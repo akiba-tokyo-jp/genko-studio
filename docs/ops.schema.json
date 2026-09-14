@@ -203,6 +203,16 @@
       "from": "int?"
     },
     {
+      "op": "step_onion",
+      "page": "int",
+      "delta": "int"
+    },
+    {
+      "op": "set_lt",
+      "page": "int",
+      "threshold": "float"
+    },
+    {
       "op": "lock_page",
       "page": "int",
       "agent": "str"

@@ -108,6 +108,7 @@ def save_episode(episode: Episode, dest: Path) -> None:
                 "spread_with": page.spread_with,
                 "numero": page.numero,
                 "onion_from": page.onion_from,
+                "lt_threshold": page.lt_threshold,
                 "effects": page.effects,
                 "ruler": page.ruler,
                 "prims": page.prims,

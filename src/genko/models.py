@@ -224,6 +224,7 @@ class Page:
     prims: list[dict] = field(default_factory=list)
     numero: bool = True
     onion_from: int | None = None
+    lt_threshold: float | None = None
 
     def __post_init__(self) -> None:
         if not self.layers:

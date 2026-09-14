@@ -266,13 +266,27 @@ def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int) -> None:
     r_yaw = float(joints.get("r_arm", {}).get("yaw", -0.4))
     arm = mm_to_px(18, dpi)
     ay = cy - mm_to_px(20, dpi)
-    draw.line((cx, ay, int(cx - arm * math.cos(l_yaw)), int(ay + arm * math.sin(l_yaw))), fill=color, width=3)
-    draw.line((cx, ay, int(cx + arm * math.cos(abs(r_yaw))), int(ay + arm * math.sin(abs(r_yaw)))), fill=color, width=3)
+    l_wx, l_wy = int(cx - arm * math.cos(l_yaw)), int(ay + arm * math.sin(l_yaw))
+    r_wx, r_wy = int(cx + arm * math.cos(abs(r_yaw))), int(ay + arm * math.sin(abs(r_yaw)))
+    draw.line((cx, ay, l_wx, l_wy), fill=color, width=3)
+    draw.line((cx, ay, r_wx, r_wy), fill=color, width=3)
+    hand = mm_to_px(10, dpi)
+    lw = float(joints.get("l_wrist", {}).get("yaw", 0.0))
+    rw = float(joints.get("r_wrist", {}).get("yaw", 0.0))
+    draw.line((l_wx, l_wy, int(l_wx - hand * math.cos(l_yaw + lw)), int(l_wy + hand * math.sin(l_yaw + lw))), fill=color, width=2)
+    draw.line((r_wx, r_wy, int(r_wx + hand * math.cos(abs(r_yaw) + rw)), int(r_wy + hand * math.sin(abs(r_yaw) + rw))), fill=color, width=2)
     l_leg = float(joints.get("l_leg", {}).get("yaw", 0.15))
     r_leg = float(joints.get("r_leg", {}).get("yaw", -0.15))
     leg = mm_to_px(28, dpi)
-    draw.line((cx, cy, int(cx - leg * math.sin(l_leg)), cy + leg), fill=color, width=3)
-    draw.line((cx, cy, int(cx + leg * math.sin(abs(r_leg))), cy + leg), fill=color, width=3)
+    l_ax, l_ay = int(cx - leg * math.sin(l_leg)), cy + leg
+    r_ax, r_ay = int(cx + leg * math.sin(abs(r_leg))), cy + leg
+    draw.line((cx, cy, l_ax, l_ay), fill=color, width=3)
+    draw.line((cx, cy, r_ax, r_ay), fill=color, width=3)
+    foot = mm_to_px(8, dpi)
+    la = float(joints.get("l_ankle", {}).get("yaw", 0.0))
+    ra = float(joints.get("r_ankle", {}).get("yaw", 0.0))
+    draw.line((l_ax, l_ay, int(l_ax - foot * math.cos(la)), l_ay + foot // 3), fill=color, width=2)
+    draw.line((r_ax, r_ay, int(r_ax + foot * math.cos(ra)), r_ay + foot // 3), fill=color, width=2)
 
 
 def _balloon_font(line: StoryLine, dpi: int, font_path: str | None) -> ImageFont.ImageFont:

@@ -7,6 +7,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QAction, QColor, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QColorDialog,
     QComboBox,
     QFileDialog,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSlider,
     QSplitter,
     QTextEdit,
     QToolBar,
@@ -51,6 +53,13 @@ class MainWindow(QMainWindow):
         self.blend = QComboBox()
         self.blend.addItems(["normal", "multiply", "screen", "add"])
         self.blend.currentTextChanged.connect(self._set_blend)
+        self.clip = QCheckBox("下でクリップ")
+        self.clip.toggled.connect(self._set_clip)
+        self.hue = QSlider(Qt.Orientation.Horizontal)
+        self.hue.setRange(0, 359)
+        self.hue.sliderReleased.connect(self._hue_brush)
+        self.filter_kind = QComboBox()
+        self.filter_kind.addItems(["blur", "sharpen", "hue", "levels", "mosaic"])
         self.subview = QLabel()
         self.subview.setFixedHeight(160)
         self.tickets = QListWidget()
@@ -85,7 +94,7 @@ class MainWindow(QMainWindow):
         add_layer = QPushButton("レイヤー追加")
         add_layer.clicked.connect(self._add_layer)
         blur = QPushButton("ぼかし")
-        blur.clicked.connect(lambda: self._filter("blur"))
+        blur.clicked.connect(lambda: self._filter(self.filter_kind.currentText()))
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -114,6 +123,10 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(QLabel("レイヤー"))
         left_layout.addWidget(self.layers)
         left_layout.addWidget(self.blend)
+        left_layout.addWidget(self.clip)
+        left_layout.addWidget(QLabel("色相"))
+        left_layout.addWidget(self.hue)
+        left_layout.addWidget(self.filter_kind)
         left_layout.addWidget(QLabel("サブビュー"))
         left_layout.addWidget(self.subview)
         left_layout.addWidget(QLabel("助手チケット"))
@@ -155,6 +168,8 @@ class MainWindow(QMainWindow):
             ("色", QKeySequence("C"), self._pick_color),
             ("太+", QKeySequence("]"), lambda: self._nudge_brush(0.15)),
             ("太-", QKeySequence("["), lambda: self._nudge_brush(-0.15)),
+            ("前頁", QKeySequence(QKeySequence.StandardKey.MoveToPreviousPage), lambda: self._jump(-1)),
+            ("次頁", QKeySequence(QKeySequence.StandardKey.MoveToNextPage), lambda: self._jump(1)),
         ]
         for title, shortcut, slot in extras:
             action = QAction(title, self)
@@ -197,6 +212,7 @@ class MainWindow(QMainWindow):
         page = self._current()
         lines = self.episode.story_for_page(page.index) if page else []
         self.canvas.set_page(page, lines)
+        self.canvas.brush_width_mm = float(self.episode.brush_width_mm)
         self._refresh_story()
         self._refresh_layers()
         self._refresh_tickets()
@@ -222,7 +238,9 @@ class MainWindow(QMainWindow):
         for layer in page.layers:
             mark = "●" if layer.visible else "○"
             label = layer.title or layer.role.value
-            self.layers.addItem(f"{mark} {label} {layer.blend}")
+            indent = "　" if layer.parent_id else ""
+            clip = " clip" if layer.clip else ""
+            self.layers.addItem(f"{indent}{mark} {label} {layer.blend}{clip}")
 
     def _toggle_layer(self, _item) -> None:
         page = self._current()
@@ -275,7 +293,7 @@ class MainWindow(QMainWindow):
         page = self._current()
         if page is None or page.index < 2:
             return
-        self._apply([{"op": "set_onion", "page": page.index, "from": page.index - 1}])
+        self._apply([{"op": "step_onion", "page": page.index, "delta": -1}])
 
     def _set_blend(self, mode: str) -> None:
         page = self._current()
@@ -294,7 +312,27 @@ class MainWindow(QMainWindow):
 
     def _nudge_brush(self, delta: float) -> None:
         width = max(0.15, float(self.episode.brush_width_mm) + delta)
+        self.canvas.brush_width_mm = width
         self._apply([{"op": "set_brush", "width_mm": width}])
+
+    def _set_clip(self, on: bool) -> None:
+        page = self._current()
+        if page is None or not page.layers:
+            return
+        row = max(0, self.layers.currentRow())
+        layer = page.layers[min(row, len(page.layers) - 1)]
+        if layer.clip == on:
+            return
+        self._apply([{"op": "set_layer", "page": page.index, "id": layer.id, "clip": on}])
+
+    def _hue_brush(self) -> None:
+        color = QColor.fromHsv(int(self.hue.value()), 220, 220)
+        self._apply([{"op": "set_brush", "rgb": [color.red(), color.green(), color.blue()]}])
+
+    def _jump(self, delta: int) -> None:
+        nxt = self._page_index + delta
+        if 0 <= nxt < len(self.episode.pages):
+            self.pages.setCurrentRow(nxt)
 
     def _refresh_subview(self) -> None:
         page = self._current()
@@ -309,7 +347,8 @@ class MainWindow(QMainWindow):
         buf = BytesIO()
         image.save(buf, format="PNG")
         pix = QPixmap.fromImage(QImage.fromData(buf.getvalue()))
-        self.subview.setPixmap(pix.scaled(180, 150, Qt.AspectRatioMode.KeepAspectRatio))
+        width = max(80, int(120 * getattr(self.canvas, "_scale", 1.0)))
+        self.subview.setPixmap(pix.scaled(width, 150, Qt.AspectRatioMode.KeepAspectRatio))
 
     def _add_layer(self) -> None:
         page = self._current()
@@ -322,6 +361,7 @@ class MainWindow(QMainWindow):
         if page is None:
             return
         layer = "ink" if page.stage == "ink" else "name"
+        kind = kind or self.filter_kind.currentText()
         self._apply([{"op": "filter_raster", "page": page.index, "layer": layer, "kind": kind, "radius": 2}])
 
     def _on_frame_selected(self, frame_id: str) -> None:

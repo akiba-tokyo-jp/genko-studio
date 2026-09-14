@@ -47,8 +47,10 @@ def apply_pressure_curve(points: list, curve: str = "gpen") -> list:
     return out
 
 
-def pack_point(x_mm: float, y_mm: float, pressure: float | None = None) -> list[float]:
+def pack_point(x_mm: float, y_mm: float, pressure: float | None = None, tilt: float = 0.0) -> list[float]:
     value = 0.7 if pressure is None else max(0.05, min(1.0, float(pressure)))
+    if tilt:
+        value = max(0.05, min(1.0, value * (1.0 + 0.25 * float(tilt))))
     return [float(x_mm), float(y_mm), value]
 
 

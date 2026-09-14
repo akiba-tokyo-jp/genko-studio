@@ -26,6 +26,8 @@ class PageCanvas(QWidget):
         self._last_pos = QPointF()
         self._drag_line: StoryLine | None = None
         self.tool = "pen"
+        self._hover: tuple[float, float] | None = None
+        self.brush_width_mm = 0.35
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_TabletTracking, True)
         self.setMinimumSize(480, 640)
@@ -62,6 +64,14 @@ class PageCanvas(QWidget):
             int(spec.height_mm * self._scale),
             QColor("#f6f1e4"),
         )
+        if self.page.spread_with:
+            painter.fillRect(
+                int(origin.x() + spec.width_mm * self._scale),
+                int(origin.y()),
+                int(spec.width_mm * self._scale),
+                int(spec.height_mm * self._scale),
+                QColor("#efe6d4"),
+            )
         inner = self.page.inner_rect_mm()
         painter.setPen(QPen(QColor("#c8b89a"), 1, Qt.PenStyle.DashLine))
         self._draw_rect(painter, inner)
@@ -75,6 +85,12 @@ class PageCanvas(QWidget):
             self._draw_balloon(painter, line)
         if self._stroke:
             self._draw_strokes(painter, [self._stroke], QColor("#d35400"), 2.0)
+        if self._hover and not self._stroke:
+            hx, hy = self._pt(*self._hover)
+            radius = max(2.0, self.brush_width_mm * self._scale)
+            painter.setPen(QPen(QColor("#d35400"), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(hx, hy, radius, radius)
 
     def _draw_rect(self, painter: QPainter, rect: Rect) -> None:
         p = self._pt(rect.x, rect.y)
@@ -138,6 +154,8 @@ class PageCanvas(QWidget):
             self.update()
             return
         if not self._stroke:
+            self._hover = self._to_mm(event.position())
+            self.update()
             return
         self._stroke.append(self._to_mm(event.position()))
         self.update()
@@ -176,16 +194,17 @@ class PageCanvas(QWidget):
             return
         x_mm, y_mm = self._to_mm(event.position())
         pressure = float(event.pressure())
+        tilt = abs(float(getattr(event, "xTilt", lambda: 0.0)())) / 60.0
         etype = event.type()
         from PySide6.QtCore import QEvent
 
         if etype == QEvent.Type.TabletPress:
-            self._stroke = [tuple(pack_point(x_mm, y_mm, pressure))]
+            self._stroke = [tuple(pack_point(x_mm, y_mm, pressure, tilt=tilt))]
             self.update()
             event.accept()
             return
         if etype == QEvent.Type.TabletMove and self._stroke:
-            self._stroke.append(tuple(pack_point(x_mm, y_mm, pressure)))
+            self._stroke.append(tuple(pack_point(x_mm, y_mm, pressure, tilt=tilt)))
             self.update()
             event.accept()
             return

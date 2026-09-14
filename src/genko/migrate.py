@@ -107,6 +107,7 @@ def migrate_payload(payload: dict) -> Episode:
             ruler=raw.get("ruler"),
             prims=list(raw.get("prims") or []),
             onion_from=raw.get("onion_from"),
+            lt_threshold=raw.get("lt_threshold"),
         )
         fills = {
             LayerRole(role): tuple(rgb)  # type: ignore[arg-type]

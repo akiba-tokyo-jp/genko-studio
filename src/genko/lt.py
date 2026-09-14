@@ -3,16 +3,18 @@ from __future__ import annotations
 from PIL import Image, ImageFilter, ImageOps
 
 
-def to_line_art(image: Image.Image, method: str = "adaptive") -> Image.Image:
+def to_line_art(image: Image.Image, method: str = "adaptive", threshold: float | None = None) -> Image.Image:
     gray = image.convert("L")
     if method == "edges":
         return ImageOps.invert(gray.filter(ImageFilter.FIND_EDGES))
     if method == "sobel":
         return ImageOps.invert(gray.filter(ImageFilter.FIND_EDGES))
-    raw = gray.tobytes()
-    mean = sum(raw) / max(1, len(raw))
-    threshold = max(8, mean - 12)
-    return gray.point(lambda p: 0 if p < threshold else 255)
+    if threshold is None:
+        raw = gray.tobytes()
+        mean = sum(raw) / max(1, len(raw))
+        threshold = max(8, mean - 12)
+    cut = float(threshold)
+    return gray.point(lambda p: 0 if p < cut else 255)
 
 
 def runs_to_strokes(binary: Image.Image, width_mm: float, height_mm: float) -> list[list[tuple[float, float]]]:

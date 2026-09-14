@@ -60,6 +60,8 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_mannequin", "page": "int", "pos": "[x,y,z]"},
     {"op": "pose_mannequin", "page": "int", "id": "str"},
     {"op": "set_onion", "page": "int", "from": "int?"},
+    {"op": "step_onion", "page": "int", "delta": "int"},
+    {"op": "set_lt", "page": "int", "threshold": "float"},
     {"op": "lock_page", "page": "int", "agent": "str"},
     {"op": "unlock_page", "page": "int"},
     {"op": "add_layer", "page": "int", "name": "str?", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?"},
@@ -712,6 +714,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                     "r_arm": {"yaw": -0.4, "pitch": 0.0},
                     "l_leg": {"yaw": 0.15, "pitch": 0.0},
                     "r_leg": {"yaw": -0.15, "pitch": 0.0},
+                    "l_wrist": {"yaw": 0.0, "pitch": 0.0},
+                    "r_wrist": {"yaw": 0.0, "pitch": 0.0},
+                    "l_ankle": {"yaw": 0.0, "pitch": 0.0},
+                    "r_ankle": {"yaw": 0.0, "pitch": 0.0},
                 },
             }
         )
@@ -737,6 +743,20 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
     if name == "set_onion":
         page = _require_page(episode, op)
         page.onion_from = None if op.get("from") in (None, "", 0) else int(op["from"])
+        return
+
+    if name == "step_onion":
+        page = _require_page(episode, op)
+        current = page.onion_from if page.onion_from else page.index
+        nxt = int(current) + int(op.get("delta") or -1)
+        page.onion_from = max(1, min(len(episode.pages), nxt))
+        if page.onion_from == page.index:
+            page.onion_from = max(1, page.index - 1)
+        return
+
+    if name == "set_lt":
+        page = _require_page(episode, op)
+        page.lt_threshold = float(op["threshold"])
         return
 
     if name == "lock_page":
@@ -917,7 +937,10 @@ def _lt_convert(episode: Episode, op: dict[str, Any]) -> None:
     from PIL import Image
 
     image = Image.open(__import__("io").BytesIO(src.raster_png))
-    binary = to_line_art(image, method=str(op.get("method") or "adaptive"))
+    cut = op.get("threshold")
+    if cut is None:
+        cut = page.lt_threshold
+    binary = to_line_art(image, method=str(op.get("method") or "adaptive"), threshold=cut)
     dest = page._layer(dest_role)
     for run in runs_to_strokes(binary, page.spec.width_mm, page.spec.height_mm):
         dest.strokes.append(coerce_stroke(run))
