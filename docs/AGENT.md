@@ -1,49 +1,49 @@
 # AGENT.md — Genko for generative AI
 
-Drive Genko **headless**. Do not open the GUI. Stdout is JSON. No Qt required for `inspect` / `apply` / `export` / `serve`.
+Drive Genko **headless**. Do not open the GUI. Stdout is JSON. No Qt required.
+
+## Loop
+
+1. `inspect` for compact state (no stroke coordinates)
+2. `render` or `GET /v1/pages/{n}.png?mode=name` to **see** the page
+3. `apply` ops (`--dry-run` to preview)
+4. Repeat
+5. `export` with print mode (name/draft never included)
 
 ## Contract
 
-- Project = a folder with `project.json` (`.genko`).
-- Name gate: `name_ok` must be true before `advance` to `ink` or `add_stroke` with `"layer":"ink"`.
-- Export never includes name/draft strokes.
-- Coordinates are millimetres. Page 1 is 1-based.
-- `inspect` is compact (no stroke points). Use it as working memory.
+- Project = folder with `project.json`
+- `name_ok` before ink strokes
+- mm coordinates, page index 1-based
+- Failed apply is transactional (nothing from that request is kept)
+- `project.lock` while `apply` runs
 
 ## CLI
 
 ```bash
 python -m genko new ./demo.genko --title 試作 --pages 8 --json
 python -m genko inspect ./demo.genko
+python -m genko inspect ./demo.genko --full
 python -m genko apply ./demo.genko ops.json
-python -m genko apply ./demo.genko -          # ops JSON on stdin
+python -m genko apply ./demo.genko ops.json --dry-run
+python -m genko render ./demo.genko --page 1 --mode name --out p1.png
 python -m genko export ./demo.genko ./out --json
 python -m genko schema
 python -m genko serve --port 8765
 ```
 
-`ops.json` is a JSON **array**:
+Ops include: `split_frame`, `add_line`, `edit_line`, `delete_line`, `name_ok`, `advance`, `add_stroke`, `delete_stroke`, `add_page`, `delete_page`, `duplicate_page`, `set_note`, `reorder`, `undo`.
 
-```json
-[
-  {"op": "split_frame", "page": 1, "axis": "vertical", "ratio": 0.5, "gutter_mm": 4},
-  {"op": "add_line", "page": 1, "text": "始めよう。", "speaker": "主人公"},
-  {"op": "name_ok", "page": 1},
-  {"op": "add_stroke", "page": 1, "layer": "ink", "points": [[20, 30], [80, 30]]}
-]
-```
-
-On failure stdout is `{"ok": false, "error": "..."}` and exit code is 1.
-
-## HTTP (headless)
+## HTTP
 
 `GET /health`  
 `GET /schema`  
-`GET /v1/inspect?path=`  
-`POST /v1/new` `{"dest","title","pages","webtoon?"}`  
-`POST /v1/apply` `{"path","ops":[...]}`  
-`POST /v1/export` `{"path","out","dpi?"}`  
+`GET /v1/inspect?path=&full=0`  
+`GET /v1/pages/{n}.png?path=&mode=name|proof|print`  
+`POST /v1/new`  
+`POST /v1/apply` `{"path","ops","dry_run?"}`  
+`POST /v1/export`
 
 ## Human
 
-`python -m genko app` — same files, mouse and menus. AI and humans share `.genko`.
+`python -m genko app` — click a panel to select before splitting. Ctrl+Z undoes. Same `.genko`.

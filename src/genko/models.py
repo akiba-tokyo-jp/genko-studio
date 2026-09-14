@@ -16,8 +16,17 @@ class LayerRole(str, Enum):
     INK = "ink"
     BG = "bg"
     FINISH = "finish"
+    TONE = "tone"
+    EFFECT = "effect"
     FRAMES = "frames"
     TEXT = "text"
+
+
+class LayerKind(str, Enum):
+    RASTER = "raster"
+    STROKES = "strokes"
+    FILL = "fill"
+    TONE = "tone"
 
 
 @dataclass(frozen=True)
@@ -26,6 +35,9 @@ class Rect:
     y: float
     width: float
     height: float
+
+    def contains(self, x: float, y: float) -> bool:
+        return self.x <= x <= self.x + self.width and self.y <= y <= self.y + self.height
 
 
 @dataclass(frozen=True)
@@ -36,28 +48,31 @@ class PageSpec:
     bleed_mm: float
     inner_margin_mm: float
     expression: str = "mono"
+    preset: str | None = None
 
     @staticmethod
     def a4_mono() -> PageSpec:
-        return PageSpec(
-            width_mm=210,
-            height_mm=297,
-            dpi=600,
-            bleed_mm=3,
-            inner_margin_mm=10,
-            expression="mono",
-        )
+        return PageSpec(210, 297, 600, 3, 10, "mono")
 
     @staticmethod
     def webtoon() -> PageSpec:
-        return PageSpec(
-            width_mm=80,
-            height_mm=400,
-            dpi=300,
-            bleed_mm=0,
-            inner_margin_mm=4,
-            expression="color",
-        )
+        return PageSpec(80, 400, 300, 0, 4, "color")
+
+    @staticmethod
+    def b4_comic() -> PageSpec:
+        return PageSpec(257, 364, 600, 3, 10, "mono", preset="commercial-b4")
+
+
+@dataclass
+class Layer:
+    id: str
+    role: LayerRole
+    kind: LayerKind = LayerKind.STROKES
+    visible: bool = True
+    exportable: bool = True
+    strokes: list[list[tuple[float, float]]] = field(default_factory=list)
+    raster_relpath: str | None = None
+    fill_rgb: tuple[int, int, int] | None = None
 
 
 @dataclass
@@ -66,6 +81,9 @@ class Frame:
     rect: Rect
     children: list[Frame] = field(default_factory=list)
     split_axis: str | None = None
+    clip: bool = True
+    bleed: bool = False
+    border_mm: float = 0.8
 
 
 @dataclass
@@ -75,10 +93,35 @@ class StoryLine:
     text: str
     speaker: str = ""
     frame_id: str | None = None
+    ruby: str = ""
+    x_mm: float = 0
+    y_mm: float = 0
+    w_mm: float = 40
+    h_mm: float = 20
+    balloon: str = "speech"
 
 
-def _new_id() -> str:
+def new_id() -> str:
     return uuid4().hex[:12]
+
+
+_new_id = new_id
+
+
+def default_layers() -> list[Layer]:
+    return [
+        Layer(id=new_id(), role=LayerRole.BG, kind=LayerKind.FILL, exportable=True),
+        Layer(id=new_id(), role=LayerRole.NAME, kind=LayerKind.STROKES, exportable=False),
+        Layer(id=new_id(), role=LayerRole.INK, kind=LayerKind.STROKES, exportable=True),
+        Layer(id=new_id(), role=LayerRole.FINISH, kind=LayerKind.STROKES, exportable=True),
+    ]
+
+
+@dataclass
+class Bible:
+    plot: str = ""
+    characters: list[dict] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -91,8 +134,43 @@ class Page:
     name_ok: bool = False
     stage: str = "name"
     fills: dict[LayerRole, tuple[int, int, int]] = field(default_factory=dict)
-    name_strokes: list[list[tuple[float, float]]] = field(default_factory=list)
-    ink_strokes: list[list[tuple[float, float]]] = field(default_factory=list)
+    layers: list[Layer] = field(default_factory=list)
+    texts: list[StoryLine] = field(default_factory=list)
+    spread_with: int | None = None
+    selected_frame_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.layers:
+            self.layers = default_layers()
+
+    def _layer(self, role: LayerRole) -> Layer:
+        for layer in self.layers:
+            if layer.role == role:
+                return layer
+        layer = Layer(
+            id=new_id(),
+            role=role,
+            kind=LayerKind.STROKES,
+            exportable=role not in (LayerRole.NAME, LayerRole.DRAFT),
+        )
+        self.layers.append(layer)
+        return layer
+
+    @property
+    def name_strokes(self) -> list[list[tuple[float, float]]]:
+        return self._layer(LayerRole.NAME).strokes
+
+    @name_strokes.setter
+    def name_strokes(self, value: list[list[tuple[float, float]]]) -> None:
+        self._layer(LayerRole.NAME).strokes = value
+
+    @property
+    def ink_strokes(self) -> list[list[tuple[float, float]]]:
+        return self._layer(LayerRole.INK).strokes
+
+    @ink_strokes.setter
+    def ink_strokes(self, value: list[list[tuple[float, float]]]) -> None:
+        self._layer(LayerRole.INK).strokes = value
 
     def inner_rect_mm(self) -> Rect:
         inset = self.spec.bleed_mm + self.spec.inner_margin_mm
@@ -135,6 +213,12 @@ class Page:
                 continue
         raise KeyError(frame_id)
 
+    def frame_at(self, x_mm: float, y_mm: float) -> Frame | None:
+        for frame in self.leaf_frames():
+            if frame.rect.contains(x_mm, y_mm):
+                return frame
+        return None
+
     def split_frame(
         self,
         frame_id: str,
@@ -150,24 +234,18 @@ class Page:
             available = rect.height - gutter_mm
             first_span = available * ratio
             second_span = available - first_span
-            a = Frame(
-                id=_new_id(),
-                rect=Rect(rect.x, rect.y, rect.width, first_span),
-            )
+            a = Frame(id=new_id(), rect=Rect(rect.x, rect.y, rect.width, first_span))
             b = Frame(
-                id=_new_id(),
+                id=new_id(),
                 rect=Rect(rect.x, rect.y + first_span + gutter_mm, rect.width, second_span),
             )
         elif axis == "vertical":
             available = rect.width - gutter_mm
             first_span = available * ratio
             second_span = available - first_span
-            a = Frame(
-                id=_new_id(),
-                rect=Rect(rect.x, rect.y, first_span, rect.height),
-            )
+            a = Frame(id=new_id(), rect=Rect(rect.x, rect.y, first_span, rect.height))
             b = Frame(
-                id=_new_id(),
+                id=new_id(),
                 rect=Rect(rect.x + first_span + gutter_mm, rect.y, second_span, rect.height),
             )
         else:
@@ -178,6 +256,15 @@ class Page:
 
     def paint(self, role: LayerRole, rgb: tuple[int, int, int]) -> None:
         self.fills[role] = rgb
+        if role in (LayerRole.NAME, LayerRole.DRAFT):
+            layer = self._layer(role)
+            layer.kind = LayerKind.FILL
+            layer.fill_rgb = rgb
+            layer.exportable = False
+        elif role in (LayerRole.INK, LayerRole.BG, LayerRole.FINISH):
+            layer = self._layer(role)
+            layer.kind = LayerKind.FILL
+            layer.fill_rgb = rgb
 
 
 @dataclass
@@ -188,12 +275,19 @@ class Episode:
     binding: Binding
     pages: list[Page]
     story: list[StoryLine] = field(default_factory=list)
+    bible: Bible = field(default_factory=Bible)
+    undo_stack: list[Episode] = field(default_factory=list, repr=False, compare=False)
 
     def reorder(self, order: list[int]) -> None:
         by_index = {page.index: page for page in self.pages}
         self.pages = [by_index[i] for i in order]
-        for i, page in enumerate(self.pages, start=1):
-            page.index = i
+        mapping = {page.index: new for new, page in enumerate(self.pages, start=1)}
+        for line in self.story:
+            line.page_index = mapping[line.page_index]
+        for new, page in enumerate(self.pages, start=1):
+            page.index = new
+            for line in page.texts:
+                line.page_index = new
 
     def add_line(
         self,
@@ -203,17 +297,27 @@ class Episode:
         frame_id: str | None = None,
     ) -> StoryLine:
         line = StoryLine(
-            id=_new_id(),
+            id=new_id(),
             page_index=page_index,
             text=text,
             speaker=speaker,
             frame_id=frame_id,
         )
         self.story.append(line)
+        for page in self.pages:
+            if page.index == page_index:
+                page.texts.append(line)
+                break
         return line
 
     def story_for_page(self, page_index: int) -> list[StoryLine]:
-        return [line for line in self.story if line.page_index == page_index]
+        from_story = [line for line in self.story if line.page_index == page_index]
+        if from_story:
+            return from_story
+        for page in self.pages:
+            if page.index == page_index:
+                return page.texts
+        return []
 
 
 def new_episode(
@@ -226,7 +330,7 @@ def new_episode(
     pages: list[Page] = []
     for index in range(1, page_count + 1):
         page = Page(index=index, spec=spec, frames=[], binding=binding)
-        root = Frame(id=_new_id(), rect=page.inner_rect_mm())
+        root = Frame(id=new_id(), rect=page.inner_rect_mm())
         page.frames = [root]
         pages.append(page)
     return Episode(

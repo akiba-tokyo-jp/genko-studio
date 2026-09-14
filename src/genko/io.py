@@ -3,24 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from genko.models import (
-    Binding,
-    Episode,
-    Frame,
-    LayerRole,
-    Page,
-    PageSpec,
-    Rect,
-    StoryLine,
-)
+from genko.migrate import migrate_payload
+from genko.models import Episode, Frame, Layer, Page, Rect, StoryLine
 
 
 def _rect_to_dict(rect: Rect) -> dict:
     return {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}
-
-
-def _rect_from_dict(data: dict) -> Rect:
-    return Rect(data["x"], data["y"], data["width"], data["height"])
 
 
 def _frame_to_dict(frame: Frame) -> dict:
@@ -28,22 +16,46 @@ def _frame_to_dict(frame: Frame) -> dict:
         "id": frame.id,
         "rect": _rect_to_dict(frame.rect),
         "split_axis": frame.split_axis,
+        "clip": frame.clip,
+        "bleed": frame.bleed,
+        "border_mm": frame.border_mm,
         "children": [_frame_to_dict(child) for child in frame.children],
     }
 
 
-def _frame_from_dict(data: dict) -> Frame:
-    return Frame(
-        id=data["id"],
-        rect=_rect_from_dict(data["rect"]),
-        split_axis=data.get("split_axis"),
-        children=[_frame_from_dict(child) for child in data.get("children", [])],
-    )
+def _layer_to_dict(layer: Layer) -> dict:
+    return {
+        "id": layer.id,
+        "role": layer.role.value,
+        "kind": layer.kind.value,
+        "visible": layer.visible,
+        "exportable": layer.exportable,
+        "strokes": layer.strokes,
+        "raster_relpath": layer.raster_relpath,
+        "fill_rgb": list(layer.fill_rgb) if layer.fill_rgb else None,
+    }
+
+
+def _line_to_dict(line: StoryLine) -> dict:
+    return {
+        "id": line.id,
+        "page_index": line.page_index,
+        "text": line.text,
+        "speaker": line.speaker,
+        "frame_id": line.frame_id,
+        "ruby": line.ruby,
+        "x_mm": line.x_mm,
+        "y_mm": line.y_mm,
+        "w_mm": line.w_mm,
+        "h_mm": line.h_mm,
+        "balloon": line.balloon,
+    }
 
 
 def save_episode(episode: Episode, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     payload = {
+        "version": 2,
         "title": episode.title,
         "episode": episode.episode,
         "binding": episode.binding.value,
@@ -54,6 +66,12 @@ def save_episode(episode: Episode, dest: Path) -> None:
             "bleed_mm": episode.spec.bleed_mm,
             "inner_margin_mm": episode.spec.inner_margin_mm,
             "expression": episode.spec.expression,
+            "preset": episode.spec.preset,
+        },
+        "bible": {
+            "plot": episode.bible.plot,
+            "characters": episode.bible.characters,
+            "constraints": episode.bible.constraints,
         },
         "pages": [
             {
@@ -61,71 +79,21 @@ def save_episode(episode: Episode, dest: Path) -> None:
                 "note": page.note,
                 "name_ok": page.name_ok,
                 "stage": page.stage,
+                "spread_with": page.spread_with,
                 "frames": [_frame_to_dict(frame) for frame in page.frames],
+                "layers": [_layer_to_dict(layer) for layer in page.layers],
+                "texts": [_line_to_dict(line) for line in page.texts],
                 "fills": {role.value: list(rgb) for role, rgb in page.fills.items()},
                 "name_strokes": page.name_strokes,
                 "ink_strokes": page.ink_strokes,
             }
             for page in episode.pages
         ],
-        "story": [
-            {
-                "id": line.id,
-                "page_index": line.page_index,
-                "text": line.text,
-                "speaker": line.speaker,
-                "frame_id": line.frame_id,
-            }
-            for line in episode.story
-        ],
+        "story": [_line_to_dict(line) for line in episode.story],
     }
     (dest / "project.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_episode(src: Path) -> Episode:
     payload = json.loads((src / "project.json").read_text(encoding="utf-8"))
-    spec = PageSpec(**payload["spec"])
-    binding = Binding(payload["binding"])
-    pages: list[Page] = []
-    for raw in payload["pages"]:
-        fills = {
-            LayerRole(role): tuple(rgb)  # type: ignore[arg-type]
-            for role, rgb in raw.get("fills", {}).items()
-        }
-        page = Page(
-            index=raw["index"],
-            spec=spec,
-            frames=[_frame_from_dict(frame) for frame in raw["frames"]],
-            binding=binding,
-            note=raw.get("note", ""),
-            name_ok=raw.get("name_ok", False),
-            stage=raw.get("stage", "name"),
-            fills=fills,
-            name_strokes=[
-                [tuple(pt) for pt in stroke]  # type: ignore[misc]
-                for stroke in raw.get("name_strokes", [])
-            ],
-            ink_strokes=[
-                [tuple(pt) for pt in stroke]  # type: ignore[misc]
-                for stroke in raw.get("ink_strokes", [])
-            ],
-        )
-        pages.append(page)
-    story = [
-        StoryLine(
-            id=line["id"],
-            page_index=line["page_index"],
-            text=line["text"],
-            speaker=line.get("speaker", ""),
-            frame_id=line.get("frame_id"),
-        )
-        for line in payload.get("story", [])
-    ]
-    return Episode(
-        title=payload["title"],
-        episode=payload["episode"],
-        spec=spec,
-        binding=binding,
-        pages=pages,
-        story=story,
-    )
+    return migrate_payload(payload)

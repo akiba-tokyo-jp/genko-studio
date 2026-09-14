@@ -5,7 +5,15 @@ CLIP STUDIO PAINT EX の全描画エンジンを複製しない。連載工場�
 
 ## 何を置き、何を置かないか
 
-置く（v0.1で実装）
+置く（v0.1 + P0）
+
+- レイヤー（name は exportable=false）。v1 ファイルはマイグレーション
+- コマクリップ合成。`render mode=name|proof|print`
+- すべての変更は `apply_ops`（GUI も AI も）。dry_run と undo
+- ページ追加／削除／複製、セリフ編集／削除、ストローク削除
+- ページPNG（AIが視覚確認）
+- project.lock
+- 選択コマの分割、保存でフォルダ作成
 
 - 複数ページの作品管理（追加・並べ替え・右綴じ）
 - A4モノクロ / Webtoon 用紙（塗り足し・基本枠）

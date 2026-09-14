@@ -34,10 +34,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     inspect = sub.add_parser("inspect", help="Headless: dump compact JSON snapshot")
     inspect.add_argument("src", type=Path)
+    inspect.add_argument("--full", action="store_true")
 
     apply_p = sub.add_parser("apply", help="Headless: apply JSON ops (file or stdin '-')")
     apply_p.add_argument("src", type=Path)
     apply_p.add_argument("ops", help="Path to JSON array, or - for stdin")
+    apply_p.add_argument("--dry-run", action="store_true")
+
+    render_p = sub.add_parser("render", help="Headless: write one page PNG (name|proof|print)")
+    render_p.add_argument("src", type=Path)
+    render_p.add_argument("--page", type=int, default=1)
+    render_p.add_argument("--mode", default="print", choices=["name", "proof", "print"])
+    render_p.add_argument("--out", type=Path, required=True)
+    render_p.add_argument("--dpi", type=int, default=150)
 
     sub.add_parser("schema", help="Headless: print operation schema as JSON")
 
@@ -83,13 +92,27 @@ def main(argv: list[str] | None = None) -> int:
                     print(path)
             return 0
         if args.cmd == "inspect":
-            _print_json(snapshot(load_episode(args.src)))
+            _print_json(snapshot(load_episode(args.src), full=args.full))
             return 0
         if args.cmd == "apply":
+            from genko.lock import ProjectLock
+
             episode = load_episode(args.src)
-            result = apply_ops(episode, _read_ops(args.ops))
-            save_episode(episode, args.src)
+            with ProjectLock(args.src):
+                result = apply_ops(episode, _read_ops(args.ops), dry_run=args.dry_run)
+                if not args.dry_run:
+                    save_episode(episode, args.src)
             _print_json(result)
+            return 0
+        if args.cmd == "render":
+            from genko.render import render_page
+
+            episode = load_episode(args.src)
+            page = next(item for item in episode.pages if item.index == args.page)
+            image = render_page(page, args.dpi, mode=args.mode, episode=episode)
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            image.save(args.out)
+            _print_json({"ok": True, "path": str(args.out), "mode": args.mode})
             return 0
         if args.cmd == "schema":
             _print_json({"ok": True, "ops": OPS_SCHEMA})

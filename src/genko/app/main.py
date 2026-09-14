@@ -7,7 +7,6 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -24,8 +23,8 @@ from PySide6.QtWidgets import (
 from genko.app.canvas import PageCanvas
 from genko.export import export_png_sequence
 from genko.io import load_episode, save_episode
-from genko.models import Episode, PageSpec, new_episode
-from genko.pipeline import InkBlockedError, advance
+from genko.models import PageSpec, new_episode
+from genko.ops import ApplyError, apply_ops
 
 
 class MainWindow(QMainWindow):
@@ -33,7 +32,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Genko Studio")
         self.resize(1280, 840)
-        self.episode: Episode = new_episode("無題", 1, 8, PageSpec.a4_mono())
+        self.episode = new_episode("無題", 1, 8, PageSpec.a4_mono())
         self.path: Path | None = None
         self._page_index = 0
 
@@ -41,6 +40,8 @@ class MainWindow(QMainWindow):
         self.pages.currentRowChanged.connect(self._select_page)
         self.canvas = PageCanvas()
         self.canvas.changed.connect(self._refresh_status)
+        self.canvas.strokeCommitted.connect(self._on_stroke)
+        self.canvas.frameSelected.connect(self._on_frame_selected)
         self.speaker = QLineEdit()
         self.speaker.setPlaceholderText("話者")
         self.line = QLineEdit()
@@ -53,10 +54,14 @@ class MainWindow(QMainWindow):
         add_line.clicked.connect(self._add_line)
         name_ok = QPushButton("ネームOK → ペン入れ")
         name_ok.clicked.connect(self._name_ok)
-        split_h = QPushButton("横に割る")
+        split_h = QPushButton("選択コマを横に割る")
         split_h.clicked.connect(lambda: self._split("horizontal"))
-        split_v = QPushButton("縦に割る")
+        split_v = QPushButton("選択コマを縦に割る")
         split_v.clicked.connect(lambda: self._split("vertical"))
+        add_page = QPushButton("ページ追加")
+        add_page.clicked.connect(self._add_page)
+        del_page = QPushButton("ページ削除")
+        del_page.clicked.connect(self._del_page)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -68,6 +73,8 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(name_ok)
         right_layout.addWidget(split_h)
         right_layout.addWidget(split_v)
+        right_layout.addWidget(add_page)
+        right_layout.addWidget(del_page)
         right_layout.addWidget(self.status)
 
         left = QWidget()
@@ -94,6 +101,7 @@ class MainWindow(QMainWindow):
             ("開く", QKeySequence.StandardKey.Open, self._open),
             ("保存", QKeySequence.StandardKey.Save, self._save),
             ("書き出し", QKeySequence.StandardKey.SaveAs, self._export),
+            ("元に戻す", QKeySequence.StandardKey.Undo, self._undo),
         ]
         for title, shortcut, slot in actions:
             action = QAction(title, self)
@@ -101,9 +109,19 @@ class MainWindow(QMainWindow):
             action.triggered.connect(slot)
             bar.addAction(action)
 
+    def _apply(self, ops: list[dict]) -> bool:
+        try:
+            apply_ops(self.episode, ops)
+        except ApplyError as exc:
+            QMessageBox.warning(self, "Genko", str(exc))
+            return False
+        self._reload_pages()
+        return True
+
     def _current(self):
         if not self.episode.pages:
             return None
+        self._page_index = min(self._page_index, len(self.episode.pages) - 1)
         return self.episode.pages[self._page_index]
 
     def _reload_pages(self) -> None:
@@ -147,40 +165,72 @@ class MainWindow(QMainWindow):
         self.status.setText(
             f"{self.episode.title}  EP{self.episode.episode}  "
             f"p{page.index}  stage={page.stage}  name_ok={page.name_ok}  "
-            f"frames={len(page.leaf_frames())}"
+            f"frames={len(page.leaf_frames())}  sel={page.selected_frame_id or '-'}"
         )
         self.setWindowTitle(f"Genko Studio — {self.episode.title} #{self.episode.episode}")
+
+    def _on_stroke(self, points: list) -> None:
+        page = self._current()
+        if page is None:
+            return
+        layer = "ink" if page.stage == "ink" else "name"
+        self._apply([{"op": "add_stroke", "page": page.index, "layer": layer, "points": points}])
+
+    def _on_frame_selected(self, frame_id: str) -> None:
+        page = self._current()
+        if page is None:
+            return
+        page.selected_frame_id = frame_id
+        self.canvas.update()
+        self._refresh_status()
 
     def _add_line(self) -> None:
         page = self._current()
         if page is None or not self.line.text().strip():
             return
-        self.episode.add_line(page.index, self.line.text().strip(), self.speaker.text().strip())
+        self._apply(
+            [
+                {
+                    "op": "add_line",
+                    "page": page.index,
+                    "text": self.line.text().strip(),
+                    "speaker": self.speaker.text().strip(),
+                    "frame_id": page.selected_frame_id,
+                }
+            ]
+        )
         self.line.clear()
-        self._refresh_story()
 
     def _name_ok(self) -> None:
         page = self._current()
         if page is None:
             return
-        page.name_ok = True
-        try:
-            advance(page, to="ink")
-        except InkBlockedError as exc:
-            QMessageBox.warning(self, "Genko", str(exc))
-            return
-        self._reload_pages()
+        self._apply([{"op": "name_ok", "page": page.index}])
 
     def _split(self, axis: str) -> None:
         page = self._current()
         if page is None:
             return
-        leaves = page.leaf_frames()
-        if not leaves:
+        if not page.selected_frame_id:
+            QMessageBox.information(self, "Genko", "先にコマをクリックして選んでください")
             return
-        page.split_frame(leaves[0].id, axis=axis, ratio=0.5, gutter_mm=4)
-        self.canvas.update()
-        self._refresh_status()
+        self._apply(
+            [{"op": "split_frame", "page": page.index, "axis": axis, "frame_id": page.selected_frame_id}]
+        )
+
+    def _add_page(self) -> None:
+        self._apply([{"op": "add_page"}])
+        self._page_index = len(self.episode.pages) - 1
+        self._reload_pages()
+
+    def _del_page(self) -> None:
+        page = self._current()
+        if page is None:
+            return
+        self._apply([{"op": "delete_page", "page": page.index}])
+
+    def _undo(self) -> None:
+        self._apply([{"op": "undo"}])
 
     def _new(self) -> None:
         self.episode = new_episode("無題", 1, 8, PageSpec.a4_mono())
@@ -199,7 +249,7 @@ class MainWindow(QMainWindow):
 
     def _save(self) -> None:
         if self.path is None:
-            path = QFileDialog.getExistingDirectory(self, "Save .genko folder")
+            path, _ = QFileDialog.getSaveFileName(self, "Save .genko folder", "untitled.genko")
             if not path:
                 return
             self.path = Path(path)
@@ -210,7 +260,7 @@ class MainWindow(QMainWindow):
         path = QFileDialog.getExistingDirectory(self, "Export PNG sequence")
         if not path:
             return
-        files = export_png_sequence(self.episode, Path(path), working_dpi=150)
+        files = export_png_sequence(self.episode, Path(path), working_dpi=150, mode="print")
         QMessageBox.information(self, "Genko", f"{len(files)} pages exported")
 
 

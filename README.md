@@ -22,6 +22,7 @@ uv run python -m genko app
 uv run python -m genko new ./demo.genko --title demo --pages 8 --json
 uv run python -m genko inspect ./demo.genko
 uv run python -m genko apply ./demo.genko ops.json
+uv run python -m genko render ./demo.genko --page 1 --mode name --out p1.png
 uv run python -m genko export ./demo.genko ./out --json
 uv run python -m genko serve --port 8765
 ```
@@ -36,7 +37,9 @@ Python 3.11+.
 
 ## Layout
 
-- `src/genko/headless.py` — JSON ops + compact snapshot
+- `src/genko/ops.py` — single command bus
+- `src/genko/render.py` — name/proof/print composite
+- `src/genko/headless.py` — JSON snapshot
 - `src/genko/server.py` — HTTP API
 - `src/genko/app/` — PySide6 GUI
 - `docs/AGENT.md` — how an agent should drive Genko

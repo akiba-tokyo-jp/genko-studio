@@ -35,7 +35,21 @@ def handle_request(method: str, path: str, body: bytes) -> tuple[int, bytes]:
         if method == "GET" and route == "/v1/inspect":
             project = Path(unquote(query.get("path", "")))
             episode = load_episode(project)
-            return _json_bytes(snapshot(episode))
+            full = query.get("full") in ("1", "true", "yes")
+            return _json_bytes(snapshot(episode, full=full))
+        if method == "GET" and route.startswith("/v1/pages/") and route.endswith(".png"):
+            from genko.render import render_page
+            import io
+
+            project = Path(unquote(query.get("path", "")))
+            episode = load_episode(project)
+            page_no = int(route.rsplit("/", 1)[-1].removesuffix(".png"))
+            page = next(item for item in episode.pages if item.index == page_no)
+            mode = query.get("mode", "print")
+            image = render_page(page, int(query.get("dpi", "150")), mode=mode, episode=episode)
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            return 200, buf.getvalue()
         if method == "POST" and route == "/v1/new":
             dest = Path(data["dest"])
             spec = PageSpec.webtoon() if data.get("webtoon") else PageSpec.a4_mono()
@@ -48,10 +62,15 @@ def handle_request(method: str, path: str, body: bytes) -> tuple[int, bytes]:
             save_episode(episode, dest)
             return _json_bytes({"ok": True, "path": str(dest), "snapshot": snapshot(episode)})
         if method == "POST" and route == "/v1/apply":
+            from genko.lock import ProjectLock
+
             project = Path(data["path"])
             episode = load_episode(project)
-            result = apply_ops(episode, data.get("ops") or [])
-            save_episode(episode, project)
+            dry_run = bool(data.get("dry_run"))
+            with ProjectLock(project):
+                result = apply_ops(episode, data.get("ops") or [], dry_run=dry_run)
+                if not dry_run:
+                    save_episode(episode, project)
             return _json_bytes(result)
         if method == "POST" and route == "/v1/export":
             project = Path(data["path"])
@@ -74,8 +93,13 @@ class _Handler(BaseHTTPRequestHandler):
         return
 
     def _send(self, status: int, payload: bytes) -> None:
+        content_type = (
+            "image/png"
+            if payload.startswith(b"\x89PNG")
+            else "application/json; charset=utf-8"
+        )
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", str(len(payload)))
