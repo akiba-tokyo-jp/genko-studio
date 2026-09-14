@@ -394,6 +394,11 @@ class Episode:
     autosave: bool = False
     font_path: str = ""
     page_locks: dict = field(default_factory=dict)
+    brush_rgb: tuple[int, int, int] = (20, 20, 20)
+    brush_width_mm: float = 0.35
+    brush_stabilize: int = 0
+    brush_taper: bool = False
+    brush_curve: str = "linear"
 
     def reorder(self, order: list[int]) -> None:
         by_index = {page.index: page for page in self.pages}

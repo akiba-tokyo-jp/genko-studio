@@ -65,6 +65,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_layer", "page": "int", "name": "str?", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?"},
     {"op": "delete_layer", "page": "int", "id": "str"},
     {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal"},
+    {"op": "set_brush", "rgb": "[r,g,b]?", "width_mm": "float?", "stabilize": "int?", "taper": "bool?", "curve": "gpen|linear"},
     {"op": "undo"},
 ]
 
@@ -103,6 +104,11 @@ def _copy_state(dst: Episode, src: Episode) -> None:
     dst.autosave = src.autosave
     dst.font_path = getattr(src, "font_path", "")
     dst.page_locks = src.page_locks
+    dst.brush_rgb = getattr(src, "brush_rgb", (20, 20, 20))
+    dst.brush_width_mm = getattr(src, "brush_width_mm", 0.35)
+    dst.brush_stabilize = getattr(src, "brush_stabilize", 0)
+    dst.brush_taper = getattr(src, "brush_taper", False)
+    dst.brush_curve = getattr(src, "brush_curve", "linear")
 
 
 def _find_line(episode: Episode, line_id: str) -> StoryLine:
@@ -291,22 +297,38 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         points = _parse_points(op.get("points") or [])
         if len(points) < 2:
             raise ApplyError("points needs at least two [x_mm, y_mm] pairs")
+        width = page.spec.width_mm
+        if page.spread_with and min(float(pt[0]) for pt in points) >= width:
+            other = next((item for item in episode.pages if item.index == page.spread_with), None)
+            if other is not None:
+                shifted = []
+                for pt in points:
+                    extra = list(pt[2:]) if len(pt) > 2 else []
+                    shifted.append((float(pt[0]) - width, float(pt[1]), *extra) if extra else (float(pt[0]) - width, float(pt[1])))
+                points = shifted
+                page = other
         if op.get("snap_ruler"):
             points = _snap_points(page, points)
-        if op.get("stabilize"):
+        stabilize = op.get("stabilize", episode.brush_stabilize)
+        if stabilize:
             from genko.stroke import stabilize_points
 
-            points = stabilize_points(points, int(op["stabilize"]))
-        if op.get("taper"):
+            points = stabilize_points(points, int(stabilize))
+        taper = op["taper"] if "taper" in op else episode.brush_taper
+        if taper:
             from genko.stroke import taper_points
 
             points = taper_points(points)
+        curve = str(op.get("curve") or episode.brush_curve or "linear")
+        if curve and curve != "linear":
+            from genko.stroke import apply_pressure_curve
+
+            points = apply_pressure_curve(points, curve)
         from genko.models import coerce_stroke, stroke_points
 
         stroke = coerce_stroke(points)
         stroke.kind = str(op.get("kind") or "gpen")
-        if op.get("width_mm") is not None:
-            stroke.width_mm = float(op["width_mm"])
+        stroke.width_mm = float(op["width_mm"]) if op.get("width_mm") is not None else float(episode.brush_width_mm)
         role = LayerRole.INK if layer_name == "ink" else LayerRole.NAME if layer_name == "name" else LayerRole(layer_name)
         target = page._layer(role)
         if target.role == LayerRole.INK and not page.name_ok:
@@ -315,11 +337,12 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if target.role in (LayerRole.INK, LayerRole.FINISH, LayerRole.BG):
             from genko.raster import bake_stroke
 
+            rgb = tuple(int(v) for v in op["rgb"]) if op.get("rgb") else tuple(int(v) for v in episode.brush_rgb)
             bake_stroke(
                 page,
                 target,
                 stroke_points(stroke),
-                rgb=tuple(int(v) for v in op["rgb"]) if op.get("rgb") else (20, 20, 20),
+                rgb=rgb,
                 kind=stroke.kind,
                 width_mm=stroke.width_mm,
             )
@@ -769,6 +792,19 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             raise ApplyError(str(exc)) from exc
         save_raster(page, layer, filtered)
         layer.kind = LayerKind.RASTER
+        return
+
+    if name == "set_brush":
+        if op.get("rgb"):
+            episode.brush_rgb = tuple(int(v) for v in op["rgb"])  # type: ignore[assignment]
+        if op.get("width_mm") is not None:
+            episode.brush_width_mm = float(op["width_mm"])
+        if "stabilize" in op:
+            episode.brush_stabilize = int(op["stabilize"] or 0)
+        if "taper" in op:
+            episode.brush_taper = bool(op["taper"])
+        if op.get("curve"):
+            episode.brush_curve = str(op["curve"])
         return
 
     raise ApplyError(f"unknown op: {name}")

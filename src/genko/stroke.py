@@ -34,6 +34,19 @@ def taper_points(points: list) -> list:
     return out
 
 
+def apply_pressure_curve(points: list, curve: str = "gpen") -> list:
+    if curve in ("", "linear"):
+        return points
+    out: list = []
+    for point in points:
+        if len(point) < 3:
+            out.append(point)
+            continue
+        pressure = max(0.05, min(1.0, float(point[2]) ** 1.8))
+        out.append([float(point[0]), float(point[1]), pressure])
+    return out
+
+
 def pack_point(x_mm: float, y_mm: float, pressure: float | None = None) -> list[float]:
     value = 0.7 if pressure is None else max(0.05, min(1.0, float(pressure)))
     return [float(x_mm), float(y_mm), value]

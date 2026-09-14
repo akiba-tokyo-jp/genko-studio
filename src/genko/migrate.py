@@ -140,6 +140,13 @@ def migrate_payload(payload: dict) -> Episode:
         font_path=str(payload.get("font_path") or ""),
         page_locks=dict(payload.get("page_locks") or {}),
     )
+    brush = payload.get("brush") or {}
+    if brush.get("rgb"):
+        episode.brush_rgb = tuple(int(v) for v in brush["rgb"])  # type: ignore[assignment]
+    episode.brush_width_mm = float(brush.get("width_mm", episode.brush_width_mm))
+    episode.brush_stabilize = int(brush.get("stabilize", 0) or 0)
+    episode.brush_taper = bool(brush.get("taper", False))
+    episode.brush_curve = str(brush.get("curve") or "linear")
     bible = payload.get("bible") or {}
     episode.bible.plot = bible.get("plot", "")
     episode.bible.characters = list(bible.get("characters") or [])

@@ -233,6 +233,14 @@
       "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal"
     },
     {
+      "op": "set_brush",
+      "rgb": "[r,g,b]?",
+      "width_mm": "float?",
+      "stabilize": "int?",
+      "taper": "bool?",
+      "curve": "gpen|linear"
+    },
+    {
       "op": "undo"
     }
   ]

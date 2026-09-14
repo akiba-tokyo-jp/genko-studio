@@ -3,10 +3,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QAction, QColor, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QColorDialog,
+    QComboBox,
     QFileDialog,
     QLabel,
     QLineEdit,
@@ -46,6 +48,11 @@ class MainWindow(QMainWindow):
         self.canvas.textMoved.connect(self._on_text_moved)
         self.layers = QListWidget()
         self.layers.itemClicked.connect(self._toggle_layer)
+        self.blend = QComboBox()
+        self.blend.addItems(["normal", "multiply", "screen", "add"])
+        self.blend.currentTextChanged.connect(self._set_blend)
+        self.subview = QLabel()
+        self.subview.setFixedHeight(160)
         self.tickets = QListWidget()
         self.speaker = QLineEdit()
         self.speaker.setPlaceholderText("話者")
@@ -106,6 +113,9 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.pages)
         left_layout.addWidget(QLabel("レイヤー"))
         left_layout.addWidget(self.layers)
+        left_layout.addWidget(self.blend)
+        left_layout.addWidget(QLabel("サブビュー"))
+        left_layout.addWidget(self.subview)
         left_layout.addWidget(QLabel("助手チケット"))
         left_layout.addWidget(self.tickets)
 
@@ -135,6 +145,18 @@ class MainWindow(QMainWindow):
             ("元に戻す", QKeySequence.StandardKey.Undo, self._undo),
         ]
         for title, shortcut, slot in actions:
+            action = QAction(title, self)
+            action.setShortcut(shortcut)
+            action.triggered.connect(slot)
+            bar.addAction(action)
+        extras = [
+            ("ペン", QKeySequence("B"), lambda: self.canvas.set_tool("pen")),
+            ("消しゴム", QKeySequence("E"), lambda: self.canvas.set_tool("eraser")),
+            ("色", QKeySequence("C"), self._pick_color),
+            ("太+", QKeySequence("]"), lambda: self._nudge_brush(0.15)),
+            ("太-", QKeySequence("["), lambda: self._nudge_brush(-0.15)),
+        ]
+        for title, shortcut, slot in extras:
             action = QAction(title, self)
             action.setShortcut(shortcut)
             action.triggered.connect(slot)
@@ -179,6 +201,7 @@ class MainWindow(QMainWindow):
         self._refresh_layers()
         self._refresh_tickets()
         self._refresh_status()
+        self._refresh_subview()
 
     def _refresh_story(self) -> None:
         page = self._current()
@@ -253,6 +276,40 @@ class MainWindow(QMainWindow):
         if page is None or page.index < 2:
             return
         self._apply([{"op": "set_onion", "page": page.index, "from": page.index - 1}])
+
+    def _set_blend(self, mode: str) -> None:
+        page = self._current()
+        if page is None or not page.layers:
+            return
+        row = max(0, self.layers.currentRow())
+        layer = page.layers[min(row, len(page.layers) - 1)]
+        if (layer.blend or "normal") == mode:
+            return
+        self._apply([{"op": "set_layer", "page": page.index, "id": layer.id, "blend": mode}])
+
+    def _pick_color(self) -> None:
+        color = QColorDialog.getColor(QColor(*self.episode.brush_rgb), self)
+        if color.isValid():
+            self._apply([{"op": "set_brush", "rgb": [color.red(), color.green(), color.blue()]}])
+
+    def _nudge_brush(self, delta: float) -> None:
+        width = max(0.15, float(self.episode.brush_width_mm) + delta)
+        self._apply([{"op": "set_brush", "width_mm": width}])
+
+    def _refresh_subview(self) -> None:
+        page = self._current()
+        if page is None:
+            self.subview.clear()
+            return
+        from io import BytesIO
+
+        from genko.render import render_page
+
+        image = render_page(page, 48, mode="name", episode=self.episode)
+        buf = BytesIO()
+        image.save(buf, format="PNG")
+        pix = QPixmap.fromImage(QImage.fromData(buf.getvalue()))
+        self.subview.setPixmap(pix.scaled(180, 150, Qt.AspectRatioMode.KeepAspectRatio))
 
     def _add_layer(self) -> None:
         page = self._current()

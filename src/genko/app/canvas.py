@@ -27,6 +27,7 @@ class PageCanvas(QWidget):
         self._drag_line: StoryLine | None = None
         self.tool = "pen"
         self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TabletTracking, True)
         self.setMinimumSize(480, 640)
 
     def set_tool(self, tool: str) -> None:

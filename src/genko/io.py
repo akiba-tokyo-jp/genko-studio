@@ -77,6 +77,13 @@ def save_episode(episode: Episode, dest: Path) -> None:
         "autosave": episode.autosave,
         "font_path": episode.font_path,
         "page_locks": episode.page_locks,
+        "brush": {
+            "rgb": list(episode.brush_rgb),
+            "width_mm": episode.brush_width_mm,
+            "stabilize": episode.brush_stabilize,
+            "taper": episode.brush_taper,
+            "curve": episode.brush_curve,
+        },
         "spec": {
             "width_mm": episode.spec.width_mm,
             "height_mm": episode.spec.height_mm,
