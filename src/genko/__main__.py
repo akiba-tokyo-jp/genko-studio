@@ -33,11 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("out", type=Path)
     export.add_argument("--json", action="store_true")
     export.add_argument("--dpi", type=int, default=150)
-    export.add_argument("--format", dest="fmt", default="png", choices=["png", "tiff", "pdf", "strip", "psd", "epub"])
+    export.add_argument("--format", dest="fmt", default="png", choices=["png", "tiff", "pdf", "strip", "psd", "epub", "pack"])
 
     inspect = sub.add_parser("inspect", help="Headless: dump compact JSON snapshot")
     inspect.add_argument("src", type=Path)
     inspect.add_argument("--full", action="store_true")
+    inspect.add_argument("--stroke", default="")
 
     apply_p = sub.add_parser("apply", help="Headless: apply JSON ops (file or stdin '-')")
     apply_p.add_argument("src", type=Path)
@@ -103,6 +104,10 @@ def main(argv: list[str] | None = None) -> int:
                 paths = [export_psd(episode, args.out if args.out.suffix else args.out / "out.psd", dpi=args.dpi)]
             elif args.fmt == "epub":
                 paths = [export_epub(episode, args.out if args.out.suffix else args.out / "out.epub", dpi=args.dpi)]
+            elif args.fmt == "pack":
+                from genko.pack import export_pack
+
+                paths = export_pack(episode, args.out)
             else:
                 paths = export_print(episode, args.out, fmt=args.fmt, dpi=args.dpi)
             if args.json:
@@ -112,7 +117,13 @@ def main(argv: list[str] | None = None) -> int:
                     print(path)
             return 0
         if args.cmd == "inspect":
-            _print_json(snapshot(load_episode(args.src), full=args.full))
+            episode = load_episode(args.src)
+            if args.stroke:
+                from genko.headless import inspect_stroke
+
+                _print_json(inspect_stroke(episode, args.stroke))
+            else:
+                _print_json(snapshot(episode, full=args.full))
             return 0
         if args.cmd == "apply":
             from genko.lock import ProjectLock

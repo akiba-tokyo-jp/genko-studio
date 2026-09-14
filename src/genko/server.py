@@ -78,6 +78,18 @@ def handle_request(method: str, path: str, body: bytes) -> tuple[int, bytes]:
             buf = io.BytesIO()
             image.save(buf, format="PNG")
             return 200, buf.getvalue()
+        if method == "GET" and route.startswith("/v1/spreads/") and route.endswith(".png"):
+            from genko.render import render_spread
+            import io
+
+            project = Path(unquote(query.get("path", "")))
+            episode = load_episode(project)
+            pair = route.rsplit("/", 1)[-1].removesuffix(".png")
+            left_s, right_s = pair.split("-")
+            image = render_spread(episode, int(left_s), int(right_s), dpi=int(query.get("dpi", "150")), mode=query.get("mode", "print"))
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            return 200, buf.getvalue()
         if method == "POST" and route == "/v1/new":
             dest = Path(data["dest"])
             spec = PageSpec.webtoon() if data.get("webtoon") else PageSpec.a4_mono()

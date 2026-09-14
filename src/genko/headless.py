@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from genko.models import Episode, Frame, StoryLine
+from genko.models import Episode, Frame, StoryLine, stroke_points
 from genko.ops import OPS_SCHEMA, ApplyError, apply_ops
 
-__all__ = ["OPS_SCHEMA", "ApplyError", "apply_ops", "snapshot"]
+__all__ = ["OPS_SCHEMA", "ApplyError", "apply_ops", "snapshot", "inspect_stroke"]
 
 
 def _frame_brief(frame: Frame) -> dict[str, Any]:
@@ -70,3 +70,18 @@ def snapshot(episode: Episode, full: bool = False) -> dict[str, Any]:
         "tickets": episode.tickets,
         "autosave": episode.autosave,
     }
+
+
+def inspect_stroke(episode: Episode, stroke_id: str) -> dict[str, Any]:
+    for page in episode.pages:
+        for layer in page.layers:
+            for stroke in layer.strokes:
+                if getattr(stroke, "id", None) == stroke_id:
+                    return {
+                        "id": stroke.id,
+                        "page": page.index,
+                        "layer": layer.role.value,
+                        "points": stroke_points(stroke),
+                        "kind": getattr(stroke, "kind", "gpen"),
+                    }
+    raise ApplyError(f"no stroke {stroke_id}")

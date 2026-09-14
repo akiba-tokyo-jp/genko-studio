@@ -53,6 +53,12 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "delete_tone", "page": "int", "id": "str"},
     {"op": "add_effect", "page": "int", "kind": "focus|speed|white", "frame_id": "str?", "params": "object"},
     {"op": "set_autosave", "enabled": "bool"},
+    {"op": "erase_raster", "page": "int", "layer": "ink|name", "points": "[[x,y],...]", "width_mm": "float"},
+    {"op": "reorder_layers", "page": "int", "order": "[id]"},
+    {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?"},
+    {"op": "set_balloon_path", "id": "str", "path": "[[x,y]]?", "wrap": "vertical|horizontal", "ruby_runs": "[[base,ruby]]"},
+    {"op": "add_mannequin", "page": "int", "pos": "[x,y,z]"},
+    {"op": "pose_mannequin", "page": "int", "id": "str"},
     {"op": "undo"},
 ]
 
@@ -175,7 +181,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         text = op.get("text")
         if not text:
             raise ApplyError("text is required")
-        episode.add_line(
+        line = episode.add_line(
             page.index,
             str(text),
             speaker=str(op.get("speaker", "")),
@@ -188,6 +194,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             balloon=str(op.get("balloon", "speech")),
             tail=_parse_tail(op.get("tail")),
         )
+        if "wrap" in op:
+            line.wrap = str(op["wrap"])
+        if op.get("ruby_runs"):
+            line.ruby_runs = [tuple(item) for item in op["ruby_runs"]]
         return
 
     if name == "edit_line":
@@ -258,33 +268,37 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name == "add_stroke":
         page = _require_page(episode, op)
-        layer = op.get("layer", "name")
+        layer_name = str(op.get("layer", "name"))
         points = _parse_points(op.get("points") or [])
         if len(points) < 2:
             raise ApplyError("points needs at least two [x_mm, y_mm] pairs")
-        if layer == "ink":
-            if not page.name_ok:
-                raise ApplyError("ink strokes require name_ok")
-            page.ink_strokes.append(points)
-        elif layer == "name":
-            page.name_strokes.append(points)
-        else:
-            target = page._layer(LayerRole(layer))
-            if target.role == LayerRole.INK and not page.name_ok:
-                raise ApplyError("ink strokes require name_ok")
-            target.strokes.append(points)
+        if op.get("snap_ruler"):
+            points = _snap_points(page, points)
+        from genko.models import coerce_stroke, stroke_points
+
+        stroke = coerce_stroke(points)
+        stroke.kind = str(op.get("kind") or "gpen")
+        if op.get("width_mm") is not None:
+            stroke.width_mm = float(op["width_mm"])
+        role = LayerRole.INK if layer_name == "ink" else LayerRole.NAME if layer_name == "name" else LayerRole(layer_name)
+        target = page._layer(role)
+        if target.role == LayerRole.INK and not page.name_ok:
+            raise ApplyError("ink strokes require name_ok")
+        target.strokes.append(stroke)
+        if target.role in (LayerRole.INK, LayerRole.FINISH, LayerRole.BG):
+            from genko.raster import bake_stroke
+
+            bake_stroke(page, target, stroke_points(stroke))
         return
 
     if name == "delete_stroke":
         page = _require_page(episode, op)
-        layer = op.get("layer", "name")
+        layer_name = str(op.get("layer", "name"))
         try:
             index = int(op["index"])
         except (KeyError, TypeError, ValueError) as exc:
             raise ApplyError("index is required") from exc
-        strokes = page.ink_strokes if layer == "ink" else page.name_strokes
-        if layer not in ("ink", "name"):
-            strokes = page._layer(LayerRole(layer)).strokes
+        strokes = _strokes_of(page, layer_name)
         if index < 0 or index >= len(strokes):
             raise ApplyError("stroke index out of range")
         strokes.pop(index)
@@ -314,10 +328,17 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name == "set_layer":
         page = _require_page(episode, op)
-        role_name = str(op.get("layer") or "")
-        layer = page._layer(LayerRole(role_name))
+        layer = None
+        if op.get("id"):
+            layer = next((item for item in page.layers if item.id == op["id"]), None)
+        if layer is None and op.get("layer"):
+            layer = page._layer(LayerRole(str(op["layer"])))
+        if layer is None:
+            raise ApplyError("layer id or role required")
         if "visible" in op:
             layer.visible = bool(op["visible"])
+        if "opacity" in op:
+            layer.opacity = float(op["opacity"])
         if "exportable" in op and layer.role not in (LayerRole.NAME, LayerRole.DRAFT):
             layer.exportable = bool(op["exportable"])
         return
@@ -479,7 +500,9 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         points = _parse_points(op.get("points") or [])
         if len(points) < 2:
             raise ApplyError("points needs at least two [x_mm, y_mm] pairs")
-        strokes[index] = points
+        from genko.models import coerce_stroke
+
+        strokes[index] = coerce_stroke(points)
         return
 
     if name == "simplify_stroke":
@@ -488,7 +511,11 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         index = int(op["index"])
         if index < 0 or index >= len(strokes):
             raise ApplyError("stroke index out of range")
-        strokes[index] = _rdp(strokes[index], float(op.get("epsilon_mm", 0.8)))
+        from genko.models import Stroke, coerce_stroke, stroke_points
+
+        raw = stroke_points(strokes[index])
+        simplified = _rdp(raw, float(op.get("epsilon_mm", 0.8)))
+        strokes[index] = coerce_stroke(simplified)
         return
 
     if name == "set_ruler":
@@ -544,6 +571,82 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                 return
         raise ApplyError(f"no ticket {ticket_id}")
 
+    if name == "erase_raster":
+        page = _require_page(episode, op)
+        role = LayerRole(str(op.get("layer") or "ink"))
+        target = page._layer(role)
+        from genko.raster import erase_raster
+
+        erase_raster(page, target, _parse_points(op.get("points") or []), width_mm=float(op.get("width_mm", 2)))
+        return
+
+    if name == "reorder_layers":
+        page = _require_page(episode, op)
+        order = op.get("order") or []
+        by_id = {layer.id: layer for layer in page.layers}
+        page.layers = [by_id[item] for item in order if item in by_id]
+        return
+
+    if name == "stamp_material":
+        page = _require_page(episode, op)
+        from genko.materials import get_material
+
+        material = get_material(str(op["material_id"]))
+        layer = Layer(
+            id=new_id(),
+            role=LayerRole.TONE if material.get("kind") != "effect" else LayerRole.EFFECT,
+            kind=LayerKind.TONE,
+            lpi=material.get("lpi"),
+            density=material.get("density"),
+            exportable=True,
+            material_id=material["id"],
+        )
+        frame_id = op.get("frame_id")
+        if frame_id:
+            frame = page._find(str(frame_id))
+            r = frame.rect
+            layer.region = [(r.x, r.y), (r.x + r.width, r.y), (r.x + r.width, r.y + r.height), (r.x, r.y + r.height)]
+        if material.get("kind") == "effect":
+            page.effects.append({"id": new_id(), "kind": material.get("effect", "speed"), "frame_id": frame_id, "params": {}})
+        else:
+            page.layers.append(layer)
+        return
+
+    if name == "set_balloon_path":
+        line = _find_line(episode, str(op.get("id") or ""))
+        if "path" in op:
+            line.path = [tuple(pt) for pt in op["path"]] if op["path"] else None
+        if "wrap" in op:
+            line.wrap = str(op["wrap"])
+        if "ruby_runs" in op:
+            line.ruby_runs = [tuple(item) for item in op["ruby_runs"]]
+        return
+
+    if name == "add_mannequin":
+        page = _require_page(episode, op)
+        page.prims.append(
+            {
+                "id": new_id(),
+                "kind": "mannequin",
+                "pos": list(op.get("pos") or [100, 160, 0]),
+                "size": [40, 80, 20],
+                "rot": [0, 0.2, 0],
+            }
+        )
+        return
+
+    if name == "pose_mannequin":
+        page = _require_page(episode, op)
+        mannequin_id = op.get("id")
+        for prim in page.prims:
+            if prim.get("id") == mannequin_id:
+                if "rot" in op:
+                    prim["rot"] = list(op["rot"])
+                if "pos" in op:
+                    prim["pos"] = list(op["pos"])
+                return
+        raise ApplyError(f"no mannequin {mannequin_id}")
+
     raise ApplyError(f"unknown op: {name}")
 
 
@@ -590,11 +693,8 @@ def _flood_fill(episode: Episode, op: dict[str, Any]) -> None:
 
 
 def _strokes_of(page: Page, layer_name: str):
-    if layer_name == "ink":
-        return page.ink_strokes
-    if layer_name == "name":
-        return page.name_strokes
-    return page._layer(LayerRole(layer_name)).strokes
+    role = LayerRole.INK if layer_name == "ink" else LayerRole.NAME if layer_name == "name" else LayerRole(layer_name)
+    return page._layer(role).strokes
 
 
 def _perp(point, start, end) -> float:
@@ -623,8 +723,28 @@ def _rdp(points: list, epsilon: float) -> list:
     return [points[0], points[-1]]
 
 
+def _snap_points(page: Page, points: list) -> list:
+    ruler = page.ruler or {}
+    vps = ruler.get("points") or []
+    if not vps:
+        return points
+    vx, vy = float(vps[0][0]), float(vps[0][1])
+    x0, y0 = float(points[0][0]), float(points[0][1])
+    x1, y1 = float(points[-1][0]), float(points[-1][1])
+    dx, dy = vx - x0, vy - y0
+    denom = dx * dx + dy * dy
+    if denom < 1e-6:
+        return points
+    t = ((x1 - x0) * dx + (y1 - y0) * dy) / denom
+    snapped = (x0 + t * dx, y0 + t * dy)
+    extra = points[-1][2:] if len(points[-1]) > 2 else ()
+    new_last = (snapped[0], snapped[1], *extra) if extra else snapped
+    return [*points[:-1], new_last]
+
+
 def _lt_convert(episode: Episode, op: dict[str, Any]) -> None:
-    from PIL import Image, ImageFilter, ImageOps
+    from genko.lt import runs_to_strokes, to_line_art
+    from genko.models import coerce_stroke
 
     page = _require_page(episode, op)
     src_role = LayerRole(str(op.get("layer") or "bg"))
@@ -634,25 +754,15 @@ def _lt_convert(episode: Episode, op: dict[str, Any]) -> None:
     src = page._layer(src_role)
     if not src.raster_png:
         raise ApplyError("lt_convert needs a raster on the source layer")
-    image = Image.open(__import__("io").BytesIO(src.raster_png)).convert("L")
-    edges = ImageOps.invert(image.filter(ImageFilter.FIND_EDGES))
-    sx = page.spec.width_mm / max(1, edges.width)
-    sy = page.spec.height_mm / max(1, edges.height)
+    from PIL import Image
+
+    image = Image.open(__import__("io").BytesIO(src.raster_png))
+    binary = to_line_art(image, method=str(op.get("method") or "adaptive"))
     dest = page._layer(dest_role)
-    for y in range(edges.height):
-        run: list[tuple[float, float]] = []
-        for x in range(edges.width):
-            if edges.getpixel((x, y)) < 80:
-                run.append((x * sx, y * sy))
-            elif len(run) >= 2:
-                dest.strokes.append(run)
-                run = []
-            else:
-                run = []
-        if len(run) >= 2:
-            dest.strokes.append(run)
+    for run in runs_to_strokes(binary, page.spec.width_mm, page.spec.height_mm):
+        dest.strokes.append(coerce_stroke(run))
     if not dest.strokes:
-        dest.strokes.append([(10.0, 10.0), (page.spec.width_mm - 10, 10.0)])
+        dest.strokes.append(coerce_stroke([(10.0, 10.0), (page.spec.width_mm - 10, 10.0)]))
 
 
 def _refresh_frame_ids(frame: Frame) -> None:

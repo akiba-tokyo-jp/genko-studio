@@ -18,6 +18,8 @@ Drive Genko **headless**. Do not open the GUI. Stdout is JSON. No Qt required.
 - Failed apply is transactional (nothing from that request is kept)
 - `project.lock` while `apply` runs (stale after 15 minutes)
 - `put_raster` is the image-generation boundary. Genko does not invent pixels.
+- `inspect --stroke ID` returns one polyline. Compact inspect still omits all points.
+- Spread: `GET /v1/spreads/{left}-{right}.png`
 
 ## CLI
 

@@ -71,19 +71,77 @@ class PageSpec:
 
 
 @dataclass
+class Stroke:
+    id: str
+    points: list[tuple[float, float]] = field(default_factory=list)
+    pressure: list[float] = field(default_factory=list)
+    width_mm: float = 0.35
+    kind: str = "gpen"
+    handles: list | None = None
+
+
+def coerce_stroke(raw) -> Stroke:
+    if isinstance(raw, Stroke):
+        return raw
+    if isinstance(raw, dict):
+        points = [tuple(pt[:2]) for pt in raw.get("points") or []]
+        pressure = [float(p) for p in raw.get("pressure") or []]
+        if not pressure:
+            pressure = [float(pt[2]) for pt in raw.get("points") or [] if len(pt) > 2]
+        return Stroke(
+            id=raw.get("id") or new_id(),
+            points=[(float(x), float(y)) for x, y in points],
+            pressure=pressure,
+            width_mm=float(raw.get("width_mm", 0.35)),
+            kind=str(raw.get("kind") or "gpen"),
+        )
+    points: list[tuple[float, float]] = []
+    pressure: list[float] = []
+    for pt in raw:
+        points.append((float(pt[0]), float(pt[1])))
+        if len(pt) > 2:
+            pressure.append(float(pt[2]))
+    if len(pressure) != len(points):
+        pressure = []
+    return Stroke(id=new_id(), points=points, pressure=pressure)
+
+
+def stroke_points(stroke) -> list[tuple]:
+    if isinstance(stroke, Stroke):
+        if stroke.pressure and len(stroke.pressure) == len(stroke.points):
+            return [(p[0], p[1], pr) for p, pr in zip(stroke.points, stroke.pressure)]
+        return list(stroke.points)
+    return list(stroke)
+
+
+def stroke_to_dict(stroke) -> dict | list:
+    if isinstance(stroke, Stroke):
+        return {
+            "id": stroke.id,
+            "points": stroke.points,
+            "pressure": stroke.pressure,
+            "width_mm": stroke.width_mm,
+            "kind": stroke.kind,
+        }
+    return stroke
+
+
+@dataclass
 class Layer:
     id: str
     role: LayerRole
     kind: LayerKind = LayerKind.STROKES
     visible: bool = True
     exportable: bool = True
-    strokes: list[list[tuple[float, float]]] = field(default_factory=list)
+    strokes: list = field(default_factory=list)
     raster_relpath: str | None = None
     fill_rgb: tuple[int, int, int] | None = None
     raster_png: bytes | None = field(default=None, repr=False, compare=False)
     lpi: float | None = None
     density: float | None = None
     region: list[tuple[float, float]] | None = None
+    opacity: float = 1.0
+    material_id: str | None = None
 
 
 @dataclass
@@ -111,6 +169,9 @@ class StoryLine:
     h_mm: float = 20
     balloon: str = "speech"
     tail: tuple[float, float] | None = None
+    wrap: str = "horizontal"
+    ruby_runs: list = field(default_factory=list)
+    path: list | None = None
 
 
 def new_id() -> str:
@@ -173,20 +234,20 @@ class Page:
         return layer
 
     @property
-    def name_strokes(self) -> list[list[tuple[float, float]]]:
-        return self._layer(LayerRole.NAME).strokes
+    def name_strokes(self) -> list:
+        return [stroke_points(s) for s in self._layer(LayerRole.NAME).strokes]
 
     @name_strokes.setter
-    def name_strokes(self, value: list[list[tuple[float, float]]]) -> None:
-        self._layer(LayerRole.NAME).strokes = value
+    def name_strokes(self, value: list) -> None:
+        self._layer(LayerRole.NAME).strokes = [coerce_stroke(item) for item in value]
 
     @property
-    def ink_strokes(self) -> list[list[tuple[float, float]]]:
-        return self._layer(LayerRole.INK).strokes
+    def ink_strokes(self) -> list:
+        return [stroke_points(s) for s in self._layer(LayerRole.INK).strokes]
 
     @ink_strokes.setter
-    def ink_strokes(self, value: list[list[tuple[float, float]]]) -> None:
-        self._layer(LayerRole.INK).strokes = value
+    def ink_strokes(self, value: list) -> None:
+        self._layer(LayerRole.INK).strokes = [coerce_stroke(item) for item in value]
 
     def inner_rect_mm(self) -> Rect:
         inset = self.spec.bleed_mm + self.spec.inner_margin_mm

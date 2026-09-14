@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
         self.canvas.frameSelected.connect(self._on_frame_selected)
         self.canvas.textMoved.connect(self._on_text_moved)
         self.layers = QListWidget()
+        self.layers.itemClicked.connect(self._toggle_layer)
         self.tickets = QListWidget()
         self.speaker = QLineEdit()
         self.speaker.setPlaceholderText("話者")
@@ -183,6 +184,16 @@ class MainWindow(QMainWindow):
         for layer in page.layers:
             mark = "●" if layer.visible else "○"
             self.layers.addItem(f"{mark} {layer.role.value}")
+
+    def _toggle_layer(self, _item) -> None:
+        page = self._current()
+        if page is None:
+            return
+        row = self.layers.currentRow()
+        if row < 0 or row >= len(page.layers):
+            return
+        layer = page.layers[row]
+        self._apply([{"op": "set_layer", "page": page.index, "id": layer.id, "visible": not layer.visible}])
 
     def _refresh_tickets(self) -> None:
         self.tickets.clear()

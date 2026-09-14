@@ -11,6 +11,7 @@ from genko.models import (
     PageSpec,
     Rect,
     StoryLine,
+    coerce_stroke,
     default_layers,
     new_id,
 )
@@ -40,12 +41,14 @@ def _layer(data: dict) -> Layer:
         kind=LayerKind(data.get("kind", "strokes")),
         visible=data.get("visible", True),
         exportable=data.get("exportable", role not in (LayerRole.NAME, LayerRole.DRAFT)),
-        strokes=[[tuple(pt) for pt in stroke] for stroke in data.get("strokes", [])],  # type: ignore[misc]
+        strokes=[coerce_stroke(stroke) for stroke in data.get("strokes", [])],
         raster_relpath=data.get("raster_relpath"),
         fill_rgb=tuple(data["fill_rgb"]) if data.get("fill_rgb") else None,  # type: ignore[arg-type]
         lpi=data.get("lpi"),
         density=data.get("density"),
         region=[tuple(pt) for pt in data["region"]] if data.get("region") else None,
+        opacity=float(data.get("opacity", 1)),
+        material_id=data.get("material_id"),
     )
 
 
@@ -63,6 +66,9 @@ def _line(data: dict) -> StoryLine:
         h_mm=float(data.get("h_mm", 20)),
         balloon=data.get("balloon", "speech"),
         tail=tuple(data["tail"]) if data.get("tail") else None,
+        wrap=data.get("wrap", "horizontal"),
+        ruby_runs=[tuple(item) for item in data.get("ruby_runs") or []],
+        path=[tuple(pt) for pt in data["path"]] if data.get("path") else None,
     )
 
 

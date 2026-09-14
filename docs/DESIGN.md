@@ -5,18 +5,18 @@ CLIP STUDIO PAINT EX の全描画エンジンを複製しない。連載工場�
 
 ## 何を置き、何を置かないか
 
-置く（P0–P4）
+置く（P0–P5）
 
 - レイヤー（name は exportable=false）。v1 ファイルはマイグレーション
 - コマクリップ合成。`render mode=name|proof|print`
 - すべての変更は `apply_ops`（GUI も AI も）。dry_run と undo
+- Stroke（筆圧Gペン）と作業ラスタ。消しゴムは画素
+- 見開き1枚、縦組みルビ、フキダシ path
+- トーンカタログ（幾何）。パース拘束。棒人間（print に出ない）
 - ページ追加／削除／複製、セリフ編集／移動／フキダシ／ルビ
 - コマ merge/resize/bleed、put_raster、ベタ、トーン網点、集中線／流線
-- 2階調 TIFF、PDF、Webtoon 縦結合、B4／出版社プリセット数値、ノンブル、トンボ
-- 筆圧付き折れ線、ベクター簡略化、パース定規、箱の3Dガイド、LT（エッジ→線）
-- 助手チケット、最小 PSD（8BPS＋文字レイヤー名）、EPUB
-- ページPNG、OpenAPI、job_id、project.lock（15分で失効）
-- 選択コマの分割、保存でフォルダ作成、GUI レイヤー／セリフドラッグ／自動保存
+- 2階調 TIFF、PDF、Webtoon 縦結合、B4／出版社プリセット数値、ノンブル、トンボ、入稿パック
+- タブレット筆圧、レイヤーパレット、inspect_stroke、spread PNG
 
 置かない（意図的。CSP互換を謳わない）
 

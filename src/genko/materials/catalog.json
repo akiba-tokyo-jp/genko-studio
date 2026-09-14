@@ -1,0 +1,6 @@
+[
+  {"id": "dot-60-30", "kind": "dot", "lpi": 60, "density": 0.3},
+  {"id": "dot-40-80", "kind": "dot", "lpi": 40, "density": 0.8},
+  {"id": "sand-50", "kind": "noise", "density": 0.5},
+  {"id": "speed-h", "kind": "effect", "effect": "speed"}
+]

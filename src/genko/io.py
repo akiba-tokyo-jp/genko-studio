@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from genko.migrate import migrate_payload
-from genko.models import Episode, Frame, Layer, Page, Rect, StoryLine
+from genko.models import Episode, Frame, Layer, Page, Rect, StoryLine, stroke_to_dict
 
 
 def _rect_to_dict(rect: Rect) -> dict:
@@ -30,12 +30,14 @@ def _layer_to_dict(layer: Layer) -> dict:
         "kind": layer.kind.value,
         "visible": layer.visible,
         "exportable": layer.exportable,
-        "strokes": layer.strokes,
+        "strokes": [stroke_to_dict(stroke) for stroke in layer.strokes],
         "raster_relpath": layer.raster_relpath,
         "fill_rgb": list(layer.fill_rgb) if layer.fill_rgb else None,
         "lpi": layer.lpi,
         "density": layer.density,
         "region": layer.region,
+        "opacity": layer.opacity,
+        "material_id": layer.material_id,
     }
 
 
@@ -53,6 +55,9 @@ def _line_to_dict(line: StoryLine) -> dict:
         "h_mm": line.h_mm,
         "balloon": line.balloon,
         "tail": list(line.tail) if line.tail else None,
+        "wrap": line.wrap,
+        "ruby_runs": [list(item) for item in line.ruby_runs],
+        "path": line.path,
     }
 
 

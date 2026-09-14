@@ -5,6 +5,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
 from genko.models import Page, Rect, StoryLine
+from genko.stroke import pack_point
 
 
 class PageCanvas(QWidget):
@@ -153,7 +154,8 @@ class PageCanvas(QWidget):
             self._stroke = []
             self.update()
             return
-        self.strokeCommitted.emit(list(self._stroke))
+        packed = [pack_point(float(pt[0]), float(pt[1]), float(pt[2]) if len(pt) > 2 else None) for pt in self._stroke]
+        self.strokeCommitted.emit(packed)
         self._stroke = []
         self.changed.emit()
         self.update()
@@ -163,3 +165,29 @@ class PageCanvas(QWidget):
         factor = 1.1 if delta > 0 else 0.9
         self._scale = min(8.0, max(0.8, self._scale * factor))
         self.update()
+
+    def tabletEvent(self, event) -> None:  # noqa: N802
+        if self.page is None:
+            return
+        x_mm, y_mm = self._to_mm(event.position())
+        pressure = float(event.pressure())
+        etype = event.type()
+        from PySide6.QtCore import QEvent
+
+        if etype == QEvent.Type.TabletPress:
+            self._stroke = [tuple(pack_point(x_mm, y_mm, pressure))]
+            self.update()
+            event.accept()
+            return
+        if etype == QEvent.Type.TabletMove and self._stroke:
+            self._stroke.append(tuple(pack_point(x_mm, y_mm, pressure)))
+            self.update()
+            event.accept()
+            return
+        if etype == QEvent.Type.TabletRelease and self._stroke:
+            if len(self._stroke) >= 2:
+                self.strokeCommitted.emit(list(self._stroke))
+            self._stroke = []
+            self.changed.emit()
+            self.update()
+            event.accept()

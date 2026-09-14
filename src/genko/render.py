@@ -179,11 +179,26 @@ def _draw_prims(image: Image.Image, page: Page, dpi: int, mode: str) -> None:
         (0, 4), (1, 5), (2, 6), (3, 7),
     ]
     for prim in page.prims:
+        if prim.get("kind") == "mannequin":
+            _draw_mannequin(draw, prim, dpi)
+            continue
         pts = _project_box(prim, dpi)
         if len(pts) < 8:
             continue
         for a, b in edges:
             draw.line([pts[a], pts[b]], fill=(90, 90, 140), width=1)
+
+
+def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int) -> None:
+    pos = prim.get("pos") or [100, 160, 0]
+    cx, cy = mm_to_px(float(pos[0]), dpi), mm_to_px(float(pos[1]), dpi)
+    color = (90, 90, 140)
+    head_r = mm_to_px(8, dpi)
+    draw.ellipse((cx - head_r, cy - mm_to_px(42, dpi) - head_r, cx + head_r, cy - mm_to_px(42, dpi) + head_r), outline=color, width=3)
+    draw.line((cx, cy - mm_to_px(34, dpi), cx, cy), fill=color, width=3)
+    draw.line((cx - mm_to_px(18, dpi), cy - mm_to_px(20, dpi), cx + mm_to_px(18, dpi), cy - mm_to_px(20, dpi)), fill=color, width=3)
+    draw.line((cx, cy, cx - mm_to_px(12, dpi), cy + mm_to_px(28, dpi)), fill=color, width=3)
+    draw.line((cx, cy, cx + mm_to_px(12, dpi), cy + mm_to_px(28, dpi)), fill=color, width=3)
 
 
 def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font) -> None:
@@ -193,7 +208,11 @@ def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font) ->
     h = mm_to_px(line.h_mm or 20, dpi)
     box = [x, y, x + w, y + h]
     kind = line.balloon or "speech"
-    if kind != "none":
+    if line.path:
+        xy = [_xy(pt, dpi) for pt in line.path]
+        if len(xy) >= 3:
+            draw.polygon(xy, fill=(255, 255, 255), outline=(20, 20, 20))
+    elif kind != "none":
         fill = (255, 255, 255)
         outline = (20, 20, 20)
         if kind == "narration":
@@ -209,6 +228,12 @@ def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font) ->
             cx = x + w // 2
             cy = y + h
             draw.polygon([(cx - 6, cy - 2), (cx + 6, cy - 2), (tx, ty)], fill=fill, outline=outline)
+    if getattr(line, "wrap", "horizontal") == "vertical":
+        for i, char in enumerate(line.text):
+            draw.text((x + 2, y + 2 + i * 12), char, fill=(10, 10, 10), font=font)
+        for _base, ruby in getattr(line, "ruby_runs", []) or []:
+            draw.text((x + 14, y + 2), ruby, fill=(10, 10, 10), font=font)
+        return
     if line.ruby:
         draw.text((x + 4, y + 2), line.ruby, fill=(10, 10, 10), font=font)
         draw.text((x + 4, y + 12), line.text, fill=(10, 10, 10), font=font)
@@ -270,6 +295,10 @@ def render_page(
         if raster is None:
             continue
         raster = raster.resize(size)
+        if getattr(layer, "opacity", 1.0) < 1:
+            r, g, b, a = raster.split()
+            a = a.point(lambda p, o=layer.opacity: int(p * o))
+            raster = Image.merge("RGBA", (r, g, b, a))
         rgba = Image.alpha_composite(rgba, raster.convert("RGBA"))
     image = rgba.convert("RGB")
 
@@ -277,8 +306,10 @@ def render_page(
     name_layer = Image.new("RGBA", size, (0, 0, 0, 0))
     _stroke_draw = ImageDraw.Draw(ink_layer)
     _name_draw = ImageDraw.Draw(name_layer)
-    for stroke in page.ink_strokes:
-        _stroke(_stroke_draw, stroke, working_dpi, INK_COLOR, 3)
+    ink_has_raster = any(layer.role == LayerRole.INK and layer.raster_png for layer in page.layers)
+    if not (mode == "print" and ink_has_raster):
+        for stroke in page.ink_strokes:
+            _stroke(_stroke_draw, stroke, working_dpi, INK_COLOR, 3)
     if include_name:
         for stroke in page.name_strokes:
             _stroke(_name_draw, stroke, working_dpi, NAME_COLOR, 3)
@@ -341,3 +372,20 @@ def render_page(
 
 def to_bitonal(image: Image.Image, threshold: int = 180) -> Image.Image:
     return image.convert("L").point(lambda p: 255 if p > threshold else 0, mode="1")
+
+
+def render_spread(episode: Episode, first: int, second: int, dpi: int = 150, mode: str = "print") -> Image.Image:
+    pages = {page.index: page for page in episode.pages}
+    a, b = pages[first], pages[second]
+    if a.is_recto() and not b.is_recto():
+        right, left = a, b
+    elif b.is_recto() and not a.is_recto():
+        right, left = b, a
+    else:
+        left, right = a, b
+    left_img = render_page(left, dpi, mode=mode, episode=episode)
+    right_img = render_page(right, dpi, mode=mode, episode=episode)
+    image = Image.new("RGB", (left_img.width + right_img.width, max(left_img.height, right_img.height)), (255, 255, 255))
+    image.paste(left_img, (0, 0))
+    image.paste(right_img, (left_img.width, 0))
+    return image

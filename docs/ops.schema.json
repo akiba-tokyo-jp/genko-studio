@@ -163,6 +163,41 @@
       "enabled": "bool"
     },
     {
+      "op": "erase_raster",
+      "page": "int",
+      "layer": "ink|name",
+      "points": "[[x,y],...]",
+      "width_mm": "float"
+    },
+    {
+      "op": "reorder_layers",
+      "page": "int",
+      "order": "[id]"
+    },
+    {
+      "op": "stamp_material",
+      "page": "int",
+      "material_id": "str",
+      "frame_id": "str?"
+    },
+    {
+      "op": "set_balloon_path",
+      "id": "str",
+      "path": "[[x,y]]?",
+      "wrap": "vertical|horizontal",
+      "ruby_runs": "[[base,ruby]]"
+    },
+    {
+      "op": "add_mannequin",
+      "page": "int",
+      "pos": "[x,y,z]"
+    },
+    {
+      "op": "pose_mannequin",
+      "page": "int",
+      "id": "str"
+    },
+    {
       "op": "undo"
     }
   ]
