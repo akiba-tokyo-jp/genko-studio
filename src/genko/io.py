@@ -39,6 +39,11 @@ def _layer_to_dict(layer: Layer) -> dict:
         "opacity": layer.opacity,
         "material_id": layer.material_id,
         "angle": layer.angle,
+        "title": layer.title,
+        "blend": layer.blend,
+        "clip": layer.clip,
+        "lock_alpha": layer.lock_alpha,
+        "parent_id": layer.parent_id,
     }
 
 

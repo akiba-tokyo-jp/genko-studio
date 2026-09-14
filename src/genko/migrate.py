@@ -50,6 +50,11 @@ def _layer(data: dict) -> Layer:
         opacity=float(data.get("opacity", 1)),
         material_id=data.get("material_id"),
         angle=float(data.get("angle", 45)),
+        title=str(data.get("title") or ""),
+        blend=str(data.get("blend") or "normal"),
+        clip=bool(data.get("clip", False)),
+        lock_alpha=bool(data.get("lock_alpha", False)),
+        parent_id=data.get("parent_id"),
     )
 
 

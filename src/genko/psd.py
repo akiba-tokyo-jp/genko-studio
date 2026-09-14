@@ -83,6 +83,8 @@ def export_psd(episode: Episode, dest: Path, dpi: int = 150) -> Path:
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     image = render_page(episode.pages[0], dpi, mode="print", episode=episode)
-    names = ["pixels"] + [f"{line.speaker}:{line.text}" if line.speaker else line.text for line in episode.story]
+    names = ["pixels"] + [layer.title for layer in episode.pages[0].layers if layer.title] + [
+        f"{line.speaker}:{line.text}" if line.speaker else line.text for line in episode.story
+    ]
     write_psd(dest, image, names)
     return dest

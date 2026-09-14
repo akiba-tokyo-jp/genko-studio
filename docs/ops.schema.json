@@ -212,6 +212,27 @@
       "page": "int"
     },
     {
+      "op": "add_layer",
+      "page": "int",
+      "name": "str?",
+      "blend": "str?",
+      "clip": "bool?",
+      "folder": "bool?",
+      "parent": "str?"
+    },
+    {
+      "op": "delete_layer",
+      "page": "int",
+      "id": "str"
+    },
+    {
+      "op": "filter_raster",
+      "page": "int",
+      "layer": "str?",
+      "id": "str?",
+      "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal"
+    },
+    {
       "op": "undo"
     }
   ]

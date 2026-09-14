@@ -49,11 +49,15 @@ def bake_stroke(
     width_mm: float = 0.35,
 ) -> None:
     image = ensure_raster(page, layer, dpi)
+    old_alpha = image.split()[3]
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     alpha = 140 if kind == "oil" else 255
     stamp_polyline(draw, points, dpi, width_mm, fill=(*rgb, alpha), coords="mm")
     image = Image.alpha_composite(image, overlay)
+    if getattr(layer, "lock_alpha", False):
+        r, g, b, a = image.split()
+        image.putalpha(ImageChops.multiply(a, old_alpha))
     image = _clip(page, image, dpi)
     save_raster(page, layer, image)
     if layer.kind == LayerKind.STROKES:

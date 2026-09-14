@@ -20,6 +20,7 @@ class LayerRole(str, Enum):
     EFFECT = "effect"
     FRAMES = "frames"
     TEXT = "text"
+    USER = "user"
 
 
 class LayerKind(str, Enum):
@@ -27,6 +28,7 @@ class LayerKind(str, Enum):
     STROKES = "strokes"
     FILL = "fill"
     TONE = "tone"
+    FOLDER = "folder"
 
 
 @dataclass(frozen=True)
@@ -143,6 +145,11 @@ class Layer:
     opacity: float = 1.0
     material_id: str | None = None
     angle: float = 45.0
+    title: str = ""
+    blend: str = "normal"
+    clip: bool = False
+    lock_alpha: bool = False
+    parent_id: str | None = None
 
 
 @dataclass

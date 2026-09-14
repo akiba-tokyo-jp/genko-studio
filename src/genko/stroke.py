@@ -2,8 +2,36 @@ from __future__ import annotations
 
 from PIL import ImageDraw
 
+
 def _mm_to_px(mm: float, dpi: int) -> int:
     return max(1, round(mm / 25.4 * dpi))
+
+
+def stabilize_points(points: list, window: int = 5) -> list:
+    if window < 3 or len(points) < 3:
+        return points
+    half = max(1, int(window) // 2)
+    out: list = []
+    for i, point in enumerate(points):
+        sl = points[max(0, i - half) : min(len(points), i + half + 1)]
+        x = sum(float(item[0]) for item in sl) / len(sl)
+        y = sum(float(item[1]) for item in sl) / len(sl)
+        extra = list(point[2:]) if len(point) > 2 else []
+        out.append([x, y, *extra] if extra else [x, y])
+    return out
+
+
+def taper_points(points: list) -> list:
+    n = len(points)
+    if n < 2:
+        return points
+    span = max(1, n * 0.25)
+    out: list = []
+    for i, point in enumerate(points):
+        factor = min(1.0, min(i, n - 1 - i) / span)
+        pressure = float(point[2]) if len(point) > 2 else 1.0
+        out.append([float(point[0]), float(point[1]), pressure * max(0.15, factor)])
+    return out
 
 
 def pack_point(x_mm: float, y_mm: float, pressure: float | None = None) -> list[float]:

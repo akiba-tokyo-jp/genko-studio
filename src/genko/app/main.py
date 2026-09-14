@@ -75,6 +75,10 @@ class MainWindow(QMainWindow):
         eraser.clicked.connect(lambda: self.canvas.set_tool("eraser"))
         onion = QPushButton("オニオンスキン")
         onion.clicked.connect(self._onion)
+        add_layer = QPushButton("レイヤー追加")
+        add_layer.clicked.connect(self._add_layer)
+        blur = QPushButton("ぼかし")
+        blur.clicked.connect(lambda: self._filter("blur"))
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -92,6 +96,8 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(pen)
         right_layout.addWidget(eraser)
         right_layout.addWidget(onion)
+        right_layout.addWidget(add_layer)
+        right_layout.addWidget(blur)
         right_layout.addWidget(self.status)
 
         left = QWidget()
@@ -192,7 +198,8 @@ class MainWindow(QMainWindow):
             return
         for layer in page.layers:
             mark = "●" if layer.visible else "○"
-            self.layers.addItem(f"{mark} {layer.role.value}")
+            label = layer.title or layer.role.value
+            self.layers.addItem(f"{mark} {label} {layer.blend}")
 
     def _toggle_layer(self, _item) -> None:
         page = self._current()
@@ -246,6 +253,19 @@ class MainWindow(QMainWindow):
         if page is None or page.index < 2:
             return
         self._apply([{"op": "set_onion", "page": page.index, "from": page.index - 1}])
+
+    def _add_layer(self) -> None:
+        page = self._current()
+        if page is None:
+            return
+        self._apply([{"op": "add_layer", "page": page.index, "name": "レイヤー", "blend": "multiply"}])
+
+    def _filter(self, kind: str) -> None:
+        page = self._current()
+        if page is None:
+            return
+        layer = "ink" if page.stage == "ink" else "name"
+        self._apply([{"op": "filter_raster", "page": page.index, "layer": layer, "kind": kind, "radius": 2}])
 
     def _on_frame_selected(self, frame_id: str) -> None:
         page = self._current()

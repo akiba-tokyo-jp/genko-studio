@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
+
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from genko.models import Episode, LayerKind, LayerRole, Page, Rect, StoryLine
+from genko.tategaki import compose as compose_tategaki
 
 EXPORT_ROLES = (
     LayerRole.INK,
@@ -74,22 +77,68 @@ def _and_alpha(layer: Image.Image, mask: Image.Image) -> Image.Image:
     return ImageChops.multiply(alpha, mask)
 
 
-def _font(path: str | None = None) -> ImageFont.ImageFont:
-    if path:
+_DELA = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "DelaGothicOne-Regular.ttf"
+_CJK_FONTS = (
+    str(_DELA),
+    r"C:\Windows\Fonts\YuGothM.ttc",
+    r"C:\Windows\Fonts\meiryo.ttc",
+    r"C:\Windows\Fonts\NotoSansJP-VF.ttf",
+    r"C:\Windows\Fonts\msgothic.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+)
+
+
+def _font(path: str | None = None, size: int = 14) -> ImageFont.ImageFont:
+    size = max(8, int(size))
+    candidates = [path] if path else []
+    candidates.extend(_CJK_FONTS)
+    for candidate in candidates:
+        if not candidate:
+            continue
         try:
-            return ImageFont.truetype(path, 14)
-        except (OSError, OSError):
-            pass
-    try:
-        return ImageFont.load_default()
-    except OSError:
-        return ImageFont.load_default()
+            return ImageFont.truetype(candidate, size)
+        except (OSError, ValueError):
+            continue
+    return ImageFont.load_default()
 
 
 def _open_raster(layer) -> Image.Image | None:
     if layer.raster_png:
         return Image.open(io.BytesIO(layer.raster_png)).convert("RGBA")
     return None
+
+
+def _blend_over(base: Image.Image, over: Image.Image, mode: str, opacity: float, clip_mask: Image.Image | None = None) -> Image.Image:
+    over = over.convert("RGBA")
+    if clip_mask is not None:
+        r, g, b, a = over.split()
+        a = ImageChops.multiply(a, clip_mask.convert("L"))
+        over = Image.merge("RGBA", (r, g, b, a))
+    if opacity < 1:
+        r, g, b, a = over.split()
+        a = a.point(lambda p, o=opacity: int(p * o))
+        over = Image.merge("RGBA", (r, g, b, a))
+    base_rgba = base.convert("RGBA")
+    if mode in ("", "normal", None):
+        return Image.alpha_composite(base_rgba, over)
+    br, bg, bb, ba = base_rgba.split()
+    rr, rg, rb, ra = over.split()
+    base_rgb = Image.merge("RGB", (br, bg, bb))
+    over_rgb = Image.merge("RGB", (rr, rg, rb))
+    if mode == "multiply":
+        mixed = ImageChops.multiply(base_rgb, over_rgb)
+    elif mode == "screen":
+        mixed = ImageChops.screen(base_rgb, over_rgb)
+    elif mode == "add":
+        mixed = ImageChops.add(base_rgb, over_rgb)
+    elif mode == "overlay":
+        mixed = ImageChops.overlay(base_rgb, over_rgb) if hasattr(ImageChops, "overlay") else ImageChops.multiply(base_rgb, over_rgb)
+    else:
+        mixed = over_rgb
+    mixed_rgba = mixed.convert("RGBA")
+    mixed_rgba.putalpha(ra)
+    return Image.alpha_composite(base_rgba, mixed_rgba)
 
 
 def _draw_tone(image: Image.Image, page: Page, dpi: int) -> None:
@@ -226,13 +275,72 @@ def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int) -> None:
     draw.line((cx, cy, int(cx + leg * math.sin(abs(r_leg))), cy + leg), fill=color, width=3)
 
 
-def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font) -> None:
+def _balloon_font(line: StoryLine, dpi: int, font_path: str | None) -> ImageFont.ImageFont:
+    n = max(1, len(line.text or " "))
+    w = mm_to_px(line.w_mm or 40, dpi)
+    h = mm_to_px(line.h_mm or 20, dpi)
+    cap = mm_to_px(5.0, dpi)
+    kind = line.balloon or "speech"
+    if getattr(line, "wrap", "horizontal") == "vertical":
+        if kind == "none":
+            size = max(12, min(w, max(12, h // n)))
+        else:
+            size = max(12, min(cap, (w * 2) // 3))
+    else:
+        size = max(12, min(cap, h // 2))
+    return _font(font_path, size)
+
+
+def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font_path: str | None = None) -> None:
     x = mm_to_px(line.x_mm, dpi)
     y = mm_to_px(line.y_mm, dpi)
     w = mm_to_px(line.w_mm or 40, dpi)
     h = mm_to_px(line.h_mm or 20, dpi)
     box = [x, y, x + w, y + h]
     kind = line.balloon or "speech"
+    font = _balloon_font(line, dpi, font_path)
+    size = int(getattr(font, "size", 14) or 14)
+    wrap = getattr(line, "wrap", "horizontal")
+    page = getattr(draw, "_image", None)
+    if wrap == "vertical":
+        em = size
+        composed = compose_tategaki(
+            line.text,
+            font,
+            em,
+            max(em, h if kind == "none" else h),
+            fill=(10, 10, 10),
+            ruby_runs=getattr(line, "ruby_runs", None) or None,
+        )
+        pad = 0 if kind == "none" else max(2, em // 4)
+        if kind != "none":
+            bw = composed.width + pad * 2
+            bh = composed.height + pad * 2
+            box = [x, y, x + bw, y + bh]
+            fill = (255, 255, 255)
+            outline = (20, 20, 20)
+            if line.path:
+                xy = [_xy(pt, dpi) for pt in line.path]
+                if len(xy) >= 3:
+                    draw.polygon(xy, fill=fill, outline=outline)
+            elif kind == "narration":
+                draw.rectangle(box, fill=fill, outline=outline, width=2)
+            elif kind == "thought":
+                draw.ellipse(box, fill=fill, outline=outline, width=2)
+                r = max(3, bw // 12)
+                draw.ellipse([x + 4, y + bh, x + 4 + r, y + bh + r], fill=fill, outline=outline, width=2)
+            else:
+                draw.ellipse(box, fill=fill, outline=outline, width=2)
+            if line.tail:
+                tx, ty = _xy(line.tail, dpi)
+                cx = x + bw // 2
+                cy = y + bh
+                draw.polygon([(cx - 6, cy - 2), (cx + 6, cy - 2), (tx, ty)], fill=fill, outline=outline)
+            if line.speaker:
+                draw.text((x, max(0, y - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
+        if page is not None:
+            page.paste(composed, (x + pad, y + pad), composed)
+        return
     if line.path:
         xy = [_xy(pt, dpi) for pt in line.path]
         if len(xy) >= 3:
@@ -253,17 +361,32 @@ def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font) ->
             cx = x + w // 2
             cy = y + h
             draw.polygon([(cx - 6, cy - 2), (cx + 6, cy - 2), (tx, ty)], fill=fill, outline=outline)
-    if getattr(line, "wrap", "horizontal") == "vertical":
-        for i, char in enumerate(line.text):
-            draw.text((x + 2, y + 2 + i * 12), char, fill=(10, 10, 10), font=font)
-        for _base, ruby in getattr(line, "ruby_runs", []) or []:
-            draw.text((x + 14, y + 2), ruby, fill=(10, 10, 10), font=font)
-        return
+    if line.speaker and kind != "none":
+        draw.text((x, max(0, y - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
+    pad_x, pad_y = 6, max(2, h // 8)
     if line.ruby:
-        draw.text((x + 4, y + 2), line.ruby, fill=(10, 10, 10), font=font)
-        draw.text((x + 4, y + 12), line.text, fill=(10, 10, 10), font=font)
-    else:
-        draw.text((x + 6, y + max(2, h // 3)), line.text, fill=(10, 10, 10), font=font)
+        draw.text((x + pad_x, y + 2), line.ruby, fill=(10, 10, 10), font=font)
+        draw.text((x + pad_x, y + 2 + size), line.text, fill=(10, 10, 10), font=font)
+        return
+    max_w = max(8, w - pad_x * 2)
+    row = ""
+    rows: list[str] = []
+    for char in line.text:
+        trial = row + char
+        try:
+            bbox = draw.textbbox((0, 0), trial, font=font)
+            tw = bbox[2] - bbox[0]
+        except Exception:
+            tw = len(trial) * size
+        if tw <= max_w or not row:
+            row = trial
+        else:
+            rows.append(row)
+            row = char
+    if row:
+        rows.append(row)
+    for i, row_text in enumerate(rows):
+        draw.text((x + pad_x, y + pad_y + i * (size + 2)), row_text, fill=(10, 10, 10), font=font)
 
 
 def _draw_crop_marks(draw: ImageDraw.ImageDraw, page: Page, dpi: int) -> None:
@@ -310,7 +433,10 @@ def render_page(
         image.paste(Image.new("RGB", size, fill), (0, 0))
 
     rgba = image.convert("RGBA")
+    prev_alpha = None
     for layer in page.layers:
+        if getattr(layer, "kind", None) == LayerKind.FOLDER:
+            continue
         if not layer.visible:
             continue
         if mode == "print" and not layer.exportable:
@@ -321,11 +447,9 @@ def render_page(
         if raster is None:
             continue
         raster = raster.resize(size)
-        if getattr(layer, "opacity", 1.0) < 1:
-            r, g, b, a = raster.split()
-            a = a.point(lambda p, o=layer.opacity: int(p * o))
-            raster = Image.merge("RGBA", (r, g, b, a))
-        rgba = Image.alpha_composite(rgba, raster.convert("RGBA"))
+        clip_mask = prev_alpha if getattr(layer, "clip", False) else None
+        rgba = _blend_over(rgba, raster, getattr(layer, "blend", "normal") or "normal", float(getattr(layer, "opacity", 1.0) or 1.0), clip_mask)
+        prev_alpha = raster.split()[3]
     image = rgba.convert("RGB")
 
     ink_layer = Image.new("RGBA", size, (0, 0, 0, 0))
@@ -370,11 +494,12 @@ def render_page(
         width_px = max(1, mm_to_px(frame.border_mm or 0.8, working_dpi) // 4)
         draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
 
-    font = _font(getattr(episode, "font_path", None) if episode is not None else None)
+    font_path = getattr(episode, "font_path", None) if episode is not None else None
+    font = _font(font_path)
     lines = episode.story_for_page(page.index) if episode is not None else page.texts
     for line in lines:
         if line.x_mm or line.y_mm or line.balloon:
-            _draw_balloon(draw, line, working_dpi, font)
+            _draw_balloon(draw, line, working_dpi, font_path)
         else:
             x = mm_to_px(page.inner_rect_mm().x + 4, working_dpi)
             y = mm_to_px(page.inner_rect_mm().y + 4, working_dpi)

@@ -62,8 +62,22 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_onion", "page": "int", "from": "int?"},
     {"op": "lock_page", "page": "int", "agent": "str"},
     {"op": "unlock_page", "page": "int"},
+    {"op": "add_layer", "page": "int", "name": "str?", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?"},
+    {"op": "delete_layer", "page": "int", "id": "str"},
+    {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal"},
     {"op": "undo"},
 ]
+
+
+def _resolve_layer(page: Page, op: dict[str, Any]) -> Layer:
+    if op.get("id"):
+        found = next((item for item in page.layers if item.id == op["id"]), None)
+        if found is None:
+            raise ApplyError(f"no layer {op['id']}")
+        return found
+    if op.get("layer"):
+        return page._layer(LayerRole(str(op["layer"])))
+    raise ApplyError("layer id or role required")
 
 
 def _require_page(episode: Episode, op: dict[str, Any]) -> Page:
@@ -279,6 +293,14 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             raise ApplyError("points needs at least two [x_mm, y_mm] pairs")
         if op.get("snap_ruler"):
             points = _snap_points(page, points)
+        if op.get("stabilize"):
+            from genko.stroke import stabilize_points
+
+            points = stabilize_points(points, int(op["stabilize"]))
+        if op.get("taper"):
+            from genko.stroke import taper_points
+
+            points = taper_points(points)
         from genko.models import coerce_stroke, stroke_points
 
         stroke = coerce_stroke(points)
@@ -318,11 +340,6 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name == "put_raster":
         page = _require_page(episode, op)
-        role_name = str(op.get("layer") or "ink")
-        try:
-            role = LayerRole(role_name)
-        except ValueError as exc:
-            raise ApplyError(f"unknown layer {role_name}") from exc
         blob: bytes | None = None
         if op.get("png_base64"):
             blob = base64.b64decode(op["png_base64"])
@@ -330,11 +347,19 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             blob = Path(str(op["path"])).read_bytes()
         if not blob:
             raise ApplyError("put_raster needs path or png_base64")
-        layer = page._layer(role)
+        if op.get("id"):
+            layer = _resolve_layer(page, op)
+        else:
+            role_name = str(op.get("layer") or "ink")
+            try:
+                role = LayerRole(role_name)
+            except ValueError as exc:
+                raise ApplyError(f"unknown layer {role_name}") from exc
+            layer = page._layer(role)
         layer.kind = LayerKind.RASTER
         layer.raster_png = blob
-        layer.raster_relpath = f"pages/{page.index:03d}/{role.value}.png"
-        if role in (LayerRole.NAME, LayerRole.DRAFT):
+        layer.raster_relpath = f"pages/{page.index:03d}/{'user-' + layer.id if layer.role == LayerRole.USER else layer.role.value}.png"
+        if layer.role in (LayerRole.NAME, LayerRole.DRAFT):
             layer.exportable = False
         return
 
@@ -353,6 +378,16 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             layer.opacity = float(op["opacity"])
         if "exportable" in op and layer.role not in (LayerRole.NAME, LayerRole.DRAFT):
             layer.exportable = bool(op["exportable"])
+        if "blend" in op:
+            layer.blend = str(op["blend"])
+        if "clip" in op:
+            layer.clip = bool(op["clip"])
+        if "lock_alpha" in op:
+            layer.lock_alpha = bool(op["lock_alpha"])
+        if "parent" in op:
+            layer.parent_id = op.get("parent")
+        if "name" in op:
+            layer.title = str(op["name"])
         return
 
     if name == "add_page":
@@ -689,6 +724,51 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
     if name == "unlock_page":
         page = _require_page(episode, op)
         episode.page_locks.pop(str(page.index), None)
+        return
+
+    if name == "add_layer":
+        page = _require_page(episode, op)
+        folder = bool(op.get("folder"))
+        layer = Layer(
+            id=new_id(),
+            role=LayerRole.USER,
+            kind=LayerKind.FOLDER if folder else LayerKind.RASTER,
+            title=str(op.get("name") or "layer"),
+            blend=str(op.get("blend") or "normal"),
+            clip=bool(op.get("clip")),
+            lock_alpha=bool(op.get("lock_alpha")),
+            parent_id=str(op["parent"]) if op.get("parent") else None,
+            exportable=True,
+        )
+        page.layers.append(layer)
+        return
+
+    if name == "delete_layer":
+        page = _require_page(episode, op)
+        layer_id = str(op.get("id") or "")
+        target = next((item for item in page.layers if item.id == layer_id), None)
+        if target is None:
+            raise ApplyError("layer not found")
+        if target.role in (LayerRole.NAME, LayerRole.INK, LayerRole.BG, LayerRole.FINISH):
+            raise ApplyError("cannot delete core layer")
+        page.layers = [item for item in page.layers if item.id != layer_id]
+        return
+
+    if name == "filter_raster":
+        from genko.filters import apply_filter
+        from genko.raster import ensure_raster, save_raster
+
+        page = _require_page(episode, op)
+        layer = _resolve_layer(page, op)
+        kind = str(op.get("kind") or "")
+        image = ensure_raster(page, layer)
+        params = {key: value for key, value in op.items() if key not in {"op", "page", "layer", "id", "kind"}}
+        try:
+            filtered = apply_filter(image, kind, params)
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
+        save_raster(page, layer, filtered)
+        layer.kind = LayerKind.RASTER
         return
 
     raise ApplyError(f"unknown op: {name}")
