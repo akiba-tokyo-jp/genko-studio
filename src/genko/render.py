@@ -74,7 +74,12 @@ def _and_alpha(layer: Image.Image, mask: Image.Image) -> Image.Image:
     return ImageChops.multiply(alpha, mask)
 
 
-def _font() -> ImageFont.ImageFont:
+def _font(path: str | None = None) -> ImageFont.ImageFont:
+    if path:
+        try:
+            return ImageFont.truetype(path, 14)
+        except (OSError, OSError):
+            pass
     try:
         return ImageFont.load_default()
     except OSError:
@@ -96,6 +101,10 @@ def _draw_tone(image: Image.Image, page: Page, dpi: int) -> None:
         lpi = float(layer.lpi or 60)
         spacing = max(2, round(dpi / lpi))
         radius = max(1, round(spacing * density * 0.45))
+        import math
+
+        angle = math.radians(float(getattr(layer, "angle", 45) or 0))
+        ca, sa = math.cos(angle), math.sin(angle)
         frames = page.leaf_frames()
         boxes = [rect_px(frame.rect, dpi) for frame in frames]
         if layer.region:
@@ -103,9 +112,14 @@ def _draw_tone(image: Image.Image, page: Page, dpi: int) -> None:
             ys = [mm_to_px(pt[1], dpi) for pt in layer.region]
             boxes = [(min(xs), min(ys), max(xs), max(ys))]
         for x0, y0, x1, y1 in boxes:
-            for y in range(y0, y1, spacing):
-                for x in range(x0, x1, spacing):
-                    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(20, 20, 20))
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            span = int(((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5)
+            for i in range(-span, span, spacing):
+                for j in range(-span, span, spacing):
+                    x = int(cx + i * ca - j * sa)
+                    y = int(cy + i * sa + j * ca)
+                    if x0 <= x <= x1 and y0 <= y <= y1:
+                        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(20, 20, 20))
 
 
 def _draw_effects(image: Image.Image, page: Page, dpi: int) -> None:
@@ -190,15 +204,26 @@ def _draw_prims(image: Image.Image, page: Page, dpi: int, mode: str) -> None:
 
 
 def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int) -> None:
+    import math
+
     pos = prim.get("pos") or [100, 160, 0]
     cx, cy = mm_to_px(float(pos[0]), dpi), mm_to_px(float(pos[1]), dpi)
     color = (90, 90, 140)
+    joints = prim.get("joints") or {}
     head_r = mm_to_px(8, dpi)
     draw.ellipse((cx - head_r, cy - mm_to_px(42, dpi) - head_r, cx + head_r, cy - mm_to_px(42, dpi) + head_r), outline=color, width=3)
     draw.line((cx, cy - mm_to_px(34, dpi), cx, cy), fill=color, width=3)
-    draw.line((cx - mm_to_px(18, dpi), cy - mm_to_px(20, dpi), cx + mm_to_px(18, dpi), cy - mm_to_px(20, dpi)), fill=color, width=3)
-    draw.line((cx, cy, cx - mm_to_px(12, dpi), cy + mm_to_px(28, dpi)), fill=color, width=3)
-    draw.line((cx, cy, cx + mm_to_px(12, dpi), cy + mm_to_px(28, dpi)), fill=color, width=3)
+    l_yaw = float(joints.get("l_arm", {}).get("yaw", 0.4))
+    r_yaw = float(joints.get("r_arm", {}).get("yaw", -0.4))
+    arm = mm_to_px(18, dpi)
+    ay = cy - mm_to_px(20, dpi)
+    draw.line((cx, ay, int(cx - arm * math.cos(l_yaw)), int(ay + arm * math.sin(l_yaw))), fill=color, width=3)
+    draw.line((cx, ay, int(cx + arm * math.cos(abs(r_yaw))), int(ay + arm * math.sin(abs(r_yaw)))), fill=color, width=3)
+    l_leg = float(joints.get("l_leg", {}).get("yaw", 0.15))
+    r_leg = float(joints.get("r_leg", {}).get("yaw", -0.15))
+    leg = mm_to_px(28, dpi)
+    draw.line((cx, cy, int(cx - leg * math.sin(l_leg)), cy + leg), fill=color, width=3)
+    draw.line((cx, cy, int(cx + leg * math.sin(abs(r_leg))), cy + leg), fill=color, width=3)
 
 
 def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font) -> None:
@@ -265,6 +290,7 @@ def render_page(
     mode: str = "print",
     episode: Episode | None = None,
     crop_marks: bool = False,
+    onion: bool = True,
 ) -> Image.Image:
     width = mm_to_px(page.spec.width_mm, working_dpi)
     height = mm_to_px(page.spec.height_mm, working_dpi)
@@ -344,7 +370,7 @@ def render_page(
         width_px = max(1, mm_to_px(frame.border_mm or 0.8, working_dpi) // 4)
         draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
 
-    font = _font()
+    font = _font(getattr(episode, "font_path", None) if episode is not None else None)
     lines = episode.story_for_page(page.index) if episode is not None else page.texts
     for line in lines:
         if line.x_mm or line.y_mm or line.balloon:
@@ -367,6 +393,19 @@ def render_page(
 
     if crop_marks and mode == "print":
         _draw_crop_marks(draw, page, working_dpi)
+    if (
+        onion
+        and episode is not None
+        and mode in ("name", "proof")
+        and getattr(page, "onion_from", None)
+    ):
+        prev = next((item for item in episode.pages if item.index == page.onion_from), None)
+        if prev is not None:
+            ghost = render_page(prev, working_dpi, mode="print", episode=episode, onion=False)
+            ghost = ghost.convert("RGBA")
+            r, g, b, a = ghost.split()
+            tint = Image.merge("RGBA", (r.point(lambda p: int(p * 0.4)), g.point(lambda p: int(p * 0.4)), b, a.point(lambda p: 70)))
+            image = Image.alpha_composite(image.convert("RGBA"), tint).convert("RGB")
     return image
 
 

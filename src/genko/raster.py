@@ -39,11 +39,21 @@ def _clip(page: Page, image: Image.Image, dpi: int) -> Image.Image:
     return image
 
 
-def bake_stroke(page: Page, layer: Layer, points: list, dpi: int = WORKING_DPI) -> None:
+def bake_stroke(
+    page: Page,
+    layer: Layer,
+    points: list,
+    dpi: int = WORKING_DPI,
+    rgb: tuple[int, int, int] = (20, 20, 20),
+    kind: str = "gpen",
+    width_mm: float = 0.35,
+) -> None:
     image = ensure_raster(page, layer, dpi)
-    draw = ImageDraw.Draw(image)
-    width_mm = 0.35
-    stamp_polyline(draw, points, dpi, width_mm, fill=(20, 20, 20, 255), coords="mm")
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    alpha = 140 if kind == "oil" else 255
+    stamp_polyline(draw, points, dpi, width_mm, fill=(*rgb, alpha), coords="mm")
+    image = Image.alpha_composite(image, overlay)
     image = _clip(page, image, dpi)
     save_raster(page, layer, image)
     if layer.kind == LayerKind.STROKES:

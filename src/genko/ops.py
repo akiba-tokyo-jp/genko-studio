@@ -59,6 +59,9 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_balloon_path", "id": "str", "path": "[[x,y]]?", "wrap": "vertical|horizontal", "ruby_runs": "[[base,ruby]]"},
     {"op": "add_mannequin", "page": "int", "pos": "[x,y,z]"},
     {"op": "pose_mannequin", "page": "int", "id": "str"},
+    {"op": "set_onion", "page": "int", "from": "int?"},
+    {"op": "lock_page", "page": "int", "agent": "str"},
+    {"op": "unlock_page", "page": "int"},
     {"op": "undo"},
 ]
 
@@ -84,6 +87,8 @@ def _copy_state(dst: Episode, src: Episode) -> None:
     dst.bible = src.bible
     dst.tickets = src.tickets
     dst.autosave = src.autosave
+    dst.font_path = getattr(src, "font_path", "")
+    dst.page_locks = src.page_locks
 
 
 def _find_line(episode: Episode, line_id: str) -> StoryLine:
@@ -288,7 +293,14 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if target.role in (LayerRole.INK, LayerRole.FINISH, LayerRole.BG):
             from genko.raster import bake_stroke
 
-            bake_stroke(page, target, stroke_points(stroke))
+            bake_stroke(
+                page,
+                target,
+                stroke_points(stroke),
+                rgb=tuple(int(v) for v in op["rgb"]) if op.get("rgb") else (20, 20, 20),
+                kind=stroke.kind,
+                width_mm=stroke.width_mm,
+            )
         return
 
     if name == "delete_stroke":
@@ -407,6 +419,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             episode.spec = PageSpec.webtoon()
             for page in episode.pages:
                 page.spec = episode.spec
+        if "font_path" in op:
+            episode.font_path = str(op["font_path"])
         return
 
     if name == "set_bible":
@@ -449,6 +463,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             lpi=float(op.get("lpi", 60)),
             density=float(op.get("density", 0.3)),
             exportable=True,
+            angle=float(op.get("angle", 45)),
         )
         frame_id = op.get("frame_id")
         if frame_id:
@@ -631,6 +646,15 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                 "pos": list(op.get("pos") or [100, 160, 0]),
                 "size": [40, 80, 20],
                 "rot": [0, 0.2, 0],
+                "joints": {
+                    "hip": {"yaw": 0.0, "pitch": 0.0},
+                    "spine": {"yaw": 0.0, "pitch": 0.0},
+                    "head": {"yaw": 0.0, "pitch": 0.0},
+                    "l_arm": {"yaw": 0.4, "pitch": 0.0},
+                    "r_arm": {"yaw": -0.4, "pitch": 0.0},
+                    "l_leg": {"yaw": 0.15, "pitch": 0.0},
+                    "r_leg": {"yaw": -0.15, "pitch": 0.0},
+                },
             }
         )
         return
@@ -644,8 +668,28 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                     prim["rot"] = list(op["rot"])
                 if "pos" in op:
                     prim["pos"] = list(op["pos"])
+                if "joints" in op:
+                    joints = prim.setdefault("joints", {})
+                    for name, values in dict(op["joints"]).items():
+                        slot = joints.setdefault(name, {})
+                        slot.update(values)
                 return
         raise ApplyError(f"no mannequin {mannequin_id}")
+
+    if name == "set_onion":
+        page = _require_page(episode, op)
+        page.onion_from = None if op.get("from") in (None, "", 0) else int(op["from"])
+        return
+
+    if name == "lock_page":
+        page = _require_page(episode, op)
+        episode.page_locks[str(page.index)] = str(op.get("agent") or "genko")
+        return
+
+    if name == "unlock_page":
+        page = _require_page(episode, op)
+        episode.page_locks.pop(str(page.index), None)
+        return
 
     raise ApplyError(f"unknown op: {name}")
 
@@ -771,10 +815,26 @@ def _refresh_frame_ids(frame: Frame) -> None:
         _refresh_frame_ids(child)
 
 
+def _check_page_lock(episode: Episode, op: dict[str, Any], agent: str) -> None:
+    name = op.get("op")
+    if name in ("lock_page", "unlock_page", "undo", "set_meta", "set_bible", "set_autosave"):
+        return
+    if "page" not in op:
+        return
+    try:
+        index = int(op["page"])
+    except (TypeError, ValueError):
+        return
+    owner = episode.page_locks.get(str(index))
+    if owner and owner != agent:
+        raise ApplyError(f"page {index} locked by {owner}")
+
+
 def apply_ops(
     episode: Episode,
     ops: list[dict[str, Any]],
     dry_run: bool = False,
+    agent: str = "genko",
 ) -> dict[str, Any]:
     from genko.headless import snapshot
 
@@ -799,6 +859,7 @@ def apply_ops(
         if not isinstance(op, dict):
             raise ApplyError(f"ops[{i}] must be an object")
         try:
+            _check_page_lock(work, op, agent)
             _apply_one(work, op)
         except ApplyError as exc:
             raise ApplyError(f"ops[{i}] {op.get('op')}: {exc}") from exc

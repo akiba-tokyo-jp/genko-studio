@@ -198,6 +198,20 @@
       "id": "str"
     },
     {
+      "op": "set_onion",
+      "page": "int",
+      "from": "int?"
+    },
+    {
+      "op": "lock_page",
+      "page": "int",
+      "agent": "str"
+    },
+    {
+      "op": "unlock_page",
+      "page": "int"
+    },
+    {
       "op": "undo"
     }
   ]

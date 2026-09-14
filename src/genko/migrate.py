@@ -49,6 +49,7 @@ def _layer(data: dict) -> Layer:
         region=[tuple(pt) for pt in data["region"]] if data.get("region") else None,
         opacity=float(data.get("opacity", 1)),
         material_id=data.get("material_id"),
+        angle=float(data.get("angle", 45)),
     )
 
 
@@ -100,6 +101,7 @@ def migrate_payload(payload: dict) -> Episode:
             effects=list(raw.get("effects") or []),
             ruler=raw.get("ruler"),
             prims=list(raw.get("prims") or []),
+            onion_from=raw.get("onion_from"),
         )
         fills = {
             LayerRole(role): tuple(rgb)  # type: ignore[arg-type]
@@ -130,6 +132,8 @@ def migrate_payload(payload: dict) -> Episode:
         story=story,
         tickets=list(payload.get("tickets") or []),
         autosave=bool(payload.get("autosave", False)),
+        font_path=str(payload.get("font_path") or ""),
+        page_locks=dict(payload.get("page_locks") or {}),
     )
     bible = payload.get("bible") or {}
     episode.bible.plot = bible.get("plot", "")

@@ -38,6 +38,7 @@ def _layer_to_dict(layer: Layer) -> dict:
         "region": layer.region,
         "opacity": layer.opacity,
         "material_id": layer.material_id,
+        "angle": layer.angle,
     }
 
 
@@ -69,6 +70,8 @@ def save_episode(episode: Episode, dest: Path) -> None:
         "episode": episode.episode,
         "binding": episode.binding.value,
         "autosave": episode.autosave,
+        "font_path": episode.font_path,
+        "page_locks": episode.page_locks,
         "spec": {
             "width_mm": episode.spec.width_mm,
             "height_mm": episode.spec.height_mm,
@@ -92,6 +95,7 @@ def save_episode(episode: Episode, dest: Path) -> None:
                 "stage": page.stage,
                 "spread_with": page.spread_with,
                 "numero": page.numero,
+                "onion_from": page.onion_from,
                 "effects": page.effects,
                 "ruler": page.ruler,
                 "prims": page.prims,

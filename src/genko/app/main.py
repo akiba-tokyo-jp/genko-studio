@@ -69,6 +69,12 @@ class MainWindow(QMainWindow):
         add_page.clicked.connect(self._add_page)
         del_page = QPushButton("ページ削除")
         del_page.clicked.connect(self._del_page)
+        pen = QPushButton("ペン")
+        pen.clicked.connect(lambda: self.canvas.set_tool("pen"))
+        eraser = QPushButton("消しゴム")
+        eraser.clicked.connect(lambda: self.canvas.set_tool("eraser"))
+        onion = QPushButton("オニオンスキン")
+        onion.clicked.connect(self._onion)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -83,6 +89,9 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(merge)
         right_layout.addWidget(add_page)
         right_layout.addWidget(del_page)
+        right_layout.addWidget(pen)
+        right_layout.addWidget(eraser)
+        right_layout.addWidget(onion)
         right_layout.addWidget(self.status)
 
         left = QWidget()
@@ -217,7 +226,26 @@ class MainWindow(QMainWindow):
         if page is None:
             return
         layer = "ink" if page.stage == "ink" else "name"
+        if self.canvas.tool == "eraser":
+            self._apply(
+                [
+                    {
+                        "op": "erase_raster",
+                        "page": page.index,
+                        "layer": layer,
+                        "points": [[p[0], p[1]] for p in points],
+                        "width_mm": 3,
+                    }
+                ]
+            )
+            return
         self._apply([{"op": "add_stroke", "page": page.index, "layer": layer, "points": points}])
+
+    def _onion(self) -> None:
+        page = self._current()
+        if page is None or page.index < 2:
+            return
+        self._apply([{"op": "set_onion", "page": page.index, "from": page.index - 1}])
 
     def _on_frame_selected(self, frame_id: str) -> None:
         page = self._current()

@@ -25,8 +25,12 @@ class PageCanvas(QWidget):
         self._panning = False
         self._last_pos = QPointF()
         self._drag_line: StoryLine | None = None
+        self.tool = "pen"
         self.setMouseTracking(True)
         self.setMinimumSize(480, 640)
+
+    def set_tool(self, tool: str) -> None:
+        self.tool = tool
 
     def set_page(self, page: Page | None, lines: list[StoryLine] | None = None) -> None:
         self.page = page

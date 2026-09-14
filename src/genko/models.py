@@ -142,6 +142,7 @@ class Layer:
     region: list[tuple[float, float]] | None = None
     opacity: float = 1.0
     material_id: str | None = None
+    angle: float = 45.0
 
 
 @dataclass
@@ -215,6 +216,7 @@ class Page:
     ruler: dict | None = None
     prims: list[dict] = field(default_factory=list)
     numero: bool = True
+    onion_from: int | None = None
 
     def __post_init__(self) -> None:
         if not self.layers:
@@ -383,6 +385,8 @@ class Episode:
     undo_stack: list[Episode] = field(default_factory=list, repr=False, compare=False)
     tickets: list[dict] = field(default_factory=list)
     autosave: bool = False
+    font_path: str = ""
+    page_locks: dict = field(default_factory=dict)
 
     def reorder(self, order: list[int]) -> None:
         by_index = {page.index: page for page in self.pages}
