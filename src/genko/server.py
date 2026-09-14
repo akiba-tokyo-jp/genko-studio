@@ -11,6 +11,26 @@ from genko.headless import OPS_SCHEMA, ApplyError, apply_ops, snapshot
 from genko.io import load_episode, save_episode
 from genko.models import PageSpec, new_episode
 
+JOBS: dict[str, dict[str, Any]] = {}
+
+
+def openapi_spec() -> dict[str, Any]:
+    return {
+        "openapi": "3.0.3",
+        "info": {"title": "Genko Headless", "version": "0.2.0"},
+        "paths": {
+            "/health": {"get": {"responses": {"200": {"description": "ok"}}}},
+            "/schema": {"get": {"responses": {"200": {"description": "ops"}}}},
+            "/openapi.json": {"get": {"responses": {"200": {"description": "spec"}}}},
+            "/v1/inspect": {"get": {"parameters": [{"name": "path", "in": "query", "required": True}]}},
+            "/v1/pages/{n}.png": {"get": {"parameters": [{"name": "path", "in": "query"}]}},
+            "/v1/new": {"post": {"requestBody": {"required": True}}},
+            "/v1/apply": {"post": {"requestBody": {"required": True}}},
+            "/v1/export": {"post": {"requestBody": {"required": True}}},
+            "/v1/jobs/{id}": {"get": {"parameters": [{"name": "id", "in": "path"}]}},
+        },
+    }
+
 
 def _json_bytes(payload: dict[str, Any], status: int = 200) -> tuple[int, bytes]:
     return status, json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -32,6 +52,14 @@ def handle_request(method: str, path: str, body: bytes) -> tuple[int, bytes]:
             return _json_bytes({"ok": True, "service": "genko-headless"})
         if method == "GET" and route == "/schema":
             return _json_bytes({"ok": True, "ops": OPS_SCHEMA})
+        if method == "GET" and route == "/openapi.json":
+            return _json_bytes(openapi_spec())
+        if method == "GET" and route.startswith("/v1/jobs/"):
+            job_id = route.rsplit("/", 1)[-1]
+            job = JOBS.get(job_id)
+            if job is None:
+                return _json_bytes({"ok": False, "error": "unknown job"}, 404)
+            return _json_bytes(job)
         if method == "GET" and route == "/v1/inspect":
             project = Path(unquote(query.get("path", "")))
             episode = load_episode(project)
@@ -71,6 +99,8 @@ def handle_request(method: str, path: str, body: bytes) -> tuple[int, bytes]:
                 result = apply_ops(episode, data.get("ops") or [], dry_run=dry_run)
                 if not dry_run:
                     save_episode(episode, project)
+            if result.get("job_id"):
+                JOBS[str(result["job_id"])] = result
             return _json_bytes(result)
         if method == "POST" and route == "/v1/export":
             project = Path(data["path"])
@@ -79,7 +109,8 @@ def handle_request(method: str, path: str, body: bytes) -> tuple[int, bytes]:
             paths = export_png_sequence(episode, out, working_dpi=int(data.get("dpi", 150)))
             return _json_bytes({"ok": True, "count": len(paths), "files": [str(p) for p in paths]})
     except ApplyError as exc:
-        return _json_bytes({"ok": False, "error": str(exc)}, 400)
+        status = 409 if "locked" in str(exc).lower() else 400
+        return _json_bytes({"ok": False, "error": str(exc)}, status)
     except FileNotFoundError as exc:
         return _json_bytes({"ok": False, "error": f"not found: {exc}"}, 404)
     except (KeyError, TypeError, ValueError) as exc:

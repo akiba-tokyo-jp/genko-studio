@@ -64,6 +64,9 @@ def snapshot(episode: Episode, full: bool = False) -> dict[str, Any]:
             "bleed_mm": episode.spec.bleed_mm,
             "inner_margin_mm": episode.spec.inner_margin_mm,
             "expression": episode.spec.expression,
+            "preset": episode.spec.preset,
         },
         "pages": pages,
+        "tickets": episode.tickets,
+        "autosave": episode.autosave,
     }

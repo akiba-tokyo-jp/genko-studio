@@ -4,28 +4,32 @@ from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
-from genko.models import Page, Rect
+from genko.models import Page, Rect, StoryLine
 
 
 class PageCanvas(QWidget):
     changed = Signal()
     strokeCommitted = Signal(list)
     frameSelected = Signal(str)
+    textMoved = Signal(str, float, float)
 
     def __init__(self) -> None:
         super().__init__()
         self.page: Page | None = None
+        self.lines: list[StoryLine] = []
         self._stroke: list[tuple[float, float]] = []
         self._scale = 2.4
         self._pan_x = 20.0
         self._pan_y = 20.0
         self._panning = False
         self._last_pos = QPointF()
+        self._drag_line: StoryLine | None = None
         self.setMouseTracking(True)
         self.setMinimumSize(480, 640)
 
-    def set_page(self, page: Page | None) -> None:
+    def set_page(self, page: Page | None, lines: list[StoryLine] | None = None) -> None:
         self.page = page
+        self.lines = list(lines or (page.texts if page else []))
         self._stroke = []
         self.update()
 
@@ -34,6 +38,9 @@ class PageCanvas(QWidget):
 
     def _pt(self, x: float, y: float) -> QPointF:
         return QPointF(x * self._scale + self._pan_x, y * self._scale + self._pan_y)
+
+    def _xy(self, point) -> tuple[float, float]:
+        return float(point[0]), float(point[1])
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
@@ -58,6 +65,8 @@ class PageCanvas(QWidget):
             self._draw_rect(painter, frame.rect)
         self._draw_strokes(painter, self.page.name_strokes, QColor("#3a6ea5"), 1.6)
         self._draw_strokes(painter, self.page.ink_strokes, QColor("#111111"), 2.2)
+        for line in self.lines:
+            self._draw_balloon(painter, line)
         if self._stroke:
             self._draw_strokes(painter, [self._stroke], QColor("#d35400"), 2.0)
 
@@ -71,10 +80,27 @@ class PageCanvas(QWidget):
         for stroke in strokes:
             if len(stroke) < 2:
                 continue
-            path = QPainterPath(self._pt(*stroke[0]))
+            start = self._xy(stroke[0])
+            path = QPainterPath(self._pt(*start))
             for point in stroke[1:]:
-                path.lineTo(self._pt(*point))
+                path.lineTo(self._pt(*self._xy(point)))
             painter.drawPath(path)
+
+    def _draw_balloon(self, painter: QPainter, line: StoryLine) -> None:
+        p = self._pt(line.x_mm, line.y_mm)
+        w = max(12, line.w_mm * self._scale)
+        h = max(10, line.h_mm * self._scale)
+        painter.setPen(QPen(QColor("#111111"), 2))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawEllipse(int(p.x()), int(p.y()), int(w), int(h))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawText(int(p.x()) + 4, int(p.y()) + int(h / 2), line.text)
+
+    def _hit_line(self, x_mm: float, y_mm: float) -> StoryLine | None:
+        for line in reversed(self.lines):
+            if line.x_mm <= x_mm <= line.x_mm + line.w_mm and line.y_mm <= y_mm <= line.y_mm + line.h_mm:
+                return line
+        return None
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -83,7 +109,12 @@ class PageCanvas(QWidget):
             return
         if self.page is None or event.button() != Qt.MouseButton.LeftButton:
             return
-        self._stroke = [self._to_mm(event.position())]
+        x_mm, y_mm = self._to_mm(event.position())
+        hit = self._hit_line(x_mm, y_mm)
+        if hit is not None:
+            self._drag_line = hit
+            return
+        self._stroke = [(x_mm, y_mm)]
         self.update()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
@@ -94,6 +125,12 @@ class PageCanvas(QWidget):
             self._last_pos = event.position()
             self.update()
             return
+        if self._drag_line is not None:
+            x_mm, y_mm = self._to_mm(event.position())
+            self._drag_line.x_mm = x_mm
+            self._drag_line.y_mm = y_mm
+            self.update()
+            return
         if not self._stroke:
             return
         self._stroke.append(self._to_mm(event.position()))
@@ -102,6 +139,10 @@ class PageCanvas(QWidget):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.MiddleButton:
             self._panning = False
+            return
+        if self._drag_line is not None:
+            self.textMoved.emit(self._drag_line.id, self._drag_line.x_mm, self._drag_line.y_mm)
+            self._drag_line = None
             return
         if self.page is None or not self._stroke:
             return

@@ -1,0 +1,169 @@
+{
+  "title": "Genko apply_ops",
+  "type": "array",
+  "ops": [
+    {
+      "op": "split_frame",
+      "page": "int",
+      "axis": "horizontal|vertical",
+      "ratio": "float",
+      "gutter_mm": "float",
+      "frame_id": "optional"
+    },
+    {
+      "op": "merge_frame",
+      "page": "int",
+      "frame_id": "str"
+    },
+    {
+      "op": "resize_frame",
+      "page": "int",
+      "frame_id": "str",
+      "rect": "{x,y,width,height}"
+    },
+    {
+      "op": "set_frame",
+      "page": "int",
+      "frame_id": "str",
+      "bleed": "bool?",
+      "clip": "bool?",
+      "border_mm": "float?"
+    },
+    {
+      "op": "add_line",
+      "page": "int",
+      "text": "str",
+      "speaker": "optional",
+      "frame_id": "optional",
+      "balloon": "optional",
+      "x_mm": "optional"
+    },
+    {
+      "op": "edit_line",
+      "id": "str",
+      "text": "optional",
+      "speaker": "optional"
+    },
+    {
+      "op": "delete_line",
+      "id": "str"
+    },
+    {
+      "op": "move_line",
+      "id": "str",
+      "x_mm": "float?",
+      "y_mm": "float?",
+      "w_mm": "float?",
+      "h_mm": "float?",
+      "tail": "[x,y]?"
+    },
+    {
+      "op": "name_ok",
+      "page": "int, optional (all pages if omitted)"
+    },
+    {
+      "op": "advance",
+      "page": "int",
+      "to": "name|ink|finish"
+    },
+    {
+      "op": "add_stroke",
+      "page": "int",
+      "layer": "name|ink",
+      "points": "[[x,y],...]"
+    },
+    {
+      "op": "delete_stroke",
+      "page": "int",
+      "layer": "name|ink",
+      "index": "int"
+    },
+    {
+      "op": "put_raster",
+      "page": "int",
+      "layer": "name|draft|ink|bg|finish",
+      "path": "optional",
+      "png_base64": "optional"
+    },
+    {
+      "op": "set_layer",
+      "page": "int",
+      "layer": "str",
+      "visible": "bool?",
+      "exportable": "bool?"
+    },
+    {
+      "op": "add_page",
+      "count": "int"
+    },
+    {
+      "op": "delete_page",
+      "page": "int"
+    },
+    {
+      "op": "duplicate_page",
+      "page": "int"
+    },
+    {
+      "op": "set_note",
+      "page": "int",
+      "note": "str"
+    },
+    {
+      "op": "set_meta",
+      "title": "str?",
+      "episode": "int?",
+      "preset": "str?"
+    },
+    {
+      "op": "set_bible",
+      "plot": "str?",
+      "characters": "list?",
+      "constraints": "list?"
+    },
+    {
+      "op": "set_spread",
+      "page": "int",
+      "with": "int|null"
+    },
+    {
+      "op": "reorder",
+      "order": "[int]"
+    },
+    {
+      "op": "flood_fill",
+      "page": "int",
+      "layer": "ink|bg",
+      "x_mm": "float",
+      "y_mm": "float",
+      "rgb": "[r,g,b]",
+      "gap_mm": "float?"
+    },
+    {
+      "op": "add_tone",
+      "page": "int",
+      "frame_id": "str?",
+      "lpi": "float",
+      "density": "float"
+    },
+    {
+      "op": "delete_tone",
+      "page": "int",
+      "id": "str"
+    },
+    {
+      "op": "add_effect",
+      "page": "int",
+      "kind": "focus|speed|white",
+      "frame_id": "str?",
+      "params": "object"
+    },
+    {
+      "op": "set_autosave",
+      "enabled": "bool"
+    },
+    {
+      "op": "undo"
+    }
+  ]
+}

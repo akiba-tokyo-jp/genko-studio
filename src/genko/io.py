@@ -33,6 +33,9 @@ def _layer_to_dict(layer: Layer) -> dict:
         "strokes": layer.strokes,
         "raster_relpath": layer.raster_relpath,
         "fill_rgb": list(layer.fill_rgb) if layer.fill_rgb else None,
+        "lpi": layer.lpi,
+        "density": layer.density,
+        "region": layer.region,
     }
 
 
@@ -49,6 +52,7 @@ def _line_to_dict(line: StoryLine) -> dict:
         "w_mm": line.w_mm,
         "h_mm": line.h_mm,
         "balloon": line.balloon,
+        "tail": list(line.tail) if line.tail else None,
     }
 
 
@@ -59,6 +63,7 @@ def save_episode(episode: Episode, dest: Path) -> None:
         "title": episode.title,
         "episode": episode.episode,
         "binding": episode.binding.value,
+        "autosave": episode.autosave,
         "spec": {
             "width_mm": episode.spec.width_mm,
             "height_mm": episode.spec.height_mm,
@@ -73,6 +78,7 @@ def save_episode(episode: Episode, dest: Path) -> None:
             "characters": episode.bible.characters,
             "constraints": episode.bible.constraints,
         },
+        "tickets": episode.tickets,
         "pages": [
             {
                 "index": page.index,
@@ -80,6 +86,10 @@ def save_episode(episode: Episode, dest: Path) -> None:
                 "name_ok": page.name_ok,
                 "stage": page.stage,
                 "spread_with": page.spread_with,
+                "numero": page.numero,
+                "effects": page.effects,
+                "ruler": page.ruler,
+                "prims": page.prims,
                 "frames": [_frame_to_dict(frame) for frame in page.frames],
                 "layers": [_layer_to_dict(layer) for layer in page.layers],
                 "texts": [_line_to_dict(line) for line in page.texts],
@@ -92,8 +102,25 @@ def save_episode(episode: Episode, dest: Path) -> None:
         "story": [_line_to_dict(line) for line in episode.story],
     }
     (dest / "project.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    for page in episode.pages:
+        for layer in page.layers:
+            if layer.raster_png and layer.raster_relpath:
+                path = dest / layer.raster_relpath
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(layer.raster_png)
+
+
+def _attach_rasters(episode: Episode, src: Path) -> None:
+    for page in episode.pages:
+        for layer in page.layers:
+            if layer.raster_relpath:
+                path = src / layer.raster_relpath
+                if path.is_file():
+                    layer.raster_png = path.read_bytes()
 
 
 def load_episode(src: Path) -> Episode:
     payload = json.loads((src / "project.json").read_text(encoding="utf-8"))
-    return migrate_payload(payload)
+    episode = migrate_payload(payload)
+    _attach_rasters(episode, src)
+    return episode

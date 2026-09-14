@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import io
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
-from genko.models import Episode, LayerRole, Page, Rect
+from genko.models import Episode, LayerKind, LayerRole, Page, Rect, StoryLine
 
 EXPORT_ROLES = (
     LayerRole.INK,
     LayerRole.BG,
     LayerRole.FINISH,
+    LayerRole.TONE,
+    LayerRole.EFFECT,
     LayerRole.FRAMES,
     LayerRole.TEXT,
 )
@@ -32,16 +35,26 @@ def rect_px(rect: Rect, dpi: int) -> tuple[int, int, int, int]:
     return x, y, x + w, y + h
 
 
+def _xy(point: tuple, dpi: int) -> tuple[int, int]:
+    return mm_to_px(float(point[0]), dpi), mm_to_px(float(point[1]), dpi)
+
+
 def _stroke(
     draw: ImageDraw.ImageDraw,
-    points: list[tuple[float, float]],
+    points: list[tuple],
     dpi: int,
     color: tuple[int, int, int],
     width: int,
 ) -> None:
     if len(points) < 2:
         return
-    xy = [(mm_to_px(x, dpi), mm_to_px(y, dpi)) for x, y in points]
+    if len(points[0]) >= 3:
+        for a, b in zip(points, points[1:]):
+            pressure = float(a[2]) if len(a) > 2 else 1.0
+            w = max(1, round(width * max(0.15, min(1.5, pressure))))
+            draw.line([_xy(a, dpi), _xy(b, dpi)], fill=color, width=w, joint="curve")
+        return
+    xy = [_xy(pt, dpi) for pt in points]
     draw.line(xy, fill=color, width=width, joint="curve")
 
 
@@ -61,11 +74,172 @@ def _and_alpha(layer: Image.Image, mask: Image.Image) -> Image.Image:
     return ImageChops.multiply(alpha, mask)
 
 
+def _font() -> ImageFont.ImageFont:
+    try:
+        return ImageFont.load_default()
+    except OSError:
+        return ImageFont.load_default()
+
+
+def _open_raster(layer) -> Image.Image | None:
+    if layer.raster_png:
+        return Image.open(io.BytesIO(layer.raster_png)).convert("RGBA")
+    return None
+
+
+def _draw_tone(image: Image.Image, page: Page, dpi: int) -> None:
+    draw = ImageDraw.Draw(image)
+    for layer in page.layers:
+        if layer.role != LayerRole.TONE or not layer.visible:
+            continue
+        density = float(layer.density or 0.3)
+        lpi = float(layer.lpi or 60)
+        spacing = max(2, round(dpi / lpi))
+        radius = max(1, round(spacing * density * 0.45))
+        frames = page.leaf_frames()
+        boxes = [rect_px(frame.rect, dpi) for frame in frames]
+        if layer.region:
+            xs = [mm_to_px(pt[0], dpi) for pt in layer.region]
+            ys = [mm_to_px(pt[1], dpi) for pt in layer.region]
+            boxes = [(min(xs), min(ys), max(xs), max(ys))]
+        for x0, y0, x1, y1 in boxes:
+            for y in range(y0, y1, spacing):
+                for x in range(x0, x1, spacing):
+                    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(20, 20, 20))
+
+
+def _draw_effects(image: Image.Image, page: Page, dpi: int) -> None:
+    draw = ImageDraw.Draw(image)
+    for effect in page.effects:
+        kind = effect.get("kind")
+        frame = None
+        if effect.get("frame_id"):
+            try:
+                frame = page._find(effect["frame_id"])
+            except KeyError:
+                frame = None
+        box = rect_px(frame.rect, dpi) if frame is not None else (0, 0, image.width, image.height)
+        x0, y0, x1, y1 = box
+        cx = (x0 + x1) // 2
+        cy = (y0 + y1) // 2
+        count = int(effect.get("params", {}).get("count", 36))
+        if kind == "focus":
+            import math
+
+            radius = max(x1 - x0, y1 - y0) // 2
+            for i in range(count):
+                angle = (2 * math.pi * i) / count
+                draw.line(
+                    (cx, cy, int(cx + radius * math.cos(angle)), int(cy + radius * math.sin(angle))),
+                    fill=(20, 20, 20),
+                    width=1,
+                )
+        elif kind == "speed":
+            for i in range(count):
+                y = y0 + int((y1 - y0) * i / max(1, count - 1))
+                draw.line((x0, y, x1, y), fill=(20, 20, 20), width=1)
+        elif kind == "white":
+            draw.rectangle(box, fill=(255, 255, 255))
+
+
+def _project_box(prim: dict, dpi: int) -> list[tuple[int, int]]:
+    pos = prim.get("pos") or [100, 150, 0]
+    size = prim.get("size") or [40, 40, 40]
+    rot = prim.get("rot") or [0, 0.6, 0.4]
+    cx, cy, cz = (float(v) for v in pos)
+    sx, sy, sz = (float(v) / 2 for v in size)
+    corners = []
+    for dx in (-sx, sx):
+        for dy in (-sy, sy):
+            for dz in (-sz, sz):
+                x, y, z = dx, dy, dz
+                ry = rot[1]
+                import math
+
+                x2 = x * math.cos(ry) - z * math.sin(ry)
+                z2 = x * math.sin(ry) + z * math.cos(ry)
+                x, z = x2, z2
+                rx = rot[0]
+                y2 = y * math.cos(rx) - z * math.sin(rx)
+                z2 = y * math.sin(rx) + z * math.cos(rx)
+                y, z = y2, z2
+                depth = 200 + z
+                scale = 180 / max(40, depth)
+                corners.append((mm_to_px(cx + x * scale, dpi), mm_to_px(cy + y * scale, dpi)))
+    return corners
+
+
+def _draw_prims(image: Image.Image, page: Page, dpi: int, mode: str) -> None:
+    if mode == "print" or not page.prims:
+        return
+    draw = ImageDraw.Draw(image)
+    edges = [
+        (0, 1), (1, 3), (3, 2), (2, 0),
+        (4, 5), (5, 7), (7, 6), (6, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    ]
+    for prim in page.prims:
+        pts = _project_box(prim, dpi)
+        if len(pts) < 8:
+            continue
+        for a, b in edges:
+            draw.line([pts[a], pts[b]], fill=(90, 90, 140), width=1)
+
+
+def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font) -> None:
+    x = mm_to_px(line.x_mm, dpi)
+    y = mm_to_px(line.y_mm, dpi)
+    w = mm_to_px(line.w_mm or 40, dpi)
+    h = mm_to_px(line.h_mm or 20, dpi)
+    box = [x, y, x + w, y + h]
+    kind = line.balloon or "speech"
+    if kind != "none":
+        fill = (255, 255, 255)
+        outline = (20, 20, 20)
+        if kind == "narration":
+            draw.rectangle(box, fill=fill, outline=outline, width=2)
+        elif kind == "thought":
+            draw.ellipse(box, fill=fill, outline=outline, width=2)
+            r = max(3, w // 12)
+            draw.ellipse([x + 4, y + h, x + 4 + r, y + h + r], fill=fill, outline=outline, width=2)
+        else:
+            draw.ellipse(box, fill=fill, outline=outline, width=2)
+        if line.tail:
+            tx, ty = _xy(line.tail, dpi)
+            cx = x + w // 2
+            cy = y + h
+            draw.polygon([(cx - 6, cy - 2), (cx + 6, cy - 2), (tx, ty)], fill=fill, outline=outline)
+    if line.ruby:
+        draw.text((x + 4, y + 2), line.ruby, fill=(10, 10, 10), font=font)
+        draw.text((x + 4, y + 12), line.text, fill=(10, 10, 10), font=font)
+    else:
+        draw.text((x + 6, y + max(2, h // 3)), line.text, fill=(10, 10, 10), font=font)
+
+
+def _draw_crop_marks(draw: ImageDraw.ImageDraw, page: Page, dpi: int) -> None:
+    w = mm_to_px(page.spec.width_mm, dpi)
+    h = mm_to_px(page.spec.height_mm, dpi)
+    bleed = mm_to_px(page.spec.bleed_mm, dpi)
+    mark = mm_to_px(5, dpi)
+    for x, y, dx, dy in (
+        (bleed, bleed, -1, 0),
+        (bleed, bleed, 0, -1),
+        (w - bleed, bleed, 1, 0),
+        (w - bleed, bleed, 0, -1),
+        (bleed, h - bleed, -1, 0),
+        (bleed, h - bleed, 0, 1),
+        (w - bleed, h - bleed, 1, 0),
+        (w - bleed, h - bleed, 0, 1),
+    ):
+        draw.line((x, y, x + dx * mark, y + dy * mark), fill=(0, 0, 0), width=1)
+
+
 def render_page(
     page: Page,
     working_dpi: int,
     mode: str = "print",
     episode: Episode | None = None,
+    crop_marks: bool = False,
 ) -> Image.Image:
     width = mm_to_px(page.spec.width_mm, working_dpi)
     height = mm_to_px(page.spec.height_mm, working_dpi)
@@ -83,6 +257,21 @@ def render_page(
         if role in (LayerRole.NAME, LayerRole.DRAFT) and mode == "print":
             continue
         image.paste(Image.new("RGB", size, fill), (0, 0))
+
+    rgba = image.convert("RGBA")
+    for layer in page.layers:
+        if not layer.visible:
+            continue
+        if mode == "print" and not layer.exportable:
+            continue
+        if layer.role in (LayerRole.NAME, LayerRole.DRAFT) and mode == "print":
+            continue
+        raster = _open_raster(layer)
+        if raster is None:
+            continue
+        raster = raster.resize(size)
+        rgba = Image.alpha_composite(rgba, raster.convert("RGBA"))
+    image = rgba.convert("RGB")
 
     ink_layer = Image.new("RGBA", size, (0, 0, 0, 0))
     name_layer = Image.new("RGBA", size, (0, 0, 0, 0))
@@ -106,21 +295,49 @@ def render_page(
     rgba = Image.alpha_composite(rgba, ink_layer)
     image = rgba.convert("RGB")
 
+    _draw_tone(image, page, working_dpi)
+    if page.effects:
+        _draw_effects(image, page, working_dpi)
+    _draw_prims(image, page, working_dpi, mode)
+
+    if page.ruler and mode in ("name", "proof"):
+        draw = ImageDraw.Draw(image)
+        for pt in page.ruler.get("points") or []:
+            px, py = _xy(pt, working_dpi)
+            draw.ellipse((px - 3, py - 3, px + 3, py + 3), outline=(180, 80, 80), width=2)
+            draw.line((px, 0, px, image.height), fill=(220, 180, 180), width=1)
+            draw.line((0, py, image.width, py), fill=(220, 180, 180), width=1)
+
     draw = ImageDraw.Draw(image)
     for frame in page.leaf_frames():
-        draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=2)
+        width_px = max(1, mm_to_px(frame.border_mm or 0.8, working_dpi) // 4)
+        draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
 
-    try:
-        font = ImageFont.load_default()
-    except OSError:
-        font = None
-    x = mm_to_px(page.inner_rect_mm().x + 4, working_dpi)
-    y = mm_to_px(page.inner_rect_mm().y + 4, working_dpi)
+    font = _font()
     lines = episode.story_for_page(page.index) if episode is not None else page.texts
     for line in lines:
-        label = f"{line.speaker}: {line.text}" if line.speaker else line.text
-        tx = mm_to_px(line.x_mm, working_dpi) if line.x_mm else x
-        ty = mm_to_px(line.y_mm, working_dpi) if line.y_mm else y
-        draw.text((tx, ty), label, fill=(10, 10, 10), font=font)
-        y += 14
+        if line.x_mm or line.y_mm or line.balloon:
+            _draw_balloon(draw, line, working_dpi, font)
+        else:
+            x = mm_to_px(page.inner_rect_mm().x + 4, working_dpi)
+            y = mm_to_px(page.inner_rect_mm().y + 4, working_dpi)
+            label = f"{line.speaker}: {line.text}" if line.speaker else line.text
+            draw.text((x, y), label, fill=(10, 10, 10), font=font)
+
+    if page.numero and mode == "print":
+        label = str(page.index)
+        ty = height - mm_to_px(12, working_dpi)
+        try:
+            bbox = draw.textbbox((0, 0), label, font=font)
+            tw = bbox[2] - bbox[0]
+        except Exception:
+            tw = 6
+        draw.text(((width - tw) / 2, ty), label, fill=(20, 20, 20), font=font)
+
+    if crop_marks and mode == "print":
+        _draw_crop_marks(draw, page, working_dpi)
     return image
+
+
+def to_bitonal(image: Image.Image, threshold: int = 180) -> Image.Image:
+    return image.convert("L").point(lambda p: 255 if p > threshold else 0, mode="1")

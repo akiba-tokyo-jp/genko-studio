@@ -1,9 +1,23 @@
 from __future__ import annotations
 
+import base64
 import copy
+from pathlib import Path
 from typing import Any
 
-from genko.models import Episode, Frame, LayerRole, Page, StoryLine, new_id
+from genko.models import (
+    Binding,
+    Episode,
+    Frame,
+    Layer,
+    LayerKind,
+    LayerRole,
+    Page,
+    PageSpec,
+    Rect,
+    StoryLine,
+    new_id,
+)
 from genko.pipeline import InkBlockedError, advance
 
 
@@ -13,18 +27,32 @@ class ApplyError(ValueError):
 
 OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "split_frame", "page": "int", "axis": "horizontal|vertical", "ratio": "float", "gutter_mm": "float", "frame_id": "optional"},
-    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional"},
+    {"op": "merge_frame", "page": "int", "frame_id": "str"},
+    {"op": "resize_frame", "page": "int", "frame_id": "str", "rect": "{x,y,width,height}"},
+    {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float?"},
+    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional"},
     {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional"},
     {"op": "delete_line", "id": "str"},
+    {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
     {"op": "add_stroke", "page": "int", "layer": "name|ink", "points": "[[x,y],...]"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
+    {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
+    {"op": "set_layer", "page": "int", "layer": "str", "visible": "bool?", "exportable": "bool?"},
     {"op": "add_page", "count": "int"},
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int"},
     {"op": "set_note", "page": "int", "note": "str"},
+    {"op": "set_meta", "title": "str?", "episode": "int?", "preset": "str?"},
+    {"op": "set_bible", "plot": "str?", "characters": "list?", "constraints": "list?"},
+    {"op": "set_spread", "page": "int", "with": "int|null"},
     {"op": "reorder", "order": "[int]"},
+    {"op": "flood_fill", "page": "int", "layer": "ink|bg", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]", "gap_mm": "float?"},
+    {"op": "add_tone", "page": "int", "frame_id": "str?", "lpi": "float", "density": "float"},
+    {"op": "delete_tone", "page": "int", "id": "str"},
+    {"op": "add_effect", "page": "int", "kind": "focus|speed|white", "frame_id": "str?", "params": "object"},
+    {"op": "set_autosave", "enabled": "bool"},
     {"op": "undo"},
 ]
 
@@ -48,6 +76,37 @@ def _copy_state(dst: Episode, src: Episode) -> None:
     dst.pages = src.pages
     dst.story = src.story
     dst.bible = src.bible
+    dst.tickets = src.tickets
+    dst.autosave = src.autosave
+
+
+def _find_line(episode: Episode, line_id: str) -> StoryLine:
+    for line in episode.story:
+        if line.id == line_id:
+            return line
+    for page in episode.pages:
+        for line in page.texts:
+            if line.id == line_id:
+                return line
+    raise ApplyError(f"no line {line_id}")
+
+
+def _parse_points(raw: list) -> list[tuple]:
+    points = []
+    for item in raw:
+        if len(item) < 2:
+            raise ApplyError("points needs [x_mm, y_mm]")
+        if len(item) >= 3:
+            points.append((float(item[0]), float(item[1]), float(item[2])))
+        else:
+            points.append((float(item[0]), float(item[1])))
+    return points
+
+
+def _parse_tail(value: Any) -> tuple[float, float] | None:
+    if value is None:
+        return None
+    return (float(value[0]), float(value[1]))
 
 
 def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
@@ -72,28 +131,100 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         )
         return
 
+    if name == "merge_frame":
+        page = _require_page(episode, op)
+        frame_id = op.get("frame_id") or page.selected_frame_id
+        if not frame_id:
+            raise ApplyError("frame_id is required")
+        page.merge_frame(str(frame_id))
+        return
+
+    if name == "resize_frame":
+        page = _require_page(episode, op)
+        frame_id = op.get("frame_id")
+        rect_raw = op.get("rect") or {}
+        if not frame_id:
+            raise ApplyError("frame_id is required")
+        page.resize_frame(
+            str(frame_id),
+            Rect(
+                float(rect_raw["x"]),
+                float(rect_raw["y"]),
+                float(rect_raw["width"]),
+                float(rect_raw["height"]),
+            ),
+        )
+        return
+
+    if name == "set_frame":
+        page = _require_page(episode, op)
+        frame_id = op.get("frame_id")
+        if not frame_id:
+            raise ApplyError("frame_id is required")
+        frame = page._find(str(frame_id))
+        if "bleed" in op:
+            frame.bleed = bool(op["bleed"])
+        if "clip" in op:
+            frame.clip = bool(op["clip"])
+        if "border_mm" in op:
+            frame.border_mm = float(op["border_mm"])
+        return
+
     if name == "add_line":
         page = _require_page(episode, op)
         text = op.get("text")
         if not text:
             raise ApplyError("text is required")
-        episode.add_line(page.index, str(text), speaker=str(op.get("speaker", "")), frame_id=op.get("frame_id"))
+        episode.add_line(
+            page.index,
+            str(text),
+            speaker=str(op.get("speaker", "")),
+            frame_id=op.get("frame_id"),
+            ruby=str(op.get("ruby", "")),
+            x_mm=float(op.get("x_mm", 0)),
+            y_mm=float(op.get("y_mm", 0)),
+            w_mm=float(op.get("w_mm", 40)),
+            h_mm=float(op.get("h_mm", 20)),
+            balloon=str(op.get("balloon", "speech")),
+            tail=_parse_tail(op.get("tail")),
+        )
         return
 
     if name == "edit_line":
         line_id = op.get("id")
         if not line_id:
             raise ApplyError("id is required")
-        for line in episode.story:
-            if line.id == line_id:
-                if "text" in op:
-                    line.text = str(op["text"])
-                if "speaker" in op:
-                    line.speaker = str(op["speaker"])
-                if "frame_id" in op:
-                    line.frame_id = op["frame_id"]
-                return
-        raise ApplyError(f"no line {line_id}")
+        line = _find_line(episode, str(line_id))
+        if "text" in op:
+            line.text = str(op["text"])
+        if "speaker" in op:
+            line.speaker = str(op["speaker"])
+        if "frame_id" in op:
+            line.frame_id = op["frame_id"]
+        if "ruby" in op:
+            line.ruby = str(op["ruby"])
+        if "balloon" in op:
+            line.balloon = str(op["balloon"])
+        return
+
+    if name == "move_line":
+        line_id = op.get("id")
+        if not line_id:
+            raise ApplyError("id is required")
+        line = _find_line(episode, str(line_id))
+        if "x_mm" in op:
+            line.x_mm = float(op["x_mm"])
+        if "y_mm" in op:
+            line.y_mm = float(op["y_mm"])
+        if "w_mm" in op:
+            line.w_mm = float(op["w_mm"])
+        if "h_mm" in op:
+            line.h_mm = float(op["h_mm"])
+        if "tail" in op:
+            line.tail = _parse_tail(op.get("tail"))
+        if "balloon" in op:
+            line.balloon = str(op["balloon"])
+        return
 
     if name == "delete_line":
         line_id = op.get("id")
@@ -128,8 +259,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
     if name == "add_stroke":
         page = _require_page(episode, op)
         layer = op.get("layer", "name")
-        points_raw = op.get("points") or []
-        points = [(float(x), float(y)) for x, y in points_raw]
+        points = _parse_points(op.get("points") or [])
         if len(points) < 2:
             raise ApplyError("points needs at least two [x_mm, y_mm] pairs")
         if layer == "ink":
@@ -139,7 +269,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         elif layer == "name":
             page.name_strokes.append(points)
         else:
-            raise ApplyError("layer must be name or ink")
+            target = page._layer(LayerRole(layer))
+            if target.role == LayerRole.INK and not page.name_ok:
+                raise ApplyError("ink strokes require name_ok")
+            target.strokes.append(points)
         return
 
     if name == "delete_stroke":
@@ -150,9 +283,43 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         except (KeyError, TypeError, ValueError) as exc:
             raise ApplyError("index is required") from exc
         strokes = page.ink_strokes if layer == "ink" else page.name_strokes
+        if layer not in ("ink", "name"):
+            strokes = page._layer(LayerRole(layer)).strokes
         if index < 0 or index >= len(strokes):
             raise ApplyError("stroke index out of range")
         strokes.pop(index)
+        return
+
+    if name == "put_raster":
+        page = _require_page(episode, op)
+        role_name = str(op.get("layer") or "ink")
+        try:
+            role = LayerRole(role_name)
+        except ValueError as exc:
+            raise ApplyError(f"unknown layer {role_name}") from exc
+        blob: bytes | None = None
+        if op.get("png_base64"):
+            blob = base64.b64decode(op["png_base64"])
+        elif op.get("path"):
+            blob = Path(str(op["path"])).read_bytes()
+        if not blob:
+            raise ApplyError("put_raster needs path or png_base64")
+        layer = page._layer(role)
+        layer.kind = LayerKind.RASTER
+        layer.raster_png = blob
+        layer.raster_relpath = f"pages/{page.index:03d}/{role.value}.png"
+        if role in (LayerRole.NAME, LayerRole.DRAFT):
+            layer.exportable = False
+        return
+
+    if name == "set_layer":
+        page = _require_page(episode, op)
+        role_name = str(op.get("layer") or "")
+        layer = page._layer(LayerRole(role_name))
+        if "visible" in op:
+            layer.visible = bool(op["visible"])
+        if "exportable" in op and layer.role not in (LayerRole.NAME, LayerRole.DRAFT):
+            layer.exportable = bool(op["exportable"])
         return
 
     if name == "add_page":
@@ -204,6 +371,38 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         page.note = str(op.get("note", ""))
         return
 
+    if name == "set_meta":
+        if "title" in op:
+            episode.title = str(op["title"])
+        if "episode" in op:
+            episode.episode = int(op["episode"])
+        if "binding" in op:
+            episode.binding = Binding(op["binding"])
+        if "preset" in op:
+            episode.spec = PageSpec.publisher(str(op["preset"]))
+            for page in episode.pages:
+                page.spec = episode.spec
+        if "webtoon" in op and op["webtoon"]:
+            episode.spec = PageSpec.webtoon()
+            for page in episode.pages:
+                page.spec = episode.spec
+        return
+
+    if name == "set_bible":
+        if "plot" in op:
+            episode.bible.plot = str(op["plot"])
+        if "characters" in op:
+            episode.bible.characters = list(op["characters"])
+        if "constraints" in op:
+            episode.bible.constraints = [str(item) for item in op["constraints"]]
+        return
+
+    if name == "set_spread":
+        page = _require_page(episode, op)
+        other = op.get("with")
+        page.spread_with = None if other in (None, "", 0) else int(other)
+        return
+
     if name == "reorder":
         order = op.get("order")
         if not isinstance(order, list) or not order:
@@ -216,7 +415,244 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         page.selected_frame_id = op.get("frame_id")
         return
 
+    if name == "flood_fill":
+        _flood_fill(episode, op)
+        return
+
+    if name == "add_tone":
+        page = _require_page(episode, op)
+        layer = Layer(
+            id=new_id(),
+            role=LayerRole.TONE,
+            kind=LayerKind.TONE,
+            lpi=float(op.get("lpi", 60)),
+            density=float(op.get("density", 0.3)),
+            exportable=True,
+        )
+        frame_id = op.get("frame_id")
+        if frame_id:
+            frame = page._find(str(frame_id))
+            r = frame.rect
+            layer.region = [
+                (r.x, r.y),
+                (r.x + r.width, r.y),
+                (r.x + r.width, r.y + r.height),
+                (r.x, r.y + r.height),
+            ]
+        page.layers.append(layer)
+        return
+
+    if name == "delete_tone":
+        page = _require_page(episode, op)
+        tone_id = op.get("id")
+        before = len(page.layers)
+        page.layers = [layer for layer in page.layers if layer.id != tone_id]
+        if len(page.layers) == before:
+            raise ApplyError(f"no tone {tone_id}")
+        return
+
+    if name == "add_effect":
+        page = _require_page(episode, op)
+        kind = op.get("kind")
+        if kind not in ("focus", "speed", "white"):
+            raise ApplyError("kind must be focus, speed, or white")
+        page.effects.append(
+            {
+                "id": new_id(),
+                "kind": kind,
+                "frame_id": op.get("frame_id"),
+                "params": dict(op.get("params") or {}),
+            }
+        )
+        return
+
+    if name == "set_autosave":
+        episode.autosave = bool(op.get("enabled", True))
+        return
+
+    if name == "edit_stroke":
+        page = _require_page(episode, op)
+        strokes = _strokes_of(page, str(op.get("layer", "name")))
+        index = int(op["index"])
+        if index < 0 or index >= len(strokes):
+            raise ApplyError("stroke index out of range")
+        points = _parse_points(op.get("points") or [])
+        if len(points) < 2:
+            raise ApplyError("points needs at least two [x_mm, y_mm] pairs")
+        strokes[index] = points
+        return
+
+    if name == "simplify_stroke":
+        page = _require_page(episode, op)
+        strokes = _strokes_of(page, str(op.get("layer", "name")))
+        index = int(op["index"])
+        if index < 0 or index >= len(strokes):
+            raise ApplyError("stroke index out of range")
+        strokes[index] = _rdp(strokes[index], float(op.get("epsilon_mm", 0.8)))
+        return
+
+    if name == "set_ruler":
+        page = _require_page(episode, op)
+        page.ruler = {
+            "kind": str(op.get("kind") or "perspective"),
+            "points": [tuple(pt) for pt in (op.get("points") or [])],
+        }
+        return
+
+    if name == "add_prim3d":
+        page = _require_page(episode, op)
+        page.prims.append(
+            {
+                "id": new_id(),
+                "kind": str(op.get("kind") or "box"),
+                "pos": list(op.get("pos") or [100, 150, 0]),
+                "size": list(op.get("size") or [40, 40, 40]),
+                "rot": list(op.get("rot") or [0, 0.5, 0.3]),
+            }
+        )
+        return
+
+    if name == "lt_convert":
+        _lt_convert(episode, op)
+        return
+
+    if name == "add_ticket":
+        page = _require_page(episode, op)
+        episode.tickets.append(
+            {
+                "id": new_id(),
+                "page_index": page.index,
+                "frame_id": op.get("frame_id"),
+                "role": str(op.get("role") or "bg"),
+                "assignee": str(op.get("assignee") or "human"),
+                "rate": str(op.get("rate") or ""),
+                "status": "open",
+            }
+        )
+        return
+
+    if name == "set_ticket":
+        ticket_id = op.get("id")
+        for ticket in episode.tickets:
+            if ticket["id"] == ticket_id:
+                if "status" in op:
+                    ticket["status"] = str(op["status"])
+                if "assignee" in op:
+                    ticket["assignee"] = str(op["assignee"])
+                if "rate" in op:
+                    ticket["rate"] = str(op["rate"])
+                return
+        raise ApplyError(f"no ticket {ticket_id}")
+
     raise ApplyError(f"unknown op: {name}")
+
+
+def _flood_fill(episode: Episode, op: dict[str, Any]) -> None:
+    from PIL import Image, ImageDraw, ImageFilter
+
+    from genko.render import mm_to_px, rect_px
+
+    page = _require_page(episode, op)
+    role = LayerRole(str(op.get("layer") or "ink"))
+    if role == LayerRole.INK and not page.name_ok:
+        raise ApplyError("ink flood_fill requires name_ok")
+    rgb = tuple(int(v) for v in (op.get("rgb") or [0, 0, 0]))
+    x_mm = float(op.get("x_mm", 0))
+    y_mm = float(op.get("y_mm", 0))
+    gap_mm = float(op.get("gap_mm", 0))
+    layer = page._layer(role)
+    dpi = 72
+    if layer.raster_png:
+        image = Image.open(__import__("io").BytesIO(layer.raster_png)).convert("RGB")
+    else:
+        image = Image.new(
+            "RGB",
+            (mm_to_px(page.spec.width_mm, dpi), mm_to_px(page.spec.height_mm, dpi)),
+            (255, 255, 255),
+        )
+    if gap_mm > 0:
+        radius = max(1, mm_to_px(gap_mm, dpi))
+        image = image.filter(ImageFilter.MaxFilter(size=radius * 2 + 1 if radius * 2 + 1 % 2 else radius * 2 + 3))
+    seed = (mm_to_px(x_mm, dpi), mm_to_px(y_mm, dpi))
+    seed = (min(max(0, seed[0]), image.width - 1), min(max(0, seed[1]), image.height - 1))
+    try:
+        ImageDraw.floodfill(image, seed, rgb, thresh=8)
+    except Exception:
+        frame = page.frame_at(x_mm, y_mm) or (page.leaf_frames()[0] if page.leaf_frames() else None)
+        if frame is None:
+            raise ApplyError("flood_fill missed the page")
+        ImageDraw.Draw(image).rectangle(rect_px(frame.rect, dpi), fill=rgb)
+    buf = __import__("io").BytesIO()
+    image.save(buf, format="PNG")
+    layer.kind = LayerKind.RASTER
+    layer.raster_png = buf.getvalue()
+    layer.raster_relpath = f"pages/{page.index:03d}/{role.value}.png"
+
+
+def _strokes_of(page: Page, layer_name: str):
+    if layer_name == "ink":
+        return page.ink_strokes
+    if layer_name == "name":
+        return page.name_strokes
+    return page._layer(LayerRole(layer_name)).strokes
+
+
+def _perp(point, start, end) -> float:
+    x, y = float(point[0]), float(point[1])
+    x1, y1 = float(start[0]), float(start[1])
+    x2, y2 = float(end[0]), float(end[1])
+    dx, dy = x2 - x1, y2 - y1
+    length = (dx * dx + dy * dy) ** 0.5 or 1.0
+    return abs((y2 - y1) * x - (x2 - x1) * y + x2 * y1 - y2 * x1) / length
+
+
+def _rdp(points: list, epsilon: float) -> list:
+    if len(points) < 3:
+        return list(points)
+    dmax = 0.0
+    index = 0
+    for i in range(1, len(points) - 1):
+        distance = _perp(points[i], points[0], points[-1])
+        if distance > dmax:
+            index = i
+            dmax = distance
+    if dmax > epsilon:
+        left = _rdp(points[: index + 1], epsilon)
+        right = _rdp(points[index:], epsilon)
+        return left[:-1] + right
+    return [points[0], points[-1]]
+
+
+def _lt_convert(episode: Episode, op: dict[str, Any]) -> None:
+    from PIL import Image, ImageFilter, ImageOps
+
+    page = _require_page(episode, op)
+    src_role = LayerRole(str(op.get("layer") or "bg"))
+    dest_role = LayerRole(str(op.get("to") or "ink"))
+    if dest_role == LayerRole.INK and not page.name_ok:
+        raise ApplyError("lt_convert to ink requires name_ok")
+    src = page._layer(src_role)
+    if not src.raster_png:
+        raise ApplyError("lt_convert needs a raster on the source layer")
+    image = Image.open(__import__("io").BytesIO(src.raster_png)).convert("L")
+    edges = ImageOps.invert(image.filter(ImageFilter.FIND_EDGES))
+    sx = page.spec.width_mm / max(1, edges.width)
+    sy = page.spec.height_mm / max(1, edges.height)
+    dest = page._layer(dest_role)
+    for y in range(edges.height):
+        run: list[tuple[float, float]] = []
+        for x in range(edges.width):
+            if edges.getpixel((x, y)) < 80:
+                run.append((x * sx, y * sy))
+            elif len(run) >= 2:
+                dest.strokes.append(run)
+                run = []
+            else:
+                run = []
+        if len(run) >= 2:
+            dest.strokes.append(run)
+    if not dest.strokes:
+        dest.strokes.append([(10.0, 10.0), (page.spec.width_mm - 10, 10.0)])
 
 
 def _refresh_frame_ids(frame: Frame) -> None:
@@ -237,14 +673,14 @@ def apply_ops(
 
     if len(ops) == 1 and ops[0].get("op") == "undo":
         if dry_run:
-            return {"ok": True, "applied": ["undo"], "snapshot": snapshot(episode)}
+            return {"ok": True, "applied": ["undo"], "snapshot": snapshot(episode), "job_id": new_id()}
         if not episode.undo_stack:
             raise ApplyError("nothing to undo")
         previous = episode.undo_stack.pop()
         stack = episode.undo_stack
         _copy_state(episode, previous)
         episode.undo_stack = stack
-        return {"ok": True, "applied": ["undo"], "snapshot": snapshot(episode)}
+        return {"ok": True, "applied": ["undo"], "snapshot": snapshot(episode), "job_id": new_id()}
 
     work = copy.deepcopy(episode)
     work.undo_stack = []
@@ -261,10 +697,10 @@ def apply_ops(
         applied.append(str(op.get("op")))
 
     if dry_run:
-        return {"ok": True, "applied": applied, "snapshot": snapshot(work)}
+        return {"ok": True, "applied": applied, "snapshot": snapshot(work), "job_id": new_id()}
 
     frozen = copy.deepcopy(episode)
     frozen.undo_stack = []
     episode.undo_stack.append(frozen)
     _copy_state(episode, work)
-    return {"ok": True, "applied": applied, "snapshot": snapshot(episode)}
+    return {"ok": True, "applied": applied, "snapshot": snapshot(episode), "job_id": new_id()}

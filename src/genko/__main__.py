@@ -5,7 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-from genko.export import export_png_sequence
 from genko.headless import OPS_SCHEMA, ApplyError, apply_ops, snapshot
 from genko.io import load_episode, save_episode
 from genko.models import PageSpec, new_episode
@@ -24,13 +23,17 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--episode", type=int, default=1)
     new.add_argument("--pages", type=int, default=8)
     new.add_argument("--webtoon", action="store_true")
-    new.add_argument("--json", action="store_true", help="Machine-readable JSON on stdout")
+    new.add_argument("--b4", action="store_true")
+    new.add_argument("--preset", default="")
+    new.add_argument("--json", action="store_true", help="Machine-readable JSON on stdout (default)")
+    new.add_argument("--plain", action="store_true", help="Print only the path")
 
     export = sub.add_parser("export", help="Export PNG sequence (draft/name layers skipped)")
     export.add_argument("src", type=Path)
     export.add_argument("out", type=Path)
     export.add_argument("--json", action="store_true")
     export.add_argument("--dpi", type=int, default=150)
+    export.add_argument("--format", dest="fmt", default="png", choices=["png", "tiff", "pdf", "strip", "psd", "epub"])
 
     inspect = sub.add_parser("inspect", help="Headless: dump compact JSON snapshot")
     inspect.add_argument("src", type=Path)
@@ -74,17 +77,34 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.cmd == "new":
-            spec = PageSpec.webtoon() if args.webtoon else PageSpec.a4_mono()
+            if args.webtoon:
+                spec = PageSpec.webtoon()
+            elif args.preset:
+                spec = PageSpec.publisher(args.preset)
+            elif args.b4:
+                spec = PageSpec.b4_comic()
+            else:
+                spec = PageSpec.a4_mono()
             episode = new_episode(args.title, args.episode, args.pages, spec)
             save_episode(episode, args.dest)
-            if args.json:
-                _print_json({"ok": True, "path": str(args.dest), "snapshot": snapshot(episode)})
-            else:
+            if args.plain:
                 print(args.dest)
+            else:
+                _print_json({"ok": True, "path": str(args.dest), "snapshot": snapshot(episode)})
             return 0
         if args.cmd == "export":
+            from genko.export import export_epub, export_print, export_psd, export_strip
+
             episode = load_episode(args.src)
-            paths = export_png_sequence(episode, args.out, working_dpi=args.dpi)
+            if args.fmt == "strip":
+                path = export_strip(episode, args.out if args.out.suffix else args.out / "strip.png", dpi=args.dpi)
+                paths = [path]
+            elif args.fmt == "psd":
+                paths = [export_psd(episode, args.out if args.out.suffix else args.out / "out.psd", dpi=args.dpi)]
+            elif args.fmt == "epub":
+                paths = [export_epub(episode, args.out if args.out.suffix else args.out / "out.epub", dpi=args.dpi)]
+            else:
+                paths = export_print(episode, args.out, fmt=args.fmt, dpi=args.dpi)
             if args.json:
                 _print_json({"ok": True, "count": len(paths), "files": [str(p) for p in paths]})
             else:

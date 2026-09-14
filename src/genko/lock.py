@@ -17,7 +17,14 @@ class ProjectLock:
     def acquire(self) -> None:
         self.project.mkdir(parents=True, exist_ok=True)
         if self.path.exists():
-            raise ApplyError(f"project locked: {self.path}")
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                data = {}
+            age = time.time() - float(data.get("acquired_at") or 0)
+            if age < 15 * 60:
+                raise ApplyError(f"project locked: {self.path}")
+            self.path.unlink()
         self.path.write_text(
             json.dumps({"agent": self.agent, "pid": os.getpid(), "acquired_at": time.time()}),
             encoding="utf-8",

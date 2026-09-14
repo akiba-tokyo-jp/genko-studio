@@ -19,11 +19,11 @@ uv run python -m genko app
 ## Generative AI (headless)
 
 ```bash
-uv run python -m genko new ./demo.genko --title demo --pages 8 --json
+uv run python -m genko new ./demo.genko --title demo --pages 8
 uv run python -m genko inspect ./demo.genko
 uv run python -m genko apply ./demo.genko ops.json
 uv run python -m genko render ./demo.genko --page 1 --mode name --out p1.png
-uv run python -m genko export ./demo.genko ./out --json
+uv run python -m genko export ./demo.genko ./out --format tiff --json
 uv run python -m genko serve --port 8765
 ```
 
@@ -39,11 +39,14 @@ Python 3.11+.
 
 - `src/genko/ops.py` — single command bus
 - `src/genko/render.py` — name/proof/print composite
+- `src/genko/export.py` — PNG / TIFF / PDF / strip / EPUB
+- `src/genko/psd.py` — minimal PSD
 - `src/genko/headless.py` — JSON snapshot
-- `src/genko/server.py` — HTTP API
+- `src/genko/server.py` — HTTP API + OpenAPI
 - `src/genko/app/` — PySide6 GUI
 - `docs/AGENT.md` — how an agent should drive Genko
 - `docs/DESIGN.md` — architecture
+- `docs/ops.schema.json` — ops catalog
 
 ## License
 

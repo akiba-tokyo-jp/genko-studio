@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from genko.app.canvas import PageCanvas
-from genko.export import export_png_sequence
+from genko.export import export_print
 from genko.io import load_episode, save_episode
 from genko.models import PageSpec, new_episode
 from genko.ops import ApplyError, apply_ops
@@ -42,6 +43,9 @@ class MainWindow(QMainWindow):
         self.canvas.changed.connect(self._refresh_status)
         self.canvas.strokeCommitted.connect(self._on_stroke)
         self.canvas.frameSelected.connect(self._on_frame_selected)
+        self.canvas.textMoved.connect(self._on_text_moved)
+        self.layers = QListWidget()
+        self.tickets = QListWidget()
         self.speaker = QLineEdit()
         self.speaker.setPlaceholderText("話者")
         self.line = QLineEdit()
@@ -58,6 +62,8 @@ class MainWindow(QMainWindow):
         split_h.clicked.connect(lambda: self._split("horizontal"))
         split_v = QPushButton("選択コマを縦に割る")
         split_v.clicked.connect(lambda: self._split("vertical"))
+        merge = QPushButton("選択コマを結合")
+        merge.clicked.connect(self._merge)
         add_page = QPushButton("ページ追加")
         add_page.clicked.connect(self._add_page)
         del_page = QPushButton("ページ削除")
@@ -73,6 +79,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(name_ok)
         right_layout.addWidget(split_h)
         right_layout.addWidget(split_v)
+        right_layout.addWidget(merge)
         right_layout.addWidget(add_page)
         right_layout.addWidget(del_page)
         right_layout.addWidget(self.status)
@@ -81,6 +88,10 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left)
         left_layout.addWidget(QLabel("ページ管理"))
         left_layout.addWidget(self.pages)
+        left_layout.addWidget(QLabel("レイヤー"))
+        left_layout.addWidget(self.layers)
+        left_layout.addWidget(QLabel("助手チケット"))
+        left_layout.addWidget(self.tickets)
 
         split = QSplitter()
         split.addWidget(left)
@@ -92,6 +103,10 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._reload_pages()
         self.pages.setCurrentRow(0)
+        self._autosave = QTimer(self)
+        self._autosave.setInterval(60_000)
+        self._autosave.timeout.connect(self._maybe_autosave)
+        self._autosave.start()
 
     def _build_menu(self) -> None:
         bar = QToolBar()
@@ -142,8 +157,11 @@ class MainWindow(QMainWindow):
 
     def _show_page(self) -> None:
         page = self._current()
-        self.canvas.set_page(page)
+        lines = self.episode.story_for_page(page.index) if page else []
+        self.canvas.set_page(page, lines)
         self._refresh_story()
+        self._refresh_layers()
+        self._refresh_tickets()
         self._refresh_status()
 
     def _refresh_story(self) -> None:
@@ -156,6 +174,20 @@ class MainWindow(QMainWindow):
             who = f"{line.speaker}: " if line.speaker else ""
             lines.append(who + line.text)
         self.story.setPlainText("\n".join(lines))
+
+    def _refresh_layers(self) -> None:
+        self.layers.clear()
+        page = self._current()
+        if page is None:
+            return
+        for layer in page.layers:
+            mark = "●" if layer.visible else "○"
+            self.layers.addItem(f"{mark} {layer.role.value}")
+
+    def _refresh_tickets(self) -> None:
+        self.tickets.clear()
+        for ticket in self.episode.tickets:
+            self.tickets.addItem(f"{ticket.get('status')} p{ticket.get('page_index')} {ticket.get('role')} {ticket.get('assignee')}")
 
     def _refresh_status(self) -> None:
         page = self._current()
@@ -183,6 +215,9 @@ class MainWindow(QMainWindow):
         page.selected_frame_id = frame_id
         self.canvas.update()
         self._refresh_status()
+
+    def _on_text_moved(self, line_id: str, x_mm: float, y_mm: float) -> None:
+        self._apply([{"op": "move_line", "id": line_id, "x_mm": x_mm, "y_mm": y_mm}])
 
     def _add_line(self) -> None:
         page = self._current()
@@ -217,6 +252,13 @@ class MainWindow(QMainWindow):
         self._apply(
             [{"op": "split_frame", "page": page.index, "axis": axis, "frame_id": page.selected_frame_id}]
         )
+
+    def _merge(self) -> None:
+        page = self._current()
+        if page is None or not page.selected_frame_id:
+            QMessageBox.information(self, "Genko", "先にコマをクリックして選んでください")
+            return
+        self._apply([{"op": "merge_frame", "page": page.index, "frame_id": page.selected_frame_id}])
 
     def _add_page(self) -> None:
         self._apply([{"op": "add_page"}])
@@ -260,8 +302,13 @@ class MainWindow(QMainWindow):
         path = QFileDialog.getExistingDirectory(self, "Export PNG sequence")
         if not path:
             return
-        files = export_png_sequence(self.episode, Path(path), working_dpi=150, mode="print")
+        files = export_print(self.episode, Path(path), fmt="png", dpi=150)
         QMessageBox.information(self, "Genko", f"{len(files)} pages exported")
+
+    def _maybe_autosave(self) -> None:
+        if self.path is None or not self.episode.autosave:
+            return
+        save_episode(self.episode, self.path)
 
 
 def run_app() -> int:

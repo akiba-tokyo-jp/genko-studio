@@ -62,6 +62,13 @@ class PageSpec:
     def b4_comic() -> PageSpec:
         return PageSpec(257, 364, 600, 3, 10, "mono", preset="commercial-b4")
 
+    @staticmethod
+    def publisher(name: str) -> PageSpec:
+        key = name.strip().lower()
+        known = {"shueisha", "kodansha", "kadokawa", "shogakukan"}
+        preset = key if key in known else "none"
+        return PageSpec(257, 364, 600, 3, 10, "mono", preset=preset)
+
 
 @dataclass
 class Layer:
@@ -73,6 +80,10 @@ class Layer:
     strokes: list[list[tuple[float, float]]] = field(default_factory=list)
     raster_relpath: str | None = None
     fill_rgb: tuple[int, int, int] | None = None
+    raster_png: bytes | None = field(default=None, repr=False, compare=False)
+    lpi: float | None = None
+    density: float | None = None
+    region: list[tuple[float, float]] | None = None
 
 
 @dataclass
@@ -99,6 +110,7 @@ class StoryLine:
     w_mm: float = 40
     h_mm: float = 20
     balloon: str = "speech"
+    tail: tuple[float, float] | None = None
 
 
 def new_id() -> str:
@@ -138,6 +150,10 @@ class Page:
     texts: list[StoryLine] = field(default_factory=list)
     spread_with: int | None = None
     selected_frame_id: str | None = None
+    effects: list[dict] = field(default_factory=list)
+    ruler: dict | None = None
+    prims: list[dict] = field(default_factory=list)
+    numero: bool = True
 
     def __post_init__(self) -> None:
         if not self.layers:
@@ -254,6 +270,33 @@ class Page:
         target.split_axis = axis
         return a, b
 
+    def parent_of(self, frame_id: str, node: Frame | None = None) -> Frame | None:
+        node = node or (self.frames[0] if self.frames else None)
+        if node is None:
+            return None
+        for child in node.children:
+            if child.id == frame_id:
+                return node
+            found = self.parent_of(frame_id, child)
+            if found is not None:
+                return found
+        return None
+
+    def merge_frame(self, frame_id: str) -> Frame:
+        parent = self.parent_of(frame_id)
+        if parent is None:
+            raise ValueError("cannot merge the root frame")
+        parent.children = []
+        parent.split_axis = None
+        return parent
+
+    def resize_frame(self, frame_id: str, rect: Rect) -> Frame:
+        target = self._find(frame_id)
+        if target.children:
+            raise ValueError("can only resize a leaf frame")
+        target.rect = rect
+        return target
+
     def paint(self, role: LayerRole, rgb: tuple[int, int, int]) -> None:
         self.fills[role] = rgb
         if role in (LayerRole.NAME, LayerRole.DRAFT):
@@ -277,6 +320,8 @@ class Episode:
     story: list[StoryLine] = field(default_factory=list)
     bible: Bible = field(default_factory=Bible)
     undo_stack: list[Episode] = field(default_factory=list, repr=False, compare=False)
+    tickets: list[dict] = field(default_factory=list)
+    autosave: bool = False
 
     def reorder(self, order: list[int]) -> None:
         by_index = {page.index: page for page in self.pages}
@@ -295,6 +340,13 @@ class Episode:
         text: str,
         speaker: str = "",
         frame_id: str | None = None,
+        ruby: str = "",
+        x_mm: float = 0,
+        y_mm: float = 0,
+        w_mm: float = 40,
+        h_mm: float = 20,
+        balloon: str = "speech",
+        tail: tuple[float, float] | None = None,
     ) -> StoryLine:
         line = StoryLine(
             id=new_id(),
@@ -302,6 +354,13 @@ class Episode:
             text=text,
             speaker=speaker,
             frame_id=frame_id,
+            ruby=ruby,
+            x_mm=x_mm,
+            y_mm=y_mm,
+            w_mm=w_mm,
+            h_mm=h_mm,
+            balloon=balloon,
+            tail=tail,
         )
         self.story.append(line)
         for page in self.pages:

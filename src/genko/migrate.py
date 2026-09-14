@@ -43,6 +43,9 @@ def _layer(data: dict) -> Layer:
         strokes=[[tuple(pt) for pt in stroke] for stroke in data.get("strokes", [])],  # type: ignore[misc]
         raster_relpath=data.get("raster_relpath"),
         fill_rgb=tuple(data["fill_rgb"]) if data.get("fill_rgb") else None,  # type: ignore[arg-type]
+        lpi=data.get("lpi"),
+        density=data.get("density"),
+        region=[tuple(pt) for pt in data["region"]] if data.get("region") else None,
     )
 
 
@@ -59,6 +62,7 @@ def _line(data: dict) -> StoryLine:
         w_mm=float(data.get("w_mm", 40)),
         h_mm=float(data.get("h_mm", 20)),
         balloon=data.get("balloon", "speech"),
+        tail=tuple(data["tail"]) if data.get("tail") else None,
     )
 
 
@@ -86,6 +90,10 @@ def migrate_payload(payload: dict) -> Episode:
             name_ok=raw.get("name_ok", False),
             stage=raw.get("stage", "name"),
             spread_with=raw.get("spread_with"),
+            numero=raw.get("numero", True),
+            effects=list(raw.get("effects") or []),
+            ruler=raw.get("ruler"),
+            prims=list(raw.get("prims") or []),
         )
         fills = {
             LayerRole(role): tuple(rgb)  # type: ignore[arg-type]
@@ -107,11 +115,18 @@ def migrate_payload(payload: dict) -> Episode:
         pages.append(page)
     if not story:
         story = [line for page in pages for line in page.texts]
-    return Episode(
+    episode = Episode(
         title=payload["title"],
         episode=payload["episode"],
         spec=spec,
         binding=binding,
         pages=pages,
         story=story,
+        tickets=list(payload.get("tickets") or []),
+        autosave=bool(payload.get("autosave", False)),
     )
+    bible = payload.get("bible") or {}
+    episode.bible.plot = bible.get("plot", "")
+    episode.bible.characters = list(bible.get("characters") or [])
+    episode.bible.constraints = list(bible.get("constraints") or [])
+    return episode

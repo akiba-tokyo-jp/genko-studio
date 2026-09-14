@@ -5,36 +5,26 @@ CLIP STUDIO PAINT EX の全描画エンジンを複製しない。連載工場�
 
 ## 何を置き、何を置かないか
 
-置く（v0.1 + P0）
+置く（P0–P4）
 
 - レイヤー（name は exportable=false）。v1 ファイルはマイグレーション
 - コマクリップ合成。`render mode=name|proof|print`
 - すべての変更は `apply_ops`（GUI も AI も）。dry_run と undo
-- ページ追加／削除／複製、セリフ編集／削除、ストローク削除
-- ページPNG（AIが視覚確認）
-- project.lock
-- 選択コマの分割、保存でフォルダ作成
-
-- 複数ページの作品管理（追加・並べ替え・右綴じ）
-- A4モノクロ / Webtoon 用紙（塗り足し・基本枠）
-- ネーム段階とペン入れ段階の分離。ネームOKが出るまで ink に進めない
-- コマ枠の分割（横／縦、アキ、日本語の右→左読み順）
-- ストーリーエディター（ページ／コマにセリフ）
-- 下描き（NAME/DRAFT）を書き出しから除外
-- `.genko` フォルダ保存
-- PNG連番書き出し
-- デスクトップGUI（人）とヘッドレス JSON CLI / HTTP（生成AI）。同じ `.genko`
+- ページ追加／削除／複製、セリフ編集／移動／フキダシ／ルビ
+- コマ merge/resize/bleed、put_raster、ベタ、トーン網点、集中線／流線
+- 2階調 TIFF、PDF、Webtoon 縦結合、B4／出版社プリセット数値、ノンブル、トンボ
+- 筆圧付き折れ線、ベクター簡略化、パース定規、箱の3Dガイド、LT（エッジ→線）
+- 助手チケット、最小 PSD（8BPS＋文字レイヤー名）、EPUB
+- ページPNG、OpenAPI、job_id、project.lock（15分で失効）
+- 選択コマの分割、保存でフォルダ作成、GUI レイヤー／セリフドラッグ／自動保存
 
 置かない（意図的。CSP互換を謳わない）
 
-- 3D / LT変換
-- トーン網点エンジン
-- ベクターペンの完全再現
-- チーム制作クラウド
-- アニメーション
-- 出版社プリセットの全網羅
+- 油彩混色、フルアニメ、CSP プラグイン、クラウドチームの OT
+- 商業印刷機と同等の網点／イワタフォント同梱
+- 本格ボーン付き3D／リアルタイム LT 変換エンジン
 
-これらは後からプラグイン層に足す。本体は原稿の状態機械である。
+本体は原稿の状態機械である。画像生成は `put_raster` の外側。
 
 ## 状態機械
 
@@ -44,15 +34,17 @@ name → (name_ok) → ink → finish → export
 
 `advance(page, "ink")` は `name_ok` が False なら `InkBlockedError`。
 
-書き出しレイヤー順: BG → INK → FINISH → FRAMES → TEXT。NAME と DRAFT は乗らない。
+書き出しレイヤー順: BG → INK → FINISH → TONE → EFFECT → FRAMES → TEXT。NAME と DRAFT は乗らない。
 
 ## データ
 
-単位はミリメートル。ラスタは書き出し時に dpi で焼く。
+単位はミリメートル。作業 dpi は 150–300、入稿時だけ 600。
 
 ```
 title.genko/
   project.json
+  project.lock
+  pages/001/*.png
 ```
 
 ページは木構造のコマを持つ。葉だけが描画領域。縦分割の葉の順は右が先（日本語）。
@@ -60,29 +52,28 @@ title.genko/
 ## モジュール
 
 - `genko.models` — Episode / Page / Frame / StoryLine / PageSpec
+- `genko.ops` — コマンドバス
 - `genko.pipeline` — ゲート
-- `genko.export` — 出荷
+- `genko.render` / `genko.export` — 合成と出荷
 - `genko.io` — 保存
 - `genko.app` — Qt UI（Windows / Linux）
 - `python -m genko` — CLI
 
 ## UI
 
-左: ページ管理。中央: 用紙キャンバス（ネームは青、ペン入れは黒）。右: ストーリーエディター、ネームOK、コマ割り。
-
-ホイールでズーム。保存はフォルダ選択（`.genko`）。
+左: ページ、レイヤー、チケット。中央: 用紙キャンバス（ネームは青、ペン入れは黒、フキダシ）。右: ストーリー、ゲート、コマ割り。中ドラッグでパン。Ctrl+Z。
 
 ## 実行
 
 ```
 uv sync --extra app --extra dev
 uv run python -m genko app
-uv run python -m genko new ./demo.genko --title 試作 --pages 8 --json
+uv run python -m genko new ./demo.genko --title 試作 --pages 8
 uv run python -m genko inspect ./demo.genko
 uv run python -m genko apply ./demo.genko ops.json
 uv run python -m genko serve --port 8765
-uv run python -m genko export ./demo.genko ./out --json
+uv run python -m genko export ./demo.genko ./out --format tiff --json
 uv run pytest
 ```
 
-Python 3.11+。人は GUI（PySide6）。生成AIは Qt なしで `inspect` / `apply` / `serve`。操作仕様は `docs/AGENT.md`。
+Python 3.11+。人は GUI（PySide6）。生成AIは Qt なし。操作仕様は `docs/AGENT.md`。JSON Schema は `docs/ops.schema.json`。
