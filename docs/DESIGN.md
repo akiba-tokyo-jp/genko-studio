@@ -15,7 +15,7 @@ CLIP STUDIO PAINT EX の全描画エンジンを複製しない。連載工場�
 - 下描き（NAME/DRAFT）を書き出しから除外
 - `.genko` フォルダ保存
 - PNG連番書き出し
-- デスクトップGUI（PySide6）と CLI
+- デスクトップGUI（人）とヘッドレス JSON CLI / HTTP（生成AI）。同じ `.genko`
 
 置かない（意図的。CSP互換を謳わない）
 
@@ -69,9 +69,12 @@ title.genko/
 ```
 uv sync --extra app --extra dev
 uv run python -m genko app
-uv run python -m genko new ./demo.genko --title 試作 --pages 8
-uv run python -m genko export ./demo.genko ./out
+uv run python -m genko new ./demo.genko --title 試作 --pages 8 --json
+uv run python -m genko inspect ./demo.genko
+uv run python -m genko apply ./demo.genko ops.json
+uv run python -m genko serve --port 8765
+uv run python -m genko export ./demo.genko ./out --json
 uv run pytest
 ```
 
-Python 3.11+。GUI は PySide6。ヘッドレスでは CLI だけで出荷できる。
+Python 3.11+。人は GUI（PySide6）。生成AIは Qt なしで `inspect` / `apply` / `serve`。操作仕様は `docs/AGENT.md`。
