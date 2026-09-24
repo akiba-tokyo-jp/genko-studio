@@ -37,7 +37,7 @@
 - **絵:** Genko がコマごとの**生成依頼パック**（生成サイズ、プロンプトの下書き、キャラ設定画・ネームの切り抜き・マスクなどの参照ファイル、描かせてはいけないもの）を出す。エージェントは自分の画像ツールで生成し、画像を候補として Genko に取り込む。採用するとコマに収まる。
 - **画像のバイト列は LLM の文脈を通さない。** 画像はファイル（同じマシン）かアップロード（別マシン）で受け渡し、ツールの引数に base64 を書かせない。LLM が数 MB の base64 を正しく書き写すことはできないからである。
 - **ゲート。** 既存の `name_ok` に `sheet`・`script`・`art`（ページ単位 `art_ok`）・`export` を加える。**承認できるのは人間だけで、MCP には承認の道具を出さない。** エージェントは承認を「依頼」し、人間が CLI・レビュー画面・GUI で承認する。
-- **来歴。** 取り込んだ画像はすべて、どの生成依頼に対して、どのエージェントが、どのツール・モデル（自己申告）・プロンプトで作ったかを持つ。書き出しには内部用の `ai_manifest.json` を付けられる。
+- **来歴。** 取り込んだ画像はすべて、どの生成依頼に対して、どのエージェントが、どのツール・モデル（自己申告）・プロンプトで作ったかを持つ。これは候補の比較や作り直しのための作業記録で、書き出しには含めない。
 - **非破壊。** 候補は消さない。採用の取り消しは `unadopt` か別候補の採用。取り込んだアタリは不変資産。
 - **構造から導出。** Genko で作ったネームなら、マスク・文字よけ・人物の位置・構図ガイド・生成サイズはデータから計算する。
 - **オフラインで試験。** 試験は「筋書きどおりに道具を呼ぶ偽エージェント」と、あらかじめ用意した画像で行う。ネットワークも LLM も要らない。
@@ -164,7 +164,7 @@
 | キャラクタースタジオ | キャラ一覧・登録 | エージェントが設定画を作る、人間が承認 | キャラ schema（look、`hair_value`、tokens、refs、locked）、設定画の依頼パック、候補、`approve sheet`（人間）、sheet ゲート |
 | 背景・小物ライブラリ | ライブラリ | エージェントか人間が登録 | `studio.locations`、`studio.props`（参照画像と来歴）。依頼パックが参照として使う |
 | SD 仕上げ・モノクロのページ | ナビ、ページビュー | Genko（決定的） | `screentone.py`（平網・AM 網点・ベタ）、`lineart.py`、顔よけの再写植 |
-| 書き出し | 書き出しボタン | 人間が承認、Genko が出力 | preflight（承認、来歴、実効 dpi）、`ai_manifest.json`（既定は内部用）、600 dpi の2値 TIFF・pack |
+| 書き出し | 書き出しボタン | 人間が承認、Genko が出力 | preflight（承認、来歴、実効 dpi）、600 dpi の2値 TIFF・pack |
 | エンジン状態・外部送信の表示 | ComfyUI 接続中、VRAM、外部送信なし | – | Genko は外部と通信しないので、この表示は要らない。エージェントの状態は Hermes 側で見る |
 | 最近のプロジェクト・設定 | 一覧、設定 | Genko | `projects`（`--root` 配下の一覧）、GUI の起動画面（M7） |
 
@@ -231,7 +231,7 @@
  S4 ネーム（ページ割り → 段組 → コマ指示 → 写植 → プレビューで自己点検）──[name ②]──▶
  S5 生成・編集（パイロットページ先行: 依頼パック → エージェントが生成 → 取り込み → 比較 → 採用/修正）──[art ③]──▶
  S6 仕上げ（線・トーン・ベタ → 顔よけ再写植 → 効果）── advance finish ──▶
- S7 書き出し（preflight）──[export ④]──▶ 原稿ファイル + ai_manifest.json
+ S7 書き出し（preflight）──[export ④]──▶ 原稿ファイル
 ```
 
 ゲートは `[...]` で示した。①〜④は人間の承認点（§13 で「要所で人が承認」に決定）。`bible` と `script` はプリセット次第（§3.4）。
@@ -346,7 +346,6 @@ name の承認が付いたページだけが対象。順序は「パイロット
   - 採用画像の来歴（どのツール・モデル・プロンプトで作ったか）が記録されている（無くても止めず、警告だけ）。
   - 取り込んだ画像に試験用の画像（`origin.kind:"fixture"`）が無い。
 - **出力:** 既存 exporter で出す。NAME/DRAFT は role で除外済み（render.py:445-459）。候補はレイヤーではないので出ようがない。pack と print は `spec.dpi`（B4 商業原稿は 600）で出す（M6 で pack の 150 dpi 上限を外す）。
-- **来歴の記録:** `ai_manifest.json`（採用コマごとの依頼パック、ツール、モデル、プロンプト、承認者、人間の関与）は既定で `studio/manifests/` に内部用として書く。公開版は `--public-manifest` のときだけ同梱する。
 - **校正用の書き出し（`export_proof`）** はエージェントも使える。全ページに「校正」の透かしが入る。本番の書き出しは人間だけ（**export ④**）。
 
 ### 3.4 ゲートとプリセット
@@ -406,7 +405,6 @@ title.genko/
     history/                    # 退避した却下候補
     audit.jsonl                 # ロックの引き取り、policy と tools の変更
     analysis/<asset>.json       # エージェントや検出器が報告した領域の全件
-    manifests/                  # ai_manifest（内部用）
     reviews/                    # review.html とプレビュー画像
     drafts/                     # M0（v2 のまま）の bible・脚本・ネーム計画・PanelSpec。M3 で project.json に取り込む
   pages/001/*.png               # v2 の旧ラスタ。読むだけ。`genko gc --legacy` で消す
@@ -1542,7 +1540,7 @@ genko apply   demo.genko ops.json --agent human:leaf [--expect-revision 128] [--
 genko undo    demo.genko [--as human:leaf] [--force] ;  genko redo demo.genko
 genko render  demo.genko --page 4 --frame f4_p1 --kind crop|compare|guide:pose --out x.png
 genko inspect demo.genko [--panel 4:f4_p1 | --candidate cd_05 | --script | --bible | --request rq_…]
-genko export  demo.genko ./out --format png|tiff|pdf|psd|epub|pack [--dpi N] [--public-manifest] [--force] [--allow-fixture]   # 本番。studio は preflight と export 承認を通す
+genko export  demo.genko ./out --format png|tiff|pdf|psd|epub|pack [--dpi N] [--force] [--allow-fixture]   # 本番。studio は preflight と export 承認を通す
 genko doctor  demo.genko [--relink DIR]
 genko gc      demo.genko [--legacy] [--archive-candidates] [--dry-run]
 genko serve   --root DIR [--port 8765] [--allow-origin URL]              # HTTP API（トークン必須）
@@ -1737,7 +1735,7 @@ placed layer ごとに、print と proof で次を行う。
 - 例: 180×80 mm のコマを 600 dpi で刷るには約 4252×1890 px（約 8 MP）が要る。1〜2 MP 級の生成画像では足りない。
 - 閾値は、グレーの絵が 350、2値の線が 600。下回るコマは worklist に `upscale_panel` として出す。
   - エージェントの画像ツールに高解像度化があれば、依頼パック `mode:"upscale"` で頼み、結果を `parent` 付きの候補として取り込む。
-  - 無ければ Genko の LANCZOS 再標本化 + 線抽出（§9.5）で仕上げる。線が甘くなることがあるので、preflight はコマごとに**達成した実効 dpi** を一覧で出し、閾値未満を警告する（`--force` で通すと、その旨が ai_manifest に残る）。
+  - 無ければ Genko の LANCZOS 再標本化 + 線抽出（§9.5）で仕上げる。線が甘くなることがあるので、preflight はコマごとに**達成した実効 dpi** を一覧で出し、閾値未満を警告する（`--force` で通せる）。
 - 書き出しの dpi は `spec.dpi`（B4 商業原稿は 600）を既定にする。今の pack は 150 dpi に切り（pack.py:12-13）、CLI の既定も 150（__main__.py:35）なので、M6 で直す。
 
 ### 9.8 文字と効果音
@@ -1837,7 +1835,6 @@ placed layer ごとに、print と proof で次を行う。
 - (b) `ai:test` はどのゲートも承認できない（MCP に道具が無く、`apply_ops` 経由の `approve` も拒否される）。人間の承認が無ければ各ゲートで `waiting_for` を出して止まる。
 - (c) 絵: 各コマで依頼パック → 試験用の画像を `inbox/` に置く → `import_images` → `adopt`。人間の art 承認の後、仕上げ、preflight、書き出しで TIFF と PDF ができる。print に NAME / DRAFT / 候補の画素がない（番兵色で確かめる）。
 - (d) 本番書き出しは `origin.kind:"fixture"` の画像があるので拒否される。`--allow-fixture` で通る。
-- (e) 採用画像の来歴が記録され、ai_manifest に出る。
 - (f) 別マシンの形: HTTP の MCP（`--http`）とトークンで同じ筋書きが通る。画像はアップロード（`POST /v1/assets`）で渡し、参照ファイルは URL で取る。
 - (g) 途中で偽エージェントを止め、新しい偽エージェントで `next` から続けて完了する（再開）。同じ依頼を作り直しても重複しない。
 - (h) わざと壊した計画を出し続ける筋書きで、偽エージェントが3回で諦めてチケットを出し、`next` が同じ項目を出し続けない。
@@ -1988,7 +1985,7 @@ M5 + M7 ─▶ M9（拡張）
 | M4-3 | `importer.py`（`inbox/` のパス、アップロード済み資産、検証、上限、冪等）、`import_candidates`、取り込み時の目安（縦横比、文字よけ、輝度、ガイド追従度） |
 | M4-4 | MCP の道具: `generation_request`、`import_images`、`candidates`、`review_candidates`、`adopt`、`request_fix`、`report_regions`、`finish_page`、`preflight`、`export_proof`。worklist を書き出しまで広げる。予約（claim） |
 | M4-5 | キャラ設定画の流れ（依頼 → 取り込み → 人間の `approve sheet` → 顔の切り出し → `locked`）、場所の参照画像 |
-| M4-6 | export の preflight（承認、fixture の拒否、実効 dpi）、`ai_manifest`（内部 / 公開）、proof の透かし。SKILL.md に絵の手順を足す |
+| M4-6 | export の preflight（承認、fixture の拒否、実効 dpi）、proof の透かし。SKILL.md に絵の手順を足す |
 
 受入基準:
 
@@ -2097,7 +2094,6 @@ M5 + M7 ─▶ M9（拡張）
 | **HTTP 経由の CSRF・DNS rebinding・任意ファイルの読み書き** | M1 で全経路にトークン、Origin / Host の検査、JSON 限定、CORS `*` の削除、`--root` の閉じ込め |
 | 古いビルドが v3 ファイルを壊す | 版ゲートを先のリリースで出す（M1-5） |
 | 生成物の記録 | 候補ごとに来歴（ツール、モデル、プロンプト）を残す。公開先が求める場合に使える |
-| AI 利用の開示が公開先で求められる | journal と ai_manifest で、コマごとの AI と人間の関与を記録しておく。出すかどうかは公開先に合わせて書き出し時に選ぶ（`--public-manifest`） |
 | 資産の肥大化 | `genko gc`（ロックを取る、参照されていない、30日より古い）。却下した候補は履歴として残し、2000 件で退避する |
 | フォント依存の決定性 | フォントを package data として同梱し、写植の結果は op の明示座標として保存する |
 | **Windows 固有の問題** | 再試行つきの置換、長いパス、UTF-8 の stdout と `--ascii`、Windows CI、日本語パスでの MCP の起動試験 |
@@ -2144,6 +2140,6 @@ M5 + M7 ─▶ M9（拡張）
 次の点は、Genko の設計では決めずに済むようにした。
 
 - **Hermes と Genko を同じマシンで動かすか。** 回答が無くても進められる。同じマシン（stdio）でも別マシン（HTTP）でもつながるように作り、M0 は同じマシンで作る。別マシンで使うことになったら M1-7 を先に出す。
-- **販売するか、AI 利用を開示するか。** Genko は制限しない。生成の記録（ツール、モデル、プロンプト）を残しておき、公開先が開示を求める場合は書き出し時に `--public-manifest` を付ける。
+- **販売するか、AI 利用を開示するか。** Genko は関与しない。公開は人が行い、必要なら人が「生成AI使用」と記載する。
 - **表現の方針。** Genko は制限を掛けない。何を描くかはネームや画像を作る AI 側で決まる。
 - **参照画像の出どころ。** Genko は参照画像の使用を制限しない。出どころのメモは整理用の任意項目。
