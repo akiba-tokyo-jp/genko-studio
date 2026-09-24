@@ -46,7 +46,7 @@ Python 3.11+.
 - `src/genko/app/` — PySide6 GUI
 - `docs/AGENT.md` — how an agent should drive Genko
 - `docs/DESIGN.md` — architecture
-- `docs/AI_PIPELINE.md` — AI manga production pipeline design (plot → script → name → art → finish → export)
+- `docs/AI_PIPELINE.md` — agent-driven manga production design (external agents such as Hermes Agent operate Genko over MCP)
 - `docs/ops.schema.json` — ops catalog
 
 ## License
