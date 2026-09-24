@@ -29,7 +29,7 @@
 ### 0.2 要約（1画面）
 
 - **Genko は文章も画素も作らない。** 「画像生成は `put_raster` の外側。Genko は画素を発明しない」という既存の原則を、台詞や脚本にも広げる。Genko の中に LLM や画像モデルの呼び出しはなく、**Genko から外部への通信もない**。何をどの AI に送るかはエージェント側で決まる。
-- **接続は MCP。** Genko は MCP サーバーとして動き、Hermes Agent は `~/.hermes/config.yaml` の `mcp_servers` に登録して道具を読み込む。同じマシンなら stdio、別のマシンなら HTTP（トークン必須）で、どちらにも対応する（配置は未定、§13）。CLI と HTTP API からも同じ操作ができる。
+- **接続は MCP。** Genko は MCP サーバーとして動き、Hermes Agent は `~/.hermes/config.yaml` の `mcp_servers` に登録して道具を読み込む。同じマシンなら stdio、別のマシンなら HTTP（トークン必須）で、どちらにも対応する（どちらで使うかは決めなくても進められる、§13.2）。CLI と HTTP API からも同じ操作ができる。
 - **道具はエージェントのために作る。** 入力は平らな JSON（再帰なし）、エラーは直す場所の JSON ポインタ付き（例 `/panels/2/lines/0: 台詞が 40 字を超えている`）、書き込みは既定で dry_run、プレビュー画像を必ず返す。「次にやること」（worklist）を状態から計算して返すので、エージェントは迷わず進める。
 - **作業単位はコマ**（葉 Frame）。`Frame.panel`（PanelSpec）に指示・参照・領域・候補・採用を持つ。
 - **単一コマンドバス。** 変更はすべて `genko.ops.apply_ops`。MCP の道具も最後は op になる。AI 専用の書き込み経路は作らない。
@@ -92,7 +92,7 @@
 | 工程を進める主体 | Genko の runner（worklist を回す） | エージェントのループ。Genko は worklist（`next`）で次の作業を示すだけ |
 | 画像の審査（judge） | Claude vision | エージェントが比較画像を見て点数を記録する。最終判断は人間 |
 | 内容安全 | ローカル分類器を必須に | 画像ツール側の方針 + 人間の art ゲート（全ページ）。ローカル分類器は任意（M9） |
-| 部品のライセンス | ComfyUI の部品ごとの manifest | 画像ツールごとの利用条件の確認（`studio tools set`、§6.5） |
+| 部品のライセンス | ComfyUI の部品ごとの manifest | 削除（Genko は生成しない。使ったツールとモデルは来歴として記録するだけ） |
 | 接続 | CLI・HTTP が主、MCP は M9 | **MCP が主**（M0 から）。CLI・HTTP は同じ機能 |
 | 引き継いだもの | – | 既存コードの調査（§0.5）、データモデル、op、段組 DSL、写植、スクリーントーン、読み順とめくり、M1〜M3 の土台工事、HTTP の安全対策 |
 
@@ -241,7 +241,7 @@
 | ステージ | エージェント（LLM・画像ツール） | Genko（決定的） | 人間 | ゲート |
 |---|---|---|---|---|
 | S0 取り込み（任意） | 手書き台詞の読み取り、領域の提案 | XY-cut コマ検出、位置合わせ、提案の重ね表示 | 提案を確定 | – |
-| S1 企画 | premise から bible（キャラ、場所、制約）を書く | スキーマ検査、見分け lint、作家名・作品名の検査 | 任意の確認 | `bible`（既定 auto） |
+| S1 企画 | premise から bible（キャラ、場所、制約）を書く | スキーマ検査、見分け lint | 任意の確認 | `bible`（既定 auto） |
 | S2 キャラ設定画 | 依頼パックで設定画を生成し、取り込む | 設定画の依頼パック、顔の切り出し、固定 | 1キャラ1枚を承認 | **sheet ①** |
 | S3 脚本 | scene → beat を書く、指摘を直す | 脚本 lint（字数、話者、ページ予算、めくり） | 任意で承認 | `script`（既定 human） |
 | S4 ネーム | ページごとにネーム計画を書く、プレビューを見て直す | 段組 → コマ、写植、人物の位置、ネーム lint、プレビュー | 直す、承認する | **name ②** |
@@ -267,9 +267,7 @@
   - locations（時間帯の変種つき）、style の要点、constraints（共通制約。例「流血表現なし」）
 - **Genko の検査:**
   - id の一意性、全キャラに `hair_value` がある。
-  - 全キャラに `age` か `age_band: adult | minor` がある。不明なら `minor` として扱う。
   - 主要キャラ同士で `hair_value` とシルエットの要点が両方一致しない（モノクロでの見分け）。
-  - premise、style、constraints に実在の作家名・作品名が入っていない（ブロックリスト。警告）。
 - **コミット:** `upsert_character`、`upsert_location`、`set_bible{plot, constraints}`、`set_studio{style}`（M0 では既存の `set_bible` にまとめて入れ、詳細はサイドカーに置く）。
 
 #### S2 キャラ設定画（一貫性の錨。コマより先に行う）
@@ -345,7 +343,7 @@ name の承認が付いたページだけが対象。順序は「パイロット
   - 全ページが `finish`、指示のあるコマに未採用が無い、位置のない台詞が無い。
   - 実効 dpi が閾値以上（gray 350、2値の線 600。未満は警告、`--force` で通す）。
   - 承認: sheet・name・art がすべて人間の承認済み。
-  - **来歴と利用条件（`policy.commercial` が true のとき）:** 採用画像の来歴にあるツールがすべて、人間が利用条件を確認したもの（`studio tools set … --commercial-ok yes`、§6.5）。参照素材の来歴（origin・権利者・license）がすべて既知で商用可。
+  - 採用画像の来歴（どのツール・モデル・プロンプトで作ったか）が記録されている（無くても止めず、警告だけ）。
   - 取り込んだ画像に試験用の画像（`origin.kind:"fixture"`）が無い。
 - **出力:** 既存 exporter で出す。NAME/DRAFT は role で除外済み（render.py:445-459）。候補はレイヤーではないので出ようがない。pack と print は `spec.dpi`（B4 商業原稿は 600）で出す（M6 で pack の 150 dpi 上限を外す）。
 - **来歴の記録:** `ai_manifest.json`（採用コマごとの依頼パック、ツール、モデル、プロンプト、承認者、人間の関与）は既定で `studio/manifests/` に内部用として書く。公開版は `--public-manifest` のときだけ同梱する。
@@ -444,7 +442,7 @@ title.genko/
     "characters": [
       {
         "id": "hina",
-        "name": "日向ひな", "reading": "ひなた ひな", "role": "heroine", "age": 16, "age_band": "minor",
+        "name": "日向ひな", "reading": "ひなた ひな", "role": "heroine", "age": 16,
         "look": {
           "hair": "肩までのストレート、横に流した前髪",
           "hair_value": "beta",
@@ -476,9 +474,6 @@ title.genko/
       "autonomy": "gated",
       "strict_gates": true,
       "gates": {"bible": "auto", "script": "human", "sheet": "human", "name": "human", "art": "human", "export": "human"},
-      "commercial": true,
-      "content": {"sexual": "none", "violence": "mild", "romance": "allowed"},
-      "disclosure": "internal",
       "limits": {"max_images_per_panel": 8, "max_fix_rounds": 2}
     },
     "style": {
@@ -499,9 +494,9 @@ title.genko/
        "refs": [{"asset": "sha256:8e2a…", "kind": "reference"}]}
     ],
     "assets": {
-      "sha256:77a0…": {"kind": "face", "origin": "generated", "rights_holder": "human:leaf", "license": "own", "commercial_ok": true},
-      "sha256:9c1e…": {"kind": "sheet", "origin": "generated", "rights_holder": "human:leaf", "license": "own", "commercial_ok": true},
-      "sha256:77b0…": {"kind": "style", "origin": "self", "rights_holder": "日向 葉", "license": "own", "commercial_ok": true}
+      "sha256:77a0…": {"kind": "face", "origin": "generated"},
+      "sha256:9c1e…": {"kind": "sheet", "origin": "generated"},
+      "sha256:77b0…": {"kind": "style", "origin": "self"}
     },
     "script": {
       "logline": "…",
@@ -570,8 +565,7 @@ title.genko/
 - placed layer は `L_ink` より下に入れる（BG → NAME → 絵 → INK → FINISH）。人間の加筆が絵の上に乗る。
 - `clip_to` は新しいキーである。既存の `Layer.clip`（下のレイヤーでクリップ）と名前がぶつからないようにした。
 - `tokens` はキャラの見た目を画像ツール向けに固定した記述である。エージェントが一度書き、人間が直せ、`locked` で凍結する。依頼パックはこれを言い換えずにそのまま入れる。
-- 参照素材の来歴は `studio.assets` の索引（origin / rights_holder / license / commercial_ok）で持つ。索引に無い資産は参照にも配置にも使えない。
-- `age_band` は `age` から導く（18 未満は `minor`）。年齢が書かれていないキャラは `minor` とみなす。
+- 参照素材は `studio.assets` の索引（種類と出どころのメモ）で持つ。索引は整理のためのもので、使用を制限しない。
 - ストロークは `strokes_blob` の hash で持ち、project.json には座標を書かない。
 
 ### 4.4 PanelSpec（`Frame.panel`、葉フレームだけ）
@@ -692,7 +686,7 @@ title.genko/
 - **サイズ。** `suggested_px` はコマの比から計算した理想（約 1 MP、64 の倍数）。画像ツールが決まったサイズしか出せない場合に備え、`tool_sizes` に「どのサイズで作ってどう切るか」を並べる。候補を取り込むときに縦横比が違っても、配置は cover で合わせ、切れる範囲を `mapping` に残す。対応サイズの一覧はユーザー設定の `tools.json`（§6.5）から引く。
 - **プロンプトは下書きである。** 組み立ては決定的（style → キャラの `tokens` → shot と angle の語彙 → 場所 → 動きと表情 → 制約の順）で、エージェントは自由に書き直してよい。実際に使ったプロンプトは取り込み時に来歴へ書く。人間が `gen.prompt_override` を書いたコマでは、下書きの代わりにそれが入り、`notes_for_agent` に「人間の指定なので変えない」と書かれる。
 - **ガイド画像**（`guides/`）は Genko が描く。`composition` はネーム（NAME のストロークとコマ）の切り抜き、`pose` は人物の箱・頭の位置・向きの矢印、`keepout` は文字よけの範囲。どれも生成サイズで描き、白地に黒の単純な線にする（どの画像ツールにも参照として渡しやすい）。
-- **参照画像**（`refs/`）は承認済みのキャラの顔と設定画、場所の画像、コマに登録された参照素材の写しである。来歴が索引に無い資産は入らない。
+- **参照画像**（`refs/`）は承認済みのキャラの顔と設定画、場所の画像、コマに登録された参照素材の写しである。
 - **同じマシンではファイルパス、別マシンでは URL** で渡す。`generation_request` の応答は `request.json` の中身と、各ファイルのパス（同じマシン）か `GET /v1/requests/{id}/files/{name}` の URL（別マシン、トークン付き）を返す。応答にはガイドの縮小プレビュー（長辺 512 px）を画像として1枚だけ付ける。
 
 ### 4.6 モデルへの追加（Python）
@@ -845,7 +839,7 @@ def migrate_payload(payload: dict) -> Episode:
 
 compact な snapshot（`headless.snapshot`）は小さいまま保つ。ストローク座標と画像バイトは入れない。
 
-- トップレベル: `revision`、`studio: {step, gates_pending, approvals_requested, worklist_counts, preset, commercial}`、`bible: {characters: [{id, name, locked, age_band}]}`。
+- トップレベル: `revision`、`studio: {step, gates_pending, approvals_requested, worklist_counts, preset}`、`bible: {characters: [{id, name, locked}]}`。
 - ページ: `id`、`side`（left / right）、`art_ok`、`locked_by`、`reading_summary`（例「右上 → 左上 → 下」）。
 - 葉: `order`、`label`（例 "4-2"）、`panel_status`、`has_spec`、`candidates: {n, adopted, stale}`、`open_request`。
 - レイヤー: `kind`、`has_raster`、`frame_id`、`title`。
@@ -871,7 +865,7 @@ M1 は性能・安全・ロック・actor（1〜3、7、10）を、M2 は v3 に
    - **actor の省略。** studio プロジェクト（`studio.policy` がある）では、省略した呼び出しは `legacy:unknown` になる。編集はできるが、ゲート op・policy の変更・ロックの解除はできない。studio でない既存プロジェクトでは、旧既定の `genko` を今までどおり扱う（既存テストと既存の使い方はそのまま通る）。
    - `docs/AGENT.md` を直し、エージェントは常に `--agent ai:<name>` を付けると書く（M1-4）。
 2. **ゲート op の actor 規則。**
-   - `approve`、`revoke`、`name_ok`、`set_studio` の policy 系フィールド（gates、autonomy、strict_gates、commercial、content、disclosure）、`studio tools set`（画像ツールの利用条件の確認、§6.5）、`unlock` 系フラグは `human:*` だけが本承認できる。
+   - `approve`、`revoke`、`name_ok`、`set_studio` の policy 系フィールド（gates、autonomy、strict_gates）、`unlock` 系フラグは `human:*` だけが本承認できる。
    - `ai:*` はゲート op を一切使えない（第3版では AI の仮承認を置かない）。承認は `request_approval` で人間に依頼する（§5.3）。
    - `system:genko` と `legacy:unknown` はゲートに触れない。
    - `export` の承認は常に人間。
@@ -998,8 +992,8 @@ M1 は性能・安全・ロック・actor（1〜3、7、10）を、M2 は v3 に
 | `delete_character` | `id`, `force?` | 参照されていれば `force` が要る | episode |
 | `upsert_location` / `delete_location` | `location{id, …}` / `id` | 場所の登録 | episode |
 | `upsert_prop` / `delete_prop` | `prop{id, name, description, refs?}` / `id`, `force?` | 小物の登録。参照されていれば削除に `force` が要る | episode |
-| `register_assets` | `assets: {"sha256:…": {kind, mime, w, h, label?, origin: generated\|self\|licensed\|public_domain\|third_party, rights_holder, license, commercial_ok?, source_url?}}` | ストアにあることと画像ヘッダを確かめ、`studio.assets` の索引に入れる。**来歴（origin・rights_holder・license）は必須。** `third_party` は参照にできるが、`policy.commercial` では書き出しの preflight で拒否される。取り込んだ候補は `generated` として自動で付く | episode。読み取りのみの I/O |
-| `attach_reference` / `detach_reference` | `target{character_id\|location_id\|prop_id}`, `asset`, `kind: sheet\|face\|turnaround\|outfit\|establishing\|style\|reference` | 参照画像の付け外し。索引に無い（来歴の無い）資産は拒否 | sheet と face の付け替えは sheet ゲートの規則に従う |
+| `register_assets` | `assets: {"sha256:…": {kind, mime, w, h, label?, origin?, note?}}` | ストアにあることと画像ヘッダを確かめ、`studio.assets` の索引に入れる。`origin`（generated / self / other など）は整理用のメモで任意。取り込んだ候補は `generated` として自動で付く | episode。読み取りのみの I/O |
+| `attach_reference` / `detach_reference` | `target{character_id\|location_id\|prop_id}`, `asset`, `kind: sheet\|face\|turnaround\|outfit\|establishing\|style\|reference` | 参照画像の付け外し | sheet と face の付け替えは sheet ゲートの規則に従う |
 
 **脚本**
 
@@ -1016,7 +1010,7 @@ M1 は性能・安全・ロック・actor（1〜3、7、10）を、M2 は v3 に
 | `set_page_plan` | `page`, `beat_ids`, `turn_role: normal\|hook\|reveal` | ページへの beat 割り当て | page lock |
 | `apply_layout` | `page`, `tiers[]`, `gutter_mm?`, `ids{slot: frame_id}`, `root_id?`, `force?` | 段組 DSL（§5.5）からギロチン木を丸ごと作る。葉の id は `ids` のとおり | page lock。name_ok 後や placed art ありでは拒否（force で orphans へ） |
 | `reset_frames` | `page`, `root_id?`, `force?` | 根1つに戻す | 同上 |
-| `set_panel` | `page`, `frame_id`, `set{…}`, `unset?[]`, `pin?[]`, `unpin?[]` | PanelSpec に merge し、`brief_hash` を再計算する。`gen.*_override` は human だけが設定でき、設定すると自動で pinned になる。指示とプロンプト上書きに実在の作家名・作品名があれば警告（commercial では拒否） | page lock。`pinned` は ai:* から守られる |
+| `set_panel` | `page`, `frame_id`, `set{…}`, `unset?[]`, `pin?[]`, `unpin?[]` | PanelSpec に merge し、`brief_hash` を再計算する。`gen.*_override` は human だけが設定でき、設定すると自動で pinned になる | page lock。`pinned` は ai:* から守られる |
 | `record_review` | `target{page_id, frame_id?}`, `kind: name\|art`, `score?`, `notes`, `input_hash` | エージェントの自己点検の結果を残す（`page.plan.reviews[kind]` か `panel.reviews[kind]`）。worklist は同じ `input_hash` の点検を出し直さない（§7.2） | page lock |
 
 **領域と参照**
@@ -1049,7 +1043,7 @@ M1 は性能・安全・ロック・actor（1〜3、7、10）を、M2 は v3 に
 |---|---|---|---|
 | `set_finish` | `page`, `frame_id?`, `finish{mode, black, white, levels, lpi, angle, line_threshold}` \| null | コマ単位でスタイルの仕上げを上書きする（render 時に効く） | page lock |
 
-**画像ツールの利用条件は op ではない。** 画像ツール（例 `openai:gpt-image-1`）を商用に使えるかは、原稿ではなく利用者と契約の事実なので、ユーザー設定ディレクトリの `tools.json` に `genko studio tools set <tool> --commercial-ok yes|no --terms-url URL --as human:leaf` で書く（§6.5）。書き出しの preflight は、採用画像の来歴の `tool_id`（`tools.json` のキー）を今の `tools.json` で引いて判定する。`tool` はエージェント側の道具名（自己申告）で、判定には使わない。
+**画像ツールの情報は op ではない。** 画像ツール（例 `openai:gpt-image-1`）の対応サイズや機能は、原稿ではなく利用者の環境の事実なので、ユーザー設定ディレクトリの `tools.json` に置く（§6.5）。
 
 placed 資産への決定的な画素変換（線抽出で INK ラスタを作る、など）は **op の中では行わない。** `studio derive` がロックの外で新しい資産を作り、`import_candidates{mode:"derive", origin.kind:"genko"}` で候補にしてから採用する（actor は `studio derive` を呼んだ人間かエージェント）。op が資産ファイルを書くことはない。メモリ上の作業ラスタ（`raster_png`）に対する既存の `filter_raster` は今のまま op で行う。
 
@@ -1136,7 +1130,7 @@ src/genko/
     vocab.json           # shot / angle / 表情 / 感情の語彙（日本語 ↔ 英語 ↔ タグ）= タグ・プロンプト辞書
     genreq.py            # 生成依頼パックの組み立て（サイズ、プロンプトの下書き、ガイドと参照の書き出し）
     importer.py          # 画像の取り込み: inbox のパス / アップロード済み資産 → 検証 → assets → import_candidates
-    tools_registry.py    # 画像ツールの登録（ユーザー設定の tools.json）: 利用条件の確認、対応サイズ、参照・編集・マスクの可否
+    tools_registry.py    # 画像ツールの登録（ユーザー設定の tools.json）: 対応サイズ、参照・編集・マスクの可否
     worklist.py          # next_actions(episode) → [WorkItem]（純関数。reviews・attempts・チケットを読む）
     claims.py            # 作業項目の短い予約（複数のエージェント・サブエージェント用、§7.4）
     review.py            # review.html（ページのプレビュー、コマの指示、候補、承認コマンド）
@@ -1208,7 +1202,7 @@ class StudioService:
     # 状態
     def projects(self) -> ToolResult: ...
     def create_project(self, name: str, *, title: str, pages: int, spec_preset: str, binding: str = "right") -> ToolResult: ...
-    # policy は `studio` の既定が入り、`commercial` は未設定（人間が決めるまで本番書き出しは不可）
+    # policy は `studio` の既定（要所で人間が承認）が入る
     def status(self, project: str) -> ToolResult: ...
     def next(self, project: str, *, role: str | None = None, limit: int = 5, claim: bool = False) -> ToolResult: ...
     def inspect(self, project: str, *, target: dict) -> ToolResult: ...
@@ -1249,7 +1243,7 @@ class StudioService:
 - **書き込む道具は `commit=False` が既定。** dry_run の結果（指摘、差分の要約、プレビュー）を返す。エージェントは指摘が無くなってから `commit=True` で呼ぶ。`commit=True` でもエラーがあれば保存しない。
 - **`issues` の `path`** は、その道具の入力の JSON ポインタである（`submit_name` なら計画の中の位置）。op のエラー（`ops[7] set_panel: …`）もソースマップで入力の位置に直してから返す。`hint` は直し方の短い説明（例「この段の cols の w の合計が 1.08。1.0 になるように直す」）。
 - **`images` は LLM に見せる用**で、縮小した PNG を最大2枚。**`files` は画像ツールに渡す用**で、原寸のファイル。同じマシンでは絶対パス、別マシンではトークン付きのダウンロード URL（§8.1）。
-- 人間用の操作（`approve`、`revoke`、本番の `export`、`studio tools set`、policy の変更）は StudioService の別の面（`HumanService`）に置き、actor が `human:*` のときだけ作れる。MCP サーバーは `HumanService` を持たない。
+- 人間用の操作（`approve`、`revoke`、本番の `export`、policy の変更）は StudioService の別の面（`HumanService`）に置き、actor が `human:*` のときだけ作れる。MCP サーバーは `HumanService` を持たない。
 
 ### 6.4 MCP サーバー（`genko mcp`）
 
@@ -1266,7 +1260,7 @@ class StudioService:
 
 ### 6.5 画像ツールの登録（`tools.json`）
 
-Genko は画像ツールを呼ばないが、依頼パックのサイズの候補と、書き出しの preflight のために、エージェントが使う画像ツールの性質と利用条件を知っておく必要がある。ユーザー設定ディレクトリの `tools.json` に置く（原稿ではなく利用者の環境と契約の事実なので、project.json には入れない）。
+Genko は画像ツールを呼ばないが、依頼パックのサイズの候補を出すために、エージェントが使う画像ツールの性質を知っておくとよい。ユーザー設定ディレクトリの `tools.json` に置く（原稿ではなく利用者の環境の事実なので、project.json には入れない）。
 
 ```json
 {
@@ -1274,16 +1268,13 @@ Genko は画像ツールを呼ばないが、依頼パックのサイズの候�
     "label": "ChatGPT / OpenAI の画像生成",
     "sizes_px": [[1024, 1024], [1536, 1024], [1024, 1536]],
     "supports": {"references": true, "edit": true, "mask": true, "seed": false},
-    "commercial_ok": null,
-    "terms_url": null,
-    "checked_by": null,
-    "notes": "利用条件は利用者が確認して記入する"
+    "notes": "サイズと機能は版で変わる。確かめて直す"
   }
 }
 ```
 
-- 出荷時の値はすべて `commercial_ok: null`（未確認）。利用者が提供元の条件を確かめ、`genko studio tools set openai:gpt-image-1 --commercial-ok yes --terms-url URL --as human:leaf` で書く（human のみ）。
-- ツールの id とサイズの表は例である。実際のサイズや機能は提供元と版で変わるので、利用者かエージェントが確かめて直す。登録の無いツールの画像も取り込めるが、サイズの候補は一般的な正方形・横長・縦長を出し、`policy.commercial` では書き出しの preflight で止まる。
+- 値は例である。実際のサイズや機能は提供元と版で変わるので、利用者かエージェントが確かめて直す（`genko studio tools set`）。
+- 登録の無いツールの画像も取り込める。その場合、サイズの候補は一般的な正方形・横長・縦長を出す。
 - エージェントは `generation_request{tool: "openai:gpt-image-1"}` のように使うツールを伝えられる。依頼パックはそのツールの対応サイズで `tool_sizes` を作り、参照やマスクを渡せないツールなら、その旨を `notes_for_agent` に書く。
 
 ### 6.6 pyproject の extras
@@ -1443,7 +1434,7 @@ MCP サーバー名は `genko`。Hermes からは `mcp_genko_<道具名>` とし
 | 道具 | 入力（主なもの） | 返すもの | 書き込み |
 |---|---|---|---|
 | `projects` | – | `--root` 配下のプロジェクト（名前、題名、ページ数、工程） | なし |
-| `create_project` | `name`, `title`, `pages`, `spec_preset`（判型。例 `commercial-b4`）, `binding`。policy は `studio` の既定、`commercial` は人間が決める | 作ったプロジェクト | あり |
+| `create_project` | `name`, `title`, `pages`, `spec_preset`（判型。例 `commercial-b4`）, `binding`。policy は `studio` の既定 | 作ったプロジェクト | あり |
 | `status` | – | 工程ごとの件数、承認待ち、承認依頼の状態、次の作業の件数 | なし |
 | `next` | `role?`, `limit?`, `claim?` | worklist の項目（`tools` の目安付き）、`waiting_for` | 予約だけ |
 | `inspect` | `target`（`bible` / `script` / `page` / `panel` / `candidate` / `request`） | 対象の JSON（小さく） | なし |
@@ -1468,7 +1459,7 @@ MCP サーバー名は `genko`。Hermes からは `mcp_genko_<道具名>` とし
 | `propose_lines`（M8） | `page`, `lines[]`（手書き台詞の読み取り結果と位置） | dry_run の重ね表示 | 提案だけ |
 | `tickets` | `status?` | チケットの一覧（人間からの修正指示と返事を含む） | なし |
 
-**出さない道具:** `approve`、`revoke`、本番の `export`、`studio tools set`、policy の変更、`unlock_page`（人間のロックを外す）。エージェントに人間の権限を持たせないためである。
+**出さない道具:** `approve`、`revoke`、本番の `export`、policy の変更、`unlock_page`（人間のロックを外す）。エージェントに人間の権限を持たせないためである。
 
 **画像の受け渡し。**
 
@@ -1535,14 +1526,14 @@ genko studio import-images demo.genko --request rq_3f9a51c0 a.png b.png --origin
 genko studio derive  demo.genko --page 4 --frame f4_p1 --kind lineart
 
 # 人間向け（actor は human:*）
-genko studio init    demo.genko --title 夏の午後の約束 --pages 16 --b4 --preset studio --commercial yes|no
+genko studio init    demo.genko --title 夏の午後の約束 --pages 16 --b4 --preset studio
 genko studio review  demo.genko --out review.html                        # 確認画面（プレビュー、指示、候補、承認コマンド）
 genko studio approve demo.genko name --page 4 --as human:leaf
 genko studio approve demo.genko sheet --character hina --candidate cd_02 --as human:leaf
 genko studio revoke  demo.genko name --page 4 --reason "3コマ目を割り直す" --as human:leaf
 genko studio fix     demo.genko --page 4 --frame f4_p1 --instruction "顔をもう少し右向きに" --as human:leaf
 genko studio accept  demo.genko prop_1a2b --as human:leaf                # assist の提案を受理
-genko studio tools set openai:gpt-image-1 --commercial-ok yes --terms-url URL --as human:leaf
+genko studio tools set openai:gpt-image-1 --sizes 1024x1024,1536x1024,1024x1536
 genko studio import-name demo.genko ./scans/*.png                        # アタリ取り込み（M8）
 genko studio adopt-drafts demo.genko                                     # M0 のサイドカーを op で取り込む（M3）
 
@@ -1734,11 +1725,11 @@ placed layer ごとに、print と proof で次を行う。
 | 4 候補の目安 | 縦横比、文字よけの範囲のエッジ密度、輝度帯、ガイド追従度 | Genko（取り込み時に計算） | 候補の一覧の順位 |
 | 5 候補の評価 | 比較画像、キャラの設定画、指示 | エージェント | `review_candidates`、採用か修正 |
 | 6 連続性 | ページと見開きの proof | エージェント | チケット |
-| 7 印刷の点検 | 顔にかかるフキダシ（報告済みの領域）、実効 dpi、来歴と利用条件。画内文字はエージェントの評価と人間の art ゲート | Genko（preflight）+ エージェント | preflight の警告と拒否 |
+| 7 印刷の点検 | 顔にかかるフキダシ（報告済みの領域）、実効 dpi。画内文字はエージェントの評価と人間の art ゲート | Genko（preflight）+ エージェント | preflight の警告と拒否 |
 | 8 人間 | ゲート①〜④、いつでも修正 | 人間 | 承認、差し戻し、修正指示 |
 
 - エージェントの評価は助言である。採用はエージェントもできるが、ページの確定（art ③）は人間が行う。
-- **内容の安全。** 生成はエージェントの画像ツールで行われるので、まずそのツールの方針が効く。Genko は bible の年齢（`age_band`）を依頼パックに書き、「性的な表現をしない」を描かせないものに常に入れる（人間の上書きでも外れない）。そのうえで、**全ページの絵を人間が art ゲートで見る**ことを既定にする（§3.4）。ローカルの分類器による自動の検査は任意の追加として M9 に置く（エージェントがローカルの画像モデルを使う場合に有用）。
+- **表現の制限は Genko では掛けない。** 何を描くかはネームと画像を作る AI（とそのサービスの方針）で決まる。Genko は内容を検査せず、人間が art ゲートで全ページを見る。
 
 ### 9.7 解像度
 
@@ -1846,7 +1837,7 @@ placed layer ごとに、print と proof で次を行う。
 - (b) `ai:test` はどのゲートも承認できない（MCP に道具が無く、`apply_ops` 経由の `approve` も拒否される）。人間の承認が無ければ各ゲートで `waiting_for` を出して止まる。
 - (c) 絵: 各コマで依頼パック → 試験用の画像を `inbox/` に置く → `import_images` → `adopt`。人間の art 承認の後、仕上げ、preflight、書き出しで TIFF と PDF ができる。print に NAME / DRAFT / 候補の画素がない（番兵色で確かめる）。
 - (d) 本番書き出しは `origin.kind:"fixture"` の画像があるので拒否される。`--allow-fixture` で通る。
-- (e) `policy.commercial` が true で、`tools.json` の `commercial_ok` が未確認のツールの画像があると、本番書き出しが拒否される。`studio tools set` の後は通る。
+- (e) 採用画像の来歴が記録され、ai_manifest に出る。
 - (f) 別マシンの形: HTTP の MCP（`--http`）とトークンで同じ筋書きが通る。画像はアップロード（`POST /v1/assets`）で渡し、参照ファイルは URL で取る。
 - (g) 途中で偽エージェントを止め、新しい偽エージェントで `next` から続けて完了する（再開）。同じ依頼を作り直しても重複しない。
 - (h) わざと壊した計画を出し続ける筋書きで、偽エージェントが3回で諦めてチケットを出し、`next` が同じ項目を出し続けない。
@@ -1997,7 +1988,7 @@ M5 + M7 ─▶ M9（拡張）
 | M4-3 | `importer.py`（`inbox/` のパス、アップロード済み資産、検証、上限、冪等）、`import_candidates`、取り込み時の目安（縦横比、文字よけ、輝度、ガイド追従度） |
 | M4-4 | MCP の道具: `generation_request`、`import_images`、`candidates`、`review_candidates`、`adopt`、`request_fix`、`report_regions`、`finish_page`、`preflight`、`export_proof`。worklist を書き出しまで広げる。予約（claim） |
 | M4-5 | キャラ設定画の流れ（依頼 → 取り込み → 人間の `approve sheet` → 顔の切り出し → `locked`）、場所の参照画像 |
-| M4-6 | export の preflight（承認、来歴、`tools.json` の利用条件、fixture の拒否、実効 dpi）、`ai_manifest`（内部 / 公開）、proof の透かし。SKILL.md に絵の手順を足す |
+| M4-6 | export の preflight（承認、fixture の拒否、実効 dpi）、`ai_manifest`（内部 / 公開）、proof の透かし。SKILL.md に絵の手順を足す |
 
 受入基準:
 
@@ -2105,10 +2096,8 @@ M5 + M7 ─▶ M9（拡張）
 | **apply と保存の性能**（undo 履歴ごとの deepcopy、ストロークの肥大） | M1 で undo 履歴を写さない、Stroke を不変にして共有、性能試験。M2 でストロークを blob に、差分保存、project.json の大きさの試験 |
 | **HTTP 経由の CSRF・DNS rebinding・任意ファイルの読み書き** | M1 で全経路にトークン、Origin / Host の検査、JSON 限定、CORS `*` の削除、`--root` の閉じ込め |
 | 古いビルドが v3 ファイルを壊す | 版ゲートを先のリリースで出す（M1-5） |
-| **画像ツールの利用条件（商用利用）** | 候補ごとに来歴（ツール、モデル）を残す。`tools.json` の `commercial_ok` は既定で未確認。`policy.commercial` では未確認のツールの画像で書き出しを拒否する。Genko は法的判断をしない |
-| **画像の内容安全** | 画像ツール側の方針、依頼パックの「性的な表現をしない」（外せない）、bible の年齢、全ページの人間の art 承認。ローカル分類器は任意（M9） |
-| **著作権・画風の模倣** | 参照素材の来歴（origin・権利者・license）を必須にし、商用モードでは不明なものを拒否。指示・bible・人間のプロンプト上書きの作家名と作品名をブロックリストで検査。最終的な判断は人間 |
-| **AI 生成物の権利と開示** | journal と ai_manifest で、コマごとの人間の関与（ネームの修正、指示、選択、加筆、仕上げ）を記録する。開示の方針は利用者が決める（§13） |
+| 生成物の記録 | 候補ごとに来歴（ツール、モデル、プロンプト）を残す。公開先が求める場合に使える |
+| AI 利用の開示が公開先で求められる | journal と ai_manifest で、コマごとの AI と人間の関与を記録しておく。出すかどうかは公開先に合わせて書き出し時に選ぶ（`--public-manifest`） |
 | 資産の肥大化 | `genko gc`（ロックを取る、参照されていない、30日より古い）。却下した候補は履歴として残し、2000 件で退避する |
 | フォント依存の決定性 | フォントを package data として同梱し、写植の結果は op の明示座標として保存する |
 | **Windows 固有の問題** | 再試行つきの置換、長いパス、UTF-8 の stdout と `--ascii`、Windows CI、日本語パスでの MCP の起動試験 |
@@ -2148,14 +2137,13 @@ M5 + M7 ─▶ M9（拡張）
 | 3 | AI の組み込み | **Genko に Claude や ChatGPT を組み込まない。** Hermes Agent などの外部エージェントが操作し、ネーム出しや画像生成はエージェント側の Claude・ChatGPT で行う | 第3版の全体（§0.4）。Genko は外部と通信しない |
 | 4 | 接続方法 | MCP | M0 から MCP サーバー（stdio）。CLI・HTTP も同じ機能 |
 | 5 | 人の承認 | 要所で人が承認（キャラ設定画、ネーム、ページごとの絵、書き出し） | 既定プリセット `studio`。MCP に承認の道具を出さない |
-| 6 | 画像生成 | 今は ChatGPT（エージェント経由）。変える可能性あり | 依頼パックはツールに依らない形。`tools.json` でツールごとの性質と利用条件を持つ |
+| 6 | 画像生成 | 今は ChatGPT（エージェント経由）。変える可能性あり | 依頼パックはツールに依らない形。`tools.json` でツールごとの対応サイズと機能を持つ |
 
-### 13.2 まだ決まっていないこと
+### 13.2 決めなくてよいこと
 
-| # | 決めること | 選択肢 | 推奨既定 | 決定で変わること |
-|---|---|---|---|---|
-| 7 | **Hermes Agent と Genko を同じマシンで動かすか** | 同じマシン / 別のマシン | 決まるまでは同じマシン（stdio）で作り、別マシン用の HTTP 接続（M1-7）は決まってから出す | 別マシンなら M1-7 を M0 の直後に出す。TLS の付け方（リバースプロキシか SSH トンネル）を決める |
-| 8 | **商用利用** | 出版・販売するか | する場合は `policy.commercial:true`。画像ツールの利用条件を人間が確認して `tools.json` に記録し、書き出しで強制する | false なら利用条件の確認は警告だけになる |
-| 9 | **AI 利用の開示** | ai_manifest を内部だけに持つ / 公開版を同梱する | 内部だけ。出版社などが求めるときだけ `--public-manifest` | 公開版は毎回の書き出しに入る |
-| 10 | **内容の方針** | 恋愛・暴力の程度、未成年キャラの扱い | 性的表現なし、暴力は軽度まで。未成年キャラの性的表現は常に禁止（変更不可） | 依頼パックの「描かせないもの」と lint の警告 |
-| 11 | **参照素材の出所** | 自作と権利を確認した素材だけ / 第三者の素材も参照に使う（非商用の習作） | 自作と権利を確認した素材だけ。作家名・作品名での指示はしない | 第三者の素材は非商用のプロジェクトだけで使え、商用の書き出しでは拒否される |
+次の点は、Genko の設計では決めずに済むようにした。
+
+- **Hermes と Genko を同じマシンで動かすか。** 回答が無くても進められる。同じマシン（stdio）でも別マシン（HTTP）でもつながるように作り、M0 は同じマシンで作る。別マシンで使うことになったら M1-7 を先に出す。
+- **販売するか、AI 利用を開示するか。** Genko は制限しない。生成の記録（ツール、モデル、プロンプト）を残しておき、公開先が開示を求める場合は書き出し時に `--public-manifest` を付ける。
+- **表現の方針。** Genko は制限を掛けない。何を描くかはネームや画像を作る AI 側で決まる。
+- **参照画像の出どころ。** Genko は参照画像の使用を制限しない。出どころのメモは整理用の任意項目。
