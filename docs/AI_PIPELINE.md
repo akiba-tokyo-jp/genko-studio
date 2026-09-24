@@ -1895,6 +1895,7 @@ M5 + M7 ─▶ M9（拡張）
 | M0-5 | `StudioService` と MCP サーバー（extra `mcp`、stdio）。**`apply_ops` 道具は StudioService の層で許可リストの op だけを通す**（M1-4 を待たない）。ゲート op（`name_ok`・`approve`・`revoke`）、`lock_page` / `unlock_page`、`set_studio` の policy、`put_raster` の `path`、`set_meta` の `font_path` は拒否する。M0 の `record_review` と `request_approval` はサイドカー（`studio/drafts/reviews.json`、`approvals.json`）に書き、`next` はそれを読む（新しい op を作らないため）。道具: `projects`、`create_project`、`status`、`next`（ネームまでの worklist）、`inspect`、`render`（name のプレビュー）、`set_bible`、`set_script`、`submit_name`、`edit_panel`、`apply_ops`（dry_run が既定）、`record_review`、`request_approval`、`tickets`。同じ道具の CLI（`genko studio …`） |
 | M0-6 | 人間向け: `genko studio init`、`studio review`（HTML）、`studio approve name`（M0 では既存の `name_ok` を人間の actor で呼ぶ）。Hermes 用の `SKILL.md` と `config.example.yaml`、MCP resource `manga-rules` |
 | M0-7 | 偽エージェントによる E2E（§10.6 の a、b、g、h のネームまでの部分）、性能の目安（`submit_name` の応答 2 秒以内） |
+| M0 の実装メモ | 実装時の割り切り: 人間の承認は M0 では name だけ（`studio approve name`）。脚本は承認不要（auto）。承認の取り消しと `edit_panel` は M3 で入れる（それまでは `submit_name` の `replace:true` で作り直す）。人間の修正指示は `genko studio comment` で出し、エージェントの `next` に `revise_page` として出る。`genko mcp` は stdio だけ（HTTP は M1-7） |
 | D0 | premise 5 本、ルーブリック、評価者 2 名の手順書、Hermes での手動チェックリスト（MCP の画像コンテンツが見えるか、Hermes から ChatGPT の画像生成を参照画像つきで呼び、ファイルに保存できるか） |
 
 受入基準:

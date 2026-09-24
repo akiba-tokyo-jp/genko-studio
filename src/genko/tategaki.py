@@ -97,16 +97,17 @@ def glyph(char: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, i
 def _columns(text: str, per_col: int) -> list[list[str]]:
     if per_col < 1:
         per_col = 1
-    chars = list(text or "")
     cols: list[list[str]] = []
-    cur: list[str] = []
-    for char in chars:
-        if len(cur) >= per_col:
+    # An explicit "\n" always starts a new column; long segments still wrap at per_col.
+    for segment in (text or "").split("\n"):
+        cur: list[str] = []
+        for char in segment:
+            if len(cur) >= per_col:
+                cols.append(cur)
+                cur = []
+            cur.append(char)
+        if cur:
             cols.append(cur)
-            cur = []
-        cur.append(char)
-    if cur:
-        cols.append(cur)
     for i in range(1, len(cols)):
         while cols[i] and cols[i][0] in LINE_START_KINSOKU and cols[i - 1]:
             cols[i - 1].append(cols[i].pop(0))

@@ -13,6 +13,7 @@ dependencies = [
 [project.optional-dependencies]
 app = ["pyside6>=6.6"]
 dev = ["pytest>=8.0"]
+mcp = ["mcp>=2,<3"]
 
 [project.scripts]
 genko = "genko.__main__:main"

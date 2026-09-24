@@ -1,0 +1,19 @@
+{
+  "scenes": [
+    {
+      "id": "sc_01", "summary": "ひなが屋上に上がる", "location_id": "loc_rooftop", "time": "sunset",
+      "beats": [
+        {"id": "b01", "kind": "action", "speaker_id": null, "text": "夕方の屋上。ひなが扉を開ける", "emotion": "緊張", "page": 1, "reveal": false},
+        {"id": "b02", "kind": "narration", "speaker_id": null, "text": "5年前の今日、ここで約束した", "emotion": "郷愁", "page": 1, "reveal": false},
+        {"id": "b03", "kind": "monologue", "speaker_id": "hina", "text": "…来るわけないよね", "emotion": "諦め", "page": 1, "reveal": false},
+        {"id": "b04", "kind": "action", "speaker_id": null, "text": "誰もいない屋上。フェンスの向こうに夕日", "emotion": "寂しさ", "page": 2, "reveal": false},
+        {"id": "b05", "kind": "dialogue", "speaker_id": "sora", "text": "遅いぞ", "emotion": "照れ", "page": 2, "reveal": true},
+        {"id": "b06", "kind": "action", "speaker_id": null, "text": "給水塔の上にソラが座っている", "emotion": "驚き", "page": 2, "reveal": false},
+        {"id": "b07", "kind": "dialogue", "speaker_id": "hina", "text": "…やっぱり来てくれたんだ", "emotion": "安堵", "page": 3, "reveal": false},
+        {"id": "b08", "kind": "dialogue", "speaker_id": "sora", "text": "約束しただろ", "emotion": "照れ", "page": 3, "reveal": false},
+        {"id": "b09", "kind": "dialogue", "speaker_id": "hina", "text": "うん…約束したから", "emotion": "喜び", "page": 4, "reveal": false},
+        {"id": "b10", "kind": "action", "speaker_id": null, "text": "二人並んで夕日を見る", "emotion": "静けさ", "page": 4, "reveal": false}
+      ]
+    }
+  ]
+}

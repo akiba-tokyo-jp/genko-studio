@@ -55,3 +55,42 @@ Locked writer → HTTP 409.
 ## Human
 
 `python -m genko app` — click a panel to select before splitting. Drag a balloon to `move_line`. Ctrl+Z undoes. Same `.genko`.
+
+## Studio (M0): write the name through MCP
+
+Genko does not call any LLM or image model. You (the agent) write the bible, the script and one name plan per page; Genko checks them, splits the panels, letters vertical balloons and returns a preview image. Only a human can approve.
+
+Connect (same machine, stdio). Hermes Agent `~/.hermes/config.yaml`:
+
+```yaml
+mcp_servers:
+  genko:
+    command: "genko"
+    args: ["mcp", "--root", "/home/you/manga", "--agent", "ai:hermes"]
+```
+
+Install with the extra: `uv sync --extra mcp` (or `pip install "genko-studio[mcp]"`). The skill for Hermes is `integrations/hermes/genko-manga/SKILL.md`.
+
+Tools: `projects`, `create_project`, `status`, `next`, `inspect` (bible / script / page / schemas / rules / snapshot), `render`, `set_bible`, `set_script`, `submit_name`, `apply_ops` (allow-listed ops only), `record_review`, `request_approval`, `tickets`. Resource: `genko://guide/manga-rules`.
+
+- Writing tools default to `commit: false`: they return `issues` (`{code, severity, path, message, hint}`, `path` is a JSON pointer into your input) and a preview. Fix what `path` points at, then send `commit: true`.
+- Name plan tiers run top to bottom; the cols inside a tier are listed right to left.
+- AI drafts live in `<project>/studio/drafts/`; project.json keeps its current format.
+
+The same tools from the shell (project is a path):
+
+```bash
+genko studio init demo.genko --pages 8 --title 試作
+genko studio set-bible demo.genko bible.json --commit
+genko studio set-script demo.genko script.json --commit
+genko studio submit-name demo.genko p001.json --commit
+genko studio next demo.genko
+```
+
+Human only:
+
+```bash
+genko studio review demo.genko --out review.html            # previews, briefs, approve commands
+genko studio approve demo.genko name --pages 1-4 --as human:leaf
+genko studio comment demo.genko --page 2 "2コマ目の台詞を減らして" --as human:leaf
+```

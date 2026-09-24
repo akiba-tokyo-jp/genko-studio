@@ -29,6 +29,17 @@ uv run python -m genko serve --port 8765
 
 See `docs/AGENT.md`.
 
+### Agents over MCP (Hermes Agent など)
+
+```bash
+uv sync --extra mcp
+uv run python -m genko mcp --root ./manga --agent ai:hermes   # stdio MCP server
+uv run python -m genko studio review ./manga/demo.genko --out review.html
+uv run python -m genko studio approve ./manga/demo.genko name --pages 1-4 --as human:you
+```
+
+The agent writes the bible, script and name plans; Genko checks, lays out and letters them. See `docs/AGENT.md` (Studio) and `integrations/hermes/`.
+
 ```bash
 uv run pytest
 ```
@@ -44,6 +55,8 @@ Python 3.11+.
 - `src/genko/headless.py` — JSON snapshot
 - `src/genko/server.py` — HTTP API + OpenAPI
 - `src/genko/app/` — PySide6 GUI
+- `src/genko/studio/` — agent tools: schemas, lint, layout DSL, lettering, worklist
+- `src/genko/mcp/` — MCP server (`genko mcp`)
 - `docs/AGENT.md` — how an agent should drive Genko
 - `docs/DESIGN.md` — architecture
 - `docs/AI_PIPELINE.md` — agent-driven manga production design (external agents such as Hermes Agent operate Genko over MCP)

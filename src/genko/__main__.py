@@ -59,6 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8765)
 
     sub.add_parser("app", help="Open the human desktop app")
+    sub.add_parser("studio", help="Agent tools and human approvals (genko studio -h)", add_help=False)
+    sub.add_parser("mcp", help="MCP server for agents such as Hermes Agent (genko mcp -h)", add_help=False)
     return parser
 
 
@@ -75,6 +77,15 @@ def _read_ops(source: str) -> list:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "studio":
+        from genko.studio.cli import main as studio_main
+
+        return studio_main(argv[1:])
+    if argv and argv[0] == "mcp":
+        from genko.studio.cli import mcp_main
+
+        return mcp_main(argv[1:])
     args = build_parser().parse_args(argv)
     try:
         if args.cmd == "new":

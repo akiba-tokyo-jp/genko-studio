@@ -1,0 +1,21 @@
+{
+  "page": 1, "turn_role": "normal", "template": null,
+  "tiers": [
+    {"h": 0.35, "cols": [{"slot": "p1", "w": 1.0, "rows": null}]},
+    {"h": 0.65, "cols": [{"slot": "p2", "w": 0.55, "rows": null}, {"slot": "p3", "w": 0.45, "rows": null}]}
+  ],
+  "panels": [
+    {"slot": "p1", "shot": "LS", "angle": "high", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [{"id": "hina", "pose": "扉を開ける", "expression": "緊張", "facing": "left", "pos": "right", "scale": 0.4}],
+     "action": "屋上の扉を開ける", "emotion": "緊張", "fx": [], "emphasis": 0.3, "cross": false,
+     "beat_ids": ["b01", "b02"], "lines": [{"beat_id": "b02", "balloon": "narration", "breaks": ["5年前の今日", "ここで約束した"]}]},
+    {"slot": "p2", "shot": "MS", "angle": "eye", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [{"id": "hina", "pose": "立ち止まる", "expression": "不安", "facing": "left", "pos": "center", "scale": 0.8}],
+     "action": "屋上を見回す", "emotion": "不安", "fx": [], "emphasis": 0.4, "cross": false,
+     "beat_ids": [], "lines": []},
+    {"slot": "p3", "shot": "CU", "angle": "eye", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [{"id": "hina", "pose": "うつむく", "expression": "諦め", "facing": "left", "pos": "center", "scale": 0.9}],
+     "action": "うつむく", "emotion": "諦め", "fx": [], "emphasis": 0.5, "cross": false,
+     "beat_ids": ["b03"], "lines": [{"beat_id": "b03", "balloon": "thought", "breaks": ["…来るわけ", "ないよね"]}]}
+  ]
+}

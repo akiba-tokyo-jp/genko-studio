@@ -1,0 +1,16 @@
+{
+  "page": 2, "turn_role": "reveal", "template": "climax_wide", "tiers": null,
+  "panels": [
+    {"slot": "p1", "shot": "ELS", "angle": "eye", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [], "action": "誰もいない屋上とフェンスの向こうの夕日", "emotion": "寂しさ", "fx": [], "emphasis": 0.3, "cross": false,
+     "beat_ids": ["b04"], "lines": []},
+    {"slot": "p2", "shot": "INSERT", "angle": "low", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [], "action": "給水塔の上から声が降ってくる", "emotion": "驚き", "fx": [], "emphasis": 0.4, "cross": false,
+     "beat_ids": ["b05"], "lines": [{"beat_id": "b05", "balloon": "speech", "breaks": ["遅いぞ"]}]},
+    {"slot": "p3", "shot": "FS", "angle": "low", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [{"id": "sora", "pose": "給水塔の上に座る", "expression": "照れ笑い", "facing": "left", "pos": "right_third", "scale": 0.6},
+                    {"id": "hina", "pose": "見上げる", "expression": "驚き", "facing": "right", "pos": "left", "scale": 0.5}],
+     "action": "給水塔の上にソラが座っている", "emotion": "驚き", "fx": ["focus"], "emphasis": 0.9, "cross": false,
+     "beat_ids": ["b06"], "lines": []}
+  ]
+}
