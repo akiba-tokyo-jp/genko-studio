@@ -114,6 +114,17 @@ def test_eight_pages_from_bible_to_export_offline(tmp_path: Path, capsys):
     # (b) the agent never approved anything
     assert all(a["by"].startswith("human:") for a in episode.studio["approvals"])
     assert len(agent.log) > 50
+    # M5 acceptance on the offline run: only people changed approvals, and few images per panel
+    from genko.studio import evaluate
+
+    audit = evaluate.audit(root / PROJECT)
+    assert audit["ok"] and set(audit["changes_by_actor"]) == {"human:test"}
+    stats = evaluate.stats(root / PROJECT)
+    assert stats["images_per_adopted_panel"]["median"] <= 8
+    assert stats["tool_calls"]["total"] > 100 and stats["tool_calls"]["ms_p95"] < 2000
+    # the pilot page was approved first and fixed the style for the rest
+    locked = episode.studio["style"]["locked"]
+    assert locked["page"] == 1 and locked["tool"] == "fixture"
 
 
 def test_agent_cannot_approve_any_gate(tmp_path: Path):

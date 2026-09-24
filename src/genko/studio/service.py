@@ -51,6 +51,7 @@ AGENT_TOOLS = frozenset({
     "status", "next", "inspect", "render", "import_image", "set_bible", "set_script", "submit_name", "apply_ops",
     "record_review", "request_approval", "tickets", "generation_request", "import_images", "candidates",
     "review_candidates", "adopt", "request_fix", "report_regions", "finish_page", "preflight", "export_proof", "ask_human",
+    "review_page",
 })
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
@@ -220,7 +221,8 @@ class StudioService:
     def generation_request(self, project: str, page: int | None = None, frame_id: str | None = None,
                            character_id: str | None = None, location_id: str | None = None, purpose: str | None = None,
                            mode: str = "new", parent: str | None = None, tool: str | None = None,
-                           instruction: str | None = None, regions: list | None = None) -> ToolResult:
+                           instruction: str | None = None, regions: list | None = None,
+                           focus_character: str | None = None) -> ToolResult:
         from genko.studio import genreq
 
         path = self.project_path(project)
@@ -236,7 +238,7 @@ class StudioService:
         try:
             pack = genreq.build(episode, path, purpose=purpose, mode=mode, page=page, frame_id=frame_id,
                                 character_id=character_id, location_id=location_id, parent=parent, tool=tool,
-                                instruction=instruction, regions=regions)
+                                instruction=instruction, regions=regions, focus_character=focus_character)
         except genreq.RequestError as exc:
             return fail(str(exc), "bad_request", exc.path)
         folder = genreq.write(pack, path)
@@ -424,6 +426,22 @@ class StudioService:
         return ToolResult(True, {"files": [str(p) for p in written], "dpi": preflight.PROOF_DPI, "watermark": True},
                           files=[str(p) for p in written])
 
+    def review_page(self, project: str) -> ToolResult:
+        """Write studio/review.html (previews, candidates, open requests, the commands a person runs to approve).
+        Send its path to the person (for example through Hermes messaging); the approving is theirs."""
+        from genko.studio.review import review_html
+
+        path = self.project_path(project)
+        out = path / "studio" / "review.html"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        from genko.studio.jsonutil import atomic_write_text
+
+        atomic_write_text(out, review_html(path))
+        open_items = [{"kind": t.get("kind"), "gate": t.get("gate"), "pages": t.get("pages"), "character_id": t.get("character_id")}
+                      for t in state.open_tickets(load_episode(path)) if t.get("kind") in ("gate", "help")]
+        return ToolResult(True, {"path": str(out), "open_requests": open_items,
+                                 "message": f"確認ページ: {out}（ブラウザで開く。承認はページ内のコマンドで）"})
+
     def ask_human(self, project: str, text: str, page: int | None = None, frame_id: str | None = None,
                   item: str | None = None) -> ToolResult:
         op: dict[str, Any] = {"op": "ask_human", "text": text, "item": item}
@@ -579,7 +597,9 @@ class StudioService:
             ops = [{"op": "set_panel", "page": page_index, "frame_id": compiled.slot_to_frame[panel["slot"]],
                     "set": {"slot": panel["slot"], **{k: panel[k] for k in BRIEF_FROM_PLAN if k in panel}}}
                    for panel in plan["panels"] if panel["slot"] in compiled.slot_to_frame]
+            submits = int(((next(p for p in episode.pages if p.index == page_index).plan) or {}).get("submits", 0)) + 1
             ops.append({"op": "set_page_plan", "page": page_index, "plan": {
+                "submits": submits,
                 "name": plan,
                 "input_hash": worklist.plan_hash(plan),
                 "rev": episode.revision,
@@ -786,6 +806,18 @@ class HumanService:
         else:
             self._apply([{"op": "revoke", "gate": gate, "page": p, "reason": reason} for p in pages])
         return {"ok": True, "revoked": gate}
+
+    def close_ticket(self, ticket_id: str, reply: str = "") -> dict:
+        episode = load_episode(self.path)
+        ticket = next((t for t in episode.tickets if t.get("id") == ticket_id), None)
+        if ticket is None:
+            return {"ok": False, "error": f"チケット {ticket_id} はない"}
+        ops = [{"op": "set_ticket", "id": ticket_id, "status": "done"}]
+        if reply and ticket.get("page_index"):
+            ops.append({"op": "request_fix", "page": ticket["page_index"], "frame_id": ticket.get("frame_id"),
+                        "instruction": reply, "scope": "frame" if ticket.get("frame_id") else "page"})
+        self._apply(ops)
+        return {"ok": True, "closed": ticket_id}
 
     def comment(self, page: int, text: str, frame_id: str | None = None) -> dict:
         episode = self._apply([{"op": "request_fix", "page": page, "frame_id": frame_id, "instruction": text,

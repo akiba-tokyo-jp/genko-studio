@@ -112,6 +112,8 @@
         "files": []
       }
     ],
+    "focus_character": null,
+    "steps": null,
     "files": {
       "composition": "guides/composition.png",
       "pose": "guides/pose.png",

@@ -72,7 +72,7 @@ def next_actions(episode: Episode, project: Path | None = None) -> list[dict]:
         blocker = "requested" if ("name", n) in requested else "await_human:name"
         out.append(item("await_human", "人間のネーム承認待ち", ["request_approval"], n, blocked_by=[blocker], gate="name"))
     out.extend(_export_items(episode, requested))
-    return _block_by_help(episode, _dedupe(out))
+    return _block_by_help(episode, _block_by_pilot(episode, _dedupe(out)))
 
 
 def _limits(episode: Episode) -> dict:
@@ -210,6 +210,29 @@ def _export_items(episode: Episode, requested: set) -> list[dict]:
     return [item("await_human", "全ページの仕上げが済んだ。preflight を確かめ、人間に書き出しを頼む",
                  ["preflight", "export_proof", "request_approval"], None,
                  blocked_by=["requested" if asked else "await_human:export"], gate="export")]
+
+
+PANEL_ART_KINDS = frozenset({"gen_panel", "import_pending", "review_candidates", "fix_panel", "report_regions"})
+
+
+def pilot_page(episode: Episode):
+    """The page drawn first (policy.pilot_page, default the first page); None when turned off."""
+    policy = episode.studio.get("policy") or {}
+    if policy.get("pilot") is False or not episode.pages:
+        return None
+    wanted = policy.get("pilot_page")
+    return next((p for p in episode.pages if p.index == wanted), episode.pages[0])
+
+
+def _block_by_pilot(episode: Episode, items: list[dict]) -> list[dict]:
+    """Until the pilot page's art is approved (and the style fixed), other pages wait for their art."""
+    pilot = pilot_page(episode)
+    if pilot is None or pilot.art_ok:
+        return items
+    for entry in items:
+        if entry["kind"] in PANEL_ART_KINDS and entry["target"].get("page") != pilot.index:
+            entry["blocked_by"].append(f"pilot:{pilot.index}")
+    return items
 
 
 def _block_by_help(episode: Episode, items: list[dict]) -> list[dict]:

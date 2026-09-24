@@ -182,6 +182,28 @@ def _layer_to_v3(layer: Layer, store: AssetStore) -> dict:
     return data
 
 
+def _gates(payload: dict | None) -> dict[str, object]:
+    out: dict[str, object] = {}
+    if not payload:
+        return out
+    for page in payload.get("pages", []):
+        key = page.get("id") or f"index:{page.get('index')}"
+        out[f"page:{key}:name_ok"] = bool(page.get("name_ok"))
+        out[f"page:{key}:art_ok"] = bool(page.get("art_ok"))
+    for char in (payload.get("bible") or {}).get("characters", []):
+        out[f"character:{char.get('id')}:locked"] = bool(char.get("locked"))
+    approvals = (payload.get("studio") or {}).get("approvals", [])
+    out["export_approvals"] = sum(1 for a in approvals if a.get("gate") == "export" and not a.get("revoked"))
+    return out
+
+
+def gate_changes(before: dict | None, after: dict) -> list[dict]:
+    """Approval state that changed in this save (who made the change is recorded with it)."""
+    old, new = _gates(before), _gates(after)
+    return [{"what": key, "from": old.get(key), "to": value} for key, value in sorted(new.items())
+            if old.get(key, False if not key.startswith("export") else 0) != value]
+
+
 def save_episode(episode: Episode, dest: Path, *, actor: str | None = None) -> None:
     """Save as v3: bump the revision, write only new assets, and journal the change."""
     dest = Path(dest)
@@ -191,18 +213,27 @@ def save_episode(episode: Episode, dest: Path, *, actor: str | None = None) -> N
         episode.asset_dir = dest
     project_json = dest / "project.json"
     before = None
+    old_payload = None
     if project_json.is_file():
         old = project_json.read_bytes()
+        try:
+            old_payload = json.loads(old)
+        except ValueError:
+            old_payload = None
         before = store.put_bytes(old, ".project.json")
         if not (dest / V2_BACKUP).exists() and json.loads(old).get("version", 1) < 3:
             (dest / V2_BACKUP).write_bytes(old)
     base = episode.revision
     episode.revision = base + 1
-    text = json.dumps(_payload(episode, store), ensure_ascii=False, indent=2)
+    payload = _payload(episode, store)
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
     _write_atomic(project_json, text)
     after = store.put_bytes(text.encode("utf-8"), ".project.json")
     pending, episode.journal_pending = episode.journal_pending, []
     who = actor or (pending[-1]["actor"] if pending else "genko")
+    changes = gate_changes(old_payload, payload)
+    if changes:
+        journal.append_audit(dest, {"rev": episode.revision, "actor": who, "at": time.time(), "changes": changes})
     journal.append(dest, {
         "kind": "commit",
         "rev": episode.revision,

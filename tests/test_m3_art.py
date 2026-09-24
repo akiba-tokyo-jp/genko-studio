@@ -339,6 +339,7 @@ def test_panel_fix_request_and_adoption_close_the_ticket(tmp_path: Path):
     frame = load_episode(project).pages[1].leaf_frames()[0]  # a panel without characters
     cand, _ = _import(agent, 2, frame.id, _png((500, 300), RED))
     _commit(agent, [{"op": "adopt_candidate", "page": 2, "frame_id": frame.id, "candidate_id": cand}])
+    HumanService(project, "human:leaf")._apply([{"op": "set_studio", "policy": {"pilot": False}}])  # no pilot page here
     HumanService(project, "human:leaf").comment(2, "空をもっと暗く", frame.id)
     items = agent.next("demo.genko", limit=50).data["items"]
     fix = next(i for i in items if i["kind"] == "fix_panel")

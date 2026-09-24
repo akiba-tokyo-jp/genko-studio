@@ -204,6 +204,36 @@ def _place(page: Page, frame: Frame | None, layer: Layer, px: tuple[int, int], f
     layer.placement_mm = fit_rect(target, int(px[0]), int(px[1]), fit, offset, scale)
 
 
+def _style_lock(episode: Episode, page: Page, agent: str) -> dict:
+    """What the pilot page fixes for the rest of the book: the image tool most used for its art,
+    a reference image (the adopted art of its largest panel), the style notes and finish."""
+    tools: dict[str, int] = {}
+    best: tuple[float, str] | None = None
+    for frame in page.leaf_frames():
+        panel = frame.panel or {}
+        cand = _by_id(panel.get("candidates", []), str((panel.get("adopted") or {}).get("art") or ""))
+        if cand is None:
+            continue
+        tool = (cand.get("origin") or {}).get("tool_id")
+        if tool:
+            tools[tool] = tools.get(tool, 0) + 1
+        area = frame.rect.width * frame.rect.height
+        if best is None or area > best[0]:
+            best = (area, cand["asset"])
+    style = episode.studio.get("style") or {}
+    notes = style.get("notes") or ((episode.studio.get("bible_doc") or {}).get("style") or {}).get("notes") or []
+    return {
+        "from_page": page.id,
+        "page": page.index,
+        "tool": max(sorted(tools), key=lambda t: tools[t]) if tools else None,
+        "reference": best[1] if best else None,
+        "notes": list(notes),
+        "finish": style.get("finish"),
+        "by": agent,
+        "rev": episode.revision,
+    }
+
+
 def _pad(cand: dict) -> float:
     return float((cand.get("mapping") or {}).get("pad_mm") or 0.0)
 
@@ -340,6 +370,8 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
                 page.art_ok = True
                 style = studio.setdefault("style", {})
                 style.setdefault("locked_from_page", page.id)
+                if "locked" not in style:
+                    style["locked"] = _style_lock(episode, page, agent)
             _close_tickets(episode, agent, "gate", gate, page=page)
         elif gate == "sheet":
             cid = str(op.get("character_id") or "")
@@ -369,6 +401,10 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
         if gate in ("name", "art"):
             page = _page(episode, op)
             page.art_ok = False
+            style = studio.get("style") or {}
+            if (style.get("locked") or {}).get("from_page") == page.id:
+                style.pop("locked", None)  # the pilot page is open again: so is the style
+                style.pop("locked_from_page", None)
             if gate == "name":
                 page.name_ok = False
                 page.stage = "name"

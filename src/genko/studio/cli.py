@@ -87,6 +87,23 @@ def _parser() -> argparse.ArgumentParser:
     comment.add_argument("--page", type=int, required=True)
     comment.add_argument("--frame")
     comment.add_argument("--as", dest="actor", required=True)
+    st = sub.add_parser("stats", help="Measure an agent run: name resubmissions, images per panel, failed tool calls")
+    st.add_argument("project", type=Path)
+    au = sub.add_parser("audit", help="Check that every approval change was made by a person")
+    au.add_argument("project", type=Path)
+    es = sub.add_parser("eval-sample", help="D5: blind character identification samples (single-character panels + sheets)")
+    es.add_argument("project", type=Path)
+    es.add_argument("--out", type=Path, required=True)
+    es.add_argument("--per-character", type=int, default=10)
+    es.add_argument("--seed", type=int, default=0)
+    esc = sub.add_parser("eval-score", help="D5: score the evaluators' answers.csv against key.json")
+    esc.add_argument("project", type=Path, help="the eval-sample folder")
+    esc.add_argument("answers", type=Path)
+    close = sub.add_parser("close-ticket", help="(human) Close an agent's question (ask_human), optionally with an instruction")
+    close.add_argument("project", type=Path)
+    close.add_argument("ticket")
+    close.add_argument("--reply", default="", help="an instruction the agent gets as a fix ticket")
+    close.add_argument("--as", dest="actor", required=True)
     adopt = sub.add_parser("adopt-drafts", help="Move M0 sidecar drafts (studio/drafts) into project.json")
     adopt.add_argument("project", type=Path)
     export = sub.add_parser("export", help="(human) Final export after preflight")
@@ -158,6 +175,18 @@ def _run(args: argparse.Namespace) -> int:
         return _emit(HumanService(path, args.actor).revoke(args.gate, _pages(args.pages), args.character, args.reason))
     if args.cmd == "comment":
         return _emit(HumanService(path, args.actor).comment(args.page, args.text, args.frame))
+    if args.cmd in ("stats", "audit", "eval-sample", "eval-score"):
+        from genko.studio import evaluate
+
+        if args.cmd == "stats":
+            return _emit(evaluate.stats(path))
+        if args.cmd == "audit":
+            return _emit(evaluate.audit(path))
+        if args.cmd == "eval-sample":
+            return _emit(evaluate.eval_sample(path, args.out, args.per_character, args.seed))
+        return _emit(evaluate.eval_score(path, args.answers))
+    if args.cmd == "close-ticket":
+        return _emit(HumanService(path, args.actor).close_ticket(args.ticket, args.reply))
     if args.cmd == "export":
         return _emit(HumanService(path, args.actor).export(args.format, args.out, args.dpi, args.allow_fixture, args.force))
     if args.cmd == "adopt-drafts":

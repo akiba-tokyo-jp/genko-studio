@@ -93,7 +93,7 @@ mcp_servers:
 
 Install with the extra: `uv sync --extra mcp` (or `pip install "genko-studio[mcp]"`). The skill for Hermes is `integrations/hermes/genko-manga/SKILL.md`.
 
-Tools: `projects`, `create_project`, `status`, `next`, `inspect` (bible / script / page / panel / studio / schemas / rules / snapshot), `render` (a page, or one panel with `frame_id`), `import_image`, `set_bible`, `set_script`, `submit_name`, `apply_ops` (allow-listed ops only), `record_review`, `request_approval` (gate name / art / sheet), `tickets`. Resources: `genko://guide/manga-rules`, `genko://ops` (the ops `apply_ops` accepts).
+Tools: `projects`, `create_project`, `status`, `next`, `inspect` (bible / script / page / panel / studio / schemas / rules / snapshot), `render` (a page, one panel with `frame_id`, or `kind` compare / guides), `import_image`, `set_bible`, `set_script`, `submit_name`, `apply_ops` (allow-listed ops only), `record_review`, `request_approval` (gate name / art / sheet / export), `tickets`, `generation_request`, `import_images`, `candidates`, `review_candidates`, `adopt`, `request_fix`, `report_regions`, `finish_page`, `preflight`, `export_proof`, `review_page`, `ask_human`. Resources: `genko://guide/skill`, `genko://guide/manga-rules`, `genko://ops` (the ops `apply_ops` accepts).
 
 - Writing tools default to `commit: false`: they return `issues` (`{code, severity, path, message, hint}`, `path` is a JSON pointer into your input) and a preview. Fix what `path` points at, then send `commit: true`.
 - Name plan tiers run top to bottom; the cols inside a tier are listed right to left.
@@ -140,6 +140,19 @@ Rules:
 - A person's pins, prompt/size overrides (`gen.prompt_override` replaces the prompt draft), regions and `skip` cannot be changed by an agent. Approvals are person-only; an approved sheet locks the character and its face is cut out as a `face` reference.
 - Limits (`studio.policy.limits`): 8 images and 2 fix rounds per panel, then the panel waits for a person.
 - The final export is a person's: `genko studio export PROJECT --format pdf|tiff|png --out DIR --as human:NAME`. It refuses with reasons: pages not finished or not approved, panels without art, unplaced lines, missing assets, effective resolution under 350 dpi (`--force`), test images (`--allow-fixture`). Missing provenance only warns.
+
+Pilot page, style and multi-character panels (M5):
+
+- Art starts on the pilot page (`studio.policy.pilot_page`, default the first page; `policy.pilot: false` turns it off). Other pages' panel work shows as blocked (`pilot:1`) until its art is approved.
+- Approving the pilot art fixes the style (`studio.style.locked`): the image tool used most for it and a reference image (its largest panel). Later requests default to that tool and carry `refs/style_pilot.png`. Revoking the pilot art unfixes it.
+- A request for a panel with two or more characters lists `steps`: generate the whole composition, report regions, then fix people one at a time with `mode: inpaint`, `parent` and `focus_character` (mask from that person's regions, only their references). `regions: ["face:hina"]` redraws only a face.
+
+People and records (M5):
+
+- `review_page` (agent) writes `studio/review.html` with previews, candidates, open requests and the commands a person runs; the agent sends its path to the person. `genko studio close-ticket PROJ ID --reply "…" --as human:NAME` answers an `ask_human` question (the reply reaches the agent as a fix ticket).
+- Every MCP tool call is logged to `studio/logs/tools.jsonl` (tool, ok, error codes, time; no documents or images). `genko studio stats PROJ` summarises a run.
+- Every approval change is appended to `studio/audit.jsonl` with its actor (never trimmed). `genko studio audit PROJ` fails if anyone but a person changed one. `undo`/`redo` that would change an approval are refused for agents.
+- D5: `genko studio eval-sample PROJ --out d5` and `genko studio eval-score d5 answers.csv`. See `docs/STUDIO_EVAL.md`.
 
 Image tools (`tools.json` in the config dir, never in a project):
 

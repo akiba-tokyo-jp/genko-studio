@@ -7,3 +7,17 @@ mcp_servers:
     args: ["mcp", "--root", "/home/you/manga", "--agent", "ai:hermes"]
     timeout: 60
     connect_timeout: 20
+    # 道具が多すぎて選び間違えるときは、サブエージェントの役ごとに絞る（キー名は Hermes の版で確かめる）。
+    # ネーム担当:
+    #   tools:
+    #     include: [projects, status, next, inspect, render, set_bible, set_script, submit_name, apply_ops,
+    #               record_review, request_approval, review_page, tickets, ask_human]
+    # 作画担当:
+    #   tools:
+    #     include: [next, inspect, render, generation_request, import_images, candidates, review_candidates,
+    #               adopt, request_fix, report_regions, apply_ops, request_approval, review_page, ask_human]
+    # 仕上げ担当:
+    #   tools:
+    #     include: [next, inspect, render, finish_page, preflight, export_proof, request_approval, review_page]
+
+  # 別マシン（Genko の HTTP の MCP 接続は未実装。画像のアップロードと依頼ファイルの取得は genko serve で使える）

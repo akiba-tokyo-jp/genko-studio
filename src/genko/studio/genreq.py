@@ -287,15 +287,22 @@ def _candidate(episode: Episode, frame: Frame | None, candidate_id: str | None) 
 def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: str = "new", page: int | None = None,
           frame_id: str | None = None, character_id: str | None = None, location_id: str | None = None,
           parent: str | None = None, tool: str | None = None, instruction: str | None = None,
-          regions: list | None = None) -> Pack:
+          regions: list | None = None, focus_character: str | None = None) -> Pack:
     if purpose not in PURPOSES:
         raise RequestError(f"purpose は {', '.join(PURPOSES)} のどれか", "/purpose")
     if mode not in MODES:
         raise RequestError(f"mode は {', '.join(MODES)} のどれか", "/mode")
+    locked = (episode.studio.get("style") or {}).get("locked") or None
+    from_lock = tool is None and bool(locked and locked.get("tool"))
+    if from_lock:
+        tool = locked["tool"]  # the pilot page fixed the image tool
     tool_id, tool_spec = tools_registry.get(tool)
+    if from_lock and tool_id is None:
+        tool_id = tool  # fixed by the pilot page even when tools.json does not describe it
     store = AssetStore(project)
     files: dict[str, bytes] = {}
     notes: list[str] = []
+    steps: list[str] | None = None
     dpi = episode.spec.dpi or 600
     if purpose in ("panel_art", "draft"):
         pg, frame = _page_frame(episode, {"page": page, "frame_id": frame_id})
@@ -317,7 +324,35 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         figures = [{"char": f.char_id, "head01": box.box01(f.head), "body01": box.box01(f.body),
                     "head_mm": [round(v, 2) for v in f.head], "body_mm": [round(v, 2) for v in f.body]}
                    for f in guide.figures_for(frame)]
-        refs = _panel_refs(episode, store, panel, cast, files)
+        if focus_character:
+            if focus_character not in cast:
+                raise RequestError(f"{focus_character} はこのコマにいない", "/focus_character")
+            if mode == "new":
+                raise RequestError("focus_character は直し（mode edit / inpaint）で使う", "/focus_character")
+            name = next((c.get("name") for c in episode.bible.characters if c.get("id") == focus_character), focus_character)
+            prompt = {**prompt,
+                      "ja": f"直すのは{name}だけ。ほかの人物と背景は元の画像のまま変えない。{name}は参照画像（設定画・顔）に合わせる。" + prompt["ja"],
+                      "en": f"Only change {focus_character}; keep everything else exactly as in the source image. "
+                            f"Match {focus_character} to the reference sheet and face. " + prompt["en"]}
+            refs = _panel_refs(episode, store, panel, [focus_character], files)
+            if mode == "inpaint" and not regions:
+                regions = [f"person:{focus_character}", f"face:{focus_character}"]
+        else:
+            refs = _panel_refs(episode, store, panel, cast, files)
+        if len(cast) >= 2 and mode == "new":
+            steps = [
+                "1. このパックで構図全体（全員）を生成して取り込む",
+                "2. 採用候補を決めたら report_regions で人物ごとの領域を報告する",
+                "3. 似ていない人物ごとに generation_request（mode inpaint、parent、focus_character）で直す",
+            ]
+            notes.append("複数人物のコマ: まず全体を作り、似ていない人物だけを一人ずつ inpaint で直す（steps を参照）")
+        if locked and locked.get("reference") and locked.get("page") != pg.index and purpose == "panel_art":
+            data = _asset(store, locked["reference"])
+            if data is not None:
+                files["refs/style_pilot.png"] = data
+                refs.append("refs/style_pilot.png")
+                notes.append(f"スタイルは {locked['page']} ページで固定済み。refs/style_pilot.png の絵柄・線の太さ・トーンに合わせる"
+                             + (f"。画像ツールは {locked['tool']} を使う" if locked.get("tool") else ""))
         b_hash = brief_hash(panel)
         avoid = _avoid(episode, cast, panel)
         characters = [{"id": cid, "tokens_en": next((c.get("tokens_en") for c in episode.bible.characters if c.get("id") == cid), None),
@@ -388,7 +423,8 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
                 raise RequestError("inpaint はコマの候補だけ", "/mode")
             rects = _mask_rects(frame, regions)
             if not rects:
-                raise RequestError("inpaint には描き直す領域（regions: 領域 id か rect_mm）が要る", "/regions")
+                raise RequestError("inpaint には描き直す領域（regions: 領域 id、\"face:<人物>\"、rect_mm）が要る。"
+                                   "人物の領域は先に report_regions で報告する", "/regions")
             px = tuple(cand.get("px") or box_size["suggested_px"])
             pad = (cand.get("mapping") or {}).get("pad_mm", PAD_MM)
             files["mask.png"] = guide.to_png(guide.mask(guide.GenBox.for_frame(frame, pad, px), rects))
@@ -417,6 +453,8 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         "keepout": keep01,
         "figures": figures,
         "characters": characters,
+        "focus_character": focus_character,
+        "steps": steps,
         "files": {
             "composition": "guides/composition.png" if "guides/composition.png" in files else None,
             "pose": "guides/pose.png" if "guides/pose.png" in files else None,
@@ -467,10 +505,17 @@ def _panel_refs(episode: Episode, store: AssetStore, panel: dict, cast: list[str
 
 
 def _mask_rects(frame: Frame, regions: list | None) -> list[tuple[float, float, float, float]]:
-    by_id = {r.get("id"): r for r in (frame.panel or {}).get("regions", [])}
+    """Regions to redraw: region ids, "face:<char>" / "person:<char>" (reported regions), or rect_mm lists."""
+    all_regions = (frame.panel or {}).get("regions", [])
+    by_id = {r.get("id"): r for r in all_regions}
     out = []
     for item in regions or []:
-        if isinstance(item, str) and item in by_id and by_id[item].get("rect_mm"):
+        if isinstance(item, str) and ":" in item and item not in by_id:
+            kind, char = item.split(":", 1)
+            kinds = ("face", "head") if kind == "face" else ("person", "body")
+            out += [tuple(float(v) for v in r["rect_mm"]) for r in all_regions
+                    if r.get("kind") in kinds and r.get("char") == char and r.get("rect_mm")]
+        elif isinstance(item, str) and item in by_id and by_id[item].get("rect_mm"):
             out.append(tuple(float(v) for v in by_id[item]["rect_mm"]))
         elif isinstance(item, (list, tuple)) and len(item) == 4:
             out.append(tuple(float(v) for v in item))

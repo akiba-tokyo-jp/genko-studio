@@ -191,6 +191,7 @@ def test_brief_change_marks_candidates_stale(tmp_path: Path):
 
 def test_claims_keep_parallel_agents_apart(tmp_path: Path):
     agent, project = _approved(tmp_path)
+    HumanService(project, "human:leaf")._apply([{"op": "set_studio", "policy": {"pilot": False}}])
     other = StudioService(tmp_path, "ai:other")
     mine = agent.next("demo.genko", limit=2, claim=True).data["items"]
     theirs = other.next("demo.genko", limit=2, claim=True).data["items"]

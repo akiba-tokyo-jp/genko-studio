@@ -16,6 +16,8 @@ from mcp.server.mcpserver import Image, MCPServer
 from genko.ops import ApplyError
 from genko.studio.service import RULES_PATH, StudioService, ToolResult
 
+SKILL_PATH = Path(__file__).resolve().parent.parent / "studio" / "guide" / "SKILL.md"
+
 INSTRUCTIONS = """Genko は漫画原稿のシステム。文章も絵も作らない。あなた（エージェント）が企画書・脚本・ネーム計画を書き、
 Genko が検査・コマ割り・縦書き写植・プレビュー描画をする。絵はあなたが別の道具で生成し、import_image で取り込む。
 進め方: status → next で次の作業を取る → 書く道具は commit=false で試し、issues の path を直してから commit=true。
@@ -41,10 +43,34 @@ def build_server(root: Path, actor: str) -> MCPServer:
     server = MCPServer("genko", instructions=INSTRUCTIONS)
 
     def call(fn, *args, **kwargs) -> list[Any]:
+        import inspect as _inspect
+        import time
+
+        from genko.studio import toollog
+
+        started = time.perf_counter()
+        bound: dict = {}
         try:
-            return _out(fn(*args, **kwargs))
+            bound = dict(_inspect.signature(fn).bind(*args, **kwargs).arguments)
+        except TypeError:
+            pass
+        try:
+            result = fn(*args, **kwargs)
+            error = None
         except ApplyError as exc:
-            return [json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)]
+            result, error = None, str(exc)
+        project = bound.get("project") or (bound.get("name") if fn.__name__ == "create_project" else None)
+        if project:
+            try:
+                path = service.project_path(str(project))
+            except ApplyError:
+                path = None
+            if path is not None:
+                toollog.record(path, actor, fn.__name__, bound, result.to_dict() if result else None, error,
+                               (time.perf_counter() - started) * 1000)
+        if result is None:
+            return [json.dumps({"ok": False, "error": error}, ensure_ascii=False)]
+        return _out(result)
 
     @server.tool(structured_output=False)
     def projects() -> list:
@@ -91,14 +117,16 @@ def build_server(root: Path, actor: str) -> MCPServer:
     def generation_request(project: str, page: int | None = None, frame_id: str | None = None,
                            character_id: str | None = None, location_id: str | None = None, purpose: str | None = None,
                            mode: str = "new", parent: str | None = None, tool: str | None = None,
-                           instruction: str | None = None, regions: list | None = None) -> list:
+                           instruction: str | None = None, regions: list | None = None,
+                           focus_character: str | None = None) -> list:
         """絵の依頼パックを作る（Genko は生成しない）。コマは page+frame_id、設定画は character_id、背景の参照は location_id。
-        purpose: panel_art / draft / character_sheet / location。mode: new / edit / inpaint（regions に領域 id か rect_mm）/ upscale。
+        purpose: panel_art / draft / character_sheet / location。mode: new / edit / inpaint（regions に領域 id、
+        "face:<人物 id>"、"person:<人物 id>" か rect_mm）/ upscale。複数人物のコマで一人だけ直すときは focus_character。
         修正は parent に元の候補 id。tool は tools.json のツール id（例 openai:gpt-image-1）。
         返す: request（サイズの候補、prompt の ja/en/tags、avoid、keepout、figures）、files（ガイドと参照画像の場所）、inbox。
         同じ内容なら同じ id。"""
         return call(service.generation_request, project, page, frame_id, character_id, location_id, purpose, mode,
-                    parent, tool, instruction, regions)
+                    parent, tool, instruction, regions, focus_character)
 
     @server.tool(structured_output=False)
     def import_images(project: str, request_id: str, images: list[dict]) -> list:
@@ -154,6 +182,11 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.export_proof, project, format)
 
     @server.tool(structured_output=False)
+    def review_page(project: str) -> list:
+        """人間の確認用ページ（studio/review.html）を作り、場所を返す。承認を頼んだら、この場所をメッセージで人間に知らせる。"""
+        return call(service.review_page, project)
+
+    @server.tool(structured_output=False)
     def ask_human(project: str, text: str, page: int | None = None, frame_id: str | None = None, item: str | None = None) -> list:
         """人間に相談する（3 回直しても通らないときなど）。そのページ・コマの作業は人間が閉じるまで next に出ない。"""
         return call(service.ask_human, project, text, page, frame_id, item)
@@ -204,6 +237,11 @@ def build_server(root: Path, actor: str) -> MCPServer:
         from genko.studio.service import AGENT_OPS
 
         return json.dumps([op for op in OPS_SCHEMA if op["op"] in AGENT_OPS], ensure_ascii=False)
+
+    @server.resource("genko://guide/skill", mime_type="text/markdown")
+    def skill() -> str:
+        """Hermes 用のスキル（作業の手順、止まるところ、してはいけないこと）の正本。"""
+        return SKILL_PATH.read_text(encoding="utf-8") if SKILL_PATH.is_file() else ""
 
     @server.resource("genko://guide/manga-rules", mime_type="text/markdown")
     def manga_rules() -> str:

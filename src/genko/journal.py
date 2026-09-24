@@ -29,6 +29,30 @@ def append(project: Path, entry: dict) -> None:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+AUDIT = Path("studio") / "audit.jsonl"
+
+
+def append_audit(project: Path, entry: dict) -> None:
+    """Approval changes, kept forever (the journal keeps only the latest commits)."""
+    target = Path(project) / AUDIT
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def audit_entries(project: Path) -> list[dict]:
+    target = Path(project) / AUDIT
+    if not target.is_file():
+        return []
+    out = []
+    for line in target.read_text(encoding="utf-8").splitlines():
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
 def entries(project: Path) -> list[dict]:
     p = path(project)
     if not p.is_file():
@@ -76,7 +100,20 @@ def restore(project: Path, *, actor: str, redo: bool = False, force: bool = Fals
     data = store.get_bytes(wanted, ".project.json")
     if data is None:
         raise ApplyError(f"snapshot {wanted} is missing from assets/")
+    from genko.io import gate_changes
+    from genko.ops import can_approve
+
+    try:
+        changes = gate_changes(json.loads(current), json.loads(data))
+    except ValueError:
+        changes = []
+    if changes and not can_approve(actor):
+        what = ", ".join(c["what"] for c in changes[:3])
+        raise ApplyError(f"this {'redo' if redo else 'undo'} changes approvals ({what}); only a person can do that")
     _write_atomic(project / "project.json", data)
+    if changes:
+        append_audit(project, {"rev": target["rev"], "actor": actor, "at": time.time(), "changes": changes,
+                               "via": "redo" if redo else "undo"})
     append(project, {"kind": "redo" if redo else "undo", "rev": target["rev"], "actor": actor, "at": time.time(),
                      "before": AssetStore.ref(current), "after": wanted})
     return {"ok": True, "kind": "redo" if redo else "undo", "rev": target["rev"]}
