@@ -65,8 +65,11 @@ class PageCanvas(QWidget):
             QColor("#f6f1e4"),
         )
         if self.page.spread_with:
+            # The partner sits on the other physical side; strokes drawn there use x >= width
+            # (right) or x < 0 (left), which add_stroke sends to the partner page.
+            offset = -spec.width_mm if self.page.side() == "right" else spec.width_mm
             painter.fillRect(
-                int(origin.x() + spec.width_mm * self._scale),
+                int(origin.x() + offset * self._scale),
                 int(origin.y()),
                 int(spec.width_mm * self._scale),
                 int(spec.height_mm * self._scale),

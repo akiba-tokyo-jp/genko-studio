@@ -70,7 +70,8 @@
       "op": "add_stroke",
       "page": "int",
       "layer": "name|ink",
-      "points": "[[x,y],...]"
+      "points": "[[x,y],...]",
+      "space": "page|spread?"
     },
     {
       "op": "delete_stroke",
@@ -113,7 +114,11 @@
       "op": "set_meta",
       "title": "str?",
       "episode": "int?",
-      "preset": "str?"
+      "preset": "str?",
+      "binding": "right|left?",
+      "start_side": "left|right|null?",
+      "strict_gates": "bool?",
+      "font_path": "str?"
     },
     {
       "op": "set_bible",
@@ -249,6 +254,62 @@
       "stabilize": "int?",
       "taper": "bool?",
       "curve": "gpen|linear"
+    },
+    {
+      "op": "select_frame",
+      "page": "int",
+      "frame_id": "str"
+    },
+    {
+      "op": "edit_stroke",
+      "page": "int",
+      "layer": "name|ink",
+      "index": "int",
+      "points": "[[x,y],...]"
+    },
+    {
+      "op": "simplify_stroke",
+      "page": "int",
+      "layer": "name|ink",
+      "index": "int",
+      "epsilon_mm": "float?"
+    },
+    {
+      "op": "set_ruler",
+      "page": "int",
+      "kind": "str",
+      "pos": "[x,y]?",
+      "points": "[[x,y],...]?"
+    },
+    {
+      "op": "add_prim3d",
+      "page": "int",
+      "kind": "str",
+      "pos": "[x,y,z]?",
+      "size": "float?",
+      "rot": "float?"
+    },
+    {
+      "op": "lt_convert",
+      "page": "int",
+      "layer": "str?",
+      "to": "ink|name?"
+    },
+    {
+      "op": "add_ticket",
+      "page": "int",
+      "id": "str?",
+      "frame_id": "str?",
+      "role": "str?",
+      "assignee": "str?",
+      "rate": "str?"
+    },
+    {
+      "op": "set_ticket",
+      "id": "str",
+      "status": "str?",
+      "assignee": "str?",
+      "rate": "str?"
     },
     {
       "op": "undo"

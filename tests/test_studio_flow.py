@@ -74,10 +74,11 @@ def test_name_is_deterministic_and_keeps_the_project_format(tmp_path: Path):
     before = json.loads((project / "project.json").read_text(encoding="utf-8"))
     save_episode(load_episode(project), project)
     after = json.loads((project / "project.json").read_text(encoding="utf-8"))
-    assert before == after  # no keys the existing loader would drop
+    before.pop("revision"), after.pop("revision")
+    assert before == after  # no keys the loader would drop
     fresh = tmp_path / "fresh.genko"
     StudioService(tmp_path, "ai:test").create_project("fresh.genko", "demo", 4)
-    assert set(before) == set(json.loads((fresh / "project.json").read_text(encoding="utf-8")))
+    assert set(before) | {"revision"} == set(json.loads((fresh / "project.json").read_text(encoding="utf-8")))
 
 
 def test_errors_block_commit_and_point_to_the_input(tmp_path: Path):

@@ -132,13 +132,13 @@ def test_ai_cannot_approve_or_take_a_human_lock():
     with pytest.raises(ApplyError):
         apply_ops(ep, [{"op": "name_ok", "page": 1}], agent="ai:bot")
     apply_ops(ep, [{"op": "lock_page", "page": 1}], agent="human:leaf")
-    assert ep.page_locks["1"] == "human:leaf"
+    assert ep.page_locks[ep.pages[0].id] == "human:leaf"
     for op in ({"op": "unlock_page", "page": 1}, {"op": "lock_page", "page": 1}, {"op": "lock_page", "page": 2, "agent": "human:leaf"}):
         with pytest.raises(ApplyError):
             apply_ops(ep, [op], agent="ai:bot")
     apply_ops(ep, [{"op": "lock_page", "page": 2}], agent="ai:bot")
     apply_ops(ep, [{"op": "lock_page", "page": 2}], agent="human:leaf")  # a person may take over an AI lock
-    assert ep.page_locks["2"] == "human:leaf"
+    assert ep.page_locks[ep.pages[1].id] == "human:leaf"
 
 
 def test_line_ops_respect_the_page_lock():
@@ -159,7 +159,7 @@ def test_cli_apply_names_the_actor(tmp_path: Path, capsys):
     ops = tmp_path / "ops.json"
     ops.write_text(json.dumps([{"op": "name_ok", "page": 1}]))
     assert main(["apply", str(project), str(ops), "--agent", "ai:bot"]) == 1
-    (project / "studio").mkdir()
+    (project / "studio" / "drafts").mkdir(parents=True)
     assert main(["apply", str(project), str(ops)]) == 1  # studio project + no actor = legacy:unknown
     assert main(["apply", str(project), str(ops), "--agent", "human:leaf"]) == 0
     capsys.readouterr()
@@ -175,7 +175,7 @@ def test_newer_version_refused_and_unknown_keys_kept(tmp_path: Path):
     save_episode(load_episode(project), project)
     again = json.loads((project / "project.json").read_text(encoding="utf-8"))
     assert again["future_feature"] == {"a": 1} and again["pages"][0]["page_future"] == [1, 2]
-    again["version"] = 3
+    again["version"] = 4
     (project / "project.json").write_text(json.dumps(again), encoding="utf-8")
     with pytest.raises(UnsupportedProjectVersion):
         load_episode(project)
@@ -229,3 +229,18 @@ def test_bundled_font_ships_inside_the_package():
 
     assert render._DELA.is_file()
     assert Path(render.__file__).resolve().parent in render._DELA.parents
+
+
+def test_every_handled_op_is_in_the_catalog_and_docs():
+    import re
+
+    from genko.ops import OPS_SCHEMA
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "genko" / "ops.py").read_text(encoding="utf-8")
+    handled = set(re.findall(r'if name == "(\w+)"', src))
+    for group in re.findall(r"if name in \(([^)]*)\)", src):
+        handled |= set(re.findall(r'"(\w+)"', group))
+    listed = {item["op"] for item in OPS_SCHEMA}
+    assert handled <= listed, sorted(handled - listed)
+    docs = json.loads((Path(__file__).resolve().parents[1] / "docs" / "ops.schema.json").read_text(encoding="utf-8"))
+    assert docs["ops"] == OPS_SCHEMA

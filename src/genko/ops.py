@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from genko.models import (
+    TRANSIENT_FIELDS,
     Binding,
     Episode,
     Frame,
@@ -37,7 +38,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
-    {"op": "add_stroke", "page": "int", "layer": "name|ink", "points": "[[x,y],...]"},
+    {"op": "add_stroke", "page": "int", "layer": "name|ink", "points": "[[x,y],...]", "space": "page|spread?"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
     {"op": "set_layer", "page": "int", "layer": "str", "visible": "bool?", "exportable": "bool?"},
@@ -45,7 +46,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int"},
     {"op": "set_note", "page": "int", "note": "str"},
-    {"op": "set_meta", "title": "str?", "episode": "int?", "preset": "str?"},
+    {"op": "set_meta", "title": "str?", "episode": "int?", "preset": "str?", "binding": "right|left?", "start_side": "left|right|null?", "strict_gates": "bool?", "font_path": "str?"},
     {"op": "set_bible", "plot": "str?", "characters": "list?", "constraints": "list?"},
     {"op": "set_spread", "page": "int", "with": "int|null"},
     {"op": "reorder", "order": "[int]"},
@@ -69,6 +70,14 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "delete_layer", "page": "int", "id": "str"},
     {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal"},
     {"op": "set_brush", "rgb": "[r,g,b]?", "width_mm": "float?", "stabilize": "int?", "taper": "bool?", "curve": "gpen|linear"},
+    {"op": "select_frame", "page": "int", "frame_id": "str"},
+    {"op": "edit_stroke", "page": "int", "layer": "name|ink", "index": "int", "points": "[[x,y],...]"},
+    {"op": "simplify_stroke", "page": "int", "layer": "name|ink", "index": "int", "epsilon_mm": "float?"},
+    {"op": "set_ruler", "page": "int", "kind": "str", "pos": "[x,y]?", "points": "[[x,y],...]?"},
+    {"op": "add_prim3d", "page": "int", "kind": "str", "pos": "[x,y,z]?", "size": "float?", "rot": "float?"},
+    {"op": "lt_convert", "page": "int", "layer": "str?", "to": "ink|name?"},
+    {"op": "add_ticket", "page": "int", "id": "str?", "frame_id": "str?", "role": "str?", "assignee": "str?", "rate": "str?"},
+    {"op": "set_ticket", "id": "str", "status": "str?", "assignee": "str?", "rate": "str?"},
     {"op": "undo"},
 ]
 
@@ -101,7 +110,7 @@ UNDO_LIMIT = 50
 def _copy_state(dst: Episode, src: Episode) -> None:
     """Move every field except the undo history from src into dst."""
     for f in dataclasses.fields(Episode):
-        if f.name != "undo_stack":
+        if f.name not in TRANSIENT_FIELDS:
             setattr(dst, f.name, getattr(src, f.name))
 
 
@@ -291,16 +300,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         points = _parse_points(op.get("points") or [])
         if len(points) < 2:
             raise ApplyError("points needs at least two [x_mm, y_mm] pairs")
-        width = page.spec.width_mm
-        if page.spread_with and min(float(pt[0]) for pt in points) >= width:
-            other = next((item for item in episode.pages if item.index == page.spread_with), None)
-            if other is not None:
-                shifted = []
-                for pt in points:
-                    extra = list(pt[2:]) if len(pt) > 2 else []
-                    shifted.append((float(pt[0]) - width, float(pt[1]), *extra) if extra else (float(pt[0]) - width, float(pt[1])))
-                points = shifted
-                page = other
+        page, points = _stroke_target(episode, page, points, str(op.get("space") or "page"))
         if op.get("snap_ruler"):
             points = _snap_points(page, points)
         stabilize = op.get("stabilize", episode.brush_stabilize)
@@ -364,6 +364,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             blob = Path(str(op["path"])).read_bytes()
         if not blob:
             raise ApplyError("put_raster needs path or png_base64")
+        _verify_image(blob)
         if op.get("id"):
             layer = _resolve_layer(page, op)
         else:
@@ -423,21 +424,23 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         removed = page.index
         episode.pages = [item for item in episode.pages if item.index != removed]
         episode.story = [line for line in episode.story if line.page_index != removed]
-        mapping = {item.index: new for new, item in enumerate(episode.pages, start=1)}
-        for line in episode.story:
-            line.page_index = mapping[line.page_index]
-        for new, item in enumerate(episode.pages, start=1):
-            item.index = new
-            for line in item.texts:
-                line.page_index = new
+        episode.page_locks.pop(page.id, None)
+        mapping: dict[int, int | None] = {item.index: new for new, item in enumerate(episode.pages, start=1)}
+        mapping[removed] = None
+        remap_page_refs(episode, mapping)
         return
 
     if name == "duplicate_page":
         page = _require_page(episode, op)
         clone: Page = copy.deepcopy(page)
         clone.index = len(episode.pages) + 1
+        clone.id = "pg_" + new_id()
+        clone.spread_with = None
+        frame_map: dict[str, str] = {}
         for frame in clone.frames:
-            _refresh_frame_ids(frame)
+            _refresh_frame_ids(frame, frame_map)
+        if clone.selected_frame_id:
+            clone.selected_frame_id = frame_map.get(clone.selected_frame_id)
         for layer in clone.layers:
             layer.id = new_id()
         new_lines: list[StoryLine] = []
@@ -445,6 +448,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             copied = copy.deepcopy(line)
             copied.id = new_id()
             copied.page_index = clone.index
+            if copied.frame_id:
+                copied.frame_id = frame_map.get(copied.frame_id, copied.frame_id)
             new_lines.append(copied)
         clone.texts = new_lines
         episode.story.extend(new_lines)
@@ -463,6 +468,14 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             episode.episode = int(op["episode"])
         if "binding" in op:
             episode.binding = Binding(op["binding"])
+            for page in episode.pages:
+                page.binding = episode.binding
+        if "start_side" in op:
+            if op["start_side"] not in (None, "left", "right"):
+                raise ApplyError("start_side must be left, right or null")
+            episode.start_side = op["start_side"]
+        if "strict_gates" in op:
+            episode.strict_gates = bool(op["strict_gates"])
         if "preset" in op:
             episode.spec = PageSpec.publisher(str(op["preset"]))
             for page in episode.pages:
@@ -487,14 +500,28 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
     if name == "set_spread":
         page = _require_page(episode, op)
         other = op.get("with")
-        page.spread_with = None if other in (None, "", 0) else int(other)
+        if other in (None, "", 0):
+            page.spread_with = None
+            return
+        partner = next((item for item in episode.pages if item.index == int(other)), None)
+        if partner is None:
+            raise ApplyError(f"no page {other}")
+        problem = facing_problem(episode, page, partner)
+        if problem and episode.strict_gates:
+            raise ApplyError(problem)
+        page.spread_with = partner.index
         return
 
     if name == "reorder":
         order = op.get("order")
         if not isinstance(order, list) or not order:
             raise ApplyError("order must be a non-empty list of page indexes")
-        episode.reorder([int(i) for i in order])
+        order = [int(i) for i in order]
+        if sorted(order) != sorted(p.index for p in episode.pages):
+            raise ApplyError("order must list every page exactly once")
+        by_index = {page.index: page for page in episode.pages}
+        episode.pages = [by_index[i] for i in order]
+        remap_page_refs(episode, {old: new for new, old in enumerate(order, start=1)})
         return
 
     if name == "select_frame":
@@ -614,8 +641,9 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         page = _require_page(episode, op)
         episode.tickets.append(
             {
-                "id": new_id(),
+                "id": str(op.get("id") or new_id()),
                 "page_index": page.index,
+                "page_id": page.id,
                 "frame_id": op.get("frame_id"),
                 "role": str(op.get("role") or "bg"),
                 "assignee": str(op.get("assignee") or "human"),
@@ -933,10 +961,37 @@ def _lt_convert(episode: Episode, op: dict[str, Any]) -> None:
         dest.strokes.append(coerce_stroke([(10.0, 10.0), (page.spec.width_mm - 10, 10.0)]))
 
 
-def _refresh_frame_ids(frame: Frame) -> None:
+def _refresh_frame_ids(frame: Frame, mapping: dict[str, str] | None = None) -> None:
+    old = frame.id
     frame.id = new_id()
+    if mapping is not None:
+        mapping[old] = frame.id
     for child in frame.children:
-        _refresh_frame_ids(child)
+        _refresh_frame_ids(child, mapping)
+
+
+def remap_page_refs(episode: Episode, mapping: dict[int, int | None]) -> None:
+    """Renumber pages after delete/reorder and fix every reference that uses page numbers."""
+    for line in episode.story:
+        line.page_index = mapping.get(line.page_index) or line.page_index
+    for page in episode.pages:
+        page.index = mapping[page.index] or page.index
+        for line in page.texts:
+            line.page_index = page.index
+    for page in episode.pages:
+        if page.spread_with is not None:
+            page.spread_with = mapping.get(page.spread_with)
+        if page.onion_from is not None:
+            page.onion_from = mapping.get(page.onion_from)
+    for ticket in episode.tickets:
+        index = ticket.get("page_index")
+        if index is None:
+            continue
+        new = mapping.get(index)
+        if new is None:
+            ticket["status"] = "orphaned"
+        else:
+            ticket["page_index"] = new
 
 
 LEGACY_ACTOR = "genko"  # what callers get when they do not name themselves; treated as a person
@@ -947,6 +1002,103 @@ LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path
 def can_approve(agent: str) -> bool:
     """Gates and unlocking other people's pages need a person: human:<name>, or the legacy unnamed caller."""
     return agent in (LEGACY_ACTOR, "human") or agent.startswith("human:")
+
+
+def _shift(points: list[tuple], dx: float) -> list[tuple]:
+    return [(float(pt[0]) + dx, float(pt[1]), *pt[2:]) for pt in points]
+
+
+def _stroke_target(episode: Episode, page: Page, points: list[tuple], space: str) -> tuple[Page, list[tuple]]:
+    """Resolve which page of a spread a stroke belongs to.
+
+    space "page" (default): x is from this page's left edge; x >= width goes to the partner
+    on the right, x < 0 to the partner on the left. space "spread": x is from the physical
+    spread's left edge, left page [0, W), right page [W, 2W).
+    """
+    width = page.spec.width_mm
+    xs = [float(pt[0]) for pt in points]
+    other = next((item for item in episode.pages if item.index == page.spread_with), None) if page.spread_with else None
+    if space == "spread":
+        if other is None:
+            raise ApplyError("space spread needs a page with spread_with")
+        left, right = (page, other) if page.side(episode.start_side) == "left" else (other, page)
+        if max(xs) < width:
+            return left, points
+        if min(xs) >= width:
+            return right, _shift(points, -width)
+        raise ApplyError("a stroke cannot cross the gutter between spread pages")
+    if space != "page":
+        raise ApplyError("space must be page or spread")
+    if other is not None and min(xs) >= width:
+        return other, _shift(points, -width)
+    if other is not None and max(xs) < 0:
+        return other, _shift(points, width)
+    return page, points
+
+
+def facing_problem(episode: Episode, a: Page, b: Page) -> str | None:
+    """Why two pages cannot form a spread, or None when they face each other."""
+    if abs(a.index - b.index) != 1:
+        return f"pages {a.index} and {b.index} are not next to each other"
+    first, second = sorted((a, b), key=lambda p: p.index)
+    start = "right" if episode.binding == Binding.RIGHT else "left"
+    if first.side(episode.start_side) != start or second.side(episode.start_side) == start:
+        return f"pages {first.index} and {second.index} are two sides of one leaf, not a spread"
+    return None
+
+
+MAX_IMAGE_PIXELS = 120_000_000
+
+
+def _verify_image(blob: bytes) -> None:
+    """Refuse bytes Pillow cannot open, and absurd sizes, before they reach a layer."""
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(blob)) as probe:
+            width, height = probe.size
+            probe.verify()
+    except Exception as exc:  # Pillow raises many types for bad data
+        raise ApplyError(f"not a readable image: {exc}") from exc
+    if width * height > MAX_IMAGE_PIXELS:
+        raise ApplyError(f"image too large: {width}x{height}")
+
+
+def validate_episode(episode: Episode) -> list[str]:
+    """Reference checks after a batch: returned as warnings (older files may already break them)."""
+    warnings: list[str] = []
+    indexes = {page.index for page in episode.pages}
+    ids = {page.id for page in episode.pages}
+    for line in episode.story:
+        if line.page_index not in indexes:
+            warnings.append(f"line {line.id}: page {line.page_index} does not exist")
+            continue
+        if line.frame_id:
+            page = next(p for p in episode.pages if p.index == line.page_index)
+            try:
+                page._find(line.frame_id)
+            except (KeyError, IndexError):
+                warnings.append(f"line {line.id}: frame {line.frame_id} is not on page {line.page_index}")
+    for key in episode.page_locks:
+        if key not in ids:
+            warnings.append(f"page lock on unknown page {key}")
+    for page in episode.pages:
+        if page.spread_with is not None and page.index < page.spread_with:
+            partner = next((p for p in episode.pages if p.index == page.spread_with), None)
+            problem = facing_problem(episode, page, partner) if partner else f"spread partner {page.spread_with} missing"
+            if problem:
+                warnings.append(f"spread {page.index}-{page.spread_with}: {problem}")
+    return warnings
+
+
+def _journal_op(op: dict[str, Any]) -> dict[str, Any]:
+    """A copy of the op for the journal, without embedded image bytes."""
+    out = dict(op)
+    if isinstance(out.get("png_base64"), str):
+        out["png_base64"] = f"<{len(out['png_base64'])} base64 chars>"
+    return out
 
 
 def _op_page_index(episode: Episode, op: dict[str, Any]) -> int | None:
@@ -962,6 +1114,22 @@ def _op_page_index(episode: Episode, op: dict[str, Any]) -> int | None:
     return None
 
 
+RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "filter_raster", "flood_fill"})
+
+
+def _check_strict(episode: Episode, op: dict[str, Any]) -> None:
+    """strict_gates (studio projects): printed layers change only after the name is approved."""
+    name = op.get("op")
+    if name in RASTER_EDIT_OPS:
+        layer = str(op.get("layer") or ("ink" if name != "filter_raster" else ""))
+        if layer not in ("name", "draft", ""):
+            page = _require_page(episode, op)
+            if not page.name_ok:
+                raise ApplyError(f"{name} on {layer} needs name_ok on page {page.index} (strict_gates)")
+    if name == "add_line" and op.get("frame_id") and not ("x_mm" in op and "y_mm" in op):
+        raise ApplyError("add_line with frame_id needs explicit x_mm/y_mm (strict_gates)")
+
+
 def _check_page_lock(episode: Episode, op: dict[str, Any], agent: str) -> None:
     name = op.get("op")
     if name in GATE_OPS and not can_approve(agent):
@@ -971,21 +1139,23 @@ def _check_page_lock(episode: Episode, op: dict[str, Any], agent: str) -> None:
     index = _op_page_index(episode, op)
     if index is None:
         return
-    owner = episode.page_locks.get(str(index))
+    page = next((p for p in episode.pages if p.index == index), None)
+    if page is None:
+        return
+    key = page.id  # v3: locks follow the page, not its position
+    owner = episode.page_locks.get(key)
     if name == "lock_page":
         wanted = str(op.get("agent") or agent)
         if agent != LEGACY_ACTOR and wanted != agent:
             raise ApplyError(f"cannot lock page {index} as {wanted} (actor is {agent})")
         if owner and owner != wanted and not (can_approve(agent) and owner.startswith("ai:")):
             raise ApplyError(f"page {index} locked by {owner}")
-        _require_page(episode, op)
-        episode.page_locks[str(index)] = wanted
+        episode.page_locks[key] = wanted
         return
     if name == "unlock_page":
         if owner and owner != agent and not can_approve(agent):
             raise ApplyError(f"page {index} locked by {owner}; {agent} cannot unlock it")
-        _require_page(episode, op)
-        episode.page_locks.pop(str(index), None)
+        episode.page_locks.pop(key, None)
         return
     if owner and owner != agent:
         raise ApplyError(f"page {index} locked by {owner}")
@@ -1011,6 +1181,7 @@ def apply_ops(
         stack = episode.undo_stack
         _copy_state(episode, previous)
         episode.undo_stack = stack
+        episode.journal_pending.append({"actor": agent, "ops": [{"op": "undo"}]})
         return {"ok": True, "applied": ["undo"], "snapshot": snapshot(episode), "job_id": new_id()}
 
     work = copy.deepcopy(episode)
@@ -1021,6 +1192,8 @@ def apply_ops(
             raise ApplyError(f"ops[{i}] must be an object")
         try:
             _check_page_lock(work, op, agent)
+            if work.strict_gates:
+                _check_strict(work, op)
             if op.get("op") not in ("lock_page", "unlock_page"):
                 _apply_one(work, op)
         except ApplyError as exc:
@@ -1029,8 +1202,9 @@ def apply_ops(
             raise ApplyError(f"ops[{i}] {op.get('op')}: {exc}") from exc
         applied.append(str(op.get("op")))
 
+    warnings = validate_episode(work)
     if dry_run:
-        return {"ok": True, "applied": applied, "snapshot": snapshot(work), "job_id": new_id()}
+        return {"ok": True, "applied": applied, "snapshot": snapshot(work), "job_id": new_id(), "warnings": warnings}
 
     # `work` is a deep copy, so the objects episode holds now are never touched again:
     # a shallow copy of them is the undo entry, no second deep copy needed.
@@ -1039,4 +1213,5 @@ def apply_ops(
     episode.undo_stack.append(frozen)
     del episode.undo_stack[:-UNDO_LIMIT]
     _copy_state(episode, work)
-    return {"ok": True, "applied": applied, "snapshot": snapshot(episode), "job_id": new_id()}
+    episode.journal_pending.append({"actor": agent, "ops": [_journal_op(op) for op in ops]})
+    return {"ok": True, "applied": applied, "snapshot": snapshot(episode), "job_id": new_id(), "warnings": warnings}

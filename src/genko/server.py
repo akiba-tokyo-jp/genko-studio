@@ -156,6 +156,9 @@ def handle_request(method: str, path: str, body: bytes, ctx: dict | None = None)
             dry_run = bool(data.get("dry_run"))
             with ProjectLock(project, agent=actor):
                 episode = load_episode(project)
+                expected = data.get("expect_revision")
+                if expected is not None and episode.revision != int(expected):
+                    return _json_bytes({"ok": False, "error": f"revision conflict: expected {expected}, found {episode.revision}"}, 409)
                 result = apply_ops(episode, ops, dry_run=dry_run, agent=actor)
                 if not dry_run:
                     save_episode(episode, project)

@@ -228,6 +228,7 @@ class Page:
     onion_from: int | None = None
     lt_threshold: float | None = None
     extra: dict = field(default_factory=dict)  # keys this build does not know; written back unchanged
+    id: str = field(default_factory=lambda: "pg_" + new_id())  # stable across reorder/delete (v3)
 
     def __post_init__(self) -> None:
         if not self.layers:
@@ -273,6 +274,20 @@ class Page:
 
     def is_recto(self) -> bool:
         return self.index % 2 == 1
+
+    def side(self, start_side: str | None = None) -> str:
+        """Physical side of the open book: "left" or "right".
+
+        The first page sits on the side opposite the binding's reading start: in a
+        right-bound (Japanese) book page 1 is on the left and spreads are (2, 3),
+        (4, 5)… with the even page on the right; a left-bound book mirrors this.
+        start_side overrides where page 1 sits.
+        """
+        first = start_side or ("left" if self.binding == Binding.RIGHT else "right")
+        same = self.index % 2 == 1
+        if same:
+            return first
+        return "right" if first == "left" else "left"
 
     def leaf_frames(self) -> list[Frame]:
         if not self.frames:
@@ -384,6 +399,9 @@ class Page:
             layer.fill_rgb = rgb
 
 
+TRANSIENT_FIELDS = frozenset({"undo_stack", "journal_pending"})
+
+
 @dataclass
 class Episode:
     title: str
@@ -404,28 +422,29 @@ class Episode:
     brush_taper: bool = False
     brush_curve: str = "linear"
     extra: dict = field(default_factory=dict)  # top-level keys this build does not know; written back unchanged
+    revision: int = 0  # +1 on every save (v3)
+    start_side: str | None = None  # "left" / "right" override for page 1; None = binding default
+    strict_gates: bool = False  # studio projects: ink/raster edits need name_ok, spreads must face
+    journal_pending: list = field(default_factory=list, repr=False, compare=False)  # ops since last save
 
     def __deepcopy__(self, memo: dict) -> Episode:
         # The undo history is never copied: copying it made every op cost O(history x project).
         new = object.__new__(type(self))
         memo[id(self)] = new
         for f in dataclasses.fields(self):
-            if f.name == "undo_stack":
+            if f.name in TRANSIENT_FIELDS:
                 continue
             setattr(new, f.name, copy.deepcopy(getattr(self, f.name), memo))
         new.undo_stack = []
+        new.journal_pending = []
         return new
 
     def reorder(self, order: list[int]) -> None:
+        from genko.ops import remap_page_refs
+
         by_index = {page.index: page for page in self.pages}
         self.pages = [by_index[i] for i in order]
-        mapping = {page.index: new for new, page in enumerate(self.pages, start=1)}
-        for line in self.story:
-            line.page_index = mapping[line.page_index]
-        for new, page in enumerate(self.pages, start=1):
-            page.index = new
-            for line in page.texts:
-                line.page_index = new
+        remap_page_refs(self, {old: new for new, old in enumerate(order, start=1)})
 
     def add_line(
         self,

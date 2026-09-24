@@ -305,7 +305,9 @@ def _balloon_font(line: StoryLine, dpi: int, font_path: str | None) -> ImageFont
     return _font(font_path, size)
 
 
-def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font_path: str | None = None) -> None:
+def _draw_balloon(
+    draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font_path: str | None = None, show_speaker: bool = True
+) -> None:
     x = mm_to_px(line.x_mm, dpi)
     y = mm_to_px(line.y_mm, dpi)
     w = mm_to_px(line.w_mm or 40, dpi)
@@ -350,7 +352,7 @@ def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font_pat
                 cx = x + bw // 2
                 cy = y + bh
                 draw.polygon([(cx - 6, cy - 2), (cx + 6, cy - 2), (tx, ty)], fill=fill, outline=outline)
-            if line.speaker:
+            if line.speaker and show_speaker:
                 draw.text((x, max(0, y - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
         if page is not None:
             page.paste(composed, (x + pad, y + pad), composed)
@@ -375,7 +377,7 @@ def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font_pat
             cx = x + w // 2
             cy = y + h
             draw.polygon([(cx - 6, cy - 2), (cx + 6, cy - 2), (tx, ty)], fill=fill, outline=outline)
-    if line.speaker and kind != "none":
+    if line.speaker and kind != "none" and show_speaker:
         draw.text((x, max(0, y - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
     pad_x, pad_y = 6, max(2, h // 8)
     if line.ruby:
@@ -462,7 +464,9 @@ def render_page(
             continue
         raster = raster.resize(size)
         clip_mask = prev_alpha if getattr(layer, "clip", False) else None
-        rgba = _blend_over(rgba, raster, getattr(layer, "blend", "normal") or "normal", float(getattr(layer, "opacity", 1.0) or 1.0), clip_mask)
+        opacity = getattr(layer, "opacity", None)
+        opacity = 1.0 if opacity is None else float(opacity)  # 0 means invisible, not "default"
+        rgba = _blend_over(rgba, raster, getattr(layer, "blend", "normal") or "normal", opacity, clip_mask)
         prev_alpha = raster.split()[3]
     image = rgba.convert("RGB")
 
@@ -513,7 +517,8 @@ def render_page(
     lines = episode.story_for_page(page.index) if episode is not None else page.texts
     for line in lines:
         if line.x_mm or line.y_mm or line.balloon:
-            _draw_balloon(draw, line, working_dpi, font_path)
+            # Speaker names are a working aid: shown in name/proof, never printed.
+            _draw_balloon(draw, line, working_dpi, font_path, show_speaker=mode != "print")
         else:
             x = mm_to_px(page.inner_rect_mm().x + 4, working_dpi)
             y = mm_to_px(page.inner_rect_mm().y + 4, working_dpi)
@@ -555,9 +560,10 @@ def to_bitonal(image: Image.Image, threshold: int = 180) -> Image.Image:
 def render_spread(episode: Episode, first: int, second: int, dpi: int = 150, mode: str = "print") -> Image.Image:
     pages = {page.index: page for page in episode.pages}
     a, b = pages[first], pages[second]
-    if a.is_recto() and not b.is_recto():
+    # Place by the physical side of the book (binding-aware), not by page parity.
+    if a.side(episode.start_side) == "right" and b.side(episode.start_side) == "left":
         right, left = a, b
-    elif b.is_recto() and not a.is_recto():
+    elif b.side(episode.start_side) == "right" and a.side(episode.start_side) == "left":
         right, left = b, a
     else:
         left, right = a, b

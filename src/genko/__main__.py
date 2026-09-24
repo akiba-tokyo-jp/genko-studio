@@ -45,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     apply_p.add_argument("src", type=Path)
     apply_p.add_argument("ops", help="Path to JSON array, or - for stdin")
     apply_p.add_argument("--dry-run", action="store_true")
+    apply_p.add_argument("--expect-revision", type=int, default=None, help="fail if someone saved since")
     apply_p.add_argument(
         "--agent",
         default="",
@@ -66,6 +67,21 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--root", type=Path, required=True, help="only paths inside this folder are served")
     serve.add_argument("--allow-origin", action="append", default=[], help="browser origin allowed to call the API")
     serve.add_argument("--allow-host", action="append", default=[], help="extra Host name (when not on 127.0.0.1)")
+
+    undo = sub.add_parser("undo", help="Undo the latest saved change (works across processes)")
+    undo.add_argument("src", type=Path)
+    undo.add_argument("--as", dest="actor", default="genko")
+    undo.add_argument("--force", action="store_true", help="undo another actor's change / ignore outside edits")
+    redo = sub.add_parser("redo", help="Redo the latest undone change")
+    redo.add_argument("src", type=Path)
+    redo.add_argument("--as", dest="actor", default="genko")
+    redo.add_argument("--force", action="store_true")
+    gc_p = sub.add_parser("gc", help="Delete assets nothing refers to")
+    gc_p.add_argument("src", type=Path)
+    gc_p.add_argument("--dry-run", action="store_true")
+    gc_p.add_argument("--legacy", action="store_true", help="also remove the v2 pages/ folder")
+    doctor_p = sub.add_parser("doctor", help="Check assets, font and paths")
+    doctor_p.add_argument("src", type=Path)
 
     token = sub.add_parser("token", help="Manage HTTP tokens (stored in the user config dir)")
     token.add_argument("action", choices=["add", "list", "revoke"])
@@ -173,10 +189,12 @@ def main(argv: list[str] | None = None) -> int:
             from genko.lock import ProjectLock
 
             ops = _read_ops(args.ops)
-            agent = args.agent or ("legacy:unknown" if (args.src / "studio").is_dir() else "genko")
+            agent = args.agent or ("legacy:unknown" if (args.src / "studio" / "drafts").is_dir() else "genko")
             with ProjectLock(args.src, agent=agent):
                 # Load inside the lock so a concurrent writer's changes are never overwritten.
                 episode = load_episode(args.src)
+                if args.expect_revision is not None and episode.revision != args.expect_revision:
+                    raise ApplyError(f"revision conflict: expected {args.expect_revision}, found {episode.revision}")
                 result = apply_ops(episode, ops, dry_run=args.dry_run, agent=agent)
                 if not args.dry_run:
                     save_episode(episode, args.src)
@@ -219,6 +237,24 @@ def main(argv: list[str] | None = None) -> int:
             except KeyboardInterrupt:
                 server.shutdown()
             return 0
+        if args.cmd in ("undo", "redo"):
+            from genko.journal import restore
+            from genko.lock import ProjectLock
+
+            with ProjectLock(args.src, agent=args.actor):
+                _print_json(restore(args.src, actor=args.actor, redo=args.cmd == "redo", force=args.force))
+            return 0
+        if args.cmd == "gc":
+            from genko.maintenance import gc
+
+            _print_json(gc(args.src, dry_run=args.dry_run, legacy=args.legacy))
+            return 0
+        if args.cmd == "doctor":
+            from genko.maintenance import doctor
+
+            report = doctor(args.src)
+            _print_json(report)
+            return 0 if report["ok"] else 1
         if args.cmd == "token":
             from genko import tokens as token_store
 

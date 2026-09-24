@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from genko.models import (
     Binding,
     Episode,
@@ -33,8 +35,20 @@ def _frame(data: dict) -> Frame:
     )
 
 
-def _layer(data: dict) -> Layer:
+def _layer(data: dict, store=None) -> Layer:
     role = LayerRole(data["role"])
+    layer = _layer_fields(data, role)
+    if store is not None and data.get("asset"):
+        layer.raster_relpath = store.relpath(data["asset"], ".png")
+        layer.raster_png = store.get_bytes(data["asset"], ".png")
+    if store is not None and data.get("strokes_blob"):
+        blob = store.get_bytes(data["strokes_blob"], ".strokes.json")
+        if blob is not None:
+            layer.strokes = [coerce_stroke(item) for item in json.loads(blob)]
+    return layer
+
+
+def _layer_fields(data: dict, role: LayerRole) -> Layer:
     return Layer(
         id=data.get("id") or new_id(),
         role=role,
@@ -78,13 +92,13 @@ def _line(data: dict) -> StoryLine:
     )
 
 
-SUPPORTED_VERSION = 2
+SUPPORTED_VERSION = 3
 KNOWN_TOP_KEYS = frozenset({
-    "version", "title", "episode", "binding", "autosave", "font_path", "page_locks", "brush",
-    "spec", "bible", "tickets", "pages", "story",
+    "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
+    "font_path", "page_locks", "brush", "spec", "bible", "tickets", "pages", "story",
 })
 KNOWN_PAGE_KEYS = frozenset({
-    "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
+    "id", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
     "effects", "ruler", "prims", "frames", "layers", "texts", "fills", "name_strokes", "ink_strokes",
 })
 
@@ -93,7 +107,7 @@ class UnsupportedProjectVersion(ValueError):
     """The file was written by a newer Genko; opening it here could lose data."""
 
 
-def migrate_payload(payload: dict) -> Episode:
+def migrate_payload(payload: dict, store=None) -> Episode:
     version = payload.get("version", 1)
     if not isinstance(version, int) or version > SUPPORTED_VERSION:
         raise UnsupportedProjectVersion(
@@ -114,6 +128,7 @@ def migrate_payload(payload: dict) -> Episode:
     pages: list[Page] = []
     for raw in payload["pages"]:
         page = Page(
+            id=raw.get("id") or "pg_" + new_id(),
             index=raw["index"],
             spec=spec,
             frames=[_frame(frame) for frame in raw["frames"]],
@@ -135,16 +150,18 @@ def migrate_payload(payload: dict) -> Episode:
         }
         page.fills = fills
         if raw.get("layers"):
-            page.layers = [_layer(item) for item in raw["layers"]]
+            page.layers = [_layer(item, store) for item in raw["layers"]]
         else:
             page.layers = default_layers()
             page.name_strokes = [[tuple(pt) for pt in stroke] for stroke in raw.get("name_strokes", [])]  # type: ignore[misc]
             page.ink_strokes = [[tuple(pt) for pt in stroke] for stroke in raw.get("ink_strokes", [])]  # type: ignore[misc]
             for role, rgb in fills.items():
                 page.paint(role, rgb)  # type: ignore[arg-type]
-        page_lines = [_line(item) for item in raw.get("texts", [])]
-        if not page_lines:
+        if story:
+            # One object per line: page.texts and episode.story must not drift apart.
             page_lines = [line for line in story if line.page_index == page.index]
+        else:
+            page_lines = [_line(item) for item in raw.get("texts", [])]
         page.texts = page_lines
         page.extra = {k: v for k, v in raw.items() if k not in KNOWN_PAGE_KEYS}
         pages.append(page)
@@ -174,4 +191,10 @@ def migrate_payload(payload: dict) -> Episode:
     episode.bible.characters = list(bible.get("characters") or [])
     episode.bible.constraints = list(bible.get("constraints") or [])
     episode.extra = {k: v for k, v in payload.items() if k not in KNOWN_TOP_KEYS}
+    episode.revision = int(payload.get("revision") or 0)
+    episode.start_side = payload.get("start_side")
+    episode.strict_gates = bool(payload.get("strict_gates", False))
+    by_index = {str(page.index): page.id for page in pages}
+    # v2 keyed locks by page number; v3 by page id.
+    episode.page_locks = {by_index.get(str(key), str(key)): owner for key, owner in episode.page_locks.items()}
     return episode

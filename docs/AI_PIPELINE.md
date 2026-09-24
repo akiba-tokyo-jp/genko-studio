@@ -1935,6 +1935,8 @@ M5 + M7 ─▶ M9（拡張）
 
 ### M2 v3 形式と保存 — 約 4.5 人週
 
+**実施状況（2026-09-24）:** M2-1〜M2-6 を実装した。設計からの変更点: journal は正規化した ops の再生ではなく、保存ごとの project.json の前後（内容アドレスの資産。v3 では小さい）を記録し、undo / redo はそれを戻す（`split_frame` などが新しい id を作るため、ops の再生では同じ状態にならない）。journal は `studio/journal.jsonl`、ops は監査用に併記する。ラスタは読み込み時にまとめて読む（遅延読み込みは見送り）。Stroke の不変化は見送り。`strict_gates` は studio のプロジェクトで有効（`advance to=finish` に art_ok を要る規則は art_ok ができる M3 で入れる）。見開きは綴じ方向から左右を決め、GUI のキャンバスも相手ページを物理的な側に描く。
+
 | PR | 内容 |
 |---|---|
 | M2-1 | 呼び出し側 id（§5.1-4）、`_validate`（触れた範囲、資産の欠落は警告）、`put_raster` の画像検証、`genko doctor` |

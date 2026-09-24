@@ -5,8 +5,12 @@ import os
 import time
 from pathlib import Path
 
+from genko import journal
+from genko.assets import AssetStore, canonical_json
 from genko.migrate import KNOWN_PAGE_KEYS as _PAGE_KEYS
 from genko.migrate import migrate_payload
+
+V2_BACKUP = "project.v2.bak.json"
 from genko.models import Episode, Frame, Layer, Page, Rect, StoryLine, stroke_to_dict
 
 
@@ -72,10 +76,14 @@ def _line_to_dict(line: StoryLine) -> dict:
 
 
 
-def _write_atomic(path: Path, text: str) -> None:
+def _write_atomic(path: Path, text: str | bytes) -> None:
     """Write via a temp file and os.replace, retrying while Windows holds the file open."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
+    if isinstance(text, bytes):
+        tmp.write_bytes(text)
+    else:
+        tmp.write_text(text, encoding="utf-8")
     for attempt in range(8):
         try:
             os.replace(tmp, path)
@@ -86,14 +94,17 @@ def _write_atomic(path: Path, text: str) -> None:
             time.sleep(0.05 * (2**attempt))
 
 
-def save_episode(episode: Episode, dest: Path) -> None:
-    dest.mkdir(parents=True, exist_ok=True)
-    payload = {
+def _payload(episode: Episode, store: AssetStore) -> dict:
+    """The v3 project.json: decisions only. Raster bytes and strokes live in assets/ by hash."""
+    return {
         **episode.extra,
-        "version": 2,
+        "version": 3,
+        "revision": episode.revision,
         "title": episode.title,
         "episode": episode.episode,
         "binding": episode.binding.value,
+        "start_side": episode.start_side,
+        "strict_gates": episode.strict_gates,
         "autosave": episode.autosave,
         "font_path": episode.font_path,
         "page_locks": episode.page_locks,
@@ -121,6 +132,7 @@ def save_episode(episode: Episode, dest: Path) -> None:
         "tickets": episode.tickets,
         "pages": [
             {
+                "id": page.id,
                 "index": page.index,
                 "note": page.note,
                 "name_ok": page.name_ok,
@@ -133,37 +145,73 @@ def save_episode(episode: Episode, dest: Path) -> None:
                 "ruler": page.ruler,
                 "prims": page.prims,
                 "frames": [_frame_to_dict(frame) for frame in page.frames],
-                "layers": [_layer_to_dict(layer) for layer in page.layers],
-                "texts": [_line_to_dict(line) for line in page.texts],
+                "layers": [_layer_to_v3(layer, store) for layer in page.layers],
                 "fills": {role.value: list(rgb) for role, rgb in page.fills.items()},
-                "name_strokes": page.name_strokes,
-                "ink_strokes": page.ink_strokes,
             }
             | {k: v for k, v in page.extra.items() if k not in _PAGE_KEYS}
             for page in episode.pages
         ],
         "story": [_line_to_dict(line) for line in episode.story],
     }
-    _write_atomic(dest / "project.json", json.dumps(payload, ensure_ascii=False, indent=2))
-    for page in episode.pages:
-        for layer in page.layers:
-            if layer.raster_png and layer.raster_relpath:
-                path = dest / layer.raster_relpath
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(layer.raster_png)
 
 
-def _attach_rasters(episode: Episode, src: Path) -> None:
-    for page in episode.pages:
-        for layer in page.layers:
-            if layer.raster_relpath:
-                path = src / layer.raster_relpath
-                if path.is_file():
-                    layer.raster_png = path.read_bytes()
+def _layer_to_v3(layer: Layer, store: AssetStore) -> dict:
+    data = _layer_to_dict(layer)
+    del data["strokes"], data["raster_relpath"]
+    if layer.raster_png:
+        data["asset"] = store.put_bytes(layer.raster_png, ".png")
+        layer.raster_relpath = store.relpath(data["asset"], ".png")
+    if layer.strokes:
+        blob = canonical_json([stroke_to_dict(stroke) for stroke in layer.strokes])
+        data["strokes_blob"] = store.put_bytes(blob.encode("utf-8"), ".strokes.json")
+        data["stroke_count"] = len(layer.strokes)
+    return data
+
+
+def save_episode(episode: Episode, dest: Path, *, actor: str | None = None) -> None:
+    """Save as v3: bump the revision, write only new assets, and journal the change."""
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    store = AssetStore(dest)
+    project_json = dest / "project.json"
+    before = None
+    if project_json.is_file():
+        old = project_json.read_bytes()
+        before = store.put_bytes(old, ".project.json")
+        if not (dest / V2_BACKUP).exists() and json.loads(old).get("version", 1) < 3:
+            (dest / V2_BACKUP).write_bytes(old)
+    base = episode.revision
+    episode.revision = base + 1
+    text = json.dumps(_payload(episode, store), ensure_ascii=False, indent=2)
+    _write_atomic(project_json, text)
+    after = store.put_bytes(text.encode("utf-8"), ".project.json")
+    pending, episode.journal_pending = episode.journal_pending, []
+    who = actor or (pending[-1]["actor"] if pending else "genko")
+    journal.append(dest, {
+        "kind": "commit",
+        "rev": episode.revision,
+        "base_rev": base,
+        "actor": who,
+        "at": time.time(),
+        "ops": [op for batch in pending for op in batch["ops"]],
+        "before": before,
+        "after": after,
+    })
 
 
 def load_episode(src: Path) -> Episode:
+    src = Path(src)
     payload = json.loads((src / "project.json").read_text(encoding="utf-8"))
-    episode = migrate_payload(payload)
-    _attach_rasters(episode, src)
+    episode = migrate_payload(payload, AssetStore(src))
+    _attach_legacy_rasters(episode, src)
     return episode
+
+
+def _attach_legacy_rasters(episode: Episode, src: Path) -> None:
+    """v2 files keep rasters under pages/NNN/; v3 layers already carry their bytes."""
+    for page in episode.pages:
+        for layer in page.layers:
+            if layer.raster_png is None and layer.raster_relpath:
+                path = src / layer.raster_relpath
+                if path.is_file():
+                    layer.raster_png = path.read_bytes()

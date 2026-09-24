@@ -103,7 +103,8 @@ class StudioService:
         if not 1 <= pages <= 400:
             return fail("pages は 1〜400", "pages_out_of_range", "/pages")
         episode = new_episode(title, 1, pages, SPEC_PRESETS[spec_preset](), Binding(binding))
-        save_episode(episode, path)
+        episode.strict_gates = True  # agent projects: printed layers change only after the name is approved
+        save_episode(episode, path, actor=self.actor)
         return ToolResult(True, {"project": name, "pages": pages})
 
     # --- reading --------------------------------------------------------------
