@@ -207,3 +207,40 @@ def eval_score(folder: Path, answers: Path) -> dict:
         "by_evaluator": {k: round(sum(v) / len(v), 3) for k, v in per_evaluator.items()},
         "by_character": {k: round(sum(v) / len(v), 3) for k, v in per_character.items()},
     }
+
+
+# --- D8: panels recovered from scanned names ----------------------------------------------------------------
+
+
+def _edge_error(a: list[float], b: list[float]) -> float:
+    return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[0] + a[2] - b[0] - b[2]), abs(a[1] + a[3] - b[1] - b[3]))
+
+
+def eval_atari(truth_path: Path, tolerance_mm: float = 5.0) -> dict:
+    """truth JSON: {"page_mm": [w, h]?, "align": "page"|"live"|"auto"?, "pages": [{"scan": path, "panels": [[x,y,w,h], …]}]}.
+    A panel counts when a detected panel matches it within `tolerance_mm` on every edge (target: 90%)."""
+    from genko.models import PageSpec, new_episode
+    from genko.studio import atari, xycut
+
+    truth_path = Path(truth_path)
+    truth = json.loads(truth_path.read_text(encoding="utf-8"))
+    spec = PageSpec.b4_comic()
+    if truth.get("page_mm"):
+        from dataclasses import replace
+
+        spec = replace(spec, width_mm=float(truth["page_mm"][0]), height_mm=float(truth["page_mm"][1]))
+    page = new_episode("eval", 1, 1, spec).pages[0]
+    rows, hits, total = [], 0, 0
+    for item in truth.get("pages", []):
+        scan = Path(item["scan"])
+        scan = scan if scan.is_absolute() else truth_path.parent / scan
+        image = Image.open(scan)
+        placement, used = atari.placement_for(image.convert("L"), page, truth.get("align", "auto"))
+        found = xycut.detect(image, tuple(placement)).leaves_mm
+        matched = sum(1 for t in item["panels"] if any(_edge_error(d["rect_mm"], t) <= tolerance_mm for d in found))
+        hits += matched
+        total += len(item["panels"])
+        rows.append({"scan": str(item["scan"]), "panels": len(item["panels"]), "detected": len(found), "matched": matched, "align": used})
+    rate = hits / total if total else None
+    return {"ok": True, "pages": rows, "matched": hits, "panels": total, "rate": round(rate, 3) if rate is not None else None,
+            "passed": rate is not None and rate >= 0.9, "tolerance_mm": tolerance_mm}

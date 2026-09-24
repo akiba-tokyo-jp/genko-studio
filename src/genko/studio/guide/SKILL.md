@@ -31,6 +31,16 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - `review_name`: `mcp_genko_render` で画像を見て、読み順の迷い・窮屈なコマ・弱いめくりを確かめる。直すなら `submit_name` を `replace: true` で送り直す。よければ `mcp_genko_record_review`。
 - `revise_page`: 人間の指示（`comments`）に従って `submit_name` を `replace: true` で送り直す。
 
+## アタリ（人間が手で描いたネーム）から始めるとき
+
+- 人間が `import_name` か CLI でアタリを取り込むと、Genko がコマ割りを検出して提案にする（確定は人間）。
+- `read_atari`: `mcp_genko_render`（`kind: "atari"`）でアタリを見て、手書きの台詞を読み、`mcp_genko_propose_lines` で提案する。
+  位置は `box01`（アタリ画像の中の 0..1 の `[x, y, 幅, 高さ]`）で渡せる。縦書きの列の区切りは `\n`。台詞が無いページは
+  `record_review`（`kind: "atari_lines"`）で知らせる。
+- `atari_layout`: コマ割りの提案が無い（見つからなかった・却下された）。`mcp_genko_analyze_name` を `params` を変えて試すか、`ask_human`。
+- `brief_panels`: 確定したコマごとに、アタリを見て指示（shot、angle、人物、動き、表情）を `apply_ops` の `set_panel` で書く。
+- 提案を出したら `review_page` の場所を人間に知らせて、確定を待つ。
+
 ## 作画
 
 作画はパイロットページ（ふつうは 1 ページ目）から始まる。パイロットページの作画が承認されると、絵柄（参照画像）と使う画像ツールが固定され、残りのページの依頼パックに入る。それまで他のページの作画は `next` に出ない。

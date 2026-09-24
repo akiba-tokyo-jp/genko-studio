@@ -1185,7 +1185,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
     page.layers = [layer for layer in page.layers if layer not in layers]
 
 
-LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame"})
+LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "filter_raster", "flood_fill"})
 
 

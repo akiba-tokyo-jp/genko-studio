@@ -29,6 +29,7 @@ STUDIO_OPS = frozenset({
     "replace_regions", "bind_ref", "unbind_ref", "register_assets", "attach_reference",
     "open_request", "close_request", "import_candidates", "review_candidates", "set_candidate",
     "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish", "ask_human", "reject_sheet",
+    "set_layout", "propose", "resolve_proposal",
 })
 
 STUDIO_SCHEMA = [
@@ -63,10 +64,13 @@ STUDIO_SCHEMA = [
     {"op": "adopt_candidate", "page": "int", "frame_id": "str", "candidate_id": "str", "to": "art|bg|draft|ink?", "fit": "cover|contain|stretch?", "offset_mm": "[dx,dy]?", "scale": "float?", "clip_to": "frame|bleed|none?"},
     {"op": "unadopt", "page": "int", "frame_id": "str", "to": "art|bg|draft|ink?"},
     {"op": "set_placement", "page": "int", "frame_id": "str", "to": "art|bg|draft|ink?", "fit": "str?", "offset_mm": "[dx,dy]?", "scale": "float?", "clip_to": "str?"},
-    {"op": "place_asset", "page": "int", "asset": "sha256:…", "to": "art|bg|draft|name?", "frame_id": "str?", "fit": "str?", "clip_to": "str?"},
+    {"op": "place_asset", "page": "int", "asset": "sha256:…", "to": "art|bg|draft|name?", "frame_id": "str?", "fit": "str?", "clip_to": "str?", "placement_mm": "[x,y,w,h]?", "title": "str?"},
     {"op": "set_finish", "page": "int", "frame_id": "str", "finish": "object|null"},
     {"op": "ask_human", "text": "str", "page": "int?", "frame_id": "str?", "item": "str? (work item kind it blocks)"},
     {"op": "reject_sheet", "character_id": "str", "candidate_ids": "[str]? (all if omitted)", "note": "str (person only)"},
+    {"op": "set_layout", "page": "int", "tree": "{rect_mm, axis?, children?}", "force": "bool?"},
+    {"op": "propose", "proposal": "{id?, kind: layout|lines, page, …}"},
+    {"op": "resolve_proposal", "id": "str", "status": "accepted|rejected", "note": "str? (person only)"},
 ]
 
 
@@ -240,6 +244,18 @@ def _style_lock(episode: Episode, page: Page, agent: str) -> dict:
         "by": agent,
         "rev": episode.revision,
     }
+
+
+def _frame_from_tree(node: dict) -> Frame:
+    x, y, w, h = (float(v) for v in node["rect_mm"])
+    frame = Frame(id=new_id(), rect=Rect(round(x, 2), round(y, 2), round(w, 2), round(h, 2)))
+    children = node.get("children") or []
+    if children:
+        if node.get("axis") not in ("horizontal", "vertical"):
+            raise _err("a node with children needs axis horizontal or vertical")
+        frame.split_axis = node["axis"]
+        frame.children = [_frame_from_tree(child) for child in children]
+    return frame
 
 
 def _pad(cand: dict) -> float:
@@ -679,8 +695,61 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
         layer = Layer(id=new_id(), role=roles[to], kind=LayerKind.PLACED, exportable=to in ("art", "bg"),
                       title=f"placed {to}", frame_id=frame.id if frame else None, asset=asset,
                       source={"asset": asset, "to": to, "by": agent})
-        _place(page, frame, layer, px, str(op.get("fit") or "cover"), str(op.get("clip_to") or ("frame" if frame else "none")), (0.0, 0.0), 1.0)
+        if op.get("placement_mm"):
+            # an explicit position (e.g. a scanned name aligned to the page): the whole image goes there
+            x, y, w, h = (float(v) for v in op["placement_mm"])
+            layer.placement_mm, layer.fit, layer.clip_to = Rect(x, y, w, h), "stretch", str(op.get("clip_to") or "none")
+            layer.title = str(op.get("title") or layer.title)
+        else:
+            _place(page, frame, layer, px, str(op.get("fit") or "cover"), str(op.get("clip_to") or ("frame" if frame else "none")), (0.0, 0.0), 1.0)
         _insert_below_ink(page, layer)
+        return
+
+    if name == "set_layout":
+        page = _page(episode, op)
+        tree = op.get("tree") or {}
+        if not tree.get("rect_mm"):
+            raise _err("tree needs rect_mm")
+        blank = len(page.leaf_frames()) == 1 and not episode.story_for_page(page.index)
+        if not blank and not op.get("force"):
+            raise _err(f"page {page.index} already has panels or lines; pass force to replace the layout")
+        if not blank:
+            from genko.ops import _orphan_art, _placed_on
+
+            _orphan_art(episode, page, _placed_on(page, {f.id for f in page.leaf_frames()}), reason="set_layout")
+        page.frames = [_frame_from_tree(tree)]
+        page.selected_frame_id = None
+        return
+
+    if name == "propose":
+        proposal = dict(op.get("proposal") or {})
+        if proposal.get("kind") not in ("layout", "lines"):
+            raise _err("proposal.kind must be layout or lines")
+        page = _page(episode, proposal)
+        pid = str(proposal.get("id") or "pr_" + new_id()[:10])
+        proposals = studio.setdefault("proposals", {})
+        if pid in proposals:
+            if proposals[pid].get("status") in ("rejected", "superseded"):  # asked again: open it again
+                proposals[pid].update({"status": "open", "by": agent, "rev": episode.revision})
+                proposals[pid].pop("resolved_by", None)
+            return  # the same proposal again
+        for other in proposals.values():  # a newer proposal of the same kind for the page replaces an open one
+            if other.get("status") == "open" and other.get("kind") == proposal["kind"] and other.get("page_id") == page.id:
+                other["status"] = "superseded"
+        proposal.update({"id": pid, "page_id": page.id, "page": page.index, "status": "open", "by": agent, "rev": episode.revision})
+        proposals[pid] = proposal
+        return
+
+    if name == "resolve_proposal":
+        if not person:
+            raise _err("only a person accepts or rejects a proposal")
+        proposal = studio.get("proposals", {}).get(str(op.get("id") or ""))
+        if proposal is None:
+            raise _err(f"no proposal {op.get('id')}")
+        status = str(op.get("status") or "")
+        if status not in ("accepted", "rejected"):
+            raise _err("status must be accepted or rejected")
+        proposal.update({"status": status, "resolved_by": agent, "note": str(op.get("note") or "")})
         return
 
     if name == "reject_sheet":

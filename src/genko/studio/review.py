@@ -143,6 +143,25 @@ def review_html(project: Path, *, max_px: int = 900) -> str:
             parts.append(f"<tr><td>{html.escape(what)}</td><td>{html.escape(req.get('text') or '')}</td>"
                          f"<td>{html.escape(req.get('created_by') or '')}</td><td>{_code(action) if action else ''}</td></tr>")
         parts.append("</table>")
+    proposals = [p for p in (episode.studio.get("proposals") or {}).values() if p.get("status") == "open"]
+    if proposals:
+        from genko.studio.atari import overlay_image
+
+        parts.append("<h2>アタリからの提案（確定するまでページは変わらない）</h2>")
+        for proposal in proposals:
+            page = next((p for p in episode.pages if p.id == proposal.get("page_id")), None)
+            if page is None:
+                continue
+            count = len(proposal.get("panels") or proposal.get("lines") or [])
+            label = f"{count} コマ（信頼度 {proposal.get('confidence', 0):.2f}）" if proposal["kind"] == "layout" else f"{count} 本の台詞"
+            image = overlay_image(episode, page, max(36, int(max_px / (page.spec.height_mm / 25.4))))
+            parts.append(f"<div class='page'><div><h3>{page.index} ページ: {html.escape(label)}（{html.escape(str(proposal.get('source') or ''))}）</h3>"
+                         f"<img class='pg' alt='proposal' src='data:image/png;base64,{_png_b64(image)}'></div><div>")
+            if proposal["kind"] == "lines":
+                parts.append("<ul>" + "".join(f"<li>{html.escape(line['text'])}</li>" for line in proposal.get("lines", [])) + "</ul>")
+            pid = proposal["id"]
+            parts.append(f"<p>確定: {_code(f'genko studio accept {proj} {pid} --as human:名前')}</p>"
+                         f"<p>却下: {_code(f'genko studio reject {proj} {pid} --note 理由 --as human:名前')}</p></div></div>")
     # character sheets
     sheets = episode.studio.get("character_candidates") or {}
     if episode.bible.characters:

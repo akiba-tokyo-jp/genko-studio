@@ -519,7 +519,9 @@
       "to": "art|bg|draft|name?",
       "frame_id": "str?",
       "fit": "str?",
-      "clip_to": "str?"
+      "clip_to": "str?",
+      "placement_mm": "[x,y,w,h]?",
+      "title": "str?"
     },
     {
       "op": "set_finish",
@@ -539,6 +541,22 @@
       "character_id": "str",
       "candidate_ids": "[str]? (all if omitted)",
       "note": "str (person only)"
+    },
+    {
+      "op": "set_layout",
+      "page": "int",
+      "tree": "{rect_mm, axis?, children?}",
+      "force": "bool?"
+    },
+    {
+      "op": "propose",
+      "proposal": "{id?, kind: layout|lines, page, …}"
+    },
+    {
+      "op": "resolve_proposal",
+      "id": "str",
+      "status": "accepted|rejected",
+      "note": "str? (person only)"
     }
   ]
 }

@@ -43,7 +43,7 @@ AGENT_OPS = frozenset({
     "add_region", "edit_region", "delete_region", "replace_regions", "bind_ref", "unbind_ref",
     "register_assets", "attach_reference", "open_request", "close_request", "import_candidates",
     "review_candidates", "set_candidate", "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish",
-    "ask_human",
+    "ask_human", "propose",
 })
 
 # Agent tools callable by name from `genko studio call` (the MCP tool set, minus project management).
@@ -51,7 +51,7 @@ AGENT_TOOLS = frozenset({
     "status", "next", "inspect", "render", "import_image", "set_bible", "set_script", "submit_name", "apply_ops",
     "record_review", "request_approval", "tickets", "generation_request", "import_images", "candidates",
     "review_candidates", "adopt", "request_fix", "report_regions", "finish_page", "preflight", "export_proof", "ask_human",
-    "review_page", "derive",
+    "review_page", "derive", "import_name", "analyze_name", "propose_lines", "proposals",
 })
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
@@ -205,7 +205,15 @@ class StudioService:
         guide:pose, guide:keepout (the request guides for a panel)."""
         path = self.project_path(project)
         episode = load_episode(path)
-        if kind:
+        if kind == "atari":
+            from genko.studio import atari
+
+            target = next((p for p in episode.pages if p.index == page), None)
+            if target is None:
+                return fail(f"{page} ページはない", "no_page", "/page")
+            dpi = max(36, min(200, int(max_px / (target.spec.height_mm / 25.4))))
+            png, label = _png(atari.overlay_image(episode, target, dpi)), "atari"
+        elif kind:
             png, label = _render_kind(episode, path, page, frame_id, kind, candidate_id, max_px)
         else:
             draft = state.name(episode, page)
@@ -471,6 +479,119 @@ class StudioService:
         ink_share = sum(layer.split()[3].histogram()[128:]) / max(1, layer.width * layer.height)
         return ToolResult(True, {"candidate": cand_id, "kind": kind, "parent": source_id, "ink_share": round(ink_share, 4),
                                  "adopt": {"candidate_id": cand_id, "to": "ink"}}, images=[_png(preview)])
+
+    # --- hand-drawn names (atari) ---------------------------------------------------------------
+
+    def import_name(self, project: str, files: list[str], start_page: int = 1, align: str = "auto",
+                    *, confine: bool = True) -> ToolResult:
+        """Scans of hand-drawn names, one per page from `start_page`: stored as assets (origin self),
+        placed on DRAFT (never printed), aligned, and analysed into layout proposals."""
+        from genko.assets import AssetStore
+        from genko.studio import atari, importer
+
+        path = self.project_path(project)
+        if align not in atari.ALIGNS:
+            return fail(f"align は {', '.join(atari.ALIGNS)}", "bad_align", "/align")
+        if not isinstance(files, list) or not files:
+            return fail("files は 1 つ以上", "no_files", "/files")
+        store = AssetStore(path)
+        episode = load_episode(path)
+        prepared = []
+        for i, name in enumerate(files):
+            source = Path(name)
+            source = (source if source.is_absolute() else self.root / source).resolve()
+            if confine and self.root not in source.parents:
+                return fail(f"--root の外: {name}", "outside_root", f"/files/{i}")
+            if not source.is_file():
+                return fail(f"ファイルがない: {name}", "no_file", f"/files/{i}")
+            try:
+                blob, size, image = importer.normalize(source.read_bytes(), i)
+            except importer.ImportError_ as exc:
+                return fail(str(exc), "bad_image", f"/files/{i}")
+            index = start_page + i
+            page = next((p for p in episode.pages if p.index == index), None)
+            if page is None:
+                return fail(f"{index} ページが無い（ページを先に増やす）", "no_page", f"/files/{i}")
+            placement, used = atari.placement_for(image.convert("L"), page, align)
+            prepared.append((index, store.put_bytes(blob, ".png"), list(size), placement, used, source.name))
+        imported = []
+        with ProjectLock(path, agent=self.actor):
+            episode = load_episode(path)
+            ops: list[dict] = []
+            for index, ref, size, placement, used, filename in prepared:
+                ops += [
+                    {"op": "register_assets", "assets": {ref: {"kind": "atari", "origin": "self", "file": filename, "by": self.actor}}},
+                    {"op": "place_asset", "page": index, "asset": ref, "to": "draft", "placement_mm": placement, "title": "アタリ"},
+                    {"op": "set_page_plan", "page": index, "plan": {"atari": {"asset": ref, "px": size, "placement_mm": placement,
+                                                                              "align": used, "file": filename, "by": self.actor}}},
+                ]
+                imported.append({"page": index, "asset": ref, "align": used, "placement_mm": placement})
+            apply_ops(episode, ops, agent=self.actor)
+            proposals = []
+            for item in imported:
+                page = next(p for p in episode.pages if p.index == item["page"])
+                proposal = atari.analyze(path, episode, page)
+                apply_ops(episode, [{"op": "propose", "proposal": proposal}], agent=self.actor)
+                proposals.append({"page": item["page"], "proposal": proposal["id"], "panels": len(proposal["panels"]),
+                                  "confidence": proposal["confidence"]})
+            save_episode(episode, path, actor=self.actor)
+        return ToolResult(True, {"imported": imported, "proposals": proposals})
+
+    def analyze_name(self, project: str, page: int, params: dict | None = None) -> ToolResult:
+        """Run the panel detection again (optionally with other parameters): a new layout proposal."""
+        from genko.studio import atari
+
+        path = self.project_path(project)
+        with ProjectLock(path, agent=self.actor):
+            episode = load_episode(path)
+            target = next((p for p in episode.pages if p.index == page), None)
+            if target is None:
+                return fail(f"{page} ページはない", "no_page", "/page")
+            try:
+                proposal = atari.analyze(path, episode, target, params)
+            except ValueError as exc:
+                return fail(str(exc), "no_atari", "/page")
+            apply_ops(episode, [{"op": "propose", "proposal": proposal}], agent=self.actor)
+            save_episode(episode, path, actor=self.actor)
+        png = _png(atari.overlay_image(load_episode(path), next(p for p in load_episode(path).pages if p.index == page), 72))
+        return ToolResult(True, {"proposal": proposal["id"], "panels": proposal["panels"], "tiers": proposal["tiers"],
+                                 "confidence": proposal["confidence"], "analysis": proposal["analysis"]}, images=[png])
+
+    def propose_lines(self, project: str, page: int, lines: list[dict]) -> ToolResult:
+        """Lines read from the handwriting (text with \n for columns, and where: x_mm/y_mm[/w_mm/h_mm] or box01
+        in the scan). A proposal only: a person accepts it. Returns the overlay to check against the scan."""
+        from genko.studio import atari
+        from genko.studio.jsonutil import content_hash
+
+        path = self.project_path(project)
+        episode = load_episode(path)
+        target = next((p for p in episode.pages if p.index == page), None)
+        if target is None:
+            return fail(f"{page} ページはない", "no_page", "/page")
+        if not isinstance(lines, list) or not lines:
+            return fail("lines は 1 つ以上", "no_lines", "/lines")
+        checked = []
+        for i, item in enumerate(lines):
+            try:
+                checked.append(atari.line_from_input(item if isinstance(item, dict) else {}, target, atari.atari_of(target)))
+            except (ValueError, TypeError) as exc:
+                return fail(str(exc), "bad_line", f"/lines/{i}")
+        proposal = {"id": "pr_" + content_hash({"page": target.id, "lines": checked})[7:17], "kind": "lines", "page": page,
+                    "source": self.actor, "lines": checked}
+        result = self._ops(project, [{"op": "propose", "proposal": proposal}])
+        if not result.ok:
+            return result
+        episode = load_episode(path)
+        page_obj = next(p for p in episode.pages if p.index == page)
+        png = _png(atari.overlay_image(episode, page_obj, 72))
+        return ToolResult(True, {"proposal": proposal["id"], "lines": len(checked)}, images=[png])
+
+    def proposals(self, project: str, status: str = "open") -> ToolResult:
+        path = self.project_path(project)
+        items = [p for p in (load_episode(path).studio.get("proposals") or {}).values() if status == "all" or p.get("status") == status]
+        brief = [{k: p.get(k) for k in ("id", "kind", "page", "status", "source", "by", "confidence")} |
+                 {"count": len(p.get("panels") or p.get("lines") or [])} for p in items]
+        return ToolResult(True, {"proposals": brief})
 
     def review_page(self, project: str) -> ToolResult:
         """Write studio/review.html (previews, candidates, open requests, the commands a person runs to approve).
@@ -833,6 +954,29 @@ class HumanService:
             self._apply([{"op": "revoke", "gate": gate, "page": p, "reason": reason} for p in pages])
         return {"ok": True, "revoked": gate}
 
+    def accept_proposal(self, proposal_id: str, force: bool = False) -> dict:
+        from genko.studio import atari
+
+        episode = load_episode(self.path)
+        proposal = (episode.studio.get("proposals") or {}).get(proposal_id)
+        if proposal is None or proposal.get("status") != "open":
+            return {"ok": False, "error": f"開いている提案 {proposal_id} は無い"}
+        try:
+            ops = atari.accept_ops(episode, proposal, force=force)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        page = next(p for p in episode.pages if p.id == proposal["page_id"])
+        ops = atari.assign_frames(ops, page)
+        try:
+            self._apply(ops)
+        except ApplyError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "accepted": proposal_id, "kind": proposal["kind"]}
+
+    def reject_proposal(self, proposal_id: str, note: str = "") -> dict:
+        self._apply([{"op": "resolve_proposal", "id": proposal_id, "status": "rejected", "note": note}])
+        return {"ok": True, "rejected": proposal_id}
+
     def close_ticket(self, ticket_id: str, reply: str = "") -> dict:
         episode = load_episode(self.path)
         ticket = next((t for t in episode.tickets if t.get("id") == ticket_id), None)
@@ -853,8 +997,8 @@ class HumanService:
 
 def _waiting(items: list[dict]) -> list[dict]:
     out = []
-    for gate in ("name", "art"):
-        pages = sorted(i["target"]["page"] for i in items if i["blocked_by"] and i.get("gate") == gate)
+    for gate in ("proposal", "name", "art"):
+        pages = sorted({i["target"]["page"] for i in items if i["blocked_by"] and i.get("gate") == gate})
         if pages:
             out.append({"gate": gate, "pages": pages})
     chars = sorted({i["target"]["character_id"] for i in items if i["blocked_by"] and i.get("gate") == "sheet"})

@@ -170,6 +170,15 @@ Printing in black and white (M6):
 - Balloons: ellipses are sized to go around the text block (half-size × √2 + pad; the name lettering measures them the same way). Tails leave from the side that faces the speaker with a base of a third of the short side. `shout` is spiky, `whisper` dashed, `thought` trails small bubbles, `narration` is a box, `sfx` is large outlined lettering without a balloon. Ruby sits beside every base it belongs to. Focus and speed lines are clipped to their panel and focus lines leave the centre clear.
 - Export: print, pack and PSD default to the page spec's dpi (B4 comic: 600); strip and EPUB to 150. File names are made safe for Windows. EPUB is EPUB 3, fixed layout, right to left for right-bound books. PSD: `genko export PROJ OUTDIR --format psd` writes one layered PSD per page (paper, each placed image as greyscale art, raster layers, ink, tone, effects, panel borders, one layer per balloon, page number; Unicode layer names, cropped layers, resolution set). The manual check for CLIP STUDIO PAINT and Photoshop is `docs/PSD_CHECKLIST.md`.
 
+Hand-drawn names (M8):
+
+- `genko studio import-name PROJ scan1.png scan2.png … [--start-page N] [--align auto|page|live] [--as human:NAME]` (or the MCP tool `import_name` with files under `--root`). Each scan becomes an asset (origin `self`), is placed on DRAFT (never printed) and aligned: `page` = the scan is the whole sheet, `live` = the drawing fills the live area, `auto` = `live` when the drawing has the live area's shape, else `page`.
+- Genko finds the panels (XY-cut on the scan: gutters between panel borders, specks and dialogue scribbles ignored) and proposes a layout with a confidence per panel; everything the analysis produced is in `studio/analysis/<page id>/`. `analyze_name {page, params}` runs it again.
+- The agent reads the handwritten lines and proposes them: `propose_lines {page, lines: [{text ("\n" between columns), balloon?, speaker?, box01 in the scan | x_mm, y_mm[, w_mm, h_mm]}]}`. If a page has no lines, `record_review {page, kind: "atari_lines"}` says so.
+- Nothing changes on the page until a person accepts: `genko studio accept PROJ PROPOSAL --as human:NAME` (a layout over existing panels needs `--force`), `genko studio reject PROJ PROPOSAL --note "…" --as human:NAME`, or the approval box in the app. Proposals show as an overlay in `render kind=atari`, review.html and the app.
+- `next` on such pages: `read_atari`, then (after the layout is accepted) `brief_panels` (write `set_panel` briefs from the scan), then the name approval. No script is needed for pages drawn by hand.
+- D8: `genko studio eval-atari truth.json` measures how many panels are recovered within 5 mm (`{"align", "pages": [{"scan", "panels": [[x, y, w, h], …]}]}`).
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

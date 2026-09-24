@@ -87,6 +87,29 @@ def _parser() -> argparse.ArgumentParser:
     comment.add_argument("--page", type=int, required=True)
     comment.add_argument("--frame")
     comment.add_argument("--as", dest="actor", required=True)
+    imp_name = sub.add_parser("import-name", help="Import scans of hand-drawn names (one per page) and propose the panels")
+    imp_name.add_argument("project", type=Path)
+    imp_name.add_argument("files", nargs="+")
+    imp_name.add_argument("--start-page", type=int, default=1)
+    imp_name.add_argument("--align", default="auto", choices=["auto", "page", "live"])
+    imp_name.add_argument("--as", dest="actor", default=None, help="who imports (default human:<login name>)")
+    ana = project_cmd("analyze", "Detect the panels of a page's imported name again (a new proposal)")
+    ana.add_argument("--page", type=int, required=True)
+    ana.add_argument("--params", help="JSON: min_gutter_mm, min_panel_mm, speck_mm, …")
+    props = project_cmd("proposals", "Layout and line proposals")
+    props.add_argument("--all", action="store_true")
+    accept = sub.add_parser("accept", help="(human) Accept a proposal: it is applied to the page")
+    accept.add_argument("project", type=Path)
+    accept.add_argument("proposal")
+    accept.add_argument("--force", action="store_true", help="replace an existing layout")
+    accept.add_argument("--as", dest="actor", required=True)
+    reject = sub.add_parser("reject", help="(human) Reject a proposal")
+    reject.add_argument("project", type=Path)
+    reject.add_argument("proposal")
+    reject.add_argument("--note", default="")
+    reject.add_argument("--as", dest="actor", required=True)
+    eva = sub.add_parser("eval-atari", help="D8: panel recovery on scans with known panels (truth JSON)")
+    eva.add_argument("truth", type=Path)
     st = sub.add_parser("stats", help="Measure an agent run: name resubmissions, images per panel, failed tool calls")
     st.add_argument("project", type=Path)
     au = sub.add_parser("audit", help="Check that every approval change was made by a person")
@@ -159,6 +182,10 @@ def main(argv: list[str]) -> int:
 def _run(args: argparse.Namespace) -> int:
     if args.cmd == "tools":
         return _tools(args)
+    if args.cmd == "eval-atari":
+        from genko.studio import evaluate
+
+        return _emit(evaluate.eval_atari(args.truth))
     path = args.project.resolve()
     if args.cmd == "approve":
         human = HumanService(path, args.actor)
@@ -185,6 +212,16 @@ def _run(args: argparse.Namespace) -> int:
         if args.cmd == "eval-sample":
             return _emit(evaluate.eval_sample(path, args.out, args.per_character, args.seed))
         return _emit(evaluate.eval_score(path, args.answers))
+    if args.cmd == "accept":
+        return _emit(HumanService(path, args.actor).accept_proposal(args.proposal, args.force))
+    if args.cmd == "reject":
+        return _emit(HumanService(path, args.actor).reject_proposal(args.proposal, args.note))
+    if args.cmd == "import-name":
+        from genko.app.session import default_actor
+
+        importer = StudioService(path.parent, args.actor or default_actor())
+        return _emit(importer.import_name(path.name, [str(Path(f).resolve()) for f in args.files], args.start_page, args.align,
+                                          confine=False).to_dict())
     if args.cmd == "close-ticket":
         return _emit(HumanService(path, args.actor).close_ticket(args.ticket, args.reply))
     if args.cmd == "export":
@@ -223,6 +260,10 @@ def _run(args: argparse.Namespace) -> int:
         if args.tool == "import_image":
             kwargs.setdefault("confine", False)
         result = getattr(service, args.tool)(name, **kwargs)
+    elif args.cmd == "analyze":
+        result = service.analyze_name(name, args.page, json.loads(args.params) if args.params else None)
+    elif args.cmd == "proposals":
+        result = service.proposals(name, "all" if args.all else "open")
     elif args.cmd == "import-image":
         result = service.import_image(name, path=str(Path(args.image).resolve()), confine=False)
     elif args.cmd == "apply":

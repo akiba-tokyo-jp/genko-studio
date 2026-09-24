@@ -16,7 +16,7 @@ from genko.studio import state
 @dataclass
 class InboxItem:
     ticket_id: str
-    kind: str                # gate | help
+    kind: str                # gate | help | proposal
     gate: str | None
     pages: list[int] = field(default_factory=list)
     character_id: str | None = None
@@ -29,6 +29,9 @@ class InboxItem:
         if self.kind == "help":
             where = f"{self.pages[0]} ページ" if self.pages else "全体"
             return f"相談（{where}）"
+        if self.kind == "proposal":
+            label = {"layout": "コマ割り", "lines": "台詞"}.get(self.gate or "", self.gate or "")
+            return f"アタリからの提案: {self.pages[0]} ページの{label}"
         label = {"name": "ネーム", "art": "作画", "sheet": "設定画", "export": "書き出し"}.get(self.gate or "", self.gate or "")
         if self.gate == "sheet":
             return f"{label}の承認: {self.character_id}"
@@ -46,6 +49,14 @@ def inbox(episode: Episode) -> list[InboxItem]:
         pages = list(ticket.get("pages") or ([ticket["page_index"]] if ticket.get("page_index") else []))
         items.append(InboxItem(ticket["id"], kind, ticket.get("gate"), pages, ticket.get("character_id"),
                                ticket.get("frame_id"), str(ticket.get("text") or ""), str(ticket.get("created_by") or "")))
+    for proposal in (episode.studio.get("proposals") or {}).values():
+        if proposal.get("status") != "open":
+            continue
+        page = next((p for p in episode.pages if p.id == proposal.get("page_id")), None)
+        count = len(proposal.get("panels") or proposal.get("lines") or [])
+        what = f"{count} コマ（信頼度 {proposal.get('confidence', 0):.2f}）" if proposal["kind"] == "layout" else f"{count} 本の台詞"
+        items.append(InboxItem(proposal["id"], "proposal", proposal["kind"], [page.index] if page else [], text=what,
+                               by=str(proposal.get("source") or proposal.get("by") or "")))
     return items
 
 
@@ -73,6 +84,12 @@ def approve_ops(episode: Episode, item: InboxItem, *, project=None, candidate_id
     """The ops for 承認. Export is not an op (the GUI runs the checked export instead)."""
     if item.kind == "help":
         return [{"op": "set_ticket", "id": item.ticket_id, "status": "done"}]
+    if item.kind == "proposal":
+        from genko.studio import atari
+
+        proposal = episode.studio["proposals"][item.ticket_id]
+        page = next(p for p in episode.pages if p.id == proposal["page_id"])
+        return atari.assign_frames(atari.accept_ops(episode, proposal), page)
     if item.gate in ("name", "art"):
         return [{"op": "approve", "gate": item.gate, "page": p} for p in item.pages]
     if item.gate == "sheet":
@@ -91,6 +108,8 @@ def send_back_ops(episode: Episode, item: InboxItem, text: str, frame_ids: list[
     text = text.strip()
     if not text:
         raise ValueError("差し戻しの理由を書く")
+    if item.kind == "proposal":
+        return [{"op": "resolve_proposal", "id": item.ticket_id, "status": "rejected", "note": text}]
     ops: list[dict] = [{"op": "set_ticket", "id": item.ticket_id, "status": "returned"}]
     if item.kind == "help":
         ops = [{"op": "set_ticket", "id": item.ticket_id, "status": "done"}]

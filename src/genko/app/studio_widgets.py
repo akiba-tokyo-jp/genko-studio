@@ -158,11 +158,12 @@ class ApprovalBox(QWidget):
             return
         self.approve_button.setEnabled(True)
         self.back_button.setEnabled(item.gate != "export")
-        self.approve_button.setText("書き出す…" if item.gate == "export" else ("閉じる" if item.kind == "help" else "承認"))
-        self.back_button.setText("返事をして閉じる" if item.kind == "help" else "差し戻し")
+        self.approve_button.setText("書き出す…" if item.gate == "export" else
+                                    ("閉じる" if item.kind == "help" else ("確定" if item.kind == "proposal" else "承認")))
+        self.back_button.setText("返事をして閉じる" if item.kind == "help" else ("却下" if item.kind == "proposal" else "差し戻し"))
         self.detail.setText(f"<b>{item.title}</b><br>{item.text or ''}<br><small>依頼: {item.by}</small>")
-        self.choices.setVisible(item.gate == "sheet")
-        if item.gate == "sheet":
+        self.choices.setVisible(item.gate == "sheet" and item.kind == "gate")
+        if item.gate == "sheet" and item.kind == "gate":
             self._sheet_choices(item)
         self._preview()
 
@@ -200,8 +201,13 @@ class ApprovalBox(QWidget):
             return
         from genko.render import render_page
 
-        mode = "name" if item.gate == "name" or not page.name_ok else "proof"
-        image = render_page(page, 60, mode=mode, episode=episode)
+        if item.kind == "proposal":
+            from genko.studio.atari import overlay_image
+
+            image = overlay_image(episode, page, 60)
+        else:
+            mode = "name" if item.gate == "name" or not page.name_ok else "proof"
+            image = render_page(page, 60, mode=mode, episode=episode)
         pix = to_pixmap(image)
         self.preview.setPixmap(pix.scaled(self.preview.width() or 360, 420, Qt.AspectRatioMode.KeepAspectRatio,
                                           Qt.TransformationMode.SmoothTransformation))

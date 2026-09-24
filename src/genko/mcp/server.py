@@ -103,7 +103,8 @@ def build_server(root: Path, actor: str) -> MCPServer:
     def render(project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None,
                kind: str | None = None, candidate_id: str | None = None) -> list:
         """ページのプレビュー画像（mode: name / proof / print）。コマ番号は読み順。frame_id を渡すとそのコマだけ。
-        kind: compare（候補にネームを赤で重ねる。candidate_id 省略で採用中の絵）/ guide:composition / guide:pose / guide:keepout。
+        kind: compare（候補にネームを赤で重ねる。candidate_id 省略で採用中の絵）/ guide:composition / guide:pose / guide:keepout /
+        atari（アタリと提案の重ね表示）。
         画像はファイルにも保存する。"""
         return call(service.render, project, page, mode, max_px, frame_id, kind, candidate_id)
 
@@ -187,6 +188,28 @@ def build_server(root: Path, actor: str) -> MCPServer:
         """Genko の決定的な処理で候補を作る。kind lineart: 候補（省略で採用中の絵）の線を抜き出した黒線の層。
         adopt の to: "ink" で置くと、トーンにした絵の上にくっきりした線が乗る。params: {radius, threshold, min_px}。"""
         return call(service.derive, project, page, frame_id, kind, candidate_id, params)
+
+    @server.tool(structured_output=False)
+    def import_name(project: str, files: list[str], start_page: int = 1, align: str = "auto") -> list:
+        """人間が描いたアタリ（スキャン画像）を取り込む。files は --root の中の画像（1 ページ 1 枚、start_page から）。
+        原本は資産になり下描き層に置かれる（印刷されない）。コマ割りを検出して提案にする。確定は人間。"""
+        return call(service.import_name, project, files, start_page, align)
+
+    @server.tool(structured_output=False)
+    def analyze_name(project: str, page: int, params: dict | None = None) -> list:
+        """アタリのコマ割りを検出し直す（params: min_gutter_mm, min_panel_mm, speck_mm など）。新しい提案と重ね表示を返す。"""
+        return call(service.analyze_name, project, page, params)
+
+    @server.tool(structured_output=False)
+    def propose_lines(project: str, page: int, lines: list[dict]) -> list:
+        """アタリの手書き台詞を読んだ結果を提案する。lines: [{text（列は \n で区切る）, balloon?, speaker?,
+        box01: [x, y, w, h]（アタリ画像の中の 0..1）か x_mm, y_mm（w_mm, h_mm は省略可）}]。確定は人間。重ね表示を返す。"""
+        return call(service.propose_lines, project, page, lines)
+
+    @server.tool(structured_output=False)
+    def proposals(project: str, status: str = "open") -> list:
+        """コマ割りと台詞の提案の一覧（status: open / all）。"""
+        return call(service.proposals, project, status)
 
     @server.tool(structured_output=False)
     def review_page(project: str) -> list:

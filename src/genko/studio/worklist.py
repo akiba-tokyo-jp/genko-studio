@@ -42,9 +42,15 @@ def next_actions(episode: Episode, project: Path | None = None) -> list[dict]:
 
     if state.bible(episode) is None:
         return [item("write_bible", "企画書（bible）がまだない", ["inspect", "set_bible"])]
-    if state.script(episode) is None:
+    atari_pages = {p.index for p in episode.pages if (p.plan or {}).get("atari")}
+    no_script = state.script(episode) is None
+    if no_script and not atari_pages:
         return [item("write_script", "脚本がまだない", ["inspect", "set_script"])]
     out: list[dict] = []
+    if no_script:
+        # a hand-drawn name needs no script for its own pages; the other pages still do
+        if any(p.index not in atari_pages and not p.name_ok for p in episode.pages):
+            out.append(item("write_script", "アタリの無いページのために脚本が要る", ["inspect", "set_script"]))
     gates = state.open_tickets(episode, "gate")
     requested = {(t.get("gate"), p) for t in gates for p in t.get("pages") or []}
     requested_sheets = {t.get("character_id") for t in gates if t.get("gate") == "sheet"}
@@ -59,9 +65,12 @@ def next_actions(episode: Episode, project: Path | None = None) -> list[dict]:
         if page.name_ok:
             out.extend(_art_items(episode, page, requested, requested_sheets, project))
             continue
+        if (page.plan or {}).get("atari"):
+            out.extend(_atari_items(episode, page, requested))
+            continue
         if draft is None:
             blank = len(page.leaf_frames()) == 1 and not episode.story_for_page(n)
-            if blank:
+            if blank and not no_script:
                 out.append(item("plan_page", "ネームがまだない", ["inspect", "submit_name", "render"], n, **page_side(n)))
             continue
         review = (draft.get("reviews") or {}).get("name")
@@ -73,6 +82,37 @@ def next_actions(episode: Episode, project: Path | None = None) -> list[dict]:
         out.append(item("await_human", "人間のネーム承認待ち", ["request_approval"], n, blocked_by=[blocker], gate="name"))
     out.extend(_export_items(episode, requested))
     return _block_by_help(episode, _block_by_pilot(episode, _dedupe(out)))
+
+
+def _atari_items(episode: Episode, page, requested: set) -> list[dict]:
+    """A page drawn by hand: proposals wait for a person; the agent reads the lines and writes briefs."""
+    n = page.index
+    proposals = [p for p in (episode.studio.get("proposals") or {}).values() if p.get("page_id") == page.id]
+    open_kinds = {p["kind"] for p in proposals if p.get("status") == "open"}
+    accepted_lines = any(p["kind"] == "lines" and p.get("status") == "accepted" for p in proposals)
+    blank = len(page.leaf_frames()) == 1
+    lines = episode.story_for_page(n)
+    no_lines_noted = bool(((page.plan or {}).get("reviews") or {}).get("atari_lines"))
+    out: list[dict] = []
+    if open_kinds:
+        out.append(item("await_human", "アタリからの提案（コマ割り・台詞）を人間が確かめて確定する", ["render", "review_page"], n,
+                        blocked_by=["await_human:proposal"], gate="proposal", input_hash=",".join(sorted(open_kinds))))
+    if blank and "layout" not in open_kinds:
+        out.append(item("atari_layout", "アタリのコマ割りの提案が無い（見つからなかったか却下された）",
+                        ["render", "analyze_name", "ask_human"], n))
+    if not lines and not accepted_lines and "lines" not in open_kinds and not no_lines_noted:
+        out.append(item("read_atari", "アタリの手書きの台詞を読み、位置と一緒に提案する（台詞が無ければ record_review kind=atari_lines）",
+                        ["render", "propose_lines", "record_review"], n))
+    if not blank and "layout" not in open_kinds:
+        missing = [f.id for f in page.leaf_frames() if not (f.panel or {}).get("shot")]
+        if missing:
+            out.append(item("brief_panels", "コマ割りは確定した。アタリを見て各コマの指示（shot、人物、動き）を書く",
+                            ["inspect", "render", "apply_ops"], n, frames=missing, input_hash=",".join(missing)))
+            return out
+        if not open_kinds and (lines or accepted_lines or no_lines_noted):
+            blocker = "requested" if ("name", n) in requested else "await_human:name"
+            out.append(item("await_human", "人間のネーム承認待ち", ["request_approval"], n, blocked_by=[blocker], gate="name"))
+    return out
 
 
 def _limits(episode: Episode) -> dict:
