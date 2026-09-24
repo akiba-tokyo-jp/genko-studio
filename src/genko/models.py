@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import dataclasses
 from dataclasses import dataclass, field
 from enum import Enum
 from uuid import uuid4
@@ -225,6 +227,7 @@ class Page:
     numero: bool = True
     onion_from: int | None = None
     lt_threshold: float | None = None
+    extra: dict = field(default_factory=dict)  # keys this build does not know; written back unchanged
 
     def __post_init__(self) -> None:
         if not self.layers:
@@ -400,6 +403,18 @@ class Episode:
     brush_stabilize: int = 0
     brush_taper: bool = False
     brush_curve: str = "linear"
+    extra: dict = field(default_factory=dict)  # top-level keys this build does not know; written back unchanged
+
+    def __deepcopy__(self, memo: dict) -> Episode:
+        # The undo history is never copied: copying it made every op cost O(history x project).
+        new = object.__new__(type(self))
+        memo[id(self)] = new
+        for f in dataclasses.fields(self):
+            if f.name == "undo_stack":
+                continue
+            setattr(new, f.name, copy.deepcopy(getattr(self, f.name), memo))
+        new.undo_stack = []
+        return new
 
     def reorder(self, order: list[int]) -> None:
         by_index = {page.index: page for page in self.pages}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import dataclasses
 from pathlib import Path
 from typing import Any
 
@@ -94,23 +95,14 @@ def _require_page(episode: Episode, op: dict[str, Any]) -> Page:
     raise ApplyError(f"no page {index}")
 
 
+UNDO_LIMIT = 50
+
+
 def _copy_state(dst: Episode, src: Episode) -> None:
-    dst.title = src.title
-    dst.episode = src.episode
-    dst.spec = src.spec
-    dst.binding = src.binding
-    dst.pages = src.pages
-    dst.story = src.story
-    dst.bible = src.bible
-    dst.tickets = src.tickets
-    dst.autosave = src.autosave
-    dst.font_path = getattr(src, "font_path", "")
-    dst.page_locks = src.page_locks
-    dst.brush_rgb = getattr(src, "brush_rgb", (20, 20, 20))
-    dst.brush_width_mm = getattr(src, "brush_width_mm", 0.35)
-    dst.brush_stabilize = getattr(src, "brush_stabilize", 0)
-    dst.brush_taper = getattr(src, "brush_taper", False)
-    dst.brush_curve = getattr(src, "brush_curve", "linear")
+    """Move every field except the undo history from src into dst."""
+    for f in dataclasses.fields(Episode):
+        if f.name != "undo_stack":
+            setattr(dst, f.name, getattr(src, f.name))
 
 
 def _find_line(episode: Episode, line_id: str) -> StoryLine:
@@ -759,15 +751,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         page.lt_threshold = float(op["threshold"])
         return
 
-    if name == "lock_page":
-        page = _require_page(episode, op)
-        episode.page_locks[str(page.index)] = str(op.get("agent") or "genko")
-        return
-
-    if name == "unlock_page":
-        page = _require_page(episode, op)
-        episode.page_locks.pop(str(page.index), None)
-        return
+    if name in ("lock_page", "unlock_page"):
+        raise ApplyError(f"{name} is handled with the actor in apply_ops")
 
     if name == "add_layer":
         page = _require_page(episode, op)
@@ -954,17 +939,54 @@ def _refresh_frame_ids(frame: Frame) -> None:
         _refresh_frame_ids(child)
 
 
+LEGACY_ACTOR = "genko"  # what callers get when they do not name themselves; treated as a person
+GATE_OPS = frozenset({"name_ok"})
+LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path"})
+
+
+def can_approve(agent: str) -> bool:
+    """Gates and unlocking other people's pages need a person: human:<name>, or the legacy unnamed caller."""
+    return agent in (LEGACY_ACTOR, "human") or agent.startswith("human:")
+
+
+def _op_page_index(episode: Episode, op: dict[str, Any]) -> int | None:
+    if "page" in op:
+        try:
+            return int(op["page"])
+        except (TypeError, ValueError):
+            return None
+    if op.get("op") in LINE_OPS and op.get("id"):
+        for line in episode.story:
+            if line.id == op["id"]:
+                return line.page_index
+    return None
+
+
 def _check_page_lock(episode: Episode, op: dict[str, Any], agent: str) -> None:
     name = op.get("op")
-    if name in ("lock_page", "unlock_page", "undo", "set_meta", "set_bible", "set_autosave"):
+    if name in GATE_OPS and not can_approve(agent):
+        raise ApplyError(f"{name} needs a person (actor {agent} cannot approve)")
+    if name in ("undo", "set_meta", "set_bible", "set_autosave"):
         return
-    if "page" not in op:
-        return
-    try:
-        index = int(op["page"])
-    except (TypeError, ValueError):
+    index = _op_page_index(episode, op)
+    if index is None:
         return
     owner = episode.page_locks.get(str(index))
+    if name == "lock_page":
+        wanted = str(op.get("agent") or agent)
+        if agent != LEGACY_ACTOR and wanted != agent:
+            raise ApplyError(f"cannot lock page {index} as {wanted} (actor is {agent})")
+        if owner and owner != wanted and not (can_approve(agent) and owner.startswith("ai:")):
+            raise ApplyError(f"page {index} locked by {owner}")
+        _require_page(episode, op)
+        episode.page_locks[str(index)] = wanted
+        return
+    if name == "unlock_page":
+        if owner and owner != agent and not can_approve(agent):
+            raise ApplyError(f"page {index} locked by {owner}; {agent} cannot unlock it")
+        _require_page(episode, op)
+        episode.page_locks.pop(str(index), None)
+        return
     if owner and owner != agent:
         raise ApplyError(f"page {index} locked by {owner}")
 
@@ -999,7 +1021,8 @@ def apply_ops(
             raise ApplyError(f"ops[{i}] must be an object")
         try:
             _check_page_lock(work, op, agent)
-            _apply_one(work, op)
+            if op.get("op") not in ("lock_page", "unlock_page"):
+                _apply_one(work, op)
         except ApplyError as exc:
             raise ApplyError(f"ops[{i}] {op.get('op')}: {exc}") from exc
         except (KeyError, ValueError, TypeError) as exc:
@@ -1009,8 +1032,11 @@ def apply_ops(
     if dry_run:
         return {"ok": True, "applied": applied, "snapshot": snapshot(work), "job_id": new_id()}
 
-    frozen = copy.deepcopy(episode)
+    # `work` is a deep copy, so the objects episode holds now are never touched again:
+    # a shallow copy of them is the undo entry, no second deep copy needed.
+    frozen = copy.copy(episode)
     frozen.undo_stack = []
     episode.undo_stack.append(frozen)
+    del episode.undo_stack[:-UNDO_LIMIT]
     _copy_state(episode, work)
     return {"ok": True, "applied": applied, "snapshot": snapshot(episode), "job_id": new_id()}

@@ -78,7 +78,27 @@ def _line(data: dict) -> StoryLine:
     )
 
 
+SUPPORTED_VERSION = 2
+KNOWN_TOP_KEYS = frozenset({
+    "version", "title", "episode", "binding", "autosave", "font_path", "page_locks", "brush",
+    "spec", "bible", "tickets", "pages", "story",
+})
+KNOWN_PAGE_KEYS = frozenset({
+    "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
+    "effects", "ruler", "prims", "frames", "layers", "texts", "fills", "name_strokes", "ink_strokes",
+})
+
+
+class UnsupportedProjectVersion(ValueError):
+    """The file was written by a newer Genko; opening it here could lose data."""
+
+
 def migrate_payload(payload: dict) -> Episode:
+    version = payload.get("version", 1)
+    if not isinstance(version, int) or version > SUPPORTED_VERSION:
+        raise UnsupportedProjectVersion(
+            f"project.json version {version} is newer than this build supports ({SUPPORTED_VERSION}); update Genko"
+        )
     spec_raw = payload["spec"]
     spec = PageSpec(
         width_mm=spec_raw["width_mm"],
@@ -126,6 +146,7 @@ def migrate_payload(payload: dict) -> Episode:
         if not page_lines:
             page_lines = [line for line in story if line.page_index == page.index]
         page.texts = page_lines
+        page.extra = {k: v for k, v in raw.items() if k not in KNOWN_PAGE_KEYS}
         pages.append(page)
     if not story:
         story = [line for page in pages for line in page.texts]
@@ -152,4 +173,5 @@ def migrate_payload(payload: dict) -> Episode:
     episode.bible.plot = bible.get("plot", "")
     episode.bible.characters = list(bible.get("characters") or [])
     episode.bible.constraints = list(bible.get("constraints") or [])
+    episode.extra = {k: v for k, v in payload.items() if k not in KNOWN_TOP_KEYS}
     return episode

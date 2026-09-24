@@ -77,7 +77,7 @@ def _and_alpha(layer: Image.Image, mask: Image.Image) -> Image.Image:
     return ImageChops.multiply(alpha, mask)
 
 
-_DELA = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "DelaGothicOne-Regular.ttf"
+_DELA = Path(__file__).resolve().parent / "fonts" / "DelaGothicOne-Regular.ttf"  # package data (ships in the wheel)
 _CJK_FONTS = (
     str(_DELA),
     r"C:\Windows\Fonts\YuGothM.ttc",

@@ -82,8 +82,15 @@ def glyph(char: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, i
         img.paste(raw, (ox, oy), raw)
         return img
     if drawn in SMALL_KANA:
+        # Some fonts (e.g. the bundled Dela Gothic) draw small kana nearly full size;
+        # shrink them so they read as small and sit in the upper right of the em box.
+        limit = int(em * 0.62)
+        if max(gw, gh) > limit:
+            scale = limit / max(gw, gh)
+            raw = raw.resize((max(1, int(gw * scale)), max(1, int(gh * scale))), Image.Resampling.LANCZOS)
+            gw, gh = raw.size
         ox = max(0, em - margin - gw)
-        oy = max(0, (em - gh) // 2)
+        oy = max(0, (em - gh) // 2 - em // 10)
         img.paste(raw, (ox, oy), raw)
         return img
     ox = max(0, (em - gw) // 2)

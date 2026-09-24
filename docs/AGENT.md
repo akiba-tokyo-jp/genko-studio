@@ -33,12 +33,20 @@ python -m genko apply ./demo.genko ops.json --dry-run
 python -m genko render ./demo.genko --page 1 --mode name --out p1.png
 python -m genko export ./demo.genko ./out --format tiff --json
 python -m genko schema
-python -m genko serve --port 8765
+python -m genko apply ./demo.genko ops.json --agent ai:myagent
+python -m genko serve --root ./manga --port 8765   # HTTP needs a token: genko token add --actor ai:myagent
 ```
 
 Ops include: split/merge/resize/set_frame, add/edit/delete/move_line, name_ok, advance, add/delete/edit/simplify_stroke, put_raster, flood_fill, add/delete_tone, add_effect, add_prim3d, set_ruler, lt_convert, add/set_ticket, page CRUD, set_meta/bible/spread/autosave, undo.
 
+## Actors
+
+Always name yourself: `--agent ai:<name>` on the CLI, a token per actor over HTTP. `ai:*` actors cannot approve (`name_ok`), cannot unlock or take over a person's page lock, and cannot lock a page in someone else's name. In a studio project (has `studio/`), an unnamed CLI call is `legacy:unknown` and cannot approve either.
+
 ## HTTP
+
+Every route except `/health` needs `Authorization: Bearer <token>` (create one with `genko token add --actor ai:<name>`; tokens live in the user config dir, `GENKO_CONFIG_DIR` overrides it). Bodies must be `Content-Type: application/json`. Paths are relative to `--root` (absolute paths must be inside it). Browser origins are refused unless allowed with `--allow-origin`.
+
 
 `GET /health`  
 `GET /schema`  

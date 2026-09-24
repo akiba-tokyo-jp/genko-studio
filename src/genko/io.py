@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 
+from genko.migrate import KNOWN_PAGE_KEYS as _PAGE_KEYS
 from genko.migrate import migrate_payload
 from genko.models import Episode, Frame, Layer, Page, Rect, StoryLine, stroke_to_dict
 
@@ -67,9 +70,26 @@ def _line_to_dict(line: StoryLine) -> dict:
     }
 
 
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    """Write via a temp file and os.replace, retrying while Windows holds the file open."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    for attempt in range(8):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 7:
+                raise
+            time.sleep(0.05 * (2**attempt))
+
+
 def save_episode(episode: Episode, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     payload = {
+        **episode.extra,
         "version": 2,
         "title": episode.title,
         "episode": episode.episode,
@@ -119,11 +139,12 @@ def save_episode(episode: Episode, dest: Path) -> None:
                 "name_strokes": page.name_strokes,
                 "ink_strokes": page.ink_strokes,
             }
+            | {k: v for k, v in page.extra.items() if k not in _PAGE_KEYS}
             for page in episode.pages
         ],
         "story": [_line_to_dict(line) for line in episode.story],
     }
-    (dest / "project.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_atomic(dest / "project.json", json.dumps(payload, ensure_ascii=False, indent=2))
     for page in episode.pages:
         for layer in page.layers:
             if layer.raster_png and layer.raster_relpath:

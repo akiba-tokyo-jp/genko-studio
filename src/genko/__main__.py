@@ -7,6 +7,7 @@ from pathlib import Path
 
 from genko.headless import OPS_SCHEMA, ApplyError, apply_ops, snapshot
 from genko.io import load_episode, save_episode
+from genko.migrate import UnsupportedProjectVersion
 from genko.models import PageSpec, new_episode
 
 
@@ -44,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
     apply_p.add_argument("src", type=Path)
     apply_p.add_argument("ops", help="Path to JSON array, or - for stdin")
     apply_p.add_argument("--dry-run", action="store_true")
+    apply_p.add_argument(
+        "--agent",
+        default="",
+        help="who is writing: human:<name> or ai:<name> (AI actors cannot approve; studio projects need it to approve)",
+    )
 
     render_p = sub.add_parser("render", help="Headless: write one page PNG (name|proof|print)")
     render_p.add_argument("src", type=Path)
@@ -57,15 +63,37 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="Headless HTTP JSON API (no GUI)")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--root", type=Path, required=True, help="only paths inside this folder are served")
+    serve.add_argument("--allow-origin", action="append", default=[], help="browser origin allowed to call the API")
+    serve.add_argument("--allow-host", action="append", default=[], help="extra Host name (when not on 127.0.0.1)")
 
+    token = sub.add_parser("token", help="Manage HTTP tokens (stored in the user config dir)")
+    token.add_argument("action", choices=["add", "list", "revoke"])
+    token.add_argument("--actor", default="", help="human:<name> or ai:<name> (add)")
+    token.add_argument("--id", default="", help="token id prefix (revoke)")
+
+    parser.add_argument("--ascii", action="store_true", help="Escape non-ASCII in JSON output (for legacy consoles)")
     sub.add_parser("app", help="Open the human desktop app")
     sub.add_parser("studio", help="Agent tools and human approvals (genko studio -h)", add_help=False)
     sub.add_parser("mcp", help="MCP server for agents such as Hermes Agent (genko mcp -h)", add_help=False)
     return parser
 
 
+_ASCII = False
+
+
 def _print_json(payload: dict) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    sys.stdout.write(json.dumps(payload, ensure_ascii=_ASCII) + "\n")
+
+
+def _utf8_stdout() -> None:
+    """Windows consoles default to cp932; JSON must still come out as UTF-8."""
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None and (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
+        try:
+            reconfigure(encoding="utf-8")
+        except (ValueError, OSError):
+            pass
 
 
 def _read_ops(source: str) -> list:
@@ -78,6 +106,11 @@ def _read_ops(source: str) -> list:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    global _ASCII
+    _ASCII = "--ascii" in argv
+    argv = [a for a in argv if a != "--ascii"]
+    if not _ASCII:
+        _utf8_stdout()
     if argv and argv[0] == "studio":
         from genko.studio.cli import main as studio_main
 
@@ -139,9 +172,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "apply":
             from genko.lock import ProjectLock
 
-            episode = load_episode(args.src)
-            with ProjectLock(args.src):
-                result = apply_ops(episode, _read_ops(args.ops), dry_run=args.dry_run)
+            ops = _read_ops(args.ops)
+            agent = args.agent or ("legacy:unknown" if (args.src / "studio").is_dir() else "genko")
+            with ProjectLock(args.src, agent=agent):
+                # Load inside the lock so a concurrent writer's changes are never overwritten.
+                episode = load_episode(args.src)
+                result = apply_ops(episode, ops, dry_run=args.dry_run, agent=agent)
                 if not args.dry_run:
                     save_episode(episode, args.src)
             _print_json(result)
@@ -162,18 +198,48 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "serve":
             from genko.server import HeadlessServer
 
-            server = HeadlessServer(host=args.host, port=args.port)
-            print(f"genko headless http://{args.host}:{server.port}", file=sys.stderr)
+            from genko import tokens as token_store
+
+            known = token_store.load()
+            if not known:
+                first = token_store.add("human:owner")
+                known = token_store.load()
+                print(f"created token for human:owner: {first}", file=sys.stderr)
+            server = HeadlessServer(
+                host=args.host,
+                port=args.port,
+                root=args.root,
+                tokens=known,
+                allow_origins=tuple(args.allow_origin),
+                allow_hosts=tuple(args.allow_host),
+            )
+            print(f"genko headless http://{args.host}:{server.port} root={args.root}", file=sys.stderr)
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
                 server.shutdown()
+            return 0
+        if args.cmd == "token":
+            from genko import tokens as token_store
+
+            if args.action == "add":
+                _print_json({"ok": True, "actor": args.actor, "token": token_store.add(args.actor)})
+            elif args.action == "list":
+                _print_json({"ok": True, "tokens": token_store.listing()})
+            else:
+                _print_json({"ok": True, "revoked": token_store.revoke(args.id)} if args.id else {"ok": False, "error": "--id is required"})
             return 0
         if args.cmd == "app":
             from genko.app.main import run_app
 
             return run_app()
     except ApplyError as exc:
+        _print_json({"ok": False, "error": str(exc)})
+        return 1
+    except UnsupportedProjectVersion as exc:
+        _print_json({"ok": False, "error": str(exc)})
+        return 2
+    except ValueError as exc:
         _print_json({"ok": False, "error": str(exc)})
         return 1
     except FileNotFoundError as exc:

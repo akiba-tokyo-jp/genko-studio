@@ -5,7 +5,7 @@ from genko.server import HeadlessServer
 
 
 def test_http_new_apply_inspect_export(tmp_path):
-    server = HeadlessServer(host="127.0.0.1", port=0)
+    server = HeadlessServer(host="127.0.0.1", port=0, root=tmp_path, tokens={"t": "human:test"})
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -25,14 +25,15 @@ def test_http_new_apply_inspect_export(tmp_path):
             req = urllib.request.Request(
                 f"http://127.0.0.1:{port}{path}",
                 data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json", "Authorization": "Bearer t"},
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return json.loads(resp.read().decode("utf-8"))
 
         def get(path: str) -> dict:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as resp:
+            req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers={"Authorization": "Bearer t"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
                 return json.loads(resp.read().decode("utf-8"))
 
         dest = tmp_path / "http.genko"
@@ -51,7 +52,7 @@ def test_http_new_apply_inspect_export(tmp_path):
         inspected = get(f"/v1/inspect?path={quote(str(dest))}")
         assert inspected["title"] == "http"
         out = tmp_path / "png"
-        exported = post("/v1/export", {"path": str(dest), "out": str(out)})
+        exported = post("/v1/export", {"path": str(dest), "out": str(out), "dpi": 72})
         assert exported["count"] == 2
         health = get("/health")
         assert health["ok"] is True
