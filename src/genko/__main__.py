@@ -120,6 +120,17 @@ def _read_ops(source: str) -> list:
     return data
 
 
+def _is_studio_project(src: Path) -> bool:
+    """Agent projects (strict gates, studio state, or M0 sidecars): an unnamed caller is not trusted as a person."""
+    if (src / "studio" / "drafts").is_dir():
+        return True
+    try:
+        payload = json.loads((src / "project.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return bool(payload.get("strict_gates") or payload.get("studio"))
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     global _ASCII
@@ -189,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
             from genko.lock import ProjectLock
 
             ops = _read_ops(args.ops)
-            agent = args.agent or ("legacy:unknown" if (args.src / "studio" / "drafts").is_dir() else "genko")
+            agent = args.agent or ("legacy:unknown" if _is_studio_project(args.src) else "genko")
             with ProjectLock(args.src, agent=agent):
                 # Load inside the lock so a concurrent writer's changes are never overwritten.
                 episode = load_episode(args.src)

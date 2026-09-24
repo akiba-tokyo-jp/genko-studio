@@ -103,6 +103,52 @@ def _font(path: str | None = None, size: int = 14) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
+def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, int], dpi: int) -> Image.Image | None:
+    """Resample a placed image from its asset into its placement, clipped to its panel."""
+    from genko.assets import AssetStore
+    from genko.placement import clip_box
+
+    if episode is None or episode.asset_dir is None or not layer.asset or layer.placement_mm is None:
+        return None
+    data = AssetStore(episode.asset_dir).get_bytes(layer.asset, ".png")
+    if data is None:
+        return None
+    r = layer.placement_mm  # may start left of / above the paper, so no clamping here
+    x0, y0 = round(r.x / 25.4 * dpi), round(r.y / 25.4 * dpi)
+    x1, y1 = round((r.x + r.width) / 25.4 * dpi), round((r.y + r.height) / 25.4 * dpi)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    frame = None
+    if layer.frame_id:
+        try:
+            frame = page._find(layer.frame_id)
+        except (KeyError, IndexError):
+            frame = None
+    cx0, cy0, cx1, cy1 = rect_px(clip_box(page, frame, layer.clip_to), dpi)
+    # only the visible part is resampled, straight from the source pixels
+    vx0, vy0 = max(x0, cx0, 0), max(y0, cy0, 0)
+    vx1, vy1 = min(x1, cx1, size[0]), min(y1, cy1, size[1])
+    if vx1 <= vx0 or vy1 <= vy0:
+        return None
+    source = Image.open(io.BytesIO(data)).convert("RGBA")
+    sx, sy = source.width / (x1 - x0), source.height / (y1 - y0)
+    box = ((vx0 - x0) * sx, (vy0 - y0) * sy, (vx1 - x0) * sx, (vy1 - y0) * sy)
+    fitted = source.resize((vx1 - vx0, vy1 - vy0), Image.Resampling.LANCZOS, box=box)
+    canvas = Image.new("RGBA", size, (0, 0, 0, 0))
+    canvas.paste(fitted, (vx0, vy0))
+    return canvas
+
+
+def render_frame(page: Page, frame_id: str, working_dpi: int, mode: str = "proof", episode: Episode | None = None) -> Image.Image:
+    """One panel, cropped from the page render (bleed panels include their bleed)."""
+    from genko.placement import clip_box
+
+    frame = page._find(frame_id)
+    image = render_page(page, working_dpi, mode=mode, episode=episode)
+    x0, y0, x1, y1 = rect_px(clip_box(page, frame, "bleed" if frame.bleed else "frame"), working_dpi)
+    return image.crop((max(0, x0), max(0, y0), min(image.width, x1), min(image.height, y1)))
+
+
 def _open_raster(layer) -> Image.Image | None:
     if layer.raster_png:
         return Image.open(io.BytesIO(layer.raster_png)).convert("RGBA")
@@ -459,10 +505,14 @@ def render_page(
             continue
         if layer.role in (LayerRole.NAME, LayerRole.DRAFT) and mode == "print":
             continue
-        raster = _open_raster(layer)
+        if layer.kind == LayerKind.PLACED:
+            raster = _placed_raster(layer, page, episode, size, working_dpi)
+        else:
+            raster = _open_raster(layer)
+            if raster is not None:
+                raster = raster.resize(size)
         if raster is None:
             continue
-        raster = raster.resize(size)
         clip_mask = prev_alpha if getattr(layer, "clip", False) else None
         opacity = getattr(layer, "opacity", None)
         opacity = 1.0 if opacity is None else float(opacity)  # 0 means invisible, not "default"
@@ -510,7 +560,17 @@ def render_page(
     draw = ImageDraw.Draw(image)
     for frame in page.leaf_frames():
         width_px = max(1, mm_to_px(frame.border_mm or 0.8, working_dpi) // 4)
-        draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
+        if not frame.bleed:
+            draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
+            continue
+        # A bleed panel has no border on the sides that run off the paper.
+        from genko.placement import outer_edges
+
+        x0, y0, x1, y1 = rect_px(frame.rect, working_dpi)
+        open_sides = outer_edges(page, frame)
+        for side, line in (("top", (x0, y0, x1, y0)), ("bottom", (x0, y1, x1, y1)), ("left", (x0, y0, x0, y1)), ("right", (x1, y0, x1, y1))):
+            if not open_sides[side]:
+                draw.line(line, fill=(20, 20, 20), width=max(1, width_px))
 
     font_path = getattr(episode, "font_path", None) if episode is not None else None
     font = _font(font_path)

@@ -31,6 +31,7 @@ class LayerKind(str, Enum):
     FILL = "fill"
     TONE = "tone"
     FOLDER = "folder"
+    PLACED = "placed"  # an imported image placed into a panel; bytes stay in assets/
 
 
 @dataclass(frozen=True)
@@ -152,6 +153,13 @@ class Layer:
     clip: bool = False
     lock_alpha: bool = False
     parent_id: str | None = None
+    asset: str | None = None  # placed: "sha256:…" in assets/
+    frame_id: str | None = None  # placed: the panel it belongs to
+    placement_mm: Rect | None = None  # placed: where the whole image lands on the page
+    fit: str = "cover"  # cover | contain | stretch
+    clip_to: str = "frame"  # frame | bleed | none
+    source: dict | None = None  # placed: {"candidate": …, "request": …}
+    finish: dict | None = None  # placed: mono finishing override (M6)
 
 
 @dataclass
@@ -163,6 +171,7 @@ class Frame:
     clip: bool = True
     bleed: bool = False
     border_mm: float = 0.8
+    panel: dict | None = None  # leaf only: the panel brief (PanelSpec), candidates and adoption
 
 
 @dataclass
@@ -229,6 +238,8 @@ class Page:
     lt_threshold: float | None = None
     extra: dict = field(default_factory=dict)  # keys this build does not know; written back unchanged
     id: str = field(default_factory=lambda: "pg_" + new_id())  # stable across reorder/delete (v3)
+    art_ok: bool = False  # art gate: a person approved this page's pictures
+    plan: dict | None = None  # name plan metadata: turn_role, layout, slots, reviews
 
     def __post_init__(self) -> None:
         if not self.layers:
@@ -399,7 +410,7 @@ class Page:
             layer.fill_rgb = rgb
 
 
-TRANSIENT_FIELDS = frozenset({"undo_stack", "journal_pending"})
+TRANSIENT_FIELDS = frozenset({"undo_stack", "journal_pending", "asset_dir"})
 
 
 @dataclass
@@ -425,7 +436,9 @@ class Episode:
     revision: int = 0  # +1 on every save (v3)
     start_side: str | None = None  # "left" / "right" override for page 1; None = binding default
     strict_gates: bool = False  # studio projects: ink/raster edits need name_ok, spreads must face
+    studio: dict = field(default_factory=dict)  # agent state: bible doc, script, locations, approvals, orphans…
     journal_pending: list = field(default_factory=list, repr=False, compare=False)  # ops since last save
+    asset_dir: object = field(default=None, repr=False, compare=False)  # project folder for assets/ (not saved)
 
     def __deepcopy__(self, memo: dict) -> Episode:
         # The undo history is never copied: copying it made every op cost O(history x project).
@@ -437,6 +450,7 @@ class Episode:
             setattr(new, f.name, copy.deepcopy(getattr(self, f.name), memo))
         new.undo_stack = []
         new.journal_pending = []
+        new.asset_dir = self.asset_dir
         return new
 
     def reorder(self, order: list[int]) -> None:

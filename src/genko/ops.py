@@ -28,8 +28,8 @@ class ApplyError(ValueError):
 
 
 OPS_SCHEMA: list[dict[str, Any]] = [
-    {"op": "split_frame", "page": "int", "axis": "horizontal|vertical", "ratio": "float", "gutter_mm": "float", "frame_id": "optional"},
-    {"op": "merge_frame", "page": "int", "frame_id": "str"},
+    {"op": "split_frame", "page": "int", "axis": "horizontal|vertical", "ratio": "float", "gutter_mm": "float", "frame_id": "optional", "force": "bool? (placed art goes to studio.orphans)"},
+    {"op": "merge_frame", "page": "int", "frame_id": "str", "force": "bool? (placed art goes to studio.orphans)"},
     {"op": "resize_frame", "page": "int", "frame_id": "str", "rect": "{x,y,width,height}"},
     {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float?"},
     {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional"},
@@ -80,6 +80,14 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_ticket", "id": "str", "status": "str?", "assignee": "str?", "rate": "str?"},
     {"op": "undo"},
 ]
+
+def _with_studio_schema() -> None:
+    from genko.studio.studio_ops import STUDIO_SCHEMA
+
+    OPS_SCHEMA.extend(STUDIO_SCHEMA)
+
+
+_with_studio_schema()
 
 
 def _resolve_layer(page: Page, op: dict[str, Any]) -> Layer:
@@ -157,12 +165,21 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if not leaves:
             raise ApplyError("page has no frames")
         frame_id = op.get("frame_id") or page.selected_frame_id or leaves[0].id
-        page.split_frame(
+        target = page._find(str(frame_id))
+        art = _placed_on(page, {target.id})
+        if art and not op.get("force"):
+            raise ApplyError(f"frame {target.id} has placed art; pass force to move it to studio.orphans")
+        a, b = page.split_frame(
             frame_id,
             axis=axis,
             ratio=float(op.get("ratio", 0.5)),
             gutter_mm=float(op.get("gutter_mm", 4)),
         )
+        if target.panel is not None:
+            # the brief stays with the panel read first: top, or the binding-side column
+            first = a if axis == "horizontal" or episode.binding != Binding.RIGHT else b
+            first.panel, target.panel = target.panel, None
+        _orphan_art(episode, page, art, reason=f"split {target.id}")
         return
 
     if name == "merge_frame":
@@ -170,7 +187,22 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         frame_id = op.get("frame_id") or page.selected_frame_id
         if not frame_id:
             raise ApplyError("frame_id is required")
+        parent = page.parent_of(str(frame_id))
+        if parent is None:
+            raise ApplyError("cannot merge the root frame")
+        leaves = _leaves_in_reading_order(parent, episode.binding)
+        art = _placed_on(page, {leaf.id for leaf in leaves})
+        if art and not op.get("force"):
+            raise ApplyError(f"panels under {parent.id} have placed art; pass force to move it to studio.orphans")
+        panels = [leaf.panel for leaf in leaves if leaf.panel]
         page.merge_frame(str(frame_id))
+        if panels:
+            parent.panel = panels[0]
+            if len(panels) > 1:
+                episode.studio.setdefault("orphans", []).append(
+                    {"kind": "panels", "page_id": page.id, "frame_id": parent.id, "panels": panels[1:], "rev": episode.revision}
+                )
+        _orphan_art(episode, page, art, reason=f"merge into {parent.id}")
         return
 
     if name == "resize_frame":
@@ -443,6 +475,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             clone.selected_frame_id = frame_map.get(clone.selected_frame_id)
         for layer in clone.layers:
             layer.id = new_id()
+            if layer.frame_id:
+                layer.frame_id = frame_map.get(layer.frame_id, layer.frame_id)
         new_lines: list[StoryLine] = []
         for line in list(episode.story_for_page(page.index)):
             copied = copy.deepcopy(line)
@@ -999,6 +1033,12 @@ GATE_OPS = frozenset({"name_ok"})
 LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path"})
 
 
+def _studio_ops() -> frozenset[str]:
+    from genko.studio.studio_ops import STUDIO_OPS
+
+    return STUDIO_OPS
+
+
 def can_approve(agent: str) -> bool:
     """Gates and unlocking other people's pages need a person: human:<name>, or the legacy unnamed caller."""
     return agent in (LEGACY_ACTOR, "human") or agent.startswith("human:")
@@ -1081,6 +1121,11 @@ def validate_episode(episode: Episode) -> list[str]:
                 page._find(line.frame_id)
             except (KeyError, IndexError):
                 warnings.append(f"line {line.id}: frame {line.frame_id} is not on page {line.page_index}")
+    for page in episode.pages:
+        leaves = {frame.id for frame in page.leaf_frames()}
+        for layer in page.layers:
+            if layer.kind == LayerKind.PLACED and layer.frame_id and layer.frame_id not in leaves:
+                warnings.append(f"page {page.index} layer {layer.id}: panel {layer.frame_id} is gone (placed art will not clip)")
     for key in episode.page_locks:
         if key not in ids:
             warnings.append(f"page lock on unknown page {key}")
@@ -1114,12 +1159,48 @@ def _op_page_index(episode: Episode, op: dict[str, Any]) -> int | None:
     return None
 
 
+def _placed_on(page: Page, frame_ids: set[str]) -> list[Layer]:
+    return [layer for layer in page.layers if layer.kind == LayerKind.PLACED and layer.frame_id in frame_ids]
+
+
+def _leaves_in_reading_order(frame: Frame, binding: Binding) -> list[Frame]:
+    if not frame.children:
+        return [frame]
+    children = list(frame.children)
+    if frame.split_axis == "vertical" and binding == Binding.RIGHT:
+        children.reverse()
+    return [leaf for child in children for leaf in _leaves_in_reading_order(child, binding)]
+
+
+def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) -> None:
+    """Placed art whose panel went away: kept (asset refs stay alive for gc) but no longer printed."""
+    if not layers:
+        return
+    from genko.io import _layer_to_dict
+
+    episode.studio.setdefault("orphans", []).append(
+        {"kind": "layers", "page_id": page.id, "reason": reason, "rev": episode.revision,
+         "layers": [_layer_to_dict(layer) for layer in layers]}
+    )
+    page.layers = [layer for layer in page.layers if layer not in layers]
+
+
+LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "filter_raster", "flood_fill"})
 
 
-def _check_strict(episode: Episode, op: dict[str, Any]) -> None:
-    """strict_gates (studio projects): printed layers change only after the name is approved."""
+def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTOR) -> None:
+    """strict_gates (studio projects): printed layers change only after the name is approved,
+    the approved layout stays put, and a page is finished only after its art is approved."""
     name = op.get("op")
+    if name in LAYOUT_OPS and not can_approve(agent):
+        page = _require_page(episode, op)
+        if page.name_ok:
+            raise ApplyError(f"page {page.index}: the name is approved; a person must revoke it before the layout changes (strict_gates)")
+    if name == "advance" and op.get("to") == "finish":
+        page = _require_page(episode, op)
+        if not page.art_ok:
+            raise ApplyError(f"page {page.index}: finish needs the art approved (strict_gates)")
     if name in RASTER_EDIT_OPS:
         layer = str(op.get("layer") or ("ink" if name != "filter_raster" else ""))
         if layer not in ("name", "draft", ""):
@@ -1193,8 +1274,12 @@ def apply_ops(
         try:
             _check_page_lock(work, op, agent)
             if work.strict_gates:
-                _check_strict(work, op)
-            if op.get("op") not in ("lock_page", "unlock_page"):
+                _check_strict(work, op, agent)
+            if op.get("op") in _studio_ops():
+                from genko.studio.studio_ops import apply_studio_op
+
+                apply_studio_op(work, op, agent)
+            elif op.get("op") not in ("lock_page", "unlock_page"):
                 _apply_one(work, op)
         except ApplyError as exc:
             raise ApplyError(f"ops[{i}] {op.get('op')}: {exc}") from exc

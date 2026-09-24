@@ -7,8 +7,10 @@ snapshots are small in v3 (strokes and rasters are hash references).
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
+from typing import Any
 
 from genko.assets import AssetStore
 
@@ -100,11 +102,19 @@ def referenced_assets(project: Path) -> set[str]:
     return refs
 
 
-def refs_in(payload: dict) -> set[str]:
+_REF = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def refs_in(payload: Any) -> set[str]:
+    """Every asset ref anywhere in a project payload: layers, panel candidates, studio refs and orphans."""
     out: set[str] = set()
-    for page in payload.get("pages", []):
-        for layer in page.get("layers", []):
-            for key in ("asset", "strokes_blob"):
-                if layer.get(key):
-                    out.add(layer[key])
+    stack = [payload]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+        elif isinstance(item, str) and _REF.fullmatch(item):
+            out.add(item)
     return out

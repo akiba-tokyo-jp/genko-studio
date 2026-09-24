@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw
 from genko.io import load_episode
 from genko.models import Page
 from genko.render import _font, mm_to_px, render_page
-from genko.studio.drafts import Drafts
+from genko.studio import state
 from genko.studio.worklist import page_side
 
 
@@ -60,9 +60,7 @@ def _png_b64(image: Image.Image) -> str:
 
 def review_html(project: Path, *, max_px: int = 900) -> str:
     episode = load_episode(project)
-    drafts = Drafts(project)
-    reviews = drafts.reviews()
-    requests = [r for r in drafts.requests() if r.get("status") == "open"]
+    requests = state.open_tickets(episode)
     parts = [
         "<!doctype html><html lang='ja'><meta charset='utf-8'>",
         f"<title>{html.escape(episode.title)} ネーム確認</title>",
@@ -75,14 +73,20 @@ def review_html(project: Path, *, max_px: int = 900) -> str:
     if requests:
         parts.append("<h2>承認・指示</h2><ul>")
         for req in requests:
-            what = f"{req.get('gate')} の承認依頼（{req.get('pages')}）" if req.get("kind") == "approval" else f"{req.get('page')} ページへの指示"
-            parts.append(f"<li>{html.escape(what)}: {html.escape(req.get('note') or req.get('text') or '')}（{html.escape(req.get('by', ''))}）</li>")
+            if req.get("kind") == "gate":
+                what = f"{req.get('gate')} の承認依頼（{req.get('pages') or req.get('character_id') or ''}）"
+            else:
+                what = f"{req.get('page_index')} ページ{' ' + req['frame_id'] if req.get('frame_id') else ''}への指示"
+            parts.append(f"<li>{html.escape(what)}: {html.escape(req.get('text') or '')}（{html.escape(req.get('created_by') or '')}）</li>")
         parts.append("</ul>")
     for page in episode.pages:
-        draft = drafts.name(page.index)
+        record = state.name(episode, page.index)
+        draft = {"plan": record["name"]} if record else None
         dpi = max(36, int(max_px / (page.spec.height_mm / 25.4)))
         image = annotate(render_page(page, dpi, mode="name", episode=episode), page, dpi, draft.get("plan") if draft else None)
         status = "承認済み" if page.name_ok else ("未承認" if draft else "ネームなし")
+        if page.name_ok:
+            status += "・作画承認済み" if page.art_ok else "・作画中"
         parts.append(f"<div class='page'><div><h3>{page.index} ページ（{status}・{html.escape(page_side(page.index)['turn'])}）</h3>")
         parts.append(f"<img alt='page {page.index}' src='data:image/png;base64,{_png_b64(image)}'></div><div>")
         if draft:
@@ -96,11 +100,14 @@ def review_html(project: Path, *, max_px: int = 900) -> str:
                     f"<td>{html.escape(lines)}</td></tr>"
                 )
             parts.append("</table>")
-            review = reviews.get(str(page.index))
+            review = state.name_review(episode, page.index)
             if review:
                 parts.append(f"<p>自己点検（{html.escape(str(review.get('by')))}）: {review.get('score')} {html.escape(review.get('notes') or '')}</p>")
             if not page.name_ok:
                 parts.append(f"<p>承認: <code>genko studio approve {html.escape(str(project))} name --pages {page.index} --as human:名前</code></p>")
+            elif not page.art_ok:
+                parts.append(f"<p>作画の承認: <code>genko studio approve {html.escape(str(project))} art --pages {page.index} --as human:名前</code></p>")
+            if not page.art_ok:
                 parts.append(f"<p>直してほしいとき: <code>genko studio comment {html.escape(str(project))} --page {page.index} \"指示\" --as human:名前</code></p>")
         parts.append("</div></div>")
     parts.append("</html>")

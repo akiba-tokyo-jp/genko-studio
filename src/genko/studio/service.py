@@ -1,8 +1,10 @@
 """StudioService: the tools an agent calls (MCP, CLI and HTTP share this).
 
 Writing tools default to a dry run: they check, compile and render, and only
-save when commit=True and nothing is an error. Approvals live in HumanService,
-which the MCP server never exposes.
+save when commit=True and nothing is an error. Every change goes through
+apply_ops into project.json (bible, script, name plans, panel briefs, reviews,
+tickets, candidates). Approvals live in HumanService, which the MCP server
+never exposes.
 """
 
 from __future__ import annotations
@@ -19,8 +21,7 @@ from genko.lock import ProjectLock
 from genko.models import Binding, Episode, PageSpec, new_episode
 from genko.ops import ApplyError, apply_ops
 from genko.studio import layout as layout_mod
-from genko.studio import lint, worklist
-from genko.studio.drafts import Drafts
+from genko.studio import lint, state, worklist
 from genko.studio.issues import Issue, error, has_errors
 from genko.studio.jsonschema_lite import validate
 from genko.studio.letter import place_page, placements_to_ops
@@ -36,7 +37,16 @@ AGENT_OPS = frozenset({
     "add_stroke", "delete_stroke", "edit_stroke", "simplify_stroke",
     "set_note", "add_mannequin", "pose_mannequin", "add_prim3d", "set_ruler",
     "add_tone", "delete_tone", "add_effect", "stamp_material",
+    # studio state (M3); approve / revoke are for people only
+    "set_studio", "upsert_character", "upsert_location", "delete_location", "upsert_prop", "delete_prop",
+    "set_page_plan", "set_panel", "record_review", "request_approval", "request_fix",
+    "add_region", "edit_region", "delete_region", "replace_regions", "bind_ref", "unbind_ref",
+    "register_assets", "attach_reference", "open_request", "close_request", "import_candidates",
+    "review_candidates", "set_candidate", "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish",
 })
+
+MAX_IMPORT_BYTES = 64 * 1024 * 1024
+BRIEF_FROM_PLAN = ("shot", "angle", "characters", "location_id", "time", "action", "emotion", "fx", "emphasis", "beat_ids")
 
 SPEC_PRESETS = {
     "commercial-b4": PageSpec.b4_comic,
@@ -112,65 +122,117 @@ class StudioService:
     def status(self, project: str) -> ToolResult:
         path = self.project_path(project)
         episode = load_episode(path)
-        drafts = Drafts(path)
-        names = self._names(drafts, episode)
-        reviews = drafts.reviews()
         pages = []
         for page in episode.pages:
-            draft = names.get(page.index)
-            review = reviews.get(str(page.index))
+            draft = state.name(episode, page.index)
+            review = state.name_review(episode, page.index)
+            leaves = page.leaf_frames()
             pages.append({
                 "page": page.index,
                 "named": draft is not None,
                 "reviewed": bool(draft and review and review.get("input_hash") == draft.get("input_hash")),
                 "name_ok": page.name_ok,
-                "panels": len(page.leaf_frames()),
+                "art_ok": page.art_ok,
+                "panels": len(leaves),
+                "adopted": sum(1 for f in leaves if (f.panel or {}).get("status") in ("adopted", "skip")),
                 "lines": len(episode.story_for_page(page.index)),
             })
-        items = self._next(path, episode)
+        items = worklist.next_actions(episode)
         return ToolResult(True, {
             "title": episode.title,
-            "bible": drafts.bible() is not None,
-            "script": drafts.script() is not None,
+            "revision": episode.revision,
+            "bible": state.bible(episode) is not None,
+            "script": state.script(episode) is not None,
             "pages": pages,
             "waiting_for": _waiting(items),
         })
 
     def next(self, project: str, limit: int = 5) -> ToolResult:
         path = self.project_path(project)
-        items = self._next(path, load_episode(path))
+        items = worklist.next_actions(load_episode(path))
         runnable = [i for i in items if not i["blocked_by"]]
         return ToolResult(True, {"items": runnable[:limit], "blocked": len(items) - len(runnable), "waiting_for": _waiting(items)})
 
-    def inspect(self, project: str, target: str, page: int | None = None) -> ToolResult:
+    def inspect(self, project: str, target: str, page: int | None = None, frame_id: str | None = None) -> ToolResult:
         path = self.project_path(project)
-        drafts = Drafts(path)
-        if target == "bible":
-            return ToolResult(True, {"bible": drafts.bible()})
-        if target == "script":
-            return ToolResult(True, {"script": drafts.script()})
         if target == "schemas":
             return ToolResult(True, {"schemas": SCHEMAS})
         if target == "rules":
             return ToolResult(True, {"rules": RULES_PATH.read_text(encoding="utf-8")})
         episode = load_episode(path)
+        if target == "bible":
+            return ToolResult(True, {"bible": state.bible(episode)})
+        if target == "script":
+            return ToolResult(True, {"script": state.script(episode)})
+        if target == "studio":
+            return ToolResult(True, {"studio": episode.studio})
         if target == "snapshot":
             return ToolResult(True, {"snapshot": snapshot(episode)})
-        if target == "page":
+        if target in ("page", "panel"):
             if page is None:
                 return fail("page が要る", "page_required", "/page")
-            return ToolResult(True, self._page_brief(episode, drafts, page))
-        return fail(f"target {target} はない（bible / script / page / schemas / rules / snapshot）", "unknown_target", "/target")
+            if not any(p.index == page for p in episode.pages):
+                return fail(f"{page} ページはない", "no_page", "/page")
+            if target == "page":
+                return ToolResult(True, self._page_brief(episode, page))
+            return ToolResult(True, _panel_brief(episode, page, frame_id))
+        return fail(f"target {target} はない（bible / script / page / panel / studio / schemas / rules / snapshot）", "unknown_target", "/target")
 
-    def render(self, project: str, page: int, mode: str = "name", max_px: int = 1024) -> ToolResult:
+    def render(self, project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None) -> ToolResult:
         path = self.project_path(project)
         episode = load_episode(path)
-        draft = Drafts(path).name(page)
-        png = _preview(episode, page, mode, max_px, draft.get("plan") if draft else None)
-        out = path / "studio" / "reviews" / f"p{page:03d}_{mode}.png"
+        draft = state.name(episode, page)
+        png = _preview(episode, page, mode, max_px, draft.get("name") if draft else None, frame_id)
+        suffix = f"_{frame_id}" if frame_id else ""
+        out = path / "studio" / "reviews" / f"p{page:03d}_{mode}{suffix}.png"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(png)
-        return ToolResult(True, {"page": page, "mode": mode}, images=[png], files=[str(out)])
+        return ToolResult(True, {"page": page, "mode": mode, "frame_id": frame_id}, images=[png], files=[str(out)])
+
+    # --- images ----------------------------------------------------------------------
+
+    def import_image(self, project: str, path: str | None = None, png_base64: str | None = None, *, confine: bool = True) -> ToolResult:
+        """Copy an image into assets/ (content-addressed). Returns its ref and pixel size.
+
+        Nothing refers to it until an op (import_candidates, place_asset, attach_reference)
+        does; unreferenced assets are removed by `genko gc` after a day.
+        """
+        import base64
+
+        from PIL import Image
+
+        from genko.assets import AssetStore
+        from genko.ops import _verify_image
+
+        project_path = self.project_path(project)
+        if (path is None) == (png_base64 is None):
+            return fail("path か png_base64 のどちらか一方を渡す", "image_source", "/")
+        if path is not None:
+            source = Path(path)
+            source = (source if source.is_absolute() else self.root / source).resolve()
+            if confine and self.root not in source.parents:
+                return fail(f"path が --root の外: {path}", "outside_root", "/path")
+            if not source.is_file():
+                return fail(f"ファイルがない: {path}", "no_file", "/path")
+            if source.stat().st_size > MAX_IMPORT_BYTES:
+                return fail("画像が大きすぎる（64MB まで）", "too_large", "/path")
+            blob = source.read_bytes()
+        else:
+            try:
+                blob = base64.b64decode(png_base64 or "", validate=True)
+            except ValueError:
+                return fail("png_base64 が base64 ではない", "bad_base64", "/png_base64")
+        _verify_image(blob)
+        with Image.open(io.BytesIO(blob)) as img:
+            img.load()
+            if img.format != "PNG":
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                blob = buf.getvalue()
+            size = img.size
+            mode = img.mode
+        ref = AssetStore(project_path).put_bytes(blob, ".png")
+        return ToolResult(True, {"asset": ref, "px": list(size), "mode": mode})
 
     # --- writing: bible, script, name ----------------------------------------------
 
@@ -183,22 +245,27 @@ class StudioService:
             return ToolResult(not has_errors(issues), {"committed": False, "characters": len(bible.get("characters", []))}, issues)
         with ProjectLock(path, agent=self.actor):
             episode = load_episode(path)
-            ops = [{"op": "set_bible", "plot": bible["plot"], "characters": bible["characters"], "constraints": bible["constraints"]}]
+            characters, more = _keep_approved(episode.bible.characters, bible["characters"])
+            if has_errors(more):
+                return ToolResult(False, {"committed": False}, issues + more)
+            doc = {k: v for k, v in bible.items() if k not in ("plot", "characters", "constraints")}
+            ops = [
+                {"op": "set_bible", "plot": bible["plot"], "characters": characters, "constraints": bible["constraints"]},
+                {"op": "set_studio", "bible_doc": doc},
+            ]
             if bible.get("title"):
                 ops.append({"op": "set_meta", "title": bible["title"]})
             apply_ops(episode, ops, agent=self.actor)
-            Drafts(path).set_bible(bible)
-            save_episode(episode, path)
+            save_episode(episode, path, actor=self.actor)
         return ToolResult(True, {"committed": True}, issues)
 
     def set_script(self, project: str, script: dict, commit: bool = False) -> ToolResult:
         path = self.project_path(project)
-        drafts = Drafts(path)
-        bible = drafts.bible()
+        episode = load_episode(path)
+        bible = state.bible(episode)
         if bible is None:
             return fail("先に set_bible で企画書を保存する", "bible_missing")
         issues = validate(script, SCHEMAS["script@1"])
-        episode = load_episode(path)
         if not has_errors(issues):
             issues += lint.lint_script(script, bible, len(episode.pages))
         per_page: dict[int, int] = {}
@@ -210,20 +277,21 @@ class StudioService:
         if has_errors(issues) or not commit:
             return ToolResult(not has_errors(issues), data, issues)
         with ProjectLock(path, agent=self.actor):
-            drafts.set_script(script)
+            episode = load_episode(path)
+            apply_ops(episode, [{"op": "set_script", "script": script}], agent=self.actor)
+            save_episode(episode, path, actor=self.actor)
         data["committed"] = True
         return ToolResult(True, data, issues)
 
     def submit_name(self, project: str, plan: dict, commit: bool = False, replace: bool = False, max_px: int = 1024) -> ToolResult:
         path = self.project_path(project)
-        drafts = Drafts(path)
-        bible, script = drafts.bible(), drafts.script()
+        episode = load_episode(path)
+        bible, script = state.bible(episode), state.script(episode)
         if bible is None or script is None:
             return fail("先に企画書（set_bible）と脚本（set_script）を保存する", "script_missing")
         issues = validate(plan, SCHEMAS["name_plan@1"])
         if has_errors(issues):
             return ToolResult(False, {"committed": False}, issues)
-        episode = load_episode(path)
         issues += lint.lint_name_plan(plan, script, bible, len(episode.pages))
         if has_errors(issues):
             return ToolResult(False, {"committed": False}, issues)
@@ -251,22 +319,24 @@ class StudioService:
             compiled, more = self._compile_name(episode, page_index, plan, bible, script, replace)
             if compiled is None or has_errors(more):
                 return ToolResult(False, {"committed": False}, more)
-            seq = drafts.next_seq()
-            drafts.set_name(page_index, {
-                "plan": plan,
+            ops = [{"op": "set_panel", "page": page_index, "frame_id": compiled.slot_to_frame[panel["slot"]],
+                    "set": {"slot": panel["slot"], **{k: panel[k] for k in BRIEF_FROM_PLAN if k in panel}}}
+                   for panel in plan["panels"] if panel["slot"] in compiled.slot_to_frame]
+            ops.append({"op": "set_page_plan", "page": page_index, "plan": {
+                "name": plan,
                 "input_hash": worklist.plan_hash(plan),
-                "seq": seq,
+                "rev": episode.revision,
+                "turn_role": plan.get("turn_role"),
                 "slot_to_frame": compiled.slot_to_frame,
                 "reading_order": compiled.reading_order,
                 "by": self.actor,
-            })
-            items = drafts.requests()
-            for item in items:
-                if item.get("kind") == "comment" and item.get("page") == page_index and item.get("status") == "open":
-                    item["status"] = "resolved"
-                    item["resolved_seq"] = seq
-            drafts.set_requests(items)
-            save_episode(episode, path)
+            }})
+            ops += [{"op": "set_ticket", "id": t["id"], "status": "done"} for t in state.page_fixes(episode, page_index)]
+            try:
+                apply_ops(episode, ops, agent=self.actor)
+            except ApplyError as exc:
+                return ToolResult(False, {"committed": False}, [error("apply_failed", "/", str(exc))])
+            save_episode(episode, path, actor=self.actor)
         data["committed"] = True
         return result
 
@@ -311,52 +381,52 @@ class StudioService:
                 with ProjectLock(path, agent=self.actor):
                     episode = load_episode(path)
                     result = apply_ops(episode, ops, agent=self.actor)
-                    save_episode(episode, path)
+                    save_episode(episode, path, actor=self.actor)
         except ApplyError as exc:
             return fail(str(exc), "apply_failed", "/ops")
-        return ToolResult(True, {"committed": commit, "applied": result["applied"]})
+        return ToolResult(True, {"committed": commit, "applied": result["applied"], "warnings": result.get("warnings", [])})
 
     # --- reviews and requests --------------------------------------------------------
 
     def record_review(self, project: str, page: int, score: float | None, notes: str) -> ToolResult:
         path = self.project_path(project)
-        drafts = Drafts(path)
-        draft = drafts.name(page)
-        if draft is None:
-            return fail(f"{page} ページのネームがまだない", "name_missing", "/page")
         with ProjectLock(path, agent=self.actor):
-            drafts.set_review(page, {"by": self.actor, "score": score, "notes": notes, "input_hash": draft["input_hash"]})
+            episode = load_episode(path)
+            draft = state.name(episode, page)
+            if draft is None:
+                return fail(f"{page} ページのネームがまだない", "name_missing", "/page")
+            apply_ops(episode, [{"op": "record_review", "page": page, "kind": "name", "score": score, "notes": notes,
+                                 "input_hash": draft["input_hash"]}], agent=self.actor)
+            save_episode(episode, path, actor=self.actor)
         return ToolResult(True, {"page": page})
 
-    def request_approval(self, project: str, gate: str, pages: list[int], note: str = "") -> ToolResult:
+    def request_approval(self, project: str, gate: str, pages: list[int], note: str = "", character_id: str | None = None) -> ToolResult:
         path = self.project_path(project)
-        if gate != "name":
-            return fail("M0 で依頼できる承認は name だけ", "gate_not_available", "/gate")
-        drafts = Drafts(path)
+        if gate not in ("name", "art", "sheet"):
+            return fail("依頼できる承認は name / art / sheet", "gate_not_available", "/gate")
+        if gate == "sheet" and not character_id:
+            return fail("sheet の承認依頼には character_id が要る", "character_required", "/character_id")
         with ProjectLock(path, agent=self.actor):
-            items = drafts.requests()
-            seq = drafts.next_seq()
-            items.append({"id": f"rq{seq}", "kind": "approval", "gate": gate, "pages": sorted(set(pages)), "note": note,
-                          "by": self.actor, "status": "open", "seq": seq})
-            drafts.set_requests(items)
-        return ToolResult(True, {"request": f"rq{seq}", "how_to_approve": f"genko studio approve {path} name --pages {','.join(map(str, sorted(set(pages))))} --as human:<name>"})
+            episode = load_episode(path)
+            before = {t["id"] for t in episode.tickets}
+            apply_ops(episode, [{"op": "request_approval", "gate": gate, "pages": pages, "note": note,
+                                 "character_id": character_id}], agent=self.actor)
+            ticket = next(t for t in episode.tickets if t["id"] not in before)
+            save_episode(episode, path, actor=self.actor)
+        pages_arg = ",".join(map(str, sorted(set(pages))))
+        how = (f"genko studio approve {path} sheet --character {character_id} --candidate <候補id> --as human:<name>" if gate == "sheet"
+               else f"genko studio approve {path} {gate} --pages {pages_arg} --as human:<name>")
+        return ToolResult(True, {"request": ticket["id"], "how_to_approve": how})
 
     def tickets(self, project: str, status: str = "open") -> ToolResult:
         path = self.project_path(project)
-        items = [r for r in Drafts(path).requests() if status == "all" or r.get("status") == status]
+        items = [t for t in load_episode(path).tickets if status == "all" or t.get("status") == status]
         return ToolResult(True, {"tickets": items})
 
     # --- helpers ----------------------------------------------------------------
 
-    def _names(self, drafts: Drafts, episode: Episode) -> dict[int, dict]:
-        return {p.index: d for p in episode.pages if (d := drafts.name(p.index)) is not None}
-
-    def _next(self, path: Path, episode: Episode) -> list[dict]:
-        drafts = Drafts(path)
-        return worklist.next_actions(episode, drafts.bible(), drafts.script(), self._names(drafts, episode), drafts.reviews(), drafts.requests())
-
-    def _page_brief(self, episode: Episode, drafts: Drafts, page: int) -> dict:
-        script = drafts.script() or {"scenes": []}
+    def _page_brief(self, episode: Episode, page: int) -> dict:
+        script = state.script(episode) or {"scenes": []}
         beats = []
         neighbours: dict[int, list[str]] = {page - 1: [], page + 1: []}
         for scene in script.get("scenes", []):
@@ -366,14 +436,19 @@ class StudioService:
                     beats.append(entry)
                 elif beat.get("page") in neighbours:
                     neighbours[beat["page"]].append(beat.get("text", ""))
-        draft = drafts.name(page)
+        draft = state.name(episode, page)
+        target = next(p for p in episode.pages if p.index == page)
         return {
             "page": page,
             **worklist.page_side(page),
             "beats": beats,
             "previous_page": " / ".join(neighbours[page - 1])[:400],
             "next_page": " / ".join(neighbours[page + 1])[:400],
-            "current_plan": draft.get("plan") if draft else None,
+            "current_plan": draft.get("name") if draft else None,
+            "panels": [{"frame_id": f.id, "rect_mm": [round(v, 1) for v in (f.rect.x, f.rect.y, f.rect.width, f.rect.height)],
+                        "slot": (f.panel or {}).get("slot"), "status": (f.panel or {}).get("status", "empty")}
+                       for f in target.leaf_frames()],
+            "fixes": [t.get("text", "") for t in state.page_fixes(episode, page)],
             "templates": {k: v["description"] for k, v in layout_mod.templates().items()},
         }
 
@@ -387,33 +462,87 @@ class HumanService:
         self.path = Path(project)
         self.actor = actor
 
-    def approve_name(self, pages: list[int]) -> dict:
+    def _apply(self, ops: list[dict]) -> Episode:
         with ProjectLock(self.path, agent=self.actor):
             episode = load_episode(self.path)
-            apply_ops(episode, [{"op": "name_ok", "page": p} for p in pages], agent=self.actor)
-            save_episode(episode, self.path)
-            drafts = Drafts(self.path)
-            items = drafts.requests()
-            for item in items:
-                if item.get("kind") == "approval" and item.get("status") == "open" and set(item.get("pages", [])) <= set(pages):
-                    item["status"] = "done"
-                    item["closed_by"] = self.actor
-            drafts.set_requests(items)
+            apply_ops(episode, ops, agent=self.actor)
+            save_episode(episode, self.path, actor=self.actor)
+        return episode
+
+    def approve_name(self, pages: list[int]) -> dict:
+        self._apply([{"op": "approve", "gate": "name", "page": p} for p in pages])
         return {"ok": True, "approved": sorted(pages)}
 
-    def comment(self, page: int, text: str) -> dict:
-        drafts = Drafts(self.path)
-        with ProjectLock(self.path, agent=self.actor):
-            items = drafts.requests()
-            seq = drafts.next_seq()
-            items.append({"id": f"c{seq}", "kind": "comment", "page": page, "text": text, "by": self.actor, "status": "open", "seq": seq})
-            drafts.set_requests(items)
-        return {"ok": True, "comment": f"c{seq}"}
+    def approve_art(self, pages: list[int]) -> dict:
+        self._apply([{"op": "approve", "gate": "art", "page": p} for p in pages])
+        return {"ok": True, "approved": sorted(pages)}
+
+    def approve_sheet(self, character_id: str, candidate_id: str) -> dict:
+        self._apply([{"op": "approve", "gate": "sheet", "character_id": character_id, "candidate_id": candidate_id}])
+        return {"ok": True, "approved": character_id}
+
+    def revoke(self, gate: str, pages: list[int], character_id: str | None = None, reason: str = "") -> dict:
+        if gate == "sheet":
+            self._apply([{"op": "revoke", "gate": "sheet", "character_id": character_id, "reason": reason}])
+        else:
+            self._apply([{"op": "revoke", "gate": gate, "page": p, "reason": reason} for p in pages])
+        return {"ok": True, "revoked": gate}
+
+    def comment(self, page: int, text: str, frame_id: str | None = None) -> dict:
+        episode = self._apply([{"op": "request_fix", "page": page, "frame_id": frame_id, "instruction": text,
+                                "scope": "frame" if frame_id else "page"}])
+        return {"ok": True, "comment": episode.tickets[-1]["id"]}
 
 
 def _waiting(items: list[dict]) -> list[dict]:
-    pages = sorted(i["target"]["page"] for i in items if i["blocked_by"] and i.get("gate") == "name")
-    return [{"gate": "name", "pages": pages}] if pages else []
+    out = []
+    for gate in ("name", "art"):
+        pages = sorted(i["target"]["page"] for i in items if i["blocked_by"] and i.get("gate") == gate)
+        if pages:
+            out.append({"gate": gate, "pages": pages})
+    chars = sorted({i["target"]["character_id"] for i in items if i["blocked_by"] and i.get("gate") == "sheet"})
+    if chars:
+        out.append({"gate": "sheet", "characters": chars})
+    return out
+
+
+def _keep_approved(current: list[dict], incoming: list[dict]) -> tuple[list[dict], list[Issue]]:
+    """A new bible keeps approved sheets (refs, locked) and may not drop a locked character."""
+    by_id = {c.get("id"): c for c in current}
+    issues: list[Issue] = []
+    out = []
+    for char in incoming:
+        old = by_id.get(char.get("id"))
+        merged = dict(char)
+        if old:
+            for key in ("refs", "locked"):
+                if key in old:
+                    merged[key] = old[key]
+        out.append(merged)
+    kept = {c.get("id") for c in incoming}
+    for cid, old in by_id.items():
+        if old.get("locked") and cid not in kept:
+            issues.append(error("locked_character", "/characters", f"{cid} の設定画は承認済み。消すには人間が承認を取り消す"))
+    return out, issues
+
+
+def _panel_brief(episode: Episode, page_index: int, frame_id: str | None) -> dict:
+    page = next(p for p in episode.pages if p.index == page_index)
+    frames = [page._find(frame_id)] if frame_id else page.leaf_frames()
+    chars = {c.get("id"): c for c in episode.bible.characters}
+    out = []
+    for frame in frames:
+        panel = frame.panel or {}
+        cast = [c.get("id") for c in panel.get("characters", []) if isinstance(c, dict)]
+        out.append({
+            "frame_id": frame.id,
+            "rect_mm": [round(v, 2) for v in (frame.rect.x, frame.rect.y, frame.rect.width, frame.rect.height)],
+            "bleed": frame.bleed,
+            "panel": panel,
+            "character_refs": {cid: chars[cid].get("refs", []) for cid in cast if cid in chars},
+            "lines": [line.text for line in episode.story_for_page(page_index) if line.frame_id == frame.id],
+        })
+    return {"page": page_index, "name_ok": page.name_ok, "art_ok": page.art_ok, "panels": out}
 
 
 def _brief(plan: dict, bible: dict) -> str:
@@ -425,16 +554,25 @@ def _brief(plan: dict, bible: dict) -> str:
     return " | ".join(parts)
 
 
-def _preview(episode: Episode, page_index: int, mode: str, max_px: int, plan: dict | None) -> bytes:
-    from genko.render import render_page
+def _preview(episode: Episode, page_index: int, mode: str, max_px: int, plan: dict | None, frame_id: str | None = None) -> bytes:
+    from genko.render import render_frame, render_page
     from genko.studio.review import annotate
 
     page = next((p for p in episode.pages if p.index == page_index), None)
     if page is None:
         raise ApplyError(f"{page_index} ページはない")
-    dpi = max(36, min(300, int(max(64, max_px) / (page.spec.height_mm / 25.4))))
-    image = render_page(page, dpi, mode=mode, episode=episode)
-    if mode == "name":
+    if frame_id:
+        try:
+            frame = page._find(frame_id)
+        except (KeyError, IndexError) as exc:
+            raise ApplyError(f"{page_index} ページにコマ {frame_id} はない") from exc
+        longest = max(frame.rect.width, frame.rect.height)
+        dpi = max(36, min(600, int(max(64, max_px) / (longest / 25.4))))
+        image = render_frame(page, frame_id, dpi, mode="proof" if mode == "name" else mode, episode=episode)
+    else:
+        dpi = max(36, min(300, int(max(64, max_px) / (page.spec.height_mm / 25.4))))
+        image = render_page(page, dpi, mode=mode, episode=episode)
+    if mode == "name" and not frame_id:
         image = annotate(image, page, dpi, plan)
     buf = io.BytesIO()
     image.save(buf, format="PNG")

@@ -1,4 +1,5 @@
-"""Sidecar files under <project>/studio/ (M0 keeps project.json unchanged).
+"""M0 sidecar files under <project>/studio/drafts/. Since M3 they are only read by
+`genko studio adopt-drafts`, which moves them into project.json.
 
 drafts/bible.json, drafts/script.json, drafts/name/pNNN.json hold what the
 agent wrote; drafts/reviews.json, drafts/requests.json and drafts/state.json

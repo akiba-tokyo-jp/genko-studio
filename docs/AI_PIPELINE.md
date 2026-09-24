@@ -1959,6 +1959,23 @@ M5 + M7 ─▶ M9（拡張）
 
 範囲: 取り込んだ画像を「コマに置く」ことを正しくし、studio の状態を project.json に持つ。まだ依頼パックは出さない。
 
+**実施状況（2026-09-24）:** M3-1〜M3-6 を実装した（GUI の描画を除く）。
+- 画像は `import_image`（MCP・CLI）で `assets/` に入れ、`import_candidates` でコマの候補にし、`adopt_candidate` で採用する。
+- 採用した絵は `LayerKind.PLACED` の層として元の資産を指す。print のたびに見える部分だけを元画像から LANCZOS で再標本化し、コマで切り取る（bleed のコマは外側の辺を紙の端まで伸ばす）。
+- studio の状態（bible_doc、脚本、ページの計画と自己点検、コマのブリーフ・候補・採用、承認の記録、チケット）は project.json に持つ。すべて `apply_ops` の op で変わるので、undo と journal がそのまま効く。
+- M0 のサイドカーは `genko studio adopt-drafts` で取り込み、`studio/drafts.adopted` に改名する。
+
+設計からの変更点:
+- `studio/state.py` は PanelSpec のクラスではなく、project.json を読むだけの関数にした。コマのブリーフは `Frame.panel`（dict）に持つ。
+- `Episode.assets` の注入の代わりに、読み込み時に `Episode.asset_dir` を付ける（保存しない一時フィールド）。
+- 絵の工程の作業（`make_sheet`・`make_art`・`import_art`・`choose_art`・`fix_art`・art 承認待ち）も `next` に出す。登場人物の設定画が承認されるまで、そのコマの作画は `make_sheet` を先に出す。
+- 資産の参照は project.json 全体から探す（候補・孤児・設定画も gc で消えない）。
+
+後回しにしたもの:
+- GUI のキャンバスで placed layer を描く（M7）。
+- `guide.py` の crop 以外のガイド（M4）。
+- raster 層の `_clip_mask` の bleed 対応（M4）。
+
 | PR | 内容 |
 |---|---|
 | M3-1 | `LayerKind.PLACED` と Layer の新フィールド（io / migrate / snapshot）、`Episode.assets` の注入 |

@@ -55,7 +55,8 @@ Python 3.11+.
 - `src/genko/headless.py` — JSON snapshot
 - `src/genko/server.py` — HTTP API + OpenAPI
 - `src/genko/app/` — PySide6 GUI
-- `src/genko/studio/` — agent tools: schemas, lint, layout DSL, lettering, worklist
+- `src/genko/studio/` — agent tools: schemas, lint, layout DSL, lettering, worklist, studio ops (panel briefs, candidates, adoption, approvals)
+- `src/genko/placement.py` — where a placed image lands in its panel and what clips it
 - `src/genko/mcp/` — MCP server (`genko mcp`)
 - `docs/AGENT.md` — how an agent should drive Genko
 - `docs/DESIGN.md` — architecture

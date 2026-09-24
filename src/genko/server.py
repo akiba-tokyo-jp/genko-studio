@@ -42,6 +42,7 @@ def openapi_spec() -> dict[str, Any]:
             "/openapi.json": {"get": {"responses": {"200": {"description": "spec"}}}},
             "/v1/inspect": {"get": {"parameters": [{"name": "path", "in": "query", "required": True}]}},
             "/v1/pages/{n}.png": {"get": {"parameters": [{"name": "path", "in": "query"}]}},
+            "/v1/pages/{n}/frames/{frame_id}.png": {"get": {"parameters": [{"name": "path", "in": "query"}, {"name": "dpi", "in": "query"}, {"name": "mode", "in": "query"}]}},
             "/v1/new": {"post": {"requestBody": {"required": True}}},
             "/v1/apply": {"post": {"requestBody": {"required": True}}},
             "/v1/export": {"post": {"requestBody": {"required": True}}},
@@ -116,6 +117,23 @@ def handle_request(method: str, path: str, body: bytes, ctx: dict | None = None)
             episode = load_episode(confine(ctx, query.get("path", "")))
             full = query.get("full") in ("1", "true", "yes")
             return _json_bytes(snapshot(episode, full=full))
+        if method == "GET" and route.startswith("/v1/pages/") and "/frames/" in route and route.endswith(".png"):
+            from genko.render import render_frame
+
+            episode = load_episode(confine(ctx, query.get("path", "")))
+            head, frame_part = route.split("/frames/", 1)
+            page_no = int(head.rsplit("/", 1)[-1])
+            page = next((item for item in episode.pages if item.index == page_no), None)
+            if page is None:
+                return _json_bytes({"ok": False, "error": f"no page {page_no}"}, 404)
+            frame_id = frame_part.removesuffix(".png")
+            try:
+                image = render_frame(page, frame_id, _dpi(query.get("dpi", "150")), mode=query.get("mode", "proof"), episode=episode)
+            except (KeyError, IndexError):
+                return _json_bytes({"ok": False, "error": f"no frame {frame_id} on page {page_no}"}, 404)
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            return 200, buf.getvalue()
         if method == "GET" and route.startswith("/v1/pages/") and route.endswith(".png"):
             from genko.render import render_page
 

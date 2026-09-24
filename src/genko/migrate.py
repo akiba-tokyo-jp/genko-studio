@@ -32,12 +32,22 @@ def _frame(data: dict) -> Frame:
         clip=data.get("clip", True),
         bleed=data.get("bleed", False),
         border_mm=float(data.get("border_mm", 0.8)),
+        panel=data.get("panel"),
     )
 
 
 def _layer(data: dict, store=None) -> Layer:
     role = LayerRole(data["role"])
     layer = _layer_fields(data, role)
+    if layer.kind == LayerKind.PLACED:
+        layer.asset = data.get("asset")
+        layer.frame_id = data.get("frame_id")
+        layer.placement_mm = _rect(data["placement_mm"]) if data.get("placement_mm") else None
+        layer.fit = data.get("fit") or "cover"
+        layer.clip_to = data.get("clip_to") or "frame"
+        layer.source = data.get("source")
+        layer.finish = data.get("finish")
+        return layer
     if store is not None and data.get("asset"):
         layer.raster_relpath = store.relpath(data["asset"], ".png")
         layer.raster_png = store.get_bytes(data["asset"], ".png")
@@ -95,10 +105,10 @@ def _line(data: dict) -> StoryLine:
 SUPPORTED_VERSION = 3
 KNOWN_TOP_KEYS = frozenset({
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
-    "font_path", "page_locks", "brush", "spec", "bible", "tickets", "pages", "story",
+    "font_path", "page_locks", "brush", "spec", "bible", "tickets", "studio", "pages", "story",
 })
 KNOWN_PAGE_KEYS = frozenset({
-    "id", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
+    "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
     "effects", "ruler", "prims", "frames", "layers", "texts", "fills", "name_strokes", "ink_strokes",
 })
 
@@ -129,6 +139,8 @@ def migrate_payload(payload: dict, store=None) -> Episode:
     for raw in payload["pages"]:
         page = Page(
             id=raw.get("id") or "pg_" + new_id(),
+            art_ok=bool(raw.get("art_ok", False)),
+            plan=raw.get("plan"),
             index=raw["index"],
             spec=spec,
             frames=[_frame(frame) for frame in raw["frames"]],
@@ -194,6 +206,7 @@ def migrate_payload(payload: dict, store=None) -> Episode:
     episode.revision = int(payload.get("revision") or 0)
     episode.start_side = payload.get("start_side")
     episode.strict_gates = bool(payload.get("strict_gates", False))
+    episode.studio = dict(payload.get("studio") or {})
     by_index = {str(page.index): page.id for page in pages}
     # v2 keyed locks by page number; v3 by page id.
     episode.page_locks = {by_index.get(str(key), str(key)): owner for key, owner in episode.page_locks.items()}

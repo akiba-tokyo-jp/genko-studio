@@ -9,9 +9,9 @@ from genko import journal
 from genko.assets import AssetStore, canonical_json
 from genko.migrate import KNOWN_PAGE_KEYS as _PAGE_KEYS
 from genko.migrate import migrate_payload
+from genko.models import Episode, Frame, Layer, LayerKind, Rect, StoryLine, stroke_to_dict
 
 V2_BACKUP = "project.v2.bak.json"
-from genko.models import Episode, Frame, Layer, Page, Rect, StoryLine, stroke_to_dict
 
 
 def _rect_to_dict(rect: Rect) -> dict:
@@ -27,6 +27,7 @@ def _frame_to_dict(frame: Frame) -> dict:
         "bleed": frame.bleed,
         "border_mm": frame.border_mm,
         "children": [_frame_to_dict(child) for child in frame.children],
+        "panel": frame.panel,
     }
 
 
@@ -51,7 +52,15 @@ def _layer_to_dict(layer: Layer) -> dict:
         "clip": layer.clip,
         "lock_alpha": layer.lock_alpha,
         "parent_id": layer.parent_id,
-    }
+    } | ({
+        "asset": layer.asset,
+        "frame_id": layer.frame_id,
+        "placement_mm": _rect_to_dict(layer.placement_mm) if layer.placement_mm else None,
+        "fit": layer.fit,
+        "clip_to": layer.clip_to,
+        "source": layer.source,
+        "finish": layer.finish,
+    } if layer.kind == LayerKind.PLACED else {})
 
 
 def _line_to_dict(line: StoryLine) -> dict:
@@ -130,10 +139,13 @@ def _payload(episode: Episode, store: AssetStore) -> dict:
             "constraints": episode.bible.constraints,
         },
         "tickets": episode.tickets,
+        "studio": episode.studio,
         "pages": [
             {
                 "id": page.id,
                 "index": page.index,
+                "art_ok": page.art_ok,
+                "plan": page.plan,
                 "note": page.note,
                 "name_ok": page.name_ok,
                 "stage": page.stage,
@@ -158,6 +170,8 @@ def _payload(episode: Episode, store: AssetStore) -> dict:
 def _layer_to_v3(layer: Layer, store: AssetStore) -> dict:
     data = _layer_to_dict(layer)
     del data["strokes"], data["raster_relpath"]
+    if layer.kind == LayerKind.PLACED:
+        return data
     if layer.raster_png:
         data["asset"] = store.put_bytes(layer.raster_png, ".png")
         layer.raster_relpath = store.relpath(data["asset"], ".png")
@@ -173,6 +187,8 @@ def save_episode(episode: Episode, dest: Path, *, actor: str | None = None) -> N
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     store = AssetStore(dest)
+    if episode.asset_dir is None:
+        episode.asset_dir = dest
     project_json = dest / "project.json"
     before = None
     if project_json.is_file():
@@ -203,6 +219,7 @@ def load_episode(src: Path) -> Episode:
     src = Path(src)
     payload = json.loads((src / "project.json").read_text(encoding="utf-8"))
     episode = migrate_payload(payload, AssetStore(src))
+    episode.asset_dir = src
     _attach_legacy_rasters(episode, src)
     return episode
 

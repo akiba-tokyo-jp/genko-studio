@@ -49,7 +49,15 @@ def test_scripted_agent_builds_a_name_and_waits_for_a_human(tmp_path: Path):
     HumanService(project, "human:leaf").approve_name([1, 2, 3, 4])
     episode = load_episode(project)
     assert all(p.name_ok for p in episode.pages)
-    assert agent.next("demo.genko").data == {"items": [], "blocked": 0, "waiting_for": []}
+    after = agent.next("demo.genko", limit=50).data
+    assert after["waiting_for"] == [] and after["blocked"] == 0
+    # with the name approved, the art starts from the character sheets (panels with unapproved characters wait)
+    assert {i["kind"] for i in after["items"]} <= {"make_sheet", "make_art"}
+    assert any(i["kind"] == "make_sheet" for i in after["items"])
+    episode = load_episode(project)
+    assert all(f.panel and f.panel.get("status") == "briefed" for p in episode.pages for f in p.leaf_frames())
+    assert all(p.plan and p.plan["input_hash"] and p.plan["reviews"]["name"]["score"] == 0.8 for p in episode.pages)
+    assert not (project / "studio" / "drafts").exists()  # M3: everything lives in project.json
     assert all(t["status"] == "done" for t in agent.tickets("demo.genko", "all").data["tickets"])
 
     again = agent.submit_name("demo.genko", _load("p001.json"), commit=True, replace=True)

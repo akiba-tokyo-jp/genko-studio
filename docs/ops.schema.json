@@ -8,12 +8,14 @@
       "axis": "horizontal|vertical",
       "ratio": "float",
       "gutter_mm": "float",
-      "frame_id": "optional"
+      "frame_id": "optional",
+      "force": "bool? (placed art goes to studio.orphans)"
     },
     {
       "op": "merge_frame",
       "page": "int",
-      "frame_id": "str"
+      "frame_id": "str",
+      "force": "bool? (placed art goes to studio.orphans)"
     },
     {
       "op": "resize_frame",
@@ -313,6 +315,217 @@
     },
     {
       "op": "undo"
+    },
+    {
+      "op": "set_studio",
+      "bible_doc": "object?",
+      "style": "object?",
+      "policy": "object? (human)",
+      "premise": "str?"
+    },
+    {
+      "op": "upsert_character",
+      "character": "{id, …}",
+      "unlock": "bool? (human)"
+    },
+    {
+      "op": "delete_character",
+      "id": "str",
+      "force": "bool?"
+    },
+    {
+      "op": "upsert_location",
+      "location": "{id, …}"
+    },
+    {
+      "op": "delete_location",
+      "id": "str"
+    },
+    {
+      "op": "upsert_prop",
+      "prop": "{id, …}"
+    },
+    {
+      "op": "delete_prop",
+      "id": "str"
+    },
+    {
+      "op": "set_script",
+      "script": "script@1"
+    },
+    {
+      "op": "set_page_plan",
+      "page": "int",
+      "plan": "object"
+    },
+    {
+      "op": "set_panel",
+      "page": "int",
+      "frame_id": "str",
+      "set": "object",
+      "unset": "[str]?",
+      "pin": "[str]?",
+      "unpin": "[str]?"
+    },
+    {
+      "op": "record_review",
+      "page": "int",
+      "frame_id": "str?",
+      "kind": "name|art",
+      "score": "float?",
+      "notes": "str",
+      "input_hash": "str"
+    },
+    {
+      "op": "approve",
+      "gate": "bible|script|sheet|name|art|export",
+      "page": "int?",
+      "character_id": "str?",
+      "candidate_id": "str?",
+      "face_asset": "str?"
+    },
+    {
+      "op": "revoke",
+      "gate": "name|art|sheet",
+      "page": "int?",
+      "character_id": "str?",
+      "reason": "str"
+    },
+    {
+      "op": "request_approval",
+      "gate": "str",
+      "pages": "[int]?",
+      "character_id": "str?",
+      "note": "str?"
+    },
+    {
+      "op": "request_fix",
+      "page": "int",
+      "frame_id": "str?",
+      "candidate_id": "str?",
+      "instruction": "str",
+      "scope": "frame|person|background|text|regions?"
+    },
+    {
+      "op": "add_region",
+      "page": "int",
+      "frame_id": "str",
+      "region": "{id?, kind, rect_mm, char?, confidence?}"
+    },
+    {
+      "op": "edit_region",
+      "page": "int",
+      "frame_id": "str",
+      "id": "str",
+      "set": "object"
+    },
+    {
+      "op": "delete_region",
+      "page": "int",
+      "frame_id": "str",
+      "id": "str"
+    },
+    {
+      "op": "replace_regions",
+      "page": "int",
+      "frame_id": "str",
+      "source": "agent|detected|derived",
+      "regions": "[region]"
+    },
+    {
+      "op": "bind_ref",
+      "page": "int",
+      "frame_id": "str",
+      "ref": "{id?, source, role, order?}"
+    },
+    {
+      "op": "unbind_ref",
+      "page": "int",
+      "frame_id": "str",
+      "id": "str"
+    },
+    {
+      "op": "register_assets",
+      "assets": "{sha256:…: {kind, origin?, note?}}"
+    },
+    {
+      "op": "attach_reference",
+      "target": "{character_id|location_id|prop_id}",
+      "asset": "str",
+      "kind": "str"
+    },
+    {
+      "op": "open_request",
+      "request": "{id, purpose, mode, target, brief_hash?, parent?}"
+    },
+    {
+      "op": "close_request",
+      "id": "str",
+      "reason": "done|cancelled|superseded"
+    },
+    {
+      "op": "import_candidates",
+      "request_id": "str?",
+      "page": "int?",
+      "frame_id": "str?",
+      "character_id": "str?",
+      "location_id": "str?",
+      "candidates": "[{id?, asset, px:[w,h], mode?, parent?, origin}]"
+    },
+    {
+      "op": "review_candidates",
+      "page": "int",
+      "frame_id": "str",
+      "reviews": "[{candidate_id, score, note?, fix?}]"
+    },
+    {
+      "op": "set_candidate",
+      "page": "int",
+      "frame_id": "str",
+      "candidate_id": "str",
+      "status": "candidate|shortlisted|rejected"
+    },
+    {
+      "op": "adopt_candidate",
+      "page": "int",
+      "frame_id": "str",
+      "candidate_id": "str",
+      "to": "art|bg|draft?",
+      "fit": "cover|contain|stretch?",
+      "offset_mm": "[dx,dy]?",
+      "scale": "float?",
+      "clip_to": "frame|bleed|none?"
+    },
+    {
+      "op": "unadopt",
+      "page": "int",
+      "frame_id": "str",
+      "to": "art|bg|draft?"
+    },
+    {
+      "op": "set_placement",
+      "page": "int",
+      "frame_id": "str",
+      "to": "art|bg|draft?",
+      "fit": "str?",
+      "offset_mm": "[dx,dy]?",
+      "scale": "float?",
+      "clip_to": "str?"
+    },
+    {
+      "op": "place_asset",
+      "page": "int",
+      "asset": "sha256:…",
+      "to": "art|bg|draft|name?",
+      "frame_id": "str?",
+      "fit": "str?",
+      "clip_to": "str?"
+    },
+    {
+      "op": "set_finish",
+      "page": "int",
+      "frame_id": "str",
+      "finish": "object|null"
     }
   ]
 }

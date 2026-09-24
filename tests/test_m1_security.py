@@ -236,7 +236,8 @@ def test_every_handled_op_is_in_the_catalog_and_docs():
 
     from genko.ops import OPS_SCHEMA
 
-    src = (Path(__file__).resolve().parents[1] / "src" / "genko" / "ops.py").read_text(encoding="utf-8")
+    root = Path(__file__).resolve().parents[1] / "src" / "genko"
+    src = (root / "ops.py").read_text(encoding="utf-8") + (root / "studio" / "studio_ops.py").read_text(encoding="utf-8")
     handled = set(re.findall(r'if name == "(\w+)"', src))
     for group in re.findall(r"if name in \(([^)]*)\)", src):
         handled |= set(re.findall(r'"(\w+)"', group))

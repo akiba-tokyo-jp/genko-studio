@@ -64,3 +64,53 @@ def test_genko_mcp_runs_over_stdio(tmp_path: Path):
             assert _json(result) == {"ok": True, "projects": [], "issues": [], "files": []}
 
     anyio.run(scenario)
+
+
+def test_mcp_art_flow_import_candidate_adopt(tmp_path: Path):
+    import base64
+    import io
+
+    from PIL import Image
+
+    from genko.io import load_episode
+    from genko.models import LayerKind
+    from genko.studio.service import HumanService
+
+    server = build_server(tmp_path, "ai:hermes")
+    Image.new("RGB", (600, 300), (200, 40, 40)).save(tmp_path / "gen.png")
+    buf = io.BytesIO()
+    Image.new("RGB", (300, 300), (40, 40, 200)).save(buf, format="PNG")
+
+    async def scenario():
+        async with Client(server) as client:
+            call = client.call_tool
+            await call("create_project", {"name": "demo.genko", "title": "demo", "pages": 4})
+            await call("set_bible", {"project": "demo.genko", "bible": _load("bible.json"), "commit": True})
+            await call("set_script", {"project": "demo.genko", "script": _load("script.json"), "commit": True})
+            await call("submit_name", {"project": "demo.genko", "plan": _load("p002.json"), "commit": True})
+            HumanService(tmp_path / "demo.genko", "human:leaf").approve_name([2])
+            panels = _json(await call("inspect", {"project": "demo.genko", "target": "panel", "page": 2}))["panels"]
+            frame_id = panels[0]["frame_id"]
+            assert panels[0]["panel"]["status"] == "briefed" and panels[0]["rect_mm"][2] > 0
+            outside = _json(await call("import_image", {"project": "demo.genko", "path": "/etc/hosts"}))
+            assert not outside["ok"]
+            first = _json(await call("import_image", {"project": "demo.genko", "path": "gen.png"}))
+            second = _json(await call("import_image", {"project": "demo.genko", "png_base64": base64.b64encode(buf.getvalue()).decode()}))
+            assert first["px"] == [600, 300] and second["asset"].startswith("sha256:")
+            ops = [{"op": "import_candidates", "page": 2, "frame_id": frame_id, "candidates": [
+                {"id": "a", "asset": first["asset"], "px": first["px"], "origin": {"kind": "agent", "model": "image-gen"}},
+                {"id": "b", "asset": second["asset"], "px": second["px"], "origin": {"kind": "agent"}}]},
+                   {"op": "review_candidates", "page": 2, "frame_id": frame_id, "reviews": [{"candidate_id": "a", "score": 0.9}]},
+                   {"op": "adopt_candidate", "page": 2, "frame_id": frame_id, "candidate_id": "a"}]
+            assert _json(await call("apply_ops", {"project": "demo.genko", "ops": ops, "commit": True}))["ok"]
+            crop = await call("render", {"project": "demo.genko", "page": 2, "mode": "print", "frame_id": frame_id, "max_px": 300})
+            assert crop.content[1].type == "image"
+            denied = _json(await call("apply_ops", {"project": "demo.genko", "ops": [{"op": "approve", "gate": "art", "page": 2}], "commit": True}))
+            assert not denied["ok"]
+            catalog = json.loads((await client.read_resource("genko://ops")).contents[0].text)
+            names = {op["op"] for op in catalog}
+            assert "adopt_candidate" in names and "approve" not in names and "put_raster" not in names
+
+    anyio.run(scenario)
+    page = load_episode(tmp_path / "demo.genko").pages[1]
+    assert sum(layer.kind == LayerKind.PLACED for layer in page.layers) == 1

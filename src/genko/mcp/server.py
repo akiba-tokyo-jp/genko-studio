@@ -17,9 +17,12 @@ from genko.ops import ApplyError
 from genko.studio.service import RULES_PATH, StudioService, ToolResult
 
 INSTRUCTIONS = """Genko は漫画原稿のシステム。文章も絵も作らない。あなた（エージェント）が企画書・脚本・ネーム計画を書き、
-Genko が検査・コマ割り・縦書き写植・プレビュー描画をする。
+Genko が検査・コマ割り・縦書き写植・プレビュー描画をする。絵はあなたが別の道具で生成し、import_image で取り込む。
 進め方: status → next で次の作業を取る → 書く道具は commit=false で試し、issues の path を直してから commit=true。
 ネームの規則は resource genko://guide/manga-rules（inspect target=rules でも読める）。
+作画: inspect target=panel でコマのブリーフと寸法を見る → 画像を生成 → import_image → apply_ops の
+import_candidates（page, frame_id, candidates:[{asset, px, origin:{kind:"agent"}}]）→ render frame_id で確認 →
+adopt_candidate。コマの外にはみ出した部分は自動で切り取られる。
 承認は人間だけが行う。承認が要るところでは request_approval を出して待つ。"""
 
 
@@ -62,14 +65,22 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.next, project, limit)
 
     @server.tool(structured_output=False)
-    def inspect(project: str, target: str, page: int | None = None) -> list:
-        """読む。target: bible / script / page（そのページの beat、前後ページ、めくりの位置、定型） / schemas / rules / snapshot。"""
-        return call(service.inspect, project, target, page)
+    def inspect(project: str, target: str, page: int | None = None, frame_id: str | None = None) -> list:
+        """読む。target: bible / script / page（そのページの beat、前後ページ、めくりの位置、定型、コマ一覧） /
+        panel（コマのブリーフ・寸法 mm・候補・登場人物の設定画、frame_id 省略でページ全部） / studio / schemas / rules / snapshot。"""
+        return call(service.inspect, project, target, page, frame_id)
 
     @server.tool(structured_output=False)
-    def render(project: str, page: int, mode: str = "name", max_px: int = 1024) -> list:
-        """ページのプレビュー画像（mode: name / proof）。コマ番号は読み順。画像はファイルにも保存する。"""
-        return call(service.render, project, page, mode, max_px)
+    def render(project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None) -> list:
+        """ページのプレビュー画像（mode: name / proof / print）。コマ番号は読み順。frame_id を渡すとそのコマだけ。
+        画像はファイルにも保存する。"""
+        return call(service.render, project, page, mode, max_px, frame_id)
+
+    @server.tool(structured_output=False)
+    def import_image(project: str, path: str | None = None, png_base64: str | None = None) -> list:
+        """生成した画像を取り込み、asset（sha256:…）と画素数 px を返す。path は --root の中のファイル。
+        取り込んだだけではどこにも使われない。apply_ops の import_candidates でコマの候補にする。"""
+        return call(service.import_image, project, path, png_base64)
 
     @server.tool(structured_output=False)
     def set_bible(project: str, bible: dict, commit: bool = False) -> list:
@@ -89,7 +100,8 @@ def build_server(root: Path, actor: str) -> MCPServer:
 
     @server.tool(structured_output=False)
     def apply_ops(project: str, ops: list[dict], commit: bool = False) -> list:
-        """細かい修正（台詞の移動・編集、コマの分割・結合など）。承認・ロック・画像読み込みの op は使えない。"""
+        """細かい修正と作画の状態（台詞の移動・編集、コマの分割・結合、set_panel、import_candidates、adopt_candidate、
+        set_placement など。一覧は inspect target=schemas ではなく genko://ops）。承認・ロック・ファイル読み込みの op は使えない。"""
         return call(service.apply_ops, project, ops, commit)
 
     @server.tool(structured_output=False)
@@ -98,14 +110,23 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.record_review, project, page, score, notes)
 
     @server.tool(structured_output=False)
-    def request_approval(project: str, pages: list[int], note: str = "", gate: str = "name") -> list:
-        """人間にネームの承認を依頼する。承認は人間が行う。"""
-        return call(service.request_approval, project, gate, pages, note)
+    def request_approval(project: str, pages: list[int] | None = None, note: str = "", gate: str = "name",
+                         character_id: str | None = None) -> list:
+        """人間に承認を依頼する。gate: name（ネーム）/ art（そのページの絵）/ sheet（キャラクター設定画、character_id が要る）。"""
+        return call(service.request_approval, project, gate, pages or [], note, character_id)
 
     @server.tool(structured_output=False)
     def tickets(project: str, status: str = "open") -> list:
         """承認依頼と、人間からの修正指示の一覧（status: open / all）。"""
         return call(service.tickets, project, status)
+
+    @server.resource("genko://ops", mime_type="application/json")
+    def ops_catalog() -> str:
+        """apply_ops で使える op と引数。"""
+        from genko.ops import OPS_SCHEMA
+        from genko.studio.service import AGENT_OPS
+
+        return json.dumps([op for op in OPS_SCHEMA if op["op"] in AGENT_OPS], ensure_ascii=False)
 
     @server.resource("genko://guide/manga-rules", mime_type="text/markdown")
     def manga_rules() -> str:
