@@ -136,9 +136,11 @@ def _art_items(episode: Episode, page, requested: set, requested_sheets: set, pr
                     out.append(item("await_human", "設定画の候補がある。人間に選んで承認してもらう", ["candidates", "request_approval"], None,
                                     blocked_by=["await_human:sheet"], gate="sheet", character_id=cid))
                 else:
+                    notes = [t.get("text", "") for t in episode.tickets if t.get("kind") == "fix" and t.get("status") == "open"
+                             and t.get("character_id") == cid]
                     out.append(item("make_sheet", "作画の前にキャラクター設定画を作り、承認してもらう",
                                     ["generation_request", "import_images", "candidates", "request_approval"], None,
-                                    character_id=cid))
+                                    character_id=cid, **({"comments": notes} if notes else {})))
             continue
         attempts = panel.get("attempts") or {}
         over = attempts.get("images", 0) >= limits["images_per_panel"] or attempts.get("fix_rounds", 0) > limits["fix_rounds"]

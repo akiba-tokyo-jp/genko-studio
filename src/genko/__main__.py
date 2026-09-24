@@ -89,7 +89,8 @@ def build_parser() -> argparse.ArgumentParser:
     token.add_argument("--id", default="", help="token id prefix (revoke)")
 
     parser.add_argument("--ascii", action="store_true", help="Escape non-ASCII in JSON output (for legacy consoles)")
-    sub.add_parser("app", help="Open the human desktop app")
+    app_p = sub.add_parser("app", help="Open the human desktop app (review, approve, edit)")
+    app_p.add_argument("project", type=Path, nargs="?", help="a .genko folder; without it a start screen lists recent projects")
     sub.add_parser("studio", help="Agent tools and human approvals (genko studio -h)", add_help=False)
     sub.add_parser("mcp", help="MCP server for agents such as Hermes Agent (genko mcp -h)", add_help=False)
     return parser
@@ -282,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "app":
             from genko.app.main import run_app
 
-            return run_app()
+            return run_app(args.project)
     except ApplyError as exc:
         _print_json({"ok": False, "error": str(exc)})
         return 1

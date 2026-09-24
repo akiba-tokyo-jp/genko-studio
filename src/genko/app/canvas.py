@@ -25,9 +25,11 @@ class PageCanvas(QWidget):
         self._panning = False
         self._last_pos = QPointF()
         self._drag_line: StoryLine | None = None
+        self._drag_pos: tuple[float, float] | None = None  # where the dragged balloon is shown; the model is untouched
         self.tool = "pen"
         self._hover: tuple[float, float] | None = None
         self.brush_width_mm = 0.35
+        self.background = None  # the rendered page (QPixmap) shown under the frames and strokes
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_TabletTracking, True)
         self.setMinimumSize(480, 640)
@@ -64,6 +66,11 @@ class PageCanvas(QWidget):
             int(spec.height_mm * self._scale),
             QColor("#f6f1e4"),
         )
+        if self.background is not None:
+            from PySide6.QtCore import QRectF
+
+            painter.drawPixmap(QRectF(origin.x(), origin.y(), spec.width_mm * self._scale, spec.height_mm * self._scale),
+                               self.background, QRectF(self.background.rect()))
         if self.page.spread_with:
             # The partner sits on the other physical side; strokes drawn there use x >= width
             # (right) or x < 0 (left), which add_stroke sends to the partner page.
@@ -85,7 +92,7 @@ class PageCanvas(QWidget):
         self._draw_strokes(painter, self.page.name_strokes, QColor("#3a6ea5"), 1.6)
         self._draw_strokes(painter, self.page.ink_strokes, QColor("#111111"), 2.2)
         for line in self.lines:
-            self._draw_balloon(painter, line)
+            self._draw_balloon(painter, line, self._drag_pos if line is self._drag_line else None)
         if self._stroke:
             self._draw_strokes(painter, [self._stroke], QColor("#d35400"), 2.0)
         if self._hover and not self._stroke:
@@ -111,8 +118,8 @@ class PageCanvas(QWidget):
                 path.lineTo(self._pt(*self._xy(point)))
             painter.drawPath(path)
 
-    def _draw_balloon(self, painter: QPainter, line: StoryLine) -> None:
-        p = self._pt(line.x_mm, line.y_mm)
+    def _draw_balloon(self, painter: QPainter, line: StoryLine, at: tuple[float, float] | None = None) -> None:
+        p = self._pt(*(at or (line.x_mm, line.y_mm)))
         w = max(12, line.w_mm * self._scale)
         h = max(10, line.h_mm * self._scale)
         painter.setPen(QPen(QColor("#111111"), 2))
@@ -138,6 +145,8 @@ class PageCanvas(QWidget):
         hit = self._hit_line(x_mm, y_mm)
         if hit is not None:
             self._drag_line = hit
+            self._drag_grab = (x_mm - hit.x_mm, y_mm - hit.y_mm)
+            self._drag_pos = (hit.x_mm, hit.y_mm)
             return
         self._stroke = [(x_mm, y_mm)]
         self.update()
@@ -152,8 +161,8 @@ class PageCanvas(QWidget):
             return
         if self._drag_line is not None:
             x_mm, y_mm = self._to_mm(event.position())
-            self._drag_line.x_mm = x_mm
-            self._drag_line.y_mm = y_mm
+            gx, gy = getattr(self, "_drag_grab", (0.0, 0.0))
+            self._drag_pos = (x_mm - gx, y_mm - gy)
             self.update()
             return
         if not self._stroke:
@@ -168,8 +177,12 @@ class PageCanvas(QWidget):
             self._panning = False
             return
         if self._drag_line is not None:
-            self.textMoved.emit(self._drag_line.id, self._drag_line.x_mm, self._drag_line.y_mm)
+            line, pos = self._drag_line, self._drag_pos
             self._drag_line = None
+            self._drag_pos = None
+            if pos is not None and (abs(pos[0] - line.x_mm) > 0.05 or abs(pos[1] - line.y_mm) > 0.05):
+                self.textMoved.emit(line.id, round(pos[0], 2), round(pos[1], 2))  # becomes a move_line op
+            self.update()
             return
         if self.page is None or not self._stroke:
             return

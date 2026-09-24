@@ -28,7 +28,7 @@ STUDIO_OPS = frozenset({
     "approve", "revoke", "request_approval", "request_fix", "add_region", "edit_region", "delete_region",
     "replace_regions", "bind_ref", "unbind_ref", "register_assets", "attach_reference",
     "open_request", "close_request", "import_candidates", "review_candidates", "set_candidate",
-    "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish", "ask_human",
+    "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish", "ask_human", "reject_sheet",
 })
 
 STUDIO_SCHEMA = [
@@ -66,6 +66,7 @@ STUDIO_SCHEMA = [
     {"op": "place_asset", "page": "int", "asset": "sha256:…", "to": "art|bg|draft|name?", "frame_id": "str?", "fit": "str?", "clip_to": "str?"},
     {"op": "set_finish", "page": "int", "frame_id": "str", "finish": "object|null"},
     {"op": "ask_human", "text": "str", "page": "int?", "frame_id": "str?", "item": "str? (work item kind it blocks)"},
+    {"op": "reject_sheet", "character_id": "str", "candidate_ids": "[str]? (all if omitted)", "note": "str (person only)"},
 ]
 
 
@@ -116,9 +117,13 @@ def _panel(frame: Frame) -> dict:
 
 
 def brief_hash(panel: dict) -> str:
+    """What the image is asked to be. Regions count only when a person drew them (an instruction);
+    faces reported from the adopted art describe the result and must not make it stale."""
     from genko.studio.jsonutil import content_hash
 
-    return content_hash({key: panel.get(key) for key in BRIEF_KEYS})
+    brief = {key: panel.get(key) for key in BRIEF_KEYS}
+    brief["regions"] = [r for r in panel.get("regions") or [] if r.get("source") == "user"] or None
+    return content_hash(brief)
 
 
 def _refresh_brief(panel: dict) -> None:
@@ -678,6 +683,24 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
         _insert_below_ink(page, layer)
         return
 
+    if name == "reject_sheet":
+        if not person:
+            raise _err("reject_sheet needs a person")
+        cid = str(op.get("character_id") or "")
+        cands = studio.get("character_candidates", {}).get(cid, [])
+        wanted = set(op.get("candidate_ids") or [c["id"] for c in cands])
+        for cand in cands:
+            if cand["id"] in wanted:
+                cand["status"] = "rejected"
+        _close_tickets(episode, agent, "gate", "sheet", character_id=cid)
+        for ticket in episode.tickets:
+            if ticket.get("kind") == "gate" and ticket.get("gate") == "sheet" and ticket.get("character_id") == cid and ticket.get("status") == "done":
+                ticket["status"] = "returned"
+        note = str(op.get("note") or "").strip()
+        if note:
+            _ticket(episode, None, agent, kind="fix", character_id=cid, text=note, scope="sheet", assignee="agent")
+        return
+
     if name == "ask_human":
         text = str(op.get("text") or "").strip()
         if not text:
@@ -769,6 +792,11 @@ def _import_candidates(episode: Episode, op: dict, agent: str) -> None:
         bucket.extend(c for c in prepared if c["asset"] not in known)
         if request is not None:
             request["status"] = "done"
+        if target.get("character_id"):
+            for ticket in episode.tickets:  # new sheets answer a person's send-back
+                if ticket.get("kind") == "fix" and ticket.get("status") == "open" and ticket.get("character_id") == owner:
+                    ticket["status"] = "done"
+                    ticket["closed_by"] = agent
         return
     page = _page(episode, target)
     try:

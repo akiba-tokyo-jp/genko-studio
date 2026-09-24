@@ -13,7 +13,7 @@ Two faces, one `.genko` file:
 
 ```bash
 uv sync --extra app --extra dev
-uv run python -m genko app
+uv run python -m genko app ./manga/demo.genko   # review, approve, edit (without a path: recent projects)
 ```
 
 ## Generative AI (headless)

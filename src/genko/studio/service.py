@@ -807,27 +807,7 @@ class HumanService:
     def approve_sheet(self, character_id: str, candidate_id: str, face_box01: list[float] | None = None) -> dict:
         """Approve a sheet and cut the face reference out of it (`face_box01` in the image, 0..1;
         default: a square at the top centre, where sheets usually put the face close-up)."""
-        from PIL import Image
-
-        from genko.assets import AssetStore
-
-        episode = load_episode(self.path)
-        cand = next((c for c in (episode.studio.get("character_candidates") or {}).get(character_id, [])
-                     if c.get("id") == candidate_id), None)
-        op = {"op": "approve", "gate": "sheet", "character_id": character_id, "candidate_id": candidate_id}
-        store = AssetStore(self.path)
-        data = store.get_bytes(cand["asset"], ".png") if cand else None
-        if data is not None:
-            image = Image.open(io.BytesIO(data))
-            w, h = image.size
-            if face_box01:
-                x, y, bw, bh = (float(v) for v in face_box01)
-            else:
-                side = 0.4 * w
-                x, y, bw, bh = 0.3, 0.03, 0.4, min(0.9, side / h)
-            box = (round(x * w), round(y * h), round((x + bw) * w), round((y + bh) * h))
-            face = image.crop(box)
-            op["face_asset"] = store.put_bytes(_png(face), ".png")
+        op = sheet_approval_op(self.path, load_episode(self.path), character_id, candidate_id, face_box01)
         self._apply([op])
         return {"ok": True, "approved": character_id, "face_asset": op.get("face_asset")}
 
@@ -883,6 +863,31 @@ def _waiting(items: list[dict]) -> list[dict]:
     if any(i["blocked_by"] and i.get("gate") == "export" for i in items):
         out.append({"gate": "export"})
     return out
+
+
+def sheet_approval_op(project: Path, episode: Episode, character_id: str, candidate_id: str,
+                      face_box01: list[float] | None = None) -> dict:
+    """The approve op for a character sheet, with the face cut out of it and stored as an asset."""
+    from PIL import Image
+
+    from genko.assets import AssetStore
+
+    cand = next((c for c in (episode.studio.get("character_candidates") or {}).get(character_id, [])
+                 if c.get("id") == candidate_id), None)
+    op = {"op": "approve", "gate": "sheet", "character_id": character_id, "candidate_id": candidate_id}
+    store = AssetStore(project)
+    data = store.get_bytes(cand["asset"], ".png") if cand else None
+    if data is not None:
+        image = Image.open(io.BytesIO(data))
+        w, h = image.size
+        if face_box01:
+            x, y, bw, bh = (float(v) for v in face_box01)
+        else:
+            side = 0.4 * w
+            x, y, bw, bh = 0.3, 0.03, 0.4, min(0.9, side / h)
+        box = (round(x * w), round(y * h), round((x + bw) * w), round((y + bh) * h))
+        op["face_asset"] = store.put_bytes(_png(image.crop(box)), ".png")
+    return op
 
 
 def _record_from_request(request: dict) -> dict:

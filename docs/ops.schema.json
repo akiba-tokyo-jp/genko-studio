@@ -533,6 +533,12 @@
       "page": "int?",
       "frame_id": "str?",
       "item": "str? (work item kind it blocks)"
+    },
+    {
+      "op": "reject_sheet",
+      "character_id": "str",
+      "candidate_ids": "[str]? (all if omitted)",
+      "note": "str (person only)"
     }
   ]
 }

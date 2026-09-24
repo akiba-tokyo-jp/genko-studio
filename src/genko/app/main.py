@@ -3,13 +3,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QFileSystemWatcher, QTimer, Qt
 from PySide6.QtGui import QAction, QColor, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
+    QDialog,
+    QDockWidget,
     QFileDialog,
     QLabel,
     QLineEdit,
@@ -26,20 +28,28 @@ from PySide6.QtWidgets import (
 )
 
 from genko.app.canvas import PageCanvas
+from genko.app.session import Session
+from genko.app.studio_widgets import ApprovalBox, Library, PanelView, ProcessBar
 from genko.export import export_print
-from genko.io import load_episode, save_episode
 from genko.models import PageSpec, new_episode
-from genko.ops import ApplyError, apply_ops
+from genko.ops import ApplyError
+
+COMMIT_AFTER_MS = 1000  # changes reach the disk after a second without edits
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, path: Path | None = None, actor: str | None = None) -> None:
         super().__init__()
         self.setWindowTitle("Genko Studio")
-        self.resize(1280, 840)
-        self.episode = new_episode("無題", 1, 8, PageSpec.a4_mono())
-        self.path: Path | None = None
+        self.resize(1440, 900)
+        self.session = Session.open(path, actor) if path else Session(new_episode("無題", 1, 8, PageSpec.a4_mono()), actor=actor)
         self._page_index = 0
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.setInterval(COMMIT_AFTER_MS)
+        self._commit_timer.timeout.connect(self.commit_now)
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.fileChanged.connect(self._on_disk_change)
 
         self.pages = QListWidget()
         self.pages.currentRowChanged.connect(self._select_page)
@@ -140,12 +150,117 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(split)
 
         self._build_menu()
+        self._build_studio()
+        self._watch()
         self._reload_pages()
         self.pages.setCurrentRow(0)
-        self._autosave = QTimer(self)
-        self._autosave.setInterval(60_000)
-        self._autosave.timeout.connect(self._maybe_autosave)
-        self._autosave.start()
+
+    # --- the session ------------------------------------------------------------------------
+
+    @property
+    def episode(self):
+        return self.session.episode
+
+    @property
+    def path(self) -> Path | None:
+        return self.session.path
+
+    def current_page(self):
+        return self._current()
+
+    def apply_ops(self, ops: list[dict]) -> bool:
+        """Apply in memory as the person, show it at once, and write it after a short pause."""
+        try:
+            self.session.apply(ops)
+        except ApplyError as exc:
+            QMessageBox.warning(self, "Genko", str(exc))
+            return False
+        if self.session.path is not None:
+            self._commit_timer.start()
+        self._reload_pages()
+        return True
+
+    def apply_and_commit(self, ops: list[dict]) -> bool:
+        """For approvals: write at once, so the agent sees the decision immediately."""
+        if not self.apply_ops(ops):
+            return False
+        self.commit_now()
+        return True
+
+    def commit_now(self) -> None:
+        self._commit_timer.stop()
+        if self.session.path is None or not (self.session.dirty or self.session.outside_change()):
+            return
+        result = self.session.commit()
+        if result.conflicts:
+            lines = [f"・{c['ops'][0].get('op')}: {c['error']}" for c in result.conflicts[:8]]
+            QMessageBox.information(self, "Genko", "エージェントの変更と重なったため、次の操作は入らなかった:\n" + "\n".join(lines))
+        self._watch()
+        self._reload_pages()
+
+    def _watch(self) -> None:
+        if self._watcher.files():
+            self._watcher.removePaths(self._watcher.files())
+        if self.session.path is not None and (self.session.path / "project.json").exists():
+            self._watcher.addPath(str(self.session.path / "project.json"))
+
+    def _on_disk_change(self, _path: str) -> None:
+        # project.json is replaced atomically, so the watch has to be set again
+        self._watch()
+        if not self.session.outside_change():
+            return
+        result = self.session.sync()
+        if result.conflicts:
+            QMessageBox.information(self, "Genko", f"エージェントの変更と重なった操作が {len(result.conflicts)} 件あった")
+        self._reload_pages()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self.commit_now()
+        super().closeEvent(event)
+
+    # --- studio panels ------------------------------------------------------------------------
+
+    def _build_studio(self) -> None:
+        self.process = ProcessBar()
+        bar = QToolBar("工程")
+        bar.addWidget(self.process)
+        self.addToolBarBreak()
+        self.addToolBar(bar)
+        self.approvals = ApprovalBox(self)
+        self.panel_view = PanelView(self)
+        self.library = Library(self)
+        for widget in (self.approvals, self.panel_view):
+            widget.changed.connect(self._reload_pages)
+        docks = []
+        for title, widget in (("承認箱", self.approvals), ("コマ", self.panel_view), ("ライブラリ", self.library)):
+            dock = QDockWidget(title, self)
+            dock.setWidget(widget)
+            dock.setObjectName(title)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+            docks.append(dock)
+        self.tabifyDockWidget(docks[0], docks[1])
+        self.tabifyDockWidget(docks[1], docks[2])
+        docks[0].raise_()
+        self.studio_docks = docks
+
+    def _refresh_studio(self) -> None:
+        self.process.refresh(self.episode)
+        self.approvals.refresh()
+        page = self._current()
+        if self.panel_view.frame_id and (page is None or not self._has_frame(page, self.panel_view.frame_id)):
+            self.panel_view.frame_id = None
+        if self.panel_view.frame_id is None and page is not None and page.selected_frame_id and self._has_frame(page, page.selected_frame_id):
+            self.panel_view.frame_id = page.selected_frame_id
+        self.panel_view.refresh()
+        self.library.refresh()
+
+    @staticmethod
+    def _has_frame(page, frame_id: str) -> bool:
+        try:
+            page._find(frame_id)
+            return True
+        except (KeyError, IndexError):
+            return False
 
     def _build_menu(self) -> None:
         bar = QToolBar()
@@ -178,13 +293,7 @@ class MainWindow(QMainWindow):
             bar.addAction(action)
 
     def _apply(self, ops: list[dict]) -> bool:
-        try:
-            apply_ops(self.episode, ops)
-        except ApplyError as exc:
-            QMessageBox.warning(self, "Genko", str(exc))
-            return False
-        self._reload_pages()
-        return True
+        return self.apply_ops(ops)
 
     def _current(self):
         if not self.episode.pages:
@@ -196,8 +305,9 @@ class MainWindow(QMainWindow):
         self.pages.blockSignals(True)
         self.pages.clear()
         for page in self.episode.pages:
-            mark = "✓" if page.name_ok else "·"
-            self.pages.addItem(f"p{page.index:02d}  {mark}  {page.stage}")
+            name = "✓" if page.name_ok else ("…" if page.plan and page.plan.get("name") else "·")
+            art = "✓" if page.art_ok else "·"
+            self.pages.addItem(f"p{page.index:02d}  ネーム{name} 作画{art}  {page.stage}")
         self.pages.blockSignals(False)
         self.pages.setCurrentRow(self._page_index)
         self._show_page()
@@ -205,6 +315,9 @@ class MainWindow(QMainWindow):
     def _select_page(self, row: int) -> None:
         if row < 0:
             return
+        if row != self._page_index:
+            self.commit_now()  # a page switch writes what was done on the last page
+            self.panel_view.frame_id = None
         self._page_index = row
         self._show_page()
 
@@ -212,12 +325,28 @@ class MainWindow(QMainWindow):
         page = self._current()
         lines = self.episode.story_for_page(page.index) if page else []
         self.canvas.set_page(page, lines)
+        self.canvas.background = self._page_background(page)
         self.canvas.brush_width_mm = float(self.episode.brush_width_mm)
         self._refresh_story()
         self._refresh_layers()
         self._refresh_tickets()
         self._refresh_status()
         self._refresh_subview()
+        if hasattr(self, "process"):
+            self._refresh_studio()
+
+    def _page_background(self, page):
+        """The page as it prints, under the editing canvas (placed art, tones, finished art)."""
+        if page is None or not any(layer.kind.value == "placed" for layer in page.layers):
+            return None
+        from io import BytesIO
+
+        from genko.render import render_page
+
+        image = render_page(page, 100, mode="proof", episode=self.episode)
+        buf = BytesIO()
+        image.save(buf, format="PNG")
+        return QPixmap.fromImage(QImage.fromData(buf.getvalue()))
 
     def _refresh_story(self) -> None:
         page = self._current()
@@ -255,17 +384,22 @@ class MainWindow(QMainWindow):
     def _refresh_tickets(self) -> None:
         self.tickets.clear()
         for ticket in self.episode.tickets:
-            self.tickets.addItem(f"{ticket.get('status')} p{ticket.get('page_index')} {ticket.get('role')} {ticket.get('assignee')}")
+            if ticket.get("status") != "open":
+                continue
+            what = ticket.get("text") or ticket.get("gate") or ticket.get("role") or ""
+            self.tickets.addItem(f"{ticket.get('kind') or ''} p{ticket.get('page_index') or '-'} → {ticket.get('assignee')}: {what}"[:80])
 
     def _refresh_status(self) -> None:
         page = self._current()
         if page is None:
             self.status.setText("")
             return
+        pending = "未保存の変更あり" if self.session.dirty else "保存済み"
         self.status.setText(
             f"{self.episode.title}  EP{self.episode.episode}  "
             f"p{page.index}  stage={page.stage}  name_ok={page.name_ok}  "
-            f"frames={len(page.leaf_frames())}  sel={page.selected_frame_id or '-'}"
+            f"frames={len(page.leaf_frames())}  sel={page.selected_frame_id or '-'}  "
+            f"r{self.session.base_revision} {pending}  {self.session.actor}"
         )
         self.setWindowTitle(f"Genko Studio — {self.episode.title} #{self.episode.episode}")
 
@@ -368,9 +502,12 @@ class MainWindow(QMainWindow):
         page = self._current()
         if page is None:
             return
-        page.selected_frame_id = frame_id
-        self.canvas.update()
-        self._refresh_status()
+        # selection goes through an op like every other change (no direct edits of the model)
+        self.panel_view.frame_id = frame_id
+        if page.selected_frame_id != frame_id:
+            self.apply_ops([{"op": "select_frame", "page": page.index, "frame_id": frame_id}])
+        else:
+            self.panel_view.refresh()
 
     def _on_text_moved(self, line_id: str, x_mm: float, y_mm: float) -> None:
         self._apply([{"op": "move_line", "id": line_id, "x_mm": x_mm, "y_mm": y_mm}])
@@ -428,30 +565,43 @@ class MainWindow(QMainWindow):
         self._apply([{"op": "delete_page", "page": page.index}])
 
     def _undo(self) -> None:
-        self._apply([{"op": "undo"}])
+        try:
+            self.session.undo()
+        except ApplyError as exc:
+            QMessageBox.information(self, "Genko", str(exc))
+        self._watch()
+        self._reload_pages()
 
     def _new(self) -> None:
-        self.episode = new_episode("無題", 1, 8, PageSpec.a4_mono())
-        self.path = None
+        self.commit_now()
+        self.session = Session(new_episode("無題", 1, 8, PageSpec.a4_mono()), actor=self.session.actor)
         self._page_index = 0
+        self._watch()
+        self._reload_pages()
+
+    def open_project(self, path: Path) -> None:
+        self.commit_now()
+        self.session = Session.open(Path(path), self.session.actor)
+        remember_project(Path(path))
+        self._page_index = 0
+        self._watch()
         self._reload_pages()
 
     def _open(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Open .genko folder")
-        if not path:
-            return
-        self.episode = load_episode(Path(path))
-        self.path = Path(path)
-        self._page_index = 0
-        self._reload_pages()
+        if path:
+            self.open_project(Path(path))
 
     def _save(self) -> None:
         if self.path is None:
             path, _ = QFileDialog.getSaveFileName(self, "Save .genko folder", "untitled.genko")
             if not path:
                 return
-            self.path = Path(path)
-        save_episode(self.episode, self.path)
+            self.session.save_as(Path(path))
+            remember_project(Path(path))
+            self._watch()
+        else:
+            self.commit_now()
         self.status.setText(f"saved {self.path}")
 
     def _export(self) -> None:
@@ -461,16 +611,80 @@ class MainWindow(QMainWindow):
         files = export_print(self.episode, Path(path), fmt="png", dpi=150)
         QMessageBox.information(self, "Genko", f"{len(files)} pages exported")
 
-    def _maybe_autosave(self) -> None:
-        if self.path is None or not self.episode.autosave:
-            return
-        save_episode(self.episode, self.path)
 
 
-def run_app() -> int:
+# --- recent projects and the start screen -----------------------------------------------------
+
+
+def _recent_path() -> Path:
+    from genko.tokens import config_dir
+
+    return config_dir() / "recent.json"
+
+
+def recent_projects() -> list[Path]:
+    import json
+
+    try:
+        items = json.loads(_recent_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [Path(p) for p in items if (Path(p) / "project.json").is_file()]
+
+
+def remember_project(path: Path) -> None:
+    import json
+
+    items = [str(Path(path).resolve())] + [str(p) for p in recent_projects() if p.resolve() != Path(path).resolve()]
+    target = _recent_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(items[:12], ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+class StartDialog(QDialog):
+    """最近のプロジェクト / 開く / 新規。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Genko Studio")
+        self.chosen: Path | None = None
+        self.list = QListWidget()
+        for path in recent_projects():
+            self.list.addItem(str(path))
+        self.list.itemDoubleClicked.connect(lambda item: self._pick(Path(item.text())))
+        open_button = QPushButton("開く…")
+        open_button.clicked.connect(self._browse)
+        new_button = QPushButton("新規")
+        new_button.clicked.connect(self.accept)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("最近のプロジェクト"))
+        layout.addWidget(self.list)
+        layout.addWidget(open_button)
+        layout.addWidget(new_button)
+
+    def _pick(self, path: Path) -> None:
+        self.chosen = path
+        self.accept()
+
+    def _browse(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Open .genko folder")
+        if path:
+            self._pick(Path(path))
+
+
+def run_app(path: Path | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Genko Studio")
-    window = MainWindow()
+    if path is None and len(sys.argv) > 1 and Path(sys.argv[1]).is_dir():
+        path = Path(sys.argv[1])
+    if path is None:
+        start = StartDialog()
+        if start.exec() != QDialog.DialogCode.Accepted:
+            return 0
+        path = start.chosen
+    window = MainWindow(path)
+    if path is not None:
+        remember_project(path)
     window.show()
     return app.exec()
 

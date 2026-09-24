@@ -76,7 +76,15 @@ Locked writer → HTTP 409.
 
 ## Human
 
-`python -m genko app` — click a panel to select before splitting. Drag a balloon to `move_line`. Ctrl+Z undoes. Same `.genko`.
+`python -m genko app [PROJECT]` (needs the `app` extra). Without a project a start screen lists recent projects.
+
+- Every change is an op applied in memory as `human:<name>` (`$GENKO_USER`, else the login name) and shown at once. Changes are written after a second without edits, on a page switch, right after an approval and on close. When an agent commits in between (the window watches project.json), the window reloads and replays its own pending ops on top; ops that no longer apply are listed instead of overwriting the agent's change. Ctrl+Z undoes pending edits in memory, or your own last saved change through the journal.
+- Process bar: pages per stage (name missing / waiting for approval, drawing, art waiting for approval, finishing, done), unapproved sheets, and the number of requests in the approval box.
+- Approval box: the agent's requests and questions. Select one, look at its preview (the page, the sheet candidates, or the preflight for an export), then approve it or send it back with a reason. There is no bulk approval. Sending back becomes an instruction the agent sees in `next` (a page fix for a name, panel fixes for art, a rejected sheet with a note, a reply to a question).
+- Panel view: click a panel on the page. Show it as printed, as a proof, compared with the name, or the source image of a candidate. Candidates show their score, request, parent and provenance (tool, model, the prompt actually used); adopt one; send an instruction (pinned on the panel and sent to the agent as a fix); draw regions (face, person, keep) that the agent may not change.
+- Library: characters (approved sheet and face, the look and `tokens_en`) and locations with their references.
+- Drag a balloon to move it (the model changes only on release, as `move_line`). Selecting a panel is a `select_frame` op.
+- The manual checklist is `docs/GUI_CHECKLIST.md`.
 
 ## Studio: write the name through MCP
 
