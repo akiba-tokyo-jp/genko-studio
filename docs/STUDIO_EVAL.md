@@ -18,17 +18,18 @@ Hermes に頼む文の例:
 
 > Genko で 8 ページの短編を作って。題材は「〇〇」。ネームは全ページ、絵は 1 ページ目（パイロット）を承認まで。承認が要るところで止まって、確認ページの場所を知らせて。
 
-人間がすること（すべて `--as human:<名前>`）:
+人間がすること。ふつうは Genko アプリ（`genko app`）の「承認箱」で、依頼を 1 件ずつ見て承認・差し戻し・返事をする。
+コマンドで行う場合は次のとおり（記録される名前は `$GENKO_USER`、無ければログイン名。別の名前にするときだけ `--as human:名前`）:
 
 | 場面 | コマンド |
 |---|---|
 | 確認ページを開く | エージェントが知らせた `studio/review.html`（自分で作るなら `genko studio review PROJ --out review.html`） |
-| ネームの承認 | `genko studio approve PROJ name --pages 1-8 --as human:名前` |
-| 直してほしい | `genko studio comment PROJ --page 3 "指示" --as human:名前`（コマだけなら `--frame コマid`） |
-| 設定画の承認 | `genko studio approve PROJ sheet --character hina --candidate 候補id --as human:名前`（顔の範囲を指定するなら `--face x,y,w,h`） |
-| 作画の承認 | `genko studio approve PROJ art --pages 1 --as human:名前` |
-| エージェントの相談に答える | `genko studio close-ticket PROJ チケットid --reply "指示" --as human:名前` |
-| 取り消し | `genko studio revoke PROJ name --pages 2 --reason "理由" --as human:名前` |
+| ネームの承認 | `genko studio approve PROJ name --pages 1-8` |
+| 直してほしい | `genko studio comment PROJ --page 3 "指示"`（コマだけなら `--frame コマid`） |
+| 設定画の承認 | `genko studio approve PROJ sheet --character hina --candidate 候補id`（顔の範囲を指定するなら `--face x,y,w,h`） |
+| 作画の承認 | `genko studio approve PROJ art --pages 1` |
+| エージェントの相談に答える | `genko studio close-ticket PROJ チケットid --reply "指示"` |
+| 取り消し | `genko studio revoke PROJ name --pages 2 --reason "理由"` |
 
 通しが終わったら（途中でもよい）記録を取る:
 

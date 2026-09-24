@@ -11,6 +11,7 @@ import json
 import sys
 from pathlib import Path
 
+from genko.app.session import default_actor
 from genko.ops import ApplyError
 from genko.studio.service import HumanService, StudioService, ToolResult
 
@@ -73,20 +74,20 @@ def _parser() -> argparse.ArgumentParser:
     approve.add_argument("--character")
     approve.add_argument("--candidate")
     approve.add_argument("--face", help="sheet: face box in the image, x,y,w,h in 0..1")
-    approve.add_argument("--as", dest="actor", required=True)
+    approve.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     revoke = sub.add_parser("revoke", help="(human) Take back a name, art or sheet approval")
     revoke.add_argument("project", type=Path)
     revoke.add_argument("gate", choices=["name", "art", "sheet"])
     revoke.add_argument("--pages", default="")
     revoke.add_argument("--character")
     revoke.add_argument("--reason", default="")
-    revoke.add_argument("--as", dest="actor", required=True)
+    revoke.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     comment = sub.add_parser("comment", help="(human) Leave a fix instruction on a page or one panel")
     comment.add_argument("project", type=Path)
     comment.add_argument("text")
     comment.add_argument("--page", type=int, required=True)
     comment.add_argument("--frame")
-    comment.add_argument("--as", dest="actor", required=True)
+    comment.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     imp_name = sub.add_parser("import-name", help="Import scans of hand-drawn names (one per page) and propose the panels")
     imp_name.add_argument("project", type=Path)
     imp_name.add_argument("files", nargs="+")
@@ -102,12 +103,12 @@ def _parser() -> argparse.ArgumentParser:
     accept.add_argument("project", type=Path)
     accept.add_argument("proposal")
     accept.add_argument("--force", action="store_true", help="replace an existing layout")
-    accept.add_argument("--as", dest="actor", required=True)
+    accept.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     reject = sub.add_parser("reject", help="(human) Reject a proposal")
     reject.add_argument("project", type=Path)
     reject.add_argument("proposal")
     reject.add_argument("--note", default="")
-    reject.add_argument("--as", dest="actor", required=True)
+    reject.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     eva = sub.add_parser("eval-atari", help="D8: panel recovery on scans with known panels (truth JSON)")
     eva.add_argument("truth", type=Path)
     st = sub.add_parser("stats", help="Measure an agent run: name resubmissions, images per panel, failed tool calls")
@@ -126,7 +127,7 @@ def _parser() -> argparse.ArgumentParser:
     close.add_argument("project", type=Path)
     close.add_argument("ticket")
     close.add_argument("--reply", default="", help="an instruction the agent gets as a fix ticket")
-    close.add_argument("--as", dest="actor", required=True)
+    close.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     adopt = sub.add_parser("adopt-drafts", help="Move M0 sidecar drafts (studio/drafts) into project.json")
     adopt.add_argument("project", type=Path)
     export = sub.add_parser("export", help="(human) Final export after preflight")
@@ -136,7 +137,7 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--dpi", type=int, help="default: the page spec dpi (600 for B4)")
     export.add_argument("--allow-fixture", action="store_true", help="let test images through (never for real books)")
     export.add_argument("--force", action="store_true", help="export even below the resolution threshold")
-    export.add_argument("--as", dest="actor", required=True)
+    export.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     tools = sub.add_parser("tools", help="Image tools the agent uses (tools.json in the config dir)")
     tools.add_argument("action", choices=["list", "set", "remove", "example"])
     tools.add_argument("tool_id", nargs="?")
@@ -188,7 +189,7 @@ def _run(args: argparse.Namespace) -> int:
         return _emit(evaluate.eval_atari(args.truth))
     path = args.project.resolve()
     if args.cmd == "approve":
-        human = HumanService(path, args.actor)
+        human = HumanService(path, args.actor or default_actor())
         if args.gate == "sheet":
             if not (args.character and args.candidate):
                 return _emit({"ok": False, "error": "sheet には --character と --candidate が要る"})
@@ -199,9 +200,9 @@ def _run(args: argparse.Namespace) -> int:
             return _emit({"ok": False, "error": "--pages が要る"})
         return _emit(human.approve_name(pages) if args.gate == "name" else human.approve_art(pages))
     if args.cmd == "revoke":
-        return _emit(HumanService(path, args.actor).revoke(args.gate, _pages(args.pages), args.character, args.reason))
+        return _emit(HumanService(path, args.actor or default_actor()).revoke(args.gate, _pages(args.pages), args.character, args.reason))
     if args.cmd == "comment":
-        return _emit(HumanService(path, args.actor).comment(args.page, args.text, args.frame))
+        return _emit(HumanService(path, args.actor or default_actor()).comment(args.page, args.text, args.frame))
     if args.cmd in ("stats", "audit", "eval-sample", "eval-score"):
         from genko.studio import evaluate
 
@@ -213,19 +214,17 @@ def _run(args: argparse.Namespace) -> int:
             return _emit(evaluate.eval_sample(path, args.out, args.per_character, args.seed))
         return _emit(evaluate.eval_score(path, args.answers))
     if args.cmd == "accept":
-        return _emit(HumanService(path, args.actor).accept_proposal(args.proposal, args.force))
+        return _emit(HumanService(path, args.actor or default_actor()).accept_proposal(args.proposal, args.force))
     if args.cmd == "reject":
-        return _emit(HumanService(path, args.actor).reject_proposal(args.proposal, args.note))
+        return _emit(HumanService(path, args.actor or default_actor()).reject_proposal(args.proposal, args.note))
     if args.cmd == "import-name":
-        from genko.app.session import default_actor
-
         importer = StudioService(path.parent, args.actor or default_actor())
         return _emit(importer.import_name(path.name, [str(Path(f).resolve()) for f in args.files], args.start_page, args.align,
                                           confine=False).to_dict())
     if args.cmd == "close-ticket":
-        return _emit(HumanService(path, args.actor).close_ticket(args.ticket, args.reply))
+        return _emit(HumanService(path, args.actor or default_actor()).close_ticket(args.ticket, args.reply))
     if args.cmd == "export":
-        return _emit(HumanService(path, args.actor).export(args.format, args.out, args.dpi, args.allow_fixture, args.force))
+        return _emit(HumanService(path, args.actor or default_actor()).export(args.format, args.out, args.dpi, args.allow_fixture, args.force))
     if args.cmd == "adopt-drafts":
         from genko.studio.adopt import adopt_drafts
 

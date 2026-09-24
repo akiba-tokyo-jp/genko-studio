@@ -59,6 +59,7 @@ class Session:
         self.actor = actor or default_actor()
         self.base_revision = episode.revision
         self.pending: list[list[dict]] = []  # batches applied in memory, not yet on disk
+        self.undone: list[list[dict]] = []  # batches undone in memory, for redo
 
     # --- opening -------------------------------------------------------------------
 
@@ -85,12 +86,13 @@ class Session:
             return self.undo()
         result = apply_ops(self.episode, ops, agent=self.actor)
         self.pending.append([dict(op) for op in ops])
+        self.undone = []
         return result
 
     def undo(self) -> dict:
         if self.pending:
             result = apply_ops(self.episode, [{"op": "undo"}], agent=self.actor)
-            self.pending.pop()
+            self.undone.append(self.pending.pop())
             return result
         if self.path is None:
             raise ApplyError("nothing to undo")
@@ -102,6 +104,24 @@ class Session:
         self.reload()
         return result
 
+    def redo(self) -> dict:
+        """Put back what undo took away: an in-memory batch, else the last undone change on disk."""
+        if self.undone:
+            batch = self.undone.pop()
+            result = apply_ops(self.episode, batch, agent=self.actor)
+            self.pending.append(batch)
+            return result
+        if self.path is None:
+            raise ApplyError("nothing to redo")
+        if self.pending:
+            self.commit()
+        from genko.journal import restore
+
+        with ProjectLock(self.path, agent=self.actor):
+            result = restore(self.path, actor=self.actor, redo=True)
+        self.reload()
+        return result
+
     # --- disk ---------------------------------------------------------------------------
 
     def reload(self) -> None:
@@ -110,6 +130,7 @@ class Session:
         self.episode = load_episode(self.path)
         self.base_revision = self.episode.revision
         self.pending = []
+        self.undone = []
 
     def commit(self) -> CommitResult:
         """Write pending changes. Rebases first when the project changed on disk."""

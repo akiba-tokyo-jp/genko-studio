@@ -932,7 +932,9 @@ class HumanService:
         self._apply([op])
         return {"ok": True, "approved": character_id, "face_asset": op.get("face_asset")}
 
-    def export(self, fmt: str, out: Path, dpi: int | None = None, allow_fixture: bool = False, force: bool = False) -> dict:
+    def export(self, fmt: str, out: Path, dpi: int | None = None, allow_fixture: bool = False, force: bool = False,
+               *, width_px: int = 800, max_height: int = 1280, long_edge: int = 2048, jpeg: bool | None = None,
+               spreads: bool = False) -> dict:
         """The final export (gate ④): preflight must pass, then the pages are written and the approval recorded."""
         from genko.export import export_print
         from genko.studio import preflight
@@ -948,7 +950,10 @@ class HumanService:
         if screen:
             from genko import profiles
 
-            written = profiles.export_webtoon(episode, Path(out)) if fmt == "webtoon" else profiles.export_sns(episode, Path(out))
+            if fmt == "webtoon":
+                written = profiles.export_webtoon(episode, Path(out), width_px, max_height, fmt="jpeg" if jpeg else "png")
+            else:
+                written = profiles.export_sns(episode, Path(out), long_edge, fmt="png" if jpeg is False else "jpeg", spreads=spreads)
         else:
             written = export_print(episode, Path(out), fmt=fmt, dpi=int(dpi or episode.spec.dpi or 600))
         self._apply([{"op": "approve", "gate": "export"}])

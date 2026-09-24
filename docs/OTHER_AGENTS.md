@@ -64,8 +64,8 @@ uv run --extra mcp python integrations/generic/mcp_client_example.py --root /tmp
 人間が選ぶ本番の書き出しに、画面向けの 2 つを足した。どちらも裁ち落としを切り、網点にせず（トーンは平らなグレー、カラーの絵は色のまま）、sRGB のプロファイルを付ける。
 
 ```bash
-genko studio export PROJ --format webtoon --out ./web --as human:名前   # 幅 800 px の縦長を 1280 px ごとに切る: 001.png, 002.png …
-genko studio export PROJ --format sns --out ./sns --as human:名前       # 1 ページ 1 枚、長辺 2048 px の JPEG
+genko studio export PROJ --format webtoon --out ./web   # 幅 800 px の縦長を 1280 px ごとに切る: 001.png, 002.png …
+genko studio export PROJ --format sns --out ./sns       # 1 ページ 1 枚、長辺 2048 px の JPEG
 genko export PROJ ./web --format webtoon --width 720 --max-height 2000 --jpeg
 genko export PROJ ./sns --format sns --long-edge 1600 --spreads          # 見開きも 1 枚ずつ
 ```

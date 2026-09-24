@@ -23,6 +23,7 @@ class InboxItem:
     frame_id: str | None = None
     text: str = ""
     by: str = ""
+    name: str = ""  # the character's name for sheet requests
 
     @property
     def title(self) -> str:
@@ -34,7 +35,7 @@ class InboxItem:
             return f"アタリからの提案: {self.pages[0]} ページの{label}"
         label = {"name": "ネーム", "art": "作画", "sheet": "設定画", "export": "書き出し"}.get(self.gate or "", self.gate or "")
         if self.gate == "sheet":
-            return f"{label}の承認: {self.character_id}"
+            return f"{label}の承認: {self.name or self.character_id}"
         if self.pages:
             return f"{label}の承認: {', '.join(map(str, self.pages))} ページ"
         return f"{label}の承認"
@@ -42,13 +43,15 @@ class InboxItem:
 
 def inbox(episode: Episode) -> list[InboxItem]:
     items = []
+    names = {c.get("id"): c.get("name") for c in episode.bible.characters}
     for ticket in state.open_tickets(episode):
         kind = ticket.get("kind")
         if kind not in ("gate", "help"):
             continue
         pages = list(ticket.get("pages") or ([ticket["page_index"]] if ticket.get("page_index") else []))
         items.append(InboxItem(ticket["id"], kind, ticket.get("gate"), pages, ticket.get("character_id"),
-                               ticket.get("frame_id"), str(ticket.get("text") or ""), str(ticket.get("created_by") or "")))
+                               ticket.get("frame_id"), str(ticket.get("text") or ""), str(ticket.get("created_by") or ""),
+                               str(names.get(ticket.get("character_id")) or "")))
     for proposal in (episode.studio.get("proposals") or {}).values():
         if proposal.get("status") != "open":
             continue
@@ -94,7 +97,7 @@ def approve_ops(episode: Episode, item: InboxItem, *, project=None, candidate_id
         return [{"op": "approve", "gate": item.gate, "page": p} for p in item.pages]
     if item.gate == "sheet":
         if not candidate_id:
-            raise ValueError("設定画の候補を選ぶ")
+            raise ValueError("設定画の候補を 1 つ選んでから承認します")
         from genko.studio.service import sheet_approval_op
 
         return [sheet_approval_op(project, episode, item.character_id or "", candidate_id, face_box01)]
@@ -107,7 +110,7 @@ def send_back_ops(episode: Episode, item: InboxItem, text: str, frame_ids: list[
     """The ops for 差し戻し: the request is closed as returned and the reason reaches the agent."""
     text = text.strip()
     if not text:
-        raise ValueError("差し戻しの理由を書く")
+        raise ValueError("理由（返事）を書いてから送ります")
     if item.kind == "proposal":
         return [{"op": "resolve_proposal", "id": item.ticket_id, "status": "rejected", "note": text}]
     ops: list[dict] = [{"op": "set_ticket", "id": item.ticket_id, "status": "returned"}]

@@ -60,7 +60,7 @@ def test_approval_box_approves_one_request_as_the_person(qapp, tmp_path: Path):
     assert "作画承認待ち" in " ".join(label.text() for label in window.process.labels)
     box.list.setCurrentRow(0)
     qapp.processEvents()
-    assert box.preview.pixmap() is not None and not box.preview.pixmap().isNull()  # looked at before deciding
+    assert box.preview._source is not None and not box.preview._source.isNull()  # looked at before deciding
     assert not box.choices.isVisible()
     box.approve()
     qapp.processEvents()
@@ -100,7 +100,7 @@ def test_panel_view_instruction_regions_and_adoption_go_through_ops(qapp, tmp_pa
         qapp.processEvents()
     view.instruction.setText("顔をもう少し大きく")
     view.send_instruction()
-    view.region_kind.setCurrentText("keep")
+    view.region_kind.setCurrentIndex(view.region_kind.findData("keep"))
     view.image.drawn.emit(0.1, 0.1, 0.3, 0.2)
     window.commit_now()
     panel = load_episode(project).pages[0]._find(frame.id).panel
@@ -164,7 +164,7 @@ def test_library_and_start_screen(qapp, tmp_path: Path):
     window.library.refresh()
     assert window.library.list.count() == 2
     window.library.list.setCurrentRow(0)
-    assert "tokens_en" in window.library.detail.toPlainText() and "face" in window.library.detail.toPlainText()
+    assert "tokens_en" in window.library.detail.toPlainText() and "顔" in window.library.detail.toPlainText()
     window.close()
     remember_project(project)
     assert recent_projects() == [project.resolve()]

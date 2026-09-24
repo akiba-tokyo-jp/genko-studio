@@ -188,7 +188,7 @@ def test_review_page_shows_candidates_requests_and_commands(tmp_path: Path, caps
     assert f"approve {project} sheet --character hina --candidate {sheet}" in page
     assert cand in page and "✔採用" in page and "試験用の画像" in page
     assert f"close-ticket {project} {ticket}" in page and "扉の向きが分からない" in page
-    assert "preflight で止まる理由" in page
+    assert "書き出しを止めている理由" in page
     # the person answers the question with an instruction: the agent gets it as a fix
     main(["studio", "close-ticket", str(project), ticket, "--reply", "扉は右開き", "--as", "human:leaf"])
     assert json.loads(capsys.readouterr().out)["ok"]

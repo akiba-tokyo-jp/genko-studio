@@ -35,8 +35,8 @@ See `docs/AGENT.md`.
 uv sync --extra mcp
 uv run python -m genko mcp --root ./manga --agent ai:hermes   # stdio MCP server
 uv run python -m genko studio review ./manga/demo.genko --out review.html
-uv run python -m genko studio approve ./manga/demo.genko name --pages 1-4 --as human:you
-uv run python -m genko studio export ./manga/demo.genko --format pdf --out ./out --as human:you
+uv run python -m genko studio approve ./manga/demo.genko name --pages 1-4
+uv run python -m genko studio export ./manga/demo.genko --format pdf --out ./out
 ```
 
 The agent writes the bible, script and name plans; Genko checks, lays out and letters them. For the art, Genko writes generation requests (sizes, prompt drafts, guides, references), the agent generates with its own image tool, and Genko imports, places, finishes and checks the result. People approve the sheets, names, art and the export. See `docs/AGENT.md` and `integrations/hermes/`. Trying it with a real agent and measuring the run: `docs/STUDIO_EVAL.md`. Claude Code, Claude Desktop and other MCP clients: `docs/OTHER_AGENTS.md`. Screen outputs: `--format webtoon` / `--format sns`.

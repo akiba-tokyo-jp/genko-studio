@@ -76,15 +76,18 @@ Locked writer → HTTP 409.
 
 ## Human
 
-`python -m genko app [PROJECT]` (needs the `app` extra). Without a project a start screen lists recent projects.
+`python -m genko app [PROJECT]` (needs the `app` extra). Without a project a start screen lists recent manuscripts and makes new ones (title, pages, paper: B4 / A4 / webtoon, binding, folder).
 
-- Every change is an op applied in memory as `human:<name>` (`$GENKO_USER`, else the login name) and shown at once. Changes are written after a second without edits, on a page switch, right after an approval and on close. When an agent commits in between (the window watches project.json), the window reloads and replays its own pending ops on top; ops that no longer apply are listed instead of overwriting the agent's change. Ctrl+Z undoes pending edits in memory, or your own last saved change through the journal.
-- Process bar: pages per stage (name missing / waiting for approval, drawing, art waiting for approval, finishing, done), unapproved sheets, and the number of requests in the approval box.
-- Approval box: the agent's requests and questions. Select one, look at its preview (the page, the sheet candidates, or the preflight for an export), then approve it or send it back with a reason. There is no bulk approval. Sending back becomes an instruction the agent sees in `next` (a page fix for a name, panel fixes for art, a rejected sheet with a note, a reply to a question).
-- Panel view: click a panel on the page. Show it as printed, as a proof, compared with the name, or the source image of a candidate. Candidates show their score, request, parent and provenance (tool, model, the prompt actually used); adopt one; send an instruction (pinned on the panel and sent to the agent as a fix); draw regions (face, person, keep) that the agent may not change.
+- Layout: pages on the left, the page in the middle, panels on the right as tabs (承認箱, コマ, 台詞, レイヤー, ライブラリ; the パネル menu shows hidden ones). It fits a 1280×720 screen (the tall panel view scrolls). The status bar shows the page, its stage, the selected panel, whether changes are saved, who you are, the process counts and the zoom.
+- The page is shown as Genko renders it (name render before the name approval, proof after: placed art, tones, vertical lettering), re-rendered at the zoom's resolution. It opens fitted to the view. Ctrl+0 fits, Ctrl+1 is paper size, Ctrl+wheel / pinch / Ctrl+± zoom, the wheel or two fingers scroll, Space+drag or the middle button pan.
+- Tools: 選択 (V: click a panel to select it, drag a balloon to move it, drag the paper to move the view), ペン (B) and 消しゴム (E) draw on the name layer before the name approval and on ink after. Right-click a panel for split / merge.
+- Every change is an op applied in memory as `human:<name>` (`$GENKO_USER`, else the login name) and shown at once. Changes are written after a second without edits, on a page switch, right after an approval and on close. When an agent commits in between (the window watches project.json), the window reloads and replays its own pending ops on top; ops that no longer apply are listed instead of overwriting the agent's change. Ctrl+Z undoes (pending edits in memory, or your own last saved change through the journal); Ctrl+Shift+Z / Ctrl+Y redoes. Deleting a page asks first. Error messages are in plain Japanese.
+- Approval box: the agent's requests and questions. Selecting one moves the page to it. Look at the preview, or 大きく見る (a zoomable viewer; ← → between the request's pages; sheet candidates side by side), then approve it or send it back with a reason. There is no bulk approval. Sending back becomes an instruction the agent sees in `next` (a page fix for a name, panel fixes for art, a rejected sheet with a note, a reply to a question). The export request opens the export dialog in official mode.
+- Panel view: click a panel on the page. Show it as printed, as a proof, compared with the name, or the source image of a candidate; 大きく見る and 候補を並べて比べる open the viewer. Candidates show their score and provenance (tool, model, the prompt actually used); adopt one; send an instruction (pinned on the panel and sent to the agent as a fix); draw regions (顔, 人物, 空けておく) that the agent may not change.
+- 書き出し… (Ctrl+E): PDF, TIFF, PNG, PSD, 入稿セット, 縦読み (webtoon), SNS, EPUB, つなげた 1 枚, with the options of each format. Any format can be written freely; "正式な書き出し" (pdf / tiff / png / webtoon / sns) runs the preflight and records the export approval.
 - Library: characters (approved sheet and face, the look and `tokens_en`) and locations with their references.
-- Drag a balloon to move it (the model changes only on release, as `move_line`). Selecting a panel is a `select_frame` op.
 - The manual checklist is `docs/GUI_CHECKLIST.md`.
+- review.html (written by the agent's `review_page`) is for looking, also on a phone; it points to the app for decisions and keeps the equivalent commands folded. `--as` is optional on the human commands (default `human:$GENKO_USER` or the login name).
 
 ## Studio: write the name through MCP
 
@@ -121,12 +124,12 @@ Human only:
 
 ```bash
 genko studio review demo.genko --out review.html            # previews, briefs, approve commands
-genko studio approve demo.genko name --pages 1-4 --as human:leaf
-genko studio approve demo.genko sheet --character hina --candidate c1 --as human:leaf
-genko studio approve demo.genko art --pages 1 --as human:leaf
-genko studio revoke demo.genko name --pages 2 --reason "コマ割りを変える" --as human:leaf
-genko studio comment demo.genko --page 2 "2コマ目の台詞を減らして" --as human:leaf
-genko studio comment demo.genko --page 2 --frame FRAME_ID "空をもっと暗く" --as human:leaf
+genko studio approve demo.genko name --pages 1-4
+genko studio approve demo.genko sheet --character hina --candidate c1
+genko studio approve demo.genko art --pages 1
+genko studio revoke demo.genko name --pages 2 --reason "コマ割りを変える"
+genko studio comment demo.genko --page 2 "2コマ目の台詞を減らして"
+genko studio comment demo.genko --page 2 --frame FRAME_ID "空をもっと暗く"
 ```
 
 ## Art: requests, imports, finishing and export (M3–M4)
@@ -147,7 +150,7 @@ Rules:
 - `split_frame` gives the brief to the panel read first; `merge_frame` keeps the first panel's brief. Placed art needs `force: true` and moves to `studio.orphans`. `duplicate_page` keeps art on the new panel ids.
 - A person's pins, prompt/size overrides (`gen.prompt_override` replaces the prompt draft), regions and `skip` cannot be changed by an agent. Approvals are person-only; an approved sheet locks the character and its face is cut out as a `face` reference.
 - Limits (`studio.policy.limits`): 8 images and 2 fix rounds per panel, then the panel waits for a person.
-- The final export is a person's: `genko studio export PROJECT --format pdf|tiff|png --out DIR --as human:NAME`. It refuses with reasons: pages not finished or not approved, panels without art, unplaced lines, missing assets, effective resolution under 350 dpi (`--force`), test images (`--allow-fixture`). Missing provenance only warns.
+- The final export is a person's: `genko studio export PROJECT --format pdf|tiff|png --out DIR`. It refuses with reasons: pages not finished or not approved, panels without art, unplaced lines, missing assets, effective resolution under 350 dpi (`--force`), test images (`--allow-fixture`). Missing provenance only warns.
 
 Pilot page, style and multi-character panels (M5):
 
@@ -157,7 +160,7 @@ Pilot page, style and multi-character panels (M5):
 
 People and records (M5):
 
-- `review_page` (agent) writes `studio/review.html` with previews, candidates, open requests and the commands a person runs; the agent sends its path to the person. `genko studio close-ticket PROJ ID --reply "…" --as human:NAME` answers an `ask_human` question (the reply reaches the agent as a fix ticket).
+- `review_page` (agent) writes `studio/review.html` with previews, candidates, open requests and the commands a person runs; the agent sends its path to the person. `genko studio close-ticket PROJ ID --reply "…"` answers an `ask_human` question (the reply reaches the agent as a fix ticket).
 - Every MCP tool call is logged to `studio/logs/tools.jsonl` (tool, ok, error codes, time; no documents or images). `genko studio stats PROJ` summarises a run.
 - Every approval change is appended to `studio/audit.jsonl` with its actor (never trimmed). `genko studio audit PROJ` fails if anyone but a person changed one. `undo`/`redo` that would change an approval are refused for agents.
 - D5: `genko studio eval-sample PROJ --out d5` and `genko studio eval-score d5 answers.csv`. See `docs/STUDIO_EVAL.md`.
@@ -172,10 +175,10 @@ Printing in black and white (M6):
 
 Hand-drawn names (M8):
 
-- `genko studio import-name PROJ scan1.png scan2.png … [--start-page N] [--align auto|page|live] [--as human:NAME]` (or the MCP tool `import_name` with files under `--root`). Each scan becomes an asset (origin `self`), is placed on DRAFT (never printed) and aligned: `page` = the scan is the whole sheet, `live` = the drawing fills the live area, `auto` = `live` when the drawing has the live area's shape, else `page`.
+- `genko studio import-name PROJ scan1.png scan2.png … [--start-page N] [--align auto|page|live]` (or the MCP tool `import_name` with files under `--root`). Each scan becomes an asset (origin `self`), is placed on DRAFT (never printed) and aligned: `page` = the scan is the whole sheet, `live` = the drawing fills the live area, `auto` = `live` when the drawing has the live area's shape, else `page`.
 - Genko finds the panels (XY-cut on the scan: gutters between panel borders, specks and dialogue scribbles ignored) and proposes a layout with a confidence per panel; everything the analysis produced is in `studio/analysis/<page id>/`. `analyze_name {page, params}` runs it again.
 - The agent reads the handwritten lines and proposes them: `propose_lines {page, lines: [{text ("\n" between columns), balloon?, speaker?, box01 in the scan | x_mm, y_mm[, w_mm, h_mm]}]}`. If a page has no lines, `record_review {page, kind: "atari_lines"}` says so.
-- Nothing changes on the page until a person accepts: `genko studio accept PROJ PROPOSAL --as human:NAME` (a layout over existing panels needs `--force`), `genko studio reject PROJ PROPOSAL --note "…" --as human:NAME`, or the approval box in the app. Proposals show as an overlay in `render kind=atari`, review.html and the app.
+- Nothing changes on the page until a person accepts: `genko studio accept PROJ PROPOSAL` (a layout over existing panels needs `--force`), `genko studio reject PROJ PROPOSAL --note "…"`, or the approval box in the app. Proposals show as an overlay in `render kind=atari`, review.html and the app.
 - `next` on such pages: `read_atari`, then (after the layout is accepted) `brief_panels` (write `set_panel` briefs from the scan), then the name approval. No script is needed for pages drawn by hand.
 - D8: `genko studio eval-atari truth.json` measures how many panels are recovered within 5 mm (`{"align", "pages": [{"scan", "panels": [[x, y, w, h], …]}]}`).
 
