@@ -59,6 +59,7 @@
       "en": "Black-and-white Japanese manga panel, greyscale, clean linework. a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip. high angle, looking down, long shot, full figure small in the frame. Setting: 校舎の屋上, at sunset. hina: on the right side of the frame, facing left. Keep the upper-right area (about 10% of the image) calm and empty for speech balloons.",
       "tags": "monochrome, greyscale, manga, black hair, wide shot, full body, from above, sunset, looking to the side"
     },
+    "color": false,
     "avoid": [
       "文字・フキダシ・効果音の描き文字",
       "色",

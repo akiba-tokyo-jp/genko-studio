@@ -938,12 +938,19 @@ class HumanService:
         from genko.studio import preflight
 
         episode = load_episode(self.path)
-        report = preflight.check(episode, self.path, allow_fixture=allow_fixture, force=force)
+        if fmt not in ("pdf", "tiff", "png", "webtoon", "sns"):
+            return {"ok": False, "error": "format は pdf / tiff / png / webtoon / sns"}
+        screen = fmt in ("webtoon", "sns")
+        # screen outputs are sized in pixels, so print resolution does not apply to them
+        report = preflight.check(episode, self.path, allow_fixture=allow_fixture, force=force or screen)
         if not report["ok"]:
             return {"ok": False, "error": "preflight で止まった", **report}
-        if fmt not in ("pdf", "tiff", "png"):
-            return {"ok": False, "error": "format は pdf / tiff / png"}
-        written = export_print(episode, Path(out), fmt=fmt, dpi=int(dpi or episode.spec.dpi or 600))
+        if screen:
+            from genko import profiles
+
+            written = profiles.export_webtoon(episode, Path(out)) if fmt == "webtoon" else profiles.export_sns(episode, Path(out))
+        else:
+            written = export_print(episode, Path(out), fmt=fmt, dpi=int(dpi or episode.spec.dpi or 600))
         self._apply([{"op": "approve", "gate": "export"}])
         return {"ok": True, "files": [str(p) for p in written], "warnings": report["warnings"], "dpi": report["dpi"]}
 

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(genko studio approve:*)",
+      "Bash(genko studio revoke:*)",
+      "Bash(genko studio export:*)",
+      "Bash(genko studio accept:*)",
+      "Bash(genko studio reject:*)",
+      "Bash(genko studio close-ticket:*)",
+      "Bash(python -m genko studio:*)",
+      "Bash(uv run python -m genko studio:*)",
+      "Edit(**/*.genko/**)",
+      "Write(**/*.genko/**)"
+    ]
+  }
+}

@@ -39,7 +39,7 @@ uv run python -m genko studio approve ./manga/demo.genko name --pages 1-4 --as h
 uv run python -m genko studio export ./manga/demo.genko --format pdf --out ./out --as human:you
 ```
 
-The agent writes the bible, script and name plans; Genko checks, lays out and letters them. For the art, Genko writes generation requests (sizes, prompt drafts, guides, references), the agent generates with its own image tool, and Genko imports, places, finishes and checks the result. People approve the sheets, names, art and the export. See `docs/AGENT.md` and `integrations/hermes/`. Trying it with a real agent and measuring the run: `docs/STUDIO_EVAL.md`.
+The agent writes the bible, script and name plans; Genko checks, lays out and letters them. For the art, Genko writes generation requests (sizes, prompt drafts, guides, references), the agent generates with its own image tool, and Genko imports, places, finishes and checks the result. People approve the sheets, names, art and the export. See `docs/AGENT.md` and `integrations/hermes/`. Trying it with a real agent and measuring the run: `docs/STUDIO_EVAL.md`. Claude Code, Claude Desktop and other MCP clients: `docs/OTHER_AGENTS.md`. Screen outputs: `--format webtoon` / `--format sns`.
 
 ```bash
 uv run pytest
@@ -53,6 +53,8 @@ Python 3.11+.
 - `src/genko/render.py` — name/proof/print composite
 - `src/genko/export.py` — PNG / TIFF / PDF / strip / EPUB
 - `src/genko/psd.py` — minimal PSD
+- `src/genko/profiles.py` — webtoon and SNS outputs
+- `src/genko/mannequin.py` — posable mannequin (canvas, name render, pose guide)
 - `src/genko/headless.py` — JSON snapshot
 - `src/genko/server.py` — HTTP API + OpenAPI
 - `src/genko/app/` — PySide6 GUI

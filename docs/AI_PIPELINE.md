@@ -91,7 +91,7 @@
 | 出力の形式を強制する方法 | Claude の structured outputs | MCP ツールの入力スキーマ + Genko の検査と JSON ポインタ付きの指摘 |
 | 工程を進める主体 | Genko の runner（worklist を回す） | エージェントのループ。Genko は worklist（`next`）で次の作業を示すだけ |
 | 画像の審査（judge） | Claude vision | エージェントが比較画像を見て点数を記録する。最終判断は人間 |
-| 内容安全 | ローカル分類器を必須に | 画像ツール側の方針 + 人間の art ゲート（全ページ）。ローカル分類器は任意（M9） |
+| 内容安全 | ローカル分類器を必須に | Genko は制限をかけない。描く内容はネームと絵を作る AI とその方針で決まり、人間が art ゲートで全ページを見る（M9-2 は実装しない） |
 | 部品のライセンス | ComfyUI の部品ごとの manifest | 削除（Genko は生成しない。使ったツールとモデルは来歴として記録するだけ） |
 | 接続 | CLI・HTTP が主、MCP は M9 | **MCP が主**（M0 から）。CLI・HTTP は同じ機能 |
 | 引き継いだもの | – | 既存コードの調査（§0.5）、データモデル、op、段組 DSL、写植、スクリーントーン、読み順とめくり、M1〜M3 の土台工事、HTTP の安全対策 |
@@ -2156,6 +2156,13 @@ M5 + M7 ─▶ M9（拡張）
 - すべて提案として出て、人間の確定まで原稿を変えない。`source:"user"` の領域は再解析で消えない。
 
 ### M9 拡張 — 約 3 人週
+
+**実施状況（2026-09-24）:** M9-1・M9-3・M9-4 を実装した。M9-2（ローカルの内容安全の分類器）は、内容の制限はかけない（描く内容はネームと絵を作る AI で決まる）という決定に従い、実装しない。
+Claude Code などでの通し確認は人間が行う（手順は `docs/OTHER_AGENTS.md`）。
+
+- M9-1: `genko export --format webtoon|sns` と `genko studio export --format webtoon|sns`（`src/genko/profiles.py`）。裁ち落としを切り、網点にせず、sRGB を付ける。webtoon は縦長を上限の高さで切って出す（1 本の画像を丸ごとメモリに持たない）。カラーのページは印刷でも網点にせず、依頼パックは `color: true`、カラーの絵柄の下書き、`avoid` に「色」を入れない。
+- M9-3: `src/genko/mannequin.py`（首・肘・膝を足した関節、身長 = 8 頭身、`rot` の傾き・回転、横向きのプリセット）。ネーム・校正の描画とポーズのガイド画像が同じ骨組みを使う。コマの中のマネキンは依頼パックの `guides/pose.png` に描かれる。
+- M9-4: `docs/OTHER_AGENTS.md`、`integrations/claude-code/`（`.mcp.json` の例、道具の名前を `mcp__genko__` にしたスキル、人間用コマンドを止める permissions の例）、`integrations/generic/mcp_client_example.py`（公式 Python SDK の最小の通し。テストで実行する）。
 
 | PR | 内容 |
 |---|---|

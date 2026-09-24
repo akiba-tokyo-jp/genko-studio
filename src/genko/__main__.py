@@ -34,7 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("out", type=Path)
     export.add_argument("--json", action="store_true")
     export.add_argument("--dpi", type=int, default=None, help="default: the page spec dpi for print formats, 150 for strip/epub")
-    export.add_argument("--format", dest="fmt", default="png", choices=["png", "tiff", "pdf", "strip", "psd", "epub", "pack"])
+    export.add_argument("--format", dest="fmt", default="png", choices=["png", "tiff", "pdf", "strip", "psd", "epub", "pack", "webtoon", "sns"])
+    export.add_argument("--width", type=int, default=800, help="webtoon: strip width in px")
+    export.add_argument("--max-height", type=int, default=1280, help="webtoon: slice height limit in px")
+    export.add_argument("--long-edge", type=int, default=2048, help="sns: long edge in px")
+    export.add_argument("--jpeg", action="store_true", help="webtoon/sns: JPEG instead of PNG")
+    export.add_argument("--spreads", action="store_true", help="sns: also one image per spread")
 
     inspect = sub.add_parser("inspect", help="Headless: dump compact JSON snapshot")
     inspect.add_argument("src", type=Path)
@@ -179,6 +184,13 @@ def main(argv: list[str] | None = None) -> int:
                 paths = [export_psd(episode, args.out, dpi=args.dpi or episode.spec.dpi)] if args.out.suffix else export_psd_pages(episode, args.out, dpi=args.dpi)
             elif args.fmt == "epub":
                 paths = [export_epub(episode, args.out if args.out.suffix else args.out / "out.epub", dpi=args.dpi or 150)]
+            elif args.fmt in ("webtoon", "sns"):
+                from genko import profiles
+
+                if args.fmt == "webtoon":
+                    paths = profiles.export_webtoon(episode, args.out, args.width, args.max_height, fmt="jpeg" if args.jpeg else "png")
+                else:
+                    paths = profiles.export_sns(episode, args.out, args.long_edge, fmt="jpeg" if args.jpeg else "png", spreads=args.spreads)
             elif args.fmt == "pack":
                 from genko.pack import export_pack
 

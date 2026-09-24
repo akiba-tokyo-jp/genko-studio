@@ -59,8 +59,8 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "reorder_layers", "page": "int", "order": "[id]"},
     {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?"},
     {"op": "set_balloon_path", "id": "str", "path": "[[x,y]]?", "wrap": "vertical|horizontal", "ruby_runs": "[[base,ruby]]"},
-    {"op": "add_mannequin", "page": "int", "pos": "[x,y,z]"},
-    {"op": "pose_mannequin", "page": "int", "id": "str"},
+    {"op": "add_mannequin", "page": "int", "pos": "[x,y,z] (pelvis, mm)", "height_mm": "float?", "rot": "[tip,turn,lean]?", "preset": "stand|walk|run|sit|point|look_back|arms_up?", "id": "str?"},
+    {"op": "pose_mannequin", "page": "int", "id": "str", "joints": "{name: {yaw, pitch}}?", "rot": "[tip,turn,lean]?", "pos": "[x,y,z]?", "height_mm": "float?", "preset": "str?"},
     {"op": "set_onion", "page": "int", "from": "int?"},
     {"op": "step_onion", "page": "int", "delta": "int"},
     {"op": "set_lt", "page": "int", "threshold": "float"},
@@ -752,29 +752,24 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         return
 
     if name == "add_mannequin":
+        from genko import mannequin
+
         page = _require_page(episode, op)
-        page.prims.append(
-            {
-                "id": new_id(),
-                "kind": "mannequin",
-                "pos": list(op.get("pos") or [100, 160, 0]),
-                "size": [40, 80, 20],
-                "rot": [0, 0.2, 0],
-                "joints": {
-                    "hip": {"yaw": 0.0, "pitch": 0.0},
-                    "spine": {"yaw": 0.0, "pitch": 0.0},
-                    "head": {"yaw": 0.0, "pitch": 0.0},
-                    "l_arm": {"yaw": 0.4, "pitch": 0.0},
-                    "r_arm": {"yaw": -0.4, "pitch": 0.0},
-                    "l_leg": {"yaw": 0.15, "pitch": 0.0},
-                    "r_leg": {"yaw": -0.15, "pitch": 0.0},
-                    "l_wrist": {"yaw": 0.0, "pitch": 0.0},
-                    "r_wrist": {"yaw": 0.0, "pitch": 0.0},
-                    "l_ankle": {"yaw": 0.0, "pitch": 0.0},
-                    "r_ankle": {"yaw": 0.0, "pitch": 0.0},
-                },
-            }
-        )
+        height = float(op.get("height_mm") or 80)
+        prim = {
+            "id": str(op.get("id") or new_id()),
+            "kind": "mannequin",
+            "pos": list(op.get("pos") or [100, 160, 0]),
+            "size": [height / 2, height, height / 4],
+            "rot": list(op.get("rot") or [0, 0, 0]),
+            "joints": mannequin.default_joints(),
+        }
+        if op.get("preset"):
+            try:
+                mannequin.apply_preset(prim, str(op["preset"]))
+            except ValueError as exc:
+                raise ApplyError(str(exc)) from exc
+        page.prims.append(prim)
         return
 
     if name == "pose_mannequin":
@@ -782,10 +777,20 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         mannequin_id = op.get("id")
         for prim in page.prims:
             if prim.get("id") == mannequin_id:
+                if op.get("preset"):
+                    from genko import mannequin
+
+                    try:
+                        mannequin.apply_preset(prim, str(op["preset"]))
+                    except ValueError as exc:
+                        raise ApplyError(str(exc)) from exc
                 if "rot" in op:
                     prim["rot"] = list(op["rot"])
                 if "pos" in op:
                     prim["pos"] = list(op["pos"])
+                if op.get("height_mm"):
+                    height = float(op["height_mm"])
+                    prim["size"] = [height / 2, height, height / 4]
                 if "joints" in op:
                     joints = prim.setdefault("joints", {})
                     for name, values in dict(op["joints"]).items():

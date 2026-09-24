@@ -47,8 +47,13 @@ class Pack:
         return self.request["id"]
 
 
-def vocab() -> dict:
-    return json.loads(_VOCAB_PATH.read_text(encoding="utf-8"))
+def vocab(expression: str = "mono") -> dict:
+    """The phrase book; colour pages get the colour style instead of the monochrome one."""
+    v = json.loads(_VOCAB_PATH.read_text(encoding="utf-8"))
+    if expression == "color":
+        v["style"] = v["style_color"]
+        v["avoid"] = [a for a in v["avoid"] if a != "色"]
+    return v
 
 
 # --- sizes ---------------------------------------------------------------------
@@ -142,7 +147,7 @@ def _keepout_sentence(boxes01: list[list[float]]) -> tuple[str, str]:
 
 
 def panel_prompt(episode: Episode, page: Page, frame: Frame, keep01: list[list[float]], instruction: str | None) -> tuple[dict, list[str]]:
-    v = vocab()
+    v = vocab(page.spec.expression)
     panel = frame.panel or {}
     studio = episode.studio
     doc = studio.get("bible_doc") or {}
@@ -234,8 +239,8 @@ def _location(episode: Episode, location_id: str | None) -> dict | None:
     return None
 
 
-def _avoid(episode: Episode, char_ids: list[str], panel: dict | None) -> list[str]:
-    v = vocab()
+def _avoid(episode: Episode, char_ids: list[str], panel: dict | None, expression: str = "mono") -> list[str]:
+    v = vocab(expression)
     override = ((panel or {}).get("gen") or {}).get("avoid_override")
     if override:
         return [str(x) for x in override]
@@ -304,8 +309,10 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
     notes: list[str] = []
     steps: list[str] | None = None
     dpi = episode.spec.dpi or 600
+    expression = episode.spec.expression
     if purpose in ("panel_art", "draft"):
         pg, frame = _page_frame(episode, {"page": page, "frame_id": frame_id})
+        expression = pg.spec.expression
         panel = frame.panel or {}
         box_size = size_block(frame.rect.width, frame.rect.height, PAD_MM, dpi, tool_spec, mode)
         # guides are drawn at the ~1 MP size, also for upscale requests (whose suggested size is the print size)
@@ -317,8 +324,10 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         cast = [c.get("id") for c in panel.get("characters", []) if isinstance(c, dict)]
         target = {"page_id": pg.id, "page": pg.index, "frame_id": frame.id, "label": f"{pg.index}-{panel.get('slot') or frame.id}"}
         files["guides/composition.png"] = guide.to_png(guide.composition(pg, frame, box))
-        if cast:
+        if cast or guide.has_mannequin(pg, frame):
             files["guides/pose.png"] = guide.to_png(guide.pose(pg, frame, box))
+            if guide.has_mannequin(pg, frame):
+                notes.append("guides/pose.png のマネキンがポーズの指定。体の向きと手足の角度を合わせる")
         if keep:
             files["guides/keepout.png"] = guide.to_png(guide.keepout(episode, pg, frame, box))
         figures = [{"char": f.char_id, "head01": box.box01(f.head), "body01": box.box01(f.body),
@@ -354,14 +363,14 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
                 notes.append(f"スタイルは {locked['page']} ページで固定済み。refs/style_pilot.png の絵柄・線の太さ・トーンに合わせる"
                              + (f"。画像ツールは {locked['tool']} を使う" if locked.get("tool") else ""))
         b_hash = brief_hash(panel)
-        avoid = _avoid(episode, cast, panel)
+        avoid = _avoid(episode, cast, panel, pg.spec.expression)
         characters = [{"id": cid, "tokens_en": next((c.get("tokens_en") for c in episode.bible.characters if c.get("id") == cid), None),
                        "files": [r for r in refs if r.startswith(f"refs/{cid}_")]} for cid in cast]
     elif purpose == "character_sheet":
         char = next((c for c in episode.bible.characters if c.get("id") == character_id), None)
         if char is None:
             raise RequestError(f"登場人物 {character_id} はない", "/character_id")
-        v = vocab()
+        v = vocab(episode.spec.expression)
         box_size = size_block(160.0, 240.0, 0.0, dpi, tool_spec, mode)
         box_size["frame_mm"] = None
         prompt = {
@@ -374,7 +383,7 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         target = {"character_id": char["id"], "label": f"sheet:{char['id']}"}
         cast = [char["id"]]
         keep01, figures, b_hash = [], [], None
-        avoid = _avoid(episode, cast, None)
+        avoid = _avoid(episode, cast, None, episode.spec.expression)
         refs = []
         for ref in char.get("refs", []):
             data = _asset(store, ref.get("asset", ""))
@@ -388,7 +397,7 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         location = _location(episode, location_id)
         if location is None:
             raise RequestError(f"場所 {location_id} はない", "/location_id")
-        v = vocab()
+        v = vocab(episode.spec.expression)
         box_size = size_block(240.0, 160.0, 0.0, dpi, tool_spec, mode)
         box_size["frame_mm"] = None
         prompt = {
@@ -398,7 +407,7 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         }
         target = {"location_id": location["id"], "label": f"location:{location['id']}"}
         cast, keep01, figures, b_hash, refs, characters = [], [], [], None, [], []
-        avoid = _avoid(episode, [], None)
+        avoid = _avoid(episode, [], None, episode.spec.expression)
         for ref in location.get("refs", []):
             data = _asset(store, ref.get("asset", ""))
             if data is not None:
@@ -449,6 +458,7 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         "brief_hash": b_hash,
         "size": box_size,
         "prompt": prompt,
+        "color": expression == "color",
         "avoid": avoid,
         "keepout": keep01,
         "figures": figures,

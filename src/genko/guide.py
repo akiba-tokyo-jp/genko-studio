@@ -115,7 +115,26 @@ def pose(page: Page, frame: Frame, box: GenBox) -> Image.Image:
             draw.line([(cx - lw * 3, cy - lw * 3), (cx + lw * 3, cy + lw * 3)], fill=0, width=lw)
             draw.line([(cx - lw * 3, cy + lw * 3), (cx + lw * 3, cy - lw * 3)], fill=0, width=lw)
         draw.text((hx0, max(0, hy0 - 12)), str(fig.char_id), fill=0, font=font)
+    # posed mannequins placed in this panel are the pose itself: draw them over the boxes
+    from genko import mannequin
+
+    r = frame.rect
+    for prim in page.prims:
+        if prim.get("kind") != "mannequin" or not mannequin.in_rect(prim, (r.x, r.y, r.width, r.height)):
+            continue
+        bone = mannequin.skeleton(prim)
+        for a, b, part in bone["segments"]:
+            draw.line([box.to_px(*a), box.to_px(*b)], fill=0 if part == "body" else 60, width=lw * 2)
+        (hx, hy), hr = bone["head"]
+        draw.ellipse(box.box_px((hx - hr, hy - hr, hr * 2, hr * 2)), outline=0, width=lw * 2)
     return image
+
+
+def has_mannequin(page: Page, frame: Frame) -> bool:
+    from genko import mannequin
+
+    r = frame.rect
+    return any(p.get("kind") == "mannequin" and mannequin.in_rect(p, (r.x, r.y, r.width, r.height)) for p in page.prims)
 
 
 def keepout_boxes(episode, page: Page, frame: Frame, grow_mm: float = 2.0) -> list[tuple[Box, str]]:

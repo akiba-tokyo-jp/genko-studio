@@ -179,6 +179,13 @@ Hand-drawn names (M8):
 - `next` on such pages: `read_atari`, then (after the layout is accepted) `brief_panels` (write `set_panel` briefs from the scan), then the name approval. No script is needed for pages drawn by hand.
 - D8: `genko studio eval-atari truth.json` measures how many panels are recovered within 5 mm (`{"align", "pages": [{"scan", "panels": [[x, y, w, h], …]}]}`).
 
+Colour, screens, mannequins and other agents (M9):
+
+- Screen outputs: `--format webtoon` (all pages at `--width` px, default 800, stacked and cut into slices of at most `--max-height` px, default 1280: `001.png`, `002.png` …) and `--format sns` (one image per page, long edge `--long-edge` px, default 2048, JPEG; `--spreads` adds one image per spread). Both cut the bleed, skip the dot screen (tones are flat grey) and embed sRGB. `genko export` takes all options; `genko studio export --format webtoon|sns` (human, after preflight; no dpi check) uses the defaults.
+- Colour pages (`spec.expression` "color") are never screened, also in print. Their generation requests have `color: true`, the colour style in the prompt draft, and no "colour" in `avoid`.
+- Mannequins: `add_mannequin {page, pos (pelvis mm), height_mm?, rot?: [tip, turn, lean], preset?, id?}` and `pose_mannequin {page, id, preset?, joints?, rot?, pos?, height_mm?}`. Joints: neck, head, shoulders (`l_arm`/`r_arm`), elbows, wrists, hips (`l_leg`/`r_leg`), knees, ankles; each `{yaw, pitch}` in radians. Presets: stand, walk, run, sit, point, look_back, arms_up. The figure is eight heads tall and is drawn on name and proof only. A mannequin inside a panel is drawn into that panel's `guides/pose.png` and noted in `notes_for_agent`.
+- Other MCP clients (Claude Code, Claude Desktop, the Python SDK): `docs/OTHER_AGENTS.md`, `integrations/claude-code/`, `integrations/generic/mcp_client_example.py`. Genko has no content filter; what is drawn depends on the agent and its image tool.
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

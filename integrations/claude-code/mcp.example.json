@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "genko": {
+      "type": "stdio",
+      "command": "genko",
+      "args": ["mcp", "--root", "/home/you/manga", "--agent", "ai:claude-code"],
+      "env": {}
+    }
+  }
+}

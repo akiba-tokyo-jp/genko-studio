@@ -197,12 +197,21 @@
     {
       "op": "add_mannequin",
       "page": "int",
-      "pos": "[x,y,z]"
+      "pos": "[x,y,z] (pelvis, mm)",
+      "height_mm": "float?",
+      "rot": "[tip,turn,lean]?",
+      "preset": "stand|walk|run|sit|point|look_back|arms_up?",
+      "id": "str?"
     },
     {
       "op": "pose_mannequin",
       "page": "int",
-      "id": "str"
+      "id": "str",
+      "joints": "{name: {yaw, pitch}}?",
+      "rot": "[tip,turn,lean]?",
+      "pos": "[x,y,z]?",
+      "height_mm": "float?",
+      "preset": "str?"
     },
     {
       "op": "set_onion",

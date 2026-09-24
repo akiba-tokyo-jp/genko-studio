@@ -131,7 +131,7 @@ def _parser() -> argparse.ArgumentParser:
     adopt.add_argument("project", type=Path)
     export = sub.add_parser("export", help="(human) Final export after preflight")
     export.add_argument("project", type=Path)
-    export.add_argument("--format", default="pdf", choices=["pdf", "tiff", "png"])
+    export.add_argument("--format", default="pdf", choices=["pdf", "tiff", "png", "webtoon", "sns"])
     export.add_argument("--out", type=Path, required=True)
     export.add_argument("--dpi", type=int, help="default: the page spec dpi (600 for B4)")
     export.add_argument("--allow-fixture", action="store_true", help="let test images through (never for real books)")

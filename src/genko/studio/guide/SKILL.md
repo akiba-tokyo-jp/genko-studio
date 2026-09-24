@@ -50,9 +50,11 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   `mcp_genko_import_images`（`request_id`、`images: [{file, origin}]`）で取り込む。取り込んだら人間に選んでもらう（承認を頼む）。
 - `gen_panel`: `mcp_genko_generation_request`（`page`, `frame_id`）で依頼パックを受け取る。
   - `request.prompt` は下書き。書き直してよいが、登場人物の見た目の記述（`characters[].tokens_en`）は言い換えない。
-    `avoid` にあるもの（文字・フキダシ・効果音・色・署名）は描かせない。モノクロ（グレースケール）で作る。
+    `avoid` にあるもの（文字・フキダシ・効果音・署名・枠線、モノクロのページでは色も）は描かせない。
+    `request.color` が true のページはカラーで、それ以外はモノクロ（グレースケール）で作る。
   - 参照画像（`files.references`: 設定画・顔・場所・`refs/style_pilot.png`）は、画像ツールが受け付けるなら必ず添える。
     `files.composition`（構図）と `files.pose`（人物の位置と向き）も参考として添えてよい。線をなぞらせる必要はない。
+    `notes_for_agent` にマネキンの注記があるときは、`files.pose` の棒人形がポーズの指定。体の向きと手足の角度を合わせる。
   - サイズは `size.suggested_px`。画像ツールが決まったサイズしか出せないときは `size.tool_sizes` の先頭を使う（切れる方向が書いてある）。
   - `keepout` の場所（台詞が入る）は静かに空けておく。プロンプトの下書きにも書いてある。
   - 1 つの依頼で 2〜4 枚作り、全部 `inbox` に保存して一度に `import_images` する。

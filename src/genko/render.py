@@ -104,7 +104,7 @@ def _font(path: str | None = None, size: int = 14) -> ImageFont.ImageFont:
 
 
 def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, int], dpi: int,
-                   mode: str = "print") -> Image.Image | None:
+                   mode: str = "print", finish: bool = True) -> Image.Image | None:
     """Resample a placed image from its asset into its placement, clipped to its panel, and give
     monochrome pages their finish (print: black and white with dots; proof: the flat grey steps)."""
     from genko.assets import AssetStore
@@ -136,7 +136,8 @@ def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, 
     sx, sy = source.width / (x1 - x0), source.height / (y1 - y0)
     box = ((vx0 - x0) * sx, (vy0 - y0) * sy, (vx1 - x0) * sx, (vy1 - y0) * sy)
     fitted = source.resize((vx1 - vx0, vy1 - vy0), Image.Resampling.LANCZOS, box=box)
-    fitted = _finish_placed(fitted, layer, page, episode, dpi, mode, (vx0, vy0))
+    if finish:
+        fitted = _finish_placed(fitted, layer, page, episode, dpi, mode, (vx0, vy0))
     canvas = Image.new("RGBA", size, (0, 0, 0, 0))
     canvas.paste(fitted, (vx0, vy0))
     return canvas
@@ -224,7 +225,7 @@ def _tone_is_fm(layer) -> bool:
         return False
 
 
-def _draw_tone(image: Image.Image, page: Page, dpi: int, mode: str = "print") -> Image.Image:
+def _draw_tone(image: Image.Image, page: Page, dpi: int, mode: str = "print", finish: bool = True) -> Image.Image:
     """Tone layers: AM dots (or FM for noise materials) with the exact black share, inside their
     region (or all panels). Proofs and names show a flat grey instead of dots."""
     from genko import screentone
@@ -240,7 +241,7 @@ def _draw_tone(image: Image.Image, page: Page, dpi: int, mode: str = "print") ->
         else:
             for frame in page.leaf_frames():
                 draw.rectangle(rect_px(frame.rect, dpi), fill=255)
-        if mode == "print":
+        if mode == "print" and finish:
             tone = screentone.tone_area(mask, density, dpi, float(layer.lpi or 60), float(layer.angle if layer.angle is not None else 45),
                                         fm=_tone_is_fm(layer))
         else:
@@ -349,41 +350,26 @@ def _draw_prims(image: Image.Image, page: Page, dpi: int, mode: str) -> None:
             draw.line([pts[a], pts[b]], fill=(90, 90, 140), width=1)
 
 
-def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int) -> None:
-    import math
+def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int, color=(90, 90, 140)) -> None:
+    """The posable figure (genko.mannequin): body, elbows, knees and neck, turned and leaned by rot."""
+    from genko import mannequin
 
-    pos = prim.get("pos") or [100, 160, 0]
-    cx, cy = mm_to_px(float(pos[0]), dpi), mm_to_px(float(pos[1]), dpi)
-    color = (90, 90, 140)
-    joints = prim.get("joints") or {}
-    head_r = mm_to_px(8, dpi)
-    draw.ellipse((cx - head_r, cy - mm_to_px(42, dpi) - head_r, cx + head_r, cy - mm_to_px(42, dpi) + head_r), outline=color, width=3)
-    draw.line((cx, cy - mm_to_px(34, dpi), cx, cy), fill=color, width=3)
-    l_yaw = float(joints.get("l_arm", {}).get("yaw", 0.4))
-    r_yaw = float(joints.get("r_arm", {}).get("yaw", -0.4))
-    arm = mm_to_px(18, dpi)
-    ay = cy - mm_to_px(20, dpi)
-    l_wx, l_wy = int(cx - arm * math.cos(l_yaw)), int(ay + arm * math.sin(l_yaw))
-    r_wx, r_wy = int(cx + arm * math.cos(abs(r_yaw))), int(ay + arm * math.sin(abs(r_yaw)))
-    draw.line((cx, ay, l_wx, l_wy), fill=color, width=3)
-    draw.line((cx, ay, r_wx, r_wy), fill=color, width=3)
-    hand = mm_to_px(10, dpi)
-    lw = float(joints.get("l_wrist", {}).get("yaw", 0.0))
-    rw = float(joints.get("r_wrist", {}).get("yaw", 0.0))
-    draw.line((l_wx, l_wy, int(l_wx - hand * math.cos(l_yaw + lw)), int(l_wy + hand * math.sin(l_yaw + lw))), fill=color, width=2)
-    draw.line((r_wx, r_wy, int(r_wx + hand * math.cos(abs(r_yaw) + rw)), int(r_wy + hand * math.sin(abs(r_yaw) + rw))), fill=color, width=2)
-    l_leg = float(joints.get("l_leg", {}).get("yaw", 0.15))
-    r_leg = float(joints.get("r_leg", {}).get("yaw", -0.15))
-    leg = mm_to_px(28, dpi)
-    l_ax, l_ay = int(cx - leg * math.sin(l_leg)), cy + leg
-    r_ax, r_ay = int(cx + leg * math.sin(abs(r_leg))), cy + leg
-    draw.line((cx, cy, l_ax, l_ay), fill=color, width=3)
-    draw.line((cx, cy, r_ax, r_ay), fill=color, width=3)
-    foot = mm_to_px(8, dpi)
-    la = float(joints.get("l_ankle", {}).get("yaw", 0.0))
-    ra = float(joints.get("r_ankle", {}).get("yaw", 0.0))
-    draw.line((l_ax, l_ay, int(l_ax - foot * math.cos(la)), l_ay + foot // 3), fill=color, width=2)
-    draw.line((r_ax, r_ay, int(r_ax + foot * math.cos(ra)), r_ay + foot // 3), fill=color, width=2)
+    bone = mannequin.skeleton(prim)
+    width = max(2, mm_to_px(0.5, dpi))
+    shade = {"body": color, "left": (60, 120, 170), "right": (150, 90, 120)}
+    for a, b, part in bone["segments"]:
+        draw.line([_xy(a, dpi), _xy(b, dpi)], fill=shade.get(part, color), width=width)
+    for a, _, part in bone["segments"]:
+        if part != "body":
+            px, py = _xy(a, dpi)
+            r = max(1, width)
+            draw.ellipse((px - r, py - r, px + r, py + r), fill=shade[part])
+    (hx, hy), hr = bone["head"]
+    x0, y0 = _xy((hx - hr, hy - hr), dpi)
+    x1, y1 = _xy((hx + hr, hy + hr), dpi)
+    draw.ellipse((x0, y0, x1, y1), outline=color, width=width)
+    nose = (hx + hr * 0.8 * bone["facing"], hy)
+    draw.line([_xy((hx, hy), dpi), _xy(nose, dpi)], fill=color, width=max(1, width // 2))
 
 
 def _balloon_font(line: StoryLine, dpi: int, font_path: str | None) -> ImageFont.ImageFont:
@@ -641,7 +627,12 @@ def render_page(
     episode: Episode | None = None,
     crop_marks: bool = False,
     onion: bool = True,
+    finish: bool | None = None,
 ) -> Image.Image:
+    """`finish`: the monochrome print finish (dots and pure black and white). None = by the page
+    (mono pages yes, colour pages no); False for screen and colour outputs (webtoon, SNS)."""
+    if finish is None:
+        finish = page.spec.expression != "color"
     width = mm_to_px(page.spec.width_mm, working_dpi)
     height = mm_to_px(page.spec.height_mm, working_dpi)
     size = (width, height)
@@ -671,7 +662,7 @@ def render_page(
         if layer.role in (LayerRole.NAME, LayerRole.DRAFT) and mode == "print":
             continue
         if layer.kind == LayerKind.PLACED:
-            raster = _placed_raster(layer, page, episode, size, working_dpi, mode)
+            raster = _placed_raster(layer, page, episode, size, working_dpi, mode, finish)
         else:
             raster = _open_raster(layer)
             if raster is not None:
@@ -709,7 +700,7 @@ def render_page(
     rgba = Image.alpha_composite(rgba, ink_layer)
     image = rgba.convert("RGB")
 
-    image = _draw_tone(image, page, working_dpi, mode)
+    image = _draw_tone(image, page, working_dpi, mode, finish)
     if page.effects:
         image = _draw_effects(image, page, working_dpi)
     _draw_prims(image, page, working_dpi, mode)
@@ -770,7 +761,8 @@ def to_bitonal(image: Image.Image, threshold: int = 180) -> Image.Image:
     return image.convert("L").point(lambda p: 255 if p > threshold else 0, mode="1")
 
 
-def render_spread(episode: Episode, first: int, second: int, dpi: int = 150, mode: str = "print") -> Image.Image:
+def render_spread(episode: Episode, first: int, second: int, dpi: int = 150, mode: str = "print",
+                  finish: bool | None = None) -> Image.Image:
     pages = {page.index: page for page in episode.pages}
     a, b = pages[first], pages[second]
     # Place by the physical side of the book (binding-aware), not by page parity.
@@ -780,8 +772,8 @@ def render_spread(episode: Episode, first: int, second: int, dpi: int = 150, mod
         right, left = b, a
     else:
         left, right = a, b
-    left_img = render_page(left, dpi, mode=mode, episode=episode)
-    right_img = render_page(right, dpi, mode=mode, episode=episode)
+    left_img = render_page(left, dpi, mode=mode, episode=episode, finish=finish)
+    right_img = render_page(right, dpi, mode=mode, episode=episode, finish=finish)
     image = Image.new("RGB", (left_img.width + right_img.width, max(left_img.height, right_img.height)), (255, 255, 255))
     image.paste(left_img, (0, 0))
     image.paste(right_img, (left_img.width, 0))
