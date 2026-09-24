@@ -1,0 +1,51 @@
+{
+  "shot": {
+    "ELS": {"ja": "超遠景", "en": "extreme long shot, tiny figures in a wide scene", "tags": "very wide shot, scenery"},
+    "LS": {"ja": "遠景（全身が小さく入る）", "en": "long shot, full figure small in the frame", "tags": "wide shot, full body"},
+    "FS": {"ja": "全身", "en": "full shot, whole body in frame", "tags": "full body"},
+    "MS": {"ja": "腰から上", "en": "medium shot, waist up", "tags": "upper body"},
+    "MCU": {"ja": "胸から上", "en": "medium close-up, chest up", "tags": "upper body, portrait"},
+    "CU": {"ja": "顔のアップ", "en": "close-up on the face", "tags": "close-up, face"},
+    "ECU": {"ja": "目元などの極端なアップ", "en": "extreme close-up", "tags": "extreme close-up"},
+    "INSERT": {"ja": "物のアップ（人物なし）", "en": "insert shot of an object, no people", "tags": "still life, object focus, no humans"}
+  },
+  "angle": {
+    "eye": {"ja": "目の高さ", "en": "eye-level angle", "tags": ""},
+    "high": {"ja": "やや上から見下ろす", "en": "high angle, looking down", "tags": "from above"},
+    "low": {"ja": "ローアングル（下から見上げる）", "en": "low angle, looking up", "tags": "from below"},
+    "bird": {"ja": "真上からの俯瞰", "en": "bird's-eye view", "tags": "from above, bird's-eye view"},
+    "worm": {"ja": "真下からのあおり", "en": "worm's-eye view", "tags": "from below, worm's-eye view"},
+    "dutch": {"ja": "傾けた構図", "en": "dutch angle, tilted frame", "tags": "dutch angle"}
+  },
+  "pos": {
+    "left": {"ja": "画面左", "en": "on the left side of the frame"},
+    "left_third": {"ja": "画面左寄り", "en": "left of centre"},
+    "center": {"ja": "画面中央", "en": "in the centre of the frame"},
+    "right_third": {"ja": "画面右寄り", "en": "right of centre"},
+    "right": {"ja": "画面右", "en": "on the right side of the frame"}
+  },
+  "facing": {
+    "left": {"ja": "画面左を向く", "en": "facing left", "tags": "looking to the side"},
+    "right": {"ja": "画面右を向く", "en": "facing right", "tags": "looking to the side"},
+    "front": {"ja": "こちらを向く", "en": "facing the viewer", "tags": "looking at viewer"},
+    "back": {"ja": "背を向ける", "en": "seen from behind", "tags": "from behind"}
+  },
+  "hair_value": {
+    "beta": {"ja": "髪はベタ（黒く塗りつぶす）", "en": "solid black hair", "tags": "black hair"},
+    "tone": {"ja": "髪はトーン（中間の灰色）", "en": "mid-grey toned hair", "tags": "grey hair"},
+    "white": {"ja": "髪は白（線だけ）", "en": "white hair drawn with outlines only", "tags": "white hair"}
+  },
+  "time": {
+    "morning": {"ja": "朝", "en": "morning", "tags": "morning"},
+    "day": {"ja": "昼", "en": "daytime", "tags": "day"},
+    "sunset": {"ja": "夕方", "en": "at sunset", "tags": "sunset"},
+    "night": {"ja": "夜", "en": "at night", "tags": "night"}
+  },
+  "style": {
+    "ja": "モノクロの日本の漫画のコマ。白黒とグレーだけ、はっきりした線。",
+    "en": "Black-and-white Japanese manga panel, greyscale, clean linework.",
+    "tags": "monochrome, greyscale, manga"
+  },
+  "avoid": ["文字・フキダシ・効果音の描き文字", "色", "署名・透かし", "コマの枠線"],
+  "avoid_en": ["text, speech balloons or sound-effect lettering", "colour", "signatures or watermarks", "panel borders"]
+}

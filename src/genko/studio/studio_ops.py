@@ -28,7 +28,7 @@ STUDIO_OPS = frozenset({
     "approve", "revoke", "request_approval", "request_fix", "add_region", "edit_region", "delete_region",
     "replace_regions", "bind_ref", "unbind_ref", "register_assets", "attach_reference",
     "open_request", "close_request", "import_candidates", "review_candidates", "set_candidate",
-    "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish",
+    "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish", "ask_human",
 })
 
 STUDIO_SCHEMA = [
@@ -65,6 +65,7 @@ STUDIO_SCHEMA = [
     {"op": "set_placement", "page": "int", "frame_id": "str", "to": "art|bg|draft?", "fit": "str?", "offset_mm": "[dx,dy]?", "scale": "float?", "clip_to": "str?"},
     {"op": "place_asset", "page": "int", "asset": "sha256:…", "to": "art|bg|draft|name?", "frame_id": "str?", "fit": "str?", "clip_to": "str?"},
     {"op": "set_finish", "page": "int", "frame_id": "str", "finish": "object|null"},
+    {"op": "ask_human", "text": "str", "page": "int?", "frame_id": "str?", "item": "str? (work item kind it blocks)"},
 ]
 
 
@@ -189,13 +190,22 @@ def _insert_below_ink(page: Page, layer: Layer) -> None:
 
 
 def _place(page: Page, frame: Frame | None, layer: Layer, px: tuple[int, int], fit: str, clip_to: str,
-           offset: tuple[float, float], scale: float) -> None:
+           offset: tuple[float, float], scale: float, pad_mm: float = 0.0) -> None:
+    """Fit the image over its panel. A generated image covers the panel plus the request's pad,
+    so that margin is kept outside the panel (and cut off by the clip)."""
     if frame is None:
         target = Rect(0, 0, page.spec.width_mm, page.spec.height_mm)
-    else:
+    elif clip_to == "bleed":
         target = default_target(page, frame, clip_to)
+    else:
+        r = frame.rect
+        target = Rect(r.x - pad_mm, r.y - pad_mm, r.width + 2 * pad_mm, r.height + 2 * pad_mm)
     layer.fit, layer.clip_to = fit, clip_to
     layer.placement_mm = fit_rect(target, int(px[0]), int(px[1]), fit, offset, scale)
+
+
+def _pad(cand: dict) -> float:
+    return float((cand.get("mapping") or {}).get("pad_mm") or 0.0)
 
 
 def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
@@ -483,9 +493,13 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
             raise _err("request.id is required")
         requests = studio.setdefault("requests", {})
         if request["id"] in requests:
-            return  # same content, same id: nothing to do
-        request.update({"status": "open", "by": agent, "rev": episode.revision})
-        requests[request["id"]] = request
+            if requests[request["id"]].get("status") == "open":
+                return  # same content, same id: nothing to do
+            requests[request["id"]]["status"] = "open"  # asked again: another round
+            request = requests[request["id"]]
+        else:
+            request.update({"status": "open", "by": agent, "rev": episode.revision})
+            requests[request["id"]] = request
         target = request.get("target") or {}
         if target.get("frame_id"):
             page = _page(episode, target)
@@ -549,7 +563,7 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
         layer.source = {"candidate": cand["id"], "request": cand.get("request"), "to": to}
         clip_to = str(op.get("clip_to") or ("bleed" if frame.bleed else "frame"))
         _place(page, frame, layer, cand.get("px") or (1, 1), str(op.get("fit") or "cover"), clip_to,
-               tuple(op.get("offset_mm") or (0.0, 0.0)), float(op.get("scale") or 1.0))
+               tuple(op.get("offset_mm") or (0.0, 0.0)), float(op.get("scale") or 1.0), _pad(cand))
         adopted = panel.setdefault("adopted", {})
         history = panel.setdefault("adopt_history", [])
         if adopted.get(to):
@@ -580,7 +594,7 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
             history.remove(previous)
             layer.asset = prev_cand["asset"]
             layer.source = {"candidate": prev_cand["id"], "request": prev_cand.get("request"), "to": to}
-            _place(page, frame, layer, prev_cand.get("px") or (1, 1), layer.fit, layer.clip_to, (0.0, 0.0), 1.0)
+            _place(page, frame, layer, prev_cand.get("px") or (1, 1), layer.fit, layer.clip_to, (0.0, 0.0), 1.0, _pad(prev_cand))
             panel.setdefault("adopted", {})[to] = prev_cand["id"]
         else:
             page.layers.remove(layer)
@@ -601,7 +615,7 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
         cand = _by_id(_panel(frame).get("candidates", []), (layer.source or {}).get("candidate", ""))
         px = cand.get("px") if cand else _asset_size(episode, layer.asset)
         _place(page, frame, layer, px, str(op.get("fit") or layer.fit), str(op.get("clip_to") or layer.clip_to),
-               tuple(op.get("offset_mm") or (0.0, 0.0)), float(op.get("scale") or 1.0))
+               tuple(op.get("offset_mm") or (0.0, 0.0)), float(op.get("scale") or 1.0), _pad(cand or {}))
         return
 
     if name == "place_asset":
@@ -622,6 +636,17 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
                       source={"asset": asset, "to": to, "by": agent})
         _place(page, frame, layer, px, str(op.get("fit") or "cover"), str(op.get("clip_to") or ("frame" if frame else "none")), (0.0, 0.0), 1.0)
         _insert_below_ink(page, layer)
+        return
+
+    if name == "ask_human":
+        text = str(op.get("text") or "").strip()
+        if not text:
+            raise _err("text is required")
+        page = _page(episode, op) if op.get("page") is not None or op.get("page_id") else None
+        if page is not None and op.get("frame_id"):
+            _leaf(page, op["frame_id"])
+        _ticket(episode, page, agent, kind="help", frame_id=op.get("frame_id"), item=op.get("item"), text=text,
+                assignee="human")
         return
 
     if name == "set_finish":
@@ -694,6 +719,7 @@ def _import_candidates(episode: Episode, op: dict, agent: str) -> None:
             "origin": origin,
             "px": [int(px[0]), int(px[1])],
             "status": "candidate",
+            **({"metrics": item["metrics"]} if isinstance(item.get("metrics"), dict) else {}),
         })
     if target.get("character_id") or target.get("location_id"):
         key = "character_candidates" if target.get("character_id") else "location_candidates"
@@ -701,6 +727,8 @@ def _import_candidates(episode: Episode, op: dict, agent: str) -> None:
         bucket = studio.setdefault(key, {}).setdefault(owner, [])
         known = {c["asset"] for c in bucket}
         bucket.extend(c for c in prepared if c["asset"] not in known)
+        if request is not None:
+            request["status"] = "done"
         return
     page = _page(episode, target)
     try:
@@ -716,7 +744,8 @@ def _import_candidates(episode: Episode, op: dict, agent: str) -> None:
     for cand in new:
         cand["brief_hash"] = (request or {}).get("brief_hash") or current
         cand["stale"] = cand["brief_hash"] != current
-        cand["mapping"] = {"frame_rect_mm": [frame.rect.x, frame.rect.y, frame.rect.width, frame.rect.height], "px": cand["px"]}
+        cand["mapping"] = {"frame_rect_mm": [frame.rect.x, frame.rect.y, frame.rect.width, frame.rect.height],
+                           "pad_mm": float((request or {}).get("pad_mm") or 0.0), "px": cand["px"]}
     panel.setdefault("candidates", []).extend(new)
     attempts = panel.setdefault("attempts", {"requests": 0, "images": 0, "fix_rounds": 0})
     attempts["images"] += len(new)

@@ -318,14 +318,17 @@ def test_sheet_approval_locks_the_character(tmp_path: Path):
     HumanService(project, "human:leaf").approve_sheet("hina", "sheet1")
     episode = load_episode(project)
     hina = next(c for c in episode.bible.characters if c["id"] == "hina")
-    assert hina["locked"] and hina["refs"][-1] == {"asset": imported.data["asset"], "kind": "sheet", "approved_by": "human:leaf"}
+    sheet = next(r for r in hina["refs"] if r["kind"] == "sheet")
+    assert hina["locked"] and sheet == {"asset": imported.data["asset"], "kind": "sheet", "approved_by": "human:leaf"}
+    face = next(r for r in hina["refs"] if r["kind"] == "face")  # cut out of the sheet on approval
+    assert face["asset"] != sheet["asset"] and (project / "assets" / face["asset"][7:9]).is_dir()
     assert all(t["status"] == "done" for t in episode.tickets if t.get("gate") == "sheet")
     with pytest.raises(ApplyError, match="locked"):
         apply_ops(episode, [{"op": "upsert_character", "character": {"id": "hina", "name": "別人"}}], agent="ai:test")
     # a new bible keeps the approved sheet
     assert agent.set_bible("demo.genko", _load("bible.json"), commit=True).ok
     hina = next(c for c in load_episode(project).bible.characters if c["id"] == "hina")
-    assert hina["locked"] and hina["refs"][-1]["kind"] == "sheet"
+    assert hina["locked"] and {r["kind"] for r in hina["refs"]} == {"sheet", "face"}
     # panels with hina no longer wait for a sheet
     kinds = {(i["kind"], i["target"].get("character_id")) for i in agent.next("demo.genko", limit=50).data["items"]}
     assert ("make_sheet", "hina") not in kinds
@@ -338,7 +341,7 @@ def test_panel_fix_request_and_adoption_close_the_ticket(tmp_path: Path):
     _commit(agent, [{"op": "adopt_candidate", "page": 2, "frame_id": frame.id, "candidate_id": cand}])
     HumanService(project, "human:leaf").comment(2, "空をもっと暗く", frame.id)
     items = agent.next("demo.genko", limit=50).data["items"]
-    fix = next(i for i in items if i["kind"] == "fix_art")
+    fix = next(i for i in items if i["kind"] == "fix_panel")
     assert fix["target"] == {"page": 2, "frame_id": frame.id} and fix["comments"] == ["空をもっと暗く"]
     cand2, _ = _import(agent, 2, frame.id, _png((500, 300), BLUE))
     _commit(agent, [{"op": "adopt_candidate", "page": 2, "frame_id": frame.id, "candidate_id": cand2}])

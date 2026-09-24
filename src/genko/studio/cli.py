@@ -72,6 +72,7 @@ def _parser() -> argparse.ArgumentParser:
     approve.add_argument("--pages", default="")
     approve.add_argument("--character")
     approve.add_argument("--candidate")
+    approve.add_argument("--face", help="sheet: face box in the image, x,y,w,h in 0..1")
     approve.add_argument("--as", dest="actor", required=True)
     revoke = sub.add_parser("revoke", help="(human) Take back a name, art or sheet approval")
     revoke.add_argument("project", type=Path)
@@ -88,6 +89,21 @@ def _parser() -> argparse.ArgumentParser:
     comment.add_argument("--as", dest="actor", required=True)
     adopt = sub.add_parser("adopt-drafts", help="Move M0 sidecar drafts (studio/drafts) into project.json")
     adopt.add_argument("project", type=Path)
+    export = sub.add_parser("export", help="(human) Final export after preflight")
+    export.add_argument("project", type=Path)
+    export.add_argument("--format", default="pdf", choices=["pdf", "tiff", "png"])
+    export.add_argument("--out", type=Path, required=True)
+    export.add_argument("--dpi", type=int, help="default: the page spec dpi (600 for B4)")
+    export.add_argument("--allow-fixture", action="store_true", help="let test images through (never for real books)")
+    export.add_argument("--force", action="store_true", help="export even below the resolution threshold")
+    export.add_argument("--as", dest="actor", required=True)
+    tools = sub.add_parser("tools", help="Image tools the agent uses (tools.json in the config dir)")
+    tools.add_argument("action", choices=["list", "set", "remove", "example"])
+    tools.add_argument("tool_id", nargs="?")
+    tools.add_argument("--file", help="set: JSON file (- for stdin) with {label, sizes_px, supports, notes}")
+    call = project_cmd("call", "Call any agent tool by name with JSON arguments (the MCP tool set)")
+    call.add_argument("tool")
+    call.add_argument("args", nargs="?", default=None, help="JSON file (- for stdin) with the tool's arguments")
     review = sub.add_parser("review", help="Write review.html with previews and approve commands")
     review.add_argument("project", type=Path)
     review.add_argument("--out", type=Path, required=True)
@@ -119,18 +135,21 @@ def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
         return _run(args)
-    except (ApplyError, ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
+    except (ApplyError, ValueError, TypeError, FileNotFoundError, json.JSONDecodeError) as exc:
         return _emit({"ok": False, "error": str(exc)})
 
 
 def _run(args: argparse.Namespace) -> int:
+    if args.cmd == "tools":
+        return _tools(args)
     path = args.project.resolve()
     if args.cmd == "approve":
         human = HumanService(path, args.actor)
         if args.gate == "sheet":
             if not (args.character and args.candidate):
                 return _emit({"ok": False, "error": "sheet には --character と --candidate が要る"})
-            return _emit(human.approve_sheet(args.character, args.candidate))
+            face = [float(v) for v in args.face.split(",")] if args.face else None
+            return _emit(human.approve_sheet(args.character, args.candidate, face))
         pages = _pages(args.pages)
         if not pages:
             return _emit({"ok": False, "error": "--pages が要る"})
@@ -139,6 +158,8 @@ def _run(args: argparse.Namespace) -> int:
         return _emit(HumanService(path, args.actor).revoke(args.gate, _pages(args.pages), args.character, args.reason))
     if args.cmd == "comment":
         return _emit(HumanService(path, args.actor).comment(args.page, args.text, args.frame))
+    if args.cmd == "export":
+        return _emit(HumanService(path, args.actor).export(args.format, args.out, args.dpi, args.allow_fixture, args.force))
     if args.cmd == "adopt-drafts":
         from genko.studio.adopt import adopt_drafts
 
@@ -162,6 +183,17 @@ def _run(args: argparse.Namespace) -> int:
         result = service.inspect(name, args.target, args.page, args.frame)
     elif args.cmd == "render":
         result = service.render(name, args.page, args.mode, args.max_px, args.frame)
+    elif args.cmd == "call":
+        from genko.studio.service import AGENT_TOOLS
+
+        if args.tool not in AGENT_TOOLS:
+            return _emit({"ok": False, "error": f"道具 {args.tool} はない（{', '.join(sorted(AGENT_TOOLS))}）"})
+        kwargs = _load(args.args) if args.args else {}
+        if not isinstance(kwargs, dict):
+            return _emit({"ok": False, "error": "引数は JSON オブジェクト"})
+        if args.tool == "import_image":
+            kwargs.setdefault("confine", False)
+        result = getattr(service, args.tool)(name, **kwargs)
     elif args.cmd == "import-image":
         result = service.import_image(name, path=str(Path(args.image).resolve()), confine=False)
     elif args.cmd == "apply":
@@ -180,6 +212,21 @@ def _run(args: argparse.Namespace) -> int:
     else:
         result = service.tickets(name, "all" if args.all else "open")
     return _emit(result.to_dict())
+
+
+def _tools(args: argparse.Namespace) -> int:
+    from genko.studio import tools_registry
+
+    if args.action == "list":
+        return _emit({"ok": True, "path": str(tools_registry.path()), "tools": tools_registry.load()})
+    if args.action == "example":
+        return _emit({"ok": True, "example": tools_registry.EXAMPLE})
+    if not args.tool_id:
+        return _emit({"ok": False, "error": "tool_id が要る"})
+    if args.action == "remove":
+        return _emit({"ok": tools_registry.remove(args.tool_id)})
+    spec = _load(args.file) if args.file else tools_registry.EXAMPLE.get(args.tool_id, tools_registry.GENERIC)
+    return _emit({"ok": True, "tool": tools_registry.set_tool(args.tool_id, spec)})
 
 
 def mcp_main(argv: list[str]) -> int:

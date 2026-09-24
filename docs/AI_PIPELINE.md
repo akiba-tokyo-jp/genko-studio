@@ -2000,6 +2000,27 @@ M5 + M7 ─▶ M9（拡張）
 
 範囲: 絵の工程の道具をそろえ、偽エージェントと試験用の画像で企画から書き出しまでを通す。
 
+**実施状況（2026-09-24）:** M4-1〜M4-6 を実装した。
+- 依頼パック（`studio/genreq.py`）: サイズ（約 1 MP・64 の倍数、`tools.json` のサイズと切り方、印刷に要る画素数）、プロンプトの下書き（ja・en・tags。キャラの `tokens_en` はそのまま）、描かせないもの、文字よけの範囲、人物の位置、ガイド画像と参照の写し、修正用の元画像とマスク。同じ内容なら同じ id。
+- 取り込み（`studio/importer.py`）: inbox の中のファイルとアップロード済みの資産だけを読む。30 MB・64 MP まで、同じ画像は 1 回だけ、来歴は必須。取り込み時の目安（縦横比のずれ、文字よけの範囲の混み具合、明るさ、ガイド追従度）で候補を並べる。
+- MCP の道具: `generation_request`、`import_images`、`candidates`、`review_candidates`、`adopt`、`request_fix`、`report_regions`、`finish_page`、`preflight`、`export_proof`、`ask_human`。`render` に `kind`（compare・ガイド）、`next` に `claim` を足した。
+- 作業リストは書き出しまで出る。上限（1 コマ 8 枚・修正 2 巡）を超えたコマと、`ask_human` で相談中の作業は止まる。
+- 設定画: 依頼 → 取り込み → 人間の `approve sheet` で顔を切り出して `face` の参照にし、キャラを `locked` にする。場所の参照画像は `adopt location_id`。
+- 書き出し: `preflight`（承認、未採用のコマ、位置のない台詞、資産の欠落、実効 dpi 350 未満、試験用の画像。来歴の欠落は警告）、校正の透かし入り書き出し、人間の `genko studio export`。
+- HTTP: `POST /v1/assets`（画像のアップロード）、`GET /v1/requests/{id}/files/{name}`。
+- 試験: 偽エージェント（`tests/agents/`）が MCP だけで 8 ページを企画から書き出しまで作る E2E（§10.6 の a〜d、g、h）、依頼パックの golden、取り込みの拒否と冪等性、予約、応答 2 秒以内。
+
+設計からの変更点:
+- ガイドはネームの NAME ストロークに加えて blocking の人物の形を描く（今のネームはストロークを持たないため）。
+- `finish_page` の写植の再調整は、報告された顔の領域に重なる台詞だけを動かす。
+- 顔の切り出しは、承認時に人間が `--face x,y,w,h` で範囲を指定できる。省略すると画像上部の中央を切り出す。
+- 予約は弱い予約で、書き込みは止めない。
+
+後回しにしたもの:
+- MCP の HTTP 接続そのもの（M1-7）。画像のアップロードと依頼ファイルの取得は、今の HTTP サーバーで先に使える。
+- 本番の 600 dpi 書き出しを MCP に出すこと（人間の CLI だけ）。
+- `assist` の自律度（提案モード）。
+
 | PR | 内容 |
 |---|---|
 | M4-1 | `blocking.py`、`guide.py` の composition / pose / keepout / mask / compare、`vocab.json` |

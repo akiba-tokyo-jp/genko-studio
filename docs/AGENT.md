@@ -121,22 +121,34 @@ genko studio comment demo.genko --page 2 "2コマ目の台詞を減らして" --
 genko studio comment demo.genko --page 2 --frame FRAME_ID "空をもっと暗く" --as human:leaf
 ```
 
-## Art in panels (M3)
+## Art: requests, imports, finishing and export (M3–M4)
 
-Genko makes no images. The agent generates them with its own tools and brings them in:
+Genko makes no images. It writes a generation request, the agent generates with its own image tool, and Genko takes the result back as candidates.
 
-1. `inspect target=panel page=N` → each panel's brief, size in mm, bleed, the characters' approved sheets.
-2. Generate the image elsewhere, then `import_image` (`path` inside `--root`, or `png_base64`) → `{asset: "sha256:…", px: [w, h]}`. JPEG/WebP are stored as PNG. An image nothing refers to is deleted by `genko gc` after a day.
-3. `apply_ops`: `import_candidates {page, frame_id, candidates: [{id?, asset, px, origin: {kind: "agent", …}}]}` → `review_candidates` / `set_candidate` → `adopt_candidate {page, frame_id, candidate_id, fit: cover|contain|stretch, clip_to: frame|bleed|none, offset_mm?, scale?}`.
-4. `render frame_id=…` to check. `set_placement` moves or rescales, `unadopt` goes back to the previous choice.
+1. `next` gives the work in order: `make_sheet` → (person approves the sheet) → `gen_panel` → `import_pending` → `review_candidates` → `fix_panel` → `report_regions` → (person approves the art) → `upscale_panel` → `finish_page` → (person exports). Items another agent claimed (`next claim=true`, 10-minute lease) and items parked by `ask_human` show as blocked.
+2. `generation_request {page, frame_id}` (or `character_id` for a sheet, `location_id` for a background reference; `mode: edit|inpaint|upscale` with `parent`) → `studio/requests/<id>/request.json` with sizes (`suggested_px` ≈ 1 MP in multiples of 64, `tool_sizes` from `tools.json`, `print_px`), a prompt draft (`ja`, `en`, `tags`; character `tokens_en` as written), `avoid`, `keepout` (balloon areas, 0..1), `figures`, and files: `guides/composition.png`, `guides/pose.png`, `guides/keepout.png`, `refs/*` (approved sheets and faces, location images), `source.png`/`mask.png` for fixes. Same content → same id.
+3. Save the generated images in `studio/inbox/<id>/` (or upload with `POST /v1/assets?path=PROJECT`, body = the image) and call `import_images {request_id, images: [{file | asset, origin: {kind, tool_id, model, prompt, params, refs_used}}]}`. Only the inbox and uploaded assets are read; 30 MB / 64 MP per image; the same image twice adds nothing. Each candidate gets `metrics` (aspect error, how busy the balloon areas are, brightness, edge overlap with the pose guide; lower `rank` is better).
+4. `candidates`, `render kind=compare` (the candidate with the name in red), `review_candidates`, then `adopt`. `report_regions` (faces and people, `box01` in the adopted image or `rect_mm`) feeds the balloon pass.
+5. After the person approves the art: `finish_page` (moves balloons off reported faces, turns `panel.fx` into effects, advances to finish). `preflight` lists what blocks the export; `export_proof` writes a 150 dpi proof with a 校正 watermark into `studio/proofs/`.
 
 Rules:
 
-- The image is kept as its asset and resampled from the source at print time into its placement, then clipped to its panel (`bleed` panels extend to the paper edge on their outer sides). Gutters stay white.
+- The image is kept as its asset and resampled from the source at print time into its placement, then clipped to its panel (`bleed` panels extend to the paper edge on their outer sides). A generated image covers the panel plus the request's 3 mm pad. Gutters stay white.
 - Art (`to: art|bg`) needs the page's name approved; `to: draft` works any time and never prints. Candidates never print.
-- With `strict_gates` (studio projects) an approved name freezes the layout for agents (`split_frame`, `merge_frame`, `resize_frame`); `advance to=finish` needs `art_ok`.
-- `split_frame` gives the brief to the panel read first (top; right column in right-bound books). `merge_frame` keeps the first panel's brief. If placed art is involved, both need `force: true` and the art moves to `studio.orphans`. `duplicate_page` keeps art on the new panel ids.
-- A person's pins (`set_panel pin`), prompt/size overrides, regions and `skip` cannot be changed by an agent. Approvals (`approve`, `revoke`) are person-only ops; an approved character sheet locks the character (`upsert_character` refuses, a new bible keeps the sheet).
-- `next` lists the art work: `make_sheet` (characters without an approved sheet), `make_art`, `import_art`, `choose_art`, `fix_art`, then `await_human` for the `art` gate.
+- With `strict_gates` (studio projects) an approved name freezes the layout for agents; `advance to=finish` needs `art_ok`.
+- `split_frame` gives the brief to the panel read first; `merge_frame` keeps the first panel's brief. Placed art needs `force: true` and moves to `studio.orphans`. `duplicate_page` keeps art on the new panel ids.
+- A person's pins, prompt/size overrides (`gen.prompt_override` replaces the prompt draft), regions and `skip` cannot be changed by an agent. Approvals are person-only; an approved sheet locks the character and its face is cut out as a `face` reference.
+- Limits (`studio.policy.limits`): 8 images and 2 fix rounds per panel, then the panel waits for a person.
+- The final export is a person's: `genko studio export PROJECT --format pdf|tiff|png --out DIR --as human:NAME`. It refuses with reasons: pages not finished or not approved, panels without art, unplaced lines, missing assets, effective resolution under 350 dpi (`--force`), test images (`--allow-fixture`). Missing provenance only warns.
 
-HTTP: `GET /v1/pages/{n}/frames/{frame_id}.png?path=…&dpi=…&mode=…` renders one panel.
+Image tools (`tools.json` in the config dir, never in a project):
+
+```bash
+genko studio tools example                       # an example entry
+genko studio tools set openai:gpt-image-1        # or --file spec.json with {label, sizes_px, supports, notes}
+genko studio tools list
+```
+
+Every agent tool is also on the shell: `genko studio call PROJECT generation_request args.json`.
+
+HTTP: `GET /v1/pages/{n}/frames/{frame_id}.png` renders one panel; `POST /v1/assets?path=PROJECT` (image body) returns `{asset, px}`; `GET /v1/requests/{id}/files/{name}?path=PROJECT` serves a request's guides and references.

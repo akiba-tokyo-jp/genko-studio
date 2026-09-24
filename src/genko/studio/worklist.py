@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from genko.models import Episode
 from genko.studio.jsonutil import content_hash, sha256_hex
 
@@ -31,7 +33,11 @@ def item(kind: str, why: str, tools: list[str], page: int | None = None, blocked
     }
 
 
-def next_actions(episode: Episode) -> list[dict]:
+DEFAULT_LIMITS = {"images_per_panel": 8, "fix_rounds": 2}
+
+
+def next_actions(episode: Episode, project: Path | None = None) -> list[dict]:
+    """Pure function of the project state (plus the inbox and asset headers when `project` is given)."""
     from genko.studio import state
 
     if state.bible(episode) is None:
@@ -39,8 +45,9 @@ def next_actions(episode: Episode) -> list[dict]:
     if state.script(episode) is None:
         return [item("write_script", "脚本がまだない", ["inspect", "set_script"])]
     out: list[dict] = []
-    requested = {(t.get("gate"), p) for t in state.open_tickets(episode, "gate") for p in t.get("pages") or []}
-    requested_sheets = {t.get("character_id") for t in state.open_tickets(episode, "gate") if t.get("gate") == "sheet"}
+    gates = state.open_tickets(episode, "gate")
+    requested = {(t.get("gate"), p) for t in gates for p in t.get("pages") or []}
+    requested_sheets = {t.get("character_id") for t in gates if t.get("gate") == "sheet"}
     for page in episode.pages:
         n = page.index
         draft = state.name(episode, n)
@@ -50,7 +57,7 @@ def next_actions(episode: Episode) -> list[dict]:
                             comments=[t.get("text", "") for t in fixes], tickets=[t["id"] for t in fixes]))
             continue
         if page.name_ok:
-            out.extend(_art_items(episode, page, requested, requested_sheets))
+            out.extend(_art_items(episode, page, requested, requested_sheets, project))
             continue
         if draft is None:
             blank = len(page.leaf_frames()) == 1 and not episode.story_for_page(n)
@@ -64,23 +71,60 @@ def next_actions(episode: Episode) -> list[dict]:
             continue
         blocker = "requested" if ("name", n) in requested else "await_human:name"
         out.append(item("await_human", "人間のネーム承認待ち", ["request_approval"], n, blocked_by=[blocker], gate="name"))
-    return _dedupe(out)
+    out.extend(_export_items(episode, requested))
+    return _block_by_help(episode, _dedupe(out))
 
 
-def _art_items(episode: Episode, page, requested: set, requested_sheets: set) -> list[dict]:
-    """Per-panel art work on a page whose name is approved."""
+def _limits(episode: Episode) -> dict:
+    return {**DEFAULT_LIMITS, **((episode.studio.get("policy") or {}).get("limits") or {})}
+
+
+def _open_request(episode: Episode, frame_id: str) -> dict | None:
+    for req in (episode.studio.get("requests") or {}).values():
+        if req.get("status") == "open" and (req.get("target") or {}).get("frame_id") == frame_id:
+            return req
+    return None
+
+
+def _inbox_files(project: Path | None, request_id: str) -> int:
+    if project is None:
+        return 0
+    folder = Path(project) / "studio" / "inbox" / request_id
+    return sum(1 for p in folder.iterdir() if p.is_file() and not p.name.startswith(".")) if folder.is_dir() else 0
+
+
+def _regions_done(panel: dict) -> bool:
+    cast = [c for c in panel.get("characters", []) if isinstance(c, dict)]
+    if not cast:
+        return True
+    if any(r.get("kind") in ("face", "head", "person", "body") and r.get("source") in ("agent", "user")
+           for r in panel.get("regions", [])):
+        return True
+    review = (panel.get("reviews") or {}).get("regions")
+    return bool(review and review.get("input_hash") == (panel.get("adopted") or {}).get("art"))
+
+
+def _art_items(episode: Episode, page, requested: set, requested_sheets: set, project: Path | None) -> list[dict]:
+    """Per-panel art work on a page whose name is approved, then finishing."""
     if page.art_ok:
-        return []
+        return _finish_items(episode, page, project)
     chars = {c.get("id"): c for c in episode.bible.characters}
+    limits = _limits(episode)
     out: list[dict] = []
     waiting = 0
     for frame in page.leaf_frames():
         panel = frame.panel or {}
         status = panel.get("status", "empty")
-        if status in ("adopted", "skip"):
+        target = {"frame_id": frame.id}
+        if status == "skip":
+            continue
+        if status == "adopted":
+            if not _regions_done(panel):
+                waiting += 1
+                out.append(item("report_regions", "採用した絵の顔と人物の位置をまだ報告していない（写植の顔よけに使う）",
+                                ["render", "report_regions"], page.index, **target))
             continue
         waiting += 1
-        target = {"frame_id": frame.id}
         cast = [c.get("id") for c in panel.get("characters", []) if isinstance(c, dict)]
         unlocked = [cid for cid in cast if cid in chars and not chars[cid].get("locked")]
         if unlocked:
@@ -88,29 +132,102 @@ def _art_items(episode: Episode, page, requested: set, requested_sheets: set) ->
                 if cid in requested_sheets:
                     out.append(item("await_human", "キャラクター設定画の承認待ち", ["request_approval"], None,
                                     blocked_by=["requested"], gate="sheet", character_id=cid))
+                elif any(c.get("status") != "rejected" for c in (episode.studio.get("character_candidates") or {}).get(cid, [])):
+                    out.append(item("await_human", "設定画の候補がある。人間に選んで承認してもらう", ["candidates", "request_approval"], None,
+                                    blocked_by=["await_human:sheet"], gate="sheet", character_id=cid))
                 else:
-                    out.append(item("make_sheet", "作画の前にキャラクター設定画を承認してもらう",
-                                    ["import_image", "import_candidates", "request_approval"], None, character_id=cid))
+                    out.append(item("make_sheet", "作画の前にキャラクター設定画を作り、承認してもらう",
+                                    ["generation_request", "import_images", "candidates", "request_approval"], None,
+                                    character_id=cid))
             continue
-        if status == "candidates":
-            out.append(item("choose_art", "候補画像から採用するものを選ぶ", ["render", "review_candidates", "adopt_candidate"],
-                            page.index, **target))
+        attempts = panel.get("attempts") or {}
+        over = attempts.get("images", 0) >= limits["images_per_panel"] or attempts.get("fix_rounds", 0) > limits["fix_rounds"]
+        request = _open_request(episode, frame.id)
+        if request is not None:
+            files = _inbox_files(project, request["id"])
+            why = (f"inbox に取り込んでいない画像が {files} 枚ある" if files else "依頼パックの画像を生成して inbox に置き、取り込む")
+            out.append(item("import_pending", why, ["import_images"], page.index, request_id=request["id"],
+                            input_hash=request["id"], **target))
+        elif status == "candidates":
+            out.append(item("review_candidates", "候補を比べて評価し、採用するか直す",
+                            ["candidates", "render", "review_candidates", "adopt", "generation_request"], page.index, **target))
+        elif over:
+            out.append(item("gen_panel", "このコマの生成回数が上限に達した。人間の判断を待つ", ["ask_human"], page.index,
+                            blocked_by=["limit"], attempts=attempts, **target))
         elif status == "fix_requested":
             fixes = [t.get("text", "") for t in episode.tickets
                      if t.get("status") == "open" and t.get("kind") == "fix" and t.get("frame_id") == frame.id]
-            out.append(item("fix_art", "人間からコマの修正指示がある", ["inspect", "import_image", "import_candidates", "adopt_candidate"],
-                            page.index, comments=fixes, **target))
-        elif status == "requested":
-            out.append(item("import_art", "依頼した画像を取り込む", ["import_image", "import_candidates"], page.index,
-                            **target))
+            out.append(item("fix_panel", "人間からコマの修正指示がある",
+                            ["inspect", "generation_request", "import_images", "adopt"], page.index, comments=fixes, **target))
         else:
-            out.append(item("make_art", "このコマの絵がまだない（外部で生成して取り込む）",
-                            ["inspect", "import_image", "import_candidates", "adopt_candidate"], page.index,
-                            **target))
+            out.append(item("gen_panel", "このコマの絵がまだない（依頼パックを作り、外部で生成して取り込む）",
+                            ["inspect", "generation_request", "import_images", "candidates", "adopt"], page.index, **target))
     if not waiting:
         blocker = "requested" if ("art", page.index) in requested else "await_human:art"
         out.append(item("await_human", "人間の作画承認待ち", ["render", "request_approval"], page.index, blocked_by=[blocker], gate="art"))
     return out
+
+
+def _finish_items(episode: Episode, page, project: Path | None) -> list[dict]:
+    out: list[dict] = []
+    if project is not None:
+        from genko.assets import AssetStore
+        from genko.studio.preflight import MIN_DPI, art_layers, layer_dpi
+
+        store = AssetStore(project)
+        for layer in art_layers(page):
+            dpi = layer_dpi(episode, page, layer, store)
+            if dpi is None or dpi >= MIN_DPI or not layer.frame_id:
+                continue
+            try:
+                panel = page._find(layer.frame_id).panel or {}
+            except (KeyError, IndexError):
+                continue
+            adopted = (panel.get("adopted") or {}).get("art")
+            review = (panel.get("reviews") or {}).get("upscale")
+            if review and review.get("input_hash") == adopted:
+                continue
+            out.append(item("upscale_panel", f"採用した絵の実効解像度が {dpi:.0f} dpi（{MIN_DPI} 未満）",
+                            ["generation_request", "import_images", "adopt", "record_review"], page.index,
+                            frame_id=layer.frame_id, dpi=dpi, input_hash=str(adopted)))
+    if page.stage != "finish":
+        out.append(item("finish_page", "作画は承認済み。仕上げ（台詞の顔よけ、効果、finish へ）", ["finish_page", "render"], page.index))
+    return out
+
+
+def _export_items(episode: Episode, requested: set) -> list[dict]:
+    if not episode.pages or not all(p.art_ok and p.stage == "finish" for p in episode.pages):
+        return []
+    approvals = episode.studio.get("approvals", [])
+    done = False
+    for record in approvals:
+        if record.get("gate") == "export":
+            done = not record.get("revoked")
+    if done:
+        return []
+    asked = any(g == "export" for g, _ in requested) or any(
+        t.get("gate") == "export" and t.get("status") == "open" and t.get("kind") == "gate" for t in episode.tickets)
+    return [item("await_human", "全ページの仕上げが済んだ。preflight を確かめ、人間に書き出しを頼む",
+                 ["preflight", "export_proof", "request_approval"], None,
+                 blocked_by=["requested" if asked else "await_human:export"], gate="export")]
+
+
+def _block_by_help(episode: Episode, items: list[dict]) -> list[dict]:
+    """Open help tickets (ask_human) park the matching items until a person closes them."""
+    tickets = [t for t in episode.tickets if t.get("kind") == "help" and t.get("status") == "open"]
+    if not tickets:
+        return items
+    for entry in items:
+        target = entry["target"]
+        for ticket in tickets:
+            same_page = ticket.get("page_index") is not None and ticket.get("page_index") == target.get("page")
+            same_frame = not ticket.get("frame_id") or ticket.get("frame_id") == target.get("frame_id")
+            same_kind = ticket.get("item") and ticket.get("item") == entry["kind"] and ticket.get("page_index") is None
+            if (same_page and same_frame) or same_kind:
+                blocker = f"ticket:{ticket['id']}"
+                if blocker not in entry["blocked_by"]:
+                    entry["blocked_by"].append(blocker)
+    return items
 
 
 def _dedupe(items: list[dict]) -> list[dict]:

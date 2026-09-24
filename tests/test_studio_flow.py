@@ -52,7 +52,7 @@ def test_scripted_agent_builds_a_name_and_waits_for_a_human(tmp_path: Path):
     after = agent.next("demo.genko", limit=50).data
     assert after["waiting_for"] == [] and after["blocked"] == 0
     # with the name approved, the art starts from the character sheets (panels with unapproved characters wait)
-    assert {i["kind"] for i in after["items"]} <= {"make_sheet", "make_art"}
+    assert {i["kind"] for i in after["items"]} <= {"make_sheet", "gen_panel"}
     assert any(i["kind"] == "make_sheet" for i in after["items"])
     episode = load_episode(project)
     assert all(f.panel and f.panel.get("status") == "briefed" for p in episode.pages for f in p.leaf_frames())

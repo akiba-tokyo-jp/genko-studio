@@ -36,9 +36,10 @@ uv sync --extra mcp
 uv run python -m genko mcp --root ./manga --agent ai:hermes   # stdio MCP server
 uv run python -m genko studio review ./manga/demo.genko --out review.html
 uv run python -m genko studio approve ./manga/demo.genko name --pages 1-4 --as human:you
+uv run python -m genko studio export ./manga/demo.genko --format pdf --out ./out --as human:you
 ```
 
-The agent writes the bible, script and name plans; Genko checks, lays out and letters them. See `docs/AGENT.md` (Studio) and `integrations/hermes/`.
+The agent writes the bible, script and name plans; Genko checks, lays out and letters them. For the art, Genko writes generation requests (sizes, prompt drafts, guides, references), the agent generates with its own image tool, and Genko imports, places, finishes and checks the result. People approve the sheets, names, art and the export. See `docs/AGENT.md` and `integrations/hermes/`.
 
 ```bash
 uv run pytest
@@ -57,6 +58,8 @@ Python 3.11+.
 - `src/genko/app/` — PySide6 GUI
 - `src/genko/studio/` — agent tools: schemas, lint, layout DSL, lettering, worklist, studio ops (panel briefs, candidates, adoption, approvals)
 - `src/genko/placement.py` — where a placed image lands in its panel and what clips it
+- `src/genko/guide.py` — panel guides for image tools (composition, pose, keepout, mask, compare)
+- `src/genko/studio/genreq.py`, `importer.py`, `preflight.py`, `finish.py` — generation requests, image import, export checks and proofs, finishing
 - `src/genko/mcp/` — MCP server (`genko mcp`)
 - `docs/AGENT.md` — how an agent should drive Genko
 - `docs/DESIGN.md` — architecture

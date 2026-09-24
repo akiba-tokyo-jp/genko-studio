@@ -1,0 +1,143 @@
+{
+  "request": {
+    "type": "genko.genreq@1",
+    "purpose": "panel_art",
+    "mode": "new",
+    "target": {
+      "page_id": "<page_id>",
+      "page": 1,
+      "frame_id": "<p1>",
+      "label": "1-p1"
+    },
+    "parent": null,
+    "tool": null,
+    "brief_hash": "sha256:169b3ed0aa6185d6dcfafdecc3241de9495ab82b1d10ea7aeef7f89604ec5b01",
+    "size": {
+      "frame_mm": [
+        231,
+        115.85
+      ],
+      "pad_mm": 3.0,
+      "aspect": "1.95:1",
+      "suggested_px": [
+        1408,
+        704
+      ],
+      "tool_sizes": [
+        {
+          "px": [
+            1536,
+            1024
+          ],
+          "crop": "上下を中央で切る"
+        },
+        {
+          "px": [
+            1024,
+            1024
+          ],
+          "crop": "上下を中央で切る"
+        },
+        {
+          "px": [
+            1024,
+            1536
+          ],
+          "crop": "上下を中央で切る"
+        }
+      ],
+      "print_px": {
+        "dpi": 600,
+        "px": [
+          5598,
+          2878
+        ]
+      }
+    },
+    "prompt": {
+      "ja": "モノクロの日本の漫画のコマ。白黒とグレーだけ、はっきりした線。背景は描き込みすぎない。日向ひな（細身、肩までのストレート、横に流した前髪、髪はベタ（黒く塗りつぶす）、目は大きく、やや垂れ目、半袖のセーラー服、左側に星形の髪留め）。やや上から見下ろす、遠景（全身が小さく入る）の構図。場所は校舎の屋上（フェンスと給水塔のある屋上）、夕方。日向ひな: 画面右、画面左を向く、扉を開ける、緊張。屋上の扉を開ける。感情: 緊張。右上の約1割は台詞用に静かに空けておく。台詞・効果音を画像に描かない。",
+      "en": "Black-and-white Japanese manga panel, greyscale, clean linework. a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip. high angle, looking down, long shot, full figure small in the frame. Setting: 校舎の屋上, at sunset. hina: on the right side of the frame, facing left. Keep the upper-right area (about 10% of the image) calm and empty for speech balloons.",
+      "tags": "monochrome, greyscale, manga, black hair, wide shot, full body, from above, sunset, looking to the side"
+    },
+    "avoid": [
+      "文字・フキダシ・効果音の描き文字",
+      "色",
+      "署名・透かし",
+      "コマの枠線"
+    ],
+    "keepout": [
+      {
+        "box01": [
+          0.918,
+          0.025,
+          0.07,
+          0.341
+        ],
+        "why": "台詞（読み順 1）"
+      }
+    ],
+    "figures": [
+      {
+        "char": "hina",
+        "head01": [
+          0.757,
+          0.322,
+          0.031,
+          0.071
+        ],
+        "body01": [
+          0.736,
+          0.322,
+          0.075,
+          0.654
+        ],
+        "head_mm": [
+          189.49,
+          49.2,
+          7.39,
+          8.69
+        ],
+        "body_mm": [
+          184.32,
+          49.2,
+          17.73,
+          79.65
+        ]
+      }
+    ],
+    "characters": [
+      {
+        "id": "hina",
+        "tokens_en": "a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip",
+        "files": []
+      }
+    ],
+    "files": {
+      "composition": "guides/composition.png",
+      "pose": "guides/pose.png",
+      "keepout": "guides/keepout.png",
+      "references": [],
+      "source": null,
+      "mask": null
+    },
+    "order_of_instructions": [
+      "共通制約",
+      "ページ",
+      "コマのメモ",
+      "今回の指示"
+    ],
+    "notes_for_agent": [
+      "composition と pose は構図の参考。線をなぞらせる必要はない",
+      "画像に文字・フキダシ・効果音を描かせない。台詞は Genko が描く"
+    ],
+    "instruction": null,
+    "import": {
+      "tool": "import_images"
+    }
+  },
+  "guide_ink": {
+    "guides/composition.png": 0.0143,
+    "guides/pose.png": 0.0009,
+    "guides/keepout.png": 0.0
+  }
+}

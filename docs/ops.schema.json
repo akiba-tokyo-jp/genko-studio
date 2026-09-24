@@ -526,6 +526,13 @@
       "page": "int",
       "frame_id": "str",
       "finish": "object|null"
+    },
+    {
+      "op": "ask_human",
+      "text": "str",
+      "page": "int?",
+      "frame_id": "str?",
+      "item": "str? (work item kind it blocks)"
     }
   ]
 }

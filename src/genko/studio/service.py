@@ -43,6 +43,14 @@ AGENT_OPS = frozenset({
     "add_region", "edit_region", "delete_region", "replace_regions", "bind_ref", "unbind_ref",
     "register_assets", "attach_reference", "open_request", "close_request", "import_candidates",
     "review_candidates", "set_candidate", "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish",
+    "ask_human",
+})
+
+# Agent tools callable by name from `genko studio call` (the MCP tool set, minus project management).
+AGENT_TOOLS = frozenset({
+    "status", "next", "inspect", "render", "import_image", "set_bible", "set_script", "submit_name", "apply_ops",
+    "record_review", "request_approval", "tickets", "generation_request", "import_images", "candidates",
+    "review_candidates", "adopt", "request_fix", "report_regions", "finish_page", "preflight", "export_proof", "ask_human",
 })
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
@@ -137,7 +145,7 @@ class StudioService:
                 "adopted": sum(1 for f in leaves if (f.panel or {}).get("status") in ("adopted", "skip")),
                 "lines": len(episode.story_for_page(page.index)),
             })
-        items = worklist.next_actions(episode)
+        items = worklist.next_actions(episode, path)
         return ToolResult(True, {
             "title": episode.title,
             "revision": episode.revision,
@@ -147,11 +155,23 @@ class StudioService:
             "waiting_for": _waiting(items),
         })
 
-    def next(self, project: str, limit: int = 5) -> ToolResult:
+    def next(self, project: str, limit: int = 5, claim: bool = False) -> ToolResult:
+        """Runnable work items. claim=True leases the returned items to this actor (§7.4) so a
+        parallel agent gets other ones; items another actor holds show as blocked."""
+        from genko.studio import claims
+
         path = self.project_path(project)
-        items = worklist.next_actions(load_episode(path))
-        runnable = [i for i in items if not i["blocked_by"]]
-        return ToolResult(True, {"items": runnable[:limit], "blocked": len(items) - len(runnable), "waiting_for": _waiting(items)})
+        items = worklist.next_actions(load_episode(path), path)
+        for entry in items:
+            if not entry["blocked_by"]:
+                holder = claims.holder(path, entry["id"])
+                if holder and holder != self.actor:
+                    entry["blocked_by"].append(f"claimed:{holder}")
+        runnable = [i for i in items if not i["blocked_by"]][:limit]
+        if claim:
+            runnable = [i for i in runnable if claims.claim(path, i["id"], self.actor)]
+        blocked = sum(1 for i in items if i["blocked_by"])
+        return ToolResult(True, {"items": runnable, "blocked": blocked, "waiting_for": _waiting(items)})
 
     def inspect(self, project: str, target: str, page: int | None = None, frame_id: str | None = None) -> ToolResult:
         path = self.project_path(project)
@@ -178,16 +198,253 @@ class StudioService:
             return ToolResult(True, _panel_brief(episode, page, frame_id))
         return fail(f"target {target} はない（bible / script / page / panel / studio / schemas / rules / snapshot）", "unknown_target", "/target")
 
-    def render(self, project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None) -> ToolResult:
+    def render(self, project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None,
+               kind: str | None = None, candidate_id: str | None = None) -> ToolResult:
+        """kind: None (page or panel in `mode`), compare (candidate + the name in red), guide:composition,
+        guide:pose, guide:keepout (the request guides for a panel)."""
         path = self.project_path(project)
         episode = load_episode(path)
-        draft = state.name(episode, page)
-        png = _preview(episode, page, mode, max_px, draft.get("name") if draft else None, frame_id)
-        suffix = f"_{frame_id}" if frame_id else ""
-        out = path / "studio" / "reviews" / f"p{page:03d}_{mode}{suffix}.png"
+        if kind:
+            png, label = _render_kind(episode, path, page, frame_id, kind, candidate_id, max_px)
+        else:
+            draft = state.name(episode, page)
+            png = _preview(episode, page, mode, max_px, draft.get("name") if draft else None, frame_id)
+            label = f"{mode}_{frame_id}" if frame_id else mode
+        out = path / "studio" / "reviews" / f"p{page:03d}_{label.replace(':', '-')}.png"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(png)
-        return ToolResult(True, {"page": page, "mode": mode, "frame_id": frame_id}, images=[png], files=[str(out)])
+        return ToolResult(True, {"page": page, "mode": mode, "kind": kind, "frame_id": frame_id}, images=[png], files=[str(out)])
+
+    # --- art: requests, imports, candidates -------------------------------------------
+
+    def generation_request(self, project: str, page: int | None = None, frame_id: str | None = None,
+                           character_id: str | None = None, location_id: str | None = None, purpose: str | None = None,
+                           mode: str = "new", parent: str | None = None, tool: str | None = None,
+                           instruction: str | None = None, regions: list | None = None) -> ToolResult:
+        from genko.studio import genreq
+
+        path = self.project_path(project)
+        if purpose is None:
+            purpose = "character_sheet" if character_id else ("location" if location_id else "panel_art")
+        episode = load_episode(path)
+        if purpose in ("panel_art", "draft"):
+            target_page = next((p for p in episode.pages if p.index == page), None)
+            if target_page is None:
+                return fail(f"{page} ページはない", "no_page", "/page")
+            if purpose == "panel_art" and not target_page.name_ok:
+                return fail(f"{page} ページのネームが承認されていない（絵の依頼は承認後。ラフは purpose=draft）", "name_not_approved", "/page")
+        try:
+            pack = genreq.build(episode, path, purpose=purpose, mode=mode, page=page, frame_id=frame_id,
+                                character_id=character_id, location_id=location_id, parent=parent, tool=tool,
+                                instruction=instruction, regions=regions)
+        except genreq.RequestError as exc:
+            return fail(str(exc), "bad_request", exc.path)
+        folder = genreq.write(pack, path)
+        with ProjectLock(path, agent=self.actor):
+            episode = load_episode(path)
+            if pack.id not in (episode.studio.get("requests") or {}):
+                apply_ops(episode, [{"op": "open_request", "request": genreq.record(pack)}], agent=self.actor)
+                save_episode(episode, path, actor=self.actor)
+            elif episode.studio["requests"][pack.id].get("status") != "open":
+                # asked again after its images came in: another round of the same request
+                apply_ops(episode, [{"op": "open_request", "request": genreq.record(pack)}], agent=self.actor)
+                save_episode(episode, path, actor=self.actor)
+        files = {name: str(folder / name) for name in sorted(pack.files)}
+        preview = _guide_sheet(pack)
+        return ToolResult(True, {"request": pack.request, "dir": str(folder), "files": files,
+                                 "inbox": str(path / "studio" / "inbox" / pack.id)},
+                          images=[preview] if preview else [])
+
+    def import_images(self, project: str, request_id: str, images: list[dict]) -> ToolResult:
+        from genko.studio import genreq, importer
+
+        path = self.project_path(project)
+        request = genreq.read(path, str(request_id))
+        if request is None:
+            return fail(f"依頼 {request_id} はない（generation_request で作る）", "no_request", "/request_id")
+        try:
+            items, first = importer.prepare(path, request, images)
+        except importer.ImportError_ as exc:
+            return fail(str(exc), "import_failed", exc.path)
+        with ProjectLock(path, agent=self.actor):
+            episode = load_episode(path)
+            if request_id not in (episode.studio.get("requests") or {}):
+                apply_ops(episode, [{"op": "open_request", "request": _record_from_request(request)}], agent=self.actor)
+            apply_ops(episode, [{"op": "import_candidates", "request_id": request_id, "candidates": items}], agent=self.actor)
+            save_episode(episode, path, actor=self.actor)
+        ids = [i["id"] for i in items]
+        preview: list[bytes] = []
+        target = request.get("target") or {}
+        if first is not None and target.get("frame_id"):
+            try:
+                png, _ = _render_kind(episode, path, int(target["page"]), target["frame_id"], "compare", ids[0], 512)
+                preview.append(png)
+            except ApplyError:
+                pass
+        return ToolResult(True, {"request_id": request_id, "candidates": ids,
+                                 "metrics": {i["id"]: i["metrics"] for i in items}}, images=preview)
+
+    def candidates(self, project: str, page: int | None = None, frame_id: str | None = None,
+                   character_id: str | None = None, location_id: str | None = None) -> ToolResult:
+        path = self.project_path(project)
+        episode = load_episode(path)
+        if character_id or location_id:
+            bucket = "character_candidates" if character_id else "location_candidates"
+            items = (episode.studio.get(bucket) or {}).get(character_id or location_id, [])
+            adopted = {}
+        else:
+            target = next((p for p in episode.pages if p.index == page), None)
+            if target is None:
+                return fail(f"{page} ページはない", "no_page", "/page")
+            try:
+                panel = target._find(str(frame_id)).panel or {}
+            except (KeyError, IndexError):
+                return fail(f"コマ {frame_id} はない", "no_frame", "/frame_id")
+            items = panel.get("candidates", [])
+            adopted = panel.get("adopted") or {}
+        rows = []
+        for cand in items:
+            origin = cand.get("origin") or {}
+            rows.append({
+                "id": cand["id"], "status": cand.get("status"), "adopted_as": [k for k, v in adopted.items() if v == cand["id"]],
+                "px": cand.get("px"), "mode": cand.get("mode"), "parent": cand.get("parent"), "request": cand.get("request"),
+                "stale": cand.get("stale", False), "review": cand.get("review"), "metrics": cand.get("metrics"),
+                "origin": {k: origin.get(k) for k in ("kind", "tool_id", "model") if origin.get(k)},
+            })
+        rows.sort(key=lambda r: ((r["metrics"] or {}).get("rank", 0), r["id"]))
+        sheet = _contact_sheet(path, items)
+        return ToolResult(True, {"candidates": rows}, images=[sheet] if sheet else [])
+
+    def review_candidates(self, project: str, page: int, frame_id: str, reviews: list[dict]) -> ToolResult:
+        return self._ops(project, [{"op": "review_candidates", "page": page, "frame_id": frame_id, "reviews": reviews}])
+
+    def adopt(self, project: str, candidate_id: str, page: int | None = None, frame_id: str | None = None,
+              to: str = "art", fit: str | None = None, offset_mm: list | None = None, scale: float | None = None,
+              location_id: str | None = None) -> ToolResult:
+        path = self.project_path(project)
+        if location_id:
+            episode = load_episode(path)
+            cand = next((c for c in (episode.studio.get("location_candidates") or {}).get(location_id, []) if c["id"] == candidate_id), None)
+            if cand is None:
+                return fail(f"場所 {location_id} の候補 {candidate_id} はない", "no_candidate", "/candidate_id")
+            return self._ops(project, [{"op": "attach_reference", "target": {"location_id": location_id}, "asset": cand["asset"], "kind": "reference"}])
+        op = {"op": "adopt_candidate", "page": page, "frame_id": frame_id, "candidate_id": candidate_id, "to": to}
+        for key, value in (("fit", fit), ("offset_mm", offset_mm), ("scale", scale)):
+            if value is not None:
+                op[key] = value
+        result = self._ops(project, [op])
+        if result.ok and page is not None and frame_id:
+            shown = self.render(project, page, "print" if to != "draft" else "proof", 512, frame_id)
+            result.images, result.files = shown.images, shown.files
+        return result
+
+    def request_fix(self, project: str, page: int, instruction: str, frame_id: str | None = None,
+                    candidate_id: str | None = None, scope: str = "frame") -> ToolResult:
+        return self._ops(project, [{"op": "request_fix", "page": page, "frame_id": frame_id, "candidate_id": candidate_id,
+                                    "instruction": instruction, "scope": scope}])
+
+    def report_regions(self, project: str, page: int, frame_id: str, regions: list[dict]) -> ToolResult:
+        """Faces and people in the adopted art. rect_mm on the page, or box01 in the adopted image (0..1)."""
+        path = self.project_path(project)
+        episode = load_episode(path)
+        target = next((p for p in episode.pages if p.index == page), None)
+        if target is None:
+            return fail(f"{page} ページはない", "no_page", "/page")
+        from genko.models import LayerKind
+
+        layer = next((lay for lay in target.layers if lay.kind == LayerKind.PLACED and lay.frame_id == frame_id
+                      and (lay.source or {}).get("to", "art") == "art"), None)
+        converted = []
+        for i, region in enumerate(regions or []):
+            if not isinstance(region, dict) or not region.get("kind"):
+                return fail("region は {kind, rect_mm | box01, char?}", "bad_region", f"/regions/{i}")
+            item = {k: region[k] for k in ("kind", "char", "confidence") if region.get(k) is not None}
+            if region.get("rect_mm"):
+                item["rect_mm"] = [round(float(v), 2) for v in region["rect_mm"]]
+            elif region.get("box01"):
+                if layer is None or layer.placement_mm is None:
+                    return fail("box01 は採用した絵に対する座標。先に adopt する", "no_art", f"/regions/{i}")
+                b, pl = [float(v) for v in region["box01"]], layer.placement_mm
+                item["rect_mm"] = [round(pl.x + b[0] * pl.width, 2), round(pl.y + b[1] * pl.height, 2),
+                                   round(b[2] * pl.width, 2), round(b[3] * pl.height, 2)]
+            else:
+                return fail("rect_mm か box01 が要る", "bad_region", f"/regions/{i}")
+            converted.append(item)
+        result = self._ops(project, [{"op": "replace_regions", "page": page, "frame_id": frame_id, "source": "agent", "regions": converted}])
+        if result.ok:
+            from genko.studio import finish
+
+            episode = load_episode(path)
+            ops, notes = finish.plan(episode, next(p for p in episode.pages if p.index == page))
+            result.data["finish_preview"] = [n for n in notes if n.get("frame_id") == frame_id]
+        return result
+
+    def finish_page(self, project: str, page: int, commit: bool = False) -> ToolResult:
+        from genko.studio import finish
+
+        path = self.project_path(project)
+        episode = load_episode(path)
+        target = next((p for p in episode.pages if p.index == page), None)
+        if target is None:
+            return fail(f"{page} ページはない", "no_page", "/page")
+        if not target.art_ok:
+            return fail(f"{page} ページの作画が承認されていない", "art_not_approved", "/page")
+        ops, notes = finish.plan(episode, target)
+        work = copy.deepcopy(episode)
+        try:
+            apply_ops(work, ops, agent=self.actor)
+        except ApplyError as exc:
+            return fail(str(exc), "apply_failed", "/")
+        png = _preview(work, page, "proof", 1024, None)
+        data = {"committed": False, "page": page, "changes": notes, "ops": len(ops)}
+        if commit:
+            with ProjectLock(path, agent=self.actor):
+                episode = load_episode(path)
+                ops, notes = finish.plan(episode, next(p for p in episode.pages if p.index == page))
+                apply_ops(episode, ops, agent=self.actor)
+                save_episode(episode, path, actor=self.actor)
+            data.update(committed=True, changes=notes)
+        return ToolResult(True, data, images=[png])
+
+    def preflight(self, project: str, allow_fixture: bool = False, force: bool = False) -> ToolResult:
+        from genko.studio import preflight
+
+        path = self.project_path(project)
+        report = preflight.check(load_episode(path), path, allow_fixture=allow_fixture, force=force)
+        return ToolResult(True, {"ready": report["ok"], **{k: v for k, v in report.items() if k != "ok"}})
+
+    def export_proof(self, project: str, format: str = "pdf") -> ToolResult:  # noqa: A002
+        from genko.studio import preflight
+
+        path = self.project_path(project)
+        episode = load_episode(path)
+        if format not in ("pdf", "png"):
+            return fail("format は pdf か png", "bad_format", "/format")
+        written = preflight.export_proof(episode, path, format)
+        return ToolResult(True, {"files": [str(p) for p in written], "dpi": preflight.PROOF_DPI, "watermark": True},
+                          files=[str(p) for p in written])
+
+    def ask_human(self, project: str, text: str, page: int | None = None, frame_id: str | None = None,
+                  item: str | None = None) -> ToolResult:
+        op: dict[str, Any] = {"op": "ask_human", "text": text, "item": item}
+        if page is not None:
+            op["page"] = page
+        if frame_id:
+            op["frame_id"] = frame_id
+        return self._ops(project, [op])
+
+    def _ops(self, project: str, ops: list[dict]) -> ToolResult:
+        path = self.project_path(project)
+        try:
+            with ProjectLock(path, agent=self.actor):
+                episode = load_episode(path)
+                before = {t["id"] for t in episode.tickets}
+                result = apply_ops(episode, ops, agent=self.actor)
+                save_episode(episode, path, actor=self.actor)
+        except ApplyError as exc:
+            return fail(str(exc), "apply_failed", "/")
+        new = [t["id"] for t in episode.tickets if t["id"] not in before]
+        return ToolResult(True, {"applied": result["applied"], **({"tickets": new} if new else {})})
 
     # --- images ----------------------------------------------------------------------
 
@@ -402,8 +659,8 @@ class StudioService:
 
     def request_approval(self, project: str, gate: str, pages: list[int], note: str = "", character_id: str | None = None) -> ToolResult:
         path = self.project_path(project)
-        if gate not in ("name", "art", "sheet"):
-            return fail("依頼できる承認は name / art / sheet", "gate_not_available", "/gate")
+        if gate not in ("name", "art", "sheet", "export"):
+            return fail("依頼できる承認は name / art / sheet / export", "gate_not_available", "/gate")
         if gate == "sheet" and not character_id:
             return fail("sheet の承認依頼には character_id が要る", "character_required", "/character_id")
         with ProjectLock(path, agent=self.actor):
@@ -414,8 +671,12 @@ class StudioService:
             ticket = next(t for t in episode.tickets if t["id"] not in before)
             save_episode(episode, path, actor=self.actor)
         pages_arg = ",".join(map(str, sorted(set(pages))))
-        how = (f"genko studio approve {path} sheet --character {character_id} --candidate <候補id> --as human:<name>" if gate == "sheet"
-               else f"genko studio approve {path} {gate} --pages {pages_arg} --as human:<name>")
+        if gate == "sheet":
+            how = f"genko studio approve {path} sheet --character {character_id} --candidate <候補id> --as human:<name>"
+        elif gate == "export":
+            how = f"genko studio export {path} --format pdf --out <出力先> --as human:<name>"
+        else:
+            how = f"genko studio approve {path} {gate} --pages {pages_arg} --as human:<name>"
         return ToolResult(True, {"request": ticket["id"], "how_to_approve": how})
 
     def tickets(self, project: str, status: str = "open") -> ToolResult:
@@ -477,9 +738,47 @@ class HumanService:
         self._apply([{"op": "approve", "gate": "art", "page": p} for p in pages])
         return {"ok": True, "approved": sorted(pages)}
 
-    def approve_sheet(self, character_id: str, candidate_id: str) -> dict:
-        self._apply([{"op": "approve", "gate": "sheet", "character_id": character_id, "candidate_id": candidate_id}])
-        return {"ok": True, "approved": character_id}
+    def approve_sheet(self, character_id: str, candidate_id: str, face_box01: list[float] | None = None) -> dict:
+        """Approve a sheet and cut the face reference out of it (`face_box01` in the image, 0..1;
+        default: a square at the top centre, where sheets usually put the face close-up)."""
+        from PIL import Image
+
+        from genko.assets import AssetStore
+
+        episode = load_episode(self.path)
+        cand = next((c for c in (episode.studio.get("character_candidates") or {}).get(character_id, [])
+                     if c.get("id") == candidate_id), None)
+        op = {"op": "approve", "gate": "sheet", "character_id": character_id, "candidate_id": candidate_id}
+        store = AssetStore(self.path)
+        data = store.get_bytes(cand["asset"], ".png") if cand else None
+        if data is not None:
+            image = Image.open(io.BytesIO(data))
+            w, h = image.size
+            if face_box01:
+                x, y, bw, bh = (float(v) for v in face_box01)
+            else:
+                side = 0.4 * w
+                x, y, bw, bh = 0.3, 0.03, 0.4, min(0.9, side / h)
+            box = (round(x * w), round(y * h), round((x + bw) * w), round((y + bh) * h))
+            face = image.crop(box)
+            op["face_asset"] = store.put_bytes(_png(face), ".png")
+        self._apply([op])
+        return {"ok": True, "approved": character_id, "face_asset": op.get("face_asset")}
+
+    def export(self, fmt: str, out: Path, dpi: int | None = None, allow_fixture: bool = False, force: bool = False) -> dict:
+        """The final export (gate ④): preflight must pass, then the pages are written and the approval recorded."""
+        from genko.export import export_print
+        from genko.studio import preflight
+
+        episode = load_episode(self.path)
+        report = preflight.check(episode, self.path, allow_fixture=allow_fixture, force=force)
+        if not report["ok"]:
+            return {"ok": False, "error": "preflight で止まった", **report}
+        if fmt not in ("pdf", "tiff", "png"):
+            return {"ok": False, "error": "format は pdf / tiff / png"}
+        written = export_print(episode, Path(out), fmt=fmt, dpi=int(dpi or episode.spec.dpi or 600))
+        self._apply([{"op": "approve", "gate": "export"}])
+        return {"ok": True, "files": [str(p) for p in written], "warnings": report["warnings"], "dpi": report["dpi"]}
 
     def revoke(self, gate: str, pages: list[int], character_id: str | None = None, reason: str = "") -> dict:
         if gate == "sheet":
@@ -503,7 +802,117 @@ def _waiting(items: list[dict]) -> list[dict]:
     chars = sorted({i["target"]["character_id"] for i in items if i["blocked_by"] and i.get("gate") == "sheet"})
     if chars:
         out.append({"gate": "sheet", "characters": chars})
+    if any(i["blocked_by"] and i.get("gate") == "export" for i in items):
+        out.append({"gate": "export"})
     return out
+
+
+def _record_from_request(request: dict) -> dict:
+    target = request.get("target") or {}
+    return {
+        "id": request["id"], "purpose": request.get("purpose"), "mode": request.get("mode"),
+        "target": {k: target[k] for k in ("page", "page_id", "frame_id", "character_id", "location_id") if k in target},
+        "brief_hash": request.get("brief_hash"), "parent": request.get("parent"), "tool": request.get("tool"),
+        "pad_mm": (request.get("size") or {}).get("pad_mm", 0.0),
+    }
+
+
+def _png(image) -> bytes:
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _guide_sheet(pack) -> bytes | None:
+    """The request's guides side by side, long side 512 px: one small image for the model to look at."""
+    from PIL import Image
+
+    names = [n for n in ("guides/composition.png", "guides/pose.png", "guides/keepout.png") if n in pack.files]
+    if not names:
+        return None
+    images = [Image.open(io.BytesIO(pack.files[n])).convert("L") for n in names]
+    h = min(256, images[0].height)
+    thumbs = [img.resize((max(1, round(img.width * h / img.height)), h)) for img in images]
+    sheet = Image.new("L", (sum(t.width for t in thumbs) + 8 * (len(thumbs) - 1), h), 200)
+    x = 0
+    for thumb in thumbs:
+        sheet.paste(thumb, (x, 0))
+        x += thumb.width + 8
+    sheet.thumbnail((512, 512))
+    return _png(sheet)
+
+
+def _contact_sheet(project: Path, items: list[dict]) -> bytes | None:
+    from PIL import Image, ImageDraw
+
+    from genko.assets import AssetStore
+
+    store = AssetStore(project)
+    thumbs = []
+    for cand in items[:8]:
+        data = store.get_bytes(cand["asset"], ".png")
+        if data is None:
+            continue
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+        img.thumbnail((192, 192))
+        tile = Image.new("RGB", (192, 208), (255, 255, 255))
+        tile.paste(img, ((192 - img.width) // 2, 16 + (192 - img.height) // 2))
+        ImageDraw.Draw(tile).text((2, 2), cand["id"], fill=(0, 0, 0))
+        thumbs.append(tile)
+    if not thumbs:
+        return None
+    cols = min(4, len(thumbs))
+    rows = (len(thumbs) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * 196, rows * 212), (220, 220, 220))
+    for i, tile in enumerate(thumbs):
+        sheet.paste(tile, ((i % cols) * 196, (i // cols) * 212))
+    return _png(sheet)
+
+
+def _render_kind(episode: Episode, project: Path, page_index: int, frame_id: str | None, kind: str,
+                 candidate_id: str | None, max_px: int) -> tuple[bytes, str]:
+    from PIL import Image
+
+    from genko import guide
+    from genko.assets import AssetStore
+    from genko.studio.genreq import PAD_MM
+
+    def exact_px(aspect: float) -> tuple[int, int]:
+        # previews keep the exact aspect (the request sizes are rounded to 64 for image tools)
+        width = max(16, round((max_px * max_px / 2 * aspect) ** 0.5))
+        return width, max(16, round(width / aspect))
+
+    page = next((p for p in episode.pages if p.index == page_index), None)
+    if page is None:
+        raise ApplyError(f"{page_index} ページはない")
+    try:
+        frame = page._find(str(frame_id))
+    except (KeyError, IndexError) as exc:
+        raise ApplyError(f"{page_index} ページにコマ {frame_id} はない") from exc
+    panel = frame.panel or {}
+    if kind == "compare":
+        cand_id = candidate_id or (panel.get("adopted") or {}).get("art")
+        cand = next((c for c in panel.get("candidates", []) if c["id"] == cand_id), None)
+        if cand is None:
+            raise ApplyError(f"候補 {cand_id} はない")
+        data = AssetStore(project).get_bytes(cand["asset"], ".png")
+        if data is None:
+            raise ApplyError(f"候補 {cand_id} の画像が assets/ に無い")
+        pad = (cand.get("mapping") or {}).get("pad_mm", 0.0)
+        box_aspect = (frame.rect.width + 2 * pad) / (frame.rect.height + 2 * pad)
+        box = guide.GenBox.for_frame(frame, pad, exact_px(box_aspect))
+        image = guide.compare(Image.open(io.BytesIO(data)), page, frame, box)
+        label = f"compare_{frame.id}_{cand_id}"
+    elif kind in ("guide:composition", "guide:pose", "guide:keepout"):
+        box_aspect = (frame.rect.width + 2 * PAD_MM) / (frame.rect.height + 2 * PAD_MM)
+        box = guide.GenBox.for_frame(frame, PAD_MM, exact_px(box_aspect))
+        name = kind.split(":", 1)[1]
+        image = guide.keepout(episode, page, frame, box) if name == "keepout" else getattr(guide, name)(page, frame, box)
+        label = f"{name}_{frame.id}"
+    else:
+        raise ApplyError("kind は compare / guide:composition / guide:pose / guide:keepout")
+    image.thumbnail((max_px, max_px))
+    return _png(image), label
 
 
 def _keep_approved(current: list[dict], incoming: list[dict]) -> tuple[list[dict], list[Issue]]:
@@ -534,11 +943,15 @@ def _panel_brief(episode: Episode, page_index: int, frame_id: str | None) -> dic
     for frame in frames:
         panel = frame.panel or {}
         cast = [c.get("id") for c in panel.get("characters", []) if isinstance(c, dict)]
+        from genko.guide import figures_for
+
         out.append({
             "frame_id": frame.id,
             "rect_mm": [round(v, 2) for v in (frame.rect.x, frame.rect.y, frame.rect.width, frame.rect.height)],
             "bleed": frame.bleed,
             "panel": panel,
+            "figures": [{"char": f.char_id, "head_mm": [round(v, 2) for v in f.head], "body_mm": [round(v, 2) for v in f.body]}
+                        for f in figures_for(frame)],
             "character_refs": {cid: chars[cid].get("refs", []) for cid in cast if cid in chars},
             "lines": [line.text for line in episode.story_for_page(page_index) if line.frame_id == frame.id],
         })

@@ -42,6 +42,8 @@ def openapi_spec() -> dict[str, Any]:
             "/openapi.json": {"get": {"responses": {"200": {"description": "spec"}}}},
             "/v1/inspect": {"get": {"parameters": [{"name": "path", "in": "query", "required": True}]}},
             "/v1/pages/{n}.png": {"get": {"parameters": [{"name": "path", "in": "query"}]}},
+            "/v1/assets": {"post": {"parameters": [{"name": "path", "in": "query"}], "requestBody": {"content": {t: {} for t in ("image/png", "image/jpeg", "image/webp")}}}},
+            "/v1/requests/{id}/files/{name}": {"get": {"parameters": [{"name": "path", "in": "query"}]}},
             "/v1/pages/{n}/frames/{frame_id}.png": {"get": {"parameters": [{"name": "path", "in": "query"}, {"name": "dpi", "in": "query"}, {"name": "mode", "in": "query"}]}},
             "/v1/new": {"post": {"requestBody": {"required": True}}},
             "/v1/apply": {"post": {"requestBody": {"required": True}}},
@@ -84,12 +86,56 @@ def _confine_ops(ctx: dict | None, ops: list) -> list:
     return out
 
 
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp")
+
+
+def _upload_asset(ctx: dict | None, query: dict, body: bytes) -> tuple[int, bytes]:
+    """POST /v1/assets?path=<project>: the body is the image. Returns its sha256 ref for import_images."""
+    from genko.assets import AssetStore
+    from genko.studio.importer import ImportError_, normalize
+
+    try:
+        project = confine(ctx, query.get("path", ""))
+    except Forbidden as exc:
+        return _json_bytes({"ok": False, "error": str(exc)}, 403)
+    if not (project / "project.json").is_file():
+        return _json_bytes({"ok": False, "error": "project not found"}, 404)
+    try:
+        blob, size, _ = normalize(body)
+    except ImportError_ as exc:
+        return _json_bytes({"ok": False, "error": str(exc)}, 400)
+    ref = AssetStore(project).put_bytes(blob, ".png")
+    return _json_bytes({"ok": True, "asset": ref, "px": list(size)})
+
+
+def _request_file(ctx: dict | None, query: dict, route: str) -> tuple[int, bytes]:
+    """GET /v1/requests/{id}/files/{name}?path=<project>: a file of a generation request (guides, refs, source, mask)."""
+    from genko.studio import genreq
+
+    try:
+        project = confine(ctx, query.get("path", ""))
+    except Forbidden as exc:
+        return _json_bytes({"ok": False, "error": str(exc)}, 403)
+    head, name = route.split("/files/", 1)
+    request_id = head.rsplit("/", 1)[-1]
+    request = genreq.read(project, request_id)
+    if request is None:
+        return _json_bytes({"ok": False, "error": "unknown request"}, 404)
+    folder = (project / "studio" / "requests" / request_id).resolve()
+    target = (folder / unquote(name)).resolve()
+    if folder not in target.parents or not target.is_file():
+        return _json_bytes({"ok": False, "error": "unknown file"}, 404)
+    return 200, target.read_bytes()
+
+
 def handle_request(method: str, path: str, body: bytes, ctx: dict | None = None) -> tuple[int, bytes]:
     """Route one request. `ctx` ({root, actor}) comes from the HTTP handler after authentication;
     without it only the routes that touch no files answer."""
     parsed = urlparse(path)
     route = parsed.path.rstrip("/") or "/"
     query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+    if route == "/v1/assets" and method == "POST":
+        return _upload_asset(ctx, query, body)
     data: dict[str, Any] = {}
     if body:
         try:
@@ -117,6 +163,8 @@ def handle_request(method: str, path: str, body: bytes, ctx: dict | None = None)
             episode = load_episode(confine(ctx, query.get("path", "")))
             full = query.get("full") in ("1", "true", "yes")
             return _json_bytes(snapshot(episode, full=full))
+        if method == "GET" and route.startswith("/v1/requests/") and "/files/" in route:
+            return _request_file(ctx, query, route)
         if method == "GET" and route.startswith("/v1/pages/") and "/frames/" in route and route.endswith(".png"):
             from genko.render import render_frame
 
@@ -244,7 +292,10 @@ class _Handler(BaseHTTPRequestHandler):
             return 403, "origin not allowed"
         if has_body:
             ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-            if ctype != "application/json":
+            if route == "/v1/assets":
+                if ctype not in IMAGE_TYPES:
+                    return 415, "Content-Type must be image/png, image/jpeg or image/webp"
+            elif ctype != "application/json":
                 return 415, "Content-Type must be application/json"
         if route in PUBLIC_ROUTES:
             return {"root": self.server.root, "actor": "anonymous"}

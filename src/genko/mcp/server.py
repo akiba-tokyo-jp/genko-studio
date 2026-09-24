@@ -20,10 +20,12 @@ INSTRUCTIONS = """Genko は漫画原稿のシステム。文章も絵も作ら�
 Genko が検査・コマ割り・縦書き写植・プレビュー描画をする。絵はあなたが別の道具で生成し、import_image で取り込む。
 進め方: status → next で次の作業を取る → 書く道具は commit=false で試し、issues の path を直してから commit=true。
 ネームの規則は resource genko://guide/manga-rules（inspect target=rules でも読める）。
-作画: inspect target=panel でコマのブリーフと寸法を見る → 画像を生成 → import_image → apply_ops の
-import_candidates（page, frame_id, candidates:[{asset, px, origin:{kind:"agent"}}]）→ render frame_id で確認 →
-adopt_candidate。コマの外にはみ出した部分は自動で切り取られる。
-承認は人間だけが行う。承認が要るところでは request_approval を出して待つ。"""
+作画: generation_request で依頼パック（サイズ・プロンプトの下書き・描かせないもの・ガイドと参照の画像）を受け取る →
+自分の画像ツールで生成し、画像を返された inbox フォルダに保存 → import_images（来歴 origin を必ず付ける）→
+candidates と render kind=compare で比べる → review_candidates → adopt。コマの外にはみ出した部分は自動で切り取られる。
+採用後は report_regions で顔と人物の位置を報告し、作画の承認後に finish_page。最後に preflight と export_proof。
+3 回直しても通らないときは ask_human で人間に相談して、その作業を置いておく。
+承認と本番の書き出しは人間だけが行う。承認が要るところでは request_approval を出して待つ。"""
 
 
 def _out(result: ToolResult) -> list[Any]:
@@ -60,9 +62,10 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.status, project)
 
     @server.tool(structured_output=False)
-    def next(project: str, limit: int = 5) -> list:
-        """次にやる作業（kind、対象ページ、使う道具の目安）。waiting_for は人間の承認待ち。"""
-        return call(service.next, project, limit)
+    def next(project: str, limit: int = 5, claim: bool = False) -> list:
+        """次にやる作業（kind、対象ページ・コマ、使う道具の目安）。waiting_for は人間の承認待ち。
+        並行して動くときは claim=true で返した作業を 10 分予約する（他のエージェントには出ない）。"""
+        return call(service.next, project, limit, claim)
 
     @server.tool(structured_output=False)
     def inspect(project: str, target: str, page: int | None = None, frame_id: str | None = None) -> list:
@@ -71,16 +74,89 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.inspect, project, target, page, frame_id)
 
     @server.tool(structured_output=False)
-    def render(project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None) -> list:
+    def render(project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None,
+               kind: str | None = None, candidate_id: str | None = None) -> list:
         """ページのプレビュー画像（mode: name / proof / print）。コマ番号は読み順。frame_id を渡すとそのコマだけ。
+        kind: compare（候補にネームを赤で重ねる。candidate_id 省略で採用中の絵）/ guide:composition / guide:pose / guide:keepout。
         画像はファイルにも保存する。"""
-        return call(service.render, project, page, mode, max_px, frame_id)
+        return call(service.render, project, page, mode, max_px, frame_id, kind, candidate_id)
 
     @server.tool(structured_output=False)
     def import_image(project: str, path: str | None = None, png_base64: str | None = None) -> list:
         """生成した画像を取り込み、asset（sha256:…）と画素数 px を返す。path は --root の中のファイル。
         取り込んだだけではどこにも使われない。apply_ops の import_candidates でコマの候補にする。"""
         return call(service.import_image, project, path, png_base64)
+
+    @server.tool(structured_output=False)
+    def generation_request(project: str, page: int | None = None, frame_id: str | None = None,
+                           character_id: str | None = None, location_id: str | None = None, purpose: str | None = None,
+                           mode: str = "new", parent: str | None = None, tool: str | None = None,
+                           instruction: str | None = None, regions: list | None = None) -> list:
+        """絵の依頼パックを作る（Genko は生成しない）。コマは page+frame_id、設定画は character_id、背景の参照は location_id。
+        purpose: panel_art / draft / character_sheet / location。mode: new / edit / inpaint（regions に領域 id か rect_mm）/ upscale。
+        修正は parent に元の候補 id。tool は tools.json のツール id（例 openai:gpt-image-1）。
+        返す: request（サイズの候補、prompt の ja/en/tags、avoid、keepout、figures）、files（ガイドと参照画像の場所）、inbox。
+        同じ内容なら同じ id。"""
+        return call(service.generation_request, project, page, frame_id, character_id, location_id, purpose, mode,
+                    parent, tool, instruction, regions)
+
+    @server.tool(structured_output=False)
+    def import_images(project: str, request_id: str, images: list[dict]) -> list:
+        """生成した画像を依頼の候補として取り込む。images: [{file: "studio/inbox/<request_id>/a.png" か asset: "sha256:…",
+        origin: {kind: "agent", tool_id, model, prompt（実際に使ったもの）, params, refs_used, note}}]。
+        file は studio/inbox/ の中だけ。同じ画像は 2 回取り込まれない。"""
+        return call(service.import_images, project, request_id, images)
+
+    @server.tool(structured_output=False)
+    def candidates(project: str, page: int | None = None, frame_id: str | None = None,
+                   character_id: str | None = None, location_id: str | None = None) -> list:
+        """候補の一覧（状態、点数、stale、来歴の要約、取り込み時の目安 metrics。rank が小さいほど良い）と並べた縮小画像。"""
+        return call(service.candidates, project, page, frame_id, character_id, location_id)
+
+    @server.tool(structured_output=False)
+    def review_candidates(project: str, page: int, frame_id: str, reviews: list[dict]) -> list:
+        """候補の評価を残す。reviews: [{candidate_id, score (0..1), note, fix?}]。"""
+        return call(service.review_candidates, project, page, frame_id, reviews)
+
+    @server.tool(structured_output=False)
+    def adopt(project: str, candidate_id: str, page: int | None = None, frame_id: str | None = None, to: str = "art",
+              fit: str | None = None, offset_mm: list[float] | None = None, scale: float | None = None,
+              location_id: str | None = None) -> list:
+        """候補を採用してコマに置く（to: art / bg / draft。fit: cover / contain / stretch）。場所の参照画像は location_id。
+        作画の確定は人間の art 承認で行う。"""
+        return call(service.adopt, project, candidate_id, page, frame_id, to, fit, offset_mm, scale, location_id)
+
+    @server.tool(structured_output=False)
+    def request_fix(project: str, page: int, instruction: str, frame_id: str | None = None,
+                    candidate_id: str | None = None, scope: str = "frame") -> list:
+        """修正のチケットを残す（自分で直す予定のメモ、または人間への相談）。"""
+        return call(service.request_fix, project, page, instruction, frame_id, candidate_id, scope)
+
+    @server.tool(structured_output=False)
+    def report_regions(project: str, page: int, frame_id: str, regions: list[dict]) -> list:
+        """採用した絵の顔と人物の位置を報告する（写植の顔よけに使う）。regions: [{kind: face|person, char?,
+        box01: [x, y, w, h]（採用した画像の中の 0..1）か rect_mm}]。人物のいない絵なら record_review kind=regions。"""
+        return call(service.report_regions, project, page, frame_id, regions)
+
+    @server.tool(structured_output=False)
+    def finish_page(project: str, page: int, commit: bool = False) -> list:
+        """作画承認済みのページを仕上げる（顔にかかる台詞の移動、効果、finish へ）。commit=false で提案とプレビューだけ。"""
+        return call(service.finish_page, project, page, commit)
+
+    @server.tool(structured_output=False)
+    def preflight(project: str) -> list:
+        """書き出しを止めている理由の一覧（承認、未採用のコマ、実効解像度、試験用の画像、来歴）。"""
+        return call(service.preflight, project)
+
+    @server.tool(structured_output=False)
+    def export_proof(project: str, format: str = "pdf") -> list:  # noqa: A002
+        """校正用の書き出し（150 dpi、全ページに「校正」の透かし）。本番の書き出しは人間が行う。"""
+        return call(service.export_proof, project, format)
+
+    @server.tool(structured_output=False)
+    def ask_human(project: str, text: str, page: int | None = None, frame_id: str | None = None, item: str | None = None) -> list:
+        """人間に相談する（3 回直しても通らないときなど）。そのページ・コマの作業は人間が閉じるまで next に出ない。"""
+        return call(service.ask_human, project, text, page, frame_id, item)
 
     @server.tool(structured_output=False)
     def set_bible(project: str, bible: dict, commit: bool = False) -> list:
@@ -112,7 +188,8 @@ def build_server(root: Path, actor: str) -> MCPServer:
     @server.tool(structured_output=False)
     def request_approval(project: str, pages: list[int] | None = None, note: str = "", gate: str = "name",
                          character_id: str | None = None) -> list:
-        """人間に承認を依頼する。gate: name（ネーム）/ art（そのページの絵）/ sheet（キャラクター設定画、character_id が要る）。"""
+        """人間に承認を依頼する。gate: name（ネーム）/ art（そのページの絵）/ sheet（キャラクター設定画、character_id が要る）/
+        export（全ページの仕上げ後、本番の書き出し）。"""
         return call(service.request_approval, project, gate, pages or [], note, character_id)
 
     @server.tool(structured_output=False)
