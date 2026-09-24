@@ -188,7 +188,7 @@ def _finish_items(episode: Episode, page, project: Path | None) -> list[dict]:
             if review and review.get("input_hash") == adopted:
                 continue
             out.append(item("upscale_panel", f"採用した絵の実効解像度が {dpi:.0f} dpi（{MIN_DPI} 未満）",
-                            ["generation_request", "import_images", "adopt", "record_review"], page.index,
+                            ["generation_request", "import_images", "adopt", "derive", "record_review"], page.index,
                             frame_id=layer.frame_id, dpi=dpi, input_hash=str(adopted)))
     if page.stage != "finish":
         out.append(item("finish_page", "作画は承認済み。仕上げ（台詞の顔よけ、効果、finish へ）", ["finish_page", "render"], page.index))

@@ -12,7 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 app = ["pyside6>=6.6"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "psd-tools>=1.9"]  # psd-tools only reads back exported PSDs in tests
 mcp = ["mcp>=2,<3"]
 
 [project.scripts]

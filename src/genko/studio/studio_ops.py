@@ -20,7 +20,7 @@ PANEL_STATUSES = ("empty", "briefed", "requested", "candidates", "fix_requested"
 CANDIDATE_STATUSES = ("candidate", "shortlisted", "rejected")
 ORIGIN_KINDS = ("agent", "human", "self", "fixture", "genko")
 GATES = ("bible", "script", "sheet", "name", "art", "export")
-ADOPT_TARGETS = ("art", "bg", "draft")
+ADOPT_TARGETS = ("art", "bg", "draft", "ink")
 
 STUDIO_OPS = frozenset({
     "set_studio", "upsert_character", "delete_character", "upsert_location", "delete_location",
@@ -60,9 +60,9 @@ STUDIO_SCHEMA = [
     {"op": "import_candidates", "request_id": "str?", "page": "int?", "frame_id": "str?", "character_id": "str?", "location_id": "str?", "candidates": "[{id?, asset, px:[w,h], mode?, parent?, origin}]"},
     {"op": "review_candidates", "page": "int", "frame_id": "str", "reviews": "[{candidate_id, score, note?, fix?}]"},
     {"op": "set_candidate", "page": "int", "frame_id": "str", "candidate_id": "str", "status": "candidate|shortlisted|rejected"},
-    {"op": "adopt_candidate", "page": "int", "frame_id": "str", "candidate_id": "str", "to": "art|bg|draft?", "fit": "cover|contain|stretch?", "offset_mm": "[dx,dy]?", "scale": "float?", "clip_to": "frame|bleed|none?"},
-    {"op": "unadopt", "page": "int", "frame_id": "str", "to": "art|bg|draft?"},
-    {"op": "set_placement", "page": "int", "frame_id": "str", "to": "art|bg|draft?", "fit": "str?", "offset_mm": "[dx,dy]?", "scale": "float?", "clip_to": "str?"},
+    {"op": "adopt_candidate", "page": "int", "frame_id": "str", "candidate_id": "str", "to": "art|bg|draft|ink?", "fit": "cover|contain|stretch?", "offset_mm": "[dx,dy]?", "scale": "float?", "clip_to": "frame|bleed|none?"},
+    {"op": "unadopt", "page": "int", "frame_id": "str", "to": "art|bg|draft|ink?"},
+    {"op": "set_placement", "page": "int", "frame_id": "str", "to": "art|bg|draft|ink?", "fit": "str?", "offset_mm": "[dx,dy]?", "scale": "float?", "clip_to": "str?"},
     {"op": "place_asset", "page": "int", "asset": "sha256:…", "to": "art|bg|draft|name?", "frame_id": "str?", "fit": "str?", "clip_to": "str?"},
     {"op": "set_finish", "page": "int", "frame_id": "str", "finish": "object|null"},
     {"op": "ask_human", "text": "str", "page": "int?", "frame_id": "str?", "item": "str? (work item kind it blocks)"},
@@ -182,8 +182,11 @@ def _art_layer(page: Page, frame_id: str, to: str) -> Layer | None:
 
 
 def _insert_below_ink(page: Page, layer: Layer) -> None:
+    """Placed art goes under the ink; extracted line art (to: ink) goes over the other placed art."""
+    is_ink = (layer.source or {}).get("to") == "ink"
     for i, existing in enumerate(page.layers):
-        if existing.role == LayerRole.INK:
+        placed_ink = existing.kind == LayerKind.PLACED and (existing.source or {}).get("to") == "ink"
+        if existing.role == LayerRole.INK or (placed_ink and not is_ink):
             page.layers.insert(i, layer)
             return
     page.layers.append(layer)
@@ -593,6 +596,7 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
             layer = Layer(
                 id=new_id(), role=LayerRole.DRAFT if to == "draft" else (LayerRole.BG if to == "bg" else LayerRole.USER),
                 kind=LayerKind.PLACED, exportable=to != "draft", title=f"{to} {frame.id}", frame_id=frame.id,
+                source={"to": to},
             )
             _insert_below_ink(page, layer)
         layer.asset = cand["asset"]
@@ -784,7 +788,7 @@ def _import_candidates(episode: Episode, op: dict, agent: str) -> None:
                            "pad_mm": float((request or {}).get("pad_mm") or 0.0), "px": cand["px"]}
     panel.setdefault("candidates", []).extend(new)
     attempts = panel.setdefault("attempts", {"requests": 0, "images": 0, "fix_rounds": 0})
-    attempts["images"] += len(new)
+    attempts["images"] += sum(1 for c in new if c["origin"].get("kind") != "genko")  # Genko's own derivations are free
     if panel.get("status") not in ("adopted", "skip"):
         panel["status"] = "candidates"
     if request is not None:

@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("src", type=Path)
     export.add_argument("out", type=Path)
     export.add_argument("--json", action="store_true")
-    export.add_argument("--dpi", type=int, default=150)
+    export.add_argument("--dpi", type=int, default=None, help="default: the page spec dpi for print formats, 150 for strip/epub")
     export.add_argument("--format", dest="fmt", default="png", choices=["png", "tiff", "pdf", "strip", "psd", "epub", "pack"])
 
     inspect = sub.add_parser("inspect", help="Headless: dump compact JSON snapshot")
@@ -169,16 +169,19 @@ def main(argv: list[str] | None = None) -> int:
 
             episode = load_episode(args.src)
             if args.fmt == "strip":
-                path = export_strip(episode, args.out if args.out.suffix else args.out / "strip.png", dpi=args.dpi)
+                path = export_strip(episode, args.out if args.out.suffix else args.out / "strip.png", dpi=args.dpi or 150)
                 paths = [path]
             elif args.fmt == "psd":
-                paths = [export_psd(episode, args.out if args.out.suffix else args.out / "out.psd", dpi=args.dpi)]
+                from genko.psd import export_psd_pages
+
+                # a folder gets one layered PSD per page; a .psd path gets the first page
+                paths = [export_psd(episode, args.out, dpi=args.dpi or episode.spec.dpi)] if args.out.suffix else export_psd_pages(episode, args.out, dpi=args.dpi)
             elif args.fmt == "epub":
-                paths = [export_epub(episode, args.out if args.out.suffix else args.out / "out.epub", dpi=args.dpi)]
+                paths = [export_epub(episode, args.out if args.out.suffix else args.out / "out.epub", dpi=args.dpi or 150)]
             elif args.fmt == "pack":
                 from genko.pack import export_pack
 
-                paths = export_pack(episode, args.out)
+                paths = export_pack(episode, args.out, dpi=args.dpi)
             else:
                 paths = export_print(episode, args.out, fmt=args.fmt, dpi=args.dpi)
             if args.json:

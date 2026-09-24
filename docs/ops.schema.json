@@ -490,7 +490,7 @@
       "page": "int",
       "frame_id": "str",
       "candidate_id": "str",
-      "to": "art|bg|draft?",
+      "to": "art|bg|draft|ink?",
       "fit": "cover|contain|stretch?",
       "offset_mm": "[dx,dy]?",
       "scale": "float?",
@@ -500,13 +500,13 @@
       "op": "unadopt",
       "page": "int",
       "frame_id": "str",
-      "to": "art|bg|draft?"
+      "to": "art|bg|draft|ink?"
     },
     {
       "op": "set_placement",
       "page": "int",
       "frame_id": "str",
-      "to": "art|bg|draft?",
+      "to": "art|bg|draft|ink?",
       "fit": "str?",
       "offset_mm": "[dx,dy]?",
       "scale": "float?",

@@ -77,7 +77,7 @@ def _drive(root: Path, human, **agent_args) -> FakeAgent:
     return holder["agent"]
 
 
-def test_eight_pages_from_bible_to_export_offline(tmp_path: Path, capsys):
+def test_eight_pages_from_bible_to_export_offline(tmp_path: Path, capsys, monkeypatch):
     root = tmp_path / "manga"
     root.mkdir()
     human = ScriptedHuman(root, tmp_path / "out", capsys)
@@ -96,7 +96,10 @@ def test_eight_pages_from_bible_to_export_offline(tmp_path: Path, capsys):
     assert len(pdf) == 1 and Path(pdf[0]).read_bytes()[:4] == b"%PDF"
     assert len(tiffs) == 8 and all(Path(t).is_file() for t in tiffs)
     assert any(a["gate"] == "export" and a["by"] == "human:test" for a in episode.studio["approvals"])
-    # nothing but adopted art prints: the magenta decoys stay candidates
+    # nothing but adopted art prints: the magenta decoys stay candidates (colours checked before the mono finish)
+    import genko.render
+
+    monkeypatch.setattr(genko.render, "_finish_placed", lambda fitted, *args, **kwargs: fitted)
     for page in episode.pages:
         image = render_page(page, 40, mode="print", episode=episode).convert("RGB")
         assert SENTINEL not in {px for _, px in image.getcolors(1 << 20)}

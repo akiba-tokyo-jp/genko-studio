@@ -17,6 +17,14 @@ from genko.render import render_page
 from genko.studio.service import HumanService, StudioService
 
 FIXTURES = Path(__file__).parent / "fixtures" / "studio" / "demo4"
+
+
+@pytest.fixture(autouse=True)
+def _no_mono_finish(monkeypatch):
+    """These tests check where art lands by its colour; the mono finish (M6) is tested in test_m6."""
+    import genko.render
+
+    monkeypatch.setattr(genko.render, "_finish_placed", lambda fitted, *args, **kwargs: fitted)
 RED, BLUE, GREEN, YELLOW = (220, 30, 30), (30, 30, 220), (30, 200, 30), (230, 220, 20)
 
 

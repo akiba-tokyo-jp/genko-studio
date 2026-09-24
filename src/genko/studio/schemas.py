@@ -33,7 +33,7 @@ SHOTS = ("ELS", "LS", "FS", "MS", "MCU", "CU", "ECU", "INSERT")
 ANGLES = ("eye", "high", "low", "bird", "worm", "dutch")
 POSITIONS = ("left", "left_third", "center", "right_third", "right")
 FACINGS = ("left", "right", "front", "back")
-BALLOONS = ("speech", "thought", "shout", "whisper", "narration")
+BALLOONS = ("speech", "thought", "shout", "whisper", "narration", "sfx")
 BEAT_KINDS = ("action", "dialogue", "monologue", "narration", "sfx")
 TEXT_BEATS = ("dialogue", "monologue", "narration")
 

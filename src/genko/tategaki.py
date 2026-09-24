@@ -121,6 +121,33 @@ def _columns(text: str, per_col: int) -> list[list[str]]:
     return [col for col in cols if col]
 
 
+def _ruby_spans(cols: list[list[str]], ruby_runs: list) -> list[tuple[int, int, int, str]]:
+    """(column, first row, last row, ruby) for every ruby run, found in reading order in the text."""
+    flat: list[tuple[int, int, str]] = [(c, r, ch) for c, col in enumerate(cols) for r, ch in enumerate(col)]
+    text = "".join(ch for _, _, ch in flat)
+    spans: list[tuple[int, int, int, str]] = []
+    pos = 0
+    for run in ruby_runs or []:
+        if not run or len(run) < 2 or not run[0] or not run[1]:
+            continue
+        base, ruby = str(run[0]), str(run[1])
+        at = text.find(base, pos)
+        if at < 0:
+            continue
+        pos = at + len(base)
+        cells = flat[at:at + len(base)]
+        # a base split over two columns gets its ruby split in proportion
+        by_col: dict[int, list[int]] = {}
+        for c, r, _ in cells:
+            by_col.setdefault(c, []).append(r)
+        taken = 0
+        for i, (c, rows) in enumerate(sorted(by_col.items())):
+            share = len(ruby) - taken if i == len(by_col) - 1 else round(len(ruby) * len(rows) / len(cells))
+            spans.append((c, min(rows), max(rows), ruby[taken:taken + share]))
+            taken += share
+    return spans
+
+
 def compose(
     text: str,
     font: ImageFont.ImageFont,
@@ -129,29 +156,35 @@ def compose(
     fill: tuple[int, int, int] = (10, 10, 10),
     ruby_runs: list | None = None,
 ) -> Image.Image:
+    """Vertical text, columns right to left. Ruby sits to the right of its base characters,
+    centred on them, for every run."""
     per_col = max(1, max_height // em)
     cols = _columns(text, per_col)
     if not cols:
         return Image.new("RGBA", (em, em), (0, 0, 0, 0))
-    ruby_w = em // 2 if ruby_runs else 0
-    width = em * len(cols) + ruby_w
+    spans = _ruby_spans(cols, ruby_runs) if ruby_runs else []
+    ruby_w = max(4, em // 2) if spans else 0
+    pitch = em + ruby_w
+    width = pitch * len(cols)
     height = em * max(len(col) for col in cols)
     out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     for index, col in enumerate(cols):
-        cx = width - ruby_w - em * (index + 1)
+        cx = width - pitch * (index + 1)
         for row, char in enumerate(col):
             out.alpha_composite(glyph(char, font, em, fill), (cx, row * em))
-    if ruby_runs:
-        ruby_font_size = max(8, em // 2)
+    if spans:
         try:
-            ruby_font = font.font_variant(size=ruby_font_size)  # type: ignore[attr-defined]
+            ruby_font = font.font_variant(size=max(8, ruby_w))  # type: ignore[attr-defined]
         except Exception:
             ruby_font = font
-        first = ruby_runs[0]
-        ruby = first[1] if len(first) > 1 else ""
-        rx = width - ruby_w
-        for i, char in enumerate(ruby):
-            out.alpha_composite(glyph(char, ruby_font, ruby_w, fill), (rx, i * ruby_w))
+        for col, first, last, ruby in spans:
+            if not ruby:
+                continue
+            rx = width - pitch * (col + 1) + em
+            centre = (first + last + 1) * em / 2
+            top = max(0, min(height - ruby_w * len(ruby), round(centre - ruby_w * len(ruby) / 2)))
+            for i, char in enumerate(ruby):
+                out.alpha_composite(glyph(char, ruby_font, ruby_w, fill), (rx, top + i * ruby_w))
     return out
 
 

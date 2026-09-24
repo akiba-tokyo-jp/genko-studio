@@ -37,11 +37,22 @@ class BalloonPlacement:
     tail: tuple[float, float] | None
 
 
+ELLIPSE_KINDS = ("speech", "thought", "shout", "whisper")
+SFX_EM_MM = 12.0  # the renderer's largest SFX glyph
+
+
 def measure(breaks: list[str], balloon: str) -> tuple[float, float]:
+    """The balloon's box as the renderer draws it: text block + pad, and for ellipses the ellipse
+    that passes around the text block's corners (half-size × √2)."""
     cols = [b for b in breaks if b] or [" "]
     longest = max(len(b) for b in cols)
+    if balloon == "sfx":
+        return (SFX_EM_MM * len(cols), SFX_EM_MM * longest)
+    text_w, text_h = EM_MM * len(cols), EM_MM * longest
+    if balloon in ELLIPSE_KINDS:
+        return (text_w * 2 ** 0.5 + 2 * PAD_MM, text_h * 2 ** 0.5 + 2 * PAD_MM)
     pad = 0.0 if balloon == "none" else PAD_MM
-    return (EM_MM * len(cols) + 2 * pad, EM_MM * longest + 2 * pad)
+    return (text_w + 2 * pad, text_h + 2 * pad)
 
 
 def place_page(
@@ -154,7 +165,7 @@ def _after(box: Box, prev: Box | None) -> bool:
 
 
 def _tail(box: Box, balloon: str, speaker_id: str | None, figs: list[Figure]) -> tuple[float, float] | None:
-    if balloon in ("narration", "thought") or not speaker_id:
+    if balloon in ("narration", "thought", "sfx") or not speaker_id:
         return None
     fig = next((f for f in figs if f.char_id == speaker_id), None)
     if fig is None:

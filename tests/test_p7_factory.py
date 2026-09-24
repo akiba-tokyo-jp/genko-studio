@@ -194,4 +194,5 @@ def test_psd_writes_named_layer_bytes(tmp_path):
     export_psd(ep, path, dpi=72)
     data = path.read_bytes()
     assert data.startswith(b"8BPS")
-    assert b"ToneA" in data or b"pixels" in data
+    # M6: layers carry Unicode names; an empty user layer has nothing to export
+    assert "コマ枠".encode("utf-16-be") in data and b"ToneA" not in data

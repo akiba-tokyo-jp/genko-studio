@@ -62,6 +62,9 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - `upscale_panel`: 画像ツールに高解像度化があれば `generation_request`（`mode: "upscale"`）で作り直して取り込み、採用し直す。
   無ければ `record_review`（`kind: "upscale"`、`input_hash` に採用中の候補 id）で理由を残す。
 - `finish_page`: `mcp_genko_finish_page` を `commit: false` で見て（顔にかかる台詞の移動、効果）、よければ `commit: true`。
+- 線をくっきりさせたいコマは `mcp_genko_derive`（`kind: "lineart"`）で採用中の絵から線を抜き出し、`adopt`（`to: "ink"`）で絵の上に置く。
+  モノクロの原稿では、グレーの絵は印刷のときに Genko が網点に変える。画像はグレースケールで、トーンを描き込みすぎずに作る。
+- 効果音はネーム計画の台詞で `balloon: "sfx"` にする（Genko が大きな縁取り文字で描く。画像に描かせない）。
 
 ## 承認を頼む
 

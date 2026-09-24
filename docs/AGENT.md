@@ -154,6 +154,14 @@ People and records (M5):
 - Every approval change is appended to `studio/audit.jsonl` with its actor (never trimmed). `genko studio audit PROJ` fails if anyone but a person changed one. `undo`/`redo` that would change an approval are refused for agents.
 - D5: `genko studio eval-sample PROJ --out d5` and `genko studio eval-score d5 answers.csv`. See `docs/STUDIO_EVAL.md`.
 
+Printing in black and white (M6):
+
+- Monochrome pages (`spec.expression` "mono") finish placed art at render time, without touching the asset: levels, a line mask (dark and locally contrasted pixels print solid), solid black and paper white, and the mid greys in flat tone steps (default 10 / 20 / 30%). `print` draws the steps as AM dots (60 lpi, 45°) with the exact black share at any dpi (±1%), so the page is pure black and white; `proof` and `name` show the flat greys instead of dots. Settings: `studio.style.finish` for the book, `set_finish {page, frame_id, finish}` per panel: `{black, white, line_threshold, line_contrast, steps, lpi, angle, screen: am|fm}`. Colour pages are left as they are.
+- Tone layers (`add_tone`, `stamp_material`) use the same dots; noise materials use FM (error diffusion).
+- `derive {page, frame_id, kind: "lineart"}` extracts the lines of the adopted art (or `candidate_id`) as a black-on-transparent candidate (origin `genko`, mode `derive`, not counted in the image budget). `adopt … to: "ink"` puts it over the toned art for crisp lines.
+- Balloons: ellipses are sized to go around the text block (half-size × √2 + pad; the name lettering measures them the same way). Tails leave from the side that faces the speaker with a base of a third of the short side. `shout` is spiky, `whisper` dashed, `thought` trails small bubbles, `narration` is a box, `sfx` is large outlined lettering without a balloon. Ruby sits beside every base it belongs to. Focus and speed lines are clipped to their panel and focus lines leave the centre clear.
+- Export: print, pack and PSD default to the page spec's dpi (B4 comic: 600); strip and EPUB to 150. File names are made safe for Windows. EPUB is EPUB 3, fixed layout, right to left for right-bound books. PSD: `genko export PROJ OUTDIR --format psd` writes one layered PSD per page (paper, each placed image as greyscale art, raster layers, ink, tone, effects, panel borders, one layer per balloon, page number; Unicode layer names, cropped layers, resolution set). The manual check for CLIP STUDIO PAINT and Photoshop is `docs/PSD_CHECKLIST.md`.
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

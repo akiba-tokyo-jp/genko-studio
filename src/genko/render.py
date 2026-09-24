@@ -103,8 +103,10 @@ def _font(path: str | None = None, size: int = 14) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, int], dpi: int) -> Image.Image | None:
-    """Resample a placed image from its asset into its placement, clipped to its panel."""
+def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, int], dpi: int,
+                   mode: str = "print") -> Image.Image | None:
+    """Resample a placed image from its asset into its placement, clipped to its panel, and give
+    monochrome pages their finish (print: black and white with dots; proof: the flat grey steps)."""
     from genko.assets import AssetStore
     from genko.placement import clip_box
 
@@ -134,9 +136,33 @@ def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, 
     sx, sy = source.width / (x1 - x0), source.height / (y1 - y0)
     box = ((vx0 - x0) * sx, (vy0 - y0) * sy, (vx1 - x0) * sx, (vy1 - y0) * sy)
     fitted = source.resize((vx1 - vx0, vy1 - vy0), Image.Resampling.LANCZOS, box=box)
+    fitted = _finish_placed(fitted, layer, page, episode, dpi, mode, (vx0, vy0))
     canvas = Image.new("RGBA", size, (0, 0, 0, 0))
     canvas.paste(fitted, (vx0, vy0))
     return canvas
+
+
+def _finish_placed(fitted: Image.Image, layer, page: Page, episode: Episode | None, dpi: int, mode: str,
+                   origin: tuple[int, int]) -> Image.Image:
+    from genko import screentone
+
+    to = (layer.source or {}).get("to", "art")
+    if mode not in ("print", "proof") or page.spec.expression == "color" or layer.role in (LayerRole.DRAFT, LayerRole.NAME):
+        return fitted
+    alpha = fitted.split()[3]
+    grey = Image.alpha_composite(Image.new("RGBA", fitted.size, (255, 255, 255, 255)), fitted).convert("L")
+    if to == "ink":
+        # extracted line art: pure black lines, transparent elsewhere
+        ink = grey.point(lambda v: 255 if v < 128 else 0)
+        out = Image.new("RGBA", fitted.size, (0, 0, 0, 0))
+        out.putalpha(ImageChops.multiply(ink, alpha))
+        return out
+    style = ((episode.studio.get("style") or {}).get("finish") if episode is not None else None) or {}
+    finish = screentone.Finish.from_dict({**style, **(layer.finish or {})})
+    done = screentone.finish_gray(grey, finish, dpi, screen=mode == "print", origin=origin)
+    out = done.convert("RGBA")
+    out.putalpha(alpha if mode == "proof" else alpha.point(lambda v: 255 if v >= 128 else 0))
+    return out
 
 
 def render_frame(page: Page, frame_id: str, working_dpi: int, mode: str = "proof", episode: Episode | None = None) -> Image.Image:
@@ -187,68 +213,93 @@ def _blend_over(base: Image.Image, over: Image.Image, mode: str, opacity: float,
     return Image.alpha_composite(base_rgba, mixed_rgba)
 
 
-def _draw_tone(image: Image.Image, page: Page, dpi: int) -> None:
-    draw = ImageDraw.Draw(image)
+def _tone_is_fm(layer) -> bool:
+    if not layer.material_id:
+        return False
+    try:
+        from genko.materials import get_material
+
+        return get_material(str(layer.material_id)).get("kind") == "noise"
+    except Exception:
+        return False
+
+
+def _draw_tone(image: Image.Image, page: Page, dpi: int, mode: str = "print") -> Image.Image:
+    """Tone layers: AM dots (or FM for noise materials) with the exact black share, inside their
+    region (or all panels). Proofs and names show a flat grey instead of dots."""
+    from genko import screentone
+
     for layer in page.layers:
         if layer.role != LayerRole.TONE or not layer.visible:
             continue
-        density = float(layer.density or 0.3)
-        lpi = float(layer.lpi or 60)
-        spacing = max(2, round(dpi / lpi))
-        radius = max(1, round(spacing * density * 0.45))
-        import math
-
-        angle = math.radians(float(getattr(layer, "angle", 45) or 0))
-        ca, sa = math.cos(angle), math.sin(angle)
-        frames = page.leaf_frames()
-        boxes = [rect_px(frame.rect, dpi) for frame in frames]
+        density = max(0.0, min(1.0, float(layer.density or 0.3)))
+        mask = Image.new("L", image.size, 0)
+        draw = ImageDraw.Draw(mask)
         if layer.region:
-            xs = [mm_to_px(pt[0], dpi) for pt in layer.region]
-            ys = [mm_to_px(pt[1], dpi) for pt in layer.region]
-            boxes = [(min(xs), min(ys), max(xs), max(ys))]
-        for x0, y0, x1, y1 in boxes:
-            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-            span = int(((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5)
-            for i in range(-span, span, spacing):
-                for j in range(-span, span, spacing):
-                    x = int(cx + i * ca - j * sa)
-                    y = int(cy + i * sa + j * ca)
-                    if x0 <= x <= x1 and y0 <= y <= y1:
-                        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(20, 20, 20))
+            draw.polygon([_xy(pt, dpi) for pt in layer.region], fill=255)
+        else:
+            for frame in page.leaf_frames():
+                draw.rectangle(rect_px(frame.rect, dpi), fill=255)
+        if mode == "print":
+            tone = screentone.tone_area(mask, density, dpi, float(layer.lpi or 60), float(layer.angle if layer.angle is not None else 45),
+                                        fm=_tone_is_fm(layer))
+        else:
+            tone = Image.new("RGBA", image.size, (0, 0, 0, 0))
+            tone.putalpha(mask.point(lambda v, d=density: round(v * d)))
+        image = Image.alpha_composite(image.convert("RGBA"), tone).convert(image.mode)
+    return image
 
 
-def _draw_effects(image: Image.Image, page: Page, dpi: int) -> None:
-    draw = ImageDraw.Draw(image)
+def _draw_effects(image: Image.Image, page: Page, dpi: int) -> Image.Image:
+    """Focus lines (tapered wedges toward a clear centre), speed lines and white flash, each clipped
+    to its panel. Lengths vary with a fixed per-effect sequence, so renders repeat exactly."""
+    import math
+    import random
+
     for effect in page.effects:
         kind = effect.get("kind")
         frame = None
         if effect.get("frame_id"):
             try:
                 frame = page._find(effect["frame_id"])
-            except KeyError:
+            except (KeyError, IndexError):
                 frame = None
         box = rect_px(frame.rect, dpi) if frame is not None else (0, 0, image.width, image.height)
         x0, y0, x1, y1 = box
-        cx = (x0 + x1) // 2
-        cy = (y0 + y1) // 2
-        count = int(effect.get("params", {}).get("count", 36))
+        params = effect.get("params") or {}
+        count = int(params.get("count", 48 if kind == "focus" else 28))
+        rng = random.Random(str(effect.get("id")))
+        layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         if kind == "focus":
-            import math
-
-            radius = max(x1 - x0, y1 - y0) // 2
+            outer = math.hypot(x1 - x0, y1 - y0) / 2
+            clear = float(params.get("clear", 0.45))  # the empty centre, as a share of the half-diagonal
             for i in range(count):
-                angle = (2 * math.pi * i) / count
-                draw.line(
-                    (cx, cy, int(cx + radius * math.cos(angle)), int(cy + radius * math.sin(angle))),
-                    fill=(20, 20, 20),
-                    width=1,
-                )
+                a = 2 * math.pi * (i + rng.random() * 0.6) / count
+                inner = outer * clear * (0.85 + rng.random() * 0.3)
+                half = (2 * math.pi / count) * (0.18 + rng.random() * 0.2)
+                tip = (cx + inner * math.cos(a), cy + inner * math.sin(a))
+                draw.polygon([(cx + outer * 1.05 * math.cos(a - half), cy + outer * 1.05 * math.sin(a - half)),
+                              (cx + outer * 1.05 * math.cos(a + half), cy + outer * 1.05 * math.sin(a + half)), tip],
+                             fill=(15, 15, 15, 255))
         elif kind == "speed":
+            height = max(1, y1 - y0)
+            thick = max(1, mm_to_px(0.3, dpi))
             for i in range(count):
-                y = y0 + int((y1 - y0) * i / max(1, count - 1))
-                draw.line((x0, y, x1, y), fill=(20, 20, 20), width=1)
+                y = y0 + height * (i + rng.random()) / count
+                start = x0 + (x1 - x0) * rng.random() * 0.5
+                draw.line((start, y, x1, y), fill=(15, 15, 15, 255), width=thick + int(rng.random() * thick * 2))
         elif kind == "white":
-            draw.rectangle(box, fill=(255, 255, 255))
+            draw.rectangle(box, fill=(255, 255, 255, 255))
+        else:
+            continue
+        if frame is not None:
+            mask = Image.new("L", image.size, 0)
+            ImageDraw.Draw(mask).rectangle(box, fill=255)
+            layer.putalpha(ImageChops.multiply(layer.split()[3], mask))
+        image = Image.alpha_composite(image.convert("RGBA"), layer).convert(image.mode)
+    return image
 
 
 def _project_box(prim: dict, dpi: int) -> list[tuple[int, int]]:
@@ -351,6 +402,111 @@ def _balloon_font(line: StoryLine, dpi: int, font_path: str | None) -> ImageFont
     return _font(font_path, size)
 
 
+SQRT2 = 2 ** 0.5
+OUTLINE = (20, 20, 20)
+PAPER = (255, 255, 255)
+
+
+def _ellipse_point(cx: float, cy: float, rx: float, ry: float, t: float) -> tuple[float, float]:
+    import math
+
+    return cx + rx * math.cos(t), cy + ry * math.sin(t)
+
+
+def _tail(draw: ImageDraw.ImageDraw, cx: float, cy: float, rx: float, ry: float, target: tuple[int, int],
+          width: int, rect: bool = False) -> None:
+    """A tail from the balloon's edge toward `target`, drawn after the balloon. The base is a third of
+    the short side (measured as a chord, so tall balloons get wide tails too) and leaves from whichever
+    side faces the speaker; the outline is opened where the tail joins."""
+    import math
+
+    tx, ty = target
+    if abs(tx - cx) < 1e-6 and abs(ty - cy) < 1e-6:
+        return
+    base = max(min(rx, ry) * 2 / 3, 4.0)
+    t = math.atan2((ty - cy) / max(ry, 1), (tx - cx) / max(rx, 1))
+    if rect:
+        if abs(tx - cx) / max(rx, 1) > abs(ty - cy) / max(ry, 1):
+            ex = cx + (rx if tx > cx else -rx)
+            p1, p2 = (ex, cy - base / 2), (ex, cy + base / 2)
+        else:
+            ey = cy + (ry if ty > cy else -ry)
+            p1, p2 = (cx - base / 2, ey), (cx + base / 2, ey)
+    else:
+        lo, hi = 0.0, math.pi / 2
+        for _ in range(24):  # the half-angle whose chord is `base`
+            mid = (lo + hi) / 2
+            a = _ellipse_point(cx, cy, rx, ry, t - mid)
+            b = _ellipse_point(cx, cy, rx, ry, t + mid)
+            if math.dist(a, b) < base:
+                lo = mid
+            else:
+                hi = mid
+        p1 = _ellipse_point(cx, cy, rx, ry, t - lo)
+        p2 = _ellipse_point(cx, cy, rx, ry, t + lo)
+    # the triangle reaches a little inside the balloon so the white covers the outline at the join
+    k = 0.12
+    q1 = (p1[0] + (cx - p1[0]) * k, p1[1] + (cy - p1[1]) * k)
+    q2 = (p2[0] + (cx - p2[0]) * k, p2[1] + (cy - p2[1]) * k)
+    draw.polygon([q1, q2, (tx, ty)], fill=PAPER)
+    draw.line([p1, (tx, ty), p2], fill=OUTLINE, width=width, joint="curve")
+
+
+def _balloon_shape(draw: ImageDraw.ImageDraw, kind: str, cx: float, cy: float, rx: float, ry: float,
+                   tail: tuple[int, int] | None, width: int) -> None:
+    import math
+
+    box = [cx - rx, cy - ry, cx + rx, cy + ry]
+    if kind == "narration":
+        draw.rectangle(box, fill=PAPER, outline=OUTLINE, width=width)
+        return
+    if kind == "shout":
+        spikes = max(12, int((rx + ry) / 6))
+        points = []
+        for i in range(spikes * 2):
+            t = math.pi * i / spikes
+            k = 1.18 if i % 2 == 0 else 0.98
+            points.append(_ellipse_point(cx, cy, rx * k, ry * k, t))
+        draw.polygon(points, fill=PAPER)
+        draw.line(points + points[:1], fill=OUTLINE, width=width)
+        if tail:
+            _tail(draw, cx, cy, rx, ry, tail, width)
+        return
+    if kind == "whisper":
+        draw.ellipse(box, fill=PAPER)
+        dashes = max(16, int((rx + ry) / 4))
+        for i in range(0, dashes * 2, 2):
+            t0, t1 = math.pi * i / dashes, math.pi * (i + 1) / dashes
+            draw.line([_ellipse_point(cx, cy, rx, ry, t0 + (t1 - t0) * k / 4) for k in range(5)], fill=OUTLINE, width=width)
+        if tail:
+            _tail(draw, cx, cy, rx, ry, tail, width)
+        return
+    draw.ellipse(box, fill=PAPER, outline=OUTLINE, width=width)
+    if tail and kind == "speech":
+        _tail(draw, cx, cy, rx, ry, tail, width)
+    if kind == "thought":
+        # small bubbles toward the speaker (or down-left when no tail is set)
+        tx, ty = tail if tail else (cx - rx * 1.6, cy + ry * 1.4)
+        ang = math.atan2((ty - cy) / max(ry, 1), (tx - cx) / max(rx, 1))
+        ex, ey = _ellipse_point(cx, cy, rx, ry, ang)
+        for i, frac in enumerate((0.25, 0.55, 0.85)):
+            r = max(2.0, min(rx, ry) * (0.22 - i * 0.06))
+            bx, by = ex + (tx - ex) * frac, ey + (ty - ey) * frac
+            draw.ellipse([bx - r, by - r, bx + r, by + r], fill=PAPER, outline=OUTLINE, width=max(1, width - 1))
+
+
+def _outlined(text_img: Image.Image, grow: int) -> Image.Image:
+    """Black text with a white outline `grow` px wide (for SFX over art)."""
+    from PIL import ImageFilter
+
+    alpha = text_img.split()[3]
+    halo = alpha.filter(ImageFilter.MaxFilter(grow * 2 + 1)) if grow > 0 else alpha
+    out = Image.new("RGBA", text_img.size, (255, 255, 255, 0))
+    out.putalpha(halo)
+    out.alpha_composite(text_img)
+    return out
+
+
 def _draw_balloon(
     draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font_path: str | None = None, show_speaker: bool = True
 ) -> None:
@@ -358,74 +514,67 @@ def _draw_balloon(
     y = mm_to_px(line.y_mm, dpi)
     w = mm_to_px(line.w_mm or 40, dpi)
     h = mm_to_px(line.h_mm or 20, dpi)
-    box = [x, y, x + w, y + h]
     kind = line.balloon or "speech"
     font = _balloon_font(line, dpi, font_path)
     size = int(getattr(font, "size", 14) or 14)
     wrap = getattr(line, "wrap", "horizontal")
     page = getattr(draw, "_image", None)
+    width = max(2, mm_to_px(0.35, dpi))
+    tail = _xy(line.tail, dpi) if line.tail else None
+    cx, cy = x + w / 2, y + h / 2
     if wrap == "vertical":
         em = size
+        pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
+        if kind == "sfx":
+            em = max(12, min(mm_to_px(12, dpi), w, h // max(1, len((line.text or " ").split("\n")[0]))))
+            font = _font(font_path, em)
         composed = compose_tategaki(
             line.text,
             font,
             em,
-            max(em, h if kind == "none" else h),
+            max(em, h),
             fill=(10, 10, 10),
             ruby_runs=getattr(line, "ruby_runs", None) or None,
         )
-        pad = 0 if kind == "none" else max(2, em // 4)
-        if kind != "none":
-            bw = composed.width + pad * 2
-            bh = composed.height + pad * 2
-            box = [x, y, x + bw, y + bh]
-            fill = (255, 255, 255)
-            outline = (20, 20, 20)
-            if line.path:
-                xy = [_xy(pt, dpi) for pt in line.path]
-                if len(xy) >= 3:
-                    draw.polygon(xy, fill=fill, outline=outline)
-            elif kind == "narration":
-                draw.rectangle(box, fill=fill, outline=outline, width=2)
-            elif kind == "thought":
-                draw.ellipse(box, fill=fill, outline=outline, width=2)
-                r = max(3, bw // 12)
-                draw.ellipse([x + 4, y + bh, x + 4 + r, y + bh + r], fill=fill, outline=outline, width=2)
-            else:
-                draw.ellipse(box, fill=fill, outline=outline, width=2)
-            if line.tail:
-                tx, ty = _xy(line.tail, dpi)
-                cx = x + bw // 2
-                cy = y + bh
-                draw.polygon([(cx - 6, cy - 2), (cx + 6, cy - 2), (tx, ty)], fill=fill, outline=outline)
-            if line.speaker and show_speaker:
-                draw.text((x, max(0, y - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
+        tw, th = composed.size
+        if kind == "none":
+            if page is not None:
+                page.paste(composed, (x, y), composed)
+            return
+        if kind == "sfx":
+            if page is not None:
+                art = _outlined(composed, max(2, em // 8))
+                page.paste(art, (round(cx - art.width / 2), round(cy - art.height / 2)), art)
+            return
+        if kind == "narration":
+            rx, ry = tw / 2 + pad, th / 2 + pad
+        else:
+            # the ellipse goes around the text block's corners: half-size × √2, plus the pad
+            rx, ry = tw / 2 * SQRT2 + pad, th / 2 * SQRT2 + pad
+        if line.path:
+            xy = [_xy(pt, dpi) for pt in line.path]
+            if len(xy) >= 3:
+                draw.polygon(xy, fill=PAPER, outline=OUTLINE)
+        else:
+            _balloon_shape(draw, kind, cx, cy, rx, ry, tail if kind != "narration" else None, width)
+        if line.speaker and show_speaker:
+            draw.text((min(x, cx - rx), max(0, min(y, cy - ry) - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
         if page is not None:
-            page.paste(composed, (x + pad, y + pad), composed)
+            page.paste(composed, (round(cx - tw / 2), round(cy - th / 2)), composed)
         return
     if line.path:
         xy = [_xy(pt, dpi) for pt in line.path]
         if len(xy) >= 3:
-            draw.polygon(xy, fill=(255, 255, 255), outline=(20, 20, 20))
-    elif kind != "none":
-        fill = (255, 255, 255)
-        outline = (20, 20, 20)
-        if kind == "narration":
-            draw.rectangle(box, fill=fill, outline=outline, width=2)
-        elif kind == "thought":
-            draw.ellipse(box, fill=fill, outline=outline, width=2)
-            r = max(3, w // 12)
-            draw.ellipse([x + 4, y + h, x + 4 + r, y + h + r], fill=fill, outline=outline, width=2)
-        else:
-            draw.ellipse(box, fill=fill, outline=outline, width=2)
-        if line.tail:
-            tx, ty = _xy(line.tail, dpi)
-            cx = x + w // 2
-            cy = y + h
-            draw.polygon([(cx - 6, cy - 2), (cx + 6, cy - 2), (tx, ty)], fill=fill, outline=outline)
+            draw.polygon(xy, fill=PAPER, outline=OUTLINE)
+    elif kind not in ("none", "sfx"):
+        _balloon_shape(draw, kind, cx, cy, w / 2, h / 2, tail if kind != "narration" else None, width)
     if line.speaker and kind != "none" and show_speaker:
         draw.text((x, max(0, y - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
     pad_x, pad_y = 6, max(2, h // 8)
+    if kind in ("speech", "thought", "shout", "whisper"):
+        # keep the text inside the ellipse: the inscribed box is the ellipse's size / √2
+        pad_x = max(pad_x, round(w / 2 * (1 - 1 / SQRT2)))
+        pad_y = max(pad_y, round(h / 2 * (1 - 1 / SQRT2)))
     if line.ruby:
         draw.text((x + pad_x, y + 2), line.ruby, fill=(10, 10, 10), font=font)
         draw.text((x + pad_x, y + 2 + size), line.text, fill=(10, 10, 10), font=font)
@@ -469,6 +618,22 @@ def _draw_crop_marks(draw: ImageDraw.ImageDraw, page: Page, dpi: int) -> None:
         draw.line((x, y, x + dx * mark, y + dy * mark), fill=(0, 0, 0), width=1)
 
 
+def _draw_frames(draw: ImageDraw.ImageDraw, page: Page, working_dpi: int) -> None:
+    for frame in page.leaf_frames():
+        width_px = max(1, mm_to_px(frame.border_mm or 0.8, working_dpi) // 4)
+        if not frame.bleed:
+            draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
+            continue
+        # A bleed panel has no border on the sides that run off the paper.
+        from genko.placement import outer_edges
+
+        x0, y0, x1, y1 = rect_px(frame.rect, working_dpi)
+        open_sides = outer_edges(page, frame)
+        for side, line in (("top", (x0, y0, x1, y0)), ("bottom", (x0, y1, x1, y1)), ("left", (x0, y0, x0, y1)), ("right", (x1, y0, x1, y1))):
+            if not open_sides[side]:
+                draw.line(line, fill=(20, 20, 20), width=max(1, width_px))
+
+
 def render_page(
     page: Page,
     working_dpi: int,
@@ -506,7 +671,7 @@ def render_page(
         if layer.role in (LayerRole.NAME, LayerRole.DRAFT) and mode == "print":
             continue
         if layer.kind == LayerKind.PLACED:
-            raster = _placed_raster(layer, page, episode, size, working_dpi)
+            raster = _placed_raster(layer, page, episode, size, working_dpi, mode)
         else:
             raster = _open_raster(layer)
             if raster is not None:
@@ -544,9 +709,9 @@ def render_page(
     rgba = Image.alpha_composite(rgba, ink_layer)
     image = rgba.convert("RGB")
 
-    _draw_tone(image, page, working_dpi)
+    image = _draw_tone(image, page, working_dpi, mode)
     if page.effects:
-        _draw_effects(image, page, working_dpi)
+        image = _draw_effects(image, page, working_dpi)
     _draw_prims(image, page, working_dpi, mode)
 
     if page.ruler and mode in ("name", "proof"):
@@ -558,19 +723,7 @@ def render_page(
             draw.line((0, py, image.width, py), fill=(220, 180, 180), width=1)
 
     draw = ImageDraw.Draw(image)
-    for frame in page.leaf_frames():
-        width_px = max(1, mm_to_px(frame.border_mm or 0.8, working_dpi) // 4)
-        if not frame.bleed:
-            draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
-            continue
-        # A bleed panel has no border on the sides that run off the paper.
-        from genko.placement import outer_edges
-
-        x0, y0, x1, y1 = rect_px(frame.rect, working_dpi)
-        open_sides = outer_edges(page, frame)
-        for side, line in (("top", (x0, y0, x1, y0)), ("bottom", (x0, y1, x1, y1)), ("left", (x0, y0, x0, y1)), ("right", (x1, y0, x1, y1))):
-            if not open_sides[side]:
-                draw.line(line, fill=(20, 20, 20), width=max(1, width_px))
+    _draw_frames(draw, page, working_dpi)
 
     font_path = getattr(episode, "font_path", None) if episode is not None else None
     font = _font(font_path)

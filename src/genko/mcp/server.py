@@ -182,6 +182,13 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.export_proof, project, format)
 
     @server.tool(structured_output=False)
+    def derive(project: str, page: int, frame_id: str, kind: str = "lineart", candidate_id: str | None = None,
+               params: dict | None = None) -> list:
+        """Genko の決定的な処理で候補を作る。kind lineart: 候補（省略で採用中の絵）の線を抜き出した黒線の層。
+        adopt の to: "ink" で置くと、トーンにした絵の上にくっきりした線が乗る。params: {radius, threshold, min_px}。"""
+        return call(service.derive, project, page, frame_id, kind, candidate_id, params)
+
+    @server.tool(structured_output=False)
     def review_page(project: str) -> list:
         """人間の確認用ページ（studio/review.html）を作り、場所を返す。承認を頼んだら、この場所をメッセージで人間に知らせる。"""
         return call(service.review_page, project)

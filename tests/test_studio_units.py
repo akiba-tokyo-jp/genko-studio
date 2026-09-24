@@ -2,6 +2,8 @@ import copy
 import json
 from pathlib import Path
 
+import pytest
+
 from genko.io import load_episode, save_episode
 from genko.models import PageSpec, new_episode
 from genko.studio import layout, lint
@@ -96,7 +98,9 @@ def test_lettering_stays_in_panel_in_reading_order_and_off_faces():
         assert x <= p.x_mm and p.x_mm + p.w_mm <= x + w
         assert y <= p.y_mm and p.y_mm + p.h_mm <= y + h
         assert p.tail is not None  # the speaker is in the panel
-    assert measure(["…やっぱり", "来てくれたんだ"], "speech")[0] == 2 * EM_MM + EM_MM / 2
+    # the ellipse goes around the text block's corners (M6): 2 columns × √2 + the pad on both sides
+    assert measure(["…やっぱり", "来てくれたんだ"], "speech")[0] == pytest.approx(2 * EM_MM * 2 ** 0.5 + EM_MM / 2)
+    assert measure(["…やっぱり", "来てくれたんだ"], "narration")[0] == 2 * EM_MM + EM_MM / 2
 
 
 def test_lettering_reports_overflow_with_the_line_path():

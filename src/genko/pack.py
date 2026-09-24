@@ -6,11 +6,13 @@ from genko.export import export_print
 from genko.models import Episode
 
 
-def export_pack(episode: Episode, dest: Path, preset: str = "shueisha", dpi: int = 600) -> list[Path]:
+def export_pack(episode: Episode, dest: Path, preset: str = "shueisha", dpi: int | None = None) -> list[Path]:
+    """Submission pack at the spec resolution (B4 comic: 600 dpi): 1-bit TIFF, PNG, list.csv, README."""
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
-    tiffs = export_print(episode, dest, fmt="tiff", dpi=min(dpi, 150), crop_marks=True)
-    pngs = export_print(episode, dest, fmt="png", dpi=min(dpi, 150), crop_marks=True)
+    dpi = int(dpi or episode.spec.dpi or 600)
+    tiffs = export_print(episode, dest, fmt="tiff", dpi=dpi, crop_marks=True)
+    pngs = export_print(episode, dest, fmt="png", dpi=dpi, crop_marks=True)
     csv_path = dest / "list.csv"
     lines = ["page,numero,dpi,expression,spread_with,width_mm,height_mm,bleed_mm,preset"]
     for page in episode.pages:
@@ -19,7 +21,7 @@ def export_pack(episode: Episode, dest: Path, preset: str = "shueisha", dpi: int
                 [
                     str(page.index),
                     str(page.index if page.numero else ""),
-                    str(page.spec.dpi),
+                    str(dpi),
                     page.spec.expression,
                     str(page.spread_with or ""),
                     str(page.spec.width_mm),

@@ -51,7 +51,7 @@ AGENT_TOOLS = frozenset({
     "status", "next", "inspect", "render", "import_image", "set_bible", "set_script", "submit_name", "apply_ops",
     "record_review", "request_approval", "tickets", "generation_request", "import_images", "candidates",
     "review_candidates", "adopt", "request_fix", "report_regions", "finish_page", "preflight", "export_proof", "ask_human",
-    "review_page",
+    "review_page", "derive",
 })
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
@@ -425,6 +425,52 @@ class StudioService:
         written = preflight.export_proof(episode, path, format)
         return ToolResult(True, {"files": [str(p) for p in written], "dpi": preflight.PROOF_DPI, "watermark": True},
                           files=[str(p) for p in written])
+
+    def derive(self, project: str, page: int, frame_id: str, kind: str = "lineart", candidate_id: str | None = None,
+               params: dict | None = None) -> ToolResult:
+        """Genko's own deterministic image steps, added as candidates (origin kind "genko", mode "derive").
+        kind lineart: the lines of a candidate (default the adopted art) as black-on-transparent ink;
+        adopt it with to: "ink" to print crisp lines over the toned art."""
+        from genko import lineart
+        from genko.assets import AssetStore
+        from genko.studio.jsonutil import content_hash
+
+        if kind != "lineart":
+            return fail("kind は lineart だけ", "bad_kind", "/kind")
+        path = self.project_path(project)
+        episode = load_episode(path)
+        target = next((p for p in episode.pages if p.index == page), None)
+        if target is None:
+            return fail(f"{page} ページはない", "no_page", "/page")
+        try:
+            panel = target._find(str(frame_id)).panel or {}
+        except (KeyError, IndexError):
+            return fail(f"コマ {frame_id} はない", "no_frame", "/frame_id")
+        source_id = candidate_id or (panel.get("adopted") or {}).get("art")
+        source = next((c for c in panel.get("candidates", []) if c.get("id") == source_id), None)
+        if source is None:
+            return fail("元の候補が無い（candidate_id を渡すか、先に採用する）", "no_candidate", "/candidate_id")
+        store = AssetStore(path)
+        data = store.get_bytes(source["asset"], ".png")
+        if data is None:
+            return fail(f"候補 {source_id} の画像が assets/ に無い", "asset_missing", "/candidate_id")
+        from PIL import Image
+
+        settings = lineart.LineParams.from_dict(params)
+        layer = lineart.extract(Image.open(io.BytesIO(data)), settings)
+        ref = store.put_bytes(lineart.to_png(layer), ".png")
+        cand_id = "cd_" + content_hash({"derive": kind, "from": source["asset"], "params": settings.__dict__})[7:17]
+        item = {"id": cand_id, "asset": ref, "px": list(layer.size), "mode": "derive", "parent": source_id,
+                "origin": {"kind": "genko", "tool_id": f"genko:{kind}", "params": settings.__dict__}}
+        result = self._ops(project, [{"op": "import_candidates", "page": page, "frame_id": frame_id, "candidates": [item]}])
+        if not result.ok:
+            return result
+        preview = Image.new("RGB", layer.size, (255, 255, 255))
+        preview.paste(layer, (0, 0), layer)
+        preview.thumbnail((512, 512))
+        ink_share = sum(layer.split()[3].histogram()[128:]) / max(1, layer.width * layer.height)
+        return ToolResult(True, {"candidate": cand_id, "kind": kind, "parent": source_id, "ink_share": round(ink_share, 4),
+                                 "adopt": {"candidate_id": cand_id, "to": "ink"}}, images=[_png(preview)])
 
     def review_page(self, project: str) -> ToolResult:
         """Write studio/review.html (previews, candidates, open requests, the commands a person runs to approve).
