@@ -8,7 +8,6 @@ from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QKeySequence, Q
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QDialog,
     QDockWidget,
@@ -30,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from genko.app import wording
+from genko.app.brush_panel import BrushPanel
 from genko.app.canvas import PageCanvas
 from genko.app.dialogs import ExportDialog, NewProjectDialog, StartDialog  # noqa: F401  (StartDialog is re-exported)
 from genko.app.session import Session
@@ -574,7 +574,7 @@ class MainWindow(QMainWindow):
 
         self.pages = QListWidget()
         self.pages.setMinimumWidth(110)
-        self.pages.setMaximumWidth(220)
+        self.pages.setMaximumWidth(180)
         self.pages.currentRowChanged.connect(self._select_page)
         self.canvas = PageCanvas()
         self.canvas.renderer = self._render_current
@@ -593,6 +593,14 @@ class MainWindow(QMainWindow):
         self.canvas.cutRequested.connect(self._cut_frame)
         self.canvas.frameShaped.connect(lambda frame_id, poly: self.apply_ops(
             [{"op": "set_frame", "page": self._current().index, "frame_id": frame_id, "poly": poly}]))
+        self.canvas.colourPicked.connect(self._on_colour_picked)
+        self.canvas.fillRequested.connect(self._fill_at)
+        self.canvas.areaFilled.connect(lambda pts: self._fill_area({"poly": pts}))
+        self.canvas.wandRequested.connect(self._wand)
+        self.canvas.selectionTransformed.connect(self._transform_selection)
+        self.canvas.strokeReshaped.connect(self._reshape)
+        self.canvas.strokes_for_reshape = lambda: list(getattr(self.target_layer(), "strokes", []) or [])
+        self._clipboard: dict | None = None
         self._target_layer_id: str | None = None
         self.eraser_mm = 2.0
         self._dock_timer = QTimer(self)
@@ -742,11 +750,35 @@ class MainWindow(QMainWindow):
         self.act_text = a("テキスト", lambda: self._tool("text"), "T", "クリックした所に台詞を入力します（縦書き）", True)
         self.act_frame = a("コマ", lambda: self._tool("frame"), "F",
                            "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", True)
+        self.act_picker = a("スポイト", lambda: self._tool("picker"), "I", "クリックした所の色をペンの色にします", True)
+        self.act_fill = a("塗りつぶし", lambda: self._tool("fill"), "G",
+                          "線で囲まれた所をクリックで塗ります（隙間閉じ・見る範囲はブラシ パネルで）", True)
+        self.act_lassofill = a("囲って塗る", lambda: self._tool("lassofill"), "Shift+G", "ドラッグで囲んだ所を塗ります", True)
+        self.act_marquee = a("範囲選択（長方形）", lambda: self._tool("rect"), "M",
+                             "ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み・縦横比を保つ）", True)
+        self.act_lasso = a("範囲選択（投げ縄）", lambda: self._tool("lasso"), "L", "ドラッグで囲んで選びます", True)
+        self.act_wand = a("自動選択", lambda: self._tool("wand"), "W", "クリックした所の、線で囲まれた範囲を選びます", True)
+        self.act_reshape = a("線の修正（つまむ）", lambda: self._tool("reshape"), "Y",
+                             "描いた線をつまんでドラッグすると、その辺りが滑らかに動きます", True)
         tools = QActionGroup(self)
-        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame):
+        self.tool_actions = {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
+                             "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill,
+                             "lassofill": self.act_lassofill, "rect": self.act_marquee, "lasso": self.act_lasso,
+                             "wand": self.act_wand, "reshape": self.act_reshape}
+        for act in self.tool_actions.values():
             tools.addAction(act)
         self.act_select.setChecked(True)
         self.act_color = a("ペンの色…", self._pick_color, "C")
+        self.act_select_all = a("すべて選択", self._select_all, std.SelectAll)
+        self.act_deselect = a("選択を解除", lambda: self.canvas.set_selection(None), "Ctrl+D")
+        self.act_copy = a("コピー", self._copy, std.Copy)
+        self.act_cut = a("切り取り", self._cut, std.Cut)
+        self.act_paste = a("貼り付け", self._paste, std.Paste, "新しいレイヤーに貼り付けます（そのまま動かせます）")
+        self.act_delete_area = a("選択範囲を消す", self._delete_area, [QKeySequence(std.Delete), QKeySequence("Backspace")])
+        self.act_flip_h = a("左右反転", lambda: self._flip(-1, 1))
+        self.act_flip_v = a("上下反転", lambda: self._flip(1, -1))
+        self.act_fill_selection = a("選択範囲を塗る", lambda: self._fill_area(self._area()), "Alt+Backspace")
+        self.act_line_width = a("選択範囲の線の太さ…", self._line_width)
         self.act_thicker = a("太く（ペン・消しゴム）", lambda: self._nudge_brush(1), "]")
         self.act_thinner = a("細く（ペン・消しゴム）", lambda: self._nudge_brush(-1), "[")
         self.act_split_h = a("コマを横に割る（上下に分ける）", lambda: self._split("horizontal"), "Ctrl+Shift+H")
@@ -765,10 +797,15 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
         menus = [
             ("ファイル", [self.act_new, self.act_open, None, self.act_save, self.act_save_as, None, self.act_import, self.act_export]),
-            ("編集", [self.act_undo, self.act_redo]),
+            ("編集", [self.act_undo, self.act_redo, None, self.act_cut, self.act_copy, self.act_paste]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_onion]),
-            ("ツール", [self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None, self.act_color, self.act_thicker, self.act_thinner]),
+            ("ツール", [self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None, self.act_picker,
+                        self.act_fill, self.act_lassofill, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
+                        self.act_color, self.act_thicker, self.act_thinner]),
+            ("選択", [self.act_marquee, self.act_lasso, self.act_wand, None, self.act_select_all, self.act_deselect, None,
+                      self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v, None,
+                      self.act_fill_selection, self.act_line_width]),
             ("コマ", [self.act_frame, None, self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
                       self.act_gutters, self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape]),
             ("ページ", [self.act_add_page, self.act_del_page, None, self.act_name_ok]),
@@ -786,7 +823,8 @@ class MainWindow(QMainWindow):
         tools_bar.setObjectName("tools")
         tools_bar.setMovable(False)
         tools_bar.setIconSize(QSize(16, 16))
-        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None, self.act_undo, self.act_redo, None,
+        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_fill, self.act_marquee, self.act_picker, self.act_text,
+                    self.act_frame, None, self.act_undo, self.act_redo, None,
                     self.act_fit, self.act_zoom_out, self.act_zoom_in, None, self.act_prev, self.act_next, None, self.act_export):
             if act is None:
                 tools_bar.addSeparator()
@@ -805,6 +843,21 @@ class MainWindow(QMainWindow):
         self.library = Library(self)
         for widget in (self.approvals, self.panel_view):
             widget.changed.connect(self._reload_pages)
+        self.brush = BrushPanel()
+        self.brush.changed.connect(self._brush_changed)
+        brush_dock = QDockWidget("ブラシ", self)
+        brush_scroll = QScrollArea()
+        brush_scroll.setWidgetResizable(True)
+        brush_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        brush_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        brush_scroll.setWidget(self.brush)
+        brush_dock.setWidget(brush_scroll)
+        brush_dock.setObjectName("ブラシ")
+        brush_dock.setMinimumWidth(self.brush.minimumSizeHint().width() + 20)
+        brush_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, brush_dock)
+        self.view_menu.addAction(brush_dock.toggleViewAction())
+        self.brush_dock = brush_dock
         docks = []
         for title, widget in (("承認箱", self.approvals), ("コマ", self.panel_view), ("台詞", self.story),
                               ("レイヤー", self.layers), ("ライブラリ", self.library)):
@@ -829,7 +882,7 @@ class MainWindow(QMainWindow):
         for first, second in zip(docks, docks[1:]):
             self.tabifyDockWidget(first, second)
         docks[0].raise_()
-        self.resizeDocks([docks[0]], [380], Qt.Orientation.Horizontal)
+        self.resizeDocks([docks[0], self.brush_dock], [340, self.brush.minimumSizeHint().width() + 20], Qt.Orientation.Horizontal)
         self.studio_docks = docks
 
     def show_dock(self, title: str) -> None:
@@ -926,6 +979,7 @@ class MainWindow(QMainWindow):
         if row != self._page_index:
             self.commit_now()  # a page switch writes what was done on the last page
             self.panel_view.frame_id = None
+            self.canvas.set_selection(None)
         self._page_index = row
         self._show_page()
 
@@ -933,7 +987,7 @@ class MainWindow(QMainWindow):
         page = self._current()
         lines = self.episode.story_for_page(page.index) if page else []
         self.canvas.overlay_name_strokes = bool(page and page.name_ok and page.stage != "name")
-        self.canvas.brush_width_mm = float(self.episode.brush_width_mm)
+        self.canvas.brush_width_mm = self.brush.size.value() if hasattr(self, "brush") else float(self.episode.brush_width_mm)
         self.canvas.eraser_mm = self.eraser_mm
         if page is not None and self._target_layer_id and not any(layer.id == self._target_layer_id for layer in page.layers):
             self._target_layer_id = None  # another page: back to its default layer
@@ -986,9 +1040,12 @@ class MainWindow(QMainWindow):
     # --- editing -----------------------------------------------------------------------------
 
     def _tool(self, tool: str) -> None:
-        self.canvas.set_tool(tool)
-        {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
-         "frame": self.act_frame}[tool].setChecked(True)
+        if tool in ("rect", "lasso", "wand"):
+            self.canvas.marquee = tool
+            self.canvas.set_tool("marquee")
+        else:
+            self.canvas.set_tool(tool)
+        self.tool_actions[tool].setChecked(True)
 
     # --- the layer the pen works on ---------------------------------------------------------------
 
@@ -1037,10 +1094,13 @@ class MainWindow(QMainWindow):
             self.flash(f"「{wording.layer_label(layer)}」には描けません（{why}）。レイヤー パネルで選び直します", 4000)
             return
         if self.canvas.tool == "eraser":
-            self.apply_ops([{"op": "erase", "page": page.index, "layer_id": layer.id,
-                             "points": [[p[0], p[1]] for p in points], "width_mm": self.eraser_mm}])
+            op = {"op": "erase", "page": page.index, "layer_id": layer.id, "points": [[p[0], p[1]] for p in points],
+                  "width_mm": self.eraser_mm}
+            if self.brush.crossing.isChecked():
+                op["mode"] = "to_crossing"
+            self.apply_ops([op])
             return
-        self.apply_ops([{"op": "add_stroke", "page": page.index, "layer_id": layer.id, "points": points}])
+        self.apply_ops([{"op": "add_stroke", "page": page.index, "layer_id": layer.id, "points": points, **self.brush.stroke_fields()}])
 
     def _onion(self) -> None:
         page = self._current()
@@ -1049,9 +1109,7 @@ class MainWindow(QMainWindow):
         self.apply_ops([{"op": "step_onion", "page": page.index, "delta": -1}])
 
     def _pick_color(self) -> None:
-        color = QColorDialog.getColor(QColor(*self.episode.brush_rgb), self, "ペンの色")
-        if color.isValid():
-            self.apply_ops([{"op": "set_brush", "rgb": [color.red(), color.green(), color.blue()]}])
+        self.brush._pick()
 
     def _nudge_brush(self, step: int) -> None:
         sizes = [0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.0, 10.0, 15.0, 20.0]
@@ -1066,10 +1124,195 @@ class MainWindow(QMainWindow):
             self.flash(f"消しゴムの太さ {self.eraser_mm:g} mm", 2000)
             self.canvas.update()
             return
-        width = nxt(float(self.episode.brush_width_mm))
+        width = self.brush.nudge_size(step)
         self.canvas.brush_width_mm = width
-        self.apply_ops([{"op": "set_brush", "width_mm": width}])
+        self.canvas.update()
         self.flash(f"ペンの太さ {width:g} mm", 2000)
+
+    def _brush_changed(self) -> None:
+        self.canvas.brush_width_mm = self.brush.size.value()
+        self.canvas.update()
+
+    # --- colour, fills, selections, line fixes (M13) ---------------------------------------------
+
+    def _paint_layer(self):
+        """The target layer when it can be painted on; otherwise a notice and None."""
+        page, layer = self._current(), self.target_layer()
+        if page is None or layer is None:
+            return None
+        if not self.drawable(layer):
+            why = "ロックされています" if getattr(layer, "locked", False) else "ペンかペイントのレイヤーではありません"
+            self.flash(f"「{wording.layer_label(layer)}」には描けません（{why}）。レイヤー パネルで選び直します", 4000)
+            return None
+        return layer
+
+    def _on_colour_picked(self, rgb) -> None:
+        self.brush.set_colour(rgb)
+        self.flash(f"色を拾いました {tuple(rgb)}", 2000)
+
+    def _paint_fields(self) -> dict:
+        out = {"rgb": list(self.brush.rgb)}
+        opacity = self.brush.opacity.value() / 100
+        if opacity < 1:
+            out["opacity"] = round(opacity, 3)
+        return out
+
+    def _fill_at(self, x_mm: float, y_mm: float) -> None:
+        layer = self._paint_layer()
+        if layer is None:
+            return
+        self.apply_ops([{"op": "fill", "page": self._current().index, "layer_id": layer.id, "x_mm": round(x_mm, 2),
+                         "y_mm": round(y_mm, 2), "gap_mm": self.brush.gap.value(), "reference": self.brush.reference.currentData(),
+                         **self._paint_fields()}])
+
+    def _area(self) -> dict | None:
+        return self.canvas.selection["area"] if self.canvas.selection else None
+
+    def _need_area(self) -> dict | None:
+        area = self._area()
+        if area is None:
+            self.flash("先に範囲を選びます（範囲選択 M・投げ縄 L・自動選択 W）", 3000)
+        return area
+
+    def _fill_area(self, area: dict | None) -> None:
+        layer = self._paint_layer()
+        if layer is None or area is None:
+            if area is None:
+                self._need_area()
+            return
+        self.apply_ops([{"op": "fill_area", "page": self._current().index, "layer_id": layer.id, "area": area, **self._paint_fields()}])
+
+    def _wand(self, x_mm: float, y_mm: float) -> None:
+        from genko import fill as fills
+        from genko import selection
+        from genko.ops import _fill_reference
+
+        page, layer = self._current(), self.target_layer()
+        if page is None or layer is None:
+            return
+        dpi = fills.FILL_DPI
+        reference = _fill_reference(self.episode, page, layer, self.brush.reference.currentData() or "page", dpi)
+        window = None
+        panel = page.frame_at(x_mm, y_mm)
+        if panel is not None:
+            r = panel.rect
+            window = (max(0, fills.px(r.x - 2, dpi)), max(0, fills.px(r.y - 2, dpi)),
+                      min(reference.width, fills.px(r.x + r.width + 2, dpi)), min(reference.height, fills.px(r.y + r.height + 2, dpi)))
+        mask = fills.region_mask(reference, (fills.px(x_mm, dpi), fills.px(y_mm, dpi)), gap_px=fills.px(self.brush.gap.value(), dpi),
+                                 window=window)
+        area = selection.wand_area(mask, dpi) if mask is not None else None
+        if area is None:
+            self.flash("そこは線の上です。線で囲まれた中をクリックします", 3000)
+            return
+        self.canvas.set_selection(area)
+
+    @staticmethod
+    def _moved_area(area: dict, matrix) -> dict:
+        from genko import selection
+
+        if area.get("poly"):
+            return {"poly": [[round(v, 3) for v in selection.apply(matrix, float(x), float(y))] for x, y in area["poly"]]}
+        import base64
+
+        patch = selection.transform_patch({"box": area["mask"]["box"], "mode": "mask",
+                                           "png": base64.b64decode(area["mask"]["png"])}, tuple(matrix))
+        return {"mask": {"box": patch["box"], "png": base64.b64encode(patch["png"]).decode("ascii")}} if patch else area
+
+    def _transform_selection(self, matrix) -> None:
+        area, layer = self._area(), self._paint_layer()
+        if area is None or layer is None:
+            return
+        matrix = [round(float(v), 5) for v in matrix]
+        if self.apply_ops([{"op": "transform_area", "page": self._current().index, "layer_id": layer.id, "area": area, "matrix": matrix}]):
+            outline = self.canvas._apply(matrix, self.canvas.selection["outline"])
+            self.canvas.set_selection(self._moved_area(area, matrix), outline)
+
+    def _flip(self, sx: int, sy: int) -> None:
+        area = self._need_area()
+        if area is None:
+            return
+        x0, y0, x1, y1 = self.canvas._sel_box()
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        self._transform_selection([sx, 0, 0, sy, cx - sx * cx, cy - sy * cy])
+
+    def _select_all(self) -> None:
+        page = self._current()
+        if page is None:
+            return
+        w, h = page.spec.width_mm, page.spec.height_mm
+        if self.canvas.tool != "marquee":
+            self._tool("rect")
+        self.canvas.set_selection({"poly": [[0, 0], [w, 0], [w, h], [0, h]]})
+
+    def _delete_area(self) -> None:
+        if self._area() is None and self.canvas.tool == "select" and self.canvas.selected_line_id:
+            self.apply_ops([{"op": "delete_line", "id": self.canvas.selected_line_id}])  # Delete on a picked balloon
+            self.canvas.selected_line_id = None
+            return
+        area, layer = self._need_area(), None
+        if area is None:
+            return
+        layer = self._paint_layer()
+        if layer is not None:
+            self.apply_ops([{"op": "delete_area", "page": self._current().index, "layer_id": layer.id, "area": area}])
+
+    def _copy(self) -> bool:
+        import copy
+
+        from genko import selection
+
+        area, layer = self._need_area(), self.target_layer()
+        if area is None or layer is None:
+            return False
+        items = selection.lift(copy.deepcopy(layer), area, self._current())
+        if not items["strokes"] and not items["patches"]:
+            self.flash("選んだ範囲に、このレイヤーの絵がありません", 3000)
+            return False
+        self._clipboard = selection.items_to_json(items)
+        self._clipboard_outline = [list(p) for p in self.canvas.selection["outline"]]
+        self._clipboard_area = area
+        self.flash("コピーしました（Ctrl+V で新しいレイヤーに貼り付け）", 2500)
+        return True
+
+    def _cut(self) -> None:
+        if self._copy():
+            self._delete_area()
+
+    def _paste(self) -> None:
+        from genko.models import new_id
+
+        page, layer = self._current(), self.target_layer()
+        if page is None or not self._clipboard:
+            self.flash("貼り付けるものがありません（先にコピー）", 2500)
+            return
+        new_layer = new_id()
+        ops = [{"op": "add_layer", "page": page.index, "name": "貼り付け", "kind": "pen", "id": new_layer},
+               {"op": "paste", "page": page.index, "layer_id": new_layer, "items": self._clipboard}]
+        if layer is not None:
+            ops[0]["after"] = layer.id
+        if self.apply_ops(ops):
+            self._target_layer_id = new_layer
+            if self.canvas.tool != "marquee":
+                self._tool("rect")
+            self.canvas.set_selection(self._clipboard_area, self._clipboard_outline)
+            self.flash("新しいレイヤー「貼り付け」に置きました。選択範囲の中をドラッグで動かせます", 3500)
+
+    def _line_width(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        area, layer = self._need_area(), self._paint_layer()
+        if area is None or layer is None:
+            return
+        value, ok = QInputDialog.getDouble(self, "線の太さ", "選んだ範囲の線の太さ（mm）", self.brush.size.value(), 0.05, 50, 2)
+        if ok:
+            self.apply_ops([{"op": "set_stroke_width", "page": self._current().index, "layer_id": layer.id, "area": area,
+                             "width_mm": value}])
+
+    def _reshape(self, stroke_id: str, points) -> None:
+        layer = self._paint_layer()
+        if layer is not None:
+            self.apply_ops([{"op": "reshape_stroke", "page": self._current().index, "layer_id": layer.id, "stroke_id": stroke_id,
+                             "points": [[round(float(v), 3) for v in p] for p in points]}])
 
     def _toggle_guides(self) -> None:
         self.canvas.show_guides = self.act_guides.isChecked()

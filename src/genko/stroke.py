@@ -12,8 +12,10 @@ def stabilize_points(points: list, window: int = 5) -> list:
         return points
     half = max(1, int(window) // 2)
     out: list = []
+    n = len(points)
     for i, point in enumerate(points):
-        sl = points[max(0, i - half) : min(len(points), i + half + 1)]
+        k = min(half, i, n - 1 - i)  # a window that shrinks evenly at the ends keeps them where they were drawn
+        sl = points[i - k : i + k + 1]
         x = sum(float(item[0]) for item in sl) / len(sl)
         y = sum(float(item[1]) for item in sl) / len(sl)
         extra = list(point[2:]) if len(point) > 2 else []
@@ -152,3 +154,95 @@ def split_by_eraser(points: list, eraser: list, radius_mm: float) -> list[list]:
     if len(current) >= 2:
         pieces.append(current)
     return pieces
+
+
+def _seg_cross(a, b, c, d):
+    """The parameter t along a→b where it crosses c→d, or None."""
+    rx, ry = b[0] - a[0], b[1] - a[1]
+    sx, sy = d[0] - c[0], d[1] - c[1]
+    den = rx * sy - ry * sx
+    if abs(den) < 1e-12:
+        return None
+    t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den
+    u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den
+    return t if 0 <= t <= 1 and 0 <= u <= 1 else None
+
+
+def erase_to_crossing(strokes: list, eraser: list, radius_mm: float) -> list:
+    """Erase the part of each touched line between the crossings (with other lines) around the touch —
+    the usual way to clean the overshoot where lines cross (交点まで消す)."""
+    import math
+
+    from genko.models import coerce_stroke
+
+    def arc_positions(points):
+        out, total = [0.0], 0.0
+        for a, b in zip(points, points[1:]):
+            total += math.dist(a[:2], b[:2])
+            out.append(total)
+        return out
+
+    # the eraser's path, walked in small steps (a quick drag leaves far-apart points)
+    step = max(0.05, radius_mm / 2)
+    walked = [tuple(eraser[0][:2])] if eraser else []
+    for a, b in zip(eraser, eraser[1:]):
+        n = max(1, math.ceil(math.dist(a[:2], b[:2]) / step))
+        walked.extend((a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n) for k in range(1, n + 1))
+    eraser = walked
+
+    result = []
+    for stroke in strokes:
+        pts = [tuple(p) for p in stroke.points]
+        if len(pts) < 2:
+            result.append(stroke)
+            continue
+        pos = arc_positions(pts)
+        # where the eraser touches this line (arc length)
+        touch = None
+        for i, (a, b) in enumerate(zip(pts, pts[1:])):
+            for e in eraser:
+                dx, dy = b[0] - a[0], b[1] - a[1]
+                seg = dx * dx + dy * dy
+                t = 0.0 if seg == 0 else max(0.0, min(1.0, ((e[0] - a[0]) * dx + (e[1] - a[1]) * dy) / seg))
+                if math.hypot(e[0] - (a[0] + t * dx), e[1] - (a[1] + t * dy)) <= radius_mm:
+                    touch = pos[i] + t * (pos[i + 1] - pos[i])
+                    break
+            if touch is not None:
+                break
+        if touch is None:
+            result.append(stroke)
+            continue
+        crossings = []
+        for other in strokes:
+            if other is stroke:
+                continue
+            ops = [tuple(p) for p in other.points]
+            for i, (a, b) in enumerate(zip(pts, pts[1:])):
+                for c, d in zip(ops, ops[1:]):
+                    t = _seg_cross(a, b, c, d)
+                    if t is not None:
+                        crossings.append(pos[i] + t * (pos[i + 1] - pos[i]))
+        before = max([c for c in crossings if c < touch], default=0.0)
+        after = min([c for c in crossings if c > touch], default=pos[-1])
+
+        def piece(lo: float, hi: float):
+            out = []
+            for i, (a, b) in enumerate(zip(pts, pts[1:])):
+                la, lb = pos[i], pos[i + 1]
+                if lb < lo or la > hi or lb == la:
+                    continue
+                t0, t1 = max(0.0, (lo - la) / (lb - la)), min(1.0, (hi - la) / (lb - la))
+                p0 = (a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0)
+                p1 = (a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1)
+                if not out:
+                    out.append(p0)
+                out.append(p1)
+            return out
+
+        for lo, hi in ((0.0, before), (after, pos[-1])):
+            part = piece(lo, hi)
+            if len(part) >= 2 and math.dist(part[0], part[-1]) > 0.2:
+                new = coerce_stroke(part)
+                new.width_mm, new.kind, new.rgb, new.opacity = stroke.width_mm, stroke.kind, stroke.rgb, stroke.opacity
+                result.append(new)
+    return result

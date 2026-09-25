@@ -35,6 +35,7 @@ AGENT_OPS = frozenset({
     "split_frame", "merge_frame", "resize_frame", "set_frame", "cut_frame", "move_gutter",
     "add_line", "edit_line", "delete_line", "move_line", "set_balloon_path", "reorder_lines",
     "add_stroke", "delete_stroke", "edit_stroke", "simplify_stroke", "erase",
+    "fill", "fill_area", "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
     "add_layer", "set_layer", "reorder_layers",
     "set_note", "add_mannequin", "pose_mannequin", "add_prim3d", "set_ruler",
     "add_tone", "delete_tone", "add_effect", "stamp_material",

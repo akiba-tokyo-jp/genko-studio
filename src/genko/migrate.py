@@ -54,6 +54,12 @@ def _layer(data: dict, store=None) -> Layer:
     if store is not None and data.get("asset"):
         layer.raster_relpath = store.relpath(data["asset"], ".png")
         layer.raster_png = store.get_bytes(data["asset"], ".png")
+    for patch in data.get("patches") or []:
+        item = {k: v for k, v in patch.items() if k != "asset"}
+        if store is not None and patch.get("asset"):
+            item["png"] = store.get_bytes(patch["asset"], ".png")
+            item["asset"] = patch["asset"]
+        layer.patches.append(item)
     if store is not None and data.get("strokes_blob"):
         blob = store.get_bytes(data["strokes_blob"], ".strokes.json")
         if blob is not None:

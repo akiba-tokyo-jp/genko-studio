@@ -213,6 +213,14 @@ Panels (M12):
 - Reading order follows the middle of each panel (slanted boxes overlap). Ink, fills and placed art are clipped to the polygon; `set_layer {panel_clip: false}` lets a layer run out of the panels.
 - Layout changes (`cut_frame`, `move_gutter`, `set_frame poly`) are refused for agents once the name is approved, like `split_frame`.
 
+Pens, fills and selections (M13):
+
+- `add_stroke {kind}`: `gpen` (G pen), `maru`, `kabura`, `mili` (even width), `pencil`, `fude` (brush), `marker` (see-through), `airbrush`, `fill_pen`, `white` (correction white). Also `width_mm`, `rgb`, `opacity`, `stabilize` (0 = off), `taper`, `pressure_gamma` (<1 soft, >1 hard). The look is drawn at render time, at the output's resolution.
+- `fill {page, layer_id, x_mm, y_mm, rgb?, opacity?, gap_mm? (0.3), reference: page|layer}` fills the region under the point, closing line gaps up to `gap_mm`, inside the clicked panel. `fill_area {area}` fills an area. Fills are kept as patches on the layer (300 dpi masks, saved as assets).
+- Areas: `{poly: [[x, y], …]}` (mm) or `{mask: {box: [x, y, w, h], png: base64}}`. `transform_area {area, matrix: [a, b, c, d, e, f]}` (x' = a·x + c·y + e, y' = b·x + d·y + f) moves, scales, turns or flips what lies in the area on that layer: lines (most of their points inside), fills and paint pixels. `delete_area {area}`. `paste {items: {strokes, patches}, matrix?}` puts copied items on a layer.
+- Line fixes: `set_stroke_width {area | ids, width_mm | scale, kind?, rgb?}`, `reshape_stroke {stroke_id, points}`, `erase {mode: "to_crossing"}` (cut a line only up to where it crosses the others).
+- The same rules as drawing apply: printed layers need the name approval (`strict_gates`), locked layers refuse edits.
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

@@ -86,6 +86,13 @@ class PageCanvas(QWidget):
     gutterMoved = Signal(str, int, float)  # split node id, gutter index, delta mm (a move_gutter op)
     cutRequested = Signal(str, QPointF, QPointF)  # panel id, cut line ends (mm): a cut_frame op
     frameShaped = Signal(str, object)  # panel id, [[x, y], …]: a free-form panel (set_frame poly)
+    colourPicked = Signal(object)  # (r, g, b) under the eyedropper
+    fillRequested = Signal(float, float)  # the fill tool clicked here (mm)
+    areaFilled = Signal(object)  # a drawn area to fill: [[x, y], …]
+    areaSelected = Signal(object)  # a new selection area {"poly": …} (the window may replace it, e.g. auto-select)
+    wandRequested = Signal(float, float)
+    selectionTransformed = Signal(object)  # [a, b, c, d, e, f] applied to the selection
+    strokeReshaped = Signal(str, object)  # stroke id, new points
 
     def __init__(self) -> None:
         super().__init__()
@@ -112,6 +119,12 @@ class PageCanvas(QWidget):
         self._handle_drag: dict | None = None
         self._frame_drag: dict | None = None  # the panel tool: {"kind": gutter|cut|vertex, ...}
         self._modifiers = Qt.KeyboardModifier.NoModifier
+        self.selection: dict | None = None  # {"area": {...}, "outline": [[x, y], …]} (mm)
+        self.marquee = "rect"  # rect | lasso | wand
+        self._sel_drag: dict | None = None
+        self.strokes_for_reshape = None  # callable → the target layer's strokes
+        self.reshape_radius_mm = 6.0
+        self._reshape: dict | None = None
         self.editor: InlineEditor | None = None
         self.overlay_name_strokes = False  # show the name strokes faintly over a proof render
         # renderer(dpi) -> QPixmap of the whole page; set by the window
@@ -272,7 +285,20 @@ class PageCanvas(QWidget):
             elif self.tool == "select" and self._hover and self._hit_line(*self._hover) is line:
                 self._draw_balloon_box(painter, line, None)
         self._draw_handles(painter)
-        if self._stroke:
+        self._draw_selection_overlay(painter)
+        if self._reshape is not None:
+            painter.setPen(QPen(QColor("#e8590c"), 2))
+            path = QPainterPath(self._pt(*self._reshape["points"][0][:2]))
+            for pt in self._reshape["points"][1:]:
+                path.lineTo(self._pt(*pt[:2]))
+            painter.drawPath(path)
+        if self._stroke and self.tool in ("lassofill", "marquee"):
+            painter.setPen(QPen(QColor("#1c7ed6") if self.tool == "marquee" else QColor("#e8590c"), 1.5, Qt.PenStyle.DashLine))
+            painter.setBrush(QColor(28, 126, 214, 30) if self.tool == "marquee" else QColor(232, 89, 12, 40))
+            pts = self._marquee_points()
+            painter.drawPolygon([self._pt(*p) for p in pts])
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        elif self._stroke:
             color = QColor("#e8590c") if self.tool == "pen" else QColor(200, 60, 60, 160)
             self._draw_strokes(painter, [self._stroke], color, max(1.5, self.brush_width_mm * self._scale))
         if self._hover and not self._stroke and self.tool in ("pen", "eraser"):
@@ -548,6 +574,158 @@ class PageCanvas(QWidget):
             drag["tails"][index][part] = [round(x_mm, 2), round(y_mm, 2)]
         self.update()
 
+    # --- selections: rectangle, lasso, auto; move / scale / rotate by handles -------------------------------
+
+    def _marquee_points(self) -> list:
+        if self.tool == "marquee" and self.marquee == "rect" and len(self._stroke) >= 2:
+            (x0, y0), (x1, y1) = self._stroke[0][:2], self._stroke[-1][:2]
+            return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        return [p[:2] for p in self._stroke]
+
+    def set_selection(self, area: dict | None, outline: list | None = None) -> None:
+        if area is None:
+            self.selection = None
+        else:
+            if outline is None:
+                if area.get("poly"):
+                    outline = [list(p) for p in area["poly"]]
+                else:
+                    x, y, w, h = area["mask"]["box"]
+                    outline = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
+            self.selection = {"area": area, "outline": outline}
+        self.update()
+
+    def _sel_box(self, outline=None):
+        pts = outline or self.selection["outline"]
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def _sel_handles(self) -> list:
+        if not self.selection or self.tool != "marquee":
+            return []
+        x0, y0, x1, y1 = self._sel_box()
+        cx = (x0 + x1) / 2
+        out = [("scale", key, (x0 + (x1 - x0) * fx, y0 + (y1 - y0) * fy)) for key, (fx, fy) in
+               {"nw": (0, 0), "n": (0.5, 0), "ne": (1, 0), "e": (1, 0.5), "se": (1, 1), "s": (0.5, 1), "sw": (0, 1), "w": (0, 0.5)}.items()]
+        out.append(("rotate", "r", (cx, y0 - 18 / self._scale)))
+        return out
+
+    def _sel_matrix(self, pos_mm) -> list:
+        import math
+
+        drag = self._sel_drag
+        x0, y0, x1, y1 = drag["box"]
+        px, py = pos_mm
+        sx0, sy0 = drag["start"]
+        if drag["kind"] == "move":
+            return [1, 0, 0, 1, px - sx0, py - sy0]
+        if drag["kind"] == "rotate":
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            angle = math.atan2(py - cy, px - cx) - math.atan2(sy0 - cy, sx0 - cx)
+            if self._modifiers & Qt.KeyboardModifier.ShiftModifier:
+                angle = round(angle / (math.pi / 12)) * (math.pi / 12)
+            c, s = math.cos(angle), math.sin(angle)
+            return [c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy]
+        key = drag["key"]
+        ax = x1 if "w" in key else x0 if "e" in key else (x0 + x1) / 2
+        ay = y1 if key.startswith("n") else y0 if key.startswith("s") else (y0 + y1) / 2
+        sx = (px - ax) / ((sx0 - ax) or 1e-6) if ("w" in key or "e" in key) else 1.0
+        sy = (py - ay) / ((sy0 - ay) or 1e-6) if (key.startswith("n") or key.startswith("s")) else 1.0
+        if self._modifiers & Qt.KeyboardModifier.ShiftModifier and key in ("nw", "ne", "se", "sw"):
+            sx = sy = (abs(sx) + abs(sy)) / 2 * (1 if sx * sy > 0 else -1)
+        return [sx, 0, 0, sy, ax - sx * ax, ay - sy * ay]
+
+    @staticmethod
+    def _apply(m, pts):
+        a, b, c, d, e, f = m
+        return [[a * x + c * y + e, b * x + d * y + f] for x, y in pts]
+
+    def _draw_selection_overlay(self, painter: QPainter) -> None:
+        if not self.selection:
+            return
+        outline = self.selection["outline"]
+        if self._sel_drag and self._sel_drag.get("matrix"):
+            outline = self._apply(self._sel_drag["matrix"], outline)
+        pts = [self._pt(*p) for p in outline]
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("white"), 1.5))
+        painter.drawPolygon(pts)
+        painter.setPen(QPen(QColor("#1c7ed6"), 1.5, Qt.PenStyle.DashLine))
+        painter.drawPolygon(pts)
+        for kind, _key, (hx, hy) in self._sel_handles():
+            p = self._pt(hx, hy)
+            painter.setPen(QPen(QColor("#1c7ed6"), 1.5))
+            painter.setBrush(QColor("white"))
+            if kind == "rotate":
+                painter.drawEllipse(p, 5, 5)
+            else:
+                painter.drawRect(QRectF(p.x() - 4, p.y() - 4, 8, 8))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _marquee_press(self, pos: QPointF) -> bool:
+        """Start moving / scaling / turning the selection; False when the press starts a new one."""
+        if not self.selection:
+            return False
+        x_mm, y_mm = self._to_mm(pos)
+        for kind, key, (hx, hy) in self._sel_handles():
+            p = self._pt(hx, hy)
+            if abs(p.x() - pos.x()) <= 7 and abs(p.y() - pos.y()) <= 7:
+                self._sel_drag = {"kind": kind, "key": key, "start": (x_mm, y_mm), "box": self._sel_box()}
+                return True
+        from genko.selection import contains
+
+        if contains({"poly": self.selection["outline"]}, x_mm, y_mm):
+            self._sel_drag = {"kind": "move", "key": "", "start": (x_mm, y_mm), "box": self._sel_box()}
+            return True
+        return False
+
+    # --- reshaping a line (つまむ) ----------------------------------------------------------------------
+
+    def _reshape_press(self, x_mm: float, y_mm: float) -> None:
+        """Grab the nearest line (anywhere along it); it is walked in 1 mm steps so the pinch bends smoothly."""
+        import math
+
+        strokes = self.strokes_for_reshape() if self.strokes_for_reshape else []
+        reach = max(1.0, 10 / self._scale)  # about 10 px on screen, at least 1 mm
+        best = None
+        for stroke in strokes:
+            pts = stroke.points
+            for a, b in zip(pts, pts[1:] or pts):
+                dx, dy = b[0] - a[0], b[1] - a[1]
+                seg = dx * dx + dy * dy
+                t = 0.0 if seg == 0 else max(0.0, min(1.0, ((x_mm - a[0]) * dx + (y_mm - a[1]) * dy) / seg))
+                d = math.hypot(x_mm - (a[0] + t * dx), y_mm - (a[1] + t * dy))
+                if d <= reach and (best is None or d < best[0]):
+                    best = (d, stroke)
+        if best is None:
+            return
+        stroke = best[1]
+        pressure = stroke.pressure if len(stroke.pressure) == len(stroke.points) else [None] * len(stroke.points)
+        src = [[x, y] + ([p] if p is not None else []) for (x, y), p in zip(stroke.points, pressure)]
+        points = [src[0]]
+        for a, b in zip(src, src[1:]):
+            n = max(1, math.ceil(math.dist(a[:2], b[:2]) / 1.0))
+            for k in range(1, n + 1):
+                t = k / n
+                pt = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+                if len(a) > 2 and len(b) > 2:
+                    pt.append(a[2] + (b[2] - a[2]) * t)
+                points.append(pt)
+        self._reshape = {"id": stroke.id, "orig": [list(p) for p in points], "points": points, "grab": (x_mm, y_mm)}
+
+    def _reshape_move(self, x_mm: float, y_mm: float) -> None:
+        import math
+
+        gx, gy = self._reshape["grab"]
+        dx, dy = x_mm - gx, y_mm - gy
+        radius = max(0.5, self.reshape_radius_mm)
+        moved = []
+        for pt in self._reshape["orig"]:
+            w = max(0.0, 1 - math.hypot(pt[0] - gx, pt[1] - gy) / radius) ** 2
+            moved.append([pt[0] + dx * w, pt[1] + dy * w] + pt[2:])
+        self._reshape["points"] = moved
+        self.update()
+
     def _draw_rect(self, painter: QPainter, rect: Rect) -> None:
         p = self._pt(rect.x, rect.y)
         painter.drawRect(QRectF(p.x(), p.y(), rect.width * self._scale, rect.height * self._scale))
@@ -590,6 +768,8 @@ class PageCanvas(QWidget):
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self.tool == "text":
             self.setCursor(Qt.CursorShape.IBeamCursor)
+        elif self.tool in ("picker", "fill", "lassofill", "marquee", "reshape"):
+            self.setCursor(Qt.CursorShape.PointingHandCursor if self.tool in ("picker", "fill") else Qt.CursorShape.CrossCursor)
         elif self.tool == "frame" and pos is not None and self.page is not None:
             gutter = self._hit_gutter(*self._to_mm(pos))
             if gutter is not None:
@@ -625,6 +805,23 @@ class PageCanvas(QWidget):
             self._modifiers = event.modifiers()
             self._frame_press(pos)
             self.update()
+            return
+        if self.tool == "picker":
+            self._pick_colour(pos)
+            return
+        if self.tool == "fill":
+            self.fillRequested.emit(x_mm, y_mm)
+            return
+        if self.tool == "marquee":
+            self._modifiers = event.modifiers()
+            if self._marquee_press(pos):
+                return
+            if self.marquee == "wand":
+                self.wandRequested.emit(x_mm, y_mm)
+                return
+            self.set_selection(None)
+        if self.tool == "reshape":
+            self._reshape_press(x_mm, y_mm)
             return
         if self.tool == "select":
             handle = self._hit_handle(pos)
@@ -664,6 +861,14 @@ class PageCanvas(QWidget):
             self._modifiers = event.modifiers()
             self._frame_move(pos)
             return
+        if self._sel_drag is not None:
+            self._modifiers = event.modifiers()
+            self._sel_drag["matrix"] = self._sel_matrix(self._to_mm(pos))
+            self.update()
+            return
+        if self._reshape is not None:
+            self._reshape_move(*self._to_mm(pos))
+            return
         if self._drag_line is not None:
             x_mm, y_mm = self._to_mm(pos)
             gx, gy = self._drag_grab
@@ -693,6 +898,32 @@ class PageCanvas(QWidget):
         if self._frame_drag is not None:
             self._press_pos = None
             self._frame_release()
+            return
+        if self._sel_drag is not None:
+            drag, self._sel_drag = self._sel_drag, None
+            matrix = drag.get("matrix")
+            if matrix and any(abs(v - w) > 1e-4 for v, w in zip(matrix, [1, 0, 0, 1, 0, 0])):
+                self.selectionTransformed.emit(matrix)
+            self.update()
+            return
+        if self._reshape is not None:
+            shape, self._reshape = self._reshape, None
+            if shape["points"] != shape["orig"]:
+                self.strokeReshaped.emit(shape["id"], shape["points"])
+            self.update()
+            return
+        if self.tool in ("lassofill", "marquee") and self._stroke:
+            pts = [list(p) for p in self._marquee_points()]
+            self._stroke = []
+            import math
+
+            if len(pts) >= 3 and max(math.dist(pts[0], p) for p in pts) > 1.0:
+                if self.tool == "lassofill":
+                    self.areaFilled.emit(pts)
+                else:
+                    self.set_selection({"poly": pts})
+                    self.areaSelected.emit({"poly": pts})
+            self.update()
             return
         if self._handle_drag is not None:
             drag, self._handle_drag = self._handle_drag, None
@@ -733,6 +964,17 @@ class PageCanvas(QWidget):
         self.strokeCommitted.emit(packed)
         self.changed.emit()
         self.update()
+
+    def _pick_colour(self, pos: QPointF) -> None:
+        if self.background is None or self.page is None:
+            return
+        x_mm, y_mm = self._to_mm(pos)
+        image = self.background.toImage()
+        px = int(x_mm / self.page.spec.width_mm * image.width())
+        py = int(y_mm / self.page.spec.height_mm * image.height())
+        if 0 <= px < image.width() and 0 <= py < image.height():
+            colour = image.pixelColor(px, py)
+            self.colourPicked.emit((colour.red(), colour.green(), colour.blue()))
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -795,6 +1037,9 @@ class PageCanvas(QWidget):
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space = True
             self._update_cursor()
+            return
+        if event.key() == Qt.Key.Key_Escape and self.selection is not None:
+            self.set_selection(None)
             return
         if event.key() == Qt.Key.Key_Escape and self._drag_line is not None:
             self._drag_line = None

@@ -42,7 +42,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
-    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "str?"},
+    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
     {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?"},
@@ -60,7 +60,14 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_effect", "page": "int", "kind": "focus|speed|white", "frame_id": "str?", "params": "object"},
     {"op": "set_autosave", "enabled": "bool"},
     {"op": "erase_raster", "page": "int", "layer": "ink|name", "points": "[[x,y],...]", "width_mm": "float"},
-    {"op": "erase", "page": "int", "layer_id": "str? (else layer: role)", "layer": "str?", "points": "[[x,y],...]", "width_mm": "float", "note": "cuts pen lines (vector) and clears paint"},
+    {"op": "fill", "page": "int", "layer_id": "str?", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float? (close gaps up to this)", "expand_mm": "float? (grow under the lines)", "reference": "page|layer?"},
+    {"op": "fill_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask: {box, png}}", "rgb": "[r,g,b]?", "opacity": "float?"},
+    {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)"},
+    {"op": "delete_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}"},
+    {"op": "paste", "page": "int", "layer_id": "str?", "items": "{strokes, patches} (copied)", "matrix": "[a,b,c,d,e,f]?"},
+    {"op": "set_stroke_width", "page": "int", "layer_id": "str?", "area": "object?", "ids": "[stroke id]?", "width_mm": "float?", "scale": "float?", "kind": "str?", "rgb": "[r,g,b]?"},
+    {"op": "reshape_stroke", "page": "int", "layer_id": "str?", "stroke_id": "str", "points": "[[x,y,p?],...]?", "width_mm": "float?"},
+    {"op": "erase", "page": "int", "layer_id": "str? (else layer: role)", "layer": "str?", "points": "[[x,y],...]", "width_mm": "float", "mode": "to_crossing? (cut a line only up to where it crosses others)", "note": "cuts pen lines (vector) and clears paint"},
     {"op": "reorder_layers", "page": "int", "order": "[id]"},
     {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?"},
     {"op": "set_balloon_path", "id": "str", "path": "[[x,y]]?", "wrap": "vertical|horizontal", "ruby_runs": "[[base,ruby]]"},
@@ -116,6 +123,66 @@ def _rasterize_strokes(page, layer) -> None:
                     width_mm=stroke.width_mm)
     layer.strokes = []
     layer.kind = LayerKind.RASTER
+
+
+def _brush_kind(kind) -> str:
+    from genko.brushes import BRUSHES, LEGACY
+
+    kind = LEGACY.get(str(kind), str(kind))
+    if kind not in BRUSHES:
+        raise ApplyError(f"kind must be one of {', '.join(BRUSHES)}")
+    return kind
+
+
+def _paint_target(page, op: dict):
+    """The layer an edit works on: layer_id, else the role in `layer` (ink by default)."""
+    if op.get("layer_id"):
+        target = _layer_by_id(page, str(op["layer_id"]))
+    else:
+        target = page._layer(LayerRole(str(op.get("layer") or "ink")))
+    if getattr(target, "locked", False):
+        raise ApplyError("the layer is locked")
+    if target.kind not in (LayerKind.STROKES, LayerKind.RASTER):
+        raise ApplyError("this layer cannot be painted on (choose a pen or paint layer)")
+    return target
+
+
+def _rgb(op: dict, episode) -> tuple[int, int, int]:
+    rgb = op.get("rgb") or episode.brush_rgb or (20, 20, 20)
+    return tuple(int(v) for v in rgb)
+
+
+def _area(op: dict) -> dict:
+    area = op.get("area") or {}
+    if area.get("poly"):
+        if len(area["poly"]) < 3:
+            raise ApplyError("an area needs at least three corners")
+        return area
+    if area.get("mask") and area["mask"].get("box") and area["mask"].get("png"):
+        return area
+    raise ApplyError("area is {poly: [[x, y], …]} or {mask: {box, png}}")
+
+
+def _fill_reference(episode, page, target, reference: str, dpi: int):
+    """What a fill looks at: the page as seen (every visible layer), or only the target layer (with the
+    panel borders)."""
+    from PIL import Image, ImageDraw
+
+    from genko import render
+
+    if reference == "page":
+        return render.render_page(page, dpi, mode="name" if not page.name_ok else "proof", episode=episode).convert("L")
+    size = (render.mm_to_px(page.spec.width_mm, dpi), render.mm_to_px(page.spec.height_mm, dpi))
+    base = Image.new("RGBA", size, (255, 255, 255, 255))
+    raster = render._open_raster(target)
+    if raster is not None:
+        base = Image.alpha_composite(base, raster.resize(size))
+    lines = render._layer_strokes(target, size, dpi, None, None)
+    if lines is not None:
+        base = Image.alpha_composite(base, lines)
+    image = base.convert("RGB")
+    render._draw_frames(ImageDraw.Draw(image), page, dpi)
+    return image.convert("L")
 
 
 def _untouched(stroke, eraser: list, radius: float) -> bool:
@@ -541,6 +608,9 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             from genko.stroke import taper_points
 
             points = taper_points(points)
+        if op.get("pressure_gamma"):
+            gamma = max(0.2, min(5.0, float(op["pressure_gamma"])))
+            points = [[p[0], p[1], max(0.0, min(1.0, float(p[2]))) ** gamma] if len(p) > 2 else p for p in points]
         curve = str(op.get("curve") or episode.brush_curve or "linear")
         if curve and curve != "linear":
             from genko.stroke import apply_pressure_curve
@@ -549,7 +619,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         from genko.models import coerce_stroke, stroke_points
 
         stroke = coerce_stroke(points)
-        stroke.kind = str(op.get("kind") or "gpen")
+        stroke.kind = _brush_kind(op.get("kind") or "gpen")
         stroke.width_mm = float(op["width_mm"]) if op.get("width_mm") is not None else float(episode.brush_width_mm)
         if op.get("layer_id"):
             target = _layer_by_id(page, str(op["layer_id"]))
@@ -568,6 +638,118 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             stroke.opacity = max(0.0, min(1.0, float(op["opacity"])))
         # lines stay vectors: they are drawn at the resolution of each render (no baking)
         target.strokes.append(stroke)
+        return
+
+    if name == "fill":
+        from genko import fill as fills
+
+        page = _require_page(episode, op)
+        target = _paint_target(page, op)
+        dpi = fills.FILL_DPI
+        at = (fills.px(float(op["x_mm"]), dpi), fills.px(float(op["y_mm"]), dpi))
+        reference = _fill_reference(episode, page, target, str(op.get("reference") or "page"), dpi)
+        panel = page.frame_at(float(op["x_mm"]), float(op["y_mm"]))
+        window = None
+        if panel is not None:  # search only the clicked panel's box (and a little around it)
+            r = panel.rect
+            window = (max(0, fills.px(r.x - 2, dpi)), max(0, fills.px(r.y - 2, dpi)),
+                      min(reference.width, fills.px(r.x + r.width + 2, dpi)), min(reference.height, fills.px(r.y + r.height + 2, dpi)))
+        mask = fills.region_mask(reference, at, gap_px=fills.px(float(op.get("gap_mm", 0.3) or 0), dpi),
+                                 expand_px=max(1, fills.px(float(op.get("expand_mm", 0.15) or 0), dpi)), window=window)
+        if mask is None:
+            raise ApplyError("nothing to fill there (the click is on a line)")
+        patch = fills.mask_patch(mask, dpi, _rgb(op, episode), float(op.get("opacity", 1.0)))
+        target.patches.append(patch)
+        return
+
+    if name == "fill_area":
+        from genko import fill as fills
+        from genko import selection
+
+        page = _require_page(episode, op)
+        target = _paint_target(page, op)
+        area = _area(op)
+        if area.get("poly"):
+            patch = fills.polygon_patch(area["poly"], _rgb(op, episode), float(op.get("opacity", 1.0)))
+        else:
+            mask, origin = selection.area_mask(area)
+            patch = fills.mask_patch(mask, fills.FILL_DPI, _rgb(op, episode), float(op.get("opacity", 1.0)), origin)
+        if patch is None:
+            raise ApplyError("the area is empty")
+        target.patches.append(patch)
+        return
+
+    if name in ("transform_area", "delete_area"):
+        from genko import selection
+
+        page = _require_page(episode, op)
+        target = _paint_target(page, op)
+        area = _area(op)
+        items = selection.lift(target, area, page)
+        if name == "delete_area":
+            return
+        matrix = tuple(float(v) for v in op.get("matrix") or selection.IDENTITY)
+        if len(matrix) != 6:
+            raise ApplyError("matrix is [a, b, c, d, e, f]")
+        try:
+            selection.drop(target, items, matrix)
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
+        return
+
+    if name == "paste":
+        from genko import selection
+
+        page = _require_page(episode, op)
+        target = _paint_target(page, op)
+        items = selection.items_from_json(op.get("items") or {})
+        if not items["strokes"] and not items["patches"]:
+            raise ApplyError("nothing to paste")
+        matrix = tuple(float(v) for v in op.get("matrix") or selection.IDENTITY)
+        selection.drop(target, items, matrix, fresh_ids=True)
+        return
+
+    if name == "set_stroke_width":
+        from genko import selection
+
+        page = _require_page(episode, op)
+        target = _paint_target(page, op)
+        area = op.get("area")
+        ids = set(op.get("ids") or [])
+        changed = 0
+        for stroke in target.strokes:
+            if (ids and stroke.id in ids) or (area and selection.stroke_inside(stroke, area)):
+                if op.get("width_mm") is not None:
+                    stroke.width_mm = max(0.05, float(op["width_mm"]))
+                if op.get("scale") is not None:
+                    stroke.width_mm = max(0.05, stroke.width_mm * float(op["scale"]))
+                if op.get("kind"):
+                    stroke.kind = _brush_kind(op["kind"])
+                if op.get("rgb"):
+                    stroke.rgb = tuple(int(v) for v in op["rgb"])
+                changed += 1
+        if not changed:
+            raise ApplyError("no line there")
+        return
+
+    if name == "reshape_stroke":
+        page = _require_page(episode, op)
+        target = _paint_target(page, op)
+        stroke = next((item for item in target.strokes if item.id == op.get("stroke_id")), None)
+        if stroke is None:
+            raise ApplyError(f"no line {op.get('stroke_id')}")
+        if op.get("points"):
+            points = _parse_points(op["points"])
+            if len(points) < 2:
+                raise ApplyError("points needs at least two [x_mm, y_mm] pairs")
+            from genko.models import coerce_stroke
+
+            new = coerce_stroke(points)
+            stroke.points, stroke.pressure = new.points, new.pressure or stroke.pressure[:len(new.points)]
+            if stroke.pressure and len(stroke.pressure) != len(stroke.points):
+                stroke.pressure = []
+        if op.get("width_mm") is not None:
+            stroke.width_mm = max(0.05, float(op["width_mm"]))
         return
 
     if name == "delete_stroke":
@@ -912,6 +1094,11 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             raise ApplyError("the layer is locked")
         points = _parse_points(op.get("points") or [])
         width = float(op.get("width_mm", 2))
+        if op.get("mode") == "to_crossing":
+            from genko.stroke import erase_to_crossing
+
+            target.strokes = erase_to_crossing(target.strokes, points, width / 2)
+            return
         if target.strokes:
             from genko.models import coerce_stroke, stroke_points
             from genko.stroke import split_by_eraser
@@ -1424,7 +1611,8 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 
 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
-RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill"})
+RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area",
+                             "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke"})
 
 
 def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTOR) -> None:

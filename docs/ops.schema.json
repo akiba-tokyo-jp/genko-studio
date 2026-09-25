@@ -118,7 +118,10 @@
       "width_mm": "float?",
       "rgb": "[r,g,b]?",
       "opacity": "float?",
-      "kind": "str?"
+      "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?",
+      "stabilize": "int?",
+      "taper": "bool?",
+      "pressure_gamma": "float? (>1 needs more force)"
     },
     {
       "op": "delete_stroke",
@@ -230,12 +233,72 @@
       "width_mm": "float"
     },
     {
+      "op": "fill",
+      "page": "int",
+      "layer_id": "str?",
+      "x_mm": "float",
+      "y_mm": "float",
+      "rgb": "[r,g,b]?",
+      "opacity": "float?",
+      "gap_mm": "float? (close gaps up to this)",
+      "expand_mm": "float? (grow under the lines)",
+      "reference": "page|layer?"
+    },
+    {
+      "op": "fill_area",
+      "page": "int",
+      "layer_id": "str?",
+      "area": "{poly} | {mask: {box, png}}",
+      "rgb": "[r,g,b]?",
+      "opacity": "float?"
+    },
+    {
+      "op": "transform_area",
+      "page": "int",
+      "layer_id": "str?",
+      "area": "{poly} | {mask}",
+      "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)"
+    },
+    {
+      "op": "delete_area",
+      "page": "int",
+      "layer_id": "str?",
+      "area": "{poly} | {mask}"
+    },
+    {
+      "op": "paste",
+      "page": "int",
+      "layer_id": "str?",
+      "items": "{strokes, patches} (copied)",
+      "matrix": "[a,b,c,d,e,f]?"
+    },
+    {
+      "op": "set_stroke_width",
+      "page": "int",
+      "layer_id": "str?",
+      "area": "object?",
+      "ids": "[stroke id]?",
+      "width_mm": "float?",
+      "scale": "float?",
+      "kind": "str?",
+      "rgb": "[r,g,b]?"
+    },
+    {
+      "op": "reshape_stroke",
+      "page": "int",
+      "layer_id": "str?",
+      "stroke_id": "str",
+      "points": "[[x,y,p?],...]?",
+      "width_mm": "float?"
+    },
+    {
       "op": "erase",
       "page": "int",
       "layer_id": "str? (else layer: role)",
       "layer": "str?",
       "points": "[[x,y],...]",
       "width_mm": "float",
+      "mode": "to_crossing? (cut a line only up to where it crosses others)",
       "note": "cuts pen lines (vector) and clears paint"
     },
     {

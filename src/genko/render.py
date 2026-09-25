@@ -62,42 +62,71 @@ def _stroke(
 
 def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Image | None,
                    raster: Image.Image | None) -> Image.Image | None:
-    """A layer's pen lines drawn from their vectors at this resolution (None if it has none).
+    """A layer's fills (patches) and pen lines, drawn from their data at this resolution (None if none).
 
     Name and draft lines are drawn in the name colour; the others in their own colour (ink black by
-    default). Lines stay inside the panels, and a layer with locked transparency only keeps them
-    where it already has pixels.
+    default) with their brush's look (genko.brushes). Everything stays inside the panels unless the
+    layer runs out of them, and a layer with locked transparency only keeps it where it has pixels.
     """
-    strokes = getattr(layer, "strokes", None) or []
-    if not strokes:
-        return None
+    from genko import brushes
     from genko.models import stroke_points
-    from genko.stroke import draw_stroke_mm
 
+    strokes = getattr(layer, "strokes", None) or []
+    patches = getattr(layer, "patches", None) or []
+    if not strokes and not patches:
+        return None
     out = Image.new("RGBA", size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(out)
     guide = layer.role in (LayerRole.NAME, LayerRole.DRAFT)
+    for patch in patches:
+        _paint_patch(out, patch, dpi, NAME_COLOR if guide else None)
     for stroke in strokes:
-        points = stroke_points(stroke)
-        rgb = NAME_COLOR if guide else (tuple(getattr(stroke, "rgb", None) or INK_COLOR))
-        alpha = int(255 * max(0.0, min(1.0, float(getattr(stroke, "opacity", 1.0)))))
-        if getattr(stroke, "kind", "") == "oil":
-            alpha = min(alpha, 140)
-        width = float(getattr(stroke, "width_mm", 0.35) or 0.35)
-        if alpha >= 255:
-            draw_stroke_mm(draw, points, dpi, width, (*rgb, 255))
-        else:  # translucent lines must not darken where their own segments overlap
-            solo = Image.new("L", size, 0)
-            draw_stroke_mm(ImageDraw.Draw(solo), points, dpi, width, 255)
-            patch = Image.new("RGBA", size, (*rgb, 0))
-            patch.putalpha(solo.point(lambda v, a=alpha: v * a // 255))
-            out = Image.alpha_composite(out, patch)
-            draw = ImageDraw.Draw(out)
+        b = brushes.brush(getattr(stroke, "kind", None))
+        drawn = brushes.draw(size, stroke_points(stroke), dpi, float(getattr(stroke, "width_mm", 0.35) or 0.35),
+                             getattr(stroke, "kind", None), seed=str(getattr(stroke, "id", "")))
+        if drawn is None:
+            continue
+        cover, (x0, y0) = drawn
+        rgb = NAME_COLOR if guide else tuple(getattr(stroke, "rgb", None) or b.rgb or INK_COLOR)
+        opacity = max(0.0, min(1.0, float(getattr(stroke, "opacity", 1.0)))) * b.opacity
+        if opacity < 1:
+            cover = cover.point(lambda v, o=opacity: int(v * o))
+        patch = Image.new("RGBA", cover.size, (*rgb, 0))
+        patch.putalpha(cover)
+        region = out.crop((x0, y0, x0 + cover.width, y0 + cover.height))
+        out.paste(Image.alpha_composite(region, patch), (x0, y0))
     if panel_mask is not None and getattr(layer, "panel_clip", True):
         out.putalpha(_and_alpha(out, panel_mask))
     if getattr(layer, "lock_alpha", False) and raster is not None:
         out.putalpha(ImageChops.multiply(out.split()[3], raster.convert("RGBA").split()[3]))
     return out
+
+
+def _paint_patch(out: Image.Image, patch: dict, dpi: int, colour=None) -> None:
+    """A fill or a pasted image, kept at its own resolution over its box (mm), onto the layer image."""
+    data = patch.get("png")
+    if not data:
+        return
+    x, y, w, h = (float(v) for v in patch["box"])
+    x0, y0 = round(x / 25.4 * dpi), round(y / 25.4 * dpi)
+    pw, ph = max(1, round(w / 25.4 * dpi)), max(1, round(h / 25.4 * dpi))
+    image = Image.open(io.BytesIO(data))
+    opacity = max(0.0, min(1.0, float(patch.get("opacity", 1.0))))
+    if patch.get("mode", "mask") == "mask":
+        cover = image.convert("L").resize((pw, ph), Image.Resampling.LANCZOS)
+        if pw > image.width * 1.5:  # upscaled fills: keep their edge crisp
+            cover = cover.point(lambda v: 255 if v >= 128 else 0)
+        if opacity < 1:
+            cover = cover.point(lambda v, o=opacity: int(v * o))
+        rgb = colour or tuple(patch.get("rgb") or INK_COLOR)
+        piece = Image.new("RGBA", (pw, ph), (*rgb, 0))
+        piece.putalpha(cover)
+    else:
+        piece = image.convert("RGBA").resize((pw, ph), Image.Resampling.LANCZOS)
+        if opacity < 1:
+            piece.putalpha(piece.split()[3].point(lambda v, o=opacity: int(v * o)))
+    region_box = (x0, y0, x0 + pw, y0 + ph)
+    region = out.crop(region_box)
+    out.paste(Image.alpha_composite(region, piece), (x0, y0))
 
 
 def _clip_mask(page: Page, size: tuple[int, int], dpi: int) -> Image.Image | None:

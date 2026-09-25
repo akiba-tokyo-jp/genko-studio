@@ -163,6 +163,9 @@ class Layer:
     lock_alpha: bool = False
     locked: bool = False  # nothing can be drawn on or erased from a locked layer
     panel_clip: bool = True  # lines stay inside the panels; False lets them run out (はみ出し)
+    # fills and pasted pixels kept at their own resolution over a box:
+    # [{"id", "box": [x, y, w, h] mm, "mode": "mask" | "image", "png": bytes, "rgb", "opacity"}]
+    patches: list = field(default_factory=list)
     parent_id: str | None = None
     asset: str | None = None  # placed: "sha256:…" in assets/
     frame_id: str | None = None  # placed: the panel it belongs to
