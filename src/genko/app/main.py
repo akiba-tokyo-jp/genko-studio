@@ -22,7 +22,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSplitter,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGridLayout,
+    QTabWidget,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -41,7 +44,8 @@ from genko.app.studio_widgets import ApprovalBox, Library, PanelView, ProcessBar
 from genko.models import PageSpec, new_episode
 from genko.ops import ApplyError
 
-COMMIT_AFTER_MS = 1000  # changes reach the disk after a second without edits
+COMMIT_AFTER_MS = 1000
+SIDE_WIDTH = 230  # the side panels; the rest of the window is the page  # changes reach the disk after a second without edits
 
 
 def _pixmap(image) -> QPixmap:
@@ -123,7 +127,8 @@ class StoryPanel(QWidget):
         self.tcy.clicked.connect(lambda _: self._style_changed())
         self.color = QPushButton("文字の色…")
         self.color.clicked.connect(self._pick_color)
-        reset = QPushButton("文字とフキダシの設定を既定に戻す")
+        reset = QPushButton("既定の設定に戻す")
+        reset.setToolTip("この台詞の文字とフキダシの設定を既定に戻します")
         reset.clicked.connect(self._reset_style)
         order = QHBoxLayout()
         order.addWidget(up)
@@ -131,10 +136,10 @@ class StoryPanel(QWidget):
         row = QHBoxLayout()
         row.addWidget(self.kind, 1)
         row.addWidget(self.vertical)
-        buttons = QHBoxLayout()
-        buttons.addWidget(add)
-        buttons.addWidget(self.apply_button)
-        buttons.addWidget(self.delete_button)
+        buttons = QGridLayout()
+        buttons.addWidget(add, 0, 0)
+        buttons.addWidget(self.delete_button, 0, 1)
+        buttons.addWidget(self.apply_button, 1, 0, 1, 2)
         form = QFormLayout()
         form.addRow("書体", self.font)
         form.addRow("文字の大きさ", self.size)
@@ -413,16 +418,15 @@ class LayerPanel(QWidget):
             self.filter.addItem(label, key)
         apply_filter = QPushButton("フィルターをかける…")
         apply_filter.clicked.connect(self._filter)
-        adds = QHBoxLayout()
-        for button in (add_pen, add_paint, add_folder):
-            adds.addWidget(button)
-        moves = QHBoxLayout()
-        for button in (up, down, delete):
-            moves.addWidget(button)
-        props = QHBoxLayout()
-        props.addWidget(QLabel("不透明度"))
-        props.addWidget(self.opacity, 1)
-        props.addWidget(self.blend)
+        adds = QGridLayout()
+        for i, button in enumerate((add_pen, add_paint, add_folder, delete, up, down)):
+            adds.addWidget(button, i // 2, i % 2)
+        up.setText("↑ 前へ")
+        down.setText("↓ 後ろへ")
+        props = QFormLayout()
+        props.addRow("不透明度", self.opacity)
+        props.addRow("合成", self.blend)
+        apply_filter.setText("かける…")
         frow = QHBoxLayout()
         frow.addWidget(self.filter, 1)
         frow.addWidget(apply_filter)
@@ -430,7 +434,6 @@ class LayerPanel(QWidget):
         layout.addWidget(self.target)
         layout.addWidget(self.list, 1)
         layout.addLayout(adds)
-        layout.addLayout(moves)
         layout.addWidget(self.name)
         layout.addLayout(props)
         layout.addWidget(self.clip)
@@ -577,8 +580,7 @@ class MainWindow(QMainWindow):
         self._watcher.fileChanged.connect(self._on_disk_change)
 
         self.pages = PageList(self)
-        self.pages.setMinimumWidth(110)
-        self.pages.setMaximumWidth(200)
+        self.pages.setMinimumWidth(120)
         self.pages.currentRowChanged.connect(self._select_page)
         self.canvas = PageCanvas()
         self.canvas.renderer = self._render_current
@@ -629,17 +631,7 @@ class MainWindow(QMainWindow):
         self._stale_docks: set = set()
         self.canvas.zoomChanged.connect(lambda _: self._refresh_zoom())
 
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(4, 4, 4, 4)
-        left_layout.addWidget(QLabel("ページ"))
-        left_layout.addWidget(self.pages, 1)
-        split = QSplitter()
-        split.addWidget(left)
-        split.addWidget(self.canvas)
-        split.setStretchFactor(1, 1)
-        split.setChildrenCollapsible(False)
-        self.setCentralWidget(split)
+        self.setCentralWidget(self.canvas)  # the page gets the room; everything else sits in panels around it
 
         self.status = QLabel()
         self.zoom_label = QLabel()
@@ -653,6 +645,10 @@ class MainWindow(QMainWindow):
         self._watch()
         self._reload_pages()
         self.pages.setCurrentRow(0)
+        # building the docks while hidden stretches the window to their summed heights; settle the layout
+        # and put the window back to a size that fits a laptop screen
+        self.layout().activate()
+        self.resize(1280, 800)
 
     # --- the session ------------------------------------------------------------------------
 
@@ -768,7 +764,7 @@ class MainWindow(QMainWindow):
         self.act_pen = a("ペン", lambda: self._tool("pen"), "B", "レイヤー パネルで選んだレイヤーに描きます", True)
         self.act_eraser = a("消しゴム", lambda: self._tool("eraser"), "E", "ペンの線は触れた所で切れます", True)
         self.act_text = a("テキスト", lambda: self._tool("text"), "T", "クリックした所に台詞を入力します（縦書き）", True)
-        self.act_frame = a("コマ", lambda: self._tool("frame"), "F",
+        self.act_frame = a("コマ割り", lambda: self._tool("frame"), "F",
                            "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", True)
         self.act_picker = a("スポイト", lambda: self._tool("picker"), "I", "クリックした所の色をペンの色にします", True)
         self.act_fill = a("塗りつぶし", lambda: self._tool("fill"), "G",
@@ -782,7 +778,7 @@ class MainWindow(QMainWindow):
                              "描いた線をつまんでドラッグすると、その辺りが滑らかに動きます", True)
         self.act_ruler = a("定規", lambda: self._tool("ruler"), "R",
                            "「定規」メニューで選んだ定規を置く（ドラッグ・クリック）。置いた定規の□をドラッグで動かす", True)
-        self.act_3d = a("3D", lambda: self._tool("3d"), "J", "デッサン人形の関節（○）や箱をドラッグして動かす。箱の上の○で回す", True)
+        self.act_3d = a("3D 操作", lambda: self._tool("3d"), "J", "デッサン人形の関節（○）や箱をドラッグして動かす。箱の上の○で回す", True)
         self.act_effect = a("効果線", lambda: self._tool("effect"), "K",
                             "コマの中をクリックすると、選んだ効果線（集中線など）が入る。中心の＋をドラッグで動かす", True)
         self.act_stamp = a("素材を置く", lambda: self._tool("stamp"), tip="素材パネルで選んだ素材を、クリックした所に置く", checkable=True)
@@ -795,7 +791,7 @@ class MainWindow(QMainWindow):
         for act in self.tool_actions.values():
             tools.addAction(act)
         self.act_select.setChecked(True)
-        self.act_color = a("ペンの色…", self._pick_color, "C")
+        self.act_color = a("ペンの色…", self._pick_color, "C")  # (kept for its key; the colour is in ツールの設定)
         self.act_select_all = a("すべて選択", self._select_all, std.SelectAll)
         self.act_deselect = a("選択を解除", lambda: self.canvas.set_selection(None), "Ctrl+D")
         self.act_copy = a("コピー", self._copy, std.Copy)
@@ -876,7 +872,7 @@ class MainWindow(QMainWindow):
                       None, self.act_guides, self.act_onion]),
             ("ツール", [self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None, self.act_picker,
                         self.act_fill, self.act_lassofill, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
-                        self.act_color, self.act_thicker, self.act_thinner]),
+                        self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner]),
             ("定規", [self.act_ruler, None, *self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
                       self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]),
             ("3D", [self.act_3d, None, self.act_add_figure, self.act_add_box, None, *self.pose_actions, None, self.act_trace,
@@ -900,20 +896,50 @@ class MainWindow(QMainWindow):
                     menu.addAction(act)
         self.view_menu = bar.addMenu("パネル")
 
-        tools_bar = QToolBar("道具")
-        tools_bar.setObjectName("tools")
-        tools_bar.setMovable(False)
-        tools_bar.setIconSize(QSize(16, 16))
-        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_fill, self.act_marquee, self.act_picker, self.act_text,
-                    self.act_frame, self.act_ruler, self.act_3d, self.act_effect, None, self.act_undo, self.act_redo, None,
-                    self.act_fit, self.act_zoom_out, self.act_zoom_in, None, self.act_prev, self.act_next, None, self.act_export):
+        from genko.app.icons import icon
+
+        pictures = {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
+                    "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill, "lassofill": self.act_lassofill,
+                    "rect": self.act_marquee, "lasso": self.act_lasso, "wand": self.act_wand, "reshape": self.act_reshape,
+                    "ruler": self.act_ruler, "3d": self.act_3d, "effect": self.act_effect, "stamp": self.act_stamp,
+                    "undo": self.act_undo, "redo": self.act_redo, "fit": self.act_fit, "zoom_in": self.act_zoom_in,
+                    "zoom_out": self.act_zoom_out, "prev": self.act_prev, "next": self.act_next, "export": self.act_export}
+        for name, act in pictures.items():
+            act.setIcon(icon(name))
+            keys = act.shortcut().toString()
+            if keys and act in self.tool_actions.values():
+                act.setToolTip(f"{act.text()}（{keys}）" + (f"\n{act.statusTip()}" if act.statusTip() else ""))
+        palette = QToolBar("道具")
+        palette.setObjectName("tools")
+        palette.setMovable(False)
+        palette.setOrientation(Qt.Orientation.Vertical)
+        palette.setIconSize(QSize(24, 24))
+        palette.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_fill, self.act_lassofill, self.act_picker, None,
+                    self.act_text, self.act_frame, None, self.act_marquee, self.act_lasso, self.act_wand, self.act_reshape, None,
+                    self.act_ruler, self.act_3d, self.act_effect):
             if act is None:
-                tools_bar.addSeparator()
+                palette.addSeparator()
             else:
-                tools_bar.addAction(act)
-        self.addToolBar(tools_bar)
+                palette.addAction(act)
+        self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, palette)
+        self.tool_palette = palette
+        commands = QToolBar("操作")
+        commands.setObjectName("commands")
+        commands.setMovable(False)
+        commands.setIconSize(QSize(18, 18))
+        commands.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        for act in (self.act_undo, self.act_redo, None, self.act_fit, self.act_zoom_out, self.act_zoom_in, None, self.act_prev,
+                    self.act_next, None, self.act_export):
+            if act is None:
+                commands.addSeparator()
+            else:
+                commands.addAction(act)
+        self.addToolBar(commands)
 
     def _build_studio(self) -> None:
+        from genko.app.tool_settings import TextToolSettings, ToolSettings, action_page, fit_narrow
+
         self.process = ProcessBar()
         self.statusBar().addPermanentWidget(self.process)
         self.statusBar().addPermanentWidget(self.zoom_label)
@@ -927,49 +953,162 @@ class MainWindow(QMainWindow):
         self.checks = CheckPanel(self)
         for widget in (self.approvals, self.panel_view):
             widget.changed.connect(self._reload_pages)
+        # ツールの設定 (left): what the tool in hand can do
         self.brush = BrushPanel()
         self.brush.changed.connect(self._brush_changed)
-        brush_dock = QDockWidget("ブラシ", self)
-        brush_scroll = QScrollArea()
-        brush_scroll.setWidgetResizable(True)
-        brush_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        brush_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        brush_scroll.setWidget(self.brush)
-        brush_dock.setWidget(brush_scroll)
-        brush_dock.setObjectName("ブラシ")
-        brush_dock.setMinimumWidth(self.brush.minimumSizeHint().width() + 20)
-        brush_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, brush_dock)
-        self.view_menu.addAction(brush_dock.toggleViewAction())
-        self.brush_dock = brush_dock
+        self.text_settings = TextToolSettings()
+        self.tool_settings = ToolSettings()
+        ts = self.tool_settings
+        ts.add(("pen", "fill", "lassofill", "picker"), self.brush)
+        eraser_size = QDoubleSpinBox()
+        eraser_size.setRange(0.2, 50)
+        eraser_size.setSingleStep(0.5)
+        eraser_size.setSuffix(" mm")
+        eraser_size.setValue(self.eraser_mm)
+        eraser_size.valueChanged.connect(self._eraser_size)
+        self.eraser_size = eraser_size
+        eraser_page = QWidget()
+        eraser_form = QFormLayout(eraser_page)
+        eraser_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        eraser_form.setContentsMargins(0, 0, 0, 0)
+        eraser_form.addRow("消しゴムの太さ（[ ] でも変わる）", eraser_size)
+        eraser_form.addRow(self.brush.crossing)
+        scrape = QLabel("トーンのレイヤーでは削ります（ぼかすかは素材パネルのトーンの欄で）")
+        scrape.setWordWrap(True)
+        scrape.setStyleSheet("color:#666")
+        eraser_form.addRow(scrape)
+        ts.add(("eraser",), eraser_page)
+        ts.add(("text",), self.text_settings)
+        ts.add(("frame",), action_page([self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, self.act_gutters,
+                                        self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape, None, self.act_paper]))
+        ts.add(("marquee",), action_page([self.act_marquee, self.act_lasso, self.act_wand, None, self.act_select_all, self.act_deselect,
+                                          None, self.act_copy, self.act_cut, self.act_paste, self.act_delete_area, None, self.act_flip_h,
+                                          self.act_flip_v, self.act_fill_selection, self.act_line_width, self.act_tone_here]))
+        radius = QDoubleSpinBox()
+        radius.setRange(1, 60)
+        radius.setSuffix(" mm")
+        radius.setValue(self.canvas.reshape_radius_mm)
+        radius.valueChanged.connect(lambda v: setattr(self.canvas, "reshape_radius_mm", v))
+        radius_page = QWidget()
+        radius_form = QFormLayout(radius_page)
+        radius_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        radius_form.setContentsMargins(0, 0, 0, 0)
+        radius_form.addRow("つまんだ所から動く範囲", radius)
+        ts.add(("reshape",), radius_page)
+        ts.add(("ruler",), action_page([*self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
+                                        self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]))
+        ts.add(("3d",), action_page([self.act_add_figure, self.act_add_box, None, *self.pose_actions, None, self.act_trace,
+                                     self.act_del_prim]))
+        ts.add(("effect",), action_page([*self.effect_actions, None, self.act_materials]))
+        ts.add(("stamp",), action_page([self.act_materials]))
+        ts.add(("select",), action_page([self.act_fit, self.act_actual, None, self.act_story_editor, self.act_checks]))
+        settings_dock = QDockWidget("ツールの設定", self)
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        settings_scroll.setWidget(ts)
+        settings_dock.setWidget(settings_scroll)
+        settings_dock.setObjectName("ツールの設定")
+        settings_dock.setMinimumWidth(SIDE_WIDTH)
+        settings_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, settings_dock)
+        self.view_menu.addAction(settings_dock.toggleViewAction())
+        self.brush_dock = settings_dock
+        ts.show_tool("select")
+        # the panels on the right; the ones for books made with agents only show for those books
         docks = []
-        for title, widget in (("承認箱", self.approvals), ("コマ", self.panel_view), ("台詞", self.story),
-                              ("レイヤー", self.layers), ("素材", self.materials), ("定規・3D", self.guides), ("点検", self.checks), ("ライブラリ", self.library)):
+        self.agent_docks = []
+        groups: dict[str, list] = {"upper": [], "lower": [], "agent": []}
+        for title, widget, group in (("承認箱", self.approvals, "agent"), ("ページ", self.pages, "upper"),
+                                     ("レイヤー", self.layers, "upper"), ("台詞", self.story, "lower"),
+                                     ("素材", self.materials, "lower"), ("定規・3D", self.guides, "lower"),
+                                     ("点検", self.checks, "lower"), ("コマの詳細", self.panel_view, "agent"),
+                                     ("資料", self.library, "agent")):
             dock = QDockWidget(title, self)
-            if widget in (self.panel_view, self.story, self.layers, self.guides, self.materials):
+            if widget is not self.pages:
                 # tall panels scroll on a small screen instead of making the window taller
                 scroll = QScrollArea()
                 scroll.setWidgetResizable(True)
                 scroll.setFrameShape(QScrollArea.Shape.NoFrame)
                 scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-                if widget not in (self.guides, self.materials):  # these two grow and shrink with their contents
-                    widget.setMinimumHeight(max(420, widget.minimumSizeHint().height()))
                 scroll.setWidget(widget)
                 dock.setWidget(scroll)
             else:
                 dock.setWidget(widget)
             dock.setObjectName(title)
-            dock.setMinimumWidth(300)
+            dock.setMinimumWidth(SIDE_WIDTH)
             dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
-            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+            dock.setTitleBarWidget(QWidget())  # the tab already names it; the room goes to the panel
+            area = Qt.DockWidgetArea.LeftDockWidgetArea if group == "agent" else Qt.DockWidgetArea.RightDockWidgetArea
+            self.addDockWidget(area, dock)
             self.view_menu.addAction(dock.toggleViewAction())
             dock.visibilityChanged.connect(lambda shown, d=dock: shown and d in self._stale_docks and self._refresh_dock(d))
             docks.append(dock)
-        for first, second in zip(docks, docks[1:]):
-            self.tabifyDockWidget(first, second)
-        docks[0].raise_()
-        self.resizeDocks([docks[0], self.brush_dock], [340, self.brush.minimumSizeHint().width() + 20], Qt.Orientation.Horizontal)
+            groups[group].append(dock)
+            if group == "agent":
+                self.agent_docks.append(dock)
+        # two stacks on the right (pages and layers above, the lettering and the other panels below); the
+        # agent's panels sit under the tool settings on the left, only for books made with agents
+        self.splitDockWidget(groups["upper"][0], groups["lower"][0], Qt.Orientation.Vertical)
+        self.splitDockWidget(settings_dock, groups["agent"][0], Qt.Orientation.Vertical)
+        for group in groups.values():
+            for other in group[1:]:
+                self.tabifyDockWidget(group[0], other)
+        self.setTabPosition(Qt.DockWidgetArea.LeftDockWidgetArea, QTabWidget.TabPosition.North)
+        self.setTabPosition(Qt.DockWidgetArea.RightDockWidgetArea, QTabWidget.TabPosition.North)
         self.studio_docks = docks
+        for dock in [*docks, settings_dock]:
+            fit_narrow(dock.widget())
+        self._agent_view(self._agent_book())
+        self.resizeDocks([docks[1], settings_dock], [SIDE_WIDTH, SIDE_WIDTH], Qt.Orientation.Horizontal)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not getattr(self, "_settled", False):
+            self._settled = True
+            self._settle_docks()
+        QTimer.singleShot(0, self._hide_stray_tabs)
+
+    def _hide_stray_tabs(self) -> None:
+        """Tabbing panels inside a split leaves an old tab bar behind (a Qt quirk) that the first show
+        brings up over the panels; hide any bar whose tabs are only the start of another bar's."""
+        from PySide6.QtWidgets import QTabBar
+
+        bars = [bar for bar in self.findChildren(QTabBar) if bar.parentWidget() is self]
+        tabs = {bar: [bar.tabText(i) for i in range(bar.count())] for bar in bars}
+        shown = {dock.windowTitle() for dock in self.findChildren(QDockWidget) if dock.isVisible()}
+        for bar in bars:
+            mine = tabs[bar]
+            if not mine or not set(mine) & shown or any(other is not bar and len(tabs[other]) > len(mine) and tabs[other][:len(mine)] == mine
+                               for other in bars):
+                bar.hide()
+
+    def _agent_book(self) -> bool:
+        """A book made with agents (strict gates or a studio), or one they have sent requests to."""
+        ep = self.episode
+        return bool(ep.strict_gates or ep.studio)
+
+    def _agent_view(self, on: bool) -> None:
+        """Show the approval box and the agent panels only for books made with agents."""
+        if getattr(self, "_agent_mode", None) == on:
+            return
+        self._agent_mode = on
+        for dock in self.agent_docks:
+            dock.setVisible(on)
+            dock.toggleViewAction().setVisible(on)
+        self.process.setVisible(on)
+        if on:
+            self.resizeDocks([self.brush_dock, self.agent_docks[0]], [1, 1], Qt.Orientation.Vertical)
+        if self.isVisible():
+            QTimer.singleShot(0, self._settle_docks)
+
+    def _settle_docks(self) -> None:
+        """The panels in front: the approval box (for agent books), the layers and the lines."""
+        for dock in self.studio_docks:
+            if dock.windowTitle() in ("承認箱", "レイヤー", "台詞") and dock.isVisible():
+                dock.raise_()
+        self._hide_stray_tabs()
 
     def show_dock(self, title: str) -> None:
         for dock in self.studio_docks:
@@ -978,12 +1117,16 @@ class MainWindow(QMainWindow):
                 dock.raise_()
 
     def _dock_visible(self, dock) -> bool:
-        return dock.isVisible() and not dock.visibleRegion().isEmpty()
+        # (a panel behind another tab is moved out of the window; one in front sits inside it)
+        return dock.isVisible() and (dock.isFloating() or self.rect().intersects(dock.geometry()))
 
     def _refresh_dock(self, dock) -> None:
         self._stale_docks.discard(dock)
-        widget = {"承認箱": self.approvals, "コマ": self.panel_view, "台詞": self.story, "レイヤー": self.layers,
-                  "素材": self.materials, "定規・3D": self.guides, "点検": self.checks, "ライブラリ": self.library}[dock.windowTitle()]
+        widget = {"承認箱": self.approvals, "コマの詳細": self.panel_view, "台詞": self.story, "レイヤー": self.layers,
+                  "素材": self.materials, "定規・3D": self.guides, "点検": self.checks, "資料": self.library,
+                  "ページ": None}[dock.windowTitle()]
+        if widget is None:
+            return
         if widget is self.panel_view:
             self._sync_panel_view()
         widget.refresh()
@@ -1052,6 +1195,8 @@ class MainWindow(QMainWindow):
         return f"{page.index} ページ\n{name}{art}{done}{extra}"
 
     def _reload_pages(self) -> None:
+        if hasattr(self, "agent_docks"):
+            self._agent_view(self._agent_book())  # an agent may have started working on this book
         self.pages.fill(self.episode.pages, self._page_text, dirty="all")
         self.pages.blockSignals(True)
         self.pages.setCurrentRow(min(self._page_index, len(self.episode.pages) - 1))
@@ -1163,8 +1308,11 @@ class MainWindow(QMainWindow):
             frames = page.leaf_frames()
             order = next((i + 1 for i, f in enumerate(frames) if f.id == page.selected_frame_id), None)
             selected = f" ・ 選択中: {order} コマ目" if order else ""
-        self.status.setText(f"{page.index} ページ（{wording.STAGE.get(page.stage, page.stage)}） ・ コマ {len(page.leaf_frames())}"
-                            f"{selected} ・ {saved} ・ {wording.actor(self.session.actor)}")
+        if self._agent_book():
+            self.status.setText(f"{page.index} ページ（{wording.STAGE.get(page.stage, page.stage)}） ・ コマ {len(page.leaf_frames())}"
+                                f"{selected} ・ {saved} ・ {wording.actor(self.session.actor)}")
+        else:
+            self.status.setText(f"{page.index} / {len(self.episode.pages)} ページ ・ コマ {len(page.leaf_frames())}{selected} ・ {saved}")
         self._refresh_zoom()
 
     def flash(self, message: str, ms: int = 3000, error: bool = False) -> None:
@@ -1195,6 +1343,8 @@ class MainWindow(QMainWindow):
         else:
             self.canvas.set_tool(tool)
         self.tool_actions[tool].setChecked(True)
+        if hasattr(self, "tool_settings"):
+            self.tool_settings.show_tool(self.canvas.tool)
 
     # --- the layer the pen works on ---------------------------------------------------------------
 
@@ -1279,6 +1429,9 @@ class MainWindow(QMainWindow):
         if self.canvas.tool == "eraser":
             self.eraser_mm = nxt(self.eraser_mm)
             self.canvas.eraser_mm = self.eraser_mm
+            self.eraser_size.blockSignals(True)
+            self.eraser_size.setValue(self.eraser_mm)
+            self.eraser_size.blockSignals(False)
             self.flash(f"消しゴムの太さ {self.eraser_mm:g} mm", 2000)
             self.canvas.update()
             return
@@ -1286,6 +1439,11 @@ class MainWindow(QMainWindow):
         self.canvas.brush_width_mm = width
         self.canvas.update()
         self.flash(f"ペンの太さ {width:g} mm", 2000)
+
+    def _eraser_size(self, value: float) -> None:
+        self.eraser_mm = float(value)
+        self.canvas.eraser_mm = self.eraser_mm
+        self.canvas.update()
 
     def _brush_changed(self) -> None:
         self.canvas.brush_width_mm = self.brush.size.value()
@@ -1729,8 +1887,11 @@ class MainWindow(QMainWindow):
                 return
             text, runs = parse_ruby(typed)
             frame = page.frame_at(x_mm, y_mm)
-            box = place_at(x_mm, y_mm, text, "speech", True, frame)
-            op = {"op": "add_line", "page": page.index, "text": text, "balloon": "speech", **box}
+            fields = self.text_settings.line_fields()
+            box = place_at(x_mm, y_mm, text, fields["balloon"], fields["vertical"], frame)
+            op = {"op": "add_line", "page": page.index, "text": text, "balloon": fields["balloon"], **box}
+            if fields["style"]:
+                op["style"] = fields["style"]
             if frame is not None:
                 op["frame_id"] = frame.id
             if runs:
@@ -1887,7 +2048,7 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_merge)
             menu.addSeparator()
             show = menu.addAction("このコマの絵を見る（コマ パネル）")
-            show.triggered.connect(lambda: self.show_dock("コマ"))
+            show.triggered.connect(lambda: self.show_dock("コマの詳細"))
             menu.addSeparator()
         menu.addAction(self.act_fit)
         menu.exec(pos.toPoint())

@@ -72,14 +72,15 @@ class MaterialPanel(QWidget):
         use.setToolTip("トーン: 選択範囲か選んだコマに（なければクリックした所に）。効果線: 選んだコマに。画像・パーツ: クリックした所に")
         use.clicked.connect(self.use)
         more = QGridLayout()
-        for i, (title, slot, tip) in enumerate((("画像を取り込む…", self.import_image, "画像ファイルを素材にします"),
-                                 ("選択範囲を登録…", self.register_selection, "選んだ範囲の線と塗りを素材（パーツ）にします"),
-                                 ("名前・フォルダ…", self.rename, ""), ("消す", self.delete, "自分で登録した素材を消します"))):
+        for i, (title, slot, tip) in enumerate((("画像を追加…", self.import_image, "画像ファイルを素材にします"),
+                                 ("範囲を登録…", self.register_selection, "選んだ範囲の線と塗りを素材（パーツ）にします"),
+                                 ("名前…", self.rename, "名前とフォルダを変えます"), ("消す", self.delete, "自分で登録した素材を消します"))):
             button = QPushButton(title)
             button.setToolTip(tip)
             button.clicked.connect(slot)
             more.addWidget(button, i // 2, i % 2)
-        new_folder = QPushButton("フォルダを作る…")
+        new_folder = QPushButton("＋フォルダ…")
+        new_folder.setToolTip("素材を分けるフォルダを作ります")
         new_folder.clicked.connect(self.new_folder)
         mat_box = QGroupBox("素材（ダブルクリックで貼る）")
         ml = QVBoxLayout(mat_box)
