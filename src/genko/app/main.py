@@ -2540,7 +2540,11 @@ class MainWindow(QMainWindow):
 
     def _export(self) -> None:
         self.commit_now()
-        ExportDialog(self, self.episode, self.path, self.session.actor).exec()
+        page = self._current()
+        dialog = ExportDialog(self, self.episode, self.path, self.session.actor, current_page=page.index if page else 1)
+        dialog.exec()
+        if dialog.fix_requested:
+            self._run_checks()
         if self.session.outside_change():
             self.session.sync()
         self._reload_pages()

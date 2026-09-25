@@ -37,6 +37,45 @@ FORMATS: list[Format] = [
 BY_KEY = {f.key: f for f in FORMATS}
 
 
+def parse_pages(text: str, count: int) -> list[int]:
+    """'3-5, 8' → [3, 4, 5, 8] (page numbers, in order, each once); ValueError when it makes no sense."""
+    out: list[int] = []
+    for part in (text or "").replace("、", ",").replace("，", ",").replace("〜", "-").replace("～", "-").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            if "-" in part:
+                a, b = (int(v) for v in part.split("-", 1))
+                pages = range(min(a, b), max(a, b) + 1)
+            else:
+                pages = range(int(part), int(part) + 1)
+        except ValueError as exc:
+            raise ValueError(f"ページの指定が読めません: {part}") from exc
+        for n in pages:
+            if not 1 <= n <= count:
+                raise ValueError(f"{n} ページはありません（1〜{count}）")
+            if n not in out:
+                out.append(n)
+    if not out:
+        raise ValueError("書き出すページがありません")
+    return sorted(out)
+
+
+def subset(episode: Episode, pages: list[int]) -> Episode:
+    """A copy of the book with only these pages (they keep their numbers; a spread missing its partner is
+    written as a single page)."""
+    import copy
+
+    keep = set(pages)
+    part = copy.deepcopy(episode)
+    part.pages = [page for page in part.pages if page.index in keep]
+    for page in part.pages:
+        if page.spread_with and page.spread_with not in keep:
+            page.spread_with = None
+    return part
+
+
 def default_dpi(episode: Episode, key: str) -> int:
     if key in ("epub", "strip"):
         return 150
@@ -45,12 +84,19 @@ def default_dpi(episode: Episode, key: str) -> int:
 
 def run(episode: Episode, project: Path | None, key: str, out: Path, *, official: bool = False,
         actor: str = "human:user", dpi: int | None = None, width: int = 800, max_height: int = 1280,
-        long_edge: int = 2048, jpeg: bool = False, spreads: bool = False, area: str = "bleed") -> dict:
-    """{ok, files, errors?, error?}. out is a folder."""
+        long_edge: int = 2048, jpeg: bool = False, spreads: bool = False, area: str = "bleed",
+        pages: list[int] | None = None) -> dict:
+    """{ok, files, errors?, error?}. out is a folder. pages: only these page numbers (None: all)."""
     out = Path(out)
     fmt = BY_KEY.get(key)
     if fmt is None:
         return {"ok": False, "error": f"知らない形式: {key}"}
+    if pages is not None and sorted(pages) != [p.index for p in episode.pages]:
+        if official:
+            return {"ok": False, "error": "正式な書き出しは全ページで行います"}
+        episode = subset(episode, pages)
+        if not episode.pages:
+            return {"ok": False, "error": "書き出すページがありません"}
     if official:
         if not fmt.official:
             return {"ok": False, "error": f"{fmt.label} は正式な書き出しに使えない"}

@@ -363,12 +363,29 @@ class NewProjectDialog(QDialog):
 class ExportDialog(QDialog):
     """Choose a format, its options and a folder. official=True locks the checked export (approval box)."""
 
-    def __init__(self, parent, episode, project: Path | None, actor: str, official: bool = False) -> None:
+    def __init__(self, parent, episode, project: Path | None, actor: str, official: bool = False, current_page: int = 1) -> None:
         super().__init__(parent)
         self.setWindowTitle("正式な書き出し" if official else "書き出し")
         self.setMinimumWidth(560)
         self.episode, self.project, self.actor = episode, project, actor
+        self.current_page = current_page
         self.result_: dict | None = None
+        self.fix_requested = False  # the person chose to fix what the check found first
+        self.which = QComboBox()
+        for label, key in (("全部のページ", "all"), (f"今のページ（{current_page}）", "current"), ("今の見開き", "spread"),
+                           ("範囲を指定", "range")):
+            self.which.addItem(label, key)
+        self.range = QLineEdit()
+        self.range.setPlaceholderText("例: 3-5, 8")
+        self.range.setVisible(False)
+        self.which.currentIndexChanged.connect(lambda _: (self.range.setVisible(self.which.currentData() == "range"), self._preview()))
+        self.range.editingFinished.connect(self._preview)
+        self.preview = QLabel()
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setMinimumSize(160, 200)
+        self.preview.setStyleSheet("background:#3a3a3a")
+        self.preview_note = QLabel()
+        self.preview_note.setStyleSheet("color:#555")
         self.format = QComboBox()
         for fmt in exporting.FORMATS:
             if official and not fmt.official:
@@ -414,6 +431,10 @@ class ExportDialog(QDialog):
         self.form = QFormLayout()
         self.form.addRow("形式", self.format)
         self.form.addRow("", self.note)
+        pages_row = QHBoxLayout()
+        pages_row.addWidget(self.which)
+        pages_row.addWidget(self.range, 1)
+        self.form.addRow("ページ", pages_row)
         self.rows: dict[str, QWidget] = {}
         for key, label, widget in (("dpi", "解像度", self.dpi), ("area", "書き出す範囲", self.area), ("width", "幅", self.width), ("max_height", "1 枚の高さの上限", self.max_height),
                                    ("long_edge", "長辺", self.long_edge), ("jpeg", "", self.jpeg), ("spreads", "", self.spreads)):
@@ -426,10 +447,19 @@ class ExportDialog(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
         self.buttons.accepted.connect(self.run)
         self.buttons.rejected.connect(self.reject)
+        side = QVBoxLayout()
+        side.addWidget(self.preview)
+        side.addWidget(self.preview_note)
+        side.addStretch(1)
+        body = QHBoxLayout()
+        body.addLayout(self.form, 1)
+        body.addLayout(side)
         layout = QVBoxLayout(self)
-        layout.addLayout(self.form)
+        layout.addLayout(body)
         layout.addWidget(self.buttons)
         self.format.currentIndexChanged.connect(lambda _: self._format_changed())
+        self.area.currentIndexChanged.connect(lambda _: self._preview())
+        self.official.toggled.connect(lambda on: (self.which.setEnabled(not on), on and self.which.setCurrentIndex(0)))
         self._format_changed()
 
     def _format_changed(self) -> None:
@@ -446,6 +476,62 @@ class ExportDialog(QDialog):
         if not self.official.isEnabled() or not fmt.official:
             self.official.setChecked(self.official.isChecked() and fmt.official)
         self.official.setVisible(fmt.official)
+        self._preview()
+
+    def pages(self) -> list[int]:
+        """The page numbers to write (ValueError when the range cannot be read)."""
+        count = len(self.episode.pages)
+        which = self.which.currentData()
+        if which == "current":
+            return [self.current_page]
+        if which == "spread":
+            page = next((p for p in self.episode.pages if p.index == self.current_page), None)
+            partner = getattr(page, "spread_with", None) if page else None
+            return sorted({self.current_page, partner} - {None})
+        if which == "range":
+            return exporting.parse_pages(self.range.text(), count)
+        return [p.index for p in self.episode.pages]
+
+    def _preview(self) -> None:
+        """The first page to be written, small, cut as it will be."""
+        from PySide6.QtGui import QImage, QPixmap
+
+        from genko.export import crop_to
+        from genko.render import render_page
+
+        try:
+            pages = self.pages()
+        except ValueError as exc:
+            self.preview.clear()
+            self.preview_note.setText(str(exc))
+            return
+        page = next((p for p in self.episode.pages if p.index == pages[0]), None)
+        if page is None:
+            return
+        dpi = 30
+        image = render_page(page, dpi, mode="print", episode=self.episode, crop_marks=self.area.currentData() == "paper")
+        if "area" in exporting.BY_KEY[self.format.currentData()].options:
+            image = crop_to(image, page, self.area.currentData(), dpi)
+        image = image.convert("RGB")
+        data = image.tobytes()
+        qimage = QImage(data, image.width, image.height, image.width * 3, QImage.Format.Format_RGB888).copy()
+        self.preview.setPixmap(QPixmap.fromImage(qimage).scaledToHeight(min(260, max(120, image.height)),
+                                                                         Qt.TransformationMode.SmoothTransformation))
+        self.preview_note.setText(f"{pages[0]} ページ（全 {len(pages)} ページを書き出す）")
+
+    def ask_preflight(self, errors: list[dict]) -> str:
+        """What the check found that stops a print: 'go' (write anyway), 'fix' or 'stop'."""
+        lines = [f"・{e['page']} ページ: {e['message']}" if e.get("page") else f"・{e['message']}" for e in errors[:10]]
+        more = f"\n…ほか {len(errors) - 10} 件" if len(errors) > 10 else ""
+        box = QMessageBox(self)
+        box.setWindowTitle("入稿前の点検")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(f"書き出す前に点検したところ、止まる問題が {len(errors)} 件ありました。\n" + "\n".join(lines) + more)
+        go = box.addButton("このまま書き出す", QMessageBox.ButtonRole.AcceptRole)
+        fix = box.addButton("直す（点検パネルを開く）", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("やめる", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        return "go" if box.clickedButton() is go else "fix" if box.clickedButton() is fix else "stop"
 
     def _pick_folder(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "書き出し先", self.folder.text())
@@ -459,10 +545,28 @@ class ExportDialog(QDialog):
 
     def run(self) -> None:
         out = Path(self.folder.text()).expanduser()
+        try:
+            pages = self.pages()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Genko", str(exc))
+            return
+        if not self.official.isChecked():  # (the official export runs its own check and stops by itself)
+            from genko import checks
+
+            report = checks.book(self.episode, self.project)
+            errors = [i for i in report["issues"] if i["level"] == "error" and (not i.get("page") or i["page"] in pages)]
+            if errors:
+                answer = self.ask_preflight(errors)
+                if answer == "fix":
+                    self.fix_requested = True
+                    self.reject()
+                    return
+                if answer != "go":
+                    return
         self.setCursor(Qt.CursorShape.WaitCursor)
         try:
             result = exporting.run(self.episode, self.project, self.format.currentData(), out,
-                                   official=self.official.isChecked(), actor=self.actor, **self.options())
+                                   official=self.official.isChecked(), actor=self.actor, pages=pages, **self.options())
         finally:
             self.unsetCursor()
         self.result_ = result

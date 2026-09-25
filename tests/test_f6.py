@@ -315,3 +315,55 @@ def test_making_a_brush_in_the_window(window, monkeypatch):
     window.brush.forget.click()
     assert key not in brushes.load_library() and window.brush.kind() == "gpen"
     brushes.CUSTOM.clear()
+
+
+# --- export: pages, preview, the check before --------------------------------------------------------------
+
+
+def test_export_writes_the_pages_asked_for(tmp_path: Path):
+    from genko.app import exporting
+
+    ep = new_episode("t", 1, 6, PageSpec.b4_comic())
+    assert exporting.parse_pages("2-4, 6, 3", 6) == [2, 3, 4, 6]
+    with pytest.raises(ValueError):
+        exporting.parse_pages("5-9", 6)
+    with pytest.raises(ValueError):
+        exporting.parse_pages("二", 6)
+    result = exporting.run(ep, None, "png", tmp_path / "o", dpi=40, pages=[2, 3, 5])
+    assert result["ok"] and len(result["files"]) == 3
+    assert exporting.run(ep, None, "png", tmp_path / "all", dpi=40)["ok"]
+    assert len(list((tmp_path / "all").glob("*.png"))) == 6
+    assert not exporting.run(ep, tmp_path / "x.genko", "pdf", tmp_path / "p", official=True, pages=[1])["ok"]
+    assert len(ep.pages) == 6  # the book itself is untouched
+
+
+def test_the_export_dialog_previews_and_checks_first(window, tmp_path: Path, monkeypatch):
+    from genko.app.dialogs import ExportDialog
+
+    # a line running off the paper: the check stops the print
+    apply_ops(window.episode, [{"op": "add_line", "page": 1, "text": "はみ出し", "x_mm": 250, "y_mm": 40, "w_mm": 20, "h_mm": 30}])
+    dialog = ExportDialog(window, window.episode, window.path, "human:leaf", current_page=2)
+    dialog.format.setCurrentIndex(dialog.format.findData("png"))
+    dialog.dpi.setValue(40)
+    dialog.folder.setText(str(tmp_path / "out"))
+    assert dialog.preview.pixmap() is not None and not dialog.preview.pixmap().isNull()
+    dialog.which.setCurrentIndex(dialog.which.findData("current"))
+    assert dialog.pages() == [2] and "2 ページ" in dialog.preview_note.text()
+    dialog.which.setCurrentIndex(dialog.which.findData("range"))
+    dialog.range.setText("1-2")
+    assert dialog.pages() == [1, 2]
+    asked = []
+    monkeypatch.setattr(ExportDialog, "ask_preflight", lambda self, errors: asked.append(errors) or "stop")
+    dialog.run()
+    assert asked and dialog.result_ is None and any(e["page"] == 1 for e in asked[0])
+    monkeypatch.setattr(ExportDialog, "ask_preflight", lambda self, errors: "fix")
+    dialog.run()
+    assert dialog.fix_requested and dialog.result_ is None
+    # only page 2: nothing stops it
+    monkeypatch.setattr(ExportDialog, "ask_preflight", lambda self, errors: pytest.fail("page 2 has nothing to fix"))
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
+    dialog.range.setText("2")
+    dialog.run()
+    assert dialog.result_["ok"] and len(dialog.result_["files"]) == 1
