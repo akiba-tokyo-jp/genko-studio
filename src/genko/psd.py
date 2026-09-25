@@ -142,13 +142,11 @@ def page_layers(page: Page, episode: Episode, dpi: int) -> list[tuple[str, Image
         balloon = blank()
         render._draw_balloon(ImageDraw.Draw(balloon), line, dpi, font_path, show_speaker=False)
         out.append((f"台詞 {line.text.replace(chr(10), '')[:24]}", balloon))
-    if page.numero:
+    from genko import nombre
+
+    if nombre.placements(episode, page):
         numero = blank()
-        draw = ImageDraw.Draw(numero)
-        font = render._font(font_path)
-        label = str(page.index)
-        bbox = draw.textbbox((0, 0), label, font=font)
-        draw.text(((width - (bbox[2] - bbox[0])) / 2, height - render.mm_to_px(12, dpi)), label, fill=(20, 20, 20), font=font)
+        nombre.draw(numero, episode, page, dpi)
         out.append(("ノンブル", numero))
     return out
 

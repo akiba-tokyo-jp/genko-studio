@@ -37,6 +37,7 @@ class GuideMixin:
         self.selected_prim_id: str | None = None
         self._prim_drag: dict | None = None
         self.selected_effect_id: str | None = None
+        self.highlight_box: list | None = None  # a problem from the checks, shown on the page (mm)
         self._effect_drag: dict | None = None
 
     # --- helpers -------------------------------------------------------------------------------------------
@@ -356,6 +357,18 @@ class GuideMixin:
             ruler.pop("active", None)
             self.rulerPlaced.emit(ruler)
         self.update()
+
+    def _draw_highlight(self, painter: QPainter) -> None:
+        if not self.highlight_box or self.page is None:
+            return
+        x, y, w, h = self.highlight_box
+        pad = 2.0
+        a, b = self._pt(x - pad, y - pad), self._pt(x + w + pad, y + h + pad)
+        painter.save()
+        painter.setPen(QPen(QColor("#e03131"), 2.5, Qt.PenStyle.DashLine))
+        painter.setBrush(QColor(224, 49, 49, 40))
+        painter.drawRect(QRectF(a, b))
+        painter.restore()
 
     # --- effect lines: click to put one, drag its centre ---------------------------------------------------
 

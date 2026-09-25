@@ -502,15 +502,10 @@ def render_page(
             label = f"{line.speaker}: {line.text}" if line.speaker else line.text
             draw.text((x, y), label, fill=(10, 10, 10), font=font)
 
-    if page.numero and mode == "print":
-        label = str(page.index)
-        ty = height - mm_to_px(12, working_dpi)
-        try:
-            bbox = draw.textbbox((0, 0), label, font=font)
-            tw = bbox[2] - bbox[0]
-        except Exception:
-            tw = 6
-        draw.text(((width - tw) / 2, ty), label, fill=(20, 20, 20), font=font)
+    if mode in ("print", "proof"):
+        from genko import nombre
+
+        nombre.draw(image, episode, page, working_dpi)
 
     if crop_marks and mode == "print":
         _draw_crop_marks(draw, page, working_dpi)

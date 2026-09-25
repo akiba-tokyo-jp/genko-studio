@@ -35,7 +35,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float? (0: no border)", "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)"},
     {"op": "cut_frame", "page": "int", "frame_id": "str?", "p0": "[x,y]", "p1": "[x,y]", "gutter_mm": "float?", "note": "cut a panel along any line (slanted panels)"},
     {"op": "move_gutter", "page": "int", "frame_id": "str (the split)", "index": "int? (gutter after this child)", "delta_mm": "float", "gutter_mm": "float? (new width)"},
-    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?"},
+    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?", "id": "str? (choose the id)"},
     {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|flash|whisper|narration|sfx|none?", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"},
     {"op": "reorder_lines", "page": "int", "order": "[line id] (reading order)"},
     {"op": "delete_line", "id": "str"},
@@ -46,9 +46,10 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
     {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?"},
-    {"op": "add_page", "count": "int"},
+    {"op": "add_page", "count": "int", "after": "int? (insert after this page; default at the end)"},
     {"op": "delete_page", "page": "int"},
-    {"op": "duplicate_page", "page": "int"},
+    {"op": "duplicate_page", "page": "int", "next_to": "bool? (the copy right after the page; default at the end)"},
+    {"op": "set_nombre", "page": "int? (with numero: show or hide that page's)", "numero": "bool?", "position": "bottom_center|bottom_outside|top_outside|side_outside?", "font": "str?", "size_mm": "float?", "start": "int? (the number of page 1)", "hidden": "bool? (隠しノンブル)", "hidden_size_mm": "float?", "show": "bool? (visible nombres)"},
     {"op": "set_note", "page": "int", "note": "str"},
     {"op": "set_meta", "title": "str?", "episode": "int?", "preset": "str?", "binding": "right|left?", "start_side": "left|right|null?", "strict_gates": "bool?", "font_path": "str?"},
     {"op": "set_bible", "plot": "str?", "characters": "list?", "constraints": "list?"},
@@ -622,6 +623,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             balloon=str(op.get("balloon", "speech")),
             tail=_parse_tail(op.get("tail")),
         )
+        if op.get("id"):
+            if any(item.id == str(op["id"]) and item is not line for item in episode.story):
+                raise ApplyError(f"line {op['id']} already exists")
+            line.id = str(op["id"])
         if "wrap" in op:
             line.wrap = str(op["wrap"])
         if op.get("ruby_runs"):
@@ -976,11 +981,36 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name == "add_page":
         count = int(op.get("count", 1))
+        if not 1 <= count <= 200:
+            raise ApplyError("count is 1 to 200")
+        after = op.get("after")
+        if after is not None and not any(p.index == int(after) for p in episode.pages) and int(after) != 0:
+            raise ApplyError(f"no page {after}")
+        first_new = len(episode.pages) + 1
         for _ in range(count):
             index = len(episode.pages) + 1
             page = Page(index=index, spec=episode.spec, frames=[], binding=episode.binding)
             page.frames = [Frame(id=new_id(), rect=page.inner_rect_mm())]
             episode.pages.append(page)
+        if after is not None and int(after) < first_new - 1:
+            old = [p.index for p in episode.pages]
+            fresh = old[first_new - 1:]
+            kept = old[:first_new - 1]
+            order = kept[:int(after)] + fresh + kept[int(after):]
+            _reorder(episode, order)
+        return
+
+    if name == "set_nombre":
+        from genko import nombre
+
+        if op.get("page") is not None and "numero" in op:
+            _require_page(episode, op).numero = bool(op["numero"])
+        change = {k: op[k] for k in ("position", "font", "size_mm", "start", "hidden", "hidden_size_mm", "show") if k in op}
+        try:
+            nombre.validate(change)
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
+        episode.nombre = {**episode.nombre, **change}
         return
 
     if name == "delete_page":
@@ -1022,6 +1052,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         clone.texts = new_lines
         episode.story.extend(new_lines)
         episode.pages.append(clone)
+        if op.get("next_to") and page.index < len(episode.pages) - 1:
+            order = [p.index for p in episode.pages[:-1]]
+            order.insert(page.index, clone.index)
+            _reorder(episode, order)
         return
 
     if name == "set_note":
@@ -1087,9 +1121,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         order = [int(i) for i in order]
         if sorted(order) != sorted(p.index for p in episode.pages):
             raise ApplyError("order must list every page exactly once")
-        by_index = {page.index: page for page in episode.pages}
-        episode.pages = [by_index[i] for i in order]
-        remap_page_refs(episode, {old: new for new, old in enumerate(order, start=1)})
+        _reorder(episode, order)
         return
 
     if name == "select_frame":
@@ -1765,6 +1797,12 @@ def _refresh_frame_ids(frame: Frame, mapping: dict[str, str] | None = None) -> N
         mapping[old] = frame.id
     for child in frame.children:
         _refresh_frame_ids(child, mapping)
+
+
+def _reorder(episode: Episode, order: list[int]) -> None:
+    by_index = {page.index: page for page in episode.pages}
+    episode.pages = [by_index[i] for i in order]
+    remap_page_refs(episode, {old: new for new, old in enumerate(order, start=1)})
 
 
 def remap_page_refs(episode: Episode, mapping: dict[int, int | None]) -> None:

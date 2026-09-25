@@ -64,7 +64,8 @@
       "wrap": "vertical|horizontal?",
       "tail": "[x,y]?",
       "tails": "[{to, via?, width_mm?}]?",
-      "style": "object?"
+      "style": "object?",
+      "id": "str? (choose the id)"
     },
     {
       "op": "edit_line",
@@ -153,7 +154,8 @@
     },
     {
       "op": "add_page",
-      "count": "int"
+      "count": "int",
+      "after": "int? (insert after this page; default at the end)"
     },
     {
       "op": "delete_page",
@@ -161,7 +163,20 @@
     },
     {
       "op": "duplicate_page",
-      "page": "int"
+      "page": "int",
+      "next_to": "bool? (the copy right after the page; default at the end)"
+    },
+    {
+      "op": "set_nombre",
+      "page": "int? (with numero: show or hide that page's)",
+      "numero": "bool?",
+      "position": "bottom_center|bottom_outside|top_outside|side_outside?",
+      "font": "str?",
+      "size_mm": "float?",
+      "start": "int? (the number of page 1)",
+      "hidden": "bool? (隠しノンブル)",
+      "hidden_size_mm": "float?",
+      "show": "bool? (visible nombres)"
     },
     {
       "op": "set_note",

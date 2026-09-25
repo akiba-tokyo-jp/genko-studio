@@ -120,6 +120,7 @@ def _payload(episode: Episode, store: AssetStore) -> dict:
         "autosave": episode.autosave,
         "font_path": episode.font_path,
         "page_locks": episode.page_locks,
+        **({"nombre": dict(episode.nombre)} if episode.nombre else {}),
         "brush": {
             "rgb": list(episode.brush_rgb),
             "width_mm": episode.brush_width_mm,

@@ -301,6 +301,7 @@ class PageCanvas(GuideMixin, QWidget):
         self._draw_rulers(painter)
         self._draw_prims_overlay(painter)
         self._draw_effect_handles(painter)
+        self._draw_highlight(painter)
         self._draw_selection_overlay(painter)
         if self._reshape is not None:
             painter.setPen(QPen(QColor("#e8590c"), 2))

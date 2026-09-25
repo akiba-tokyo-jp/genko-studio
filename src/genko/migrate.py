@@ -119,7 +119,7 @@ def _line(data: dict) -> StoryLine:
 SUPPORTED_VERSION = 3
 KNOWN_TOP_KEYS = frozenset({
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
-    "font_path", "page_locks", "brush", "spec", "bible", "tickets", "studio", "pages", "story",
+    "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
 })
 KNOWN_PAGE_KEYS = frozenset({
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
@@ -213,6 +213,7 @@ def migrate_payload(payload: dict, store=None) -> Episode:
     episode.brush_stabilize = int(brush.get("stabilize", 0) or 0)
     episode.brush_taper = bool(brush.get("taper", False))
     episode.brush_curve = str(brush.get("curve") or "linear")
+    episode.nombre = dict(payload.get("nombre") or {})
     bible = payload.get("bible") or {}
     episode.bible.plot = bible.get("plot", "")
     episode.bible.characters = list(bible.get("characters") or [])

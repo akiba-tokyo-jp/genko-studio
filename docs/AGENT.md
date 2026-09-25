@@ -233,6 +233,13 @@ Tones, effect lines and materials (M15):
 - `add_effect {page, kind: focus|speed|uni_flash|beta_flash|white, frame_id, params}`: focus `{center, inner: [rx, ry], count, jitter, width_mm}`, speed `{angle, count, length, curve, jitter, width_mm}`, uni_flash `{center, inner, count, length_mm, width_mm}`, beta_flash `{center, inner, spikes, depth}`; `rgb` for white lines. `edit_effect {id, params (merged, null removes), visible}`, `delete_effect`, `effect_to_layer {id, layer_id}` turns it into pen lines (効果線ペン, kind `fx`) and fills to finish by hand.
 - Materials: built-in tones, gradients and effects, plus the person's own library in the config dir (pictures, drawn parts, folders). `stamp_material {page, material_id, frame_id | area | at (tones), x_mm, y_mm (effect centre, or where a picture / part goes), layer_id (pictures and parts), width_mm}` copies it into the book.
 
+Pages and the book (M16):
+
+- `add_page {count, after}` inserts pages; `duplicate_page {page, next_to: true}` puts the copy right after; `reorder {order}` moves pages (lines, spreads and onion skins follow).
+- `set_nombre {position: bottom_center|bottom_outside|top_outside|side_outside, font, size_mm, start, hidden, hidden_size_mm, show}` sets the book's page numbers (outside = the fore-edge, which changes side each page; the hidden nombre sits in the gutter). `set_nombre {page, numero: false}` hides one page's. They print in exports and show in proofs.
+- `add_line {id}` can choose the new line's id.
+- `genko.checks.book(episode, project?)` lists what to fix before printing, each with a page and a place: text outside the trim or the basic frame, text too small for its balloon, overlapping balloons, low-resolution pictures, paint layers, art beyond the paper, spreads that do not face, empty pages — plus the studio preflight for studio books.
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

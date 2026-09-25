@@ -33,6 +33,8 @@ from genko.app.brush_panel import BrushPanel
 from genko.app.canvas import PageCanvas
 from genko.app.guide_panel import PRESETS, GuidePanel
 from genko.app.material_panel import MaterialPanel
+from genko.app.check_panel import CheckPanel
+from genko.app.pages_panel import PageList, nombre_dialog
 from genko.app.dialogs import ExportDialog, NewProjectDialog, StartDialog  # noqa: F401  (StartDialog is re-exported)
 from genko.app.session import Session
 from genko.app.studio_widgets import ApprovalBox, Library, PanelView, ProcessBar
@@ -574,9 +576,9 @@ class MainWindow(QMainWindow):
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_disk_change)
 
-        self.pages = QListWidget()
+        self.pages = PageList(self)
         self.pages.setMinimumWidth(110)
-        self.pages.setMaximumWidth(180)
+        self.pages.setMaximumWidth(200)
         self.pages.currentRowChanged.connect(self._select_page)
         self.canvas = PageCanvas()
         self.canvas.renderer = self._render_current
@@ -683,9 +685,8 @@ class MainWindow(QMainWindow):
     def _after_edit(self) -> None:
         """An edit on this page: redraw the page at once, the side panels a little later (drawing stays quick)."""
         page = self._current()
-        item = self.pages.item(self._page_index)
-        if page is not None and item is not None:
-            item.setText(self._page_text(page))
+        if page is not None:
+            self.pages.update_page(page, self._page_text(page))
         self._show_page(light=True)
 
     def apply_and_commit(self, ops: list[dict]) -> bool:
@@ -853,8 +854,17 @@ class MainWindow(QMainWindow):
         self.act_bleed = a("選んだコマを断ち切りにする（紙の端まで）", self._toggle_bleed)
         self.act_reset_shape = a("選んだコマの形を元に戻す", lambda: self._set_selected_frame({"poly": None}))
         self.act_template = a("テンプレートでコマを割る…", self._templates, tip="今のページのコマと台詞を作り直します")
-        self.act_add_page = a("ページを追加", self._add_page)
+        self.act_add_page = a("ページを追加（この後ろに）", self._add_page)
         self.act_del_page = a("このページを削除…", self._del_page)
+        self.act_dup_page = a("このページを複製", lambda: self._current() and self.duplicate_page(self._current().index))
+        self.act_page_up = a("このページを前へ", lambda: self._current() and self.pages.move_page(self._current().index, -1), "Ctrl+Shift+Up")
+        self.act_page_down = a("このページを後ろへ", lambda: self._current() and self.pages.move_page(self._current().index, 1),
+                               "Ctrl+Shift+Down")
+        self.act_spread = a("次のページと見開きにする／解除", self._toggle_spread)
+        self.act_nombre = a("ノンブルの設定…", lambda: nombre_dialog(self), tip="位置・書体・大きさ・始まりの番号・隠しノンブル")
+        self.act_page_nombre = a("このページのノンブルを隠す／出す", self._toggle_page_nombre)
+        self.act_story_editor = a("ストーリーエディター…", self.open_story_editor, "Ctrl+Shift+L", "全ページの台詞をまとめて直す・台本を流し込む")
+        self.act_checks = a("入稿前の点検", self._run_checks, "F9", "はみ出し・文字の重なりや小ささ・解像度などを探します")
         self.act_name_ok = a("ネーム完了 → 作画へ進む", self._name_ok, tip="承認の要らない原稿（エージェントを使わない原稿）で使います")
 
         bar = self.menuBar()
@@ -877,7 +887,8 @@ class MainWindow(QMainWindow):
                       self.act_fill_selection, self.act_line_width]),
             ("コマ", [self.act_frame, None, self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
                       self.act_gutters, self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape]),
-            ("ページ", [self.act_add_page, self.act_del_page, None, self.act_name_ok]),
+            ("ページ", [self.act_add_page, self.act_dup_page, self.act_del_page, None, self.act_page_up, self.act_page_down, self.act_spread,
+                        None, self.act_nombre, self.act_page_nombre, None, self.act_story_editor, self.act_checks, None, self.act_name_ok]),
         ]
         for title, actions in menus:
             menu = bar.addMenu(title)
@@ -912,6 +923,7 @@ class MainWindow(QMainWindow):
         self.library = Library(self)
         self.guides = GuidePanel(self)
         self.materials = MaterialPanel(self)
+        self.checks = CheckPanel(self)
         for widget in (self.approvals, self.panel_view):
             widget.changed.connect(self._reload_pages)
         self.brush = BrushPanel()
@@ -931,7 +943,7 @@ class MainWindow(QMainWindow):
         self.brush_dock = brush_dock
         docks = []
         for title, widget in (("承認箱", self.approvals), ("コマ", self.panel_view), ("台詞", self.story),
-                              ("レイヤー", self.layers), ("素材", self.materials), ("定規・3D", self.guides), ("ライブラリ", self.library)):
+                              ("レイヤー", self.layers), ("素材", self.materials), ("定規・3D", self.guides), ("点検", self.checks), ("ライブラリ", self.library)):
             dock = QDockWidget(title, self)
             if widget in (self.panel_view, self.story, self.layers, self.guides, self.materials):
                 # tall panels scroll on a small screen instead of making the window taller
@@ -970,7 +982,7 @@ class MainWindow(QMainWindow):
     def _refresh_dock(self, dock) -> None:
         self._stale_docks.discard(dock)
         widget = {"承認箱": self.approvals, "コマ": self.panel_view, "台詞": self.story, "レイヤー": self.layers,
-                  "素材": self.materials, "定規・3D": self.guides, "ライブラリ": self.library}[dock.windowTitle()]
+                  "素材": self.materials, "定規・3D": self.guides, "点検": self.checks, "ライブラリ": self.library}[dock.windowTitle()]
         if widget is self.panel_view:
             self._sync_panel_view()
         widget.refresh()
@@ -1030,16 +1042,68 @@ class MainWindow(QMainWindow):
             name = "ネーム"
         art = " / 作画 ✓" if page.art_ok else (" / 作画中" if page.name_ok else "")
         done = " / 仕上げ ✓" if page.stage == "finish" else ""
-        return f"{page.index} ページ\n{name}{art}{done}"
+        extra = ""
+        if page.spread_with:
+            pair = sorted((page.index, page.spread_with))
+            extra += f"\n見開き {pair[0]}–{pair[1]}"
+        if not page.numero:
+            extra += "\nノンブルなし"
+        return f"{page.index} ページ\n{name}{art}{done}{extra}"
 
     def _reload_pages(self) -> None:
+        self.pages.fill(self.episode.pages, self._page_text, dirty="all")
         self.pages.blockSignals(True)
-        self.pages.clear()
-        for page in self.episode.pages:
-            self.pages.addItem(self._page_text(page))
+        self.pages.setCurrentRow(min(self._page_index, len(self.episode.pages) - 1))
         self.pages.blockSignals(False)
-        self.pages.setCurrentRow(self._page_index)
         self._show_page()
+
+    # --- the book's pages (M16) --------------------------------------------------------------------------
+
+    def reorder_pages(self, order: list[int], follow: int | None = None) -> None:
+        """Put the pages in this order; the page being worked on stays selected."""
+        current = follow if follow is not None else (self._current().index if self._current() else 1)
+        if self.apply_ops([{"op": "reorder", "order": order}]):
+            self._page_index = order.index(current) if current in order else 0
+        self._reload_pages()
+
+    def add_page_after(self, index: int) -> None:
+        if self.apply_ops([{"op": "add_page", "count": 1, "after": index}]):
+            self._page_index = index  # the new page
+            self._reload_pages()
+
+    def duplicate_page(self, index: int) -> None:
+        if self.apply_ops([{"op": "duplicate_page", "page": index, "next_to": True}]):
+            self._page_index = index
+            self._reload_pages()
+
+    def set_spread(self, index: int, other: int | None) -> None:
+        page = next((p for p in self.episode.pages if p.index == index), None)
+        ops = []
+        if other is None and page is not None and page.spread_with:
+            ops = [{"op": "set_spread", "page": index, "with": None}, {"op": "set_spread", "page": page.spread_with, "with": None}]
+        elif other is not None:
+            ops = [{"op": "set_spread", "page": index, "with": other}, {"op": "set_spread", "page": other, "with": index}]
+        if ops and self.apply_ops(ops):
+            self._reload_pages()
+
+    def show_issue(self, issue: dict) -> None:
+        """Go to a problem the checks found and mark it on the page."""
+        if issue.get("page"):
+            self.go_to_page(int(issue["page"]))
+        self.canvas.highlight_box = issue.get("box")
+        target = issue.get("target") or {}
+        if target.get("kind") == "line" and target.get("id"):
+            self.canvas.selected_line_id = target["id"]
+        elif target.get("kind") == "layer" and target.get("id") and any(layer.id == target["id"] for layer in self._current().layers):
+            self._target_layer_id = target["id"]
+        self.canvas.update()
+        self.flash(issue.get("message", ""), 5000)
+
+    def open_story_editor(self) -> None:
+        from genko.app.story_editor import StoryEditor
+
+        self.story_editor = StoryEditor(self)
+        self.story_editor.show()
 
     def go_to_page(self, index: int) -> None:
         row = next((i for i, p in enumerate(self.episode.pages) if p.index == index), None)
@@ -1053,6 +1117,7 @@ class MainWindow(QMainWindow):
             self.commit_now()  # a page switch writes what was done on the last page
             self.panel_view.frame_id = None
             self.canvas.set_selection(None)
+            self.canvas.highlight_box = None
         self._page_index = row
         self._show_page()
 
@@ -1928,9 +1993,33 @@ class MainWindow(QMainWindow):
         self.apply_ops([{"op": "merge_frame", "page": page.index, "frame_id": page.selected_frame_id}])
 
     def _add_page(self) -> None:
-        self.apply_ops([{"op": "add_page"}])
-        self._page_index = len(self.episode.pages) - 1
-        self._reload_pages()
+        page = self._current()
+        if page is None:
+            self.apply_ops([{"op": "add_page"}])
+            self._page_index = len(self.episode.pages) - 1
+            self._reload_pages()
+            return
+        self.add_page_after(page.index)
+
+    def _toggle_spread(self) -> None:
+        page = self._current()
+        if page is None:
+            return
+        if page.spread_with:
+            self.set_spread(page.index, None)
+        elif page.index < len(self.episode.pages):
+            self.set_spread(page.index, page.index + 1)
+
+    def _toggle_page_nombre(self) -> None:
+        page = self._current()
+        if page is not None:
+            self.apply_ops([{"op": "set_nombre", "page": page.index, "numero": not page.numero}])
+
+    def _run_checks(self) -> None:
+        self.show_dock("点検")
+        report = self.checks.run()
+        self.flash("直すところは見つかりませんでした" if not report["issues"] else
+                   f"止まる問題 {report['errors']} 件・確かめた方がよいこと {report['warnings']} 件（点検パネル）", 4000)
 
     def _del_page(self) -> None:
         page = self._current()
