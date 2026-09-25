@@ -157,7 +157,8 @@
       "locked": "bool?",
       "panel_clip": "bool? (false: lines run out of the panels)",
       "name": "str?",
-      "color": "[r,g,b]|null? (shown in this colour on screen, never printed)"
+      "color": "[r,g,b]|null? (shown in this colour on screen, never printed)",
+      "reference": "bool? (fills with reference: reference look at this layer)"
     },
     {
       "op": "add_page",
@@ -316,7 +317,7 @@
       "opacity": "float?",
       "gap_mm": "float? (close gaps up to this)",
       "expand_mm": "float? (grow under the lines)",
-      "reference": "page|layer?"
+      "reference": "page|layer|reference? (reference: the layers set as reference)"
     },
     {
       "op": "fill_area",
@@ -603,6 +604,16 @@
       "size": "[w,h,d] | float?",
       "rot": "[tip,turn,lean]?",
       "focal_mm": "float?",
+      "id": "str?"
+    },
+    {
+      "op": "add_scene",
+      "page": "int",
+      "kind": "room|classroom|corridor|street",
+      "pos": "[x,y,z]? (centre; z = depth)",
+      "size": "[w,h,d]|number? (mm; a number scales the usual size)",
+      "rot": "[tip,turn,lean]? radians",
+      "focal_mm": "float? (smaller = stronger perspective; 220)",
       "id": "str?"
     },
     {

@@ -27,7 +27,7 @@ NAMES = {
     "add_tone": "トーンを貼った", "set_tone": "トーンを変えた", "add_effect": "効果線を入れた", "edit_effect": "効果線を変えた",
     "delete_effect": "効果線を消した", "effect_to_layer": "効果線を線にした", "stamp_material": "素材を置いた",
     "add_ruler": "定規を置いた", "edit_ruler": "定規を動かした", "delete_ruler": "定規を消した",
-    "add_prim3d": "3D を置いた", "add_mannequin": "デッサン人形を置いた", "edit_prim": "3D を動かした", "pose_mannequin": "ポーズを変えた",
+    "add_prim3d": "3D を置いた", "add_scene": "背景の 3D を置いた", "add_mannequin": "デッサン人形を置いた", "edit_prim": "3D を動かした", "pose_mannequin": "ポーズを変えた",
     "delete_prim": "3D を消した", "trace_prims": "3D を線にした", "import_raster": "画像を読み込んだ", "place_image": "画像を置いた",
     "define_brush": "ブラシを作った", "approve": "承認した", "reject": "差し戻した", "advance": "工程を進めた",
 }

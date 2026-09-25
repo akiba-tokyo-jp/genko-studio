@@ -534,6 +534,10 @@ class LayerPanel(QWidget):
         self.draft = QCheckBox("下描き（書き出さない）")
         self.draft.setToolTip("画面には見えますが、書き出し・印刷には出ません")
         self.draft.clicked.connect(lambda on: self._set("exportable", not on))
+        self.reference = QCheckBox("参照にする")
+        self.reference.setToolTip("塗りつぶしの「見る範囲: 参照レイヤー」で、このレイヤーの線を見て塗ります。"
+                                  "線画を参照にすれば、塗りは別のレイヤーに入れられます")
+        self.reference.clicked.connect(lambda on: self._set("reference", on))
         self.tint = QComboBox()
         for label, rgb in (("表示色: そのまま", None), ("表示色: 青", [40, 110, 230]), ("表示色: 赤", [220, 50, 50]),
                            ("表示色: 緑", [40, 150, 70]), ("表示色: 灰", [150, 150, 150])):
@@ -583,6 +587,7 @@ class LayerPanel(QWidget):
         layout.addWidget(self.locked)
         layout.addWidget(self.overhang)
         layout.addWidget(self.draft)
+        layout.addWidget(self.reference)
         layout.addWidget(self.tint)
         layout.addWidget(self.mask_button)
         layout.addLayout(frow)
@@ -601,7 +606,8 @@ class LayerPanel(QWidget):
             lock = " 🔒" if getattr(layer, "locked", False) else ""
             masked = " ◐" if getattr(layer, "mask", None) else ""
             draft = " （下描き）" if not layer.exportable and layer.role not in (LayerRole.NAME, LayerRole.DRAFT) else ""
-            item = QListWidgetItem(f"{indent}{icon} {wording.layer_label(layer)}{draft}{masked}{lock}")
+            ref = " 〔参照〕" if getattr(layer, "reference", False) else ""
+            item = QListWidgetItem(f"{indent}{icon} {wording.layer_label(layer)}{draft}{ref}{masked}{lock}")
             picture = self._thumbnail(page, layer)
             if picture is not None:
                 item.setIcon(picture)
@@ -640,6 +646,7 @@ class LayerPanel(QWidget):
         self.locked.setChecked(bool(getattr(layer, "locked", False)))
         self.overhang.setChecked(not getattr(layer, "panel_clip", True))
         self.draft.setChecked(not layer.exportable)
+        self.reference.setChecked(bool(getattr(layer, "reference", False)))
         self.draft.setEnabled(layer.role not in (LayerRole.NAME, LayerRole.DRAFT))  # (those never print)
         colour = list(layer.color) if getattr(layer, "color", None) else None
         self.tint.setCurrentIndex(max(0, self.tint.findData(colour)) if colour else 0)
@@ -947,6 +954,10 @@ class MainWindow(QMainWindow):
         except ApplyError as exc:
             self.flash(wording.error(str(exc)), 6000, error=True)
             return False
+        if getattr(self, "_recording", None) is not None:
+            from genko.app import actions
+
+            self._recording.extend(actions.recordable(ops))
         if self.session.path is not None:
             self._commit_timer.start()
         if self.pages.count() != len(self.episode.pages):
@@ -1135,6 +1146,11 @@ class MainWindow(QMainWindow):
         self.act_add_cylinder = a("3D の円柱を置く", lambda: self._add_prim("cylinder"))
         self.act_add_stairs = a("3D の階段を置く", lambda: self._add_prim("stairs"))
         self.act_add_floor = a("床（パースの格子）を置く", lambda: self._add_prim("floor"), tip="地面の格子で、背景のパースの目安にします")
+        from genko.prim3d import SCENE_LABELS
+
+        self.scene_actions = [a(f"背景: {label}", lambda _=False, k=key: self._add_scene(k),
+                                tip="壁・床・窓・机などの 3D の下描きをまとめて置きます。まとめて動かし・回し・線にできます")
+                              for key, label in SCENE_LABELS.items()]
         self.act_trace = a("3D を線にする（描く先のレイヤーへ）", lambda: self.trace_prims(selected_only=False),
                            tip="このページの 3D を鉛筆の線にして下描きにします")
         self.act_del_prim = a("選んだ 3D を消す", lambda: self.guides.delete_prim())
@@ -1194,7 +1210,7 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
         menus = [
             ("ファイル", [self.act_new, self.act_open, "recent", None, self.act_save, self.act_save_as, None, self.act_import,
-                         self.act_export, self.act_print, None, self.act_prefs, None, self.act_close, self.act_quit]),
+                         self.act_export, self.act_print, None, "actions", None, self.act_prefs, None, self.act_close, self.act_quit]),
             ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste,
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
@@ -1216,7 +1232,7 @@ class MainWindow(QMainWindow):
                       self.act_fill_selection, self.act_line_width]),
             ("定規・3D", [self.act_ruler, None, *self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
                           self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm, None, self.act_3d,
-                          self.act_add_figure, self.act_add_box, self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, "poses",
+                          self.act_add_figure, self.act_add_box, self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, "scenes", "poses",
                           self.act_trace, self.act_del_prim]),
             ("コマ", [self.act_frame, None, self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
                       self.act_gutters, self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape]),
@@ -1239,6 +1255,14 @@ class MainWindow(QMainWindow):
                         shapes.addAction(label, lambda k=key: self._set_selected_balloon(k))
                 elif act == "mask":
                     self.layer_mask_menu = menu.addMenu("マスク")  # (filled with the layer panel's own, below)
+                elif act == "actions":
+                    self.actions_menu = menu.addMenu("オートアクション")
+                    self.actions_menu.aboutToShow.connect(self._fill_actions_menu)
+                    self._fill_actions_menu()
+                elif act == "scenes":
+                    scenes = menu.addMenu("背景の 3D を置く")
+                    for scene in self.scene_actions:
+                        scenes.addAction(scene)
                 elif act == "poses":
                     poses = menu.addMenu("ポーズ")
                     for pose in self.pose_actions:
@@ -1303,6 +1327,80 @@ class MainWindow(QMainWindow):
             else:
                 commands.addAction(act)
         self.addToolBar(commands)
+
+    # --- オートアクション ------------------------------------------------------------------------
+
+    def _fill_actions_menu(self) -> None:
+        from genko.app import actions
+
+        menu = self.actions_menu
+        menu.clear()
+        if getattr(self, "_recording", None) is None:
+            menu.addAction("記録を始める", self.start_recording)
+        else:
+            menu.addAction(f"記録を止めて名前を付ける…（{len(self._recording)} 手）", self.stop_recording)
+            menu.addAction("記録をやめる（残さない）", self._drop_recording)
+        saved = actions.load()
+        menu.addSeparator()
+        if not saved:
+            empty = menu.addAction("（記録したアクションはまだありません）")
+            empty.setEnabled(False)
+            return
+        for name, data in saved.items():
+            act = menu.addAction(f"実行: {name}", lambda _=False, n=name: self.play_action(n))
+            act.setToolTip(actions.describe(data["ops"]))
+        remove = menu.addMenu("消す")
+        for name in saved:
+            remove.addAction(name, lambda _=False, n=name: self._remove_action(n))
+
+    def start_recording(self) -> None:
+        self._recording = []
+        self.flash("オートアクションを記録しています。終わったら ファイル → オートアクション → 記録を止める", 6000)
+        self._refresh_status()
+
+    def _drop_recording(self) -> None:
+        self._recording = None
+        self._refresh_status()
+
+    def stop_recording(self, name: str | None = None) -> bool:
+        """Keep what was recorded under a name (asked for when not given)."""
+        from genko.app import actions
+
+        ops, self._recording = getattr(self, "_recording", None) or [], None
+        self._refresh_status()
+        if not ops:
+            self.flash("記録した操作がありません", 3000)
+            return False
+        if name is None:
+            from PySide6.QtWidgets import QInputDialog
+
+            name, ok = QInputDialog.getText(self, "オートアクション", f"名前（{len(ops)} 手: {actions.describe(ops)}）")
+            if not ok or not name.strip():
+                return False
+        actions.store(name.strip(), ops)
+        self.flash(f"「{name.strip()}」を残しました（ファイル → オートアクション から実行）", 4000)
+        return True
+
+    def play_action(self, name: str) -> bool:
+        from genko.app import actions
+
+        data = actions.load().get(name)
+        page = self._current()
+        if data is None or page is None:
+            return False
+        layer = self.target_layer()
+        frame = self.selected_frame()
+        ops = actions.replay(data["ops"], page.index, layer.id if layer is not None else None, frame.id if frame else None)
+        if self.apply_ops(ops):
+            self.flash(f"「{name}」を実行しました（{len(ops)} 手。元に戻すは 1 回で）", 3000)
+            return True
+        return False
+
+    def _remove_action(self, name: str) -> None:
+        from genko.app import actions
+
+        if QMessageBox.question(self, "オートアクション", f"「{name}」を消しますか？") == QMessageBox.StandardButton.Yes:
+            actions.remove(name)
 
     def _print(self) -> None:
         from genko.app.printing import PrintDialog
@@ -1390,7 +1488,7 @@ class MainWindow(QMainWindow):
         ts.add(("reshape",), radius_page)
         ts.add(("ruler",), action_page([*self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
                                         self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]))
-        ts.add(("3d",), action_page([self.act_add_figure, self.act_add_box, self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, None, *self.pose_actions, None, self.act_trace,
+        ts.add(("3d",), action_page([self.act_add_figure, self.act_add_box, self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, None, *self.scene_actions, None, *self.pose_actions, None, self.act_trace,
                                      self.act_del_prim]))
         ts.add(("effect",), action_page([*self.effect_actions, None, self.act_materials]))
         ts.add(("stamp",), action_page([self.act_materials]))
@@ -1749,6 +1847,8 @@ class MainWindow(QMainWindow):
     def _refresh_status(self) -> None:
         page = self._current()
         saved = "保存待ち…" if self.session.dirty else ("保存済み" if self.session.path else "未保存（ファイル → 別の場所に保存）")
+        if getattr(self, "_recording", None) is not None:
+            saved += " ・ ● オートアクションを記録中"
         self.setWindowTitle(f"{self.episode.title} 第{self.episode.episode}話 — Genko Studio")
         if page is None:
             self.status.setText(saved)
@@ -2339,6 +2439,31 @@ class MainWindow(QMainWindow):
             size = {"floor": [min(r.width, 200.0), 1, min(r.width, 200.0)], "stairs": [side, side, side * 1.4],
                     "cylinder": [side * 0.8, side * 1.3, side * 0.8]}.get(kind, [side, side, side])
             op = {"op": "add_prim3d", "page": page.index, "kind": kind, "id": prim_id, "pos": [cx, cy, 0], "size": size}
+        if self.apply_ops([op]):
+            self.canvas.selected_prim_id = prim_id
+            self._tool("3d")
+            self.show_dock("定規・3D")
+            self.guides.refresh()
+
+    def _add_scene(self, kind: str) -> None:
+        """A whole background (room, classroom, corridor, street) as one 3D guide, filling the chosen panel."""
+        from genko.models import new_id
+        from genko.prim3d import SCENE_SIZES
+
+        page = self._current()
+        if page is None:
+            return
+        frame = self.selected_frame()
+        r = frame.rect if frame is not None else page.inner_rect_mm()
+        base = SCENE_SIZES[kind]
+        scale = max(0.3, min(2.0, r.width / base[0] * 1.1))
+        prim_id = new_id()
+        size = [round(v * scale, 1) for v in base]
+        from genko.prim3d import SCENE_VIEWS
+
+        depth = size[2] / 2 + SCENE_VIEWS[kind][1] * 220
+        op = {"op": "add_scene", "page": page.index, "kind": kind, "id": prim_id,
+              "pos": [r.x + r.width / 2, r.y + r.height * 0.5, round(depth, 1)], "size": size}
         if self.apply_ops([op]):
             self.canvas.selected_prim_id = prim_id
             self._tool("3d")

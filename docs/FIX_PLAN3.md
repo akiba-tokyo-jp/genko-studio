@@ -104,6 +104,11 @@
   - 「記録を始める／止める」の間にした操作（op）を名前を付けて残し（設定フォルダの `actions.json`）、今のページと描く先のレイヤーで何度でも実行する。
   - メニュー ファイル → オートアクション（記録を始める・止めて名前を付ける・実行・消す）。
 
+**実施状況（済）:** `tests/test_h4.py`。
+- 背景: `add_scene` は `kind: "scene"` の 1 つの 3D（`prim3d.scene_parts` が壁・床の格子・窓・扉・机・建物・電柱を作る）。部屋と教室は中から斜めに、廊下と街並みは奥へ向かう一点透視で置く（`SCENE_VIEWS`）。`edit_prim`・`delete_prim`・`trace_prims` は id 1 つでまとめて効く。メニュー 定規・3D → 背景の 3D を置く、3D ツールの設定にも。
+- 参照レイヤー: `Layer.reference`・`set_layer {reference}`、塗り（`fill`・`add_tone` の `at`）の `reference: "reference"`。レイヤー パネルの「参照にする」と〔参照〕の印、塗りの「見る範囲: 参照レイヤー」。
+- オートアクション: `app/actions.py`（`record`・`replay`・設定フォルダの `actions.json`）。実行した分は 1 回の「元に戻す」で戻る。記録中は下の欄に「● 記録中」。
+
 ---
 
 ## H5 MCP

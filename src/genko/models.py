@@ -316,6 +316,7 @@ class Layer:
     # a layer mask: {"png": L image over the whole page (white shows, black hides), "enabled": bool}
     mask: dict | None = None
     color: tuple[int, int, int] | None = None  # shown in this colour on screen (a blue draft); never printed
+    reference: bool = False  # fills set to "reference" look at the lines of these layers (参照レイヤー)
 
 
 @dataclass

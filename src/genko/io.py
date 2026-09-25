@@ -57,7 +57,7 @@ def _layer_to_dict(layer: Layer, strokes: bool = True) -> dict:
         | ({"locked": True} if layer.locked else {}) | ({"panel_clip": False} if not layer.panel_clip else {}) \
         | ({"tone": dict(layer.tone)} if layer.tone else {}) \
         | ({"mask": {"enabled": bool(layer.mask.get("enabled", True))}} if layer.mask else {}) \
-        | ({"color": list(layer.color)} if layer.color else {}) | ({
+        | ({"color": list(layer.color)} if layer.color else {}) | ({"reference": True} if layer.reference else {}) | ({
         "asset": layer.asset,
         "frame_id": layer.frame_id,
         "placement_mm": _rect_to_dict(layer.placement_mm) if layer.placement_mm else None,

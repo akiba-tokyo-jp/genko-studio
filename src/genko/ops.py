@@ -48,7 +48,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
-    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen, never printed)"},
+    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen, never printed)", "reference": "bool? (fills with reference: reference look at this layer)"},
     {"op": "add_page", "count": "int", "after": "int? (insert after this page; default at the end)"},
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int", "next_to": "bool? (the copy right after the page; default at the end)"},
@@ -69,7 +69,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "effect_to_layer", "page": "int", "id": "str", "layer_id": "str", "keep": "bool? (keep the effect too)"},
     {"op": "set_autosave", "enabled": "bool"},
     {"op": "erase_raster", "page": "int", "layer": "ink|name", "points": "[[x,y],...]", "width_mm": "float"},
-    {"op": "fill", "page": "int", "layer_id": "str?", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float? (close gaps up to this)", "expand_mm": "float? (grow under the lines)", "reference": "page|layer?"},
+    {"op": "fill", "page": "int", "layer_id": "str?", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float? (close gaps up to this)", "expand_mm": "float? (grow under the lines)", "reference": "page|layer|reference? (reference: the layers set as reference)"},
     {"op": "fill_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask: {box, png}}", "rgb": "[r,g,b]?", "opacity": "float?"},
     {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)", "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)"},
     {"op": "delete_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}"},
@@ -105,6 +105,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "edit_ruler", "page": "int", "id": "str", "points": "[[x,y],...]?", "angle": "float?", "ratio": "float?", "copies": "int?", "mirror": "bool?", "frame_id": "str|null?", "active": "bool?", "visible": "bool?"},
     {"op": "delete_ruler", "page": "int", "id": "str? (none: every ruler on the page)"},
     {"op": "add_prim3d", "kind": "box|cylinder|stairs|floor", "steps": "int? (stairs)", "lines": "int? (floor grid)", "page": "int", "pos": "[x,y,z]?", "size": "[w,h,d] | float?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "id": "str?"},
+    {"op": "add_scene", "page": "int", "kind": "room|classroom|corridor|street", "pos": "[x,y,z]? (centre; z = depth)", "size": "[w,h,d]|number? (mm; a number scales the usual size)", "rot": "[tip,turn,lean]? radians", "focal_mm": "float? (smaller = stronger perspective; 220)", "id": "str?"},
     {"op": "edit_prim", "page": "int", "id": "str", "pos": "[x,y,z]?", "size": "[w,h,d]?", "rot": "[tip,turn,lean]?", "focal_mm": "float?"},
     {"op": "delete_prim", "page": "int", "id": "str"},
     {"op": "trace_prims", "page": "int", "layer_id": "str", "ids": "[id]? (none: all)", "kind": "str? (pencil)", "width_mm": "float?", "rgb": "[r,g,b]?"},
@@ -238,7 +239,7 @@ def _new_tone(episode, page, op: dict) -> Layer:
         at = dict(op["at"])
         dpi = fills.FILL_DPI
         x, y = float(at["x_mm"]), float(at["y_mm"])
-        reference = _fill_reference(episode, page, page.layers[0] if page.layers else layer, "page", dpi)
+        reference = _fill_reference(episode, page, page.layers[0] if page.layers else layer, str(at.get("reference") or "page"), dpi)
         panel = page.frame_at(x, y)
         window = None
         if panel is not None:
@@ -318,22 +319,28 @@ def _frame_contains(page):
 
 
 def _fill_reference(episode, page, target, reference: str, dpi: int):
-    """What a fill looks at: the page as seen (every visible layer), or only the target layer (with the
-    panel borders)."""
+    """What a fill looks at: the page as seen (every visible layer), only the target layer, or the layers
+    marked as reference (参照レイヤー), each with the panel borders."""
     from PIL import Image, ImageDraw
 
     from genko import render
 
     if reference == "page":
         return render.render_page(page, dpi, mode="name" if not page.name_ok else "proof", episode=episode).convert("L")
+    if reference not in ("layer", "reference"):
+        raise ApplyError("reference must be page, layer or reference")
+    looked = [target] if reference == "layer" else [layer for layer in page.layers if getattr(layer, "reference", False)]
+    if not looked:
+        raise ApplyError("no layer is set as the reference (set_layer reference: true)")
     size = (render.mm_to_px(page.spec.width_mm, dpi), render.mm_to_px(page.spec.height_mm, dpi))
     base = Image.new("RGBA", size, (255, 255, 255, 255))
-    raster = render._open_raster(target)
-    if raster is not None:
-        base = Image.alpha_composite(base, raster.resize(size))
-    lines = render._layer_strokes(target, size, dpi, None, None)
-    if lines is not None:
-        base = Image.alpha_composite(base, lines)
+    for layer in looked:
+        raster = render._open_raster(layer)
+        if raster is not None:
+            base = Image.alpha_composite(base, raster.resize(size))
+        lines = render._layer_strokes(layer, size, dpi, None, None)
+        if lines is not None:
+            base = Image.alpha_composite(base, lines)
     image = base.convert("RGB")
     render._draw_frames(ImageDraw.Draw(image), page, dpi)
     return image.convert("L")
@@ -1148,6 +1155,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             layer.title = str(op["name"])
         if "color" in op:
             layer.color = tuple(int(v) for v in op["color"])[:3] if op["color"] else None
+        if "reference" in op:
+            layer.reference = bool(op["reference"])
         return
 
     if name == "gradient_fill":
@@ -1648,6 +1657,28 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             prim["lines"] = max(2, min(40, int(op.get("lines") or 8)))
             if not op.get("rot"):
                 prim["rot"] = [-1.2, 0.5, 0]  # seen from above at a slant
+        page.prims.append(prim)
+        return
+
+    if name == "add_scene":
+        from genko import prim3d
+
+        page = _require_page(episode, op)
+        kind = str(op.get("kind") or "room")
+        if kind not in prim3d.SCENES:
+            raise ApplyError(f"scene kind must be one of {', '.join(prim3d.SCENES)}")
+        spec = page.spec
+        size = op.get("size") or prim3d.SCENE_SIZES[kind]
+        if not isinstance(size, (list, tuple)):
+            size = [float(size) * v / prim3d.SCENE_SIZES[kind][0] for v in prim3d.SCENE_SIZES[kind]]
+        size = _vec3(size)
+        focal = max(20.0, float(op.get("focal_mm") or 220))
+        rot, near = prim3d.SCENE_VIEWS[kind]
+        # (depth: the scene's near end sits `near` × focal from the camera plane; inside for corridors)
+        depth = size[2] / 2 + near * focal
+        prim = {"id": str(op.get("id") or new_id()), "kind": "scene", "scene": kind,
+                "pos": _vec3(op.get("pos") or [spec.width_mm / 2, spec.height_mm / 2, depth]), "size": size,
+                "rot": _vec3(op.get("rot") or rot), "focal_mm": focal}
         page.prims.append(prim)
         return
 
@@ -2388,7 +2419,7 @@ PAGE_LOCAL_OPS = frozenset({
     "merge_down", "set_layer_mask", "paint_mask", "set_note", "select_frame", "flood_fill",
     "add_tone", "set_tone", "delete_tone", "add_effect", "edit_effect", "delete_effect", "effect_to_layer",
     "edit_stroke", "simplify_stroke", "set_ruler", "add_ruler", "edit_ruler", "delete_ruler",
-    "add_prim3d", "edit_prim", "delete_prim", "trace_prims", "lt_convert", "erase_raster", "erase",
+    "add_prim3d", "add_scene", "edit_prim", "delete_prim", "trace_prims", "lt_convert", "erase_raster", "erase",
     "reorder_layers", "stamp_material", "add_mannequin", "pose_mannequin", "set_onion", "step_onion",
     "set_lt", "add_layer", "delete_layer", "filter_raster",
 })

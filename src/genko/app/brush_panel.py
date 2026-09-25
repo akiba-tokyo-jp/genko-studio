@@ -109,6 +109,8 @@ class BrushPanel(QWidget):
         self.reference = QComboBox()
         self.reference.addItem("見えている全部", "page")
         self.reference.addItem("このレイヤーだけ", "layer")
+        self.reference.addItem("参照レイヤー", "reference")
+        self.reference.setToolTip("参照レイヤー: レイヤー パネルで「参照にする」にしたレイヤーの線を見て塗ります")
         self.reference.currentIndexChanged.connect(lambda _: self._save())
         self.crossing = QCheckBox("消しゴムで交点まで消す")
         self.crossing.setToolTip("線の交わる所までを一度に消します（はみ出しの掃除）")
