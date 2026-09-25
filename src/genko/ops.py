@@ -48,7 +48,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
-    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen, never printed)", "reference": "bool? (fills with reference: reference look at this layer)"},
+    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)"},
     {"op": "add_page", "count": "int", "after": "int? (insert after this page; default at the end)"},
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int", "next_to": "bool? (the copy right after the page; default at the end)"},
@@ -71,7 +71,15 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "erase_raster", "page": "int", "layer": "ink|name", "points": "[[x,y],...]", "width_mm": "float"},
     {"op": "fill", "page": "int", "layer_id": "str?", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float? (close gaps up to this)", "expand_mm": "float? (grow under the lines)", "reference": "page|layer|reference? (reference: the layers set as reference)"},
     {"op": "fill_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask: {box, png}}", "rgb": "[r,g,b]?", "opacity": "float?"},
-    {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)", "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)"},
+    {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)", "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)", "interp": "nearest|bilinear|bicubic? (how pixels are resampled)"},
+    {"op": "merge_layers", "page": "int", "ids": "[layer id] (two or more: into the lowest, as they show)", "name": "str?"},
+    {"op": "merge_visible", "page": "int", "copy": "bool? (default true: a new layer on top; false: the visible layers merged)", "name": "str?", "id": "str?"},
+    {"op": "group_layers", "page": "int", "ids": "[layer id]", "name": "str?", "id": "str? (the new folder)"},
+    {"op": "move_layers", "page": "int", "ids": "[layer id]", "parent": "folder id|null? (into / out of a folder)", "after": "layer id|bottom? (just above this layer)"},
+    {"op": "convert_layer", "page": "int", "id": "str", "to": "paint|pen (pen: the pixels traced into lines)", "min_mm": "float? (pen: shorter marks are left out)"},
+    {"op": "set_layers", "page": "int", "ids": "[layer id]?", "all": "bool?", "visible": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "locked": "bool?", "lock_alpha": "bool?", "color": "[r,g,b]|null?", "exportable": "bool?", "reference": "bool?", "panel_clip": "bool?", "color_prints": "bool?", "effect": "object|null?"},
+    {"op": "set_paper", "page": "int? (none: every page)", "rgb": "[r,g,b]|null (用紙色; null: white)"},
+    {"op": "liquify", "page": "int", "layer_id": "str?", "points": "[[x,y],...]", "width_mm": "float? (10)", "strength": "0..1? (0.6)", "mode": "push|pinch|bloat|twirl_cw|twirl_ccw"},
     {"op": "add_shape", "page": "int", "layer_id": "str?", "shape": "line|polyline|curve|rect|ellipse|polygon", "points": "[[x,y],…]? (line, polyline, curve)", "box": "[x,y,w,h]? (rect, ellipse, polygon)", "sides": "int? (polygon)", "angle": "float? (polygon, degrees)", "radius_mm": "float? (rect: round corners)", "closed": "bool? (polyline, curve)", "line": "bool? (default true)", "fill": "bool?", "fill_rgb": "[r,g,b]?", "rgb": "[r,g,b]?", "width_mm": "float?", "kind": "brush? (mili)", "opacity": "float?"},
     {"op": "smudge", "page": "int", "layer_id": "str?", "points": "[[x,y,pressure?],...]", "width_mm": "float?", "strength": "0..1? (0.6)", "mode": "blur|smudge|blend? (ぼかし・指先・なじませ)"},
     {"op": "vector_edit", "page": "int", "layer_id": "str?", "action": "move_point|add_point|delete_point|connect|cut|recolor|delete", "stroke_id": "str? (move_point, add_point, delete_point, cut)", "ids": "[str]? (connect: two; recolor, delete)", "index": "int? (the point)", "to": "[x,y]? (move_point)", "at": "[x,y]? (add_point, cut)", "rgb": "[r,g,b]|null? (recolor; null: the layer's ink)"},
@@ -93,7 +101,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_lt", "page": "int", "threshold": "float"},
     {"op": "lock_page", "page": "int", "agent": "str"},
     {"op": "unlock_page", "page": "int"},
-    {"op": "add_layer", "page": "int", "name": "str?", "kind": "pen|paint|folder?", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?", "after": "layer id?", "id": "str?"},
+    {"op": "add_layer", "page": "int", "name": "str?", "kind": "pen|paint|folder|fill|gradient|adjust?", "rgb": "[r,g,b]? (fill)", "gradient": "{from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}? (gradient)", "adjust": "{kind, …}? (adjust: a correction layer over what is under it)", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?", "after": "layer id?", "id": "str?"},
     {"op": "delete_layer", "page": "int", "id": "str"},
     {"op": "gradient_fill", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}? (default: the whole page)", "from": "[x,y] (mm)", "to": "[x,y] (mm)", "rgb_from": "[r,g,b]?", "rgb_to": "[r,g,b]?", "opacity_from": "0..1? (1)", "opacity_to": "0..1? (0: fades out)", "shape": "linear|radial?"},
     {"op": "define_brush", "key": "str (my_…)", "label": "str", "base": "a brush to start from?", "width_mm": "float?", "min_pressure": "0..1?", "gamma": "0.2..5?", "opacity": "0.05..1?", "stabilize": "0..15?", "taper": "bool?", "texture": "''|grain|soft|dry?", "rgb": "[r,g,b]|null?", "fixed_width": "bool?", "delete": "bool?"},
@@ -101,7 +109,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "merge_down", "page": "int", "id": "str (merged into the layer below it; pen onto pen stays lines, anything else becomes pixels)"},
     {"op": "set_layer_mask", "page": "int", "id": "str", "area": "{poly} | {mask}? (only this area shows)", "fill": "show|hide? (the whole mask)", "invert": "bool?", "enabled": "bool?", "delete": "bool?"},
     {"op": "paint_mask", "page": "int", "id": "str", "points": "[[x,y],...]", "width_mm": "float?", "show": "bool (true: the pen shows the layer, false: the eraser hides it)"},
-    {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal"},
+    {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map", "note": "params by kind: blur radius; hue shift/saturation/value; levels black/white; curve gamma; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"},
     {"op": "set_brush", "rgb": "[r,g,b]?", "width_mm": "float?", "stabilize": "int?", "taper": "bool?", "curve": "gpen|linear"},
     {"op": "select_frame", "page": "int", "frame_id": "str"},
     {"op": "edit_stroke", "page": "int", "layer": "name|ink", "index": "int", "points": "[[x,y],...]"},
@@ -774,6 +782,84 @@ def _merge_down(episode, page, upper) -> None:
     page.layers.remove(upper)
 
 
+def _blend_mode(value) -> str:
+    from genko.render import BLEND_MODES
+
+    mode = str(value or "normal")
+    if mode not in ("normal", "multiply", "screen", "add", "overlay", *BLEND_MODES):
+        raise ApplyError(f"unknown blend mode {mode}")
+    return mode
+
+
+INTERPS = ("nearest", "bilinear", "bicubic")
+
+
+def _interp(op: dict):
+    kind = str(op.get("interp") or "bilinear")
+    if kind not in INTERPS:
+        raise ApplyError("interp must be nearest, bilinear or bicubic")
+    return {"nearest": Image.Resampling.NEAREST, "bilinear": Image.Resampling.BILINEAR, "bicubic": Image.Resampling.BICUBIC}[kind]
+
+
+def _rgb3(value, what: str) -> list[int]:
+    try:
+        rgb = [int(v) for v in value][:3]
+    except (TypeError, ValueError) as exc:
+        raise ApplyError(f"{what} is [r, g, b]") from exc
+    if len(rgb) != 3 or any(not 0 <= v <= 255 for v in rgb):
+        raise ApplyError(f"{what} is [r, g, b]")
+    return rgb
+
+
+def _fill_spec(raw) -> dict:
+    """A fill layer's colour, or its gradient (from and to in mm, colours and opacities at each end)."""
+    if not isinstance(raw, dict):
+        raise ApplyError("fill is {rgb} or {gradient}")
+    if raw.get("gradient") is not None:
+        g = raw["gradient"] if isinstance(raw["gradient"], dict) else {}
+        out = {"from": [float(v) for v in (g.get("from") or [0, 0])][:2], "to": [float(v) for v in (g.get("to") or [0, 100])][:2],
+               "rgb_from": _rgb3(g.get("rgb_from") or [20, 20, 20], "rgb_from"), "rgb_to": _rgb3(g.get("rgb_to") or [255, 255, 255], "rgb_to"),
+               "opacity_from": max(0.0, min(1.0, float(g.get("opacity_from", 1.0)))),
+               "opacity_to": max(0.0, min(1.0, float(g.get("opacity_to", 1.0)))), "shape": str(g.get("shape") or "linear")}
+        if out["shape"] not in ("linear", "radial"):
+            raise ApplyError("shape must be linear or radial")
+        if len(out["from"]) != 2 or len(out["to"]) != 2:
+            raise ApplyError("from and to are [x_mm, y_mm]")
+        return {"gradient": out}
+    return {"rgb": _rgb3(raw.get("rgb") or [255, 255, 255], "rgb")}
+
+
+def _adjust_spec(raw) -> dict:
+    from genko.filters import ADJUSTMENTS, apply_filter
+
+    if not isinstance(raw, dict) or raw.get("kind") not in ADJUSTMENTS:
+        raise ApplyError(f"adjust kind must be one of {', '.join(ADJUSTMENTS)}")
+    spec = dict(raw)
+    try:  # (tried once on a small picture: bad numbers are refused now, not at every render)
+        apply_filter(Image.new("RGBA", (4, 4), (120, 80, 40, 255)), spec["kind"], {k: v for k, v in spec.items() if k != "kind"})
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ApplyError(f"the adjustment cannot be used: {exc}") from exc
+    return spec
+
+
+def _effect_spec(raw) -> dict:
+    if not isinstance(raw, dict):
+        raise ApplyError("effect is {border} and/or {water_edge}")
+    out = {}
+    for key, value in raw.items():
+        if key == "border" and value:
+            value = value if isinstance(value, dict) else {}
+            out["border"] = {"width_mm": max(0.05, min(10.0, float(value.get("width_mm", 0.5)))),
+                             "rgb": _rgb3(value.get("rgb") or [255, 255, 255], "rgb")}
+        elif key == "water_edge" and value:
+            value = value if isinstance(value, dict) else {}
+            out["water_edge"] = {"width_mm": max(0.05, min(10.0, float(value.get("width_mm", 0.6)))),
+                                 "strength": max(0.0, min(1.0, float(value.get("strength", 0.6))))}
+        elif key not in ("border", "water_edge"):
+            raise ApplyError(f"unknown effect {key} (border, water_edge)")
+    return out
+
+
 def _style_runs(raw) -> list:
     """[[words, {scale?, bold?, rgb?}]] — part of a line styled."""
     out = []
@@ -1364,6 +1450,12 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         _fill_gaps(episode, op)
         return
 
+    from genko import layerops
+
+    if name in layerops.OPS:
+        layerops.apply(episode, op, name)
+        return
+
     if name in ("transform_area", "delete_area"):
         from genko import selection
 
@@ -1378,7 +1470,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
             try:
                 go = warp.mapping(selection.area_bbox(area), op["warp"])
-                selection.drop_warped(target, items, go)
+                selection.drop_warped(target, items, go, resample=_interp(op))
             except warp.WarpError as exc:
                 raise ApplyError(str(exc)) from exc
             return
@@ -1386,7 +1478,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if len(matrix) != 6:
             raise ApplyError("matrix is [a, b, c, d, e, f]")
         try:
-            selection.drop(target, items, matrix)
+            selection.drop(target, items, matrix, resample=_interp(op))
         except ValueError as exc:
             raise ApplyError(str(exc)) from exc
         return
@@ -1501,7 +1593,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if "exportable" in op and layer.role not in (LayerRole.NAME, LayerRole.DRAFT):
             layer.exportable = bool(op["exportable"])
         if "blend" in op:
-            layer.blend = str(op["blend"])
+            layer.blend = _blend_mode(op["blend"])
         if "clip" in op:
             layer.clip = bool(op["clip"])
         if "lock_alpha" in op:
@@ -1520,6 +1612,18 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             layer.color = tuple(int(v) for v in op["color"])[:3] if op["color"] else None
         if "reference" in op:
             layer.reference = bool(op["reference"])
+        if "color_prints" in op:
+            layer.color_prints = bool(op["color_prints"])
+        if "fill" in op:
+            if layer.kind != LayerKind.FILL:
+                raise ApplyError("fill is set on a fill layer")
+            layer.fill = _fill_spec(op["fill"]) if op["fill"] else None
+        if "adjust" in op:
+            if layer.kind != LayerKind.ADJUST:
+                raise ApplyError("adjust is set on a correction layer")
+            layer.adjust = _adjust_spec(op["adjust"])
+        if "effect" in op:
+            layer.effect = _effect_spec(op["effect"]) if op["effect"] else None
         return
 
     if name == "gradient_fill":
@@ -2339,20 +2443,30 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
     if name == "add_layer":
         page = _require_page(episode, op)
         kind_name = "folder" if op.get("folder") else str(op.get("kind") or "paint")
-        kinds = {"folder": LayerKind.FOLDER, "pen": LayerKind.STROKES, "paint": LayerKind.RASTER}
+        kinds = {"folder": LayerKind.FOLDER, "pen": LayerKind.STROKES, "paint": LayerKind.RASTER, "fill": LayerKind.FILL,
+                 "gradient": LayerKind.FILL, "adjust": LayerKind.ADJUST}
         if kind_name not in kinds:
-            raise ApplyError("kind must be pen, paint or folder")
+            raise ApplyError("kind must be pen, paint, folder, fill, gradient or adjust")
         layer = Layer(
             id=str(op.get("id") or new_id()),
             role=LayerRole.USER,
             kind=kinds[kind_name],
             title=str(op.get("name") or "layer"),
-            blend=str(op.get("blend") or "normal"),
+            blend=_blend_mode(op.get("blend") or "normal"),
             clip=bool(op.get("clip")),
             lock_alpha=bool(op.get("lock_alpha")),
             parent_id=str(op["parent"]) if op.get("parent") else None,
             exportable=True,
         )
+        if kind_name == "fill":
+            layer.fill = _fill_spec({"rgb": op.get("rgb") or [255, 255, 255]})
+            layer.title = str(op.get("name") or "ベタ塗り")
+        elif kind_name == "gradient":
+            layer.fill = _fill_spec({"gradient": op.get("gradient") or {}})
+            layer.title = str(op.get("name") or "グラデーション")
+        elif kind_name == "adjust":
+            layer.adjust = _adjust_spec(op.get("adjust") or {"kind": "levels"})
+            layer.title = str(op.get("name") or "色調補正")
         if any(item.id == layer.id for item in page.layers):
             raise ApplyError(f"layer {layer.id} exists")
         after = op.get("after")
@@ -2725,7 +2839,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "gradient_fill",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
-                             "trace_prims", "effect_to_layer", "add_shape", "smudge", "vector_edit", "fill_gaps"})
+                             "trace_prims", "effect_to_layer", "add_shape", "smudge", "vector_edit", "fill_gaps", "liquify"})
 
 
 def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTOR) -> None:
@@ -2740,7 +2854,14 @@ def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTO
         page = _require_page(episode, op)
         if not page.art_ok:
             raise ApplyError(f"page {page.index}: finish needs the art approved (strict_gates)")
-    if name in ("set_layer_mask", "paint_mask", "merge_down", "delete_layer", "duplicate_layer") and op.get("id"):
+    if name in ("merge_layers", "merge_visible", "set_layers", "move_layers", "group_layers"):
+        page = _require_page(episode, op)
+        ids = set(op.get("ids") or []) if not op.get("all") and name != "merge_visible" else {layer.id for layer in page.layers}
+        printed = [layer for layer in page.layers if layer.id in ids and layer.role not in (LayerRole.NAME, LayerRole.DRAFT)]
+        if printed and not page.name_ok and name in ("merge_layers", "merge_visible"):
+            raise ApplyError(f"{name} on a printed layer needs name_ok on page {page.index} (strict_gates)")
+        return
+    if name in ("set_layer_mask", "paint_mask", "merge_down", "delete_layer", "duplicate_layer", "convert_layer") and op.get("id"):
         op = {**op, "layer_id": op["id"]}  # (these name the layer by id: the same rule as drawing on it)
         name = "fill"
     if name in ("add_stroke", *RASTER_EDIT_OPS) and op.get("layer_id"):
@@ -2804,6 +2925,7 @@ PAGE_LOCAL_OPS = frozenset({
     "add_prim3d", "add_scene", "edit_prim", "delete_prim", "trace_prims", "lt_convert", "erase_raster", "erase",
     "reorder_layers", "stamp_material", "add_mannequin", "pose_mannequin", "set_onion", "step_onion",
     "set_lt", "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area", "smudge", "vector_edit", "fill_gaps",
+    "merge_layers", "merge_visible", "group_layers", "move_layers", "convert_layer", "set_layers", "liquify",
 })
 # Ops that find a line by id; the line lives in the story (always copied) or in one page's texts.
 LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path"})

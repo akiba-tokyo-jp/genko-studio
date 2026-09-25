@@ -118,7 +118,7 @@ def _affine_back(dst: list, src: list) -> tuple:
     return (*cx, *cy)
 
 
-def warp_image(image: Image.Image, origin: tuple[int, int], go, dpi: int, cells: int = 14) -> tuple[Image.Image, tuple[int, int]] | None:
+def warp_image(image: Image.Image, origin: tuple[int, int], go, dpi: int, cells: int = 14, resample=Image.Resampling.BILINEAR) -> tuple[Image.Image, tuple[int, int]] | None:
     """An image lying at `origin` (px at dpi) redrawn through the warp: (image, its new origin) or None."""
     scale = dpi / 25.4
     ox, oy = origin
@@ -156,7 +156,7 @@ def warp_image(image: Image.Image, origin: tuple[int, int], go, dpi: int, cells:
                 coeffs = _affine_back([(x - bx0, y - by0) for x, y in local], list(src))
                 if coeffs is None:
                     continue
-                piece = image.transform((bx1 - bx0, by1 - by0), Image.Transform.AFFINE, coeffs, resample=Image.Resampling.BILINEAR)
+                piece = image.transform((bx1 - bx0, by1 - by0), Image.Transform.AFFINE, coeffs, resample=resample)
                 mask = Image.new("L", piece.size, 0)
                 # (a little wider than the triangle, so neighbouring pieces leave no seam)
                 ImageDraw.Draw(mask).polygon([(x - bx0, y - by0) for x, y in local], fill=255, outline=255)

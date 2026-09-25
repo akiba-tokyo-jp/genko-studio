@@ -36,6 +36,7 @@ class LayerKind(str, Enum):
     TONE = "tone"
     FOLDER = "folder"
     PLACED = "placed"  # an imported image placed into a panel; bytes stay in assets/
+    ADJUST = "adjust"  # a correction layer (色調補正レイヤー): changes the colours of what is under it, at render time
 
 
 @dataclass(frozen=True)
@@ -317,6 +318,13 @@ class Layer:
     mask: dict | None = None
     color: tuple[int, int, int] | None = None  # shown in this colour on screen (a blue draft); never printed
     reference: bool = False  # fills set to "reference" look at the lines of these layers (参照レイヤー)
+    # J5: a fill layer's colour or gradient ({"rgb"} | {"gradient": {from, to, rgb_from, rgb_to, opacity_from,
+    # opacity_to, shape}}); a correction layer's adjustment ({"kind", …params}); effects on the layer's picture
+    # ({"border": {width_mm, rgb}, "water_edge": {width_mm, strength}}); the layer colour printed too
+    fill: dict | None = None
+    adjust: dict | None = None
+    effect: dict | None = None
+    color_prints: bool = False
 
 
 @dataclass

@@ -527,9 +527,9 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             color = QColor("#e8590c") if self.tool == "pen" else QColor(200, 60, 60, 160)
             shown = self.snapped_preview(self._stroke) if self.tool == "pen" else [self._stroke]
             self._draw_strokes(painter, shown, color, max(1.5, self.brush_width_mm * self._scale))
-        if self._hover and not self._stroke and self.tool in ("pen", "eraser", "blend"):
+        if self._hover and not self._stroke and self.tool in ("pen", "eraser", "blend", "liquify"):
             hx, hy = self._pt(*self._hover).x(), self._pt(*self._hover).y()
-            radius = max(2.0, (self.brush_width_mm if self.tool == "pen" else self.blend_mm if self.tool == "blend"
+            radius = max(2.0, (self.brush_width_mm if self.tool == "pen" else self.blend_mm if self.tool in ("blend", "liquify")
                                else self.eraser_mm) / 2 * self._scale)
             painter.setPen(QPen(QColor("#e8590c"), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -944,6 +944,9 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         out = [("scale", key, (x0 + (x1 - x0) * fx, y0 + (y1 - y0) * fy)) for key, (fx, fy) in
                {"nw": (0, 0), "n": (0.5, 0), "ne": (1, 0), "e": (1, 0.5), "se": (1, 1), "s": (0.5, 1), "sw": (0, 1), "w": (0, 0.5)}.items()]
         out.append(("rotate", "r", (cx, y0 - 18 / self._scale)))
+        # 平行ゆがみ (skew): a diamond a quarter along each side slants the box along that side
+        out += [("skew", "n", (x0 + (x1 - x0) * 0.25, y0)), ("skew", "s", (x0 + (x1 - x0) * 0.75, y1)),
+                ("skew", "w", (x0, y0 + (y1 - y0) * 0.75)), ("skew", "e", (x1, y0 + (y1 - y0) * 0.25))]
         return out
 
     def _sel_matrix(self, pos_mm) -> list:
@@ -963,6 +966,14 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             c, s = math.cos(angle), math.sin(angle)
             return [c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy]
         key = drag["key"]
+        if drag["kind"] == "skew":  # the side dragged slides along itself; the opposite side stays
+            if key in ("n", "s"):
+                ay = y1 if key == "n" else y0
+                k = (px - sx0) / ((sy0 - ay) or 1e-6)
+                return [1, 0, k, 1, -k * ay, 0]
+            ax = x1 if key == "w" else x0
+            k = (py - sy0) / ((sx0 - ax) or 1e-6)
+            return [1, k, 0, 1, 0, -k * ax]
         ax = x1 if "w" in key else x0 if "e" in key else (x0 + x1) / 2
         ay = y1 if key.startswith("n") else y0 if key.startswith("s") else (y0 + y1) / 2
         sx = (px - ax) / ((sx0 - ax) or 1e-6) if ("w" in key or "e" in key) else 1.0
@@ -997,6 +1008,9 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             painter.setBrush(QColor("white"))
             if kind == "rotate":
                 painter.drawEllipse(p, 5, 5)
+            elif kind == "skew":
+                painter.drawPolygon([QPointF(p.x(), p.y() - 5), QPointF(p.x() + 5, p.y()), QPointF(p.x(), p.y() + 5),
+                                     QPointF(p.x() - 5, p.y())])
             elif kind == "warp":
                 painter.setPen(QPen(QColor("#e8590c"), 1.5))
                 painter.drawEllipse(p, 5, 5)
@@ -1108,7 +1122,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
         elif self._space:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
-        elif self.tool in ("pen", "eraser", "blend"):
+        elif self.tool in ("pen", "eraser", "blend", "liquify"):
             # the brush's circle is drawn on the page (paintEvent); the pointer itself as chosen
             blank = self.cursor_kind in ("circle", "dot")
             self.setCursor(Qt.CursorShape.BlankCursor if blank else Qt.CursorShape.CrossCursor)
@@ -1666,7 +1680,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             self._eraser_end = self.tool  # the pen turned over: erase for this stroke, then back
             self.tool = "eraser"
             self._update_cursor()
-        if self.page is None or self.tool not in ("pen", "eraser", "blend") or self._space:
+        if self.page is None or self.tool not in ("pen", "eraser", "blend", "liquify") or self._space:
             event.ignore()  # the select tool works with the pen as a mouse
             return
         x_mm, y_mm = self._to_mm(self._ev(event.position()))

@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import QFileSystemWatcher, QPointF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -473,7 +474,7 @@ class StoryPanel(QWidget):
             self.refresh()
 
 
-LAYER_ICON = {"strokes": "✎", "raster": "▦", "folder": "▸", "placed": "🖼", "tone": "░", "fill": "■"}
+LAYER_ICON = {"strokes": "✎", "raster": "▦", "folder": "▸", "placed": "🖼", "tone": "░", "fill": "■", "adjust": "◑"}
 
 
 class LayerPanel(QWidget):
@@ -488,7 +489,13 @@ class LayerPanel(QWidget):
         self.target = QLabel()
         self.target.setWordWrap(True)
         self.list = QListWidget()
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # Ctrl / Shift+click: several
         self.list.itemChanged.connect(self._visibility)
+        self.list.itemDoubleClicked.connect(lambda _item: self._edit_special())
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("レイヤーを探す（名前）")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self._search)
         self.list.currentRowChanged.connect(lambda _: self._selected())
         self.name = QLineEdit()
         self.name.setPlaceholderText("レイヤーの名前")
@@ -517,6 +524,51 @@ class LayerPanel(QWidget):
         add_paint.clicked.connect(lambda: self._add("paint", "ペイント"))
         add_folder = QPushButton("＋フォルダ")
         add_folder.clicked.connect(lambda: self._add("folder", "フォルダ"))
+        add_special = QPushButton("＋塗り・補正 ▾")
+        add_special.setToolTip("ベタ塗り・グラデーション・色調補正のレイヤー（あとから何度でも直せます。ダブルクリックで直す）")
+        special = self.special_menu = QMenu(add_special)
+        special.addAction("ベタ塗りのレイヤー…", self._add_fill)
+        special.addAction("グラデーションのレイヤー…", self._add_gradient)
+        adjust = special.addMenu("色調補正のレイヤー")
+        for key, label in wording.ADJUSTMENTS:
+            adjust.addAction(label + "…", lambda k=key: self._add_adjust(k))
+        special.addSeparator()
+        special.addAction("塗り・補正を直す…", self._edit_special)
+        add_special.setMenu(special)
+        several = QPushButton("まとめて ▾")
+        several.setToolTip("Ctrl・Shift+クリックで選んだレイヤーをまとめて扱う。表示レイヤーの結合・変換・下描きの一括など")
+        many = self.many_menu = QMenu(several)
+        self.act_merge_selected = many.addAction("選んだレイヤーを結合", self._merge_selected)
+        self.act_group_selected = many.addAction("選んだレイヤーをフォルダにまとめる", self._group_selected)
+        self.act_group_selected.setShortcut("Ctrl+G")
+        many.addAction("選んだレイヤーを見せる", lambda: self._set_selected({"visible": True}))
+        many.addAction("選んだレイヤーを隠す", lambda: self._set_selected({"visible": False}))
+        many.addAction("選んだレイヤーをロック", lambda: self._set_selected({"locked": True}))
+        many.addAction("選んだレイヤーのロックを外す", lambda: self._set_selected({"locked": False}))
+        many.addSeparator()
+        self.act_merge_visible = many.addAction("表示レイヤーを結合", lambda: self._merge_visible(False))
+        self.act_merge_visible_copy = many.addAction("表示レイヤーのコピーを結合", lambda: self._merge_visible(True))
+        self.act_merge_visible_copy.setShortcut("Ctrl+Shift+Alt+E")
+        many.addSeparator()
+        self.act_to_paint = many.addAction("ペイントのレイヤーに変換（線を画像に）", lambda: self._convert("paint"))
+        self.act_to_pen = many.addAction("ペンのレイヤーに変換（画像を線に）", lambda: self._convert("pen"))
+        many.addSeparator()
+        many.addAction("下描きを全部隠す", lambda: self._drafts({"visible": False}))
+        many.addAction("下描きを全部見せる", lambda: self._drafts({"visible": True}))
+        many.addAction("用紙の色…", self._paper)
+        several.setMenu(many)
+        self.effect_button = QPushButton("効果 ▾")
+        self.effect_button.setToolTip("境界効果（フチ・水彩境界）と、表示色を印刷にも出すか")
+        effects = QMenu(self.effect_button)
+        effects.addAction("フチをつける…", self._border)
+        effects.addAction("水彩境界…", self._water_edge)
+        effects.addAction("境界効果を外す", lambda: self._set("effect", None))
+        effects.addSeparator()
+        self.act_color_prints = effects.addAction("表示色で印刷する")
+        self.act_color_prints.setCheckable(True)
+        self.act_color_prints.setToolTip("「表示色」を画面だけでなく書き出し・印刷にも出します（青い線の原稿など）")
+        self.act_color_prints.toggled.connect(lambda on: self._set("color_prints", on))
+        self.effect_button.setMenu(effects)
         up = QPushButton("↑")
         up.setToolTip("前へ")
         up.clicked.connect(lambda: self._move(1))
@@ -565,7 +617,7 @@ class LayerPanel(QWidget):
         apply_filter = QPushButton("フィルターをかける…")
         apply_filter.clicked.connect(self._filter)
         adds = QGridLayout()
-        for i, button in enumerate((add_pen, add_paint, add_folder, delete, up, down, duplicate, merge)):
+        for i, button in enumerate((add_pen, add_paint, add_folder, add_special, delete, several, up, down, duplicate, merge)):
             adds.addWidget(button, i // 2, i % 2)
         up.setText("↑ 前へ")
         down.setText("↓ 後ろへ")
@@ -578,6 +630,7 @@ class LayerPanel(QWidget):
         frow.addWidget(apply_filter)
         layout = QVBoxLayout(self)
         layout.addWidget(self.target)
+        layout.addWidget(self.search)
         layout.addWidget(self.list, 1)
         layout.addLayout(adds)
         layout.addWidget(self.name)
@@ -589,7 +642,10 @@ class LayerPanel(QWidget):
         layout.addWidget(self.draft)
         layout.addWidget(self.reference)
         layout.addWidget(self.tint)
-        layout.addWidget(self.mask_button)
+        mrow = QHBoxLayout()
+        mrow.addWidget(self.mask_button, 1)
+        mrow.addWidget(self.effect_button, 1)
+        layout.addLayout(mrow)
         layout.addLayout(frow)
         self._loading = False
 
@@ -619,6 +675,7 @@ class LayerPanel(QWidget):
         if target is not None and target.id in self.ids:
             self.list.setCurrentRow(self.ids.index(target.id))
         self._loading = False
+        self._search(self.search.text())
         self._selected(from_list=False)
 
     def _layer(self):
@@ -652,6 +709,8 @@ class LayerPanel(QWidget):
         self.tint.setCurrentIndex(max(0, self.tint.findData(colour)) if colour else 0)
         self.act_mask_off.setChecked(bool(layer.mask) and not layer.mask.get("enabled", True))
         self.mask_button.setText("マスク ◐ ▾" if layer.mask else "マスク ▾")
+        self.act_color_prints.setChecked(bool(getattr(layer, "color_prints", False)))
+        self.effect_button.setText("効果 ✓ ▾" if getattr(layer, "effect", None) else "効果 ▾")
         self._loading = False
         drawable = self.window.drawable(layer)
         prints = layer.exportable and layer.role not in (LayerRole.NAME, LayerRole.DRAFT)
@@ -709,7 +768,7 @@ class LayerPanel(QWidget):
         if layer.kind == LayerKind.FOLDER:
             return None
         if not (layer.strokes or layer.patches or layer.raster_png or layer.kind in (LayerKind.PLACED, LayerKind.TONE)
-                or getattr(layer, "tone", None)):
+                or getattr(layer, "tone", None) or getattr(layer, "fill", None)):
             return None  # (an empty layer has nothing to show)
         cache = self.__dict__.setdefault("_thumbs", {})
         try:
@@ -787,6 +846,176 @@ class LayerPanel(QWidget):
             return
         self.window.apply_ops([{"op": "delete_layer", "page": page.index, "id": layer.id}])
 
+    # --- J5: several layers, fill / gradient / correction layers, effects ----------------------------------
+
+    def selected_ids(self) -> list[str]:
+        rows = sorted({self.list.row(item) for item in self.list.selectedItems()})
+        return [self.ids[row] for row in rows if 0 <= row < len(self.ids)]
+
+    def _search(self, text: str) -> None:
+        page = self.window.current_page()
+        words = text.strip().lower()
+        for row, layer_id in enumerate(self.ids):
+            layer = next((item for item in page.layers if item.id == layer_id), None) if page else None
+            label = wording.layer_label(layer).lower() if layer is not None else ""
+            self.list.item(row).setHidden(bool(words) and words not in label)
+
+    def _several(self, least: int = 2) -> list[str] | None:
+        ids = self.selected_ids()
+        if len(ids) < least:
+            self.window.flash(f"Ctrl（または Shift）+クリックで、レイヤーを {least} 枚以上選びます", 5000)
+            return None
+        return ids
+
+    def _merge_selected(self) -> None:
+        ids = self._several()
+        page = self.window.current_page()
+        if ids and self.window.apply_ops([{"op": "merge_layers", "page": page.index, "ids": ids}]):
+            lowest = next(layer for layer in page.layers if layer.id in ids)
+            self.window.set_target_layer(lowest.id)
+            self.refresh()
+
+    def _group_selected(self) -> None:
+        from genko.models import new_id
+
+        ids = self._several(1)
+        page = self.window.current_page()
+        if ids:
+            self.window.apply_ops([{"op": "group_layers", "page": page.index, "ids": ids, "id": new_id(), "name": "フォルダ"}])
+
+    def _set_selected(self, fields: dict) -> None:
+        ids = self._several(1)
+        page = self.window.current_page()
+        if ids:
+            self.window.apply_ops([{"op": "set_layers", "page": page.index, "ids": ids, **fields}])
+
+    def _merge_visible(self, copy: bool) -> None:
+        from genko.models import new_id
+
+        page = self.window.current_page()
+        if page is None:
+            return
+        if not copy and QMessageBox.question(self, "Genko", "見えているレイヤーを 1 枚にまとめます。\n（元に戻す で取り消せます）") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        new = new_id()
+        op = {"op": "merge_visible", "page": page.index, "copy": copy}
+        if copy:
+            op["id"] = new
+        if self.window.apply_ops([op]) and copy:
+            self.window.set_target_layer(new)
+            self.refresh()
+
+    def _convert(self, to: str) -> None:
+        page, layer = self._layer()
+        if layer is None:
+            return
+        self.window.apply_ops([{"op": "convert_layer", "page": page.index, "id": layer.id, "to": to}])
+
+    def _drafts(self, fields: dict) -> None:
+        page = self.window.current_page()
+        ids = [layer.id for layer in page.layers if layer.role == LayerRole.DRAFT
+               or (not layer.exportable and layer.role != LayerRole.NAME)] if page else []
+        if not ids:
+            self.window.flash("このページに下描きのレイヤーはありません", 4000)
+            return
+        self.window.apply_ops([{"op": "set_layers", "page": page.index, "ids": ids, **fields}])
+
+    def _paper(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+
+        page = self.window.current_page()
+        now = (page.extra.get("paper_rgb") if page else None) or [255, 255, 255]
+        colour = QColorDialog.getColor(QColor(*now), self, "用紙の色（全ページ）")
+        if colour.isValid():
+            rgb = [colour.red(), colour.green(), colour.blue()]
+            self.window.apply_ops([{"op": "set_paper", "rgb": None if rgb == [255, 255, 255] else rgb}])
+
+    def _add_special(self, kind: str, title: str, fields: dict) -> None:
+        from genko.models import new_id
+
+        page, layer = self._layer()
+        if page is None:
+            return
+        new = new_id()
+        op = {"op": "add_layer", "page": page.index, "kind": kind, "name": title, "id": new, **fields}
+        if layer is not None:
+            op["after"] = layer.id
+        if self.window.apply_ops([op]):
+            self.window.set_target_layer(new)
+            self.refresh()
+
+    def _add_fill(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+
+        colour = QColorDialog.getColor(QColor(*self.window.brush.rgb), self, "ベタ塗りの色")
+        if colour.isValid():
+            self._add_special("fill", "ベタ塗り", {"rgb": [colour.red(), colour.green(), colour.blue()]})
+
+    def _add_gradient(self) -> None:
+        page = self.window.current_page()
+        spec = gradient_dialog(self, page, {"rgb_from": list(self.window.brush.rgb), "rgb_to": list(self.window.colours.sub_rgb),
+                                            "opacity_to": 0.0})
+        if spec is not None:
+            self._add_special("gradient", "グラデーション", {"gradient": spec})
+
+    def _adjust_fields(self, kind: str, now: dict | None = None) -> dict | None:
+        if kind == "gradient_map":
+            return {"colors": (now or {}).get("colors") or [list(self.window.brush.rgb), list(self.window.colours.sub_rgb)]}
+        return filter_params(self, kind, now)
+
+    def _add_adjust(self, kind: str) -> None:
+        params = self._adjust_fields(kind)
+        if params is not None:
+            self._add_special("adjust", dict(wording.ADJUSTMENTS).get(kind, "色調補正"), {"adjust": {"kind": kind, **params}})
+
+    def _edit_special(self) -> None:
+        page, layer = self._layer()
+        if layer is None:
+            return
+        if layer.kind == LayerKind.ADJUST and layer.adjust:
+            kind = layer.adjust.get("kind", "levels")
+            params = self._adjust_fields(kind, layer.adjust)
+            if params is not None:
+                self._set("adjust", {"kind": kind, **params})
+        elif layer.kind == LayerKind.FILL and layer.fill and layer.fill.get("gradient"):
+            spec = gradient_dialog(self, page, layer.fill["gradient"])
+            if spec is not None:
+                self._set("fill", {"gradient": spec})
+        elif layer.kind == LayerKind.FILL and layer.fill:
+            from PySide6.QtWidgets import QColorDialog
+
+            colour = QColorDialog.getColor(QColor(*layer.fill.get("rgb", [255, 255, 255])), self, "ベタ塗りの色")
+            if colour.isValid():
+                self._set("fill", {"rgb": [colour.red(), colour.green(), colour.blue()]})
+
+    def _border(self) -> None:
+        from PySide6.QtWidgets import QColorDialog, QInputDialog
+
+        page, layer = self._layer()
+        if layer is None:
+            return
+        width, ok = QInputDialog.getDouble(self, "フチ", "フチの太さ（mm）", 0.6, 0.05, 10, 2)
+        if not ok:
+            return
+        colour = QColorDialog.getColor(QColor(255, 255, 255), self, "フチの色")
+        if colour.isValid():
+            effect = dict(layer.effect or {})
+            effect["border"] = {"width_mm": width, "rgb": [colour.red(), colour.green(), colour.blue()]}
+            self._set("effect", effect)
+
+    def _water_edge(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        page, layer = self._layer()
+        if layer is None:
+            return
+        width, ok = QInputDialog.getDouble(self, "水彩境界", "にじむ幅（mm）", 0.8, 0.05, 10, 2)
+        if ok:
+            effect = dict(layer.effect or {})
+            effect["water_edge"] = {"width_mm": width, "strength": 0.7}
+            self._set("effect", effect)
+
     def _filter(self) -> None:
         page, layer = self._layer()
         if layer is None:
@@ -796,21 +1025,88 @@ class LayerPanel(QWidget):
         if QMessageBox.question(self, "Genko", f"レイヤー「{wording.layer_label(layer)}」全体に「{label}」をかけます。{extra}\n"
                                 "（元に戻す で取り消せます）") != QMessageBox.StandardButton.Yes:
             return
-        params = filter_params(self, self.filter.currentData())
+        params = self._adjust_fields(self.filter.currentData())
         if params is None:
             return
         self.window.apply_ops([{"op": "filter_raster", "page": page.index, "id": layer.id, "kind": self.filter.currentData(), **params}])
 
 
-def filter_params(parent, kind: str) -> dict | None:
+def gradient_dialog(parent, page, now: dict) -> dict | None:
+    """A gradient layer's settings: which way, colours at each end and how see-through the end is."""
+    from PySide6.QtWidgets import QColorDialog, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
+
+    w = page.spec.width_mm if page else 210
+    h = page.spec.height_mm if page else 297
+    ways = [("上から下へ", [w / 2, 0], [w / 2, h], "linear"), ("下から上へ", [w / 2, h], [w / 2, 0], "linear"),
+            ("左から右へ", [0, h / 2], [w, h / 2], "linear"), ("右から左へ", [w, h / 2], [0, h / 2], "linear"),
+            ("中心から外へ（円）", [w / 2, h / 2], [w / 2, 0], "radial")]
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("グラデーション")
+    form = QFormLayout(dialog)
+    way = QComboBox()
+    for label, *_rest in ways:
+        way.addItem(label)
+    colours = {"rgb_from": list(now.get("rgb_from") or [20, 20, 20]), "rgb_to": list(now.get("rgb_to") or [255, 255, 255])}
+    buttons_c = {}
+    for key, label in (("rgb_from", "はじめの色"), ("rgb_to", "終わりの色")):
+        button = QPushButton()
+        button.setStyleSheet("background: rgb({},{},{})".format(*colours[key]))
+
+        def pick(_=False, k=key, b=button):
+            colour = QColorDialog.getColor(QColor(*colours[k]), dialog, "色")
+            if colour.isValid():
+                colours[k] = [colour.red(), colour.green(), colour.blue()]
+                b.setStyleSheet("background: rgb({},{},{})".format(*colours[k]))
+
+        button.clicked.connect(pick)
+        buttons_c[key] = button
+    start = QDoubleSpinBox()
+    start.setRange(0, 100)
+    start.setSuffix(" %")
+    start.setValue(100 * float(now.get("opacity_from", 1.0)))
+    end = QDoubleSpinBox()
+    end.setRange(0, 100)
+    end.setSuffix(" %")
+    end.setValue(100 * float(now.get("opacity_to", 1.0)))
+    form.addRow("向き", way)
+    form.addRow("はじめの色", buttons_c["rgb_from"])
+    form.addRow("はじめの濃さ", start)
+    form.addRow("終わりの色", buttons_c["rgb_to"])
+    form.addRow("終わりの濃さ", end)
+    ok = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    ok.accepted.connect(dialog.accept)
+    ok.rejected.connect(dialog.reject)
+    form.addRow(ok)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    _label, a, b, shape = ways[way.currentIndex()]
+    return {"from": [round(v, 2) for v in a], "to": [round(v, 2) for v in b], "shape": shape, **colours,
+            "opacity_from": start.value() / 100, "opacity_to": end.value() / 100}
+
+
+FILTER_FIELDS = {
+    "blur": [("radius", "ぼかしの強さ", 0.5, 30, 2.0)],
+    "levels": [("black", "黒くする所（0〜255）", 0, 254, 20), ("white", "白くする所（1〜255）", 1, 255, 235)],
+    "curve": [("gamma", "明るさ（1 より大きいと暗く、小さいと明るく）", 0.2, 5, 1.0)],
+    "hue": [("shift", "色相（°）", -180, 180, 30), ("saturation", "彩度（倍）", 0, 3, 1.0), ("value", "明度（倍）", 0, 3, 1.0)],
+    "mosaic": [("block", "モザイクの大きさ（px）", 2, 64, 8)],
+    "motion_blur": [("distance", "流す長さ（px）", 1, 300, 12), ("angle", "向き（°）", -180, 180, 0)],
+    "radial_blur": [("amount", "強さ", 0.01, 0.5, 0.08), ("cx", "中心（横 0〜1）", 0, 1, 0.5), ("cy", "中心（縦 0〜1）", 0, 1, 0.5)],
+    "zoom_blur": [("amount", "強さ", 0.01, 0.5, 0.08), ("cx", "中心（横 0〜1）", 0, 1, 0.5), ("cy", "中心（縦 0〜1）", 0, 1, 0.5)],
+    "noise": [("amount", "量（0〜1）", 0.01, 1, 0.15)],
+    "wave": [("amplitude", "揺れ幅（px）", 0, 200, 6), ("wavelength", "波の長さ（px）", 2, 1000, 60)],
+    "twirl": [("angle", "回す角度（°）", -720, 720, 90), ("radius", "広さ（0〜1）", 0.05, 1, 0.45)],
+    "posterize": [("levels", "段階の数", 2, 64, 4)],
+    "threshold": [("threshold", "しきい値（0〜255）", 0, 255, 128)],
+    "bitonal": [("threshold", "しきい値（0〜255）", 0, 255, 180)],
+}
+
+
+def filter_params(parent, kind: str, now: dict | None = None) -> dict | None:
     """The numbers of a colour adjustment, asked once (None: the person stopped)."""
     from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
 
-    fields = {"blur": [("radius", "ぼかしの強さ", 0.5, 30, 2.0)],
-              "levels": [("black", "黒くする所（0〜255）", 0, 254, 20), ("white", "白くする所（1〜255）", 1, 255, 235)],
-              "curve": [("gamma", "明るさ（1 より大きいと暗く、小さいと明るく）", 0.2, 5, 1.0)],
-              "hue": [("shift", "色相（°）", -180, 180, 30), ("saturation", "彩度（倍）", 0, 3, 1.0), ("value", "明度（倍）", 0, 3, 1.0)],
-              "mosaic": [("block", "モザイクの大きさ（px）", 2, 64, 8)]}.get(kind)
+    fields = FILTER_FIELDS.get(kind)
     if not fields:
         return {}
     dialog = QDialog(parent)
@@ -820,8 +1116,8 @@ def filter_params(parent, kind: str) -> dict | None:
     for key, label, lo, hi, value in fields:
         box = QDoubleSpinBox()
         box.setRange(lo, hi)
-        box.setSingleStep(0.1 if hi <= 5 else 1)
-        box.setValue(value)
+        box.setSingleStep(0.01 if hi <= 1 else 0.1 if hi <= 5 else 1)
+        box.setValue(float((now or {}).get(key, value)))
         form.addRow(label, box)
         boxes[key] = box
     buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -909,6 +1205,7 @@ class MainWindow(QMainWindow):
         self._clipboard: dict | None = None
         self.mask_edit = False  # pen and eraser work on the target layer's mask
         self._target_layer_id: str | None = None
+        self.transform_interp = "bilinear"  # how pixels are resampled when the selection is transformed
         self.eraser_mm = 2.0
         self._dock_timer = QTimer(self)
         self._dock_timer.setSingleShot(True)
@@ -1106,6 +1403,8 @@ class MainWindow(QMainWindow):
                            "直線・折れ線・曲線・長方形・楕円・多角形を描く（Shift で 45° と正方形。折れ線と曲線はクリックで点、ダブルクリックか Enter で終わり）", True)
         self.act_blend = a("色混ぜ", lambda: self._tool("blend"), "Shift+B",
                            "ペイントのレイヤーの色をぼかす・指先でのばす・なじませる", True)
+        self.act_liquify = a("ゆがみ（指で押す）", lambda: self._tool("liquify"), "Shift+L",
+                             "なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く", True)
         self.act_vector = a("線の編集（制御点）", lambda: self._tool("vector"), "Shift+Y",
                             "線を選んで制御点を動かす（Alt+クリックで点を足す、Delete で消す、Shift+クリックで 2 本目）", True)
         self.act_vector_join = a("選んだ 2 本の線をつなぐ", lambda: self._vector_selected("connect"))
@@ -1123,7 +1422,7 @@ class MainWindow(QMainWindow):
         self.act_sel_pen = a("選択ペン", lambda: self._tool("selpen"), None, "なぞった所を選択範囲に足す", True)
         self.act_sel_erase = a("選択消し", lambda: self._tool("selerase"), None, "なぞった所を選択範囲から外す", True)
         tools = QActionGroup(self)
-        self.tool_actions = {"vector": self.act_vector, "blend": self.act_blend, "shape": self.act_shape, "ellipse": self.act_sel_ellipse, "polyline": self.act_sel_polyline,
+        self.tool_actions = {"vector": self.act_vector, "liquify": self.act_liquify, "blend": self.act_blend, "shape": self.act_shape, "ellipse": self.act_sel_ellipse, "polyline": self.act_sel_polyline,
                              "colour": self.act_sel_colour, "selpen": self.act_sel_pen, "selerase": self.act_sel_erase,
                              "move": self.act_move, "gradient": self.act_gradient, "select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
                              "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill,
@@ -1258,12 +1557,12 @@ class MainWindow(QMainWindow):
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_scale, self.act_onion, None, self.act_tool_names]),
             ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_blend, self.act_shape, self.act_text, self.act_frame, None,
-                        self.act_picker, self.act_fill, self.act_lassofill, self.act_fill_gaps, self.act_gradient, self.act_reshape, self.act_vector, None, self.act_marquee, self.act_lasso, self.act_wand, None,
+                        self.act_picker, self.act_fill, self.act_lassofill, self.act_fill_gaps, self.act_gradient, self.act_reshape, self.act_vector, self.act_liquify, None, self.act_marquee, self.act_lasso, self.act_wand, None,
                         self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner, None,
                         self.act_swap_colour, self.act_transparent]),
             ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
-                          self.act_layer_merge, self.act_layer_delete, None, self.act_layer_up, self.act_layer_down, None,
-                          self.act_layer_draft, "mask"]),
+                          self.act_layer_merge, self.act_layer_delete, None, "layer_special", "layer_many", None,
+                          self.act_layer_up, self.act_layer_down, None, self.act_layer_draft, "layer_effect", "mask"]),
             ("台詞", [self.act_line_type, self.act_balloon_pen, None, self.act_line_edit, self.act_line_wrap, "shapes",
                       self.act_line_delete, None, self.act_story_editor]),
             ("トーン・効果線", [self.act_tone_here, self.act_tone_click, None, self.act_effect, *self.effect_actions, None,
@@ -1273,7 +1572,7 @@ class MainWindow(QMainWindow):
                       self.act_sel_grow, self.act_sel_shrink, self.act_sel_feather, self.act_sel_layer, None, self.act_sel_keep,
                       "stock", self.act_quick_mask, None,
                       self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v,
-                      self.act_warp_perspective, self.act_warp_mesh, self.act_warp_apply, None,
+                      self.act_warp_perspective, self.act_warp_mesh, self.act_warp_apply, "interp", None,
                       self.act_fill_selection, self.act_line_width]),
             ("定規・3D", [self.act_ruler, None, *self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
                           self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm, None, self.act_3d,
@@ -1298,6 +1597,19 @@ class MainWindow(QMainWindow):
                     shapes = menu.addMenu("フキダシの形")
                     for key, label in KINDS:
                         shapes.addAction(label, lambda k=key: self._set_selected_balloon(k))
+                elif act in ("layer_special", "layer_many", "layer_effect"):  # (filled with the layer panel's own, below)
+                    titles = {"layer_special": "塗り・グラデーション・色調補正のレイヤー", "layer_many": "まとめて（複数のレイヤー・表示レイヤー・変換）",
+                              "layer_effect": "境界効果・表示色の印刷"}
+                    setattr(self, act + "_menu", menu.addMenu(titles[act]))
+                elif act == "interp":
+                    interp = menu.addMenu("変形の補間")
+                    group = QActionGroup(interp)
+                    for key, label in (("bilinear", "なめらか（バイリニア）"), ("bicubic", "よりなめらか（バイキュービック）"),
+                                       ("nearest", "ハード（ニアレストネイバー・ドット絵やトーンに）")):
+                        act_i = interp.addAction(label, lambda k=key: setattr(self, "transform_interp", k))
+                        act_i.setCheckable(True)
+                        act_i.setChecked(key == self.transform_interp)
+                        group.addAction(act_i)
                 elif act == "mask":
                     self.layer_mask_menu = menu.addMenu("マスク")  # (filled with the layer panel's own, below)
                 elif act == "actions":
@@ -1554,6 +1866,10 @@ class MainWindow(QMainWindow):
         self.layers = LayerPanel(self)
         for act in self.layers.mask_button.menu().actions():
             self.layer_mask_menu.addAction(act)
+        for name, menu in (("layer_special", self.layers.special_menu), ("layer_many", self.layers.many_menu),
+                           ("layer_effect", self.layers.effect_button.menu())):
+            for act in menu.actions():
+                getattr(self, name + "_menu").addAction(act)
         self.library = Library(self)
         self.guides = GuidePanel(self)
         self.materials = MaterialPanel(self)
@@ -1703,6 +2019,31 @@ class MainWindow(QMainWindow):
         blend_note.setStyleSheet("color:#666")
         bfl.addRow(blend_note)
         ts.add(("blend",), blend_page)
+        self.liquify_mode = QComboBox()
+        for label, key in (("押し流す", "push"), ("縮める", "pinch"), ("ふくらませる", "bloat"), ("右に渦", "twirl_cw"),
+                           ("左に渦", "twirl_ccw")):
+            self.liquify_mode.addItem(label, key)
+        self.liquify_strength = _Spin()
+        self.liquify_strength.setRange(5, 100)
+        self.liquify_strength.setSuffix(" %")
+        self.liquify_strength.setValue(60)
+        liquify_size = QDoubleSpinBox()
+        liquify_size.setRange(0.5, 80)
+        liquify_size.setSuffix(" mm")
+        liquify_size.setValue(10.0)
+        liquify_size.valueChanged.connect(lambda v: setattr(self.canvas, "blend_mm", float(v)))
+        liquify_page = QWidget()
+        lfl = QFormLayout(liquify_page)
+        lfl.setContentsMargins(0, 0, 0, 0)
+        lfl.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        lfl.addRow("動かし方", self.liquify_mode)
+        lfl.addRow("強さ", self.liquify_strength)
+        lfl.addRow("大きさ", liquify_size)
+        liquify_note = QLabel("ペンの線は点が動き、線のまま残ります。")
+        liquify_note.setWordWrap(True)
+        liquify_note.setStyleSheet("color:#666")
+        lfl.addRow(liquify_note)
+        ts.add(("liquify",), liquify_page)
         radius = QDoubleSpinBox()
         radius.setRange(1, 60)
         radius.setSuffix(" mm")
@@ -2228,6 +2569,11 @@ class MainWindow(QMainWindow):
             # 透明色: the pen takes away where it passes
             self.apply_ops([{"op": "erase", "page": page.index, "layer_id": layer.id, "points": [[p[0], p[1]] for p in points],
                              "width_mm": max(0.3, self.brush.size.value())}])
+            return
+        if self.canvas.tool == "liquify":
+            self.apply_ops([{"op": "liquify", "page": page.index, "layer_id": layer.id, "points": [[p[0], p[1]] for p in points],
+                             "width_mm": self.canvas.blend_mm, "strength": self.liquify_strength.value() / 100,
+                             "mode": self.liquify_mode.currentData()}])
             return
         if self.canvas.tool == "blend":
             self.apply_ops([{"op": "smudge", "page": page.index, "layer_id": layer.id, "points": points,
@@ -2762,7 +3108,8 @@ class MainWindow(QMainWindow):
         if area is None or layer is None:
             return
         matrix = [round(float(v), 5) for v in matrix]
-        if self.apply_ops([{"op": "transform_area", "page": self._current().index, "layer_id": layer.id, "area": area, "matrix": matrix}]):
+        if self.apply_ops([{"op": "transform_area", "page": self._current().index, "layer_id": layer.id, "area": area, "matrix": matrix,
+                            "interp": self.transform_interp}]):
             outline = self.canvas._apply(matrix, self.canvas.selection["outline"])
             self.canvas.set_selection(self._moved_area(area, matrix), outline)
 
@@ -2778,7 +3125,8 @@ class MainWindow(QMainWindow):
         area, layer = self._area(), self._paint_layer()
         if area is None or layer is None:
             return
-        if self.apply_ops([{"op": "transform_area", "page": self._current().index, "layer_id": layer.id, "area": area, "warp": warp}]):
+        if self.apply_ops([{"op": "transform_area", "page": self._current().index, "layer_id": layer.id, "area": area, "warp": warp,
+                            "interp": self.transform_interp}]):
             self.canvas.set_selection(None)
 
     def _page_overview(self) -> None:

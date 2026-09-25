@@ -106,6 +106,10 @@ def _layer_fields(data: dict, role: LayerRole) -> Layer:
         parent_id=data.get("parent_id"),
         color=tuple(int(v) for v in data["color"])[:3] if data.get("color") else None,  # type: ignore[arg-type]
         reference=bool(data.get("reference", False)),
+        fill=dict(data["fill"]) if isinstance(data.get("fill"), dict) else None,
+        adjust=dict(data["adjust"]) if isinstance(data.get("adjust"), dict) else None,
+        effect=dict(data["effect"]) if isinstance(data.get("effect"), dict) else None,
+        color_prints=bool(data.get("color_prints", False)),
     )
 
 

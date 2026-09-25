@@ -135,7 +135,7 @@ def _split_patch(patch: dict, area: dict) -> tuple[dict | None, dict | None]:
     return _to_patch(with_alpha(outside_alpha), origin, patch), _to_patch(with_alpha(inside_alpha), origin, patch)
 
 
-def transform_patch(patch: dict, m: Matrix) -> dict | None:
+def transform_patch(patch: dict, m: Matrix, resample=Image.Resampling.BILINEAR) -> dict | None:
     image, (ox, oy) = _patch_px(patch)
     corners = [(ox, oy), (ox + image.width, oy), (ox, oy + image.height), (ox + image.width, oy + image.height)]
     scale = FILL_DPI / 25.4
@@ -159,7 +159,7 @@ def transform_patch(patch: dict, m: Matrix) -> dict | None:
     p01 = back(nx0, ny0 + 1)
     coeffs = (p10[0] - p00[0], p01[0] - p00[0], p00[0] - ox, p10[1] - p00[1], p01[1] - p00[1], p00[1] - oy)
     size = (max(1, nx1 - nx0), max(1, ny1 - ny0))
-    out = image.transform(size, Image.Transform.AFFINE, coeffs, resample=Image.Resampling.BILINEAR)
+    out = image.transform(size, Image.Transform.AFFINE, coeffs, resample=resample)
     return _to_patch(out, (nx0, ny0), patch)
 
 
@@ -202,7 +202,7 @@ def lift(layer, area: dict, page=None) -> dict:
     return {"strokes": strokes_in, "patches": patches_in}
 
 
-def drop(layer, items: dict, m: Matrix = IDENTITY, fresh_ids: bool = False) -> None:
+def drop(layer, items: dict, m: Matrix = IDENTITY, fresh_ids: bool = False, resample=Image.Resampling.BILINEAR) -> None:
     """Put lifted (or copied) items back on the layer, transformed by `m`."""
     for stroke in items.get("strokes", []):
         moved = transform_stroke(stroke, m) if m != IDENTITY else stroke
@@ -210,14 +210,14 @@ def drop(layer, items: dict, m: Matrix = IDENTITY, fresh_ids: bool = False) -> N
             moved.id = new_id() if fresh_ids else stroke.id
         layer.strokes.append(moved)
     for patch in items.get("patches", []):
-        moved = transform_patch(patch, m) if m != IDENTITY else dict(patch)
+        moved = transform_patch(patch, m, resample) if m != IDENTITY else dict(patch)
         if moved:
             if fresh_ids:
                 moved["id"] = new_id()
             layer.patches.append(moved)
 
 
-def drop_warped(layer, items: dict, go) -> None:
+def drop_warped(layer, items: dict, go, resample=Image.Resampling.BILINEAR) -> None:
     """Put lifted items back through a free transform (genko.warp): lines point by point, pixels piece by piece."""
     from genko import warp
 
@@ -225,7 +225,7 @@ def drop_warped(layer, items: dict, go) -> None:
         layer.strokes.append(warp.warp_stroke(stroke, go))
     for patch in items.get("patches", []):
         image, origin = _patch_px(patch)
-        warped = warp.warp_image(image, origin, go, FILL_DPI)
+        warped = warp.warp_image(image, origin, go, FILL_DPI, resample=resample)
         if warped is not None:
             moved = _to_patch(warped[0], warped[1], patch)
             if moved:

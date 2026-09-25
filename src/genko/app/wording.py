@@ -24,10 +24,20 @@ GATE = {"name": "ネーム", "art": "作画", "sheet": "設定画", "export": "�
 REGION = [("face", "顔"), ("person", "人物"), ("keep", "空けておく")]
 REGION_LABEL = dict(REGION)
 
-BLEND = [("normal", "通常"), ("multiply", "乗算"), ("screen", "スクリーン"), ("add", "加算")]
+BLEND = [("normal", "通常"), ("multiply", "乗算"), ("screen", "スクリーン"), ("add", "加算（発光）"), ("overlay", "オーバーレイ"),
+         ("darken", "比較（暗）"), ("lighten", "比較（明）"), ("color_burn", "焼き込みカラー"), ("linear_burn", "焼き込み（リニア）"),
+         ("color_dodge", "覆い焼きカラー"), ("soft_light", "ソフトライト"), ("hard_light", "ハードライト"),
+         ("difference", "差の絶対値"), ("exclusion", "除外"), ("subtract", "減算"), ("divide", "除算"), ("hue", "色相"),
+         ("saturation", "彩度"), ("color", "カラー"), ("luminosity", "輝度")]
 
 FILTERS = [("levels", "レベル補正"), ("curve", "明るさの曲線（トーンカーブ）"), ("hue", "色相・彩度・明度"), ("blur", "ぼかし"),
-           ("sharpen", "シャープ"), ("mosaic", "モザイク")]
+           ("sharpen", "シャープ"), ("mosaic", "モザイク"), ("motion_blur", "移動ぼかし"), ("radial_blur", "放射ぼかし"),
+           ("zoom_blur", "ズームぼかし"), ("noise", "ノイズ"), ("wave", "波形"), ("twirl", "渦巻き"), ("lineart", "線画抽出"),
+           ("invert", "色調反転"), ("posterize", "階調化（ポスタリゼーション）"), ("threshold", "2 値化（しきい値）"),
+           ("bitonal", "白黒にする"), ("gradient_map", "グラデーションマップ")]
+# what a correction layer can hold (it changes colours, not shapes)
+ADJUSTMENTS = [("levels", "レベル補正"), ("curve", "トーンカーブ"), ("hue", "色相・彩度・明度"), ("invert", "色調反転"),
+               ("posterize", "階調化"), ("threshold", "2 値化"), ("gradient_map", "グラデーションマップ")]
 
 
 def actor(name: str | None) -> str:
@@ -113,6 +123,30 @@ _ERRORS: list[tuple[str, object]] = [
     (r"the layer has no colour yet.*", "このレイヤーにはまだ色がありません（先に塗ってから塗り残しを塗ります）"),
     (r"there is nothing on this layer to blend there", "そこにはこのレイヤーの色がないので、混ぜられません"),
     (r"a guide's axis is h or v", "ガイド線の向きは横（h）か縦（v）です"),
+    (r"a folder cannot hold itself", "フォルダを自分の中には入れられません"),
+    (r"adjust is set on a correction layer", "補正の設定は、色調補正のレイヤーにだけできます"),
+    (r"adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"),
+    (r"choose two or more layers to merge", "結合するレイヤーを 2 枚以上選びます"),
+    (r"effect is .* and/or .*", "境界効果は、フチか水彩境界です"),
+    (r"fill is .* or .*", "塗りの設定は、色かグラデーションです"),
+    (r"fill is set on a fill layer", "塗りの設定は、塗りつぶしのレイヤーにだけできます"),
+    (r"from and to are \[x_mm, y_mm\]", "グラデーションのはじめと終わりの位置が要ります"),
+    (r"ids is the list of layer ids", "レイヤーを選んでください"),
+    (r"interp must be .*", "補間は、なめらか・よりなめらか・ハードから選びます"),
+    (r"mode must be one of push.*", "ゆがみは、押し流す・縮める・ふくらませる・渦から選びます"),
+    (r"mode must be one of .*", "その動かし方は選べません"),
+    (r"only a paint layer can become a pen layer", "ペンのレイヤーに変換できるのは、ペイントのレイヤーだけです"),
+    (r"page not found", "そのページはありません"),
+    (r"parent must be a folder", "入れる先はフォルダを選びます"),
+    (r"points is \[\[x, y\], \.\.\.\] in mm", "なぞった点が要ります"),
+    (r"rgb is \[r, g, b\], each 0\.\.255", "色は 0〜255 の 3 つの数です"),
+    (r"set_layers needs something to set.*", "まとめて変える設定がありません"),
+    (r"shape must be linear or radial", "グラデーションの形は、直線か円です"),
+    (r"the adjustment cannot be used: .*", "その補正の数値は使えません"),
+    (r"the layer has no marks to trace", "このレイヤーには線にできる絵がありません"),
+    (r"this layer cannot become a paint layer", "このレイヤーはペイントのレイヤーに変換できません"),
+    (r"unknown blend mode .*", "その合成モードはありません"),
+    (r"unknown effect .*", "その境界効果はありません（フチ・水彩境界）"),
     (r"an area needs at least three points", "範囲には 3 点以上が要ります"),
     (r"no layer .*", "そのレイヤーはありません"),
     (r"the colour point is off the page", "色を取る点がページの外です"),

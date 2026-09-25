@@ -4,7 +4,7 @@ import io
 import threading
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from genko.models import Episode, LayerKind, LayerRole, Page, Rect, StoryLine
 
@@ -250,6 +250,93 @@ def _paint_patch(out: Image.Image, patch: dict, dpi: int, colour=None) -> None:
     out.paste(Image.alpha_composite(region, piece), (x0, y0))
 
 
+def gradient_image(size: tuple[int, int], dpi: int, spec: dict) -> Image.Image:
+    """A page-sized gradient (a gradient layer): from → to (mm), colours and opacities at each end."""
+    import math
+
+    import numpy as np
+
+    w, h = size
+    scale = dpi / 25.4
+    (fx, fy), (tx, ty) = [float(v) for v in spec.get("from", [0, 0])[:2]], [float(v) for v in spec.get("to", [0, 100])[:2]]
+    gx, gy = np.meshgrid((np.arange(w) + 0.5) / scale, (np.arange(h) + 0.5) / scale)
+    length = math.hypot(tx - fx, ty - fy) or 1.0
+    if spec.get("shape") == "radial":
+        t = np.hypot(gx - fx, gy - fy) / length
+    else:
+        t = ((gx - fx) * (tx - fx) + (gy - fy) * (ty - fy)) / (length * length)
+    t = np.clip(t, 0.0, 1.0)
+    c0 = np.array([int(v) for v in (spec.get("rgb_from") or [20, 20, 20])][:3], dtype=float)
+    c1 = np.array([int(v) for v in (spec.get("rgb_to") or [255, 255, 255])][:3], dtype=float)
+    a0 = max(0.0, min(1.0, float(spec.get("opacity_from", 1.0))))
+    a1 = max(0.0, min(1.0, float(spec.get("opacity_to", 1.0))))
+    rgb = (c0[None, None, :] * (1 - t[..., None]) + c1[None, None, :] * t[..., None]).round().astype("uint8")
+    alpha = ((a0 * (1 - t) + a1 * t) * 255).round().astype("uint8")
+    return Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
+
+
+def fill_layer_image(layer, size: tuple[int, int], dpi: int) -> Image.Image:
+    """A fill layer's picture: one colour over the page, or its gradient."""
+    spec = layer.fill or {}
+    if spec.get("gradient"):
+        return gradient_image(size, dpi, spec["gradient"])
+    rgb = tuple(int(v) for v in (spec.get("rgb") or layer.fill_rgb or (255, 255, 255)))[:3]
+    return Image.new("RGBA", size, (*rgb, 255))
+
+
+def layer_effects(layer, raster: Image.Image, dpi: int) -> Image.Image:
+    """境界効果: an edge line around what the layer shows (フチ), or colour gathered at its edges (水彩境界)."""
+    effect = getattr(layer, "effect", None) or {}
+    if not effect:
+        return raster
+    out = raster.convert("RGBA")
+    alpha = out.split()[3]
+    if effect.get("water_edge"):
+        spec = effect["water_edge"]
+        width = max(1, round(float(spec.get("width_mm", 0.6)) / 25.4 * dpi))
+        strength = max(0.0, min(1.0, float(spec.get("strength", 0.6))))
+        inner = alpha.filter(ImageFilter.MinFilter(width * 2 + 1)) if width < 12 else \
+            alpha.filter(ImageFilter.GaussianBlur(width)).point(lambda v: 255 if v > 245 else 0)
+        rim = ImageChops.subtract(alpha, inner)
+        dark = Image.new("RGBA", out.size, (0, 0, 0, 0))
+        dark.putalpha(rim.point(lambda v, s=strength: int(v * s * 0.6)))
+        shaded = out.copy()
+        shaded.alpha_composite(dark)
+        shaded.putalpha(alpha)
+        out = shaded
+    if effect.get("border"):
+        spec = effect["border"]
+        width = max(1, round(float(spec.get("width_mm", 0.5)) / 25.4 * dpi))
+        rgb = tuple(int(v) for v in (spec.get("rgb") or (255, 255, 255)))[:3]
+        grown = alpha.filter(ImageFilter.GaussianBlur(width / 1.5)).point(lambda v: 255 if v > 12 else 0)
+        border = Image.new("RGBA", out.size, (*rgb, 0))
+        border.putalpha(grown)
+        border.alpha_composite(out)
+        out = border
+    return out
+
+
+def _adjusted(rgba: Image.Image, layer, clip_mask: Image.Image | None) -> Image.Image:
+    """A correction layer at work: what is under it, with its adjustment, through its mask and opacity."""
+    from genko.filters import apply_filter
+
+    spec = dict(layer.adjust or {})
+    kind = spec.pop("kind", "")
+    if not kind:
+        return rgba
+    try:
+        changed = apply_filter(rgba, kind, spec)
+    except ValueError:
+        return rgba
+    strength = Image.new("L", rgba.size, round(255 * max(0.0, min(1.0, float(layer.opacity if layer.opacity is not None else 1)))))
+    if layer.mask and layer.mask.get("enabled", True) and layer.mask.get("png"):
+        shown = Image.open(io.BytesIO(layer.mask["png"])).convert("L").resize(rgba.size)
+        strength = ImageChops.multiply(strength, shown)
+    if clip_mask is not None:
+        strength = ImageChops.multiply(strength, clip_mask.convert("L"))
+    return Image.composite(changed.convert("RGBA"), rgba, strength)
+
+
 def _clip_mask(page: Page, size: tuple[int, int], dpi: int) -> Image.Image | None:
     leaves = [frame for frame in page.leaf_frames() if getattr(frame, "clip", True)]
     if not leaves:
@@ -417,6 +504,14 @@ def layer_image(page: Page, layer, dpi: int, episode: Episode | None = None) -> 
         out = Image.new("RGBA", size, (20, 20, 20, 0))
         out.putalpha(grey)
         return _masked(layer, out)
+    if layer.kind == LayerKind.ADJUST:
+        return empty
+    if layer.kind == LayerKind.FILL and getattr(layer, "fill", None):
+        raster = fill_layer_image(layer, size, dpi)
+        panel_mask = _clip_mask(page, size, dpi)
+        if panel_mask is not None and getattr(layer, "panel_clip", True):
+            raster.putalpha(_and_alpha(raster, panel_mask))
+        return _masked(layer, raster)
     if layer.kind == LayerKind.PLACED:
         raster = _placed_raster(layer, page, episode, size, dpi, "proof", False)
     else:
@@ -426,7 +521,9 @@ def layer_image(page: Page, layer, dpi: int, episode: Episode | None = None) -> 
     lines = _layer_strokes(layer, size, dpi, _clip_mask(page, size, dpi), raster)
     if lines is not None:
         raster = lines if raster is None else Image.alpha_composite(raster.convert("RGBA"), lines)
-    return _masked(layer, raster.convert("RGBA")) if raster is not None else empty
+    if raster is None:
+        return empty
+    return _masked(layer, layer_effects(layer, raster.convert("RGBA"), dpi))
 
 
 def _open_raster(layer) -> Image.Image | None:
@@ -460,11 +557,88 @@ def _blend_over(base: Image.Image, over: Image.Image, mode: str, opacity: float,
         mixed = ImageChops.add(base_rgb, over_rgb)
     elif mode == "overlay":
         mixed = ImageChops.overlay(base_rgb, over_rgb) if hasattr(ImageChops, "overlay") else ImageChops.multiply(base_rgb, over_rgb)
+    elif mode in BLEND_MODES:
+        mixed = _blend_math(base_rgb, over_rgb, mode)
     else:
         mixed = over_rgb
     mixed_rgba = mixed.convert("RGBA")
     mixed_rgba.putalpha(ra)
     return Image.alpha_composite(base_rgba, mixed_rgba)
+
+
+BLEND_MODES = ("darken", "lighten", "color_burn", "color_dodge", "linear_burn", "soft_light", "hard_light", "difference",
+               "exclusion", "subtract", "divide", "hue", "saturation", "color", "luminosity")
+
+
+def _blend_math(base: Image.Image, over: Image.Image, mode: str) -> Image.Image:
+    """The rest of the blend modes (比較(暗)・比較(明)・焼き込みカラー・覆い焼きカラー・焼き込み(リニア)・
+    ソフトライト・ハードライト・差の絶対値・除外・減算・除算・色相・彩度・カラー・輝度)."""
+    import numpy as np
+
+    b = np.asarray(base, dtype=np.float32) / 255
+    o = np.asarray(over, dtype=np.float32) / 255
+    if mode == "darken":
+        m = np.minimum(b, o)
+    elif mode == "lighten":
+        m = np.maximum(b, o)
+    elif mode == "color_burn":
+        m = np.where(o <= 0, 0.0, 1 - np.minimum(1, (1 - b) / np.maximum(o, 1e-6)))
+        m = np.where(b >= 1, 1.0, m)
+    elif mode == "color_dodge":
+        m = np.where(o >= 1, 1.0, np.minimum(1, b / np.maximum(1 - o, 1e-6)))
+        m = np.where(b <= 0, 0.0, m)
+    elif mode == "linear_burn":
+        m = np.clip(b + o - 1, 0, 1)
+    elif mode == "soft_light":
+        d = np.where(b <= 0.25, ((16 * b - 12) * b + 4) * b, np.sqrt(b))
+        m = np.where(o <= 0.5, b - (1 - 2 * o) * b * (1 - b), b + (2 * o - 1) * (d - b))
+    elif mode == "hard_light":
+        m = np.where(o <= 0.5, 2 * b * o, 1 - 2 * (1 - b) * (1 - o))
+    elif mode == "difference":
+        m = np.abs(b - o)
+    elif mode == "exclusion":
+        m = b + o - 2 * b * o
+    elif mode == "subtract":
+        m = np.clip(b - o, 0, 1)
+    elif mode == "divide":
+        m = np.where(o <= 0, 1.0, np.minimum(1, b / np.maximum(o, 1e-6)))
+    else:
+        m = _nonseparable(b, o, mode)
+    return Image.fromarray(np.clip(m * 255 + 0.5, 0, 255).astype(np.uint8), "RGB")
+
+
+def _nonseparable(b, o, mode: str):
+    """hue / saturation / color / luminosity, as the W3C compositing rules have them."""
+    import numpy as np
+
+    def lum(c):
+        return c[..., 0:1] * 0.3 + c[..., 1:2] * 0.59 + c[..., 2:3] * 0.11
+
+    def clip(c):
+        el = lum(c)
+        n = c.min(axis=-1, keepdims=True)
+        x = c.max(axis=-1, keepdims=True)
+        c = np.where(n < 0, el + (c - el) * el / np.maximum(el - n, 1e-6), c)
+        return np.where(x > 1, el + (c - el) * (1 - el) / np.maximum(x - el, 1e-6), c)
+
+    def set_lum(c, el):
+        return clip(c + (el - lum(c)))
+
+    def sat(c):
+        return c.max(axis=-1, keepdims=True) - c.min(axis=-1, keepdims=True)
+
+    def set_sat(c, s):
+        lo = c.min(axis=-1, keepdims=True)
+        span = sat(c)
+        return np.where(span > 1e-6, (c - lo) * s / np.maximum(span, 1e-6), 0.0)
+
+    if mode == "hue":
+        return set_lum(set_sat(o, sat(b)), lum(b))
+    if mode == "saturation":
+        return set_lum(set_sat(b, sat(o)), lum(b))
+    if mode == "color":
+        return set_lum(o, lum(b))
+    return set_lum(b, lum(o))  # luminosity
 
 
 def _is_tone(layer) -> bool:
@@ -621,7 +795,8 @@ def render_page(
     width = mm_to_px(page.spec.width_mm, working_dpi)
     height = mm_to_px(page.spec.height_mm, working_dpi)
     size = (width, height)
-    image = Image.new("RGB", size, (255, 255, 255))
+    paper = page.extra.get("paper_rgb") if isinstance(getattr(page, "extra", None), dict) else None
+    image = Image.new("RGB", size, tuple(int(v) for v in paper[:3]) if paper else (255, 255, 255))
     include_name = mode in ("name", "proof")
 
     fill_roles = (LayerRole.BG, LayerRole.INK, LayerRole.FINISH)
@@ -654,6 +829,19 @@ def render_page(
             rgba = tones.draw_layer(rgba, layer, page, working_dpi, print_mode=mode == "print" and finish)
             prev_alpha = None
             continue
+        if layer.kind == LayerKind.ADJUST:  # a correction layer changes what is under it; it has no picture
+            rgba = _adjusted(rgba, layer, prev_alpha if getattr(layer, "clip", False) else None)
+            continue
+        if layer.kind == LayerKind.FILL and layer.fill:
+            raster = fill_layer_image(layer, size, working_dpi)
+            if panel_mask is not None and getattr(layer, "panel_clip", True):
+                raster.putalpha(_and_alpha(raster, panel_mask))
+            raster = _masked(layer, raster)
+            clip_mask = prev_alpha if getattr(layer, "clip", False) else None
+            rgba = _blend_over(rgba, raster, getattr(layer, "blend", "normal") or "normal",
+                               1.0 if layer.opacity is None else float(layer.opacity), clip_mask)
+            prev_alpha = raster.split()[3]
+            continue
         if layer.kind == LayerKind.PLACED:
             raster = _placed_raster(layer, page, episode, size, working_dpi, mode, finish)
         else:
@@ -665,8 +853,9 @@ def render_page(
             raster = lines if raster is None else Image.alpha_composite(raster.convert("RGBA"), lines)
         if raster is None:
             continue
+        raster = layer_effects(layer, raster, working_dpi)
         raster = _masked(layer, raster)
-        if mode != "print" and getattr(layer, "color", None):
+        if getattr(layer, "color", None) and (mode != "print" or getattr(layer, "color_prints", False)):
             raster = _tinted(raster, layer.color)
         clip_mask = prev_alpha if getattr(layer, "clip", False) else None
         opacity = getattr(layer, "opacity", None)

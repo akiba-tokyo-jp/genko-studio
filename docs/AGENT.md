@@ -281,6 +281,24 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### J5 additions
+
+- Layer kinds in `add_layer`: `fill {rgb}` (ベタ塗り), `gradient {gradient: {from, to, rgb_from, rgb_to, opacity_from,
+  opacity_to, shape}}` and `adjust {adjust: {kind: levels | curve | hue | invert | posterize | threshold |
+  gradient_map | bitonal, …}}` (a correction layer: it changes what is under it at render time and can be changed
+  again with `set_layer {fill | adjust}`; its opacity, mask and clip apply).
+- `set_layer {effect: {border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null, color_prints}` and the blend
+  modes `darken`, `lighten`, `color_burn`, `color_dodge`, `linear_burn`, `soft_light`, `hard_light`, `difference`,
+  `exclusion`, `subtract`, `divide`, `hue`, `saturation`, `color`, `luminosity` (besides normal, multiply, screen,
+  add, overlay).
+- Several layers: `merge_layers {ids}` (into the lowest, as they showed), `merge_visible {copy?}` (copy: a new
+  layer on top), `group_layers {ids, name?}`, `move_layers {ids, parent?, after?}`, `set_layers {ids | all, …}`,
+  `convert_layer {id, to: paint | pen}` (pen: the pixels traced into lines).
+- `set_paper {page?, rgb | null}` (用紙色), `liquify {layer_id, points, width_mm, strength, mode: push | pinch |
+  bloat | twirl_cw | twirl_ccw}` (pixels and pen lines), `transform_area {interp: nearest | bilinear | bicubic}`.
+- `filter_raster {kind}` also takes `motion_blur`, `radial_blur`, `zoom_blur`, `noise`, `wave`, `twirl`, `lineart`,
+  `invert`, `posterize`, `threshold`, `gradient_map`.
+
 ### J4 additions
 
 - `vector_edit {page, layer_id, action: move_point | add_point | delete_point | connect | cut | recolor | delete,

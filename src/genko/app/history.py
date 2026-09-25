@@ -29,6 +29,10 @@ NAMES = {
     "add_ruler": "定規を置いた", "edit_ruler": "定規を動かした", "delete_ruler": "定規を消した",
     "add_prim3d": "3D を置いた", "add_scene": "背景の 3D を置いた", "add_mannequin": "デッサン人形を置いた", "edit_prim": "3D を動かした", "pose_mannequin": "ポーズを変えた",
     "delete_prim": "3D を消した", "trace_prims": "3D を線にした", "import_raster": "画像を読み込んだ", "place_image": "画像を置いた",
+    "merge_layers": "レイヤーを結合した", "merge_visible": "表示レイヤーを結合した", "group_layers": "レイヤーをフォルダにまとめた",
+    "move_layers": "レイヤーを動かした", "convert_layer": "レイヤーを変換した", "set_layers": "レイヤーの設定をまとめて変えた",
+    "set_paper": "用紙の色を変えた", "liquify": "ゆがませた", "smudge": "色を混ぜた", "vector_edit": "線を編集した",
+    "fill_gaps": "塗り残しを埋めた", "add_shape": "図形を描いた",
     "define_brush": "ブラシを作った", "approve": "承認した", "reject": "差し戻した", "advance": "工程を進めた",
 }
 

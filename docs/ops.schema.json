@@ -152,14 +152,18 @@
       "visible": "bool?",
       "exportable": "bool?",
       "opacity": "float?",
-      "blend": "str?",
+      "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?",
       "clip": "bool?",
       "lock_alpha": "bool?",
       "locked": "bool?",
       "panel_clip": "bool? (false: lines run out of the panels)",
       "name": "str?",
-      "color": "[r,g,b]|null? (shown in this colour on screen, never printed)",
-      "reference": "bool? (fills with reference: reference look at this layer)"
+      "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)",
+      "reference": "bool? (fills with reference: reference look at this layer)",
+      "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)",
+      "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)",
+      "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)",
+      "color_prints": "bool? (the layer colour is printed too)"
     },
     {
       "op": "add_page",
@@ -334,7 +338,74 @@
       "layer_id": "str?",
       "area": "{poly} | {mask}",
       "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)",
-      "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)"
+      "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)",
+      "interp": "nearest|bilinear|bicubic? (how pixels are resampled)"
+    },
+    {
+      "op": "merge_layers",
+      "page": "int",
+      "ids": "[layer id] (two or more: into the lowest, as they show)",
+      "name": "str?"
+    },
+    {
+      "op": "merge_visible",
+      "page": "int",
+      "copy": "bool? (default true: a new layer on top; false: the visible layers merged)",
+      "name": "str?",
+      "id": "str?"
+    },
+    {
+      "op": "group_layers",
+      "page": "int",
+      "ids": "[layer id]",
+      "name": "str?",
+      "id": "str? (the new folder)"
+    },
+    {
+      "op": "move_layers",
+      "page": "int",
+      "ids": "[layer id]",
+      "parent": "folder id|null? (into / out of a folder)",
+      "after": "layer id|bottom? (just above this layer)"
+    },
+    {
+      "op": "convert_layer",
+      "page": "int",
+      "id": "str",
+      "to": "paint|pen (pen: the pixels traced into lines)",
+      "min_mm": "float? (pen: shorter marks are left out)"
+    },
+    {
+      "op": "set_layers",
+      "page": "int",
+      "ids": "[layer id]?",
+      "all": "bool?",
+      "visible": "bool?",
+      "opacity": "float?",
+      "blend": "str?",
+      "clip": "bool?",
+      "locked": "bool?",
+      "lock_alpha": "bool?",
+      "color": "[r,g,b]|null?",
+      "exportable": "bool?",
+      "reference": "bool?",
+      "panel_clip": "bool?",
+      "color_prints": "bool?",
+      "effect": "object|null?"
+    },
+    {
+      "op": "set_paper",
+      "page": "int? (none: every page)",
+      "rgb": "[r,g,b]|null (用紙色; null: white)"
+    },
+    {
+      "op": "liquify",
+      "page": "int",
+      "layer_id": "str?",
+      "points": "[[x,y],...]",
+      "width_mm": "float? (10)",
+      "strength": "0..1? (0.6)",
+      "mode": "push|pinch|bloat|twirl_cw|twirl_ccw"
     },
     {
       "op": "add_shape",
@@ -510,7 +581,10 @@
       "op": "add_layer",
       "page": "int",
       "name": "str?",
-      "kind": "pen|paint|folder?",
+      "kind": "pen|paint|folder|fill|gradient|adjust?",
+      "rgb": "[r,g,b]? (fill)",
+      "gradient": "{from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}? (gradient)",
+      "adjust": "{kind, …}? (adjust: a correction layer over what is under it)",
       "blend": "str?",
       "clip": "bool?",
       "folder": "bool?",
@@ -586,7 +660,8 @@
       "page": "int",
       "layer": "str?",
       "id": "str?",
-      "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal"
+      "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map",
+      "note": "params by kind: blur radius; hue shift/saturation/value; levels black/white; curve gamma; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"
     },
     {
       "op": "set_brush",
