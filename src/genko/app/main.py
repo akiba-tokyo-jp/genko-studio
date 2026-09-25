@@ -897,6 +897,7 @@ class MainWindow(QMainWindow):
         self.act_export = a("書き出し…", self._export, "Ctrl+E", "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します")
         self.act_undo = a("元に戻す", self._undo, std.Undo)
         self.act_redo = a("やり直す", self._redo, [QKeySequence(std.Redo), QKeySequence("Ctrl+Y")])
+        self.act_history = a("履歴…", lambda: self.show_dock("履歴"), "Ctrl+H", "変更の一覧。クリックでその時点まで戻る・進む")
         self.act_fit = a("全体を表示", self.canvas.fit_page, "Ctrl+0")
         self.act_zoom_in = a("拡大", lambda: self.canvas.zoom_by(1.25), [QKeySequence(std.ZoomIn), QKeySequence("Ctrl+=")])
         self.act_zoom_out = a("縮小", lambda: self.canvas.zoom_by(0.8), std.ZoomOut)
@@ -1026,7 +1027,7 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
         menus = [
             ("ファイル", [self.act_new, self.act_open, None, self.act_save, self.act_save_as, None, self.act_import, self.act_export]),
-            ("編集", [self.act_undo, self.act_redo, None, self.act_cut, self.act_copy, self.act_paste]),
+            ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_onion]),
@@ -1112,6 +1113,9 @@ class MainWindow(QMainWindow):
         self.guides = GuidePanel(self)
         self.materials = MaterialPanel(self)
         self.checks = CheckPanel(self)
+        from genko.app.history import HistoryPanel
+
+        self.history = HistoryPanel(self)
         for widget in (self.approvals, self.panel_view):
             widget.changed.connect(self._reload_pages)
         # ツールの設定 (left): what the tool in hand can do
@@ -1187,7 +1191,7 @@ class MainWindow(QMainWindow):
         self.agent_docks = []
         groups: dict[str, list] = {"upper": [], "lower": [], "agent": []}
         for title, widget, group in (("承認箱", self.approvals, "agent"), ("ページ", self.pages, "upper"),
-                                     ("レイヤー", self.layers, "upper"), ("台詞", self.story, "lower"),
+                                     ("レイヤー", self.layers, "upper"), ("履歴", self.history, "upper"), ("台詞", self.story, "lower"),
                                      ("素材", self.materials, "lower"), ("定規・3D", self.guides, "lower"),
                                      ("点検", self.checks, "lower"), ("コマの詳細", self.panel_view, "agent"),
                                      ("資料", self.library, "agent")):
@@ -1290,7 +1294,7 @@ class MainWindow(QMainWindow):
         self._stale_docks.discard(dock)
         widget = {"承認箱": self.approvals, "コマの詳細": self.panel_view, "台詞": self.story, "レイヤー": self.layers,
                   "素材": self.materials, "定規・3D": self.guides, "点検": self.checks, "資料": self.library,
-                  "ページ": None}[dock.windowTitle()]
+                  "履歴": self.history, "ページ": None}[dock.windowTitle()]
         if widget is None:
             return
         if widget is self.panel_view:

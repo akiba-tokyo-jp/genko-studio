@@ -367,3 +367,42 @@ def test_the_export_dialog_previews_and_checks_first(window, tmp_path: Path, mon
     dialog.range.setText("2")
     dialog.run()
     assert dialog.result_["ok"] and len(dialog.result_["files"]) == 1
+
+
+# --- history ----------------------------------------------------------------------------------------------------
+
+
+def test_the_history_names_each_change_and_goes_back_to_it(window):
+    from genko.app.history import describe
+
+    assert describe([{"op": "add_stroke"}]) == "ペンで描いた"
+    assert describe([{"op": "add_stroke"}] * 3) == "ペンで描いた（3 回）"
+    assert describe([{"op": "split_frame"}, {"op": "add_line"}]) == "コマを割った ほか 1 件"
+    ink = next(layer for layer in window.current_page().layers if layer.role == LayerRole.INK)
+    window.commit_now()
+    first = len(_layer(window.episode, ink.id).strokes)
+    window.apply_ops([{"op": "add_stroke", "page": 1, "layer_id": ink.id, "points": [[10, 10], [20, 20]]}])
+    window.apply_ops([{"op": "add_line", "page": 1, "text": "やあ", "x_mm": 100, "y_mm": 100}])
+    window.apply_ops([{"op": "split_frame", "page": 1, "frame_id": window.current_page().frames[0].id, "axis": "horizontal"}])
+    panel = window.history
+    window.act_history.trigger()
+    panel.refresh()
+    texts = [panel.list.item(i).text() for i in range(panel.list.count())]
+    assert texts[-3:] == ["ペンで描いた", "台詞を入れた", "▶ コマを割った"]
+    strokes = len(_layer(window.episode, ink.id).strokes)
+    # back to just after the pen line
+    row = texts.index("ペンで描いた")
+    panel._go(panel.list.item(row))
+    assert not window.episode.story_for_page(1) and len(window.current_page().frames[0].children) == 0
+    assert len(_layer(window.episode, ink.id).strokes) == strokes
+    texts = [panel.list.item(i).text() for i in range(panel.list.count())]
+    assert texts[row] == "▶ ペンで描いた" and texts[-1] == "コマを割った（取り消し済み）"
+    # forward again
+    panel._go(panel.list.item(panel.list.count() - 1))
+    assert window.episode.story_for_page(1) and window.current_page().frames[0].children
+    # saved changes too: back to the start undoes through the journal on disk
+    window.commit_now()
+    panel.refresh()
+    panel._go(panel.list.item(0))
+    assert len(_layer(window.episode, ink.id).strokes) == first and not window.episode.story_for_page(1)
+    assert panel.list.item(0).text().startswith("▶")
