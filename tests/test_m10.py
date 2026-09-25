@@ -247,7 +247,7 @@ def _drag(canvas, points_mm):
 def test_the_pen_draws_on_the_selected_layer_quickly(window):
     import time
 
-    assert window.target_layer().role == LayerRole.NAME  # the name stage: the name layer
+    assert window.target_layer().role == LayerRole.INK  # a person alone starts on the ink, which prints
     window.show_dock("レイヤー")
     window.layers._add("pen", "ペン")
     user_id = window.target_layer().id

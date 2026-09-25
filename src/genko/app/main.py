@@ -567,7 +567,9 @@ class LayerPanel(QWidget):
         self.mask_button.setText("マスク ◐ ▾" if layer.mask else "マスク ▾")
         self._loading = False
         drawable = self.window.drawable(layer)
-        self.target.setText(f"描く先: <b>{wording.layer_label(layer)}</b>" if drawable else
+        prints = layer.exportable and layer.role not in (LayerRole.NAME, LayerRole.DRAFT)
+        note = "" if prints else " <span style='color:#c92a2a'>（印刷されません）</span>"
+        self.target.setText(f"描く先: <b>{wording.layer_label(layer)}</b>{note}" if drawable else
                             f"<span style='color:#c92a2a'>「{wording.layer_label(layer)}」には描けません。ペンかペイントのレイヤーを選びます</span>")
 
     def _set(self, key: str, value) -> None:
@@ -1547,7 +1549,9 @@ class MainWindow(QMainWindow):
         found = next((layer for layer in page.layers if layer.id == self._target_layer_id), None)
         if found is not None:
             return found
-        role = LayerRole.NAME if page.stage == "name" else LayerRole.INK
+        # a person drawing alone starts on the ink (it prints); a book made with agents starts with the name
+        agent = self._agent_book() if hasattr(self, "agent_docks") else bool(self.episode.strict_gates or self.episode.studio)
+        role = LayerRole.NAME if page.stage == "name" and agent else LayerRole.INK
         return next((layer for layer in page.layers if layer.role == role), None)
 
     def set_target_layer(self, layer_id: str) -> None:

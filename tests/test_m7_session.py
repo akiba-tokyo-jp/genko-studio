@@ -67,8 +67,8 @@ def test_ops_that_no_longer_apply_are_reported_not_forced(tmp_path: Path):
     agent, project = _named(tmp_path)
     gui = Session.open(project)
     line = gui.episode.story_for_page(3)[0]
-    gui.apply([{"op": "move_line", "id": line.id, "x_mm": 20, "y_mm": 20}])
     gui.apply([{"op": "set_note", "page": 1, "note": "残る"}])
+    gui.apply([{"op": "move_line", "id": line.id, "x_mm": 20, "y_mm": 20}])  # (the note is saved before this)
     # the agent rebuilt page 3 in the meantime: that line is gone
     assert agent.submit_name("demo.genko", _load("p003.json"), commit=True, replace=True).ok
     result = gui.commit()

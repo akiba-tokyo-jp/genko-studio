@@ -126,7 +126,15 @@ def page_issues(episode, page) -> list[dict]:
             out.append(_issue("error", "spread_not_facing", page, f"{page.index} ページの見開きの相手（{page.spread_with} ページ）が向かい合わない"))
     art = any(layer.strokes or getattr(layer, "patches", None) or layer.raster_png or layer.kind == LayerKind.PLACED
               for layer in page.layers if layer.exportable and layer.role not in (LayerRole.NAME, LayerRole.DRAFT))
-    if not art and not lines and not page.effects:
+    hidden = [layer for layer in page.layers if (layer.strokes or getattr(layer, "patches", None) or layer.raster_png)
+              and not (layer.exportable and layer.role not in (LayerRole.NAME, LayerRole.DRAFT))]
+    if not art and hidden:
+        names = "・".join(dict.fromkeys(("ネーム" if layer.role == LayerRole.NAME else "下描き" if layer.role == LayerRole.DRAFT
+                                         else (layer.title or "レイヤー")) for layer in hidden))
+        out.append(_issue("error", "art_not_printed", page,
+                          f"{page.index} ページの絵は「{names}」のレイヤーにだけ描かれていて、印刷・書き出しに出ない"
+                          "（ペン入れのレイヤーに描くか、レイヤーの「下描き（書き出さない）」を外す）", kind="layer", target_id=hidden[0].id))
+    elif not art and not lines and not page.effects:
         out.append(_issue("warning", "empty_page", page, f"{page.index} ページに何も描かれていない"))
     return out
 

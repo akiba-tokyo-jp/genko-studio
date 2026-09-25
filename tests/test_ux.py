@@ -186,24 +186,24 @@ def test_select_tool_selects_and_pans_and_the_pen_only_draws_when_chosen(qapp, t
     canvas.mousePressEvent(_mouse(canvas, QEvent.Type.MouseButtonPress, inside, left, left))
     canvas.mouseReleaseEvent(_mouse(canvas, QEvent.Type.MouseButtonRelease, inside, left, none))
     assert window.current_page().selected_frame_id  # a click selects the panel
-    strokes = len(window.current_page().name_strokes)
+    strokes = len(window.target_layer().strokes)
     # a drag with the select tool moves the view and draws nothing
     pan = canvas._pan_x
     canvas.mousePressEvent(_mouse(canvas, QEvent.Type.MouseButtonPress, inside, left, left))
     canvas.mouseMoveEvent(_mouse(canvas, QEvent.Type.MouseMove, inside + QPointF(60, 0), left, left))
     canvas.mouseReleaseEvent(_mouse(canvas, QEvent.Type.MouseButtonRelease, inside + QPointF(60, 0), left, none))
-    assert canvas._pan_x > pan and len(window.current_page().name_strokes) == strokes
+    assert canvas._pan_x > pan and len(window.target_layer().strokes) == strokes
     window.act_pen.trigger()
     assert canvas.tool == "pen"
     canvas.mousePressEvent(_mouse(canvas, QEvent.Type.MouseButtonPress, inside, left, left))
     for step in range(1, 8):
         canvas.mouseMoveEvent(_mouse(canvas, QEvent.Type.MouseMove, inside + QPointF(step * 8, step * 4), left, left))
     canvas.mouseReleaseEvent(_mouse(canvas, QEvent.Type.MouseButtonRelease, inside + QPointF(56, 28), left, none))
-    assert len(window.current_page().name_strokes) == strokes + 1
+    assert len(window.target_layer().strokes) == strokes + 1
     window.act_undo.trigger()
-    assert len(window.current_page().name_strokes) == strokes
+    assert len(window.target_layer().strokes) == strokes
     window.act_redo.trigger()
-    assert len(window.current_page().name_strokes) == strokes + 1
+    assert len(window.target_layer().strokes) == strokes + 1
     window.close()
 
 

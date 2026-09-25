@@ -60,6 +60,18 @@ def _stroke(
     draw.line(xy, fill=color, width=width, joint="curve")
 
 
+_STROKE_CACHE: dict = {}  # (layer id, dpi, size, guide) → (patches' signature, lines' signatures, image); oldest first
+STROKE_CACHE_SIZE = 12
+
+
+def _stroke_sig(stroke, brushes) -> tuple:
+    """What decides how a line looks (a changed line gets a different signature)."""
+    points = getattr(stroke, "points", None) or []
+    return (getattr(stroke, "id", None), getattr(stroke, "kind", None), getattr(stroke, "width_mm", None), str(getattr(stroke, "rgb", None)),
+            getattr(stroke, "opacity", None), len(points), tuple(points[0]) if points else None, tuple(points[-1]) if points else None,
+            len(getattr(stroke, "pressure", None) or []), brushes.brush(getattr(stroke, "kind", None)))
+
+
 def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Image | None,
                    raster: Image.Image | None) -> Image.Image | None:
     """A layer's fills (patches) and pen lines, drawn from their data at this resolution (None if none).
@@ -75,11 +87,36 @@ def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Ima
     patches = getattr(layer, "patches", None) or []
     if not strokes and not patches:
         return None
-    out = Image.new("RGBA", size, (0, 0, 0, 0))
     guide = layer.role in (LayerRole.NAME, LayerRole.DRAFT)
-    for patch in patches:
-        _paint_patch(out, patch, dpi, NAME_COLOR if guide else None)
-    for stroke in strokes:
+    # the lines drawn so far are remembered per layer and resolution: a new line is drawn on top of them
+    # instead of drawing the whole layer again (a finished page has thousands of lines)
+    key = (getattr(layer, "id", None), dpi, size, guide)
+    patch_sig = tuple((p.get("id"), tuple(p.get("box") or ()), len(p.get("png") or b""), str(p.get("rgb")), p.get("opacity"),
+                       p.get("mode")) for p in patches)
+    sigs = [_stroke_sig(stroke, brushes) for stroke in strokes]
+    cached = _STROKE_CACHE.get(key) if key[0] else None
+    if cached is not None and cached[0] == patch_sig and cached[1] == sigs[:len(cached[1])]:
+        out = cached[2].copy()
+        todo = strokes[len(cached[1]):]
+    else:
+        out = Image.new("RGBA", size, (0, 0, 0, 0))
+        for patch in patches:
+            _paint_patch(out, patch, dpi, NAME_COLOR if guide else None)
+        todo = strokes
+    # lines of one colour gather in one coverage mask (screen: a + b − ab, the same as laying them over each
+    # other) and go onto the layer once per colour, instead of once per line
+    ink: Image.Image | None = None
+    ink_rgb = None
+
+    def lay() -> None:
+        nonlocal out
+        if ink is not None and ink.getbbox():
+            box = ink.getbbox()
+            patch = Image.new("RGBA", (box[2] - box[0], box[3] - box[1]), (*ink_rgb, 0))
+            patch.putalpha(ink.crop(box))
+            out.alpha_composite(patch, (box[0], box[1]))
+
+    for stroke in todo:
         b = brushes.brush(getattr(stroke, "kind", None))
         drawn = brushes.draw(size, stroke_points(stroke), dpi, float(getattr(stroke, "width_mm", 0.35) or 0.35),
                              getattr(stroke, "kind", None), seed=str(getattr(stroke, "id", "")))
@@ -90,10 +127,17 @@ def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Ima
         opacity = max(0.0, min(1.0, float(getattr(stroke, "opacity", 1.0)))) * b.opacity
         if opacity < 1:
             cover = cover.point(lambda v, o=opacity: int(v * o))
-        patch = Image.new("RGBA", cover.size, (*rgb, 0))
-        patch.putalpha(cover)
-        region = out.crop((x0, y0, x0 + cover.width, y0 + cover.height))
-        out.paste(Image.alpha_composite(region, patch), (x0, y0))
+        if rgb != ink_rgb:
+            lay()
+            ink, ink_rgb = Image.new("L", size, 0), rgb
+        box = (x0, y0, x0 + cover.width, y0 + cover.height)
+        ink.paste(ImageChops.screen(ink.crop(box), cover), box[:2])
+    lay()
+    if key[0]:
+        _STROKE_CACHE.pop(key, None)
+        _STROKE_CACHE[key] = (patch_sig, sigs, out.copy())
+        while len(_STROKE_CACHE) > STROKE_CACHE_SIZE:
+            _STROKE_CACHE.pop(next(iter(_STROKE_CACHE)))
     if panel_mask is not None and getattr(layer, "panel_clip", True):
         out.putalpha(_and_alpha(out, panel_mask))
     if getattr(layer, "lock_alpha", False) and raster is not None:

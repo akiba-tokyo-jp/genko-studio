@@ -84,12 +84,18 @@ class Session:
         """Apply at once in memory (raises ApplyError). Undo pops the last pending batch."""
         if len(ops) == 1 and ops[0].get("op") == "undo":
             return self.undo()
+        if self.pending and self.path is not None:
+            # one saved change per change: undo then always takes back exactly one (not all that were
+            # made within the save interval)
+            self.commit()
         result = apply_ops(self.episode, ops, agent=self.actor)
         self.pending.append([dict(op) for op in ops])
         self.undone = []
         return result
 
     def undo(self) -> dict:
+        if self.pending and self.path is not None:
+            self.commit()  # (then undo and redo both go through the journal, one change at a time)
         if self.pending:
             result = apply_ops(self.episode, [{"op": "undo"}], agent=self.actor)
             self.undone.append(self.pending.pop())
