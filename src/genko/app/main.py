@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
@@ -79,7 +80,7 @@ class StoryPanel(QWidget):
         self.speaker = QLineEdit()
         self.speaker.setPlaceholderText("話者（空でもよい）")
         self.text = QPlainTextEdit()
-        self.text.setPlaceholderText("台詞（改行で次の列へ。ルビは ｜約束《やくそく》、傍点は 《《強調》》）")
+        self.text.setPlaceholderText("台詞（改行で次の列へ。ルビは ｜約束《やくそく》、傍点は 《《強調》》、一部を大きく {大|…}・太く {太|…}・赤く {赤|…}）")
         self.text.setMaximumHeight(80)
         self.kind = QComboBox()
         for key, label in KINDS:
@@ -143,6 +144,24 @@ class StoryPanel(QWidget):
         self.mark.addItem("黒丸（・）", "dot")
         self.mark.setToolTip("《《強調》》と書いた所に付く傍点の形")
         self.mark.activated.connect(lambda _: self._style_changed())
+        self.bold = QCheckBox("太字")
+        self.bold.clicked.connect(lambda _: self._style_changed())
+        self.italic = QCheckBox("斜体")
+        self.italic.clicked.connect(lambda _: self._style_changed())
+        self.outline_colour = QPushButton("フチの色…")
+        self.outline_colour.setToolTip("白フチの色（黒フチなど）")
+        self.outline_colour.clicked.connect(self._pick_outline_colour)
+        self.wobble = spin(0, 1, 0.1, "")
+        self.wobble.setToolTip("フキダシの線を手描きのように揺らす（0 でまっすぐ）")
+        self.double = QCheckBox("二重線")
+        self.double.clicked.connect(lambda _: self._style_changed())
+        self.spikes = QSpinBox()
+        self.spikes.setRange(0, 80)
+        self.spikes.setSpecialValueText("自動")
+        self.spikes.setToolTip("叫びのフキダシのトゲの数")
+        self.spikes.editingFinished.connect(self._style_changed)
+        self.spike_depth = spin(0.05, 0.6, 0.05, "")
+        self.spike_depth.setToolTip("叫びのフキダシのトゲの長さ（大きいほど鋭い）")
         self.color = QPushButton("文字の色…")
         self.color.clicked.connect(self._pick_color)
         reset = QPushButton("既定の設定に戻す")
@@ -170,6 +189,15 @@ class StoryPanel(QWidget):
         form.addRow("", self.tcy)
         form.addRow("欧文", self.latin)
         form.addRow("傍点", self.mark)
+        faces = QHBoxLayout()
+        faces.addWidget(self.bold)
+        faces.addWidget(self.italic)
+        form.addRow("", faces)
+        form.addRow("", self.outline_colour)
+        form.addRow("線の揺れ", self.wobble)
+        form.addRow("", self.double)
+        form.addRow("トゲの数", self.spikes)
+        form.addRow("トゲの長さ", self.spike_depth)
         form.addRow("回転", self.rotate)
         form.addRow("傾き", self.skew)
         form.addRow("弓なり", self.arc)
@@ -278,6 +306,12 @@ class StoryPanel(QWidget):
         self.arc.setValue(float(st["arc"] or 0))
         self.latin.setCurrentIndex(max(0, self.latin.findData(st["latin"])))
         self.mark.setCurrentIndex(max(0, self.mark.findData(st["emphasis_mark"])))
+        self.bold.setChecked(bool(st["bold"]))
+        self.italic.setChecked(bool(st["italic"]))
+        self.wobble.setValue(float(st["wobble"] or 0))
+        self.double.setChecked(bool(st["double"]))
+        self.spikes.setValue(int(st["spikes"] or 0))
+        self.spike_depth.setValue(float(st["spike_depth"] or 0.2))
         self._loading = False
 
     def _style(self, change: dict) -> None:
@@ -292,7 +326,10 @@ class StoryPanel(QWidget):
                      "outline_mm": self.outline.value() or None, "border_mm": self.border.value(),
                      "align": self.align.currentData(), "fill": self.fill.currentData(), "tcy": self.tcy.isChecked(),
                      "rotate_deg": self.rotate.value() or None, "skew_deg": self.skew.value() or None, "arc": self.arc.value() or None,
-                     "latin": self.latin.currentData(), "emphasis_mark": self.mark.currentData()})
+                     "latin": self.latin.currentData(), "emphasis_mark": self.mark.currentData(),
+                     "bold": self.bold.isChecked() or None, "italic": self.italic.isChecked() or None, "wobble": self.wobble.value() or None,
+                     "double": self.double.isChecked() or None, "spikes": self.spikes.value() or None,
+                     "spike_depth": self.spike_depth.value() if abs(self.spike_depth.value() - 0.2) > 1e-6 else None})
 
     def _font_changed(self) -> None:
         if self._loading:
@@ -336,6 +373,20 @@ class StoryPanel(QWidget):
         if color.isValid():
             self._style({"rgb": [color.red(), color.green(), color.blue()]})
 
+    def _pick_outline_colour(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+
+        from genko.balloons import style_of
+
+        line = self._line()
+        if line is None:
+            return
+        rgb = style_of(line)["outline_rgb"] or (255, 255, 255)
+        color = QColorDialog.getColor(QColor(*rgb), self, "フチの色")
+        if color.isValid():
+            self._style({"outline_rgb": [color.red(), color.green(), color.blue()],
+                         "outline_mm": style_of(line)["outline_mm"] or 0.6})
+
     def _reset_style(self) -> None:
         from genko.ops import STYLE_KEYS
 
@@ -372,7 +423,7 @@ class StoryPanel(QWidget):
         if frame is None:
             self.window.flash("先に編集画面でコマをクリックして選びます（テキストツール T なら、置きたい所をクリック）", 6000)
             return
-        text, runs, marks = parse_marks(typed)
+        text, runs, marks, styles = parse_marks(typed)
         box = place_new(self.window.episode, page, frame, text, self.kind.currentData(), self.vertical.isChecked())
         before = {ln.id for ln in self._lines()}
         op = {"op": "add_line", "page": page.index, "text": text, "speaker": self.speaker.text().strip(),
@@ -381,6 +432,8 @@ class StoryPanel(QWidget):
             op["ruby_runs"] = runs
         if marks:
             op["emphasis_runs"] = marks
+        if styles:
+            op["style_runs"] = styles
         if self.window.apply_ops([op]):
             self.text.clear()
             added = next((ln.id for ln in self._lines() if ln.id not in before), None)
@@ -397,10 +450,10 @@ class StoryPanel(QWidget):
         if not typed:
             self.window.flash("台詞が空です。消すときは「削除」を押します", 6000)
             return
-        text, runs, marks = parse_marks(typed)
+        text, runs, marks, styles = parse_marks(typed)
         kind, vertical = self.kind.currentData(), self.vertical.isChecked()
         ops = [{"op": "edit_line", "id": line.id, "text": text, "speaker": self.speaker.text().strip(), "balloon": kind,
-                "wrap": "vertical" if vertical else "horizontal", "ruby_runs": runs, "emphasis_runs": marks}]
+                "wrap": "vertical" if vertical else "horizontal", "ruby_runs": runs, "emphasis_runs": marks, "style_runs": styles}]
         if (text, kind, vertical) != (line.text, line.balloon, line.wrap == "vertical"):
             frame = self.window.frame_by_id(line.frame_id)
             ops.append({"op": "move_line", "id": line.id, **refit(line, frame, text, kind, vertical)})
@@ -2278,7 +2331,7 @@ class MainWindow(QMainWindow):
 
             if not typed:
                 return
-            text, runs, marks = parse_marks(typed)
+            text, runs, marks, styles = parse_marks(typed)
             frame = page.frame_at(x_mm, y_mm)
             fields = self.text_settings.line_fields()
             box = place_at(x_mm, y_mm, text, fields["balloon"], fields["vertical"], frame)
@@ -2291,6 +2344,8 @@ class MainWindow(QMainWindow):
                 op["ruby_runs"] = runs
             if marks:
                 op["emphasis_runs"] = marks
+            if styles:
+                op["style_runs"] = styles
             before = {ln.id for ln in self.episode.story}
             if self.apply_ops([op]):
                 added = next((ln.id for ln in self.episode.story if ln.id not in before), None)
@@ -2313,7 +2368,7 @@ class MainWindow(QMainWindow):
 
             if not typed:
                 return
-            text, runs, marks = parse_marks(typed)
+            text, runs, marks, styles = parse_marks(typed)
             fields = self.text_settings.line_fields()
             kind = fields["balloon"] if fields["balloon"] not in ("sfx", "none", "narration") else "speech"
             op = {"op": "add_line", "page": page.index, "text": text, "balloon": kind, "path": outline,
@@ -2327,6 +2382,8 @@ class MainWindow(QMainWindow):
                 op["ruby_runs"] = runs
             if marks:
                 op["emphasis_runs"] = marks
+            if styles:
+                op["style_runs"] = styles
             before = {ln.id for ln in self.episode.story}
             if self.apply_ops([op]):
                 added = next((ln.id for ln in self.episode.story if ln.id not in before), None)
@@ -2348,11 +2405,11 @@ class MainWindow(QMainWindow):
             current = self._line(line_id)
             if not typed or current is None:
                 return
-            text, runs, marks = parse_marks(typed)
-            if (text, [list(r) for r in runs], marks) == (current.text, [list(r) for r in current.ruby_runs],
-                                                          list(current.emphasis_runs)):
+            text, runs, marks, styles = parse_marks(typed)
+            if (text, [list(r) for r in runs], marks, styles) == (current.text, [list(r) for r in current.ruby_runs],
+                                                                  list(current.emphasis_runs), [list(r) for r in current.style_runs]):
                 return
-            ops = [{"op": "edit_line", "id": line_id, "text": text, "ruby_runs": runs, "emphasis_runs": marks}]
+            ops = [{"op": "edit_line", "id": line_id, "text": text, "ruby_runs": runs, "emphasis_runs": marks, "style_runs": styles}]
             size = refit(current, self.frame_by_id(current.frame_id), text, current.balloon, current.wrap == "vertical")
             # keep the balloon's centre where it was
             cx, cy = current.x_mm + current.w_mm / 2, current.y_mm + current.h_mm / 2

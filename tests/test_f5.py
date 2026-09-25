@@ -27,7 +27,7 @@ def _env(tmp_path: Path, monkeypatch):
 def test_marks_are_typed_like_novel_sites_and_read_back():
     from genko.app.lettering import parse_marks, with_marks
 
-    text, runs, marks = parse_marks("《《絶対》》に｜約束《やくそく》する")
+    text, runs, marks, _styles = parse_marks("《《絶対》》に｜約束《やくそく》する")
     assert (text, runs, marks) == ("絶対に約束する", [["約束", "やくそく"]], ["絶対"])
     ep = new_episode("t", 1, 1, PageSpec.b4_comic())
     apply_ops(ep, [{"op": "add_line", "page": 1, "text": text, "ruby_runs": runs, "emphasis_runs": marks, "id": "a"}])

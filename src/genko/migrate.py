@@ -118,6 +118,7 @@ def _line(data: dict) -> StoryLine:
         ruby_runs=[tuple(item) for item in data.get("ruby_runs") or []],
         path=[tuple(pt) for pt in data["path"]] if data.get("path") else None,
         emphasis_runs=[str(item) for item in data.get("emphasis_runs") or []],
+        style_runs=[[str(r[0]), dict(r[1])] for r in data.get("style_runs") or [] if r and len(r) > 1],
         style=dict(data.get("style") or {}),
         tails=[dict(t) for t in data.get("tails") or []],
     )

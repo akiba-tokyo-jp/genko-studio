@@ -268,12 +268,13 @@ class StoryEditor(QDialog):
             line = by_id.get(r["id"]) if r["id"] else None
             if line is None:
                 continue
-            text, runs, marks = parse_marks(r["text"])
-            if (text, runs or [], marks, r["speaker"], r["balloon"]) == (
-                    line.text, [list(x) for x in line.ruby_runs], list(line.emphasis_runs), line.speaker or "", line.balloon or "speech"):
+            text, runs, marks, styles = parse_marks(r["text"])
+            if (text, runs or [], marks, styles, r["speaker"], r["balloon"]) == (
+                    line.text, [list(x) for x in line.ruby_runs], list(line.emphasis_runs), [list(x) for x in line.style_runs],
+                    line.speaker or "", line.balloon or "speech"):
                 continue
             ops.append({"op": "edit_line", "id": line.id, "text": text, "speaker": r["speaker"], "balloon": r["balloon"], "ruby_runs": runs,
-                        "emphasis_runs": marks})
+                        "emphasis_runs": marks, "style_runs": styles})
             if text != line.text or r["balloon"] != (line.balloon or "speech"):
                 page = next((p for p in episode.pages if p.index == line.page_index), None)
                 frame = None
@@ -300,12 +301,14 @@ class StoryEditor(QDialog):
             frames = page.leaf_frames()
             for i, r in enumerate(fresh):
                 frame = frames[i * len(frames) // len(fresh)] if frames else None
-                text, runs, marks = parse_marks(r["text"])
+                text, runs, marks, styles = parse_marks(r["text"])
                 op = {"op": "add_line", "page": page_no, "id": r["id"], "text": text, "speaker": r["speaker"], "balloon": r["balloon"]}
                 if runs:
                     op["ruby_runs"] = runs
                 if marks:
                     op["emphasis_runs"] = marks
+                if styles:
+                    op["style_runs"] = styles
                 if frame is not None:
                     op.update(frame_id=frame.id, **place_new(work, page, frame, text, r["balloon"], True))
                 apply_ops(work, [op])

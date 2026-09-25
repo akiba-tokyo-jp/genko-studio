@@ -53,17 +53,19 @@ def _ink_bbox(font: ImageFont.ImageFont, char: str) -> tuple[int, int, int, int]
     return _textbbox(font, char)
 
 
-def _raw_glyph(char: str, font: ImageFont.ImageFont, fill: tuple[int, int, int]) -> Image.Image:
+def _raw_glyph(char: str, font: ImageFont.ImageFont, fill: tuple[int, int, int], bold: int = 0) -> Image.Image:
     size = max(16, int(getattr(font, "size", 14) or 14))
     canvas = Image.new("RGBA", (size * 4, size * 4), (0, 0, 0, 0))
-    ImageDraw.Draw(canvas).text((size, size), char, font=font, fill=fill + (255,))
+    # bold: the letter's own outline in its colour (a heavier weight made from any face)
+    ImageDraw.Draw(canvas).text((size, size), char, font=font, fill=fill + (255,), stroke_width=bold,
+                                stroke_fill=fill + (255,) if bold else None)
     bbox = canvas.getbbox()
     if bbox is None:
         return Image.new("RGBA", (size // 2, size // 2), (0, 0, 0, 0))
     return canvas.crop(bbox)
 
 
-def glyph(char: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, int]) -> Image.Image:
+def glyph(char: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, int], bold: int = 0) -> Image.Image:
     img = Image.new("RGBA", (em, em), (0, 0, 0, 0))
     rotate = char in ROTATE_CW
     drawn = char
@@ -73,7 +75,7 @@ def glyph(char: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, i
         rotate = False
     elif char in VERTICAL_FORMS:
         rotate = True
-    raw = _raw_glyph(drawn, font, fill)
+    raw = _raw_glyph(drawn, font, fill, bold)
     gw, gh = raw.size
     margin = max(1, em // 12)
     if drawn in PUNCT_TR:
@@ -213,9 +215,9 @@ def _columns(text: str, per_col: int) -> list[list[str]]:
     return columns_of(text, per_col, tcy=False)
 
 
-def tcy_glyph(cell: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, int]) -> Image.Image:
+def tcy_glyph(cell: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, int], bold: int = 0) -> Image.Image:
     """Two or three characters side by side in one em (condensed to fit)."""
-    raw = _raw_glyph(cell, font, fill)
+    raw = _raw_glyph(cell, font, fill, bold)
     gw, gh = raw.size
     limit = int(em * 0.92)
     scale = min(1.0, limit / max(1, gw), limit / max(1, gh))
@@ -226,14 +228,15 @@ def tcy_glyph(cell: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, in
     return img
 
 
-def latin_glyph(word: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, int]) -> Image.Image:
+def latin_glyph(word: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, int], bold: int = 0) -> Image.Image:
     """Half-width letters set across, then turned a quarter clockwise to lie along the column."""
     line = Image.new("RGBA", (max(1, int(font.getlength(word)) + em), em), (0, 0, 0, 0))
     try:
         ascent, descent = font.getmetrics()
     except Exception:
         ascent, descent = em, 0
-    ImageDraw.Draw(line).text((0, (em - ascent - descent) // 2), word, font=font, fill=fill + (255,))
+    ImageDraw.Draw(line).text((0, (em - ascent - descent) // 2), word, font=font, fill=fill + (255,), stroke_width=bold,
+                              stroke_fill=fill + (255,) if bold else None)
     box = line.getbbox()
     if box is None:
         return Image.new("RGBA", (em, em), (0, 0, 0, 0))
@@ -321,6 +324,30 @@ def draw_mark(image: Image.Image, centre: tuple[float, float], size: float, kind
     draw.ellipse((cx - r, cy - r * 0.9, cx + r, cy + r), fill=colour)
 
 
+STYLE_TAGS = {"大": {"scale": 1.4}, "特大": {"scale": 1.8}, "小": {"scale": 0.7}, "太": {"bold": True},
+              "赤": {"rgb": [210, 30, 30]}, "青": {"rgb": [30, 80, 200]}, "白": {"rgb": [255, 255, 255]}}
+
+
+def char_styles(text: str, style_runs: list | None, base: dict | None = None) -> list[dict]:
+    """The style of each character of the text: the line's own (base), then each run's, found in order."""
+    out = [dict(base or {}) for _ in text]
+    pos = 0
+    for run in style_runs or []:
+        if not run or len(run) < 2 or not run[0]:
+            continue
+        at = text.find(str(run[0]), pos)
+        if at < 0:
+            continue
+        pos = at + len(str(run[0]))
+        for i in range(at, pos):
+            out[i].update(run[1] or {})
+    return out
+
+
+def bold_px(em: int) -> int:
+    return max(1, round(em / 22))
+
+
 def compose(
     text: str,
     font: ImageFont.ImageFont,
@@ -337,6 +364,8 @@ def compose(
     latin: bool = False,
     emphasis_runs: list | None = None,
     emphasis_mark: str = "sesame",
+    style_runs: list | None = None,
+    bold: bool = False,
 ) -> Image.Image:
     """Vertical text, columns right to left. 傍点 sit right of their characters and ruby right of
     those (ruby moves out when both are there), centred on their base, for every run.
@@ -344,78 +373,101 @@ def compose(
     face: a genko.fonts.Face that picks the font per character (アンチック). tracking / leading:
     extra space between characters / columns, in em. tcy: 縦中横 for short runs of digits and !?.
     latin: 4 or more half-width letters lie on their side. align: top, center or bottom of each
-    column in the block."""
-    step = max(1, round(em * (1 + tracking)))
-    per_col = max(1, (max_height - em) // step + 1) if max_height >= em else 1
+    column in the block. style_runs: [[words, {scale, bold, rgb}]] — part of the line larger, smaller,
+    bolder or in another colour (a larger character widens its column). bold: the whole line bold."""
+    gap_px = max(0, round(em * tracking))  # between characters
 
-    def font_for(char: str):
-        return face.font(em, char) if face is not None else font
+    def font_for(char: str, size: int = em):
+        return face.font(size, char) if face is not None else (font.font_variant(size=size) if size != em and hasattr(font, "font_variant")
+                                                               else font)
 
-    turned: dict[str, Image.Image] = {}
+    # the style of each cell, in reading order (cells never change order when they wrap)
+    seq = [cell for cell in cells(text, tcy, latin) if cell != "\n"]
+    plain = text.replace("\n", "")
+    per_char = char_styles(plain, style_runs, {"bold": True} if bold else None)
+    styles, at = [], 0
+    for cell in seq:
+        styles.append(per_char[at] if at < len(per_char) else {})
+        at += len(cell_text(cell))
 
-    def units(cell: str) -> int:
-        if not cell.startswith(ROT):
-            return 1
-        if cell not in turned:
-            image = latin_glyph(cell[1:], font_for("A"), em, fill)
-            if image.width > em:
-                scale = em / image.width
-                image = image.resize((em, max(1, int(image.height * scale))), Image.Resampling.LANCZOS)
-            turned[cell] = image
-        return max(1, -(-(turned[cell].height - em) // step) + 1)
+    def size_of(style: dict) -> int:
+        return max(4, round(em * max(0.3, min(3.0, float(style.get("scale", 1.0))))))
 
-    cols = columns_of(text, per_col, tcy, latin, units)
+    turned: dict[int, Image.Image] = {}
+    heights: list[int] = []
+    for i, cell in enumerate(seq):
+        size = size_of(styles[i])
+        if cell.startswith(ROT):
+            rgb = tuple(styles[i].get("rgb") or fill)
+            image = latin_glyph(cell[1:], font_for("A", size), size, rgb, bold_px(size) if styles[i].get("bold") else 0)
+            if image.width > size:
+                image = image.resize((size, max(1, int(image.height * size / image.width))), Image.Resampling.LANCZOS)
+            turned[i] = image
+            heights.append(max(size, image.height))
+        else:
+            heights.append(size)
+    order = iter(range(len(seq)))
+    cols = columns_of(text, max_height + gap_px, tcy, latin, lambda cell: heights[next(order)] + gap_px)
     if not cols:
         return Image.new("RGBA", (em, em), (0, 0, 0, 0))
+    index_of: list[list[int]] = []
+    n = 0
+    for col in cols:
+        index_of.append(list(range(n, n + len(col))))
+        n += len(col)
     spans = _ruby_spans(cols, ruby_runs) if ruby_runs else []
     marked = emphasis_cells(cols, emphasis_runs) if emphasis_runs else set()
     ruby_w = max(4, em // 2) if spans else 0
     mark_w = max(3, round(em * 0.36)) if marked else 0
     gap = max(0, round(em * leading))
-    pitch = em + mark_w + ruby_w + gap
-    width = pitch * len(cols) - gap
-    starts = []  # the row each cell starts on, per column
-    for col in cols:
-        rows, at = [], 0
-        for cell in col:
-            rows.append(at)
-            at += units(cell)
-        starts.append(rows + [at])
-    height = em + step * (max(rows[-1] for rows in starts) - 1)
+    widths = [max(size_of(styles[i]) for i in idx) for idx in index_of]
+    width = sum(w + mark_w + ruby_w for w in widths) + gap * (len(cols) - 1)
+    ys: list[list[int]] = []
+    for idx in index_of:
+        pos, rows = 0, []
+        for i in idx:
+            rows.append(pos)
+            pos += heights[i] + gap_px
+        ys.append(rows + [pos - gap_px])
+    height = max(rows[-1] for rows in ys)
     out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    tops = []
-    for index, col in enumerate(cols):
-        cx = width - pitch * index - em - mark_w - ruby_w
-        col_h = em + step * (starts[index][-1] - 1)
+    lefts, tops = [], []
+    right = width
+    for c, col in enumerate(cols):
+        cx = right - ruby_w - mark_w - widths[c]
+        lefts.append(cx)
+        right = cx - gap
+        col_h = ys[c][-1]
         top = 0 if align == "top" else (height - col_h) // (2 if align == "center" else 1)
         tops.append(top)
         for row, cell in enumerate(col):
-            y = top + starts[index][row] * step
+            i = index_of[c][row]
+            style = styles[i]
+            size = size_of(style)
+            rgb = tuple(style.get("rgb") or fill)
+            thick = bold_px(size) if style.get("bold") else 0
+            y = top + ys[c][row]
             if cell.startswith(ROT):
-                image = turned[cell]
-                out.alpha_composite(image, (cx + (em - image.width) // 2, y))
+                image = turned[i]
+                out.alpha_composite(image, (cx + (widths[c] - image.width) // 2, y))
                 continue
             if len(cell) > 1:
-                image = tcy_glyph(cell, font_for("0"), em, fill)
+                image = tcy_glyph(cell, font_for("0", size), size, rgb, thick)
             else:
-                image = glyph(cell, font_for(cell), em, fill)
-            out.alpha_composite(image, (cx, y))
-            if (index, row) in marked:
-                draw_mark(out, (cx + em + mark_w / 2, y + em / 2), mark_w, MARKS.get(emphasis_mark, "sesame"), fill)
+                image = glyph(cell, font_for(cell, size), size, rgb, thick)
+            out.alpha_composite(image, (cx + (widths[c] - size) // 2, y))
+            if (c, row) in marked:
+                draw_mark(out, (cx + widths[c] + mark_w / 2, y + size / 2), mark_w, MARKS.get(emphasis_mark, "sesame"), rgb)
     for col, first, last, ruby in spans:
         if not ruby:
             continue
-        rx = width - pitch * col - ruby_w
-        y0, y1 = starts[col][first] * step, starts[col][last] * step
-        centre = tops[col] + (y0 + y1 + em) / 2
+        rx = lefts[col] + widths[col] + mark_w
+        y0 = ys[col][first]
+        y1 = ys[col][last] + heights[index_of[col][last]]
+        centre = tops[col] + (y0 + y1) / 2
         top = max(0, min(height - ruby_w * len(ruby), round(centre - ruby_w * len(ruby) / 2)))
         for i, char in enumerate(ruby):
-            base = font_for(char)
-            try:
-                ruby_font = base.font_variant(size=max(8, ruby_w))  # type: ignore[attr-defined]
-            except Exception:
-                ruby_font = base
-            out.alpha_composite(glyph(char, ruby_font, ruby_w, fill), (rx, top + i * ruby_w))
+            out.alpha_composite(glyph(char, font_for(char, max(8, ruby_w)), ruby_w, fill), (rx, top + i * ruby_w))
     return out
 
 

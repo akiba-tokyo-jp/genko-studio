@@ -93,21 +93,50 @@ def parse_ruby(text: str) -> tuple[str, list[list[str]]]:
 _EMPHASIS = _re.compile(r"《《([^《》\n]+)》》")
 
 
-def parse_marks(typed: str) -> tuple[str, list[list[str]], list[str]]:
-    """Ruby and 傍点 as typed: '《《絶対》》に｜約束《やくそく》' → ('絶対に約束', [['約束', 'やくそく']], ['絶対'])
-    (《《…》》 for dots, as on Japanese novel sites)."""
+_STYLED = _re.compile(r"[{｛]([^{}｛｝|｜\n]+)[|｜]([^{}｛｝\n]+)[}｝]")
+
+
+def parse_styles(typed: str) -> tuple[str, list]:
+    """Part of a line styled as typed: '{大|なんだと}' → ('なんだと', [['なんだと', {'scale': 1.4}]]).
+    Marks: 大・特大・小・太・赤・青・白, several with 、 or , ('{大、太|…}'). Unknown marks stay as typed."""
+    from genko.tategaki import STYLE_TAGS
+
+    styles: list = []
+
+    def take(match) -> str:
+        tags = [t.strip() for t in _re.split(r"[、,，・ ]+", match.group(1)) if t.strip()]
+        if not tags or any(t not in STYLE_TAGS for t in tags):
+            return match.group(0)
+        style: dict = {}
+        for tag in tags:
+            style.update(STYLE_TAGS[tag])
+        styles.append([match.group(2), style])
+        return match.group(2)
+
+    return _STYLED.sub(take, typed or ""), styles
+
+
+def parse_marks(typed: str) -> tuple[str, list[list[str]], list[str], list]:
+    """Ruby, 傍点 and styled parts as typed: '《《絶対》》に｜約束《やくそく》{大|する}' →
+    ('絶対に約束する', [['約束', 'やくそく']], ['絶対'], [['する', {'scale': 1.4}]])
+    (《《…》》 for dots, as on Japanese novel sites; {大|…} for a part larger, smaller, bolder or coloured)."""
     emphasis: list[str] = []
 
     def take(match) -> str:
         emphasis.append(match.group(1))
         return match.group(1)
 
-    text, runs = parse_ruby(_EMPHASIS.sub(take, typed or ""))
-    return text, runs, emphasis
+    styled, styles = parse_styles(typed)
+    text, runs = parse_ruby(_EMPHASIS.sub(take, styled))
+    # (the styled words, found again in the text without its marks)
+    styles = [[parse_ruby(_EMPHASIS.sub(lambda m: m.group(1), words))[0], style] for words, style in styles]
+    return text, runs, emphasis, styles
 
 
 def with_marks(line) -> str:
-    """A line as typed back: its ruby and its 傍点 in the notation."""
+    """A line as typed back: its ruby, 傍点 and styled parts in the notation."""
+    from genko.tategaki import STYLE_TAGS
+
     text = with_ruby(line.text, line.ruby_runs)
     pos = 0
     for base in getattr(line, "emphasis_runs", None) or []:
@@ -116,6 +145,18 @@ def with_marks(line) -> str:
             continue
         text = text[:at] + f"《《{base}》》" + text[at + len(base):]
         pos = at + len(base) + 4
+    pos = 0
+    for words, style in getattr(line, "style_runs", None) or []:
+        tags = []
+        for tag, value in STYLE_TAGS.items():
+            if all(style.get(k) == v for k, v in value.items()):
+                tags.append(tag)
+        at = text.find(words, pos)
+        if at < 0 or not tags:
+            continue
+        mark = "、".join(tags)
+        text = text[:at] + f"{{{mark}|{words}}}" + text[at + len(words):]
+        pos = at + len(words) + len(mark) + 3
     return text
 
 

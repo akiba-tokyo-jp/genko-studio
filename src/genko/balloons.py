@@ -31,7 +31,8 @@ TEXT = (10, 10, 10)
 
 DEFAULTS = {"font": None, "size_mm": None, "tracking": 0.0, "leading": 0.15, "align": "top", "outline_mm": None,
             "rgb": None, "tcy": True, "border_mm": 0.35, "fill": "white", "group": None, "rotate_deg": 0.0, "skew_deg": 0.0,
-            "arc": 0.0, "latin": "rotate", "emphasis_mark": "sesame"}
+            "arc": 0.0, "latin": "rotate", "emphasis_mark": "sesame", "bold": False, "italic": False, "outline_rgb": None,
+            "wobble": 0.0, "double": False, "spikes": None, "spike_depth": 0.2}
 LINE_START = frozenset("、。，．）」』)】］〉》ーぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ！？!?…‥")
 LINE_END = frozenset("「『（(【［〈《〔")
 
@@ -86,13 +87,28 @@ def _vertical(line, st: dict, face, em: int, inner_h: float, fill) -> Image.Imag
     return compose(text, face.font(em), em, max(em, int(column + em * 0.1)), fill=fill,
                    ruby_runs=getattr(line, "ruby_runs", None) or None, face=face, tracking=tracking, leading=leading,
                    tcy=bool(st["tcy"]), align=str(st["align"] or "top"), latin=latin,
-                   emphasis_runs=_emphasis(line, face) or None, emphasis_mark=str(st["emphasis_mark"] or "sesame"))
+                   emphasis_runs=_emphasis(line, face) or None, emphasis_mark=str(st["emphasis_mark"] or "sesame"),
+                   style_runs=getattr(line, "style_runs", None) or None, bold=bool(st["bold"]))
 
 
 def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Image:
-    """Rows left to right with kinsoku, centred (or aligned by style.align: left / center / right)."""
+    """Rows left to right with kinsoku, centred (or aligned by style.align: left / center / right).
+    Ruby sits above its words and 傍点 just above the characters (the ruby above them); part of a line
+    can be larger, smaller, bolder or in another colour (style_runs), which makes its row taller."""
+    from genko.tategaki import bold_px, char_styles
+
     text = face.normalize(line.text or "")
     tracking = float(st["tracking"] or 0)
+    flat = text.replace("\n", "")
+    styles_flat = char_styles(flat, getattr(line, "style_runs", None), {"bold": True} if st["bold"] else None)
+    styles: list[dict] = []
+    k = 0
+    for char in text:  # (styles per character of the text, "\n" included)
+        if char == "\n":
+            styles.append({})
+        else:
+            styles.append(styles_flat[k])
+            k += 1
     marked: set[int] = set()
     pos = 0
     for base in _emphasis(line, face):
@@ -100,49 +116,92 @@ def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Im
         if at >= 0:
             marked.update(i for i in range(at, at + len(base)) if not text[i].isspace())
             pos = at + len(base)
-    mark_h = round(em * 0.36) if marked else 0  # 傍点 sit above the characters
-    line_h = round(em * (1.15 + float(st["leading"] or 0))) + mark_h
+    ruby_at: list[tuple[int, int, str]] = []  # (first char, last char + 1, ruby)
+    pos = 0
+    for run in getattr(line, "ruby_runs", None) or []:
+        if not run or len(run) < 2 or not run[0] or not run[1]:
+            continue
+        base = face.normalize(str(run[0]))
+        at = text.find(base, pos)
+        if at >= 0:
+            ruby_at.append((at, at + len(base), str(run[1])))
+            pos = at + len(base)
+    mark_h = round(em * 0.36) if marked else 0
+    ruby_h = max(6, em // 2) if ruby_at else 0
 
-    def advance(char: str) -> float:
+    def size_of(i: int) -> int:
+        return max(4, round(em * max(0.3, min(3.0, float(styles[i].get("scale", 1.0))))))
+
+    def advance(i: int) -> float:
+        char = text[i]
         try:
-            return face.font(em, char).getlength(char) + em * tracking
+            return face.font(size_of(i), char).getlength(char) + em * tracking
         except Exception:
-            return em * (1 + tracking)
+            return size_of(i) * (1 + tracking)
 
-    rows: list[list[tuple[str, int]]] = []  # (character, its place in the text)
+    rows: list[list[int]] = []  # the characters' places in the text, row by row
     index = 0
     for part in text.split("\n"):
-        row: list[tuple[str, int]] = []
+        row: list[int] = []
         width = 0.0
         for char in part:
-            w = advance(char)
+            w = advance(index)
             if row and width + w > inner_w and char not in LINE_START:
-                if row[-1][0] in LINE_END and len(row) > 1:
+                if text[row[-1]] in LINE_END and len(row) > 1:
                     rows.append(row[:-1])
-                    row, width = [row[-1]], advance(row[-1][0])
+                    row, width = [row[-1]], advance(row[-1])
                 else:
                     rows.append(row)
                     row, width = [], 0.0
-            row.append((char, index))
+            row.append(index)
             index += 1
             width += w
         rows.append(row)
         index += 1  # the "\n"
-    widths = [sum(advance(c) for c, _ in row) for row in rows]
+    above = mark_h + ruby_h
+    heights = [round(max([size_of(i) for i in row] or [em]) * (1.15 + float(st["leading"] or 0))) + above for row in rows]
+    widths = [sum(advance(i) for i in row) for row in rows]
     out_w = max(1, math.ceil(max(widths or [1])))
-    out = Image.new("RGBA", (out_w, max(1, line_h * len(rows))), (0, 0, 0, 0))
+    out = Image.new("RGBA", (out_w, max(1, sum(heights))), (0, 0, 0, 0))
     draw = ImageDraw.Draw(out)
     align = st["align"] if st["align"] in ("left", "right") else "center"
-    for i, row in enumerate(rows):
-        x = 0.0 if align == "left" else (out_w - widths[i]) / (2 if align == "center" else 1)
-        for char, at in row:
-            font = face.font(em, char)
-            draw.text((x, i * line_h + mark_h + (line_h - mark_h - em) / 2), char, font=font, fill=fill + (255,))
-            if at in marked:
-                w = advance(char) - em * tracking
-                draw_mark(out, (x + w / 2, i * line_h + mark_h / 2 + max(1, em // 16)), mark_h, str(st["emphasis_mark"] or "sesame"),
-                          fill, vertical=False)
-            x += advance(char)
+    xs: dict[int, tuple[float, float, int]] = {}  # place in text → (left, right, row top)
+    top = 0
+    for r, row in enumerate(rows):
+        x = 0.0 if align == "left" else (out_w - widths[r]) / (2 if align == "center" else 1)
+        tallest = max([size_of(i) for i in row] or [em])
+        base_y = top + above + (heights[r] - above - tallest) / 2  # characters share the row's baseline area
+        for i in row:
+            size = size_of(i)
+            rgb = tuple(styles[i].get("rgb") or fill)
+            thick = bold_px(size) if styles[i].get("bold") else 0
+            draw.text((x, base_y + (tallest - size)), text[i], font=face.font(size, text[i]), fill=rgb + (255,),
+                      stroke_width=thick, stroke_fill=rgb + (255,) if thick else None)
+            w = advance(i) - em * tracking
+            if i in marked:
+                draw_mark(out, (x + w / 2, top + ruby_h + mark_h / 2 + max(1, em // 16)), mark_h, str(st["emphasis_mark"] or "sesame"),
+                          rgb, vertical=False)
+            xs[i] = (x, x + w, top)
+            x += advance(i)
+        top += heights[r]
+    for first, last, ruby in ruby_at:
+        # a word split over rows gets its ruby split in proportion
+        groups: dict[int, list[int]] = {}
+        for i in range(first, last):
+            if i in xs:
+                groups.setdefault(xs[i][2], []).append(i)
+        taken = 0
+        count = sum(len(g) for g in groups.values()) or 1
+        for n, (row_top, chars) in enumerate(sorted(groups.items())):
+            share = len(ruby) - taken if n == len(groups) - 1 else round(len(ruby) * len(chars) / count)
+            part = ruby[taken:taken + share]
+            taken += share
+            if not part:
+                continue
+            font = face.font(ruby_h, part[0])
+            span = font.getlength(part)
+            centre = (xs[chars[0]][0] + xs[chars[-1]][1]) / 2
+            draw.text((max(0, min(out_w - span, centre - span / 2)), row_top), part, font=font, fill=fill + (255,))
     return out
 
 
@@ -181,11 +240,12 @@ def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Imag
     outline = st["outline_mm"]
     grow = px(float(outline), dpi) if outline else (max(2, em // 8) if kind == "sfx" else 0)
     if grow:
-        image = outlined(image, grow)
+        image = outlined(image, grow, tuple(st["outline_rgb"]) if st["outline_rgb"] else (255, 255, 255))
     if st["arc"]:
         image = arched(image, float(st["arc"]), vertical)
-    if st["skew_deg"]:
-        image = skewed(image, float(st["skew_deg"]), vertical)
+    skew = float(st["skew_deg"] or 0) or (12.0 if st["italic"] else 0.0)  # (italic: a light lean)
+    if skew:
+        image = skewed(image, skew, vertical)
     return image, em
 
 
@@ -246,9 +306,51 @@ def _ellipse_point(cx: float, cy: float, rx: float, ry: float, t: float) -> tupl
     return cx + rx * math.cos(t), cy + ry * math.sin(t)
 
 
-def _shape(draw: ImageDraw.ImageDraw, kind: str, box: tuple[float, float, float, float]) -> None:
+def _wobbly(points: list, amount: float, size: float, seed: str) -> list:
+    """An outline pushed in and out a little, smoothly (a balloon drawn by hand)."""
+    import random
+
+    rng = random.Random(seed or "genko")
+    waves = [(rng.uniform(2, 5), rng.uniform(0, math.tau), rng.uniform(0.5, 1.0)) for _ in range(3)]
+    cx = sum(p[0] for p in points) / len(points)
+    cy = sum(p[1] for p in points) / len(points)
+    out = []
+    n = len(points)
+    for k, (x, y) in enumerate(points):
+        t = math.tau * k / n
+        push = sum(a * math.sin(f * t + ph) for f, ph, a in waves) / 3
+        d = math.hypot(x - cx, y - cy) or 1.0
+        shift = push * amount * size * 0.05
+        out.append((x + (x - cx) / d * shift, y + (y - cy) / d * shift))
+    return out
+
+
+def _outline(kind: str, box, n: int = 96) -> list | None:
+    """The outline of an ellipse or box balloon as points (for the hand-drawn wobble)."""
     x0, y0, x1, y1 = box
     cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+    if kind in ("speech", "thought", "whisper", "flash"):
+        return [_ellipse_point(cx, cy, rx, ry, math.tau * k / n) for k in range(n)]
+    if kind in ("box", "narration", "rounded"):
+        per = n // 4
+        pts = []
+        for (ax, ay), (bx, by) in (((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))):
+            pts += [(ax + (bx - ax) * i / per, ay + (by - ay) * i / per) for i in range(per)]
+        return pts
+    return None
+
+
+def _shape(draw: ImageDraw.ImageDraw, kind: str, box: tuple[float, float, float, float], st: dict | None = None,
+           seed: str = "") -> None:
+    x0, y0, x1, y1 = box
+    cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+    st = st or {}
+    wobble = float(st.get("wobble") or 0)
+    if wobble > 0:
+        points = _outline(kind, box)
+        if points:
+            draw.polygon(_wobbly(points, wobble, min(rx, ry) * 2, seed), fill=255)
+            return
     if kind in ("box", "narration"):
         draw.rectangle(box, fill=255)
     elif kind == "rounded":
@@ -263,11 +365,12 @@ def _shape(draw: ImageDraw.ImageDraw, kind: str, box: tuple[float, float, float,
             bx, by = _ellipse_point(cx, cy, rx * k, ry * k, 2 * math.pi * i / n)
             draw.ellipse((bx - bump, by - bump, bx + bump, by + bump), fill=255)
     elif kind == "shout":
-        spikes = max(12, int((rx + ry) / max(4.0, min(rx, ry) / 3)))
+        spikes = int(st.get("spikes") or 0) or max(12, int((rx + ry) / max(4.0, min(rx, ry) / 3)))
+        depth = max(0.05, min(0.6, float(st.get("spike_depth") or 0.2)))
         points = []
         for i in range(spikes * 2):
             t = math.pi * i / spikes
-            k = 1.0 if i % 2 == 0 else 0.8
+            k = 1.0 if i % 2 == 0 else 1.0 - depth
             points.append(_ellipse_point(cx, cy, rx * k, ry * k, t))
         draw.polygon(points, fill=255)
     else:  # speech, thought, whisper, flash
@@ -425,7 +528,7 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
         if getattr(line, "path", None):  # drawn by hand
             draw.polygon([((px(p[0], dpi) - rx0) * scale, (px(p[1], dpi) - ry0) * scale) for p in line.path], fill=255)
         else:
-            _shape(draw, line.balloon or "speech", local(box))
+            _shape(draw, line.balloon or "speech", local(box), style_of(line), str(getattr(line, "id", "")))
     for line, tail in tails:
         box = local(next(b for ln, b in zip(lines, boxes) if ln is line))
         tip = ((px(tail["to"][0], dpi) - rx0) * scale, (px(tail["to"][1], dpi) - ry0) * scale)
@@ -449,6 +552,9 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
     shapes = ImageChops.lighter(mask, bubbles)
     inside = ImageChops.lighter(_erode(mask, width), _erode(bubbles, max(1, width * 2 // 3)))
     band = ImageChops.subtract(shapes, inside)
+    if st.get("double"):  # a second line inside the first
+        inner = _erode(inside, max(2, width * 2))
+        band = ImageChops.lighter(band, ImageChops.subtract(inner, _erode(inner, max(1, width))))
     if kind == "whisper":
         band = ImageChops.multiply(band, _dashes(size, [local(b) for b in boxes], scale))
     if kind == "flash":

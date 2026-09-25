@@ -38,8 +38,8 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float? (0: no border)", "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)"},
     {"op": "cut_frame", "page": "int", "frame_id": "str?", "p0": "[x,y]", "p1": "[x,y]", "gutter_mm": "float?", "note": "cut a panel along any line (slanted panels)"},
     {"op": "move_gutter", "page": "int", "frame_id": "str (the split)", "index": "int? (gutter after this child)", "delta_mm": "float", "gutter_mm": "float? (new width)"},
-    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]?", "path": "[[x,y]]? (a hand-drawn balloon)", "id": "str? (choose the id)"},
-    {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|flash|whisper|narration|sfx|none?", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]? (傍点 on these words)", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"},
+    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]?", "style_runs": "[[words, {scale, bold, rgb}]]?", "path": "[[x,y]]? (a hand-drawn balloon)", "id": "str? (choose the id)"},
+    {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|flash|whisper|narration|sfx|none?", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]? (傍点 on these words)", "style_runs": "[[words, {scale 0.3..3, bold, rgb}]]? (part of the line larger, smaller, bolder, coloured)", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"},
     {"op": "reorder_lines", "page": "int", "order": "[line id] (reading order)"},
     {"op": "delete_line", "id": "str"},
     {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
@@ -354,7 +354,8 @@ def _untouched(stroke, eraser: list, radius: float) -> bool:
 
 STYLE_KEYS = {"font": str, "size_mm": float, "tracking": float, "leading": float, "align": str, "outline_mm": float,
               "rgb": list, "tcy": bool, "border_mm": float, "fill": str, "group": str, "rotate_deg": float, "skew_deg": float,
-              "arc": float, "latin": str, "emphasis_mark": str}
+              "arc": float, "latin": str, "emphasis_mark": str, "bold": bool, "italic": bool, "outline_rgb": list,
+              "wobble": float, "double": bool, "spikes": int, "spike_depth": float}
 
 
 def _merge_style(current: dict, change) -> dict:
@@ -385,6 +386,12 @@ def _merge_style(current: dict, change) -> dict:
             raise ApplyError("skew_deg must be between -60 and 60")
         if key == "arc" and abs(value) > 1:
             raise ApplyError("arc must be between -1 and 1")
+        if key == "wobble" and not 0 <= value <= 1:
+            raise ApplyError("wobble must be between 0 and 1")
+        if key == "spikes" and not 6 <= value <= 80:
+            raise ApplyError("spikes must be between 6 and 80")
+        if key == "spike_depth" and not 0.05 <= value <= 0.6:
+            raise ApplyError("spike_depth must be between 0.05 and 0.6")
         out[key] = value
     return out
 
@@ -446,6 +453,29 @@ def _merge_down(episode, page, upper) -> None:
         lower.kind = LayerKind.RASTER
         rasters.save_raster(page, lower, merged)
     page.layers.remove(upper)
+
+
+def _style_runs(raw) -> list:
+    """[[words, {scale?, bold?, rgb?}]] — part of a line styled."""
+    out = []
+    for item in raw or []:
+        if not isinstance(item, (list, tuple)) or len(item) < 2 or not item[0] or not isinstance(item[1], dict):
+            raise ApplyError("style_runs is [[words, {scale, bold, rgb}], ...]")
+        style = {}
+        for key, value in item[1].items():
+            if key == "scale":
+                value = float(value)
+                if not 0.3 <= value <= 3:
+                    raise ApplyError("scale must be between 0.3 and 3")
+                style["scale"] = value
+            elif key == "bold":
+                style["bold"] = bool(value)
+            elif key == "rgb":
+                style["rgb"] = [int(v) for v in value][:3]
+            else:
+                raise ApplyError(f"unknown style_runs key {key} (scale, bold, rgb)")
+        out.append([str(item[0]), style])
+    return out
 
 
 def _emphasis(raw) -> list[str]:
@@ -741,6 +771,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             line.ruby_runs = [tuple(item) for item in op["ruby_runs"]]
         if op.get("emphasis_runs"):
             line.emphasis_runs = _emphasis(op["emphasis_runs"])
+        if op.get("style_runs"):
+            line.style_runs = _style_runs(op["style_runs"])
         if op.get("path"):
             _set_path(line, op["path"])
         if op.get("style"):
@@ -784,6 +816,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             line.ruby_runs = [tuple(item) for item in op["ruby_runs"] or []]
         if "emphasis_runs" in op:
             line.emphasis_runs = _emphasis(op["emphasis_runs"])
+        if "style_runs" in op:
+            line.style_runs = _style_runs(op["style_runs"])
         if "balloon" in op:
             line.balloon = _balloon_kind(op["balloon"])
         if "wrap" in op:
@@ -1740,6 +1774,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             line.ruby_runs = [tuple(item) for item in op["ruby_runs"]]
         if "emphasis_runs" in op:
             line.emphasis_runs = _emphasis(op["emphasis_runs"])
+        if "style_runs" in op:
+            line.style_runs = _style_runs(op["style_runs"])
         return
 
     if name == "add_mannequin":

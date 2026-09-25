@@ -110,7 +110,8 @@ class TextToolSettings(QWidget):
         form.addRow("", self.draw_balloon)
         form.addRow("書体", self.font)
         form.addRow("文字の大きさ", self.size)
-        note = QLabel("ルビは ｜約束《やくそく》、傍点は 《《強調》》と打ちます。入れた後の台詞は、台詞パネルで直せます。")
+        note = QLabel("ルビは ｜約束《やくそく》、傍点は 《《強調》》、一部を大きく {大|…}（特大・小・太・赤・青・白も）と打ちます。"
+                      "入れた後の台詞は、台詞パネルで直せます。")
         note.setWordWrap(True)
         note.setStyleSheet("color:#666")
         form.addRow(note)
