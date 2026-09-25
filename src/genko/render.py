@@ -497,14 +497,22 @@ def _draw_prims(image: Image.Image, page: Page, dpi: int, mode: str) -> None:
         return
     from genko import prim3d
 
-    draw = ImageDraw.Draw(image)
     width = max(1, mm_to_px(0.3, dpi))
+    frames = {frame.id: frame for frame in page.leaf_frames()}
     for prim in page.prims:
+        # a guide set in a panel stays in it (a room seen from inside runs far past the panel's edges)
+        frame = frames.get(prim.get("frame_id") or "")
+        sheet = Image.new("RGBA", image.size, (0, 0, 0, 0)) if frame is not None else None
+        draw = ImageDraw.Draw(sheet if sheet is not None else image)
         if prim.get("kind") == "mannequin":
             _draw_mannequin(draw, prim, dpi)
-            continue
-        for a, b, seen in prim3d.edges(prim):
-            draw.line([_xy(a, dpi), _xy(b, dpi)], fill=(90, 90, 140) if seen else (190, 190, 215), width=width)
+        else:
+            for a, b, seen in prim3d.edges(prim):
+                draw.line([_xy(a, dpi), _xy(b, dpi)], fill=(90, 90, 140) if seen else (190, 190, 215), width=width)
+        if sheet is not None:
+            inside = Image.new("L", image.size, 0)
+            fill_frame(ImageDraw.Draw(inside), frame, dpi)
+            image.paste(sheet, (0, 0), ImageChops.multiply(sheet.split()[3], inside))
 
 
 def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int, color=(90, 90, 140)) -> None:

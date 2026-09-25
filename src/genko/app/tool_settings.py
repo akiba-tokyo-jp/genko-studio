@@ -59,6 +59,21 @@ def action_button(action) -> QToolButton:
     return button
 
 
+def menu_button(label: str, groups: list) -> QWidget:
+    """One button that opens a menu of actions (groups split by lines): a long list kept short."""
+    from PySide6.QtWidgets import QMenu, QPushButton
+
+    button = QPushButton(label + " ▾")
+    menu = QMenu(button)
+    for n, group in enumerate(groups):
+        if n:
+            menu.addSeparator()
+        for action in group:
+            menu.addAction(action)
+    button.setMenu(menu)
+    return button
+
+
 def action_page(actions, extra: list[QWidget] | None = None) -> QWidget:
     page = QWidget()
     layout = QVBoxLayout(page)

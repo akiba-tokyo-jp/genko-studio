@@ -57,6 +57,8 @@ def tails_of(line) -> list[dict]:
 
 def _inner(kind: str, w: float, h: float, pad: float) -> tuple[float, float]:
     """The space for text inside the shape."""
+    if kind == "electric":  # (a squarish outline: more room than an ellipse, less the teeth)
+        return (w - 2 * pad) * 0.76, (h - 2 * pad) * 0.76
     if kind in ELLIPTIC:
         return (w - 2 * pad) / SQRT2, (h - 2 * pad) / SQRT2
     if kind == "rounded":

@@ -1352,6 +1352,15 @@ class MainWindow(QMainWindow):
         remove = menu.addMenu("消す")
         for name in saved:
             remove.addAction(name, lambda _=False, n=name: self._remove_action(n))
+        menu.addSeparator()
+        menu.addAction("管理（手順を見る・並べ替える・外す）…", self.manage_actions)
+
+    def manage_actions(self):
+        from genko.app.actions import ActionsDialog
+
+        dialog = ActionsDialog(self)
+        dialog.show()
+        return dialog
 
     def start_recording(self) -> None:
         self._recording = []
@@ -1391,8 +1400,13 @@ class MainWindow(QMainWindow):
         layer = self.target_layer()
         frame = self.selected_frame()
         ops = actions.replay(data["ops"], page.index, layer.id if layer is not None else None, frame.id if frame else None)
+        skipped = len(data["ops"]) - len(ops)
+        if not ops:
+            self.flash(f"「{name}」の手順は、どれも記録したページの決まった物を変えるもので、このページではできません", 5000)
+            return False
         if self.apply_ops(ops):
-            self.flash(f"「{name}」を実行しました（{len(ops)} 手。元に戻すは 1 回で）", 3000)
+            extra = f"。{skipped} 手はこのページではできないので飛ばしました" if skipped else ""
+            self.flash(f"「{name}」を実行しました（{len(ops)} 手。元に戻すは 1 回で{extra}）", 4000)
             return True
         return False
 
@@ -1488,7 +1502,11 @@ class MainWindow(QMainWindow):
         ts.add(("reshape",), radius_page)
         ts.add(("ruler",), action_page([*self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
                                         self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]))
-        ts.add(("3d",), action_page([self.act_add_figure, self.act_add_box, self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, None, *self.scene_actions, None, *self.pose_actions, None, self.act_trace,
+        from genko.app.tool_settings import menu_button
+
+        ts.add(("3d",), action_page([menu_button("置く", [[self.act_add_figure, self.act_add_box, self.act_add_cylinder,
+                                                            self.act_add_stairs, self.act_add_floor], self.scene_actions]),
+                                     menu_button("人形のポーズ", [self.pose_actions]), None, self.act_trace,
                                      self.act_del_prim]))
         ts.add(("effect",), action_page([*self.effect_actions, None, self.act_materials]))
         ts.add(("stamp",), action_page([self.act_materials]))
@@ -2464,6 +2482,8 @@ class MainWindow(QMainWindow):
         depth = size[2] / 2 + SCENE_VIEWS[kind][1] * 220
         op = {"op": "add_scene", "page": page.index, "kind": kind, "id": prim_id,
               "pos": [r.x + r.width / 2, r.y + r.height * 0.5, round(depth, 1)], "size": size}
+        if frame is not None:
+            op["frame_id"] = frame.id
         if self.apply_ops([op]):
             self.canvas.selected_prim_id = prim_id
             self._tool("3d")

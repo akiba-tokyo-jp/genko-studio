@@ -61,7 +61,7 @@
       "y_mm": "optional",
       "w_mm": "optional",
       "h_mm": "optional",
-      "wrap": "vertical|horizontal?",
+      "wrap": "vertical|horizontal? (default vertical)",
       "tail": "[x,y]?",
       "tails": "[{to, via?, width_mm?}]?",
       "style": "object?",
@@ -604,6 +604,7 @@
       "size": "[w,h,d] | float?",
       "rot": "[tip,turn,lean]?",
       "focal_mm": "float?",
+      "frame_id": "str? (drawn only inside this panel)",
       "id": "str?"
     },
     {
@@ -614,6 +615,7 @@
       "size": "[w,h,d]|number? (mm; a number scales the usual size)",
       "rot": "[tip,turn,lean]? radians",
       "focal_mm": "float? (smaller = stronger perspective; 220)",
+      "frame_id": "str? (kept inside this panel; default the panel under pos, false for none)",
       "id": "str?"
     },
     {

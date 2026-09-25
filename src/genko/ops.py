@@ -38,7 +38,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float? (0: no border)", "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)"},
     {"op": "cut_frame", "page": "int", "frame_id": "str?", "p0": "[x,y]", "p1": "[x,y]", "gutter_mm": "float?", "note": "cut a panel along any line (slanted panels)"},
     {"op": "move_gutter", "page": "int", "frame_id": "str (the split)", "index": "int? (gutter after this child)", "delta_mm": "float", "gutter_mm": "float? (new width)"},
-    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]?", "style_runs": "[[words, {scale, bold, rgb}]]?", "path": "[[x,y]]? (a hand-drawn balloon)", "id": "str? (choose the id)"},
+    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal? (default vertical)", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]?", "style_runs": "[[words, {scale, bold, rgb}]]?", "path": "[[x,y]]? (a hand-drawn balloon)", "id": "str? (choose the id)"},
     {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|electric|flash|whisper|narration|sfx|none?", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]? (傍点 on these words)", "style_runs": "[[words, {scale 0.3..3, bold, weight, rgb}]]? (part of the line larger, smaller, bolder, coloured)", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"},
     {"op": "reorder_lines", "page": "int", "order": "[line id] (reading order)"},
     {"op": "delete_line", "id": "str"},
@@ -104,8 +104,8 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_ruler", "page": "int", "kind": "line|curve|parallel|concentric|radial|perspective|symmetry", "points": "[[x,y],...]?", "angle": "float? (deg)", "ratio": "float? (concentric height/width)", "copies": "int? (symmetry)", "mirror": "bool?", "frame_id": "str? (only in this panel)", "reach_mm": "float?", "id": "str?"},
     {"op": "edit_ruler", "page": "int", "id": "str", "points": "[[x,y],...]?", "angle": "float?", "ratio": "float?", "copies": "int?", "mirror": "bool?", "frame_id": "str|null?", "active": "bool?", "visible": "bool?"},
     {"op": "delete_ruler", "page": "int", "id": "str? (none: every ruler on the page)"},
-    {"op": "add_prim3d", "kind": "box|cylinder|stairs|floor", "steps": "int? (stairs)", "lines": "int? (floor grid)", "page": "int", "pos": "[x,y,z]?", "size": "[w,h,d] | float?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "id": "str?"},
-    {"op": "add_scene", "page": "int", "kind": "room|classroom|corridor|street", "pos": "[x,y,z]? (centre; z = depth)", "size": "[w,h,d]|number? (mm; a number scales the usual size)", "rot": "[tip,turn,lean]? radians", "focal_mm": "float? (smaller = stronger perspective; 220)", "id": "str?"},
+    {"op": "add_prim3d", "kind": "box|cylinder|stairs|floor", "steps": "int? (stairs)", "lines": "int? (floor grid)", "page": "int", "pos": "[x,y,z]?", "size": "[w,h,d] | float?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "frame_id": "str? (drawn only inside this panel)", "id": "str?"},
+    {"op": "add_scene", "page": "int", "kind": "room|classroom|corridor|street", "pos": "[x,y,z]? (centre; z = depth)", "size": "[w,h,d]|number? (mm; a number scales the usual size)", "rot": "[tip,turn,lean]? radians", "focal_mm": "float? (smaller = stronger perspective; 220)", "frame_id": "str? (kept inside this panel; default the panel under pos, false for none)", "id": "str?"},
     {"op": "edit_prim", "page": "int", "id": "str", "pos": "[x,y,z]?", "size": "[w,h,d]?", "rot": "[tip,turn,lean]?", "focal_mm": "float?"},
     {"op": "delete_prim", "page": "int", "id": "str"},
     {"op": "trace_prims", "page": "int", "layer_id": "str", "ids": "[id]? (none: all)", "kind": "str? (pencil)", "width_mm": "float?", "rgb": "[r,g,b]?"},
@@ -551,6 +551,20 @@ def _layer_by_id(page, layer_id: str):
     return layer
 
 
+def _guide_frame(page: Page, op: dict, pos) -> str | None:
+    """The panel a 3D guide stays inside: the one named, else the one under its centre (None: none)."""
+    from genko.frames import contains
+
+    leaves = page.leaf_frames()
+    if op.get("frame_id"):
+        if not any(frame.id == op["frame_id"] for frame in leaves):
+            raise ApplyError(f"no frame {op['frame_id']}")
+        return str(op["frame_id"])
+    if op.get("frame_id") is False:
+        return None
+    return next((frame.id for frame in leaves if contains(frame, float(pos[0]), float(pos[1]))), None)
+
+
 def _require_page(episode: Episode, op: dict[str, Any]) -> Page:
     try:
         index = int(op["page"])
@@ -780,8 +794,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             if any(item.id == str(op["id"]) and item is not line for item in episode.story):
                 raise ApplyError(f"line {op['id']} already exists")
             line.id = str(op["id"])
-        if "wrap" in op:
-            line.wrap = str(op["wrap"])
+        # manga dialogue is set vertically unless asked otherwise (the app's text tool does the same)
+        line.wrap = str(op.get("wrap") or "vertical")
+        if line.wrap not in ("vertical", "horizontal"):
+            raise ApplyError("wrap must be vertical or horizontal")
         if op.get("ruby_runs"):
             line.ruby_runs = [tuple(item) for item in op["ruby_runs"]]
         if op.get("emphasis_runs"):
@@ -1651,6 +1667,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                 "size": _vec3(size), "rot": _vec3(op.get("rot") or [0.35, 0.6, 0])}
         if op.get("focal_mm"):
             prim["focal_mm"] = max(20.0, float(op["focal_mm"]))
+        if op.get("frame_id"):
+            prim["frame_id"] = _guide_frame(page, op, prim["pos"])
         if kind == "stairs":
             prim["steps"] = max(2, min(30, int(op.get("steps") or 6)))
         if kind == "floor":
@@ -1679,6 +1697,9 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         prim = {"id": str(op.get("id") or new_id()), "kind": "scene", "scene": kind,
                 "pos": _vec3(op.get("pos") or [spec.width_mm / 2, spec.height_mm / 2, depth]), "size": size,
                 "rot": _vec3(op.get("rot") or rot), "focal_mm": focal}
+        frame_id = _guide_frame(page, op, prim["pos"])
+        if frame_id:
+            prim["frame_id"] = frame_id
         page.prims.append(prim)
         return
 
