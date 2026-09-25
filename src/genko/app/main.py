@@ -263,7 +263,7 @@ class StoryPanel(QWidget):
         finally:
             QApplication.restoreOverrideCursor()
         if not found:
-            QMessageBox.information(self, "Genko", "日本語を表示できる書体が、このパソコンに見つかりませんでした")
+            self.window.flash("日本語を表示できる書体が、このパソコンに見つかりませんでした", 6000)
             return None
         names = [f"{item['name']} {item['style']}" for item in found]
         name, ok = QInputDialog.getItem(self, "パソコンの書体", "書体", names, 0, False)
@@ -312,11 +312,11 @@ class StoryPanel(QWidget):
         page = self.window.current_page()
         typed = self.text.toPlainText().strip()
         if page is None or not typed:
-            QMessageBox.information(self, "Genko", "台詞を書いてから追加します")
+            self.window.flash("台詞を書いてから追加します", 6000)
             return
         frame = self.window.selected_frame()
         if frame is None:
-            QMessageBox.information(self, "Genko", "先に編集画面でコマをクリックして選びます（テキストツール T なら、置きたい所をクリック）")
+            self.window.flash("先に編集画面でコマをクリックして選びます（テキストツール T なら、置きたい所をクリック）", 6000)
             return
         text, runs = parse_ruby(typed)
         box = place_new(self.window.episode, page, frame, text, self.kind.currentData(), self.vertical.isChecked())
@@ -339,7 +339,7 @@ class StoryPanel(QWidget):
             return
         typed = self.text.toPlainText().strip()
         if not typed:
-            QMessageBox.information(self, "Genko", "台詞が空です。消すときは「削除」を押します")
+            self.window.flash("台詞が空です。消すときは「削除」を押します", 6000)
             return
         text, runs = parse_ruby(typed)
         kind, vertical = self.kind.currentData(), self.vertical.isChecked()
@@ -672,7 +672,7 @@ class MainWindow(QMainWindow):
         try:
             self.session.apply(ops)
         except ApplyError as exc:
-            QMessageBox.warning(self, "Genko", wording.error(str(exc)))
+            self.flash(wording.error(str(exc)), 6000, error=True)
             return False
         if self.session.path is not None:
             self._commit_timer.start()
@@ -703,7 +703,7 @@ class MainWindow(QMainWindow):
         result = self.session.commit()
         if result.conflicts:
             lines = [f"・{wording.error(c['error'])}" for c in result.conflicts[:8]]
-            QMessageBox.information(self, "Genko", "エージェントの変更と重なったため、次の操作は入りませんでした:\n" + "\n".join(lines))
+            self.flash("エージェントの変更と重なったため、次の操作は入りませんでした:\n" + "\n".join(lines), 6000)
         self._watch()
         if result.rebased or result.conflicts:
             self._reload_pages()  # someone else's changes came in
@@ -723,7 +723,7 @@ class MainWindow(QMainWindow):
             return
         result = self.session.sync()
         if result.conflicts:
-            QMessageBox.information(self, "Genko", f"エージェントの変更と重なった操作が {len(result.conflicts)} 件あり、入りませんでした")
+            self.flash(f"エージェントの変更と重なった操作が {len(result.conflicts)} 件あり、入りませんでした", 6000)
         self._reload_pages()
 
     def closeEvent(self, event) -> None:  # noqa: N802
@@ -1167,10 +1167,20 @@ class MainWindow(QMainWindow):
                             f"{selected} ・ {saved} ・ {wording.actor(self.session.actor)}")
         self._refresh_zoom()
 
-    def flash(self, message: str, ms: int = 3000) -> None:
-        """A short notice in the status line (it goes back to the page's status after `ms`)."""
-        self.status.setText(f"<b>{message}</b>")
+    def flash(self, message: str, ms: int = 3000, error: bool = False) -> None:
+        """A notice in the status line that never stops the work (it goes back to the page's status after
+        `ms`); problems show in red and stay a little longer. Only questions before something that cannot
+        be taken back open a window."""
+        from html import escape
+
+        text = escape(str(message)).replace("\n", " ・ ")
+        if error:
+            self.status.setText(f"<span style='color:#c92a2a'><b>⚠ {text}</b></span>")
+            ms = max(ms, 6000)
+        else:
+            self.status.setText(f"<b>{text}</b>")
         self.last_notice = message
+        self.last_error = message if error else getattr(self, "last_error", None)
         QTimer.singleShot(ms, self._refresh_status)
 
     def _refresh_zoom(self) -> None:
@@ -1827,7 +1837,7 @@ class MainWindow(QMainWindow):
         if page is None:
             return
         if self.path is None:
-            QMessageBox.information(self, "Genko", "画像を読み込む前に、原稿を保存します（ファイル → 別の場所に保存）")
+            self.flash("画像を読み込む前に、原稿を保存します（ファイル → 別の場所に保存）", 6000)
             return
         path, _ = QFileDialog.getOpenFileName(self, "画像を読み込む", "", "画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.psd)")
         if not path:
@@ -1838,7 +1848,7 @@ class MainWindow(QMainWindow):
                 buf = BytesIO()
                 img.convert("RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB").save(buf, format="PNG")
         except Exception as exc:  # unreadable file
-            QMessageBox.warning(self, "Genko", f"読み込めない画像です:\n{exc}")
+            self.flash(f"読み込めない画像です:\n{exc}", 6000, error=True)
             return
         self.commit_now()
         ref = AssetStore(self.path).put_bytes(buf.getvalue(), ".png")
@@ -1896,7 +1906,7 @@ class MainWindow(QMainWindow):
         if page is None:
             return
         if not page.selected_frame_id:
-            QMessageBox.information(self, "Genko", "先にコマをクリックして選びます（選択ツール）")
+            self.flash("先にコマをクリックして選びます（選択ツール）", 6000)
             return
         gutter = self.gutter_mm("horizontal" if axis == "horizontal" else "vertical")
         self.apply_ops([{"op": "split_frame", "page": page.index, "axis": axis, "frame_id": page.selected_frame_id, "gutter_mm": gutter}])
@@ -1949,7 +1959,7 @@ class MainWindow(QMainWindow):
     def _set_selected_frame(self, change: dict) -> None:
         frame = self.selected_frame()
         if frame is None:
-            QMessageBox.information(self, "Genko", "先にコマをクリックして選びます")
+            self.flash("先にコマをクリックして選びます", 6000)
             return
         self.apply_ops([{"op": "set_frame", "page": self._current().index, "frame_id": frame.id, **change}])
 
@@ -1958,7 +1968,7 @@ class MainWindow(QMainWindow):
 
         frame = self.selected_frame()
         if frame is None:
-            QMessageBox.information(self, "Genko", "先にコマをクリックして選びます")
+            self.flash("先にコマをクリックして選びます", 6000)
             return
         value, ok = QInputDialog.getDouble(self, "枠線の太さ", "枠線の太さ（mm）", float(frame.border_mm), 0.0, 5.0, 2)
         if ok:
@@ -1967,7 +1977,7 @@ class MainWindow(QMainWindow):
     def _toggle_bleed(self) -> None:
         frame = self.selected_frame()
         if frame is None:
-            QMessageBox.information(self, "Genko", "先にコマをクリックして選びます")
+            self.flash("先にコマをクリックして選びます", 6000)
             return
         self._set_selected_frame({"bleed": not frame.bleed})
         self.flash("断ち切りにしました（紙の端に接する辺は枠線なし）" if not frame.bleed else "断ち切りをやめました")
@@ -1990,7 +2000,7 @@ class MainWindow(QMainWindow):
     def _merge(self) -> None:
         page = self._current()
         if page is None or not page.selected_frame_id:
-            QMessageBox.information(self, "Genko", "先にコマをクリックして選びます（選択ツール）")
+            self.flash("先にコマをクリックして選びます（選択ツール）", 6000)
             return
         self.apply_ops([{"op": "merge_frame", "page": page.index, "frame_id": page.selected_frame_id}])
 

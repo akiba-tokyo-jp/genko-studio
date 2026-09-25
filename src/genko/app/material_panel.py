@@ -226,7 +226,7 @@ class MaterialPanel(QWidget):
         try:
             item = materials.import_image(path, folder=folder)
         except Exception as exc:
-            QMessageBox.warning(self, "Genko", f"取り込めませんでした（{exc}）")
+            self.window.flash(f"取り込めませんでした（{exc}）", 6000, error=True)
             return
         self._fill_folders()
         self.select_material(item["id"])

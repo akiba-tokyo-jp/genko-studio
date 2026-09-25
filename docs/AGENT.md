@@ -240,6 +240,8 @@ Pages and the book (M16):
 - `add_line {id}` can choose the new line's id.
 - `genko.checks.book(episode, project?)` lists what to fix before printing, each with a page and a place: text outside the trim or the basic frame, text too small for its balloon, overlapping balloons, low-resolution pictures, paint layers, art beyond the paper, spreads that do not face, empty pages — plus the studio preflight for studio books.
 
+Books without agents (F2): the name → art → finish order (ink needs `name_ok`) applies only to books with `strict_gates` or a studio; a person's own book can be inked at any time.
+
 Paper (F1):
 
 - A page has its paper (the canvas, `width_mm` × `height_mm`, coordinates from its top left), the finished size centred on it (`trim_w_mm` × `trim_h_mm`, 仕上がり), the bleed around that (`bleed_mm`, 裁ち落とし) and the basic frame (基本枠) inside the trim (`margins_mm`: top, bottom, binding side (のど), fore-edge (小口); binding and fore-edge swap with the page's side). New panels fill the basic frame.

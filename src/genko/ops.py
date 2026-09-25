@@ -175,6 +175,12 @@ def _area(op: dict) -> dict:
     raise ApplyError("area is {poly: [[x, y], …]} or {mask: {box, png}}")
 
 
+def _gated(episode) -> bool:
+    """The name → art → finish order is enforced only for books made with agents (strict gates or a
+    studio); a person drawing alone can ink, tone and finish whenever they like."""
+    return bool(getattr(episode, "strict_gates", False) or getattr(episode, "studio", None))
+
+
 def _tone_numbers(layer, op: dict) -> None:
     if op.get("lpi") is not None:
         lpi = float(op["lpi"])
@@ -781,7 +787,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             target = page._layer(role)
         if getattr(target, "locked", False):
             raise ApplyError("the layer is locked")
-        if target.role == LayerRole.INK and not page.name_ok:
+        if target.role == LayerRole.INK and not page.name_ok and _gated(episode):
             raise ApplyError("ink strokes require name_ok")
         rgb = op.get("rgb") or (episode.brush_rgb if tuple(episode.brush_rgb) != (20, 20, 20) else None)
         stroke.rgb = tuple(int(v) for v in rgb) if rgb else None
@@ -1690,7 +1696,7 @@ def _flood_fill(episode: Episode, op: dict[str, Any]) -> None:
 
     page = _require_page(episode, op)
     role = LayerRole(str(op.get("layer") or "ink"))
-    if role == LayerRole.INK and not page.name_ok:
+    if role == LayerRole.INK and not page.name_ok and _gated(episode):
         raise ApplyError("ink flood_fill requires name_ok")
     rgb = tuple(int(v) for v in (op.get("rgb") or [0, 0, 0]))
     x_mm = float(op.get("x_mm", 0))
@@ -1782,7 +1788,7 @@ def _lt_convert(episode: Episode, op: dict[str, Any]) -> None:
     page = _require_page(episode, op)
     src_role = LayerRole(str(op.get("layer") or "bg"))
     dest_role = LayerRole(str(op.get("to") or "ink"))
-    if dest_role == LayerRole.INK and not page.name_ok:
+    if dest_role == LayerRole.INK and not page.name_ok and _gated(episode):
         raise ApplyError("lt_convert to ink requires name_ok")
     src = page._layer(src_role)
     if not src.raster_png:
