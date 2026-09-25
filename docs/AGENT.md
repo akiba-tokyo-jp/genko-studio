@@ -281,6 +281,18 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### H5 additions
+
+- `inspect` targets: `materials` (id, name, kind, folder — what `stamp_material` takes), `fonts` (the bundled
+  `style.font` keys and the computer's fonts by path), `brushes` (built-in `add_stroke` kinds, the book's own,
+  the person's library).
+- `snapshot` layers carry `title`, `kind`, `opacity`, `blend`, `clip`, `locked`, `mask`, `color`, `parent_id`,
+  `reference`, `panel_clip`; lines carry `w_mm`, `h_mm`, `balloon`, `wrap`, `style`; pages list their 3D prims.
+- `render {layer_id}` shows one layer alone on white; `mode: print` is the print look.
+- New in H3/H4: balloon `electric`, `style.weight: normal | bold | heavy` (also in `style_runs`), `add_scene
+  {kind: room | classroom | corridor | street, pos?, size?, rot?, focal_mm?}`, `set_layer {reference}` and
+  `fill {reference: "reference"}`.
+
 Tools: `check` (the same pre-press check as the app; `preflight` also returns it under `checks`), `undo` (the
 agent's own latest saved change only), `export {format: pdf | tiff | png | psd | pack | epub | strip | webtoon | sns,
 pages?, dpi?, area?, width?, max_height?, long_edge?, jpeg?, spreads?}` → files under `<project>/exports/`. The

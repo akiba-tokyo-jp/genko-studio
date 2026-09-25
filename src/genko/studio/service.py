@@ -192,7 +192,13 @@ class StudioService:
             return ToolResult(True, {"schemas": SCHEMAS})
         if target == "rules":
             return ToolResult(True, {"rules": RULES_PATH.read_text(encoding="utf-8")})
+        if target == "materials":
+            return ToolResult(True, {"materials": _materials_list()})
+        if target == "fonts":
+            return ToolResult(True, {"fonts": _fonts_list()})
         episode = load_episode(path)
+        if target == "brushes":
+            return ToolResult(True, {"brushes": _brushes_list(episode)})
         if target == "bible":
             return ToolResult(True, {"bible": state.bible(episode)})
         if target == "script":
@@ -209,14 +215,39 @@ class StudioService:
             if target == "page":
                 return ToolResult(True, self._page_brief(episode, page))
             return ToolResult(True, _panel_brief(episode, page, frame_id))
-        return fail(f"target {target} はない（bible / script / page / panel / studio / schemas / rules / snapshot）", "unknown_target", "/target")
+        return fail(f"target {target} はない（bible / script / page / panel / studio / schemas / rules / snapshot / "
+                    "materials / fonts / brushes）", "unknown_target", "/target")
 
     def render(self, project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None,
-               kind: str | None = None, candidate_id: str | None = None) -> ToolResult:
+               kind: str | None = None, candidate_id: str | None = None, layer_id: str | None = None) -> ToolResult:
         """kind: None (page or panel in `mode`), compare (candidate + the name in red), guide:composition,
-        guide:pose, guide:keepout (the request guides for a panel)."""
+        guide:pose, guide:keepout (the request guides for a panel). layer_id: that layer alone, on white.
+        mode print: as it prints (no name, no guides, the print finish)."""
         path = self.project_path(project)
         episode = load_episode(path)
+        if mode not in ("name", "proof", "print"):
+            return fail(f"mode {mode} はない（name / proof / print）", "bad_mode", "/mode")
+        if layer_id:
+            target = next((p for p in episode.pages if p.index == page), None)
+            if target is None:
+                return fail(f"{page} ページはない", "no_page", "/page")
+            layer = next((lay for lay in target.layers if lay.id == layer_id), None)
+            if layer is None:
+                return fail(f"{page} ページにレイヤー {layer_id} はない", "no_layer", "/layer_id")
+            from PIL import Image
+
+            from genko.render import layer_image
+
+            dpi = max(36, min(300, int(max_px / (target.spec.height_mm / 25.4))))
+            alone = layer_image(target, layer, dpi, episode)
+            paper = Image.new("RGBA", alone.size, (255, 255, 255, 255))
+            paper.alpha_composite(alone)
+            png = _png(paper.convert("RGB"))
+            out = path / "studio" / "reviews" / f"p{page:03d}_layer_{layer_id}.png"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(png)
+            return ToolResult(True, {"page": page, "layer_id": layer_id, "title": layer.title or layer.role.value},
+                              images=[png], files=[str(out)])
         if kind == "atari":
             from genko.studio import atari
 
@@ -1297,3 +1328,54 @@ def _preview(episode: Episode, page_index: int, mode: str, max_px: int, plan: di
 
 def result_dict(result: ToolResult) -> dict[str, Any]:
     return result.to_dict()
+
+
+# --- listings for agents (inspect materials / fonts / brushes) ------------------------------------------
+
+
+def _materials_list() -> list[dict]:
+    """Every material stamp_material can place: the bundled catalogue and the person's own."""
+    from genko import materials
+
+    out = []
+    for item in materials.all_materials():
+        entry = {"id": item.get("id"), "name": item.get("name"), "kind": item.get("kind"), "folder": item.get("folder", "")}
+        if item.get("tone"):
+            entry["tone"] = item["tone"]
+        if item.get("effect"):
+            entry["effect"] = item["effect"]
+        out.append(entry)
+    return out
+
+
+def _fonts_list() -> dict:
+    """The bundled faces (style.font keys) and the computer's fonts that can set Japanese (by path)."""
+    from genko import fonts
+
+    bundled = [{"key": key, "label": label} for key, (label, _k, _o) in fonts.BUNDLED.items()]
+    try:
+        system = [{"name": f.get("name"), "style": f.get("style"), "path": f.get("path")} for f in fonts.system_fonts()]
+    except Exception:  # (an unreadable fonts folder is not the agent's problem)
+        system = []
+    return {"bundled": bundled, "system": system, "note": "style.font takes a bundled key or a system font's path; "
+            "style.weight normal|bold|heavy thickens any face"}
+
+
+def _brushes_list(episode) -> dict:
+    """Brushes for add_stroke kind: the built-in ones, the book's own, and the person's library."""
+    from genko import brushes
+
+    def brief(key, b):
+        return {"key": key, "label": b.label, "width_mm": b.width_mm, "texture": b.texture or None,
+                "fixed_width": b.fixed_width, "opacity": b.opacity}
+
+    library = {}
+    try:
+        library = brushes.load_library()
+    except Exception:
+        library = {}
+    return {"builtin": [brief(k, b) for k, b in brushes.BRUSHES.items()],
+            "book": [{"key": k, **{kk: v for kk, v in d.items() if kk in ("label", "base", "width_mm", "texture")}}
+                     for k, d in (episode.brush_custom or {}).items()],
+            "library": [{"key": k, **{kk: v for kk, v in d.items() if kk in ("label", "base", "width_mm", "texture")}}
+                        for k, d in library.items()]}

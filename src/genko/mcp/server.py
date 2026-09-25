@@ -26,7 +26,9 @@ Genko が検査・コマ割り・縦書き写植・プレビュー描画をす�
 自分の画像ツールで生成し、画像を返された inbox フォルダに保存 → import_images（来歴 origin を必ず付ける）→
 candidates と render kind=compare で比べる → review_candidates → adopt。コマの外にはみ出した部分は自動で切り取られる。
 採用後は report_regions で顔と人物の位置を報告し、作画の承認後に finish_page。最後に check（人と同じ点検）・preflight と export（各形式）。
-描く・直す: apply_ops でページ・コマ・レイヤー（複製・結合・マスク）・線・塗り・グラデーション・台詞（傍点・部分書式・回転）・3D・トーン・効果線まで、人が画面でできることは全部できる（op 一覧は resource genko://ops）。間違えたら undo（自分の変更だけ）。
+描く・直す: apply_ops でページ・コマ・レイヤー（複製・結合・マスク）・線・塗り・グラデーション・台詞（傍点・部分書式・回転）・3D（背景は add_scene）・トーン・効果線まで、人が画面でできることは全部できる（op 一覧は resource genko://ops）。間違えたら undo（自分の変更だけ）。
+使える素材・書体・ブラシは inspect target=materials / fonts / brushes、レイヤーと台詞の今の設定は inspect target=snapshot。
+render は layer_id でそのレイヤーだけ、mode=print で印刷と同じ見え方。
 3 回直しても通らないときは ask_human で人間に相談して、その作業を置いておく。
 承認と本番の書き出しは人間だけが行う。承認が要るところでは request_approval を出して待つ。"""
 
@@ -97,17 +99,21 @@ def build_server(root: Path, actor: str) -> MCPServer:
     @server.tool(structured_output=False)
     def inspect(project: str, target: str, page: int | None = None, frame_id: str | None = None) -> list:
         """読む。target: bible / script / page（そのページの beat、前後ページ、めくりの位置、定型、コマ一覧） /
-        panel（コマのブリーフ・寸法 mm・候補・登場人物の設定画、frame_id 省略でページ全部） / studio / schemas / rules / snapshot。"""
+        panel（コマのブリーフ・寸法 mm・候補・登場人物の設定画、frame_id 省略でページ全部） / studio / schemas / rules /
+        snapshot（ページ・レイヤー〔名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照〕・台詞〔書式・フキダシ〕・3D） /
+        materials（stamp_material で貼れる素材: id・名前・種類・フォルダ） / fonts（style.font に使える書体） /
+        brushes（add_stroke の kind に使えるブラシ: 入っているもの・この原稿の自作・自分の自作）。"""
         return call(service.inspect, project, target, page, frame_id)
 
     @server.tool(structured_output=False)
     def render(project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None,
-               kind: str | None = None, candidate_id: str | None = None) -> list:
-        """ページのプレビュー画像（mode: name / proof / print）。コマ番号は読み順。frame_id を渡すとそのコマだけ。
+               kind: str | None = None, candidate_id: str | None = None, layer_id: str | None = None) -> list:
+        """ページのプレビュー画像（mode: name / proof / print。print は印刷と同じ見え方）。コマ番号は読み順。
+        frame_id を渡すとそのコマだけ。layer_id を渡すとそのレイヤーだけを白の上に。
         kind: compare（候補にネームを赤で重ねる。candidate_id 省略で採用中の絵）/ guide:composition / guide:pose / guide:keepout /
         atari（アタリと提案の重ね表示）。
         画像はファイルにも保存する。"""
-        return call(service.render, project, page, mode, max_px, frame_id, kind, candidate_id)
+        return call(service.render, project, page, mode, max_px, frame_id, kind, candidate_id, layer_id)
 
     @server.tool(structured_output=False)
     def import_image(project: str, path: str | None = None, png_base64: str | None = None) -> list:

@@ -84,15 +84,18 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 人が画面でできることは、`mcp_genko_apply_ops` の op で全部できる（一覧は resource `genko://ops`）。まず `commit: false` で試す。
 
 - ページ: `add_page`・`delete_page`・`duplicate_page`・`reorder`・`set_spread`（見開き）・`set_page_spec`（原稿用紙を変えるとコマや台詞も合わせて動く）。
-- レイヤー: `add_layer`・`duplicate_layer`・`merge_down`（ペン同士は線のまま）・`delete_layer`・`set_layer`（`exportable: false` で下描き＝書き出さない、`color` で画面だけの表示色）。
+- 調べる: `mcp_genko_inspect` の `target` で `snapshot`（レイヤーの名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照、台詞の書式とフキダシ、3D）、`materials`（貼れる素材の id）、`fonts`（`style.font` に使える書体）、`brushes`（`kind` に使えるブラシ）。
+- 見る: `mcp_genko_render` の `mode: print` は印刷と同じ見え方、`layer_id` はそのレイヤーだけ。
+- レイヤー: `add_layer`・`duplicate_layer`・`merge_down`（ペン同士は線のまま）・`delete_layer`・`set_layer`（`exportable: false` で下描き＝書き出さない、`color` で画面だけの表示色、`reference: true` で参照レイヤー）。
   マスクは `set_layer_mask`（`area` の所だけ見せる・`fill`・`invert`・`enabled`・`delete`）と `paint_mask`（`show: true` で見せる、`false` で隠す）。
-- 線と塗り: `add_stroke`（`kind` はブラシ。自作のブラシは `define_brush` で定義してから）、`erase`、`fill`・`fill_area`、`gradient_fill`（`from`・`to`・色・不透明度、`shape: radial` で円）、`filter_raster`（`levels`・`curve`・`hue`・`blur`…）。
+- 線と塗り: `add_stroke`（`kind` はブラシ。自作のブラシは `define_brush` で定義してから）、`erase`、`fill`・`fill_area`（`fill` の `reference: "reference"` は参照レイヤーの線だけを見て塗る）、`gradient_fill`（`from`・`to`・色・不透明度、`shape: radial` で円）、`filter_raster`（`levels`・`curve`・`hue`・`blur`…）。
 - 範囲の変形: `transform_area` の `matrix`（移動・拡大・回転・反転）か `warp`（`perspective` で 4 隅、`mesh` で 3×3 の点）。レイヤーを丸ごと動かすのは、ページ全体を `area` にした `matrix`。
 - 台詞: `add_line`・`edit_line` の
-  - `ruby_runs`（ルビ）、`emphasis_runs`（傍点）、`style_runs`（一部を大きく・小さく・太く・色を変える: `[["本当", {"scale": 1.4, "bold": true}]]`）。
-  - `style`: `rotate_deg`（フキダシごと回す）、`skew_deg`・`arc`（描き文字の傾き・弓なり）、`bold`・`italic`、`outline_rgb`（フチの色）、`latin`（`rotate` で 4 文字以上の英数字を寝かせる／`upright`）、`emphasis_mark`（`sesame`・`dot`）、`wobble`（手描き風の揺れ）・`double`（二重線）・`spikes`・`spike_depth`（叫びのトゲ）。
+  - `ruby_runs`（ルビ）、`emphasis_runs`（傍点）、`style_runs`（一部を大きく・小さく・太く・色を変える: `[["本当", {"scale": 1.4, "weight": "heavy"}]]`）。
+  - `style`: `rotate_deg`（フキダシごと回す）、`skew_deg`・`arc`（描き文字の傾き・弓なり）、`weight`（`normal`・`bold`・`heavy`）・`italic`、`outline_rgb`（フチの色）、`latin`（`rotate` で 4 文字以上の英数字を寝かせる／`upright`）、`emphasis_mark`（`sesame`・`dot`）、`wobble`（手描き風の揺れ）・`double`（二重線）・`spikes`・`spike_depth`（叫びのトゲ）。
+  - `balloon` の形に `electric`（電子音: 電話・テレビの声。角のあるギザギザの縁と稲妻のしっぽ）。
   - `path`（手で描いた形のフキダシ、`set_balloon_path` でも）。
-- 3D: `add_prim3d` の `kind` は `box`・`cylinder`・`stairs`・`floor`（パースの格子）。人形は `add_mannequin`。`trace_prims` で線にする。
+- 3D: `add_prim3d` の `kind` は `box`・`cylinder`・`stairs`・`floor`（パースの格子）。背景は `add_scene`（`kind`: `room`・`classroom`・`corridor`・`street`）で、壁・床・窓・机・建物をまとめて置き、`edit_prim`・`delete_prim`・`trace_prims` は id 1 つで効く。人形は `add_mannequin`。`trace_prims` で線にする。
 - 点検: `mcp_genko_check` で、人の「入稿前の点検」と同じ問題の一覧を受け取る（`preflight` の結果の `checks` にも入る）。
 - 取り消し: `mcp_genko_undo` で自分の最後の変更を取り消す（人の変更と承認は取り消せない）。
 - 書き出し: `mcp_genko_export`（`format`: pdf・tiff・png・psd・pack・epub・strip・webtoon・sns、`pages`、`dpi`、`area`: paper・bleed・trim）。承認は要らない。書き出し先は原稿の `exports/`。

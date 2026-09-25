@@ -125,6 +125,8 @@
 - `render` に `layer_id`（そのレイヤーだけ）と `mode: print`（印刷と同じ見え方）を足す。
 - 案内書（`SKILL.md` と写し、`AGENT.md`）に書く。
 
+**実施状況（済）:** `tests/test_h5.py`。`service._materials_list`・`_fonts_list`・`_brushes_list`、`headless._layer_brief`（`patch_count`・`panel_clip` も）と台詞の `w_mm`・`h_mm`・`balloon`・`wrap`・`style`、ページの `prims`。`render {layer_id}`（白の上にそのレイヤーだけ）、`mode` は name・proof・print 以外を断る。MCP の `inspect`・`render` の説明と INSTRUCTIONS、`SKILL.md`（と 2 つの写し）、`AGENT.md` の「H5 additions」。
+
 ---
 
 ## 順番
