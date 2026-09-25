@@ -32,7 +32,7 @@ RULES_PATH = Path(__file__).with_name("guide") / "manga_rules.md"
 # Ops an agent may send through apply_ops. Gates, locks, meta (font paths),
 # rasters from local paths and structural page changes are not on the list.
 AGENT_OPS = frozenset({
-    "split_frame", "merge_frame", "resize_frame", "set_frame",
+    "split_frame", "merge_frame", "resize_frame", "set_frame", "cut_frame", "move_gutter",
     "add_line", "edit_line", "delete_line", "move_line", "set_balloon_path", "reorder_lines",
     "add_stroke", "delete_stroke", "edit_stroke", "simplify_stroke", "erase",
     "add_layer", "set_layer", "reorder_layers",

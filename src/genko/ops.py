@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import copy
 import dataclasses
+import math
 from pathlib import Path
 from typing import Any
 
@@ -28,10 +29,12 @@ class ApplyError(ValueError):
 
 
 OPS_SCHEMA: list[dict[str, Any]] = [
-    {"op": "split_frame", "page": "int", "axis": "horizontal|vertical", "ratio": "float", "gutter_mm": "float", "frame_id": "optional", "force": "bool? (placed art goes to studio.orphans)"},
+    {"op": "split_frame", "page": "int", "axis": "horizontal|vertical", "ratio": "float", "gutter_mm": "float", "tilt_mm": "float? (slant: the cut's ends differ by this)", "frame_id": "optional", "force": "bool? (placed art goes to studio.orphans)"},
     {"op": "merge_frame", "page": "int", "frame_id": "str", "force": "bool? (placed art goes to studio.orphans)"},
     {"op": "resize_frame", "page": "int", "frame_id": "str", "rect": "{x,y,width,height}"},
-    {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float?"},
+    {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float? (0: no border)", "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)"},
+    {"op": "cut_frame", "page": "int", "frame_id": "str?", "p0": "[x,y]", "p1": "[x,y]", "gutter_mm": "float?", "note": "cut a panel along any line (slanted panels)"},
+    {"op": "move_gutter", "page": "int", "frame_id": "str (the split)", "index": "int? (gutter after this child)", "delta_mm": "float", "gutter_mm": "float? (new width)"},
     {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?"},
     {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|flash|whisper|narration|sfx|none?", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"},
     {"op": "reorder_lines", "page": "int", "order": "[line id] (reading order)"},
@@ -42,7 +45,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "str?"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
-    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "name": "str?"},
+    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?"},
     {"op": "add_page", "count": "int"},
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int"},
@@ -258,17 +261,73 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         art = _placed_on(page, {target.id})
         if art and not op.get("force"):
             raise ApplyError(f"frame {target.id} has placed art; pass force to move it to studio.orphans")
-        a, b = page.split_frame(
-            frame_id,
-            axis=axis,
-            ratio=float(op.get("ratio", 0.5)),
-            gutter_mm=float(op.get("gutter_mm", 4)),
-        )
+        from genko import frames as geo
+
+        ratio, gutter, tilt = float(op.get("ratio", 0.5)), float(op.get("gutter_mm", 4)), float(op.get("tilt_mm", 0) or 0)
+        if target.children:
+            raise ApplyError("can only split a leaf frame")
+        if tilt or target.poly:
+            p0, p1 = geo.axis_line(target, axis, ratio, gutter, tilt)
+            try:
+                a, b = geo.cut_frame(target, p0, p1, gutter, new_id)
+            except ValueError as exc:
+                raise ApplyError(str(exc)) from exc
+        else:
+            a, b = page.split_frame(frame_id, axis=axis, ratio=ratio, gutter_mm=gutter)
+            geo.remember_split(target)
         if target.panel is not None:
             # the brief stays with the panel read first: top, or the binding-side column
             first = a if axis == "horizontal" or episode.binding != Binding.RIGHT else b
             first.panel, target.panel = target.panel, None
         _orphan_art(episode, page, art, reason=f"split {target.id}")
+        return
+
+    if name == "cut_frame":
+        from genko import frames as geo
+
+        page = _require_page(episode, op)
+        try:
+            p0 = (float(op["p0"][0]), float(op["p0"][1]))
+            p1 = (float(op["p1"][0]), float(op["p1"][1]))
+        except (KeyError, TypeError, ValueError, IndexError) as exc:
+            raise ApplyError("p0 and p1 are [x, y] in mm") from exc
+        frame_id = op.get("frame_id")
+        if not frame_id:  # the panel under the middle of the cut
+            under = page.frame_at((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2)
+            if under is None:
+                raise ApplyError("frame_id is required")
+            frame_id = under.id
+        target = page._find(str(frame_id))
+        if target.children:
+            raise ApplyError("can only split a leaf frame")
+        if math.dist(p0, p1) < 1:
+            raise ApplyError("the cut is too short")
+        art = _placed_on(page, {target.id})
+        if art and not op.get("force"):
+            raise ApplyError(f"frame {target.id} has placed art; pass force to move it to studio.orphans")
+        panel = target.panel
+        try:
+            a, b = geo.cut_frame(target, p0, p1, float(op.get("gutter_mm", 4)), new_id)
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
+        if panel is not None:
+            first = a if target.split_axis == "horizontal" or episode.binding != Binding.RIGHT else b
+            first.panel, target.panel = panel, None
+        _orphan_art(episode, page, art, reason=f"cut {target.id}")
+        return
+
+    if name == "move_gutter":
+        from genko import frames as geo
+
+        page = _require_page(episode, op)
+        node = page._find(str(op.get("frame_id") or ""))
+        if not node.children:
+            raise ApplyError("frame_id must be a split (the parent of the panels on both sides)")
+        try:
+            geo.move_gutter(node, int(op.get("index", 0)), float(op.get("delta_mm", 0)),
+                            None if op.get("gutter_mm") is None else float(op["gutter_mm"]))
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
         return
 
     if name == "merge_frame":
@@ -323,6 +382,22 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             frame.clip = bool(op["clip"])
         if "border_mm" in op:
             frame.border_mm = float(op["border_mm"])
+        if "poly" in op:
+            from genko import frames as geo
+
+            if frame.children:
+                raise ApplyError("only a panel (not a split) takes a shape")
+            if op["poly"]:
+                points = [(float(p[0]), float(p[1])) for p in op["poly"]]
+                if len(points) < 3 or geo.area(points) < 4:
+                    raise ApplyError("a shape needs at least three corners around some area")
+                geo.set_shape(frame, points)
+                frame.custom = True
+            else:
+                frame.custom = False
+                parent = page.parent_of(frame.id)
+                if parent is not None:
+                    geo.relayout(parent)
         return
 
     if name == "add_line":
@@ -557,6 +632,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             layer.lock_alpha = bool(op["lock_alpha"])
         if "locked" in op:
             layer.locked = bool(op["locked"])
+        if "panel_clip" in op:
+            layer.panel_clip = bool(op["panel_clip"])
         if "title" in op:
             layer.title = str(op["title"] or "")
         if "parent" in op:
@@ -1346,7 +1423,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
     page.layers = [layer for layer in page.layers if layer not in layers]
 
 
-LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout"})
+LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill"})
 
 
@@ -1354,7 +1431,7 @@ def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTO
     """strict_gates (studio projects): printed layers change only after the name is approved,
     the approved layout stays put, and a page is finished only after its art is approved."""
     name = op.get("op")
-    if name in LAYOUT_OPS and not can_approve(agent):
+    if (name in LAYOUT_OPS or (name == "set_frame" and "poly" in op)) and not can_approve(agent):
         page = _require_page(episode, op)
         if page.name_ok:
             raise ApplyError(f"page {page.index}: the name is approved; a person must revoke it before the layout changes (strict_gates)")

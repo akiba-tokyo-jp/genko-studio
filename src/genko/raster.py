@@ -5,7 +5,7 @@ import io
 from PIL import Image, ImageDraw, ImageChops
 
 from genko.models import Layer, LayerKind, Page
-from genko.render import mm_to_px, rect_px
+from genko.render import mm_to_px
 from genko.stroke import stamp_polyline
 
 WORKING_DPI = 200
@@ -32,8 +32,10 @@ def _clip(page: Page, image: Image.Image, dpi: int) -> Image.Image:
         return image
     mask = Image.new("L", image.size, 0)
     draw = ImageDraw.Draw(mask)
+    from genko.render import fill_frame
+
     for frame in leaves:
-        draw.rectangle(rect_px(frame.rect, dpi), fill=255)
+        fill_frame(draw, frame, dpi)
     alpha = image.split()[3]
     image.putalpha(ImageChops.multiply(alpha, mask))
     return image

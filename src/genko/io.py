@@ -28,7 +28,8 @@ def _frame_to_dict(frame: Frame) -> dict:
         "border_mm": frame.border_mm,
         "children": [_frame_to_dict(child) for child in frame.children],
         "panel": frame.panel,
-    }
+    } | ({"poly": [list(p) for p in frame.poly]} if frame.poly else {}) | ({"split": frame.split} if frame.split else {}) \
+        | ({"custom": True} if frame.custom else {})
 
 
 def _layer_to_dict(layer: Layer) -> dict:
@@ -52,7 +53,7 @@ def _layer_to_dict(layer: Layer) -> dict:
         "clip": layer.clip,
         "lock_alpha": layer.lock_alpha,
         "parent_id": layer.parent_id,
-    } | ({"locked": True} if layer.locked else {}) | ({
+    } | ({"locked": True} if layer.locked else {}) | ({"panel_clip": False} if not layer.panel_clip else {}) | ({
         "asset": layer.asset,
         "frame_id": layer.frame_id,
         "placement_mm": _rect_to_dict(layer.placement_mm) if layer.placement_mm else None,

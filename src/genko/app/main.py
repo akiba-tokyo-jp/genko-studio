@@ -385,6 +385,9 @@ class LayerPanel(QWidget):
         self.protect.clicked.connect(lambda on: self._set("lock_alpha", on))
         self.locked = QCheckBox("ロック（描けなくする）")
         self.locked.clicked.connect(lambda on: self._set("locked", on))
+        self.overhang = QCheckBox("コマの外にもはみ出す")
+        self.overhang.setToolTip("このレイヤーの線を、コマの枠で切らずに間の白や外まで描きます")
+        self.overhang.clicked.connect(lambda on: self._set("panel_clip", not on))
         add_pen = QPushButton("＋ペン")
         add_pen.setToolTip("線を描くレイヤー（線はあとから消しゴムで切れる）")
         add_pen.clicked.connect(lambda: self._add("pen", "ペン"))
@@ -429,6 +432,7 @@ class LayerPanel(QWidget):
         layout.addWidget(self.clip)
         layout.addWidget(self.protect)
         layout.addWidget(self.locked)
+        layout.addWidget(self.overhang)
         layout.addLayout(frow)
         self._loading = False
 
@@ -475,6 +479,7 @@ class LayerPanel(QWidget):
         self.clip.setChecked(bool(layer.clip))
         self.protect.setChecked(bool(layer.lock_alpha))
         self.locked.setChecked(bool(getattr(layer, "locked", False)))
+        self.overhang.setChecked(not getattr(layer, "panel_clip", True))
         self._loading = False
         drawable = self.window.drawable(layer)
         self.target.setText(f"描く先: <b>{wording.layer_label(layer)}</b>" if drawable else
@@ -583,6 +588,11 @@ class MainWindow(QMainWindow):
         self.canvas.lineEditRequested.connect(self._edit_line_inline)
         self.canvas.lineContextMenu.connect(self._line_menu)
         self.canvas.textRequested.connect(self._type_new_line)
+        self.canvas.gutterMoved.connect(lambda node, index, delta: self.apply_ops(
+            [{"op": "move_gutter", "page": self._current().index, "frame_id": node, "index": index, "delta_mm": delta}]))
+        self.canvas.cutRequested.connect(self._cut_frame)
+        self.canvas.frameShaped.connect(lambda frame_id, poly: self.apply_ops(
+            [{"op": "set_frame", "page": self._current().index, "frame_id": frame_id, "poly": poly}]))
         self._target_layer_id: str | None = None
         self.eraser_mm = 2.0
         self._dock_timer = QTimer(self)
@@ -730,8 +740,10 @@ class MainWindow(QMainWindow):
         self.act_pen = a("ペン", lambda: self._tool("pen"), "B", "レイヤー パネルで選んだレイヤーに描きます", True)
         self.act_eraser = a("消しゴム", lambda: self._tool("eraser"), "E", "ペンの線は触れた所で切れます", True)
         self.act_text = a("テキスト", lambda: self._tool("text"), "T", "クリックした所に台詞を入力します（縦書き）", True)
+        self.act_frame = a("コマ", lambda: self._tool("frame"), "F",
+                           "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", True)
         tools = QActionGroup(self)
-        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_text):
+        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame):
             tools.addAction(act)
         self.act_select.setChecked(True)
         self.act_color = a("ペンの色…", self._pick_color, "C")
@@ -740,6 +752,12 @@ class MainWindow(QMainWindow):
         self.act_split_h = a("コマを横に割る（上下に分ける）", lambda: self._split("horizontal"), "Ctrl+Shift+H")
         self.act_split_v = a("コマを縦に割る（左右に分ける）", lambda: self._split("vertical"), "Ctrl+Shift+V")
         self.act_merge = a("コマを結合（割る前に戻す）", self._merge, "Ctrl+Shift+M")
+        self.act_gutters = a("コマ間隔の設定…", self._gutter_settings, tip="新しく割るときの上下・左右の間隔")
+        self.act_border = a("選んだコマの枠線の太さ…", self._border_width)
+        self.act_no_border = a("選んだコマの枠線をなくす", lambda: self._set_selected_frame({"border_mm": 0}))
+        self.act_bleed = a("選んだコマを断ち切りにする（紙の端まで）", self._toggle_bleed)
+        self.act_reset_shape = a("選んだコマの形を元に戻す", lambda: self._set_selected_frame({"poly": None}))
+        self.act_template = a("テンプレートでコマを割る…", self._templates, tip="今のページのコマと台詞を作り直します")
         self.act_add_page = a("ページを追加", self._add_page)
         self.act_del_page = a("このページを削除…", self._del_page)
         self.act_name_ok = a("ネーム完了 → 作画へ進む", self._name_ok, tip="承認の要らない原稿（エージェントを使わない原稿）で使います")
@@ -750,8 +768,9 @@ class MainWindow(QMainWindow):
             ("編集", [self.act_undo, self.act_redo]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_onion]),
-            ("ツール", [self.act_select, self.act_pen, self.act_eraser, self.act_text, None, self.act_color, self.act_thicker, self.act_thinner]),
-            ("コマ", [self.act_split_h, self.act_split_v, self.act_merge]),
+            ("ツール", [self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None, self.act_color, self.act_thicker, self.act_thinner]),
+            ("コマ", [self.act_frame, None, self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
+                      self.act_gutters, self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape]),
             ("ページ", [self.act_add_page, self.act_del_page, None, self.act_name_ok]),
         ]
         for title, actions in menus:
@@ -767,7 +786,7 @@ class MainWindow(QMainWindow):
         tools_bar.setObjectName("tools")
         tools_bar.setMovable(False)
         tools_bar.setIconSize(QSize(16, 16))
-        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_text, None, self.act_undo, self.act_redo, None,
+        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None, self.act_undo, self.act_redo, None,
                     self.act_fit, self.act_zoom_out, self.act_zoom_in, None, self.act_prev, self.act_next, None, self.act_export):
             if act is None:
                 tools_bar.addSeparator()
@@ -968,7 +987,8 @@ class MainWindow(QMainWindow):
 
     def _tool(self, tool: str) -> None:
         self.canvas.set_tool(tool)
-        {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text}[tool].setChecked(True)
+        {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
+         "frame": self.act_frame}[tool].setChecked(True)
 
     # --- the layer the pen works on ---------------------------------------------------------------
 
@@ -1250,7 +1270,94 @@ class MainWindow(QMainWindow):
         if not page.selected_frame_id:
             QMessageBox.information(self, "Genko", "先にコマをクリックして選びます（選択ツール）")
             return
-        self.apply_ops([{"op": "split_frame", "page": page.index, "axis": axis, "frame_id": page.selected_frame_id}])
+        gutter = self.gutter_mm("horizontal" if axis == "horizontal" else "vertical")
+        self.apply_ops([{"op": "split_frame", "page": page.index, "axis": axis, "frame_id": page.selected_frame_id, "gutter_mm": gutter}])
+
+    # --- panels: gutters, borders, templates ------------------------------------------------------------
+
+    def gutter_mm(self, cut: str) -> float:
+        """The gutter for a new cut: between tiers (a horizontal cut) or between side-by-side panels."""
+        from PySide6.QtCore import QSettings
+
+        settings = QSettings("Genko", "Genko Studio")
+        default = 6.0 if cut == "horizontal" else 3.0
+        try:
+            return float(settings.value(f"gutter_{cut}", default))
+        except (TypeError, ValueError):
+            return default
+
+    def _gutter_settings(self) -> None:
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QDialogButtonBox, QDoubleSpinBox, QFormLayout
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("コマ間隔")
+        spins = {}
+        form = QFormLayout(dialog)
+        for key, label in (("horizontal", "上下の間隔（段と段の間）"), ("vertical", "左右の間隔（横に並ぶコマの間）")):
+            spin = QDoubleSpinBox()
+            spin.setRange(0, 30)
+            spin.setSingleStep(0.5)
+            spin.setSuffix(" mm")
+            spin.setValue(self.gutter_mm(key))
+            form.addRow(label, spin)
+            spins[key] = spin
+        form.addRow(QLabel("これから割るコマに使います。今ある間隔は、コマ ツール（F）で間の白をドラッグして変えます。"))
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            settings = QSettings("Genko", "Genko Studio")
+            for key, spin in spins.items():
+                settings.setValue(f"gutter_{key}", spin.value())
+
+    def _cut_frame(self, frame_id: str, p0: QPointF, p1: QPointF) -> None:
+        page = self._current()
+        horizontal = abs(p1.x() - p0.x()) >= abs(p1.y() - p0.y())
+        self.apply_ops([{"op": "cut_frame", "page": page.index, "frame_id": frame_id, "p0": [round(p0.x(), 2), round(p0.y(), 2)],
+                         "p1": [round(p1.x(), 2), round(p1.y(), 2)], "gutter_mm": self.gutter_mm("horizontal" if horizontal else "vertical")}])
+
+    def _set_selected_frame(self, change: dict) -> None:
+        frame = self.selected_frame()
+        if frame is None:
+            QMessageBox.information(self, "Genko", "先にコマをクリックして選びます")
+            return
+        self.apply_ops([{"op": "set_frame", "page": self._current().index, "frame_id": frame.id, **change}])
+
+    def _border_width(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        frame = self.selected_frame()
+        if frame is None:
+            QMessageBox.information(self, "Genko", "先にコマをクリックして選びます")
+            return
+        value, ok = QInputDialog.getDouble(self, "枠線の太さ", "枠線の太さ（mm）", float(frame.border_mm), 0.0, 5.0, 2)
+        if ok:
+            self._set_selected_frame({"border_mm": value})
+
+    def _toggle_bleed(self) -> None:
+        frame = self.selected_frame()
+        if frame is None:
+            QMessageBox.information(self, "Genko", "先にコマをクリックして選びます")
+            return
+        self._set_selected_frame({"bleed": not frame.bleed})
+        self.flash("断ち切りにしました（紙の端に接する辺は枠線なし）" if not frame.bleed else "断ち切りをやめました")
+
+    def _templates(self) -> None:
+        from genko.app.dialogs import TemplateDialog
+
+        page = self._current()
+        if page is None:
+            return
+        dialog = TemplateDialog(self, self.episode, page)
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.ops:
+            return
+        if dialog.needs_clearing and QMessageBox.question(
+                self, "Genko", f"{page.index} ページのコマと台詞を消して、テンプレートで割り直します。\n（元に戻す で取り消せます）") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        self.apply_ops(dialog.ops)
 
     def _merge(self) -> None:
         page = self._current()

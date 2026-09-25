@@ -205,6 +205,14 @@ Lettering (M11):
 - Tails: `tails: [{to: [x, y], via?: [x, y], width_mm?}]` — several per balloon, curved through `via`. `tail` (one straight tail) still works.
 - Vertical text: kinsoku at both ends of a column (closing marks hang at the end of the previous column), balanced columns, ruby runs. `reorder_lines {page, order}` sets the reading order.
 
+Panels (M12):
+
+- A panel is a rectangle or a polygon (`poly`, page mm; `rect` is then its box). `split_frame {tilt_mm}` slants a split; `cut_frame {p0, p1, gutter_mm, frame_id?}` cuts a panel along any line (the panel under the line's middle when no frame_id). Split nodes keep their cut (`split`: the line in the node's own 0..1 box and the gutter), so cuts follow their panel when the page is re-laid.
+- `move_gutter {frame_id: the split, index?, delta_mm, gutter_mm?}` moves the gutter (and can set its width); the panels on both sides and everything inside them are laid out again. Stacks from `set_layout` move the same way.
+- `set_frame {poly}` makes a free-form panel (it keeps its form when the page is re-laid; `poly: null` goes back to the cut), `border_mm` (0: no border), `bleed`.
+- Reading order follows the middle of each panel (slanted boxes overlap). Ink, fills and placed art are clipped to the polygon; `set_layer {panel_clip: false}` lets a layer run out of the panels.
+- Layout changes (`cut_frame`, `move_gutter`, `set_frame poly`) are refused for agents once the name is approved, like `split_frame`.
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

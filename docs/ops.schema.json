@@ -8,6 +8,7 @@
       "axis": "horizontal|vertical",
       "ratio": "float",
       "gutter_mm": "float",
+      "tilt_mm": "float? (slant: the cut's ends differ by this)",
       "frame_id": "optional",
       "force": "bool? (placed art goes to studio.orphans)"
     },
@@ -29,7 +30,25 @@
       "frame_id": "str",
       "bleed": "bool?",
       "clip": "bool?",
-      "border_mm": "float?"
+      "border_mm": "float? (0: no border)",
+      "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)"
+    },
+    {
+      "op": "cut_frame",
+      "page": "int",
+      "frame_id": "str?",
+      "p0": "[x,y]",
+      "p1": "[x,y]",
+      "gutter_mm": "float?",
+      "note": "cut a panel along any line (slanted panels)"
+    },
+    {
+      "op": "move_gutter",
+      "page": "int",
+      "frame_id": "str (the split)",
+      "index": "int? (gutter after this child)",
+      "delta_mm": "float",
+      "gutter_mm": "float? (new width)"
     },
     {
       "op": "add_line",
@@ -126,6 +145,7 @@
       "clip": "bool?",
       "lock_alpha": "bool?",
       "locked": "bool?",
+      "panel_clip": "bool? (false: lines run out of the panels)",
       "name": "str?"
     },
     {

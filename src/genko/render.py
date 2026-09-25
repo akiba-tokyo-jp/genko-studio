@@ -93,7 +93,7 @@ def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Ima
             patch.putalpha(solo.point(lambda v, a=alpha: v * a // 255))
             out = Image.alpha_composite(out, patch)
             draw = ImageDraw.Draw(out)
-    if panel_mask is not None:
+    if panel_mask is not None and getattr(layer, "panel_clip", True):
         out.putalpha(_and_alpha(out, panel_mask))
     if getattr(layer, "lock_alpha", False) and raster is not None:
         out.putalpha(ImageChops.multiply(out.split()[3], raster.convert("RGBA").split()[3]))
@@ -107,8 +107,16 @@ def _clip_mask(page: Page, size: tuple[int, int], dpi: int) -> Image.Image | Non
     mask = Image.new("L", size, 0)
     draw = ImageDraw.Draw(mask)
     for frame in leaves:
-        draw.rectangle(rect_px(frame.rect, dpi), fill=255)
+        fill_frame(draw, frame, dpi)
     return mask
+
+
+def fill_frame(draw: ImageDraw.ImageDraw, frame, dpi: int, fill=255) -> None:
+    """A panel's area: its rectangle, or its polygon when it is slanted or free-form."""
+    if getattr(frame, "poly", None):
+        draw.polygon([_xy(p, dpi) for p in frame.poly], fill=fill)
+    else:
+        draw.rectangle(rect_px(frame.rect, dpi), fill=fill)
 
 
 def _and_alpha(layer: Image.Image, mask: Image.Image) -> Image.Image:
@@ -179,6 +187,10 @@ def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, 
         fitted = _finish_placed(fitted, layer, page, episode, dpi, mode, (vx0, vy0))
     canvas = Image.new("RGBA", size, (0, 0, 0, 0))
     canvas.paste(fitted, (vx0, vy0))
+    if frame is not None and getattr(frame, "poly", None) and layer.clip_to == "frame":
+        shape_mask = Image.new("L", size, 0)
+        fill_frame(ImageDraw.Draw(shape_mask), frame, dpi)
+        canvas.putalpha(ImageChops.multiply(canvas.split()[3], shape_mask))
     return canvas
 
 
@@ -441,6 +453,11 @@ def _draw_crop_marks(draw: ImageDraw.ImageDraw, page: Page, dpi: int) -> None:
 def _draw_frames(draw: ImageDraw.ImageDraw, page: Page, working_dpi: int) -> None:
     for frame in page.leaf_frames():
         width_px = max(1, mm_to_px(frame.border_mm if frame.border_mm is not None else 0.8, working_dpi))
+        if frame.border_mm is not None and frame.border_mm <= 0:
+            continue  # a panel without a border
+        if getattr(frame, "poly", None):
+            draw.polygon([_xy(p, working_dpi) for p in frame.poly], outline=(20, 20, 20), width=width_px)
+            continue
         if not frame.bleed:
             draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
             continue

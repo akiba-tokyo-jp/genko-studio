@@ -162,6 +162,7 @@ class Layer:
     clip: bool = False
     lock_alpha: bool = False
     locked: bool = False  # nothing can be drawn on or erased from a locked layer
+    panel_clip: bool = True  # lines stay inside the panels; False lets them run out (はみ出し)
     parent_id: str | None = None
     asset: str | None = None  # placed: "sha256:…" in assets/
     frame_id: str | None = None  # placed: the panel it belongs to
@@ -182,6 +183,9 @@ class Frame:
     bleed: bool = False
     border_mm: float = 0.8
     panel: dict | None = None  # leaf only: the panel brief (PanelSpec), candidates and adoption
+    poly: list | None = None  # a slanted or free-form panel: its corners (page mm); rect is their box
+    split: dict | None = None  # a split node's cut: {"a", "b"} in its box's 0..1 coordinates, "gutter_mm"
+    custom: bool = False  # a person shaped this panel by hand (it keeps its form when the page is re-laid)
 
 
 @dataclass
@@ -323,11 +327,14 @@ class Page:
     def _walk_leaves(self, frame: Frame) -> list[Frame]:
         if not frame.children:
             return [frame]
+        from genko.frames import centroid, shape
+
         children = list(frame.children)
+        # by the middle of each child (slanted panels' boxes overlap): right to left, top to bottom
         if frame.split_axis == "vertical":
-            children.sort(key=lambda child: -child.rect.x)
+            children.sort(key=lambda child: -centroid(shape(child))[0])
         else:
-            children.sort(key=lambda child: child.rect.y)
+            children.sort(key=lambda child: centroid(shape(child))[1])
         out: list[Frame] = []
         for child in children:
             out.extend(self._walk_leaves(child))
@@ -345,8 +352,10 @@ class Page:
         raise KeyError(frame_id)
 
     def frame_at(self, x_mm: float, y_mm: float) -> Frame | None:
+        from genko.frames import contains
+
         for frame in self.leaf_frames():
-            if frame.rect.contains(x_mm, y_mm):
+            if contains(frame, x_mm, y_mm):
                 return frame
         return None
 

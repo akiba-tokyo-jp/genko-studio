@@ -83,6 +83,9 @@ class PageCanvas(QWidget):
     lineEditRequested = Signal(str)  # double-click on a balloon: type over it
     lineContextMenu = Signal(str, QPointF)
     textRequested = Signal(float, float)  # the text tool clicked here (mm)
+    gutterMoved = Signal(str, int, float)  # split node id, gutter index, delta mm (a move_gutter op)
+    cutRequested = Signal(str, QPointF, QPointF)  # panel id, cut line ends (mm): a cut_frame op
+    frameShaped = Signal(str, object)  # panel id, [[x, y], …]: a free-form panel (set_frame poly)
 
     def __init__(self) -> None:
         super().__init__()
@@ -107,6 +110,8 @@ class PageCanvas(QWidget):
         self.show_guides = True  # bleed, trim line and the basic frame
         self.selected_line_id: str | None = None
         self._handle_drag: dict | None = None
+        self._frame_drag: dict | None = None  # the panel tool: {"kind": gutter|cut|vertex, ...}
+        self._modifiers = Qt.KeyboardModifier.NoModifier
         self.editor: InlineEditor | None = None
         self.overlay_name_strokes = False  # show the name strokes faintly over a proof render
         # renderer(dpi) -> QPixmap of the whole page; set by the window
@@ -300,25 +305,155 @@ class PageCanvas(QWidget):
         """Without a renderer (tests, or before the first render): frames and balloon boxes."""
         painter.setPen(QPen(QColor("#111111"), 2))
         for frame in self.page.leaf_frames():
-            self._draw_rect(painter, frame.rect)
+            self._draw_frame(painter, frame)
         for line in self.lines:
             self._draw_balloon_box(painter, line, None)
 
     def _draw_selection(self, painter: QPainter) -> None:
         hover_frame = None
-        if self.tool == "select" and self._hover and not self._drag_line:
+        if self.tool in ("select", "frame") and self._hover and not self._drag_line:
             if self._hit_line(*self._hover) is None:
                 hover_frame = self.page.frame_at(*self._hover)
         for frame in self.page.leaf_frames():
             if frame.id == self.page.selected_frame_id:
                 painter.setPen(QPen(QColor("#1c7ed6"), 3))
                 painter.setBrush(QColor(28, 126, 214, 16))
-                self._draw_rect(painter, frame.rect)
+                self._draw_frame(painter, frame)
             elif hover_frame is not None and frame.id == hover_frame.id:
                 painter.setPen(QPen(QColor(28, 126, 214, 150), 1.5, Qt.PenStyle.DashLine))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                self._draw_rect(painter, frame.rect)
+                self._draw_frame(painter, frame)
         painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self.tool == "frame":
+            self._draw_frame_tool(painter)
+
+    def _draw_frame(self, painter: QPainter, frame) -> None:
+        from genko.frames import shape
+
+        painter.drawPolygon([self._pt(x, y) for x, y in shape(frame)])
+
+    # --- the panel tool: drag gutters, cut panels (any angle), move corners -------------------------------
+
+    def _gutters(self) -> list[dict]:
+        from genko.frames import gutters
+
+        return gutters(self.page.frames[0]) if self.page and self.page.frames else []
+
+    def _hit_gutter(self, x_mm: float, y_mm: float):
+        from genko.frames import distance_to_segment
+
+        tolerance = 6 / self._scale
+        best = None
+        for gutter in self._gutters():
+            d = distance_to_segment((x_mm, y_mm), gutter["p0"], gutter["p1"])
+            if d <= gutter["width"] / 2 + tolerance and (best is None or d < best[0]):
+                best = (d, gutter)
+        return best[1] if best else None
+
+    def _vertex_handles(self) -> list[tuple[int, tuple[float, float]]]:
+        from genko.frames import shape
+
+        if self.tool != "frame" or not self.page or not self.page.selected_frame_id:
+            return []
+        try:
+            frame = self.page._find(self.page.selected_frame_id)
+        except (KeyError, IndexError):
+            return []
+        drag = self._frame_drag
+        pts = drag["poly"] if drag and drag["kind"] == "vertex" else shape(frame)
+        return list(enumerate(pts))
+
+    def _draw_frame_tool(self, painter: QPainter) -> None:
+        drag = self._frame_drag
+        hover = self._hit_gutter(*self._hover) if self._hover and not drag else None
+        for gutter in self._gutters():
+            strong = hover is gutter or (drag and drag["kind"] == "gutter" and drag["gutter"]["node"] == gutter["node"]
+                                        and drag["gutter"]["index"] == gutter["index"])
+            if not strong:
+                continue
+            p0, p1 = gutter["p0"], gutter["p1"]
+            if drag and drag["kind"] == "gutter":
+                dx, dy = drag["offset"]
+                p0, p1 = (p0[0] + dx, p0[1] + dy), (p1[0] + dx, p1[1] + dy)
+            painter.setPen(QPen(QColor(232, 89, 12, 160), max(3.0, gutter["width"] * self._scale)))
+            painter.drawLine(self._pt(*p0), self._pt(*p1))
+        if drag and drag["kind"] == "cut":
+            painter.setPen(QPen(QColor("#e03131"), 2, Qt.PenStyle.DashLine))
+            painter.drawLine(self._pt(*drag["p0"]), self._pt(*drag["p1"]))
+        if drag and drag["kind"] == "vertex":
+            painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
+            painter.drawPolygon([self._pt(x, y) for x, y in drag["poly"]])
+        for _i, (x, y) in self._vertex_handles():
+            p = self._pt(x, y)
+            painter.setPen(QPen(QColor("#1c7ed6"), 1.5))
+            painter.setBrush(QColor("white"))
+            painter.drawEllipse(p, HANDLE_PX / 2 + 1, HANDLE_PX / 2 + 1)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _frame_press(self, pos: QPointF) -> None:
+        from genko.frames import shape
+
+        x_mm, y_mm = self._to_mm(pos)
+        for i, (vx, vy) in self._vertex_handles():
+            p = self._pt(vx, vy)
+            if abs(p.x() - pos.x()) <= HANDLE_PX + 2 and abs(p.y() - pos.y()) <= HANDLE_PX + 2:
+                frame = self.page._find(self.page.selected_frame_id)
+                self._frame_drag = {"kind": "vertex", "index": i, "frame": frame.id, "poly": [list(p) for p in shape(frame)]}
+                return
+        gutter = self._hit_gutter(x_mm, y_mm)
+        if gutter is not None:
+            self._frame_drag = {"kind": "gutter", "gutter": gutter, "start": (x_mm, y_mm), "offset": (0.0, 0.0), "delta": 0.0}
+            return
+        frame = self.page.frame_at(x_mm, y_mm)
+        # a cut may start outside the panels (from the margin across): the panel is found on release
+        self._frame_drag = {"kind": "cut", "frame": frame.id if frame else None, "p0": (x_mm, y_mm), "p1": (x_mm, y_mm)}
+
+    def _frame_move(self, pos: QPointF) -> None:
+        import math
+
+        drag = self._frame_drag
+        x_mm, y_mm = self._to_mm(pos)
+        if drag["kind"] == "vertex":
+            drag["poly"][drag["index"]] = [round(x_mm, 2), round(y_mm, 2)]
+        elif drag["kind"] == "gutter":
+            g = drag["gutter"]
+            (ax, ay), (bx, by) = g["p0"], g["p1"]
+            length = math.hypot(bx - ax, by - ay) or 1.0
+            nx, ny = -(by - ay) / length, (bx - ax) / length
+            if (g["horizontal"] and ny < 0) or (not g["horizontal"] and nx < 0):
+                nx, ny = -nx, -ny
+            delta = (x_mm - drag["start"][0]) * nx + (y_mm - drag["start"][1]) * ny
+            drag["delta"], drag["offset"] = delta, (nx * delta, ny * delta)
+        else:
+            x0, y0 = drag["p0"]
+            dx, dy = x_mm - x0, y_mm - y0
+            # nearly level or upright cuts snap straight (hold Alt for a free angle)
+            free = bool(self._modifiers & Qt.KeyboardModifier.AltModifier)
+            if not free and abs(dy) <= abs(dx) * 0.07:
+                y_mm = y0
+            elif not free and abs(dx) <= abs(dy) * 0.07:
+                x_mm = x0
+            drag["p1"] = (x_mm, y_mm)
+        self.update()
+
+    def _frame_release(self) -> None:
+        import math
+
+        drag, self._frame_drag = self._frame_drag, None
+        if drag["kind"] == "vertex":
+            self.frameShaped.emit(drag["frame"], drag["poly"])
+        elif drag["kind"] == "gutter":
+            if abs(drag["delta"]) > 0.2:
+                self.gutterMoved.emit(drag["gutter"]["node"], drag["gutter"]["index"], round(drag["delta"], 2))
+        elif math.dist(drag["p0"], drag["p1"]) >= 5:
+            mid = ((drag["p0"][0] + drag["p1"][0]) / 2, (drag["p0"][1] + drag["p1"][1]) / 2)
+            target = self.page.frame_at(*mid)
+            frame_id = target.id if target is not None else drag["frame"]
+            if frame_id:
+                self.cutRequested.emit(frame_id, QPointF(*drag["p0"]), QPointF(*drag["p1"]))
+        elif drag["frame"]:
+            self.frameSelected.emit(drag["frame"])
+        self.update()
 
     # --- balloon handles -----------------------------------------------------------------------------
 
@@ -455,6 +590,12 @@ class PageCanvas(QWidget):
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self.tool == "text":
             self.setCursor(Qt.CursorShape.IBeamCursor)
+        elif self.tool == "frame" and pos is not None and self.page is not None:
+            gutter = self._hit_gutter(*self._to_mm(pos))
+            if gutter is not None:
+                self.setCursor(Qt.CursorShape.SplitVCursor if gutter["horizontal"] else Qt.CursorShape.SplitHCursor)
+            else:
+                self.setCursor(Qt.CursorShape.CrossCursor)
         elif pos is not None and self.page is not None and self._hit_line(*self._to_mm(pos)):
             self.setCursor(Qt.CursorShape.SizeAllCursor)
         else:
@@ -479,6 +620,11 @@ class PageCanvas(QWidget):
         self._press_pos = pos
         if self.tool == "text":
             self.textRequested.emit(x_mm, y_mm)
+            return
+        if self.tool == "frame":
+            self._modifiers = event.modifiers()
+            self._frame_press(pos)
+            self.update()
             return
         if self.tool == "select":
             handle = self._hit_handle(pos)
@@ -514,6 +660,10 @@ class PageCanvas(QWidget):
         if self._handle_drag is not None:
             self._drag_handle(pos)
             return
+        if self._frame_drag is not None:
+            self._modifiers = event.modifiers()
+            self._frame_move(pos)
+            return
         if self._drag_line is not None:
             x_mm, y_mm = self._to_mm(pos)
             gx, gy = self._drag_grab
@@ -539,6 +689,10 @@ class PageCanvas(QWidget):
             self._panning = False
             self._press_pos = None
             self._update_cursor(event.position())
+            return
+        if self._frame_drag is not None:
+            self._press_pos = None
+            self._frame_release()
             return
         if self._handle_drag is not None:
             drag, self._handle_drag = self._handle_drag, None

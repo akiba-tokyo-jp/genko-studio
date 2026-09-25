@@ -33,6 +33,9 @@ def _frame(data: dict) -> Frame:
         bleed=data.get("bleed", False),
         border_mm=float(data.get("border_mm", 0.8)),
         panel=data.get("panel"),
+        poly=[tuple(p) for p in data["poly"]] if data.get("poly") else None,
+        split=dict(data["split"]) if data.get("split") else None,
+        custom=bool(data.get("custom", False)),
     )
 
 
@@ -79,6 +82,7 @@ def _layer_fields(data: dict, role: LayerRole) -> Layer:
         clip=bool(data.get("clip", False)),
         lock_alpha=bool(data.get("lock_alpha", False)),
         locked=bool(data.get("locked", False)),
+        panel_clip=bool(data.get("panel_clip", True)),
         parent_id=data.get("parent_id"),
     )
 

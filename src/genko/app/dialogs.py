@@ -308,3 +308,99 @@ class ExportDialog(QDialog):
         if box.clickedButton() is open_button:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(out)))
         self.accept()
+
+
+# --- panel layout templates --------------------------------------------------------------------------------
+
+
+def _tree(frame) -> dict:
+    r = frame.rect
+    node = {"rect_mm": [r.x, r.y, r.width, r.height]}
+    if frame.children:
+        node["axis"] = frame.split_axis
+        node["children"] = [_tree(child) for child in frame.children]
+    return node
+
+
+def _plan(key: str) -> dict:
+    """A template as a layout plan (a person's layout has no panel briefs yet)."""
+    from genko.studio import layout
+
+    slots = layout.slots_in_order(layout.resolve_tiers({"template": key}))
+    return {"template": key, "panels": [{"slot": slot} for slot in slots]}
+
+
+class TemplateDialog(QDialog):
+    """Pick a panel layout; `ops` are the ops that clear the page and cut it (applied by the window)."""
+
+    def __init__(self, parent, episode, page) -> None:
+        import copy
+
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QIcon
+
+        from genko.app.studio_widgets import to_pixmap
+        from genko.render import render_page
+        from genko.studio import layout
+
+        super().__init__(parent)
+        self.setWindowTitle("テンプレートでコマを割る")
+        self.resize(720, 520)
+        self.episode, self.page = episode, page
+        self.ops: list[dict] = []
+        self.needs_clearing = not layout.is_blank(episode, page)
+        self.list = QListWidget()
+        self.list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.list.setIconSize(QSize(120, 170))
+        self.list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list.setSpacing(8)
+        self.list.setWordWrap(True)
+        for key, spec in layout.templates().items():
+            trial = copy.deepcopy(episode)
+            target = next(p for p in trial.pages if p.index == page.index)
+            try:
+                layout.clear_page(trial, target, agent="human:preview")
+                layout.apply_layout(trial, page.index, _plan(key), agent="human:preview")
+                target = next(p for p in trial.pages if p.index == page.index)
+                icon = QIcon(to_pixmap(render_page(target, 20, mode="print", episode=trial)))
+            except Exception:
+                continue
+            item = QListWidgetItem(icon, spec.get("description") or key)
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            self.list.addItem(item)
+        self.list.itemDoubleClicked.connect(lambda _: self.choose())
+        note = QLabel("コマと台詞は作り直されます（元に戻す で取り消せます）。" if self.needs_clearing else "空のページをテンプレートで割ります。")
+        note.setWordWrap(True)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("このテンプレートで割る")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
+        buttons.accepted.connect(self.choose)
+        buttons.rejected.connect(self.reject)
+        layout_box = QVBoxLayout(self)
+        layout_box.addWidget(self.list, 1)
+        layout_box.addWidget(note)
+        layout_box.addWidget(buttons)
+
+    def choose(self) -> None:
+        import copy
+
+        from genko.studio import layout
+
+        item = self.list.currentItem()
+        if item is None:
+            return
+        trial = copy.deepcopy(self.episode)
+        target = next(p for p in trial.pages if p.index == self.page.index)
+        try:
+            layout.clear_page(trial, target, agent="human:preview")
+            layout.apply_layout(trial, self.page.index, _plan(item.data(Qt.ItemDataRole.UserRole)), agent="human:preview")
+        except Exception as exc:
+            from genko.app import wording
+
+            QMessageBox.warning(self, "Genko", wording.error(str(exc)))
+            return
+        done = next(p for p in trial.pages if p.index == self.page.index)
+        # one op with the finished tree (split ids made on the copy would not match the book)
+        self.ops = [{"op": "delete_line", "id": line.id} for line in self.episode.story_for_page(self.page.index)]
+        self.ops.append({"op": "set_layout", "page": self.page.index, "tree": _tree(done.frames[0]), "force": True})
+        self.accept()
