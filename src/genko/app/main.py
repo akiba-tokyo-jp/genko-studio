@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, QPointF, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QFileSystemWatcher, QPoint, QPointF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
+    QTabBar,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -1181,11 +1182,20 @@ def filter_params(parent, kind: str, now: dict | None = None) -> dict | None:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, path: Path | None = None, actor: str | None = None) -> None:
+    def __init__(self, path: Path | None = None, actor: str | None = None, session: Session | None = None) -> None:
         super().__init__()
+        from genko.app import documents
+
         self.setWindowTitle("Genko Studio")
         self.resize(1280, 800)
-        self.session = Session.open(path, actor) if path else Session(new_episode("無題", 1, 8, PageSpec.a4_mono()), actor=actor)
+        if session is not None:  # (another window on a book already open: they share it)
+            self.session = session
+        else:
+            self.session = Session.open(path, actor) if path else Session(new_episode("無題", 1, 8, PageSpec.a4_mono()), actor=actor)
+        self.documents = [documents.Document(self.session)]
+        self._doc = 0
+        self._closed = False
+        documents.register(self)
         self._page_index = 0
         self._commit_timer = QTimer(self)
         self._commit_timer.setSingleShot(True)
@@ -1264,7 +1274,24 @@ class MainWindow(QMainWindow):
         self._stale_docks: set = set()
         self.canvas.zoomChanged.connect(lambda _: self._refresh_zoom())
 
-        self.setCentralWidget(self.canvas)  # the page gets the room; everything else sits in panels around it
+        # the page gets the room; everything else sits in panels around it. Above it, a tab for each open book
+        self.doc_tabs = QTabBar()
+        self.doc_tabs.setTabsClosable(True)
+        self.doc_tabs.setMovable(True)
+        self.doc_tabs.setDocumentMode(True)
+        self.doc_tabs.setExpanding(False)
+        self.doc_tabs.setElideMode(Qt.TextElideMode.ElideRight)
+        self.doc_tabs.addTab(self.documents[0].title)
+        self.doc_tabs.currentChanged.connect(self._switch_document)
+        self.doc_tabs.tabCloseRequested.connect(self.close_document)
+        self.doc_tabs.tabMoved.connect(self._document_moved)
+        central = QWidget()
+        column = QVBoxLayout(central)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        column.addWidget(self.doc_tabs)
+        column.addWidget(self.canvas, 1)
+        self.setCentralWidget(central)
 
         self.status = QLabel()
         self.zoom_label = QLabel()
@@ -1317,7 +1344,130 @@ class MainWindow(QMainWindow):
             self._reload_pages()
         else:
             self._after_edit()
+        self._tell_others()
         return True
+
+    # --- several books, and one book in several windows (J11) --------------------------------------------------
+
+    def _tell_others(self) -> None:
+        from genko.app import documents
+
+        documents.notify(self.session, self)
+
+    def on_shared_change(self) -> None:
+        """The book changed in another window: show it here (only the pages that changed are drawn again)."""
+        if self._closed:
+            return
+        if self.pages.count() != len(self.episode.pages):
+            self._reload_pages()
+            return
+        seen = getattr(self, "_seen_pages", {})
+        current = self._current()
+        redraw = False
+        for page in self.episode.pages:
+            if seen.get(page.id) is not page:  # (an edit makes new page objects: the others are as they were)
+                self.pages.update_page(page, self._page_text(page))
+                redraw = redraw or (current is not None and page.id == current.id)
+        self._remember_pages()
+        if redraw or current is None or self.canvas.page is not current:
+            self._show_page(light=True)
+        self._refresh_status()
+
+    def _remember_pages(self) -> None:
+        self._seen_pages = {page.id: page for page in self.episode.pages}
+
+    def _store_document(self) -> None:
+        if not self.documents:
+            return
+        doc = self.documents[self._doc]
+        doc.session = self.session
+        doc.page_index = self._page_index
+        doc.view = self.canvas.view_state()
+        doc.target_layer_id = self._target_layer_id
+
+    def _show_document(self, index: int) -> None:
+        doc = self.documents[index]
+        self._doc = index
+        self.session = doc.session
+        self._page_index = doc.page_index
+        self._target_layer_id = doc.target_layer_id
+        self.panel_view.frame_id = None
+        self.canvas.set_selection(None)
+        self._watch()
+        self._reload_pages()
+        self.canvas.set_view_state(doc.view)
+        self.doc_tabs.blockSignals(True)
+        self.doc_tabs.setCurrentIndex(index)
+        self.doc_tabs.setTabText(index, doc.title)
+        self.doc_tabs.setTabToolTip(index, str(doc.session.path or "未保存"))
+        self.doc_tabs.blockSignals(False)
+        self._refresh_status()
+
+    def _switch_document(self, index: int) -> None:
+        if not 0 <= index < len(self.documents) or index == self._doc:
+            return
+        self.commit_now()
+        self._store_document()
+        self._show_document(index)
+
+    def next_document(self, step: int = 1) -> None:
+        if len(self.documents) > 1:
+            self._switch_document((self._doc + step) % len(self.documents))
+
+    def _document_moved(self, old: int, new: int) -> None:
+        doc = self.documents.pop(old)
+        self.documents.insert(new, doc)
+        self._doc = self.doc_tabs.currentIndex()
+
+    def add_document(self, session: Session) -> None:
+        """A book in a new tab, shown now. An untouched untitled book in the only tab gives its place."""
+        from genko.app import documents
+
+        self.commit_now()
+        self._store_document()
+        if len(self.documents) == 1 and self.session.path is None and not self.session.dirty:
+            self.documents[0] = documents.Document(session)
+            self._doc = -1
+            self._show_document(0)
+            self.canvas.fit_page()
+            return
+        self.documents.append(documents.Document(session))
+        self.doc_tabs.blockSignals(True)
+        self.doc_tabs.addTab(self.documents[-1].title)
+        self.doc_tabs.blockSignals(False)
+        self._show_document(len(self.documents) - 1)
+        self.canvas.fit_page()
+
+    def close_document(self, index: int | None = None) -> None:
+        """Close a book's tab (it is written first); the last one closes the window."""
+        index = self._doc if index is None else index
+        if not 0 <= index < len(self.documents):
+            return
+        if len(self.documents) == 1:
+            self.close()
+            return
+        if index == self._doc:
+            self.commit_now()
+        else:
+            self._store_document()
+        self.documents.pop(index)
+        self.doc_tabs.blockSignals(True)
+        self.doc_tabs.removeTab(index)
+        self.doc_tabs.blockSignals(False)
+        if index == self._doc:
+            self._show_document(min(index, len(self.documents) - 1))
+        else:
+            self._doc = self.doc_tabs.currentIndex()
+
+    def new_window(self) -> "MainWindow":
+        """The same book in another window (both show every change; each has its own page and zoom)."""
+        self.commit_now()
+        window = MainWindow(session=self.session, actor=self.session.actor)
+        window.resize(self.size())
+        window.go_to_page(self._current().index if self._current() else 1)
+        window.show()
+        window.move(self.pos() + QPoint(40, 40))
+        return window
 
     def _after_edit(self) -> None:
         """An edit on this page: redraw the page at once, the side panels a little later (drawing stays quick)."""
@@ -1344,6 +1494,7 @@ class MainWindow(QMainWindow):
         self._watch()
         if result.rebased or result.conflicts:
             self._reload_pages()  # someone else's changes came in
+            self._tell_others()
         else:
             self._refresh_status()
 
@@ -1362,9 +1513,14 @@ class MainWindow(QMainWindow):
         if result.conflicts:
             self.flash(f"エージェントの変更と重なった操作が {len(result.conflicts)} 件あり、入りませんでした", 6000)
         self._reload_pages()
+        self._tell_others()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        from genko.app import documents
+
         self.commit_now()
+        self._closed = True
+        documents.unregister(self)
         super().closeEvent(event)
 
     # --- actions, menus and toolbars ------------------------------------------------------------
@@ -1628,7 +1784,11 @@ class MainWindow(QMainWindow):
         self.act_line_edit = a("選んだ台詞をその場で直す", self._edit_selected_line, "F2")
         self.act_line_delete = a("選んだ台詞を消す", self._delete_selected_line)
         self.act_line_wrap = a("縦書き・横書きを切り替える", self._toggle_selected_wrap)
-        self.act_close = a("閉じる", self.close, QKeySequence.StandardKey.Close)
+        self.act_close = a("閉じる", lambda: self.close_document(), QKeySequence.StandardKey.Close, "この原稿を閉じます（最後の原稿ならウィンドウも）")
+        self.act_new_window = a("新しいウィンドウ（同じ原稿）", self.new_window,
+                                tip="この原稿をもう 1 つのウィンドウで開きます。拡大して描きながら、別の窓で全体を見る")
+        self.act_next_doc = a("次の原稿", lambda: self.next_document(1), "Ctrl+Tab")
+        self.act_prev_doc = a("前の原稿", lambda: self.next_document(-1), "Ctrl+Shift+Tab")
         self.act_quit = a("Genko を終わる", lambda: QApplication.instance().closeAllWindows(), QKeySequence.StandardKey.Quit)
 
         bar = self.menuBar()
@@ -1717,6 +1877,10 @@ class MainWindow(QMainWindow):
                 else:
                     menu.addAction(act)
         self.view_menu = bar.addMenu("ウィンドウ")
+        self.view_menu.addAction(self.act_new_window)
+        self.view_menu.addAction(self.act_next_doc)
+        self.view_menu.addAction(self.act_prev_doc)
+        self.view_menu.addSeparator()
         self.workspace_menu = self.view_menu.addMenu("ワークスペース")
         self.workspace_menu.aboutToShow.connect(self._fill_workspaces)
         self.view_menu.addAction(self.act_edit_commandbar)
@@ -2517,6 +2681,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "agent_docks"):
             self._agent_view(self._agent_book())  # an agent may have started working on this book
         self.pages.fill(self.episode.pages, self._page_text, dirty="all")
+        self._remember_pages()
         self.pages.blockSignals(True)
         self.pages.setCurrentRow(min(self._page_index, len(self.episode.pages) - 1))
         self.pages.blockSignals(False)
@@ -2659,6 +2824,8 @@ class MainWindow(QMainWindow):
         if getattr(self, "_recording", None) is not None:
             saved += " ・ ● オートアクションを記録中"
         self.setWindowTitle(f"{self.episode.title} 第{self.episode.episode}話 — Genko Studio")
+        if hasattr(self, "doc_tabs") and 0 <= self._doc < self.doc_tabs.count():
+            self.doc_tabs.setTabText(self._doc, self.documents[self._doc].title)
         if page is None:
             self.status.setText(saved)
             return
@@ -4321,6 +4488,7 @@ class MainWindow(QMainWindow):
             self.flash(wording.error(str(exc)), 3000)
         self._watch()
         self._reload_pages()
+        self._tell_others()
 
     def _redo(self) -> None:
         try:
@@ -4329,6 +4497,7 @@ class MainWindow(QMainWindow):
             self.flash(wording.error(str(exc)), 3000)
         self._watch()
         self._reload_pages()
+        self._tell_others()
 
     # --- files ---------------------------------------------------------------------------------------
 
@@ -4338,14 +4507,15 @@ class MainWindow(QMainWindow):
             self.open_project(dialog.created)
 
     def open_project(self, path: Path) -> None:
-        self.commit_now()
-        self.session = Session.open(Path(path), self.session.actor)
+        """Open a book in a new tab (to its tab, if it is open here already; sharing it, if another window has it)."""
+        from genko.app import documents
+
         remember_project(Path(path))
-        self._page_index = 0
-        self.panel_view.frame_id = None
-        self._watch()
-        self._reload_pages()
-        self.canvas.fit_page()
+        window, doc = documents.find(path)
+        if window is self:
+            self._switch_document(self.documents.index(doc))
+            return
+        self.add_document(doc.session if doc is not None else Session.open(Path(path), self.session.actor))
 
     def _open(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "原稿（.genko のフォルダ）を開く")

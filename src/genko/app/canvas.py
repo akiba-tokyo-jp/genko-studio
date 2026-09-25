@@ -448,6 +448,24 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self.changed.emit()
         self.update()
 
+    def view_state(self) -> dict:
+        """How the page is shown (zoom, scroll, turn, mirror), to come back to it later."""
+        return {"scale": self._scale, "pan": (self._pan_x, self._pan_y), "fitted": self._fitted, "rotation": self.rotation,
+                "flipped": self.flipped}
+
+    def set_view_state(self, state: dict | None) -> None:
+        if not state or state.get("fitted", True):
+            self.rotation = float((state or {}).get("rotation", 0.0))
+            self.flipped = bool((state or {}).get("flipped", False))
+            self.fit_page()
+            return
+        self._scale = max(MIN_SCALE, min(MAX_SCALE, float(state["scale"])))
+        self._pan_x, self._pan_y = state["pan"]
+        self._fitted = False
+        self.rotation = float(state.get("rotation", 0.0))
+        self.flipped = bool(state.get("flipped", False))
+        self._after_zoom()
+
     def reset_view(self) -> None:
         self.rotation = 0.0
         self.flipped = False
