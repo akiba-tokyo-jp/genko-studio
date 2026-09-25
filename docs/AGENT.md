@@ -260,3 +260,29 @@ genko studio tools list
 Every agent tool is also on the shell: `genko studio call PROJECT generation_request args.json`.
 
 HTTP: `GET /v1/pages/{n}/frames/{frame_id}.png` renders one panel; `POST /v1/assets?path=PROJECT` (image body) returns `{asset, px}`; `GET /v1/requests/{id}/files/{name}?path=PROJECT` serves a request's guides and references.
+
+## Parity with the app (G6)
+
+Everything a person can do in the app can be done through `apply_ops`; the ops an agent may use are listed in
+`AGENT_OPS` (studio/service.py). Only the human steps stay out of reach: approvals and their undoing
+(`approve`, `revoke`, `name_ok`, `advance`, `reject_sheet`, `resolve_proposal`), page locks and tickets, and
+`set_bible` / `set_script` (they have their own tools).
+
+- Pages: `add_page`, `delete_page`, `duplicate_page`, `reorder`, `set_spread`, `set_page_spec`.
+- Layers: `duplicate_layer`, `merge_down` (pen onto pen stays lines; anything else becomes pixels as it showed),
+  `delete_layer`, `set_layer {exportable, color, …}`, `set_layer_mask {area | fill | invert | enabled | delete}`,
+  `paint_mask {points, width_mm, show}`.
+- Drawing: `define_brush {key: my_…, label, base, width_mm, min_pressure, gamma, opacity, stabilize, taper, texture,
+  rgb, fixed_width}` (the book keeps the definition), `gradient_fill {area?, from, to, rgb_from, rgb_to, opacity_from,
+  opacity_to, shape}`, `filter_raster {kind: levels | curve | hue | blur | sharpen | mosaic, …}`, `flood_fill`,
+  `erase_raster` (pictures come in through `import_image`; `put_raster` can read local files and stays out), `transform_area {warp: {perspective: [4 points]} | {mesh: [9 points]}}`.
+- Lines: `emphasis_runs` (傍点), `style_runs` (`[[words, {scale, bold, rgb}]]`), `path` (a drawn balloon) and the
+  style keys `rotate_deg`, `skew_deg`, `arc`, `bold`, `italic`, `outline_rgb`, `latin`, `emphasis_mark`, `wobble`,
+  `double`, `spikes`, `spike_depth`.
+- 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
+
+Tools: `check` (the same pre-press check as the app; `preflight` also returns it under `checks`), `undo` (the
+agent's own latest saved change only), `export {format: pdf | tiff | png | psd | pack | epub | strip | webtoon | sns,
+pages?, dpi?, area?, width?, max_height?, long_edge?, jpeg?, spreads?}` → files under `<project>/exports/`. The
+official export, recorded as the export approval, stays with people.
+

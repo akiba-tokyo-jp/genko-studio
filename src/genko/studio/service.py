@@ -42,6 +42,11 @@ AGENT_OPS = frozenset({
     "add_tone", "delete_tone", "add_effect", "stamp_material",
     "set_tone", "edit_effect", "delete_effect", "effect_to_layer",
     "set_nombre",
+    # pages, layers, brushes and pixels: everything a person can do to the drawing (G6)
+    "add_page", "delete_page", "duplicate_page", "reorder", "set_spread", "set_page_spec",
+    "delete_layer", "duplicate_layer", "merge_down", "set_layer_mask", "paint_mask",
+    "define_brush", "filter_raster", "flood_fill", "erase_raster", "gradient_fill",  # (put_raster reads files: import_image instead)
+    "set_onion", "step_onion",
     # studio state (M3); approve / revoke are for people only
     "set_studio", "upsert_character", "upsert_location", "delete_location", "upsert_prop", "delete_prop",
     "set_page_plan", "set_panel", "record_review", "request_approval", "request_fix",
@@ -56,7 +61,7 @@ AGENT_TOOLS = frozenset({
     "status", "next", "inspect", "render", "import_image", "set_bible", "set_script", "submit_name", "apply_ops",
     "record_review", "request_approval", "tickets", "generation_request", "import_images", "candidates",
     "review_candidates", "adopt", "request_fix", "report_regions", "finish_page", "preflight", "export_proof", "ask_human",
-    "review_page", "derive", "import_name", "analyze_name", "propose_lines", "proposals",
+    "review_page", "derive", "import_name", "analyze_name", "propose_lines", "proposals", "undo", "export", "check",
 })
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
@@ -427,8 +432,60 @@ class StudioService:
         from genko.studio import preflight
 
         path = self.project_path(project)
-        report = preflight.check(load_episode(path), path, allow_fixture=allow_fixture, force=force)
-        return ToolResult(True, {"ready": report["ok"], **{k: v for k, v in report.items() if k != "ok"}})
+        from genko import checks
+
+        episode = load_episode(path)
+        report = preflight.check(episode, path, allow_fixture=allow_fixture, force=force)
+        found = checks.book(episode, path)  # (and what a person sees in 入稿前の点検)
+        return ToolResult(True, {"ready": report["ok"], **{k: v for k, v in report.items() if k != "ok"},
+                                 "checks": {"errors": found["errors"], "warnings": found["warnings"], "issues": found["issues"]}})
+
+    def check(self, project: str) -> ToolResult:
+        """The same pre-press check a person runs in the app (入稿前の点検): lines off the paper, small or
+        overlapping text, missing art, pages that will not print…"""
+        from genko import checks
+
+        path = self.project_path(project)
+        report = checks.book(load_episode(path), path)
+        return ToolResult(True, {"errors": report["errors"], "warnings": report["warnings"], "issues": report["issues"]})
+
+    def undo(self, project: str) -> ToolResult:
+        """Take back this agent's own latest saved change (never a person's, never an approval)."""
+        from genko.journal import restore
+
+        path = self.project_path(project)
+        try:
+            with ProjectLock(path, agent=self.actor):
+                result = restore(path, actor=self.actor)
+        except ApplyError as exc:
+            return fail(str(exc), "undo_refused", "/")
+        return ToolResult(True, {"undone_revision": result.get("rev")})
+
+    def export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
+               area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int = 2048, jpeg: bool = False,
+               spreads: bool = False) -> ToolResult:
+        """Write the book (or some pages) in any format into <project>/exports/<time>_<format>/, as a person
+        can from the app. Not the official export (that one is recorded as an approval and is for people)."""
+        import time
+
+        from genko.app import exporting
+
+        path = self.project_path(project)
+        if format not in exporting.BY_KEY:
+            return fail(f"format は {' / '.join(exporting.BY_KEY)}", "bad_format", "/format")
+        episode = load_episode(path)
+        if pages is not None:
+            count = len(episode.pages)
+            bad = [p for p in pages if not 1 <= int(p) <= count]
+            if bad or not pages:
+                return fail(f"pages は 1〜{count} のページ番号", "bad_pages", "/pages")
+        out = path / "exports" / f"{time.strftime('%Y%m%d-%H%M%S')}_{format}"
+        result = exporting.run(episode, None, format, out, actor=self.actor, dpi=dpi, width=width, max_height=max_height,
+                               long_edge=long_edge, jpeg=jpeg, spreads=spreads, area=area,
+                               pages=sorted({int(p) for p in pages}) if pages else None)
+        if not result.get("ok"):
+            return fail(str(result.get("error") or "書き出せなかった"), "export_failed", "/")
+        return ToolResult(True, {"folder": str(out), "files": result["files"]}, files=result["files"])
 
     def export_proof(self, project: str, format: str = "pdf") -> ToolResult:  # noqa: A002
         from genko.studio import preflight

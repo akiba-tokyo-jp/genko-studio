@@ -136,9 +136,15 @@ def test_agent_cannot_approve_any_gate(tmp_path: Path):
     async def scenario():
         async with Client(server) as client:
             tools = {t.name for t in (await client.list_tools()).tools}
-            assert not {"approve", "revoke", "export"} & tools
+            assert not {"approve", "revoke"} & tools
             agent = FakeAgent(client, tmp_path, PROJECT, None, pages=4)
             await agent.tool("create_project", name=PROJECT, title="t", pages=4)
+            # an agent may write the book out (export), but that is never the official export: no approval is recorded
+            await agent.tool("export", project=PROJECT, format="png", dpi=30)
+            from genko.io import load_episode
+
+            episode = load_episode(tmp_path / PROJECT)
+            assert not [r for r in episode.studio.get("approvals", []) if r.get("gate") == "export"]
             for op in ({"op": "approve", "gate": "name", "page": 1}, {"op": "approve", "gate": "export"},
                        {"op": "name_ok", "page": 1}, {"op": "revoke", "gate": "name", "page": 1}):
                 result = await agent.tool("apply_ops", ops=[op], commit=True)

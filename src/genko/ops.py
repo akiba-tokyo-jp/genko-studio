@@ -2300,7 +2300,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 
 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
-RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area",
+RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "gradient_fill",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
                              "trace_prims", "effect_to_layer"})
 
@@ -2317,6 +2317,9 @@ def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTO
         page = _require_page(episode, op)
         if not page.art_ok:
             raise ApplyError(f"page {page.index}: finish needs the art approved (strict_gates)")
+    if name in ("set_layer_mask", "paint_mask", "merge_down", "delete_layer", "duplicate_layer") and op.get("id"):
+        op = {**op, "layer_id": op["id"]}  # (these name the layer by id: the same rule as drawing on it)
+        name = "fill"
     if name in ("add_stroke", *RASTER_EDIT_OPS) and op.get("layer_id"):
         page = _require_page(episode, op)
         target = next((item for item in page.layers if item.id == op["layer_id"]), None)

@@ -79,6 +79,24 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 効果音はネーム計画の台詞で `balloon: "sfx"` にする（Genko が大きな縁取り文字で描く。画像に描かせない）。
 - 台詞の見た目は `apply_ops` の `edit_line` で直せる: `balloon`（speech・rounded・box・cloud・thought・shout・flash・whisper・narration・sfx・none）、`style`（`font`: antique・gothic・mincho・maru・hand・sfx・sfx_pop、`size_mm`、`outline_mm` など）、`tails`（`[{to, via}]`、曲がったしっぽ・複数）。人間が直した見た目は変えない。
 
+## 人と同じ道具で描く・直す
+
+人が画面でできることは、`mcp_genko_apply_ops` の op で全部できる（一覧は resource `genko://ops`）。まず `commit: false` で試す。
+
+- ページ: `add_page`・`delete_page`・`duplicate_page`・`reorder`・`set_spread`（見開き）・`set_page_spec`（原稿用紙を変えるとコマや台詞も合わせて動く）。
+- レイヤー: `add_layer`・`duplicate_layer`・`merge_down`（ペン同士は線のまま）・`delete_layer`・`set_layer`（`exportable: false` で下描き＝書き出さない、`color` で画面だけの表示色）。
+  マスクは `set_layer_mask`（`area` の所だけ見せる・`fill`・`invert`・`enabled`・`delete`）と `paint_mask`（`show: true` で見せる、`false` で隠す）。
+- 線と塗り: `add_stroke`（`kind` はブラシ。自作のブラシは `define_brush` で定義してから）、`erase`、`fill`・`fill_area`、`gradient_fill`（`from`・`to`・色・不透明度、`shape: radial` で円）、`filter_raster`（`levels`・`curve`・`hue`・`blur`…）。
+- 範囲の変形: `transform_area` の `matrix`（移動・拡大・回転・反転）か `warp`（`perspective` で 4 隅、`mesh` で 3×3 の点）。レイヤーを丸ごと動かすのは、ページ全体を `area` にした `matrix`。
+- 台詞: `add_line`・`edit_line` の
+  - `ruby_runs`（ルビ）、`emphasis_runs`（傍点）、`style_runs`（一部を大きく・小さく・太く・色を変える: `[["本当", {"scale": 1.4, "bold": true}]]`）。
+  - `style`: `rotate_deg`（フキダシごと回す）、`skew_deg`・`arc`（描き文字の傾き・弓なり）、`bold`・`italic`、`outline_rgb`（フチの色）、`latin`（`rotate` で 4 文字以上の英数字を寝かせる／`upright`）、`emphasis_mark`（`sesame`・`dot`）、`wobble`（手描き風の揺れ）・`double`（二重線）・`spikes`・`spike_depth`（叫びのトゲ）。
+  - `path`（手で描いた形のフキダシ、`set_balloon_path` でも）。
+- 3D: `add_prim3d` の `kind` は `box`・`cylinder`・`stairs`・`floor`（パースの格子）。人形は `add_mannequin`。`trace_prims` で線にする。
+- 点検: `mcp_genko_check` で、人の「入稿前の点検」と同じ問題の一覧を受け取る（`preflight` の結果の `checks` にも入る）。
+- 取り消し: `mcp_genko_undo` で自分の最後の変更を取り消す（人の変更と承認は取り消せない）。
+- 書き出し: `mcp_genko_export`（`format`: pdf・tiff・png・psd・pack・epub・strip・webtoon・sns、`pages`、`dpi`、`area`: paper・bleed・trim）。承認は要らない。書き出し先は原稿の `exports/`。
+
 ## 承認を頼む
 
 `waiting_for` の内容ごとに `mcp_genko_request_approval` を 1 回出す。
@@ -98,4 +116,4 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 人間が固定した欄（pinned）・人間が描いた領域・承認済みの設定画を変えようとしない。
 - 台詞や効果音を「絵の中の文字」として描かせない。文字は Genko が描く。
 - 画像のバイト列を道具の引数に書かない。画像はファイル（`inbox`）かアップロードで渡す。
-- 本番の書き出しをしない（`export_proof` の校正だけはよい）。
+- 正式な書き出し（書き出しの承認として記録するもの）はしない。それは人間だけ。`export` で各形式に書き出して見せるのはよい。

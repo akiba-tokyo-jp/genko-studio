@@ -25,7 +25,8 @@ Genko が検査・コマ割り・縦書き写植・プレビュー描画をす�
 作画: generation_request で依頼パック（サイズ・プロンプトの下書き・描かせないもの・ガイドと参照の画像）を受け取る →
 自分の画像ツールで生成し、画像を返された inbox フォルダに保存 → import_images（来歴 origin を必ず付ける）→
 candidates と render kind=compare で比べる → review_candidates → adopt。コマの外にはみ出した部分は自動で切り取られる。
-採用後は report_regions で顔と人物の位置を報告し、作画の承認後に finish_page。最後に preflight と export_proof。
+採用後は report_regions で顔と人物の位置を報告し、作画の承認後に finish_page。最後に check（人と同じ点検）・preflight と export（各形式）。
+描く・直す: apply_ops でページ・コマ・レイヤー（複製・結合・マスク）・線・塗り・グラデーション・台詞（傍点・部分書式・回転）・3D・トーン・効果線まで、人が画面でできることは全部できる（op 一覧は resource genko://ops）。間違えたら undo（自分の変更だけ）。
 3 回直しても通らないときは ask_human で人間に相談して、その作業を置いておく。
 承認と本番の書き出しは人間だけが行う。承認が要るところでは request_approval を出して待つ。"""
 
@@ -181,6 +182,24 @@ def build_server(root: Path, actor: str) -> MCPServer:
     def export_proof(project: str, format: str = "pdf") -> list:  # noqa: A002
         """校正用の書き出し（150 dpi、全ページに「校正」の透かし）。本番の書き出しは人間が行う。"""
         return call(service.export_proof, project, format)
+
+    @server.tool(structured_output=False)
+    def check(project: str) -> list:
+        """人が使う「入稿前の点検」と同じ点検（はみ出し・文字の小ささや重なり・印刷に出ない絵など）。"""
+        return call(service.check, project)
+
+    @server.tool(structured_output=False)
+    def undo(project: str) -> list:
+        """自分（このエージェント）の最後の保存済みの変更を取り消す。人の変更と承認は取り消せない。"""
+        return call(service.undo, project)
+
+    @server.tool(structured_output=False)
+    def export(project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
+               area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int = 2048, jpeg: bool = False,
+               spreads: bool = False) -> list:
+        """書き出し（承認は要らない。正式な書き出しは人だけ）: format は pdf / tiff / png / psd / pack / epub / strip / webtoon / sns。
+        pages でページを選ぶ（例 [3, 4, 5]）。area は paper / bleed / trim。書いた先は <原稿>/exports/。"""
+        return call(service.export, project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads)
 
     @server.tool(structured_output=False)
     def derive(project: str, page: int, frame_id: str, kind: str = "lineart", candidate_id: str | None = None,
