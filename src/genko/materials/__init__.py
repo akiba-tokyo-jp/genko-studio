@@ -11,6 +11,11 @@ Entry: {"id", "name", "folder", "kind": tone | effect | image | lines, …} with
 - lines: "items" (copied pen lines and fills, as the clipboard keeps them)
 - lettering (描き文字): "text", "balloon" (sfx by default), "wrap", "style" (a line's style), "w_mm", "h_mm" — put
   on a page as a line set that way
+- brush: "brush" (define_brush settings) — using it adds the brush to the book and picks it
+- prim: "prim" (mannequin | box | cylinder | stairs | floor) or "scene" (room | classroom | corridor | street) — a
+  3D guide put where clicked
+Every entry may have "tags" (words the search finds, besides its name and folder). Material packs (a folder or a
+.zip with pack.json and its pictures, or just pictures) come in with import_pack and go out with export_pack.
 Old catalog kinds "dot" / "noise" are tones.
 """
 
@@ -18,18 +23,51 @@ from __future__ import annotations
 
 import io
 import json
+import math
 from pathlib import Path
 
 _CATALOG: list[dict] | None = None
-KINDS = ("tone", "effect", "image", "lines", "lettering")
+KINDS = ("tone", "effect", "image", "lines", "lettering", "brush", "prim")
 
 
 def load_catalog() -> list[dict]:
     global _CATALOG
     if _CATALOG is None:
         path = Path(__file__).with_name("catalog.json")
+        from genko.materials.builtin import generated
+
         _CATALOG = [normalize({**item, "builtin": True}) for item in json.loads(path.read_text(encoding="utf-8"))]
+        _CATALOG += [{**item, "builtin": True} for item in generated()]
     return _CATALOG
+
+
+def search(query: str = "", kind: str | None = None, tag: str | None = None) -> list[dict]:
+    """Materials whose name, folder or tags hold every word of the query (and of that kind / with that tag)."""
+    words = [w for w in (query or "").lower().replace("　", " ").split() if w]
+    out = []
+    for item in all_materials():
+        if kind and item.get("kind") != kind:
+            continue
+        tags = [str(t) for t in item.get("tags") or []]
+        if tag and tag not in tags:
+            continue
+        hay = " ".join([str(item.get("name", "")), str(item.get("folder", "")), *tags, KIND_WORDS.get(item.get("kind"), "")]).lower()
+        if all(w in hay for w in words):
+            out.append(item)
+    return out
+
+
+KIND_WORDS = {"tone": "トーン", "effect": "効果線", "image": "画像", "lines": "パーツ 線", "lettering": "描き文字 効果音",
+              "brush": "ブラシ", "prim": "3d 立体"}
+
+
+def all_tags() -> list[str]:
+    seen: list[str] = []
+    for item in all_materials():
+        for tag in item.get("tags") or []:
+            if tag not in seen:
+                seen.append(str(tag))
+    return seen
 
 
 def normalize(item: dict) -> dict:
@@ -155,6 +193,8 @@ def update_material(material_id: str, **change) -> dict:
     for entry in items:
         if entry["id"] == material_id:
             entry.update({k: v for k, v in change.items() if k in ("name", "folder")})
+            if "tags" in change:
+                entry["tags"] = [str(t).strip() for t in change["tags"] or [] if str(t).strip()]
             _save(items)
             return entry
     raise KeyError(material_id)
@@ -207,6 +247,10 @@ def thumbnail(item: dict, size: int = 72):
             base.paste(image, ((size - image.width) // 2, (size - image.height) // 2), image)
             return base
     base = Image.new("RGB", (size, size), "white")
+    if kind == "brush":
+        return _brush_sample(item, size)
+    if kind == "prim":
+        return _prim_sample(item, size)
     if kind == "lettering":
         from genko.balloons import text_image
         from genko.models import StoryLine
@@ -233,3 +277,132 @@ def thumbnail(item: dict, size: int = 72):
     return base
 
 
+
+
+# --- packs -----------------------------------------------------------------------------------------------------
+
+PICTURES = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")
+
+
+def import_pack(path, folder: str | None = None) -> list[dict]:
+    """Materials from a pack: a folder or a .zip holding pack.json (entries as the library keeps them, pictures
+    next to it by "file"), or just pictures (each becomes a picture material; sub-folders become folders)."""
+    import tempfile
+    import zipfile
+
+    source = Path(path)
+    if source.is_file() and source.suffix.lower() == ".zip":
+        with tempfile.TemporaryDirectory() as tmp:
+            with zipfile.ZipFile(source) as archive:
+                for member in archive.namelist():
+                    target = (Path(tmp) / member).resolve()
+                    if not str(target).startswith(str(Path(tmp).resolve())):
+                        raise ValueError("the pack has a file outside itself")
+                archive.extractall(tmp)
+            return import_pack(Path(tmp), folder or source.stem)
+    if not source.is_dir():
+        raise ValueError("a material pack is a folder or a .zip")
+    folder = folder or source.name
+    added: list[dict] = []
+    manifest = source / "pack.json"
+    if manifest.exists():
+        entries = json.loads(manifest.read_text(encoding="utf-8"))
+        for entry in entries if isinstance(entries, list) else []:
+            kind = entry.get("kind")
+            if kind not in KINDS or not entry.get("name"):
+                continue
+            data = {k: v for k, v in entry.items() if k not in ("id", "name", "folder", "kind", "file", "builtin")}
+            if kind == "image":
+                picture = source / str(entry.get("file") or "")
+                if not picture.is_file():
+                    continue
+                item = import_image(picture, entry["name"], entry.get("folder") or folder, entry.get("width_mm"))
+                if data.get("tags"):
+                    item = update_material(item["id"], tags=data["tags"])
+            else:
+                item = add_material(entry["name"], kind, entry.get("folder") or folder, **data)
+            added.append(item)
+        return added
+    for picture in sorted(source.rglob("*")):
+        if picture.suffix.lower() in PICTURES and picture.is_file():
+            sub = picture.parent.relative_to(source)
+            where = folder if str(sub) == "." else f"{folder}/{sub.as_posix()}"
+            added.append(import_image(picture, picture.stem, where))
+    if not added:
+        raise ValueError("the pack has no materials (pack.json or pictures)")
+    return added
+
+
+def export_pack(material_ids: list[str], path) -> Path:
+    """The chosen materials as a .zip pack (pack.json and the pictures) others can import."""
+    import zipfile
+
+    target = Path(path)
+    entries = []
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        for material_id in material_ids:
+            item = dict(get_material(material_id))
+            item.pop("builtin", None)
+            if item.get("kind") == "image":
+                data = image_bytes(item)
+                if not data:
+                    continue
+                name = f"{item['id']}.png"
+                archive.writestr(name, data)
+                item["file"] = name
+            entries.append(item)
+        archive.writestr("pack.json", json.dumps(entries, ensure_ascii=False, indent=1))
+    return target
+
+
+def _brush_sample(item: dict, size: int):
+    """A wavy stroke drawn with the brush, as on a page."""
+    from PIL import Image
+
+    from genko import brushes
+    from genko.models import Layer, LayerKind, LayerRole, Stroke, new_id
+    from genko.render import _layer_strokes
+
+    brush = brushes.from_dict("my_sample", dict(item.get("brush") or {}))
+    brushes.CUSTOM["my_sample"] = brush
+    white = brush.rgb == (255, 255, 255)
+    pts = [(4 + 52 * k / 30, 30 + 12 * math.sin(k / 30 * 2 * math.pi)) for k in range(31)]
+    stroke = Stroke(id=new_id(), points=pts, pressure=[0.4 + 0.6 * math.sin(math.pi * k / 30) for k in range(31)],
+                    width_mm=brush.width_mm, kind="my_sample", rgb=brush.rgb)
+    layer = Layer(id="sample", role=LayerRole.USER, kind=LayerKind.STROKES, strokes=[stroke])
+    picture = _layer_strokes(layer, (size, size), round(size / 60 * 25.4), None, None)
+    base = Image.new("RGB", (size, size), (60, 60, 60) if white else "white")
+    if picture is not None:
+        base.paste(picture, (0, 0), picture)
+    return base
+
+
+def _prim_sample(item: dict, size: int):
+    from PIL import Image, ImageDraw
+
+    from genko import prim3d
+
+    if item.get("scene"):
+        kind = item["scene"]
+        dims = list(prim3d.SCENE_SIZES[kind])
+        rot, near = prim3d.SCENE_VIEWS[kind]
+        prim = {"id": "s", "kind": "scene", "scene": kind, "pos": [0, 0, dims[2] / 2 + near * 220], "size": dims, "rot": list(rot),
+                "focal_mm": 220.0}
+    else:
+        kind = item.get("prim") or "box"
+        dims = {"mannequin": [40, 80, 20], "floor": [160, 1, 160]}.get(kind, [40, 40, 40])
+        prim = {"id": "p", "kind": kind, "pos": [0, 0, 0], "size": dims, "rot": [-1.2, 0.5, 0] if kind == "floor" else [0.35, 0.6, 0]}
+    base = Image.new("RGB", (size, size), "white")
+    try:
+        paths = prim3d.trace(prim)
+    except Exception:
+        return base
+    xs = [p[0] for path in paths for p in path]
+    ys = [p[1] for path in paths for p in path]
+    if not xs:
+        return base
+    k = (size - 8) / max(1e-6, max(max(xs) - min(xs), max(ys) - min(ys)))
+    draw = ImageDraw.Draw(base)
+    for path in paths:
+        draw.line([(4 + (x - min(xs)) * k, 4 + (y - min(ys)) * k) for x, y in path], fill=(40, 40, 40), width=1)
+    return base

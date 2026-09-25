@@ -101,7 +101,7 @@ def build_server(root: Path, actor: str) -> MCPServer:
         """読む。target: bible / script / page（そのページの beat、前後ページ、めくりの位置、定型、コマ一覧） /
         panel（コマのブリーフ・寸法 mm・候補・登場人物の設定画、frame_id 省略でページ全部） / studio / schemas / rules /
         snapshot（ページ・レイヤー〔名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照〕・台詞〔書式・フキダシ〕・3D） /
-        materials（stamp_material で貼れる素材: id・名前・種類・フォルダ） / fonts（style.font に使える書体） /
+        materials（stamp_material で貼れる素材: id・名前・種類〔トーン・効果線・画像・パーツ・描き文字・ブラシ・3D〕・フォルダ・タグ） / fonts（style.font に使える書体） /
         brushes（add_stroke の kind に使えるブラシ: 入っているもの・この原稿の自作・自分の自作）。"""
         return call(service.inspect, project, target, page, frame_id)
 

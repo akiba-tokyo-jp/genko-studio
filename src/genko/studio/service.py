@@ -1345,6 +1345,10 @@ def _materials_list() -> list[dict]:
             entry["tone"] = item["tone"]
         if item.get("effect"):
             entry["effect"] = item["effect"]
+        if item.get("tags"):
+            entry["tags"] = list(item["tags"])
+        if item.get("kind") == "lettering":
+            entry["text"] = item.get("text")
         out.append(entry)
     return out
 

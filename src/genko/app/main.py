@@ -3573,6 +3573,15 @@ class MainWindow(QMainWindow):
 
     def use_material(self, item: dict) -> None:
         kind = item.get("kind")
+        if kind == "brush":  # a brush material: added to the book and picked at once
+            import hashlib
+
+            key = "my_" + hashlib.sha1(item["id"].encode("utf-8")).hexdigest()[:10]
+            if self.apply_ops([{"op": "stamp_material", "page": self._current().index, "material_id": item["id"]}]):
+                self.brush.reload_kinds(select=key)
+                self._tool("pen")
+                self.flash(f"ブラシ「{item.get('name')}」で描けます", 3500)
+            return
         if kind == "tone":
             self._put_tone(item, ask_click=True)
             return
@@ -3600,7 +3609,7 @@ class MainWindow(QMainWindow):
             if self.apply_ops([op]):
                 self._after_tone(op["id"])
             return
-        if kind in ("effect", "lettering"):
+        if kind in ("effect", "lettering", "prim"):
             frame = page.frame_at(x_mm, y_mm)
             op.update({"frame_id": frame.id if frame else None, "x_mm": round(x_mm, 2), "y_mm": round(y_mm, 2)})
             if kind == "lettering":

@@ -281,6 +281,15 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### J7 additions
+
+- `inspect materials` lists every kind: tone, effect, image, lines (marks 漫符, props 小物, traced backgrounds),
+  lettering (描き文字, with its `text`), brush, prim (3D figures, boxes, scenes); each with `folder` and `tags`.
+- `stamp_material`: lines on `layer_id` at `x_mm/y_mm`; lettering becomes a line there; a brush is added to the
+  book (`define_brush`, key `my_…`, then usable as `add_stroke {kind}`); a prim is a 3D guide at `x_mm/y_mm`.
+- Packs (a folder or .zip with pack.json and pictures, or just pictures) are the person's library: imported and
+  exported in the app (materials panel → 素材パック).
+
 ### J6 additions
 
 - Panels: `set_frame {curves: [mm per edge] | null, bow: {edge, mm}, line: {kind: solid | double | dashed | dotted |

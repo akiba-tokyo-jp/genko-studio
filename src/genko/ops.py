@@ -92,7 +92,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "reshape_stroke", "page": "int", "layer_id": "str?", "stroke_id": "str", "points": "[[x,y,p?],...]?", "width_mm": "float?"},
     {"op": "erase", "page": "int", "layer_id": "str? (else layer: role)", "layer": "str?", "points": "[[x,y],...]", "width_mm": "float", "mode": "cut|to_crossing|whole? (cut: where it touches; to_crossing: up to where it crosses others; whole: every line touched)", "note": "cuts pen lines (vector) and clears paint"},
     {"op": "reorder_layers", "page": "int", "order": "[id]"},
-    {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?", "area": "object?", "at": "object?", "layer_id": "str? (pictures and drawn parts)", "line_id": "str? (a picture material: it becomes this line's balloon, 画像のフキダシ)", "x_mm": "float?", "y_mm": "float? (where a picture's / part's middle goes)", "width_mm": "float?"},
+    {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?", "area": "object?", "at": "object?", "layer_id": "str? (pictures and drawn parts)", "line_id": "str? (a picture material: it becomes this line's balloon, 画像のフキダシ)", "kinds": "tone (a tone layer) | effect | image | lines (on layer_id at x/y) | lettering (a line at x/y) | brush (the book gets the brush) | prim (a 3D guide at x/y)", "x_mm": "float?", "y_mm": "float? (where a picture's / part's middle goes)", "width_mm": "float?"},
     {"op": "set_balloon_path", "id": "str", "path": "[[x,y]]? (a hand-drawn outline; the box becomes its bounds; null goes back to the shape)", "wrap": "vertical|horizontal", "ruby_runs": "[[base,ruby]]", "emphasis_runs": "[str]"},
     {"op": "add_mannequin", "page": "int", "pos": "[x,y,z] (pelvis, mm)", "height_mm": "float?", "rot": "[tip,turn,lean]?", "preset": "stand|walk|run|sit|point|look_back|arms_up?", "id": "str?"},
     {"op": "pose_mannequin", "page": "int", "id": "str", "joints": "{name: {yaw, pitch}}?", "rot": "[tip,turn,lean]?", "pos": "[x,y,z]?", "height_mm": "float?", "preset": "str?", "drag": "{handle: pelvis|chest|head|l_elbow|l_hand|l_knee|…, to: [x,y]}?"},
@@ -2462,6 +2462,29 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                 _frame_or_fail(page, frame_id)
             page.effects.append({"id": str(op.get("id") or new_id()), "kind": material.get("effect", "speed"),
                                  "frame_id": frame_id, "params": params})
+            return
+        if kind == "brush":  # a brush material: the book gets the brush (define_brush), ready to draw with
+            import hashlib
+
+            key = "my_" + hashlib.sha1(material["id"].encode("utf-8")).hexdigest()[:10]
+            data = {"label": material.get("name") or "ブラシ", **dict(material.get("brush") or {})}
+            _apply_one(episode, {"op": "define_brush", "key": key, **data})
+            return
+        if kind == "prim":  # a 3D material: the figure, box or scene put where asked
+            x = float(op.get("x_mm", page.spec.width_mm / 2))
+            y = float(op.get("y_mm", page.spec.height_mm / 2))
+            new = str(op.get("id") or new_id())
+            if material.get("scene"):
+                _apply_one(episode, {"op": "add_scene", "page": page.index, "kind": material["scene"], "id": new,
+                                     **({"frame_id": op["frame_id"]} if op.get("frame_id") else {})})
+                prim = next(p for p in page.prims if p.get("id") == new)
+                prim["pos"] = [round(x, 3), round(y, 3), prim["pos"][2]]
+            elif material.get("prim") == "mannequin":
+                _apply_one(episode, {"op": "add_mannequin", "page": page.index, "pos": [x, y, 0], "id": new,
+                                     **({"frame_id": op["frame_id"]} if op.get("frame_id") else {})})
+            else:
+                _apply_one(episode, {"op": "add_prim3d", "page": page.index, "kind": material.get("prim") or "box", "pos": [x, y, 0],
+                                     "id": new, **({"frame_id": op["frame_id"]} if op.get("frame_id") else {})})
             return
         if kind == "lettering":  # 描き文字: a line set as the material has it
             width = float(op.get("width_mm") or material.get("w_mm") or 50)

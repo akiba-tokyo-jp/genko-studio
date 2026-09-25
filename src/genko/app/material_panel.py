@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
+    QLineEdit,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -30,7 +31,7 @@ from genko import effects, materials
 PATTERNS = [("網点", "dot"), ("線", "line"), ("カケアミ風（交差）", "cross"), ("砂目", "noise"), ("ベタのグレー", "flat"),
             ("柄: 市松", "check"), ("柄: レンガ", "brick"), ("柄: 波", "wave"), ("柄: 格子", "grid"), ("柄: 斜線", "hatch"),
             ("柄: 星", "star"), ("柄: 砂", "sand"), ("柄: 画像から…", "image")]
-KIND_WORD = {"tone": "トーン", "effect": "効果線", "image": "画像", "lines": "パーツ", "lettering": "描き文字"}
+KIND_WORD = {"tone": "トーン", "effect": "効果線", "image": "画像", "lines": "パーツ", "lettering": "描き文字", "brush": "ブラシ", "prim": "3D"}
 # the settings people change per effect kind: (key, label, lo, hi, step, default)
 EFFECT_FIELDS = {
     "focus": [("count", "本数", 10, 600, 10, 90), ("inner_r", "中心の空き（mm）", 1, 200, 1, None),
@@ -72,13 +73,19 @@ class MaterialPanel(QWidget):
         self.list.setWordWrap(True)
         self.list.setMinimumHeight(240)
         self.list.itemDoubleClicked.connect(lambda _: self.use())
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("素材を探す（名前・タグ・種類）")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(lambda _: self._fill_list())
         use = QPushButton("貼る")
         use.setToolTip("トーン: 選択範囲か選んだコマに（なければクリックした所に）。効果線: 選んだコマに。画像・パーツ: クリックした所に")
         use.clicked.connect(self.use)
         more = QGridLayout()
         for i, (title, slot, tip) in enumerate((("画像を追加…", self.import_image, "画像ファイルを素材にします"),
                                  ("範囲を登録…", self.register_selection, "選んだ範囲の線と塗りを素材（パーツ）にします"),
-                                 ("名前…", self.rename, "名前とフォルダを変えます"), ("消す", self.delete, "自分で登録した素材を消します"))):
+                                 ("名前…", self.rename, "名前とフォルダを変えます"), ("消す", self.delete, "自分で登録した素材を消します"),
+                                 ("タグ…", self.edit_tags, "探すときの言葉（タグ）を付けます"),
+                                 ("素材パック…", self.pack_menu, "素材パック（フォルダ・zip）を読み込む／選んだ素材を書き出す"))):
             button = QPushButton(title)
             button.setToolTip(tip)
             button.clicked.connect(slot)
@@ -92,6 +99,7 @@ class MaterialPanel(QWidget):
         row.addWidget(self.folder, 1)
         row.addWidget(new_folder)
         ml.addLayout(row)
+        ml.addWidget(self.search)
         ml.addWidget(self.list)
         ml.addWidget(use)
         ml.addLayout(more)
@@ -202,13 +210,16 @@ class MaterialPanel(QWidget):
         folder = self.folder.currentData()
         keep = self.current_material()
         self.list.clear()
-        for item in materials.all_materials():
-            if folder and (item.get("folder") or "その他") != folder:
-                continue
+        query = self.search.text().strip() if hasattr(self, "search") else ""
+        found = materials.search(query) if query else materials.all_materials()
+        for item in found:
+            if folder and not query and (item.get("folder") or "その他") != folder:
+                continue  # (a search looks in every folder)
             entry = QListWidgetItem(item.get("name") or item["id"])
             entry.setData(Qt.ItemDataRole.UserRole, item["id"])
             entry.setToolTip(f"{KIND_WORD.get(item.get('kind'), '')} ・ {item.get('folder') or ''}"
-                             + ("" if item.get("builtin") else " ・ マイ素材"))
+                             + ("" if item.get("builtin") else " ・ マイ素材")
+                             + (f"\nタグ: {'、'.join(item.get('tags') or [])}" if item.get("tags") else ""))
             if item["id"] not in self._icons:
                 try:
                     self._icons[item["id"]] = _icon(materials.thumbnail(item, 56))
@@ -283,6 +294,55 @@ class MaterialPanel(QWidget):
             materials.update_material(item["id"], name=name or item["name"], folder=folder or item.get("folder", "マイ素材"))
             self._icons.pop(item["id"], None)
             self._fill_folders()
+
+    def edit_tags(self) -> None:
+        item = self.current_material()
+        if item is None or item.get("builtin"):
+            self.window.flash("タグを付けられるのは自分で登録した素材です（入っている素材にはタグが付いています）", 4000)
+            return
+        text, ok = QInputDialog.getText(self, "素材のタグ", "タグ（、で区切る）", text="、".join(item.get("tags") or []))
+        if ok:
+            import re
+
+            materials.update_material(item["id"], tags=[t for t in re.split(r"[、,，\s]+", text) if t])
+            self._fill_list()
+
+    def pack_menu(self) -> None:
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        menu.addAction("素材パック（zip）を読み込む…", lambda: self.import_pack(zip_file=True))
+        menu.addAction("フォルダを素材パックとして読み込む…", lambda: self.import_pack(zip_file=False))
+        menu.addSeparator()
+        menu.addAction("このフォルダの自分の素材を書き出す…", self.export_pack)
+        menu.exec(QCursor.pos())
+
+    def import_pack(self, zip_file: bool = True) -> None:
+        if zip_file:
+            path, _ = QFileDialog.getOpenFileName(self, "素材パックを読み込む", "", "素材パック (*.zip)")
+        else:
+            path = QFileDialog.getExistingDirectory(self, "素材パックのフォルダ")
+        if not path:
+            return
+        try:
+            added = materials.import_pack(path)
+        except Exception as exc:
+            self.window.flash(f"読み込めませんでした（{exc}）", 6000, error=True)
+            return
+        self._fill_folders()
+        self.window.flash(f"素材を {len(added)} 個読み込みました", 4000)
+
+    def export_pack(self) -> None:
+        folder = self.folder.currentData()
+        mine = [i for i in materials.user_materials() if not folder or i.get("folder") == folder]
+        if not mine:
+            self.window.flash("書き出せる自分の素材がありません（フォルダを選び直します）", 4000)
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "素材パックを書き出す", f"{folder or '素材'}.zip", "素材パック (*.zip)")
+        if path:
+            materials.export_pack([i["id"] for i in mine], path)
+            self.window.flash(f"素材 {len(mine)} 個を書き出しました", 4000)
 
     def delete(self) -> None:
         item = self.current_material()

@@ -530,6 +530,7 @@
       "at": "object?",
       "layer_id": "str? (pictures and drawn parts)",
       "line_id": "str? (a picture material: it becomes this line's balloon, 画像のフキダシ)",
+      "kinds": "tone (a tone layer) | effect | image | lines (on layer_id at x/y) | lettering (a line at x/y) | brush (the book gets the brush) | prim (a 3D guide at x/y)",
       "x_mm": "float?",
       "y_mm": "float? (where a picture's / part's middle goes)",
       "width_mm": "float?"
