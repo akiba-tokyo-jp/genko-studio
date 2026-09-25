@@ -89,6 +89,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - レイヤー: `add_layer`・`duplicate_layer`・`merge_down`（ペン同士は線のまま）・`delete_layer`・`set_layer`（`exportable: false` で下描き＝書き出さない、`color` で画面だけの表示色、`reference: true` で参照レイヤー）。
   マスクは `set_layer_mask`（`area` の所だけ見せる・`fill`・`invert`・`enabled`・`delete`）と `paint_mask`（`show: true` で見せる、`false` で隠す）。
 - 線と塗り: `add_stroke`（`kind` はブラシ。自作のブラシは `define_brush` で定義してから）、`erase`、`fill`・`fill_area`（`fill` の `reference: "reference"` は参照レイヤーの線だけを見て塗る）、`gradient_fill`（`from`・`to`・色・不透明度、`shape: radial` で円）、`filter_raster`（`levels`・`curve`・`hue`・`blur`…）。
+- 図形: `add_shape`（`shape`: `line`・`polyline`・`curve`・`rect`・`ellipse`・`polygon`、`line`・`fill` で線と塗り）。
+- 範囲（`area`）: どの op の `area` にも、`poly`・`mask` のほかに `rect`・`ellipse`・`layer`（そのレイヤーの描いてある所）・`color`（その色の所）・`all`・`saved`（`store_area` で残した範囲）と、`union`・`intersect`・`subtract` の組み合わせ、`invert`・`grow_mm`（負で縮める）・`feather_mm` が使える。ガイド線は `add_ruler` の `kind: "guide"`（`axis`・`at`）。
 - 範囲の変形: `transform_area` の `matrix`（移動・拡大・回転・反転）か `warp`（`perspective` で 4 隅、`mesh` で 3×3 の点）。レイヤーを丸ごと動かすのは、ページ全体を `area` にした `matrix`。
 - 台詞: `add_line`・`edit_line` の
   - `ruby_runs`（ルビ）、`emphasis_runs`（傍点）、`style_runs`（一部を大きく・小さく・太く・色を変える: `[["本当", {"scale": 1.4, "weight": "heavy"}]]`）。

@@ -83,6 +83,9 @@ def _draw(name: str, p: QPainter) -> None:
         p.setBrush(ACCENT)
         p.setPen(_pen(1.2, ACCENT))
         p.drawEllipse(QPointF(5.5, 27.5), 2.5, 2.5)
+    elif name == "shape":
+        p.drawRect(QRectF(4, 12, 15, 15))
+        p.drawEllipse(QRectF(13, 4, 15, 15))
     elif name == "rect":
         p.setPen(_pen(2, INK, Qt.PenStyle.DashLine))
         p.drawRect(QRectF(5, 7, 22, 18))

@@ -18,7 +18,7 @@ from genko.ops import ApplyError, apply_ops  # noqa: E402
 
 SRC = Path(__file__).parent.parent / "src" / "genko"
 # every module whose messages reach people through ApplyError
-SOURCES = ["ops.py", "rulers.py", "tones.py", "effects.py", "nombre.py", "models.py", "mannequin.py", "selection.py",
+SOURCES = ["ops.py", "rulers.py", "tones.py", "effects.py", "nombre.py", "models.py", "mannequin.py", "selection.py", "selops.py",
            "pagespec.py", "warp.py", "brushes.py", "frames.py", "materials/__init__.py", "lock.py", "journal.py", "app/session.py", "__main__.py"]
 
 

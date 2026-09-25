@@ -281,6 +281,16 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### J2 additions
+
+- `add_shape {shape: line | polyline | curve | rect | ellipse | polygon, points | box, sides?, radius_mm?, closed?,
+  line?, fill?, rgb?, fill_rgb?, width_mm?, kind?}`.
+- Areas everywhere (`genko/selops.py`): besides `poly` and `mask`, `rect`, `ellipse`, `layer`, `color {x_mm, y_mm,
+  tolerance?, contiguous?}`, `all`, `saved` (kept with `store_area {name, area}` / `forget_area`), and
+  `union` / `intersect` / `subtract` of areas, with `invert`, `grow_mm` (negative shrinks) and `feather_mm`.
+  `apply_ops` turns them into a mask before the op runs.
+- Guide lines: `add_ruler {kind: guide, axis: h | v, at}`.
+
 ### H5 additions
 
 - `inspect` targets: `materials` (id, name, kind, folder — what `stamp_material` takes), `fonts` (the bundled

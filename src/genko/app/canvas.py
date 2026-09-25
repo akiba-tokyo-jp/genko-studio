@@ -14,6 +14,7 @@ from PySide6.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QLabel, QPlainTextEdit, QWidget
 
 from genko.app.canvas_guides import GuideMixin
+from genko.app.canvas_shapes import ShapeSelectMixin
 from genko.models import Page, Rect, StoryLine
 from genko.stroke import pack_point
 
@@ -76,7 +77,7 @@ class InlineEditor(QPlainTextEdit):
 MIN_SCALE, MAX_SCALE = 0.3, 12.0  # screen px per mm
 
 
-class PageCanvas(GuideMixin, QWidget):
+class PageCanvas(GuideMixin, ShapeSelectMixin, QWidget):
     changed = Signal()
     strokeCommitted = Signal(list)
     frameSelected = Signal(str)
@@ -88,6 +89,10 @@ class PageCanvas(GuideMixin, QWidget):
     lineEditRequested = Signal(str)  # double-click on a balloon: type over it
     lineContextMenu = Signal(str, QPointF)
     detailReady = Signal(int, int, object)  # page generation, dpi, QImage (from the detail thread)
+    shapeDrawn = Signal(object)  # {shape, points | box, sides?, closed?}: an add_shape op
+    selectionDrawn = Signal(object, str)  # a new area and how it joins the selection (replace/add/subtract/intersect)
+    selectionPainted = Signal(object, bool)  # selection pen points (mm), True = add / False = take away
+    colourAreaRequested = Signal(float, float)  # 色域選択 clicked here
     textRequested = Signal(float, float)  # the text tool clicked here (mm)
     gutterMoved = Signal(str, int, float)  # split node id, gutter index, delta mm (a move_gutter op)
     cutRequested = Signal(str, QPointF, QPointF)  # panel id, cut line ends (mm): a cut_frame op
@@ -164,6 +169,7 @@ class PageCanvas(GuideMixin, QWidget):
         self._reshape: dict | None = None
         self.editor: InlineEditor | None = None
         self._init_guides()
+        self._init_shapes()
         self.overlay_name_strokes = False  # show the name strokes faintly over a proof render
         # renderer(dpi) -> QPixmap of the whole page; set by the window
         self.renderer: Callable[[int], QPixmap | None] | None = None
@@ -494,6 +500,13 @@ class PageCanvas(GuideMixin, QWidget):
             painter.setBrush(QColor(255, 255, 255, 220))
             painter.drawPolygon([self._pt(*p[:2]) for p in self._stroke])
             painter.setBrush(Qt.BrushStyle.NoBrush)
+        elif self._stroke and self.tool == "marquee" and self.marquee in ("pen", "erase"):
+            colour = QColor(28, 126, 214, 110) if self.marquee == "pen" else QColor(220, 60, 60, 110)
+            pen = QPen(colour, max(2.0, self.selection_pen_mm * self._scale))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.drawPolyline([self._pt(*p[:2]) for p in self._stroke])
         elif self._stroke and self.tool in ("lassofill", "marquee"):
             painter.setPen(QPen(QColor("#1c7ed6") if self.tool == "marquee" else QColor("#e8590c"), 1.5, Qt.PenStyle.DashLine))
             painter.setBrush(QColor(28, 126, 214, 30) if self.tool == "marquee" else QColor(232, 89, 12, 40))
@@ -518,6 +531,10 @@ class PageCanvas(GuideMixin, QWidget):
             if self.cursor_kind in ("circle", "dot"):
                 painter.setBrush(QColor("#e8590c"))
                 painter.drawEllipse(QPointF(hx, hy), 1.5, 1.5)
+        self._draw_shape_preview(painter)
+        self._draw_guide_drag(painter)
+        self._draw_scale(painter)
+        self._place_launcher()
 
     def _draw_tool_drag(self, painter: QPainter) -> None:
         """The layer being moved (its picture, following the pen) or the gradient's direction."""
@@ -954,6 +971,7 @@ class PageCanvas(GuideMixin, QWidget):
     def _draw_selection_overlay(self, painter: QPainter) -> None:
         if not self.selection:
             return
+        self._draw_selection_mask(painter)
         outline = self.selection["outline"]
         if self._sel_drag and self._sel_drag.get("matrix"):
             outline = self._apply(self._sel_drag["matrix"], outline)
@@ -1123,8 +1141,13 @@ class PageCanvas(GuideMixin, QWidget):
             return
         if self.page is None or event.button() != Qt.MouseButton.LeftButton:
             return
+        if self._guide_press(event.position()):
+            return
         x_mm, y_mm = self._to_mm(pos)
         self._press_pos = pos
+        if self.tool == "shape":
+            self._shape_press(x_mm, y_mm, event.modifiers())
+            return
         if self.tool in ("move", "gradient"):
             self._tool_drag = {"start": (x_mm, y_mm), "end": (x_mm, y_mm)}
             if self.tool == "move":
@@ -1164,12 +1187,26 @@ class PageCanvas(GuideMixin, QWidget):
             return
         if self.tool == "marquee":
             self._modifiers = event.modifiers()
-            if self._marquee_press(pos):
+            self._sel_how = self.how_from(event.modifiers())
+            if self._sel_how == "replace" and self.marquee != "polyline" and self._marquee_press(pos):
                 return
             if self.marquee == "wand":
                 self.wandRequested.emit(x_mm, y_mm)
                 return
-            self.set_selection(None)
+            if self.marquee == "color":
+                self.colourAreaRequested.emit(x_mm, y_mm)
+                return
+            if self.marquee == "polyline":
+                self._shape_pts.append((x_mm, y_mm))
+                self.update()
+                return
+            if self.marquee == "ellipse":
+                self._shape_drag = [(x_mm, y_mm), (x_mm, y_mm)]
+                if self._sel_how == "replace":
+                    self.set_selection(None)
+                return
+            if self._sel_how == "replace" and self.marquee not in ("pen", "erase"):
+                self.set_selection(None)
         if self.tool == "reshape":
             self._reshape_press(x_mm, y_mm)
             return
@@ -1204,7 +1241,12 @@ class PageCanvas(GuideMixin, QWidget):
                 turn = round((before + turn) / 15) * 15 - before  # Ctrl: in 15° steps
             self.set_rotation(before + turn)
             return
+        if self._guide_move(event.position()):
+            return
         pos = self._ev(event.position())
+        if self._shape_drag is not None and self.page is not None:
+            self._shape_move(*self._to_mm(pos), event.modifiers())
+            return
         if self._panning:
             delta = pos - self._last_pos
             self._pan_x += delta.x()
@@ -1283,6 +1325,26 @@ class PageCanvas(GuideMixin, QWidget):
         if self._turning is not None:
             self._turning = None
             return
+        if self._guide_release(event.position()):
+            return
+        if self._shape_drag is not None and self.tool == "marquee":
+            (x0, y0), (x1, y1) = self._shape_drag
+            self._shape_drag = None
+            if abs(x1 - x0) > 0.5 and abs(y1 - y0) > 0.5:
+                from genko.selops import ellipse_poly
+
+                self._selection_done({"poly": ellipse_poly([min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0)])})
+            self.update()
+            return
+        if self._shape_drag is not None:
+            self._shape_release()
+            return
+        if self.tool == "marquee" and self.marquee in ("pen", "erase") and self._stroke:
+            pts = [[round(p[0], 3), round(p[1], 3)] for p in self._stroke]
+            self._stroke = []
+            self.selectionPainted.emit(pts, self.marquee == "pen")
+            self.update()
+            return
         if self._tool_drag is not None:
             drag, self._tool_drag = self._tool_drag, None
             (sx, sy), (ex, ey) = drag["start"], drag["end"]
@@ -1348,8 +1410,7 @@ class PageCanvas(GuideMixin, QWidget):
                 if self.tool == "lassofill":
                     self.areaFilled.emit(pts)
                 else:
-                    self.set_selection({"poly": pts})
-                    self.areaSelected.emit({"poly": pts})
+                    self._selection_done({"poly": pts})
             self.update()
             return
         if self._handle_drag is not None:
@@ -1408,6 +1469,9 @@ class PageCanvas(GuideMixin, QWidget):
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.MiddleButton:
             self.fit_page()
+            return
+        if self._shape_pts and (self.tool == "shape" or (self.tool == "marquee" and self.marquee == "polyline")):
+            self.finish_points()
             return
         if self.tool == "ruler":
             self.finish_curve()
@@ -1489,6 +1553,8 @@ class PageCanvas(GuideMixin, QWidget):
     def hold_modifier(self, key: str, down: bool) -> None:
         """Alt / Ctrl held: the chosen tool for a moment (環境設定), back to the tool before when let go."""
         tool = self.modifier_tools.get(key) or ""
+        if (self._held_tool or self.tool) == "marquee" and key == "alt":
+            tool = ""  # (Alt takes away from the selection there)
         if down:
             if tool and self._held_tool is None and not self._stroke and tool != self.tool:
                 self._held_tool = self.tool
@@ -1507,6 +1573,11 @@ class PageCanvas(GuideMixin, QWidget):
             return
         if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_Control) and not event.isAutoRepeat():
             self.hold_modifier("alt" if event.key() == Qt.Key.Key_Alt else "ctrl", True)
+        if self._shape_pts and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.finish_points(closed=bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier))
+            return
+        if event.key() == Qt.Key.Key_Escape and self.cancel_points():
+            return
         if self.tool == "ruler" and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.finish_curve()
             return

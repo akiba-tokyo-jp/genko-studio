@@ -72,6 +72,9 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "fill", "page": "int", "layer_id": "str?", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float? (close gaps up to this)", "expand_mm": "float? (grow under the lines)", "reference": "page|layer|reference? (reference: the layers set as reference)"},
     {"op": "fill_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask: {box, png}}", "rgb": "[r,g,b]?", "opacity": "float?"},
     {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)", "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)"},
+    {"op": "add_shape", "page": "int", "layer_id": "str?", "shape": "line|polyline|curve|rect|ellipse|polygon", "points": "[[x,y],…]? (line, polyline, curve)", "box": "[x,y,w,h]? (rect, ellipse, polygon)", "sides": "int? (polygon)", "angle": "float? (polygon, degrees)", "radius_mm": "float? (rect: round corners)", "closed": "bool? (polyline, curve)", "line": "bool? (default true)", "fill": "bool?", "fill_rgb": "[r,g,b]?", "rgb": "[r,g,b]?", "width_mm": "float?", "kind": "brush? (mili)", "opacity": "float?"},
+    {"op": "store_area", "page": "int", "name": "str", "area": "area (kept on the page; use it later as {saved: name})"},
+    {"op": "forget_area", "page": "int", "name": "str"},
     {"op": "delete_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}"},
     {"op": "paste", "page": "int", "layer_id": "str?", "items": "{strokes, patches} (copied)", "matrix": "[a,b,c,d,e,f]?"},
     {"op": "set_stroke_width", "page": "int", "layer_id": "str?", "area": "object?", "ids": "[stroke id]?", "width_mm": "float?", "scale": "float?", "kind": "str?", "rgb": "[r,g,b]?"},
@@ -101,7 +104,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "edit_stroke", "page": "int", "layer": "name|ink", "index": "int", "points": "[[x,y],...]"},
     {"op": "simplify_stroke", "page": "int", "layer": "name|ink", "index": "int", "epsilon_mm": "float?"},
     {"op": "set_ruler", "page": "int", "kind": "str", "pos": "[x,y]?", "points": "[[x,y],...]?", "note": "old single ruler; use add_ruler"},
-    {"op": "add_ruler", "page": "int", "kind": "line|curve|parallel|concentric|radial|perspective|symmetry", "points": "[[x,y],...]?", "angle": "float? (deg)", "ratio": "float? (concentric height/width)", "copies": "int? (symmetry)", "mirror": "bool?", "frame_id": "str? (only in this panel)", "reach_mm": "float?", "id": "str?"},
+    {"op": "add_ruler", "page": "int", "kind": "line|curve|parallel|concentric|radial|perspective|symmetry|guide", "axis": "h|v? (guide)", "at": "float? (guide: mm from the top or left)", "points": "[[x,y],...]?", "angle": "float? (deg)", "ratio": "float? (concentric height/width)", "copies": "int? (symmetry)", "mirror": "bool?", "frame_id": "str? (only in this panel)", "reach_mm": "float?", "id": "str?"},
     {"op": "edit_ruler", "page": "int", "id": "str", "points": "[[x,y],...]?", "angle": "float?", "ratio": "float?", "copies": "int?", "mirror": "bool?", "frame_id": "str|null?", "active": "bool?", "visible": "bool?"},
     {"op": "delete_ruler", "page": "int", "id": "str? (none: every ruler on the page)"},
     {"op": "add_prim3d", "kind": "box|cylinder|stairs|floor", "steps": "int? (stairs)", "lines": "int? (floor grid)", "page": "int", "pos": "[x,y,z]?", "size": "[w,h,d] | float?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "frame_id": "str? (drawn only inside this panel)", "id": "str?"},
@@ -154,6 +157,84 @@ def _brush_kind(kind, episode=None) -> str:
     if kind not in BRUSHES and not (episode is not None and kind in episode.brush_custom):
         raise ApplyError(f"kind must be one of {', '.join(BRUSHES)} (or a brush defined in the book with define_brush)")
     return kind
+
+
+SHAPES = ("line", "polyline", "curve", "rect", "ellipse", "polygon")
+
+
+def shape_points(kind: str, op: dict) -> tuple[list[tuple[float, float]], bool]:
+    """A figure's outline (mm) and whether it is closed."""
+    import math
+
+    if kind in ("rect", "ellipse", "polygon"):
+        box = op.get("box")
+        if not box or len(box) != 4:
+            raise ApplyError("box [x, y, w, h] is required")
+        x, y, w, h = (float(v) for v in box)
+        cx, cy = x + w / 2, y + h / 2
+        if kind == "rect":
+            r = max(0.0, min(float(op.get("radius_mm") or 0), w / 2, h / 2))
+            if r <= 0:
+                return [(x, y), (x + w, y), (x + w, y + h), (x, y + h)], True
+            pts = []
+            for (ox, oy), start in (((x + w - r, y + r), -90), ((x + w - r, y + h - r), 0), ((x + r, y + h - r), 90), ((x + r, y + r), 180)):
+                pts += [(ox + r * math.cos(math.radians(start + 90 * i / 8)), oy + r * math.sin(math.radians(start + 90 * i / 8)))
+                        for i in range(9)]
+            return pts, True
+        if kind == "ellipse":
+            n = 96
+            return [(cx + w / 2 * math.cos(math.tau * k / n), cy + h / 2 * math.sin(math.tau * k / n)) for k in range(n)], True
+        sides = max(3, min(24, int(op.get("sides") or 5)))
+        turn = math.radians(float(op.get("angle") or 0)) - math.pi / 2
+        return [(cx + w / 2 * math.cos(turn + math.tau * k / sides), cy + h / 2 * math.sin(turn + math.tau * k / sides))
+                for k in range(sides)], True
+    points = [(float(p[0]), float(p[1])) for p in op.get("points") or []]
+    if len(points) < 2:
+        raise ApplyError("points needs at least two [x, y]")
+    if kind == "curve":
+        if len(points) == 2:
+            return points, False
+        # a smooth curve through the points (Catmull–Rom)
+        out = []
+        ext = [points[0], *points, points[-1]]
+        for i in range(1, len(ext) - 2):
+            p0, p1, p2, p3 = ext[i - 1], ext[i], ext[i + 1], ext[i + 2]
+            for k in range(12):
+                t = k / 12
+                out.append(tuple(0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t * t
+                                        + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t ** 3) for j in (0, 1)))
+        out.append(points[-1])
+        return out, bool(op.get("closed"))
+    return points, bool(op.get("closed")) and kind == "polyline"
+
+
+def _add_shape(episode, op: dict) -> None:
+    """図形: a line, polyline, curve, rectangle, ellipse or polygon, drawn as a pen line, filled, or both."""
+    from genko import fill as fills
+    from genko.models import coerce_stroke
+
+    kind = str(op.get("shape") or "")
+    if kind not in SHAPES:
+        raise ApplyError(f"shape must be one of {', '.join(SHAPES)}")
+    page = _require_page(episode, op)
+    target = _paint_target(page, op)
+    points, closed = shape_points(kind, op)
+    line, filled = op.get("line", True), bool(op.get("fill"))
+    if filled and (closed or kind in ("rect", "ellipse", "polygon")):
+        patch = fills.polygon_patch([list(p) for p in points], _rgb({"rgb": op.get("fill_rgb") or op.get("rgb")}, episode),
+                                    float(op.get("opacity", 1.0)))
+        if patch is not None:
+            target.patches.append(patch)
+    if line:
+        drawn = list(points) + ([points[0]] if closed else [])
+        stroke = coerce_stroke([(round(x, 3), round(y, 3), 1.0) for x, y in drawn])
+        stroke.kind = _brush_kind(op.get("kind") or "mili", episode)
+        stroke.width_mm = float(op.get("width_mm") or episode.brush_width_mm)
+        if op.get("rgb"):
+            stroke.rgb = tuple(int(v) for v in op["rgb"])
+        if op.get("opacity") is not None:
+            stroke.opacity = max(0.0, min(1.0, float(op["opacity"])))
+        target.strokes.append(stroke)
 
 
 def _paint_target(page, op: dict):
@@ -1017,6 +1098,28 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         target.patches.append(patch)
         return
 
+    if name == "store_area":
+        page = _require_page(episode, op)
+        label = str(op.get("name") or "").strip()
+        if not label:
+            raise ApplyError("name is required")
+        saved = dict(page.extra.get("saved_areas") or {})
+        saved[label] = _area(op)
+        page.extra = {**page.extra, "saved_areas": saved}
+        return
+
+    if name == "forget_area":
+        page = _require_page(episode, op)
+        saved = dict(page.extra.get("saved_areas") or {})
+        if saved.pop(str(op.get("name") or ""), None) is None:
+            raise ApplyError(f"no saved area {op.get('name')}")
+        page.extra = {**page.extra, "saved_areas": saved}
+        return
+
+    if name == "add_shape":
+        _add_shape(episode, op)
+        return
+
     if name in ("transform_area", "delete_area"):
         from genko import selection
 
@@ -1618,9 +1721,11 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                 raise ApplyError(f"ruler {ruler['id']} already exists")
         else:
             ruler = copy.deepcopy(_ruler(page, op.get("id")))
-        for key in ("angle", "ratio", "reach_mm"):
+        for key in ("angle", "ratio", "reach_mm", "at"):
             if op.get(key) is not None:
-                ruler[key] = float(op[key])
+                ruler[key] = round(float(op[key]), 3)
+        if op.get("axis") is not None:
+            ruler["axis"] = str(op["axis"])
         if op.get("copies") is not None:
             ruler["copies"] = int(op["copies"])
         for key in ("mirror", "active", "visible"):
@@ -2364,7 +2469,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "gradient_fill",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
-                             "trace_prims", "effect_to_layer"})
+                             "trace_prims", "effect_to_layer", "add_shape"})
 
 
 def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTOR) -> None:
@@ -2442,7 +2547,7 @@ PAGE_LOCAL_OPS = frozenset({
     "edit_stroke", "simplify_stroke", "set_ruler", "add_ruler", "edit_ruler", "delete_ruler",
     "add_prim3d", "add_scene", "edit_prim", "delete_prim", "trace_prims", "lt_convert", "erase_raster", "erase",
     "reorder_layers", "stamp_material", "add_mannequin", "pose_mannequin", "set_onion", "step_onion",
-    "set_lt", "add_layer", "delete_layer", "filter_raster",
+    "set_lt", "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area",
 })
 # Ops that find a line by id; the line lives in the story (always copied) or in one page's texts.
 LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path"})
@@ -2527,6 +2632,14 @@ def apply_ops(
         if not isinstance(op, dict):
             raise ApplyError(f"ops[{i}] must be an object")
         try:
+            if isinstance(op, dict) and isinstance(op.get("area"), dict):
+                from genko import selops
+
+                if selops.needs_resolving(op["area"]):
+                    try:
+                        op = {**op, "area": selops.resolve(op["area"], _require_page(work, op), work)}
+                    except selops.AreaError as exc:
+                        raise ApplyError(str(exc)) from exc
             _check_page_lock(work, op, agent)
             if work.strict_gates:
                 _check_strict(work, op, agent)

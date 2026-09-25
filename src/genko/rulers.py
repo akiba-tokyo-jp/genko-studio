@@ -10,6 +10,8 @@ Kinds (`kind`) and what they use:
 - radial: `points` [centre] — lines run toward the centre (focus lines).
 - perspective: `points` = 1 to 3 vanishing points — lines run toward the vanishing point that fits the
   stroke's direction (and level / upright for one and two points).
+- guide: `axis` ("h" across / "v" up and down) and `at` (mm) — a guide line pulled out of the rulers at
+  the page's edges; lines started within 3 mm of it run along it.
 - symmetry: `points` [a, b] (the axis), `copies` (2 = a mirror; 3 or more = turned copies around a),
   `mirror` (with copies > 2, mirrored too) — every line is drawn again in the other places.
 
@@ -21,8 +23,9 @@ from __future__ import annotations
 
 import math
 
-KINDS = ("line", "curve", "parallel", "concentric", "radial", "perspective", "symmetry")
-POINTS_NEEDED = {"line": 2, "curve": 2, "parallel": 0, "concentric": 1, "radial": 1, "perspective": 1, "symmetry": 2}
+KINDS = ("line", "curve", "parallel", "concentric", "radial", "perspective", "symmetry", "guide")
+POINTS_NEEDED = {"line": 2, "curve": 2, "parallel": 0, "concentric": 1, "radial": 1, "perspective": 1, "symmetry": 2, "guide": 0}
+GUIDE_REACH_MM = 3.0
 REACH_MM = 10.0
 
 
@@ -37,6 +40,10 @@ def validate(ruler: dict) -> None:
         raise ValueError("a perspective ruler has 1 to 3 vanishing points")
     if kind == "concentric" and float(ruler.get("ratio", 1) or 1) <= 0:
         raise ValueError("ratio must be above 0")
+    if kind == "guide":
+        if ruler.get("axis") not in ("h", "v"):
+            raise ValueError("a guide's axis is h or v")
+        float(ruler.get("at"))
     if kind == "symmetry" and not 2 <= int(ruler.get("copies", 2) or 2) <= 32:
         raise ValueError("copies is 2 to 32")
 
@@ -176,6 +183,11 @@ def horizon(ruler: dict):
 def _snap_one(ruler: dict, points: list):
     """The stroke along this ruler, or None when the ruler does not take it."""
     kind = ruler["kind"]
+    if kind == "guide":
+        at = float(ruler["at"])
+        line = [(-1e4, at), (1e4, at)] if ruler.get("axis") == "h" else [(at, -1e4), (at, 1e4)]
+        ruler = {"kind": "line", "points": line, "reach_mm": ruler.get("reach_mm", GUIDE_REACH_MM)}
+        kind = "line"
     start, end = _xy(points[0]), _xy(points[-1])
     reach = float(ruler.get("reach_mm", REACH_MM) or REACH_MM)
     if kind == "line":

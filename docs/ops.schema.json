@@ -336,6 +336,36 @@
       "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)"
     },
     {
+      "op": "add_shape",
+      "page": "int",
+      "layer_id": "str?",
+      "shape": "line|polyline|curve|rect|ellipse|polygon",
+      "points": "[[x,y],…]? (line, polyline, curve)",
+      "box": "[x,y,w,h]? (rect, ellipse, polygon)",
+      "sides": "int? (polygon)",
+      "angle": "float? (polygon, degrees)",
+      "radius_mm": "float? (rect: round corners)",
+      "closed": "bool? (polyline, curve)",
+      "line": "bool? (default true)",
+      "fill": "bool?",
+      "fill_rgb": "[r,g,b]?",
+      "rgb": "[r,g,b]?",
+      "width_mm": "float?",
+      "kind": "brush? (mili)",
+      "opacity": "float?"
+    },
+    {
+      "op": "store_area",
+      "page": "int",
+      "name": "str",
+      "area": "area (kept on the page; use it later as {saved: name})"
+    },
+    {
+      "op": "forget_area",
+      "page": "int",
+      "name": "str"
+    },
+    {
       "op": "delete_area",
       "page": "int",
       "layer_id": "str?",
@@ -566,7 +596,9 @@
     {
       "op": "add_ruler",
       "page": "int",
-      "kind": "line|curve|parallel|concentric|radial|perspective|symmetry",
+      "kind": "line|curve|parallel|concentric|radial|perspective|symmetry|guide",
+      "axis": "h|v? (guide)",
+      "at": "float? (guide: mm from the top or left)",
       "points": "[[x,y],...]?",
       "angle": "float? (deg)",
       "ratio": "float? (concentric height/width)",

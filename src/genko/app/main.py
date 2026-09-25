@@ -878,6 +878,10 @@ class MainWindow(QMainWindow):
         self.canvas.fillRequested.connect(self._fill_at)
         self.canvas.areaFilled.connect(lambda pts: self._fill_area({"poly": pts}))
         self.canvas.wandRequested.connect(self._wand)
+        self.canvas.shapeDrawn.connect(self._shape_drawn)
+        self.canvas.selectionDrawn.connect(self._selection_drawn)
+        self.canvas.selectionPainted.connect(self._selection_painted)
+        self.canvas.colourAreaRequested.connect(self._select_colour)
         self.canvas.selectionTransformed.connect(self._transform_selection)
         self.canvas.selectionWarped.connect(self._warp_selection)
         self.canvas.layerMoveStarted.connect(self._layer_move_started)
@@ -1096,8 +1100,17 @@ class MainWindow(QMainWindow):
                           "描く先のレイヤーを丸ごとドラッグで動かす（Shift で縦・横・45°）", True)
         self.act_gradient = a("グラデーション", lambda: self._tool("gradient"), "U",
                               "ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）", True)
+        self.act_shape = a("図形", lambda: self._tool("shape"), "O",
+                           "直線・折れ線・曲線・長方形・楕円・多角形を描く（Shift で 45° と正方形。折れ線と曲線はクリックで点、ダブルクリックか Enter で終わり）", True)
+        self.act_sel_ellipse = a("範囲選択（楕円）", lambda: self._tool("ellipse"), None, "ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）", True)
+        self.act_sel_polyline = a("範囲選択（折れ線）", lambda: self._tool("polyline"), None, "クリックで角を置き、ダブルクリックか Enter で閉じる", True)
+        self.act_sel_colour = a("色域選択", lambda: self._tool("colour"), None, "クリックした所と同じ色の所をページ中から選ぶ", True)
+        self.act_sel_pen = a("選択ペン", lambda: self._tool("selpen"), None, "なぞった所を選択範囲に足す", True)
+        self.act_sel_erase = a("選択消し", lambda: self._tool("selerase"), None, "なぞった所を選択範囲から外す", True)
         tools = QActionGroup(self)
-        self.tool_actions = {"move": self.act_move, "gradient": self.act_gradient, "select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
+        self.tool_actions = {"shape": self.act_shape, "ellipse": self.act_sel_ellipse, "polyline": self.act_sel_polyline,
+                             "colour": self.act_sel_colour, "selpen": self.act_sel_pen, "selerase": self.act_sel_erase,
+                             "move": self.act_move, "gradient": self.act_gradient, "select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
                              "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill,
                              "lassofill": self.act_lassofill, "rect": self.act_marquee, "lasso": self.act_lasso,
                              "wand": self.act_wand, "reshape": self.act_reshape, "ruler": self.act_ruler, "3d": self.act_3d,
@@ -1108,6 +1121,14 @@ class MainWindow(QMainWindow):
         self.act_color = a("ペンの色…", self._pick_color, "C")  # (kept for its key; the colour is in ツールの設定)
         self.act_select_all = a("すべて選択", self._select_all, std.SelectAll)
         self.act_deselect = a("選択を解除", lambda: self.canvas.set_selection(None), "Ctrl+D")
+        self.act_sel_invert = a("選択範囲を反転", lambda: self._change_selection({"invert": True}), "Ctrl+Alt+I")
+        self.act_sel_grow = a("選択範囲を広げる…", lambda: self._change_selection_by("grow_mm", 1), None, "選択範囲の縁を外へ広げる")
+        self.act_sel_shrink = a("選択範囲を狭める…", lambda: self._change_selection_by("grow_mm", -1), None, "選択範囲の縁を内へ狭める")
+        self.act_sel_feather = a("境界をぼかす…", lambda: self._change_selection_by("feather_mm", 1), None, "選択範囲の縁をなめらかにぼかす")
+        self.act_sel_layer = a("描画部分から選択", self._select_drawn, None, "描く先のレイヤーで描いてある所を選ぶ")
+        self.act_sel_keep = a("選択範囲をストック…", self._keep_selection, None, "名前を付けてページに残す（後で「ストックから選ぶ」）")
+        self.act_quick_mask = a("クイックマスク", self._quick_mask, None, "選択範囲を赤で見せ、選択ペン・選択消しで直す", True)
+        self.act_scale = a("目盛りを表示", self._toggle_scale, "Ctrl+R", "上と左に mm の目盛り。目盛りからドラッグするとガイド線を引けます", True)
         self.act_copy = a("コピー", self._copy, std.Copy)
         self.act_cut = a("切り取り", self._cut, std.Cut)
         self.act_paste = a("貼り付け", self._paste, std.Paste, "新しいレイヤーに貼り付けます（そのまま動かせます）")
@@ -1220,8 +1241,8 @@ class MainWindow(QMainWindow):
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
-                      None, self.act_guides, self.act_onion, None, self.act_tool_names]),
-            ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None,
+                      None, self.act_guides, self.act_scale, self.act_onion, None, self.act_tool_names]),
+            ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_shape, self.act_text, self.act_frame, None,
                         self.act_picker, self.act_fill, self.act_lassofill, self.act_gradient, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
                         self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner]),
             ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
@@ -1231,7 +1252,10 @@ class MainWindow(QMainWindow):
                       self.act_line_delete, None, self.act_story_editor]),
             ("トーン・効果線", [self.act_tone_here, self.act_tone_click, None, self.act_effect, *self.effect_actions, None,
                                self.act_materials]),
-            ("選択", [self.act_marquee, self.act_lasso, self.act_wand, None, self.act_select_all, self.act_deselect, None,
+            ("選択", [self.act_marquee, self.act_sel_ellipse, self.act_lasso, self.act_sel_polyline, self.act_wand, self.act_sel_colour,
+                      self.act_sel_pen, self.act_sel_erase, None, self.act_select_all, self.act_deselect, self.act_sel_invert,
+                      self.act_sel_grow, self.act_sel_shrink, self.act_sel_feather, self.act_sel_layer, None, self.act_sel_keep,
+                      "stock", self.act_quick_mask, None,
                       self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v,
                       self.act_warp_perspective, self.act_warp_mesh, self.act_warp_apply, None,
                       self.act_fill_selection, self.act_line_width]),
@@ -1264,6 +1288,9 @@ class MainWindow(QMainWindow):
                     self.actions_menu = menu.addMenu("オートアクション")
                     self.actions_menu.aboutToShow.connect(self._fill_actions_menu)
                     self._fill_actions_menu()
+                elif act == "stock":
+                    self.stock_menu = menu.addMenu("ストックから選ぶ")
+                    self.stock_menu.aboutToShow.connect(self._fill_stock)
                 elif act == "scenes":
                     scenes = menu.addMenu("背景の 3D を置く")
                     for scene in self.scene_actions:
@@ -1293,7 +1320,7 @@ class MainWindow(QMainWindow):
                     "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill, "lassofill": self.act_lassofill,
                     "rect": self.act_marquee, "lasso": self.act_lasso, "wand": self.act_wand, "reshape": self.act_reshape,
                     "ruler": self.act_ruler, "3d": self.act_3d, "effect": self.act_effect, "stamp": self.act_stamp,
-                    "move": self.act_move, "gradient": self.act_gradient, "undo": self.act_undo, "redo": self.act_redo, "fit": self.act_fit, "zoom_in": self.act_zoom_in,
+                    "move": self.act_move, "gradient": self.act_gradient, "shape": self.act_shape, "undo": self.act_undo, "redo": self.act_redo, "fit": self.act_fit, "zoom_in": self.act_zoom_in,
                     "zoom_out": self.act_zoom_out, "prev": self.act_prev, "next": self.act_next, "export": self.act_export}
         self._pictures = pictures
         for name, act in pictures.items():
@@ -1307,7 +1334,7 @@ class MainWindow(QMainWindow):
         palette.setOrientation(Qt.Orientation.Vertical)
         palette.setIconSize(QSize(24, 24))
         palette.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        for act in (self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_fill, self.act_lassofill, self.act_gradient,
+        for act in (self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_shape, self.act_fill, self.act_lassofill, self.act_gradient,
                     self.act_picker, None,
                     self.act_text, self.act_frame, None, self.act_marquee, self.act_lasso, self.act_wand, self.act_reshape, None,
                     self.act_ruler, self.act_3d, self.act_effect):
@@ -1332,6 +1359,7 @@ class MainWindow(QMainWindow):
         commands.setIconSize(QSize(18, 18))
         commands.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.command_bar = commands
+        self._make_launcher()
         from genko.app.workspace import fill_commandbar
 
         fill_commandbar(self)  # (the commands chosen in ウィンドウ → コマンドバーを変える)
@@ -1499,7 +1527,7 @@ class MainWindow(QMainWindow):
             prefs().setValue("ui/tool_names", "1" if on else "0")
 
     def _build_studio(self) -> None:
-        from genko.app.tool_settings import TextToolSettings, ToolSettings, action_page, fit_narrow
+        from genko.app.tool_settings import TextToolSettings, ToolSettings, action_page, fit_narrow, menu_button
 
         self.process = ProcessBar()
         self.statusBar().addPermanentWidget(self.process)
@@ -1552,10 +1580,72 @@ class MainWindow(QMainWindow):
         ts.add(("text",), self.text_settings)
         ts.add(("frame",), action_page([self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, self.act_gutters,
                                         self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape, None, self.act_paper]))
-        ts.add(("marquee",), action_page([self.act_marquee, self.act_lasso, self.act_wand, None, self.act_select_all, self.act_deselect,
-                                          None, self.act_copy, self.act_cut, self.act_paste, self.act_delete_area, None, self.act_flip_h,
-                                          self.act_flip_v, self.act_warp_perspective, self.act_warp_mesh, self.act_warp_apply, None,
-                                          self.act_fill_selection, self.act_line_width, self.act_tone_here]))
+        from PySide6.QtWidgets import QCheckBox as _Check
+        from PySide6.QtWidgets import QSpinBox as _Spin
+
+        self.marquee_mode = QComboBox()
+        for label, key in (("長方形", "rect"), ("楕円", "ellipse"), ("投げ縄", "lasso"), ("折れ線", "polyline"), ("自動選択", "wand"),
+                           ("色域選択", "colour"), ("選択ペン", "selpen"), ("選択消し", "selerase")):
+            self.marquee_mode.addItem(label, key)
+        self.marquee_mode.activated.connect(lambda _: self._tool(self.marquee_mode.currentData()))
+        self.selection_pen = QDoubleSpinBox()
+        self.selection_pen.setRange(0.2, 60)
+        self.selection_pen.setSuffix(" mm")
+        self.selection_pen.setValue(4.0)
+        self.selection_pen.valueChanged.connect(lambda v: setattr(self.canvas, "selection_pen_mm", float(v)))
+        self.colour_tolerance = _Spin()
+        self.colour_tolerance.setRange(0, 255)
+        self.colour_tolerance.setValue(24)
+        self.colour_tolerance.setToolTip("色域選択: どれだけ違う色まで同じとみなすか")
+        self.colour_contiguous = _Check("隣り合う所だけ")
+        sel_form = QWidget()
+        sfl = QFormLayout(sel_form)
+        sfl.setContentsMargins(0, 0, 0, 0)
+        sfl.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        sfl.addRow("選び方", self.marquee_mode)
+        sfl.addRow("選択ペンの太さ", self.selection_pen)
+        sfl.addRow("色域の幅", self.colour_tolerance)
+        sfl.addRow("", self.colour_contiguous)
+        joins = QLabel("Shift で足す・Alt で引く・両方で重なりだけ")
+        joins.setWordWrap(True)
+        joins.setStyleSheet("color:#666")
+        ts.add(("marquee",), action_page([sel_form, joins,
+                                          menu_button("選択範囲", [[self.act_select_all, self.act_deselect, self.act_sel_invert],
+                                                                   [self.act_sel_grow, self.act_sel_shrink, self.act_sel_feather,
+                                                                    self.act_sel_layer], [self.act_sel_keep, self.act_quick_mask]]),
+                                          menu_button("中身", [[self.act_copy, self.act_cut, self.act_paste, self.act_delete_area],
+                                                               [self.act_flip_h, self.act_flip_v, self.act_warp_perspective,
+                                                                self.act_warp_mesh, self.act_warp_apply],
+                                                               [self.act_fill_selection, self.act_line_width, self.act_tone_here]])]))
+        self.shape_kind = QComboBox()
+        for label, key in (("直線", "line"), ("折れ線", "polyline"), ("曲線", "curve"), ("長方形", "rect"), ("楕円", "ellipse"),
+                           ("多角形", "polygon")):
+            self.shape_kind.addItem(label, key)
+        self.shape_kind.activated.connect(lambda _: setattr(self.canvas, "shape_kind", self.shape_kind.currentData()))
+        self.shape_style = QComboBox()
+        for label, key in (("線", "line"), ("塗り", "fill"), ("線と塗り", "both")):
+            self.shape_style.addItem(label, key)
+        self.shape_sides = _Spin()
+        self.shape_sides.setRange(3, 24)
+        self.shape_sides.setValue(5)
+        self.shape_sides.valueChanged.connect(lambda v: setattr(self.canvas, "shape_sides", int(v)))
+        self.shape_radius = QDoubleSpinBox()
+        self.shape_radius.setRange(0, 100)
+        self.shape_radius.setSuffix(" mm")
+        shape_page = QWidget()
+        shl = QFormLayout(shape_page)
+        shl.setContentsMargins(0, 0, 0, 0)
+        shl.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        shl.addRow("形", self.shape_kind)
+        shl.addRow("描き方", self.shape_style)
+        shl.addRow("多角形の角", self.shape_sides)
+        shl.addRow("長方形の角の丸み", self.shape_radius)
+        note = QLabel("線の太さと色はペンと同じ。Shift で 45° と正方形。折れ線・曲線はクリックで点を置き、"
+                      "ダブルクリックか Enter で終わり（Shift+Enter で閉じる）。")
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#666")
+        shl.addRow(note)
+        ts.add(("shape",), shape_page)
         radius = QDoubleSpinBox()
         radius.setRange(1, 60)
         radius.setSuffix(" mm")
@@ -1569,8 +1659,6 @@ class MainWindow(QMainWindow):
         ts.add(("reshape",), radius_page)
         ts.add(("ruler",), action_page([*self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
                                         self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]))
-        from genko.app.tool_settings import menu_button
-
         ts.add(("3d",), action_page([menu_button("置く", [[self.act_add_figure, self.act_add_box, self.act_add_cylinder,
                                                             self.act_add_stairs, self.act_add_floor], self.scene_actions]),
                                      menu_button("人形のポーズ", [self.pose_actions]), None, self.act_trace,
@@ -1621,6 +1709,18 @@ class MainWindow(QMainWindow):
         nav_dock.raise_()
         self.view_menu.addAction(quick_dock.toggleViewAction())
         self.quick_dock = quick_dock
+        from genko.app.subview import SubView
+
+        self.subview = SubView(self)
+        sub_dock = QDockWidget("サブビュー", self)
+        sub_dock.setObjectName("サブビュー")
+        sub_dock.setWidget(self.subview)
+        sub_dock.setFeatures(nav_dock.features())
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, sub_dock)
+        self.tabifyDockWidget(quick_dock, sub_dock)
+        nav_dock.raise_()
+        self.view_menu.addAction(sub_dock.toggleViewAction())
+        self.sub_dock = sub_dock
         self.brush_dock = settings_dock
         ts.show_tool("select")
         # the panels on the right; the ones for books made with agents only show for those books
@@ -1990,9 +2090,13 @@ class MainWindow(QMainWindow):
     # --- editing -----------------------------------------------------------------------------
 
     def _tool(self, tool: str) -> None:
-        if tool in ("rect", "lasso", "wand"):
-            self.canvas.marquee = tool
+        marquee = {"rect": "rect", "lasso": "lasso", "wand": "wand", "ellipse": "ellipse", "polyline": "polyline",
+                   "colour": "color", "selpen": "pen", "selerase": "erase"}
+        if tool in marquee:
+            self.canvas.marquee = marquee[tool]
             self.canvas.set_tool("marquee")
+            if hasattr(self, "marquee_mode"):
+                self.marquee_mode.setCurrentIndex(max(0, self.marquee_mode.findData(tool)))
         else:
             self.canvas.set_tool(tool)
         self.tool_actions[tool].setChecked(True)
@@ -2280,7 +2384,180 @@ class MainWindow(QMainWindow):
         if area is None:
             self.flash("そこは線の上です。線で囲まれた中をクリックします", 3000)
             return
+        self._join_selection(area, self.canvas._sel_how)
+
+    # --- figures and the selection's other shapes (J2) -----------------------------------------------
+
+    def _shape_drawn(self, shape: dict) -> None:
+        layer = self._paint_layer()
+        page = self._current()
+        if layer is None or page is None:
+            return
+        how = self.shape_style.currentData() if hasattr(self, "shape_style") else "line"
+        op = {"op": "add_shape", "page": page.index, "layer_id": layer.id, **shape,
+              "line": how in ("line", "both"), "fill": how in ("fill", "both"),
+              "width_mm": self.canvas.brush_width_mm,
+              "rgb": list(self.brush.rgb)}
+        if hasattr(self, "shape_radius") and shape.get("shape") == "rect" and self.shape_radius.value():
+            op["radius_mm"] = self.shape_radius.value()
+        self.apply_ops([op])
+
+    def _make_launcher(self) -> None:
+        """選択範囲ランチャー: what is usually done next with a selection, right under it."""
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QToolButton
+
+        bar = QFrame(self.canvas)
+        bar.setObjectName("launcher")
+        bar.setStyleSheet("#launcher { background: rgba(250,250,252,235); border: 1px solid #9aa; border-radius: 4px; }"
+                          " QToolButton { padding: 2px 5px; }")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(3, 2, 3, 2)
+        row.setSpacing(2)
+        self.launcher_actions = [
+            ("塗る", self.act_fill_selection), ("消す", self.act_delete_area), ("トーン", self.act_tone_here),
+            ("反転", self.act_sel_invert), ("広げる", self.act_sel_grow), ("変形", self.act_warp_perspective),
+            ("コピー", self.act_copy), ("解除", self.act_deselect)]
+        for label, action in self.launcher_actions:
+            button = QToolButton()
+            button.setText(label)
+            button.setToolTip(action.text())
+            button.clicked.connect(action.trigger)
+            row.addWidget(button)
+        bar.hide()
+        self.canvas.launcher = bar
+
+    def _join_selection(self, area: dict | None, how: str) -> None:
+        from genko import selops
+
+        page = self._current()
+        if area is None or page is None:
+            return
+        current = self.canvas.selection["area"] if self.canvas.selection else None
+        try:
+            joined = selops.combine(current, area, how, page, self.episode) if how != "replace" else area
+        except selops.AreaError as exc:
+            self.flash(wording.error(str(exc)), 3000, error=True)
+            return
+        self.canvas.set_selection(joined)
+        if joined is None:
+            self.flash("選択範囲がなくなりました", 2000)
+
+    def _selection_drawn(self, area: dict, how: str) -> None:
+        if how != "replace":
+            self._join_selection(area, how)
+
+    def _selection_painted(self, points: list, add: bool) -> None:
+        from genko import selops
+
+        area = selops.stroke_area(points, self.canvas.selection_pen_mm)
+        if area is None:
+            return
+        if not add and self.canvas.selection is None:
+            return
+        self._join_selection(area, "add" if add else "subtract")
+
+    def _select_colour(self, x_mm: float, y_mm: float) -> None:
+        from genko import selops
+
+        page = self._current()
+        if page is None:
+            return
+        spec = {"x_mm": x_mm, "y_mm": y_mm, "tolerance": self.colour_tolerance.value() if hasattr(self, "colour_tolerance") else 24,
+                "contiguous": bool(getattr(self, "colour_contiguous", None) and self.colour_contiguous.isChecked())}
+        try:
+            area = selops.resolve({"color": spec}, page, self.episode)
+        except selops.AreaError as exc:
+            self.flash(wording.error(str(exc)), 3000, error=True)
+            return
+        self._join_selection(area, self.canvas._sel_how)
+
+    def _change_selection(self, change: dict) -> None:
+        """Invert, grow, shrink or soften the selection (the page as a whole when inverting nothing)."""
+        from genko import selops
+
+        page = self._current()
+        if page is None:
+            return
+        current = self.canvas.selection["area"] if self.canvas.selection else None
+        if current is None and not change.get("invert"):
+            self._need_area()
+            return
+        base = current if current is not None else {"rect": [0, 0, 0.01, 0.01]}
+        try:
+            area = selops.resolve({"union": [base], **change}, page, self.episode)
+        except selops.AreaError as exc:
+            self.flash(wording.error(str(exc)), 3000, error=True)
+            return
         self.canvas.set_selection(area)
+
+    def _change_selection_by(self, key: str, sign: int) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        if self._need_area() is None:
+            return
+        title = {"grow_mm": "広げる" if sign > 0 else "狭める", "feather_mm": "ぼかす"}[key]
+        amount, ok = QInputDialog.getDouble(self, "選択範囲", f"{title}幅（mm）", 1.0, 0.1, 50.0, 1)
+        if ok:
+            self._change_selection({key: sign * amount})
+
+    def _select_drawn(self) -> None:
+        from genko import selops
+
+        page, layer = self._current(), self.target_layer()
+        if page is None or layer is None:
+            return
+        try:
+            area = selops.resolve({"layer": layer.id}, page, self.episode)
+        except selops.AreaError:
+            self.flash("描く先のレイヤーには、まだ何も描いてありません", 3000)
+            return
+        self._join_selection(area, "replace")
+
+    def _keep_selection(self, name: str | None = None) -> bool:
+        area = self._need_area()
+        page = self._current()
+        if area is None or page is None:
+            return False
+        if name is None:
+            from PySide6.QtWidgets import QInputDialog
+
+            name, ok = QInputDialog.getText(self, "選択範囲をストック", "名前（例: 空、髪、背景）")
+            if not ok or not name.strip():
+                return False
+        return self.apply_ops([{"op": "store_area", "page": page.index, "name": name.strip(), "area": area}])
+
+    def _fill_stock(self) -> None:
+        menu = self.stock_menu
+        menu.clear()
+        page = self._current()
+        saved = (page.extra.get("saved_areas") or {}) if page is not None else {}
+        if not saved:
+            empty = menu.addAction("（このページにストックはありません）")
+            empty.setEnabled(False)
+            return
+        for name in saved:
+            menu.addAction(name, lambda _=False, n=name: self._use_stock(n))
+        forget = menu.addMenu("ストックを消す")
+        for name in saved:
+            forget.addAction(name, lambda _=False, n=name: self.apply_ops([{"op": "forget_area", "page": page.index, "name": n}]))
+
+    def _use_stock(self, name: str) -> None:
+        page = self._current()
+        saved = (page.extra.get("saved_areas") or {}).get(name) if page is not None else None
+        if saved is not None:
+            self._join_selection(saved, "replace")
+
+    def _quick_mask(self, on: bool) -> None:
+        """The selection shown in red, to be painted with the selection pen and eraser."""
+        self.canvas.quick_mask = bool(on)
+        if on:
+            self._tool("selpen")
+            self.flash("クイックマスク: 選択ペンで足し、選択消しで外します。終わったらもう一度「クイックマスク」", 5000)
+        self.canvas.update()
+
+    def _toggle_scale(self, on: bool) -> None:
+        self.canvas.show_scale = bool(on)
+        self.canvas.update()
 
     @staticmethod
     def _moved_area(area: dict, matrix) -> dict:
@@ -2505,6 +2782,9 @@ class MainWindow(QMainWindow):
 
         ruler_id = new_id()
         if self.apply_ops([{"op": "add_ruler", "page": page.index, "id": ruler_id, **ruler}]):
+            if ruler.get("kind") == "guide":
+                self.flash("ガイド線を引きました。近くで描き始めた線が沿います（定規 → 選んだ定規を消す で消す）", 3500)
+                return
             self.canvas.selected_ruler_id = ruler_id
             if not self.act_snap.isChecked():
                 self.act_snap.setChecked(True)
