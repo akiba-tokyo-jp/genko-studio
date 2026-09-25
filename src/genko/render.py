@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import threading
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont
@@ -62,6 +63,24 @@ def _stroke(
 
 _STROKE_CACHE: dict = {}  # (layer id, dpi, size, guide) → (patches' signature, lines' signatures, image); oldest first
 STROKE_CACHE_SIZE = 12
+STROKE_CACHE_PIXELS = 80_000_000  # about 320 MB: a few zoomed-in (fine) layers, or a dozen normal ones
+_CACHE_LOCK = threading.Lock()  # the canvas renders zoomed-in views on a second thread
+_LOCAL = threading.local()
+
+
+class Cancelled(Exception):
+    """A background render that is no longer wanted (the page changed or was left)."""
+
+
+def cancel_with(event) -> None:
+    """Renders on this thread stop (raise Cancelled) soon after event is set."""
+    _LOCAL.cancel = event
+
+
+def _check_cancel() -> None:
+    event = getattr(_LOCAL, "cancel", None)
+    if event is not None and event.is_set():
+        raise Cancelled()
 
 
 def _stroke_sig(stroke, brushes) -> tuple:
@@ -72,8 +91,54 @@ def _stroke_sig(stroke, brushes) -> tuple:
             len(getattr(stroke, "pressure", None) or []), brushes.brush(getattr(stroke, "kind", None)))
 
 
+QUICK_DPI = 32  # at or below this (small pictures of pages and layers) lines are drawn as plain polylines
+
+
+def _quick_strokes(strokes, patches, size, dpi: int, guide: bool) -> Image.Image:
+    """Lines as plain polylines of their width, straight onto the layer: a thumbnail (or the screen's
+    first look) of a page with thousands of lines in milliseconds. The brush look is left out."""
+    from genko import brushes
+
+    out = Image.new("RGBA", size, (0, 0, 0, 0))
+    for patch in patches:
+        _paint_patch(out, patch, dpi, NAME_COLOR if guide else None)
+    draw = ImageDraw.Draw(out)
+    scale = dpi / 25.4
+    for stroke in strokes:
+        points = getattr(stroke, "points", None) or []
+        if not points:
+            continue
+        b = brushes.brush(getattr(stroke, "kind", None))
+        rgb = NAME_COLOR if guide else tuple(getattr(stroke, "rgb", None) or b.rgb or INK_COLOR)
+        shade = int(255 * max(0.0, min(1.0, float(getattr(stroke, "opacity", 1.0)))) * b.opacity)
+        xy = [(p[0] * scale, p[1] * scale) for p in points]
+        width = max(1, round(float(getattr(stroke, "width_mm", 0.35) or 0.35) * scale))
+        if len(xy) == 1:
+            draw.point(xy, fill=(*rgb, shade))
+        else:
+            draw.line(xy, fill=(*rgb, shade), width=width, joint="curve" if width > 2 else None)
+    return out
+
+
+ROUGH_FROM = 300  # a layer with this many lines not yet drawn at a resolution is roughed out first on screen
+
+
+def rough_needed(page: Page, dpi: int) -> bool:
+    """Would drawing this page now mean drawing many lines from scratch (a page not seen lately)?"""
+    size = (mm_to_px(page.spec.width_mm, dpi), mm_to_px(page.spec.height_mm, dpi))
+    with _CACHE_LOCK:
+        for layer in page.layers:
+            strokes = getattr(layer, "strokes", None) or []
+            if len(strokes) < ROUGH_FROM or not layer.visible:
+                continue
+            cached = _STROKE_CACHE.get((layer.id, dpi, size, layer.role in (LayerRole.NAME, LayerRole.DRAFT)))
+            if cached is None or len(strokes) - len(cached[1]) >= ROUGH_FROM:
+                return True
+    return False
+
+
 def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Image | None,
-                   raster: Image.Image | None) -> Image.Image | None:
+                   raster: Image.Image | None, rough: bool = False) -> Image.Image | None:
     """A layer's fills (patches) and pen lines, drawn from their data at this resolution (None if none).
 
     Name and draft lines are drawn in the name colour; the others in their own colour (ink black by
@@ -88,13 +153,16 @@ def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Ima
     if not strokes and not patches:
         return None
     guide = layer.role in (LayerRole.NAME, LayerRole.DRAFT)
+    if dpi <= QUICK_DPI or rough:
+        return _clipped(layer, _quick_strokes(strokes, patches, size, dpi, guide), panel_mask, raster)
     # the lines drawn so far are remembered per layer and resolution: a new line is drawn on top of them
     # instead of drawing the whole layer again (a finished page has thousands of lines)
     key = (getattr(layer, "id", None), dpi, size, guide)
     patch_sig = tuple((p.get("id"), tuple(p.get("box") or ()), len(p.get("png") or b""), str(p.get("rgb")), p.get("opacity"),
                        p.get("mode")) for p in patches)
     sigs = [_stroke_sig(stroke, brushes) for stroke in strokes]
-    cached = _STROKE_CACHE.get(key) if key[0] else None
+    with _CACHE_LOCK:
+        cached = _STROKE_CACHE.get(key) if key[0] else None
     if cached is not None and cached[0] == patch_sig and cached[1] == sigs[:len(cached[1])]:
         out = cached[2].copy()
         todo = strokes[len(cached[1]):]
@@ -116,7 +184,9 @@ def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Ima
             patch.putalpha(ink.crop(box))
             out.alpha_composite(patch, (box[0], box[1]))
 
-    for stroke in todo:
+    for n, stroke in enumerate(todo):
+        if n % 64 == 63:
+            _check_cancel()
         b = brushes.brush(getattr(stroke, "kind", None))
         drawn = brushes.draw(size, stroke_points(stroke), dpi, float(getattr(stroke, "width_mm", 0.35) or 0.35),
                              getattr(stroke, "kind", None), seed=str(getattr(stroke, "id", "")))
@@ -134,10 +204,17 @@ def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Ima
         ink.paste(ImageChops.screen(ink.crop(box), cover), box[:2])
     lay()
     if key[0]:
-        _STROKE_CACHE.pop(key, None)
-        _STROKE_CACHE[key] = (patch_sig, sigs, out.copy())
-        while len(_STROKE_CACHE) > STROKE_CACHE_SIZE:
-            _STROKE_CACHE.pop(next(iter(_STROKE_CACHE)))
+        kept = out.copy()
+        with _CACHE_LOCK:
+            _STROKE_CACHE.pop(key, None)
+            _STROKE_CACHE[key] = (patch_sig, sigs, kept)
+            while len(_STROKE_CACHE) > 1 and (len(_STROKE_CACHE) > STROKE_CACHE_SIZE or sum(
+                    item[2].width * item[2].height for item in _STROKE_CACHE.values()) > STROKE_CACHE_PIXELS):
+                _STROKE_CACHE.pop(next(iter(_STROKE_CACHE)))
+    return _clipped(layer, out, panel_mask, raster)
+
+
+def _clipped(layer, out: Image.Image, panel_mask, raster) -> Image.Image:
     if panel_mask is not None and getattr(layer, "panel_clip", True):
         out.putalpha(_and_alpha(out, panel_mask))
     if getattr(layer, "lock_alpha", False) and raster is not None:
@@ -526,9 +603,11 @@ def render_page(
     crop_marks: bool = False,
     onion: bool = True,
     finish: bool | None = None,
+    rough: bool = False,
 ) -> Image.Image:
     """`finish`: the monochrome print finish (dots and pure black and white). None = by the page
-    (mono pages yes, colour pages no); False for screen and colour outputs (webtoon, SNS)."""
+    (mono pages yes, colour pages no); False for screen and colour outputs (webtoon, SNS).
+    `rough`: lines as plain polylines (the screen's first look at a page; never for output)."""
     if finish is None:
         finish = page.spec.expression != "color"
     width = mm_to_px(page.spec.width_mm, working_dpi)
@@ -552,6 +631,7 @@ def render_page(
     prev_alpha = None
     panel_mask = _clip_mask(page, size, working_dpi)
     for layer in page.layers:
+        _check_cancel()
         if getattr(layer, "kind", None) == LayerKind.FOLDER:
             continue
         if not layer.visible:
@@ -572,7 +652,7 @@ def render_page(
             raster = _open_raster(layer)
             if raster is not None:
                 raster = raster.resize(size)
-        lines = _layer_strokes(layer, size, working_dpi, panel_mask, raster)
+        lines = _layer_strokes(layer, size, working_dpi, panel_mask, raster, rough=rough)
         if lines is not None:
             raster = lines if raster is None else Image.alpha_composite(raster.convert("RGBA"), lines)
         if raster is None:

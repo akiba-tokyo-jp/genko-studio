@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from genko.models import Episode, Frame, StoryLine, stroke_points
+from genko.models import Episode, Frame, LayerRole, StoryLine, stroke_points
 from genko.ops import OPS_SCHEMA, ApplyError, apply_ops
 
 __all__ = ["OPS_SCHEMA", "ApplyError", "apply_ops", "snapshot", "inspect_stroke"]
@@ -24,6 +24,10 @@ def _line_brief(line: StoryLine) -> dict[str, Any]:
     }
 
 
+def _count(page, role) -> int:
+    return sum(len(layer.strokes) for layer in page.layers if layer.role == role)
+
+
 def snapshot(episode: Episode, full: bool = False) -> dict[str, Any]:
     pages = []
     for page in episode.pages:
@@ -35,8 +39,8 @@ def snapshot(episode: Episode, full: bool = False) -> dict[str, Any]:
             "leaf_count": len(page.leaf_frames()),
             "leaves": [_frame_brief(frame) for frame in page.leaf_frames()],
             "story": [_line_brief(line) for line in episode.story_for_page(page.index)],
-            "name_stroke_count": len(page.name_strokes),
-            "ink_stroke_count": len(page.ink_strokes),
+            "name_stroke_count": _count(page, LayerRole.NAME),
+            "ink_stroke_count": _count(page, LayerRole.INK),
             "selected_frame_id": page.selected_frame_id,
             "layers": [
                 {

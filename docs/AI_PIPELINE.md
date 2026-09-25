@@ -377,7 +377,7 @@ name の承認が付いたページだけが対象。順序は「パイロット
 
 - **project.json に画像バイトを入れない。** ラスタ、候補、シート、参照、取り込んだアタリは `assets/` に内容アドレスで置く。Episode は hash だけを持つ。
 - **ラスタの保存を内容アドレスにする。** 作業ラスタ（`raster_png` を持つ既存レイヤー）はメモリ上ではそのまま。`save_episode` が保存時に sha256 を計算して `assets/` に書き、relpath をその hash パスにする。ops と render は変えない。ページ番号や role から作るパスがなくなるので、§0.5 の 5〜7 の衝突と上書きが構造的に消える。
-- **ストロークの保存も内容アドレスにする（v3）。** メモリ上の `Layer.strokes` はそのまま。`save_episode` はレイヤーごとにストロークを正準 JSON（座標は 0.01 mm に丸め）にして `assets/` に置き、project.json には `strokes_blob`（hash）と本数だけを書く。`name_strokes` / `ink_strokes` の重複（§0.5 の 23）は v3 では書かない（読み込みは v2 のために残す）。lt_convert の 3 万本も project.json を太らせない。
+- **ストロークの保存も内容アドレスにする（v3）。** メモリ上の `Layer.strokes` はそのまま。`save_episode` はレイヤーごとにストロークを正準 JSON にして `assets/` に置き（H1 から座標と筆圧は `xy`・`p` に float64 リトルエンディアンの base64 で詰める。数の並びの古い形も読める。新しい線の座標は 0.001 mm に丸める）、project.json には `strokes_blob`（hash）と本数だけを書く。`name_strokes` / `ink_strokes` の重複（§0.5 の 23）は v3 では書かない（読み込みは v2 のために残す）。lt_convert の 3 万本も project.json を太らせない。
 - **差分保存。** 保存は、hash が既にストアにある資産を書かない。project.json は一時ファイル + `os.replace`（Windows では `PermissionError` を最大 2 秒まで間隔を広げて再試行）。読み込みはラスタを遅延読み込みにする（render と op が触れたときに読む）。
 - **AI の画像は `placed` レイヤー**（新しい `LayerKind`）。バイト列をメモリに持たず、`asset` と `placement_mm` を持つ。render は Episode に注入した AssetStore から開く（LRU）。
 - **コマのデータは Frame に置く**（`Frame.panel`）。`duplicate_page` は `_refresh_frame_ids` で id を変えてもオブジェクトは保つので（ops.py:951-954）、指示がコマと一緒に動く。

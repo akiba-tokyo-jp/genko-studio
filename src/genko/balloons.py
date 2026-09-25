@@ -6,7 +6,7 @@ outline is the mask's inner edge (`border_mm` wide) and the inside is filled whi
 The text is set in the space inside the shape, centred, and shrinks to fit unless it has a size.
 
 Shapes: speech (ellipse), rounded, box, cloud, thought (ellipse and bubbles), shout (spikes),
-flash (radiating lines), whisper (dashed), narration (box, no tail), sfx (outlined lettering, no
+electric (電子音: a jagged, cornered edge and a lightning tail, for phones and TVs), flash (radiating lines), whisper (dashed), narration (box, no tail), sfx (outlined lettering, no
 balloon), none (text only).
 """
 
@@ -19,8 +19,8 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 from genko import fonts
 from genko.tategaki import cells, compose, draw_mark
 
-SHAPES = ("speech", "rounded", "box", "cloud", "thought", "shout", "flash", "whisper", "narration", "sfx", "none")
-ELLIPTIC = ("speech", "cloud", "thought", "shout", "flash", "whisper")
+SHAPES = ("speech", "rounded", "box", "cloud", "thought", "shout", "electric", "flash", "whisper", "narration", "sfx", "none")
+ELLIPTIC = ("speech", "cloud", "thought", "shout", "electric", "flash", "whisper")
 NO_TAIL = ("narration", "sfx", "none", "flash")
 SQRT2 = 2 ** 0.5
 CAP_MM = 5.0
@@ -31,7 +31,7 @@ TEXT = (10, 10, 10)
 
 DEFAULTS = {"font": None, "size_mm": None, "tracking": 0.0, "leading": 0.15, "align": "top", "outline_mm": None,
             "rgb": None, "tcy": True, "border_mm": 0.35, "fill": "white", "group": None, "rotate_deg": 0.0, "skew_deg": 0.0,
-            "arc": 0.0, "latin": "rotate", "emphasis_mark": "sesame", "bold": False, "italic": False, "outline_rgb": None,
+            "arc": 0.0, "latin": "rotate", "emphasis_mark": "sesame", "bold": False, "weight": None, "italic": False, "outline_rgb": None,
             "wobble": 0.0, "double": False, "spikes": None, "spike_depth": 0.2}
 LINE_START = frozenset("、。，．）」』)】］〉》ーぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ！？!?…‥")
 LINE_END = frozenset("「『（(【［〈《〔")
@@ -88,7 +88,7 @@ def _vertical(line, st: dict, face, em: int, inner_h: float, fill) -> Image.Imag
                    ruby_runs=getattr(line, "ruby_runs", None) or None, face=face, tracking=tracking, leading=leading,
                    tcy=bool(st["tcy"]), align=str(st["align"] or "top"), latin=latin,
                    emphasis_runs=_emphasis(line, face) or None, emphasis_mark=str(st["emphasis_mark"] or "sesame"),
-                   style_runs=getattr(line, "style_runs", None) or None, bold=bool(st["bold"]))
+                   style_runs=getattr(line, "style_runs", None) or None, bold=line_weight(st))
 
 
 def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Image:
@@ -100,7 +100,7 @@ def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Im
     text = face.normalize(line.text or "")
     tracking = float(st["tracking"] or 0)
     flat = text.replace("\n", "")
-    styles_flat = char_styles(flat, getattr(line, "style_runs", None), {"bold": True} if st["bold"] else None)
+    styles_flat = char_styles(flat, getattr(line, "style_runs", None), {"bold": line_weight(st)} if line_weight(st) else None)
     styles: list[dict] = []
     k = 0
     for char in text:  # (styles per character of the text, "\n" included)
@@ -174,7 +174,7 @@ def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Im
         for i in row:
             size = size_of(i)
             rgb = tuple(styles[i].get("rgb") or fill)
-            thick = bold_px(size) if styles[i].get("bold") else 0
+            thick = bold_px(size, styles[i].get("bold"))
             draw.text((x, base_y + (tallest - size)), text[i], font=face.font(size, text[i]), fill=rgb + (255,),
                       stroke_width=thick, stroke_fill=rgb + (255,) if thick else None)
             w = advance(i) - em * tracking
@@ -302,6 +302,15 @@ def outlined(text_img: Image.Image, grow: int, colour=(255, 255, 255)) -> Image.
 # --- shapes -----------------------------------------------------------------------------------------------
 
 
+def line_weight(st: dict) -> int:
+    """The line's weight: style.weight (normal / bold / heavy) wins over the older bold switch."""
+    from genko.tategaki import weight_level
+
+    if st.get("weight"):
+        return weight_level(st["weight"])
+    return weight_level(bool(st.get("bold")))
+
+
 def _ellipse_point(cx: float, cy: float, rx: float, ry: float, t: float) -> tuple[float, float]:
     return cx + rx * math.cos(t), cy + ry * math.sin(t)
 
@@ -373,8 +382,30 @@ def _shape(draw: ImageDraw.ImageDraw, kind: str, box: tuple[float, float, float,
             k = 1.0 if i % 2 == 0 else 1.0 - depth
             points.append(_ellipse_point(cx, cy, rx * k, ry * k, t))
         draw.polygon(points, fill=255)
+    elif kind == "electric":
+        draw.polygon(_electric(box, st), fill=255)
     else:  # speech, thought, whisper, flash
         draw.ellipse(box, fill=255)
+
+
+def _electric(box, st: dict | None = None) -> list[tuple[float, float]]:
+    """The 電子音 edge: a squarish outline (a superellipse) broken into sharp zigzags that lean one way,
+    like a voice coming through a speaker."""
+    x0, y0, x1, y1 = box
+    cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+    st = st or {}
+    teeth = int(st.get("spikes") or 0) or max(14, int((rx + ry) / max(3.0, min(rx, ry) / 4)))
+    depth = max(0.04, min(0.4, float(st.get("spike_depth") or 0.12)))
+    points = []
+    for i in range(teeth * 2):
+        t = math.pi * (i + (0.35 if i % 2 else 0)) / teeth  # (the inner corners lag: a sawtooth, not a star)
+        c, s_ = math.cos(t), math.sin(t)
+        # a superellipse of power 4: flat sides, round corners
+        k = 1.0 if i % 2 == 0 else 1.0 - depth
+        px_ = cx + rx * k * math.copysign(abs(c) ** 0.5, c)
+        py_ = cy + ry * k * math.copysign(abs(s_) ** 0.5, s_)
+        points.append((px_, py_))
+    return points
 
 
 def _edge_point(kind: str, box, toward: tuple[float, float], spread: float) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -391,7 +422,7 @@ def _edge_point(kind: str, box, toward: tuple[float, float], spread: float) -> t
         mx = max(x0 + spread, min(x1 - spread, tx))
         return (mx - spread / 2, ey), (mx + spread / 2, ey)
     t = math.atan2((ty - cy) / max(ry, 1), (tx - cx) / max(rx, 1))
-    k = 0.72 if kind == "shout" else 0.9  # start inside the shape (below the spikes' valleys)
+    k = 0.72 if kind == "shout" else 0.8 if kind == "electric" else 0.9  # start inside (below the spikes' valleys)
     rx, ry = rx * k / 0.9, ry * k / 0.9
     lo, hi = 0.0, math.pi / 2
     for _ in range(24):  # the half-angle whose chord is `spread`
@@ -420,6 +451,10 @@ def _tail_polygon(kind: str, box, tip, via, base: float) -> list[tuple[float, fl
         dy = 2 * (1 - t) * (cy - my) + 2 * t * (tip[1] - cy)
         n = math.hypot(dx, dy) or 1.0
         half = math.dist(p1, p2) / 2 * (1 - t)
+        if kind == "electric" and 0 < i < steps:
+            # a lightning tail: the centre line jumps sideways at a few steps
+            jump = (1 if (i // 4) % 2 else -1) * math.dist(p1, p2) * 0.9 * (1 - t) if i % 4 == 0 else 0.0
+            x, y = x - dy / n * jump, y + dx / n * jump
         left.append((x - dy / n * half, y + dx / n * half))
         right.append((x + dy / n * half, y - dx / n * half))
     return left + right[::-1]

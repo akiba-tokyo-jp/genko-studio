@@ -50,11 +50,10 @@ SIDE_WIDTH = 230  # the side panels; the rest of the window is the page  # chang
 
 
 def _pixmap(image) -> QPixmap:
-    from io import BytesIO
-
-    buf = BytesIO()
-    image.convert("RGB").save(buf, format="PNG")
-    return QPixmap.fromImage(QImage.fromData(buf.getvalue()))
+    rgb = image.convert("RGB")
+    data = rgb.tobytes()
+    qimage = QImage(data, rgb.width, rgb.height, rgb.width * 3, QImage.Format.Format_RGB888)
+    return QPixmap.fromImage(qimage)  # (fromImage copies the pixels, so data may go)
 
 
 class StoryPanel(QWidget):
@@ -144,8 +143,11 @@ class StoryPanel(QWidget):
         self.mark.addItem("黒丸（・）", "dot")
         self.mark.setToolTip("《《強調》》と書いた所に付く傍点の形")
         self.mark.activated.connect(lambda _: self._style_changed())
-        self.bold = QCheckBox("太字")
-        self.bold.clicked.connect(lambda _: self._style_changed())
+        self.weight = QComboBox()
+        for label, key in (("標準", "normal"), ("太", "bold"), ("極太", "heavy")):
+            self.weight.addItem(label, key)
+        self.weight.setToolTip("文字の太さ。書体に太い字がないときは、字の線を太らせて作ります")
+        self.weight.activated.connect(lambda _: self._style_changed())
         self.italic = QCheckBox("斜体")
         self.italic.clicked.connect(lambda _: self._style_changed())
         self.outline_colour = QPushButton("フチの色…")
@@ -190,9 +192,9 @@ class StoryPanel(QWidget):
         form.addRow("欧文", self.latin)
         form.addRow("傍点", self.mark)
         faces = QHBoxLayout()
-        faces.addWidget(self.bold)
+        faces.addWidget(self.weight)
         faces.addWidget(self.italic)
-        form.addRow("", faces)
+        form.addRow("太さ", faces)
         form.addRow("", self.outline_colour)
         form.addRow("線の揺れ", self.wobble)
         form.addRow("", self.double)
@@ -215,9 +217,14 @@ class StoryPanel(QWidget):
         sl = QVBoxLayout(self.style_box)
         sl.setContentsMargins(0, 6, 0, 0)
         sl.addWidget(self.style_title)
-        sl.addLayout(form)
-        sl.addWidget(reset)
-        sl.addWidget(hint)
+        # (hidden while no line is chosen: a column of greyed-out fields only says "not here")
+        self.style_body = QWidget()
+        bl = QVBoxLayout(self.style_body)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.addLayout(form)
+        bl.addWidget(reset)
+        bl.addWidget(hint)
+        sl.addWidget(self.style_body)
         layout = QVBoxLayout(self)
         layout.setSpacing(4)
         layout.addWidget(QLabel("このページの台詞（読み順）"))
@@ -272,11 +279,10 @@ class StoryPanel(QWidget):
         line = self._line()
         for widget in (self.apply_button, self.delete_button):
             widget.setEnabled(line is not None)
-        for widget in self.style_box.findChildren(QWidget):
-            if widget is not self.style_title:
-                widget.setEnabled(line is not None)
+        self.style_body.setVisible(line is not None)
+        self.style_title.setStyleSheet("font-weight:bold" if line is not None else "color:#666")
         self.style_title.setText(f"選んだ台詞の文字とフキダシ: 「{line.text[:12]}{'…' if len(line.text) > 12 else ''}」"
-                                 if line is not None else "台詞を選ぶと、その文字とフキダシを変えられます")
+                                 if line is not None else "台詞をクリックすると、ここに文字とフキダシの設定が出ます")
         self.window.canvas.selected_line_id = line.id if line else None
         self.window.canvas.update()
         if line is None:
@@ -306,7 +312,9 @@ class StoryPanel(QWidget):
         self.arc.setValue(float(st["arc"] or 0))
         self.latin.setCurrentIndex(max(0, self.latin.findData(st["latin"])))
         self.mark.setCurrentIndex(max(0, self.mark.findData(st["emphasis_mark"])))
-        self.bold.setChecked(bool(st["bold"]))
+        from genko.balloons import line_weight
+
+        self.weight.setCurrentIndex(line_weight(st))
         self.italic.setChecked(bool(st["italic"]))
         self.wobble.setValue(float(st["wobble"] or 0))
         self.double.setChecked(bool(st["double"]))
@@ -327,7 +335,7 @@ class StoryPanel(QWidget):
                      "align": self.align.currentData(), "fill": self.fill.currentData(), "tcy": self.tcy.isChecked(),
                      "rotate_deg": self.rotate.value() or None, "skew_deg": self.skew.value() or None, "arc": self.arc.value() or None,
                      "latin": self.latin.currentData(), "emphasis_mark": self.mark.currentData(),
-                     "bold": self.bold.isChecked() or None, "italic": self.italic.isChecked() or None, "wobble": self.wobble.value() or None,
+                     "weight": self.weight.currentData() if self.weight.currentIndex() else None, "bold": None, "italic": self.italic.isChecked() or None, "wobble": self.wobble.value() or None,
                      "double": self.double.isChecked() or None, "spikes": self.spikes.value() or None,
                      "spike_depth": self.spike_depth.value() if abs(self.spike_depth.value() - 0.2) > 1e-6 else None})
 
@@ -839,6 +847,8 @@ class MainWindow(QMainWindow):
         self.pages.currentRowChanged.connect(self._select_page)
         self.canvas = PageCanvas()
         self.canvas.renderer = self._render_current
+        self.canvas.detail_job = self._detail_job
+        self.canvas.needs_rough = self._needs_rough
         self.canvas.changed.connect(self._refresh_status)
         self.canvas.changed.connect(lambda: self._refresh_zoom() if hasattr(self, "zoom_label") else None)
         self.canvas.strokeCommitted.connect(self._on_stroke)
@@ -1034,6 +1044,8 @@ class MainWindow(QMainWindow):
         self.act_turn_reset = a("回転・反転を戻す", self.canvas.reset_view, "Ctrl+Alt+0")
         self.act_mirror = a("左右反転して見る", lambda on: self.canvas.flip_view(on), "H",
                             "表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません", True)
+        self.act_tool_names = a("道具の名前を表示", self._show_tool_names, None,
+                                "左の道具にアイコンと名前を並べます（環境に残ります）", True)
         self.act_overview = a("ページを並べて見る", self._page_overview, "Ctrl+Shift+O", "全ページを縮小図で並べ、ダブルクリックで開きます")
         self.act_prev = a("◀ 前のページ", lambda: self._jump(-1), [QKeySequence(std.MoveToPreviousPage), QKeySequence("Ctrl+Left")])
         self.act_next = a("次のページ ▶", lambda: self._jump(1), [QKeySequence(std.MoveToNextPage), QKeySequence("Ctrl+Right")])
@@ -1186,7 +1198,7 @@ class MainWindow(QMainWindow):
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
-                      None, self.act_guides, self.act_onion]),
+                      None, self.act_guides, self.act_onion, None, self.act_tool_names]),
             ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None,
                         self.act_picker, self.act_fill, self.act_lassofill, self.act_gradient, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
                         self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner]),
@@ -1269,6 +1281,15 @@ class MainWindow(QMainWindow):
                 palette.addAction(act)
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, palette)
         self.tool_palette = palette
+        for act, short in ((self.act_marquee, "長方形選択"), (self.act_lasso, "投げ縄選択"), (self.act_reshape, "線の修正"),
+                           (self.act_3d, "3D")):
+            act.setIconText(short)  # (the palette's names stay short; menus keep the full name)
+        from genko.app.preferences import settings as prefs
+
+        self.act_tool_names.blockSignals(True)
+        self.act_tool_names.setChecked(str(prefs().value("ui/tool_names", "0")) == "1")
+        self.act_tool_names.blockSignals(False)
+        self._show_tool_names(self.act_tool_names.isChecked(), save=False)
         commands = QToolBar("操作")
         commands.setObjectName("commands")
         commands.setMovable(False)
@@ -1281,6 +1302,15 @@ class MainWindow(QMainWindow):
             else:
                 commands.addAction(act)
         self.addToolBar(commands)
+
+    def _show_tool_names(self, on: bool, save: bool = True) -> None:
+        """Icons alone, or icons with their names (easier while learning 18 tools)."""
+        style = Qt.ToolButtonStyle.ToolButtonTextBesideIcon if on else Qt.ToolButtonStyle.ToolButtonIconOnly
+        self.tool_palette.setToolButtonStyle(style)
+        if save:
+            from genko.app.preferences import settings as prefs
+
+            prefs().setValue("ui/tool_names", "1" if on else "0")
 
     def _build_studio(self) -> None:
         from genko.app.tool_settings import TextToolSettings, ToolSettings, action_page, fit_narrow
@@ -1672,7 +1702,7 @@ class MainWindow(QMainWindow):
         else:
             self._refresh_studio()
 
-    def _render_current(self, dpi: int) -> QPixmap | None:
+    def _render_current(self, dpi: int, rough: bool = False) -> QPixmap | None:
         page = self._current()
         if page is None:
             return None
@@ -1682,9 +1712,32 @@ class MainWindow(QMainWindow):
         # agent's name stage)
         mode = "name" if not page.name_ok and getattr(self, "_agent_mode", False) else "proof"
         try:
-            return _pixmap(render_page(page, dpi, mode=mode, episode=self.episode))
+            return _pixmap(render_page(page, dpi, mode=mode, episode=self.episode, rough=rough))
         except Exception:  # a broken asset must not take the editor down
             return None
+
+    def _needs_rough(self, dpi: int) -> bool:
+        from genko.render import rough_needed
+
+        page = self._current()
+        return page is not None and rough_needed(page, dpi)
+
+    def _detail_job(self, dpi: int):
+        """The current page, rendered finer off the GUI thread. Pages are never changed in place (an
+        edit makes new copies of what it touches), so the thread can read these while people draw on."""
+        page, episode = self._current(), self.episode
+        mode = "name" if page is not None and not page.name_ok and getattr(self, "_agent_mode", False) else "proof"
+
+        def job():
+            if page is None:
+                return None
+            from genko.render import render_page
+
+            rgb = render_page(page, dpi, mode=mode, episode=episode).convert("RGB")
+            data = rgb.tobytes()
+            return QImage(data, rgb.width, rgb.height, rgb.width * 3, QImage.Format.Format_RGB888).copy()
+
+        return job
 
     def _refresh_status(self) -> None:
         page = self._current()

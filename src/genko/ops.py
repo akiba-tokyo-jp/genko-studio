@@ -39,7 +39,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "cut_frame", "page": "int", "frame_id": "str?", "p0": "[x,y]", "p1": "[x,y]", "gutter_mm": "float?", "note": "cut a panel along any line (slanted panels)"},
     {"op": "move_gutter", "page": "int", "frame_id": "str (the split)", "index": "int? (gutter after this child)", "delta_mm": "float", "gutter_mm": "float? (new width)"},
     {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]?", "style_runs": "[[words, {scale, bold, rgb}]]?", "path": "[[x,y]]? (a hand-drawn balloon)", "id": "str? (choose the id)"},
-    {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|flash|whisper|narration|sfx|none?", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]? (傍点 on these words)", "style_runs": "[[words, {scale 0.3..3, bold, rgb}]]? (part of the line larger, smaller, bolder, coloured)", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"},
+    {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|electric|flash|whisper|narration|sfx|none?", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]? (傍点 on these words)", "style_runs": "[[words, {scale 0.3..3, bold, weight, rgb}]]? (part of the line larger, smaller, bolder, coloured)", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"},
     {"op": "reorder_lines", "page": "int", "order": "[line id] (reading order)"},
     {"op": "delete_line", "id": "str"},
     {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
@@ -355,7 +355,7 @@ def _untouched(stroke, eraser: list, radius: float) -> bool:
 
 STYLE_KEYS = {"font": str, "size_mm": float, "tracking": float, "leading": float, "align": str, "outline_mm": float,
               "rgb": list, "tcy": bool, "border_mm": float, "fill": str, "group": str, "rotate_deg": float, "skew_deg": float,
-              "arc": float, "latin": str, "emphasis_mark": str, "bold": bool, "italic": bool, "outline_rgb": list,
+              "arc": float, "latin": str, "emphasis_mark": str, "bold": bool, "weight": str, "italic": bool, "outline_rgb": list,
               "wobble": float, "double": bool, "spikes": int, "spike_depth": float}
 
 
@@ -383,6 +383,8 @@ def _merge_style(current: dict, change) -> dict:
             raise ApplyError("latin must be rotate or upright")
         if key == "emphasis_mark" and value not in ("sesame", "dot"):
             raise ApplyError("emphasis_mark must be sesame or dot")
+        if key == "weight" and value not in ("normal", "bold", "heavy"):
+            raise ApplyError("weight must be normal, bold or heavy")
         if key in ("skew_deg",) and abs(value) > 60:
             raise ApplyError("skew_deg must be between -60 and 60")
         if key == "arc" and abs(value) > 1:
@@ -472,10 +474,14 @@ def _style_runs(raw) -> list:
                 style["scale"] = value
             elif key == "bold":
                 style["bold"] = bool(value)
+            elif key == "weight":
+                if value not in ("normal", "bold", "heavy"):
+                    raise ApplyError("weight must be normal, bold or heavy")
+                style["bold"] = {"normal": 0, "bold": True, "heavy": 2}[value]
             elif key == "rgb":
                 style["rgb"] = [int(v) for v in value][:3]
             else:
-                raise ApplyError(f"unknown style_runs key {key} (scale, bold, rgb)")
+                raise ApplyError(f"unknown style_runs key {key} (scale, bold, weight, rgb)")
         out.append([str(item[0]), style])
     return out
 
@@ -858,7 +864,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         before = len(episode.story)
         episode.story = [line for line in episode.story if line.id != line_id]
         for page in episode.pages:
-            page.texts = [line for line in page.texts if line.id != line_id]
+            if any(line.id == line_id for line in page.texts):
+                page.texts = [line for line in page.texts if line.id != line_id]
         if len(episode.story) == before:
             raise ApplyError(f"no line {line_id}")
         return
@@ -919,6 +926,9 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         from genko.models import coerce_stroke, stroke_points
 
         stroke = coerce_stroke(points)
+        # a micrometre is finer than any pen; fewer digits keep a thick book quick to save and open
+        stroke.points = [(round(x, 3), round(y, 3)) for x, y in stroke.points]
+        stroke.pressure = [round(v, 3) for v in stroke.pressure]
         stroke.kind = _brush_kind(op.get("kind") or "gpen", episode)
         stroke.width_mm = float(op["width_mm"]) if op.get("width_mm") is not None else float(episode.brush_width_mm)
         if op.get("layer_id"):
@@ -2367,6 +2377,75 @@ def _check_page_lock(episode: Episode, op: dict[str, Any], agent: str) -> None:
         raise ApplyError(f"page {index} locked by {owner}")
 
 
+# Ops that change only the page named by their "page" (and its spread partner, for strokes that
+# cross the gutter), plus book-level fields that are always copied. Everything else copies the
+# whole book, as before.
+PAGE_LOCAL_OPS = frozenset({
+    "split_frame", "cut_frame", "move_gutter", "merge_frame", "resize_frame", "set_frame",
+    "add_line", "name_ok", "advance",
+    "add_stroke", "fill", "fill_area", "transform_area", "delete_area", "paste", "set_stroke_width",
+    "reshape_stroke", "delete_stroke", "put_raster", "set_layer", "gradient_fill", "duplicate_layer",
+    "merge_down", "set_layer_mask", "paint_mask", "set_note", "select_frame", "flood_fill",
+    "add_tone", "set_tone", "delete_tone", "add_effect", "edit_effect", "delete_effect", "effect_to_layer",
+    "edit_stroke", "simplify_stroke", "set_ruler", "add_ruler", "edit_ruler", "delete_ruler",
+    "add_prim3d", "edit_prim", "delete_prim", "trace_prims", "lt_convert", "erase_raster", "erase",
+    "reorder_layers", "stamp_material", "add_mannequin", "pose_mannequin", "set_onion", "step_onion",
+    "set_lt", "add_layer", "delete_layer", "filter_raster",
+})
+# Ops that find a line by id; the line lives in the story (always copied) or in one page's texts.
+LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path"})
+BOOK_OPS = frozenset({"set_brush", "define_brush", "set_autosave", "add_ticket", "set_ticket", "reorder_lines"})
+
+
+def _touched_pages(episode: Episode, ops: list) -> set[int] | None:
+    """The page indexes a batch can change, or None when it may change any (then everything is copied)."""
+    by_index = {page.index: page for page in episode.pages}
+    touched: set[int] = set()
+    for op in ops:
+        if not isinstance(op, dict):
+            return None
+        name = op.get("op")
+        if name in BOOK_OPS:
+            continue
+        if name in LINE_OPS:
+            line_id = str(op.get("id") or "")
+            touched.update(page.index for page in episode.pages if any(line.id == line_id for line in page.texts))
+            continue
+        if name not in PAGE_LOCAL_OPS:
+            return None
+        if name in ("name_ok", "advance") and "page" not in op:
+            return None
+        try:
+            index = int(op["page"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        page = by_index.get(index)
+        if page is None:
+            continue  # the op itself reports the missing page
+        touched.add(index)
+        if page.spread_with:
+            touched.add(page.spread_with)
+    return touched
+
+
+def _working_copy(episode: Episode, ops: list) -> Episode:
+    """A copy of the book to apply a batch to. Only the pages the batch can change are copied; the
+    others are shared with the book, which is safe because nothing changes a page in place outside an
+    op, and ops only reach the pages _touched_pages names. This keeps one stroke on a thick book cheap."""
+    touched = _touched_pages(episode, ops)
+    if touched is None or len(touched) * 2 > len(episode.pages):
+        work = copy.deepcopy(episode)
+        work.undo_stack = []
+        return work
+    memo: dict = {}
+    for page in episode.pages:
+        if page.index not in touched:
+            memo[id(page)] = page  # deepcopy returns the page itself: shared, not copied
+    work = copy.deepcopy(episode, memo)
+    work.undo_stack = []
+    return work
+
+
 def apply_ops(
     episode: Episode,
     ops: list[dict[str, Any]],
@@ -2390,8 +2469,7 @@ def apply_ops(
         episode.journal_pending.append({"actor": agent, "ops": [{"op": "undo"}]})
         return {"ok": True, "applied": ["undo"], "snapshot": snapshot(episode), "job_id": new_id()}
 
-    work = copy.deepcopy(episode)
-    work.undo_stack = []
+    work = _working_copy(episode, ops)
     applied: list[str] = []
     for i, op in enumerate(ops):
         if not isinstance(op, dict):

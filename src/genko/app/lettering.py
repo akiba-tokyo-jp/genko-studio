@@ -14,7 +14,7 @@ MARGIN_MM = 3.0
 
 KINDS = [
     ("speech", "普通（楕円）"), ("rounded", "角丸"), ("box", "四角"), ("cloud", "雲（もくもく）"), ("thought", "心の声（泡つき）"),
-    ("shout", "叫び（トゲ）"), ("flash", "フラッシュ（放射線）"), ("whisper", "ささやき（点線）"), ("narration", "ナレーション（四角・しっぽなし）"),
+    ("shout", "叫び（トゲ）"), ("electric", "電子音（電話・テレビ）"), ("flash", "フラッシュ（放射線）"), ("whisper", "ささやき（点線）"), ("narration", "ナレーション（四角・しっぽなし）"),
     ("sfx", "効果音（描き文字）"), ("none", "文字だけ"),
 ]
 KIND_LABEL = dict(KINDS)

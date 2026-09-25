@@ -5,11 +5,11 @@ import os
 import time
 from pathlib import Path
 
-from genko import journal
+from genko import blobcache, journal
 from genko.assets import AssetStore, canonical_json
 from genko.migrate import KNOWN_PAGE_KEYS as _PAGE_KEYS
 from genko.migrate import migrate_payload
-from genko.models import Episode, Frame, Layer, LayerKind, Rect, StoryLine, stroke_to_dict
+from genko.models import Episode, Frame, Layer, LayerKind, Rect, StoryLine, stroke_to_dict, stroke_to_packed
 
 V2_BACKUP = "project.v2.bak.json"
 
@@ -32,14 +32,14 @@ def _frame_to_dict(frame: Frame) -> dict:
         | ({"custom": True} if frame.custom else {})
 
 
-def _layer_to_dict(layer: Layer) -> dict:
+def _layer_to_dict(layer: Layer, strokes: bool = True) -> dict:
     return {
         "id": layer.id,
         "role": layer.role.value,
         "kind": layer.kind.value,
         "visible": layer.visible,
         "exportable": layer.exportable,
-        "strokes": [stroke_to_dict(stroke) for stroke in layer.strokes],
+        "strokes": [stroke_to_dict(stroke) for stroke in layer.strokes] if strokes else [],
         "raster_relpath": layer.raster_relpath,
         "fill_rgb": list(layer.fill_rgb) if layer.fill_rgb else None,
         "lpi": layer.lpi,
@@ -178,7 +178,7 @@ def _payload(episode: Episode, store: AssetStore) -> dict:
 
 
 def _layer_to_v3(layer: Layer, store: AssetStore) -> dict:
-    data = _layer_to_dict(layer)
+    data = _layer_to_dict(layer, strokes=False)
     del data["strokes"], data["raster_relpath"]
     if layer.kind == LayerKind.PLACED:
         return data
@@ -191,8 +191,12 @@ def _layer_to_v3(layer: Layer, store: AssetStore) -> dict:
         data["patches"] = [{**{k: v for k, v in p.items() if k != "png"}, "asset": store.put_bytes(p["png"], ".png")}
                            for p in layer.patches if p.get("png")]
     if layer.strokes:
-        blob = canonical_json([stroke_to_dict(stroke) for stroke in layer.strokes])
-        data["strokes_blob"] = store.put_bytes(blob.encode("utf-8"), ".strokes.json")
+        ref = blobcache.ref_for(layer.strokes)
+        if ref is None or not store.path(ref, ".strokes.json").is_file():
+            blob = canonical_json([stroke_to_packed(stroke) for stroke in layer.strokes])
+            ref = store.put_bytes(blob.encode("utf-8"), ".strokes.json")
+            blobcache.remember(ref, layer.strokes)
+        data["strokes_blob"] = ref
         data["stroke_count"] = len(layer.strokes)
     return data
 
@@ -255,10 +259,24 @@ def save_episode(episode: Episode, dest: Path, *, actor: str | None = None) -> N
         "base_rev": base,
         "actor": who,
         "at": time.time(),
-        "ops": [op for batch in pending for op in batch["ops"]],
+        **_journal_ops([op for batch in pending for op in batch["ops"]], store),
         "before": before,
         "after": after,
     })
+
+
+JOURNAL_OPS_INLINE = 16_000  # bytes; larger batches keep only a brief of each op in the journal line
+
+
+def _journal_ops(ops: list, store: AssetStore) -> dict:
+    """The ops of a commit for the journal. A big batch (thousands of strokes) goes to an asset, and the
+    journal line keeps each op's name and small fields, so reading the journal for undo stays quick."""
+    text = json.dumps(ops, ensure_ascii=False)
+    if len(text) <= JOURNAL_OPS_INLINE:
+        return {"ops": ops}
+    brief = [{k: v for k, v in op.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) < 80}
+             if isinstance(op, dict) else {} for op in ops]
+    return {"ops": brief, "ops_asset": store.put_bytes(text.encode("utf-8"), ".ops.json")}
 
 
 def load_episode(src: Path) -> Episode:

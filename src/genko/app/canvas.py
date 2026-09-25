@@ -20,6 +20,10 @@ from genko.stroke import pack_point
 HANDLE_PX = 7
 
 
+BASE_DPI = 220  # rendered at once; enough up to about 230 % on a normal screen
+DETAIL_DPI = 432  # zoomed in further, a finer render follows from a background thread (up to 450 %)
+
+
 class InlineEditor(QPlainTextEdit):
     """Typing a line where it goes: Ctrl+Enter (or clicking elsewhere) keeps it, Esc drops it."""
 
@@ -83,6 +87,7 @@ class PageCanvas(GuideMixin, QWidget):
     lineGeometry = Signal(str, object)  # line id, {x_mm, y_mm, w_mm, h_mm} or {tails}: a move_line op
     lineEditRequested = Signal(str)  # double-click on a balloon: type over it
     lineContextMenu = Signal(str, QPointF)
+    detailReady = Signal(int, int, object)  # page generation, dpi, QImage (from the detail thread)
     textRequested = Signal(float, float)  # the text tool clicked here (mm)
     gutterMoved = Signal(str, int, float)  # split node id, gutter index, delta mm (a move_gutter op)
     cutRequested = Signal(str, QPointF, QPointF)  # panel id, cut line ends (mm): a cut_frame op
@@ -157,7 +162,19 @@ class PageCanvas(GuideMixin, QWidget):
         self.overlay_name_strokes = False  # show the name strokes faintly over a proof render
         # renderer(dpi) -> QPixmap of the whole page; set by the window
         self.renderer: Callable[[int], QPixmap | None] | None = None
+        # detail_job(dpi) -> a function that renders a QImage off the GUI thread (zoomed-in views)
+        self.detail_job: Callable[[int], Callable[[], object]] | None = None
+        # needs_rough(dpi) -> True when a full render now would be slow (many lines not drawn lately):
+        # then a rough render shows at once and the real one follows from the background thread
+        self.needs_rough: Callable[[int], bool] | None = None
+        self._rough = False
         self._rendered: tuple[int, QPixmap] | None = None
+        self._content_gen = 0  # +1 whenever the page changes (a detail render of an older page is dropped)
+        self._rendered_gen = -1
+        self._detail_thread = None
+        self._detail_cancel = None
+        self._detail_next: tuple[int, int] | None = None
+        self.detailReady.connect(self._detail_done)
         self._rerender = QTimer(self)
         self._rerender.setSingleShot(True)
         self._rerender.setInterval(160)
@@ -202,22 +219,82 @@ class PageCanvas(GuideMixin, QWidget):
     def invalidate(self) -> None:
         """The page changed: render it again (now, so a new stroke never blinks away)."""
         self._rendered = None
+        self._content_gen += 1
+        if self._detail_cancel is not None:
+            self._detail_cancel.set()  # (a finer render of the page as it was is of no use now)
         self._render_now()
 
     def _wanted_dpi(self) -> int:
+        """The resolution that matches the zoom: one page pixel per screen pixel, up to DETAIL_DPI."""
         ratio = self.devicePixelRatioF() or 1.0
         dpi = self._scale * 25.4 * ratio
-        return int(max(48, min(220, round(dpi / 24) * 24)))
+        return int(max(48, min(DETAIL_DPI, round(dpi / 24) * 24)))
 
     def _render_now(self) -> None:
         if self.page is None or self.renderer is None:
             self._rendered = None
             self.update()
             return
-        dpi = self._wanted_dpi()
-        pix = self.renderer(dpi)
-        self._rendered = (dpi, pix) if pix is not None else None
+        wanted = self._wanted_dpi()
+        base = min(wanted, BASE_DPI)
+        # right away at up to BASE_DPI (quick: lines drawn before are remembered); finer in the background
+        current = self._rendered if self._rendered_gen == self._content_gen else None
+        if current is None or current[0] < base or (current[0] > wanted and wanted <= BASE_DPI):
+            rough = self.detail_job is not None and self.needs_rough is not None and self.needs_rough(base)
+            pix = self.renderer(base, rough=True) if rough else self.renderer(base)
+            self._rendered = (base, pix) if pix is not None else None
+            self._rendered_gen = self._content_gen
+            self._rough = rough
+        if self.detail_job is not None and (self._rough or (wanted > BASE_DPI and (
+                self._rendered is None or self._rendered[0] != wanted))):
+            self._start_detail(wanted)
         self.update()
+
+    def _start_detail(self, dpi: int) -> None:
+        import threading
+
+        if self._detail_thread is not None and self._detail_thread.is_alive():
+            self._detail_next = (self._content_gen, dpi)  # after the one running (only the latest)
+            return
+        from genko import render
+
+        self._detail_next = None
+        job = self.detail_job(dpi)
+        gen = self._content_gen
+        cancel = self._detail_cancel = threading.Event()
+
+        def run() -> None:
+            render.cancel_with(cancel)
+            try:
+                image = job()
+            except Exception:  # cancelled, or a broken asset: stay on the quick render
+                image = None
+            self.detailReady.emit(gen, dpi, image)
+
+        self._detail_thread = threading.Thread(target=run, name="genko-detail", daemon=True)
+        self._detail_thread.start()
+
+    def _detail_done(self, gen: int, dpi: int, image) -> None:
+        if image is not None and gen == self._content_gen and dpi == self._wanted_dpi():
+            self._rendered = (dpi, QPixmap.fromImage(image))
+            self._rendered_gen = gen
+            self._rough = False
+            self.update()
+        pending, self._detail_next = self._detail_next, None
+        if pending is not None and pending[0] == self._content_gen and pending[1] == self._wanted_dpi() and (
+                self._rough or self._rendered is None or self._rendered[0] != pending[1]):
+            self._start_detail(pending[1])
+
+    def wait_detail(self, timeout: float = 30.0) -> None:
+        """Let the background render finish and show it (tests, screenshots)."""
+        from PySide6.QtWidgets import QApplication
+
+        while self._detail_thread is not None:
+            thread = self._detail_thread
+            thread.join(timeout)
+            QApplication.processEvents()
+            if self._detail_thread is thread and not thread.is_alive():
+                break
 
     # --- view --------------------------------------------------------------------------------------
 

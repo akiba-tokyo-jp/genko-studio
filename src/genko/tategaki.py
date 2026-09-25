@@ -324,7 +324,7 @@ def draw_mark(image: Image.Image, centre: tuple[float, float], size: float, kind
     draw.ellipse((cx - r, cy - r * 0.9, cx + r, cy + r), fill=colour)
 
 
-STYLE_TAGS = {"大": {"scale": 1.4}, "特大": {"scale": 1.8}, "小": {"scale": 0.7}, "太": {"bold": True},
+STYLE_TAGS = {"大": {"scale": 1.4}, "特大": {"scale": 1.8}, "小": {"scale": 0.7}, "太": {"bold": True}, "極太": {"bold": 2},
               "赤": {"rgb": [210, 30, 30]}, "青": {"rgb": [30, 80, 200]}, "白": {"rgb": [255, 255, 255]}}
 
 
@@ -344,8 +344,24 @@ def char_styles(text: str, style_runs: list | None, base: dict | None = None) ->
     return out
 
 
-def bold_px(em: int) -> int:
-    return max(1, round(em / 22))
+WEIGHTS = {"normal": 0, "bold": 1, "heavy": 2}  # 標準・太・極太 (none of the bundled faces has weights of its own)
+
+
+def weight_level(value) -> int:
+    """0 normal, 1 bold, 2 heavy: from style.weight ("bold"/"heavy") or the older bold (True)."""
+    if isinstance(value, str):
+        return WEIGHTS.get(value, 0)
+    if value is True:
+        return 1
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return max(0, min(2, int(value)))
+    return 0
+
+
+def bold_px(em: int, level=1) -> int:
+    """How much a letter is thickened (its own outline in its colour) for a weight."""
+    level = weight_level(level)
+    return max(level, round(em * level / 22)) if level else 0
 
 
 def compose(
@@ -365,7 +381,7 @@ def compose(
     emphasis_runs: list | None = None,
     emphasis_mark: str = "sesame",
     style_runs: list | None = None,
-    bold: bool = False,
+    bold: bool | int | str = False,
 ) -> Image.Image:
     """Vertical text, columns right to left. 傍点 sit right of their characters and ruby right of
     those (ruby moves out when both are there), centred on their base, for every run.
@@ -374,7 +390,8 @@ def compose(
     extra space between characters / columns, in em. tcy: 縦中横 for short runs of digits and !?.
     latin: 4 or more half-width letters lie on their side. align: top, center or bottom of each
     column in the block. style_runs: [[words, {scale, bold, rgb}]] — part of the line larger, smaller,
-    bolder or in another colour (a larger character widens its column). bold: the whole line bold."""
+    bolder or in another colour (a larger character widens its column). bold: the whole line's weight
+    (True or "bold", 2 or "heavy")."""
     gap_px = max(0, round(em * tracking))  # between characters
 
     def font_for(char: str, size: int = em):
@@ -384,7 +401,7 @@ def compose(
     # the style of each cell, in reading order (cells never change order when they wrap)
     seq = [cell for cell in cells(text, tcy, latin) if cell != "\n"]
     plain = text.replace("\n", "")
-    per_char = char_styles(plain, style_runs, {"bold": True} if bold else None)
+    per_char = char_styles(plain, style_runs, {"bold": weight_level(bold)} if weight_level(bold) else None)
     styles, at = [], 0
     for cell in seq:
         styles.append(per_char[at] if at < len(per_char) else {})
@@ -399,7 +416,7 @@ def compose(
         size = size_of(styles[i])
         if cell.startswith(ROT):
             rgb = tuple(styles[i].get("rgb") or fill)
-            image = latin_glyph(cell[1:], font_for("A", size), size, rgb, bold_px(size) if styles[i].get("bold") else 0)
+            image = latin_glyph(cell[1:], font_for("A", size), size, rgb, bold_px(size, styles[i].get("bold")))
             if image.width > size:
                 image = image.resize((size, max(1, int(image.height * size / image.width))), Image.Resampling.LANCZOS)
             turned[i] = image
@@ -445,7 +462,7 @@ def compose(
             style = styles[i]
             size = size_of(style)
             rgb = tuple(style.get("rgb") or fill)
-            thick = bold_px(size) if style.get("bold") else 0
+            thick = bold_px(size, style.get("bold"))
             y = top + ys[c][row]
             if cell.startswith(ROT):
                 image = turned[i]

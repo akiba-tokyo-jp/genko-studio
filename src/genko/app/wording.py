@@ -122,6 +122,7 @@ _ERRORS: list[tuple[str, object]] = [
     (r"emphasis_runs must be a list of the words that carry dots", "傍点は、付ける言葉のリストで指定します"),
     (r"latin must be rotate or upright", "欧文の組み方は「寝かせる」か「立てる」です"),
     (r"emphasis_mark must be sesame or dot", "傍点の形は「ゴマ」か「黒丸」です"),
+    (r"weight must be normal, bold or heavy", "文字の太さは「標準」「太」「極太」のどれかです"),
     (r"skew_deg must be between -60 and 60", "傾きは -60°〜60° の間で指定します"),
     (r"arc must be between -1 and 1", "弓なりは -1〜1 の間で指定します"),
     (r"no gutter there", "そこにはコマの間がありません"),

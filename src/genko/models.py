@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import array
+import base64
+import binascii
 import copy
 import dataclasses
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from uuid import uuid4
@@ -165,10 +169,65 @@ class Stroke:
     rgb: tuple[int, int, int] | None = None  # None: the layer's default ink colour
     opacity: float = 1.0
 
+    def __deepcopy__(self, memo: dict) -> Stroke:
+        # (a page holds thousands of these; points are tuples of numbers, which never need copying)
+        new = copy.copy(self)
+        memo[id(self)] = new
+        new.points = [p if type(p) is tuple else copy.deepcopy(p, memo) for p in self.points]
+        new.pressure = list(self.pressure)
+        if self.handles is not None:
+            new.handles = copy.deepcopy(self.handles, memo)
+        return new
+
+
+_BIG = sys.byteorder == "big"  # blobs are little-endian everywhere
+
+
+def _pack(values, kind: str) -> str:
+    arr = array.array(kind, values)
+    if _BIG:
+        arr.byteswap()
+    return base64.b64encode(arr.tobytes()).decode("ascii")
+
+
+def _unpack(text: str, kind: str):
+    arr = array.array(kind)
+    arr.frombytes(binascii.a2b_base64(text))
+    if _BIG:
+        arr.byteswap()
+    return arr
+
+
+def stroke_to_packed(stroke) -> dict:
+    """A stroke for the saved blob: points as little-endian float64 pairs (mm) and pressure as float64,
+    both base64. Reading these is many times quicker than lists of numbers,
+    which is what a book of fifty thousand lines needs to open quickly."""
+    stroke = coerce_stroke(stroke)
+    out = {"id": stroke.id, "kind": stroke.kind, "width_mm": stroke.width_mm,
+           "xy": _pack([float(v) for p in stroke.points for v in (p[0], p[1])], "d")}
+    if stroke.pressure:
+        out["p"] = _pack([float(v) for v in stroke.pressure], "d")
+    if stroke.rgb is not None:
+        out["rgb"] = list(stroke.rgb)
+    if stroke.opacity != 1.0:
+        out["opacity"] = stroke.opacity
+    return out
+
 
 def coerce_stroke(raw) -> Stroke:
     if isinstance(raw, Stroke):
         return raw
+    if isinstance(raw, dict) and "xy" in raw:
+        xy = _unpack(raw["xy"], "d")
+        return Stroke(
+            id=raw.get("id") or new_id(),
+            points=list(zip(xy[0::2], xy[1::2])),
+            pressure=_unpack(raw["p"], "d").tolist() if raw.get("p") else [],
+            width_mm=float(raw.get("width_mm", 0.35)),
+            kind=str(raw.get("kind") or "gpen"),
+            rgb=tuple(int(v) for v in raw["rgb"]) if raw.get("rgb") else None,
+            opacity=float(raw.get("opacity", 1.0)),
+        )
     if isinstance(raw, dict):
         points = [tuple(pt[:2]) for pt in raw.get("points") or []]
         pressure = [float(p) for p in raw.get("pressure") or []]

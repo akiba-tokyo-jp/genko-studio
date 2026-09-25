@@ -66,9 +66,17 @@ def _layer(data: dict, store=None) -> Layer:
             item["asset"] = patch["asset"]
         layer.patches.append(item)
     if store is not None and data.get("strokes_blob"):
-        blob = store.get_bytes(data["strokes_blob"], ".strokes.json")
-        if blob is not None:
-            layer.strokes = [coerce_stroke(item) for item in json.loads(blob)]
+        from genko import blobcache
+
+        ref = data["strokes_blob"]
+        cached = blobcache.strokes_for(ref)
+        if cached is not None and store.path(ref, ".strokes.json").is_file():
+            layer.strokes = cached
+        else:
+            blob = store.get_bytes(ref, ".strokes.json")
+            if blob is not None:
+                layer.strokes = [coerce_stroke(item) for item in json.loads(blob)]
+                blobcache.remember(ref, layer.strokes)
     return layer
 
 

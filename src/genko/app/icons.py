@@ -48,21 +48,36 @@ def _draw(name: str, p: QPainter) -> None:
         p.drawRect(QRectF(4, 4, 24, 24))
         p.drawLine(QPointF(4, 14), QPointF(28, 14))
         p.drawLine(QPointF(17, 14), QPointF(13, 28))
-    elif name in ("fill", "lassofill"):
-        p.drawPolygon(_poly([(6, 14), (15, 5), (25, 15), (16, 24)]))
+    elif name == "fill":
+        # a paint bucket, tipped, pouring
+        p.save()
+        p.translate(14, 16)
+        p.rotate(-35)
+        p.drawPolygon(_poly([(-8, -6), (8, -6), (6, 9), (-6, 9)]))
+        p.drawArc(QRectF(-7, -12, 14, 12), 0, 180 * 16)
+        p.restore()
         p.setBrush(ACCENT)
         p.setPen(_pen(1.2, ACCENT))
-        p.drawEllipse(QPointF(26, 24), 3, 4)
-        if name == "lassofill":
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(_pen(1.6, INK, Qt.PenStyle.DashLine))
-            p.drawEllipse(QRectF(2, 2, 26, 26))
+        p.drawPolygon(_poly([(23, 14), (27, 22), (27, 26), (23, 28), (20, 25), (21, 20)]))
+    elif name == "lassofill":
+        # a loop, dashed, with its inside filled
+        path = QPainterPath(QPointF(6, 18))
+        path.cubicTo(QPointF(2, 6), QPointF(20, 0), QPointF(27, 8))
+        path.cubicTo(QPointF(32, 16), QPointF(22, 28), QPointF(12, 26))
+        path.cubicTo(QPointF(8, 25), QPointF(7, 22), QPointF(6, 18))
+        p.setBrush(QColor(ACCENT.red(), ACCENT.green(), ACCENT.blue(), 150))
+        p.setPen(_pen(1.8, INK, Qt.PenStyle.DashLine))
+        p.drawPath(path)
     elif name == "picker":
-        p.drawLine(QPointF(7, 25), QPointF(19, 13))
-        p.drawPolygon(_poly([(18, 8), (24, 14), (21, 17), (15, 11)]))
-        p.drawLine(QPointF(21, 7), QPointF(25, 11))
+        # an eyedropper: bulb, tube, a drop at the tip
+        p.setBrush(INK)
+        p.drawEllipse(QPointF(24, 8), 4.5, 4.5)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawLine(QPointF(17, 12), QPointF(20, 15))
+        p.drawPolygon(_poly([(19, 11), (21, 13), (9, 25), (7, 23)]))
         p.setBrush(ACCENT)
-        p.drawEllipse(QPointF(6, 26), 2.5, 2.5)
+        p.setPen(_pen(1.2, ACCENT))
+        p.drawEllipse(QPointF(5.5, 27.5), 2.5, 2.5)
     elif name == "rect":
         p.setPen(_pen(2, INK, Qt.PenStyle.DashLine))
         p.drawRect(QRectF(5, 7, 22, 18))

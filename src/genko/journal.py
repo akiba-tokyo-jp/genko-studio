@@ -53,11 +53,30 @@ def audit_entries(project: Path) -> list[dict]:
     return out
 
 
+_PARSED: dict[str, tuple[bytes, int, list[dict]]] = {}  # file -> (its bytes' edges, size, entries)
+
+
+def _edges(data: bytes, size: int) -> bytes:
+    return data[:64] + data[max(0, size - 64):size]
+
+
 def entries(project: Path) -> list[dict]:
+    """Every journal line. The journal only grows, so lines read before are not parsed again (a thick
+    book's journal holds megabytes of ops, and undo reads it each time)."""
     p = path(project)
     if not p.is_file():
         return []
-    return [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
+    data = p.read_bytes()
+    key = str(p.resolve())
+    known = _PARSED.get(key)
+    start, items = 0, []
+    if known is not None and len(data) >= known[1] and _edges(data, known[1]) == known[0]:
+        start, items = known[1], list(known[2])
+    for line in data[start:].decode("utf-8").splitlines():
+        if line.strip():
+            items.append(json.loads(line))
+    _PARSED[key] = (_edges(data, len(data)), len(data), items)
+    return list(items)
 
 
 def stacks(items: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -125,6 +144,8 @@ def referenced_assets(project: Path) -> set[str]:
     refs: set[str] = set()
     snapshots: list[bytes] = []
     for item in entries(project)[-KEEP_ENTRIES:]:
+        if item.get("ops_asset"):
+            refs.add(item["ops_asset"])
         for key in ("before", "after"):
             if item.get(key):
                 refs.add(item[key])
