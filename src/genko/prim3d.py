@@ -1,4 +1,5 @@
-"""3D boxes on the page (drawing guides): a box turned in space and seen in perspective.
+"""3D shapes on the page (drawing guides), turned in space and seen in perspective: boxes, cylinders,
+stairs and floors (a perspective grid on the ground).
 
 A box is {"kind": "box", "pos": [x, y, z] (its centre: page mm, z = depth toward the back),
 "size": [w, h, d] (mm), "rot": [tip, turn, lean] (radians: about the page's across, upright and
@@ -54,8 +55,60 @@ def project(prim: dict) -> list[tuple[float, float]]:
     return out
 
 
+KINDS = ("box", "cylinder", "stairs", "floor")
+
+
+def _segments3d(prim: dict) -> list[tuple[tuple[float, float, float], tuple[float, float, float]]]:
+    """The lines of a cylinder, stairs or floor in its own space (centred, before turning)."""
+    w, h, d = _size(prim)
+    kind = prim.get("kind")
+    out = []
+    if kind == "cylinder":
+        n = 32
+        rx, rz = w / 2, d / 2
+        for y in (-h / 2, h / 2):
+            ring = [(rx * math.cos(math.tau * k / n), y, rz * math.sin(math.tau * k / n)) for k in range(n + 1)]
+            out += list(zip(ring, ring[1:]))
+        for k in range(4):
+            a = math.tau * k / 4
+            out.append(((rx * math.cos(a), -h / 2, rz * math.sin(a)), (rx * math.cos(a), h / 2, rz * math.sin(a))))
+    elif kind == "stairs":
+        steps = max(2, min(30, int(prim.get("steps") or 6)))
+        rise, run = h / steps, d / steps
+        profile = [(h / 2, -d / 2)]  # (y, z): up is −y; the stairs climb toward the back
+        for k in range(steps):
+            y, z = profile[-1]
+            profile.append((y - rise, z))
+            profile.append((y - rise, z + run))
+        profile.append((h / 2, d / 2))
+        profile.append(profile[0])
+        for x in (-w / 2, w / 2):
+            pts = [(x, y, z) for y, z in profile]
+            out += list(zip(pts, pts[1:]))
+        for y, z in profile[:-1]:
+            out.append(((-w / 2, y, z), (w / 2, y, z)))
+    else:  # floor: a grid on the ground
+        n = max(2, min(40, int(prim.get("lines") or 8)))
+        for k in range(n + 1):
+            x = -w / 2 + w * k / n
+            z = -d / 2 + d * k / n
+            out.append(((x, 0.0, -d / 2), (x, 0.0, d / 2)))
+            out.append(((-w / 2, 0.0, z), (w / 2, 0.0, z)))
+    return out
+
+
+def _to_page(prim: dict, p) -> tuple[float, float]:
+    cx, cy, cz = (list(prim.get("pos") or [100, 150, 0]) + [0, 0, 0])[:3]
+    focal = float(prim.get("focal_mm", 400) or 400)
+    x, y, z = _rotate(p, prim.get("rot") or [0.3, 0.6, 0])
+    scale = focal / max(focal * 0.2, focal + float(cz) + z)
+    return float(cx) + x * scale, float(cy) + y * scale
+
+
 def edges(prim: dict) -> list[tuple[tuple[float, float], tuple[float, float], bool]]:
-    """(a, b, seen) for each edge: seen is False for the edges at the back."""
+    """(a, b, seen) for each edge: seen is False for the edges at the back (boxes; the other shapes show all)."""
+    if prim.get("kind") in ("cylinder", "stairs", "floor"):
+        return [(_to_page(prim, a), _to_page(prim, b), True) for a, b in _segments3d(prim)]
     pts3 = corners3d(prim)
     pts = project(prim)
     focal = float(prim.get("focal_mm", 400) or 400)
@@ -80,7 +133,7 @@ def edges(prim: dict) -> list[tuple[tuple[float, float], tuple[float, float], bo
 
 
 def bbox(prim: dict) -> tuple[float, float, float, float]:
-    pts = project(prim)
+    pts = project(prim) if prim.get("kind", "box") == "box" else [p for a, b, _ in edges(prim) for p in (a, b)]
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)
 

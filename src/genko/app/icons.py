@@ -129,6 +129,19 @@ def _draw(name: str, p: QPainter) -> None:
             p.translate(32, 0)
             p.scale(-1, 1)
         p.drawPolyline(_poly([(20, 6), (10, 16), (20, 26)]))
+    elif name == "move":
+        for (x0, y0, x1, y1) in ((16, 3, 16, 29), (3, 16, 29, 16)):
+            p.drawLine(QPointF(x0, y0), QPointF(x1, y1))
+        for tip in (((12, 7), (16, 3), (20, 7)), ((12, 25), (16, 29), (20, 25)), ((7, 12), (3, 16), (7, 20)), ((25, 12), (29, 16), (25, 20))):
+            p.drawPolyline(_poly(tip))
+    elif name == "gradient":
+        from PySide6.QtGui import QLinearGradient
+
+        shade = QLinearGradient(4, 16, 28, 16)
+        shade.setColorAt(0, INK)
+        shade.setColorAt(1, QColor(255, 255, 255, 0))
+        p.setBrush(shade)
+        p.drawRect(QRectF(4, 8, 24, 16))
     elif name == "export":
         p.drawPolyline(_poly([(6, 18), (6, 28), (26, 28), (26, 18)]))
         p.drawLine(QPointF(16, 4), QPointF(16, 20))

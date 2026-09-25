@@ -17,9 +17,13 @@ def apply_filter(image: Image.Image, kind: str, params: dict | None = None) -> I
         out.putalpha(rgba.split()[3])
         return out
     if kind == "hue":
-        shift = int(params.get("shift", 30)) % 360
+        shift = int(float(params.get("shift", 30))) % 360
+        sat = max(0.0, float(params.get("saturation", 1.0)))
+        val = max(0.0, float(params.get("value", 1.0)))
         h, s, v = rgba.convert("RGB").convert("HSV").split()
         h = h.point(lambda p: (p + round(shift * 255 / 360)) % 256)
+        s = s.point(lambda p: min(255, round(p * sat)))
+        v = v.point(lambda p: min(255, round(p * val)))
         rgb = Image.merge("HSV", (h, s, v)).convert("RGB")
         out = rgb.convert("RGBA")
         out.putalpha(rgba.split()[3])
@@ -41,9 +45,10 @@ def apply_filter(image: Image.Image, kind: str, params: dict | None = None) -> I
         out.putalpha(rgba.split()[3])
         return out
     if kind == "curve":
-        gamma = float(params.get("gamma", 1.6))
-        rgb = ImageOps.autocontrast(rgba.convert("RGB"))
-        rgb = ImageEnhance.Brightness(rgb).enhance(1 / max(0.2, gamma))
+        # a gamma curve: > 1 darkens the middle tones, < 1 lightens them; black and white stay
+        gamma = max(0.2, min(5.0, float(params.get("gamma", 1.6))))
+        table = [round(255 * (i / 255) ** gamma) for i in range(256)]
+        rgb = rgba.convert("RGB").point(table * 3)
         out = rgb.convert("RGBA")
         out.putalpha(rgba.split()[3])
         return out

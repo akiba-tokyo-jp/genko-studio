@@ -104,7 +104,10 @@ class PageCanvas(GuideMixin, QWidget):
     effectMoved = Signal(str, object)  # effect id, its new centre [x, y]
     stampRequested = Signal(float, float)  # the material tool clicked here (mm)
     selectionWarped = Signal(object)  # a free transform of the selection: {perspective: [4 points]} | {mesh: [9 points]}
-    balloonDrawn = Signal(object)  # the text tool's balloon pen: an outline [[x, y], …] (mm)
+    balloonDrawn = Signal(object)
+    layerMoveStarted = Signal()  # the layer-move tool pressed: the window hands over the layer's picture
+    layerMoved = Signal(float, float)  # the layer-move tool: how far (mm)
+    gradientRequested = Signal(object, object)  # the gradient tool: from, to (mm)  # the text tool's balloon pen: an outline [[x, y], …] (mm)
 
     def __init__(self) -> None:
         super().__init__()
@@ -122,7 +125,9 @@ class PageCanvas(GuideMixin, QWidget):
         self._live = None  # LiveInk of the line being drawn
         self._live_of: tuple | None = None  # (the point list, straight/snapped) it was drawn from
         self._eraser_end: str | None = None
-        self.pen_button = "menu"  # the pen's side button: menu (a right click) | picker | hand
+        self.pen_button = "menu"
+        self._tool_drag: dict | None = None  # the layer-move and gradient tools: {"start", "end"} (mm)
+        self.move_image = None  # (QImage, x_mm, y_mm, w_mm, h_mm): the moving layer's picture  # the pen's side button: menu (a right click) | picker | hand
         self.balloon_pen = False
         self.warp: dict | None = None  # a free transform being set up: {"kind", "box": (x, y, w, h), "points"}  # the text tool draws a balloon's outline instead of placing a line  # the tool to go back to after the pen's eraser end lifts
         self._panning = False
@@ -246,6 +251,15 @@ class PageCanvas(GuideMixin, QWidget):
         self._pan_y = anchor.y() - my * self._scale
         self._fitted = False
         self._after_zoom()
+
+    def center_on(self, x_mm: float, y_mm: float) -> None:
+        """Put this point of the page in the middle of the view (the navigator)."""
+        self._pan_x = self.width() / 2 - x_mm * self._scale
+        self._pan_y = self.height() / 2 - y_mm * self._scale
+        self._fitted = False
+        self._live_reset()
+        self.changed.emit()
+        self.update()
 
     def actual_size(self) -> None:
         """About the size of the paper on a typical screen (96 px per inch)."""
@@ -381,6 +395,7 @@ class PageCanvas(GuideMixin, QWidget):
             elif self.tool == "select" and self._hover and self._hit_line(*self._hover) is line:
                 self._draw_balloon_box(painter, line, None)
         self._draw_handles(painter)
+        self._draw_tool_drag(painter)
         self._draw_rulers(painter)
         self._draw_prims_overlay(painter)
         self._draw_effect_handles(painter)
@@ -417,6 +432,30 @@ class PageCanvas(GuideMixin, QWidget):
             painter.setPen(QPen(QColor("#e8590c"), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(QPointF(hx, hy), radius, radius)
+
+    def _draw_tool_drag(self, painter: QPainter) -> None:
+        """The layer being moved (its picture, following the pen) or the gradient's direction."""
+        drag = self._tool_drag
+        if drag is None:
+            return
+        (sx, sy), (ex, ey) = drag["start"], drag["end"]
+        if self.tool == "move" and self.move_image is not None:
+            image, x, y, w, h = self.move_image
+            a, b = self._pt(x + ex - sx, y + ey - sy), self._pt(x + w + ex - sx, y + h + ey - sy)
+            painter.setOpacity(0.7)
+            painter.drawImage(QRectF(a, b), image)
+            painter.setOpacity(1.0)
+            painter.setPen(QPen(QColor("#1c7ed6"), 1, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(QRectF(a, b))
+        elif self.tool == "gradient":
+            painter.setPen(QPen(QColor("#e8590c"), 2))
+            painter.drawLine(self._pt(sx, sy), self._pt(ex, ey))
+            painter.setBrush(QColor("#e8590c"))
+            painter.drawEllipse(self._pt(sx, sy), 4, 4)
+            painter.setBrush(QColor("white"))
+            painter.drawEllipse(self._pt(ex, ey), 4, 4)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
 
     def _draw_guides(self, painter: QPainter, page_rect: QRectF) -> None:
         """The bleed (cut off, shaded), the trim line (the finished size) and the basic frame."""
@@ -961,7 +1000,9 @@ class PageCanvas(GuideMixin, QWidget):
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self.tool == "text":
             self.setCursor(Qt.CursorShape.IBeamCursor)
-        elif self.tool in ("ruler", "3d", "effect", "stamp"):
+        elif self.tool == "move":
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+        elif self.tool in ("ruler", "3d", "effect", "stamp", "gradient"):
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self.tool in ("picker", "fill", "lassofill", "marquee", "reshape"):
             self.setCursor(Qt.CursorShape.PointingHandCursor if self.tool in ("picker", "fill") else Qt.CursorShape.CrossCursor)
@@ -996,6 +1037,12 @@ class PageCanvas(GuideMixin, QWidget):
             return
         x_mm, y_mm = self._to_mm(pos)
         self._press_pos = pos
+        if self.tool in ("move", "gradient"):
+            self._tool_drag = {"start": (x_mm, y_mm), "end": (x_mm, y_mm)}
+            if self.tool == "move":
+                self.layerMoveStarted.emit()
+            self.update()
+            return
         if self.tool == "text" and self.balloon_pen:
             self._stroke = [(x_mm, y_mm)]  # the outline of a balloon, drawn by hand
             self.update()
@@ -1078,6 +1125,18 @@ class PageCanvas(GuideMixin, QWidget):
             self._fitted = False
             self.update()
             return
+        if self._tool_drag is not None:
+            x_mm, y_mm = self._to_mm(pos)
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:  # Shift: straight across, down or at 45°
+                import math
+
+                sx, sy = self._tool_drag["start"]
+                angle = round(math.atan2(y_mm - sy, x_mm - sx) / (math.pi / 4)) * (math.pi / 4)
+                length = math.hypot(x_mm - sx, y_mm - sy)
+                x_mm, y_mm = sx + length * math.cos(angle), sy + length * math.sin(angle)
+            self._tool_drag["end"] = (x_mm, y_mm)
+            self.update()
+            return
         if self._handle_drag is not None:
             self._modifiers = event.modifiers()
             self._drag_handle(pos)
@@ -1135,6 +1194,17 @@ class PageCanvas(GuideMixin, QWidget):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if self._turning is not None:
             self._turning = None
+            return
+        if self._tool_drag is not None:
+            drag, self._tool_drag = self._tool_drag, None
+            (sx, sy), (ex, ey) = drag["start"], drag["end"]
+            if self.tool == "move":
+                self.move_image = None
+                if abs(ex - sx) > 0.05 or abs(ey - sy) > 0.05:
+                    self.layerMoved.emit(round(ex - sx, 3), round(ey - sy, 3))
+            elif abs(ex - sx) + abs(ey - sy) > 0.5:
+                self.gradientRequested.emit([round(sx, 3), round(sy, 3)], [round(ex, 3), round(ey, 3)])
+            self.update()
             return
         if self._panning:
             self._panning = False

@@ -781,7 +781,43 @@ class LayerPanel(QWidget):
         if QMessageBox.question(self, "Genko", f"レイヤー「{wording.layer_label(layer)}」全体に「{label}」をかけます。{extra}\n"
                                 "（元に戻す で取り消せます）") != QMessageBox.StandardButton.Yes:
             return
-        self.window.apply_ops([{"op": "filter_raster", "page": page.index, "id": layer.id, "kind": self.filter.currentData(), "radius": 2}])
+        params = filter_params(self, self.filter.currentData())
+        if params is None:
+            return
+        self.window.apply_ops([{"op": "filter_raster", "page": page.index, "id": layer.id, "kind": self.filter.currentData(), **params}])
+
+
+def filter_params(parent, kind: str) -> dict | None:
+    """The numbers of a colour adjustment, asked once (None: the person stopped)."""
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
+
+    fields = {"blur": [("radius", "ぼかしの強さ", 0.5, 30, 2.0)],
+              "levels": [("black", "黒くする所（0〜255）", 0, 254, 20), ("white", "白くする所（1〜255）", 1, 255, 235)],
+              "curve": [("gamma", "明るさ（1 より大きいと暗く、小さいと明るく）", 0.2, 5, 1.0)],
+              "hue": [("shift", "色相（°）", -180, 180, 30), ("saturation", "彩度（倍）", 0, 3, 1.0), ("value", "明度（倍）", 0, 3, 1.0)],
+              "mosaic": [("block", "モザイクの大きさ（px）", 2, 64, 8)]}.get(kind)
+    if not fields:
+        return {}
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("フィルターの強さ")
+    form = QFormLayout(dialog)
+    boxes = {}
+    for key, label, lo, hi, value in fields:
+        box = QDoubleSpinBox()
+        box.setRange(lo, hi)
+        box.setSingleStep(0.1 if hi <= 5 else 1)
+        box.setValue(value)
+        form.addRow(label, box)
+        boxes[key] = box
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.button(QDialogButtonBox.StandardButton.Ok).setText("かける")
+    buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    form.addRow(buttons)
+    if not dialog.exec():
+        return None
+    return {key: round(box.value(), 3) for key, box in boxes.items()}
 
 
 class MainWindow(QMainWindow):
@@ -827,6 +863,9 @@ class MainWindow(QMainWindow):
         self.canvas.wandRequested.connect(self._wand)
         self.canvas.selectionTransformed.connect(self._transform_selection)
         self.canvas.selectionWarped.connect(self._warp_selection)
+        self.canvas.layerMoveStarted.connect(self._layer_move_started)
+        self.canvas.layerMoved.connect(self._layer_moved)
+        self.canvas.gradientRequested.connect(self._gradient)
         self.canvas.strokeReshaped.connect(self._reshape)
         self.canvas.strokes_for_reshape = lambda: list(getattr(self.target_layer(), "strokes", []) or [])
         self.canvas.rulerPlaced.connect(self._place_ruler)
@@ -995,6 +1034,7 @@ class MainWindow(QMainWindow):
         self.act_turn_reset = a("回転・反転を戻す", self.canvas.reset_view, "Ctrl+Alt+0")
         self.act_mirror = a("左右反転して見る", lambda on: self.canvas.flip_view(on), "H",
                             "表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません", True)
+        self.act_overview = a("ページを並べて見る", self._page_overview, "Ctrl+Shift+O", "全ページを縮小図で並べ、ダブルクリックで開きます")
         self.act_prev = a("◀ 前のページ", lambda: self._jump(-1), [QKeySequence(std.MoveToPreviousPage), QKeySequence("Ctrl+Left")])
         self.act_next = a("次のページ ▶", lambda: self._jump(1), [QKeySequence(std.MoveToNextPage), QKeySequence("Ctrl+Right")])
         self.act_onion = a("前のページを透かす（オニオンスキン）", self._onion)
@@ -1023,8 +1063,12 @@ class MainWindow(QMainWindow):
         self.act_effect = a("効果線", lambda: self._tool("effect"), "K",
                             "コマの中をクリックすると、選んだ効果線（集中線など）が入る。中心の＋をドラッグで動かす", True)
         self.act_stamp = a("素材を置く", lambda: self._tool("stamp"), tip="素材パネルで選んだ素材を、クリックした所に置く", checkable=True)
+        self.act_move = a("レイヤー移動", lambda: self._tool("move"), "Q",
+                          "描く先のレイヤーを丸ごとドラッグで動かす（Shift で縦・横・45°）", True)
+        self.act_gradient = a("グラデーション", lambda: self._tool("gradient"), "U",
+                              "ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）", True)
         tools = QActionGroup(self)
-        self.tool_actions = {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
+        self.tool_actions = {"move": self.act_move, "gradient": self.act_gradient, "select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
                              "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill,
                              "lassofill": self.act_lassofill, "rect": self.act_marquee, "lasso": self.act_lasso,
                              "wand": self.act_wand, "reshape": self.act_reshape, "ruler": self.act_ruler, "3d": self.act_3d,
@@ -1075,6 +1119,9 @@ class MainWindow(QMainWindow):
         self.act_clear_rulers = a("このページの定規をすべて消す", self._clear_rulers)
         self.act_add_figure = a("デッサン人形を置く", lambda: self._add_prim("mannequin"), tip="選んだコマ（なければページ）の真ん中に置きます")
         self.act_add_box = a("3D の箱を置く", lambda: self._add_prim("box"))
+        self.act_add_cylinder = a("3D の円柱を置く", lambda: self._add_prim("cylinder"))
+        self.act_add_stairs = a("3D の階段を置く", lambda: self._add_prim("stairs"))
+        self.act_add_floor = a("床（パースの格子）を置く", lambda: self._add_prim("floor"), tip="地面の格子で、背景のパースの目安にします")
         self.act_trace = a("3D を線にする（描く先のレイヤーへ）", lambda: self.trace_prims(selected_only=False),
                            tip="このページの 3D を鉛筆の線にして下描きにします")
         self.act_del_prim = a("選んだ 3D を消す", lambda: self.guides.delete_prim())
@@ -1138,10 +1185,10 @@ class MainWindow(QMainWindow):
             ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste,
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
-                      self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_prev, self.act_next,
+                      self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_onion]),
-            ("ツール", [self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None, self.act_picker,
-                        self.act_fill, self.act_lassofill, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
+            ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None,
+                        self.act_picker, self.act_fill, self.act_lassofill, self.act_gradient, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
                         self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner]),
             ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
                           self.act_layer_merge, self.act_layer_delete, None, self.act_layer_up, self.act_layer_down, None,
@@ -1156,7 +1203,8 @@ class MainWindow(QMainWindow):
                       self.act_fill_selection, self.act_line_width]),
             ("定規・3D", [self.act_ruler, None, *self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
                           self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm, None, self.act_3d,
-                          self.act_add_figure, self.act_add_box, "poses", self.act_trace, self.act_del_prim]),
+                          self.act_add_figure, self.act_add_box, self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, "poses",
+                          self.act_trace, self.act_del_prim]),
             ("コマ", [self.act_frame, None, self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
                       self.act_gutters, self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape]),
             ("ページ", [self.act_add_page, self.act_dup_page, self.act_del_page, None, self.act_page_up, self.act_page_down, self.act_spread,
@@ -1198,7 +1246,7 @@ class MainWindow(QMainWindow):
                     "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill, "lassofill": self.act_lassofill,
                     "rect": self.act_marquee, "lasso": self.act_lasso, "wand": self.act_wand, "reshape": self.act_reshape,
                     "ruler": self.act_ruler, "3d": self.act_3d, "effect": self.act_effect, "stamp": self.act_stamp,
-                    "undo": self.act_undo, "redo": self.act_redo, "fit": self.act_fit, "zoom_in": self.act_zoom_in,
+                    "move": self.act_move, "gradient": self.act_gradient, "undo": self.act_undo, "redo": self.act_redo, "fit": self.act_fit, "zoom_in": self.act_zoom_in,
                     "zoom_out": self.act_zoom_out, "prev": self.act_prev, "next": self.act_next, "export": self.act_export}
         for name, act in pictures.items():
             act.setIcon(icon(name))
@@ -1211,7 +1259,8 @@ class MainWindow(QMainWindow):
         palette.setOrientation(Qt.Orientation.Vertical)
         palette.setIconSize(QSize(24, 24))
         palette.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_fill, self.act_lassofill, self.act_picker, None,
+        for act in (self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_fill, self.act_lassofill, self.act_gradient,
+                    self.act_picker, None,
                     self.act_text, self.act_frame, None, self.act_marquee, self.act_lasso, self.act_wand, self.act_reshape, None,
                     self.act_ruler, self.act_3d, self.act_effect):
             if act is None:
@@ -1304,13 +1353,18 @@ class MainWindow(QMainWindow):
         ts.add(("reshape",), radius_page)
         ts.add(("ruler",), action_page([*self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
                                         self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]))
-        ts.add(("3d",), action_page([self.act_add_figure, self.act_add_box, None, *self.pose_actions, None, self.act_trace,
+        ts.add(("3d",), action_page([self.act_add_figure, self.act_add_box, self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, None, *self.pose_actions, None, self.act_trace,
                                      self.act_del_prim]))
         ts.add(("effect",), action_page([*self.effect_actions, None, self.act_materials]))
         ts.add(("stamp",), action_page([self.act_materials]))
         select_page = action_page([self.act_fit, self.act_actual, None, self.act_story_editor, self.act_checks])
         select_page.layout().insertWidget(0, self.story.style_box)
         ts.add(("select",), select_page)
+        ts.add(("move",), action_page([self.act_layer_dup, None, self.act_select_all]))
+        self.gradient_mode = QComboBox()
+        for label, key in (("ペンの色 → 透明", "fade"), ("ペンの色 → 白", "white"), ("黒 → 白", "bw"), ("円（中心からペンの色 → 透明）", "radial")):
+            self.gradient_mode.addItem(label, key)
+        ts.add(("gradient",), action_page([], [QLabel("色の変わり方"), self.gradient_mode]))
         settings_dock = QDockWidget("ツールの設定", self)
         settings_scroll = QScrollArea()
         settings_scroll.setWidgetResizable(True)
@@ -1323,6 +1377,18 @@ class MainWindow(QMainWindow):
         settings_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, settings_dock)
         self.view_menu.addAction(settings_dock.toggleViewAction())
+        from genko.app.navigator import Navigator
+
+        self.navigator = Navigator(self)
+        nav_dock = QDockWidget("全体図", self)
+        nav_dock.setObjectName("全体図")
+        nav_dock.setWidget(self.navigator)
+        nav_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+                             | QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, nav_dock)
+        self.splitDockWidget(settings_dock, nav_dock, Qt.Orientation.Vertical)
+        self.view_menu.addAction(nav_dock.toggleViewAction())
+        self.navigator_dock = nav_dock
         self.brush_dock = settings_dock
         ts.show_tool("select")
         # the panels on the right; the ones for books made with agents only show for those books
@@ -1408,6 +1474,8 @@ class MainWindow(QMainWindow):
             dock.toggleViewAction().setVisible(on)
         self.process.setVisible(on)
         self.act_name_ok.setVisible(on)  # (stages and their approvals are for books made with agents)
+        if hasattr(self, "navigator_dock"):
+            self.navigator_dock.setVisible(not on)  # (the approval box needs the room; ウィンドウ → 全体図 brings it back)
         if on:
             self.resizeDocks([self.brush_dock, self.agent_docks[0]], [1, 1], Qt.Orientation.Vertical)
         if self.isVisible():
@@ -1420,6 +1488,8 @@ class MainWindow(QMainWindow):
         lower = next((d for d in self.studio_docks if d.windowTitle() == "台詞"), None)
         if upper is not None and lower is not None:
             self.resizeDocks([upper, lower], [2, 3], Qt.Orientation.Vertical)
+        if hasattr(self, "navigator_dock"):  # the navigator stays small under the tool settings
+            self.resizeDocks([self.brush_dock, self.navigator_dock], [max(300, self.height() - 330), 170], Qt.Orientation.Vertical)
         for dock in self.studio_docks:
             if dock.windowTitle() in ("承認箱", "レイヤー", "台詞") and dock.isVisible():
                 dock.raise_()
@@ -1989,6 +2059,58 @@ class MainWindow(QMainWindow):
         if self.apply_ops([{"op": "transform_area", "page": self._current().index, "layer_id": layer.id, "area": area, "warp": warp}]):
             self.canvas.set_selection(None)
 
+    def _page_overview(self) -> None:
+        from genko.app.navigator import PageOverview
+
+        self.overview = PageOverview(self)
+        self.overview.show()
+
+    def _layer_move_started(self) -> None:
+        """The picture of the layer being moved, for the canvas to carry under the pen."""
+        from genko.render import layer_image
+
+        page, layer = self._current(), self.target_layer()
+        if page is None or layer is None:
+            return
+        dpi = max(24, min(150, round(self.canvas._scale * 25.4)))
+        image = layer_image(page, layer, dpi, self.episode)
+        box = image.getbbox()
+        if box is None:
+            self.canvas.move_image = None
+            return
+        piece = image.crop(box)
+        data = piece.tobytes()
+        qimage = QImage(data, piece.width, piece.height, piece.width * 4, QImage.Format.Format_RGBA8888).copy()
+        mm = 25.4 / dpi
+        self.canvas.move_image = (qimage, box[0] * mm, box[1] * mm, piece.width * mm, piece.height * mm)
+
+    def _layer_moved(self, dx: float, dy: float) -> None:
+        page, layer = self._current(), self._paint_layer()
+        if page is None or layer is None:
+            return
+        w, h = page.spec.width_mm, page.spec.height_mm
+        m = 30.0  # everything on the layer, and a little beyond the paper
+        whole = {"poly": [[-m, -m], [w + m, -m], [w + m, h + m], [-m, h + m]]}
+        self.apply_ops([{"op": "transform_area", "page": page.index, "layer_id": layer.id, "area": whole, "matrix": [1, 0, 0, 1, dx, dy]}])
+
+    def _gradient(self, start, end) -> None:
+        page, layer = self._current(), self._paint_layer()
+        if page is None or layer is None:
+            return
+        rgb = list(self.brush.rgb)
+        mode = self.gradient_mode.currentData()
+        op = {"op": "gradient_fill", "page": page.index, "layer_id": layer.id, "from": start, "to": end}
+        if mode == "white":
+            op.update(rgb_from=rgb, rgb_to=[255, 255, 255])
+        elif mode == "bw":
+            op.update(rgb_from=[20, 20, 20], rgb_to=[255, 255, 255])
+        else:
+            op.update(rgb_from=rgb, opacity_to=0.0, shape="radial" if mode == "radial" else "linear")
+        area = self._area()
+        if area is not None:
+            op["area"] = area
+        self.apply_ops([op])
+
     def _flip(self, sx: int, sy: int) -> None:
         area = self._need_area()
         if area is None:
@@ -2154,7 +2276,9 @@ class MainWindow(QMainWindow):
             op = {"op": "add_mannequin", "page": page.index, "id": prim_id, "pos": [cx, cy + height * 0.05, 0], "height_mm": height}
         else:
             side = round(max(15.0, min(80.0, min(r.width, r.height) * 0.4)), 1)
-            op = {"op": "add_prim3d", "page": page.index, "kind": "box", "id": prim_id, "pos": [cx, cy, 0], "size": [side, side, side]}
+            size = {"floor": [min(r.width, 200.0), 1, min(r.width, 200.0)], "stairs": [side, side, side * 1.4],
+                    "cylinder": [side * 0.8, side * 1.3, side * 0.8]}.get(kind, [side, side, side])
+            op = {"op": "add_prim3d", "page": page.index, "kind": kind, "id": prim_id, "pos": [cx, cy, 0], "size": size}
         if self.apply_ops([op]):
             self.canvas.selected_prim_id = prim_id
             self._tool("3d")

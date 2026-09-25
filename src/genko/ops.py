@@ -89,6 +89,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "unlock_page", "page": "int"},
     {"op": "add_layer", "page": "int", "name": "str?", "kind": "pen|paint|folder?", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?", "after": "layer id?", "id": "str?"},
     {"op": "delete_layer", "page": "int", "id": "str"},
+    {"op": "gradient_fill", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}? (default: the whole page)", "from": "[x,y] (mm)", "to": "[x,y] (mm)", "rgb_from": "[r,g,b]?", "rgb_to": "[r,g,b]?", "opacity_from": "0..1? (1)", "opacity_to": "0..1? (0: fades out)", "shape": "linear|radial?"},
     {"op": "define_brush", "key": "str (my_…)", "label": "str", "base": "a brush to start from?", "width_mm": "float?", "min_pressure": "0..1?", "gamma": "0.2..5?", "opacity": "0.05..1?", "stabilize": "0..15?", "taper": "bool?", "texture": "''|grain|soft|dry?", "rgb": "[r,g,b]|null?", "fixed_width": "bool?", "delete": "bool?"},
     {"op": "duplicate_layer", "page": "int", "id": "str", "new_id": "str?"},
     {"op": "merge_down", "page": "int", "id": "str (merged into the layer below it; pen onto pen stays lines, anything else becomes pixels)"},
@@ -103,7 +104,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_ruler", "page": "int", "kind": "line|curve|parallel|concentric|radial|perspective|symmetry", "points": "[[x,y],...]?", "angle": "float? (deg)", "ratio": "float? (concentric height/width)", "copies": "int? (symmetry)", "mirror": "bool?", "frame_id": "str? (only in this panel)", "reach_mm": "float?", "id": "str?"},
     {"op": "edit_ruler", "page": "int", "id": "str", "points": "[[x,y],...]?", "angle": "float?", "ratio": "float?", "copies": "int?", "mirror": "bool?", "frame_id": "str|null?", "active": "bool?", "visible": "bool?"},
     {"op": "delete_ruler", "page": "int", "id": "str? (none: every ruler on the page)"},
-    {"op": "add_prim3d", "page": "int", "kind": "box", "pos": "[x,y,z]?", "size": "[w,h,d] | float?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "id": "str?"},
+    {"op": "add_prim3d", "kind": "box|cylinder|stairs|floor", "steps": "int? (stairs)", "lines": "int? (floor grid)", "page": "int", "pos": "[x,y,z]?", "size": "[w,h,d] | float?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "id": "str?"},
     {"op": "edit_prim", "page": "int", "id": "str", "pos": "[x,y,z]?", "size": "[w,h,d]?", "rot": "[tip,turn,lean]?", "focal_mm": "float?"},
     {"op": "delete_prim", "page": "int", "id": "str"},
     {"op": "trace_prims", "page": "int", "layer_id": "str", "ids": "[id]? (none: all)", "kind": "str? (pencil)", "width_mm": "float?", "rgb": "[r,g,b]?"},
@@ -397,6 +398,7 @@ def _merge_style(current: dict, change) -> dict:
 
 
 MASK_DPI = 150
+GRADIENT_DPI = 150  # gradients are smooth: this is plenty, and keeps a whole-page one light
 ROLE_TITLES = {"name": "ネーム", "draft": "下描き", "ink": "ペン入れ", "bg": "背景", "finish": "仕上げ"}
 
 
@@ -1138,6 +1140,49 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             layer.color = tuple(int(v) for v in op["color"])[:3] if op["color"] else None
         return
 
+    if name == "gradient_fill":
+        from genko import selection
+
+        page = _require_page(episode, op)
+        target = _paint_target(page, op)
+        try:
+            (fx, fy), (tx, ty) = [float(v) for v in op["from"][:2]], [float(v) for v in op["to"][:2]]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ApplyError("gradient_fill needs from and to: [x_mm, y_mm]") from exc
+        if math.hypot(tx - fx, ty - fy) < 0.5:
+            raise ApplyError("the gradient needs a longer drag")
+        dpi = GRADIENT_DPI
+        if op.get("area"):
+            shown, (x0, y0) = selection.area_mask(_area(op), dpi)
+        else:
+            x0 = y0 = 0
+            shown = Image.new("L", (round(page.spec.width_mm / 25.4 * dpi), round(page.spec.height_mm / 25.4 * dpi)), 255)
+        import numpy as np
+
+        w, h = shown.size
+        scale = dpi / 25.4
+        xs = (np.arange(w) + x0 + 0.5) / scale
+        ys = (np.arange(h) + y0 + 0.5) / scale
+        gx, gy = np.meshgrid(xs, ys)
+        if op.get("shape") == "radial":
+            t = np.hypot(gx - fx, gy - fy) / math.hypot(tx - fx, ty - fy)
+        else:
+            dx, dy = tx - fx, ty - fy
+            t = ((gx - fx) * dx + (gy - fy) * dy) / (dx * dx + dy * dy)
+        t = np.clip(t, 0.0, 1.0)
+        c0 = np.array([int(v) for v in (op.get("rgb_from") or [20, 20, 20])][:3], dtype=float)
+        c1 = np.array([int(v) for v in (op.get("rgb_to") or op.get("rgb_from") or [20, 20, 20])][:3], dtype=float)
+        a0 = max(0.0, min(1.0, float(op.get("opacity_from", 1.0))))
+        a1 = max(0.0, min(1.0, float(op.get("opacity_to", 0.0 if not op.get("rgb_to") else 1.0))))
+        rgb = (c0[None, None, :] * (1 - t[..., None]) + c1[None, None, :] * t[..., None]).round().astype("uint8")
+        alpha = ((a0 * (1 - t) + a1 * t) * np.asarray(shown, dtype=float)).round().astype("uint8")
+        image = Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
+        patch = selection._to_patch(image, (x0, y0), {"mode": "image", "opacity": 1.0}, dpi)
+        if patch is None:
+            raise ApplyError("the gradient has nothing to show there")
+        target.patches.append(patch)
+        return
+
     if name == "define_brush":
         from genko import brushes
 
@@ -1578,15 +1623,21 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
     if name == "add_prim3d":
         page = _require_page(episode, op)
         kind = str(op.get("kind") or "box")
-        if kind != "box":
-            raise ApplyError("kind must be box (figures: add_mannequin)")
-        size = op.get("size") or [40, 40, 40]
+        if kind not in ("box", "cylinder", "stairs", "floor"):
+            raise ApplyError("kind must be box, cylinder, stairs or floor (figures: add_mannequin)")
+        size = op.get("size") or ([160, 1, 160] if kind == "floor" else [40, 40, 40])
         if not isinstance(size, (list, tuple)):
             size = [float(size)] * 3
         prim = {"id": str(op.get("id") or new_id()), "kind": kind, "pos": _vec3(op.get("pos") or [100, 150, 0]),
                 "size": _vec3(size), "rot": _vec3(op.get("rot") or [0.35, 0.6, 0])}
         if op.get("focal_mm"):
             prim["focal_mm"] = max(20.0, float(op["focal_mm"]))
+        if kind == "stairs":
+            prim["steps"] = max(2, min(30, int(op.get("steps") or 6)))
+        if kind == "floor":
+            prim["lines"] = max(2, min(40, int(op.get("lines") or 8)))
+            if not op.get("rot"):
+                prim["rot"] = [-1.2, 0.5, 0]  # seen from above at a slant
         page.prims.append(prim)
         return
 

@@ -26,7 +26,8 @@ REGION_LABEL = dict(REGION)
 
 BLEND = [("normal", "通常"), ("multiply", "乗算"), ("screen", "スクリーン"), ("add", "加算")]
 
-FILTERS = [("blur", "ぼかし"), ("sharpen", "シャープ"), ("levels", "レベル補正"), ("mosaic", "モザイク")]
+FILTERS = [("levels", "レベル補正"), ("curve", "明るさの曲線（トーンカーブ）"), ("hue", "色相・彩度・明度"), ("blur", "ぼかし"),
+           ("sharpen", "シャープ"), ("mosaic", "モザイク")]
 
 
 def actor(name: str | None) -> str:
@@ -85,6 +86,10 @@ _ERRORS: list[tuple[str, object]] = [
     (r"style_runs is .*", "文字の一部の書式は、言葉と「大きさ・太字・色」の組で指定します"),
     (r"scale must be between 0.3 and 3", "文字の大きさの倍率は 0.3〜3 の間で決めます"),
     (r"unknown style_runs key (\S+).*", "文字の一部の書式に知らない項目があります（大きさ・太字・色だけ）"),
+    (r"gradient_fill needs from and to.*", "グラデーションは、始めと終わりの点で指定します"),
+    (r"the gradient needs a longer drag", "もう少し長くドラッグします"),
+    (r"the gradient has nothing to show there", "そこにはグラデーションを塗れる所がありません"),
+    (r"kind must be box, cylinder, stairs or floor.*", "3D の形は、箱・円柱・階段・床から選びます"),
     (r"the area has no size", "選んだ範囲に大きさがありません"),
     (r"perspective takes four corners.*", "遠近の変形は 4 隅（左上・右上・右下・左下）で指定します"),
     (r"the four corners must enclose an area", "4 隅が一直線に並んでいて、形になりません"),

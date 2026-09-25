@@ -463,6 +463,19 @@
       "id": "str"
     },
     {
+      "op": "gradient_fill",
+      "page": "int",
+      "layer_id": "str?",
+      "area": "{poly} | {mask}? (default: the whole page)",
+      "from": "[x,y] (mm)",
+      "to": "[x,y] (mm)",
+      "rgb_from": "[r,g,b]?",
+      "rgb_to": "[r,g,b]?",
+      "opacity_from": "0..1? (1)",
+      "opacity_to": "0..1? (0: fades out)",
+      "shape": "linear|radial?"
+    },
+    {
       "op": "define_brush",
       "key": "str (my_…)",
       "label": "str",
@@ -582,8 +595,10 @@
     },
     {
       "op": "add_prim3d",
+      "kind": "box|cylinder|stairs|floor",
+      "steps": "int? (stairs)",
+      "lines": "int? (floor grid)",
       "page": "int",
-      "kind": "box",
       "pos": "[x,y,z]?",
       "size": "[w,h,d] | float?",
       "rot": "[tip,turn,lean]?",
