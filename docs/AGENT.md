@@ -281,6 +281,18 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### J12 additions (animation)
+
+- `set_animation {page, fps, frames, loop, off}` makes a page a short animation (its timeline in
+  `page.extra.anim`); printed, the page is its first frame.
+- `add_anim_folder {page, id?, name?}`: a row of the timeline. `add_cel {page, folder, kind: pen | paint, id?, name?,
+  at?}`: a cel in it (draw on it with `add_stroke {layer_id: <cel>}`); a folder's first cel shows from frame 1.
+- `set_exposure {page, folder, frame, cel | null, clear?}` and `set_exposures {page, folder, cels: [[frame, cel]]}`:
+  the exposure sheet (a cel shows from its frame until the next entry; null shows nothing).
+- `set_camera_key {page, frame, rect: [x, y, w, h] mm | null}`: camera work, moving evenly between keys.
+- `set_light_table {page, cels}`: cels always shown faint while drawing.
+- `export {format: "animation", pages: [n], movie: gif | webp | png | mp4 | frames, dpi?, width?}`.
+
 ### J10 additions
 
 - `import_psd {page, path | psd (base64), fit: paper | bleed | trim, id?, parent?, after?}`: a PSD or PSB (Photoshop,

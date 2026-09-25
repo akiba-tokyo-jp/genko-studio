@@ -926,6 +926,10 @@ def render_page(
     """`finish`: the monochrome print finish (dots and pure black and white). None = by the page
     (mono pages yes, colour pages no); False for screen and colour outputs (webtoon, SNS).
     `rough`: lines as plain polylines (the screen's first look at a page; never for output)."""
+    if (getattr(page, "extra", None) or {}).get("anim") and not getattr(page, "_at_frame", False):
+        from genko import anim  # (an animation page prints as its first frame, not every cel at once)
+
+        page = anim.at_frame(page, 1)
     if finish is None:
         finish = page.spec.expression != "color"
     width = mm_to_px(page.spec.width_mm, working_dpi)

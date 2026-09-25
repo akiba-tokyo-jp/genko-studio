@@ -67,6 +67,7 @@ def layer_label(layer) -> str:
 
 # names of things in messages (op fields) as people call them
 _FIELDS = {
+    "frames": "フレーム数", "frame": "フレーム", "at": "出すフレーム", "fps": "1 秒のフレーム数",
     "kind": "種類", "balloon": "フキダシの種類", "align": "揃え", "position": "ノンブルの位置", "font": "書体", "pattern": "トーンの模様",
     "preset": "見本", "handle": "動かす所", "count": "数", "lpi": "線数", "density": "濃さ", "size_mm": "大きさ",
     "hidden_size_mm": "隠しノンブルの大きさ", "start": "始まりの番号", "copies": "写しの数", "ratio": "縦横の比", "jitter": "ばらつき",
@@ -152,6 +153,13 @@ _ERRORS: list[tuple[str, object]] = [
     (r"ops is the list of ops to run on each page", "各ページで行う操作の一覧が要ります"),
     (r"pages is the list of pages", "ページを選んでください"),
     (r"spine_mm is the spine's width.*", "背幅（0〜100 mm）が要ります"),
+    (r"(\w+) is a frame number", lambda m: f"{_field(m.group(1))}はフレームの番号で指定します"),
+    (r"cels is a list of \[frame, cel id or null\]", "セルの指定は［フレーム, セル］の並びです"),
+    (r"folder is an animation folder's id.*", "アニメーションフォルダーを指定します（先にアニメーションフォルダーを作る）"),
+    (r"page (\d+) is not an animation.*", r"\1 ページはアニメーションではありません（先にタイムラインでアニメーションにする）"),
+    (r"the page is not an animation.*", "このページはアニメーションではありません（先にタイムラインでアニメーションにする）"),
+    (r"rect is \[x, y, width, height\] in mm", "カメラの範囲は［左, 上, 幅, 高さ］（mm）で指定します"),
+    (r"cel must be a layer in the animation folder", "セルはそのアニメーションフォルダーの中のレイヤーです"),
     (r"CMYK is written as TIFF or PDF", "CMYK は TIFF か PDF で書き出します"),
     (r"Lab PSD files are not supported: save it as RGB or CMYK", "Lab カラーの PSD は読めません。RGB か CMYK で保存し直してください"),
     (r"MP4 needs ffmpeg on this computer; WebP, GIF and PNG need nothing",

@@ -879,6 +879,56 @@
       "rgb": "[r,g,b]?"
     },
     {
+      "op": "set_animation",
+      "page": "int",
+      "fps": "float? (1..60)",
+      "frames": "int? (the length)",
+      "loop": "bool?",
+      "off": "bool? (an ordinary page again)",
+      "note": "a page as a short animation: its timeline in page.extra.anim"
+    },
+    {
+      "op": "add_anim_folder",
+      "page": "int",
+      "id": "str?",
+      "name": "str?",
+      "note": "an animation folder: a row of the timeline that holds cels"
+    },
+    {
+      "op": "add_cel",
+      "page": "int",
+      "folder": "animation folder id",
+      "kind": "pen|paint?",
+      "id": "str?",
+      "name": "str?",
+      "at": "int? (the frame it shows from; a folder's first cel shows from 1)"
+    },
+    {
+      "op": "set_exposure",
+      "page": "int",
+      "folder": "str",
+      "frame": "int",
+      "cel": "cel id | null (nothing)",
+      "clear": "bool? (remove this frame's entry)"
+    },
+    {
+      "op": "set_exposures",
+      "page": "int",
+      "folder": "str",
+      "cels": "[[frame, cel id | null], …] (the whole exposure sheet)"
+    },
+    {
+      "op": "set_camera_key",
+      "page": "int",
+      "frame": "int",
+      "rect": "[x, y, w, h] mm | null (カメラワーク: the camera moves evenly between keys)"
+    },
+    {
+      "op": "set_light_table",
+      "page": "int",
+      "cels": "[cel ids] (always shown faint while drawing)"
+    },
+    {
       "op": "import_psd",
       "page": "int",
       "path": "str? (a .psd / .psb file)",

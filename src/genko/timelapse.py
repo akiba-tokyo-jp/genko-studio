@@ -18,6 +18,7 @@ FOLDER = Path("studio") / "timelapse"
 LONG_SIDE = 720  # px: the recorded pictures
 MAX_FRAMES = 50_000
 FORMATS = ("webp", "gif", "png", "mp4")
+MOVIES = FORMATS
 
 
 def is_on(episode) -> bool:
@@ -136,17 +137,31 @@ def export(project: Path, dest: Path, *, page: int | None = None, fps: float = 1
         board = Image.new("RGB", size, (128, 128, 128))
         board.paste(image, ((size[0] - image.width) // 2, (size[1] - image.height) // 2))
         frames_out.append(board)
-    dest = dest.with_suffix("." + fmt)
+    return write_movie(frames_out, dest.with_suffix("." + fmt), fps, fmt, hold=hold)
+
+
+def write_movie(pictures: list[Image.Image], dest: Path, fps: float, fmt: str, *, hold: float = 0.0,
+                loop: bool = True) -> Path:
+    """Pictures of one size as a moving picture: animated WebP, GIF or PNG, or MP4 through ffmpeg. `hold` keeps
+    the last picture on screen that many seconds more."""
+    if fmt not in MOVIES:
+        raise ValueError(f"format must be one of {', '.join(MOVIES)}")
+    dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    pictures = [p.convert("RGB") for p in pictures]
     duration = max(20, round(1000 / fps))
     if fmt == "mp4":
-        return _mp4(frames_out + [frames_out[-1]] * max(0, round(hold * fps)), dest, fps)
-    durations = [duration] * len(frames_out)
+        return _mp4(pictures + [pictures[-1]] * max(0, round(hold * fps)), dest, fps)
+    durations = [duration] * len(pictures)
     durations[-1] += round(hold * 1000)  # (the finished picture stays a little)
     if fmt == "gif":
-        frames_out = [f.quantize(colors=128, dither=Image.Dither.NONE) for f in frames_out]
+        pictures = [p.quantize(colors=128, dither=Image.Dither.NONE) for p in pictures]
     extra = {"lossless": False, "quality": 80} if fmt == "webp" else {}
-    frames_out[0].save(dest, save_all=True, append_images=frames_out[1:], duration=durations, loop=0, **extra)
+    loops = {"loop": 0} if loop else ({} if fmt == "gif" else {"loop": 1})
+    if len(pictures) == 1:
+        pictures[0].save(dest, **({"duration": durations[0]} if fmt != "png" else {}))
+        return dest
+    pictures[0].save(dest, save_all=True, append_images=pictures[1:], duration=durations, **loops, **extra)
     return dest
 
 

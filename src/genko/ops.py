@@ -129,6 +129,13 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_camera", "page": "int", "turn": "float? (radians, about the upright axis)", "tip": "float? (looking down +, up −)", "roll": "float?", "focal_mm": "float? (20..5000: short = strong perspective)", "target": "[x,y]? (the point the camera turns about)", "off": "bool? (back to each 3D seen on its own)"},
     {"op": "set_light", "page": "int", "dir": "[x,y,z]? (toward the light: x right, y down, z away from the viewer)", "ambient": "0..1?"},
     {"op": "render_prims", "page": "int", "layer_id": "str?", "ids": "[prim id]? (none: all)", "lines": "bool? (true: the pen lines, hidden parts left out)", "surfaces": "bool? (true: the shaded surfaces as greys)", "tone": "{lpi, angle}? (the layer tone-ized: the greys print as dots)", "light": "[x,y,z]?", "ambient": "0..1?", "width_mm": "float?", "kind": "str? (brush, mili)", "rgb": "[r,g,b]?"},
+    {"op": "set_animation", "page": "int", "fps": "float? (1..60)", "frames": "int? (the length)", "loop": "bool?", "off": "bool? (an ordinary page again)", "note": "a page as a short animation: its timeline in page.extra.anim"},
+    {"op": "add_anim_folder", "page": "int", "id": "str?", "name": "str?", "note": "an animation folder: a row of the timeline that holds cels"},
+    {"op": "add_cel", "page": "int", "folder": "animation folder id", "kind": "pen|paint?", "id": "str?", "name": "str?", "at": "int? (the frame it shows from; a folder's first cel shows from 1)"},
+    {"op": "set_exposure", "page": "int", "folder": "str", "frame": "int", "cel": "cel id | null (nothing)", "clear": "bool? (remove this frame's entry)"},
+    {"op": "set_exposures", "page": "int", "folder": "str", "cels": "[[frame, cel id | null], …] (the whole exposure sheet)"},
+    {"op": "set_camera_key", "page": "int", "frame": "int", "rect": "[x, y, w, h] mm | null (カメラワーク: the camera moves evenly between keys)"},
+    {"op": "set_light_table", "page": "int", "cels": "[cel ids] (always shown faint while drawing)"},
     {"op": "import_psd", "page": "int", "path": "str? (a .psd / .psb file)", "psd": "str? (the file in base64, instead of path)", "fit": "paper|bleed|trim? (default bleed: the picture fills it, keeping its shape)", "id": "str? (the new layers are <id>-1, <id>-2…)", "parent": "folder id?", "after": "layer id?", "note": "every layer as a Genko layer: pixels, names, opacity, visibility, blend, clipping, folders, masks"},
     {"op": "set_timelapse", "on": "bool (true: every save records a small picture of each changed page, for the timelapse export)"},
     {"op": "add_cover", "kind": "front|back|jacket (表紙・裏表紙・カバー)", "spine_mm": "float? (jacket: the spine)", "flap_mm": "float? (jacket: each flap, 袖)", "bleed": "bool? (default true: one panel to the bleed)", "note": "covers are pages at the end, without nombre; previews and exports put them first and last"},
@@ -1573,6 +1580,12 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name in layerops.OPS:
         layerops.apply(episode, op, name)
+        return
+
+    if name in ("set_animation", "add_anim_folder", "add_cel", "set_exposure", "set_exposures", "set_camera_key", "set_light_table"):
+        from genko import animops
+
+        animops.apply(episode, op, name)
         return
 
     if name in ("import_psd", "set_timelapse"):
@@ -3153,7 +3166,8 @@ def _check_page_lock(episode: Episode, op: dict[str, Any], agent: str) -> None:
 # cross the gutter), plus book-level fields that are always copied. Everything else copies the
 # whole book, as before.
 PAGE_LOCAL_OPS = frozenset({
-    "import_psd",
+    "import_psd", "set_animation", "add_anim_folder", "add_cel", "set_exposure", "set_exposures", "set_camera_key",
+    "set_light_table",
     "split_frame", "cut_frame", "move_gutter", "merge_frame", "resize_frame", "set_frame",
     "add_line", "name_ok", "advance",
     "add_stroke", "fill", "fill_area", "transform_area", "delete_area", "paste", "set_stroke_width",

@@ -448,6 +448,12 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self.changed.emit()
         self.update()
 
+    def show_frame(self, rendered) -> None:
+        """Show a picture made elsewhere (a frame while an animation plays), until the page changes."""
+        self._rendered = rendered
+        self._rendered_gen = self._content_gen
+        self.update()
+
     def view_state(self) -> dict:
         """How the page is shown (zoom, scroll, turn, mirror), to come back to it later."""
         return {"scale": self._scale, "pan": (self._pan_x, self._pan_y), "fitted": self._fitted, "rotation": self.rotation,

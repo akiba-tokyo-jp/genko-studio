@@ -205,10 +205,11 @@ def build_server(root: Path, actor: str) -> MCPServer:
                spreads: bool = False, color: str = "rgb", icc: str | None = None, fps: float = 12,
                seconds: float | None = None, movie: str = "webp") -> list:
         """書き出し（承認は要らない。正式な書き出しは人だけ）: format は pdf / tiff / png / cmyk / layers / psd / pack / epub /
-        kindle / strip / webtoon / sns / timelapse。pages でページを選ぶ（例 [3, 4, 5]）。area は paper / bleed / trim。
+        kindle / strip / webtoon / sns / timelapse / animation。pages でページを選ぶ（例 [3, 4, 5]）。area は paper / bleed / trim。
         pdf の color は rgb / cmyk / gray、cmyk と pdf の icc は印刷所の CMYK プロファイル（.icc のパス）。kindle は long_edge
         （既定 2560）。timelapse は記録した制作過程（set_timelapse で記録）を movie（webp / gif / png / mp4）で、fps と
-        seconds（全体の長さ）、pages は 1 ページだけ。書いた先は <原稿>/exports/。"""
+        seconds（全体の長さ）、pages は 1 ページだけ。animation はアニメーションのページ（pages に 1 つ）を movie（gif / webp /
+        png / mp4 / frames〔連番 PNG〕）で、width で幅を。書いた先は <原稿>/exports/。"""
         return call(service.export, project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc,
                     fps, seconds, movie)
 

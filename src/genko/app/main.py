@@ -1192,6 +1192,7 @@ class MainWindow(QMainWindow):
             self.session = session
         else:
             self.session = Session.open(path, actor) if path else Session(new_episode("無題", 1, 8, PageSpec.a4_mono()), actor=actor)
+        self.anim_frames: dict[str, int] = {}  # the frame shown of each animation page (page id -> frame)
         self.documents = [documents.Document(self.session)]
         self._doc = 0
         self._closed = False
@@ -1762,6 +1763,8 @@ class MainWindow(QMainWindow):
         self.act_replace = a("台詞の検索・置換…", self._replace_dialog, "Ctrl+Alt+F", "全ページの台詞から言葉を探して置き換えます")
         self.act_add_cover = a("表紙・カバーを足す…", self._add_cover_dialog, tip="表紙・裏表紙、または背と袖のあるカバー 1 枚")
         self.act_book_preview = a("本の形でプレビュー…", self._book_preview, "Ctrl+Shift+B", "見開きで、ページをめくって読むように見ます")
+        self.act_timeline = a("アニメーション（タイムライン）", lambda: self.show_dock("タイムライン"),
+                              tip="このページを短いアニメーションにします: セル・タイムライン・オニオンスキン・カメラワーク・書き出し")
         self.act_assignee = a("このページの担当…", self._assignee_dialog, tip="ページを誰が描くかを決めます（ページ一覧に出ます）")
         self.act_checks = a("入稿前の点検", self._run_checks, "F9", "はみ出し・文字の重なりや小ささ・解像度などを探します")
         self.act_name_ok = a("ネーム完了 → 作画へ進む", self._name_ok, tip="承認の要らない原稿（エージェントを使わない原稿）で使います")
@@ -1827,7 +1830,7 @@ class MainWindow(QMainWindow):
                       self.act_gutters, self.act_border, self.act_no_border, *self.border_kind_actions, self.act_border_colour,
                       self.act_bleed, self.act_reset_shape, None, self.act_frame_numbers]),
             ("ページ", [self.act_add_page, self.act_dup_page, self.act_del_page, None, self.act_page_up, self.act_page_down, self.act_spread,
-                        None, self.act_paper, self.act_nombre, self.act_page_nombre, self.act_add_cover, self.act_assignee, None,
+                        None, self.act_paper, self.act_nombre, self.act_page_nombre, self.act_add_cover, self.act_assignee, self.act_timeline, None,
                         self.act_story_editor, self.act_replace, self.act_book_preview, self.act_checks, None, self.act_name_ok]),
         ]
         from genko.app.lettering import KINDS
@@ -2466,6 +2469,18 @@ class MainWindow(QMainWindow):
         nav_dock.raise_()
         self.view_menu.addAction(sub_dock.toggleViewAction())
         self.sub_dock = sub_dock
+        from genko.app.timeline import TimelinePanel
+
+        self.timeline = TimelinePanel(self)
+        timeline_dock = QDockWidget("タイムライン", self)
+        timeline_dock.setObjectName("タイムライン")
+        timeline_dock.setWidget(self.timeline)
+        timeline_dock.setFeatures(nav_dock.features())
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, timeline_dock)
+        self.tabifyDockWidget(quick_dock, timeline_dock)
+        nav_dock.raise_()
+        self.view_menu.addAction(timeline_dock.toggleViewAction())
+        self.timeline_dock = timeline_dock
         self.brush_dock = settings_dock
         ts.show_tool("select")
         from genko.app.colours import ColourPanel
@@ -2583,10 +2598,12 @@ class MainWindow(QMainWindow):
         self._hide_stray_tabs()
 
     def show_dock(self, title: str) -> None:
-        for dock in self.studio_docks:
+        for dock in self.findChildren(QDockWidget):  # (the studio's panels and the others: 全体図, タイムライン…)
             if dock.windowTitle() == title:
                 dock.show()
                 dock.raise_()
+        if title == "タイムライン" and hasattr(self, "timeline"):
+            self.timeline.refresh()
 
     def _dock_visible(self, dock) -> bool:
         # (a panel behind another tab is moved out of the window; one in front sits inside it)
@@ -2761,6 +2778,10 @@ class MainWindow(QMainWindow):
             self._target_layer_id = None  # another page: back to its default layer
         self.canvas.set_page(page, lines)
         self._refresh_status()
+        if hasattr(self, "timeline") and page is not None:
+            self.timeline.frame = self.current_frame(page)
+            if self.timeline.isVisible() or not light:
+                self.timeline.refresh()
         if not hasattr(self, "process"):
             return
         if light:
@@ -2778,9 +2799,32 @@ class MainWindow(QMainWindow):
         # agent's name stage)
         mode = "name" if not page.name_ok and getattr(self, "_agent_mode", False) else "proof"
         try:
-            return _pixmap(self._proofed(render_page(page, dpi, mode=mode, episode=self.episode, rough=rough)))
+            image = render_page(self._frame_page(page), dpi, mode=mode, episode=self.episode, rough=rough)
+            return _pixmap(self._proofed(self._with_onion(image, page, dpi)))
         except Exception:  # a broken asset must not take the editor down
             return None
+
+    # --- animation (J12): the page at the frame shown, with the frames around it faint ------------------------------
+
+    def current_frame(self, page=None) -> int:
+        page = page or self._current()
+        return self.anim_frames.get(page.id, 1) if page is not None else 1
+
+    def _frame_page(self, page):
+        from genko import anim
+
+        return anim.at_frame(page, self.current_frame(page)) if anim.is_animation(page) else page
+
+    def _with_onion(self, image, page, dpi: int):
+        from genko import anim
+
+        if not anim.is_animation(page) or not (hasattr(self, "timeline") and self.timeline.onion.isChecked()):
+            return image
+        return anim.with_onion(image, page, self.current_frame(page), dpi)
+
+    @staticmethod
+    def _pixmap_of(image) -> QPixmap:
+        return _pixmap(image)
 
     def _proofed(self, image):
         """The page as it will print in CMYK, when that view is on."""
@@ -2802,14 +2846,15 @@ class MainWindow(QMainWindow):
         edit makes new copies of what it touches), so the thread can read these while people draw on."""
         page, episode = self._current(), self.episode
         mode = "name" if page is not None and not page.name_ok and getattr(self, "_agent_mode", False) else "proof"
-        proofed = self._proofed
+        proofed, onion = self._proofed, self._with_onion
+        shown = self._frame_page(page) if page is not None else None
 
         def job():
             if page is None:
                 return None
             from genko.render import render_page
 
-            rgb = proofed(render_page(page, dpi, mode=mode, episode=episode)).convert("RGB")
+            rgb = proofed(onion(render_page(shown, dpi, mode=mode, episode=episode), page, dpi)).convert("RGB")
             data = rgb.tobytes()
             return QImage(data, rgb.width, rgb.height, rgb.width * 3, QImage.Format.Format_RGB888).copy()
 

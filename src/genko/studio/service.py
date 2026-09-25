@@ -40,7 +40,8 @@ AGENT_OPS = frozenset({
     "set_note", "add_mannequin", "pose_mannequin", "add_prim3d", "add_scene", "set_ruler", "add_shape", "store_area", "forget_area", "smudge", "vector_edit", "fill_gaps", "merge_layers", "merge_visible", "group_layers", "move_layers",
     "convert_layer", "set_layers", "set_paper", "liquify", "ruler_to_layer",
     "add_figure", "pose_figure", "add_head", "add_hand", "import_model", "set_camera", "set_light", "render_prims",
-    "add_cover", "replace_text", "for_pages", "set_assignee", "import_psd", "set_timelapse",
+    "add_cover", "replace_text", "for_pages", "set_assignee", "import_psd", "set_timelapse", "set_animation", "add_anim_folder", "add_cel", "set_exposure", "set_exposures",
+    "set_camera_key", "set_light_table",
     "add_ruler", "edit_ruler", "delete_ruler", "edit_prim", "delete_prim", "trace_prims",
     "add_tone", "delete_tone", "add_effect", "stamp_material",
     "set_tone", "edit_effect", "delete_effect", "effect_to_layer",
@@ -519,8 +520,25 @@ class StudioService:
                 return fail(str(exc), "export_failed", "/")
             return ToolResult(True, {"folder": str(written.parent), "files": [str(written)],
                                      "frames": len(timelapse.frames(path, int(pages[0]) if pages else None))}, files=[str(written)])
+        if format == "animation":
+            from genko import anim
+
+            episode = load_episode(path)
+            if not pages or len(pages) != 1:
+                return fail("animation の pages はアニメーションのページ 1 つ", "bad_pages", "/pages")
+            page = next((p for p in episode.pages if p.index == int(pages[0])), None)
+            if page is None or not anim.is_animation(page):
+                return fail(f"{pages[0]} ページはアニメーションではない（set_animation）", "bad_pages", "/pages")
+            out = path / "exports" / f"{time.strftime('%Y%m%d-%H%M%S')}_animation" / f"p{page.index:03d}.{movie}"
+            try:
+                written = anim.export(page, out, episode=episode, fmt="frames" if movie == "frames" else movie,
+                                      dpi=int(dpi or 100), width=width if width != 800 else None)
+            except ValueError as exc:
+                return fail(str(exc), "export_failed", "/")
+            files = [str(p) for p in written] if isinstance(written, list) else [str(written)]
+            return ToolResult(True, {"folder": str(out.parent), "files": files, "frames": anim.frames_of(page)}, files=files)
         if format not in exporting.BY_KEY:
-            return fail(f"format は {' / '.join([*exporting.BY_KEY, 'timelapse'])}", "bad_format", "/format")
+            return fail(f"format は {' / '.join([*exporting.BY_KEY, 'timelapse', 'animation'])}", "bad_format", "/format")
         episode = load_episode(path)
         if pages is not None:
             count = len(episode.pages)

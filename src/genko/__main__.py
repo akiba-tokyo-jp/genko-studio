@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--json", action="store_true")
     export.add_argument("--dpi", type=int, default=None, help="default: the page spec dpi for print formats, 150 for strip/epub")
     export.add_argument("--format", dest="fmt", default="png", choices=["png", "tiff", "pdf", "strip", "psd", "epub", "pack", "webtoon", "sns",
-                                                                         "cmyk", "layers", "kindle", "timelapse"])
+                                                                         "cmyk", "layers", "kindle", "timelapse", "animation"])
     export.add_argument("--width", type=int, default=800, help="webtoon: strip width in px")
     export.add_argument("--max-height", type=int, default=1280, help="webtoon: slice height limit in px")
     export.add_argument("--long-edge", type=int, default=2048, help="sns: long edge in px")
@@ -47,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--area", default="paper", choices=["paper", "bleed", "trim"])
     export.add_argument("--fps", type=float, default=12, help="timelapse: pictures per second")
     export.add_argument("--seconds", type=float, default=None, help="timelapse: fit the whole recording into this time")
-    export.add_argument("--page", type=int, default=None, help="timelapse: only this page")
+    export.add_argument("--page", type=int, default=None, help="timelapse: only this page; animation: the page")
 
     inspect = sub.add_parser("inspect", help="Headless: dump compact JSON snapshot")
     inspect.add_argument("src", type=Path)
@@ -218,6 +218,15 @@ def main(argv: list[str] | None = None) -> int:
 
                 long_edge = args.long_edge if args.long_edge != 2048 else KINDLE_LONG_EDGE
                 paths = [export_kindle(episode, args.out if args.out.suffix else args.out / "kindle.epub", long_edge=long_edge)]
+            elif args.fmt == "animation":
+                from genko import anim
+
+                page = next((p for p in episode.pages if p.index == (args.page or 1)), None)
+                if page is None:
+                    raise SystemExit(f"no page {args.page}")
+                written = anim.export(page, args.out if args.out.suffix else args.out / f"p{page.index:03d}.gif", episode=episode,
+                                      dpi=args.dpi or 100)
+                paths = written if isinstance(written, list) else [written]
             elif args.fmt == "timelapse":
                 from genko import timelapse
 
