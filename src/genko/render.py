@@ -383,51 +383,20 @@ def _draw_effects(image: Image.Image, page: Page, dpi: int) -> Image.Image:
     return image
 
 
-def _project_box(prim: dict, dpi: int) -> list[tuple[int, int]]:
-    pos = prim.get("pos") or [100, 150, 0]
-    size = prim.get("size") or [40, 40, 40]
-    rot = prim.get("rot") or [0, 0.6, 0.4]
-    cx, cy, cz = (float(v) for v in pos)
-    sx, sy, sz = (float(v) / 2 for v in size)
-    corners = []
-    for dx in (-sx, sx):
-        for dy in (-sy, sy):
-            for dz in (-sz, sz):
-                x, y, z = dx, dy, dz
-                ry = rot[1]
-                import math
-
-                x2 = x * math.cos(ry) - z * math.sin(ry)
-                z2 = x * math.sin(ry) + z * math.cos(ry)
-                x, z = x2, z2
-                rx = rot[0]
-                y2 = y * math.cos(rx) - z * math.sin(rx)
-                z2 = y * math.sin(rx) + z * math.cos(rx)
-                y, z = y2, z2
-                depth = 200 + z
-                scale = 180 / max(40, depth)
-                corners.append((mm_to_px(cx + x * scale, dpi), mm_to_px(cy + y * scale, dpi)))
-    return corners
-
-
 def _draw_prims(image: Image.Image, page: Page, dpi: int, mode: str) -> None:
+    """3D figures and boxes: drawing guides in the name and proof renders (never printed)."""
     if mode == "print" or not page.prims:
         return
+    from genko import prim3d
+
     draw = ImageDraw.Draw(image)
-    edges = [
-        (0, 1), (1, 3), (3, 2), (2, 0),
-        (4, 5), (5, 7), (7, 6), (6, 4),
-        (0, 4), (1, 5), (2, 6), (3, 7),
-    ]
+    width = max(1, mm_to_px(0.3, dpi))
     for prim in page.prims:
         if prim.get("kind") == "mannequin":
             _draw_mannequin(draw, prim, dpi)
             continue
-        pts = _project_box(prim, dpi)
-        if len(pts) < 8:
-            continue
-        for a, b in edges:
-            draw.line([pts[a], pts[b]], fill=(90, 90, 140), width=1)
+        for a, b, seen in prim3d.edges(prim):
+            draw.line([_xy(a, dpi), _xy(b, dpi)], fill=(90, 90, 140) if seen else (190, 190, 215), width=width)
 
 
 def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int, color=(90, 90, 140)) -> None:

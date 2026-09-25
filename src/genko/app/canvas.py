@@ -13,6 +13,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import QLabel, QPlainTextEdit, QWidget
 
+from genko.app.canvas_guides import GuideMixin
 from genko.models import Page, Rect, StoryLine
 from genko.stroke import pack_point
 
@@ -71,7 +72,7 @@ class InlineEditor(QPlainTextEdit):
 MIN_SCALE, MAX_SCALE = 0.3, 12.0  # screen px per mm
 
 
-class PageCanvas(QWidget):
+class PageCanvas(GuideMixin, QWidget):
     changed = Signal()
     strokeCommitted = Signal(list)
     frameSelected = Signal(str)
@@ -93,6 +94,11 @@ class PageCanvas(QWidget):
     wandRequested = Signal(float, float)
     selectionTransformed = Signal(object)  # [a, b, c, d, e, f] applied to the selection
     strokeReshaped = Signal(str, object)  # stroke id, new points
+    rulerPlaced = Signal(object)  # {kind, points, angle?, ratio?, copies?}: an add_ruler op
+    rulerEdited = Signal(str, object)  # ruler id, {points, angle?}: an edit_ruler op
+    primSelected = Signal(str)  # a 3D figure or box ("" for none)
+    primEdited = Signal(str, object)  # id, {pos} or {rot}: an edit_prim op
+    primPosed = Signal(str, str, object)  # figure id, the dragged part, where to (mm): a pose_mannequin drag
 
     def __init__(self) -> None:
         super().__init__()
@@ -126,6 +132,7 @@ class PageCanvas(QWidget):
         self.reshape_radius_mm = 6.0
         self._reshape: dict | None = None
         self.editor: InlineEditor | None = None
+        self._init_guides()
         self.overlay_name_strokes = False  # show the name strokes faintly over a proof render
         # renderer(dpi) -> QPixmap of the whole page; set by the window
         self.renderer: Callable[[int], QPixmap | None] | None = None
@@ -148,6 +155,7 @@ class PageCanvas(QWidget):
     def set_tool(self, tool: str) -> None:
         self.tool = tool
         self._stroke = []
+        self._ruler_draft = None
         self._update_cursor()
         self.update()
 
@@ -274,6 +282,7 @@ class PageCanvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self.show_guides:
             self._draw_guides(painter, page_rect)
+        self._draw_grid(painter)
         if self.overlay_name_strokes:
             self._draw_strokes(painter, self.page.name_strokes, QColor(58, 110, 165, 110), 1.2)
         self._draw_selection(painter)
@@ -285,6 +294,8 @@ class PageCanvas(QWidget):
             elif self.tool == "select" and self._hover and self._hit_line(*self._hover) is line:
                 self._draw_balloon_box(painter, line, None)
         self._draw_handles(painter)
+        self._draw_rulers(painter)
+        self._draw_prims_overlay(painter)
         self._draw_selection_overlay(painter)
         if self._reshape is not None:
             painter.setPen(QPen(QColor("#e8590c"), 2))
@@ -300,7 +311,8 @@ class PageCanvas(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
         elif self._stroke:
             color = QColor("#e8590c") if self.tool == "pen" else QColor(200, 60, 60, 160)
-            self._draw_strokes(painter, [self._stroke], color, max(1.5, self.brush_width_mm * self._scale))
+            shown = self.snapped_preview(self._stroke) if self.tool == "pen" else [self._stroke]
+            self._draw_strokes(painter, shown, color, max(1.5, self.brush_width_mm * self._scale))
         if self._hover and not self._stroke and self.tool in ("pen", "eraser"):
             hx, hy = self._pt(*self._hover).x(), self._pt(*self._hover).y()
             radius = max(2.0, (self.brush_width_mm if self.tool == "pen" else self.eraser_mm) / 2 * self._scale)
@@ -768,6 +780,8 @@ class PageCanvas(QWidget):
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self.tool == "text":
             self.setCursor(Qt.CursorShape.IBeamCursor)
+        elif self.tool in ("ruler", "3d"):
+            self.setCursor(Qt.CursorShape.CrossCursor)
         elif self.tool in ("picker", "fill", "lassofill", "marquee", "reshape"):
             self.setCursor(Qt.CursorShape.PointingHandCursor if self.tool in ("picker", "fill") else Qt.CursorShape.CrossCursor)
         elif self.tool == "frame" and pos is not None and self.page is not None:
@@ -809,6 +823,13 @@ class PageCanvas(QWidget):
         if self.tool == "picker":
             self._pick_colour(pos)
             return
+        if self.tool == "ruler":
+            self._modifiers = event.modifiers()
+            self._ruler_press(pos)
+            return
+        if self.tool == "3d":
+            self._prim_press(pos)
+            return
         if self.tool == "fill":
             self.fillRequested.emit(x_mm, y_mm)
             return
@@ -841,6 +862,8 @@ class PageCanvas(QWidget):
                 return
             self._last_pos = pos  # a drag on empty paper moves the view (hand), a click selects
             return
+        if self.tool == "pen" and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            x_mm, y_mm = self.grid_point(x_mm, y_mm)  # a straight line (Shift) starts on the grid
         self._stroke = [(x_mm, y_mm)]
         self.update()
 
@@ -869,6 +892,12 @@ class PageCanvas(QWidget):
         if self._reshape is not None:
             self._reshape_move(*self._to_mm(pos))
             return
+        if self.tool == "ruler":
+            self._modifiers = event.modifiers()
+            if self._ruler_move(pos):
+                return
+        if self._prim_move(pos):
+            return
         if self._drag_line is not None:
             x_mm, y_mm = self._to_mm(pos)
             gx, gy = self._drag_grab
@@ -886,7 +915,10 @@ class PageCanvas(QWidget):
             self._update_cursor(pos)
             self.update()
             return
-        self._stroke.append(self._to_mm(pos))
+        if self.tool == "pen" and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            self._stroke = [self._stroke[0], self.grid_point(*self._to_mm(pos))]  # Shift: a straight line
+        else:
+            self._stroke.append(self._to_mm(pos))
         self.update()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
@@ -898,6 +930,12 @@ class PageCanvas(QWidget):
         if self._frame_drag is not None:
             self._press_pos = None
             self._frame_release()
+            return
+        if self._prim_drag is not None:
+            self._prim_release()
+            return
+        if self.tool == "ruler":
+            self._ruler_release()
             return
         if self._sel_drag is not None:
             drag, self._sel_drag = self._sel_drag, None
@@ -980,6 +1018,9 @@ class PageCanvas(QWidget):
         if event.button() == Qt.MouseButton.MiddleButton:
             self.fit_page()
             return
+        if self.tool == "ruler":
+            self.finish_curve()
+            return
         if self.page is not None and event.button() == Qt.MouseButton.LeftButton and self.tool == "select":
             hit = self._hit_line(*self._to_mm(event.position()))
             if hit is not None:
@@ -1037,6 +1078,12 @@ class PageCanvas(QWidget):
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space = True
             self._update_cursor()
+            return
+        if self.tool == "ruler" and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.finish_curve()
+            return
+        if self.tool == "ruler" and event.key() == Qt.Key.Key_Escape and (self._ruler_draft or self._ruler_drag):
+            self.cancel_ruler()
             return
         if event.key() == Qt.Key.Key_Escape and self.selection is not None:
             self.set_selection(None)

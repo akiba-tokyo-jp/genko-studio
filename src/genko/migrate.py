@@ -122,7 +122,7 @@ KNOWN_TOP_KEYS = frozenset({
 })
 KNOWN_PAGE_KEYS = frozenset({
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
-    "effects", "ruler", "prims", "frames", "layers", "texts", "fills", "name_strokes", "ink_strokes",
+    "effects", "ruler", "rulers", "prims", "frames", "layers", "texts", "fills", "name_strokes", "ink_strokes",
 })
 
 
@@ -165,6 +165,7 @@ def migrate_payload(payload: dict, store=None) -> Episode:
             numero=raw.get("numero", True),
             effects=list(raw.get("effects") or []),
             ruler=raw.get("ruler"),
+            rulers=list(raw.get("rulers") or []),
             prims=list(raw.get("prims") or []),
             onion_from=raw.get("onion_from"),
             lt_threshold=raw.get("lt_threshold"),

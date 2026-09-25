@@ -336,7 +336,8 @@
       "rot": "[tip,turn,lean]?",
       "pos": "[x,y,z]?",
       "height_mm": "float?",
-      "preset": "str?"
+      "preset": "str?",
+      "drag": "{handle: pelvis|chest|head|l_elbow|l_hand|l_knee|…, to: [x,y]}?"
     },
     {
       "op": "set_onion",
@@ -418,15 +419,72 @@
       "page": "int",
       "kind": "str",
       "pos": "[x,y]?",
-      "points": "[[x,y],...]?"
+      "points": "[[x,y],...]?",
+      "note": "old single ruler; use add_ruler"
+    },
+    {
+      "op": "add_ruler",
+      "page": "int",
+      "kind": "line|curve|parallel|concentric|radial|perspective|symmetry",
+      "points": "[[x,y],...]?",
+      "angle": "float? (deg)",
+      "ratio": "float? (concentric height/width)",
+      "copies": "int? (symmetry)",
+      "mirror": "bool?",
+      "frame_id": "str? (only in this panel)",
+      "reach_mm": "float?",
+      "id": "str?"
+    },
+    {
+      "op": "edit_ruler",
+      "page": "int",
+      "id": "str",
+      "points": "[[x,y],...]?",
+      "angle": "float?",
+      "ratio": "float?",
+      "copies": "int?",
+      "mirror": "bool?",
+      "frame_id": "str|null?",
+      "active": "bool?",
+      "visible": "bool?"
+    },
+    {
+      "op": "delete_ruler",
+      "page": "int",
+      "id": "str? (none: every ruler on the page)"
     },
     {
       "op": "add_prim3d",
       "page": "int",
-      "kind": "str",
+      "kind": "box",
       "pos": "[x,y,z]?",
-      "size": "float?",
-      "rot": "float?"
+      "size": "[w,h,d] | float?",
+      "rot": "[tip,turn,lean]?",
+      "focal_mm": "float?",
+      "id": "str?"
+    },
+    {
+      "op": "edit_prim",
+      "page": "int",
+      "id": "str",
+      "pos": "[x,y,z]?",
+      "size": "[w,h,d]?",
+      "rot": "[tip,turn,lean]?",
+      "focal_mm": "float?"
+    },
+    {
+      "op": "delete_prim",
+      "page": "int",
+      "id": "str"
+    },
+    {
+      "op": "trace_prims",
+      "page": "int",
+      "layer_id": "str",
+      "ids": "[id]? (none: all)",
+      "kind": "str? (pencil)",
+      "width_mm": "float?",
+      "rgb": "[r,g,b]?"
     },
     {
       "op": "lt_convert",

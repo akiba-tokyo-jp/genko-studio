@@ -253,7 +253,8 @@ class Page:
     spread_with: int | None = None
     selected_frame_id: str | None = None
     effects: list[dict] = field(default_factory=list)
-    ruler: dict | None = None
+    ruler: dict | None = None  # the old single perspective ruler (kept for old books)
+    rulers: list[dict] = field(default_factory=list)  # genko.rulers
     prims: list[dict] = field(default_factory=list)
     numero: bool = True
     onion_from: int | None = None

@@ -221,6 +221,12 @@ Pens, fills and selections (M13):
 - Line fixes: `set_stroke_width {area | ids, width_mm | scale, kind?, rgb?}`, `reshape_stroke {stroke_id, points}`, `erase {mode: "to_crossing"}` (cut a line only up to where it crosses the others).
 - The same rules as drawing apply: printed layers need the name approval (`strict_gates`), locked layers refuse edits.
 
+Rulers and 3D (M14):
+
+- `add_ruler {page, kind, points, …, frame_id?}` puts a ruler on the page: `line` [a, b], `curve` (points of a smooth curve), `parallel {angle}`, `concentric` [centre] `{ratio, angle}`, `radial` [centre] (focus lines), `perspective` (1 to 3 vanishing points), `symmetry` [a, b] `{copies, mirror}`. `edit_ruler {id, active, visible, …}`, `delete_ruler {id?}` (none: all).
+- `add_stroke {snap_ruler: true}` (or `ruler_id`) makes the line follow the ruler that suits it (line and curve rulers only take lines that start within 10 mm of them); active symmetry rulers draw the line again. Rulers are guides: never printed.
+- `add_mannequin`, `pose_mannequin {drag: {handle, to: [x, y]}}` points a part (chest, head, elbows, hands, fingers, knees, ankles, toes; `pelvis` moves the figure) at a place on the page. `add_prim3d {kind: box, pos, size: [w, h, d], rot: [tip, turn, lean], focal_mm}`, `edit_prim`, `delete_prim`. Figures and boxes show in name and proof renders, never in print. `trace_prims {layer_id, ids?}` draws them as pencil lines on a layer (for the draft).
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

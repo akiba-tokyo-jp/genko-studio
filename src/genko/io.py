@@ -157,6 +157,7 @@ def _payload(episode: Episode, store: AssetStore) -> dict:
                 "lt_threshold": page.lt_threshold,
                 "effects": page.effects,
                 "ruler": page.ruler,
+                "rulers": page.rulers,
                 "prims": page.prims,
                 "frames": [_frame_to_dict(frame) for frame in page.frames],
                 "layers": [_layer_to_v3(layer, store) for layer in page.layers],

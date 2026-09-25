@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, QPointF, QSize, Qt, QTimer
+from PySide6.QtCore import QFileSystemWatcher, QPointF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from genko.app import wording
 from genko.app.brush_panel import BrushPanel
 from genko.app.canvas import PageCanvas
+from genko.app.guide_panel import PRESETS, GuidePanel
 from genko.app.dialogs import ExportDialog, NewProjectDialog, StartDialog  # noqa: F401  (StartDialog is re-exported)
 from genko.app.session import Session
 from genko.app.studio_widgets import ApprovalBox, Library, PanelView, ProcessBar
@@ -600,6 +601,14 @@ class MainWindow(QMainWindow):
         self.canvas.selectionTransformed.connect(self._transform_selection)
         self.canvas.strokeReshaped.connect(self._reshape)
         self.canvas.strokes_for_reshape = lambda: list(getattr(self.target_layer(), "strokes", []) or [])
+        self.canvas.rulerPlaced.connect(self._place_ruler)
+        self.canvas.rulerEdited.connect(lambda ruler_id, change: self.apply_ops(
+            [{"op": "edit_ruler", "page": self._current().index, "id": ruler_id, **change}]))
+        self.canvas.primSelected.connect(lambda prim_id: self.guides.select_prim(prim_id))
+        self.canvas.primEdited.connect(lambda prim_id, change: self.apply_ops(
+            [{"op": "edit_prim", "page": self._current().index, "id": prim_id, **change}]))
+        self.canvas.primPosed.connect(lambda prim_id, handle, to: self.apply_ops(
+            [{"op": "pose_mannequin", "page": self._current().index, "id": prim_id, "drag": {"handle": handle, "to": to}}]))
         self._clipboard: dict | None = None
         self._target_layer_id: str | None = None
         self.eraser_mm = 2.0
@@ -629,6 +638,8 @@ class MainWindow(QMainWindow):
 
         self._build_actions()
         self._build_studio()
+        self.canvas.grid_mm = float(QSettings("Genko", "Genko Studio").value("guides/grid_mm", 5.0))
+        self._guide_toggles()
         self._watch()
         self._reload_pages()
         self.pages.setCurrentRow(0)
@@ -760,11 +771,14 @@ class MainWindow(QMainWindow):
         self.act_wand = a("自動選択", lambda: self._tool("wand"), "W", "クリックした所の、線で囲まれた範囲を選びます", True)
         self.act_reshape = a("線の修正（つまむ）", lambda: self._tool("reshape"), "Y",
                              "描いた線をつまんでドラッグすると、その辺りが滑らかに動きます", True)
+        self.act_ruler = a("定規", lambda: self._tool("ruler"), "R",
+                           "「定規」メニューで選んだ定規を置く（ドラッグ・クリック）。置いた定規の□をドラッグで動かす", True)
+        self.act_3d = a("3D", lambda: self._tool("3d"), "J", "デッサン人形の関節（○）や箱をドラッグして動かす。箱の上の○で回す", True)
         tools = QActionGroup(self)
         self.tool_actions = {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
                              "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill,
                              "lassofill": self.act_lassofill, "rect": self.act_marquee, "lasso": self.act_lasso,
-                             "wand": self.act_wand, "reshape": self.act_reshape}
+                             "wand": self.act_wand, "reshape": self.act_reshape, "ruler": self.act_ruler, "3d": self.act_3d}
         for act in self.tool_actions.values():
             tools.addAction(act)
         self.act_select.setChecked(True)
@@ -779,6 +793,37 @@ class MainWindow(QMainWindow):
         self.act_flip_v = a("上下反転", lambda: self._flip(1, -1))
         self.act_fill_selection = a("選択範囲を塗る", lambda: self._fill_area(self._area()), "Alt+Backspace")
         self.act_line_width = a("選択範囲の線の太さ…", self._line_width)
+        settings = QSettings("Genko", "Genko Studio")
+        self.ruler_kinds = [
+            ("直線定規", "line", {}, "ドラッグで置く。近くで描いた線がまっすぐ沿う"),
+            ("曲線定規", "curve", {}, "クリックで点を打ち、ダブルクリック（Enter）で終わる"),
+            ("平行線定規", "parallel", {}, "ドラッグで角度を決める。どこで描いてもその角度の直線になる"),
+            ("同心円定規", "concentric", {}, "中心からドラッグ（Alt で楕円）。描いた線が円に沿う"),
+            ("放射線定規（集中線）", "radial", {}, "中心をクリック。描いた線が中心へ向かう"),
+            ("パース定規（1 点）", "perspective", {"vps": 1}, "消失点をクリック"),
+            ("パース定規（2 点）", "perspective", {"vps": 2}, "消失点を 2 つクリック（アイレベルが引かれる）"),
+            ("パース定規（3 点）", "perspective", {"vps": 3}, "消失点を 3 つクリック"),
+            ("対称定規（左右）", "symmetry", {"copies": 2}, "対称の軸をドラッグ。描いた線が反対側にも描かれる"),
+            ("対称定規（回転）…", "symmetry", {"ask": True}, "中心から軸をドラッグ。描いた線が中心の周りに写される"),
+        ]
+        self.ruler_actions = [a(title, lambda _=False, k=kind, o=opts: self._choose_ruler(k, **o), tip=tip)
+                              for title, kind, opts, tip in self.ruler_kinds]
+        self.act_snap = a("定規にスナップ", self._guide_toggles, "Ctrl+2", "ペンの線を定規に沿わせる（切ると自由に描ける）", True)
+        self.act_show_rulers = a("定規を表示", self._guide_toggles, "Ctrl+Shift+R", "", True)
+        self.act_grid = a("グリッドを表示", self._guide_toggles, "Ctrl+'", "", True)
+        self.act_grid_snap = a("グリッドにスナップ", self._guide_toggles, "", "Shift で引く直線と定規の点がグリッドに吸い付く", True)
+        for act, key, default in ((self.act_snap, "snap", True), (self.act_show_rulers, "show", True),
+                                  (self.act_grid, "grid", False), (self.act_grid_snap, "grid_snap", False)):
+            act.setChecked(str(settings.value(f"guides/{key}", default)).lower() == "true")
+        self.act_grid_mm = a("グリッドの間隔…", self._grid_spacing)
+        self.act_del_ruler = a("選んだ定規を消す", lambda: self.guides.delete_ruler())
+        self.act_clear_rulers = a("このページの定規をすべて消す", self._clear_rulers)
+        self.act_add_figure = a("デッサン人形を置く", lambda: self._add_prim("mannequin"), tip="選んだコマ（なければページ）の真ん中に置きます")
+        self.act_add_box = a("3D の箱を置く", lambda: self._add_prim("box"))
+        self.act_trace = a("3D を線にする（描く先のレイヤーへ）", lambda: self.trace_prims(selected_only=False),
+                           tip="このページの 3D を鉛筆の線にして下描きにします")
+        self.act_del_prim = a("選んだ 3D を消す", lambda: self.guides.delete_prim())
+        self.pose_actions = [a(f"ポーズ: {label}", lambda _=False, k=key: self._pose(k)) for key, label in PRESETS.items()]
         self.act_thicker = a("太く（ペン・消しゴム）", lambda: self._nudge_brush(1), "]")
         self.act_thinner = a("細く（ペン・消しゴム）", lambda: self._nudge_brush(-1), "[")
         self.act_split_h = a("コマを横に割る（上下に分ける）", lambda: self._split("horizontal"), "Ctrl+Shift+H")
@@ -803,6 +848,10 @@ class MainWindow(QMainWindow):
             ("ツール", [self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None, self.act_picker,
                         self.act_fill, self.act_lassofill, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
                         self.act_color, self.act_thicker, self.act_thinner]),
+            ("定規", [self.act_ruler, None, *self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
+                      self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]),
+            ("3D", [self.act_3d, None, self.act_add_figure, self.act_add_box, None, *self.pose_actions, None, self.act_trace,
+                    self.act_del_prim]),
             ("選択", [self.act_marquee, self.act_lasso, self.act_wand, None, self.act_select_all, self.act_deselect, None,
                       self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v, None,
                       self.act_fill_selection, self.act_line_width]),
@@ -824,7 +873,7 @@ class MainWindow(QMainWindow):
         tools_bar.setMovable(False)
         tools_bar.setIconSize(QSize(16, 16))
         for act in (self.act_select, self.act_pen, self.act_eraser, self.act_fill, self.act_marquee, self.act_picker, self.act_text,
-                    self.act_frame, None, self.act_undo, self.act_redo, None,
+                    self.act_frame, self.act_ruler, self.act_3d, None, self.act_undo, self.act_redo, None,
                     self.act_fit, self.act_zoom_out, self.act_zoom_in, None, self.act_prev, self.act_next, None, self.act_export):
             if act is None:
                 tools_bar.addSeparator()
@@ -841,6 +890,7 @@ class MainWindow(QMainWindow):
         self.story = StoryPanel(self)
         self.layers = LayerPanel(self)
         self.library = Library(self)
+        self.guides = GuidePanel(self)
         for widget in (self.approvals, self.panel_view):
             widget.changed.connect(self._reload_pages)
         self.brush = BrushPanel()
@@ -860,9 +910,9 @@ class MainWindow(QMainWindow):
         self.brush_dock = brush_dock
         docks = []
         for title, widget in (("承認箱", self.approvals), ("コマ", self.panel_view), ("台詞", self.story),
-                              ("レイヤー", self.layers), ("ライブラリ", self.library)):
+                              ("レイヤー", self.layers), ("定規・3D", self.guides), ("ライブラリ", self.library)):
             dock = QDockWidget(title, self)
-            if widget in (self.panel_view, self.story, self.layers):
+            if widget in (self.panel_view, self.story, self.layers, self.guides):
                 # tall panels scroll on a small screen instead of making the window taller
                 scroll = QScrollArea()
                 scroll.setWidgetResizable(True)
@@ -897,7 +947,7 @@ class MainWindow(QMainWindow):
     def _refresh_dock(self, dock) -> None:
         self._stale_docks.discard(dock)
         widget = {"承認箱": self.approvals, "コマ": self.panel_view, "台詞": self.story, "レイヤー": self.layers,
-                  "ライブラリ": self.library}[dock.windowTitle()]
+                  "定規・3D": self.guides, "ライブラリ": self.library}[dock.windowTitle()]
         if widget is self.panel_view:
             self._sync_panel_view()
         widget.refresh()
@@ -1100,7 +1150,10 @@ class MainWindow(QMainWindow):
                 op["mode"] = "to_crossing"
             self.apply_ops([op])
             return
-        self.apply_ops([{"op": "add_stroke", "page": page.index, "layer_id": layer.id, "points": points, **self.brush.stroke_fields()}])
+        op = {"op": "add_stroke", "page": page.index, "layer_id": layer.id, "points": points, **self.brush.stroke_fields()}
+        if self.canvas.snap_rulers and page.rulers:
+            op["snap_ruler"] = True
+        self.apply_ops([op])
 
     def _onion(self) -> None:
         page = self._current()
@@ -1245,6 +1298,12 @@ class MainWindow(QMainWindow):
         self.canvas.set_selection({"poly": [[0, 0], [w, 0], [w, h], [0, h]]})
 
     def _delete_area(self) -> None:
+        if self.canvas.tool == "ruler" and self.canvas.selected_ruler_id:
+            self.guides.delete_ruler()
+            return
+        if self.canvas.tool == "3d" and self.canvas.selected_prim_id:
+            self.guides.delete_prim()
+            return
         if self._area() is None and self.canvas.tool == "select" and self.canvas.selected_line_id:
             self.apply_ops([{"op": "delete_line", "id": self.canvas.selected_line_id}])  # Delete on a picked balloon
             self.canvas.selected_line_id = None
@@ -1307,6 +1366,115 @@ class MainWindow(QMainWindow):
         if ok:
             self.apply_ops([{"op": "set_stroke_width", "page": self._current().index, "layer_id": layer.id, "area": area,
                              "width_mm": value}])
+
+    # --- rulers, grid, 3D (M14) ----------------------------------------------------------------------
+
+    def _guide_toggles(self) -> None:
+        self.canvas.snap_rulers = self.act_snap.isChecked()
+        self.canvas.rulers_visible = self.act_show_rulers.isChecked()
+        self.canvas.grid_visible = self.act_grid.isChecked()
+        self.canvas.grid_snap = self.act_grid_snap.isChecked()
+        settings = QSettings("Genko", "Genko Studio")
+        for act, key in ((self.act_snap, "snap"), (self.act_show_rulers, "show"), (self.act_grid, "grid"), (self.act_grid_snap, "grid_snap")):
+            settings.setValue(f"guides/{key}", act.isChecked())
+        self.canvas.update()
+
+    def _grid_spacing(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        value, ok = QInputDialog.getDouble(self, "グリッドの間隔", "間隔（mm）", self.canvas.grid_mm, 0.5, 100, 1)
+        if ok:
+            self.canvas.grid_mm = value
+            QSettings("Genko", "Genko Studio").setValue("guides/grid_mm", value)
+            if not self.act_grid.isChecked():
+                self.act_grid.setChecked(True)
+                self._guide_toggles()
+            self.canvas.update()
+
+    def _choose_ruler(self, kind: str, vps: int = 1, copies: int = 2, ask: bool = False) -> None:
+        if ask:
+            from PySide6.QtWidgets import QInputDialog
+
+            copies, ok = QInputDialog.getInt(self, "対称定規", "写しの数（中心の周りに）", 6, 3, 32)
+            if not ok:
+                return
+        self.canvas.ruler_kind = kind
+        self.canvas.ruler_vps = vps
+        self.canvas.ruler_copies = copies
+        self._tool("ruler")
+        title = next(t for t, k, o, _ in self.ruler_kinds if k == kind and (kind != "perspective" or o.get("vps") == vps)
+                     and (kind != "symmetry" or bool(o.get("ask")) == ask))
+        tip = next(tp for t, _k, _o, tp in self.ruler_kinds if t == title)
+        self.flash(f"{title.rstrip('…')}: {tip}", 5000)
+
+    def _place_ruler(self, ruler: dict) -> None:
+        page = self._current()
+        if page is None:
+            return
+        from genko.models import new_id
+
+        ruler_id = new_id()
+        if self.apply_ops([{"op": "add_ruler", "page": page.index, "id": ruler_id, **ruler}]):
+            self.canvas.selected_ruler_id = ruler_id
+            if not self.act_snap.isChecked():
+                self.act_snap.setChecked(True)
+                self._guide_toggles()
+            self.flash("定規を置きました。ペン（B）で描くと沿います（Ctrl+2 で切り替え）", 3500)
+
+    def _clear_rulers(self) -> None:
+        page = self._current()
+        if page is not None and page.rulers:
+            self.apply_ops([{"op": "delete_ruler", "page": page.index}])
+            self.canvas.selected_ruler_id = None
+
+    def _add_prim(self, kind: str) -> None:
+        from genko.frames import contains as geo_contains
+        from genko.models import new_id
+
+        page = self._current()
+        if page is None:
+            return
+        frame = self.selected_frame()
+        r = frame.rect if frame is not None else page.inner_rect_mm()
+        cx, cy = r.x + r.width / 2, r.y + r.height / 2
+        shift = 12.0 * sum(1 for p in page.prims if frame is None or geo_contains(frame, *(p.get("pos") or [0, 0])[:2]))
+        cx, cy = cx + shift, cy + shift * 0.5  # the next one beside the last, not on top of it
+        prim_id = new_id()
+        if kind == "mannequin":
+            height = round(max(30.0, min(140.0, r.height * 0.8)), 1)
+            op = {"op": "add_mannequin", "page": page.index, "id": prim_id, "pos": [cx, cy + height * 0.05, 0], "height_mm": height}
+        else:
+            side = round(max(15.0, min(80.0, min(r.width, r.height) * 0.4)), 1)
+            op = {"op": "add_prim3d", "page": page.index, "kind": "box", "id": prim_id, "pos": [cx, cy, 0], "size": [side, side, side]}
+        if self.apply_ops([op]):
+            self.canvas.selected_prim_id = prim_id
+            self._tool("3d")
+            self.show_dock("定規・3D")
+            self.guides.refresh()
+
+    def _pose(self, preset: str) -> None:
+        page, prim_id = self._current(), self.canvas.selected_prim_id
+        prim = next((p for p in (page.prims if page else []) if p.get("id") == prim_id and p.get("kind") == "mannequin"), None)
+        if prim is None:
+            prim = next((p for p in (page.prims if page else []) if p.get("kind") == "mannequin"), None)
+        if prim is None:
+            self.flash("先にデッサン人形を置きます（3D → デッサン人形を置く）", 3000)
+            return
+        self.apply_ops([{"op": "pose_mannequin", "page": page.index, "id": prim["id"], "preset": preset}])
+
+    def trace_prims(self, selected_only: bool = False) -> None:
+        page = self._current()
+        layer = self._paint_layer()
+        if page is None or layer is None:
+            return
+        if not page.prims:
+            self.flash("このページに 3D がありません", 2500)
+            return
+        op = {"op": "trace_prims", "page": page.index, "layer_id": layer.id}
+        if selected_only and self.canvas.selected_prim_id:
+            op["ids"] = [self.canvas.selected_prim_id]
+        if self.apply_ops([op]):
+            self.flash(f"「{wording.layer_label(layer)}」に線で写しました", 3000)
 
     def _reshape(self, stroke_id: str, points) -> None:
         layer = self._paint_layer()

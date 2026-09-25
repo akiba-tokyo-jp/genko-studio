@@ -79,6 +79,7 @@ def skeleton(prim: dict) -> dict:
         return (point[0] + math.sin(a) * length, point[1] + math.cos(a) * length * squash)
 
     segments = []
+    named: dict[str, tuple[float, float]] = {}
     hip_yaw, _ = _joint(joints, "hip")
     spine_yaw, spine_pitch = _joint(joints, "spine")
     pelvis = (x0, y0)
@@ -90,6 +91,7 @@ def skeleton(prim: dict) -> dict:
     head_yaw, head_pitch = _joint(joints, "head")
     head_r = unit * 0.5
     head_c = step(neck_top, math.pi + spine_yaw + hip_yaw + neck_yaw + head_yaw, head_r, head_pitch)
+    named.update(pelvis=pelvis, chest=chest, neck=neck_top, head=head_c)
     shoulder_half = unit * 0.9 * narrow
     hip_half = unit * 0.55 * narrow
     body_angle = spine_yaw + hip_yaw
@@ -107,6 +109,7 @@ def skeleton(prim: dict) -> dict:
         hand = step(elbow, body_angle + (arm_yaw + elbow_yaw) * facing, unit * 1.3, elbow_pitch)
         fingers = step(hand, body_angle + (arm_yaw + elbow_yaw + wrist_yaw) * facing, unit * 0.5)
         segments += [(shoulder, elbow, side), (elbow, hand, side), (hand, fingers, side)]
+        named.update({f"{prefix}_shoulder": shoulder, f"{prefix}_elbow": elbow, f"{prefix}_hand": hand, f"{prefix}_fingers": fingers})
         hip = (pelvis[0] + across[0] * hip_half * s, pelvis[1] + across[1] * hip_half * s)
         segments.append((pelvis, hip, "body"))
         leg_yaw, leg_pitch = _joint(joints, f"{prefix}_leg")
@@ -117,10 +120,69 @@ def skeleton(prim: dict) -> dict:
         toe_angle = hip_yaw + (leg_yaw + knee_yaw) * facing - (math.pi / 2 - ankle_yaw) * facing
         toe = step(ankle, toe_angle, unit * 0.6)
         segments += [(hip, knee, side), (knee, ankle, side), (ankle, toe, side)]
+        named.update({f"{prefix}_hip": hip, f"{prefix}_knee": knee, f"{prefix}_ankle": ankle, f"{prefix}_toe": toe})
     xs = [p[0] for seg in segments for p in seg[:2]] + [head_c[0] - head_r, head_c[0] + head_r]
     ys = [p[1] for seg in segments for p in seg[:2]] + [head_c[1] - head_r, head_c[1] + head_r]
-    return {"segments": segments, "head": (head_c, head_r), "facing": facing,
+    return {"segments": segments, "head": (head_c, head_r), "facing": facing, "points": named,
             "bbox": (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))}
+
+
+# the points people drag, and (the point the segment starts from, the joint that turns it)
+HANDLES = {
+    "chest": ("pelvis", "spine"), "head": ("neck", "head"),
+    **{f"{p}_elbow": (f"{p}_shoulder", f"{p}_arm") for p in "lr"},
+    **{f"{p}_hand": (f"{p}_elbow", f"{p}_elbow") for p in "lr"},
+    **{f"{p}_fingers": (f"{p}_hand", f"{p}_wrist") for p in "lr"},
+    **{f"{p}_knee": (f"{p}_hip", f"{p}_leg") for p in "lr"},
+    **{f"{p}_ankle": (f"{p}_knee", f"{p}_knee") for p in "lr"},
+    **{f"{p}_toe": (f"{p}_ankle", f"{p}_ankle") for p in "lr"},
+}
+
+
+def pose_to(prim: dict, handle: str, target) -> dict:
+    """The joint change ({joint: {"yaw": …}}) that points the dragged part at `target` (page mm);
+    "pelvis" moves the whole figure ({"pos": …})."""
+    if handle == "pelvis":
+        pos = list(prim.get("pos") or [100, 160, 0]) + [0, 0, 0]
+        return {"pos": [round(float(target[0]), 3), round(float(target[1]), 3), pos[2]]}
+    if handle not in HANDLES:
+        raise ValueError(f"handle must be pelvis or one of {', '.join(HANDLES)}")
+    bone = skeleton(prim)
+    base_name, joint = HANDLES[handle]
+    base = bone["points"][base_name]
+    rot = list(prim.get("rot") or [0, 0, 0]) + [0, 0, 0]
+    lean = float(rot[2])
+    squash = max(0.2, abs(math.cos(float(rot[0]))))
+    facing = bone["facing"]
+    dx, dy = float(target[0]) - base[0], float(target[1]) - base[1]
+    if math.hypot(dx, dy) < 1e-6:
+        return {}
+    a = math.atan2(dx, dy / squash) - lean  # the drawn angle (0 = down the page)
+    joints = {**default_joints(), **(prim.get("joints") or {})}
+    y = {name: _joint(joints, name)[0] for name in JOINTS}
+    body = y["spine"] + y["hip"]
+
+    def wrap(v: float) -> float:
+        return math.atan2(math.sin(v), math.cos(v))
+
+    p = handle[0]
+    if handle == "chest":
+        value = wrap(a - math.pi - y["hip"])
+    elif handle == "head":
+        value = wrap(a - math.pi - body - y["neck"])
+    elif handle.endswith("_elbow"):
+        value = wrap((a - body) * facing)
+    elif handle.endswith("_hand"):
+        value = wrap((a - body) * facing - y[f"{p}_arm"])
+    elif handle.endswith("_fingers"):
+        value = wrap((a - body) * facing - y[f"{p}_arm"] - y[f"{p}_elbow"])
+    elif handle.endswith("_knee"):
+        value = wrap((a - y["hip"]) * facing)
+    elif handle.endswith("_ankle"):
+        value = wrap((a - y["hip"]) * facing - y[f"{p}_leg"])
+    else:  # toe
+        value = wrap((a - y["hip"]) * facing - y[f"{p}_leg"] - y[f"{p}_knee"] + math.pi / 2)
+    return {"joints": {joint: {"yaw": round(value, 4)}}}
 
 
 def in_rect(prim: dict, rect) -> bool:

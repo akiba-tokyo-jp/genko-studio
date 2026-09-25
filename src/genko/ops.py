@@ -72,7 +72,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?"},
     {"op": "set_balloon_path", "id": "str", "path": "[[x,y]]?", "wrap": "vertical|horizontal", "ruby_runs": "[[base,ruby]]"},
     {"op": "add_mannequin", "page": "int", "pos": "[x,y,z] (pelvis, mm)", "height_mm": "float?", "rot": "[tip,turn,lean]?", "preset": "stand|walk|run|sit|point|look_back|arms_up?", "id": "str?"},
-    {"op": "pose_mannequin", "page": "int", "id": "str", "joints": "{name: {yaw, pitch}}?", "rot": "[tip,turn,lean]?", "pos": "[x,y,z]?", "height_mm": "float?", "preset": "str?"},
+    {"op": "pose_mannequin", "page": "int", "id": "str", "joints": "{name: {yaw, pitch}}?", "rot": "[tip,turn,lean]?", "pos": "[x,y,z]?", "height_mm": "float?", "preset": "str?", "drag": "{handle: pelvis|chest|head|l_elbow|l_hand|l_knee|…, to: [x,y]}?"},
     {"op": "set_onion", "page": "int", "from": "int?"},
     {"op": "step_onion", "page": "int", "delta": "int"},
     {"op": "set_lt", "page": "int", "threshold": "float"},
@@ -85,8 +85,14 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "select_frame", "page": "int", "frame_id": "str"},
     {"op": "edit_stroke", "page": "int", "layer": "name|ink", "index": "int", "points": "[[x,y],...]"},
     {"op": "simplify_stroke", "page": "int", "layer": "name|ink", "index": "int", "epsilon_mm": "float?"},
-    {"op": "set_ruler", "page": "int", "kind": "str", "pos": "[x,y]?", "points": "[[x,y],...]?"},
-    {"op": "add_prim3d", "page": "int", "kind": "str", "pos": "[x,y,z]?", "size": "float?", "rot": "float?"},
+    {"op": "set_ruler", "page": "int", "kind": "str", "pos": "[x,y]?", "points": "[[x,y],...]?", "note": "old single ruler; use add_ruler"},
+    {"op": "add_ruler", "page": "int", "kind": "line|curve|parallel|concentric|radial|perspective|symmetry", "points": "[[x,y],...]?", "angle": "float? (deg)", "ratio": "float? (concentric height/width)", "copies": "int? (symmetry)", "mirror": "bool?", "frame_id": "str? (only in this panel)", "reach_mm": "float?", "id": "str?"},
+    {"op": "edit_ruler", "page": "int", "id": "str", "points": "[[x,y],...]?", "angle": "float?", "ratio": "float?", "copies": "int?", "mirror": "bool?", "frame_id": "str|null?", "active": "bool?", "visible": "bool?"},
+    {"op": "delete_ruler", "page": "int", "id": "str? (none: every ruler on the page)"},
+    {"op": "add_prim3d", "page": "int", "kind": "box", "pos": "[x,y,z]?", "size": "[w,h,d] | float?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "id": "str?"},
+    {"op": "edit_prim", "page": "int", "id": "str", "pos": "[x,y,z]?", "size": "[w,h,d]?", "rot": "[tip,turn,lean]?", "focal_mm": "float?"},
+    {"op": "delete_prim", "page": "int", "id": "str"},
+    {"op": "trace_prims", "page": "int", "layer_id": "str", "ids": "[id]? (none: all)", "kind": "str? (pencil)", "width_mm": "float?", "rgb": "[r,g,b]?"},
     {"op": "lt_convert", "page": "int", "layer": "str?", "to": "ink|name?"},
     {"op": "add_ticket", "page": "int", "id": "str?", "frame_id": "str?", "role": "str?", "assignee": "str?", "rate": "str?"},
     {"op": "set_ticket", "id": "str", "status": "str?", "assignee": "str?", "rate": "str?"},
@@ -161,6 +167,38 @@ def _area(op: dict) -> dict:
     if area.get("mask") and area["mask"].get("box") and area["mask"].get("png"):
         return area
     raise ApplyError("area is {poly: [[x, y], …]} or {mask: {box, png}}")
+
+
+def _ruler(page, ruler_id) -> dict:
+    found = next((r for r in page.rulers if r.get("id") == ruler_id), None)
+    if found is None:
+        raise ApplyError(f"no ruler {ruler_id}")
+    return found
+
+
+def _prim(page, prim_id) -> dict:
+    found = next((p for p in page.prims if p.get("id") == prim_id), None)
+    if found is None:
+        raise ApplyError(f"no 3D figure or box {prim_id}")
+    return found
+
+
+def _vec3(value) -> list[float]:
+    values = [float(v) for v in (list(value) + [0.0, 0.0, 0.0])[:3]]
+    return [round(v, 4) for v in values]
+
+
+def _frame_contains(page):
+    from genko import frames as geo
+
+    def inside(frame_id: str, x: float, y: float) -> bool:
+        try:
+            frame = page._find(frame_id)
+        except (KeyError, IndexError):
+            return False
+        return geo.contains(frame, x, y)
+
+    return inside
 
 
 def _fill_reference(episode, page, target, reference: str, dpi: int):
@@ -596,13 +634,21 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if len(points) < 2:
             raise ApplyError("points needs at least two [x_mm, y_mm] pairs")
         page, points = _stroke_target(episode, page, points, str(op.get("space") or "page"))
-        if op.get("snap_ruler"):
-            points = _snap_points(page, points)
         stabilize = op.get("stabilize", episode.brush_stabilize)
         if stabilize:
             from genko.stroke import stabilize_points
 
             points = stabilize_points(points, int(stabilize))
+        copies: list = []
+        if op.get("snap_ruler") or op.get("ruler_id"):
+            if page.rulers:
+                from genko import rulers as guides
+
+                inside = _frame_contains(page)
+                points = [tuple(p) for p in guides.snap(points, page.rulers, inside, only=op.get("ruler_id"))]
+                copies = [[tuple(p) for p in c] for c in guides.symmetry_copies(points, page.rulers, inside)]
+            else:
+                points = _snap_points(page, points)
         taper = op["taper"] if "taper" in op else episode.brush_taper
         if taper:
             from genko.stroke import taper_points
@@ -638,6 +684,11 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             stroke.opacity = max(0.0, min(1.0, float(op["opacity"])))
         # lines stay vectors: they are drawn at the resolution of each render (no baking)
         target.strokes.append(stroke)
+        for copy_points in copies:  # symmetry rulers draw the line again
+            twin = copy.deepcopy(stroke)
+            twin.id = new_id()
+            twin.points = [(float(p[0]), float(p[1])) for p in copy_points]
+            target.strokes.append(twin)
         return
 
     if name == "fill":
@@ -1038,17 +1089,106 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         }
         return
 
+    if name in ("add_ruler", "edit_ruler"):
+        from genko import rulers as guides
+
+        page = _require_page(episode, op)
+        if name == "add_ruler":
+            ruler = {"id": str(op.get("id") or new_id()), "kind": str(op.get("kind") or ""), "points": [], "active": True, "visible": True}
+            if any(r.get("id") == ruler["id"] for r in page.rulers):
+                raise ApplyError(f"ruler {ruler['id']} already exists")
+        else:
+            ruler = copy.deepcopy(_ruler(page, op.get("id")))
+        for key in ("angle", "ratio", "reach_mm"):
+            if op.get(key) is not None:
+                ruler[key] = float(op[key])
+        if op.get("copies") is not None:
+            ruler["copies"] = int(op["copies"])
+        for key in ("mirror", "active", "visible"):
+            if key in op:
+                ruler[key] = bool(op[key])
+        if "points" in op:
+            ruler["points"] = [[round(float(p[0]), 3), round(float(p[1]), 3)] for p in op.get("points") or []]
+        if "frame_id" in op:
+            if op["frame_id"]:
+                try:
+                    page._find(str(op["frame_id"]))
+                except (KeyError, IndexError) as exc:
+                    raise ApplyError(f"no panel {op['frame_id']}") from exc
+            ruler["frame_id"] = op["frame_id"] or None
+        try:
+            guides.validate(ruler)
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
+        if name == "add_ruler":
+            page.rulers.append(ruler)
+        else:
+            page.rulers = [ruler if r.get("id") == ruler["id"] else r for r in page.rulers]
+        return
+
+    if name == "delete_ruler":
+        page = _require_page(episode, op)
+        if op.get("id"):
+            _ruler(page, op["id"])
+            page.rulers = [r for r in page.rulers if r.get("id") != op["id"]]
+        else:
+            page.rulers = []
+            page.ruler = None
+        return
+
     if name == "add_prim3d":
         page = _require_page(episode, op)
-        page.prims.append(
-            {
-                "id": new_id(),
-                "kind": str(op.get("kind") or "box"),
-                "pos": list(op.get("pos") or [100, 150, 0]),
-                "size": list(op.get("size") or [40, 40, 40]),
-                "rot": list(op.get("rot") or [0, 0.5, 0.3]),
-            }
-        )
+        kind = str(op.get("kind") or "box")
+        if kind != "box":
+            raise ApplyError("kind must be box (figures: add_mannequin)")
+        size = op.get("size") or [40, 40, 40]
+        if not isinstance(size, (list, tuple)):
+            size = [float(size)] * 3
+        prim = {"id": str(op.get("id") or new_id()), "kind": kind, "pos": _vec3(op.get("pos") or [100, 150, 0]),
+                "size": _vec3(size), "rot": _vec3(op.get("rot") or [0.35, 0.6, 0])}
+        if op.get("focal_mm"):
+            prim["focal_mm"] = max(20.0, float(op["focal_mm"]))
+        page.prims.append(prim)
+        return
+
+    if name == "edit_prim":
+        page = _require_page(episode, op)
+        prim = _prim(page, op.get("id"))
+        for key in ("pos", "size", "rot"):
+            if op.get(key) is not None:
+                prim[key] = _vec3(op[key])
+        if op.get("focal_mm"):
+            prim["focal_mm"] = max(20.0, float(op["focal_mm"]))
+        if prim.get("kind") == "mannequin" and op.get("size") is not None:
+            height = prim["size"][1]
+            prim["size"] = [height / 2, height, height / 4]
+        return
+
+    if name == "delete_prim":
+        page = _require_page(episode, op)
+        _prim(page, op.get("id"))
+        page.prims = [p for p in page.prims if p.get("id") != op.get("id")]
+        return
+
+    if name == "trace_prims":
+        from genko import prim3d
+        from genko.models import coerce_stroke
+
+        page = _require_page(episode, op)
+        target = _paint_target(page, op)
+        ids = set(op.get("ids") or [])
+        chosen = [p for p in page.prims if not ids or p.get("id") in ids]
+        if not chosen:
+            raise ApplyError("no 3D figure or box to trace")
+        kind = _brush_kind(op.get("kind") or "pencil")
+        for prim in chosen:
+            for line in prim3d.trace(prim):
+                stroke = coerce_stroke([(round(x, 3), round(y, 3)) for x, y in line])
+                stroke.kind = kind
+                stroke.width_mm = float(op.get("width_mm") or 0.3)
+                if op.get("rgb"):
+                    stroke.rgb = tuple(int(v) for v in op["rgb"])
+                target.strokes.append(stroke)
         return
 
     if name == "lt_convert":
@@ -1207,6 +1347,20 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                     for name, values in dict(op["joints"]).items():
                         slot = joints.setdefault(name, {})
                         slot.update(values)
+                if op.get("drag"):
+                    from genko import mannequin
+
+                    drag = dict(op["drag"])
+                    try:
+                        change = mannequin.pose_to(prim, str(drag.get("handle")), drag.get("to") or [0, 0])
+                    except ValueError as exc:
+                        raise ApplyError(str(exc)) from exc
+                    if "pos" in change:
+                        prim["pos"] = change["pos"]
+                    for joint, values in change.get("joints", {}).items():
+                        prim.setdefault("joints", {}).setdefault(joint, {}).update(values)
+                if op.get("drag") and not op.get("preset"):
+                    prim.pop("preset", None)  # a hand-made pose is no longer the preset
                 return
         raise ApplyError(f"no mannequin {mannequin_id}")
 
@@ -1612,7 +1766,8 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area",
-                             "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke"})
+                             "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
+                             "trace_prims"})
 
 
 def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTOR) -> None:
