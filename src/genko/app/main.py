@@ -1545,7 +1545,7 @@ class MainWindow(QMainWindow):
         self.act_add_stick = a("棒人形（手早いポーズ用）を置く", lambda: self._add_prim("mannequin"))
         self.act_add_head = a("頭部（顔の向きの目安）を置く", lambda: self._add_prim("head"))
         self.act_add_hand = a("手（指のポーズ）を置く", lambda: self._add_prim("hand"))
-        self.act_import_obj = a("3D モデルを読み込む（OBJ）…", self._import_obj)
+        self.act_import_obj = a("3D モデルを読み込む（OBJ・glTF・VRM）…", self._import_obj)
         self.act_add_box = a("3D の箱を置く", lambda: self._add_prim("box"))
         self.act_add_cylinder = a("3D の円柱を置く", lambda: self._add_prim("cylinder"))
         self.act_add_stairs = a("3D の階段を置く", lambda: self._add_prim("stairs"))
@@ -3503,18 +3503,23 @@ class MainWindow(QMainWindow):
         page = self._current()
         if page is None:
             return
-        path, _ = QFileDialog.getOpenFileName(self, "3D モデルを読み込む", "", "OBJ (*.obj)")
+        path, _ = QFileDialog.getOpenFileName(self, "3D モデルを読み込む", "", "3D モデル (*.obj *.glb *.gltf *.vrm)")
         if not path:
             return
+        import base64
+
         try:
-            text = Path(path).read_text(encoding="utf-8", errors="replace")
+            raw = Path(path).read_bytes()
         except OSError as exc:
             self.flash(f"読み込めませんでした（{exc}）", 6000, error=True)
             return
+        suffix = Path(path).suffix.lower()
+        source = ({"glb": base64.b64encode(raw).decode("ascii")} if suffix in (".glb", ".vrm")
+                  else {"gltf": raw.decode("utf-8", "replace")} if suffix == ".gltf" else {"obj": raw.decode("utf-8", "replace")})
         frame = self.selected_frame()
         r = frame.rect if frame is not None else page.inner_rect_mm()
         prim_id = new_id()
-        if self.apply_ops([{"op": "import_model", "page": page.index, "obj": text, "id": prim_id, "name": Path(path).stem,
+        if self.apply_ops([{"op": "import_model", "page": page.index, **source, "id": prim_id, "name": Path(path).stem,
                             "pos": [r.x + r.width / 2, r.y + r.height / 2, 0], "size_mm": round(min(r.width, r.height) * 0.6, 1)}]):
             self.canvas.selected_prim_id = prim_id
             self._tool("3d")

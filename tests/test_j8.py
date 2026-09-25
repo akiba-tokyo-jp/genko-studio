@@ -225,3 +225,41 @@ def test_placing_and_posing_the_3d_figure(window, qapp):
     window.act_add_hand.trigger()
     assert [p["kind"] for p in window.current_page().prims] == ["figure", "head", "hand"]
     window.canvas.repaint()
+
+
+def _glb() -> bytes:
+    """A tetrahedron as a binary glTF (what VRM files are)."""
+    import json
+    import struct
+
+    positions = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype="<f4").tobytes()
+    indices = np.array([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3], dtype="<u2").tobytes()
+    blob = positions + indices
+    doc = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
+           "nodes": [{"mesh": 0, "translation": [5, 0, 0]}], "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}],
+           "buffers": [{"byteLength": len(blob)}],
+           "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(positions)},
+                           {"buffer": 0, "byteOffset": len(positions), "byteLength": len(indices)}],
+           "accessors": [{"bufferView": 0, "componentType": 5126, "count": 4, "type": "VEC3"},
+                         {"bufferView": 1, "componentType": 5123, "count": 12, "type": "SCALAR"}]}
+    text = json.dumps(doc).encode("utf-8")
+    text += b" " * (-len(text) % 4)
+    body = struct.pack("<II", len(text), 0x4E4F534A) + text + struct.pack("<II", len(blob), 0x004E4942) + blob
+    return struct.pack("<III", 0x46546C67, 2, 12 + len(body)) + body
+
+
+def test_gltf_and_vrm_models():
+    import base64
+
+    from genko import mesh3d, prim3d
+
+    mesh = mesh3d.read_gltf(_glb())
+    assert len(mesh["f"]) == 4 and len(mesh["v"]) == 12
+    ep = _book()
+    apply_ops(ep, [{"op": "import_model", "page": 1, "glb": base64.b64encode(_glb()).decode("ascii"), "size_mm": 40, "pos": [100, 100, 0],
+                    "id": "t"}])
+    assert _prim(ep, "t")["kind"] == "mesh" and prim3d.trace(_prim(ep, "t"))
+    with pytest.raises(ApplyError):
+        apply_ops(ep, [{"op": "import_model", "page": 1, "glb": base64.b64encode(b"glTF" + b"\0" * 8).decode("ascii")}])
+    with pytest.raises(ApplyError):
+        apply_ops(ep, [{"op": "import_model", "page": 1, "gltf": "{\"buffers\": [{\"uri\": \"model.bin\"}]}"}])

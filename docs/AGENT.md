@@ -289,7 +289,7 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   the viewer, y twists, z turns in the picture; presets stand, walk, run, sit, point, arms_up, think, kneel, peace;
   hands open, relaxed, fist, point, peace, grip).
 - `add_head {pos, size_mm, rot}` (the face's centre and eye lines), `add_hand {pos, size_mm, side, pose, rot}`,
-  `import_model {obj (OBJ text), size_mm, pos, rot, name}`.
+  `import_model {obj (OBJ text) | glb (a .glb / .vrm, base64) | gltf (text), size_mm, pos, rot, name}`.
 - `set_camera {turn, tip, roll, focal_mm, target | off}` turns every 3D on the page together; `set_light {dir,
   ambient}`.
 - `render_prims {layer_id, ids?, lines, surfaces, tone {lpi}, light?, width_mm, kind}`: pen lines with hidden parts

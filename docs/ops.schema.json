@@ -838,7 +838,9 @@
     {
       "op": "import_model",
       "page": "int",
-      "obj": "str (the OBJ file's text: v and f lines)",
+      "obj": "str? (the OBJ file's text: v and f lines)",
+      "glb": "str? (a .glb / .vrm file, base64)",
+      "gltf": "str? (a .gltf's text with its data inside)",
       "size_mm": "float? (its longest side, 60)",
       "pos": "[x,y,z]?",
       "rot": "[tip,turn,lean]?",

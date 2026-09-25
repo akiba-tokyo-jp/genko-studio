@@ -613,3 +613,106 @@ def read_obj(text: str) -> dict:
     v = (v - (lo + hi) / 2) / span
     ratio = (hi - lo) / span
     return {"v": [round(float(c), 5) for c in v.flatten()], "f": faces, "ratio": [round(float(r), 4) for r in ratio]}
+
+
+# --- glTF / GLB (VRM is a GLB) -----------------------------------------------------------------------------------
+
+_COMPONENTS = {5120: ("b", 1), 5121: ("B", 1), 5122: ("h", 2), 5123: ("H", 2), 5125: ("I", 4), 5126: ("f", 4)}
+_WIDTH = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}
+
+
+def read_gltf(data: bytes) -> dict:
+    """A mesh from a .glb / .vrm (binary glTF) or a .gltf with its buffer inside (data: URI): every mesh's
+    triangles in their rest pose, the nodes' places applied, fitted into a unit box like read_obj."""
+    import base64
+    import json
+    import struct
+
+    if data[:4] == b"glTF":
+        if len(data) < 20:
+            raise ObjError("the model file is cut short")
+        _magic, _version, total = struct.unpack_from("<III", data, 0)
+        at, doc, blob = 12, None, b""
+        while at + 8 <= min(total, len(data)):
+            length, kind = struct.unpack_from("<II", data, at)
+            chunk = data[at + 8:at + 8 + length]
+            if kind == 0x4E4F534A:
+                doc = json.loads(chunk.decode("utf-8"))
+            elif kind == 0x004E4942:
+                blob = chunk
+            at += 8 + length
+        if doc is None:
+            raise ObjError("the model file has no scene")
+        buffers = [blob]
+    else:
+        try:
+            doc = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ObjError("the model file is not glTF") from exc
+        buffers = []
+        for buffer in doc.get("buffers") or []:
+            uri = str(buffer.get("uri") or "")
+            if not uri.startswith("data:"):
+                raise ObjError("a .gltf must carry its data inside (or use .glb)")
+            buffers.append(base64.b64decode(uri.split(",", 1)[1]))
+
+    def accessor(index: int) -> np.ndarray:
+        acc = doc["accessors"][index]
+        view = doc["bufferViews"][acc["bufferView"]]
+        fmt, size = _COMPONENTS[acc["componentType"]]
+        width = _WIDTH[acc["type"]]
+        start = int(view.get("byteOffset", 0)) + int(acc.get("byteOffset", 0))
+        stride = int(view.get("byteStride", 0)) or size * width
+        raw = buffers[view.get("buffer", 0)]
+        count = int(acc["count"])
+        if stride == size * width:
+            values = np.frombuffer(raw, dtype=np.dtype("<" + fmt), count=count * width, offset=start)
+        else:
+            values = np.array([struct.unpack_from("<" + fmt * width, raw, start + i * stride) for i in range(count)]).flatten()
+        return values.reshape(count, width).astype(float)
+
+    def node_matrix(node: dict) -> np.ndarray:
+        if node.get("matrix"):
+            return np.array(node["matrix"], dtype=float).reshape(4, 4).T
+        m = np.eye(4)
+        t = node.get("translation") or [0, 0, 0]
+        x, y, z, w = node.get("rotation") or [0, 0, 0, 1]
+        rot = np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+        s = node.get("scale") or [1, 1, 1]
+        m[:3, :3] = rot * np.array(s)
+        m[:3, 3] = t
+        return m
+
+    verts: list[np.ndarray] = []
+    faces: list[list[int]] = []
+
+    def visit(index: int, parent: np.ndarray) -> None:
+        node = doc["nodes"][index]
+        m = parent @ node_matrix(node)
+        if node.get("mesh") is not None:
+            for primitive in doc["meshes"][node["mesh"]].get("primitives") or []:
+                if primitive.get("mode", 4) != 4 or "POSITION" not in (primitive.get("attributes") or {}):
+                    continue
+                pos = accessor(primitive["attributes"]["POSITION"])
+                world = (np.hstack([pos, np.ones((len(pos), 1))]) @ m.T)[:, :3]
+                base = sum(len(v) for v in verts)
+                idx = accessor(primitive["indices"]).astype(int).flatten() if primitive.get("indices") is not None else np.arange(len(pos))
+                verts.append(world)
+                faces.extend([[base + int(idx[k]), base + int(idx[k + 1]), base + int(idx[k + 2])] for k in range(0, len(idx) - 2, 3)])
+                if len(faces) > MAX_FACES:
+                    raise ObjError(f"the model has too many faces (at most {MAX_FACES})")
+        for child in node.get("children") or []:
+            visit(child, m)
+
+    scene = (doc.get("scenes") or [{"nodes": list(range(len(doc.get("nodes") or [])))}])[int(doc.get("scene", 0))]
+    for root in scene.get("nodes") or []:
+        visit(root, np.eye(4))
+    if not verts or not faces:
+        raise ObjError("the OBJ file has no faces")
+    v = np.vstack(verts) * np.array([1.0, -1.0, -1.0])  # (glTF: y up, z toward the viewer)
+    lo, hi = v.min(axis=0), v.max(axis=0)
+    span = float((hi - lo).max()) or 1.0
+    v = (v - (lo + hi) / 2) / span
+    return {"v": [round(float(c), 5) for c in v.flatten()], "f": faces, "ratio": [round(float(r), 4) for r in (hi - lo) / span]}

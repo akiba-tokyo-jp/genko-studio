@@ -234,12 +234,19 @@ def apply(episode, op: dict[str, Any], name: str) -> None:
         return
     if name == "import_model":
         text = op.get("obj")
-        if not isinstance(text, str) or not text.strip():
-            raise ApplyError("obj is the model's OBJ text")
         try:
-            mesh = mesh3d.read_obj(text)
-        except (mesh3d.ObjError, ValueError, IndexError) as exc:
-            raise ApplyError(str(exc)) from exc
+            if op.get("glb"):  # a .glb / .vrm (base64), or a .gltf's text
+                import base64
+
+                mesh = mesh3d.read_gltf(base64.b64decode(str(op["glb"])))
+            elif op.get("gltf"):
+                mesh = mesh3d.read_gltf(str(op["gltf"]).encode("utf-8"))
+            else:
+                if not isinstance(text, str) or not text.strip():
+                    raise ApplyError("obj is the model's OBJ text")
+                mesh = mesh3d.read_obj(text)
+        except (mesh3d.ObjError, ValueError, IndexError, KeyError, TypeError) as exc:
+            raise ApplyError(str(exc) if isinstance(exc, (mesh3d.ObjError, ApplyError)) else f"the model cannot be read ({exc})") from exc
         longest = float(op.get("size_mm") or 60)
         ratio = mesh.pop("ratio")
         prim = {"id": str(op.get("id") or new_id()), "kind": "mesh", "pos": _vec(op.get("pos") or [100, 150, 0]),
