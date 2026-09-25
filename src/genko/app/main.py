@@ -1102,13 +1102,15 @@ class MainWindow(QMainWindow):
                               "ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）", True)
         self.act_shape = a("図形", lambda: self._tool("shape"), "O",
                            "直線・折れ線・曲線・長方形・楕円・多角形を描く（Shift で 45° と正方形。折れ線と曲線はクリックで点、ダブルクリックか Enter で終わり）", True)
+        self.act_blend = a("色混ぜ", lambda: self._tool("blend"), "Shift+B",
+                           "ペイントのレイヤーの色をぼかす・指先でのばす・なじませる", True)
         self.act_sel_ellipse = a("範囲選択（楕円）", lambda: self._tool("ellipse"), None, "ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）", True)
         self.act_sel_polyline = a("範囲選択（折れ線）", lambda: self._tool("polyline"), None, "クリックで角を置き、ダブルクリックか Enter で閉じる", True)
         self.act_sel_colour = a("色域選択", lambda: self._tool("colour"), None, "クリックした所と同じ色の所をページ中から選ぶ", True)
         self.act_sel_pen = a("選択ペン", lambda: self._tool("selpen"), None, "なぞった所を選択範囲に足す", True)
         self.act_sel_erase = a("選択消し", lambda: self._tool("selerase"), None, "なぞった所を選択範囲から外す", True)
         tools = QActionGroup(self)
-        self.tool_actions = {"shape": self.act_shape, "ellipse": self.act_sel_ellipse, "polyline": self.act_sel_polyline,
+        self.tool_actions = {"blend": self.act_blend, "shape": self.act_shape, "ellipse": self.act_sel_ellipse, "polyline": self.act_sel_polyline,
                              "colour": self.act_sel_colour, "selpen": self.act_sel_pen, "selerase": self.act_sel_erase,
                              "move": self.act_move, "gradient": self.act_gradient, "select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
                              "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill,
@@ -1242,7 +1244,7 @@ class MainWindow(QMainWindow):
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_scale, self.act_onion, None, self.act_tool_names]),
-            ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_shape, self.act_text, self.act_frame, None,
+            ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_blend, self.act_shape, self.act_text, self.act_frame, None,
                         self.act_picker, self.act_fill, self.act_lassofill, self.act_gradient, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
                         self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner]),
             ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
@@ -1320,7 +1322,7 @@ class MainWindow(QMainWindow):
                     "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill, "lassofill": self.act_lassofill,
                     "rect": self.act_marquee, "lasso": self.act_lasso, "wand": self.act_wand, "reshape": self.act_reshape,
                     "ruler": self.act_ruler, "3d": self.act_3d, "effect": self.act_effect, "stamp": self.act_stamp,
-                    "move": self.act_move, "gradient": self.act_gradient, "shape": self.act_shape, "undo": self.act_undo, "redo": self.act_redo, "fit": self.act_fit, "zoom_in": self.act_zoom_in,
+                    "move": self.act_move, "gradient": self.act_gradient, "shape": self.act_shape, "blend": self.act_blend, "undo": self.act_undo, "redo": self.act_redo, "fit": self.act_fit, "zoom_in": self.act_zoom_in,
                     "zoom_out": self.act_zoom_out, "prev": self.act_prev, "next": self.act_next, "export": self.act_export}
         self._pictures = pictures
         for name, act in pictures.items():
@@ -1334,7 +1336,7 @@ class MainWindow(QMainWindow):
         palette.setOrientation(Qt.Orientation.Vertical)
         palette.setIconSize(QSize(24, 24))
         palette.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        for act in (self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_shape, self.act_fill, self.act_lassofill, self.act_gradient,
+        for act in (self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_blend, self.act_shape, self.act_fill, self.act_lassofill, self.act_gradient,
                     self.act_picker, None,
                     self.act_text, self.act_frame, None, self.act_marquee, self.act_lasso, self.act_wand, self.act_reshape, None,
                     self.act_ruler, self.act_3d, self.act_effect):
@@ -1552,6 +1554,12 @@ class MainWindow(QMainWindow):
         self.brush.changed.connect(self._brush_changed)
         self.brush.make.clicked.connect(self._make_brush)
         self.brush.forget.clicked.connect(self._forget_brush)
+        from PySide6.QtWidgets import QMenu
+
+        brush_files = QMenu(self.brush.files)
+        brush_files.addAction("選んでいるブラシをファイルに書き出す…", self._export_brush)
+        brush_files.addAction("ブラシを読み込む（.genkobrush・.abr）…", self._import_brushes_dialog)
+        self.brush.files.setMenu(brush_files)
         self._brush_changed()
         self.text_settings = TextToolSettings()
         self.text_settings.draw_balloon.toggled.connect(lambda on: setattr(self.canvas, "balloon_pen", on))
@@ -1572,6 +1580,11 @@ class MainWindow(QMainWindow):
         eraser_form.setContentsMargins(0, 0, 0, 0)
         eraser_form.addRow("消しゴムの太さ（[ ] でも変わる）", eraser_size)
         eraser_form.addRow(self.brush.crossing)
+        self.eraser_mode = QComboBox()
+        for label, key in (("触れた所で切る", ""), ("交点まで", "to_crossing"), ("線全体", "whole")):
+            self.eraser_mode.addItem(label, key)
+        self.eraser_mode.setToolTip("線全体: 触れた線を丸ごと消す（ベクター）")
+        eraser_form.addRow("消し方", self.eraser_mode)
         scrape = QLabel("トーンのレイヤーでは削ります（ぼかすかは素材パネルのトーンの欄で）")
         scrape.setWordWrap(True)
         scrape.setStyleSheet("color:#666")
@@ -1646,6 +1659,30 @@ class MainWindow(QMainWindow):
         note.setStyleSheet("color:#666")
         shl.addRow(note)
         ts.add(("shape",), shape_page)
+        self.blend_mode = QComboBox()
+        for label, key in (("ぼかし", "blur"), ("指先（色をのばす）", "smudge"), ("なじませ", "blend")):
+            self.blend_mode.addItem(label, key)
+        self.blend_strength = _Spin()
+        self.blend_strength.setRange(5, 100)
+        self.blend_strength.setSuffix(" %")
+        self.blend_strength.setValue(60)
+        blend_size = QDoubleSpinBox()
+        blend_size.setRange(0.5, 60)
+        blend_size.setSuffix(" mm")
+        blend_size.setValue(6.0)
+        blend_size.valueChanged.connect(lambda v: setattr(self.canvas, "blend_mm", float(v)))
+        blend_page = QWidget()
+        bfl = QFormLayout(blend_page)
+        bfl.setContentsMargins(0, 0, 0, 0)
+        bfl.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        bfl.addRow("混ぜ方", self.blend_mode)
+        bfl.addRow("強さ", self.blend_strength)
+        bfl.addRow("大きさ", blend_size)
+        blend_note = QLabel("ペイントのレイヤーの色を混ぜます（ペンの線は線のまま）。")
+        blend_note.setWordWrap(True)
+        blend_note.setStyleSheet("color:#666")
+        bfl.addRow(blend_note)
+        ts.add(("blend",), blend_page)
         radius = QDoubleSpinBox()
         radius.setRange(1, 60)
         radius.setSuffix(" mm")
@@ -2159,12 +2196,19 @@ class MainWindow(QMainWindow):
             self.apply_ops([{"op": "paint_mask", "page": page.index, "id": layer.id, "points": [[p[0], p[1]] for p in points],
                              "width_mm": self.eraser_mm if erase else max(0.5, self.brush.size.value()), "show": not erase}])
             return
+        if self.canvas.tool == "blend":
+            self.apply_ops([{"op": "smudge", "page": page.index, "layer_id": layer.id, "points": points,
+                             "width_mm": self.canvas.blend_mm, "strength": self.blend_strength.value() / 100,
+                             "mode": self.blend_mode.currentData()}])
+            return
         if self.canvas.tool == "eraser":
             op = {"op": "erase", "page": page.index, "layer_id": layer.id, "points": [[p[0], p[1]] for p in points],
                   "width_mm": self.eraser_mm}
             if getattr(layer.kind, "value", "") == "tone":
                 if self.materials.soft.isChecked():
                     op["soft"] = True
+            elif self.eraser_mode.currentData():
+                op["mode"] = self.eraser_mode.currentData()
             elif self.brush.crossing.isChecked():
                 op["mode"] = "to_crossing"
             self.apply_ops([op])
@@ -2295,6 +2339,66 @@ class MainWindow(QMainWindow):
         brushes.save_to_library(key, brushes.to_dict(brushes.CUSTOM[key]))
         self.brush.reload_kinds(select=key)
         self.flash(f"ブラシ「{data['label']}」を作りました（ブラシの一覧の ★）", 4000)
+
+    def _export_brush(self, path: str | None = None) -> bool:
+        """The brush in a file (.genkobrush) to give to someone else or keep."""
+        import json
+
+        from genko import brushes
+
+        key = self.brush.kind()
+        if path is None:
+            from PySide6.QtWidgets import QFileDialog
+
+            path, _ = QFileDialog.getSaveFileName(self, "ブラシを書き出す", f"{brushes.brush(key).label}.genkobrush",
+                                                  "Genko のブラシ (*.genkobrush)")
+            if not path:
+                return False
+        data = {"genko_brush": 1, "brushes": {key: {**brushes.to_dict(brushes.brush(key)), "base": key if key in brushes.BRUSHES else "gpen"}}}
+        Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        self.flash(f"ブラシを書き出しました: {Path(path).name}", 3000)
+        return True
+
+    def import_brushes(self, path: str) -> list[str]:
+        """Brushes from a .genkobrush or a Photoshop .abr into one's own list. Returns their keys."""
+        import json
+
+        from genko import abr, brushes
+        from genko.models import new_id
+
+        raw = Path(path).read_bytes()
+        if Path(path).suffix.lower() == ".abr":
+            definitions = abr.brushes_from(raw, prefix=f"{Path(path).stem} ")
+        else:
+            data = json.loads(raw.decode("utf-8"))
+            definitions = list((data.get("brushes") or {}).values())
+        keys = []
+        for definition in definitions:
+            key = f"my_{new_id()}"
+            try:
+                brushes.CUSTOM[key] = brushes.from_dict(key, definition)
+            except (ValueError, TypeError):
+                continue
+            brushes.save_to_library(key, brushes.to_dict(brushes.CUSTOM[key]))
+            keys.append(key)
+        if keys:
+            self.brush.reload_kinds(select=keys[0])
+        return keys
+
+    def _import_brushes_dialog(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        from genko import abr
+
+        path, _ = QFileDialog.getOpenFileName(self, "ブラシを読み込む", "", "ブラシ (*.genkobrush *.abr)")
+        if not path:
+            return
+        try:
+            keys = self.import_brushes(path)
+        except (abr.AbrError, ValueError, OSError) as exc:
+            self.flash(f"読み込めませんでした: {wording.error(str(exc))}", 5000, error=True)
+            return
+        self.flash(f"ブラシを {len(keys)} 本読み込みました（一覧の ★）" if keys else "読み込めるブラシがありませんでした", 4000)
 
     def _forget_brush(self) -> None:
         from genko import brushes

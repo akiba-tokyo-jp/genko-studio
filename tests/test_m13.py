@@ -68,6 +68,9 @@ def test_every_brush_draws_and_keeps_its_kind(tmp_path: Path):
         grey = _grey(ep, 100, 60 + i * 12, dpi=150)
         if key == "white":
             assert grey > 240  # white on white
+        elif brushes.brush(key).scatter or brushes.brush(key).spacing > 1:
+            # (scattered and spaced-out brushes: somewhere near the line, not on every pixel)
+            assert min(_grey(ep, 100 + dx, 60 + i * 12 + dy, dpi=150) for dx in range(-6, 7, 2) for dy in range(-3, 4)) < 235, key
         else:
             assert grey < 235, key
     project = tmp_path / "b.genko"

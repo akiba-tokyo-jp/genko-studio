@@ -139,6 +139,9 @@ class BrushPanel(QWidget):
         make_row = QGridLayout()
         make_row.addWidget(self.make, 0, 0)
         make_row.addWidget(self.forget, 1, 0)
+        self.files = QPushButton("読み込み・書き出し ▾")
+        self.files.setToolTip("ブラシをファイルに書き出す・読み込む（.genkobrush、Photoshop の .abr）")
+        make_row.addWidget(self.files, 2, 0)
         layout.addLayout(make_row)
         layout.addLayout(form)
         layout.addWidget(QLabel("色（スポイト I で拾う）"))
@@ -277,7 +280,12 @@ class BrushPanel(QWidget):
         return out
 
 
-TEXTURE_LABELS = [("なし（なめらか）", ""), ("鉛筆のざらつき", "grain"), ("筆のかすれ", "dry"), ("エアブラシ（ぼかし）", "soft")]
+TEXTURE_LABELS = [("なし（なめらか）", ""), ("鉛筆のざらつき", "grain"), ("筆のかすれ", "dry"), ("エアブラシ（ぼかし）", "soft"),
+                  ("水彩（縁に色がたまる）", "water")]
+TIP_LABELS = [("丸", "round"), ("平たい（カリグラフィ）", "flat"), ("画像", "image")]
+PATTERN_LABELS = [("なし", ""), ("点", "dots"), ("破線", "dash"), ("レース", "lace"), ("草", "grass"), ("ハート", "hearts"),
+                  ("星", "stars"), ("葉", "leaves")]
+AA_LABELS = [("なし", "none"), ("弱", "weak"), ("中", "normal"), ("強", "strong")]
 
 
 class BrushDialog(QDialog):
@@ -325,6 +333,64 @@ class BrushDialog(QDialog):
         self.sample = QLabel()
         self.sample.setMinimumHeight(70)
         self.sample.setStyleSheet("background: white; border: 1px solid #bbb")
+        # the tip and how it is laid down (J3)
+        self.tip = QComboBox()
+        for label, key in TIP_LABELS:
+            self.tip.addItem(label, key)
+        self.tip.setCurrentIndex(max(0, self.tip.findData(b.tip)))
+        self.tip_png = b.tip_png
+        self.tip_angle = QSpinBox()
+        self.tip_angle.setRange(-180, 180)
+        self.tip_angle.setSuffix(" °")
+        self.tip_angle.setValue(round(b.tip_angle))
+        self.tip_ratio = QSpinBox()
+        self.tip_ratio.setRange(2, 100)
+        self.tip_ratio.setSuffix(" %")
+        self.tip_ratio.setValue(round(b.tip_ratio * 100))
+        self.tip_follow = QCheckBox("先端を線の向きに合わせて回す")
+        self.tip_follow.setChecked(b.tip_follow)
+        self.tip_picture = QPushButton("画像から先端を作る…")
+        self.tip_picture.clicked.connect(self._pick_tip)
+        self.pattern = QComboBox()
+        for label, key in PATTERN_LABELS:
+            self.pattern.addItem(label, key)
+        self.pattern.setCurrentIndex(max(0, self.pattern.findData(b.pattern)))
+        self.spacing = QSpinBox()
+        self.spacing.setRange(0, 500)
+        self.spacing.setSuffix(" %")
+        self.spacing.setValue(round(b.spacing * 100))
+        self.spacing.setToolTip("先端を置く間隔（太さに対する割合）。0 で続いた線")
+        self.scatter = QSpinBox()
+        self.scatter.setRange(0, 500)
+        self.scatter.setSuffix(" %")
+        self.scatter.setValue(round(b.scatter * 100))
+        self.scatter.setToolTip("先端を線から散らす広さ（スプレー・点描）")
+        self.stamp = QSpinBox()
+        self.stamp.setRange(2, 300)
+        self.stamp.setSuffix(" %")
+        self.stamp.setValue(round(b.stamp_size * 100))
+        self.jitter = QSpinBox()
+        self.jitter.setRange(0, 100)
+        self.jitter.setSuffix(" %")
+        self.jitter.setValue(round(b.size_jitter * 100))
+        self.turn = QCheckBox("ランダムに回す")
+        self.turn.setChecked(b.turn_jitter)
+        self.count = QSpinBox()
+        self.count.setRange(1, 12)
+        self.count.setValue(b.count)
+        self.speed = QSpinBox()
+        self.speed.setRange(0, 100)
+        self.speed.setSuffix(" %")
+        self.speed.setValue(round(b.speed * 100))
+        self.speed.setToolTip("速く描くほど細くなる強さ")
+        self.post = QSpinBox()
+        self.post.setRange(0, 10)
+        self.post.setValue(b.post_smooth)
+        self.post.setToolTip("描き終えた後に線をなめらかに整える強さ（後補正）")
+        self.aa = QComboBox()
+        for label, key in AA_LABELS:
+            self.aa.addItem(label, key)
+        self.aa.setCurrentIndex(max(0, self.aa.findData(b.aa)))
         form = QFormLayout()
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         form.addRow("名前", self.name)
@@ -337,27 +403,78 @@ class BrushDialog(QDialog):
         form.addRow("質感", self.texture)
         form.addRow("", self.fixed)
         form.addRow("", self.white)
-        form.addRow("試し描き", self.sample)
+        form.addRow("速さで細く", self.speed)
+        form.addRow("後補正", self.post)
+        form.addRow("アンチエイリアス", self.aa)
+        tips = QFormLayout()
+        tips.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        tips.addRow("先端の形", self.tip)
+        tips.addRow("", self.tip_picture)
+        tips.addRow("先端の角度", self.tip_angle)
+        tips.addRow("平たさ", self.tip_ratio)
+        tips.addRow("", self.tip_follow)
+        tips.addRow("模様", self.pattern)
+        tips.addRow("間隔", self.spacing)
+        tips.addRow("散らばり", self.scatter)
+        tips.addRow("1 つの大きさ", self.stamp)
+        tips.addRow("大きさの乱れ", self.jitter)
+        tips.addRow("", self.turn)
+        tips.addRow("一度に置く数", self.count)
+        from PySide6.QtWidgets import QTabWidget, QWidget
+
+        tabs = QTabWidget()
+        basic, shape = QWidget(), QWidget()
+        basic.setLayout(form)
+        shape.setLayout(tips)
+        tabs.addTab(basic, "描き味")
+        tabs.addTab(shape, "先端・模様")
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("作る")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
-        layout.addLayout(form)
+        layout.addWidget(tabs)
+        layout.addWidget(QLabel("試し描き"))
+        layout.addWidget(self.sample)
         layout.addWidget(buttons)
-        for widget in (self.width, self.thin, self.curve, self.opacity, self.steady):
+        for widget in (self.width, self.thin, self.curve, self.opacity, self.steady, self.tip_angle, self.tip_ratio, self.spacing,
+                       self.scatter, self.stamp, self.jitter, self.count, self.speed, self.post):
             widget.valueChanged.connect(lambda _: self._draw_sample())
-        for widget in (self.taper, self.fixed, self.white):
+        for widget in (self.taper, self.fixed, self.white, self.tip_follow, self.turn):
             widget.toggled.connect(lambda _: self._draw_sample())
-        self.texture.currentIndexChanged.connect(lambda _: self._draw_sample())
+        for widget in (self.texture, self.tip, self.pattern, self.aa):
+            widget.currentIndexChanged.connect(lambda _: self._draw_sample())
         self._draw_sample()
 
     def data(self) -> dict:
         return {"label": self.name.text().strip() or "自分のブラシ", "base": self.base, "width_mm": self.width.value(),
                 "min_pressure": self.thin.value() / 100, "gamma": round(self.curve.value(), 2), "opacity": self.opacity.value() / 100,
                 "stabilize": self.steady.value(), "taper": self.taper.isChecked(), "texture": self.texture.currentData(),
-                "fixed_width": self.fixed.isChecked(), "rgb": [255, 255, 255] if self.white.isChecked() else None}
+                "fixed_width": self.fixed.isChecked(), "rgb": [255, 255, 255] if self.white.isChecked() else None,
+                "tip": self.tip.currentData() if (self.tip.currentData() != "image" or self.tip_png) else "round",
+                "tip_angle": float(self.tip_angle.value()), "tip_ratio": self.tip_ratio.value() / 100,
+                "tip_follow": self.tip_follow.isChecked(), "tip_png": self.tip_png or "", "pattern": self.pattern.currentData(),
+                "spacing": self.spacing.value() / 100, "scatter": self.scatter.value() / 100, "stamp_size": self.stamp.value() / 100,
+                "size_jitter": self.jitter.value() / 100, "turn_jitter": self.turn.isChecked(), "count": self.count.value(),
+                "speed": self.speed.value() / 100, "post_smooth": self.post.value(), "aa": self.aa.currentData()}
+
+    def _pick_tip(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        from genko import abr
+
+        path, _ = QFileDialog.getOpenFileName(self, "先端にする画像", "", "画像 (*.png *.jpg *.jpeg *.webp *.bmp)")
+        if not path:
+            return
+        try:
+            self.tip_png = abr.tip_from_picture(path)
+        except (abr.AbrError, OSError):
+            return
+        self.tip.setCurrentIndex(self.tip.findData("image"))
+        if not self.spacing.value():
+            self.spacing.setValue(25)
+        self._draw_sample()
 
     def _draw_sample(self) -> None:
         """An S-curve pressed lightly, then hard, then lightly, as this brush draws it."""

@@ -128,7 +128,8 @@
       "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?",
       "stabilize": "int?",
       "taper": "bool?",
-      "pressure_gamma": "float? (>1 needs more force)"
+      "pressure_gamma": "float? (>1 needs more force)",
+      "post_smooth": "int? 0..10 (後補正; default the brush's)"
     },
     {
       "op": "delete_stroke",
@@ -355,6 +356,15 @@
       "opacity": "float?"
     },
     {
+      "op": "smudge",
+      "page": "int",
+      "layer_id": "str?",
+      "points": "[[x,y,pressure?],...]",
+      "width_mm": "float?",
+      "strength": "0..1? (0.6)",
+      "mode": "blur|smudge|blend? (ぼかし・指先・なじませ)"
+    },
+    {
       "op": "store_area",
       "page": "int",
       "name": "str",
@@ -404,7 +414,7 @@
       "layer": "str?",
       "points": "[[x,y],...]",
       "width_mm": "float",
-      "mode": "to_crossing? (cut a line only up to where it crosses others)",
+      "mode": "cut|to_crossing|whole? (cut: where it touches; to_crossing: up to where it crosses others; whole: every line touched)",
       "note": "cuts pen lines (vector) and clears paint"
     },
     {

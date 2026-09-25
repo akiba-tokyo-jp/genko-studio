@@ -83,6 +83,15 @@ def _draw(name: str, p: QPainter) -> None:
         p.setBrush(ACCENT)
         p.setPen(_pen(1.2, ACCENT))
         p.drawEllipse(QPointF(5.5, 27.5), 2.5, 2.5)
+    elif name == "blend":
+        # a drop, smeared: the colour pulled along
+        path = QPainterPath(QPointF(12, 4))
+        path.cubicTo(QPointF(20, 14), QPointF(20, 24), QPointF(12, 24))
+        path.cubicTo(QPointF(4, 24), QPointF(4, 14), QPointF(12, 4))
+        p.drawPath(path)
+        p.setPen(_pen(1.6, ACCENT))
+        for k, y in enumerate((14, 19, 24)):
+            p.drawLine(QPointF(20 + k, y), QPointF(29, y))
     elif name == "shape":
         p.drawRect(QRectF(4, 12, 15, 15))
         p.drawEllipse(QRectF(13, 4, 15, 15))

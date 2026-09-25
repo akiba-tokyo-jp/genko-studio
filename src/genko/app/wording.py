@@ -77,7 +77,6 @@ def _field(name: str) -> str:
 
 _ERRORS: list[tuple[str, object]] = [
     (r"brush (\S+) must be between (\S+) and (\S+)", lambda m: f"ブラシの{ {'width_mm': '太さ', 'min_pressure': '弱い筆圧での太さ', 'gamma': '筆圧の効き方', 'opacity': '不透明度', 'stabilize': '手ぶれ補正'}.get(m.group(1), m.group(1)) }は {m.group(2)}〜{m.group(3)} の間で決めます"),
-    (r"brush texture must be none, grain, soft or dry", "ブラシの質感は「なし・鉛筆・筆・エアブラシ」から選びます"),
     (r"a brush needs a name", "ブラシに名前を付けます"),
     (r"a brush of one's own has a key starting with my_", "自作のブラシの名前（key）は my_ で始めます"),
     (r"wobble must be between 0 and 1", "線の揺れは 0〜1 の間で決めます"),
@@ -96,6 +95,15 @@ _ERRORS: list[tuple[str, object]] = [
     (r"points needs at least two \[x, y\]", "線を引くには 2 点以上が要ります"),
     (r"no saved area .*", "その名前の選択範囲は残っていません"),
     (r"name is required", "名前が要ります"),
+    (r"brush texture must be .*", "ブラシの質感は、なし・鉛筆・エアブラシ・かすれ・水彩から選びます"),
+    (r"an image tip needs its picture.*", "画像の先端には画像が要ります（画像から先端を作る）"),
+    (r"brush aa must be .*", "アンチエイリアスは、なし・弱・中・強から選びます"),
+    (r"brush pattern must be .*", "模様は、点・破線・レース・草・ハート・星・葉から選びます"),
+    (r"brush tip must be .*", "先端の形は、丸・平たい・画像から選びます"),
+    (r"mode must be blur, smudge or blend", "色混ぜは、ぼかし・指先・なじませから選びます"),
+    (r"mode must be cut, to_crossing or whole", "消し方は、触れた所・交点まで・線全体から選びます"),
+    (r"the brush is off the page", "ページの外です"),
+    (r"there is nothing on this layer to blend there", "そこにはこのレイヤーの色がないので、混ぜられません"),
     (r"a guide's axis is h or v", "ガイド線の向きは横（h）か縦（v）です"),
     (r"an area needs at least three points", "範囲には 3 点以上が要ります"),
     (r"no layer .*", "そのレイヤーはありません"),

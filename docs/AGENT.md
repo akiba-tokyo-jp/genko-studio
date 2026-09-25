@@ -281,6 +281,16 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### J3 additions
+
+- Brushes: new built-ins (calligraphy, water, spray, stipple, dotline, dashline, lace, grass, leaves, hearts,
+  stars); `define_brush` also takes `tip` (round | flat | image with `tip_png`), `tip_angle`, `tip_ratio`,
+  `tip_follow`, `pattern`, `spacing`, `scatter`, `stamp_size`, `size_jitter`, `turn_jitter`, `count`, `speed`,
+  `post_smooth`, `aa`. `add_stroke {post_smooth}` overrides the brush's.
+- `smudge {page, layer_id, points, width_mm, strength, mode: blur | smudge | blend}` on paint layers.
+- `erase {mode: cut | to_crossing | whole}`.
+- `genko/abr.py` reads Photoshop .abr sampled tips (people import them in the app).
+
 ### J2 additions
 
 - `add_shape {shape: line | polyline | curve | rect | ellipse | polygon, points | box, sides?, radius_mm?, closed?,

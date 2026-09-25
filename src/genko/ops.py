@@ -45,7 +45,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
-    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)"},
+    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
     {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen, never printed)", "reference": "bool? (fills with reference: reference look at this layer)"},
@@ -73,13 +73,14 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "fill_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask: {box, png}}", "rgb": "[r,g,b]?", "opacity": "float?"},
     {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)", "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)"},
     {"op": "add_shape", "page": "int", "layer_id": "str?", "shape": "line|polyline|curve|rect|ellipse|polygon", "points": "[[x,y],…]? (line, polyline, curve)", "box": "[x,y,w,h]? (rect, ellipse, polygon)", "sides": "int? (polygon)", "angle": "float? (polygon, degrees)", "radius_mm": "float? (rect: round corners)", "closed": "bool? (polyline, curve)", "line": "bool? (default true)", "fill": "bool?", "fill_rgb": "[r,g,b]?", "rgb": "[r,g,b]?", "width_mm": "float?", "kind": "brush? (mili)", "opacity": "float?"},
+    {"op": "smudge", "page": "int", "layer_id": "str?", "points": "[[x,y,pressure?],...]", "width_mm": "float?", "strength": "0..1? (0.6)", "mode": "blur|smudge|blend? (ぼかし・指先・なじませ)"},
     {"op": "store_area", "page": "int", "name": "str", "area": "area (kept on the page; use it later as {saved: name})"},
     {"op": "forget_area", "page": "int", "name": "str"},
     {"op": "delete_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}"},
     {"op": "paste", "page": "int", "layer_id": "str?", "items": "{strokes, patches} (copied)", "matrix": "[a,b,c,d,e,f]?"},
     {"op": "set_stroke_width", "page": "int", "layer_id": "str?", "area": "object?", "ids": "[stroke id]?", "width_mm": "float?", "scale": "float?", "kind": "str?", "rgb": "[r,g,b]?"},
     {"op": "reshape_stroke", "page": "int", "layer_id": "str?", "stroke_id": "str", "points": "[[x,y,p?],...]?", "width_mm": "float?"},
-    {"op": "erase", "page": "int", "layer_id": "str? (else layer: role)", "layer": "str?", "points": "[[x,y],...]", "width_mm": "float", "mode": "to_crossing? (cut a line only up to where it crosses others)", "note": "cuts pen lines (vector) and clears paint"},
+    {"op": "erase", "page": "int", "layer_id": "str? (else layer: role)", "layer": "str?", "points": "[[x,y],...]", "width_mm": "float", "mode": "cut|to_crossing|whole? (cut: where it touches; to_crossing: up to where it crosses others; whole: every line touched)", "note": "cuts pen lines (vector) and clears paint"},
     {"op": "reorder_layers", "page": "int", "order": "[id]"},
     {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?", "area": "object?", "at": "object?", "layer_id": "str? (pictures and drawn parts)", "x_mm": "float?", "y_mm": "float? (where a picture's / part's middle goes)", "width_mm": "float?"},
     {"op": "set_balloon_path", "id": "str", "path": "[[x,y]]? (a hand-drawn outline; the box becomes its bounds; null goes back to the shape)", "wrap": "vertical|horizontal", "ruby_runs": "[[base,ruby]]", "emphasis_runs": "[str]"},
@@ -206,6 +207,76 @@ def shape_points(kind: str, op: dict) -> tuple[list[tuple[float, float]], bool]:
         out.append(points[-1])
         return out, bool(op.get("closed"))
     return points, bool(op.get("closed")) and kind == "polyline"
+
+
+SMUDGE_DPI = 200
+
+
+def _smudge(episode, op: dict) -> None:
+    """色混ぜ: blur (ぼかし), push the colour along (指先) or even it out (なじませ) where the brush passes,
+    on a paint layer's pixels. The result is laid over the layer as a picture (its old pixels stay under)."""
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
+
+    from genko import render
+    from genko import selection as sel
+    from genko.stroke import draw_stroke_mm
+
+    page = _require_page(episode, op)
+    target = _paint_target(page, op)
+    mode = str(op.get("mode") or "blur")
+    if mode not in ("blur", "smudge", "blend"):
+        raise ApplyError("mode must be blur, smudge or blend")
+    points = _parse_points(op.get("points") or [])
+    if len(points) < 2:
+        raise ApplyError("points needs at least two [x_mm, y_mm] pairs")
+    width = max(0.3, float(op.get("width_mm") or 6.0))
+    strength = max(0.05, min(1.0, float(op.get("strength", 0.6))))
+    dpi = SMUDGE_DPI
+    scale = dpi / 25.4
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    pad = width * 1.5
+    x0, y0 = max(0.0, min(xs) - pad), max(0.0, min(ys) - pad)
+    x1, y1 = min(page.spec.width_mm, max(xs) + pad), min(page.spec.height_mm, max(ys) + pad)
+    box = (round(x0 * scale), round(y0 * scale), round(x1 * scale), round(y1 * scale))
+    if box[2] - box[0] < 2 or box[3] - box[1] < 2:
+        raise ApplyError("the brush is off the page")
+    layer = render.layer_image(page, target, dpi, episode).crop(box)
+    if layer.getbbox() is None:
+        raise ApplyError("there is nothing on this layer to blend there")
+    shifted = [(p[0] - x0, p[1] - y0, p[2] if len(p) > 2 else 0.7) for p in points]
+    cover = Image.new("L", layer.size, 0)
+    draw_stroke_mm(ImageDraw.Draw(cover), shifted, dpi, width, 255)
+    cover = cover.filter(ImageFilter.GaussianBlur(max(1.0, width * scale / 6)))
+    cover = cover.point(lambda v, s=strength: int(v * s))
+    if mode in ("blur", "blend"):
+        radius = max(1.0, width * scale / (3 if mode == "blur" else 1.5))
+        worked = layer.filter(ImageFilter.GaussianBlur(radius))
+    else:
+        # 指先: carry the colour under the start of each step forward along the line
+        worked = layer.copy()
+        r = max(2, round(width * scale / 2))
+        carried = None
+        for (ax, ay, *_), (bx, by, *_) in zip(shifted, shifted[1:]):
+            steps = max(1, int(math.dist((ax, ay), (bx, by)) * scale / max(1, r / 3)))
+            for k in range(steps):
+                t = k / steps
+                cx, cy = round((ax + (bx - ax) * t) * scale), round((ay + (by - ay) * t) * scale)
+                spot = (cx - r, cy - r, cx + r, cy + r)
+                here = worked.crop(spot)
+                carried = here if carried is None else Image.blend(carried, here, 1 - strength)
+                worked.paste(Image.blend(here, carried, strength), spot[:2])
+    result = Image.composite(worked, layer, cover)
+    bands = ImageChops.difference(result, layer).split()
+    moved = bands[0]
+    for band in bands[1:]:
+        moved = ImageChops.lighter(moved, band)
+    changed = moved.point(lambda v: 255 if v > 2 else 0).getbbox()  # (every channel: RGBA bboxes see only alpha)
+    if changed is None:
+        return
+    template = {"mode": "image", "opacity": 1.0}
+    patch = sel._to_patch(result.crop(changed).convert("RGBA"), (box[0] + changed[0], box[1] + changed[1]), template, dpi)
+    if patch is not None:
+        target.patches.append(patch)
 
 
 def _add_shape(episode, op: dict) -> None:
@@ -1004,6 +1075,11 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             from genko.stroke import stabilize_points
 
             points = stabilize_points(points, int(stabilize))
+        from genko import brushes as _brushes
+
+        _after = op.get("post_smooth", _brushes.brush(_brush_kind(op.get("kind") or "gpen", episode)).post_smooth)
+        if _after:  # 後補正: the brush evens the line out once it is drawn
+            points = _brushes.smoothed(points, int(_after))
         copies: list = []
         if op.get("snap_ruler") or op.get("ruler_id"):
             if page.rulers:
@@ -1118,6 +1194,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name == "add_shape":
         _add_shape(episode, op)
+        return
+
+    if name == "smudge":
+        _smudge(episode, op)
         return
 
     if name in ("transform_area", "delete_area"):
@@ -1904,6 +1984,18 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
             target.strokes = erase_to_crossing(target.strokes, points, width / 2)
             return
+        if op.get("mode") == "whole":  # 線全体: every line the eraser touches goes, whole
+            from genko.models import stroke_points
+            from genko.stroke import split_by_eraser
+
+            def touched(stroke) -> bool:
+                pieces = split_by_eraser(stroke_points(stroke), points, width / 2)
+                return not (len(pieces) == 1 and len(pieces[0]) >= len(stroke.points) and _untouched(stroke, points, width / 2))
+
+            target.strokes = [stroke for stroke in target.strokes if not touched(stroke)]
+            return
+        if op.get("mode") not in (None, "", "cut"):
+            raise ApplyError("mode must be cut, to_crossing or whole")
         if target.strokes:
             from genko.models import coerce_stroke, stroke_points
             from genko.stroke import split_by_eraser
@@ -2469,7 +2561,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "gradient_fill",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
-                             "trace_prims", "effect_to_layer", "add_shape"})
+                             "trace_prims", "effect_to_layer", "add_shape", "smudge"})
 
 
 def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTOR) -> None:
@@ -2547,7 +2639,7 @@ PAGE_LOCAL_OPS = frozenset({
     "edit_stroke", "simplify_stroke", "set_ruler", "add_ruler", "edit_ruler", "delete_ruler",
     "add_prim3d", "add_scene", "edit_prim", "delete_prim", "trace_prims", "lt_convert", "erase_raster", "erase",
     "reorder_layers", "stamp_material", "add_mannequin", "pose_mannequin", "set_onion", "step_onion",
-    "set_lt", "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area",
+    "set_lt", "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area", "smudge",
 })
 # Ops that find a line by id; the line lives in the story (always copied) or in one page's texts.
 LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path"})

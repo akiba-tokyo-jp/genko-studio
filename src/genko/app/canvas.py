@@ -136,6 +136,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, QWidget):
         self._live_of: tuple | None = None  # (the point list, straight/snapped) it was drawn from
         self._eraser_end: str | None = None
         self.pen_button = "menu"
+        self.blend_mm = 6.0  # the 色混ぜ brush's size
         self.cursor_kind = "circle_cross"  # circle | circle_cross | cross | dot (環境設定)
         self.modifier_tools = {"alt": "picker", "ctrl": "select"}  # held Alt / Ctrl: this tool for a moment
         self._held_tool: str | None = None  # the tool to go back to when the modifier is let go
@@ -521,9 +522,10 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, QWidget):
             color = QColor("#e8590c") if self.tool == "pen" else QColor(200, 60, 60, 160)
             shown = self.snapped_preview(self._stroke) if self.tool == "pen" else [self._stroke]
             self._draw_strokes(painter, shown, color, max(1.5, self.brush_width_mm * self._scale))
-        if self._hover and not self._stroke and self.tool in ("pen", "eraser"):
+        if self._hover and not self._stroke and self.tool in ("pen", "eraser", "blend"):
             hx, hy = self._pt(*self._hover).x(), self._pt(*self._hover).y()
-            radius = max(2.0, (self.brush_width_mm if self.tool == "pen" else self.eraser_mm) / 2 * self._scale)
+            radius = max(2.0, (self.brush_width_mm if self.tool == "pen" else self.blend_mm if self.tool == "blend"
+                               else self.eraser_mm) / 2 * self._scale)
             painter.setPen(QPen(QColor("#e8590c"), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             if self.cursor_kind in ("circle", "circle_cross"):
@@ -1100,7 +1102,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, QWidget):
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
         elif self._space:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
-        elif self.tool in ("pen", "eraser"):
+        elif self.tool in ("pen", "eraser", "blend"):
             # the brush's circle is drawn on the page (paintEvent); the pointer itself as chosen
             blank = self.cursor_kind in ("circle", "dot")
             self.setCursor(Qt.CursorShape.BlankCursor if blank else Qt.CursorShape.CrossCursor)
@@ -1644,7 +1646,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, QWidget):
             self._eraser_end = self.tool  # the pen turned over: erase for this stroke, then back
             self.tool = "eraser"
             self._update_cursor()
-        if self.page is None or self.tool not in ("pen", "eraser") or self._space:
+        if self.page is None or self.tool not in ("pen", "eraser", "blend") or self._space:
             event.ignore()  # the select tool works with the pen as a mouse
             return
         x_mm, y_mm = self._to_mm(self._ev(event.position()))
