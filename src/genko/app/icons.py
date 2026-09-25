@@ -13,7 +13,12 @@ INK = QColor(40, 44, 52)
 ACCENT = QColor(232, 89, 12)
 
 
-def _pen(width: float = 2.2, colour: QColor = INK, style=Qt.PenStyle.SolidLine) -> QPen:
+LIGHT_INK = INK
+DARK_INK = QColor(222, 225, 230)  # (on the dark screen the pictures are drawn light)
+
+
+def _pen(width: float = 2.2, colour: QColor | None = None, style=Qt.PenStyle.SolidLine) -> QPen:
+    colour = INK if colour is None else colour
     pen = QPen(colour, width, style, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
     return pen
 
@@ -165,8 +170,22 @@ def _draw(name: str, p: QPainter) -> None:
         p.drawRect(QRectF(6, 6, 20, 20))
 
 
-@lru_cache(maxsize=64)
+def dark_screen() -> bool:
+    from PySide6.QtGui import QGuiApplication, QPalette
+
+    app = QGuiApplication.instance()
+    return app is not None and app.palette().color(QPalette.ColorRole.Window).lightness() < 128
+
+
 def icon(name: str) -> QIcon:
+    """A tool's picture, drawn in the screen's text colour (dark on a light screen, light on a dark one)."""
+    return _icon(name, dark_screen())
+
+
+@lru_cache(maxsize=128)
+def _icon(name: str, dark: bool) -> QIcon:
+    global INK
+    INK = DARK_INK if dark else LIGHT_INK
     pixmap = QPixmap(64, 64)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -174,4 +193,5 @@ def icon(name: str) -> QIcon:
     painter.scale(2, 2)
     _draw(name, painter)
     painter.end()
+    INK = LIGHT_INK
     return QIcon(pixmap)

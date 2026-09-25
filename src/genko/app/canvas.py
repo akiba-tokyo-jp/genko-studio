@@ -131,6 +131,11 @@ class PageCanvas(GuideMixin, QWidget):
         self._live_of: tuple | None = None  # (the point list, straight/snapped) it was drawn from
         self._eraser_end: str | None = None
         self.pen_button = "menu"
+        self.cursor_kind = "circle_cross"  # circle | circle_cross | cross | dot (環境設定)
+        self.modifier_tools = {"alt": "picker", "ctrl": "select"}  # held Alt / Ctrl: this tool for a moment
+        self._held_tool: str | None = None  # the tool to go back to when the modifier is let go
+        self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+        self.grabGesture(Qt.GestureType.PinchGesture)
         self._tool_drag: dict | None = None  # the layer-move and gradient tools: {"start", "end"} (mm)
         self.move_image = None  # (QImage, x_mm, y_mm, w_mm, h_mm): the moving layer's picture  # the pen's side button: menu (a right click) | picker | hand
         self.balloon_pen = False
@@ -508,7 +513,11 @@ class PageCanvas(GuideMixin, QWidget):
             radius = max(2.0, (self.brush_width_mm if self.tool == "pen" else self.eraser_mm) / 2 * self._scale)
             painter.setPen(QPen(QColor("#e8590c"), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(QPointF(hx, hy), radius, radius)
+            if self.cursor_kind in ("circle", "circle_cross"):
+                painter.drawEllipse(QPointF(hx, hy), radius, radius)
+            if self.cursor_kind in ("circle", "dot"):
+                painter.setBrush(QColor("#e8590c"))
+                painter.drawEllipse(QPointF(hx, hy), 1.5, 1.5)
 
     def _draw_tool_drag(self, painter: QPainter) -> None:
         """The layer being moved (its picture, following the pen) or the gradient's direction."""
@@ -1074,7 +1083,9 @@ class PageCanvas(GuideMixin, QWidget):
         elif self._space:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
         elif self.tool in ("pen", "eraser"):
-            self.setCursor(Qt.CursorShape.CrossCursor)
+            # the brush's circle is drawn on the page (paintEvent); the pointer itself as chosen
+            blank = self.cursor_kind in ("circle", "dot")
+            self.setCursor(Qt.CursorShape.BlankCursor if blank else Qt.CursorShape.CrossCursor)
         elif self.tool == "text":
             self.setCursor(Qt.CursorShape.IBeamCursor)
         elif self.tool == "move":
@@ -1445,6 +1456,14 @@ class PageCanvas(GuideMixin, QWidget):
     def event(self, event) -> bool:  # noqa: A003
         from PySide6.QtCore import QEvent
 
+        if event.type() == QEvent.Type.Gesture:  # two fingers on a touch screen: zoom, turn, move
+            pinch = event.gesture(Qt.GestureType.PinchGesture)
+            if pinch is not None:
+                self.pinch(float(pinch.scaleFactor()), float(pinch.rotationAngle() - pinch.lastRotationAngle()),
+                           QPointF(self.mapFromGlobal(pinch.centerPoint().toPoint())),
+                           QPointF(pinch.centerPoint() - pinch.lastCenterPoint()))
+                event.accept()
+                return True
         if event.type() == QEvent.Type.NativeGesture:  # trackpad pinch (macOS)
             from PySide6.QtCore import Qt as _Qt
 
@@ -1453,13 +1472,41 @@ class PageCanvas(GuideMixin, QWidget):
                 return True
         return super().event(event)
 
+    def pinch(self, scale: float, turn_deg: float, centre: QPointF, moved: QPointF) -> None:
+        """A two-finger gesture: spread to zoom about the fingers, twist to turn the view, slide to move."""
+        if moved.x() or moved.y():
+            self._pan_x += moved.x()
+            self._pan_y += moved.y()
+            self._fitted = False
+        if abs(turn_deg) > 0.01:
+            self.rotate_view(turn_deg)
+        if scale and abs(scale - 1.0) > 1e-3:
+            self.zoom_by(scale, self._ev(centre))
+        self.update()
+
     # --- keyboard --------------------------------------------------------------------------------------
+
+    def hold_modifier(self, key: str, down: bool) -> None:
+        """Alt / Ctrl held: the chosen tool for a moment (環境設定), back to the tool before when let go."""
+        tool = self.modifier_tools.get(key) or ""
+        if down:
+            if tool and self._held_tool is None and not self._stroke and tool != self.tool:
+                self._held_tool = self.tool
+                self.tool = tool
+                self._update_cursor()
+                self.update()
+        elif self._held_tool is not None:
+            self.tool, self._held_tool = self._held_tool, None
+            self._update_cursor()
+            self.update()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space = True
             self._update_cursor()
             return
+        if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_Control) and not event.isAutoRepeat():
+            self.hold_modifier("alt" if event.key() == Qt.Key.Key_Alt else "ctrl", True)
         if self.tool == "ruler" and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.finish_curve()
             return
@@ -1483,6 +1530,8 @@ class PageCanvas(GuideMixin, QWidget):
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_Control) and not event.isAutoRepeat():
+            self.hold_modifier("alt" if event.key() == Qt.Key.Key_Alt else "ctrl", False)
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space = False
             self._panning = False

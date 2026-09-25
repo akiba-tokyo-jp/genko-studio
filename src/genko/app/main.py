@@ -1056,6 +1056,11 @@ class MainWindow(QMainWindow):
         self.act_turn_reset = a("回転・反転を戻す", self.canvas.reset_view, "Ctrl+Alt+0")
         self.act_mirror = a("左右反転して見る", lambda on: self.canvas.flip_view(on), "H",
                             "表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません", True)
+        self.act_find_command = a("コマンドを探す…", self._find_command, "Ctrl+Shift+F",
+                                  "名前の一部を打つと、メニューのどこにあるかが分かり、そのまま実行できます")
+        self.act_edit_commandbar = a("コマンドバーを変える…", lambda: self._edit_commandbar())
+        self.act_edit_quick = a("クイックアクセスを変える…", lambda: self.quick_access.edit())
+        self.act_save_workspace = a("今の配置をワークスペースとして残す…", self._save_workspace)
         self.act_tool_names = a("道具の名前を表示", self._show_tool_names, None,
                                 "左の道具にアイコンと名前を並べます（環境に残ります）", True)
         self.act_overview = a("ページを並べて見る", self._page_overview, "Ctrl+Shift+O", "全ページを縮小図で並べ、ダブルクリックで開きます")
@@ -1270,8 +1275,13 @@ class MainWindow(QMainWindow):
                 else:
                     menu.addAction(act)
         self.view_menu = bar.addMenu("ウィンドウ")
+        self.workspace_menu = self.view_menu.addMenu("ワークスペース")
+        self.workspace_menu.aboutToShow.connect(self._fill_workspaces)
+        self.view_menu.addAction(self.act_edit_commandbar)
+        self.view_menu.addAction(self.act_edit_quick)
+        self.view_menu.addSeparator()
         help_menu = bar.addMenu("ヘルプ")
-        for act in (self.act_help_guide, self.act_help_keys, self.act_help_faq, None, self.act_about):
+        for act in (self.act_find_command, None, self.act_help_guide, self.act_help_keys, self.act_help_faq, None, self.act_about):
             if act is None:
                 help_menu.addSeparator()
             else:
@@ -1285,6 +1295,7 @@ class MainWindow(QMainWindow):
                     "ruler": self.act_ruler, "3d": self.act_3d, "effect": self.act_effect, "stamp": self.act_stamp,
                     "move": self.act_move, "gradient": self.act_gradient, "undo": self.act_undo, "redo": self.act_redo, "fit": self.act_fit, "zoom_in": self.act_zoom_in,
                     "zoom_out": self.act_zoom_out, "prev": self.act_prev, "next": self.act_next, "export": self.act_export}
+        self._pictures = pictures
         for name, act in pictures.items():
             act.setIcon(icon(name))
             keys = act.shortcut().toString()
@@ -1320,12 +1331,10 @@ class MainWindow(QMainWindow):
         commands.setMovable(False)
         commands.setIconSize(QSize(18, 18))
         commands.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        for act in (self.act_undo, self.act_redo, None, self.act_fit, self.act_zoom_out, self.act_zoom_in, None, self.act_prev,
-                    self.act_next, None, self.act_export):
-            if act is None:
-                commands.addSeparator()
-            else:
-                commands.addAction(act)
+        self.command_bar = commands
+        from genko.app.workspace import fill_commandbar
+
+        fill_commandbar(self)  # (the commands chosen in ウィンドウ → コマンドバーを変える)
         self.addToolBar(commands)
 
     # --- オートアクション ------------------------------------------------------------------------
@@ -1421,6 +1430,64 @@ class MainWindow(QMainWindow):
 
         self.commit_now()
         PrintDialog(self).exec()
+
+    # --- the screen made one's own (J1) -------------------------------------------------------------
+
+    def refresh_icons(self) -> None:
+        """Draw the tool pictures again (after the screen's colours change)."""
+        from genko.app.icons import icon
+
+        for name, act in getattr(self, "_pictures", {}).items():
+            act.setIcon(icon(name))
+        if hasattr(self, "quick_access"):
+            self.quick_access.refresh()
+
+    def _find_command(self):
+        from genko.app.workspace import CommandSearch
+
+        dialog = CommandSearch(self)
+        dialog.show()
+        dialog.query.setFocus()
+        return dialog
+
+    def _edit_commandbar(self) -> None:
+        from genko.app.workspace import edit_commandbar
+
+        edit_commandbar(self)
+
+    def _fill_workspaces(self) -> None:
+        from genko.app import workspace
+
+        menu = self.workspace_menu
+        menu.clear()
+        menu.addAction(self.act_save_workspace)
+        menu.addAction("はじめの配置に戻す", self._default_layout)
+        names = workspace.workspaces()
+        if names:
+            menu.addSeparator()
+            for name in names:
+                menu.addAction(name, lambda _=False, n=name: workspace.load_workspace(self, n))
+            remove = menu.addMenu("消す")
+            for name in names:
+                remove.addAction(name, lambda _=False, n=name: workspace.delete_workspace(n))
+
+    def _save_workspace(self, name: str | None = None) -> bool:
+        from genko.app import workspace
+
+        if name is None:
+            from PySide6.QtWidgets import QInputDialog
+
+            name, ok = QInputDialog.getText(self, "ワークスペース", "名前（例: ペン入れ、写植）")
+            if not ok or not name.strip():
+                return False
+        workspace.save_workspace(self, name.strip())
+        self.flash(f"ワークスペース「{name.strip()}」を残しました（ウィンドウ → ワークスペース）", 3000)
+        return True
+
+    def _default_layout(self) -> None:
+        if getattr(self, "_default_state", None) is not None:
+            self.restoreState(self._default_state)
+        self._settle_docks()
 
     def _show_tool_names(self, on: bool, save: bool = True) -> None:
         """Icons alone, or icons with their names (easier while learning 18 tools)."""
@@ -1542,6 +1609,18 @@ class MainWindow(QMainWindow):
         self.splitDockWidget(settings_dock, nav_dock, Qt.Orientation.Vertical)
         self.view_menu.addAction(nav_dock.toggleViewAction())
         self.navigator_dock = nav_dock
+        from genko.app.workspace import QuickAccess
+
+        self.quick_access = QuickAccess(self)
+        quick_dock = QDockWidget("クイックアクセス", self)
+        quick_dock.setObjectName("クイックアクセス")
+        quick_dock.setWidget(self.quick_access)
+        quick_dock.setFeatures(nav_dock.features())
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, quick_dock)
+        self.tabifyDockWidget(nav_dock, quick_dock)
+        nav_dock.raise_()
+        self.view_menu.addAction(quick_dock.toggleViewAction())
+        self.quick_dock = quick_dock
         self.brush_dock = settings_dock
         ts.show_tool("select")
         # the panels on the right; the ones for books made with agents only show for those books
@@ -1596,6 +1675,8 @@ class MainWindow(QMainWindow):
         if not getattr(self, "_settled", False):
             self._settled = True
             self._settle_docks()
+            self._default_state = self.saveState()  # (ウィンドウ → ワークスペース → はじめの配置に戻す)
+            self.quick_access.refresh()
         QTimer.singleShot(0, self._hide_stray_tabs)
 
     def _hide_stray_tabs(self) -> None:

@@ -119,6 +119,14 @@ def apply_all(window) -> None:
     window._commit_timer.setInterval(save_after_ms())
     window.canvas.pen_button = pen_button()
     window.brush.set_personal_pressure(tablet_gamma())
+    from genko.app import workspace
+
+    workspace.apply_theme()
+    if hasattr(window, "refresh_icons"):
+        window.refresh_icons()
+    window.canvas.cursor_kind = workspace.cursor_kind()
+    window.canvas.modifier_tools = {"alt": workspace.modifier_tool("alt"), "ctrl": workspace.modifier_tool("ctrl")}
+    window.canvas._update_cursor()
 
 
 class PressurePad(QWidget):
@@ -234,8 +242,29 @@ class PreferencesDialog(QDialog):
         self.save_after.setRange(1, 30)
         self.save_after.setSuffix(" 秒")
         self.save_after.setValue(max(1, round(save_after_ms() / 1000)))
+        from genko.app import workspace
+
+        self.theme = QComboBox()
+        for label, key in workspace.THEMES:
+            self.theme.addItem(label, key)
+        self.theme.setCurrentIndex(max(0, self.theme.findData(workspace.theme())))
+        self.cursor = QComboBox()
+        for label, key in workspace.CURSORS:
+            self.cursor.addItem(label, key)
+        self.cursor.setCurrentIndex(max(0, self.cursor.findData(workspace.cursor_kind())))
+        self.alt_tool = QComboBox()
+        self.ctrl_tool = QComboBox()
+        for box, key in ((self.alt_tool, "alt"), (self.ctrl_tool, "ctrl")):
+            for label, tool in workspace.MODIFIER_TOOLS:
+                box.addItem(label, tool)
+            box.setCurrentIndex(max(0, box.findData(workspace.modifier_tool(key))))
+            box.setToolTip("押している間だけ、この道具になります（離すと元の道具に戻る）")
         work = QWidget()
         wl = QFormLayout(work)
+        wl.addRow("画面の色", self.theme)
+        wl.addRow("ペンのカーソル", self.cursor)
+        wl.addRow("Alt を押している間", self.alt_tool)
+        wl.addRow("Ctrl を押している間", self.ctrl_tool)
         wl.addRow("画面の文字の大きさ", self.font_pt)
         wl.addRow("新しい原稿の用紙", self.paper)
         wl.addRow("変更を保存するまで", self.save_after)
@@ -307,5 +336,9 @@ class PreferencesDialog(QDialog):
         store.setValue("save/after_ms", self.save_after.value() * 1000)
         store.setValue("tablet/gamma", "" if self.gamma is None else self.gamma)
         store.setValue("tablet/button", self.button.currentData())
+        store.setValue("ui/theme", self.theme.currentData())
+        store.setValue("ui/cursor", self.cursor.currentData())
+        store.setValue("keys/alt_tool", self.alt_tool.currentData())
+        store.setValue("keys/ctrl_tool", self.ctrl_tool.currentData())
         apply_all(self.window)
         self.accept()
