@@ -35,12 +35,19 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("out", type=Path)
     export.add_argument("--json", action="store_true")
     export.add_argument("--dpi", type=int, default=None, help="default: the page spec dpi for print formats, 150 for strip/epub")
-    export.add_argument("--format", dest="fmt", default="png", choices=["png", "tiff", "pdf", "strip", "psd", "epub", "pack", "webtoon", "sns"])
+    export.add_argument("--format", dest="fmt", default="png", choices=["png", "tiff", "pdf", "strip", "psd", "epub", "pack", "webtoon", "sns",
+                                                                         "cmyk", "layers", "kindle", "timelapse"])
     export.add_argument("--width", type=int, default=800, help="webtoon: strip width in px")
     export.add_argument("--max-height", type=int, default=1280, help="webtoon: slice height limit in px")
     export.add_argument("--long-edge", type=int, default=2048, help="sns: long edge in px")
     export.add_argument("--jpeg", action="store_true", help="webtoon/sns: JPEG instead of PNG")
     export.add_argument("--spreads", action="store_true", help="sns: also one image per spread")
+    export.add_argument("--color", default="rgb", choices=["rgb", "cmyk", "gray"], help="pdf/tiff/png: colour of the pages")
+    export.add_argument("--icc", default=None, help="cmyk: the printer's CMYK ICC profile")
+    export.add_argument("--area", default="paper", choices=["paper", "bleed", "trim"])
+    export.add_argument("--fps", type=float, default=12, help="timelapse: pictures per second")
+    export.add_argument("--seconds", type=float, default=None, help="timelapse: fit the whole recording into this time")
+    export.add_argument("--page", type=int, default=None, help="timelapse: only this page")
 
     inspect = sub.add_parser("inspect", help="Headless: dump compact JSON snapshot")
     inspect.add_argument("src", type=Path)
@@ -202,8 +209,23 @@ def main(argv: list[str] | None = None) -> int:
                 from genko.pack import export_pack
 
                 paths = export_pack(episode, args.out, dpi=args.dpi)
+            elif args.fmt == "layers":
+                from genko.export import export_layers
+
+                paths = export_layers(episode, args.out, dpi=args.dpi or episode.spec.dpi, area=args.area)
+            elif args.fmt == "kindle":
+                from genko.export import KINDLE_LONG_EDGE, export_kindle
+
+                long_edge = args.long_edge if args.long_edge != 2048 else KINDLE_LONG_EDGE
+                paths = [export_kindle(episode, args.out if args.out.suffix else args.out / "kindle.epub", long_edge=long_edge)]
+            elif args.fmt == "timelapse":
+                from genko import timelapse
+
+                paths = [timelapse.export(args.src, args.out if args.out.suffix else args.out / "timelapse.webp", page=args.page,
+                                          fps=args.fps, seconds=args.seconds)]
             else:
-                paths = export_print(episode, args.out, fmt=args.fmt, dpi=args.dpi)
+                paths = export_print(episode, args.out, fmt=args.fmt, dpi=args.dpi, color="cmyk" if args.fmt == "cmyk" else args.color,
+                                     icc=args.icc, area=args.area)
             if args.json:
                 _print_json({"ok": True, "count": len(paths), "files": [str(p) for p in paths]})
             else:

@@ -40,7 +40,7 @@ AGENT_OPS = frozenset({
     "set_note", "add_mannequin", "pose_mannequin", "add_prim3d", "add_scene", "set_ruler", "add_shape", "store_area", "forget_area", "smudge", "vector_edit", "fill_gaps", "merge_layers", "merge_visible", "group_layers", "move_layers",
     "convert_layer", "set_layers", "set_paper", "liquify", "ruler_to_layer",
     "add_figure", "pose_figure", "add_head", "add_hand", "import_model", "set_camera", "set_light", "render_prims",
-    "add_cover", "replace_text", "for_pages", "set_assignee",
+    "add_cover", "replace_text", "for_pages", "set_assignee", "import_psd", "set_timelapse",
     "add_ruler", "edit_ruler", "delete_ruler", "edit_prim", "delete_prim", "trace_prims",
     "add_tone", "delete_tone", "add_effect", "stamp_material",
     "set_tone", "edit_effect", "delete_effect", "effect_to_layer",
@@ -497,16 +497,30 @@ class StudioService:
 
     def export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int = 2048, jpeg: bool = False,
-               spreads: bool = False) -> ToolResult:
+               spreads: bool = False, color: str = "rgb", icc: str | None = None, fps: float = 12,
+               seconds: float | None = None, movie: str = "webp") -> ToolResult:
         """Write the book (or some pages) in any format into <project>/exports/<time>_<format>/, as a person
-        can from the app. Not the official export (that one is recorded as an approval and is for people)."""
+        can from the app. Not the official export (that one is recorded as an approval and is for people).
+        format timelapse: the recorded making-of as a moving picture (movie webp | gif | png | mp4)."""
         import time
 
         from genko.app import exporting
 
         path = self.project_path(project)
+        if format == "timelapse":
+            from genko import timelapse
+
+            if pages is not None and len(pages) != 1:
+                return fail("timelapse の pages は 1 ページだけ（省略で全ページ）", "bad_pages", "/pages")
+            out = path / "exports" / f"{time.strftime('%Y%m%d-%H%M%S')}_timelapse" / f"timelapse.{movie}"
+            try:
+                written = timelapse.export(path, out, page=int(pages[0]) if pages else None, fps=fps, seconds=seconds, fmt=movie)
+            except ValueError as exc:
+                return fail(str(exc), "export_failed", "/")
+            return ToolResult(True, {"folder": str(written.parent), "files": [str(written)],
+                                     "frames": len(timelapse.frames(path, int(pages[0]) if pages else None))}, files=[str(written)])
         if format not in exporting.BY_KEY:
-            return fail(f"format は {' / '.join(exporting.BY_KEY)}", "bad_format", "/format")
+            return fail(f"format は {' / '.join([*exporting.BY_KEY, 'timelapse'])}", "bad_format", "/format")
         episode = load_episode(path)
         if pages is not None:
             count = len(episode.pages)
@@ -515,7 +529,7 @@ class StudioService:
                 return fail(f"pages は 1〜{count} のページ番号", "bad_pages", "/pages")
         out = path / "exports" / f"{time.strftime('%Y%m%d-%H%M%S')}_{format}"
         result = exporting.run(episode, None, format, out, actor=self.actor, dpi=dpi, width=width, max_height=max_height,
-                               long_edge=long_edge, jpeg=jpeg, spreads=spreads, area=area,
+                               long_edge=long_edge, jpeg=jpeg, spreads=spreads, area=area, color=color, icc=icc,
                                pages=sorted({int(p) for p in pages}) if pages else None)
         if not result.get("ok"):
             return fail(str(result.get("error") or "書き出せなかった"), "export_failed", "/")

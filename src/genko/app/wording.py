@@ -152,6 +152,28 @@ _ERRORS: list[tuple[str, object]] = [
     (r"ops is the list of ops to run on each page", "各ページで行う操作の一覧が要ります"),
     (r"pages is the list of pages", "ページを選んでください"),
     (r"spine_mm is the spine's width.*", "背幅（0〜100 mm）が要ります"),
+    (r"CMYK is written as TIFF or PDF", "CMYK は TIFF か PDF で書き出します"),
+    (r"Lab PSD files are not supported: save it as RGB or CMYK", "Lab カラーの PSD は読めません。RGB か CMYK で保存し直してください"),
+    (r"MP4 needs ffmpeg on this computer; WebP, GIF and PNG need nothing",
+     "MP4 にはこのパソコンに ffmpeg が要ります（WebP・GIF・PNG なら何も要りません）"),
+    (r"PSD depth (\d+) is not supported", r"\1 ビットの PSD は読めません"),
+    (r"broken PSD layer record", "PSD のレイヤーの情報が壊れています"),
+    (r"color must be rgb, cmyk or gray", "色は RGB・CMYK・グレーのどれかです"),
+    (r"ffmpeg failed: (.*)", r"動画にできませんでした（\1）"),
+    (r"format must be one of (.*)", r"形式は \1 のどれかです"),
+    (r"import_psd needs path or psd \(base64\)", "読み込む PSD のファイルを指定します"),
+    (r"not a PSD file", "PSD のファイルではありません"),
+    (r"nothing has been recorded yet.*", "まだ記録がありません（ファイル → タイムラプスを記録する をオンにして描くと記録されます）"),
+    (r"psd is the file's bytes in base64", "PSD のデータが読めません"),
+    (r"the PSD cannot be read \((.*)\)", lambda m: f"PSD を読み込めません（{_inner(m.group(1))}）"),
+    (r"the PSD file is cut short", "PSD のファイルが途中で切れています"),
+    (r"the PSD has no pictures to read", "PSD に読み込める絵がありません"),
+    (r"the colour profile cannot be read \((.*)\)", "カラープロファイルを読み込めません"),
+    (r"the file cannot be read \((.*)\)", "ファイルを読み込めません"),
+    (r"the profile is not a CMYK printing profile", "CMYK の印刷用のカラープロファイルではありません"),
+    (r"the recorded pictures are missing", "記録した絵が見つかりません"),
+    (r"unknown PSD compression (\d+)", "この PSD の圧縮の形式は読めません"),
+    (r"unknown PSD version", "この PSD の版は読めません"),
     (r"the book already has a .* cover", "その表紙はもうあります"),
     (r"the pattern cannot be read.*", "正規表現が読めません"),
     (r"body .* must be between .*", "体型の数値が大きすぎるか小さすぎます"),
@@ -326,6 +348,12 @@ _ERRORS: list[tuple[str, object]] = [
     (r"([a-z_]+) is (\d+) or more", lambda m: f"{_field(m.group(1))}は {m.group(2)} 以上にします"),
     (r"([a-z_]+(?: \(int\))?) is required", lambda m: f"{_field(m.group(1).replace(' (int)', ''))}の指定が要ります"),
 ]
+
+
+def _inner(text: str) -> str:
+    """A reason inside another message: in Japanese when it is known, else as it is."""
+    shown = error(text)
+    return text if shown.startswith("この操作はできませんでした") else shown
 
 
 def error(message: str) -> str:

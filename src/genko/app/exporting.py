@@ -18,20 +18,25 @@ class Format:
     key: str
     label: str
     note: str
-    options: tuple[str, ...] = ()  # dpi, area, width, max_height, long_edge, jpeg, spreads
+    options: tuple[str, ...] = ()  # dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc
     official: bool = False
 
 
 FORMATS: list[Format] = [
-    Format("pdf", "PDF（印刷）", "1 冊の PDF。印刷所・校正用。", ("dpi", "area"), True),
+    Format("pdf", "PDF（印刷）", "1 冊の PDF。印刷所・校正用。色は RGB・CMYK・グレーから。", ("dpi", "area", "color", "icc"), True),
     Format("tiff", "TIFF（入稿）", "ページごとの 2 値 TIFF。モノクロの入稿用。", ("dpi", "area"), True),
     Format("png", "PNG", "ページごとの PNG。", ("dpi", "area"), True),
+    Format("cmyk", "CMYK（カラー入稿）", "ページごとの CMYK の TIFF。印刷所のカラープロファイル（ICC）を選ぶとそれで変換して埋め込む。"
+           "選ばなければ、黒い線は K 版だけ・総インキ量は 320% 以内にして変換する。", ("dpi", "area", "icc")),
+    Format("layers", "レイヤーごとの PNG", "ページごとのフォルダーに、レイヤーを 1 枚ずつ透明な PNG で（下のレイヤーから番号順）。", ("dpi", "area")),
     Format("psd", "PSD（レイヤー付き）", "ページごとの PSD。CLIP STUDIO PAINT・Photoshop で仕上げを続けるとき。", ("dpi",)),
     Format("pack", "入稿セット", "TIFF・PNG・ページ一覧（CSV）・説明書きをまとめたフォルダ。", ("dpi",)),
     Format("webtoon", "縦読み（Webtoon）", "全ページを縦につなげ、決まった高さで切った画像。網点にしない。",
            ("width", "max_height", "jpeg"), True),
     Format("sns", "SNS 用画像", "1 ページ 1 枚の JPEG。見開きも 1 枚にできる。網点にしない。", ("long_edge", "jpeg", "spreads"), True),
     Format("epub", "EPUB（電子書籍）", "固定レイアウトの EPUB 3。", ("dpi",)),
+    Format("kindle", "Kindle（固定レイアウト）", "Kindle 用の固定レイアウトの電子書籍（KDP にそのまま出せる EPUB）。全ページ同じ大きさの JPEG、"
+           "右綴じは右から左へ。モノクロの原稿はグレーで。", ("long_edge",)),
     Format("strip", "つなげた 1 枚", "全ページを縦に並べた 1 枚の PNG（確認用）。", ("dpi",)),
 ]
 BY_KEY = {f.key: f for f in FORMATS}
@@ -85,7 +90,7 @@ def default_dpi(episode: Episode, key: str) -> int:
 def run(episode: Episode, project: Path | None, key: str, out: Path, *, official: bool = False,
         actor: str = "human:user", dpi: int | None = None, width: int = 800, max_height: int = 1280,
         long_edge: int = 2048, jpeg: bool = False, spreads: bool = False, area: str = "bleed",
-        pages: list[int] | None = None) -> dict:
+        pages: list[int] | None = None, color: str = "rgb", icc: str | None = None) -> dict:
     """{ok, files, errors?, error?}. out is a folder. pages: only these page numbers (None: all)."""
     out = Path(out)
     fmt = BY_KEY.get(key)
@@ -109,10 +114,19 @@ def run(episode: Episode, project: Path | None, key: str, out: Path, *, official
         return result
     dpi = int(dpi or default_dpi(episode, key))
     try:
-        if key in ("pdf", "tiff", "png"):
+        if key in ("pdf", "tiff", "png", "cmyk"):
             from genko.export import export_print
 
-            files = export_print(episode, out, fmt=key, dpi=dpi, area=area)
+            files = export_print(episode, out, fmt=key, dpi=dpi, area=area, color="cmyk" if key == "cmyk" else color,
+                                 icc=icc or None)
+        elif key == "layers":
+            from genko.export import export_layers
+
+            files = export_layers(episode, out, dpi=dpi, area=area)
+        elif key == "kindle":
+            from genko.export import export_kindle, stem
+
+            files = [export_kindle(episode, out / f"{stem(episode)}_kindle.epub", long_edge=long_edge)]
         elif key == "psd":
             from genko.psd import export_psd_pages
 

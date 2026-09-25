@@ -18,7 +18,7 @@ from genko.ops import ApplyError, apply_ops  # noqa: E402
 
 SRC = Path(__file__).parent.parent / "src" / "genko"
 # every module whose messages reach people through ApplyError
-SOURCES = ["ops.py", "layerops.py", "threeops.py", "bookops.py", "rulers.py", "tones.py", "effects.py", "nombre.py", "models.py", "mannequin.py", "selection.py", "selops.py",
+SOURCES = ["ops.py", "layerops.py", "threeops.py", "bookops.py", "fileops.py", "psd.py", "colour.py", "timelapse.py", "export.py", "rulers.py", "tones.py", "effects.py", "nombre.py", "models.py", "mannequin.py", "selection.py", "selops.py",
            "pagespec.py", "warp.py", "brushes.py", "frames.py", "materials/__init__.py", "lock.py", "journal.py", "app/session.py", "__main__.py"]
 
 
@@ -32,7 +32,7 @@ def _messages() -> list[str]:
     out = []
     for name in SOURCES:
         text = (SRC / name).read_text(encoding="utf-8")
-        for raw in re.findall(r'raise (?:ApplyError|ValueError|WarpError)\(f?"([^"]+)"', text):
+        for raw in re.findall(r'raise (?:ApplyError|ValueError|WarpError|PSDError)\(f?"([^"]+)"', text):
             out.append(re.sub(r"\{[^{}]*(\{[^{}]*\}[^{}]*)*\}", "3", raw))
     return sorted(set(out))
 
@@ -45,7 +45,9 @@ def test_every_error_reads_in_japanese():
         if re.search(r"[ぁ-んァ-ヶ一-龥]", message):
             continue  # already Japanese
         shown = wording.error(message)
-        if re.search(r"[A-Za-z]{4,}", shown.replace("Genko", "")):
+        for name in ("Genko", "CMYK", "TIFF", "WebP", "ffmpeg"):  # (names that have no Japanese form)
+            shown = shown.replace(name, "")
+        if re.search(r"[A-Za-z]{4,}", shown):
             english.append((message, shown))
     assert english == []
     # through the op prefix too

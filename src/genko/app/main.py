@@ -1423,6 +1423,13 @@ class MainWindow(QMainWindow):
         self.act_guides = a("仕上がり線・基本枠を表示", self._toggle_guides, "Ctrl+;", "断ち切り（裁ち落とし）・仕上がり線・基本枠", True)
         self.act_guides.setChecked(True)
         self.act_import = a("画像を読み込む…", self._import_image, "Ctrl+Shift+I", "選んだコマに（選んでいなければページに）画像を置きます")
+        self.act_import_psd = a("PSD をレイヤーのまま読み込む…", self._import_psd,
+                                tip="Photoshop・CLIP STUDIO PAINT などの PSD／PSB を、レイヤー・フォルダー・マスク・合成モードのままこのページに")
+        self.act_timelapse = a("タイムラプスを記録する", self._toggle_timelapse, checkable=True,
+                               tip="保存のたびに、変わったページの小さな絵を残します（制作過程の動画にできます）")
+        self.act_timelapse_export = a("タイムラプスを書き出す…", self._export_timelapse, tip="記録した制作過程を動く画像（WebP・GIF・PNG・MP4）に")
+        self.act_cmyk_proof = a("CMYK で見る（色校正）", self._toggle_cmyk_proof, checkable=True,
+                                tip="印刷したときの色の見当（CMYK の範囲に収めた色）で表示します。プロファイルは書き出しで選んだもの")
         self.act_select = a("選択", lambda: self._tool("select"), "V", "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", True)
         self.act_pen = a("ペン", lambda: self._tool("pen"), "B", "レイヤー パネルで選んだレイヤーに描きます", True)
         self.act_eraser = a("消しゴム", lambda: self._tool("eraser"), "E", "ペンの線は触れた所で切れます", True)
@@ -1627,12 +1634,12 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
         menus = [
             ("ファイル", [self.act_new, self.act_open, "recent", None, self.act_save, self.act_save_as, None, self.act_import,
-                         self.act_export, self.act_print, None, "actions", None, self.act_prefs, None, self.act_close, self.act_quit]),
+                         self.act_import_psd, self.act_export, self.act_print, None, self.act_timelapse, self.act_timelapse_export, None, "actions", None, self.act_prefs, None, self.act_close, self.act_quit]),
             ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste,
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
-                      None, self.act_guides, self.act_scale, self.act_onion, None, self.act_tool_names]),
+                      None, self.act_guides, self.act_scale, self.act_onion, self.act_cmyk_proof, None, self.act_tool_names]),
             ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_blend, self.act_shape, self.act_text, self.act_frame, None,
                         self.act_picker, self.act_fill, self.act_lassofill, self.act_fill_gaps, self.act_gradient, self.act_reshape, self.act_vector, self.act_liquify, None, self.act_marquee, self.act_lasso, self.act_wand, None,
                         self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner, None,
@@ -2606,9 +2613,18 @@ class MainWindow(QMainWindow):
         # agent's name stage)
         mode = "name" if not page.name_ok and getattr(self, "_agent_mode", False) else "proof"
         try:
-            return _pixmap(render_page(page, dpi, mode=mode, episode=self.episode, rough=rough))
+            return _pixmap(self._proofed(render_page(page, dpi, mode=mode, episode=self.episode, rough=rough)))
         except Exception:  # a broken asset must not take the editor down
             return None
+
+    def _proofed(self, image):
+        """The page as it will print in CMYK, when that view is on."""
+        if not getattr(self, "_cmyk_proof", False):
+            return image
+        from genko import colour
+        from genko.app.dialogs import icc_setting
+
+        return colour.proof(image, icc_setting() or None)
 
     def _needs_rough(self, dpi: int) -> bool:
         from genko.render import rough_needed
@@ -2621,19 +2637,23 @@ class MainWindow(QMainWindow):
         edit makes new copies of what it touches), so the thread can read these while people draw on."""
         page, episode = self._current(), self.episode
         mode = "name" if page is not None and not page.name_ok and getattr(self, "_agent_mode", False) else "proof"
+        proofed = self._proofed
 
         def job():
             if page is None:
                 return None
             from genko.render import render_page
 
-            rgb = render_page(page, dpi, mode=mode, episode=episode).convert("RGB")
+            rgb = proofed(render_page(page, dpi, mode=mode, episode=episode)).convert("RGB")
             data = rgb.tobytes()
             return QImage(data, rgb.width, rgb.height, rgb.width * 3, QImage.Format.Format_RGB888).copy()
 
         return job
 
     def _refresh_status(self) -> None:
+        from genko import timelapse
+
+        self.act_timelapse.setChecked(timelapse.is_on(self.episode))
         page = self._current()
         saved = "保存待ち…" if self.session.dirty else ("保存済み" if self.session.path else "未保存（ファイル → 別の場所に保存）")
         if getattr(self, "_recording", None) is not None:
@@ -4352,6 +4372,50 @@ class MainWindow(QMainWindow):
         self._watch()
         self._refresh_status()
         self.flash(f"保存しました: {target}", 3000)
+
+    def _import_psd(self, path: str | None = None) -> None:
+        page = self._current()
+        if page is None:
+            return
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "PSD を読み込む", "", "PSD (*.psd *.psb)")
+        if not path:
+            return
+        chosen = self.layers.selected_ids()
+        at = chosen[0] if chosen else None  # (just above the chosen layer)
+        op = {"op": "import_psd", "page": page.index, "path": path, "fit": "bleed"}
+        if at:
+            op["after"] = at
+        self.setCursor(Qt.CursorShape.WaitCursor)
+        try:
+            ok = self.apply_ops([op])
+        finally:
+            self.unsetCursor()
+        if ok:
+            self.flash(f"「{Path(path).name}」をレイヤーのまま読み込みました", 5000)
+
+    def _toggle_timelapse(self, on: bool) -> None:
+        if on and self.path is None:
+            self.flash("タイムラプスの前に、原稿を保存します（ファイル → 別の場所に保存）", 6000)
+            self.act_timelapse.setChecked(False)
+            return
+        if self.apply_ops([{"op": "set_timelapse", "on": bool(on)}]):
+            self.commit_now()
+            self.flash("タイムラプスを記録しています（保存のたびに 1 コマ）" if on else "タイムラプスの記録を止めました", 4000)
+
+    def _export_timelapse(self) -> None:
+        from genko.app.dialogs import TimelapseDialog
+
+        if self.path is None:
+            self.flash("原稿を保存してから使えます", 5000)
+            return
+        self.commit_now()
+        page = self._current()
+        TimelapseDialog(self, self.path, page.index if page else 1).exec()
+
+    def _toggle_cmyk_proof(self, on: bool) -> None:
+        self._cmyk_proof = bool(on)
+        self.canvas.invalidate()
 
     def _export(self) -> None:
         self.commit_now()

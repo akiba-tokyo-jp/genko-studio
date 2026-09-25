@@ -879,6 +879,21 @@
       "rgb": "[r,g,b]?"
     },
     {
+      "op": "import_psd",
+      "page": "int",
+      "path": "str? (a .psd / .psb file)",
+      "psd": "str? (the file in base64, instead of path)",
+      "fit": "paper|bleed|trim? (default bleed: the picture fills it, keeping its shape)",
+      "id": "str? (the new layers are <id>-1, <id>-2…)",
+      "parent": "folder id?",
+      "after": "layer id?",
+      "note": "every layer as a Genko layer: pixels, names, opacity, visibility, blend, clipping, folders, masks"
+    },
+    {
+      "op": "set_timelapse",
+      "on": "bool (true: every save records a small picture of each changed page, for the timelapse export)"
+    },
+    {
       "op": "add_cover",
       "kind": "front|back|jacket (表紙・裏表紙・カバー)",
       "spine_mm": "float? (jacket: the spine)",

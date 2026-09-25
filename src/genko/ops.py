@@ -129,6 +129,8 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_camera", "page": "int", "turn": "float? (radians, about the upright axis)", "tip": "float? (looking down +, up −)", "roll": "float?", "focal_mm": "float? (20..5000: short = strong perspective)", "target": "[x,y]? (the point the camera turns about)", "off": "bool? (back to each 3D seen on its own)"},
     {"op": "set_light", "page": "int", "dir": "[x,y,z]? (toward the light: x right, y down, z away from the viewer)", "ambient": "0..1?"},
     {"op": "render_prims", "page": "int", "layer_id": "str?", "ids": "[prim id]? (none: all)", "lines": "bool? (true: the pen lines, hidden parts left out)", "surfaces": "bool? (true: the shaded surfaces as greys)", "tone": "{lpi, angle}? (the layer tone-ized: the greys print as dots)", "light": "[x,y,z]?", "ambient": "0..1?", "width_mm": "float?", "kind": "str? (brush, mili)", "rgb": "[r,g,b]?"},
+    {"op": "import_psd", "page": "int", "path": "str? (a .psd / .psb file)", "psd": "str? (the file in base64, instead of path)", "fit": "paper|bleed|trim? (default bleed: the picture fills it, keeping its shape)", "id": "str? (the new layers are <id>-1, <id>-2…)", "parent": "folder id?", "after": "layer id?", "note": "every layer as a Genko layer: pixels, names, opacity, visibility, blend, clipping, folders, masks"},
+    {"op": "set_timelapse", "on": "bool (true: every save records a small picture of each changed page, for the timelapse export)"},
     {"op": "add_cover", "kind": "front|back|jacket (表紙・裏表紙・カバー)", "spine_mm": "float? (jacket: the spine)", "flap_mm": "float? (jacket: each flap, 袖)", "bleed": "bool? (default true: one panel to the bleed)", "note": "covers are pages at the end, without nombre; previews and exports put them first and last"},
     {"op": "replace_text", "find": "str", "replace": "str", "regex": "bool?", "case": "bool? (default true: case matters)", "pages": "[int]? (none: every page)", "speakers": "bool? (speakers too)", "must_find": "bool? (an error when nothing matched)"},
     {"op": "for_pages", "pages": "[int] | all | body? (body: not the covers; default)", "ops": "[op] (each run on every page, its page set to it)"},
@@ -1571,6 +1573,12 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name in layerops.OPS:
         layerops.apply(episode, op, name)
+        return
+
+    if name in ("import_psd", "set_timelapse"):
+        from genko import fileops
+
+        fileops.apply(episode, op, name)
         return
 
     if name in ("add_cover", "replace_text", "set_assignee"):
@@ -3067,7 +3075,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 
 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
-RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "gradient_fill",
+RASTER_EDIT_OPS = frozenset({"put_raster", "import_psd", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "gradient_fill",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
                              "trace_prims", "effect_to_layer", "add_shape", "smudge", "vector_edit", "fill_gaps", "liquify", "render_prims"})
 
@@ -3145,6 +3153,7 @@ def _check_page_lock(episode: Episode, op: dict[str, Any], agent: str) -> None:
 # cross the gutter), plus book-level fields that are always copied. Everything else copies the
 # whole book, as before.
 PAGE_LOCAL_OPS = frozenset({
+    "import_psd",
     "split_frame", "cut_frame", "move_gutter", "merge_frame", "resize_frame", "set_frame",
     "add_line", "name_ok", "advance",
     "add_stroke", "fill", "fill_area", "transform_area", "delete_area", "paste", "set_stroke_width",

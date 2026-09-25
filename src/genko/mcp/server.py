@@ -202,10 +202,15 @@ def build_server(root: Path, actor: str) -> MCPServer:
     @server.tool(structured_output=False)
     def export(project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int = 2048, jpeg: bool = False,
-               spreads: bool = False) -> list:
-        """書き出し（承認は要らない。正式な書き出しは人だけ）: format は pdf / tiff / png / psd / pack / epub / strip / webtoon / sns。
-        pages でページを選ぶ（例 [3, 4, 5]）。area は paper / bleed / trim。書いた先は <原稿>/exports/。"""
-        return call(service.export, project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads)
+               spreads: bool = False, color: str = "rgb", icc: str | None = None, fps: float = 12,
+               seconds: float | None = None, movie: str = "webp") -> list:
+        """書き出し（承認は要らない。正式な書き出しは人だけ）: format は pdf / tiff / png / cmyk / layers / psd / pack / epub /
+        kindle / strip / webtoon / sns / timelapse。pages でページを選ぶ（例 [3, 4, 5]）。area は paper / bleed / trim。
+        pdf の color は rgb / cmyk / gray、cmyk と pdf の icc は印刷所の CMYK プロファイル（.icc のパス）。kindle は long_edge
+        （既定 2560）。timelapse は記録した制作過程（set_timelapse で記録）を movie（webp / gif / png / mp4）で、fps と
+        seconds（全体の長さ）、pages は 1 ページだけ。書いた先は <原稿>/exports/。"""
+        return call(service.export, project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc,
+                    fps, seconds, movie)
 
     @server.tool(structured_output=False)
     def derive(project: str, page: int, frame_id: str, kind: str = "lineart", candidate_id: str | None = None,

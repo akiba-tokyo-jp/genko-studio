@@ -52,7 +52,7 @@ Python 3.11+.
 - `src/genko/ops.py` — single command bus
 - `src/genko/render.py` — name/proof/print composite
 - `src/genko/export.py` — PNG / TIFF / PDF / strip / EPUB
-- `src/genko/psd.py` — minimal PSD
+- `src/genko/psd.py` — PSD / PSB read (layers, folders, masks) and write; `colour.py` CMYK; `timelapse.py`; minimal PSD
 - `src/genko/profiles.py` — webtoon and SNS outputs
 - `src/genko/mannequin.py` — posable mannequin (canvas, name render, pose guide)
 - `src/genko/headless.py` — JSON snapshot

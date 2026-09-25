@@ -281,6 +281,20 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### J10 additions
+
+- `import_psd {page, path | psd (base64), fit: paper | bleed | trim, id?, parent?, after?}`: a PSD or PSB (Photoshop,
+  CLIP STUDIO PAINT, Krita…; 8/16/32-bit, RGB, grey or CMYK, raw / RLE / ZIP) as Genko layers from the bottom:
+  pixels (text layers as their pictures), names, opacity, visibility, blend mode, clipping, folders and layer masks.
+  Adjustment and fill layers carry no pixels and are skipped. The layers are `<id>-1`, `<id>-2`…; a raster edit
+  (the name gate applies).
+- `set_timelapse {on}`: while on, every save leaves a small picture of each changed page in `studio/timelapse/`.
+- `export` formats: `cmyk` (CMYK TIFF), pdf `color: rgb | cmyk | gray` and `icc` (the printer's CMYK profile; without
+  one, black on K alone and at most 320% ink), `layers` (a transparent PNG per layer, per page), `kindle` (fixed
+  layout EPUB with the Kindle metadata, JPEG pages of one size, `long_edge` 2560), `timelapse` (`movie`: webp | gif |
+  png | mp4 with ffmpeg; `fps`, `seconds`, one page in `pages`). RGB files embed the sRGB profile; the layered PSD
+  now keeps opacity, blend, clipping and masks.
+
 ### J9 additions
 
 - `add_cover {kind: front | back | jacket, spine_mm, flap_mm}`: covers are pages at the end without nombre; a

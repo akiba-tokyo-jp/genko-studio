@@ -267,6 +267,11 @@ def save_episode(episode: Episode, dest: Path, *, actor: str | None = None) -> N
         "before": before,
         "after": after,
     })
+    from genko import timelapse
+
+    if timelapse.is_on(episode):  # (a small picture of each changed page; every page when it was just turned on)
+        started = not ((old_payload or {}).get("timelapse") or {}).get("on")
+        timelapse.record(dest, episode, [p.index for p in episode.pages] if started else timelapse.changed_pages(old_payload, payload))
 
 
 JOURNAL_OPS_INLINE = 16_000  # bytes; larger batches keep only a brief of each op in the journal line

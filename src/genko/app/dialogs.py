@@ -364,6 +364,20 @@ class NewProjectDialog(QDialog):
 # --- export -------------------------------------------------------------------------------------------
 
 
+def icc_setting() -> str:
+    """The CMYK profile chosen last (kept on this computer, like the app's other settings)."""
+    from PySide6.QtCore import QSettings
+
+    value = QSettings("Genko", "Genko Studio").value("color/icc", "")
+    return value if isinstance(value, str) and Path(value).is_file() else ""
+
+
+def set_icc_setting(path: str) -> None:
+    from PySide6.QtCore import QSettings
+
+    QSettings("Genko", "Genko Studio").setValue("color/icc", path)
+
+
 class ExportDialog(QDialog):
     """Choose a format, its options and a folder. official=True locks the checked export (approval box)."""
 
@@ -420,6 +434,19 @@ class ExportDialog(QDialog):
             self.area.addItem(AREA_LABELS[key], key)
         self.area.setCurrentIndex(self.area.findData("bleed"))
         self.area.setToolTip("印刷所の指定に合わせます。多くは「裁ち落としまで」。トンボ付きは用紙全体")
+        self.color = QComboBox()
+        for label, key in (("RGB（sRGB を埋め込む）", "rgb"), ("CMYK", "cmyk"), ("グレー", "gray")):
+            self.color.addItem(label, key)
+        self.icc = QLineEdit(icc_setting())
+        self.icc.setPlaceholderText("なし（K 版の黒・総インキ量 320%）")
+        self.icc.setToolTip("印刷所が指定する CMYK のカラープロファイル（Japan Color 2001 Coated など .icc）")
+        pick_icc = QPushButton("選ぶ…")
+        pick_icc.clicked.connect(self._pick_icc)
+        self.icc_row = QWidget()
+        icc_line = QHBoxLayout(self.icc_row)
+        icc_line.setContentsMargins(0, 0, 0, 0)
+        icc_line.addWidget(self.icc, 1)
+        icc_line.addWidget(pick_icc)
         self.jpeg = QCheckBox("JPEG にする（PNG より軽い）")
         self.spreads = QCheckBox("見開きも 1 枚ずつ出す")
         self.official = QCheckBox("正式な書き出し（点検して、書き出しの承認として記録する）")
@@ -441,7 +468,8 @@ class ExportDialog(QDialog):
         self.form.addRow("ページ", pages_row)
         self.rows: dict[str, QWidget] = {}
         for key, label, widget in (("dpi", "解像度", self.dpi), ("area", "書き出す範囲", self.area), ("width", "幅", self.width), ("max_height", "1 枚の高さの上限", self.max_height),
-                                   ("long_edge", "長辺", self.long_edge), ("jpeg", "", self.jpeg), ("spreads", "", self.spreads)):
+                                   ("long_edge", "長辺", self.long_edge), ("jpeg", "", self.jpeg), ("spreads", "", self.spreads),
+                                   ("color", "色", self.color), ("icc", "カラープロファイル", self.icc_row)):
             self.form.addRow(label, widget)
             self.rows[key] = widget
         self.form.addRow("", self.official)
@@ -476,6 +504,7 @@ class ExportDialog(QDialog):
             if label is not None:
                 label.setVisible(visible)
         self.dpi.setValue(exporting.default_dpi(self.episode, fmt.key))
+        self.long_edge.setValue(2560 if fmt.key == "kindle" else 2048)
         self.jpeg.setChecked(fmt.key == "sns")
         if not self.official.isEnabled() or not fmt.official:
             self.official.setChecked(self.official.isChecked() and fmt.official)
@@ -537,6 +566,25 @@ class ExportDialog(QDialog):
         box.exec()
         return "go" if box.clickedButton() is go else "fix" if box.clickedButton() is fix else "stop"
 
+    def _pick_icc(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "CMYK のカラープロファイル", self.icc.text(), "カラープロファイル (*.icc *.icm)")
+        if not path:
+            return
+        from genko import colour
+
+        try:
+            ok = colour.is_cmyk_profile(path)
+        except ValueError as exc:
+            from genko.app import wording
+
+            QMessageBox.warning(self, "Genko", wording.error(str(exc)))
+            return
+        if not ok:
+            QMessageBox.warning(self, "Genko", "CMYK の印刷用プロファイルではありません")
+            return
+        self.icc.setText(path)
+        set_icc_setting(path)
+
     def _pick_folder(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "書き出し先", self.folder.text())
         if path:
@@ -545,7 +593,7 @@ class ExportDialog(QDialog):
     def options(self) -> dict:
         return {"dpi": self.dpi.value(), "width": self.width.value(), "max_height": self.max_height.value(),
                 "long_edge": self.long_edge.value(), "jpeg": self.jpeg.isChecked(), "spreads": self.spreads.isChecked(),
-                "area": self.area.currentData()}
+                "area": self.area.currentData(), "color": self.color.currentData(), "icc": self.icc.text().strip() or None}
 
     def run(self) -> None:
         out = Path(self.folder.text()).expanduser()
@@ -576,7 +624,9 @@ class ExportDialog(QDialog):
         self.result_ = result
         if not result.get("ok"):
             reasons = [e.get("message", "") for e in result.get("errors", [])[:12]]
-            QMessageBox.warning(self, "Genko", "書き出せませんでした。\n" + ("\n".join(reasons) or result.get("error", "")))
+            from genko.app import wording
+
+            QMessageBox.warning(self, "Genko", "書き出せませんでした。\n" + ("\n".join(reasons) or wording.error(result.get("error", ""))))
             return
         box = QMessageBox(self)
         box.setWindowTitle("Genko")
@@ -586,6 +636,97 @@ class ExportDialog(QDialog):
         box.exec()
         if box.clickedButton() is open_button:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(out)))
+        self.accept()
+
+
+class TimelapseDialog(QDialog):
+    """The recorded making-of as a moving picture: every page in the order it was drawn, or one page."""
+
+    MOVIES = (("WebP（動く画像・軽い）", "webp"), ("GIF", "gif"), ("PNG（APNG）", "png"), ("MP4（動画）", "mp4"))
+
+    def __init__(self, parent, project: Path, current_page: int = 1):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QDoubleSpinBox
+
+        from genko import timelapse
+
+        self.project, self.current_page = Path(project), current_page
+        self.setWindowTitle("タイムラプスを書き出す")
+        self.which = QComboBox()
+        self.which.addItem("全ページ（描いた順）", "all")
+        self.which.addItem(f"このページだけ（{current_page} ページ）", "page")
+        self.movie = QComboBox()
+        for label, key in self.MOVIES:
+            self.movie.addItem(label, key)
+        if timelapse.ffmpeg() is None:  # (MP4 needs ffmpeg; the others need nothing)
+            item = self.movie.model().item(self.movie.findData("mp4"))
+            item.setEnabled(False)
+            item.setToolTip("ffmpeg が入っていないので使えません")
+        self.fps = QDoubleSpinBox()
+        self.fps.setRange(1, 60)
+        self.fps.setDecimals(0)
+        self.fps.setValue(12)
+        self.fps.setSuffix(" コマ／秒")
+        self.seconds = QDoubleSpinBox()
+        self.seconds.setRange(0, 600)
+        self.seconds.setDecimals(0)
+        self.seconds.setValue(0)
+        self.seconds.setSpecialValueText("すべてのコマ")
+        self.seconds.setSuffix(" 秒に収める")
+        self.count = QLabel()
+        self.count.setStyleSheet("color:#555")
+        form = QFormLayout()
+        form.addRow("ページ", self.which)
+        form.addRow("形式", self.movie)
+        form.addRow("速さ", self.fps)
+        form.addRow("長さ", self.seconds)
+        form.addRow("", self.count)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("書き出す…")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
+        buttons.accepted.connect(self.run)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+        self.which.currentIndexChanged.connect(lambda _: self._count())
+        self._count()
+        self.written: Path | None = None
+
+    def page(self) -> int | None:
+        return self.current_page if self.which.currentData() == "page" else None
+
+    def _count(self) -> int:
+        from genko import timelapse
+
+        n = len(timelapse.frames(self.project, self.page()))
+        self.count.setText(f"記録したコマ: {n}" if n else "まだ記録がありません（ファイル → タイムラプスを記録する）")
+        return n
+
+    def write(self, dest: Path) -> Path:
+        from genko import timelapse
+
+        return timelapse.export(self.project, dest, page=self.page(), fps=self.fps.value(),
+                                seconds=self.seconds.value() or None, fmt=self.movie.currentData())
+
+    def run(self) -> None:
+        if not self._count():
+            return
+        ext = self.movie.currentData()
+        start = str(self.project.parent / f"{self.project.stem}_timelapse.{ext}")
+        path, _ = QFileDialog.getSaveFileName(self, "タイムラプスの保存先", start, f"*.{ext}")
+        if not path:
+            return
+        self.setCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.written = self.write(Path(path))
+        except ValueError as exc:
+            from genko.app import wording
+
+            QMessageBox.warning(self, "Genko", wording.error(str(exc)))
+            return
+        finally:
+            self.unsetCursor()
         self.accept()
 
 
