@@ -186,3 +186,73 @@ def test_the_layer_panel_duplicates_merges_masks_and_shows_pictures(window):
     assert after.mask["png"] != before and len(after.strokes) == strokes  # the mask changed, not the lines
     panel.act_mask_edit.setChecked(False)
     assert not window.mask_edit
+
+
+# --- free transform ---------------------------------------------------------------------------------------
+
+
+def test_perspective_moves_the_corners_where_asked():
+    from genko import warp
+
+    go = warp.mapping((50, 100, 100, 60), {"perspective": [[60, 90], [140, 110], [160, 170], [40, 150]]})
+    for (x, y), target in zip([(50, 100), (150, 100), (150, 160), (50, 160)], [(60, 90), (140, 110), (160, 170), (40, 150)]):
+        u, v = go(x, y)
+        assert abs(u - target[0]) < 1e-6 and abs(v - target[1]) < 1e-6
+    ep, _ink = _book()
+    area = {"poly": [[50, 100], [150, 100], [150, 160], [50, 160]]}
+    apply_ops(ep, [{"op": "add_layer", "page": 1, "kind": "paint", "name": "塗り", "id": "p"},
+                   {"op": "add_stroke", "page": 1, "layer_id": "p", "points": [[55, 105], [145, 105], [145, 155], [55, 155], [55, 105]],
+                    "width_mm": 1, "stabilize": 0, "taper": False},
+                   {"op": "fill_area", "page": 1, "layer_id": "p", "area": {"poly": [[70, 120], [130, 120], [130, 140], [70, 140]]},
+                    "rgb": [0, 0, 0]}])
+    corners = [[60, 90], [140, 110], [160, 170], [40, 150]]
+    apply_ops(ep, [{"op": "transform_area", "page": 1, "layer_id": "p", "area": area, "warp": {"perspective": corners}}])
+    layer = _layer(ep, "p")
+    pts = [p for p in layer.strokes[0].points]
+    for corner in ([55, 105], [145, 105], [145, 155], [55, 155]):
+        target = go(*corner)
+        assert min(abs(p[0] - target[0]) + abs(p[1] - target[1]) for p in pts) < 0.05
+    # the fill went through the same mapping: its centre lands where the box's centre goes
+    from genko.selection import _patch_px
+
+    image, (ox, oy) = _patch_px(layer.patches[0])
+    cx, cy = go(100, 130)
+    px, py = round(cx / 25.4 * 300) - ox, round(cy / 25.4 * 300) - oy
+    assert image.getpixel((px, py)) > 200 if image.mode == "L" else image.getpixel((px, py))[3] > 200
+    fx0, fy0 = go(70, 120)
+    assert abs(layer.patches[0]["box"][0] - min(go(70, 120)[0], go(70, 140)[0])) < 1.0 and abs(layer.patches[0]["box"][1] - fy0) < 1.5
+
+
+def test_a_mesh_bends_through_its_middle():
+    ep, _ink = _book()
+    apply_ops(ep, [{"op": "add_layer", "page": 1, "kind": "pen", "name": "線", "id": "m"},
+                   {"op": "add_stroke", "page": 1, "layer_id": "m", "points": [[50, 130], [150, 130]], "width_mm": 1, "stabilize": 0,
+                    "taper": False}])
+    grid = [[50, 100], [100, 100], [150, 100], [50, 130], [100, 110], [150, 130], [50, 160], [100, 160], [150, 160]]
+    apply_ops(ep, [{"op": "transform_area", "page": 1, "layer_id": "m", "area": {"poly": [[50, 100], [150, 100], [150, 160], [50, 160]]},
+                    "warp": {"mesh": grid}}])
+    pts = _layer(ep, "m").strokes[0].points
+    assert len(pts) > 10  # split so it can bend
+    middle = min(pts, key=lambda p: abs(p[0] - 100))
+    assert abs(middle[1] - 110) < 0.5 and abs(pts[0][1] - 130) < 0.01 and abs(pts[-1][1] - 130) < 0.01
+    with pytest.raises(ApplyError):
+        apply_ops(ep, [{"op": "transform_area", "page": 1, "layer_id": "m", "area": {"poly": [[0, 0], [10, 0], [10, 10]]},
+                        "warp": {"mesh": grid[:4]}}])
+
+
+def test_free_transform_on_the_canvas(window):
+    from test_m13 import _drag
+
+    canvas = window.canvas
+    window.set_target_layer("u")
+    window.act_marquee.trigger()
+    canvas.set_selection({"poly": [[40, 50], [80, 50], [80, 310], [40, 310]]})
+    window.act_warp_perspective.trigger()
+    assert canvas.warp and len(canvas._sel_handles()) == 4
+    _drag(canvas, None, None, path=[(80, 50), (100, 55), (120, 60)])  # the top-right corner
+    assert canvas.warp["points"][1] == [120.0, 60.0] or abs(canvas.warp["points"][1][0] - 120) < 0.5
+    before = [list(p) for p in _layer(window.episode, "u").strokes[0].points]
+    window.act_warp_apply.trigger()
+    assert canvas.warp is None and canvas.selection is None
+    after = _layer(window.episode, "u").strokes[0].points
+    assert len(after) > len(before) and max(p[0] for p in after) > max(p[0] for p in before) + 5

@@ -329,7 +329,8 @@
       "page": "int",
       "layer_id": "str?",
       "area": "{poly} | {mask}",
-      "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)"
+      "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)",
+      "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)"
     },
     {
       "op": "delete_area",

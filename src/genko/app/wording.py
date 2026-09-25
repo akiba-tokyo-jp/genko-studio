@@ -75,6 +75,12 @@ def _field(name: str) -> str:
 
 
 _ERRORS: list[tuple[str, object]] = [
+    (r"the area has no size", "選んだ範囲に大きさがありません"),
+    (r"perspective takes four corners.*", "遠近の変形は 4 隅（左上・右上・右下・左下）で指定します"),
+    (r"the four corners must enclose an area", "4 隅が一直線に並んでいて、形になりません"),
+    (r"mesh takes nine points.*", "メッシュの変形は 3×3 の 9 点で指定します"),
+    (r"a warp is perspective.*", "自由変形は遠近（4 隅）かメッシュ（9 点）で指定します"),
+    (r"the transform stretches the area too far", "引き伸ばしすぎです。点を近づけます"),
     (r"a folder cannot be duplicated", "フォルダは複製できません（中のレイヤーを選んで複製します）"),
     (r"there is no layer below to merge into", "下にレイヤーがないので結合できません"),
     (r"placed images and tones cannot be merged", "配置した画像とトーンのレイヤーは結合できません"),

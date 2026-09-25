@@ -19,7 +19,7 @@ from genko.ops import ApplyError, apply_ops  # noqa: E402
 SRC = Path(__file__).parent.parent / "src" / "genko"
 # every module whose messages reach people through ApplyError
 SOURCES = ["ops.py", "rulers.py", "tones.py", "effects.py", "nombre.py", "models.py", "mannequin.py", "selection.py",
-           "pagespec.py", "frames.py", "materials/__init__.py", "lock.py", "journal.py", "app/session.py", "__main__.py"]
+           "pagespec.py", "warp.py", "frames.py", "materials/__init__.py", "lock.py", "journal.py", "app/session.py", "__main__.py"]
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +32,7 @@ def _messages() -> list[str]:
     out = []
     for name in SOURCES:
         text = (SRC / name).read_text(encoding="utf-8")
-        for raw in re.findall(r'raise (?:ApplyError|ValueError)\(f?"([^"]+)"', text):
+        for raw in re.findall(r'raise (?:ApplyError|ValueError|WarpError)\(f?"([^"]+)"', text):
             out.append(re.sub(r"\{[^{}]*(\{[^{}]*\}[^{}]*)*\}", "3", raw))
     return sorted(set(out))
 

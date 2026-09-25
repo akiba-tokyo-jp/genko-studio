@@ -71,7 +71,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "erase_raster", "page": "int", "layer": "ink|name", "points": "[[x,y],...]", "width_mm": "float"},
     {"op": "fill", "page": "int", "layer_id": "str?", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float? (close gaps up to this)", "expand_mm": "float? (grow under the lines)", "reference": "page|layer?"},
     {"op": "fill_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask: {box, png}}", "rgb": "[r,g,b]?", "opacity": "float?"},
-    {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)"},
+    {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)", "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)"},
     {"op": "delete_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}"},
     {"op": "paste", "page": "int", "layer_id": "str?", "items": "{strokes, patches} (copied)", "matrix": "[a,b,c,d,e,f]?"},
     {"op": "set_stroke_width", "page": "int", "layer_id": "str?", "area": "object?", "ids": "[stroke id]?", "width_mm": "float?", "scale": "float?", "kind": "str?", "rgb": "[r,g,b]?"},
@@ -955,6 +955,15 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         area = _area(op)
         items = selection.lift(target, area, page)
         if name == "delete_area":
+            return
+        if op.get("warp"):
+            from genko import warp
+
+            try:
+                go = warp.mapping(selection.area_bbox(area), op["warp"])
+                selection.drop_warped(target, items, go)
+            except warp.WarpError as exc:
+                raise ApplyError(str(exc)) from exc
             return
         matrix = tuple(float(v) for v in op.get("matrix") or selection.IDENTITY)
         if len(matrix) != 6:

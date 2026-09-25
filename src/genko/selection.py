@@ -217,6 +217,21 @@ def drop(layer, items: dict, m: Matrix = IDENTITY, fresh_ids: bool = False) -> N
             layer.patches.append(moved)
 
 
+def drop_warped(layer, items: dict, go) -> None:
+    """Put lifted items back through a free transform (genko.warp): lines point by point, pixels piece by piece."""
+    from genko import warp
+
+    for stroke in items.get("strokes", []):
+        layer.strokes.append(warp.warp_stroke(stroke, go))
+    for patch in items.get("patches", []):
+        image, origin = _patch_px(patch)
+        warped = warp.warp_image(image, origin, go, FILL_DPI)
+        if warped is not None:
+            moved = _to_patch(warped[0], warped[1], patch)
+            if moved:
+                layer.patches.append(moved)
+
+
 def items_to_json(items: dict) -> dict:
     """Copied items in a form that travels in an op (the clipboard)."""
     from genko.models import stroke_to_dict

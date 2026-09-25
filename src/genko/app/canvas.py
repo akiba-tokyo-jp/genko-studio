@@ -103,6 +103,7 @@ class PageCanvas(GuideMixin, QWidget):
     effectSelected = Signal(str)
     effectMoved = Signal(str, object)  # effect id, its new centre [x, y]
     stampRequested = Signal(float, float)  # the material tool clicked here (mm)
+    selectionWarped = Signal(object)  # a free transform of the selection: {perspective: [4 points]} | {mesh: [9 points]}
     balloonDrawn = Signal(object)  # the text tool's balloon pen: an outline [[x, y], …] (mm)
 
     def __init__(self) -> None:
@@ -121,7 +122,8 @@ class PageCanvas(GuideMixin, QWidget):
         self._live = None  # LiveInk of the line being drawn
         self._live_of: tuple | None = None  # (the point list, straight/snapped) it was drawn from
         self._eraser_end: str | None = None
-        self.balloon_pen = False  # the text tool draws a balloon's outline instead of placing a line  # the tool to go back to after the pen's eraser end lifts
+        self.balloon_pen = False
+        self.warp: dict | None = None  # a free transform being set up: {"kind", "box": (x, y, w, h), "points"}  # the text tool draws a balloon's outline instead of placing a line  # the tool to go back to after the pen's eraser end lifts
         self._panning = False
         self._space = False
         self._last_pos = QPointF()
@@ -719,6 +721,7 @@ class PageCanvas(GuideMixin, QWidget):
         return [p[:2] for p in self._stroke]
 
     def set_selection(self, area: dict | None, outline: list | None = None) -> None:
+        self.warp = None
         if area is None:
             self.selection = None
         else:
@@ -736,9 +739,51 @@ class PageCanvas(GuideMixin, QWidget):
         xs, ys = [p[0] for p in pts], [p[1] for p in pts]
         return min(xs), min(ys), max(xs), max(ys)
 
+    def start_warp(self, kind: str) -> bool:
+        """Pull the selection's corners (perspective) or a 3×3 grid (mesh); Enter applies, Esc cancels."""
+        if not self.selection:
+            return False
+        x0, y0, x1, y1 = self._sel_box()
+        if kind == "perspective":
+            points = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+        else:
+            points = [[x0 + (x1 - x0) * i / 2, y0 + (y1 - y0) * j / 2] for j in range(3) for i in range(3)]
+        self.warp = {"kind": kind, "box": (x0, y0, x1 - x0, y1 - y0), "points": points}
+        self.update()
+        return True
+
+    def finish_warp(self) -> None:
+        if self.warp is None:
+            return
+        warp, self.warp = self.warp, None
+        self.selectionWarped.emit({warp["kind"]: [[round(v, 3) for v in p] for p in warp["points"]]})
+        self.update()
+
+    def cancel_warp(self) -> None:
+        self.warp = None
+        self.update()
+
+    def _draw_warp(self, painter: QPainter) -> None:
+        from genko import warp as warps
+
+        try:
+            go = warps.mapping(self.warp["box"], {self.warp["kind"]: self.warp["points"]})
+        except warps.WarpError:
+            return
+        x0, y0, w, h = self.warp["box"]
+        painter.setPen(QPen(QColor("#e8590c"), 1.2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        steps = 16
+        for k in range(5):  # the box's grid, bent the way the area will be
+            t = k / 4
+            painter.drawPolyline([self._pt(*go(x0 + w * i / steps, y0 + h * t)) for i in range(steps + 1)])
+            painter.drawPolyline([self._pt(*go(x0 + w * t, y0 + h * i / steps)) for i in range(steps + 1)])
+
     def _sel_handles(self) -> list:
         if not self.selection or self.tool != "marquee":
             return []
+        if self.warp is not None:
+            return [("warp", i, tuple(p)) for i, p in enumerate(self.warp["points"])]
         x0, y0, x1, y1 = self._sel_box()
         cx = (x0 + x1) / 2
         out = [("scale", key, (x0 + (x1 - x0) * fx, y0 + (y1 - y0) * fy)) for key, (fx, fy) in
@@ -784,6 +829,8 @@ class PageCanvas(GuideMixin, QWidget):
             outline = self._apply(self._sel_drag["matrix"], outline)
         pts = [self._pt(*p) for p in outline]
         painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self.warp is not None:
+            self._draw_warp(painter)
         painter.setPen(QPen(QColor("white"), 1.5))
         painter.drawPolygon(pts)
         painter.setPen(QPen(QColor("#1c7ed6"), 1.5, Qt.PenStyle.DashLine))
@@ -793,6 +840,9 @@ class PageCanvas(GuideMixin, QWidget):
             painter.setPen(QPen(QColor("#1c7ed6"), 1.5))
             painter.setBrush(QColor("white"))
             if kind == "rotate":
+                painter.drawEllipse(p, 5, 5)
+            elif kind == "warp":
+                painter.setPen(QPen(QColor("#e8590c"), 1.5))
                 painter.drawEllipse(p, 5, 5)
             else:
                 painter.drawRect(QRectF(p.x() - 4, p.y() - 4, 8, 8))
@@ -808,6 +858,8 @@ class PageCanvas(GuideMixin, QWidget):
             if abs(p.x() - pos.x()) <= 7 and abs(p.y() - pos.y()) <= 7:
                 self._sel_drag = {"kind": kind, "key": key, "start": (x_mm, y_mm), "box": self._sel_box()}
                 return True
+        if self.warp is not None:
+            return True  # (only the points move while a free transform is being set up)
         from genko.selection import contains
 
         if contains({"poly": self.selection["outline"]}, x_mm, y_mm):
@@ -1029,6 +1081,10 @@ class PageCanvas(GuideMixin, QWidget):
             self._modifiers = event.modifiers()
             self._frame_move(pos)
             return
+        if self._sel_drag is not None and self._sel_drag["kind"] == "warp":
+            self.warp["points"][self._sel_drag["key"]] = [round(v, 3) for v in self._to_mm(pos)]
+            self.update()
+            return
         if self._sel_drag is not None:
             self._modifiers = event.modifiers()
             self._sel_drag["matrix"] = self._sel_matrix(self._to_mm(pos))
@@ -1092,6 +1148,10 @@ class PageCanvas(GuideMixin, QWidget):
             return
         if self.tool == "ruler":
             self._ruler_release()
+            return
+        if self._sel_drag is not None and self._sel_drag["kind"] == "warp":
+            self._sel_drag = None
+            self.update()
             return
         if self._sel_drag is not None:
             drag, self._sel_drag = self._sel_drag, None
@@ -1253,6 +1313,12 @@ class PageCanvas(GuideMixin, QWidget):
             return
         if self.tool == "ruler" and event.key() == Qt.Key.Key_Escape and (self._ruler_draft or self._ruler_drag):
             self.cancel_ruler()
+            return
+        if self.warp is not None and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.finish_warp()
+            return
+        if self.warp is not None and event.key() == Qt.Key.Key_Escape:
+            self.cancel_warp()
             return
         if event.key() == Qt.Key.Key_Escape and self.selection is not None:
             self.set_selection(None)

@@ -749,6 +749,7 @@ class MainWindow(QMainWindow):
         self.canvas.areaFilled.connect(lambda pts: self._fill_area({"poly": pts}))
         self.canvas.wandRequested.connect(self._wand)
         self.canvas.selectionTransformed.connect(self._transform_selection)
+        self.canvas.selectionWarped.connect(self._warp_selection)
         self.canvas.strokeReshaped.connect(self._reshape)
         self.canvas.strokes_for_reshape = lambda: list(getattr(self.target_layer(), "strokes", []) or [])
         self.canvas.rulerPlaced.connect(self._place_ruler)
@@ -955,6 +956,11 @@ class MainWindow(QMainWindow):
         self.act_flip_v = a("上下反転", lambda: self._flip(1, -1))
         self.act_fill_selection = a("選択範囲を塗る", lambda: self._fill_area(self._area()), "Alt+Backspace")
         self.act_line_width = a("選択範囲の線の太さ…", self._line_width)
+        self.act_warp_perspective = a("自由変形（遠近・4 隅）", lambda: self._start_warp("perspective"), "Ctrl+Shift+P",
+                                      "選択範囲の 4 隅を好きな所へ引っぱる。Enter で確定、Esc でやめる")
+        self.act_warp_mesh = a("自由変形（メッシュ・3×3）", lambda: self._start_warp("mesh"), "Ctrl+Shift+W",
+                               "選択範囲の 3×3 の点を引っぱって曲げる。Enter で確定、Esc でやめる")
+        self.act_warp_apply = a("自由変形を確定", lambda: self.canvas.finish_warp())
         settings = QSettings("Genko", "Genko Studio")
         self.ruler_kinds = [
             ("直線定規", "line", {}, "ドラッグで置く。近くで描いた線がまっすぐ沿う"),
@@ -1034,7 +1040,8 @@ class MainWindow(QMainWindow):
             ("トーン・効果線", [self.act_tone_here, self.act_tone_click, None, self.act_effect, *self.effect_actions, None,
                                self.act_materials]),
             ("選択", [self.act_marquee, self.act_lasso, self.act_wand, None, self.act_select_all, self.act_deselect, None,
-                      self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v, None,
+                      self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v,
+                      self.act_warp_perspective, self.act_warp_mesh, self.act_warp_apply, None,
                       self.act_fill_selection, self.act_line_width]),
             ("コマ", [self.act_frame, None, self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
                       self.act_gutters, self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape]),
@@ -1139,7 +1146,8 @@ class MainWindow(QMainWindow):
                                         self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape, None, self.act_paper]))
         ts.add(("marquee",), action_page([self.act_marquee, self.act_lasso, self.act_wand, None, self.act_select_all, self.act_deselect,
                                           None, self.act_copy, self.act_cut, self.act_paste, self.act_delete_area, None, self.act_flip_h,
-                                          self.act_flip_v, self.act_fill_selection, self.act_line_width, self.act_tone_here]))
+                                          self.act_flip_v, self.act_warp_perspective, self.act_warp_mesh, self.act_warp_apply, None,
+                                          self.act_fill_selection, self.act_line_width, self.act_tone_here]))
         radius = QDoubleSpinBox()
         radius.setRange(1, 60)
         radius.setSuffix(" mm")
@@ -1708,6 +1716,21 @@ class MainWindow(QMainWindow):
         if self.apply_ops([{"op": "transform_area", "page": self._current().index, "layer_id": layer.id, "area": area, "matrix": matrix}]):
             outline = self.canvas._apply(matrix, self.canvas.selection["outline"])
             self.canvas.set_selection(self._moved_area(area, matrix), outline)
+
+    def _start_warp(self, kind: str) -> None:
+        if self._need_area() is None:
+            return
+        if self.canvas.tool != "marquee":
+            self.canvas.set_tool("marquee")
+        self.canvas.start_warp(kind)
+        self.flash("点を引っぱって形を決め、Enter（または「自由変形を確定」）で確定します。Esc でやめます", 6000)
+
+    def _warp_selection(self, warp: dict) -> None:
+        area, layer = self._area(), self._paint_layer()
+        if area is None or layer is None:
+            return
+        if self.apply_ops([{"op": "transform_area", "page": self._current().index, "layer_id": layer.id, "area": area, "warp": warp}]):
+            self.canvas.set_selection(None)
 
     def _flip(self, sx: int, sy: int) -> None:
         area = self._need_area()
