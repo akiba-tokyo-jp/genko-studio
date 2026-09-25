@@ -269,6 +269,10 @@ class NewProjectDialog(QDialog):
         for label, key in PAPERS:
             self.paper.addItem(label, key)
         self.paper.addItem("自分で決める…", "custom")
+        from genko.app.preferences import default_paper
+
+        if default_paper() and self.paper.findData(default_paper()) >= 0:  # the paper chosen in the preferences
+            self.paper.setCurrentIndex(self.paper.findData(default_paper()))
         self.custom_spec: PageSpec | None = None
         self.paper_note = QLabel()
         self.paper_note.setWordWrap(True)

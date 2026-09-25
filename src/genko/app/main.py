@@ -794,6 +794,10 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentRow(0)
         # building the docks while hidden stretches the window to their summed heights; settle the layout
         # and put the window back to a size that fits a laptop screen
+        from genko.app import preferences
+
+        preferences.name_commands(self)  # (every command's words are its lasting name; keys can be changed)
+        preferences.apply_all(self)
         self.layout().activate()
         self.resize(1280, 800)
 
@@ -897,6 +901,11 @@ class MainWindow(QMainWindow):
         self.act_export = a("書き出し…", self._export, "Ctrl+E", "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します")
         self.act_undo = a("元に戻す", self._undo, std.Undo)
         self.act_redo = a("やり直す", self._redo, [QKeySequence(std.Redo), QKeySequence("Ctrl+Y")])
+        self.act_prefs = a("環境設定…", self._preferences, "Ctrl+,", "ショートカット・ペンタブレット・文字の大きさ・新しい原稿の用紙・保存の間隔")
+        self.act_help_keys = a("ショートカット一覧", lambda: self._help("keys"), "F1")
+        self.act_help_guide = a("はじめての使い方", lambda: self._help("guide"))
+        self.act_help_faq = a("困ったとき（よくある質問）", lambda: self._help("faq"))
+        self.act_about = a("Genko Studio について", lambda: self._help("about"))
         self.act_history = a("履歴…", lambda: self.show_dock("履歴"), "Ctrl+H", "変更の一覧。クリックでその時点まで戻る・進む")
         self.act_fit = a("全体を表示", self.canvas.fit_page, "Ctrl+0")
         self.act_zoom_in = a("拡大", lambda: self.canvas.zoom_by(1.25), [QKeySequence(std.ZoomIn), QKeySequence("Ctrl+=")])
@@ -1026,7 +1035,8 @@ class MainWindow(QMainWindow):
 
         bar = self.menuBar()
         menus = [
-            ("ファイル", [self.act_new, self.act_open, None, self.act_save, self.act_save_as, None, self.act_import, self.act_export]),
+            ("ファイル", [self.act_new, self.act_open, None, self.act_save, self.act_save_as, None, self.act_import, self.act_export, None,
+                         self.act_prefs]),
             ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_prev, self.act_next,
@@ -1057,6 +1067,12 @@ class MainWindow(QMainWindow):
                 else:
                     menu.addAction(act)
         self.view_menu = bar.addMenu("パネル")
+        help_menu = bar.addMenu("ヘルプ")
+        for act in (self.act_help_guide, self.act_help_keys, self.act_help_faq, None, self.act_about):
+            if act is None:
+                help_menu.addSeparator()
+            else:
+                help_menu.addAction(act)
 
         from genko.app.icons import icon
 
@@ -1630,6 +1646,27 @@ class MainWindow(QMainWindow):
         self.eraser_mm = float(value)
         self.canvas.eraser_mm = self.eraser_mm
         self.canvas.update()
+
+    def _preferences(self) -> None:
+        from genko.app.preferences import PreferencesDialog
+
+        PreferencesDialog(self).exec()
+
+    def _help(self, what: str) -> None:
+        from genko.app import help as helps
+
+        if what == "keys":
+            self.help_dialog = helps.show(self, "ショートカット一覧", helps.shortcut_html(self))
+        elif what == "guide":
+            self.help_dialog = helps.show(self, "はじめての使い方", helps.GUIDE)
+        elif what == "faq":
+            self.help_dialog = helps.show(self, "困ったとき", helps.FAQ)
+        else:
+            from genko import __version__
+
+            self.help_dialog = helps.show(self, "Genko Studio について",
+                                          f"<h2>Genko Studio</h2><p>版 {__version__}</p><p>マンガの原稿を、ネームから入稿まで描く道具。"
+                                          "エージェント（AI）と分担して進めることもできます。</p>")
 
     def _make_brush(self) -> None:
         from genko import brushes
@@ -2585,6 +2622,12 @@ def remember_project(path: Path) -> None:
 def run_app(path: Path | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Genko Studio")
+    from genko.app import preferences
+
+    if preferences.ui_font_pt():  # the size of the letters chosen in the preferences
+        font = app.font()
+        font.setPointSize(preferences.ui_font_pt())
+        app.setFont(font)
     if path is None and len(sys.argv) > 1 and Path(sys.argv[1]).is_dir():
         path = Path(sys.argv[1])
     if path is None:

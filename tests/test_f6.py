@@ -406,3 +406,91 @@ def test_the_history_names_each_change_and_goes_back_to_it(window):
     panel._go(panel.list.item(0))
     assert len(_layer(window.episode, ink.id).strokes) == first and not window.episode.story_for_page(1)
     assert panel.list.item(0).text().startswith("▶")
+
+
+# --- help and preferences ---------------------------------------------------------------------------------
+
+
+def test_help_lists_the_keys_as_they_are(window):
+    from genko.app import help as helps
+
+    rows = helps.shortcut_rows(window)
+    assert ("ツール", "ペン", "B") in rows and any(command == "左右反転して見る" for _m, command, _k in rows)
+    menus = [a.text() for a in window.menuBar().actions()]
+    assert menus[-1] == "ヘルプ"
+    window.act_help_guide.trigger()
+    assert "はじめての 1 冊" in window.help_dialog.text.toPlainText()
+    window.act_help_faq.trigger()
+    assert "線が描けない" in window.help_dialog.text.toPlainText()
+    window.act_help_keys.trigger()
+    assert "ペン" in window.help_dialog.text.toPlainText()
+
+
+def test_preferences_change_keys_pen_and_work(window, qapp):
+    from PySide6.QtGui import QKeySequence
+
+    from genko.app import help as helps
+    from genko.app import preferences
+    from genko.app.preferences import PreferencesDialog
+
+    dialog = PreferencesDialog(window)
+    # two commands on one key are refused
+    dialog.editors["ペン"].setKeySequence(QKeySequence("E"))
+    dialog.save()
+    assert "「E」" in dialog.clash.text() and window.act_pen.shortcut().toString() == "B"
+    dialog.editors["ペン"].setKeySequence(QKeySequence("P"))
+    # the pen tablet: a light hand gets a softer curve
+    dialog.pad.pressures = [0.25 + 0.01 * (i % 10) for i in range(60)]
+    dialog._measure()
+    assert dialog.gamma is not None and dialog.gamma < 1 and "やわらかめ" in dialog.gamma_note.text()
+    dialog.button.setCurrentIndex(dialog.button.findData("picker"))
+    dialog.font_pt.setValue(13)
+    dialog.paper.setCurrentIndex(dialog.paper.findData("b5"))
+    dialog.save_after.setValue(5)
+    dialog.save()
+    assert dialog.result() == 1
+    assert window.act_pen.shortcut().toString() == "P"
+    assert ("ツール", "ペン", "P") in helps.shortcut_rows(window)
+    assert window._commit_timer.interval() == 5000 and window.canvas.pen_button == "picker"
+    assert window.brush.pressure.itemText(window.brush.pressure.count() - 1).startswith("自分に合わせた")
+    assert preferences.ui_font_pt() == 13 and preferences.default_paper() == "b5"
+    # a new window keeps the key; the new-book dialog starts on B5
+    from genko.app.dialogs import NewProjectDialog
+    from genko.app.main import MainWindow
+
+    other = MainWindow(window.path)
+    assert other.act_pen.shortcut().toString() == "P"
+    other.close()
+    assert NewProjectDialog(window).paper.currentData() == "b5"
+    # back to the first keys
+    again = PreferencesDialog(window)
+    again._reset_keys()
+    again.save()
+    assert window.act_pen.shortcut().toString() == "B"
+    assert preferences.gamma_for([0.5] * 20) == 1.0
+    with pytest.raises(ValueError):
+        preferences.gamma_for([0.5] * 3)
+    store = preferences.settings()
+    for key in ("ui/font_pt", "new/paper", "save/after_ms", "tablet/gamma", "tablet/button"):
+        store.remove(key)  # (the settings are shared by the tests)
+
+
+def test_the_pens_side_button_picks_a_colour(window):
+    import test_f4
+
+    canvas = window.canvas
+    window.act_pen.trigger()
+    canvas.pen_button = "picker"
+    picked = []
+    canvas.colourPicked.connect(lambda rgb: picked.append(rgb))
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QTabletEvent
+
+    test_f4._tablet(canvas, "move", QPointF(1, 1), eraser=False)  # (makes the device)
+    device = test_f4._DEVICES[False]
+    screen = canvas._view().map(canvas._pt(60, 200))
+    event = QTabletEvent(QEvent.Type.TabletPress, device, QPointF(screen), QPointF(canvas.mapToGlobal(screen)), 0.5, 0.0, 0.0, 0.0,
+                         0.0, 0.0, Qt.KeyboardModifier.NoModifier, Qt.MouseButton.RightButton, Qt.MouseButton.RightButton)
+    before = len(_layer(window.episode, "u").strokes)
+    canvas.tabletEvent(event)
+    assert picked and not canvas._stroke and len(_layer(window.episode, "u").strokes) == before

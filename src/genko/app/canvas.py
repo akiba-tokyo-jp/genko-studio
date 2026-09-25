@@ -122,6 +122,7 @@ class PageCanvas(GuideMixin, QWidget):
         self._live = None  # LiveInk of the line being drawn
         self._live_of: tuple | None = None  # (the point list, straight/snapped) it was drawn from
         self._eraser_end: str | None = None
+        self.pen_button = "menu"  # the pen's side button: menu (a right click) | picker | hand
         self.balloon_pen = False
         self.warp: dict | None = None  # a free transform being set up: {"kind", "box": (x, y, w, h), "points"}  # the text tool draws a balloon's outline instead of placing a line  # the tool to go back to after the pen's eraser end lifts
         self._panning = False
@@ -1345,6 +1346,27 @@ class PageCanvas(GuideMixin, QWidget):
         from PySide6.QtGui import QPointingDevice
 
         etype = event.type()
+        side = event.button() in (Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton) or (
+            etype == QEvent.Type.TabletMove and event.buttons() & (Qt.MouseButton.RightButton | Qt.MouseButton.MiddleButton))
+        if side and self.pen_button != "menu" and self.page is not None:
+            pos = self._ev(event.position())
+            if self.pen_button == "picker" and etype == QEvent.Type.TabletPress:
+                self._pick_colour(pos)
+            elif self.pen_button == "hand":
+                if etype == QEvent.Type.TabletPress:
+                    self._start_pan(pos)
+                elif etype == QEvent.Type.TabletMove and self._panning:
+                    delta = pos - self._last_pos
+                    self._pan_x += delta.x()
+                    self._pan_y += delta.y()
+                    self._last_pos = pos
+                    self._fitted = False
+                    self.update()
+            if etype == QEvent.Type.TabletRelease:
+                self._panning = False
+                self._update_cursor()
+            event.accept()
+            return
         eraser_end = event.pointerType() == QPointingDevice.PointerType.Eraser
         if etype == QEvent.Type.TabletPress and eraser_end and self.page is not None and self.tool != "eraser" \
                 and not self._space:

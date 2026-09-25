@@ -158,6 +158,15 @@ class BrushPanel(QWidget):
 
     # --- state ------------------------------------------------------------------------------------------
 
+    def set_personal_pressure(self, gamma: float | None) -> None:
+        """The pressure curve measured in the preferences, as 「自分に合わせた」."""
+        for at in reversed(range(self.pressure.count())):
+            if self.pressure.itemText(at).startswith("自分に合わせた"):
+                self.pressure.removeItem(at)
+        self.personal_gamma = gamma
+        if gamma is not None:
+            self.pressure.addItem(f"自分に合わせた（γ {gamma:g}）", gamma)
+
     def _fill_kinds(self) -> None:
         mine = brushes.load_library()
         for key, brush in brushes.everything().items():
