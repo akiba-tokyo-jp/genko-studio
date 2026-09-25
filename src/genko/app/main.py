@@ -1057,40 +1057,81 @@ class MainWindow(QMainWindow):
         self.act_checks = a("入稿前の点検", self._run_checks, "F9", "はみ出し・文字の重なりや小ささ・解像度などを探します")
         self.act_name_ok = a("ネーム完了 → 作画へ進む", self._name_ok, tip="承認の要らない原稿（エージェントを使わない原稿）で使います")
 
+        # layers and lines get their own menus too (not only their panels)
+        L = lambda method: (lambda *_: getattr(self.layers, method)())  # noqa: E731
+        self.act_layer_pen = a("新しいペンのレイヤー", lambda: self.layers._add("pen", "ペン"), "Ctrl+Shift+N")
+        self.act_layer_paint = a("新しいペイントのレイヤー", lambda: self.layers._add("paint", "ペイント"))
+        self.act_layer_folder = a("新しいフォルダ", lambda: self.layers._add("folder", "フォルダ"))
+        self.act_layer_dup = a("レイヤーを複製", L("_duplicate"), "Ctrl+J")
+        self.act_layer_merge = a("下のレイヤーと結合", L("_merge_down"), "Ctrl+Shift+E")
+        self.act_layer_delete = a("レイヤーを削除", L("_delete"))
+        self.act_layer_up = a("レイヤーを前へ", lambda: self.layers._move(1), "Ctrl+]")
+        self.act_layer_down = a("レイヤーを後ろへ", lambda: self.layers._move(-1), "Ctrl+[")
+        self.act_layer_draft = a("下描きにする（書き出さない）／戻す", lambda: self.layers.draft.click())
+
+        self.act_line_type = a("台詞を入れる（テキストの道具）", lambda: self._tool("text"))
+        self.act_balloon_pen = a("フキダシを手で描く", lambda on: (self._tool("text"), self.text_settings.draw_balloon.setChecked(on)),
+                                 tip="ドラッグで囲んだ形のフキダシに台詞を入れます", checkable=True)
+        self.act_line_edit = a("選んだ台詞をその場で直す", self._edit_selected_line, "F2")
+        self.act_line_delete = a("選んだ台詞を消す", self._delete_selected_line)
+        self.act_line_wrap = a("縦書き・横書きを切り替える", self._toggle_selected_wrap)
+        self.act_close = a("閉じる", self.close, QKeySequence.StandardKey.Close)
+        self.act_quit = a("Genko を終わる", lambda: QApplication.instance().closeAllWindows(), QKeySequence.StandardKey.Quit)
+
         bar = self.menuBar()
         menus = [
-            ("ファイル", [self.act_new, self.act_open, None, self.act_save, self.act_save_as, None, self.act_import, self.act_export, None,
-                         self.act_prefs]),
-            ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste]),
+            ("ファイル", [self.act_new, self.act_open, "recent", None, self.act_save, self.act_save_as, None, self.act_import,
+                         self.act_export, None, self.act_prefs, None, self.act_close, self.act_quit]),
+            ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste,
+                      self.act_delete_area, None, self.act_select_all, self.act_deselect]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_onion]),
             ("ツール", [self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None, self.act_picker,
                         self.act_fill, self.act_lassofill, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
                         self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner]),
-            ("定規", [self.act_ruler, None, *self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
-                      self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]),
-            ("3D", [self.act_3d, None, self.act_add_figure, self.act_add_box, None, *self.pose_actions, None, self.act_trace,
-                    self.act_del_prim]),
+            ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
+                          self.act_layer_merge, self.act_layer_delete, None, self.act_layer_up, self.act_layer_down, None,
+                          self.act_layer_draft, "mask"]),
+            ("台詞", [self.act_line_type, self.act_balloon_pen, None, self.act_line_edit, self.act_line_wrap, "shapes",
+                      self.act_line_delete, None, self.act_story_editor]),
             ("トーン・効果線", [self.act_tone_here, self.act_tone_click, None, self.act_effect, *self.effect_actions, None,
                                self.act_materials]),
             ("選択", [self.act_marquee, self.act_lasso, self.act_wand, None, self.act_select_all, self.act_deselect, None,
                       self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v,
                       self.act_warp_perspective, self.act_warp_mesh, self.act_warp_apply, None,
                       self.act_fill_selection, self.act_line_width]),
+            ("定規・3D", [self.act_ruler, None, *self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
+                          self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm, None, self.act_3d,
+                          self.act_add_figure, self.act_add_box, "poses", self.act_trace, self.act_del_prim]),
             ("コマ", [self.act_frame, None, self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
                       self.act_gutters, self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape]),
             ("ページ", [self.act_add_page, self.act_dup_page, self.act_del_page, None, self.act_page_up, self.act_page_down, self.act_spread,
                         None, self.act_paper, self.act_nombre, self.act_page_nombre, None, self.act_story_editor, self.act_checks, None, self.act_name_ok]),
         ]
+        from genko.app.lettering import KINDS
+
         for title, actions in menus:
             menu = bar.addMenu(title)
             for act in actions:
                 if act is None:
                     menu.addSeparator()
+                elif act == "recent":
+                    self.recent_menu = menu.addMenu("最近使った原稿")
+                    self.recent_menu.aboutToShow.connect(self._fill_recent)
+                elif act == "shapes":
+                    shapes = menu.addMenu("フキダシの形")
+                    for key, label in KINDS:
+                        shapes.addAction(label, lambda k=key: self._set_selected_balloon(k))
+                elif act == "mask":
+                    self.layer_mask_menu = menu.addMenu("マスク")  # (filled with the layer panel's own, below)
+                elif act == "poses":
+                    poses = menu.addMenu("ポーズ")
+                    for pose in self.pose_actions:
+                        poses.addAction(pose)
                 else:
                     menu.addAction(act)
-        self.view_menu = bar.addMenu("パネル")
+        self.view_menu = bar.addMenu("ウィンドウ")
         help_menu = bar.addMenu("ヘルプ")
         for act in (self.act_help_guide, self.act_help_keys, self.act_help_faq, None, self.act_about):
             if act is None:
@@ -1149,6 +1190,8 @@ class MainWindow(QMainWindow):
         self.panel_view = PanelView(self)
         self.story = StoryPanel(self)
         self.layers = LayerPanel(self)
+        for act in self.layers.mask_button.menu().actions():
+            self.layer_mask_menu.addAction(act)
         self.library = Library(self)
         self.guides = GuidePanel(self)
         self.materials = MaterialPanel(self)
@@ -1166,6 +1209,7 @@ class MainWindow(QMainWindow):
         self._brush_changed()
         self.text_settings = TextToolSettings()
         self.text_settings.draw_balloon.toggled.connect(lambda on: setattr(self.canvas, "balloon_pen", on))
+        self.text_settings.draw_balloon.toggled.connect(lambda on: self.act_balloon_pen.setChecked(on))
         self.tool_settings = ToolSettings()
         ts = self.tool_settings
         ts.add(("pen", "fill", "lassofill", "picker"), self.brush)
@@ -1706,6 +1750,46 @@ class MainWindow(QMainWindow):
             self.help_dialog = helps.show(self, "Genko Studio について",
                                           f"<h2>Genko Studio</h2><p>版 {__version__}</p><p>マンガの原稿を、ネームから入稿まで描く道具。"
                                           "エージェント（AI）と分担して進めることもできます。</p>")
+
+    def _fill_recent(self) -> None:
+        self.recent_menu.clear()
+        items = recent_projects()
+        if not items:
+            self.recent_menu.addAction("（まだありません）").setEnabled(False)
+        for path in items[:12]:
+            self.recent_menu.addAction(path.stem, lambda p=path: self.open_project(p))
+
+    def _selected_line_or_say(self):
+        line = self._line(self.canvas.selected_line_id) if self.canvas.selected_line_id else None
+        if line is None:
+            self.flash("先に選択ツール（V）で台詞（フキダシ）をクリックして選びます", 4000)
+        return line
+
+    def _edit_selected_line(self) -> None:
+        line = self._selected_line_or_say()
+        if line is not None:
+            self._edit_line_inline(line.id)
+
+    def _delete_selected_line(self) -> None:
+        line = self._selected_line_or_say()
+        if line is not None and self.apply_ops([{"op": "delete_line", "id": line.id}]):
+            self.canvas.selected_line_id = None
+
+    def _toggle_selected_wrap(self) -> None:
+        from genko.app.lettering import refit
+
+        line = self._selected_line_or_say()
+        if line is None:
+            return
+        vertical = line.wrap != "vertical"
+        size = refit(line, self.frame_by_id(line.frame_id), line.text, line.balloon, vertical)
+        self.apply_ops([{"op": "edit_line", "id": line.id, "wrap": "vertical" if vertical else "horizontal"},
+                        {"op": "move_line", "id": line.id, **size}])
+
+    def _set_selected_balloon(self, kind: str) -> None:
+        line = self._selected_line_or_say()
+        if line is not None:
+            self.apply_ops([{"op": "edit_line", "id": line.id, "balloon": kind}])
 
     def _make_brush(self) -> None:
         from genko import brushes
