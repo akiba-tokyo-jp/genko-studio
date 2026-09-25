@@ -174,11 +174,24 @@ class StoryPanel(QWidget):
         form.addRow("傾き", self.skew)
         form.addRow("弓なり", self.arc)
         form.addRow("", self.color)
-        hint = QLabel("編集画面: テキストツール（T）でクリックした所に入力。フキダシはダブルクリックで打ち直し、"
-                      "四隅で大きさ、●でしっぽの先、◇でしっぽの曲がり。右クリックで形・しっぽ・結合。")
+        hint = QLabel("フキダシはダブルクリックで打ち直し、四隅で大きさ、●でしっぽの先、◇でしっぽの曲がり、上の○で回転。"
+                      "右クリックで形・しっぽ・結合。")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#666")
+        # the lettering and balloon settings of the chosen line sit beside the tool (ツールの設定), where
+        # there is room; this panel keeps the list and the words
+        self.style_box = QWidget()
+        self.style_title = QLabel()
+        self.style_title.setStyleSheet("font-weight:bold")
+        self.style_title.setWordWrap(True)
+        sl = QVBoxLayout(self.style_box)
+        sl.setContentsMargins(0, 6, 0, 0)
+        sl.addWidget(self.style_title)
+        sl.addLayout(form)
+        sl.addWidget(reset)
+        sl.addWidget(hint)
         layout = QVBoxLayout(self)
+        layout.setSpacing(4)
         layout.addWidget(QLabel("このページの台詞（読み順）"))
         layout.addWidget(self.list, 1)
         layout.addLayout(order)
@@ -186,9 +199,10 @@ class StoryPanel(QWidget):
         layout.addWidget(self.text)
         layout.addLayout(row)
         layout.addLayout(buttons)
-        layout.addLayout(form)
-        layout.addWidget(reset)
-        layout.addWidget(hint)
+        more = QLabel("文字・フキダシの設定は左の「ツールの設定」に出ます")
+        more.setWordWrap(True)
+        more.setStyleSheet("color:#666")
+        layout.addWidget(more)
         self._picked()
 
     def _lines(self):
@@ -230,6 +244,11 @@ class StoryPanel(QWidget):
         line = self._line()
         for widget in (self.apply_button, self.delete_button):
             widget.setEnabled(line is not None)
+        for widget in self.style_box.findChildren(QWidget):
+            if widget is not self.style_title:
+                widget.setEnabled(line is not None)
+        self.style_title.setText(f"選んだ台詞の文字とフキダシ: 「{line.text[:12]}{'…' if len(line.text) > 12 else ''}」"
+                                 if line is not None else "台詞を選ぶと、その文字とフキダシを変えられます")
         self.window.canvas.selected_line_id = line.id if line else None
         self.window.canvas.update()
         if line is None:
@@ -474,7 +493,7 @@ class LayerPanel(QWidget):
         self.act_mask_off.toggled.connect(lambda on: self._loading or self._mask({"enabled": not on}))
         mask_menu.addAction("マスクを消す", lambda: self._mask({"delete": True}))
         self.mask_button.setMenu(mask_menu)
-        self.list.setIconSize(QSize(28, 38))
+        self.list.setIconSize(QSize(18, 24))
         self.filter = QComboBox()
         for key, label in wording.FILTERS:
             self.filter.addItem(label, key)
@@ -621,6 +640,9 @@ class LayerPanel(QWidget):
 
         if layer.kind == LayerKind.FOLDER:
             return None
+        if not (layer.strokes or layer.patches or layer.raster_png or layer.kind in (LayerKind.PLACED, LayerKind.TONE)
+                or getattr(layer, "tone", None)):
+            return None  # (an empty layer has nothing to show)
         cache = self.__dict__.setdefault("_thumbs", {})
         try:
             key = (page.index, layer.id, hash(repr(_layer_to_dict(layer))), len(layer.raster_png or b""),
@@ -1189,7 +1211,9 @@ class MainWindow(QMainWindow):
                                      self.act_del_prim]))
         ts.add(("effect",), action_page([*self.effect_actions, None, self.act_materials]))
         ts.add(("stamp",), action_page([self.act_materials]))
-        ts.add(("select",), action_page([self.act_fit, self.act_actual, None, self.act_story_editor, self.act_checks]))
+        select_page = action_page([self.act_fit, self.act_actual, None, self.act_story_editor, self.act_checks])
+        select_page.layout().insertWidget(0, self.story.style_box)
+        ts.add(("select",), select_page)
         settings_dock = QDockWidget("ツールの設定", self)
         settings_scroll = QScrollArea()
         settings_scroll.setWidgetResizable(True)
@@ -1286,13 +1310,19 @@ class MainWindow(QMainWindow):
             dock.setVisible(on)
             dock.toggleViewAction().setVisible(on)
         self.process.setVisible(on)
+        self.act_name_ok.setVisible(on)  # (stages and their approvals are for books made with agents)
         if on:
             self.resizeDocks([self.brush_dock, self.agent_docks[0]], [1, 1], Qt.Orientation.Vertical)
         if self.isVisible():
             QTimer.singleShot(0, self._settle_docks)
 
     def _settle_docks(self) -> None:
-        """The panels in front: the approval box (for agent books), the layers and the lines."""
+        """The panels in front: the approval box (for agent books), the layers and the lines; the lower
+        stack (the lines, the materials) gets the larger share of the height."""
+        upper = next((d for d in self.studio_docks if d.windowTitle() == "レイヤー"), None)
+        lower = next((d for d in self.studio_docks if d.windowTitle() == "台詞"), None)
+        if upper is not None and lower is not None:
+            self.resizeDocks([upper, lower], [2, 3], Qt.Orientation.Vertical)
         for dock in self.studio_docks:
             if dock.windowTitle() in ("承認箱", "レイヤー", "台詞") and dock.isVisible():
                 dock.raise_()
@@ -1321,6 +1351,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_visible_docks(self) -> None:
         self.process.refresh(self.episode)
+        if self.canvas.selected_line_id:  # the chosen line's settings beside the tool stay current
+            self.story.refresh()
+            self.story.select(self.canvas.selected_line_id)
         for dock in self.studio_docks:
             if self._dock_visible(dock):
                 self._refresh_dock(dock)
@@ -1478,7 +1511,9 @@ class MainWindow(QMainWindow):
             return None
         from genko.render import render_page
 
-        mode = "name" if not page.name_ok else "proof"
+        # (a person alone sees the page as it will print, name lines in blue; the name view is for the
+        # agent's name stage)
+        mode = "name" if not page.name_ok and getattr(self, "_agent_mode", False) else "proof"
         try:
             return _pixmap(render_page(page, dpi, mode=mode, episode=self.episode))
         except Exception:  # a broken asset must not take the editor down
@@ -1500,7 +1535,7 @@ class MainWindow(QMainWindow):
             self.status.setText(f"{page.index} ページ（{wording.STAGE.get(page.stage, page.stage)}） ・ コマ {len(page.leaf_frames())}"
                                 f"{selected} ・ {saved} ・ {wording.actor(self.session.actor)}")
         else:
-            self.status.setText(f"{page.index} / {len(self.episode.pages)} ページ ・ コマ {len(page.leaf_frames())}{selected} ・ {saved}")
+            self.status.setText(f"{page.index} / {len(self.episode.pages)} ページ ・ コマ {len(page.leaf_frames())} 個{selected} ・ {saved}")
         self._refresh_zoom()
 
     def flash(self, message: str, ms: int = 3000, error: bool = False) -> None:

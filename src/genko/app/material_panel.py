@@ -155,11 +155,22 @@ class MaterialPanel(QWidget):
         el.addWidget(self.effects)
         el.addLayout(self.effect_form)
         el.addLayout(effect_buttons)
+        # three pages in the panel, so none of them needs a long scroll
+        from PySide6.QtWidgets import QTabWidget
+
+        self.tabs = QTabWidget()
+        for box, title in ((mat_box, "素材"), (self.tone_box, "トーン"), (self.effect_box, "効果線")):
+            page = QWidget()
+            pl = QVBoxLayout(page)
+            pl.setContentsMargins(0, 0, 0, 0)
+            box.setFlat(True)  # (the tab already frames it)
+            box.layout().setContentsMargins(2, 4, 2, 2)
+            pl.addWidget(box)
+            pl.addStretch(1)
+            self.tabs.addTab(page, title)
         layout = QVBoxLayout(self)
-        layout.addWidget(mat_box)
-        layout.addWidget(self.tone_box)
-        layout.addWidget(self.effect_box)
-        layout.addStretch(1)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.tabs)
         self._fill_folders()
 
     # --- materials ------------------------------------------------------------------------------------------

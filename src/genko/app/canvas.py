@@ -290,8 +290,10 @@ class PageCanvas(GuideMixin, QWidget):
             self._live_of = None
         shown = self.snapped_preview(self._stroke)
         plain = len(shown) == 1 and shown[0] is self._stroke
-        if plain and self._live_of is not None and self._live_of[0] is self._stroke and self._live_of[1]:
-            self._live.extend(self._stroke)
+        if plain:
+            if not (self._live_of is not None and self._live_of[0] is self._stroke and self._live_of[1]):
+                self._live.redraw([])  # a new line: start from nothing
+            self._live.follow(self._stroke)
         else:
             self._live.redraw(shown[0], *shown[1:])
         self._live_of = (self._stroke, plain)
@@ -403,6 +405,8 @@ class PageCanvas(GuideMixin, QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
         elif self._stroke and self.tool == "pen" and self.live_brush is not None:
             painter.drawImage(0, 0, self._live_sync())
+            if self._live.tail is not None:
+                painter.drawImage(self._live.tail[0], self._live.tail[1], self._live.tail[2])
         elif self._stroke:
             color = QColor("#e8590c") if self.tool == "pen" else QColor(200, 60, 60, 160)
             shown = self.snapped_preview(self._stroke) if self.tool == "pen" else [self._stroke]

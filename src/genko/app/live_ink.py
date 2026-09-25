@@ -25,6 +25,8 @@ class LiveInk:
         self.rgb = tuple(brush.get("rgb") or b.rgb or (20, 20, 20))
         self.opacity = max(0.0, min(1.0, float(brush.get("opacity", 1.0)))) * b.opacity
         self.gamma = float(brush.get("pressure_gamma") or 1.0)
+        self.stabilize = int(brush.get("stabilize") or 0)  # the same steadying as the finished line
+        self.tail: tuple[int, int, QImage] | None = None  # the last few points, which the steadying still moves
         self.image = QImage(self.size[0], self.size[1], QImage.Format.Format_ARGB32_Premultiplied)
         self.image.fill(Qt.GlobalColor.transparent)
         self._cover = Image.new("L", self.size, 0)  # how much of each pixel the line covers so far
@@ -53,11 +55,36 @@ class LiveInk:
         self._paint(part)
         self._drawn = len(points)
 
+    def follow(self, points: list) -> None:
+        """The line so far, steadied as it will be when the pen lifts: the settled part is drawn once, and
+        only the last few points (which the steadying still moves) are drawn again each time."""
+        from genko.stroke import stabilize_points
+
+        if self.stabilize < 3 or len(points) < 3:
+            self.tail = None
+            self.extend(points)
+            return
+        steady = stabilize_points([list(p) for p in points], self.stabilize)
+        settled = steady[:max(1, len(steady) - self.stabilize // 2)]
+        self.extend(settled)
+        rest = [self._screen(p) for p in steady[max(0, len(settled) - 2):]]
+        drawn = brushes.draw(self.size, rest, round(self.scale * 25.4, 4), self.width_mm, self.kind, seed="live") if len(rest) > 1 else None
+        if drawn is None:
+            self.tail = None
+            return
+        mask, (x0, y0) = drawn
+        alpha = mask if self.opacity >= 1 else mask.point(lambda v, o=self.opacity: int(v * o))
+        patch = Image.new("RGBA", mask.size, (*self.rgb, 0))
+        patch.putalpha(alpha)
+        data = patch.tobytes()
+        self.tail = (x0, y0, QImage(data, patch.width, patch.height, patch.width * 4, QImage.Format.Format_RGBA8888).copy())
+
     def redraw(self, points: list, *copies: list) -> None:
         """Start the picture again (the line snapped to a ruler, became a straight line, or has symmetry
         copies)."""
         self.image.fill(Qt.GlobalColor.transparent)
         self._cover = Image.new("L", self.size, 0)
+        self.tail = None
         for copy in copies:
             self._drawn = 0
             self.extend(copy)
