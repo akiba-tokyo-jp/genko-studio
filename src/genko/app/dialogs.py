@@ -27,17 +27,157 @@ from PySide6.QtWidgets import (
 )
 
 from genko.app import exporting
-from genko.models import Binding, PageSpec
+from genko.models import PAPER_PRESETS, Binding, PageSpec
 
-PAPERS = [
-    ("B4 モノクロ（商業誌・投稿の原稿用紙、600 dpi）", "b4"),
-    ("A4 モノクロ（同人誌・練習、600 dpi）", "a4"),
-    ("縦読み・カラー（Webtoon、幅 80 mm）", "webtoon"),
-]
+PAPERS = [(label, key) for key, (label, _make) in PAPER_PRESETS.items()]
 
 
 def spec_for(key: str) -> PageSpec:
-    return {"b4": PageSpec.b4_comic, "a4": PageSpec.a4_mono, "webtoon": PageSpec.webtoon}[key]()
+    return PAPER_PRESETS[key][1]()
+
+
+class PaperDialog(QDialog):
+    """用紙の設定: a preset, or every number — paper, finished size, bleed and the basic frame's margins."""
+
+    def __init__(self, parent, spec: PageSpec, changing: bool = False) -> None:
+        from PySide6.QtWidgets import QDoubleSpinBox, QGridLayout
+
+        super().__init__(parent)
+        self.setWindowTitle("原稿用紙の設定")
+        self.preset = QComboBox()
+        self.preset.addItem("（数値で決める）", "")
+        for key, (label, _make) in PAPER_PRESETS.items():
+            self.preset.addItem(label, key)
+        self.preset.currentIndexChanged.connect(lambda _: self._from_preset())
+
+        def spin(lo, hi, value):
+            box = QDoubleSpinBox()
+            box.setRange(lo, hi)
+            box.setDecimals(1)
+            box.setSingleStep(0.5)
+            box.setSuffix(" mm")
+            box.setValue(float(value))
+            box.valueChanged.connect(lambda _: self._changed())
+            return box
+
+        tw, th = spec.trim_size()
+        m = spec.margins()
+        self.paper_w, self.paper_h = spin(20, 1000, spec.width_mm), spin(20, 2000, spec.height_mm)
+        self.trim_w, self.trim_h = spin(10, 1000, tw), spin(10, 2000, th)
+        self.bleed = spin(0, 20, spec.bleed_mm)
+        self.top, self.bottom = spin(0, 200, m["top"]), spin(0, 200, m["bottom"])
+        self.inner, self.outer = spin(0, 200, m["inner"]), spin(0, 200, m["outer"])
+        self.dpi = QSpinBox()
+        self.dpi.setRange(72, 1200)
+        self.dpi.setValue(int(spec.dpi))
+        self.dpi.setSuffix(" dpi")
+        grid = QGridLayout()
+        rows = [("用紙（キャンバス）", self.paper_w, self.paper_h), ("仕上がり（トンボの内側）", self.trim_w, self.trim_h)]
+        grid.addWidget(QLabel("幅"), 0, 1)
+        grid.addWidget(QLabel("高さ"), 0, 2)
+        for i, (label, a, b) in enumerate(rows, start=1):
+            grid.addWidget(QLabel(label), i, 0)
+            grid.addWidget(a, i, 1)
+            grid.addWidget(b, i, 2)
+        grid.addWidget(QLabel("裁ち落とし（仕上がりの外）"), 3, 0)
+        grid.addWidget(self.bleed, 3, 1)
+        grid.addWidget(QLabel("基本枠までの余白　上 / 下"), 4, 0)
+        grid.addWidget(self.top, 4, 1)
+        grid.addWidget(self.bottom, 4, 2)
+        grid.addWidget(QLabel("　　　　　　　　のど / 小口"), 5, 0)
+        grid.addWidget(self.inner, 5, 1)
+        grid.addWidget(self.outer, 5, 2)
+        grid.addWidget(QLabel("解像度"), 6, 0)
+        grid.addWidget(self.dpi, 6, 1)
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        self.move = QCheckBox("コマ・台詞・絵を新しい基本枠に合わせて動かす")
+        self.move.setChecked(True)
+        self.move.setVisible(changing)
+        hint = QLabel("数値は出版社・印刷所で違います。投稿・入稿の前に、先方の原稿用紙の指定を確かめてください。")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#666")
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("変える" if changing else "決める")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        layout = QVBoxLayout(self)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("見本"))
+        row.addWidget(self.preset, 1)
+        layout.addLayout(row)
+        layout.addLayout(grid)
+        layout.addWidget(self.summary)
+        layout.addWidget(self.move)
+        layout.addWidget(hint)
+        layout.addWidget(buttons)
+        self._preset_key = ""
+        same = next((key for key, (_label, make) in PAPER_PRESETS.items() if make() == spec), "")
+        if same:  # the book is on a preset: show it as that
+            self.preset.blockSignals(True)
+            self.preset.setCurrentIndex(self.preset.findData(same))
+            self.preset.blockSignals(False)
+            self._preset_key = same
+        self._changed(keep_preset=True)
+
+    def _from_preset(self) -> None:
+        key = self.preset.currentData()
+        if not key:
+            return
+        spec = PAPER_PRESETS[key][1]()
+        tw, th = spec.trim_size()
+        m = spec.margins()
+        widgets = (self.paper_w, self.paper_h, self.trim_w, self.trim_h, self.bleed, self.top, self.bottom, self.inner, self.outer)
+        values = (spec.width_mm, spec.height_mm, tw, th, spec.bleed_mm, m["top"], m["bottom"], m["inner"], m["outer"])
+        for widget, value in zip(widgets, values):
+            widget.blockSignals(True)
+            widget.setValue(float(value))
+            widget.blockSignals(False)
+        self.dpi.setValue(int(spec.dpi))
+        self._preset_key = key
+        self._changed(keep_preset=True)
+
+    def spec(self) -> PageSpec:
+        if self._preset_key:
+            return PAPER_PRESETS[self._preset_key][1]()
+        return PageSpec.custom(self.paper_w.value(), self.paper_h.value(), self.trim_w.value(), self.trim_h.value(), self.bleed.value(),
+                               self.top.value(), self.bottom.value(), self.inner.value(), self.outer.value(), self.dpi.value())
+
+    def _changed(self, keep_preset: bool = False) -> None:
+        if not keep_preset and getattr(self, "_preset_key", ""):
+            self._preset_key = ""
+            self.preset.blockSignals(True)
+            self.preset.setCurrentIndex(0)
+            self.preset.blockSignals(False)
+        try:
+            text = self.spec().describe()
+            ok = True
+        except ValueError as exc:
+            text = {"the paper must hold the finished size and its bleed": "用紙が、仕上がりと裁ち落としより小さくなっています",
+                    "the basic frame must fit inside the finished size": "基本枠が仕上がりに収まりません"}.get(str(exc), str(exc))
+            ok = False
+        self.summary.setText(text)
+        self.summary.setStyleSheet("" if ok else "color:#c92a2a")
+        if hasattr(self, "ok_button"):
+            self.ok_button.setEnabled(ok)
+
+    def _accept(self) -> None:
+        try:
+            self.spec()
+        except ValueError:
+            return
+        self.accept()
+
+    def op(self) -> dict:
+        """The set_page_spec op for this choice."""
+        if self._preset_key:
+            return {"op": "set_page_spec", "preset": self._preset_key, "move": self.move.isChecked()}
+        return {"op": "set_page_spec", "paper": [self.paper_w.value(), self.paper_h.value()],
+                "trim": [self.trim_w.value(), self.trim_h.value()], "bleed_mm": self.bleed.value(),
+                "margins": [self.top.value(), self.bottom.value(), self.inner.value(), self.outer.value()], "dpi": self.dpi.value(),
+                "move": self.move.isChecked()}
 
 
 def project_title(path: Path) -> str:
@@ -128,6 +268,12 @@ class NewProjectDialog(QDialog):
         self.paper = QComboBox()
         for label, key in PAPERS:
             self.paper.addItem(label, key)
+        self.paper.addItem("自分で決める…", "custom")
+        self.custom_spec: PageSpec | None = None
+        self.paper_note = QLabel()
+        self.paper_note.setWordWrap(True)
+        self.paper_note.setStyleSheet("color:#666")
+        self.paper.currentIndexChanged.connect(lambda _: self._paper_changed())
         self.binding = QComboBox()
         self.binding.addItem("右綴じ（縦書きの漫画）", "right")
         self.binding.addItem("左綴じ", "left")
@@ -146,6 +292,7 @@ class NewProjectDialog(QDialog):
         form.addRow("話数", self.episode)
         form.addRow("ページ数", self.pages)
         form.addRow("原稿用紙", self.paper)
+        form.addRow("", self.paper_note)
         form.addRow("綴じ", self.binding)
         form.addRow("保存する場所", where)
         form.addRow("", self.where_note)
@@ -158,6 +305,7 @@ class NewProjectDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(buttons)
         self._note()
+        self._paper_changed()
 
     def target(self) -> Path:
         from genko.export import safe_name
@@ -169,6 +317,21 @@ class NewProjectDialog(QDialog):
 
     def _note(self) -> None:
         self.where_note.setText(f"作られるフォルダ: {self.target()}")
+
+    def chosen_spec(self) -> PageSpec:
+        if self.paper.currentData() == "custom":
+            return self.custom_spec or PageSpec.b4_comic()
+        return spec_for(self.paper.currentData())
+
+    def _paper_changed(self) -> None:
+        if self.paper.currentData() == "custom":
+            dialog = PaperDialog(self, self.custom_spec or PageSpec.b4_comic())
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.custom_spec = dialog.spec()
+            elif self.custom_spec is None:
+                self.paper.setCurrentIndex(0)
+                return
+        self.paper_note.setText(self.chosen_spec().describe())
 
     def _pick_folder(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "保存する場所", self.folder.text())
@@ -184,7 +347,7 @@ class NewProjectDialog(QDialog):
             QMessageBox.warning(self, "Genko", f"同じ名前の原稿がすでにあります:\n{target}")
             return
         episode = new_episode(self.title.text().strip() or "無題", self.episode.value(), self.pages.value(),
-                              spec_for(self.paper.currentData()), Binding(self.binding.currentData()))
+                              self.chosen_spec(), Binding(self.binding.currentData()))
         try:
             save_episode(episode, target)
         except OSError as exc:
@@ -229,6 +392,13 @@ class ExportDialog(QDialog):
         self.long_edge.setRange(400, 8000)
         self.long_edge.setValue(2048)
         self.long_edge.setSuffix(" px")
+        from genko.export import AREA_LABELS, AREAS
+
+        self.area = QComboBox()
+        for key in AREAS:
+            self.area.addItem(AREA_LABELS[key], key)
+        self.area.setCurrentIndex(self.area.findData("bleed"))
+        self.area.setToolTip("印刷所の指定に合わせます。多くは「裁ち落としまで」。トンボ付きは用紙全体")
         self.jpeg = QCheckBox("JPEG にする（PNG より軽い）")
         self.spreads = QCheckBox("見開きも 1 枚ずつ出す")
         self.official = QCheckBox("正式な書き出し（点検して、書き出しの承認として記録する）")
@@ -245,7 +415,7 @@ class ExportDialog(QDialog):
         self.form.addRow("形式", self.format)
         self.form.addRow("", self.note)
         self.rows: dict[str, QWidget] = {}
-        for key, label, widget in (("dpi", "解像度", self.dpi), ("width", "幅", self.width), ("max_height", "1 枚の高さの上限", self.max_height),
+        for key, label, widget in (("dpi", "解像度", self.dpi), ("area", "書き出す範囲", self.area), ("width", "幅", self.width), ("max_height", "1 枚の高さの上限", self.max_height),
                                    ("long_edge", "長辺", self.long_edge), ("jpeg", "", self.jpeg), ("spreads", "", self.spreads)):
             self.form.addRow(label, widget)
             self.rows[key] = widget
@@ -284,7 +454,8 @@ class ExportDialog(QDialog):
 
     def options(self) -> dict:
         return {"dpi": self.dpi.value(), "width": self.width.value(), "max_height": self.max_height.value(),
-                "long_edge": self.long_edge.value(), "jpeg": self.jpeg.isChecked(), "spreads": self.spreads.isChecked()}
+                "long_edge": self.long_edge.value(), "jpeg": self.jpeg.isChecked(), "spreads": self.spreads.isChecked(),
+                "area": self.area.currentData()}
 
     def run(self) -> None:
         out = Path(self.folder.text()).expanduser()

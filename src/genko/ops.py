@@ -49,6 +49,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_page", "count": "int", "after": "int? (insert after this page; default at the end)"},
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int", "next_to": "bool? (the copy right after the page; default at the end)"},
+    {"op": "set_page_spec", "preset": "b4|b5|a5|a4|webtoon?", "paper": "[w,h]? mm", "trim": "[w,h]? (finished size)", "bleed_mm": "float?", "margins": "[top,bottom,inner,outer] | {top,bottom,inner,outer}? (basic frame, from the trim)", "dpi": "int?", "move": "bool? (default true: move everything onto the new basic frame)"},
     {"op": "set_nombre", "page": "int? (with numero: show or hide that page's)", "numero": "bool?", "position": "bottom_center|bottom_outside|top_outside|side_outside?", "font": "str?", "size_mm": "float?", "start": "int? (the number of page 1)", "hidden": "bool? (隠しノンブル)", "hidden_size_mm": "float?", "show": "bool? (visible nombres)"},
     {"op": "set_note", "page": "int", "note": "str"},
     {"op": "set_meta", "title": "str?", "episode": "int?", "preset": "str?", "binding": "right|left?", "start_side": "left|right|null?", "strict_gates": "bool?", "font_path": "str?"},
@@ -1000,6 +1001,16 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             _reorder(episode, order)
         return
 
+    if name == "set_page_spec":
+        from genko import pagespec
+
+        try:
+            spec = pagespec.spec_from(op, episode.spec)
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
+        pagespec.relayout(episode, spec, move=op.get("move", True) is not False)
+        return
+
     if name == "set_nombre":
         from genko import nombre
 
@@ -1852,28 +1863,30 @@ def _shift(points: list[tuple], dx: float) -> list[tuple]:
 def _stroke_target(episode: Episode, page: Page, points: list[tuple], space: str) -> tuple[Page, list[tuple]]:
     """Resolve which page of a spread a stroke belongs to.
 
-    space "page" (default): x is from this page's left edge; x >= width goes to the partner
-    on the right, x < 0 to the partner on the left. space "spread": x is from the physical
-    spread's left edge, left page [0, W), right page [W, 2W).
+    space "page" (default): x is from this page's paper; past the gutter (the trim's edge at the
+    binding) it goes to the partner. space "spread": x is from the left page's paper; the right page
+    starts one trim width further (the two finished sizes meet at the gutter).
     """
-    width = page.spec.width_mm
+    step = page.spread_step_mm()  # the finished sizes meet at the gutter
+    trim = page.trim_rect_mm()
+    gutter = trim.x + trim.width  # the gutter, in the left page's coordinates
     xs = [float(pt[0]) for pt in points]
     other = next((item for item in episode.pages if item.index == page.spread_with), None) if page.spread_with else None
     if space == "spread":
         if other is None:
             raise ApplyError("space spread needs a page with spread_with")
         left, right = (page, other) if page.side(episode.start_side) == "left" else (other, page)
-        if max(xs) < width:
+        if max(xs) < gutter:
             return left, points
-        if min(xs) >= width:
-            return right, _shift(points, -width)
+        if min(xs) >= gutter:
+            return right, _shift(points, -step)
         raise ApplyError("a stroke cannot cross the gutter between spread pages")
     if space != "page":
         raise ApplyError("space must be page or spread")
-    if other is not None and min(xs) >= width:
-        return other, _shift(points, -width)
-    if other is not None and max(xs) < 0:
-        return other, _shift(points, width)
+    if other is not None and page.side(episode.start_side) == "left" and min(xs) >= gutter:
+        return other, _shift(points, -step)
+    if other is not None and page.side(episode.start_side) == "right" and max(xs) < trim.x:
+        return other, _shift(points, step)
     return page, points
 
 

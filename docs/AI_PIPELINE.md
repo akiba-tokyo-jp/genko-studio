@@ -1432,7 +1432,7 @@ MCP サーバー名は `genko`。Hermes からは `mcp_genko_<道具名>` とし
 | 道具 | 入力（主なもの） | 返すもの | 書き込み |
 |---|---|---|---|
 | `projects` | – | `--root` 配下のプロジェクト（名前、題名、ページ数、工程） | なし |
-| `create_project` | `name`, `title`, `pages`, `spec_preset`（判型。例 `commercial-b4`）, `binding`。policy は `studio` の既定 | 作ったプロジェクト | あり |
+| `create_project` | `name`, `title`, `pages`, `spec_preset`（判型: `commercial-b4`（B4 商業誌・投稿、仕上がり 220×310・基本枠 180×270）、`doujin-b5`、`doujin-a5`、`a4-mono`、`webtoon`）, `binding`。policy は `studio` の既定 | 作ったプロジェクト | あり |
 | `status` | – | 工程ごとの件数、承認待ち、承認依頼の状態、次の作業の件数 | なし |
 | `next` | `role?`, `limit?`, `claim?` | worklist の項目（`tools` の目安付き）、`waiting_for` | 予約だけ |
 | `inspect` | `target`（`bible` / `script` / `page` / `panel` / `candidate` / `request`） | 対象の JSON（小さく） | なし |

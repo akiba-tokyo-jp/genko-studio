@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--webtoon", action="store_true")
     new.add_argument("--b4", action="store_true")
     new.add_argument("--preset", default="")
+    new.add_argument("--paper", default="", help="b4 (magazines, contests) | b5 | a5 (doujinshi) | a4 (practice) | webtoon")
     new.add_argument("--json", action="store_true", help="Machine-readable JSON on stdout (default)")
     new.add_argument("--plain", action="store_true", help="Print only the path")
 
@@ -155,7 +156,13 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.cmd == "new":
-            if args.webtoon:
+            if args.paper:
+                from genko.models import PAPER_PRESETS
+
+                if args.paper not in PAPER_PRESETS:
+                    raise SystemExit(f"--paper must be one of {', '.join(PAPER_PRESETS)}")
+                spec = PAPER_PRESETS[args.paper][1]()
+            elif args.webtoon:
                 spec = PageSpec.webtoon()
             elif args.preset:
                 spec = PageSpec.publisher(args.preset)

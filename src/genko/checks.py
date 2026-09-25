@@ -43,10 +43,9 @@ def _text_size_mm(line) -> float | None:
 
 def page_issues(episode, page) -> list[dict]:
     out: list[dict] = []
-    spec = page.spec
-    bleed = spec.bleed_mm
-    trim = (bleed, bleed, spec.width_mm - 2 * bleed, spec.height_mm - 2 * bleed)
-    inner = page.inner_rect_mm()
+    t = page.trim_rect_mm()
+    trim = (t.x, t.y, t.width, t.height)
+    inner = page.inner_rect_mm(getattr(episode, "start_side", None))
     lines = episode.story_for_page(page.index)
     placed = []
     for line in lines:
@@ -114,8 +113,9 @@ def page_issues(episode, page) -> list[dict]:
             x, y, w, h = (float(v) for v in patch["box"])
             xs += [x, x + w]
             ys += [y, y + h]
-        if xs and (min(xs) < -1 or min(ys) < -1 or max(xs) > spec.width_mm + 1 or max(ys) > spec.height_mm + 1):
-            out.append(_issue("warning", "art_outside_page", page, f"「{label}」の絵が紙の外まで出ている（はみ出た所は切れる）",
+        b = page.bleed_rect_mm()
+        if xs and (min(xs) < b.x - 1 or min(ys) < b.y - 1 or max(xs) > b.x + b.width + 1 or max(ys) > b.y + b.height + 1):
+            out.append(_issue("warning", "art_outside_page", page, f"「{label}」の絵が裁ち落としの外まで出ている（はみ出た所は印刷されない）",
                               (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)), "layer", layer.id))
     if page.spread_with:
         from genko.ops import facing_problem

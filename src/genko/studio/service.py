@@ -64,6 +64,8 @@ BRIEF_FROM_PLAN = ("shot", "angle", "characters", "location_id", "time", "action
 
 SPEC_PRESETS = {
     "commercial-b4": PageSpec.b4_comic,
+    "doujin-b5": PageSpec.b5_doujin,
+    "doujin-a5": PageSpec.a5_doujin,
     "a4-mono": PageSpec.a4_mono,
     "webtoon": PageSpec.webtoon,
 }
@@ -939,7 +941,7 @@ class HumanService:
 
     def export(self, fmt: str, out: Path, dpi: int | None = None, allow_fixture: bool = False, force: bool = False,
                *, width_px: int = 800, max_height: int = 1280, long_edge: int = 2048, jpeg: bool | None = None,
-               spreads: bool = False) -> dict:
+               spreads: bool = False, area: str = "bleed") -> dict:
         """The final export (gate ④): preflight must pass, then the pages are written and the approval recorded."""
         from genko.export import export_print
         from genko.studio import preflight
@@ -960,7 +962,7 @@ class HumanService:
             else:
                 written = profiles.export_sns(episode, Path(out), long_edge, fmt="png" if jpeg is False else "jpeg", spreads=spreads)
         else:
-            written = export_print(episode, Path(out), fmt=fmt, dpi=int(dpi or episode.spec.dpi or 600))
+            written = export_print(episode, Path(out), fmt=fmt, dpi=int(dpi or episode.spec.dpi or 600), area=area)
         self._apply([{"op": "approve", "gate": "export"}])
         return {"ok": True, "files": [str(p) for p in written], "warnings": report["warnings"], "dpi": report["dpi"]}
 

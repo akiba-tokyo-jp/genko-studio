@@ -229,15 +229,15 @@ def test_delete_copy_paste_and_paint_pixels():
 
     spec = ep.pages[0].spec
     image = Image.new("RGBA", (mm_to_px(spec.width_mm, WORKING_DPI), mm_to_px(spec.height_mm, WORKING_DPI)), (0, 0, 0, 0))
-    image.paste((0, 0, 0, 255), (mm_to_px(10, WORKING_DPI), mm_to_px(10, WORKING_DPI), mm_to_px(30, WORKING_DPI), mm_to_px(30, WORKING_DPI)))
+    image.paste((0, 0, 0, 255), (mm_to_px(50, WORKING_DPI), mm_to_px(60, WORKING_DPI), mm_to_px(70, WORKING_DPI), mm_to_px(80, WORKING_DPI)))
     buf = io.BytesIO()
     image.save(buf, format="PNG")
     apply_ops(ep, [{"op": "add_layer", "page": 1, "name": "色", "kind": "paint", "id": "paint1"},
                    {"op": "put_raster", "page": 1, "id": "paint1", "png_base64": base64.b64encode(buf.getvalue()).decode()}])
-    assert _grey(ep, 20, 20) < 60
-    apply_ops(ep, [{"op": "transform_area", "page": 1, "layer_id": "paint1", "area": {"poly": [[0, 0], [60, 0], [60, 60], [0, 60]]},
+    assert _grey(ep, 60, 70) < 60
+    apply_ops(ep, [{"op": "transform_area", "page": 1, "layer_id": "paint1", "area": {"poly": [[40, 50], [100, 50], [100, 110], [40, 110]]},
                     "matrix": [1, 0, 0, 1, 100, 0]}])
-    assert _grey(ep, 20, 20) > 240 and _grey(ep, 120, 20) < 60
+    assert _grey(ep, 60, 70) > 240 and _grey(ep, 160, 70) < 60
 
 
 def test_line_width_pinch_and_erase_to_crossing():

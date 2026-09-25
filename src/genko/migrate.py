@@ -144,6 +144,9 @@ def migrate_payload(payload: dict, store=None) -> Episode:
         dpi=spec_raw["dpi"],
         bleed_mm=spec_raw["bleed_mm"],
         inner_margin_mm=spec_raw["inner_margin_mm"],
+        trim_w_mm=spec_raw.get("trim_w_mm"),
+        trim_h_mm=spec_raw.get("trim_h_mm"),
+        margins_mm=tuple(float(v) for v in spec_raw["margins_mm"]) if spec_raw.get("margins_mm") else None,
         expression=spec_raw.get("expression", "mono"),
         preset=spec_raw.get("preset"),
     )

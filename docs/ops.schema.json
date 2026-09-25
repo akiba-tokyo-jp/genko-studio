@@ -167,6 +167,16 @@
       "next_to": "bool? (the copy right after the page; default at the end)"
     },
     {
+      "op": "set_page_spec",
+      "preset": "b4|b5|a5|a4|webtoon?",
+      "paper": "[w,h]? mm",
+      "trim": "[w,h]? (finished size)",
+      "bleed_mm": "float?",
+      "margins": "[top,bottom,inner,outer] | {top,bottom,inner,outer}? (basic frame, from the trim)",
+      "dpi": "int?",
+      "move": "bool? (default true: move everything onto the new basic frame)"
+    },
+    {
       "op": "set_nombre",
       "page": "int? (with numero: show or hide that page's)",
       "numero": "bool?",

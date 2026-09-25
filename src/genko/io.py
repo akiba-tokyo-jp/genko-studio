@@ -136,7 +136,8 @@ def _payload(episode: Episode, store: AssetStore) -> dict:
             "inner_margin_mm": episode.spec.inner_margin_mm,
             "expression": episode.spec.expression,
             "preset": episode.spec.preset,
-        },
+        } | ({"trim_w_mm": episode.spec.trim_w_mm, "trim_h_mm": episode.spec.trim_h_mm} if episode.spec.trim_w_mm else {})
+          | ({"margins_mm": list(episode.spec.margins_mm)} if episode.spec.margins_mm else {}),
         "bible": {
             "plot": episode.bible.plot,
             "characters": episode.bible.characters,

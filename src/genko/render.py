@@ -133,10 +133,15 @@ def _clip_mask(page: Page, size: tuple[int, int], dpi: int) -> Image.Image | Non
     leaves = [frame for frame in page.leaf_frames() if getattr(frame, "clip", True)]
     if not leaves:
         return None
+    from genko.placement import clip_box
+
     mask = Image.new("L", size, 0)
     draw = ImageDraw.Draw(mask)
     for frame in leaves:
-        fill_frame(draw, frame, dpi)
+        if getattr(frame, "bleed", False) and not getattr(frame, "poly", None):
+            draw.rectangle(rect_px(clip_box(page, frame, "bleed"), dpi), fill=255)  # a bleed panel runs out to the bleed
+        else:
+            fill_frame(draw, frame, dpi)
     return mask
 
 
@@ -366,21 +371,39 @@ def _draw_balloon(
 
 
 def _draw_crop_marks(draw: ImageDraw.ImageDraw, page: Page, dpi: int) -> None:
-    w = mm_to_px(page.spec.width_mm, dpi)
-    h = mm_to_px(page.spec.height_mm, dpi)
-    bleed = mm_to_px(page.spec.bleed_mm, dpi)
-    mark = mm_to_px(5, dpi)
-    for x, y, dx, dy in (
-        (bleed, bleed, -1, 0),
-        (bleed, bleed, 0, -1),
-        (w - bleed, bleed, 1, 0),
-        (w - bleed, bleed, 0, -1),
-        (bleed, h - bleed, -1, 0),
-        (bleed, h - bleed, 0, 1),
-        (w - bleed, h - bleed, 1, 0),
-        (w - bleed, h - bleed, 0, 1),
-    ):
-        draw.line((x, y, x + dx * mark, y + dy * mark), fill=(0, 0, 0), width=1)
+    """トンボ: at each corner the trim line and the bleed line (内トンボ・外トンボ), and a centre mark on each
+    side, all outside the bleed. Pages without room around the bleed get short marks at the trim."""
+    trim, bleed = page.trim_rect_mm(), page.bleed_rect_mm()
+    room = min(bleed.x, bleed.y, page.spec.width_mm - bleed.x - bleed.width, page.spec.height_mm - bleed.y - bleed.height)
+    ink = (0, 0, 0)
+    px = lambda v: mm_to_px(v, dpi)  # noqa: E731
+    if room < 4:
+        mark = px(5)
+        for x_mm, y_mm, dx, dy in ((trim.x, trim.y, -1, -1), (trim.x + trim.width, trim.y, 1, -1),
+                                   (trim.x, trim.y + trim.height, -1, 1), (trim.x + trim.width, trim.y + trim.height, 1, 1)):
+            x, y = px(x_mm), px(y_mm)
+            draw.line((x, y, x + dx * mark, y), fill=ink, width=1)
+            draw.line((x, y, x, y + dy * mark), fill=ink, width=1)
+        return
+    gap, length = 1.0, min(10.0, room - 1.5)
+    xs = {"l": (trim.x, bleed.x), "r": (trim.x + trim.width, bleed.x + bleed.width)}
+    ys = {"t": (trim.y, bleed.y), "b": (trim.y + trim.height, bleed.y + bleed.height)}
+    for hx, (tx, bx) in xs.items():
+        for vy, (ty, by) in ys.items():
+            out_x = -1 if hx == "l" else 1
+            out_y = -1 if vy == "t" else 1
+            # horizontal marks (at the trim and bleed heights) out beyond the bleed on the left / right
+            x0 = bx + out_x * gap
+            for y in (ty, by):
+                draw.line((px(x0), px(y), px(x0 + out_x * length), px(y)), fill=ink, width=1)
+            y0 = by + out_y * gap
+            for x in (tx, bx):
+                draw.line((px(x), px(y0), px(x), px(y0 + out_y * length)), fill=ink, width=1)
+    cx, cy = trim.x + trim.width / 2, trim.y + trim.height / 2
+    for x in (bleed.x - gap - length, bleed.x + bleed.width + gap):
+        draw.line((px(x), px(cy), px(x + length), px(cy)), fill=ink, width=1)
+    for y in (bleed.y - gap - length, bleed.y + bleed.height + gap):
+        draw.line((px(cx), px(y), px(cx), px(y + length)), fill=ink, width=1)
 
 
 def _draw_frames(draw: ImageDraw.ImageDraw, page: Page, working_dpi: int) -> None:
@@ -530,7 +553,7 @@ def to_bitonal(image: Image.Image, threshold: int = 180) -> Image.Image:
 
 
 def render_spread(episode: Episode, first: int, second: int, dpi: int = 150, mode: str = "print",
-                  finish: bool | None = None) -> Image.Image:
+                  finish: bool | None = None, to_trim: bool = False) -> Image.Image:
     pages = {page.index: page for page in episode.pages}
     a, b = pages[first], pages[second]
     # Place by the physical side of the book (binding-aware), not by page parity.
@@ -542,6 +565,14 @@ def render_spread(episode: Episode, first: int, second: int, dpi: int = 150, mod
         left, right = a, b
     left_img = render_page(left, dpi, mode=mode, episode=episode, finish=finish)
     right_img = render_page(right, dpi, mode=mode, episode=episode, finish=finish)
+    # the finished sizes meet at the gutter: the left page up to its trim's right edge, the right from its trim's left edge
+    lt, rt = left.trim_rect_mm(), right.trim_rect_mm()
+    top = lambda t, img: mm_to_px(t.y, dpi) if to_trim else 0  # noqa: E731
+    bottom = lambda t, img: mm_to_px(t.y + t.height, dpi) if to_trim else img.height  # noqa: E731
+    left_img = left_img.crop((mm_to_px(lt.x, dpi) if to_trim else 0, top(lt, left_img), mm_to_px(lt.x + lt.width, dpi),
+                              bottom(lt, left_img)))
+    right_img = right_img.crop((mm_to_px(rt.x, dpi), top(rt, right_img), mm_to_px(rt.x + rt.width, dpi) if to_trim else right_img.width,
+                                bottom(rt, right_img)))
     image = Image.new("RGB", (left_img.width + right_img.width, max(left_img.height, right_img.height)), (255, 255, 255))
     image.paste(left_img, (0, 0))
     image.paste(right_img, (left_img.width, 0))

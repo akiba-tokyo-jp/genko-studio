@@ -47,6 +47,14 @@ class Rect:
 
 @dataclass(frozen=True)
 class PageSpec:
+    """One page's paper (the canvas), its finished size (仕上がり, centred on the paper), the bleed around
+    it (裁ち落とし) and the basic frame inside it (基本枠: margins from the trim at the top, bottom, the
+    binding side (のど, inner) and the fore-edge (小口, outer)). Coordinates start at the paper's top left.
+
+    Old books had no trim or margins: their trim is the paper less the bleed all round and their margins
+    are `inner_margin_mm` on every side (so they draw exactly as before).
+    """
+
     width_mm: float
     height_mm: float
     dpi: int
@@ -54,9 +62,63 @@ class PageSpec:
     inner_margin_mm: float
     expression: str = "mono"
     preset: str | None = None
+    trim_w_mm: float | None = None
+    trim_h_mm: float | None = None
+    margins_mm: tuple[float, float, float, float] | None = None  # top, bottom, inner (のど), outer (小口)
+
+    # --- sizes ------------------------------------------------------------------------------------------
+
+    def trim_size(self) -> tuple[float, float]:
+        if self.trim_w_mm and self.trim_h_mm:
+            return float(self.trim_w_mm), float(self.trim_h_mm)
+        return self.width_mm - 2 * self.bleed_mm, self.height_mm - 2 * self.bleed_mm
+
+    def trim_origin(self) -> tuple[float, float]:
+        w, h = self.trim_size()
+        return (self.width_mm - w) / 2, (self.height_mm - h) / 2
+
+    def margins(self) -> dict[str, float]:
+        if self.margins_mm:
+            top, bottom, inner, outer = (float(v) for v in self.margins_mm)
+        else:
+            top = bottom = inner = outer = float(self.inner_margin_mm)
+        return {"top": top, "bottom": bottom, "inner": inner, "outer": outer}
+
+    def frame_size(self) -> tuple[float, float]:
+        w, h = self.trim_size()
+        m = self.margins()
+        return w - m["inner"] - m["outer"], h - m["top"] - m["bottom"]
+
+    def describe(self) -> str:
+        w, h = self.trim_size()
+        fw, fh = self.frame_size()
+        return (f"用紙 {self.width_mm:g}×{self.height_mm:g} mm ・ 仕上がり {w:g}×{h:g} mm ・ 裁ち落とし {self.bleed_mm:g} mm ・ "
+                f"基本枠 {fw:g}×{fh:g} mm ・ {self.dpi} dpi")
+
+    # --- presets (the usual sizes; publishers and printers differ, so every number can be changed) --------
+
+    @staticmethod
+    def b4_comic() -> PageSpec:
+        """B4 manuscript paper for magazines and contests: finished 220×310 (1.2× the printed B5), bleed 5,
+        basic frame 180×270."""
+        return PageSpec(257, 364, 600, 5, 20, "mono", preset="commercial-b4", trim_w_mm=220, trim_h_mm=310,
+                        margins_mm=(20, 20, 20, 20))
+
+    @staticmethod
+    def b5_doujin() -> PageSpec:
+        """B5 doujinshi at print size: finished 182×257, bleed 3, basic frame 150×220."""
+        return PageSpec(208, 283, 600, 3, 16, "mono", preset="doujin-b5", trim_w_mm=182, trim_h_mm=257,
+                        margins_mm=(18.5, 18.5, 16, 16))
+
+    @staticmethod
+    def a5_doujin() -> PageSpec:
+        """A5 doujinshi at print size: finished 148×210, bleed 3, basic frame 120×180."""
+        return PageSpec(174, 236, 600, 3, 14, "mono", preset="doujin-a5", trim_w_mm=148, trim_h_mm=210,
+                        margins_mm=(15, 15, 14, 14))
 
     @staticmethod
     def a4_mono() -> PageSpec:
+        """An A4 sheet for practice: the whole sheet is the page (bleed 3, 10 mm margins)."""
         return PageSpec(210, 297, 600, 3, 10, "mono")
 
     @staticmethod
@@ -64,15 +126,32 @@ class PageSpec:
         return PageSpec(80, 400, 300, 0, 4, "color")
 
     @staticmethod
-    def b4_comic() -> PageSpec:
-        return PageSpec(257, 364, 600, 3, 10, "mono", preset="commercial-b4")
+    def custom(paper_w: float, paper_h: float, trim_w: float, trim_h: float, bleed: float, top: float, bottom: float,
+               inner: float, outer: float, dpi: int = 600, expression: str = "mono") -> PageSpec:
+        if trim_w + 2 * bleed > paper_w + 1e-6 or trim_h + 2 * bleed > paper_h + 1e-6:
+            raise ValueError("the paper must hold the finished size and its bleed")
+        if inner + outer >= trim_w or top + bottom >= trim_h:
+            raise ValueError("the basic frame must fit inside the finished size")
+        if min(trim_w, trim_h, paper_w, paper_h) <= 0 or min(bleed, top, bottom, inner, outer) < 0:
+            raise ValueError("sizes must be positive")
+        return PageSpec(float(paper_w), float(paper_h), int(dpi), float(bleed), float(min(top, bottom, inner, outer)), expression,
+                        preset="custom", trim_w_mm=float(trim_w), trim_h_mm=float(trim_h),
+                        margins_mm=(float(top), float(bottom), float(inner), float(outer)))
 
     @staticmethod
     def publisher(name: str) -> PageSpec:
         key = name.strip().lower()
         known = {"shueisha", "kodansha", "kadokawa", "shogakukan"}
-        preset = key if key in known else "none"
-        return PageSpec(257, 364, 600, 3, 10, "mono", preset=preset)
+        return dataclasses.replace(PageSpec.b4_comic(), preset=key if key in known else "none")
+
+
+PAPER_PRESETS = {
+    "b4": ("B4 商業誌・投稿（仕上がり 220×310・基本枠 180×270・600 dpi）", PageSpec.b4_comic),
+    "b5": ("B5 同人誌（原寸・仕上がり 182×257・基本枠 150×220）", PageSpec.b5_doujin),
+    "a5": ("A5 同人誌（原寸・仕上がり 148×210・基本枠 120×180）", PageSpec.a5_doujin),
+    "a4": ("A4 練習用（紙全体がページ）", PageSpec.a4_mono),
+    "webtoon": ("縦読み・カラー（Webtoon、幅 80 mm）", PageSpec.webtoon),
+}
 
 
 @dataclass
@@ -298,14 +377,36 @@ class Page:
     def ink_strokes(self, value: list) -> None:
         self._layer(LayerRole.INK).strokes = [coerce_stroke(item) for item in value]
 
-    def inner_rect_mm(self) -> Rect:
-        inset = self.spec.bleed_mm + self.spec.inner_margin_mm
-        return Rect(
-            x=inset,
-            y=inset,
-            width=self.spec.width_mm - 2 * inset,
-            height=self.spec.height_mm - 2 * inset,
-        )
+    def paper_rect_mm(self) -> Rect:
+        return Rect(0.0, 0.0, float(self.spec.width_mm), float(self.spec.height_mm))
+
+    def trim_rect_mm(self) -> Rect:
+        """The finished size (仕上がり): where the book is cut."""
+        x, y = self.spec.trim_origin()
+        w, h = self.spec.trim_size()
+        return Rect(x, y, w, h)
+
+    def bleed_rect_mm(self) -> Rect:
+        """The finished size plus the bleed (裁ち落とし): how far art that runs off the page must reach."""
+        t = self.trim_rect_mm()
+        b = float(self.spec.bleed_mm)
+        return Rect(t.x - b, t.y - b, t.width + 2 * b, t.height + 2 * b)
+
+    def spread_step_mm(self) -> float:
+        """How far right the right-hand page of a spread starts, in this page's coordinates, so that the two
+        finished sizes meet at the gutter (the paper margins overlap, as the sheets are laid on each other)."""
+        return self.trim_rect_mm().width
+
+    def binding_edge(self, start_side: str | None = None) -> str:
+        """Which edge of this page is at the binding (のど): "left" or "right"."""
+        return "right" if self.side(start_side) == "left" else "left"
+
+    def inner_rect_mm(self, start_side: str | None = None) -> Rect:
+        """The basic frame (基本枠); the binding (のど) and fore-edge (小口) margins swap with the page's side."""
+        t = self.trim_rect_mm()
+        m = self.spec.margins()
+        left, right = (m["inner"], m["outer"]) if self.binding_edge(start_side) == "left" else (m["outer"], m["inner"])
+        return Rect(t.x + left, t.y + m["top"], t.width - left - right, t.height - m["top"] - m["bottom"])
 
     def is_recto(self) -> bool:
         return self.index % 2 == 1

@@ -473,7 +473,7 @@ def test_plain_projects_render_placed_layers_without_a_studio(tmp_path: Path):
     assert render_page(load_episode(project).pages[0], 40, mode="print", episode=episode)  # a missing asset does not crash
 
 
-def test_bleed_panel_art_runs_to_the_paper_edge(tmp_path: Path):
+def test_bleed_panel_art_runs_out_to_the_bleed(tmp_path: Path):
     agent, project = _named(tmp_path)
     page = load_episode(project).pages[0]
     top = min(page.leaf_frames(), key=lambda f: f.rect.y)
@@ -484,5 +484,11 @@ def test_bleed_panel_art_runs_to_the_paper_edge(tmp_path: Path):
     layer = next(layer for layer in episode.pages[0].layers if layer.kind == LayerKind.PLACED)
     assert layer.clip_to == "bleed"
     image = render_page(episode.pages[0], 60, mode="print", episode=episode)
-    assert image.getpixel((1, 1))[:3] == RED  # the top-left paper corner
-    assert image.getpixel((1, image.height - 2))[:3] == (255, 255, 255)  # below the panel: paper
+    from genko.render import mm_to_px
+
+    bleed = episode.pages[0].bleed_rect_mm()
+    x0, y0 = mm_to_px(bleed.x, 60), mm_to_px(bleed.y, 60)
+    assert image.getpixel((x0 + 1, y0 + 1))[:3] == RED  # the bleed's top-left corner (cut off in print)
+    if x0 > 2:
+        assert image.getpixel((x0 - 2, y0 + 1))[:3] == (255, 255, 255)  # the paper beyond the bleed stays white
+    assert image.getpixel((x0 + 1, image.height - 2))[:3] == (255, 255, 255)  # below the panel: paper

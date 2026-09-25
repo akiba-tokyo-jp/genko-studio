@@ -49,8 +49,8 @@ def area(effect: dict, page) -> tuple[list[tuple[float, float]], tuple[float, fl
     if frame is not None:
         outline = [(float(x), float(y)) for x, y in geo.shape(frame)]
     else:
-        w, h = page.spec.width_mm, page.spec.height_mm
-        outline = [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)]
+        b = page.bleed_rect_mm()  # without a panel: the whole page out to the bleed
+        outline = [(b.x, b.y), (b.x + b.width, b.y), (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
     xs, ys = [p[0] for p in outline], [p[1] for p in outline]
     return outline, (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
 

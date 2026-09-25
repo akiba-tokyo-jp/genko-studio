@@ -33,10 +33,11 @@ def clip_box(page: Page, frame: Frame | None, clip_to: str) -> Rect:
     if clip_to != "bleed":
         return r
     edges = outer_edges(page, frame)
-    x0 = 0.0 if edges["left"] else r.x
-    y0 = 0.0 if edges["top"] else r.y
-    x1 = full.width if edges["right"] else r.x + r.width
-    y1 = full.height if edges["bottom"] else r.y + r.height
+    bleed = page.bleed_rect_mm()  # a bleed panel runs out to the bleed (the part that is cut off)
+    x0 = bleed.x if edges["left"] else r.x
+    y0 = bleed.y if edges["top"] else r.y
+    x1 = bleed.x + bleed.width if edges["right"] else r.x + r.width
+    y1 = bleed.y + bleed.height if edges["bottom"] else r.y + r.height
     return Rect(x0, y0, x1 - x0, y1 - y0)
 
 

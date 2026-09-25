@@ -862,6 +862,7 @@ class MainWindow(QMainWindow):
                                "Ctrl+Shift+Down")
         self.act_spread = a("次のページと見開きにする／解除", self._toggle_spread)
         self.act_nombre = a("ノンブルの設定…", lambda: nombre_dialog(self), tip="位置・書体・大きさ・始まりの番号・隠しノンブル")
+        self.act_paper = a("原稿用紙の設定…", self._paper_settings, tip="用紙・仕上がり・裁ち落とし・基本枠。変えるとコマや台詞も新しい枠に合わせて動きます")
         self.act_page_nombre = a("このページのノンブルを隠す／出す", self._toggle_page_nombre)
         self.act_story_editor = a("ストーリーエディター…", self.open_story_editor, "Ctrl+Shift+L", "全ページの台詞をまとめて直す・台本を流し込む")
         self.act_checks = a("入稿前の点検", self._run_checks, "F9", "はみ出し・文字の重なりや小ささ・解像度などを探します")
@@ -888,7 +889,7 @@ class MainWindow(QMainWindow):
             ("コマ", [self.act_frame, None, self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
                       self.act_gutters, self.act_border, self.act_no_border, self.act_bleed, self.act_reset_shape]),
             ("ページ", [self.act_add_page, self.act_dup_page, self.act_del_page, None, self.act_page_up, self.act_page_down, self.act_spread,
-                        None, self.act_nombre, self.act_page_nombre, None, self.act_story_editor, self.act_checks, None, self.act_name_ok]),
+                        None, self.act_paper, self.act_nombre, self.act_page_nombre, None, self.act_story_editor, self.act_checks, None, self.act_name_ok]),
         ]
         for title, actions in menus:
             menu = bar.addMenu(title)
@@ -1846,7 +1847,8 @@ class MainWindow(QMainWindow):
         if frame is not None:
             place["frame_id"] = frame.id
         else:
-            place["placement_mm"] = [0, 0, page.spec.width_mm, page.spec.height_mm]
+            b = page.bleed_rect_mm()  # the whole page, out to the bleed
+            place["placement_mm"] = [b.x, b.y, b.width, b.height]
         ops = [{"op": "register_assets", "assets": {ref: {"kind": "image", "origin": {"kind": "self", "file": Path(path).name}}}}, place]
         if self.apply_ops(ops):
             where = "選んだコマ" if frame is not None else "ページ全体"
@@ -2000,6 +2002,15 @@ class MainWindow(QMainWindow):
             self._reload_pages()
             return
         self.add_page_after(page.index)
+
+    def _paper_settings(self) -> None:
+        from genko.app.dialogs import PaperDialog
+
+        dialog = PaperDialog(self, self.episode.spec, changing=True)
+        if dialog.exec() == QDialog.DialogCode.Accepted and self.apply_ops([dialog.op()]):
+            self._reload_pages()
+            self.canvas.fit_page()
+            self.flash(f"原稿用紙を変えました: {self.episode.spec.describe()}", 5000)
 
     def _toggle_spread(self) -> None:
         page = self._current()

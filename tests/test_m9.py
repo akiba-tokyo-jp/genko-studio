@@ -183,9 +183,10 @@ def test_sns_long_edge_and_spreads(tmp_path: Path):
 def test_trimmed_page_has_no_bleed():
     ep = _book(1)
     image = profiles.trimmed(ep.pages[0], ep, 72)
-    full = render_page(ep.pages[0], 72, mode="print", episode=ep)
-    bleed = round(3 / 25.4 * 72)
-    assert image.size == (full.width - 2 * bleed, full.height - 2 * bleed)
+    from genko.render import mm_to_px
+
+    trim = ep.pages[0].trim_rect_mm()
+    assert image.size == (mm_to_px(trim.width, 72), mm_to_px(trim.height, 72))
     assert abs(image.width - 204 / 25.4 * 72) <= 1.5 and abs(image.height - 291 / 25.4 * 72) <= 1.5
 
 

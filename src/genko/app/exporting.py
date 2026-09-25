@@ -18,14 +18,14 @@ class Format:
     key: str
     label: str
     note: str
-    options: tuple[str, ...] = ()  # dpi, width, max_height, long_edge, jpeg, spreads
+    options: tuple[str, ...] = ()  # dpi, area, width, max_height, long_edge, jpeg, spreads
     official: bool = False
 
 
 FORMATS: list[Format] = [
-    Format("pdf", "PDF（印刷）", "1 冊の PDF。印刷所・校正用。", ("dpi",), True),
-    Format("tiff", "TIFF（入稿）", "ページごとの 2 値 TIFF。モノクロの入稿用。", ("dpi",), True),
-    Format("png", "PNG", "ページごとの PNG。", ("dpi",), True),
+    Format("pdf", "PDF（印刷）", "1 冊の PDF。印刷所・校正用。", ("dpi", "area"), True),
+    Format("tiff", "TIFF（入稿）", "ページごとの 2 値 TIFF。モノクロの入稿用。", ("dpi", "area"), True),
+    Format("png", "PNG", "ページごとの PNG。", ("dpi", "area"), True),
     Format("psd", "PSD（レイヤー付き）", "ページごとの PSD。CLIP STUDIO PAINT・Photoshop で仕上げを続けるとき。", ("dpi",)),
     Format("pack", "入稿セット", "TIFF・PNG・ページ一覧（CSV）・説明書きをまとめたフォルダ。", ("dpi",)),
     Format("webtoon", "縦読み（Webtoon）", "全ページを縦につなげ、決まった高さで切った画像。網点にしない。",
@@ -45,7 +45,7 @@ def default_dpi(episode: Episode, key: str) -> int:
 
 def run(episode: Episode, project: Path | None, key: str, out: Path, *, official: bool = False,
         actor: str = "human:user", dpi: int | None = None, width: int = 800, max_height: int = 1280,
-        long_edge: int = 2048, jpeg: bool = False, spreads: bool = False) -> dict:
+        long_edge: int = 2048, jpeg: bool = False, spreads: bool = False, area: str = "bleed") -> dict:
     """{ok, files, errors?, error?}. out is a folder."""
     out = Path(out)
     fmt = BY_KEY.get(key)
@@ -59,14 +59,14 @@ def run(episode: Episode, project: Path | None, key: str, out: Path, *, official
         from genko.studio.service import HumanService
 
         result = HumanService(project, actor).export(key, out, dpi=dpi, width_px=width, max_height=max_height,
-                                                     long_edge=long_edge, jpeg=jpeg, spreads=spreads)
+                                                     long_edge=long_edge, jpeg=jpeg, spreads=spreads, area=area)
         return result
     dpi = int(dpi or default_dpi(episode, key))
     try:
         if key in ("pdf", "tiff", "png"):
             from genko.export import export_print
 
-            files = export_print(episode, out, fmt=key, dpi=dpi)
+            files = export_print(episode, out, fmt=key, dpi=dpi, area=area)
         elif key == "psd":
             from genko.psd import export_psd_pages
 

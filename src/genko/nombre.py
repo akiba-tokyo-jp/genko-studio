@@ -45,12 +45,11 @@ def placements(episode, page) -> list[dict]:
     if not getattr(page, "numero", True):
         return []
     cfg = settings(episode)
-    spec = page.spec
-    bleed = spec.bleed_mm
-    trim = (bleed, bleed, spec.width_mm - bleed, spec.height_mm - bleed)  # x0, y0, x1, y1
-    inner = page.inner_rect_mm()
-    side = page.side(getattr(episode, "start_side", None))
-    outer_right = side == "right"  # a right-hand page's fore-edge is on its right
+    start_side = getattr(episode, "start_side", None)
+    t = page.trim_rect_mm()
+    trim = (t.x, t.y, t.x + t.width, t.y + t.height)  # x0, y0, x1, y1
+    inner = page.inner_rect_mm(start_side)
+    outer_right = page.binding_edge(start_side) == "left"  # the fore-edge is away from the binding
     text = str(number(episode, page))
     size = float(cfg["size_mm"])
     out = []
@@ -67,7 +66,7 @@ def placements(episode, page) -> list[dict]:
         elif position == "side_outside":
             x, y = outside_x, inner.y + inner.height / 2
         else:
-            x, y = spec.width_mm / 2, below
+            x, y = (trim[0] + trim[2]) / 2, below
         out.append({"text": text, "x_mm": round(x, 3), "y_mm": round(y, 3), "size_mm": size, "hidden": False})
     if cfg["hidden"]:
         small = float(cfg["hidden_size_mm"])

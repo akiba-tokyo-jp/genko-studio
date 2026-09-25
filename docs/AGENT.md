@@ -240,6 +240,13 @@ Pages and the book (M16):
 - `add_line {id}` can choose the new line's id.
 - `genko.checks.book(episode, project?)` lists what to fix before printing, each with a page and a place: text outside the trim or the basic frame, text too small for its balloon, overlapping balloons, low-resolution pictures, paint layers, art beyond the paper, spreads that do not face, empty pages — plus the studio preflight for studio books.
 
+Paper (F1):
+
+- A page has its paper (the canvas, `width_mm` × `height_mm`, coordinates from its top left), the finished size centred on it (`trim_w_mm` × `trim_h_mm`, 仕上がり), the bleed around that (`bleed_mm`, 裁ち落とし) and the basic frame (基本枠) inside the trim (`margins_mm`: top, bottom, binding side (のど), fore-edge (小口); binding and fore-edge swap with the page's side). New panels fill the basic frame.
+- Presets (`create_project spec_preset`, CLI `genko new --paper`): `commercial-b4` / `b4` (B4 sheet, finished 220×310, bleed 5, frame 180×270), `doujin-b5` / `b5` (finished 182×257, bleed 3, frame 150×220), `doujin-a5` / `a5` (finished 148×210, bleed 3, frame 120×180), `a4-mono` / `a4` (practice: the sheet is the page), `webtoon`. Old books keep their old spec (the sheet less the bleed is the trim).
+- `set_page_spec {preset | paper: [w, h], trim: [w, h], bleed_mm, margins: [top, bottom, inner, outer], dpi, move: true}` puts the book on other paper and moves panels, lines, art, rulers, figures and effects onto the new basic frame.
+- Bleed panels run out to the bleed; art beyond it is not printed. Spreads join where the finished sizes meet (the gutter). Print exports take `area`: `paper` (with crop marks), `bleed` (the usual for printers) or `trim`; screen exports are cut to the trim.
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

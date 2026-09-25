@@ -47,14 +47,13 @@ def _save(image: Image.Image, path: Path, fmt: str, quality: int) -> Path:
 def trimmed(page: Page, episode: Episode, dpi: int) -> Image.Image:
     """The page as read on screen: no bleed, no dots, no crop marks."""
     image = render_page(page, dpi, mode="print", episode=episode, finish=False)
-    bleed = mm_to_px(page.spec.bleed_mm, dpi) if page.spec.bleed_mm else 0
-    if bleed:
-        image = image.crop((bleed, bleed, image.width - bleed, image.height - bleed))
-    return image
+    trim = page.trim_rect_mm()
+    x0, y0 = mm_to_px(trim.x, dpi), mm_to_px(trim.y, dpi)
+    return image.crop((x0, y0, x0 + mm_to_px(trim.width, dpi), y0 + mm_to_px(trim.height, dpi)))
 
 
 def _dpi_for_width(page: Page, width_px: int) -> int:
-    trim_w = page.spec.width_mm - 2 * page.spec.bleed_mm
+    trim_w = page.spec.trim_size()[0]
     return max(36, round(width_px / (trim_w / 25.4)))
 
 
@@ -65,8 +64,7 @@ def export_webtoon(episode: Episode, dest: Path, width_px: int = 800, max_height
     # heights first (render each page once, at its own scale), then cut the strip into slices
     heights = []
     for page in episode.pages:
-        trim_w = page.spec.width_mm - 2 * page.spec.bleed_mm
-        trim_h = page.spec.height_mm - 2 * page.spec.bleed_mm
+        trim_w, trim_h = page.spec.trim_size()
         heights.append(round(width_px * trim_h / trim_w))
     tops, y = [], 0
     for h in heights:
@@ -101,8 +99,7 @@ def export_sns(episode: Episode, dest: Path, long_edge: int = 2048, fmt: str = "
     dest.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for page in episode.pages:
-        trim_h = page.spec.height_mm - 2 * page.spec.bleed_mm
-        trim_w = page.spec.width_mm - 2 * page.spec.bleed_mm
+        trim_w, trim_h = page.spec.trim_size()
         dpi = max(36, round(long_edge / (max(trim_w, trim_h) / 25.4)))
         image = trimmed(page, episode, dpi)
         image.thumbnail((long_edge, long_edge), Image.Resampling.LANCZOS)
@@ -115,8 +112,8 @@ def export_sns(episode: Episode, dest: Path, long_edge: int = 2048, fmt: str = "
                 continue
             done |= {page.index, partner}
             first, second = sorted((page.index, partner))
-            dpi = max(36, round(long_edge / (2 * page.spec.width_mm / 25.4)))
-            image = render_spread(episode, first, second, dpi=dpi, mode="print", finish=False)
+            dpi = max(36, round(long_edge / (2 * page.spec.trim_size()[0] / 25.4)))
+            image = render_spread(episode, first, second, dpi=dpi, mode="print", finish=False, to_trim=True)
             image.thumbnail((long_edge, long_edge), Image.Resampling.LANCZOS)
             written.append(_save(image, dest / f"{stem(episode)}_spread_{first:03d}-{second:03d}", fmt, quality))
     return written

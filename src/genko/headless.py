@@ -65,7 +65,8 @@ def snapshot(episode: Episode, full: bool = False) -> dict[str, Any]:
             "inner_margin_mm": episode.spec.inner_margin_mm,
             "expression": episode.spec.expression,
             "preset": episode.spec.preset,
-        },
+        } | ({"trim_w_mm": episode.spec.trim_w_mm, "trim_h_mm": episode.spec.trim_h_mm} if episode.spec.trim_w_mm else {})
+          | ({"margins_mm": list(episode.spec.margins_mm)} if episode.spec.margins_mm else {}),
         "pages": pages,
         "tickets": episode.tickets,
         "autosave": episode.autosave,

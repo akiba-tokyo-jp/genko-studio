@@ -55,6 +55,21 @@ def export_png_sequence(
     return written
 
 
+AREAS = ("paper", "bleed", "trim")
+AREA_LABELS = {"paper": "用紙全体（トンボ付き）", "bleed": "裁ち落としまで（入稿の標準）", "trim": "仕上がりまで"}
+
+
+def crop_to(image, page, area: str, dpi: int):
+    """A page image cut to the paper, the bleed or the finished size."""
+    if area == "paper":
+        return image
+    from genko.render import mm_to_px
+
+    r = page.bleed_rect_mm() if area == "bleed" else page.trim_rect_mm()
+    x0, y0 = mm_to_px(r.x, dpi), mm_to_px(r.y, dpi)
+    return image.crop((x0, y0, x0 + mm_to_px(r.width, dpi), y0 + mm_to_px(r.height, dpi)))
+
+
 def export_print(
     episode: Episode,
     dest: Path,
@@ -62,12 +77,17 @@ def export_print(
     dpi: int | None = None,
     threshold: int = 180,
     crop_marks: bool = True,
+    area: str = "paper",
 ) -> list[Path]:
+    """Print pages. `area`: "paper" (the whole sheet, with crop marks), "bleed" (the finished size and its
+    bleed: what most printers take) or "trim" (the finished size only)."""
+    if area not in AREAS:
+        raise ValueError(f"area must be one of {', '.join(AREAS)}")
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     dpi = int(dpi or episode.spec.dpi or 600)  # print resolution comes from the page spec (B4 comic: 600)
     images = [
-        render_page(page, dpi, mode="print", episode=episode, crop_marks=crop_marks)
+        crop_to(render_page(page, dpi, mode="print", episode=episode, crop_marks=crop_marks and area == "paper"), page, area, dpi)
         for page in episode.pages
     ]
     fmt = fmt.lower()

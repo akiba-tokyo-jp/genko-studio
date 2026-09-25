@@ -61,7 +61,8 @@ def test_detection_gives_tiers_and_reading_order():
 def test_auto_alignment_puts_the_drawing_on_the_live_area():
     from genko.studio.atari import placement_for
 
-    page = new_episode("t", 1, 1, PageSpec.b4_comic()).pages[0]
+    # the synthetic scans are drawn on the whole B4 sheet with 13 mm margins (the old layout), so the page matches
+    page = new_episode("t", 1, 1, PageSpec(257, 364, 600, 3, 10, "mono")).pages[0]
     png, truth = synth.draw_page(synth.LAYOUTS[1], 150, 3, margin_mm=15)  # a scan with extra paper around the page
     image = Image.open(io.BytesIO(png))
     small = image.resize((round(image.width * 0.8), round(image.height * 0.8)))  # and scanned at another scale

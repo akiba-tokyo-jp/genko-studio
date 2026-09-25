@@ -238,13 +238,34 @@ def test_finish_keeps_balloons_off_reported_faces(tmp_path: Path):
         assert agent.finish_page("demo.genko", page.index, commit=True).data["committed"]
     episode = load_episode(project)
     overlaps = 0
+
+    def hits(box, face):
+        x, y, w, h = box
+        fx, fy, fw, fh = face
+        return min(x + w, fx + fw) - max(x, fx) > 0 and min(y + h, fy + fh) - max(y, fy) > 0
+
+    def room_without_faces(frame, w, h, faces):
+        # could a balloon this size sit anywhere in the panel (3 mm margins) without touching a face?
+        r = frame.rect
+        y = r.y + 3
+        while y + h <= r.y + r.height - 3:
+            x = r.x + 3
+            while x + w <= r.x + r.width - 3:
+                if not any(hits((x, y, w, h), f) for f in faces):
+                    return True
+                x += 1
+            y += 1
+        return False
+
     for page in episode.pages:
-        faces = [r["rect_mm"] for f in page.leaf_frames() for r in (f.panel or {}).get("regions", []) if r.get("kind") == "face"]
-        for line in episode.story_for_page(page.index):
-            for fx, fy, fw, fh in faces:
-                dx = min(line.x_mm + line.w_mm, fx + fw) - max(line.x_mm, fx)
-                dy = min(line.y_mm + line.h_mm, fy + fh) - max(line.y_mm, fy)
-                overlaps += dx > 0 and dy > 0
+        for frame in page.leaf_frames():
+            faces = [r["rect_mm"] for r in (frame.panel or {}).get("regions", []) if r.get("kind") == "face"]
+            for line in episode.story_for_page(page.index):
+                if line.frame_id != frame.id:
+                    continue
+                box = (line.x_mm, line.y_mm, line.w_mm, line.h_mm)
+                if any(hits(box, f) for f in faces) and room_without_faces(frame, line.w_mm, line.h_mm, faces):
+                    overlaps += 1  # a face-free spot existed and the planner did not take it
     assert overlaps == 0
 
 

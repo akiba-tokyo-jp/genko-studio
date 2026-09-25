@@ -208,10 +208,11 @@ class PageCanvas(GuideMixin, QWidget):
         spec = self.page.spec
         x0, w = 0.0, spec.width_mm
         if self.page.spread_with:
+            step = self.page.spread_step_mm()  # the partner's finished size meets this one's at the gutter
             if self.page.side() == "right":
-                x0, w = -spec.width_mm, 2 * spec.width_mm
+                x0, w = -step, spec.width_mm + step
             else:
-                w = 2 * spec.width_mm
+                w = spec.width_mm + step
         return x0, 0.0, w, spec.height_mm
 
     def fit_page(self) -> None:
@@ -276,7 +277,8 @@ class PageCanvas(GuideMixin, QWidget):
         page_rect = QRectF(origin.x(), origin.y(), spec.width_mm * self._scale, spec.height_mm * self._scale)
         if self.page.spread_with:
             # the partner sits on the other physical side; strokes drawn there go to the partner page
-            offset = -spec.width_mm if self.page.side() == "right" else spec.width_mm
+            step = self.page.spread_step_mm()
+            offset = -step if self.page.side() == "right" else step
             painter.fillRect(page_rect.translated(offset * self._scale, 0), QColor("#e9e4d8"))
         painter.fillRect(page_rect, QColor("#ffffff"))
         if self.background is not None:
@@ -328,18 +330,30 @@ class PageCanvas(GuideMixin, QWidget):
 
     def _draw_guides(self, painter: QPainter, page_rect: QRectF) -> None:
         """The bleed (cut off, shaded), the trim line (the finished size) and the basic frame."""
-        spec = self.page.spec
-        bleed = spec.bleed_mm * self._scale
-        if bleed > 0:
-            trim = page_rect.adjusted(bleed, bleed, -bleed, -bleed)
-            shade = QColor(120, 120, 140, 40)
-            painter.fillRect(QRectF(page_rect.left(), page_rect.top(), page_rect.width(), bleed), shade)
-            painter.fillRect(QRectF(page_rect.left(), page_rect.bottom() - bleed, page_rect.width(), bleed), shade)
-            painter.fillRect(QRectF(page_rect.left(), trim.top(), bleed, trim.height()), shade)
-            painter.fillRect(QRectF(page_rect.right() - bleed, trim.top(), bleed, trim.height()), shade)
-            painter.setPen(QPen(QColor(200, 40, 120, 200), 1))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(trim)
+        def box(r) -> QRectF:
+            a = self._pt(r.x, r.y)
+            return QRectF(a.x(), a.y(), r.width * self._scale, r.height * self._scale)
+
+        from PySide6.QtGui import QPainterPath as _Path
+
+        bleed, trim = box(self.page.bleed_rect_mm()), box(self.page.trim_rect_mm())
+        # the paper outside the bleed is never printed (darker); the bleed is cut off (lighter)
+        outside = _Path()
+        outside.addRect(page_rect)
+        inside = _Path()
+        inside.addRect(bleed)
+        painter.fillPath(outside.subtracted(inside), QColor(90, 90, 110, 70))
+        band = _Path()
+        band.addRect(bleed)
+        cut = _Path()
+        cut.addRect(trim)
+        painter.fillPath(band.subtracted(cut), QColor(120, 120, 140, 40))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self.page.spec.bleed_mm > 0:
+            painter.setPen(QPen(QColor(120, 120, 140, 160), 1, Qt.PenStyle.DotLine))
+            painter.drawRect(bleed)
+        painter.setPen(QPen(QColor(200, 40, 120, 200), 1))
+        painter.drawRect(trim)
         inner = self.page.inner_rect_mm()
         painter.setPen(QPen(QColor(28, 126, 214, 150), 1, Qt.PenStyle.DashLine))
         painter.setBrush(Qt.BrushStyle.NoBrush)
