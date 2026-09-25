@@ -75,6 +75,10 @@ def _field(name: str) -> str:
 
 
 _ERRORS: list[tuple[str, object]] = [
+    (r"brush (\S+) must be between (\S+) and (\S+)", lambda m: f"ブラシの{ {'width_mm': '太さ', 'min_pressure': '弱い筆圧での太さ', 'gamma': '筆圧の効き方', 'opacity': '不透明度', 'stabilize': '手ぶれ補正'}.get(m.group(1), m.group(1)) }は {m.group(2)}〜{m.group(3)} の間で決めます"),
+    (r"brush texture must be none, grain, soft or dry", "ブラシの質感は「なし・鉛筆・筆・エアブラシ」から選びます"),
+    (r"a brush needs a name", "ブラシに名前を付けます"),
+    (r"a brush of one's own has a key starting with my_", "自作のブラシの名前（key）は my_ で始めます"),
     (r"the area has no size", "選んだ範囲に大きさがありません"),
     (r"perspective takes four corners.*", "遠近の変形は 4 隅（左上・右上・右下・左下）で指定します"),
     (r"the four corners must enclose an area", "4 隅が一直線に並んでいて、形になりません"),

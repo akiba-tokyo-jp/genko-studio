@@ -223,6 +223,11 @@ def migrate_payload(payload: dict, store=None) -> Episode:
     episode.brush_stabilize = int(brush.get("stabilize", 0) or 0)
     episode.brush_taper = bool(brush.get("taper", False))
     episode.brush_curve = str(brush.get("curve") or "linear")
+    episode.brush_custom = {str(k): dict(v) for k, v in (brush.get("custom") or {}).items()}
+    if episode.brush_custom:
+        from genko import brushes
+
+        brushes.register(episode.brush_custom)  # the book's own brushes draw the same on any computer
     episode.nombre = dict(payload.get("nombre") or {})
     bible = payload.get("bible") or {}
     episode.bible.plot = bible.get("plot", "")

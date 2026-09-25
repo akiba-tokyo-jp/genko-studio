@@ -89,6 +89,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "unlock_page", "page": "int"},
     {"op": "add_layer", "page": "int", "name": "str?", "kind": "pen|paint|folder?", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?", "after": "layer id?", "id": "str?"},
     {"op": "delete_layer", "page": "int", "id": "str"},
+    {"op": "define_brush", "key": "str (my_…)", "label": "str", "base": "a brush to start from?", "width_mm": "float?", "min_pressure": "0..1?", "gamma": "0.2..5?", "opacity": "0.05..1?", "stabilize": "0..15?", "taper": "bool?", "texture": "''|grain|soft|dry?", "rgb": "[r,g,b]|null?", "fixed_width": "bool?", "delete": "bool?"},
     {"op": "duplicate_layer", "page": "int", "id": "str", "new_id": "str?"},
     {"op": "merge_down", "page": "int", "id": "str (merged into the layer below it; pen onto pen stays lines, anything else becomes pixels)"},
     {"op": "set_layer_mask", "page": "int", "id": "str", "area": "{poly} | {mask}? (only this area shows)", "fill": "show|hide? (the whole mask)", "invert": "bool?", "enabled": "bool?", "delete": "bool?"},
@@ -144,12 +145,12 @@ def _rasterize_strokes(page, layer) -> None:
     layer.kind = LayerKind.RASTER
 
 
-def _brush_kind(kind) -> str:
+def _brush_kind(kind, episode=None) -> str:
     from genko.brushes import BRUSHES, LEGACY
 
     kind = LEGACY.get(str(kind), str(kind))
-    if kind not in BRUSHES:
-        raise ApplyError(f"kind must be one of {', '.join(BRUSHES)}")
+    if kind not in BRUSHES and not (episode is not None and kind in episode.brush_custom):
+        raise ApplyError(f"kind must be one of {', '.join(BRUSHES)} (or a brush defined in the book with define_brush)")
     return kind
 
 
@@ -882,7 +883,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         from genko.models import coerce_stroke, stroke_points
 
         stroke = coerce_stroke(points)
-        stroke.kind = _brush_kind(op.get("kind") or "gpen")
+        stroke.kind = _brush_kind(op.get("kind") or "gpen", episode)
         stroke.width_mm = float(op["width_mm"]) if op.get("width_mm") is not None else float(episode.brush_width_mm)
         if op.get("layer_id"):
             target = _layer_by_id(page, str(op["layer_id"]))
@@ -1001,7 +1002,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                 if op.get("scale") is not None:
                     stroke.width_mm = max(0.05, stroke.width_mm * float(op["scale"]))
                 if op.get("kind"):
-                    stroke.kind = _brush_kind(op["kind"])
+                    stroke.kind = _brush_kind(op["kind"], episode)
                 if op.get("rgb"):
                     stroke.rgb = tuple(int(v) for v in op["rgb"])
                 changed += 1
@@ -1101,6 +1102,24 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             layer.title = str(op["name"])
         if "color" in op:
             layer.color = tuple(int(v) for v in op["color"])[:3] if op["color"] else None
+        return
+
+    if name == "define_brush":
+        from genko import brushes
+
+        key = str(op.get("key") or "")
+        if not key.startswith("my_") or len(key) > 40:
+            raise ApplyError("a brush of one's own has a key starting with my_")
+        if op.get("delete"):
+            episode.brush_custom.pop(key, None)
+            return
+        data = {k: v for k, v in op.items() if k not in ("op", "key", "delete")}
+        try:
+            made = brushes.from_dict(key, data)
+        except (ValueError, TypeError) as exc:
+            raise ApplyError(str(exc)) from exc
+        episode.brush_custom[key] = brushes.to_dict(made)
+        brushes.CUSTOM[key] = made
         return
 
     if name == "duplicate_layer":
@@ -1566,7 +1585,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         chosen = [p for p in page.prims if not ids or p.get("id") in ids]
         if not chosen:
             raise ApplyError("no 3D figure or box to trace")
-        kind = _brush_kind(op.get("kind") or "pencil")
+        kind = _brush_kind(op.get("kind") or "pencil", episode)
         for prim in chosen:
             for line in prim3d.trace(prim):
                 stroke = coerce_stroke([(round(x, 3), round(y, 3)) for x, y in line])

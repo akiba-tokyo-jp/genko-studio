@@ -130,7 +130,7 @@ def _payload(episode: Episode, store: AssetStore) -> dict:
             "stabilize": episode.brush_stabilize,
             "taper": episode.brush_taper,
             "curve": episode.brush_curve,
-        },
+        } | ({"custom": {k: dict(v) for k, v in episode.brush_custom.items()}} if episode.brush_custom else {}),
         "spec": {
             "width_mm": episode.spec.width_mm,
             "height_mm": episode.spec.height_mm,

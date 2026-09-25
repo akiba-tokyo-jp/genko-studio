@@ -461,6 +461,22 @@
       "id": "str"
     },
     {
+      "op": "define_brush",
+      "key": "str (my_…)",
+      "label": "str",
+      "base": "a brush to start from?",
+      "width_mm": "float?",
+      "min_pressure": "0..1?",
+      "gamma": "0.2..5?",
+      "opacity": "0.05..1?",
+      "stabilize": "0..15?",
+      "taper": "bool?",
+      "texture": "''|grain|soft|dry?",
+      "rgb": "[r,g,b]|null?",
+      "fixed_width": "bool?",
+      "delete": "bool?"
+    },
+    {
       "op": "duplicate_layer",
       "page": "int",
       "id": "str",

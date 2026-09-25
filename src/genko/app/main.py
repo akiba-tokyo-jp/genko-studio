@@ -1117,6 +1117,8 @@ class MainWindow(QMainWindow):
         # ツールの設定 (left): what the tool in hand can do
         self.brush = BrushPanel()
         self.brush.changed.connect(self._brush_changed)
+        self.brush.make.clicked.connect(self._make_brush)
+        self.brush.forget.clicked.connect(self._forget_brush)
         self._brush_changed()
         self.text_settings = TextToolSettings()
         self.text_settings.draw_balloon.toggled.connect(lambda on: setattr(self.canvas, "balloon_pen", on))
@@ -1579,9 +1581,16 @@ class MainWindow(QMainWindow):
             self.apply_ops([op])
             return
         op = {"op": "add_stroke", "page": page.index, "layer_id": layer.id, "points": points, **self.brush.stroke_fields()}
+        ops = [op]
+        kind = op.get("kind") or ""
+        if kind.startswith("my_") and kind not in self.episode.brush_custom:
+            from genko import brushes
+
+            # the book keeps the brush's settings, so the line looks the same on any computer
+            ops.insert(0, {"op": "define_brush", "key": kind, **brushes.to_dict(brushes.brush(kind))})
         if self.canvas.snap_rulers and page.rulers:
             op["snap_ruler"] = True
-        self.apply_ops([op])
+        self.apply_ops(ops)
 
     def _onion(self) -> None:
         page = self._current()
@@ -1617,6 +1626,37 @@ class MainWindow(QMainWindow):
         self.eraser_mm = float(value)
         self.canvas.eraser_mm = self.eraser_mm
         self.canvas.update()
+
+    def _make_brush(self) -> None:
+        from genko import brushes
+        from genko.app.brush_panel import BrushDialog
+        from genko.models import new_id
+
+        dialog = BrushDialog(self, self.brush.kind())
+        if not dialog.exec():
+            return
+        key = f"my_{new_id()}"
+        data = dialog.data()
+        try:
+            brushes.CUSTOM[key] = brushes.from_dict(key, data)
+        except ValueError as exc:
+            self.flash(wording.error(str(exc)), 6000, error=True)
+            return
+        brushes.save_to_library(key, brushes.to_dict(brushes.CUSTOM[key]))
+        self.brush.reload_kinds(select=key)
+        self.flash(f"ブラシ「{data['label']}」を作りました（ブラシの一覧の ★）", 4000)
+
+    def _forget_brush(self) -> None:
+        from genko import brushes
+
+        key = self.brush.kind()
+        if not key.startswith("my_"):
+            return
+        brushes.save_to_library(key, None)
+        if key not in self.episode.brush_custom:
+            brushes.CUSTOM.pop(key, None)
+        self.brush.reload_kinds(select="gpen")
+        self.flash("自作のブラシを一覧から消しました（描いた線はそのまま）", 4000)
 
     def _brush_changed(self) -> None:
         self.canvas.brush_width_mm = self.brush.size.value()

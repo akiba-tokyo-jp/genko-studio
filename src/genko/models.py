@@ -566,6 +566,7 @@ class Episode:
     brush_stabilize: int = 0
     brush_taper: bool = False
     brush_curve: str = "linear"
+    brush_custom: dict = field(default_factory=dict)  # brushes people made, carried with the book (genko.brushes)
     nombre: dict = field(default_factory=dict)  # page numbers (genko.nombre)
     extra: dict = field(default_factory=dict)  # top-level keys this build does not know; written back unchanged
     revision: int = 0  # +1 on every save (v3)

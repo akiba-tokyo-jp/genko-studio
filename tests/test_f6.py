@@ -256,3 +256,62 @@ def test_free_transform_on_the_canvas(window):
     assert canvas.warp is None and canvas.selection is None
     after = _layer(window.episode, "u").strokes[0].points
     assert len(after) > len(before) and max(p[0] for p in after) > max(p[0] for p in before) + 5
+
+
+# --- brushes of one's own -----------------------------------------------------------------------------------
+
+
+def test_a_brush_of_ones_own_draws_the_same_on_another_computer(tmp_path: Path, monkeypatch):
+    from genko import brushes
+
+    ep, ink = _book()
+    apply_ops(ep, [{"op": "define_brush", "key": "my_fude", "label": "かすれ筆", "base": "fude", "width_mm": 3, "min_pressure": 0.02,
+                    "gamma": 2.2, "texture": "dry", "taper": True}])
+    apply_ops(ep, [{"op": "add_stroke", "page": 1, "layer_id": ink.id, "kind": "my_fude", "width_mm": 3, "stabilize": 0,
+                    "points": [[40, 320, 0.1], [120, 330, 1.0], [200, 320, 0.2]]}])
+    before = render_page(ep.pages[0], DPI, episode=ep)
+    save_episode(ep, tmp_path / "b.genko")
+    # another computer: nothing known of the brush, another config folder
+    brushes.CUSTOM.clear()
+    monkeypatch.setenv("GENKO_CONFIG_DIR", str(tmp_path / "elsewhere"))
+    again = load_episode(tmp_path / "b.genko")
+    assert again.brush_custom["my_fude"]["label"] == "かすれ筆" and brushes.brush("my_fude").texture == "dry"
+    assert _diff(before, render_page(again.pages[0], DPI, episode=again)) < 0.01
+    with pytest.raises(ApplyError):
+        apply_ops(again, [{"op": "define_brush", "key": "my_bad", "label": "x", "gamma": 9}])
+    with pytest.raises(ApplyError):
+        apply_ops(again, [{"op": "define_brush", "key": "gpen", "label": "x"}])
+    with pytest.raises(ApplyError):
+        apply_ops(again, [{"op": "add_stroke", "page": 1, "layer_id": ink.id, "kind": "my_unknown", "points": [[1, 1], [5, 5]]}])
+    brushes.CUSTOM.clear()
+
+
+def test_making_a_brush_in_the_window(window, monkeypatch):
+    from test_m13 import _drag
+
+    from genko import brushes
+    from genko.app.brush_panel import BrushDialog
+
+    def accept(dialog):
+        dialog.name.setText("太いかぶら")
+        dialog.width.setValue(1.4)
+        dialog.thin.setValue(40)
+        dialog.texture.setCurrentIndex(dialog.texture.findData("grain"))
+        assert dialog.sample.pixmap() is not None and not dialog.sample.pixmap().isNull()
+        return 1
+
+    monkeypatch.setattr(BrushDialog, "exec", accept)
+    window.brush.kinds.setCurrentRow(list(brushes.BRUSHES).index("kabura"))
+    window.brush.make.click()
+    key = window.brush.kind()
+    assert key.startswith("my_") and window.brush.kinds.currentItem().text() == "★ 太いかぶら"
+    assert window.brush.size.value() == 1.4 and brushes.load_library()[key]["texture"] == "grain"
+    ink = next(layer for layer in window.current_page().layers if layer.role == LayerRole.INK)
+    window.set_target_layer(ink.id)
+    window.act_pen.trigger()
+    _drag(window.canvas, None, None, path=[(60, 330), (90, 332), (120, 334)])
+    assert window.episode.brush_custom[key]["label"] == "太いかぶら"
+    assert _layer(window.episode, ink.id).strokes[-1].kind == key
+    window.brush.forget.click()
+    assert key not in brushes.load_library() and window.brush.kind() == "gpen"
+    brushes.CUSTOM.clear()
