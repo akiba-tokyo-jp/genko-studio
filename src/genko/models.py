@@ -325,6 +325,7 @@ class Layer:
     adjust: dict | None = None
     effect: dict | None = None
     color_prints: bool = False
+    screen: dict | None = None  # J6 トーン化: the layer's greys printed as a halftone {pattern, lpi, angle, black, white}
 
 
 @dataclass
@@ -340,6 +341,8 @@ class Frame:
     poly: list | None = None  # a slanted or free-form panel: its corners (page mm); rect is their box
     split: dict | None = None  # a split node's cut: {"a", "b"} in its box's 0..1 coordinates, "gutter_mm"
     custom: bool = False  # a person shaped this panel by hand (it keeps its form when the page is re-laid)
+    curves: list | None = None  # J6: how far each edge bows out (mm, outward +; edge i runs from corner i)
+    line: dict | None = None  # J6: the border's look {kind: solid|double|dashed|dotted|rough, rgb, gap_mm, dash_mm}
 
 
 @dataclass

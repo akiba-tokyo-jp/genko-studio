@@ -36,6 +36,8 @@ def _frame(data: dict) -> Frame:
         poly=[tuple(p) for p in data["poly"]] if data.get("poly") else None,
         split=dict(data["split"]) if data.get("split") else None,
         custom=bool(data.get("custom", False)),
+        curves=[float(v) for v in data["curves"]] if isinstance(data.get("curves"), list) else None,
+        line=dict(data["line"]) if isinstance(data.get("line"), dict) else None,
     )
 
 
@@ -110,6 +112,7 @@ def _layer_fields(data: dict, role: LayerRole) -> Layer:
         adjust=dict(data["adjust"]) if isinstance(data.get("adjust"), dict) else None,
         effect=dict(data["effect"]) if isinstance(data.get("effect"), dict) else None,
         color_prints=bool(data.get("color_prints", False)),
+        screen=dict(data["screen"]) if isinstance(data.get("screen"), dict) else None,
     )
 
 

@@ -31,7 +31,10 @@
       "bleed": "bool?",
       "clip": "bool?",
       "border_mm": "float? (0: no border)",
-      "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)"
+      "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)",
+      "curves": "[mm per edge] | null? (edges bowed out +, in -; edge i runs from corner i: top, right, bottom, left for a rectangle)",
+      "bow": "{edge, mm}? (one edge)",
+      "line": "{kind: solid|double|dashed|dotted|rough, rgb?, gap_mm?, dash_mm?, wobble_mm?} | null? (the border's look)"
     },
     {
       "op": "cut_frame",
@@ -76,15 +79,15 @@
       "id": "str",
       "text": "optional",
       "speaker": "optional",
-      "balloon": "speech|rounded|box|cloud|thought|shout|electric|flash|whisper|narration|sfx|none?",
+      "balloon": "speech|rounded|box|cloud|thought|shout|electric|flash|whisper|narration|sfx|none|picture? (picture: style.picture, a base64 PNG stretched over the box)",
       "wrap": "vertical|horizontal?",
       "ruby": "str?",
       "ruby_runs": "[[base, ruby]]?",
       "emphasis_runs": "[str]? (傍点 on these words)",
       "style_runs": "[[words, {scale 0.3..3, bold, weight, rgb}]]? (part of the line larger, smaller, bolder, coloured)",
       "frame_id": "str?",
-      "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6}? (null resets a key)",
-      "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"
+      "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6, scale_x 0.3..3 (長体 < 1 < 平体), gradient {rgb_from, rgb_to, angle}, text_path [[x,y]…] (mm from the box's top left: the letters follow it), features [jp78|jp90|trad|expt|hwid|…] (OpenType forms, across text), yakumono (paired punctuation set half wide; default true), spike_jitter 0..1, bumps 5..60 (cloud), picture (base64 PNG), fill_png (letters painted with a picture), warp [[x,y]×4] (the letters' corners as shares of their box: 遠近・ゆがみ)}? (null resets a key)",
+      "tails": "[{to:[x,y], via?:[x,y], width_mm?, kind?: wedge|zigzag|fade|bubbles}]?"
     },
     {
       "op": "reorder_lines",
@@ -163,7 +166,8 @@
       "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)",
       "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)",
       "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)",
-      "color_prints": "bool? (the layer colour is printed too)"
+      "color_prints": "bool? (the layer colour is printed too)",
+      "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white} | null? (トーン化: the layer's greys print as a halftone)"
     },
     {
       "op": "add_page",
@@ -249,7 +253,9 @@
       "lpi": "float?",
       "density": "float? (0..1 black)",
       "angle": "float?",
-      "pattern": "dot|line|cross|noise|flat?",
+      "pattern": "dot|line|cross|noise|flat|check|brick|wave|grid|hatch|star|sand|image?",
+      "scale_mm": "float? (柄トーン)",
+      "tile_png": "str? (image)",
       "gradient": "{shape: linear|radial, angle, start, end}?",
       "name": "str?",
       "after": "layer id?",
@@ -263,7 +269,9 @@
       "lpi": "float?",
       "density": "float?",
       "angle": "float?",
-      "pattern": "str?",
+      "pattern": "dot|line|cross|noise|flat|check|brick|wave|grid|hatch|star|sand|image?",
+      "scale_mm": "float? (柄トーン: the motif's size)",
+      "tile_png": "str? (image: a base64 PNG repeated)",
       "gradient": "object|null?",
       "name": "str?"
     },
@@ -277,7 +285,7 @@
       "page": "int",
       "kind": "focus|speed|uni_flash|beta_flash|white",
       "frame_id": "str?",
-      "params": "object (see docs)",
+      "params": "object: focus {center, inner, inner_path [[x,y]…] (any shape), twist (degrees: a swirl), count, jitter, width_mm, taper}; speed {angle, count, length, jitter, width_mm, curve (mm), taper, path [[x,y]…] (along a curve), spread_mm}; uni_flash {center, inner, count, length_mm}; beta_flash {center, inner, spikes, depth}",
       "id": "str?"
     },
     {
@@ -521,6 +529,7 @@
       "area": "object?",
       "at": "object?",
       "layer_id": "str? (pictures and drawn parts)",
+      "line_id": "str? (a picture material: it becomes this line's balloon, 画像のフキダシ)",
       "x_mm": "float?",
       "y_mm": "float? (where a picture's / part's middle goes)",
       "width_mm": "float?"
@@ -701,7 +710,12 @@
     {
       "op": "add_ruler",
       "page": "int",
-      "kind": "line|curve|parallel|concentric|radial|perspective|symmetry|guide",
+      "kind": "line|curve|parallel|concentric|radial|perspective|symmetry|guide|parallel_curve|multi_curve|radial_curve",
+      "points2": "[[x,y],...]? (multi_curve: the second curve)",
+      "center": "[x,y]? (radial_curve)",
+      "layer_id": "str? (only while drawing on this layer)",
+      "lock_horizon": "bool? (perspective: the eye level stays)",
+      "fixed": "bool?",
       "axis": "h|v? (guide)",
       "at": "float? (guide: mm from the top or left)",
       "points": "[[x,y],...]?",
@@ -714,10 +728,26 @@
       "id": "str?"
     },
     {
+      "op": "ruler_to_layer",
+      "page": "int",
+      "id": "str (the ruler)",
+      "layer_id": "str?",
+      "width_mm": "float?",
+      "kind": "str? (brush, mili)",
+      "rgb": "[r,g,b]?",
+      "note": "定規ペン: the ruler's own line drawn as pen lines"
+    },
+    {
       "op": "edit_ruler",
       "page": "int",
       "id": "str",
       "points": "[[x,y],...]?",
+      "points2": "[[x,y],...]?",
+      "center": "[x,y]?",
+      "horizon_y": "float? (perspective: move the eye level)",
+      "lock_horizon": "bool?",
+      "fixed": "bool?",
+      "layer_id": "str|null?",
       "angle": "float?",
       "ratio": "float?",
       "copies": "int?",

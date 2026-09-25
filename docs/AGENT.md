@@ -281,6 +281,26 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### J6 additions
+
+- Panels: `set_frame {curves: [mm per edge] | null, bow: {edge, mm}, line: {kind: solid | double | dashed | dotted |
+  rough, rgb?, gap_mm?, dash_mm?, wobble_mm?} | null}` (edges run from corner i: top, right, bottom, left for a
+  rectangle; + bows out).
+- Lettering style keys: `scale_x` (長体 < 1 < 平体), `gradient {rgb_from, rgb_to, angle}`, `fill_png` (letters
+  painted with a picture), `warp` (the letters' four corners as shares of their box), `text_path` ([[x, y]…] mm
+  from the box's top left), `features` (OpenType forms: jp78, jp90, trad, expt, hwid…; across text), `yakumono`
+  (default true: paired punctuation set half wide), and variation selectors in the text (異体字).
+- Balloons: `balloon: picture` with `style.picture` (base64 PNG), or `stamp_material {material_id, line_id}` with an
+  image material; `spike_jitter`, `bumps` (cloud); tails take `kind: wedge | zigzag | fade | bubbles`.
+- Effects: speed lines `path` + `spread_mm` (along a curve); focus lines `inner_path` (any clear shape), `twist`.
+- Tones: patterns `check | brick | wave | grid | hatch | star | sand | image` (`scale_mm`, `tile_png`);
+  `set_layer {screen: {pattern, lpi, angle, black, white} | null}` (a layer's greys print as a halftone); the
+  checks report `tone_moire` for overlapping tones at different angles or line counts.
+- Rulers: kinds `parallel_curve`, `multi_curve` (`points2`), `radial_curve` (`center`); any ruler may have
+  `layer_id` (only for that layer); perspective `lock_horizon`, `horizon_y`, `fixed`; `ruler_to_layer {id,
+  layer_id, width_mm}` draws a ruler's own line (定規ペン).
+- Materials: kind `lettering` (描き文字: text, balloon, style, size); `stamp_material` puts it as a line.
+
 ### J5 additions
 
 - Layer kinds in `add_layer`: `fill {rgb}` (ベタ塗り), `gradient {gradient: {from, to, rgb_from, rgb_to, opacity_from,

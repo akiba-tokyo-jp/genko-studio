@@ -33,6 +33,8 @@ class GuideMixin:
         self.ruler_copies = 2  # symmetry
         self.selected_ruler_id: str | None = None
         self._ruler_draft: list | None = None  # points of a ruler being placed
+        self._ruler_first: list | None = None  # a multi-curve ruler's first curve, while the second is placed
+        self.target_layer_id: str | None = None  # (rulers kept with a layer show and snap only for it)
         self._ruler_drag: dict | None = None
         self.selected_prim_id: str | None = None
         self._prim_drag: dict | None = None
@@ -43,7 +45,8 @@ class GuideMixin:
     # --- helpers -------------------------------------------------------------------------------------------
 
     def _page_rulers(self) -> list[dict]:
-        return list(getattr(self.page, "rulers", None) or []) if self.page is not None else []
+        rs = list(getattr(self.page, "rulers", None) or []) if self.page is not None else []
+        return [r for r in rs if not r.get("layer_id") or self.target_layer_id is None or r["layer_id"] == self.target_layer_id]
 
     def _frame_contains(self):
         from genko.ops import _frame_contains
@@ -61,8 +64,8 @@ class GuideMixin:
         if not (self.snap_rulers and rs and len(points) >= 2):
             return [points]
         inside = self._frame_contains()
-        main = rulers.snap(points, rs, inside)
-        return [main, *rulers.symmetry_copies(main, rs, inside)]
+        main = rulers.snap(points, rs, inside, layer_id=self.target_layer_id)
+        return [main, *rulers.symmetry_copies(main, rs, inside, layer_id=self.target_layer_id)]
 
     def _ruler_handles(self) -> list[tuple[str, int, tuple[float, float]]]:
         out = []
@@ -162,6 +165,26 @@ class GuideMixin:
                 painter.setPen(QPen(colour, 1.6, Qt.PenStyle.DotLine))
                 for d in rulers.directions(ruler, hover):
                     self._line_across(painter, hover, d)
+        elif kind in ("parallel_curve", "radial_curve", "multi_curve") and len(pts) >= 2:
+            for curve in rulers.outline(ruler):
+                path = QPainterPath(self._pt(*curve[0]))
+                for p in curve[1:]:
+                    path.lineTo(self._pt(*p))
+                painter.drawPath(path)
+            if kind == "radial_curve" and ruler.get("center"):
+                c = self._pt(*ruler["center"])
+                painter.drawEllipse(c, 5, 5)
+            if hover:  # the curve a line started here would follow
+                try:
+                    through = rulers._curve_through(ruler, hover)
+                except (ValueError, KeyError, ZeroDivisionError):
+                    through = None
+                if through:
+                    painter.setPen(QPen(colour, 1.4, Qt.PenStyle.DotLine))
+                    path = QPainterPath(self._pt(*through[0]))
+                    for p in through[1:]:
+                        path.lineTo(self._pt(*p))
+                    painter.drawPath(path)
         elif kind == "symmetry" and len(pts) >= 2:
             painter.setPen(QPen(QColor("#ae3ec9"), 1.5, Qt.PenStyle.DashDotLine))
             a = pts[0]
@@ -190,7 +213,7 @@ class GuideMixin:
                         ruler = self._ruler_drag["ruler"]
                     self._draw_one_ruler(painter, ruler, ruler.get("id") == self.selected_ruler_id)
         if self._ruler_draft:
-            draft = self._draft_ruler(self._ruler_draft + ([self._hover] if self._hover and self.ruler_kind in ("curve", "perspective") else []))
+            draft = self._draft_ruler(self._ruler_draft + ([self._hover] if self._hover and self.ruler_kind in ("curve", "perspective", "parallel_curve", "radial_curve", "multi_curve") else []))
             if draft:
                 self._draw_one_ruler(painter, draft, True)
         painter.restore()
@@ -248,7 +271,7 @@ class GuideMixin:
         kind = self.ruler_kind
         if not pts:
             return None
-        if kind == "curve":  # a double-click adds the same point twice
+        if kind in ("curve", "parallel_curve", "radial_curve", "multi_curve"):  # a double-click adds the same point twice
             kept = [pts[0]]
             for pt in pts[1:]:
                 if math.dist(pt, kept[-1]) > 0.5:
@@ -257,6 +280,14 @@ class GuideMixin:
             if len(pts) < 2:
                 return None
         ruler = {"id": "_draft", "kind": kind, "points": pts, "active": True}
+        if kind == "radial_curve":  # the first click is the centre, then the curve
+            if len(pts) < 3:
+                return {"id": "_draft", "kind": "curve", "points": pts[1:] or pts, "active": True} if len(pts) >= 2 else None
+            ruler["center"], ruler["points"] = pts[0], pts[1:]
+        elif kind == "multi_curve":
+            if self._ruler_first is None:
+                return {"id": "_draft", "kind": "curve", "points": pts, "active": True}
+            ruler["points"], ruler["points2"] = self._ruler_first, pts
         if kind in ("line", "symmetry"):
             if len(pts) < 2:
                 return None
@@ -290,7 +321,7 @@ class GuideMixin:
                     self._ruler_drag = {"id": ruler_id, "index": index, "ruler": ruler, "moved": False}
                     self.update()
                     return
-        if self.ruler_kind in ("curve", "perspective"):  # click by click
+        if self.ruler_kind in ("curve", "perspective", "parallel_curve", "radial_curve", "multi_curve"):  # click by click
             self._ruler_draft = (self._ruler_draft or []) + [[round(x, 2), round(y, 2)]]
             if self.ruler_kind == "perspective" and len(self._ruler_draft) >= self.ruler_vps:
                 self._finish_ruler()
@@ -340,18 +371,27 @@ class GuideMixin:
             self.update()
 
     def finish_curve(self) -> None:
-        """Enter or a double-click ends a curve ruler."""
-        if self._ruler_draft and self.ruler_kind == "curve" and len(self._ruler_draft) >= 2:
+        """Enter or a double-click ends a curve ruler (a multi-curve's first curve, then its second)."""
+        if not self._ruler_draft or len(self._ruler_draft) < 2:
+            return
+        if self.ruler_kind == "multi_curve" and self._ruler_first is None:
+            self._ruler_first = self._draft_ruler(self._ruler_draft)["points"]
+            self._ruler_draft = []
+            self.update()
+            return
+        if self.ruler_kind in ("curve", "parallel_curve", "multi_curve") or (self.ruler_kind == "radial_curve" and len(self._ruler_draft) >= 3):
             self._finish_ruler()
 
     def cancel_ruler(self) -> None:
         self._ruler_draft = None
+        self._ruler_first = None
         self._ruler_drag = None
         self.update()
 
     def _finish_ruler(self) -> None:
         ruler = self._draft_ruler(self._ruler_draft or [])
         self._ruler_draft = None
+        self._ruler_first = None
         if ruler:
             ruler.pop("id", None)
             ruler.pop("active", None)

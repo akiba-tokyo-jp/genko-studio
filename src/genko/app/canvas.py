@@ -7,6 +7,7 @@ the wheel or two fingers scroll, Space+drag or the middle button pans.
 
 from __future__ import annotations
 
+import copy
 from typing import Callable
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
@@ -99,6 +100,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
     gutterMoved = Signal(str, int, float)  # split node id, gutter index, delta mm (a move_gutter op)
     cutRequested = Signal(str, QPointF, QPointF)  # panel id, cut line ends (mm): a cut_frame op
     frameShaped = Signal(str, object)  # panel id, [[x, y], …]: a free-form panel (set_frame poly)
+    frameBowed = Signal(str, int, float)  # panel id, edge, mm: an edge bowed out (+) or in (−) (set_frame bow)
     colourPicked = Signal(object)  # (r, g, b) under the eyedropper
     fillRequested = Signal(float, float)  # the fill tool clicked here (mm)
     areaFilled = Signal(object)  # a drawn area to fill: [[x, y], …]
@@ -169,6 +171,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self.selection: dict | None = None  # {"area": {...}, "outline": [[x, y], …]} (mm)
         self.marquee = "rect"  # rect | lasso | wand
         self._sel_drag: dict | None = None
+        self.show_frame_numbers = False  # コマ番号 (the reading order) over the panels
+        self.binding = "right"
         self.strokes_for_reshape = None  # callable → the target layer's strokes
         self.reshape_radius_mm = 6.0
         self._reshape: dict | None = None
@@ -622,13 +626,39 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 self._draw_frame(painter, frame)
         painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self.show_frame_numbers:
+            self._draw_frame_numbers(painter)
         if self.tool == "frame":
             self._draw_frame_tool(painter)
 
-    def _draw_frame(self, painter: QPainter, frame) -> None:
+    def _draw_frame_numbers(self, painter: QPainter) -> None:
+        """コマ番号: each panel's place in the reading order, in a small circle at its top outer corner."""
         from genko.frames import shape
+        from genko.models import Binding
+        from genko.ops import _leaves_in_reading_order
 
-        painter.drawPolygon([self._pt(x, y) for x, y in shape(frame)])
+        if not self.page.frames:
+            return
+        binding = self.binding if isinstance(self.binding, Binding) else Binding(self.binding or "right")
+        font = painter.font()
+        font.setBold(True)
+        painter.setFont(font)
+        for n, frame in enumerate(_leaves_in_reading_order(self.page.frames[0], binding), start=1):
+            pts = shape(frame)
+            corner = max(pts, key=lambda p: (p[0] if binding == Binding.RIGHT else -p[0]) - p[1])
+            q = self._pt(*corner)
+            q = QPointF(q.x() + (-14 if binding == Binding.RIGHT else 14), q.y() + 14)
+            painter.setPen(QPen(QColor("#1c7ed6"), 1.5))
+            painter.setBrush(QColor(255, 255, 255, 230))
+            painter.drawEllipse(q, 10, 10)
+            painter.setPen(QColor("#1c7ed6"))
+            painter.drawText(QRectF(q.x() - 10, q.y() - 10, 20, 20), Qt.AlignmentFlag.AlignCenter, str(n))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _draw_frame(self, painter: QPainter, frame) -> None:
+        from genko.frames import outline
+
+        painter.drawPolygon([self._pt(x, y) for x, y in outline(frame)])
 
     # --- the panel tool: drag gutters, cut panels (any angle), move corners -------------------------------
 
@@ -661,6 +691,28 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         pts = drag["poly"] if drag and drag["kind"] == "vertex" else shape(frame)
         return list(enumerate(pts))
 
+    def _bow_handles(self) -> list[tuple[int, tuple[float, float]]]:
+        """The ◇ in the middle of each edge of the chosen panel: drag it out or in to bow the edge (曲線の枠)."""
+        from genko.frames import curves_of, edge_normal, shape
+
+        if self.tool != "frame" or not self.page or not self.page.selected_frame_id:
+            return []
+        try:
+            frame = self.page._find(self.page.selected_frame_id)
+        except (KeyError, IndexError):
+            return []
+        if frame.children:
+            return []
+        pts = shape(frame)
+        curves = curves_of(frame, pts) or [0.0] * len(pts)
+        drag = self._frame_drag
+        out = []
+        for i in range(len(pts)):
+            mid, n, _b = edge_normal(pts, i)
+            bow = drag["mm"] if drag and drag["kind"] == "bow" and drag["edge"] == i else curves[i]
+            out.append((i, (mid[0] + n[0] * bow, mid[1] + n[1] * bow)))
+        return out
+
     def _draw_frame_tool(self, painter: QPainter) -> None:
         drag = self._frame_drag
         hover = self._hit_gutter(*self._hover) if self._hover and not drag else None
@@ -686,6 +738,23 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             painter.setPen(QPen(QColor("#1c7ed6"), 1.5))
             painter.setBrush(QColor("white"))
             painter.drawEllipse(p, HANDLE_PX / 2 + 1, HANDLE_PX / 2 + 1)
+        for _i, (x, y) in self._bow_handles():
+            p = self._pt(x, y)
+            r = HANDLE_PX / 2 + 1
+            painter.setPen(QPen(QColor("#e8590c"), 1.5))
+            painter.setBrush(QColor("white"))
+            painter.drawPolygon([QPointF(p.x(), p.y() - r), QPointF(p.x() + r, p.y()), QPointF(p.x(), p.y() + r), QPointF(p.x() - r, p.y())])
+        if drag and drag["kind"] == "bow":
+            from genko.frames import outline
+
+            frame = self.page._find(drag["frame"])
+            ghost = copy.copy(frame)
+            curves = list(drag["curves"])
+            curves[drag["edge"]] = drag["mm"]
+            ghost.curves = curves
+            painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPolygon([self._pt(x, y) for x, y in outline(ghost)])
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
     def _frame_press(self, pos: QPointF) -> None:
@@ -697,6 +766,16 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             if abs(p.x() - pos.x()) <= HANDLE_PX + 2 and abs(p.y() - pos.y()) <= HANDLE_PX + 2:
                 frame = self.page._find(self.page.selected_frame_id)
                 self._frame_drag = {"kind": "vertex", "index": i, "frame": frame.id, "poly": [list(p) for p in shape(frame)]}
+                return
+        for i, (bx, by) in self._bow_handles():
+            p = self._pt(bx, by)
+            if abs(p.x() - pos.x()) <= HANDLE_PX + 2 and abs(p.y() - pos.y()) <= HANDLE_PX + 2:
+                from genko.frames import curves_of
+
+                frame = self.page._find(self.page.selected_frame_id)
+                pts = shape(frame)
+                curves = curves_of(frame, pts) or [0.0] * len(pts)
+                self._frame_drag = {"kind": "bow", "edge": i, "frame": frame.id, "curves": curves, "mm": curves[i]}
                 return
         gutter = self._hit_gutter(x_mm, y_mm)
         if gutter is not None:
@@ -713,6 +792,14 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         x_mm, y_mm = self._to_mm(pos)
         if drag["kind"] == "vertex":
             drag["poly"][drag["index"]] = [round(x_mm, 2), round(y_mm, 2)]
+        elif drag["kind"] == "bow":
+            from genko.frames import edge_normal, shape
+
+            pts = shape(self.page._find(drag["frame"]))
+            mid, n, _b = edge_normal(pts, drag["edge"])
+            edge = math.dist(pts[drag["edge"]], pts[(drag["edge"] + 1) % len(pts)])
+            bow = (x_mm - mid[0]) * n[0] + (y_mm - mid[1]) * n[1]
+            drag["mm"] = round(max(-edge / 2 + 0.01, min(edge / 2 - 0.01, bow)), 2)
         elif drag["kind"] == "gutter":
             g = drag["gutter"]
             (ax, ay), (bx, by) = g["p0"], g["p1"]
@@ -740,6 +827,9 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         drag, self._frame_drag = self._frame_drag, None
         if drag["kind"] == "vertex":
             self.frameShaped.emit(drag["frame"], drag["poly"])
+        elif drag["kind"] == "bow":
+            if abs(drag["mm"] - drag["curves"][drag["edge"]]) > 0.05:
+                self.frameBowed.emit(drag["frame"], drag["edge"], float(drag["mm"] if abs(drag["mm"]) > 0.5 else 0.0))
         elif drag["kind"] == "gutter":
             if abs(drag["delta"]) > 0.2:
                 self.gutterMoved.emit(drag["gutter"]["node"], drag["gutter"]["index"], round(drag["delta"], 2))

@@ -29,7 +29,8 @@ def _frame_to_dict(frame: Frame) -> dict:
         "children": [_frame_to_dict(child) for child in frame.children],
         "panel": frame.panel,
     } | ({"poly": [list(p) for p in frame.poly]} if frame.poly else {}) | ({"split": frame.split} if frame.split else {}) \
-        | ({"custom": True} if frame.custom else {})
+        | ({"custom": True} if frame.custom else {}) | ({"curves": list(frame.curves)} if frame.curves else {}) \
+        | ({"line": dict(frame.line)} if frame.line else {})
 
 
 def _layer_to_dict(layer: Layer, strokes: bool = True) -> dict:
@@ -59,7 +60,8 @@ def _layer_to_dict(layer: Layer, strokes: bool = True) -> dict:
         | ({"mask": {"enabled": bool(layer.mask.get("enabled", True))}} if layer.mask else {}) \
         | ({"color": list(layer.color)} if layer.color else {}) | ({"reference": True} if layer.reference else {}) \
         | ({"fill": layer.fill} if layer.fill else {}) | ({"adjust": layer.adjust} if layer.adjust else {}) \
-        | ({"effect": layer.effect} if layer.effect else {}) | ({"color_prints": True} if layer.color_prints else {}) | ({
+        | ({"effect": layer.effect} if layer.effect else {}) | ({"color_prints": True} if layer.color_prints else {}) \
+        | ({"screen": layer.screen} if layer.screen else {}) | ({
         "asset": layer.asset,
         "frame_id": layer.frame_id,
         "placement_mm": _rect_to_dict(layer.placement_mm) if layer.placement_mm else None,

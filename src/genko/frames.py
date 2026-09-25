@@ -69,11 +69,82 @@ def set_shape(frame: Frame, points: list[Point]) -> None:
         frame.rect, frame.poly = bbox(pts), pts
 
 
+def _signed_area(points: list[Point]) -> float:
+    return sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(points, points[1:] + points[:1])) / 2
+
+
+def edge_normal(points: list[Point], i: int) -> tuple[Point, Point, Point]:
+    """Edge i (corner i → i+1): its middle, its outward normal and its end."""
+    a, b = points[i], points[(i + 1) % len(points)]
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dy) or 1.0
+    n = (dy / length, -dx / length)
+    if _signed_area(points) < 0:
+        n = (-n[0], -n[1])
+    return ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), n, b
+
+
+def curves_of(frame: Frame, points: list[Point] | None = None) -> list[float] | None:
+    """The panel's bows (mm, outward +) when they fit its corners, else None."""
+    pts = points if points is not None else shape(frame)
+    curves = getattr(frame, "curves", None)
+    if not curves or len(curves) != len(pts) or not any(abs(float(c)) > 1e-6 for c in curves):
+        return None
+    return [float(c) for c in curves]
+
+
+def outline(frame: Frame, step_mm: float = 1.0) -> list[Point]:
+    """The panel's outline: its corners, with each bowed edge (curves, 曲線の枠) walked as a curve."""
+    pts = shape(frame)
+    curves = curves_of(frame, pts)
+    if curves is None:
+        return pts
+    out: list[Point] = []
+    for i, a in enumerate(pts):
+        out.append(a)
+        bow = curves[i]
+        if abs(bow) < 1e-6:
+            continue
+        mid, n, b = edge_normal(pts, i)
+        c = (mid[0] + n[0] * 2 * bow, mid[1] + n[1] * 2 * bow)  # (a quadratic curve's middle is half way to its control)
+        steps = max(4, int(math.dist(a, b) / step_mm))
+        for k in range(1, steps):
+            t = k / steps
+            out.append(((1 - t) ** 2 * a[0] + 2 * (1 - t) * t * c[0] + t * t * b[0],
+                        (1 - t) ** 2 * a[1] + 2 * (1 - t) * t * c[1] + t * t * b[1]))
+    return out
+
+
+def offset(points: list[Point], d: float) -> list[Point]:
+    """The outline moved inward by d mm (outward when d < 0), corner by corner along the mitre."""
+    n = len(points)
+    if n < 3:
+        return list(points)
+    sign = 1.0 if _signed_area(points) > 0 else -1.0
+    out = []
+    for i in range(n):
+        p0, p1, p2 = points[i - 1], points[i], points[(i + 1) % n]
+        normals = []
+        for a, b in ((p0, p1), (p1, p2)):
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            length = math.hypot(dx, dy) or 1.0
+            normals.append((-dy / length * sign, dx / length * sign))  # (inward)
+        mx, my = normals[0][0] + normals[1][0], normals[0][1] + normals[1][1]
+        length = math.hypot(mx, my)
+        if length < 1e-6:
+            out.append((p1[0] + normals[0][0] * d, p1[1] + normals[0][1] * d))
+            continue
+        mx, my = mx / length, my / length
+        cos = max(0.25, mx * normals[0][0] + my * normals[0][1])  # (a sharp corner's mitre is kept short)
+        out.append((p1[0] + mx * d / cos, p1[1] + my * d / cos))
+    return out
+
+
 def contains(frame: Frame, x: float, y: float) -> bool:
-    if not getattr(frame, "poly", None):
+    if not getattr(frame, "poly", None) and curves_of(frame) is None:
         return frame.rect.contains(x, y)
     inside = False
-    pts = shape(frame)
+    pts = outline(frame)
     j = len(pts) - 1
     for i in range(len(pts)):
         xi, yi = pts[i]

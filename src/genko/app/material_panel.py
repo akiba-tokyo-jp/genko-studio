@@ -27,14 +27,18 @@ from PySide6.QtWidgets import (
 
 from genko import effects, materials
 
-PATTERNS = [("網点", "dot"), ("線", "line"), ("カケアミ風（交差）", "cross"), ("砂目", "noise"), ("ベタのグレー", "flat")]
-KIND_WORD = {"tone": "トーン", "effect": "効果線", "image": "画像", "lines": "パーツ"}
+PATTERNS = [("網点", "dot"), ("線", "line"), ("カケアミ風（交差）", "cross"), ("砂目", "noise"), ("ベタのグレー", "flat"),
+            ("柄: 市松", "check"), ("柄: レンガ", "brick"), ("柄: 波", "wave"), ("柄: 格子", "grid"), ("柄: 斜線", "hatch"),
+            ("柄: 星", "star"), ("柄: 砂", "sand"), ("柄: 画像から…", "image")]
+KIND_WORD = {"tone": "トーン", "effect": "効果線", "image": "画像", "lines": "パーツ", "lettering": "描き文字"}
 # the settings people change per effect kind: (key, label, lo, hi, step, default)
 EFFECT_FIELDS = {
     "focus": [("count", "本数", 10, 600, 10, 90), ("inner_r", "中心の空き（mm）", 1, 200, 1, None),
-              ("jitter", "ばらつき", 0, 1, 0.05, 0.25), ("width_mm", "太さ（mm）", 0.05, 5, 0.05, 0.8)],
+              ("jitter", "ばらつき", 0, 1, 0.05, 0.25), ("width_mm", "太さ（mm）", 0.05, 5, 0.05, 0.8),
+              ("twist", "渦（°）", -180, 180, 5, 0)],
     "speed": [("count", "本数", 5, 400, 5, 40), ("angle", "向き（°）", -180, 180, 5, 0), ("length", "長さ", 0.05, 1, 0.05, 0.7),
-              ("curve", "曲がり（mm）", -80, 80, 1, 0), ("jitter", "ばらつき", 0, 1, 0.05, 0.25), ("width_mm", "太さ（mm）", 0.05, 5, 0.05, 0.5)],
+              ("curve", "曲がり（mm）", -80, 80, 1, 0), ("jitter", "ばらつき", 0, 1, 0.05, 0.25), ("width_mm", "太さ（mm）", 0.05, 5, 0.05, 0.5),
+              ("spread_mm", "沿わせた時の幅（mm）", 2, 300, 1, 40)],
     "uni_flash": [("count", "本数", 20, 800, 10, 140), ("inner_r", "中心の空き（mm）", 1, 200, 1, None),
                   ("length_mm", "線の長さ（mm）", 2, 150, 1, None), ("jitter", "ばらつき", 0, 1, 0.05, 0.25),
                   ("width_mm", "太さ（mm）", 0.05, 3, 0.05, 0.35)],
@@ -96,7 +100,13 @@ class MaterialPanel(QWidget):
         self.pattern = QComboBox()
         for label, key in PATTERNS:
             self.pattern.addItem(label, key)
-        self.pattern.activated.connect(lambda _: self._tone({"pattern": self.pattern.currentData()}))
+        self.pattern.activated.connect(lambda _: self._pattern_chosen())
+        self.scale = QDoubleSpinBox()
+        self.scale.setRange(0.3, 50)
+        self.scale.setSuffix(" mm")
+        self.scale.setValue(3.0)
+        self.scale.setToolTip("柄トーンの模様の大きさ（繰り返しの間隔）")
+        self.scale.editingFinished.connect(lambda: self._tone({"scale_mm": self.scale.value()}))
         self.lpi = QDoubleSpinBox()
         self.lpi.setRange(5, 300)
         self.lpi.setSuffix(" 線")
@@ -128,6 +138,7 @@ class MaterialPanel(QWidget):
         tone_form = QFormLayout()
         tone_form.addRow("", self.tone_label)
         tone_form.addRow("模様", self.pattern)
+        tone_form.addRow("柄の大きさ", self.scale)
         tone_form.addRow("線数", self.lpi)
         tone_form.addRow("濃さ", self.density)
         tone_form.addRow("角度", self.angle)
@@ -311,6 +322,10 @@ class MaterialPanel(QWidget):
             tone = settings(layer)
             self.tone_label.setText(f"「{layer.title or 'トーン'}」")
             self.pattern.setCurrentIndex(max(0, self.pattern.findData(tone["pattern"])))
+            self.scale.setValue(float(tone.get("scale_mm") or 3.0))
+            from genko.tones import MOTIFS
+
+            self.scale.setEnabled(tone["pattern"] in MOTIFS)
             self.lpi.setValue(tone["lpi"])
             self.density.setValue(round(tone["density"] * 100))
             self.angle.setValue(tone["angle"])
@@ -323,6 +338,33 @@ class MaterialPanel(QWidget):
             widget.setEnabled(bool(self.gradient.currentData()))
         self._loading = False
         self._fill_effects()
+
+    def _pattern_chosen(self) -> None:
+        key = self.pattern.currentData()
+        if key != "image":
+            self._tone({"pattern": key})
+            return
+        import base64
+        import io
+
+        from PIL import Image
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(self, "柄にする画像（白地に黒い模様）", "", "画像 (*.png *.jpg *.jpeg *.bmp *.webp)")
+        if not path:
+            self.refresh()
+            return
+        try:
+            with Image.open(path) as img:
+                img = img.convert("LA")
+                img.thumbnail((512, 512))
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+        except Exception as exc:
+            self.window.flash(f"読み込めない画像です:\n{exc}", 6000, error=True)
+            self.refresh()
+            return
+        self._tone({"pattern": "image", "tile_png": base64.b64encode(buf.getvalue()).decode("ascii")})
 
     def _tone(self, change: dict) -> None:
         layer = self._tone_layer()
@@ -409,6 +451,20 @@ class MaterialPanel(QWidget):
             spin.editingFinished.connect(lambda k=key, sp=spin: self._effect_set(k, sp.value()))
             self.effect_form.addRow(label, spin)
             self.effect_fields[key] = spin
+        kind = effect.get("kind")
+        if kind in ("speed", "focus"):
+            from PySide6.QtWidgets import QPushButton
+
+            key = "path" if kind == "speed" else "inner_path"
+            draw = QPushButton("描いた線に沿わせる" if kind == "speed" else "中心の空きを描いた形にする")
+            draw.setToolTip("ボタンを押してから、ペンで 1 本引きます（流線はその線に沿い、集中線はその形の外から入る）")
+            draw.clicked.connect(lambda _=False, k=key, e=effect["id"]: self.window.draw_effect_shape(e, k))
+            self.effect_form.addRow(draw)
+            if params.get(key):
+                undo = QPushButton("沿わせるのをやめる" if kind == "speed" else "中心の空きを楕円に戻す")
+                undo.clicked.connect(lambda _=False, k=key: self.window.apply_ops([{"op": "edit_effect", "page": self.window.current_page().index,
+                                                                                  "id": effect["id"], "params": {k: None}}]))
+                self.effect_form.addRow(undo)
 
     def _effect_set(self, key: str, value: float) -> None:
         effect = self._effect()

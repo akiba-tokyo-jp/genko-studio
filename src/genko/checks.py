@@ -117,6 +117,7 @@ def page_issues(episode, page) -> list[dict]:
         if xs and (min(xs) < b.x - 1 or min(ys) < b.y - 1 or max(xs) > b.x + b.width + 1 or max(ys) > b.y + b.height + 1):
             out.append(_issue("warning", "art_outside_page", page, f"「{label}」の絵が裁ち落としの外まで出ている（はみ出た所は印刷されない）",
                               (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)), "layer", layer.id))
+    out.extend(_moire(page))
     if page.spread_with:
         from genko.ops import facing_problem
 
@@ -136,6 +137,52 @@ def page_issues(episode, page) -> list[dict]:
                           "（ペン入れのレイヤーに描くか、レイヤーの「下描き（書き出さない）」を外す）", kind="layer", target_id=hidden[0].id))
     elif not art and not lines and not page.effects:
         out.append(_issue("warning", "empty_page", page, f"{page.index} ページに何も描かれていない"))
+    return out
+
+
+def _moire(page) -> list[dict]:
+    """トーンの重ね: two dot / line tones over the same place at different angles or line counts beat
+    into a moiré in print. Found from the tones' masks at a coarse size."""
+    import numpy as np
+
+    from genko import tones
+
+    screens = [layer for layer in page.layers if layer.visible and layer.exportable
+               and (layer.kind == LayerKind.TONE or layer.role == LayerRole.TONE or getattr(layer, "screen", None))]
+    if len(screens) < 2:
+        return []
+    dpi = 20
+    size = (max(1, round(page.spec.width_mm / 25.4 * dpi)), max(1, round(page.spec.height_mm / 25.4 * dpi)))
+    looks, masks = [], []
+    for layer in screens:
+        if getattr(layer, "screen", None):
+            spec = layer.screen
+            look = (spec.get("pattern", "dot"), float(spec.get("lpi", 60)), float(spec.get("angle", 45)) % 90)
+            from genko.render import layer_image
+
+            where = np.asarray(layer_image(page, layer, dpi).getchannel(3)) > 20
+        else:
+            st = tones.settings(layer)
+            if st["pattern"] not in ("dot", "line", "cross"):
+                continue
+            look = (st["pattern"], st["lpi"], st["angle"] % 90)
+            where = np.asarray(tones.mask(layer, page, size, dpi)) > 20
+        looks.append((layer, look))
+        masks.append(where)
+    out = []
+    for i in range(len(looks)):
+        for j in range(i + 1, len(looks)):
+            (a, la), (b, lb) = looks[i], looks[j]
+            if la == lb or masks[i].shape != masks[j].shape:
+                continue
+            both = masks[i] & masks[j]
+            if both.sum() < 4:
+                continue
+            ys, xs = np.nonzero(both)
+            box = (xs.min() / dpi * 25.4, ys.min() / dpi * 25.4, (xs.max() - xs.min() + 1) / dpi * 25.4, (ys.max() - ys.min() + 1) / dpi * 25.4)
+            out.append(_issue("warning", "tone_moire", page,
+                              f"トーン「{a.title or 'トーン'}」と「{b.title or 'トーン'}」が重なっていて、線数か角度が違う（印刷でモアレが出る）",
+                              box, "layer", b.id))
     return out
 
 

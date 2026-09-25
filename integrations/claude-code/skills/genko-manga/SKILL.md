@@ -93,6 +93,10 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 線の編集: `vector_edit`（`action`: `move_point`・`add_point`・`delete_point`・`connect`・`cut`・`recolor`・`delete`。線の id は `inspect` の `snapshot` か `render`）。塗り残しは `fill_gaps`。
 - レイヤー: `add_layer` の `kind` に `fill`（ベタ塗り・`rgb`）・`gradient`（`gradient`）・`adjust`（色調補正・`adjust: {kind, …}`、下の絵の色を変える。あとから `set_layer` で直せる）。`set_layer` の `effect`（`border` フチ・`water_edge` 水彩境界）と `color_prints`（表示色を印刷にも）。合成モードは比較（暗・明）・焼き込み・覆い焼き・ソフトライト・差の絶対値・色相・輝度なども。まとめて: `merge_layers`・`merge_visible`（`copy`）・`group_layers`・`move_layers`・`set_layers`・`convert_layer`（`to`: `paint`・`pen`）。用紙の色は `set_paper`。
 - 変形: `liquify`（`mode`: `push`・`pinch`・`bloat`・`twirl_cw`・`twirl_ccw`）、`transform_area` の `interp`（`nearest` でドットをぼかさない）。フィルターは移動・放射・ズームぼかし、ノイズ、波形、渦巻き、線画抽出、反転、階調化、しきい値、グラデーションマップも。
+- コマ: `set_frame` の `curves`・`bow`（辺を曲げる）と `line`（枠線: `solid`・`double`・`dashed`・`dotted`・`rough`、`rgb`）。
+- 文字の `style`: `scale_x`（長体・平体）・`gradient`・`fill_png`（画像で塗る）・`warp`（4 隅で遠近・ゆがみ）・`text_path`（パスに沿わせる）・`features`（字形）・`yakumono`（約物の詰め）。異体字はテキストに異体字セレクタを入れる。フキダシは `picture`（画像のフキダシ）、`spike_jitter`・`bumps`、しっぽの `kind`（`zigzag`・`fade`・`bubbles`）。
+- 効果線: 流線の `path`・`spread_mm`、集中線の `inner_path`・`twist`。トーン: 柄（`check`・`brick`・`wave`・`grid`・`hatch`・`star`・`sand`・`image`）、レイヤーのトーン化は `set_layer` の `screen`、点検の `tone_moire`。
+- 定規: `parallel_curve`・`multi_curve`・`radial_curve`、`layer_id`（レイヤー専用）、パースの `lock_horizon`・`horizon_y`・`fixed`、定規ペンは `ruler_to_layer`。描き文字の素材は `stamp_material`（kind `lettering`）。
 - 図形: `add_shape`（`shape`: `line`・`polyline`・`curve`・`rect`・`ellipse`・`polygon`、`line`・`fill` で線と塗り）。
 - 範囲（`area`）: どの op の `area` にも、`poly`・`mask` のほかに `rect`・`ellipse`・`layer`（そのレイヤーの描いてある所）・`color`（その色の所）・`all`・`saved`（`store_area` で残した範囲）と、`union`・`intersect`・`subtract` の組み合わせ、`invert`・`grow_mm`（負で縮める）・`feather_mm` が使える。ガイド線は `add_ruler` の `kind: "guide"`（`axis`・`at`）。
 - 範囲の変形: `transform_area` の `matrix`（移動・拡大・回転・反転）か `warp`（`perspective` で 4 隅、`mesh` で 3×3 の点）。レイヤーを丸ごと動かすのは、ページ全体を `area` にした `matrix`。

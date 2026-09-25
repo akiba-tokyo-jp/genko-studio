@@ -13,15 +13,17 @@ balloon), none (text only).
 from __future__ import annotations
 
 import math
+import random
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from genko import fonts
-from genko.tategaki import cells, compose, draw_mark
+from genko.tategaki import bold_px, cells, compose, draw_mark
 
-SHAPES = ("speech", "rounded", "box", "cloud", "thought", "shout", "electric", "flash", "whisper", "narration", "sfx", "none")
+SHAPES = ("speech", "rounded", "box", "cloud", "thought", "shout", "electric", "flash", "whisper", "narration", "sfx", "none",
+          "picture")
 ELLIPTIC = ("speech", "cloud", "thought", "shout", "electric", "flash", "whisper")
-NO_TAIL = ("narration", "sfx", "none", "flash")
+NO_TAIL = ("narration", "sfx", "none", "flash", "picture")
 SQRT2 = 2 ** 0.5
 CAP_MM = 5.0
 SFX_CAP_MM = 12.0
@@ -32,7 +34,25 @@ TEXT = (10, 10, 10)
 DEFAULTS = {"font": None, "size_mm": None, "tracking": 0.0, "leading": 0.15, "align": "top", "outline_mm": None,
             "rgb": None, "tcy": True, "border_mm": 0.35, "fill": "white", "group": None, "rotate_deg": 0.0, "skew_deg": 0.0,
             "arc": 0.0, "latin": "rotate", "emphasis_mark": "sesame", "bold": False, "weight": None, "italic": False, "outline_rgb": None,
-            "wobble": 0.0, "double": False, "spikes": None, "spike_depth": 0.2}
+            "wobble": 0.0, "double": False, "spikes": None, "spike_depth": 0.2,
+            # J6: 長体・平体 (width of the letters to their height), a gradient over the letters, the letters set
+            # along a path (mm from the box's top left), OpenType features (字形: jp78, jp90, trad, expt, hwid…),
+            # 約物の詰め (paired punctuation set half wide), uneven spikes, the cloud's bumps
+            "scale_x": 1.0, "gradient": None, "text_path": None, "features": None, "yakumono": True,
+            "spike_jitter": 0.0, "bumps": None, "picture": None,
+            # the letters' box pulled into four corners (0..1 of it: 遠近・ゆがみ), or painted with a picture
+            "warp": None, "fill_png": None}
+TAIL_KINDS = ("wedge", "zigzag", "fade", "bubbles")
+VS = (range(0xFE00, 0xFE10), range(0xE0100, 0xE01F0))
+
+
+def is_vs(char: str) -> bool:
+    """A variation selector (異体字セレクタ): it chooses the form of the letter before it."""
+    return len(char) == 1 and any(ord(char) in r for r in VS)
+
+
+OPENING = frozenset("「『（(【［〈《〔｛“‘")
+CLOSING = frozenset("」』）)】］〉》〕｝”’、。，．・：；")
 LINE_START = frozenset("、。，．）」』)】］〉》ーぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ！？!?…‥")
 LINE_END = frozenset("「『（(【［〈《〔")
 
@@ -66,6 +86,8 @@ def _inner(kind: str, w: float, h: float, pad: float) -> tuple[float, float]:
         return w - 2 * pad - r * 0.3, h - 2 * pad - r * 0.3
     if kind in ("box", "narration"):
         return w - 2 * pad, h - 2 * pad
+    if kind == "picture":  # (a picture balloon: the words keep to its middle)
+        return (w - 2 * pad) * 0.7, (h - 2 * pad) * 0.7
     return w, h
 
 
@@ -134,12 +156,22 @@ def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Im
     def size_of(i: int) -> int:
         return max(4, round(em * max(0.3, min(3.0, float(styles[i].get("scale", 1.0))))))
 
+    features = [str(f) for f in st.get("features") or []] or None
+
     def advance(i: int) -> float:
         char = text[i]
+        if is_vs(char):
+            return 0.0
         try:
-            return face.font(size_of(i), char).getlength(char) + em * tracking
+            width = face.font(size_of(i), char).getlength(char) + em * tracking
         except Exception:
-            return size_of(i) * (1 + tracking)
+            width = size_of(i) * (1 + tracking)
+        if st.get("yakumono", True) and i + 1 < len(text):
+            after = text[i + 1]
+            # 約物の詰め: a closing mark before another mark, or any mark before an opening one, keeps half its width
+            if (char in CLOSING and (after in CLOSING or after in OPENING)) or (char in OPENING and after in OPENING):
+                width -= size_of(i) * 0.5
+        return width
 
     rows: list[list[int]] = []  # the characters' places in the text, row by row
     index = 0
@@ -177,8 +209,12 @@ def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Im
             size = size_of(i)
             rgb = tuple(styles[i].get("rgb") or fill)
             thick = bold_px(size, styles[i].get("bold"))
-            draw.text((x, base_y + (tallest - size)), text[i], font=face.font(size, text[i]), fill=rgb + (255,),
-                      stroke_width=thick, stroke_fill=rgb + (255,) if thick else None)
+            if is_vs(text[i]):
+                xs[i] = (x, x, top)
+                continue
+            letter = text[i] + "".join(c for c in text[i + 1:i + 3] if is_vs(c))[:1]
+            draw.text((x, base_y + (tallest - size)), letter, font=face.font(size, text[i]), fill=rgb + (255,),
+                      stroke_width=thick, stroke_fill=rgb + (255,) if thick else None, features=features)
             w = advance(i) - em * tracking
             if i in marked:
                 draw_mark(out, (x + w / 2, top + ruby_h + mark_h / 2 + max(1, em // 16)), mark_h, str(st["emphasis_mark"] or "sesame"),
@@ -232,13 +268,20 @@ def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Imag
         fixed = False
     pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
     inner_w, inner_h = _inner(kind, w, h, pad)
+    scale_x = max(0.3, min(3.0, float(st.get("scale_x") or 1.0)))
     for _ in range(10):
         image = _vertical(line, st, face, em, inner_h, fill) if vertical else _horizontal(line, st, face, em, inner_w, fill)
+        if abs(scale_x - 1) > 1e-3:  # 長体 (< 1) or 平体 (> 1): the letters narrower or wider than tall
+            image = image.resize((max(1, round(image.width * scale_x)), image.height), Image.Resampling.LANCZOS)
         if fixed or (image.width <= inner_w * 1.02 and image.height <= inner_h * 1.02) or em <= 8:
             break
         em = max(8, int(em * 0.9))
         pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
         inner_w, inner_h = _inner(kind, w, h, pad)
+    if st.get("gradient"):
+        image = gradient_letters(image, st["gradient"])
+    if st.get("fill_png"):
+        image = picture_letters(image, st["fill_png"])
     outline = st["outline_mm"]
     grow = px(float(outline), dpi) if outline else (max(2, em // 8) if kind == "sfx" else 0)
     if grow:
@@ -248,7 +291,124 @@ def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Imag
     skew = float(st["skew_deg"] or 0) or (12.0 if st["italic"] else 0.0)  # (italic: a light lean)
     if skew:
         image = skewed(image, skew, vertical)
+    if st.get("warp"):
+        image = warped_letters(image, st["warp"])
     return image, em
+
+
+_PICTURES: dict = {}
+
+
+def picture_of(data: str) -> Image.Image | None:
+    """A picture balloon's image (base64 PNG), decoded once."""
+    import base64
+    import io
+
+    key = hash(data)
+    if key not in _PICTURES:
+        try:
+            _PICTURES[key] = Image.open(io.BytesIO(base64.b64decode(data))).convert("RGBA")
+        except Exception:
+            _PICTURES[key] = None
+        if len(_PICTURES) > 64:
+            _PICTURES.pop(next(iter(_PICTURES)))
+    return _PICTURES[key]
+
+
+def picture_letters(image: Image.Image, data: str) -> Image.Image:
+    """The letters painted with a picture (stretched over them)."""
+    picture = picture_of(data)
+    if picture is None:
+        return image
+    box = image.getchannel(3).getbbox() or (0, 0, image.width, image.height)
+    out = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    out.paste(picture.convert("RGB").resize((max(1, box[2] - box[0]), max(1, box[3] - box[1])), Image.Resampling.LANCZOS), box[:2])
+    out.putalpha(image.getchannel(3))
+    return out
+
+
+def warped_letters(image: Image.Image, corners) -> Image.Image:
+    """文字の変形: the letters' box pulled so its top-left, top-right, bottom-right and bottom-left corners go to
+    these places (each [x, y] as shares of the box; [[0,0],[1,0],[1,1],[0,1]] leaves it as it is)."""
+    from genko.warp import _homography
+
+    w, h = image.size
+    dst = [(float(c[0]) * w, float(c[1]) * h) for c in corners]
+    xs, ys = [p[0] for p in dst], [p[1] for p in dst]
+    ox, oy = min(xs), min(ys)
+    size = (max(1, int(max(xs) - ox) + 1), max(1, int(max(ys) - oy) + 1))
+    src = [(0, 0), (w, 0), (w, h), (0, h)]
+    back = _homography([(x - ox, y - oy) for x, y in dst], src)  # output place → where it comes from
+    coeffs = tuple((back / back[2, 2]).flatten()[:8])
+    return image.transform(size, Image.Transform.PERSPECTIVE, coeffs, Image.Resampling.BICUBIC)
+
+
+def gradient_letters(image: Image.Image, spec: dict) -> Image.Image:
+    """The letters coloured from one colour to another (top to bottom, or at `angle` degrees)."""
+    import numpy as np
+
+    w, h = image.size
+    a = np.array([int(v) for v in (spec.get("rgb_from") or [20, 20, 20])][:3], dtype=float)
+    b = np.array([int(v) for v in (spec.get("rgb_to") or [230, 40, 40])][:3], dtype=float)
+    angle = math.radians(float(spec.get("angle", 90)))
+    x0, y0, x1, y1 = image.getchannel(3).getbbox() or (0, 0, w, h)  # (from the letters' own edges)
+    gx, gy = np.meshgrid((np.arange(w) - x0) / max(1, x1 - x0 - 1), (np.arange(h) - y0) / max(1, y1 - y0 - 1))
+    t = np.clip(gx * math.cos(angle) + gy * math.sin(angle), 0, None)
+    top = abs(math.cos(angle)) + abs(math.sin(angle))
+    t = np.clip(t / max(1e-6, top), 0, 1)
+    rgb = a[None, None, :] * (1 - t[..., None]) + b[None, None, :] * t[..., None]
+    out = Image.fromarray(rgb.round().astype("uint8"), "RGB").convert("RGBA")
+    out.putalpha(image.split()[3])
+    return out
+
+
+def path_text(image: Image.Image, line, dpi: int, font_path: str | None) -> None:
+    """文字をパスに沿わせる: each letter stood on the path (mm from the line's box), turned with it."""
+    st = style_of(line)
+    face = fonts.face(st["font"] or font_path, fonts.DEFAULT_SFX if (line.balloon or "") == "sfx" else fonts.DEFAULT_DIALOGUE)
+    fill = tuple(st["rgb"]) if st["rgb"] else TEXT
+    em = px(float(st["size_mm"] or CAP_MM), dpi)
+    pts = [(px(line.x_mm + float(p[0]), dpi), px(line.y_mm + float(p[1]), dpi)) for p in st["text_path"]]
+    if len(pts) < 2:
+        return
+    lengths = [0.0]
+    for a, b in zip(pts, pts[1:]):
+        lengths.append(lengths[-1] + math.dist(a, b))
+    total = lengths[-1]
+    text = face.normalize((line.text or "").replace("\n", ""))
+    letters = [c for c in text if c != "\n" and not is_vs(c)]
+    tracking = float(st["tracking"] or 0)
+    widths = [face.font(em, c).getlength(c) * float(st.get("scale_x") or 1) + em * tracking for c in letters]
+    run = sum(widths)
+    at = {"left": 0.0, "right": max(0.0, total - run)}.get(st["align"], max(0.0, (total - run) / 2))
+    bold = bold_px(em, line_weight(st)) if line_weight(st) else 0
+
+    def point_at(d: float):
+        d = max(0.0, min(total, d))
+        k = max(0, min(len(pts) - 2, next((i for i in range(len(lengths) - 1) if lengths[i + 1] >= d), len(pts) - 2)))
+        seg = (lengths[k + 1] - lengths[k]) or 1.0
+        t = (d - lengths[k]) / seg
+        (x0, y0), (x1, y1) = pts[k], pts[k + 1]
+        return x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, math.degrees(math.atan2(y1 - y0, x1 - x0))
+
+    for char, width in zip(letters, widths):
+        x, y, angle = point_at(at + width / 2)
+        at += width
+        if char.isspace():
+            continue
+        font = face.font(em, char)
+        size = em * 3
+        cell = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        ImageDraw.Draw(cell).text((size / 2, size / 2), char, font=font, fill=fill + (255,), anchor="ms",
+                                  stroke_width=bold, stroke_fill=fill + (255,) if bold else None)
+        if abs(float(st.get("scale_x") or 1) - 1) > 1e-3:
+            cell = cell.resize((max(1, round(size * float(st["scale_x"]))), size), Image.Resampling.LANCZOS)
+        if st.get("gradient"):
+            cell = gradient_letters(cell, st["gradient"])
+        if st["outline_mm"]:
+            cell = outlined(cell, px(float(st["outline_mm"]), dpi), tuple(st["outline_rgb"]) if st["outline_rgb"] else (255, 255, 255))
+        turned = cell.rotate(-angle, resample=Image.Resampling.BICUBIC, center=(cell.width / 2, cell.height / 2))
+        image.paste(turned, (round(x - turned.width / 2), round(y - turned.height / 2)), turned)
 
 
 def skewed(image: Image.Image, degrees: float, vertical: bool) -> Image.Image:
@@ -370,7 +530,9 @@ def _shape(draw: ImageDraw.ImageDraw, kind: str, box: tuple[float, float, float,
         bump = max(2.0, min(rx, ry) * 0.3)
         k = 1 - bump / max(1.0, min(rx, ry))
         perimeter = math.pi * (rx + ry) * k
-        n = max(8, int(perimeter / (bump * 1.4)))
+        n = int(st.get("bumps") or 0) or max(8, int(perimeter / (bump * 1.4)))
+        if st.get("bumps"):  # (a set number of bumps: each as big as its share of the edge)
+            bump = max(2.0, perimeter / n / 1.4)
         draw.ellipse((cx - rx * k, cy - ry * k, cx + rx * k, cy + ry * k), fill=255)
         for i in range(n):
             bx, by = _ellipse_point(cx, cy, rx * k, ry * k, 2 * math.pi * i / n)
@@ -379,9 +541,11 @@ def _shape(draw: ImageDraw.ImageDraw, kind: str, box: tuple[float, float, float,
         spikes = int(st.get("spikes") or 0) or max(12, int((rx + ry) / max(4.0, min(rx, ry) / 3)))
         depth = max(0.05, min(0.6, float(st.get("spike_depth") or 0.2)))
         points = []
+        jitter = max(0.0, min(1.0, float(st.get("spike_jitter") or 0)))
+        rng = random.Random(seed or "shout")
         for i in range(spikes * 2):
             t = math.pi * i / spikes
-            k = 1.0 if i % 2 == 0 else 1.0 - depth
+            k = (1.0 + (rng.uniform(-0.5, 0.5) * depth * 2 * jitter)) if i % 2 == 0 else 1.0 - depth
             points.append(_ellipse_point(cx, cy, rx * k, ry * k, t))
         draw.polygon(points, fill=255)
     elif kind == "electric":
@@ -438,8 +602,10 @@ def _edge_point(kind: str, box, toward: tuple[float, float], spread: float) -> t
     return _ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t - lo), _ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t + lo)
 
 
-def _tail_polygon(kind: str, box, tip, via, base: float) -> list[tuple[float, float]]:
-    """A tail from the shape toward `tip`, curving through `via` when given (a quadratic curve)."""
+def _tail_polygon(kind: str, box, tip, via, base: float, style: str = "wedge") -> list[tuple[float, float]]:
+    """A tail from the shape toward `tip`, curving through `via` when given (a quadratic curve).
+    style: wedge (くさび), zigzag (ギザギザ: the edges saw back and forth), fade (消える: drawn the same, then
+    faded out toward the tip where it is painted)."""
     p1, p2 = _edge_point(kind, box, via or tip, base)
     mx, my = (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2
     cx, cy = via if via else ((mx + tip[0]) / 2, (my + tip[1]) / 2)
@@ -453,6 +619,8 @@ def _tail_polygon(kind: str, box, tip, via, base: float) -> list[tuple[float, fl
         dy = 2 * (1 - t) * (cy - my) + 2 * t * (tip[1] - cy)
         n = math.hypot(dx, dy) or 1.0
         half = math.dist(p1, p2) / 2 * (1 - t)
+        if style == "zigzag" and 0 < i < steps:
+            half *= 1.6 if i % 2 else 0.55
         if kind == "electric" and 0 < i < steps:
             # a lightning tail: the centre line jumps sideways at a few steps
             jump = (1 if (i // 4) % 2 else -1) * math.dist(p1, p2) * 0.9 * (1 - t) if i % 4 == 0 else 0.0
@@ -460,6 +628,21 @@ def _tail_polygon(kind: str, box, tip, via, base: float) -> list[tuple[float, fl
         left.append((x - dy / n * half, y + dx / n * half))
         right.append((x + dy / n * half, y - dx / n * half))
     return left + right[::-1]
+
+
+def _fade_mask(size, fades) -> Image.Image:
+    """255 everywhere but near each fading tail's tip, where it falls to 0 at the tip itself."""
+    import numpy as np
+
+    w, h = size
+    keep = np.ones((h, w), dtype=np.float32)
+    gx, gy = np.meshgrid(np.arange(w), np.arange(h))
+    for box, tip in fades:
+        cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        reach = max(1.0, math.dist((cx, cy), tip) - min(box[2] - box[0], box[3] - box[1]) / 2) * 0.7
+        d = np.hypot(gx - tip[0], gy - tip[1])
+        keep = np.minimum(keep, np.clip(d / reach, 0, 1))
+    return Image.fromarray((keep * 255).astype("uint8"), "L")
 
 
 def _erode(mask: Image.Image, amount: int) -> Image.Image:
@@ -531,6 +714,17 @@ def draw_group(image: Image.Image, lines: list, dpi: int, show_speaker: bool = T
     if st["rotate_deg"] and abs(float(st["rotate_deg"])) > 0.01:
         _draw_turned(image, lines, dpi, show_speaker, font_path, float(st["rotate_deg"]))
         return
+    for ln in lines:  # 画像のフキダシ: the picture stretched over the box
+        if (ln.balloon or "") == "picture" and style_of(ln).get("picture"):
+            picture = picture_of(style_of(ln)["picture"])
+            if picture is not None:
+                box = (px(ln.x_mm, dpi), px(ln.y_mm, dpi), px(ln.w_mm or 40, dpi), px(ln.h_mm or 20, dpi))
+                stretched = picture.resize((max(1, box[2]), max(1, box[3])), Image.Resampling.LANCZOS)
+                image.paste(stretched, (box[0], box[1]), stretched)
+    if kind == "picture":
+        for line in lines:
+            _paint_text(image, line, dpi, show_speaker, font_path)
+        return
     if kind not in ("sfx", "none"):
         boxes = [(px(ln.x_mm, dpi), px(ln.y_mm, dpi), px(ln.x_mm + (ln.w_mm or 40), dpi), px(ln.y_mm + (ln.h_mm or 20), dpi))
                  for ln in lines]
@@ -557,6 +751,7 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
     draw = ImageDraw.Draw(mask)
     bubbles = Image.new("L", size, 0)
     bdraw = ImageDraw.Draw(bubbles)
+    fades: list = []
 
     def local(box):
         return tuple((v - o) * scale for v, o in zip(box, (rx0, ry0, rx0, ry0)))
@@ -572,7 +767,8 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
         via = ((px(tail["via"][0], dpi) - rx0) * scale, (px(tail["via"][1], dpi) - ry0) * scale) if tail.get("via") else None
         short = min(box[2] - box[0], box[3] - box[1])
         base = px(float(tail["width_mm"]), dpi) * scale if tail.get("width_mm") else max(4.0, short / 4)
-        if (line.balloon or "speech") == "thought":
+        tail_style = str(tail.get("kind") or "wedge")
+        if (line.balloon or "speech") == "thought" or tail_style == "bubbles":
             # bubbles toward the speaker instead of a tail
             x0, y0, x1, y1 = box
             cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
@@ -583,7 +779,9 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
                 bx, by = ex + (tip[0] - ex) * frac, ey + (tip[1] - ey) * frac
                 bdraw.ellipse((bx - r, by - r, bx + r, by + r), fill=255)
             continue
-        draw.polygon(_tail_polygon(line.balloon or "speech", box, tip, via, base), fill=255)
+        draw.polygon(_tail_polygon(line.balloon or "speech", box, tip, via, base, tail_style), fill=255)
+        if tail_style == "fade":
+            fades.append((box, tip))
     width = px(float(st["border_mm"] if st["border_mm"] is not None else 0.35), dpi) * scale
     kind = lines[0].balloon or "speech"
     shapes = ImageChops.lighter(mask, bubbles)
@@ -592,6 +790,10 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
     if st.get("double"):  # a second line inside the first
         inner = _erode(inside, max(2, width * 2))
         band = ImageChops.lighter(band, ImageChops.subtract(inner, _erode(inner, max(1, width))))
+    if fades:  # 消えるしっぽ: its outline and fill thin away toward the tip
+        keep = _fade_mask(size, fades)
+        band = ImageChops.multiply(band, keep)
+        shapes = ImageChops.lighter(ImageChops.multiply(shapes, keep), inside)
     if kind == "whisper":
         band = ImageChops.multiply(band, _dashes(size, [local(b) for b in boxes], scale))
     if kind == "flash":
@@ -637,6 +839,9 @@ def _flash_lines(size, boxes, width: int) -> Image.Image:
 
 
 def _paint_text(image: Image.Image, line, dpi: int, show_speaker: bool, font_path: str | None) -> None:
+    if style_of(line).get("text_path"):
+        path_text(image, line, dpi, font_path)
+        return
     text, em = text_image(line, dpi, font_path)
     x, y = px(line.x_mm, dpi), px(line.y_mm, dpi)
     w, h = px(line.w_mm or 40, dpi), px(line.h_mm or 20, dpi)

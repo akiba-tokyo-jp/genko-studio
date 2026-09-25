@@ -14,6 +14,16 @@ Kinds (`kind`) and what they use:
   the page's edges; lines started within 3 mm of it run along it.
 - symmetry: `points` [a, b] (the axis), `copies` (2 = a mirror; 3 or more = turned copies around a),
   `mirror` (with copies > 2, mirrored too) — every line is drawn again in the other places.
+- parallel_curve (平行曲線): `points` (a curve) — a line anywhere follows the curve's shape, moved to where
+  it starts.
+- multi_curve (多重曲線): `points` and `points2` (two curves) — a line follows the shape between the two
+  that passes where it starts.
+- radial_curve (放射曲線): `points` (a curve) and `center` [x, y] — a line follows the curve grown or shrunk
+  about the centre to pass where it starts.
+
+Perspective rulers may keep their eye level (`lock_horizon`: the vanishing points move only along it) and
+be fixed (`fixed`: the points do not move). Any ruler may belong to a layer (`layer_id`): it then snaps and
+shows only while that layer is drawn on.
 
 Every ruler has `id`, `active` (it snaps / copies), `visible` and may have `frame_id` (only for lines that
 start in that panel). `reach_mm` is how near a line / curve ruler a stroke has to start to snap (10 mm).
@@ -23,8 +33,10 @@ from __future__ import annotations
 
 import math
 
-KINDS = ("line", "curve", "parallel", "concentric", "radial", "perspective", "symmetry", "guide")
-POINTS_NEEDED = {"line": 2, "curve": 2, "parallel": 0, "concentric": 1, "radial": 1, "perspective": 1, "symmetry": 2, "guide": 0}
+KINDS = ("line", "curve", "parallel", "concentric", "radial", "perspective", "symmetry", "guide", "parallel_curve", "multi_curve",
+         "radial_curve")
+POINTS_NEEDED = {"line": 2, "curve": 2, "parallel": 0, "concentric": 1, "radial": 1, "perspective": 1, "symmetry": 2, "guide": 0,
+                 "parallel_curve": 2, "multi_curve": 2, "radial_curve": 2}
 GUIDE_REACH_MM = 3.0
 REACH_MM = 10.0
 
@@ -46,6 +58,10 @@ def validate(ruler: dict) -> None:
         float(ruler.get("at"))
     if kind == "symmetry" and not 2 <= int(ruler.get("copies", 2) or 2) <= 32:
         raise ValueError("copies is 2 to 32")
+    if kind == "multi_curve" and len(ruler.get("points2") or []) < 2:
+        raise ValueError("a multi_curve ruler needs points2 (a second curve)")
+    if kind == "radial_curve" and len(ruler.get("center") or []) < 2:
+        raise ValueError("a radial_curve ruler needs its center")
 
 
 # --- small geometry ------------------------------------------------------------------------------------
@@ -244,6 +260,14 @@ def _snap_one(ruler: dict, points: list):
             out += [to_page(radius * math.cos(a + (b - a) * k / n), radius * math.sin(a + (b - a) * k / n)) for k in range(n)]
         out.append(to_page(radius * math.cos(angles[-1]), radius * math.sin(angles[-1])))
         return _with(out, points)
+    if kind in ("parallel_curve", "multi_curve", "radial_curve"):
+        poly = _curve_through(ruler, start)
+        if poly is None:
+            return None
+        _, s0, _ = _nearest_on_polyline(start, poly)
+        _, s1, _ = _nearest_on_polyline(end, poly)
+        n = max(2, len(points), int(abs(s1 - s0)) + 2)
+        return _with([_at_arc(poly, s0 + (s1 - s0) * i / (n - 1)) for i in range(n)], points)
     if kind in ("parallel", "radial", "perspective"):
         options = directions(ruler, start)
         if not options:
@@ -256,15 +280,60 @@ def _snap_one(ruler: dict, points: list):
     return None
 
 
-def _applies(ruler: dict, start, frame_contains) -> bool:
+def _resampled(poly: list, n: int) -> list[tuple[float, float]]:
+    total = sum(math.dist(a, b) for a, b in zip(poly, poly[1:])) or 1.0
+    return [_at_arc(poly, total * i / (n - 1)) for i in range(n)]
+
+
+def _curve_through(ruler: dict, start) -> list | None:
+    """The curve of a parallel / multi / radial curve ruler that passes `start` (a polyline, mm)."""
+    kind = ruler["kind"]
+    poly = smooth_curve(ruler["points"])
+    if len(poly) < 2:
+        return None
+    if kind == "parallel_curve":
+        _, _, near = _nearest_on_polyline(start, poly)
+        dx, dy = start[0] - near[0], start[1] - near[1]
+        # (reach the curve's whole length out past the ends, so a line may start beyond them)
+        return [(x + dx, y + dy) for x, y in poly]
+    if kind == "radial_curve":
+        c = _xy(ruler["center"])
+        # the ray from the centre through the start meets the curve where the start's copy of it lies
+        angle = math.atan2(start[1] - c[1], start[0] - c[0])
+        best, best_off = None, math.inf
+        for p in poly:
+            off = abs(math.remainder(math.atan2(p[1] - c[1], p[0] - c[0]) - angle, 2 * math.pi))
+            if off < best_off:
+                best, best_off = p, off
+        base = math.dist(best, c)
+        if base < 0.1:
+            return None
+        k = math.dist(start, c) / base
+        return [(c[0] + (x - c[0]) * k, c[1] + (y - c[1]) * k) for x, y in poly]
+    other = smooth_curve(ruler["points2"])
+    n = 120
+    a, b = _resampled(poly, n), _resampled(other, n)
+    best, best_d = None, math.inf
+    for i in range(41):  # the blend of the two curves that passes nearest the start
+        w = i / 40
+        blend = [(p[0] * (1 - w) + q[0] * w, p[1] * (1 - w) + q[1] * w) for p, q in zip(a, b)]
+        d = _nearest_on_polyline(start, blend)[0]
+        if d < best_d:
+            best, best_d = blend, d
+    return best
+
+
+def _applies(ruler: dict, start, frame_contains, layer_id: str | None = None) -> bool:
     if not ruler.get("active", True) or ruler.get("kind") == "symmetry":
+        return False
+    if ruler.get("layer_id") and layer_id is not None and ruler["layer_id"] != layer_id:
         return False
     if ruler.get("frame_id") and frame_contains is not None:
         return bool(frame_contains(ruler["frame_id"], *start))
     return True
 
 
-def snap(points: list, rulers: list, frame_contains=None, only: str | None = None) -> list:
+def snap(points: list, rulers: list, frame_contains=None, only: str | None = None, layer_id: str | None = None) -> list:
     """The stroke snapped to the ruler that suits it best (the one whose line stays nearest to what was
     drawn); unchanged when no ruler takes it. `frame_contains(frame_id, x, y)` limits panel rulers;
     `only` picks one ruler by id."""
@@ -275,7 +344,7 @@ def snap(points: list, rulers: list, frame_contains=None, only: str | None = Non
     for ruler in rulers:
         if only and ruler.get("id") != only:
             continue
-        if not _applies(ruler, start, frame_contains):
+        if not _applies(ruler, start, frame_contains, layer_id):
             continue
         snapped = _snap_one(ruler, points)
         if not snapped:
@@ -289,12 +358,14 @@ def snap(points: list, rulers: list, frame_contains=None, only: str | None = Non
 # --- symmetry ------------------------------------------------------------------------------------------
 
 
-def symmetry_copies(points: list, rulers: list, frame_contains=None) -> list[list]:
+def symmetry_copies(points: list, rulers: list, frame_contains=None, layer_id: str | None = None) -> list[list]:
     """The extra strokes the active symmetry rulers make from one stroke."""
     out: list[list] = []
     start = _xy(points[0]) if points else (0, 0)
     for ruler in rulers:
         if ruler.get("kind") != "symmetry" or not ruler.get("active", True):
+            continue
+        if ruler.get("layer_id") and layer_id is not None and ruler["layer_id"] != layer_id:
             continue
         if ruler.get("frame_id") and frame_contains is not None and not frame_contains(ruler["frame_id"], *start):
             continue
@@ -326,6 +397,41 @@ def symmetry_copies(points: list, rulers: list, frame_contains=None) -> list[lis
 
 
 # --- the grid ------------------------------------------------------------------------------------------
+
+
+def outline(ruler: dict, page_size: tuple[float, float] = (400.0, 500.0)) -> list[list[tuple[float, float]]]:
+    """The ruler as lines to draw (定規ペン / showing it): straight rulers, curves, circles, guides, the
+    horizon of a perspective. Kinds that are only directions give nothing."""
+    kind = ruler["kind"]
+    if kind == "line":
+        return [[_xy(p) for p in ruler["points"][:2]]]
+    if kind in ("curve", "parallel_curve", "radial_curve"):
+        return [smooth_curve(ruler["points"])]
+    if kind == "multi_curve":
+        return [smooth_curve(ruler["points"]), smooth_curve(ruler["points2"])]
+    if kind == "guide":
+        at = float(ruler["at"])
+        w, h = page_size
+        return [[(0.0, at), (w, at)]] if ruler.get("axis") == "h" else [[(at, 0.0), (at, h)]]
+    if kind == "concentric" and len(ruler.get("points") or []) > 1:
+        c, edge = _xy(ruler["points"][0]), _xy(ruler["points"][1])
+        ratio = float(ruler.get("ratio", 1) or 1)
+        rot = math.radians(float(ruler.get("angle", 0) or 0))
+        x, y = edge[0] - c[0], edge[1] - c[1]
+        r = math.hypot(x * math.cos(rot) + y * math.sin(rot), (-x * math.sin(rot) + y * math.cos(rot)) / ratio)
+        out = []
+        for i in range(97):
+            t = 2 * math.pi * i / 96
+            lx, ly = r * math.cos(t), r * math.sin(t) * ratio
+            out.append((c[0] + lx * math.cos(rot) - ly * math.sin(rot), c[1] + lx * math.sin(rot) + ly * math.cos(rot)))
+        return [out]
+    if kind == "perspective":
+        eye = horizon(ruler)
+        if eye is None:
+            return []
+        (px_, py_), (dx, dy) = eye
+        return [[(px_ - dx * 1000, py_ - dy * 1000), (px_ + dx * 1000, py_ + dy * 1000)]]
+    return []
 
 
 def snap_to_grid(point, spacing_mm: float, origin=(0.0, 0.0)) -> tuple[float, float]:

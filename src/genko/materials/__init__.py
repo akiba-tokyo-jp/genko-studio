@@ -9,6 +9,8 @@ Entry: {"id", "name", "folder", "kind": tone | effect | image | lines, …} with
 - effect: "effect" (a kind of genko.effects), "params"
 - image: "file" (a PNG next to library.json), "width_mm"
 - lines: "items" (copied pen lines and fills, as the clipboard keeps them)
+- lettering (描き文字): "text", "balloon" (sfx by default), "wrap", "style" (a line's style), "w_mm", "h_mm" — put
+  on a page as a line set that way
 Old catalog kinds "dot" / "noise" are tones.
 """
 
@@ -19,7 +21,7 @@ import json
 from pathlib import Path
 
 _CATALOG: list[dict] | None = None
-KINDS = ("tone", "effect", "image", "lines")
+KINDS = ("tone", "effect", "image", "lines", "lettering")
 
 
 def load_catalog() -> list[dict]:
@@ -205,6 +207,17 @@ def thumbnail(item: dict, size: int = 72):
             base.paste(image, ((size - image.width) // 2, (size - image.height) // 2), image)
             return base
     base = Image.new("RGB", (size, size), "white")
+    if kind == "lettering":
+        from genko.balloons import text_image
+        from genko.models import StoryLine
+
+        line = StoryLine(id="t", page_index=1, text=item.get("text") or "ド", balloon=item.get("balloon") or "sfx",
+                         w_mm=float(item.get("w_mm") or 40), h_mm=float(item.get("h_mm") or 30), wrap=item.get("wrap") or "horizontal")
+        line.style = dict(item.get("style") or {})
+        picture, _em = text_image(line, 120)
+        picture.thumbnail((size - 4, size - 4))
+        base.paste(picture, ((size - picture.width) // 2, (size - picture.height) // 2), picture)
+        return base
     if kind == "lines":
         from genko.selection import items_from_json
 

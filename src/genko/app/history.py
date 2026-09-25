@@ -32,7 +32,7 @@ NAMES = {
     "merge_layers": "レイヤーを結合した", "merge_visible": "表示レイヤーを結合した", "group_layers": "レイヤーをフォルダにまとめた",
     "move_layers": "レイヤーを動かした", "convert_layer": "レイヤーを変換した", "set_layers": "レイヤーの設定をまとめて変えた",
     "set_paper": "用紙の色を変えた", "liquify": "ゆがませた", "smudge": "色を混ぜた", "vector_edit": "線を編集した",
-    "fill_gaps": "塗り残しを埋めた", "add_shape": "図形を描いた",
+    "fill_gaps": "塗り残しを埋めた", "add_shape": "図形を描いた", "ruler_to_layer": "定規の線を描いた",
     "define_brush": "ブラシを作った", "approve": "承認した", "reject": "差し戻した", "advance": "工程を進めた",
 }
 

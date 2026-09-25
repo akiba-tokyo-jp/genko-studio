@@ -172,9 +172,18 @@ def cells(text: str, tcy: bool = True, latin: bool = False) -> list[str]:
             out.extend(text[i:j])
             i = j
             continue
+        if 0xFE00 <= ord(char) <= 0xFE0F or 0xE0100 <= ord(char) <= 0xE01EF:
+            if out and out[-1] != "\n":  # (a variation selector stays with its letter: 異体字)
+                out[-1] += char
+            i += 1
+            continue
         out.append(char)
         i += 1
     return out
+
+
+def has_vs(cell: str) -> bool:
+    return len(cell) == 2 and (0xFE00 <= ord(cell[1]) <= 0xFE0F or 0xE0100 <= ord(cell[1]) <= 0xE01EF)
 
 
 def cell_text(cell: str) -> str:
@@ -468,7 +477,7 @@ def compose(
                 image = turned[i]
                 out.alpha_composite(image, (cx + (widths[c] - image.width) // 2, y))
                 continue
-            if len(cell) > 1:
+            if len(cell) > 1 and not has_vs(cell):
                 image = tcy_glyph(cell, font_for("0", size), size, rgb, thick)
             else:
                 image = glyph(cell, font_for(cell, size), size, rgb, thick)

@@ -2,10 +2,12 @@
 
 Kinds and their settings (`params`, page mm; everything is optional):
 
-- focus (集中線): `center` [x, y], `inner` [rx, ry] (the clear middle), `count`, `jitter` (0..1, how
-  unevenly the lines stop), `width_mm`, `taper` (thin toward the middle).
+- focus (集中線): `center` [x, y], `inner` [rx, ry] (the clear middle), `inner_path` [[x, y], …] (the clear
+  middle as any shape instead of an ellipse), `twist` (degrees the lines turn by on their way in: a swirl),
+  `count`, `jitter` (0..1, how unevenly the lines stop), `width_mm`, `taper` (thin toward the middle).
 - speed (流線): `angle` (degrees, the direction of motion), `count`, `length` (share of the panel, 0..1),
-  `jitter`, `width_mm`, `curve` (mm the lines bow by), `taper`.
+  `jitter`, `width_mm`, `curve` (mm the lines bow by), `taper`; or `path` [[x, y], …] (the lines run along
+  this curve, `spread_mm` across it).
 - uni_flash (ウニフラッシュ): `center`, `inner` [rx, ry], `count`, `length_mm`, `jitter`, `width_mm`.
 - beta_flash (ベタフラッシュ): `center`, `inner` [rx, ry], `spikes`, `depth` (0..1, how far the white
   spikes reach into the black), `jitter`.
@@ -47,7 +49,7 @@ def area(effect: dict, page) -> tuple[list[tuple[float, float]], tuple[float, fl
         except (KeyError, IndexError):
             frame = None
     if frame is not None:
-        outline = [(float(x), float(y)) for x, y in geo.shape(frame)]
+        outline = [(float(x), float(y)) for x, y in geo.outline(frame)]
     else:
         b = page.bleed_rect_mm()  # without a panel: the whole page out to the bleed
         outline = [(b.x, b.y), (b.x + b.width, b.y), (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
@@ -68,6 +70,71 @@ def _inner(params: dict, box) -> tuple[float, float]:
         return max(0.5, float(rx)), max(0.5, float(ry))
     share = float(params.get("clear", 0.4))  # old books: the clear middle as a share of the panel
     return max(0.5, w / 2 * share), max(0.5, h / 2 * share)
+
+
+def _ray_to(shape: list, centre, angle: float) -> float:
+    """How far from `centre` a ray at `angle` meets the outline `shape` (the nearest crossing)."""
+    ox, oy = centre
+    dx, dy = math.cos(angle), math.sin(angle)
+    best = None
+    for (ax, ay), (bx, by) in zip(shape, shape[1:] + shape[:1]):
+        ex, ey = bx - ax, by - ay
+        den = dx * ey - dy * ex
+        if abs(den) < 1e-9:
+            continue
+        t = ((ax - ox) * ey - (ay - oy) * ex) / den
+        u = ((ax - ox) * dy - (ay - oy) * dx) / den
+        if t > 0 and 0 <= u <= 1 and (best is None or t < best):
+            best = t
+    return best if best is not None else 5.0
+
+
+def _speed_along(params: dict, rng, box) -> list[dict]:
+    """流線 along a curve: the path walked in even steps, each line an offset copy of a stretch of it."""
+    raw = [(float(p[0]), float(p[1])) for p in params["path"]]
+    dense = [raw[0]]
+    ext = [raw[0], *raw, raw[-1]]
+    for i in range(1, len(ext) - 2):  # (a Catmull-Rom curve through the points: no sharp corners)
+        p0, p1, p2, p3 = ext[i - 1], ext[i], ext[i + 1], ext[i + 2]
+        n = max(2, int(math.dist(p1, p2) / 1.5))
+        for k in range(1, n + 1):
+            t = k / n
+            dense.append(tuple(0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t * t
+                                      + (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t ** 3) for c in (0, 1)))
+    lengths = [0.0]
+    for a, b in zip(dense, dense[1:]):
+        lengths.append(lengths[-1] + math.dist(a, b))
+    total = lengths[-1] or 1.0
+    count = int(params.get("count", 40))
+    width = float(params.get("width_mm", 0.5))
+    share = float(params.get("length", 0.7))
+    jitter = float(params.get("jitter", 0.25))
+    spread = float(params.get("spread_mm", min(box[2], box[3]) * 0.5))
+    taper = "both" if params.get("taper", True) is not False else ""
+
+    def at(s: float):
+        s = max(0.0, min(total, s))
+        k = next((i for i in range(len(lengths) - 1) if lengths[i + 1] >= s), len(lengths) - 2)
+        seg = (lengths[k + 1] - lengths[k]) or 1.0
+        t = (s - lengths[k]) / seg
+        (x0, y0), (x1, y1) = dense[k], dense[k + 1]
+        d = math.hypot(x1 - x0, y1 - y0) or 1.0
+        return x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, -(y1 - y0) / d, (x1 - x0) / d
+
+    out = []
+    for i in range(count):
+        offset = spread * ((i + rng.random()) / count - 0.5)
+        length = total * share * (1 - jitter * rng.random() * 0.8)
+        start = (total - length) * rng.random()
+        steps = max(8, int(length / 2))
+        pts = []
+        for k in range(steps):
+            t = k / (steps - 1)
+            x, y, nx, ny = at(start + length * t)
+            p = 0.03 + 0.97 * math.sin(math.pi * t) if taper else 1.0
+            pts.append([round(x + nx * offset, 3), round(y + ny * offset, 3), round(p, 3)])
+        out.append({"points": pts, "width_mm": width * (0.5 + rng.random())})
+    return out
 
 
 def _line(a, b, taper: str, n: int = 6) -> list[list[float]]:
@@ -103,12 +170,27 @@ def geometry(effect: dict, page) -> dict:
         width = float(params.get("width_mm", 0.8))
         outer = math.hypot(w, h) + math.hypot(cx - (x + w / 2), cy - (y + h / 2))
         taper = "in" if params.get("taper", True) else ""
+        shape = [(float(p[0]), float(p[1])) for p in params.get("inner_path") or []]
+        twist = math.radians(float(params.get("twist", 0)))
         for i in range(count):
             a = 2 * math.pi * (i + rng.random() * 0.7) / count
             stop = 1 + jitter * rng.random() * 1.2
-            inner_pt = (cx + rx * stop * math.cos(a), cy + ry * stop * math.sin(a))
+            if len(shape) >= 3:
+                reach = _ray_to(shape, (cx, cy), a)
+                inner_pt = (cx + reach * stop * math.cos(a), cy + reach * stop * math.sin(a))
+            else:
+                inner_pt = (cx + rx * stop * math.cos(a), cy + ry * stop * math.sin(a))
             outer_pt = (cx + outer * math.cos(a), cy + outer * math.sin(a))
-            lines.append({"points": _line(outer_pt, inner_pt, taper), "width_mm": width * (0.6 + rng.random() * 0.8)})
+            pts = _line(outer_pt, inner_pt, taper, 16 if twist else 6)
+            if twist:  # a swirl: each point turned about the centre, less toward the middle (the ends stay on the shape)
+                for k, p in enumerate(pts):
+                    turn = twist * (1 - k / (len(pts) - 1)) ** 2
+                    dx, dy = p[0] - cx, p[1] - cy
+                    p[0] = round(cx + dx * math.cos(turn) - dy * math.sin(turn), 3)
+                    p[1] = round(cy + dx * math.sin(turn) + dy * math.cos(turn), 3)
+            lines.append({"points": pts, "width_mm": width * (0.6 + rng.random() * 0.8)})
+    elif kind == "speed" and len(params.get("path") or []) >= 2:
+        lines = _speed_along(params, rng, box)
     elif kind == "speed":
         angle = math.radians(float(params.get("angle", 0)))
         d = (math.cos(angle), math.sin(angle))

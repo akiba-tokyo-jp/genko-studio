@@ -354,8 +354,12 @@ def _clip_mask(page: Page, size: tuple[int, int], dpi: int) -> Image.Image | Non
 
 
 def fill_frame(draw: ImageDraw.ImageDraw, frame, dpi: int, fill=255) -> None:
-    """A panel's area: its rectangle, or its polygon when it is slanted or free-form."""
-    if getattr(frame, "poly", None):
+    """A panel's area: its rectangle, or its polygon (or curved outline) when it is slanted or free-form."""
+    from genko import frames as geo
+
+    if geo.curves_of(frame) is not None:
+        draw.polygon([_xy(p, dpi) for p in geo.outline(frame)], fill=fill)
+    elif getattr(frame, "poly", None):
         draw.polygon([_xy(p, dpi) for p in frame.poly], fill=fill)
     else:
         draw.rectangle(rect_px(frame.rect, dpi), fill=fill)
@@ -756,13 +760,113 @@ def _draw_crop_marks(draw: ImageDraw.ImageDraw, page: Page, dpi: int) -> None:
         draw.line((px(cx), px(y), px(cx), px(y + length)), fill=ink, width=1)
 
 
+BORDER_KINDS = ("solid", "double", "dashed", "dotted", "rough")
+
+
+def _dashes(points: list, on: float, off: float) -> list[list]:
+    """A closed outline cut into pieces `on` long with `off` between (page mm)."""
+    import math
+
+    ring = list(points) + [points[0]]
+    pieces, current, left, drawing = [], [ring[0]], on, True
+    for a, b in zip(ring, ring[1:]):
+        length = math.dist(a, b)
+        t0 = 0.0
+        while length - t0 > 1e-9:
+            step = min(left, length - t0)
+            t1 = t0 + step
+            p = (a[0] + (b[0] - a[0]) * t1 / length, a[1] + (b[1] - a[1]) * t1 / length)
+            if drawing:
+                current.append(p)
+            left -= step
+            t0 = t1
+            if left <= 1e-9:
+                if drawing and len(current) > 1:
+                    pieces.append(current)
+                drawing = not drawing
+                left = on if drawing else off
+                current = [p]
+    if drawing and len(current) > 1:
+        pieces.append(current)
+    return pieces
+
+
+def _rough(points: list, seed: str, amount_mm: float) -> list:
+    """The outline as drawn by hand: walked in 1 mm steps, drifting slowly across the line (a smooth wobble
+    through random knots about 7 mm apart), never quite the same twice along a panel."""
+    import math
+    import random
+
+    rng = random.Random(seed)
+    ring = list(points) + [points[0]]
+    out = []
+    for a, b in zip(ring, ring[1:]):
+        length = math.dist(a, b)
+        steps = max(1, int(length))
+        nx, ny = (-(b[1] - a[1]) / (length or 1), (b[0] - a[0]) / (length or 1))
+        knots = [rng.uniform(-amount_mm, amount_mm) for _ in range(int(length / 7) + 2)]
+        knots[0] = knots[-1] = 0.0  # (the corners stay where they are)
+        for k in range(steps):
+            t = k / steps
+            pos = t * (len(knots) - 1)
+            i = min(len(knots) - 2, int(pos))
+            f = (1 - math.cos((pos - i) * math.pi)) / 2
+            wobble = knots[i] * (1 - f) + knots[i + 1] * f
+            out.append((a[0] + (b[0] - a[0]) * t + nx * wobble, a[1] + (b[1] - a[1]) * t + ny * wobble))
+    return out
+
+
+def draw_border(draw: ImageDraw.ImageDraw, points: list, width_mm: float, dpi: int, style: dict | None, seed: str = "") -> None:
+    """A panel border along its outline (page mm): solid, double, dashed, dotted or rough, in its colour."""
+    from genko.frames import offset
+
+    style = style or {}
+    kind = style.get("kind") or "solid"
+    rgb = tuple(int(v) for v in (style.get("rgb") or (20, 20, 20)))[:3]
+    width_px = max(1, mm_to_px(width_mm, dpi))
+
+    def ring(pts, width):
+        draw.line([_xy(p, dpi) for p in list(pts) + [pts[0]]], fill=rgb, width=width, joint="curve")
+
+    if kind == "double":
+        gap = float(style.get("gap_mm", max(0.6, width_mm)))
+        thin = max(1, round(width_px * 0.6))
+        ring(points, thin)
+        ring(offset(points, gap + width_mm * 0.6), thin)
+    elif kind in ("dashed", "dotted"):
+        on = float(style.get("dash_mm", 3.0 if kind == "dashed" else 0.01))
+        off = float(style.get("gap_mm", 1.8 if kind == "dashed" else max(1.0, width_mm * 2.2)))
+        for piece in _dashes(points, max(0.01, on), max(0.2, off)):
+            if kind == "dotted":
+                x, y = _xy(piece[0], dpi)
+                r = width_px / 2 + 0.5
+                draw.ellipse((x - r, y - r, x + r, y + r), fill=rgb)
+            else:
+                draw.line([_xy(p, dpi) for p in piece], fill=rgb, width=width_px)
+    elif kind == "rough":
+        pts = _rough(points, seed or "frame", float(style.get("wobble_mm", 0.35)))
+        ring(pts, width_px)
+    else:
+        ring(points, width_px)
+
+
 def _draw_frames(draw: ImageDraw.ImageDraw, page: Page, working_dpi: int) -> None:
+    from genko import frames as geo
+
     for frame in page.leaf_frames():
         width_px = max(1, mm_to_px(frame.border_mm if frame.border_mm is not None else 0.8, working_dpi))
         if frame.border_mm is not None and frame.border_mm <= 0:
             continue  # a panel without a border
-        if getattr(frame, "poly", None):
-            draw.polygon([_xy(p, working_dpi) for p in frame.poly], outline=(20, 20, 20), width=width_px)
+        style = getattr(frame, "line", None)
+        if getattr(frame, "poly", None) or geo.curves_of(frame) is not None or (style and style.get("kind", "solid") != "solid"):
+            if style or geo.curves_of(frame) is not None:
+                draw_border(draw, geo.outline(frame), frame.border_mm if frame.border_mm is not None else 0.8, working_dpi,
+                            style, frame.id)
+            else:
+                draw.polygon([_xy(p, working_dpi) for p in frame.poly], outline=(20, 20, 20), width=width_px)
+            continue
+        if style and style.get("rgb"):
+            draw_border(draw, geo.outline(frame), frame.border_mm if frame.border_mm is not None else 0.8, working_dpi, style, frame.id)
             continue
         if not frame.bleed:
             draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
@@ -854,6 +958,10 @@ def render_page(
         if raster is None:
             continue
         raster = layer_effects(layer, raster, working_dpi)
+        if getattr(layer, "screen", None) and mode == "print":  # トーン化: its greys as dots in print
+            from genko import tones
+
+            raster = tones.screened(raster, layer.screen, working_dpi)
         raster = _masked(layer, raster)
         if getattr(layer, "color", None) and (mode != "print" or getattr(layer, "color_prints", False)):
             raster = _tinted(raster, layer.color)

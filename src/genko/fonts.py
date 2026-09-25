@@ -42,7 +42,7 @@ DEFAULT_SFX = "sfx"
 
 def is_kana_like(char: str) -> bool:
     """Characters an アンチック sets in Mincho: kana, the long vowel mark and Japanese punctuation."""
-    code = ord(char)
+    code = ord(char[:1] or " ")
     return (0x3040 <= code <= 0x30FF or 0x31F0 <= code <= 0x31FF or 0x3000 <= code <= 0x303F
             or 0xFF61 <= code <= 0xFF9F or char in "ー〜～…‥")
 
