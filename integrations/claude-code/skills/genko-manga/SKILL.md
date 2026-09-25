@@ -90,6 +90,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   マスクは `set_layer_mask`（`area` の所だけ見せる・`fill`・`invert`・`enabled`・`delete`）と `paint_mask`（`show: true` で見せる、`false` で隠す）。
 - 線と塗り: `add_stroke`（`kind` はブラシ。自作のブラシは `define_brush` で定義してから）、`erase`、`fill`・`fill_area`（`fill` の `reference: "reference"` は参照レイヤーの線だけを見て塗る）、`gradient_fill`（`from`・`to`・色・不透明度、`shape: radial` で円）、`filter_raster`（`levels`・`curve`・`hue`・`blur`…）。
 - ブラシ: 入っているものは `inspect` の `brushes`（G ペン・筆・スプレー・点描・点線・破線・レース・草むら・木の葉・ハート・星・カリグラフィ・水彩など）。`define_brush` で `tip`（`round`・`flat`・`image`＋`tip_png`）・`pattern`・`spacing`・`scatter`・`stamp_size`・`size_jitter`・`turn_jitter`・`count`・`speed`・`post_smooth`・`aa` も決められる。色を混ぜる・ぼかすのは `smudge`（`mode`: `blur`・`smudge`・`blend`）。線を丸ごと消すのは `erase` の `mode: "whole"`。
+- 線の編集: `vector_edit`（`action`: `move_point`・`add_point`・`delete_point`・`connect`・`cut`・`recolor`・`delete`。線の id は `inspect` の `snapshot` か `render`）。塗り残しは `fill_gaps`。
 - 図形: `add_shape`（`shape`: `line`・`polyline`・`curve`・`rect`・`ellipse`・`polygon`、`line`・`fill` で線と塗り）。
 - 範囲（`area`）: どの op の `area` にも、`poly`・`mask` のほかに `rect`・`ellipse`・`layer`（そのレイヤーの描いてある所）・`color`（その色の所）・`all`・`saved`（`store_area` で残した範囲）と、`union`・`intersect`・`subtract` の組み合わせ、`invert`・`grow_mm`（負で縮める）・`feather_mm` が使える。ガイド線は `add_ruler` の `kind: "guide"`（`axis`・`at`）。
 - 範囲の変形: `transform_area` の `matrix`（移動・拡大・回転・反転）か `warp`（`perspective` で 4 隅、`mesh` で 3×3 の点）。レイヤーを丸ごと動かすのは、ページ全体を `area` にした `matrix`。

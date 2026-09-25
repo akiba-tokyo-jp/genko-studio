@@ -855,6 +855,7 @@ class MainWindow(QMainWindow):
         self.canvas = PageCanvas()
         self.canvas.renderer = self._render_current
         self.canvas.detail_job = self._detail_job
+        self.canvas.layer_colour_at = self.layer_colour_at
         self.canvas.needs_rough = self._needs_rough
         self.canvas.changed.connect(self._refresh_status)
         self.canvas.changed.connect(lambda: self._refresh_zoom() if hasattr(self, "zoom_label") else None)
@@ -879,6 +880,7 @@ class MainWindow(QMainWindow):
         self.canvas.areaFilled.connect(lambda pts: self._fill_area({"poly": pts}))
         self.canvas.wandRequested.connect(self._wand)
         self.canvas.shapeDrawn.connect(self._shape_drawn)
+        self.canvas.vectorEdited.connect(self._vector_edit)
         self.canvas.selectionDrawn.connect(self._selection_drawn)
         self.canvas.selectionPainted.connect(self._selection_painted)
         self.canvas.colourAreaRequested.connect(self._select_colour)
@@ -1104,13 +1106,24 @@ class MainWindow(QMainWindow):
                            "直線・折れ線・曲線・長方形・楕円・多角形を描く（Shift で 45° と正方形。折れ線と曲線はクリックで点、ダブルクリックか Enter で終わり）", True)
         self.act_blend = a("色混ぜ", lambda: self._tool("blend"), "Shift+B",
                            "ペイントのレイヤーの色をぼかす・指先でのばす・なじませる", True)
+        self.act_vector = a("線の編集（制御点）", lambda: self._tool("vector"), "Shift+Y",
+                            "線を選んで制御点を動かす（Alt+クリックで点を足す、Delete で消す、Shift+クリックで 2 本目）", True)
+        self.act_vector_join = a("選んだ 2 本の線をつなぐ", lambda: self._vector_selected("connect"))
+        self.act_vector_cut = a("クリックした所で線を切る", lambda on: setattr(self.canvas, "vector_cut", bool(on)), None,
+                                "オンの間、線をクリックするとそこで 2 本に分かれます", True)
+        self.act_vector_colour = a("選んだ線をペンの色にする", lambda: self._vector_selected("recolor"))
+        self.act_vector_delete = a("選んだ線を消す", lambda: self._vector_selected("delete"))
+        self.act_fill_gaps = a("塗り残しを塗る", self._fill_gaps, None, "塗った色の間に残った小さなすき間を、同じ色で塗ります")
+        self.act_swap_colour = a("メインとサブの色を入れ替える", lambda: self.colours.swap(), "X")
+        self.act_transparent = a("透明色で描く", lambda on: self.colours.transparent.setChecked(on), None,
+                                 "ペンで描いた所が消える（もう一度で戻る）", True)
         self.act_sel_ellipse = a("範囲選択（楕円）", lambda: self._tool("ellipse"), None, "ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）", True)
         self.act_sel_polyline = a("範囲選択（折れ線）", lambda: self._tool("polyline"), None, "クリックで角を置き、ダブルクリックか Enter で閉じる", True)
         self.act_sel_colour = a("色域選択", lambda: self._tool("colour"), None, "クリックした所と同じ色の所をページ中から選ぶ", True)
         self.act_sel_pen = a("選択ペン", lambda: self._tool("selpen"), None, "なぞった所を選択範囲に足す", True)
         self.act_sel_erase = a("選択消し", lambda: self._tool("selerase"), None, "なぞった所を選択範囲から外す", True)
         tools = QActionGroup(self)
-        self.tool_actions = {"blend": self.act_blend, "shape": self.act_shape, "ellipse": self.act_sel_ellipse, "polyline": self.act_sel_polyline,
+        self.tool_actions = {"vector": self.act_vector, "blend": self.act_blend, "shape": self.act_shape, "ellipse": self.act_sel_ellipse, "polyline": self.act_sel_polyline,
                              "colour": self.act_sel_colour, "selpen": self.act_sel_pen, "selerase": self.act_sel_erase,
                              "move": self.act_move, "gradient": self.act_gradient, "select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
                              "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill,
@@ -1245,8 +1258,9 @@ class MainWindow(QMainWindow):
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_scale, self.act_onion, None, self.act_tool_names]),
             ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_blend, self.act_shape, self.act_text, self.act_frame, None,
-                        self.act_picker, self.act_fill, self.act_lassofill, self.act_gradient, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
-                        self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner]),
+                        self.act_picker, self.act_fill, self.act_lassofill, self.act_fill_gaps, self.act_gradient, self.act_reshape, self.act_vector, None, self.act_marquee, self.act_lasso, self.act_wand, None,
+                        self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner, None,
+                        self.act_swap_colour, self.act_transparent]),
             ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
                           self.act_layer_merge, self.act_layer_delete, None, self.act_layer_up, self.act_layer_down, None,
                           self.act_layer_draft, "mask"]),
@@ -1659,6 +1673,12 @@ class MainWindow(QMainWindow):
         note.setStyleSheet("color:#666")
         shl.addRow(note)
         ts.add(("shape",), shape_page)
+        vector_note = QLabel("線をクリックで選び、□（制御点）をドラッグ。Alt+クリックで点を足し、Delete で点（または線）を消す。"
+                             "Shift+クリックで 2 本目を選ぶ。")
+        vector_note.setWordWrap(True)
+        vector_note.setStyleSheet("color:#666")
+        ts.add(("vector",), action_page([vector_note, self.act_vector_cut, None, self.act_vector_join, self.act_vector_colour,
+                                         self.act_vector_delete]))
         self.blend_mode = QComboBox()
         for label, key in (("ぼかし", "blur"), ("指先（色をのばす）", "smudge"), ("なじませ", "blend")):
             self.blend_mode.addItem(label, key)
@@ -1760,6 +1780,9 @@ class MainWindow(QMainWindow):
         self.sub_dock = sub_dock
         self.brush_dock = settings_dock
         ts.show_tool("select")
+        from genko.app.colours import ColourPanel
+
+        self.colours = ColourPanel(self)
         # the panels on the right; the ones for books made with agents only show for those books
         docks = []
         self.agent_docks = []
@@ -1767,7 +1790,8 @@ class MainWindow(QMainWindow):
         for title, widget, group in (("承認箱", self.approvals, "agent"), ("ページ", self.pages, "upper"),
                                      ("レイヤー", self.layers, "upper"), ("履歴", self.history, "upper"), ("台詞", self.story, "lower"),
                                      ("素材", self.materials, "lower"), ("定規・3D", self.guides, "lower"),
-                                     ("点検", self.checks, "lower"), ("コマの詳細", self.panel_view, "agent"),
+                                     ("点検", self.checks, "lower"), ("カラー", self.colours, "upper"),
+                                     ("コマの詳細", self.panel_view, "agent"),
                                      ("資料", self.library, "agent")):
             dock = QDockWidget(title, self)
             if widget is not self.pages:
@@ -1822,6 +1846,10 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QTabBar
 
         bars = [bar for bar in self.findChildren(QTabBar) if bar.parentWidget() is self]
+        for bar in bars:  # panel names are shown whole; when they do not fit, the bar scrolls
+            bar.setElideMode(Qt.TextElideMode.ElideNone)
+            bar.setUsesScrollButtons(True)
+            bar.setExpanding(False)
         tabs = {bar: [bar.tabText(i) for i in range(bar.count())] for bar in bars}
         shown = {dock.windowTitle() for dock in self.findChildren(QDockWidget) if dock.isVisible()}
         for bar in bars:
@@ -1880,7 +1908,7 @@ class MainWindow(QMainWindow):
         self._stale_docks.discard(dock)
         widget = {"承認箱": self.approvals, "コマの詳細": self.panel_view, "台詞": self.story, "レイヤー": self.layers,
                   "素材": self.materials, "定規・3D": self.guides, "点検": self.checks, "資料": self.library,
-                  "履歴": self.history, "ページ": None}[dock.windowTitle()]
+                  "履歴": self.history, "ページ": None, "カラー": None}[dock.windowTitle()]
         if widget is None:
             return
         if widget is self.panel_view:
@@ -2196,6 +2224,11 @@ class MainWindow(QMainWindow):
             self.apply_ops([{"op": "paint_mask", "page": page.index, "id": layer.id, "points": [[p[0], p[1]] for p in points],
                              "width_mm": self.eraser_mm if erase else max(0.5, self.brush.size.value()), "show": not erase}])
             return
+        if self.canvas.tool == "pen" and self.colours.transparent.isChecked():
+            # 透明色: the pen takes away where it passes
+            self.apply_ops([{"op": "erase", "page": page.index, "layer_id": layer.id, "points": [[p[0], p[1]] for p in points],
+                             "width_mm": max(0.3, self.brush.size.value())}])
+            return
         if self.canvas.tool == "blend":
             self.apply_ops([{"op": "smudge", "page": page.index, "layer_id": layer.id, "points": points,
                              "width_mm": self.canvas.blend_mm, "strength": self.blend_strength.value() / 100,
@@ -2223,7 +2256,8 @@ class MainWindow(QMainWindow):
             ops.insert(0, {"op": "define_brush", "key": kind, **brushes.to_dict(brushes.brush(kind))})
         if self.canvas.snap_rulers and page.rulers:
             op["snap_ruler"] = True
-        self.apply_ops(ops)
+        if self.apply_ops(ops) and hasattr(self, "colours"):
+            self.colours.remember(self.brush.rgb)
 
     def _onion(self) -> None:
         page = self._current()
@@ -2430,6 +2464,21 @@ class MainWindow(QMainWindow):
             return None
         return layer
 
+    def layer_colour_at(self, x_mm: float, y_mm: float):
+        """The colour of the layer being drawn on at this point (the eyedropper set to the layer)."""
+        from genko.render import layer_image
+
+        page, layer = self._current(), self.target_layer()
+        if page is None or layer is None:
+            return None
+        dpi = 100
+        image = layer_image(page, layer, dpi, self.episode)
+        x, y = round(x_mm / 25.4 * dpi), round(y_mm / 25.4 * dpi)
+        if not (0 <= x < image.width and 0 <= y < image.height):
+            return None
+        r, g, b, a = image.getpixel((x, y))
+        return (r, g, b) if a > 20 else None
+
     def _on_colour_picked(self, rgb) -> None:
         self.brush.set_colour(rgb)
         self.flash(f"色を拾いました {tuple(rgb)}", 2000)
@@ -2529,6 +2578,39 @@ class MainWindow(QMainWindow):
             row.addWidget(button)
         bar.hide()
         self.canvas.launcher = bar
+
+    def _vector_edit(self, change: dict) -> None:
+        layer, page = self._paint_layer(), self._current()
+        if layer is None or page is None:
+            return
+        self.apply_ops([{"op": "vector_edit", "page": page.index, "layer_id": layer.id, **change}])
+        self.canvas.update()
+
+    def _vector_selected(self, action: str) -> None:
+        ids = list(self.canvas.vector_ids)
+        if not ids:
+            self.flash("先に「線の編集」（Shift+Y）で線を選びます", 3000)
+            return
+        if action == "connect" and len(ids) != 2:
+            self.flash("つなぐ線を 2 本選びます（2 本目は Shift+クリック）", 3000)
+            return
+        change = {"action": action, "ids": ids}
+        if action == "recolor":
+            change["rgb"] = list(self.brush.rgb)
+        self._vector_edit(change)
+        if action in ("connect", "delete"):
+            self.canvas.vector_ids = ids[:1] if action == "connect" else []
+
+    def _fill_gaps(self) -> None:
+        layer, page = self._paint_layer(), self._current()
+        if layer is None or page is None:
+            return
+        op = {"op": "fill_gaps", "page": page.index, "layer_id": layer.id, "max_mm": self.gap_size.value()
+              if hasattr(self, "gap_size") else 1.5}
+        area = self._area()
+        if area is not None:
+            op["area"] = area
+        self.apply_ops([op])
 
     def _join_selection(self, area: dict | None, how: str) -> None:
         from genko import selops

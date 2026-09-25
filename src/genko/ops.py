@@ -74,6 +74,8 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)", "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)"},
     {"op": "add_shape", "page": "int", "layer_id": "str?", "shape": "line|polyline|curve|rect|ellipse|polygon", "points": "[[x,y],…]? (line, polyline, curve)", "box": "[x,y,w,h]? (rect, ellipse, polygon)", "sides": "int? (polygon)", "angle": "float? (polygon, degrees)", "radius_mm": "float? (rect: round corners)", "closed": "bool? (polyline, curve)", "line": "bool? (default true)", "fill": "bool?", "fill_rgb": "[r,g,b]?", "rgb": "[r,g,b]?", "width_mm": "float?", "kind": "brush? (mili)", "opacity": "float?"},
     {"op": "smudge", "page": "int", "layer_id": "str?", "points": "[[x,y,pressure?],...]", "width_mm": "float?", "strength": "0..1? (0.6)", "mode": "blur|smudge|blend? (ぼかし・指先・なじませ)"},
+    {"op": "vector_edit", "page": "int", "layer_id": "str?", "action": "move_point|add_point|delete_point|connect|cut|recolor|delete", "stroke_id": "str? (move_point, add_point, delete_point, cut)", "ids": "[str]? (connect: two; recolor, delete)", "index": "int? (the point)", "to": "[x,y]? (move_point)", "at": "[x,y]? (add_point, cut)", "rgb": "[r,g,b]|null? (recolor; null: the layer's ink)"},
+    {"op": "fill_gaps", "page": "int", "layer_id": "str?", "max_mm": "float? (1.5: spots up to this across)", "rgb": "[r,g,b]? (default the layer's commonest colour)", "area": "area? (only here)"},
     {"op": "store_area", "page": "int", "name": "str", "area": "area (kept on the page; use it later as {saved: name})"},
     {"op": "forget_area", "page": "int", "name": "str"},
     {"op": "delete_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}"},
@@ -207,6 +209,160 @@ def shape_points(kind: str, op: dict) -> tuple[list[tuple[float, float]], bool]:
         out.append(points[-1])
         return out, bool(op.get("closed"))
     return points, bool(op.get("closed")) and kind == "polyline"
+
+
+VECTOR_ACTIONS = ("move_point", "add_point", "delete_point", "connect", "cut", "recolor", "delete")
+
+
+def _stroke_by_id(layer, stroke_id: str):
+    for i, stroke in enumerate(layer.strokes):
+        if getattr(stroke, "id", None) == stroke_id:
+            return i, stroke
+    raise ApplyError(f"no stroke {stroke_id}")
+
+
+def _nearest_segment(points, x: float, y: float) -> tuple[int, float, tuple[float, float]]:
+    """(index of the segment's first point, distance, the nearest point on it)."""
+    best = (0, float("inf"), (x, y))
+    for i, (a, b) in enumerate(zip(points, points[1:])):
+        ax, ay, bx, by = float(a[0]), float(a[1]), float(b[0]), float(b[1])
+        dx, dy = bx - ax, by - ay
+        seg = dx * dx + dy * dy
+        t = 0.0 if seg == 0 else max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / seg))
+        px, py = ax + t * dx, ay + t * dy
+        d = math.hypot(x - px, y - py)
+        if d < best[1]:
+            best = (i, d, (px, py))
+    return best
+
+
+def _vector_edit(episode, op: dict) -> None:
+    """ベクター線の編集: control points moved, added or taken out; two lines joined; a line cut in two;
+    lines recoloured or deleted. Lines are named by their ids (inspect snapshot / the vector tool)."""
+    import copy as _copy
+
+    page = _require_page(episode, op)
+    layer = _paint_target(page, op)
+    action = str(op.get("action") or "")
+    if action not in VECTOR_ACTIONS:
+        raise ApplyError(f"action must be one of {', '.join(VECTOR_ACTIONS)}")
+    if action in ("recolor", "delete"):
+        ids = [str(v) for v in (op.get("ids") or ([op["stroke_id"]] if op.get("stroke_id") else []))]
+        if not ids:
+            raise ApplyError("ids (or stroke_id) is required")
+        for stroke_id in ids:
+            _stroke_by_id(layer, stroke_id)
+        if action == "delete":
+            layer.strokes = [s for s in layer.strokes if s.id not in ids]
+        else:
+            rgb = op.get("rgb")
+            for stroke in layer.strokes:
+                if stroke.id in ids:
+                    stroke.rgb = tuple(int(v) for v in rgb)[:3] if rgb else None
+        return
+    if action == "connect":
+        ids = [str(v) for v in op.get("ids") or []]
+        if len(ids) != 2 or ids[0] == ids[1]:
+            raise ApplyError("connect takes two line ids")
+        (_, a), (_, b) = _stroke_by_id(layer, ids[0]), _stroke_by_id(layer, ids[1])
+        pa, pb = list(a.points), list(b.points)
+        pra, prb = list(a.pressure) or [0.7] * len(pa), list(b.pressure) or [0.7] * len(pb)
+        # join at the nearest ends (turning either line round as needed)
+        ends = [(math.dist(pa[-1], pb[0]), False, False), (math.dist(pa[-1], pb[-1]), False, True),
+                (math.dist(pa[0], pb[0]), True, False), (math.dist(pa[0], pb[-1]), True, True)]
+        _, flip_a, flip_b = min(ends)
+        if flip_a:
+            pa, pra = pa[::-1], pra[::-1]
+        if flip_b:
+            pb, prb = pb[::-1], prb[::-1]
+        joined = _copy.copy(a)
+        joined.points = pa + pb
+        joined.pressure = pra + prb if (a.pressure or b.pressure) else []
+        layer.strokes = [joined if s is a else s for s in layer.strokes if s is not b]
+        return
+    stroke_id = str(op.get("stroke_id") or "")
+    index, stroke = _stroke_by_id(layer, stroke_id)
+    points, pressure = list(stroke.points), list(stroke.pressure)
+    changed = _copy.copy(stroke)
+    if action == "move_point":
+        k = int(op.get("index", -1))
+        if not 0 <= k < len(points):
+            raise ApplyError("index is not a point of the line")
+        to = op.get("to")
+        points[k] = (round(float(to[0]), 3), round(float(to[1]), 3))
+    elif action == "add_point":
+        at = op.get("at")
+        seg, _d, (px, py) = _nearest_segment(points, float(at[0]), float(at[1]))
+        points.insert(seg + 1, (round(px, 3), round(py, 3)))
+        if pressure:
+            pressure.insert(seg + 1, (pressure[seg] + pressure[min(seg + 1, len(pressure) - 1)]) / 2)
+    elif action == "delete_point":
+        k = int(op.get("index", -1))
+        if not 0 <= k < len(points):
+            raise ApplyError("index is not a point of the line")
+        if len(points) <= 2:
+            raise ApplyError("a line keeps at least two points (delete the line instead)")
+        del points[k]
+        if pressure:
+            del pressure[k]
+    elif action == "cut":
+        at = op.get("at")
+        seg, _d, (px, py) = _nearest_segment(points, float(at[0]), float(at[1]))
+        first, second = points[:seg + 1] + [(px, py)], [(px, py)] + points[seg + 1:]
+        if len(first) < 2 or len(second) < 2:
+            raise ApplyError("that is the end of the line")
+        tail = _copy.copy(stroke)
+        tail.id = new_id()
+        tail.points = second
+        changed.points = first
+        if pressure:
+            mid = pressure[seg]
+            changed.pressure = pressure[:seg + 1] + [mid]
+            tail.pressure = [mid] + pressure[seg + 1:]
+        layer.strokes = layer.strokes[:index] + [changed, tail] + layer.strokes[index + 1:]
+        return
+    changed.points = points
+    changed.pressure = pressure
+    layer.strokes = layer.strokes[:index] + [changed] + layer.strokes[index + 1:]
+
+
+def _fill_gaps(episode, op: dict) -> None:
+    """塗り残し部分に塗る: the small spots left unpainted between colours and lines (up to `max_mm` across),
+    filled in `rgb` (or the layer's commonest colour)."""
+    from collections import Counter
+
+    from PIL import ImageChops, ImageFilter
+
+    from genko import fill as fills
+    from genko import render, selops
+
+    page = _require_page(episode, op)
+    target = _paint_target(page, op)
+    dpi = 150
+    size = (render.mm_to_px(page.spec.width_mm, dpi), render.mm_to_px(page.spec.height_mm, dpi))
+    painted = render.layer_image(page, target, dpi, episode).split()[3].point(lambda v: 255 if v > 40 else 0).resize(size)
+    if painted.getbbox() is None:
+        raise ApplyError("the layer has no colour yet (fill first, then the spots left over)")
+    lines = render.render_page(page, dpi, mode="proof", episode=episode).convert("L").resize(size).point(lambda v: 255 if v < 128 else 0)
+    reach = max(1, round(float(op.get("max_mm", 1.5)) / 25.4 * dpi))
+    # close the painted shape (grow then shrink): what fills in is the small leftover
+    grown = painted.filter(ImageFilter.GaussianBlur(reach)).point(lambda v: 255 if v > 8 else 0)
+    closed = grown.filter(ImageFilter.GaussianBlur(reach)).point(lambda v: 255 if v > 247 else 0)
+    closed = ImageChops.lighter(closed, painted)
+    holes = ImageChops.subtract(closed, painted)
+    if op.get("area"):
+        holes = ImageChops.darker(holes, selops.to_mask(op["area"], page, episode, dpi).resize(size))
+    if holes.getbbox() is None:
+        return
+    rgb = op.get("rgb")
+    if not rgb:
+        image = render.layer_image(page, target, 60, episode)
+        counts = Counter(p[:3] for p in image.getdata() if p[3] > 200)
+        rgb = counts.most_common(1)[0][0] if counts else (20, 20, 20)
+    del lines  # (lines are under the fills already; the holes are only where no colour is)
+    patch = fills.mask_patch(holes, dpi, tuple(int(v) for v in rgb)[:3], float(op.get("opacity", 1.0)))
+    if patch is not None:
+        target.patches.append(patch)
 
 
 SMUDGE_DPI = 200
@@ -1198,6 +1354,14 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name == "smudge":
         _smudge(episode, op)
+        return
+
+    if name == "vector_edit":
+        _vector_edit(episode, op)
+        return
+
+    if name == "fill_gaps":
+        _fill_gaps(episode, op)
         return
 
     if name in ("transform_area", "delete_area"):
@@ -2561,7 +2725,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "gradient_fill",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
-                             "trace_prims", "effect_to_layer", "add_shape", "smudge"})
+                             "trace_prims", "effect_to_layer", "add_shape", "smudge", "vector_edit", "fill_gaps"})
 
 
 def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTOR) -> None:
@@ -2639,7 +2803,7 @@ PAGE_LOCAL_OPS = frozenset({
     "edit_stroke", "simplify_stroke", "set_ruler", "add_ruler", "edit_ruler", "delete_ruler",
     "add_prim3d", "add_scene", "edit_prim", "delete_prim", "trace_prims", "lt_convert", "erase_raster", "erase",
     "reorder_layers", "stamp_material", "add_mannequin", "pose_mannequin", "set_onion", "step_onion",
-    "set_lt", "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area", "smudge",
+    "set_lt", "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area", "smudge", "vector_edit", "fill_gaps",
 })
 # Ops that find a line by id; the line lives in the story (always copied) or in one page's texts.
 LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path"})

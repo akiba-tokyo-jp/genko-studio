@@ -281,6 +281,14 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### J4 additions
+
+- `vector_edit {page, layer_id, action: move_point | add_point | delete_point | connect | cut | recolor | delete,
+  stroke_id?, ids?, index?, to?, at?, rgb?}`.
+- `fill_gaps {page, layer_id, max_mm?, rgb?, area?}` (塗り残し).
+- Colours are plain `rgb` in every op; the colour sets, history and the main / sub / transparent colours are
+  the app's (drawing with the transparent colour is an `erase`).
+
 ### J3 additions
 
 - Brushes: new built-ins (calligraphy, water, spray, stipple, dotline, dashline, lace, grass, leaves, hearts,

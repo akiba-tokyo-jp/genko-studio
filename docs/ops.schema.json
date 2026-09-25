@@ -365,6 +365,26 @@
       "mode": "blur|smudge|blend? (ぼかし・指先・なじませ)"
     },
     {
+      "op": "vector_edit",
+      "page": "int",
+      "layer_id": "str?",
+      "action": "move_point|add_point|delete_point|connect|cut|recolor|delete",
+      "stroke_id": "str? (move_point, add_point, delete_point, cut)",
+      "ids": "[str]? (connect: two; recolor, delete)",
+      "index": "int? (the point)",
+      "to": "[x,y]? (move_point)",
+      "at": "[x,y]? (add_point, cut)",
+      "rgb": "[r,g,b]|null? (recolor; null: the layer's ink)"
+    },
+    {
+      "op": "fill_gaps",
+      "page": "int",
+      "layer_id": "str?",
+      "max_mm": "float? (1.5: spots up to this across)",
+      "rgb": "[r,g,b]? (default the layer's commonest colour)",
+      "area": "area? (only here)"
+    },
+    {
       "op": "store_area",
       "page": "int",
       "name": "str",
