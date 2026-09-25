@@ -55,9 +55,13 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_spread", "page": "int", "with": "int|null"},
     {"op": "reorder", "order": "[int]"},
     {"op": "flood_fill", "page": "int", "layer": "ink|bg", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]", "gap_mm": "float?"},
-    {"op": "add_tone", "page": "int", "frame_id": "str?", "lpi": "float", "density": "float"},
+    {"op": "add_tone", "page": "int", "frame_id": "str?", "area": "{poly}|{mask}?", "at": "{x_mm, y_mm, gap_mm?, reference?}? (the region a fill would take)", "lpi": "float?", "density": "float? (0..1 black)", "angle": "float?", "pattern": "dot|line|cross|noise|flat?", "gradient": "{shape: linear|radial, angle, start, end}?", "name": "str?", "after": "layer id?", "id": "str?", "note": "nothing given: every panel"},
+    {"op": "set_tone", "page": "int", "id": "str", "lpi": "float?", "density": "float?", "angle": "float?", "pattern": "str?", "gradient": "object|null?", "name": "str?"},
     {"op": "delete_tone", "page": "int", "id": "str"},
-    {"op": "add_effect", "page": "int", "kind": "focus|speed|white", "frame_id": "str?", "params": "object"},
+    {"op": "add_effect", "page": "int", "kind": "focus|speed|uni_flash|beta_flash|white", "frame_id": "str?", "params": "object (see docs)", "id": "str?"},
+    {"op": "edit_effect", "page": "int", "id": "str", "params": "object? (merged; null removes a key)", "kind": "str?", "frame_id": "str|null?", "visible": "bool?"},
+    {"op": "delete_effect", "page": "int", "id": "str"},
+    {"op": "effect_to_layer", "page": "int", "id": "str", "layer_id": "str", "keep": "bool? (keep the effect too)"},
     {"op": "set_autosave", "enabled": "bool"},
     {"op": "erase_raster", "page": "int", "layer": "ink|name", "points": "[[x,y],...]", "width_mm": "float"},
     {"op": "fill", "page": "int", "layer_id": "str?", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float? (close gaps up to this)", "expand_mm": "float? (grow under the lines)", "reference": "page|layer?"},
@@ -69,7 +73,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "reshape_stroke", "page": "int", "layer_id": "str?", "stroke_id": "str", "points": "[[x,y,p?],...]?", "width_mm": "float?"},
     {"op": "erase", "page": "int", "layer_id": "str? (else layer: role)", "layer": "str?", "points": "[[x,y],...]", "width_mm": "float", "mode": "to_crossing? (cut a line only up to where it crosses others)", "note": "cuts pen lines (vector) and clears paint"},
     {"op": "reorder_layers", "page": "int", "order": "[id]"},
-    {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?"},
+    {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?", "area": "object?", "at": "object?", "layer_id": "str? (pictures and drawn parts)", "x_mm": "float?", "y_mm": "float? (where a picture's / part's middle goes)", "width_mm": "float?"},
     {"op": "set_balloon_path", "id": "str", "path": "[[x,y]]?", "wrap": "vertical|horizontal", "ruby_runs": "[[base,ruby]]"},
     {"op": "add_mannequin", "page": "int", "pos": "[x,y,z] (pelvis, mm)", "height_mm": "float?", "rot": "[tip,turn,lean]?", "preset": "stand|walk|run|sit|point|look_back|arms_up?", "id": "str?"},
     {"op": "pose_mannequin", "page": "int", "id": "str", "joints": "{name: {yaw, pitch}}?", "rot": "[tip,turn,lean]?", "pos": "[x,y,z]?", "height_mm": "float?", "preset": "str?", "drag": "{handle: pelvis|chest|head|l_elbow|l_hand|l_knee|…, to: [x,y]}?"},
@@ -148,8 +152,8 @@ def _paint_target(page, op: dict):
         target = page._layer(LayerRole(str(op.get("layer") or "ink")))
     if getattr(target, "locked", False):
         raise ApplyError("the layer is locked")
-    if target.kind not in (LayerKind.STROKES, LayerKind.RASTER):
-        raise ApplyError("this layer cannot be painted on (choose a pen or paint layer)")
+    if target.kind not in (LayerKind.STROKES, LayerKind.RASTER, LayerKind.TONE):
+        raise ApplyError("this layer cannot be painted on (choose a pen, paint or tone layer)")
     return target
 
 
@@ -167,6 +171,101 @@ def _area(op: dict) -> dict:
     if area.get("mask") and area["mask"].get("box") and area["mask"].get("png"):
         return area
     raise ApplyError("area is {poly: [[x, y], …]} or {mask: {box, png}}")
+
+
+def _tone_numbers(layer, op: dict) -> None:
+    if op.get("lpi") is not None:
+        lpi = float(op["lpi"])
+        if not 5 <= lpi <= 300:
+            raise ApplyError("lpi is 5 to 300")
+        layer.lpi = lpi
+    if op.get("density") is not None:
+        density = float(op["density"])
+        if not 0 <= density <= 1:
+            raise ApplyError("density is 0 to 1 (the black share)")
+        layer.density = density
+    if op.get("angle") is not None:
+        layer.angle = float(op["angle"])
+
+
+def _new_tone(episode, page, op: dict) -> Layer:
+    """A tone layer from add_tone / a tone material: its look and where it goes."""
+    from genko import fill as fills
+    from genko import frames as geo
+    from genko import selection, tones
+
+    tone = {"pattern": str(op.get("pattern") or "dot")}
+    if op.get("gradient"):
+        tone["gradient"] = dict(op["gradient"])
+    try:
+        tones.validate(tone)
+    except ValueError as exc:
+        raise ApplyError(str(exc)) from exc
+    layer = Layer(id=str(op.get("id") or new_id()), role=LayerRole.TONE, kind=LayerKind.TONE, lpi=60.0, density=0.3,
+                  exportable=True, angle=45.0, tone=tone, title=str(op.get("name") or ""))
+    if any(item.id == layer.id for item in page.layers):
+        raise ApplyError(f"layer {layer.id} already exists")
+    _tone_numbers(layer, op)
+    patch = None
+    if op.get("area"):
+        area = _area(op)
+        if area.get("poly"):
+            patch = fills.polygon_patch(area["poly"], (0, 0, 0))
+        else:
+            mask, origin = selection.area_mask(area)
+            patch = fills.mask_patch(mask, fills.FILL_DPI, (0, 0, 0), 1.0, origin)
+    elif op.get("frame_id"):
+        frame = _frame_or_fail(page, op["frame_id"])
+        patch = fills.polygon_patch([list(p) for p in geo.shape(frame)], (0, 0, 0))
+    elif op.get("at"):
+        at = dict(op["at"])
+        dpi = fills.FILL_DPI
+        x, y = float(at["x_mm"]), float(at["y_mm"])
+        reference = _fill_reference(episode, page, page.layers[0] if page.layers else layer, "page", dpi)
+        panel = page.frame_at(x, y)
+        window = None
+        if panel is not None:
+            r = panel.rect
+            window = (max(0, fills.px(r.x - 2, dpi)), max(0, fills.px(r.y - 2, dpi)),
+                      min(reference.width, fills.px(r.x + r.width + 2, dpi)), min(reference.height, fills.px(r.y + r.height + 2, dpi)))
+        mask = fills.region_mask(reference, (fills.px(x, dpi), fills.px(y, dpi)), gap_px=fills.px(float(at.get("gap_mm", 0.3) or 0), dpi),
+                                 expand_px=1, window=window)
+        if mask is None:
+            raise ApplyError("nothing to fill there (the click is on a line)")
+        patch = fills.mask_patch(mask, dpi, (0, 0, 0))
+    if patch is not None:
+        layer.patches.append(patch)
+    elif any(op.get(k) for k in ("area", "frame_id", "at")):
+        raise ApplyError("the area is empty")
+    return layer
+
+
+def _frame_or_fail(page, frame_id):
+    try:
+        return page._find(str(frame_id))
+    except (KeyError, IndexError) as exc:
+        raise ApplyError(f"no panel {frame_id}") from exc
+
+
+def _effect(page, effect_id) -> dict:
+    found = next((e for e in page.effects if e.get("id") == effect_id), None)
+    if found is None:
+        raise ApplyError(f"no effect {effect_id}")
+    return found
+
+
+def _items_box(items: dict):
+    xs, ys = [], []
+    for stroke in items.get("strokes", []):
+        xs += [p[0] for p in stroke.points]
+        ys += [p[1] for p in stroke.points]
+    for patch in items.get("patches", []):
+        x, y, w, h = (float(v) for v in patch["box"])
+        xs += [x, x + w]
+        ys += [y, y + h]
+    if not xs:
+        return None
+    return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)
 
 
 def _ruler(page, ruler_id) -> dict:
@@ -669,8 +768,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         stroke.width_mm = float(op["width_mm"]) if op.get("width_mm") is not None else float(episode.brush_width_mm)
         if op.get("layer_id"):
             target = _layer_by_id(page, str(op["layer_id"]))
-            if target.kind not in (LayerKind.STROKES, LayerKind.RASTER):
-                raise ApplyError("this layer cannot take pen lines (choose a pen or paint layer)")
+            if target.kind not in (LayerKind.STROKES, LayerKind.RASTER, LayerKind.TONE):
+                raise ApplyError("this layer cannot take pen lines (choose a pen, paint or tone layer)")
         else:
             role = LayerRole.INK if layer_name == "ink" else LayerRole.NAME if layer_name == "name" else LayerRole(layer_name)
             target = page._layer(role)
@@ -1004,26 +1103,36 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name == "add_tone":
         page = _require_page(episode, op)
-        layer = Layer(
-            id=new_id(),
-            role=LayerRole.TONE,
-            kind=LayerKind.TONE,
-            lpi=float(op.get("lpi", 60)),
-            density=float(op.get("density", 0.3)),
-            exportable=True,
-            angle=float(op.get("angle", 45)),
-        )
-        frame_id = op.get("frame_id")
-        if frame_id:
-            frame = page._find(str(frame_id))
-            r = frame.rect
-            layer.region = [
-                (r.x, r.y),
-                (r.x + r.width, r.y),
-                (r.x + r.width, r.y + r.height),
-                (r.x, r.y + r.height),
-            ]
-        page.layers.append(layer)
+        layer = _new_tone(episode, page, op)
+        if op.get("after"):
+            index = next((i for i, item in enumerate(page.layers) if item.id == op["after"]), None)
+            if index is None:
+                raise ApplyError(f"no layer {op['after']}")
+            page.layers.insert(index + 1, layer)
+        else:
+            page.layers.append(layer)
+        return
+
+    if name == "set_tone":
+        from genko import tones
+
+        page = _require_page(episode, op)
+        layer = _layer_by_id(page, str(op.get("id")))
+        if layer.kind != LayerKind.TONE and layer.role != LayerRole.TONE:
+            raise ApplyError("that layer is not a tone")
+        tone = dict(layer.tone or {})
+        if op.get("pattern"):
+            tone["pattern"] = str(op["pattern"])
+        if "gradient" in op:
+            tone["gradient"] = dict(op["gradient"]) if op["gradient"] else None
+        try:
+            tones.validate(tone)
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
+        layer.tone = tone
+        _tone_numbers(layer, op)
+        if op.get("name"):
+            layer.title = str(op["name"])
         return
 
     if name == "delete_tone":
@@ -1036,18 +1145,60 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         return
 
     if name == "add_effect":
+        from genko import effects
+
         page = _require_page(episode, op)
-        kind = op.get("kind")
-        if kind not in ("focus", "speed", "white"):
-            raise ApplyError("kind must be focus, speed, or white")
-        page.effects.append(
-            {
-                "id": new_id(),
-                "kind": kind,
-                "frame_id": op.get("frame_id"),
-                "params": dict(op.get("params") or {}),
-            }
-        )
+        kind = str(op.get("kind") or "")
+        params = dict(op.get("params") or {})
+        try:
+            effects.validate(kind, params)
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
+        if op.get("frame_id"):
+            _frame_or_fail(page, op["frame_id"])
+        page.effects.append({"id": str(op.get("id") or new_id()), "kind": kind, "frame_id": op.get("frame_id"), "params": params})
+        return
+
+    if name == "edit_effect":
+        from genko import effects
+
+        page = _require_page(episode, op)
+        effect = _effect(page, op.get("id"))
+        params = dict(effect.get("params") or {})
+        for key, value in dict(op.get("params") or {}).items():
+            if value is None:
+                params.pop(key, None)
+            else:
+                params[key] = value
+        kind = str(op.get("kind") or effect["kind"])
+        try:
+            effects.validate(kind, params)
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
+        if "frame_id" in op:
+            if op["frame_id"]:
+                _frame_or_fail(page, op["frame_id"])
+            effect["frame_id"] = op["frame_id"] or None
+        if "visible" in op:
+            effect["visible"] = bool(op["visible"])
+        effect["kind"], effect["params"] = kind, params
+        return
+
+    if name == "delete_effect":
+        page = _require_page(episode, op)
+        _effect(page, op.get("id"))
+        page.effects = [e for e in page.effects if e.get("id") != op.get("id")]
+        return
+
+    if name == "effect_to_layer":
+        from genko import effects
+
+        page = _require_page(episode, op)
+        effect = _effect(page, op.get("id"))
+        target = _paint_target(page, op)
+        effects.to_layer(effect, page, target)
+        if not op.get("keep"):
+            page.effects = [e for e in page.effects if e.get("id") != op.get("id")]
         return
 
     if name == "set_autosave":
@@ -1234,6 +1385,14 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             raise ApplyError("the layer is locked")
         points = _parse_points(op.get("points") or [])
         width = float(op.get("width_mm", 2))
+        if target.kind == LayerKind.TONE:  # on a tone the eraser scrapes (削り); soft fades it out
+            from genko.models import coerce_stroke
+
+            scrape = coerce_stroke(points if len(points) > 1 else [*points, (points[0][0] + 0.01, points[0][1] + 0.01)])
+            scrape.kind = "scrape_soft" if op.get("soft") else "scrape"
+            scrape.width_mm = width
+            target.strokes.append(scrape)
+            return
         if op.get("mode") == "to_crossing":
             from genko.stroke import erase_to_crossing
 
@@ -1269,28 +1428,53 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name == "stamp_material":
         page = _require_page(episode, op)
-        from genko.materials import get_material
+        from genko.materials import get_material, image_bytes
 
-        material = get_material(str(op["material_id"]))
-        layer = Layer(
-            id=new_id(),
-            role=LayerRole.TONE if material.get("kind") != "effect" else LayerRole.EFFECT,
-            kind=LayerKind.TONE,
-            lpi=material.get("lpi"),
-            density=material.get("density"),
-            exportable=True,
-            material_id=material["id"],
-        )
-        frame_id = op.get("frame_id")
-        if frame_id:
-            frame = page._find(str(frame_id))
-            r = frame.rect
-            layer.region = [(r.x, r.y), (r.x + r.width, r.y), (r.x + r.width, r.y + r.height), (r.x, r.y + r.height)]
-        if material.get("kind") == "effect":
-            page.effects.append({"id": new_id(), "kind": material.get("effect", "speed"), "frame_id": frame_id, "params": {}})
-        else:
+        try:
+            material = get_material(str(op.get("material_id")))
+        except KeyError as exc:
+            raise ApplyError(f"no material {op.get('material_id')}") from exc
+        kind = material.get("kind")
+        if kind == "tone":
+            tone_op = {**(material.get("tone") or {}), **{k: op[k] for k in ("frame_id", "area", "at", "after", "id") if op.get(k)}}
+            layer = _new_tone(episode, page, {**tone_op, "name": material.get("name")})
+            layer.material_id = material["id"]
             page.layers.append(layer)
-        return
+            return
+        if kind == "effect":
+            params = dict(material.get("params") or {})
+            if op.get("x_mm") is not None and op.get("y_mm") is not None:
+                params["center"] = [float(op["x_mm"]), float(op["y_mm"])]
+            frame_id = op.get("frame_id")
+            if frame_id:
+                _frame_or_fail(page, frame_id)
+            page.effects.append({"id": str(op.get("id") or new_id()), "kind": material.get("effect", "speed"),
+                                 "frame_id": frame_id, "params": params})
+            return
+        target = _paint_target(page, op)
+        if kind == "image":
+            data = image_bytes(material)
+            if not data:
+                raise ApplyError("the picture file of this material is missing")
+            width = float(op.get("width_mm") or material.get("width_mm") or 60)
+            height = width * float(material.get("aspect") or 1)
+            cx = float(op.get("x_mm", page.spec.width_mm / 2))
+            cy = float(op.get("y_mm", page.spec.height_mm / 2))
+            target.patches.append({"id": new_id(), "box": [round(cx - width / 2, 3), round(cy - height / 2, 3), round(width, 3), round(height, 3)],
+                                   "mode": "image", "png": data, "opacity": 1.0})
+            return
+        if kind == "lines":
+            from genko import selection
+
+            items = selection.items_from_json(material.get("items") or {})
+            matrix = selection.IDENTITY
+            if op.get("x_mm") is not None and op.get("y_mm") is not None:
+                box = _items_box(items)
+                if box:
+                    matrix = (1.0, 0.0, 0.0, 1.0, float(op["x_mm"]) - (box[0] + box[2] / 2), float(op["y_mm"]) - (box[1] + box[3] / 2))
+            selection.drop(target, items, matrix, fresh_ids=True)
+            return
+        raise ApplyError(f"unknown material kind {kind}")
 
     if name == "set_balloon_path":
         line = _find_line(episode, str(op.get("id") or ""))
@@ -1767,7 +1951,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
-                             "trace_prims"})
+                             "trace_prims", "effect_to_layer"})
 
 
 def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTOR) -> None:

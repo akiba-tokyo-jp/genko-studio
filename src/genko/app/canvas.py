@@ -99,6 +99,10 @@ class PageCanvas(GuideMixin, QWidget):
     primSelected = Signal(str)  # a 3D figure or box ("" for none)
     primEdited = Signal(str, object)  # id, {pos} or {rot}: an edit_prim op
     primPosed = Signal(str, str, object)  # figure id, the dragged part, where to (mm): a pose_mannequin drag
+    effectRequested = Signal(float, float)  # the effect tool clicked here (mm): put the chosen effect line
+    effectSelected = Signal(str)
+    effectMoved = Signal(str, object)  # effect id, its new centre [x, y]
+    stampRequested = Signal(float, float)  # the material tool clicked here (mm)
 
     def __init__(self) -> None:
         super().__init__()
@@ -296,6 +300,7 @@ class PageCanvas(GuideMixin, QWidget):
         self._draw_handles(painter)
         self._draw_rulers(painter)
         self._draw_prims_overlay(painter)
+        self._draw_effect_handles(painter)
         self._draw_selection_overlay(painter)
         if self._reshape is not None:
             painter.setPen(QPen(QColor("#e8590c"), 2))
@@ -780,7 +785,7 @@ class PageCanvas(GuideMixin, QWidget):
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self.tool == "text":
             self.setCursor(Qt.CursorShape.IBeamCursor)
-        elif self.tool in ("ruler", "3d"):
+        elif self.tool in ("ruler", "3d", "effect", "stamp"):
             self.setCursor(Qt.CursorShape.CrossCursor)
         elif self.tool in ("picker", "fill", "lassofill", "marquee", "reshape"):
             self.setCursor(Qt.CursorShape.PointingHandCursor if self.tool in ("picker", "fill") else Qt.CursorShape.CrossCursor)
@@ -829,6 +834,12 @@ class PageCanvas(GuideMixin, QWidget):
             return
         if self.tool == "3d":
             self._prim_press(pos)
+            return
+        if self.tool == "effect":
+            self._effect_press(pos)
+            return
+        if self.tool == "stamp":
+            self.stampRequested.emit(x_mm, y_mm)
             return
         if self.tool == "fill":
             self.fillRequested.emit(x_mm, y_mm)
@@ -896,7 +907,7 @@ class PageCanvas(GuideMixin, QWidget):
             self._modifiers = event.modifiers()
             if self._ruler_move(pos):
                 return
-        if self._prim_move(pos):
+        if self._prim_move(pos) or self._effect_move(pos):
             return
         if self._drag_line is not None:
             x_mm, y_mm = self._to_mm(pos)
@@ -933,6 +944,9 @@ class PageCanvas(GuideMixin, QWidget):
             return
         if self._prim_drag is not None:
             self._prim_release()
+            return
+        if self._effect_drag is not None:
+            self._effect_release()
             return
         if self.tool == "ruler":
             self._ruler_release()

@@ -294,92 +294,27 @@ def _blend_over(base: Image.Image, over: Image.Image, mode: str, opacity: float,
     return Image.alpha_composite(base_rgba, mixed_rgba)
 
 
-def _tone_is_fm(layer) -> bool:
-    if not layer.material_id:
-        return False
-    try:
-        from genko.materials import get_material
-
-        return get_material(str(layer.material_id)).get("kind") == "noise"
-    except Exception:
-        return False
+def _is_tone(layer) -> bool:
+    return layer.role == LayerRole.TONE or getattr(layer, "kind", None) == LayerKind.TONE
 
 
 def _draw_tone(image: Image.Image, page: Page, dpi: int, mode: str = "print", finish: bool = True) -> Image.Image:
-    """Tone layers: AM dots (or FM for noise materials) with the exact black share, inside their
-    region (or all panels). Proofs and names show a flat grey instead of dots."""
-    from genko import screentone
+    """Every visible tone layer (genko.tones) over the image: the pattern in print, its grey otherwise."""
+    from genko import tones
 
     for layer in page.layers:
-        if layer.role != LayerRole.TONE or not layer.visible:
-            continue
-        density = max(0.0, min(1.0, float(layer.density or 0.3)))
-        mask = Image.new("L", image.size, 0)
-        draw = ImageDraw.Draw(mask)
-        if layer.region:
-            draw.polygon([_xy(pt, dpi) for pt in layer.region], fill=255)
-        else:
-            for frame in page.leaf_frames():
-                draw.rectangle(rect_px(frame.rect, dpi), fill=255)
-        if mode == "print" and finish:
-            tone = screentone.tone_area(mask, density, dpi, float(layer.lpi or 60), float(layer.angle if layer.angle is not None else 45),
-                                        fm=_tone_is_fm(layer))
-        else:
-            tone = Image.new("RGBA", image.size, (0, 0, 0, 0))
-            tone.putalpha(mask.point(lambda v, d=density: round(v * d)))
-        image = Image.alpha_composite(image.convert("RGBA"), tone).convert(image.mode)
+        if _is_tone(layer) and layer.visible:
+            image = tones.draw_layer(image, layer, page, dpi, print_mode=mode == "print" and finish)
     return image
 
 
 def _draw_effects(image: Image.Image, page: Page, dpi: int) -> Image.Image:
-    """Focus lines (tapered wedges toward a clear centre), speed lines and white flash, each clipped
-    to its panel. Lengths vary with a fixed per-effect sequence, so renders repeat exactly."""
-    import math
-    import random
+    """Effect lines (genko.effects), each inside its panel; the same effect always gives the same lines."""
+    from genko import effects
 
     for effect in page.effects:
-        kind = effect.get("kind")
-        frame = None
-        if effect.get("frame_id"):
-            try:
-                frame = page._find(effect["frame_id"])
-            except (KeyError, IndexError):
-                frame = None
-        box = rect_px(frame.rect, dpi) if frame is not None else (0, 0, image.width, image.height)
-        x0, y0, x1, y1 = box
-        params = effect.get("params") or {}
-        count = int(params.get("count", 48 if kind == "focus" else 28))
-        rng = random.Random(str(effect.get("id")))
-        layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(layer)
-        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-        if kind == "focus":
-            outer = math.hypot(x1 - x0, y1 - y0) / 2
-            clear = float(params.get("clear", 0.45))  # the empty centre, as a share of the half-diagonal
-            for i in range(count):
-                a = 2 * math.pi * (i + rng.random() * 0.6) / count
-                inner = outer * clear * (0.85 + rng.random() * 0.3)
-                half = (2 * math.pi / count) * (0.18 + rng.random() * 0.2)
-                tip = (cx + inner * math.cos(a), cy + inner * math.sin(a))
-                draw.polygon([(cx + outer * 1.05 * math.cos(a - half), cy + outer * 1.05 * math.sin(a - half)),
-                              (cx + outer * 1.05 * math.cos(a + half), cy + outer * 1.05 * math.sin(a + half)), tip],
-                             fill=(15, 15, 15, 255))
-        elif kind == "speed":
-            height = max(1, y1 - y0)
-            thick = max(1, mm_to_px(0.3, dpi))
-            for i in range(count):
-                y = y0 + height * (i + rng.random()) / count
-                start = x0 + (x1 - x0) * rng.random() * 0.5
-                draw.line((start, y, x1, y), fill=(15, 15, 15, 255), width=thick + int(rng.random() * thick * 2))
-        elif kind == "white":
-            draw.rectangle(box, fill=(255, 255, 255, 255))
-        else:
-            continue
-        if frame is not None:
-            mask = Image.new("L", image.size, 0)
-            ImageDraw.Draw(mask).rectangle(box, fill=255)
-            layer.putalpha(ImageChops.multiply(layer.split()[3], mask))
-        image = Image.alpha_composite(image.convert("RGBA"), layer).convert(image.mode)
+        if effect.get("kind") in effects.KINDS and effect.get("visible", True):
+            image = effects.draw(image, effect, page, dpi)
     return image
 
 
@@ -511,6 +446,12 @@ def render_page(
             continue
         if layer.role in (LayerRole.NAME, LayerRole.DRAFT) and mode == "print":
             continue
+        if _is_tone(layer):  # tones sit in the layer order: a layer above can cover them
+            from genko import tones
+
+            rgba = tones.draw_layer(rgba, layer, page, working_dpi, print_mode=mode == "print" and finish)
+            prev_alpha = None
+            continue
         if layer.kind == LayerKind.PLACED:
             raster = _placed_raster(layer, page, episode, size, working_dpi, mode, finish)
         else:
@@ -529,7 +470,6 @@ def render_page(
         prev_alpha = raster.split()[3]
     image = rgba.convert("RGB")
 
-    image = _draw_tone(image, page, working_dpi, mode, finish)
     if page.effects:
         image = _draw_effects(image, page, working_dpi)
     _draw_prims(image, page, working_dpi, mode)

@@ -227,6 +227,12 @@ Rulers and 3D (M14):
 - `add_stroke {snap_ruler: true}` (or `ruler_id`) makes the line follow the ruler that suits it (line and curve rulers only take lines that start within 10 mm of them); active symmetry rulers draw the line again. Rulers are guides: never printed.
 - `add_mannequin`, `pose_mannequin {drag: {handle, to: [x, y]}}` points a part (chest, head, elbows, hands, fingers, knees, ankles, toes; `pelvis` moves the figure) at a place on the page. `add_prim3d {kind: box, pos, size: [w, h, d], rot: [tip, turn, lean], focal_mm}`, `edit_prim`, `delete_prim`. Figures and boxes show in name and proof renders, never in print. `trace_prims {layer_id, ids?}` draws them as pencil lines on a layer (for the draft).
 
+Tones, effect lines and materials (M15):
+
+- `add_tone {page, area | frame_id | at: {x_mm, y_mm, gap_mm?}, pattern: dot|line|cross|noise|flat, lpi, density (0..1 black), angle, gradient: {shape: linear|radial, angle, start, end}, name, id}` makes a tone layer; with none of area / frame_id / at it covers every panel. `set_tone {id, …}` changes it. On a tone layer `add_stroke` paints more tone, `erase` scrapes it (`soft: true` fades), `fill` / `fill_area` add areas. Tones sit in the layer order (a layer above covers them) and print as pure black-and-white patterns; proofs show their grey.
+- `add_effect {page, kind: focus|speed|uni_flash|beta_flash|white, frame_id, params}`: focus `{center, inner: [rx, ry], count, jitter, width_mm}`, speed `{angle, count, length, curve, jitter, width_mm}`, uni_flash `{center, inner, count, length_mm, width_mm}`, beta_flash `{center, inner, spikes, depth}`; `rgb` for white lines. `edit_effect {id, params (merged, null removes), visible}`, `delete_effect`, `effect_to_layer {id, layer_id}` turns it into pen lines (効果線ペン, kind `fx`) and fills to finish by hand.
+- Materials: built-in tones, gradients and effects, plus the person's own library in the config dir (pictures, drawn parts, folders). `stamp_material {page, material_id, frame_id | area | at (tones), x_mm, y_mm (effect centre, or where a picture / part goes), layer_id (pictures and parts), width_mm}` copies it into the book.
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

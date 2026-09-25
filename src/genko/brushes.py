@@ -40,6 +40,7 @@ BRUSHES: dict[str, Brush] = {b.key: b for b in (
     Brush("airbrush", "エアブラシ", 8.0, min_pressure=0.5, opacity=0.5, stabilize=1, taper=False, texture="soft"),
     Brush("fill_pen", "ベタ塗りペン", 3.0, fixed_width=True, stabilize=1, taper=False),
     Brush("white", "ホワイト（修正）", 1.0, min_pressure=0.3, stabilize=2, taper=False, rgb=(255, 255, 255)),
+    Brush("fx", "効果線ペン", 0.5, min_pressure=0.0, gamma=1.0, stabilize=0, taper=False),
 )}
 DEFAULT = "gpen"
 LEGACY = {"oil": "marker"}
@@ -81,7 +82,7 @@ def draw(size: tuple[int, int], points: list, dpi: int, width_mm: float, kind: s
         # an airbrush: a wide soft spray (the width is its diameter)
         draw_stroke_mm(ImageDraw.Draw(mask), shift, dpi, width_mm * 0.5, 255)
         return mask.filter(ImageFilter.GaussianBlur(max(1.0, width_mm * scale / 3))), (x0, y0)
-    draw_stroke_mm(ImageDraw.Draw(mask), shift, dpi, width_mm, 255)
+    draw_stroke_mm(ImageDraw.Draw(mask), shift, dpi, width_mm, 255, floor=0.03 if b.min_pressure < 0.05 else 0.15)
     if b.texture in ("grain", "dry"):
         rng = random.Random(seed or "genko")
         grain_px = max(1, round(dpi / 150)) if b.texture == "grain" else max(1, round(dpi / 60))

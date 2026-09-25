@@ -83,7 +83,8 @@ def stamp_polyline(
             draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill)
 
 
-def draw_stroke_mm(draw: ImageDraw.ImageDraw, points: list, dpi: int, width_mm: float, fill, pressure_scale: bool = True) -> None:
+def draw_stroke_mm(draw: ImageDraw.ImageDraw, points: list, dpi: int, width_mm: float, fill, pressure_scale: bool = True,
+                   floor: float = 0.15) -> None:
     """A pen line from its vector points (mm, optional pressure) at any resolution.
 
     Each segment is a quad between two round caps whose radii follow the pressure, so the line is
@@ -97,7 +98,7 @@ def draw_stroke_mm(draw: ImageDraw.ImageDraw, points: list, dpi: int, width_mm: 
     pts = []
     for pt in points:
         pressure = float(pt[2]) if len(pt) > 2 and pressure_scale else 1.0
-        radius = max(0.5, width_mm * max(0.15, min(1.5, pressure)) * scale / 2)
+        radius = max(0.5, width_mm * max(floor, min(1.5, pressure)) * scale / 2)
         pts.append((float(pt[0]) * scale, float(pt[1]) * scale, radius))
     if len(pts) == 1:
         x, y, r = pts[0]

@@ -32,6 +32,7 @@ from genko.app import wording
 from genko.app.brush_panel import BrushPanel
 from genko.app.canvas import PageCanvas
 from genko.app.guide_panel import PRESETS, GuidePanel
+from genko.app.material_panel import MaterialPanel
 from genko.app.dialogs import ExportDialog, NewProjectDialog, StartDialog  # noqa: F401  (StartDialog is re-exported)
 from genko.app.session import Session
 from genko.app.studio_widgets import ApprovalBox, Library, PanelView, ProcessBar
@@ -602,6 +603,13 @@ class MainWindow(QMainWindow):
         self.canvas.strokeReshaped.connect(self._reshape)
         self.canvas.strokes_for_reshape = lambda: list(getattr(self.target_layer(), "strokes", []) or [])
         self.canvas.rulerPlaced.connect(self._place_ruler)
+        self.canvas.effectRequested.connect(self._effect_at)
+        self.canvas.effectSelected.connect(lambda effect_id: self.materials.select_effect(effect_id))
+        self.canvas.effectMoved.connect(lambda effect_id, centre: self.apply_ops(
+            [{"op": "edit_effect", "page": self._current().index, "id": effect_id, "params": {"center": centre}}]))
+        self.canvas.stampRequested.connect(self._stamp_at)
+        self._effect_kind = "focus"
+        self._pending_material: dict | None = None
         self.canvas.rulerEdited.connect(lambda ruler_id, change: self.apply_ops(
             [{"op": "edit_ruler", "page": self._current().index, "id": ruler_id, **change}]))
         self.canvas.primSelected.connect(lambda prim_id: self.guides.select_prim(prim_id))
@@ -774,11 +782,15 @@ class MainWindow(QMainWindow):
         self.act_ruler = a("定規", lambda: self._tool("ruler"), "R",
                            "「定規」メニューで選んだ定規を置く（ドラッグ・クリック）。置いた定規の□をドラッグで動かす", True)
         self.act_3d = a("3D", lambda: self._tool("3d"), "J", "デッサン人形の関節（○）や箱をドラッグして動かす。箱の上の○で回す", True)
+        self.act_effect = a("効果線", lambda: self._tool("effect"), "K",
+                            "コマの中をクリックすると、選んだ効果線（集中線など）が入る。中心の＋をドラッグで動かす", True)
+        self.act_stamp = a("素材を置く", lambda: self._tool("stamp"), tip="素材パネルで選んだ素材を、クリックした所に置く", checkable=True)
         tools = QActionGroup(self)
         self.tool_actions = {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text,
                              "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill,
                              "lassofill": self.act_lassofill, "rect": self.act_marquee, "lasso": self.act_lasso,
-                             "wand": self.act_wand, "reshape": self.act_reshape, "ruler": self.act_ruler, "3d": self.act_3d}
+                             "wand": self.act_wand, "reshape": self.act_reshape, "ruler": self.act_ruler, "3d": self.act_3d,
+                             "effect": self.act_effect, "stamp": self.act_stamp}
         for act in self.tool_actions.values():
             tools.addAction(act)
         self.act_select.setChecked(True)
@@ -823,6 +835,12 @@ class MainWindow(QMainWindow):
         self.act_trace = a("3D を線にする（描く先のレイヤーへ）", lambda: self.trace_prims(selected_only=False),
                            tip="このページの 3D を鉛筆の線にして下描きにします")
         self.act_del_prim = a("選んだ 3D を消す", lambda: self.guides.delete_prim())
+        self.act_tone_here = a("選択範囲・選んだコマにトーンを貼る", self._tone_here, "Ctrl+Shift+T",
+                               "素材パネルで選んだトーン（なければ網点 60 線 30%）を貼ります")
+        self.act_tone_click = a("クリックした所にトーンを貼る", self._tone_click, tip="線で囲まれた所をクリックすると、そこにトーンが入ります")
+        self.effect_actions = [a(label, lambda _=False, k=key: self._choose_effect(k)) for key, label in
+                               (("focus", "集中線"), ("speed", "流線"), ("uni_flash", "ウニフラッシュ"), ("beta_flash", "ベタフラッシュ"))]
+        self.act_materials = a("素材パネルを開く", lambda: self.show_dock("素材"))
         self.pose_actions = [a(f"ポーズ: {label}", lambda _=False, k=key: self._pose(k)) for key, label in PRESETS.items()]
         self.act_thicker = a("太く（ペン・消しゴム）", lambda: self._nudge_brush(1), "]")
         self.act_thinner = a("細く（ペン・消しゴム）", lambda: self._nudge_brush(-1), "[")
@@ -852,6 +870,8 @@ class MainWindow(QMainWindow):
                       self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]),
             ("3D", [self.act_3d, None, self.act_add_figure, self.act_add_box, None, *self.pose_actions, None, self.act_trace,
                     self.act_del_prim]),
+            ("トーン・効果線", [self.act_tone_here, self.act_tone_click, None, self.act_effect, *self.effect_actions, None,
+                               self.act_materials]),
             ("選択", [self.act_marquee, self.act_lasso, self.act_wand, None, self.act_select_all, self.act_deselect, None,
                       self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v, None,
                       self.act_fill_selection, self.act_line_width]),
@@ -873,7 +893,7 @@ class MainWindow(QMainWindow):
         tools_bar.setMovable(False)
         tools_bar.setIconSize(QSize(16, 16))
         for act in (self.act_select, self.act_pen, self.act_eraser, self.act_fill, self.act_marquee, self.act_picker, self.act_text,
-                    self.act_frame, self.act_ruler, self.act_3d, None, self.act_undo, self.act_redo, None,
+                    self.act_frame, self.act_ruler, self.act_3d, self.act_effect, None, self.act_undo, self.act_redo, None,
                     self.act_fit, self.act_zoom_out, self.act_zoom_in, None, self.act_prev, self.act_next, None, self.act_export):
             if act is None:
                 tools_bar.addSeparator()
@@ -891,6 +911,7 @@ class MainWindow(QMainWindow):
         self.layers = LayerPanel(self)
         self.library = Library(self)
         self.guides = GuidePanel(self)
+        self.materials = MaterialPanel(self)
         for widget in (self.approvals, self.panel_view):
             widget.changed.connect(self._reload_pages)
         self.brush = BrushPanel()
@@ -910,14 +931,16 @@ class MainWindow(QMainWindow):
         self.brush_dock = brush_dock
         docks = []
         for title, widget in (("承認箱", self.approvals), ("コマ", self.panel_view), ("台詞", self.story),
-                              ("レイヤー", self.layers), ("定規・3D", self.guides), ("ライブラリ", self.library)):
+                              ("レイヤー", self.layers), ("素材", self.materials), ("定規・3D", self.guides), ("ライブラリ", self.library)):
             dock = QDockWidget(title, self)
-            if widget in (self.panel_view, self.story, self.layers, self.guides):
+            if widget in (self.panel_view, self.story, self.layers, self.guides, self.materials):
                 # tall panels scroll on a small screen instead of making the window taller
                 scroll = QScrollArea()
                 scroll.setWidgetResizable(True)
                 scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-                widget.setMinimumHeight(max(420, widget.minimumSizeHint().height()))
+                scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                if widget not in (self.guides, self.materials):  # these two grow and shrink with their contents
+                    widget.setMinimumHeight(max(420, widget.minimumSizeHint().height()))
                 scroll.setWidget(widget)
                 dock.setWidget(scroll)
             else:
@@ -947,7 +970,7 @@ class MainWindow(QMainWindow):
     def _refresh_dock(self, dock) -> None:
         self._stale_docks.discard(dock)
         widget = {"承認箱": self.approvals, "コマ": self.panel_view, "台詞": self.story, "レイヤー": self.layers,
-                  "定規・3D": self.guides, "ライブラリ": self.library}[dock.windowTitle()]
+                  "素材": self.materials, "定規・3D": self.guides, "ライブラリ": self.library}[dock.windowTitle()]
         if widget is self.panel_view:
             self._sync_panel_view()
         widget.refresh()
@@ -1115,12 +1138,15 @@ class MainWindow(QMainWindow):
         self._target_layer_id = layer_id
         layer = self.target_layer()
         if layer is not None:
-            self.flash(f"描く先: {wording.layer_label(layer)}", 2000)
+            tone = getattr(layer.kind, "value", "") == "tone"
+            self.flash(f"描く先: {wording.layer_label(layer)}" + ("（ペンでトーンを足す・消しゴムで削る）" if tone else ""), 2500)
+        if hasattr(self, "materials"):
+            self.materials.refresh()
 
     @staticmethod
     def drawable(layer) -> bool:
         kind = getattr(layer.kind, "value", str(layer.kind))
-        return kind in ("strokes", "raster") and not getattr(layer, "locked", False)
+        return kind in ("strokes", "raster", "tone") and not getattr(layer, "locked", False)
 
     def selected_frame(self):
         page = self._current()
@@ -1146,7 +1172,10 @@ class MainWindow(QMainWindow):
         if self.canvas.tool == "eraser":
             op = {"op": "erase", "page": page.index, "layer_id": layer.id, "points": [[p[0], p[1]] for p in points],
                   "width_mm": self.eraser_mm}
-            if self.brush.crossing.isChecked():
+            if getattr(layer.kind, "value", "") == "tone":
+                if self.materials.soft.isChecked():
+                    op["soft"] = True
+            elif self.brush.crossing.isChecked():
                 op["mode"] = "to_crossing"
             self.apply_ops([op])
             return
@@ -1475,6 +1504,127 @@ class MainWindow(QMainWindow):
             op["ids"] = [self.canvas.selected_prim_id]
         if self.apply_ops([op]):
             self.flash(f"「{wording.layer_label(layer)}」に線で写しました", 3000)
+
+    # --- tones, effect lines, materials (M15) -------------------------------------------------------------
+
+    def _default_tone(self) -> dict:
+        item = self.materials.current_material()
+        if item is not None and item.get("kind") == "tone":
+            return item
+        from genko.materials import get_material
+
+        return get_material("dot-60-30")
+
+    def _after_tone(self, layer_id: str) -> None:
+        self.set_target_layer(layer_id)
+        self.layers.refresh()
+
+    def _tone_here(self) -> None:
+        self._put_tone(self._default_tone(), ask_click=True)
+
+    def _tone_click(self) -> None:
+        self._pending_material = self._default_tone()
+        self._tool("stamp")
+        self.flash(f"「{self._pending_material.get('name')}」: 線で囲まれた所をクリックすると、そこにトーンが入ります", 4000)
+
+    def _put_tone(self, item: dict, ask_click: bool = False) -> None:
+        from genko.models import new_id
+
+        page = self._current()
+        if page is None:
+            return
+        op = {"op": "stamp_material", "page": page.index, "material_id": item["id"], "id": new_id()}
+        if self.canvas.selection:
+            op["area"] = self.canvas.selection["area"]
+        elif self.selected_frame() is not None:
+            op["frame_id"] = self.selected_frame().id
+        elif ask_click:
+            self._pending_material = item
+            self._tool("stamp")
+            self.flash("選択範囲もコマも選ばれていません。トーンを貼る所をクリックします", 4000)
+            return
+        if self.apply_ops([op]):
+            self._after_tone(op["id"])
+            self.flash(f"「{item.get('name')}」を貼りました。ペンで足す・消しゴムで削る", 3500)
+
+    def use_material(self, item: dict) -> None:
+        kind = item.get("kind")
+        if kind == "tone":
+            self._put_tone(item, ask_click=True)
+            return
+        if kind == "effect" and self.selected_frame() is not None:
+            self.apply_ops([{"op": "stamp_material", "page": self._current().index, "material_id": item["id"],
+                             "frame_id": self.selected_frame().id}])
+            return
+        self._pending_material = item
+        self._tool("stamp")
+        where = "コマの中" if kind == "effect" else "置きたい所"
+        self.flash(f"「{item.get('name')}」: {where}をクリックします", 3500)
+
+    def _stamp_at(self, x_mm: float, y_mm: float) -> None:
+        from genko.models import new_id
+
+        page, item = self._current(), self._pending_material or self.materials.current_material()
+        if page is None or item is None:
+            self.flash("素材パネルで素材を選びます", 2500)
+            return
+        op = {"op": "stamp_material", "page": page.index, "material_id": item["id"]}
+        kind = item.get("kind")
+        if kind == "tone":
+            op["id"] = new_id()
+            op["at"] = {"x_mm": round(x_mm, 2), "y_mm": round(y_mm, 2), "gap_mm": self.brush.gap.value()}
+            if self.apply_ops([op]):
+                self._after_tone(op["id"])
+            return
+        if kind == "effect":
+            frame = page.frame_at(x_mm, y_mm)
+            op.update({"frame_id": frame.id if frame else None, "x_mm": round(x_mm, 2), "y_mm": round(y_mm, 2)})
+            self.apply_ops([op])
+            return
+        layer = self._paint_layer()
+        if layer is None:
+            return
+        op.update({"layer_id": layer.id, "x_mm": round(x_mm, 2), "y_mm": round(y_mm, 2)})
+        self.apply_ops([op])
+
+    def _choose_effect(self, kind: str) -> None:
+        from genko.effects import LABELS
+
+        self._effect_kind = kind
+        self._tool("effect")
+        self.flash(f"{LABELS[kind]}: コマの中をクリックします（集中線・フラッシュはそこが中心）", 3500)
+
+    def _effect_at(self, x_mm: float, y_mm: float) -> None:
+        from genko.models import new_id
+
+        page = self._current()
+        if page is None:
+            return
+        frame = page.frame_at(x_mm, y_mm)
+        params = {}
+        if self._effect_kind in ("focus", "uni_flash", "beta_flash"):
+            params["center"] = [round(x_mm, 2), round(y_mm, 2)]
+        effect_id = new_id()
+        if self.apply_ops([{"op": "add_effect", "page": page.index, "kind": self._effect_kind, "id": effect_id,
+                            "frame_id": frame.id if frame else None, "params": params}]):
+            self.canvas.selected_effect_id = effect_id
+            self.show_dock("素材")
+            self.materials.refresh()
+            self.materials.select_effect(effect_id)
+
+    def copy_selection_items(self) -> dict | None:
+        import copy
+
+        from genko import selection
+
+        area, layer = self._need_area(), self.target_layer()
+        if area is None or layer is None:
+            return None
+        items = selection.lift(copy.deepcopy(layer), area, self._current())
+        if not items["strokes"] and not items["patches"]:
+            self.flash("選んだ範囲に、描く先のレイヤーの絵がありません", 3000)
+            return None
+        return selection.items_to_json(items)
 
     def _reshape(self, stroke_id: str, points) -> None:
         layer = self._paint_layer()

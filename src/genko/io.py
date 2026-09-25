@@ -54,7 +54,8 @@ def _layer_to_dict(layer: Layer) -> dict:
         "lock_alpha": layer.lock_alpha,
         "parent_id": layer.parent_id,
     } | ({"patches": [{k: v for k, v in p.items() if k != "png"} for p in layer.patches]} if layer.patches else {}) \
-        | ({"locked": True} if layer.locked else {}) | ({"panel_clip": False} if not layer.panel_clip else {}) | ({
+        | ({"locked": True} if layer.locked else {}) | ({"panel_clip": False} if not layer.panel_clip else {}) \
+        | ({"tone": dict(layer.tone)} if layer.tone else {}) | ({
         "asset": layer.asset,
         "frame_id": layer.frame_id,
         "placement_mm": _rect_to_dict(layer.placement_mm) if layer.placement_mm else None,

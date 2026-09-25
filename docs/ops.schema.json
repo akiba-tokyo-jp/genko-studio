@@ -206,8 +206,28 @@
       "op": "add_tone",
       "page": "int",
       "frame_id": "str?",
-      "lpi": "float",
-      "density": "float"
+      "area": "{poly}|{mask}?",
+      "at": "{x_mm, y_mm, gap_mm?, reference?}? (the region a fill would take)",
+      "lpi": "float?",
+      "density": "float? (0..1 black)",
+      "angle": "float?",
+      "pattern": "dot|line|cross|noise|flat?",
+      "gradient": "{shape: linear|radial, angle, start, end}?",
+      "name": "str?",
+      "after": "layer id?",
+      "id": "str?",
+      "note": "nothing given: every panel"
+    },
+    {
+      "op": "set_tone",
+      "page": "int",
+      "id": "str",
+      "lpi": "float?",
+      "density": "float?",
+      "angle": "float?",
+      "pattern": "str?",
+      "gradient": "object|null?",
+      "name": "str?"
     },
     {
       "op": "delete_tone",
@@ -217,9 +237,31 @@
     {
       "op": "add_effect",
       "page": "int",
-      "kind": "focus|speed|white",
+      "kind": "focus|speed|uni_flash|beta_flash|white",
       "frame_id": "str?",
-      "params": "object"
+      "params": "object (see docs)",
+      "id": "str?"
+    },
+    {
+      "op": "edit_effect",
+      "page": "int",
+      "id": "str",
+      "params": "object? (merged; null removes a key)",
+      "kind": "str?",
+      "frame_id": "str|null?",
+      "visible": "bool?"
+    },
+    {
+      "op": "delete_effect",
+      "page": "int",
+      "id": "str"
+    },
+    {
+      "op": "effect_to_layer",
+      "page": "int",
+      "id": "str",
+      "layer_id": "str",
+      "keep": "bool? (keep the effect too)"
     },
     {
       "op": "set_autosave",
@@ -310,7 +352,13 @@
       "op": "stamp_material",
       "page": "int",
       "material_id": "str",
-      "frame_id": "str?"
+      "frame_id": "str?",
+      "area": "object?",
+      "at": "object?",
+      "layer_id": "str? (pictures and drawn parts)",
+      "x_mm": "float?",
+      "y_mm": "float? (where a picture's / part's middle goes)",
+      "width_mm": "float?"
     },
     {
       "op": "set_balloon_path",

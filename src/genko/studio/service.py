@@ -40,6 +40,7 @@ AGENT_OPS = frozenset({
     "set_note", "add_mannequin", "pose_mannequin", "add_prim3d", "set_ruler",
     "add_ruler", "edit_ruler", "delete_ruler", "edit_prim", "delete_prim", "trace_prims",
     "add_tone", "delete_tone", "add_effect", "stamp_material",
+    "set_tone", "edit_effect", "delete_effect", "effect_to_layer",
     # studio state (M3); approve / revoke are for people only
     "set_studio", "upsert_character", "upsert_location", "delete_location", "upsert_prop", "delete_prop",
     "set_page_plan", "set_panel", "record_review", "request_approval", "request_fix",

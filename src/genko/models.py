@@ -166,6 +166,7 @@ class Layer:
     # fills and pasted pixels kept at their own resolution over a box:
     # [{"id", "box": [x, y, w, h] mm, "mode": "mask" | "image", "png": bytes, "rgb", "opacity"}]
     patches: list = field(default_factory=list)
+    tone: dict | None = None  # tone layers: {pattern, gradient} (genko.tones); lpi / density / angle are fields
     parent_id: str | None = None
     asset: str | None = None  # placed: "sha256:…" in assets/
     frame_id: str | None = None  # placed: the panel it belongs to

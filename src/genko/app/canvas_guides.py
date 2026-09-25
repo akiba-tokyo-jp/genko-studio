@@ -36,6 +36,8 @@ class GuideMixin:
         self._ruler_drag: dict | None = None
         self.selected_prim_id: str | None = None
         self._prim_drag: dict | None = None
+        self.selected_effect_id: str | None = None
+        self._effect_drag: dict | None = None
 
     # --- helpers -------------------------------------------------------------------------------------------
 
@@ -353,6 +355,61 @@ class GuideMixin:
             ruler.pop("id", None)
             ruler.pop("active", None)
             self.rulerPlaced.emit(ruler)
+        self.update()
+
+    # --- effect lines: click to put one, drag its centre ---------------------------------------------------
+
+    def _effect_handles(self) -> list[tuple[str, tuple[float, float]]]:
+        from genko import effects
+
+        out = []
+        for effect in (self.page.effects if self.page is not None else []):
+            if effect.get("kind") in ("focus", "uni_flash", "beta_flash"):
+                _, box = effects.area(effect, self.page)
+                params = effect.get("params") or {}
+                c = params.get("center") or [box[0] + box[2] / 2, box[1] + box[3] / 2]
+                out.append((effect["id"], (float(c[0]), float(c[1]))))
+        return out
+
+    def _draw_effect_handles(self, painter: QPainter) -> None:
+        if self.page is None or self.tool != "effect":
+            return
+        painter.save()
+        for effect_id, point in self._effect_handles():
+            if self._effect_drag and self._effect_drag["id"] == effect_id:
+                point = self._effect_drag["to"]
+            q = self._pt(*point)
+            painter.setPen(QPen(QColor("#e8590c"), 2))
+            painter.setBrush(QColor(255, 255, 255, 220) if effect_id != self.selected_effect_id else QColor("#e8590c"))
+            painter.drawEllipse(q, 7, 7)
+            painter.drawLine(QPointF(q.x() - 11, q.y()), QPointF(q.x() + 11, q.y()))
+            painter.drawLine(QPointF(q.x(), q.y() - 11), QPointF(q.x(), q.y() + 11))
+        painter.restore()
+
+    def _effect_press(self, pos: QPointF) -> None:
+        for effect_id, point in self._effect_handles():
+            if self._near(pos, point, 10):
+                self.selected_effect_id = effect_id
+                self._effect_drag = {"id": effect_id, "to": point, "moved": False}
+                self.effectSelected.emit(effect_id)
+                self.update()
+                return
+        x, y = self._to_mm(pos)
+        self.effectRequested.emit(x, y)
+
+    def _effect_move(self, pos: QPointF) -> bool:
+        if self._effect_drag is None:
+            return False
+        x, y = self._to_mm(pos)
+        self._effect_drag["to"] = (round(x, 2), round(y, 2))
+        self._effect_drag["moved"] = True
+        self.update()
+        return True
+
+    def _effect_release(self) -> None:
+        drag, self._effect_drag = self._effect_drag, None
+        if drag and drag["moved"]:
+            self.effectMoved.emit(drag["id"], list(drag["to"]))
         self.update()
 
     # --- 3D --------------------------------------------------------------------------------------------

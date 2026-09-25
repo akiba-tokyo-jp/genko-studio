@@ -89,6 +89,7 @@ def _layer_fields(data: dict, role: LayerRole) -> Layer:
         lock_alpha=bool(data.get("lock_alpha", False)),
         locked=bool(data.get("locked", False)),
         panel_clip=bool(data.get("panel_clip", True)),
+        tone=dict(data["tone"]) if data.get("tone") else None,
         parent_id=data.get("parent_id"),
     )
 
