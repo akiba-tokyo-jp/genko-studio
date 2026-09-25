@@ -34,7 +34,8 @@ RULES_PATH = Path(__file__).with_name("guide") / "manga_rules.md"
 AGENT_OPS = frozenset({
     "split_frame", "merge_frame", "resize_frame", "set_frame",
     "add_line", "edit_line", "delete_line", "move_line", "set_balloon_path",
-    "add_stroke", "delete_stroke", "edit_stroke", "simplify_stroke",
+    "add_stroke", "delete_stroke", "edit_stroke", "simplify_stroke", "erase",
+    "add_layer", "set_layer", "reorder_layers",
     "set_note", "add_mannequin", "pose_mannequin", "add_prim3d", "set_ruler",
     "add_tone", "delete_tone", "add_effect", "stamp_material",
     # studio state (M3); approve / revoke are for people only

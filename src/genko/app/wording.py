@@ -47,7 +47,7 @@ def layer_label(layer) -> str:
     if kind == "placed":
         base = "絵（配置）"
     # titles made of ids (placed art) are not names people gave
-    if title and not re.fullmatch(r"(art|ink|placed)?\s*[0-9a-f]{8,}", title) and title != role:
+    if title and not re.fullmatch(r"(art|ink|placed)?\s*[0-9a-f]{8,}|placed (art|bg|draft|name)|layer", title) and title != role:
         return title
     return base
 

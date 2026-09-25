@@ -38,13 +38,22 @@
       "speaker": "optional",
       "frame_id": "optional",
       "balloon": "optional",
-      "x_mm": "optional"
+      "x_mm": "optional",
+      "y_mm": "optional",
+      "w_mm": "optional",
+      "h_mm": "optional",
+      "wrap": "vertical|horizontal?",
+      "tail": "[x,y]?"
     },
     {
       "op": "edit_line",
       "id": "str",
       "text": "optional",
-      "speaker": "optional"
+      "speaker": "optional",
+      "balloon": "speech|shout|thought|whisper|narration|sfx|none?",
+      "wrap": "vertical|horizontal?",
+      "ruby": "str?",
+      "frame_id": "str?"
     },
     {
       "op": "delete_line",
@@ -57,7 +66,8 @@
       "y_mm": "float?",
       "w_mm": "float?",
       "h_mm": "float?",
-      "tail": "[x,y]?"
+      "tail": "[x,y]?",
+      "balloon": "str?"
     },
     {
       "op": "name_ok",
@@ -72,8 +82,13 @@
       "op": "add_stroke",
       "page": "int",
       "layer": "name|ink",
-      "points": "[[x,y],...]",
-      "space": "page|spread?"
+      "layer_id": "str? (a pen or paint layer)",
+      "points": "[[x,y,pressure?],...]",
+      "space": "page|spread?",
+      "width_mm": "float?",
+      "rgb": "[r,g,b]?",
+      "opacity": "float?",
+      "kind": "str?"
     },
     {
       "op": "delete_stroke",
@@ -92,8 +107,15 @@
       "op": "set_layer",
       "page": "int",
       "layer": "str",
+      "id": "str?",
       "visible": "bool?",
-      "exportable": "bool?"
+      "exportable": "bool?",
+      "opacity": "float?",
+      "blend": "str?",
+      "clip": "bool?",
+      "lock_alpha": "bool?",
+      "locked": "bool?",
+      "name": "str?"
     },
     {
       "op": "add_page",
@@ -177,6 +199,15 @@
       "width_mm": "float"
     },
     {
+      "op": "erase",
+      "page": "int",
+      "layer_id": "str? (else layer: role)",
+      "layer": "str?",
+      "points": "[[x,y],...]",
+      "width_mm": "float",
+      "note": "cuts pen lines (vector) and clears paint"
+    },
+    {
       "op": "reorder_layers",
       "page": "int",
       "order": "[id]"
@@ -241,10 +272,13 @@
       "op": "add_layer",
       "page": "int",
       "name": "str?",
+      "kind": "pen|paint|folder?",
       "blend": "str?",
       "clip": "bool?",
       "folder": "bool?",
-      "parent": "str?"
+      "parent": "str?",
+      "after": "layer id?",
+      "id": "str?"
     },
     {
       "op": "delete_layer",

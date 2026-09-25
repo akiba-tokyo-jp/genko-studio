@@ -79,3 +79,76 @@ def stamp_polyline(
             x = ax + (bx - ax) * t
             y = ay + (by - ay) * t
             draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill)
+
+
+def draw_stroke_mm(draw: ImageDraw.ImageDraw, points: list, dpi: int, width_mm: float, fill, pressure_scale: bool = True) -> None:
+    """A pen line from its vector points (mm, optional pressure) at any resolution.
+
+    Each segment is a quad between two round caps whose radii follow the pressure, so the line is
+    smooth at 600 dpi and cheap at screen size (no per-pixel stamping).
+    """
+    import math
+
+    if not points:
+        return
+    scale = dpi / 25.4
+    pts = []
+    for pt in points:
+        pressure = float(pt[2]) if len(pt) > 2 and pressure_scale else 1.0
+        radius = max(0.5, width_mm * max(0.15, min(1.5, pressure)) * scale / 2)
+        pts.append((float(pt[0]) * scale, float(pt[1]) * scale, radius))
+    if len(pts) == 1:
+        x, y, r = pts[0]
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=fill)
+        return
+    for (ax, ay, ar), (bx, by, br) in zip(pts, pts[1:]):
+        dx, dy = bx - ax, by - ay
+        length = math.hypot(dx, dy)
+        if length > 1e-6:
+            nx, ny = -dy / length, dx / length
+            draw.polygon([(ax + nx * ar, ay + ny * ar), (bx + nx * br, by + ny * br),
+                          (bx - nx * br, by - ny * br), (ax - nx * ar, ay - ny * ar)], fill=fill)
+        draw.ellipse((bx - br, by - br, bx + br, by + br), fill=fill)
+    x, y, r = pts[0]
+    draw.ellipse((x - r, y - r, x + r, y + r), fill=fill)
+
+
+def split_by_eraser(points: list, eraser: list, radius_mm: float) -> list[list]:
+    """The pieces of a line that survive an eraser path (vector erase: the line is cut, not painted over)."""
+    import math
+
+    def near(p) -> bool:
+        px, py = float(p[0]), float(p[1])
+        for (ax, ay, *_), (bx, by, *_) in zip(eraser, eraser[1:] or eraser):
+            dx, dy = bx - ax, by - ay
+            seg = dx * dx + dy * dy
+            t = 0.0 if seg == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg))
+            if math.hypot(px - (ax + t * dx), py - (ay + t * dy)) <= radius_mm:
+                return True
+        return False
+
+    # densify so a short eraser still cuts a long segment
+    dense: list = []
+    for a, b in zip(points, points[1:]):
+        dist = math.hypot(float(b[0]) - float(a[0]), float(b[1]) - float(a[1]))
+        steps = max(1, int(dist / max(0.2, radius_mm / 2)))
+        for i in range(steps):
+            t = i / steps
+            q = [float(a[0]) + (float(b[0]) - float(a[0])) * t, float(a[1]) + (float(b[1]) - float(a[1])) * t]
+            if len(a) > 2:
+                q.append(float(a[2]) + ((float(b[2]) if len(b) > 2 else float(a[2])) - float(a[2])) * t)
+            dense.append(q)
+    if points:
+        dense.append([float(v) for v in points[-1]])
+    pieces: list[list] = []
+    current: list = []
+    for p in dense:
+        if near(p):
+            if len(current) >= 2:
+                pieces.append(current)
+            current = []
+        else:
+            current.append(p)
+    if len(current) >= 2:
+        pieces.append(current)
+    return pieces

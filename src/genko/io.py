@@ -52,7 +52,7 @@ def _layer_to_dict(layer: Layer) -> dict:
         "clip": layer.clip,
         "lock_alpha": layer.lock_alpha,
         "parent_id": layer.parent_id,
-    } | ({
+    } | ({"locked": True} if layer.locked else {}) | ({
         "asset": layer.asset,
         "frame_id": layer.frame_id,
         "placement_mm": _rect_to_dict(layer.placement_mm) if layer.placement_mm else None,

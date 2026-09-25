@@ -3,7 +3,7 @@ from genko.ops import apply_ops
 from genko.render import mm_to_px, render_page
 
 
-def test_erase_clears_ink_pixels_not_stroke_index():
+def test_erase_cuts_the_line_in_two():
     ep = new_episode("t", 1, 1, PageSpec.a4_mono())
     apply_ops(
         ep,
@@ -19,7 +19,7 @@ def test_erase_clears_ink_pixels_not_stroke_index():
             },
         ],
     )
-    assert len(ep.pages[0]._layer(__import__("genko.models", fromlist=["LayerRole"]).LayerRole.INK).strokes) == 1
+    assert len(ep.pages[0]._layer(__import__("genko.models", fromlist=["LayerRole"]).LayerRole.INK).strokes) == 2  # vector erase: the line is cut, not painted over
     img = render_page(ep.pages[0], 72, mode="print", episode=ep)
     mid = img.getpixel((mm_to_px(75, 72), mm_to_px(80, 72)))
     end = img.getpixel((mm_to_px(35, 72), mm_to_px(80, 72)))

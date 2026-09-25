@@ -32,16 +32,16 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "merge_frame", "page": "int", "frame_id": "str", "force": "bool? (placed art goes to studio.orphans)"},
     {"op": "resize_frame", "page": "int", "frame_id": "str", "rect": "{x,y,width,height}"},
     {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float?"},
-    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional"},
-    {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional"},
+    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal?", "tail": "[x,y]?"},
+    {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|shout|thought|whisper|narration|sfx|none?", "wrap": "vertical|horizontal?", "ruby": "str?", "frame_id": "str?"},
     {"op": "delete_line", "id": "str"},
-    {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?"},
+    {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?", "balloon": "str?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
-    {"op": "add_stroke", "page": "int", "layer": "name|ink", "points": "[[x,y],...]", "space": "page|spread?"},
+    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "str?"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
-    {"op": "set_layer", "page": "int", "layer": "str", "visible": "bool?", "exportable": "bool?"},
+    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "name": "str?"},
     {"op": "add_page", "count": "int"},
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int"},
@@ -56,6 +56,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_effect", "page": "int", "kind": "focus|speed|white", "frame_id": "str?", "params": "object"},
     {"op": "set_autosave", "enabled": "bool"},
     {"op": "erase_raster", "page": "int", "layer": "ink|name", "points": "[[x,y],...]", "width_mm": "float"},
+    {"op": "erase", "page": "int", "layer_id": "str? (else layer: role)", "layer": "str?", "points": "[[x,y],...]", "width_mm": "float", "note": "cuts pen lines (vector) and clears paint"},
     {"op": "reorder_layers", "page": "int", "order": "[id]"},
     {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?"},
     {"op": "set_balloon_path", "id": "str", "path": "[[x,y]]?", "wrap": "vertical|horizontal", "ruby_runs": "[[base,ruby]]"},
@@ -66,7 +67,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_lt", "page": "int", "threshold": "float"},
     {"op": "lock_page", "page": "int", "agent": "str"},
     {"op": "unlock_page", "page": "int"},
-    {"op": "add_layer", "page": "int", "name": "str?", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?"},
+    {"op": "add_layer", "page": "int", "name": "str?", "kind": "pen|paint|folder?", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?", "after": "layer id?", "id": "str?"},
     {"op": "delete_layer", "page": "int", "id": "str"},
     {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal"},
     {"op": "set_brush", "rgb": "[r,g,b]?", "width_mm": "float?", "stabilize": "int?", "taper": "bool?", "curve": "gpen|linear"},
@@ -99,6 +100,39 @@ def _resolve_layer(page: Page, op: dict[str, Any]) -> Layer:
     if op.get("layer"):
         return page._layer(LayerRole(str(op["layer"])))
     raise ApplyError("layer id or role required")
+
+
+def _rasterize_strokes(page, layer) -> None:
+    """Turn a layer's pen lines into its pixels (filters and fills work on pixels)."""
+    from genko.models import stroke_points
+    from genko.raster import bake_stroke
+
+    for stroke in layer.strokes:
+        bake_stroke(page, layer, stroke_points(stroke), rgb=tuple(stroke.rgb or (20, 20, 20)), kind=stroke.kind,
+                    width_mm=stroke.width_mm)
+    layer.strokes = []
+    layer.kind = LayerKind.RASTER
+
+
+def _untouched(stroke, eraser: list, radius: float) -> bool:
+    """True when no point of the line comes within the eraser's radius (keep the line as it is)."""
+    import math
+
+    for p in stroke.points:
+        for (ax, ay, *_), (bx, by, *_) in zip(eraser, eraser[1:] or eraser):
+            dx, dy = bx - ax, by - ay
+            seg = dx * dx + dy * dy
+            t = 0.0 if seg == 0 else max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / seg))
+            if math.hypot(p[0] - (ax + t * dx), p[1] - (ay + t * dy)) <= radius:
+                return False
+    return True
+
+
+def _layer_by_id(page, layer_id: str):
+    layer = next((item for item in page.layers if item.id == layer_id), None)
+    if layer is None:
+        raise ApplyError(f"no layer {layer_id}")
+    return layer
 
 
 def _require_page(episode: Episode, op: dict[str, Any]) -> Page:
@@ -275,6 +309,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             line.ruby = str(op["ruby"])
         if "balloon" in op:
             line.balloon = str(op["balloon"])
+        if "wrap" in op:
+            if op["wrap"] not in ("vertical", "horizontal"):
+                raise ApplyError("wrap must be vertical or horizontal")
+            line.wrap = str(op["wrap"])
         return
 
     if name == "move_line":
@@ -355,23 +393,23 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         stroke = coerce_stroke(points)
         stroke.kind = str(op.get("kind") or "gpen")
         stroke.width_mm = float(op["width_mm"]) if op.get("width_mm") is not None else float(episode.brush_width_mm)
-        role = LayerRole.INK if layer_name == "ink" else LayerRole.NAME if layer_name == "name" else LayerRole(layer_name)
-        target = page._layer(role)
+        if op.get("layer_id"):
+            target = _layer_by_id(page, str(op["layer_id"]))
+            if target.kind not in (LayerKind.STROKES, LayerKind.RASTER):
+                raise ApplyError("this layer cannot take pen lines (choose a pen or paint layer)")
+        else:
+            role = LayerRole.INK if layer_name == "ink" else LayerRole.NAME if layer_name == "name" else LayerRole(layer_name)
+            target = page._layer(role)
+        if getattr(target, "locked", False):
+            raise ApplyError("the layer is locked")
         if target.role == LayerRole.INK and not page.name_ok:
             raise ApplyError("ink strokes require name_ok")
+        rgb = op.get("rgb") or (episode.brush_rgb if tuple(episode.brush_rgb) != (20, 20, 20) else None)
+        stroke.rgb = tuple(int(v) for v in rgb) if rgb else None
+        if op.get("opacity") is not None:
+            stroke.opacity = max(0.0, min(1.0, float(op["opacity"])))
+        # lines stay vectors: they are drawn at the resolution of each render (no baking)
         target.strokes.append(stroke)
-        if target.role in (LayerRole.INK, LayerRole.FINISH, LayerRole.BG):
-            from genko.raster import bake_stroke
-
-            rgb = tuple(int(v) for v in op["rgb"]) if op.get("rgb") else tuple(int(v) for v in episode.brush_rgb)
-            bake_stroke(
-                page,
-                target,
-                stroke_points(stroke),
-                rgb=rgb,
-                kind=stroke.kind,
-                width_mm=stroke.width_mm,
-            )
         return
 
     if name == "delete_stroke":
@@ -434,6 +472,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             layer.clip = bool(op["clip"])
         if "lock_alpha" in op:
             layer.lock_alpha = bool(op["lock_alpha"])
+        if "locked" in op:
+            layer.locked = bool(op["locked"])
+        if "title" in op:
+            layer.title = str(op["title"] or "")
         if "parent" in op:
             layer.parent_id = op.get("parent")
         if "name" in op:
@@ -700,13 +742,35 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                 return
         raise ApplyError(f"no ticket {ticket_id}")
 
-    if name == "erase_raster":
+    if name in ("erase_raster", "erase"):
         page = _require_page(episode, op)
-        role = LayerRole(str(op.get("layer") or "ink"))
-        target = page._layer(role)
-        from genko.raster import erase_raster
+        if op.get("layer_id"):
+            target = _layer_by_id(page, str(op["layer_id"]))
+        else:
+            target = page._layer(LayerRole(str(op.get("layer") or "ink")))
+        if getattr(target, "locked", False):
+            raise ApplyError("the layer is locked")
+        points = _parse_points(op.get("points") or [])
+        width = float(op.get("width_mm", 2))
+        if target.strokes:
+            from genko.models import coerce_stroke, stroke_points
+            from genko.stroke import split_by_eraser
 
-        erase_raster(page, target, _parse_points(op.get("points") or []), width_mm=float(op.get("width_mm", 2)))
+            kept = []
+            for stroke in target.strokes:
+                pieces = split_by_eraser(stroke_points(stroke), points, width / 2)
+                if len(pieces) == 1 and len(pieces[0]) >= len(stroke.points) and _untouched(stroke, points, width / 2):
+                    kept.append(stroke)
+                    continue
+                for piece in pieces:
+                    part = coerce_stroke(piece)
+                    part.width_mm, part.kind, part.rgb, part.opacity = stroke.width_mm, stroke.kind, stroke.rgb, stroke.opacity
+                    kept.append(part)
+            target.strokes = kept
+        if target.raster_png:
+            from genko.raster import erase_raster
+
+            erase_raster(page, target, points, width_mm=width)
         return
 
     if name == "reorder_layers":
@@ -823,11 +887,14 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
 
     if name == "add_layer":
         page = _require_page(episode, op)
-        folder = bool(op.get("folder"))
+        kind_name = "folder" if op.get("folder") else str(op.get("kind") or "paint")
+        kinds = {"folder": LayerKind.FOLDER, "pen": LayerKind.STROKES, "paint": LayerKind.RASTER}
+        if kind_name not in kinds:
+            raise ApplyError("kind must be pen, paint or folder")
         layer = Layer(
-            id=new_id(),
+            id=str(op.get("id") or new_id()),
             role=LayerRole.USER,
-            kind=LayerKind.FOLDER if folder else LayerKind.RASTER,
+            kind=kinds[kind_name],
             title=str(op.get("name") or "layer"),
             blend=str(op.get("blend") or "normal"),
             clip=bool(op.get("clip")),
@@ -835,7 +902,11 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             parent_id=str(op["parent"]) if op.get("parent") else None,
             exportable=True,
         )
-        page.layers.append(layer)
+        if any(item.id == layer.id for item in page.layers):
+            raise ApplyError(f"layer {layer.id} exists")
+        after = op.get("after")
+        index = next((i + 1 for i, item in enumerate(page.layers) if item.id == after), len(page.layers)) if after else len(page.layers)
+        page.layers.insert(index, layer)
         return
 
     if name == "delete_layer":
@@ -856,6 +927,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         page = _require_page(episode, op)
         layer = _resolve_layer(page, op)
         kind = str(op.get("kind") or "")
+        if layer.strokes:
+            _rasterize_strokes(page, layer)
         image = ensure_raster(page, layer)
         params = {key: value for key, value in op.items() if key not in {"op", "page", "layer", "id", "kind"}}
         try:
@@ -1191,7 +1264,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 
 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout"})
-RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "filter_raster", "flood_fill"})
+RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill"})
 
 
 def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTOR) -> None:
@@ -1206,6 +1279,12 @@ def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTO
         page = _require_page(episode, op)
         if not page.art_ok:
             raise ApplyError(f"page {page.index}: finish needs the art approved (strict_gates)")
+    if name in ("add_stroke", *RASTER_EDIT_OPS) and op.get("layer_id"):
+        page = _require_page(episode, op)
+        target = next((item for item in page.layers if item.id == op["layer_id"]), None)
+        if target is not None and target.role not in (LayerRole.NAME, LayerRole.DRAFT) and not page.name_ok:
+            raise ApplyError(f"{name} on a printed layer needs name_ok on page {page.index} (strict_gates)")
+        return
     if name in RASTER_EDIT_OPS:
         layer = str(op.get("layer") or ("ink" if name != "filter_raster" else ""))
         if layer not in ("name", "draft", ""):

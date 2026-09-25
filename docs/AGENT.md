@@ -189,6 +189,14 @@ Colour, screens, mannequins and other agents (M9):
 - Mannequins: `add_mannequin {page, pos (pelvis mm), height_mm?, rot?: [tip, turn, lean], preset?, id?}` and `pose_mannequin {page, id, preset?, joints?, rot?, pos?, height_mm?}`. Joints: neck, head, shoulders (`l_arm`/`r_arm`), elbows, wrists, hips (`l_leg`/`r_leg`), knees, ankles; each `{yaw, pitch}` in radians. Presets: stand, walk, run, sit, point, look_back, arms_up. The figure is eight heads tall and is drawn on name and proof only. A mannequin inside a panel is drawn into that panel's `guides/pose.png` and noted in `notes_for_agent`.
 - Other MCP clients (Claude Code, Claude Desktop, the Python SDK): `docs/OTHER_AGENTS.md`, `integrations/claude-code/`, `integrations/generic/mcp_client_example.py`. Genko has no content filter; what is drawn depends on the agent and its image tool.
 
+Drawing (M10, see `docs/TOOLS_PLAN.md`):
+
+- Pen lines are vectors: `add_stroke` keeps the points (with pressure) and every render draws them at its own resolution with the line's width, colour (`rgb`) and `opacity`. Nothing is baked into pixels; a filter (`filter_raster`) turns a layer's lines into pixels first.
+- `add_stroke {layer_id}` draws on any pen or paint layer; `erase {page, layer_id, points, width_mm}` cuts pen lines where the eraser passes (vector erase) and clears paint. A `locked` layer refuses both.
+- Layers are composited in their order (lines included). `add_layer {kind: pen|paint|folder, name, after, id}`, `set_layer {name, opacity, blend, clip, lock_alpha, locked, visible}`, `reorder_layers`, `delete_layer`. In studio books, drawing on a printed layer still needs the name approval.
+- `edit_line {wrap: vertical|horizontal, balloon}`; vertical text without breaks wraps inside its balloon (the box is the balloon's outside) in even columns.
+- Panel borders print at their `border_mm` (default 0.8 mm).
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

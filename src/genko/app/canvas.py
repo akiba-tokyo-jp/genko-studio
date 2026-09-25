@@ -26,6 +26,7 @@ class PageCanvas(QWidget):
     textMoved = Signal(str, float, float)
     contextMenuAt = Signal(str, QPointF)  # frame id ("" if none), global position
     zoomChanged = Signal(float)
+    lineSelected = Signal(str, bool)  # line id, open the lines panel
 
     def __init__(self) -> None:
         super().__init__()
@@ -46,6 +47,9 @@ class PageCanvas(QWidget):
         self.tool = "select"
         self._hover: tuple[float, float] | None = None
         self.brush_width_mm = 0.35
+        self.eraser_mm = 2.0
+        self.show_guides = True  # bleed, trim line and the basic frame
+        self.selected_line_id: str | None = None
         self.overlay_name_strokes = False  # show the name strokes faintly over a proof render
         # renderer(dpi) -> QPixmap of the whole page; set by the window
         self.renderer: Callable[[int], QPixmap | None] | None = None
@@ -183,12 +187,16 @@ class PageCanvas(QWidget):
         else:
             self._draw_plain(painter)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.show_guides:
+            self._draw_guides(painter, page_rect)
         if self.overlay_name_strokes:
             self._draw_strokes(painter, self.page.name_strokes, QColor(58, 110, 165, 110), 1.2)
         self._draw_selection(painter)
         for line in self.lines:
             if line is self._drag_line:
                 self._draw_balloon_box(painter, line, self._drag_pos, strong=True)
+            elif line.id == self.selected_line_id:
+                self._draw_balloon_box(painter, line, None, strong=True, fill=False)
             elif self.tool == "select" and self._hover and self._hit_line(*self._hover) is line:
                 self._draw_balloon_box(painter, line, None)
         if self._stroke:
@@ -196,10 +204,29 @@ class PageCanvas(QWidget):
             self._draw_strokes(painter, [self._stroke], color, max(1.5, self.brush_width_mm * self._scale))
         if self._hover and not self._stroke and self.tool in ("pen", "eraser"):
             hx, hy = self._pt(*self._hover).x(), self._pt(*self._hover).y()
-            radius = max(2.0, (self.brush_width_mm if self.tool == "pen" else 1.5) * self._scale)
+            radius = max(2.0, (self.brush_width_mm if self.tool == "pen" else self.eraser_mm) / 2 * self._scale)
             painter.setPen(QPen(QColor("#e8590c"), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(QPointF(hx, hy), radius, radius)
+
+    def _draw_guides(self, painter: QPainter, page_rect: QRectF) -> None:
+        """The bleed (cut off, shaded), the trim line (the finished size) and the basic frame."""
+        spec = self.page.spec
+        bleed = spec.bleed_mm * self._scale
+        if bleed > 0:
+            trim = page_rect.adjusted(bleed, bleed, -bleed, -bleed)
+            shade = QColor(120, 120, 140, 40)
+            painter.fillRect(QRectF(page_rect.left(), page_rect.top(), page_rect.width(), bleed), shade)
+            painter.fillRect(QRectF(page_rect.left(), page_rect.bottom() - bleed, page_rect.width(), bleed), shade)
+            painter.fillRect(QRectF(page_rect.left(), trim.top(), bleed, trim.height()), shade)
+            painter.fillRect(QRectF(page_rect.right() - bleed, trim.top(), bleed, trim.height()), shade)
+            painter.setPen(QPen(QColor(200, 40, 120, 200), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(trim)
+        inner = self.page.inner_rect_mm()
+        painter.setPen(QPen(QColor(28, 126, 214, 150), 1, Qt.PenStyle.DashLine))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        self._draw_rect(painter, inner)
 
     def _draw_plain(self, painter: QPainter) -> None:
         """Without a renderer (tests, or before the first render): frames and balloon boxes."""
@@ -241,11 +268,12 @@ class PageCanvas(QWidget):
                 path.lineTo(self._pt(*self._xy(point)))
             painter.drawPath(path)
 
-    def _draw_balloon_box(self, painter: QPainter, line: StoryLine, at: tuple[float, float] | None, strong: bool = False) -> None:
+    def _draw_balloon_box(self, painter: QPainter, line: StoryLine, at: tuple[float, float] | None, strong: bool = False,
+                          fill: bool = True) -> None:
         p = self._pt(*(at or (line.x_mm, line.y_mm)))
         rect = QRectF(p.x(), p.y(), max(10, line.w_mm * self._scale), max(10, line.h_mm * self._scale))
         painter.setPen(QPen(QColor("#e8590c"), 2 if strong else 1.5, Qt.PenStyle.DashLine))
-        painter.setBrush(QColor(255, 255, 255, 170) if strong else Qt.BrushStyle.NoBrush)
+        painter.setBrush(QColor(255, 255, 255, 170) if strong and fill else Qt.BrushStyle.NoBrush)
         painter.drawRect(rect)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
@@ -339,8 +367,10 @@ class PageCanvas(QWidget):
             self._drag_line = None
             self._drag_pos = None
             self._press_pos = None
+            self.selected_line_id = line.id
             if pos is not None and (abs(pos[0] - line.x_mm) > 0.05 or abs(pos[1] - line.y_mm) > 0.05):
                 self.textMoved.emit(line.id, round(pos[0], 2), round(pos[1], 2))  # becomes a move_line op
+            self.lineSelected.emit(line.id, False)
             self.update()
             return
         if self.page is None or event.button() != Qt.MouseButton.LeftButton:
@@ -353,10 +383,9 @@ class PageCanvas(QWidget):
             return
         if not self._stroke:
             return
-        if len(self._stroke) < 4:
-            self._stroke = []  # a tap with the pen draws nothing
-            self.update()
-            return
+        if len(self._stroke) == 1:
+            x, y = self._stroke[0][:2]
+            self._stroke.append((x + 0.01, y + 0.01))  # a tap: a dot with the pen, a spot with the eraser
         packed = [pack_point(float(pt[0]), float(pt[1]), float(pt[2]) if len(pt) > 2 else None) for pt in self._stroke]
         self._stroke = []
         self.strokeCommitted.emit(packed)
@@ -366,6 +395,12 @@ class PageCanvas(QWidget):
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.MiddleButton:
             self.fit_page()
+            return
+        if self.page is not None and event.button() == Qt.MouseButton.LeftButton and self.tool == "select":
+            hit = self._hit_line(*self._to_mm(event.position()))
+            if hit is not None:
+                self.selected_line_id = hit.id
+                self.lineSelected.emit(hit.id, True)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         self._hover = None
@@ -452,8 +487,10 @@ class PageCanvas(QWidget):
         if etype == QEvent.Type.TabletRelease and self._stroke:
             stroke = list(self._stroke)
             self._stroke = []
-            if len(stroke) >= 2:
-                self.strokeCommitted.emit(stroke)
+            if len(stroke) == 1:
+                x, y, *rest = stroke[0]
+                stroke.append((x + 0.01, y + 0.01, *rest))  # a tap with the pen is a dot
+            self.strokeCommitted.emit(stroke)
             self.changed.emit()
             self.update()
             event.accept()

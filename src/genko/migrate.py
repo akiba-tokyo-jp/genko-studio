@@ -78,6 +78,7 @@ def _layer_fields(data: dict, role: LayerRole) -> Layer:
         blend=str(data.get("blend") or "normal"),
         clip=bool(data.get("clip", False)),
         lock_alpha=bool(data.get("lock_alpha", False)),
+        locked=bool(data.get("locked", False)),
         parent_id=data.get("parent_id"),
     )
 

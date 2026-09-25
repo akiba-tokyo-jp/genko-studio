@@ -83,6 +83,8 @@ class Stroke:
     width_mm: float = 0.35
     kind: str = "gpen"
     handles: list | None = None
+    rgb: tuple[int, int, int] | None = None  # None: the layer's default ink colour
+    opacity: float = 1.0
 
 
 def coerce_stroke(raw) -> Stroke:
@@ -99,6 +101,8 @@ def coerce_stroke(raw) -> Stroke:
             pressure=pressure,
             width_mm=float(raw.get("width_mm", 0.35)),
             kind=str(raw.get("kind") or "gpen"),
+            rgb=tuple(int(v) for v in raw["rgb"]) if raw.get("rgb") else None,
+            opacity=float(raw.get("opacity", 1.0)),
         )
     points: list[tuple[float, float]] = []
     pressure: list[float] = []
@@ -121,13 +125,18 @@ def stroke_points(stroke) -> list[tuple]:
 
 def stroke_to_dict(stroke) -> dict | list:
     if isinstance(stroke, Stroke):
-        return {
+        out = {
             "id": stroke.id,
             "points": stroke.points,
             "pressure": stroke.pressure,
             "width_mm": stroke.width_mm,
             "kind": stroke.kind,
         }
+        if stroke.rgb is not None:
+            out["rgb"] = list(stroke.rgb)
+        if stroke.opacity != 1.0:
+            out["opacity"] = stroke.opacity
+        return out
     return stroke
 
 
@@ -152,6 +161,7 @@ class Layer:
     blend: str = "normal"
     clip: bool = False
     lock_alpha: bool = False
+    locked: bool = False  # nothing can be drawn on or erased from a locked layer
     parent_id: str | None = None
     asset: str | None = None  # placed: "sha256:…" in assets/
     frame_id: str | None = None  # placed: the panel it belongs to

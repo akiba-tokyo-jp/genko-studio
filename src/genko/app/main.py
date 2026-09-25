@@ -49,156 +49,341 @@ def _pixmap(image) -> QPixmap:
 
 
 class StoryPanel(QWidget):
-    """The page's lines, and adding one to the selected panel."""
+    """The page's lines: pick one to edit it (text, speaker, kind, vertical), add one to the selected panel, delete."""
 
     def __init__(self, window) -> None:
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from genko.app.lettering import KINDS
+
         super().__init__()
         self.window = window
+        self.line_ids: list[str] = []
         self.list = QListWidget()
+        self.list.currentRowChanged.connect(lambda _: self._picked())
         self.speaker = QLineEdit()
         self.speaker.setPlaceholderText("話者（空でもよい）")
-        self.line = QLineEdit()
-        self.line.setPlaceholderText("台詞")
-        self.line.returnPressed.connect(self.add)
-        add = QPushButton("選んだコマに台詞を追加")
+        self.text = QPlainTextEdit()
+        self.text.setPlaceholderText("台詞（改行で次の列へ）")
+        self.text.setMaximumHeight(90)
+        self.kind = QComboBox()
+        for key, label in KINDS:
+            self.kind.addItem(label, key)
+        self.vertical = QCheckBox("縦書き")
+        self.vertical.setChecked(True)
+        add = QPushButton("選んだコマに追加")
         add.clicked.connect(self.add)
-        hint = QLabel("台詞の位置は、選択ツールで編集画面のフキダシをドラッグして動かします。")
+        self.apply_button = QPushButton("この台詞を直す")
+        self.apply_button.clicked.connect(self.apply_edit)
+        self.delete_button = QPushButton("削除")
+        self.delete_button.clicked.connect(self.delete)
+        row = QHBoxLayout()
+        row.addWidget(self.kind, 1)
+        row.addWidget(self.vertical)
+        buttons = QHBoxLayout()
+        buttons.addWidget(add)
+        buttons.addWidget(self.apply_button)
+        buttons.addWidget(self.delete_button)
+        hint = QLabel("位置は、選択ツールで編集画面のフキダシをドラッグして動かします。")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#666")
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("このページの台詞（読み順）"))
         layout.addWidget(self.list, 1)
         layout.addWidget(self.speaker)
-        layout.addWidget(self.line)
-        layout.addWidget(add)
+        layout.addWidget(self.text)
+        layout.addLayout(row)
+        layout.addLayout(buttons)
         layout.addWidget(hint)
+        self._picked()
+
+    def _lines(self):
+        page = self.window.current_page()
+        return self.window.episode.story_for_page(page.index) if page else []
 
     def refresh(self) -> None:
+        from genko.app.lettering import KIND_LABEL
+
+        current = self.current_id()
+        self.list.blockSignals(True)
         self.list.clear()
-        page = self.window.current_page()
-        if page is None:
-            return
-        for line in self.window.episode.story_for_page(page.index):
+        self.line_ids = []
+        for n, line in enumerate(self._lines(), 1):
             who = f"{line.speaker}: " if line.speaker else ""
-            self.list.addItem(who + line.text.replace("\n", " "))
+            kind = KIND_LABEL.get(line.balloon, line.balloon)
+            self.list.addItem(f"{n}. {who}{line.text.replace(chr(10), ' ')}　〔{kind}〕")
+            self.line_ids.append(line.id)
+        row = self.line_ids.index(current) if current in self.line_ids else -1
+        self.list.setCurrentRow(row)
+        self.list.blockSignals(False)
+        self._picked()
+
+    def current_id(self) -> str | None:
+        row = self.list.currentRow()
+        return self.line_ids[row] if 0 <= row < len(self.line_ids) else None
+
+    def select(self, line_id: str | None) -> None:
+        if line_id in self.line_ids:
+            self.list.setCurrentRow(self.line_ids.index(line_id))
+
+    def _picked(self) -> None:
+        line_id = self.current_id()
+        line = next((ln for ln in self._lines() if ln.id == line_id), None)
+        self.apply_button.setEnabled(line is not None)
+        self.delete_button.setEnabled(line is not None)
+        self.window.canvas.selected_line_id = line_id
+        self.window.canvas.update()
+        if line is None:
+            return
+        self.speaker.setText(line.speaker)
+        self.text.setPlainText(line.text)
+        self.kind.setCurrentIndex(max(0, self.kind.findData(line.balloon)))
+        self.vertical.setChecked(line.wrap == "vertical")
 
     def add(self) -> None:
+        from genko.app.lettering import place_new
+
         page = self.window.current_page()
-        text = self.line.text().strip()
+        text = self.text.toPlainText().strip()
         if page is None or not text:
+            QMessageBox.information(self, "Genko", "台詞を書いてから追加します")
             return
-        if not page.selected_frame_id:
+        frame = self.window.selected_frame()
+        if frame is None:
             QMessageBox.information(self, "Genko", "先に編集画面でコマをクリックして選びます")
             return
+        box = place_new(self.window.episode, page, frame, text, self.kind.currentData(), self.vertical.isChecked())
+        before = {ln.id for ln in self._lines()}
         if self.window.apply_ops([{"op": "add_line", "page": page.index, "text": text, "speaker": self.speaker.text().strip(),
-                                   "frame_id": page.selected_frame_id}]):
-            self.line.clear()
+                                   "frame_id": frame.id, "balloon": self.kind.currentData(), **box}]):
+            self.text.clear()
+            added = next((ln.id for ln in self._lines() if ln.id not in before), None)
+            self.refresh()
+            self.select(added)
+
+    def apply_edit(self) -> None:
+        from genko.app.lettering import refit
+
+        line = next((ln for ln in self._lines() if ln.id == self.current_id()), None)
+        if line is None:
+            return
+        text = self.text.toPlainText().strip()
+        if not text:
+            QMessageBox.information(self, "Genko", "台詞が空です。消すときは「削除」を押します")
+            return
+        kind, vertical = self.kind.currentData(), self.vertical.isChecked()
+        ops = [{"op": "edit_line", "id": line.id, "text": text, "speaker": self.speaker.text().strip(), "balloon": kind,
+                "wrap": "vertical" if vertical else "horizontal"}]
+        if (text, kind, vertical) != (line.text, line.balloon, line.wrap == "vertical"):
+            frame = self.window.frame_by_id(line.frame_id)
+            ops.append({"op": "move_line", "id": line.id, **refit(line, frame, text, kind, vertical)})
+        self.window.apply_ops(ops)
+
+    def delete(self) -> None:
+        line_id = self.current_id()
+        if line_id and self.window.apply_ops([{"op": "delete_line", "id": line_id}]):
+            self.refresh()
+
+
+LAYER_ICON = {"strokes": "✎", "raster": "▦", "folder": "▸", "placed": "🖼", "tone": "░", "fill": "■"}
 
 
 class LayerPanel(QWidget):
-    """Layers of the page: visibility (check), blend, clip, a new layer, filters."""
+    """Layers, front first. The selected layer is where the pen and the eraser work."""
 
     def __init__(self, window) -> None:
+        from PySide6.QtWidgets import QSlider
+
         super().__init__()
         self.window = window
+        self.ids: list[str] = []
+        self.target = QLabel()
+        self.target.setWordWrap(True)
         self.list = QListWidget()
         self.list.itemChanged.connect(self._visibility)
         self.list.currentRowChanged.connect(lambda _: self._selected())
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("レイヤーの名前")
+        self.name.editingFinished.connect(self._rename)
+        self.opacity = QSlider(Qt.Orientation.Horizontal)
+        self.opacity.setRange(0, 100)
+        self.opacity.sliderReleased.connect(self._set_opacity)
         self.blend = QComboBox()
         for key, label in wording.BLEND:
             self.blend.addItem(label, key)
-        self.blend.activated.connect(lambda _: self._set_blend())
+        self.blend.activated.connect(lambda _: self._set("blend", self.blend.currentData()))
         self.clip = QCheckBox("下のレイヤーでクリップ")
-        self.clip.clicked.connect(self._set_clip)
-        add = QPushButton("レイヤーを追加")
-        add.clicked.connect(self._add)
+        self.clip.clicked.connect(lambda on: self._set("clip", on))
+        self.protect = QCheckBox("透明部分を保護")
+        self.protect.clicked.connect(lambda on: self._set("lock_alpha", on))
+        self.locked = QCheckBox("ロック（描けなくする）")
+        self.locked.clicked.connect(lambda on: self._set("locked", on))
+        add_pen = QPushButton("＋ペン")
+        add_pen.setToolTip("線を描くレイヤー（線はあとから消しゴムで切れる）")
+        add_pen.clicked.connect(lambda: self._add("pen", "ペン"))
+        add_paint = QPushButton("＋ペイント")
+        add_paint.setToolTip("塗りや画像のレイヤー")
+        add_paint.clicked.connect(lambda: self._add("paint", "ペイント"))
+        add_folder = QPushButton("＋フォルダ")
+        add_folder.clicked.connect(lambda: self._add("folder", "フォルダ"))
+        up = QPushButton("↑")
+        up.setToolTip("前へ")
+        up.clicked.connect(lambda: self._move(1))
+        down = QPushButton("↓")
+        down.setToolTip("後ろへ")
+        down.clicked.connect(lambda: self._move(-1))
+        delete = QPushButton("削除")
+        delete.clicked.connect(self._delete)
         self.filter = QComboBox()
         for key, label in wording.FILTERS:
             self.filter.addItem(label, key)
         apply_filter = QPushButton("フィルターをかける…")
         apply_filter.clicked.connect(self._filter)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("合成"))
-        row.addWidget(self.blend, 1)
+        adds = QHBoxLayout()
+        for button in (add_pen, add_paint, add_folder):
+            adds.addWidget(button)
+        moves = QHBoxLayout()
+        for button in (up, down, delete):
+            moves.addWidget(button)
+        props = QHBoxLayout()
+        props.addWidget(QLabel("不透明度"))
+        props.addWidget(self.opacity, 1)
+        props.addWidget(self.blend)
         frow = QHBoxLayout()
         frow.addWidget(self.filter, 1)
         frow.addWidget(apply_filter)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("チェックで表示・非表示"))
+        layout.addWidget(self.target)
         layout.addWidget(self.list, 1)
-        layout.addLayout(row)
+        layout.addLayout(adds)
+        layout.addLayout(moves)
+        layout.addWidget(self.name)
+        layout.addLayout(props)
         layout.addWidget(self.clip)
-        layout.addWidget(add)
+        layout.addWidget(self.protect)
+        layout.addWidget(self.locked)
         layout.addLayout(frow)
         self._loading = False
 
     def refresh(self) -> None:
         page = self.window.current_page()
         self._loading = True
-        row = self.list.currentRow()
         self.list.clear()
-        for layer in (page.layers if page else []):
-            item = QListWidgetItem(("　" if layer.parent_id else "") + wording.layer_label(layer))
+        self.ids = []
+        layers = list(reversed(page.layers)) if page else []  # front first
+        for layer in layers:
+            kind = getattr(layer.kind, "value", str(layer.kind))
+            icon = LAYER_ICON.get(kind, "")
+            indent = "　" if layer.parent_id else ""
+            lock = " 🔒" if getattr(layer, "locked", False) else ""
+            item = QListWidgetItem(f"{indent}{icon} {wording.layer_label(layer)}{lock}")
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked)
             self.list.addItem(item)
+            self.ids.append(layer.id)
+        target = self.window.target_layer()
+        if target is not None and target.id in self.ids:
+            self.list.setCurrentRow(self.ids.index(target.id))
         self._loading = False
-        if page and page.layers:
-            self.list.setCurrentRow(min(max(row, 0), len(page.layers) - 1))
-        self._selected()
+        self._selected(from_list=False)
 
     def _layer(self):
         page = self.window.current_page()
         row = self.list.currentRow()
-        if page is None or not 0 <= row < len(page.layers):
+        if page is None or not 0 <= row < len(self.ids):
             return page, None
-        return page, page.layers[row]
+        return page, next((layer for layer in page.layers if layer.id == self.ids[row]), None)
 
-    def _selected(self) -> None:
-        _, layer = self._layer()
+    def _selected(self, from_list: bool = True) -> None:
+        page, layer = self._layer()
         if layer is None:
+            self.target.setText("")
             return
-        index = self.blend.findData(layer.blend or "normal")
-        self.blend.setCurrentIndex(max(0, index))
+        if from_list and not self._loading:
+            self.window.set_target_layer(layer.id)
+        self._loading = True
+        self.name.setText(wording.layer_label(layer))
+        self.opacity.setValue(int(round(100 * (layer.opacity if layer.opacity is not None else 1.0))))
+        self.blend.setCurrentIndex(max(0, self.blend.findData(layer.blend or "normal")))
         self.clip.setChecked(bool(layer.clip))
+        self.protect.setChecked(bool(layer.lock_alpha))
+        self.locked.setChecked(bool(getattr(layer, "locked", False)))
+        self._loading = False
+        drawable = self.window.drawable(layer)
+        self.target.setText(f"描く先: <b>{wording.layer_label(layer)}</b>" if drawable else
+                            f"<span style='color:#c92a2a'>「{wording.layer_label(layer)}」には描けません。ペンかペイントのレイヤーを選びます</span>")
+
+    def _set(self, key: str, value) -> None:
+        page, layer = self._layer()
+        if layer is not None and not self._loading:
+            self.window.apply_ops([{"op": "set_layer", "page": page.index, "id": layer.id, key: value}])
+
+    def _set_opacity(self) -> None:
+        self._set("opacity", self.opacity.value() / 100)
+
+    def _rename(self) -> None:
+        page, layer = self._layer()
+        name = self.name.text().strip()
+        if layer is not None and name and name != wording.layer_label(layer):
+            self.window.apply_ops([{"op": "set_layer", "page": page.index, "id": layer.id, "name": name}])
 
     def _visibility(self, item: QListWidgetItem) -> None:
         if self._loading:
             return
         page = self.window.current_page()
         row = self.list.row(item)
-        if page is None or not 0 <= row < len(page.layers):
+        if page is None or not 0 <= row < len(self.ids):
             return
+        layer = next(layer for layer in page.layers if layer.id == self.ids[row])
         visible = item.checkState() == Qt.CheckState.Checked
-        if page.layers[row].visible != visible:
-            self.window.apply_ops([{"op": "set_layer", "page": page.index, "id": page.layers[row].id, "visible": visible}])
+        if layer.visible != visible:
+            self.window.apply_ops([{"op": "set_layer", "page": page.index, "id": layer.id, "visible": visible}])
 
-    def _set_blend(self) -> None:
+    def _add(self, kind: str, title: str) -> None:
+        from genko.models import new_id
+
         page, layer = self._layer()
-        if layer is not None and (layer.blend or "normal") != self.blend.currentData():
-            self.window.apply_ops([{"op": "set_layer", "page": page.index, "id": layer.id, "blend": self.blend.currentData()}])
-
-    def _set_clip(self, on: bool) -> None:
-        page, layer = self._layer()
-        if layer is not None and layer.clip != on:
-            self.window.apply_ops([{"op": "set_layer", "page": page.index, "id": layer.id, "clip": on}])
-
-    def _add(self) -> None:
-        page = self.window.current_page()
-        if page is not None:
-            self.window.apply_ops([{"op": "add_layer", "page": page.index, "name": "レイヤー", "blend": "multiply"}])
-
-    def _filter(self) -> None:
-        page = self.window.current_page()
         if page is None:
             return
-        target = "ネーム" if page.stage == "name" else "ペン入れ"
+        new = new_id()
+        op = {"op": "add_layer", "page": page.index, "kind": kind, "name": title, "id": new}
+        if layer is not None:
+            op["after"] = layer.id  # just in front of the selected layer
+        if self.window.apply_ops([op]) and kind != "folder":
+            self.window.set_target_layer(new)
+            self.refresh()
+
+    def _move(self, delta: int) -> None:
+        page, layer = self._layer()
+        if layer is None:
+            return
+        order = [item.id for item in page.layers]
+        i = order.index(layer.id)
+        j = i + delta
+        if not 0 <= j < len(order):
+            return
+        order[i], order[j] = order[j], order[i]
+        self.window.apply_ops([{"op": "reorder_layers", "page": page.index, "order": order}])
+
+    def _delete(self) -> None:
+        page, layer = self._layer()
+        if layer is None:
+            return
+        if QMessageBox.question(self, "Genko", f"レイヤー「{wording.layer_label(layer)}」を削除しますか？\n（元に戻す で取り消せます）") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        self.window.apply_ops([{"op": "delete_layer", "page": page.index, "id": layer.id}])
+
+    def _filter(self) -> None:
+        page, layer = self._layer()
+        if layer is None:
+            return
         label = self.filter.currentText()
-        if QMessageBox.question(self, "Genko", f"{page.index} ページの「{target}」レイヤー全体に「{label}」をかけます。\n"
+        extra = "\nペンの線は画像になり、あとから線として消せなくなります。" if layer.strokes else ""
+        if QMessageBox.question(self, "Genko", f"レイヤー「{wording.layer_label(layer)}」全体に「{label}」をかけます。{extra}\n"
                                 "（元に戻す で取り消せます）") != QMessageBox.StandardButton.Yes:
             return
-        layer = "name" if page.stage == "name" else "ink"
-        self.window.apply_ops([{"op": "filter_raster", "page": page.index, "layer": layer, "kind": self.filter.currentData(), "radius": 2}])
+        self.window.apply_ops([{"op": "filter_raster", "page": page.index, "id": layer.id, "kind": self.filter.currentData(), "radius": 2}])
 
 
 class MainWindow(QMainWindow):
@@ -226,6 +411,14 @@ class MainWindow(QMainWindow):
         self.canvas.frameSelected.connect(self._on_frame_selected)
         self.canvas.textMoved.connect(self._on_text_moved)
         self.canvas.contextMenuAt.connect(self._context_menu)
+        self.canvas.lineSelected.connect(self._on_line_selected)
+        self._target_layer_id: str | None = None
+        self.eraser_mm = 2.0
+        self._dock_timer = QTimer(self)
+        self._dock_timer.setSingleShot(True)
+        self._dock_timer.setInterval(250)
+        self._dock_timer.timeout.connect(self._refresh_visible_docks)
+        self._stale_docks: set = set()
         self.canvas.zoomChanged.connect(lambda _: self._refresh_zoom())
 
         left = QWidget()
@@ -273,8 +466,19 @@ class MainWindow(QMainWindow):
             return False
         if self.session.path is not None:
             self._commit_timer.start()
-        self._reload_pages()
+        if self.pages.count() != len(self.episode.pages):
+            self._reload_pages()
+        else:
+            self._after_edit()
         return True
+
+    def _after_edit(self) -> None:
+        """An edit on this page: redraw the page at once, the side panels a little later (drawing stays quick)."""
+        page = self._current()
+        item = self.pages.item(self._page_index)
+        if page is not None and item is not None:
+            item.setText(self._page_text(page))
+        self._show_page(light=True)
 
     def apply_and_commit(self, ops: list[dict]) -> bool:
         """For approvals: write at once, so the agent sees the decision immediately."""
@@ -292,7 +496,10 @@ class MainWindow(QMainWindow):
             lines = [f"・{wording.error(c['error'])}" for c in result.conflicts[:8]]
             QMessageBox.information(self, "Genko", "エージェントの変更と重なったため、次の操作は入りませんでした:\n" + "\n".join(lines))
         self._watch()
-        self._reload_pages()
+        if result.rebased or result.conflicts:
+            self._reload_pages()  # someone else's changes came in
+        else:
+            self._refresh_status()
 
     def _watch(self) -> None:
         if self._watcher.files():
@@ -345,16 +552,19 @@ class MainWindow(QMainWindow):
         self.act_prev = a("◀ 前のページ", lambda: self._jump(-1), [QKeySequence(std.MoveToPreviousPage), QKeySequence("Ctrl+Left")])
         self.act_next = a("次のページ ▶", lambda: self._jump(1), [QKeySequence(std.MoveToNextPage), QKeySequence("Ctrl+Right")])
         self.act_onion = a("前のページを透かす（オニオンスキン）", self._onion)
+        self.act_guides = a("仕上がり線・基本枠を表示", self._toggle_guides, "Ctrl+;", "断ち切り（裁ち落とし）・仕上がり線・基本枠", True)
+        self.act_guides.setChecked(True)
+        self.act_import = a("画像を読み込む…", self._import_image, "Ctrl+Shift+I", "選んだコマに（選んでいなければページに）画像を置きます")
         self.act_select = a("選択", lambda: self._tool("select"), "V", "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", True)
-        self.act_pen = a("ペン", lambda: self._tool("pen"), "B", "ネームの段階はネームに、承認後はペン入れに描きます", True)
-        self.act_eraser = a("消しゴム", lambda: self._tool("eraser"), "E", "", True)
+        self.act_pen = a("ペン", lambda: self._tool("pen"), "B", "レイヤー パネルで選んだレイヤーに描きます", True)
+        self.act_eraser = a("消しゴム", lambda: self._tool("eraser"), "E", "ペンの線は触れた所で切れます", True)
         tools = QActionGroup(self)
         for act in (self.act_select, self.act_pen, self.act_eraser):
             tools.addAction(act)
         self.act_select.setChecked(True)
         self.act_color = a("ペンの色…", self._pick_color, "C")
-        self.act_thicker = a("線を太く", lambda: self._nudge_brush(0.15), "]")
-        self.act_thinner = a("線を細く", lambda: self._nudge_brush(-0.15), "[")
+        self.act_thicker = a("太く（ペン・消しゴム）", lambda: self._nudge_brush(1), "]")
+        self.act_thinner = a("細く（ペン・消しゴム）", lambda: self._nudge_brush(-1), "[")
         self.act_split_h = a("コマを横に割る（上下に分ける）", lambda: self._split("horizontal"), "Ctrl+Shift+H")
         self.act_split_v = a("コマを縦に割る（左右に分ける）", lambda: self._split("vertical"), "Ctrl+Shift+V")
         self.act_merge = a("コマを結合（割る前に戻す）", self._merge, "Ctrl+Shift+M")
@@ -364,10 +574,10 @@ class MainWindow(QMainWindow):
 
         bar = self.menuBar()
         menus = [
-            ("ファイル", [self.act_new, self.act_open, None, self.act_save, self.act_save_as, None, self.act_export]),
+            ("ファイル", [self.act_new, self.act_open, None, self.act_save, self.act_save_as, None, self.act_import, self.act_export]),
             ("編集", [self.act_undo, self.act_redo]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_prev, self.act_next,
-                      None, self.act_onion]),
+                      None, self.act_guides, self.act_onion]),
             ("ツール", [self.act_select, self.act_pen, self.act_eraser, None, self.act_color, self.act_thicker, self.act_thinner]),
             ("コマ", [self.act_split_h, self.act_split_v, self.act_merge]),
             ("ページ", [self.act_add_page, self.act_del_page, None, self.act_name_ok]),
@@ -423,6 +633,7 @@ class MainWindow(QMainWindow):
             dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
             self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
             self.view_menu.addAction(dock.toggleViewAction())
+            dock.visibilityChanged.connect(lambda shown, d=dock: shown and d in self._stale_docks and self._refresh_dock(d))
             docks.append(dock)
         for first, second in zip(docks, docks[1:]):
             self.tabifyDockWidget(first, second)
@@ -436,7 +647,34 @@ class MainWindow(QMainWindow):
                 dock.show()
                 dock.raise_()
 
+    def _dock_visible(self, dock) -> bool:
+        return dock.isVisible() and not dock.visibleRegion().isEmpty()
+
+    def _refresh_dock(self, dock) -> None:
+        self._stale_docks.discard(dock)
+        widget = {"承認箱": self.approvals, "コマ": self.panel_view, "台詞": self.story, "レイヤー": self.layers,
+                  "ライブラリ": self.library}[dock.windowTitle()]
+        if widget is self.panel_view:
+            self._sync_panel_view()
+        widget.refresh()
+
+    def _refresh_visible_docks(self) -> None:
+        self.process.refresh(self.episode)
+        for dock in self.studio_docks:
+            if self._dock_visible(dock):
+                self._refresh_dock(dock)
+            else:
+                self._stale_docks.add(dock)
+
+    def _sync_panel_view(self) -> None:
+        page = self._current()
+        if self.panel_view.frame_id and (page is None or not self._has_frame(page, self.panel_view.frame_id)):
+            self.panel_view.frame_id = None
+        if self.panel_view.frame_id is None and page is not None and page.selected_frame_id and self._has_frame(page, page.selected_frame_id):
+            self.panel_view.frame_id = page.selected_frame_id
+
     def _refresh_studio(self) -> None:
+        self._stale_docks.clear()
         self.process.refresh(self.episode)
         self.approvals.refresh()
         page = self._current()
@@ -500,14 +738,21 @@ class MainWindow(QMainWindow):
         self._page_index = row
         self._show_page()
 
-    def _show_page(self) -> None:
+    def _show_page(self, light: bool = False) -> None:
         page = self._current()
         lines = self.episode.story_for_page(page.index) if page else []
         self.canvas.overlay_name_strokes = bool(page and page.name_ok and page.stage != "name")
         self.canvas.brush_width_mm = float(self.episode.brush_width_mm)
+        self.canvas.eraser_mm = self.eraser_mm
+        if page is not None and self._target_layer_id and not any(layer.id == self._target_layer_id for layer in page.layers):
+            self._target_layer_id = None  # another page: back to its default layer
         self.canvas.set_page(page, lines)
         self._refresh_status()
-        if hasattr(self, "process"):
+        if not hasattr(self, "process"):
+            return
+        if light:
+            self._dock_timer.start()
+        else:
             self._refresh_studio()
 
     def _render_current(self, dpi: int) -> QPixmap | None:
@@ -547,16 +792,57 @@ class MainWindow(QMainWindow):
         self.canvas.set_tool(tool)
         {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser}[tool].setChecked(True)
 
-    def _on_stroke(self, points: list) -> None:
+    # --- the layer the pen works on ---------------------------------------------------------------
+
+    def target_layer(self):
+        from genko.models import LayerRole
+
         page = self._current()
         if page is None:
+            return None
+        found = next((layer for layer in page.layers if layer.id == self._target_layer_id), None)
+        if found is not None:
+            return found
+        role = LayerRole.NAME if page.stage == "name" else LayerRole.INK
+        return next((layer for layer in page.layers if layer.role == role), None)
+
+    def set_target_layer(self, layer_id: str) -> None:
+        self._target_layer_id = layer_id
+        layer = self.target_layer()
+        if layer is not None:
+            self.statusBar().showMessage(f"描く先: {wording.layer_label(layer)}", 2000)
+
+    @staticmethod
+    def drawable(layer) -> bool:
+        kind = getattr(layer.kind, "value", str(layer.kind))
+        return kind in ("strokes", "raster") and not getattr(layer, "locked", False)
+
+    def selected_frame(self):
+        page = self._current()
+        if page is None or not page.selected_frame_id or not self._has_frame(page, page.selected_frame_id):
+            return None
+        return page._find(page.selected_frame_id)
+
+    def frame_by_id(self, frame_id: str | None):
+        page = self._current()
+        if page is None or not frame_id or not self._has_frame(page, frame_id):
+            return None
+        return page._find(frame_id)
+
+    def _on_stroke(self, points: list) -> None:
+        page = self._current()
+        layer = self.target_layer()
+        if page is None or layer is None:
             return
-        layer = "name" if page.stage == "name" else "ink"
+        if not self.drawable(layer):
+            why = "ロックされています" if getattr(layer, "locked", False) else "ペンかペイントのレイヤーではありません"
+            self.statusBar().showMessage(f"「{wording.layer_label(layer)}」には描けません（{why}）。レイヤー パネルで選び直します", 4000)
+            return
         if self.canvas.tool == "eraser":
-            self.apply_ops([{"op": "erase_raster", "page": page.index, "layer": layer,
-                             "points": [[p[0], p[1]] for p in points], "width_mm": 3}])
+            self.apply_ops([{"op": "erase", "page": page.index, "layer_id": layer.id,
+                             "points": [[p[0], p[1]] for p in points], "width_mm": self.eraser_mm}])
             return
-        self.apply_ops([{"op": "add_stroke", "page": page.index, "layer": layer, "points": points}])
+        self.apply_ops([{"op": "add_stroke", "page": page.index, "layer_id": layer.id, "points": points}])
 
     def _onion(self) -> None:
         page = self._current()
@@ -569,11 +855,70 @@ class MainWindow(QMainWindow):
         if color.isValid():
             self.apply_ops([{"op": "set_brush", "rgb": [color.red(), color.green(), color.blue()]}])
 
-    def _nudge_brush(self, delta: float) -> None:
-        width = max(0.15, float(self.episode.brush_width_mm) + delta)
+    def _nudge_brush(self, step: int) -> None:
+        sizes = [0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.0, 10.0, 15.0, 20.0]
+
+        def nxt(value: float) -> float:
+            i = min(range(len(sizes)), key=lambda k: abs(sizes[k] - value))
+            return sizes[max(0, min(len(sizes) - 1, i + step))]
+
+        if self.canvas.tool == "eraser":
+            self.eraser_mm = nxt(self.eraser_mm)
+            self.canvas.eraser_mm = self.eraser_mm
+            self.statusBar().showMessage(f"消しゴムの太さ {self.eraser_mm:g} mm", 2000)
+            self.canvas.update()
+            return
+        width = nxt(float(self.episode.brush_width_mm))
         self.canvas.brush_width_mm = width
         self.apply_ops([{"op": "set_brush", "width_mm": width}])
-        self.statusBar().showMessage(f"線の太さ {width:.2f} mm", 2000)
+        self.statusBar().showMessage(f"ペンの太さ {width:g} mm", 2000)
+
+    def _toggle_guides(self) -> None:
+        self.canvas.show_guides = self.act_guides.isChecked()
+        self.canvas.update()
+
+    def _on_line_selected(self, line_id: str, open_panel: bool) -> None:
+        self.story.refresh()
+        self.story.select(line_id)
+        if open_panel:
+            self.show_dock("台詞")
+
+    def _import_image(self) -> None:
+        from io import BytesIO
+
+        from PIL import Image
+
+        from genko.assets import AssetStore
+
+        page = self._current()
+        if page is None:
+            return
+        if self.path is None:
+            QMessageBox.information(self, "Genko", "画像を読み込む前に、原稿を保存します（ファイル → 別の場所に保存）")
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "画像を読み込む", "", "画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.psd)")
+        if not path:
+            return
+        try:
+            with Image.open(path) as img:
+                img.load()
+                buf = BytesIO()
+                img.convert("RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB").save(buf, format="PNG")
+        except Exception as exc:  # unreadable file
+            QMessageBox.warning(self, "Genko", f"読み込めない画像です:\n{exc}")
+            return
+        self.commit_now()
+        ref = AssetStore(self.path).put_bytes(buf.getvalue(), ".png")
+        frame = self.selected_frame()
+        place = {"op": "place_asset", "page": page.index, "asset": ref, "to": "art", "title": Path(path).stem}
+        if frame is not None:
+            place["frame_id"] = frame.id
+        else:
+            place["placement_mm"] = [0, 0, page.spec.width_mm, page.spec.height_mm]
+        ops = [{"op": "register_assets", "assets": {ref: {"kind": "image", "origin": {"kind": "self", "file": Path(path).name}}}}, place]
+        if self.apply_ops(ops):
+            where = "選んだコマ" if frame is not None else "ページ全体"
+            self.statusBar().showMessage(f"{where}に「{Path(path).name}」を置きました", 4000)
 
     def _jump(self, delta: int) -> None:
         nxt = self._page_index + delta
@@ -588,8 +933,7 @@ class MainWindow(QMainWindow):
         self.panel_view.frame_id = frame_id
         if page.selected_frame_id != frame_id:
             self.apply_ops([{"op": "select_frame", "page": page.index, "frame_id": frame_id}])
-        else:
-            self.panel_view.refresh()
+        self.panel_view.refresh()  # a deliberate click: show the panel at once
 
     def _context_menu(self, frame_id: str, pos: QPointF) -> None:
         menu = QMenu(self)

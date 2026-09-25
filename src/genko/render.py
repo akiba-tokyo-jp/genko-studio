@@ -61,6 +61,46 @@ def _stroke(
     draw.line(xy, fill=color, width=width, joint="curve")
 
 
+def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Image | None,
+                   raster: Image.Image | None) -> Image.Image | None:
+    """A layer's pen lines drawn from their vectors at this resolution (None if it has none).
+
+    Name and draft lines are drawn in the name colour; the others in their own colour (ink black by
+    default). Lines stay inside the panels, and a layer with locked transparency only keeps them
+    where it already has pixels.
+    """
+    strokes = getattr(layer, "strokes", None) or []
+    if not strokes:
+        return None
+    from genko.models import stroke_points
+    from genko.stroke import draw_stroke_mm
+
+    out = Image.new("RGBA", size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(out)
+    guide = layer.role in (LayerRole.NAME, LayerRole.DRAFT)
+    for stroke in strokes:
+        points = stroke_points(stroke)
+        rgb = NAME_COLOR if guide else (tuple(getattr(stroke, "rgb", None) or INK_COLOR))
+        alpha = int(255 * max(0.0, min(1.0, float(getattr(stroke, "opacity", 1.0)))))
+        if getattr(stroke, "kind", "") == "oil":
+            alpha = min(alpha, 140)
+        width = float(getattr(stroke, "width_mm", 0.35) or 0.35)
+        if alpha >= 255:
+            draw_stroke_mm(draw, points, dpi, width, (*rgb, 255))
+        else:  # translucent lines must not darken where their own segments overlap
+            solo = Image.new("L", size, 0)
+            draw_stroke_mm(ImageDraw.Draw(solo), points, dpi, width, 255)
+            patch = Image.new("RGBA", size, (*rgb, 0))
+            patch.putalpha(solo.point(lambda v, a=alpha: v * a // 255))
+            out = Image.alpha_composite(out, patch)
+            draw = ImageDraw.Draw(out)
+    if panel_mask is not None:
+        out.putalpha(_and_alpha(out, panel_mask))
+    if getattr(layer, "lock_alpha", False) and raster is not None:
+        out.putalpha(ImageChops.multiply(out.split()[3], raster.convert("RGBA").split()[3]))
+    return out
+
+
 def _clip_mask(page: Page, size: tuple[int, int], dpi: int) -> Image.Image | None:
     leaves = [frame for frame in page.leaf_frames() if getattr(frame, "clip", True)]
     if not leaves:
@@ -514,11 +554,26 @@ def _draw_balloon(
         if kind == "sfx":
             em = max(12, min(mm_to_px(12, dpi), w, h // max(1, len((line.text or " ").split("\n")[0]))))
             font = _font(font_path, em)
+        # the box is the balloon's outside: text without breaks wraps at the height inside it
+        if kind in ("speech", "thought", "shout", "whisper"):
+            column = (h - 2 * pad) / SQRT2 + em * 0.25
+        elif kind == "narration":
+            column = h - 2 * pad + em * 0.25
+        else:
+            column = h
+        text = line.text or ""
+        if "\n" not in text and kind not in ("none", "sfx") and em > 0:
+            # balance the columns (7 / 7 / 1 reads badly; 5 / 5 / 5 does not)
+            fit = max(1, int(column // em))
+            count = len(text)
+            if count > fit:
+                cols = -(-count // fit)
+                column = min(column, (-(-count // cols)) * em + em * 0.25)
         composed = compose_tategaki(
             line.text,
             font,
             em,
-            max(em, h),
+            max(em, int(column)),
             fill=(10, 10, 10),
             ruby_runs=getattr(line, "ruby_runs", None) or None,
         )
@@ -606,7 +661,7 @@ def _draw_crop_marks(draw: ImageDraw.ImageDraw, page: Page, dpi: int) -> None:
 
 def _draw_frames(draw: ImageDraw.ImageDraw, page: Page, working_dpi: int) -> None:
     for frame in page.leaf_frames():
-        width_px = max(1, mm_to_px(frame.border_mm or 0.8, working_dpi) // 4)
+        width_px = max(1, mm_to_px(frame.border_mm if frame.border_mm is not None else 0.8, working_dpi))
         if not frame.bleed:
             draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
             continue
@@ -652,6 +707,7 @@ def render_page(
 
     rgba = image.convert("RGBA")
     prev_alpha = None
+    panel_mask = _clip_mask(page, size, working_dpi)
     for layer in page.layers:
         if getattr(layer, "kind", None) == LayerKind.FOLDER:
             continue
@@ -667,6 +723,9 @@ def render_page(
             raster = _open_raster(layer)
             if raster is not None:
                 raster = raster.resize(size)
+        lines = _layer_strokes(layer, size, working_dpi, panel_mask, raster)
+        if lines is not None:
+            raster = lines if raster is None else Image.alpha_composite(raster.convert("RGBA"), lines)
         if raster is None:
             continue
         clip_mask = prev_alpha if getattr(layer, "clip", False) else None
@@ -674,30 +733,6 @@ def render_page(
         opacity = 1.0 if opacity is None else float(opacity)  # 0 means invisible, not "default"
         rgba = _blend_over(rgba, raster, getattr(layer, "blend", "normal") or "normal", opacity, clip_mask)
         prev_alpha = raster.split()[3]
-    image = rgba.convert("RGB")
-
-    ink_layer = Image.new("RGBA", size, (0, 0, 0, 0))
-    name_layer = Image.new("RGBA", size, (0, 0, 0, 0))
-    _stroke_draw = ImageDraw.Draw(ink_layer)
-    _name_draw = ImageDraw.Draw(name_layer)
-    ink_has_raster = any(layer.role == LayerRole.INK and layer.raster_png for layer in page.layers)
-    if not (mode == "print" and ink_has_raster):
-        for stroke in page.ink_strokes:
-            _stroke(_stroke_draw, stroke, working_dpi, INK_COLOR, 3)
-    if include_name:
-        for stroke in page.name_strokes:
-            _stroke(_name_draw, stroke, working_dpi, NAME_COLOR, 3)
-
-    mask = _clip_mask(page, size, working_dpi)
-    if mask is not None:
-        ink_layer.putalpha(_and_alpha(ink_layer, mask))
-        if include_name:
-            name_layer.putalpha(_and_alpha(name_layer, mask))
-
-    rgba = image.convert("RGBA")
-    if include_name:
-        rgba = Image.alpha_composite(rgba, name_layer)
-    rgba = Image.alpha_composite(rgba, ink_layer)
     image = rgba.convert("RGB")
 
     image = _draw_tone(image, page, working_dpi, mode, finish)

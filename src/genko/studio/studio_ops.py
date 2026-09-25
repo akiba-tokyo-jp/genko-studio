@@ -702,6 +702,7 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
             layer.title = str(op.get("title") or layer.title)
         else:
             _place(page, frame, layer, px, str(op.get("fit") or "cover"), str(op.get("clip_to") or ("frame" if frame else "none")), (0.0, 0.0), 1.0)
+            layer.title = str(op.get("title") or layer.title)
         _insert_below_ink(page, layer)
         return
 
