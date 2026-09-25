@@ -218,6 +218,10 @@ def migrate_payload(payload: dict, store=None) -> Episode:
             page_lines = [_line(item) for item in raw.get("texts", [])]
         page.texts = page_lines
         page.extra = {k: v for k, v in raw.items() if k not in KNOWN_PAGE_KEYS}
+        if isinstance(page.extra.get("cover"), dict):  # (a cover's paper follows from the book's)
+            from genko.covers import spec_for
+
+            page.spec = spec_for(spec, page.extra["cover"])
         pages.append(page)
     if not story:
         story = [line for page in pages for line in page.texts]

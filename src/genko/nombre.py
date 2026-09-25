@@ -37,7 +37,10 @@ def validate(change: dict) -> None:
 
 
 def number(episode, page) -> int:
-    return int(settings(episode)["start"]) - 1 + page.index
+    from genko.covers import is_cover
+
+    before = sum(1 for p in getattr(episode, "pages", []) if p.index < page.index and is_cover(p))
+    return int(settings(episode)["start"]) - 1 + page.index - before
 
 
 def placements(episode, page) -> list[dict]:

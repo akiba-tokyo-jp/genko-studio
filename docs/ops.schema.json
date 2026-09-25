@@ -879,6 +879,34 @@
       "rgb": "[r,g,b]?"
     },
     {
+      "op": "add_cover",
+      "kind": "front|back|jacket (表紙・裏表紙・カバー)",
+      "spine_mm": "float? (jacket: the spine)",
+      "flap_mm": "float? (jacket: each flap, 袖)",
+      "bleed": "bool? (default true: one panel to the bleed)",
+      "note": "covers are pages at the end, without nombre; previews and exports put them first and last"
+    },
+    {
+      "op": "replace_text",
+      "find": "str",
+      "replace": "str",
+      "regex": "bool?",
+      "case": "bool? (default true: case matters)",
+      "pages": "[int]? (none: every page)",
+      "speakers": "bool? (speakers too)",
+      "must_find": "bool? (an error when nothing matched)"
+    },
+    {
+      "op": "for_pages",
+      "pages": "[int] | all | body? (body: not the covers; default)",
+      "ops": "[op] (each run on every page, its page set to it)"
+    },
+    {
+      "op": "set_assignee",
+      "pages": "[int]",
+      "who": "str (empty: nobody) (担当: who draws the page)"
+    },
+    {
       "op": "edit_prim",
       "page": "int",
       "id": "str",

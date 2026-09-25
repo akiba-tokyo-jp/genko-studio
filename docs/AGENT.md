@@ -281,6 +281,15 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### J9 additions
+
+- `add_cover {kind: front | back | jacket, spine_mm, flap_mm}`: covers are pages at the end without nombre; a
+  jacket is one sheet [flap][front][spine][back][flap] (right-bound). Exports name them cover_front / cover_back /
+  cover_jacket; EPUB puts the front first and the back last.
+- `replace_text {find, replace, regex?, case?, pages?, speakers?, must_find?}` over every line.
+- `for_pages {pages: [n] | all | body, ops}` runs the ops on each page (checked like any other op).
+- `set_assignee {pages, who}` (担当).
+
 ### J8 additions
 
 - `add_figure {pos (pelvis), height_mm, body {heads, shoulders, hips, build, legs}, preset, joints {name: {x, y, z}},

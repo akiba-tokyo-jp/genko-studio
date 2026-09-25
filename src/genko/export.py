@@ -47,9 +47,11 @@ def export_png_sequence(
 ) -> list[Path]:
     dest.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
+    from genko.covers import file_stem
+
     for page in episode.pages:
         image = render_page(page, working_dpi, mode=mode, episode=episode)
-        path = dest / f"{stem(episode)}_p{page.index:03d}.png"
+        path = dest / f"{stem(episode)}_{file_stem(page)}.png"
         image.save(path)
         written.append(path)
     return written
@@ -97,8 +99,10 @@ def export_print(
         rgb = [image.convert("RGB") for image in images]
         rgb[0].save(path, format="PDF", save_all=True, append_images=rgb[1:], resolution=dpi)
         return [path]
+    from genko.covers import file_stem
+
     for page, image in zip(episode.pages, images):
-        name = f"{stem(episode)}_p{page.index:03d}"
+        name = f"{stem(episode)}_{file_stem(page)}"
         if fmt == "tiff":
             path = dest / f"{name}.tiff"
             to_bitonal(image, threshold=threshold).save(path, format="TIFF", compression="group4")
@@ -115,7 +119,9 @@ def export_print(
 def export_strip(episode: Episode, dest: Path, dpi: int = 150) -> Path:
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    pages = [render_page(page, dpi, mode="print", episode=episode) for page in episode.pages]
+    from genko.covers import is_cover
+
+    pages = [render_page(page, dpi, mode="print", episode=episode) for page in episode.pages if not is_cover(page)]
     width = max(image.width for image in pages)
     height = sum(image.height for image in pages)
     strip = Image.new("RGB", (width, height), (255, 255, 255))
@@ -143,12 +149,16 @@ def export_epub(episode: Episode, dest: Path, dpi: int = 150) -> Path:
     rtl = episode.binding == Binding.RIGHT
     ident = "urn:genko:" + hashlib.sha256(f"{episode.title}/{episode.episode}".encode("utf-8")).hexdigest()[:24]
     modified = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    from genko import covers
+
     pages = []
-    for page in episode.pages:
+    for page in covers.pages_in_order(episode):  # (the front cover first, the back cover last)
         image = render_page(page, dpi, mode="print", episode=episode)
+        if (covers.cover_of(page) or {}).get("kind") == "jacket":
+            image = covers.front_of(page, image, dpi, episode.binding.value)
         buf = io.BytesIO()
         image.save(buf, format="PNG")
-        pages.append((f"p{page.index:03d}", image.size, buf.getvalue(), page))
+        pages.append((covers.file_stem(page), image.size, buf.getvalue(), page))
     manifest = ['<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>']
     spine = []
     xhtml = []

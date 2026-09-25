@@ -129,6 +129,10 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_camera", "page": "int", "turn": "float? (radians, about the upright axis)", "tip": "float? (looking down +, up −)", "roll": "float?", "focal_mm": "float? (20..5000: short = strong perspective)", "target": "[x,y]? (the point the camera turns about)", "off": "bool? (back to each 3D seen on its own)"},
     {"op": "set_light", "page": "int", "dir": "[x,y,z]? (toward the light: x right, y down, z away from the viewer)", "ambient": "0..1?"},
     {"op": "render_prims", "page": "int", "layer_id": "str?", "ids": "[prim id]? (none: all)", "lines": "bool? (true: the pen lines, hidden parts left out)", "surfaces": "bool? (true: the shaded surfaces as greys)", "tone": "{lpi, angle}? (the layer tone-ized: the greys print as dots)", "light": "[x,y,z]?", "ambient": "0..1?", "width_mm": "float?", "kind": "str? (brush, mili)", "rgb": "[r,g,b]?"},
+    {"op": "add_cover", "kind": "front|back|jacket (表紙・裏表紙・カバー)", "spine_mm": "float? (jacket: the spine)", "flap_mm": "float? (jacket: each flap, 袖)", "bleed": "bool? (default true: one panel to the bleed)", "note": "covers are pages at the end, without nombre; previews and exports put them first and last"},
+    {"op": "replace_text", "find": "str", "replace": "str", "regex": "bool?", "case": "bool? (default true: case matters)", "pages": "[int]? (none: every page)", "speakers": "bool? (speakers too)", "must_find": "bool? (an error when nothing matched)"},
+    {"op": "for_pages", "pages": "[int] | all | body? (body: not the covers; default)", "ops": "[op] (each run on every page, its page set to it)"},
+    {"op": "set_assignee", "pages": "[int]", "who": "str (empty: nobody) (担当: who draws the page)"},
     {"op": "edit_prim", "page": "int", "id": "str", "pos": "[x,y,z]?", "size": "[w,h,d]?", "rot": "[tip,turn,lean]?", "focal_mm": "float?"},
     {"op": "delete_prim", "page": "int", "id": "str"},
     {"op": "trace_prims", "page": "int", "layer_id": "str", "ids": "[id]? (none: all)", "kind": "str? (pencil)", "width_mm": "float?", "rgb": "[r,g,b]?"},
@@ -838,6 +842,13 @@ def _border_style(raw) -> dict:
         if raw.get(key) is not None:
             out[key] = max(lo, min(hi, float(raw[key])))
     return out
+
+
+def _covered(page, spec):
+    """A page's paper on the book's `spec` (a cover's is its own)."""
+    from genko.covers import cover_of, spec_for
+
+    return spec_for(spec, cover_of(page)) if cover_of(page) else spec
 
 
 def _blend_mode(value) -> str:
@@ -1562,6 +1573,12 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         layerops.apply(episode, op, name)
         return
 
+    if name in ("add_cover", "replace_text", "set_assignee"):
+        from genko import bookops
+
+        bookops.apply(episode, op, name)
+        return
+
     if name in ("add_figure", "pose_figure", "add_head", "add_hand", "import_model", "set_camera", "set_light", "render_prims"):
         from genko import threeops
 
@@ -1877,6 +1894,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         after = op.get("after")
         if after is not None and not any(p.index == int(after) for p in episode.pages) and int(after) != 0:
             raise ApplyError(f"no page {after}")
+        from genko.covers import is_cover
+
+        if after is None and any(is_cover(p) for p in episode.pages):  # (new pages go before the covers at the end)
+            after = max((p.index for p in episode.pages if not is_cover(p)), default=0)
         first_new = len(episode.pages) + 1
         for _ in range(count):
             index = len(episode.pages) + 1
@@ -1982,11 +2003,11 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if "preset" in op:
             episode.spec = PageSpec.publisher(str(op["preset"]))
             for page in episode.pages:
-                page.spec = episode.spec
+                page.spec = _covered(page, episode.spec)
         if "webtoon" in op and op["webtoon"]:
             episode.spec = PageSpec.webtoon()
             for page in episode.pages:
-                page.spec = episode.spec
+                page.spec = _covered(page, episode.spec)
         if "font_path" in op:
             episode.font_path = str(op["font_path"])
         return
@@ -3213,6 +3234,20 @@ def apply_ops(
         episode.undo_stack = stack
         episode.journal_pending.append({"actor": agent, "ops": [{"op": "undo"}]})
         return {"ok": True, "applied": ["undo"], "snapshot": snapshot(episode), "job_id": new_id()}
+
+    if any(isinstance(op, dict) and op.get("op") == "for_pages" for op in ops):
+        from genko import bookops  # (the same ops page by page, each checked like any other)
+
+        expanded: list = []
+        for i, op in enumerate(ops):
+            if isinstance(op, dict) and op.get("op") == "for_pages":
+                try:
+                    expanded.extend(bookops.expand(episode, op))
+                except ApplyError as exc:
+                    raise ApplyError(f"ops[{i}] for_pages: {exc}") from exc
+            else:
+                expanded.append(op)
+        ops = expanded
 
     work = _working_copy(episode, ops)
     applied: list[str] = []

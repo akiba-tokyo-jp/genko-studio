@@ -1596,6 +1596,10 @@ class MainWindow(QMainWindow):
         self.act_paper = a("原稿用紙の設定…", self._paper_settings, tip="用紙・仕上がり・裁ち落とし・基本枠。変えるとコマや台詞も新しい枠に合わせて動きます")
         self.act_page_nombre = a("このページのノンブルを隠す／出す", self._toggle_page_nombre)
         self.act_story_editor = a("ストーリーエディター…", self.open_story_editor, "Ctrl+Shift+L", "全ページの台詞をまとめて直す・台本を流し込む")
+        self.act_replace = a("台詞の検索・置換…", self._replace_dialog, "Ctrl+Alt+F", "全ページの台詞から言葉を探して置き換えます")
+        self.act_add_cover = a("表紙・カバーを足す…", self._add_cover_dialog, tip="表紙・裏表紙、または背と袖のあるカバー 1 枚")
+        self.act_book_preview = a("本の形でプレビュー…", self._book_preview, "Ctrl+Shift+B", "見開きで、ページをめくって読むように見ます")
+        self.act_assignee = a("このページの担当…", self._assignee_dialog, tip="ページを誰が描くかを決めます（ページ一覧に出ます）")
         self.act_checks = a("入稿前の点検", self._run_checks, "F9", "はみ出し・文字の重なりや小ささ・解像度などを探します")
         self.act_name_ok = a("ネーム完了 → 作画へ進む", self._name_ok, tip="承認の要らない原稿（エージェントを使わない原稿）で使います")
 
@@ -1656,7 +1660,8 @@ class MainWindow(QMainWindow):
                       self.act_gutters, self.act_border, self.act_no_border, *self.border_kind_actions, self.act_border_colour,
                       self.act_bleed, self.act_reset_shape, None, self.act_frame_numbers]),
             ("ページ", [self.act_add_page, self.act_dup_page, self.act_del_page, None, self.act_page_up, self.act_page_down, self.act_spread,
-                        None, self.act_paper, self.act_nombre, self.act_page_nombre, None, self.act_story_editor, self.act_checks, None, self.act_name_ok]),
+                        None, self.act_paper, self.act_nombre, self.act_page_nombre, self.act_add_cover, self.act_assignee, None,
+                        self.act_story_editor, self.act_replace, self.act_book_preview, self.act_checks, None, self.act_name_ok]),
         ]
         from genko.app.lettering import KINDS
 
@@ -1789,6 +1794,9 @@ class MainWindow(QMainWindow):
         for name, data in saved.items():
             act = menu.addAction(f"実行: {name}", lambda _=False, n=name: self.play_action(n))
             act.setToolTip(actions.describe(data["ops"]))
+        every = menu.addMenu("全ページに実行")
+        for name in saved:
+            every.addAction(name, lambda _=False, n=name: self.play_action_on_all(n))
         remove = menu.addMenu("消す")
         for name in saved:
             remove.addAction(name, lambda _=False, n=name: self._remove_action(n))
@@ -1847,6 +1855,89 @@ class MainWindow(QMainWindow):
         if self.apply_ops(ops):
             extra = f"。{skipped} 手はこのページではできないので飛ばしました" if skipped else ""
             self.flash(f"「{name}」を実行しました（{len(ops)} 手。元に戻すは 1 回で{extra}）", 4000)
+            return True
+        return False
+
+    def _replace_dialog(self) -> None:
+        from genko.app.bookview import ReplaceDialog
+
+        ReplaceDialog(self).exec()
+
+    def _book_preview(self) -> None:
+        from genko.app.bookview import BookPreview
+
+        self.commit_now()
+        BookPreview(self).exec()
+
+    def _add_cover_dialog(self) -> None:
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
+
+        from genko.covers import LABELS, cover_of
+
+        have = {cover_of(p)["kind"] for p in self.episode.pages if cover_of(p)}
+        dialog = QDialog(self)
+        dialog.setWindowTitle("表紙・カバーを足す")
+        form = QFormLayout(dialog)
+        kind = QComboBox()
+        for key, label in LABELS.items():
+            if key not in have:
+                kind.addItem(label, key)
+        if not kind.count():
+            self.flash("表紙・裏表紙・カバーは、もう全部あります", 4000)
+            return
+        spine, flap = QDoubleSpinBox(), QDoubleSpinBox()
+        spine.setRange(1, 100)
+        spine.setValue(10)
+        spine.setSuffix(" mm")
+        spine.setToolTip("背幅（ページ数と紙の厚さで決まります。印刷所に聞きます）")
+        flap.setRange(0, 200)
+        flap.setValue(70)
+        flap.setSuffix(" mm")
+        form.addRow("種類", kind)
+        form.addRow("背幅（カバー）", spine)
+        form.addRow("袖（カバー）", flap)
+        kind.currentIndexChanged.connect(lambda _: (spine.setEnabled(kind.currentData() == "jacket"), flap.setEnabled(kind.currentData() == "jacket")))
+        spine.setEnabled(kind.currentData() == "jacket")
+        flap.setEnabled(kind.currentData() == "jacket")
+        ok = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        ok.accepted.connect(dialog.accept)
+        ok.rejected.connect(dialog.reject)
+        form.addRow(ok)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        op = {"op": "add_cover", "kind": kind.currentData()}
+        if op["kind"] == "jacket":
+            op.update(spine_mm=spine.value(), flap_mm=flap.value())
+        if self.apply_ops([op]):
+            self._select_page(len(self.episode.pages) - 1)
+
+    def _assignee_dialog(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        page = self._current()
+        if page is None:
+            return
+        who, ok = QInputDialog.getText(self, "このページの担当", "名前（空にすると担当なし）", text=(page.extra or {}).get("assignee", ""))
+        if ok:
+            self.apply_ops([{"op": "set_assignee", "pages": [page.index], "who": who}])
+
+    def play_action_on_all(self, name: str) -> bool:
+        """The action on every page (not the covers), as one step to undo."""
+        from genko.app import actions
+
+        data = actions.load().get(name)
+        if data is None:
+            return False
+        steps = actions.replay(data["ops"], 0, None, None)
+        steps = [{k: v for k, v in op.items() if k != "page"} for op in steps]
+        if not steps:
+            self.flash(f"「{name}」の手順は、どれも記録したページの決まった物を変えるもので、ほかのページではできません", 5000)
+            return False
+        if QMessageBox.question(self, "オートアクション", f"「{name}」を全ページ（表紙を除く）に実行しますか？（元に戻すは 1 回）") \
+                != QMessageBox.StandardButton.Yes:
+            return False
+        if self.apply_ops([{"op": "for_pages", "pages": "body", "ops": steps}]):
+            self.flash(f"「{name}」を全ページに実行しました", 4000)
             return True
         return False
 
@@ -2391,6 +2482,12 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _page_text(page) -> str:
+        from genko.covers import LABELS, cover_of
+
+        cover = cover_of(page)
+        who = (page.extra or {}).get("assignee")
+        if cover:
+            return LABELS[cover["kind"]] + (f"\n担当 {who}" if who else "")
         if page.name_ok:
             name = "ネーム ✓"
         elif page.plan and page.plan.get("name"):
@@ -2405,6 +2502,8 @@ class MainWindow(QMainWindow):
             extra += f"\n見開き {pair[0]}–{pair[1]}"
         if not page.numero:
             extra += "\nノンブルなし"
+        if who:
+            extra += f"\n担当 {who}"
         return f"{page.index} ページ\n{name}{art}{done}{extra}"
 
     def _reload_pages(self) -> None:

@@ -99,6 +99,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 定規: `parallel_curve`・`multi_curve`・`radial_curve`、`layer_id`（レイヤー専用）、パースの `lock_horizon`・`horizon_y`・`fixed`、定規ペンは `ruler_to_layer`。描き文字の素材は `stamp_material`（kind `lettering`）。
 - 素材: `inspect` の `materials` に種類（トーン・効果線・画像・パーツ〔漫符・小物・背景の線画〕・描き文字・ブラシ・3D）とタグ。`stamp_material` でパーツは `layer_id` の `x_mm`・`y_mm` に、描き文字は台詞として、ブラシは原稿に加わり（`add_stroke` の `kind` に使える）、3D は置いた所に。
 - 3D: 体型と関節のある人形は `add_figure`（`body`: `heads` 等身・`shoulders`・`hips`・`build`・`legs`、`preset`、`hands`）と `pose_figure`（`joints` の x・y・z、`drag`）。頭部 `add_head`、手 `add_hand`（`pose`）、OBJ は `import_model`。ページのカメラ `set_camera`、光 `set_light`。線と陰の面にするのは `render_prims`（`tone` で面を網点に）。
+- 本: 表紙・裏表紙・カバー（背と袖）は `add_cover`（ページの最後に入り、ノンブルなし）。全ページの台詞の置換は `replace_text`、同じ操作を全ページに `for_pages`、担当は `set_assignee`。
 - 図形: `add_shape`（`shape`: `line`・`polyline`・`curve`・`rect`・`ellipse`・`polygon`、`line`・`fill` で線と塗り）。
 - 範囲（`area`）: どの op の `area` にも、`poly`・`mask` のほかに `rect`・`ellipse`・`layer`（そのレイヤーの描いてある所）・`color`（その色の所）・`all`・`saved`（`store_area` で残した範囲）と、`union`・`intersect`・`subtract` の組み合わせ、`invert`・`grow_mm`（負で縮める）・`feather_mm` が使える。ガイド線は `add_ruler` の `kind: "guide"`（`axis`・`at`）。
 - 範囲の変形: `transform_area` の `matrix`（移動・拡大・回転・反転）か `warp`（`perspective` で 4 隅、`mesh` で 3×3 の点）。レイヤーを丸ごと動かすのは、ページ全体を `area` にした `matrix`。

@@ -40,6 +40,7 @@ AGENT_OPS = frozenset({
     "set_note", "add_mannequin", "pose_mannequin", "add_prim3d", "add_scene", "set_ruler", "add_shape", "store_area", "forget_area", "smudge", "vector_edit", "fill_gaps", "merge_layers", "merge_visible", "group_layers", "move_layers",
     "convert_layer", "set_layers", "set_paper", "liquify", "ruler_to_layer",
     "add_figure", "pose_figure", "add_head", "add_hand", "import_model", "set_camera", "set_light", "render_prims",
+    "add_cover", "replace_text", "for_pages", "set_assignee",
     "add_ruler", "edit_ruler", "delete_ruler", "edit_prim", "delete_prim", "trace_prims",
     "add_tone", "delete_tone", "add_effect", "stamp_material",
     "set_tone", "edit_effect", "delete_effect", "effect_to_layer",

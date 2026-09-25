@@ -96,9 +96,11 @@ def _raster(png: bytes, new_spec: PageSpec, old_frame: Rect, new_frame: Rect) ->
 def relayout(episode: Episode, new_spec: PageSpec, move: bool = True) -> None:
     """Put the book on new paper; with `move`, everything on each page follows the basic frame."""
     olds = {page.index: page.inner_rect_mm(episode.start_side) for page in episode.pages}
+    from genko.covers import cover_of, spec_for
+
     episode.spec = new_spec
     for page in episode.pages:
-        page.spec = new_spec
+        page.spec = spec_for(new_spec, cover_of(page)) if cover_of(page) else new_spec
     if not move:
         return
     for page in episode.pages:

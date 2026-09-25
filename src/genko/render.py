@@ -1018,6 +1018,10 @@ def render_page(
 
     draw = ImageDraw.Draw(image)
     _draw_frames(draw, page, working_dpi)
+    if mode in ("name", "proof") and (getattr(page, "extra", None) or {}).get("cover"):
+        from genko.covers import draw_folds
+
+        draw_folds(image, page, working_dpi, getattr(getattr(episode, "binding", None), "value", "right"))
 
     font_path = getattr(episode, "font_path", None) if episode is not None else None
     font = _font(font_path)
