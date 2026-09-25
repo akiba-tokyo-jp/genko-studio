@@ -100,6 +100,8 @@ def _line(data: dict) -> StoryLine:
         wrap=data.get("wrap", "horizontal"),
         ruby_runs=[tuple(item) for item in data.get("ruby_runs") or []],
         path=[tuple(pt) for pt in data["path"]] if data.get("path") else None,
+        style=dict(data.get("style") or {}),
+        tails=[dict(t) for t in data.get("tails") or []],
     )
 
 

@@ -77,6 +77,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 線をくっきりさせたいコマは `mcp__genko__derive`（`kind: "lineart"`）で採用中の絵から線を抜き出し、`adopt`（`to: "ink"`）で絵の上に置く。
   モノクロの原稿では、グレーの絵は印刷のときに Genko が網点に変える。画像はグレースケールで、トーンを描き込みすぎずに作る。
 - 効果音はネーム計画の台詞で `balloon: "sfx"` にする（Genko が大きな縁取り文字で描く。画像に描かせない）。
+- 台詞の見た目は `apply_ops` の `edit_line` で直せる: `balloon`（speech・rounded・box・cloud・thought・shout・flash・whisper・narration・sfx・none）、`style`（`font`: antique・gothic・mincho・maru・hand・sfx・sfx_pop、`size_mm`、`outline_mm` など）、`tails`（`[{to, via}]`、曲がったしっぽ・複数）。人間が直した見た目は変えない。
 
 ## 承認を頼む
 

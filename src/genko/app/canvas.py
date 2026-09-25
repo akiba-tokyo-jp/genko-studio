@@ -11,10 +11,62 @@ from typing import Callable
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap, QWheelEvent
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLabel, QPlainTextEdit, QWidget
 
 from genko.models import Page, Rect, StoryLine
 from genko.stroke import pack_point
+
+HANDLE_PX = 7
+
+
+class InlineEditor(QPlainTextEdit):
+    """Typing a line where it goes: Ctrl+Enter (or clicking elsewhere) keeps it, Esc drops it."""
+
+    def __init__(self, parent, text: str, on_done) -> None:
+        super().__init__(parent)
+        self.on_done = on_done
+        self.finished = False
+        self.setPlainText(text)
+        self.setStyleSheet("QPlainTextEdit{background:#fffbe6;border:2px solid #e8590c;font-size:15px}")
+        self.setPlaceholderText("台詞を入力（改行で次の列、ルビは ｜約束《やくそく》）")
+        self.hint = QLabel("Ctrl+Enter で決定・Esc でやめる", parent)
+        self.hint.setStyleSheet("background:#e8590c;color:white;padding:1px 4px")
+        self.hint.adjustSize()
+
+    def place(self, x: float, y: float) -> None:
+        self.setGeometry(int(x), int(y), 260, 110)
+        parent = self.parentWidget()
+        hx = max(0, min(int(x), (parent.width() if parent else 10000) - self.hint.width()))
+        self.hint.move(hx, max(0, int(y) - self.hint.height()))
+        self.show()
+        self.hint.show()
+        self.setFocus()
+        self.moveCursor(self.textCursor().MoveOperation.End)
+
+    def finish(self, keep: bool) -> None:
+        if self.finished:
+            return
+        self.finished = True
+        text = self.toPlainText().strip()
+        self.hide()
+        self.hint.hide()
+        self.hint.deleteLater()
+        self.deleteLater()
+        self.on_done(text if keep else None)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape:
+            self.finish(False)
+            return
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.finish(True)
+            return
+        super().keyPressEvent(event)
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        self.finish(True)
+
 
 MIN_SCALE, MAX_SCALE = 0.3, 12.0  # screen px per mm
 
@@ -27,6 +79,10 @@ class PageCanvas(QWidget):
     contextMenuAt = Signal(str, QPointF)  # frame id ("" if none), global position
     zoomChanged = Signal(float)
     lineSelected = Signal(str, bool)  # line id, open the lines panel
+    lineGeometry = Signal(str, object)  # line id, {x_mm, y_mm, w_mm, h_mm} or {tails}: a move_line op
+    lineEditRequested = Signal(str)  # double-click on a balloon: type over it
+    lineContextMenu = Signal(str, QPointF)
+    textRequested = Signal(float, float)  # the text tool clicked here (mm)
 
     def __init__(self) -> None:
         super().__init__()
@@ -50,6 +106,8 @@ class PageCanvas(QWidget):
         self.eraser_mm = 2.0
         self.show_guides = True  # bleed, trim line and the basic frame
         self.selected_line_id: str | None = None
+        self._handle_drag: dict | None = None
+        self.editor: InlineEditor | None = None
         self.overlay_name_strokes = False  # show the name strokes faintly over a proof render
         # renderer(dpi) -> QPixmap of the whole page; set by the window
         self.renderer: Callable[[int], QPixmap | None] | None = None
@@ -84,6 +142,15 @@ class PageCanvas(QWidget):
         if size_changed or self._fitted:
             self.fit_page()
         self.invalidate()
+
+    def open_editor(self, x_mm: float, y_mm: float, text: str, on_done) -> InlineEditor:
+        """Type a line at this point of the page; on_done(text or None) when finished."""
+        if self.editor is not None and not self.editor.finished:
+            self.editor.finish(True)
+        p = self._pt(x_mm, y_mm)
+        self.editor = InlineEditor(self, text, on_done)
+        self.editor.place(max(0.0, min(self.width() - 260.0, p.x())), max(20.0, min(self.height() - 110.0, p.y())))
+        return self.editor
 
     def invalidate(self) -> None:
         """The page changed: render it again (now, so a new stroke never blinks away)."""
@@ -199,6 +266,7 @@ class PageCanvas(QWidget):
                 self._draw_balloon_box(painter, line, None, strong=True, fill=False)
             elif self.tool == "select" and self._hover and self._hit_line(*self._hover) is line:
                 self._draw_balloon_box(painter, line, None)
+        self._draw_handles(painter)
         if self._stroke:
             color = QColor("#e8590c") if self.tool == "pen" else QColor(200, 60, 60, 160)
             self._draw_strokes(painter, [self._stroke], color, max(1.5, self.brush_width_mm * self._scale))
@@ -252,6 +320,99 @@ class PageCanvas(QWidget):
                 self._draw_rect(painter, frame.rect)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
+    # --- balloon handles -----------------------------------------------------------------------------
+
+    def _selected_line(self) -> StoryLine | None:
+        return next((ln for ln in self.lines if ln.id == self.selected_line_id), None)
+
+    @staticmethod
+    def _tails(line) -> list[dict]:
+        tails = [dict(t) for t in (getattr(line, "tails", None) or []) if t.get("to")]
+        if not tails and line.tail:
+            tails = [{"to": list(line.tail)}]
+        return tails
+
+    def _handles(self) -> list[tuple[str, object, tuple[float, float]]]:
+        """(kind, key, point in mm) of the selected balloon: 8 resize handles, and per tail its tip and bend."""
+        line = self._selected_line()
+        if line is None or self.tool != "select":
+            return []
+        box = self._handle_drag["cur"] if self._handle_drag and self._handle_drag["kind"] == "resize" else (
+            line.x_mm, line.y_mm, line.w_mm, line.h_mm)
+        x, y, w, h = box
+        out: list = []
+        for key, (fx, fy) in {"nw": (0, 0), "n": (0.5, 0), "ne": (1, 0), "e": (1, 0.5), "se": (1, 1), "s": (0.5, 1),
+                              "sw": (0, 1), "w": (0, 0.5)}.items():
+            out.append(("resize", key, (x + w * fx, y + h * fy)))
+        tails = self._handle_drag["tails"] if self._handle_drag and self._handle_drag["kind"] == "tail" else self._tails(line)
+        cx, cy = x + w / 2, y + h / 2
+        for i, tail in enumerate(tails):
+            tip = tail["to"]
+            via = tail.get("via") or [(cx + tip[0]) / 2, (cy + tip[1]) / 2]
+            out.append(("tail", (i, "to"), (tip[0], tip[1])))
+            out.append(("tail", (i, "via"), (via[0], via[1])))
+        return out
+
+    def _hit_handle(self, pos: QPointF):
+        for kind, key, (hx, hy) in reversed(self._handles()):
+            p = self._pt(hx, hy)
+            if abs(p.x() - pos.x()) <= HANDLE_PX + 2 and abs(p.y() - pos.y()) <= HANDLE_PX + 2:
+                return kind, key
+        return None
+
+    def _draw_handles(self, painter: QPainter) -> None:
+        line = self._selected_line()
+        if line is None or self.tool != "select":
+            return
+        drag = self._handle_drag
+        if drag and drag["kind"] == "resize":
+            x, y, w, h = drag["cur"]
+            p = self._pt(x, y)
+            painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(QRectF(p.x(), p.y(), w * self._scale, h * self._scale))
+        if drag and drag["kind"] == "tail":
+            painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
+            cx, cy = line.x_mm + line.w_mm / 2, line.y_mm + line.h_mm / 2
+            for tail in drag["tails"]:
+                path = QPainterPath(self._pt(cx, cy))
+                via = tail.get("via") or [(cx + tail["to"][0]) / 2, (cy + tail["to"][1]) / 2]
+                path.quadTo(self._pt(*via), self._pt(*tail["to"]))
+                painter.drawPath(path)
+        for kind, key, (hx, hy) in self._handles():
+            p = self._pt(hx, hy)
+            painter.setPen(QPen(QColor("#e8590c"), 1.5))
+            painter.setBrush(QColor("white"))
+            if kind == "resize":
+                painter.drawRect(QRectF(p.x() - HANDLE_PX / 2, p.y() - HANDLE_PX / 2, HANDLE_PX, HANDLE_PX))
+            elif key[1] == "to":
+                painter.setBrush(QColor("#e8590c"))
+                painter.drawEllipse(p, HANDLE_PX / 2 + 1, HANDLE_PX / 2 + 1)
+            else:
+                painter.drawPolygon([p + QPointF(0, -5), p + QPointF(5, 0), p + QPointF(0, 5), p + QPointF(-5, 0)])
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _drag_handle(self, pos: QPointF) -> None:
+        drag = self._handle_drag
+        x_mm, y_mm = self._to_mm(pos)
+        if drag["kind"] == "resize":
+            x, y, w, h = drag["orig"]
+            key = drag["key"]
+            left, top, right, bottom = x, y, x + w, y + h
+            if "w" in key:
+                left = min(x_mm, right - 4)
+            if "e" in key:
+                right = max(x_mm, left + 4)
+            if key.startswith("n"):
+                top = min(y_mm, bottom - 4)
+            if key.startswith("s"):
+                bottom = max(y_mm, top + 4)
+            drag["cur"] = (round(left, 2), round(top, 2), round(right - left, 2), round(bottom - top, 2))
+        else:
+            index, part = drag["key"]
+            drag["tails"][index][part] = [round(x_mm, 2), round(y_mm, 2)]
+        self.update()
+
     def _draw_rect(self, painter: QPainter, rect: Rect) -> None:
         p = self._pt(rect.x, rect.y)
         painter.drawRect(QRectF(p.x(), p.y(), rect.width * self._scale, rect.height * self._scale))
@@ -292,6 +453,8 @@ class PageCanvas(QWidget):
             self.setCursor(Qt.CursorShape.OpenHandCursor)
         elif self.tool in ("pen", "eraser"):
             self.setCursor(Qt.CursorShape.CrossCursor)
+        elif self.tool == "text":
+            self.setCursor(Qt.CursorShape.IBeamCursor)
         elif pos is not None and self.page is not None and self._hit_line(*self._to_mm(pos)):
             self.setCursor(Qt.CursorShape.SizeAllCursor)
         else:
@@ -314,7 +477,19 @@ class PageCanvas(QWidget):
             return
         x_mm, y_mm = self._to_mm(pos)
         self._press_pos = pos
+        if self.tool == "text":
+            self.textRequested.emit(x_mm, y_mm)
+            return
         if self.tool == "select":
+            handle = self._hit_handle(pos)
+            if handle is not None:
+                line = self._selected_line()
+                kind, key = handle
+                self._handle_drag = {"kind": kind, "key": key, "line": line.id,
+                                     "orig": (line.x_mm, line.y_mm, line.w_mm, line.h_mm),
+                                     "cur": (line.x_mm, line.y_mm, line.w_mm, line.h_mm),
+                                     "tails": [dict(t, to=list(t["to"])) for t in self._tails(line)]}
+                return
             hit = self._hit_line(x_mm, y_mm)
             if hit is not None:
                 self._drag_line = hit
@@ -335,6 +510,9 @@ class PageCanvas(QWidget):
             self._last_pos = pos
             self._fitted = False
             self.update()
+            return
+        if self._handle_drag is not None:
+            self._drag_handle(pos)
             return
         if self._drag_line is not None:
             x_mm, y_mm = self._to_mm(pos)
@@ -361,6 +539,16 @@ class PageCanvas(QWidget):
             self._panning = False
             self._press_pos = None
             self._update_cursor(event.position())
+            return
+        if self._handle_drag is not None:
+            drag, self._handle_drag = self._handle_drag, None
+            self._press_pos = None
+            if drag["kind"] == "resize" and drag["cur"] != drag["orig"]:
+                x, y, w, h = drag["cur"]
+                self.lineGeometry.emit(drag["line"], {"x_mm": x, "y_mm": y, "w_mm": w, "h_mm": h})
+            elif drag["kind"] == "tail":
+                self.lineGeometry.emit(drag["line"], {"tails": drag["tails"]})
+            self.update()
             return
         if self._drag_line is not None:
             line, pos = self._drag_line, self._drag_pos
@@ -400,7 +588,8 @@ class PageCanvas(QWidget):
             hit = self._hit_line(*self._to_mm(event.position()))
             if hit is not None:
                 self.selected_line_id = hit.id
-                self.lineSelected.emit(hit.id, True)
+                self.lineSelected.emit(hit.id, False)
+                self.lineEditRequested.emit(hit.id)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         self._hover = None
@@ -408,6 +597,12 @@ class PageCanvas(QWidget):
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802
         if self.page is None:
+            return
+        hit = self._hit_line(*self._to_mm(QPointF(event.pos())))
+        if hit is not None:
+            self.selected_line_id = hit.id
+            self.update()
+            self.lineContextMenu.emit(hit.id, QPointF(event.globalPos()))
             return
         frame = self.page.frame_at(*self._to_mm(QPointF(event.pos())))
         if frame is not None and frame.id != self.page.selected_frame_id:

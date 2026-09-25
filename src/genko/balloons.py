@@ -1,0 +1,406 @@
+"""Balloons and lettering: shapes, tails, joined balloons, and the text inside them.
+
+A line's box (x_mm, y_mm, w_mm, h_mm) is the balloon's outside. The shape is drawn as a mask with its
+tails; balloons that share `style.group` are one mask, so joined balloons have one outline. The
+outline is the mask's inner edge (`border_mm` wide) and the inside is filled white (or left empty).
+The text is set in the space inside the shape, centred, and shrinks to fit unless it has a size.
+
+Shapes: speech (ellipse), rounded, box, cloud, thought (ellipse and bubbles), shout (spikes),
+flash (radiating lines), whisper (dashed), narration (box, no tail), sfx (outlined lettering, no
+balloon), none (text only).
+"""
+
+from __future__ import annotations
+
+import math
+
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
+
+from genko import fonts
+from genko.tategaki import cells, compose
+
+SHAPES = ("speech", "rounded", "box", "cloud", "thought", "shout", "flash", "whisper", "narration", "sfx", "none")
+ELLIPTIC = ("speech", "cloud", "thought", "shout", "flash", "whisper")
+NO_TAIL = ("narration", "sfx", "none", "flash")
+SQRT2 = 2 ** 0.5
+CAP_MM = 5.0
+SFX_CAP_MM = 12.0
+OUTLINE = (20, 20, 20)
+PAPER = (255, 255, 255)
+TEXT = (10, 10, 10)
+
+DEFAULTS = {"font": None, "size_mm": None, "tracking": 0.0, "leading": 0.15, "align": "top", "outline_mm": None,
+            "rgb": None, "tcy": True, "border_mm": 0.35, "fill": "white", "group": None}
+LINE_START = frozenset("、。，．）」』)】］〉》ーぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ！？!?…‥")
+LINE_END = frozenset("「『（(【［〈《〔")
+
+
+def px(mm: float, dpi: int) -> int:
+    return max(1, round(mm / 25.4 * dpi))
+
+
+def style_of(line) -> dict:
+    return {**DEFAULTS, **(getattr(line, "style", None) or {})}
+
+
+def tails_of(line) -> list[dict]:
+    tails = [dict(t) for t in (getattr(line, "tails", None) or []) if t.get("to")]
+    if not tails and getattr(line, "tail", None):
+        tails = [{"to": list(line.tail)}]
+    return tails
+
+
+# --- text ------------------------------------------------------------------------------------------------
+
+
+def _inner(kind: str, w: float, h: float, pad: float) -> tuple[float, float]:
+    """The space for text inside the shape."""
+    if kind in ELLIPTIC:
+        return (w - 2 * pad) / SQRT2, (h - 2 * pad) / SQRT2
+    if kind == "rounded":
+        r = min(w, h) * 0.3
+        return w - 2 * pad - r * 0.3, h - 2 * pad - r * 0.3
+    if kind in ("box", "narration"):
+        return w - 2 * pad, h - 2 * pad
+    return w, h
+
+
+def _vertical(line, st: dict, face, em: int, inner_h: float, fill) -> Image.Image:
+    text = face.normalize(line.text or "")
+    tracking, leading = float(st["tracking"] or 0), float(st["leading"] or 0)
+    step = em * (1 + tracking)
+    column = inner_h
+    if "\n" not in text and em > 0:
+        # balance the columns (7 / 7 / 1 reads badly; 5 / 5 / 5 does not)
+        count = len(cells(text, bool(st["tcy"])))
+        fit = max(1, int((inner_h - em) // step) + 1)
+        if count > fit:
+            cols = -(-count // fit)
+            column = min(column, em + step * (-(-count // cols) - 1))
+    return compose(text, face.font(em), em, max(em, int(column + em * 0.1)), fill=fill,
+                   ruby_runs=getattr(line, "ruby_runs", None) or None, face=face, tracking=tracking, leading=leading,
+                   tcy=bool(st["tcy"]), align=str(st["align"] or "top"))
+
+
+def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Image:
+    """Rows left to right with kinsoku, centred (or aligned by style.align: left / center / right)."""
+    text = face.normalize(line.text or "")
+    tracking = float(st["tracking"] or 0)
+    line_h = round(em * (1.15 + float(st["leading"] or 0)))
+
+    def advance(char: str) -> float:
+        try:
+            return face.font(em, char).getlength(char) + em * tracking
+        except Exception:
+            return em * (1 + tracking)
+
+    rows: list[str] = []
+    for part in text.split("\n"):
+        row, width = "", 0.0
+        for char in part:
+            w = advance(char)
+            if row and width + w > inner_w and char not in LINE_START:
+                if row[-1] in LINE_END and len(row) > 1:
+                    rows.append(row[:-1])
+                    row, width = row[-1], advance(row[-1])
+                else:
+                    rows.append(row)
+                    row, width = "", 0.0
+            row += char
+            width += w
+        rows.append(row)
+    widths = [sum(advance(c) for c in row) for row in rows]
+    out_w = max(1, math.ceil(max(widths or [1])))
+    out = Image.new("RGBA", (out_w, max(1, line_h * len(rows))), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(out)
+    align = st["align"] if st["align"] in ("left", "right") else "center"
+    for i, row in enumerate(rows):
+        x = 0.0 if align == "left" else (out_w - widths[i]) / (2 if align == "center" else 1)
+        for char in row:
+            font = face.font(em, char)
+            draw.text((x, i * line_h + (line_h - em) / 2), char, font=font, fill=fill + (255,))
+            x += advance(char)
+    return out
+
+
+def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Image, int]:
+    """The lettering of a line (RGBA) and its em in px, fitted into its balloon."""
+    st = style_of(line)
+    kind = line.balloon or "speech"
+    face = fonts.face(st["font"] or (None if kind == "sfx" else font_path), fonts.DEFAULT_SFX if kind == "sfx" else fonts.DEFAULT_DIALOGUE)
+    fill = tuple(st["rgb"]) if st["rgb"] else TEXT
+    w, h = px(line.w_mm or 40, dpi), px(line.h_mm or 20, dpi)
+    vertical = getattr(line, "wrap", "horizontal") == "vertical"
+    if st["size_mm"]:
+        em = px(float(st["size_mm"]), dpi)
+        fixed = True
+    elif kind == "sfx":
+        first = max(1, len(cells((line.text or " ").split("\n")[0], bool(st["tcy"]))))
+        em = max(8, min(px(SFX_CAP_MM, dpi), (w if vertical else h), (h if vertical else w) // first))
+        fixed = False
+    elif kind == "none":
+        # text only: the box sets the size (the longest column fills its height)
+        longest = max(len(cells(part, bool(st["tcy"]))) for part in (line.text or " ").split("\n")) or 1
+        em = max(8, min(w, h // longest) if vertical else min(h, w // longest))
+        fixed = False
+    else:
+        em = max(8, px(CAP_MM, dpi))
+        fixed = False
+    pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
+    inner_w, inner_h = _inner(kind, w, h, pad)
+    for _ in range(10):
+        image = _vertical(line, st, face, em, inner_h, fill) if vertical else _horizontal(line, st, face, em, inner_w, fill)
+        if fixed or (image.width <= inner_w * 1.02 and image.height <= inner_h * 1.02) or em <= 8:
+            break
+        em = max(8, int(em * 0.9))
+        pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
+        inner_w, inner_h = _inner(kind, w, h, pad)
+    outline = st["outline_mm"]
+    grow = px(float(outline), dpi) if outline else (max(2, em // 8) if kind == "sfx" else 0)
+    if grow:
+        image = outlined(image, grow)
+    return image, em
+
+
+def outlined(text_img: Image.Image, grow: int, colour=(255, 255, 255)) -> Image.Image:
+    """Text with a halo (白フチ) `grow` px wide."""
+    alpha = text_img.split()[3]
+    pad = grow + 1
+    padded = Image.new("L", (alpha.width + 2 * pad, alpha.height + 2 * pad), 0)
+    padded.paste(alpha, (pad, pad))
+    halo = padded.filter(ImageFilter.MaxFilter(min(grow * 2 + 1, 61) | 1))
+    out = Image.new("RGBA", padded.size, colour + (0,))
+    out.putalpha(halo)
+    body = Image.new("RGBA", padded.size, (0, 0, 0, 0))
+    body.paste(text_img, (pad, pad))
+    out.alpha_composite(body)
+    return out
+
+
+# --- shapes -----------------------------------------------------------------------------------------------
+
+
+def _ellipse_point(cx: float, cy: float, rx: float, ry: float, t: float) -> tuple[float, float]:
+    return cx + rx * math.cos(t), cy + ry * math.sin(t)
+
+
+def _shape(draw: ImageDraw.ImageDraw, kind: str, box: tuple[float, float, float, float]) -> None:
+    x0, y0, x1, y1 = box
+    cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+    if kind in ("box", "narration"):
+        draw.rectangle(box, fill=255)
+    elif kind == "rounded":
+        draw.rounded_rectangle(box, radius=min(rx, ry) * 0.6, fill=255)
+    elif kind == "cloud":
+        bump = max(2.0, min(rx, ry) * 0.3)
+        k = 1 - bump / max(1.0, min(rx, ry))
+        perimeter = math.pi * (rx + ry) * k
+        n = max(8, int(perimeter / (bump * 1.4)))
+        draw.ellipse((cx - rx * k, cy - ry * k, cx + rx * k, cy + ry * k), fill=255)
+        for i in range(n):
+            bx, by = _ellipse_point(cx, cy, rx * k, ry * k, 2 * math.pi * i / n)
+            draw.ellipse((bx - bump, by - bump, bx + bump, by + bump), fill=255)
+    elif kind == "shout":
+        spikes = max(12, int((rx + ry) / max(4.0, min(rx, ry) / 3)))
+        points = []
+        for i in range(spikes * 2):
+            t = math.pi * i / spikes
+            k = 1.0 if i % 2 == 0 else 0.8
+            points.append(_ellipse_point(cx, cy, rx * k, ry * k, t))
+        draw.polygon(points, fill=255)
+    else:  # speech, thought, whisper, flash
+        draw.ellipse(box, fill=255)
+
+
+def _edge_point(kind: str, box, toward: tuple[float, float], spread: float) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Two points on the shape's edge, `spread` apart, facing `toward` (the tail's base)."""
+    x0, y0, x1, y1 = box
+    cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+    tx, ty = toward
+    if kind in ("box", "narration", "rounded"):
+        if abs(tx - cx) / max(rx, 1) > abs(ty - cy) / max(ry, 1):
+            ex = cx + (rx if tx > cx else -rx) * 0.9
+            my = max(y0 + spread, min(y1 - spread, ty))
+            return (ex, my - spread / 2), (ex, my + spread / 2)
+        ey = cy + (ry if ty > cy else -ry) * 0.9
+        mx = max(x0 + spread, min(x1 - spread, tx))
+        return (mx - spread / 2, ey), (mx + spread / 2, ey)
+    t = math.atan2((ty - cy) / max(ry, 1), (tx - cx) / max(rx, 1))
+    k = 0.72 if kind == "shout" else 0.9  # start inside the shape (below the spikes' valleys)
+    rx, ry = rx * k / 0.9, ry * k / 0.9
+    lo, hi = 0.0, math.pi / 2
+    for _ in range(24):  # the half-angle whose chord is `spread`
+        mid = (lo + hi) / 2
+        a = _ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t - mid)
+        b = _ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t + mid)
+        if math.dist(a, b) < spread:
+            lo = mid
+        else:
+            hi = mid
+    return _ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t - lo), _ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t + lo)
+
+
+def _tail_polygon(kind: str, box, tip, via, base: float) -> list[tuple[float, float]]:
+    """A tail from the shape toward `tip`, curving through `via` when given (a quadratic curve)."""
+    p1, p2 = _edge_point(kind, box, via or tip, base)
+    mx, my = (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2
+    cx, cy = via if via else ((mx + tip[0]) / 2, (my + tip[1]) / 2)
+    left, right = [], []
+    steps = 16
+    for i in range(steps + 1):
+        t = i / steps
+        x = (1 - t) ** 2 * mx + 2 * (1 - t) * t * cx + t ** 2 * tip[0]
+        y = (1 - t) ** 2 * my + 2 * (1 - t) * t * cy + t ** 2 * tip[1]
+        dx = 2 * (1 - t) * (cx - mx) + 2 * t * (tip[0] - cx)
+        dy = 2 * (1 - t) * (cy - my) + 2 * t * (tip[1] - cy)
+        n = math.hypot(dx, dy) or 1.0
+        half = math.dist(p1, p2) / 2 * (1 - t)
+        left.append((x - dy / n * half, y + dx / n * half))
+        right.append((x + dy / n * half, y - dx / n * half))
+    return left + right[::-1]
+
+
+def _erode(mask: Image.Image, amount: int) -> Image.Image:
+    if amount <= 0:
+        return mask
+    if amount <= 3:
+        for _ in range(amount):
+            mask = mask.filter(ImageFilter.MinFilter(3))
+        return mask
+    # an isotropic erosion: blur and keep what stays nearly solid (Φ(2) ≈ 0.977)
+    return mask.filter(ImageFilter.GaussianBlur(amount / 2)).point(lambda v: 255 if v >= 249 else 0)
+
+
+def draw_group(image: Image.Image, lines: list, dpi: int, show_speaker: bool = True, font_path: str | None = None) -> None:
+    """One balloon (or several joined ones) with their tails and text, onto the page image."""
+    first = lines[0]
+    kind = first.balloon or "speech"
+    st = style_of(first)
+    if kind not in ("sfx", "none"):
+        boxes = [(px(ln.x_mm, dpi), px(ln.y_mm, dpi), px(ln.x_mm + (ln.w_mm or 40), dpi), px(ln.y_mm + (ln.h_mm or 20), dpi))
+                 for ln in lines]
+        tails = [(ln, t) for ln in lines if (ln.balloon or "speech") not in NO_TAIL for t in tails_of(ln)]
+        for ln in lines:  # a thought without a speaker still trails its bubbles, down and away
+            if (ln.balloon or "speech") == "thought" and not tails_of(ln):
+                tails.append((ln, {"to": [ln.x_mm - (ln.w_mm or 40) * 0.3, ln.y_mm + (ln.h_mm or 20) * 1.2]}))
+        xs = [b[0] for b in boxes] + [b[2] for b in boxes] + [px(t["to"][0], dpi) for _, t in tails]
+        ys = [b[1] for b in boxes] + [b[3] for b in boxes] + [px(t["to"][1], dpi) for _, t in tails]
+        margin = px(4, dpi)
+        rx0, ry0 = max(0, min(xs) - margin), max(0, min(ys) - margin)
+        rx1, ry1 = min(image.width, max(xs) + margin), min(image.height, max(ys) + margin)
+        if rx1 > rx0 and ry1 > ry0:
+            _paint_shapes(image, lines, boxes, tails, (rx0, ry0, rx1, ry1), dpi, st)
+    for line in lines:
+        _paint_text(image, line, dpi, show_speaker, font_path)
+
+
+def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> None:
+    rx0, ry0, rx1, ry1 = region
+    scale = 2 if dpi < 300 else 1  # draw small renders at twice the size for smooth edges
+    size = ((rx1 - rx0) * scale, (ry1 - ry0) * scale)
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    bubbles = Image.new("L", size, 0)
+    bdraw = ImageDraw.Draw(bubbles)
+
+    def local(box):
+        return tuple((v - o) * scale for v, o in zip(box, (rx0, ry0, rx0, ry0)))
+
+    for line, box in zip(lines, boxes):
+        _shape(draw, line.balloon or "speech", local(box))
+    for line, tail in tails:
+        box = local(next(b for ln, b in zip(lines, boxes) if ln is line))
+        tip = ((px(tail["to"][0], dpi) - rx0) * scale, (px(tail["to"][1], dpi) - ry0) * scale)
+        via = ((px(tail["via"][0], dpi) - rx0) * scale, (px(tail["via"][1], dpi) - ry0) * scale) if tail.get("via") else None
+        short = min(box[2] - box[0], box[3] - box[1])
+        base = px(float(tail["width_mm"]), dpi) * scale if tail.get("width_mm") else max(4.0, short / 4)
+        if (line.balloon or "speech") == "thought":
+            # bubbles toward the speaker instead of a tail
+            x0, y0, x1, y1 = box
+            cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+            ang = math.atan2((tip[1] - cy) / max(ry, 1), (tip[0] - cx) / max(rx, 1))
+            ex, ey = _ellipse_point(cx, cy, rx, ry, ang)
+            for i, frac in enumerate((0.3, 0.6, 0.88)):
+                r = max(2.0, min(rx, ry) * (0.2 - i * 0.05))
+                bx, by = ex + (tip[0] - ex) * frac, ey + (tip[1] - ey) * frac
+                bdraw.ellipse((bx - r, by - r, bx + r, by + r), fill=255)
+            continue
+        draw.polygon(_tail_polygon(line.balloon or "speech", box, tip, via, base), fill=255)
+    width = px(float(st["border_mm"] if st["border_mm"] is not None else 0.35), dpi) * scale
+    kind = lines[0].balloon or "speech"
+    shapes = ImageChops.lighter(mask, bubbles)
+    inside = ImageChops.lighter(_erode(mask, width), _erode(bubbles, max(1, width * 2 // 3)))
+    band = ImageChops.subtract(shapes, inside)
+    if kind == "whisper":
+        band = ImageChops.multiply(band, _dashes(size, [local(b) for b in boxes], scale))
+    if kind == "flash":
+        band = _flash_lines(size, [local(b) for b in boxes], width)
+    if scale > 1:
+        full = (rx1 - rx0, ry1 - ry0)
+        shapes, band = shapes.resize(full, Image.Resampling.LANCZOS), band.resize(full, Image.Resampling.LANCZOS)
+    area = image.crop(region)
+    if st["fill"] != "none":
+        area.paste(PAPER, (0, 0, area.width, area.height), shapes)
+    area.paste(OUTLINE, (0, 0, area.width, area.height), band)
+    image.paste(area, (rx0, ry0))
+
+
+def _dashes(size, boxes, scale: int) -> Image.Image:
+    """Angular stripes around each balloon's centre: dashed outlines for whispers."""
+    out = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(out)
+    for x0, y0, x1, y1 in boxes:
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        r = max(x1 - x0, y1 - y0) * 2
+        n = max(16, int((x1 - x0 + y1 - y0) / (6 * scale)))
+        for i in range(0, n * 2, 2):
+            a0, a1 = math.pi * i / n, math.pi * (i + 1) / n
+            draw.polygon([(cx, cy), (cx + r * math.cos(a0), cy + r * math.sin(a0)), (cx + r * math.cos(a1), cy + r * math.sin(a1))], fill=255)
+    return out
+
+
+def _flash_lines(size, boxes, width: int) -> Image.Image:
+    """Radiating lines around the balloon (a flash): no outline, lines from just inside to outside."""
+    out = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(out)
+    for x0, y0, x1, y1 in boxes:
+        cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+        n = max(40, int((rx + ry) / 2))
+        for i in range(n):
+            t = 2 * math.pi * i / n + (i % 3) * 0.013
+            inner = 0.93 + 0.04 * ((i * 7) % 5) / 5
+            a = _ellipse_point(cx, cy, rx * inner, ry * inner, t)
+            b = _ellipse_point(cx, cy, rx * 1.18, ry * 1.18, t)
+            draw.line([a, b], fill=255, width=max(1, width // 2))
+    return out
+
+
+def _paint_text(image: Image.Image, line, dpi: int, show_speaker: bool, font_path: str | None) -> None:
+    text, em = text_image(line, dpi, font_path)
+    x, y = px(line.x_mm, dpi), px(line.y_mm, dpi)
+    w, h = px(line.w_mm or 40, dpi), px(line.h_mm or 20, dpi)
+    cx, cy = x + w / 2, y + h / 2
+    if (line.balloon or "speech") == "none":
+        image.paste(text, (x, y), text)  # text only: set from the box's corner
+    else:
+        image.paste(text, (round(cx - text.width / 2), round(cy - text.height / 2)), text)
+    if show_speaker and line.speaker and (line.balloon or "speech") != "none":
+        font = fonts.face(None).font(max(8, em * 2 // 3))
+        ImageDraw.Draw(image).text((x, max(0, y - em)), line.speaker, fill=(90, 90, 90), font=font)
+
+
+def draw_lines(image: Image.Image, lines: list, dpi: int, font_path: str | None = None, show_speaker: bool = True) -> None:
+    """Every placed line of a page, joined balloons drawn together (in reading order of their first line)."""
+    groups: dict[str, list] = {}
+    order: list[list] = []
+    for line in lines:
+        key = style_of(line)["group"]
+        if key:
+            if key not in groups:
+                groups[key] = []
+                order.append(groups[key])
+            groups[key].append(line)
+        else:
+            order.append([line])
+    for group in order:
+        draw_group(image, group, dpi, show_speaker, font_path)

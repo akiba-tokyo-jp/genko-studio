@@ -6,7 +6,6 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from genko.models import Episode, LayerKind, LayerRole, Page, Rect, StoryLine
-from genko.tategaki import compose as compose_tategaki
 
 EXPORT_ROLES = (
     LayerRole.INK,
@@ -412,233 +411,13 @@ def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int, color=(90, 
     draw.line([_xy((hx, hy), dpi), _xy(nose, dpi)], fill=color, width=max(1, width // 2))
 
 
-def _balloon_font(line: StoryLine, dpi: int, font_path: str | None) -> ImageFont.ImageFont:
-    n = max(1, len(line.text or " "))
-    w = mm_to_px(line.w_mm or 40, dpi)
-    h = mm_to_px(line.h_mm or 20, dpi)
-    cap = mm_to_px(5.0, dpi)
-    kind = line.balloon or "speech"
-    if getattr(line, "wrap", "horizontal") == "vertical":
-        if kind == "none":
-            size = max(12, min(w, max(12, h // n)))
-        else:
-            size = max(12, min(cap, (w * 2) // 3))
-    else:
-        size = max(12, min(cap, h // 2))
-    return _font(font_path, size)
-
-
-SQRT2 = 2 ** 0.5
-OUTLINE = (20, 20, 20)
-PAPER = (255, 255, 255)
-
-
-def _ellipse_point(cx: float, cy: float, rx: float, ry: float, t: float) -> tuple[float, float]:
-    import math
-
-    return cx + rx * math.cos(t), cy + ry * math.sin(t)
-
-
-def _tail(draw: ImageDraw.ImageDraw, cx: float, cy: float, rx: float, ry: float, target: tuple[int, int],
-          width: int, rect: bool = False) -> None:
-    """A tail from the balloon's edge toward `target`, drawn after the balloon. The base is a third of
-    the short side (measured as a chord, so tall balloons get wide tails too) and leaves from whichever
-    side faces the speaker; the outline is opened where the tail joins."""
-    import math
-
-    tx, ty = target
-    if abs(tx - cx) < 1e-6 and abs(ty - cy) < 1e-6:
-        return
-    base = max(min(rx, ry) * 2 / 3, 4.0)
-    t = math.atan2((ty - cy) / max(ry, 1), (tx - cx) / max(rx, 1))
-    if rect:
-        if abs(tx - cx) / max(rx, 1) > abs(ty - cy) / max(ry, 1):
-            ex = cx + (rx if tx > cx else -rx)
-            p1, p2 = (ex, cy - base / 2), (ex, cy + base / 2)
-        else:
-            ey = cy + (ry if ty > cy else -ry)
-            p1, p2 = (cx - base / 2, ey), (cx + base / 2, ey)
-    else:
-        lo, hi = 0.0, math.pi / 2
-        for _ in range(24):  # the half-angle whose chord is `base`
-            mid = (lo + hi) / 2
-            a = _ellipse_point(cx, cy, rx, ry, t - mid)
-            b = _ellipse_point(cx, cy, rx, ry, t + mid)
-            if math.dist(a, b) < base:
-                lo = mid
-            else:
-                hi = mid
-        p1 = _ellipse_point(cx, cy, rx, ry, t - lo)
-        p2 = _ellipse_point(cx, cy, rx, ry, t + lo)
-    # the triangle reaches a little inside the balloon so the white covers the outline at the join
-    k = 0.12
-    q1 = (p1[0] + (cx - p1[0]) * k, p1[1] + (cy - p1[1]) * k)
-    q2 = (p2[0] + (cx - p2[0]) * k, p2[1] + (cy - p2[1]) * k)
-    draw.polygon([q1, q2, (tx, ty)], fill=PAPER)
-    draw.line([p1, (tx, ty), p2], fill=OUTLINE, width=width, joint="curve")
-
-
-def _balloon_shape(draw: ImageDraw.ImageDraw, kind: str, cx: float, cy: float, rx: float, ry: float,
-                   tail: tuple[int, int] | None, width: int) -> None:
-    import math
-
-    box = [cx - rx, cy - ry, cx + rx, cy + ry]
-    if kind == "narration":
-        draw.rectangle(box, fill=PAPER, outline=OUTLINE, width=width)
-        return
-    if kind == "shout":
-        spikes = max(12, int((rx + ry) / 6))
-        points = []
-        for i in range(spikes * 2):
-            t = math.pi * i / spikes
-            k = 1.18 if i % 2 == 0 else 0.98
-            points.append(_ellipse_point(cx, cy, rx * k, ry * k, t))
-        draw.polygon(points, fill=PAPER)
-        draw.line(points + points[:1], fill=OUTLINE, width=width)
-        if tail:
-            _tail(draw, cx, cy, rx, ry, tail, width)
-        return
-    if kind == "whisper":
-        draw.ellipse(box, fill=PAPER)
-        dashes = max(16, int((rx + ry) / 4))
-        for i in range(0, dashes * 2, 2):
-            t0, t1 = math.pi * i / dashes, math.pi * (i + 1) / dashes
-            draw.line([_ellipse_point(cx, cy, rx, ry, t0 + (t1 - t0) * k / 4) for k in range(5)], fill=OUTLINE, width=width)
-        if tail:
-            _tail(draw, cx, cy, rx, ry, tail, width)
-        return
-    draw.ellipse(box, fill=PAPER, outline=OUTLINE, width=width)
-    if tail and kind == "speech":
-        _tail(draw, cx, cy, rx, ry, tail, width)
-    if kind == "thought":
-        # small bubbles toward the speaker (or down-left when no tail is set)
-        tx, ty = tail if tail else (cx - rx * 1.6, cy + ry * 1.4)
-        ang = math.atan2((ty - cy) / max(ry, 1), (tx - cx) / max(rx, 1))
-        ex, ey = _ellipse_point(cx, cy, rx, ry, ang)
-        for i, frac in enumerate((0.25, 0.55, 0.85)):
-            r = max(2.0, min(rx, ry) * (0.22 - i * 0.06))
-            bx, by = ex + (tx - ex) * frac, ey + (ty - ey) * frac
-            draw.ellipse([bx - r, by - r, bx + r, by + r], fill=PAPER, outline=OUTLINE, width=max(1, width - 1))
-
-
-def _outlined(text_img: Image.Image, grow: int) -> Image.Image:
-    """Black text with a white outline `grow` px wide (for SFX over art)."""
-    from PIL import ImageFilter
-
-    alpha = text_img.split()[3]
-    halo = alpha.filter(ImageFilter.MaxFilter(grow * 2 + 1)) if grow > 0 else alpha
-    out = Image.new("RGBA", text_img.size, (255, 255, 255, 0))
-    out.putalpha(halo)
-    out.alpha_composite(text_img)
-    return out
-
-
 def _draw_balloon(
     draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font_path: str | None = None, show_speaker: bool = True
 ) -> None:
-    x = mm_to_px(line.x_mm, dpi)
-    y = mm_to_px(line.y_mm, dpi)
-    w = mm_to_px(line.w_mm or 40, dpi)
-    h = mm_to_px(line.h_mm or 20, dpi)
-    kind = line.balloon or "speech"
-    font = _balloon_font(line, dpi, font_path)
-    size = int(getattr(font, "size", 14) or 14)
-    wrap = getattr(line, "wrap", "horizontal")
-    page = getattr(draw, "_image", None)
-    width = max(2, mm_to_px(0.35, dpi))
-    tail = _xy(line.tail, dpi) if line.tail else None
-    cx, cy = x + w / 2, y + h / 2
-    if wrap == "vertical":
-        em = size
-        pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
-        if kind == "sfx":
-            em = max(12, min(mm_to_px(12, dpi), w, h // max(1, len((line.text or " ").split("\n")[0]))))
-            font = _font(font_path, em)
-        # the box is the balloon's outside: text without breaks wraps at the height inside it
-        if kind in ("speech", "thought", "shout", "whisper"):
-            column = (h - 2 * pad) / SQRT2 + em * 0.25
-        elif kind == "narration":
-            column = h - 2 * pad + em * 0.25
-        else:
-            column = h
-        text = line.text or ""
-        if "\n" not in text and kind not in ("none", "sfx") and em > 0:
-            # balance the columns (7 / 7 / 1 reads badly; 5 / 5 / 5 does not)
-            fit = max(1, int(column // em))
-            count = len(text)
-            if count > fit:
-                cols = -(-count // fit)
-                column = min(column, (-(-count // cols)) * em + em * 0.25)
-        composed = compose_tategaki(
-            line.text,
-            font,
-            em,
-            max(em, int(column)),
-            fill=(10, 10, 10),
-            ruby_runs=getattr(line, "ruby_runs", None) or None,
-        )
-        tw, th = composed.size
-        if kind == "none":
-            if page is not None:
-                page.paste(composed, (x, y), composed)
-            return
-        if kind == "sfx":
-            if page is not None:
-                art = _outlined(composed, max(2, em // 8))
-                page.paste(art, (round(cx - art.width / 2), round(cy - art.height / 2)), art)
-            return
-        if kind == "narration":
-            rx, ry = tw / 2 + pad, th / 2 + pad
-        else:
-            # the ellipse goes around the text block's corners: half-size × √2, plus the pad
-            rx, ry = tw / 2 * SQRT2 + pad, th / 2 * SQRT2 + pad
-        if line.path:
-            xy = [_xy(pt, dpi) for pt in line.path]
-            if len(xy) >= 3:
-                draw.polygon(xy, fill=PAPER, outline=OUTLINE)
-        else:
-            _balloon_shape(draw, kind, cx, cy, rx, ry, tail if kind != "narration" else None, width)
-        if line.speaker and show_speaker:
-            draw.text((min(x, cx - rx), max(0, min(y, cy - ry) - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
-        if page is not None:
-            page.paste(composed, (round(cx - tw / 2), round(cy - th / 2)), composed)
-        return
-    if line.path:
-        xy = [_xy(pt, dpi) for pt in line.path]
-        if len(xy) >= 3:
-            draw.polygon(xy, fill=PAPER, outline=OUTLINE)
-    elif kind not in ("none", "sfx"):
-        _balloon_shape(draw, kind, cx, cy, w / 2, h / 2, tail if kind != "narration" else None, width)
-    if line.speaker and kind != "none" and show_speaker:
-        draw.text((x, max(0, y - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
-    pad_x, pad_y = 6, max(2, h // 8)
-    if kind in ("speech", "thought", "shout", "whisper"):
-        # keep the text inside the ellipse: the inscribed box is the ellipse's size / √2
-        pad_x = max(pad_x, round(w / 2 * (1 - 1 / SQRT2)))
-        pad_y = max(pad_y, round(h / 2 * (1 - 1 / SQRT2)))
-    if line.ruby:
-        draw.text((x + pad_x, y + 2), line.ruby, fill=(10, 10, 10), font=font)
-        draw.text((x + pad_x, y + 2 + size), line.text, fill=(10, 10, 10), font=font)
-        return
-    max_w = max(8, w - pad_x * 2)
-    row = ""
-    rows: list[str] = []
-    for char in line.text:
-        trial = row + char
-        try:
-            bbox = draw.textbbox((0, 0), trial, font=font)
-            tw = bbox[2] - bbox[0]
-        except Exception:
-            tw = len(trial) * size
-        if tw <= max_w or not row:
-            row = trial
-        else:
-            rows.append(row)
-            row = char
-    if row:
-        rows.append(row)
-    for i, row_text in enumerate(rows):
-        draw.text((x + pad_x, y + pad_y + i * (size + 2)), row_text, fill=(10, 10, 10), font=font)
+    """One line's balloon and lettering onto the image behind `draw` (see genko.balloons)."""
+    from genko import balloons
+
+    balloons.draw_lines(draw._image, [line], dpi, font_path, show_speaker)
 
 
 def _draw_crop_marks(draw: ImageDraw.ImageDraw, page: Page, dpi: int) -> None:
@@ -754,10 +533,14 @@ def render_page(
     font_path = getattr(episode, "font_path", None) if episode is not None else None
     font = _font(font_path)
     lines = episode.story_for_page(page.index) if episode is not None else page.texts
+    from genko import balloons
+
+    placed = [line for line in lines if line.x_mm or line.y_mm or line.balloon]
+    # Speaker names are a working aid: shown in name/proof, never printed.
+    balloons.draw_lines(image, placed, working_dpi, font_path, show_speaker=mode != "print")
     for line in lines:
-        if line.x_mm or line.y_mm or line.balloon:
-            # Speaker names are a working aid: shown in name/proof, never printed.
-            _draw_balloon(draw, line, working_dpi, font_path, show_speaker=mode != "print")
+        if line in placed:
+            continue
         else:
             x = mm_to_px(page.inner_rect_mm().x + 4, working_dpi)
             y = mm_to_px(page.inner_rect_mm().y + 4, working_dpi)

@@ -32,10 +32,11 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "merge_frame", "page": "int", "frame_id": "str", "force": "bool? (placed art goes to studio.orphans)"},
     {"op": "resize_frame", "page": "int", "frame_id": "str", "rect": "{x,y,width,height}"},
     {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float?"},
-    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal?", "tail": "[x,y]?"},
-    {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|shout|thought|whisper|narration|sfx|none?", "wrap": "vertical|horizontal?", "ruby": "str?", "frame_id": "str?"},
+    {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?"},
+    {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|flash|whisper|narration|sfx|none?", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"},
+    {"op": "reorder_lines", "page": "int", "order": "[line id] (reading order)"},
     {"op": "delete_line", "id": "str"},
-    {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?", "balloon": "str?"},
+    {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
     {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "str?"},
@@ -126,6 +127,60 @@ def _untouched(stroke, eraser: list, radius: float) -> bool:
             if math.hypot(p[0] - (ax + t * dx), p[1] - (ay + t * dy)) <= radius:
                 return False
     return True
+
+
+STYLE_KEYS = {"font": str, "size_mm": float, "tracking": float, "leading": float, "align": str, "outline_mm": float,
+              "rgb": list, "tcy": bool, "border_mm": float, "fill": str, "group": str}
+
+
+def _merge_style(current: dict, change) -> dict:
+    """Merge style keys into a line's style; a key set to null goes back to the default."""
+    if not isinstance(change, dict):
+        raise ApplyError("style must be an object")
+    out = dict(current or {})
+    for key, value in change.items():
+        if key not in STYLE_KEYS:
+            raise ApplyError(f"unknown style key {key} (one of {', '.join(STYLE_KEYS)})")
+        if value is None or value == "":
+            out.pop(key, None)
+            continue
+        kind = STYLE_KEYS[key]
+        try:
+            value = [int(v) for v in value][:3] if kind is list else kind(value)
+        except (TypeError, ValueError) as exc:
+            raise ApplyError(f"style {key}: {exc}") from exc
+        if key == "align" and value not in ("top", "center", "bottom", "left", "right"):
+            raise ApplyError("align must be top, center, bottom, left or right")
+        if key == "fill" and value not in ("white", "none"):
+            raise ApplyError("fill must be white or none")
+        out[key] = value
+    return out
+
+
+def _parse_tails(raw) -> list[dict]:
+    tails = []
+    for item in raw or []:
+        if isinstance(item, (list, tuple)):
+            item = {"to": item}
+        to = item.get("to") if isinstance(item, dict) else None
+        if not to or len(to) < 2:
+            raise ApplyError("a tail needs to: [x, y]")
+        tail = {"to": [float(to[0]), float(to[1])]}
+        if item.get("via"):
+            tail["via"] = [float(item["via"][0]), float(item["via"][1])]
+        if item.get("width_mm"):
+            tail["width_mm"] = float(item["width_mm"])
+        tails.append(tail)
+    return tails
+
+
+def _balloon_kind(kind) -> str:
+    from genko.balloons import SHAPES
+
+    kind = str(kind or "speech")
+    if kind not in SHAPES:
+        raise ApplyError(f"balloon must be one of {', '.join(SHAPES)}")
+    return kind
 
 
 def _layer_by_id(page, layer_id: str):
@@ -292,6 +347,23 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             line.wrap = str(op["wrap"])
         if op.get("ruby_runs"):
             line.ruby_runs = [tuple(item) for item in op["ruby_runs"]]
+        if op.get("style"):
+            line.style = _merge_style({}, op["style"])
+        if op.get("tails"):
+            line.tails = _parse_tails(op["tails"])
+            line.tail = tuple(line.tails[0]["to"])
+        line.balloon = _balloon_kind(line.balloon)
+        return
+
+    if name == "reorder_lines":
+        page = _require_page(episode, op)
+        order = [str(item) for item in op.get("order") or []]
+        mine = [line for line in episode.story if line.page_index == page.index]
+        if sorted(order) != sorted(line.id for line in mine):
+            raise ApplyError("order must list every line of the page exactly once")
+        by_id = {line.id: line for line in mine}
+        others = iter([by_id[i] for i in order])
+        episode.story = [next(others) if line.page_index == page.index else line for line in episode.story]
         return
 
     if name == "edit_line":
@@ -299,6 +371,11 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if not line_id:
             raise ApplyError("id is required")
         line = _find_line(episode, str(line_id))
+        if "style" in op:
+            line.style = _merge_style(line.style, op["style"])
+        if "tails" in op:
+            line.tails = _parse_tails(op["tails"])
+            line.tail = tuple(line.tails[0]["to"]) if line.tails else None
         if "text" in op:
             line.text = str(op["text"])
         if "speaker" in op:
@@ -307,8 +384,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             line.frame_id = op["frame_id"]
         if "ruby" in op:
             line.ruby = str(op["ruby"])
+        if "ruby_runs" in op:
+            line.ruby_runs = [tuple(item) for item in op["ruby_runs"] or []]
         if "balloon" in op:
-            line.balloon = str(op["balloon"])
+            line.balloon = _balloon_kind(op["balloon"])
         if "wrap" in op:
             if op["wrap"] not in ("vertical", "horizontal"):
                 raise ApplyError("wrap must be vertical or horizontal")
@@ -330,8 +409,12 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             line.h_mm = float(op["h_mm"])
         if "tail" in op:
             line.tail = _parse_tail(op.get("tail"))
+            line.tails = [{"to": list(line.tail)}] if line.tail else []
+        if "tails" in op:
+            line.tails = _parse_tails(op["tails"])
+            line.tail = tuple(line.tails[0]["to"]) if line.tails else None
         if "balloon" in op:
-            line.balloon = str(op["balloon"])
+            line.balloon = _balloon_kind(op["balloon"])
         return
 
     if name == "delete_line":

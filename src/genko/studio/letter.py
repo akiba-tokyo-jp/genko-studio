@@ -38,6 +38,7 @@ class BalloonPlacement:
 
 
 ELLIPSE_KINDS = ("speech", "thought", "shout", "whisper")
+LEADING = 0.15
 SFX_EM_MM = 12.0  # the renderer's largest SFX glyph
 
 
@@ -48,7 +49,8 @@ def measure(breaks: list[str], balloon: str) -> tuple[float, float]:
     longest = max(len(b) for b in cols)
     if balloon == "sfx":
         return (SFX_EM_MM * len(cols), SFX_EM_MM * longest)
-    text_w, text_h = EM_MM * len(cols), EM_MM * longest
+    # columns are LEADING em apart (the renderer's default), characters sit edge to edge
+    text_w, text_h = EM_MM * len(cols) + EM_MM * LEADING * (len(cols) - 1), EM_MM * longest
     if balloon in ELLIPSE_KINDS:
         return (text_w * 2 ** 0.5 + 2 * PAD_MM, text_h * 2 ** 0.5 + 2 * PAD_MM)
     pad = 0.0 if balloon == "none" else PAD_MM

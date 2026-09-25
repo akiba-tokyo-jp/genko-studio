@@ -197,6 +197,14 @@ Drawing (M10, see `docs/TOOLS_PLAN.md`):
 - `edit_line {wrap: vertical|horizontal, balloon}`; vertical text without breaks wraps inside its balloon (the box is the balloon's outside) in even columns.
 - Panel borders print at their `border_mm` (default 0.8 mm).
 
+Lettering (M11):
+
+- Faces ship with Genko (SIL OFL, `src/genko/fonts/licenses/`): `antique` (the default for dialogue: kana in Zen Old Mincho, kanji in Zen Kaku Gothic New), `gothic`, `mincho`, `maru`, `hand`, `sfx` (Dela Gothic One, the default for sound effects), `sfx_pop`. A font file path works too. Characters a face lacks fall back to a look-alike or the Gothic.
+- `edit_line {style}` (and `add_line {style}`): `font`, `size_mm` (null = fit the balloon), `tracking`, `leading` (in em; columns are 0.15 em apart by default), `align` (top / center / bottom; left / center / right for horizontal text), `outline_mm` (white halo), `rgb`, `tcy` (縦中横 for 2-3 digits or letters and !? runs, on by default; full-width digits too), `border_mm`, `fill` (white / none), `group` (balloons with the same group are drawn as one, with one outline). A key set to null goes back to the default.
+- Balloon shapes (`balloon`): speech, rounded, box, cloud, thought, shout, flash, whisper, narration, sfx, none. The box is the balloon's outside; the text is centred in the space inside it and shrinks to fit unless it has a size.
+- Tails: `tails: [{to: [x, y], via?: [x, y], width_mm?}]` — several per balloon, curved through `via`. `tail` (one straight tail) still works.
+- Vertical text: kinsoku at both ends of a column (closing marks hang at the end of the previous column), balanced columns, ruby runs. `reorder_lines {page, order}` sets the reading order.
+
 Image tools (`tools.json` in the config dir, never in a project):
 
 ```bash

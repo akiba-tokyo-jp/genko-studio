@@ -272,7 +272,7 @@ def test_the_pen_draws_on_the_selected_layer_quickly(window):
     window.apply_ops([{"op": "set_layer", "page": 1, "id": user_id, "locked": True}])
     window.act_pen.trigger()
     _drag(window.canvas, [(40, 120), (60, 125), (80, 120)])
-    assert len(user_strokes()) == 3 and "描けません" in window.statusBar().currentMessage()
+    assert len(user_strokes()) == 3 and "描けません" in window.last_notice
 
 
 def test_lines_are_added_edited_and_deleted_in_the_panel(window, qapp):

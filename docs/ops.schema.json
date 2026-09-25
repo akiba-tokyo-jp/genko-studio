@@ -43,17 +43,27 @@
       "w_mm": "optional",
       "h_mm": "optional",
       "wrap": "vertical|horizontal?",
-      "tail": "[x,y]?"
+      "tail": "[x,y]?",
+      "tails": "[{to, via?, width_mm?}]?",
+      "style": "object?"
     },
     {
       "op": "edit_line",
       "id": "str",
       "text": "optional",
       "speaker": "optional",
-      "balloon": "speech|shout|thought|whisper|narration|sfx|none?",
+      "balloon": "speech|rounded|box|cloud|thought|shout|flash|whisper|narration|sfx|none?",
       "wrap": "vertical|horizontal?",
       "ruby": "str?",
-      "frame_id": "str?"
+      "ruby_runs": "[[base, ruby]]?",
+      "frame_id": "str?",
+      "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group}? (null resets a key)",
+      "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"
+    },
+    {
+      "op": "reorder_lines",
+      "page": "int",
+      "order": "[line id] (reading order)"
     },
     {
       "op": "delete_line",
@@ -67,6 +77,7 @@
       "w_mm": "float?",
       "h_mm": "float?",
       "tail": "[x,y]?",
+      "tails": "[{to, via?, width_mm?}]?",
       "balloon": "str?"
     },
     {

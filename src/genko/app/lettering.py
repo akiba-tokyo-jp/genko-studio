@@ -6,13 +6,16 @@ left), to the left of the lines already there. Long text is broken into columns 
 
 from __future__ import annotations
 
+import re as _re
+
 from genko.studio.letter import EM_MM, measure
 
 MARGIN_MM = 3.0
 
 KINDS = [
-    ("speech", "普通のフキダシ"), ("shout", "叫び（トゲ）"), ("thought", "心の声（もくもく）"), ("whisper", "ささやき（点線）"),
-    ("narration", "ナレーション（四角）"), ("sfx", "効果音（描き文字）"), ("none", "フキダシなし（文字だけ）"),
+    ("speech", "普通（楕円）"), ("rounded", "角丸"), ("box", "四角"), ("cloud", "雲（もくもく）"), ("thought", "心の声（泡つき）"),
+    ("shout", "叫び（トゲ）"), ("flash", "フラッシュ（放射線）"), ("whisper", "ささやき（点線）"), ("narration", "ナレーション（四角・しっぽなし）"),
+    ("sfx", "効果音（描き文字）"), ("none", "文字だけ"),
 ]
 KIND_LABEL = dict(KINDS)
 
@@ -66,3 +69,50 @@ def refit(line, frame, text: str, balloon: str, vertical: bool) -> dict:
     w, h = box_size(text, balloon, vertical, max_h, max_w)
     right = line.x_mm + line.w_mm
     return {"x_mm": round(right - w, 2), "y_mm": line.y_mm, "w_mm": w, "h_mm": h}
+
+
+# --- ruby in the text box: ｜約束《やくそく》 (the notation Japanese novel sites use) -------------------
+
+
+_KANJI = r"[㐀-鿿豈-﫿々〆ヶ]"
+_RUBY = _re.compile(r"[｜|]([^｜|《》\n]+)《([^《》\n]+)》|(" + _KANJI + r"+)《([^《》\n]+)》")
+
+
+def parse_ruby(text: str) -> tuple[str, list[list[str]]]:
+    """'｜約束《やくそく》の日' → ('約束の日', [['約束', 'やくそく']]). Kanji right before 《》 need no ｜."""
+    runs: list[list[str]] = []
+
+    def take(match) -> str:
+        base = match.group(1) or match.group(3)
+        runs.append([base, match.group(2) or match.group(4)])
+        return base
+
+    return _RUBY.sub(take, text or ""), runs
+
+
+def with_ruby(text: str, runs) -> str:
+    """The text as typed back, with its ruby in the notation (each run once, in order)."""
+    out, pos = [], 0
+    for base, ruby in runs or []:
+        at = (text or "").find(base, pos)
+        if at < 0:
+            continue
+        out.append(text[pos:at])
+        out.append(f"｜{base}《{ruby}》")
+        pos = at + len(base)
+    out.append((text or "")[pos:])
+    return "".join(out)
+
+
+def place_at(x_mm: float, y_mm: float, text: str, balloon: str = "speech", vertical: bool = True,
+             frame=None) -> dict:
+    """A balloon centred where the person clicked, sized to its text and kept inside the panel."""
+    max_h = (frame.rect.height - 2 * MARGIN_MM) if frame else 120.0
+    max_w = (frame.rect.width - 2 * MARGIN_MM) if frame else 160.0
+    w, h = box_size(text, balloon, vertical, max_h, max_w)
+    x, y = x_mm - w / 2, y_mm - h / 2
+    if frame is not None:
+        r = frame.rect
+        x = max(r.x + 1, min(r.x + r.width - w - 1, x))
+        y = max(r.y + 1, min(r.y + r.height - h - 1, y))
+    return {"x_mm": round(x, 2), "y_mm": round(y, 2), "w_mm": w, "h_mm": h, "wrap": "vertical" if vertical else "horizontal"}

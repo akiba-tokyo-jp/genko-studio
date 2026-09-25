@@ -201,6 +201,11 @@ class StoryLine:
     wrap: str = "horizontal"
     ruby_runs: list = field(default_factory=list)
     path: list | None = None
+    # lettering and balloon style: font, size_mm, tracking, leading, align, outline_mm, rgb, tcy,
+    # border_mm, fill ("white" | "none"), group (balloons with the same group are drawn as one)
+    style: dict = field(default_factory=dict)
+    # tails: [{"to": [x, y], "via": [x, y] | None, "width_mm": float | None}]; `tail` is the old single tail
+    tails: list = field(default_factory=list)
 
 
 def new_id() -> str:

@@ -49,23 +49,30 @@ def _pixmap(image) -> QPixmap:
 
 
 class StoryPanel(QWidget):
-    """The page's lines: pick one to edit it (text, speaker, kind, vertical), add one to the selected panel, delete."""
+    """The page's lines in reading order. Pick one to edit its words, speaker, balloon and lettering
+    style; add one to the selected panel; reorder; delete. Ruby is typed as ｜約束《やくそく》."""
 
     def __init__(self, window) -> None:
-        from PySide6.QtWidgets import QPlainTextEdit
+        from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QPlainTextEdit
 
+        from genko import fonts
         from genko.app.lettering import KINDS
 
         super().__init__()
         self.window = window
         self.line_ids: list[str] = []
+        self._loading = False
         self.list = QListWidget()
         self.list.currentRowChanged.connect(lambda _: self._picked())
+        up = QPushButton("↑ 前へ")
+        up.clicked.connect(lambda: self._move(-1))
+        down = QPushButton("↓ 後へ")
+        down.clicked.connect(lambda: self._move(1))
         self.speaker = QLineEdit()
         self.speaker.setPlaceholderText("話者（空でもよい）")
         self.text = QPlainTextEdit()
-        self.text.setPlaceholderText("台詞（改行で次の列へ）")
-        self.text.setMaximumHeight(90)
+        self.text.setPlaceholderText("台詞（改行で次の列へ。ルビは ｜約束《やくそく》）")
+        self.text.setMaximumHeight(80)
         self.kind = QComboBox()
         for key, label in KINDS:
             self.kind.addItem(label, key)
@@ -77,6 +84,46 @@ class StoryPanel(QWidget):
         self.apply_button.clicked.connect(self.apply_edit)
         self.delete_button = QPushButton("削除")
         self.delete_button.clicked.connect(self.delete)
+        # lettering style of the selected line (applied at once)
+        self.font = QComboBox()
+        for key, (label, _k, _o) in fonts.BUNDLED.items():
+            self.font.addItem(label, key)
+        self.font.addItem("パソコンの書体を選ぶ…", "__pick__")
+        self.font.activated.connect(lambda _: self._font_changed())
+
+        def spin(lo, hi, step, suffix, special=None):
+            box = QDoubleSpinBox()
+            box.setRange(lo, hi)
+            box.setSingleStep(step)
+            box.setDecimals(2)
+            box.setSuffix(suffix)
+            if special:
+                box.setSpecialValueText(special)
+            box.editingFinished.connect(self._style_changed)
+            return box
+
+        self.size = spin(0, 40, 0.5, " mm", "自動")
+        self.tracking = spin(-0.3, 1.0, 0.05, " 字")
+        self.leading = spin(-0.3, 2.0, 0.05, " 字")
+        self.outline = spin(0, 5, 0.1, " mm", "なし")
+        self.border = spin(0, 3, 0.05, " mm")
+        self.align = QComboBox()
+        for key, label in (("top", "上"), ("center", "中央"), ("bottom", "下"), ("left", "左"), ("right", "右")):
+            self.align.addItem(label, key)
+        self.align.activated.connect(lambda _: self._style_changed())
+        self.fill = QComboBox()
+        self.fill.addItem("白", "white")
+        self.fill.addItem("塗らない（透明）", "none")
+        self.fill.activated.connect(lambda _: self._style_changed())
+        self.tcy = QCheckBox("数字と !? を縦中横にする")
+        self.tcy.clicked.connect(lambda _: self._style_changed())
+        self.color = QPushButton("文字の色…")
+        self.color.clicked.connect(self._pick_color)
+        reset = QPushButton("文字とフキダシの設定を既定に戻す")
+        reset.clicked.connect(self._reset_style)
+        order = QHBoxLayout()
+        order.addWidget(up)
+        order.addWidget(down)
         row = QHBoxLayout()
         row.addWidget(self.kind, 1)
         row.addWidget(self.vertical)
@@ -84,22 +131,40 @@ class StoryPanel(QWidget):
         buttons.addWidget(add)
         buttons.addWidget(self.apply_button)
         buttons.addWidget(self.delete_button)
-        hint = QLabel("位置は、選択ツールで編集画面のフキダシをドラッグして動かします。")
+        form = QFormLayout()
+        form.addRow("書体", self.font)
+        form.addRow("文字の大きさ", self.size)
+        form.addRow("字間", self.tracking)
+        form.addRow("行間", self.leading)
+        form.addRow("揃え", self.align)
+        form.addRow("白フチ", self.outline)
+        form.addRow("フキダシの線", self.border)
+        form.addRow("フキダシの中", self.fill)
+        form.addRow("", self.tcy)
+        form.addRow("", self.color)
+        hint = QLabel("編集画面: テキストツール（T）でクリックした所に入力。フキダシはダブルクリックで打ち直し、"
+                      "四隅で大きさ、●でしっぽの先、◇でしっぽの曲がり。右クリックで形・しっぽ・結合。")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#666")
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("このページの台詞（読み順）"))
         layout.addWidget(self.list, 1)
+        layout.addLayout(order)
         layout.addWidget(self.speaker)
         layout.addWidget(self.text)
         layout.addLayout(row)
         layout.addLayout(buttons)
+        layout.addLayout(form)
+        layout.addWidget(reset)
         layout.addWidget(hint)
         self._picked()
 
     def _lines(self):
         page = self.window.current_page()
         return self.window.episode.story_for_page(page.index) if page else []
+
+    def _line(self):
+        return next((ln for ln in self._lines() if ln.id == self.current_id()), None)
 
     def refresh(self) -> None:
         from genko.app.lettering import KIND_LABEL
@@ -127,53 +192,155 @@ class StoryPanel(QWidget):
             self.list.setCurrentRow(self.line_ids.index(line_id))
 
     def _picked(self) -> None:
-        line_id = self.current_id()
-        line = next((ln for ln in self._lines() if ln.id == line_id), None)
-        self.apply_button.setEnabled(line is not None)
-        self.delete_button.setEnabled(line is not None)
-        self.window.canvas.selected_line_id = line_id
+        from genko.app.lettering import with_ruby
+        from genko.balloons import style_of
+
+        line = self._line()
+        for widget in (self.apply_button, self.delete_button):
+            widget.setEnabled(line is not None)
+        self.window.canvas.selected_line_id = line.id if line else None
         self.window.canvas.update()
         if line is None:
             return
+        self._loading = True
         self.speaker.setText(line.speaker)
-        self.text.setPlainText(line.text)
+        self.text.setPlainText(with_ruby(line.text, line.ruby_runs))
         self.kind.setCurrentIndex(max(0, self.kind.findData(line.balloon)))
         self.vertical.setChecked(line.wrap == "vertical")
+        st = style_of(line)
+        font = st["font"] or ("sfx" if line.balloon == "sfx" else "antique")
+        index = self.font.findData(font)
+        if index < 0:
+            self.font.insertItem(self.font.count() - 1, Path(font).stem, font)
+            index = self.font.findData(font)
+        self.font.setCurrentIndex(index)
+        self.size.setValue(float(st["size_mm"] or 0))
+        self.tracking.setValue(float(st["tracking"] or 0))
+        self.leading.setValue(float(st["leading"] or 0))
+        self.outline.setValue(float(st["outline_mm"] or 0))
+        self.border.setValue(float(st["border_mm"] if st["border_mm"] is not None else 0.35))
+        self.align.setCurrentIndex(max(0, self.align.findData(st["align"])))
+        self.fill.setCurrentIndex(max(0, self.fill.findData(st["fill"])))
+        self.tcy.setChecked(bool(st["tcy"]))
+        self._loading = False
+
+    def _style(self, change: dict) -> None:
+        line = self._line()
+        if line is not None and not self._loading:
+            self.window.apply_ops([{"op": "edit_line", "id": line.id, "style": change}])
+
+    def _style_changed(self) -> None:
+        if self._loading:
+            return
+        self._style({"size_mm": self.size.value() or None, "tracking": self.tracking.value(), "leading": self.leading.value(),
+                     "outline_mm": self.outline.value() or None, "border_mm": self.border.value(),
+                     "align": self.align.currentData(), "fill": self.fill.currentData(), "tcy": self.tcy.isChecked()})
+
+    def _font_changed(self) -> None:
+        if self._loading:
+            return
+        key = self.font.currentData()
+        if key == "__pick__":
+            key = self._pick_system_font()
+            if not key:
+                self._picked()
+                return
+        self._style({"font": key})
+        self._picked()
+
+    def _pick_system_font(self) -> str | None:
+        from PySide6.QtWidgets import QApplication, QInputDialog
+
+        from genko import fonts
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            found = fonts.system_fonts()
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not found:
+            QMessageBox.information(self, "Genko", "日本語を表示できる書体が、このパソコンに見つかりませんでした")
+            return None
+        names = [f"{item['name']} {item['style']}" for item in found]
+        name, ok = QInputDialog.getItem(self, "パソコンの書体", "書体", names, 0, False)
+        return found[names.index(name)]["path"] if ok and name in names else None
+
+    def _pick_color(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+
+        from genko.balloons import style_of
+
+        line = self._line()
+        if line is None:
+            return
+        rgb = style_of(line)["rgb"] or (10, 10, 10)
+        color = QColorDialog.getColor(QColor(*rgb), self, "文字の色")
+        if color.isValid():
+            self._style({"rgb": [color.red(), color.green(), color.blue()]})
+
+    def _reset_style(self) -> None:
+        from genko.ops import STYLE_KEYS
+
+        line = self._line()
+        if line is not None:
+            keep = {k: None for k in STYLE_KEYS if k != "group"}
+            self._style(keep)
+            self._picked()
+
+    def _move(self, delta: int) -> None:
+        page = self.window.current_page()
+        line_id = self.current_id()
+        if page is None or line_id is None:
+            return
+        order = list(self.line_ids)
+        i = order.index(line_id)
+        j = i + delta
+        if not 0 <= j < len(order):
+            return
+        order[i], order[j] = order[j], order[i]
+        if self.window.apply_ops([{"op": "reorder_lines", "page": page.index, "order": order}]):
+            self.refresh()
+            self.select(line_id)
 
     def add(self) -> None:
-        from genko.app.lettering import place_new
+        from genko.app.lettering import parse_ruby, place_new
 
         page = self.window.current_page()
-        text = self.text.toPlainText().strip()
-        if page is None or not text:
+        typed = self.text.toPlainText().strip()
+        if page is None or not typed:
             QMessageBox.information(self, "Genko", "台詞を書いてから追加します")
             return
         frame = self.window.selected_frame()
         if frame is None:
-            QMessageBox.information(self, "Genko", "先に編集画面でコマをクリックして選びます")
+            QMessageBox.information(self, "Genko", "先に編集画面でコマをクリックして選びます（テキストツール T なら、置きたい所をクリック）")
             return
+        text, runs = parse_ruby(typed)
         box = place_new(self.window.episode, page, frame, text, self.kind.currentData(), self.vertical.isChecked())
         before = {ln.id for ln in self._lines()}
-        if self.window.apply_ops([{"op": "add_line", "page": page.index, "text": text, "speaker": self.speaker.text().strip(),
-                                   "frame_id": frame.id, "balloon": self.kind.currentData(), **box}]):
+        op = {"op": "add_line", "page": page.index, "text": text, "speaker": self.speaker.text().strip(),
+              "frame_id": frame.id, "balloon": self.kind.currentData(), **box}
+        if runs:
+            op["ruby_runs"] = runs
+        if self.window.apply_ops([op]):
             self.text.clear()
             added = next((ln.id for ln in self._lines() if ln.id not in before), None)
             self.refresh()
             self.select(added)
 
     def apply_edit(self) -> None:
-        from genko.app.lettering import refit
+        from genko.app.lettering import parse_ruby, refit
 
-        line = next((ln for ln in self._lines() if ln.id == self.current_id()), None)
+        line = self._line()
         if line is None:
             return
-        text = self.text.toPlainText().strip()
-        if not text:
+        typed = self.text.toPlainText().strip()
+        if not typed:
             QMessageBox.information(self, "Genko", "台詞が空です。消すときは「削除」を押します")
             return
+        text, runs = parse_ruby(typed)
         kind, vertical = self.kind.currentData(), self.vertical.isChecked()
         ops = [{"op": "edit_line", "id": line.id, "text": text, "speaker": self.speaker.text().strip(), "balloon": kind,
-                "wrap": "vertical" if vertical else "horizontal"}]
+                "wrap": "vertical" if vertical else "horizontal", "ruby_runs": runs}]
         if (text, kind, vertical) != (line.text, line.balloon, line.wrap == "vertical"):
             frame = self.window.frame_by_id(line.frame_id)
             ops.append({"op": "move_line", "id": line.id, **refit(line, frame, text, kind, vertical)})
@@ -412,6 +579,10 @@ class MainWindow(QMainWindow):
         self.canvas.textMoved.connect(self._on_text_moved)
         self.canvas.contextMenuAt.connect(self._context_menu)
         self.canvas.lineSelected.connect(self._on_line_selected)
+        self.canvas.lineGeometry.connect(lambda line_id, change: self.apply_ops([{"op": "move_line", "id": line_id, **change}]))
+        self.canvas.lineEditRequested.connect(self._edit_line_inline)
+        self.canvas.lineContextMenu.connect(self._line_menu)
+        self.canvas.textRequested.connect(self._type_new_line)
         self._target_layer_id: str | None = None
         self.eraser_mm = 2.0
         self._dock_timer = QTimer(self)
@@ -558,8 +729,9 @@ class MainWindow(QMainWindow):
         self.act_select = a("選択", lambda: self._tool("select"), "V", "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", True)
         self.act_pen = a("ペン", lambda: self._tool("pen"), "B", "レイヤー パネルで選んだレイヤーに描きます", True)
         self.act_eraser = a("消しゴム", lambda: self._tool("eraser"), "E", "ペンの線は触れた所で切れます", True)
+        self.act_text = a("テキスト", lambda: self._tool("text"), "T", "クリックした所に台詞を入力します（縦書き）", True)
         tools = QActionGroup(self)
-        for act in (self.act_select, self.act_pen, self.act_eraser):
+        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_text):
             tools.addAction(act)
         self.act_select.setChecked(True)
         self.act_color = a("ペンの色…", self._pick_color, "C")
@@ -578,7 +750,7 @@ class MainWindow(QMainWindow):
             ("編集", [self.act_undo, self.act_redo]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_onion]),
-            ("ツール", [self.act_select, self.act_pen, self.act_eraser, None, self.act_color, self.act_thicker, self.act_thinner]),
+            ("ツール", [self.act_select, self.act_pen, self.act_eraser, self.act_text, None, self.act_color, self.act_thicker, self.act_thinner]),
             ("コマ", [self.act_split_h, self.act_split_v, self.act_merge]),
             ("ページ", [self.act_add_page, self.act_del_page, None, self.act_name_ok]),
         ]
@@ -595,7 +767,7 @@ class MainWindow(QMainWindow):
         tools_bar.setObjectName("tools")
         tools_bar.setMovable(False)
         tools_bar.setIconSize(QSize(16, 16))
-        for act in (self.act_select, self.act_pen, self.act_eraser, None, self.act_undo, self.act_redo, None,
+        for act in (self.act_select, self.act_pen, self.act_eraser, self.act_text, None, self.act_undo, self.act_redo, None,
                     self.act_fit, self.act_zoom_out, self.act_zoom_in, None, self.act_prev, self.act_next, None, self.act_export):
             if act is None:
                 tools_bar.addSeparator()
@@ -618,12 +790,12 @@ class MainWindow(QMainWindow):
         for title, widget in (("承認箱", self.approvals), ("コマ", self.panel_view), ("台詞", self.story),
                               ("レイヤー", self.layers), ("ライブラリ", self.library)):
             dock = QDockWidget(title, self)
-            if widget is self.panel_view:
-                # the panel view is tall; on a small screen it scrolls instead of making the window taller
+            if widget in (self.panel_view, self.story, self.layers):
+                # tall panels scroll on a small screen instead of making the window taller
                 scroll = QScrollArea()
                 scroll.setWidgetResizable(True)
                 scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-                widget.setMinimumHeight(560)
+                widget.setMinimumHeight(max(420, widget.minimumSizeHint().height()))
                 scroll.setWidget(widget)
                 dock.setWidget(scroll)
             else:
@@ -783,6 +955,12 @@ class MainWindow(QMainWindow):
                             f"{selected} ・ {saved} ・ {wording.actor(self.session.actor)}")
         self._refresh_zoom()
 
+    def flash(self, message: str, ms: int = 3000) -> None:
+        """A short notice in the status line (it goes back to the page's status after `ms`)."""
+        self.status.setText(f"<b>{message}</b>")
+        self.last_notice = message
+        QTimer.singleShot(ms, self._refresh_status)
+
     def _refresh_zoom(self) -> None:
         self.zoom_label.setText(f"表示 {self.canvas.zoom_percent()}%")
 
@@ -790,7 +968,7 @@ class MainWindow(QMainWindow):
 
     def _tool(self, tool: str) -> None:
         self.canvas.set_tool(tool)
-        {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser}[tool].setChecked(True)
+        {"select": self.act_select, "pen": self.act_pen, "eraser": self.act_eraser, "text": self.act_text}[tool].setChecked(True)
 
     # --- the layer the pen works on ---------------------------------------------------------------
 
@@ -810,7 +988,7 @@ class MainWindow(QMainWindow):
         self._target_layer_id = layer_id
         layer = self.target_layer()
         if layer is not None:
-            self.statusBar().showMessage(f"描く先: {wording.layer_label(layer)}", 2000)
+            self.flash(f"描く先: {wording.layer_label(layer)}", 2000)
 
     @staticmethod
     def drawable(layer) -> bool:
@@ -836,7 +1014,7 @@ class MainWindow(QMainWindow):
             return
         if not self.drawable(layer):
             why = "ロックされています" if getattr(layer, "locked", False) else "ペンかペイントのレイヤーではありません"
-            self.statusBar().showMessage(f"「{wording.layer_label(layer)}」には描けません（{why}）。レイヤー パネルで選び直します", 4000)
+            self.flash(f"「{wording.layer_label(layer)}」には描けません（{why}）。レイヤー パネルで選び直します", 4000)
             return
         if self.canvas.tool == "eraser":
             self.apply_ops([{"op": "erase", "page": page.index, "layer_id": layer.id,
@@ -865,17 +1043,125 @@ class MainWindow(QMainWindow):
         if self.canvas.tool == "eraser":
             self.eraser_mm = nxt(self.eraser_mm)
             self.canvas.eraser_mm = self.eraser_mm
-            self.statusBar().showMessage(f"消しゴムの太さ {self.eraser_mm:g} mm", 2000)
+            self.flash(f"消しゴムの太さ {self.eraser_mm:g} mm", 2000)
             self.canvas.update()
             return
         width = nxt(float(self.episode.brush_width_mm))
         self.canvas.brush_width_mm = width
         self.apply_ops([{"op": "set_brush", "width_mm": width}])
-        self.statusBar().showMessage(f"ペンの太さ {width:g} mm", 2000)
+        self.flash(f"ペンの太さ {width:g} mm", 2000)
 
     def _toggle_guides(self) -> None:
         self.canvas.show_guides = self.act_guides.isChecked()
         self.canvas.update()
+
+    # --- lettering on the page ------------------------------------------------------------------------
+
+    def _line(self, line_id: str):
+        return next((ln for ln in self.episode.story if ln.id == line_id), None)
+
+    def _type_new_line(self, x_mm: float, y_mm: float) -> None:
+        page = self._current()
+        if page is None:
+            return
+
+        def done(typed: str | None) -> None:
+            from genko.app.lettering import parse_ruby, place_at
+
+            if not typed:
+                return
+            text, runs = parse_ruby(typed)
+            frame = page.frame_at(x_mm, y_mm)
+            box = place_at(x_mm, y_mm, text, "speech", True, frame)
+            op = {"op": "add_line", "page": page.index, "text": text, "balloon": "speech", **box}
+            if frame is not None:
+                op["frame_id"] = frame.id
+            if runs:
+                op["ruby_runs"] = runs
+            before = {ln.id for ln in self.episode.story}
+            if self.apply_ops([op]):
+                added = next((ln.id for ln in self.episode.story if ln.id not in before), None)
+                self.canvas.selected_line_id = added
+                self._tool("select")
+                self._on_line_selected(added, False)
+
+        self.canvas.open_editor(x_mm, y_mm, "", done)
+
+    def _edit_line_inline(self, line_id: str) -> None:
+        from genko.app.lettering import with_ruby
+
+        line = self._line(line_id)
+        if line is None:
+            return
+
+        def done(typed: str | None) -> None:
+            from genko.app.lettering import parse_ruby, refit
+
+            current = self._line(line_id)
+            if not typed or current is None:
+                return
+            text, runs = parse_ruby(typed)
+            if (text, [list(r) for r in runs]) == (current.text, [list(r) for r in current.ruby_runs]):
+                return
+            ops = [{"op": "edit_line", "id": line_id, "text": text, "ruby_runs": runs}]
+            size = refit(current, self.frame_by_id(current.frame_id), text, current.balloon, current.wrap == "vertical")
+            # keep the balloon's centre where it was
+            cx, cy = current.x_mm + current.w_mm / 2, current.y_mm + current.h_mm / 2
+            ops.append({"op": "move_line", "id": line_id, "x_mm": round(cx - size["w_mm"] / 2, 2), "y_mm": round(cy - size["h_mm"] / 2, 2),
+                        "w_mm": size["w_mm"], "h_mm": size["h_mm"]})
+            self.apply_ops(ops)
+
+        self.canvas.open_editor(line.x_mm, line.y_mm, with_ruby(line.text, line.ruby_runs), done)
+
+    def _line_menu(self, line_id: str, pos: QPointF) -> None:
+        from genko.app.lettering import KINDS
+        from genko.balloons import style_of
+
+        line = self._line(line_id)
+        if line is None:
+            return
+        self._on_line_selected(line_id, False)
+        menu = QMenu(self)
+        edit = menu.addAction("打ち直す（ダブルクリック）")
+        edit.triggered.connect(lambda: self._edit_line_inline(line_id))
+        shapes = menu.addMenu("フキダシの形")
+        for key, label in KINDS:
+            act = shapes.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(line.balloon == key)
+            act.triggered.connect(lambda _=False, k=key: self.apply_ops([{"op": "edit_line", "id": line_id, "balloon": k}]))
+        direction = menu.addAction("横書きにする" if line.wrap == "vertical" else "縦書きにする")
+        direction.triggered.connect(lambda: self.apply_ops([{"op": "edit_line", "id": line_id,
+                                                             "wrap": "horizontal" if line.wrap == "vertical" else "vertical"}]))
+        menu.addSeparator()
+        tails = self.canvas._tails(line)
+        add_tail = menu.addAction("しっぽを足す")
+        add_tail.triggered.connect(lambda: self.apply_ops([{"op": "move_line", "id": line_id, "tails": tails + [
+            {"to": [round(line.x_mm - line.w_mm * 0.2, 2), round(line.y_mm + line.h_mm * 1.25, 2)]}]}]))
+        if tails:
+            drop = menu.addAction("しっぽを 1 本消す")
+            drop.triggered.connect(lambda: self.apply_ops([{"op": "move_line", "id": line_id, "tails": tails[:-1]}]))
+            straight = menu.addAction("しっぽをまっすぐにする")
+            straight.triggered.connect(lambda: self.apply_ops([{"op": "move_line", "id": line_id,
+                                                                "tails": [{"to": t["to"]} for t in tails]}]))
+        menu.addSeparator()
+        group = style_of(line)["group"]
+        lines = self.episode.story_for_page(line.page_index)
+        index = next(i for i, ln in enumerate(lines) if ln.id == line_id)
+        if index + 1 < len(lines):
+            nxt = lines[index + 1]
+            join = menu.addAction("次の台詞のフキダシとつなげる")
+            key = group or f"g_{line_id[:8]}"
+            join.triggered.connect(lambda: self.apply_ops([{"op": "edit_line", "id": line_id, "style": {"group": key}},
+                                                          {"op": "edit_line", "id": nxt.id, "style": {"group": key}}]))
+        if group:
+            split = menu.addAction("つなげたフキダシを離す")
+            split.triggered.connect(lambda: self.apply_ops([{"op": "edit_line", "id": ln.id, "style": {"group": None}}
+                                                           for ln in lines if style_of(ln)["group"] == group]))
+        menu.addSeparator()
+        delete = menu.addAction("削除")
+        delete.triggered.connect(lambda: self.apply_ops([{"op": "delete_line", "id": line_id}]))
+        menu.exec(pos.toPoint())
 
     def _on_line_selected(self, line_id: str, open_panel: bool) -> None:
         self.story.refresh()
@@ -918,7 +1204,7 @@ class MainWindow(QMainWindow):
         ops = [{"op": "register_assets", "assets": {ref: {"kind": "image", "origin": {"kind": "self", "file": Path(path).name}}}}, place]
         if self.apply_ops(ops):
             where = "選んだコマ" if frame is not None else "ページ全体"
-            self.statusBar().showMessage(f"{where}に「{Path(path).name}」を置きました", 4000)
+            self.flash(f"{where}に「{Path(path).name}」を置きました", 4000)
 
     def _jump(self, delta: int) -> None:
         nxt = self._page_index + delta
@@ -991,7 +1277,7 @@ class MainWindow(QMainWindow):
         try:
             self.session.undo()
         except ApplyError as exc:
-            self.statusBar().showMessage(wording.error(str(exc)), 3000)
+            self.flash(wording.error(str(exc)), 3000)
         self._watch()
         self._reload_pages()
 
@@ -999,7 +1285,7 @@ class MainWindow(QMainWindow):
         try:
             self.session.redo()
         except ApplyError as exc:
-            self.statusBar().showMessage(wording.error(str(exc)), 3000)
+            self.flash(wording.error(str(exc)), 3000)
         self._watch()
         self._reload_pages()
 
@@ -1033,7 +1319,7 @@ class MainWindow(QMainWindow):
             self._save_as()
             return
         self.commit_now()
-        self.statusBar().showMessage(f"保存しました: {self.path}", 3000)
+        self.flash(f"保存しました: {self.path}", 3000)
 
     def _save_as(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "原稿を保存する場所", f"{self.episode.title or '無題'}.genko")
@@ -1044,7 +1330,7 @@ class MainWindow(QMainWindow):
         remember_project(target)
         self._watch()
         self._refresh_status()
-        self.statusBar().showMessage(f"保存しました: {target}", 3000)
+        self.flash(f"保存しました: {target}", 3000)
 
     def _export(self) -> None:
         self.commit_now()

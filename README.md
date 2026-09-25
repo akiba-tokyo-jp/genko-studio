@@ -69,6 +69,10 @@ Python 3.11+.
 - `docs/AI_PIPELINE.md` — agent-driven manga production design (external agents such as Hermes Agent operate Genko over MCP)
 - `docs/ops.schema.json` — ops catalog
 
+## Fonts
+
+The lettering faces in `src/genko/fonts/` (Zen Kaku Gothic New, Zen Old Mincho, Zen Maru Gothic, Yomogi, Reggae One, Dela Gothic One) are under the SIL Open Font License 1.1; the licence texts are in `src/genko/fonts/licenses/`.
+
 ## License
 
 MIT

@@ -101,24 +101,96 @@ def glyph(char: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, i
     return img
 
 
-def _columns(text: str, per_col: int) -> list[list[str]]:
-    if per_col < 1:
-        per_col = 1
+LINE_END_KINSOKU = frozenset("「『（(【［〈《〔｛")
+TCY_HALF = frozenset("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!?")
+FULL_DIGITS = {chr(0xFF10 + i): str(i) for i in range(10)}
+BANGS = {"！": "!", "？": "?", "!": "!", "?": "?"}
+
+
+def cells(text: str, tcy: bool = True) -> list[str]:
+    """The text as vertical cells. With tcy, 2-3 half-width letters or digits ("12", "OK") and
+    runs of ！？ ("!?", "!!") sit side by side in one cell (縦中横). "\n" stays as a cell."""
+    out: list[str] = []
+    i = 0
+    text = text or ""
+    while i < len(text):
+        char = text[i]
+        if tcy and char in BANGS:
+            j = i
+            while j < len(text) and text[j] in BANGS and j - i < 3:
+                j += 1
+            if j - i >= 2:
+                out.append("".join(BANGS[c] for c in text[i:j]))
+                i = j
+                continue
+        if tcy and char in FULL_DIGITS:
+            j = i
+            while j < len(text) and text[j] in FULL_DIGITS:
+                j += 1
+            if 2 <= j - i <= 3:  # "１２" reads as one number: side by side, like "12"
+                out.append("".join(FULL_DIGITS[c] for c in text[i:j]))
+                i = j
+                continue
+            out.extend(text[i:j])
+            i = j
+            continue
+        if tcy and char in TCY_HALF and char not in "!?":
+            j = i
+            while j < len(text) and text[j] in TCY_HALF and text[j] not in "!?":
+                j += 1
+            if 2 <= j - i <= 3:
+                out.append(text[i:j])
+                i = j
+                continue
+            out.extend(text[i:j])
+            i = j
+            continue
+        out.append(char)
+        i += 1
+    return out
+
+
+def columns_of(text: str, per_col: int, tcy: bool = True) -> list[list[str]]:
+    """Cells in columns: "\n" starts a column; long runs wrap at per_col. Kinsoku: closing marks and
+    small kana never start a column (they hang at the end of the one before, ぶら下げ), and opening
+    brackets never end one."""
+    per_col = max(1, per_col)
     cols: list[list[str]] = []
-    # An explicit "\n" always starts a new column; long segments still wrap at per_col.
-    for segment in (text or "").split("\n"):
-        cur: list[str] = []
-        for char in segment:
-            if len(cur) >= per_col:
-                cols.append(cur)
-                cur = []
-            cur.append(char)
-        if cur:
+    cur: list[str] = []
+    for cell in cells(text, tcy):
+        if cell == "\n":
             cols.append(cur)
+            cur = []
+            continue
+        if len(cur) >= per_col:
+            cols.append(cur)
+            cur = []
+        cur.append(cell)
+    cols.append(cur)
     for i in range(1, len(cols)):
         while cols[i] and cols[i][0] in LINE_START_KINSOKU and cols[i - 1]:
             cols[i - 1].append(cols[i].pop(0))
+    for i in range(len(cols) - 1):
+        while cols[i] and cols[i][-1] in LINE_END_KINSOKU and len(cols[i]) > 1:
+            cols[i + 1].insert(0, cols[i].pop())
     return [col for col in cols if col]
+
+
+def _columns(text: str, per_col: int) -> list[list[str]]:
+    return columns_of(text, per_col, tcy=False)
+
+
+def tcy_glyph(cell: str, font: ImageFont.ImageFont, em: int, fill: tuple[int, int, int]) -> Image.Image:
+    """Two or three characters side by side in one em (condensed to fit)."""
+    raw = _raw_glyph(cell, font, fill)
+    gw, gh = raw.size
+    limit = int(em * 0.92)
+    scale = min(1.0, limit / max(1, gw), limit / max(1, gh))
+    if scale < 1.0:
+        raw = raw.resize((max(1, int(gw * scale)), max(1, int(gh * scale))), Image.Resampling.LANCZOS)
+    img = Image.new("RGBA", (em, em), (0, 0, 0, 0))
+    img.paste(raw, ((em - raw.width) // 2, (em - raw.height) // 2), raw)
+    return img
 
 
 def _ruby_spans(cols: list[list[str]], ruby_runs: list) -> list[tuple[int, int, int, str]]:
@@ -155,35 +227,58 @@ def compose(
     max_height: int,
     fill: tuple[int, int, int] = (10, 10, 10),
     ruby_runs: list | None = None,
+    *,
+    face=None,
+    tracking: float = 0.0,
+    leading: float = 0.0,
+    tcy: bool = False,
+    align: str = "top",
 ) -> Image.Image:
     """Vertical text, columns right to left. Ruby sits to the right of its base characters,
-    centred on them, for every run."""
-    per_col = max(1, max_height // em)
-    cols = _columns(text, per_col)
+    centred on them, for every run.
+
+    face: a genko.fonts.Face that picks the font per character (アンチック). tracking / leading:
+    extra space between characters / columns, in em. tcy: 縦中横 for short runs of digits and !?.
+    align: top, center or bottom of each column in the block."""
+    step = max(1, round(em * (1 + tracking)))
+    per_col = max(1, (max_height - em) // step + 1) if max_height >= em else 1
+    cols = columns_of(text, per_col, tcy)
     if not cols:
         return Image.new("RGBA", (em, em), (0, 0, 0, 0))
     spans = _ruby_spans(cols, ruby_runs) if ruby_runs else []
     ruby_w = max(4, em // 2) if spans else 0
-    pitch = em + ruby_w
-    width = pitch * len(cols)
-    height = em * max(len(col) for col in cols)
+    gap = max(0, round(em * leading))
+    pitch = em + ruby_w + gap
+    width = pitch * len(cols) - gap
+    height = em + step * (max(len(col) for col in cols) - 1)
     out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+
+    def font_for(char: str):
+        return face.font(em, char) if face is not None else font
+
     for index, col in enumerate(cols):
-        cx = width - pitch * (index + 1)
-        for row, char in enumerate(col):
-            out.alpha_composite(glyph(char, font, em, fill), (cx, row * em))
+        cx = width - pitch * index - em - ruby_w
+        col_h = em + step * (len(col) - 1)
+        top = 0 if align == "top" else (height - col_h) // (2 if align == "center" else 1)
+        for row, cell in enumerate(col):
+            if len(cell) > 1:
+                image = tcy_glyph(cell, font_for("0"), em, fill)
+            else:
+                image = glyph(cell, font_for(cell), em, fill)
+            out.alpha_composite(image, (cx, top + row * step))
     if spans:
-        try:
-            ruby_font = font.font_variant(size=max(8, ruby_w))  # type: ignore[attr-defined]
-        except Exception:
-            ruby_font = font
         for col, first, last, ruby in spans:
             if not ruby:
                 continue
-            rx = width - pitch * (col + 1) + em
-            centre = (first + last + 1) * em / 2
+            rx = width - pitch * col - ruby_w
+            centre = (first * step + last * step + em) / 2
             top = max(0, min(height - ruby_w * len(ruby), round(centre - ruby_w * len(ruby) / 2)))
             for i, char in enumerate(ruby):
+                base = font_for(char)
+                try:
+                    ruby_font = base.font_variant(size=max(8, ruby_w))  # type: ignore[attr-defined]
+                except Exception:
+                    ruby_font = base
                 out.alpha_composite(glyph(char, ruby_font, ruby_w, fill), (rx, top + i * ruby_w))
     return out
 

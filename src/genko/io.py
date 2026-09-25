@@ -80,7 +80,7 @@ def _line_to_dict(line: StoryLine) -> dict:
         "wrap": line.wrap,
         "ruby_runs": [list(item) for item in line.ruby_runs],
         "path": line.path,
-    }
+    } | ({"style": dict(line.style)} if line.style else {}) | ({"tails": [dict(t) for t in line.tails]} if line.tails else {})
 
 
 
