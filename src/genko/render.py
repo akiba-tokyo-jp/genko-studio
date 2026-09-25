@@ -261,6 +261,53 @@ def render_frame(page: Page, frame_id: str, working_dpi: int, mode: str = "proof
     return image.crop((max(0, x0), max(0, y0), min(image.width, x1), min(image.height, y1)))
 
 
+def _masked(layer, image: Image.Image) -> Image.Image:
+    """A layer's pixels through its mask (white shows, black hides)."""
+    mask = getattr(layer, "mask", None)
+    if not mask or not mask.get("png") or not mask.get("enabled", True):
+        return image
+    shown = Image.open(io.BytesIO(mask["png"])).convert("L").resize(image.size, Image.Resampling.BILINEAR)
+    image = image.convert("RGBA")
+    image.putalpha(ImageChops.multiply(image.split()[3], shown))
+    return image
+
+
+def _tinted(image: Image.Image, rgb) -> Image.Image:
+    """A layer shown in one colour (its shapes kept by their alpha): a blue draft, a red check."""
+    image = image.convert("RGBA")
+    out = Image.new("RGBA", image.size, tuple(int(v) for v in rgb)[:3] + (0,))
+    out.putalpha(image.split()[3])
+    return out
+
+
+def layer_image(page: Page, layer, dpi: int, episode: Episode | None = None) -> Image.Image:
+    """One layer alone over a transparent page (its pixels, fills and lines, panel clip and mask): for
+    merging layers and for the layer panel's small pictures."""
+    size = (mm_to_px(page.spec.width_mm, dpi), mm_to_px(page.spec.height_mm, dpi))
+    empty = Image.new("RGBA", size, (0, 0, 0, 0))
+    if getattr(layer, "kind", None) == LayerKind.FOLDER:
+        return empty
+    if _is_tone(layer):
+        from genko import tones
+
+        white = Image.new("RGBA", size, (255, 255, 255, 255))
+        drawn = tones.draw_layer(white.copy(), layer, page, dpi, print_mode=False)
+        grey = ImageChops.difference(white.convert("L"), drawn.convert("L"))  # the tone's ink as alpha
+        out = Image.new("RGBA", size, (20, 20, 20, 0))
+        out.putalpha(grey)
+        return _masked(layer, out)
+    if layer.kind == LayerKind.PLACED:
+        raster = _placed_raster(layer, page, episode, size, dpi, "proof", False)
+    else:
+        raster = _open_raster(layer)
+        if raster is not None:
+            raster = raster.resize(size)
+    lines = _layer_strokes(layer, size, dpi, _clip_mask(page, size, dpi), raster)
+    if lines is not None:
+        raster = lines if raster is None else Image.alpha_composite(raster.convert("RGBA"), lines)
+    return _masked(layer, raster.convert("RGBA")) if raster is not None else empty
+
+
 def _open_raster(layer) -> Image.Image | None:
     if layer.raster_png:
         return Image.open(io.BytesIO(layer.raster_png)).convert("RGBA")
@@ -486,6 +533,9 @@ def render_page(
             raster = lines if raster is None else Image.alpha_composite(raster.convert("RGBA"), lines)
         if raster is None:
             continue
+        raster = _masked(layer, raster)
+        if mode != "print" and getattr(layer, "color", None):
+            raster = _tinted(raster, layer.color)
         clip_mask = prev_alpha if getattr(layer, "clip", False) else None
         opacity = getattr(layer, "opacity", None)
         opacity = 1.0 if opacity is None else float(opacity)  # 0 means invisible, not "default"

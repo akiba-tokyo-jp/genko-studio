@@ -254,6 +254,9 @@ class Layer:
     clip_to: str = "frame"  # frame | bleed | none
     source: dict | None = None  # placed: {"candidate": …, "request": …}
     finish: dict | None = None  # placed: mono finishing override (M6)
+    # a layer mask: {"png": L image over the whole page (white shows, black hides), "enabled": bool}
+    mask: dict | None = None
+    color: tuple[int, int, int] | None = None  # shown in this colour on screen (a blue draft); never printed
 
 
 @dataclass

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import copy
 import dataclasses
+import io
 import math
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,8 @@ from genko.models import (
     StoryLine,
     new_id,
 )
+from PIL import Image, ImageChops, ImageDraw, ImageOps
+
 from genko.pipeline import InkBlockedError, advance
 
 
@@ -45,7 +48,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
-    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?"},
+    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen, never printed)"},
     {"op": "add_page", "count": "int", "after": "int? (insert after this page; default at the end)"},
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int", "next_to": "bool? (the copy right after the page; default at the end)"},
@@ -86,6 +89,10 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "unlock_page", "page": "int"},
     {"op": "add_layer", "page": "int", "name": "str?", "kind": "pen|paint|folder?", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?", "after": "layer id?", "id": "str?"},
     {"op": "delete_layer", "page": "int", "id": "str"},
+    {"op": "duplicate_layer", "page": "int", "id": "str", "new_id": "str?"},
+    {"op": "merge_down", "page": "int", "id": "str (merged into the layer below it; pen onto pen stays lines, anything else becomes pixels)"},
+    {"op": "set_layer_mask", "page": "int", "id": "str", "area": "{poly} | {mask}? (only this area shows)", "fill": "show|hide? (the whole mask)", "invert": "bool?", "enabled": "bool?", "delete": "bool?"},
+    {"op": "paint_mask", "page": "int", "id": "str", "points": "[[x,y],...]", "width_mm": "float?", "show": "bool (true: the pen shows the layer, false: the eraser hides it)"},
     {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal"},
     {"op": "set_brush", "rgb": "[r,g,b]?", "width_mm": "float?", "stabilize": "int?", "taper": "bool?", "curve": "gpen|linear"},
     {"op": "select_frame", "page": "int", "frame_id": "str"},
@@ -379,6 +386,65 @@ def _merge_style(current: dict, change) -> dict:
             raise ApplyError("arc must be between -1 and 1")
         out[key] = value
     return out
+
+
+MASK_DPI = 150
+ROLE_TITLES = {"name": "ネーム", "draft": "下描き", "ink": "ペン入れ", "bg": "背景", "finish": "仕上げ"}
+
+
+def _png(image) -> bytes:
+    buf = io.BytesIO()
+    image.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def _mask_image(page, layer):
+    """The layer's mask as an L image over the page (all white — everything shows — when it has none)."""
+    size = (max(1, round(page.spec.width_mm / 25.4 * MASK_DPI)), max(1, round(page.spec.height_mm / 25.4 * MASK_DPI)))
+    if layer.mask and layer.mask.get("png"):
+        return Image.open(io.BytesIO(layer.mask["png"])).convert("L").resize(size)
+    return Image.new("L", size, 255)
+
+
+def _merge_down(episode, page, upper) -> None:
+    """The layer into the one below it (same folder). Pen onto pen with nothing in between stays lines;
+    anything else is drawn into pixels on the lower layer, as it showed."""
+    from genko import raster as rasters
+    from genko import render
+
+    siblings = [item for item in page.layers if item.parent_id == upper.parent_id and item.kind != LayerKind.FOLDER]
+    at = siblings.index(upper)
+    if at == 0:
+        raise ApplyError("there is no layer below to merge into")
+    lower = siblings[at - 1]
+    for item in (upper, lower):
+        if item.kind in (LayerKind.PLACED, LayerKind.TONE) or getattr(item, "tone", None):
+            raise ApplyError("placed images and tones cannot be merged")
+        if getattr(item, "locked", False):
+            raise ApplyError("the layer is locked")
+    plain = (upper.kind == lower.kind == LayerKind.STROKES and not upper.raster_png and not lower.raster_png
+             and not upper.mask and not lower.mask and (upper.blend or "normal") == "normal" and not upper.clip
+             and float(upper.opacity if upper.opacity is not None else 1) >= 1 and upper.panel_clip == lower.panel_clip
+             and upper.color == lower.color)
+    if plain:
+        lower.strokes.extend(upper.strokes)
+        lower.patches.extend(upper.patches)
+    else:
+        dpi = rasters.WORKING_DPI
+        below = render.layer_image(page, lower, dpi, episode)
+        above = render.layer_image(page, upper, dpi, episode)
+        clip = below.split()[3] if upper.clip else None
+        opacity = float(upper.opacity if upper.opacity is not None else 1)
+        merged = render._blend_over(below, above, upper.blend or "normal", opacity, clip)
+        if (upper.blend or "normal") != "normal":
+            # (a blend mode keeps the lower alpha; where only the upper layer is, it still shows)
+            shown = ImageChops.multiply(above.split()[3], clip) if clip else above.split()[3]
+            shown = shown.point(lambda v: int(v * opacity))
+            merged.putalpha(ImageChops.lighter(below.split()[3], shown))
+        lower.strokes, lower.patches, lower.mask = [], [], None
+        lower.kind = LayerKind.RASTER
+        rasters.save_raster(page, lower, merged)
+    page.layers.remove(upper)
 
 
 def _emphasis(raw) -> list[str]:
@@ -1024,6 +1090,77 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             layer.parent_id = op.get("parent")
         if "name" in op:
             layer.title = str(op["name"])
+        if "color" in op:
+            layer.color = tuple(int(v) for v in op["color"])[:3] if op["color"] else None
+        return
+
+    if name == "duplicate_layer":
+        page = _require_page(episode, op)
+        source = _layer_by_id(page, str(op.get("id") or ""))
+        if source.kind == LayerKind.FOLDER:
+            raise ApplyError("a folder cannot be duplicated")
+        twin = copy.deepcopy(source)
+        twin.id = str(op.get("new_id") or new_id())
+        if any(item.id == twin.id for item in page.layers):
+            raise ApplyError(f"layer {twin.id} exists")
+        if source.kind != LayerKind.PLACED:
+            twin.role = LayerRole.USER  # the copy is an ordinary layer (a book has one ink layer, one name layer…)
+        twin.title = f"{source.title or ROLE_TITLES.get(source.role.value, 'レイヤー')} のコピー"
+        for stroke in twin.strokes:
+            stroke.id = new_id()
+        for patch in twin.patches:
+            patch["id"] = new_id()
+        page.layers.insert(page.layers.index(source) + 1, twin)
+        return
+
+    if name == "merge_down":
+        page = _require_page(episode, op)
+        upper = _layer_by_id(page, str(op.get("id") or ""))
+        _merge_down(episode, page, upper)
+        return
+
+    if name == "set_layer_mask":
+        page = _require_page(episode, op)
+        layer = _layer_by_id(page, str(op.get("id") or ""))
+        if layer.kind in (LayerKind.FOLDER, LayerKind.PLACED):
+            raise ApplyError("this layer cannot take a mask (a folder or a placed image)")
+        if op.get("delete"):
+            layer.mask = None
+            return
+        image = _mask_image(page, layer)
+        if op.get("area"):
+            from genko import selection
+
+            shown, (x0, y0) = selection.area_mask(op["area"], MASK_DPI)
+            image = Image.new("L", image.size, 0)
+            image.paste(shown, (x0, y0))
+        elif op.get("fill"):
+            if op["fill"] not in ("show", "hide"):
+                raise ApplyError("fill must be show or hide")
+            image = Image.new("L", image.size, 255 if op["fill"] == "show" else 0)
+        if op.get("invert"):
+            image = ImageOps.invert(image)
+        enabled = bool(op["enabled"]) if "enabled" in op else bool((layer.mask or {}).get("enabled", True))
+        layer.mask = {"png": _png(image), "enabled": enabled}
+        return
+
+    if name == "paint_mask":
+        page = _require_page(episode, op)
+        layer = _layer_by_id(page, str(op.get("id") or ""))
+        if layer.kind in (LayerKind.FOLDER, LayerKind.PLACED):
+            raise ApplyError("this layer cannot take a mask (a folder or a placed image)")
+        points = _parse_points(op.get("points") or [])
+        if not points:
+            raise ApplyError("points needs at least one [x_mm, y_mm] pair")
+        from genko.stroke import draw_stroke_mm
+
+        image = _mask_image(page, layer)
+        if len(points) == 1:
+            points = [points[0], [points[0][0] + 0.01, points[0][1] + 0.01]]
+        flat = [[p[0], p[1]] for p in points]  # the mask takes the whole width, whatever the pressure
+        draw_stroke_mm(ImageDraw.Draw(image), flat, MASK_DPI, float(op.get("width_mm") or 3.0), 255 if op.get("show", True) else 0,
+                       pressure_scale=False)
+        layer.mask = {"png": _png(image), "enabled": bool((layer.mask or {}).get("enabled", True))}
         return
 
     if name == "add_page":

@@ -154,7 +154,8 @@
       "lock_alpha": "bool?",
       "locked": "bool?",
       "panel_clip": "bool? (false: lines run out of the panels)",
-      "name": "str?"
+      "name": "str?",
+      "color": "[r,g,b]|null? (shown in this colour on screen, never printed)"
     },
     {
       "op": "add_page",
@@ -457,6 +458,35 @@
       "op": "delete_layer",
       "page": "int",
       "id": "str"
+    },
+    {
+      "op": "duplicate_layer",
+      "page": "int",
+      "id": "str",
+      "new_id": "str?"
+    },
+    {
+      "op": "merge_down",
+      "page": "int",
+      "id": "str (merged into the layer below it; pen onto pen stays lines, anything else becomes pixels)"
+    },
+    {
+      "op": "set_layer_mask",
+      "page": "int",
+      "id": "str",
+      "area": "{poly} | {mask}? (only this area shows)",
+      "fill": "show|hide? (the whole mask)",
+      "invert": "bool?",
+      "enabled": "bool?",
+      "delete": "bool?"
+    },
+    {
+      "op": "paint_mask",
+      "page": "int",
+      "id": "str",
+      "points": "[[x,y],...]",
+      "width_mm": "float?",
+      "show": "bool (true: the pen shows the layer, false: the eraser hides it)"
     },
     {
       "op": "filter_raster",

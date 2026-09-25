@@ -54,6 +54,11 @@ def _layer(data: dict, store=None) -> Layer:
     if store is not None and data.get("asset"):
         layer.raster_relpath = store.relpath(data["asset"], ".png")
         layer.raster_png = store.get_bytes(data["asset"], ".png")
+    mask = data.get("mask") or {}
+    if store is not None and mask.get("asset"):
+        png = store.get_bytes(mask["asset"], ".png")
+        if png:
+            layer.mask = {"png": png, "enabled": bool(mask.get("enabled", True))}
     for patch in data.get("patches") or []:
         item = {k: v for k, v in patch.items() if k != "asset"}
         if store is not None and patch.get("asset"):
@@ -91,6 +96,7 @@ def _layer_fields(data: dict, role: LayerRole) -> Layer:
         panel_clip=bool(data.get("panel_clip", True)),
         tone=dict(data["tone"]) if data.get("tone") else None,
         parent_id=data.get("parent_id"),
+        color=tuple(int(v) for v in data["color"])[:3] if data.get("color") else None,  # type: ignore[arg-type]
     )
 
 

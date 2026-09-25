@@ -55,7 +55,9 @@ def _layer_to_dict(layer: Layer) -> dict:
         "parent_id": layer.parent_id,
     } | ({"patches": [{k: v for k, v in p.items() if k != "png"} for p in layer.patches]} if layer.patches else {}) \
         | ({"locked": True} if layer.locked else {}) | ({"panel_clip": False} if not layer.panel_clip else {}) \
-        | ({"tone": dict(layer.tone)} if layer.tone else {}) | ({
+        | ({"tone": dict(layer.tone)} if layer.tone else {}) \
+        | ({"mask": {"enabled": bool(layer.mask.get("enabled", True))}} if layer.mask else {}) \
+        | ({"color": list(layer.color)} if layer.color else {}) | ({
         "asset": layer.asset,
         "frame_id": layer.frame_id,
         "placement_mm": _rect_to_dict(layer.placement_mm) if layer.placement_mm else None,
@@ -182,6 +184,8 @@ def _layer_to_v3(layer: Layer, store: AssetStore) -> dict:
     if layer.raster_png:
         data["asset"] = store.put_bytes(layer.raster_png, ".png")
         layer.raster_relpath = store.relpath(data["asset"], ".png")
+    if layer.mask and layer.mask.get("png"):
+        data["mask"] = {"enabled": bool(layer.mask.get("enabled", True)), "asset": store.put_bytes(layer.mask["png"], ".png")}
     if layer.patches:
         data["patches"] = [{**{k: v for k, v in p.items() if k != "png"}, "asset": store.put_bytes(p["png"], ".png")}
                            for p in layer.patches if p.get("png")]

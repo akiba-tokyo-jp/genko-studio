@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, QPointF, QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QKeySequence, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -41,7 +41,7 @@ from genko.app.pages_panel import PageList, nombre_dialog
 from genko.app.dialogs import ExportDialog, NewProjectDialog, StartDialog  # noqa: F401  (StartDialog is re-exported)
 from genko.app.session import Session
 from genko.app.studio_widgets import ApprovalBox, Library, PanelView, ProcessBar
-from genko.models import PageSpec, new_episode
+from genko.models import LayerKind, LayerRole, PageSpec, new_episode
 from genko.ops import ApplyError
 
 COMMIT_AFTER_MS = 1000
@@ -445,13 +445,43 @@ class LayerPanel(QWidget):
         down.clicked.connect(lambda: self._move(-1))
         delete = QPushButton("削除")
         delete.clicked.connect(self._delete)
+        duplicate = QPushButton("複製")
+        duplicate.setToolTip("選んだレイヤーの写しを、すぐ上に作ります")
+        duplicate.clicked.connect(self._duplicate)
+        merge = QPushButton("下と結合")
+        merge.setToolTip("選んだレイヤーを、すぐ下のレイヤーに合わせます（ペン同士は線のまま）")
+        merge.clicked.connect(self._merge_down)
+        self.draft = QCheckBox("下描き（書き出さない）")
+        self.draft.setToolTip("画面には見えますが、書き出し・印刷には出ません")
+        self.draft.clicked.connect(lambda on: self._set("exportable", not on))
+        self.tint = QComboBox()
+        for label, rgb in (("表示色: そのまま", None), ("表示色: 青", [40, 110, 230]), ("表示色: 赤", [220, 50, 50]),
+                           ("表示色: 緑", [40, 150, 70]), ("表示色: 灰", [150, 150, 150])):
+            self.tint.addItem(label, rgb)
+        self.tint.setToolTip("画面でだけ、このレイヤーをこの色で見ます（印刷は元の色）")
+        self.tint.activated.connect(lambda _: self._set("color", self.tint.currentData()))
+        self.mask_button = QPushButton("マスク ▾")
+        self.mask_button.setToolTip("レイヤーの一部を隠す。選択範囲から作り、ペンで見せる所を足し、消しゴムで隠す")
+        mask_menu = QMenu(self.mask_button)
+        self.act_mask_from_sel = mask_menu.addAction("選択範囲からマスクを作る", self._mask_from_selection)
+        self.act_mask_all = mask_menu.addAction("全部見せるマスクを作る", lambda: self._mask({"fill": "show"}))
+        self.act_mask_edit = mask_menu.addAction("マスクを編集する（ペンで見せる・消しゴムで隠す）")
+        self.act_mask_edit.setCheckable(True)
+        self.act_mask_edit.toggled.connect(self._mask_edit)
+        mask_menu.addAction("マスクを反転", lambda: self._mask({"invert": True}))
+        self.act_mask_off = mask_menu.addAction("マスクを使わない")
+        self.act_mask_off.setCheckable(True)
+        self.act_mask_off.toggled.connect(lambda on: self._loading or self._mask({"enabled": not on}))
+        mask_menu.addAction("マスクを消す", lambda: self._mask({"delete": True}))
+        self.mask_button.setMenu(mask_menu)
+        self.list.setIconSize(QSize(28, 38))
         self.filter = QComboBox()
         for key, label in wording.FILTERS:
             self.filter.addItem(label, key)
         apply_filter = QPushButton("フィルターをかける…")
         apply_filter.clicked.connect(self._filter)
         adds = QGridLayout()
-        for i, button in enumerate((add_pen, add_paint, add_folder, delete, up, down)):
+        for i, button in enumerate((add_pen, add_paint, add_folder, delete, up, down, duplicate, merge)):
             adds.addWidget(button, i // 2, i % 2)
         up.setText("↑ 前へ")
         down.setText("↓ 後ろへ")
@@ -472,6 +502,9 @@ class LayerPanel(QWidget):
         layout.addWidget(self.protect)
         layout.addWidget(self.locked)
         layout.addWidget(self.overhang)
+        layout.addWidget(self.draft)
+        layout.addWidget(self.tint)
+        layout.addWidget(self.mask_button)
         layout.addLayout(frow)
         self._loading = False
 
@@ -486,7 +519,12 @@ class LayerPanel(QWidget):
             icon = LAYER_ICON.get(kind, "")
             indent = "　" if layer.parent_id else ""
             lock = " 🔒" if getattr(layer, "locked", False) else ""
-            item = QListWidgetItem(f"{indent}{icon} {wording.layer_label(layer)}{lock}")
+            masked = " ◐" if getattr(layer, "mask", None) else ""
+            draft = " （下描き）" if not layer.exportable and layer.role not in (LayerRole.NAME, LayerRole.DRAFT) else ""
+            item = QListWidgetItem(f"{indent}{icon} {wording.layer_label(layer)}{draft}{masked}{lock}")
+            picture = self._thumbnail(page, layer)
+            if picture is not None:
+                item.setIcon(picture)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked)
             self.list.addItem(item)
@@ -510,6 +548,8 @@ class LayerPanel(QWidget):
             self.target.setText("")
             return
         if from_list and not self._loading:
+            if self.window.target_layer() is not layer and self.act_mask_edit.isChecked():
+                self.act_mask_edit.setChecked(False)  # the mask being edited was the other layer's
             self.window.set_target_layer(layer.id)
         self._loading = True
         self.name.setText(wording.layer_label(layer))
@@ -519,6 +559,12 @@ class LayerPanel(QWidget):
         self.protect.setChecked(bool(layer.lock_alpha))
         self.locked.setChecked(bool(getattr(layer, "locked", False)))
         self.overhang.setChecked(not getattr(layer, "panel_clip", True))
+        self.draft.setChecked(not layer.exportable)
+        self.draft.setEnabled(layer.role not in (LayerRole.NAME, LayerRole.DRAFT))  # (those never print)
+        colour = list(layer.color) if getattr(layer, "color", None) else None
+        self.tint.setCurrentIndex(max(0, self.tint.findData(colour)) if colour else 0)
+        self.act_mask_off.setChecked(bool(layer.mask) and not layer.mask.get("enabled", True))
+        self.mask_button.setText("マスク ◐ ▾" if layer.mask else "マスク ▾")
         self._loading = False
         drawable = self.window.drawable(layer)
         self.target.setText(f"描く先: <b>{wording.layer_label(layer)}</b>" if drawable else
@@ -563,6 +609,70 @@ class LayerPanel(QWidget):
         if self.window.apply_ops([op]) and kind != "folder":
             self.window.set_target_layer(new)
             self.refresh()
+
+    def _thumbnail(self, page, layer):
+        """A small picture of the layer alone (cached until the layer changes)."""
+        from PIL import Image
+
+        from genko import render
+        from genko.io import _layer_to_dict
+
+        if layer.kind == LayerKind.FOLDER:
+            return None
+        cache = self.__dict__.setdefault("_thumbs", {})
+        try:
+            key = (page.index, layer.id, hash(repr(_layer_to_dict(layer))), len(layer.raster_png or b""),
+                   len((layer.mask or {}).get("png", b"")))
+        except Exception:
+            return None
+        if key not in cache:
+            image = render.layer_image(page, layer, 10, self.window.episode)
+            paper = Image.new("RGBA", image.size, (255, 255, 255, 255))
+            paper.alpha_composite(image)
+            data = paper.convert("RGB").tobytes()
+            qimage = QImage(data, paper.width, paper.height, paper.width * 3, QImage.Format.Format_RGB888).copy()
+            cache[key] = QIcon(QPixmap.fromImage(qimage))
+        return cache[key]
+
+    def _duplicate(self) -> None:
+        page, layer = self._layer()
+        if layer is None:
+            return
+        from genko.models import new_id
+
+        new = new_id()
+        if self.window.apply_ops([{"op": "duplicate_layer", "page": page.index, "id": layer.id, "new_id": new}]):
+            self.window.set_target_layer(new)
+            self.refresh()
+
+    def _merge_down(self) -> None:
+        page, layer = self._layer()
+        if layer is None:
+            return
+        below = page.layers.index(layer) - 1
+        if self.window.apply_ops([{"op": "merge_down", "page": page.index, "id": layer.id}]) and below >= 0:
+            self.window.set_target_layer(self.window.current_page().layers[below].id)
+            self.refresh()
+
+    def _mask(self, change: dict) -> None:
+        page, layer = self._layer()
+        if layer is not None and not self._loading:
+            self.window.apply_ops([{"op": "set_layer_mask", "page": page.index, "id": layer.id, **change}])
+            self._selected(from_list=False)
+
+    def _mask_from_selection(self) -> None:
+        selection = self.window.canvas.selection
+        if not selection:
+            self.window.flash("先に範囲選択（M・L・W）で見せたい所を選びます", 5000)
+            return
+        self._mask({"area": selection["area"]})
+
+    def _mask_edit(self, on: bool) -> None:
+        page, layer = self._layer()
+        if on and layer is not None and not layer.mask:
+            self._mask({"fill": "show"})
+        self.window.mask_edit = on
+        self.window.flash("マスクの編集中: ペンで見せる所を足し、消しゴムで隠します" if on else "マスクの編集を終えました", 4000)
 
     def _move(self, delta: int) -> None:
         page, layer = self._layer()
@@ -657,6 +767,7 @@ class MainWindow(QMainWindow):
         self.canvas.primPosed.connect(lambda prim_id, handle, to: self.apply_ops(
             [{"op": "pose_mannequin", "page": self._current().index, "id": prim_id, "drag": {"handle": handle, "to": to}}]))
         self._clipboard: dict | None = None
+        self.mask_edit = False  # pen and eraser work on the target layer's mask
         self._target_layer_id: str | None = None
         self.eraser_mm = 2.0
         self._dock_timer = QTimer(self)
@@ -1443,6 +1554,11 @@ class MainWindow(QMainWindow):
         if not self.drawable(layer):
             why = "ロックされています" if getattr(layer, "locked", False) else "ペンかペイントのレイヤーではありません"
             self.flash(f"「{wording.layer_label(layer)}」には描けません（{why}）。レイヤー パネルで選び直します", 4000)
+            return
+        if self.mask_edit and self.canvas.tool in ("pen", "eraser"):
+            erase = self.canvas.tool == "eraser"
+            self.apply_ops([{"op": "paint_mask", "page": page.index, "id": layer.id, "points": [[p[0], p[1]] for p in points],
+                             "width_mm": self.eraser_mm if erase else max(0.5, self.brush.size.value()), "show": not erase}])
             return
         if self.canvas.tool == "eraser":
             op = {"op": "erase", "page": page.index, "layer_id": layer.id, "points": [[p[0], p[1]] for p in points],
