@@ -281,6 +281,13 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### K1 additions
+
+- `add_stroke {rotation: [degrees, …]}`: the pen's barrel turn at each point (resampled to the line); brushes with
+  `tip_rotation` (define_brush; the calligraphy pen) turn their flat nib with it.
+- `inspect {target: "plugins"}` lists the filter plugins the person installed (<config>/plugins/*.py with NAME,
+  PARAMS and run(image, **params)); run one with `filter_raster {kind: "plugin:<key>", …params}`.
+
 ### J12 additions (animation)
 
 - `set_animation {page, fps, frames, loop, off}` makes a page a short animation (its timeline in

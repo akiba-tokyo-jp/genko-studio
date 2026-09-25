@@ -45,7 +45,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
-    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)"},
+    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)", "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
     {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white} | null? (トーン化: the layer's greys print as a halftone)"},
@@ -109,7 +109,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "merge_down", "page": "int", "id": "str (merged into the layer below it; pen onto pen stays lines, anything else becomes pixels)"},
     {"op": "set_layer_mask", "page": "int", "id": "str", "area": "{poly} | {mask}? (only this area shows)", "fill": "show|hide? (the whole mask)", "invert": "bool?", "enabled": "bool?", "delete": "bool?"},
     {"op": "paint_mask", "page": "int", "id": "str", "points": "[[x,y],...]", "width_mm": "float?", "show": "bool (true: the pen shows the layer, false: the eraser hides it)"},
-    {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map", "note": "params by kind: blur radius; hue shift/saturation/value; levels black/white; curve gamma; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"},
+    {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|plugin:<key>", "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; hue shift/saturation/value; levels black/white; curve gamma; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"},
     {"op": "set_brush", "rgb": "[r,g,b]?", "width_mm": "float?", "stabilize": "int?", "taper": "bool?", "curve": "gpen|linear"},
     {"op": "select_frame", "page": "int", "frame_id": "str"},
     {"op": "edit_stroke", "page": "int", "layer": "name|ink", "index": "int", "points": "[[x,y],...]"},
@@ -1089,6 +1089,21 @@ def _find_line(episode: Episode, line_id: str) -> StoryLine:
     raise ApplyError(f"no line {line_id}")
 
 
+def _resampled(values: list[float], count: int) -> list[float]:
+    """A list of numbers stretched or squeezed evenly to `count` (rounded to a tenth)."""
+    if not values or count <= 0:
+        return []
+    if len(values) == 1 or count == 1:
+        return [round(values[0], 1)] * count
+    out = []
+    for i in range(count):
+        at = i * (len(values) - 1) / (count - 1)
+        lo = int(at)
+        hi = min(lo + 1, len(values) - 1)
+        out.append(round(values[lo] + (values[hi] - values[lo]) * (at - lo), 1))
+    return out
+
+
 def _parse_points(raw: list) -> list[tuple]:
     points = []
     for item in raw:
@@ -1479,6 +1494,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         stroke.pressure = [round(v, 3) for v in stroke.pressure]
         stroke.kind = _brush_kind(op.get("kind") or "gpen", episode)
         stroke.width_mm = float(op["width_mm"]) if op.get("width_mm") is not None else float(episode.brush_width_mm)
+        if op.get("rotation"):  # the pen's barrel turn, along the line as drawn (smoothing may change the count)
+            stroke.rotation = _resampled([float(v) for v in op["rotation"]], len(stroke.points))
         if op.get("layer_id"):
             target = _layer_by_id(page, str(op["layer_id"]))
             if target.kind not in (LayerKind.STROKES, LayerKind.RASTER, LayerKind.TONE):

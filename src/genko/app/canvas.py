@@ -1800,8 +1800,10 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         x_mm, y_mm = self._to_mm(self._ev(event.position()))
         pressure = float(event.pressure())
         tilt = abs(float(getattr(event, "xTilt", lambda: 0.0)())) / 60.0
+        turn = float(getattr(event, "rotation", lambda: 0.0)())  # (the barrel, on pens that report it: アートペン)
         if etype == QEvent.Type.TabletPress:
             self._stroke = [tuple(pack_point(x_mm, y_mm, pressure, tilt=tilt))]
+            self._turns = [turn]
             self.update()
             event.accept()
             return
@@ -1809,8 +1811,10 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             if self.tool == "pen" and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 gx, gy = self.grid_point(x_mm, y_mm)  # Shift: a straight line, as with the mouse
                 self._stroke = [self._stroke[0], tuple(pack_point(gx, gy, pressure, tilt=tilt))]
+                self._turns = self._turns[:1] + [turn]
             else:
                 self._stroke.append(tuple(pack_point(x_mm, y_mm, pressure, tilt=tilt)))
+                self._turns.append(turn)
             self.update()
             event.accept()
             return
@@ -1820,7 +1824,10 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             if len(stroke) == 1:
                 x, y, *rest = stroke[0]
                 stroke.append((x + 0.01, y + 0.01, *rest))  # a tap with the pen is a dot
+            turns = list(getattr(self, "_turns", []))
+            self.last_rotation = (turns + turns[-1:]) if len(turns) == 1 else turns
             self.strokeCommitted.emit(stroke)
+            self.last_rotation = []
             self._back_from_eraser_end()
             self.changed.emit()
             self.update()

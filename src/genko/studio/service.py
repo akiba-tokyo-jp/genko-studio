@@ -200,6 +200,10 @@ class StudioService:
             return ToolResult(True, {"materials": _materials_list()})
         if target == "fonts":
             return ToolResult(True, {"fonts": _fonts_list()})
+        if target == "plugins":
+            from genko import plugins
+
+            return ToolResult(True, {"plugins": [{**p, "kind": plugins.PREFIX + p["key"]} for p in plugins.available()]})
         episode = load_episode(path)
         if target == "brushes":
             return ToolResult(True, {"brushes": _brushes_list(episode)})

@@ -100,6 +100,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 素材: `inspect` の `materials` に種類（トーン・効果線・画像・パーツ〔漫符・小物・背景の線画〕・描き文字・ブラシ・3D）とタグ。`stamp_material` でパーツは `layer_id` の `x_mm`・`y_mm` に、描き文字は台詞として、ブラシは原稿に加わり（`add_stroke` の `kind` に使える）、3D は置いた所に。
 - 3D: 体型と関節のある人形は `add_figure`（`body`: `heads` 等身・`shoulders`・`hips`・`build`・`legs`、`preset`、`hands`）と `pose_figure`（`joints` の x・y・z、`drag`）。頭部 `add_head`、手 `add_hand`（`pose`）、OBJ は `import_model`。ページのカメラ `set_camera`、光 `set_light`。線と陰の面にするのは `render_prims`（`tone` で面を網点に）。
 - 本: 表紙・裏表紙・カバー（背と袖）は `add_cover`（ページの最後に入り、ノンブルなし）。全ページの台詞の置換は `replace_text`、同じ操作を全ページに `for_pages`、担当は `set_assignee`。
+- ペンの軸の回転（アートペン）: `add_stroke` の `rotation`（点ごとの角度）。`tip_rotation` のブラシ（カリグラフィ）は先端が回る。
+- フィルターのプラグイン: `inspect` の `plugins` にあれば、`filter_raster` の `kind` に `plugin:<key>`（設定は `PARAMS` のとおり）。
 - アニメーション: `set_animation`（`fps`・`frames`・`loop`）でページを短いアニメーションに。`add_anim_folder` がタイムラインの 1 行、`add_cel`（`folder`・`at`）がセル（描くのは `add_stroke` の `layer_id` にセルの id）。どのフレームにどのセルを出すかは `set_exposure`（`frame`・`cel`、null で空）か `set_exposures`（全部）。カメラワークは `set_camera_key`（`rect`）、いつも薄く見るセルは `set_light_table`。書き出しは `export` の `format: "animation"`（`pages` に 1 ページ、`movie`: gif・webp・png・mp4・frames）。
 - ファイル: PSD／PSB をレイヤーのまま読み込むのは `import_psd`（`path`、`fit`: `paper`・`bleed`・`trim`。フォルダー・マスク・不透明度・合成モード・クリッピング・表示もそのまま）。制作過程の記録は `set_timelapse`（`on`）。
 - 図形: `add_shape`（`shape`: `line`・`polyline`・`curve`・`rect`・`ellipse`・`polygon`、`line`・`fill` で線と塗り）。

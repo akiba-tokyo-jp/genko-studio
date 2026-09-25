@@ -33,6 +33,7 @@ class Brush:
     tip_angle: float = 45.0  # degrees (flat tips)
     tip_ratio: float = 0.25  # thin side / wide side (flat tips)
     tip_follow: bool = False  # the tip turns with the line's direction
+    tip_rotation: bool = False  # the tip turns with the pen's barrel (アートペン: when the pen reports it)
     tip_png: str = ""  # base64 grey picture: the stamp (image tips, made from a picture or an .abr)
     spacing: float = 0.0  # stamps at this share of the width apart (0: a continuous line)
     scatter: float = 0.0  # stamps thrown this share of the width off the line (spray, stipple)
@@ -59,7 +60,7 @@ BRUSHES: dict[str, Brush] = {b.key: b for b in (
     Brush("white", "ホワイト（修正）", 1.0, min_pressure=0.3, stabilize=2, taper=False, rgb=(255, 255, 255)),
     Brush("fx", "効果線ペン", 0.5, min_pressure=0.0, gamma=1.0, stabilize=0, taper=False),
     # J3: brushes laid down in stamps, and the others CLIP STUDIO has
-    Brush("calligraphy", "カリグラフィ（平たいペン先）", 1.6, min_pressure=0.5, stabilize=3, taper=False, tip="flat", tip_angle=35,
+    Brush("calligraphy", "カリグラフィ（平たいペン先）", 1.6, min_pressure=0.5, stabilize=3, taper=False, tip="flat", tip_angle=35, tip_rotation=True,
           tip_ratio=0.22),
     Brush("water", "水彩", 4.0, min_pressure=0.4, opacity=0.55, stabilize=2, taper=False, texture="water"),
     Brush("spray", "スプレー", 8.0, min_pressure=0.5, stabilize=1, taper=False, pattern="dots", spacing=0.08, scatter=0.5,
@@ -103,7 +104,7 @@ def everything() -> dict[str, Brush]:
     return {**BRUSHES, **CUSTOM}
 
 
-J3_KEYS = ("tip", "tip_angle", "tip_ratio", "tip_follow", "tip_png", "spacing", "scatter", "size_jitter", "turn_jitter", "count",
+J3_KEYS = ("tip", "tip_angle", "tip_ratio", "tip_follow", "tip_rotation", "tip_png", "spacing", "scatter", "size_jitter", "turn_jitter", "count",
            "pattern", "speed", "post_smooth", "aa", "stamp_size")
 
 
@@ -146,7 +147,8 @@ def from_dict(key: str, data: dict, base: str | None = None) -> Brush:
                  taper=bool(merged["taper"]), texture=str(merged["texture"] or ""),
                  rgb=tuple(int(v) for v in merged["rgb"])[:3] if merged.get("rgb") else None,  # type: ignore[arg-type]
                  fixed_width=bool(merged["fixed_width"]), tip=str(merged["tip"]), tip_angle=float(merged["tip_angle"]),
-                 tip_ratio=float(merged["tip_ratio"]), tip_follow=bool(merged["tip_follow"]), tip_png=str(merged["tip_png"] or ""),
+                 tip_ratio=float(merged["tip_ratio"]), tip_follow=bool(merged["tip_follow"]),
+                 tip_rotation=bool(merged.get("tip_rotation", False)), tip_png=str(merged["tip_png"] or ""),
                  spacing=float(merged["spacing"]), scatter=float(merged["scatter"]), size_jitter=float(merged["size_jitter"]),
                  turn_jitter=bool(merged["turn_jitter"]), count=int(merged["count"]), pattern=str(merged["pattern"] or ""),
                  speed=float(merged["speed"]), post_smooth=int(merged["post_smooth"]), aa=str(merged["aa"]),
@@ -293,8 +295,10 @@ def _stamped(b: Brush) -> bool:
     return bool(b.pattern) or b.tip in ("flat", "image") or b.scatter > 0 or b.spacing > 0
 
 
-def _draw_stamps(mask: Image.Image, pts: list, b: Brush, dpi: int, width_mm: float, seed: str) -> None:
-    """Lay the brush's stamp along the line (points in px with their radius)."""
+def _draw_stamps(mask: Image.Image, pts: list, b: Brush, dpi: int, width_mm: float, seed: str,
+                 rotation: list | None = None) -> None:
+    """Lay the brush's stamp along the line (points in px with their radius; `rotation`: the pen's barrel turn at
+    each point, in degrees)."""
     rng = random.Random(seed or "genko")
     width_px = width_mm * dpi / 25.4
     step = max(1.0, (b.spacing or 0.1) * width_px)
@@ -303,18 +307,21 @@ def _draw_stamps(mask: Image.Image, pts: list, b: Brush, dpi: int, width_mm: flo
     # walk the line at `step`, carrying the leftover distance between segments
     carry = 0.0
     positions = []
-    for (ax, ay, ar), (bx, by, br) in zip(pts, pts[1:] or pts):
+    turns = rotation if rotation and len(rotation) == len(pts) else None
+    for i, ((ax, ay, ar), (bx, by, br)) in enumerate(zip(pts, pts[1:] or pts)):
         length = math.hypot(bx - ax, by - ay)
         direction = math.atan2(by - ay, bx - ax) if length > 1e-6 else 0.0
+        ta = turns[i] if turns else 0.0
+        tb = turns[min(i + 1, len(turns) - 1)] if turns else 0.0
         t = carry
         while t <= length:
             f = t / length if length > 1e-6 else 0.0
-            positions.append((ax + (bx - ax) * f, ay + (by - ay) * f, ar + (br - ar) * f, direction))
+            positions.append((ax + (bx - ax) * f, ay + (by - ay) * f, ar + (br - ar) * f, direction, ta + (tb - ta) * f))
             t += step
         carry = t - length
         if length <= 1e-6:
             break
-    for x, y, r, direction in positions:
+    for x, y, r, direction, turn in positions:
         for _ in range(b.count):
             size = max(1.5, 2 * r * b.stamp_size * (1 - b.size_jitter * rng.random()))  # (a spray drop stays visible)
             ox = oy = 0.0
@@ -325,6 +332,8 @@ def _draw_stamps(mask: Image.Image, pts: list, b: Brush, dpi: int, width_mm: flo
                 angle = rng.uniform(-0.35, 0.35)  # blades stand up (the shape already points up), a little astray
             elif b.turn_jitter:
                 angle = rng.uniform(0, math.tau)
+            elif b.tip == "flat" and b.tip_rotation and turns:
+                angle = math.radians(b.tip_angle + turn)  # (the nib turns as the pen is turned in the hand)
             elif b.tip == "flat" and not b.tip_follow:
                 angle = math.radians(b.tip_angle)
             elif b.pattern in ("dash", "lace", "leaves") or b.tip_follow:
@@ -364,8 +373,10 @@ def _finish_edges(mask: Image.Image, b: Brush, dpi: int) -> Image.Image:
     return mask
 
 
-def draw(size: tuple[int, int], points: list, dpi: int, width_mm: float, kind: str | None, seed: str = ""):
-    """The line's coverage at this resolution, only around the line: (L image, (x0, y0)) or None."""
+def draw(size: tuple[int, int], points: list, dpi: int, width_mm: float, kind: str | None, seed: str = "",
+         rotation: list | None = None):
+    """The line's coverage at this resolution, only around the line: (L image, (x0, y0)) or None. `rotation`: the
+    pen's barrel turn at each point (flat tips with tip_rotation follow it)."""
     b = brush(kind)
     pts = _pressured(points, b)
     if not pts:
@@ -385,7 +396,7 @@ def draw(size: tuple[int, int], points: list, dpi: int, width_mm: float, kind: s
     mask = Image.new("L", (x1 - x0, y1 - y0), 0)
     if _stamped(b):
         radius = [(p[0] * scale, p[1] * scale, max(0.5, width_mm * max(0.03, min(1.5, p[2])) * scale / 2)) for p in shift]
-        _draw_stamps(mask, radius, b, dpi, width_mm, seed)
+        _draw_stamps(mask, radius, b, dpi, width_mm, seed, rotation=list(rotation or []) or None)
         return _finish_edges(mask, b, dpi), (x0, y0)
     if b.texture == "soft":
         # an airbrush: a wide soft spray (the width is its diameter)

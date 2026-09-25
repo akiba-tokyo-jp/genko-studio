@@ -52,6 +52,10 @@ def _remap(rgba: Image.Image, map_x, map_y) -> Image.Image:
 def apply_filter(image: Image.Image, kind: str, params: dict | None = None) -> Image.Image:
     params = params or {}
     rgba = image.convert("RGBA")
+    if kind.startswith("plugin:"):  # (a filter a person installed: genko.plugins)
+        from genko import plugins
+
+        return plugins.run(kind, rgba, params)
     if kind == "blur":
         radius = float(params.get("radius", 2))
         return rgba.filter(ImageFilter.GaussianBlur(radius=radius))

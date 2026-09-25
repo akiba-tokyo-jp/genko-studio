@@ -652,6 +652,10 @@ class LayerPanel(QWidget):
         self.filter = QComboBox()
         for key, label in wording.FILTERS:
             self.filter.addItem(label, key)
+        from genko import plugins
+
+        for plugin in plugins.available():  # (filters a person installed in the plugins folder)
+            self.filter.addItem(f"{plugin['name']}（プラグイン）", plugins.PREFIX + plugin["key"])
         apply_filter = QPushButton("フィルターをかける…")
         apply_filter.clicked.connect(self._filter)
         adds = QGridLayout()
@@ -1157,6 +1161,10 @@ def filter_params(parent, kind: str, now: dict | None = None) -> dict | None:
     from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
 
     fields = FILTER_FIELDS.get(kind)
+    if fields is None and kind.startswith("plugin:"):
+        from genko import plugins
+
+        fields = plugins.fields(kind)
     if not fields:
         return {}
     dialog = QDialog(parent)
@@ -1780,6 +1788,8 @@ class MainWindow(QMainWindow):
         self.act_layer_up = a("レイヤーを前へ", lambda: self.layers._move(1), "Ctrl+]")
         self.act_layer_down = a("レイヤーを後ろへ", lambda: self.layers._move(-1), "Ctrl+[")
         self.act_layer_draft = a("下描きにする（書き出さない）／戻す", lambda: self.layers.draft.click())
+        self.act_plugins = a("プラグインのフォルダーを開く", self._open_plugins,
+                             tip="ここに入れた Python のフィルター（.py）が、レイヤーのフィルターに並びます（次に開いたときから）")
 
         self.act_line_type = a("台詞を入れる（テキストの道具）", lambda: self._tool("text"))
         self.act_balloon_pen = a("フキダシを手で描く", lambda on: (self._tool("text"), self.text_settings.draw_balloon.setChecked(on)),
@@ -1809,7 +1819,7 @@ class MainWindow(QMainWindow):
                         self.act_swap_colour, self.act_transparent]),
             ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
                           self.act_layer_merge, self.act_layer_delete, None, "layer_special", "layer_many", None,
-                          self.act_layer_up, self.act_layer_down, None, self.act_layer_draft, "layer_effect", "mask"]),
+                          self.act_layer_up, self.act_layer_down, None, self.act_layer_draft, "layer_effect", "mask", None, self.act_plugins]),
             ("台詞", [self.act_line_type, self.act_balloon_pen, None, self.act_line_edit, self.act_line_wrap, "shapes",
                       self.act_line_delete, None, self.act_story_editor]),
             ("トーン・効果線", [self.act_tone_here, self.act_tone_click, None, self.act_effect, *self.effect_actions, None,
@@ -3025,6 +3035,9 @@ class MainWindow(QMainWindow):
             self.apply_ops([op])
             return
         op = {"op": "add_stroke", "page": page.index, "layer_id": layer.id, "points": points, **self.brush.stroke_fields()}
+        turns = getattr(self.canvas, "last_rotation", None) or []
+        if len(turns) == len(points) and any(abs(v) > 0.5 for v in turns):  # (a pen that reports its barrel turn)
+            op["rotation"] = [round(v, 1) for v in turns]
         ops = [op]
         kind = op.get("kind") or ""
         if kind.startswith("my_") and kind not in self.episode.brush_custom:
@@ -4627,6 +4640,16 @@ class MainWindow(QMainWindow):
         self.commit_now()
         page = self._current()
         TimelapseDialog(self, self.path, page.index if page else 1).exec()
+
+    def _open_plugins(self) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        from genko import plugins
+
+        target = plugins.folder()
+        target.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     def _toggle_cmyk_proof(self, on: bool) -> None:
         self._cmyk_proof = bool(on)

@@ -189,7 +189,8 @@ def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Ima
             _check_cancel()
         b = brushes.brush(getattr(stroke, "kind", None))
         drawn = brushes.draw(size, stroke_points(stroke), dpi, float(getattr(stroke, "width_mm", 0.35) or 0.35),
-                             getattr(stroke, "kind", None), seed=str(getattr(stroke, "id", "")))
+                             getattr(stroke, "kind", None), seed=str(getattr(stroke, "id", "")),
+                             rotation=getattr(stroke, "rotation", None))
         if drawn is None:
             continue
         cover, (x0, y0) = drawn

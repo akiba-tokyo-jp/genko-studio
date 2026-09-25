@@ -132,7 +132,8 @@
       "stabilize": "int?",
       "taper": "bool?",
       "pressure_gamma": "float? (>1 needs more force)",
-      "post_smooth": "int? 0..10 (後補正; default the brush's)"
+      "post_smooth": "int? 0..10 (後補正; default the brush's)",
+      "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"
     },
     {
       "op": "delete_stroke",
@@ -670,8 +671,8 @@
       "page": "int",
       "layer": "str?",
       "id": "str?",
-      "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map",
-      "note": "params by kind: blur radius; hue shift/saturation/value; levels black/white; curve gamma; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"
+      "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|plugin:<key>",
+      "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; hue shift/saturation/value; levels black/white; curve gamma; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"
     },
     {
       "op": "set_brush",

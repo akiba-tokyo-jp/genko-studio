@@ -349,6 +349,8 @@ class BrushDialog(QDialog):
         self.tip_ratio.setValue(round(b.tip_ratio * 100))
         self.tip_follow = QCheckBox("先端を線の向きに合わせて回す")
         self.tip_follow.setChecked(b.tip_follow)
+        self.tip_rotation = QCheckBox("ペンの軸を回すと先端も回る（アートペン）")
+        self.tip_rotation.setChecked(getattr(b, "tip_rotation", False))
         self.tip_picture = QPushButton("画像から先端を作る…")
         self.tip_picture.clicked.connect(self._pick_tip)
         self.pattern = QComboBox()
@@ -413,6 +415,7 @@ class BrushDialog(QDialog):
         tips.addRow("先端の角度", self.tip_angle)
         tips.addRow("平たさ", self.tip_ratio)
         tips.addRow("", self.tip_follow)
+        tips.addRow("", self.tip_rotation)
         tips.addRow("模様", self.pattern)
         tips.addRow("間隔", self.spacing)
         tips.addRow("散らばり", self.scatter)
@@ -441,7 +444,7 @@ class BrushDialog(QDialog):
         for widget in (self.width, self.thin, self.curve, self.opacity, self.steady, self.tip_angle, self.tip_ratio, self.spacing,
                        self.scatter, self.stamp, self.jitter, self.count, self.speed, self.post):
             widget.valueChanged.connect(lambda _: self._draw_sample())
-        for widget in (self.taper, self.fixed, self.white, self.tip_follow, self.turn):
+        for widget in (self.taper, self.fixed, self.white, self.tip_follow, self.tip_rotation, self.turn):
             widget.toggled.connect(lambda _: self._draw_sample())
         for widget in (self.texture, self.tip, self.pattern, self.aa):
             widget.currentIndexChanged.connect(lambda _: self._draw_sample())
@@ -454,7 +457,7 @@ class BrushDialog(QDialog):
                 "fixed_width": self.fixed.isChecked(), "rgb": [255, 255, 255] if self.white.isChecked() else None,
                 "tip": self.tip.currentData() if (self.tip.currentData() != "image" or self.tip_png) else "round",
                 "tip_angle": float(self.tip_angle.value()), "tip_ratio": self.tip_ratio.value() / 100,
-                "tip_follow": self.tip_follow.isChecked(), "tip_png": self.tip_png or "", "pattern": self.pattern.currentData(),
+                "tip_follow": self.tip_follow.isChecked(), "tip_rotation": self.tip_rotation.isChecked(), "tip_png": self.tip_png or "", "pattern": self.pattern.currentData(),
                 "spacing": self.spacing.value() / 100, "scatter": self.scatter.value() / 100, "stamp_size": self.stamp.value() / 100,
                 "size_jitter": self.jitter.value() / 100, "turn_jitter": self.turn.isChecked(), "count": self.count.value(),
                 "speed": self.speed.value() / 100, "post_smooth": self.post.value(), "aa": self.aa.currentData()}
