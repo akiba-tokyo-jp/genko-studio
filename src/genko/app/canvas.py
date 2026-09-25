@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap, QWheelEvent
+from PySide6.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap, QTransform, QWheelEvent
 from PySide6.QtWidgets import QLabel, QPlainTextEdit, QWidget
 
 from genko.app.canvas_guides import GuideMixin
@@ -113,6 +113,13 @@ class PageCanvas(GuideMixin, QWidget):
         self._pan_x = 20.0
         self._pan_y = 20.0
         self._fitted = True  # follow the window size until the person zooms or pans
+        self.rotation = 0.0  # the view only (degrees, clockwise); the page itself never turns
+        self.flipped = False  # the view mirrored left to right (to check the drawing's balance)
+        self._turning: tuple[float, float] | None = None  # Shift+Space drag: (start angle, rotation then)
+        self.live_brush: dict | None = None  # the pen in hand (add_stroke fields); None draws a plain guide line
+        self._live = None  # LiveInk of the line being drawn
+        self._live_of: tuple | None = None  # (the point list, straight/snapped) it was drawn from
+        self._eraser_end: str | None = None  # the tool to go back to after the pen's eraser end lifts
         self._panning = False
         self._space = False
         self._last_pos = QPointF()
@@ -177,7 +184,7 @@ class PageCanvas(GuideMixin, QWidget):
         """Type a line at this point of the page; on_done(text or None) when finished."""
         if self.editor is not None and not self.editor.finished:
             self.editor.finish(True)
-        p = self._pt(x_mm, y_mm)
+        p = self._view().map(self._pt(x_mm, y_mm))
         self.editor = InlineEditor(self, text, on_done)
         self.editor.place(max(0.0, min(self.width() - 260.0, p.x())), max(20.0, min(self.height() - 110.0, p.y())))
         return self.editor
@@ -262,6 +269,72 @@ class PageCanvas(GuideMixin, QWidget):
     def _xy(self, point) -> tuple[float, float]:
         return float(point[0]), float(point[1])
 
+    # --- the line being drawn ---------------------------------------------------------------------------
+
+    def _live_reset(self) -> None:
+        self._live = None
+        self._live_of = None
+
+    def _live_sync(self):
+        """The line so far, drawn with the pen in hand; only the new part is drawn each time."""
+        from genko.app.live_ink import LiveInk
+
+        pan, size = (self._pan_x, self._pan_y), (self.width(), self.height())
+        if self._live is None or not self._live.matches(self._scale, pan, size):
+            self._live = LiveInk(size, self._scale, pan, self.live_brush or {})
+            self._live_of = None
+        shown = self.snapped_preview(self._stroke)
+        plain = len(shown) == 1 and shown[0] is self._stroke
+        if plain and self._live_of is not None and self._live_of[0] is self._stroke and self._live_of[1]:
+            self._live.extend(self._stroke)
+        else:
+            self._live.redraw(shown[0], *shown[1:])
+        self._live_of = (self._stroke, plain)
+        return self._live.image
+
+    # --- the view's turn and mirror: painting goes through _view(), every input through _ev() --------
+
+    def _view(self) -> QTransform:
+        view = QTransform()
+        if not self.rotation and not self.flipped:
+            return view
+        cx, cy = self.width() / 2, self.height() / 2
+        view.translate(cx, cy)
+        view.rotate(self.rotation)
+        if self.flipped:
+            view.scale(-1, 1)
+        view.translate(-cx, -cy)
+        return view
+
+    def _ev(self, pos: QPointF) -> QPointF:
+        """A point on the screen, in the unturned view where _pt and _to_mm work."""
+        if not self.rotation and not self.flipped:
+            return QPointF(pos)
+        inverse, _ok = self._view().inverted()
+        return inverse.map(QPointF(pos))
+
+    def rotate_view(self, degrees: float) -> None:
+        self.set_rotation(self.rotation + degrees)
+
+    def set_rotation(self, degrees: float) -> None:
+        turned = (degrees + 180.0) % 360.0 - 180.0
+        self.rotation = 0.0 if abs(turned) < 0.01 else turned
+        self._live_reset()
+        self.changed.emit()
+        self.update()
+
+    def flip_view(self, on: bool | None = None) -> None:
+        self.flipped = (not self.flipped) if on is None else bool(on)
+        self._live_reset()
+        self.changed.emit()
+        self.update()
+
+    def reset_view(self) -> None:
+        self.rotation = 0.0
+        self.flipped = False
+        self.fit_page()
+        self.changed.emit()
+
     # --- painting ---------------------------------------------------------------------------------
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -272,6 +345,7 @@ class PageCanvas(GuideMixin, QWidget):
             painter.setPen(QColor("#bbbbbb"))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ページがありません")
             return
+        painter.setTransform(self._view())
         spec = self.page.spec
         origin = self._pt(0, 0)
         page_rect = QRectF(origin.x(), origin.y(), spec.width_mm * self._scale, spec.height_mm * self._scale)
@@ -317,6 +391,8 @@ class PageCanvas(GuideMixin, QWidget):
             pts = self._marquee_points()
             painter.drawPolygon([self._pt(*p) for p in pts])
             painter.setBrush(Qt.BrushStyle.NoBrush)
+        elif self._stroke and self.tool == "pen" and self.live_brush is not None:
+            painter.drawImage(0, 0, self._live_sync())
         elif self._stroke:
             color = QColor("#e8590c") if self.tool == "pen" else QColor(200, 60, 60, 160)
             shown = self.snapped_preview(self._stroke) if self.tool == "pen" else [self._stroke]
@@ -824,7 +900,10 @@ class PageCanvas(GuideMixin, QWidget):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         self.setFocus()
-        pos = event.position()
+        pos = self._ev(event.position())
+        if event.button() == Qt.MouseButton.LeftButton and self._space and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            self._turning = (self._angle_at(event.position()), self.rotation)  # Shift+Space: turn the view
+            return
         if event.button() == Qt.MouseButton.MiddleButton or (event.button() == Qt.MouseButton.LeftButton and self._space):
             self._start_pan(pos)
             return
@@ -894,7 +973,14 @@ class PageCanvas(GuideMixin, QWidget):
         self.update()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
-        pos = event.position()
+        if self._turning is not None:
+            start, before = self._turning
+            turn = self._angle_at(event.position()) - start
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                turn = round((before + turn) / 15) * 15 - before  # Ctrl: in 15° steps
+            self.set_rotation(before + turn)
+            return
+        pos = self._ev(event.position())
         if self._panning:
             delta = pos - self._last_pos
             self._pan_x += delta.x()
@@ -947,11 +1033,19 @@ class PageCanvas(GuideMixin, QWidget):
             self._stroke.append(self._to_mm(pos))
         self.update()
 
+    def _angle_at(self, pos: QPointF) -> float:
+        import math
+
+        return math.degrees(math.atan2(pos.y() - self.height() / 2, pos.x() - self.width() / 2))
+
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._turning is not None:
+            self._turning = None
+            return
         if self._panning:
             self._panning = False
             self._press_pos = None
-            self._update_cursor(event.position())
+            self._update_cursor(self._ev(event.position()))
             return
         if self._frame_drag is not None:
             self._press_pos = None
@@ -1017,7 +1111,7 @@ class PageCanvas(GuideMixin, QWidget):
             return
         if self.tool == "select":
             self._press_pos = None
-            frame = self.page.frame_at(*self._to_mm(event.position()))
+            frame = self.page.frame_at(*self._to_mm(self._ev(event.position())))
             if frame is not None:
                 self.frameSelected.emit(frame.id)
             return
@@ -1051,7 +1145,7 @@ class PageCanvas(GuideMixin, QWidget):
             self.finish_curve()
             return
         if self.page is not None and event.button() == Qt.MouseButton.LeftButton and self.tool == "select":
-            hit = self._hit_line(*self._to_mm(event.position()))
+            hit = self._hit_line(*self._to_mm(self._ev(event.position())))
             if hit is not None:
                 self.selected_line_id = hit.id
                 self.lineSelected.emit(hit.id, False)
@@ -1064,13 +1158,13 @@ class PageCanvas(GuideMixin, QWidget):
     def contextMenuEvent(self, event) -> None:  # noqa: N802
         if self.page is None:
             return
-        hit = self._hit_line(*self._to_mm(QPointF(event.pos())))
+        hit = self._hit_line(*self._to_mm(self._ev(QPointF(event.pos()))))
         if hit is not None:
             self.selected_line_id = hit.id
             self.update()
             self.lineContextMenu.emit(hit.id, QPointF(event.globalPos()))
             return
-        frame = self.page.frame_at(*self._to_mm(QPointF(event.pos())))
+        frame = self.page.frame_at(*self._to_mm(self._ev(QPointF(event.pos()))))
         if frame is not None and frame.id != self.page.selected_frame_id:
             self.frameSelected.emit(frame.id)
         self.contextMenuAt.emit(frame.id if frame else "", QPointF(event.globalPos()))
@@ -1079,14 +1173,15 @@ class PageCanvas(GuideMixin, QWidget):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             delta = event.angleDelta().y() or event.pixelDelta().y()
             if delta:
-                self.zoom_by(1.0 + max(-0.5, min(0.5, delta / 600)), event.position())
+                self.zoom_by(1.0 + max(-0.5, min(0.5, delta / 600)), self._ev(event.position()))
             return
         pixel = event.pixelDelta()
         dx, dy = (pixel.x(), pixel.y()) if not pixel.isNull() else (event.angleDelta().x() / 3, event.angleDelta().y() / 3)
         if event.modifiers() & Qt.KeyboardModifier.ShiftModifier and not dx:
             dx, dy = dy, 0
-        self._pan_x += dx
-        self._pan_y += dy
+        moved = self._ev(QPointF(dx, dy)) - self._ev(QPointF(0, 0))  # the page follows the fingers, turned or not
+        self._pan_x += moved.x()
+        self._pan_y += moved.y()
         self._fitted = False
         self.update()
 
@@ -1097,7 +1192,7 @@ class PageCanvas(GuideMixin, QWidget):
             from PySide6.QtCore import Qt as _Qt
 
             if event.gestureType() == _Qt.NativeGestureType.ZoomNativeGesture:
-                self.zoom_by(1.0 + float(event.value()), event.position())
+                self.zoom_by(1.0 + float(event.value()), self._ev(event.position()))
                 return True
         return super().event(event)
 
@@ -1128,29 +1223,40 @@ class PageCanvas(GuideMixin, QWidget):
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space = False
             self._panning = False
-            self._update_cursor(QPointF(self.mapFromGlobal(QCursor.pos())))
+            self._update_cursor(self._ev(QPointF(self.mapFromGlobal(QCursor.pos()))))
             return
         super().keyReleaseEvent(event)
 
     # --- tablet ------------------------------------------------------------------------------------------
 
     def tabletEvent(self, event) -> None:  # noqa: N802
-        if self.page is None or self.tool not in ("pen", "eraser"):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QPointingDevice
+
+        etype = event.type()
+        eraser_end = event.pointerType() == QPointingDevice.PointerType.Eraser
+        if etype == QEvent.Type.TabletPress and eraser_end and self.page is not None and self.tool != "eraser" \
+                and not self._space:
+            self._eraser_end = self.tool  # the pen turned over: erase for this stroke, then back
+            self.tool = "eraser"
+            self._update_cursor()
+        if self.page is None or self.tool not in ("pen", "eraser") or self._space:
             event.ignore()  # the select tool works with the pen as a mouse
             return
-        x_mm, y_mm = self._to_mm(event.position())
+        x_mm, y_mm = self._to_mm(self._ev(event.position()))
         pressure = float(event.pressure())
         tilt = abs(float(getattr(event, "xTilt", lambda: 0.0)())) / 60.0
-        etype = event.type()
-        from PySide6.QtCore import QEvent
-
         if etype == QEvent.Type.TabletPress:
             self._stroke = [tuple(pack_point(x_mm, y_mm, pressure, tilt=tilt))]
             self.update()
             event.accept()
             return
         if etype == QEvent.Type.TabletMove and self._stroke:
-            self._stroke.append(tuple(pack_point(x_mm, y_mm, pressure, tilt=tilt)))
+            if self.tool == "pen" and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                gx, gy = self.grid_point(x_mm, y_mm)  # Shift: a straight line, as with the mouse
+                self._stroke = [self._stroke[0], tuple(pack_point(gx, gy, pressure, tilt=tilt))]
+            else:
+                self._stroke.append(tuple(pack_point(x_mm, y_mm, pressure, tilt=tilt)))
             self.update()
             event.accept()
             return
@@ -1161,6 +1267,17 @@ class PageCanvas(GuideMixin, QWidget):
                 x, y, *rest = stroke[0]
                 stroke.append((x + 0.01, y + 0.01, *rest))  # a tap with the pen is a dot
             self.strokeCommitted.emit(stroke)
+            self._back_from_eraser_end()
             self.changed.emit()
             self.update()
             event.accept()
+            return
+        if etype == QEvent.Type.TabletRelease:
+            self._back_from_eraser_end()
+            event.accept()
+
+    def _back_from_eraser_end(self) -> None:
+        if self._eraser_end is not None:
+            self.tool = self._eraser_end
+            self._eraser_end = None
+            self._update_cursor()

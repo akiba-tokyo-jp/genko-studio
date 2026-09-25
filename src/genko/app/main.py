@@ -585,6 +585,7 @@ class MainWindow(QMainWindow):
         self.canvas = PageCanvas()
         self.canvas.renderer = self._render_current
         self.canvas.changed.connect(self._refresh_status)
+        self.canvas.changed.connect(lambda: self._refresh_zoom() if hasattr(self, "zoom_label") else None)
         self.canvas.strokeCommitted.connect(self._on_stroke)
         self.canvas.frameSelected.connect(self._on_frame_selected)
         self.canvas.textMoved.connect(self._on_text_moved)
@@ -754,6 +755,13 @@ class MainWindow(QMainWindow):
         self.act_zoom_in = a("拡大", lambda: self.canvas.zoom_by(1.25), [QKeySequence(std.ZoomIn), QKeySequence("Ctrl+=")])
         self.act_zoom_out = a("縮小", lambda: self.canvas.zoom_by(0.8), std.ZoomOut)
         self.act_actual = a("原寸（紙の大きさ）", self.canvas.actual_size, "Ctrl+1")
+        self.act_turn_left = a("左に回す（15°）", lambda: self.canvas.rotate_view(-15), "Ctrl+Alt+Left",
+                               "表示だけを回します（原稿は回りません）。Shift＋スペースを押しながらドラッグでも回せます")
+        self.act_turn_right = a("右に回す（15°）", lambda: self.canvas.rotate_view(15), "Ctrl+Alt+Right",
+                                "表示だけを回します（原稿は回りません）")
+        self.act_turn_reset = a("回転・反転を戻す", self.canvas.reset_view, "Ctrl+Alt+0")
+        self.act_mirror = a("左右反転して見る", lambda on: self.canvas.flip_view(on), "H",
+                            "表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません", True)
         self.act_prev = a("◀ 前のページ", lambda: self._jump(-1), [QKeySequence(std.MoveToPreviousPage), QKeySequence("Ctrl+Left")])
         self.act_next = a("次のページ ▶", lambda: self._jump(1), [QKeySequence(std.MoveToNextPage), QKeySequence("Ctrl+Right")])
         self.act_onion = a("前のページを透かす（オニオンスキン）", self._onion)
@@ -868,7 +876,8 @@ class MainWindow(QMainWindow):
         menus = [
             ("ファイル", [self.act_new, self.act_open, None, self.act_save, self.act_save_as, None, self.act_import, self.act_export]),
             ("編集", [self.act_undo, self.act_redo, None, self.act_cut, self.act_copy, self.act_paste]),
-            ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_prev, self.act_next,
+            ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
+                      self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_onion]),
             ("ツール", [self.act_select, self.act_pen, self.act_eraser, self.act_text, self.act_frame, None, self.act_picker,
                         self.act_fill, self.act_lassofill, self.act_reshape, None, self.act_marquee, self.act_lasso, self.act_wand, None,
@@ -956,6 +965,7 @@ class MainWindow(QMainWindow):
         # ツールの設定 (left): what the tool in hand can do
         self.brush = BrushPanel()
         self.brush.changed.connect(self._brush_changed)
+        self._brush_changed()
         self.text_settings = TextToolSettings()
         self.tool_settings = ToolSettings()
         ts = self.tool_settings
@@ -1332,7 +1342,11 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(ms, self._refresh_status)
 
     def _refresh_zoom(self) -> None:
-        self.zoom_label.setText(f"表示 {self.canvas.zoom_percent()}%")
+        turned = f" ・ 回転 {self.canvas.rotation:+.0f}°" if self.canvas.rotation else ""
+        mirrored = " ・ 左右反転" if self.canvas.flipped else ""
+        self.zoom_label.setText(f"表示 {self.canvas.zoom_percent()}%{turned}{mirrored}")
+        if hasattr(self, "act_mirror") and self.act_mirror.isChecked() != self.canvas.flipped:
+            self.act_mirror.setChecked(self.canvas.flipped)
 
     # --- editing -----------------------------------------------------------------------------
 
@@ -1447,6 +1461,7 @@ class MainWindow(QMainWindow):
 
     def _brush_changed(self) -> None:
         self.canvas.brush_width_mm = self.brush.size.value()
+        self.canvas.live_brush = self.brush.stroke_fields()  # the line being drawn looks like the pen in hand
         self.canvas.update()
 
     # --- colour, fills, selections, line fixes (M13) ---------------------------------------------
