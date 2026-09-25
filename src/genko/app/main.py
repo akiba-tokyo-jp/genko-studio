@@ -1025,6 +1025,7 @@ class MainWindow(QMainWindow):
         self.act_save = a("保存", self._save, std.Save, "変更は自動で保存されます。今すぐ書き込むときに使います")
         self.act_save_as = a("別の場所に保存…", self._save_as, std.SaveAs)
         self.act_export = a("書き出し…", self._export, "Ctrl+E", "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します")
+        self.act_print = a("印刷…", self._print, "Ctrl+P", "プリンターで紙に印刷します（仕上がりで切る・用紙全体）")
         self.act_undo = a("元に戻す", self._undo, std.Undo)
         self.act_redo = a("やり直す", self._redo, [QKeySequence(std.Redo), QKeySequence("Ctrl+Y")])
         self.act_prefs = a("環境設定…", self._preferences, "Ctrl+,", "ショートカット・ペンタブレット・文字の大きさ・新しい原稿の用紙・保存の間隔")
@@ -1193,7 +1194,7 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
         menus = [
             ("ファイル", [self.act_new, self.act_open, "recent", None, self.act_save, self.act_save_as, None, self.act_import,
-                         self.act_export, None, self.act_prefs, None, self.act_close, self.act_quit]),
+                         self.act_export, self.act_print, None, self.act_prefs, None, self.act_close, self.act_quit]),
             ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste,
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
@@ -1302,6 +1303,12 @@ class MainWindow(QMainWindow):
             else:
                 commands.addAction(act)
         self.addToolBar(commands)
+
+    def _print(self) -> None:
+        from genko.app.printing import PrintDialog
+
+        self.commit_now()
+        PrintDialog(self).exec()
 
     def _show_tool_names(self, on: bool, save: bool = True) -> None:
         """Icons alone, or icons with their names (easier while learning 18 tools)."""

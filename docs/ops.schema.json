@@ -76,14 +76,14 @@
       "id": "str",
       "text": "optional",
       "speaker": "optional",
-      "balloon": "speech|rounded|box|cloud|thought|shout|flash|whisper|narration|sfx|none?",
+      "balloon": "speech|rounded|box|cloud|thought|shout|electric|flash|whisper|narration|sfx|none?",
       "wrap": "vertical|horizontal?",
       "ruby": "str?",
       "ruby_runs": "[[base, ruby]]?",
       "emphasis_runs": "[str]? (傍点 on these words)",
-      "style_runs": "[[words, {scale 0.3..3, bold, rgb}]]? (part of the line larger, smaller, bolder, coloured)",
+      "style_runs": "[[words, {scale 0.3..3, bold, weight, rgb}]]? (part of the line larger, smaller, bolder, coloured)",
       "frame_id": "str?",
-      "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6}? (null resets a key)",
+      "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6}? (null resets a key)",
       "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"
     },
     {
