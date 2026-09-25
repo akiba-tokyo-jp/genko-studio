@@ -29,7 +29,7 @@ class InlineEditor(QPlainTextEdit):
         self.finished = False
         self.setPlainText(text)
         self.setStyleSheet("QPlainTextEdit{background:#fffbe6;border:2px solid #e8590c;font-size:15px}")
-        self.setPlaceholderText("台詞を入力（改行で次の列、ルビは ｜約束《やくそく》）")
+        self.setPlaceholderText("台詞を入力（改行で次の列、ルビは ｜約束《やくそく》、傍点は 《《強調》》）")
         self.hint = QLabel("Ctrl+Enter で決定・Esc でやめる", parent)
         self.hint.setStyleSheet("background:#e8590c;color:white;padding:1px 4px")
         self.hint.adjustSize()
@@ -103,6 +103,7 @@ class PageCanvas(GuideMixin, QWidget):
     effectSelected = Signal(str)
     effectMoved = Signal(str, object)  # effect id, its new centre [x, y]
     stampRequested = Signal(float, float)  # the material tool clicked here (mm)
+    balloonDrawn = Signal(object)  # the text tool's balloon pen: an outline [[x, y], …] (mm)
 
     def __init__(self) -> None:
         super().__init__()
@@ -119,7 +120,8 @@ class PageCanvas(GuideMixin, QWidget):
         self.live_brush: dict | None = None  # the pen in hand (add_stroke fields); None draws a plain guide line
         self._live = None  # LiveInk of the line being drawn
         self._live_of: tuple | None = None  # (the point list, straight/snapped) it was drawn from
-        self._eraser_end: str | None = None  # the tool to go back to after the pen's eraser end lifts
+        self._eraser_end: str | None = None
+        self.balloon_pen = False  # the text tool draws a balloon's outline instead of placing a line  # the tool to go back to after the pen's eraser end lifts
         self._panning = False
         self._space = False
         self._last_pos = QPointF()
@@ -385,7 +387,12 @@ class PageCanvas(GuideMixin, QWidget):
             for pt in self._reshape["points"][1:]:
                 path.lineTo(self._pt(*pt[:2]))
             painter.drawPath(path)
-        if self._stroke and self.tool in ("lassofill", "marquee"):
+        if self._stroke and self.tool == "text":
+            painter.setPen(QPen(QColor(20, 20, 20), max(1.0, 0.35 * self._scale)))
+            painter.setBrush(QColor(255, 255, 255, 220))
+            painter.drawPolygon([self._pt(*p[:2]) for p in self._stroke])
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        elif self._stroke and self.tool in ("lassofill", "marquee"):
             painter.setPen(QPen(QColor("#1c7ed6") if self.tool == "marquee" else QColor("#e8590c"), 1.5, Qt.PenStyle.DashLine))
             painter.setBrush(QColor(28, 126, 214, 30) if self.tool == "marquee" else QColor(232, 89, 12, 40))
             pts = self._marquee_points()
@@ -615,6 +622,7 @@ class PageCanvas(GuideMixin, QWidget):
             out.append(("resize", key, (x + w * fx, y + h * fy)))
         tails = self._handle_drag["tails"] if self._handle_drag and self._handle_drag["kind"] == "tail" else self._tails(line)
         cx, cy = x + w / 2, y + h / 2
+        out.append(("turn", "turn", (cx, y - 7)))  # drag around the centre to turn the balloon
         for i, tail in enumerate(tails):
             tip = tail["to"]
             via = tail.get("via") or [(cx + tip[0]) / 2, (cy + tip[1]) / 2]
@@ -640,6 +648,15 @@ class PageCanvas(GuideMixin, QWidget):
             painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(QRectF(p.x(), p.y(), w * self._scale, h * self._scale))
+        if drag and drag["kind"] == "turn" and drag.get("angle") is not None:
+            import math
+
+            cx, cy = line.x_mm + line.w_mm / 2, line.y_mm + line.h_mm / 2
+            a = math.radians(drag["angle"])
+            r = max(line.w_mm, line.h_mm) / 2 + 7
+            painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
+            painter.drawLine(self._pt(cx, cy), self._pt(cx + r * math.sin(a), cy - r * math.cos(a)))
+            painter.drawText(self._pt(cx, cy) + QPointF(6, -6), f"{drag['angle']:+.0f}°")
         if drag and drag["kind"] == "tail":
             painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
             cx, cy = line.x_mm + line.w_mm / 2, line.y_mm + line.h_mm / 2
@@ -654,6 +671,9 @@ class PageCanvas(GuideMixin, QWidget):
             painter.setBrush(QColor("white"))
             if kind == "resize":
                 painter.drawRect(QRectF(p.x() - HANDLE_PX / 2, p.y() - HANDLE_PX / 2, HANDLE_PX, HANDLE_PX))
+            elif kind == "turn":
+                painter.drawLine(p + QPointF(0, HANDLE_PX / 2 + 1), self._pt(hx, hy + 7) + QPointF(0, 0))
+                painter.drawEllipse(p, HANDLE_PX / 2 + 2, HANDLE_PX / 2 + 2)
             elif key[1] == "to":
                 painter.setBrush(QColor("#e8590c"))
                 painter.drawEllipse(p, HANDLE_PX / 2 + 1, HANDLE_PX / 2 + 1)
@@ -677,6 +697,14 @@ class PageCanvas(GuideMixin, QWidget):
             if key.startswith("s"):
                 bottom = max(y_mm, top + 4)
             drag["cur"] = (round(left, 2), round(top, 2), round(right - left, 2), round(bottom - top, 2))
+        elif drag["kind"] == "turn":
+            import math
+
+            x, y, w, h = drag["orig"]
+            angle = math.degrees(math.atan2(x_mm - (x + w / 2), (y + h / 2) - y_mm))  # 0 straight up, clockwise
+            if self._modifiers & Qt.KeyboardModifier.ShiftModifier:
+                angle = round(angle / 15) * 15
+            drag["angle"] = round(angle, 1)
         else:
             index, part = drag["key"]
             drag["tails"][index][part] = [round(x_mm, 2), round(y_mm, 2)]
@@ -911,6 +939,10 @@ class PageCanvas(GuideMixin, QWidget):
             return
         x_mm, y_mm = self._to_mm(pos)
         self._press_pos = pos
+        if self.tool == "text" and self.balloon_pen:
+            self._stroke = [(x_mm, y_mm)]  # the outline of a balloon, drawn by hand
+            self.update()
+            return
         if self.tool == "text":
             self.textRequested.emit(x_mm, y_mm)
             return
@@ -990,6 +1022,7 @@ class PageCanvas(GuideMixin, QWidget):
             self.update()
             return
         if self._handle_drag is not None:
+            self._modifiers = event.modifiers()
             self._drag_handle(pos)
             return
         if self._frame_drag is not None:
@@ -1073,6 +1106,16 @@ class PageCanvas(GuideMixin, QWidget):
                 self.strokeReshaped.emit(shape["id"], shape["points"])
             self.update()
             return
+        if self.tool == "text" and self._stroke:
+            import math
+
+            pts = [[round(p[0], 2), round(p[1], 2)] for p in self._stroke[:: max(1, len(self._stroke) // 80)]]
+            self._stroke = []
+            xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+            if len(pts) >= 3 and max(xs) - min(xs) > 4 and max(ys) - min(ys) > 4 and max(math.dist(pts[0], p) for p in pts) > 4:
+                self.balloonDrawn.emit(pts)
+            self.update()
+            return
         if self.tool in ("lassofill", "marquee") and self._stroke:
             pts = [list(p) for p in self._marquee_points()]
             self._stroke = []
@@ -1094,6 +1137,8 @@ class PageCanvas(GuideMixin, QWidget):
                 self.lineGeometry.emit(drag["line"], {"x_mm": x, "y_mm": y, "w_mm": w, "h_mm": h})
             elif drag["kind"] == "tail":
                 self.lineGeometry.emit(drag["line"], {"tails": drag["tails"]})
+            elif drag["kind"] == "turn" and drag.get("angle") is not None:
+                self.lineGeometry.emit(drag["line"], {"style": {"rotate_deg": drag["angle"] or None}})
             self.update()
             return
         if self._drag_line is not None:

@@ -90,6 +90,35 @@ def parse_ruby(text: str) -> tuple[str, list[list[str]]]:
     return _RUBY.sub(take, text or ""), runs
 
 
+_EMPHASIS = _re.compile(r"《《([^《》\n]+)》》")
+
+
+def parse_marks(typed: str) -> tuple[str, list[list[str]], list[str]]:
+    """Ruby and 傍点 as typed: '《《絶対》》に｜約束《やくそく》' → ('絶対に約束', [['約束', 'やくそく']], ['絶対'])
+    (《《…》》 for dots, as on Japanese novel sites)."""
+    emphasis: list[str] = []
+
+    def take(match) -> str:
+        emphasis.append(match.group(1))
+        return match.group(1)
+
+    text, runs = parse_ruby(_EMPHASIS.sub(take, typed or ""))
+    return text, runs, emphasis
+
+
+def with_marks(line) -> str:
+    """A line as typed back: its ruby and its 傍点 in the notation."""
+    text = with_ruby(line.text, line.ruby_runs)
+    pos = 0
+    for base in getattr(line, "emphasis_runs", None) or []:
+        at = text.find(base, pos)
+        if at < 0:
+            continue
+        text = text[:at] + f"《《{base}》》" + text[at + len(base):]
+        pos = at + len(base) + 4
+    return text
+
+
 def with_ruby(text: str, runs) -> str:
     """The text as typed back, with its ruby in the notation (each run once, in order)."""
     out, pos = [], 0

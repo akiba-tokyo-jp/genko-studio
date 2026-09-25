@@ -79,7 +79,7 @@ class StoryPanel(QWidget):
         self.speaker = QLineEdit()
         self.speaker.setPlaceholderText("話者（空でもよい）")
         self.text = QPlainTextEdit()
-        self.text.setPlaceholderText("台詞（改行で次の列へ。ルビは ｜約束《やくそく》）")
+        self.text.setPlaceholderText("台詞（改行で次の列へ。ルビは ｜約束《やくそく》、傍点は 《《強調》》）")
         self.text.setMaximumHeight(80)
         self.kind = QComboBox()
         for key, label in KINDS:
@@ -125,6 +125,24 @@ class StoryPanel(QWidget):
         self.fill.activated.connect(lambda _: self._style_changed())
         self.tcy = QCheckBox("数字と !? を縦中横にする")
         self.tcy.clicked.connect(lambda _: self._style_changed())
+        self.rotate = spin(-180, 180, 5, "°")
+        self.rotate.setDecimals(0)
+        self.rotate.setToolTip("フキダシごと回します（選択ツールで、フキダシの上の○をドラッグしても回せます）")
+        self.skew = spin(-60, 60, 5, "°")
+        self.skew.setDecimals(0)
+        self.skew.setToolTip("文字を傾けます（描き文字・効果音に）")
+        self.arc = spin(-1, 1, 0.1, "")
+        self.arc.setToolTip("文字を弓なりに曲げます（1 で真ん中が大きく持ち上がる。マイナスで逆向き）")
+        self.latin = QComboBox()
+        self.latin.addItem("4 文字以上は寝かせる", "rotate")
+        self.latin.addItem("1 文字ずつ立てる", "upright")
+        self.latin.setToolTip("縦書きの中の半角の英数字の組み方")
+        self.latin.activated.connect(lambda _: self._style_changed())
+        self.mark = QComboBox()
+        self.mark.addItem("ゴマ（﹅）", "sesame")
+        self.mark.addItem("黒丸（・）", "dot")
+        self.mark.setToolTip("《《強調》》と書いた所に付く傍点の形")
+        self.mark.activated.connect(lambda _: self._style_changed())
         self.color = QPushButton("文字の色…")
         self.color.clicked.connect(self._pick_color)
         reset = QPushButton("既定の設定に戻す")
@@ -150,6 +168,11 @@ class StoryPanel(QWidget):
         form.addRow("フキダシの線", self.border)
         form.addRow("フキダシの中", self.fill)
         form.addRow("", self.tcy)
+        form.addRow("欧文", self.latin)
+        form.addRow("傍点", self.mark)
+        form.addRow("回転", self.rotate)
+        form.addRow("傾き", self.skew)
+        form.addRow("弓なり", self.arc)
         form.addRow("", self.color)
         hint = QLabel("編集画面: テキストツール（T）でクリックした所に入力。フキダシはダブルクリックで打ち直し、"
                       "四隅で大きさ、●でしっぽの先、◇でしっぽの曲がり。右クリックで形・しっぽ・結合。")
@@ -201,7 +224,7 @@ class StoryPanel(QWidget):
             self.list.setCurrentRow(self.line_ids.index(line_id))
 
     def _picked(self) -> None:
-        from genko.app.lettering import with_ruby
+        from genko.app.lettering import with_marks
         from genko.balloons import style_of
 
         line = self._line()
@@ -213,7 +236,7 @@ class StoryPanel(QWidget):
             return
         self._loading = True
         self.speaker.setText(line.speaker)
-        self.text.setPlainText(with_ruby(line.text, line.ruby_runs))
+        self.text.setPlainText(with_marks(line))
         self.kind.setCurrentIndex(max(0, self.kind.findData(line.balloon)))
         self.vertical.setChecked(line.wrap == "vertical")
         st = style_of(line)
@@ -231,6 +254,11 @@ class StoryPanel(QWidget):
         self.align.setCurrentIndex(max(0, self.align.findData(st["align"])))
         self.fill.setCurrentIndex(max(0, self.fill.findData(st["fill"])))
         self.tcy.setChecked(bool(st["tcy"]))
+        self.rotate.setValue(float(st["rotate_deg"] or 0))
+        self.skew.setValue(float(st["skew_deg"] or 0))
+        self.arc.setValue(float(st["arc"] or 0))
+        self.latin.setCurrentIndex(max(0, self.latin.findData(st["latin"])))
+        self.mark.setCurrentIndex(max(0, self.mark.findData(st["emphasis_mark"])))
         self._loading = False
 
     def _style(self, change: dict) -> None:
@@ -243,7 +271,9 @@ class StoryPanel(QWidget):
             return
         self._style({"size_mm": self.size.value() or None, "tracking": self.tracking.value(), "leading": self.leading.value(),
                      "outline_mm": self.outline.value() or None, "border_mm": self.border.value(),
-                     "align": self.align.currentData(), "fill": self.fill.currentData(), "tcy": self.tcy.isChecked()})
+                     "align": self.align.currentData(), "fill": self.fill.currentData(), "tcy": self.tcy.isChecked(),
+                     "rotate_deg": self.rotate.value() or None, "skew_deg": self.skew.value() or None, "arc": self.arc.value() or None,
+                     "latin": self.latin.currentData(), "emphasis_mark": self.mark.currentData()})
 
     def _font_changed(self) -> None:
         if self._loading:
@@ -312,7 +342,7 @@ class StoryPanel(QWidget):
             self.select(line_id)
 
     def add(self) -> None:
-        from genko.app.lettering import parse_ruby, place_new
+        from genko.app.lettering import parse_marks, place_new
 
         page = self.window.current_page()
         typed = self.text.toPlainText().strip()
@@ -323,13 +353,15 @@ class StoryPanel(QWidget):
         if frame is None:
             self.window.flash("先に編集画面でコマをクリックして選びます（テキストツール T なら、置きたい所をクリック）", 6000)
             return
-        text, runs = parse_ruby(typed)
+        text, runs, marks = parse_marks(typed)
         box = place_new(self.window.episode, page, frame, text, self.kind.currentData(), self.vertical.isChecked())
         before = {ln.id for ln in self._lines()}
         op = {"op": "add_line", "page": page.index, "text": text, "speaker": self.speaker.text().strip(),
               "frame_id": frame.id, "balloon": self.kind.currentData(), **box}
         if runs:
             op["ruby_runs"] = runs
+        if marks:
+            op["emphasis_runs"] = marks
         if self.window.apply_ops([op]):
             self.text.clear()
             added = next((ln.id for ln in self._lines() if ln.id not in before), None)
@@ -337,7 +369,7 @@ class StoryPanel(QWidget):
             self.select(added)
 
     def apply_edit(self) -> None:
-        from genko.app.lettering import parse_ruby, refit
+        from genko.app.lettering import parse_marks, refit
 
         line = self._line()
         if line is None:
@@ -346,10 +378,10 @@ class StoryPanel(QWidget):
         if not typed:
             self.window.flash("台詞が空です。消すときは「削除」を押します", 6000)
             return
-        text, runs = parse_ruby(typed)
+        text, runs, marks = parse_marks(typed)
         kind, vertical = self.kind.currentData(), self.vertical.isChecked()
         ops = [{"op": "edit_line", "id": line.id, "text": text, "speaker": self.speaker.text().strip(), "balloon": kind,
-                "wrap": "vertical" if vertical else "horizontal", "ruby_runs": runs}]
+                "wrap": "vertical" if vertical else "horizontal", "ruby_runs": runs, "emphasis_runs": marks}]
         if (text, kind, vertical) != (line.text, line.balloon, line.wrap == "vertical"):
             frame = self.window.frame_by_id(line.frame_id)
             ops.append({"op": "move_line", "id": line.id, **refit(line, frame, text, kind, vertical)})
@@ -591,7 +623,9 @@ class MainWindow(QMainWindow):
         self.canvas.textMoved.connect(self._on_text_moved)
         self.canvas.contextMenuAt.connect(self._context_menu)
         self.canvas.lineSelected.connect(self._on_line_selected)
-        self.canvas.lineGeometry.connect(lambda line_id, change: self.apply_ops([{"op": "move_line", "id": line_id, **change}]))
+        self.canvas.lineGeometry.connect(lambda line_id, change: self.apply_ops(
+            [{"op": "edit_line" if "style" in change else "move_line", "id": line_id, **change}]))
+        self.canvas.balloonDrawn.connect(self._balloon_drawn)
         self.canvas.lineEditRequested.connect(self._edit_line_inline)
         self.canvas.lineContextMenu.connect(self._line_menu)
         self.canvas.textRequested.connect(self._type_new_line)
@@ -967,6 +1001,7 @@ class MainWindow(QMainWindow):
         self.brush.changed.connect(self._brush_changed)
         self._brush_changed()
         self.text_settings = TextToolSettings()
+        self.text_settings.draw_balloon.toggled.connect(lambda on: setattr(self.canvas, "balloon_pen", on))
         self.tool_settings = ToolSettings()
         ts = self.tool_settings
         ts.add(("pen", "fill", "lassofill", "picker"), self.brush)
@@ -1896,11 +1931,11 @@ class MainWindow(QMainWindow):
             return
 
         def done(typed: str | None) -> None:
-            from genko.app.lettering import parse_ruby, place_at
+            from genko.app.lettering import parse_marks, place_at
 
             if not typed:
                 return
-            text, runs = parse_ruby(typed)
+            text, runs, marks = parse_marks(typed)
             frame = page.frame_at(x_mm, y_mm)
             fields = self.text_settings.line_fields()
             box = place_at(x_mm, y_mm, text, fields["balloon"], fields["vertical"], frame)
@@ -1911,6 +1946,8 @@ class MainWindow(QMainWindow):
                 op["frame_id"] = frame.id
             if runs:
                 op["ruby_runs"] = runs
+            if marks:
+                op["emphasis_runs"] = marks
             before = {ln.id for ln in self.episode.story}
             if self.apply_ops([op]):
                 added = next((ln.id for ln in self.episode.story if ln.id not in before), None)
@@ -1920,23 +1957,59 @@ class MainWindow(QMainWindow):
 
         self.canvas.open_editor(x_mm, y_mm, "", done)
 
+    def _balloon_drawn(self, outline: list) -> None:
+        """The text tool's balloon pen: the drawn outline becomes the balloon, then the words are typed."""
+        page = self._current()
+        if page is None:
+            return
+        xs, ys = [p[0] for p in outline], [p[1] for p in outline]
+        cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+
+        def done(typed: str | None) -> None:
+            from genko.app.lettering import parse_marks
+
+            if not typed:
+                return
+            text, runs, marks = parse_marks(typed)
+            fields = self.text_settings.line_fields()
+            kind = fields["balloon"] if fields["balloon"] not in ("sfx", "none", "narration") else "speech"
+            op = {"op": "add_line", "page": page.index, "text": text, "balloon": kind, "path": outline,
+                  "wrap": "vertical" if fields["vertical"] else "horizontal"}
+            frame = page.frame_at(cx, cy)
+            if frame is not None:
+                op["frame_id"] = frame.id
+            if fields["style"]:
+                op["style"] = fields["style"]
+            if runs:
+                op["ruby_runs"] = runs
+            if marks:
+                op["emphasis_runs"] = marks
+            before = {ln.id for ln in self.episode.story}
+            if self.apply_ops([op]):
+                added = next((ln.id for ln in self.episode.story if ln.id not in before), None)
+                self.canvas.selected_line_id = added
+                self._on_line_selected(added, False)
+
+        self.canvas.open_editor(min(xs), min(ys), "", done)
+
     def _edit_line_inline(self, line_id: str) -> None:
-        from genko.app.lettering import with_ruby
+        from genko.app.lettering import with_marks
 
         line = self._line(line_id)
         if line is None:
             return
 
         def done(typed: str | None) -> None:
-            from genko.app.lettering import parse_ruby, refit
+            from genko.app.lettering import parse_marks, refit
 
             current = self._line(line_id)
             if not typed or current is None:
                 return
-            text, runs = parse_ruby(typed)
-            if (text, [list(r) for r in runs]) == (current.text, [list(r) for r in current.ruby_runs]):
+            text, runs, marks = parse_marks(typed)
+            if (text, [list(r) for r in runs], marks) == (current.text, [list(r) for r in current.ruby_runs],
+                                                          list(current.emphasis_runs)):
                 return
-            ops = [{"op": "edit_line", "id": line_id, "text": text, "ruby_runs": runs}]
+            ops = [{"op": "edit_line", "id": line_id, "text": text, "ruby_runs": runs, "emphasis_runs": marks}]
             size = refit(current, self.frame_by_id(current.frame_id), text, current.balloon, current.wrap == "vertical")
             # keep the balloon's centre where it was
             cx, cy = current.x_mm + current.w_mm / 2, current.y_mm + current.h_mm / 2
@@ -1944,7 +2017,7 @@ class MainWindow(QMainWindow):
                         "w_mm": size["w_mm"], "h_mm": size["h_mm"]})
             self.apply_ops(ops)
 
-        self.canvas.open_editor(line.x_mm, line.y_mm, with_ruby(line.text, line.ruby_runs), done)
+        self.canvas.open_editor(line.x_mm, line.y_mm, with_marks(line), done)
 
     def _line_menu(self, line_id: str, pos: QPointF) -> None:
         from genko.app.lettering import KINDS

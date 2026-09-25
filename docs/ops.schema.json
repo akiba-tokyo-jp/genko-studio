@@ -65,6 +65,9 @@
       "tail": "[x,y]?",
       "tails": "[{to, via?, width_mm?}]?",
       "style": "object?",
+      "ruby_runs": "[[base, ruby]]?",
+      "emphasis_runs": "[str]?",
+      "path": "[[x,y]]? (a hand-drawn balloon)",
       "id": "str? (choose the id)"
     },
     {
@@ -76,8 +79,9 @@
       "wrap": "vertical|horizontal?",
       "ruby": "str?",
       "ruby_runs": "[[base, ruby]]?",
+      "emphasis_runs": "[str]? (傍点 on these words)",
       "frame_id": "str?",
-      "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group}? (null resets a key)",
+      "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot}? (null resets a key)",
       "tails": "[{to:[x,y], via?:[x,y], width_mm?}]?"
     },
     {
@@ -388,9 +392,10 @@
     {
       "op": "set_balloon_path",
       "id": "str",
-      "path": "[[x,y]]?",
+      "path": "[[x,y]]? (a hand-drawn outline; the box becomes its bounds; null goes back to the shape)",
       "wrap": "vertical|horizontal",
-      "ruby_runs": "[[base,ruby]]"
+      "ruby_runs": "[[base,ruby]]",
+      "emphasis_runs": "[str]"
     },
     {
       "op": "add_mannequin",

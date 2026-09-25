@@ -287,7 +287,8 @@ class StoryLine:
     tail: tuple[float, float] | None = None
     wrap: str = "horizontal"
     ruby_runs: list = field(default_factory=list)
-    path: list | None = None
+    path: list | None = None  # a balloon drawn by hand: its outline (mm); the box is its bounds
+    emphasis_runs: list = field(default_factory=list)  # 傍点: the stretches of text that carry dots
     # lettering and balloon style: font, size_mm, tracking, leading, align, outline_mm, rgb, tcy,
     # border_mm, fill ("white" | "none"), group (balloons with the same group are drawn as one)
     style: dict = field(default_factory=dict)

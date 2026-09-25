@@ -17,7 +17,7 @@ import math
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from genko import fonts
-from genko.tategaki import cells, compose
+from genko.tategaki import cells, compose, draw_mark
 
 SHAPES = ("speech", "rounded", "box", "cloud", "thought", "shout", "flash", "whisper", "narration", "sfx", "none")
 ELLIPTIC = ("speech", "cloud", "thought", "shout", "flash", "whisper")
@@ -30,7 +30,8 @@ PAPER = (255, 255, 255)
 TEXT = (10, 10, 10)
 
 DEFAULTS = {"font": None, "size_mm": None, "tracking": 0.0, "leading": 0.15, "align": "top", "outline_mm": None,
-            "rgb": None, "tcy": True, "border_mm": 0.35, "fill": "white", "group": None}
+            "rgb": None, "tcy": True, "border_mm": 0.35, "fill": "white", "group": None, "rotate_deg": 0.0, "skew_deg": 0.0,
+            "arc": 0.0, "latin": "rotate", "emphasis_mark": "sesame"}
 LINE_START = frozenset("、。，．）」』)】］〉》ーぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ！？!?…‥")
 LINE_END = frozenset("「『（(【［〈《〔")
 
@@ -65,28 +66,42 @@ def _inner(kind: str, w: float, h: float, pad: float) -> tuple[float, float]:
     return w, h
 
 
+def _emphasis(line, face) -> list[str]:
+    return [face.normalize(str(run)) for run in getattr(line, "emphasis_runs", None) or [] if run]
+
+
 def _vertical(line, st: dict, face, em: int, inner_h: float, fill) -> Image.Image:
     text = face.normalize(line.text or "")
     tracking, leading = float(st["tracking"] or 0), float(st["leading"] or 0)
+    latin = st["latin"] != "upright"
     step = em * (1 + tracking)
     column = inner_h
     if "\n" not in text and em > 0:
         # balance the columns (7 / 7 / 1 reads badly; 5 / 5 / 5 does not)
-        count = len(cells(text, bool(st["tcy"])))
+        count = len(cells(text, bool(st["tcy"]), latin))
         fit = max(1, int((inner_h - em) // step) + 1)
         if count > fit:
             cols = -(-count // fit)
             column = min(column, em + step * (-(-count // cols) - 1))
     return compose(text, face.font(em), em, max(em, int(column + em * 0.1)), fill=fill,
                    ruby_runs=getattr(line, "ruby_runs", None) or None, face=face, tracking=tracking, leading=leading,
-                   tcy=bool(st["tcy"]), align=str(st["align"] or "top"))
+                   tcy=bool(st["tcy"]), align=str(st["align"] or "top"), latin=latin,
+                   emphasis_runs=_emphasis(line, face) or None, emphasis_mark=str(st["emphasis_mark"] or "sesame"))
 
 
 def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Image:
     """Rows left to right with kinsoku, centred (or aligned by style.align: left / center / right)."""
     text = face.normalize(line.text or "")
     tracking = float(st["tracking"] or 0)
-    line_h = round(em * (1.15 + float(st["leading"] or 0)))
+    marked: set[int] = set()
+    pos = 0
+    for base in _emphasis(line, face):
+        at = text.find(base, pos)
+        if at >= 0:
+            marked.update(i for i in range(at, at + len(base)) if not text[i].isspace())
+            pos = at + len(base)
+    mark_h = round(em * 0.36) if marked else 0  # 傍点 sit above the characters
+    line_h = round(em * (1.15 + float(st["leading"] or 0))) + mark_h
 
     def advance(char: str) -> float:
         try:
@@ -94,31 +109,39 @@ def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Im
         except Exception:
             return em * (1 + tracking)
 
-    rows: list[str] = []
+    rows: list[list[tuple[str, int]]] = []  # (character, its place in the text)
+    index = 0
     for part in text.split("\n"):
-        row, width = "", 0.0
+        row: list[tuple[str, int]] = []
+        width = 0.0
         for char in part:
             w = advance(char)
             if row and width + w > inner_w and char not in LINE_START:
-                if row[-1] in LINE_END and len(row) > 1:
+                if row[-1][0] in LINE_END and len(row) > 1:
                     rows.append(row[:-1])
-                    row, width = row[-1], advance(row[-1])
+                    row, width = [row[-1]], advance(row[-1][0])
                 else:
                     rows.append(row)
-                    row, width = "", 0.0
-            row += char
+                    row, width = [], 0.0
+            row.append((char, index))
+            index += 1
             width += w
         rows.append(row)
-    widths = [sum(advance(c) for c in row) for row in rows]
+        index += 1  # the "\n"
+    widths = [sum(advance(c) for c, _ in row) for row in rows]
     out_w = max(1, math.ceil(max(widths or [1])))
     out = Image.new("RGBA", (out_w, max(1, line_h * len(rows))), (0, 0, 0, 0))
     draw = ImageDraw.Draw(out)
     align = st["align"] if st["align"] in ("left", "right") else "center"
     for i, row in enumerate(rows):
         x = 0.0 if align == "left" else (out_w - widths[i]) / (2 if align == "center" else 1)
-        for char in row:
+        for char, at in row:
             font = face.font(em, char)
-            draw.text((x, i * line_h + (line_h - em) / 2), char, font=font, fill=fill + (255,))
+            draw.text((x, i * line_h + mark_h + (line_h - mark_h - em) / 2), char, font=font, fill=fill + (255,))
+            if at in marked:
+                w = advance(char) - em * tracking
+                draw_mark(out, (x + w / 2, i * line_h + mark_h / 2 + max(1, em // 16)), mark_h, str(st["emphasis_mark"] or "sesame"),
+                          fill, vertical=False)
             x += advance(char)
     return out
 
@@ -135,7 +158,7 @@ def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Imag
         em = px(float(st["size_mm"]), dpi)
         fixed = True
     elif kind == "sfx":
-        first = max(1, len(cells((line.text or " ").split("\n")[0], bool(st["tcy"]))))
+        first = max(1, len(cells((line.text or " ").split("\n")[0], bool(st["tcy"]), st["latin"] != "upright")))
         em = max(8, min(px(SFX_CAP_MM, dpi), (w if vertical else h), (h if vertical else w) // first))
         fixed = False
     elif kind == "none":
@@ -159,7 +182,46 @@ def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Imag
     grow = px(float(outline), dpi) if outline else (max(2, em // 8) if kind == "sfx" else 0)
     if grow:
         image = outlined(image, grow)
+    if st["arc"]:
+        image = arched(image, float(st["arc"]), vertical)
+    if st["skew_deg"]:
+        image = skewed(image, float(st["skew_deg"]), vertical)
     return image, em
+
+
+def skewed(image: Image.Image, degrees: float, vertical: bool) -> Image.Image:
+    """Lettering leaning by `degrees`: across text leans right like italics (its top moves right);
+    vertical text's columns slide down toward the left (a slanted 描き文字). Negative leans the other way."""
+    k = math.tan(math.radians(max(-60.0, min(60.0, degrees))))
+    w, h = image.size
+    # (PIL's affine maps each output pixel back to the input: x' = a x + b y + c, y' = d x + e y + f)
+    if vertical:
+        size = (w, int(h + abs(k) * w) + 1)
+        return image.transform(size, Image.Transform.AFFINE, (1, 0, 0, k, 1, -k * w if k > 0 else 0), Image.Resampling.BICUBIC)
+    size = (int(w + abs(k) * h) + 1, h)
+    return image.transform(size, Image.Transform.AFFINE, (1, k, -k * h if k > 0 else 0, 0, 1, 0), Image.Resampling.BICUBIC)
+
+
+def arched(image: Image.Image, amount: float, vertical: bool) -> Image.Image:
+    """Lettering bent into a bow (弓なり): amount 1 lifts the middle by a third of the text's length
+    (negative bends the other way)."""
+    w, h = image.size
+    length = h if vertical else w
+    rise = abs(amount) * length / 3
+    pad = int(rise) + 1
+    out = Image.new("RGBA", (w + pad, h) if vertical else (w, h + pad), (0, 0, 0, 0))
+    strip = max(1, length // 120)
+    for start in range(0, length, strip):
+        t = (start + strip / 2) / length * 2 - 1  # -1 … 1 along the text
+        lift = rise * (1 - t * t)  # the middle moves most
+        offset = int(round(lift if amount < 0 else rise - lift))
+        if vertical:
+            piece = image.crop((0, start, w, min(h, start + strip)))
+            out.alpha_composite(piece, (pad - offset if amount > 0 else offset, start))
+        else:
+            piece = image.crop((start, 0, min(w, start + strip), h))
+            out.alpha_composite(piece, (start, offset))
+    return out
 
 
 def outlined(text_img: Image.Image, grow: int, colour=(255, 255, 255)) -> Image.Image:
@@ -271,11 +333,64 @@ def _erode(mask: Image.Image, amount: int) -> Image.Image:
     return mask.filter(ImageFilter.GaussianBlur(amount / 2)).point(lambda v: 255 if v >= 249 else 0)
 
 
+def _turned(point, centre, degrees: float) -> list[float]:
+    """A point turned about `centre` by `degrees` (clockwise on the page)."""
+    a = math.radians(degrees)
+    dx, dy = point[0] - centre[0], point[1] - centre[1]
+    return [centre[0] + dx * math.cos(a) - dy * math.sin(a), centre[1] + dx * math.sin(a) + dy * math.cos(a)]
+
+
+def _draw_turned(image: Image.Image, lines: list, dpi: int, show_speaker: bool, font_path: str | None, degrees: float) -> None:
+    """A balloon turned by `degrees`: drawn upright on its own sheet, turned about its centre and laid
+    on the page. The tails are turned back first, so they still point where they were aimed."""
+    import copy
+
+    x0 = min(ln.x_mm for ln in lines)
+    y0 = min(ln.y_mm for ln in lines)
+    x1 = max(ln.x_mm + (ln.w_mm or 40) for ln in lines)
+    y1 = max(ln.y_mm + (ln.h_mm or 20) for ln in lines)
+    centre = ((x0 + x1) / 2, (y0 + y1) / 2)
+    reach = math.hypot(x1 - x0, y1 - y0) / 2
+    for ln in lines:
+        for tail in tails_of(ln):
+            reach = max(reach, math.dist(centre, tail["to"]))
+    reach += 6  # room for outlines, halos and the tail's bubbles
+    left, top = centre[0] - reach, centre[1] - reach
+    size = px(2 * reach, dpi)
+    sheet = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    upright = []
+    for ln in lines:
+        twin = copy.copy(ln)
+        twin.style = {k: v for k, v in (ln.style or {}).items() if k != "rotate_deg"}
+        twin.x_mm, twin.y_mm = ln.x_mm - left, ln.y_mm - top
+        twin.path = [(p[0] - left, p[1] - top) for p in ln.path] if getattr(ln, "path", None) else None
+        tails = []
+        for tail in tails_of(ln):
+            moved = dict(tail, to=[v - o for v, o in zip(_turned(tail["to"], centre, -degrees), (left, top))])
+            if tail.get("via"):
+                moved["via"] = [v - o for v, o in zip(_turned(tail["via"], centre, -degrees), (left, top))]
+            tails.append(moved)
+        twin.tails = tails
+        twin.tail = tuple(tails[0]["to"]) if tails else None
+        upright.append(twin)
+    draw_group(sheet, upright, dpi, False, font_path)
+    turned = sheet.rotate(-degrees, resample=Image.Resampling.BICUBIC, center=(size / 2, size / 2))
+    image.paste(turned, (round(left / 25.4 * dpi), round(top / 25.4 * dpi)), turned)
+    if show_speaker:
+        for ln in lines:
+            if ln.speaker and (ln.balloon or "speech") != "none":
+                font = fonts.face(None).font(max(8, px(3, dpi)))
+                ImageDraw.Draw(image).text((px(ln.x_mm, dpi), max(0, px(ln.y_mm - 4, dpi))), ln.speaker, fill=(90, 90, 90), font=font)
+
+
 def draw_group(image: Image.Image, lines: list, dpi: int, show_speaker: bool = True, font_path: str | None = None) -> None:
     """One balloon (or several joined ones) with their tails and text, onto the page image."""
     first = lines[0]
     kind = first.balloon or "speech"
     st = style_of(first)
+    if st["rotate_deg"] and abs(float(st["rotate_deg"])) > 0.01:
+        _draw_turned(image, lines, dpi, show_speaker, font_path, float(st["rotate_deg"]))
+        return
     if kind not in ("sfx", "none"):
         boxes = [(px(ln.x_mm, dpi), px(ln.y_mm, dpi), px(ln.x_mm + (ln.w_mm or 40), dpi), px(ln.y_mm + (ln.h_mm or 20), dpi))
                  for ln in lines]
@@ -307,7 +422,10 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
         return tuple((v - o) * scale for v, o in zip(box, (rx0, ry0, rx0, ry0)))
 
     for line, box in zip(lines, boxes):
-        _shape(draw, line.balloon or "speech", local(box))
+        if getattr(line, "path", None):  # drawn by hand
+            draw.polygon([((px(p[0], dpi) - rx0) * scale, (px(p[1], dpi) - ry0) * scale) for p in line.path], fill=255)
+        else:
+            _shape(draw, line.balloon or "speech", local(box))
     for line, tail in tails:
         box = local(next(b for ln, b in zip(lines, boxes) if ln is line))
         tip = ((px(tail["to"][0], dpi) - rx0) * scale, (px(tail["to"][1], dpi) - ry0) * scale)
