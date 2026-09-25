@@ -677,13 +677,20 @@ def _draw_prims(image: Image.Image, page: Page, dpi: int, mode: str) -> None:
 
     width = max(1, mm_to_px(0.3, dpi))
     frames = {frame.id: frame for frame in page.leaf_frames()}
+    from genko import mesh3d
+
     for prim in page.prims:
+        prim = mesh3d.with_camera(prim, page)
         # a guide set in a panel stays in it (a room seen from inside runs far past the panel's edges)
         frame = frames.get(prim.get("frame_id") or "")
         sheet = Image.new("RGBA", image.size, (0, 0, 0, 0)) if frame is not None else None
         draw = ImageDraw.Draw(sheet if sheet is not None else image)
         if prim.get("kind") == "mannequin":
             _draw_mannequin(draw, prim, dpi)
+        elif prim.get("kind") in prim3d.MESH_KINDS:
+            _draw_surfaces(sheet if sheet is not None else image, prim, page, dpi)
+            for line in prim3d.trace(prim):
+                draw.line([_xy(p, dpi) for p in line], fill=(70, 70, 120), width=width)
         else:
             for a, b, seen in prim3d.edges(prim):
                 draw.line([_xy(a, dpi), _xy(b, dpi)], fill=(90, 90, 140) if seen else (190, 190, 215), width=width)
@@ -691,6 +698,31 @@ def _draw_prims(image: Image.Image, page: Page, dpi: int, mode: str) -> None:
             inside = Image.new("L", image.size, 0)
             fill_frame(ImageDraw.Draw(inside), frame, dpi)
             image.paste(sheet, (0, 0), ImageChops.multiply(sheet.split()[3], inside))
+
+
+def _draw_surfaces(image: Image.Image, prim: dict, page: Page, dpi: int) -> None:
+    """A 3D guide's surfaces, lightly shaded by the page's light (the name and proof views only)."""
+    import numpy as np
+
+    from genko import mesh3d, prim3d
+
+    x, y, w, h = prim3d.prim_bbox(prim)
+    if w <= 0 or h <= 0:
+        return
+    light = (page.extra or {}).get("light") or {}
+    size = (max(1, mm_to_px(w, dpi) + 2), max(1, mm_to_px(h, dpi) + 2))
+    shade, _z, alpha = mesh3d.raster([{k: v for k, v in prim.items() if k != "camera"}], size, dpi, prim.get("camera"),
+                                     light.get("dir"), float(light.get("ambient", 0.35)), box=(x, y))
+    if not alpha.any():
+        return
+    grey = (200 + 55 * np.clip(shade, 0, 1)).astype("uint8")
+    tint = np.dstack([grey - 20, grey - 20, grey, (alpha * 150).astype("uint8")])
+    patch = Image.fromarray(tint, "RGBA")
+    ox, oy = mm_to_px(x, dpi), mm_to_px(y, dpi)
+    base = image.convert("RGBA") if image.mode != "RGBA" else image
+    region = base.crop((ox, oy, ox + size[0], oy + size[1]))
+    region.alpha_composite(patch)
+    image.paste(region.convert(image.mode), (ox, oy))
 
 
 def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int, color=(90, 90, 140)) -> None:

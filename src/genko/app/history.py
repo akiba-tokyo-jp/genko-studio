@@ -33,6 +33,9 @@ NAMES = {
     "move_layers": "レイヤーを動かした", "convert_layer": "レイヤーを変換した", "set_layers": "レイヤーの設定をまとめて変えた",
     "set_paper": "用紙の色を変えた", "liquify": "ゆがませた", "smudge": "色を混ぜた", "vector_edit": "線を編集した",
     "fill_gaps": "塗り残しを埋めた", "add_shape": "図形を描いた", "ruler_to_layer": "定規の線を描いた",
+    "add_figure": "デッサン人形を置いた", "pose_figure": "ポーズを変えた", "add_head": "頭部を置いた", "add_hand": "手を置いた",
+    "import_model": "3D モデルを読み込んだ", "set_camera": "カメラを動かした", "set_light": "光の向きを変えた",
+    "render_prims": "3D を線と面にした",
     "define_brush": "ブラシを作った", "approve": "承認した", "reject": "差し戻した", "advance": "工程を進めた",
 }
 

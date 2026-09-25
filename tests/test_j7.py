@@ -77,7 +77,7 @@ def test_3d_materials_are_put_where_asked():
                    {"op": "stamp_material", "page": 1, "material_id": "3d-箱", "x_mm": 150, "y_mm": 100, "id": "b"},
                    {"op": "stamp_material", "page": 1, "material_id": "3d-教室（3D）", "x_mm": 120, "y_mm": 200, "id": "s"}])
     prims = {p["id"]: p for p in ep.pages[0].prims}
-    assert prims["m"]["kind"] == "mannequin" and prims["b"]["kind"] == "box" and prims["s"]["scene"] == "classroom"
+    assert prims["m"]["kind"] == "figure" and prims["b"]["kind"] == "box" and prims["s"]["scene"] == "classroom"
     assert prims["b"]["pos"][:2] == [150.0, 100.0] and prims["s"]["pos"][:2] == [120.0, 200.0]
 
 

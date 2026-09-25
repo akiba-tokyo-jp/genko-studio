@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -27,6 +28,12 @@ from PySide6.QtWidgets import (
 RULER = {"line": "直線定規", "curve": "曲線定規", "parallel": "平行線定規", "concentric": "同心円定規", "radial": "放射線定規",
          "perspective": "パース定規", "symmetry": "対称定規"}
 PRESETS = {"stand": "立つ", "walk": "歩く", "run": "走る", "sit": "座る", "point": "指さす", "look_back": "振り返る", "arms_up": "両手を上げる"}
+# the 3D figure's poses (genko.mesh3d.FIGURE_PRESETS), and the hands'
+FIGURE_PRESETS = {"stand": "立つ", "walk": "歩く", "run": "走る", "sit": "座る", "point": "指さす", "arms_up": "両手を上げる",
+                  "think": "考える", "kneel": "片ひざ", "peace": "ピース"}
+HAND_POSES = {"open": "開く", "relaxed": "力を抜く", "fist": "握る", "point": "指さす", "peace": "ピース", "grip": "つかむ"}
+KIND_LABELS = {"box": "箱", "cylinder": "円柱", "stairs": "階段", "floor": "床", "scene": "背景", "figure": "デッサン人形（3D）",
+               "head": "頭部", "hand": "手", "mesh": "モデル", "mannequin": "デッサン人形（棒）"}
 
 
 def ruler_label(ruler: dict) -> str:
@@ -112,6 +119,19 @@ class GuidePanel(QWidget):
         remove.clicked.connect(self.delete_prim)
         buttons.addWidget(trace)
         buttons.addWidget(remove)
+        more = QGridLayout()
+        self.body_button = QPushButton("体型・手…")
+        self.body_button.setToolTip("デッサン人形の等身・肩幅・腰幅・体格・脚の長さと、手のポーズ（手のモデルはその形）")
+        self.body_button.clicked.connect(self.body_dialog)
+        camera = QPushButton("カメラ・光…")
+        camera.setToolTip("このページの 3D をまとめて見る向き・画角と、光の向き")
+        camera.clicked.connect(self.camera_dialog)
+        surfaces = QPushButton("線と面に…")
+        surfaces.setToolTip("3D を描く先のレイヤーに、線（見えない所は描かない）と陰の面（トーン化もできる）で写します")
+        surfaces.clicked.connect(self.render_dialog)
+        more.addWidget(self.body_button, 0, 0)
+        more.addWidget(camera, 0, 1)
+        more.addWidget(surfaces, 1, 0, 1, 2)
         prim_form = QFormLayout()
         prim_form.addRow("ポーズ", self.preset)
         prim_form.addRow("向き", self.turn)
@@ -124,6 +144,7 @@ class GuidePanel(QWidget):
         pl.addWidget(self.prims)
         pl.addLayout(prim_form)
         pl.addLayout(buttons)
+        pl.addLayout(more)
         layout = QVBoxLayout(self)
         layout.addWidget(ruler_box)
         layout.addWidget(prim_box)
@@ -158,16 +179,15 @@ class GuidePanel(QWidget):
         self.ruler_hint.setVisible(self.rulers.count() == 0)
         keep_prim = self.window.canvas.selected_prim_id
         self.prims.clear()
-        figures = boxes = 0
+        counts: dict[str, int] = {}
         for prim in (page.prims if page else []):
-            if prim.get("kind") == "mannequin":
-                figures += 1
-                label = f"デッサン人形 {figures}"
-                if prim.get("preset"):
-                    label += f"（{PRESETS.get(prim['preset'], prim['preset'])}）"
-            else:
-                boxes += 1
-                label = f"箱 {boxes}"
+            kind = prim.get("kind") or "box"
+            counts[kind] = counts.get(kind, 0) + 1
+            label = f"{KIND_LABELS.get(kind, kind)} {counts[kind]}"
+            if kind == "mesh" and prim.get("title"):
+                label = f"モデル「{prim['title']}」"
+            if prim.get("preset"):
+                label += f"（{({**PRESETS, **FIGURE_PRESETS}).get(prim['preset'], prim['preset'])}）"
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, prim.get("id"))
             self.prims.addItem(item)
@@ -212,9 +232,14 @@ class GuidePanel(QWidget):
         if prim is None:
             return
         self._loading = True
-        figure = prim.get("kind") == "mannequin"
-        self.preset.setEnabled(figure)
-        self.focal.setEnabled(not figure)
+        figure = prim.get("kind") in ("mannequin", "figure")
+        self.preset.clear()
+        self.preset.addItem("（ポーズを選ぶ）", "")
+        for key, label in (FIGURE_PRESETS if prim.get("kind") == "figure" else HAND_POSES if prim.get("kind") == "hand" else PRESETS).items():
+            self.preset.addItem(label, key)
+        self.preset.setEnabled(figure or prim.get("kind") == "hand")
+        self.body_button.setEnabled(prim.get("kind") in ("figure", "hand"))
+        self.focal.setEnabled(prim.get("kind") != "mannequin")
         rot = (list(prim.get("rot") or [0, 0, 0]) + [0, 0, 0])[:3]
         self.tip.setValue(round(math.degrees(float(rot[0]))))
         self.turn.setValue(round(math.degrees(float(rot[1]))))
@@ -302,7 +327,7 @@ class GuidePanel(QWidget):
         if self._loading or prim is None:
             return
         value = self.size.value()
-        if prim.get("kind") == "mannequin":
+        if prim.get("kind") in ("mannequin", "figure"):
             self._prim_set({"size": [value / 2, value, value / 4]})
         else:
             size = [float(v) for v in prim.get("size") or [40, 40, 40]]
@@ -311,10 +336,132 @@ class GuidePanel(QWidget):
 
     def _preset(self) -> None:
         prim, key = self._prim(), self.preset.currentData()
-        if prim is None or not key or prim.get("kind") != "mannequin":
+        if prim is None or not key:
             return
-        self.window.apply_ops([{"op": "pose_mannequin", "page": self._page().index, "id": prim["id"], "preset": key}])
+        if prim.get("kind") == "mannequin":
+            self.window.apply_ops([{"op": "pose_mannequin", "page": self._page().index, "id": prim["id"], "preset": key}])
+        elif prim.get("kind") == "figure":
+            self.window.apply_ops([{"op": "pose_figure", "page": self._page().index, "id": prim["id"], "preset": key}])
+        elif prim.get("kind") == "hand":
+            self.window.apply_ops([{"op": "pose_figure", "page": self._page().index, "id": prim["id"], "pose": key}])
         self.preset.setCurrentIndex(0)
+
+    # --- the figure's body and hands, the camera and light, 3D into drawing ---------------------------------
+
+    def body_dialog(self) -> None:
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+
+        prim = self._prim()
+        if prim is None or prim.get("kind") not in ("figure", "hand"):
+            self.window.flash("先にデッサン人形（3D）か手を選びます", 3000)
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("体型・手")
+        form = QFormLayout(dialog)
+        fields = {}
+        if prim["kind"] == "figure":
+            body = {"heads": 7.5, "shoulders": 1.0, "hips": 1.0, "build": 1.0, "legs": 1.0, **(prim.get("body") or {})}
+            for key, label, lo, hi in (("heads", "等身", 4, 10), ("shoulders", "肩幅", 0.6, 1.5), ("hips", "腰幅", 0.6, 1.6),
+                                       ("build", "体格（太さ）", 0.5, 1.8), ("legs", "脚の長さ", 0.6, 1.5)):
+                box = QDoubleSpinBox()
+                box.setRange(lo, hi)
+                box.setSingleStep(0.1 if hi <= 2 else 0.5)
+                box.setValue(float(body[key]))
+                form.addRow(label, box)
+                fields[key] = box
+        hands = {}
+        for side, label in (("l", "左手"), ("r", "右手")) if prim["kind"] == "figure" else (("pose", "手の形"),):
+            combo = QComboBox()
+            for key, name in HAND_POSES.items():
+                combo.addItem(name, key)
+            now = (prim.get("hands") or {}).get(side) if prim["kind"] == "figure" else prim.get("pose")
+            combo.setCurrentIndex(max(0, combo.findData(now or "relaxed")))
+            form.addRow(label, combo)
+            hands[side] = combo
+        ok = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        ok.accepted.connect(dialog.accept)
+        ok.rejected.connect(dialog.reject)
+        form.addRow(ok)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        op = {"op": "pose_figure", "page": self._page().index, "id": prim["id"]}
+        if prim["kind"] == "figure":
+            op["body"] = {k: round(v.value(), 2) for k, v in fields.items()}
+            op["hands"] = {k: c.currentData() for k, c in hands.items()}
+        else:
+            op["pose"] = hands["pose"].currentData()
+        self.window.apply_ops([op])
+
+    def camera_dialog(self) -> None:
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+
+        page = self._page()
+        if page is None:
+            return
+        camera = dict((page.extra or {}).get("camera") or {})
+        light = dict((page.extra or {}).get("light") or {})
+        dialog = QDialog(self)
+        dialog.setWindowTitle("カメラ・光（このページの 3D）")
+        form = QFormLayout(dialog)
+        use = QCheckBox("カメラを使う（3D をまとめて同じ向きから見る）")
+        use.setChecked(bool(camera))
+        turn, tip, roll = (QDoubleSpinBox() for _ in range(3))
+        for box, key, label in ((turn, "turn", "回り込み（°）"), (tip, "tip", "見下ろし（°）"), (roll, "roll", "傾き（°）")):
+            box.setRange(-180, 180)
+            box.setValue(math.degrees(float(camera.get(key, 0))))
+            form.addRow(label, box)
+        focal = QDoubleSpinBox()
+        focal.setRange(20, 5000)
+        focal.setSuffix(" mm")
+        focal.setValue(float(camera.get("focal_mm", 400)))
+        focal.setToolTip("小さいほど広角（遠近が強い）")
+        form.insertRow(0, use)
+        form.addRow("画角（焦点距離）", focal)
+        lx, ly, lz = (QDoubleSpinBox() for _ in range(3))
+        direction = list(light.get("dir") or [-0.5, -0.7, -0.6])
+        for box, value, label in ((lx, direction[0], "光: 右へ"), (ly, direction[1], "光: 下へ"), (lz, direction[2], "光: 奥へ")):
+            box.setRange(-1, 1)
+            box.setSingleStep(0.1)
+            box.setValue(float(value))
+            form.addRow(label, box)
+        ambient = QDoubleSpinBox()
+        ambient.setRange(0, 1)
+        ambient.setSingleStep(0.05)
+        ambient.setValue(float(light.get("ambient", 0.35)))
+        form.addRow("明るさの底上げ", ambient)
+        ok = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        ok.accepted.connect(dialog.accept)
+        ok.rejected.connect(dialog.reject)
+        form.addRow(ok)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        ops = [{"op": "set_light", "page": page.index, "dir": [lx.value(), ly.value(), lz.value()], "ambient": ambient.value()}]
+        if use.isChecked():
+            ops.append({"op": "set_camera", "page": page.index, "turn": math.radians(turn.value()), "tip": math.radians(tip.value()),
+                        "roll": math.radians(roll.value()), "focal_mm": focal.value()})
+        else:
+            ops.append({"op": "set_camera", "page": page.index, "off": True})
+        self.window.apply_ops(ops)
+
+    def render_dialog(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        page = self._page()
+        layer = self.window._paint_layer()
+        if page is None or layer is None or not page.prims:
+            self.window.flash("3D を置き、描く先のレイヤーを選びます", 3000)
+            return
+        prim = self._prim()
+        answer = QMessageBox.question(self, "3D を線と面に", "陰の面も写しますか？（はい: 線と面・面はトーン化して網点で印刷 ／ いいえ: 線だけ）",
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel)
+        if answer == QMessageBox.StandardButton.Cancel:
+            return
+        op = {"op": "render_prims", "page": page.index, "layer_id": layer.id, "surfaces": answer == QMessageBox.StandardButton.Yes}
+        if prim is not None:
+            op["ids"] = [prim["id"]]
+        if op["surfaces"]:
+            op["tone"] = {"lpi": 60}
+        self.window.apply_ops([op])
 
     def delete_prim(self) -> None:
         prim_id = (self._prim() or {}).get("id") or self.window.canvas.selected_prim_id

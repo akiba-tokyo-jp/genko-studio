@@ -1251,8 +1251,7 @@ class MainWindow(QMainWindow):
         self.canvas.primSelected.connect(lambda prim_id: self.guides.select_prim(prim_id))
         self.canvas.primEdited.connect(lambda prim_id, change: self.apply_ops(
             [{"op": "edit_prim", "page": self._current().index, "id": prim_id, **change}]))
-        self.canvas.primPosed.connect(lambda prim_id, handle, to: self.apply_ops(
-            [{"op": "pose_mannequin", "page": self._current().index, "id": prim_id, "drag": {"handle": handle, "to": to}}]))
+        self.canvas.primPosed.connect(self._prim_posed)
         self._clipboard: dict | None = None
         self.mask_edit = False  # pen and eraser work on the target layer's mask
         self._target_layer_id: str | None = None
@@ -1541,7 +1540,12 @@ class MainWindow(QMainWindow):
         self.act_ruler_horizon = a("パースの目の高さを固定する／外す", lambda: self._ruler_flag("lock_horizon"),
                                    tip="消失点を動かしても、アイレベル（目の高さ）の上を滑るだけにします")
         self.act_clear_rulers = a("このページの定規をすべて消す", self._clear_rulers)
-        self.act_add_figure = a("デッサン人形を置く", lambda: self._add_prim("mannequin"), tip="選んだコマ（なければページ）の真ん中に置きます")
+        self.act_add_figure = a("デッサン人形を置く", lambda: self._add_prim("figure"),
+                                tip="体型を変えられ、関節をドラッグでポーズを付けられる人形を、選んだコマ（なければページ）の真ん中に置きます")
+        self.act_add_stick = a("棒人形（手早いポーズ用）を置く", lambda: self._add_prim("mannequin"))
+        self.act_add_head = a("頭部（顔の向きの目安）を置く", lambda: self._add_prim("head"))
+        self.act_add_hand = a("手（指のポーズ）を置く", lambda: self._add_prim("hand"))
+        self.act_import_obj = a("3D モデルを読み込む（OBJ）…", self._import_obj)
         self.act_add_box = a("3D の箱を置く", lambda: self._add_prim("box"))
         self.act_add_cylinder = a("3D の円柱を置く", lambda: self._add_prim("cylinder"))
         self.act_add_stairs = a("3D の階段を置く", lambda: self._add_prim("stairs"))
@@ -1560,7 +1564,10 @@ class MainWindow(QMainWindow):
         self.effect_actions = [a(label, lambda _=False, k=key: self._choose_effect(k)) for key, label in
                                (("focus", "集中線"), ("speed", "流線"), ("uni_flash", "ウニフラッシュ"), ("beta_flash", "ベタフラッシュ"))]
         self.act_materials = a("素材パネルを開く", lambda: self.show_dock("素材"))
-        self.pose_actions = [a(f"ポーズ: {label}", lambda _=False, k=key: self._pose(k)) for key, label in PRESETS.items()]
+        from genko.app.guide_panel import FIGURE_PRESETS as _FIGURE_POSES
+
+        self.pose_actions = [a(f"ポーズ: {label}", lambda _=False, k=key: self._pose(k))
+                             for key, label in {**PRESETS, **{k: v for k, v in _FIGURE_POSES.items() if k not in PRESETS}}.items()]
         self.act_thicker = a("太く（ペン・消しゴム）", lambda: self._nudge_brush(1), "]")
         self.act_thinner = a("細く（ペン・消しゴム）", lambda: self._nudge_brush(-1), "[")
         self.act_split_h = a("コマを横に割る（上下に分ける）", lambda: self._split("horizontal"), "Ctrl+Shift+H")
@@ -1642,7 +1649,8 @@ class MainWindow(QMainWindow):
                       self.act_fill_selection, self.act_line_width]),
             ("定規・3D", [self.act_ruler, None, *self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
                           self.act_clear_rulers, self.act_ruler_layer, self.act_ruler_pen, self.act_ruler_fix, self.act_ruler_horizon, None, self.act_grid, self.act_grid_snap, self.act_grid_mm, None, self.act_3d,
-                          self.act_add_figure, self.act_add_box, self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, "scenes", "poses",
+                          self.act_add_figure, self.act_add_stick, self.act_add_head, self.act_add_hand, self.act_add_box, self.act_add_cylinder,
+                          self.act_add_stairs, self.act_add_floor, "scenes", self.act_import_obj, "poses",
                           self.act_trace, self.act_del_prim]),
             ("コマ", [self.act_frame, None, self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
                       self.act_gutters, self.act_border, self.act_no_border, *self.border_kind_actions, self.act_border_colour,
@@ -2133,8 +2141,9 @@ class MainWindow(QMainWindow):
                                         menu_button("選んだ定規", [[self.act_ruler_layer, self.act_ruler_pen],
                                                                   [self.act_ruler_fix, self.act_ruler_horizon]]),
                                         self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]))
-        ts.add(("3d",), action_page([menu_button("置く", [[self.act_add_figure, self.act_add_box, self.act_add_cylinder,
-                                                            self.act_add_stairs, self.act_add_floor], self.scene_actions]),
+        ts.add(("3d",), action_page([menu_button("置く", [[self.act_add_figure, self.act_add_stick, self.act_add_head, self.act_add_hand],
+                                                           [self.act_add_box, self.act_add_cylinder, self.act_add_stairs, self.act_add_floor],
+                                                           self.scene_actions, [self.act_import_obj]]),
                                      menu_button("人形のポーズ", [self.pose_actions]), None, self.act_trace,
                                      self.act_del_prim]))
         ts.add(("effect",), action_page([*self.effect_actions, None, self.act_materials]))
@@ -3400,6 +3409,12 @@ class MainWindow(QMainWindow):
         tip = next(tp for t, _k, _o, tp in self.ruler_kinds if t == title)
         self.flash(f"{title.rstrip('…')}: {tip}", 5000)
 
+    def _prim_posed(self, prim_id: str, handle: str, to) -> None:
+        page = self._current()
+        prim = next((p for p in page.prims if p.get("id") == prim_id), None) if page else None
+        op = "pose_figure" if prim is not None and prim.get("kind") == "figure" else "pose_mannequin"
+        self.apply_ops([{"op": op, "page": page.index, "id": prim_id, "drag": {"handle": handle, "to": to}}])
+
     def _selected_ruler(self):
         page = self._current()
         ruler_id = getattr(self.canvas, "selected_ruler_id", None)
@@ -3464,15 +3479,43 @@ class MainWindow(QMainWindow):
         shift = 12.0 * sum(1 for p in page.prims if frame is None or geo_contains(frame, *(p.get("pos") or [0, 0])[:2]))
         cx, cy = cx + shift, cy + shift * 0.5  # the next one beside the last, not on top of it
         prim_id = new_id()
-        if kind == "mannequin":
+        if kind in ("mannequin", "figure"):
             height = round(max(30.0, min(140.0, r.height * 0.8)), 1)
-            op = {"op": "add_mannequin", "page": page.index, "id": prim_id, "pos": [cx, cy + height * 0.05, 0], "height_mm": height}
+            op = {"op": "add_mannequin" if kind == "mannequin" else "add_figure", "page": page.index, "id": prim_id,
+                  "pos": [cx, cy + height * 0.05, 0], "height_mm": height}
+        elif kind in ("head", "hand"):
+            side = round(max(15.0, min(60.0, min(r.width, r.height) * 0.35)), 1)
+            op = {"op": f"add_{kind}", "page": page.index, "id": prim_id, "pos": [cx, cy, 0], "size_mm": side}
         else:
             side = round(max(15.0, min(80.0, min(r.width, r.height) * 0.4)), 1)
             size = {"floor": [min(r.width, 200.0), 1, min(r.width, 200.0)], "stairs": [side, side, side * 1.4],
                     "cylinder": [side * 0.8, side * 1.3, side * 0.8]}.get(kind, [side, side, side])
             op = {"op": "add_prim3d", "page": page.index, "kind": kind, "id": prim_id, "pos": [cx, cy, 0], "size": size}
         if self.apply_ops([op]):
+            self.canvas.selected_prim_id = prim_id
+            self._tool("3d")
+            self.show_dock("定規・3D")
+            self.guides.refresh()
+
+    def _import_obj(self) -> None:
+        from genko.models import new_id
+
+        page = self._current()
+        if page is None:
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "3D モデルを読み込む", "", "OBJ (*.obj)")
+        if not path:
+            return
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            self.flash(f"読み込めませんでした（{exc}）", 6000, error=True)
+            return
+        frame = self.selected_frame()
+        r = frame.rect if frame is not None else page.inner_rect_mm()
+        prim_id = new_id()
+        if self.apply_ops([{"op": "import_model", "page": page.index, "obj": text, "id": prim_id, "name": Path(path).stem,
+                            "pos": [r.x + r.width / 2, r.y + r.height / 2, 0], "size_mm": round(min(r.width, r.height) * 0.6, 1)}]):
             self.canvas.selected_prim_id = prim_id
             self._tool("3d")
             self.show_dock("定規・3D")
@@ -3506,12 +3549,21 @@ class MainWindow(QMainWindow):
             self.guides.refresh()
 
     def _pose(self, preset: str) -> None:
+        from genko.mesh3d import FIGURE_PRESETS
+
         page, prim_id = self._current(), self.canvas.selected_prim_id
-        prim = next((p for p in (page.prims if page else []) if p.get("id") == prim_id and p.get("kind") == "mannequin"), None)
+        figures = ("mannequin", "figure")
+        prim = next((p for p in (page.prims if page else []) if p.get("id") == prim_id and p.get("kind") in figures), None)
         if prim is None:
-            prim = next((p for p in (page.prims if page else []) if p.get("kind") == "mannequin"), None)
+            prim = next((p for p in (page.prims if page else []) if p.get("kind") in figures), None)
         if prim is None:
             self.flash("先にデッサン人形を置きます（3D → デッサン人形を置く）", 3000)
+            return
+        if prim["kind"] == "figure":
+            if preset not in FIGURE_PRESETS:
+                self.flash("このポーズは棒人形だけのものです", 3000)
+                return
+            self.apply_ops([{"op": "pose_figure", "page": page.index, "id": prim["id"], "preset": preset}])
             return
         self.apply_ops([{"op": "pose_mannequin", "page": page.index, "id": prim["id"], "preset": preset}])
 

@@ -227,7 +227,7 @@ class GuideMixin:
             selected = prim.get("id") == self.selected_prim_id
             if shown is not prim:  # the part being dragged, drawn live
                 painter.setPen(QPen(QColor("#e8590c"), 2))
-                for a, b in self._prim_lines(shown):
+                for a, b in self._prim_lines(shown, quick=True):
                     painter.drawLine(self._pt(*a), self._pt(*b))
             for name, point in self._prim_handles(shown):
                 q = self._pt(*point)
@@ -238,15 +238,30 @@ class GuideMixin:
                 else:
                     painter.drawEllipse(q, 4.5, 4.5)
             if selected:
-                x, y, w, h = prim3d.prim_bbox(shown)
+                from genko import mesh3d
+
+                x, y, w, h = prim3d.prim_bbox(mesh3d.with_camera(shown, self.page))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.setPen(QPen(QColor("#1c7ed6"), 1, Qt.PenStyle.DashLine))
                 a, b = self._pt(x, y), self._pt(x + w, y + h)
                 painter.drawRect(QRectF(a, b))
         painter.restore()
 
-    @staticmethod
-    def _prim_lines(prim: dict) -> list:
+    def _prim_lines(self, prim: dict, quick: bool = False) -> list:
+        from genko import mesh3d
+
+        prim = mesh3d.with_camera(prim, self.page)
+        if quick and prim.get("kind") == "figure":  # (while dragging: the bones, which follow the pen at once)
+            import numpy as np
+
+            sk = mesh3d.figure_skeleton(prim)["points"]
+            bones = [("pelvis", "neck"), ("neck", "head")] + [(a.format(p), b.format(p)) for p in "lr" for a, b in (
+                ("neck", "{}_shoulder"), ("{}_shoulder", "{}_elbow"), ("{}_elbow", "{}_wrist"), ("{}_wrist", "{}_hand"),
+                ("pelvis", "{}_hip"), ("{}_hip", "{}_knee"), ("{}_knee", "{}_ankle"), ("{}_ankle", "{}_toe"))]
+            names = sorted({n for pair in bones for n in pair})
+            page_pts, _depth = mesh3d.to_page(prim, np.array([sk[n] for n in names]), prim.get("camera"))
+            where = {n: (float(p[0]), float(p[1])) for n, p in zip(names, page_pts)}
+            return [(where[a], where[b]) for a, b in bones]
         if prim.get("kind") == "mannequin":
             bone = mannequin.skeleton(prim)
             lines = [(a, b) for a, b, _ in bone["segments"]]
@@ -256,10 +271,19 @@ class GuideMixin:
         return [(a, b) for a, b, _ in prim3d.edges(prim)]
 
     def _prim_handles(self, prim: dict) -> list[tuple[str, tuple[float, float]]]:
+        from genko import mesh3d
+
         if prim.get("kind") == "mannequin":
             points = mannequin.skeleton(prim)["points"]
             return [("pelvis", points["pelvis"])] + [(name, points[name]) for name in mannequin.HANDLES]
-        x, y, w, h = prim3d.bbox(prim)
+        camera = (self.page.extra or {}).get("camera") if self.page is not None else None
+        if prim.get("kind") == "figure":
+            from genko import threeops
+
+            handles = threeops.figure_handles(prim, camera)
+            x, y, w, h = prim3d.prim_bbox(mesh3d.with_camera(prim, self.page))
+            return handles + [("turn", (x + w / 2, y - 8))]
+        x, y, w, h = prim3d.bbox(mesh3d.with_camera(prim, self.page))
         pos = prim.get("pos") or [0, 0, 0]
         return [("move", (float(pos[0]), float(pos[1]))), ("turn", (x + w / 2, y - 8))]
 
@@ -479,11 +503,13 @@ class GuideMixin:
                     self._prim_drag = {"id": prim["id"], "handle": name, "prim": copy.deepcopy(prim), "orig": copy.deepcopy(prim),
                                        "start": (x, y), "moved": False}
                     return
+        from genko import mesh3d
+
         for prim in reversed(prims):
-            bx, by, bw, bh = prim3d.prim_bbox(prim)
+            bx, by, bw, bh = prim3d.prim_bbox(mesh3d.with_camera(prim, self.page))
             if bx <= x <= bx + bw and by <= y <= by + bh:
                 self._select_prim(prim["id"])
-                handle = "pelvis" if prim.get("kind") == "mannequin" else "move"
+                handle = "pelvis" if prim.get("kind") in ("mannequin", "figure") else "move"
                 self._prim_drag = {"id": prim["id"], "handle": handle, "prim": copy.deepcopy(prim), "orig": copy.deepcopy(prim),
                                    "start": (x, y), "moved": False, "grab": True}
                 return
@@ -510,7 +536,13 @@ class GuideMixin:
             tip, turn, lean = (list(orig.get("rot") or [0, 0, 0]) + [0, 0, 0])[:3]
             prim["rot"] = [round(tip - (y - sy) / 40, 4), round(turn + (x - sx) / 40, 4), lean]
         else:
-            change = mannequin.pose_to(prim, handle, (x, y))
+            if prim.get("kind") == "figure":
+                from genko import threeops
+
+                camera = (self.page.extra or {}).get("camera")
+                change = threeops.drag_joint(prim, handle, (x, y), camera)
+            else:
+                change = mannequin.pose_to(prim, handle, (x, y))
             for joint, values in change.get("joints", {}).items():
                 prim.setdefault("joints", {}).setdefault(joint, {}).update(values)
         drag["to"] = [round(x, 2), round(y, 2)]

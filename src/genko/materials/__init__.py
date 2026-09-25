@@ -390,8 +390,12 @@ def _prim_sample(item: dict, size: int):
                 "focal_mm": 220.0}
     else:
         kind = item.get("prim") or "box"
-        dims = {"mannequin": [40, 80, 20], "floor": [160, 1, 160]}.get(kind, [40, 40, 40])
+        dims = {"mannequin": [40, 80, 20], "figure": [40, 80, 20], "floor": [160, 1, 160]}.get(kind, [40, 40, 40])
         prim = {"id": "p", "kind": kind, "pos": [0, 0, 0], "size": dims, "rot": [-1.2, 0.5, 0] if kind == "floor" else [0.35, 0.6, 0]}
+        if kind in ("figure", "hand"):
+            prim["rot"] = [0, 0.4, 0]
+            if item.get("pose"):
+                prim["pose"] = item["pose"]
     base = Image.new("RGB", (size, size), "white")
     try:
         paths = prim3d.trace(prim)

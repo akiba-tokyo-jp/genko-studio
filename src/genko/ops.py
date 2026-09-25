@@ -121,6 +121,14 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "delete_ruler", "page": "int", "id": "str? (none: every ruler on the page)"},
     {"op": "add_prim3d", "kind": "box|cylinder|stairs|floor", "steps": "int? (stairs)", "lines": "int? (floor grid)", "page": "int", "pos": "[x,y,z]?", "size": "[w,h,d] | float?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "frame_id": "str? (drawn only inside this panel)", "id": "str?"},
     {"op": "add_scene", "page": "int", "kind": "room|classroom|corridor|street", "pos": "[x,y,z]? (centre; z = depth)", "size": "[w,h,d]|number? (mm; a number scales the usual size)", "rot": "[tip,turn,lean]? radians", "focal_mm": "float? (smaller = stronger perspective; 220)", "frame_id": "str? (kept inside this panel; default the panel under pos, false for none)", "id": "str?"},
+    {"op": "add_figure", "page": "int", "pos": "[x,y,z] (the pelvis, mm)", "height_mm": "float? (90)", "body": "{heads (等身 4..10), shoulders, hips, build, legs (0.6..1.5)}?", "preset": "stand|walk|run|sit|point|arms_up|think|kneel|peace?", "joints": "{hip|spine|chest|neck|head|l_arm|r_arm|l_elbow|r_elbow|l_wrist|r_wrist|l_leg|r_leg|l_knee|r_knee|l_ankle|r_ankle: {x (toward the viewer), y (twist), z (in the picture, counter-clockwise)}}? (radians)", "hands": "{l, r: open|relaxed|fist|point|peace|grip}?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "frame_id": "str?", "id": "str?"},
+    {"op": "pose_figure", "page": "int", "id": "str (a figure or a hand)", "joints": "{name: {x,y,z}}? (merged)", "set_joints": "object? (replaces)", "body": "object?", "hands": "object?", "preset": "str?", "pose": "str? (a hand)", "rot": "[tip,turn,lean]?", "pos": "[x,y,z]?", "height_mm": "float?", "drag": "{handle: pelvis|neck|head|l_elbow|l_wrist|l_hand|l_knee|l_ankle|l_toe|r_…, to: [x,y]}?"},
+    {"op": "add_head", "page": "int", "pos": "[x,y,z]", "size_mm": "float? (30)", "rot": "[tip,turn,lean]? (the face's direction)", "frame_id": "str?", "id": "str?"},
+    {"op": "add_hand", "page": "int", "pos": "[x,y,z]", "size_mm": "float? (25)", "side": "l|r?", "pose": "open|relaxed|fist|point|peace|grip?", "rot": "[tip,turn,lean]?", "frame_id": "str?", "id": "str?"},
+    {"op": "import_model", "page": "int", "obj": "str (the OBJ file's text: v and f lines)", "size_mm": "float? (its longest side, 60)", "pos": "[x,y,z]?", "rot": "[tip,turn,lean]?", "name": "str?", "frame_id": "str?", "id": "str?"},
+    {"op": "set_camera", "page": "int", "turn": "float? (radians, about the upright axis)", "tip": "float? (looking down +, up −)", "roll": "float?", "focal_mm": "float? (20..5000: short = strong perspective)", "target": "[x,y]? (the point the camera turns about)", "off": "bool? (back to each 3D seen on its own)"},
+    {"op": "set_light", "page": "int", "dir": "[x,y,z]? (toward the light: x right, y down, z away from the viewer)", "ambient": "0..1?"},
+    {"op": "render_prims", "page": "int", "layer_id": "str?", "ids": "[prim id]? (none: all)", "lines": "bool? (true: the pen lines, hidden parts left out)", "surfaces": "bool? (true: the shaded surfaces as greys)", "tone": "{lpi, angle}? (the layer tone-ized: the greys print as dots)", "light": "[x,y,z]?", "ambient": "0..1?", "width_mm": "float?", "kind": "str? (brush, mili)", "rgb": "[r,g,b]?"},
     {"op": "edit_prim", "page": "int", "id": "str", "pos": "[x,y,z]?", "size": "[w,h,d]?", "rot": "[tip,turn,lean]?", "focal_mm": "float?"},
     {"op": "delete_prim", "page": "int", "id": "str"},
     {"op": "trace_prims", "page": "int", "layer_id": "str", "ids": "[id]? (none: all)", "kind": "str? (pencil)", "width_mm": "float?", "rgb": "[r,g,b]?"},
@@ -1554,6 +1562,12 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         layerops.apply(episode, op, name)
         return
 
+    if name in ("add_figure", "pose_figure", "add_head", "add_hand", "import_model", "set_camera", "set_light", "render_prims"):
+        from genko import threeops
+
+        threeops.apply(episode, op, name)
+        return
+
     if name in ("transform_area", "delete_area"):
         from genko import selection
 
@@ -2332,8 +2346,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if not chosen:
             raise ApplyError("no 3D figure or box to trace")
         kind = _brush_kind(op.get("kind") or "pencil", episode)
+        from genko import mesh3d
+
         for prim in chosen:
-            for line in prim3d.trace(prim):
+            for line in prim3d.trace(mesh3d.with_camera(prim, page)):
                 stroke = coerce_stroke([(round(x, 3), round(y, 3)) for x, y in line])
                 stroke.kind = kind
                 stroke.width_mm = float(op.get("width_mm") or 0.3)
@@ -2479,8 +2495,11 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                                      **({"frame_id": op["frame_id"]} if op.get("frame_id") else {})})
                 prim = next(p for p in page.prims if p.get("id") == new)
                 prim["pos"] = [round(x, 3), round(y, 3), prim["pos"][2]]
-            elif material.get("prim") == "mannequin":
-                _apply_one(episode, {"op": "add_mannequin", "page": page.index, "pos": [x, y, 0], "id": new,
+            elif material.get("prim") in ("mannequin", "figure", "head", "hand"):
+                kind = material["prim"]
+                extra = {"pose": material["pose"]} if kind == "hand" and material.get("pose") else {}
+                _apply_one(episode, {"op": {"mannequin": "add_mannequin", "figure": "add_figure"}.get(kind, f"add_{kind}"),
+                                     "page": page.index, "pos": [x, y, 0], "id": new, **extra,
                                      **({"frame_id": op["frame_id"]} if op.get("frame_id") else {})})
             else:
                 _apply_one(episode, {"op": "add_prim3d", "page": page.index, "kind": material.get("prim") or "box", "pos": [x, y, 0],
@@ -3029,7 +3048,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "gradient_fill",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
-                             "trace_prims", "effect_to_layer", "add_shape", "smudge", "vector_edit", "fill_gaps", "liquify"})
+                             "trace_prims", "effect_to_layer", "add_shape", "smudge", "vector_edit", "fill_gaps", "liquify", "render_prims"})
 
 
 def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTOR) -> None:
@@ -3116,6 +3135,7 @@ PAGE_LOCAL_OPS = frozenset({
     "reorder_layers", "stamp_material", "add_mannequin", "pose_mannequin", "set_onion", "step_onion",
     "set_lt", "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area", "smudge", "vector_edit", "fill_gaps",
     "merge_layers", "merge_visible", "group_layers", "move_layers", "convert_layer", "set_layers", "liquify", "ruler_to_layer",
+    "add_figure", "pose_figure", "add_head", "add_hand", "import_model", "set_camera", "set_light", "render_prims",
 })
 # Ops that find a line by id; the line lives in the story (always copied) or in one page's texts.
 LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path"})

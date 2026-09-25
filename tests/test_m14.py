@@ -351,7 +351,7 @@ def test_grid_and_shift_straight_lines(window):
 
 
 def test_pose_a_figure_and_turn_a_box_on_the_canvas(window):
-    window.act_add_figure.trigger()
+    window.act_add_stick.trigger()  # (the stick figure; the 3D one is in test_j8)
     page = window.current_page()
     figure = page.prims[0]
     assert window.canvas.tool == "3d" and window.canvas.selected_prim_id == figure["id"]

@@ -47,6 +47,15 @@ def corners3d(prim: dict) -> list[tuple[float, float, float]]:
 
 def project(prim: dict) -> list[tuple[float, float]]:
     """The eight corners on the page (mm)."""
+    if prim.get("camera"):
+        import numpy as np
+
+        from genko import mesh3d
+
+        w, h, d = _size(prim)
+        local = np.array([(sx * w / 2, sy * h / 2, sz * d / 2) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
+        pts, _depth = mesh3d.to_page(prim, local, prim["camera"])
+        return [(float(x), float(y)) for x, y in pts]
     cx, cy, cz = (list(prim.get("pos") or [100, 150, 0]) + [0, 0, 0])[:3]
     focal = float(prim.get("focal_mm", 400) or 400)
     out = []
@@ -57,6 +66,7 @@ def project(prim: dict) -> list[tuple[float, float]]:
 
 
 KINDS = ("box", "cylinder", "stairs", "floor", "scene")
+MESH_KINDS = ("figure", "head", "hand", "mesh")  # (genko.mesh3d: surfaces, hidden lines, the camera)
 SCENES = ("room", "classroom", "corridor", "street")
 SCENE_LABELS = {"room": "部屋", "classroom": "教室", "corridor": "廊下", "street": "街並み"}
 # where the camera looks from, per scene: rooms from a corner, a slight view down; corridors and streets
@@ -225,6 +235,13 @@ def _segments3d(prim: dict) -> list[tuple[tuple[float, float, float], tuple[floa
 
 
 def _to_page(prim: dict, p) -> tuple[float, float]:
+    if prim.get("camera"):
+        import numpy as np
+
+        from genko import mesh3d
+
+        pts, _depth = mesh3d.to_page(prim, np.array([p], dtype=float), prim["camera"])
+        return float(pts[0][0]), float(pts[0][1])
     cx, cy, cz = (list(prim.get("pos") or [100, 150, 0]) + [0, 0, 0])[:3]
     focal = float(prim.get("focal_mm", 400) or 400)
     x, y, z = _rotate(p, prim.get("rot") or [0.3, 0.6, 0])
@@ -233,8 +250,13 @@ def _to_page(prim: dict, p) -> tuple[float, float]:
 
 
 def edges(prim: dict) -> list[tuple[tuple[float, float], tuple[float, float], bool]]:
-    """(a, b, seen) for each edge: seen is False for the edges at the back (boxes; the other shapes show all)."""
-    if prim.get("kind") in ("cylinder", "stairs", "floor", "scene"):
+    """(a, b, seen) for each edge: seen is False for the edges at the back (boxes; the other shapes show all).
+    Figures, heads, hands and models give their pen lines (hidden parts already left out)."""
+    if prim.get("kind") in MESH_KINDS:
+        from genko import mesh3d
+
+        return [(a, b, True) for line in mesh3d.prim_lines(prim, 16.0) for a, b in zip(line, line[1:])]
+    if prim.get("kind") in ("cylinder", "stairs", "floor", "scene") or (prim.get("camera") and prim.get("kind", "box") == "box"):
         return [(_to_page(prim, a), _to_page(prim, b), True) for a, b in _segments3d(prim)]
     pts3 = corners3d(prim)
     pts = project(prim)
@@ -260,12 +282,24 @@ def edges(prim: dict) -> list[tuple[tuple[float, float], tuple[float, float], bo
 
 
 def bbox(prim: dict) -> tuple[float, float, float, float]:
+    if prim.get("kind") in MESH_KINDS:
+        return prim_bbox(prim)
     pts = project(prim) if prim.get("kind", "box") == "box" else [p for a, b, _ in edges(prim) for p in (a, b)]
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)
 
 
 def prim_bbox(prim: dict) -> tuple[float, float, float, float]:
+    if prim.get("kind") in MESH_KINDS:
+        from genko import mesh3d
+
+        pts = mesh3d.seen(prim, prim.get("camera"))[0]
+        if not len(pts):
+            pos = prim.get("pos") or [0, 0]
+            return float(pos[0]), float(pos[1]), 0.0, 0.0
+        x0, y0 = pts.min(axis=0)
+        x1, y1 = pts.max(axis=0)
+        return float(x0), float(y0), float(x1 - x0), float(y1 - y0)
     if prim.get("kind") == "mannequin":
         from genko import mannequin
 
@@ -275,6 +309,10 @@ def prim_bbox(prim: dict) -> tuple[float, float, float, float]:
 
 def trace(prim: dict) -> list[list[tuple[float, float]]]:
     """Lines to draw the prim with a pen (its seen edges, or the figure's bones and head)."""
+    if prim.get("kind") in MESH_KINDS:
+        from genko import mesh3d
+
+        return [list(line) for line in mesh3d.prim_lines(prim)]
     if prim.get("kind") == "mannequin":
         from genko import mannequin
 

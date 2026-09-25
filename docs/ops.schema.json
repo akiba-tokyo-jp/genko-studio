@@ -787,6 +787,96 @@
       "id": "str?"
     },
     {
+      "op": "add_figure",
+      "page": "int",
+      "pos": "[x,y,z] (the pelvis, mm)",
+      "height_mm": "float? (90)",
+      "body": "{heads (等身 4..10), shoulders, hips, build, legs (0.6..1.5)}?",
+      "preset": "stand|walk|run|sit|point|arms_up|think|kneel|peace?",
+      "joints": "{hip|spine|chest|neck|head|l_arm|r_arm|l_elbow|r_elbow|l_wrist|r_wrist|l_leg|r_leg|l_knee|r_knee|l_ankle|r_ankle: {x (toward the viewer), y (twist), z (in the picture, counter-clockwise)}}? (radians)",
+      "hands": "{l, r: open|relaxed|fist|point|peace|grip}?",
+      "rot": "[tip,turn,lean]?",
+      "focal_mm": "float?",
+      "frame_id": "str?",
+      "id": "str?"
+    },
+    {
+      "op": "pose_figure",
+      "page": "int",
+      "id": "str (a figure or a hand)",
+      "joints": "{name: {x,y,z}}? (merged)",
+      "set_joints": "object? (replaces)",
+      "body": "object?",
+      "hands": "object?",
+      "preset": "str?",
+      "pose": "str? (a hand)",
+      "rot": "[tip,turn,lean]?",
+      "pos": "[x,y,z]?",
+      "height_mm": "float?",
+      "drag": "{handle: pelvis|neck|head|l_elbow|l_wrist|l_hand|l_knee|l_ankle|l_toe|r_…, to: [x,y]}?"
+    },
+    {
+      "op": "add_head",
+      "page": "int",
+      "pos": "[x,y,z]",
+      "size_mm": "float? (30)",
+      "rot": "[tip,turn,lean]? (the face's direction)",
+      "frame_id": "str?",
+      "id": "str?"
+    },
+    {
+      "op": "add_hand",
+      "page": "int",
+      "pos": "[x,y,z]",
+      "size_mm": "float? (25)",
+      "side": "l|r?",
+      "pose": "open|relaxed|fist|point|peace|grip?",
+      "rot": "[tip,turn,lean]?",
+      "frame_id": "str?",
+      "id": "str?"
+    },
+    {
+      "op": "import_model",
+      "page": "int",
+      "obj": "str (the OBJ file's text: v and f lines)",
+      "size_mm": "float? (its longest side, 60)",
+      "pos": "[x,y,z]?",
+      "rot": "[tip,turn,lean]?",
+      "name": "str?",
+      "frame_id": "str?",
+      "id": "str?"
+    },
+    {
+      "op": "set_camera",
+      "page": "int",
+      "turn": "float? (radians, about the upright axis)",
+      "tip": "float? (looking down +, up −)",
+      "roll": "float?",
+      "focal_mm": "float? (20..5000: short = strong perspective)",
+      "target": "[x,y]? (the point the camera turns about)",
+      "off": "bool? (back to each 3D seen on its own)"
+    },
+    {
+      "op": "set_light",
+      "page": "int",
+      "dir": "[x,y,z]? (toward the light: x right, y down, z away from the viewer)",
+      "ambient": "0..1?"
+    },
+    {
+      "op": "render_prims",
+      "page": "int",
+      "layer_id": "str?",
+      "ids": "[prim id]? (none: all)",
+      "lines": "bool? (true: the pen lines, hidden parts left out)",
+      "surfaces": "bool? (true: the shaded surfaces as greys)",
+      "tone": "{lpi, angle}? (the layer tone-ized: the greys print as dots)",
+      "light": "[x,y,z]?",
+      "ambient": "0..1?",
+      "width_mm": "float?",
+      "kind": "str? (brush, mili)",
+      "rgb": "[r,g,b]?"
+    },
+    {
       "op": "edit_prim",
       "page": "int",
       "id": "str",

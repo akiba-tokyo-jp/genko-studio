@@ -281,6 +281,21 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### J8 additions
+
+- `add_figure {pos (pelvis), height_mm, body {heads, shoulders, hips, build, legs}, preset, joints {name: {x, y, z}},
+  hands {l, r}, rot}`; `pose_figure {id, joints (merged) | set_joints, body, hands, preset, rot, pos, drag {handle, to}}`
+  (joints: hip, spine, chest, neck, head, l/r_arm, l/r_elbow, l/r_wrist, l/r_leg, l/r_knee, l/r_ankle; x swings toward
+  the viewer, y twists, z turns in the picture; presets stand, walk, run, sit, point, arms_up, think, kneel, peace;
+  hands open, relaxed, fist, point, peace, grip).
+- `add_head {pos, size_mm, rot}` (the face's centre and eye lines), `add_hand {pos, size_mm, side, pose, rot}`,
+  `import_model {obj (OBJ text), size_mm, pos, rot, name}`.
+- `set_camera {turn, tip, roll, focal_mm, target | off}` turns every 3D on the page together; `set_light {dir,
+  ambient}`.
+- `render_prims {layer_id, ids?, lines, surfaces, tone {lpi}, light?, width_mm, kind}`: pen lines with hidden parts
+  left out, and the lit surfaces as greys (with `tone`, the layer prints them as dots). `trace_prims` also leaves
+  hidden lines out for figures, heads, hands and models.
+
 ### J7 additions
 
 - `inspect materials` lists every kind: tone, effect, image, lines (marks 漫符, props 小物, traced backgrounds),
