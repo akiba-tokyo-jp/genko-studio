@@ -38,6 +38,23 @@ def region_figures(panel: dict) -> list[Figure]:
     return figures
 
 
+AIMED = ("focus", "uni_flash", "white")  # (lines that close in on a point: aimed at the faces, which they leave clear)
+
+
+def _aim(kind: str, figs: list[Figure]) -> dict:
+    """Centre and clear middle of focus lines around the reported faces (all of them), so no line crosses a face."""
+    if kind not in AIMED or not figs:
+        return {}
+    heads = [f.head for f in figs]
+    x0 = min(h[0] for h in heads)
+    y0 = min(h[1] for h in heads)
+    x1 = max(h[0] + h[2] for h in heads)
+    y1 = max(h[1] + h[3] for h in heads)
+    # (an ellipse through the corners of the faces' box, a little wider: √2 × half the box, and a margin)
+    return {"center": [round((x0 + x1) / 2, 2), round((y0 + y1) / 2, 2)],
+            "inner": [round((x1 - x0) / 2 * 1.5 + 2, 2), round((y1 - y0) / 2 * 1.5 + 2, 2)]}
+
+
 def plan(episode: Episode, page: Page) -> tuple[list[dict], list[dict]]:
     """(ops, proposals). Proposals explain each op for the preview."""
     ops: list[dict] = []
@@ -69,8 +86,12 @@ def plan(episode: Episode, page: Page) -> tuple[list[dict], list[dict]]:
             kind = FX_KINDS.get(str(word).strip())
             if kind and (kind, frame.id) not in existing:
                 existing.add((kind, frame.id))
-                ops.append({"op": "add_effect", "page": page.index, "kind": kind, "frame_id": frame.id, "params": {}})
-                notes.append({"kind": "add_effect", "frame_id": frame.id, "effect": kind})
+                params = _aim(kind, figs)
+                ops.append({"op": "add_effect", "page": page.index, "kind": kind, "frame_id": frame.id, "params": params})
+                note = {"kind": "add_effect", "frame_id": frame.id, "effect": kind}
+                if kind in AIMED and not params:
+                    note["why"] = "顔の位置が報告されていないので、コマの中心に向けた。report_regions で顔を報告すると顔に合わせる"
+                notes.append(note)
     if page.stage != "finish":
         ops.append({"op": "advance", "page": page.index, "to": "finish"})
     return ops, notes

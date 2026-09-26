@@ -101,10 +101,10 @@ def _canvas(images: list[Image.Image]) -> tuple[int, int]:
 
 
 def export(project: Path, dest: Path, *, page: int | None = None, fps: float = 12, seconds: float | None = None,
-           fmt: str | None = None, hold: float = 2.0) -> Path:
+           fmt: str | None = None, hold: float = 2.0, report: dict | None = None) -> Path:
     """The recorded pictures as a moving picture at `dest` (its suffix, or fmt: webp | gif | png | mp4).
     `seconds` fits the whole recording into that time (frames are dropped evenly); `hold` keeps the finished
-    picture on screen a little at the end."""
+    picture on screen a little at the end. `report` gets "frames": the pictures in the file."""
     items = frames(project, page)
     if not items:
         raise ValueError("nothing has been recorded yet (turn the timelapse on and work for a while)")
@@ -137,13 +137,14 @@ def export(project: Path, dest: Path, *, page: int | None = None, fps: float = 1
         board = Image.new("RGB", size, (128, 128, 128))
         board.paste(image, ((size[0] - image.width) // 2, (size[1] - image.height) // 2))
         frames_out.append(board)
-    return write_movie(frames_out, dest.with_suffix("." + fmt), fps, fmt, hold=hold)
+    return write_movie(frames_out, dest.with_suffix("." + fmt), fps, fmt, hold=hold, report=report)
 
 
 def write_movie(pictures: list[Image.Image], dest: Path, fps: float, fmt: str, *, hold: float = 0.0,
-                loop: bool = True) -> Path:
+                loop: bool = True, report: dict | None = None) -> Path:
     """Pictures of one size as a moving picture: animated WebP, GIF or PNG, or MP4 through ffmpeg. `hold` keeps
-    the last picture on screen that many seconds more."""
+    the last picture on screen that many seconds more. The same picture twice in a row is one picture shown
+    twice as long (the file formats merge them anyway); `report` gets "frames", the pictures in the file."""
     if fmt not in MOVIES:
         raise ValueError(f"format must be one of {', '.join(MOVIES)}")
     dest = Path(dest)
@@ -151,9 +152,22 @@ def write_movie(pictures: list[Image.Image], dest: Path, fps: float, fmt: str, *
     pictures = [p.convert("RGB") for p in pictures]
     duration = max(20, round(1000 / fps))
     if fmt == "mp4":
-        return _mp4(pictures + [pictures[-1]] * max(0, round(hold * fps)), dest, fps)
-    durations = [duration] * len(pictures)
+        pictures = pictures + [pictures[-1]] * max(0, round(hold * fps))
+        if report is not None:
+            report["frames"] = len(pictures)
+        return _mp4(pictures, dest, fps)
+    kept: list[Image.Image] = []
+    durations: list[int] = []
+    for picture in pictures:
+        if kept and picture.tobytes() == kept[-1].tobytes():
+            durations[-1] += duration
+        else:
+            kept.append(picture)
+            durations.append(duration)
+    pictures = kept
     durations[-1] += round(hold * 1000)  # (the finished picture stays a little)
+    if report is not None:
+        report["frames"] = len(pictures)
     if fmt == "gif":
         pictures = [p.quantize(colors=128, dither=Image.Dither.NONE) for p in pictures]
     extra = {"lossless": False, "quality": 80} if fmt == "webp" else {}

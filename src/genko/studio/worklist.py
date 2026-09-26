@@ -63,6 +63,11 @@ def next_actions(episode: Episode, project: Path | None = None) -> list[dict]:
                             comments=[t.get("text", "") for t in fixes], tickets=[t["id"] for t in fixes]))
             continue
         if page.name_ok:
+            if fixes:  # (after the name: the instruction is done with apply_ops and closed with resolve_ticket)
+                out.append(item("fix_page", "人間から修正の指示がある（直したら resolve_ticket で閉じる）",
+                                ["inspect", "render", "apply_ops", "resolve_ticket"], n,
+                                comments=[t.get("text", "") for t in fixes], tickets=[t["id"] for t in fixes],
+                                input_hash=",".join(t["id"] for t in fixes)))
             out.extend(_art_items(episode, page, requested, requested_sheets, project))
             continue
         if (page.plan or {}).get("atari"):
@@ -197,10 +202,11 @@ def _art_items(episode: Episode, page, requested: set, requested_sheets: set, pr
             out.append(item("gen_panel", "このコマの生成回数が上限に達した。人間の判断を待つ", ["ask_human"], page.index,
                             blocked_by=["limit"], attempts=attempts, **target))
         elif status == "fix_requested":
-            fixes = [t.get("text", "") for t in episode.tickets
-                     if t.get("status") == "open" and t.get("kind") == "fix" and t.get("frame_id") == frame.id]
-            out.append(item("fix_panel", "人間からコマの修正指示がある",
-                            ["inspect", "generation_request", "import_images", "adopt"], page.index, comments=fixes, **target))
+            open_fixes = [t for t in episode.tickets
+                          if t.get("status") == "open" and t.get("kind") == "fix" and t.get("frame_id") == frame.id]
+            out.append(item("fix_panel", "人間からコマの修正指示がある（絵を採用し直すと閉じる。絵以外の直しは resolve_ticket で閉じる）",
+                            ["inspect", "generation_request", "import_images", "adopt", "apply_ops", "resolve_ticket"], page.index,
+                            comments=[t.get("text", "") for t in open_fixes], tickets=[t["id"] for t in open_fixes], **target))
         else:
             out.append(item("gen_panel", "このコマの絵がまだない（依頼パックを作り、外部で生成して取り込む）",
                             ["inspect", "generation_request", "import_images", "candidates", "adopt"], page.index, **target))

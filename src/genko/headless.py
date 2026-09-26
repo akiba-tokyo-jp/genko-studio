@@ -78,6 +78,9 @@ def snapshot(episode: Episode, full: bool = False) -> dict[str, Any]:
             "prims": [{"id": p.get("id"), "kind": p.get("kind")} | ({"scene": p["scene"]} if p.get("scene") else {})
                       for p in page.prims],
         }
+        if page.effects:  # (effect lines and flashes, with their ids for edit_effect)
+            item["effects"] = [{"id": e.get("id"), "kind": e.get("kind"), "frame_id": e.get("frame_id"), "params": e.get("params") or {}}
+                               for e in page.effects]
         extra = page.extra or {}
         if extra.get("assignee"):
             item["assignee"] = extra["assignee"]

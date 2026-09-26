@@ -128,6 +128,11 @@ def _parser() -> argparse.ArgumentParser:
     close.add_argument("ticket")
     close.add_argument("--reply", default="", help="an instruction the agent gets as a fix ticket")
     close.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
+    reopen = sub.add_parser("reopen-ticket", help="(human) Reopen a fix ticket the agent closed (not done yet)")
+    reopen.add_argument("project", type=Path)
+    reopen.add_argument("ticket")
+    reopen.add_argument("--note", default="", help="what is still wrong")
+    reopen.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     adopt = sub.add_parser("adopt-drafts", help="Move M0 sidecar drafts (studio/drafts) into project.json")
     adopt.add_argument("project", type=Path)
     export = sub.add_parser("export", help="(human) Final export after preflight")
@@ -223,6 +228,8 @@ def _run(args: argparse.Namespace) -> int:
                                           confine=False).to_dict())
     if args.cmd == "close-ticket":
         return _emit(HumanService(path, args.actor or default_actor()).close_ticket(args.ticket, args.reply))
+    if args.cmd == "reopen-ticket":
+        return _emit(HumanService(path, args.actor or default_actor()).reopen_ticket(args.ticket, args.note))
     if args.cmd == "export":
         return _emit(HumanService(path, args.actor or default_actor()).export(args.format, args.out, args.dpi, args.allow_fixture, args.force))
     if args.cmd == "adopt-drafts":

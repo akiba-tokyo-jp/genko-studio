@@ -104,7 +104,7 @@ def _write_atomic(path: Path, text: str | bytes) -> None:
     if isinstance(text, bytes):
         tmp.write_bytes(text)
     else:
-        tmp.write_text(text, encoding="utf-8")
+        tmp.write_bytes(text.encode("utf-8"))  # (the same bytes on every system: Windows would turn \n into \r\n)
     for attempt in range(8):
         try:
             os.replace(tmp, path)

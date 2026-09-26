@@ -14,7 +14,7 @@ from typing import Any
 from mcp.server.mcpserver import Image, MCPServer
 
 from genko.ops import ApplyError
-from genko.studio.service import RULES_PATH, StudioService, ToolResult
+from genko.studio.service import RULES_PATH, StudioService, ToolResult, wording_error
 
 SKILL_PATH = Path(__file__).resolve().parent.parent / "studio" / "guide" / "SKILL.md"
 
@@ -72,7 +72,8 @@ def build_server(root: Path, actor: str) -> MCPServer:
                 toollog.record(path, actor, fn.__name__, bound, result.to_dict() if result else None, error,
                                (time.perf_counter() - started) * 1000)
         if result is None:
-            return [json.dumps({"ok": False, "error": error}, ensure_ascii=False)]
+            shown = wording_error(error or "")
+            return [json.dumps({"ok": False, "error": shown, **({"detail": error} if shown != error else {})}, ensure_ascii=False)]
         return _out(result)
 
     @server.tool(structured_output=False)
@@ -154,7 +155,7 @@ def build_server(root: Path, actor: str) -> MCPServer:
 
     @server.tool(structured_output=False)
     def review_candidates(project: str, page: int, frame_id: str, reviews: list[dict]) -> list:
-        """候補の評価を残す。reviews: [{candidate_id, score (0..1), note, fix?}]。"""
+        """候補の評価を残す。page と frame_id（どのコマの候補か）は必須。reviews: [{candidate_id, score (0..1), note, fix?}]。"""
         return call(service.review_candidates, project, page, frame_id, reviews)
 
     @server.tool(structured_output=False)
@@ -199,7 +200,8 @@ def build_server(root: Path, actor: str) -> MCPServer:
 
     @server.tool(structured_output=False)
     def undo(project: str) -> list:
-        """自分（このエージェント）の最後の保存済みの変更を取り消す。人の変更と承認は取り消せない。"""
+        """自分（このエージェント）の最後の保存済みの変更を取り消す。次のときは断る: 最後の変更が人（や別のエージェント）のもの、
+        承認が変わる変更、project.json が Genko の外で書き換えられた（記録と中身が合わない）、取り消すものが無い。"""
         return call(service.undo, project)
 
     @server.tool(structured_output=False)
@@ -294,6 +296,12 @@ def build_server(root: Path, actor: str) -> MCPServer:
     def tickets(project: str, status: str = "open") -> list:
         """承認依頼と、人間からの修正指示の一覧（status: open / all）。"""
         return call(service.tickets, project, status)
+
+    @server.tool(structured_output=False)
+    def resolve_ticket(project: str, ticket_id: str, note: str) -> list:
+        """人間からの直しの指示（kind fix、担当 agent のチケット）を直し終えたと返して閉じる。note に何をしたかを書く。
+        承認の依頼や ask_human の質問は閉じられない（人が閉じる）。人は genko studio reopen-ticket で開き直せる。"""
+        return call(service.resolve_ticket, project, ticket_id, note)
 
     @server.resource("genko://ops", mime_type="application/json")
     def ops_catalog() -> str:

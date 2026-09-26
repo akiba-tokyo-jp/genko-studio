@@ -29,7 +29,7 @@ STUDIO_OPS = frozenset({
     "replace_regions", "bind_ref", "unbind_ref", "register_assets", "attach_reference",
     "open_request", "close_request", "import_candidates", "review_candidates", "set_candidate",
     "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish", "ask_human", "reject_sheet",
-    "set_layout", "propose", "resolve_proposal",
+    "set_layout", "propose", "resolve_proposal", "resolve_ticket", "reopen_ticket",
 })
 
 STUDIO_SCHEMA = [
@@ -46,6 +46,8 @@ STUDIO_SCHEMA = [
     {"op": "record_review", "page": "int", "frame_id": "str?", "kind": "name|art|upscale|regions", "score": "float?", "notes": "str", "input_hash": "str"},
     {"op": "approve", "gate": "bible|script|sheet|name|art|export", "page": "int?", "character_id": "str?", "candidate_id": "str?", "face_asset": "str?"},
     {"op": "revoke", "gate": "name|art|sheet", "page": "int?", "character_id": "str?", "reason": "str"},
+    {"op": "resolve_ticket", "id": "str", "note": "str (what was done)"},
+    {"op": "reopen_ticket", "id": "str", "note": "str? (human)"},
     {"op": "request_approval", "gate": "str", "pages": "[int]?", "character_id": "str?", "note": "str?"},
     {"op": "request_fix", "page": "int", "frame_id": "str?", "candidate_id": "str?", "instruction": "str", "scope": "frame|person|background|text|regions?"},
     {"op": "add_region", "page": "int", "frame_id": "str", "region": "{id?, kind, rect_mm, char?, confidence?}"},
@@ -751,6 +753,36 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
         if status not in ("accepted", "rejected"):
             raise _err("status must be accepted or rejected")
         proposal.update({"status": status, "resolved_by": agent, "note": str(op.get("note") or "")})
+        return
+
+    if name in ("resolve_ticket", "reopen_ticket"):
+        ticket = next((t for t in episode.tickets if t.get("id") == str(op.get("id") or "")), None)
+        if ticket is None:
+            raise _err(f"no ticket {op.get('id')}")
+        note = str(op.get("note") or "").strip()
+        if name == "reopen_ticket":
+            if not person:
+                raise _err("only a person can reopen a ticket")
+            ticket.update({"status": "open", "reopened_by": agent, "reopen_note": note})
+            if ticket.get("frame_id") and ticket.get("page_index"):
+                page = next((p for p in episode.pages if p.index == ticket["page_index"]), None)
+                frame = next((f for f in page.leaf_frames() if f.id == ticket["frame_id"]), None) if page is not None else None
+                if frame is not None and (frame.panel or {}).get("status") != "skip":
+                    _panel(frame)["status"] = "fix_requested"
+            return
+        if ticket.get("status") != "open":
+            raise _err(f"ticket {ticket['id']} is not open")
+        if not person and (ticket.get("kind") != "fix" or ticket.get("assignee") != "agent"):
+            raise _err("an agent resolves only a person's fix instruction (approvals and questions are closed by a person)")
+        if not note and not person:
+            raise _err("note is required")
+        ticket.update({"status": "done", "resolved_by": agent, "resolved_note": note, "resolved_rev": episode.revision})
+        frame_id = ticket.get("frame_id")
+        page = next((p for p in episode.pages if p.index == ticket.get("page_index")), None) if frame_id else None
+        frame = next((f for f in page.leaf_frames() if f.id == frame_id), None) if page is not None else None
+        still = any(t.get("kind") == "fix" and t.get("status") == "open" and t.get("frame_id") == frame_id for t in episode.tickets)
+        if frame is not None and (frame.panel or {}).get("status") == "fix_requested" and not still:
+            frame.panel["status"] = "adopted" if (frame.panel.get("adopted") or {}).get("art") else "briefed"
         return
 
     if name == "reject_sheet":

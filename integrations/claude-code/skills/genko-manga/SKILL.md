@@ -66,9 +66,11 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - `import_pending`: 依頼済みで画像がまだのコマ。`inbox` に画像を置いて `import_images`。
 - `review_candidates`: `mcp__genko__candidates`（metrics の `rank` が小さいほど目安が良い）と `mcp__genko__render`（`kind: "compare"`、`candidate_id`）で比べる。
   赤い線がネームの構図。構図がネームに合うか、人物が設定画に似ているか、手足の破綻、画内の文字、台詞の場所が空いているかを見て、
-  `review_candidates` で点数（0〜1）とメモを残し、良いものを `mcp__genko__adopt`。どれも駄目なら直しの依頼を作る。
+  `review_candidates`（`page` と `frame_id` も必須）で点数（0〜1）とメモを残し、良いものを `mcp__genko__adopt`。どれも駄目なら直しの依頼を作る。
   1 コマ 8 枚・直し 2 巡を超えると、そのコマは人間の判断待ちになる。
-- `fix_panel`: 人間の指示（`comments`）どおりに直しの依頼を作る（`instruction` に指示を入れる）。
+- `fix_panel`: 人間の指示（`comments`）どおりに直しの依頼を作る（`instruction` に指示を入れる）。絵を採用し直すとチケットは閉じる。
+  絵ではない直し（台詞・線・効果など）なら `apply_ops` で直し、`mcp__genko__resolve_ticket`（`ticket_id` は `tickets` の値、`note` に何をしたか）で閉じる。
+- `fix_page`: ネーム承認後のページへの人間の指示。`apply_ops` で直してから `resolve_ticket` で閉じる。閉じられるのは人からの直しの指示だけ（承認の依頼や質問は人が閉じる）。人は `genko studio reopen-ticket` で開き直せる。
 - `report_regions`: 採用した絵の顔と人物の位置を `mcp__genko__report_regions` で報告する（`box01` は画像の中の 0..1 の `[x, y, 幅, 高さ]`）。
   人物がいない絵なら `apply_ops` の `record_review`（`kind: "regions"`、`frame_id`、`input_hash` に採用中の候補 id）。
 - `upscale_panel`: 画像ツールに高解像度化があれば `generation_request`（`mode: "upscale"`）で作り直して取り込み、採用し直す。
@@ -83,12 +85,12 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 
 人が画面でできることは、`mcp__genko__apply_ops` の op で全部できる（一覧は resource `genko://ops`）。まず `commit: false` で試す。
 
-- ページ: `add_page`・`delete_page`・`duplicate_page`・`reorder`・`set_spread`（見開き）・`set_page_spec`（原稿用紙を変えるとコマや台詞も合わせて動く）。
+- ページ: `add_page`（`after` を省くと本文の最後、表紙より前）・`delete_page`・`duplicate_page`・`reorder`・`set_spread`（見開き）・`set_page_spec`（原稿用紙を変えるとコマや台詞も合わせて動く）。
 - 調べる: `mcp__genko__inspect` の `target` で `snapshot`（レイヤーの名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照、台詞の書式とフキダシ、3D）、`materials`（貼れる素材の id）、`fonts`（`style.font` に使える書体）、`brushes`（`kind` に使えるブラシ）。
 - 見る: `mcp__genko__render` の `mode: print` は印刷と同じ見え方、`layer_id` はそのレイヤーだけ。
 - レイヤー: `add_layer`・`duplicate_layer`・`merge_down`（ペン同士は線のまま）・`delete_layer`・`set_layer`（`exportable: false` で下描き＝書き出さない、`color` で画面だけの表示色、`reference: true` で参照レイヤー）。
   マスクは `set_layer_mask`（`area` の所だけ見せる・`fill`・`invert`・`enabled`・`delete`）と `paint_mask`（`show: true` で見せる、`false` で隠す）。
-- 線と塗り: `add_stroke`（`kind` はブラシ。自作のブラシは `define_brush` で定義してから）、`erase`、`fill`・`fill_area`（`fill` の `reference: "reference"` は参照レイヤーの線だけを見て塗る）、`gradient_fill`（`from`・`to`・色・不透明度、`shape: radial` で円）、`filter_raster`（`levels`・`curve`・`hue`・`blur`…）。
+- 線と塗り: `add_stroke`（`kind` はブラシ。自作のブラシは `define_brush` で定義してから。コマの外に描いた線はコマの形で切られて見えない。そのときは返事の `results` に `outside_panels` が出る）、`erase`、`fill`・`fill_area`（`fill` の `reference: "reference"` は参照レイヤーの線だけを見て塗る）、`gradient_fill`（`from`・`to`・色・不透明度、`shape: radial` で円）、`filter_raster`（`levels`・`curve`・`hue`・`blur`…）。
 - ブラシ: 入っているものは `inspect` の `brushes`（G ペン・筆・スプレー・点描・点線・破線・レース・草むら・木の葉・ハート・星・カリグラフィ・水彩など）。`define_brush` で `tip`（`round`・`flat`・`image`＋`tip_png`）・`pattern`・`spacing`・`scatter`・`stamp_size`・`size_jitter`・`turn_jitter`・`count`・`speed`・`post_smooth`・`aa` も決められる。色を混ぜる・ぼかすのは `smudge`（`mode`: `blur`・`smudge`・`blend`）。線を丸ごと消すのは `erase` の `mode: "whole"`。
 - 線の編集: `vector_edit`（`action`: `move_point`・`add_point`・`delete_point`・`connect`・`cut`・`recolor`・`delete`。線の id は `inspect` の `snapshot` か `render`）。塗り残しは `fill_gaps`。
 - レイヤー: `add_layer` の `kind` に `fill`（ベタ塗り・`rgb`）・`gradient`（`gradient`）・`adjust`（色調補正・`adjust: {kind, …}`、下の絵の色を変える。あとから `set_layer` で直せる）。`set_layer` の `effect`（`border` フチ・`water_edge` 水彩境界）と `color_prints`（表示色を印刷にも）。合成モードは比較（暗・明）・焼き込み・覆い焼き・ソフトライト・差の絶対値・色相・輝度なども。まとめて: `merge_layers`・`merge_visible`（`copy`）・`group_layers`・`move_layers`・`set_layers`・`convert_layer`（`to`: `paint`・`pen`）。用紙の色は `set_paper`。
@@ -98,8 +100,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 効果線: 流線の `path`・`spread_mm`、集中線の `inner_path`・`twist`。トーン: 柄（`check`・`brick`・`wave`・`grid`・`hatch`・`star`・`sand`・`image`）、レイヤーのトーン化は `set_layer` の `screen`、点検の `tone_moire`。
 - 定規: `parallel_curve`・`multi_curve`・`radial_curve`、`layer_id`（レイヤー専用）、パースの `lock_horizon`・`horizon_y`・`fixed`、定規ペンは `ruler_to_layer`。描き文字の素材は `stamp_material`（kind `lettering`）。
 - 素材: `inspect` の `materials` に種類（トーン・効果線・画像・パーツ〔漫符・小物・背景の線画〕・描き文字・ブラシ・3D）とタグ。`stamp_material` でパーツは `layer_id` の `x_mm`・`y_mm` に、描き文字は台詞として、ブラシは原稿に加わり（`add_stroke` の `kind` に使える）、3D は置いた所に。
-- 3D: 体型と関節のある人形は `add_figure`（`body`: `heads` 等身・`shoulders`・`hips`・`build`・`legs`、`preset`、`hands`）と `pose_figure`（`joints` の x・y・z、`drag`）。頭部 `add_head`、手 `add_hand`（`pose`）、OBJ は `import_model`。ページのカメラ `set_camera`、光 `set_light`。線と陰の面にするのは `render_prims`（`tone` で面を網点に）。
-- 本: 表紙・裏表紙・カバー（背と袖）は `add_cover`（ページの最後に入り、ノンブルなし）。全ページの台詞の置換は `replace_text`、同じ操作を全ページに `for_pages`、担当は `set_assignee`。
+- 3D: 体型と関節のある人形は `add_figure`（`body`: `heads` 等身・`shoulders`・`hips`・`build`・`legs`、`preset`、`hands`）と `pose_figure`（`joints` の x・y・z、`drag`）。頭部 `add_head`、手 `add_hand`（`pose`）、OBJ は `import_model`。ページのカメラ `set_camera`、光 `set_light`。線と陰の面にするのは `render_prims`（`surfaces` は既定で true＝陰を灰色で入れる。線だけなら `lines: true, surfaces: false`。`tone` で面を網点に）。
+- 本: 表紙・裏表紙・カバー（背と袖）は `add_cover`（ページの最後に入り、ノンブルなし。本のプレビュー・EPUB・Kindle では表紙が先頭、裏表紙が末尾。PDF・TIFF・PNG はページの順のままで、ファイル名が `cover_front` など）。全ページの台詞の置換は `replace_text`、同じ操作を全ページに `for_pages`、担当は `set_assignee`。
 - ペンの軸の回転（アートペン）: `add_stroke` の `rotation`（点ごとの角度）。`tip_rotation` のブラシ（カリグラフィ）は先端が回る。
 - フィルターのプラグイン（置き場所は `inspect` の `plugins` の `folder`）: 一覧にあれば、`filter_raster` の `kind` に `plugin:<key>`（設定は `PARAMS` のとおり）。
 - アニメーション: `set_animation`（`fps`・`frames`・`loop`）でページを短いアニメーションに。`add_anim_folder` がタイムラインの 1 行、`add_cel`（`folder`・`at`）がセル（描くのは `add_stroke` の `layer_id` にセルの id）。どのフレームにどのセルを出すかは `set_exposure`（`frame`・`cel`、null で空）か `set_exposures`（全部）。カメラワークは `set_camera_key`（`rect`）、いつも薄く見るセルは `set_light_table`。書き出しは `export` の `format: "animation"`（`pages` に 1 ページ、`movie`: gif・webp・png・mp4・frames）。
@@ -112,9 +114,10 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   - `style`: `rotate_deg`（フキダシごと回す）、`skew_deg`・`arc`（描き文字の傾き・弓なり）、`weight`（`normal`・`bold`・`heavy`）・`italic`、`outline_rgb`（フチの色）、`latin`（`rotate` で 4 文字以上の英数字を寝かせる／`upright`）、`emphasis_mark`（`sesame`・`dot`）、`wobble`（手描き風の揺れ）・`double`（二重線）・`spikes`・`spike_depth`（叫びのトゲ）。
   - `balloon` の形に `electric`（電子音: 電話・テレビの声。角のあるギザギザの縁と稲妻のしっぽ）。
   - `path`（手で描いた形のフキダシ、`set_balloon_path` でも）。
+  - フキダシの大きさと位置は `move_line` の `w_mm`・`h_mm`・`x_mm`・`y_mm`（`edit_line` では変わらない）。
 - 3D: `add_prim3d` の `kind` は `box`・`cylinder`・`stairs`・`floor`（パースの格子）。背景は `add_scene`（`kind`: `room`・`classroom`・`corridor`・`street`）で、壁・床・窓・机・建物をまとめて置き、`edit_prim`・`delete_prim`・`trace_prims` は id 1 つで効く。人形は `add_mannequin`。`trace_prims` で線にする。
 - 点検: `mcp__genko__check` で、人の「入稿前の点検」と同じ問題の一覧を受け取る（`preflight` の結果の `checks` にも入る）。
-- 取り消し: `mcp__genko__undo` で自分の最後の変更を取り消す（人の変更と承認は取り消せない）。
+- 取り消し: `mcp__genko__undo` で自分の最後の変更を取り消す。最後の変更が人のもの・承認が変わる・`project.json` が Genko の外で書き換えられた、のどれかなら断る。
 - 書き出し: `mcp__genko__export`（`format`: pdf・tiff・png・cmyk・layers・psd・pack・epub・kindle・strip・webtoon・sns・timelapse、`pages`、`dpi`、`area`: paper・bleed・trim）。承認は要らない。書き出し先は原稿の `exports/`。
   - `cmyk`（CMYK の TIFF）と pdf の `color: "cmyk"` は、`icc` に印刷所の CMYK プロファイル（.icc のパス）を渡すとそれで変換する。無ければ黒は K 版だけ・総インキ量 320% 以内。`color: "gray"` も。
   - `layers` はレイヤーを 1 枚ずつ透明な PNG に。`kindle` は Kindle 用の固定レイアウト（`long_edge` 既定 2560）。

@@ -109,6 +109,8 @@ def restore(project: Path, *, actor: str, redo: bool = False, force: bool = Fals
     target = stack[-1]
     current = (project / "project.json").read_bytes()
     expected = target["before"] if redo else target["after"]
+    if AssetStore.ref(current) != expected and AssetStore.ref(current.replace(b"\r\n", b"\n")) == expected:
+        current = current.replace(b"\r\n", b"\n")  # (saved on Windows before line endings were fixed: the same book)
     if AssetStore.ref(current) != expected and not force:
         raise ApplyError("project.json changed outside the journal; use --force to restore anyway")
     if not redo and target.get("actor") != actor and not force:

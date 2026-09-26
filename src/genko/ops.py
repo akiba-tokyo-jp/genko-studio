@@ -42,14 +42,14 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|electric|flash|whisper|narration|sfx|none|picture? (picture: style.picture, a base64 PNG stretched over the box)", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]? (傍点 on these words)", "style_runs": "[[words, {scale 0.3..3, bold, weight, rgb}]]? (part of the line larger, smaller, bolder, coloured)", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6, scale_x 0.3..3 (長体 < 1 < 平体), gradient {rgb_from, rgb_to, angle}, text_path [[x,y]…] (mm from the box's top left: the letters follow it), features [jp78|jp90|trad|expt|hwid|…] (OpenType forms, across text), yakumono (paired punctuation set half wide; default true), spike_jitter 0..1, bumps 5..60 (cloud), picture (base64 PNG), fill_png (letters painted with a picture), warp [[x,y]×4] (the letters' corners as shares of their box: 遠近・ゆがみ)}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], width_mm?, kind?: wedge|zigzag|fade|bubbles}]?"},
     {"op": "reorder_lines", "page": "int", "order": "[line id] (reading order)"},
     {"op": "delete_line", "id": "str"},
-    {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float?", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
+    {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float? (the balloon's size: edit_line does not change it)", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
     {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)", "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
     {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white} | null? (トーン化: the layer's greys print as a halftone)"},
-    {"op": "add_page", "count": "int", "after": "int? (insert after this page; default at the end)"},
+    {"op": "add_page", "count": "int", "after": "int? (insert after this page; default after the last story page, before any covers)"},
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int", "next_to": "bool? (the copy right after the page; default at the end)"},
     {"op": "set_page_spec", "preset": "b4|b5|a5|a4|webtoon?", "paper": "[w,h]? mm", "trim": "[w,h]? (finished size)", "bleed_mm": "float?", "margins": "[top,bottom,inner,outer] | {top,bottom,inner,outer}? (basic frame, from the trim)", "dpi": "int?", "move": "bool? (default true: move everything onto the new basic frame)"},
@@ -128,7 +128,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "import_model", "page": "int", "obj": "str? (the OBJ file's text: v and f lines)", "glb": "str? (a .glb / .vrm file, base64)", "gltf": "str? (a .gltf's text with its data inside)", "size_mm": "float? (its longest side, 60)", "pos": "[x,y,z]?", "rot": "[tip,turn,lean]?", "name": "str?", "frame_id": "str?", "id": "str?"},
     {"op": "set_camera", "page": "int", "turn": "float? (radians, about the upright axis)", "tip": "float? (looking down +, up −)", "roll": "float?", "focal_mm": "float? (20..5000: short = strong perspective)", "target": "[x,y]? (the point the camera turns about)", "off": "bool? (back to each 3D seen on its own)"},
     {"op": "set_light", "page": "int", "dir": "[x,y,z]? (toward the light: x right, y down, z away from the viewer)", "ambient": "0..1?"},
-    {"op": "render_prims", "page": "int", "layer_id": "str?", "ids": "[prim id]? (none: all)", "lines": "bool? (true: the pen lines, hidden parts left out)", "surfaces": "bool? (true: the shaded surfaces as greys)", "tone": "{lpi, angle}? (the layer tone-ized: the greys print as dots)", "light": "[x,y,z]?", "ambient": "0..1?", "width_mm": "float?", "kind": "str? (brush, mili)", "rgb": "[r,g,b]?"},
+    {"op": "render_prims", "page": "int", "layer_id": "str?", "ids": "[prim id]? (none: all)", "lines": "bool? (true: the pen lines, hidden parts left out)", "surfaces": "bool? (default true: the shaded surfaces as greys; false for the lines alone)", "tone": "{lpi, angle}? (the layer tone-ized: the greys print as dots)", "light": "[x,y,z]?", "ambient": "0..1?", "width_mm": "float?", "kind": "str? (brush, mili)", "rgb": "[r,g,b]?"},
     {"op": "set_animation", "page": "int", "fps": "float? (1..60)", "frames": "int? (the length)", "loop": "bool?", "off": "bool? (an ordinary page again)", "note": "a page as a short animation: its timeline in page.extra.anim"},
     {"op": "add_anim_folder", "page": "int", "id": "str?", "name": "str?", "note": "an animation folder: a row of the timeline that holds cels"},
     {"op": "add_cel", "page": "int", "folder": "animation folder id", "kind": "pen|paint?", "id": "str?", "name": "str?", "at": "int? (the frame it shows from; a folder's first cel shows from 1)"},
@@ -138,7 +138,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_light_table", "page": "int", "cels": "[cel ids] (always shown faint while drawing)"},
     {"op": "import_psd", "page": "int", "path": "str? (a .psd / .psb file: relative to the book's folder, or absolute; over MCP it must be under --root)", "psd": "str? (the file in base64, instead of path)", "fit": "paper|bleed|trim? (default bleed: the picture fills it, keeping its shape)", "id": "str? (the new layers are <id>-1, <id>-2…)", "parent": "folder id?", "after": "layer id?", "note": "every layer as a Genko layer: pixels, names, opacity, visibility, blend, clipping, folders, masks"},
     {"op": "set_timelapse", "on": "bool (true: every save records a small picture of each changed page, for the timelapse export)"},
-    {"op": "add_cover", "kind": "front|back|jacket (表紙・裏表紙・カバー)", "spine_mm": "float? (jacket: the spine)", "flap_mm": "float? (jacket: each flap, 袖)", "bleed": "bool? (default true: one panel to the bleed)", "note": "covers are pages at the end, without nombre; previews and exports put them first and last"},
+    {"op": "add_cover", "kind": "front|back|jacket (表紙・裏表紙・カバー)", "spine_mm": "float? (jacket: the spine)", "flap_mm": "float? (jacket: each flap, 袖)", "bleed": "bool? (default true: one panel to the bleed)", "note": "covers are pages at the end, without nombre; the book preview, EPUB and Kindle put the front cover first and the back cover last; print exports (PDF, TIFF, PNG) keep the page order, the covers named cover_front / cover_back / cover_jacket"},
     {"op": "replace_text", "find": "str", "replace": "str", "regex": "bool?", "case": "bool? (default true: case matters)", "pages": "[int]? (none: every page)", "speakers": "bool? (speakers too)", "must_find": "bool? (an error when nothing matched)"},
     {"op": "for_pages", "pages": "[int] | all | body? (body: not the covers; default)", "ops": "[op] (each run on every page, its page set to it)"},
     {"op": "set_assignee", "pages": "[int]", "who": "str (empty: nobody) (担当: who draws the page)"},
@@ -662,6 +662,31 @@ def _prim(page, prim_id) -> dict:
 def _vec3(value) -> list[float]:
     values = [float(v) for v in (list(value) + [0.0, 0.0, 0.0])[:3]]
     return [round(v, 4) for v in values]
+
+
+def _in_a_panel(page, points, pad: float = 0.0) -> bool:
+    """Whether any of the points (within `pad` mm) lies in a panel that cuts the layers (a page with no such
+    panel cuts nothing)."""
+    from genko import frames as geo
+    from genko.placement import clip_box
+
+    leaves = [frame for frame in page.leaf_frames() if getattr(frame, "clip", True)]
+    if not leaves:
+        return True
+    dense = list(points[:1])
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):  # (along the line every millimetre: a long stroke can cross a panel)
+        steps = max(1, int(math.hypot(x1 - x0, y1 - y0)))
+        dense += [(x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps) for k in range(1, steps + 1)]
+    points = dense
+    for frame in leaves:
+        box = clip_box(page, frame, "bleed") if getattr(frame, "bleed", False) and not getattr(frame, "poly", None) else frame.rect
+        for x, y in points:
+            if not (box.x - pad <= x <= box.x + box.width + pad and box.y - pad <= y <= box.y + box.height + pad):
+                continue
+            if box is not frame.rect or geo.contains(frame, x, y) or pad and any(
+                    geo.contains(frame, x + dx, y + dy) for dx, dy in ((pad, 0), (-pad, 0), (0, pad), (0, -pad))):
+                return True
+    return False
 
 
 def _frame_contains(page):
@@ -1536,6 +1561,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             twin.id = new_id()
             twin.points = [(float(p[0]), float(p[1])) for p in copy_points]
             target.strokes.append(twin)
+        if getattr(target, "panel_clip", True) and not _in_a_panel(page, stroke.points, stroke.width_mm / 2):
+            op["_report"] = {"warning": "outside_panels",
+                             "message": "この線はどのコマにも入っていないので、コマの形で切られて見えません"
+                                        "（コマの外に描くなら、そのレイヤーを set_layer panel_clip:false にする）"}
         return
 
     if name == "fill":

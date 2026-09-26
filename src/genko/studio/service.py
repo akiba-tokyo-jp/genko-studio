@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import io
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,7 @@ AGENT_OPS = frozenset({
     "add_region", "edit_region", "delete_region", "replace_regions", "bind_ref", "unbind_ref",
     "register_assets", "attach_reference", "open_request", "close_request", "import_candidates",
     "review_candidates", "set_candidate", "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish",
-    "ask_human", "propose",
+    "ask_human", "propose", "resolve_ticket",
 })
 
 # Agent tools callable by name from `genko studio call` (the MCP tool set, minus project management).
@@ -69,6 +70,7 @@ AGENT_TOOLS = frozenset({
     "record_review", "request_approval", "tickets", "generation_request", "import_images", "candidates",
     "review_candidates", "adopt", "request_fix", "report_regions", "finish_page", "preflight", "export_proof", "ask_human",
     "review_page", "derive", "import_name", "analyze_name", "propose_lines", "proposals", "undo", "export", "check",
+    "resolve_ticket",
 })
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
@@ -100,8 +102,18 @@ class ToolResult:
         }
 
 
+def wording_error(message: str) -> str:
+    """An op's refusal in Japanese where the wording is known (the op's place in the list is kept)."""
+    from genko.app import wording
+
+    match = re.match(r"(ops\[\d+\] [a-z_]+: )(.*)", message, re.S)
+    prefix, core = (match.group(1), match.group(2)) if match else ("", message)
+    return prefix + wording._inner(core)
+
+
 def fail(message: str, code: str = "error", path: str = "/") -> ToolResult:
-    return ToolResult(False, {"error": message}, [error(code, path, message)])
+    shown = wording_error(message)
+    return ToolResult(False, {"error": shown, **({"detail": message} if shown != message else {})}, [error(code, path, shown)])
 
 
 class StudioService:
@@ -526,12 +538,15 @@ class StudioService:
             if pages is not None and len(pages) != 1:
                 return fail("timelapse の pages は 1 ページだけ（省略で全ページ）", "bad_pages", "/pages")
             out = path / "exports" / f"{time.strftime('%Y%m%d-%H%M%S')}_timelapse" / f"timelapse.{movie}"
+            report: dict = {}
             try:
-                written = timelapse.export(path, out, page=int(pages[0]) if pages else None, fps=fps, seconds=seconds, fmt=movie)
+                written = timelapse.export(path, out, page=int(pages[0]) if pages else None, fps=fps, seconds=seconds, fmt=movie,
+                                           report=report)
             except ValueError as exc:
                 return fail(str(exc), "export_failed", "/")
-            return ToolResult(True, {"folder": str(written.parent), "files": [str(written)],
-                                     "frames": len(timelapse.frames(path, int(pages[0]) if pages else None))}, files=[str(written)])
+            recorded = len(timelapse.frames(path, int(pages[0]) if pages else None))
+            return ToolResult(True, {"folder": str(written.parent), "files": [str(written)], "frames": report.get("frames", recorded),
+                                     "recorded": recorded}, files=[str(written)])
         if format == "animation":
             from genko import anim
 
@@ -1032,6 +1047,10 @@ class StudioService:
         return ToolResult(True, {"request": ticket["id"], "how_to_approve": how, **({"faces": face_note} if face_note else {})},
                           images=faces)
 
+    def resolve_ticket(self, project: str, ticket_id: str, note: str) -> ToolResult:
+        """Say a person's fix instruction is done (only fix tickets assigned to the agent; a person can reopen it)."""
+        return self._ops(project, [{"op": "resolve_ticket", "id": ticket_id, "note": note}])
+
     def tickets(self, project: str, status: str = "open") -> ToolResult:
         path = self.project_path(project)
         items = [t for t in load_episode(path).tickets if status == "all" or t.get("status") == status]
@@ -1166,6 +1185,13 @@ class HumanService:
                         "instruction": reply, "scope": "frame" if ticket.get("frame_id") else "page"})
         self._apply(ops)
         return {"ok": True, "closed": ticket_id}
+
+    def reopen_ticket(self, ticket_id: str, note: str = "") -> dict:
+        try:
+            self._apply([{"op": "reopen_ticket", "id": ticket_id, "note": note}])
+        except ApplyError as exc:
+            return {"ok": False, "error": wording_error(str(exc))}
+        return {"ok": True, "reopened": ticket_id}
 
     def comment(self, page: int, text: str, frame_id: str | None = None) -> dict:
         episode = self._apply([{"op": "request_fix", "page": page, "frame_id": frame_id, "instruction": text,

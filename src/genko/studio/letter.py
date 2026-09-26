@@ -40,6 +40,7 @@ class BalloonPlacement:
 ELLIPSE_KINDS = ("speech", "thought", "shout", "whisper")
 LEADING = 0.15
 SFX_EM_MM = 12.0  # the renderer's largest SFX glyph
+SPIKED = {"shout": 0.26}  # (a shout's default spike depth, and a little more for its valleys' chords)
 
 
 def measure(breaks: list[str], balloon: str) -> tuple[float, float]:
@@ -51,8 +52,11 @@ def measure(breaks: list[str], balloon: str) -> tuple[float, float]:
         return (SFX_EM_MM * len(cols), SFX_EM_MM * longest)
     # columns are LEADING em apart (the renderer's default), characters sit edge to edge
     text_w, text_h = EM_MM * len(cols) + EM_MM * LEADING * (len(cols) - 1), EM_MM * longest
-    if balloon in ELLIPSE_KINDS:
-        return (text_w * 2 ** 0.5 + 2 * PAD_MM, text_h * 2 ** 0.5 + 2 * PAD_MM)
+    if balloon in ELLIPSE_KINDS or balloon in SPIKED:
+        # the text's corners on an ellipse (half-size × √2); a spiked edge's valleys cut in by its depth, so the
+        # ellipse the text needs is the valleys', and the outline is that much bigger
+        grow = 2 ** 0.5 / (1 - SPIKED.get(balloon, 0.0))
+        return (text_w * grow + 2 * PAD_MM, text_h * grow + 2 * PAD_MM)
     pad = 0.0 if balloon == "none" else PAD_MM
     return (text_w + 2 * pad, text_h + 2 * pad)
 
@@ -64,7 +68,7 @@ def fits(rect: Box, balloon: str, others: int = 0) -> str:
     if balloon == "sfx":
         chars, cols = int(room_h // SFX_EM_MM), int(room_w // SFX_EM_MM)
     else:
-        grow = 2 ** 0.5 if balloon in ELLIPSE_KINDS else 1.0
+        grow = 2 ** 0.5 / (1 - SPIKED.get(balloon, 0.0)) if (balloon in ELLIPSE_KINDS or balloon in SPIKED) else 1.0
         pad = 0.0 if balloon == "none" else PAD_MM
         chars = int(((room_h - 2 * pad) / grow) // EM_MM)
         cols = int((((room_w - 2 * pad) / grow) + EM_MM * LEADING) // (EM_MM * (1 + LEADING)))

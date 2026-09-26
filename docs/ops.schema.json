@@ -103,7 +103,7 @@
       "id": "str",
       "x_mm": "float?",
       "y_mm": "float?",
-      "w_mm": "float?",
+      "w_mm": "float? (the balloon's size: edit_line does not change it)",
       "h_mm": "float?",
       "tail": "[x,y]?",
       "tails": "[{to, via?, width_mm?}]?",
@@ -173,7 +173,7 @@
     {
       "op": "add_page",
       "count": "int",
-      "after": "int? (insert after this page; default at the end)"
+      "after": "int? (insert after this page; default after the last story page, before any covers)"
     },
     {
       "op": "delete_page",
@@ -871,7 +871,7 @@
       "layer_id": "str?",
       "ids": "[prim id]? (none: all)",
       "lines": "bool? (true: the pen lines, hidden parts left out)",
-      "surfaces": "bool? (true: the shaded surfaces as greys)",
+      "surfaces": "bool? (default true: the shaded surfaces as greys; false for the lines alone)",
       "tone": "{lpi, angle}? (the layer tone-ized: the greys print as dots)",
       "light": "[x,y,z]?",
       "ambient": "0..1?",
@@ -950,7 +950,7 @@
       "spine_mm": "float? (jacket: the spine)",
       "flap_mm": "float? (jacket: each flap, 袖)",
       "bleed": "bool? (default true: one panel to the bleed)",
-      "note": "covers are pages at the end, without nombre; previews and exports put them first and last"
+      "note": "covers are pages at the end, without nombre; the book preview, EPUB and Kindle put the front cover first and the back cover last; print exports (PDF, TIFF, PNG) keep the page order, the covers named cover_front / cover_back / cover_jacket"
     },
     {
       "op": "replace_text",
@@ -1094,6 +1094,16 @@
       "page": "int?",
       "character_id": "str?",
       "reason": "str"
+    },
+    {
+      "op": "resolve_ticket",
+      "id": "str",
+      "note": "str (what was done)"
+    },
+    {
+      "op": "reopen_ticket",
+      "id": "str",
+      "note": "str? (human)"
     },
     {
       "op": "request_approval",

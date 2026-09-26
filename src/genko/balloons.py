@@ -75,10 +75,13 @@ def tails_of(line) -> list[dict]:
 # --- text ------------------------------------------------------------------------------------------------
 
 
-def _inner(kind: str, w: float, h: float, pad: float) -> tuple[float, float]:
-    """The space for text inside the shape."""
+def _inner(kind: str, w: float, h: float, pad: float, depth: float | None = None) -> tuple[float, float]:
+    """The space for text inside the shape (a shout's text stays inside its spikes' valleys)."""
     if kind == "electric":  # (a squarish outline: more room than an ellipse, less the teeth)
         return (w - 2 * pad) * 0.76, (h - 2 * pad) * 0.76
+    if kind == "shout":
+        keep = 1 - max(0.05, min(0.6, float(depth if depth is not None else 0.2))) - 0.06  # (the valleys, and their chords)
+        return (w - 2 * pad) / SQRT2 * keep, (h - 2 * pad) / SQRT2 * keep
     if kind in ELLIPTIC:
         return (w - 2 * pad) / SQRT2, (h - 2 * pad) / SQRT2
     if kind == "rounded":
@@ -267,7 +270,7 @@ def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Imag
         em = max(8, px(CAP_MM, dpi))
         fixed = False
     pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
-    inner_w, inner_h = _inner(kind, w, h, pad)
+    inner_w, inner_h = _inner(kind, w, h, pad, st.get("spike_depth"))
     scale_x = max(0.3, min(3.0, float(st.get("scale_x") or 1.0)))
     for _ in range(10):
         image = _vertical(line, st, face, em, inner_h, fill) if vertical else _horizontal(line, st, face, em, inner_w, fill)
@@ -277,7 +280,7 @@ def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Imag
             break
         em = max(8, int(em * 0.9))
         pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
-        inner_w, inner_h = _inner(kind, w, h, pad)
+        inner_w, inner_h = _inner(kind, w, h, pad, st.get("spike_depth"))
     if st.get("gradient"):
         image = gradient_letters(image, st["gradient"])
     if st.get("fill_png"):

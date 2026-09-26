@@ -281,6 +281,25 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### M3 fixes (from the Windows test report)
+
+- `resolve_ticket {project, ticket_id, note}` (tool, and the op of the same name): the agent closes a person's fix
+  instruction it has done (kind fix, assignee agent only; approval requests and ask_human questions stay the
+  person's). The ticket keeps `resolved_by`, `resolved_note`; a person reopens it with `genko studio reopen-ticket`.
+- `next`: a page-level instruction on a page whose name is approved is a `fix_page` item; `fix_panel` items list their
+  `tickets`.
+- Refusals come back in Japanese where the wording is known (the policy, strict_gates, person-only ops); the
+  original English is in `detail`.
+- `inspect snapshot` pages list `effects` (id, kind, frame_id, params) for `edit_effect`.
+- `add_stroke` reports `{warning: "outside_panels"}` in `results` when the line lies in no panel (it would be cut
+  away); `set_layer panel_clip:false` lets a layer run outside.
+- `finish_page` aims focus lines and flashes at the faces reported with `report_regions` (the middle of their box,
+  the clear centre around them); with no faces it says so in its notes.
+- Shout balloons are sized for their spikes (letters fit inside the valleys); `balloon_overflow` measures the same way.
+- Timelapse `frames` is the number of pictures in the file (the same picture twice in a row is one, shown longer);
+  `recorded` is how many were recorded.
+- `undo` works on books saved on Windows (the journal compares the saved bytes, whatever the line ends).
+
 ### M1 fixes (from the Hermes test report)
 
 - `check` returns its findings in `checks` (as `preflight` does); `issues` stays the reply's own tool problems.
