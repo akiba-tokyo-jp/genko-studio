@@ -101,6 +101,12 @@ def check(episode: Episode, project: Path, *, allow_fixture: bool = False, force
                     (warnings if force else errors).append(issue)
             cand = _candidate_for(page, layer)
             origin = (cand or {}).get("origin") or {}
+            if (cand or {}).get("upscaled"):  # (enlarged: prints at size, but nothing more was drawn)
+                up = cand["upscaled"]
+                if dpi_table and dpi_table[-1].get("frame_id") == layer.frame_id:
+                    dpi_table[-1]["upscaled"] = up.get("scale")
+                warnings.append(warning("upscaled", lwhere, f"{page.index} ページのコマ {layer.frame_id} の絵は {up.get('scale')} 倍に拡大したもの"
+                                        f"（{up.get('method')}。描き込みは元の大きさのまま）"))
             if origin.get("kind") == "fixture":
                 issue = (warning if allow_fixture else error)(
                     "fixture_image", lwhere, f"{page.index} ページに試験用の画像（fixture）がある", "本番では使えない。--allow-fixture で通す")

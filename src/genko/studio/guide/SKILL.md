@@ -15,6 +15,13 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 1. `mcp__genko__projects` でプロジェクトを確かめる。無ければ `mcp__genko__create_project`（例: name `summer.genko`、pages 8）。
 2. `mcp__genko__inspect` を `target: "rules"` で呼び、ネームの規則を読む。`target: "schemas"` で入力の形を読む。
 
+## 会話の名前（session）
+
+同じ Genko を複数の会話（Telegram のスレッドなど）から使うときは、どの道具にも `session` に会話の名前（例 スレッド番号 `"9204"`）を渡す。
+変更は `ai:<名前>/<session>` で記録され、`undo` はその会話の変更だけを戻し、`next` の `claim` もその会話のものになる。
+別の会話がこの 15 分に書いた原稿に書き込もうとすると、一度だけ `code: "book_in_use"` で止まる（書き込まない）。
+人に確かめてから同じ呼び出しをもう一度すれば通る。別々に進めるなら、原稿を複製して使う。
+
 ## ループ
 
 1. `mcp__genko__next` で次の作業を1つ取る（他のエージェントと並行して動くときは `claim: true`）。`tools` に使う道具の目安がある。
@@ -73,8 +80,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - `fix_page`: ネーム承認後のページへの人間の指示。`apply_ops` で直してから `resolve_ticket` で閉じる。閉じられるのは人からの直しの指示だけ（承認の依頼や質問は人が閉じる）。人は `genko studio reopen-ticket` で開き直せる。
 - `report_regions`: 採用した絵の顔と人物の位置を `mcp__genko__report_regions` で報告する（`box01` は画像の中の 0..1 の `[x, y, 幅, 高さ]`）。
   人物がいない絵なら `apply_ops` の `record_review`（`kind: "regions"`、`frame_id`、`input_hash` に採用中の候補 id）。
-- `upscale_panel`: 画像ツールに高解像度化があれば `generation_request`（`mode: "upscale"`）で作り直して取り込み、採用し直す。
-  無ければ `record_review`（`kind: "upscale"`、`input_hash` に採用中の候補 id）で理由を残す。
+- `upscale_panel`: 採用した絵が印刷の解像度に足りない。`mcp__genko__upscale`（`page`・`frame_id`、`method` は `inspect` の `upscalers`、既定 `genko`）で拡大した候補を作り、`adopt` で置き直す。
+  画像ツールに高解像度化があれば `generation_request`（`mode: "upscale"`）でもよい。拡大しないなら `record_review`（`kind: "upscale"`、`input_hash` に採用中の候補 id）で理由を残す。
 - `finish_page`: `mcp__genko__finish_page` を `commit: false` で見て（顔にかかる台詞の移動、効果）、よければ `commit: true`。
 - 線をくっきりさせたいコマは `mcp__genko__derive`（`kind: "lineart"`）で採用中の絵から線を抜き出し、`adopt`（`to: "ink"`）で絵の上に置く。
   モノクロの原稿では、グレーの絵は印刷のときに Genko が網点に変える。画像はグレースケールで、トーンを描き込みすぎずに作る。
@@ -119,6 +126,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 点検: `mcp__genko__check` で、人の「入稿前の点検」と同じ問題の一覧を受け取る（`preflight` の結果の `checks` にも入る）。
 - 取り消し: `mcp__genko__undo` で自分の最後の変更を取り消す。最後の変更が人のもの・承認が変わる・`project.json` が Genko の外で書き換えられた、のどれかなら断る。
 - 書き出し: `mcp__genko__export`（`format`: pdf・tiff・png・cmyk・layers・psd・pack・epub・kindle・strip・webtoon・sns・timelapse、`pages`、`dpi`、`area`: paper・bleed・trim）。承認は要らない。書き出し先は原稿の `exports/`。
+  40 秒で終わらない書き出し（600 dpi の PDF・PNG・PSD など）は `job` を返す。書き出しは続いているので、1〜5 分おいて `mcp__genko__export_status`（`job`）で結果（`result` の `files`）を取る。`upscale` の `job` も同じ。
   - `cmyk`（CMYK の TIFF）と pdf の `color: "cmyk"` は、`icc` に印刷所の CMYK プロファイル（.icc のパス）を渡すとそれで変換する。無ければ黒は K 版だけ・総インキ量 320% 以内。`color: "gray"` も。
   - `layers` はレイヤーを 1 枚ずつ透明な PNG に。`kindle` は Kindle 用の固定レイアウト（`long_edge` 既定 2560）。
   - `timelapse` は `set_timelapse` で記録した制作過程（`movie`: webp・gif・png・mp4、`fps`、`seconds`、`pages` は 1 ページだけ）。

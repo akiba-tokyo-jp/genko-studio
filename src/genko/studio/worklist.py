@@ -168,6 +168,11 @@ def _art_items(episode: Episode, page, requested: set, requested_sheets: set, pr
                 waiting += 1
                 out.append(item("report_regions", "採用した絵の顔と人物の位置をまだ報告していない（写植の顔よけに使う）",
                                 ["render", "report_regions"], page.index, **target))
+                continue
+            small = _upscale_items(episode, page, project, frame.id)  # (before the art is shown for approval)
+            if small:
+                waiting += 1
+                out.extend(small)
             continue
         waiting += 1
         cast = [c.get("id") for c in panel.get("characters", []) if isinstance(c, dict)]
@@ -216,28 +221,37 @@ def _art_items(episode: Episode, page, requested: set, requested_sheets: set, pr
     return out
 
 
-def _finish_items(episode: Episode, page, project: Path | None) -> list[dict]:
+def _upscale_items(episode: Episode, page, project: Path | None, frame_id: str | None = None) -> list[dict]:
+    """Adopted art below the print resolution (unless it was enlarged or a reason was recorded)."""
     out: list[dict] = []
-    if project is not None:
-        from genko.assets import AssetStore
-        from genko.studio.preflight import MIN_DPI, art_layers, layer_dpi
+    if project is None:
+        return out
+    from genko.assets import AssetStore
+    from genko.studio.preflight import MIN_DPI, art_layers, layer_dpi
 
-        store = AssetStore(project)
-        for layer in art_layers(page):
-            dpi = layer_dpi(episode, page, layer, store)
-            if dpi is None or dpi >= MIN_DPI or not layer.frame_id:
-                continue
-            try:
-                panel = page._find(layer.frame_id).panel or {}
-            except (KeyError, IndexError):
-                continue
-            adopted = (panel.get("adopted") or {}).get("art")
-            review = (panel.get("reviews") or {}).get("upscale")
-            if review and review.get("input_hash") == adopted:
-                continue
-            out.append(item("upscale_panel", f"採用した絵の実効解像度が {dpi:.0f} dpi（{MIN_DPI} 未満）",
-                            ["generation_request", "import_images", "adopt", "derive", "record_review"], page.index,
-                            frame_id=layer.frame_id, dpi=dpi, input_hash=str(adopted)))
+    store = AssetStore(project)
+    for layer in art_layers(page):
+        if frame_id is not None and layer.frame_id != frame_id:
+            continue
+        dpi = layer_dpi(episode, page, layer, store)
+        if dpi is None or dpi >= MIN_DPI or not layer.frame_id:
+            continue
+        try:
+            panel = page._find(layer.frame_id).panel or {}
+        except (KeyError, IndexError):
+            continue
+        adopted = (panel.get("adopted") or {}).get("art")
+        review = (panel.get("reviews") or {}).get("upscale")
+        if review and review.get("input_hash") == adopted:
+            continue
+        out.append(item("upscale_panel", f"採用した絵の実効解像度が {dpi:.0f} dpi（{MIN_DPI} 未満）。upscale で拡大して採用し直す",
+                        ["upscale", "adopt", "generation_request", "import_images", "record_review"], page.index,
+                        frame_id=layer.frame_id, dpi=dpi, input_hash=str(adopted)))
+    return out
+
+
+def _finish_items(episode: Episode, page, project: Path | None) -> list[dict]:
+    out = _upscale_items(episode, page, project)
     if page.stage != "finish":
         out.append(item("finish_page", "作画は承認済み。仕上げ（台詞の顔よけ、効果、finish へ）", ["finish_page", "render"], page.index))
     return out

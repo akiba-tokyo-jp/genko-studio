@@ -24,6 +24,7 @@ def _parser() -> argparse.ArgumentParser:
         p = sub.add_parser(name, help=help_text)
         p.add_argument("project", type=Path)
         p.add_argument("--agent", default="ai:cli", help="actor for agent tools (ai:<name>)")
+        p.add_argument("--session", default=None, help="the conversation's own name: changes are recorded as <agent>/<session>")
         return p
 
     init = sub.add_parser("init", help="Create a project (B4 mono by default)")
@@ -143,6 +144,13 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--allow-fixture", action="store_true", help="let test images through (never for real books)")
     export.add_argument("--force", action="store_true", help="export even below the resolution threshold")
     export.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
+    ups = sub.add_parser("upscaler", help="(human) Upscaler programs on this computer the agent's upscale tool may run")
+    ups.add_argument("action", choices=["list", "add", "remove"])
+    ups.add_argument("name", nargs="?")
+    ups.add_argument("--command", dest="command_line", help='add: the command, with {in} {out} and {scale}, e.g. '
+                     '"realesrgan-ncnn-vulkan -i {in} -o {out} -s {scale}"')
+    ups.add_argument("--scales", default="", help="add: the enlargements it can do, e.g. 2,4")
+    ups.add_argument("--label", default="")
     tools = sub.add_parser("tools", help="Image tools the agent uses (tools.json in the config dir)")
     tools.add_argument("action", choices=["list", "set", "remove", "example"])
     tools.add_argument("tool_id", nargs="?")
@@ -188,6 +196,8 @@ def main(argv: list[str]) -> int:
 def _run(args: argparse.Namespace) -> int:
     if args.cmd == "tools":
         return _tools(args)
+    if args.cmd == "upscaler":
+        return _upscaler(args)
     if args.cmd == "eval-atari":
         from genko.studio import evaluate
 
@@ -242,7 +252,12 @@ def _run(args: argparse.Namespace) -> int:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(review_html(path), encoding="utf-8")
         return _emit({"ok": True, "path": str(args.out)})
-    service = StudioService(path.parent, getattr(args, "agent", "ai:cli"))
+    from genko.studio.presence import actor_for
+
+    try:
+        service = StudioService(path.parent, actor_for(getattr(args, "agent", "ai:cli"), getattr(args, "session", None)))
+    except ValueError as exc:
+        return _emit({"ok": False, "error": str(exc)})
     name = path.name
     result: ToolResult
     if args.cmd == "init":
@@ -303,6 +318,25 @@ def _tools(args: argparse.Namespace) -> int:
         return _emit({"ok": tools_registry.remove(args.tool_id)})
     spec = _load(args.file) if args.file else tools_registry.EXAMPLE.get(args.tool_id, tools_registry.GENERIC)
     return _emit({"ok": True, "tool": tools_registry.set_tool(args.tool_id, spec)})
+
+
+def _upscaler(args: argparse.Namespace) -> int:
+    from genko import upscale
+
+    if args.action == "list":
+        return _emit({"ok": True, "upscalers": upscale.available(), "registered": upscale.registered()})
+    if not args.name:
+        return _emit({"ok": False, "error": "名前が要る"})
+    if args.action == "remove":
+        return _emit({"ok": upscale.unregister(args.name)})
+    if not args.command_line:
+        return _emit({"ok": False, "error": "--command が要る"})
+    try:
+        scales = [float(v) for v in args.scales.split(",") if v.strip()]
+        spec = upscale.register(args.name, args.command_line, scales, args.label)
+    except ValueError as exc:
+        return _emit({"ok": False, "error": str(exc)})
+    return _emit({"ok": True, "name": args.name, "upscaler": spec})
 
 
 def mcp_main(argv: list[str]) -> int:

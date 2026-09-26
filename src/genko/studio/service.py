@@ -70,7 +70,7 @@ AGENT_TOOLS = frozenset({
     "record_review", "request_approval", "tickets", "generation_request", "import_images", "candidates",
     "review_candidates", "adopt", "request_fix", "report_regions", "finish_page", "preflight", "export_proof", "ask_human",
     "review_page", "derive", "import_name", "analyze_name", "propose_lines", "proposals", "undo", "export", "check",
-    "resolve_ticket",
+    "resolve_ticket", "export_status", "upscale",
 })
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
@@ -217,6 +217,8 @@ class StudioService:
             return ToolResult(True, {"materials": _materials_list()})
         if target == "fonts":
             return ToolResult(True, {"fonts": _fonts_list()})
+        if target == "upscalers":
+            return self.upscalers()
         if target == "plugins":
             from genko import plugins
 
@@ -242,7 +244,7 @@ class StudioService:
                 return ToolResult(True, self._page_brief(episode, page))
             return ToolResult(True, _panel_brief(episode, page, frame_id))
         return fail(f"target {target} はない（bible / script / page / panel / studio / schemas / rules / snapshot / "
-                    "materials / fonts / brushes）", "unknown_target", "/target")
+                    "materials / fonts / brushes / plugins / upscalers）", "unknown_target", "/target")
 
     def render(self, project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None,
                kind: str | None = None, candidate_id: str | None = None, layer_id: str | None = None) -> ToolResult:
@@ -522,7 +524,36 @@ class StudioService:
     def export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                spreads: bool = False, color: str = "rgb", icc: str | None = None, fps: float = 12,
-               seconds: float | None = None, movie: str = "webp") -> ToolResult:
+               seconds: float | None = None, movie: str = "webp", background: bool = False) -> ToolResult:
+        """background: run as a job (the reply within a little while, else a job id for export_status)."""
+        args = (project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc, fps, seconds, movie)
+        if background:
+            return self._job(project, "export", lambda: self._export(*args))
+        return self._export(*args)
+
+    def export_status(self, project: str, job: str) -> ToolResult:
+        """A background export's state; when it is done, its reply is in result."""
+        from genko.studio import jobs
+
+        record = jobs.status(self.project_path(project), job)
+        if not record.get("ok"):
+            return fail(record["error"], "no_job", "/job")
+        files = list((record.get("result") or {}).get("files") or [])
+        return ToolResult(True, {k: v for k, v in record.items() if k != "ok"}, files=files)
+
+    def _job(self, project: str, kind: str, work) -> ToolResult:
+        from genko.studio import jobs
+
+        reply = jobs.start(self.project_path(project), kind, lambda: work().to_dict(), actor=self.actor)
+        if not reply.get("ok"):
+            return ToolResult(False, {k: v for k, v in reply.items() if k not in ("ok", "issues", "files")})
+        return ToolResult(True, {k: v for k, v in reply.items() if k not in ("ok", "issues", "files")},
+                          files=list(reply.get("files") or []))
+
+    def _export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
+                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
+                spreads: bool = False, color: str = "rgb", icc: str | None = None, fps: float = 12,
+                seconds: float | None = None, movie: str = "webp") -> ToolResult:
         """Write the book (or some pages) in any format into <project>/exports/<time>_<format>/, as a person
         can from the app. Not the official export (that one is recorded as an approval and is for people).
         format timelapse: the recorded making-of as a moving picture (movie webp | gif | png | mp4)."""
@@ -580,7 +611,9 @@ class StudioService:
             return fail(str(result.get("error") or "書き出せなかった"), "export_failed", "/")
         return ToolResult(True, {"folder": str(out), "files": result["files"]}, files=result["files"])
 
-    def export_proof(self, project: str, format: str = "pdf") -> ToolResult:  # noqa: A002
+    def export_proof(self, project: str, format: str = "pdf", background: bool = False) -> ToolResult:  # noqa: A002
+        if background:
+            return self._job(project, "export_proof", lambda: self.export_proof(project, format))
         from genko.studio import preflight
 
         path = self.project_path(project)
@@ -636,6 +669,82 @@ class StudioService:
         ink_share = sum(layer.split()[3].histogram()[128:]) / max(1, layer.width * layer.height)
         return ToolResult(True, {"candidate": cand_id, "kind": kind, "parent": source_id, "ink_share": round(ink_share, 4),
                                  "adopt": {"candidate_id": cand_id, "to": "ink"}}, images=[_png(preview)])
+
+    def upscale(self, project: str, page: int, frame_id: str, candidate_id: str | None = None, scale: float | None = None,
+                method: str = "genko", background: bool = False) -> ToolResult:
+        """Enlarge a panel's art (default the adopted art) into a new candidate marked as enlarged. method: "genko"
+        (Genko's own) or an upscaler the person registered. scale: default enough for the book's dpi (4 at most)."""
+        if background:
+            return self._job(project, "upscale", lambda: self.upscale(project, page, frame_id, candidate_id, scale, method))
+        from genko import upscale as up
+        from genko.studio.jsonutil import content_hash
+        from genko.studio.preflight import art_layers, layer_dpi
+
+        path = self.project_path(project)
+        episode = load_episode(path)
+        target = next((p for p in episode.pages if p.index == page), None)
+        if target is None:
+            return fail(f"{page} ページはない", "no_page", "/page")
+        try:
+            panel = target._find(str(frame_id)).panel or {}
+        except (KeyError, IndexError):
+            return fail(f"コマ {frame_id} はない", "no_frame", "/frame_id")
+        source_id = candidate_id or (panel.get("adopted") or {}).get("art")
+        source = next((c for c in panel.get("candidates", []) if c.get("id") == source_id), None)
+        if source is None:
+            return fail("元の候補が無い（candidate_id を渡すか、先に採用する）", "no_candidate", "/candidate_id")
+        if method != up.BUILTIN and method not in up.registered():
+            names = ", ".join(a["name"] for a in up.available())
+            return fail(f"高解像度化の道具 {method} は無い（使えるもの: {names}。道具の登録は人が genko studio upscaler add で行う）",
+                        "no_upscaler", "/method")
+        store = AssetStore(path)
+        data = store.get_bytes(source["asset"], ".png")
+        if data is None:
+            return fail(f"候補 {source_id} の画像が assets/ に無い", "asset_missing", "/candidate_id")
+        wanted = float(episode.spec.dpi or 600)
+        now = None
+        layer = next((la for la in art_layers(target) if la.frame_id == frame_id and (la.source or {}).get("candidate") == source_id), None)
+        if layer is not None:
+            now = layer_dpi(episode, target, layer, store)
+        if scale is None:
+            if not now:
+                return fail("採用していない候補の倍率は決められない（scale を渡す）", "scale_required", "/scale")
+            scale = min(up.MAX_SCALE, max(1.0, round(wanted / now + 0.049, 1)))
+        from genko.ops import MAX_IMAGE_PIXELS
+
+        image = Image.open(io.BytesIO(data))
+        image.load()
+        if image.width * image.height * float(scale) ** 2 > MAX_IMAGE_PIXELS:
+            return fail(f"拡大すると大きすぎる（{image.width}x{image.height} の {scale} 倍）", "too_large", "/scale")
+        try:
+            big = up.enlarge(image, float(scale), method)
+        except ValueError as exc:
+            return fail(str(exc), "upscale_failed", "/method")
+        buf = io.BytesIO()
+        big.save(buf, format="PNG")
+        ref = store.put_bytes(buf.getvalue(), ".png")
+        cand_id = "cd_" + content_hash({"upscale": method, "from": source["asset"], "scale": scale})[7:17]
+        marker = {"from": source_id, "from_px": list(image.size), "scale": float(scale), "method": method}
+        item = {"id": cand_id, "asset": ref, "px": list(big.size), "mode": "upscale", "parent": source_id, "upscaled": marker,
+                **({"mapping": source["mapping"]} if source.get("mapping") else {}),
+                "origin": {"kind": "genko", "tool_id": f"genko:upscale:{method}", "params": {"scale": float(scale)}}}
+        if not any(c.get("id") == cand_id for c in panel.get("candidates", [])):
+            result = self._ops(project, [{"op": "import_candidates", "page": page, "frame_id": frame_id, "candidates": [item]}])
+            if not result.ok:
+                return result
+        after = round(now * float(scale), 1) if now else None
+        preview = big.convert("RGB")
+        preview.thumbnail((512, 512))
+        return ToolResult(True, {"candidate": cand_id, "parent": source_id, "px": list(big.size), "scale": float(scale),
+                                 "method": method, "dpi_before": now, "dpi_after": after,
+                                 "adopt": {"candidate_id": cand_id, "page": page, "frame_id": frame_id},
+                                 "note": "拡大しただけで描き込みは増えない。作画の承認の後に採用すると、承認は取り直しになる"},
+                          images=[_png(preview)])
+
+    def upscalers(self) -> ToolResult:
+        from genko import upscale as up
+
+        return ToolResult(True, {"upscalers": up.available()})
 
     # --- hand-drawn names (atari) ---------------------------------------------------------------
 

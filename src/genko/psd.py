@@ -47,6 +47,55 @@ def _raw(channel: Image.Image) -> bytes:
     return struct.pack(">H", 0) + channel.tobytes()
 
 
+def _packbits_rows(pixels) -> tuple:
+    """PackBits (PSD compression 1) of each row of a 2-D uint8 array, done with numpy: (the rows' byte counts,
+    the packed bytes). Runs of 3 or more become repeat packets, the rest literal packets, 128 bytes at most each."""
+    import numpy as np
+
+    height, width = pixels.shape
+    if height > 1024:  # (a band of rows at a time keeps the index arrays small)
+        parts = [_packbits_rows(pixels[top:top + 1024]) for top in range(0, height, 1024)]
+        return np.concatenate([c for c, _ in parts]).astype(">u2"), b"".join(d for _, d in parts)
+    flat = np.ascontiguousarray(pixels).reshape(-1)
+    starts = np.ones(flat.size, dtype=bool)
+    starts[1:] = flat[1:] != flat[:-1]
+    starts[::width] = True  # (a run never crosses a row)
+    run_start = np.flatnonzero(starts)
+    run_len = np.diff(np.append(run_start, flat.size))
+    long_run = run_len >= 3
+    first = np.ones(run_start.size, dtype=bool)
+    first[1:] = long_run[1:] | long_run[:-1] | (run_start[1:] % width == 0)
+    seg_start = run_start[first]
+    seg_len = np.add.reduceat(run_len, np.flatnonzero(first))
+    seg_rep = long_run[first]
+    chunks = (seg_len + 127) // 128
+    pk_seg = np.repeat(np.arange(seg_start.size), chunks)
+    within = np.arange(pk_seg.size) - np.repeat(np.cumsum(chunks) - chunks, chunks)
+    pk_start = seg_start[pk_seg] + within * 128
+    pk_len = np.minimum(128, seg_len[pk_seg] - within * 128)
+    pk_rep = seg_rep[pk_seg] & (pk_len >= 2)
+    size = np.where(pk_rep, 2, pk_len + 1)
+    offset = np.cumsum(size) - size
+    out = np.empty(int(size.sum()), dtype=np.uint8)
+    out[offset] = np.where(pk_rep, (257 - pk_len) & 0xFF, pk_len - 1).astype(np.uint8)
+    out[offset[pk_rep] + 1] = flat[pk_start[pk_rep]]
+    lit = ~pk_rep
+    lit_len = pk_len[lit]
+    src = np.repeat(pk_start[lit] - np.cumsum(lit_len) + lit_len, lit_len) + np.arange(int(lit_len.sum()))
+    dst = np.repeat(offset[lit] + 1 - pk_start[lit], lit_len) + src
+    out[dst] = flat[src]
+    counts = np.bincount(pk_start // width, weights=size, minlength=height).astype(">u2")
+    return counts, out.tobytes()
+
+
+def _rle(channel: Image.Image) -> bytes:
+    """A layer's channel, PackBits-compressed (a plain area costs a few bytes a row, not its width)."""
+    import numpy as np
+
+    counts, packed = _packbits_rows(np.asarray(channel.convert("L")))
+    return struct.pack(">H", 1) + counts.tobytes() + packed
+
+
 def _layer_records(layers: list, size: tuple[int, int]) -> bytes:
     """Layers as (name, image) or (name, image, {opacity, visible, blend, clip, section}); section 1 starts
     (the top of) a folder and 3 ends it (its bottom), as Photoshop writes them."""
@@ -66,12 +115,12 @@ def _layer_records(layers: list, size: tuple[int, int]) -> bytes:
             crop = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
         r, g, b, a = crop.split()
         records += struct.pack(">iiii", top, left, bottom, right)
-        channels = [(-1, _raw(a)), (0, _raw(r)), (1, _raw(g)), (2, _raw(b))]
+        channels = [(-1, _rle(a)), (0, _rle(r)), (1, _rle(g)), (2, _rle(b))]
         mask = meta.get("mask")  # (an L picture over the whole canvas: white shows)
         mask_data = struct.pack(">I", 0)
         if mask is not None:
             mask = mask.convert("L").resize(size)
-            channels.append((-2, _raw(mask)))
+            channels.append((-2, _rle(mask)))
             mask_data = struct.pack(">I", 20) + struct.pack(">iiii", 0, 0, size[1], size[0]) + bytes([255, 0, 0, 0])
         records += struct.pack(">H", len(channels))
         for cid, packed in channels:
@@ -102,7 +151,10 @@ def write_psd(path: Path, merged: Image.Image, layers: list[tuple[str, Image.Ima
     width, height = rgb.size
     header = b"8BPS" + struct.pack(">H", 1) + (b"\x00" * 6) + struct.pack(">HIIHH", 3, height, width, 8, 3)
     body = header + struct.pack(">I", 0) + _resources(dpi) + _layer_records(layers, rgb.size)
-    body += struct.pack(">H", 0) + b"".join(channel.tobytes() for channel in rgb.split())
+    import numpy as np
+
+    packed = [_packbits_rows(np.asarray(channel)) for channel in rgb.split()]  # (the merged picture: RLE, all rows' counts first)
+    body += struct.pack(">H", 1) + b"".join(c.tobytes() for c, _ in packed) + b"".join(d for _, d in packed)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(body)

@@ -281,6 +281,27 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### M2 (group B of the Hermes report)
+
+- Every MCP tool takes `session` (the conversation's own name, e.g. a Telegram thread id; 1–40 of A-Z a-z 0-9 _ . : @ -).
+  Changes, the tool log and the audit record `<agent>/<session>`; `undo` takes back only that conversation's changes;
+  `next claim` leases are per conversation. `genko studio call … --session` does the same from the CLI.
+- A write (a writing tool, or commit=true) to a book another agent or conversation wrote in the last 15 minutes is held
+  back once: `{ok: false, code: "book_in_use", others: [{actor, minutes_ago}], you}`. The same call again goes through
+  (studio/presence.json keeps who wrote when, and whom each has been told about).
+- `export`, `export_proof` and `upscale` over MCP wait 40 seconds; longer work goes on in the server and the reply is
+  `{job, status: "running"}`. `export_status {project, job}` → `{status: running | done | failed | lost, seconds,
+  result}` (studio/jobs/<job>.json). A reply that came in time also carries its `job`.
+- PSD files are PackBits-compressed (layers and the merged picture): a 600 dpi B4 page is tens of MB, not ~600 MB. The
+  line detection of the mono finish is several times faster at 600 dpi.
+- `upscale {project, page, frame_id, candidate_id?, scale?, method?}` enlarges the adopted art (or a candidate) into a
+  new candidate (`mode: "upscale"`, `upscaled: {from, from_px, scale, method}`, origin kind genko). method `genko`
+  (Lanczos and firmed line edges) or an upscaler program the person registered (`genko studio upscaler add NAME
+  --command "… {in} {out} {scale}"`; `inspect {target: "upscalers"}` lists them; agents cannot register one). The
+  default scale reaches the book's dpi, 4× at most. Adopting it after the art approval asks for the approval again.
+  preflight warns `upscaled` for enlarged art and marks it in its `dpi` table. `upscale_panel` now comes before the art
+  approval request (and still after it, for art approved small).
+
 ### M3 fixes (from the Windows test report)
 
 - `resolve_ticket {project, ticket_id, note}` (tool, and the op of the same name): the agent closes a person's fix

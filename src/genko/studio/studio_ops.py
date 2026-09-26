@@ -886,6 +886,8 @@ def _import_candidates(episode: Episode, op: dict, agent: str) -> None:
             "status": "candidate",
             **({"metrics": item["metrics"]} if isinstance(item.get("metrics"), dict) else {}),
             **({"face_box01": [float(v) for v in item["face_box01"]]} if item.get("face_box01") else {}),
+            **({"mapping": item["mapping"]} if isinstance(item.get("mapping"), dict) else {}),
+            **({"upscaled": item["upscaled"]} if isinstance(item.get("upscaled"), dict) else {}),
         })
     if target.get("character_id") or target.get("location_id"):
         key = "character_candidates" if target.get("character_id") else "location_candidates"

@@ -17,7 +17,7 @@ import math
 from dataclasses import dataclass
 from functools import lru_cache
 
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageChops
 
 DEFAULT_STEPS = (0.1, 0.2, 0.3)
 
@@ -125,10 +125,29 @@ def levels(grey: Image.Image, finish: Finish) -> Image.Image:
     return grey.point(lambda v: 0 if v <= lo else (255 if v >= hi else round((v - lo) * 255 / (hi - lo))))
 
 
+def _max_filter(grey: Image.Image, size: int) -> Image.Image:
+    """The brightest value in a size×size square around each pixel (as ImageFilter.MaxFilter), done as a row pass
+    and a column pass: at 600 dpi a square filter is many times slower."""
+    import numpy as np
+
+    pixels = np.asarray(grey.convert("L"))
+    r = size // 2
+    height, width = pixels.shape
+    padded = np.pad(pixels, ((0, 0), (r, r)), mode="edge")
+    rows = padded[:, 0:width].copy()
+    for k in range(1, 2 * r + 1):
+        np.maximum(rows, padded[:, k:k + width], out=rows)
+    padded = np.pad(rows, ((r, r), (0, 0)), mode="edge")
+    out = padded[0:height].copy()
+    for k in range(1, 2 * r + 1):
+        np.maximum(out, padded[k:k + height], out=out)
+    return Image.fromarray(out, "L")
+
+
 def line_mask(grey: Image.Image, finish: Finish, dpi: int) -> Image.Image:
     """255 where a pixel is part of a drawn line: dark, and darker than its neighbourhood."""
     size = max(3, (round(dpi / 100) * 2 + 1))
-    local_max = grey.filter(ImageFilter.MaxFilter(size))
+    local_max = _max_filter(grey, size)
     contrast = ImageChops.subtract(local_max, grey)
     dark = grey.point(lambda v: 255 if v < finish.line_threshold else 0)
     strong = contrast.point(lambda v: 255 if v >= finish.line_contrast else 0)
