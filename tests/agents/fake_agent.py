@@ -175,7 +175,8 @@ class FakeAgent:
         rows = listed["candidates"]
         good = [r for r in rows if r["origin"].get("model") == "fixture-good" and not r["stale"]]
         reviews = [{"candidate_id": r["id"], "score": 0.9 if r in good else 0.1,
-                    "note": "構図がネームに合う" if r in good else "関係ない画像"} for r in rows]
+                    "note": "構図がネームに合う" if r in good else "関係ない画像",
+                    "checks": {"likeness": 0.9 if r in good else 0.1, "hands": "ok", "text": "none", "cut": "none"}} for r in rows]
         await self.tool("review_candidates", page=page, frame_id=frame_id, reviews=reviews)
         compare = await self.tool("render", page=page, frame_id=frame_id, kind="compare", candidate_id=good[-1]["id"], max_px=256)
         assert compare["_images"]

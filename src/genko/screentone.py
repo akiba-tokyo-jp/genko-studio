@@ -182,7 +182,7 @@ def quantize(grey: Image.Image, finish: Finish) -> tuple[Image.Image, list[tuple
 
 
 def finish_gray(grey: Image.Image, finish: Finish, dpi: int, *, screen: bool, origin: tuple[int, int] = (0, 0),
-                faces: Image.Image | None = None) -> Image.Image:
+                faces: Image.Image | None = None, dark: Image.Image | None = None, light: Image.Image | None = None) -> Image.Image:
     """Greyscale art → print (screen=True: only 0 and 255) or proof (quantized greys). `faces` (L, white where a
     face is): their mid greys are lightened, so faces stand out white from a toned picture; their lines stay."""
     grey = grey.convert("L")
@@ -190,11 +190,17 @@ def finish_gray(grey: Image.Image, finish: Finish, dpi: int, *, screen: bool, or
     toned = grey
     if finish.smooth > 0:  # (the picture's own dots and grain would beat against the screen: even them out first)
         toned = grey.filter(ImageFilter.GaussianBlur(max(0.3, float(finish.smooth) * dpi / 600)))
+    lo = finish.black
+    if dark is not None:  # (clothes printed solid black: their darker half goes to black, highlights stay)
+        solid = toned.point(lambda v: 0 if v < 160 else v)
+        toned = Image.composite(solid, toned, dark.convert("L").resize(toned.size))
+    if light is not None:  # (clothes printed white: only their lines and deepest shadows stay)
+        paper = toned.point(lambda v: v if v <= lo else 255)
+        toned = Image.composite(paper, toned, light.convert("L").resize(toned.size))
     if faces is not None and finish.face_light > 0:
         keep = max(0.0, min(1.0, float(finish.face_light)))
-        lo = finish.black
-        light = toned.point(lambda v: v if v <= lo else round(255 - (255 - v) * (1 - keep)))
-        toned = Image.composite(light, toned, faces.convert("L").resize(toned.size))
+        lifted = toned.point(lambda v: v if v <= lo else round(255 - (255 - v) * (1 - keep)))
+        toned = Image.composite(lifted, toned, faces.convert("L").resize(toned.size))
     proof, regions = quantize(toned, finish)
     if not screen:
         return ImageChops.darker(proof, ImageChops.invert(lines))

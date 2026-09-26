@@ -1,6 +1,7 @@
 """The quality report on the test story: print files, balloons by their speakers, the book's lettering, effect words,
 props and the panel before, lighter faces in the tones, bold panel shapes, and the title page."""
 
+import io
 import json
 import os
 import sys
@@ -294,3 +295,125 @@ def test_a_title_page_sets_the_title_and_author():
     assert [line.text for line in ep.story_for_page(1)][:2] == ["雨の日", "山田"]
     missing = lint.lint_name_plan({**_load("p001.json"), "title": True}, _load("script.json"), {**_load("bible.json"), "author": None}, 4)
     assert any(i.code == "author_missing" for i in missing)
+
+
+# --- the Windows quality round -----------------------------------------------------------------------------------
+
+
+def _adopted(tmp_path):
+    import test_m5 as m5
+
+    agent, project, human = m5._project(tmp_path / "w")
+    m5._sheets(agent, human)
+    frame = load_episode(project).pages[0].leaf_frames()[0]
+    m5._art(agent, project, 1, frame.id)
+    return agent, project, human, frame.id
+
+
+def test_line_art_lies_on_its_picture(tmp_path):
+    agent, project, human, frame_id = _adopted(tmp_path)
+    made = agent.derive("demo.genko", 1, frame_id)
+    assert made.ok, made.to_dict()
+    assert agent.adopt("demo.genko", made.data["candidate"], 1, frame_id, to="ink").ok
+    layers = [layer for layer in load_episode(project).pages[0].layers if layer.frame_id == frame_id and layer.placement_mm]
+    art = next(la for la in layers if (la.source or {}).get("to") == "art").placement_mm
+    ink = next(la for la in layers if (la.source or {}).get("to") == "ink").placement_mm
+    assert (round(art.x, 2), round(art.y, 2), round(art.width, 2)) == (round(ink.x, 2), round(ink.y, 2), round(ink.width, 2))
+
+
+def test_a_grown_balloon_keeps_its_tail_outside_and_the_check_sees_hidden_ones():
+    from genko import checks
+    from genko.ops import tail_hidden
+
+    ep = _book(1)
+    apply_ops(ep, [{"op": "add_line", "page": 1, "text": "よくない！", "id": "s", "balloon": "shout", "x_mm": 60, "y_mm": 60,
+                    "w_mm": 20, "h_mm": 30, "tail": [70, 95]}])
+    apply_ops(ep, [{"op": "move_line", "id": "s", "w_mm": 40, "h_mm": 60}])  # (the tip at 70, 95 is now inside)
+    line = next(item for item in ep.story if item.id == "s")
+    assert not tail_hidden(line, line.tail) and line.tail[1] > 95
+    apply_ops(ep, [{"op": "move_line", "id": "s", "tail": [80, 90]}])  # (put inside on purpose)
+    codes = [i["code"] for i in checks.page_issues(ep, ep.pages[0])]
+    assert "tail_hidden" in codes
+
+
+def test_a_face_cut_by_the_panel_is_pointed_out(tmp_path):
+    from genko import checks
+
+    ep = _book(1)
+    frame = ep.pages[0].leaf_frames()[0]
+    r = frame.rect
+    frame.panel = {"status": "adopted", "regions": [{"kind": "face", "char": "hina", "rect_mm": [r.x - 8, r.y + 20, 30, 30]}]}
+    found = [i for i in checks.page_issues(ep, ep.pages[0]) if i["code"] == "cut_by_panel"]
+    assert found and "[8.0, 0.0]" in found[0]["message"]
+
+
+def test_placed_art_takes_a_mask(tmp_path):
+    agent, project, human, frame_id = _adopted(tmp_path)
+    layer = next(la for la in load_episode(project).pages[0].layers if la.frame_id == frame_id and la.placement_mm)
+    result = agent.apply_ops("demo.genko", [{"op": "set_layer_mask", "page": 1, "id": layer.id,
+                                             "area": {"rect": [0, 0, 60, 60]}}], commit=True)
+    assert result.ok, result.to_dict()
+    again = next(la for la in load_episode(project).pages[0].layers if la.id == layer.id)
+    assert again.mask and again.mask.get("png")  # (kept through saving)
+
+
+def test_heavy_letters_are_thickened_less():
+    from genko.tategaki import bold_px
+
+    assert bold_px(118, "bold") == 3 and bold_px(118, "heavy") == 3  # (5 mm at 600 dpi: was 5 and 11 px)
+    assert bold_px(425, "heavy") <= 13  # (18 mm: dense kanji keep their inside white)
+
+
+def test_ebooks_are_cut_to_the_finished_size_in_flat_greys(tmp_path):
+    import zipfile
+
+    from genko.export import export_epub
+
+    ep = _book(1)
+    book = export_epub(ep, tmp_path / "b.epub", 40)
+    with zipfile.ZipFile(book) as archive:
+        name = next(n for n in archive.namelist() if n.endswith(".png"))
+        with Image.open(io.BytesIO(archive.read(name))) as image:
+            size = image.size
+    t = ep.pages[0].trim_rect_mm()
+    assert abs(size[0] - round(t.width / 25.4 * 40)) <= 2
+
+
+def test_flat_greys_instead_of_dots():
+    from genko import screentone
+
+    grey = Image.new("L", (120, 120), 150)
+    printed = screentone.finish_gray(grey, screentone.Finish(), 300, screen=True)
+    flat = screentone.finish_gray(grey, screentone.Finish(), 300, screen=False)
+    assert set(printed.getdata()) <= {0, 255} and len(set(flat.getdata()) - {0, 255}) >= 1
+
+
+def test_clothes_print_the_same_way_in_every_panel():
+    from genko import screentone
+
+    grey = Image.new("L", (100, 100), 120)
+    dark = Image.new("L", (100, 100), 0)
+    dark.paste(255, (0, 0, 50, 100))
+    out = screentone.finish_gray(grey, screentone.Finish(), 300, screen=True, dark=dark)
+    left = list(out.crop((5, 5, 45, 95)).getdata())
+    assert sum(1 for v in left if v == 0) / len(left) > 0.95  # (solid black where the bible says beta)
+
+
+def test_reviews_of_people_carry_the_checks(tmp_path):
+    import test_m5 as m5
+
+    agent, project, human = m5._project(tmp_path / "r")
+    m5._sheets(agent, human)
+    frame = load_episode(project).pages[0].leaf_frames()[1]
+    req = agent.generation_request("demo.genko", page=1, frame_id=frame.id).data
+    path = Path(req["inbox"]) / "a.png"
+    path.write_bytes(m5.fixture_images.panel(req["request"]["size"]["suggested_px"], req["request"]["figures"]))
+    cand = agent.import_images("demo.genko", req["request"]["id"], [{"file": f"studio/inbox/{req['request']['id']}/a.png",
+                                                                    "origin": {"tool_id": m5.TOOL}}]).data["candidates"][0]
+    bare = agent.review_candidates("demo.genko", 1, frame.id, [{"candidate_id": cand, "score": 0.8, "note": "ok"}])
+    assert not bare.ok and bare.to_dict()["issues"][0]["code"] == "checks_required"
+    full = agent.review_candidates("demo.genko", 1, frame.id, [{"candidate_id": cand, "score": 0.8, "note": "ok",
+                                                               "checks": {"likeness": 0.7, "hands": "ok", "text": "none", "cut": "none"}}])
+    assert full.ok
+    panel = next(f for f in load_episode(project).pages[0].leaf_frames() if f.id == frame.id).panel
+    assert next(c for c in panel["candidates"] if c["id"] == cand)["review"]["checks"]["likeness"] == 0.7

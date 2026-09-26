@@ -280,20 +280,22 @@ def export_strip(episode: Episode, dest: Path, dpi: int = 150) -> Path:
 KINDLE_LONG_EDGE = 2560  # px: what Amazon asks of comic pages (Kindle Publishing Guidelines, fixed layout)
 
 
-def export_kindle(episode: Episode, dest: Path, long_edge: int = KINDLE_LONG_EDGE, gray: bool | None = None) -> Path:
+def export_kindle(episode: Episode, dest: Path, long_edge: int = KINDLE_LONG_EDGE, gray: bool | None = None,
+                  dots: bool = False) -> Path:
     """A fixed-layout book for Kindle (KDP takes it as it is; Kindle Previewer opens it): every page the same
     size, JPEG, the metadata Kindle reads (comic, right-to-left for manga, the original resolution, no
     margins or gutter). A monochrome book is written in grey."""
     if gray is None:
         gray = getattr(episode.spec, "expression", "mono") == "mono"
-    return export_epub(episode, dest, kindle=True, long_edge=long_edge, gray=gray, jpeg=True)
+    return export_epub(episode, dest, kindle=True, long_edge=long_edge, gray=gray, jpeg=True, dots=dots)
 
 
 def export_epub(episode: Episode, dest: Path, dpi: int = 150, *, kindle: bool = False, long_edge: int | None = None,
-                gray: bool = False, jpeg: bool = False) -> Path:
+                gray: bool = False, jpeg: bool = False, dots: bool = False) -> Path:
     """EPUB 3, fixed layout, one page image per spine item. Right-bound books read right to left. `long_edge`
     scales every page to that many pixels on its long side (the same size for all); `kindle` adds what the
-    Kindle devices read."""
+    Kindle devices read. Pages are cut to the finished size, and the tones drawn as flat greys (a reader scales
+    the page, and scaled dots beat into moiré); `dots` keeps the print's dots."""
     import hashlib
     import io
     import time
@@ -317,10 +319,10 @@ def export_epub(episode: Episode, dest: Path, dpi: int = 150, *, kindle: bool = 
         dpi = max(dpi, int(long_edge / (longest / 25.4)) + 1)
     size = None
     for page, part in covers.reading_order(episode):  # (the front cover first, the back cover last)
-        image = render_page(page, dpi, mode="print", episode=episode)
+        image = render_page(page, dpi, mode="print", episode=episode, dots=dots)
         if (covers.cover_of(page) or {}).get("kind") == "jacket":
             image = covers.front_of(page, image, dpi, episode.binding.value, "裏表紙" if part == "back" else "表紙")
-        elif kindle:  # (a reader shows the finished page: no bleed, no marks)
+        else:  # (a reader shows the finished page: no bleed, no marks, no paper around it)
             image = crop_to(image, page, "trim", dpi)
         if long_edge:
             if size is None:

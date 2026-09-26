@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import io
 import threading
 from pathlib import Path
@@ -61,6 +62,7 @@ def _stroke(
     draw.line(xy, fill=color, width=width, joint="curve")
 
 
+_NO_DOTS: contextvars.ContextVar[bool] = contextvars.ContextVar("genko_no_dots", default=False)  # (screens: greys, no dots)
 _STROKE_CACHE: dict = {}  # (layer id, dpi, size, guide) → (patches' signature, lines' signatures, image); oldest first
 STROKE_CACHE_SIZE = 12
 STROKE_CACHE_PIXELS = 80_000_000  # about 320 MB: a few zoomed-in (fine) layers, or a dozen normal ones
@@ -468,8 +470,9 @@ def _finish_placed(fitted: Image.Image, layer, page: Page, episode: Episode | No
         return out
     style = ((episode.studio.get("style") or {}).get("finish") if episode is not None else None) or {}
     finish = screentone.Finish.from_dict({**style, **(layer.finish or {})})
-    done = screentone.finish_gray(grey, finish, dpi, screen=mode == "print", origin=origin,
-                                  faces=_face_mask(layer, page, fitted.size, dpi, origin))
+    dark, light = _clothes_masks(layer, page, episode, fitted.size, dpi, origin)
+    done = screentone.finish_gray(grey, finish, dpi, screen=mode == "print" and not _NO_DOTS.get(), origin=origin,
+                                  faces=_face_mask(layer, page, fitted.size, dpi, origin), dark=dark, light=light)
     out = done.convert("RGBA")
     out.putalpha(alpha if mode == "proof" else alpha.point(lambda v: 255 if v >= 128 else 0))
     return out
@@ -493,6 +496,39 @@ def _face_mask(layer, page: Page, size: tuple[int, int], dpi: int, origin: tuple
         x0, y0 = mm_to_px(x, dpi) - origin[0], mm_to_px(y, dpi) - origin[1]
         draw.ellipse((x0, y0, x0 + mm_to_px(w, dpi), y0 + mm_to_px(h, dpi)), fill=255)
     return mask.filter(ImageFilter.GaussianBlur(max(1.0, dpi / 100)))
+
+
+def _clothes_masks(layer, page: Page, episode: Episode | None, size: tuple[int, int], dpi: int,
+                   origin: tuple[int, int]) -> tuple[Image.Image | None, Image.Image | None]:
+    """(solid black, white): the reported people whose bible says their clothes print that way, less their faces."""
+    if episode is None or not getattr(layer, "frame_id", None):
+        return None, None
+    values = {c.get("id"): (c.get("look") or {}).get("clothes_value") for c in episode.bible.characters}
+    if not any(v in ("beta", "white") for v in values.values()):
+        return None, None
+    try:
+        panel = page._find(layer.frame_id).panel or {}
+    except (KeyError, IndexError):
+        return None, None
+    regions = [r for r in panel.get("regions", []) if isinstance(r.get("rect_mm"), (list, tuple)) and len(r["rect_mm"]) == 4]
+    out = []
+    for value in ("beta", "white"):
+        bodies = [r["rect_mm"] for r in regions if r.get("kind") in ("person", "body") and values.get(r.get("char")) == value]
+        if not bodies:
+            out.append(None)
+            continue
+        mask = Image.new("L", size, 0)
+        draw = ImageDraw.Draw(mask)
+        for x, y, w, h in bodies:
+            x0, y0 = mm_to_px(x, dpi) - origin[0], mm_to_px(y, dpi) - origin[1]
+            draw.rectangle((x0, y0, x0 + mm_to_px(w, dpi), y0 + mm_to_px(h, dpi)), fill=255)
+        for r in regions:  # (never the faces, nor the hair above them)
+            if r.get("kind") in ("face", "head"):
+                x, y, w, h = r["rect_mm"]
+                x0, y0 = mm_to_px(x - w * 0.15, dpi) - origin[0], mm_to_px(y - h * 0.3, dpi) - origin[1]
+                draw.ellipse((x0, y0, x0 + mm_to_px(w * 1.3, dpi), y0 + mm_to_px(h * 1.45, dpi)), fill=0)
+        out.append(mask.filter(ImageFilter.GaussianBlur(max(1.0, dpi / 150))))
+    return out[0], out[1]
 
 
 def render_frame(page: Page, frame_id: str, working_dpi: int, mode: str = "proof", episode: Episode | None = None) -> Image.Image:
@@ -954,10 +990,18 @@ def render_page(
     onion: bool = True,
     finish: bool | None = None,
     rough: bool = False,
+    dots: bool = True,
 ) -> Image.Image:
     """`finish`: the monochrome print finish (dots and pure black and white). None = by the page
     (mono pages yes, colour pages no); False for screen and colour outputs (webtoon, SNS).
-    `rough`: lines as plain polylines (the screen's first look at a page; never for output)."""
+    `rough`: lines as plain polylines (the screen's first look at a page; never for output).
+    `dots`: False draws the tones as flat greys (e-books: dots scaled by a reader beat into moiré)."""
+    if not dots:
+        token = _NO_DOTS.set(True)
+        try:
+            return render_page(page, working_dpi, mode, episode, crop_marks, onion, finish, rough)
+        finally:
+            _NO_DOTS.reset(token)
     if (getattr(page, "extra", None) or {}).get("anim") and not getattr(page, "_at_frame", False):
         from genko import anim  # (an animation page prints as its first frame, not every cel at once)
 
@@ -998,7 +1042,7 @@ def render_page(
         if _is_tone(layer):  # tones sit in the layer order: a layer above can cover them
             from genko import tones
 
-            rgba = tones.draw_layer(rgba, layer, page, working_dpi, print_mode=mode == "print" and finish)
+            rgba = tones.draw_layer(rgba, layer, page, working_dpi, print_mode=mode == "print" and finish and not _NO_DOTS.get())
             prev_alpha = None
             continue
         if layer.kind == LayerKind.ADJUST:  # a correction layer changes what is under it; it has no picture
@@ -1030,7 +1074,7 @@ def render_page(
                 and not getattr(layer, "screen", None) and _has_colour(raster)):
             # (a picture from a painting app on a monochrome page is finished like placed art: grey and tones)
             raster = _finish_placed(raster, layer, page, episode, working_dpi, mode, (0, 0))
-        if getattr(layer, "screen", None) and mode == "print":  # トーン化: its greys as dots in print
+        if getattr(layer, "screen", None) and mode == "print" and not _NO_DOTS.get():  # トーン化: its greys as dots in print
             from genko import tones
 
             raster = tones.screened(raster, layer.screen, working_dpi)

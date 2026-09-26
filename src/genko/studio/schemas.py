@@ -80,7 +80,7 @@ BIBLE_V1 = more(obj(
             name=STR,
             role=STR,
             age=nullable(INT),
-            look=obj(
+            look=more(obj(
                 hair=STR,
                 hair_value=enum("beta", "tone", "white"),
                 eyes=STR,
@@ -89,6 +89,9 @@ BIBLE_V1 = more(obj(
                 outfits=arr(obj(id=STR, desc=STR)),
                 marks=arr(STR),
                 silhouette=STR,
+            ),
+                # (the clothes in print: beta = solid black, tone = the tones, white = paper; the same in every panel)
+                clothes_value=nullable(enum("beta", "tone", "white")),
             ),
             speech=obj(first_person=STR, tone=STR),
             tokens_en=nullable(STR),

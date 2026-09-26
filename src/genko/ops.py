@@ -689,6 +689,39 @@ def _in_a_panel(page, points, pad: float = 0.0) -> bool:
     return False
 
 
+def tail_hidden(line, tip) -> bool:
+    """Whether a tail's tip lies inside its balloon (an ellipse for the round kinds, the box for the others)."""
+    w, h = float(line.w_mm or 40), float(line.h_mm or 20)
+    cx, cy = float(line.x_mm) + w / 2, float(line.y_mm) + h / 2
+    dx, dy = float(tip[0]) - cx, float(tip[1]) - cy
+    if (line.balloon or "speech") in ("box", "narration", "rounded", "none", "sfx"):
+        return abs(dx) < w / 2 and abs(dy) < h / 2
+    return (dx / (w / 2)) ** 2 + (dy / (h / 2)) ** 2 < 1.0
+
+
+def _tails_outside(line, beyond: float = 3.0) -> None:
+    """Move each tail's tip that the balloon now covers out past its outline, in the same direction."""
+    w, h = float(line.w_mm or 40), float(line.h_mm or 20)
+    cx, cy = float(line.x_mm) + w / 2, float(line.y_mm) + h / 2
+    tails = [dict(t) for t in (line.tails or ([{"to": list(line.tail)}] if line.tail else []))]
+    changed = False
+    for tail in tails:
+        tip = tail.get("to")
+        if not tip or not tail_hidden(line, tip):
+            continue
+        dx, dy = float(tip[0]) - cx, float(tip[1]) - cy
+        if abs(dx) + abs(dy) < 1e-6:
+            dx, dy = 0.0, 1.0
+        length = math.hypot(dx, dy)
+        ux, uy = dx / length, dy / length
+        edge = 1.0 / math.sqrt((ux / (w / 2)) ** 2 + (uy / (h / 2)) ** 2)  # (the outline's distance that way)
+        tail["to"] = [round(cx + ux * (edge + beyond), 2), round(cy + uy * (edge + beyond), 2)]
+        changed = True
+    if changed:
+        line.tails = tails
+        line.tail = tuple(tails[0]["to"])
+
+
 def _frame_contains(page):
     from genko import frames as geo
 
@@ -1456,6 +1489,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             line.tail = tuple(line.tails[0]["to"]) if line.tails else None
         if "balloon" in op:
             line.balloon = _balloon_kind(op["balloon"])
+        if not ("tail" in op or "tails" in op) and any(k in op for k in ("x_mm", "y_mm", "w_mm", "h_mm")):
+            _tails_outside(line)  # (a bigger or moved balloon must not swallow its tail)
         return
 
     if name == "delete_line":
@@ -1932,8 +1967,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
     if name == "set_layer_mask":
         page = _require_page(episode, op)
         layer = _layer_by_id(page, str(op.get("id") or ""))
-        if layer.kind in (LayerKind.FOLDER, LayerKind.PLACED):
-            raise ApplyError("this layer cannot take a mask (a folder or a placed image)")
+        if layer.kind == LayerKind.FOLDER:
+            raise ApplyError("a folder cannot take a mask (mask the layers in it)")
         if op.get("delete"):
             layer.mask = None
             return
@@ -1957,8 +1992,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
     if name == "paint_mask":
         page = _require_page(episode, op)
         layer = _layer_by_id(page, str(op.get("id") or ""))
-        if layer.kind in (LayerKind.FOLDER, LayerKind.PLACED):
-            raise ApplyError("this layer cannot take a mask (a folder or a placed image)")
+        if layer.kind == LayerKind.FOLDER:
+            raise ApplyError("a folder cannot take a mask (mask the layers in it)")
         points = _parse_points(op.get("points") or [])
         if not points:
             raise ApplyError("points needs at least one [x_mm, y_mm] pair")

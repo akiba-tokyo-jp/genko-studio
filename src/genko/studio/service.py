@@ -398,6 +398,33 @@ class StudioService:
         return ToolResult(True, {"candidates": rows}, images=[sheet] if sheet else [])
 
     def review_candidates(self, project: str, page: int, frame_id: str, reviews: list[dict]) -> ToolResult:
+        """Scores and notes for candidates. In a panel with people, each review also answers what Genko cannot see:
+        checks {likeness 0..1 (to the sheets), hands ok|broken|none, text none|some (letters drawn in the picture),
+        cut none|some (a face, hand or head cut by the panel)}."""
+        path = self.project_path(project)
+        episode = load_episode(path)
+        target = next((p for p in episode.pages if p.index == page), None)
+        cast = []
+        if target is not None:
+            try:
+                cast = [c for c in (target._find(str(frame_id)).panel or {}).get("characters", []) if isinstance(c, dict)]
+            except (KeyError, IndexError):
+                cast = []
+        wanted = {"likeness": None, "hands": ("ok", "broken", "none"), "text": ("none", "some"), "cut": ("none", "some")}
+        for i, review in enumerate(reviews or []):
+            checks = review.get("checks") if isinstance(review, dict) else None
+            if not cast:
+                continue
+            if not isinstance(checks, dict):
+                return fail("人物のいるコマの評価には checks {likeness（設定画に似ているか 0〜1）, hands（ok / broken / none）, "
+                            "text（絵の中の文字 none / some）, cut（顔・手・頭が枠で切れる none / some）} が要る", "checks_required",
+                            f"/reviews/{i}/checks")
+            for key, allowed in wanted.items():
+                value = checks.get(key)
+                good = isinstance(value, (int, float)) and 0 <= float(value) <= 1 if allowed is None else value in allowed
+                if not good:
+                    return fail(f"checks.{key} が無いか値が違う（{'0〜1' if allowed is None else ' / '.join(allowed)}）",
+                                "checks_invalid", f"/reviews/{i}/checks/{key}")
         return self._ops(project, [{"op": "review_candidates", "page": page, "frame_id": frame_id, "reviews": reviews}])
 
     def adopt(self, project: str, candidate_id: str, page: int | None = None, frame_id: str | None = None,
@@ -525,9 +552,9 @@ class StudioService:
     def export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
-               seconds: float | None = None, movie: str = "webp", background: bool = False) -> ToolResult:
+               seconds: float | None = None, movie: str = "webp", background: bool = False, dots: bool = False) -> ToolResult:
         """background: run as a job (the reply within a little while, else a job id for export_status)."""
-        args = (project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc, fps, seconds, movie)
+        args = (project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc, fps, seconds, movie, dots)
         if background:
             return self._job(project, "export", lambda: self._export(*args))
         return self._export(*args)
@@ -554,7 +581,7 @@ class StudioService:
     def _export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                 area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                 spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
-                seconds: float | None = None, movie: str = "webp") -> ToolResult:
+                seconds: float | None = None, movie: str = "webp", dots: bool = False) -> ToolResult:
         """Write the book (or some pages) in any format into <project>/exports/<time>_<format>/, as a person
         can from the app. Not the official export (that one is recorded as an approval and is for people).
         format timelapse: the recorded making-of as a moving picture (movie webp | gif | png | mp4)."""
@@ -607,7 +634,7 @@ class StudioService:
         out = path / "exports" / f"{time.strftime('%Y%m%d-%H%M%S')}_{format}"
         result = exporting.run(episode, None, format, out, actor=self.actor, dpi=dpi, width=width, max_height=max_height,
                                long_edge=long_edge, jpeg=jpeg, spreads=spreads, area=area, color=color, icc=icc,
-                               pages=sorted({int(p) for p in pages}) if pages else None)
+                               pages=sorted({int(p) for p in pages}) if pages else None, dots=dots)
         if not result.get("ok"):
             return fail(str(result.get("error") or "書き出せなかった"), "export_failed", "/")
         return ToolResult(True, {"folder": str(out), "files": result["files"]}, files=result["files"])
@@ -660,6 +687,7 @@ class StudioService:
         ref = store.put_bytes(lineart.to_png(layer), ".png")
         cand_id = "cd_" + content_hash({"derive": kind, "from": source["asset"], "params": settings.__dict__})[7:17]
         item = {"id": cand_id, "asset": ref, "px": list(layer.size), "mode": "derive", "parent": source_id,
+                **({"mapping": source["mapping"]} if source.get("mapping") else {}),  # (placed as its parent: lines on lines)
                 "origin": {"kind": "genko", "tool_id": f"genko:{kind}", "params": settings.__dict__}}
         result = self._ops(project, [{"op": "import_candidates", "page": page, "frame_id": frame_id, "candidates": [item]}])
         if not result.ok:

@@ -201,7 +201,9 @@ def build_server(root: Path, actor: str) -> MCPServer:
 
     @tool
     def review_candidates(project: str, page: int, frame_id: str, reviews: list[dict]) -> list:
-        """候補の評価を残す。page と frame_id（どのコマの候補か）は必須。reviews: [{candidate_id, score (0..1), note, fix?}]。"""
+        """候補の評価を残す。page と frame_id（どのコマの候補か）は必須。reviews: [{candidate_id, score (0..1), note, fix?, checks}]。
+        人物のいるコマでは checks が必須: {likeness: 設定画に似ているか 0..1, hands: ok / broken / none, text: 絵の中の文字 none / some,
+        cut: 顔・手・頭が枠で切れる none / some}。Genko は絵を判断できないので、あなたが render と candidates を見て書く。"""
         return call(service.review_candidates, project, page, frame_id, reviews)
 
     @tool
@@ -254,15 +256,16 @@ def build_server(root: Path, actor: str) -> MCPServer:
     def export(project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
-               seconds: float | None = None, movie: str = "webp") -> list:
+               seconds: float | None = None, movie: str = "webp", dots: bool = False) -> list:
         """書き出し（承認は要らない。正式な書き出しは人だけ）: format は pdf / tiff / png / cmyk / layers / psd / pack / epub /
         kindle / strip / webtoon / sns / timelapse / animation。pages でページを選ぶ（例 [3, 4, 5]）。area は paper / bleed / trim。
         pdf・png・tiff の color は auto（既定: モノクロの原稿はグレー、カラーは RGB）/ rgb / cmyk / gray / bitonal（白黒 2 階調）、cmyk と pdf の icc は印刷所の CMYK プロファイル（.icc のパス）。long_edge の既定は kindle 2560・sns 2048。timelapse は記録した制作過程（set_timelapse で記録）を movie（webp / gif / png / mp4）で、fps と
         seconds（全体の長さ）、pages は省略で全ページ（描いた順）か、1 ページだけを [n] で。animation はアニメーションのページ（pages に 1 つ）を movie（gif / webp /
         png / mp4 / frames〔連番 PNG〕）で、width で幅を。書いた先は <原稿>/exports/。
+        epub と kindle は仕上がりで切り、トーンを網点にせずグレーで描く（網点を縮めるとモアレが出る）。dots=true で印刷と同じ網点。
         40 秒で終わらないときは job を返す（書き出しは続いている）。export_status で結果を取る。"""
         return call(service.export, project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc,
-                    fps, seconds, movie, background=True)
+                    fps, seconds, movie, background=True, dots=dots)
 
     @tool
     def export_status(project: str, job: str) -> list:

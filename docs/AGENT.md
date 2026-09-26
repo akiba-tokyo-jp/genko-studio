@@ -281,6 +281,22 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### Windows quality round
+
+- `derive` candidates keep their parent's placement margin (pad_mm): line art lies exactly on its picture; a
+  candidate's own `mapping.pad_mm` survives import.
+- `move_line` that moves or resizes a balloon pushes a swallowed tail tip back outside its outline. `check` reports
+  `tail_hidden` (a tip inside its balloon) and `cut_by_panel` (a reported face or person cut by the panel edge, with
+  the offset that brings it back).
+- Placed art takes `set_layer_mask` / `paint_mask` (kept through saving).
+- `weight` thickens less (bold em/45, heavy em/34): heavy no longer fills dense kanji at large sizes.
+- EPUB and Kindle pages are cut to the finished size and the tones drawn as flat greys (`dots: true` keeps the
+  print's dots); `render_page(dots=False)`.
+- bible characters' `look.clothes_value` (beta | tone | white) prints the reported person's clothes the same way
+  in every panel (faces and hair kept out).
+- `review_candidates` in a panel with people requires `checks` {likeness 0..1, hands ok|broken|none, text
+  none|some, cut none|some}; they are kept on the candidate's review.
+
 ### Quality report (the test story compared with commercial manga)
 
 - Print export: `color` auto (default) writes a monochrome book in grey, losslessly; `bitonal` is 1-bit. PDFs are

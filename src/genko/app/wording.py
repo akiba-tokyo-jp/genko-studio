@@ -253,7 +253,7 @@ _ERRORS: list[tuple[str, object]] = [
     (r"a folder cannot be duplicated", "フォルダは複製できません（中のレイヤーを選んで複製します）"),
     (r"there is no layer below to merge into", "下にレイヤーがないので結合できません"),
     (r"placed images and tones cannot be merged", "配置した画像とトーンのレイヤーは結合できません"),
-    (r"this layer cannot take a mask \(a folder or a placed image\)", "フォルダと配置した画像にはマスクを付けられません"),
+    (r"a folder cannot take a mask.*", "フォルダにはマスクを付けられません（中のレイヤーに付けます）"),
     (r"fill must be show or hide", "マスクは「全部見せる」か「全部隠す」で作ります"),
     (r"points needs at least one \[x_mm, y_mm\] pair", "点が 1 つもありません"),
     # undo, pages, layers

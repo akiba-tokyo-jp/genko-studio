@@ -70,6 +70,13 @@ def page_issues(episode, page) -> list[dict]:
                 out.append(_issue("warning", "text_too_small", page,
                                   f"台詞「{short}」の文字が {size:.1f} mm まで小さくなっている（フキダシを大きくするか、文を短く）",
                                   box, "line", line.id))
+        from genko.ops import tail_hidden
+
+        for tail in (line.tails or ([{"to": list(line.tail)}] if line.tail else [])):
+            if tail.get("to") and tail_hidden(line, tail["to"]):
+                out.append(_issue("warning", "tail_hidden", page, f"台詞「{short}」の尾がフキダシの中に埋もれている（誰の台詞か分からない）。"
+                                  "move_line の tail で先を外に出す", box, "line", line.id))
+    out.extend(_cut_faces(page))
     for i, (a, box_a) in enumerate(placed):
         for b, box_b in placed[i + 1:]:
             group_a, group_b = (a.style or {}).get("group"), (b.style or {}).get("group")
@@ -137,6 +144,36 @@ def page_issues(episode, page) -> list[dict]:
                           "（ペン入れのレイヤーに描くか、レイヤーの「下描き（書き出さない）」を外す）", kind="layer", target_id=hidden[0].id))
     elif not art and not lines and not page.effects:
         out.append(_issue("warning", "empty_page", page, f"{page.index} ページに何も描かれていない"))
+    return out
+
+
+def _cut_faces(page) -> list[dict]:
+    """Reported faces and people that the panel's edge cuts: how far out, and the offset that brings them back."""
+    from genko.placement import clip_box
+
+    out = []
+    for frame in page.leaf_frames():
+        panel = frame.panel or {}
+        box = clip_box(page, frame, "bleed" if frame.bleed else "frame")
+        for region in panel.get("regions", []):
+            rect = region.get("rect_mm")
+            if region.get("kind") not in ("face", "head", "person", "body") or not isinstance(rect, (list, tuple)) or len(rect) != 4:
+                continue
+            x, y, w, h = (float(v) for v in rect)
+            left, top = box.x - x, box.y - y
+            right, bottom = x + w - (box.x + box.width), y + h - (box.y + box.height)
+            worst = max(left, top, right, bottom)
+            face = region.get("kind") in ("face", "head")
+            if worst <= (0.5 if face else max(3.0, 0.15 * max(w, h))):
+                continue
+            dx = (left if left > 0 else 0) - (right if right > 0 else 0)
+            dy = (top if top > 0 else 0) - (bottom if bottom > 0 else 0)
+            who = region.get("char") or ""
+            what = "顔" if face else "人物"
+            out.append(_issue("warning", "cut_by_panel", page,
+                              f"{page.index} ページのコマ {panel.get('slot') or frame.id} で{who}の{what}が枠で {worst:.0f} mm 切れている。"
+                              f"set_placement の offset_mm を今の値から [{dx:.1f}, {dy:.1f}] ずらす（入らなければ scale を下げる）",
+                              (x, y, w, h), "frame", frame.id))
     return out
 
 

@@ -35,7 +35,13 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - `write_bible`: 企画書を書いて `mcp__genko__set_bible`。登場人物の `tokens_en`（英語の見た目の記述）は、絵の依頼にそのまま入るので丁寧に書く。
   - `author`: 作者名（扉に入る）。
   - `lettering`: 作品に合う文字の設定。種類（speech・thought・shout・whisper・narration・sfx・title）ごとに `font`（`inspect` の fonts の key）・`scale`（大きさの倍率）・`weight`。
-    ジャンルと雰囲気で選ぶ（例: シリアスのナレーションは明朝、ギャグやかわいい系は丸ゴシックや手書き風）。空なら台詞と同じ書体。叫びは 1.3 倍・太字、ささやきは 0.8 倍が既定。
+    ジャンルと雰囲気で選ぶ。空なら台詞と同じ書体。叫びは 1.3 倍・太字、ささやきは 0.8 倍が既定。例:
+    - 少年・青年・アクション: 叫び `gothic`、心の声 `maru`、ナレーション `mincho`。
+    - シリアス・ミステリー: ナレーション `mincho`、心の声 `antique`（台詞と同じ）で静かに。
+    - ギャグ・コメディ: 叫び `sfx_pop` か `gothic`、ツッコミも `gothic`、心の声 `maru`、ナレーション `maru`。
+    - かわいい・日常・恋愛: 台詞 `maru`、心の声 `hand`、ナレーション `maru`。
+    `weight: "heavy"` は画数の多い漢字の中の白をつぶしやすい。叫びは太い書体（`gothic`）を選び、`bold` までにする。
+  - 人物の `look.clothes_value`: 服の印刷の仕方（`beta` 黒ベタ・`tone` トーン・`white` 白）。報告した人物の範囲に、どのコマでも同じに効く（黒い服が灰色になったりベタになったりしない）。
   - `props`: 何度も出る小物（id・name・desc・tokens_en）。参照画像は `apply_ops` の `attach_reference`（`target.prop_id`）で付ける。コマの `props` に id を書くと、その参照が絵の依頼に付く。
 - `write_script`: 脚本を書いて `mcp__genko__set_script`。beat ごとに `page` を決める。見せ場（reveal）は偶数ページの先頭、引き（hook）は奇数ページの最後。
 - `plan_page`: `mcp__genko__inspect`（target `page`）でそのページの beat を読み、ネーム計画を書いて `mcp__genko__submit_name`。
@@ -83,7 +89,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - `import_pending`: 依頼済みで画像がまだのコマ。`inbox` に画像を置いて `import_images`。
 - `review_candidates`: `mcp__genko__candidates`（metrics の `rank` が小さいほど目安が良い）と `mcp__genko__render`（`kind: "compare"`、`candidate_id`）で比べる。
   赤い線がネームの構図。構図がネームに合うか、人物が設定画に似ているか、手足の破綻、画内の文字、台詞の場所が空いているかを見て、
-  `review_candidates`（`page` と `frame_id` も必須）で点数（0〜1）とメモを残し、良いものを `mcp__genko__adopt`。どれも駄目なら直しの依頼を作る。
+  `review_candidates`（`page` と `frame_id` も必須）で点数（0〜1）とメモを残し（人物のいるコマは `checks`: `likeness` 設定画に似ているか 0〜1・`hands` ok / broken / none・`text` 絵の中の文字 none / some・`cut` 顔や手が枠で切れる none / some も必須）、良いものを `mcp__genko__adopt`。どれも駄目なら直しの依頼を作る。
   1 コマ 8 枚・直し 2 巡を超えると、そのコマは人間の判断待ちになる。
 - `fix_panel`: 人間の指示（`comments`）どおりに直しの依頼を作る（`instruction` に指示を入れる）。絵を採用し直すとチケットは閉じる。
   絵ではない直し（台詞・線・効果など）なら `apply_ops` で直し、`mcp__genko__resolve_ticket`（`ticket_id` は `tickets` の値、`note` に何をしたか）で閉じる。
@@ -94,6 +100,9 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   画像ツールに高解像度化があれば `generation_request`（`mode: "upscale"`）でもよい。拡大しないなら `record_review`（`kind: "upscale"`、`input_hash` に採用中の候補 id）で理由を残す。
 - `finish_page`: `mcp__genko__finish_page` を `commit: false` で見て（顔にかかる台詞や話していない人の近くの台詞の移動、尾を報告した顔へ、効果・漫符・雨）、よければ `commit: true`。
   報告した顔は、網点が薄くなって白く浮く。
+- `check` の `cut_by_panel` は、報告した顔や人物が枠で切れている所。示された量だけ `set_placement` の `offset_mm` をずらす。
+  `tail_hidden` は尾がフキダシの中に埋もれている所（`move_line` で大きさを変えると尾は外へ出し直される）。
+- 取り込んだ絵のレイヤーにも `set_layer_mask`・`paint_mask` で範囲を付けられる。
 - 線をくっきりさせたいコマは `mcp__genko__derive`（`kind: "lineart"`）で採用中の絵から線を抜き出し、`adopt`（`to: "ink"`）で絵の上に置く。
   モノクロの原稿では、グレーの絵は印刷のときに Genko が網点に変える。画像はグレースケールで、トーンを描き込みすぎずに作る。
 - 効果音はネーム計画の台詞で `balloon: "sfx"` にする（Genko が大きな縁取り文字で描く。画像に描かせない）。
@@ -140,6 +149,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   40 秒で終わらない書き出し（600 dpi の PDF・PNG・PSD など）は `job` を返す。書き出しは続いているので、1〜5 分おいて `mcp__genko__export_status`（`job`）で結果（`result` の `files`）を取る。`upscale` の `job` も同じ。
   - `color` の既定 `auto`: モノクロの原稿はグレー（劣化なし）、カラーは RGB。`bitonal` で白黒 2 階調。PDF には仕上がり線（TrimBox）と裁ち落とし（BleedBox）が入る。
   - `cmyk`（CMYK の TIFF）と pdf の `color: "cmyk"` は、`icc` に印刷所の CMYK プロファイル（.icc のパス）を渡すとそれで変換する。無ければ黒は K 版だけ・総インキ量 320% 以内。`color: "gray"` も。
+  - `epub`・`kindle` は仕上がりで切り、トーンを網点にせずグレーで描く（読むときに縮小されてもモアレが出ない）。印刷と同じ網点にするなら `dots: true`。
   - `layers` はレイヤーを 1 枚ずつ透明な PNG に。`kindle` は Kindle 用の固定レイアウト（`long_edge` 既定 2560）。
   - `timelapse` は `set_timelapse` で記録した制作過程（`movie`: webp・gif・png・mp4、`fps`、`seconds`、`pages` は 1 ページだけ）。
 

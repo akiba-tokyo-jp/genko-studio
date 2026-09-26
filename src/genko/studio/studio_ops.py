@@ -595,7 +595,8 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
             if cand is None:
                 raise _err(f"no candidate {item.get('candidate_id')}")
             if name == "review_candidates":
-                cand["review"] = {"by": agent, "score": item.get("score"), "note": item.get("note", ""), "fix": item.get("fix")}
+                cand["review"] = {"by": agent, "score": item.get("score"), "note": item.get("note", ""), "fix": item.get("fix"),
+                                  **({"checks": dict(item["checks"])} if isinstance(item.get("checks"), dict) else {})}
             else:
                 if item.get("status") not in CANDIDATE_STATUSES:
                     raise _err(f"status must be one of {CANDIDATE_STATUSES}")
@@ -918,7 +919,8 @@ def _import_candidates(episode: Episode, op: dict, agent: str) -> None:
         cand["brief_hash"] = (request or {}).get("brief_hash") or current
         cand["stale"] = cand["brief_hash"] != current
         cand["mapping"] = {"frame_rect_mm": [frame.rect.x, frame.rect.y, frame.rect.width, frame.rect.height],
-                           "pad_mm": float((request or {}).get("pad_mm") or 0.0), "px": cand["px"]}
+                           "pad_mm": float((cand.get("mapping") or {}).get("pad_mm", (request or {}).get("pad_mm") or 0.0) or 0.0),
+                           "px": cand["px"]}  # (a derived or enlarged picture keeps its parent's margin: it lies on it)
     panel.setdefault("candidates", []).extend(new)
     attempts = panel.setdefault("attempts", {"requests": 0, "images": 0, "fix_rounds": 0})
     attempts["images"] += sum(1 for c in new if c["origin"].get("kind") != "genko")  # Genko's own derivations are free

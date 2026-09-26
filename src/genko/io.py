@@ -185,13 +185,13 @@ def _payload(episode: Episode, store: AssetStore) -> dict:
 def _layer_to_v3(layer: Layer, store: AssetStore) -> dict:
     data = _layer_to_dict(layer, strokes=False)
     del data["strokes"], data["raster_relpath"]
+    if layer.mask and layer.mask.get("png"):  # (placed art takes a mask too: the art shows only where it is white)
+        data["mask"] = {"enabled": bool(layer.mask.get("enabled", True)), "asset": store.put_bytes(layer.mask["png"], ".png")}
     if layer.kind == LayerKind.PLACED:
         return data
     if layer.raster_png:
         data["asset"] = store.put_bytes(layer.raster_png, ".png")
         layer.raster_relpath = store.relpath(data["asset"], ".png")
-    if layer.mask and layer.mask.get("png"):
-        data["mask"] = {"enabled": bool(layer.mask.get("enabled", True)), "asset": store.put_bytes(layer.mask["png"], ".png")}
     if layer.patches:
         data["patches"] = [{**{k: v for k, v in p.items() if k != "png"}, "asset": store.put_bytes(p["png"], ".png")}
                            for p in layer.patches if p.get("png")]

@@ -370,7 +370,8 @@ def weight_level(value) -> int:
 def bold_px(em: int, level=1) -> int:
     """How much a letter is thickened (its own outline in its colour) for a weight."""
     level = weight_level(level)
-    return max(level, round(em * level / 22)) if level else 0
+    # (the outline goes round both sides of every stroke: more than this fills the inside of dense kanji)
+    return max(level, round(em * (1 / 45 if level == 1 else 1 / 34))) if level else 0
 
 
 def compose(

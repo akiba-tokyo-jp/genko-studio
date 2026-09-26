@@ -90,7 +90,7 @@ def default_dpi(episode: Episode, key: str) -> int:
 def run(episode: Episode, project: Path | None, key: str, out: Path, *, official: bool = False,
         actor: str = "human:user", dpi: int | None = None, width: int = 800, max_height: int = 1280,
         long_edge: int = 2048, jpeg: bool = False, spreads: bool = False, area: str = "bleed",
-        pages: list[int] | None = None, color: str = "auto", icc: str | None = None) -> dict:
+        pages: list[int] | None = None, color: str = "auto", icc: str | None = None, dots: bool = False) -> dict:
     """{ok, files, errors?, error?}. out is a folder. pages: only these page numbers (None: all)."""
     out = Path(out)
     fmt = BY_KEY.get(key)
@@ -127,7 +127,7 @@ def run(episode: Episode, project: Path | None, key: str, out: Path, *, official
         elif key == "kindle":
             from genko.export import export_kindle, stem
 
-            files = [export_kindle(episode, out / f"{stem(episode)}_kindle.epub", long_edge=long_edge)]
+            files = [export_kindle(episode, out / f"{stem(episode)}_kindle.epub", long_edge=long_edge, dots=dots)]
         elif key == "psd":
             from genko.psd import export_psd_pages
 
@@ -139,7 +139,7 @@ def run(episode: Episode, project: Path | None, key: str, out: Path, *, official
         elif key == "epub":
             from genko.export import export_epub, stem
 
-            files = [export_epub(episode, out / f"{stem(episode)}.epub", dpi=dpi)]
+            files = [export_epub(episode, out / f"{stem(episode)}.epub", dpi=dpi, dots=dots)]
         elif key == "strip":
             from genko.export import export_strip, stem
 
