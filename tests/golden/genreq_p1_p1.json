@@ -56,7 +56,7 @@
     },
     "prompt": {
       "ja": "モノクロの日本の漫画のコマ。白黒とグレーだけ、はっきりした線。背景は描き込みすぎない。日向ひな（細身、肩までのストレート、横に流した前髪、髪はベタ（黒く塗りつぶす）、目は大きく、やや垂れ目、半袖のセーラー服、左側に星形の髪留め）。やや上から見下ろす、遠景（全身が小さく入る）の構図。場所は校舎の屋上（フェンスと給水塔のある屋上）、夕方。日向ひな: 画面右、画面左を向く、扉を開ける、緊張。屋上の扉を開ける。感情: 緊張。右上の約1割は台詞用に静かに空けておく。台詞・効果音を画像に描かない。",
-      "en": "Black-and-white Japanese manga panel, greyscale, clean linework. a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip. high angle, looking down, long shot, full figure small in the frame. Setting: 校舎の屋上, at sunset. hina: on the right side of the frame, facing left. Keep the upper-right area (about 10% of the image) calm and empty for speech balloons.",
+      "en": "Black-and-white Japanese manga panel, greyscale, clean linework. a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip. high angle, looking down, long shot, full figure small in the frame. Setting: 校舎の屋上 (in Japanese: フェンスと給水塔のある屋上), at sunset. hina: on the right side of the frame, facing left, pose/expression (in Japanese): 扉を開ける、緊張. Action (in Japanese): 屋上の扉を開ける. Mood (in Japanese): 緊張. Keep the upper-right area (about 10% of the image) calm and empty for speech balloons.",
       "tags": "monochrome, greyscale, manga, black hair, wide shot, full body, from above, sunset, looking to the side"
     },
     "color": false,
@@ -130,6 +130,7 @@
       "今回の指示"
     ],
     "notes_for_agent": [
+      "英語のプロンプトの (in Japanese) の部分は日本語のまま入っている。英語で受ける画像ツールには訳して渡す",
       "composition と pose は構図の参考。線をなぞらせる必要はない",
       "画像に文字・フキダシ・効果音を描かせない。台詞は Genko が描く"
     ],

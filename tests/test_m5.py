@@ -250,7 +250,7 @@ def test_skill_copy_matches_the_packaged_one():
             return {t.name for t in (await client.list_tools()).tools}
 
     tools = anyio.run(names)
-    named = set(re.findall(r"mcp_genko_(\w+)", packaged))
+    named = set(re.findall(r"mcp__genko__(\w+)", packaged))
     assert named <= tools, named - tools
 
 

@@ -51,7 +51,7 @@ def placed(page, size: tuple[int, int], fit: str) -> tuple[tuple[int, int], tupl
 def import_psd(episode, op: dict) -> None:
     """Every layer of a PSD as a Genko layer on the page, from the bottom: pixels (text layers as their
     pictures), names, opacity, visibility, blend mode, clipping, folders and layer masks. Adjustment and fill
-    layers carry no pixels and are left out (named in op["_skipped"])."""
+    layers carry no pixels and are left out (named in the op's report)."""
     from genko import psd
     from genko.ops import MASK_DPI, MAX_IMAGE_PIXELS, _require_page
 
@@ -62,8 +62,11 @@ def import_psd(episode, op: dict) -> None:
         except ValueError as exc:
             raise ApplyError("psd is the file's bytes in base64") from exc
     elif op.get("path"):
+        source = Path(str(op["path"])).expanduser()
+        if not source.is_absolute() and episode.asset_dir is not None:  # (relative to the book's folder)
+            source = Path(episode.asset_dir) / source
         try:
-            data = Path(str(op["path"])).read_bytes()
+            data = source.read_bytes()
         except OSError as exc:
             raise ApplyError(f"the file cannot be read ({exc})") from exc
     else:
@@ -101,6 +104,7 @@ def import_psd(episode, op: dict) -> None:
             picture = item.image if shown == doc.size else item.image.resize(shown, Image.LANCZOS)
             canvas.paste(picture, at)  # (onto a clear layer: the pixels as they are)
             layer.kind = LayerKind.RASTER
+            layer.source = {"kind": "psd"}  # (a painting app's picture: on a monochrome page it prints in grey and tones)
             layer.raster_png = _png(canvas)
             layer.raster_relpath = f"pages/{page.index:03d}/user-{layer.id}.png"
             if item.mask is not None:
@@ -114,8 +118,7 @@ def import_psd(episode, op: dict) -> None:
     after = op.get("after")
     index = next((i + 1 for i, item in enumerate(page.layers) if item.id == after), len(page.layers)) if after else len(page.layers)
     page.layers[index:index] = new_layers
-    op["_skipped"] = list(doc.skipped)
-    op["_layers"] = [layer.id for layer in new_layers]
+    op["_report"] = {"layers": [{"id": layer.id, "title": layer.title} for layer in new_layers], "skipped": list(doc.skipped)}
 
 
 def set_timelapse(episode, op: dict) -> None:

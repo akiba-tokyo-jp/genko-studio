@@ -113,6 +113,7 @@ def _layer_fields(data: dict, role: LayerRole) -> Layer:
         effect=dict(data["effect"]) if isinstance(data.get("effect"), dict) else None,
         color_prints=bool(data.get("color_prints", False)),
         screen=dict(data["screen"]) if isinstance(data.get("screen"), dict) else None,
+        source=dict(data["source"]) if isinstance(data.get("source"), dict) else None,
     )
 
 

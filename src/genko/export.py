@@ -153,9 +153,15 @@ def export_layers(episode: Episode, dest: Path, dpi: int = 350, area: str = "pap
     for page in episode.pages:
         folder = dest / f"{stem(episode)}_{covers.file_stem(page)}"
         folder.mkdir(parents=True, exist_ok=True)
-        for n, (name, image, *_meta) in enumerate(page_layers(page, episode, dpi), start=1):
+        for n, (name, image, *meta) in enumerate(page_layers(page, episode, dpi), start=1):
             if image is None:
                 continue
+            mask = (meta[0] if meta else {}).get("mask")
+            if mask is not None:  # (the layer's mask applies: a PNG has no mask of its own)
+                from PIL import ImageChops
+
+                image = image.convert("RGBA")
+                image.putalpha(ImageChops.multiply(image.getchannel("A"), mask.convert("L").resize(image.size)))
             path = folder / f"{n:02d}_{safe_name(name, 'layer')}.png"
             crop_to(image, page, area, dpi).save(path, dpi=(dpi, dpi))
             written.append(path)
@@ -218,10 +224,10 @@ def export_epub(episode: Episode, dest: Path, dpi: int = 150, *, kindle: bool = 
         longest = max(max(p.trim_rect_mm().width, p.trim_rect_mm().height) for p in episode.pages)
         dpi = max(dpi, int(long_edge / (longest / 25.4)) + 1)
     size = None
-    for page in covers.pages_in_order(episode):  # (the front cover first, the back cover last)
+    for page, part in covers.reading_order(episode):  # (the front cover first, the back cover last)
         image = render_page(page, dpi, mode="print", episode=episode)
         if (covers.cover_of(page) or {}).get("kind") == "jacket":
-            image = covers.front_of(page, image, dpi, episode.binding.value)
+            image = covers.front_of(page, image, dpi, episode.binding.value, "裏表紙" if part == "back" else "表紙")
         elif kindle:  # (a reader shows the finished page: no bleed, no marks)
             image = crop_to(image, page, "trim", dpi)
         if long_edge:
@@ -235,7 +241,8 @@ def export_epub(episode: Episode, dest: Path, dpi: int = 150, *, kindle: bool = 
         image = image.convert("L" if gray else "RGB")
         buf = io.BytesIO()
         image.save(buf, format="JPEG" if jpeg else "PNG", **({"quality": 90} if jpeg else {}))
-        pages.append((covers.file_stem(page), image.size, buf.getvalue(), page))
+        stem_name = f"cover_{part}" if part != "page" else covers.file_stem(page)
+        pages.append((stem_name, image.size, buf.getvalue(), page))
     manifest = ['<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>']
     spine = []
     xhtml = []
@@ -243,8 +250,11 @@ def export_epub(episode: Episode, dest: Path, dpi: int = 150, *, kindle: bool = 
         cover = ' properties="cover-image"' if i == 0 else ""
         manifest.append(f'<item id="img_{stem}" href="images/{stem}.{ext}" media-type="{media}"{cover}/>')
         manifest.append(f'<item id="page_{stem}" href="{stem}.xhtml" media-type="application/xhtml+xml"/>')
-        side = page.side(episode.start_side)
-        spine.append(f'<itemref idref="page_{stem}" properties="page-spread-{side}"/>')
+        if covers.is_cover(page):  # (a cover stands alone, in the middle of the screen)
+            spine.append(f'<itemref idref="page_{stem}" properties="rendition:page-spread-center"/>')
+        else:
+            side = page.side(episode.start_side)
+            spine.append(f'<itemref idref="page_{stem}" properties="page-spread-{side}"/>')
         xhtml.append((f"{stem}.xhtml",
                       '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html>'
                       '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ja"><head>'

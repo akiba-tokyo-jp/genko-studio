@@ -78,6 +78,16 @@ def snapshot(episode: Episode, full: bool = False) -> dict[str, Any]:
             "prims": [{"id": p.get("id"), "kind": p.get("kind")} | ({"scene": p["scene"]} if p.get("scene") else {})
                       for p in page.prims],
         }
+        extra = page.extra or {}
+        if extra.get("assignee"):
+            item["assignee"] = extra["assignee"]
+        if extra.get("cover"):
+            item["cover"] = extra["cover"]
+        if extra.get("anim"):  # (the timeline: speed, length, which cel shows from which frame, the camera)
+            anim = extra["anim"]
+            item["animation"] = {"fps": anim.get("fps"), "frames": anim.get("frames"), "loop": anim.get("loop", True),
+                                 "tracks": anim.get("tracks", []), "camera": anim.get("camera", []),
+                                 "light_table": anim.get("light_table", [])}
         if full:
             item["name_strokes"] = page.name_strokes
             item["ink_strokes"] = page.ink_strokes

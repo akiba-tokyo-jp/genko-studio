@@ -122,7 +122,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_prim3d", "kind": "box|cylinder|stairs|floor", "steps": "int? (stairs)", "lines": "int? (floor grid)", "page": "int", "pos": "[x,y,z]?", "size": "[w,h,d] | float?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "frame_id": "str? (drawn only inside this panel)", "id": "str?"},
     {"op": "add_scene", "page": "int", "kind": "room|classroom|corridor|street", "pos": "[x,y,z]? (centre; z = depth)", "size": "[w,h,d]|number? (mm; a number scales the usual size)", "rot": "[tip,turn,lean]? radians", "focal_mm": "float? (smaller = stronger perspective; 220)", "frame_id": "str? (kept inside this panel; default the panel under pos, false for none)", "id": "str?"},
     {"op": "add_figure", "page": "int", "pos": "[x,y,z] (the pelvis, mm)", "height_mm": "float? (90)", "body": "{heads (等身 4..10), shoulders, hips, build, legs (0.6..1.5)}?", "preset": "stand|walk|run|sit|point|arms_up|think|kneel|peace?", "joints": "{hip|spine|chest|neck|head|l_arm|r_arm|l_elbow|r_elbow|l_wrist|r_wrist|l_leg|r_leg|l_knee|r_knee|l_ankle|r_ankle: {x (toward the viewer), y (twist), z (in the picture, counter-clockwise)}}? (radians)", "hands": "{l, r: open|relaxed|fist|point|peace|grip}?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "frame_id": "str?", "id": "str?"},
-    {"op": "pose_figure", "page": "int", "id": "str (a figure or a hand)", "joints": "{name: {x,y,z}}? (merged)", "set_joints": "object? (replaces)", "body": "object?", "hands": "object?", "preset": "str?", "pose": "str? (a hand)", "rot": "[tip,turn,lean]?", "pos": "[x,y,z]?", "height_mm": "float?", "drag": "{handle: pelvis|neck|head|l_elbow|l_wrist|l_hand|l_knee|l_ankle|l_toe|r_…, to: [x,y]}?"},
+    {"op": "pose_figure", "page": "int", "id": "str (a figure or a hand)", "joints": "{name: {x,y,z}}? (merged; radians: x swings toward the viewer, y twists along the bone, z turns in the picture counter-clockwise; names: hip, spine, chest, neck, head, l_arm, r_arm, l_elbow, r_elbow, l_wrist, r_wrist, l_leg, r_leg, l_knee, r_knee, l_ankle, r_ankle — e.g. both arms up: l_arm z 2.8, r_arm z -2.8)", "set_joints": "object? (replaces)", "body": "object?", "hands": "object?", "preset": "str?", "pose": "str? (a hand)", "rot": "[tip,turn,lean]?", "pos": "[x,y,z]?", "height_mm": "float?", "drag": "{handle: pelvis|neck|head|l_elbow|l_wrist|l_hand|l_knee|l_ankle|l_toe|r_…, to: [x,y]}?"},
     {"op": "add_head", "page": "int", "pos": "[x,y,z]", "size_mm": "float? (30)", "rot": "[tip,turn,lean]? (the face's direction)", "frame_id": "str?", "id": "str?"},
     {"op": "add_hand", "page": "int", "pos": "[x,y,z]", "size_mm": "float? (25)", "side": "l|r?", "pose": "open|relaxed|fist|point|peace|grip?", "rot": "[tip,turn,lean]?", "frame_id": "str?", "id": "str?"},
     {"op": "import_model", "page": "int", "obj": "str? (the OBJ file's text: v and f lines)", "glb": "str? (a .glb / .vrm file, base64)", "gltf": "str? (a .gltf's text with its data inside)", "size_mm": "float? (its longest side, 60)", "pos": "[x,y,z]?", "rot": "[tip,turn,lean]?", "name": "str?", "frame_id": "str?", "id": "str?"},
@@ -136,7 +136,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_exposures", "page": "int", "folder": "str", "cels": "[[frame, cel id | null], …] (the whole exposure sheet)"},
     {"op": "set_camera_key", "page": "int", "frame": "int", "rect": "[x, y, w, h] mm | null (カメラワーク: the camera moves evenly between keys)"},
     {"op": "set_light_table", "page": "int", "cels": "[cel ids] (always shown faint while drawing)"},
-    {"op": "import_psd", "page": "int", "path": "str? (a .psd / .psb file)", "psd": "str? (the file in base64, instead of path)", "fit": "paper|bleed|trim? (default bleed: the picture fills it, keeping its shape)", "id": "str? (the new layers are <id>-1, <id>-2…)", "parent": "folder id?", "after": "layer id?", "note": "every layer as a Genko layer: pixels, names, opacity, visibility, blend, clipping, folders, masks"},
+    {"op": "import_psd", "page": "int", "path": "str? (a .psd / .psb file: relative to the book's folder, or absolute; over MCP it must be under --root)", "psd": "str? (the file in base64, instead of path)", "fit": "paper|bleed|trim? (default bleed: the picture fills it, keeping its shape)", "id": "str? (the new layers are <id>-1, <id>-2…)", "parent": "folder id?", "after": "layer id?", "note": "every layer as a Genko layer: pixels, names, opacity, visibility, blend, clipping, folders, masks"},
     {"op": "set_timelapse", "on": "bool (true: every save records a small picture of each changed page, for the timelapse export)"},
     {"op": "add_cover", "kind": "front|back|jacket (表紙・裏表紙・カバー)", "spine_mm": "float? (jacket: the spine)", "flap_mm": "float? (jacket: each flap, 袖)", "bleed": "bool? (default true: one panel to the bleed)", "note": "covers are pages at the end, without nombre; previews and exports put them first and last"},
     {"op": "replace_text", "find": "str", "replace": "str", "regex": "bool?", "case": "bool? (default true: case matters)", "pages": "[int]? (none: every page)", "speakers": "bool? (speakers too)", "must_find": "bool? (an error when nothing matched)"},
@@ -180,6 +180,24 @@ def _rasterize_strokes(page, layer) -> None:
         bake_stroke(page, layer, stroke_points(stroke), rgb=tuple(stroke.rgb or (20, 20, 20)), kind=stroke.kind,
                     width_mm=stroke.width_mm)
     layer.strokes = []
+    layer.kind = LayerKind.RASTER
+
+
+def _bake_vectors(page, layer) -> None:
+    """A layer's fills (patches) and pen lines drawn into its pixels, as they show on the page."""
+    from genko import render
+    from genko.raster import WORKING_DPI, ensure_raster, save_raster
+
+    base = ensure_raster(page, layer)
+    size = base.size
+    dpi = max(1, round(size[0] / (page.spec.width_mm / 25.4))) if layer.raster_png else WORKING_DPI  # (the pixels' own)
+    mask = render._clip_mask(page, size, dpi) if getattr(layer, "panel_clip", True) else None
+    drawn = render._layer_strokes(layer, size, dpi, mask, base)
+    if drawn is not None:
+        base = Image.alpha_composite(base.convert("RGBA"), drawn)
+    layer.strokes = []
+    layer.patches = []
+    save_raster(page, layer, base)
     layer.kind = LayerKind.RASTER
 
 
@@ -2760,8 +2778,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         page = _require_page(episode, op)
         layer = _resolve_layer(page, op)
         kind = str(op.get("kind") or "")
-        if layer.strokes:
-            _rasterize_strokes(page, layer)
+        if layer.strokes or layer.patches:  # (pen lines and shape fills become pixels, so the filter reaches them)
+            _bake_vectors(page, layer)
         image = ensure_raster(page, layer)
         params = {key: value for key, value in op.items() if key not in {"op", "page", "layer", "id", "kind"}}
         try:
@@ -3291,6 +3309,7 @@ def apply_ops(
 
     work = _working_copy(episode, ops)
     applied: list[str] = []
+    results: list[dict] = []  # (what some ops found or made: replace_text's count, import_psd's layers…)
     for i, op in enumerate(ops):
         if not isinstance(op, dict):
             raise ApplyError(f"ops[{i}] must be an object")
@@ -3317,10 +3336,14 @@ def apply_ops(
         except (KeyError, ValueError, TypeError) as exc:
             raise ApplyError(f"ops[{i}] {op.get('op')}: {exc}") from exc
         applied.append(str(op.get("op")))
+        report = op.pop("_report", None) if isinstance(op, dict) else None
+        if report:
+            results.append({"index": i, "op": str(op.get("op")), **report})
 
     warnings = validate_episode(work)
+    extra = {"results": results} if results else {}
     if dry_run:
-        return {"ok": True, "applied": applied, "snapshot": snapshot(work), "job_id": new_id(), "warnings": warnings}
+        return {"ok": True, "applied": applied, "snapshot": snapshot(work), "job_id": new_id(), "warnings": warnings, **extra}
 
     # `work` is a deep copy, so the objects episode holds now are never touched again:
     # a shallow copy of them is the undo entry, no second deep copy needed.
@@ -3330,4 +3353,4 @@ def apply_ops(
     del episode.undo_stack[:-UNDO_LIMIT]
     _copy_state(episode, work)
     episode.journal_pending.append({"actor": agent, "ops": [_journal_op(op) for op in ops]})
-    return {"ok": True, "applied": applied, "snapshot": snapshot(episode), "job_id": new_id(), "warnings": warnings}
+    return {"ok": True, "applied": applied, "snapshot": snapshot(episode), "job_id": new_id(), "warnings": warnings, **extra}

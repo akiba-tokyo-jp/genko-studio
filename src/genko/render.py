@@ -441,6 +441,16 @@ def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, 
     return canvas
 
 
+def _has_colour(image: Image.Image) -> bool:
+    """Whether a layer's picture has colour in it (greys and black lines do not count)."""
+    small = image.convert("RGBA")
+    small.thumbnail((96, 96))
+    alpha = small.getchannel("A")
+    sat = small.convert("RGB").convert("HSV").getchannel("S")
+    seen = ImageChops.multiply(sat, alpha.point(lambda v: 255 if v > 32 else 0))
+    return seen.getextrema()[1] > 40
+
+
 def _finish_placed(fitted: Image.Image, layer, page: Page, episode: Episode | None, dpi: int, mode: str,
                    origin: tuple[int, int]) -> Image.Image:
     from genko import screentone
@@ -995,6 +1005,10 @@ def render_page(
         if raster is None:
             continue
         raster = layer_effects(layer, raster, working_dpi)
+        if (finish and mode in ("print", "proof") and (getattr(layer, "source", None) or {}).get("kind") == "psd"
+                and not getattr(layer, "screen", None) and _has_colour(raster)):
+            # (a picture from a painting app on a monochrome page is finished like placed art: grey and tones)
+            raster = _finish_placed(raster, layer, page, episode, working_dpi, mode, (0, 0))
         if getattr(layer, "screen", None) and mode == "print":  # トーン化: its greys as dots in print
             from genko import tones
 
@@ -1035,7 +1049,8 @@ def render_page(
 
     placed = [line for line in lines if line.x_mm or line.y_mm or line.balloon]
     # Speaker names are a working aid: shown in name/proof, never printed.
-    balloons.draw_lines(image, placed, working_dpi, font_path, show_speaker=mode != "print")
+    panels = {f.id: (f.rect.x, f.rect.y, f.rect.width, f.rect.height) for f in page.leaf_frames()}
+    balloons.draw_lines(image, placed, working_dpi, font_path, show_speaker=mode != "print", panels=panels)
     for line in lines:
         if line in placed:
             continue

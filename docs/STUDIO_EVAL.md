@@ -10,7 +10,7 @@ Genko の側で数えられるものは Genko が記録するので、人間が�
 3. Hermes の設定に `integrations/hermes/config.example.yaml` の `mcp_servers.genko` を足す。`--agent ai:hermes` のまま。
 4. スキルを入れる: `integrations/hermes/genko-manga/` を Hermes のスキルのフォルダに置く（同じ内容を MCP の resource `genko://guide/skill` でも読める）。
 5. 画像ツールを登録する: `genko studio tools set openai:gpt-image-1`。対応サイズや参照・マスクの可否が違えば `--file` で直す（`genko studio tools example` が雛形）。
-6. Hermes で `mcp_genko_projects` が呼べることを確かめる。
+6. Hermes で `mcp__genko__projects`（v0.21 より前は `mcp_genko_projects`）が呼べることを確かめる。
 
 ## 2. M5-1 パイロットページの通し
 

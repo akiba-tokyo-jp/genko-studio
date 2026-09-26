@@ -43,7 +43,7 @@ STUDIO_SCHEMA = [
     {"op": "set_script", "script": "script@1"},
     {"op": "set_page_plan", "page": "int", "plan": "object"},
     {"op": "set_panel", "page": "int", "frame_id": "str", "set": "object", "unset": "[str]?", "pin": "[str]?", "unpin": "[str]?"},
-    {"op": "record_review", "page": "int", "frame_id": "str?", "kind": "name|art", "score": "float?", "notes": "str", "input_hash": "str"},
+    {"op": "record_review", "page": "int", "frame_id": "str?", "kind": "name|art|upscale|regions", "score": "float?", "notes": "str", "input_hash": "str"},
     {"op": "approve", "gate": "bible|script|sheet|name|art|export", "page": "int?", "character_id": "str?", "candidate_id": "str?", "face_asset": "str?"},
     {"op": "revoke", "gate": "name|art|sheet", "page": "int?", "character_id": "str?", "reason": "str"},
     {"op": "request_approval", "gate": "str", "pages": "[int]?", "character_id": "str?", "note": "str?"},
@@ -853,6 +853,7 @@ def _import_candidates(episode: Episode, op: dict, agent: str) -> None:
             "px": [int(px[0]), int(px[1])],
             "status": "candidate",
             **({"metrics": item["metrics"]} if isinstance(item.get("metrics"), dict) else {}),
+            **({"face_box01": [float(v) for v in item["face_box01"]]} if item.get("face_box01") else {}),
         })
     if target.get("character_id") or target.get("location_id"):
         key = "character_candidates" if target.get("character_id") else "location_candidates"

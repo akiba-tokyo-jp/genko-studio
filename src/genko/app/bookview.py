@@ -35,17 +35,7 @@ def book_pages(episode) -> list:
     """What the reader turns through: (kind, page) — the front, the pages, the back (a jacket gives both)."""
     from genko import covers
 
-    out = []
-    for page in covers.pages_in_order(episode):
-        cover = covers.cover_of(page)
-        if cover and cover["kind"] == "jacket":
-            out.append(("front", page))
-        else:
-            out.append((cover["kind"] if cover else "page", page))
-    jacket = next((p for p in episode.pages if (covers.cover_of(p) or {}).get("kind") == "jacket"), None)
-    if jacket is not None:
-        out.append(("back", jacket))
-    return out
+    return [(part, page) for page, part in covers.reading_order(episode)]
 
 
 def spreads(count: int) -> list[list[int]]:

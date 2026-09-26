@@ -83,10 +83,10 @@ def test_check_undo_and_export(agent: StudioService, tmp_path: Path):
     _ok(agent.apply_ops("demo.genko", [{"op": "add_line", "page": 1, "text": "はみ出し", "x_mm": 250, "y_mm": 40, "w_mm": 20, "h_mm": 30}],
                         commit=True))
     found = _ok(agent.check("demo.genko"))
-    assert found["errors"] >= 1 and any(i["page"] == 1 for i in found["issues"])
+    assert found["errors"] >= 1 and any(i["page"] == 1 for i in found["checks"])
     from genko import checks
 
-    assert found["issues"] == checks.book(load_episode(agent.project_path("demo.genko")), agent.project_path("demo.genko"))["issues"]
+    assert found["checks"] == checks.book(load_episode(agent.project_path("demo.genko")), agent.project_path("demo.genko"))["issues"]
     assert "checks" in _ok(agent.preflight("demo.genko"))
     # undo: its own change only
     _ok(agent.undo("demo.genko"))
@@ -124,7 +124,7 @@ def test_the_mcp_server_offers_the_tools_and_the_guides_tell_of_them(tmp_path: P
     anyio.run(scenario)
     guide = GUIDE.read_text(encoding="utf-8")
     for word in ("emphasis_runs", "style_runs", "rotate_deg", "set_layer_mask", "merge_down", "warp", "define_brush",
-                 "gradient_fill", "mcp_genko_check", "mcp_genko_undo", "mcp_genko_export", "cylinder", "wobble"):
+                 "gradient_fill", "mcp__genko__check", "mcp__genko__undo", "mcp__genko__export", "cylinder", "wobble"):
         assert word in guide, word
     doc = AGENT_DOC.read_text(encoding="utf-8")
     assert "Parity with the app" in doc and "gradient_fill" in doc

@@ -64,8 +64,25 @@ def pages_in_order(episode) -> list:
     elif "front" in covers:
         out.append(covers["front"])
     out += body
-    if "back" in covers and "jacket" not in covers:
+    if "back" in covers:  # (a back cover of its own comes last, with a jacket too)
         out.append(covers["back"])
+    return out
+
+
+def reading_order(episode) -> list[tuple]:
+    """(page, part) as a reader turns through the book: part "front" | "page" | "back". A jacket gives the front
+    and, when the book has no back cover of its own, the back."""
+    kinds = {cover_of(p)["kind"]: p for p in episode.pages if is_cover(p)}
+    out = []
+    if "jacket" in kinds:
+        out.append((kinds["jacket"], "front"))
+    elif "front" in kinds:
+        out.append((kinds["front"], "front"))
+    out += [(p, "page") for p in episode.pages if not is_cover(p)]
+    if "back" in kinds:
+        out.append((kinds["back"], "back"))
+    elif "jacket" in kinds:
+        out.append((kinds["jacket"], "back"))
     return out
 
 
@@ -75,11 +92,11 @@ def file_stem(page) -> str:
     return f"cover_{cover['kind']}" if cover else f"p{page.index:03d}"
 
 
-def front_of(page, image, dpi: int, binding: str = "right"):
-    """The front cover cut out of a jacket's picture (the page itself for a front cover)."""
+def front_of(page, image, dpi: int, binding: str = "right", which: str = "表紙"):
+    """The front cover (or, which="裏表紙", the back) cut out of a jacket's picture (the page itself otherwise)."""
     from genko.render import mm_to_px
 
-    part = next(((x0, x1) for x0, x1, name in folds(page, binding) if name == "表紙"), None)
+    part = next(((x0, x1) for x0, x1, name in folds(page, binding) if name == which), None)
     if part is None:
         return image
     t = page.trim_rect_mm()

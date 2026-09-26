@@ -281,6 +281,25 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### M1 fixes (from the Hermes test report)
+
+- `check` returns its findings in `checks` (as `preflight` does); `issues` stays the reply's own tool problems.
+- `apply_ops` replies carry `results`: what some ops found or made — `replace_text` {replaced, where: [{line, page,
+  count}]}, `import_psd` {layers, skipped}.
+- `status` pages and `inspect snapshot` pages show `assignee` and `cover`; snapshot pages show `animation` (fps,
+  frames, loop, tracks, camera, light_table). `genko studio audit` lists each approval change (`entries`).
+- `import_images` takes `face_box01` [x, y, w, h] (0..1) for a character sheet's face close-up; approving the sheet
+  cuts the face reference there. `request_approval` for a sheet returns each candidate's face crop as images.
+- `import_psd` paths are relative to the book's folder (or absolute under --root over MCP). Its layers print in grey
+  and tones on monochrome pages, as placed art does.
+- Art requests: the page's turn role goes to its first (reveal) or last (hook) panel only; the English prompt carries
+  the action, mood, pose and place (marked "in Japanese"); sheets and backgrounds say "artwork", not "panel".
+- `balloon_overflow` says how many characters per column and how many columns the panel takes.
+- EPUB / Kindle: a jacket and a back cover both appear (front first, back last); covers stand alone
+  (`page-spread-center`). Per-layer PNGs apply layer masks; filters reach shape fills (they are drawn into pixels).
+- Export `long_edge` defaults per format (kindle 2560, sns 2048). Tool names: `mcp__genko__<name>` (older Hermes:
+  `mcp_genko_<name>`).
+
 ### K1 additions
 
 - `add_stroke {rotation: [degrees, …]}`: the pen's barrel turn at each point (resampled to the line); brushes with

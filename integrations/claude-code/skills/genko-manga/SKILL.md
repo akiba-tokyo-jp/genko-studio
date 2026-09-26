@@ -5,7 +5,7 @@ description: Genko Studio を MCP で操作して、企画から漫画のネー�
 
 # Genko で漫画を作る
 
-Genko は漫画原稿のシステムで、MCP サーバー `genko` として接続されている（道具は `mcp__genko__<名前>`）。
+Genko は漫画原稿のシステムで、MCP サーバー `genko` として接続されている（道具は `mcp__genko__<名前>`。古い Hermes（v0.21 より前）では区切りの `__` が `_` 1 つになる）。
 Genko は文章も絵も作らない。企画書・脚本・ネーム計画と絵は、あなたが作る。Genko はそれを検査し、コマ割りと縦書きの写植を計算し、
 絵の依頼パック（サイズ・プロンプトの下書き・ガイド画像・参照画像）を用意し、取り込んだ絵をコマに置いて仕上げる。
 承認と本番の書き出しは人間が行う。この文書の最新版は resource `genko://guide/skill` で読める。
@@ -101,9 +101,9 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 3D: 体型と関節のある人形は `add_figure`（`body`: `heads` 等身・`shoulders`・`hips`・`build`・`legs`、`preset`、`hands`）と `pose_figure`（`joints` の x・y・z、`drag`）。頭部 `add_head`、手 `add_hand`（`pose`）、OBJ は `import_model`。ページのカメラ `set_camera`、光 `set_light`。線と陰の面にするのは `render_prims`（`tone` で面を網点に）。
 - 本: 表紙・裏表紙・カバー（背と袖）は `add_cover`（ページの最後に入り、ノンブルなし）。全ページの台詞の置換は `replace_text`、同じ操作を全ページに `for_pages`、担当は `set_assignee`。
 - ペンの軸の回転（アートペン）: `add_stroke` の `rotation`（点ごとの角度）。`tip_rotation` のブラシ（カリグラフィ）は先端が回る。
-- フィルターのプラグイン: `inspect` の `plugins` にあれば、`filter_raster` の `kind` に `plugin:<key>`（設定は `PARAMS` のとおり）。
+- フィルターのプラグイン（置き場所は `inspect` の `plugins` の `folder`）: 一覧にあれば、`filter_raster` の `kind` に `plugin:<key>`（設定は `PARAMS` のとおり）。
 - アニメーション: `set_animation`（`fps`・`frames`・`loop`）でページを短いアニメーションに。`add_anim_folder` がタイムラインの 1 行、`add_cel`（`folder`・`at`）がセル（描くのは `add_stroke` の `layer_id` にセルの id）。どのフレームにどのセルを出すかは `set_exposure`（`frame`・`cel`、null で空）か `set_exposures`（全部）。カメラワークは `set_camera_key`（`rect`）、いつも薄く見るセルは `set_light_table`。書き出しは `export` の `format: "animation"`（`pages` に 1 ページ、`movie`: gif・webp・png・mp4・frames）。
-- ファイル: PSD／PSB をレイヤーのまま読み込むのは `import_psd`（`path`、`fit`: `paper`・`bleed`・`trim`。フォルダー・マスク・不透明度・合成モード・クリッピング・表示もそのまま）。制作過程の記録は `set_timelapse`（`on`）。
+- ファイル: PSD／PSB をレイヤーのまま読み込むのは `import_psd`（`path` は原稿のフォルダからの相対パスか --root の中、`fit`: `paper`・`bleed`・`trim`。フォルダー・マスク・不透明度・合成モード・クリッピング・表示もそのまま）。制作過程の記録は `set_timelapse`（`on`）。
 - 図形: `add_shape`（`shape`: `line`・`polyline`・`curve`・`rect`・`ellipse`・`polygon`、`line`・`fill` で線と塗り）。
 - 範囲（`area`）: どの op の `area` にも、`poly`・`mask` のほかに `rect`・`ellipse`・`layer`（そのレイヤーの描いてある所）・`color`（その色の所）・`all`・`saved`（`store_area` で残した範囲）と、`union`・`intersect`・`subtract` の組み合わせ、`invert`・`grow_mm`（負で縮める）・`feather_mm` が使える。ガイド線は `add_ruler` の `kind: "guide"`（`axis`・`at`）。
 - 範囲の変形: `transform_area` の `matrix`（移動・拡大・回転・反転）か `warp`（`perspective` で 4 隅、`mesh` で 3×3 の点）。レイヤーを丸ごと動かすのは、ページ全体を `area` にした `matrix`。

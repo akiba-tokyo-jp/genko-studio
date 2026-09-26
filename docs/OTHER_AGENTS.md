@@ -5,9 +5,9 @@ Genko の MCP サーバーは `genko mcp --root <原稿のフォルダ> --agent 
 
 | クライアント | 道具の名前 | スキル（手順書）の置き場所 |
 |---|---|---|
-| Hermes Agent | `mcp_genko_<名前>` | `integrations/hermes/genko-manga/` |
+| Hermes Agent | `mcp__genko__<名前>`（v0.21 より前は `mcp_genko_<名前>`） | `integrations/hermes/genko-manga/` |
 | Claude Code | `mcp__genko__<名前>` | `integrations/claude-code/skills/genko-manga/` |
-| そのほか | クライアントによる | MCP の resource `genko://guide/skill`（`mcp_genko_` の名前で書いてある） |
+| そのほか | クライアントによる | MCP の resource `genko://guide/skill`（`mcp__genko__` の名前で書いてある） |
 
 `--agent` は必ず `ai:` で始める。MCP には承認の道具が無く、`ai:` の名前では承認も取り消しもできない。
 

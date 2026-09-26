@@ -61,7 +61,8 @@ def _layer_to_dict(layer: Layer, strokes: bool = True) -> dict:
         | ({"color": list(layer.color)} if layer.color else {}) | ({"reference": True} if layer.reference else {}) \
         | ({"fill": layer.fill} if layer.fill else {}) | ({"adjust": layer.adjust} if layer.adjust else {}) \
         | ({"effect": layer.effect} if layer.effect else {}) | ({"color_prints": True} if layer.color_prints else {}) \
-        | ({"screen": layer.screen} if layer.screen else {}) | ({
+        | ({"screen": layer.screen} if layer.screen else {}) \
+        | ({"source": layer.source} if layer.source and layer.kind != LayerKind.PLACED else {}) | ({
         "asset": layer.asset,
         "frame_id": layer.frame_id,
         "placement_mm": _rect_to_dict(layer.placement_mm) if layer.placement_mm else None,

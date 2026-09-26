@@ -45,8 +45,22 @@ def annotate(image: Image.Image, page: Page, dpi: int, plan: dict | None) -> Ima
         slot = slots_by_order[order - 1] if order - 1 < len(slots_by_order) else ""
         panel = panels.get(slot)
         if panel:
+            from genko.studio.blocking import figures
+
+            # where each person stands and how big (pos, scale): the name is approved with the blocking in view
+            for fig in figures(panel, (r.x, r.y, r.width, r.height)):
+                for box, width in ((fig.body, 1), (fig.head, 2)):
+                    bx, by, bw, bh = (mm_to_px(v, dpi) for v in box)
+                    draw.rectangle([bx, by, bx + bw, by + bh], outline=(200, 80, 60), width=width)
+                hx, hy = mm_to_px(fig.head[0], dpi), mm_to_px(fig.head[1], dpi)
+                draw.text((hx + 3, hy + 2), fig.char_id, fill=(200, 80, 60), font=small)
             label = f"{slot} {panel.get('shot')}/{panel.get('angle')} {panel.get('action', '')}"[:40]
             ly = mm_to_px(r.y + r.height, dpi) - badge
+            room = x2 - x - 6
+            if small.getlength(label) > room:  # (the band stays inside its own panel: the words are cut to fit)
+                while label and small.getlength(label + "…") > room:
+                    label = label[:-1]
+                label += "…"
             draw.rectangle([x, ly, x2, ly + badge], fill=(235, 240, 255))
             draw.text((x + 3, ly + 2), label, fill=(40, 60, 140), font=small)
     return out

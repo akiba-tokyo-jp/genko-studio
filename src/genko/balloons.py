@@ -706,7 +706,26 @@ def _draw_turned(image: Image.Image, lines: list, dpi: int, show_speaker: bool, 
                 ImageDraw.Draw(image).text((px(ln.x_mm, dpi), max(0, px(ln.y_mm - 4, dpi))), ln.speaker, fill=(90, 90, 90), font=font)
 
 
-def draw_group(image: Image.Image, lines: list, dpi: int, show_speaker: bool = True, font_path: str | None = None) -> None:
+def _thought_trail(line, panels: dict | None) -> list[float]:
+    """Where a thought's bubbles trail to when nobody is named: down and away, but inside the line's panel."""
+    w, h = line.w_mm or 40, line.h_mm or 20
+    tries = [(-0.3 * w, 1.2 * h), (1.3 * w, 1.2 * h), (-0.3 * w, -0.2 * h), (1.3 * w, -0.2 * h)]
+    rect = (panels or {}).get(getattr(line, "frame_id", None))
+    if rect is None:
+        dx, dy = tries[0]
+        return [line.x_mm + dx, line.y_mm + dy]
+    x0, y0, rw, rh = rect
+    inset = 2.0
+    for dx, dy in tries:
+        tx, ty = line.x_mm + dx, line.y_mm + dy
+        if x0 + inset <= tx <= x0 + rw - inset and y0 + inset <= ty <= y0 + rh - inset:
+            return [tx, ty]
+    dx, dy = tries[0]  # (no room outside the balloon: the nearest point inside the panel)
+    return [min(max(line.x_mm + dx, x0 + inset), x0 + rw - inset), min(max(line.y_mm + dy, y0 + inset), y0 + rh - inset)]
+
+
+def draw_group(image: Image.Image, lines: list, dpi: int, show_speaker: bool = True, font_path: str | None = None,
+               panels: dict | None = None) -> None:
     """One balloon (or several joined ones) with their tails and text, onto the page image."""
     first = lines[0]
     kind = first.balloon or "speech"
@@ -731,7 +750,7 @@ def draw_group(image: Image.Image, lines: list, dpi: int, show_speaker: bool = T
         tails = [(ln, t) for ln in lines if (ln.balloon or "speech") not in NO_TAIL for t in tails_of(ln)]
         for ln in lines:  # a thought without a speaker still trails its bubbles, down and away
             if (ln.balloon or "speech") == "thought" and not tails_of(ln):
-                tails.append((ln, {"to": [ln.x_mm - (ln.w_mm or 40) * 0.3, ln.y_mm + (ln.h_mm or 20) * 1.2]}))
+                tails.append((ln, {"to": _thought_trail(ln, panels)}))
         xs = [b[0] for b in boxes] + [b[2] for b in boxes] + [px(t["to"][0], dpi) for _, t in tails]
         ys = [b[1] for b in boxes] + [b[3] for b in boxes] + [px(t["to"][1], dpi) for _, t in tails]
         margin = px(4, dpi)
@@ -855,8 +874,10 @@ def _paint_text(image: Image.Image, line, dpi: int, show_speaker: bool, font_pat
         ImageDraw.Draw(image).text((x, max(0, y - em)), line.speaker, fill=(90, 90, 90), font=font)
 
 
-def draw_lines(image: Image.Image, lines: list, dpi: int, font_path: str | None = None, show_speaker: bool = True) -> None:
-    """Every placed line of a page, joined balloons drawn together (in reading order of their first line)."""
+def draw_lines(image: Image.Image, lines: list, dpi: int, font_path: str | None = None, show_speaker: bool = True,
+               panels: dict | None = None) -> None:
+    """Every placed line of a page, joined balloons drawn together (in reading order of their first line).
+    `panels`: {frame id: (x, y, w, h) mm}, so a thought's own bubbles stay inside its panel."""
     groups: dict[str, list] = {}
     order: list[list] = []
     for line in lines:
@@ -869,4 +890,4 @@ def draw_lines(image: Image.Image, lines: list, dpi: int, font_path: str | None 
         else:
             order.append([line])
     for group in order:
-        draw_group(image, group, dpi, show_speaker, font_path)
+        draw_group(image, group, dpi, show_speaker, font_path, panels)

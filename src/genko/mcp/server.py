@@ -103,7 +103,8 @@ def build_server(root: Path, actor: str) -> MCPServer:
         snapshot（ページ・レイヤー〔名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照〕・台詞〔書式・フキダシ〕・3D） /
         materials（stamp_material で貼れる素材: id・名前・種類〔トーン・効果線・画像・パーツ・描き文字・ブラシ・3D〕・フォルダ・タグ） / fonts（style.font に使える書体） /
         brushes（add_stroke の kind に使えるブラシ: 入っているもの・この原稿の自作・自分の自作） / plugins（人が入れた
-        フィルターのプラグイン: filter_raster の kind に "plugin:<key>"、params は PARAMS のとおり）。"""
+        フィルターのプラグイン: filter_raster の kind に "plugin:<key>"、params は PARAMS のとおり。置き場所は folder:
+        Linux は ~/.config/genko/plugins、Windows は %APPDATA%\\genko\\plugins）。"""
         return call(service.inspect, project, target, page, frame_id)
 
     @server.tool(structured_output=False)
@@ -141,7 +142,8 @@ def build_server(root: Path, actor: str) -> MCPServer:
     def import_images(project: str, request_id: str, images: list[dict]) -> list:
         """生成した画像を依頼の候補として取り込む。images: [{file: "studio/inbox/<request_id>/a.png" か asset: "sha256:…",
         origin: {kind: "agent", tool_id, model, prompt（実際に使ったもの）, params, refs_used, note}}]。
-        file は studio/inbox/ の中だけ。同じ画像は 2 回取り込まれない。"""
+        file は studio/inbox/ の中だけ。同じ画像は 2 回取り込まれない。設定画では face_box01: [x, y, 幅, 高さ]（画像の中の
+        0〜1）で顔のアップの範囲を付ける（承認のとき、ここを顔の参照として切り出す）。"""
         return call(service.import_images, project, request_id, images)
 
     @server.tool(structured_output=False)
@@ -192,7 +194,7 @@ def build_server(root: Path, actor: str) -> MCPServer:
 
     @server.tool(structured_output=False)
     def check(project: str) -> list:
-        """人が使う「入稿前の点検」と同じ点検（はみ出し・文字の小ささや重なり・印刷に出ない絵など）。"""
+        """人が使う「入稿前の点検」と同じ点検（はみ出し・文字の小ささや重なり・印刷に出ない絵など）。見つかった一つずつは checks に入る。"""
         return call(service.check, project)
 
     @server.tool(structured_output=False)
@@ -202,14 +204,13 @@ def build_server(root: Path, actor: str) -> MCPServer:
 
     @server.tool(structured_output=False)
     def export(project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
-               area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int = 2048, jpeg: bool = False,
+               area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                spreads: bool = False, color: str = "rgb", icc: str | None = None, fps: float = 12,
                seconds: float | None = None, movie: str = "webp") -> list:
         """書き出し（承認は要らない。正式な書き出しは人だけ）: format は pdf / tiff / png / cmyk / layers / psd / pack / epub /
         kindle / strip / webtoon / sns / timelapse / animation。pages でページを選ぶ（例 [3, 4, 5]）。area は paper / bleed / trim。
-        pdf の color は rgb / cmyk / gray、cmyk と pdf の icc は印刷所の CMYK プロファイル（.icc のパス）。kindle は long_edge
-        （既定 2560）。timelapse は記録した制作過程（set_timelapse で記録）を movie（webp / gif / png / mp4）で、fps と
-        seconds（全体の長さ）、pages は 1 ページだけ。animation はアニメーションのページ（pages に 1 つ）を movie（gif / webp /
+        pdf の color は rgb / cmyk / gray、cmyk と pdf の icc は印刷所の CMYK プロファイル（.icc のパス）。long_edge の既定は kindle 2560・sns 2048。timelapse は記録した制作過程（set_timelapse で記録）を movie（webp / gif / png / mp4）で、fps と
+        seconds（全体の長さ）、pages は省略で全ページ（描いた順）か、1 ページだけを [n] で。animation はアニメーションのページ（pages に 1 つ）を movie（gif / webp /
         png / mp4 / frames〔連番 PNG〕）で、width で幅を。書いた先は <原稿>/exports/。"""
         return call(service.export, project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc,
                     fps, seconds, movie)
@@ -272,7 +273,9 @@ def build_server(root: Path, actor: str) -> MCPServer:
     @server.tool(structured_output=False)
     def apply_ops(project: str, ops: list[dict], commit: bool = False) -> list:
         """細かい修正と作画の状態（台詞の移動・編集、コマの分割・結合、set_panel、import_candidates、adopt_candidate、
-        set_placement など。一覧は inspect target=schemas ではなく genko://ops）。承認・ロック・ファイル読み込みの op は使えない。"""
+        set_placement など。一覧は inspect target=schemas ではなく genko://ops）。承認・ロック・ファイル読み込みの op は使えない
+        （import_psd だけは読める: path は原稿のフォルダからの相対パスか、--root の中の絶対パス）。返事の results に、
+        一部の op が見つけたもの・作ったもの（replace_text の件数と場所、import_psd のレイヤー）が入る。"""
         return call(service.apply_ops, project, ops, commit)
 
     @server.tool(structured_output=False)

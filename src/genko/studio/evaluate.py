@@ -92,6 +92,9 @@ def audit(project: Path) -> dict:
         "changes": sum(len(e.get("changes", [])) for e in entries),
         "changes_by_actor": by_actor,
         "violations": violations + [{"approval": r} for r in records],
+        # (each approval change: when, by whom, at which revision, what — the last 100, newest last)
+        "entries": [{"rev": e.get("rev"), "at": e.get("at"), "actor": e.get("actor"), "via": e.get("via"),
+                     "changes": e.get("changes", [])} for e in entries[-100:]],
         "note": None if (project / journal.AUDIT).is_file() else "studio/audit.jsonl が無い（M5 より前の保存だけのプロジェクト）",
     }
 

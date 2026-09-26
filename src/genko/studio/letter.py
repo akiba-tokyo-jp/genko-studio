@@ -57,6 +57,21 @@ def measure(breaks: list[str], balloon: str) -> tuple[float, float]:
     return (text_w + 2 * pad, text_h + 2 * pad)
 
 
+def fits(rect: Box, balloon: str, others: int = 0) -> str:
+    """How much text this panel takes in one balloon of this kind, in words for the agent."""
+    _x, _y, w, h = rect
+    room_w, room_h = w - 2 * MARGIN_MM, h - 2 * MARGIN_MM
+    if balloon == "sfx":
+        chars, cols = int(room_h // SFX_EM_MM), int(room_w // SFX_EM_MM)
+    else:
+        grow = 2 ** 0.5 if balloon in ELLIPSE_KINDS else 1.0
+        pad = 0.0 if balloon == "none" else PAD_MM
+        chars = int(((room_h - 2 * pad) / grow) // EM_MM)
+        cols = int((((room_w - 2 * pad) / grow) + EM_MM * LEADING) // (EM_MM * (1 + LEADING)))
+    where = f"このコマ（{w:.0f}×{h:.0f} mm）のこの形のフキダシには、1 列 {max(0, chars)} 字・{max(0, cols)} 列まで"
+    return where + ("（ほかの台詞と場所を分け合うので、実際はもっと少ない）" if others else "")
+
+
 def place_page(
     plan: dict, layout: CompiledLayout, bible: dict, speakers: dict[str, str | None]
 ) -> tuple[list[BalloonPlacement], list[Issue]]:
@@ -80,7 +95,8 @@ def place_page(
                         "balloon_overflow",
                         path,
                         f"コマ {panel.get('slot')} に台詞が入らない（{size[0]:.0f}×{size[1]:.0f} mm）",
-                        "台詞を短くする、breaks で列を分ける、台詞を別のコマに移す、コマを大きくする",
+                        f"{fits(rect, line.get('balloon', 'speech'), len(placed))}。台詞を短くする、breaks で列を分ける、"
+                        "台詞を別のコマに移す、コマを大きくする",
                     )
                 )
                 continue

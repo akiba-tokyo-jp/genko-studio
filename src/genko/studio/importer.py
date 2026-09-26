@@ -182,7 +182,22 @@ def prepare(project: Path, request: dict, images: list) -> tuple[list[dict], Ima
             "parent": request.get("parent"),
             "origin": origin,
             "metrics": {**measured, "rank": rank_key(measured)},
+            **({"face_box01": face} if (face := _face_box(item, i)) else {}),
         })
         if first is None:
             first = image
     return items, first
+
+
+def _face_box(item, index: int) -> list[float] | None:
+    """Where the face close-up is in a character sheet ([x, y, w, h], 0..1), if the agent said."""
+    box = item.get("face_box01") if isinstance(item, dict) else None
+    if box is None:
+        return None
+    try:
+        x, y, w, h = (float(v) for v in box)
+    except (TypeError, ValueError) as exc:
+        raise ImportError_("face_box01 は [x, y, 幅, 高さ]（画像の中の 0〜1）", f"/images/{index}/face_box01") from exc
+    if not (0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 - x + 1e-6 and 0 < h <= 1 - y + 1e-6):
+        raise ImportError_("face_box01 は画像の中に収める（0〜1）", f"/images/{index}/face_box01")
+    return [round(x, 4), round(y, 4), round(w, 4), round(h, 4)]

@@ -805,7 +805,7 @@
       "op": "pose_figure",
       "page": "int",
       "id": "str (a figure or a hand)",
-      "joints": "{name: {x,y,z}}? (merged)",
+      "joints": "{name: {x,y,z}}? (merged; radians: x swings toward the viewer, y twists along the bone, z turns in the picture counter-clockwise; names: hip, spine, chest, neck, head, l_arm, r_arm, l_elbow, r_elbow, l_wrist, r_wrist, l_leg, r_leg, l_knee, r_knee, l_ankle, r_ankle — e.g. both arms up: l_arm z 2.8, r_arm z -2.8)",
       "set_joints": "object? (replaces)",
       "body": "object?",
       "hands": "object?",
@@ -932,7 +932,7 @@
     {
       "op": "import_psd",
       "page": "int",
-      "path": "str? (a .psd / .psb file)",
+      "path": "str? (a .psd / .psb file: relative to the book's folder, or absolute; over MCP it must be under --root)",
       "psd": "str? (the file in base64, instead of path)",
       "fit": "paper|bleed|trim? (default bleed: the picture fills it, keeping its shape)",
       "id": "str? (the new layers are <id>-1, <id>-2…)",
@@ -1075,7 +1075,7 @@
       "op": "record_review",
       "page": "int",
       "frame_id": "str?",
-      "kind": "name|art",
+      "kind": "name|art|upscale|regions",
       "score": "float?",
       "notes": "str",
       "input_hash": "str"

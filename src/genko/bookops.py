@@ -44,7 +44,7 @@ def add_cover(episode, op: dict) -> None:
 
 def replace_text(episode, op: dict) -> None:
     """Every line's words (and speakers, if asked) with `find` swapped for `replace`; `regex` for patterns.
-    `pages` limits it; the count found is left in op["_count"] for the caller."""
+    `pages` limits it; how many and where go back in the op's report."""
     find = str(op.get("find") or "")
     if not find:
         raise ApplyError("find is the words to look for")
@@ -56,11 +56,13 @@ def replace_text(episode, op: dict) -> None:
         raise ApplyError(f"the pattern cannot be read: {exc}") from exc
     pages = {int(p) for p in op.get("pages") or []}
     count = 0
+    where: list[dict] = []
     for line in episode.story:
         if pages and line.page_index not in pages:
             continue
         new, n = pattern.subn(replace, line.text or "")
         if n:
+            where.append({"line": line.id, "page": line.page_index, "count": n, "text": new[:40]})
             line.text = new
             count += n
             # (ruby, dots and styled parts keep pointing at words that are still there)
@@ -70,11 +72,12 @@ def replace_text(episode, op: dict) -> None:
         if op.get("speakers"):
             new, n = pattern.subn(replace, line.speaker or "")
             if n:
+                where.append({"line": line.id, "page": line.page_index, "count": n, "speaker": new})
                 line.speaker = new
                 count += n
     if count == 0 and op.get("must_find"):
         raise ApplyError("nothing matched")
-    op["_count"] = count
+    op["_report"] = {"replaced": count, "where": where[:200]}
 
 
 def expand(episode, op: dict) -> list[dict]:

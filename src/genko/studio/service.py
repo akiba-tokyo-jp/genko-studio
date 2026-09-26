@@ -15,6 +15,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
+from genko.assets import AssetStore
 from genko.headless import snapshot
 from genko.io import load_episode, save_episode
 from genko.lock import ProjectLock
@@ -161,6 +164,8 @@ class StudioService:
                 "panels": len(leaves),
                 "adopted": sum(1 for f in leaves if (f.panel or {}).get("status") in ("adopted", "skip")),
                 "lines": len(episode.story_for_page(page.index)),
+                **({"assignee": page.extra["assignee"]} if (page.extra or {}).get("assignee") else {}),
+                **({"cover": page.extra["cover"]["kind"]} if (page.extra or {}).get("cover") else {}),
             })
         items = worklist.next_actions(episode, path)
         return ToolResult(True, {
@@ -203,7 +208,8 @@ class StudioService:
         if target == "plugins":
             from genko import plugins
 
-            return ToolResult(True, {"plugins": [{**p, "kind": plugins.PREFIX + p["key"]} for p in plugins.available()]})
+            return ToolResult(True, {"plugins": [{**p, "kind": plugins.PREFIX + p["key"]} for p in plugins.available()],
+                                     "folder": str(plugins.folder())})
         episode = load_episode(path)
         if target == "brushes":
             return ToolResult(True, {"brushes": _brushes_list(episode)})
@@ -486,7 +492,8 @@ class StudioService:
 
         path = self.project_path(project)
         report = checks.book(load_episode(path), path)
-        return ToolResult(True, {"errors": report["errors"], "warnings": report["warnings"], "issues": report["issues"]})
+        # (the list goes in "checks", as preflight's does: "issues" is the reply's own list of tool problems)
+        return ToolResult(True, {"errors": report["errors"], "warnings": report["warnings"], "checks": report["issues"]})
 
     def undo(self, project: str) -> ToolResult:
         """Take back this agent's own latest saved change (never a person's, never an approval)."""
@@ -501,7 +508,7 @@ class StudioService:
         return ToolResult(True, {"undone_revision": result.get("rev")})
 
     def export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
-               area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int = 2048, jpeg: bool = False,
+               area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                spreads: bool = False, color: str = "rgb", icc: str | None = None, fps: float = 12,
                seconds: float | None = None, movie: str = "webp") -> ToolResult:
         """Write the book (or some pages) in any format into <project>/exports/<time>_<format>/, as a person
@@ -512,6 +519,7 @@ class StudioService:
         from genko.app import exporting
 
         path = self.project_path(project)
+        long_edge = int(long_edge or (2560 if format == "kindle" else 2048))  # (each format's own default)
         if format == "timelapse":
             from genko import timelapse
 
@@ -952,6 +960,15 @@ class StudioService:
             name = op.get("op") if isinstance(op, dict) else None
             if name not in AGENT_OPS:
                 return fail(f"op {name} はこの道具では使えない", "op_not_allowed", f"/ops/{i}/op")
+        ops = [dict(op) for op in ops]
+        for i, op in enumerate(ops):
+            if op.get("op") == "import_psd" and op.get("path"):  # (read like the other tools: in the book or under --root)
+                raw = Path(str(op["path"])).expanduser()
+                target = (raw if raw.is_absolute() else path / raw).resolve()
+                if self.root not in target.parents:
+                    return fail(f"path は原稿のフォルダからの相対パスか、--root の中のパス: {op['path']}", "path_outside_root",
+                                f"/ops/{i}/path")
+                op["path"] = str(target)
         episode = load_episode(path)
         try:
             result = apply_ops(episode, ops, dry_run=True, agent=self.actor)
@@ -962,7 +979,8 @@ class StudioService:
                     save_episode(episode, path, actor=self.actor)
         except ApplyError as exc:
             return fail(str(exc), "apply_failed", "/ops")
-        return ToolResult(True, {"committed": commit, "applied": result["applied"], "warnings": result.get("warnings", [])})
+        return ToolResult(True, {"committed": commit, "applied": result["applied"], "warnings": result.get("warnings", []),
+                                 **({"results": result["results"]} if result.get("results") else {})})
 
     # --- reviews and requests --------------------------------------------------------
 
@@ -992,13 +1010,27 @@ class StudioService:
             ticket = next(t for t in episode.tickets if t["id"] not in before)
             save_episode(episode, path, actor=self.actor)
         pages_arg = ",".join(map(str, sorted(set(pages))))
+        faces: list[bytes] = []
+        face_note = None
+        if gate == "sheet":  # (the face each candidate would give, to check before approving)
+            store = AssetStore(path)
+            for cand in (episode.studio.get("character_candidates") or {}).get(character_id, [])[:6]:
+                data = store.get_bytes(cand["asset"], ".png")
+                if data is None:
+                    continue
+                face = face_crop(Image.open(io.BytesIO(data)), cand.get("face_box01"))
+                face.thumbnail((256, 256))
+                faces.append(_png(face))
+            face_note = ("images は候補ごとの顔の切り出し（承認すると以後の作画の参照になる）。ずれていれば、取り込むときに"
+                         "face_box01 を付け直すか、承認のときに --face x,y,w,h で位置を指定する")
         if gate == "sheet":
-            how = f"genko studio approve {path} sheet --character {character_id} --candidate <候補id> --as human:<name>"
+            how = f"genko studio approve {path} sheet --character {character_id} --candidate <候補id>"
         elif gate == "export":
-            how = f"genko studio export {path} --format pdf --out <出力先> --as human:<name>"
+            how = f"genko studio export {path} --format pdf --out <出力先>"
         else:
-            how = f"genko studio approve {path} {gate} --pages {pages_arg} --as human:<name>"
-        return ToolResult(True, {"request": ticket["id"], "how_to_approve": how})
+            how = f"genko studio approve {path} {gate} --pages {pages_arg}"
+        return ToolResult(True, {"request": ticket["id"], "how_to_approve": how, **({"faces": face_note} if face_note else {})},
+                          images=faces)
 
     def tickets(self, project: str, status: str = "open") -> ToolResult:
         path = self.project_path(project)
@@ -1170,14 +1202,20 @@ def sheet_approval_op(project: Path, episode: Episode, character_id: str, candid
     if data is not None:
         image = Image.open(io.BytesIO(data))
         w, h = image.size
-        if face_box01:
-            x, y, bw, bh = (float(v) for v in face_box01)
-        else:
-            side = 0.4 * w
-            x, y, bw, bh = 0.3, 0.03, 0.4, min(0.9, side / h)
-        box = (round(x * w), round(y * h), round((x + bw) * w), round((y + bh) * h))
-        op["face_asset"] = store.put_bytes(_png(image.crop(box)), ".png")
+        op["face_asset"] = store.put_bytes(_png(face_crop(image, face_box01 or cand.get("face_box01"))), ".png")
     return op
+
+
+def face_crop(image, box01: list[float] | None = None):
+    """The face close-up of a character sheet: where the agent (or the person) said it is; without that, a
+    square at the top of the sheet's widest empty-bordered area is only a guess (people see it before approving)."""
+    w, h = image.size
+    if box01:
+        x, y, bw, bh = (float(v) for v in box01)
+    else:
+        side = min(0.4 * w, 0.9 * h)
+        x, y, bw, bh = 0.5 - side / w / 2, 0.03, side / w, side / h
+    return image.crop((round(x * w), round(y * h), round((x + bw) * w), round((y + bh) * h)))
 
 
 def _record_from_request(request: dict) -> dict:

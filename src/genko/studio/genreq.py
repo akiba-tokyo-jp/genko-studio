@@ -47,6 +47,13 @@ class Pack:
         return self.request["id"]
 
 
+def _artwork(style: dict) -> dict:
+    """The style words for a picture that is not a panel (a character sheet, a background): "漫画の絵", not "コマ"."""
+    return {"ja": style["ja"].replace("漫画のコマ", "漫画の絵").replace("ウェブトゥーンのコマ", "ウェブトゥーンの絵"),
+            "en": style["en"].replace("manga panel", "manga artwork").replace("webtoon panel", "webtoon artwork"),
+            "tags": style["tags"]}
+
+
 def vocab(expression: str = "mono") -> dict:
     """The phrase book; colour pages get the colour style instead of the monochrome one."""
     v = json.loads(_VOCAB_PATH.read_text(encoding="utf-8"))
@@ -177,7 +184,8 @@ def panel_prompt(episode: Episode, page: Page, frame: Frame, keep01: list[list[f
     time = v["time"].get(panel.get("time") or "", {})
     if location:
         ja.append(f"場所は{location.get('name', location.get('id'))}（{location.get('desc', '')}）" + (f"、{time['ja']}" if time else "") + "。")
-        en.append(f"Setting: {location.get('name_en') or location.get('name', location.get('id'))}" + (f", {time['en']}" if time else "") + ".")
+        where_en = location.get("name_en") or f"{location.get('name', location.get('id'))} (in Japanese: {location.get('desc', '')})"
+        en.append(f"Setting: {where_en}" + (f", {time['en']}" if time else "") + ".")
         if time:
             tags.append(time["tags"])
     for c in cast:
@@ -189,24 +197,32 @@ def panel_prompt(episode: Episode, page: Page, frame: Frame, keep01: list[list[f
         if bits:
             ja.append(f"{name}: " + "、".join(bits) + "。")
         en_bits = [p for p in (pos.get("en"), facing.get("en")) if p]
+        jp_bits = [p for p in (c.get("pose"), c.get("expression")) if p]
+        if jp_bits:  # (pose and expression are written in Japanese: carried as they are, marked)
+            en_bits.append("pose/expression (in Japanese): " + "、".join(jp_bits))
         if en_bits:
             en.append(f"{c.get('id')}: " + ", ".join(en_bits) + ".")
         if facing.get("tags"):
             tags.append(facing["tags"])
     if panel.get("action"):
         ja.append(str(panel["action"]) + "。")
+        en.append(f"Action (in Japanese): {panel['action']}.")
     if panel.get("emotion"):
         ja.append(f"感情: {panel['emotion']}。")
+        en.append(f"Mood (in Japanese): {panel['emotion']}.")
     keep_ja, keep_en = _keepout_sentence(keep01)
     if keep_ja:
         ja.append(keep_ja)
         en.append(keep_en)
     ja += [str(c).rstrip("。") + "。" for c in episode.bible.constraints]
     plan = page.plan or {}
-    if plan.get("turn_role") == "reveal":
+    order = [f.id for f in page.leaf_frames()]  # (reading order: the page's role belongs to its first or last panel)
+    if plan.get("turn_role") == "reveal" and order and frame.id == order[0]:
         ja.append("めくってすぐの見せ場のコマ。")
-    elif plan.get("turn_role") == "hook":
+        en.append("The big reveal right after the page turn.")
+    elif plan.get("turn_role") == "hook" and order and frame.id == order[-1]:
         ja.append("次のページへ引く最後のコマ。")
+        en.append("The last panel of the page, a hook into the next page.")
     if panel.get("memo"):
         ja.append(str(panel["memo"]))
     human = panel.get("instruction")
@@ -216,6 +232,8 @@ def panel_prompt(episode: Episode, page: Page, frame: Frame, keep01: list[list[f
         ja.append(f"指示: {human}")
     if instruction:
         ja.append(f"今回の指示: {instruction}")
+    if any(k in panel for k in ("action", "emotion")) or instruction or human:
+        notes.append("英語のプロンプトの (in Japanese) の部分は日本語のまま入っている。英語で受ける画像ツールには訳して渡す")
     if not all(chars.get(c.get("id"), {}).get("tokens_en") for c in cast):
         notes.append("英語の見た目の記述（tokens_en）が無い人物がいる。英語のプロンプトは参照画像と日本語から補う")
     prompt = {"ja": "".join(ja), "en": " ".join(en), "tags": ", ".join(dict.fromkeys(t for t in tags if t))}
@@ -371,6 +389,7 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         if char is None:
             raise RequestError(f"登場人物 {character_id} はない", "/character_id")
         v = vocab(episode.spec.expression)
+        v["style"] = _artwork(v["style"])
         box_size = size_block(160.0, 240.0, 0.0, dpi, tool_spec, mode)
         box_size["frame_mm"] = None
         prompt = {
@@ -392,12 +411,13 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
                 files[name] = data
                 refs.append(name)
         characters = [{"id": char["id"], "tokens_en": char.get("tokens_en"), "files": refs}]
-        notes.append("顔が正面を向いたアップを必ず入れる（承認時に顔の参照として切り出す）")
+        notes.append("顔が正面を向いたアップを必ず入れる。取り込むとき face_box01 でその範囲を付ける（承認時に顔の参照として切り出す）")
     else:  # location
         location = _location(episode, location_id)
         if location is None:
             raise RequestError(f"場所 {location_id} はない", "/location_id")
         v = vocab(episode.spec.expression)
+        v["style"] = _artwork(v["style"])
         box_size = size_block(240.0, 160.0, 0.0, dpi, tool_spec, mode)
         box_size["frame_mm"] = None
         prompt = {
