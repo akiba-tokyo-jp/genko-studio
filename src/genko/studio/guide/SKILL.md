@@ -33,8 +33,18 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 ## ネーム
 
 - `write_bible`: 企画書を書いて `mcp__genko__set_bible`。登場人物の `tokens_en`（英語の見た目の記述）は、絵の依頼にそのまま入るので丁寧に書く。
+  - `author`: 作者名（扉に入る）。
+  - `lettering`: 作品に合う文字の設定。種類（speech・thought・shout・whisper・narration・sfx・title）ごとに `font`（`inspect` の fonts の key）・`scale`（大きさの倍率）・`weight`。
+    ジャンルと雰囲気で選ぶ（例: シリアスのナレーションは明朝、ギャグやかわいい系は丸ゴシックや手書き風）。空なら台詞と同じ書体。叫びは 1.3 倍・太字、ささやきは 0.8 倍が既定。
+  - `props`: 何度も出る小物（id・name・desc・tokens_en）。参照画像は `apply_ops` の `attach_reference`（`target.prop_id`）で付ける。コマの `props` に id を書くと、その参照が絵の依頼に付く。
 - `write_script`: 脚本を書いて `mcp__genko__set_script`。beat ごとに `page` を決める。見せ場（reveal）は偶数ページの先頭、引き（hook）は奇数ページの最後。
 - `plan_page`: `mcp__genko__inspect`（target `page`）でそのページの beat を読み、ネーム計画を書いて `mcp__genko__submit_name`。
+  - 見せ場は大きく: めくってすぐの見せ場は `template` の `reveal_top`・`reveal_bleed`、締めのページは `finale_bleed`、動きのある場面は `action_slant`。
+  - コマの `bleed: true` で断ち切り（紙の端まで）、`slant`（mm）で次のコマとの境を斜めに。ページの `spread: true` で次のページと見開き。
+  - 1 ページ目を扉にするなら `title: true`（`template` は `title_top` か `reveal_bleed`）。題名と作者名が入る。
+  - `fx` の言葉（雨・汗・集中線・水しぶきなど。知らない言葉は警告が出る）は仕上げで Genko が描くか、絵の依頼文に入る。`emphasis` も依頼文に入る。
+  - 効果音（balloon `sfx`）は、コマの `sfx_at`（音の出どころ、コマの中の 0..1 の [x, y]）の近くに置かれる。
+  - 台詞は話者の顔の近くに置かれ、尾が話者へ伸びる。人物の `pos` を絵の配置どおりに書く。
 - `review_name`: `mcp__genko__render` で画像を見て、読み順の迷い・窮屈なコマ・弱いめくりを確かめる。直すなら `submit_name` を `replace: true` で送り直す。よければ `mcp__genko__record_review`。
 - `revise_page`: 人間の指示（`comments`）に従って `submit_name` を `replace: true` で送り直す。
 
@@ -82,7 +92,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   人物がいない絵なら `apply_ops` の `record_review`（`kind: "regions"`、`frame_id`、`input_hash` に採用中の候補 id）。
 - `upscale_panel`: 採用した絵が印刷の解像度に足りない。`mcp__genko__upscale`（`page`・`frame_id`、`method` は `inspect` の `upscalers`、既定 `genko`）で拡大した候補を作り、`adopt` で置き直す。
   画像ツールに高解像度化があれば `generation_request`（`mode: "upscale"`）でもよい。拡大しないなら `record_review`（`kind: "upscale"`、`input_hash` に採用中の候補 id）で理由を残す。
-- `finish_page`: `mcp__genko__finish_page` を `commit: false` で見て（顔にかかる台詞の移動、効果）、よければ `commit: true`。
+- `finish_page`: `mcp__genko__finish_page` を `commit: false` で見て（顔にかかる台詞や話していない人の近くの台詞の移動、尾を報告した顔へ、効果・漫符・雨）、よければ `commit: true`。
+  報告した顔は、網点が薄くなって白く浮く。
 - 線をくっきりさせたいコマは `mcp__genko__derive`（`kind: "lineart"`）で採用中の絵から線を抜き出し、`adopt`（`to: "ink"`）で絵の上に置く。
   モノクロの原稿では、グレーの絵は印刷のときに Genko が網点に変える。画像はグレースケールで、トーンを描き込みすぎずに作る。
 - 効果音はネーム計画の台詞で `balloon: "sfx"` にする（Genko が大きな縁取り文字で描く。画像に描かせない）。
@@ -127,6 +138,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 取り消し: `mcp__genko__undo` で自分の最後の変更を取り消す。最後の変更が人のもの・承認が変わる・`project.json` が Genko の外で書き換えられた、のどれかなら断る。
 - 書き出し: `mcp__genko__export`（`format`: pdf・tiff・png・cmyk・layers・psd・pack・epub・kindle・strip・webtoon・sns・timelapse、`pages`、`dpi`、`area`: paper・bleed・trim）。承認は要らない。書き出し先は原稿の `exports/`。
   40 秒で終わらない書き出し（600 dpi の PDF・PNG・PSD など）は `job` を返す。書き出しは続いているので、1〜5 分おいて `mcp__genko__export_status`（`job`）で結果（`result` の `files`）を取る。`upscale` の `job` も同じ。
+  - `color` の既定 `auto`: モノクロの原稿はグレー（劣化なし）、カラーは RGB。`bitonal` で白黒 2 階調。PDF には仕上がり線（TrimBox）と裁ち落とし（BleedBox）が入る。
   - `cmyk`（CMYK の TIFF）と pdf の `color: "cmyk"` は、`icc` に印刷所の CMYK プロファイル（.icc のパス）を渡すとそれで変換する。無ければ黒は K 版だけ・総インキ量 320% 以内。`color: "gray"` も。
   - `layers` はレイヤーを 1 枚ずつ透明な PNG に。`kindle` は Kindle 用の固定レイアウト（`long_edge` 既定 2560）。
   - `timelapse` は `set_timelapse` で記録した制作過程（`movie`: webp・gif・png・mp4、`fps`、`seconds`、`pages` は 1 ページだけ）。

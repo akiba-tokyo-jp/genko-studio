@@ -171,7 +171,7 @@ _ERRORS: list[tuple[str, object]] = [
      "MP4 にはこのパソコンに ffmpeg が要ります（WebP・GIF・PNG なら何も要りません）"),
     (r"PSD depth (\d+) is not supported", r"\1 ビットの PSD は読めません"),
     (r"broken PSD layer record", "PSD のレイヤーの情報が壊れています"),
-    (r"color must be rgb, cmyk or gray", "色は RGB・CMYK・グレーのどれかです"),
+    (r"color must be (?:auto, )?rgb, cmyk(?:, gray)? or (?:gray|bitonal)", "色は自動・RGB・CMYK・グレー・2 階調のどれかです"),
     (r"ffmpeg failed: (.*)", r"動画にできませんでした（\1）"),
     (r"format must be one of (.*)", r"形式は \1 のどれかです"),
     (r"import_psd needs path or psd \(base64\)", "読み込む PSD のファイルを指定します"),

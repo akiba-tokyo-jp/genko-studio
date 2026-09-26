@@ -180,6 +180,13 @@ def panel_prompt(episode: Episode, page: Page, frame: Frame, keep01: list[list[f
         ja.append("、".join(p for p in (angle.get("ja"), shot.get("ja")) if p) + "の構図。")
         en.append(", ".join(p for p in (angle.get("en"), shot.get("en")) if p) + ".")
         tags += [t for t in (shot.get("tags"), angle.get("tags")) if t]
+    known_props = {p.get("id"): p for p in studio.get("props", [])}
+    for pid in panel.get("props") or []:
+        prop = known_props.get(pid)
+        if prop is None:
+            continue
+        ja.append(f"小物「{prop.get('name', pid)}」: {prop.get('desc', '')}（参照画像があれば、形と柄をそのまま）。")
+        en.append(f"Prop {pid}: {prop.get('tokens_en') or prop.get('desc', '') + ' (in Japanese)'}, exactly as in its reference.")
     location = _location(episode, panel.get("location_id"))
     time = v["time"].get(panel.get("time") or "", {})
     if location:
@@ -210,6 +217,16 @@ def panel_prompt(episode: Episode, page: Page, frame: Frame, keep01: list[list[f
     if panel.get("emotion"):
         ja.append(f"感情: {panel['emotion']}。")
         en.append(f"Mood (in Japanese): {panel['emotion']}.")
+    from genko.studio import fxwords
+
+    fx_ja, fx_en = fxwords.art_words(panel.get("fx") or [])
+    if fx_ja:
+        ja.append("効果: " + "、".join(fx_ja) + "。")
+        en.append("Effects: " + "; ".join(fx_en) + ".")
+    weight = fxwords.emphasis_words(panel.get("emphasis"))
+    if weight:
+        ja.append(weight[0])
+        en.append(weight[1])
     keep_ja, keep_en = _keepout_sentence(keep01)
     if keep_ja:
         ja.append(keep_ja)
@@ -373,6 +390,11 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
                 "3. 似ていない人物ごとに generation_request（mode inpaint、parent、focus_character）で直す",
             ]
             notes.append("複数人物のコマ: まず全体を作り、似ていない人物だけを一人ずつ inpaint で直す（steps を参照）")
+        before = _previous_art(episode, store, pg, frame) if mode == "new" else None
+        if before is not None:  # (the same scene's panel before this one: people, clothes and props carry on)
+            files["refs/previous_panel.png"] = before[0]
+            refs.append("refs/previous_panel.png")
+            notes.append(f"refs/previous_panel.png は同じ場面の直前のコマ（{before[1]}）。人物の服装・持ち物・背景をそろえる。構図は真似しない")
         if locked and locked.get("reference") and locked.get("page") != pg.index and purpose == "panel_art":
             data = _asset(store, locked["reference"])
             if data is not None:
@@ -524,6 +546,14 @@ def _panel_refs(episode: Episode, store: AssetStore, panel: dict, cast: list[str
             name = f"refs/{location['id']}_{ref['asset'][7:15]}.png"
             files[name] = data
             names.append(name)
+    props = {p.get("id"): p for p in episode.studio.get("props", [])}
+    for pid in panel.get("props") or []:  # (a prop that must look the same every time: its registered pictures)
+        for ref in (props.get(pid) or {}).get("refs", []):
+            data = _asset(store, ref.get("asset", ""))
+            if data is not None:
+                name = f"refs/prop_{pid}_{ref['asset'][7:15]}.png"
+                files[name] = data
+                names.append(name)
     for ref in sorted(panel.get("refs", []), key=lambda r: r.get("order", 0)):
         source = ref.get("source") or {}
         data = _asset(store, source.get("asset", "")) if source.get("kind") == "asset" else None
@@ -532,6 +562,26 @@ def _panel_refs(episode: Episode, store: AssetStore, panel: dict, cast: list[str
             files[name] = data
             names.append(name)
     return names
+
+
+def _previous_art(episode: Episode, store: AssetStore, page: Page, frame: Frame) -> tuple[bytes, str] | None:
+    """The adopted art of the panel just before this one in reading order, when it shows the same place (and the
+    same scene, when the script says so)."""
+    panel = frame.panel or {}
+    order = [(p, f) for p in sorted(episode.pages, key=lambda p: p.index) for f in p.leaf_frames()]
+    at = next((i for i, (p, f) in enumerate(order) if f.id == frame.id), None)
+    if not at:
+        return None
+    before_page, before = order[at - 1]
+    other = before.panel or {}
+    if not panel.get("location_id") or other.get("location_id") != panel.get("location_id"):
+        return None
+    adopted = (other.get("adopted") or {}).get("art")
+    cand = next((c for c in other.get("candidates", []) if c.get("id") == adopted), None)
+    if cand is None:
+        return None
+    data = _asset(store, cand.get("asset", ""))
+    return (data, f"{before_page.index} ページ {other.get('slot') or before.id}") if data is not None else None
 
 
 def _mask_rects(frame: Frame, regions: list | None) -> list[tuple[float, float, float, float]]:

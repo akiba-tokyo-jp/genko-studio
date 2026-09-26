@@ -74,6 +74,89 @@ def crop_to(image, page, area: str, dpi: int):
     return image.crop((x0, y0, x0 + mm_to_px(r.width, dpi), y0 + mm_to_px(r.height, dpi)))
 
 
+COLORS = ("auto", "rgb", "cmyk", "gray", "bitonal")
+
+
+def page_color(page: Page, color: str) -> str:
+    """The colour a page is written in. auto: a monochrome book's pages in grey (its tones stay crisp: no JPEG, no
+    colour), its covers and a colour book's pages in RGB."""
+    if color != "auto":
+        return color
+    from genko.covers import is_cover
+
+    return "rgb" if page.spec.expression == "color" or is_cover(page) else "gray"
+
+
+def _pdf_boxes(page: Page, area: str) -> dict[str, tuple[float, float, float, float]]:
+    """The page's MediaBox (the written area), BleedBox and TrimBox in points, from the bottom left."""
+    paper = (0.0, 0.0, page.spec.width_mm, page.spec.height_mm)
+    rects = {"paper": paper}
+    for key, rect in (("bleed", page.bleed_rect_mm()), ("trim", page.trim_rect_mm())):
+        rects[key] = (rect.x, rect.y, rect.width, rect.height)
+    mx, my, mw, mh = rects[area]
+    pt = 72 / 25.4
+
+    def box(rect):
+        x, y, w, h = rect
+        x0, x1 = max(x, mx) - mx, min(x + w, mx + mw) - mx
+        top, bottom = max(y, my) - my, min(y + h, my + mh) - my
+        return (round(x0 * pt, 3), round((mh - bottom) * pt, 3), round(x1 * pt, 3), round((mh - top) * pt, 3))
+
+    return {"MediaBox": box(rects[area]), "BleedBox": box(rects["bleed"]), "TrimBox": box(rects["trim"])}
+
+
+def write_pdf(path: Path, pictures: list, boxes: list[dict], profiles: list[bytes | None] | None = None) -> Path:
+    """A print PDF: each page one picture, stored losslessly (Flate), in its own colour: 1-bit and 8-bit grey,
+    RGB or CMYK (with an ICC profile when given). Every page carries its MediaBox, BleedBox and TrimBox."""
+    import zlib
+
+    objects: list[bytes] = []
+
+    def add(body: bytes) -> int:
+        objects.append(body)
+        return len(objects)
+
+    def stream(head: str, data: bytes) -> bytes:
+        return f"<< {head} /Length {len(data)} >>\nstream\n".encode() + data + b"\nendstream"
+
+    catalog = add(b"")  # (filled in last)
+    pages_obj = add(b"")
+    kids: list[int] = []
+    profile_ids: dict[bytes, int] = {}
+    for n, (picture, box) in enumerate(zip(pictures, boxes)):
+        mode = picture.mode
+        space, bits, comps = {"1": ("/DeviceGray", 1, 1), "L": ("/DeviceGray", 8, 1), "RGB": ("/DeviceRGB", 8, 3),
+                              "CMYK": ("/DeviceCMYK", 8, 4)}[mode]
+        profile = (profiles or [None] * len(pictures))[n]
+        if profile and mode in ("RGB", "CMYK"):
+            if profile not in profile_ids:
+                profile_ids[profile] = add(stream(f"/N {comps} /Filter /FlateDecode", zlib.compress(profile, 6)))
+            space = f"[/ICCBased {profile_ids[profile]} 0 R]"
+        data = zlib.compress(picture.tobytes(), 6)
+        image = add(stream(f"/Type /XObject /Subtype /Image /Width {picture.width} /Height {picture.height} "
+                           f"/ColorSpace {space} /BitsPerComponent {bits} /Filter /FlateDecode", data))
+        x0, y0, x1, y1 = box["MediaBox"]
+        draw = f"q {x1 - x0:.3f} 0 0 {y1 - y0:.3f} 0 0 cm /Im0 Do Q".encode()
+        content = add(stream("", draw))
+        boxes_text = " ".join(f"/{key} [{' '.join(f'{v:.3f}' for v in value)}]" for key, value in box.items())
+        kids.append(add(f"<< /Type /Page /Parent {pages_obj} 0 R {boxes_text} /Resources << /XObject << /Im0 {image} 0 R >> >> "
+                        f"/Contents {content} 0 R >>".encode()))
+    objects[catalog - 1] = f"<< /Type /Catalog /Pages {pages_obj} 0 R >>".encode()
+    objects[pages_obj - 1] = f"<< /Type /Pages /Kids [{' '.join(f'{k} 0 R' for k in kids)}] /Count {len(kids)} >>".encode()
+    out = bytearray(b"%PDF-1.6\n%\xe2\xe3\xcf\xd3\n")
+    offsets = []
+    for i, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    out += b"".join(f"{o:010d} 00000 n \n".encode() for o in offsets)
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root {catalog} 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    path = Path(path)
+    path.write_bytes(bytes(out))
+    return path
+
+
 def export_print(
     episode: Episode,
     dest: Path,
@@ -82,16 +165,17 @@ def export_print(
     threshold: int = 180,
     crop_marks: bool = True,
     area: str = "paper",
-    color: str = "rgb",
+    color: str = "auto",
     icc: str | None = None,
 ) -> list[Path]:
     """Print pages. `area`: "paper" (the whole sheet, with crop marks), "bleed" (the finished size and its
-    bleed: what most printers take) or "trim" (the finished size only). `color`: "rgb" (sRGB, its profile
-    embedded), "cmyk" (TIFF or PDF, through the printer's profile `icc` when given) or "gray"."""
+    bleed: what most printers take) or "trim" (the finished size only). `color`: "auto" (a monochrome book in
+    grey, a colour book in RGB), "rgb" (sRGB, its profile embedded), "cmyk" (TIFF or PDF, through the printer's
+    profile `icc` when given), "gray", or "bitonal" (1-bit black and white, 二階調)."""
     if area not in AREAS:
         raise ValueError(f"area must be one of {', '.join(AREAS)}")
-    if color not in ("rgb", "cmyk", "gray"):
-        raise ValueError("color must be rgb, cmyk or gray")
+    if color not in COLORS:
+        raise ValueError("color must be auto, rgb, cmyk, gray or bitonal")
     fmt = fmt.lower()
     if color == "cmyk" and fmt not in ("tiff", "pdf", "cmyk"):
         raise ValueError("CMYK is written as TIFF or PDF")
@@ -108,35 +192,43 @@ def export_print(
     ]
     written: list[Path] = []
 
-    def coloured(image):
-        if color == "cmyk":
+    def coloured(image, how: str):
+        if how == "cmyk":
             return colour.to_cmyk(image, icc)
-        return image.convert("L" if color == "gray" else "RGB")
+        if how == "bitonal":
+            return to_bitonal(image, threshold=threshold)
+        return image.convert("L" if how == "gray" else "RGB")
 
-    profile = (Path(icc).read_bytes() if icc and color == "cmyk" else colour.srgb_icc() if color == "rgb" else None)
+    def profile_for(how: str) -> bytes | None:
+        return Path(icc).read_bytes() if icc and how == "cmyk" else colour.srgb_icc() if how == "rgb" else None
+
     if fmt == "pdf":
         path = dest / f"{stem(episode)}.pdf"
-        pictures = [coloured(image) for image in images]
-        extra = {"quality": 95} if color == "cmyk" else {}
-        pictures[0].save(path, format="PDF", save_all=True, append_images=pictures[1:], resolution=dpi, **extra)
-        return [path]
+        hows = [page_color(page, color) for page in episode.pages]
+        pictures = [coloured(image, how) for image, how in zip(images, hows)]
+        return [write_pdf(path, pictures, [_pdf_boxes(page, area) for page in episode.pages], [profile_for(h) for h in hows])]
     from genko.covers import file_stem
 
     for page, image in zip(episode.pages, images):
         name = f"{stem(episode)}_{file_stem(page)}"
-        if fmt == "cmyk" or (fmt == "tiff" and color != "rgb"):  # (colour and grey TIFF for print)
+        how = page_color(page, color)
+        profile = profile_for(how)
+        if fmt == "cmyk" or (fmt == "tiff" and how not in ("rgb", "bitonal") and color != "auto"):  # (colour and grey TIFF)
             path = dest / f"{name}.tiff"
-            coloured(image).save(path, format="TIFF", compression="tiff_lzw", dpi=(dpi, dpi),
-                                 **({"icc_profile": profile} if profile else {}))
+            coloured(image, how).save(path, format="TIFF", compression="tiff_lzw", dpi=(dpi, dpi),
+                                      **({"icc_profile": profile} if profile else {}))
+        elif fmt == "tiff" and how == "rgb" and color == "auto":  # (a colour page, as a colour TIFF)
+            path = dest / f"{name}.tiff"
+            coloured(image, how).save(path, format="TIFF", compression="tiff_lzw", dpi=(dpi, dpi), icc_profile=profile)
         elif fmt == "tiff":
             path = dest / f"{name}.tiff"
-            to_bitonal(image, threshold=threshold).save(path, format="TIFF", compression="group4")
+            to_bitonal(image, threshold=threshold).save(path, format="TIFF", compression="group4", dpi=(dpi, dpi))
         elif fmt == "png1":
             path = dest / f"{name}.png"
-            to_bitonal(image, threshold=threshold).save(path)
+            to_bitonal(image, threshold=threshold).save(path, dpi=(dpi, dpi))
         else:
             path = dest / f"{name}.png"
-            picture = coloured(image)
+            picture = coloured(image, how)
             picture.save(path, dpi=(dpi, dpi), **({"icc_profile": profile} if profile else {}))
         written.append(path)
     return written

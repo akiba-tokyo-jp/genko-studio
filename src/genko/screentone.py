@@ -17,7 +17,7 @@ import math
 from dataclasses import dataclass
 from functools import lru_cache
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageFilter
 
 DEFAULT_STEPS = (0.1, 0.2, 0.3)
 
@@ -32,6 +32,8 @@ class Finish:
     lpi: float = 60.0
     angle: float = 45.0
     screen: str = "am"         # am (dots) or fm (noise)
+    face_light: float = 0.6    # how much of their grey the reported faces lose (0: none, 1: paper white)
+    smooth: float = 1.0        # the art's own fine specks evened out before the tones (px at 600 dpi; 0: off)
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "Finish":
@@ -179,11 +181,21 @@ def quantize(grey: Image.Image, finish: Finish) -> tuple[Image.Image, list[tuple
     return proof, regions
 
 
-def finish_gray(grey: Image.Image, finish: Finish, dpi: int, *, screen: bool, origin: tuple[int, int] = (0, 0)) -> Image.Image:
-    """Greyscale art → print (screen=True: only 0 and 255) or proof (quantized greys)."""
+def finish_gray(grey: Image.Image, finish: Finish, dpi: int, *, screen: bool, origin: tuple[int, int] = (0, 0),
+                faces: Image.Image | None = None) -> Image.Image:
+    """Greyscale art → print (screen=True: only 0 and 255) or proof (quantized greys). `faces` (L, white where a
+    face is): their mid greys are lightened, so faces stand out white from a toned picture; their lines stay."""
     grey = grey.convert("L")
     lines = line_mask(grey, finish, dpi)
-    proof, regions = quantize(grey, finish)
+    toned = grey
+    if finish.smooth > 0:  # (the picture's own dots and grain would beat against the screen: even them out first)
+        toned = grey.filter(ImageFilter.GaussianBlur(max(0.3, float(finish.smooth) * dpi / 600)))
+    if faces is not None and finish.face_light > 0:
+        keep = max(0.0, min(1.0, float(finish.face_light)))
+        lo = finish.black
+        light = toned.point(lambda v: v if v <= lo else round(255 - (255 - v) * (1 - keep)))
+        toned = Image.composite(light, toned, faces.convert("L").resize(toned.size))
+    proof, regions = quantize(toned, finish)
     if not screen:
         return ImageChops.darker(proof, ImageChops.invert(lines))
     out = proof.point(lambda v: 0 if v == 0 else 255)  # solid black and paper

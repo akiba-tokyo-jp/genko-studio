@@ -56,7 +56,8 @@ def layer_dpi(episode: Episode, page: Page, layer, store: AssetStore) -> float |
     return round(effective_dpi(size[0], layer.placement_mm.width), 1)
 
 
-def check(episode: Episode, project: Path, *, allow_fixture: bool = False, force: bool = False, min_dpi: int = MIN_DPI) -> dict:
+def check(episode: Episode, project: Path, *, allow_fixture: bool = False, force: bool = False, min_dpi: int = MIN_DPI,
+          color: str | None = None) -> dict:
     store = AssetStore(project)
     errors: list[Issue] = []
     warnings: list[Issue] = []
@@ -113,6 +114,11 @@ def check(episode: Episode, project: Path, *, allow_fixture: bool = False, force
                 (warnings if allow_fixture else errors).append(issue)
             elif cand is None or (origin.get("kind") == "agent" and not (origin.get("tool_id") or origin.get("model"))):
                 warnings.append(warning("provenance_missing", lwhere, f"{page.index} ページのコマ {layer.frame_id} の画像の来歴（ツール・モデル）が記録されていない"))
+    mono = any(p.spec.expression != "color" for p in episode.pages)
+    if color == "rgb" and mono:  # (a monochrome book written in colour: the printer sees grey fringes on every dot)
+        issue = (warning if force else error)("mono_as_colour", "/color", "モノクロの原稿を RGB で書き出そうとしている",
+                                              "color を auto（グレー）か bitonal（2 階調）にする")
+        (warnings if force else errors).append(issue)
     if studio_project:
         for cid in sorted(needed_sheets):
             if not chars[cid].get("locked"):

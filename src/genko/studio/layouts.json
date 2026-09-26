@@ -1,52 +1,418 @@
 {
   "splash": {
     "description": "1ページ1コマ（扉、決めゴマ）",
-    "tiers": [{"h": 1.0, "cols": [{"slot": "p1", "w": 1.0, "rows": null}]}]
+    "tiers": [
+      {
+        "h": 1.0,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      }
+    ]
   },
   "2tier_wide": {
     "description": "横長2段",
     "tiers": [
-      {"h": 0.5, "cols": [{"slot": "p1", "w": 1.0, "rows": null}]},
-      {"h": 0.5, "cols": [{"slot": "p2", "w": 1.0, "rows": null}]}
+      {
+        "h": 0.5,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.5,
+        "cols": [
+          {
+            "slot": "p2",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      }
     ]
   },
   "3tier_1-2-1": {
     "description": "3段。中段を左右2つに割る",
     "tiers": [
-      {"h": 0.3, "cols": [{"slot": "p1", "w": 1.0, "rows": null}]},
-      {"h": 0.35, "cols": [{"slot": "p2", "w": 0.5, "rows": null}, {"slot": "p3", "w": 0.5, "rows": null}]},
-      {"h": 0.35, "cols": [{"slot": "p4", "w": 1.0, "rows": null}]}
+      {
+        "h": 0.3,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.35,
+        "cols": [
+          {
+            "slot": "p2",
+            "w": 0.5,
+            "rows": null
+          },
+          {
+            "slot": "p3",
+            "w": 0.5,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.35,
+        "cols": [
+          {
+            "slot": "p4",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      }
     ]
   },
   "3tier_2-1-2": {
     "description": "3段。上下を2つずつ、中段は横長",
     "tiers": [
-      {"h": 0.3, "cols": [{"slot": "p1", "w": 0.55, "rows": null}, {"slot": "p2", "w": 0.45, "rows": null}]},
-      {"h": 0.4, "cols": [{"slot": "p3", "w": 1.0, "rows": null}]},
-      {"h": 0.3, "cols": [{"slot": "p4", "w": 0.45, "rows": null}, {"slot": "p5", "w": 0.55, "rows": null}]}
+      {
+        "h": 0.3,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 0.55,
+            "rows": null
+          },
+          {
+            "slot": "p2",
+            "w": 0.45,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.4,
+        "cols": [
+          {
+            "slot": "p3",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.3,
+        "cols": [
+          {
+            "slot": "p4",
+            "w": 0.45,
+            "rows": null
+          },
+          {
+            "slot": "p5",
+            "w": 0.55,
+            "rows": null
+          }
+        ]
+      }
     ]
   },
   "4tier_classic": {
     "description": "4段の標準的な割り",
     "tiers": [
-      {"h": 0.24, "cols": [{"slot": "p1", "w": 0.6, "rows": null}, {"slot": "p2", "w": 0.4, "rows": null}]},
-      {"h": 0.26, "cols": [{"slot": "p3", "w": 1.0, "rows": null}]},
-      {"h": 0.26, "cols": [{"slot": "p4", "w": 0.4, "rows": null}, {"slot": "p5", "w": 0.6, "rows": null}]},
-      {"h": 0.24, "cols": [{"slot": "p6", "w": 1.0, "rows": null}]}
+      {
+        "h": 0.24,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 0.6,
+            "rows": null
+          },
+          {
+            "slot": "p2",
+            "w": 0.4,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.26,
+        "cols": [
+          {
+            "slot": "p3",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.26,
+        "cols": [
+          {
+            "slot": "p4",
+            "w": 0.4,
+            "rows": null
+          },
+          {
+            "slot": "p5",
+            "w": 0.6,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.24,
+        "cols": [
+          {
+            "slot": "p6",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      }
     ]
   },
   "climax_wide": {
     "description": "上に小さなコマ2つ、下に大ゴマ",
     "tiers": [
-      {"h": 0.28, "cols": [{"slot": "p1", "w": 0.5, "rows": null}, {"slot": "p2", "w": 0.5, "rows": null}]},
-      {"h": 0.72, "cols": [{"slot": "p3", "w": 1.0, "rows": null}]}
+      {
+        "h": 0.28,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 0.5,
+            "rows": null
+          },
+          {
+            "slot": "p2",
+            "w": 0.5,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.72,
+        "cols": [
+          {
+            "slot": "p3",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      }
     ]
   },
   "tall_right": {
     "description": "右に縦長の大ゴマ、左に2コマを重ねる",
     "tiers": [
-      {"h": 0.7, "cols": [{"slot": "p1", "w": 0.55, "rows": null}, {"slot": "c2", "w": 0.45, "rows": [{"slot": "p2", "h": 0.5}, {"slot": "p3", "h": 0.5}]}]},
-      {"h": 0.3, "cols": [{"slot": "p4", "w": 1.0, "rows": null}]}
+      {
+        "h": 0.7,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 0.55,
+            "rows": null
+          },
+          {
+            "slot": "c2",
+            "w": 0.45,
+            "rows": [
+              {
+                "slot": "p2",
+                "h": 0.5
+              },
+              {
+                "slot": "p3",
+                "h": 0.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "h": 0.3,
+        "cols": [
+          {
+            "slot": "p4",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      }
     ]
+  },
+  "reveal_bleed": {
+    "description": "見せ場の1ページ1コマ。紙の端まで断ち切り（めくってすぐの大ゴマ）",
+    "tiers": [
+      {
+        "h": 1.0,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      }
+    ],
+    "bleed": [
+      "p1"
+    ]
+  },
+  "reveal_top": {
+    "description": "見せ場。上に断ち切りの大ゴマ、下に小さなコマ2つ",
+    "tiers": [
+      {
+        "h": 0.64,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.36,
+        "cols": [
+          {
+            "slot": "p2",
+            "w": 0.5,
+            "rows": null
+          },
+          {
+            "slot": "p3",
+            "w": 0.5,
+            "rows": null
+          }
+        ]
+      }
+    ],
+    "bleed": [
+      "p1"
+    ]
+  },
+  "finale_bleed": {
+    "description": "締め。上に小さなコマ2つ、下に断ち切りの大ゴマ（最後のページ・引きのページ）",
+    "tiers": [
+      {
+        "h": 0.3,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 0.5,
+            "rows": null
+          },
+          {
+            "slot": "p2",
+            "w": 0.5,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.7,
+        "cols": [
+          {
+            "slot": "p3",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      }
+    ],
+    "bleed": [
+      "p3"
+    ]
+  },
+  "action_slant": {
+    "description": "動きのある3段。段の境を斜めに",
+    "tiers": [
+      {
+        "h": 0.34,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.33,
+        "cols": [
+          {
+            "slot": "p2",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.33,
+        "cols": [
+          {
+            "slot": "p3",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      }
+    ],
+    "slant": {
+      "p1": 14,
+      "p2": -14
+    }
+  },
+  "title_top": {
+    "description": "1ページ目。上の段に題名と作者名、下に3コマ（読み切りの扉を兼ねる）",
+    "tiers": [
+      {
+        "h": 0.34,
+        "cols": [
+          {
+            "slot": "p1",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.33,
+        "cols": [
+          {
+            "slot": "p2",
+            "w": 0.5,
+            "rows": null
+          },
+          {
+            "slot": "p3",
+            "w": 0.5,
+            "rows": null
+          }
+        ]
+      },
+      {
+        "h": 0.33,
+        "cols": [
+          {
+            "slot": "p4",
+            "w": 1.0,
+            "rows": null
+          }
+        ]
+      }
+    ],
+    "bleed": [
+      "p1"
+    ],
+    "title": "p1"
   }
 }

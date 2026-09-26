@@ -17,6 +17,7 @@ from genko.studio.drafts import Drafts
 
 ACTOR = "system:adopt-drafts"
 BRIEF_FROM_PLAN = ("shot", "angle", "characters", "location_id", "time", "action", "emotion", "fx", "emphasis", "beat_ids")
+BRIEF_LATER = ("props", "sfx_at", "bleed", "slant")  # (plan fields added later: copied when given)
 
 
 def adopt_drafts(project: Path) -> dict:
@@ -51,7 +52,8 @@ def adopt_drafts(project: Path) -> dict:
                 frame_id = slots.get(panel.get("slot"))
                 if frame_id in leaves:
                     ops.append({"op": "set_panel", "page": page.index, "frame_id": frame_id,
-                                "set": {"slot": panel["slot"], **{k: panel[k] for k in BRIEF_FROM_PLAN if k in panel}}})
+                                "set": {"slot": panel["slot"], **{k: panel[k] for k in BRIEF_FROM_PLAN if k in panel},
+                                **{k: panel[k] for k in BRIEF_LATER if panel.get(k) is not None}}})
             ops.append({"op": "set_page_plan", "page": page.index, "plan": {
                 "name": plan, "input_hash": record.get("input_hash"), "rev": episode.revision,
                 "turn_role": plan.get("turn_role"), "slot_to_frame": slots,

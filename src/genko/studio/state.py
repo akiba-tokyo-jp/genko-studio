@@ -55,3 +55,19 @@ def page_fixes(episode: Episode, index: int) -> list[dict]:
         if (t.get("page_id") == (page.id if page else None) or t.get("page_index") == index)
         and not t.get("frame_id") and t.get("assignee") == "agent"
     ]
+
+
+def written_look(char: dict) -> str:
+    """What the bible says a character looks like, in one line, to lay beside the sheet candidates: a person checks
+    that the picture and the words agree (Genko cannot compare them)."""
+    look = char.get("look") or {}
+    parts = [f"{label}: {look[key]}" for key, label in (("hair", "髪"), ("eyes", "目"), ("build", "体格"), ("silhouette", "シルエット"))
+             if look.get(key)]
+    if look.get("height_cm"):
+        parts.append(f"身長: {look['height_cm']} cm")
+    outfits = [str(o.get("desc")) for o in look.get("outfits") or [] if isinstance(o, dict) and o.get("desc")]
+    if outfits:
+        parts.append("服: " + " ／ ".join(outfits))
+    if look.get("marks"):
+        parts.append("特徴: " + "、".join(map(str, look["marks"])))
+    return "。".join(parts)

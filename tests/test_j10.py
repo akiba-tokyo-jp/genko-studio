@@ -180,9 +180,12 @@ def test_cmyk_and_profiles_in_the_print_export(tmp_path):
         assert tiff.mode == "CMYK" and round(tiff.info["dpi"][0]) == 40
     pdf = export_print(ep, tmp_path / "d", fmt="pdf", dpi=40, color="cmyk")[0]
     assert b"/DeviceCMYK" in pdf.read_bytes()
-    png = export_print(ep, tmp_path / "e", fmt="png", dpi=40)[0]
+    png = export_print(ep, tmp_path / "e", fmt="png", dpi=40, color="rgb")[0]
     with Image.open(png) as image:
         assert image.info.get("icc_profile") == colour.srgb_icc()
+    auto = export_print(ep, tmp_path / "e2", fmt="png", dpi=40)[0]
+    with Image.open(auto) as image:
+        assert image.mode == "L"  # (a monochrome book: grey, no colour fringes)
     gray = export_print(ep, tmp_path / "f", fmt="tiff", dpi=40, color="gray")[0]
     with Image.open(gray) as image:
         assert image.mode == "L"

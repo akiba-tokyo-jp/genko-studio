@@ -749,7 +749,8 @@ STYLE_KEYS = {"font": str, "size_mm": float, "tracking": float, "leading": float
               "arc": float, "latin": str, "emphasis_mark": str, "bold": bool, "weight": str, "italic": bool, "outline_rgb": list,
               "wobble": float, "double": bool, "spikes": int, "spike_depth": float,
               "scale_x": float, "gradient": dict, "text_path": "points", "features": "tags", "yakumono": bool,
-              "spike_jitter": float, "bumps": int, "picture": "png", "fill_png": "png", "warp": "corners"}
+              "spike_jitter": float, "bumps": int, "picture": "png", "fill_png": "png", "warp": "corners",
+              "speaker_id": str}  # (speaker_id: the character who says it, so the balloon and its tail can find them)
 FEATURES = ("jp78", "jp83", "jp90", "jp04", "trad", "expt", "nlck", "hojo", "hwid", "fwid", "pwid", "palt", "twid", "qwid",
             "ruby", "liga", "kern", "smpl", "ital", "salt", "ss01", "ss02", "ss03", "ss04", "ss05")
 

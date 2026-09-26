@@ -143,6 +143,9 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--dpi", type=int, help="default: the page spec dpi (600 for B4)")
     export.add_argument("--allow-fixture", action="store_true", help="let test images through (never for real books)")
     export.add_argument("--force", action="store_true", help="export even below the resolution threshold")
+    export.add_argument("--color", default="auto", choices=["auto", "gray", "bitonal", "rgb", "cmyk"],
+                        help="auto: a monochrome book in grey (lossless), a colour book in RGB; bitonal: 1-bit black and white")
+    export.add_argument("--icc", default=None, help="cmyk: the printer's CMYK profile (.icc)")
     export.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     ups = sub.add_parser("upscaler", help="(human) Upscaler programs on this computer the agent's upscale tool may run")
     ups.add_argument("action", choices=["list", "add", "remove"])
@@ -241,7 +244,8 @@ def _run(args: argparse.Namespace) -> int:
     if args.cmd == "reopen-ticket":
         return _emit(HumanService(path, args.actor or default_actor()).reopen_ticket(args.ticket, args.note))
     if args.cmd == "export":
-        return _emit(HumanService(path, args.actor or default_actor()).export(args.format, args.out, args.dpi, args.allow_fixture, args.force))
+        return _emit(HumanService(path, args.actor or default_actor()).export(args.format, args.out, args.dpi, args.allow_fixture, args.force,
+                                                                             color=args.color, icc=args.icc))
     if args.cmd == "adopt-drafts":
         from genko.studio.adopt import adopt_drafts
 

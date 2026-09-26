@@ -231,6 +231,10 @@ def review_html(project: Path, *, max_px: int = 900) -> str:
             refs = {r.get("kind"): r.get("asset") for r in char.get("refs", [])}
             status = "<span class='ok'>承認済み</span>" if char.get("locked") else "<span class='warn'>未承認</span>"
             parts.append(f"<h3>{html.escape(str(char.get('name', cid)))} {status}</h3>")
+            from genko.studio.state import written_look
+
+            if written_look(char):  # (the words beside the pictures: do they agree?)
+                parts.append(f"<p class='muted'>企画書の見た目: {html.escape(written_look(char))}</p>")
             if refs.get("sheet"):
                 parts += _candidate_tiles(store, [{"id": "sheet", "label": "承認した設定画", "asset": refs["sheet"]}] +
                                           ([{"id": "face", "label": "顔", "asset": refs["face"]}] if refs.get("face") else []), set())

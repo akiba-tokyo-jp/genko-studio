@@ -468,10 +468,31 @@ def _finish_placed(fitted: Image.Image, layer, page: Page, episode: Episode | No
         return out
     style = ((episode.studio.get("style") or {}).get("finish") if episode is not None else None) or {}
     finish = screentone.Finish.from_dict({**style, **(layer.finish or {})})
-    done = screentone.finish_gray(grey, finish, dpi, screen=mode == "print", origin=origin)
+    done = screentone.finish_gray(grey, finish, dpi, screen=mode == "print", origin=origin,
+                                  faces=_face_mask(layer, page, fitted.size, dpi, origin))
     out = done.convert("RGBA")
     out.putalpha(alpha if mode == "proof" else alpha.point(lambda v: 255 if v >= 128 else 0))
     return out
+
+
+def _face_mask(layer, page: Page, size: tuple[int, int], dpi: int, origin: tuple[int, int]) -> Image.Image | None:
+    """White ellipses, softened at the edge, where the panel's reported faces are (in the fitted art's pixels)."""
+    if not getattr(layer, "frame_id", None):
+        return None
+    try:
+        panel = page._find(layer.frame_id).panel or {}
+    except (KeyError, IndexError):
+        return None
+    faces = [r["rect_mm"] for r in panel.get("regions", []) if r.get("kind") in ("face", "head")
+             and isinstance(r.get("rect_mm"), (list, tuple)) and len(r["rect_mm"]) == 4]
+    if not faces:
+        return None
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    for x, y, w, h in faces:
+        x0, y0 = mm_to_px(x, dpi) - origin[0], mm_to_px(y, dpi) - origin[1]
+        draw.ellipse((x0, y0, x0 + mm_to_px(w, dpi), y0 + mm_to_px(h, dpi)), fill=255)
+    return mask.filter(ImageFilter.GaussianBlur(max(1.0, dpi / 100)))
 
 
 def render_frame(page: Page, frame_id: str, working_dpi: int, mode: str = "proof", episode: Episode | None = None) -> Image.Image:

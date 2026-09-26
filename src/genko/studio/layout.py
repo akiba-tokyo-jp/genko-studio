@@ -152,26 +152,55 @@ def apply_layout(episode: Episode, page_index: int, plan: dict, *, agent: str = 
         raise LayoutError(problems[0].path, problems[0].message)
     tiers = resolve_tiers(plan)
     base = "/tiers" if plan.get("tiers") else "/template"
+    shape = {} if plan.get("tiers") else templates().get(plan.get("template"), {})
+    bleeds = set(shape.get("bleed") or [])
+    slants = {str(k): float(v) for k, v in (shape.get("slant") or {}).items()}
+    for panel in plan.get("panels") or []:  # (the plan's own choices win over the template's)
+        if panel.get("bleed") is not None:
+            (bleeds.add if panel["bleed"] else bleeds.discard)(panel.get("slot"))
+        if panel.get("slant") is not None:
+            slants[str(panel.get("slot"))] = float(panel["slant"])
+
+    def leaf(part: dict) -> str | None:
+        """The slot of a tier or column that is one panel (its border to the next is that panel's)."""
+        if part.get("cols") is not None:
+            cols = part["cols"]
+            return leaf(cols[0]) if len(cols) == 1 else None
+        return None if part.get("rows") else part.get("slot")
+
     out = CompiledLayout()
     tier_ids = _split_sequence(
-        episode, page_index, page.frames[0].id, [t["h"] for t in tiers], "horizontal", TIER_GUTTER_MM, agent, out, base
+        episode, page_index, page.frames[0].id, [t["h"] for t in tiers], "horizontal", TIER_GUTTER_MM, agent, out, base,
+        [slants.get(leaf(t) or "", 0.0) for t in tiers],
     )
     for ti, (tier, tier_id) in enumerate(zip(tiers, tier_ids)):
         cols = tier["cols"]
         col_ids = _split_sequence(
-            episode, page_index, tier_id, [c["w"] for c in cols], "vertical", COL_GUTTER_MM, agent, out, f"{base}/{ti}/cols"
+            episode, page_index, tier_id, [c["w"] for c in cols], "vertical", COL_GUTTER_MM, agent, out, f"{base}/{ti}/cols",
+            [slants.get(leaf(c) or "", 0.0) for c in cols],
         )
         for ci, (col, col_id) in enumerate(zip(cols, col_ids)):
             rows = col.get("rows")
             if rows:
                 row_ids = _split_sequence(
                     episode, page_index, col_id, [r["h"] for r in rows], "horizontal", TIER_GUTTER_MM, agent, out,
-                    f"{base}/{ti}/cols/{ci}/rows",
+                    f"{base}/{ti}/cols/{ci}/rows", [slants.get(r.get("slot") or "", 0.0) for r in rows],
                 )
                 for row, frame_id in zip(rows, row_ids):
                     out.slot_to_frame[row["slot"]] = frame_id
             else:
                 out.slot_to_frame[col["slot"]] = col_id
+    extra = [{"op": "set_frame", "page": page_index, "frame_id": out.slot_to_frame[slot], "bleed": True}
+             for slot in sorted(bleeds) if slot in out.slot_to_frame]
+    if plan.get("spread"):  # (見開き: this page and the next one are one picture)
+        extra.append({"op": "set_spread", "page": page_index, "with": page_index + 1})
+    for op in extra:
+        out.source_map.append((len(out.ops), "/spread" if op["op"] == "set_spread" else "/panels"))
+        out.ops.append(op)
+        try:
+            _apply(episode, [op], agent)
+        except ApplyError as exc:
+            raise LayoutError("/spread" if op["op"] == "set_spread" else "/panels", str(exc)) from exc
     by_frame = {frame_id: slot for slot, frame_id in out.slot_to_frame.items()}
     for frame in _page(episode, page_index).leaf_frames():
         slot = by_frame[frame.id]
@@ -191,6 +220,7 @@ def _split_sequence(
     agent: str,
     out: CompiledLayout,
     path: str,
+    tilts: list[float] | None = None,
 ) -> list[str]:
     """Split a frame into len(ratios) parts and return their ids in reading order.
 
@@ -212,6 +242,8 @@ def _split_sequence(
         rest_extent = (rect.height if axis == "horizontal" else rect.width) - gutter
         ratio = span / rest_extent if axis == "horizontal" else (rest_extent - span) / rest_extent
         op = {"op": "split_frame", "page": page_index, "frame_id": remaining, "axis": axis, "ratio": ratio, "gutter_mm": gutter}
+        if tilts and abs(tilts[index]) > 1e-6:  # (斜め: this part's border to the next is slanted)
+            op["tilt_mm"] = round(float(tilts[index]), 2)
         out.source_map.append((len(out.ops), f"{path}/{index}"))
         out.ops.append(op)
         _apply(episode, [op], agent)

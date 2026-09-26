@@ -253,11 +253,11 @@ def build_server(root: Path, actor: str) -> MCPServer:
     @tool
     def export(project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
-               spreads: bool = False, color: str = "rgb", icc: str | None = None, fps: float = 12,
+               spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
                seconds: float | None = None, movie: str = "webp") -> list:
         """書き出し（承認は要らない。正式な書き出しは人だけ）: format は pdf / tiff / png / cmyk / layers / psd / pack / epub /
         kindle / strip / webtoon / sns / timelapse / animation。pages でページを選ぶ（例 [3, 4, 5]）。area は paper / bleed / trim。
-        pdf の color は rgb / cmyk / gray、cmyk と pdf の icc は印刷所の CMYK プロファイル（.icc のパス）。long_edge の既定は kindle 2560・sns 2048。timelapse は記録した制作過程（set_timelapse で記録）を movie（webp / gif / png / mp4）で、fps と
+        pdf・png・tiff の color は auto（既定: モノクロの原稿はグレー、カラーは RGB）/ rgb / cmyk / gray / bitonal（白黒 2 階調）、cmyk と pdf の icc は印刷所の CMYK プロファイル（.icc のパス）。long_edge の既定は kindle 2560・sns 2048。timelapse は記録した制作過程（set_timelapse で記録）を movie（webp / gif / png / mp4）で、fps と
         seconds（全体の長さ）、pages は省略で全ページ（描いた順）か、1 ページだけを [n] で。animation はアニメーションのページ（pages に 1 つ）を movie（gif / webp /
         png / mp4 / frames〔連番 PNG〕）で、width で幅を。書いた先は <原稿>/exports/。
         40 秒で終わらないときは job を返す（書き出しは続いている）。export_status で結果を取る。"""

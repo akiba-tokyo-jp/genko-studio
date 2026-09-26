@@ -29,7 +29,7 @@ from genko.studio import lint, state, worklist
 from genko.studio.issues import Issue, error, has_errors
 from genko.studio.jsonschema_lite import validate
 from genko.studio.letter import place_page, placements_to_ops
-from genko.studio.schemas import SCHEMAS
+from genko.studio.schemas import SCHEMAS, fill_nulls
 
 RULES_PATH = Path(__file__).with_name("guide") / "manga_rules.md"
 
@@ -75,6 +75,7 @@ AGENT_TOOLS = frozenset({
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
 BRIEF_FROM_PLAN = ("shot", "angle", "characters", "location_id", "time", "action", "emotion", "fx", "emphasis", "beat_ids")
+BRIEF_LATER = ("props", "sfx_at", "bleed", "slant")  # (plan fields added later: copied when given)
 
 SPEC_PRESETS = {
     "commercial-b4": PageSpec.b4_comic,
@@ -523,7 +524,7 @@ class StudioService:
 
     def export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
-               spreads: bool = False, color: str = "rgb", icc: str | None = None, fps: float = 12,
+               spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
                seconds: float | None = None, movie: str = "webp", background: bool = False) -> ToolResult:
         """background: run as a job (the reply within a little while, else a job id for export_status)."""
         args = (project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc, fps, seconds, movie)
@@ -552,7 +553,7 @@ class StudioService:
 
     def _export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                 area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
-                spreads: bool = False, color: str = "rgb", icc: str | None = None, fps: float = 12,
+                spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
                 seconds: float | None = None, movie: str = "webp") -> ToolResult:
         """Write the book (or some pages) in any format into <project>/exports/<time>_<format>/, as a person
         can from the app. Not the official export (that one is recorded as an approval and is for people).
@@ -946,6 +947,7 @@ class StudioService:
 
     def set_bible(self, project: str, bible: dict, commit: bool = False) -> ToolResult:
         path = self.project_path(project)
+        bible = fill_nulls(bible, SCHEMAS["bible@1"])
         issues = validate(bible, SCHEMAS["bible@1"])
         if not has_errors(issues):
             issues += lint.lint_bible(bible)
@@ -963,6 +965,9 @@ class StudioService:
             ]
             if bible.get("title"):
                 ops.append({"op": "set_meta", "title": bible["title"]})
+            known = {p.get("id"): p for p in episode.studio.get("props", [])}
+            for prop in bible.get("props") or []:  # (the props join the book's list, keeping references already attached)
+                ops.append({"op": "upsert_prop", "prop": {**known.get(prop["id"], {}), **prop}})
             apply_ops(episode, ops, agent=self.actor)
             save_episode(episode, path, actor=self.actor)
         return ToolResult(True, {"committed": True}, issues)
@@ -997,6 +1002,7 @@ class StudioService:
         bible, script = state.bible(episode), state.script(episode)
         if bible is None or script is None:
             return fail("先に企画書（set_bible）と脚本（set_script）を保存する", "script_missing")
+        plan = fill_nulls(plan, SCHEMAS["name_plan@1"])
         issues = validate(plan, SCHEMAS["name_plan@1"])
         if has_errors(issues):
             return ToolResult(False, {"committed": False}, issues)
@@ -1028,7 +1034,8 @@ class StudioService:
             if compiled is None or has_errors(more):
                 return ToolResult(False, {"committed": False}, more)
             ops = [{"op": "set_panel", "page": page_index, "frame_id": compiled.slot_to_frame[panel["slot"]],
-                    "set": {"slot": panel["slot"], **{k: panel[k] for k in BRIEF_FROM_PLAN if k in panel}}}
+                    "set": {"slot": panel["slot"], **{k: panel[k] for k in BRIEF_FROM_PLAN if k in panel},
+                                **{k: panel[k] for k in BRIEF_LATER if panel.get(k) is not None}}}
                    for panel in plan["panels"] if panel["slot"] in compiled.slot_to_frame]
             submits = int(((next(p for p in episode.pages if p.index == page_index).plan) or {}).get("submits", 0)) + 1
             ops.append({"op": "set_page_plan", "page": page_index, "plan": {
@@ -1134,6 +1141,7 @@ class StudioService:
             ticket = next(t for t in episode.tickets if t["id"] not in before)
             save_episode(episode, path, actor=self.actor)
         pages_arg = ",".join(map(str, sorted(set(pages))))
+        written = ""
         faces: list[bytes] = []
         face_note = None
         if gate == "sheet":  # (the face each candidate would give, to check before approving)
@@ -1147,14 +1155,20 @@ class StudioService:
                 faces.append(_png(face))
             face_note = ("images は候補ごとの顔の切り出し（承認すると以後の作画の参照になる）。ずれていれば、取り込むときに"
                          "face_box01 を付け直すか、承認のときに --face x,y,w,h で位置を指定する")
+            char = next((c for c in episode.bible.characters if c.get("id") == character_id), {})
+            written = state.written_look(char)
         if gate == "sheet":
             how = f"genko studio approve {path} sheet --character {character_id} --candidate <候補id>"
         elif gate == "export":
             how = f"genko studio export {path} --format pdf --out <出力先>"
         else:
             how = f"genko studio approve {path} {gate} --pages {pages_arg}"
-        return ToolResult(True, {"request": ticket["id"], "how_to_approve": how, **({"faces": face_note} if face_note else {})},
-                          images=faces)
+        extra = {"faces": face_note} if face_note else {}
+        if gate == "sheet" and written:
+            extra["written"] = written
+            extra["check"] = ("人に承認を頼むとき、written（企画書の見た目の文）も一緒に送り、候補と食い違いが無いか見てもらう。"
+                              "Genko は絵と文を比べられない")
+        return ToolResult(True, {"request": ticket["id"], "how_to_approve": how, **extra}, images=faces)
 
     def resolve_ticket(self, project: str, ticket_id: str, note: str) -> ToolResult:
         """Say a person's fix instruction is done (only fix tickets assigned to the agent; a person can reopen it)."""
@@ -1228,7 +1242,7 @@ class HumanService:
 
     def export(self, fmt: str, out: Path, dpi: int | None = None, allow_fixture: bool = False, force: bool = False,
                *, width_px: int = 800, max_height: int = 1280, long_edge: int = 2048, jpeg: bool | None = None,
-               spreads: bool = False, area: str = "bleed") -> dict:
+               spreads: bool = False, area: str = "bleed", color: str = "auto", icc: str | None = None) -> dict:
         """The final export (gate ④): preflight must pass, then the pages are written and the approval recorded."""
         from genko.export import export_print
         from genko.studio import preflight
@@ -1238,7 +1252,8 @@ class HumanService:
             return {"ok": False, "error": "format は pdf / tiff / png / webtoon / sns"}
         screen = fmt in ("webtoon", "sns")
         # screen outputs are sized in pixels, so print resolution does not apply to them
-        report = preflight.check(episode, self.path, allow_fixture=allow_fixture, force=force or screen)
+        report = preflight.check(episode, self.path, allow_fixture=allow_fixture, force=force or screen,
+                                 color=None if screen else color)
         if not report["ok"]:
             return {"ok": False, "error": "preflight で止まった", **report}
         if screen:
@@ -1249,7 +1264,8 @@ class HumanService:
             else:
                 written = profiles.export_sns(episode, Path(out), long_edge, fmt="png" if jpeg is False else "jpeg", spreads=spreads)
         else:
-            written = export_print(episode, Path(out), fmt=fmt, dpi=int(dpi or episode.spec.dpi or 600), area=area)
+            written = export_print(episode, Path(out), fmt=fmt, dpi=int(dpi or episode.spec.dpi or 600), area=area, color=color,
+                                   icc=icc)
         self._apply([{"op": "approve", "gate": "export"}])
         return {"ok": True, "files": [str(p) for p in written], "warnings": report["warnings"], "dpi": report["dpi"]}
 

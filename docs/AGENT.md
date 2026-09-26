@@ -281,6 +281,27 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `double`, `spikes`, `spike_depth`.
 - 3D: `add_prim3d {kind: box | cylinder | stairs | floor}`.
 
+### Quality report (the test story compared with commercial manga)
+
+- Print export: `color` auto (default) writes a monochrome book in grey, losslessly; `bitonal` is 1-bit. PDFs are
+  written by Genko (Flate, no JPEG) with MediaBox, BleedBox and TrimBox per page. preflight refuses a monochrome book
+  exported as RGB (`mono_as_colour`); `genko studio export --color`.
+- Balloons sit by their speaker's head (above or beside, never nearer another character, 3 mm left for the tail);
+  tails and thought bubbles run to just short of the mouth. Lines carry `style.speaker_id`; finish_page moves a
+  balloon nearer someone else and re-aims tails at the reported faces.
+- bible@1 gains `author`, `lettering` ({speech|thought|shout|whisper|narration|sfx|title: {font, scale, weight}})
+  and `props`. Defaults: shout ×1.3 bold, whisper ×0.8; no font is forced. Missing new fields are read as null.
+- name_plan@1 gains page `spread` and `title`, panel `props`, `bleed`, `slant` (mm, the border to the next panel) and
+  `sfx_at` ([x, y] 0..1: sound effects go there). Templates reveal_bleed, reveal_top, finale_bleed, action_slant,
+  title_top (with their bleed / slant / title slot). lint: fx_unknown, unknown_prop, reveal_small, emphasis_small,
+  finale_small, title_missing, author_missing, unknown_font.
+- fx words (studio/fxwords.py): effects, manga marks by the first reported face, rain streaks (layer 効果（仕上げ）),
+  or words for the art request. fx and emphasis go into the prompt. Props' references and the previous panel of the
+  same place (refs/previous_panel.png) go with the art request. Sheet approval requests carry `written` (the
+  bible's description) and review.html shows it beside the candidates.
+- The mono finish lightens reported faces (Finish.face_light, 0.6) and smooths the art's own specks before the
+  tones (Finish.smooth).
+
 ### M2 (group B of the Hermes report)
 
 - Every MCP tool takes `session` (the conversation's own name, e.g. a Telegram thread id; 1–40 of A-Z a-z 0-9 _ . : @ -).

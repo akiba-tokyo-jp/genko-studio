@@ -435,7 +435,8 @@ class ExportDialog(QDialog):
         self.area.setCurrentIndex(self.area.findData("bleed"))
         self.area.setToolTip("印刷所の指定に合わせます。多くは「裁ち落としまで」。トンボ付きは用紙全体")
         self.color = QComboBox()
-        for label, key in (("RGB（sRGB を埋め込む）", "rgb"), ("CMYK", "cmyk"), ("グレー", "gray")):
+        for label, key in (("自動（モノクロの原稿はグレー、カラーは RGB）", "auto"), ("RGB（sRGB を埋め込む）", "rgb"), ("CMYK", "cmyk"),
+                           ("グレー", "gray"), ("2 階調（白黒の 1 ビット）", "bitonal")):
             self.color.addItem(label, key)
         self.icc = QLineEdit(icc_setting())
         self.icc.setPlaceholderText("なし（K 版の黒・総インキ量 320%）")

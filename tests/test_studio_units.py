@@ -9,7 +9,7 @@ from genko.models import PageSpec, new_episode
 from genko.studio import layout, lint
 from genko.studio.jsonschema_lite import conservative_problems, validate
 from genko.studio.letter import EM_MM, measure, place_page
-from genko.studio.schemas import SCHEMAS
+from genko.studio.schemas import SCHEMAS, fill_nulls
 from genko.tategaki import _columns
 
 FIXTURES = Path(__file__).parent / "fixtures" / "studio" / "demo4"
@@ -26,10 +26,11 @@ def _b4(pages: int = 4):
 def test_schemas_are_conservative_and_fixtures_match():
     for name, schema in SCHEMAS.items():
         assert conservative_problems(schema) == [], name
-    assert validate(_load("bible.json"), SCHEMAS["bible@1"]) == []
+    # (inputs written before a field was added get it as null: fill_nulls, as set_bible and submit_name do)
+    assert validate(fill_nulls(_load("bible.json"), SCHEMAS["bible@1"]), SCHEMAS["bible@1"]) == []
     assert validate(_load("script.json"), SCHEMAS["script@1"]) == []
     for n in range(1, 5):
-        assert validate(_load(f"p00{n}.json"), SCHEMAS["name_plan@1"]) == []
+        assert validate(fill_nulls(_load(f"p00{n}.json"), SCHEMAS["name_plan@1"]), SCHEMAS["name_plan@1"]) == []
 
 
 def test_validator_reports_json_pointer_paths():
