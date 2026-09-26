@@ -8,6 +8,7 @@ license = { text = "MIT" }
 authors = [{ name = "Genko Studio" }]
 dependencies = [
   "pillow>=10.0",
+  "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
