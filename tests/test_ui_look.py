@@ -475,3 +475,32 @@ def test_the_system_glass_only_where_the_system_has_it(qapp):
     menu = QMenu()
     assert glass.wants(menu)
     assert glass.apply(menu) is False or glass.available()
+
+
+# --- stage 2: the page on the graphics card -----------------------------------------------------------------------
+
+
+def test_the_gpu_canvas_is_the_same_canvas_on_opengl(qapp):
+    from PySide6.QtOpenGLWidgets import QOpenGLWidget
+
+    from genko.app import canvas as cv
+
+    gpu = cv._gpu_class()
+    assert issubclass(gpu, QOpenGLWidget) and "paintGL" in gpu.__dict__ and "paintEvent" not in gpu.__dict__
+    made = gpu()
+    got = []
+    made.changed.connect(lambda: got.append(True))
+    made.changed.emit()
+    assert got and made._QtBase is QOpenGLWidget and hasattr(made, "glide") and hasattr(made, "fit_page")
+
+
+def test_the_page_is_drawn_by_the_processor_where_there_is_no_real_card(qapp):
+    from genko.app import canvas as cv
+
+    assert not cv.gpu_available()  # (the offscreen test screen)
+    assert type(cv.make_canvas()).__name__ == "PageCanvas"
+    for name in ("llvmpipe (LLVM 17.0.6, 256 bits)", "Microsoft Basic Render Driver", "Software Rasterizer"):
+        assert cv.software_renderer(name)
+    for name in ("NVIDIA GeForce RTX 4070/PCIe/SSE2", "AMD Radeon Pro 5500M OpenGL Engine", "Intel(R) Iris(R) Xe Graphics",
+                 "Apple M2"):
+        assert not cv.software_renderer(name)

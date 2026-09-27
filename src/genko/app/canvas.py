@@ -82,6 +82,7 @@ MIN_SCALE, MAX_SCALE = 0.3, 12.0  # screen px per mm
 
 
 class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
+    _QtBase = QWidget  # (the GPU canvas below is the same class on QOpenGLWidget)
     changed = Signal()
     strokeCommitted = Signal(list)
     frameSelected = Signal(str)
@@ -126,7 +127,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
     gradientRequested = Signal(object, object)  # the gradient tool: from, to (mm)  # the text tool's balloon pen: an outline [[x, y], …] (mm)
 
     def __init__(self) -> None:
-        super().__init__()
+        self._QtBase.__init__(self)
         self.page: Page | None = None
         self.lines: list[StoryLine] = []
         self._stroke: list[tuple] = []
@@ -381,7 +382,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         return round(self._scale / (96 / 25.4) * 100)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
+        self._QtBase.resizeEvent(self, event)
         if self._fitted:
             self.fit_page()
 
@@ -1830,7 +1831,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             if event.gestureType() == _Qt.NativeGestureType.ZoomNativeGesture:
                 self.zoom_by(1.0 + float(event.value()), self._ev(event.position()))
                 return True
-        return super().event(event)
+        return self._QtBase.event(self, event)
 
     def pinch(self, scale: float, turn_deg: float, centre: QPointF, moved: QPointF) -> None:
         """A two-finger gesture: spread to zoom about the fingers, twist to turn the view, slide to move."""
@@ -1896,7 +1897,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             self._drag_pos = None
             self.update()
             return
-        super().keyPressEvent(event)
+        self._QtBase.keyPressEvent(self, event)
 
     def keyReleaseEvent(self, event) -> None:  # noqa: N802
         if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_Control) and not event.isAutoRepeat():
@@ -1906,7 +1907,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             self._panning = False
             self._update_cursor(self._ev(QPointF(self.mapFromGlobal(QCursor.pos()))))
             return
-        super().keyReleaseEvent(event)
+        self._QtBase.keyReleaseEvent(self, event)
 
     # --- tablet ------------------------------------------------------------------------------------------
 
@@ -1990,3 +1991,75 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             self.tool = self._eraser_end
             self._eraser_end = None
             self._update_cursor()
+
+
+# --- the page drawn by the graphics card (stage 2) ----------------------------------------------------------------
+
+_GPU: list = []
+
+
+def _gpu_class():
+    """PageCanvas on a QOpenGLWidget: the same drawing, but scaling, turning and compositing the page's picture
+    happen on the graphics card (smooth zoom and rotation on a large page)."""
+    if not _GPU:
+        from PySide6.QtOpenGLWidgets import QOpenGLWidget
+
+        body = {k: v for k, v in PageCanvas.__dict__.items() if k not in ("__dict__", "__weakref__", "staticMetaObject")}
+        body["_QtBase"] = QOpenGLWidget
+        # a QOpenGLWidget draws in paintGL (its own paintEvent renders into the card's buffer): the same drawing there
+        body.pop("paintEvent")
+        body["paintGL"] = lambda self: PageCanvas.paintEvent(self, None)
+        _GPU.append(type("GpuPageCanvas", (GuideMixin, ShapeSelectMixin, VectorMixin, QOpenGLWidget), body))
+    return _GPU[0]
+
+
+def gpu_available() -> bool:
+    """A real screen with an OpenGL context that can be made (not the offscreen test screen), and not turned off."""
+    from PySide6.QtGui import QGuiApplication, QOffscreenSurface, QOpenGLContext
+
+    from genko.app.preferences import settings
+
+    app = QGuiApplication.instance()
+    if app is None or app.platformName() in ("offscreen", "minimal", "vnc"):
+        return False
+    if str(settings().value("ui/gpu", "true")).lower() in ("0", "false", "no"):
+        return False
+    try:
+        context = QOpenGLContext()
+        if not context.create():
+            return False
+        surface = QOffscreenSurface()
+        surface.create()
+        if not context.makeCurrent(surface):
+            return False
+        renderer = str(context.functions().glGetString(0x1F01) or "")  # GL_RENDERER
+        context.doneCurrent()
+        return not software_renderer(renderer)
+    except Exception:
+        return False
+
+
+def software_renderer(name: str) -> bool:
+    """OpenGL done by the processor (a virtual machine, a remote desktop): slower than drawing without it."""
+    name = name.lower()
+    return any(word in name for word in ("llvmpipe", "softpipe", "software", "swrast", "basic render", "gdi generic"))
+
+
+def make_canvas() -> PageCanvas:
+    """The page's canvas: on the graphics card where it can be, drawn by the processor otherwise."""
+    if gpu_available():
+        try:
+            from PySide6.QtGui import QSurfaceFormat
+
+            canvas = _gpu_class()()
+            form = QSurfaceFormat()
+            form.setSamples(4)  # (smooth edges on the handles and guides)
+            canvas.setFormat(form)
+            canvas.gpu = True
+            return canvas
+        except Exception:
+            pass
+    canvas = PageCanvas()
+    canvas.gpu = False
+    return canvas
+

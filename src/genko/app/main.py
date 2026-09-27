@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 
 from genko.app import wording
 from genko.app.brush_panel import BrushPanel
-from genko.app.canvas import PageCanvas
+from genko.app.canvas import make_canvas
 from genko.app.guide_panel import PRESETS, GuidePanel
 from genko.app.material_panel import MaterialPanel
 from genko.app.check_panel import CheckPanel
@@ -1293,7 +1293,7 @@ class MainWindow(QMainWindow):
         self.pages = PageList(self)
         self.pages.setMinimumWidth(120)
         self.pages.currentRowChanged.connect(self._select_page)
-        self.canvas = PageCanvas()
+        self.canvas = make_canvas()  # (on the graphics card where it can be: canvas.py)
         self.canvas.renderer = self._render_current
         self.canvas.detail_job = self._detail_job
         self.canvas.layer_colour_at = self.layer_colour_at
