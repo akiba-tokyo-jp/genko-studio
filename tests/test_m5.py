@@ -85,7 +85,7 @@ def test_pilot_page_first_then_the_style_is_fixed(tmp_path: Path):
     assert ("gen_panel", 2) in kinds
     after = agent.generation_request("demo.genko", page=2, frame_id=page2.id).data["request"]
     assert "refs/style_pilot.png" in after["files"]["references"] and after["tool"] == TOOL
-    assert any("1 ページで固定" in n for n in after["notes_for_agent"])
+    assert any("1 ページ目（試しのページ）で固定" in n for n in after["notes_for_agent"])
     # re-opening the pilot page opens the style again
     human.revoke("art", [1], reason="線を太く")
     assert "locked" not in load_episode(project).studio["style"]
