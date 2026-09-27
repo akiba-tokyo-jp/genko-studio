@@ -142,7 +142,10 @@ def chosen(key: str, default: list[str]) -> list[str]:
     value = settings().value(key, None)
     if value in (None, ""):
         return list(default)
-    return [v for v in str(value).split("\t") if v]
+    from genko.app.preferences import RENAMED
+
+    old_to_new = {old: new for new, old in RENAMED.items()}  # (commands renamed later keep their place)
+    return [old_to_new.get(v, v) for v in str(value).split("\t") if v]
 
 
 def keep(key: str, names: list[str]) -> None:

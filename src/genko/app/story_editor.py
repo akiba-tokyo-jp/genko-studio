@@ -125,7 +125,7 @@ class StoryEditor(QDialog):
         self.table.setWordWrap(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         buttons = QHBoxLayout()
-        for title, slot in (("行を追加", self.add_row), ("行を削除", self.delete_rows), ("↑", lambda: self.move(-1)), ("↓", lambda: self.move(1)),
+        for title, slot in (("行を追加", self.add_row), ("行を消す", self.delete_rows), ("↑", lambda: self.move(-1)), ("↓", lambda: self.move(1)),
                             ("台本を流し込む…", self.pour)):
             button = QPushButton(title)
             button.clicked.connect(slot)

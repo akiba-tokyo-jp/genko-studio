@@ -65,7 +65,7 @@ def test_a_person_alone_inks_before_the_name_is_approved():
     studio.strict_gates = True
     with pytest.raises(ApplyError) as err:
         apply_ops(studio, [{"op": "add_stroke", "page": 1, "layer": "ink", "points": [[50, 60], [80, 90]]}])
-    assert "エージェントと進める原稿" in wording.error(str(err.value))
+    assert "AI と進める原稿" in wording.error(str(err.value))
 
 
 # --- the window ---------------------------------------------------------------------------------------

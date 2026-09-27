@@ -153,12 +153,12 @@ class PageList(QListWidget):
         menu.addAction("このページのノンブルを隠す" if page.numero else "このページのノンブルを出す",
                        lambda: w.apply_ops([{"op": "set_nombre", "page": index, "numero": not page.numero}]))
         menu.addSeparator()
-        menu.addAction("このページを削除…", lambda: self._delete(index))
+        menu.addAction("このページを消す…", lambda: self._delete(index))
         menu.exec(self.mapToGlobal(pos))
 
     def _delete(self, index: int) -> None:
         w = self.window
-        answer = QMessageBox.question(self, "Genko", f"{index} ページを削除しますか？（元に戻す で取り消せます）")
+        answer = QMessageBox.question(self, "Genko", f"{index} ページを消しますか？（元に戻す で取り消せます）")
         if answer == QMessageBox.StandardButton.Yes:
             w.apply_ops([{"op": "delete_page", "page": index}])
 

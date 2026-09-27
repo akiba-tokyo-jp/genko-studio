@@ -86,7 +86,7 @@ class ProcessBar(QWidget):
         self.labels = []
         pending = len(review_model.inbox(episode))
         chips = [(f"承認箱 <b>{pending}</b>", "badge-warn" if pending else "badge",
-                  "エージェントからの承認依頼と相談。右の「承認箱」で 1 件ずつ見て決めます")]
+                  "AI からの承認依頼と相談。右の「承認箱」で 1 件ずつ見て決めます")]
         for text, count in review_model.progress(episode):
             if count:
                 chips.append((f"{text} <b>{count}</b>", "badge-warn" if "待ち" in text or "未承認" in text else "badge", ""))
@@ -106,7 +106,7 @@ HOW = {
     "art": "印刷と同じ見た目（網点は平らなグレー）で、絵がネームどおりか、人物が設定画に似ているかを見ます。",
     "sheet": "候補から 1 枚選んで承認します。選んだ絵の顔のアップが、以後の作画の参照になります。",
     "export": "書き出す前の点検結果です。止める理由が無ければ、書き出す… で正式に書き出します。",
-    "help": "エージェントからの相談です。返事を書いて「返事を送る」と、エージェントの作業に指示として届きます。",
+    "help": "AI からの相談です。返事を書いて「返事を送る」と、AI の作業に指示として届きます。",
     "proposal": "アタリから読み取った提案です。確定するまで原稿は変わりません。",
 }
 
@@ -184,11 +184,11 @@ class ApprovalBox(QWidget):
         head = QHBoxLayout()
         head.addWidget(self.page_pick, 1)
         head.addWidget(self.big)
-        self.empty = QLabel("承認を待っている依頼はありません。\nエージェントが依頼を出すと、ここに届きます。")
+        self.empty = QLabel("承認を待っている依頼はありません。\nAI が依頼を出すと、ここに届きます。")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         theme.role(self.empty, "hint")
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("エージェントからの依頼（1 件ずつ見て決める）"))
+        layout.addWidget(QLabel("AI からの依頼（1 件ずつ見て決める）"))
         layout.addWidget(self.list)
         layout.addWidget(self.empty)
         layout.addWidget(self.detail)
@@ -243,8 +243,8 @@ class ApprovalBox(QWidget):
         self.back_button.setVisible(item.gate != "export")
         self.approve_button.setText({"export": "書き出す…", "help": "返事なしで閉じる", "proposal": "確定"}.get(kind, "承認"))
         self.back_button.setText({"help": "返事を送る", "proposal": "却下"}.get(kind, "差し戻す"))
-        self.reason.setPlaceholderText({"help": "返事（エージェントへの指示になる）", "proposal": "却下の理由"}.get(
-            kind, "差し戻す理由（エージェントへの指示になる）"))
+        self.reason.setPlaceholderText({"help": "返事（AI への指示になる）", "proposal": "却下の理由"}.get(
+            kind, "差し戻す理由（AI への指示になる）"))
         self.reason.setVisible(item.gate != "export")
         # one clear main button: the reply for a question, the approval otherwise
         answer = kind == "help"
@@ -499,7 +499,7 @@ class PanelView(QWidget):
         compare = QPushButton("候補を並べて比べる")
         compare.clicked.connect(self.compare_candidates)
         self.instruction = QLineEdit()
-        self.instruction.setPlaceholderText("このコマへの指示（エージェントの作業に出る）")
+        self.instruction.setPlaceholderText("このコマへの指示（AI の作業に出る）")
         send = QPushButton("指示を送る")
         send.clicked.connect(self.send_instruction)
         self.region_kind = QComboBox()
@@ -588,7 +588,7 @@ class PanelView(QWidget):
                 entry.setIcon(theme.still_icon(to_pixmap(image)))
             self.candidates.addItem(entry)
         for region in panel.get("regions", []):
-            who = "人" if region.get("source") == "user" else "エージェント"
+            who = "人" if region.get("source") == "user" else "AI"
             entry = QListWidgetItem(f"{wording.REGION_LABEL.get(region.get('kind'), region.get('kind'))} {region.get('char') or ''}（{who}）")
             entry.setData(Qt.ItemDataRole.UserRole, region.get("id"))
             self.regions.addItem(entry)
@@ -707,7 +707,7 @@ class PanelView(QWidget):
             if image is not None:
                 items.append((f"候補 {n}" + (" ✔採用" if cand["id"] in adopted else ""), image.convert("RGB")))
         if items:
-            ViewerDialog(self, "候補を比べる", items, "採用は コマ パネルで候補を選んで「この候補を採用」を押します。").exec()
+            ViewerDialog(self, "候補を比べる", items, "採用は「コマの詳細」で候補を選んで「この候補を採用」を押します。").exec()
 
     def adopt(self) -> None:
         page, cand = self._page(), self._selected_candidate()

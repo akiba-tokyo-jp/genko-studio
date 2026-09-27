@@ -41,10 +41,10 @@ ADJUSTMENTS = [("levels", "レベル補正"), ("curve", "トーンカーブ"), (
 
 
 def actor(name: str | None) -> str:
-    """ai:hermes → エージェント（hermes）, human:leaf → leaf."""
+    """ai:hermes → AI（hermes）, human:leaf → leaf."""
     name = str(name or "")
     if name.startswith("ai:"):
-        return f"エージェント（{name[3:]}）"
+        return f"AI（{name[3:]}）"
     if name.startswith("human:"):
         return name[6:]
     return name or "不明"
@@ -312,9 +312,9 @@ _ERRORS: list[tuple[str, object]] = [
     # approvals and people (studio books)
     (r"page \d+: the name is approved.*", "このページのネームは承認済みなので、コマ割りを変えられません。変えるには承認を取り消します"),
     (r"set_layer exportable on a drawn layer needs name_ok.*",
-     "描いてあるレイヤーを印刷に出すのは、ネームの承認の後にできます（エージェントと進める原稿）"),
+     "描いてあるレイヤーを印刷に出すのは、ネームの承認の後にできます（AI と進める原稿）"),
     (r".*needs name_ok.*|ink strokes require name_ok|.*requires name_ok",
-     "エージェントと進める原稿では、ネームの承認の後でペン入れできます（承認の前は、ネーム・下描きと、印刷に出さない"
+     "AI と進める原稿では、ネームの承認の後でペン入れできます（承認の前は、ネーム・下描きと、印刷に出さない"
      "設定にしたレイヤーに描けます。一人の原稿には、この制限はありません）"),
     (r".*finish needs the art approved.*", "作画が承認されてから仕上げに進めます"),
     (r".*approve the name first.*", "先にネームの承認が要ります"),
@@ -332,13 +332,13 @@ _ERRORS: list[tuple[str, object]] = [
     (r"only a person accepts or rejects a proposal", "提案を確定・却下できるのは人だけです"),
     (r"character (\S+) is locked \(a person can unlock it\)", r"人物 \1 は固定されています（外せるのは人だけです）"),
     (r"only a person can reopen a ticket", "チケットを開き直せるのは人だけです"),
-    (r"an agent resolves only a person's fix instruction.*", "エージェントが閉じられるのは、人からの直しの指示のチケットだけです（承認の依頼や質問は人が閉じます）"),
+    (r"an agent resolves only a person's fix instruction.*", "AI が閉じられるのは、人からの直しの指示のチケットだけです（承認の依頼や質問は人が閉じます）"),
     (r"ticket (\S+) is not open", r"チケット \1 は開いていません"),
     (r"no ticket (\S+)", r"チケット \1 はありません"),
     (r".* is handled with the actor in apply_ops", "この操作はここではできません"),
     (r"cannot lock page .*", "このページは作業中にできません"),
     (r"page (\d+) locked by (.+?)(;.*)?$", r"\1 ページは \2 が作業中です"),
-    (r"project locked: .*", "この原稿は、ほかの Genko かエージェントが作業中です。少し待ってからやり直します"),
+    (r"project locked: .*", "この原稿は、ほかの Genko か AI が作業中です。少し待ってからやり直します"),
     (r"frame .* has placed art.*|panels under .* have placed art.*", "このコマには絵が置かれています。絵をどかしてから操作します"),
     (r"the latest change is by (.+?);.*", r"直前の変更は \1 のものなので戻せません"),
     (r"this (undo|redo) changes approvals.*", "承認が変わる操作は、承認・取り消しの画面から行います"),

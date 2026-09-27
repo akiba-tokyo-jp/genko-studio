@@ -97,7 +97,7 @@ PANEL = {None: "未着手", "empty": "未着手", "briefed": "指示あり", "re
 
 def _who(actor: str | None) -> str:
     actor = str(actor or "")
-    return f"エージェント（{actor[3:]}）" if actor.startswith("ai:") else (actor[6:] if actor.startswith("human:") else actor)
+    return f"AI（{actor[3:]}）" if actor.startswith("ai:") else (actor[6:] if actor.startswith("human:") else actor)
 
 
 def _words(panel: dict) -> str:
@@ -174,7 +174,7 @@ def review_html(project: Path, *, max_px: int = 900) -> str:
         f"<title>{html.escape(episode.title)} の確認</title><style>{CSS}</style></head><body>",
         f"<h1>{html.escape(episode.title)}</h1>",
         "<p class='lead'>このページは見るためのものです。承認・差し戻し・相談への返事は Genko アプリの「承認箱」で行います"
-        f"（開き方: {html.escape('genko app')} のあと、この原稿を選ぶ）。エージェントは承認できません。"
+        f"（開き方: {html.escape('genko app')} のあと、この原稿を選ぶ）。AI は承認できません。"
         f"<br><span class='muted'>版 r{episode.revision}</span></p>",
     ]
     if requests:
@@ -275,7 +275,7 @@ def review_html(project: Path, *, max_px: int = 900) -> str:
             parts.append("</table></div>")
             review = state.name_review(episode, page.index)
             if review:
-                parts.append(f"<p class='muted'>エージェントの自己点検: {review.get('score')} {html.escape(review.get('notes') or '')}</p>")
+                parts.append(f"<p class='muted'>AI の自己点検: {review.get('score')} {html.escape(review.get('notes') or '')}</p>")
             parts.append(_cmd(f"genko studio approve {proj} name --pages {page.index}", "ネームを承認（コマンド）"))
         if page.name_ok:
             for order, frame in enumerate(page.leaf_frames(), 1):
