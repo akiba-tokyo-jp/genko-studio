@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QVBoxLayout,
 )
+from genko.app import theme
 
 AREAS = [("仕上がりで切る", "trim"), ("裁ち落としまで", "bleed"), ("用紙全体（トンボ付き）", "paper")]
 MAX_DPI = 600
@@ -125,7 +126,7 @@ class PrintDialog(QDialog):
         note = QLabel("印刷と同じ見え方（ネームは出ません）で、用紙に合わせて縮めて印刷します。"
                       "入稿用のデータは「書き出し…」で作ります。")
         note.setWordWrap(True)
-        note.setStyleSheet("color:#666")
+        theme.role(note, "hint")
         buttons = QDialogButtonBox()
         self.print_button = buttons.addButton("プリンターを選んで印刷…", QDialogButtonBox.ButtonRole.AcceptRole)
         preview = buttons.addButton("プレビュー…", QDialogButtonBox.ButtonRole.ActionRole)

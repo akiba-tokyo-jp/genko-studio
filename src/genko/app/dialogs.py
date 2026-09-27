@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QUrl, Qt
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from genko.app import exporting
 from genko.models import PAPER_PRESETS, Binding, PageSpec
+from genko.app import theme
 
 PAPERS = [(label, key) for key, (label, _make) in PAPER_PRESETS.items()]
 
@@ -96,7 +97,7 @@ class PaperDialog(QDialog):
         self.move.setVisible(changing)
         hint = QLabel("数値は出版社・印刷所で違います。投稿・入稿の前に、先方の原稿用紙の指定を確かめてください。")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#666")
+        theme.role(hint, "hint")
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("変える" if changing else "決める")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
@@ -159,7 +160,7 @@ class PaperDialog(QDialog):
                     "the basic frame must fit inside the finished size": "基本枠が仕上がりに収まりません"}.get(str(exc), str(exc))
             ok = False
         self.summary.setText(text)
-        self.summary.setStyleSheet("" if ok else "color:#c92a2a")
+        theme.role(self.summary, "" if ok else "error")
         if hasattr(self, "ok_button"):
             self.ok_button.setEnabled(ok)
 
@@ -190,8 +191,45 @@ def project_title(path: Path) -> str:
 # --- start screen -----------------------------------------------------------------------------------
 
 
+def _blank_cover(size) -> QPixmap:
+    pixmap = QPixmap(size)
+    pixmap.fill(QColor(theme.tokens().base))
+    return pixmap
+
+
+def cover_thumbnail(path: Path, height: int = 180) -> QPixmap | None:
+    """The book's first page, small, kept in the settings folder until the book changes."""
+    import hashlib
+
+    from genko.tokens import config_dir
+
+    source = Path(path) / "project.json"
+    try:
+        stamp = int(source.stat().st_mtime)
+    except OSError:
+        return None
+    folder = config_dir() / "thumbs"
+    target = folder / f"{hashlib.sha1(str(Path(path).resolve()).encode('utf-8')).hexdigest()[:16]}_{stamp}.png"
+    if not target.is_file():
+        try:
+            from genko.io import load_episode
+            from genko.render import render_page
+
+            episode = load_episode(Path(path))
+            page = episode.pages[0]
+            image = render_page(page, max(8, int(height / (page.spec.height_mm / 25.4))), mode="print", episode=episode)
+        except Exception:  # (a book that cannot be read shows a plain card)
+            return None
+        folder.mkdir(parents=True, exist_ok=True)
+        for old in folder.glob(target.name.rsplit("_", 1)[0] + "_*.png"):
+            old.unlink(missing_ok=True)
+        image.convert("RGB").save(target)
+    pixmap = QPixmap(str(target))
+    return pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation) if not pixmap.isNull() else None
+
+
 class StartDialog(QDialog):
-    """最近の原稿 / 開く / 新しく作る."""
+    """最近の原稿（表紙の縮小画像つき）/ 開く / 新しく作る."""
 
     def __init__(self) -> None:
         from genko.app.main import recent_projects
@@ -199,40 +237,80 @@ class StartDialog(QDialog):
         super().__init__()
         self.setWindowTitle("Genko Studio")
         self.chosen: Path | None = None
-        self.resize(560, 420)
-        head = QLabel("<h2>Genko Studio</h2>漫画原稿の編集と、エージェントが出した承認依頼の確認をします。")
-        head.setWordWrap(True)
+        self.resize(860, 560)
+        name = QLabel("Genko Studio")
+        name.setStyleSheet("font-size: 22px; font-weight: 600;")
+        lead = theme.role(QLabel("漫画原稿の編集と、エージェントが出した承認依頼の確認をします。"), "hint")
+        lead.setWordWrap(True)
+        new_button = theme.primary(theme.iconic(QPushButton("新しい原稿を作る…"), "page"))
+        new_button.clicked.connect(self._new)
+        browse = theme.iconic(QPushButton("ほかの原稿を開く…"), "open")
+        browse.clicked.connect(self._browse)
+        side = QVBoxLayout()
+        side.addWidget(name)
+        side.addWidget(lead)
+        side.addSpacing(18)
+        side.addWidget(new_button)
+        side.addWidget(browse)
+        side.addStretch(1)
         self.list = QListWidget()
+        self.list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.list.setIconSize(QSize(132, 180))
+        self.list.setGridSize(QSize(168, 250))
+        self.list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list.setMovement(QListWidget.Movement.Static)
         self.list.setWordWrap(True)
-        self.list.setSpacing(2)
-        for path in recent_projects():
-            item = QListWidgetItem(f"{project_title(path)}\n{path}")
+        self.list.setSpacing(6)
+        self._paths = recent_projects()
+        blank = _blank_cover(QSize(132, 180))
+        for path in self._paths:
+            item = QListWidgetItem(blank, project_title(path))
             item.setData(Qt.ItemDataRole.UserRole, str(path))
+            item.setToolTip(str(path))
             self.list.addItem(item)
         if self.list.count():
             self.list.setCurrentRow(0)
         self.list.itemActivated.connect(lambda item: self._pick(Path(item.data(Qt.ItemDataRole.UserRole))))
-        empty = QLabel("最近開いた原稿はまだありません。")
+        empty = theme.role(QLabel("最近開いた原稿はまだありません。\n左の「新しい原稿を作る」から始めます。"), "empty")
+        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty.setVisible(self.list.count() == 0)
+        self.list.setVisible(self.list.count() > 0)
         open_recent = QPushButton("選んだ原稿を開く")
         open_recent.setDefault(True)
         open_recent.setEnabled(self.list.count() > 0)
         open_recent.clicked.connect(lambda: self.list.currentItem() and self._pick(Path(self.list.currentItem().data(Qt.ItemDataRole.UserRole))))
-        browse = QPushButton("ほかの原稿を開く…")
-        browse.clicked.connect(self._browse)
-        new_button = QPushButton("新しい原稿を作る…")
-        new_button.clicked.connect(self._new)
-        buttons = QHBoxLayout()
-        buttons.addWidget(new_button)
-        buttons.addWidget(browse)
-        buttons.addStretch(1)
-        buttons.addWidget(open_recent)
-        layout = QVBoxLayout(self)
-        layout.addWidget(head)
-        layout.addWidget(QLabel("最近の原稿"))
-        layout.addWidget(self.list, 1)
-        layout.addWidget(empty)
-        layout.addLayout(buttons)
+        main = QVBoxLayout()
+        main.addWidget(theme.role(QLabel("最近の原稿"), "section"))
+        main.addWidget(self.list, 1)
+        main.addWidget(empty, 1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(open_recent)
+        main.addLayout(row)
+        card = QWidget()
+        card.setObjectName("startCard")
+        card.setLayout(main)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
+        layout.addLayout(side, 0)
+        layout.addWidget(card, 1)
+        self._next_cover = 0
+        QTimer.singleShot(0, self._load_cover)
+
+    def _load_cover(self) -> None:
+        """The recent books' first pages, one at a time (the window stays quick to open)."""
+        if self._next_cover >= self.list.count():
+            return
+        item = self.list.item(self._next_cover)
+        self._next_cover += 1
+        cover = cover_thumbnail(Path(item.data(Qt.ItemDataRole.UserRole)))
+        if cover is not None:
+            picture = QIcon()
+            for mode in (QIcon.Mode.Normal, QIcon.Mode.Selected, QIcon.Mode.Active):  # (the page never tinted)
+                picture.addPixmap(cover, mode)
+            item.setIcon(picture)
+        QTimer.singleShot(0, self._load_cover)
 
     def _pick(self, path: Path) -> None:
         self.chosen = path
@@ -276,7 +354,7 @@ class NewProjectDialog(QDialog):
         self.custom_spec: PageSpec | None = None
         self.paper_note = QLabel()
         self.paper_note.setWordWrap(True)
-        self.paper_note.setStyleSheet("color:#666")
+        theme.role(self.paper_note, "hint")
         self.paper.currentIndexChanged.connect(lambda _: self._paper_changed())
         self.binding = QComboBox()
         self.binding.addItem("右綴じ（縦書きの漫画）", "right")
@@ -288,7 +366,7 @@ class NewProjectDialog(QDialog):
         where.addWidget(self.folder, 1)
         where.addWidget(pick)
         self.where_note = QLabel()
-        self.where_note.setStyleSheet("color:#666")
+        theme.role(self.where_note, "hint")
         self.title.textChanged.connect(self._note)
         self.folder.textChanged.connect(self._note)
         form = QFormLayout()
@@ -401,9 +479,9 @@ class ExportDialog(QDialog):
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setMinimumSize(160, 200)
-        self.preview.setStyleSheet("background:#3a3a3a")
+        self.preview.setStyleSheet(f"background:{theme.tokens().surround}")
         self.preview_note = QLabel()
-        self.preview_note.setStyleSheet("color:#555")
+        theme.role(self.preview_note, "hint")
         self.format = QComboBox()
         for fmt in exporting.FORMATS:
             if official and not fmt.official:
@@ -411,7 +489,7 @@ class ExportDialog(QDialog):
             self.format.addItem(fmt.label, fmt.key)
         self.note = QLabel()
         self.note.setWordWrap(True)
-        self.note.setStyleSheet("color:#555")
+        theme.role(self.note, "hint")
         self.dpi = QSpinBox()
         self.dpi.setRange(72, 1200)
         self.dpi.setSuffix(" dpi")
@@ -675,7 +753,7 @@ class TimelapseDialog(QDialog):
         self.seconds.setSpecialValueText("すべてのコマ")
         self.seconds.setSuffix(" 秒に収める")
         self.count = QLabel()
-        self.count.setStyleSheet("color:#555")
+        theme.role(self.count, "hint")
         form = QFormLayout()
         form.addRow("ページ", self.which)
         form.addRow("形式", self.movie)

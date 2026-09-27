@@ -1,5 +1,5 @@
 """Tool and command icons, drawn by Genko itself (no image files, nothing borrowed): simple line pictures
-on a 32×32 grid, in the window's text colour so they read on light and dark themes."""
+on a 32×32 grid, one line weight, in the look's text colour with its one accent (theme.py), or grey only."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ LIGHT_INK = INK
 DARK_INK = QColor(222, 225, 230)  # (on the dark screen the pictures are drawn light)
 
 
-def _pen(width: float = 2.2, colour: QColor | None = None, style=Qt.PenStyle.SolidLine) -> QPen:
+def _pen(width: float = 2.0, colour: QColor | None = None, style=Qt.PenStyle.SolidLine) -> QPen:
     colour = INK if colour is None else colour
     pen = QPen(colour, width, style, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
     return pen
@@ -178,6 +178,92 @@ def _draw(name: str, p: QPainter) -> None:
         p.drawPolyline(_poly([(6, 18), (6, 28), (26, 28), (26, 18)]))
         p.drawLine(QPointF(16, 4), QPointF(16, 20))
         p.drawPolyline(_poly([(10, 10), (16, 4), (22, 10)]))
+    elif name in ("add", "pen_layer", "paint_layer", "folder"):
+        if name == "folder":
+            p.drawPolyline(_poly([(4, 10), (4, 26), (28, 26), (28, 12), (15, 12), (12, 8), (4, 8), (4, 10)]))
+        elif name == "pen_layer":
+            p.drawPolygon(_poly([(4, 20), (16, 26), (28, 20), (16, 14)]))
+            p.drawLine(QPointF(14, 6), QPointF(20, 12))
+        elif name == "paint_layer":
+            p.drawPolygon(_poly([(4, 20), (16, 26), (28, 20), (16, 14)]))
+            p.setBrush(ACCENT)
+            p.setPen(_pen(1.2, ACCENT))
+            p.drawEllipse(QPointF(17, 8), 4, 4)
+        p.setPen(_pen(2.0, ACCENT))
+        cx, cy = (25, 7) if name != "add" else (16, 16)
+        size = 4 if name != "add" else 9
+        p.drawLine(QPointF(cx - size, cy), QPointF(cx + size, cy))
+        p.drawLine(QPointF(cx, cy - size), QPointF(cx, cy + size))
+    elif name == "delete":
+        p.drawLine(QPointF(6, 9), QPointF(26, 9))
+        p.drawPolyline(_poly([(12, 9), (13, 5), (19, 5), (20, 9)]))
+        p.drawPolygon(_poly([(8, 9), (10, 28), (22, 28), (24, 9)]))
+        p.drawLine(QPointF(14, 14), QPointF(14, 23))
+        p.drawLine(QPointF(18, 14), QPointF(18, 23))
+    elif name in ("up", "down"):
+        if name == "down":
+            p.translate(0, 32)
+            p.scale(1, -1)
+        p.drawLine(QPointF(16, 27), QPointF(16, 6))
+        p.drawPolyline(_poly([(8, 14), (16, 6), (24, 14)]))
+    elif name == "approve":
+        p.setPen(_pen(2.6, ACCENT))
+        p.drawPolyline(_poly([(6, 17), (13, 24), (27, 9)]))
+    elif name == "back":
+        path = QPainterPath(QPointF(10, 12))
+        path.lineTo(QPointF(22, 12))
+        path.cubicTo(QPointF(30, 12), QPointF(30, 26), QPointF(22, 26))
+        path.lineTo(QPointF(12, 26))
+        p.drawPath(path)
+        p.drawPolyline(_poly([(15, 7), (10, 12), (15, 17)]))
+    elif name == "expand":
+        for tip in (((5, 12), (5, 5), (12, 5)), ((20, 5), (27, 5), (27, 12)), ((27, 20), (27, 27), (20, 27)), ((12, 27), (5, 27), (5, 20))):
+            p.drawPolyline(_poly(tip))
+    elif name == "search":
+        p.drawEllipse(QRectF(5, 5, 16, 16))
+        p.drawLine(QPointF(18, 18), QPointF(27, 27))
+    elif name == "settings":
+        p.drawEllipse(QPointF(16, 16), 4.5, 4.5)
+        for a in range(0, 360, 45):
+            r = math.radians(a)
+            p.drawLine(QPointF(16 + 8 * math.cos(r), 16 + 8 * math.sin(r)), QPointF(16 + 12 * math.cos(r), 16 + 12 * math.sin(r)))
+        p.drawEllipse(QPointF(16, 16), 8.5, 8.5)
+    elif name == "story":
+        for x in (24, 18, 12):
+            p.drawLine(QPointF(x, 5), QPointF(x, 22 if x != 12 else 16))
+        p.setPen(_pen(2.0, ACCENT))
+        p.drawLine(QPointF(6, 27), QPointF(26, 27))
+    elif name == "check":
+        for y in (8, 16, 24):
+            p.drawLine(QPointF(14, y), QPointF(28, y))
+        p.setPen(_pen(2.0, ACCENT))
+        for y in (8, 16, 24):
+            p.drawPolyline(_poly([(4, y), (6.5, y + 2.5), (10, y - 2.5)]))
+    elif name == "page":
+        p.drawPolygon(_poly([(7, 4), (20, 4), (26, 10), (26, 28), (7, 28)]))
+        p.drawPolyline(_poly([(20, 4), (20, 10), (26, 10)]))
+    elif name == "open":
+        p.drawPolyline(_poly([(4, 10), (4, 26), (24, 26), (28, 14), (8, 14), (4, 26)]))
+        p.drawPolyline(_poly([(4, 10), (4, 7), (12, 7), (14, 10), (24, 10), (24, 14)]))
+    elif name == "book":
+        p.drawPolyline(_poly([(16, 8), (16, 27)]))
+        p.drawPolygon(_poly([(16, 8), (5, 5), (5, 24), (16, 27), (27, 24), (27, 5)]))
+    elif name == "duplicate":
+        p.drawRect(QRectF(5, 9, 16, 18))
+        p.drawPolyline(_poly([(11, 9), (11, 4), (27, 4), (27, 22), (21, 22)]))
+    elif name == "merge":
+        p.drawPolygon(_poly([(4, 24), (16, 29), (28, 24), (16, 19)]))
+        p.drawLine(QPointF(16, 3), QPointF(16, 15))
+        p.drawPolyline(_poly([(11, 10), (16, 15), (21, 10)]))
+    elif name == "more":
+        p.setBrush(INK)
+        for x in (8, 16, 24):
+            p.drawEllipse(QPointF(x, 16), 1.8, 1.8)
+    elif name == "info":
+        p.drawEllipse(QRectF(5, 5, 22, 22))
+        p.drawLine(QPointF(16, 14), QPointF(16, 22))
+        p.setBrush(INK)
+        p.drawEllipse(QPointF(16, 10), 1.2, 1.2)
     else:
         p.drawRect(QRectF(6, 6, 20, 20))
 
@@ -190,14 +276,17 @@ def dark_screen() -> bool:
 
 
 def icon(name: str) -> QIcon:
-    """A tool's picture, drawn in the screen's text colour (dark on a light screen, light on a dark one)."""
-    return _icon(name, dark_screen())
+    """A tool's picture, drawn in the look's text colour and its one accent (grey only when chosen)."""
+    from genko.app import theme
+
+    t = theme.tokens()
+    return _icon(name, t.text, t.muted if theme.mono_icons() else t.accent)
 
 
-@lru_cache(maxsize=128)
-def _icon(name: str, dark: bool) -> QIcon:
-    global INK
-    INK = DARK_INK if dark else LIGHT_INK
+@lru_cache(maxsize=256)
+def _icon(name: str, ink: str, accent: str) -> QIcon:
+    global INK, ACCENT
+    INK, ACCENT = QColor(ink), QColor(accent)
     pixmap = QPixmap(64, 64)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -205,5 +294,5 @@ def _icon(name: str, dark: bool) -> QIcon:
     painter.scale(2, 2)
     _draw(name, painter)
     painter.end()
-    INK = LIGHT_INK
+    INK, ACCENT = LIGHT_INK, QColor(232, 89, 12)
     return QIcon(pixmap)

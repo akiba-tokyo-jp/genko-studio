@@ -46,6 +46,7 @@ from genko.app.session import Session
 from genko.app.studio_widgets import ApprovalBox, Library, PanelView, ProcessBar
 from genko.models import LayerKind, LayerRole, PageSpec, new_episode
 from genko.ops import ApplyError
+from genko.app import theme
 
 COMMIT_AFTER_MS = 1000
 SIDE_WIDTH = 230  # the side panels; the rest of the window is the page  # changes reach the disk after a second without edits
@@ -74,9 +75,9 @@ class StoryPanel(QWidget):
         self._loading = False
         self.list = QListWidget()
         self.list.currentRowChanged.connect(lambda _: self._picked())
-        up = QPushButton("↑ 前へ")
+        up = theme.iconic(QPushButton("↑ 前へ"), "up", "前へ", "選んだ台詞を読み順で前へ")
         up.clicked.connect(lambda: self._move(-1))
-        down = QPushButton("↓ 後へ")
+        down = theme.iconic(QPushButton("↓ 後へ"), "down", "後へ", "選んだ台詞を読み順で後ろへ")
         down.clicked.connect(lambda: self._move(1))
         self.speaker = QLineEdit()
         self.speaker.setPlaceholderText("話者（空でもよい）")
@@ -88,11 +89,11 @@ class StoryPanel(QWidget):
             self.kind.addItem(label, key)
         self.vertical = QCheckBox("縦書き")
         self.vertical.setChecked(True)
-        add = QPushButton("選んだコマに追加")
+        add = theme.iconic(QPushButton("選んだコマに追加"), "add")
         add.clicked.connect(self.add)
         self.apply_button = QPushButton("この台詞を直す")
         self.apply_button.clicked.connect(self.apply_edit)
-        self.delete_button = QPushButton("削除")
+        self.delete_button = theme.iconic(QPushButton("削除"), "delete")
         self.delete_button.clicked.connect(self.delete)
         # lettering style of the selected line (applied at once)
         self.font = QComboBox()
@@ -219,12 +220,12 @@ class StoryPanel(QWidget):
         hint = QLabel("フキダシはダブルクリックで打ち直し、四隅で大きさ、●でしっぽの先、◇でしっぽの曲がり、上の○で回転。"
                       "右クリックで形・しっぽ・結合。")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#666")
+        theme.hint(hint)
         # the lettering and balloon settings of the chosen line sit beside the tool (ツールの設定), where
         # there is room; this panel keeps the list and the words
         self.style_box = QWidget()
         self.style_title = QLabel()
-        self.style_title.setStyleSheet("font-weight:bold")
+        theme.role(self.style_title, "title")
         self.style_title.setWordWrap(True)
         sl = QVBoxLayout(self.style_box)
         sl.setContentsMargins(0, 6, 0, 0)
@@ -248,7 +249,7 @@ class StoryPanel(QWidget):
         layout.addLayout(buttons)
         more = QLabel("文字・フキダシの設定は左の「ツールの設定」に出ます")
         more.setWordWrap(True)
-        more.setStyleSheet("color:#666")
+        theme.hint(more)
         layout.addWidget(more)
         self._picked()
 
@@ -292,7 +293,7 @@ class StoryPanel(QWidget):
         for widget in (self.apply_button, self.delete_button):
             widget.setEnabled(line is not None)
         self.style_body.setVisible(line is not None)
-        self.style_title.setStyleSheet("font-weight:bold" if line is not None else "color:#666")
+        theme.role(self.style_title, "title" if line is not None else "hint")
         self.style_title.setText(f"選んだ台詞の文字とフキダシ: 「{line.text[:12]}{'…' if len(line.text) > 12 else ''}」"
                                  if line is not None else "台詞をクリックすると、ここに文字とフキダシの設定が出ます")
         self.window.canvas.selected_line_id = line.id if line else None
@@ -551,13 +552,13 @@ class LayerPanel(QWidget):
         self.overhang = QCheckBox("コマの外にもはみ出す")
         self.overhang.setToolTip("このレイヤーの線を、コマの枠で切らずに間の白や外まで描きます")
         self.overhang.clicked.connect(lambda on: self._set("panel_clip", not on))
-        add_pen = QPushButton("＋ペン")
+        add_pen = theme.iconic(QPushButton("＋ペン"), "pen_layer", "ペン", "ペンのレイヤーを足す（線が拡大してもなめらか）")
         add_pen.setToolTip("線を描くレイヤー（線はあとから消しゴムで切れる）")
         add_pen.clicked.connect(lambda: self._add("pen", "ペン"))
-        add_paint = QPushButton("＋ペイント")
+        add_paint = theme.iconic(QPushButton("＋ペイント"), "paint_layer", "ペイント", "ペイントのレイヤーを足す（塗りや筆のにじみ）")
         add_paint.setToolTip("塗りや画像のレイヤー")
         add_paint.clicked.connect(lambda: self._add("paint", "ペイント"))
-        add_folder = QPushButton("＋フォルダ")
+        add_folder = theme.iconic(QPushButton("＋フォルダ"), "folder", "フォルダ", "フォルダを足す（レイヤーをまとめる）")
         add_folder.clicked.connect(lambda: self._add("folder", "フォルダ"))
         add_special = QPushButton("＋塗り・補正 ▾")
         add_special.setToolTip("ベタ塗り・グラデーション・色調補正のレイヤー（あとから何度でも直せます。ダブルクリックで直す）")
@@ -613,7 +614,7 @@ class LayerPanel(QWidget):
         down = QPushButton("↓")
         down.setToolTip("後ろへ")
         down.clicked.connect(lambda: self._move(-1))
-        delete = QPushButton("削除")
+        delete = theme.iconic(QPushButton("削除"), "delete")
         delete.clicked.connect(self._delete)
         duplicate = QPushButton("複製")
         duplicate.setToolTip("選んだレイヤーの写しを、すぐ上に作ります")
@@ -658,11 +659,22 @@ class LayerPanel(QWidget):
             self.filter.addItem(f"{plugin['name']}（プラグイン）", plugins.PREFIX + plugin["key"])
         apply_filter = QPushButton("フィルターをかける…")
         apply_filter.clicked.connect(self._filter)
-        adds = QGridLayout()
-        for i, button in enumerate((add_pen, add_paint, add_folder, add_special, delete, several, up, down, duplicate, merge)):
-            adds.addWidget(button, i // 2, i % 2)
-        up.setText("↑ 前へ")
-        down.setText("↓ 後ろへ")
+        adds = QGridLayout()  # (small picture buttons under the list, as painting apps have them)
+        adds.setSpacing(2)
+        pictures = ((add_pen, "pen_layer", "ペンのレイヤーを足す（線を描く。線はあとから消しゴムで切れる）"),
+                    (add_paint, "paint_layer", "ペイントのレイヤーを足す（塗りや筆のにじみ）"),
+                    (add_folder, "folder", "フォルダを足す（レイヤーをまとめる）"),
+                    (add_special, "add", "塗り・グラデーション・色調補正のレイヤーを足す"),
+                    (duplicate, "duplicate", "選んだレイヤーを複製"), (merge, "merge", "下のレイヤーと結合"),
+                    (several, "more", "まとめて: 選んだレイヤーの結合・フォルダにまとめる・変換など"),
+                    (up, "up", "選んだレイヤーを上へ"), (down, "down", "選んだレイヤーを下へ"), (delete, "delete", "選んだレイヤーを削除"))
+        for i, (button, name, tip) in enumerate(pictures):
+            theme.iconic(button, name, "", tip)
+            button.setFixedSize(30, 28)
+            button.setIconSize(QSize(18, 18))
+            button.setStyleSheet("QPushButton::menu-indicator { width: 0; }")
+            adds.addWidget(button, i // 5, i % 5)
+        adds.setColumnStretch(5, 1)
         props = QFormLayout()
         props.addRow("不透明度", self.opacity)
         props.addRow("合成", self.blend)
@@ -1898,6 +1910,12 @@ class MainWindow(QMainWindow):
         self.workspace_menu.aboutToShow.connect(self._fill_workspaces)
         self.view_menu.addAction(self.act_edit_commandbar)
         self.view_menu.addAction(self.act_edit_quick)
+        self.act_hints = QAction("パネルの説明を表示", self)
+        self.act_hints.setCheckable(True)
+        self.act_hints.setChecked(theme.show_hints())
+        self.act_hints.setStatusTip("切ると、パネルの説明の文は隠れ、ツールチップで読めます")
+        self.act_hints.toggled.connect(theme.set_hints)
+        self.view_menu.addAction(self.act_hints)
         self.view_menu.addSeparator()
         help_menu = bar.addMenu("ヘルプ")
         for act in (self.act_find_command, None, self.act_help_guide, self.act_help_keys, self.act_help_faq, None, self.act_about):
@@ -2145,6 +2163,7 @@ class MainWindow(QMainWindow):
 
         for name, act in getattr(self, "_pictures", {}).items():
             act.setIcon(icon(name))
+        theme.refresh_icons()
         if hasattr(self, "quick_access"):
             self.quick_access.refresh()
 
@@ -2267,13 +2286,13 @@ class MainWindow(QMainWindow):
         eraser_form.addRow("消し方", self.eraser_mode)
         scrape = QLabel("トーンのレイヤーでは削ります（ぼかすかは素材パネルのトーンの欄で）")
         scrape.setWordWrap(True)
-        scrape.setStyleSheet("color:#666")
+        theme.hint(scrape)
         eraser_form.addRow(scrape)
         ts.add(("eraser",), eraser_page)
         ts.add(("text",), self.text_settings)
         frame_note = QLabel("コマを選ぶと、辺の中ほどの ◇ をドラッグで辺を曲げられます（外へふくらむ・内へへこむ）。")
         frame_note.setWordWrap(True)
-        frame_note.setStyleSheet("color:#666")
+        theme.hint(frame_note)
         ts.add(("frame",), action_page([self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, self.act_gutters,
                                         self.act_border, self.act_no_border,
                                         menu_button("枠線の種類・色", [self.border_kind_actions, [self.act_border_colour]]),
@@ -2306,7 +2325,7 @@ class MainWindow(QMainWindow):
         sfl.addRow("", self.colour_contiguous)
         joins = QLabel("Shift で足す・Alt で引く・両方で重なりだけ")
         joins.setWordWrap(True)
-        joins.setStyleSheet("color:#666")
+        theme.hint(joins)
         ts.add(("marquee",), action_page([sel_form, joins,
                                           menu_button("選択範囲", [[self.act_select_all, self.act_deselect, self.act_sel_invert],
                                                                    [self.act_sel_grow, self.act_sel_shrink, self.act_sel_feather,
@@ -2341,13 +2360,13 @@ class MainWindow(QMainWindow):
         note = QLabel("線の太さと色はペンと同じ。Shift で 45° と正方形。折れ線・曲線はクリックで点を置き、"
                       "ダブルクリックか Enter で終わり（Shift+Enter で閉じる）。")
         note.setWordWrap(True)
-        note.setStyleSheet("color:#666")
+        theme.hint(note)
         shl.addRow(note)
         ts.add(("shape",), shape_page)
         vector_note = QLabel("線をクリックで選び、□（制御点）をドラッグ。Alt+クリックで点を足し、Delete で点（または線）を消す。"
                              "Shift+クリックで 2 本目を選ぶ。")
         vector_note.setWordWrap(True)
-        vector_note.setStyleSheet("color:#666")
+        theme.hint(vector_note)
         ts.add(("vector",), action_page([vector_note, self.act_vector_cut, None, self.act_vector_join, self.act_vector_colour,
                                          self.act_vector_delete]))
         self.blend_mode = QComboBox()
@@ -2371,7 +2390,7 @@ class MainWindow(QMainWindow):
         bfl.addRow("大きさ", blend_size)
         blend_note = QLabel("ペイントのレイヤーの色を混ぜます（ペンの線は線のまま）。")
         blend_note.setWordWrap(True)
-        blend_note.setStyleSheet("color:#666")
+        theme.hint(blend_note)
         bfl.addRow(blend_note)
         ts.add(("blend",), blend_page)
         self.liquify_mode = QComboBox()
@@ -2396,7 +2415,7 @@ class MainWindow(QMainWindow):
         lfl.addRow("大きさ", liquify_size)
         liquify_note = QLabel("ペンの線は点が動き、線のまま残ります。")
         liquify_note.setWordWrap(True)
-        liquify_note.setStyleSheet("color:#666")
+        theme.hint(liquify_note)
         lfl.addRow(liquify_note)
         ts.add(("liquify",), liquify_page)
         radius = QDoubleSpinBox()
@@ -3352,8 +3371,7 @@ class MainWindow(QMainWindow):
 
         bar = QFrame(self.canvas)
         bar.setObjectName("launcher")
-        bar.setStyleSheet("#launcher { background: rgba(250,250,252,235); border: 1px solid #9aa; border-radius: 4px; }"
-                          " QToolButton { padding: 2px 5px; }")
+        bar.setStyleSheet("QToolButton { padding: 2px 5px; }")  # (its face and border come from the look: theme.py)
         row = QHBoxLayout(bar)
         row.setContentsMargins(3, 2, 3, 2)
         row.setSpacing(2)
@@ -4699,6 +4717,8 @@ def run_app(path: Path | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Genko Studio")
     from genko.app import preferences
+
+    theme.apply(app)  # (the look before the first window: the start screen too)
 
     if preferences.ui_font_pt():  # the size of the letters chosen in the preferences
         font = app.font()

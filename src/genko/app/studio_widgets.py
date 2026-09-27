@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from genko.app import review_model, wording
 from genko.ops import ApplyError
+from genko.app import theme
 
 Apply = Callable[[list[dict]], bool]
 
@@ -84,14 +85,14 @@ class ProcessBar(QWidget):
             label.deleteLater()
         self.labels = []
         pending = len(review_model.inbox(episode))
-        chips = [(f"承認箱 <b>{pending}</b>", "#ffc9c9" if pending else "#e9ecef",
+        chips = [(f"承認箱 <b>{pending}</b>", "badge-warn" if pending else "badge",
                   "エージェントからの承認依頼と相談。右の「承認箱」で 1 件ずつ見て決めます")]
         for text, count in review_model.progress(episode):
             if count:
-                chips.append((f"{text} <b>{count}</b>", "#ffe8cc" if "待ち" in text or "未承認" in text else "#e9ecef", ""))
-        for text, color, tip in chips:
+                chips.append((f"{text} <b>{count}</b>", "badge-warn" if "待ち" in text or "未承認" in text else "badge", ""))
+        for text, kind, tip in chips:
             label = QLabel(text)
-            label.setStyleSheet(f"padding:1px 8px;border-radius:8px;background:{color}")
+            theme.role(label, kind)
             if tip:
                 label.setToolTip(tip)
             self.layout_.addWidget(label)
@@ -161,7 +162,7 @@ class ApprovalBox(QWidget):
         self.page_pick.currentIndexChanged.connect(lambda _: self._page_changed())
         self.preview = PreviewLabel()
         self.preview.activated.connect(self.open_viewer)
-        self.big = QPushButton("大きく見る")
+        self.big = theme.iconic(QPushButton("大きく見る"), "expand")
         self.big.clicked.connect(self.open_viewer)
         self.choices = QListWidget()
         self.choices.setViewMode(QListWidget.ViewMode.IconMode)
@@ -170,9 +171,9 @@ class ApprovalBox(QWidget):
         self.choices.setMaximumHeight(200)
         self.choices.itemDoubleClicked.connect(lambda _: self.open_viewer())
         self.reason = QLineEdit()
-        self.approve_button = QPushButton("承認")
+        self.approve_button = QPushButton("承認")  # (the accent button: its words alone)
         self.approve_button.clicked.connect(self.approve)
-        self.back_button = QPushButton("差し戻し")
+        self.back_button = theme.iconic(QPushButton("差し戻し"), "back")
         self.back_button.clicked.connect(self.send_back)
         buttons = QHBoxLayout()
         buttons.addWidget(self.back_button)
@@ -183,7 +184,7 @@ class ApprovalBox(QWidget):
         head.addWidget(self.big)
         self.empty = QLabel("承認を待っている依頼はありません。\nエージェントが依頼を出すと、ここに届きます。")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty.setStyleSheet("color:#777")
+        theme.role(self.empty, "hint")
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("エージェントからの依頼（1 件ずつ見て決める）"))
         layout.addWidget(self.list)
@@ -194,7 +195,7 @@ class ApprovalBox(QWidget):
         layout.addWidget(self.choices)
         layout.addWidget(self.reason)
         layout.addLayout(buttons)
-        self.approve_button.setStyleSheet("font-weight:bold;padding:4px 16px")
+        theme.primary(self.approve_button)
 
     def refresh(self) -> None:
         episode = self.window.session.episode

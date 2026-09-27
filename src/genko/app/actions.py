@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import json
 import time
+from genko.app import theme
 from pathlib import Path
 
 # ops that make something with an "id" of its own
@@ -162,7 +163,7 @@ class ActionsDialog:
         steps = QListWidget()
         note = QLabel("灰色の手順は、記録したページの決まった物（台詞・線など）を変えるもので、ほかのページでは飛ばします。")
         note.setWordWrap(True)
-        note.setStyleSheet("color:#666")
+        theme.hint(note)
         state = {"data": load()}
 
         def fill_names(select: str | None = None) -> None:

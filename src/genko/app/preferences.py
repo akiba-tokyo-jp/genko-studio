@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from genko.app import theme
 
 PEN_BUTTONS = [("右クリック（メニュー）", "menu"), ("スポイト", "picker"), ("手のひら（表示を動かす）", "hand")]
 SAVE_AFTER = (500, 30000)
@@ -124,6 +125,7 @@ def apply_all(window) -> None:
     workspace.apply_theme()
     if hasattr(window, "refresh_icons"):
         window.refresh_icons()
+    window.canvas.update()
     window.canvas.cursor_kind = workspace.cursor_kind()
     window.canvas.modifier_tools = {"alt": workspace.modifier_tool("alt"), "ctrl": workspace.modifier_tool("ctrl")}
     window.canvas._update_cursor()
@@ -189,7 +191,7 @@ class PreferencesDialog(QDialog):
             self.table.setCellWidget(row, 1, editor)
             self.editors[action.text()] = editor
         self.clash = QLabel()
-        self.clash.setStyleSheet("color:#c92a2a")
+        theme.role(self.clash, "error")
         self.clash.setWordWrap(True)
         reset = QPushButton("すべて最初のキーに戻す")
         reset.clicked.connect(self._reset_keys)
@@ -248,6 +250,24 @@ class PreferencesDialog(QDialog):
         for label, key in workspace.THEMES:
             self.theme.addItem(label, key)
         self.theme.setCurrentIndex(max(0, self.theme.findData(workspace.theme())))
+        from PySide6.QtWidgets import QCheckBox, QSlider
+
+        self.brightness = QSlider(Qt.Orientation.Horizontal)
+        self.brightness.setRange(-2, 2)
+        self.brightness.setPageStep(1)
+        self.brightness.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.brightness.setValue(theme.brightness())
+        self.brightness.setToolTip("パネルのグレーの明るさ（左ほど暗く、右ほど明るい）")
+        self.surround = QComboBox()
+        for label, key in (("自動（画面の色に合わせる）", "auto"), ("暗いグレー", "58"), ("中間のグレー", "128"),
+                           ("明るいグレー", "190"), ("黒", "20")):
+            self.surround.addItem(label, key)
+        self.surround.setCurrentIndex(max(0, self.surround.findData(theme.surround_setting())))
+        self.surround.setToolTip("原稿のまわりの色。無彩色のグレーにしておくと、原稿のグレーの見え方が狂いません")
+        self.mono_icons = QCheckBox("アイコンをグレーだけで描く")
+        self.mono_icons.setChecked(theme.mono_icons())
+        self.hints = QCheckBox("パネルに説明の文を出す（切ると、説明はツールチップに入る）")
+        self.hints.setChecked(theme.show_hints())
         self.cursor = QComboBox()
         for label, key in workspace.CURSORS:
             self.cursor.addItem(label, key)
@@ -262,6 +282,10 @@ class PreferencesDialog(QDialog):
         work = QWidget()
         wl = QFormLayout(work)
         wl.addRow("画面の色", self.theme)
+        wl.addRow("パネルの明るさ", self.brightness)
+        wl.addRow("原稿のまわり", self.surround)
+        wl.addRow("", self.mono_icons)
+        wl.addRow("", self.hints)
         wl.addRow("ペンのカーソル", self.cursor)
         wl.addRow("Alt を押している間", self.alt_tool)
         wl.addRow("Ctrl を押している間", self.ctrl_tool)
@@ -269,7 +293,7 @@ class PreferencesDialog(QDialog):
         wl.addRow("新しい原稿の用紙", self.paper)
         wl.addRow("変更を保存するまで", self.save_after)
         note = QLabel("文字の大きさは、次に Genko を開いたときから変わります。")
-        note.setStyleSheet("color:#666")
+        theme.role(note, "hint")
         wl.addRow("", note)
         tabs.addTab(work, "表示・作業")
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -337,6 +361,10 @@ class PreferencesDialog(QDialog):
         store.setValue("tablet/gamma", "" if self.gamma is None else self.gamma)
         store.setValue("tablet/button", self.button.currentData())
         store.setValue("ui/theme", self.theme.currentData())
+        store.setValue("ui/brightness", self.brightness.value())
+        store.setValue("ui/surround", self.surround.currentData())
+        store.setValue("ui/mono_icons", "true" if self.mono_icons.isChecked() else "false")
+        theme.set_hints(self.hints.isChecked())
         store.setValue("ui/cursor", self.cursor.currentData())
         store.setValue("keys/alt_tool", self.alt_tool.currentData())
         store.setValue("keys/ctrl_tool", self.ctrl_tool.currentData())

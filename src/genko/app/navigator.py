@@ -10,6 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QDialog, QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from genko.app import theme
 
 
 class Navigator(QWidget):
@@ -98,7 +99,7 @@ class PageOverview(QDialog):
         self.list.setSpacing(6)
         self.list.itemDoubleClicked.connect(self._open)
         note = QLabel("ダブルクリックでそのページを開きます。見開きのページは「◀▶」で示します。")
-        note.setStyleSheet("color:#666")
+        theme.hint(note)
         layout = QVBoxLayout(self)
         layout.addWidget(note)
         layout.addWidget(self.list, 1)

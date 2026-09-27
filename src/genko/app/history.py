@@ -10,6 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from genko.app import theme
 
 NAMES = {
     "add_stroke": "ペンで描いた", "erase": "消しゴムで消した", "fill": "塗りつぶした", "fill_area": "囲って塗った",
@@ -87,7 +88,7 @@ class HistoryPanel(QWidget):
         self.list.itemClicked.connect(self._go)
         note = QLabel("クリックで、その変更をした直後まで戻る（進む）。灰色は取り消した変更（やり直せる）。")
         note.setWordWrap(True)
-        note.setStyleSheet("color:#666")
+        theme.hint(note)
         layout = QVBoxLayout(self)
         layout.addWidget(self.list, 1)
         layout.addWidget(note)

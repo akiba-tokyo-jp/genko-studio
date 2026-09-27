@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QLabel, QPlainTextEdit, QWidget
 from genko.app.canvas_guides import GuideMixin
 from genko.app.canvas_shapes import ShapeSelectMixin
 from genko.app.canvas_vector import VectorMixin
+from genko.app import theme
 from genko.models import Page, Rect, StoryLine
 from genko.stroke import pack_point
 
@@ -35,10 +36,10 @@ class InlineEditor(QPlainTextEdit):
         self.on_done = on_done
         self.finished = False
         self.setPlainText(text)
-        self.setStyleSheet("QPlainTextEdit{background:#fffbe6;border:2px solid #e8590c;font-size:15px}")
+        self.setStyleSheet(f"QPlainTextEdit{{background:#fffdf5;color:#1f2124;border:2px solid {theme.tokens().accent};font-size:15px}}")
         self.setPlaceholderText("台詞を入力（改行で次の列、ルビは ｜約束《やくそく》、傍点は 《《強調》》）")
         self.hint = QLabel("Ctrl+Enter で決定・Esc でやめる", parent)
-        self.hint.setStyleSheet("background:#e8590c;color:white;padding:1px 4px")
+        self.hint.setStyleSheet(f"background:{theme.tokens().accent};color:{theme.tokens().accent_text};padding:1px 6px;border-radius:3px")
         self.hint.adjustSize()
 
     def place(self, x: float, y: float) -> None:
@@ -483,9 +484,9 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        painter.fillRect(self.rect(), QColor("#3a3a3a"))
+        painter.fillRect(self.rect(), theme.surround())  # (a neutral grey: it does not sway how the page's greys look)
         if self.page is None:
-            painter.setPen(QColor("#bbbbbb"))
+            painter.setPen(QColor(theme.tokens().muted))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ページがありません")
             return
         painter.setTransform(self._view())

@@ -7,9 +7,8 @@ Everything is kept in the settings (QSettings), so it stays for every book.
 from __future__ import annotations
 
 from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication,
     QDialog,
     QDialogButtonBox,
     QGridLayout,
@@ -24,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from genko.app.preferences import settings
 
-THEMES = [("パソコンの設定のまま", "system"), ("明るい", "light"), ("暗い", "dark")]
+THEMES = [("パソコンの設定のまま", "system"), ("明るい", "light"), ("暗い", "dark")]  # (theme.MODES)
 CURSORS = [("ブラシの大きさの円", "circle"), ("円と十字", "circle_cross"), ("十字", "cross"), ("点", "dot")]
 MODIFIER_TOOLS = [("何もしない", ""), ("スポイト", "picker"), ("選択", "select"), ("レイヤー移動", "move"), ("消しゴム", "eraser")]
 DEFAULT_COMMANDBAR = ["元に戻す", "やり直す", "|", "全体を表示", "縮小", "拡大", "|", "◀ 前のページ", "次のページ ▶", "|", "書き出し…"]
@@ -337,29 +336,10 @@ def theme() -> str:
 
 
 def apply_theme(mode: str | None = None) -> None:
-    app = QApplication.instance()
-    if app is None:
-        return
-    mode = mode or theme()
-    if not hasattr(app, "_genko_palette"):
-        app._genko_palette = QPalette(app.palette())  # (what the system gave, to go back to)
-    if mode != "dark":
-        app.setPalette(app._genko_palette if mode == "system" else app.style().standardPalette())
-        return
-    dark = QPalette()
-    base, window, text = QColor(38, 40, 44), QColor(50, 53, 58), QColor(226, 228, 232)
-    for role, colour in ((QPalette.ColorRole.Window, window), (QPalette.ColorRole.WindowText, text),
-                         (QPalette.ColorRole.Base, base), (QPalette.ColorRole.AlternateBase, window),
-                         (QPalette.ColorRole.ToolTipBase, window), (QPalette.ColorRole.ToolTipText, text),
-                         (QPalette.ColorRole.Text, text), (QPalette.ColorRole.Button, window),
-                         (QPalette.ColorRole.ButtonText, text), (QPalette.ColorRole.BrightText, QColor(255, 120, 80)),
-                         (QPalette.ColorRole.Highlight, QColor(232, 89, 12)), (QPalette.ColorRole.HighlightedText, QColor("white")),
-                         (QPalette.ColorRole.PlaceholderText, QColor(150, 152, 158)), (QPalette.ColorRole.Link, QColor(120, 170, 255))):
-        dark.setColor(role, colour)
-    dark.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(120, 122, 128))
-    dark.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(120, 122, 128))
-    dark.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(120, 122, 128))
-    app.setPalette(dark)
+    """The screen's colours (theme.py: calm greys, one accent, light or dark or as the computer is)."""
+    from genko.app import theme as look
+
+    look.apply(which=mode)
 
 
 def cursor_kind() -> str:

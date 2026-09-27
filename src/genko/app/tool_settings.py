@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from genko.app import theme
 
 TITLES = {
     "select": ("選択（V）", "コマをクリックで選ぶ・フキダシをドラッグで動かす・ダブルクリックで打ち直す・何もない所のドラッグで表示を動かす"),
@@ -60,6 +61,7 @@ def action_button(action) -> QToolButton:
     button.setDefaultAction(action)
     button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    button.setProperty("panel", True)  # (drawn as a button, not a bare tool: theme.py)
     return button
 
 
@@ -134,7 +136,7 @@ class TextToolSettings(QWidget):
         note = QLabel("ルビは ｜約束《やくそく》、傍点は 《《強調》》、一部を大きく {大|…}（特大・小・太・赤・青・白も）と打ちます。"
                       "入れた後の台詞は、台詞パネルで直せます。")
         note.setWordWrap(True)
-        note.setStyleSheet("color:#666")
+        theme.hint(note)
         form.addRow(note)
 
     def line_fields(self) -> dict:
@@ -150,10 +152,10 @@ class ToolSettings(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.title = QLabel()
-        self.title.setStyleSheet("font-weight:bold; font-size:13px")
+        theme.role(self.title, "title")
         self.hint = QLabel()
         self.hint.setWordWrap(True)
-        self.hint.setStyleSheet("color:#555")
+        theme.hint(self.hint)
         self.stack = QStackedWidget()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -210,7 +212,7 @@ def fit_narrow(root: QWidget) -> None:
             box.setTitle(head)
             hint = QLabel(note)
             hint.setWordWrap(True)
-            hint.setStyleSheet("color:#666")
+            theme.hint(hint)
             box.layout().insertWidget(0, hint) if hasattr(box.layout(), "insertWidget") else box.layout().insertRow(0, hint)
     for button in root.findChildren(QPushButton):
         if button.text() and button.maximumWidth() > 1000:  # (fixed-size buttons stay as they are)
