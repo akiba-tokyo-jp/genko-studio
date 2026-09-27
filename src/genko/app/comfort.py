@@ -248,6 +248,35 @@ def radial_on() -> bool:
 # --- resting the eyes ---------------------------------------------------------------------------------------
 
 
+class _Input(QObject):
+    """One watcher for the whole application: when a person last pressed, drew or typed."""
+
+    KINDS = (QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress, QEvent.Type.TabletPress, QEvent.Type.Wheel,
+             QEvent.Type.TabletMove)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.last = time.monotonic()
+
+    def eventFilter(self, _obj, event) -> bool:  # noqa: N802
+        if event.type() in self.KINDS:
+            self.last = time.monotonic()
+        return False
+
+
+_input: _Input | None = None
+
+
+def last_input() -> float:
+    global _input
+    app = QApplication.instance()
+    if _input is None and app is not None:
+        _input = _Input()
+        _input.setParent(app)
+        app.installEventFilter(_input)
+    return _input.last if _input is not None else time.monotonic()
+
+
 class RestReminder(QObject):
     """Counts the time actually spent working (input within the last two minutes) and, after the chosen
     minutes, says so quietly. Off (0) unless the person chooses a length in the preferences."""
@@ -259,13 +288,10 @@ class RestReminder(QObject):
         super().__init__(window)
         self.window = window
         self.worked = 0.0
-        self.last_input = time.monotonic()
+        last_input()
         self._tick = QTimer(self)
         self._tick.setInterval(15_000)
         self._tick.timeout.connect(self._count)
-        app = QApplication.instance()
-        if app is not None:
-            app.installEventFilter(self)
         self._tick.start()
 
     def minutes(self) -> int:
@@ -276,19 +302,16 @@ class RestReminder(QObject):
         except (TypeError, ValueError):
             return 0
 
-    def eventFilter(self, _obj, event) -> bool:  # noqa: N802
-        if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress, QEvent.Type.TabletPress,
-                            QEvent.Type.Wheel, QEvent.Type.TabletMove):
-            now = time.monotonic()
-            if now - self.last_input > self.RESET_IDLE_S:
-                self.worked = 0.0  # (a real pause already happened)
-            self.last_input = now
-        return False
-
     def _count(self) -> None:
+        if getattr(self.window, "_closed", False):
+            self._tick.stop()
+            return
         if not self.minutes():
             return
-        if time.monotonic() - self.last_input < self.IDLE_S:
+        idle = time.monotonic() - last_input()
+        if idle > self.RESET_IDLE_S:
+            self.worked = 0.0  # (a real pause already happened)
+        elif idle < self.IDLE_S:
             self.worked += self._tick.interval() / 1000
         if self.worked >= self.minutes() * 60:
             self.worked = 0.0

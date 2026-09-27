@@ -168,6 +168,12 @@ def test_the_eyes_are_reminded_only_when_asked(window, qapp):
     rest._count()
     assert rest.worked == 10_000  # (off by default: nothing counted, nothing shown)
     settings().setValue("ui/rest_minutes", 30)
+    import time
+
+    from genko.app import comfort
+
+    comfort.last_input()
+    comfort._input.last = time.monotonic()  # (the person is at work)
     shown = []
     rest.remind = lambda: shown.append(True)
     rest._count()
