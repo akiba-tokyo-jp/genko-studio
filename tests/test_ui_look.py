@@ -38,6 +38,17 @@ def window(qapp, tmp_path: Path):
     win.close()
 
 
+def _alone(qapp) -> None:
+    """Earlier tests leave their windows alive; a new look re-polishes every one of them, so clear them first."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    for widget in qapp.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+
 # --- the look ---------------------------------------------------------------------------------------------------
 
 
@@ -45,6 +56,7 @@ def test_light_and_dark_and_the_brightness_step(qapp):
     from genko.app import theme
     from genko.app.preferences import settings
 
+    _alone(qapp)
     light, dark = theme.tokens("light", 0), theme.tokens("dark", 0)
     assert not light.dark and dark.dark
     assert theme.QColor(light.window).lightness() > 180 and theme.QColor(dark.window).lightness() < 60
@@ -187,6 +199,7 @@ def test_fewer_moving_things_and_letters_at_once(qapp):
     from genko.app import comfort
     from genko.app.preferences import settings
 
+    _alone(qapp)
     settings().setValue("ui/reduce_motion", "true")
     comfort.apply_motion(qapp)
     assert not qapp.isEffectEnabled(Qt.UIEffect.UI_AnimateMenu)
