@@ -292,7 +292,10 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 image = job()
             except Exception:  # cancelled, or a broken asset: stay on the quick render
                 image = None
-            self.detailReady.emit(gen, dpi, image)
+            try:
+                self.detailReady.emit(gen, dpi, image)
+            except RuntimeError:  # the window was closed while the page was being drawn
+                pass
 
         self._detail_thread = threading.Thread(target=run, name="genko-detail", daemon=True)
         self._detail_thread.start()
