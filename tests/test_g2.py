@@ -91,6 +91,8 @@ def test_the_line_while_drawing_is_steadied_like_the_finished_one(window):
 
     canvas = window.canvas
     window.act_pen.trigger()
+    keys = list(brushes.everything())
+    window.brush.kinds.setCurrentRow(keys.index("gpen"))  # (the pen settings are shared by the tests: say which)
     window.brush.taper.setChecked(False)
     window.brush.steady.setValue(7)
     import math

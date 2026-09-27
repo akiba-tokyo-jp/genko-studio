@@ -221,10 +221,7 @@ class MaterialPanel(QWidget):
                              + ("" if item.get("builtin") else " ・ マイ素材")
                              + (f"\nタグ: {'、'.join(item.get('tags') or [])}" if item.get("tags") else ""))
             if item["id"] not in self._icons:
-                try:
-                    self._icons[item["id"]] = _icon(materials.thumbnail(item, 56))
-                except Exception:  # a missing picture must not take the panel down
-                    self._icons[item["id"]] = QIcon()
+                self._icons[item["id"]] = _shared_icon(item)
             entry.setIcon(self._icons[item["id"]])
             self.list.addItem(entry)
             if keep and item["id"] == keep["id"]:
@@ -554,4 +551,25 @@ class MaterialPanel(QWidget):
         if effect is not None:
             self.window.apply_ops([{"op": "delete_effect", "page": self.window.current_page().index, "id": effect["id"]}])
             self.window.canvas.selected_effect_id = None
+
+
+_SHARED: dict = {}  # (a material's picture, drawn once for every window: the same material looks the same)
+
+
+def _shared_icon(item: dict) -> QIcon:
+    import json
+
+    try:
+        key = (item["id"], json.dumps(item, sort_keys=True, default=str))
+    except (TypeError, ValueError):
+        key = None
+    if key is not None and key in _SHARED:
+        return _SHARED[key]
+    try:
+        icon = _icon(materials.thumbnail(item, 56))
+    except Exception:  # a missing picture must not take the panel down
+        icon = QIcon()
+    if key is not None:
+        _SHARED[key] = icon
+    return icon
 
