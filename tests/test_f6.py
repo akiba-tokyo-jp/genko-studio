@@ -444,6 +444,9 @@ def test_preferences_change_keys_pen_and_work(window, qapp):
     dialog._measure()
     assert dialog.gamma is not None and dialog.gamma < 1 and "やわらかめ" in dialog.gamma_note.text()
     dialog.button.setCurrentIndex(dialog.button.findData("picker"))
+    from PySide6.QtWidgets import QApplication
+
+    size_before = QApplication.instance().font().pointSize()
     dialog.font_pt.setValue(13)
     dialog.paper.setCurrentIndex(dialog.paper.findData("b5"))
     dialog.save_after.setValue(5)
@@ -473,6 +476,13 @@ def test_preferences_change_keys_pen_and_work(window, qapp):
     store = preferences.settings()
     for key in ("ui/font_pt", "new/paper", "save/after_ms", "tablet/gamma", "tablet/button"):
         store.remove(key)  # (the settings are shared by the tests)
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()  # (the letters' size is the application's, shared by the tests too)
+    font = app.font()
+    font.setPointSize(size_before)
+    app.setFont(font)
+    app._genko_tokens = None
 
 
 def test_the_pens_side_button_picks_a_colour(window):
