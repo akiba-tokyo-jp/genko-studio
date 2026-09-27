@@ -120,6 +120,7 @@ def test_the_book_keeps_the_style_and_the_art_requests_carry_it(tmp_path: Path):
     assert request["prompt"]["ja"].startswith(WORDS)
     assert "Finished style: chibi" in request["prompt"]["en"] and "chibi" in request["prompt"]["tags"]
     assert sum("透かし" in a for a in request["avoid"]) == 1 and "色" in request["avoid"]  # (no word twice)
+    assert "コマ枠" not in request["avoid"] and "コマの枠線" in request["avoid"]  # (the same thing, once)
     assert "refs/style_catalog.png" in request["files"]["references"] and "refs/style_catalog.png" in pack.files
     assert request["style"] == {"catalog_id": "shonen-battle-chibi", "version": 3, "title": "低頭身のデフォルメ"}
     sheet = genreq.build(episode, tmp_path / "demo.genko", purpose="character_sheet",
@@ -235,3 +236,31 @@ def test_a_second_start_hands_its_link_to_the_open_genko(qapp):
         listener.deleteLater()
         qapp.processEvents()
     assert links.is_link("GENKO://x") and not links.is_link("C:/book.genko")
+
+
+def test_the_pilot_fixes_the_tool_that_drew_not_genkos_enlargement():
+    from genko.studio.studio_ops import _style_lock
+
+    ep = new_episode("t", 1, 1, PageSpec.b4_comic())
+    frame = ep.pages[0].leaf_frames()[0]
+    frame.panel = {"adopted": {"art": "cd_big"}, "candidates": [
+        {"id": "cd_small", "asset": "sha256:aa", "origin": {"tool_id": "xai:grok-imagine"}},
+        {"id": "cd_big", "asset": "sha256:bb", "parent": "cd_small", "origin": {"kind": "genko", "tool_id": "genko:upscale:genko"}}]}
+    locked = _style_lock(ep, ep.pages[0], "human:leaf")
+    assert locked["tool"] == "xai:grok-imagine" and locked["reference"] == "sha256:bb"
+
+
+def test_the_picker_finds_and_marks_what_does_not_fit(qapp, monkeypatch):
+    from genko.app.style_picker import StylePicker
+
+    monkeypatch.setattr(StylePicker, "inline", True)
+    dialog = StylePicker(None, None, "color")
+    dialog.find.setText("少年")
+    assert not dialog.list.item(0).isHidden()
+    dialog.find.setText("ない言葉")
+    assert dialog.list.item(0).isHidden()
+    dialog.find.clear()
+    dialog.list.setCurrentRow(0)
+    assert "カラー" in dialog.fit.text() and "使われません" in dialog.fit.text()
+    assert "網点" in dialog.words.text() and not dialog.show_words.isChecked()
+    dialog.close()

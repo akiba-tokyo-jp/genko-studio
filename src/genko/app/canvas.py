@@ -2009,8 +2009,18 @@ def _gpu_class():
         # a QOpenGLWidget draws in paintGL (its own paintEvent renders into the card's buffer): the same drawing there
         body.pop("paintEvent")
         body["paintGL"] = lambda self: PageCanvas.paintEvent(self, None)
+        body["resizeGL"] = _gl_resized
         _GPU.append(type("GpuPageCanvas", (GuideMixin, ShapeSelectMixin, VectorMixin, QOpenGLWidget), body))
     return _GPU[0]
+
+
+def _gl_resized(canvas, _w: int, _h: int) -> None:
+    """After a resize (maximizing, restoring) some drivers hand the widget a new context, and a picture already sent
+    to the card may come back black (Intel HD 5500): the page's picture is sent again as a new picture."""
+    rendered = getattr(canvas, "_rendered", None)
+    if rendered is not None:
+        canvas._rendered = (rendered[0], QPixmap.fromImage(rendered[1].toImage()))  # (a new picture: sent again)
+    canvas.update()
 
 
 def gpu_available() -> bool:

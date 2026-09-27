@@ -339,10 +339,10 @@ class PreferencesDialog(QDialog):
         theme.role(note, "hint")
         for head, rows in (("見た目", [("画面の色", self.theme), ("パネルの明るさ", self.brightness), ("原稿のまわり", self.surround),
                                        ("画面の書体", self.ui_font), ("画面の文字の大きさ", self.font_pt), ("", note),
-                                       ("", self.mono_icons), ("", self.hints)]),
+                                       ("", self.mono_icons), ("", self.hints), ("", self.gpu)]),
                            ("描く・操作", [("ペンのカーソル", self.cursor), ("Alt を押している間", self.alt_tool),
                                          ("Ctrl を押している間", self.ctrl_tool), ("", self.radial)]),
-                           ("長い時間の作業", [("休憩の案内", self.rest), ("", self.motion), ("", self.gpu), ("", self.requests)]),
+                           ("長い時間の作業", [("休憩の案内", self.rest), ("", self.motion), ("", self.requests)]),
                            ("原稿と保存", [("新しい原稿の用紙", self.paper), ("変更を保存するまで", self.save_after)])):
             wl.addRow(look.section(head))
             for label, widget in rows:

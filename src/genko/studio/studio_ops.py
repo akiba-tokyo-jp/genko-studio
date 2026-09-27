@@ -230,7 +230,14 @@ def _style_lock(episode: Episode, page: Page, agent: str) -> dict:
         cand = _by_id(panel.get("candidates", []), str((panel.get("adopted") or {}).get("art") or ""))
         if cand is None:
             continue
-        tool = (cand.get("origin") or {}).get("tool_id")
+        maker = cand
+        for _ in range(8):  # (Genko's own enlargement is not the tool that drew it: the picture it came from is)
+            if not str((maker.get("origin") or {}).get("tool_id") or "").startswith("genko:") or not maker.get("parent"):
+                break
+            maker = _by_id(panel.get("candidates", []), str(maker["parent"])) or maker
+        tool = (maker.get("origin") or {}).get("tool_id")
+        if str(tool or "").startswith("genko:"):
+            tool = None
         if tool:
             tools[tool] = tools.get(tool, 0) + 1
         area = frame.rect.width * frame.rect.height

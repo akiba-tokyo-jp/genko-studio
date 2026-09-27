@@ -85,8 +85,11 @@ def book_vocab(episode: Episode, expression: str = "mono") -> dict:
     words = kept["prompt"]
     v["style"] = {"ja": str(words["ja"]).rstrip() + ("" if str(words["ja"]).rstrip().endswith("。") else "。"),
                   "en": str(words.get("en") or words["ja"]).rstrip(), "tags": str(words.get("tags") or "")}
-    known = {a for item in v["avoid"] for a in item.replace("・", " ").split()} | set(v["avoid"])
-    v["avoid"] = v["avoid"] + [a for a in kept.get("avoid") or [] if a not in known and not (expression == "color" and a == "色")]
+    def key(word: str) -> str:  # (コマの枠線 and コマ枠 are one thing)
+        return word.replace("の", "").replace("線", "").strip()
+
+    known = {key(a) for item in v["avoid"] for a in item.replace("・", " ").split()} | {key(a) for a in v["avoid"]}
+    v["avoid"] = v["avoid"] + [a for a in kept.get("avoid") or [] if key(a) not in known and not (expression == "color" and a == "色")]
     return v
 
 
@@ -444,7 +447,7 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
             if data is not None:
                 files["refs/style_pilot.png"] = data
                 refs.append("refs/style_pilot.png")
-                notes.append(f"スタイルは {locked['page']} ページで固定済み。refs/style_pilot.png の絵柄・線の太さ・トーンに合わせる"
+                notes.append(f"絵柄は {locked['page']} ページ目（試しのページ）で固定済み。refs/style_pilot.png の絵柄・線の太さ・トーンに合わせる"
                              + (f"。画像ツールは {locked['tool']} を使う" if locked.get("tool") else ""))
         b_hash = brief_hash(panel)
         avoid = _avoid(episode, cast, panel, pg.spec.expression)

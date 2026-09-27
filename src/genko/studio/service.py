@@ -853,7 +853,7 @@ class StudioService:
         after = round(now * float(scale), 1) if now else None
         preview = big.convert("RGB")
         preview.thumbnail((512, 512))
-        return ToolResult(True, {"candidate": cand_id, "parent": source_id, "px": list(big.size), "scale": float(scale),
+        return ToolResult(True, {"candidate": cand_id, "candidate_id": cand_id, "parent": source_id, "px": list(big.size), "scale": float(scale),
                                  "method": method, "dpi_before": now, "dpi_after": after,
                                  "adopt": {"candidate_id": cand_id, "page": page, "frame_id": frame_id},
                                  "note": "拡大しただけで描き込みは増えない。作画の承認の後に採用すると、承認は取り直しになる"},

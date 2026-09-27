@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QLineEdit,
     QListWidgetItem,
     QPushButton,
     QScrollArea,
@@ -61,10 +62,11 @@ class StylePicker(QDialog):
 
     inline = False  # (tests: read the catalog at once, not in the background)
 
-    def __init__(self, parent: QWidget | None, kept: dict | None = None) -> None:
+    def __init__(self, parent: QWidget | None, kept: dict | None = None, expression: str = "mono") -> None:
         super().__init__(parent)
         self.setWindowTitle("絵柄を選ぶ")
         self.kept = kept
+        self.expression = expression  # (the book's: a black-and-white style on a colour book is marked)
         self.chosen: str | None = None
         self.back_to_genko = False
         self.nodes: dict[str, dict] = {}
@@ -80,6 +82,10 @@ class StylePicker(QDialog):
         top = QHBoxLayout()
         top.addWidget(self.up)
         top.addWidget(self.where, 1)
+        self.find = QLineEdit()
+        self.find.setPlaceholderText("この段から探す（名前・説明）")
+        self.find.setClearButtonEnabled(True)
+        self.find.textChanged.connect(self._filter)
         self.list = QListWidget()
         self.list.setIconSize(THUMB)
         self.list.setSpacing(2)
@@ -90,6 +96,7 @@ class StylePicker(QDialog):
         theme.role(self.note, "hint")
         body = QVBoxLayout()
         body.addLayout(top)
+        body.addWidget(self.find)
         body.addWidget(self.list, 1)
         body.addWidget(self.note)
 
@@ -101,10 +108,16 @@ class StylePicker(QDialog):
         self.title.setWordWrap(True)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
+        self.fit = QLabel()
+        self.fit.setWordWrap(True)
         self.words = QLabel()
         self.words.setWordWrap(True)
         self.words.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         theme.role(self.words, "hint")
+        self.show_words = QPushButton("依頼の言葉を見る")
+        self.show_words.setCheckable(True)
+        theme.role_prop(self.show_words, "quiet", True)
+        self.show_words.setToolTip("この絵柄が絵の依頼に書く言葉（長い）を見ます")
         self.site = QPushButton("サイトで見る")
         theme.role_prop(self.site, "quiet", True)
         self.site.clicked.connect(lambda: self.chosen_id() and QDesktopServices.openUrl(QUrl(stylecat.page_url(self.chosen_id()))))
@@ -116,8 +129,16 @@ class StylePicker(QDialog):
         side.addWidget(self.picture)
         side.addWidget(self.title)
         side.addWidget(self.summary)
+        side.addWidget(self.fit)
         side.addWidget(scroll, 1)
-        side.addWidget(self.site, 0, Qt.AlignmentFlag.AlignLeft)
+        scroll.hide()  # (the words for the image tool are long: shown when asked)
+        self.show_words.toggled.connect(scroll.setVisible)
+        links_row = QHBoxLayout()
+        links_row.addWidget(self.show_words)
+        links_row.addWidget(self.site)
+        links_row.addStretch(1)
+        side.addLayout(links_row)
+        side.addStretch(1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
@@ -204,6 +225,14 @@ class StylePicker(QDialog):
             self._thumb(child, item)
             if child["id"] == select:
                 self.list.setCurrentItem(item)
+        self._filter(self.find.text())
+
+    def _filter(self, words: str) -> None:
+        """Only the rows whose name or summary has all the words (the third level has twenty-odd styles)."""
+        wanted = [w for w in str(words or "").split() if w]
+        for row in range(self.list.count()):
+            item = self.list.item(row)
+            item.setHidden(bool(wanted) and not all(w in item.text() for w in wanted))
 
     def _thumb(self, node: dict, item: QListWidgetItem) -> None:
         url = node.get("thumbnail_url")
@@ -249,6 +278,7 @@ class StylePicker(QDialog):
         node = self.nodes.get(node_id, {})
         self.title.setText(node.get("title", node_id))
         self.summary.setText(node.get("summary") or "")
+        self.fit.setText("")
         self.words.setText("")
         self.picture.setPixmap(QPixmap())
         if node_id in self.details:
@@ -270,7 +300,10 @@ class StylePicker(QDialog):
     def _detail(self, node_id: str, data: dict) -> None:
         words = (data.get("prompt") or {}).get("ja") or ""
         colour = "白黒" if data.get("expression") == "mono" else "カラー"
-        self.words.setText(f"{colour}・版 {data.get('version')}\n{words}")
+        clash = data.get("expression", "mono") == "mono" and self.expression == "color"
+        self.fit.setText(f"{colour}・版 {data.get('version')}" + ("　この原稿はカラーなので、絵の依頼には使われません" if clash else ""))
+        theme.role(self.fit, "error" if clash else "hint")
+        self.words.setText(words)
         key = "s:" + node_id
         if key in self.pictures:
             self._picture(self.pictures[key])

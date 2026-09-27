@@ -261,9 +261,14 @@ class StartDialog(QDialog):
         ai_button = theme.iconic(QPushButton("AI をつなぐ…"), "settings")
         ai_button.setToolTip("AI の設定に貼る文（このパソコンの場所入り）と、最初に頼むことを出します")
         ai_button.clicked.connect(self._ai)
+        self.notice = QLabel()  # (something waiting for the book that will be opened: a style from the catalog)
+        self.notice.setWordWrap(True)
+        self.notice.setObjectName("startNotice")
+        self.notice.hide()
         side = QVBoxLayout()
         side.addWidget(name)
         side.addWidget(lead)
+        side.addWidget(self.notice)
         side.addSpacing(14)
         side.addWidget(theme.role(QLabel("自分で描く"), "section"))
         side.addWidget(new_button)
@@ -346,6 +351,10 @@ class StartDialog(QDialog):
         dialog = NewProjectDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.created:
             self._pick(dialog.created)
+
+    def show_notice(self, words: str) -> None:
+        self.notice.setText(words)
+        self.notice.setVisible(bool(words))
 
     def _ai(self) -> None:
         from genko.app.ai_link import AiDialog

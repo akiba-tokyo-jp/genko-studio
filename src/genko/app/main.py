@@ -1686,9 +1686,10 @@ class MainWindow(QMainWindow):
         self.act_zoom_in = a("拡大", lambda: self.canvas.glide(lambda: self.canvas.zoom_by(1.25)), [QKeySequence(std.ZoomIn), QKeySequence("Ctrl+=")])
         self.act_zoom_out = a("縮小", lambda: self.canvas.glide(lambda: self.canvas.zoom_by(0.8)), std.ZoomOut)
         self.act_actual = a("原寸（紙の大きさ）", lambda: self.canvas.glide(self.canvas.actual_size), "Ctrl+1")
-        self.act_turn_left = a("左に回す（15°）", lambda: self.canvas.rotate_view(-15), "Ctrl+Alt+Left",
+        # (- and ^ as in CLIP STUDIO PAINT, too: Intel graphics drivers take Ctrl+Alt+arrows to turn the whole screen)
+        self.act_turn_left = a("左に回す（15°）", lambda: self.canvas.rotate_view(-15), ["-", "Ctrl+Alt+Left"],
                                "表示だけを回します（原稿は回りません）。Shift＋スペースを押しながらドラッグでも回せます")
-        self.act_turn_right = a("右に回す（15°）", lambda: self.canvas.rotate_view(15), "Ctrl+Alt+Right",
+        self.act_turn_right = a("右に回す（15°）", lambda: self.canvas.rotate_view(15), ["^", "Ctrl+Alt+Right"],
                                 "表示だけを回します（原稿は回りません）")
         self.act_turn_reset = a("回転・反転を戻す", self.canvas.reset_view, "Ctrl+Alt+0")
         self.act_mirror = a("左右反転して見る", lambda on: self.canvas.flip_view(on), "H",
@@ -4722,7 +4723,7 @@ class MainWindow(QMainWindow):
         from genko.app.style_picker import StylePicker
         from genko.studio.genreq import catalog
 
-        dialog = StylePicker(self, catalog(self.episode))
+        dialog = StylePicker(self, catalog(self.episode), self.episode.spec.expression)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         if dialog.back_to_genko:
@@ -4743,10 +4744,9 @@ class MainWindow(QMainWindow):
         if style_id is None:
             self.flash(f"Genko の知らないリンクです: {link}", 6000, error=True)
             return
-        if self.isMinimized():
-            self.showNormal()
-        self.raise_()
-        self.activateWindow()
+        from genko.app import links
+
+        links.come_forward(self)
         self.use_style(style_id, ask=True)
 
     def use_style(self, style_id: str, ask: bool = True) -> bool:
@@ -5062,6 +5062,15 @@ def run_app(path: Path | None = None, link: str | None = None) -> int:
         path = Path(sys.argv[1])
     if path is None:
         start = StartDialog()
+        if waiting:
+            from genko import stylecat
+
+            try:
+                wanted = stylecat.style_from_link(waiting[0])
+            except stylecat.CatalogError:
+                wanted = None
+            if wanted:
+                start.show_notice(f"サイトから絵柄（{wanted}）が届きました。開いた原稿に使うかを、開いたあとで聞きます。")
         if start.exec() != QDialog.DialogCode.Accepted or start.chosen is None:
             return 0
         path = start.chosen

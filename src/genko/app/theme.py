@@ -307,6 +307,7 @@ QDialog[glass="true"] {{ background: {_rgba(t.window, 0.7)}; }}
 QFrame#dialogCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 8px; }}
 QWidget#dialogFooter {{ border-top: 1px solid {t.divider}; }}
 QWidget#launcher {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; }}
+QLabel#startNotice {{ background: {t.accent_soft}; color: {t.text}; border-radius: 6px; padding: 8px; }}
 QWidget#firstSteps {{ background: {t.panel}; border-bottom: 1px solid {t.divider}; }}
 QWidget#startCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 8px; }}
 """
