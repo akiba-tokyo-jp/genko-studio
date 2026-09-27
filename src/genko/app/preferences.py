@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QKeySequenceEdit,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -203,6 +204,10 @@ class PreferencesDialog(QDialog):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 0, item)
             editor = QKeySequenceEdit(action.shortcut())
+            field = editor.findChild(QLineEdit)
+            if field is not None:
+                field.setPlaceholderText("キーを押す")
+            editor.setAccessibleName(f"{action.text()} のショートカット")
             self.table.setCellWidget(row, 1, editor)
             self.editors[action.text()] = editor
         self.clash = QLabel()

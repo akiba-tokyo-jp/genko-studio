@@ -337,6 +337,21 @@ def empty_note(view, text: str):
     return note
 
 
+def japanese(app: QApplication) -> bool:
+    """Qt's own words in Japanese (はい・いいえ, the file and colour dialogs, text fields' menus): the screen is
+    Japanese whatever language the computer is set to."""
+    if getattr(app, "_genko_translator", None) is not None:
+        return True
+    from PySide6.QtCore import QLibraryInfo, QTranslator
+
+    translator = QTranslator(app)
+    if not translator.load("qtbase_ja", QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+        return False
+    app.installTranslator(translator)
+    app._genko_translator = translator
+    return True
+
+
 def name_buttons(root: QWidget) -> None:
     """Buttons that show only a picture get their tooltip's first line as their name for screen readers (one pass
     over a window when it is built: no watching of events, so drawing stays as fast)."""
@@ -402,6 +417,7 @@ def apply(app: QApplication | None = None, which: str | None = None) -> Tokens:
     from genko.app import glass
 
     glass.install(app)  # (the system's frosted glass for menus and the like, where there is one)
+    japanese(app)
     if not getattr(app, "_genko_follows_system", False):
         try:
             app.styleHints().colorSchemeChanged.connect(lambda _scheme: mode() == "system" and _refresh_all(app))
