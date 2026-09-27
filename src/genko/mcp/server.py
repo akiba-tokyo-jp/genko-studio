@@ -338,6 +338,15 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.submit_name, project, plan, commit, replace)
 
     @tool
+    def take_panel_art(project: str, request_id: str, image: dict, regions: list[dict] | None = None,
+                       upscale: bool = True, method: str = "genko") -> list:
+        """コマ 1 つの絵を 1 回で入れる: 依頼（request_id）の画像を取り込み、採用し、原稿の解像度に足りなければ拡大して
+        採用し直し、regions があれば顔と人物の位置を報告する（report_regions と同じ形）。image は import_images の 1 件と
+        同じ {file（studio/inbox/ の中）か asset, origin}。止まったら stopped_at にどの段かが入る。候補の点検
+        （review_candidates）と人の承認は別に行う。upscale=false で拡大しない。"""
+        return call(service.take_panel_art, project, request_id, image, regions, upscale, method)
+
+    @tool
     def style_catalog(project: str | None = None, style_id: str | None = None) -> list:
         """マンガの絵柄カタログ（https://manga.akiba.tokyo.jp）を読む。引数なし: 1段目のジャンルの一覧。
         style_id: その絵柄（言葉 prompt_ja・白黒かカラーか・1 つ下の段の children）。children から選んで下の段へたどる。

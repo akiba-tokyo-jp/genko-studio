@@ -98,6 +98,9 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   赤い線がネームの構図。構図がネームに合うか、人物が設定画に似ているか、手足の破綻、画内の文字、台詞の場所が空いているかを見て、
   `review_candidates`（`page` と `frame_id` も必須）で点数（0〜1）とメモを残し（人物のいるコマは `checks`: `likeness` 設定画に似ているか 0〜1・`hands` ok / broken / none・`text` 絵の中の文字 none / some・`cut` 顔や手が枠で切れる none / some も必須）、良いものを `mcp__genko__adopt`。どれも駄目なら直しの依頼を作る。
   1 コマ 8 枚・直し 2 巡を超えると、そのコマは人間の判断待ちになる。
+- 1 枚で決まるときの近道: `mcp__genko__take_panel_art`（`request_id`、`image: {file, origin}`、人物のいるコマは `regions`）で、
+  取り込み → 採用 → 解像度が足りなければ拡大して採用し直し → 顔と人物の位置の報告、を 1 回で行う。止まったら `stopped_at` に
+  どの段かが入る。候補を比べて選ぶとき（2 枚以上）と人の承認は、これまでどおり別に行う。
 - `fix_panel`: 人間の指示（`comments`）どおりに直しの依頼を作る（`instruction` に指示を入れる）。絵を採用し直すとチケットは閉じる。
   絵ではない直し（台詞・線・効果など）なら `apply_ops` で直し、`mcp__genko__resolve_ticket`（`ticket_id` は `tickets` の値、`note` に何をしたか）で閉じる。
 - `fix_page`: ネーム承認後のページへの人間の指示。`apply_ops` で直してから `resolve_ticket` で閉じる。閉じられるのは人からの直しの指示だけ（承認の依頼や質問は人が閉じる）。人は `genko studio reopen-ticket` で開き直せる。

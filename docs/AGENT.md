@@ -134,6 +134,12 @@ genko studio comment demo.genko --page 2 --frame FRAME_ID "空をもっと暗く
 
 ## Art: requests, imports, finishing and export (M3–M4)
 
+`take_panel_art {project, request_id, image: {file|asset, origin}, regions?, upscale (default true), method}` takes one
+picture for one panel in one call: import, adopt, enlarge and adopt again when the book's dpi needs it, report regions.
+It returns `steps`, `candidate_id`, `adopted`, `upscaled` and the dpi, or `stopped_at` with the failing step's issues.
+Reviews (`review_candidates`) and the person's approvals stay separate. A request's `files.references` are in order of
+need (faces, sheets, the style sample, the panel before, props, places): an image tool that takes fewer uses the first.
+
 Style from the manga style catalog (L1): `style_catalog` (no arguments: the genres; `style_id`: a branch with its words
 and `children`; `project` alone: the book's style and `newer` when the site has a newer version) and
 `use_style {project, style_id|null, commit}` copy a branch into the book (`studio.style.catalog`: id, path, words

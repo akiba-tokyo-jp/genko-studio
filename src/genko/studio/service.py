@@ -70,7 +70,7 @@ AGENT_TOOLS = frozenset({
     "record_review", "request_approval", "tickets", "generation_request", "import_images", "candidates",
     "review_candidates", "adopt", "request_fix", "report_regions", "finish_page", "preflight", "export_proof", "ask_human",
     "review_page", "derive", "import_name", "analyze_name", "propose_lines", "proposals", "undo", "export", "check",
-    "resolve_ticket", "export_status", "upscale", "style_catalog", "use_style",
+    "resolve_ticket", "export_status", "upscale", "style_catalog", "use_style", "take_panel_art",
 })
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
@@ -551,6 +551,71 @@ class StudioService:
             shown = self.render(project, page, "print" if to != "draft" else "proof", 512, frame_id)
             result.images, result.files = shown.images, shown.files
         return result
+
+    def take_panel_art(self, project: str, request_id: str, image: dict, regions: list[dict] | None = None,
+                       upscale: bool = True, method: str = "genko") -> ToolResult:
+        """One picture for one panel in one call: import it for the request, adopt it, enlarge it when the book's
+        resolution needs it (and adopt the enlargement), then report the faces and people (when given). Stops at the
+        first step that fails and says which. Reviewing the candidates and the person's approval stay separate."""
+        from genko.studio.preflight import art_layers, layer_dpi
+
+        path = self.project_path(project)
+        request = genreq.read(path, str(request_id))
+        if request is None:
+            return fail(f"依頼 {request_id} はない（generation_request で作る）", "no_request", "/request_id")
+        target = request.get("target") or {}
+        if request.get("purpose") not in ("panel_art", "draft") or not target.get("frame_id"):
+            return fail("take_panel_art はコマの依頼（panel_art・draft）だけ。設定画・場所は import_images と承認で",
+                        "not_a_panel", "/request_id")
+        page, frame_id = int(target["page"]), str(target["frame_id"])
+        to = "draft" if request.get("purpose") == "draft" else "art"
+        steps: list[dict] = []
+
+        def stop(step: str, result: ToolResult) -> ToolResult:
+            steps.append({"step": step, "ok": False})
+            return ToolResult(False, {"steps": steps, "stopped_at": step, **result.data}, result.issues, result.images, result.files)
+
+        imported = self.import_images(project, request_id, [image])
+        if not imported.ok:
+            return stop("import", imported)
+        candidate = imported.data["candidates"][0]
+        steps.append({"step": "import", "ok": True, "candidate_id": candidate})
+        adopted = self.adopt(project, candidate, page, frame_id, to)
+        if not adopted.ok:
+            return stop("adopt", adopted)
+        steps.append({"step": "adopt", "ok": True, "candidate_id": candidate})
+        final, shown, dpi = candidate, adopted, {}
+        if upscale and to == "art":
+            episode = load_episode(path)
+            pg = next(p for p in episode.pages if p.index == page)
+            layer = next((la for la in art_layers(pg) if la.frame_id == frame_id
+                          and (la.source or {}).get("candidate") == candidate), None)
+            now = layer_dpi(episode, pg, layer, AssetStore(path)) if layer is not None else None
+            wanted = float(episode.spec.dpi or 600)
+            dpi = {"dpi_before": now, "dpi_wanted": wanted}
+            if now and now < wanted * 0.95:
+                bigger = self.upscale(project, page, frame_id, candidate, None, method)
+                if not bigger.ok:
+                    return stop("upscale", bigger)
+                steps.append({"step": "upscale", "ok": True, "candidate_id": bigger.data["candidate_id"],
+                              "scale": bigger.data.get("scale")})
+                again = self.adopt(project, bigger.data["candidate_id"], page, frame_id, to)
+                if not again.ok:
+                    return stop("adopt_upscaled", again)
+                steps.append({"step": "adopt_upscaled", "ok": True, "candidate_id": bigger.data["candidate_id"]})
+                final, shown = bigger.data["candidate_id"], again
+                dpi["dpi_after"] = bigger.data.get("dpi_after")
+            else:
+                steps.append({"step": "upscale", "ok": True, "skipped": "解像度は足りている" if now else "解像度が分からない"})
+        if regions:
+            reported = self.report_regions(project, page, frame_id, regions)
+            if not reported.ok:
+                return stop("report_regions", reported)
+            steps.append({"step": "report_regions", "ok": True})
+        return ToolResult(True, {"steps": steps, "page": page, "frame_id": frame_id, "candidate_id": candidate,
+                                 "adopted": final, "upscaled": final != candidate, **dpi,
+                                 "note": "候補の点検（review_candidates）と人の承認は別。作画の承認の後に採用し直すと、承認は取り直しになる"},
+                          imported.issues + shown.issues, shown.images, shown.files)
 
     def request_fix(self, project: str, page: int, instruction: str, frame_id: str | None = None,
                     candidate_id: str | None = None, scope: str = "frame") -> ToolResult:
