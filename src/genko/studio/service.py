@@ -103,6 +103,22 @@ class ToolResult:
         }
 
 
+def _props_by_id(plan: dict, bible: dict) -> list[Issue]:
+    """Props written by their name (as a person would) are read as the prop with that name: its id goes in."""
+    by_name = {str(p.get("name")): p.get("id") for p in bible.get("props") or [] if isinstance(p, dict) and p.get("name")}
+    ids = {p.get("id") for p in bible.get("props") or [] if isinstance(p, dict)}
+    out: list[Issue] = []
+    for index, panel in enumerate(plan.get("panels") or []):
+        if not isinstance(panel, dict) or not isinstance(panel.get("props"), list):
+            continue
+        for n, item in enumerate(panel["props"]):
+            if item not in ids and str(item) in by_name:
+                panel["props"][n] = by_name[str(item)]
+                out.append(warning("prop_by_name", f"/panels/{index}/props/{n}",
+                                   f"小物「{item}」を id {by_name[str(item)]} として読んだ", "props は企画書の id で書く"))
+    return out
+
+
 def _catalog_node(data: dict) -> dict:
     """A branch of the style catalog, for an agent choosing one: where it is, its words, the branches under it."""
     return {
@@ -1121,6 +1137,7 @@ class StudioService:
             return fail("先に企画書（set_bible）と脚本（set_script）を保存する", "script_missing")
         plan = fill_nulls(plan, SCHEMAS["name_plan@1"])
         issues = validate(plan, SCHEMAS["name_plan@1"])
+        issues += _props_by_id(plan, bible)
         if has_errors(issues):
             return ToolResult(False, {"committed": False}, issues)
         issues += lint.lint_name_plan(plan, script, bible, len(episode.pages), tall=episode.spec.height_mm > 2 * episode.spec.width_mm)

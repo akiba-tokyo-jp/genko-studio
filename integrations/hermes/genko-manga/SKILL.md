@@ -78,7 +78,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - `make_sheet`: `mcp__genko__generation_request`（`character_id`）で設定画の依頼パックを受け取り、画像生成で作る。
   顔が正面を向いたアップを必ず入れる（承認時に顔の参照として切り出される）。画像を返された `inbox` のフォルダに保存し、
   `mcp__genko__import_images`（`request_id`、`images: [{file, origin}]`）で取り込む。取り込んだら人間に選んでもらう（承認を頼む）。
-- `gen_panel`: `mcp__genko__generation_request`（`page`, `frame_id`）で依頼パックを受け取る。
+- `gen_panel`: `mcp__genko__generation_request`（`page`, `frame_id`）で依頼パックを受け取る。参照画像（`files.references`）は大事な順に並んでいる。画像ツールが受けられる枚数が少ないときは前から渡す。
   - `request.prompt` は下書き。書き直してよいが、登場人物の見た目の記述（`characters[].tokens_en`）は言い換えない。
     `avoid` にあるもの（文字・フキダシ・効果音・署名・枠線、モノクロのページでは色も）は描かせない。
     `request.color` が true のページはカラーで、それ以外はモノクロ（グレースケール）で作る。

@@ -560,11 +560,13 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
             "composition": "guides/composition.png" if "guides/composition.png" in files else None,
             "pose": "guides/pose.png" if "guides/pose.png" in files else None,
             "keepout": "guides/keepout.png" if "guides/keepout.png" in files else None,
-            "references": sorted(r for r in files if r.startswith("refs/")),
+            "references": _by_priority(r for r in files if r.startswith("refs/")),
             "source": source,
             "mask": mask,
         },
         "order_of_instructions": ["共通制約", "ページ", "コマのメモ", "今回の指示"],
+        "references_note": "references は大事な順。画像ツールが受けられる枚数が少ないときは、前から順に渡す"
+                           "（人物の顔・設定画 → 絵柄の見本 → 直前のコマ → 小物 → 場所）",
         "notes_for_agent": notes,
         "instruction": instruction,
     }
@@ -577,6 +579,25 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
     request["import"] = {"tool": "import_images", "request_id": request_id, "inbox": f"studio/inbox/{request_id}/"}
     request["notes_for_agent"] = notes + [f"画像は studio/inbox/{request_id}/ に置いてから import_images を呼ぶ（別マシンなら POST /v1/assets）"]
     return Pack(request, files)
+
+
+def _by_priority(names) -> list[str]:
+    """The reference files, the most needed first (an image tool may take only two): the people's faces and sheets,
+    the book's style, the panel before, props, places, then anything else."""
+    def rank(name: str) -> tuple[int, str]:
+        if name.endswith("_face.png"):
+            return 0, name
+        if name.endswith("_sheet.png"):
+            return 1, name
+        if name in ("refs/style_pilot.png", "refs/style_catalog.png"):
+            return 2, name
+        if name == "refs/previous_panel.png":
+            return 3, name
+        if name.startswith("refs/prop_"):
+            return 4, name
+        return 5, name
+
+    return sorted(names, key=rank)
 
 
 def _panel_refs(episode: Episode, store: AssetStore, panel: dict, cast: list[str], files: dict[str, bytes]) -> list[str]:
