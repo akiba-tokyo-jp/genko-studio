@@ -75,6 +75,7 @@ class StoryPanel(QWidget):
         self._loading = False
         self.list = QListWidget()
         self.list.currentRowChanged.connect(lambda _: self._picked())
+        theme.empty_note(self.list, "このページにはまだ台詞がありません。\nテキストの道具（T）で、置きたい所をクリックします")
         up = theme.iconic(QPushButton("↑ 前へ"), "up", "前へ", "選んだ台詞を読み順で前へ")
         up.clicked.connect(lambda: self._move(-1))
         down = theme.iconic(QPushButton("↓ 後へ"), "down", "後へ", "選んだ台詞を読み順で後ろへ")
@@ -757,6 +758,7 @@ class LayerPanel(QWidget):
         if target is not None and target.id in self.ids:
             self.list.setCurrentRow(self.ids.index(target.id))
         self._loading = False
+        self.search.setVisible(len(self.ids) > 8 or bool(self.search.text()))  # (finding a layer by name: a thick page only)
         self._search(self.search.text())
         self._selected(from_list=False)
 
@@ -804,6 +806,7 @@ class LayerPanel(QWidget):
         page, layer = self._layer()
         if layer is None:
             self.target.setText("")
+            self.target.hide()
             return
         if from_list and not self._loading:
             if self.window.target_layer() is not layer and self.act_mask_edit.isChecked():
@@ -832,6 +835,7 @@ class LayerPanel(QWidget):
         note = "" if prints else " <span style='color:#c92a2a'>（印刷されません）</span>"
         self.target.setText(f"描く先: <b>{wording.layer_label(layer)}</b>{note}" if drawable else
                             f"<span style='color:#c92a2a'>「{wording.layer_label(layer)}」には描けません。ペンかペイントのレイヤーを選びます</span>")
+        self.target.setVisible(not (drawable and prints))  # (the chosen row already says where the pen draws; only a warning needs words)
 
     def _set(self, key: str, value) -> None:
         page, layer = self._layer()

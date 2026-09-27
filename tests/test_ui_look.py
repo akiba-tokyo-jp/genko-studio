@@ -368,3 +368,43 @@ def test_a_question_makes_the_reply_the_main_button(qapp, tmp_path):
     box.list.setCurrentRow(kinds.index("gate"))
     assert box.approve_button.property("primary") and not box.back_button.property("primary")
     window.close()
+
+
+# --- UI-F ---------------------------------------------------------------------------------------------------
+
+
+def test_the_brush_list_shows_each_brushs_line(window):
+    brush = window.brush
+    icons = [brush.kinds.item(i).icon() for i in range(brush.kinds.count())]
+    assert icons and all(not icon.isNull() for icon in icons)
+    image = icons[0].pixmap(72, 20).toImage()
+    assert any(image.pixelColor(x, 10).alpha() for x in range(image.width()))  # (a line runs across)
+
+
+def test_the_tool_settings_fold_to_the_tools_name(window, qapp):
+    ts = window.tool_settings
+    window.act_frame.trigger()
+    ts.fold.click()
+    qapp.processEvents()
+    assert ts.folded and not ts.stack.isVisible() and ts.title.text().startswith("コマ割り")
+    assert window.brush_dock.maximumHeight() < 100
+    ts.fold.click()
+    qapp.processEvents()
+    assert ts.stack.isVisible() and window.brush_dock.maximumHeight() > 10000
+
+
+def test_an_empty_lines_list_says_what_goes_there(window):
+    notes = [label for label in window.story.list.viewport().findChildren(QLabel_()) if "台詞がありません" in label.text()]
+    assert notes and notes[0].isVisibleTo(window.story.list)
+
+
+def test_the_layers_top_rows_only_when_needed(window):
+    panel = window.layers
+    panel.refresh()
+    assert not panel.search.isVisibleTo(panel) and not panel.target.isVisibleTo(panel)
+
+
+def QLabel_():  # noqa: N802
+    from PySide6.QtWidgets import QLabel
+
+    return QLabel

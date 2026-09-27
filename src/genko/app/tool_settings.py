@@ -210,11 +210,24 @@ class ToolSettings(QWidget):
         self.hint.setWordWrap(True)
         theme.hint(self.hint)
         self.stack = QStackedWidget()
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton
+
+        # the settings fold to the tool's name (room for the approval box below, when an agent works on the book)
+        self.fold = QPushButton("▾")
+        self.fold.setProperty("iconbtn", True)
+        self.fold.setFixedSize(24, 22)
+        self.fold.setCheckable(True)
+        self.fold.setToolTip("ツールの設定をたたむ・開く")
+        self.fold.toggled.connect(self.set_folded)
+        head = QHBoxLayout()
+        head.addWidget(self.title, 1)
+        head.addWidget(self.fold)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
-        layout.addWidget(self.title)
+        layout.addLayout(head)
         layout.addWidget(self.hint)
         layout.addWidget(self.stack, 1)
+        self.folded = False
         self.pages: dict[str, QWidget] = {}
         self.tool = "select"
 
@@ -224,6 +237,18 @@ class ToolSettings(QWidget):
         for tool in tools:
             self.pages[tool] = widget
 
+    def set_folded(self, on: bool) -> None:
+        """Only the tool's name (and its dock no taller than that), or everything."""
+        self.folded = on
+        self.fold.setText("▸" if on else "▾")
+        self.hint.setVisible(not on and theme.show_hints() and bool(self.hint.text()))
+        self.stack.setVisible(not on and self.pages.get(self.tool) is not None)
+        dock = self.parentWidget()
+        while dock is not None and not dock.inherits("QDockWidget"):
+            dock = dock.parentWidget()
+        if dock is not None:
+            dock.setMaximumHeight(self.title.sizeHint().height() + 18 if on else 16777215)
+
     def show_tool(self, tool: str) -> None:
         self.tool = tool
         title, hint = TITLES.get(tool, (tool, ""))
@@ -232,7 +257,7 @@ class ToolSettings(QWidget):
         widget = self.pages.get(tool)
         if widget is not None:
             self.stack.setCurrentWidget(widget)
-            self.stack.setVisible(True)
+            self.stack.setVisible(not self.folded)
         else:
             self.stack.setVisible(False)
 

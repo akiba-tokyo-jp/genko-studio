@@ -34,8 +34,50 @@ from genko.brushes import DEFAULT
 
 SIZES = [0.2, 0.3, 0.5, 0.8, 1.2, 2.0, 3.0, 5.0, 10.0]
 MONO = [(20, 20, 20), (64, 64, 64), (128, 128, 128), (192, 192, 192), (255, 255, 255)]
-COLOURS = [(220, 50, 50), (240, 140, 40), (250, 210, 60), (90, 170, 80), (50, 140, 200), (70, 80, 190), (150, 80, 180),
-           (240, 170, 180), (160, 110, 70), (250, 225, 200)]
+# a few quiet colours for colour work and blue pencil (the chosen colour is always one click away)
+COLOURS = [(196, 72, 60), (214, 140, 72), (206, 178, 92), (98, 142, 96), (72, 118, 164), (86, 96, 150), (130, 96, 140),
+           (222, 178, 172), (150, 116, 88), (238, 222, 204)]
+
+
+def stroke_preview(kind: str, ink, size=(96, 20)):
+    """A short line drawn with this brush (pressed lightly, hard, lightly), for the brush list."""
+    import math
+
+    from PIL import Image
+
+    from genko.stroke import taper_points
+
+    key = (kind, tuple(ink), size)
+    if key in _PREVIEWS:
+        return _PREVIEWS[key]
+    w, h = size[0] * 2, size[1] * 2
+    dpi = 96
+    mm = 25.4 / dpi
+    brush = brushes.brush(kind)
+    pts = [[(6 + i * (w - 12) / 60) * mm, (h / 2 + (h / 4) * math.sin(i / 9.5)) * mm, math.sin(math.pi * i / 60)]
+           for i in range(61)]
+    if brush.taper:
+        pts = taper_points(pts)
+    width = max(0.4, min(brush.width_mm * 1.6, h * 0.4 * mm))
+    image = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    try:
+        drawn = brushes.draw((w, h), pts, dpi, width, kind, seed="preview")
+    except Exception:  # (a broken brush of one's own: no picture rather than no list)
+        drawn = None
+    if drawn is not None:
+        cover, origin = drawn
+        rgb = tuple(ink) if brush.rgb in (None, (20, 20, 20)) else brush.rgb
+        layer = Image.new("RGBA", cover.size, (*rgb, 255))
+        layer.putalpha(cover.point(lambda v: int(v * max(0.35, brush.opacity))))
+        image.alpha_composite(layer, origin)
+    data = image.tobytes()
+    pixmap = QPixmap.fromImage(QImage(data, w, h, w * 4, QImage.Format.Format_RGBA8888).copy())
+    pixmap.setDevicePixelRatio(2)
+    _PREVIEWS[key] = pixmap
+    return pixmap
+
+
+_PREVIEWS: dict = {}
 PRESSURE = [("やわらかい", 0.7), ("ふつう", 1.0), ("かたい", 1.6)]
 
 
@@ -49,9 +91,11 @@ class BrushPanel(QWidget):
         brushes.register(brushes.load_library())  # the person's own brushes
         self._fill_kinds()
         self.kinds.setMaximumHeight(170)
-        self.make = QPushButton("ブラシを複製して調整…")
+        self.make = QPushButton("複製して調整…")
         self.make.setToolTip("選んでいるペンをもとに、入り抜き・筆圧・質感などを変えた自分のブラシを作ります")
         self.forget = QPushButton("自作のブラシを消す")
+        for button in (self.make, self.forget):
+            button.setProperty("row", True)
         self.forget.setToolTip("自分のブラシ一覧から消します（そのブラシで描いた原稿の線はそのまま）")
         self.kinds.currentRowChanged.connect(lambda _: self._kind_changed())
         self.size = QDoubleSpinBox()
@@ -66,6 +110,7 @@ class BrushPanel(QWidget):
         for i, value in enumerate(SIZES):
             button = QPushButton(f"{value:g}")
             button.setFixedWidth(34)
+            button.setProperty("chip", True)  # (small flat choices: theme.py)
             button.setToolTip(f"{value:g} mm")
             button.clicked.connect(lambda _=False, v=value: self.size.setValue(v))
             sizes.addWidget(button, i // 5, i % 5)
@@ -87,13 +132,14 @@ class BrushPanel(QWidget):
         self.pressure.currentIndexChanged.connect(lambda _: self._save())
         # colour
         self.swatch = QPushButton()
-        self.swatch.setFixedSize(46, 30)
+        self.swatch.setFixedSize(40, 40)
         self.swatch.clicked.connect(self._pick)
         palette = QGridLayout()
         for i, rgb in enumerate(MONO + COLOURS):
             button = QPushButton()
-            button.setFixedSize(22, 22)
-            button.setStyleSheet(f"background: rgb{rgb}; border: 1px solid #888")
+            button.setFixedSize(20, 20)
+            button.setStyleSheet(f"QPushButton {{ background: rgb{rgb}; border: 1px solid rgba(128,128,128,0.45); border-radius: 10px; }}"
+                                 "QPushButton:hover { border: 2px solid palette(highlight); }")
             button.setToolTip("白" if rgb == (255, 255, 255) else ("黒" if rgb == (20, 20, 20) else ""))
             button.clicked.connect(lambda _=False, c=rgb: self.set_colour(c))
             palette.addWidget(button, i // 5, i % 5)
@@ -132,21 +178,34 @@ class BrushPanel(QWidget):
         fill_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         fill_form.addRow("隙間を閉じる", self.gap)
         fill_form.addRow("見る範囲", self.reference)
+        from genko.app import theme
+
+        def section(title: str, tip: str = "") -> QLabel:
+            label = QLabel(title)
+            theme.role(label, "section")
+            label.setToolTip(tip)
+            return label
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(QLabel("ペンの種類"))
+        layout.addWidget(section("ペンの種類"))
         layout.addWidget(self.kinds)
-        make_row = QGridLayout()
-        make_row.addWidget(self.make, 0, 0)
-        make_row.addWidget(self.forget, 1, 0)
         self.files = QPushButton("読み込み・書き出し ▾")
+        self.files.setProperty("row", True)
         self.files.setToolTip("ブラシをファイルに書き出す・読み込む（.genkobrush、Photoshop の .abr）")
-        make_row.addWidget(self.files, 2, 0)
+        make_row = QVBoxLayout()
+        make_row.setSpacing(1)
+        from genko.app.tool_settings import _or_blank
+
+        for button in (self.make, self.forget, self.files):
+            button.setIcon(_or_blank(button.icon()))  # (the rows' words start together)
+            make_row.addWidget(button)
         layout.addLayout(make_row)
+        layout.addWidget(section("描き味"))
         layout.addLayout(form)
-        layout.addWidget(QLabel("色（スポイト I で拾う）"))
+        layout.addWidget(section("色", "スポイト（I）で原稿から拾えます"))
         layout.addLayout(colour_row)
-        layout.addWidget(QLabel("塗りつぶし（G）"))
+        layout.addWidget(section("塗りつぶし（G）"))
         layout.addLayout(fill_form)
         layout.addWidget(self.crossing)
         layout.addStretch(1)
@@ -173,9 +232,16 @@ class BrushPanel(QWidget):
             self.pressure.addItem(f"自分に合わせた（γ {gamma:g}）", gamma)
 
     def _fill_kinds(self) -> None:
+        from PySide6.QtCore import QSize
+
+        from genko.app import theme
+
         mine = brushes.load_library()
+        ink = theme.QColor(theme.tokens().text)
+        self.kinds.setIconSize(QSize(72, 20))
         for key, brush in brushes.everything().items():
             item = QListWidgetItem(("★ " if key.startswith("my_") else "") + brush.label)
+            item.setIcon(theme.still_icon(stroke_preview(key, (ink.red(), ink.green(), ink.blue()), (72, 20))))
             item.setData(Qt.ItemDataRole.UserRole, key)
             if key.startswith("my_") and key not in mine:
                 item.setToolTip("この原稿に入っていたブラシ")
@@ -249,7 +315,7 @@ class BrushPanel(QWidget):
 
     def set_colour(self, rgb) -> None:
         self.rgb = tuple(int(v) for v in rgb)[:3]
-        self.swatch.setStyleSheet(f"background: rgb{self.rgb}; border: 2px solid #333")
+        self.swatch.setStyleSheet(f"QPushButton {{ background: rgb{self.rgb}; border: 2px solid rgba(128,128,128,0.6); border-radius: 20px; }}")
         self.swatch.setToolTip(f"今の色 {self.rgb}")
         self.settings.setValue("brush/rgb", ",".join(str(v) for v in self.rgb))
         self.changed.emit()

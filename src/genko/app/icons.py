@@ -28,7 +28,7 @@ LUCIDE = {
     "down": "arrow-down", "approve": "circle-check", "back": "corner-up-left", "expand": "maximize-2", "search": "search",
     "settings": "settings", "story": "file-text", "check": "clipboard-check", "page": "file", "open": "folder-open",
     "book": "book-open", "duplicate": "copy", "merge": "arrow-down-to-line", "more": "ellipsis", "info": "info",
-    "eye": "eye", "eye_off": "eye-off",
+    "eye": "eye", "eye_off": "eye-off", "close": "x",
     # a layer's kind, shown while it has nothing drawn yet
     "kind_strokes": "pen-line", "kind_raster": "paintbrush", "kind_folder": "folder", "kind_placed": "image",
     "kind_tone": "grid-3x3", "kind_fill": "square", "kind_adjust": "contrast", "kind_other": "layers",

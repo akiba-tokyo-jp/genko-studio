@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -220,6 +220,8 @@ QPushButton[iconbtn="true"] {{ background: transparent; border: 1px solid transp
 QPushButton[iconbtn="true"]:hover {{ background: {t.hover}; }}
 QPushButton[iconbtn="true"]:pressed {{ background: {t.selected}; }}
 QPushButton[iconbtn="true"]::menu-indicator {{ width: 0; image: none; }}
+QPushButton[chip="true"] {{ background: transparent; border: 1px solid {t.divider}; border-radius: 9px; padding: 1px 4px; color: {t.muted}; }}
+QPushButton[chip="true"]:hover {{ background: {t.hover}; color: {t.text}; }}
 QPushButton[quiet="true"] {{ color: {t.muted}; }}
 QWidget#toolPage QCheckBox {{ padding: 3px 0 3px 7px; spacing: 8px; }}
 QPushButton[row="true"]::menu-indicator {{ width: 0; image: none; }}
@@ -278,12 +280,53 @@ QLabel[role="heading"] {{ font-weight: 500; }}
 QLabel[role="badge"] {{ border-radius: 8px; padding: 1px 8px; background: {t.hover}; color: {t.text}; }}
 QLabel[role="badge-warn"] {{ border-radius: 8px; padding: 1px 8px; background: {t.accent_soft}; color: {t.text}; }}
 QLabel[role="badge-ok"] {{ border-radius: 8px; padding: 1px 8px; background: {t.hover}; color: {t.ok}; }}
+QTabBar::close-button {{ image: url({_indicator("close", t.muted)}); subcontrol-position: right; border-radius: 4px;
+    padding: 1px; margin: 2px; }}
+QTabBar::close-button:hover {{ image: url({_indicator("close", t.text)}); background: {t.hover}; }}
 QListWidget#layerList::indicator {{ width: 16px; height: 16px; margin-right: 2px; }}
 QListWidget#layerList::indicator:checked {{ image: url({_indicator("eye", t.text)}); }}
 QListWidget#layerList::indicator:unchecked {{ image: url({_indicator("eye_off", t.faint)}); }}
 QWidget#launcher {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; }}
 QWidget#startCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 8px; }}
 """
+
+
+def empty_note(view, text: str):
+    """Quiet words in an empty list, saying what will appear there and how (they go when the first row comes)."""
+    from PySide6.QtWidgets import QLabel
+
+    note = QLabel(text, view.viewport())
+    note.setWordWrap(True)
+    note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    role(note, "empty")
+    note.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def follow(*_args) -> None:
+        try:
+            note.setGeometry(view.viewport().rect().adjusted(8, 8, -8, -8))
+            note.setVisible(view.model().rowCount() == 0)
+        except RuntimeError:  # (the list is gone)
+            pass
+
+    model = view.model()
+    for signal in (model.rowsInserted, model.rowsRemoved, model.modelReset, model.layoutChanged):
+        signal.connect(follow)
+    view.viewport().installEventFilter(_Resize(view.viewport(), follow))
+    follow()
+    return note
+
+
+class _Resize(QObject):
+    """Keeps an empty list's note the size of the list."""
+
+    def __init__(self, parent, callback) -> None:
+        super().__init__(parent)
+        self.callback = callback
+
+    def eventFilter(self, _obj, event) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.Resize:
+            self.callback()
+        return False
 
 
 def still_icon(pixmap):
