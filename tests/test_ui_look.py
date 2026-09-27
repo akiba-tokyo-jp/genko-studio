@@ -104,10 +104,14 @@ def test_icons_follow_the_look_and_can_be_grey(qapp):
     from genko.app.preferences import settings
 
     assert not icons.icon("approve").isNull() and not icons.icon("duplicate").isNull()
+    from PySide6.QtGui import QIcon
+
+    on = (32, 32, QIcon.Mode.Normal, QIcon.State.On)  # (the tool in hand: its picture in the accent, or grey)
     settings().setValue("ui/mono_icons", "true")
-    grey = icons.icon("pen").pixmap(32, 32).toImage()
+    grey = icons.icon("pen").pixmap(*on).toImage()
     settings().setValue("ui/mono_icons", "false")
-    colour = icons.icon("pen").pixmap(32, 32).toImage()
+    colour = icons.icon("pen").pixmap(*on).toImage()
+    assert icons.icon("pen").pixmap(32, 32).toImage() != colour  # (not in hand: the plain ink)
     assert grey != colour and theme.mono_icons() is False
 
 
@@ -325,3 +329,42 @@ def test_the_rarely_used_panels_wait_in_the_window_menu(window):
     assert not window.sub_dock.isVisible() and not window.timeline_dock.isVisible()
     window.show_dock("タイムライン")
     assert window.timeline_dock.isVisible()
+
+
+def test_the_icons_are_lucide_with_a_few_of_genkos_own(qapp):
+    from genko.app import icons
+
+    assert all((icons.LUCIDE_DIR / f"{file}.svg").exists() for file in icons.LUCIDE.values())
+    assert (icons.LUCIDE_DIR / "LICENSE").read_text().startswith("ISC License")
+    for name in ("pen", "text", "effect", "gradient", "kind_tone"):
+        image = icons.icon(name).pixmap(32, 32).toImage()
+        assert any(image.pixelColor(x, y).alpha() for x in range(32) for y in range(32)), name
+
+
+def test_the_layer_settings_fold_away(window):
+    panel = window.layers
+    assert not panel.details.isVisible() and panel.details_toggle.text().startswith("▸")
+    panel.details_toggle.click()
+    assert panel.details.isVisible() and panel.details_toggle.text().startswith("▾")
+    panel.details_toggle.click()
+
+
+def test_a_question_makes_the_reply_the_main_button(qapp, tmp_path):
+    import sys
+
+    from genko.app.main import MainWindow
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    import test_m7_gui as m7
+
+    _agent, project = m7._project(tmp_path)
+    window = MainWindow(project)
+    window.show()
+    qapp.processEvents()
+    box = window.approvals
+    kinds = [i.kind for i in box.items]
+    box.list.setCurrentRow(kinds.index("help"))
+    assert box.back_button.property("primary") and not box.approve_button.property("primary")
+    box.list.setCurrentRow(kinds.index("gate"))
+    assert box.approve_button.property("primary") and not box.back_button.property("primary")
+    window.close()

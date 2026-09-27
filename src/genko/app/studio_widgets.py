@@ -162,7 +162,9 @@ class ApprovalBox(QWidget):
         self.page_pick.currentIndexChanged.connect(lambda _: self._page_changed())
         self.preview = PreviewLabel()
         self.preview.activated.connect(self.open_viewer)
+        self.preview.setMinimumHeight(170)
         self.big = theme.iconic(QPushButton("大きく見る"), "expand")
+        self.big.setProperty("row", True)
         self.big.clicked.connect(self.open_viewer)
         self.choices = QListWidget()
         self.choices.setViewMode(QListWidget.ViewMode.IconMode)
@@ -244,12 +246,17 @@ class ApprovalBox(QWidget):
         self.reason.setPlaceholderText({"help": "返事（エージェントへの指示になる）", "proposal": "却下の理由"}.get(
             kind, "差し戻す理由（エージェントへの指示になる）"))
         self.reason.setVisible(item.gate != "export")
+        # one clear main button: the reply for a question, the approval otherwise
+        answer = kind == "help"
+        theme.role_prop(self.approve_button, "primary", not answer)
+        theme.role_prop(self.back_button, "primary", answer)
+        muted = theme.tokens().muted
         text = f"<b>{item.title}</b>"
         if item.text:
             text += f"<br>{item.text}"
-        text += f"<br><small style='color:#555'>{HOW.get(kind, '')}</small>"
-        text += f"<br><small style='color:#888'>依頼: {wording.actor(item.by)}</small>"
+        text += f"<br><small style='color:{muted}'>依頼: {wording.actor(item.by)}</small>"
         self.detail.setText(text)
+        self.detail.setToolTip(HOW.get(kind, ""))  # (how to answer: on hover, not in the way)
         self.choices.setVisible(item.gate == "sheet" and item.kind == "gate")
         self.big.setVisible(item.gate != "export")
         sheet = item.gate == "sheet" and item.kind == "gate"

@@ -90,9 +90,11 @@ class StoryPanel(QWidget):
             self.kind.addItem(label, key)
         self.vertical = QCheckBox("縦書き")
         self.vertical.setChecked(True)
-        add = theme.iconic(QPushButton("選んだコマに追加"), "add")
+        add = theme.iconic(QPushButton("コマに追加"), "add")
+        add.setToolTip("上の欄の台詞を、選んだコマに加えます")
         add.clicked.connect(self.add)
-        self.apply_button = QPushButton("この台詞を直す")
+        self.apply_button = QPushButton("台詞を直す")
+        self.apply_button.setToolTip("選んだ台詞を、上の欄の言葉・話者・形に直します")
         self.apply_button.clicked.connect(self.apply_edit)
         self.delete_button = theme.iconic(QPushButton("削除"), "delete")
         self.delete_button.clicked.connect(self.delete)
@@ -180,16 +182,26 @@ class StoryPanel(QWidget):
         reset = QPushButton("既定の設定に戻す")
         reset.setToolTip("この台詞の文字とフキダシの設定を既定に戻します")
         reset.clicked.connect(self._reset_style)
+        for button in (up, down, self.delete_button):  # (flat pictures beside the list)
+            theme.iconic(button, {up: "up", down: "down"}.get(button, "delete"), "")
+            button.setFixedSize(28, 26)
+            button.setProperty("iconbtn", True)
+        self.delete_button.setToolTip("選んだ台詞を削除")
         order = QHBoxLayout()
+        order.setSpacing(2)
+        heading = QLabel("台詞（読み順）")
+        theme.role(heading, "section")
+        order.addWidget(heading, 1)
         order.addWidget(up)
         order.addWidget(down)
+        order.addWidget(self.delete_button)
         row = QHBoxLayout()
         row.addWidget(self.kind, 1)
         row.addWidget(self.vertical)
-        buttons = QGridLayout()
-        buttons.addWidget(add, 0, 0)
-        buttons.addWidget(self.delete_button, 0, 1)
-        buttons.addWidget(self.apply_button, 1, 0, 1, 2)
+        theme.primary(add)
+        buttons = QHBoxLayout()
+        buttons.addWidget(add, 1)
+        buttons.addWidget(self.apply_button, 1)
         form = QFormLayout()
         form.addRow("書体", self.font)
         form.addRow("文字の大きさ", self.size)
@@ -241,9 +253,8 @@ class StoryPanel(QWidget):
         sl.addWidget(self.style_body)
         layout = QVBoxLayout(self)
         layout.setSpacing(4)
-        layout.addWidget(QLabel("このページの台詞（読み順）"))
-        layout.addWidget(self.list, 1)
         layout.addLayout(order)
+        layout.addWidget(self.list, 1)
         layout.addWidget(self.speaker)
         layout.addWidget(self.text)
         layout.addLayout(row)
@@ -511,7 +522,8 @@ class StoryPanel(QWidget):
             self.refresh()
 
 
-LAYER_ICON = {"strokes": "✎", "raster": "▦", "folder": "▸", "placed": "🖼", "tone": "░", "fill": "■", "adjust": "◑"}
+LAYER_KIND_NAME = {"strokes": "ペンのレイヤー", "raster": "ペイントのレイヤー", "folder": "フォルダ", "placed": "画像",
+                   "tone": "トーン", "fill": "塗り", "adjust": "色調補正"}
 
 
 class LayerPanel(QWidget):
@@ -676,7 +688,7 @@ class LayerPanel(QWidget):
             theme.iconic(button, name, "", tip)
             button.setFixedSize(30, 28)
             button.setIconSize(QSize(18, 18))
-            button.setStyleSheet("QPushButton::menu-indicator { width: 0; }")
+            button.setProperty("iconbtn", True)  # (flat pictures, lit on hover: theme.py)
             adds.addWidget(button, i // 5, i % 5)
         adds.setColumnStretch(5, 1)
         props = QFormLayout()
@@ -691,20 +703,31 @@ class LayerPanel(QWidget):
         layout.addWidget(self.search)
         layout.addWidget(self.list, 1)
         layout.addLayout(adds)
-        layout.addWidget(self.name)
-        layout.addLayout(props)
-        layout.addWidget(self.clip)
-        layout.addWidget(self.protect)
-        layout.addWidget(self.locked)
-        layout.addWidget(self.overhang)
-        layout.addWidget(self.draft)
-        layout.addWidget(self.reference)
-        layout.addWidget(self.tint)
+        # the chosen layer's settings fold away: the list and its buttons are what is used all the time
+        from genko.app.preferences import settings as prefs
+
+        self.details_toggle = QPushButton()
+        self.details_toggle.setProperty("row", True)
+        self.details_toggle.setCheckable(True)
+        self.details = QWidget()
+        dl = QVBoxLayout(self.details)
+        dl.setContentsMargins(0, 0, 0, 0)
+        dl.setSpacing(3)
+        dl.addWidget(self.name)
+        dl.addLayout(props)
+        for box in (self.clip, self.protect, self.locked, self.overhang, self.draft, self.reference):
+            dl.addWidget(box)
+        dl.addWidget(self.tint)
         mrow = QHBoxLayout()
         mrow.addWidget(self.mask_button, 1)
         mrow.addWidget(self.effect_button, 1)
-        layout.addLayout(mrow)
-        layout.addLayout(frow)
+        dl.addLayout(mrow)
+        dl.addLayout(frow)
+        self.details_toggle.toggled.connect(self._show_details)
+        self.details_toggle.setChecked(str(prefs().value("ui/layer_details", "false")) == "true")
+        self._show_details(self.details_toggle.isChecked(), save=False)
+        layout.addWidget(self.details_toggle)
+        layout.addWidget(self.details)
         self._loading = False
 
     def refresh(self) -> None:
@@ -715,15 +738,17 @@ class LayerPanel(QWidget):
         layers = list(reversed(page.layers)) if page else []  # front first
         for layer in layers:
             kind = getattr(layer.kind, "value", str(layer.kind))
-            icon = LAYER_ICON.get(kind, "")
             indent = "　" if layer.parent_id else ""
-            lock = " 🔒" if getattr(layer, "locked", False) else ""
-            masked = " ◐" if getattr(layer, "mask", None) else ""
-            draft = " （下描き）" if not layer.exportable and layer.role not in (LayerRole.NAME, LayerRole.DRAFT) else ""
-            ref = " 〔参照〕" if getattr(layer, "reference", False) else ""
-            item = QListWidgetItem(f"{indent}{icon} {wording.layer_label(layer)}{draft}{ref}{masked}{lock}")
+            marks = [word for on, word in (
+                (not layer.exportable and layer.role not in (LayerRole.NAME, LayerRole.DRAFT), "下描き"),
+                (getattr(layer, "reference", False), "参照"), (bool(getattr(layer, "mask", None)), "マスク"),
+                (getattr(layer, "locked", False), "ロック")) if on]
+            item = QListWidgetItem(f"{indent}{wording.layer_label(layer)}" + (f"　· {' · '.join(marks)}" if marks else ""))
+            item.setToolTip(LAYER_KIND_NAME.get(kind, ""))
             picture = self._thumbnail(page, layer)
-            item.setIcon(theme.still_icon(picture.pixmap(self.list.iconSize())) if picture is not None else self._blank_icon())  # (every row the same height)
+            # its picture, or (nothing drawn yet) a quiet mark of its kind; every row the same height
+            item.setIcon(theme.still_icon(picture.pixmap(self.list.iconSize())) if picture is not None else self._kind_mark(kind))
+            item.setData(Qt.ItemDataRole.UserRole + 1, "picture" if picture is not None else "mark")
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked)
             self.list.addItem(item)
@@ -735,12 +760,38 @@ class LayerPanel(QWidget):
         self._search(self.search.text())
         self._selected(from_list=False)
 
-    def _blank_icon(self):
-        if getattr(self, "_blank", None) is None:
-            pixmap = QPixmap(self.list.iconSize())
+    def _show_details(self, on: bool, save: bool = True) -> None:
+        self.details.setVisible(on)
+        self.details_toggle.setText(("▾ " if on else "▸ ") + "レイヤーの設定")
+        self.details_toggle.setToolTip("不透明度・合成・ロック・下描き・マスク・フィルターなど")
+        if save:
+            from genko.app.preferences import settings as prefs
+
+            prefs().setValue("ui/layer_details", "true" if on else "false")
+
+    def _kind_mark(self, kind: str) -> QIcon:
+        """A small grey picture of the layer's kind, in the room a thumbnail takes."""
+        from PySide6.QtGui import QPainter
+
+        from genko.app.icons import LUCIDE, _lucide
+
+        cache = self.__dict__.setdefault("_marks", {})
+        t = theme.tokens()
+        key = (kind, t.faint)
+        if key not in cache:
+            size = self.list.iconSize()
+            pixmap = QPixmap(size)
             pixmap.fill(Qt.GlobalColor.transparent)
-            self._blank = QIcon(pixmap)
-        return self._blank
+            name = f"kind_{kind}" if f"kind_{kind}" in LUCIDE else "kind_other"
+            mark = _lucide(name, t.muted, 64)
+            if mark is not None:
+                side = min(size.width(), size.height())
+                painter = QPainter(pixmap)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                painter.drawPixmap((size.width() - side) // 2, (size.height() - side) // 2, side, side, mark)
+                painter.end()
+            cache[key] = theme.still_icon(pixmap)
+        return cache[key]
 
     def _layer(self):
         page = self.window.current_page()
@@ -2498,6 +2549,7 @@ class MainWindow(QMainWindow):
         settings_scroll.setWidget(ts)
         settings_dock.setWidget(settings_scroll)
         settings_dock.setObjectName("ツールの設定")
+        settings_dock.setTitleBarWidget(QWidget())  # (the tool's own name heads the panel; no second title above it)
         settings_dock.setMinimumWidth(SIDE_WIDTH)
         settings_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, settings_dock)

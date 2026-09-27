@@ -69,16 +69,13 @@ def test_the_chosen_lines_settings_sit_beside_the_tool(window, qapp):
 
 
 def test_layers_are_compact_and_empty_ones_have_no_picture(window):
+    from PySide6.QtCore import Qt
+
     panel = window.layers
     panel.refresh()
     assert panel.list.iconSize().height() <= 24
-    def blank(icon) -> bool:  # (an empty layer keeps the picture's room, so every row is as tall, but shows nothing)
-        if icon.isNull():
-            return True
-        image = icon.pixmap(panel.list.iconSize()).toImage()
-        return all(image.pixelColor(x, y).alpha() == 0 for x in range(image.width()) for y in range(image.height()))
-
-    assert all(blank(panel.list.item(i).icon()) for i in range(panel.list.count()))  # nothing drawn yet
+    # nothing drawn yet: each row shows its kind's quiet mark, not a picture of the layer
+    assert all(panel.list.item(i).data(Qt.ItemDataRole.UserRole + 1) == "mark" for i in range(panel.list.count()))
 
 
 def test_no_agent_stage_in_a_book_drawn_alone(window):

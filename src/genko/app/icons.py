@@ -1,5 +1,6 @@
-"""Tool and command icons, drawn by Genko itself (no image files, nothing borrowed): simple line pictures
-on a 32×32 grid, one line weight, in the look's text colour with its one accent (theme.py), or grey only."""
+"""Tool and command icons: Lucide (ISC licence, `lucide/LICENSE`) for everything a general icon set has, and a
+few manga pictures Genko draws itself in the same line weight (あ for lettering, focus lines, a gradient).
+All are drawn in the look's text colour; a chosen tool's picture turns the accent (theme.py)."""
 
 from __future__ import annotations
 
@@ -17,7 +18,44 @@ LIGHT_INK = INK
 DARK_INK = QColor(222, 225, 230)  # (on the dark screen the pictures are drawn light)
 
 
-def _pen(width: float = 2.0, colour: QColor | None = None, style=Qt.PenStyle.SolidLine) -> QPen:
+LUCIDE = {
+    "select": "mouse-pointer-2", "pen": "pen-tool", "eraser": "eraser", "frame": "layout-dashboard", "fill": "paint-bucket",
+    "lassofill": "lasso", "lasso": "lasso-select", "picker": "pipette", "blend": "blend", "shape": "shapes",
+    "rect": "square-dashed", "wand": "wand-sparkles", "reshape": "spline", "ruler": "ruler", "3d": "box", "stamp": "stamp",
+    "undo": "undo-2", "redo": "redo-2", "zoom_in": "zoom-in", "zoom_out": "zoom-out", "fit": "scan",
+    "prev": "chevron-left", "next": "chevron-right", "move": "move", "export": "share", "add": "plus",
+    "pen_layer": "pen-line", "paint_layer": "paintbrush", "folder": "folder-plus", "delete": "trash-2", "up": "arrow-up",
+    "down": "arrow-down", "approve": "circle-check", "back": "corner-up-left", "expand": "maximize-2", "search": "search",
+    "settings": "settings", "story": "file-text", "check": "clipboard-check", "page": "file", "open": "folder-open",
+    "book": "book-open", "duplicate": "copy", "merge": "arrow-down-to-line", "more": "ellipsis", "info": "info",
+    "eye": "eye", "eye_off": "eye-off",
+    # a layer's kind, shown while it has nothing drawn yet
+    "kind_strokes": "pen-line", "kind_raster": "paintbrush", "kind_folder": "folder", "kind_placed": "image",
+    "kind_tone": "grid-3x3", "kind_fill": "square", "kind_adjust": "contrast", "kind_other": "layers",
+}
+LUCIDE_DIR = __import__("pathlib").Path(__file__).resolve().parent / "lucide"
+
+
+def _lucide(name: str, colour: str, size: int = 64):
+    """A Lucide picture in this colour (its lines are drawn in currentColor)."""
+    from PySide6.QtCore import QByteArray
+    from PySide6.QtSvg import QSvgRenderer
+
+    path = LUCIDE_DIR / f"{LUCIDE[name]}.svg"
+    try:
+        svg = path.read_text(encoding="utf-8").replace("currentColor", colour)
+    except OSError:
+        return None
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    QSvgRenderer(QByteArray(svg.encode("utf-8"))).render(painter, QRectF(4, 4, size - 8, size - 8))
+    painter.end()
+    return pixmap
+
+
+def _pen(width: float = 2.4, colour: QColor | None = None, style=Qt.PenStyle.SolidLine) -> QPen:
     colour = INK if colour is None else colour
     pen = QPen(colour, width, style, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
     return pen
@@ -44,8 +82,8 @@ def _draw(name: str, p: QPainter) -> None:
         p.drawLine(QPointF(5, 29), QPointF(28, 29))
     elif name == "text":
         font = QFont()
-        font.setPixelSize(22)
-        font.setBold(True)
+        font.setPixelSize(21)
+        font.setWeight(QFont.Weight.DemiBold)
         p.setFont(font)
         p.setPen(INK)
         p.drawText(QRectF(0, 0, 32, 32), Qt.AlignmentFlag.AlignCenter, "あ")
@@ -293,8 +331,11 @@ def icon(name: str) -> QIcon:
     return _icon(name, t.text, t.muted if theme.mono_icons() else t.accent)
 
 
-@lru_cache(maxsize=256)
-def _icon(name: str, ink: str, accent: str) -> QIcon:
+def _picture(name: str, ink: str, accent: str) -> QPixmap:
+    if name in LUCIDE:
+        pixmap = _lucide(name, ink)
+        if pixmap is not None:
+            return pixmap
     global INK, ACCENT
     INK, ACCENT = QColor(ink), QColor(accent)
     pixmap = QPixmap(64, 64)
@@ -305,4 +346,14 @@ def _icon(name: str, ink: str, accent: str) -> QIcon:
     _draw(name, painter)
     painter.end()
     INK, ACCENT = LIGHT_INK, QColor(232, 89, 12)
-    return QIcon(pixmap)
+    return pixmap
+
+
+@lru_cache(maxsize=256)
+def _icon(name: str, ink: str, accent: str) -> QIcon:
+    """The picture in the ink; when its tool is the one in hand (a checked button) in the accent."""
+    icon = QIcon(_picture(name, ink, ink))
+    chosen = _picture(name, accent, accent)
+    for mode in (QIcon.Mode.Normal, QIcon.Mode.Active, QIcon.Mode.Selected):
+        icon.addPixmap(chosen, mode, QIcon.State.On)
+    return icon
