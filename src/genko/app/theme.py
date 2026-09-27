@@ -221,10 +221,13 @@ def apply(app: QApplication | None = None, which: str | None = None) -> Tokens:
     t = tokens(which)
     if app is None:
         return t
+    if getattr(app, "_genko_tokens", None) == t:  # (unchanged: re-styling every open widget again is slow)
+        return t
     if app.style().objectName().lower() != "fusion":
         app.setStyle("Fusion")
     app.setPalette(palette(t))
     app.setStyleSheet(style_sheet(t))
+    app._genko_tokens = t
     if not getattr(app, "_genko_follows_system", False):
         try:
             app.styleHints().colorSchemeChanged.connect(lambda _scheme: mode() == "system" and _refresh_all(app))
