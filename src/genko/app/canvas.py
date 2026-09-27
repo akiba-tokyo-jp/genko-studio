@@ -165,6 +165,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self.brush_width_mm = 0.35
         self.eraser_mm = 2.0
         self.show_guides = True  # bleed, trim line and the basic frame
+        self.phone_view = False  # (a vertical-scroll book: how much of it one phone screen shows)
         self.selected_line_id: str | None = None
         self._handle_drag: dict | None = None
         self._frame_drag: dict | None = None  # the panel tool: {"kind": gutter|cut|vertex, ...}
@@ -506,6 +507,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self.show_guides:
             self._draw_guides(painter, page_rect)
+        if self.phone_view:
+            self._draw_phone(painter)
         self._draw_grid(painter)
         if self.overlay_name_strokes:
             self._draw_strokes(painter, self.page.name_strokes, QColor(58, 110, 165, 110), 1.2)
@@ -627,6 +630,41 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         painter.setPen(QPen(QColor(28, 126, 214, 150), 1, Qt.PenStyle.DashLine))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         self._draw_rect(painter, inner)
+
+    PHONE_ASPECT = 844 / 390  # (a phone held upright: the screen's height to its width)
+
+    def phone_screens(self) -> list[float]:
+        """Where each phone screen ends down the page (mm from the page's top), the page's width filling the screen."""
+        trim = self.page.trim_rect_mm()
+        step = trim.width * self.PHONE_ASPECT
+        ends, y = [], trim.y + step
+        while y < trim.y + trim.height - 1e-6:
+            ends.append(y)
+            y += step
+        return ends
+
+    def _draw_phone(self, painter: QPainter) -> None:
+        """The screens' breaks down the page, and the screen under the cursor (the rest a little dimmed)."""
+        trim = self.page.trim_rect_mm()
+        step = trim.width * self.PHONE_ASPECT
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(0, 150, 136, 170), 1, Qt.PenStyle.DashDotLine))
+        for n, y in enumerate(self.phone_screens(), start=1):
+            a, b = self._pt(trim.x, y), self._pt(trim.x + trim.width, y)
+            painter.drawLine(a, b)
+            painter.drawText(QPointF(b.x() + 4, b.y() + 4), f"{n}")
+        if self._hover is None:
+            return
+        top = min(max(self._hover[1] - step / 2, trim.y), max(trim.y, trim.y + trim.height - step))
+        a = self._pt(trim.x, top)
+        screen = QRectF(a.x(), a.y(), trim.width * self._scale, min(step, trim.height) * self._scale)
+        whole = QPainterPath()
+        whole.addRect(QRectF(self._pt(trim.x, trim.y), self._pt(trim.x + trim.width, trim.y + trim.height)))
+        hole = QPainterPath()
+        hole.addRect(screen)
+        painter.fillPath(whole.subtracted(hole), QColor(0, 0, 0, 22))
+        painter.setPen(QPen(QColor(0, 150, 136, 220), 2))
+        painter.drawRoundedRect(screen, 6, 6)
 
     def _draw_plain(self, painter: QPainter) -> None:
         """Without a renderer (tests, or before the first render): frames and balloon boxes."""

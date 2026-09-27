@@ -123,6 +123,10 @@ def apply_all(window) -> None:
     from genko.app import workspace
 
     workspace.apply_theme()
+    from genko.app import comfort
+
+    comfort.apply_motion()
+    comfort.apply_font()
     if hasattr(window, "refresh_icons"):
         window.refresh_icons()
     window.canvas.update()
@@ -268,6 +272,19 @@ class PreferencesDialog(QDialog):
         self.mono_icons.setChecked(theme.mono_icons())
         self.hints = QCheckBox("パネルに説明の文を出す（切ると、説明はツールチップに入る）")
         self.hints.setChecked(theme.show_hints())
+        from genko.app import comfort
+
+        self.radial = QCheckBox("描く道具で右クリックすると円形のメニュー（Shift＋右クリックはふだんのメニュー）")
+        self.radial.setChecked(comfort.radial_on())
+        self.rest = QComboBox()
+        for label, minutes in (("知らせない", 0), ("30 分ごと", 30), ("45 分ごと", 45), ("60 分ごと", 60), ("90 分ごと", 90)):
+            self.rest.addItem(label, minutes)
+        self.rest.setCurrentIndex(max(0, self.rest.findData(int(settings().value("ui/rest_minutes", 0) or 0))))
+        self.rest.setToolTip("作業を続けた時間（手を止めていた時間は数えない）で、目を休める頃を知らせます")
+        self.requests = QCheckBox("エージェントから承認の依頼が届いたら、承認箱を前に出す")
+        self.requests.setChecked(comfort.raise_requests())
+        self.motion = QCheckBox("動きを減らす（メニューやヒントがすべるように開かない）")
+        self.motion.setChecked(comfort.reduce_motion())
         self.cursor = QComboBox()
         for label, key in workspace.CURSORS:
             self.cursor.addItem(label, key)
@@ -286,13 +303,17 @@ class PreferencesDialog(QDialog):
         wl.addRow("原稿のまわり", self.surround)
         wl.addRow("", self.mono_icons)
         wl.addRow("", self.hints)
+        wl.addRow("", self.radial)
+        wl.addRow("", self.requests)
+        wl.addRow("休憩の案内", self.rest)
+        wl.addRow("", self.motion)
         wl.addRow("ペンのカーソル", self.cursor)
         wl.addRow("Alt を押している間", self.alt_tool)
         wl.addRow("Ctrl を押している間", self.ctrl_tool)
         wl.addRow("画面の文字の大きさ", self.font_pt)
         wl.addRow("新しい原稿の用紙", self.paper)
         wl.addRow("変更を保存するまで", self.save_after)
-        note = QLabel("文字の大きさは、次に Genko を開いたときから変わります。")
+        note = QLabel("文字の大きさは、決めるとすぐに変わります。")
         theme.role(note, "hint")
         wl.addRow("", note)
         tabs.addTab(work, "表示・作業")
@@ -365,6 +386,10 @@ class PreferencesDialog(QDialog):
         store.setValue("ui/surround", self.surround.currentData())
         store.setValue("ui/mono_icons", "true" if self.mono_icons.isChecked() else "false")
         theme.set_hints(self.hints.isChecked())
+        store.setValue("ui/radial", "true" if self.radial.isChecked() else "false")
+        store.setValue("ui/rest_minutes", self.rest.currentData())
+        store.setValue("ui/raise_requests", "true" if self.requests.isChecked() else "false")
+        store.setValue("ui/reduce_motion", "true" if self.motion.isChecked() else "false")
         store.setValue("ui/cursor", self.cursor.currentData())
         store.setValue("keys/alt_tool", self.alt_tool.currentData())
         store.setValue("keys/ctrl_tool", self.ctrl_tool.currentData())

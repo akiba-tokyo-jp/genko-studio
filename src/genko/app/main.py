@@ -1321,6 +1321,25 @@ class MainWindow(QMainWindow):
 
         self._build_actions()
         self._build_studio()
+        from genko.app import comfort
+
+        self.canvas_only = comfort.CanvasOnly(self)
+        self.act_canvas_only = QAction("原稿だけを表示", self)
+        self.act_canvas_only.setShortcut("Tab")
+        self.act_canvas_only.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.act_canvas_only.setStatusTip("パネルとバーを隠して原稿だけにします（Tab で戻る）。左右の端にカーソルを寄せるとその側のパネルが出ます")
+        self.act_canvas_only.triggered.connect(self.canvas_only.toggle)
+        self.canvas.addAction(self.act_canvas_only)
+        self.view_menu.insertAction(self.view_menu.actions()[0] if self.view_menu.actions() else None, self.act_canvas_only)
+        stages = self.view_menu.addMenu("作業の段階")
+        self.stage_actions = {}
+        for key, stage in comfort.STAGES.items():
+            act = stages.addAction(f"{stage['label']}の並び", lambda k=key: comfort.apply_stage(self, k))
+            act.setStatusTip("この段階でよく使うパネルだけを出します")
+            self.stage_actions[key] = act
+        self.rest = comfort.RestReminder(self)
+        self.act_phone.setChecked(comfort.phone_default(self.episode))
+        self.canvas.phone_view = self.act_phone.isChecked()
         self.canvas.grid_mm = float(QSettings("Genko", "Genko Studio").value("guides/grid_mm", 5.0))
         self._guide_toggles()
         self._watch()
@@ -1508,6 +1527,9 @@ class MainWindow(QMainWindow):
         self._commit_timer.stop()
         if self.session.path is None or not (self.session.dirty or self.session.outside_change()):
             return
+        from genko.app import comfort
+
+        before = comfort.request_ids(self)
         result = self.session.commit()
         if result.conflicts:
             lines = [f"・{wording.error(c['error'])}" for c in result.conflicts[:8]]
@@ -1516,6 +1538,7 @@ class MainWindow(QMainWindow):
         if result.rebased or result.conflicts:
             self._reload_pages()  # someone else's changes came in
             self._tell_others()
+            comfort.notice_requests(self, before)
         else:
             self._refresh_status()
 
@@ -1530,11 +1553,15 @@ class MainWindow(QMainWindow):
         self._watch()
         if not self.session.outside_change():
             return
+        from genko.app import comfort
+
+        before = comfort.request_ids(self)
         result = self.session.sync()
         if result.conflicts:
             self.flash(f"エージェントの変更と重なった操作が {len(result.conflicts)} 件あり、入りませんでした", 6000)
         self._reload_pages()
         self._tell_others()
+        comfort.notice_requests(self, before)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         from genko.app import documents
@@ -1599,6 +1626,7 @@ class MainWindow(QMainWindow):
         self.act_onion = a("前のページを透かす（オニオンスキン）", self._onion)
         self.act_guides = a("仕上がり線・基本枠を表示", self._toggle_guides, "Ctrl+;", "断ち切り（裁ち落とし）・仕上がり線・基本枠", True)
         self.act_guides.setChecked(True)
+        self.act_phone = a("スマホの画面の範囲を表示", self._toggle_phone, tip="縦読みの原稿で、スマホ 1 画面に入る範囲と画面の切れ目", checkable=True)
         self.act_import = a("画像を読み込む…", self._import_image, "Ctrl+Shift+I", "選んだコマに（選んでいなければページに）画像を置きます")
         self.act_import_psd = a("PSD をレイヤーのまま読み込む…", self._import_psd,
                                 tip="Photoshop・CLIP STUDIO PAINT などの PSD／PSB を、レイヤー・フォルダー・マスク・合成モードのままこのページに")
@@ -1824,7 +1852,7 @@ class MainWindow(QMainWindow):
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
-                      None, self.act_guides, self.act_scale, self.act_onion, self.act_cmyk_proof, None, self.act_tool_names]),
+                      None, self.act_guides, self.act_phone, self.act_scale, self.act_onion, self.act_cmyk_proof, None, self.act_tool_names]),
             ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_blend, self.act_shape, self.act_text, self.act_frame, None,
                         self.act_picker, self.act_fill, self.act_lassofill, self.act_fill_gaps, self.act_gradient, self.act_reshape, self.act_vector, self.act_liquify, None, self.act_marquee, self.act_lasso, self.act_wand, None,
                         self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner, None,
@@ -2923,7 +2951,7 @@ class MainWindow(QMainWindow):
 
         text = escape(str(message)).replace("\n", " ・ ")
         if error:
-            self.status.setText(f"<span style='color:#c92a2a'><b>⚠ {text}</b></span>")
+            self.status.setText(f"<span style='color:{theme.tokens().danger}'><b>⚠ {text}</b></span>")
             ms = max(ms, 6000)
         else:
             self.status.setText(f"<b>{text}</b>")
@@ -4087,6 +4115,13 @@ class MainWindow(QMainWindow):
             self.apply_ops([{"op": "reshape_stroke", "page": self._current().index, "layer_id": layer.id, "stroke_id": stroke_id,
                              "points": [[round(float(v), 3) for v in p] for p in points]}])
 
+    def _toggle_phone(self) -> None:
+        from genko.app.preferences import settings
+
+        self.canvas.phone_view = self.act_phone.isChecked()
+        settings().setValue("ui/phone_view", "true" if self.canvas.phone_view else "false")
+        self.canvas.update()
+
     def _toggle_guides(self) -> None:
         self.canvas.show_guides = self.act_guides.isChecked()
         self.canvas.update()
@@ -4360,6 +4395,15 @@ class MainWindow(QMainWindow):
         self.panel_view.refresh()  # a deliberate click: show the panel at once
 
     def _context_menu(self, frame_id: str, pos: QPointF) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from genko.app import comfort
+
+        shift = QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier
+        if comfort.radial_on() and self.canvas.tool in comfort.RADIAL_TOOLS and not shift:
+            self.radial = comfort.RadialMenu(self, comfort.radial_actions(self), pos.toPoint())  # (Shift: the usual menu)
+            self.radial.show()
+            return
         menu = QMenu(self)
         if frame_id:
             menu.addAction(self.act_split_h)
