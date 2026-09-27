@@ -294,6 +294,8 @@ QListWidget#layerList::indicator:unchecked {{ image: url({_indicator("eye_off", 
 QMenu[glass="true"] {{ background: {_rgba(t.panel, 0.62)}; border: 1px solid {_rgba(t.border, 0.7)}; }}
 QToolTip[glass="true"], QLabel[glass="true"] {{ background: {_rgba(t.raised, 0.66)}; }}
 QDialog[glass="true"] {{ background: {_rgba(t.window, 0.7)}; }}
+QFrame#dialogCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 8px; }}
+QWidget#dialogFooter {{ border-top: 1px solid {t.divider}; }}
 QWidget#launcher {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; }}
 QWidget#startCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 8px; }}
 """

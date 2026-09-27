@@ -41,7 +41,7 @@ class PaperDialog(QDialog):
     """用紙の設定: a preset, or every number — paper, finished size, bleed and the basic frame's margins."""
 
     def __init__(self, parent, spec: PageSpec, changing: bool = False) -> None:
-        from PySide6.QtWidgets import QDoubleSpinBox, QGridLayout
+        from PySide6.QtWidgets import QDoubleSpinBox
 
         super().__init__(parent)
         self.setWindowTitle("原稿用紙の設定")
@@ -72,48 +72,52 @@ class PaperDialog(QDialog):
         self.dpi.setRange(72, 1200)
         self.dpi.setValue(int(spec.dpi))
         self.dpi.setSuffix(" dpi")
-        grid = QGridLayout()
-        rows = [("用紙（キャンバス）", self.paper_w, self.paper_h), ("仕上がり（トンボの内側）", self.trim_w, self.trim_h)]
-        grid.addWidget(QLabel("幅"), 0, 1)
-        grid.addWidget(QLabel("高さ"), 0, 2)
-        for i, (label, a, b) in enumerate(rows, start=1):
-            grid.addWidget(QLabel(label), i, 0)
-            grid.addWidget(a, i, 1)
-            grid.addWidget(b, i, 2)
-        grid.addWidget(QLabel("裁ち落とし（仕上がりの外）"), 3, 0)
-        grid.addWidget(self.bleed, 3, 1)
-        grid.addWidget(QLabel("基本枠までの余白　上 / 下"), 4, 0)
-        grid.addWidget(self.top, 4, 1)
-        grid.addWidget(self.bottom, 4, 2)
-        grid.addWidget(QLabel("　　　　　　　　のど / 小口"), 5, 0)
-        grid.addWidget(self.inner, 5, 1)
-        grid.addWidget(self.outer, 5, 2)
-        grid.addWidget(QLabel("解像度"), 6, 0)
-        grid.addWidget(self.dpi, 6, 1)
+        from genko.app import dialog_look as look
+
+        def pair(a, b) -> QHBoxLayout:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            row.addWidget(a, 1)
+            row.addWidget(QLabel("×"))
+            row.addWidget(b, 1)
+            return row
+
+        rows = look.form()
+        rows.addRow(look.section("用紙と仕上がり"))
+        rows.addRow("見本", self.preset)
+        rows.addRow("用紙（幅×高さ）", pair(self.paper_w, self.paper_h))
+        rows.addRow("仕上がり（幅×高さ）", pair(self.trim_w, self.trim_h))
+        rows.addRow("裁ち落とし", self.bleed)
+        rows.addRow("解像度", self.dpi)
+        rows.addRow(look.section("基本枠までの余白（仕上がりから）"))
+        rows.addRow("上・下", pair(self.top, self.bottom))
+        rows.addRow("のど・小口", pair(self.inner, self.outer))
+        look.quiet_labels(rows)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
+        theme.role(self.summary, "hint")
         self.move = QCheckBox("コマ・台詞・絵を新しい基本枠に合わせて動かす")
         self.move.setChecked(True)
         self.move.setVisible(changing)
-        hint = QLabel("数値は出版社・印刷所で違います。投稿・入稿の前に、先方の原稿用紙の指定を確かめてください。")
-        hint.setWordWrap(True)
-        theme.role(hint, "hint")
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("変える" if changing else "決める")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        layout = QVBoxLayout(self)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("見本"))
-        row.addWidget(self.preset, 1)
-        layout.addLayout(row)
-        layout.addLayout(grid)
-        layout.addWidget(self.summary)
-        layout.addWidget(self.move)
-        layout.addWidget(hint)
-        layout.addWidget(buttons)
+        body = QVBoxLayout()
+        body.setSpacing(8)
+        body.addLayout(rows)
+        body.addWidget(self.move)
+        body.addStretch(1)
+        self.diagram = look.PaperDiagram()
+        side = QVBoxLayout()
+        side.addWidget(self.diagram, 1)
+        side.addWidget(look.legend())
+        side.addWidget(self.summary)
+        look.frame(self, look.header("原稿用紙の設定", "数値は出版社・印刷所で違います。投稿・入稿の前に、先方の原稿用紙の指定を確かめてください。"),
+                   body, look.card(side, "できあがりの形"), look.footer(buttons))
+        self.resize(760, 520)
         self._preset_key = ""
         same = next((key for key, (_label, make) in PAPER_PRESETS.items() if make() == spec), "")
         if same:  # the book is on a preset: show it as that
@@ -160,7 +164,12 @@ class PaperDialog(QDialog):
                     "the basic frame must fit inside the finished size": "基本枠が仕上がりに収まりません"}.get(str(exc), str(exc))
             ok = False
         self.summary.setText(text)
-        theme.role(self.summary, "" if ok else "error")
+        theme.role(self.summary, "hint" if ok else "error")
+        if hasattr(self, "diagram"):
+            try:
+                self.diagram.show_spec(self.spec() if ok else self.diagram.spec, error=not ok)
+            except ValueError:
+                pass
         if hasattr(self, "ok_button"):
             self.ok_button.setEnabled(ok)
 
@@ -369,23 +378,40 @@ class NewProjectDialog(QDialog):
         theme.role(self.where_note, "hint")
         self.title.textChanged.connect(self._note)
         self.folder.textChanged.connect(self._note)
-        form = QFormLayout()
-        form.addRow("作品名", self.title)
-        form.addRow("話数", self.episode)
-        form.addRow("ページ数", self.pages)
-        form.addRow("原稿用紙", self.paper)
-        form.addRow("", self.paper_note)
-        form.addRow("綴じ", self.binding)
-        form.addRow("保存する場所", where)
-        form.addRow("", self.where_note)
+        from genko.app import dialog_look as look
+
+        book = look.form()
+        book.addRow(look.section("作品"))
+        book.addRow("作品名", self.title)
+        counts = QHBoxLayout()
+        counts.addWidget(self.episode, 1)
+        counts.addWidget(QLabel("話　"))
+        counts.addWidget(self.pages, 1)
+        counts.addWidget(QLabel("ページ"))
+        book.addRow("話数・ページ数", counts)
+        book.addRow("綴じ", self.binding)
+        book.addRow(look.section("原稿用紙"))
+        book.addRow("原稿用紙", self.paper)
+        book.addRow("", self.paper_note)
+        book.addRow(look.section("保存"))
+        book.addRow("保存する場所", where)
+        book.addRow("", self.where_note)
+        look.quiet_labels(book)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("作る")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
         buttons.accepted.connect(self.create)
         buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(buttons)
+        body = QVBoxLayout()
+        body.addLayout(book)
+        body.addStretch(1)
+        self.diagram = look.PaperDiagram()
+        side = QVBoxLayout()
+        side.addWidget(self.diagram, 1)
+        side.addWidget(look.legend())
+        look.frame(self, look.header("新しい原稿", "あとから「ページ → 原稿用紙の設定」で、用紙もページ数も変えられます。"),
+                   body, look.card(side, "原稿用紙"), look.footer(buttons))
+        self.resize(780, 500)
         self._note()
         self._paper_changed()
 
@@ -414,6 +440,8 @@ class NewProjectDialog(QDialog):
                 self.paper.setCurrentIndex(0)
                 return
         self.paper_note.setText(self.chosen_spec().describe())
+        if hasattr(self, "diagram"):
+            self.diagram.show_spec(self.chosen_spec())
 
     def _pick_folder(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "保存する場所", self.folder.text())
@@ -478,8 +506,8 @@ class ExportDialog(QDialog):
         self.range.editingFinished.connect(self._preview)
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setMinimumSize(160, 200)
-        self.preview.setStyleSheet(f"background:{theme.tokens().surround}")
+        self.preview.setMinimumSize(220, 300)
+        self.preview.setStyleSheet(f"background:{theme.tokens().surround}; border-radius: 6px")
         self.preview_note = QLabel()
         theme.role(self.preview_note, "hint")
         self.format = QComboBox()
@@ -538,36 +566,45 @@ class ExportDialog(QDialog):
         where = QHBoxLayout()
         where.addWidget(self.folder, 1)
         where.addWidget(pick)
-        self.form = QFormLayout()
+        from genko.app import dialog_look as look
+
+        self.form = look.form()
+        self.form.addRow(look.section("形式"))
         self.form.addRow("形式", self.format)
         self.form.addRow("", self.note)
+        self.form.addRow(look.section("ページと大きさ"))
         pages_row = QHBoxLayout()
         pages_row.addWidget(self.which)
         pages_row.addWidget(self.range, 1)
         self.form.addRow("ページ", pages_row)
         self.rows: dict[str, QWidget] = {}
         for key, label, widget in (("dpi", "解像度", self.dpi), ("area", "書き出す範囲", self.area), ("width", "幅", self.width), ("max_height", "1 枚の高さの上限", self.max_height),
-                                   ("long_edge", "長辺", self.long_edge), ("jpeg", "", self.jpeg), ("spreads", "", self.spreads),
-                                   ("color", "色", self.color), ("icc", "カラープロファイル", self.icc_row)):
+                                   ("long_edge", "長辺", self.long_edge), ("jpeg", "", self.jpeg), ("spreads", "", self.spreads)):
             self.form.addRow(label, widget)
             self.rows[key] = widget
+        self.colour_head = look.section("色")
+        self.form.addRow(self.colour_head)
+        for key, label, widget in (("color", "色", self.color), ("icc", "カラープロファイル", self.icc_row)):
+            self.form.addRow(label, widget)
+            self.rows[key] = widget
+        self.form.addRow(look.section("書き出し先"))
+        self.form.addRow("フォルダ", where)
         self.form.addRow("", self.official)
-        self.form.addRow("書き出し先", where)
+        look.quiet_labels(self.form)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("書き出す")
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
         self.buttons.accepted.connect(self.run)
         self.buttons.rejected.connect(self.reject)
         side = QVBoxLayout()
-        side.addWidget(self.preview)
+        side.addWidget(self.preview, 1)
         side.addWidget(self.preview_note)
-        side.addStretch(1)
-        body = QHBoxLayout()
-        body.addLayout(self.form, 1)
-        body.addLayout(side)
-        layout = QVBoxLayout(self)
-        layout.addLayout(body)
-        layout.addWidget(self.buttons)
+        body = QVBoxLayout()
+        body.addLayout(self.form)
+        body.addStretch(1)
+        look.frame(self, look.header("書き出し", "形式を選ぶと、その形式で決められることだけが並びます。右は書き出される 1 ページ目です。"),
+                   body, look.card(side, "書き出される形"), look.footer(self.buttons))
+        self.resize(900, 600)
         self.format.currentIndexChanged.connect(lambda _: self._format_changed())
         self.area.currentIndexChanged.connect(lambda _: self._preview())
         self.official.toggled.connect(lambda on: (self.which.setEnabled(not on), on and self.which.setCurrentIndex(0)))
@@ -582,6 +619,7 @@ class ExportDialog(QDialog):
             label = self.form.labelForField(widget)
             if label is not None:
                 label.setVisible(visible)
+        self.colour_head.setVisible(any(key in fmt.options for key in ("color", "icc")))  # (no empty heading)
         self.dpi.setValue(exporting.default_dpi(self.episode, fmt.key))
         self.long_edge.setValue(2560 if fmt.key == "kindle" else 2048)
         self.jpeg.setChecked(fmt.key == "sns")
@@ -627,8 +665,8 @@ class ExportDialog(QDialog):
         image = image.convert("RGB")
         data = image.tobytes()
         qimage = QImage(data, image.width, image.height, image.width * 3, QImage.Format.Format_RGB888).copy()
-        self.preview.setPixmap(QPixmap.fromImage(qimage).scaledToHeight(min(260, max(120, image.height)),
-                                                                         Qt.TransformationMode.SmoothTransformation))
+        room = max(200, self.preview.height() - 24)
+        self.preview.setPixmap(QPixmap.fromImage(qimage).scaledToHeight(room, Qt.TransformationMode.SmoothTransformation))
         self.preview_note.setText(f"{pages[0]} ページ（全 {len(pages)} ページを書き出す）")
 
     def ask_preflight(self, errors: list[dict]) -> str:

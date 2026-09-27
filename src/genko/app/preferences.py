@@ -275,23 +275,27 @@ class PreferencesDialog(QDialog):
         self.surround.setToolTip("原稿のまわりの色。無彩色のグレーにしておくと、原稿のグレーの見え方が狂いません")
         self.mono_icons = QCheckBox("アイコンをグレーだけで描く")
         self.mono_icons.setChecked(theme.mono_icons())
-        self.hints = QCheckBox("パネルに説明の文を出す（切ると、説明はツールチップに入る）")
+        self.hints = QCheckBox("パネルに説明の文を出す")
+        self.hints.setToolTip("切ると、説明はツールチップに入ります")
         self.hints.setChecked(theme.show_hints())
         from genko.app import comfort
 
-        self.radial = QCheckBox("描く道具で右クリックすると円形のメニュー（Shift＋右クリックはふだんのメニュー）")
+        self.radial = QCheckBox("描く道具の右クリックで円形のメニュー")
+        self.radial.setToolTip("Shift＋右クリックは、ふだんのメニューになります")
         self.radial.setChecked(comfort.radial_on())
         self.rest = QComboBox()
         for label, minutes in (("知らせない", 0), ("30 分ごと", 30), ("45 分ごと", 45), ("60 分ごと", 60), ("90 分ごと", 90)):
             self.rest.addItem(label, minutes)
         self.rest.setCurrentIndex(max(0, self.rest.findData(int(settings().value("ui/rest_minutes", 0) or 0))))
         self.rest.setToolTip("作業を続けた時間（手を止めていた時間は数えない）で、目を休める頃を知らせます")
-        self.requests = QCheckBox("エージェントから承認の依頼が届いたら、承認箱を前に出す")
+        self.requests = QCheckBox("承認の依頼が届いたら、承認箱を前に出す")
+        self.requests.setToolTip("エージェントから承認の依頼や相談が届いたとき")
         self.requests.setChecked(comfort.raise_requests())
-        self.gpu = QCheckBox("原稿の表示にグラフィックボードを使う（次に開いた窓から）")
+        self.gpu = QCheckBox("原稿の表示にグラフィックボードを使う")
         self.gpu.setChecked(str(settings().value("ui/gpu", "true")).lower() not in ("0", "false", "no"))
-        self.gpu.setToolTip("拡大・回転がなめらかになります。対応していないパソコンでは、入れていても使いません")
-        self.motion = QCheckBox("動きを減らす（メニューやヒントがすべるように開かない）")
+        self.gpu.setToolTip("拡大・回転がなめらかになります（次に開いた窓から）。対応していないパソコンでは、入れていても使いません")
+        self.motion = QCheckBox("動きを減らす")
+        self.motion.setToolTip("メニューの開き方・拡大の寄り方・知らせの出方などの動きを止めます")
         self.motion.setChecked(comfort.reduce_motion())
         self.cursor = QComboBox()
         for label, key in workspace.CURSORS:
@@ -304,37 +308,62 @@ class PreferencesDialog(QDialog):
                 box.addItem(label, tool)
             box.setCurrentIndex(max(0, box.findData(workspace.modifier_tool(key))))
             box.setToolTip("押している間だけ、この道具になります（離すと元の道具に戻る）")
+        from genko.app import dialog_look as look
+
         work = QWidget()
-        wl = QFormLayout(work)
-        wl.addRow("画面の色", self.theme)
-        wl.addRow("パネルの明るさ", self.brightness)
-        wl.addRow("原稿のまわり", self.surround)
-        wl.addRow("", self.mono_icons)
-        wl.addRow("", self.hints)
-        wl.addRow("", self.radial)
-        wl.addRow("", self.requests)
-        wl.addRow("休憩の案内", self.rest)
-        wl.addRow("", self.motion)
-        wl.addRow("", self.gpu)
-        wl.addRow("ペンのカーソル", self.cursor)
-        wl.addRow("Alt を押している間", self.alt_tool)
-        wl.addRow("Ctrl を押している間", self.ctrl_tool)
-        wl.addRow("画面の書体", self.ui_font)
-        wl.addRow("画面の文字の大きさ", self.font_pt)
-        wl.addRow("新しい原稿の用紙", self.paper)
-        wl.addRow("変更を保存するまで", self.save_after)
+        wl = look.form()
+        work.setLayout(wl)
         note = QLabel("文字の大きさは、決めるとすぐに変わります。")
         theme.role(note, "hint")
-        wl.addRow("", note)
+        for head, rows in (("見た目", [("画面の色", self.theme), ("パネルの明るさ", self.brightness), ("原稿のまわり", self.surround),
+                                       ("画面の書体", self.ui_font), ("画面の文字の大きさ", self.font_pt), ("", note),
+                                       ("", self.mono_icons), ("", self.hints)]),
+                           ("描く・操作", [("ペンのカーソル", self.cursor), ("Alt を押している間", self.alt_tool),
+                                         ("Ctrl を押している間", self.ctrl_tool), ("", self.radial)]),
+                           ("長い時間の作業", [("休憩の案内", self.rest), ("", self.motion), ("", self.gpu), ("", self.requests)]),
+                           ("原稿と保存", [("新しい原稿の用紙", self.paper), ("変更を保存するまで", self.save_after)])):
+            wl.addRow(look.section(head))
+            for label, widget in rows:
+                wl.addRow(label, widget)
+        look.quiet_labels(wl)
+        from PySide6.QtWidgets import QScrollArea
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(work)
+        work = scroll
         tabs.addTab(work, "表示・作業")
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("決める")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
         buttons.accepted.connect(self.save)
         buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addWidget(tabs, 1)
-        layout.addWidget(buttons)
+        # the pages chosen from a list at the side (as the main window's panels are chosen), not tabs across the top
+        from PySide6.QtWidgets import QHBoxLayout, QListWidget, QListWidgetItem
+
+        from genko.app.icons import icon
+
+        tabs.tabBar().hide()
+        tabs.setDocumentMode(True)
+        self.pages_list = QListWidget()
+        self.pages_list.setObjectName("prefsNav")
+        self.pages_list.setFixedWidth(150)
+        for i, (name, picture) in enumerate((("ショートカット", "search"), ("ペンタブレット", "pen"), ("表示・作業", "settings"))):
+            self.pages_list.addItem(QListWidgetItem(icon(picture), tabs.tabText(i) or name))
+        self.pages_list.currentRowChanged.connect(tabs.setCurrentIndex)
+        tabs.currentChanged.connect(lambda i: self.pages_list.currentRow() != i and self.pages_list.setCurrentRow(i))
+        self.pages_list.setCurrentRow(tabs.currentIndex())
+        middle = QHBoxLayout()
+        middle.setSpacing(16)
+        middle.addWidget(self.pages_list)
+        middle.addWidget(tabs, 1)
+        body = QWidget()
+        body.setLayout(middle)
+        middle.setContentsMargins(0, 0, 0, 0)
+        look.frame(self, look.header("環境設定", "このパソコンでの Genko の使い心地です。原稿には残りません。"), body, None, look.footer(buttons))
+        self.resize(820, 620)
         self.tabs = tabs
         self._show_gamma()
 

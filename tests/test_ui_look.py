@@ -504,3 +504,49 @@ def test_the_page_is_drawn_by_the_processor_where_there_is_no_real_card(qapp):
     for name in ("NVIDIA GeForce RTX 4070/PCIe/SSE2", "AMD Radeon Pro 5500M OpenGL Engine", "Intel(R) Iris(R) Xe Graphics",
                  "Apple M2"):
         assert not cv.software_renderer(name)
+
+
+# --- UI-G: the dialogs made of the same parts ---------------------------------------------------------------
+
+
+def test_the_dialogs_have_a_heading_a_card_and_one_main_button(window, qapp):
+    from PySide6.QtWidgets import QDialogButtonBox, QFrame, QLabel
+
+    from genko.app.brush_panel import BrushDialog
+    from genko.app.dialogs import ExportDialog, NewProjectDialog, PaperDialog
+    from genko.app.preferences import PreferencesDialog
+
+    made = [ExportDialog(window, window.episode, window.path, window.session.actor, current_page=1), NewProjectDialog(window),
+            PaperDialog(window, window.episode.spec, changing=True), PreferencesDialog(window), BrushDialog(window, "gpen")]
+    for dialog in made:
+        titles = [label for label in dialog.findChildren(QLabel) if label.property("role") == "title"]
+        assert titles, type(dialog).__name__
+        ok = dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Ok)
+        assert ok.property("primary"), type(dialog).__name__
+        cards = [f for f in dialog.findChildren(QFrame) if f.objectName() == "dialogCard"]
+        assert cards or isinstance(dialog, PreferencesDialog), type(dialog).__name__
+        dialog.close()
+
+
+def test_the_paper_picture_follows_the_numbers(window):
+    from genko.app.dialogs import PaperDialog
+
+    dialog = PaperDialog(window, window.episode.spec, changing=True)
+    before = dialog.diagram.spec
+    dialog.trim_w.setValue(dialog.trim_w.value() - 20)
+    assert dialog.diagram.spec is not before and not dialog.diagram.error
+    dialog.paper_w.setValue(50)  # (smaller than the finished size: the picture says so)
+    assert dialog.diagram.error and not dialog.ok_button.isEnabled()
+    dialog.close()
+
+
+def test_the_preferences_pages_are_chosen_at_the_side(window):
+    from genko.app.preferences import PreferencesDialog
+
+    dialog = PreferencesDialog(window)
+    assert dialog.tabs.tabBar().isHidden() and dialog.pages_list.count() == dialog.tabs.count()
+    dialog.pages_list.setCurrentRow(2)
+    assert dialog.tabs.currentIndex() == 2
+    dialog.tabs.setCurrentIndex(0)
+    assert dialog.pages_list.currentRow() == 0
+    dialog.close()

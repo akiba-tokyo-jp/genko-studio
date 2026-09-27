@@ -459,29 +459,35 @@ class BrushDialog(QDialog):
         for label, key in AA_LABELS:
             self.aa.addItem(label, key)
         self.aa.setCurrentIndex(max(0, self.aa.findData(b.aa)))
-        form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        from genko.app import dialog_look as look
+        from genko.app import theme
+
+        form = look.form()
         form.addRow("名前", self.name)
+        form.addRow(look.section("線の太さと筆圧"))
         form.addRow("太さ（はじめの値）", self.width)
         form.addRow("弱い筆圧での太さ", self.thin)
         form.addRow("筆圧の効き方", self.curve)
-        form.addRow("不透明度", self.opacity)
-        form.addRow("手ぶれ補正", self.steady)
         form.addRow("", self.taper)
+        form.addRow("速さで細く", self.speed)
+        form.addRow(look.section("なめらかさ"))
+        form.addRow("手ぶれ補正", self.steady)
+        form.addRow("後補正", self.post)
+        form.addRow("アンチエイリアス", self.aa)
+        form.addRow(look.section("色と質感"))
+        form.addRow("不透明度", self.opacity)
         form.addRow("質感", self.texture)
         form.addRow("", self.fixed)
         form.addRow("", self.white)
-        form.addRow("速さで細く", self.speed)
-        form.addRow("後補正", self.post)
-        form.addRow("アンチエイリアス", self.aa)
-        tips = QFormLayout()
-        tips.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        tips = look.form()
+        tips.addRow(look.section("先端"))
         tips.addRow("先端の形", self.tip)
         tips.addRow("", self.tip_picture)
         tips.addRow("先端の角度", self.tip_angle)
         tips.addRow("平たさ", self.tip_ratio)
         tips.addRow("", self.tip_follow)
         tips.addRow("", self.tip_rotation)
+        tips.addRow(look.section("模様（点・レース・草などを並べる）"))
         tips.addRow("模様", self.pattern)
         tips.addRow("間隔", self.spacing)
         tips.addRow("散らばり", self.scatter)
@@ -502,11 +508,20 @@ class BrushDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addWidget(tabs)
-        layout.addWidget(QLabel("試し描き"))
-        layout.addWidget(self.sample)
-        layout.addWidget(buttons)
+        for rows in (form, tips):
+            look.quiet_labels(rows)
+        self.sample.setMinimumSize(260, 160)
+        self.sample.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sample.setStyleSheet("background: white; border-radius: 6px")
+        side = QVBoxLayout()
+        side.addWidget(self.sample, 1)
+        change = QLabel("値を変えると、すぐにこの線が描き直されます（弱く・強く・弱くと押した線）。")
+        change.setWordWrap(True)
+        theme.role(change, "hint")
+        side.addWidget(change)
+        look.frame(self, look.header("ブラシを複製して調整", f"「{brushes.brush(base).label}」をもとに、自分のブラシを作ります。元のブラシは変わりません。"),
+                   tabs, look.card(side, "試し描き"), look.footer(buttons))
+        self.resize(900, 600)
         for widget in (self.width, self.thin, self.curve, self.opacity, self.steady, self.tip_angle, self.tip_ratio, self.spacing,
                        self.scatter, self.stamp, self.jitter, self.count, self.speed, self.post):
             widget.valueChanged.connect(lambda _: self._draw_sample())
@@ -558,9 +573,9 @@ class BrushDialog(QDialog):
         except ValueError:
             return
         brushes.CUSTOM["my_sample"] = made
-        w, h, dpi = 300, 70, 96
+        w, h, dpi = 300, 140, 96
         mm = 25.4 / dpi
-        pts = [[(20 + i * 2.6) * mm, (35 + 18 * math.sin(i / 16)) * mm, math.sin(math.pi * i / 100)] for i in range(101)]
+        pts = [[(22 + i * 2.56) * mm, (70 + 34 * math.sin(i / 16)) * mm, math.sin(math.pi * i / 100)] for i in range(101)]
         if made.taper:
             pts = taper_points(pts)
         drawn = brushes.draw((w, h), pts, dpi, max(0.3, min(made.width_mm, 4.0)), "my_sample", seed="sample")
