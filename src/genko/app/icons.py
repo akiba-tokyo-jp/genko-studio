@@ -36,16 +36,23 @@ LUCIDE = {
 LUCIDE_DIR = __import__("pathlib").Path(__file__).resolve().parent / "lucide"
 
 
+@lru_cache(maxsize=128)
+def _svg(file: str) -> str | None:
+    try:
+        return (LUCIDE_DIR / f"{file}.svg").read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
 def _lucide(name: str, colour: str, size: int = 64):
     """A Lucide picture in this colour (its lines are drawn in currentColor)."""
     from PySide6.QtCore import QByteArray
     from PySide6.QtSvg import QSvgRenderer
 
-    path = LUCIDE_DIR / f"{LUCIDE[name]}.svg"
-    try:
-        svg = path.read_text(encoding="utf-8").replace("currentColor", colour)
-    except OSError:
+    svg = _svg(LUCIDE[name])
+    if svg is None:
         return None
+    svg = svg.replace("currentColor", colour)
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -323,12 +330,17 @@ def dark_screen() -> bool:
     return app is not None and app.palette().color(QPalette.ColorRole.Window).lightness() < 128
 
 
-def icon(name: str) -> QIcon:
-    """A tool's picture, drawn in the look's text colour and its one accent (grey only when chosen)."""
+def colours() -> tuple[str, str]:
+    """The ink and the accent the pictures are drawn in now (read once when many are drawn together)."""
     from genko.app import theme
 
     t = theme.tokens()
-    return _icon(name, t.text, t.muted if theme.mono_icons() else t.accent)
+    return t.text, (t.muted if theme.mono_icons() else t.accent)
+
+
+def icon(name: str, inks: tuple[str, str] | None = None) -> QIcon:
+    """A tool's picture, drawn in the look's text colour and its one accent (grey only when chosen)."""
+    return _icon(name, *(inks or colours()))
 
 
 def _picture(name: str, ink: str, accent: str) -> QPixmap:

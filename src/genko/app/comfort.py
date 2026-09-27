@@ -157,6 +157,26 @@ class RadialMenu(QWidget):
         self.move(centre.x() - size // 2, centre.y() - size // 2)
         self.hover = -1
         self.opened = time.monotonic()
+        self.setProperty("glass_wanted", True)
+        from PySide6.QtGui import QRegion
+
+        self.setMask(QRegion(0, 0, size, size, QRegion.RegionType.Ellipse))  # (a round window: the glass stays round)
+        self.grow = 1.0
+        if not reduce_motion():  # it opens from the pen outward
+            from PySide6.QtCore import QEasingCurve, QVariantAnimation
+
+            self.grow = 0.0
+            self._opening = QVariantAnimation(self)
+            self._opening.setDuration(140)
+            self._opening.setStartValue(0.0)
+            self._opening.setEndValue(1.0)
+            self._opening.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._opening.valueChanged.connect(self._grown)
+            self._opening.start()
+
+    def _grown(self, value) -> None:
+        self.grow = float(value)
+        self.update()
 
     def _centre(self) -> QPointF:
         return QPointF(self.width() / 2, self.height() / 2)
@@ -180,10 +200,15 @@ class RadialMenu(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         c = self._centre()
+        if self.grow < 1.0:
+            p.setOpacity(self.grow)
+            p.translate(c)
+            p.scale(0.82 + 0.18 * self.grow, 0.82 + 0.18 * self.grow)
+            p.translate(-c)
         ring = QPainterPath()
         ring.addEllipse(c, self.RADIUS + self.BUTTON + 2, self.RADIUS + self.BUTTON + 2)
         back = QColor(t.panel)
-        back.setAlpha(240)
+        back.setAlpha(150 if self.property("glass") else 240)  # (over the system's glass, a thinner face)
         p.setPen(QPen(QColor(t.border), 1))
         p.setBrush(back)
         p.drawPath(ring)
@@ -342,8 +367,47 @@ def toast(window, text: str, ms: int = 5000) -> QLabel:
     note.move(max(8, (window.canvas.width() - note.width()) // 2), max(8, window.canvas.height() - note.height() - 24))
     note.mousePressEvent = lambda _e: note.deleteLater()
     note.show()
-    QTimer.singleShot(ms, note.deleteLater)
+    if reduce_motion():
+        QTimer.singleShot(ms, note.deleteLater)
+        return note
+    from PySide6.QtCore import QEasingCurve, QPropertyAnimation
+    from PySide6.QtWidgets import QGraphicsOpacityEffect
+
+    fade = QGraphicsOpacityEffect(note)
+    note.setGraphicsEffect(fade)
+    rise = note.pos()
+
+    def animate(start: float, end: float, then=None) -> None:
+        try:
+            move = QPropertyAnimation(fade, b"opacity", note)
+        except RuntimeError:  # (clicked away already)
+            return
+        move.setDuration(160)
+        move.setStartValue(start)
+        move.setEndValue(end)
+        move.setEasingCurve(QEasingCurve.Type.OutCubic)
+        if then is not None:
+            move.finished.connect(then)
+        move.start()
+
+    fade.setOpacity(0.0)
+    slide = QPropertyAnimation(note, b"pos", note)  # (it rises a little as it comes)
+    slide.setDuration(180)
+    slide.setStartValue(rise + QPointF(0, 10).toPoint())
+    slide.setEndValue(rise)
+    slide.setEasingCurve(QEasingCurve.Type.OutCubic)
+    slide.start()
+    animate(0.0, 1.0)
+    QTimer.singleShot(ms, lambda: _alive(note) and animate(1.0, 0.0, note.deleteLater))
     return note
+
+
+def _alive(widget) -> bool:
+    try:
+        widget.objectName()
+        return True
+    except RuntimeError:
+        return False
 
 
 # --- fewer moving things; the letters' size at once -------------------------------------------------------------

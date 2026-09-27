@@ -408,3 +408,70 @@ def QLabel_():  # noqa: N802
     from PySide6.QtWidgets import QLabel
 
     return QLabel
+
+
+# --- stage 1: motion and the system's glass -------------------------------------------------------------------
+
+
+def test_zoom_glides_but_the_view_is_already_there(window, qapp):
+    from genko.app.preferences import settings
+
+    canvas = window.canvas
+    before = canvas._scale
+    window.act_zoom_in.trigger()
+    assert abs(canvas._scale - before * 1.25) < 1e-6  # (what the pen touches is the new view at once)
+    assert canvas._glide is not None and canvas._glide_motion.state() == canvas._glide_motion.State.Running
+    canvas.grab()  # (drawn part way without trouble)
+    canvas._glide_motion.setCurrentTime(170)
+    assert canvas._glide is None
+    settings().setValue("ui/reduce_motion", "true")
+    window.act_fit.trigger()
+    assert getattr(canvas, "_glide", None) is None  # (fewer moving things: straight there)
+    settings().setValue("ui/reduce_motion", "false")
+
+
+def test_a_page_let_go_slides_to_a_stop(window, qapp):
+    import time
+
+    from PySide6.QtCore import QPointF
+
+    canvas = window.canvas
+    canvas._start_pan(QPointF(100, 100))
+    canvas._pan_speed = QPointF(12, 0)
+    canvas._pan_time = time.monotonic()
+    canvas._panning = False
+    x = canvas._pan_x
+    canvas._coast()
+    for _ in range(5):
+        canvas._coast_step()
+    assert canvas._pan_x > x + 30
+    for _ in range(60):
+        canvas._coast_step()
+    assert not canvas._coast_timer.isActive()
+
+
+def test_the_round_menu_opens_outward(window, qapp):
+    from PySide6.QtCore import QPointF
+
+    window.act_pen.trigger()
+    window._context_menu("", QPointF(400, 300))
+    menu = window.radial
+    assert menu.grow < 1.0 and menu.property("glass_wanted") and not menu.mask().isEmpty()
+    menu._opening.setCurrentTime(140)
+    assert menu.grow == 1.0
+    menu.grab()
+    menu.close()
+
+
+def test_the_system_glass_only_where_the_system_has_it(qapp):
+    import sys
+
+    from PySide6.QtWidgets import QMenu
+
+    from genko.app import glass
+
+    if sys.platform.startswith("linux"):
+        assert glass.available() == "" and not glass.install(qapp)
+    menu = QMenu()
+    assert glass.wants(menu)
+    assert glass.apply(menu) is False or glass.available()

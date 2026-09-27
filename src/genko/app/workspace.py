@@ -95,6 +95,7 @@ class CommandSearch(QDialog):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("コマンドを探す")
+        self.setProperty("glass_wanted", True)  # (the system's frosted glass where there is one: glass.py)
         self.resize(520, 420)
         self.query = QLineEdit()
         self.query.setPlaceholderText("例: トーン、見開き、太く、反転…")

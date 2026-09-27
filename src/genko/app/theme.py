@@ -189,6 +189,11 @@ def palette(t: Tokens) -> QPalette:
     return p
 
 
+def _rgba(hex_colour: str, alpha: float) -> str:
+    colour = QColor(hex_colour)
+    return f"rgba({colour.red()}, {colour.green()}, {colour.blue()}, {alpha:g})"
+
+
 def style_sheet(t: Tokens, pt: float = 9.0) -> str:
     """One style sheet for every panel: flat surfaces, thin dividers, small radii, one accent; three steps of
     letters: headings (bold, larger), section titles (bold, small, quiet) and labels and values (regular)."""
@@ -286,6 +291,9 @@ QTabBar::close-button:hover {{ image: url({_indicator("close", t.text)}); backgr
 QListWidget#layerList::indicator {{ width: 16px; height: 16px; margin-right: 2px; }}
 QListWidget#layerList::indicator:checked {{ image: url({_indicator("eye", t.text)}); }}
 QListWidget#layerList::indicator:unchecked {{ image: url({_indicator("eye_off", t.faint)}); }}
+QMenu[glass="true"] {{ background: {_rgba(t.panel, 0.62)}; border: 1px solid {_rgba(t.border, 0.7)}; }}
+QToolTip[glass="true"], QLabel[glass="true"] {{ background: {_rgba(t.raised, 0.66)}; }}
+QDialog[glass="true"] {{ background: {_rgba(t.window, 0.7)}; }}
 QWidget#launcher {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; }}
 QWidget#startCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 8px; }}
 """
@@ -368,6 +376,9 @@ def apply(app: QApplication | None = None, which: str | None = None) -> Tokens:
     app.setPalette(palette(t))
     app.setStyleSheet(style_sheet(t, base_pt(app)))
     app._genko_tokens = key
+    from genko.app import glass
+
+    glass.install(app)  # (the system's frosted glass for menus and the like, where there is one)
     if not getattr(app, "_genko_follows_system", False):
         try:
             app.styleHints().colorSchemeChanged.connect(lambda _scheme: mode() == "system" and _refresh_all(app))
@@ -462,12 +473,13 @@ def iconic(button, name: str, text: str | None = None, tip: str | None = None):
 
 
 def refresh_icons() -> None:
-    from genko.app.icons import icon
+    from genko.app.icons import colours, icon
 
+    inks = colours()  # (once: the settings are read for the look, not for every button)
     alive = []
     for button, name in _ICONED:
         try:
-            button.setIcon(icon(name))
+            button.setIcon(icon(name, inks))
         except RuntimeError:
             continue
         alive.append((button, name))

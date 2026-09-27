@@ -8,6 +8,7 @@ the wheel or two fingers scroll, Space+drag or the middle button pans.
 from __future__ import annotations
 
 import copy
+import time
 from typing import Callable
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
@@ -156,6 +157,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self._panning = False
         self._space = False
         self._last_pos = QPointF()
+        self._pan_speed = QPointF(0, 0)
+        self._pan_time = 0.0
         self._press_pos: QPointF | None = None
         self._drag_line: StoryLine | None = None
         self._drag_pos: tuple[float, float] | None = None  # where the dragged balloon is shown; the model is untouched
@@ -485,7 +488,59 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
 
     # --- painting ---------------------------------------------------------------------------------
 
+    def glide(self, change) -> None:
+        """Change the view (zoom in or out, fit, actual size) and draw the way there over a moment. The view is
+        already where it goes (what the pen touches is the new view); only the picture catches up."""
+        before = (self._scale, self._pan_x, self._pan_y)
+        change()
+        after = (self._scale, self._pan_x, self._pan_y)
+        from genko.app.comfort import reduce_motion
+
+        if reduce_motion() or not self.isVisible() or before == after or before[0] <= 0:
+            return
+        from PySide6.QtCore import QEasingCurve, QVariantAnimation
+
+        self._glide = (before, after, 0.0)
+        motion = self.__dict__.get("_glide_motion")
+        if motion is None:
+            motion = self._glide_motion = QVariantAnimation(self)
+            motion.setDuration(170)
+            motion.setStartValue(0.0)
+            motion.setEndValue(1.0)
+            motion.setEasingCurve(QEasingCurve.Type.OutCubic)
+            motion.valueChanged.connect(self._glide_step)
+            motion.finished.connect(self._glide_done)
+        motion.stop()
+        motion.start()
+
+    def _glide_step(self, value) -> None:
+        if getattr(self, "_glide", None) is not None:
+            start, end, _t = self._glide
+            self._glide = (start, end, float(value))
+            self.update()
+
+    def _glide_done(self) -> None:
+        self._glide = None
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: N802
+        glide = getattr(self, "_glide", None)
+        if glide is None or glide[2] >= 1.0:
+            return self._paint(event)
+        (s0, x0, y0), (s1, x1, y1), t = glide
+        w, h = self.width() / 2, self.height() / 2
+        # the scale moves evenly in steps (as a zoom feels), the page point in the middle slides straight
+        c0, c1 = ((w - x0) / s0, (h - y0) / s0), ((w - x1) / s1, (h - y1) / s1)
+        scale = s0 * (s1 / s0) ** t
+        cx, cy = c0[0] + (c1[0] - c0[0]) * t, c0[1] + (c1[1] - c0[1]) * t
+        kept = (self._scale, self._pan_x, self._pan_y)
+        self._scale, self._pan_x, self._pan_y = scale, w - cx * scale, h - cy * scale
+        try:
+            self._paint(event)
+        finally:
+            self._scale, self._pan_x, self._pan_y = kept
+
+    def _paint(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.fillRect(self.rect(), theme.surround())  # (a neutral grey: it does not sway how the page's greys look)
@@ -1316,9 +1371,43 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
     # --- mouse -----------------------------------------------------------------------------------------
 
     def _start_pan(self, pos: QPointF) -> None:
+        self._stop_coast()
         self._panning = True
         self._last_pos = pos
+        self._pan_speed = QPointF(0, 0)
+        self._pan_time = time.monotonic()
         self._update_cursor()
+
+    # a page let go while moving slides on a little and slows to a stop (as on a tablet)
+    def _coast(self) -> None:
+        from genko.app.comfort import reduce_motion
+
+        speed = getattr(self, "_pan_speed", QPointF(0, 0))
+        if reduce_motion() or (abs(speed.x()) + abs(speed.y())) < 0.4 or time.monotonic() - self._pan_time > 0.08:
+            return
+        timer = self.__dict__.get("_coast_timer")
+        if timer is None:
+            timer = self._coast_timer = QTimer(self)
+            timer.setInterval(16)
+            timer.timeout.connect(self._coast_step)
+        timer.start()
+
+    def _coast_step(self) -> None:
+        speed = self._pan_speed * 0.88
+        self._pan_speed = speed
+        if abs(speed.x()) + abs(speed.y()) < 0.3:
+            self._stop_coast()
+            return
+        self._pan_x += speed.x()
+        self._pan_y += speed.y()
+        self._fitted = False
+        self.update()
+
+    def _stop_coast(self) -> None:
+        timer = self.__dict__.get("_coast_timer")
+        if timer is not None and timer.isActive():
+            timer.stop()
+            self.changed.emit()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         self.setFocus()
@@ -1447,6 +1536,10 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             self._pan_x += delta.x()
             self._pan_y += delta.y()
             self._last_pos = pos
+            now = time.monotonic()
+            frames = max(1.0, (now - self._pan_time) / 0.016)  # (the speed per screen frame, a little smoothed)
+            self._pan_speed = self._pan_speed * 0.4 + (delta / frames) * 0.6
+            self._pan_time = now
             self._fitted = False
             self.update()
             return
@@ -1557,6 +1650,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             self._panning = False
             self._press_pos = None
             self._update_cursor(self._ev(event.position()))
+            self._coast()
             return
         if self._frame_drag is not None:
             self._press_pos = None

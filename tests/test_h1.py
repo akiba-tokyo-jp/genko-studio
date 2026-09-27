@@ -265,6 +265,13 @@ def test_a_thick_book_stays_quick(app, tmp_path: Path):
     blobcache.clear()
     renders._STROKE_CACHE.clear()
     journal._PARSED.clear()
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    for widget in app.topLevelWidgets():  # (earlier tests' windows would slow this one: a person has a few open)
+        widget.close()
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
 
     t = time.perf_counter()
     window = MainWindow(project)

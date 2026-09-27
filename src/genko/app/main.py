@@ -1667,10 +1667,10 @@ class MainWindow(QMainWindow):
         self.act_help_faq = a("困ったとき（よくある質問）", lambda: self._help("faq"))
         self.act_about = a("Genko Studio について", lambda: self._help("about"))
         self.act_history = a("履歴…", lambda: self.show_dock("履歴"), "Ctrl+H", "変更の一覧。クリックでその時点まで戻る・進む")
-        self.act_fit = a("全体を表示", self.canvas.fit_page, "Ctrl+0")
-        self.act_zoom_in = a("拡大", lambda: self.canvas.zoom_by(1.25), [QKeySequence(std.ZoomIn), QKeySequence("Ctrl+=")])
-        self.act_zoom_out = a("縮小", lambda: self.canvas.zoom_by(0.8), std.ZoomOut)
-        self.act_actual = a("原寸（紙の大きさ）", self.canvas.actual_size, "Ctrl+1")
+        self.act_fit = a("全体を表示", lambda: self.canvas.glide(self.canvas.fit_page), "Ctrl+0")
+        self.act_zoom_in = a("拡大", lambda: self.canvas.glide(lambda: self.canvas.zoom_by(1.25)), [QKeySequence(std.ZoomIn), QKeySequence("Ctrl+=")])
+        self.act_zoom_out = a("縮小", lambda: self.canvas.glide(lambda: self.canvas.zoom_by(0.8)), std.ZoomOut)
+        self.act_actual = a("原寸（紙の大きさ）", lambda: self.canvas.glide(self.canvas.actual_size), "Ctrl+1")
         self.act_turn_left = a("左に回す（15°）", lambda: self.canvas.rotate_view(-15), "Ctrl+Alt+Left",
                                "表示だけを回します（原稿は回りません）。Shift＋スペースを押しながらドラッグでも回せます")
         self.act_turn_right = a("右に回す（15°）", lambda: self.canvas.rotate_view(15), "Ctrl+Alt+Right",
@@ -2252,10 +2252,11 @@ class MainWindow(QMainWindow):
 
     def refresh_icons(self) -> None:
         """Draw the tool pictures again (after the screen's colours change)."""
-        from genko.app.icons import icon
+        from genko.app.icons import colours, icon
 
+        inks = colours()
         for name, act in getattr(self, "_pictures", {}).items():
-            act.setIcon(icon(name))
+            act.setIcon(icon(name, inks))
         theme.refresh_icons()
         if hasattr(self, "quick_access"):
             self.quick_access.refresh()
