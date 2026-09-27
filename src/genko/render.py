@@ -344,12 +344,15 @@ def _clip_mask(page: Page, size: tuple[int, int], dpi: int) -> Image.Image | Non
     leaves = [frame for frame in page.leaf_frames() if getattr(frame, "clip", True)]
     if not leaves:
         return None
-    from genko.placement import clip_box
+    from genko.placement import bleed_poly, clip_box
 
     mask = Image.new("L", size, 0)
     draw = ImageDraw.Draw(mask)
     for frame in leaves:
-        if getattr(frame, "bleed", False) and not getattr(frame, "poly", None):
+        shape = bleed_poly(page, frame)
+        if shape is not None:  # a slanted bleed panel: out to the bleed, its slanted sides kept
+            draw.polygon([_xy(p, dpi) for p in shape], fill=255)
+        elif getattr(frame, "bleed", False) and not getattr(frame, "poly", None):
             draw.rectangle(rect_px(clip_box(page, frame, "bleed"), dpi), fill=255)  # a bleed panel runs out to the bleed
         else:
             fill_frame(draw, frame, dpi)
@@ -436,9 +439,15 @@ def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, 
         fitted = _finish_placed(fitted, layer, page, episode, dpi, mode, (vx0, vy0))
     canvas = Image.new("RGBA", size, (0, 0, 0, 0))
     canvas.paste(fitted, (vx0, vy0))
-    if frame is not None and getattr(frame, "poly", None) and layer.clip_to == "frame":
+    if frame is not None and getattr(frame, "poly", None) and layer.clip_to in ("frame", "bleed"):
+        from genko.placement import bleed_poly
+
         shape_mask = Image.new("L", size, 0)
-        fill_frame(ImageDraw.Draw(shape_mask), frame, dpi)
+        shape = bleed_poly(page, frame) if layer.clip_to == "bleed" else None
+        if shape is not None:  # (a slanted bleed panel: cut along its slanted sides, out to the bleed elsewhere)
+            ImageDraw.Draw(shape_mask).polygon([_xy(p, dpi) for p in shape], fill=255)
+        else:
+            fill_frame(ImageDraw.Draw(shape_mask), frame, dpi)
         canvas.putalpha(ImageChops.multiply(canvas.split()[3], shape_mask))
     return canvas
 
@@ -958,6 +967,15 @@ def _draw_frames(draw: ImageDraw.ImageDraw, page: Page, working_dpi: int) -> Non
         if frame.border_mm is not None and frame.border_mm <= 0:
             continue  # a panel without a border
         style = getattr(frame, "line", None)
+        from genko.placement import bleed_poly, on_bleed_edge
+
+        shape = bleed_poly(page, frame)
+        if shape is not None and not style and geo.curves_of(frame) is None:
+            # a slanted bleed panel: a border on the inner sides only (the sides off the paper are cut)
+            for a, b in zip(shape, shape[1:] + shape[:1]):
+                if not on_bleed_edge(page, a, b):
+                    draw.line([_xy(a, working_dpi), _xy(b, working_dpi)], fill=(20, 20, 20), width=width_px)
+            continue
         if getattr(frame, "poly", None) or geo.curves_of(frame) is not None or (style and style.get("kind", "solid") != "solid"):
             if style or geo.curves_of(frame) is not None:
                 draw_border(draw, geo.outline(frame), frame.border_mm if frame.border_mm is not None else 0.8, working_dpi,

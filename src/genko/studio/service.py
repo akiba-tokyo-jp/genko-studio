@@ -98,9 +98,20 @@ class ToolResult:
         return {
             "ok": self.ok,
             **self.data,
-            "issues": [issue.to_dict() for issue in self.issues],
+            "issues": [issue.to_dict() for issue in sorted(self.issues, key=lambda i: i.severity != "error")],  # (errors first)
             "files": self.files,
         }
+
+
+def _gutter_brief(page) -> list[dict]:
+    """The gaps between panels, as move_gutter takes them (frame_id = the split, index = the gap after that child)."""
+    from genko.frames import gutters
+
+    if not page.frames:
+        return []
+    return [{"frame_id": g["node"], "index": g["index"], "width_mm": round(g["width"], 2),
+             "direction": "horizontal" if g["horizontal"] else "vertical",
+             "from_mm": [round(v, 1) for v in g["p0"]], "to_mm": [round(v, 1) for v in g["p1"]]} for g in gutters(page.frames[0])]
 
 
 def wording_error(message: str) -> str:
@@ -1034,7 +1045,7 @@ class StudioService:
         issues = validate(plan, SCHEMAS["name_plan@1"])
         if has_errors(issues):
             return ToolResult(False, {"committed": False}, issues)
-        issues += lint.lint_name_plan(plan, script, bible, len(episode.pages))
+        issues += lint.lint_name_plan(plan, script, bible, len(episode.pages), tall=episode.spec.height_mm > 2 * episode.spec.width_mm)
         if has_errors(issues):
             return ToolResult(False, {"committed": False}, issues)
         page_index = plan["page"]
@@ -1083,6 +1094,7 @@ class StudioService:
                 return ToolResult(False, {"committed": False}, [error("apply_failed", "/", str(exc))])
             save_episode(episode, path, actor=self.actor)
         data["committed"] = True
+        data["gutters"] = _gutter_brief(next(p for p in episode.pages if p.index == page_index))
         return result
 
     def _compile_name(self, episode: Episode, page_index: int, plan: dict, bible: dict, script: dict, replace: bool):
@@ -1232,6 +1244,7 @@ class StudioService:
             "panels": [{"frame_id": f.id, "rect_mm": [round(v, 1) for v in (f.rect.x, f.rect.y, f.rect.width, f.rect.height)],
                         "slot": (f.panel or {}).get("slot"), "status": (f.panel or {}).get("status", "empty")}
                        for f in target.leaf_frames()],
+            "gutters": _gutter_brief(target),
             "fixes": [t.get("text", "") for t in state.page_fixes(episode, page)],
             "templates": {k: v["description"] for k, v in layout_mod.templates().items()},
         }

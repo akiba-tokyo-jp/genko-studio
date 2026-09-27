@@ -25,6 +25,44 @@ def outer_edges(page: Page, frame: Frame) -> dict[str, bool]:
     }
 
 
+def bleed_poly(page: Page, frame: Frame | None) -> list | None:
+    """A slanted or free-form bleed panel run out to the bleed: its corners on the live area's edge move out to the
+    bleed's edge (so the slanted sides keep their slant and only the outer sides go off the paper). None for others."""
+    if frame is None or not getattr(frame, "bleed", False) or not getattr(frame, "poly", None):
+        return None
+    inner, bleed = page.inner_rect_mm(), page.bleed_rect_mm()
+    out = []
+    for point in frame.poly:
+        x, y = float(point[0]), float(point[1])
+        if abs(x - inner.x) < EDGE_EPS_MM:
+            x = bleed.x
+        elif abs(x - (inner.x + inner.width)) < EDGE_EPS_MM:
+            x = bleed.x + bleed.width
+        if abs(y - inner.y) < EDGE_EPS_MM:
+            y = bleed.y
+        elif abs(y - (inner.y + inner.height)) < EDGE_EPS_MM:
+            y = bleed.y + bleed.height
+        out.append([x, y])
+    return out
+
+
+def on_bleed_edge(page: Page, a, b) -> bool:
+    """Whether a side of a bleed polygon lies along the bleed's edge (it is cut off: no border there)."""
+    bleed = page.bleed_rect_mm()
+    for fixed, index in ((bleed.x, 0), (bleed.x + bleed.width, 0), (bleed.y, 1), (bleed.y + bleed.height, 1)):
+        if abs(a[index] - fixed) < EDGE_EPS_MM and abs(b[index] - fixed) < EDGE_EPS_MM:
+            return True
+    return False
+
+
+def in_poly(points, x: float, y: float) -> bool:
+    inside = False
+    for (x0, y0), (x1, y1) in zip(points, points[1:] + points[:1]):
+        if (y0 > y) != (y1 > y) and x < x0 + (y - y0) * (x1 - x0) / (y1 - y0):
+            inside = not inside
+    return inside
+
+
 def clip_box(page: Page, frame: Frame | None, clip_to: str) -> Rect:
     full = Rect(0, 0, page.spec.width_mm, page.spec.height_mm)
     if frame is None or clip_to == "none":

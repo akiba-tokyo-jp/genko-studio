@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -119,7 +120,7 @@ class PaperDialog(QDialog):
                    body, look.card(side, "できあがりの形"), look.footer(buttons))
         self.resize(760, 520)
         self._preset_key = ""
-        same = next((key for key, (_label, make) in PAPER_PRESETS.items() if make() == spec), "")
+        same = next((key for key, (_label, make) in PAPER_PRESETS.items() if dataclasses.replace(make(), preset=spec.preset) == spec), "")
         if same:  # the book is on a preset: show it as that
             self.preset.blockSignals(True)
             self.preset.setCurrentIndex(self.preset.findData(same))

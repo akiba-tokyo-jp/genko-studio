@@ -51,7 +51,7 @@ python -m genko doctor ./demo.genko                   # missing assets, font, lo
 python -m genko gc ./demo.genko --dry-run             # unreferenced assets (--legacy removes the v2 pages/ folder)
 ```
 
-Files written by a newer Genko are refused; v2 projects are read and upgraded on the first save (`project.v2.bak.json` keeps the original). Pages have stable ids; page locks follow the page. Spreads follow the binding: in a right-bound book the even page is on the right. `add_stroke{space:"spread"}` takes x from the spread's left edge. Studio projects are `strict_gates`: printed layers change only after `name_ok`, `add_line` with a frame needs coordinates, and spreads must face.
+Files written by a newer Genko are refused; v2 projects are read and upgraded on the first save (`project.v2.bak.json` keeps the original). Pages have stable ids; page locks follow the page. Spreads follow the binding: in a right-bound book the even page is on the right. `add_stroke{space:"spread"}` takes x from the spread's left edge. Studio projects are `strict_gates`: printed layers change only after `name_ok` (a layer set `exportable: false` can be drawn before it, as a trial, and turned printing once the name is approved), `add_line` with a frame needs coordinates, and spreads must face.
 
 ## Actors
 
@@ -307,6 +307,8 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   balloon nearer someone else and re-aims tails at the reported faces.
 - bible@1 gains `author`, `lettering` ({speech|thought|shout|whisper|narration|sfx|title: {font, scale, weight}})
   and `props`. Defaults: shout ×1.3 bold, whisper ×0.8; no font is forced. Missing new fields are read as null.
+- name_plan@1 page `tier_gap_mm` / `col_gap_mm` set the gaps (default 7 / 3). submit_name (after commit) and inspect page
+  return `gutters` [{frame_id, index, width_mm, direction, from_mm, to_mm}] for move_gutter, which carries the lines along.
 - name_plan@1 gains page `spread` and `title`, panel `props`, `bleed`, `slant` (mm, the border to the next panel) and
   `sfx_at` ([x, y] 0..1: sound effects go there). Templates reveal_bleed, reveal_top, finale_bleed, action_slant,
   title_top (with their bleed / slant / title slot). lint: fx_unknown, unknown_prop, reveal_small, emphasis_small,

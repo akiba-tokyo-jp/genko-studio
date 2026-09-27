@@ -311,8 +311,11 @@ _ERRORS: list[tuple[str, object]] = [
     (r"a folder needs a name|a material needs a name", "名前を入れます"),
     # approvals and people (studio books)
     (r"page \d+: the name is approved.*", "このページのネームは承認済みなので、コマ割りを変えられません。変えるには承認を取り消します"),
+    (r"set_layer exportable on a drawn layer needs name_ok.*",
+     "描いてあるレイヤーを印刷に出すのは、ネームの承認の後にできます（エージェントと進める原稿）"),
     (r".*needs name_ok.*|ink strokes require name_ok|.*requires name_ok",
-     "エージェントと進める原稿では、ネームの承認の後でペン入れできます（承認の前はネームと下描きのレイヤーに描けます。一人の原稿には、この制限はありません）"),
+     "エージェントと進める原稿では、ネームの承認の後でペン入れできます（承認の前は、ネーム・下描きと、印刷に出さない"
+     "設定にしたレイヤーに描けます。一人の原稿には、この制限はありません）"),
     (r".*finish needs the art approved.*", "作画が承認されてから仕上げに進めます"),
     (r".*approve the name first.*", "先にネームの承認が要ります"),
     (r"add_line with frame_id needs explicit x_mm/y_mm.*", "コマを指定して台詞を置くときは、x_mm と y_mm も指定します"),

@@ -60,9 +60,10 @@ def _check(value: Any, schema: dict, path: str, issues: list[Issue]) -> None:
             if key not in value:
                 issues.append(error("schema_required", f"{path}/{_escape(key)}", f"{key} がない"))
         if schema.get("additionalProperties") is False:
+            allowed = "使える項目: " + ", ".join(props) if props else "この場所に項目は置けない"
             for key in value:
                 if key not in props:
-                    issues.append(error("schema_unknown_key", f"{path}/{_escape(key)}", f"{key} は定義されていない項目です"))
+                    issues.append(error("schema_unknown_key", f"{path}/{_escape(key)}", f"{key} は定義されていない項目です", allowed))
         for key, sub in props.items():
             if key in value:
                 _check(value[key], sub, f"{path}/{_escape(key)}", issues)

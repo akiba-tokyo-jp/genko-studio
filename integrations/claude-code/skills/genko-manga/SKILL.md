@@ -46,7 +46,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - `write_script`: 脚本を書いて `mcp__genko__set_script`。beat ごとに `page` を決める。見せ場（reveal）は偶数ページの先頭、引き（hook）は奇数ページの最後。
 - `plan_page`: `mcp__genko__inspect`（target `page`）でそのページの beat を読み、ネーム計画を書いて `mcp__genko__submit_name`。
   - 見せ場は大きく: めくってすぐの見せ場は `template` の `reveal_top`・`reveal_bleed`、締めのページは `finale_bleed`、動きのある場面は `action_slant`。
-  - コマの `bleed: true` で断ち切り（紙の端まで）、`slant`（mm）で次のコマとの境を斜めに。ページの `spread: true` で次のページと見開き。
+  - コマの `bleed: true` で断ち切り（紙の端まで）、`slant`（mm）で次のコマとの境を斜めに。ページの `spread: true` で次のページと見開き。コマの間の広さはページの `tier_gap_mm`（段の間、既定 7）と `col_gap_mm`（横に並ぶコマの間、既定 3）。できたあとで動かすときは inspect page の `gutters`（frame_id と index）を move_gutter に渡す。
   - 1 ページ目を扉にするなら `title: true`（`template` は `title_top` か `reveal_bleed`）。題名と作者名が入る。
   - `fx` の言葉（雨・汗・集中線・水しぶきなど。知らない言葉は警告が出る）は仕上げで Genko が描くか、絵の依頼文に入る。`emphasis` も依頼文に入る。
   - 効果音（balloon `sfx`）は、コマの `sfx_at`（音の出どころ、コマの中の 0..1 の [x, y]）の近くに置かれる。

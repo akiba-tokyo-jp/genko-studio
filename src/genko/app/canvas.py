@@ -2014,7 +2014,7 @@ def _gpu_class():
 
 
 def gpu_available() -> bool:
-    """A real screen with an OpenGL context that can be made (not the offscreen test screen), and not turned off."""
+    """Turned on by the person, on a real screen with an OpenGL context that can be made (not the offscreen test screen)."""
     from PySide6.QtGui import QGuiApplication, QOffscreenSurface, QOpenGLContext
 
     from genko.app.preferences import settings
@@ -2022,8 +2022,8 @@ def gpu_available() -> bool:
     app = QGuiApplication.instance()
     if app is None or app.platformName() in ("offscreen", "minimal", "vnc"):
         return False
-    if str(settings().value("ui/gpu", "true")).lower() in ("0", "false", "no"):
-        return False
+    if str(settings().value("ui/gpu_canvas", "false")).lower() not in ("1", "true", "yes"):  # (off unless chosen: some
+        return False  # drivers give a blank white page, e.g. older Intel graphics on Windows)
     try:
         context = QOpenGLContext()
         if not context.create():

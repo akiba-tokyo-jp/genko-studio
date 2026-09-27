@@ -151,7 +151,7 @@ def place_page(
                 )
                 continue
             box, covers_face = spot
-            if covers_face:
+            if covers_face and balloon not in ("sfx", "none"):  # (a sound or bare text over a face is the drawing's business)
                 issues.append(warning("balloon_covers_face", path, f"コマ {panel.get('slot')} で台詞が顔にかかる", "台詞を減らすか、人物の pos を変える"))
             placed.append(box)
             placements.append(

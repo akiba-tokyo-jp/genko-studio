@@ -659,6 +659,55 @@ def _prim(page, prim_id) -> dict:
     return found
 
 
+def _leaf_rects(page) -> dict[str, Rect]:
+    return {leaf.id: Rect(leaf.rect.x, leaf.rect.y, leaf.rect.width, leaf.rect.height) for leaf in page.leaf_frames()}
+
+
+def _carry_lines(episode, page, before: dict[str, Rect]) -> None:
+    """The lines go where their panels went: a line of a panel that moved or changed size (its own frame_id, or its
+    middle inside the panel's old place) keeps its place inside the panel, and so do the ends of its tails."""
+    after = {leaf.id: leaf.rect for leaf in page.leaf_frames()}
+    moved = {fid: (old, after[fid]) for fid, old in before.items() if fid in after and (
+        abs(old.x - after[fid].x) + abs(old.y - after[fid].y) + abs(old.width - after[fid].width)
+        + abs(old.height - after[fid].height)) > 1e-6}
+    if not moved:
+        return
+
+    def inside(rect, x, y) -> bool:
+        return rect.x <= x <= rect.x + rect.width and rect.y <= y <= rect.y + rect.height
+
+    def carry(point, old, new):
+        fx = (point[0] - old.x) / old.width if old.width else 0.5
+        fy = (point[1] - old.y) / old.height if old.height else 0.5
+        return new.x + fx * new.width, new.y + fy * new.height
+
+    for line in episode.story_for_page(page.index):
+        cx, cy = line.x_mm + line.w_mm / 2, line.y_mm + line.h_mm / 2
+        pair = moved.get(line.frame_id) if line.frame_id else None
+        if pair is None:
+            pair = next((p for p in moved.values() if inside(p[0], cx, cy)), None)
+        if pair is not None:
+            old, new = pair
+            nx, ny = carry((cx, cy), old, new)
+            w, h = min(line.w_mm, new.width), min(line.h_mm, new.height)  # (a smaller panel: the box stays inside)
+            line.x_mm = round(min(max(nx - w / 2, new.x), new.x + new.width - w), 3)
+            line.y_mm = round(min(max(ny - h / 2, new.y), new.y + new.height - h), 3)
+            line.w_mm, line.h_mm = round(w, 3), round(h, 3)
+        for tail in list(line.tails or []):
+            to = tail.get("to")
+            if not to:
+                continue
+            spot = next((p for p in moved.values() if inside(p[0], to[0], to[1])), None)
+            if spot is not None:
+                tail["to"] = [round(v, 3) for v in carry(to, *spot)]
+                if tail.get("via"):
+                    tail["via"] = [round(v, 3) for v in carry(tail["via"], *spot)]
+        if line.tail:
+            spot = next((p for p in moved.values() if inside(p[0], line.tail[0], line.tail[1])), None)
+            if spot is not None:
+                line.tail = tuple(round(v, 3) for v in carry(line.tail, *spot))
+
+
 def _vec3(value) -> list[float]:
     values = [float(v) for v in (list(value) + [0.0, 0.0, 0.0])[:3]]
     return [round(v, 4) for v in values]
@@ -678,7 +727,14 @@ def _in_a_panel(page, points, pad: float = 0.0) -> bool:
         steps = max(1, int(math.hypot(x1 - x0, y1 - y0)))
         dense += [(x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps) for k in range(1, steps + 1)]
     points = dense
+    from genko.placement import bleed_poly, in_poly
+
     for frame in leaves:
+        shape = bleed_poly(page, frame)
+        if shape is not None:  # (a slanted bleed panel reaches out to the bleed along its outer sides)
+            if any(in_poly(shape, x, y) for x, y in points):
+                return True
+            continue
         box = clip_box(page, frame, "bleed") if getattr(frame, "bleed", False) and not getattr(frame, "poly", None) else frame.rect
         for x, y in points:
             if not (box.x - pad <= x <= box.x + box.width + pad and box.y - pad <= y <= box.y + box.height + pad):
@@ -1279,11 +1335,13 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         node = page._find(str(op.get("frame_id") or ""))
         if not node.children:
             raise ApplyError("frame_id must be a split (the parent of the panels on both sides)")
+        before = _leaf_rects(page)
         try:
             geo.move_gutter(node, int(op.get("index", 0)), float(op.get("delta_mm", 0)),
                             None if op.get("gutter_mm") is None else float(op["gutter_mm"]))
         except ValueError as exc:
             raise ApplyError(str(exc)) from exc
+        _carry_lines(episode, page, before)
         return
 
     if name == "merge_frame":
@@ -1315,6 +1373,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         rect_raw = op.get("rect") or {}
         if not frame_id:
             raise ApplyError("frame_id is required")
+        before = _leaf_rects(page)
         page.resize_frame(
             str(frame_id),
             Rect(
@@ -1324,6 +1383,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                 float(rect_raw["height"]),
             ),
         )
+        _carry_lines(episode, page, before)
         return
 
     if name == "set_frame":
@@ -1584,7 +1644,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             target = page._layer(role)
         if getattr(target, "locked", False):
             raise ApplyError("the layer is locked")
-        if target.role == LayerRole.INK and not page.name_ok and _gated(episode):
+        if target.role == LayerRole.INK and target.exportable and not page.name_ok and _gated(episode):
             raise ApplyError("ink strokes require name_ok")
         rgb = op.get("rgb") or (episode.brush_rgb if tuple(episode.brush_rgb) != (20, 20, 20) else None)
         stroke.rgb = tuple(int(v) for v in rgb) if rgb else None
@@ -3218,9 +3278,19 @@ def _check_strict(episode: Episode, op: dict[str, Any], agent: str = LEGACY_ACTO
     if name in ("add_stroke", *RASTER_EDIT_OPS) and op.get("layer_id"):
         page = _require_page(episode, op)
         target = next((item for item in page.layers if item.id == op["layer_id"]), None)
-        if target is not None and target.role not in (LayerRole.NAME, LayerRole.DRAFT) and not page.name_ok:
+        # (a layer that is not printed — the name, a draft, or one set exportable:false — may be drawn on before the
+        # name is approved: trying a line out does not change the page)
+        if (target is not None and target.role not in (LayerRole.NAME, LayerRole.DRAFT) and target.exportable
+                and not page.name_ok):
             raise ApplyError(f"{name} on a printed layer needs name_ok on page {page.index} (strict_gates)")
         return
+    if name == "set_layer" and op.get("exportable") is True:
+        page = _require_page(episode, op)
+        key = op.get("id") or op.get("layer")
+        target = next((item for item in page.layers if item.id == key or getattr(item.role, "value", "") == key), None)
+        drawn = target is not None and (target.strokes or target.patches or target.raster_png)
+        if drawn and target.role not in (LayerRole.NAME, LayerRole.DRAFT) and not target.exportable and not page.name_ok:
+            raise ApplyError(f"set_layer exportable on a drawn layer needs name_ok on page {page.index} (strict_gates)")
     if name in RASTER_EDIT_OPS:
         layer = str(op.get("layer") or ("ink" if name != "filter_raster" else ""))
         if layer not in ("name", "draft", ""):

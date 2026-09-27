@@ -96,7 +96,7 @@ def script_index(script: dict) -> dict[str, dict]:
     return out
 
 
-def lint_name_plan(plan: dict, script: dict, bible: dict, page_count: int) -> list[Issue]:
+def lint_name_plan(plan: dict, script: dict, bible: dict, page_count: int, tall: bool = False) -> list[Issue]:
     issues: list[Issue] = []
     page = plan.get("page", 0)
     if not 1 <= page <= page_count:
@@ -150,8 +150,10 @@ def lint_name_plan(plan: dict, script: dict, bible: dict, page_count: int) -> li
 
         for fi, word in enumerate(panel.get("fx") or []):
             if fxwords.resolve(str(word)) is None:
+                listed = not any(i.code == "fx_unknown" for i in issues)  # (the list of known words once, on the first)
                 issues.append(warning("fx_unknown", f"{ppath}/fx/{fi}", f"効果の言葉「{word}」を Genko は知らない（絵の依頼文には入る。"
-                                      "仕上げで Genko は描かない）", "知っている言葉: " + "・".join(fxwords.KNOWN)))
+                                      "仕上げで Genko は描かない）",
+                                      "知っている言葉: " + "・".join(fxwords.KNOWN) if listed else "知っている言葉は最初の fx_unknown に"))
         _collect_sides(sides, panel, index)
     for bid in page_text_beats:
         if bid not in placed:
@@ -171,7 +173,7 @@ def lint_name_plan(plan: dict, script: dict, bible: dict, page_count: int) -> li
     for scene_id, positions in sides.items():
         if positions.get("_crossed"):
             issues.append(warning("axis_crossed", "/panels", f"場面 {scene_id} で人物の左右が入れ替わる（180度ルール）", "意図的なら cross:true を付ける"))
-    issues.extend(_size_hints(plan, page, page_count))
+    issues.extend(_size_hints(plan, page, page_count, tall))
     if plan.get("title"):
         if not str(bible.get("title") or "").strip():
             issues.append(warning("title_missing", "/title", "扉にするページだが、企画書に題名（title）が無い"))
@@ -254,7 +256,7 @@ def _shares(plan: dict) -> dict[str, float]:
     return out
 
 
-def _size_hints(plan: dict, page: int, page_count: int) -> list[Issue]:
+def _size_hints(plan: dict, page: int, page_count: int, tall: bool = False) -> list[Issue]:
     """Big moments in small panels: the reveal after a page turn, a panel of high emphasis, the book's last panel."""
     from genko.studio.layout import slots_in_order, resolve_tiers, LayoutError
 
@@ -278,7 +280,7 @@ def _size_hints(plan: dict, page: int, page_count: int) -> list[Issue]:
         if weight >= 0.8 and shares.get(slot, 1) < 0.3:
             out.append(warning("emphasis_small", f"/panels/{i}/emphasis", f"強調の高いコマ {slot} がページの3割より小さい",
                                "大きい段に置くか、bleed（断ち切り）や slant（斜め）で目立たせる"))
-    if page == page_count and order:
+    if page == page_count and order and not tall:  # (a tall strip ends by scrolling, not with a page's last panel)
         last = order[-1]
         panel = (panels.get(last) or (None, {}))[1]
         template_bleed = last in (_template(plan).get("bleed") or [])

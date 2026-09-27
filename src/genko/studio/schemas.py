@@ -167,6 +167,8 @@ NAME_PLAN_V1 = more(obj(
 ),
     spread=nullable(BOOL),  # (見開き: this page and the next are drawn as one picture)
     title=nullable(BOOL),  # (the page's first tier makes room for the title and the author's name)
+    tier_gap_mm=nullable(NUM),  # (the gap between tiers and between rows; unset: 7 mm)
+    col_gap_mm=nullable(NUM),  # (the gap between panels side by side; unset: 3 mm)
 )
 
 SCHEMAS = {"bible@1": BIBLE_V1, "script@1": SCRIPT_V1, "name_plan@1": NAME_PLAN_V1}

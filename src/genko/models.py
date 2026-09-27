@@ -124,11 +124,11 @@ class PageSpec:
     @staticmethod
     def a4_mono() -> PageSpec:
         """An A4 sheet for practice: the whole sheet is the page (bleed 3, 10 mm margins)."""
-        return PageSpec(210, 297, 600, 3, 10, "mono")
+        return PageSpec(210, 297, 600, 3, 10, "mono", preset="a4-mono")
 
     @staticmethod
     def webtoon() -> PageSpec:
-        return PageSpec(80, 400, 300, 0, 4, "color")
+        return PageSpec(80, 400, 300, 0, 4, "color", preset="webtoon")
 
     @staticmethod
     def custom(paper_w: float, paper_h: float, trim_w: float, trim_h: float, bleed: float, top: float, bottom: float,

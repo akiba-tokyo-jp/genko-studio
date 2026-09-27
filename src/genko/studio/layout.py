@@ -168,22 +168,23 @@ def apply_layout(episode: Episode, page_index: int, plan: dict, *, agent: str = 
             return leaf(cols[0]) if len(cols) == 1 else None
         return None if part.get("rows") else part.get("slot")
 
+    tier_gap, col_gap = _gap(plan, "tier_gap_mm", TIER_GUTTER_MM), _gap(plan, "col_gap_mm", COL_GUTTER_MM)
     out = CompiledLayout()
     tier_ids = _split_sequence(
-        episode, page_index, page.frames[0].id, [t["h"] for t in tiers], "horizontal", TIER_GUTTER_MM, agent, out, base,
+        episode, page_index, page.frames[0].id, [t["h"] for t in tiers], "horizontal", tier_gap, agent, out, base,
         [slants.get(leaf(t) or "", 0.0) for t in tiers],
     )
     for ti, (tier, tier_id) in enumerate(zip(tiers, tier_ids)):
         cols = tier["cols"]
         col_ids = _split_sequence(
-            episode, page_index, tier_id, [c["w"] for c in cols], "vertical", COL_GUTTER_MM, agent, out, f"{base}/{ti}/cols",
+            episode, page_index, tier_id, [c["w"] for c in cols], "vertical", col_gap, agent, out, f"{base}/{ti}/cols",
             [slants.get(leaf(c) or "", 0.0) for c in cols],
         )
         for ci, (col, col_id) in enumerate(zip(cols, col_ids)):
             rows = col.get("rows")
             if rows:
                 row_ids = _split_sequence(
-                    episode, page_index, col_id, [r["h"] for r in rows], "horizontal", TIER_GUTTER_MM, agent, out,
+                    episode, page_index, col_id, [r["h"] for r in rows], "horizontal", tier_gap, agent, out,
                     f"{base}/{ti}/cols/{ci}/rows", [slants.get(r.get("slot") or "", 0.0) for r in rows],
                 )
                 for row, frame_id in zip(rows, row_ids):
@@ -208,6 +209,15 @@ def apply_layout(episode: Episode, page_index: int, plan: dict, *, agent: str = 
         r = frame.rect
         out.leaf_rects_mm[slot] = (round(r.x, 3), round(r.y, 3), round(r.width, 3), round(r.height, 3))
     return out
+
+
+def _gap(plan: dict, key: str, default: float) -> float:
+    value = plan.get(key)
+    if value is None:
+        return default
+    if not 0 <= float(value) <= 100:
+        raise LayoutError(f"/{key}", f"{key} は 0〜100 mm")
+    return float(value)
 
 
 def _split_sequence(
