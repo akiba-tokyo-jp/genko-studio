@@ -1,6 +1,7 @@
 """F6: the missing features — layers (duplicate, merge down, draft, mask, colour, small pictures), free
 transform, brushes of one's own, export ranges and checks, history, help and preferences."""
 
+import re
 import os
 import sys
 from pathlib import Path
@@ -387,7 +388,7 @@ def test_the_history_names_each_change_and_goes_back_to_it(window):
     panel = window.history
     window.act_history.trigger()
     panel.refresh()
-    texts = [panel.list.item(i).text() for i in range(panel.list.count())]
+    texts = [re.sub(r"　(\d\d/\d\d )?\d\d:\d\d$", "", panel.list.item(i).text()) for i in range(panel.list.count())]  # (no time)
     assert texts[-3:] == ["ペンで描いた", "台詞を入れた", "▶ コマを割った"]
     strokes = len(_layer(window.episode, ink.id).strokes)
     # back to just after the pen line
@@ -395,7 +396,7 @@ def test_the_history_names_each_change_and_goes_back_to_it(window):
     panel._go(panel.list.item(row))
     assert not window.episode.story_for_page(1) and len(window.current_page().frames[0].children) == 0
     assert len(_layer(window.episode, ink.id).strokes) == strokes
-    texts = [panel.list.item(i).text() for i in range(panel.list.count())]
+    texts = [re.sub(r"　(\d\d/\d\d )?\d\d:\d\d$", "", panel.list.item(i).text()) for i in range(panel.list.count())]  # (no time)
     assert texts[row] == "▶ ペンで描いた" and texts[-1] == "コマを割った（戻した操作）"
     # forward again
     panel._go(panel.list.item(panel.list.count() - 1))

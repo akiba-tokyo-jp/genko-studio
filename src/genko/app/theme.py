@@ -248,10 +248,9 @@ QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     selection-background-color: {t.accent}; selection-color: {t.accent_text}; }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {t.accent}; }}
 QComboBox::drop-down {{ border: none; width: 18px; }}
-QSpinBox, QDoubleSpinBox {{ padding-right: 18px; }}
-QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: border; subcontrol-position: top right; width: 18px;
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: border; subcontrol-position: top right; width: 16px;
     border: none; border-left: 1px solid {t.divider}; border-top-right-radius: 4px; background: transparent; }}
-QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: border; subcontrol-position: bottom right; width: 18px;
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: border; subcontrol-position: bottom right; width: 16px;
     border: none; border-left: 1px solid {t.divider}; border-bottom-right-radius: 4px; background: transparent; }}
 QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
     background: {t.hover}; }}
@@ -265,9 +264,9 @@ QListWidget::item, QTreeWidget::item {{ padding: 3px 4px; border-radius: 4px; }}
 QListWidget::item:hover, QTreeWidget::item:hover {{ background: {t.hover}; }}
 QListWidget::item:selected, QTreeWidget::item:selected {{ background: {t.selected}; color: {t.text}; }}
 QHeaderView::section {{ background: {t.panel}; color: {t.muted}; border: none; border-bottom: 1px solid {t.divider}; padding: 3px 6px; }}
-QScrollBar:vertical {{ background: transparent; width: 12px; margin: 1px; }}
-QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 1px; }}
-QScrollBar::handle {{ background: {t.border}; border-radius: 4px; min-height: 24px; min-width: 24px; margin: 2px; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
+QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 0; }}
+QScrollBar::handle {{ background: {t.border}; border-radius: 4px; min-height: 24px; min-width: 24px; margin: 1px; }}
 QScrollBar::handle:hover {{ background: {t.muted}; }}
 QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{ background: none; width: 0; height: 0; }}
 QSlider::groove:horizontal {{ height: 4px; background: {t.border}; border-radius: 2px; }}
@@ -308,6 +307,7 @@ QDialog[glass="true"] {{ background: {_rgba(t.window, 0.7)}; }}
 QFrame#dialogCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 8px; }}
 QWidget#dialogFooter {{ border-top: 1px solid {t.divider}; }}
 QWidget#launcher {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; }}
+QWidget#firstSteps {{ background: {t.panel}; border-bottom: 1px solid {t.divider}; }}
 QWidget#startCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 8px; }}
 """
 

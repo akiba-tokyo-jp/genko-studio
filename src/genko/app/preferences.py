@@ -90,13 +90,18 @@ def name_commands(window) -> None:
         if text and not action.isSeparator() and not action.menu() and not action.objectName():
             action.setObjectName(f"cmd:{text}")
             window.default_shortcuts[text] = [QKeySequence(k) for k in action.shortcuts()]
-    retip(window)
+
+
+RENAMED = {"レイヤーを消す": "レイヤーを削除", "このページを消す…": "このページを削除…"}  # (new name: old name)
 
 
 def apply_shortcuts(window) -> None:
     store = settings()
     for action in _commands(window):
         key = f"shortcuts/{action.text()}"
+        old = RENAMED.get(action.text())
+        if not store.contains(key) and old and store.contains(f"shortcuts/{old}"):  # (keys chosen under the old name)
+            key = f"shortcuts/{old}"
         if store.contains(key):
             value = str(store.value(key) or "")
             action.setShortcuts([QKeySequence(v) for v in value.split("|") if v] if value else [])
@@ -305,7 +310,7 @@ class PreferencesDialog(QDialog):
         self.rest.setCurrentIndex(max(0, self.rest.findData(int(settings().value("ui/rest_minutes", 0) or 0))))
         self.rest.setToolTip("作業を続けた時間（手を止めていた時間は数えない）で、目を休める頃を知らせます")
         self.requests = QCheckBox("承認の依頼が届いたら、承認箱を前に出す")
-        self.requests.setToolTip("エージェントから承認の依頼や相談が届いたとき")
+        self.requests.setToolTip("AI から承認の依頼や相談が届いたとき")
         self.requests.setChecked(comfort.raise_requests())
         self.gpu = QCheckBox("原稿の表示にグラフィックボードを使う")
         self.gpu.setChecked(str(settings().value("ui/gpu_canvas", "false")).lower() in ("1", "true", "yes"))

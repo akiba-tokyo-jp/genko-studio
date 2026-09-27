@@ -67,9 +67,10 @@ def timeline(session) -> tuple[list[dict], list[dict]]:
         for item in undo_stack:
             if item.get("before") is None:
                 continue  # the book being made: nothing before it to go back to
-            done.append({"label": describe(item.get("ops") or []), "actor": item.get("actor", ""), "saved": True})
-        disk_redo = [{"label": describe(item.get("ops") or []), "actor": item.get("actor", ""), "saved": True}
-                     for item in reversed(redo_stack)]
+            done.append({"label": describe(item.get("ops") or []), "actor": item.get("actor", ""), "saved": True,
+                         "at": item.get("at")})
+        disk_redo = [{"label": describe(item.get("ops") or []), "actor": item.get("actor", ""), "saved": True,
+                      "at": item.get("at")} for item in reversed(redo_stack)]
     else:
         disk_redo = []
     for batch in session.pending:
@@ -78,6 +79,17 @@ def timeline(session) -> tuple[list[dict], list[dict]]:
         later.append({"label": describe(batch), "actor": session.actor, "saved": False})
     later.extend(disk_redo)
     return done, later
+
+
+def _when(at) -> str:
+    """The time of a saved change (today: hours and minutes; before: the date too); nothing for unsaved ones."""
+    if not at:
+        return ""
+    import datetime
+
+    moment = datetime.datetime.fromtimestamp(float(at))
+    today = datetime.date.today() == moment.date()
+    return moment.strftime("　%H:%M" if today else "　%m/%d %H:%M")
 
 
 class HistoryPanel(QWidget):
@@ -104,11 +116,11 @@ class HistoryPanel(QWidget):
         me = self.window.session.actor
         for n, entry in enumerate(done, 1):
             who = "" if not entry["actor"] or entry["actor"] == me else f"　〔{entry['actor'].split(':')[-1]}〕"
-            item = QListWidgetItem(f"{entry['label']}{who}")
+            item = QListWidgetItem(f"{entry['label']}{who}{_when(entry.get('at'))}")
             item.setData(Qt.ItemDataRole.UserRole, n)
             self.list.addItem(item)
         for n, entry in enumerate(later, len(done) + 1):
-            item = QListWidgetItem(f"{entry['label']}（戻した操作）")
+            item = QListWidgetItem(f"{entry['label']}（戻した操作）{_when(entry.get('at'))}")
             item.setForeground(QColor(theme.tokens().faint))
             item.setData(Qt.ItemDataRole.UserRole, n)
             self.list.addItem(item)

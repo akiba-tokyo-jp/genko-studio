@@ -250,18 +250,28 @@ class StartDialog(QDialog):
         self.resize(860, 560)
         name = QLabel("Genko Studio")
         theme.role(name, "title")
-        lead = theme.role(QLabel("漫画原稿の編集と、エージェントが出した承認依頼の確認をします。"), "hint")
+        lead = theme.role(QLabel("漫画の原稿を作るアプリです。自分で描くことも、AI に描いてもらって確かめ・直すこともできます。"), "hint")
         lead.setWordWrap(True)
         new_button = theme.primary(theme.iconic(QPushButton("新しい原稿を作る…"), "page"))
         new_button.clicked.connect(self._new)
         browse = theme.iconic(QPushButton("ほかの原稿を開く…"), "open")
         browse.clicked.connect(self._browse)
+        ai_steps = theme.role(QLabel("1. AI（Claude など）をつなぐ\n2. 作りたい話を AI に伝える\n3. 届いた承認依頼を確かめて決める"), "hint")
+        ai_steps.setWordWrap(True)
+        ai_button = theme.iconic(QPushButton("AI をつなぐ…"), "settings")
+        ai_button.setToolTip("AI の設定に貼る文（このパソコンの場所入り）と、最初に頼むことを出します")
+        ai_button.clicked.connect(self._ai)
         side = QVBoxLayout()
         side.addWidget(name)
         side.addWidget(lead)
-        side.addSpacing(18)
+        side.addSpacing(14)
+        side.addWidget(theme.role(QLabel("自分で描く"), "section"))
         side.addWidget(new_button)
         side.addWidget(browse)
+        side.addSpacing(14)
+        side.addWidget(theme.role(QLabel("AI と作る"), "section"))
+        side.addWidget(ai_steps)
+        side.addWidget(ai_button)
         side.addStretch(1)
         self.list = QListWidget()
         self.list.setViewMode(QListWidget.ViewMode.IconMode)
@@ -281,7 +291,8 @@ class StartDialog(QDialog):
         if self.list.count():
             self.list.setCurrentRow(0)
         self.list.itemActivated.connect(lambda item: self._pick(Path(item.data(Qt.ItemDataRole.UserRole))))
-        empty = theme.role(QLabel("最近開いた原稿はまだありません。\n左の「新しい原稿を作る」から始めます。"), "empty")
+        empty = theme.role(QLabel("最近開いた原稿はまだありません。\n自分で描くなら「新しい原稿を作る」、"
+                                  "AI に頼むなら「AI をつなぐ」から始めます。"), "empty")
         empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty.setVisible(self.list.count() == 0)
         self.list.setVisible(self.list.count() > 0)
@@ -335,6 +346,11 @@ class StartDialog(QDialog):
         dialog = NewProjectDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.created:
             self._pick(dialog.created)
+
+    def _ai(self) -> None:
+        from genko.app.ai_link import AiDialog
+
+        AiDialog(self).exec()
 
 
 # --- new manuscript -------------------------------------------------------------------------------

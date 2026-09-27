@@ -79,7 +79,7 @@ def test_errors_and_labels_are_in_plain_japanese():
     assert wording.error("page 2 locked by ai:hermes") == "2 ページは ai:hermes が作業中です"
     assert wording.error("no page 9") == "9 ページはありません"
     assert wording.error("something new").startswith("この操作はできませんでした")
-    assert wording.actor("ai:hermes") == "エージェント（hermes）" and wording.actor("human:leaf") == "leaf"
+    assert wording.actor("ai:hermes") == "AI（hermes）" and wording.actor("human:leaf") == "leaf"
     ep = new_episode("t", 1, 1, PageSpec.a4_mono())
     labels = [wording.layer_label(layer) for layer in ep.pages[0].layers]
     assert "ネーム" in labels and "ペン入れ" in labels
@@ -150,7 +150,8 @@ def test_the_window_fits_a_laptop_screen_and_the_page_fits_the_view(qapp, tmp_pa
     window.act_fit.trigger()
     assert canvas._scale == pytest.approx(before) and canvas._fitted
     # the status says where you are, in words
-    assert "ページ" in window.status.text() and "leaf" in window.status.text() and "stage=" not in window.status.text()
+    assert "ページ" in window.status.text() and "stage=" not in window.status.text()
+    assert "leaf" not in window.status.text()  # (the computer's user name is not shown: U-21)
     assert "ネーム" in window.pages.item(0).text()
     window.close()
 
@@ -234,7 +235,7 @@ def test_approval_box_follows_the_page_and_opens_a_large_view(qapp, tmp_path: Pa
     art_row = next(i for i, item in enumerate(box.items) if item.gate == "art")
     box.list.setCurrentRow(art_row)
     qapp.processEvents()
-    assert window.current_page().index == 1 and "エージェント" in box.detail.text()
+    assert window.current_page().index == 1 and "AI" in box.detail.text()
     shown = {}
 
     def fake_exec(self):
@@ -327,7 +328,7 @@ def test_review_page_reads_on_a_phone_and_points_to_the_app(tmp_path: Path):
     page = Path(result.data["path"]).read_text(encoding="utf-8")
     assert "name='viewport'" in page and "承認箱" in page and "human:名前" not in page
     assert "<details class='cmd'>" in page and "あなたを待っているもの" in page
-    assert "作画の承認（1 ページ）" in page and "エージェント（test）" in page
+    assert "作画の承認（1 ページ）" in page and "AI（test）" in page
 
 
 def test_approving_from_the_shell_needs_no_as(tmp_path: Path, capsys):

@@ -97,7 +97,7 @@ class StoryPanel(QWidget):
         self.apply_button = QPushButton("台詞を直す")
         self.apply_button.setToolTip("選んだ台詞を、上の欄の言葉・話者・形に直します")
         self.apply_button.clicked.connect(self.apply_edit)
-        self.delete_button = theme.iconic(QPushButton("削除"), "delete")
+        self.delete_button = theme.iconic(QPushButton("消す"), "delete")
         self.delete_button.clicked.connect(self.delete)
         # lettering style of the selected line (applied at once)
         self.font = QComboBox()
@@ -187,7 +187,7 @@ class StoryPanel(QWidget):
             theme.iconic(button, {up: "up", down: "down"}.get(button, "delete"), "")
             button.setFixedSize(28, 26)
             button.setProperty("iconbtn", True)
-        self.delete_button.setToolTip("選んだ台詞を削除")
+        self.delete_button.setToolTip("選んだ台詞を消す")
         order = QHBoxLayout()
         order.setSpacing(2)
         heading = QLabel("台詞（読み順）")
@@ -199,7 +199,8 @@ class StoryPanel(QWidget):
         row = QHBoxLayout()
         row.addWidget(self.kind, 1)
         row.addWidget(self.vertical)
-        theme.primary(add)
+        self.add_button = add
+        self.text.textChanged.connect(self._main_button)  # (the accent only once there are words to add)
         buttons = QHBoxLayout()
         buttons.addWidget(add, 1)
         buttons.addWidget(self.apply_button, 1)
@@ -283,12 +284,18 @@ class StoryPanel(QWidget):
         for n, line in enumerate(self._lines(), 1):
             who = f"{line.speaker}: " if line.speaker else ""
             kind = KIND_LABEL.get(line.balloon, line.balloon)
-            self.list.addItem(f"{n}. {who}{line.text.replace(chr(10), ' ')}　〔{kind}〕")
+            words = line.text.replace(chr(10), " ")
+            item = QListWidgetItem(f"{n}.〔{kind.split('（')[0]}〕{who}{words}")  # (the kind first: a long line is cut
+            item.setToolTip(f"{who}{words}\n{kind}")  # at its end, not its kind)
+            self.list.addItem(item)
             self.line_ids.append(line.id)
         row = self.line_ids.index(current) if current in self.line_ids else -1
         self.list.setCurrentRow(row)
         self.list.blockSignals(False)
         self._picked()
+
+    def _main_button(self) -> None:
+        theme.role_prop(self.add_button, "primary", bool(self.text.toPlainText().strip()) and self.current_id() is None)
 
     def current_id(self) -> str | None:
         row = self.list.currentRow()
@@ -305,6 +312,8 @@ class StoryPanel(QWidget):
         line = self._line()
         for widget in (self.apply_button, self.delete_button):
             widget.setEnabled(line is not None)
+        theme.role_prop(self.apply_button, "primary", line is not None)
+        self._main_button()
         self.style_body.setVisible(line is not None)
         theme.role(self.style_title, "heading" if line is not None else "hint")
         self.style_title.setText(f"選んだ台詞の文字とフキダシ: 「{line.text[:12]}{'…' if len(line.text) > 12 else ''}」"
@@ -631,7 +640,7 @@ class LayerPanel(QWidget):
         down = QPushButton("↓")
         down.setToolTip("後ろへ")
         down.clicked.connect(lambda: self._move(-1))
-        delete = theme.iconic(QPushButton("削除"), "delete")
+        delete = theme.iconic(QPushButton("消す"), "delete")
         delete.clicked.connect(self._delete)
         duplicate = QPushButton("複製")
         duplicate.setToolTip("選んだレイヤーの写しを、すぐ上に作ります")
@@ -684,7 +693,7 @@ class LayerPanel(QWidget):
                     (add_special, "add", "塗り・グラデーション・色調補正のレイヤーを足す"),
                     (duplicate, "duplicate", "選んだレイヤーを複製"), (merge, "merge", "下のレイヤーと結合"),
                     (several, "more", "まとめて: 選んだレイヤーの結合・フォルダにまとめる・変換など"),
-                    (up, "up", "選んだレイヤーを上へ"), (down, "down", "選んだレイヤーを下へ"), (delete, "delete", "選んだレイヤーを削除"))
+                    (up, "up", "選んだレイヤーを上へ"), (down, "down", "選んだレイヤーを下へ"), (delete, "delete", "選んだレイヤーを消す"))
         for i, (button, name, tip) in enumerate(pictures):
             theme.iconic(button, name, "", tip)
             button.setFixedSize(30, 28)
@@ -961,7 +970,7 @@ class LayerPanel(QWidget):
         page, layer = self._layer()
         if layer is None:
             return
-        if QMessageBox.question(self, "Genko", f"レイヤー「{wording.layer_label(layer)}」を削除しますか？\n（元に戻す で取り消せます）") \
+        if QMessageBox.question(self, "Genko", f"レイヤー「{wording.layer_label(layer)}」を消しますか？\n（元に戻す で取り消せます）") \
                 != QMessageBox.StandardButton.Yes:
             return
         self.window.apply_ops([{"op": "delete_layer", "page": page.index, "id": layer.id}])
@@ -1377,6 +1386,8 @@ class MainWindow(QMainWindow):
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
         column.addWidget(self.doc_tabs)
+        self.first_steps = None  # (made when a book with nothing in it is in front: most books never need it)
+        self._column = column
         column.addWidget(self.canvas, 1)
         self.setCentralWidget(central)
 
@@ -1600,7 +1611,7 @@ class MainWindow(QMainWindow):
         result = self.session.commit()
         if result.conflicts:
             lines = [f"・{wording.error(c['error'])}" for c in result.conflicts[:8]]
-            self.flash("エージェントの変更と重なったため、次の操作は入りませんでした:\n" + "\n".join(lines), 6000)
+            self.flash("AI の変更と重なったため、次の操作は入りませんでした:\n" + "\n".join(lines), 6000)
         self._watch()
         if result.rebased or result.conflicts:
             self._reload_pages()  # someone else's changes came in
@@ -1625,10 +1636,11 @@ class MainWindow(QMainWindow):
         before = comfort.request_ids(self)
         result = self.session.sync()
         if result.conflicts:
-            self.flash(f"エージェントの変更と重なった操作が {len(result.conflicts)} 件あり、入りませんでした", 6000)
+            self.flash(f"AI の変更と重なった操作が {len(result.conflicts)} 件あり、入りませんでした", 6000)
         self._reload_pages()
         self._tell_others()
         comfort.notice_requests(self, before)
+        self._refresh_ai()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         from genko.app import documents
@@ -1657,6 +1669,7 @@ class MainWindow(QMainWindow):
         a = self._action
         self.act_new = a("新しい原稿…", self._new, std.New)
         self.act_open = a("開く…", self._open, std.Open)
+        self.act_ai = a("AI と作る…", self._ai_dialog, tip="Claude などの AI をつなぐ設定・この原稿で動いた AI・最初に頼むこと")
         self.act_save = a("保存", self._save, std.Save, "変更は自動で保存されます。今すぐ書き込むときに使います")
         self.act_save_as = a("別の場所に保存…", self._save_as, std.SaveAs)
         self.act_export = a("書き出し…", self._export, "Ctrl+E", "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します")
@@ -1865,7 +1878,7 @@ class MainWindow(QMainWindow):
                                    checkable=True)
         self.act_template = a("テンプレートでコマを割る…", self._templates, tip="今のページのコマと台詞を作り直します")
         self.act_add_page = a("ページを追加（この後ろに）", self._add_page)
-        self.act_del_page = a("このページを削除…", self._del_page)
+        self.act_del_page = a("このページを消す…", self._del_page)
         self.act_dup_page = a("このページを複製", lambda: self._current() and self.duplicate_page(self._current().index))
         self.act_page_up = a("このページを前へ", lambda: self._current() and self.pages.move_page(self._current().index, -1), "Ctrl+Shift+Up")
         self.act_page_down = a("このページを後ろへ", lambda: self._current() and self.pages.move_page(self._current().index, 1),
@@ -1884,7 +1897,7 @@ class MainWindow(QMainWindow):
                               tip="このページを短いアニメーションにします: セル・タイムライン・オニオンスキン・カメラワーク・書き出し")
         self.act_assignee = a("このページの担当…", self._assignee_dialog, tip="ページを誰が描くかを決めます（ページ一覧に出ます）")
         self.act_checks = a("入稿前の点検", self._run_checks, "F9", "はみ出し・文字の重なりや小ささ・解像度などを探します")
-        self.act_name_ok = a("ネーム完了 → 作画へ進む", self._name_ok, tip="承認の要らない原稿（エージェントを使わない原稿）で使います")
+        self.act_name_ok = a("ネーム完了 → 作画へ進む", self._name_ok, tip="承認の要らない原稿（AI を使わない原稿）で使います")
 
         # layers and lines get their own menus too (not only their panels)
         L = lambda method: (lambda *_: getattr(self.layers, method)())  # noqa: E731
@@ -1893,7 +1906,7 @@ class MainWindow(QMainWindow):
         self.act_layer_folder = a("新しいフォルダ", lambda: self.layers._add("folder", "フォルダ"))
         self.act_layer_dup = a("レイヤーを複製", L("_duplicate"), "Ctrl+J")
         self.act_layer_merge = a("下のレイヤーと結合", L("_merge_down"), "Ctrl+Shift+E")
-        self.act_layer_delete = a("レイヤーを削除", L("_delete"))
+        self.act_layer_delete = a("レイヤーを消す", L("_delete"))
         self.act_layer_up = a("レイヤーを前へ", lambda: self.layers._move(1), "Ctrl+]")
         self.act_layer_down = a("レイヤーを後ろへ", lambda: self.layers._move(-1), "Ctrl+[")
         self.act_layer_draft = a("下描きにする（書き出さない）／戻す", lambda: self.layers.draft.click())
@@ -1915,7 +1928,7 @@ class MainWindow(QMainWindow):
 
         bar = self.menuBar()
         menus = [
-            ("ファイル", [self.act_new, self.act_open, "recent", None, self.act_save, self.act_save_as, None, self.act_import,
+            ("ファイル", [self.act_new, self.act_open, "recent", None, self.act_ai, None, self.act_save, self.act_save_as, None, self.act_import,
                          self.act_import_psd, self.act_export, self.act_print, None, self.act_timelapse, self.act_timelapse_export, None, "actions", None, self.act_prefs, None, self.act_close, self.act_quit]),
             ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste,
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
@@ -2324,6 +2337,16 @@ class MainWindow(QMainWindow):
     def _build_studio(self) -> None:
         from genko.app.tool_settings import TextToolSettings, ToolSettings, action_page, fit_narrow, menu_button
 
+        self.ai_button = QPushButton("AI と作る")
+        theme.role_prop(self.ai_button, "quiet", True)
+        self.ai_button.setFlat(True)
+        self.ai_button.setToolTip("AI（Claude など）をつなぐ・この原稿で動いた AI を見る")
+        self.ai_button.clicked.connect(self._ai_dialog)
+        self.statusBar().addPermanentWidget(self.ai_button)
+        self._ai_timer = QTimer(self)
+        self._ai_timer.setInterval(30_000)  # (the minutes since the AI last wrote)
+        self._ai_timer.timeout.connect(self._refresh_ai)
+        self._ai_timer.start()
         self.process = ProcessBar()
         self.statusBar().addPermanentWidget(self.process)
         self.statusBar().addPermanentWidget(self.zoom_label)
@@ -2611,6 +2634,8 @@ class MainWindow(QMainWindow):
         nav_dock.raise_()
         self.view_menu.addAction(timeline_dock.toggleViewAction())
         self.timeline_dock = timeline_dock
+        for dock in (nav_dock, quick_dock, sub_dock, timeline_dock):  # (their tab names them: no second title above)
+            dock.setTitleBarWidget(QWidget())
         for dock in (sub_dock, timeline_dock):  # (for some work only: ウィンドウ brings them; the tabs fit without them)
             dock.hide()
         self.brush_dock = settings_dock
@@ -2643,18 +2668,18 @@ class MainWindow(QMainWindow):
             dock.setMinimumWidth(SIDE_WIDTH)
             dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
             dock.setTitleBarWidget(QWidget())  # the tab already names it; the room goes to the panel
-            area = Qt.DockWidgetArea.LeftDockWidgetArea if group == "agent" else Qt.DockWidgetArea.RightDockWidgetArea
-            self.addDockWidget(area, dock)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
             self.view_menu.addAction(dock.toggleViewAction())
             dock.visibilityChanged.connect(lambda shown, d=dock: shown and d in self._stale_docks and self._refresh_dock(d))
             docks.append(dock)
             groups[group].append(dock)
             if group == "agent":
                 self.agent_docks.append(dock)
-        # two stacks on the right (pages and layers above, the lettering and the other panels below); the
-        # agent's panels sit under the tool settings on the left, only for books made with agents
+        # the right column: the approval box on top (only for books made with agents: what waits for the person is
+        # always in sight), then pages and layers, then the lettering and the other panels; the left column keeps
+        # the tool settings and the overview for every book
+        self.splitDockWidget(groups["agent"][0], groups["upper"][0], Qt.Orientation.Vertical)
         self.splitDockWidget(groups["upper"][0], groups["lower"][0], Qt.Orientation.Vertical)
-        self.splitDockWidget(settings_dock, groups["agent"][0], Qt.Orientation.Vertical)
         for group in groups.values():
             for other in group[1:]:
                 self.tabifyDockWidget(group[0], other)
@@ -2665,6 +2690,26 @@ class MainWindow(QMainWindow):
             fit_narrow(dock.widget())
         self._agent_view(self._agent_book())
         self.resizeDocks([docks[1], settings_dock], [SIDE_WIDTH, SIDE_WIDTH], Qt.Orientation.Horizontal)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._fit_tools)  # (after the palette has its new height)
+
+    def _fit_tools(self) -> None:
+        """Every tool within reach on a short screen (1366×768): the palette's pictures shrink to fit its height,
+        down to 16 px, instead of hiding the last tools behind the palette's » button."""
+        palette = getattr(self, "tool_palette", None)
+        if palette is None or palette.toolButtonStyle() != Qt.ToolButtonStyle.ToolButtonIconOnly:
+            return
+        tools = [a for a in palette.actions() if not a.isSeparator() and a.isVisible()]
+        if not tools:
+            return
+        for size in range(24, 15, -1):  # (the largest pictures that let the last tool show)
+            palette.setIconSize(QSize(size, size))
+            palette.layout().activate()
+            last = palette.widgetForAction(tools[-1])
+            if last is not None and last.isVisibleTo(palette):
+                return
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -2708,10 +2753,6 @@ class MainWindow(QMainWindow):
             dock.toggleViewAction().setVisible(on)
         self.process.setVisible(on)
         self.act_name_ok.setVisible(on)  # (stages and their approvals are for books made with agents)
-        if hasattr(self, "navigator_dock"):
-            self.navigator_dock.setVisible(not on)  # (the approval box needs the room; ウィンドウ → 全体図 brings it back)
-        if on:
-            self.resizeDocks([self.brush_dock, self.agent_docks[0]], [1, 1], Qt.Orientation.Vertical)
         if self.isVisible():
             QTimer.singleShot(0, self._settle_docks)
 
@@ -2720,8 +2761,13 @@ class MainWindow(QMainWindow):
         stack (the lines, the materials) gets the larger share of the height."""
         upper = next((d for d in self.studio_docks if d.windowTitle() == "レイヤー"), None)
         lower = next((d for d in self.studio_docks if d.windowTitle() == "台詞"), None)
+        box = next((d for d in self.studio_docks if d.windowTitle() == "承認箱"), None)
         if upper is not None and lower is not None:
-            self.resizeDocks([upper, lower], [2, 3], Qt.Orientation.Vertical)
+            if box is not None and box.isVisible():  # (the approval box: room for its list and one request's words)
+                self.resizeDocks([box, upper, lower], [max(170, self.height() // 5), 3 * self.height() // 10,
+                                                       2 * self.height() // 5], Qt.Orientation.Vertical)
+            else:
+                self.resizeDocks([upper, lower], [2, 3], Qt.Orientation.Vertical)
         if hasattr(self, "navigator_dock"):  # the navigator stays small under the tool settings
             self.resizeDocks([self.brush_dock, self.navigator_dock], [max(300, self.height() - 330), 170], Qt.Orientation.Vertical)
         for dock in self.studio_docks:
@@ -2811,7 +2857,7 @@ class MainWindow(QMainWindow):
         if page.name_ok:
             name = "ネーム ✓"
         elif page.plan and page.plan.get("name"):
-            name = "ネーム 確認待ち"
+            name = "ネーム 承認待ち"
         else:
             name = "ネーム"
         art = " / 作画 ✓" if page.art_ok else (" / 作画中" if page.name_ok else "")
@@ -3013,10 +3059,14 @@ class MainWindow(QMainWindow):
             selected = f" ・ 選択中: {order} コマ目" if order else ""
         if self._agent_book():
             self.status.setText(f"{page.index} ページ（{wording.STAGE.get(page.stage, page.stage)}） ・ コマ {len(page.leaf_frames())}"
-                                f"{selected} ・ {saved} ・ {wording.actor(self.session.actor)}")
+                                f"{selected} ・ {saved}")
         else:
             self.status.setText(f"{page.index} / {len(self.episode.pages)} ページ ・ コマ {len(page.leaf_frames())} 個{selected} ・ {saved}")
         self._refresh_zoom()
+        self._refresh_first_steps()
+        if getattr(self, "_ai_for", None) != self.path:  # (another book in front: its AIs)
+            self._ai_for = self.path
+            self._refresh_ai()
 
     def flash(self, message: str, ms: int = 3000, error: bool = False) -> None:
         """A notice in the status line that never stops the work (it goes back to the page's status after
@@ -3226,7 +3276,7 @@ class MainWindow(QMainWindow):
 
             self.help_dialog = helps.show(self, "Genko Studio について",
                                           f"<h2>Genko Studio</h2><p>版 {__version__}</p><p>マンガの原稿を、ネームから入稿まで描く道具。"
-                                          "エージェント（AI）と分担して進めることもできます。</p>")
+                                          "AIと分担して進めることもできます。</p>")
 
     def _fill_recent(self) -> None:
         self.recent_menu.clear()
@@ -4372,7 +4422,7 @@ class MainWindow(QMainWindow):
         if style_of(line).get("text_path"):
             paths.addAction("パスから外す", lambda: self.apply_ops([{"op": "edit_line", "id": line_id, "style": {"text_path": None}}]))
         menu.addSeparator()
-        delete = menu.addAction("削除")
+        delete = menu.addAction("消す")
         delete.triggered.connect(lambda: self.apply_ops([{"op": "delete_line", "id": line_id}]))
         menu.exec(pos.toPoint())
 
@@ -4485,11 +4535,32 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_split_v)
             menu.addAction(self.act_merge)
             menu.addSeparator()
-            show = menu.addAction("このコマの絵を見る（コマ パネル）")
+            show = menu.addAction("このコマの詳細を見る")
             show.triggered.connect(lambda: self.show_dock("コマの詳細"))
+            ref = menu.addAction("AI 用の参照をコピー")
+            ref.setToolTip("このコマを AI に伝える言葉（ページ・読み順・AI の使う名前）をコピーします")
+            ref.triggered.connect(lambda: self.copy_panel_reference(frame_id))
             menu.addSeparator()
         menu.addAction(self.act_fit)
         menu.exec(pos.toPoint())
+
+    def panel_reference(self, frame_id: str) -> str | None:
+        """The words that point an AI at one panel: the page and reading order a person sees, and the names the
+        AI's tools use (page, frame_id, and the plan's slot when the name has one)."""
+        page = self._current()
+        if page is None or not self._has_frame(page, frame_id):
+            return None
+        frames = page.leaf_frames()
+        order = next((i + 1 for i, f in enumerate(frames) if f.id == frame_id), None)
+        slot = (page._find(frame_id).panel or {}).get("slot")
+        names = f"page {page.index}, frame_id \"{frame_id}\"" + (f", slot \"{slot}\"" if slot else "")
+        return f"{page.index} ページ目の {order} コマ目（読み順）［{names}］"
+
+    def copy_panel_reference(self, frame_id: str) -> None:
+        words = self.panel_reference(frame_id)
+        if words:
+            QApplication.clipboard().setText(words)
+            self.flash(f"コピーしました: {words}", 4000)
 
     def _on_text_moved(self, line_id: str, x_mm: float, y_mm: float) -> None:
         self.apply_ops([{"op": "move_line", "id": line_id, "x_mm": x_mm, "y_mm": y_mm}])
@@ -4720,6 +4791,62 @@ class MainWindow(QMainWindow):
         self.flash(f"絵柄を「{where}」にしました（版 {kept.get('version')}）。この後の絵の依頼に入ります", 6000)
         return True
 
+    def _first_steps_bar(self) -> QWidget:
+        """Over a book with nothing in it yet: the first steps, for drawing and for asking an AI (it goes with the
+        first panel, line or stroke, or with its ×)."""
+        bar = QWidget()
+        bar.setObjectName("firstSteps")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(12, 6, 8, 6)
+        row.setSpacing(6)
+        words = QLabel("まだ何もない原稿です。最初の一歩:")
+        theme.role(words, "hint")
+        row.addWidget(words)
+        for label, tool, key in (("コマを割る", "frame", "F"), ("ペンで描く", "pen", "B"), ("台詞を入れる", "text", "T")):
+            button = QPushButton(f"{label}（{key}）")
+            button.clicked.connect(lambda _=False, t=tool: self._tool(t))
+            row.addWidget(button)
+        ai = QPushButton("AI に頼む…")
+        ai.clicked.connect(self._ai_dialog)
+        row.addWidget(ai)
+        row.addStretch(1)
+        close = theme.iconic(QPushButton(), "close", "", "この案内を閉じる")
+        close.setProperty("iconbtn", True)
+        close.setFixedSize(24, 24)
+        close.clicked.connect(lambda: (setattr(self, "_first_steps_closed", True), bar.hide()))
+        row.addWidget(close)
+        bar.hide()
+        return bar
+
+    def _refresh_first_steps(self) -> None:
+        if not hasattr(self, "_column"):
+            return
+        empty = not getattr(self, "_first_steps_closed", False) and not self.episode.story and all(
+            len(page.leaf_frames()) <= 1 and not any(layer.strokes or layer.raster_png is not None for layer in page.layers)
+            for page in self.episode.pages)
+        if empty and self.first_steps is None:
+            self.first_steps = self._first_steps_bar()
+            self._column.insertWidget(1, self.first_steps)
+        if self.first_steps is not None:
+            self.first_steps.setVisible(empty)
+
+    def _ai_dialog(self) -> None:
+        from genko.app.ai_link import AiDialog
+
+        AiDialog(self, self.path).exec()
+        self._refresh_ai()
+
+    def _refresh_ai(self) -> None:
+        """The status line's AI button: who worked on the book lately (● while an AI is working)."""
+        from genko.app import ai_link
+
+        button = getattr(self, "ai_button", None)
+        if button is None:
+            return
+        words, working = ai_link.status_words(self.path)
+        button.setText(("● " if working else "") + words)
+        theme.role_prop(button, "quiet", not working)
+
     def _toggle_spread(self) -> None:
         page = self._current()
         if page is None:
@@ -4745,7 +4872,7 @@ class MainWindow(QMainWindow):
         if page is None:
             return
         extra = "\nこのページのネームは承認済みです。" if page.name_ok else ""
-        answer = QMessageBox.question(self, "Genko", f"{page.index} ページを削除しますか？{extra}\n（元に戻す で取り消せます）")
+        answer = QMessageBox.question(self, "Genko", f"{page.index} ページを消しますか？{extra}\n（元に戻す で取り消せます）")
         if answer == QMessageBox.StandardButton.Yes:
             self.apply_ops([{"op": "delete_page", "page": page.index}])
 

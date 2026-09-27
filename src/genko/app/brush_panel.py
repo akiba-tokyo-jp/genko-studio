@@ -137,8 +137,8 @@ class BrushPanel(QWidget):
         palette = QGridLayout()
         for i, rgb in enumerate(MONO + COLOURS):
             button = QPushButton()
-            button.setFixedSize(24, 24)
-            button.setStyleSheet(f"QPushButton {{ background: rgb{rgb}; border: 1px solid rgba(128,128,128,0.45); border-radius: 12px; }}"
+            button.setFixedSize(22, 22)  # (22 px, 2 px apart or more: a 24 px target pitch)
+            button.setStyleSheet(f"QPushButton {{ background: rgb{rgb}; border: 1px solid rgba(128,128,128,0.45); border-radius: 11px; }}"
                                  "QPushButton:hover { border: 2px solid palette(highlight); }")
             button.setToolTip("白" if rgb == (255, 255, 255) else ("黒" if rgb == (20, 20, 20) else f"色（RGB {rgb[0]}, {rgb[1]}, {rgb[2]}）"))
             button.setAccessibleName(button.toolTip())

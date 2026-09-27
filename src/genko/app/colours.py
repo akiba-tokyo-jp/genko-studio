@@ -103,7 +103,7 @@ def near(rgb, n: int = 5) -> list[list[tuple[int, int, int]]]:
 class Swatch(QPushButton):
     picked = Signal(object)
 
-    def __init__(self, rgb=(0, 0, 0), size: int = 24) -> None:
+    def __init__(self, rgb=(0, 0, 0), size: int = 22) -> None:  # (22 px, 2 px apart: a 24 px target pitch, WCAG 2.5.8)
         super().__init__()
         self.setFixedSize(size, size)
         self.set_rgb(rgb)
@@ -163,7 +163,7 @@ class HueBar(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setFixedWidth(24)
+        self.setFixedWidth(18)  # (a strip to drag along, 110 px tall: not a small target)
         self.setMinimumHeight(110)
         self.hue = 0.0
 
@@ -197,9 +197,11 @@ def _grid(rows, on_pick) -> QWidget:
     grid = QGridLayout(box)
     grid.setSpacing(2)
     grid.setContentsMargins(0, 0, 0, 0)
+    columns = max((len(row) for row in rows), default=1)
+    size = max(16, min(22, 200 // columns - 2))  # (as large as the panel's width lets a wide grid be)
     for r, row in enumerate(rows):
         for c, rgb in enumerate(row):
-            swatch = Swatch(rgb)
+            swatch = Swatch(rgb, size)
             swatch.picked.connect(on_pick)
             grid.addWidget(swatch, r, c)
     return box
@@ -224,7 +226,7 @@ class ColourPanel(QWidget):
         # main / sub / transparent
         self.main = Swatch(window.brush.rgb, 30)
         self.main.setToolTip("メインの色（今の色）")
-        self.sub = Swatch(self.sub_rgb, 24)
+        self.sub = Swatch(self.sub_rgb, 22)
         self.sub.setToolTip("サブの色（X で入れ替え）")
         self.sub.picked.connect(lambda _: self.swap())
         swap = QPushButton("⇄")
@@ -398,7 +400,7 @@ class ColourPanel(QWidget):
         for n, rgb in enumerate(self.sets.get(self.set_choice.currentText(), [])):
             swatch = Swatch(rgb)
             swatch.picked.connect(self.choose)
-            self.set_grid.addWidget(swatch, n // 8, n % 8)
+            self.set_grid.addWidget(swatch, n // 7, n % 7)  # (7 a row: 22 px swatches fit the panel)
 
     def add_to_set(self) -> None:
         name = self.set_choice.currentText()
@@ -431,7 +433,7 @@ class ColourPanel(QWidget):
         for n, rgb in enumerate(self.history):
             swatch = Swatch(rgb)
             swatch.picked.connect(self.choose)
-            self.history_grid.addWidget(swatch, n // 8, n % 8)
+            self.history_grid.addWidget(swatch, n // 7, n % 7)
 
     def _fill_between(self) -> None:
         while self.between_layout.count():
