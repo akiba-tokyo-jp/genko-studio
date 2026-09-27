@@ -56,9 +56,22 @@ class Navigator(QWidget):
         scale = rect.width() / page.spec.width_mm
         x, y, w, h = self.seen_mm()
         seen = QRectF(rect.x() + x * scale, rect.y() + y * scale, w * scale, h * scale).intersected(QRectF(self.rect()))
-        painter.setPen(QPen(QColor("#e8590c"), 2))
+        if seen.contains(QRectF(rect)):  # (the whole page is in sight: no frame around everything)
+            return
+        # the part out of sight dimmed, the part in sight framed in the accent
+        from PySide6.QtGui import QPainterPath
+
+        outside = QPainterPath()
+        outside.addRect(QRectF(rect))
+        inside = QPainterPath()
+        inside.addRect(seen)
+        shade = QColor(theme.tokens().surround)
+        shade.setAlpha(110)
+        painter.fillPath(outside.subtracted(inside), shade)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(theme.tokens().accent), 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(seen)
+        painter.drawRoundedRect(seen.adjusted(0.75, 0.75, -0.75, -0.75), 2, 2)
 
     def _go(self, pos: QPointF) -> None:
         rect = self._page_rect()

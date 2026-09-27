@@ -30,12 +30,15 @@ def qapp():
         pytest.skip(f"Qt cannot start here: {exc}")
 
 
-def _window(qapp, tmp_path: Path, studio: bool = False, size=(1280, 720)):
+def _window(qapp, tmp_path: Path, studio: bool = False, size=(1280, 720), waiting: bool = False):
     from genko.app.main import MainWindow
 
     ep = new_episode("t", 1, 4, PageSpec.b4_comic())
     if studio:
         ep.strict_gates = True
+    if waiting:  # (a question from the agent waits in the approval box)
+        ep.tickets.append({"id": "t_help", "kind": "help", "status": "open", "text": "背景はどうしますか", "page_index": 1,
+                           "created_by": "ai:test"})
     project = tmp_path / ("s.genko" if studio else "b.genko")
     save_episode(ep, project)
     win = MainWindow(project)
@@ -145,8 +148,13 @@ def test_agent_panels_only_for_books_made_with_agents(qapp, tmp_path: Path):
     solo.close()
     studio = _window(qapp, tmp_path, studio=True)
     titles = {d.windowTitle(): d.isVisible() for d in studio.studio_docks}
-    assert titles["承認箱"] and titles["コマの詳細"]
+    assert not titles["承認箱"] and titles["コマの詳細"]  # (the box steps aside while nothing waits)
     studio.close()
+    (tmp_path / "w").mkdir()
+    waiting = _window(qapp, tmp_path / "w", studio=True, waiting=True)
+    titles = {d.windowTitle(): d.isVisible() for d in waiting.studio_docks}
+    assert titles["承認箱"] and titles["コマの詳細"]
+    waiting.close()
 
 
 def test_names_say_what_they_are(qapp, tmp_path: Path):
@@ -172,7 +180,7 @@ def test_no_stray_tab_bars_and_the_right_panels_in_front(qapp, tmp_path: Path):
 
     for studio in (False, True):
         (tmp_path / str(studio)).mkdir()
-        win = _window(qapp, tmp_path / str(studio), studio=studio, size=(1024, 640))
+        win = _window(qapp, tmp_path / str(studio), studio=studio, size=(1024, 640), waiting=studio)
         for _ in range(3):
             qapp.processEvents()
         shown = [[bar.tabText(i) for i in range(bar.count())] for bar in win.findChildren(QTabBar)
@@ -181,5 +189,10 @@ def test_no_stray_tab_bars_and_the_right_panels_in_front(qapp, tmp_path: Path):
         assert sorted(map(tuple, shown)) == sorted({tuple(tabs) for tabs in shown}), shown
         assert all(len(tabs) >= 2 for tabs in shown), shown
         fronts = {bar.tabText(bar.currentIndex()) for bar in win.findChildren(QTabBar) if bar.isVisible()}
-        assert {"レイヤー", "台詞"} <= fronts and (("承認箱" in fronts) == studio)
+        # one row of tabs on the right (the layers in front); the approval box stands alone over it, no tab
+        assert "レイヤー" in fronts and "台詞" not in fronts and "承認箱" not in fronts
+        right = [tabs for tabs in shown if "レイヤー" in tabs]
+        assert len(right) == 1 and "台詞" in right[0] and "承認箱" not in right[0]
+        box = next(d for d in win.studio_docks if d.windowTitle() == "承認箱")
+        assert box.isVisible() == studio
         win.close()

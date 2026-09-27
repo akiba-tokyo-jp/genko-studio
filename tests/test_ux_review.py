@@ -35,6 +35,8 @@ def _window(qapp, tmp_path: Path, agent: bool = False, size=(1366, 768)):
     episode = new_episode("t", 1, 2, PageSpec.b4_comic())
     if agent:
         episode.strict_gates = True
+        episode.tickets.append({"id": "t_help", "kind": "help", "status": "open", "text": "背景はどうしますか",
+                                "page_index": 1, "created_by": "ai:test"})
     save_episode(episode, project)
     window = MainWindow(project)
     window.resize(*size)

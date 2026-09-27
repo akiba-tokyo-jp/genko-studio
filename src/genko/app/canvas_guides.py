@@ -13,6 +13,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
 from genko import mannequin, prim3d, rulers
+from genko.app import theme
 
 ACTIVE = QColor("#2b8a3e")
 IDLE = QColor(130, 130, 130, 170)
@@ -154,7 +155,7 @@ class GuideMixin:
         elif kind == "perspective" and pts:
             h = rulers.horizon(ruler)
             if h:
-                painter.setPen(QPen(QColor("#e8590c"), 1.3))
+                painter.setPen(QPen(theme.accent(), 1.3))
                 self._line_across(painter, h[0], h[1])
                 painter.setPen(QPen(colour, 1))
             for v in pts:
@@ -226,13 +227,13 @@ class GuideMixin:
             shown = self._prim_drag["prim"] if self._prim_drag and self._prim_drag["id"] == prim.get("id") else prim
             selected = prim.get("id") == self.selected_prim_id
             if shown is not prim:  # the part being dragged, drawn live
-                painter.setPen(QPen(QColor("#e8590c"), 2))
+                painter.setPen(QPen(theme.accent(), 2))
                 for a, b in self._prim_lines(shown, quick=True):
                     painter.drawLine(self._pt(*a), self._pt(*b))
             for name, point in self._prim_handles(shown):
                 q = self._pt(*point)
                 painter.setPen(QPen(PRIM, 1.2))
-                painter.setBrush(QColor("#e8590c") if selected and name in ("pelvis", "move") else QColor("white"))
+                painter.setBrush(theme.accent() if selected and name in ("pelvis", "move") else QColor("white"))
                 if name == "turn":
                     painter.drawEllipse(q, 6, 6)
                 else:
@@ -456,8 +457,8 @@ class GuideMixin:
             if self._effect_drag and self._effect_drag["id"] == effect_id:
                 point = self._effect_drag["to"]
             q = self._pt(*point)
-            painter.setPen(QPen(QColor("#e8590c"), 2))
-            painter.setBrush(QColor(255, 255, 255, 220) if effect_id != self.selected_effect_id else QColor("#e8590c"))
+            painter.setPen(QPen(theme.accent(), 2))
+            painter.setBrush(QColor(255, 255, 255, 220) if effect_id != self.selected_effect_id else theme.accent())
             painter.drawEllipse(q, 7, 7)
             painter.drawLine(QPointF(q.x() - 11, q.y()), QPointF(q.x() + 11, q.y()))
             painter.drawLine(QPointF(q.x(), q.y() - 11), QPointF(q.x(), q.y() + 11))

@@ -22,7 +22,9 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -238,8 +240,100 @@ def cover_thumbnail(path: Path, height: int = 180) -> QPixmap | None:
     return pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation) if not pixmap.isNull() else None
 
 
+def _book_facts(path: Path) -> str:
+    """A recent book's pages and when it was last worked on, under its cover (read from project.json alone)."""
+    import datetime
+
+    try:
+        project = Path(path) / "project.json"
+        pages = len(json.loads(project.read_text(encoding="utf-8")).get("pages") or [])
+        when = datetime.datetime.fromtimestamp(project.stat().st_mtime)
+    except (OSError, ValueError):
+        return ""
+    today = datetime.date.today()
+    day = "今日" if when.date() == today else "昨日" if (today - when.date()).days == 1 else f"{when.month}月{when.day}日"
+    return f"{pages} ページ · {day}"
+
+
+class _CoverCard(QStyledItemDelegate):
+    """A recent book: its first page on a sheet with a soft edge, its title (本文) and its facts (補足) under it."""
+
+    def paint(self, painter, option, index) -> None:  # noqa: D102
+        from PySide6.QtCore import QRect
+        from PySide6.QtGui import QFont, QPen
+        from PySide6.QtWidgets import QStyle
+
+        t = theme.tokens()
+        painter.save()
+        painter.setRenderHint(painter.RenderHint.Antialiasing)
+        box = option.rect.adjusted(6, 6, -6, -6)
+        chosen = bool(option.state & QStyle.StateFlag.State_Selected)
+        hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        if chosen or hover:
+            painter.setPen(QPen(QColor(t.accent if chosen else t.border), 1.5))
+            painter.setBrush(QColor(t.selected if chosen else t.hover))
+            painter.drawRoundedRect(box, 10, 10)
+        icon = index.data(Qt.ItemDataRole.DecorationRole)
+        size = QSize(132, 180)
+        sheet = QRect(box.center().x() - size.width() // 2, box.top() + 12, size.width(), size.height())
+        painter.setPen(QPen(QColor(t.divider), 1))
+        painter.setBrush(QColor(t.base))
+        painter.drawRoundedRect(sheet.adjusted(-1, -1, 1, 1), 3, 3)
+        if icon is not None:
+            pixmap = icon.pixmap(size)
+            target = QRect(0, 0, pixmap.width(), pixmap.height())
+            target.moveCenter(sheet.center())
+            painter.drawPixmap(target, pixmap)
+        text_box = QRect(box.left() + 8, sheet.bottom() + 10, box.width() - 16, 20)
+        font = QFont(option.font)
+        font.setWeight(QFont.Weight.Medium)
+        painter.setFont(font)
+        painter.setPen(QColor(t.text))
+        title = painter.fontMetrics().elidedText(index.data(Qt.ItemDataRole.DisplayRole) or "", Qt.TextElideMode.ElideRight,
+                                                 text_box.width())
+        painter.drawText(text_box, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, title)
+        painter.setFont(option.font)
+        painter.setPen(QColor(t.muted))
+        painter.drawText(text_box.translated(0, 20), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                         index.data(Qt.ItemDataRole.UserRole + 1) or "")
+        painter.restore()
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802
+        return QSize(172, 262)
+
+
+class _ActionCard(QPushButton):
+    """A way to begin: its picture, its name (見出し) and one line of what it does (補足)."""
+
+    def __init__(self, icon: str, title: str, words: str, main: bool = False) -> None:
+        from genko.app.icons import icon as picture
+
+        super().__init__()
+        self.setObjectName("actionCard")
+        self.setProperty("main", main)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName(title)
+        self.setToolTip(words)
+        self.setMinimumHeight(144)  # (the picture, the name and two lines of words)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        mark = QLabel()
+        mark.setPixmap(picture(icon).pixmap(28, 28))
+        name = theme.role(QLabel(title), "heading")
+        note = theme.role(QLabel(words), "caption")
+        note.setWordWrap(True)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+        for widget in (mark, name, note):
+            widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            layout.addWidget(widget)
+        layout.addStretch(1)
+        self.title = name
+
+
 class StartDialog(QDialog):
-    """最近の原稿（表紙の縮小画像つき）/ 開く / 新しく作る."""
+    """The first screen: three ways to begin (draw it yourself, open a book, make it with an AI) as cards, and the
+    recent books by their first pages."""
 
     def __init__(self) -> None:
         from genko.app.main import recent_projects
@@ -247,80 +341,71 @@ class StartDialog(QDialog):
         super().__init__()
         self.setWindowTitle("Genko Studio")
         self.chosen: Path | None = None
-        self.resize(860, 560)
         name = QLabel("Genko Studio")
         theme.role(name, "title")
         lead = theme.role(QLabel("漫画の原稿を作るアプリです。自分で描くことも、AI に描いてもらって確かめ・直すこともできます。"), "hint")
         lead.setWordWrap(True)
-        new_button = theme.primary(theme.iconic(QPushButton("新しい原稿を作る…"), "page"))
-        new_button.clicked.connect(self._new)
-        browse = theme.iconic(QPushButton("ほかの原稿を開く…"), "open")
-        browse.clicked.connect(self._browse)
-        ai_steps = theme.role(QLabel("1. AI（Claude など）をつなぐ\n2. 作りたい話を AI に伝える\n3. 届いた承認依頼を確かめて決める"), "hint")
-        ai_steps.setWordWrap(True)
-        ai_button = theme.iconic(QPushButton("AI をつなぐ…"), "settings")
-        ai_button.setToolTip("AI の設定に貼る文（このパソコンの場所入り）と、最初に頼むことを出します")
-        ai_button.clicked.connect(self._ai)
         self.notice = QLabel()  # (something waiting for the book that will be opened: a style from the catalog)
         self.notice.setWordWrap(True)
         self.notice.setObjectName("startNotice")
         self.notice.hide()
-        side = QVBoxLayout()
-        side.addWidget(name)
-        side.addWidget(lead)
-        side.addWidget(self.notice)
-        side.addSpacing(14)
-        side.addWidget(theme.role(QLabel("自分で描く"), "section"))
-        side.addWidget(new_button)
-        side.addWidget(browse)
-        side.addSpacing(14)
-        side.addWidget(theme.role(QLabel("AI と作る"), "section"))
-        side.addWidget(ai_steps)
-        side.addWidget(ai_button)
-        side.addStretch(1)
+        new_card = _ActionCard("page", "新しい原稿を作る", "用紙とページ数を決めて、白い原稿から自分で描きます", main=True)
+        new_card.clicked.connect(self._new)
+        open_card = _ActionCard("open", "原稿を開く", "このパソコンにある .genko の原稿を開きます")
+        open_card.clicked.connect(self._browse)
+        ai_card = _ActionCard("wand", "AI と作る", "Claude などの AI をつなぎ、作りたい話を伝えて、届いた依頼を確かめます")
+        ai_card.clicked.connect(self._ai)
+        cards = QHBoxLayout()
+        cards.setSpacing(16)
+        for card in (new_card, open_card, ai_card):
+            cards.addWidget(card, 1)
+        self.cards = (new_card, open_card, ai_card)
         self.list = QListWidget()
+        self.list.setObjectName("recentBooks")
         self.list.setViewMode(QListWidget.ViewMode.IconMode)
         self.list.setIconSize(QSize(132, 180))
-        self.list.setGridSize(QSize(168, 250))
+        self.list.setGridSize(QSize(176, 266))
         self.list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.list.setMovement(QListWidget.Movement.Static)
-        self.list.setWordWrap(True)
-        self.list.setSpacing(6)
+        self.list.setMouseTracking(True)
+        self.list.setItemDelegate(_CoverCard(self.list))
         self._paths = recent_projects()
         blank = _blank_cover(QSize(132, 180))
         for path in self._paths:
             item = QListWidgetItem(blank, project_title(path))
             item.setData(Qt.ItemDataRole.UserRole, str(path))
+            item.setData(Qt.ItemDataRole.UserRole + 1, _book_facts(path))
             item.setToolTip(str(path))
             self.list.addItem(item)
         if self.list.count():
             self.list.setCurrentRow(0)
         self.list.itemActivated.connect(lambda item: self._pick(Path(item.data(Qt.ItemDataRole.UserRole))))
-        empty = theme.role(QLabel("最近開いた原稿はまだありません。\n自分で描くなら「新しい原稿を作る」、"
-                                  "AI に頼むなら「AI をつなぐ」から始めます。"), "empty")
-        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty = theme.role(QLabel("最近開いた原稿は、ここに 1 ページ目の絵で並びます。"), "caption")
         empty.setVisible(self.list.count() == 0)
         self.list.setVisible(self.list.count() > 0)
-        open_recent = QPushButton("選んだ原稿を開く")
+        open_recent = theme.primary(QPushButton("開く"))
+        open_recent.setToolTip("選んだ原稿を開きます（ダブルクリックでも開きます）")
         open_recent.setDefault(True)
-        open_recent.setEnabled(self.list.count() > 0)
+        open_recent.setVisible(self.list.count() > 0)
         open_recent.clicked.connect(lambda: self.list.currentItem() and self._pick(Path(self.list.currentItem().data(Qt.ItemDataRole.UserRole))))
-        main = QVBoxLayout()
-        main.addWidget(theme.role(QLabel("最近の原稿"), "section"))
-        main.addWidget(self.list, 1)
-        main.addWidget(empty, 1)
-        row = QHBoxLayout()
-        row.addStretch(1)
-        row.addWidget(open_recent)
-        main.addLayout(row)
-        card = QWidget()
-        card.setObjectName("startCard")
-        card.setLayout(main)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
-        layout.addLayout(side, 0)
-        layout.addWidget(card, 1)
+        recent_head = QHBoxLayout()
+        recent_head.addWidget(theme.role(QLabel("最近の原稿"), "heading"))
+        recent_head.addStretch(1)
+        recent_head.addWidget(open_recent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 32, 32, 24)
+        layout.setSpacing(8)
+        layout.addWidget(name)
+        layout.addWidget(lead)
+        layout.addWidget(self.notice)
+        layout.addSpacing(16)
+        layout.addLayout(cards)
+        layout.addSpacing(24)
+        layout.addLayout(recent_head)
+        layout.addWidget(self.list, 1)
+        layout.addWidget(empty)
+        layout.addStretch(0 if self.list.count() else 1)
+        self.resize(960, 640 if self.list.count() else 440)  # (no recent books: no empty half screen)
         self._next_cover = 0
         QTimer.singleShot(0, self._load_cover)
 

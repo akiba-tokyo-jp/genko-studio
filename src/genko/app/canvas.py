@@ -588,7 +588,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self._draw_highlight(painter)
         self._draw_selection_overlay(painter)
         if self._reshape is not None:
-            painter.setPen(QPen(QColor("#e8590c"), 2))
+            painter.setPen(QPen(theme.accent(), 2))
             path = QPainterPath(self._pt(*self._reshape["points"][0][:2]))
             for pt in self._reshape["points"][1:]:
                 path.lineTo(self._pt(*pt[:2]))
@@ -606,7 +606,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             painter.setPen(pen)
             painter.drawPolyline([self._pt(*p[:2]) for p in self._stroke])
         elif self._stroke and self.tool in ("lassofill", "marquee"):
-            painter.setPen(QPen(QColor("#1c7ed6") if self.tool == "marquee" else QColor("#e8590c"), 1.5, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(QColor("#1c7ed6") if self.tool == "marquee" else theme.accent(), 1.5, Qt.PenStyle.DashLine))
             painter.setBrush(QColor(28, 126, 214, 30) if self.tool == "marquee" else QColor(232, 89, 12, 40))
             pts = self._marquee_points()
             painter.drawPolygon([self._pt(*p) for p in pts])
@@ -616,19 +616,19 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             if self._live.tail is not None:
                 painter.drawImage(self._live.tail[0], self._live.tail[1], self._live.tail[2])
         elif self._stroke:
-            color = QColor("#e8590c") if self.tool == "pen" else QColor(200, 60, 60, 160)
+            color = theme.accent() if self.tool == "pen" else QColor(200, 60, 60, 160)
             shown = self.snapped_preview(self._stroke) if self.tool == "pen" else [self._stroke]
             self._draw_strokes(painter, shown, color, max(1.5, self.brush_width_mm * self._scale))
         if self._hover and not self._stroke and self.tool in ("pen", "eraser", "blend", "liquify"):
             hx, hy = self._pt(*self._hover).x(), self._pt(*self._hover).y()
             radius = max(2.0, (self.brush_width_mm if self.tool == "pen" else self.blend_mm if self.tool in ("blend", "liquify")
                                else self.eraser_mm) / 2 * self._scale)
-            painter.setPen(QPen(QColor("#e8590c"), 1))
+            painter.setPen(QPen(theme.accent(), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             if self.cursor_kind in ("circle", "circle_cross"):
                 painter.drawEllipse(QPointF(hx, hy), radius, radius)
             if self.cursor_kind in ("circle", "dot"):
-                painter.setBrush(QColor("#e8590c"))
+                painter.setBrush(theme.accent())
                 painter.drawEllipse(QPointF(hx, hy), 1.5, 1.5)
         self._draw_shape_preview(painter)
         self._draw_vector(painter)
@@ -652,9 +652,9 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(QRectF(a, b))
         elif self.tool == "gradient":
-            painter.setPen(QPen(QColor("#e8590c"), 2))
+            painter.setPen(QPen(theme.accent(), 2))
             painter.drawLine(self._pt(sx, sy), self._pt(ex, ey))
-            painter.setBrush(QColor("#e8590c"))
+            painter.setBrush(theme.accent())
             painter.drawEllipse(self._pt(sx, sy), 4, 4)
             painter.setBrush(QColor("white"))
             painter.drawEllipse(self._pt(ex, ey), 4, 4)
@@ -865,7 +865,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             painter.setPen(QPen(QColor("#e03131"), 2, Qt.PenStyle.DashLine))
             painter.drawLine(self._pt(*drag["p0"]), self._pt(*drag["p1"]))
         if drag and drag["kind"] == "vertex":
-            painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
             painter.drawPolygon([self._pt(x, y) for x, y in drag["poly"]])
         for _i, (x, y) in self._vertex_handles():
             p = self._pt(x, y)
@@ -875,7 +875,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         for _i, (x, y) in self._bow_handles():
             p = self._pt(x, y)
             r = HANDLE_PX / 2 + 1
-            painter.setPen(QPen(QColor("#e8590c"), 1.5))
+            painter.setPen(QPen(theme.accent(), 1.5))
             painter.setBrush(QColor("white"))
             painter.drawPolygon([QPointF(p.x(), p.y() - r), QPointF(p.x() + r, p.y()), QPointF(p.x(), p.y() + r), QPointF(p.x() - r, p.y())])
         if drag and drag["kind"] == "bow":
@@ -886,7 +886,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             curves = list(drag["curves"])
             curves[drag["edge"]] = drag["mm"]
             ghost.curves = curves
-            painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPolygon([self._pt(x, y) for x, y in outline(ghost)])
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -1026,7 +1026,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         if drag and drag["kind"] == "resize":
             x, y, w, h = drag["cur"]
             p = self._pt(x, y)
-            painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(QRectF(p.x(), p.y(), w * self._scale, h * self._scale))
         if drag and drag["kind"] == "turn" and drag.get("angle") is not None:
@@ -1035,11 +1035,11 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             cx, cy = line.x_mm + line.w_mm / 2, line.y_mm + line.h_mm / 2
             a = math.radians(drag["angle"])
             r = max(line.w_mm, line.h_mm) / 2 + 7
-            painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
             painter.drawLine(self._pt(cx, cy), self._pt(cx + r * math.sin(a), cy - r * math.cos(a)))
             painter.drawText(self._pt(cx, cy) + QPointF(6, -6), f"{drag['angle']:+.0f}°")
         if drag and drag["kind"] == "tail":
-            painter.setPen(QPen(QColor("#e8590c"), 2, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
             cx, cy = line.x_mm + line.w_mm / 2, line.y_mm + line.h_mm / 2
             for tail in drag["tails"]:
                 path = QPainterPath(self._pt(cx, cy))
@@ -1048,7 +1048,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 painter.drawPath(path)
         for kind, key, (hx, hy) in self._handles():
             p = self._pt(hx, hy)
-            painter.setPen(QPen(QColor("#e8590c"), 1.5))
+            painter.setPen(QPen(theme.accent(), 1.5))
             painter.setBrush(QColor("white"))
             if kind == "resize":
                 painter.drawRect(QRectF(p.x() - HANDLE_PX / 2, p.y() - HANDLE_PX / 2, HANDLE_PX, HANDLE_PX))
@@ -1056,7 +1056,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 painter.drawLine(p + QPointF(0, HANDLE_PX / 2 + 1), self._pt(hx, hy + 7) + QPointF(0, 0))
                 painter.drawEllipse(p, HANDLE_PX / 2 + 2, HANDLE_PX / 2 + 2)
             elif key[1] == "to":
-                painter.setBrush(QColor("#e8590c"))
+                painter.setBrush(theme.accent())
                 painter.drawEllipse(p, HANDLE_PX / 2 + 1, HANDLE_PX / 2 + 1)
             else:
                 painter.drawPolygon([p + QPointF(0, -5), p + QPointF(5, 0), p + QPointF(0, 5), p + QPointF(-5, 0)])
@@ -1150,7 +1150,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         except warps.WarpError:
             return
         x0, y0, w, h = self.warp["box"]
-        painter.setPen(QPen(QColor("#e8590c"), 1.2))
+        painter.setPen(QPen(theme.accent(), 1.2))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         steps = 16
         for k in range(5):  # the box's grid, bent the way the area will be
@@ -1236,7 +1236,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 painter.drawPolygon([QPointF(p.x(), p.y() - 5), QPointF(p.x() + 5, p.y()), QPointF(p.x(), p.y() + 5),
                                      QPointF(p.x() - 5, p.y())])
             elif kind == "warp":
-                painter.setPen(QPen(QColor("#e8590c"), 1.5))
+                painter.setPen(QPen(theme.accent(), 1.5))
                 painter.drawEllipse(p, 5, 5)
             else:
                 painter.drawRect(QRectF(p.x() - 4, p.y() - 4, 8, 8))
@@ -1328,7 +1328,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                           fill: bool = True) -> None:
         p = self._pt(*(at or (line.x_mm, line.y_mm)))
         rect = QRectF(p.x(), p.y(), max(10, line.w_mm * self._scale), max(10, line.h_mm * self._scale))
-        painter.setPen(QPen(QColor("#e8590c"), 2 if strong else 1.5, Qt.PenStyle.DashLine))
+        painter.setPen(QPen(theme.accent(), 2 if strong else 1.5, Qt.PenStyle.DashLine))
         painter.setBrush(QColor(255, 255, 255, 170) if strong and fill else Qt.BrushStyle.NoBrush)
         painter.drawRect(rect)
         painter.setBrush(Qt.BrushStyle.NoBrush)

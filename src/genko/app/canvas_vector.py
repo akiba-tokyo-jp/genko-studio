@@ -9,6 +9,7 @@ import math
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPen
+from genko.app import theme
 
 PICK_PX = 8.0
 
@@ -125,7 +126,7 @@ class VectorMixin:
             if n == 0:  # the first chosen line shows its control points
                 for k, p in enumerate(pts):
                     q = self._pt(*p)
-                    painter.setBrush(QColor("#e8590c") if k == self.vector_point else QColor("white"))
+                    painter.setBrush(theme.accent() if k == self.vector_point else QColor("white"))
                     painter.setPen(QPen(QColor("#1c7ed6"), 1))
                     painter.drawRect(int(q.x()) - 3, int(q.y()) - 3, 6, 6)
                 painter.setBrush(Qt.BrushStyle.NoBrush)

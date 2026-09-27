@@ -9,6 +9,7 @@ import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal  # noqa: F401  (Signal: the canvas declares them)
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from genko.app import theme
 
 SCALE_PX = 16  # the scales' width on screen
 
@@ -148,7 +149,7 @@ class ShapeSelectMixin:
             return
         closed = pts[-1] is None
         pts = [p for p in pts if p is not None]
-        painter.setPen(QPen(QColor("#1c7ed6") if self.tool == "marquee" else QColor("#e8590c"), 1.5,
+        painter.setPen(QPen(QColor("#1c7ed6") if self.tool == "marquee" else theme.accent(), 1.5,
                             Qt.PenStyle.DashLine if self.tool == "marquee" else Qt.PenStyle.SolidLine))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         q = [self._pt(*p) for p in pts]

@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLabel,
     QSizePolicy,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -138,10 +137,10 @@ def action_page(actions, extra: list[QWidget] | None = None) -> QWidget:
     layout.setSpacing(1)
     for action in actions:
         if action is None:
-            layout.addSpacing(6)
+            layout.addSpacing(8)
         elif isinstance(action, str):
             if layout.count():
-                layout.addSpacing(6)
+                layout.addSpacing(8)
             layout.addWidget(section(action))
         elif isinstance(action, QWidget):
             layout.addWidget(action)
@@ -201,15 +200,54 @@ class TextToolSettings(QWidget):
         return {"balloon": self.balloon.currentData(), "vertical": self.vertical.isChecked(), "style": style}
 
 
+class _CurrentStack(QWidget):
+    """The tools' pages, one shown at a time, as tall as the page shown (a QStackedWidget measures every page,
+    so a short page sat over empty room and a scroll bar)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._pages: list[QWidget] = []
+        self._current: QWidget | None = None
+
+    def addWidget(self, widget: QWidget) -> None:  # noqa: N802
+        self._pages.append(widget)
+        self._layout.addWidget(widget)
+        widget.setVisible(self._current is None)
+        if self._current is None:
+            self._current = widget
+
+    def indexOf(self, widget: QWidget) -> int:  # noqa: N802
+        return self._pages.index(widget) if widget in self._pages else -1
+
+    def count(self) -> int:
+        return len(self._pages)
+
+    def widget(self, n: int) -> QWidget:
+        return self._pages[n]
+
+    def currentWidget(self) -> QWidget | None:  # noqa: N802
+        return self._current
+
+    def setCurrentWidget(self, widget: QWidget) -> None:  # noqa: N802
+        if widget is self._current:
+            return
+        if self._current is not None:
+            self._current.hide()
+        self._current = widget
+        widget.show()
+
+
 class ToolSettings(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.title = QLabel()
-        theme.role(self.title, "title")
+        theme.role(self.title, "heading")
         self.hint = QLabel()
         self.hint.setWordWrap(True)
         theme.hint(self.hint)
-        self.stack = QStackedWidget()
+        self.stack = _CurrentStack()
         from PySide6.QtWidgets import QHBoxLayout, QPushButton
 
         # the settings fold to the tool's name (room for the approval box below, when an agent works on the book)
@@ -223,7 +261,8 @@ class ToolSettings(QWidget):
         head.addWidget(self.title, 1)
         head.addWidget(self.fold)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         layout.addLayout(head)
         layout.addWidget(self.hint)
         layout.addWidget(self.stack, 1)

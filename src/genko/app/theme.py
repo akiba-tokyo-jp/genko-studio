@@ -7,8 +7,9 @@ palette, one style sheet and the icons, so every panel looks of a piece.
   greys look
 - mono icons: the icons in grey only (no accent colour competing with the art)
 - hints: the panels' explanations shown, or kept in tooltips (off: a quieter screen)
-- letters (D4): IBM Plex Sans JP (bundled, SIL OFL) on every system, or the computer's own; three steps of
-  weight and size: headings, section titles, and the plain labels and values
+- letters (D4): IBM Plex Sans JP (bundled, SIL OFL) on every system, or the computer's own; four steps:
+  見出し (a panel's or a tool's name: larger and bold; a dialog's title larger still), 本文 (labels and values),
+  補足 (explanations and section names: quiet grey, never below MIN_PT) and 数字 (counts: bold, in the text colour)
 """
 
 from __future__ import annotations
@@ -170,6 +171,14 @@ def tokens(which: str | None = None, step: int | None = None) -> Tokens:
     return moved
 
 
+def accent() -> QColor:
+    """The accent now, for drawing on the canvas (from the look put on the application: no settings read, so a
+    paint stays quick)."""
+    app = QApplication.instance()
+    key = getattr(app, "_genko_tokens", None) if app is not None else None
+    return QColor(key[0].accent if key else LIGHT.accent)
+
+
 def surround() -> QColor:
     return QColor(tokens().surround)
 
@@ -197,9 +206,9 @@ def _rgba(hex_colour: str, alpha: float) -> str:
 
 
 def style_sheet(t: Tokens, pt: float = 9.0) -> str:
-    """One style sheet for every panel: flat surfaces, thin dividers, small radii, one accent; three steps of
-    letters: headings (bold, larger), section titles (bold, small, quiet) and labels and values (regular)."""
-    big, small = f"{pt + 3:g}pt", f"{max(MIN_PT, pt - 1):g}pt"
+    """One style sheet for every panel: flat surfaces, thin dividers, small radii, one accent; the four steps of
+    letters (見出し・本文・補足・数字: the module's note)."""
+    big, head, small = f"{pt + 5:g}pt", f"{pt + 2:g}pt", f"{max(MIN_PT, pt - 1):g}pt"
     return f"""
 QMainWindow, QDialog {{ background: {t.window}; }}
 QMainWindow::separator {{ background: {t.window}; width: 3px; height: 3px; }}
@@ -210,10 +219,10 @@ QDockWidget > QWidget {{ background: {t.panel}; }}
 QWidget#panelBody {{ background: {t.panel}; }}
 QTabWidget::pane {{ border: none; border-top: 1px solid {t.divider}; background: {t.panel}; }}
 QTabBar {{ qproperty-drawBase: 0; }}
-QTabBar::tab {{ background: transparent; color: {t.muted}; padding: 4px 7px; border: none; border-bottom: 2px solid transparent; }}
+QTabBar::tab {{ background: transparent; color: {t.muted}; padding: 6px 8px; border: none; border-bottom: 2px solid transparent; }}
 QTabBar::tab:hover {{ color: {t.text}; }}
 QTabBar::tab:selected {{ color: {t.text}; border-bottom: 2px solid {t.accent}; font-weight: 500; }}
-QPushButton {{ background: {t.raised}; color: {t.text}; border: 1px solid {t.border}; border-radius: 4px; padding: 3px 6px; }}
+QPushButton {{ background: {t.raised}; color: {t.text}; border: 1px solid {t.border}; border-radius: 6px; padding: 4px 8px; }}
 QPushButton:hover {{ background: {t.hover}; }}
 QPushButton:pressed, QPushButton:checked {{ background: {t.selected}; border-color: {t.accent}; }}
 QPushButton:disabled {{ color: {t.faint}; background: {t.panel}; border-color: {t.divider}; }}
@@ -230,7 +239,8 @@ QPushButton[iconbtn="true"]::menu-indicator {{ width: 0; image: none; }}
 QPushButton[chip="true"] {{ background: transparent; border: 1px solid {t.divider}; border-radius: 9px; padding: 1px 4px; color: {t.muted}; }}
 QPushButton[chip="true"]:hover {{ background: {t.hover}; color: {t.text}; }}
 QPushButton[quiet="true"] {{ color: {t.muted}; }}
-QWidget#toolPage QCheckBox {{ padding: 3px 0 3px 7px; spacing: 8px; }}
+QWidget#toolPage QCheckBox {{ padding: 4px 0 4px 7px; spacing: 8px; }}
+QWidget#toolPage QLabel[role="section"] {{ padding-left: 7px; }}
 QPushButton[row="true"]::menu-indicator {{ width: 0; image: none; }}
 QPushButton[row="true"]:pressed {{ background: {t.selected}; border-color: {t.selected}; }}
 QPushButton[row="true"]:disabled {{ color: {t.faint}; background: transparent; border-color: transparent; }}
@@ -244,7 +254,7 @@ QToolBar#commands {{ padding: 2px 4px; spacing: 2px; }}
 QToolBar#commands QToolButton {{ padding: 4px; }}
 QToolBar::separator {{ background: {t.divider}; width: 1px; height: 1px; margin: 4px 6px; }}
 QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
-    background: {t.base}; color: {t.text}; border: 1px solid {t.border}; border-radius: 4px; padding: 1px 3px;
+    background: {t.base}; color: {t.text}; border: 1px solid {t.border}; border-radius: 6px; padding: 2px 3px;
     selection-background-color: {t.accent}; selection-color: {t.accent_text}; }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {t.accent}; }}
 QComboBox::drop-down {{ border: none; width: 18px; }}
@@ -260,7 +270,7 @@ QComboBox QAbstractItemView {{ background: {t.base}; border: 1px solid {t.border
     selection-color: {t.text}; }}
 QListWidget, QListView, QTreeWidget, QTreeView, QTableWidget, QTableView {{
     background: {t.base}; color: {t.text}; border: 1px solid {t.divider}; border-radius: 6px; outline: none; }}
-QListWidget::item, QTreeWidget::item {{ padding: 3px 4px; border-radius: 4px; }}
+QListWidget::item, QTreeWidget::item {{ padding: 4px 8px; border-radius: 4px; }}
 QListWidget::item:hover, QTreeWidget::item:hover {{ background: {t.hover}; }}
 QListWidget::item:selected, QTreeWidget::item:selected {{ background: {t.selected}; color: {t.text}; }}
 QHeaderView::section {{ background: {t.panel}; color: {t.muted}; border: none; border-bottom: 1px solid {t.divider}; padding: 3px 6px; }}
@@ -282,16 +292,19 @@ QMenu::item:selected {{ background: {t.selected}; color: {t.text}; }}
 QMenu::item:disabled {{ color: {t.faint}; }}
 QMenu::separator {{ height: 1px; background: {t.divider}; margin: 4px 8px; }}
 QToolTip {{ background: {t.raised}; color: {t.text}; border: 1px solid {t.border}; border-radius: 4px; padding: 4px 6px; }}
-QStatusBar {{ background: {t.window}; color: {t.muted}; border-top: 1px solid {t.divider}; }}
+QStatusBar {{ background: {t.window}; color: {t.muted}; border-top: 1px solid {t.divider}; padding: 0 8px; }}
+QStatusBar::item {{ border: none; }}
 QStatusBar QLabel {{ color: {t.muted}; }}
 QSplitter::handle {{ background: {t.divider}; }}
 QLabel[role="hint"] {{ color: {t.muted}; }}
 QLabel[role="empty"] {{ color: {t.muted}; padding: 16px; }}
 QLabel[role="error"] {{ color: {t.danger}; }}
 QLabel[role="title"] {{ font-weight: 700; font-size: {big}; }}
-QLabel[role="section"] {{ color: {t.muted}; font-weight: 700; font-size: {small}; padding-top: 6px; }}
+QLabel[role="heading"] {{ font-weight: 700; font-size: {head}; }}
+QLabel[role="section"] {{ color: {t.muted}; font-weight: 500; font-size: {small}; padding-top: 8px; padding-bottom: 2px; }}
 QLabel[role="label"] {{ color: {t.muted}; }}
-QLabel[role="heading"] {{ font-weight: 500; }}
+QLabel[role="caption"] {{ color: {t.muted}; font-size: {small}; }}
+QLabel[role="figure"] {{ color: {t.text}; font-weight: 700; }}
 QLabel[role="badge"] {{ border-radius: 8px; padding: 1px 8px; background: {t.hover}; color: {t.text}; }}
 QLabel[role="badge-warn"] {{ border-radius: 8px; padding: 1px 8px; background: {t.accent_soft}; color: {t.text}; }}
 QLabel[role="badge-ok"] {{ border-radius: 8px; padding: 1px 8px; background: {t.hover}; color: {t.ok}; }}
@@ -310,6 +323,12 @@ QWidget#launcher {{ background: {t.panel}; border: 1px solid {t.border}; border-
 QLabel#startNotice {{ background: {t.accent_soft}; color: {t.text}; border-radius: 6px; padding: 8px; }}
 QWidget#firstSteps {{ background: {t.panel}; border-bottom: 1px solid {t.divider}; }}
 QWidget#startCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 8px; }}
+QPushButton#actionCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 12px; padding: 0; text-align: left; }}
+QPushButton#actionCard:hover {{ background: {t.hover}; border-color: {t.border}; }}
+QPushButton#actionCard:pressed {{ background: {t.selected}; }}
+QPushButton#actionCard[main="true"] {{ border: 2px solid {t.accent}; }}
+QListWidget#recentBooks {{ background: transparent; border: none; }}
+QListWidget#recentBooks::item, QListWidget#recentBooks::item:hover, QListWidget#recentBooks::item:selected {{ background: transparent; }}
 """
 
 

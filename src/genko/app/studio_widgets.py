@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable
 
 from PIL import Image
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -68,8 +68,21 @@ def _brief_words(panel: dict) -> list[str]:
 # --- process bar -------------------------------------------------------------------------------------
 
 
+class _Chip(QLabel):
+    """A count in the status bar that opens what it counts."""
+
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
 class ProcessBar(QWidget):
-    """How far the book is: only the steps that have pages, and the approval box count."""
+    """How far the book is: only the steps that have pages, and the approval box count (a click opens the box)."""
+
+    open_box = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -86,15 +99,18 @@ class ProcessBar(QWidget):
         self.labels = []
         pending = len(review_model.inbox(episode))
         chips = [(f"承認箱 <b>{pending}</b>", "badge-warn" if pending else "badge",
-                  "AI からの承認依頼と相談。右の「承認箱」で 1 件ずつ見て決めます")]
+                  "AI からの承認依頼と相談。押すと右上に承認箱が出て、1 件ずつ見て決められます")]
         for text, count in review_model.progress(episode):
             if count:
                 chips.append((f"{text} <b>{count}</b>", "badge-warn" if "待ち" in text or "未承認" in text else "badge", ""))
-        for text, kind, tip in chips:
-            label = QLabel(text)
+        for n, (text, kind, tip) in enumerate(chips):
+            label = _Chip(text) if n == 0 else QLabel(text)
             theme.role(label, kind)
             if tip:
                 label.setToolTip(tip)
+            if n == 0:
+                label.setCursor(Qt.CursorShape.PointingHandCursor)
+                label.clicked.connect(self.open_box.emit)
             self.layout_.addWidget(label)
             self.labels.append(label)
 
@@ -130,7 +146,8 @@ class PreviewLabel(QLabel):
 
     def _fit(self) -> None:
         if self._source is None or self._source.isNull():
-            self.setPixmap(QPixmap())
+            if not self.pixmap().isNull():  # (clearing a picture; words put here instead stay)
+                self.setPixmap(QPixmap())
             return
         self.setPixmap(self._source.scaled(max(40, self.width() - 4), max(40, self.height() - 4), Qt.AspectRatioMode.KeepAspectRatio,
                                            Qt.TransformationMode.SmoothTransformation))
@@ -153,7 +170,6 @@ class ApprovalBox(QWidget):
         self.window = window
         self.items: list[review_model.InboxItem] = []
         self.list = QListWidget()
-        self.list.setMaximumHeight(120)
         self.list.currentRowChanged.connect(self._show)
         self.detail = QLabel()
         self.detail.setWordWrap(True)
@@ -187,8 +203,21 @@ class ApprovalBox(QWidget):
         self.empty = QLabel("承認を待っている依頼はありません。\nAI が依頼を出すと、ここに届きます。")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         theme.role(self.empty, "hint")
+        # the box's name and how many wait, over the list (見出し and 数字: theme.py)
+        title = QLabel("承認待ち")
+        theme.role(title, "heading")
+        title.setToolTip("AI からの承認の依頼と相談。1 件ずつ見て決めます")
+        self.count = QLabel()
+        theme.role(self.count, "badge-warn")
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        top.addWidget(title)
+        top.addWidget(self.count)
+        top.addStretch(1)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("AI からの依頼（1 件ずつ見て決める）"))
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+        layout.addLayout(top)
         layout.addWidget(self.list)
         layout.addWidget(self.empty)
         layout.addWidget(self.detail)
@@ -208,6 +237,11 @@ class ApprovalBox(QWidget):
         for item in self.items:
             self.list.addItem(item.title)
         self.list.blockSignals(False)
+        self.count.setText(str(len(self.items)))
+        self.count.setVisible(bool(self.items))
+        # the list as tall as its rows (up to four), not a fixed block of empty space under one request
+        rows = max(1, min(4, len(self.items)))
+        self.list.setFixedHeight(rows * max(self.list.sizeHintForRow(0), 24) + 6)
         ids = [i.ticket_id for i in self.items]
         row = ids.index(current.ticket_id) if current and current.ticket_id in ids else (0 if self.items else -1)
         self.list.setCurrentRow(row)
@@ -251,10 +285,8 @@ class ApprovalBox(QWidget):
         theme.role_prop(self.approve_button, "primary", not answer)
         theme.role_prop(self.back_button, "primary", answer)
         muted = theme.tokens().muted
-        text = f"<b>{item.title}</b>"
-        if item.text:
-            text += f"<br>{item.text}"
-        text += f"<br><small style='color:{muted}'>依頼: {wording.actor(item.by)}</small>"
+        text = (item.text + "<br>") if item.text else ""  # (its title is the chosen row above)
+        text += f"<small style='color:{muted}'>依頼: {wording.actor(item.by)}</small>"
         self.detail.setText(text)
         self.detail.setToolTip(HOW.get(kind, ""))  # (how to answer: on hover, not in the way)
         self.choices.setVisible(item.gate == "sheet" and item.kind == "gate")
@@ -267,6 +299,9 @@ class ApprovalBox(QWidget):
         if follow and item.pages:
             self.window.go_to_page(item.pages[0])
         self._preview()
+        fit = getattr(self.window, "_fit_box", None)
+        if callable(fit):
+            QTimer.singleShot(0, self, fit)  # (the box as tall as this request needs)
 
     def _page_changed(self) -> None:
         page = self.page_pick.currentData()
@@ -317,11 +352,18 @@ class ApprovalBox(QWidget):
             from genko.studio import preflight
 
             report = preflight.check(episode, self.window.session.path)
-            text = "点検は通っています。書き出せます。" if report["ok"] else "止めている理由:\n" + "\n".join(e["message"] for e in report["errors"][:12])
+            errors = report["errors"]
+            more = f"\nほか {len(errors) - 5} 件（全部は「点検」のタブで見られます）" if len(errors) > 5 else ""
+            text = "点検は通っています。書き出せます。" if report["ok"] else "止めている理由:\n" + "\n".join(
+                "・" + e["message"] for e in errors[:5]) + more
             self.preview.set_image(None)
+            self.preview.setMinimumHeight(0)
+            self.preview.setWordWrap(True)
+            self.preview.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.preview.setText(text)
             self.approve_button.setEnabled(report["ok"])
             return
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if item.gate == "sheet" and item.kind == "gate":
             self.preview.set_image(None)
             self.preview.setMinimumHeight(0)

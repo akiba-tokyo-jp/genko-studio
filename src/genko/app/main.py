@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from genko.app import wording
+from genko.app import review_model, wording
 from genko.app.brush_panel import BrushPanel
 from genko.app.canvas import make_canvas
 from genko.app.guide_panel import PRESETS, GuidePanel
@@ -49,7 +49,10 @@ from genko.ops import ApplyError
 from genko.app import theme
 
 COMMIT_AFTER_MS = 1000
-SIDE_WIDTH = 230  # the side panels; the rest of the window is the page  # changes reach the disk after a second without edits
+SIDE_WIDTH = 230  # the side panels; the rest of the window is the page
+AGENT_PANELS = ("承認箱", "コマの詳細", "資料")  # (only for books made with agents)
+DRAWING_TOOLS = ("pen", "eraser", "fill", "lassofill", "vector", "blend", "liquify", "gradient", "shape")
+OCCASIONAL_PANELS = ("履歴", "素材", "定規・3D", "点検", "資料")  # (join the row of tabs when opened)  # changes reach the disk after a second without edits
 
 
 def _pixmap(image) -> QPixmap:
@@ -2339,8 +2342,7 @@ class MainWindow(QMainWindow):
         from genko.app.tool_settings import TextToolSettings, ToolSettings, action_page, fit_narrow, menu_button
 
         self.ai_button = QPushButton("AI と作る")
-        theme.role_prop(self.ai_button, "quiet", True)
-        self.ai_button.setFlat(True)
+        theme.role_prop(self.ai_button, "chip", True)  # (the same rounded look as the counts beside it)
         self.ai_button.setToolTip("AI（Claude など）をつなぐ・この原稿で動いた AI を見る")
         self.ai_button.clicked.connect(self._ai_dialog)
         self.statusBar().addPermanentWidget(self.ai_button)
@@ -2349,6 +2351,7 @@ class MainWindow(QMainWindow):
         self._ai_timer.timeout.connect(self._refresh_ai)
         self._ai_timer.start()
         self.process = ProcessBar()
+        self.process.open_box.connect(lambda: self.show_dock("承認箱"))
         self.statusBar().addPermanentWidget(self.process)
         self.statusBar().addPermanentWidget(self.zoom_label)
         self.approvals = ApprovalBox(self)
@@ -2644,16 +2647,15 @@ class MainWindow(QMainWindow):
         from genko.app.colours import ColourPanel
 
         self.colours = ColourPanel(self)
-        # the panels on the right; the ones for books made with agents only show for those books
+        # the panels on the right: the approval box on its own (only while something waits for the person), and
+        # under it one row of tabs; the panels for occasional work join that row when they are opened
         docks = []
         self.agent_docks = []
-        groups: dict[str, list] = {"upper": [], "lower": [], "agent": []}
-        for title, widget, group in (("承認箱", self.approvals, "agent"), ("ページ", self.pages, "upper"),
-                                     ("レイヤー", self.layers, "upper"), ("履歴", self.history, "upper"), ("台詞", self.story, "lower"),
-                                     ("素材", self.materials, "lower"), ("定規・3D", self.guides, "lower"),
-                                     ("点検", self.checks, "lower"), ("カラー", self.colours, "upper"),
-                                     ("コマの詳細", self.panel_view, "agent"),
-                                     ("資料", self.library, "agent")):
+        self.box_dock = None
+        panels = (("承認箱", self.approvals), ("レイヤー", self.layers), ("台詞", self.story), ("ページ", self.pages),
+                  ("カラー", self.colours), ("コマの詳細", self.panel_view), ("履歴", self.history),
+                  ("素材", self.materials), ("定規・3D", self.guides), ("点検", self.checks), ("資料", self.library))
+        for title, widget in panels:
             dock = QDockWidget(title, self)
             if widget is not self.pages:
                 # tall panels scroll on a small screen instead of making the window taller
@@ -2667,23 +2669,24 @@ class MainWindow(QMainWindow):
                 dock.setWidget(widget)
             dock.setObjectName(title)
             dock.setMinimumWidth(SIDE_WIDTH)
-            dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+            features = QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            if title in OCCASIONAL_PANELS:  # (their tab has a close button: they leave the row when done with)
+                features |= QDockWidget.DockWidgetFeature.DockWidgetClosable
+            dock.setFeatures(features)
             dock.setTitleBarWidget(QWidget())  # the tab already names it; the room goes to the panel
             self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
             self.view_menu.addAction(dock.toggleViewAction())
             dock.visibilityChanged.connect(lambda shown, d=dock: shown and d in self._stale_docks and self._refresh_dock(d))
             docks.append(dock)
-            groups[group].append(dock)
-            if group == "agent":
+            if title in AGENT_PANELS:
                 self.agent_docks.append(dock)
-        # the right column: the approval box on top (only for books made with agents: what waits for the person is
-        # always in sight), then pages and layers, then the lettering and the other panels; the left column keeps
-        # the tool settings and the overview for every book
-        self.splitDockWidget(groups["agent"][0], groups["upper"][0], Qt.Orientation.Vertical)
-        self.splitDockWidget(groups["upper"][0], groups["lower"][0], Qt.Orientation.Vertical)
-        for group in groups.values():
-            for other in group[1:]:
-                self.tabifyDockWidget(group[0], other)
+        self.box_dock = docks[0]
+        self.splitDockWidget(docks[0], docks[1], Qt.Orientation.Vertical)
+        for other in docks[2:]:
+            self.tabifyDockWidget(docks[1], other)
+        for dock in docks:
+            if dock.windowTitle() in OCCASIONAL_PANELS:
+                dock.hide()
         self.setTabPosition(Qt.DockWidgetArea.LeftDockWidgetArea, QTabWidget.TabPosition.North)
         self.setTabPosition(Qt.DockWidgetArea.RightDockWidgetArea, QTabWidget.TabPosition.North)
         self.studio_docks = docks
@@ -2750,31 +2753,59 @@ class MainWindow(QMainWindow):
             return
         self._agent_mode = on
         for dock in self.agent_docks:
-            dock.setVisible(on)
             dock.toggleViewAction().setVisible(on)
+            if not on:
+                dock.hide()
+            elif dock.windowTitle() == "コマの詳細":
+                dock.show()
+        self._box_waiting = None
+        self._sync_box()
         self.process.setVisible(on)
         self.act_name_ok.setVisible(on)  # (stages and their approvals are for books made with agents)
         if self.isVisible():
             QTimer.singleShot(0, self._settle_docks)
 
+    def _sync_box(self) -> None:
+        """The approval box stands over the tabs while something waits for the person, and steps aside when
+        nothing does (the count stays in the status bar)."""
+        box = getattr(self, "box_dock", None)
+        if box is None:
+            return
+        waiting = bool(getattr(self, "_agent_mode", False) and review_model.inbox(self.episode))
+        if waiting == getattr(self, "_box_waiting", None):
+            return
+        self._box_waiting = waiting
+        box.setVisible(waiting)
+        if waiting and self.isVisible():
+            QTimer.singleShot(0, self._settle_docks)
+
     def _settle_docks(self) -> None:
-        """The panels in front: the approval box (for agent books), the layers and the lines; the lower
-        stack (the lines, the materials) gets the larger share of the height."""
-        upper = next((d for d in self.studio_docks if d.windowTitle() == "レイヤー"), None)
-        lower = next((d for d in self.studio_docks if d.windowTitle() == "台詞"), None)
-        box = next((d for d in self.studio_docks if d.windowTitle() == "承認箱"), None)
-        if upper is not None and lower is not None:
-            if box is not None and box.isVisible():  # (the approval box: room for its list and one request's words)
-                self.resizeDocks([box, upper, lower], [max(170, self.height() // 5), 3 * self.height() // 10,
-                                                       2 * self.height() // 5], Qt.Orientation.Vertical)
-            else:
-                self.resizeDocks([upper, lower], [2, 3], Qt.Orientation.Vertical)
-        if hasattr(self, "navigator_dock"):  # the navigator stays small under the tool settings
+        """The panels in front: the approval box (while something waits), then the layers; the overview stays
+        small under the tool settings."""
+        tabs = next((d for d in self.studio_docks if d.windowTitle() == "レイヤー"), None)
+        self._fit_box()
+        if hasattr(self, "navigator_dock"):
             self.resizeDocks([self.brush_dock, self.navigator_dock], [max(300, self.height() - 330), 170], Qt.Orientation.Vertical)
-        for dock in self.studio_docks:
-            if dock.windowTitle() in ("承認箱", "レイヤー", "台詞") and dock.isVisible():
-                dock.raise_()
+        wide = max(SIDE_WIDTH, min(320, self.width() // 6))  # (the tabs' names whole on a wide screen)
+        if tabs is not None and not tabs.isFloating():
+            self.resizeDocks([tabs], [wide], Qt.Orientation.Horizontal)
+        if tabs is not None and not getattr(self, "_fronted", False):
+            self._fronted = True
+            tabs.raise_()
         self._hide_stray_tabs()
+
+    def _fit_box(self) -> None:
+        """The approval box as tall as the request needs: room for a preview when there is one, only its words
+        and buttons otherwise; the tabs under it keep the rest."""
+        box = getattr(self, "box_dock", None)
+        tabs = next((d for d in getattr(self, "studio_docks", []) if d.windowTitle() == "レイヤー"), None)
+        if box is None or tabs is None or not box.isVisible() or box.isFloating():
+            return
+        most = 2 * self.height() // 5
+        box_ = self.approvals
+        pictured = box_.preview._source is not None or box_.choices.isVisibleTo(box_)
+        want = max(300, most) if pictured else min(max(box_.sizeHint().height(), box_.minimumSizeHint().height()) + 24, most)
+        self.resizeDocks([box, tabs], [want, max(200, self.height() - want)], Qt.Orientation.Vertical)
 
     def show_dock(self, title: str) -> None:
         for dock in self.findChildren(QDockWidget):  # (the studio's panels and the others: 全体図, タイムライン…)
@@ -2801,6 +2832,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_visible_docks(self) -> None:
         self.process.refresh(self.episode)
+        self._sync_box()
         if self.canvas.selected_line_id:  # the chosen line's settings beside the tool stay current
             self.story.refresh()
             self.story.select(self.canvas.selected_line_id)
@@ -2820,6 +2852,7 @@ class MainWindow(QMainWindow):
     def _refresh_studio(self) -> None:
         self._stale_docks.clear()
         self.process.refresh(self.episode)
+        self._sync_box()
         self.approvals.refresh()
         page = self._current()
         if self.panel_view.frame_id and (page is None or not self._has_frame(page, self.panel_view.frame_id)):
@@ -3107,6 +3140,18 @@ class MainWindow(QMainWindow):
         self.tool_actions[tool].setChecked(True)
         if hasattr(self, "tool_settings"):
             self.tool_settings.show_tool(self.canvas.tool)
+        self._panel_for_tool(tool)
+
+    def _panel_for_tool(self, tool: str) -> None:
+        """The tab under the approval box follows the work: the lines for the text tool, the layers for the
+        drawing tools. Only between those two, so a panel the person opened stays in front."""
+        docks = {d.windowTitle(): d for d in getattr(self, "studio_docks", [])}
+        lines, layers = docks.get("台詞"), docks.get("レイヤー")
+        if lines is None or layers is None:
+            return
+        want, other = (lines, layers) if tool == "text" else (layers, lines) if tool in DRAWING_TOOLS else (None, None)
+        if want is not None and not self._dock_visible(want) and self._dock_visible(other):
+            want.raise_()
 
     # --- the layer the pen works on ---------------------------------------------------------------
 
