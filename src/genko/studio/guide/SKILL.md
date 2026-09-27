@@ -68,6 +68,13 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 
 作画はパイロットページ（ふつうは 1 ページ目）から始まる。パイロットページの作画が承認されると、絵柄（参照画像）と使う画像ツールが固定され、残りのページの依頼パックに入る。それまで他のページの作画は `next` に出ない。
 
+- 絵柄はマンガの絵柄カタログ（https://manga.akiba.tokyo.jp）から選べる。`mcp__genko__style_catalog`（引数なし）で 1段目のジャンル、
+  `style_id` でその絵柄の言葉と 1 つ下の段（`children`）が出る。どの段で止めてもよい。絵柄は本の印象を決めるので、
+  `ask_human` で候補を見せて人に選んでもらい、`mcp__genko__use_style`（`style_id`、`commit: true`）で原稿に写す。
+  以後の依頼パックの prompt・avoid・参照画像（`refs/style_catalog.png`）に入る。原稿の絵柄はサイトが変わっても変わらない。
+  `style_catalog`（`project` だけ）で新しい版が出ているか（`newer`）が分かるが、写し直すのは人に確かめてから。
+  白黒の絵柄はカラーの原稿（webtoon）には使われない。試しのページで絵柄が固定されたあとは人しか変えられない。
+
 - `make_sheet`: `mcp__genko__generation_request`（`character_id`）で設定画の依頼パックを受け取り、画像生成で作る。
   顔が正面を向いたアップを必ず入れる（承認時に顔の参照として切り出される）。画像を返された `inbox` のフォルダに保存し、
   `mcp__genko__import_images`（`request_id`、`images: [{file, origin}]`）で取り込む。取り込んだら人間に選んでもらう（承認を頼む）。

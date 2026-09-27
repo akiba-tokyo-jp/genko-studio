@@ -1028,6 +1028,10 @@
       "premise": "str?"
     },
     {
+      "op": "set_style_catalog",
+      "catalog": "object | null (a branch of the manga style catalog as the style_catalog tool keeps it; null: back to Genko's own words). Once the pilot page fixed the style, only a person changes it"
+    },
+    {
       "op": "upsert_character",
       "character": "{id, …}",
       "unlock": "bool? (human)"

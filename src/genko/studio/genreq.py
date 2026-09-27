@@ -49,7 +49,8 @@ class Pack:
 
 def _artwork(style: dict) -> dict:
     """The style words for a picture that is not a panel (a character sheet, a background): "漫画の絵", not "コマ"."""
-    return {"ja": style["ja"].replace("漫画のコマ", "漫画の絵").replace("ウェブトゥーンのコマ", "ウェブトゥーンの絵"),
+    return {"ja": style["ja"].replace("漫画のコマ", "漫画の絵").replace("マンガのコマ", "マンガの絵")
+            .replace("ウェブトゥーンのコマ", "ウェブトゥーンの絵"),
             "en": style["en"].replace("manga panel", "manga artwork").replace("webtoon panel", "webtoon artwork"),
             "tags": style["tags"]}
 
@@ -61,6 +62,49 @@ def vocab(expression: str = "mono") -> dict:
         v["style"] = v["style_color"]
         v["avoid"] = [a for a in v["avoid"] if a != "色"]
     return v
+
+
+def catalog(episode: Episode) -> dict | None:
+    """The branch of the manga style catalog the book keeps (None: Genko's own words)."""
+    kept = (episode.studio.get("style") or {}).get("catalog")
+    return kept if isinstance(kept, dict) and (kept.get("prompt") or {}).get("ja") else None
+
+
+def catalog_fits(kept: dict, expression: str) -> bool:
+    """A black-and-white style on a colour page does not fit (its words ask for no colour)."""
+    return not (kept.get("expression", "mono") == "mono" and expression == "color")
+
+
+def book_vocab(episode: Episode, expression: str = "mono") -> dict:
+    """The phrase book with the book's style: the catalog's words and what it never draws, when the book chose one
+    that fits the page."""
+    v = vocab(expression)
+    kept = catalog(episode)
+    if kept is None or not catalog_fits(kept, expression):
+        return v
+    words = kept["prompt"]
+    v["style"] = {"ja": str(words["ja"]).rstrip() + ("" if str(words["ja"]).rstrip().endswith("。") else "。"),
+                  "en": str(words.get("en") or words["ja"]).rstrip(), "tags": str(words.get("tags") or "")}
+    known = {a for item in v["avoid"] for a in item.replace("・", " ").split()} | set(v["avoid"])
+    v["avoid"] = v["avoid"] + [a for a in kept.get("avoid") or [] if a not in known and not (expression == "color" and a == "色")]
+    return v
+
+
+def _catalog_sample(episode: Episode, store: AssetStore, expression: str, files: dict[str, bytes], refs: list[str],
+                    notes: list[str]) -> None:
+    """The style's sample as a reference, and a word on what it is for."""
+    kept = catalog(episode)
+    if kept is None:
+        return
+    if not catalog_fits(kept, expression):
+        notes.append(f"原稿の絵柄（{kept.get('title')}）は白黒用なので、カラーのページには使っていない。カラーの絵柄は人に確かめる")
+        return
+    data = _asset(store, kept.get("sample") or "")
+    if data is not None:
+        files["refs/style_catalog.png"] = data
+        refs.append("refs/style_catalog.png")
+        notes.append(f"refs/style_catalog.png は原稿の絵柄「{'・'.join(kept.get('path') or [kept.get('title', '')])}」の見本。"
+                     "線・ベタとトーンの量・目や髪の描き方・頭身を合わせる。人物・服・構図は真似しない")
 
 
 # --- sizes ---------------------------------------------------------------------
@@ -154,7 +198,7 @@ def _keepout_sentence(boxes01: list[list[float]]) -> tuple[str, str]:
 
 
 def panel_prompt(episode: Episode, page: Page, frame: Frame, keep01: list[list[float]], instruction: str | None) -> tuple[dict, list[str]]:
-    v = vocab(page.spec.expression)
+    v = book_vocab(episode, page.spec.expression)
     panel = frame.panel or {}
     studio = episode.studio
     doc = studio.get("bible_doc") or {}
@@ -275,7 +319,7 @@ def _location(episode: Episode, location_id: str | None) -> dict | None:
 
 
 def _avoid(episode: Episode, char_ids: list[str], panel: dict | None, expression: str = "mono") -> list[str]:
-    v = vocab(expression)
+    v = book_vocab(episode, expression)
     override = ((panel or {}).get("gen") or {}).get("avoid_override")
     if override:
         return [str(x) for x in override]
@@ -410,7 +454,7 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         char = next((c for c in episode.bible.characters if c.get("id") == character_id), None)
         if char is None:
             raise RequestError(f"登場人物 {character_id} はない", "/character_id")
-        v = vocab(episode.spec.expression)
+        v = book_vocab(episode, episode.spec.expression)
         v["style"] = _artwork(v["style"])
         box_size = size_block(160.0, 240.0, 0.0, dpi, tool_spec, mode)
         box_size["frame_mm"] = None
@@ -438,7 +482,7 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         location = _location(episode, location_id)
         if location is None:
             raise RequestError(f"場所 {location_id} はない", "/location_id")
-        v = vocab(episode.spec.expression)
+        v = book_vocab(episode, episode.spec.expression)
         v["style"] = _artwork(v["style"])
         box_size = size_block(240.0, 160.0, 0.0, dpi, tool_spec, mode)
         box_size["frame_mm"] = None
@@ -456,6 +500,8 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
                 name = f"refs/{location['id']}_{ref['asset'][7:15]}.png"
                 files[name] = data
                 refs.append(name)
+    if mode == "new" and not (purpose == "panel_art" and "refs/style_pilot.png" in files):  # (the pilot page is the
+        _catalog_sample(episode, store, expression, files, refs, notes)  # book's own sample once it fixed the style)
     source = mask = None
     if mode in ("edit", "inpaint", "upscale"):
         frame = _page_frame(episode, {"page": page, "frame_id": frame_id})[1] if purpose in ("panel_art", "draft") else None
@@ -519,6 +565,9 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         "notes_for_agent": notes,
         "instruction": instruction,
     }
+    kept = catalog(episode)
+    if kept is not None and catalog_fits(kept, expression):  # (which style, which version: the request says so)
+        request["style"] = {"catalog_id": kept["id"], "version": kept.get("version"), "title": kept.get("title")}
     digest = sha256_hex(canonical_json({"request": request, "files": {k: sha256_hex(v) for k, v in sorted(files.items())}}))
     request_id = "rq_" + digest[:10]
     request = {"type": TYPE, "id": request_id, **{k: v for k, v in request.items() if k != "type"}}

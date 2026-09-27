@@ -1871,6 +1871,8 @@ class MainWindow(QMainWindow):
         self.act_spread = a("次のページと見開きにする／解除", self._toggle_spread)
         self.act_nombre = a("ノンブルの設定…", lambda: nombre_dialog(self), tip="位置・書体・大きさ・始まりの番号・隠しノンブル")
         self.act_paper = a("原稿用紙の設定…", self._paper_settings, tip="用紙・仕上がり・裁ち落とし・基本枠。変えるとコマや台詞も新しい枠に合わせて動きます")
+        self.act_style = a("絵柄を選ぶ…", self._pick_style,
+                           tip="マンガの絵柄カタログから、この原稿の絵柄を選びます（絵の依頼文と見本の参照画像になります）")
         self.act_page_nombre = a("このページのノンブルを隠す／出す", self._toggle_page_nombre)
         self.act_story_editor = a("ストーリーエディター…", self.open_story_editor, "Ctrl+Shift+L", "全ページの台詞をまとめて直す・台本を流し込む")
         self.act_replace = a("台詞の検索・置換…", self._replace_dialog, "Ctrl+Alt+F", "全ページの台詞から言葉を探して置き換えます")
@@ -1945,7 +1947,7 @@ class MainWindow(QMainWindow):
                       self.act_gutters, self.act_border, self.act_no_border, *self.border_kind_actions, self.act_border_colour,
                       self.act_bleed, self.act_reset_shape, None, self.act_frame_numbers]),
             ("ページ", [self.act_add_page, self.act_dup_page, self.act_del_page, None, self.act_page_up, self.act_page_down, self.act_spread,
-                        None, self.act_paper, self.act_nombre, self.act_page_nombre, self.act_add_cover, self.act_assignee, self.act_timeline, None,
+                        None, self.act_paper, self.act_style, self.act_nombre, self.act_page_nombre, self.act_add_cover, self.act_assignee, self.act_timeline, None,
                         self.act_story_editor, self.act_replace, self.act_book_preview, self.act_checks, None, self.act_name_ok]),
         ]
         from genko.app.lettering import KINDS
@@ -4643,6 +4645,79 @@ class MainWindow(QMainWindow):
             self.canvas.fit_page()
             self.flash(f"原稿用紙を変えました: {self.episode.spec.describe()}", 5000)
 
+    def _pick_style(self) -> None:
+        from genko.app.style_picker import StylePicker
+        from genko.studio.genreq import catalog
+
+        dialog = StylePicker(self, catalog(self.episode))
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if dialog.back_to_genko:
+            if self.apply_ops([{"op": "set_style_catalog", "catalog": None}]):
+                self.flash("絵柄を Genko の言葉に戻しました", 4000)
+        elif dialog.chosen:
+            self.use_style(dialog.chosen, ask=False)
+
+    def open_link(self, link: str) -> None:
+        """A genko:// link from a web page (the style catalog's 「この絵柄を使う」)."""
+        from genko import stylecat
+
+        try:
+            style_id = stylecat.style_from_link(link)
+        except stylecat.CatalogError as exc:
+            self.flash(str(exc), 6000, error=True)
+            return
+        if style_id is None:
+            self.flash(f"Genko の知らないリンクです: {link}", 6000, error=True)
+            return
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self.use_style(style_id, ask=True)
+
+    def use_style(self, style_id: str, ask: bool = True) -> bool:
+        """Keep a branch of the style catalog as this book's style: its words, what it never draws, its sample."""
+        from genko import stylecat
+        from genko.assets import AssetStore
+
+        if self.path is None:
+            self.flash("絵柄を選ぶ前に、原稿を保存します（ファイル → 別の場所に保存）", 6000)
+            return False
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            data = stylecat.style(style_id)
+        except stylecat.CatalogError as exc:
+            QApplication.restoreOverrideCursor()
+            self.flash(str(exc), 6000, error=True)
+            return False
+        QApplication.restoreOverrideCursor()
+        where = "・".join(p.get("title", "") for p in data.get("path") or []) or data.get("title", style_id)
+        warn = ""
+        if data.get("expression") == "mono" and self.episode.spec.expression == "color":
+            warn = "\n\nこの絵柄は白黒用です。カラーの原稿では、絵の依頼に使われません。"
+        locked = (self.episode.studio.get("style") or {}).get("locked")
+        if locked:
+            warn += f"\n\n絵柄は {locked.get('page')} ページの試しで固定されています。変えると、この後の絵の依頼が新しい絵柄になります。"
+        if ask or locked or warn:
+            answer = QMessageBox.question(self, "絵柄を選ぶ", f"「{self.episode.title or '無題'}」の絵柄を「{where}」にしますか？{warn}")
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.commit_now()
+            png = stylecat.sample_png(data)
+            kept = stylecat.saved(data, AssetStore(self.path).put_bytes(png, ".png") if png else None)
+        except stylecat.CatalogError as exc:
+            self.flash(str(exc), 6000, error=True)
+            return False
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not self.apply_ops([{"op": "set_style_catalog", "catalog": kept}]):
+            return False
+        self.flash(f"絵柄を「{where}」にしました（版 {kept.get('version')}）。この後の絵の依頼に入ります", 6000)
+        return True
+
     def _toggle_spread(self) -> None:
         page = self._current()
         if page is None:
@@ -4828,9 +4903,25 @@ def remember_project(path: Path) -> None:
     target.write_text(json.dumps(items[:12], ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def run_app(path: Path | None = None) -> int:
+def run_app(path: Path | None = None, link: str | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Genko Studio")
+    from genko.app import links
+
+    if link and links.send(link):  # (Genko is open already: the link goes to it)
+        return 0
+    listener = links.Listener(app)
+    waiting: list[str] = [link] if link else []
+
+    def arrive(url: str) -> None:
+        window = next((w for w in (QApplication.activeWindow(), *QApplication.topLevelWidgets())
+                       if isinstance(w, MainWindow) and w.isVisible()), None)
+        if window is None:
+            waiting.append(url)
+        else:
+            window.open_link(url)
+
+    listener.received.connect(arrive)
     from genko.app import preferences
 
     if preferences.ui_font_pt():  # the size of the letters chosen in the preferences
@@ -4848,6 +4939,8 @@ def run_app(path: Path | None = None) -> int:
     window = MainWindow(path)
     remember_project(path)
     window.show()
+    for url in waiting:
+        QTimer.singleShot(0, lambda url=url: window.open_link(url))
     return app.exec()
 
 

@@ -43,7 +43,7 @@ def _out(result: ToolResult) -> list[Any]:
 
 READ_ONLY = frozenset({
     "projects", "status", "next", "inspect", "render", "candidates", "preflight", "check", "tickets", "proposals",
-    "review_page", "export", "export_proof", "export_status",
+    "review_page", "export", "export_proof", "export_status", "style_catalog",
 })
 
 
@@ -336,6 +336,21 @@ def build_server(root: Path, actor: str) -> MCPServer:
         """1ページのネーム計画（name_plan@1）を検査・コマ割り・写植し、プレビュー画像を返す。
         commit=true で保存。すでにネームがあるページを作り直すときは replace=true。"""
         return call(service.submit_name, project, plan, commit, replace)
+
+    @tool
+    def style_catalog(project: str | None = None, style_id: str | None = None) -> list:
+        """マンガの絵柄カタログ（https://manga.akiba.tokyo.jp）を読む。引数なし: 1段目のジャンルの一覧。
+        style_id: その絵柄（言葉 prompt_ja・白黒かカラーか・1 つ下の段の children）。children から選んで下の段へたどる。
+        どの段で止めてもよい。project だけ: 原稿の絵柄と、カタログに新しい版が出ているか（newer）。"""
+        return call(service.style_catalog, project, style_id)
+
+    @tool
+    def use_style(project: str, style_id: str | None, commit: bool = False) -> list:
+        """カタログの絵柄を原稿の絵柄にする（言葉・描かない物・見本の絵・版を原稿に写す。サイトが変わっても原稿の絵柄は
+        変わらない）。以後の generation_request の prompt・avoid・参照画像（refs/style_catalog.png）に入る。
+        style_id null で Genko の言葉に戻す。試しのページで絵柄が固定されたあとは人しか変えられない。
+        絵柄は本の印象を決めるので、選ぶ前に ask_human で人に確かめるのがよい。"""
+        return call(service.use_style, project, style_id, commit)
 
     @tool
     def apply_ops(project: str, ops: list[dict], commit: bool = False) -> list:

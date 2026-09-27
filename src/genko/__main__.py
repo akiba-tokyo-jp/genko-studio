@@ -103,7 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--ascii", action="store_true", help="Escape non-ASCII in JSON output (for legacy consoles)")
     app_p = sub.add_parser("app", help="Open the human desktop app (review, approve, edit)")
-    app_p.add_argument("project", type=Path, nargs="?", help="a .genko folder; without it a start screen lists recent projects")
+    app_p.add_argument("project", nargs="?", help="a .genko folder (or a genko:// link); without it a start screen lists recent projects")
+    sub.add_parser("register-links", help="Let genko:// links (the style catalog's 「この絵柄を使う」) open Genko")
     sub.add_parser("studio", help="Agent tools and human approvals (genko studio -h)", add_help=False)
     sub.add_parser("mcp", help="MCP server for agents such as Hermes Agent (genko mcp -h)", add_help=False)
     return parser
@@ -331,9 +332,18 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json({"ok": True, "revoked": token_store.revoke(args.id)} if args.id else {"ok": False, "error": "--id is required"})
             return 0
         if args.cmd == "app":
+            from genko.app.links import is_link
             from genko.app.main import run_app
 
-            return run_app(args.project)
+            if is_link(args.project):
+                return run_app(None, args.project)
+            return run_app(Path(args.project) if args.project else None)
+        if args.cmd == "register-links":
+            from genko.app.links import register
+
+            done, words = register()
+            _print_json({"ok": done, "message": words})
+            return 0 if done else 1
     except ApplyError as exc:
         _print_json({"ok": False, "error": str(exc)})
         return 1

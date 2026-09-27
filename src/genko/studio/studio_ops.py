@@ -29,11 +29,13 @@ STUDIO_OPS = frozenset({
     "replace_regions", "bind_ref", "unbind_ref", "register_assets", "attach_reference",
     "open_request", "close_request", "import_candidates", "review_candidates", "set_candidate",
     "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish", "ask_human", "reject_sheet",
-    "set_layout", "propose", "resolve_proposal", "resolve_ticket", "reopen_ticket",
+    "set_layout", "propose", "resolve_proposal", "resolve_ticket", "reopen_ticket", "set_style_catalog",
 })
 
 STUDIO_SCHEMA = [
     {"op": "set_studio", "bible_doc": "object?", "style": "object?", "policy": "object? (human)", "premise": "str?"},
+    {"op": "set_style_catalog", "catalog": "object | null (a branch of the manga style catalog as the style_catalog tool "
+     "keeps it; null: back to Genko's own words). Once the pilot page fixed the style, only a person changes it"},
     {"op": "upsert_character", "character": "{id, …}", "unlock": "bool? (human)"},
     {"op": "delete_character", "id": "str", "force": "bool?"},
     {"op": "upsert_location", "location": "{id, …}"},
@@ -523,6 +525,26 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
         else:
             panel["refs"] = [r for r in refs if r.get("id") != op.get("id")]
         _refresh_brief(panel)
+        return
+
+    if name == "set_style_catalog":
+        from genko import stylecat
+
+        style = studio.get("style") or {}
+        if style.get("locked") and not person:
+            raise _err("the style is fixed by the pilot page: a person changes the style catalog")
+        catalog = op.get("catalog")
+        if catalog is None:
+            style.pop("catalog", None)
+        else:
+            try:
+                kept = stylecat.validate(catalog)
+            except stylecat.CatalogError as exc:
+                raise _err(str(exc)) from exc
+            if kept.get("sample"):
+                _require_asset(episode, kept["sample"])
+            style["catalog"] = {**kept, "by": agent}
+        studio["style"] = style
         return
 
     if name == "register_assets":

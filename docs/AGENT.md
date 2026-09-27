@@ -134,6 +134,16 @@ genko studio comment demo.genko --page 2 --frame FRAME_ID "空をもっと暗く
 
 ## Art: requests, imports, finishing and export (M3–M4)
 
+Style from the manga style catalog (L1): `style_catalog` (no arguments: the genres; `style_id`: a branch with its words
+and `children`; `project` alone: the book's style and `newer` when the site has a newer version) and
+`use_style {project, style_id|null, commit}` copy a branch into the book (`studio.style.catalog`: id, path, words
+ja/en/tags, avoid, the sample as an asset, version) with the op `set_style_catalog`. Requests then start with the
+style's words, add its avoid, carry `refs/style_catalog.png` and `style {catalog_id, version, title}`. A black-and-white
+style is not used on colour pages (a note instead). After the pilot page fixed the style only a person changes it.
+The site's 「この絵柄を使う」 opens `genko://use-style?id=…`: `genko app <link>` hands it to the open Genko
+(`genko register-links` tells Windows/Linux that such links open Genko). GENKO_STYLE_CATALOG changes the address,
+GENKO_STYLE_CATALOG_TOKEN is sent as a bearer token.
+
 Genko makes no images. It writes a generation request, the agent generates with its own image tool, and Genko takes the result back as candidates.
 
 1. `next` gives the work in order: `make_sheet` → (person approves the sheet) → `gen_panel` → `import_pending` → `review_candidates` → `fix_panel` → `report_regions` → (person approves the art) → `upscale_panel` → `finish_page` → (person exports). Items another agent claimed (`next claim=true`, 10-minute lease) and items parked by `ask_human` show as blocked.

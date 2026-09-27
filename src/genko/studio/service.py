@@ -25,8 +25,8 @@ from genko.lock import ProjectLock
 from genko.models import Binding, Episode, PageSpec, new_episode
 from genko.ops import ApplyError, apply_ops
 from genko.studio import layout as layout_mod
-from genko.studio import lint, state, worklist
-from genko.studio.issues import Issue, error, has_errors
+from genko.studio import genreq, lint, state, worklist
+from genko.studio.issues import Issue, error, has_errors, warning
 from genko.studio.jsonschema_lite import validate
 from genko.studio.letter import place_page, placements_to_ops
 from genko.studio.schemas import SCHEMAS, fill_nulls
@@ -61,7 +61,7 @@ AGENT_OPS = frozenset({
     "add_region", "edit_region", "delete_region", "replace_regions", "bind_ref", "unbind_ref",
     "register_assets", "attach_reference", "open_request", "close_request", "import_candidates",
     "review_candidates", "set_candidate", "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish",
-    "ask_human", "propose", "resolve_ticket",
+    "ask_human", "propose", "resolve_ticket", "set_style_catalog",
 })
 
 # Agent tools callable by name from `genko studio call` (the MCP tool set, minus project management).
@@ -70,7 +70,7 @@ AGENT_TOOLS = frozenset({
     "record_review", "request_approval", "tickets", "generation_request", "import_images", "candidates",
     "review_candidates", "adopt", "request_fix", "report_regions", "finish_page", "preflight", "export_proof", "ask_human",
     "review_page", "derive", "import_name", "analyze_name", "propose_lines", "proposals", "undo", "export", "check",
-    "resolve_ticket", "export_status", "upscale",
+    "resolve_ticket", "export_status", "upscale", "style_catalog", "use_style",
 })
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
@@ -101,6 +101,27 @@ class ToolResult:
             "issues": [issue.to_dict() for issue in sorted(self.issues, key=lambda i: i.severity != "error")],  # (errors first)
             "files": self.files,
         }
+
+
+def _catalog_node(data: dict) -> dict:
+    """A branch of the style catalog, for an agent choosing one: where it is, its words, the branches under it."""
+    return {
+        "id": data.get("id"), "title": data.get("title"), "summary": data.get("summary"), "level": data.get("level"),
+        "path": [p.get("title") for p in data.get("path") or [] if isinstance(p, dict)],
+        "expression": data.get("expression"), "version": data.get("version"),
+        "prompt_ja": (data.get("prompt") or {}).get("ja"),
+        "children": [{k: c.get(k) for k in ("id", "title", "summary")} for c in data.get("children") or [] if isinstance(c, dict)],
+    }
+
+
+def _style_brief(episode) -> dict | None:
+    """The book's style from the catalog (None: Genko's own words)."""
+    kept = genreq.catalog(episode)
+    if kept is None:
+        return None
+    return {"id": kept.get("id"), "title": kept.get("title"), "path": kept.get("path"), "version": kept.get("version"),
+            "expression": kept.get("expression"), "has_sample": bool(kept.get("sample")),
+            "fits": genreq.catalog_fits(kept, episode.spec.expression)}
 
 
 def _gutter_brief(page) -> list[dict]:
@@ -198,8 +219,67 @@ class StudioService:
             "bible": state.bible(episode) is not None,
             "script": state.script(episode) is not None,
             "pages": pages,
+            "style": _style_brief(episode),
             "waiting_for": _waiting(items),
         })
+
+    def style_catalog(self, project: str | None = None, style_id: str | None = None) -> ToolResult:
+        """The manga style catalog: the genres (no id), a branch with its words and the branches under it (an id),
+        or the book's style and whether the catalog has a newer version of it (a project, no id)."""
+        from genko import stylecat
+
+        try:
+            if style_id:
+                data = stylecat.style(style_id)
+                return ToolResult(True, {"style": _catalog_node(data), "page_url": stylecat.page_url(data["id"])})
+            if project:
+                episode = load_episode(self.project_path(project))
+                kept = genreq.catalog(episode)
+                if kept is None:
+                    return ToolResult(True, {"style": None, "note": "この原稿は Genko の言葉の絵柄（カタログの絵柄を選んでいない）"})
+                return ToolResult(True, {"style": _style_brief(episode), "newer": stylecat.newer(kept)})
+            nodes = [n for n in stylecat.tree() if n.get("parent") is None]
+            return ToolResult(True, {"genres": [{k: n.get(k) for k in ("id", "title", "summary")} for n in nodes]})
+        except stylecat.CatalogError as exc:
+            return fail(str(exc), "style_catalog")
+
+    def use_style(self, project: str, style_id: str | None, commit: bool = False) -> ToolResult:
+        """Keep a branch of the catalog as the book's style (its words, what it never draws, its sample, its version).
+        style_id null: back to Genko's own words."""
+        from genko import stylecat
+        from genko.assets import AssetStore
+
+        path = self.project_path(project)
+        episode = load_episode(path)
+        issues: list[Issue] = []
+        try:
+            data = stylecat.style(style_id) if style_id else None
+        except stylecat.CatalogError as exc:
+            return fail(str(exc), "style_catalog", "/style_id")
+        if data is not None and data.get("expression") == "mono" and episode.spec.expression == "color":
+            issues.append(warning("style_mono_on_color", "/style_id", "白黒の絵柄を選んだが、この原稿はカラー（カラーのページの依頼には使われない）",
+                                  "白黒の原稿にするか、カラーの絵柄を人に確かめる"))
+        if (episode.studio.get("style") or {}).get("locked"):
+            return ToolResult(False, {"committed": False}, [error("style_locked", "/style_id",
+                              "絵柄は試しのページで固定済み。変えるのは人（Genko の画面で絵柄を選ぶ）")])
+        shown = _catalog_node(data) if data else None
+        if not commit:
+            return ToolResult(True, {"committed": False, "style": shown}, issues)
+        with ProjectLock(path, agent=self.actor):
+            episode = load_episode(path)
+            catalog = None
+            if data is not None:
+                try:
+                    png = stylecat.sample_png(data)
+                except stylecat.CatalogError as exc:
+                    return fail(str(exc), "style_catalog")
+                catalog = stylecat.saved(data, AssetStore(path).put_bytes(png, ".png") if png else None)
+            try:
+                apply_ops(episode, [{"op": "set_style_catalog", "catalog": catalog}], agent=self.actor)
+            except ApplyError as exc:
+                return ToolResult(False, {"committed": False}, [error("apply_failed", "/", wording_error(str(exc)))])
+            save_episode(episode, path, actor=self.actor)
+        return ToolResult(True, {"committed": True, "style": _style_brief(episode)}, issues)
 
     def next(self, project: str, limit: int = 5, claim: bool = False) -> ToolResult:
         """Runnable work items. claim=True leases the returned items to this actor (§7.4) so a
@@ -314,8 +394,6 @@ class StudioService:
                            mode: str = "new", parent: str | None = None, tool: str | None = None,
                            instruction: str | None = None, regions: list | None = None,
                            focus_character: str | None = None) -> ToolResult:
-        from genko.studio import genreq
-
         path = self.project_path(project)
         if purpose is None:
             purpose = "character_sheet" if character_id else ("location" if location_id else "panel_art")
@@ -349,7 +427,7 @@ class StudioService:
                           images=[preview] if preview else [])
 
     def import_images(self, project: str, request_id: str, images: list[dict]) -> ToolResult:
-        from genko.studio import genreq, importer
+        from genko.studio import importer
 
         path = self.project_path(project)
         request = genreq.read(path, str(request_id))
