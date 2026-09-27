@@ -234,6 +234,11 @@ class PreferencesDialog(QDialog):
         tl.addLayout(row)
         tabs.addTab(tablet, "ペンタブレット")
         # the screen and work
+        self.ui_font = QComboBox()
+        for label, key in theme.FONT_CHOICES:
+            self.ui_font.addItem(label, key)
+        self.ui_font.setCurrentIndex(max(0, self.ui_font.findData(theme.font_choice())))
+        self.ui_font.setToolTip("Genko の標準は、どのパソコンでも同じ見た目になるよう同梱した書体です（SIL OFL）")
         self.font_pt = QSpinBox()
         self.font_pt.setRange(0, 24)
         self.font_pt.setSpecialValueText("パソコンの設定のまま")
@@ -310,6 +315,7 @@ class PreferencesDialog(QDialog):
         wl.addRow("ペンのカーソル", self.cursor)
         wl.addRow("Alt を押している間", self.alt_tool)
         wl.addRow("Ctrl を押している間", self.ctrl_tool)
+        wl.addRow("画面の書体", self.ui_font)
         wl.addRow("画面の文字の大きさ", self.font_pt)
         wl.addRow("新しい原稿の用紙", self.paper)
         wl.addRow("変更を保存するまで", self.save_after)
@@ -377,6 +383,7 @@ class PreferencesDialog(QDialog):
             else:
                 store.setValue(key, "|".join(keys))
         store.setValue("ui/font_pt", self.font_pt.value())
+        store.setValue("ui/ui_font", self.ui_font.currentData())
         store.setValue("new/paper", self.paper.currentData())
         store.setValue("save/after_ms", self.save_after.value() * 1000)
         store.setValue("tablet/gamma", "" if self.gamma is None else self.gamma)

@@ -502,6 +502,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             step = self.page.spread_step_mm()
             offset = -step if self.page.side() == "right" else step
             painter.fillRect(page_rect.translated(offset * self._scale, 0), QColor("#e9e4d8"))
+        self._draw_shadow(painter, page_rect)
         painter.fillRect(page_rect, QColor("#ffffff"))
         if self.background is not None:
             painter.drawPixmap(page_rect, self.background, QRectF(self.background.rect()))
@@ -603,6 +604,17 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             painter.drawEllipse(self._pt(ex, ey), 4, 4)
             painter.setBrush(Qt.BrushStyle.NoBrush)
 
+    def _draw_shadow(self, painter: QPainter, page_rect: QRectF) -> None:
+        """A soft shadow under the sheet, so the page sits on the surround like paper on a desk."""
+        scale = max(0.2, abs(painter.transform().determinant()) ** 0.5)
+        painter.setPen(Qt.PenStyle.NoPen)
+        dark = theme.tokens().dark
+        for i in range(6, 0, -1):
+            grow = i * 1.6 / scale
+            painter.setBrush(QColor(0, 0, 0, (14 if dark else 9) + (6 - i) * (5 if dark else 3)))
+            painter.drawRoundedRect(page_rect.adjusted(-grow, -grow + 1.5 / scale, grow, grow + 3 / scale), grow, grow)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
     def _draw_guides(self, painter: QPainter, page_rect: QRectF) -> None:
         """The bleed (cut off, shaded), the trim line (the finished size) and the basic frame."""
         def box(r) -> QRectF:
@@ -617,20 +629,20 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         outside.addRect(page_rect)
         inside = _Path()
         inside.addRect(bleed)
-        painter.fillPath(outside.subtracted(inside), QColor(90, 90, 110, 70))
+        painter.fillPath(outside.subtracted(inside), QColor(90, 92, 100, 26))
         band = _Path()
         band.addRect(bleed)
         cut = _Path()
         cut.addRect(trim)
-        painter.fillPath(band.subtracted(cut), QColor(120, 120, 140, 40))
+        painter.fillPath(band.subtracted(cut), QColor(120, 122, 130, 22))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         if self.page.spec.bleed_mm > 0:
-            painter.setPen(QPen(QColor(120, 120, 140, 160), 1, Qt.PenStyle.DotLine))
+            painter.setPen(QPen(QColor(120, 122, 130, 110), 1, Qt.PenStyle.DotLine))
             painter.drawRect(bleed)
-        painter.setPen(QPen(QColor(200, 40, 120, 200), 1))
+        painter.setPen(QPen(QColor(200, 60, 120, 130), 1))
         painter.drawRect(trim)
         inner = self.page.inner_rect_mm()
-        painter.setPen(QPen(QColor(28, 126, 214, 150), 1, Qt.PenStyle.DashLine))
+        painter.setPen(QPen(QColor(40, 126, 214, 95), 1, Qt.PenStyle.DashLine))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         self._draw_rect(painter, inner)
 

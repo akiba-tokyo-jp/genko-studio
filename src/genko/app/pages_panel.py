@@ -13,7 +13,9 @@ THUMB_H = 100
 def _icon(image) -> QIcon:
     rgb = image.convert("RGB")
     qimage = QImage(rgb.tobytes("raw", "RGB"), rgb.width, rgb.height, rgb.width * 3, QImage.Format.Format_RGB888).copy()
-    return QIcon(QPixmap.fromImage(qimage))
+    from genko.app.theme import still_icon
+
+    return still_icon(QPixmap.fromImage(qimage))
 
 
 class PageList(QListWidget):

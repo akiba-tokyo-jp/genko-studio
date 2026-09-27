@@ -264,6 +264,16 @@ def _draw(name: str, p: QPainter) -> None:
         p.drawLine(QPointF(16, 14), QPointF(16, 22))
         p.setBrush(INK)
         p.drawEllipse(QPointF(16, 10), 1.2, 1.2)
+    elif name in ("eye", "eye_off"):
+        path = QPainterPath(QPointF(3, 16))
+        path.quadTo(QPointF(16, 3), QPointF(29, 16))
+        path.quadTo(QPointF(16, 29), QPointF(3, 16))
+        p.drawPath(path)
+        if name == "eye":
+            p.setBrush(INK)
+            p.drawEllipse(QPointF(16, 16), 4.2, 4.2)
+        else:
+            p.drawLine(QPointF(6, 27), QPointF(26, 5))
     else:
         p.drawRect(QRectF(6, 6, 20, 20))
 

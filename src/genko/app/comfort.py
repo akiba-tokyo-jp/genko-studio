@@ -182,12 +182,17 @@ class RadialMenu(QWidget):
         c = self._centre()
         ring = QPainterPath()
         ring.addEllipse(c, self.RADIUS + self.BUTTON + 2, self.RADIUS + self.BUTTON + 2)
-        ring.addEllipse(c, 20, 20)
         back = QColor(t.panel)
-        back.setAlpha(238)
+        back.setAlpha(240)
         p.setPen(QPen(QColor(t.border), 1))
         p.setBrush(back)
         p.drawPath(ring)
+        # the centre: where the pen was; letting go here closes the menu
+        p.setBrush(QColor(t.window))
+        p.drawEllipse(c, 14, 14)
+        p.setPen(QPen(QColor(t.muted), 1.4))
+        for dx, dy in ((-4, -4), (-4, 4)):
+            p.drawLine(QPointF(c.x() + dx, c.y() + dy), QPointF(c.x() - dx, c.y() - dy))
         font = QFont(self.font())
         font.setPointSizeF(max(7.0, font.pointSizeF() * 0.85))
         p.setFont(font)
@@ -195,7 +200,7 @@ class RadialMenu(QWidget):
             spot = self._spot(i)
             chosen = i == self.hover
             p.setPen(QPen(QColor(t.accent if chosen else t.border), 1.5 if chosen else 1))
-            p.setBrush(QColor(t.accent_soft if chosen else t.raised))
+            p.setBrush(QColor(t.selected if chosen else t.raised))
             p.drawEllipse(spot, self.BUTTON, self.BUTTON)
             icon = action.icon()
             if not icon.isNull():

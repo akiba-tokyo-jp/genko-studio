@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QSizePolicy,
     QStackedWidget,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -53,23 +52,73 @@ SHORT = {
 }
 
 
-def action_button(action) -> QToolButton:
+def action_button(action) -> QWidget:
+    """A command as a quiet row (its picture and words, left-aligned, lit on hover), or a switch as a check box
+    — not a stack of identical framed buttons."""
+    from PySide6.QtWidgets import QPushButton
+
     short = SHORT.get(action.text())
     if short:
         action.setIconText(short)
-    button = QToolButton()
-    button.setDefaultAction(action)
-    button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+    if action.isCheckable():
+        box = QCheckBox(action.iconText())
+        box.setToolTip(action.toolTip() if action.toolTip() != action.text() else action.statusTip())
+        box.setChecked(action.isChecked())
+        box.toggled.connect(lambda on: action.isChecked() != on and action.trigger())
+        action.toggled.connect(lambda on: _alive(box) and box.setChecked(on))
+        return box
+    button = QPushButton(action.iconText())
+    button.setProperty("row", True)  # (drawn as a row: theme.py)
+    button.setIcon(_or_blank(action.icon()))
+    button.setToolTip(action.statusTip() or action.toolTip())
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-    button.setProperty("panel", True)  # (drawn as a button, not a bare tool: theme.py)
+    button.clicked.connect(action.trigger)
+
+    def follow() -> None:
+        if _alive(button):
+            button.setEnabled(action.isEnabled())
+            button.setVisible(action.isVisible())
+            button.setIcon(_or_blank(action.icon()))
+
+    action.changed.connect(follow)
+    follow()
     return button
+
+
+def _or_blank(icon):
+    """Rows without a picture keep its room, so every row's words start at the same place."""
+    if not icon.isNull():
+        return icon
+    from PySide6.QtGui import QIcon, QPixmap
+
+    blank = QPixmap(16, 16)
+    blank.fill(Qt.GlobalColor.transparent)
+    return QIcon(blank)
+
+
+def _alive(widget) -> bool:
+    try:
+        widget.objectName()
+        return True
+    except RuntimeError:  # (its panel was closed)
+        return False
+
+
+def section(title: str) -> QLabel:
+    """A section's name over its rows: small, bold and quiet."""
+    label = QLabel(title)
+    theme.role(label, "section")
+    return label
 
 
 def menu_button(label: str, groups: list) -> QWidget:
     """One button that opens a menu of actions (groups split by lines): a long list kept short."""
+    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QMenu, QPushButton
 
     button = QPushButton(label + " ▾")
+    button.setProperty("row", True)
+    button.setIcon(_or_blank(QIcon()))
     menu = QMenu(button)
     for n, group in enumerate(groups):
         if n:
@@ -81,15 +130,18 @@ def menu_button(label: str, groups: list) -> QWidget:
 
 
 def action_page(actions, extra: list[QWidget] | None = None) -> QWidget:
+    """A tool's page: sections (a str in the list starts one) of command rows and switches; None is a gap."""
     page = QWidget()
     layout = QVBoxLayout(page)
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(3)
+    layout.setSpacing(1)
     for action in actions:
         if action is None:
-            line = QLabel()
-            line.setFixedHeight(4)
-            layout.addWidget(line)
+            layout.addSpacing(6)
+        elif isinstance(action, str):
+            if layout.count():
+                layout.addSpacing(6)
+            layout.addWidget(section(action))
         elif isinstance(action, QWidget):
             layout.addWidget(action)
         else:

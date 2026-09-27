@@ -266,3 +266,62 @@ def test_a_phone_screen_over_a_vertical_scroll_book(qapp, tmp_path):
 
 def test_the_phone_screen_stays_off_for_a_printed_page(window):
     assert not window.act_phone.isChecked() and not window.canvas.phone_view
+
+
+# --- the finish (D1–D4) --------------------------------------------------------------------------------------
+
+
+def test_the_bundled_letters_and_their_three_steps(qapp):
+    from genko.app import theme
+    from genko.app.preferences import settings
+
+    theme.apply(qapp)
+    assert theme.ui_family() and "Plex" in theme.ui_family() and qapp.font().family() == theme.ui_family()
+    sheet = qapp.styleSheet()
+    assert 'QLabel[role="section"]' in sheet and 'QLabel[role="title"] { font-weight: 700' in sheet
+    settings().setValue("ui/ui_font", "system")
+    theme.apply(qapp)
+    assert qapp.font().family() != theme.ui_family()
+    settings().setValue("ui/ui_font", "genko")
+    theme.apply(qapp)
+    assert qapp.font().family() == theme.ui_family()
+
+
+def test_the_chosen_row_is_a_clean_grey(qapp):
+    from genko.app import theme
+
+    for which in ("light", "dark"):
+        chosen = theme.QColor(theme.tokens(which, 0).selected)
+        assert chosen.hslSaturation() < 60 and not 0 <= chosen.hslHue() <= 60  # (a cool grey, not a muddy orange)
+
+
+def test_the_top_bar_is_pictures_and_the_panel_is_rows(window):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QLabel, QPushButton
+
+    assert window.command_bar.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+    assert all(not a.icon().isNull() for a in window.command_bar.actions() if not a.isSeparator())
+    window.act_frame.trigger()
+    page = window.tool_settings.stack.currentWidget()
+    sections = [label.text() for label in page.findChildren(QLabel) if label.property("role") == "section"]
+    assert {"割る", "枠線", "形"} <= set(sections)
+    rows = [b for b in page.findChildren(QPushButton) if b.property("row")]
+    assert rows and len({b.iconSize().width() for b in rows}) == 1
+    window.act_split_h.setEnabled(False)
+    assert not next(b for b in rows if b.text().startswith("横に割る")).isEnabled()
+    window.act_split_h.setEnabled(True)
+
+
+def test_layers_have_eyes_and_even_rows(window):
+    panel = window.layers
+    panel.refresh()
+    assert panel.list.objectName() == "layerList" and "layerList::indicator:checked" in window.styleSheet() + \
+        __import__("PySide6.QtWidgets", fromlist=["QApplication"]).QApplication.instance().styleSheet()
+    heights = {panel.list.visualItemRect(panel.list.item(i)).height() for i in range(panel.list.count())}
+    assert len(heights) == 1
+
+
+def test_the_rarely_used_panels_wait_in_the_window_menu(window):
+    assert not window.sub_dock.isVisible() and not window.timeline_dock.isVisible()
+    window.show_dock("タイムライン")
+    assert window.timeline_dock.isVisible()

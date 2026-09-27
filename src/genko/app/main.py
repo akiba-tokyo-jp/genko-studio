@@ -82,7 +82,8 @@ class StoryPanel(QWidget):
         self.speaker = QLineEdit()
         self.speaker.setPlaceholderText("話者（空でもよい）")
         self.text = QPlainTextEdit()
-        self.text.setPlaceholderText("台詞（改行で次の列へ。ルビは ｜約束《やくそく》、傍点は 《《強調》》、一部を大きく {大|…}・太く {太|…}・赤く {赤|…}）")
+        self.text.setPlaceholderText("台詞を打つ（改行で次の列へ）")
+        self.text.setToolTip("ルビは ｜約束《やくそく》、傍点は 《《強調》》、一部を大きく {大|…}・太く {太|…}・赤く {赤|…}")
         self.text.setMaximumHeight(80)
         self.kind = QComboBox()
         for key, label in KINDS:
@@ -225,7 +226,7 @@ class StoryPanel(QWidget):
         # there is room; this panel keeps the list and the words
         self.style_box = QWidget()
         self.style_title = QLabel()
-        theme.role(self.style_title, "title")
+        theme.role(self.style_title, "heading")
         self.style_title.setWordWrap(True)
         sl = QVBoxLayout(self.style_box)
         sl.setContentsMargins(0, 6, 0, 0)
@@ -293,9 +294,9 @@ class StoryPanel(QWidget):
         for widget in (self.apply_button, self.delete_button):
             widget.setEnabled(line is not None)
         self.style_body.setVisible(line is not None)
-        theme.role(self.style_title, "title" if line is not None else "hint")
+        theme.role(self.style_title, "heading" if line is not None else "hint")
         self.style_title.setText(f"選んだ台詞の文字とフキダシ: 「{line.text[:12]}{'…' if len(line.text) > 12 else ''}」"
-                                 if line is not None else "台詞をクリックすると、ここに文字とフキダシの設定が出ます")
+                                 if line is not None else "台詞をクリックすると設定が出ます")
         self.window.canvas.selected_line_id = line.id if line else None
         self.window.canvas.update()
         if line is None:
@@ -525,6 +526,9 @@ class LayerPanel(QWidget):
         self.target = QLabel()
         self.target.setWordWrap(True)
         self.list = QListWidget()
+        self.list.setObjectName("layerList")  # (its check boxes are eyes: theme.py)
+        self.list.setUniformItemSizes(True)
+        self.list.setMinimumHeight(72)  # (a short panel keeps its fields below; the list scrolls)
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # Ctrl / Shift+click: several
         self.list.itemChanged.connect(self._visibility)
         self.list.itemDoubleClicked.connect(lambda _item: self._edit_special())
@@ -719,8 +723,7 @@ class LayerPanel(QWidget):
             ref = " 〔参照〕" if getattr(layer, "reference", False) else ""
             item = QListWidgetItem(f"{indent}{icon} {wording.layer_label(layer)}{draft}{ref}{masked}{lock}")
             picture = self._thumbnail(page, layer)
-            if picture is not None:
-                item.setIcon(picture)
+            item.setIcon(theme.still_icon(picture.pixmap(self.list.iconSize())) if picture is not None else self._blank_icon())  # (every row the same height)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked)
             self.list.addItem(item)
@@ -731,6 +734,13 @@ class LayerPanel(QWidget):
         self._loading = False
         self._search(self.search.text())
         self._selected(from_list=False)
+
+    def _blank_icon(self):
+        if getattr(self, "_blank", None) is None:
+            pixmap = QPixmap(self.list.iconSize())
+            pixmap.fill(Qt.GlobalColor.transparent)
+            self._blank = QIcon(pixmap)
+        return self._blank
 
     def _layer(self):
         page = self.window.current_page()
@@ -1994,8 +2004,8 @@ class MainWindow(QMainWindow):
         commands = QToolBar("操作")
         commands.setObjectName("commands")
         commands.setMovable(False)
-        commands.setIconSize(QSize(18, 18))
-        commands.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        commands.setIconSize(QSize(20, 20))
+        commands.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)  # (the names are in the tooltips)
         self.command_bar = commands
         self._make_launcher()
         from genko.app.workspace import fill_commandbar
@@ -2321,10 +2331,11 @@ class MainWindow(QMainWindow):
         frame_note = QLabel("コマを選ぶと、辺の中ほどの ◇ をドラッグで辺を曲げられます（外へふくらむ・内へへこむ）。")
         frame_note.setWordWrap(True)
         theme.hint(frame_note)
-        ts.add(("frame",), action_page([self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, self.act_gutters,
-                                        self.act_border, self.act_no_border,
+        ts.add(("frame",), action_page(["割る", self.act_split_h, self.act_split_v, self.act_merge, self.act_template, self.act_gutters,
+                                        "枠線", self.act_border, self.act_no_border,
                                         menu_button("枠線の種類・色", [self.border_kind_actions, [self.act_border_colour]]),
-                                        self.act_bleed, self.act_reset_shape, self.act_frame_numbers, None, self.act_paper, frame_note]))
+                                        "形", self.act_bleed, self.act_reset_shape, self.act_frame_numbers,
+                                        "原稿", self.act_paper, frame_note]))
         from PySide6.QtWidgets import QCheckBox as _Check
         from PySide6.QtWidgets import QSpinBox as _Spin
 
@@ -2354,7 +2365,7 @@ class MainWindow(QMainWindow):
         joins = QLabel("Shift で足す・Alt で引く・両方で重なりだけ")
         joins.setWordWrap(True)
         theme.hint(joins)
-        ts.add(("marquee",), action_page([sel_form, joins,
+        ts.add(("marquee",), action_page([sel_form, joins, "選択範囲と中身",
                                           menu_button("選択範囲", [[self.act_select_all, self.act_deselect, self.act_sel_invert],
                                                                    [self.act_sel_grow, self.act_sel_shrink, self.act_sel_feather,
                                                                     self.act_sel_layer], [self.act_sel_keep, self.act_quick_mask]]),
@@ -2395,7 +2406,7 @@ class MainWindow(QMainWindow):
                              "Shift+クリックで 2 本目を選ぶ。")
         vector_note.setWordWrap(True)
         theme.hint(vector_note)
-        ts.add(("vector",), action_page([vector_note, self.act_vector_cut, None, self.act_vector_join, self.act_vector_colour,
+        ts.add(("vector",), action_page([vector_note, "線", self.act_vector_cut, self.act_vector_join, self.act_vector_colour,
                                          self.act_vector_delete]))
         self.blend_mode = QComboBox()
         for label, key in (("ぼかし", "blur"), ("指先（色をのばす）", "smudge"), ("なじませ", "blend")):
@@ -2457,27 +2468,28 @@ class MainWindow(QMainWindow):
         radius_form.setContentsMargins(0, 0, 0, 0)
         radius_form.addRow("つまんだ所から動く範囲", radius)
         ts.add(("reshape",), radius_page)
-        ts.add(("ruler",), action_page([menu_button("定規の種類", [self.ruler_actions[:5], self.ruler_actions[5:8],
+        ts.add(("ruler",), action_page(["定規", menu_button("定規の種類", [self.ruler_actions[:5], self.ruler_actions[5:8],
                                                                   self.ruler_actions[8:10], self.ruler_actions[10:]]),
-                                        None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
                                         menu_button("選んだ定規", [[self.act_ruler_layer, self.act_ruler_pen],
                                                                   [self.act_ruler_fix, self.act_ruler_horizon]]),
-                                        self.act_clear_rulers, None, self.act_grid, self.act_grid_snap, self.act_grid_mm]))
-        ts.add(("3d",), action_page([menu_button("置く", [[self.act_add_figure, self.act_add_stick, self.act_add_head, self.act_add_hand],
+                                        self.act_del_ruler, self.act_clear_rulers,
+                                        "吸着と表示", self.act_snap, self.act_show_rulers,
+                                        "グリッド", self.act_grid, self.act_grid_snap, self.act_grid_mm]))
+        ts.add(("3d",), action_page(["置く", menu_button("置く", [[self.act_add_figure, self.act_add_stick, self.act_add_head, self.act_add_hand],
                                                            [self.act_add_box, self.act_add_cylinder, self.act_add_stairs, self.act_add_floor],
                                                            self.scene_actions, [self.act_import_obj]]),
-                                     menu_button("人形のポーズ", [self.pose_actions]), None, self.act_trace,
+                                     "動かす・線にする", menu_button("人形のポーズ", [self.pose_actions]), self.act_trace,
                                      self.act_del_prim]))
-        ts.add(("effect",), action_page([*self.effect_actions, None, self.act_materials]))
+        ts.add(("effect",), action_page(["効果線の種類", *self.effect_actions, "素材", self.act_materials]))
         ts.add(("stamp",), action_page([self.act_materials]))
-        select_page = action_page([self.act_fit, self.act_actual, None, self.act_story_editor, self.act_checks])
+        select_page = action_page(["表示", self.act_fit, self.act_actual, "原稿", self.act_story_editor, self.act_checks])
         select_page.layout().insertWidget(0, self.story.style_box)
         ts.add(("select",), select_page)
-        ts.add(("move",), action_page([self.act_layer_dup, None, self.act_select_all]))
+        ts.add(("move",), action_page(["レイヤー", self.act_layer_dup, self.act_select_all]))
         self.gradient_mode = QComboBox()
         for label, key in (("ペンの色 → 透明", "fade"), ("ペンの色 → 白", "white"), ("黒 → 白", "bw"), ("円（中心からペンの色 → 透明）", "radial")):
             self.gradient_mode.addItem(label, key)
-        ts.add(("gradient",), action_page([], [QLabel("色の変わり方"), self.gradient_mode]))
+        ts.add(("gradient",), action_page(["色の変わり方"], [self.gradient_mode]))
         settings_dock = QDockWidget("ツールの設定", self)
         settings_scroll = QScrollArea()
         settings_scroll.setWidgetResizable(True)
@@ -2538,6 +2550,8 @@ class MainWindow(QMainWindow):
         nav_dock.raise_()
         self.view_menu.addAction(timeline_dock.toggleViewAction())
         self.timeline_dock = timeline_dock
+        for dock in (sub_dock, timeline_dock):  # (for some work only: ウィンドウ brings them; the tabs fit without them)
+            dock.hide()
         self.brush_dock = settings_dock
         ts.show_tool("select")
         from genko.app.colours import ColourPanel
@@ -4762,12 +4776,11 @@ def run_app(path: Path | None = None) -> int:
     app.setApplicationName("Genko Studio")
     from genko.app import preferences
 
-    theme.apply(app)  # (the look before the first window: the start screen too)
-
     if preferences.ui_font_pt():  # the size of the letters chosen in the preferences
         font = app.font()
         font.setPointSize(preferences.ui_font_pt())
         app.setFont(font)
+    theme.apply(app)  # (the look before the first window: the start screen too)
     if path is None and len(sys.argv) > 1 and Path(sys.argv[1]).is_dir():
         path = Path(sys.argv[1])
     if path is None:

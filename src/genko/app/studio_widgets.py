@@ -13,7 +13,7 @@ from typing import Callable
 
 from PIL import Image
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -280,7 +280,7 @@ class ApprovalBox(QWidget):
             entry.setToolTip(cand["id"])
             if image is not None:
                 image.thumbnail((150, 190))
-                entry.setIcon(QIcon(to_pixmap(image)))
+                entry.setIcon(theme.still_icon(to_pixmap(image)))
             self.choices.addItem(entry)
         if self.choices.count():
             self.choices.setCurrentRow(0)
@@ -578,7 +578,7 @@ class PanelView(QWidget):
             image = asset_image(self.window.session.path, cand["asset"])
             if image is not None:
                 image.thumbnail((110, 110))
-                entry.setIcon(QIcon(to_pixmap(image)))
+                entry.setIcon(theme.still_icon(to_pixmap(image)))
             self.candidates.addItem(entry)
         for region in panel.get("regions", []):
             who = "人" if region.get("source") == "user" else "エージェント"
@@ -785,7 +785,7 @@ class Library(QWidget):
         image = asset_image(self.window.session.path, asset)
         if image is not None:
             image.thumbnail((96, 128))
-            entry.setIcon(QIcon(to_pixmap(image)))
+            entry.setIcon(theme.still_icon(to_pixmap(image)))
         self.list.addItem(entry)
         self.entries.append(data)
 

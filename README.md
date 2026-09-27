@@ -71,7 +71,7 @@ Python 3.11+.
 
 ## Fonts
 
-The lettering faces in `src/genko/fonts/` (Zen Kaku Gothic New, Zen Old Mincho, Zen Maru Gothic, Yomogi, Reggae One, Dela Gothic One) are under the SIL Open Font License 1.1; the licence texts are in `src/genko/fonts/licenses/`.
+The lettering faces in `src/genko/fonts/` (Zen Kaku Gothic New, Zen Old Mincho, Zen Maru Gothic, Yomogi, Reggae One, Dela Gothic One) are under the SIL Open Font License 1.1, as is the screen's own face in `src/genko/fonts/ui/` (IBM Plex Sans JP, used for the application's menus and panels, never for lettering); the licence texts are in `src/genko/fonts/licenses/`.
 
 ## License
 
