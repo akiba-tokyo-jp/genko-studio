@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from genko import anim
+from genko.app import theme
 
 CELL_W = 26
 
@@ -157,9 +158,9 @@ class TimelinePanel(QWidget):
                 item = QTableWidgetItem(text)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if frame == self.frame:
-                    item.setBackground(QBrush(QColor(255, 225, 150)))
+                    item.setBackground(QBrush(QColor(theme.tokens().accent_soft)))
                 elif frame in keys:
-                    item.setBackground(QBrush(QColor(210, 230, 250)))
+                    item.setBackground(QBrush(QColor(theme.tokens().selected)))
                 self.table.setItem(row, col, item)
         if ids:
             self.table.setCurrentCell(min(row_now, len(ids) - 1), self.frame - 1)

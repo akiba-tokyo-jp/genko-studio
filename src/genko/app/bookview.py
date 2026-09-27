@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from genko.app import theme
+
 PREVIEW_DPI = 45
 
 
@@ -61,7 +63,7 @@ class BookView(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        painter.fillRect(self.rect(), QColor(58, 58, 62))
+        painter.fillRect(self.rect(), QColor(theme.tokens().surround))
         d = self.dialog
         left, right = d.sides(d.spread)
         page_h = self.height() - 40
@@ -95,7 +97,7 @@ class BookView(QWidget):
                 painter.drawPixmap(QRectF(x, spine.y() - 6 * (1 - abs(1 - 2 * t)), width, page_h), pix, QRectF(pix.rect()))
                 painter.fillRect(QRectF(x, spine.y(), width, page_h), QColor(0, 0, 0, int(90 * (1 - abs(1 - 2 * t)))))
                 painter.restore()
-        painter.setPen(QColor(220, 220, 220))
+        painter.setPen(QColor(theme.tokens().text))
         painter.drawText(QRectF(0, self.height() - 28, self.width(), 24), Qt.AlignmentFlag.AlignCenter, d.caption())
         painter.end()
 

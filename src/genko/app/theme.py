@@ -20,6 +20,8 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QPalett
 from PySide6.QtWidgets import QApplication, QWidget
 
 MODES = [("パソコンの設定のまま", "system"), ("明るい", "light"), ("暗い", "dark")]
+MIN_PT = 9.0  # (the smallest letters on the screen: about 12 px at 100 %)
+MIN_TARGET = 24  # (the smallest thing to click, in px)
 
 
 @dataclass(frozen=True)
@@ -197,7 +199,7 @@ def _rgba(hex_colour: str, alpha: float) -> str:
 def style_sheet(t: Tokens, pt: float = 9.0) -> str:
     """One style sheet for every panel: flat surfaces, thin dividers, small radii, one accent; three steps of
     letters: headings (bold, larger), section titles (bold, small, quiet) and labels and values (regular)."""
-    big, small = f"{pt + 3:g}pt", f"{max(7.0, pt - 1):g}pt"
+    big, small = f"{pt + 3:g}pt", f"{max(MIN_PT, pt - 1):g}pt"
     return f"""
 QMainWindow, QDialog {{ background: {t.window}; }}
 QMainWindow::separator {{ background: {t.window}; width: 3px; height: 3px; }}
@@ -246,6 +248,15 @@ QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     selection-background-color: {t.accent}; selection-color: {t.accent_text}; }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {t.accent}; }}
 QComboBox::drop-down {{ border: none; width: 18px; }}
+QSpinBox, QDoubleSpinBox {{ padding-right: 18px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: border; subcontrol-position: top right; width: 18px;
+    border: none; border-left: 1px solid {t.divider}; border-top-right-radius: 4px; background: transparent; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: border; subcontrol-position: bottom right; width: 18px;
+    border: none; border-left: 1px solid {t.divider}; border-bottom-right-radius: 4px; background: transparent; }}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+    background: {t.hover}; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({_indicator("caret_up", t.muted)}); width: 10px; height: 10px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({_indicator("caret_down", t.muted)}); width: 10px; height: 10px; }}
 QComboBox QAbstractItemView {{ background: {t.base}; border: 1px solid {t.border}; selection-background-color: {t.selected};
     selection-color: {t.text}; }}
 QListWidget, QListView, QTreeWidget, QTreeView, QTableWidget, QTableView {{
@@ -254,14 +265,14 @@ QListWidget::item, QTreeWidget::item {{ padding: 3px 4px; border-radius: 4px; }}
 QListWidget::item:hover, QTreeWidget::item:hover {{ background: {t.hover}; }}
 QListWidget::item:selected, QTreeWidget::item:selected {{ background: {t.selected}; color: {t.text}; }}
 QHeaderView::section {{ background: {t.panel}; color: {t.muted}; border: none; border-bottom: 1px solid {t.divider}; padding: 3px 6px; }}
-QScrollBar:vertical {{ background: transparent; width: 9px; margin: 1px; }}
-QScrollBar:horizontal {{ background: transparent; height: 9px; margin: 1px; }}
-QScrollBar::handle {{ background: {t.border}; border-radius: 3px; min-height: 24px; min-width: 24px; }}
+QScrollBar:vertical {{ background: transparent; width: 12px; margin: 1px; }}
+QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 1px; }}
+QScrollBar::handle {{ background: {t.border}; border-radius: 4px; min-height: 24px; min-width: 24px; margin: 2px; }}
 QScrollBar::handle:hover {{ background: {t.muted}; }}
 QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{ background: none; width: 0; height: 0; }}
 QSlider::groove:horizontal {{ height: 4px; background: {t.border}; border-radius: 2px; }}
 QSlider::sub-page:horizontal {{ background: {t.accent}; border-radius: 2px; }}
-QSlider::handle:horizontal {{ background: {t.raised}; border: 1px solid {t.border}; width: 14px; margin: -6px 0; border-radius: 7px; }}
+QSlider::handle:horizontal {{ background: {t.raised}; border: 1px solid {t.border}; width: 18px; margin: -8px 0; border-radius: 9px; }}
 QGroupBox {{ border: 1px solid {t.divider}; border-radius: 6px; margin-top: 10px; padding-top: 6px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 4px; color: {t.muted}; }}
 QMenuBar {{ background: {t.window}; color: {t.text}; }}
@@ -288,7 +299,7 @@ QLabel[role="badge-ok"] {{ border-radius: 8px; padding: 1px 8px; background: {t.
 QTabBar::close-button {{ image: url({_indicator("close", t.muted)}); subcontrol-position: right; border-radius: 4px;
     padding: 1px; margin: 2px; }}
 QTabBar::close-button:hover {{ image: url({_indicator("close", t.text)}); background: {t.hover}; }}
-QListWidget#layerList::indicator {{ width: 16px; height: 16px; margin-right: 2px; }}
+QListWidget#layerList::indicator {{ width: 18px; height: 18px; padding: 3px; margin-right: 1px; }}
 QListWidget#layerList::indicator:checked {{ image: url({_indicator("eye", t.text)}); }}
 QListWidget#layerList::indicator:unchecked {{ image: url({_indicator("eye_off", t.faint)}); }}
 QMenu[glass="true"] {{ background: {_rgba(t.panel, 0.62)}; border: 1px solid {_rgba(t.border, 0.7)}; }}
@@ -324,6 +335,16 @@ def empty_note(view, text: str):
     view.viewport().installEventFilter(_Resize(view.viewport(), follow))
     follow()
     return note
+
+
+def name_buttons(root: QWidget) -> None:
+    """Buttons that show only a picture get their tooltip's first line as their name for screen readers (one pass
+    over a window when it is built: no watching of events, so drawing stays as fast)."""
+    from PySide6.QtWidgets import QAbstractButton
+
+    for button in root.findChildren(QAbstractButton):
+        if not button.text() and not button.accessibleName() and button.toolTip():
+            button.setAccessibleName(button.toolTip().split("\n")[0].strip())
 
 
 class _Resize(QObject):
@@ -465,11 +486,13 @@ def iconic(button, name: str, text: str | None = None, tip: str | None = None):
     """A button with its picture (and a shorter label, the words moved to its tooltip)."""
     from genko.app.icons import icon
 
-    if tip or (text is not None and button.text() and text != button.text()):
-        button.setToolTip(tip or button.text())
+    if tip or (text is not None and button.text() and text != button.text() and not button.toolTip()):
+        button.setToolTip(tip or button.text())  # (a tooltip already written stays: it says more than the label)
     if text is not None:
         button.setText(text)
     button.setIcon(icon(name))
+    if not button.text() and button.toolTip():  # (a picture alone: its words for a screen reader)
+        button.setAccessibleName(button.toolTip().split("\n")[0].strip())
     _ICONED.append((button, name))
     return button
 

@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from genko.app import theme
+
 Item = tuple[str, Image.Image]
 
 
@@ -32,7 +34,7 @@ class ImageView(QGraphicsView):
         self.setRenderHints(QPainter.RenderHint.SmoothPixmapTransform | QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        self.setBackgroundBrush(QColor("#3a3a3a"))
+        self.setBackgroundBrush(QColor(theme.tokens().surround))
         self._fitted = True
 
     def show_items(self, items: list[Item]) -> None:
@@ -51,7 +53,7 @@ class ImageView(QGraphicsView):
             item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
             if caption:
                 text = scene.addSimpleText(caption, font)
-                text.setBrush(QColor("#f1f3f5"))
+                text.setBrush(QColor(theme.tokens().text))
                 text.setPos(x, tallest + 8)
             x += image.width + gap
         scene.setSceneRect(scene.itemsBoundingRect().adjusted(-gap, -gap, gap, gap))

@@ -212,11 +212,14 @@ class ShapeSelectMixin:
         painter.save()
         painter.resetTransform()
         w, h = self.width(), self.height()
-        painter.fillRect(QRectF(0, 0, w, SCALE_PX), QColor(235, 235, 238))
-        painter.fillRect(QRectF(0, 0, SCALE_PX, h), QColor(235, 235, 238))
-        painter.setPen(QColor(90, 90, 96))
+        from genko.app import theme
+
+        t = theme.tokens()
+        painter.fillRect(QRectF(0, 0, w, SCALE_PX), QColor(t.panel))
+        painter.fillRect(QRectF(0, 0, SCALE_PX, h), QColor(t.panel))
+        painter.setPen(QColor(t.muted))
         font = QFont(painter.font())
-        font.setPixelSize(9)
+        font.setPointSizeF(max(7.0, theme.MIN_PT - 1.5))  # (follows the screen's scale; the scale strip is narrow)
         painter.setFont(font)
         if abs(self.rotation % 360) < 0.01:
             view = self._view()
@@ -242,7 +245,7 @@ class ShapeSelectMixin:
                     if major:
                         painter.drawText(QPointF(1, y - 2), f"{round(k * step)}")
                 k += 1
-        painter.fillRect(QRectF(0, 0, SCALE_PX, SCALE_PX), QColor(220, 220, 224))
+        painter.fillRect(QRectF(0, 0, SCALE_PX, SCALE_PX), QColor(t.divider))
         painter.restore()
 
     # --- a mask selection (or the quick mask) shown as a tint ----------------------------------------------

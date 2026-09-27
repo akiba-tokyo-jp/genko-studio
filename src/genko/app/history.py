@@ -108,8 +108,8 @@ class HistoryPanel(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, n)
             self.list.addItem(item)
         for n, entry in enumerate(later, len(done) + 1):
-            item = QListWidgetItem(f"{entry['label']}（取り消し済み）")
-            item.setForeground(QColor(150, 150, 150))
+            item = QListWidgetItem(f"{entry['label']}（戻した操作）")
+            item.setForeground(QColor(theme.tokens().faint))
             item.setData(Qt.ItemDataRole.UserRole, n)
             self.list.addItem(item)
         now = self.list.item(len(done))

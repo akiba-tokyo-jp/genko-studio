@@ -43,7 +43,7 @@ class Navigator(QWidget):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#3a3a3a"))
+        painter.fillRect(self.rect(), QColor(theme.tokens().surround))
         rect = self._page_rect()
         if rect is None:
             return

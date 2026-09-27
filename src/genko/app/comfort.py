@@ -219,7 +219,7 @@ class RadialMenu(QWidget):
         for dx, dy in ((-4, -4), (-4, 4)):
             p.drawLine(QPointF(c.x() + dx, c.y() + dy), QPointF(c.x() - dx, c.y() - dy))
         font = QFont(self.font())
-        font.setPointSizeF(max(7.0, font.pointSizeF() * 0.85))
+        font.setPointSizeF(max(theme.MIN_PT, font.pointSizeF() * 0.85))
         p.setFont(font)
         for i, action in enumerate(self.actions_):
             spot = self._spot(i)
@@ -413,10 +413,34 @@ def _alive(widget) -> bool:
 # --- fewer moving things; the letters' size at once -------------------------------------------------------------
 
 
+def system_reduces_motion() -> bool:
+    """The computer's own "fewer animations" setting (Windows: animations off; Mac: reduce motion)."""
+    import sys
+
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            on = ctypes.c_int(1)
+            if ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(on), 0):  # SPI_GETCLIENTAREAANIMATION
+                return not on.value
+        elif sys.platform == "darwin":
+            from AppKit import NSWorkspace  # (pyobjc)
+
+            return bool(NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceMotion())
+    except Exception:  # noqa: BLE001 (no answer from the system: move as usual)
+        return False
+    return False
+
+
 def reduce_motion() -> bool:
+    """By the person's choice; with no choice made, as the computer is set."""
     from genko.app.preferences import settings
 
-    return str(settings().value("ui/reduce_motion", "false")).lower() in ("1", "true", "yes")
+    value = settings().value("ui/reduce_motion", None)
+    if value is None or str(value) == "":
+        return system_reduces_motion()
+    return str(value).lower() in ("1", "true", "yes")
 
 
 def apply_motion(app: QApplication | None = None) -> None:

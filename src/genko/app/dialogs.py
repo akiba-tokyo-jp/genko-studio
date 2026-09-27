@@ -249,7 +249,7 @@ class StartDialog(QDialog):
         self.chosen: Path | None = None
         self.resize(860, 560)
         name = QLabel("Genko Studio")
-        name.setStyleSheet("font-size: 22px; font-weight: 600;")
+        theme.role(name, "title")
         lead = theme.role(QLabel("漫画原稿の編集と、エージェントが出した承認依頼の確認をします。"), "hint")
         lead.setWordWrap(True)
         new_button = theme.primary(theme.iconic(QPushButton("新しい原稿を作る…"), "page"))

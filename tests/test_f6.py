@@ -396,7 +396,7 @@ def test_the_history_names_each_change_and_goes_back_to_it(window):
     assert not window.episode.story_for_page(1) and len(window.current_page().frames[0].children) == 0
     assert len(_layer(window.episode, ink.id).strokes) == strokes
     texts = [panel.list.item(i).text() for i in range(panel.list.count())]
-    assert texts[row] == "▶ ペンで描いた" and texts[-1] == "コマを割った（取り消し済み）"
+    assert texts[row] == "▶ ペンで描いた" and texts[-1] == "コマを割った（戻した操作）"
     # forward again
     panel._go(panel.list.item(panel.list.count() - 1))
     assert window.episode.story_for_page(1) and window.current_page().frames[0].children

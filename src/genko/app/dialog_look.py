@@ -114,6 +114,7 @@ def frame(dialog: QDialog, head: QWidget, body: QWidget | QLayout, side: QWidget
         middle.addWidget(side, 2)
     outer.addLayout(middle, 1)
     outer.addWidget(foot)
+    theme.name_buttons(dialog)
 
 
 class PaperDiagram(QWidget):

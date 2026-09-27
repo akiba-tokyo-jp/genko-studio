@@ -215,7 +215,7 @@ class ToolSettings(QWidget):
         # the settings fold to the tool's name (room for the approval box below, when an agent works on the book)
         self.fold = QPushButton("▾")
         self.fold.setProperty("iconbtn", True)
-        self.fold.setFixedSize(24, 22)
+        self.fold.setFixedSize(24, 24)
         self.fold.setCheckable(True)
         self.fold.setToolTip("ツールの設定をたたむ・開く")
         self.fold.toggled.connect(self.set_folded)

@@ -832,9 +832,10 @@ class LayerPanel(QWidget):
         self._loading = False
         drawable = self.window.drawable(layer)
         prints = layer.exportable and layer.role not in (LayerRole.NAME, LayerRole.DRAFT)
-        note = "" if prints else " <span style='color:#c92a2a'>（印刷されません）</span>"
+        red = theme.tokens().danger
+        note = "" if prints else f" <span style='color:{red}'>（印刷されません）</span>"
         self.target.setText(f"描く先: <b>{wording.layer_label(layer)}</b>{note}" if drawable else
-                            f"<span style='color:#c92a2a'>「{wording.layer_label(layer)}」には描けません。ペンかペイントのレイヤーを選びます</span>")
+                            f"<span style='color:{red}'>「{wording.layer_label(layer)}」には描けません。ペンかペイントのレイヤーを選びます</span>")
         self.target.setVisible(not (drawable and prints))  # (the chosen row already says where the pen draws; only a warning needs words)
 
     def _set(self, key: str, value) -> None:
@@ -1416,6 +1417,7 @@ class MainWindow(QMainWindow):
 
         preferences.name_commands(self)  # (every command's words are its lasting name; keys can be changed)
         preferences.apply_all(self)
+        theme.name_buttons(self)
         self.layout().activate()
         self.resize(1280, 800)
 

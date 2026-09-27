@@ -103,7 +103,7 @@ def near(rgb, n: int = 5) -> list[list[tuple[int, int, int]]]:
 class Swatch(QPushButton):
     picked = Signal(object)
 
-    def __init__(self, rgb=(0, 0, 0), size: int = 18) -> None:
+    def __init__(self, rgb=(0, 0, 0), size: int = 24) -> None:
         super().__init__()
         self.setFixedSize(size, size)
         self.set_rgb(rgb)
@@ -111,8 +111,11 @@ class Swatch(QPushButton):
 
     def set_rgb(self, rgb) -> None:
         self.rgb = tuple(int(v) for v in rgb)[:3]
-        self.setStyleSheet(f"background: rgb{self.rgb}; border: 1px solid #888; border-radius: 2px")
-        self.setToolTip(f"RGB {self.rgb}")
+        from genko.app import theme
+
+        self.setStyleSheet(f"background: rgb{self.rgb}; border: 1px solid {theme.tokens().border}; border-radius: 3px")
+        self.setToolTip(f"色（RGB {self.rgb[0]}, {self.rgb[1]}, {self.rgb[2]}）")
+        self.setAccessibleName(self.toolTip())
 
 
 class SVSquare(QWidget):
@@ -160,7 +163,7 @@ class HueBar(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setFixedWidth(18)
+        self.setFixedWidth(24)
         self.setMinimumHeight(110)
         self.hue = 0.0
 
@@ -221,7 +224,7 @@ class ColourPanel(QWidget):
         # main / sub / transparent
         self.main = Swatch(window.brush.rgb, 30)
         self.main.setToolTip("メインの色（今の色）")
-        self.sub = Swatch(self.sub_rgb, 22)
+        self.sub = Swatch(self.sub_rgb, 24)
         self.sub.setToolTip("サブの色（X で入れ替え）")
         self.sub.picked.connect(lambda _: self.swap())
         swap = QPushButton("⇄")

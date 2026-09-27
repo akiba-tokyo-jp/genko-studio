@@ -12,6 +12,7 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QComboBox, QFileDialog, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
 from genko.app.preferences import settings
+from genko.app import theme
 
 IMAGE_FILTER = "画像 (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff)"
 
@@ -50,10 +51,10 @@ class Picture(QWidget):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#3a3a3a"))
+        painter.fillRect(self.rect(), QColor(theme.tokens().surround))
         target = self._target()
         if target is None:
-            painter.setPen(QColor("#bbbbbb"))
+            painter.setPen(QColor(theme.tokens().text))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "「画像を足す」で資料を開きます")
             return
         x, y, scale = target

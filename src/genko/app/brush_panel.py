@@ -137,10 +137,11 @@ class BrushPanel(QWidget):
         palette = QGridLayout()
         for i, rgb in enumerate(MONO + COLOURS):
             button = QPushButton()
-            button.setFixedSize(20, 20)
-            button.setStyleSheet(f"QPushButton {{ background: rgb{rgb}; border: 1px solid rgba(128,128,128,0.45); border-radius: 10px; }}"
+            button.setFixedSize(24, 24)
+            button.setStyleSheet(f"QPushButton {{ background: rgb{rgb}; border: 1px solid rgba(128,128,128,0.45); border-radius: 12px; }}"
                                  "QPushButton:hover { border: 2px solid palette(highlight); }")
-            button.setToolTip("白" if rgb == (255, 255, 255) else ("黒" if rgb == (20, 20, 20) else ""))
+            button.setToolTip("白" if rgb == (255, 255, 255) else ("黒" if rgb == (20, 20, 20) else f"色（RGB {rgb[0]}, {rgb[1]}, {rgb[2]}）"))
+            button.setAccessibleName(button.toolTip())
             button.clicked.connect(lambda _=False, c=rgb: self.set_colour(c))
             palette.addWidget(button, i // 5, i % 5)
         self.rgb = (20, 20, 20)
@@ -398,7 +399,9 @@ class BrushDialog(QDialog):
         self.white.setChecked(b.rgb == (255, 255, 255))
         self.sample = QLabel()
         self.sample.setMinimumHeight(70)
-        self.sample.setStyleSheet("background: white; border: 1px solid #bbb")
+        from genko.app import theme
+
+        self.sample.setStyleSheet(f"background: white; border: 1px solid {theme.tokens().border}")  # (the paper)
         # the tip and how it is laid down (J3)
         self.tip = QComboBox()
         for label, key in TIP_LABELS:

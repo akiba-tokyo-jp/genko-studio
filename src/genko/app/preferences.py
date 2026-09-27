@@ -89,6 +89,7 @@ def name_commands(window) -> None:
         if text and not action.isSeparator() and not action.menu() and not action.objectName():
             action.setObjectName(f"cmd:{text}")
             window.default_shortcuts[text] = [QKeySequence(k) for k in action.shortcuts()]
+    retip(window)
 
 
 def apply_shortcuts(window) -> None:
@@ -98,6 +99,16 @@ def apply_shortcuts(window) -> None:
         if store.contains(key):
             value = str(store.value(key) or "")
             action.setShortcuts([QKeySequence(v) for v in value.split("|") if v] if value else [])
+    retip(window)
+
+
+def retip(window) -> None:
+    """Every command's tooltip says its name, its keys as they are now, and what it does (written again when the
+    keys change, so a changed key never shows the old one)."""
+    for action in _commands(window):
+        keys = action.shortcut().toString(QKeySequence.SequenceFormat.NativeText)
+        what = action.statusTip()
+        action.setToolTip(action.text().replace("&", "") + (f"（{keys}）" if keys else "") + (f"\n{what}" if what else ""))
 
 
 def conflicts(mapping: dict[str, list[str]]) -> list[tuple[str, str, str]]:
@@ -296,7 +307,7 @@ class PreferencesDialog(QDialog):
         self.gpu.setToolTip("拡大・回転がなめらかになります（次に開いた窓から）。原稿が白いままになったら外してください。"
                             "対応していないパソコンでは、入れていても使いません")
         self.motion = QCheckBox("動きを減らす")
-        self.motion.setToolTip("メニューの開き方・拡大の寄り方・知らせの出方などの動きを止めます")
+        self.motion.setToolTip("メニューの開き方・拡大の寄り方・知らせの出方などの動きを止めます（決めていなければパソコンの設定に合わせます）")
         self.motion.setChecked(comfort.reduce_motion())
         self.cursor = QComboBox()
         for label, key in workspace.CURSORS:
@@ -398,6 +409,8 @@ class PreferencesDialog(QDialog):
                 for name, editor in self.editors.items()}
 
     def save(self) -> None:
+        from genko.app import comfort
+
         mapping = self.mapping()
         clashes = conflicts(mapping)
         if clashes:
@@ -431,7 +444,10 @@ class PreferencesDialog(QDialog):
         store.setValue("ui/rest_minutes", self.rest.currentData())
         store.setValue("ui/raise_requests", "true" if self.requests.isChecked() else "false")
         store.setValue("ui/gpu_canvas", "true" if self.gpu.isChecked() else "false")
-        store.setValue("ui/reduce_motion", "true" if self.motion.isChecked() else "false")
+        if self.motion.isChecked() == comfort.system_reduces_motion():  # (as the computer is set: keep following it)
+            store.remove("ui/reduce_motion")
+        else:
+            store.setValue("ui/reduce_motion", "true" if self.motion.isChecked() else "false")
         store.setValue("ui/cursor", self.cursor.currentData())
         store.setValue("keys/alt_tool", self.alt_tool.currentData())
         store.setValue("keys/ctrl_tool", self.ctrl_tool.currentData())
