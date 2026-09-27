@@ -132,6 +132,7 @@ def menu_button(label: str, groups: list) -> QWidget:
 def action_page(actions, extra: list[QWidget] | None = None) -> QWidget:
     """A tool's page: sections (a str in the list starts one) of command rows and switches; None is a gap."""
     page = QWidget()
+    page.setObjectName("toolPage")  # (its switches line up with the rows: theme.py)
     layout = QVBoxLayout(page)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(1)

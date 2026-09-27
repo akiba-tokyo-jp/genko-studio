@@ -216,6 +216,8 @@ QPushButton[primary="true"]:disabled {{ background: {t.panel}; color: {t.faint};
 QPushButton[row="true"] {{ background: transparent; border: 1px solid transparent; border-radius: 5px; padding: 4px 6px;
     text-align: left; }}
 QPushButton[row="true"]:hover {{ background: {t.hover}; }}
+QPushButton[quiet="true"] {{ color: {t.muted}; }}
+QWidget#toolPage QCheckBox {{ padding: 3px 0 3px 7px; spacing: 8px; }}
 QPushButton[row="true"]::menu-indicator {{ width: 0; image: none; }}
 QPushButton[row="true"]:pressed {{ background: {t.selected}; border-color: {t.selected}; }}
 QPushButton[row="true"]:disabled {{ color: {t.faint}; background: transparent; border-color: transparent; }}

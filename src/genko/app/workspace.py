@@ -228,6 +228,10 @@ class QuickAccess(QWidget):
         self.grid = QGridLayout()
         self.grid.setSpacing(3)
         edit = QPushButton("並べるものを選ぶ…")
+        edit.setProperty("row", True)
+        from genko.app import theme
+
+        theme.role_prop(edit, "quiet", True)
         edit.clicked.connect(self.edit)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -248,10 +252,13 @@ class QuickAccess(QWidget):
             action = actions.get(name)
             if action is None:
                 continue
-            button = QPushButton(action.text())
+            from genko.app.tool_settings import SHORT, _or_blank
+
+            button = QPushButton(SHORT.get(action.text(), action.text()))
+            button.setProperty("row", True)  # (quiet rows like the tool settings: theme.py)
             button.setToolTip(action.statusTip() or action.text())
-            if not action.icon().isNull():
-                button.setIcon(action.icon())
+            button.setAccessibleName(action.text())
+            button.setIcon(_or_blank(action.icon()))
             button.clicked.connect(action.trigger)
             button.setMinimumWidth(60)
             self.buttons.append(button)
