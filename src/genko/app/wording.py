@@ -292,6 +292,7 @@ _ERRORS: list[tuple[str, object]] = [
     (r"the trace must start and end on the same line.*", "描き直すときは、同じ線の上から描き始めて、その線の上で終えます"),
     (r"no line of this layer is near the trace", "なぞった所の近くに、このレイヤーの線がありません"),
     (r"points needs the trace: two points or more", "なぞった線が短すぎます"),
+    (r"texture must be hard, soft or rough", "消しゴムの質は硬め・軟らかめ・粗めから選びます"),
     (r"ignore takes draft and text", "見ないものは下描きと台詞から選びます"),
     (r"poly needs three points or more \(the lasso\)", "囲む形は 3 点以上にします"),
     (r"the lasso is too small", "囲んだ所が小さすぎます"),

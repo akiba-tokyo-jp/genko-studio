@@ -45,7 +45,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float? (the balloon's size: edit_line does not change it)", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
-    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "taper_in_mm": "float? (入り: how long the start thins, mm; with taper)", "taper_out_mm": "float? (抜き: how long the end thins; 0 keeps that end)", "pressure_opacity": "float? 0..1 (a light touch also lightens the line)", "stabilize_speed": "bool? (quicker strokes are steadied more)", "post_fit": "float? mm (後補正: the wobble within this is dropped and a smooth curve drawn through the line)", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)", "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"},
+    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "taper_in_mm": "float? (入り: how long the start thins, mm; with taper)", "taper_out_mm": "float? (抜き: how long the end thins; 0 keeps that end)", "pressure_opacity": "float? 0..1 (a light touch also lightens the line)", "stabilize_speed": "bool? (quicker strokes are steadied more)", "post_fit": "float? mm (後補正: the wobble within this is dropped and a smooth curve drawn through the line)", "snap_lines_mm": "float? (ベクター吸着: each end within this of a line on the layer moves onto it)", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)", "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
     {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "panel_each": "bool? (true: each line stays in the panel it begins in)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white} | null? (トーン化: the layer's greys print as a halftone)"},
@@ -92,7 +92,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "paste", "page": "int", "layer_id": "str?", "items": "{strokes, patches} (copied)", "matrix": "[a,b,c,d,e,f]?"},
     {"op": "set_stroke_width", "page": "int", "layer_id": "str?", "area": "object?", "ids": "[stroke id]?", "width_mm": "float?", "scale": "float?", "kind": "str?", "rgb": "[r,g,b]?"},
     {"op": "reshape_stroke", "page": "int", "layer_id": "str?", "stroke_id": "str", "points": "[[x,y,p?],...]?", "width_mm": "float?"},
-    {"op": "erase", "page": "int", "layer_id": "str? (else layer: role)", "layer": "str?", "points": "[[x,y],...]", "width_mm": "float", "mode": "cut|to_crossing|whole? (cut: where it touches; to_crossing: up to where it crosses others; whole: every line touched)", "note": "cuts pen lines (vector) and clears paint"},
+    {"op": "erase", "page": "int", "layer_id": "str? (else layer: role)", "layer": "str?", "points": "[[x,y],...]", "width_mm": "float", "mode": "cut|to_crossing|whole? (cut: where it touches; to_crossing: up to where it crosses others; whole: every line touched)", "texture": "hard|soft|rough? (paint: a soft edge or a rough grain)", "snap_ruler": "bool? (along the page's rulers)", "note": "cuts pen lines (vector) and clears paint"},
     {"op": "reorder_layers", "page": "int", "order": "[id]"},
     {"op": "stamp_material", "page": "int", "material_id": "str", "frame_id": "str?", "area": "object?", "at": "object?", "layer_id": "str? (pictures and drawn parts)", "line_id": "str? (a picture material: it becomes this line's balloon, 画像のフキダシ)", "kinds": "tone (a tone layer) | effect | image | lines (on layer_id at x/y) | lettering (a line at x/y) | brush (the book gets the brush) | prim (a 3D guide at x/y)", "x_mm": "float?", "y_mm": "float? (where a picture's / part's middle goes)", "width_mm": "float?"},
     {"op": "set_balloon_path", "id": "str", "path": "[[x,y]]? (a hand-drawn outline; the box becomes its bounds; null goes back to the shape)", "wrap": "vertical|horizontal", "ruby_runs": "[[base,ruby]]", "emphasis_runs": "[str]"},
@@ -272,6 +272,41 @@ def _stroke_by_id(layer, stroke_id: str):
         if getattr(stroke, "id", None) == stroke_id:
             return i, stroke
     raise ApplyError(f"no stroke {stroke_id}")
+
+
+def _snap_ends(page, op: dict, points: list, reach: float) -> list:
+    """ベクター吸着: each end of a new line within `reach` mm of a line already on the layer moves onto the
+    nearest point of that line (an end of it first, when one is as near), so shapes close and lines meet."""
+    if op.get("layer_id"):
+        try:
+            layer = _layer_by_id(page, str(op["layer_id"]))
+        except ApplyError:
+            return points
+    else:
+        layer = page._layer(LayerRole.INK if str(op.get("layer", "name")) == "ink" else LayerRole.NAME)
+    others = [list(s.points) for s in getattr(layer, "strokes", []) or [] if len(s.points) >= 2]
+    if not others or len(points) < 2:
+        return points
+    out = [list(p) for p in points]
+
+    def target(x: float, y: float):
+        # an end within reach first (shapes close end to end), else the nearest point along a line
+        ends = [(math.dist(end, (x, y)), end) for line in others for end in (line[0], line[-1])]
+        ends = [e for e in ends if e[0] <= reach]
+        if ends:
+            return min(ends, key=lambda e: e[0])[1]
+        best = None
+        for line in others:
+            _seg, d, near = _nearest_segment(line, x, y)
+            if d <= reach and (best is None or d < best[0]):
+                best = (d, near)
+        return best[1] if best else None
+
+    for k in (0, -1):
+        found = target(out[k][0], out[k][1])
+        if found is not None:
+            out[k][0], out[k][1] = float(found[0]), float(found[1])
+    return [tuple(p) for p in out]
 
 
 def _trace_edit(episode, op: dict) -> None:
@@ -1929,6 +1964,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                 copies = [[tuple(p) for p in c] for c in guides.symmetry_copies(points, page.rulers, inside, layer_id=layer_id)]
             else:
                 points = _snap_points(page, points)
+        if op.get("snap_lines_mm"):  # ベクター吸着: the line's ends meet the lines already drawn nearby
+            points = _snap_ends(page, op, points, max(0.1, min(10.0, float(op["snap_lines_mm"]))))
         taper = op["taper"] if "taper" in op else episode.brush_taper
         if taper:
             from genko.stroke import taper_points
@@ -2935,6 +2972,14 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             raise ApplyError("the layer is locked")
         points = _parse_points(op.get("points") or [])
         width = float(op.get("width_mm", 2))
+        if op.get("snap_ruler") and page.rulers:  # スナップ消しゴム: the eraser runs along the ruler, as the pen does
+            from genko import rulers as guides
+
+            points = [tuple(p) for p in guides.snap(points, page.rulers, _frame_contains(page), only=op.get("ruler_id"),
+                                                     layer_id=str(op.get("layer_id") or "") or None)]
+        texture = str(op.get("texture") or "")
+        if texture not in ("", "hard", "soft", "rough"):
+            raise ApplyError("texture must be hard, soft or rough")
         if target.kind == LayerKind.TONE:  # on a tone the eraser scrapes (削り); soft fades it out
             from genko.models import coerce_stroke
 
@@ -2975,10 +3020,12 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                     part.width_mm, part.kind, part.rgb, part.opacity = stroke.width_mm, stroke.kind, stroke.rgb, stroke.opacity
                     kept.append(part)
             target.strokes = kept
+        if target.kind == LayerKind.RASTER and getattr(target, "patches", None) and not target.raster_png:
+            _bake_vectors(page, target)  # (fills on a paint layer are erased like its pixels)
         if target.raster_png:
             from genko.raster import erase_raster
 
-            erase_raster(page, target, points, width_mm=width)
+            erase_raster(page, target, points, width_mm=width, texture="" if texture == "hard" else texture)
         return
 
     if name == "reorder_layers":

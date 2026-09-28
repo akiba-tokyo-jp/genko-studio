@@ -144,6 +144,15 @@ class BrushPanel(QWidget):
         self.speed_steady = QCheckBox("速い線ほど補正を強く")
         self.speed_steady.setToolTip("速度による手ブレ補正: すばやく引いた所ほど手ぶれを強く抑え、ゆっくり描いた所は細かい形を残す")
         self.speed_steady.toggled.connect(lambda _: self._save())
+        self.snap_lines = QDoubleSpinBox()
+        self.snap_lines.setMaximumWidth(110)
+        self.snap_lines.setRange(0, 5)
+        self.snap_lines.setSingleStep(0.5)
+        self.snap_lines.setDecimals(1)
+        self.snap_lines.setSuffix(" mm")
+        self.snap_lines.setSpecialValueText("しない")
+        self.snap_lines.setToolTip("ベクター吸着: 線の端がこの距離まで近い線（同じレイヤー）に、くっついて止まる。形が閉じ、線がつながる")
+        self.snap_lines.valueChanged.connect(lambda _: self._save())
         self.post_fit = QDoubleSpinBox()
         self.post_fit.setMaximumWidth(110)
         self.post_fit.setRange(0, 2)
@@ -234,6 +243,7 @@ class BrushPanel(QWidget):
         form.addRow("不透明度", with_value(self.opacity))
         form.addRow("手ぶれ補正", slider_for(self.steady))
         form.addRow(self.speed_steady)
+        form.addRow("線の端をくっつける", slider_for(self.snap_lines))
         form.addRow("後補正", slider_for(self.post_fit))
         form.addRow(self.taper)
         form.addRow("入り", slider_for(self.taper_in))
@@ -379,6 +389,7 @@ class BrushPanel(QWidget):
         self.ink_pressure.setValue(int(float(kept("ink_pressure", 0))))
         self.speed_steady.setChecked(str(kept("speed_steady", False)).lower() == "true")
         self.post_fit.setValue(float(kept("post_fit", 0)))
+        self.snap_lines.setValue(float(kept("snap_lines", 0)))
         self._follow_taper()
 
     def _kind_changed(self) -> None:
@@ -408,6 +419,7 @@ class BrushPanel(QWidget):
         self.settings.setValue(prefix + "ink_pressure", self.ink_pressure.value())
         self.settings.setValue(prefix + "speed_steady", self.speed_steady.isChecked())
         self.settings.setValue(prefix + "post_fit", self.post_fit.value())
+        self.settings.setValue(prefix + "snap_lines", self.snap_lines.value())
         self._follow_taper()
         self.settings.setValue("fill/gap", self.gap.value())
         self.settings.setValue("fill/reference", self.reference.currentData())
@@ -476,6 +488,8 @@ class BrushPanel(QWidget):
             out["stabilize_speed"] = True
         if self.post_fit.value() > 0:
             out["post_fit"] = round(self.post_fit.value(), 2)
+        if self.snap_lines.value() > 0:
+            out["snap_lines_mm"] = round(self.snap_lines.value(), 2)
         return out
 
 

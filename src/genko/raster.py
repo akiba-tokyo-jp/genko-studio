@@ -66,13 +66,36 @@ def bake_stroke(
         layer.kind = LayerKind.RASTER
 
 
-def erase_raster(page: Page, layer: Layer, points: list, width_mm: float = 2.0, dpi: int = WORKING_DPI) -> None:
+def erase_raster(page: Page, layer: Layer, points: list, width_mm: float = 2.0, dpi: int = WORKING_DPI,
+                 texture: str = "") -> None:
+    """The eraser on paint: hard (a clean edge), soft (軟らかめ: the edge fades out) or rough (粗め: a grain
+    left behind, as a dry eraser leaves)."""
     if not layer.raster_png:
         from genko.models import stroke_points
 
         for stroke in layer.strokes:
             bake_stroke(page, layer, stroke_points(stroke), dpi)
     image = ensure_raster(page, layer, dpi)
-    draw = ImageDraw.Draw(image)
-    stamp_polyline(draw, points, dpi, width_mm, fill=(0, 0, 0, 0), coords="mm")
+    if texture not in ("soft", "rough"):
+        draw = ImageDraw.Draw(image)
+        stamp_polyline(draw, points, dpi, width_mm, fill=(0, 0, 0, 0), coords="mm")
+        save_raster(page, layer, image)
+        return
+    import random
+
+    from PIL import ImageFilter
+
+    mask = Image.new("L", image.size, 0)
+    width = width_mm * (0.7 if texture == "soft" else 1.0)
+    stamp_polyline(ImageDraw.Draw(mask), points, dpi, width, fill=255, coords="mm")
+    if texture == "soft":
+        mask = mask.filter(ImageFilter.GaussianBlur(max(1.0, width_mm / 25.4 * dpi / 4)))
+    else:
+        rng = random.Random(f"{layer.id}{points[0] if points else ''}")
+        grain = max(1, round(dpi / 100))
+        small = Image.new("L", (max(1, mask.width // grain), max(1, mask.height // grain)))
+        small.putdata([255 if rng.random() < 0.7 else 0 for _ in range(small.width * small.height)])
+        mask = ImageChops.multiply(mask, small.resize(mask.size, Image.Resampling.NEAREST))
+    alpha = image.split()[3]
+    image.putalpha(ImageChops.subtract(alpha, mask))
     save_raster(page, layer, image)

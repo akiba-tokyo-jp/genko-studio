@@ -137,6 +137,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   `stabilize_speed`（速い所ほど補正）、`post_fit`（この mm までのゆれを除いて曲線に置き換え）。
 - 塗りつぶし（`fill`）: `tolerance`（色の誤差 0〜100、大きいほどうすい線を越える）、`expand_mm`（線の下へ広げる）、
   `ignore: ["draft", "text"]`（下描き・台詞を壁にしない）。`fill_enclosed`（`poly`）は囲んだ中の線で閉じた所だけを塗る。
+- `add_stroke` の `snap_lines_mm`: 線の端が、その距離までの近い線にくっつく（形を閉じる・線をつなぐ）。
+  `erase` の `texture`（soft / rough）と `snap_ruler`（定規に沿って消す）。
 - 描いた線の直し: `trace_edit`（`action` widen / narrow / redraw / redraw_width / join / simplify、`points` はなぞった線）。
   1 点の太さは `vector_edit`（`action: set_pressure`、`index`、`pressure`）。
 - ペン入れと新しいペン・ペイントのレイヤーの線は、描き始めたコマの中だけに出る（`panel_each`）。

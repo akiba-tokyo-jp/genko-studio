@@ -623,7 +623,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 painter.drawImage(self._live.tail[0], self._live.tail[1], self._live.tail[2])
         elif self._stroke:
             color = theme.accent() if self.tool == "pen" else QColor(200, 60, 60, 160)
-            shown = self.snapped_preview(self._stroke) if self.tool == "pen" else [self._stroke]
+            shown = (self.snapped_preview(self._stroke) if self.tool == "pen"
+                     else self.snapped_preview(self._stroke)[:1] if self.tool == "eraser" else [self._stroke])
             self._draw_strokes(painter, shown, color, max(1.5, self.brush_width_mm * self._scale))
         if self._hover and not self._stroke and self.tool in ("pen", "eraser", "blend", "liquify"):
             hx, hy = self._pt(*self._hover).x(), self._pt(*self._hover).y()

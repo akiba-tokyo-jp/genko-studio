@@ -2519,6 +2519,15 @@ class MainWindow(QMainWindow):
             self.eraser_mode.addItem(label, key)
         self.eraser_mode.setToolTip("線全体: 触れた線を丸ごと消す（ベクター）")
         eraser_form.addRow("消し方", self.eraser_mode)
+        self.eraser_texture = QComboBox()
+        for label, key in (("硬め", "hard"), ("軟らかめ（縁がぼける）", "soft"), ("粗め（ざらつく）", "rough")):
+            self.eraser_texture.addItem(label, key)
+        self.eraser_texture.setToolTip("ペイントのレイヤーの消え方。ペンの線（ベクター）は、どれでもその所で切れる")
+        eraser_form.addRow("消しゴムの質", self.eraser_texture)
+        snap_note = QLabel("定規への吸着（表示メニュー）がオンなら、消しゴムも定規に沿って消します")
+        snap_note.setWordWrap(True)
+        theme.hint(snap_note)
+        eraser_form.addRow(snap_note)
         scrape = QLabel("トーンのレイヤーでは削ります（ぼかすかは素材パネルのトーンの欄で）")
         scrape.setWordWrap(True)
         theme.hint(scrape)
@@ -3427,6 +3436,10 @@ class MainWindow(QMainWindow):
                 op["mode"] = self.eraser_mode.currentData()
             elif self.brush.crossing.isChecked():
                 op["mode"] = "to_crossing"
+            if self.eraser_texture.currentData() != "hard":
+                op["texture"] = self.eraser_texture.currentData()
+            if self.canvas.snap_rulers and page.rulers:
+                op["snap_ruler"] = True
             self.apply_ops([op])
             return
         op = {"op": "add_stroke", "page": page.index, "layer_id": layer.id, "points": points, **self.brush.stroke_fields()}
