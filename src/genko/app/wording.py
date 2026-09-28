@@ -175,6 +175,7 @@ _ERRORS: list[tuple[str, object]] = [
     (r"pages is the list of pages", "ページを選んでください"),
     (r"spine_mm is the spine's width.*", "背幅（0〜100 mm）が要ります"),
     (r"height_mm is the band's height.*", "帯の高さは 15〜200 mm です"),
+    (r"only a person can let approvals come through a chat", "チャットでの承認を許せるのは人だけです"),
     (r"kind must be front, back, jacket or obi", "表紙・裏表紙・カバー・帯から選びます"),
     (r"(\w+) is a frame number", lambda m: f"{_field(m.group(1))}はフレームの番号で指定します"),
     (r"cels is a list of \[frame, cel id or null\]", "セルの指定は［フレーム, セル］の並びです"),

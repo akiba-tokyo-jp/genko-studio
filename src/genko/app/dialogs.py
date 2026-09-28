@@ -736,6 +736,7 @@ class ExportDialog(QDialog):
         look.frame(self, look.header("書き出し", "形式を選ぶと、その形式で決められることだけが並びます。右は書き出される 1 ページ目です。"),
                    body, look.card(side, "書き出される形"), look.footer(self.buttons))
         self.resize(900, 600)
+        self.format.setCurrentIndex(max(0, self.format.findData("png")))  # (PNG unless another is chosen)
         self.format.currentIndexChanged.connect(lambda _: self._format_changed())
         self.area.currentIndexChanged.connect(lambda _: self._preview())
         self.official.toggled.connect(lambda on: (self.which.setEnabled(not on), on and self.which.setCurrentIndex(0)))

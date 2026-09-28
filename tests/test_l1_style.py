@@ -224,20 +224,20 @@ def test_a_second_start_hands_its_link_to_the_open_genko(qapp):
     listener = links.Listener()
     got: list[str] = []
     listener.received.connect(got.append)
-    import threading
+    import subprocess
+    import sys
     import time
 
-    sent: list[bool] = []
     try:
-        # (the later start is another program: here, another thread, while this one's events run)
-        later = threading.Thread(target=lambda: sent.append(links.send("genko://use-style?id=shonen")))
-        later.start()
-        deadline = time.monotonic() + 10
-        while (later.is_alive() or not got) and time.monotonic() < deadline:
+        # (the later start is another program, as when the browser's button starts Genko)
+        code = ("import sys; from PySide6.QtCore import QCoreApplication; app = QCoreApplication([]); "
+                "from genko.app import links; sys.exit(0 if links.send('genko://use-style?id=shonen') else 3)")
+        later = subprocess.Popen([sys.executable, "-c", code])
+        deadline = time.monotonic() + 20
+        while (later.poll() is None or not got) and time.monotonic() < deadline:
             qapp.processEvents()
             time.sleep(0.01)
-        later.join(1)
-        assert sent == [True]
+        assert later.wait(5) == 0
         server = listener.server
         assert got == ["genko://use-style?id=shonen"], (server.isListening(), server.fullServerName(), server.errorString())
     finally:

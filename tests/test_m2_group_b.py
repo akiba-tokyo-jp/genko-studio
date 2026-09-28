@@ -191,7 +191,7 @@ def test_genko_enlarges_adopted_art_into_a_marked_candidate(tmp_path):
     parent = next(c for c in panel["candidates"] if c["id"] == data["parent"])
     assert cand["px"] == [parent["px"][0] * 2, parent["px"][1] * 2] and cand["upscaled"]["scale"] == 2.0
     assert cand["origin"]["kind"] == "genko" and cand["mode"] == "upscale"
-    assert agent.adopt("demo.genko", data["candidate"], 1, frame_id).ok
+    assert agent.adopt("demo.genko", data["candidate"], 1, frame_id, upscale=False).ok
     report = check(load_episode(project), project, force=True)
     assert any(w["code"] == "upscaled" for w in report["warnings"])
     assert any(row.get("upscaled") == 2.0 for row in report["dpi"])
@@ -231,5 +231,5 @@ def test_small_art_asks_for_enlarging_before_the_art_approval(tmp_path):
     small = [i for i in items if i["kind"] == "upscale_panel" and i["target"].get("frame_id") == frame_id]
     if not small:
         pytest.skip("the fixture art is sharp enough already")
-    assert "upscale" in small[0]["tools"]
+    assert "adopt" in small[0]["tools"] and small[0]["adopted"]  # (adopting it again enlarges it)
     assert not any(i["kind"] == "await_human" and i.get("gate") == "art" and i["target"].get("page") == 1 for i in items)

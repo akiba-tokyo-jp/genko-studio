@@ -1209,6 +1209,10 @@
       "reason": "str"
     },
     {
+      "op": "allow_chat_approval",
+      "on": "bool (person only: the AI may record approvals a person sends in chat)"
+    },
+    {
       "op": "resolve_ticket",
       "id": "str",
       "note": "str (what was done)"

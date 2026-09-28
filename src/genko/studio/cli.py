@@ -136,9 +136,13 @@ def _parser() -> argparse.ArgumentParser:
     reopen.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     adopt = sub.add_parser("adopt-drafts", help="Move M0 sidecar drafts (studio/drafts) into project.json")
     adopt.add_argument("project", type=Path)
+    chat = sub.add_parser("chat-approval", help="(human) Let the AI record approvals you send in a chat (on / off)")
+    chat.add_argument("project", type=Path)
+    chat.add_argument("state", choices=["on", "off"])
+    chat.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     export = sub.add_parser("export", help="(human) Final export after preflight")
     export.add_argument("project", type=Path)
-    export.add_argument("--format", default="pdf", choices=["pdf", "tiff", "png", "webtoon", "sns"])
+    export.add_argument("--format", default="png", choices=["png", "pdf", "tiff", "webtoon", "sns"])
     export.add_argument("--out", type=Path, required=True)
     export.add_argument("--dpi", type=int, help="default: the page spec dpi (600 for B4)")
     export.add_argument("--allow-fixture", action="store_true", help="let test images through (never for real books)")
@@ -217,6 +221,8 @@ def _run(args: argparse.Namespace) -> int:
         if not pages:
             return _emit({"ok": False, "error": "--pages が要る"})
         return _emit(human.approve_name(pages) if args.gate == "name" else human.approve_art(pages))
+    if args.cmd == "chat-approval":
+        return _emit(HumanService(path, args.actor or default_actor()).chat_approval(args.state == "on"))
     if args.cmd == "revoke":
         return _emit(HumanService(path, args.actor or default_actor()).revoke(args.gate, _pages(args.pages), args.character, args.reason))
     if args.cmd == "comment":

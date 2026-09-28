@@ -38,7 +38,7 @@ NAMES = {
     "import_model": "3D モデルを読み込んだ", "set_camera": "カメラを動かした", "set_light": "光の向きを変えた",
     "render_prims": "3D を線と面にした", "add_cover": "表紙を足した", "import_psd": "PSD を読み込んだ", "set_timelapse": "タイムラプスを切り替えた", "set_animation": "アニメーションを設定した", "add_anim_folder": "アニメーションフォルダーを足した", "add_cel": "セルを足した", "set_exposure": "タイムラインを直した", "set_exposures": "タイムラインを直した", "set_camera_key": "カメラワークを直した", "set_light_table": "ライトテーブルを直した", "replace_text": "台詞を置き換えた",
     "set_assignee": "担当を決めた",
-    "define_brush": "ブラシを作った", "approve": "承認した", "reject": "差し戻した", "advance": "工程を進めた",
+    "define_brush": "ブラシを作った", "approve": "承認した", "allow_chat_approval": "チャットでの承認を切り替えた", "reject": "差し戻した", "advance": "工程を進めた",
 }
 
 

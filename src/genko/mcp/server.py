@@ -20,19 +20,39 @@ SKILL_PATH = Path(__file__).resolve().parent.parent / "studio" / "guide" / "SKIL
 
 INSTRUCTIONS = """Genko は漫画原稿のシステム。文章も絵も作らない。あなた（エージェント）が企画書・脚本・ネーム計画を書き、
 Genko が検査・コマ割り・縦書き写植・プレビュー描画をする。絵はあなたが別の道具で生成し、import_image で取り込む。
-進め方: status → next で次の作業を取る → 書く道具は commit=false で試し、issues の path を直してから commit=true。
+進め方: status → next で次の作業を取る → 書く道具を commit=true で呼ぶ（エラーがあれば何も書かずに返るので issues の path を直して送り直す）。書く道具の返事の next が次の作業。
 ネームの規則は resource genko://guide/manga-rules（inspect target=rules でも読める）。
-作画: generation_request で依頼パック（サイズ・プロンプトの下書き・描かせないもの・ガイドと参照の画像）を受け取る →
-自分の画像ツールで生成し、画像を返された inbox フォルダに保存 → import_images（来歴 origin を必ず付ける）→
-candidates と render kind=compare で比べる → review_candidates → adopt。コマの外にはみ出した部分は自動で切り取られる。
-採用後は report_regions で顔と人物の位置を報告し、作画の承認後に finish_page。最後に check（人と同じ点検）・preflight と export（各形式）。
+作画: generation_request で依頼パックを受け取る → 自分の画像ツールで生成し、返された inbox フォルダに保存 →
+take_panel_art（取り込み・採用・足りなければ拡大・顔と人物の位置の報告を 1 回で）。2 枚以上を比べるときだけ import_images → candidates → review_candidates → adopt。
+作画の承認後に finish_page。最後に check（人と同じ点検）・preflight と export（既定は png）。
 描く・直す: apply_ops でページ・コマ・レイヤー（複製・結合・マスク）・線・塗り・グラデーション・台詞（傍点・部分書式・回転）・3D（背景は add_scene）・トーン・効果線まで、人が画面でできることは全部できる（op 一覧は resource genko://ops）。間違えたら undo（自分の変更だけ）。
 使える素材・書体・ブラシは inspect target=materials / fonts / brushes、レイヤーと台詞の今の設定は inspect target=snapshot。
 render は layer_id でそのレイヤーだけ、mode=print で印刷と同じ見え方。
 3 回直しても通らないときは ask_human で人間に相談して、その作業を置いておく。
-承認と本番の書き出しは人間だけが行う。承認が要るところでは request_approval を出して待つ。
+承認と本番の書き出しは人間だけが行う。承認が要るところでは request_approval を出して待つ（人がチャットで承認し、原稿がそれを許していれば record_chat_approval で人の名前で記録できる）。
 同じ Genko を複数の会話（Telegram のスレッドなど）で使うときは、どの道具にも session に会話の名前（例 "9204"）を渡す。
 変更はその名前で記録され、undo はその会話の変更だけを戻す。別の会話が使っている原稿に書くと、一度だけ book_in_use で止まる。"""
+
+
+def slim_schema(node: Any) -> Any:
+    """A tool's input schema without what tells an agent nothing: every title, `anyOf [X, null]` (X alone: leaving a
+    value out is the same), and `default: null`. The arguments are still checked against the full model."""
+    if isinstance(node, list):
+        return [slim_schema(v) for v in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: ({name: slim_schema(sub) for name, sub in v.items()} if k in ("properties", "$defs") and isinstance(v, dict)
+               else slim_schema(v))  # (the argument names themselves are kept, "title" among them)
+           for k, v in node.items()
+           if not (k == "title" and isinstance(v, str)) and not (k == "default" and v is None)
+           and not (k == "additionalProperties" and v is True)}
+    options = out.get("anyOf")
+    if isinstance(options, list):
+        kept = [o for o in options if o != {"type": "null"}]
+        if len(kept) == 1 and len(kept) < len(options):
+            out.pop("anyOf")
+            out = {**kept[0], **out}
+    return out
 
 
 def _out(result: ToolResult) -> list[Any]:
@@ -45,6 +65,12 @@ READ_ONLY = frozenset({
     "projects", "status", "next", "inspect", "render", "candidates", "preflight", "check", "tickets", "proposals",
     "review_page", "export", "export_proof", "export_status", "style_catalog",
 })
+
+
+# writes whose reply carries the next work item
+NEXT_AFTER = frozenset({"set_bible", "set_script", "submit_name", "apply_ops", "import_images", "take_panel_art", "adopt",
+                        "review_candidates", "report_regions", "finish_page", "request_approval", "resolve_ticket",
+                        "record_chat_approval", "upscale", "import_name", "use_style"})
 
 
 def build_server(root: Path, actor: str) -> MCPServer:
@@ -73,7 +99,11 @@ def build_server(root: Path, actor: str) -> MCPServer:
                 current_session.reset(token)
 
         wrapped.__signature__ = signature.replace(parameters=[*signature.parameters.values(), extra])
-        return server.tool(structured_output=False)(wrapped)
+        registered = server.tool(structured_output=False)(wrapped)
+        entry = getattr(server, "_tool_manager", None) and server._tool_manager._tools.get(fn.__name__)
+        if entry is not None:  # (what every agent reads up front: no titles, no "or null", no null defaults)
+            entry.parameters = slim_schema(entry.parameters)
+        return registered
 
     def call(fn, *args, **kwargs) -> list[Any]:
         import time
@@ -117,9 +147,18 @@ def build_server(root: Path, actor: str) -> MCPServer:
                            (time.perf_counter() - started) * 1000)
             if writes and result is not None and result.ok:
                 presence.touch(path, who)
+                if fn.__name__ in NEXT_AFTER and isinstance(result.data, dict) and "next" not in result.data:
+                    # (what to do next rides on the reply: no separate next call after each write)
+                    try:
+                        upcoming = StudioService(root, who).next(str(project), limit=1).data
+                        result.data["next"] = (upcoming["items"] or [None])[0] or {"waiting_for": upcoming["waiting_for"]}
+                    except Exception:  # noqa: BLE001 (the write went through; the hint is only a help)
+                        pass
         if result is None:
             shown = wording_error(error or "")
-            return [json.dumps({"ok": False, "error": shown, **({"detail": error} if shown != error else {})}, ensure_ascii=False)]
+            head = (error or "").split(" ‖ ")[0]
+            return [json.dumps({"ok": False, "error": shown, **({"detail": head} if wording_error(head) != head else {})},
+                               ensure_ascii=False)]
         return _out(result)
 
     @tool
@@ -144,15 +183,17 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.next, project, limit, claim)
 
     @tool
-    def inspect(project: str, target: str, page: int | None = None, frame_id: str | None = None) -> list:
-        """読む。target: bible / script / page（そのページの beat、前後ページ、めくりの位置、定型、コマ一覧） /
-        panel（コマのブリーフ・寸法 mm・候補・登場人物の設定画、frame_id 省略でページ全部） / studio / schemas / rules /
-        snapshot（ページ・レイヤー〔名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照〕・台詞〔書式・フキダシ〕・3D） /
+    def inspect(project: str, target: str, page: int | None = None, frame_id: str | None = None, op: str | None = None,
+                full: bool = False) -> list:
+        """読む。target: ops（apply_ops の op の名前の一覧。op に名前〔カンマ区切り〕を渡すとその引数の形） / drawing（op と書き出しの
+        詳しい使い方） / bible / script / page（そのページの beat、前後ページ、めくりの位置、定型、コマ一覧） /
+        panel（コマのブリーフ・寸法 mm・候補の要約〔full=true で全部〕・登場人物の設定画、frame_id 省略でページ全部） / studio / schemas / rules /
+        snapshot（page を渡すとそのページだけ。ページ・レイヤー〔名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照〕・台詞〔書式・フキダシ〕・3D） /
         materials（stamp_material で貼れる素材: id・名前・種類〔トーン・効果線・画像・パーツ・描き文字・ブラシ・3D〕・フォルダ・タグ） / fonts（style.font に使える書体） /
         brushes（add_stroke の kind に使えるブラシ: 入っているもの・この原稿の自作・自分の自作） / upscalers（upscale の method） / plugins（人が入れた
         フィルターのプラグイン: filter_raster の kind に "plugin:<key>"、params は PARAMS のとおり。置き場所は folder:
         Linux は ~/.config/genko/plugins、Windows は %APPDATA%\\genko\\plugins）。"""
-        return call(service.inspect, project, target, page, frame_id)
+        return call(service.inspect, project, target, page, frame_id, op, full)
 
     @tool
     def render(project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None,
@@ -209,10 +250,11 @@ def build_server(root: Path, actor: str) -> MCPServer:
     @tool
     def adopt(project: str, candidate_id: str, page: int | None = None, frame_id: str | None = None, to: str = "art",
               fit: str | None = None, offset_mm: list[float] | None = None, scale: float | None = None,
-              location_id: str | None = None) -> list:
-        """候補を採用してコマに置く（to: art / bg / draft。fit: cover / contain / stretch）。場所の参照画像は location_id。
-        作画の確定は人間の art 承認で行う。"""
-        return call(service.adopt, project, candidate_id, page, frame_id, to, fit, offset_mm, scale, location_id)
+              location_id: str | None = None, regions: list[dict] | None = None, upscale: bool = True) -> list:
+        """候補を採用してコマに置く（to: art / bg / draft。fit: cover / contain / stretch）。page・frame_id は省くと候補から引く。
+        art は本の解像度に足りなければ拡大して採用し直し（upscale: false で止める）、regions（顔・人物の位置）を渡せば報告まで
+        1 回で済む。場所の参照画像は location_id。作画の確定は人間の art 承認で行う。"""
+        return call(service.adopt, project, candidate_id, page, frame_id, to, fit, offset_mm, scale, location_id, regions, upscale)
 
     @tool
     def request_fix(project: str, page: int, instruction: str, frame_id: str | None = None,
@@ -237,7 +279,7 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.preflight, project)
 
     @tool
-    def export_proof(project: str, format: str = "pdf") -> list:  # noqa: A002
+    def export_proof(project: str, format: str = "png") -> list:  # noqa: A002
         """校正用の書き出し（150 dpi、全ページに「校正」の透かし）。本番の書き出しは人間が行う。40 秒で終わらないときは job を返す。"""
         return call(service.export_proof, project, format, background=True)
 
@@ -254,25 +296,37 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.undo, project)
 
     @tool
-    def export(project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
+    def export(project: str, format: str = "png", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
-               seconds: float | None = None, movie: str = "webp", dots: bool = False) -> list:
-        """書き出し（承認は要らない。正式な書き出しは人だけ）: format は pdf / tiff / png / cmyk / layers / psd / pack / epub /
+               seconds: float | None = None, movie: str = "webp", dots: bool = False, screen: dict | None = None) -> list:
+        """書き出し（承認は要らない。正式な書き出しは人だけ）: dpi の既定は 300（見せる・確かめる用。印刷用の本番は人が書き出す）。format は png（既定）/ pdf / tiff / cmyk / layers / psd / pack / epub /
         kindle / strip / webtoon / sns / timelapse / animation。pages でページを選ぶ（例 [3, 4, 5]）。area は paper / bleed / trim。
         pdf・png・tiff の color は auto（既定: モノクロの原稿はグレー、カラーは RGB）/ rgb / cmyk / gray / bitonal（白黒 2 階調）、cmyk と pdf の icc は印刷所の CMYK プロファイル（.icc のパス）。long_edge の既定は kindle 2560・sns 2048。timelapse は記録した制作過程（set_timelapse で記録）を movie（webp / gif / png / mp4）で、fps と
         seconds（全体の長さ）、pages は省略で全ページ（描いた順）か、1 ページだけを [n] で。animation はアニメーションのページ（pages に 1 つ）を movie（gif / webp /
         png / mp4 / frames〔連番 PNG〕）で、width で幅を。書いた先は <原稿>/exports/。
         epub と kindle は仕上がりで切り、トーンを網点にせずグレーで描く（網点を縮めるとモアレが出る）。dots=true で印刷と同じ網点。
-        40 秒で終わらないときは job を返す（書き出しは続いている）。export_status で結果を取る。"""
+        screen（{lpi, angle, shape}）は color bitonal のときグレーを網点にする。
+        40 秒で終わらないときは job を返す（書き出しは続いている）。export_status（wait_s で最大 60 秒待つ）で結果を取る。"""
+        if dpi is None and format in ("png", "pdf", "tiff", "cmyk", "layers", "psd", "pack", "strip"):
+            dpi = 300
         return call(service.export, project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc,
-                    fps, seconds, movie, background=True, dots=dots)
+                    fps, seconds, movie, background=True, dots=dots, screen=screen)
 
     @tool
-    def export_status(project: str, job: str) -> list:
+    def record_chat_approval(project: str, gate: str, message: str, pages: list[int] | None = None,
+                             character_id: str | None = None, candidate_id: str | None = None,
+                             face_box01: list[float] | None = None) -> list:
+        """人がチャット（Telegram など）で承認したときに、その承認を人の名前で記録する。人が原稿ごとに許可したときだけ使える
+        （許可が無ければ chat_approval_off）。gate は name / art / sheet。message に人が送った言葉をそのまま入れる。
+        人がはっきり承認していないのに呼ばない。"""
+        return call(service.record_chat_approval, project, gate, message, pages, character_id, candidate_id, face_box01)
+
+    @tool
+    def export_status(project: str, job: str, wait_s: float = 60) -> list:
         """export / export_proof / upscale が job を返したとき（40 秒で終わらなかった処理）の様子。status: running / done / failed /
-        lost（Genko が途中で止まった）。done なら result に書き出しの返事（files など）が入る。"""
-        return call(service.export_status, project, job)
+        lost（Genko が途中で止まった）。done なら result に書き出しの返事（files など）が入る。wait_s 秒（最大 60）まで終わるのを待ってから返す。"""
+        return call(service.export_status, project, job, wait_s)
 
     @tool
     def upscale(project: str, page: int, frame_id: str, candidate_id: str | None = None, scale: float | None = None,
@@ -409,6 +463,13 @@ def build_server(root: Path, actor: str) -> MCPServer:
     def skill() -> str:
         """Hermes 用のスキル（作業の手順、止まるところ、してはいけないこと）の正本。"""
         return SKILL_PATH.read_text(encoding="utf-8") if SKILL_PATH.is_file() else ""
+
+    @server.resource("genko://guide/drawing", mime_type="text/markdown")
+    def drawing_guide() -> str:
+        """人と同じ道具で描く・直す: op と書き出しの詳しい使い方（inspect target=drawing と同じ）。"""
+        from genko.studio.service import DRAWING_PATH
+
+        return DRAWING_PATH.read_text(encoding="utf-8")
 
     @server.resource("genko://guide/manga-rules", mime_type="text/markdown")
     def manga_rules() -> str:

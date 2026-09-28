@@ -109,6 +109,8 @@ def test_eight_pages_from_bible_to_export_offline(tmp_path: Path, capsys, monkey
             panel = frame.panel
             assert panel["status"] == "adopted" and panel["attempts"]["images"] == 2
             adopted = next(c for c in panel["candidates"] if c["id"] == panel["adopted"]["art"])
+            while adopted.get("upscaled"):  # (adopting enlarges small art: the drawn picture is its parent)
+                adopted = next(c for c in panel["candidates"] if c["id"] == adopted["parent"])
             assert adopted["origin"]["model"] == "fixture-good" and adopted["review"]["score"] == 0.9
             assert adopted["mapping"]["pad_mm"] == 3.0
     assert any(r.get("source") == "agent" for p in episode.pages for f in p.leaf_frames() for r in f.panel.get("regions", []))

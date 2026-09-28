@@ -58,7 +58,7 @@ def _art(agent: StudioService, project: Path, page: int, frame_id: str, report: 
     cand = agent.import_images("demo.genko", request["id"], [{"file": f"studio/inbox/{request['id']}/a.png",
                                                               "origin": {"tool_id": TOOL, "model": "gpt-image-1", "prompt": "x"}}])
     cand_id = cand.data["candidates"][0]
-    assert agent.adopt("demo.genko", cand_id, page=page, frame_id=frame_id).ok
+    assert agent.adopt("demo.genko", cand_id, page=page, frame_id=frame_id, upscale=False).ok
     if report:
         figures = [f for f in agent.inspect("demo.genko", "panel", page, frame_id).data["panels"][0]["figures"]]
         regions = [{"kind": k, "char": f["char"], "rect_mm": f[m]} for f in figures for k, m in (("face", "head_mm"), ("person", "body_mm"))]

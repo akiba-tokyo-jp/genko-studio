@@ -170,8 +170,14 @@ def _art_items(episode: Episode, page, requested: set, requested_sheets: set, pr
         if status == "adopted":
             if not _regions_done(panel):
                 waiting += 1
-                out.append(item("report_regions", "採用した絵の顔と人物の位置をまだ報告していない（写植の顔よけに使う）",
-                                ["render", "report_regions"], page.index, **target))
+                from genko.guide import figures_for
+
+                figures = [{"char": f.char_id, "head_mm": [round(v, 1) for v in f.head], "body_mm": [round(v, 1) for v in f.body]}
+                           for f in figures_for(frame)]
+                out.append(item("report_regions", "採用した絵の顔と人物の位置をまだ報告していない（写植の顔よけに使う）。"
+                                "figures はネームでの目安（絵で実際の位置を確かめて rect_mm か box01 で報告する）",
+                                ["render", "report_regions"], page.index, adopted=(panel.get("adopted") or {}).get("art"),
+                                figures=figures, **target))
                 continue
             small = _upscale_items(episode, page, project, frame.id)  # (before the art is shown for approval)
             if small:
@@ -248,9 +254,9 @@ def _upscale_items(episode: Episode, page, project: Path | None, frame_id: str |
         review = (panel.get("reviews") or {}).get("upscale")
         if review and review.get("input_hash") == adopted:
             continue
-        out.append(item("upscale_panel", f"採用した絵の実効解像度が {dpi:.0f} dpi（{MIN_DPI} 未満）。upscale で拡大して採用し直す",
-                        ["upscale", "adopt", "generation_request", "import_images", "record_review"], page.index,
-                        frame_id=layer.frame_id, dpi=dpi, input_hash=str(adopted)))
+        out.append(item("upscale_panel", f"採用した絵の実効解像度が {dpi:.0f} dpi（{MIN_DPI} 未満）。adopt（candidate_id に adopted）"
+                        "を呼ぶと拡大して採用し直す", ["adopt", "generation_request", "take_panel_art", "record_review"], page.index,
+                        frame_id=layer.frame_id, dpi=round(dpi), adopted=adopted, input_hash=str(adopted)))
     return out
 
 

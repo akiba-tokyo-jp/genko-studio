@@ -43,6 +43,21 @@ def _candidate_for(page: Page, layer) -> dict | None:
     return next((c for c in (frame.panel or {}).get("candidates", []) if c.get("id") == cand_id), None)
 
 
+def _drawn_origin(page: Page, layer, cand: dict | None) -> dict:
+    """Where the picture was drawn: an enlargement (Genko's own) is followed back to the picture it enlarged."""
+    origin = (cand or {}).get("origin") or {}
+    try:
+        pool = {c.get("id"): c for c in (page._find(layer.frame_id).panel or {}).get("candidates", [])}
+    except (KeyError, IndexError):
+        return origin
+    for _ in range(6):
+        if not (cand or {}).get("upscaled") or not cand.get("parent") or cand["parent"] not in pool:
+            break
+        cand = pool[cand["parent"]]
+        origin = cand.get("origin") or {}
+    return origin
+
+
 def art_layers(page: Page) -> list:
     return [layer for layer in page.layers if layer.kind == LayerKind.PLACED and layer.exportable and layer.visible]
 
@@ -108,7 +123,7 @@ def check(episode: Episode, project: Path, *, allow_fixture: bool = False, force
                     dpi_table[-1]["upscaled"] = up.get("scale")
                 warnings.append(warning("upscaled", lwhere, f"{page.index} ページのコマ {layer.frame_id} の絵は {up.get('scale')} 倍に拡大したもの"
                                         f"（{up.get('method')}。描き込みは元の大きさのまま）"))
-            if origin.get("kind") == "fixture":
+            if _drawn_origin(page, layer, cand).get("kind") == "fixture":  # (an enlarged test image is still one)
                 issue = (warning if allow_fixture else error)(
                     "fixture_image", lwhere, f"{page.index} ページに試験用の画像（fixture）がある", "本番では使えない。--allow-fixture で通す")
                 (warnings if allow_fixture else errors).append(issue)
