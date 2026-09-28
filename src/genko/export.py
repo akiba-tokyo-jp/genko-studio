@@ -167,11 +167,13 @@ def export_print(
     area: str = "paper",
     color: str = "auto",
     icc: str | None = None,
+    screen: dict | None = None,
 ) -> list[Path]:
     """Print pages. `area`: "paper" (the whole sheet, with crop marks), "bleed" (the finished size and its
     bleed: what most printers take) or "trim" (the finished size only). `color`: "auto" (a monochrome book in
     grey, a colour book in RGB), "rgb" (sRGB, its profile embedded), "cmyk" (TIFF or PDF, through the printer's
-    profile `icc` when given), "gray", or "bitonal" (1-bit black and white, 二階調)."""
+    profile `icc` when given), "gray", or "bitonal" (1-bit black and white, 二階調). `screen` ({lpi, angle, shape}):
+    書き出しでのトーン化 — in black and white the greys print as dots at that screen rather than at the threshold."""
     if area not in AREAS:
         raise ValueError(f"area must be one of {', '.join(AREAS)}")
     if color not in COLORS:
@@ -191,12 +193,20 @@ def export_print(
         for page in episode.pages
     ]
     written: list[Path] = []
+    if screen:
+        from genko.screentone import DOT_SHAPES
+
+        if not 10 <= float(screen.get("lpi", 60)) <= 150:
+            raise ValueError("screen lpi must be between 10 and 150")
+        if str(screen.get("shape") or "round") not in DOT_SHAPES:
+            raise ValueError(f"screen shape must be one of {', '.join(DOT_SHAPES)}")
+        screen = {**screen, "dpi": dpi}
 
     def coloured(image, how: str):
         if how == "cmyk":
             return colour.to_cmyk(image, icc)
         if how == "bitonal":
-            return to_bitonal(image, threshold=threshold)
+            return to_bitonal(image, threshold=threshold, screen=screen)
         return image.convert("L" if how == "gray" else "RGB")
 
     def profile_for(how: str) -> bytes | None:
@@ -222,10 +232,10 @@ def export_print(
             coloured(image, how).save(path, format="TIFF", compression="tiff_lzw", dpi=(dpi, dpi), icc_profile=profile)
         elif fmt == "tiff":
             path = dest / f"{name}.tiff"
-            to_bitonal(image, threshold=threshold).save(path, format="TIFF", compression="group4", dpi=(dpi, dpi))
+            to_bitonal(image, threshold=threshold, screen=screen).save(path, format="TIFF", compression="group4", dpi=(dpi, dpi))
         elif fmt == "png1":
             path = dest / f"{name}.png"
-            to_bitonal(image, threshold=threshold).save(path, dpi=(dpi, dpi))
+            to_bitonal(image, threshold=threshold, screen=screen).save(path, dpi=(dpi, dpi))
         else:
             path = dest / f"{name}.png"
             picture = coloured(image, how)

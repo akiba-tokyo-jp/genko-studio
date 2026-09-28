@@ -139,6 +139,9 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self._fitted = True  # follow the window size until the person zooms or pans
         self.rotation = 0.0  # the view only (degrees, clockwise); the page itself never turns
         self.flipped = False  # the view mirrored left to right (to check the drawing's balance)
+        self.flipped_v = False  # 上下反転表示: the view upside down
+        self.sel_pivot = None  # 基準位置: the point the selection turns about (mm; None: its middle)
+        self._zoom_drag = None  # 虫めがね: where a drag to zoom into began (screen)
         self._turning: tuple[float, float] | None = None  # Shift+Space drag: (start angle, rotation then)
         self.live_brush: dict | None = None  # the pen in hand (add_stroke fields); None draws a plain guide line
         self._live = None  # LiveInk of the line being drawn
@@ -430,19 +433,19 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
 
     def _view(self) -> QTransform:
         view = QTransform()
-        if not self.rotation and not self.flipped:
+        if not self.rotation and not self.flipped and not self.flipped_v:
             return view
         cx, cy = self.width() / 2, self.height() / 2
         view.translate(cx, cy)
         view.rotate(self.rotation)
-        if self.flipped:
-            view.scale(-1, 1)
+        if self.flipped or self.flipped_v:
+            view.scale(-1 if self.flipped else 1, -1 if self.flipped_v else 1)
         view.translate(-cx, -cy)
         return view
 
     def _ev(self, pos: QPointF) -> QPointF:
         """A point on the screen, in the unturned view where _pt and _to_mm work."""
-        if not self.rotation and not self.flipped:
+        if not self.rotation and not self.flipped and not self.flipped_v:
             return QPointF(pos)
         inverse, _ok = self._view().inverted()
         return inverse.map(QPointF(pos))
@@ -463,6 +466,30 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self.changed.emit()
         self.update()
 
+    def flip_view_vertical(self, on: bool | None = None) -> None:
+        """上下反転表示: only the view, the page stays as it is."""
+        self.flipped_v = (not self.flipped_v) if on is None else bool(on)
+        self._live_reset()
+        self.changed.emit()
+        self.update()
+
+    def set_zoom_percent(self, percent: float) -> None:
+        """表示倍率の直接入力: 100% is the paper's size on a typical screen (as zoom_percent reads)."""
+        percent = max(1.0, float(percent))
+        self.zoom_by((percent / 100 * 96 / 25.4) / self._scale)
+
+    def zoom_to_rect(self, x0: float, y0: float, x1: float, y1: float) -> None:
+        """虫めがね: the area (mm) dragged round fills the view."""
+        w, h = abs(x1 - x0), abs(y1 - y0)
+        if w < 0.5 or h < 0.5:
+            return
+        self._scale = max(MIN_SCALE, min(MAX_SCALE, min(self.width() / w, self.height() / h) * 0.95))
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        self._pan_x = self.width() / 2 - cx * self._scale
+        self._pan_y = self.height() / 2 - cy * self._scale
+        self._fitted = False
+        self._after_zoom()
+
     def show_frame(self, rendered) -> None:
         """Show a picture made elsewhere (a frame while an animation plays), until the page changes."""
         self._rendered = rendered
@@ -472,12 +499,13 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
     def view_state(self) -> dict:
         """How the page is shown (zoom, scroll, turn, mirror), to come back to it later."""
         return {"scale": self._scale, "pan": (self._pan_x, self._pan_y), "fitted": self._fitted, "rotation": self.rotation,
-                "flipped": self.flipped}
+                "flipped": self.flipped, "flipped_v": self.flipped_v}
 
     def set_view_state(self, state: dict | None) -> None:
         if not state or state.get("fitted", True):
             self.rotation = float((state or {}).get("rotation", 0.0))
             self.flipped = bool((state or {}).get("flipped", False))
+            self.flipped_v = bool((state or {}).get("flipped_v", False))
             self.fit_page()
             return
         self._scale = max(MIN_SCALE, min(MAX_SCALE, float(state["scale"])))
@@ -485,11 +513,13 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self._fitted = False
         self.rotation = float(state.get("rotation", 0.0))
         self.flipped = bool(state.get("flipped", False))
+        self.flipped_v = bool(state.get("flipped_v", False))
         self._after_zoom()
 
     def reset_view(self) -> None:
         self.rotation = 0.0
         self.flipped = False
+        self.flipped_v = False
         self.fit_page()
         self.changed.emit()
 
@@ -593,6 +623,11 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self._draw_effect_handles(painter)
         self._draw_highlight(painter)
         self._draw_selection_overlay(painter)
+        if self._zoom_drag is not None:  # (the area the magnifier will fill the view with)
+            a, b = self._zoom_drag["start"], self._zoom_drag["end"]
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(theme.accent(), 1.2, Qt.PenStyle.DashLine))
+            painter.drawRect(QRectF(a, b).normalized())
         if self._reshape is not None:
             painter.setPen(QPen(theme.accent(), 2))
             path = QPainterPath(self._pt(*self._reshape["points"][0][:2]))
@@ -1064,8 +1099,12 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         out.append(("turn", "turn", (cx, y - 7)))  # drag around the centre to turn the balloon
         for i, tail in enumerate(tails):
             tip = tail["to"]
-            via = tail.get("via") or [(cx + tip[0]) / 2, (cy + tip[1]) / 2]
             out.append(("tail", (i, "to"), (tip[0], tip[1])))
+            if tail.get("vias"):  # (a bent tail: a handle at each corner)
+                for k, bend in enumerate(tail["vias"]):
+                    out.append(("tail", (i, "vias", k), (bend[0], bend[1])))
+                continue
+            via = tail.get("via") or [(cx + tip[0]) / 2, (cy + tip[1]) / 2]
             out.append(("tail", (i, "via"), (via[0], via[1])))
         return out
 
@@ -1101,8 +1140,13 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             cx, cy = line.x_mm + line.w_mm / 2, line.y_mm + line.h_mm / 2
             for tail in drag["tails"]:
                 path = QPainterPath(self._pt(cx, cy))
-                via = tail.get("via") or [(cx + tail["to"][0]) / 2, (cy + tail["to"][1]) / 2]
-                path.quadTo(self._pt(*via), self._pt(*tail["to"]))
+                if tail.get("vias"):
+                    for bend in tail["vias"]:
+                        path.lineTo(self._pt(*bend))
+                    path.lineTo(self._pt(*tail["to"]))
+                else:
+                    via = tail.get("via") or [(cx + tail["to"][0]) / 2, (cy + tail["to"][1]) / 2]
+                    path.quadTo(self._pt(*via), self._pt(*tail["to"]))
                 painter.drawPath(path)
         for kind, key, (hx, hy) in self._handles():
             p = self._pt(hx, hy)
@@ -1145,8 +1189,11 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 angle = round(angle / 15) * 15
             drag["angle"] = round(angle, 1)
         else:
-            index, part = drag["key"]
-            drag["tails"][index][part] = [round(x_mm, 2), round(y_mm, 2)]
+            index, part, *at = drag["key"]
+            if part == "vias":
+                drag["tails"][index]["vias"][at[0]] = [round(x_mm, 2), round(y_mm, 2)]
+            else:
+                drag["tails"][index][part] = [round(x_mm, 2), round(y_mm, 2)]
         self.update()
 
     # --- selections: rectangle, lasso, auto; move / scale / rotate by handles -------------------------------
@@ -1159,6 +1206,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
 
     def set_selection(self, area: dict | None, outline: list | None = None) -> None:
         self.warp = None
+        self.sel_pivot = None
         if area is None:
             self.selection = None
         else:
@@ -1176,16 +1224,25 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         xs, ys = [p[0] for p in pts], [p[1] for p in pts]
         return min(xs), min(ys), max(xs), max(ys)
 
-    def start_warp(self, kind: str) -> bool:
-        """Pull the selection's corners (perspective) or a 3×3 grid (mesh); Enter applies, Esc cancels."""
+    def selection_pivot(self) -> tuple[float, float]:
+        """基準位置: where the selection turns and scales about (its middle unless the ＋ was moved)."""
+        if self.sel_pivot:
+            return tuple(self.sel_pivot)
+        x0, y0, x1, y1 = self._sel_box()
+        return (x0 + x1) / 2, (y0 + y1) / 2
+
+    def start_warp(self, kind: str, columns: int = 2, rows: int = 2) -> bool:
+        """Pull the selection's corners (perspective) or a grid (mesh: `columns`×`rows` cells, 3×3 points by
+        default); Enter applies, Esc cancels."""
         if not self.selection:
             return False
         x0, y0, x1, y1 = self._sel_box()
+        columns, rows = max(1, min(8, int(columns))), max(1, min(8, int(rows)))
         if kind == "perspective":
             points = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
         else:
-            points = [[x0 + (x1 - x0) * i / 2, y0 + (y1 - y0) * j / 2] for j in range(3) for i in range(3)]
-        self.warp = {"kind": kind, "box": (x0, y0, x1 - x0, y1 - y0), "points": points}
+            points = [[x0 + (x1 - x0) * i / columns, y0 + (y1 - y0) * j / rows] for j in range(rows + 1) for i in range(columns + 1)]
+        self.warp = {"kind": kind, "box": (x0, y0, x1 - x0, y1 - y0), "points": points, "grid": [columns + 1, rows + 1]}
         self.update()
         return True
 
@@ -1193,7 +1250,10 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         if self.warp is None:
             return
         warp, self.warp = self.warp, None
-        self.selectionWarped.emit({warp["kind"]: [[round(v, 3) for v in p] for p in warp["points"]]})
+        out = {warp["kind"]: [[round(v, 3) for v in p] for p in warp["points"]]}
+        if warp["kind"] == "mesh" and warp.get("grid") != [3, 3]:
+            out["grid"] = warp["grid"]
+        self.selectionWarped.emit(out)
         self.update()
 
     def cancel_warp(self) -> None:
@@ -1204,7 +1264,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         from genko import warp as warps
 
         try:
-            go = warps.mapping(self.warp["box"], {self.warp["kind"]: self.warp["points"]})
+            go = warps.mapping(self.warp["box"], {self.warp["kind"]: self.warp["points"], "grid": self.warp.get("grid")})
         except warps.WarpError:
             return
         x0, y0, w, h = self.warp["box"]
@@ -1226,6 +1286,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         out = [("scale", key, (x0 + (x1 - x0) * fx, y0 + (y1 - y0) * fy)) for key, (fx, fy) in
                {"nw": (0, 0), "n": (0.5, 0), "ne": (1, 0), "e": (1, 0.5), "se": (1, 1), "s": (0.5, 1), "sw": (0, 1), "w": (0, 0.5)}.items()]
         out.append(("rotate", "r", (cx, y0 - 18 / self._scale)))
+        out.append(("pivot", "p", tuple(self.sel_pivot) if self.sel_pivot else (cx, (y0 + y1) / 2)))  # (基準位置: drag it)
         # 平行ゆがみ (skew): a diamond a quarter along each side slants the box along that side
         out += [("skew", "n", (x0 + (x1 - x0) * 0.25, y0)), ("skew", "s", (x0 + (x1 - x0) * 0.75, y1)),
                 ("skew", "w", (x0, y0 + (y1 - y0) * 0.75)), ("skew", "e", (x1, y0 + (y1 - y0) * 0.25))]
@@ -1241,7 +1302,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         if drag["kind"] == "move":
             return [1, 0, 0, 1, px - sx0, py - sy0]
         if drag["kind"] == "rotate":
-            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            cx, cy = self.sel_pivot or ((x0 + x1) / 2, (y0 + y1) / 2)
             angle = math.atan2(py - cy, px - cx) - math.atan2(sy0 - cy, sx0 - cx)
             if self._modifiers & Qt.KeyboardModifier.ShiftModifier:
                 angle = round(angle / (math.pi / 12)) * (math.pi / 12)
@@ -1290,6 +1351,11 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             painter.setBrush(QColor("white"))
             if kind == "rotate":
                 painter.drawEllipse(p, 5, 5)
+            elif kind == "pivot":  # (a target: the point the selection turns about)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(p, 6, 6)
+                painter.drawLine(QPointF(p.x() - 9, p.y()), QPointF(p.x() + 9, p.y()))
+                painter.drawLine(QPointF(p.x(), p.y() - 9), QPointF(p.x(), p.y() + 9))
             elif kind == "skew":
                 painter.drawPolygon([QPointF(p.x(), p.y() - 5), QPointF(p.x() + 5, p.y()), QPointF(p.x(), p.y() + 5),
                                      QPointF(p.x() - 5, p.y())])
@@ -1519,6 +1585,9 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         if self.tool == "picker":
             self._pick_colour(pos)
             return
+        if self.tool == "zoom":  # 虫めがね: a click zooms in (Alt: out), a drag zooms into the area
+            self._zoom_drag = {"start": pos, "end": pos, "out": bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)}
+            return
         if self.tool == "ruler":
             self._modifiers = event.modifiers()
             self._ruler_press(pos)
@@ -1568,7 +1637,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 self._handle_drag = {"kind": kind, "key": key, "line": line.id,
                                      "orig": (line.x_mm, line.y_mm, line.w_mm, line.h_mm),
                                      "cur": (line.x_mm, line.y_mm, line.w_mm, line.h_mm),
-                                     "tails": [dict(t, to=list(t["to"])) for t in self._tails(line)]}
+                                     "tails": [copy.deepcopy(t) for t in self._tails(line)]}
                 return
             hit = self._hit_line(x_mm, y_mm)
             if hit is not None:
@@ -1594,6 +1663,10 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         if self._guide_move(event.position()):
             return
         pos = self._ev(event.position())
+        if self._zoom_drag is not None:
+            self._zoom_drag["end"] = pos
+            self.update()
+            return
         if self._shape_drag is not None and self.page is not None:
             self._shape_move(*self._to_mm(pos), event.modifiers())
             return
@@ -1633,6 +1706,10 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             return
         if self._sel_drag is not None and self._sel_drag["kind"] == "warp":
             self.warp["points"][self._sel_drag["key"]] = [round(v, 3) for v in self._to_mm(pos)]
+            self.update()
+            return
+        if self._sel_drag is not None and self._sel_drag["kind"] == "pivot":
+            self.sel_pivot = [round(v, 3) for v in self._to_mm(pos)]
             self.update()
             return
         if self._sel_drag is not None:
@@ -1682,6 +1759,15 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             self._turning = None
             return
         if self._guide_release(event.position()):
+            return
+        if self._zoom_drag is not None:
+            drag, self._zoom_drag = self._zoom_drag, None
+            start, end = drag["start"], drag["end"]
+            if abs(end.x() - start.x()) > 6 and abs(end.y() - start.y()) > 6:
+                self.zoom_to_rect(*self._to_mm(start), *self._to_mm(end))
+            else:
+                self.glide(lambda: self.zoom_by(0.5 if drag["out"] else 2.0, start))
+            self.update()
             return
         if self._vector_release():
             return
@@ -1733,7 +1819,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         if self.tool == "ruler":
             self._ruler_release()
             return
-        if self._sel_drag is not None and self._sel_drag["kind"] == "warp":
+        if self._sel_drag is not None and self._sel_drag["kind"] in ("warp", "pivot"):
             self._sel_drag = None
             self.update()
             return
@@ -1922,8 +2008,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
     def hold_modifier(self, key: str, down: bool) -> None:
         """Alt / Ctrl held: the chosen tool for a moment (環境設定), back to the tool before when let go."""
         tool = self.modifier_tools.get(key) or ""
-        if (self._held_tool or self.tool) == "marquee" and key == "alt":
-            tool = ""  # (Alt takes away from the selection there)
+        if (self._held_tool or self.tool) in ("marquee", "zoom") and key == "alt":
+            tool = ""  # (Alt takes away from the selection there, and zooms out with the magnifier)
         if down:
             if tool and self._held_tool is None and not self._stroke and tool != self.tool:
                 self._held_tool = self.tool

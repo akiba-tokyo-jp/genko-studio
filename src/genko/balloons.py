@@ -41,7 +41,11 @@ DEFAULTS = {"font": None, "size_mm": None, "tracking": 0.0, "leading": 0.15, "al
             "scale_x": 1.0, "gradient": None, "text_path": None, "features": None, "yakumono": True,
             "spike_jitter": 0.0, "bumps": None, "picture": None,
             # the letters' box pulled into four corners (0..1 of it: 遠近・ゆがみ), or painted with a picture
-            "warp": None, "fill_png": None}
+            "warp": None, "fill_png": None,
+            # W6: the balloon's own line and fill colours (and how much the fill covers), the words moved inside it,
+            # a hand-drawn outline smoothed into a curve, and the parts of it taken away (フキダシ消しゴム)
+            "line_rgb": None, "fill_rgb": None, "fill_opacity": None, "text_dx_mm": 0.0, "text_dy_mm": 0.0,
+            "path_curve": False, "cuts": None, "ruby_scale": 0.5, "mono_ruby": False, "below_layer": None}
 TAIL_KINDS = ("wedge", "zigzag", "fade", "bubbles")
 VS = (range(0xFE00, 0xFE10), range(0xE0100, 0xE01F0))
 
@@ -115,7 +119,8 @@ def _vertical(line, st: dict, face, em: int, inner_h: float, fill) -> Image.Imag
                    ruby_runs=getattr(line, "ruby_runs", None) or None, face=face, tracking=tracking, leading=leading,
                    tcy=bool(st["tcy"]), align=str(st["align"] or "top"), latin=latin,
                    emphasis_runs=_emphasis(line, face) or None, emphasis_mark=str(st["emphasis_mark"] or "sesame"),
-                   style_runs=getattr(line, "style_runs", None) or None, bold=line_weight(st))
+                   style_runs=getattr(line, "style_runs", None) or None, bold=line_weight(st),
+                   ruby_scale=float(st.get("ruby_scale") or 0.5), mono_ruby=bool(st.get("mono_ruby")))
 
 
 def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Image:
@@ -204,8 +209,10 @@ def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Im
     align = st["align"] if st["align"] in ("left", "right") else "center"
     xs: dict[int, tuple[float, float, int]] = {}  # place in text → (left, right, row top)
     top = 0
+    justify = st["align"] == "justify"  # 均等揃え: each row (but the last) spread over the whole width
     for r, row in enumerate(rows):
-        x = 0.0 if align == "left" else (out_w - widths[r]) / (2 if align == "center" else 1)
+        x = 0.0 if align == "left" or justify else (out_w - widths[r]) / (2 if align == "center" else 1)
+        spread = (out_w - widths[r]) / (len(row) - 1) if justify and len(row) > 1 and r < len(rows) - 1 else 0.0
         tallest = max([size_of(i) for i in row] or [em])
         base_y = top + above + (heights[r] - above - tallest) / 2  # characters share the row's baseline area
         for i in row:
@@ -223,7 +230,7 @@ def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Im
                 draw_mark(out, (x + w / 2, top + ruby_h + mark_h / 2 + max(1, em // 16)), mark_h, str(st["emphasis_mark"] or "sesame"),
                           rgb, vertical=False)
             xs[i] = (x, x + w, top)
-            x += advance(i)
+            x += advance(i) + spread
         top += heights[r]
     for first, last, ruby in ruby_at:
         # a word split over rows gets its ruby split in proportion
@@ -605,6 +612,43 @@ def _edge_point(kind: str, box, toward: tuple[float, float], spread: float) -> t
     return _ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t - lo), _ellipse_point(cx, cy, rx * 0.9, ry * 0.9, t + lo)
 
 
+def _smooth_closed(points: list, per: int = 6) -> list:
+    """A closed outline through the points, as a smooth curve (Catmull–Rom)."""
+    n = len(points)
+    if n < 3:
+        return points
+    out = []
+    for i in range(n):
+        p0, p1, p2, p3 = points[i - 1], points[i], points[(i + 1) % n], points[(i + 2) % n]
+        for s in range(per):
+            t = s / per
+            t2, t3 = t * t, t * t * t
+            out.append(tuple(0.5 * (2 * p1[k] + (-p0[k] + p2[k]) * t + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t2
+                                    + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t3) for k in (0, 1)))
+    return out
+
+
+def _polyline_tail(kind: str, box, tip, vias: list, base: float) -> list[tuple[float, float]]:
+    """A tail that bends at each of `vias` (折れ線のしっぽ): straight pieces, narrowing to the tip."""
+    p1, p2 = _edge_point(kind, box, vias[0], base)
+    mid = ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
+    path = [mid, *[tuple(v) for v in vias], tuple(tip)]
+    lengths = [0.0]
+    for a, b in zip(path, path[1:]):
+        lengths.append(lengths[-1] + math.dist(a, b))
+    total = lengths[-1] or 1.0
+    half0 = math.dist(p1, p2) / 2
+    left, right = [], []
+    for i, p in enumerate(path):
+        a, b = path[max(0, i - 1)], path[min(len(path) - 1, i + 1)]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        n = math.hypot(dx, dy) or 1.0
+        half = half0 * (1 - lengths[i] / total)
+        left.append((p[0] - dy / n * half, p[1] + dx / n * half))
+        right.append((p[0] + dy / n * half, p[1] - dx / n * half))
+    return left + right[::-1]
+
+
 def _tail_polygon(kind: str, box, tip, via, base: float, style: str = "wedge") -> list[tuple[float, float]]:
     """A tail from the shape toward `tip`, curving through `via` when given (a quadratic curve).
     style: wedge (くさび), zigzag (ギザギザ: the edges saw back and forth), fade (消える: drawn the same, then
@@ -754,8 +798,9 @@ def draw_group(image: Image.Image, lines: list, dpi: int, show_speaker: bool = T
         for ln in lines:  # a thought without a speaker still trails its bubbles, down and away
             if (ln.balloon or "speech") == "thought" and not tails_of(ln):
                 tails.append((ln, {"to": _thought_trail(ln, panels)}))
-        xs = [b[0] for b in boxes] + [b[2] for b in boxes] + [px(t["to"][0], dpi) for _, t in tails]
-        ys = [b[1] for b in boxes] + [b[3] for b in boxes] + [px(t["to"][1], dpi) for _, t in tails]
+        bends = [v for _, t in tails for v in (t.get("vias") or ([t["via"]] if t.get("via") else []))]
+        xs = [b[0] for b in boxes] + [b[2] for b in boxes] + [px(t["to"][0], dpi) for _, t in tails] + [px(v[0], dpi) for v in bends]
+        ys = [b[1] for b in boxes] + [b[3] for b in boxes] + [px(t["to"][1], dpi) for _, t in tails] + [px(v[1], dpi) for v in bends]
         margin = px(4, dpi)
         rx0, ry0 = max(0, min(xs) - margin), max(0, min(ys) - margin)
         rx1, ry1 = min(image.width, max(xs) + margin), min(image.height, max(ys) + margin)
@@ -780,7 +825,10 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
 
     for line, box in zip(lines, boxes):
         if getattr(line, "path", None):  # drawn by hand
-            draw.polygon([((px(p[0], dpi) - rx0) * scale, (px(p[1], dpi) - ry0) * scale) for p in line.path], fill=255)
+            outline = [((px(p[0], dpi) - rx0) * scale, (px(p[1], dpi) - ry0) * scale) for p in line.path]
+            if style_of(line).get("path_curve"):
+                outline = _smooth_closed(outline)
+            draw.polygon(outline, fill=255)
         else:
             _shape(draw, line.balloon or "speech", local(box), style_of(line), str(getattr(line, "id", "")))
     for line, tail in tails:
@@ -790,6 +838,10 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
         short = min(box[2] - box[0], box[3] - box[1])
         base = px(float(tail["width_mm"]), dpi) * scale if tail.get("width_mm") else max(4.0, short / 4)
         tail_style = str(tail.get("kind") or "wedge")
+        if tail.get("vias"):  # 折れ線のしっぽ
+            bends = [((px(v[0], dpi) - rx0) * scale, (px(v[1], dpi) - ry0) * scale) for v in tail["vias"]]
+            draw.polygon(_polyline_tail(line.balloon or "speech", box, tip, bends, base), fill=255)
+            continue
         if (line.balloon or "speech") == "thought" or tail_style == "bubbles":
             # bubbles toward the speaker instead of a tail
             x0, y0, x1, y1 = box
@@ -820,14 +872,41 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
         band = ImageChops.multiply(band, _dashes(size, [local(b) for b in boxes], scale))
     if kind == "flash":
         band = _flash_lines(size, [local(b) for b in boxes], width)
+    cut = _cuts_mask(lines, size, (rx0, ry0), dpi, scale)
+    if cut is not None:  # フキダシ消しゴム: those parts of the balloon (its fill and its line) are gone
+        keep = ImageChops.invert(cut)
+        shapes, band = ImageChops.multiply(shapes, keep), ImageChops.multiply(band, keep)
     if scale > 1:
         full = (rx1 - rx0, ry1 - ry0)
         shapes, band = shapes.resize(full, Image.Resampling.LANCZOS), band.resize(full, Image.Resampling.LANCZOS)
     area = image.crop(region)
     if st["fill"] != "none":
-        area.paste(PAPER, (0, 0, area.width, area.height), shapes)
-    area.paste(OUTLINE, (0, 0, area.width, area.height), band)
+        paper = tuple(int(v) for v in st.get("fill_rgb") or PAPER)[:3]
+        cover = st.get("fill_opacity")
+        if cover is not None and float(cover) < 1:
+            shapes = shapes.point(lambda v, k=max(0.0, float(cover)): int(v * k))
+        area.paste(paper, (0, 0, area.width, area.height), shapes)
+    area.paste(tuple(int(v) for v in st.get("line_rgb") or OUTLINE)[:3], (0, 0, area.width, area.height), band)
     image.paste(area, (rx0, ry0))
+
+
+def _cuts_mask(lines, size, origin, dpi: int, scale: int):
+    """Where the balloon eraser went over the balloons (their `cuts`, mm from each box's corner), or None."""
+    strokes = [(ln, c) for ln in lines for c in (style_of(ln).get("cuts") or [])]
+    if not strokes:
+        return None
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    for ln, cut in strokes:
+        pts = [((px(ln.x_mm + p[0], dpi) - origin[0]) * scale, (px(ln.y_mm + p[1], dpi) - origin[1]) * scale)
+               for p in cut.get("points") or []]
+        width = max(1, px(float(cut.get("width_mm", 2.0)), dpi) * scale)
+        if len(pts) == 1:
+            pts = pts * 2
+        draw.line(pts, fill=255, width=width, joint="curve")
+        for x, y in (pts[0], pts[-1]):
+            draw.ellipse((x - width / 2, y - width / 2, x + width / 2, y + width / 2), fill=255)
+    return mask
 
 
 def _dashes(size, boxes, scale: int) -> Image.Image:
@@ -865,7 +944,9 @@ def _paint_text(image: Image.Image, line, dpi: int, show_speaker: bool, font_pat
         path_text(image, line, dpi, font_path)
         return
     text, em = text_image(line, dpi, font_path)
-    x, y = px(line.x_mm, dpi), px(line.y_mm, dpi)
+    st = style_of(line)
+    x = px(line.x_mm + float(st.get("text_dx_mm") or 0), dpi)  # (the words moved inside the balloon)
+    y = px(line.y_mm + float(st.get("text_dy_mm") or 0), dpi)
     w, h = px(line.w_mm or 40, dpi), px(line.h_mm or 20, dpi)
     cx, cy = x + w / 2, y + h / 2
     if (line.balloon or "speech") == "none":

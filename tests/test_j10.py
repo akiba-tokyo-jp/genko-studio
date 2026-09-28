@@ -350,3 +350,29 @@ def test_psd_import_proof_and_timelapse_in_the_app(window, qapp, tmp_path):
     assert not export.icc_row.isHidden() and export.rows["dpi"].isVisibleTo(export)
     export.format.setCurrentIndex(export.format.findData("kindle"))
     assert export.long_edge.value() == 2560
+
+
+def test_tone_screen_shape_offset_and_export_toning_in_the_app(window, qapp):
+    from genko.app.dialogs import ExportDialog
+
+    page = window.current_page()
+    window.apply_ops([{"op": "add_tone", "page": page.index, "id": "tw7", "density": 0.3}])
+    layer = next(item for item in window.current_page().layers if item.id == "tw7")
+    window.target_layer = lambda: layer
+    panel = window.materials
+    panel.refresh()
+    assert panel.dot_shape.isEnabled()
+    panel.dot_shape.setCurrentIndex(panel.dot_shape.findData("diamond"))
+    panel.dot_shape.activated.emit(panel.dot_shape.currentIndex())
+    panel.off_x.setValue(0.4)
+    panel.off_x.editingFinished.emit()
+    layer = next(item for item in window.current_page().layers if item.id == "tw7")
+    assert layer.tone["dot_shape"] == "diamond" and layer.tone["offset_mm"] == [0.4, 0.0]
+    export = ExportDialog(window, window.episode, window.path, "human:leaf", current_page=1)
+    export.format.setCurrentIndex(export.format.findData("tiff"))
+    assert export.screen_row.isEnabled()
+    export.screen_on.setChecked(True)
+    assert export.options()["screen"]["lpi"] == 60
+    export.format.setCurrentIndex(export.format.findData("pdf"))
+    export.color.setCurrentIndex(export.color.findData("rgb"))
+    assert not export.screen_row.isEnabled() and export.options()["screen"] is None

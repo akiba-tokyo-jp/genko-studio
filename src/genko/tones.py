@@ -6,7 +6,8 @@ A tone layer with none of these covers every panel (as old books did).
 
 How (`layer.tone`, with `layer.lpi`, `layer.density` (black share 0..1) and `layer.angle`):
 {"pattern": dot | line | cross | noise | flat, "gradient": {"shape": linear | radial, "angle": deg,
-"start": density, "end": density} | None}. Gradients run across the mask's box along `angle`
+"start": density, "end": density} | None, "dot_shape": round | square | diamond | ellipse, "offset_mm": [x, y]
+(the screen moved, 網をずらす)}. Gradients run across the mask's box along `angle`
 (linear) or from its middle outward (radial). Print renders show the pattern in pure black and
 white; proofs and the screen show the grey it will read as.
 """
@@ -29,7 +30,7 @@ def settings(layer) -> dict:
     pattern = tone.get("pattern")
     if not pattern:
         pattern = "noise" if _legacy_noise(layer) else "dot"
-    return {**{k: tone[k] for k in ("scale_mm", "tile_png", "seed") if tone.get(k) is not None},
+    return {**{k: tone[k] for k in ("scale_mm", "tile_png", "seed", "dot_shape", "offset_mm") if tone.get(k) is not None},
             "pattern": pattern, "gradient": tone.get("gradient"), "lpi": float(layer.lpi or 60),
             "density": max(0.0, min(1.0, float(layer.density if layer.density is not None else 0.3))),
             "angle": float(layer.angle if layer.angle is not None else 45)}
@@ -54,6 +55,13 @@ def validate(tone: dict) -> None:
             raise ValueError("an image tone needs its picture (tile_png, a base64 PNG)")
     if tone.get("scale_mm") is not None and not 0.3 <= float(tone["scale_mm"]) <= 50:
         raise ValueError("scale_mm is 0.3 to 50")
+    from genko.screentone import DOT_SHAPES
+
+    if tone.get("dot_shape") is not None and tone["dot_shape"] not in DOT_SHAPES:
+        raise ValueError(f"dot_shape must be one of {', '.join(DOT_SHAPES)}")
+    offset = tone.get("offset_mm")
+    if offset is not None and (not isinstance(offset, (list, tuple)) or len(offset) != 2):
+        raise ValueError("offset_mm is [x, y] in mm")
     gradient = tone.get("gradient")
     if gradient:
         if gradient.get("shape", "linear") not in SHAPES:
@@ -133,15 +141,26 @@ def coverage_map(tone: dict, where: Image.Image) -> np.ndarray:
     return (start + (end - start) * t).astype(np.float32)
 
 
-def _screen(pattern: str, size: tuple[int, int], dpi: int, lpi: float, angle: float) -> np.ndarray:
-    """The threshold (0..1) a pixel's coverage must pass to be black."""
+def shift_px(offset_mm, dpi: int) -> tuple[int, int]:
+    """網の位置のずれ (mm) in pixels at this resolution."""
+    if not offset_mm:
+        return 0, 0
+    return round(float(offset_mm[0]) / 25.4 * dpi), round(float(offset_mm[1]) / 25.4 * dpi)
+
+
+def _screen(pattern: str, size: tuple[int, int], dpi: int, lpi: float, angle: float, shift: tuple[int, int] = (0, 0),
+            shape: str = "round") -> np.ndarray:
+    """The threshold (0..1) a pixel's coverage must pass to be black. `shift`: the screen moved by this many pixels
+    (網をずらす); `shape`: the dots' shape."""
     w, h = size
     if pattern == "dot":
         from genko.screentone import tiled_threshold
 
-        return np.asarray(tiled_threshold(size, dpi, lpi, angle), dtype=np.float32) / 256.0
+        return np.asarray(tiled_threshold(size, dpi, lpi, angle, (-shift[0], -shift[1]), shape), dtype=np.float32) / 256.0
     period = max(2.0, dpi / max(1.0, lpi))
     ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    xs -= shift[0]
+    ys -= shift[1]
     a = math.radians(angle)
 
     def lines(theta: float) -> np.ndarray:
@@ -176,6 +195,9 @@ def _motif(tone: dict, size: tuple[int, int], dpi: int, cover: np.ndarray) -> np
     w, h = size
     period = max(3.0, float(tone.get("scale_mm") or 3.0) / 25.4 * dpi)
     ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    dx, dy = shift_px(tone.get("offset_mm"), dpi)
+    xs -= dx
+    ys -= dy
     a = math.radians(float(tone.get("angle", 0) if tone.get("pattern") != "hatch" else tone.get("angle", 45)))
     u = (xs * math.cos(a) + ys * math.sin(a)) / period
     v = (-xs * math.sin(a) + ys * math.cos(a)) / period
@@ -233,7 +255,8 @@ def pattern_image(tone: dict, where: Image.Image, dpi: int, print_mode: bool) ->
         share = cover
         if pattern == "cross":  # two families together reach the asked share
             share = 1 - np.sqrt(np.clip(1 - cover, 0, 1))
-        black = (_screen(pattern, where.size, dpi, tone["lpi"], tone["angle"]) < share).astype(np.float32)
+        black = (_screen(pattern, where.size, dpi, tone["lpi"], tone["angle"], shift_px(tone.get("offset_mm"), dpi),
+                         str(tone.get("dot_shape") or "round")) < share).astype(np.float32)
     alpha = np.clip(black * alpha_in * 255, 0, 255).astype(np.uint8)
     layer = Image.new("RGBA", where.size, (0, 0, 0, 0))
     layer.putalpha(Image.fromarray(alpha, "L"))
@@ -272,7 +295,8 @@ def screened(raster: Image.Image, spec: dict, dpi: int) -> Image.Image:
         img = Image.fromarray(np.clip(255 * (1 - cover), 0, 255).astype(np.uint8), "L")
         black = (np.asarray(img.convert("1").convert("L")) < 128).astype(np.float32)
     else:
-        black = (_screen(pattern if pattern in ("dot", "line", "cross") else "dot", rgba.size, dpi, lpi, angle) < cover).astype(np.float32)
+        black = (_screen(pattern if pattern in ("dot", "line", "cross") else "dot", rgba.size, dpi, lpi, angle,
+                         shift_px(spec.get("offset_mm"), dpi), str(spec.get("shape") or "round")) < cover).astype(np.float32)
     out = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
     out.putalpha(Image.fromarray((black * 255).astype(np.uint8), "L"))
     return out

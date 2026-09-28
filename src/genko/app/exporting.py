@@ -18,13 +18,13 @@ class Format:
     key: str
     label: str
     note: str
-    options: tuple[str, ...] = ()  # dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc
+    options: tuple[str, ...] = ()  # dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc, screen
     official: bool = False
 
 
 FORMATS: list[Format] = [
-    Format("pdf", "PDF（印刷）", "1 冊の PDF。印刷所・校正用。色は自動（モノクロはグレー）・RGB・CMYK・グレー・2 階調から。仕上がりの位置（TrimBox）入り。", ("dpi", "area", "color", "icc"), True),
-    Format("tiff", "TIFF（入稿）", "ページごとの 2 値 TIFF。モノクロの入稿用。", ("dpi", "area"), True),
+    Format("pdf", "PDF（印刷）", "1 冊の PDF。印刷所・校正用。色は自動（モノクロはグレー）・RGB・CMYK・グレー・2 階調から。仕上がりの位置（TrimBox）入り。", ("dpi", "area", "color", "icc", "screen"), True),
+    Format("tiff", "TIFF（入稿）", "ページごとの 2 値 TIFF。モノクロの入稿用。", ("dpi", "area", "screen"), True),
     Format("png", "PNG", "ページごとの PNG。", ("dpi", "area"), True),
     Format("cmyk", "CMYK（カラー入稿）", "ページごとの CMYK の TIFF。印刷所のカラープロファイル（ICC）を選ぶとそれで変換して埋め込む。"
            "選ばなければ、黒い線は K 版だけ・総インキ量は 320% 以内にして変換する。", ("dpi", "area", "icc")),
@@ -90,7 +90,8 @@ def default_dpi(episode: Episode, key: str) -> int:
 def run(episode: Episode, project: Path | None, key: str, out: Path, *, official: bool = False,
         actor: str = "human:user", dpi: int | None = None, width: int = 800, max_height: int = 1280,
         long_edge: int = 2048, jpeg: bool = False, spreads: bool = False, area: str = "bleed",
-        pages: list[int] | None = None, color: str = "auto", icc: str | None = None, dots: bool = False) -> dict:
+        pages: list[int] | None = None, color: str = "auto", icc: str | None = None, dots: bool = False,
+        screen: dict | None = None) -> dict:
     """{ok, files, errors?, error?}. out is a folder. pages: only these page numbers (None: all)."""
     out = Path(out)
     fmt = BY_KEY.get(key)
@@ -111,7 +112,7 @@ def run(episode: Episode, project: Path | None, key: str, out: Path, *, official
 
         result = HumanService(project, actor).export(key, out, dpi=dpi, width_px=width, max_height=max_height,
                                                      long_edge=long_edge, jpeg=jpeg, spreads=spreads, area=area,
-                                                     color=color, icc=icc)
+                                                     color=color, icc=icc, screen=screen)
         return result
     dpi = int(dpi or default_dpi(episode, key))
     try:
@@ -119,7 +120,7 @@ def run(episode: Episode, project: Path | None, key: str, out: Path, *, official
             from genko.export import export_print
 
             files = export_print(episode, out, fmt=key, dpi=dpi, area=area, color="cmyk" if key == "cmyk" else color,
-                                 icc=icc or None)
+                                 icc=icc or None, screen=screen)
         elif key == "layers":
             from genko.export import export_layers
 

@@ -136,6 +136,13 @@ def cells(text: str, tcy: bool = True, latin: bool = False) -> list[str]:
     text = text or ""
     while i < len(text):
         char = text[i]
+        if char == TCY_OPEN:  # (words chosen for 縦中横: one cell, whatever they are)
+            end = text.find(TCY_CLOSE, i + 1)
+            end = len(text) if end < 0 else end
+            if text[i + 1:end]:
+                out.append(text[i + 1:end])
+            i = end + 1
+            continue
         if latin and char in LATIN_LETTERS:
             j = _latin_run(text, i)
             if sum(1 for c in text[i:j] if c in LATIN_LETTERS) >= LATIN_RUN:
@@ -334,7 +341,39 @@ def draw_mark(image: Image.Image, centre: tuple[float, float], size: float, kind
 
 
 STYLE_TAGS = {"大": {"scale": 1.4}, "特大": {"scale": 1.8}, "小": {"scale": 0.7}, "太": {"bold": True}, "極太": {"bold": 2},
-              "赤": {"rgb": [210, 30, 30]}, "青": {"rgb": [30, 80, 200]}, "白": {"rgb": [255, 255, 255]}}
+              "赤": {"rgb": [210, 30, 30]}, "青": {"rgb": [30, 80, 200]}, "白": {"rgb": [255, 255, 255]},
+              "縦中横": {"tcy": True}}
+TCY_OPEN, TCY_CLOSE = "\x01", "\x02"  # (around the words chosen for 縦中横, while the cells are made)
+
+
+def mark_tcy(text: str, style_runs: list | None) -> str:
+    """The text with the words its style runs set 縦中横 wrapped, so that each becomes one cell."""
+    out, pos = text, 0
+    for run in style_runs or []:
+        if not run or len(run) < 2 or not (run[1] or {}).get("tcy") or not run[0]:
+            continue
+        words = str(run[0])
+        at = out.find(words, pos)
+        if at < 0 or "\n" in words:
+            continue
+        out = out[:at] + TCY_OPEN + words + TCY_CLOSE + out[at + len(words):]
+        pos = at + len(words) + 2
+    return out
+
+
+def mono_runs(ruby_runs: list | None) -> list:
+    """モノルビ: a run whose reading divides evenly over its characters becomes one run per character."""
+    out = []
+    for run in ruby_runs or []:
+        if not run or len(run) < 2:
+            continue
+        base, ruby = str(run[0]), str(run[1])
+        if len(base) > 1 and len(ruby) % len(base) == 0:
+            k = len(ruby) // len(base)
+            out.extend([base[i], ruby[i * k:(i + 1) * k]] for i in range(len(base)))
+        else:
+            out.append([base, ruby])
+    return out
 
 
 def char_styles(text: str, style_runs: list | None, base: dict | None = None) -> list[dict]:
@@ -392,6 +431,8 @@ def compose(
     emphasis_mark: str = "sesame",
     style_runs: list | None = None,
     bold: bool | int | str = False,
+    ruby_scale: float = 0.5,
+    mono_ruby: bool = False,
 ) -> Image.Image:
     """Vertical text, columns right to left. 傍点 sit right of their characters and ruby right of
     those (ruby moves out when both are there), centred on their base, for every run.
@@ -408,9 +449,12 @@ def compose(
         return face.font(size, char) if face is not None else (font.font_variant(size=size) if size != em and hasattr(font, "font_variant")
                                                                else font)
 
+    plain = text.replace("\n", "")
+    text = mark_tcy(text, style_runs)  # (縦中横 chosen word by word)
+    if mono_ruby:
+        ruby_runs = mono_runs(ruby_runs)
     # the style of each cell, in reading order (cells never change order when they wrap)
     seq = [cell for cell in cells(text, tcy, latin) if cell != "\n"]
-    plain = text.replace("\n", "")
     per_char = char_styles(plain, style_runs, {"bold": weight_level(bold)} if weight_level(bold) else None)
     styles, at = [], 0
     for cell in seq:
@@ -444,7 +488,7 @@ def compose(
         n += len(col)
     spans = _ruby_spans(cols, ruby_runs) if ruby_runs else []
     marked = emphasis_cells(cols, emphasis_runs) if emphasis_runs else set()
-    ruby_w = max(4, em // 2) if spans else 0
+    ruby_w = max(4, round(em * max(0.25, min(0.8, float(ruby_scale or 0.5))))) if spans else 0
     mark_w = max(3, round(em * 0.36)) if marked else 0
     gap = max(0, round(em * leading))
     widths = [max(size_of(styles[i]) for i in idx) for idx in index_of]
@@ -457,6 +501,13 @@ def compose(
             pos += heights[i] + gap_px
         ys.append(rows + [pos - gap_px])
     height = max(rows[-1] for rows in ys)
+    if align == "justify":  # 均等揃え: every column spread over the whole height, its characters evenly apart
+        height = max(height, max_height)
+        for c, idx in enumerate(index_of):
+            if len(idx) < 2:
+                continue
+            extra = (height - ys[c][-1]) / (len(idx) - 1)
+            ys[c] = [round(y + k * extra) for k, y in enumerate(ys[c][:-1])] + [height]
     out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     lefts, tops = [], []
     right = width
@@ -465,7 +516,7 @@ def compose(
         lefts.append(cx)
         right = cx - gap
         col_h = ys[c][-1]
-        top = 0 if align == "top" else (height - col_h) // (2 if align == "center" else 1)
+        top = 0 if align in ("top", "justify") else (height - col_h) // (2 if align == "center" else 1)
         tops.append(top)
         for row, cell in enumerate(col):
             i = index_of[c][row]

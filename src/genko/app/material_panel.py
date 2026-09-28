@@ -127,6 +127,24 @@ class MaterialPanel(QWidget):
         self.angle.setRange(-180, 180)
         self.angle.setSuffix("°")
         self.angle.editingFinished.connect(lambda: self._tone({"angle": self.angle.value()}))
+        self.dot_shape = QComboBox()
+        from genko.app.dialogs import SCREEN_SHAPES
+
+        for label, key in SCREEN_SHAPES:
+            self.dot_shape.addItem(label, key)
+        self.dot_shape.setToolTip("網点の形（網の種類）。四角は 50% で角どうしがつながる")
+        self.dot_shape.activated.connect(lambda _: self._tone({"dot_shape": self.dot_shape.currentData()}))
+        self.off_x, self.off_y = QDoubleSpinBox(), QDoubleSpinBox()
+        for spin, tip in ((self.off_x, "網を右へずらす（mm）"), (self.off_y, "網を下へずらす（mm）")):
+            spin.setRange(-20, 20)
+            spin.setSingleStep(0.1)
+            spin.setDecimals(2)
+            spin.setSuffix(" mm")
+            spin.setToolTip(tip + "。貼る場所はそのままで、網点の並びだけが動く（隣のトーンと網をそろえる・モアレを避ける）")
+            spin.editingFinished.connect(lambda: self._tone({"offset_mm": [self.off_x.value(), self.off_y.value()]}))
+        offset_row = QHBoxLayout()
+        offset_row.addWidget(self.off_x)
+        offset_row.addWidget(self.off_y)
         self.gradient = QComboBox()
         for label, key in (("なし", ""), ("直線", "linear"), ("円", "radial")):
             self.gradient.addItem(label, key)
@@ -150,6 +168,8 @@ class MaterialPanel(QWidget):
         tone_form.addRow("線数", self.lpi)
         tone_form.addRow("濃さ", self.density)
         tone_form.addRow("角度", self.angle)
+        tone_form.addRow("網の形", self.dot_shape)
+        tone_form.addRow("網のずれ", offset_row)
         tone_form.addRow("グラデーション", self.gradient)
         tone_form.addRow("　向き", self.g_angle)
         tone_form.addRow("　始まり", self.g_start)
@@ -386,6 +406,11 @@ class MaterialPanel(QWidget):
             self.lpi.setValue(tone["lpi"])
             self.density.setValue(round(tone["density"] * 100))
             self.angle.setValue(tone["angle"])
+            self.dot_shape.setCurrentIndex(max(0, self.dot_shape.findData(tone.get("dot_shape") or "round")))
+            self.dot_shape.setEnabled(tone["pattern"] == "dot")
+            offset = tone.get("offset_mm") or (0, 0)
+            self.off_x.setValue(float(offset[0]))
+            self.off_y.setValue(float(offset[1]))
             gradient = tone.get("gradient") or {}
             self.gradient.setCurrentIndex(max(0, self.gradient.findData(gradient.get("shape", "") if gradient else "")))
             self.g_angle.setValue(float(gradient.get("angle", 90)))

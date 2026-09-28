@@ -88,7 +88,9 @@
       "style_runs": "[[words, {scale 0.3..3, bold, weight, rgb}]]? (part of the line larger, smaller, bolder, coloured)",
       "frame_id": "str?",
       "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6, scale_x 0.3..3 (長体 < 1 < 平体), gradient {rgb_from, rgb_to, angle}, text_path [[x,y]…] (mm from the box's top left: the letters follow it), features [jp78|jp90|trad|expt|hwid|…] (OpenType forms, across text), yakumono (paired punctuation set half wide; default true), spike_jitter 0..1, bumps 5..60 (cloud), picture (base64 PNG), fill_png (letters painted with a picture), warp [[x,y]×4] (the letters' corners as shares of their box: 遠近・ゆがみ)}? (null resets a key)",
-      "tails": "[{to:[x,y], via?:[x,y], width_mm?, kind?: wedge|zigzag|fade|bubbles}]?"
+      "tails": "[{to:[x,y], via?:[x,y], vias?:[[x,y],…] (折れ線: bends at each), width_mm?, kind?: wedge|zigzag|fade|bubbles}]?",
+      "style (W6)": "line_rgb, fill_rgb, fill_opacity 0..1, text_dx_mm, text_dy_mm (the words moved inside the balloon), path_curve (a hand-drawn outline as a smooth curve), cuts, align justify (均等), ruby_scale 0.25..0.8, mono_ruby, below_layer (a layer id: the line is drawn under it)",
+      "style_runs (W6)": "[[words, {…, tcy: true}]] (縦中横 on those words)"
     },
     {
       "op": "reorder_lines",
@@ -98,6 +100,13 @@
     {
       "op": "delete_line",
       "id": "str"
+    },
+    {
+      "op": "cut_balloon",
+      "id": "str",
+      "points": "[[x,y],...] (page mm)",
+      "width_mm": "float? (2)",
+      "note": "フキダシ消しゴム: the balloon (fill and line) taken away there; style cuts: null brings it back"
     },
     {
       "op": "move_line",
@@ -176,7 +185,7 @@
       "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)",
       "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)",
       "color_prints": "bool? (the layer colour is printed too)",
-      "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white} | null? (トーン化: the layer's greys print as a halftone)"
+      "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white, shape: round|square|diamond|ellipse, offset_mm: [x,y]} | null? (トーン化: the layer's greys print as a halftone)"
     },
     {
       "op": "add_page",
@@ -266,6 +275,8 @@
       "scale_mm": "float? (柄トーン)",
       "tile_png": "str? (image)",
       "gradient": "{shape: linear|radial, angle, start, end}?",
+      "dot_shape": "round|square|diamond|ellipse? (網の種類)",
+      "offset_mm": "[x,y]? (網をずらす)",
       "name": "str?",
       "after": "layer id?",
       "id": "str?",
@@ -282,6 +293,9 @@
       "scale_mm": "float? (柄トーン: the motif's size)",
       "tile_png": "str? (image: a base64 PNG repeated)",
       "gradient": "object|null?",
+      "dot_shape": "round|square|diamond|ellipse? (網の種類)",
+      "offset_mm": "[x,y]|null? (網のずれ)",
+      "move_by_mm": "[dx,dy]? (網を動かす: added to the offset)",
       "name": "str?"
     },
     {
@@ -371,7 +385,7 @@
       "layer_id": "str?",
       "area": "{poly} | {mask}",
       "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)",
-      "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)",
+      "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row), grid: [across, down]? (another grid: 2..9 points each way)} (instead of matrix)",
       "interp": "nearest|bilinear|bicubic? (how pixels are resampled)"
     },
     {
@@ -730,8 +744,9 @@
       "page": "int",
       "layer": "str?",
       "id": "str?",
-      "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|plugin:<key>",
-      "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; hue shift/saturation/value; levels black/white; curve gamma; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"
+      "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|brightness_contrast|despeckle|plugin:<key>",
+      "area": "{poly}|{mask}? (選択範囲の中だけ)",
+      "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; sharpen amount (1 usual, 2 strong)/radius; hue shift/saturation/value; levels black/white/gamma (middle, >1 lighter)/out_black/out_white/channel (rgb|r|g|b); curve gamma, or points [[in,out],…] 0..255 and channel; brightness_contrast brightness/contrast (-100..100); despeckle size_mm (specks smaller than this)/what (ink|holes|both); mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"
     },
     {
       "op": "set_brush",
@@ -771,7 +786,8 @@
     {
       "op": "add_ruler",
       "page": "int",
-      "kind": "line|curve|parallel|concentric|radial|perspective|symmetry|guide|parallel_curve|multi_curve|radial_curve",
+      "kind": "line|curve|parallel|concentric|radial|perspective|symmetry|guide|parallel_curve|multi_curve|radial_curve|rect|ellipse|polygon (rect/ellipse: points = two opposite corners, angle; polygon: 3+ corners)",
+      "grid": "int? (perspective: the ground grid's lines, 0 none)",
       "points2": "[[x,y],...]? (multi_curve: the second curve)",
       "center": "[x,y]? (radial_curve)",
       "layer_id": "str? (only while drawing on this layer)",
@@ -799,9 +815,25 @@
       "note": "定規ペン: the ruler's own line drawn as pen lines"
     },
     {
+      "op": "ruler_from_3d",
+      "page": "int",
+      "prim_id": "str? (default: the first 3D on the page)",
+      "grid": "int?",
+      "id": "str?",
+      "note": "a perspective ruler through the vanishing points the 3D (and the page camera) makes"
+    },
+    {
+      "op": "camera_from_ruler",
+      "page": "int",
+      "id": "str (a perspective ruler)",
+      "prim_id": "str?",
+      "note": "the page camera turned (and its focal length set) so the 3D's vanishing points sit on the ruler's"
+    },
+    {
       "op": "edit_ruler",
       "page": "int",
       "id": "str",
+      "grid": "int?",
       "points": "[[x,y],...]?",
       "points2": "[[x,y],...]?",
       "center": "[x,y]?",

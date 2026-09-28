@@ -1144,8 +1144,22 @@ def render_page(
     rgba = image.convert("RGBA")
     prev_alpha = None
     panel_mask = _clip_mask(page, size, working_dpi)
+    # lines set under a layer (テキストの重ね順): drawn just before that layer, not over everything
+    from genko import balloons as _balloons
+
+    all_lines = (episode.story_for_page(page.index) if episode is not None else page.texts) or []
+    below = {}
+    layer_ids = {layer.id for layer in page.layers}
+    for line in all_lines:
+        under = _balloons.style_of(line).get("below_layer")
+        if under and under in layer_ids and (line.x_mm or line.y_mm or line.balloon):
+            below.setdefault(under, []).append(line)
     for layer in page.layers:
         _check_cancel()
+        if layer.id in below:
+            panels_ = {f.id: (f.rect.x, f.rect.y, f.rect.width, f.rect.height) for f in page.leaf_frames()}
+            _balloons.draw_lines(rgba, below[layer.id], working_dpi, getattr(episode, "font_path", None) if episode else None,
+                                 show_speaker=mode != "print", panels=panels_)
         if getattr(layer, "kind", None) == LayerKind.FOLDER:
             continue
         if not layer.visible:
@@ -1227,12 +1241,13 @@ def render_page(
     lines = episode.story_for_page(page.index) if episode is not None else page.texts
     from genko import balloons
 
-    placed = [line for line in lines if line.x_mm or line.y_mm or line.balloon]
+    drawn_below = {id(line) for group in below.values() for line in group}
+    placed = [line for line in lines if (line.x_mm or line.y_mm or line.balloon) and id(line) not in drawn_below]
     # Speaker names are a working aid: shown in name/proof, never printed.
     panels = {f.id: (f.rect.x, f.rect.y, f.rect.width, f.rect.height) for f in page.leaf_frames()}
     balloons.draw_lines(image, placed, working_dpi, font_path, show_speaker=mode != "print", panels=panels)
     for line in lines:
-        if line in placed:
+        if line in placed or id(line) in drawn_below:
             continue
         else:
             x = mm_to_px(page.inner_rect_mm().x + 4, working_dpi)
@@ -1263,8 +1278,28 @@ def render_page(
     return image
 
 
-def to_bitonal(image: Image.Image, threshold: int = 180) -> Image.Image:
-    return image.convert("L").point(lambda p: 255 if p > threshold else 0, mode="1")
+def to_bitonal(image: Image.Image, threshold: int = 180, screen: dict | None = None) -> Image.Image:
+    """Pure black and white. `screen` ({lpi, angle, shape, pattern}: 書き出しでのトーン化): the greys become dots at
+    that screen instead of going white or black at the threshold; solid black and paper stay as they are."""
+    grey = image.convert("L")
+    if not screen:
+        return grey.point(lambda p: 255 if p > threshold else 0, mode="1")
+    import numpy as np
+
+    from genko import tones
+
+    dpi = int(screen.get("dpi") or 600)
+    values = np.asarray(grey, dtype=np.float32) / 255.0
+    black_at, white_at = float(screen.get("black", 0.1)), float(screen.get("white", 0.95))
+    cover = np.clip((white_at - values) / max(0.01, white_at - black_at), 0, 1)
+    pattern = str(screen.get("pattern") or "dot")
+    if pattern == "noise":
+        dotted = np.asarray(Image.fromarray(np.clip(255 * (1 - cover), 0, 255).astype(np.uint8), "L").convert("1").convert("L")) < 128
+    else:
+        dotted = tones._screen(pattern if pattern in ("dot", "line", "cross") else "dot", grey.size, dpi,
+                               float(screen.get("lpi", 60)), float(screen.get("angle", 45)), (0, 0),
+                               str(screen.get("shape") or "round")) < cover
+    return Image.fromarray(np.where(dotted, 0, 255).astype(np.uint8), "L").convert("1", dither=Image.Dither.NONE)
 
 
 def render_spread(episode: Episode, first: int, second: int, dpi: int = 150, mode: str = "print",
