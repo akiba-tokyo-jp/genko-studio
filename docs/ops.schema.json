@@ -132,6 +132,11 @@
       "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?",
       "stabilize": "int?",
       "taper": "bool?",
+      "taper_in_mm": "float? (入り: how long the start thins, mm; with taper)",
+      "taper_out_mm": "float? (抜き: how long the end thins; 0 keeps that end)",
+      "pressure_opacity": "float? 0..1 (a light touch also lightens the line)",
+      "stabilize_speed": "bool? (quicker strokes are steadied more)",
+      "post_fit": "float? mm (後補正: the wobble within this is dropped and a smooth curve drawn through the line)",
       "pressure_gamma": "float? (>1 needs more force)",
       "post_smooth": "int? 0..10 (後補正; default the brush's)",
       "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"

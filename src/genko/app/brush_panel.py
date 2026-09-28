@@ -125,6 +125,34 @@ class BrushPanel(QWidget):
         self.taper = QCheckBox("入り抜き")
         self.taper.setToolTip("線の両端を細くします")
         self.taper.toggled.connect(lambda _: self._save())
+        self.taper_in, self.taper_out = QDoubleSpinBox(), QDoubleSpinBox()
+        for box, what in ((self.taper_in, "入り（描き始め）"), (self.taper_out, "抜き（描き終わり）")):
+            box.setMaximumWidth(110)
+            box.setRange(-1, 30)  # (-1: 自動, the line's length decides as before)
+            box.setSingleStep(0.5)
+            box.setDecimals(1)
+            box.setSuffix(" mm")
+            box.setSpecialValueText("自動")
+            box.setToolTip(f"{what}が細くなる長さ。0 でその端は細くしない。自動: 線の長さの 1/4（両方とも自動のとき）")
+            box.valueChanged.connect(lambda _: self._save())
+        self.ink_pressure = QSpinBox()
+        self.ink_pressure.setMaximumWidth(110)
+        self.ink_pressure.setRange(0, 100)
+        self.ink_pressure.setSuffix(" %")
+        self.ink_pressure.setToolTip("弱い筆圧で線が薄くなる割合（鉛筆の下描き・影に）。0 % で筆圧は太さにだけ効く")
+        self.ink_pressure.valueChanged.connect(lambda _: self._save())
+        self.speed_steady = QCheckBox("速い線ほど補正を強く")
+        self.speed_steady.setToolTip("速度による手ブレ補正: すばやく引いた所ほど手ぶれを強く抑え、ゆっくり描いた所は細かい形を残す")
+        self.speed_steady.toggled.connect(lambda _: self._save())
+        self.post_fit = QDoubleSpinBox()
+        self.post_fit.setMaximumWidth(110)
+        self.post_fit.setRange(0, 2)
+        self.post_fit.setSingleStep(0.1)
+        self.post_fit.setDecimals(1)
+        self.post_fit.setSuffix(" mm")
+        self.post_fit.setSpecialValueText("しない")
+        self.post_fit.setToolTip("後補正: 描き終えた線のゆれ（この幅まで）を除き、なめらかな曲線に置き換える")
+        self.post_fit.valueChanged.connect(lambda _: self._save())
         self.pressure = QComboBox()
         self.pressure.setToolTip("やわらかい: 弱い力でも太く。かたい: 強く押したときだけ太く")
         for label, gamma in PRESSURE:
@@ -173,7 +201,12 @@ class BrushPanel(QWidget):
         form.addRow(self._wrap(sizes))
         form.addRow("不透明度", with_value(self.opacity))
         form.addRow("手ぶれ補正", slider_for(self.steady))
+        form.addRow(self.speed_steady)
+        form.addRow("後補正", slider_for(self.post_fit))
         form.addRow(self.taper)
+        form.addRow("入り", slider_for(self.taper_in))
+        form.addRow("抜き", slider_for(self.taper_out))
+        form.addRow("筆圧で濃さ", slider_for(self.ink_pressure))
         form.addRow("筆圧", self.pressure)
         palette.setSpacing(3)
         colour_row = QHBoxLayout()
@@ -294,6 +327,16 @@ class BrushPanel(QWidget):
         gamma = float(self.settings.value(prefix + "pressure", 1.0)) if stored else 1.0
         self.pressure.setCurrentIndex(max(0, self.pressure.findData(gamma)))
 
+        def kept(key: str, default):
+            return self.settings.value(prefix + key, default) if stored else default
+
+        self.taper_in.setValue(float(kept("taper_in", -1)))
+        self.taper_out.setValue(float(kept("taper_out", -1)))
+        self.ink_pressure.setValue(int(float(kept("ink_pressure", 0))))
+        self.speed_steady.setChecked(str(kept("speed_steady", False)).lower() == "true")
+        self.post_fit.setValue(float(kept("post_fit", 0)))
+        self._follow_taper()
+
     def _kind_changed(self) -> None:
         if self._loading:
             return
@@ -316,10 +359,21 @@ class BrushPanel(QWidget):
         self.settings.setValue(prefix + "steady", self.steady.value())
         self.settings.setValue(prefix + "taper", self.taper.isChecked())
         self.settings.setValue(prefix + "pressure", self.pressure.currentData())
+        self.settings.setValue(prefix + "taper_in", self.taper_in.value())
+        self.settings.setValue(prefix + "taper_out", self.taper_out.value())
+        self.settings.setValue(prefix + "ink_pressure", self.ink_pressure.value())
+        self.settings.setValue(prefix + "speed_steady", self.speed_steady.isChecked())
+        self.settings.setValue(prefix + "post_fit", self.post_fit.value())
+        self._follow_taper()
         self.settings.setValue("fill/gap", self.gap.value())
         self.settings.setValue("fill/reference", self.reference.currentData())
         self.settings.setValue("eraser/crossing", self.crossing.isChecked())
         self.changed.emit()
+
+    def _follow_taper(self) -> None:
+        """The lengths only mean something while the line tapers."""
+        for box in (self.taper_in, self.taper_out):
+            box.setEnabled(self.taper.isChecked())
 
     def set_colour(self, rgb) -> None:
         self.rgb = tuple(int(v) for v in rgb)[:3]
@@ -353,6 +407,16 @@ class BrushPanel(QWidget):
             out["opacity"] = round(opacity / max(brush.opacity, 0.01), 3)
         if self.pressure.currentData() != 1.0:
             out["pressure_gamma"] = self.pressure.currentData()
+        if out["taper"] and (self.taper_in.value() >= 0 or self.taper_out.value() >= 0):
+            for key, box in (("taper_in_mm", self.taper_in), ("taper_out_mm", self.taper_out)):
+                if box.value() >= 0:
+                    out[key] = round(box.value(), 2)
+        if self.ink_pressure.value():
+            out["pressure_opacity"] = round(self.ink_pressure.value() / 100, 2)
+        if self.speed_steady.isChecked() and out["stabilize"]:
+            out["stabilize_speed"] = True
+        if self.post_fit.value() > 0:
+            out["post_fit"] = round(self.post_fit.value(), 2)
         return out
 
 

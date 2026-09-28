@@ -133,6 +133,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - コマは割る（`split_frame`・`cut_frame`）ほかに、描いて作れる: `add_frame`（`rect: [x, y, 幅, 高さ]` か `points`）。
   最初に描いたコマは基本枠と入れ替わる。`delete_frame` で 1 つだけ消せる（ほかはそのまま）。
   角を丸くするのは `set_frame` の `corner_mm`（半径 mm）。
+- `add_stroke` の線の描き味: `taper_in_mm`・`taper_out_mm`（入り・抜きの長さ）、`pressure_opacity`（弱い筆圧で薄く）、
+  `stabilize_speed`（速い所ほど補正）、`post_fit`（この mm までのゆれを除いて曲線に置き換え）。
 - ペン入れと新しいペン・ペイントのレイヤーの線は、描き始めたコマの中だけに出る（`panel_each`）。
   コマをまたいで引く線は、そのレイヤーを `set_layer panel_each: false` にする。
   `tail_hidden` は尾がフキダシの中に埋もれている所（`move_line` で大きさを変えると尾は外へ出し直される）。

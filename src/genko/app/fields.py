@@ -129,11 +129,13 @@ class LineSample(QLabel):
         pts = [[(10 + i * (w - 20) / 80) * mm, (h / 2 + h * 0.22 * math.sin(i / 12.7)) * mm,
                 max(0.02, math.sin(math.pi * i / 80)) ** gamma] for i in range(81)]
         if f.get("taper"):
-            pts = taper_points(pts)
+            lengths = [f.get(k) for k in ("taper_in_mm", "taper_out_mm")]
+            pts = taper_points(pts, *(lengths if any(v is not None for v in lengths) else (None, None)))
         width = max(0.1, min(float(f.get("width_mm") or 1.0), h * 0.3 * mm))
         image = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         try:
-            drawn = brushes.draw((w, h), pts, dpi, width, f.get("kind") or "g", seed="sample")
+            drawn = brushes.draw((w, h), pts, dpi, width, f.get("kind") or "g", seed="sample",
+                                 pressure_opacity=float(f.get("pressure_opacity") or 0))
         except Exception:  # (a broken brush of one's own: no sample rather than an error)
             drawn = None
         if drawn is not None:

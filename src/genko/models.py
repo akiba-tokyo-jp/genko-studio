@@ -170,6 +170,7 @@ class Stroke:
     rgb: tuple[int, int, int] | None = None  # None: the layer's default ink colour
     opacity: float = 1.0
     rotation: list[float] = field(default_factory=list)  # the pen's barrel turn at each point (degrees; アートペン)
+    pressure_opacity: float = 0.0  # 0..1: how much a light touch also lightens the line (筆圧で濃さ)
 
     def __deepcopy__(self, memo: dict) -> Stroke:
         # (a page holds thousands of these; points are tuples of numbers, which never need copying)
@@ -216,6 +217,8 @@ def stroke_to_packed(stroke) -> dict:
         out["opacity"] = stroke.opacity
     if stroke.rotation:
         out["r"] = _pack([float(v) for v in stroke.rotation], "d")
+    if stroke.pressure_opacity:
+        out["po"] = stroke.pressure_opacity
     return out
 
 
@@ -233,6 +236,7 @@ def coerce_stroke(raw) -> Stroke:
             rgb=tuple(int(v) for v in raw["rgb"]) if raw.get("rgb") else None,
             opacity=float(raw.get("opacity", 1.0)),
             rotation=_unpack(raw["r"], "d").tolist() if raw.get("r") else [],
+            pressure_opacity=float(raw.get("po", 0.0) or 0.0),
         )
     if isinstance(raw, dict):
         points = [tuple(pt[:2]) for pt in raw.get("points") or []]
@@ -248,6 +252,7 @@ def coerce_stroke(raw) -> Stroke:
             rgb=tuple(int(v) for v in raw["rgb"]) if raw.get("rgb") else None,
             opacity=float(raw.get("opacity", 1.0)),
             rotation=[float(v) for v in raw.get("rotation") or []],
+            pressure_opacity=float(raw.get("po", raw.get("pressure_opacity", 0.0)) or 0.0),
         )
     points: list[tuple[float, float]] = []
     pressure: list[float] = []

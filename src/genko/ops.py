@@ -45,7 +45,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float? (the balloon's size: edit_line does not change it)", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
-    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)", "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"},
+    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "taper_in_mm": "float? (入り: how long the start thins, mm; with taper)", "taper_out_mm": "float? (抜き: how long the end thins; 0 keeps that end)", "pressure_opacity": "float? 0..1 (a light touch also lightens the line)", "stabilize_speed": "bool? (quicker strokes are steadied more)", "post_fit": "float? mm (後補正: the wobble within this is dropped and a smooth curve drawn through the line)", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)", "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
     {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "panel_each": "bool? (true: each line stays in the panel it begins in)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white} | null? (トーン化: the layer's greys print as a halftone)"},
@@ -1703,12 +1703,16 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if stabilize:
             from genko.stroke import stabilize_points
 
-            points = stabilize_points(points, int(stabilize))
+            points = stabilize_points(points, int(stabilize), by_speed=bool(op.get("stabilize_speed")))
         from genko import brushes as _brushes
 
         _after = op.get("post_smooth", _brushes.brush(_brush_kind(op.get("kind") or "gpen", episode)).post_smooth)
         if _after:  # 後補正: the brush evens the line out once it is drawn
             points = _brushes.smoothed(points, int(_after))
+        if op.get("post_fit"):  # 後補正（曲線に置き換え）: the wobble goes, a smooth curve through what shapes the line
+            from genko.stroke import fit_curve
+
+            points = fit_curve(points, max(0.05, min(3.0, float(op["post_fit"]))))
         copies: list = []
         if op.get("snap_ruler") or op.get("ruler_id"):
             if page.rulers:
@@ -1724,7 +1728,9 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         if taper:
             from genko.stroke import taper_points
 
-            points = taper_points(points)
+            lengths = {k: max(0.0, min(80.0, float(op[k]))) for k in ("taper_in_mm", "taper_out_mm") if op.get(k) is not None}
+            points = taper_points(points, lengths.get("taper_in_mm", 0.0 if lengths else None),
+                                  lengths.get("taper_out_mm", 0.0 if lengths else None))
         if op.get("pressure_gamma"):
             gamma = max(0.2, min(5.0, float(op["pressure_gamma"])))
             points = [[p[0], p[1], max(0.0, min(1.0, float(p[2]))) ** gamma] if len(p) > 2 else p for p in points]
@@ -1741,6 +1747,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         stroke.pressure = [round(v, 3) for v in stroke.pressure]
         stroke.kind = _brush_kind(op.get("kind") or "gpen", episode)
         stroke.width_mm = float(op["width_mm"]) if op.get("width_mm") is not None else float(episode.brush_width_mm)
+        if op.get("pressure_opacity"):
+            stroke.pressure_opacity = round(max(0.0, min(1.0, float(op["pressure_opacity"]))), 3)
         if op.get("rotation"):  # the pen's barrel turn, along the line as drawn (smoothing may change the count)
             stroke.rotation = _resampled([float(v) for v in op["rotation"]], len(stroke.points))
         if op.get("layer_id"):

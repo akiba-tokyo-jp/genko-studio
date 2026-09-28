@@ -374,9 +374,35 @@ def _finish_edges(mask: Image.Image, b: Brush, dpi: int) -> Image.Image:
 
 
 def draw(size: tuple[int, int], points: list, dpi: int, width_mm: float, kind: str | None, seed: str = "",
-         rotation: list | None = None):
+         rotation: list | None = None, pressure_opacity: float = 0.0):
     """The line's coverage at this resolution, only around the line: (L image, (x0, y0)) or None. `rotation`: the
-    pen's barrel turn at each point (flat tips with tip_rotation follow it)."""
+    pen's barrel turn at each point (flat tips with tip_rotation follow it). `pressure_opacity` 0..1: a light
+    touch also lightens the line (筆圧で濃さ; the ends of a tapered line fade as they thin)."""
+    drawn = _draw(size, points, dpi, width_mm, kind, seed, rotation)
+    if drawn is None or pressure_opacity <= 0:
+        return drawn
+    mask, (x0, y0) = drawn
+    return ImageChops.multiply(mask, _shade(points, mask.size, (x0, y0), dpi, width_mm, min(1.0, pressure_opacity))), (x0, y0)
+
+
+def _shade(points: list, size: tuple[int, int], origin: tuple[int, int], dpi: int, width_mm: float, amount: float) -> Image.Image:
+    """How dark each part of the line is: full where pressed hard, lighter (by `amount`) where the touch was light."""
+    scale = dpi / 25.4
+    shade = Image.new("L", size, 255)
+    draw_ = ImageDraw.Draw(shade)
+    pts = [(float(p[0]) * scale - origin[0], float(p[1]) * scale - origin[1], float(p[2]) if len(p) > 2 else 1.0)
+           for p in points]
+    reach = max(2.0, width_mm * scale * 1.6)
+    for (ax, ay, ap), (bx, by, bp) in zip(pts, pts[1:]):
+        pressure = max(0.0, min(1.0, (ap + bp) / 2))
+        level = int(255 * (1 - amount * (1 - pressure)))
+        draw_.line([(ax, ay), (bx, by)], fill=level, width=max(1, int(reach)))
+        draw_.ellipse((bx - reach / 2, by - reach / 2, bx + reach / 2, by + reach / 2), fill=level)
+    return shade
+
+
+def _draw(size: tuple[int, int], points: list, dpi: int, width_mm: float, kind: str | None, seed: str = "",
+          rotation: list | None = None):
     b = brush(kind)
     pts = _pressured(points, b)
     if not pts:

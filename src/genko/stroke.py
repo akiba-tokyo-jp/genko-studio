@@ -7,14 +7,28 @@ def _mm_to_px(mm: float, dpi: int) -> int:
     return max(1, round(mm / 25.4 * dpi))
 
 
-def stabilize_points(points: list, window: int = 5) -> list:
+def stabilize_points(points: list, window: int = 5, by_speed: bool = False) -> list:
+    """手ブレ補正: each point the average of its neighbours. `by_speed` (速度による手ブレ補正): where the hand
+    moved quickly (long steps between the points, which come at a steady rate) the average reaches further,
+    up to twice as far; slow careful parts keep their detail."""
     if window < 3 or len(points) < 3:
         return points
     half = max(1, int(window) // 2)
     out: list = []
     n = len(points)
+    reach = [half] * n
+    if by_speed and n > 3:
+        import math
+        import statistics
+
+        steps = [math.dist(points[i][:2], points[i + 1][:2]) for i in range(n - 1)]
+        usual = statistics.median(steps) or 1e-6
+        for i in range(n):
+            step = (steps[max(0, i - 1)] + steps[min(n - 2, i)]) / 2
+            quick = max(0.0, min(1.0, (step / usual - 0.5) / 1.5))  # (half the usual step: slow; twice: quick)
+            reach[i] = max(1, round(half * (0.5 + 1.5 * quick)))
     for i, point in enumerate(points):
-        k = min(half, i, n - 1 - i)  # a window that shrinks evenly at the ends keeps them where they were drawn
+        k = min(reach[i], i, n - 1 - i)  # a window that shrinks evenly at the ends keeps them where they were drawn
         sl = points[i - k : i + k + 1]
         x = sum(float(item[0]) for item in sl) / len(sl)
         y = sum(float(item[1]) for item in sl) / len(sl)
@@ -23,16 +37,79 @@ def stabilize_points(points: list, window: int = 5) -> list:
     return out
 
 
-def taper_points(points: list) -> list:
+def taper_points(points: list, in_mm: float | None = None, out_mm: float | None = None) -> list:
+    """入り抜き: the line thins towards its ends. Without lengths, a quarter of the points at each end (as
+    before); with them, `in_mm` along the line from its start and `out_mm` back from its end (0: that end
+    keeps its width), so a short hair and a long outline get the same entry and exit."""
     n = len(points)
     if n < 2:
         return points
-    span = max(1, n * 0.25)
+    if in_mm is None and out_mm is None:
+        span = max(1, n * 0.25)
+        factors = [min(1.0, min(i, n - 1 - i) / span) for i in range(n)]
+    else:
+        import math
+
+        along = [0.0]
+        for a, b in zip(points, points[1:]):
+            along.append(along[-1] + math.dist((float(a[0]), float(a[1])), (float(b[0]), float(b[1]))))
+        total = along[-1] or 1e-6
+        first, last = max(0.0, float(in_mm or 0)), max(0.0, float(out_mm or 0))
+        if first + last > total:  # (a line shorter than both: each end takes its share)
+            k = total / (first + last)
+            first, last = first * k, last * k
+        factors = [min(1.0, s / first if first > 0 else 1.0, (total - s) / last if last > 0 else 1.0) for s in along]
     out: list = []
-    for i, point in enumerate(points):
-        factor = min(1.0, min(i, n - 1 - i) / span)
+    for point, factor in zip(points, factors):
         pressure = float(point[2]) if len(point) > 2 else 1.0
         out.append([float(point[0]), float(point[1]), pressure * max(0.15, factor)])
+    return out
+
+
+def fit_curve(points: list, tolerance_mm: float = 0.3, step_mm: float = 0.5) -> list:
+    """後補正（曲線に置き換え）: the line's wobble dropped (only the points that shape it are kept, within
+    `tolerance_mm`) and a smooth curve drawn through them again (Catmull–Rom, points every `step_mm`); the
+    pressure follows along. The ends stay where they were drawn."""
+    import math
+
+    pts = [(float(p[0]), float(p[1]), float(p[2]) if len(p) > 2 else 1.0) for p in points]
+    if len(pts) < 4 or tolerance_mm <= 0:
+        return points
+
+    def dist_seg(p, a, b) -> float:
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        length = dx * dx + dy * dy
+        t = 0.0 if length < 1e-12 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length))
+        return math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
+
+    keep = {0, len(pts) - 1}
+    todo = [(0, len(pts) - 1)]
+    while todo:
+        lo, hi = todo.pop()
+        far, at = 0.0, -1
+        for i in range(lo + 1, hi):
+            d = dist_seg(pts[i], pts[lo], pts[hi])
+            if d > far:
+                far, at = d, i
+        if far > tolerance_mm and at > 0:
+            keep.add(at)
+            todo += [(lo, at), (at, hi)]
+    key = [pts[i] for i in sorted(keep)]
+    if len(key) < 3:
+        key = [pts[0], pts[len(pts) // 2], pts[-1]]
+    out: list = []
+    for i in range(len(key) - 1):
+        p0, p1, p2, p3 = key[max(0, i - 1)], key[i], key[i + 1], key[min(len(key) - 1, i + 2)]
+        steps = max(1, int(math.dist(p1[:2], p2[:2]) / step_mm))
+        for s in range(steps):
+            t = s / steps
+            t2, t3 = t * t, t * t * t
+            x = 0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2
+                       + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3)
+            y = 0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2
+                       + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)
+            out.append([x, y, p1[2] + (p2[2] - p1[2]) * t])
+    out.append([key[-1][0], key[-1][1], key[-1][2]])
     return out
 
 

@@ -90,7 +90,8 @@ def _stroke_sig(stroke, brushes) -> tuple:
     points = getattr(stroke, "points", None) or []
     return (getattr(stroke, "id", None), getattr(stroke, "kind", None), getattr(stroke, "width_mm", None), str(getattr(stroke, "rgb", None)),
             getattr(stroke, "opacity", None), len(points), tuple(points[0]) if points else None, tuple(points[-1]) if points else None,
-            len(getattr(stroke, "pressure", None) or []), brushes.brush(getattr(stroke, "kind", None)))
+            len(getattr(stroke, "pressure", None) or []), brushes.brush(getattr(stroke, "kind", None)),
+            getattr(stroke, "pressure_opacity", 0.0))
 
 
 QUICK_DPI = 32  # at or below this (small pictures of pages and layers) lines are drawn as plain polylines
@@ -286,7 +287,8 @@ def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Ima
         b = brushes.brush(getattr(stroke, "kind", None))
         drawn = brushes.draw(size, stroke_points(stroke), dpi, float(getattr(stroke, "width_mm", 0.35) or 0.35),
                              getattr(stroke, "kind", None), seed=str(getattr(stroke, "id", "")),
-                             rotation=getattr(stroke, "rotation", None))
+                             rotation=getattr(stroke, "rotation", None),
+                             pressure_opacity=float(getattr(stroke, "pressure_opacity", 0.0) or 0.0))
         if drawn is None:
             continue
         cover, (x0, y0) = drawn
