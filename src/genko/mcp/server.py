@@ -435,10 +435,10 @@ def build_server(root: Path, actor: str) -> MCPServer:
 
     @tool
     def request_approval(project: str, pages: list[int] | None = None, note: str = "", gate: str = "name",
-                         character_id: str | None = None) -> list:
-        """人間に承認を依頼する。gate: name（ネーム）/ art（そのページの絵）/ sheet（キャラクター設定画、character_id が要る）/
-        export（全ページの仕上げ後、本番の書き出し）。"""
-        return call(service.request_approval, project, gate, pages or [], note, character_id)
+                         character_id: str | None = None, character_ids: list[str] | None = None) -> list:
+        """人間に承認を依頼する。gate: name（ネーム、pages は複数まとめてよい）/ art（絵、pages）/ sheet（キャラクター設定画、
+        character_id、複数なら character_ids で 1 回に）/ export（全ページの仕上げ後、本番の書き出し）。"""
+        return call(service.request_approval, project, gate, pages or [], note, character_id, character_ids)
 
     @tool
     def tickets(project: str, status: str = "open") -> list:

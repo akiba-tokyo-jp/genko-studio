@@ -96,3 +96,17 @@ def test_export_status_waits_for_the_job(tmp_path, monkeypatch):
     monkeypatch.setattr("time.sleep", lambda s: None)
     result = agent.export_status("demo.genko", "job1", wait_s=30)
     assert result.ok and result.data["status"] == "done"
+
+
+def test_the_standing_notes_come_once_and_sheets_are_asked_for_together(tmp_path):
+    import test_m5 as m5
+
+    agent, project, human = m5._project(tmp_path)
+    chars = [c["id"] for c in json.loads((FIXTURES / "bible.json").read_text(encoding="utf-8"))["characters"]]
+    first = agent.generation_request("demo.genko", character_id=chars[0]).data["request"]
+    again = agent.generation_request("demo.genko", character_id=chars[-1]).data["request"]
+    assert "references_note" in first and "references_note" not in again and again["standing_notes"]
+    assert not any(n in agent.STANDING_NOTES for n in again["notes_for_agent"])
+    asked = agent.request_approval("demo.genko", "sheet", [], character_ids=chars)
+    assert asked.ok and [r["character_id"] for r in asked.data["requests"]] == chars
+    assert len({r["request"] for r in asked.data["requests"]}) == len(chars)

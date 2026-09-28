@@ -52,7 +52,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   - `fx` の言葉（雨・汗・集中線・水しぶきなど。知らない言葉は警告が出る）は仕上げで Genko が描くか、絵の依頼文に入る。`emphasis` も依頼文に入る。
   - 効果音（balloon `sfx`）は、コマの `sfx_at`（音の出どころ、コマの中の 0..1 の [x, y]）の近くに置かれる。
   - 台詞は話者の顔の近くに置かれ、尾が話者へ伸びる。人物の `pos` を絵の配置どおりに書く。
-- `review_name`: `mcp__genko__render` で画像を見て、読み順の迷い・窮屈なコマ・弱いめくりを確かめる。直すなら `submit_name` を `replace: true` で送り直す。よければ `mcp__genko__record_review`。
+- `review_name`: `submit_name` の返事に付いた画像で、読み順の迷い・窮屈なコマ・弱いめくりを確かめる（見返すときだけ `mcp__genko__render`）。直すなら `submit_name` を `replace: true` で送り直す。よければ `mcp__genko__record_review`（`input_hash` は作業項目の値）。
+- 承認の依頼はまとめて出す: ネームと作画は `pages` に複数のページ、設定画は `character_ids` に複数の人物を入れて 1 回で。
 - `revise_page`: 人間の指示（`comments`）に従って `submit_name` を `replace: true` で送り直す。
 
 ## アタリ（人間が手で描いたネーム）から始めるとき

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import io
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -492,9 +493,34 @@ class StudioService:
                 save_episode(episode, path, actor=self.actor)
         files = {name: str(folder / name) for name in sorted(pack.files)}
         preview = _guide_sheet(pack)
-        return ToolResult(True, {"request": pack.request, "dir": str(folder), "files": files,
+        return ToolResult(True, {"request": self._told_once(path, pack.request), "dir": str(folder), "files": files,
                                  "inbox": str(path / "studio" / "inbox" / pack.id)},
                           images=[preview] if preview else [])
+
+    STANDING_NOTES = ("composition と pose は構図の参考。線をなぞらせる必要はない",
+                      "画像に文字・フキダシ・効果音を描かせない。台詞は Genko が描く")
+
+    def _told_once(self, path: Path, request: dict) -> dict:
+        """The request as this agent needs it: the notes that are the same in every request come the first time only
+        (after that, standing_notes says so; the full request stays in request.json beside the files)."""
+        marker = path / "studio" / "agents_told.json"
+        try:
+            told = set(json.loads(marker.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            told = set()
+        who = self.actor.split("/")[0]
+        if who not in told:
+            try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(json.dumps(sorted(told | {who})), encoding="utf-8")
+            except OSError:
+                pass
+            return request
+        out = {k: v for k, v in request.items() if k not in ("order_of_instructions", "references_note")}
+        out["notes_for_agent"] = [n for n in request.get("notes_for_agent") or [] if n not in self.STANDING_NOTES]
+        out["standing_notes"] = ("最初の依頼と同じ注意（参照画像の順・構図は参考・文字を描かせない）は省いた。"
+                                 "全部は dir の request.json にある")
+        return out
 
     def import_images(self, project: str, request_id: str, images: list[dict], preview: bool = True) -> ToolResult:
         from genko.studio import importer
@@ -1514,7 +1540,16 @@ class StudioService:
         return ToolResult(True, {"approved": gate, "pages": sorted(int(p) for p in pages or []) or None,
                                  "character_id": character_id, "by": person, "via": self.actor})
 
-    def request_approval(self, project: str, gate: str, pages: list[int], note: str = "", character_id: str | None = None) -> ToolResult:
+    def request_approval(self, project: str, gate: str, pages: list[int], note: str = "", character_id: str | None = None,
+                         character_ids: list[str] | None = None) -> ToolResult:
+        """Ask a person to approve. Several character sheets in one call with character_ids (one request each)."""
+        if gate == "sheet" and character_ids:
+            done = [self.request_approval(project, gate, pages, note, cid) for cid in dict.fromkeys(character_ids)]
+            failed = next((r for r in done if not r.ok), None)
+            if failed is not None:
+                return failed
+            return ToolResult(True, {"requests": [{"character_id": cid, **r.data} for cid, r in zip(dict.fromkeys(character_ids), done)]},
+                              images=[img for r in done for img in r.images])
         path = self.project_path(project)
         if gate not in ("name", "art", "sheet", "export"):
             return fail("依頼できる承認は name / art / sheet / export", "gate_not_available", "/gate")
