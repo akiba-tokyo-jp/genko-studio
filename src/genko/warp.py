@@ -36,7 +36,7 @@ def mesh_size(count: int, grid=None) -> tuple[int, int]:
     if grid:
         nx, ny = int(grid[0]), int(grid[1])
     else:
-        nx = ny = round(count ** 0.5)
+        nx = ny = 3  # (without its grid a mesh is the 3×3 one)
     if nx < 2 or ny < 2 or nx > 9 or ny > 9 or nx * ny != count:
         raise WarpError("mesh takes a grid of points row by row: 3×3 (nine) unless grid [across, down] says otherwise (2 to 9 each)")
     return nx, ny

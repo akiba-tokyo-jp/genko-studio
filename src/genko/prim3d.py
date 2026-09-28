@@ -65,7 +65,27 @@ def project(prim: dict) -> list[tuple[float, float]]:
     return out
 
 
-KINDS = ("box", "cylinder", "stairs", "floor", "scene")
+KINDS = ("box", "cylinder", "stairs", "floor", "scene", "sphere", "cone", "prop")
+# 小物: furniture and things to place one by one, as boxes in a unit box (x, y, z, w, h, d: shares of the size;
+# y from the top, the ground at 1)
+PROPS = {
+    "chair": [(0.5, 0.52, 0.5, 1.0, 0.08, 1.0), (0.08, 0.78, 0.08, 0.1, 0.44, 0.1), (0.92, 0.78, 0.08, 0.1, 0.44, 0.1),
+              (0.08, 0.78, 0.92, 0.1, 0.44, 0.1), (0.92, 0.78, 0.92, 0.1, 0.44, 0.1), (0.5, 0.24, 0.95, 1.0, 0.48, 0.08)],
+    "desk": [(0.5, 0.05, 0.5, 1.0, 0.1, 1.0), (0.05, 0.55, 0.05, 0.08, 0.9, 0.08), (0.95, 0.55, 0.05, 0.08, 0.9, 0.08),
+             (0.05, 0.55, 0.95, 0.08, 0.9, 0.08), (0.95, 0.55, 0.95, 0.08, 0.9, 0.08), (0.75, 0.25, 0.5, 0.45, 0.3, 0.95)],
+    "table": [(0.5, 0.05, 0.5, 1.0, 0.1, 1.0), (0.08, 0.55, 0.08, 0.08, 0.9, 0.08), (0.92, 0.55, 0.08, 0.08, 0.9, 0.08),
+              (0.08, 0.55, 0.92, 0.08, 0.9, 0.08), (0.92, 0.55, 0.92, 0.08, 0.9, 0.08)],
+    "bed": [(0.5, 0.75, 0.5, 1.0, 0.5, 1.0), (0.5, 0.45, 0.5, 0.96, 0.15, 0.98), (0.5, 0.4, 0.1, 0.6, 0.12, 0.16),
+            (0.5, 0.35, 0.02, 1.0, 0.7, 0.04)],
+    "door": [(0.5, 0.5, 0.5, 1.0, 1.0, 0.08), (0.5, 0.52, 0.45, 0.84, 0.92, 0.02), (0.85, 0.55, 0.4, 0.06, 0.04, 0.08)],
+    "window": [(0.5, 0.5, 0.5, 1.0, 1.0, 0.1), (0.5, 0.5, 0.5, 0.9, 0.9, 0.04), (0.5, 0.5, 0.45, 0.04, 0.9, 0.06),
+               (0.5, 0.5, 0.45, 0.9, 0.04, 0.06)],
+    "shelf": [(0.5, 0.5, 0.5, 1.0, 1.0, 1.0), (0.5, 0.25, 0.5, 0.94, 0.03, 0.96), (0.5, 0.5, 0.5, 0.94, 0.03, 0.96),
+              (0.5, 0.75, 0.5, 0.94, 0.03, 0.96)],
+    "car": [(0.5, 0.68, 0.5, 1.0, 0.36, 1.0), (0.45, 0.33, 0.5, 0.55, 0.34, 0.9), (0.18, 0.9, 0.02, 0.18, 0.2, 0.06),
+            (0.82, 0.9, 0.02, 0.18, 0.2, 0.06), (0.18, 0.9, 0.98, 0.18, 0.2, 0.06), (0.82, 0.9, 0.98, 0.18, 0.2, 0.06)],
+}
+PROP_LABELS = {"chair": "椅子", "desk": "机", "table": "テーブル", "bed": "ベッド", "door": "ドア", "window": "窓", "shelf": "棚", "car": "車"}
 MESH_KINDS = ("figure", "head", "hand", "mesh")  # (genko.mesh3d: surfaces, hidden lines, the camera)
 SCENES = ("room", "classroom", "corridor", "street")
 SCENE_LABELS = {"room": "部屋", "classroom": "教室", "corridor": "廊下", "street": "街並み"}
@@ -198,6 +218,32 @@ def _segments3d(prim: dict) -> list[tuple[tuple[float, float, float], tuple[floa
     w, h, d = _size(prim)
     kind = prim.get("kind")
     out = []
+    if kind == "sphere":
+        rx, ry, rz = w / 2, h / 2, d / 2
+        n = 32
+        for k in range(1, 6):  # the latitudes
+            phi = math.pi * k / 6
+            ring = [(rx * math.sin(phi) * math.cos(math.tau * i / n), -ry * math.cos(phi), rz * math.sin(phi) * math.sin(math.tau * i / n))
+                    for i in range(n + 1)]
+            out += list(zip(ring, ring[1:]))
+        for k in range(6):  # and the meridians
+            th = math.pi * k / 6
+            ring = [(rx * math.sin(math.tau * i / n) * math.cos(th), -ry * math.cos(math.tau * i / n), rz * math.sin(math.tau * i / n) * math.sin(th))
+                    for i in range(n + 1)]
+            out += list(zip(ring, ring[1:]))
+        return out
+    if kind == "cone":
+        n = 32
+        rx, rz = w / 2, d / 2
+        ring = [(rx * math.cos(math.tau * k / n), h / 2, rz * math.sin(math.tau * k / n)) for k in range(n + 1)]
+        out += list(zip(ring, ring[1:]))
+        apex = (0.0, -h / 2, 0.0)
+        out += [(apex, ring[k * n // 8]) for k in range(8)]
+        return out
+    if kind == "prop":
+        for bx, by, bz, bw, bh, bd in PROPS.get(str(prim.get("prop") or "chair"), PROPS["chair"]):
+            out += _box_edges((bx - 0.5) * w, (by - 0.5) * h, (bz - 0.5) * d, bw * w, bh * h, bd * d)
+        return out
     if kind == "cylinder":
         n = 32
         rx, rz = w / 2, d / 2
@@ -256,7 +302,7 @@ def edges(prim: dict) -> list[tuple[tuple[float, float], tuple[float, float], bo
         from genko import mesh3d
 
         return [(a, b, True) for line in mesh3d.prim_lines(prim, 16.0) for a, b in zip(line, line[1:])]
-    if prim.get("kind") in ("cylinder", "stairs", "floor", "scene") or (prim.get("camera") and prim.get("kind", "box") == "box"):
+    if prim.get("kind") in ("cylinder", "stairs", "floor", "scene", "sphere", "cone", "prop") or (prim.get("camera") and prim.get("kind", "box") == "box"):
         return [(_to_page(prim, a), _to_page(prim, b), True) for a, b in _segments3d(prim)]
     pts3 = corners3d(prim)
     pts = project(prim)

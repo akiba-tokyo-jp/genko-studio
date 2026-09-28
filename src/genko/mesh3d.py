@@ -10,7 +10,9 @@ seen; without one each prim is seen as before (prim3d's projection about its own
 
 Figure ("figure"): `size` [.., height, ..], `body` {heads (等身, 7.5), shoulders, hips, build (thickness),
 legs (leg length)}, `joints` {name: {x, y, z}} (radians: x swings toward the viewer, y twists, z turns in
-the picture, counter-clockwise), `hands` {"l": pose, "r": pose} (open, relaxed, fist, point, peace, grip).
+the picture, counter-clockwise), `hands` {"l": pose, "r": pose} (open, relaxed, fist, point, peace, grip; or
+{"pose", "curls": [thumb, index, middle, ring, little] or {finger: curl}}: each finger 0 straight .. 1 closed).
+`body.sex` male | female sets the build (shoulders, hips, the chest) before the numbers.
 Head ("head"): an egg with its centre line, eye line, nose and jaw marked. Hand ("hand"): one hand alone,
 `side` l | r and `pose`. Mesh ("mesh"): `mesh` {"v": [x, y, z, …] (unit box), "f": [[i, j, k, …], …]}.
 """
@@ -32,6 +34,29 @@ SMOOTH = 1000  # (added to a face's part when it belongs to a rounded piece)
 # finger curl (0 straight .. 1 closed) per pose: thumb, index, middle, ring, little
 _CURLS = {"open": (0.0, 0.0, 0.0, 0.0, 0.0), "relaxed": (0.2, 0.25, 0.3, 0.35, 0.4), "fist": (0.7, 1.0, 1.0, 1.0, 1.0),
           "point": (0.6, 0.0, 1.0, 1.0, 1.0), "peace": (0.7, 0.0, 0.0, 1.0, 1.0), "grip": (0.5, 0.6, 0.6, 0.6, 0.6)}
+
+FINGERS = ("thumb", "index", "middle", "ring", "little")
+# 男女の体型: what "sex" sets before the person's own numbers (heads, shoulders, hips, build)
+SEX_BODY = {"male": {"shoulders": 1.08, "hips": 0.95, "build": 1.05}, "female": {"heads": 7.2, "shoulders": 0.86, "hips": 1.18, "build": 0.88}}
+
+
+def hand_curls(value) -> tuple[float, ...]:
+    """指ごとの曲がり (thumb, index, middle, ring, little: 0 straight .. 1 closed) from a pose name, a list of
+    five, or {"pose": name, "curls": [five] or {finger: curl}} (the fingers named are changed from the pose)."""
+    if isinstance(value, (list, tuple)) and len(value) == 5:
+        return tuple(max(0.0, min(1.0, float(c))) for c in value)
+    if isinstance(value, dict):
+        base = list(_CURLS.get(str(value.get("pose") or "relaxed"), _CURLS["relaxed"]))
+        curls = value.get("curls")
+        if isinstance(curls, (list, tuple)) and len(curls) == 5:
+            base = [float(c) for c in curls]
+        elif isinstance(curls, dict):
+            for name, c in curls.items():
+                if name in FINGERS:
+                    base[FINGERS.index(name)] = float(c)
+        return tuple(max(0.0, min(1.0, c)) for c in base)
+    return _CURLS.get(str(value or "relaxed"), _CURLS["relaxed"])
+
 
 FIGURE_PRESETS: dict[str, dict] = {
     "stand": {},
@@ -164,10 +189,10 @@ class Builder:
         return np.array(self.v, dtype=float).reshape(-1, 3), self.f, self.parts
 
 
-def _hand(b: Builder, wrist: np.ndarray, frame: np.ndarray, length: float, pose: str, side: int, part: int) -> None:
-    """A hand at the wrist: the palm and five fingers of two bones, curled by the pose. `frame` is the
-    forearm's turn (its y points along the hand)."""
-    curls = _CURLS.get(pose, _CURLS["relaxed"])
+def _hand(b: Builder, wrist: np.ndarray, frame: np.ndarray, length: float, pose, side: int, part: int) -> None:
+    """A hand at the wrist: the palm and five fingers of two bones, curled by the pose (a name, or each finger's
+    curl: hand_curls). `frame` is the forearm's turn (its y points along the hand)."""
+    curls = hand_curls(pose)
     palm_len, palm_w, thick = length * 0.5, length * 0.45, length * 0.14
     down, across, front = frame[:, 1], frame[:, 0], frame[:, 2]
     palm_c = wrist + down * palm_len / 2
@@ -202,7 +227,8 @@ def figure_skeleton(prim: dict) -> dict:
     """The figure's joints in its own space (mm, before its turn): {name: point}, and each bone's turn."""
     size = prim.get("size") or [40, 80, 20]
     height = float(size[1] if isinstance(size, (list, tuple)) else size) or 80.0
-    body = {"heads": 7.5, "shoulders": 1.0, "hips": 1.0, "build": 1.0, "legs": 1.0, **(prim.get("body") or {})}
+    own = dict(prim.get("body") or {})
+    body = {"heads": 7.5, "shoulders": 1.0, "hips": 1.0, "build": 1.0, "legs": 1.0, **SEX_BODY.get(str(own.get("sex") or ""), {}), **own}
     u = height / max(4.0, min(10.0, float(body["heads"])))
     joints = prim.get("joints") or {}
     rest_arm = {"l_arm": {"z": 0.12}, "r_arm": {"z": -0.12}}
@@ -263,13 +289,18 @@ def _figure(prim: dict):
                 (0.95 * u * max(0.6, float(sk["body"]["shoulders"])) * 0.85 * build ** 0.3, 0.85 * u, 0.5 * u * build), turns["chest"], part=1)
     b.ellipsoid((pts["pelvis"] + pts["waist"]) / 2, (0.62 * u * build ** 0.3 * max(0.6, float(sk["body"]["hips"])), 0.75 * u, 0.42 * u * build),
                 turns["spine"], part=1)
+    if sk["body"].get("sex") == "female":  # (the chest's shape, and a narrower waist)
+        chest = (pts["waist"] + pts["neck"]) / 2 + turns["chest"] @ np.array([0, 0.25 * u, 0])
+        for s in (1, -1):
+            b.ellipsoid(chest + turns["chest"] @ np.array([s * 0.36 * u, 0.05 * u, -0.38 * u * build]),
+                        (0.3 * u, 0.28 * u, 0.26 * u), turns["chest"], nu=10, nv=7, part=1)
     b.capsule(pts["neck"], pts["head_base"], t * 0.8, part=1)
     _head_mesh(b, pts["head"], turns["head"], u, part=2)
     hands = prim.get("hands") or {}
     for p, s in (("l", 1), ("r", -1)):
         b.capsule(pts[f"{p}_shoulder"], pts[f"{p}_elbow"], t * 1.05, part=3)
         b.capsule(pts[f"{p}_elbow"], pts[f"{p}_wrist"], t * 0.85, part=3)
-        _hand(b, pts[f"{p}_wrist"], turns[f"{p}_wrist"], 0.8 * u, str(hands.get(p) or "relaxed"), s, part=4)
+        _hand(b, pts[f"{p}_wrist"], turns[f"{p}_wrist"], 0.8 * u, hands.get(p) or "relaxed", s, part=4)
         b.capsule(pts[f"{p}_hip"], pts[f"{p}_knee"], t * 1.45, part=5)
         b.capsule(pts[f"{p}_knee"], pts[f"{p}_ankle"], t * 1.1, part=5)
         foot_mid = (pts[f"{p}_ankle"] + pts[f"{p}_toe"]) / 2
@@ -316,9 +347,10 @@ def _mesh_of(prim: dict):
         length = float(size[1] if isinstance(size, (list, tuple)) else size) or 20.0
         b = Builder()
         side = 1 if prim.get("side", "r") == "l" else -1
-        _hand(b, np.array([0, -length / 2, 0]), np.eye(3), length, str(prim.get("pose") or "relaxed"), side, 4)
+        _hand(b, np.array([0, -length / 2, 0]), np.eye(3), length,
+              {"pose": prim.get("pose") or "relaxed", "curls": prim["curls"]} if prim.get("curls") else (prim.get("pose") or "relaxed"), side, 4)
         return b.arrays(), []
-    if kind in ("box", "cylinder", "stairs", "floor", "scene"):
+    if kind in ("box", "cylinder", "stairs", "floor", "scene", "sphere", "cone", "prop"):
         return _solid(prim), []
     if kind == "mesh":
         data = prim.get("mesh") or {}
@@ -352,6 +384,16 @@ def _solid(prim: dict):
             b.box((0, (top + h / 2) / 2, -d / 2 + run * (k + 0.5)), (w, h / 2 - top, run))
     elif kind == "floor":
         b.add([(-w / 2, 0, -d / 2), (w / 2, 0, -d / 2), (w / 2, 0, d / 2), (-w / 2, 0, d / 2)], [(0, 1, 2, 3)])
+    elif kind == "sphere":
+        b.ellipsoid((0, 0, 0), (w / 2, h / 2, d / 2), nu=24, nv=14)
+    elif kind == "cone":
+        n = 24
+        verts = [(0.0, -h / 2, 0.0)] + [(w / 2 * math.cos(2 * math.pi * k / n), h / 2, d / 2 * math.sin(2 * math.pi * k / n)) for k in range(n)]
+        faces = [(0, 1 + (k + 1) % n, 1 + k) for k in range(n)] + [tuple(range(1, n + 1))]
+        b.add(verts, faces, 0, smooth=True)
+    elif kind == "prop":
+        for bx, by, bz, bw, bh, bd in prim3d.PROPS.get(str(prim.get("prop") or "chair"), prim3d.PROPS["chair"]):
+            b.box(((bx - 0.5) * w, (by - 0.5) * h, (bz - 0.5) * d), (bw * w, bh * h, bd * d))
     elif kind == "scene":
         g, top, back = h / 2, -h / 2, d / 2
         b.add([(-w / 2, g, -d / 2), (w / 2, g, -d / 2), (w / 2, g, back), (-w / 2, g, back)], [(0, 1, 2, 3)])  # the floor

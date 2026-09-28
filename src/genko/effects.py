@@ -4,10 +4,15 @@ Kinds and their settings (`params`, page mm; everything is optional):
 
 - focus (集中線): `center` [x, y], `inner` [rx, ry] (the clear middle), `inner_path` [[x, y], …] (the clear
   middle as any shape instead of an ellipse), `twist` (degrees the lines turn by on their way in: a swirl),
-  `count`, `jitter` (0..1, how unevenly the lines stop), `width_mm`, `taper` (thin toward the middle).
+  `count`, `jitter` (0..1, how unevenly the lines stop), `width_mm`, `taper` (thin toward the middle),
+  `length_mm` (each line this long from where it stops, instead of reaching the panel's edge).
 - speed (流線): `angle` (degrees, the direction of motion), `count`, `length` (share of the panel, 0..1),
-  `jitter`, `width_mm`, `curve` (mm the lines bow by), `taper`; or `path` [[x, y], …] (the lines run along
-  this curve, `spread_mm` across it).
+  `jitter`, `width_mm`, `curve` (mm the lines bow by), `taper`, `spacing_mm` (線の間隔, instead of `count`); or
+  `path` [[x, y], …] (the lines run along this curve, `spread_mm` across it).
+
+Focus and speed lines also take `bundle` (まとまり: lines per bundle) with `bundle_gap` (0..0.95, the room left
+between bundles); the 乱れ one by one — `jitter_length`, `jitter_position`, `jitter_width` (0..1; each falls
+back to `jitter`); and `taper` as "in", "out", "both" or false (入り抜き).
 - uni_flash (ウニフラッシュ): `center`, `inner` [rx, ry], `count`, `length_mm`, `jitter`, `width_mm`.
 - beta_flash (ベタフラッシュ): `center`, `inner` [rx, ry], `spikes`, `depth` (0..1, how far the white
   spikes reach into the black), `jitter`.
@@ -43,7 +48,11 @@ def validate(kind: str, params: dict) -> None:
         raise ValueError("within is a shape of 3 points or more")
     if int(params.get("count", 1) or 1) > 2000 or int(params.get("spikes", 1) or 1) > 2000:
         raise ValueError("too many lines (at most 2000)")
-    for key in ("jitter", "depth", "length"):
+    if params.get("taper") not in (None, True, False, "True", "", "none", "in", "out", "both"):
+        raise ValueError("taper is in, out, both or false")
+    if params.get("bundle") is not None and not 1 <= int(params["bundle"]) <= 50:
+        raise ValueError("bundle is 1 to 50 lines")
+    for key in ("jitter", "depth", "length", "jitter_length", "jitter_position", "jitter_width"):
         if key in params and not 0 <= float(params[key]) <= 1:
             raise ValueError(f"{key} is 0 to 1")
 
@@ -147,12 +156,42 @@ def _speed_along(params: dict, rng, box) -> list[dict]:
     return out
 
 
+def _taper(params: dict, default: str) -> str:
+    """入り抜き: "in" (thin toward the middle / the end), "out" (thin at the start), "both", or "" (even)."""
+    value = params.get("taper", True)
+    if value is True or value == "True":
+        return default
+    if value in (False, None, "", "none"):
+        return ""
+    return str(value) if value in ("in", "out", "both") else default
+
+
+def _jitter(params: dict, what: str) -> float:
+    """乱れ by kind (length, position, width); each falls back to the one `jitter`."""
+    return max(0.0, min(1.0, float(params.get(f"jitter_{what}", params.get("jitter", 0.25)))))
+
+
+def _slot(i: int, count: int, params: dict, r: float) -> float | None:
+    """まとまり: where line i sits (0..1 round or across) when the lines come in bundles of `bundle`, with
+    `bundle_gap` (0..0.95) of each bundle's room left empty; None without bundles."""
+    size = int(params.get("bundle", 1) or 1)
+    if size <= 1:
+        return None
+    gap = max(0.0, min(0.95, float(params.get("bundle_gap", 0.5))))
+    groups = math.ceil(count / size)
+    b, k = divmod(i, size)
+    spread = (1 - gap) / size
+    return (b + gap / 2 + (k + 0.5) * spread + (r - 0.5) * spread * _jitter(params, "position") * 2) / groups
+
+
 def _line(a, b, taper: str, n: int = 6) -> list[list[float]]:
-    """Points from a to b with pressures for the taper: "in" (thin at b), "both", or "" (even)."""
+    """Points from a to b with pressures for the taper: "in" (thin at b), "out" (thin at a), "both", or "" (even)."""
     out = []
     for i in range(n):
         t = i / (n - 1)
-        if taper == "in":
+        if taper == "out":
+            p = 0.03 + 0.97 * t
+        elif taper == "in":
             p = 1 - t * 0.97
         elif taper == "both":
             p = 0.03 + 0.97 * math.sin(math.pi * t)
@@ -179,18 +218,30 @@ def geometry(effect: dict, page) -> dict:
         count = int(params.get("count", 90))
         width = float(params.get("width_mm", 0.8))
         outer = math.hypot(w, h) + math.hypot(cx - (x + w / 2), cy - (y + h / 2))
-        taper = "in" if params.get("taper", True) else ""
+        taper = _taper(params, "in")
         shape = [(float(p[0]), float(p[1])) for p in params.get("inner_path") or []]
         twist = math.radians(float(params.get("twist", 0)))
+        own = any(f"jitter_{k}" in params for k in ("length", "position", "width"))
         for i in range(count):
-            a = 2 * math.pi * (i + rng.random() * 0.7) / count
-            stop = 1 + jitter * rng.random() * 1.2
+            r = rng.random()
+            slot = _slot(i, count, params, r)
+            if slot is not None:
+                a = 2 * math.pi * slot
+            elif own:
+                a = 2 * math.pi * (i + 0.5 + (r - 0.5) * _jitter(params, "position") * 2) / count
+            else:
+                a = 2 * math.pi * (i + r * 0.7) / count
+            stop = 1 + _jitter(params, "length") * rng.random() * 1.2
             if len(shape) >= 3:
                 reach = _ray_to(shape, (cx, cy), a)
                 inner_pt = (cx + reach * stop * math.cos(a), cy + reach * stop * math.sin(a))
             else:
                 inner_pt = (cx + rx * stop * math.cos(a), cy + ry * stop * math.sin(a))
             outer_pt = (cx + outer * math.cos(a), cy + outer * math.sin(a))
+            if params.get("length_mm"):  # (線の長さ: from where it stops, straight out from the middle)
+                away = math.dist((cx, cy), inner_pt) or 1.0
+                ux, uy = (inner_pt[0] - cx) / away, (inner_pt[1] - cy) / away
+                outer_pt = (inner_pt[0] + ux * float(params["length_mm"]), inner_pt[1] + uy * float(params["length_mm"]))
             pts = _line(outer_pt, inner_pt, taper, 16 if twist else 6)
             if twist:  # a swirl: each point turned about the centre, less toward the middle (the ends stay on the shape)
                 for k, p in enumerate(pts):
@@ -198,7 +249,9 @@ def geometry(effect: dict, page) -> dict:
                     dx, dy = p[0] - cx, p[1] - cy
                     p[0] = round(cx + dx * math.cos(turn) - dy * math.sin(turn), 3)
                     p[1] = round(cy + dx * math.sin(turn) + dy * math.cos(turn), 3)
-            lines.append({"points": pts, "width_mm": width * (0.6 + rng.random() * 0.8)})
+            spread = rng.random()
+            thick = width * (1 + _jitter(params, "width") * (spread * 2 - 1) * 1.6) if own else width * (0.6 + spread * 0.8)
+            lines.append({"points": pts, "width_mm": max(0.02, thick)})
     elif kind == "speed" and len(params.get("path") or []) >= 2:
         lines = _speed_along(params, rng, box)
     elif kind == "speed":
@@ -216,11 +269,20 @@ def geometry(effect: dict, page) -> dict:
         lo, hi = min(across), max(across)
         a0, a1 = min(along), max(along)
         span = a1 - a0
-        taper = str(params.get("taper", "both")) if params.get("taper", True) is not False else ""
-        taper = "both" if taper in ("True", "both") else taper
+        taper = _taper(params, "both")
+        if params.get("spacing_mm"):  # (線の間隔 instead of how many)
+            count = max(2, min(2000, int((hi - lo) / max(0.2, float(params["spacing_mm"])))))
+        own = any(f"jitter_{k}" in params for k in ("length", "position", "width"))
         for i in range(count):
-            offset = lo + (hi - lo) * (i + rng.random()) / count
-            length = span * share * (1 - jitter * rng.random() * 0.8)
+            r = rng.random()
+            slot = _slot(i, count, params, r)
+            if slot is not None:
+                offset = lo + (hi - lo) * slot
+            elif own:
+                offset = lo + (hi - lo) * (i + 0.5 + (r - 0.5) * _jitter(params, "position") * 2) / count
+            else:
+                offset = lo + (hi - lo) * (i + r) / count
+            length = span * share * (1 - _jitter(params, "length") * rng.random() * 0.8)
             start = a0 - span * 0.05 + (span * 1.1 - length) * rng.random()
             pts = []
             steps = 24 if curve else 8
@@ -234,10 +296,14 @@ def geometry(effect: dict, page) -> dict:
                     p = 0.03 + 0.97 * math.sin(math.pi * t)
                 elif taper == "in":
                     p = 1 - 0.97 * t
+                elif taper == "out":
+                    p = 0.03 + 0.97 * t
                 else:
                     p = 1.0
                 pts.append([round(px, 3), round(py, 3), round(p, 3)])
-            lines.append({"points": pts, "width_mm": width * (0.5 + rng.random())})
+            spread = rng.random()
+            thick = width * (1 + _jitter(params, "width") * (spread * 2 - 1) * 1.6) if own else width * (0.5 + spread)
+            lines.append({"points": pts, "width_mm": max(0.02, thick)})
     elif kind == "uni_flash":
         cx, cy = _centre(params, box)
         rx, ry = _inner(params, box)

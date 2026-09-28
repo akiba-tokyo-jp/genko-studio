@@ -37,7 +37,9 @@ def test_a_mesh_of_any_grid():
     with pytest.raises(warp.WarpError):
         warp.mapping((0, 0, 10, 10), {"mesh": pts})  # (six points need their grid)
     square = [[x * 2.5, y * 2.5] for y in range(5) for x in range(5)]
-    assert warp.mapping((0, 0, 10, 10), {"mesh": square})(3, 3) == pytest.approx((3.0, 3.0))
+    assert warp.mapping((0, 0, 10, 10), {"mesh": square, "grid": [5, 5]})(3, 3) == pytest.approx((3.0, 3.0))
+    with pytest.raises(warp.WarpError):
+        warp.mapping((0, 0, 10, 10), {"mesh": square})
 
 
 def test_the_numbers_turn_about_the_pivot():
@@ -78,9 +80,12 @@ def test_the_pivot_moves_and_the_selection_turns_about_it(window):
     canvas.set_tool("marquee")
     canvas.set_selection({"poly": [[20, 20], [60, 20], [60, 40], [20, 40]]})
     assert canvas.selection_pivot() == pytest.approx((40, 30))
-    pivot = next(h for h in canvas._sel_handles() if h[0] == "pivot")
-    assert pivot[2] == pytest.approx((40, 30))
-    canvas.sel_pivot = [20, 20]
+    assert not any(h[0] == "pivot" for h in canvas._sel_handles())  # (the middle is for moving the selection)
+    canvas.pivot_mode = True
+    assert canvas._marquee_press(canvas._pt(20, 20))
+    canvas._sel_drag = None
+    assert canvas.sel_pivot == pytest.approx([20, 20]) and not canvas.pivot_mode
+    assert next(h for h in canvas._sel_handles() if h[0] == "pivot")[2] == pytest.approx((20, 20))
     canvas._sel_drag = {"kind": "rotate", "key": "r", "start": (20, 10), "box": canvas._sel_box()}
     a, b, c, d, e, f = canvas._sel_matrix((30, 20))  # (a quarter turn about the top-left corner)
     assert (a * 20 + c * 20 + e, b * 20 + d * 20 + f) == pytest.approx((20, 20))
