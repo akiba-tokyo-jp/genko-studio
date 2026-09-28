@@ -280,6 +280,10 @@ class ToolSettings(QWidget):
         """Only the tool's name (and its dock no taller than that), or everything."""
         self.folded = on
         self.fold.setText("▸" if on else "▾")
+        if not on and self.isVisible():
+            from genko.app import comfort
+
+            comfort.fade_in(self.stack, 160)
         self.hint.setVisible(not on and theme.show_hints() and bool(self.hint.text()))
         self.stack.setVisible(not on and self.pages.get(self.tool) is not None)
         dock = self.parentWidget()
@@ -295,6 +299,10 @@ class ToolSettings(QWidget):
         self.hint.setText(hint)
         widget = self.pages.get(tool)
         if widget is not None:
+            if widget is not self.stack.currentWidget() and self.isVisible():
+                from genko.app import comfort
+
+                comfort.fade_in(widget, 140)  # (the new tool's settings come in softly)
             self.stack.setCurrentWidget(widget)
             self.stack.setVisible(not self.folded)
         else:

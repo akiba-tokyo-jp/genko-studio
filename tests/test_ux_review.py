@@ -173,3 +173,18 @@ def test_the_lines_list_shows_the_kind_first(qapp, tmp_path):
         assert window.story.list.item(0).text().startswith("1.〔ナレーション〕")
     finally:
         window.close()
+
+
+def test_nine_menus_and_the_tabs_whole_on_a_1366_screen(qapp, tmp_path):
+    from PySide6.QtWidgets import QTabBar
+
+    window = _window(qapp, tmp_path, agent=True, size=(1366, 768))
+    try:
+        window._settle_docks()
+        for _ in range(20):
+            qapp.processEvents()
+        assert len([a for a in window.menuBar().actions() if a.menu()]) == 9
+        bar = next(b for b in window.findChildren(QTabBar) if b.isVisible() and "レイヤー" in [b.tabText(i) for i in range(b.count())])
+        assert all(bar.tabRect(i).right() <= bar.width() for i in range(bar.count()))  # (no tab behind the arrows)
+    finally:
+        window.close()

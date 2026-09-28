@@ -53,21 +53,27 @@ def _menu(win, title):
     return next(a.menu() for a in win.menuBar().actions() if a.text() == title)
 
 
+def _sub(menu, title):
+    return next(a.menu() for a in menu.actions() if a.menu() is not None and a.text() == title)
+
+
 def _texts(menu):
     return [a.text() for a in menu.actions() if a.text()]
 
 
 def test_the_menus_people_look_for(window):
     titles = [a.text() for a in window.menuBar().actions()]
-    assert titles == ["ファイル", "編集", "表示", "ツール", "レイヤー", "台詞", "トーン・効果線", "選択", "定規・3D", "コマ", "ページ",
-                      "ウィンドウ", "ヘルプ"]
+    # nine menus: the rulers, 3D, tones and effect lines inside ツール; the panels and the lines inside ページ
+    assert titles == ["ファイル", "編集", "表示", "ツール", "選択", "レイヤー", "ページ", "ウィンドウ", "ヘルプ"]
     file_menu = _texts(_menu(window, "ファイル"))
     assert "最近使った原稿" in file_menu and "閉じる" in file_menu and "Genko を終わる" in file_menu
     edit = _texts(_menu(window, "編集"))
     assert "すべて選択" in edit and "選択範囲を消す" in edit
-    assert "マスク" in _texts(_menu(window, "レイヤー")) and "フキダシの形" in _texts(_menu(window, "台詞"))
-    ruler3d = _texts(_menu(window, "定規・3D"))
-    assert "直線定規" in ruler3d and "デッサン人形を置く" in ruler3d and "ポーズ" in ruler3d
+    assert "マスク" in _texts(_menu(window, "レイヤー")) and "フキダシの形" in _texts(_sub(_menu(window, "ページ"), "台詞"))
+    tools = _menu(window, "ツール")
+    assert "直線定規" in _texts(_sub(tools, "定規")) and "デッサン人形を置く" in _texts(_sub(tools, "3D"))
+    assert "ポーズ" in _texts(_sub(tools, "3D")) and "集中線" in _texts(_sub(tools, "トーン・効果線"))
+    assert window.act_split_h.text() in _texts(_sub(_menu(window, "ページ"), "コマ"))
     # recent books
     recent = window.recent_menu
     recent.aboutToShow.emit()

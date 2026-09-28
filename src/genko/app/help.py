@@ -93,17 +93,21 @@ def shortcut_rows(window) -> list[tuple[str, str, str]]:
     """(menu, command, keys) for every command that has keys, in menu order."""
     out = []
     seen = set()
-    for top in window.menuBar().actions():
-        menu = top.menu()
-        if menu is None:
-            continue
+    def walk(menu, where: str) -> None:
         for action in menu.actions():
-            if action.isSeparator() or action.menu() or not action.text():
+            if action.isSeparator() or not action.text():
+                continue
+            if action.menu():  # (the menus inside a menu: ツール → 定規, ページ → コマ…)
+                walk(action.menu(), f"{where} → {action.text()}")
                 continue
             keys = ", ".join(k.toString(QKeySequence.SequenceFormat.NativeText) for k in action.shortcuts())
             if keys and action.text() not in seen:
                 seen.add(action.text())
-                out.append((top.text(), action.text(), keys))
+                out.append((where, action.text(), keys))
+
+    for top in window.menuBar().actions():
+        if top.menu() is not None:
+            walk(top.menu(), top.text())
     return out
 
 

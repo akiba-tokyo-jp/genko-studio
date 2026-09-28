@@ -162,12 +162,17 @@ class BrushPanel(QWidget):
         self.crossing = QCheckBox("消しゴムで交点まで消す")
         self.crossing.setToolTip("線の交わる所までを一度に消します（はみ出しの掃除）")
         self.crossing.toggled.connect(lambda _: self._save())
+        from genko.app.fields import LineSample, slider_for, with_value
+
+        # the pen as set now, drawn (a change is seen before the page is touched)
+        self.sample = LineSample(lambda: {**self.stroke_fields(), "opacity": self.opacity.value() / 100, "rgb": self.rgb})
         form = QFormLayout()
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
-        form.addRow("太さ", self.size)
+        form.addRow(self.sample)
+        form.addRow("太さ", slider_for(self.size, log=True))
         form.addRow(self._wrap(sizes))
-        form.addRow("不透明度", self.opacity)
-        form.addRow("手ぶれ補正", self.steady)
+        form.addRow("不透明度", with_value(self.opacity))
+        form.addRow("手ぶれ補正", slider_for(self.steady))
         form.addRow(self.taper)
         form.addRow("筆圧", self.pressure)
         palette.setSpacing(3)
@@ -177,7 +182,7 @@ class BrushPanel(QWidget):
         colour_row.addStretch(1)
         fill_form = QFormLayout()
         fill_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        fill_form.addRow("隙間を閉じる", self.gap)
+        fill_form.addRow("隙間を閉じる", slider_for(self.gap))
         fill_form.addRow("見る範囲", self.reference)
         from genko.app import theme
 
@@ -299,6 +304,8 @@ class BrushPanel(QWidget):
         self._save()
 
     def _save(self) -> None:
+        if hasattr(self, "sample"):
+            self.sample.refresh()
         if self._loading:
             return
         kind = self.kind()
@@ -319,6 +326,8 @@ class BrushPanel(QWidget):
         self.swatch.setStyleSheet(f"QPushButton {{ background: rgb{self.rgb}; border: 2px solid rgba(128,128,128,0.6); border-radius: 20px; }}")
         self.swatch.setToolTip(f"今の色 {self.rgb}")
         self.settings.setValue("brush/rgb", ",".join(str(v) for v in self.rgb))
+        if hasattr(self, "sample"):
+            self.sample.refresh()
         self.changed.emit()
 
     def _pick(self) -> None:

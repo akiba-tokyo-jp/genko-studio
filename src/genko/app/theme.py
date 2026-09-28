@@ -221,12 +221,13 @@ QMainWindow > QTabBar {{ background: {t.panel}; }}
 QWidget#panelBody {{ background: {t.panel}; }}
 QTabWidget::pane {{ border: none; border-top: 1px solid {t.divider}; background: {t.panel}; }}
 QTabBar {{ qproperty-drawBase: 0; }}
-QTabBar::tab {{ background: transparent; color: {t.muted}; padding: 6px 8px; border: none; border-bottom: 2px solid transparent; }}
+QTabBar::tab {{ background: transparent; color: {t.muted}; padding: 6px 6px; border: none; border-bottom: 2px solid transparent; }}
 QTabBar::tab:hover {{ color: {t.text}; }}
 QTabBar::tab:selected {{ color: {t.text}; border-bottom: 2px solid {t.accent}; font-weight: 500; }}
 QPushButton {{ background: {t.raised}; color: {t.text}; border: 1px solid {t.border}; border-radius: 6px; padding: 4px 8px; }}
 QPushButton:hover {{ background: {t.hover}; }}
-QPushButton:pressed, QPushButton:checked {{ background: {t.selected}; border-color: {t.accent}; }}
+QPushButton:checked {{ background: {t.selected}; border-color: {t.accent}; }}
+QPushButton:pressed {{ background: {t.accent_soft}; border-color: {t.accent}; }}
 QPushButton:disabled {{ color: {t.faint}; background: {t.panel}; border-color: {t.divider}; }}
 QPushButton[primary="true"] {{ background: {t.accent}; color: {t.accent_text}; border-color: {t.accent}; font-weight: 600; }}
 QPushButton[primary="true"]:hover {{ background: {_shift(t.accent, 1)}; }}
@@ -248,7 +249,8 @@ QPushButton[row="true"]:pressed {{ background: {t.selected}; border-color: {t.se
 QPushButton[row="true"]:disabled {{ color: {t.faint}; background: transparent; border-color: transparent; }}
 QToolButton {{ background: transparent; color: {t.text}; border: 1px solid transparent; border-radius: 5px; padding: 3px; }}
 QToolButton:hover {{ background: {t.hover}; }}
-QToolButton:checked, QToolButton:pressed {{ background: {t.selected}; border-color: {t.selected}; }}
+QToolButton:checked {{ background: {t.selected}; border-color: {t.selected}; }}
+QToolButton:pressed {{ background: {t.accent_soft}; border-color: {t.accent}; }}
 QToolButton[panel="true"] {{ background: {t.raised}; border: 1px solid {t.border}; padding: 3px 6px; }}
 QToolButton[panel="true"]:hover {{ background: {t.hover}; }}
 QToolBar {{ background: {t.window}; border: none; spacing: 1px; padding: 1px; }}
@@ -323,6 +325,9 @@ QFrame#dialogCard {{ background: {t.panel}; border: 1px solid {t.divider}; borde
 QWidget#dialogFooter {{ border-top: 1px solid {t.divider}; }}
 QWidget#launcher {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; }}
 QLabel#startNotice {{ background: {t.accent_soft}; color: {t.text}; border-radius: 6px; padding: 8px; }}
+QToolButton#effectTile {{ background: {t.base}; border: 1px solid {t.divider}; border-radius: 8px; padding: 4px 2px; }}
+QToolButton#effectTile:hover {{ border-color: {t.border}; background: {t.hover}; }}
+QLabel#lineSample {{ background: {t.base}; border: 1px solid {t.divider}; border-radius: 8px; }}
 QLabel#approvalPreview {{ background: {t.base}; border: 1px solid {t.divider}; border-radius: 8px; padding: 8px; }}
 QPushButton#overPicture {{ background: {_rgba(t.raised, 0.92)}; border: 1px solid {t.border}; border-radius: 6px; padding: 4px 8px; }}
 QPushButton#overPicture:hover {{ background: {t.hover}; }}

@@ -831,6 +831,10 @@ class LayerPanel(QWidget):
 
     def _show_details(self, on: bool, save: bool = True) -> None:
         self.details.setVisible(on)
+        if on and save:  # (opened by the person: its fields come in softly)
+            from genko.app import comfort
+
+            comfort.fade_in(self.details, 160)
         self.details_toggle.setText(("▾ " if on else "▸ ") + "レイヤーの設定")
         self.details_toggle.setToolTip("不透明度・合成・ロック・下描き・マスク・フィルターなど")
         if save:
@@ -2000,17 +2004,20 @@ class MainWindow(QMainWindow):
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
                       self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_phone, self.act_scale, self.act_onion, self.act_cmyk_proof, None, self.act_tool_names]),
+            # the tools, and under them the rulers, the 3D figures and the tones and effect lines (fewer menus in the
+            # bar: nine, not thirteen; everything is still found by コマンドを探す)
             ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_blend, self.act_shape, self.act_text, self.act_frame, None,
                         self.act_picker, self.act_fill, self.act_lassofill, self.act_fill_gaps, self.act_gradient, self.act_reshape, self.act_vector, self.act_liquify, None, self.act_marquee, self.act_lasso, self.act_wand, None,
                         self.act_ruler, self.act_3d, self.act_effect, self.act_stamp, None, self.act_thicker, self.act_thinner, None,
-                        self.act_swap_colour, self.act_transparent]),
-            ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
-                          self.act_layer_merge, self.act_layer_delete, None, "layer_special", "layer_many", None,
-                          self.act_layer_up, self.act_layer_down, None, self.act_layer_draft, "layer_effect", "mask", None, self.act_plugins]),
-            ("台詞", [self.act_line_type, self.act_balloon_pen, None, self.act_line_edit, self.act_line_wrap, "shapes",
-                      self.act_line_delete, None, self.act_story_editor]),
-            ("トーン・効果線", [self.act_tone_here, self.act_tone_click, None, self.act_effect, *self.effect_actions, None,
-                               self.act_materials]),
+                        self.act_swap_colour, self.act_transparent, None,
+                        ("sub", "トーン・効果線", [self.act_tone_here, self.act_tone_click, None, *self.effect_actions, None,
+                                              self.act_effect_within, self.act_effect_avoid, self.act_effect_clear, None, self.act_materials]),
+                        ("sub", "定規", [*self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
+                                         self.act_clear_rulers, self.act_ruler_layer, self.act_ruler_pen, self.act_ruler_fix, self.act_ruler_horizon,
+                                         None, self.act_grid, self.act_grid_snap, self.act_grid_mm]),
+                        ("sub", "3D", [self.act_add_figure, self.act_add_stick, self.act_add_head, self.act_add_hand, self.act_add_box,
+                                       self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, "scenes", self.act_import_obj, "poses",
+                                       self.act_trace, self.act_del_prim])]),
             ("選択", [self.act_marquee, self.act_sel_ellipse, self.act_lasso, self.act_sel_polyline, self.act_wand, self.act_sel_colour,
                       self.act_sel_pen, self.act_sel_erase, None, self.act_select_all, self.act_deselect, self.act_sel_invert,
                       self.act_sel_grow, self.act_sel_shrink, self.act_sel_feather, self.act_sel_layer, None, self.act_sel_keep,
@@ -2018,23 +2025,29 @@ class MainWindow(QMainWindow):
                       self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v,
                       self.act_warp_perspective, self.act_warp_mesh, self.act_warp_apply, "interp", None,
                       self.act_fill_selection, self.act_line_width]),
-            ("定規・3D", [self.act_ruler, None, *self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
-                          self.act_clear_rulers, self.act_ruler_layer, self.act_ruler_pen, self.act_ruler_fix, self.act_ruler_horizon, None, self.act_grid, self.act_grid_snap, self.act_grid_mm, None, self.act_3d,
-                          self.act_add_figure, self.act_add_stick, self.act_add_head, self.act_add_hand, self.act_add_box, self.act_add_cylinder,
-                          self.act_add_stairs, self.act_add_floor, "scenes", self.act_import_obj, "poses",
-                          self.act_trace, self.act_del_prim]),
-            ("コマ", [self.act_frame, None, self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
-                      self.act_gutters, self.act_border, self.act_no_border, *self.border_kind_actions, self.act_border_colour,
-                      self.act_bleed, self.act_reset_shape, None, self.act_frame_numbers]),
+            ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
+                          self.act_layer_merge, self.act_layer_delete, None, "layer_special", "layer_many", None,
+                          self.act_layer_up, self.act_layer_down, None, self.act_layer_draft, "layer_effect", "mask", None, self.act_plugins]),
+            # the book: its pages, and under them the panels and the lines
             ("ページ", [self.act_add_page, self.act_dup_page, self.act_del_page, None, self.act_page_up, self.act_page_down, self.act_spread,
                         None, self.act_paper, self.act_style, self.act_nombre, self.act_page_nombre, self.act_add_cover, self.act_assignee, self.act_timeline, None,
-                        self.act_story_editor, self.act_replace, self.act_book_preview, self.act_checks, None, self.act_name_ok]),
+                        ("sub", "コマ", [self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
+                                         self.act_gutters, self.act_border, self.act_no_border, *self.border_kind_actions, self.act_border_colour,
+                                         self.act_bleed, self.act_reset_shape, None, self.act_frame_numbers]),
+                        ("sub", "台詞", [self.act_line_type, self.act_balloon_pen, None, self.act_line_edit, self.act_line_wrap, "shapes",
+                                         self.act_line_delete]),
+                        None, self.act_story_editor, self.act_replace, self.act_book_preview, self.act_checks, None, self.act_name_ok]),
         ]
         from genko.app.lettering import KINDS
 
-        for title, actions in menus:
-            menu = bar.addMenu(title)
+        def fill(menu, actions) -> None:
             for act in actions:
+                if isinstance(act, tuple) and act[0] == "sub":  # (a submenu: its title and its own list)
+                    fill(menu.addMenu(act[1]), act[2])
+                    continue
+                add(menu, act)
+
+        def add(menu, act) -> None:
                 if act is None:
                     menu.addSeparator()
                 elif act == "recent":
@@ -2076,6 +2089,9 @@ class MainWindow(QMainWindow):
                         poses.addAction(pose)
                 else:
                     menu.addAction(act)
+
+        for title, actions in menus:
+            fill(bar.addMenu(title), actions)
         self.view_menu = bar.addMenu("ウィンドウ")
         self.view_menu.addAction(self.act_new_window)
         self.view_menu.addAction(self.act_next_doc)
@@ -2470,7 +2486,9 @@ class MainWindow(QMainWindow):
         eraser_form = QFormLayout(eraser_page)
         eraser_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         eraser_form.setContentsMargins(0, 0, 0, 0)
-        eraser_form.addRow("消しゴムの太さ（[ ] でも変わる）", eraser_size)
+        from genko.app.fields import slider_for
+
+        eraser_form.addRow("消しゴムの太さ（[ ] でも変わる）", slider_for(eraser_size, log=True))
         eraser_form.addRow(self.brush.crossing)
         self.eraser_mode = QComboBox()
         for label, key in (("触れた所で切る", ""), ("交点まで", "to_crossing"), ("線全体", "whole")):
@@ -2635,7 +2653,9 @@ class MainWindow(QMainWindow):
                                                            self.scene_actions, [self.act_import_obj]]),
                                      "動かす・線にする", menu_button("人形のポーズ", [self.pose_actions]), self.act_trace,
                                      self.act_del_prim]))
-        ts.add(("effect",), action_page(["効果線の種類", *self.effect_actions,
+        from genko.app.fields import effect_tiles
+
+        ts.add(("effect",), action_page(["効果線の種類", effect_tiles(self.effect_actions, ("focus", "speed", "uni_flash", "beta_flash")),
                                          "描く範囲（選択範囲で）", self.act_effect_within, self.act_effect_avoid, self.act_effect_clear,
                                          "素材", self.act_materials]))
         ts.add(("stamp",), action_page([self.act_materials]))
@@ -2860,7 +2880,8 @@ class MainWindow(QMainWindow):
         self._fit_box()
         if hasattr(self, "navigator_dock"):
             self.resizeDocks([self.brush_dock, self.navigator_dock], [max(300, self.height() - 330), 170], Qt.Orientation.Vertical)
-        wide = max(SIDE_WIDTH, min(320, self.width() // 6))  # (the tabs' names whole on a wide screen)
+        # the row of tabs whole, without arrows, from 1366 px up; under that the page keeps the room
+        wide = max(SIDE_WIDTH, min(320, self.width() // 5)) if self.width() >= 1360 else SIDE_WIDTH
         if tabs is not None and not tabs.isFloating():
             self.resizeDocks([tabs], [wide], Qt.Orientation.Horizontal)
         if tabs is not None and not getattr(self, "_fronted", False):
