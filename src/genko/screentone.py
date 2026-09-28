@@ -63,9 +63,14 @@ def effective_lpi(dpi: int, lpi: float, angle: float) -> float:
     return dpi / math.hypot(m, n)
 
 
+DOT_SHAPES = ("round", "square", "diamond", "ellipse")
+
+
 @lru_cache(maxsize=32)
-def threshold_tile(m: int, n: int) -> Image.Image:
-    """L image of side m²+n²: each pixel's rank (0..255) by distance to its dot centre."""
+def threshold_tile(m: int, n: int, shape: str = "round") -> Image.Image:
+    """L image of side m²+n²: each pixel's rank (0..255) by distance to its dot centre. The distance sets the dot's
+    shape (網の種類): round (丸), square (四角: the dots meet at their corners at 50%), diamond (ひし形) or ellipse
+    (楕円: the dots join into chains first along the screen's angle)."""
     size = m * m + n * n
     norm = float(size)
     order = []
@@ -76,7 +81,14 @@ def threshold_tile(m: int, n: int) -> Image.Image:
             v = (-x * n + y * m) / norm
             du = u - math.floor(u) - 0.5
             dv = v - math.floor(v) - 0.5
-            dist = du * du + dv * dv
+            if shape == "square":
+                dist = max(abs(du), abs(dv)) ** 2 + (du * du + dv * dv) * 1e-3
+            elif shape == "diamond":
+                dist = (abs(du) + abs(dv)) ** 2 + (du * du + dv * dv) * 1e-3
+            elif shape == "ellipse":
+                dist = du * du * 0.55 + dv * dv * 1.45
+            else:
+                dist = du * du + dv * dv
             # ties (the same spot in every cell) are broken by position so coverage stays exact
             order.append((round(dist, 9), (x * 7 + y * 13) % size, y, x))
     order.sort()
@@ -87,9 +99,10 @@ def threshold_tile(m: int, n: int) -> Image.Image:
     return Image.frombytes("L", (size, size), bytes(data))
 
 
-def tiled_threshold(size: tuple[int, int], dpi: int, lpi: float, angle: float, origin: tuple[int, int] = (0, 0)) -> Image.Image:
+def tiled_threshold(size: tuple[int, int], dpi: int, lpi: float, angle: float, origin: tuple[int, int] = (0, 0),
+                    shape: str = "round") -> Image.Image:
     """The threshold array over an area whose top-left is `origin` on the page (so screens line up across layers)."""
-    tile = threshold_tile(*screen_vector(dpi, lpi, angle))
+    tile = threshold_tile(*screen_vector(dpi, lpi, angle), shape if shape in DOT_SHAPES else "round")
     t = tile.width
     ox, oy = origin[0] % t, origin[1] % t
     out = Image.new("L", size)

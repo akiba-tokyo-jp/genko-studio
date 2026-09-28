@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
@@ -32,6 +33,8 @@ from PySide6.QtWidgets import (
 from genko.app import exporting
 from genko.models import PAPER_PRESETS, Binding, PageSpec
 from genko.app import theme
+
+SCREEN_SHAPES = [("丸", "round"), ("四角", "square"), ("ひし形", "diamond"), ("楕円", "ellipse")]
 
 PAPERS = [(label, key) for key, (label, _make) in PAPER_PRESETS.items()]
 
@@ -665,6 +668,22 @@ class ExportDialog(QDialog):
         icc_line.setContentsMargins(0, 0, 0, 0)
         icc_line.addWidget(self.icc, 1)
         icc_line.addWidget(pick_icc)
+        self.screen_on = QCheckBox("グレーを網点にする")
+        self.screen_on.setToolTip("2 階調で書き出すとき、トーン化していないグレーを、しきい値で白か黒にせず網点にします（書き出しでのトーン化）")
+        self.screen_lpi = QDoubleSpinBox()
+        self.screen_lpi.setRange(10, 150)
+        self.screen_lpi.setValue(60)
+        self.screen_lpi.setSuffix(" 線")
+        self.screen_shape = QComboBox()
+        for label, key in SCREEN_SHAPES:
+            self.screen_shape.addItem(label, key)
+        self.screen_row = QWidget()
+        screen_line = QHBoxLayout(self.screen_row)
+        screen_line.setContentsMargins(0, 0, 0, 0)
+        screen_line.addWidget(self.screen_on)
+        screen_line.addWidget(self.screen_lpi)
+        screen_line.addWidget(self.screen_shape)
+        self.color.currentIndexChanged.connect(lambda _: self.screen_row.setEnabled(self._bitonal()))
         self.jpeg = QCheckBox("JPEG にする（PNG より軽い）")
         self.spreads = QCheckBox("見開きも 1 枚ずつ出す")
         self.official = QCheckBox("正式な書き出し（点検して、書き出しの承認として記録する）")
@@ -695,7 +714,8 @@ class ExportDialog(QDialog):
             self.rows[key] = widget
         self.colour_head = look.section("色")
         self.form.addRow(self.colour_head)
-        for key, label, widget in (("color", "色", self.color), ("icc", "カラープロファイル", self.icc_row)):
+        for key, label, widget in (("color", "色", self.color), ("icc", "カラープロファイル", self.icc_row),
+                                   ("screen", "トーン化", self.screen_row)):
             self.form.addRow(label, widget)
             self.rows[key] = widget
         self.form.addRow(look.section("書き出し先"))
@@ -730,7 +750,8 @@ class ExportDialog(QDialog):
             label = self.form.labelForField(widget)
             if label is not None:
                 label.setVisible(visible)
-        self.colour_head.setVisible(any(key in fmt.options for key in ("color", "icc")))  # (no empty heading)
+        self.colour_head.setVisible(any(key in fmt.options for key in ("color", "icc", "screen")))  # (no empty heading)
+        self.screen_row.setEnabled(self._bitonal())
         self.dpi.setValue(exporting.default_dpi(self.episode, fmt.key))
         self.long_edge.setValue(2560 if fmt.key == "kindle" else 2048)
         self.jpeg.setChecked(fmt.key == "sns")
@@ -821,7 +842,13 @@ class ExportDialog(QDialog):
     def options(self) -> dict:
         return {"dpi": self.dpi.value(), "width": self.width.value(), "max_height": self.max_height.value(),
                 "long_edge": self.long_edge.value(), "jpeg": self.jpeg.isChecked(), "spreads": self.spreads.isChecked(),
-                "area": self.area.currentData(), "color": self.color.currentData(), "icc": self.icc.text().strip() or None}
+                "area": self.area.currentData(), "color": self.color.currentData(), "icc": self.icc.text().strip() or None,
+                "screen": ({"lpi": self.screen_lpi.value(), "shape": self.screen_shape.currentData()}
+                           if self.screen_on.isChecked() and self._bitonal() else None)}
+
+    def _bitonal(self) -> bool:
+        """Black and white only (the 2 値 TIFF, or 2 階調 chosen): where greys can be toned at export."""
+        return self.format.currentData() == "tiff" or self.color.currentData() == "bitonal"
 
     def run(self) -> None:
         out = Path(self.folder.text()).expanduser()

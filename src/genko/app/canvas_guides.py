@@ -162,10 +162,22 @@ class GuideMixin:
                 for k in range(16):
                     a = k * math.pi / 8
                     painter.drawLine(self._pt(*v), self._pt(v[0] + math.cos(a) * 2000, v[1] + math.sin(a) * 2000))
+            if ruler.get("grid"):  # パースのグリッド: the ground
+                painter.setPen(QPen(colour, 1, Qt.PenStyle.DashLine))
+                spec = self.page.spec
+                for a, b in rulers.perspective_grid(ruler, (spec.width_mm, spec.height_mm)):
+                    painter.drawLine(self._pt(*a), self._pt(*b))
+                painter.setPen(QPen(colour, 1))
             if hover:
                 painter.setPen(QPen(colour, 1.6, Qt.PenStyle.DotLine))
                 for d in rulers.directions(ruler, hover):
                     self._line_across(painter, hover, d)
+        elif kind in rulers.SHAPES and len(pts) >= 2:
+            curve = rulers.outline(ruler)[0] if kind != "polygon" or len(pts) >= 3 else pts
+            path = QPainterPath(self._pt(*curve[0]))
+            for p in curve[1:]:
+                path.lineTo(self._pt(*p))
+            painter.drawPath(path)
         elif kind in ("parallel_curve", "radial_curve", "multi_curve") and len(pts) >= 2:
             for curve in rulers.outline(ruler):
                 path = QPainterPath(self._pt(*curve[0]))
@@ -296,7 +308,7 @@ class GuideMixin:
         kind = self.ruler_kind
         if not pts:
             return None
-        if kind in ("curve", "parallel_curve", "radial_curve", "multi_curve"):  # a double-click adds the same point twice
+        if kind in ("curve", "parallel_curve", "radial_curve", "multi_curve", "polygon"):  # a double-click adds the same point twice
             kept = [pts[0]]
             for pt in pts[1:]:
                 if math.dist(pt, kept[-1]) > 0.5:
@@ -313,7 +325,7 @@ class GuideMixin:
             if self._ruler_first is None:
                 return {"id": "_draft", "kind": "curve", "points": pts, "active": True}
             ruler["points"], ruler["points2"] = self._ruler_first, pts
-        if kind in ("line", "symmetry"):
+        if kind in ("line", "symmetry", "rect", "ellipse"):
             if len(pts) < 2:
                 return None
             ruler["points"] = [pts[0], pts[-1]]
@@ -346,7 +358,7 @@ class GuideMixin:
                     self._ruler_drag = {"id": ruler_id, "index": index, "ruler": ruler, "moved": False}
                     self.update()
                     return
-        if self.ruler_kind in ("curve", "perspective", "parallel_curve", "radial_curve", "multi_curve"):  # click by click
+        if self.ruler_kind in ("curve", "perspective", "parallel_curve", "radial_curve", "multi_curve", "polygon"):  # click by click
             self._ruler_draft = (self._ruler_draft or []) + [[round(x, 2), round(y, 2)]]
             if self.ruler_kind == "perspective" and len(self._ruler_draft) >= self.ruler_vps:
                 self._finish_ruler()
@@ -356,7 +368,7 @@ class GuideMixin:
             self._ruler_draft = [[round(x, 2), round(y, 2)]]
             self._finish_ruler()
             return
-        self._ruler_draft = [[round(x, 2), round(y, 2)]]  # dragged kinds: line, parallel, concentric, symmetry
+        self._ruler_draft = [[round(x, 2), round(y, 2)]]  # dragged kinds: line, parallel, concentric, symmetry, rect, ellipse
         self.update()
 
     def _ruler_move(self, pos: QPointF) -> bool:
@@ -370,7 +382,7 @@ class GuideMixin:
             drag["moved"] = True
             self.update()
             return True
-        if self._ruler_draft and self.ruler_kind in ("line", "parallel", "concentric", "symmetry"):
+        if self._ruler_draft and self.ruler_kind in ("line", "parallel", "concentric", "symmetry", "rect", "ellipse"):
             self._ruler_draft = [self._ruler_draft[0], [round(x, 2), round(y, 2)]]
             self.update()
             return True
@@ -386,8 +398,10 @@ class GuideMixin:
                 self.rulerEdited.emit(drag["id"], change)
             self.update()
             return
-        if self._ruler_draft and self.ruler_kind in ("line", "parallel", "concentric", "symmetry"):
-            if len(self._ruler_draft) >= 2 and math.dist(self._ruler_draft[0], self._ruler_draft[-1]) > 1.0:
+        if self._ruler_draft and self.ruler_kind in ("line", "parallel", "concentric", "symmetry", "rect", "ellipse"):
+            if len(self._ruler_draft) >= 2 and math.dist(self._ruler_draft[0], self._ruler_draft[-1]) > 1.0 and (
+                    self.ruler_kind not in ("rect", "ellipse") or min(abs(self._ruler_draft[0][0] - self._ruler_draft[-1][0]),
+                                                                     abs(self._ruler_draft[0][1] - self._ruler_draft[-1][1])) >= 0.5):
                 self._finish_ruler()
             elif self.ruler_kind == "concentric":
                 self._finish_ruler()  # a click: circles around that point
@@ -405,6 +419,8 @@ class GuideMixin:
             self.update()
             return
         if self.ruler_kind in ("curve", "parallel_curve", "multi_curve") or (self.ruler_kind == "radial_curve" and len(self._ruler_draft) >= 3):
+            self._finish_ruler()
+        elif self.ruler_kind == "polygon" and len((self._draft_ruler(self._ruler_draft) or {}).get("points") or []) >= 3:
             self._finish_ruler()
 
     def cancel_ruler(self) -> None:

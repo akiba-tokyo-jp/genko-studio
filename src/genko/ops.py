@@ -39,16 +39,17 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "cut_frame", "page": "int", "frame_id": "str?", "p0": "[x,y]", "p1": "[x,y]", "gutter_mm": "float?", "note": "cut a panel along any line (slanted panels)"},
     {"op": "move_gutter", "page": "int", "frame_id": "str (the split)", "index": "int? (gutter after this child)", "delta_mm": "float", "gutter_mm": "float? (new width)"},
     {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal? (default vertical)", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]?", "style_runs": "[[words, {scale, bold, rgb}]]?", "path": "[[x,y]]? (a hand-drawn balloon)", "id": "str? (choose the id)"},
-    {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|electric|flash|whisper|narration|sfx|none|picture? (picture: style.picture, a base64 PNG stretched over the box)", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]? (傍点 on these words)", "style_runs": "[[words, {scale 0.3..3, bold, weight, rgb}]]? (part of the line larger, smaller, bolder, coloured)", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6, scale_x 0.3..3 (長体 < 1 < 平体), gradient {rgb_from, rgb_to, angle}, text_path [[x,y]…] (mm from the box's top left: the letters follow it), features [jp78|jp90|trad|expt|hwid|…] (OpenType forms, across text), yakumono (paired punctuation set half wide; default true), spike_jitter 0..1, bumps 5..60 (cloud), picture (base64 PNG), fill_png (letters painted with a picture), warp [[x,y]×4] (the letters' corners as shares of their box: 遠近・ゆがみ)}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], width_mm?, kind?: wedge|zigzag|fade|bubbles}]?"},
+    {"op": "edit_line", "id": "str", "text": "optional", "speaker": "optional", "balloon": "speech|rounded|box|cloud|thought|shout|electric|flash|whisper|narration|sfx|none|picture? (picture: style.picture, a base64 PNG stretched over the box)", "wrap": "vertical|horizontal?", "ruby": "str?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]? (傍点 on these words)", "style_runs": "[[words, {scale 0.3..3, bold, weight, rgb}]]? (part of the line larger, smaller, bolder, coloured)", "frame_id": "str?", "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6, scale_x 0.3..3 (長体 < 1 < 平体), gradient {rgb_from, rgb_to, angle}, text_path [[x,y]…] (mm from the box's top left: the letters follow it), features [jp78|jp90|trad|expt|hwid|…] (OpenType forms, across text), yakumono (paired punctuation set half wide; default true), spike_jitter 0..1, bumps 5..60 (cloud), picture (base64 PNG), fill_png (letters painted with a picture), warp [[x,y]×4] (the letters' corners as shares of their box: 遠近・ゆがみ)}? (null resets a key)", "tails": "[{to:[x,y], via?:[x,y], vias?:[[x,y],…] (折れ線: bends at each), width_mm?, kind?: wedge|zigzag|fade|bubbles}]?", "style (W6)": "line_rgb, fill_rgb, fill_opacity 0..1, text_dx_mm, text_dy_mm (the words moved inside the balloon), path_curve (a hand-drawn outline as a smooth curve), cuts, align justify (均等), ruby_scale 0.25..0.8, mono_ruby, below_layer (a layer id: the line is drawn under it)", "style_runs (W6)": "[[words, {…, tcy: true}]] (縦中横 on those words)"},
     {"op": "reorder_lines", "page": "int", "order": "[line id] (reading order)"},
     {"op": "delete_line", "id": "str"},
+    {"op": "cut_balloon", "id": "str", "points": "[[x,y],...] (page mm)", "width_mm": "float? (2)", "note": "フキダシ消しゴム: the balloon (fill and line) taken away there; style cuts: null brings it back"},
     {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float? (the balloon's size: edit_line does not change it)", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
     {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "taper_in_mm": "float? (入り: how long the start thins, mm; with taper)", "taper_out_mm": "float? (抜き: how long the end thins; 0 keeps that end)", "pressure_opacity": "float? 0..1 (a light touch also lightens the line)", "stabilize_speed": "bool? (quicker strokes are steadied more)", "post_fit": "float? mm (後補正: the wobble within this is dropped and a smooth curve drawn through the line)", "snap_lines_mm": "float? (ベクター吸着: each end within this of a line on the layer moves onto it)", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)", "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
-    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "panel_each": "bool? (true: each line stays in the panel it begins in)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white} | null? (トーン化: the layer's greys print as a halftone)"},
+    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "panel_each": "bool? (true: each line stays in the panel it begins in)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white, shape: round|square|diamond|ellipse, offset_mm: [x,y]} | null? (トーン化: the layer's greys print as a halftone)"},
     {"op": "add_page", "count": "int", "after": "int? (insert after this page; default after the last story page, before any covers)"},
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int", "next_to": "bool? (the copy right after the page; default at the end)"},
@@ -60,8 +61,8 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_spread", "page": "int", "with": "int|null"},
     {"op": "reorder", "order": "[int]"},
     {"op": "flood_fill", "page": "int", "layer": "ink|bg", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]", "gap_mm": "float?"},
-    {"op": "add_tone", "page": "int", "frame_id": "str?", "area": "{poly}|{mask}?", "at": "{x_mm, y_mm, gap_mm?, reference?}? (the region a fill would take)", "lpi": "float?", "density": "float? (0..1 black)", "angle": "float?", "pattern": "dot|line|cross|noise|flat|check|brick|wave|grid|hatch|star|sand|image?", "scale_mm": "float? (柄トーン)", "tile_png": "str? (image)", "gradient": "{shape: linear|radial, angle, start, end}?", "name": "str?", "after": "layer id?", "id": "str?", "note": "nothing given: every panel"},
-    {"op": "set_tone", "page": "int", "id": "str", "lpi": "float?", "density": "float?", "angle": "float?", "pattern": "dot|line|cross|noise|flat|check|brick|wave|grid|hatch|star|sand|image?", "scale_mm": "float? (柄トーン: the motif's size)", "tile_png": "str? (image: a base64 PNG repeated)", "gradient": "object|null?", "name": "str?"},
+    {"op": "add_tone", "page": "int", "frame_id": "str?", "area": "{poly}|{mask}?", "at": "{x_mm, y_mm, gap_mm?, reference?}? (the region a fill would take)", "lpi": "float?", "density": "float? (0..1 black)", "angle": "float?", "pattern": "dot|line|cross|noise|flat|check|brick|wave|grid|hatch|star|sand|image?", "scale_mm": "float? (柄トーン)", "tile_png": "str? (image)", "gradient": "{shape: linear|radial, angle, start, end}?", "dot_shape": "round|square|diamond|ellipse? (網の種類)", "offset_mm": "[x,y]? (網をずらす)", "name": "str?", "after": "layer id?", "id": "str?", "note": "nothing given: every panel"},
+    {"op": "set_tone", "page": "int", "id": "str", "lpi": "float?", "density": "float?", "angle": "float?", "pattern": "dot|line|cross|noise|flat|check|brick|wave|grid|hatch|star|sand|image?", "scale_mm": "float? (柄トーン: the motif's size)", "tile_png": "str? (image: a base64 PNG repeated)", "gradient": "object|null?", "dot_shape": "round|square|diamond|ellipse? (網の種類)", "offset_mm": "[x,y]|null? (網のずれ)", "move_by_mm": "[dx,dy]? (網を動かす: added to the offset)", "name": "str?"},
     {"op": "delete_tone", "page": "int", "id": "str"},
     {"op": "add_effect", "page": "int", "kind": "focus|speed|uni_flash|beta_flash|white", "frame_id": "str?", "params": "object: focus {center, inner, inner_path [[x,y]…] (any shape), twist (degrees: a swirl), count, jitter, width_mm, taper}; speed {angle, count, length, jitter, width_mm, curve (mm), taper, path [[x,y]…] (along a curve), spread_mm}; uni_flash {center, inner, count, length_mm}; beta_flash {center, inner, spikes, depth}; every kind: avoid [{ellipse: [cx,cy,rx,ry]} | {path: [[x,y]…]}] (the lines stop short of these, e.g. faces, and thin out), within [[x,y]…] (drawn only inside this shape)", "id": "str?"},
     {"op": "edit_effect", "page": "int", "id": "str", "params": "object? (merged; null removes a key)", "kind": "str?", "frame_id": "str|null?", "visible": "bool?"},
@@ -72,7 +73,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "fill", "page": "int", "layer_id": "str?", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float? (close gaps up to this)", "expand_mm": "float? (grow under the lines)", "reference": "page|layer|reference? (reference: the layers set as reference)", "tolerance": "0..100? (色の誤差: how dark a pixel may be and still be filled over, 37)", "ignore": "[draft|text]? (page: 下描き・ネーム and the lines are not walls)"},
     {"op": "fill_enclosed", "page": "int", "layer_id": "str?", "poly": "[[x,y],...] (the lasso)", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float?", "expand_mm": "float?", "reference": "page|layer|reference?", "tolerance": "0..100?", "ignore": "[draft|text]?", "note": "囲って塗る (CLIP): only the areas the lines close inside the lasso are filled"},
     {"op": "fill_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask: {box, png}}", "rgb": "[r,g,b]?", "opacity": "float?"},
-    {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)", "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)", "interp": "nearest|bilinear|bicubic? (how pixels are resampled)"},
+    {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)", "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row), grid: [across, down]? (another grid: 2..9 points each way)} (instead of matrix)", "interp": "nearest|bilinear|bicubic? (how pixels are resampled)"},
     {"op": "merge_layers", "page": "int", "ids": "[layer id] (two or more: into the lowest, as they show)", "name": "str?"},
     {"op": "merge_visible", "page": "int", "copy": "bool? (default true: a new layer on top; false: the visible layers merged)", "name": "str?", "id": "str?"},
     {"op": "group_layers", "page": "int", "ids": "[layer id]", "name": "str?", "id": "str? (the new folder)"},
@@ -113,15 +114,17 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "merge_down", "page": "int", "id": "str (merged into the layer below it; pen onto pen stays lines, anything else becomes pixels)"},
     {"op": "set_layer_mask", "page": "int", "id": "str", "area": "{poly} | {mask}? (only this area shows)", "fill": "show|hide? (the whole mask)", "invert": "bool?", "enabled": "bool?", "delete": "bool?"},
     {"op": "paint_mask", "page": "int", "id": "str", "points": "[[x,y],...]", "width_mm": "float?", "show": "bool (true: the pen shows the layer, false: the eraser hides it)"},
-    {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|plugin:<key>", "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; hue shift/saturation/value; levels black/white; curve gamma; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"},
+    {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|brightness_contrast|despeckle|plugin:<key>", "area": "{poly}|{mask}? (選択範囲の中だけ)", "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; sharpen amount (1 usual, 2 strong)/radius; hue shift/saturation/value; levels black/white/gamma (middle, >1 lighter)/out_black/out_white/channel (rgb|r|g|b); curve gamma, or points [[in,out],…] 0..255 and channel; brightness_contrast brightness/contrast (-100..100); despeckle size_mm (specks smaller than this)/what (ink|holes|both); mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"},
     {"op": "set_brush", "rgb": "[r,g,b]?", "width_mm": "float?", "stabilize": "int?", "taper": "bool?", "curve": "gpen|linear"},
     {"op": "select_frame", "page": "int", "frame_id": "str"},
     {"op": "edit_stroke", "page": "int", "layer": "name|ink", "index": "int", "points": "[[x,y],...]"},
     {"op": "simplify_stroke", "page": "int", "layer": "name|ink", "index": "int", "epsilon_mm": "float?"},
     {"op": "set_ruler", "page": "int", "kind": "str", "pos": "[x,y]?", "points": "[[x,y],...]?", "note": "old single ruler; use add_ruler"},
-    {"op": "add_ruler", "page": "int", "kind": "line|curve|parallel|concentric|radial|perspective|symmetry|guide|parallel_curve|multi_curve|radial_curve", "points2": "[[x,y],...]? (multi_curve: the second curve)", "center": "[x,y]? (radial_curve)", "layer_id": "str? (only while drawing on this layer)", "lock_horizon": "bool? (perspective: the eye level stays)", "fixed": "bool?", "axis": "h|v? (guide)", "at": "float? (guide: mm from the top or left)", "points": "[[x,y],...]?", "angle": "float? (deg)", "ratio": "float? (concentric height/width)", "copies": "int? (symmetry)", "mirror": "bool?", "frame_id": "str? (only in this panel)", "reach_mm": "float?", "id": "str?"},
+    {"op": "add_ruler", "page": "int", "kind": "line|curve|parallel|concentric|radial|perspective|symmetry|guide|parallel_curve|multi_curve|radial_curve|rect|ellipse|polygon (rect/ellipse: points = two opposite corners, angle; polygon: 3+ corners)", "grid": "int? (perspective: the ground grid's lines, 0 none)", "points2": "[[x,y],...]? (multi_curve: the second curve)", "center": "[x,y]? (radial_curve)", "layer_id": "str? (only while drawing on this layer)", "lock_horizon": "bool? (perspective: the eye level stays)", "fixed": "bool?", "axis": "h|v? (guide)", "at": "float? (guide: mm from the top or left)", "points": "[[x,y],...]?", "angle": "float? (deg)", "ratio": "float? (concentric height/width)", "copies": "int? (symmetry)", "mirror": "bool?", "frame_id": "str? (only in this panel)", "reach_mm": "float?", "id": "str?"},
     {"op": "ruler_to_layer", "page": "int", "id": "str (the ruler)", "layer_id": "str?", "width_mm": "float?", "kind": "str? (brush, mili)", "rgb": "[r,g,b]?", "note": "定規ペン: the ruler's own line drawn as pen lines"},
-    {"op": "edit_ruler", "page": "int", "id": "str", "points": "[[x,y],...]?", "points2": "[[x,y],...]?", "center": "[x,y]?", "horizon_y": "float? (perspective: move the eye level)", "lock_horizon": "bool?", "fixed": "bool?", "layer_id": "str|null?", "angle": "float?", "ratio": "float?", "copies": "int?", "mirror": "bool?", "frame_id": "str|null?", "active": "bool?", "visible": "bool?"},
+    {"op": "ruler_from_3d", "page": "int", "prim_id": "str? (default: the first 3D on the page)", "grid": "int?", "id": "str?", "note": "a perspective ruler through the vanishing points the 3D (and the page camera) makes"},
+    {"op": "camera_from_ruler", "page": "int", "id": "str (a perspective ruler)", "prim_id": "str?", "note": "the page camera turned (and its focal length set) so the 3D's vanishing points sit on the ruler's"},
+    {"op": "edit_ruler", "page": "int", "id": "str", "grid": "int?", "points": "[[x,y],...]?", "points2": "[[x,y],...]?", "center": "[x,y]?", "horizon_y": "float? (perspective: move the eye level)", "lock_horizon": "bool?", "fixed": "bool?", "layer_id": "str|null?", "angle": "float?", "ratio": "float?", "copies": "int?", "mirror": "bool?", "frame_id": "str|null?", "active": "bool?", "visible": "bool?"},
     {"op": "delete_ruler", "page": "int", "id": "str? (none: every ruler on the page)"},
     {"op": "add_prim3d", "kind": "box|cylinder|stairs|floor", "steps": "int? (stairs)", "lines": "int? (floor grid)", "page": "int", "pos": "[x,y,z]?", "size": "[w,h,d] | float?", "rot": "[tip,turn,lean]?", "focal_mm": "float?", "frame_id": "str? (drawn only inside this panel)", "id": "str?"},
     {"op": "add_scene", "page": "int", "kind": "room|classroom|corridor|street", "pos": "[x,y,z]? (centre; z = depth)", "size": "[w,h,d]|number? (mm; a number scales the usual size)", "rot": "[tip,turn,lean]? radians", "focal_mm": "float? (smaller = stronger perspective; 220)", "frame_id": "str? (kept inside this panel; default the panel under pos, false for none)", "id": "str?"},
@@ -763,6 +766,43 @@ def _rgb(op: dict, episode) -> tuple[int, int, int]:
     return tuple(int(v) for v in rgb)
 
 
+def layer_pixels(page, layer):
+    """The layer's pixels as it shows (its pen lines and fills drawn in, on a copy: the layer is not changed)."""
+    from genko.raster import ensure_raster
+
+    if layer.strokes or layer.patches:
+        import copy
+
+        page, layer = copy.copy(page), copy.deepcopy(layer)
+        page.layers = [layer if item.id == layer.id else item for item in page.layers]
+        _bake_vectors(page, layer)
+    return ensure_raster(page, layer)
+
+
+def filtered_raster(page, layer, kind: str, op: dict):
+    """The layer's pixels with the filter on (only inside op["area"] when given); the layer is not changed.
+    The app's preview uses it too. Pen lines not yet baked are drawn in first, on a copy."""
+    from genko.filters import apply_filter
+
+    image = layer_pixels(page, layer)
+    params = {key: value for key, value in op.items() if key not in {"op", "page", "layer", "id", "kind", "area"}}
+    try:
+        filtered = apply_filter(image, kind, params)
+    except (ValueError, TypeError) as exc:
+        raise ApplyError(str(exc)) from exc
+    if op.get("area"):  # (選択範囲の中だけ)
+        from PIL import Image
+
+        from genko import filters, selection
+        from genko.raster import WORKING_DPI
+
+        inside, (x0, y0) = selection.area_mask(_area(op), WORKING_DPI)
+        mask = Image.new("L", image.size, 0)
+        mask.paste(inside, (x0, y0))
+        filtered = filters.within(image, filtered, mask)
+    return filtered
+
+
 def _area(op: dict) -> dict:
     area = op.get("area") or {}
     if area.get("poly"):
@@ -795,6 +835,28 @@ def _tone_numbers(layer, op: dict) -> None:
         layer.angle = float(op["angle"])
 
 
+def _tone_screen_keys(tone: dict, op: dict) -> None:
+    """網の種類 (dot_shape) and 網のずれ (offset_mm; move_by adds to it): null takes them away."""
+    if "dot_shape" in op:
+        if op["dot_shape"] in (None, "", "round"):
+            tone.pop("dot_shape", None)
+        else:
+            tone["dot_shape"] = str(op["dot_shape"])
+    if "offset_mm" in op or op.get("move_by_mm"):
+        base = op["offset_mm"] if "offset_mm" in op else tone.get("offset_mm")
+        try:
+            x, y = (float(v) for v in (base or (0, 0)))
+            if op.get("move_by_mm"):
+                ax, ay = (float(v) for v in op["move_by_mm"])
+                x, y = x + ax, y + ay
+        except (TypeError, ValueError) as exc:
+            raise ApplyError("offset_mm is [x, y] in mm") from exc
+        if x == 0 and y == 0:
+            tone.pop("offset_mm", None)
+        else:
+            tone["offset_mm"] = [round(x, 3), round(y, 3)]
+
+
 def _new_tone(episode, page, op: dict) -> Layer:
     """A tone layer from add_tone / a tone material: its look and where it goes."""
     from genko import fill as fills
@@ -807,6 +869,7 @@ def _new_tone(episode, page, op: dict) -> Layer:
             tone[key] = float(op[key]) if key == "scale_mm" else str(op[key])
     if op.get("gradient"):
         tone["gradient"] = dict(op["gradient"])
+    _tone_screen_keys(tone, op)
     try:
         tones.validate(tone)
     except ValueError as exc:
@@ -957,6 +1020,8 @@ def _carry_lines(episode, page, before: dict[str, Rect]) -> None:
                 tail["to"] = [round(v, 3) for v in carry(to, *spot)]
                 if tail.get("via"):
                     tail["via"] = [round(v, 3) for v in carry(tail["via"], *spot)]
+                if tail.get("vias"):
+                    tail["vias"] = [[round(v, 3) for v in carry(bend, *spot)] for bend in tail["vias"]]
         if line.tail:
             spot = next((p for p in moved.values() if inside(p[0], line.tail[0], line.tail[1])), None)
             if spot is not None:
@@ -1103,7 +1168,9 @@ STYLE_KEYS = {"font": str, "size_mm": float, "tracking": float, "leading": float
               "wobble": float, "double": bool, "spikes": int, "spike_depth": float,
               "scale_x": float, "gradient": dict, "text_path": "points", "features": "tags", "yakumono": bool,
               "spike_jitter": float, "bumps": int, "picture": "png", "fill_png": "png", "warp": "corners",
-              "speaker_id": str}  # (speaker_id: the character who says it, so the balloon and its tail can find them)
+              "speaker_id": str, "line_rgb": list, "fill_rgb": list, "fill_opacity": float, "text_dx_mm": float,
+              "text_dy_mm": float, "path_curve": bool, "cuts": "cuts", "ruby_scale": float, "mono_ruby": bool,
+              "below_layer": str}  # (speaker_id: the character who says it, so the balloon and its tail can find them)
 FEATURES = ("jp78", "jp83", "jp90", "jp04", "trad", "expt", "nlck", "hojo", "hwid", "fwid", "pwid", "palt", "twid", "qwid",
             "ruby", "liga", "kern", "smpl", "ital", "salt", "ss01", "ss02", "ss03", "ss04", "ss05")
 
@@ -1125,6 +1192,11 @@ def _merge_style(current: dict, change) -> dict:
                 value = [[round(float(p[0]), 4), round(float(p[1]), 4)] for p in value]
                 if len(value) != 4 or any(not -1 <= c <= 2 for p in value for c in p):
                     raise ValueError("warp is four corners [[x, y] ×4] as shares of the box (-1..2)")
+            elif kind == "cuts":
+                value = [{"points": [[round(float(p[0]), 3), round(float(p[1]), 3)] for p in c["points"]],
+                          "width_mm": round(max(0.1, min(40.0, float(c.get("width_mm", 2.0)))), 3)} for c in value]
+                if any(not c["points"] for c in value):
+                    raise ValueError("a cut needs its points")
             elif kind == "points":
                 value = [[round(float(p[0]), 3), round(float(p[1]), 3)] for p in value]
                 if len(value) < 2:
@@ -1146,8 +1218,8 @@ def _merge_style(current: dict, change) -> dict:
                 value = [int(v) for v in value][:3] if kind is list else kind(value)
         except (TypeError, ValueError, IndexError, AttributeError, OSError) as exc:
             raise ApplyError(f"style {key}: {exc}") from exc
-        if key == "align" and value not in ("top", "center", "bottom", "left", "right"):
-            raise ApplyError("align must be top, center, bottom, left or right")
+        if key == "align" and value not in ("top", "center", "bottom", "left", "right", "justify"):
+            raise ApplyError("align must be top, center, bottom, left, right or justify")
         if key == "fill" and value not in ("white", "none"):
             raise ApplyError("fill must be white or none")
         if key == "latin" and value not in ("rotate", "upright"):
@@ -1328,8 +1400,21 @@ def _screen_spec(raw) -> dict:
     lpi = float(raw.get("lpi", 60))
     if not 10 <= lpi <= 150:
         raise ApplyError("lpi must be between 10 and 150")
-    return {"pattern": pattern, "lpi": lpi, "angle": float(raw.get("angle", 45)) % 180,
+    from genko.screentone import DOT_SHAPES
+
+    shape = str(raw.get("shape") or "round")
+    if shape not in DOT_SHAPES:
+        raise ApplyError(f"screen shape must be one of {', '.join(DOT_SHAPES)}")
+    spec = {"pattern": pattern, "lpi": lpi, "angle": float(raw.get("angle", 45)) % 180,
             "black": max(0.0, min(0.9, float(raw.get("black", 0.1)))), "white": max(0.1, min(1.0, float(raw.get("white", 0.95))))}
+    if shape != "round":
+        spec["shape"] = shape
+    if raw.get("offset_mm"):
+        try:
+            spec["offset_mm"] = [float(v) for v in raw["offset_mm"]][:2]
+        except (TypeError, ValueError) as exc:
+            raise ApplyError("offset_mm is [x, y] in mm") from exc
+    return spec
 
 
 def _effect_spec(raw) -> dict:
@@ -1364,7 +1449,9 @@ def _style_runs(raw) -> list:
                     raise ApplyError("scale must be between 0.3 and 3")
                 style["scale"] = value
             elif key == "bold":
-                style["bold"] = bool(value)
+                style["bold"] = 2 if value == 2 else bool(value)  # (2: 極太)
+            elif key == "tcy":
+                style["tcy"] = bool(value)
             elif key == "weight":
                 if value not in ("normal", "bold", "heavy"):
                     raise ApplyError("weight must be normal, bold or heavy")
@@ -1372,7 +1459,7 @@ def _style_runs(raw) -> list:
             elif key == "rgb":
                 style["rgb"] = [int(v) for v in value][:3]
             else:
-                raise ApplyError(f"unknown style_runs key {key} (scale, bold, weight, rgb)")
+                raise ApplyError(f"unknown style_runs key {key} (scale, bold, weight, rgb, tcy)")
         out.append([str(item[0]), style])
     return out
 
@@ -1413,6 +1500,9 @@ def _parse_tails(raw) -> list[dict]:
         tail = {"to": [float(to[0]), float(to[1])]}
         if item.get("via"):
             tail["via"] = [float(item["via"][0]), float(item["via"][1])]
+        if item.get("vias"):  # 折れ線のしっぽ: it bends at each of these
+            tail["vias"] = [[float(v[0]), float(v[1])] for v in item["vias"]]
+            tail.pop("via", None)
         if item.get("width_mm"):
             tail["width_mm"] = float(item["width_mm"])
         if item.get("kind") and item["kind"] != "wedge":
@@ -1874,6 +1964,16 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             if op["wrap"] not in ("vertical", "horizontal"):
                 raise ApplyError("wrap must be vertical or horizontal")
             line.wrap = str(op["wrap"])
+        return
+
+    if name == "cut_balloon":  # フキダシ消しゴム: part of the balloon taken away where the eraser went
+        line = _find_line(episode, str(op.get("id") or ""))
+        points = _parse_points(op.get("points") or [])
+        if not points:
+            raise ApplyError("points: where the eraser went over the balloon")
+        cut = {"points": [[round(p[0] - line.x_mm, 3), round(p[1] - line.y_mm, 3)] for p in points],
+               "width_mm": round(max(0.1, min(40.0, float(op.get("width_mm", 2.0)))), 3)}
+        line.style = _merge_style(line.style or {}, {"cuts": [*((line.style or {}).get("cuts") or []), cut]})
         return
 
     if name == "move_line":
@@ -2635,6 +2735,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                     tone[key] = float(op[key]) if key == "scale_mm" else str(op[key])
         if "gradient" in op:
             tone["gradient"] = dict(op["gradient"]) if op["gradient"] else None
+        _tone_screen_keys(tone, op)
         try:
             tones.validate(tone)
         except ValueError as exc:
@@ -2767,6 +2868,11 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             ruler["axis"] = str(op["axis"])
         if op.get("copies") is not None:
             ruler["copies"] = int(op["copies"])
+        if "grid" in op:  # (perspective: パースのグリッド, how many lines; 0 or null: none)
+            if op["grid"]:
+                ruler["grid"] = int(op["grid"])
+            else:
+                ruler.pop("grid", None)
         for key in ("mirror", "active", "visible", "lock_horizon", "fixed"):
             if key in op:
                 ruler[key] = bool(op[key])
@@ -2810,6 +2916,34 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             page.rulers.append(ruler)
         else:
             page.rulers = [ruler if r.get("id") == ruler["id"] else r for r in page.rulers]
+        return
+
+    if name in ("ruler_from_3d", "camera_from_ruler"):  # 3D カメラとパース定規の連動
+        from genko import persp3d
+
+        page = _require_page(episode, op)
+        prims = [p for p in page.prims if p.get("kind") != "mannequin"]
+        prim = next((p for p in prims if p.get("id") == op.get("prim_id")), None) if op.get("prim_id") else (prims[0] if prims else None)
+        if prim is None:
+            raise ApplyError("no 3D on this page to match (prim_id)" if not op.get("prim_id") else f"no 3D {op['prim_id']}")
+        camera = (page.extra or {}).get("camera")
+        if name == "ruler_from_3d":
+            made = persp3d.ruler_from(prim, camera)
+            if made is None:
+                raise ApplyError("the 3D is seen straight on: its lines stay parallel (no vanishing point)")
+            ruler_id = str(op.get("id") or new_id())
+            if any(r.get("id") == ruler_id for r in page.rulers):
+                raise ApplyError(f"ruler {ruler_id} already exists")
+            page.rulers.append({"id": ruler_id, **made, "active": True, "visible": True,
+                                **({"grid": int(op["grid"])} if op.get("grid") else {})})
+            return
+        ruler = _ruler(page, op.get("id"))
+        if ruler.get("kind") != "perspective":
+            raise ApplyError("the camera follows a perspective ruler")
+        try:
+            page.extra["camera"] = persp3d.camera_for(ruler, prim, camera or {"target": [page.spec.width_mm / 2, page.spec.height_mm / 2]})
+        except ValueError as exc:
+            raise ApplyError(str(exc)) from exc
         return
 
     if name == "ruler_to_layer":  # 定規ペン: the ruler itself drawn as pen lines on a layer
@@ -3278,21 +3412,13 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         return
 
     if name == "filter_raster":
-        from genko.filters import apply_filter
-        from genko.raster import ensure_raster, save_raster
+        from genko.raster import save_raster
 
         page = _require_page(episode, op)
         layer = _resolve_layer(page, op)
-        kind = str(op.get("kind") or "")
         if layer.strokes or layer.patches:  # (pen lines and shape fills become pixels, so the filter reaches them)
             _bake_vectors(page, layer)
-        image = ensure_raster(page, layer)
-        params = {key: value for key, value in op.items() if key not in {"op", "page", "layer", "id", "kind"}}
-        try:
-            filtered = apply_filter(image, kind, params)
-        except ValueError as exc:
-            raise ApplyError(str(exc)) from exc
-        save_raster(page, layer, filtered)
+        save_raster(page, layer, filtered_raster(page, layer, str(op.get("kind") or ""), op))
         layer.kind = LayerKind.RASTER
         return
 
@@ -3471,7 +3597,7 @@ def remap_page_refs(episode: Episode, mapping: dict[int, int | None]) -> None:
 
 LEGACY_ACTOR = "genko"  # what callers get when they do not name themselves; treated as a person
 GATE_OPS = frozenset({"name_ok"})
-LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path"})
+LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path", "cut_balloon"})
 
 
 def _studio_ops() -> frozenset[str]:
@@ -3729,7 +3855,7 @@ PAGE_LOCAL_OPS = frozenset({
     "reshape_stroke", "delete_stroke", "put_raster", "set_layer", "gradient_fill", "duplicate_layer",
     "merge_down", "set_layer_mask", "paint_mask", "set_note", "select_frame", "flood_fill",
     "add_tone", "set_tone", "delete_tone", "add_effect", "edit_effect", "delete_effect", "effect_to_layer",
-    "edit_stroke", "simplify_stroke", "set_ruler", "add_ruler", "edit_ruler", "delete_ruler",
+    "edit_stroke", "simplify_stroke", "set_ruler", "add_ruler", "edit_ruler", "delete_ruler", "ruler_from_3d", "camera_from_ruler",
     "add_prim3d", "add_scene", "edit_prim", "delete_prim", "trace_prims", "lt_convert", "erase_raster", "erase",
     "reorder_layers", "stamp_material", "add_mannequin", "pose_mannequin", "set_onion", "step_onion",
     "set_lt", "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area", "smudge", "vector_edit", "trace_edit", "fill_gaps",
@@ -3737,7 +3863,7 @@ PAGE_LOCAL_OPS = frozenset({
     "add_figure", "pose_figure", "add_head", "add_hand", "import_model", "set_camera", "set_light", "render_prims",
 })
 # Ops that find a line by id; the line lives in the story (always copied) or in one page's texts.
-LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path"})
+LINE_OPS = frozenset({"edit_line", "move_line", "delete_line", "set_balloon_path", "cut_balloon"})
 BOOK_OPS = frozenset({"set_brush", "define_brush", "set_autosave", "add_ticket", "set_ticket", "reorder_lines"})
 
 

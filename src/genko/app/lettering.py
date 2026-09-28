@@ -103,13 +103,31 @@ def parse_styles(typed: str) -> tuple[str, list]:
 
     styles: list = []
 
+    def tag_style(tag: str) -> dict | None:
+        """A named mark, a colour (#rrggbb) or a size (×1.5: this many times the line's)."""
+        if tag in STYLE_TAGS:
+            return STYLE_TAGS[tag]
+        colour = _re.fullmatch(r"[#＃]([0-9a-fA-F]{6})", tag)
+        if colour:
+            h = colour.group(1)
+            return {"rgb": [int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)]}
+        size = _re.fullmatch(r"[x×Ｘｘ]([0-9.]+)", tag)
+        if size:
+            try:
+                value = float(size.group(1))
+            except ValueError:
+                return None
+            return {"scale": value} if 0.3 <= value <= 3 else None
+        return None
+
     def take(match) -> str:
         tags = [t.strip() for t in _re.split(r"[、,，・ ]+", match.group(1)) if t.strip()]
-        if not tags or any(t not in STYLE_TAGS for t in tags):
+        found = [tag_style(t) for t in tags]
+        if not tags or any(f is None for f in found):
             return match.group(0)
         style: dict = {}
-        for tag in tags:
-            style.update(STYLE_TAGS[tag])
+        for part in found:
+            style.update(part)
         styles.append([match.group(2), style])
         return match.group(2)
 
@@ -147,10 +165,15 @@ def with_marks(line) -> str:
         pos = at + len(base) + 4
     pos = 0
     for words, style in getattr(line, "style_runs", None) or []:
-        tags = []
+        tags, covered = [], set()
         for tag, value in STYLE_TAGS.items():
-            if all(style.get(k) == v for k, v in value.items()):
+            if all(style.get(k) == v for k, v in value.items()) and not (set(value) & covered):
                 tags.append(tag)
+                covered |= set(value)
+        if style.get("rgb") and "rgb" not in covered:
+            tags.append("#" + "".join(f"{int(v):02x}" for v in style["rgb"][:3]))
+        if style.get("scale") and "scale" not in covered:
+            tags.append(f"×{float(style['scale']):g}")
         at = text.find(words, pos)
         if at < 0 or not tags:
             continue

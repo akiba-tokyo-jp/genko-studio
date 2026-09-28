@@ -139,6 +139,10 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   `ignore: ["draft", "text"]`（下描き・台詞を壁にしない）。`fill_enclosed`（`poly`）は囲んだ中の線で閉じた所だけを塗る。
 - `add_stroke` の `snap_lines_mm`: 線の端が、その距離までの近い線にくっつく（形を閉じる・線をつなぐ）。
   `erase` の `texture`（soft / rough）と `snap_ruler`（定規に沿って消す）。
+- フキダシ: style の `line_rgb`・`fill_rgb`・`fill_opacity`（線と中の色）、`text_dx_mm`・`text_dy_mm`（文字だけずらす）。
+  しっぽの `vias`（折れ線の角）、`width_mm`。`cut_balloon`（`points`、`width_mm`）でフキダシの一部を削る。
+- 写植: 台詞の書き方 `{#3060c0|…}`（色）・`{×1.3|…}`（大きさ）・`{縦中横|12}`。style の `align: "justify"`（均等）、
+  `ruby_scale`・`mono_ruby`、`below_layer`（そのレイヤーの下に描く）。
 - 描いた線の直し: `trace_edit`（`action` widen / narrow / redraw / redraw_width / join / simplify、`points` はなぞった線）。
   1 点の太さは `vector_edit`（`action: set_pressure`、`index`、`pressure`）。
 - ペン入れと新しいペン・ペイントのレイヤーの線は、描き始めたコマの中だけに出る（`panel_each`）。
@@ -159,14 +163,14 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 見る: `mcp__genko__render` の `mode: print` は印刷と同じ見え方、`layer_id` はそのレイヤーだけ。
 - レイヤー: `add_layer`・`duplicate_layer`・`merge_down`（ペン同士は線のまま）・`delete_layer`・`set_layer`（`exportable: false` で下描き＝書き出さない、`color` で画面だけの表示色、`reference: true` で参照レイヤー）。
   マスクは `set_layer_mask`（`area` の所だけ見せる・`fill`・`invert`・`enabled`・`delete`）と `paint_mask`（`show: true` で見せる、`false` で隠す）。
-- 線と塗り: `add_stroke`（`kind` はブラシ。自作のブラシは `define_brush` で定義してから。コマの外に描いた線はコマの形で切られて見えない。そのときは返事の `results` に `outside_panels` が出る）、`erase`、`fill`・`fill_area`（`fill` の `reference: "reference"` は参照レイヤーの線だけを見て塗る）、`gradient_fill`（`from`・`to`・色・不透明度、`shape: radial` で円）、`filter_raster`（`levels`・`curve`・`hue`・`blur`…）。
+- 線と塗り: `add_stroke`（`kind` はブラシ。自作のブラシは `define_brush` で定義してから。コマの外に描いた線はコマの形で切られて見えない。そのときは返事の `results` に `outside_panels` が出る）、`erase`、`fill`・`fill_area`（`fill` の `reference: "reference"` は参照レイヤーの線だけを見て塗る）、`gradient_fill`（`from`・`to`・色・不透明度、`shape: radial` で円）、`filter_raster`（`levels`・`curve`・`hue`・`blur`…。`area` を渡すとその範囲の中だけ。`levels` は `gamma`（中間）・`out_black`・`out_white`・`channel`、`curve` は `points: [[元, 後], …]`（0〜255）、`brightness_contrast`、ゴミ取りは `despeckle`（`size_mm`・`what: ink|holes|both`）、`sharpen` は `amount`）。
 - ブラシ: 入っているものは `inspect` の `brushes`（G ペン・筆・スプレー・点描・点線・破線・レース・草むら・木の葉・ハート・星・カリグラフィ・水彩など）。`define_brush` で `tip`（`round`・`flat`・`image`＋`tip_png`）・`pattern`・`spacing`・`scatter`・`stamp_size`・`size_jitter`・`turn_jitter`・`count`・`speed`・`post_smooth`・`aa` も決められる。色を混ぜる・ぼかすのは `smudge`（`mode`: `blur`・`smudge`・`blend`）。線を丸ごと消すのは `erase` の `mode: "whole"`。
 - 線の編集: `vector_edit`（`action`: `move_point`・`add_point`・`delete_point`・`connect`・`cut`・`recolor`・`delete`。線の id は `inspect` の `snapshot` か `render`）。塗り残しは `fill_gaps`。
 - レイヤー: `add_layer` の `kind` に `fill`（ベタ塗り・`rgb`）・`gradient`（`gradient`）・`adjust`（色調補正・`adjust: {kind, …}`、下の絵の色を変える。あとから `set_layer` で直せる）。`set_layer` の `effect`（`border` フチ・`water_edge` 水彩境界）と `color_prints`（表示色を印刷にも）。合成モードは比較（暗・明）・焼き込み・覆い焼き・ソフトライト・差の絶対値・色相・輝度なども。まとめて: `merge_layers`・`merge_visible`（`copy`）・`group_layers`・`move_layers`・`set_layers`・`convert_layer`（`to`: `paint`・`pen`）。用紙の色は `set_paper`。
-- 変形: `liquify`（`mode`: `push`・`pinch`・`bloat`・`twirl_cw`・`twirl_ccw`）、`transform_area` の `interp`（`nearest` でドットをぼかさない）。フィルターは移動・放射・ズームぼかし、ノイズ、波形、渦巻き、線画抽出、反転、階調化、しきい値、グラデーションマップも。
+- 変形: `liquify`（`mode`: `push`・`pinch`・`bloat`・`twirl_cw`・`twirl_ccw`）、`transform_area` の `interp`（`nearest` でドットをぼかさない）と、`warp.mesh` の格子の数 `grid: [横の点, 縦の点]`（2〜9。省くと 3×3）。フィルターは移動・放射・ズームぼかし、ノイズ、波形、渦巻き、線画抽出、反転、階調化、しきい値、グラデーションマップも。
 - コマ: `set_frame` の `curves`・`bow`（辺を曲げる）と `line`（枠線: `solid`・`double`・`dashed`・`dotted`・`rough`、`rgb`）。
 - 文字の `style`: `scale_x`（長体・平体）・`gradient`・`fill_png`（画像で塗る）・`warp`（4 隅で遠近・ゆがみ）・`text_path`（パスに沿わせる）・`features`（字形）・`yakumono`（約物の詰め）。異体字はテキストに異体字セレクタを入れる。フキダシは `picture`（画像のフキダシ）、`spike_jitter`・`bumps`、しっぽの `kind`（`zigzag`・`fade`・`bubbles`）。
-- 効果線: 流線の `path`・`spread_mm`、集中線の `inner_path`・`twist`。トーン: 柄（`check`・`brick`・`wave`・`grid`・`hatch`・`star`・`sand`・`image`）、レイヤーのトーン化は `set_layer` の `screen`、点検の `tone_moire`。
+- 効果線: 流線の `path`・`spread_mm`、集中線の `inner_path`・`twist`。トーン: 柄（`check`・`brick`・`wave`・`grid`・`hatch`・`star`・`sand`・`image`）、レイヤーのトーン化は `set_layer` の `screen`（`shape`・`offset_mm` も）、点検の `tone_moire`。網の形は `add_tone`・`set_tone` の `dot_shape`（`round`・`square`・`diamond`・`ellipse`）、網をずらすのは `offset_mm: [右, 下]`（`move_by_mm` で足す）。2 値で書き出すとき、トーン化していないグレーを網点にするのは `export` の `screen: {lpi, shape}`。
 - 定規: `parallel_curve`・`multi_curve`・`radial_curve`、`layer_id`（レイヤー専用）、パースの `lock_horizon`・`horizon_y`・`fixed`、定規ペンは `ruler_to_layer`。描き文字の素材は `stamp_material`（kind `lettering`）。
 - 素材: `inspect` の `materials` に種類（トーン・効果線・画像・パーツ〔漫符・小物・背景の線画〕・描き文字・ブラシ・3D）とタグ。`stamp_material` でパーツは `layer_id` の `x_mm`・`y_mm` に、描き文字は台詞として、ブラシは原稿に加わり（`add_stroke` の `kind` に使える）、3D は置いた所に。
 - 3D: 体型と関節のある人形は `add_figure`（`body`: `heads` 等身・`shoulders`・`hips`・`build`・`legs`、`preset`、`hands`）と `pose_figure`（`joints` の x・y・z、`drag`）。頭部 `add_head`、手 `add_hand`（`pose`）、OBJ は `import_model`。ページのカメラ `set_camera`、光 `set_light`。線と陰の面にするのは `render_prims`（`surfaces` は既定で true＝陰を灰色で入れる。線だけなら `lines: true, surfaces: false`。`tone` で面を網点に）。
@@ -176,7 +180,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - アニメーション: `set_animation`（`fps`・`frames`・`loop`）でページを短いアニメーションに。`add_anim_folder` がタイムラインの 1 行、`add_cel`（`folder`・`at`）がセル（描くのは `add_stroke` の `layer_id` にセルの id）。どのフレームにどのセルを出すかは `set_exposure`（`frame`・`cel`、null で空）か `set_exposures`（全部）。カメラワークは `set_camera_key`（`rect`）、いつも薄く見るセルは `set_light_table`。書き出しは `export` の `format: "animation"`（`pages` に 1 ページ、`movie`: gif・webp・png・mp4・frames）。
 - ファイル: PSD／PSB をレイヤーのまま読み込むのは `import_psd`（`path` は原稿のフォルダからの相対パスか --root の中、`fit`: `paper`・`bleed`・`trim`。フォルダー・マスク・不透明度・合成モード・クリッピング・表示もそのまま）。制作過程の記録は `set_timelapse`（`on`）。
 - 図形: `add_shape`（`shape`: `line`・`polyline`・`curve`・`rect`・`ellipse`・`polygon`、`line`・`fill` で線と塗り）。
-- 範囲（`area`）: どの op の `area` にも、`poly`・`mask` のほかに `rect`・`ellipse`・`layer`（そのレイヤーの描いてある所）・`color`（その色の所）・`all`・`saved`（`store_area` で残した範囲）と、`union`・`intersect`・`subtract` の組み合わせ、`invert`・`grow_mm`（負で縮める）・`feather_mm` が使える。ガイド線は `add_ruler` の `kind: "guide"`（`axis`・`at`）。
+- 範囲（`area`）: どの op の `area` にも、`poly`・`mask` のほかに `rect`・`ellipse`・`layer`（そのレイヤーの描いてある所）・`color`（その色の所）・`all`・`saved`（`store_area` で残した範囲）と、`union`・`intersect`・`subtract` の組み合わせ、`invert`・`grow_mm`（負で縮める）・`feather_mm` が使える。ガイド線は `add_ruler` の `kind: "guide"`（`axis`・`at`）。図形定規は `kind: "rect"`・`"ellipse"`（`points` は対角の 2 点、`angle`）・`"polygon"`（角 3 つ以上）。パース定規の地面のグリッドは `grid`（線の数）。背景の 3D に合わせてパース定規を置くのは `ruler_from_3d`、逆にパース定規にカメラを合わせるのは `camera_from_ruler`。
 - 範囲の変形: `transform_area` の `matrix`（移動・拡大・回転・反転）か `warp`（`perspective` で 4 隅、`mesh` で 3×3 の点）。レイヤーを丸ごと動かすのは、ページ全体を `area` にした `matrix`。
 - 台詞: `add_line`・`edit_line` の
   - `ruby_runs`（ルビ）、`emphasis_runs`（傍点）、`style_runs`（一部を大きく・小さく・太く・色を変える: `[["本当", {"scale": 1.4, "weight": "heavy"}]]`）。

@@ -11,9 +11,154 @@ import random
 from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps
 
 KINDS = ("blur", "sharpen", "hue", "levels", "curve", "mosaic", "bitonal", "motion_blur", "radial_blur", "zoom_blur", "noise",
-         "wave", "twirl", "lineart", "invert", "posterize", "threshold", "gradient_map")
+         "wave", "twirl", "lineart", "invert", "posterize", "threshold", "gradient_map", "brightness_contrast", "despeckle")
 # the ones a correction layer (調整レイヤー) can hold: they change colours, not shapes
-ADJUSTMENTS = ("levels", "curve", "hue", "invert", "posterize", "threshold", "gradient_map", "bitonal")
+ADJUSTMENTS = ("levels", "curve", "hue", "invert", "posterize", "threshold", "gradient_map", "bitonal", "brightness_contrast")
+CHANNELS = ("rgb", "r", "g", "b")
+
+
+def _by_channel(rgba: Image.Image, table: list[int], channel: str) -> Image.Image:
+    """A 256-entry table through all three colours, or one of them (channel r, g or b)."""
+    channel = channel if channel in CHANNELS else "rgb"
+    if channel == "rgb":
+        return _keep_alpha(rgba.convert("RGB").point(table * 3), rgba)
+    identity = list(range(256))
+    tables = [table if name == channel else identity for name in ("r", "g", "b")]
+    return _keep_alpha(rgba.convert("RGB").point(tables[0] + tables[1] + tables[2]), rgba)
+
+
+def curve_table(points) -> list[int]:
+    """トーンカーブ: a smooth curve through the points ([[in, out], …], 0..255) that never turns back
+    (monotone cubic, Fritsch–Carlson); the ends run flat beyond the first and last point."""
+    pts = sorted({int(round(float(x))): float(y) for x, y in points}.items())
+    if len(pts) < 2:
+        raise ValueError("a tone curve needs two points or more")
+    xs = [float(x) for x, _ in pts]
+    ys = [max(0.0, min(255.0, y)) for _, y in pts]
+    n = len(xs)
+    d = [(ys[k + 1] - ys[k]) / max(1e-9, xs[k + 1] - xs[k]) for k in range(n - 1)]
+    m = [d[0]] + [0.0 if d[k - 1] * d[k] <= 0 else (d[k - 1] + d[k]) / 2 for k in range(1, n - 1)] + [d[-1]]
+    for k in range(n - 1):
+        if d[k] == 0:
+            m[k] = m[k + 1] = 0.0
+            continue
+        a, b = m[k] / d[k], m[k + 1] / d[k]
+        if a * a + b * b > 9:
+            t = 3 / math.sqrt(a * a + b * b)
+            m[k], m[k + 1] = t * a * d[k], t * b * d[k]
+    table = []
+    for i in range(256):
+        if i <= xs[0]:
+            table.append(round(ys[0]))
+            continue
+        if i >= xs[-1]:
+            table.append(round(ys[-1]))
+            continue
+        k = next(j for j in range(n - 1) if xs[j] <= i <= xs[j + 1])
+        h = xs[k + 1] - xs[k]
+        t = (i - xs[k]) / h
+        h00, h10, h01, h11 = 2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2
+        value = h00 * ys[k] + h10 * h * m[k] + h01 * ys[k + 1] + h11 * h * m[k + 1]
+        table.append(max(0, min(255, round(value))))
+    return table
+
+
+def levels_table(black: float = 0, white: float = 255, gamma: float = 1.0, out_black: float = 0, out_white: float = 255) -> list[int]:
+    """レベル補正: input black and white points, the middle (gamma: > 1 lightens the middle greys, as CLIP's
+    middle slider moved left) and the output range."""
+    black, white = float(black), max(float(black) + 1, float(white))
+    gamma = max(0.1, min(9.99, float(gamma)))
+    table = []
+    for p in range(256):
+        t = min(1.0, max(0.0, (p - black) / (white - black)))
+        t = t ** (1 / gamma)
+        table.append(max(0, min(255, round(float(out_black) + t * (float(out_white) - float(out_black))))))
+    return table
+
+
+def brightness_contrast_table(brightness: float = 0, contrast: float = 0) -> list[int]:
+    """明るさ・コントラスト (each -100..100): brightness moves every value, contrast pulls them from or toward
+    the middle grey."""
+    b = max(-100.0, min(100.0, float(brightness))) * 1.275
+    c = max(-100.0, min(100.0, float(contrast)))
+    k = 1 + c / 100 if c <= 0 else 1 / max(0.01, 1 - c / 100 * 0.99)
+    return [max(0, min(255, round((p - 127.5) * k + 127.5 + b))) for p in range(256)]
+
+
+def _components(mask):
+    """Connected parts (8-neighbour) of a bool array as runs: (runs [(y, x0, x1)], label per run, size per label).
+    Rows are cut into runs and runs that touch across rows are joined, so a page of lines is quick."""
+    import numpy as np
+
+    runs: list[tuple[int, int, int]] = []
+    parent: list[int] = []
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    previous: list[int] = []
+    for y in range(mask.shape[0]):
+        row = mask[y]
+        if not row.any():
+            previous = []
+            continue
+        edges = np.diff(np.concatenate(([0], row.view(np.uint8), [0])).astype(np.int8))
+        starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
+        current = []
+        j = 0
+        for x0, x1 in zip(starts.tolist(), ends.tolist()):
+            index = len(runs)
+            runs.append((y, x0, x1))
+            parent.append(index)
+            current.append(index)
+            while j < len(previous) and runs[previous[j]][2] < x0:  # (ends before this run's reach)
+                j += 1
+            k = j
+            while k < len(previous) and runs[previous[k]][1] <= x1:  # (8-neighbour: touching at a corner counts)
+                a, b = find(index), find(previous[k])
+                if a != b:
+                    parent[a] = b
+                k += 1
+        previous = current
+    labels = [find(i) for i in range(len(runs))]
+    sizes: dict[int, int] = {}
+    for (y, x0, x1), label in zip(runs, labels):
+        sizes[label] = sizes.get(label, 0) + x1 - x0
+    return runs, labels, sizes
+
+
+def despeckle(rgba: Image.Image, size_px: float, what: str = "ink") -> Image.Image:
+    """ゴミ取り: specks (ink smaller than size_px across) taken away, or (what="holes") small holes in the ink
+    filled; what="both" does both. On a see-through layer the specks become transparent, on a scan (paper
+    everywhere) they become paper."""
+    import numpy as np
+
+    arr = np.array(rgba.convert("RGBA"))
+    alpha = arr[..., 3]
+    lum = arr[..., :3].astype(np.float32) @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    ink = (alpha >= 128) & (lum < 128)
+    limit = max(1.0, float(size_px)) ** 2
+    opaque = float((alpha > 250).mean()) > 0.9
+    for part in (("ink", "holes") if what == "both" else (what,)):
+        target = ink if part == "ink" else ~ink
+        runs, labels, sizes = _components(target)
+        for (y, x0, x1), label in zip(runs, labels):
+            if sizes[label] >= limit:
+                continue
+            if part == "ink":
+                arr[y, x0:x1] = (255, 255, 255, 255) if opaque else (0, 0, 0, 0)
+            else:
+                arr[y, x0:x1] = (0, 0, 0, 255)
+        ink = (arr[..., 3] >= 128) & ((arr[..., :3].astype(np.float32) @ np.array([0.299, 0.587, 0.114], dtype=np.float32)) < 128)
+    return Image.fromarray(arr, "RGBA")
+
+
+def within(original: Image.Image, filtered: Image.Image, mask: Image.Image) -> Image.Image:
+    """The filter only inside the selection: `mask` (L, the layer's size) chooses the filtered pixels."""
+    return Image.composite(filtered.convert("RGBA"), original.convert("RGBA"), mask.convert("L").resize(original.size))
 
 
 def _keep_alpha(rgb: Image.Image, source: Image.Image) -> Image.Image:
@@ -60,6 +205,11 @@ def apply_filter(image: Image.Image, kind: str, params: dict | None = None) -> I
         radius = float(params.get("radius", 2))
         return rgba.filter(ImageFilter.GaussianBlur(radius=radius))
     if kind == "sharpen":
+        if params.get("amount") is not None:  # (シャープの強さ: 1 is the usual, 2 the strong one)
+            amount = max(0.1, min(5.0, float(params["amount"])))
+            rgb = rgba.convert("RGB").filter(ImageFilter.UnsharpMask(radius=max(0.5, float(params.get("radius", 2))),
+                                                                      percent=round(120 * amount), threshold=2))
+            return _keep_alpha(rgb, rgba)
         rgb = rgba.convert("RGB").point(lambda p: min(255, p + 12))
         rgb = ImageEnhance.Contrast(rgb).enhance(1.3)
         rgb = rgb.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
@@ -78,6 +228,22 @@ def apply_filter(image: Image.Image, kind: str, params: dict | None = None) -> I
         out = rgb.convert("RGBA")
         out.putalpha(rgba.split()[3])
         return out
+    if kind == "brightness_contrast":
+        table = brightness_contrast_table(params.get("brightness", 0), params.get("contrast", 0))
+        return _by_channel(rgba, table, str(params.get("channel") or "rgb"))
+    if kind == "despeckle":
+        dpi = float(params.get("dpi", 200))
+        size = float(params["size_px"]) if params.get("size_px") is not None else float(params.get("size_mm", 0.3)) / 25.4 * dpi
+        what = str(params.get("what") or "ink")
+        if what not in ("ink", "holes", "both"):
+            raise ValueError("despeckle what must be ink, holes or both")
+        return despeckle(rgba, size, what)
+    if kind == "levels" and any(params.get(k) is not None for k in ("gamma", "out_black", "out_white", "channel")):
+        table = levels_table(params.get("black", 0), params.get("white", 255), params.get("gamma", 1.0),
+                             params.get("out_black", 0), params.get("out_white", 255))
+        return _by_channel(rgba, table, str(params.get("channel") or "rgb"))
+    if kind == "curve" and params.get("points"):
+        return _by_channel(rgba, curve_table(params["points"]), str(params.get("channel") or "rgb"))
     if kind == "levels":
         black = int(params.get("black", 0))
         white = int(params.get("white", 255))

@@ -3,7 +3,8 @@ bend it (メッシュ). Pen lines move point by point (long segments are split f
 area); fills and pixels are redrawn through the same mapping, piece by piece.
 
 A warp is {"perspective": [[x, y] × 4]} — where the top-left, top-right, bottom-right and bottom-left of
-the area's box go — or {"mesh": [[x, y] × 9]} — where the 3×3 grid over the box goes, row by row (mm).
+the area's box go — or {"mesh": [[x, y] × 9]} — where the 3×3 grid over the box goes, row by row (mm); another grid size
+({"mesh": [...], "grid": [across, down]}, 2 to 9 points each way) for finer bending (メッシュ変形の格子数).
 """
 
 from __future__ import annotations
@@ -30,6 +31,17 @@ def _homography(src: list, dst: list) -> np.ndarray:
     return h / h[2, 2]
 
 
+def mesh_size(count: int, grid=None) -> tuple[int, int]:
+    """(points across, points down) of a mesh of `count` points: `grid` [across, down] when given, else square."""
+    if grid:
+        nx, ny = int(grid[0]), int(grid[1])
+    else:
+        nx = ny = round(count ** 0.5)
+    if nx < 2 or ny < 2 or nx > 9 or ny > 9 or nx * ny != count:
+        raise WarpError("mesh takes a grid of points row by row: 3×3 (nine) unless grid [across, down] says otherwise (2 to 9 each)")
+    return nx, ny
+
+
 def mapping(box: tuple[float, float, float, float], warp: dict):
     """The warp as a function (x, y) mm → (x', y') mm over the area's box (x, y, w, h)."""
     x0, y0, w, h = box
@@ -54,21 +66,21 @@ def mapping(box: tuple[float, float, float, float], warp: dict):
         return go
     if warp.get("mesh"):
         grid = [(float(p[0]), float(p[1])) for p in warp["mesh"]]
-        if len(grid) != 9:
-            raise WarpError("mesh takes nine points, a 3×3 grid row by row")
+        nx, ny = mesh_size(len(grid), warp.get("grid"))
+        cols, rows = nx - 1, ny - 1
 
         def go(x: float, y: float) -> tuple[float, float]:
-            fx = min(2.0, max(0.0, (x - x0) / w * 2))
-            fy = min(2.0, max(0.0, (y - y0) / h * 2))
-            cx, cy = min(1, int(fx)), min(1, int(fy))
+            fx = min(float(cols), max(0.0, (x - x0) / w * cols))
+            fy = min(float(rows), max(0.0, (y - y0) / h * rows))
+            cx, cy = min(cols - 1, int(fx)), min(rows - 1, int(fy))
             tx, ty = fx - cx, fy - cy
-            p00, p10 = grid[cy * 3 + cx], grid[cy * 3 + cx + 1]
-            p01, p11 = grid[(cy + 1) * 3 + cx], grid[(cy + 1) * 3 + cx + 1]
+            p00, p10 = grid[cy * nx + cx], grid[cy * nx + cx + 1]
+            p01, p11 = grid[(cy + 1) * nx + cx], grid[(cy + 1) * nx + cx + 1]
             u = (1 - tx) * (1 - ty) * p00[0] + tx * (1 - ty) * p10[0] + (1 - tx) * ty * p01[0] + tx * ty * p11[0]
             v = (1 - tx) * (1 - ty) * p00[1] + tx * (1 - ty) * p10[1] + (1 - tx) * ty * p01[1] + tx * ty * p11[1]
             # beyond the box (a line that reaches out of it) the edge's pull carries on
-            u += (x - x0 - fx * w / 2) if fx in (0.0, 2.0) else 0.0
-            v += (y - y0 - fy * h / 2) if fy in (0.0, 2.0) else 0.0
+            u += (x - x0 - fx * w / cols) if fx in (0.0, float(cols)) else 0.0
+            v += (y - y0 - fy * h / rows) if fy in (0.0, float(rows)) else 0.0
             return u, v
 
         return go

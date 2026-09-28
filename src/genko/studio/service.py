@@ -37,7 +37,7 @@ RULES_PATH = Path(__file__).with_name("guide") / "manga_rules.md"
 # rasters from local paths and structural page changes are not on the list.
 AGENT_OPS = frozenset({
     "split_frame", "merge_frame", "resize_frame", "set_frame", "cut_frame", "move_gutter", "add_frame", "delete_frame",
-    "add_line", "edit_line", "delete_line", "move_line", "set_balloon_path", "reorder_lines",
+    "add_line", "edit_line", "delete_line", "move_line", "set_balloon_path", "cut_balloon", "reorder_lines",
     "add_stroke", "delete_stroke", "edit_stroke", "simplify_stroke", "erase",
     "fill", "fill_area", "fill_enclosed", "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
     "add_layer", "set_layer", "reorder_layers",
@@ -46,7 +46,7 @@ AGENT_OPS = frozenset({
     "add_figure", "pose_figure", "add_head", "add_hand", "import_model", "set_camera", "set_light", "render_prims",
     "add_cover", "replace_text", "for_pages", "set_assignee", "import_psd", "set_timelapse", "set_animation", "add_anim_folder", "add_cel", "set_exposure", "set_exposures",
     "set_camera_key", "set_light_table",
-    "add_ruler", "edit_ruler", "delete_ruler", "edit_prim", "delete_prim", "trace_prims",
+    "add_ruler", "edit_ruler", "delete_ruler", "ruler_from_3d", "camera_from_ruler", "edit_prim", "delete_prim", "trace_prims",
     "add_tone", "delete_tone", "add_effect", "stamp_material",
     "set_tone", "edit_effect", "delete_effect", "effect_to_layer",
     "set_nombre",
@@ -798,9 +798,13 @@ class StudioService:
     def export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
-               seconds: float | None = None, movie: str = "webp", background: bool = False, dots: bool = False) -> ToolResult:
-        """background: run as a job (the reply within a little while, else a job id for export_status)."""
-        args = (project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc, fps, seconds, movie, dots)
+               seconds: float | None = None, movie: str = "webp", background: bool = False, dots: bool = False,
+               screen: dict | None = None) -> ToolResult:
+        """background: run as a job (the reply within a little while, else a job id for export_status).
+        screen ({lpi, angle, shape: round|square|diamond|ellipse}): with color bitonal (or png1), the greys are
+        printed as dots at that screen (書き出しでのトーン化) instead of going black or white."""
+        args = (project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc, fps, seconds, movie, dots,
+                screen)
         if background:
             return self._job(project, "export", lambda: self._export(*args))
         return self._export(*args)
@@ -827,7 +831,7 @@ class StudioService:
     def _export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                 area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                 spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
-                seconds: float | None = None, movie: str = "webp", dots: bool = False) -> ToolResult:
+                seconds: float | None = None, movie: str = "webp", dots: bool = False, screen: dict | None = None) -> ToolResult:
         """Write the book (or some pages) in any format into <project>/exports/<time>_<format>/, as a person
         can from the app. Not the official export (that one is recorded as an approval and is for people).
         format timelapse: the recorded making-of as a moving picture (movie webp | gif | png | mp4)."""
@@ -880,7 +884,7 @@ class StudioService:
         out = path / "exports" / f"{time.strftime('%Y%m%d-%H%M%S')}_{format}"
         result = exporting.run(episode, None, format, out, actor=self.actor, dpi=dpi, width=width, max_height=max_height,
                                long_edge=long_edge, jpeg=jpeg, spreads=spreads, area=area, color=color, icc=icc,
-                               pages=sorted({int(p) for p in pages}) if pages else None, dots=dots)
+                               pages=sorted({int(p) for p in pages}) if pages else None, dots=dots, screen=screen)
         if not result.get("ok"):
             return fail(str(result.get("error") or "書き出せなかった"), "export_failed", "/")
         return ToolResult(True, {"folder": str(out), "files": result["files"]}, files=result["files"])
@@ -1519,7 +1523,8 @@ class HumanService:
 
     def export(self, fmt: str, out: Path, dpi: int | None = None, allow_fixture: bool = False, force: bool = False,
                *, width_px: int = 800, max_height: int = 1280, long_edge: int = 2048, jpeg: bool | None = None,
-               spreads: bool = False, area: str = "bleed", color: str = "auto", icc: str | None = None) -> dict:
+               spreads: bool = False, area: str = "bleed", color: str = "auto", icc: str | None = None,
+               screen: dict | None = None) -> dict:
         """The final export (gate ④): preflight must pass, then the pages are written and the approval recorded."""
         from genko.export import export_print
         from genko.studio import preflight
@@ -1542,7 +1547,7 @@ class HumanService:
                 written = profiles.export_sns(episode, Path(out), long_edge, fmt="png" if jpeg is False else "jpeg", spreads=spreads)
         else:
             written = export_print(episode, Path(out), fmt=fmt, dpi=int(dpi or episode.spec.dpi or 600), area=area, color=color,
-                                   icc=icc)
+                                   icc=icc, screen=screen)
         self._apply([{"op": "approve", "gate": "export"}])
         return {"ok": True, "files": [str(p) for p in written], "warnings": report["warnings"], "dpi": report["dpi"]}
 

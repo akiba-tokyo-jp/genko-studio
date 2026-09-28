@@ -88,7 +88,8 @@ class StoryPanel(QWidget):
         self.speaker.setPlaceholderText("話者（空でもよい）")
         self.text = QPlainTextEdit()
         self.text.setPlaceholderText("台詞を打つ（改行で次の列へ）")
-        self.text.setToolTip("ルビは ｜約束《やくそく》、傍点は 《《強調》》、一部を大きく {大|…}・太く {太|…}・赤く {赤|…}")
+        self.text.setToolTip("ルビは ｜約束《やくそく》、傍点は 《《強調》》、一部を大きく {大|…}・太く {太|…}・赤く {赤|…}、"
+                             "好きな色 {#3060c0|…}・大きさ {×1.3|…}・縦中横 {縦中横|12}（重ねるときは {大、赤|…}）")
         self.text.setMaximumHeight(80)
         self.kind = QComboBox()
         for key, label in KINDS:
@@ -127,7 +128,8 @@ class StoryPanel(QWidget):
         self.outline = spin(0, 5, 0.1, " mm", "なし")
         self.border = spin(0, 3, 0.05, " mm")
         self.align = QComboBox()
-        for key, label in (("top", "上"), ("center", "中央"), ("bottom", "下"), ("left", "左"), ("right", "右")):
+        for key, label in (("top", "上"), ("center", "中央"), ("bottom", "下"), ("left", "左"), ("right", "右"),
+                           ("justify", "均等（列・行いっぱいに）")):
             self.align.addItem(label, key)
         self.align.activated.connect(lambda _: self._style_changed())
         self.fill = QComboBox()
@@ -184,6 +186,32 @@ class StoryPanel(QWidget):
         self.spike_depth.setToolTip("叫びのフキダシのトゲの長さ（大きいほど鋭い）")
         self.color = QPushButton("文字の色…")
         self.color.clicked.connect(self._pick_color)
+        self.line_colour = QPushButton("フキダシの線の色…")
+        self.line_colour.clicked.connect(lambda: self._pick_style_colour("line_rgb", "フキダシの線の色", (20, 20, 20)))
+        self.fill_colour = QPushButton("フキダシの中の色…")
+        self.fill_colour.clicked.connect(lambda: self._pick_style_colour("fill_rgb", "フキダシの中の色", (255, 255, 255)))
+        self.fill_cover = QSpinBox()
+        self.fill_cover.setRange(0, 100)
+        self.fill_cover.setSuffix(" %")
+        self.fill_cover.setToolTip("フキダシの中の塗りの濃さ（下の絵が透ける）")
+        self.fill_cover.editingFinished.connect(self._style_changed)
+        self.text_dx = spin(-40, 40, 0.5, " mm")
+        self.text_dy = spin(-40, 40, 0.5, " mm")
+        for box in (self.text_dx, self.text_dy):
+            box.setToolTip("文字だけをフキダシの中でずらします（フキダシは動かない）")
+        self.tail_width = spin(0, 30, 0.5, " mm", "自動")
+        self.tail_width.setToolTip("しっぽの付け根の幅")
+        self.tail_width.editingFinished.connect(self._tail_width)
+        self.path_curve = QCheckBox("手で描いたフキダシを曲線にする")
+        self.path_curve.clicked.connect(lambda _: self._style_changed())
+        self.ruby_scale = spin(0.25, 0.8, 0.05, " 字")
+        self.ruby_scale.setToolTip("ルビの大きさ（本文の何字ぶんか。既定 0.5）")
+        self.mono_ruby = QCheckBox("モノルビ（1 字ずつに振る）")
+        self.mono_ruby.setToolTip("読みが字数で割り切れるとき、1 字ずつの真横に振ります（つかない時はまとめて）")
+        self.mono_ruby.clicked.connect(lambda _: self._style_changed())
+        self.layer_order = QComboBox()
+        self.layer_order.setToolTip("テキストの重ね順: このレイヤーの下に台詞を描きます（上のレイヤーの絵がフキダシに重なる）")
+        self.layer_order.activated.connect(lambda _: self._style({"below_layer": self.layer_order.currentData()}))
         reset = QPushButton("既定の設定に戻す")
         reset.setToolTip("この台詞の文字とフキダシの設定を既定に戻します")
         reset.clicked.connect(self._reset_style)
@@ -236,6 +264,18 @@ class StoryPanel(QWidget):
         form.addRow("", self.yakumono)
         form.addRow("", self.color)
         form.addRow("", self.gradient)
+        form.addRow("", self.line_colour)
+        form.addRow("", self.fill_colour)
+        form.addRow("中の塗りの濃さ", self.fill_cover)
+        shift = QHBoxLayout()
+        shift.addWidget(self.text_dx)
+        shift.addWidget(self.text_dy)
+        form.addRow("文字のずれ（横・縦）", shift)
+        form.addRow("しっぽの幅", self.tail_width)
+        form.addRow("", self.path_curve)
+        form.addRow("ルビの大きさ", self.ruby_scale)
+        form.addRow("", self.mono_ruby)
+        form.addRow("重ね順", self.layer_order)
         hint = QLabel("フキダシはダブルクリックで打ち直し、四隅で大きさ、●でしっぽの先、◇でしっぽの曲がり、上の○で回転。"
                       "右クリックで形・しっぽ・結合。")
         hint.setWordWrap(True)
@@ -362,6 +402,24 @@ class StoryPanel(QWidget):
         self.double.setChecked(bool(st["double"]))
         self.spikes.setValue(int(st["spikes"] or 0))
         self.spike_depth.setValue(float(st["spike_depth"] or 0.2))
+        self.fill_cover.setValue(round(100 * float(st.get("fill_opacity") if st.get("fill_opacity") is not None else 1.0)))
+        self.text_dx.setValue(float(st.get("text_dx_mm") or 0))
+        self.text_dy.setValue(float(st.get("text_dy_mm") or 0))
+        widths = [t.get("width_mm") for t in (line.tails or [])]
+        self.tail_width.setValue(float(widths[0]) if widths and widths[0] else 0.0)
+        self.tail_width.setEnabled(bool(line.tails))
+        self.path_curve.setVisible(bool(getattr(line, "path", None)))
+        self.path_curve.setChecked(bool(st.get("path_curve")))
+        self.ruby_scale.setValue(float(st.get("ruby_scale") or 0.5))
+        self.mono_ruby.setChecked(bool(st.get("mono_ruby")))
+        self.layer_order.clear()
+        self.layer_order.addItem("いちばん上（既定）", None)
+        page = self.window.current_page()
+        from genko.app import wording as _wording
+
+        for layer in reversed(page.layers if page else []):
+            self.layer_order.addItem(f"「{_wording.layer_label(layer)}」の下", layer.id)
+        self.layer_order.setCurrentIndex(max(0, self.layer_order.findData(st.get("below_layer"))))
         self._loading = False
 
     def _style(self, change: dict) -> None:
@@ -381,7 +439,33 @@ class StoryPanel(QWidget):
                      "double": self.double.isChecked() or None, "spikes": self.spikes.value() or None,
                      "spike_depth": self.spike_depth.value() if abs(self.spike_depth.value() - 0.2) > 1e-6 else None,
                      "scale_x": self.scale_x.value() if abs(self.scale_x.value() - 1) > 1e-3 else None,
-                     "yakumono": None if self.yakumono.isChecked() else False})
+                     "yakumono": None if self.yakumono.isChecked() else False,
+                     "fill_opacity": self.fill_cover.value() / 100 if self.fill_cover.value() < 100 else None,
+                     "text_dx_mm": self.text_dx.value() or None, "text_dy_mm": self.text_dy.value() or None,
+                     "path_curve": self.path_curve.isChecked() or None,
+                     "ruby_scale": self.ruby_scale.value() if abs(self.ruby_scale.value() - 0.5) > 1e-3 else None,
+                     "mono_ruby": self.mono_ruby.isChecked() or None})
+
+    def _pick_style_colour(self, key: str, title: str, default) -> None:
+        from PySide6.QtWidgets import QColorDialog
+
+        from genko.balloons import style_of
+
+        line = self._line()
+        if line is None:
+            return
+        rgb = style_of(line).get(key) or default
+        color = QColorDialog.getColor(QColor(*rgb), self, title)
+        if color.isValid():
+            self._style({key: [color.red(), color.green(), color.blue()]})
+
+    def _tail_width(self) -> None:
+        line = self._line()
+        if line is None or self._loading or not line.tails:
+            return
+        width = self.tail_width.value()
+        tails = [{**t, "width_mm": width} if width else {k: v for k, v in t.items() if k != "width_mm"} for t in line.tails]
+        self.window.apply_ops([{"op": "move_line", "id": line.id, "tails": tails}])
 
     def _font_changed(self) -> None:
         if self._loading:
@@ -1202,15 +1286,12 @@ class LayerPanel(QWidget):
             self._set("effect", effect)
 
     def _screen(self) -> None:
-        from PySide6.QtWidgets import QInputDialog
-
         page, layer = self._layer()
         if layer is None:
             return
-        lpi, ok = QInputDialog.getDouble(self, "トーン化", "線数（多いほど細かい網点。60 前後が普通）",
-                                         float((layer.screen or {}).get("lpi", 60)), 10, 150, 0)
-        if ok:
-            self._set("screen", {**(layer.screen or {}), "lpi": lpi})
+        spec = screen_dialog(self, layer.screen or {})
+        if spec is not None:
+            self._set("screen", spec)
             self.window.flash("このレイヤーのグレーは、印刷と書き出しで網点になります（画面はグレーのまま）", 5000)
 
     def _water_edge(self) -> None:
@@ -1225,19 +1306,105 @@ class LayerPanel(QWidget):
             effect["water_edge"] = {"width_mm": width, "strength": 0.7}
             self._set("effect", effect)
 
+    def _histogram(self, page, layer) -> list[int] | None:
+        """How many of the layer's drawn pixels have each lightness (for レベル補正 and トーンカーブ)."""
+        try:
+            from genko.ops import layer_pixels
+
+            image = layer_pixels(page, layer)
+        except Exception:
+            return None
+        return image.convert("L").histogram(mask=image.getchannel("A").point(lambda a: 255 if a else 0))
+
     def _filter(self) -> None:
         page, layer = self._layer()
         if layer is None:
             return
         label = self.filter.currentText()
         extra = "\nペンの線は画像になり、あとから線として消せなくなります。" if layer.strokes else ""
-        if QMessageBox.question(self, "Genko", f"レイヤー「{wording.layer_label(layer)}」全体に「{label}」をかけます。{extra}\n"
+        where = "の選択範囲の中" if self.window.canvas.selection else "全体"
+        if QMessageBox.question(self, "Genko", f"レイヤー「{wording.layer_label(layer)}」{where}に「{label}」をかけます。{extra}\n"
                                 "（元に戻す で取り消せます）") != QMessageBox.StandardButton.Yes:
             return
-        params = self._adjust_fields(self.filter.currentData())
+        kind = self.filter.currentData()
+        selection = self.window.canvas.selection
+        area = {"area": selection["area"]} if selection and selection.get("area") else {}
+        if kind == "gradient_map":
+            params = self._adjust_fields(kind)
+        else:
+            params = filter_params(self, kind, preview=lambda values: self.window.preview_filter(page, layer, kind, values, area),
+                                   histogram=self._histogram(page, layer) if kind in ("levels", "curve") else None)
         if params is None:
             return
-        self.window.apply_ops([{"op": "filter_raster", "page": page.index, "id": layer.id, "kind": self.filter.currentData(), **params}])
+        self.window.apply_ops([{"op": "filter_raster", "page": page.index, "id": layer.id, "kind": kind, **params, **area}])
+
+
+def transform_matrix(pivot, dx: float = 0, dy: float = 0, sx: float = 1, sy: float = 1, angle: float = 0) -> list[float]:
+    """[a, b, c, d, e, f] (x' = ax + cy + e, y' = bx + dy + f): scale, then turn (degrees, clockwise on the page),
+    both about `pivot`, then move by (dx, dy) mm."""
+    import math
+
+    px, py = pivot
+    t = math.radians(angle)
+    c, s = math.cos(t), math.sin(t)
+    a, b, cc, d = c * sx, s * sx, -s * sy, c * sy
+    return [a, b, cc, d, px - a * px - cc * py + dx, py - b * px - d * py + dy]
+
+
+def screen_dialog(parent, now: dict) -> dict | None:
+    """レイヤーのトーン化: the screen its greys print as (網の種類・形・線数・角度・ずれ)."""
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
+
+    from genko.app.dialogs import SCREEN_SHAPES
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("トーン化")
+    form = QFormLayout(dialog)
+    pattern = QComboBox()
+    for label, key in (("網点", "dot"), ("線", "line"), ("交差した線", "cross"), ("砂目", "noise")):
+        pattern.addItem(label, key)
+    pattern.setCurrentIndex(max(0, pattern.findData(now.get("pattern") or "dot")))
+    shape = QComboBox()
+    for label, key in SCREEN_SHAPES:
+        shape.addItem(label, key)
+    shape.setCurrentIndex(max(0, shape.findData(now.get("shape") or "round")))
+    pattern.currentIndexChanged.connect(lambda _: shape.setEnabled(pattern.currentData() == "dot"))
+    shape.setEnabled(pattern.currentData() == "dot")
+    lpi, angle, off_x, off_y = QDoubleSpinBox(), QDoubleSpinBox(), QDoubleSpinBox(), QDoubleSpinBox()
+    lpi.setRange(10, 150)
+    lpi.setDecimals(0)
+    lpi.setValue(float(now.get("lpi", 60)))
+    lpi.setSuffix(" 線")
+    lpi.setToolTip("多いほど細かい網点。60 前後が普通")
+    angle.setRange(0, 179)
+    angle.setDecimals(0)
+    angle.setValue(float(now.get("angle", 45)))
+    angle.setSuffix("°")
+    offset = now.get("offset_mm") or (0, 0)
+    for spin, value in ((off_x, offset[0]), (off_y, offset[1])):
+        spin.setRange(-20, 20)
+        spin.setSingleStep(0.1)
+        spin.setDecimals(2)
+        spin.setSuffix(" mm")
+        spin.setValue(float(value))
+    form.addRow("網の種類", pattern)
+    form.addRow("網の形", shape)
+    form.addRow("線数", lpi)
+    form.addRow("角度", angle)
+    form.addRow("網のずれ（右）", off_x)
+    form.addRow("網のずれ（下）", off_y)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    form.addRow(buttons)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    spec = {**now, "pattern": pattern.currentData(), "shape": shape.currentData(), "lpi": lpi.value(), "angle": angle.value()}
+    if off_x.value() or off_y.value():
+        spec["offset_mm"] = [off_x.value(), off_y.value()]
+    else:
+        spec.pop("offset_mm", None)
+    return spec
 
 
 def gradient_dialog(parent, page, now: dict) -> dict | None:
@@ -1293,10 +1460,17 @@ def gradient_dialog(parent, page, now: dict) -> dict | None:
             "opacity_from": start.value() / 100, "opacity_to": end.value() / 100}
 
 
+_CHANNELS = [("RGB（全部）", "rgb"), ("赤", "r"), ("緑", "g"), ("青", "b")]
 FILTER_FIELDS = {
     "blur": [("radius", "ぼかしの強さ", 0.5, 30, 2.0)],
-    "levels": [("black", "黒くする所（0〜255）", 0, 254, 20), ("white", "白くする所（1〜255）", 1, 255, 235)],
-    "curve": [("gamma", "明るさ（1 より大きいと暗く、小さいと明るく）", 0.2, 5, 1.0)],
+    "levels": [("channel", "色", _CHANNELS, "rgb"), ("black", "黒くする所（0〜255）", 0, 254, 20), ("white", "白くする所（1〜255）", 1, 255, 235),
+               ("gamma", "中間（1 より大きいと明るく）", 0.1, 9.99, 1.0), ("out_black", "出す暗さの下限", 0, 255, 0),
+               ("out_white", "出す明るさの上限", 0, 255, 255)],
+    "curve": [("channel", "色", _CHANNELS, "rgb")],
+    "brightness_contrast": [("brightness", "明るさ", -100, 100, 0), ("contrast", "コントラスト", -100, 100, 0)],
+    "sharpen": [("amount", "強さ（1 で普通、2 で強め）", 0.1, 5, 1.0)],
+    "despeckle": [("size_mm", "取るゴミの大きさ（mm）", 0.05, 5, 0.3),
+                  ("what", "取るもの", [("黒い点（ゴミ）", "ink"), ("線の中の白い穴", "holes"), ("両方", "both")], "ink")],
     "hue": [("shift", "色相（°）", -180, 180, 30), ("saturation", "彩度（倍）", 0, 3, 1.0), ("value", "明度（倍）", 0, 3, 1.0)],
     "mosaic": [("block", "モザイクの大きさ（px）", 2, 64, 8)],
     "motion_blur": [("distance", "流す長さ（px）", 1, 300, 12), ("angle", "向き（°）", -180, 180, 0)],
@@ -1311,37 +1485,19 @@ FILTER_FIELDS = {
 }
 
 
-def filter_params(parent, kind: str, now: dict | None = None) -> dict | None:
-    """The numbers of a colour adjustment, asked once (None: the person stopped)."""
-    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
+def filter_params(parent, kind: str, now: dict | None = None, preview=None, histogram=None) -> dict | None:
+    """The numbers of a filter or a colour adjustment, asked once (None: the person stopped). `preview(params)`
+    shows the result on the page while they change."""
+    from genko.app import filter_dialog
 
     fields = FILTER_FIELDS.get(kind)
     if fields is None and kind.startswith("plugin:"):
         from genko import plugins
 
         fields = plugins.fields(kind)
-    if not fields:
+    if not fields and kind != "curve":
         return {}
-    dialog = QDialog(parent)
-    dialog.setWindowTitle("フィルターの強さ")
-    form = QFormLayout(dialog)
-    boxes = {}
-    for key, label, lo, hi, value in fields:
-        box = QDoubleSpinBox()
-        box.setRange(lo, hi)
-        box.setSingleStep(0.01 if hi <= 1 else 0.1 if hi <= 5 else 1)
-        box.setValue(float((now or {}).get(key, value)))
-        form.addRow(label, box)
-        boxes[key] = box
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-    buttons.button(QDialogButtonBox.StandardButton.Ok).setText("かける")
-    buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
-    buttons.accepted.connect(dialog.accept)
-    buttons.rejected.connect(dialog.reject)
-    form.addRow(buttons)
-    if not dialog.exec():
-        return None
-    return {key: round(box.value(), 3) for key, box in boxes.items()}
+    return filter_dialog.ask(parent, kind, fields or [], now, preview, histogram=histogram)
 
 
 class MainWindow(QMainWindow):
@@ -1762,6 +1918,11 @@ class MainWindow(QMainWindow):
         self.act_turn_right = a("右に回す（15°）", lambda: self.canvas.rotate_view(15), ["^", "Ctrl+Alt+Right"],
                                 "表示だけを回します（原稿は回りません）")
         self.act_turn_reset = a("回転・反転を戻す", self.canvas.reset_view, "Ctrl+Alt+0")
+        self.act_view_flip_v = a("上下反転して見る", lambda on: self.canvas.flip_view_vertical(on), "Shift+H",
+                            "表示だけを上下反転します。原稿は変わりません", True)
+        self.act_zoom_tool = a("虫めがね", lambda: self._tool("zoom"), "Z",
+                               "クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに", True)
+        self.act_zoom_value = a("表示倍率を打ち込む…", self._ask_zoom, None, "倍率（%）を数で決めます。ステータスバーの倍率でも")
         self.act_mirror = a("左右反転して見る", lambda on: self.canvas.flip_view(on), "H",
                             "表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません", True)
         self.act_find_command = a("コマンドを探す…", self._find_command, "Ctrl+Shift+F",
@@ -1846,7 +2007,7 @@ class MainWindow(QMainWindow):
                              "frame": self.act_frame, "picker": self.act_picker, "fill": self.act_fill,
                              "lassofill": self.act_lassofill, "rect": self.act_marquee, "lasso": self.act_lasso,
                              "wand": self.act_wand, "reshape": self.act_reshape, "ruler": self.act_ruler, "3d": self.act_3d,
-                             "effect": self.act_effect, "stamp": self.act_stamp}
+                             "effect": self.act_effect, "stamp": self.act_stamp, "zoom": self.act_zoom_tool}
         for act in self.tool_actions.values():
             tools.addAction(act)
         self.act_select.setChecked(True)
@@ -1873,6 +2034,10 @@ class MainWindow(QMainWindow):
                                       "選択範囲の 4 隅を好きな所へ引っぱる。Enter で確定、Esc でやめる")
         self.act_warp_mesh = a("自由変形（メッシュ・3×3）", lambda: self._start_warp("mesh"), "Ctrl+Shift+W",
                                "選択範囲の 3×3 の点を引っぱって曲げる。Enter で確定、Esc でやめる")
+        self.act_warp_mesh_grid = a("自由変形（メッシュ・格子の数を決める）…", self._start_mesh_grid, None,
+                                    "横と縦の格子の数（1〜8）を決めてから、点を引っぱって曲げる")
+        self.act_transform_numbers = a("変形を数で決める…", self._transform_numbers, None,
+                                       "選択範囲を、移動（mm）・拡大率（%）・回転（°）の数で変形します。基準位置（選択範囲の中の＋）を中心に")
         self.act_warp_apply = a("自由変形を確定", lambda: self.canvas.finish_warp())
         settings = QSettings("Genko", "Genko Studio")
         self.ruler_kinds = [
@@ -1889,6 +2054,9 @@ class MainWindow(QMainWindow):
             ("平行曲線定規", "parallel_curve", {}, "クリックで曲線を置き、Enter で終わる。どこで描いてもその曲線の形に沿う"),
             ("多重曲線定規", "multi_curve", {}, "1 本目の曲線をクリックで置いて Enter、2 本目も置いて Enter。描いた線は 2 本の間の形に沿う"),
             ("放射曲線定規", "radial_curve", {}, "中心をクリックしてから曲線をクリックで置き、Enter。描いた線は中心から広がる同じ形に沿う"),
+            ("図形定規（長方形）", "rect", {}, "対角をドラッグ。近くで描いた線が長方形の辺に沿って回る（角はそのまま）"),
+            ("図形定規（楕円）", "ellipse", {}, "外側の四角をドラッグ。近くで描いた線が楕円に沿う"),
+            ("図形定規（多角形）", "polygon", {}, "角をクリックで打ち、Enter で閉じる。近くで描いた線が辺に沿う"),
         ]
         self.ruler_actions = [a(title, lambda _=False, k=kind, o=opts: self._choose_ruler(k, **o), tip=tip)
                               for title, kind, opts, tip in self.ruler_kinds]
@@ -1904,6 +2072,13 @@ class MainWindow(QMainWindow):
         self.act_ruler_layer = a("選んだ定規をこのレイヤー専用にする／戻す", self._ruler_to_target_layer,
                                  tip="描く先のレイヤーを描いている時だけ、その定規が見えて効きます")
         self.act_ruler_pen = a("選んだ定規の線を描く（定規ペン）", self._ruler_pen, tip="定規そのものを、描く先のレイヤーにペンの線で描きます")
+        self.act_ruler_selection = a("選んだ定規から選択範囲を作る", self._ruler_selection,
+                                     tip="閉じた形の定規（図形定規・円・閉じた曲線）の中を選択範囲にします")
+        self.act_persp_grid = a("パース定規のグリッド…", self._perspective_grid, tip="選んだパース定規に、地面のグリッドを出す（線の数。0 で消す）")
+        self.act_ruler_from_3d = a("3D に合わせてパース定規を作る", self._ruler_from_3d,
+                                   tip="ページの 3D（選んだもの、なければ最初のもの）の消失点にパース定規を置きます")
+        self.act_camera_from_ruler = a("カメラを選んだパース定規に合わせる", self._camera_from_ruler,
+                                       tip="3D のカメラを回して、3D の消失点が選んだパース定規の消失点に来るようにします")
         self.act_ruler_frame = a("選んだ定規でコマを割る・作る", self._ruler_frame,
                                  tip="直線の定規: その線でコマを割ります。円・閉じた曲線の定規: その形のコマを作ります")
         self.act_ruler_fix = a("選んだ定規を固定する／外す", lambda: self._ruler_flag("fixed"), tip="点を動かせないようにします")
@@ -2024,8 +2199,8 @@ class MainWindow(QMainWindow):
                          self.act_import_psd, self.act_export, self.act_print, None, self.act_timelapse, self.act_timelapse_export, None, "actions", None, self.act_prefs, None, self.act_close, self.act_quit]),
             ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste,
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
-            ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, None, self.act_turn_left,
-                      self.act_turn_right, self.act_mirror, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
+            ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, self.act_zoom_value, self.act_zoom_tool, None, self.act_turn_left,
+                      self.act_turn_right, self.act_mirror, self.act_view_flip_v, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
                       None, self.act_guides, self.act_phone, self.act_scale, self.act_onion, self.act_cmyk_proof, None, self.act_tool_names]),
             # the tools, and under them the rulers, the 3D figures and the tones and effect lines (fewer menus in the
             # bar: nine, not thirteen; everything is still found by コマンドを探す)
@@ -2036,7 +2211,8 @@ class MainWindow(QMainWindow):
                         ("sub", "トーン・効果線", [self.act_tone_here, self.act_tone_click, None, *self.effect_actions, None,
                                               self.act_effect_within, self.act_effect_avoid, self.act_effect_clear, None, self.act_materials]),
                         ("sub", "定規", [*self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
-                                         self.act_clear_rulers, self.act_ruler_layer, self.act_ruler_pen, self.act_ruler_frame, self.act_ruler_fix, self.act_ruler_horizon,
+                                         self.act_clear_rulers, self.act_ruler_layer, self.act_ruler_pen, self.act_ruler_frame, self.act_ruler_selection, self.act_ruler_fix, self.act_ruler_horizon,
+                                         self.act_persp_grid, self.act_ruler_from_3d, self.act_camera_from_ruler,
                                          None, self.act_grid, self.act_grid_snap, self.act_grid_mm]),
                         ("sub", "3D", [self.act_add_figure, self.act_add_stick, self.act_add_head, self.act_add_hand, self.act_add_box,
                                        self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, "scenes", self.act_import_obj, "poses",
@@ -2046,7 +2222,8 @@ class MainWindow(QMainWindow):
                       self.act_sel_grow, self.act_sel_shrink, self.act_sel_feather, self.act_sel_layer, None, self.act_sel_keep,
                       "stock", self.act_quick_mask, None,
                       self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v,
-                      self.act_warp_perspective, self.act_warp_mesh, self.act_warp_apply, "interp", None,
+                      self.act_warp_perspective, self.act_warp_mesh, self.act_warp_mesh_grid, self.act_warp_apply, self.act_transform_numbers,
+                      "interp", None,
                       self.act_fill_selection, self.act_line_width]),
             ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
                           self.act_layer_merge, self.act_layer_delete, None, "layer_special", "layer_many", None,
@@ -2462,6 +2639,16 @@ class MainWindow(QMainWindow):
         self.process.open_box.connect(lambda: self.show_dock("承認箱"))
         self.statusBar().addPermanentWidget(self.process)
         self.statusBar().addPermanentWidget(self.zoom_label)
+        from PySide6.QtWidgets import QSpinBox
+
+        self.zoom_box = QSpinBox()  # (表示倍率の直接入力)
+        self.zoom_box.setRange(5, 6400)
+        self.zoom_box.setSuffix(" %")
+        self.zoom_box.setToolTip("表示倍率。数を打ち込んで Enter")
+        self.zoom_box.setKeyboardTracking(False)
+        self.zoom_box.valueChanged.connect(lambda value: self.canvas.set_zoom_percent(value)
+                                           if value != self.canvas.zoom_percent() else None)
+        self.statusBar().addPermanentWidget(self.zoom_box)
         self.approvals = ApprovalBox(self)
         self.panel_view = PanelView(self)
         self.story = StoryPanel(self)
@@ -2524,6 +2711,9 @@ class MainWindow(QMainWindow):
             self.eraser_texture.addItem(label, key)
         self.eraser_texture.setToolTip("ペイントのレイヤーの消え方。ペンの線（ベクター）は、どれでもその所で切れる")
         eraser_form.addRow("消しゴムの質", self.eraser_texture)
+        self.eraser_balloons = QCheckBox("フキダシを削る")
+        self.eraser_balloons.setToolTip("消しゴムでなぞった所の、台詞のフキダシ（中と線）を削ります。絵は消しません")
+        eraser_form.addRow(self.eraser_balloons)
         snap_note = QLabel("定規への吸着（表示メニュー）がオンなら、消しゴムも定規に沿って消します")
         snap_note.setWordWrap(True)
         theme.hint(snap_note)
@@ -2726,9 +2916,10 @@ class MainWindow(QMainWindow):
         radius_form.addRow(pin)
         ts.add(("reshape",), radius_page)
         ts.add(("ruler",), action_page(["定規", menu_button("定規の種類", [self.ruler_actions[:5], self.ruler_actions[5:8],
-                                                                  self.ruler_actions[8:10], self.ruler_actions[10:]]),
-                                        menu_button("選んだ定規", [[self.act_ruler_layer, self.act_ruler_pen, self.act_ruler_frame],
-                                                                  [self.act_ruler_fix, self.act_ruler_horizon]]),
+                                                                  self.ruler_actions[8:10], self.ruler_actions[10:13], self.ruler_actions[13:]]),
+                                        menu_button("選んだ定規", [[self.act_ruler_layer, self.act_ruler_pen, self.act_ruler_frame, self.act_ruler_selection],
+                                                                  [self.act_ruler_fix, self.act_ruler_horizon, self.act_persp_grid],
+                                                                  [self.act_ruler_from_3d, self.act_camera_from_ruler]]),
                                         self.act_del_ruler, self.act_clear_rulers,
                                         "吸着と表示", self.act_snap, self.act_show_rulers,
                                         "グリッド", self.act_grid, self.act_grid_snap, self.act_grid_mm]))
@@ -3211,7 +3402,31 @@ class MainWindow(QMainWindow):
     def _frame_page(self, page):
         from genko import anim
 
-        return anim.at_frame(page, self.current_frame(page)) if anim.is_animation(page) else page
+        page = anim.at_frame(page, self.current_frame(page)) if anim.is_animation(page) else page
+        preview = getattr(self, "_filter_preview", None)
+        if preview is not None and preview[0] == page.id:  # (a filter being tried: its layer as it would come out)
+            import dataclasses
+
+            _, layer_id, png = preview
+            layers = [dataclasses.replace(item, id=f"{item.id}~preview", raster_png=png, strokes=[], patches=[],
+                                          kind=LayerKind.RASTER) if item.id == layer_id else item for item in page.layers]
+            page = dataclasses.replace(page, layers=layers)
+        return page
+
+    def preview_filter(self, page, layer, kind: str, params: dict | None, area: dict | None = None) -> None:
+        """フィルターのプレビュー: the page shows the layer with the filter on (params None: as it is)."""
+        if params is None:
+            self._filter_preview = None
+        else:
+            import io
+
+            from genko.ops import filtered_raster
+
+            image = filtered_raster(page, layer, kind, {**params, **(area or {})})
+            buf = io.BytesIO()
+            image.save(buf, format="PNG", compress_level=1)
+            self._filter_preview = (page.id, layer.id, buf.getvalue())
+        self.canvas.invalidate()
 
     def _with_onion(self, image, page, dpi: int):
         from genko import anim
@@ -3307,9 +3522,77 @@ class MainWindow(QMainWindow):
     def _refresh_zoom(self) -> None:
         turned = f" ・ 回転 {self.canvas.rotation:+.0f}°" if self.canvas.rotation else ""
         mirrored = " ・ 左右反転" if self.canvas.flipped else ""
+        mirrored += " ・ 上下反転" if self.canvas.flipped_v else ""
         self.zoom_label.setText(f"表示 {self.canvas.zoom_percent()}%{turned}{mirrored}")
         if hasattr(self, "act_mirror") and self.act_mirror.isChecked() != self.canvas.flipped:
             self.act_mirror.setChecked(self.canvas.flipped)
+        if hasattr(self, "act_view_flip_v") and self.act_view_flip_v.isChecked() != self.canvas.flipped_v:
+            self.act_view_flip_v.setChecked(self.canvas.flipped_v)
+        if hasattr(self, "zoom_box") and not self.zoom_box.hasFocus():
+            self.zoom_box.blockSignals(True)
+            self.zoom_box.setValue(self.canvas.zoom_percent())
+            self.zoom_box.blockSignals(False)
+
+    def _ask_zoom(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        value, ok = QInputDialog.getInt(self, "表示倍率", "倍率（%。100 で紙の大きさ）", self.canvas.zoom_percent(), 5, 6400)
+        if ok:
+            self.canvas.glide(lambda: self.canvas.set_zoom_percent(value))
+
+    def _start_mesh_grid(self) -> None:
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QSpinBox
+
+        if self._need_area() is None:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("メッシュの格子")
+        form = QFormLayout(dialog)
+        across, down = QSpinBox(), QSpinBox()
+        for box in (across, down):
+            box.setRange(1, 8)
+            box.setValue(int(QSettings("Genko", "Genko Studio").value("warp/mesh", 3)))
+        form.addRow("横の格子の数", across)
+        form.addRow("縦の格子の数", down)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if not dialog.exec():
+            return
+        QSettings("Genko", "Genko Studio").setValue("warp/mesh", across.value())
+        self._start_warp("mesh", across.value(), down.value())
+
+    def _transform_numbers(self) -> None:
+        """変形の数値入力: move, scale and turn the selection by numbers, about its 基準位置."""
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
+
+        if self._need_area() is None or not self.canvas.selection:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("変形を数で決める")
+        form = QFormLayout(dialog)
+        boxes = {}
+        for key, label, lo, hi, value, suffix in (("dx", "右へ", -500, 500, 0, " mm"), ("dy", "下へ", -500, 500, 0, " mm"),
+                                                  ("sx", "横の大きさ", 1, 1000, 100, " %"), ("sy", "縦の大きさ", 1, 1000, 100, " %"),
+                                                  ("angle", "回転（右回り）", -360, 360, 0, "°")):
+            box = QDoubleSpinBox()
+            box.setRange(lo, hi)
+            box.setDecimals(2)
+            box.setValue(value)
+            box.setSuffix(suffix)
+            form.addRow(label, box)
+            boxes[key] = box
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if not dialog.exec():
+            return
+        matrix = transform_matrix(self.canvas.selection_pivot(), boxes["dx"].value(), boxes["dy"].value(), boxes["sx"].value() / 100,
+                                  boxes["sy"].value() / 100, boxes["angle"].value())
+        if any(abs(v - w) > 1e-6 for v, w in zip(matrix, [1, 0, 0, 1, 0, 0])):
+            self._transform_selection(matrix)
 
     # --- editing -----------------------------------------------------------------------------
 
@@ -3401,6 +3684,18 @@ class MainWindow(QMainWindow):
             if line is not None and len(points) >= 2:
                 path = [[round(p[0] - line.x_mm, 2), round(p[1] - line.y_mm, 2)] for p in points[:: max(1, len(points) // 40)]]
                 self.apply_ops([{"op": "edit_line", "id": line.id, "balloon": "none", "style": {"text_path": path}}])
+            return
+        if self.canvas.tool == "eraser" and self.eraser_balloons.isChecked():  # フキダシ消しゴム
+            reach = self.eraser_mm / 2
+            xs, ys = [p[0] for p in points], [p[1] for p in points]
+            hit = [ln for ln in self.episode.story_for_page(page.index)
+                   if (ln.balloon or "speech") not in ("sfx", "none") and min(xs) - reach < ln.x_mm + (ln.w_mm or 40)
+                   and max(xs) + reach > ln.x_mm and min(ys) - reach < ln.y_mm + (ln.h_mm or 20) and max(ys) + reach > ln.y_mm]
+            if not hit:
+                self.flash("なぞった所にフキダシがありません", 3000)
+                return
+            self.apply_ops([{"op": "cut_balloon", "id": ln.id, "points": [[round(p[0], 2), round(p[1], 2)] for p in points],
+                             "width_mm": self.eraser_mm} for ln in hit])
             return
         if not self.drawable(layer):
             why = "ロックされています" if getattr(layer, "locked", False) else "ペンかペイントのレイヤーではありません"
@@ -4021,12 +4316,12 @@ class MainWindow(QMainWindow):
             outline = self.canvas._apply(matrix, self.canvas.selection["outline"])
             self.canvas.set_selection(self._moved_area(area, matrix), outline)
 
-    def _start_warp(self, kind: str) -> None:
+    def _start_warp(self, kind: str, columns: int = 2, rows: int = 2) -> None:
         if self._need_area() is None:
             return
         if self.canvas.tool != "marquee":
             self.canvas.set_tool("marquee")
-        self.canvas.start_warp(kind)
+        self.canvas.start_warp(kind, columns, rows)
         self.flash("点を引っぱって形を決め、Enter（または「自由変形を確定」）で確定します。Esc でやめます", 6000)
 
     def _warp_selection(self, warp: dict) -> None:
@@ -4244,6 +4539,60 @@ class MainWindow(QMainWindow):
         if ruler is not None and layer is not None:
             self.apply_ops([{"op": "ruler_to_layer", "page": page.index, "id": ruler["id"], "layer_id": layer.id,
                              "width_mm": max(0.1, self.brush.size.value()), "rgb": list(self.brush.rgb)}])
+
+    def _closed_ruler_outline(self, ruler, page) -> list | None:
+        import math
+
+        from genko import rulers
+
+        lines = rulers.outline(ruler, (page.spec.width_mm, page.spec.height_mm))
+        if lines and len(lines[0]) > 3 and math.dist(lines[0][0], lines[0][-1]) < 1.0:
+            return [[round(x, 2), round(y, 2)] for x, y in lines[0][:-1]]
+        return None
+
+    def _ruler_selection(self) -> None:
+        """定規から選択範囲: the inside of a closed ruler (a shape, a circle, a closed curve)."""
+        page, ruler = self._selected_ruler()
+        if ruler is None:
+            return
+        poly = self._closed_ruler_outline(ruler, page)
+        if poly is None:
+            self.flash("選択範囲にできるのは、閉じた形の定規（図形定規・円・閉じた曲線）です", 6000)
+            return
+        self._tool("rect")
+        self.canvas.set_selection({"poly": poly})
+
+    def _perspective_grid(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        page, ruler = self._selected_ruler()
+        if ruler is None:
+            return
+        if ruler.get("kind") != "perspective":
+            self.flash("パース定規を選んでください", 5000)
+            return
+        lines, ok = QInputDialog.getInt(self, "パースのグリッド", "地面のグリッドの線の数（0 で消す）", int(ruler.get("grid") or 12), 0, 60)
+        if ok:
+            self.apply_ops([{"op": "edit_ruler", "page": page.index, "id": ruler["id"], "grid": lines}])
+
+    def _selected_prim_id(self):
+        prim_id = getattr(self.canvas, "selected_prim_id", None)
+        return {"prim_id": prim_id} if prim_id else {}
+
+    def _ruler_from_3d(self) -> None:
+        page = self._current()
+        if page is None:
+            return
+        if not [p for p in page.prims if p.get("kind") != "mannequin"]:
+            self.flash("このページに 3D がありません（3D の道具で置いてから）", 5000)
+            return
+        self.apply_ops([{"op": "ruler_from_3d", "page": page.index, **self._selected_prim_id()}])
+
+    def _camera_from_ruler(self) -> None:
+        page, ruler = self._selected_ruler()
+        if ruler is None:
+            return
+        self.apply_ops([{"op": "camera_from_ruler", "page": page.index, "id": ruler["id"], **self._selected_prim_id()}])
 
     def _ruler_frame(self) -> None:
         """A straight ruler cuts the panel it crosses; a circle or a closed curve becomes a panel of its shape."""
@@ -4728,6 +5077,17 @@ class MainWindow(QMainWindow):
 
         self.canvas.open_editor(line.x_mm, line.y_mm, with_marks(line), done)
 
+    @staticmethod
+    def _with_bend(line, tail: dict) -> dict:
+        """A tail with one more corner: half way between its last bend (or the balloon) and its tip."""
+        cx, cy = line.x_mm + (line.w_mm or 40) / 2, line.y_mm + (line.h_mm or 20) / 2
+        bends = [list(v) for v in tail.get("vias") or ([tail["via"]] if tail.get("via") else [])]
+        start = bends[-1] if bends else [cx, cy]
+        bends.append([round((start[0] + tail["to"][0]) / 2 + 3, 2), round((start[1] + tail["to"][1]) / 2, 2)])
+        out = {k: v for k, v in tail.items() if k != "via"}
+        out["vias"] = bends
+        return out
+
     def _line_menu(self, line_id: str, pos: QPointF) -> None:
         from genko.app.lettering import KINDS
         from genko.balloons import style_of
@@ -4756,6 +5116,10 @@ class MainWindow(QMainWindow):
         if tails:
             drop = menu.addAction("しっぽを 1 本消す")
             drop.triggered.connect(lambda: self.apply_ops([{"op": "move_line", "id": line_id, "tails": tails[:-1]}]))
+            bend = menu.addAction("しっぽに曲がり角を足す（折れ線）")
+            bend.setToolTip("しっぽの途中に角を足します。□をドラッグして折れ線のしっぽにします")
+            bend.triggered.connect(lambda: self.apply_ops([{"op": "move_line", "id": line_id, "tails": [
+                self._with_bend(line, t) for t in tails]}]))
             straight = menu.addAction("しっぽをまっすぐにする")
             straight.triggered.connect(lambda: self.apply_ops([{"op": "move_line", "id": line_id,
                                                                 "tails": [{"to": t["to"]} for t in tails]}]))

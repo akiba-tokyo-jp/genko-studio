@@ -20,6 +20,10 @@ Kinds (`kind`) and what they use:
   that passes where it starts.
 - radial_curve (放射曲線): `points` (a curve) and `center` [x, y] — a line follows the curve grown or shrunk
   about the centre to pass where it starts.
+- rect / ellipse (図形定規): `points` [a, b] (two opposite corners of the box), `angle` — a line started near
+  the outline runs round it, corners kept. polygon: `points` (3 or more corners, closed).
+
+A perspective ruler may show a grid on the ground (`grid`: how many lines, 0 = none; パースのグリッド).
 
 Perspective rulers may keep their eye level (`lock_horizon`: the vanishing points move only along it) and
 be fixed (`fixed`: the points do not move). Any ruler may belong to a layer (`layer_id`): it then snaps and
@@ -34,9 +38,10 @@ from __future__ import annotations
 import math
 
 KINDS = ("line", "curve", "parallel", "concentric", "radial", "perspective", "symmetry", "guide", "parallel_curve", "multi_curve",
-         "radial_curve")
+         "radial_curve", "rect", "ellipse", "polygon")
+SHAPES = ("rect", "ellipse", "polygon")  # 図形定規: a line started near the outline runs round it
 POINTS_NEEDED = {"line": 2, "curve": 2, "parallel": 0, "concentric": 1, "radial": 1, "perspective": 1, "symmetry": 2, "guide": 0,
-                 "parallel_curve": 2, "multi_curve": 2, "radial_curve": 2}
+                 "parallel_curve": 2, "multi_curve": 2, "radial_curve": 2, "rect": 2, "ellipse": 2, "polygon": 3}
 GUIDE_REACH_MM = 3.0
 REACH_MM = 10.0
 
@@ -62,6 +67,12 @@ def validate(ruler: dict) -> None:
         raise ValueError("a multi_curve ruler needs points2 (a second curve)")
     if kind == "radial_curve" and len(ruler.get("center") or []) < 2:
         raise ValueError("a radial_curve ruler needs its center")
+    if kind in ("rect", "ellipse"):
+        (ax, ay), (bx, by) = (_xy(p) for p in points[:2])
+        if abs(bx - ax) < 0.5 or abs(by - ay) < 0.5:
+            raise ValueError(f"a {kind} ruler needs a box with some size (points: two opposite corners)")
+    if ruler.get("grid") is not None and not 0 <= int(ruler["grid"]) <= 60:
+        raise ValueError("grid is 0 (none) to 60 lines")
 
 
 # --- small geometry ------------------------------------------------------------------------------------
@@ -159,6 +170,93 @@ def _at_arc(poly, s: float) -> tuple[float, float]:
             return a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])
         pos += seg
     return poly[-1]
+
+
+def shape_outline(ruler: dict) -> list[tuple[float, float]]:
+    """A shape ruler's closed outline (the first point again at the end): a rectangle or an ellipse in the box of
+    its two points (turned by `angle` about the middle), or the polygon through its points."""
+    kind = ruler["kind"]
+    pts = [_xy(p) for p in ruler.get("points") or []]
+    if kind == "polygon":
+        return pts + pts[:1]
+    (ax, ay), (bx, by) = pts[0], pts[1]
+    cx, cy, w, h = (ax + bx) / 2, (ay + by) / 2, abs(bx - ax), abs(by - ay)
+    if kind == "rect":
+        local = [(-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)]
+    else:
+        n = max(48, min(360, int(math.pi * (w + h) / 2)))
+        local = [(w / 2 * math.cos(math.tau * k / n), h / 2 * math.sin(math.tau * k / n)) for k in range(n)]
+    rot = math.radians(float(ruler.get("angle", 0) or 0))
+    c, s = math.cos(rot), math.sin(rot)
+    out = [(cx + x * c - y * s, cy + x * s + y * c) for x, y in local]
+    return out + out[:1]
+
+
+def _around(poly: list, points: list) -> list:
+    """The stroke carried round a closed outline: each point goes to the nearest place on it, the way round
+    followed as the stroke went (it may go past the start, round and round); corners are kept."""
+    total = sum(math.dist(a, b) for a, b in zip(poly, poly[1:])) or 1.0
+    corners, pos = [], 0.0
+    for a, b in zip(poly, poly[1:]):
+        corners.append(pos)
+        pos += math.dist(a, b)
+    arcs, last = [], None
+    for p in points:
+        s = _nearest_on_polyline(_xy(p), poly)[1]
+        if last is not None:
+            s = last + math.remainder(s - last, total)
+        arcs.append(s)
+        last = s
+    out = []
+    for a, b in zip(arcs, arcs[1:]):
+        lo, hi = min(a, b), max(a, b)
+        between = sorted({c + k * total for c in corners for k in range(math.floor(lo / total) - 1, math.ceil(hi / total) + 1)
+                          if lo < c + k * total < hi}, reverse=b < a)
+        for s in [a, *between]:
+            out.append(_at_arc(poly, s % total))
+    out.append(_at_arc(poly, arcs[-1] % total))
+    return _with(out, points)
+
+
+def perspective_grid(ruler: dict, page_size: tuple[float, float], lines: int | None = None) -> list[list[tuple[float, float]]]:
+    """パースのグリッド: the ground under the eye level as lines to the vanishing points. One point: lines to it
+    and, across, the depths a diagonal to a measuring point gives; two or three: lines to the first two."""
+    vps = [_xy(p) for p in ruler.get("points") or []]
+    n = int(lines if lines is not None else ruler.get("grid") or 0)
+    if not vps or n <= 0:
+        return []
+    w, h = page_size
+    base_y = max(h, vps[0][1] + 10) + h * 0.5  # (a line well below the eye level, beyond the page's foot)
+    spread = max(w, 1.0) * 3
+    xs = [vps[0][0] - spread / 2 + spread * k / n for k in range(n + 1)]
+    out = []
+    if len(vps) == 1:
+        vx, vy = vps[0]
+        for x in xs:
+            out.append([(vx, vy), (x, base_y)])
+        # the depths: a diagonal from the left end to a measuring point on the eye level
+        mx = vx + spread
+        (lx, ly) = (xs[0], base_y)
+        for x in xs[1:]:
+            # where the line toward the vanishing point from (x, base_y) meets the diagonal (lx, ly)→(mx, vy)
+            p = _cross((vx, vy), (x, base_y), (lx, ly), (mx, vy))
+            if p is not None and vy < p[1] <= base_y:
+                out.append([(xs[0] + (p[1] - base_y) * (vx - xs[0]) / (vy - base_y), p[1]),
+                            (xs[-1] + (p[1] - base_y) * (vx - xs[-1]) / (vy - base_y), p[1])])
+        return out
+    for v in vps[:2]:
+        for x in xs:
+            out.append([v, (x, base_y)])
+    return out
+
+
+def _cross(a, b, c, d):
+    """Where the lines a-b and c-d meet (None when parallel)."""
+    den = (a[0] - b[0]) * (c[1] - d[1]) - (a[1] - b[1]) * (c[0] - d[0])
+    if abs(den) < 1e-9:
+        return None
+    t = ((a[0] - c[0]) * (c[1] - d[1]) - (a[1] - c[1]) * (c[0] - d[0])) / den
+    return a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])
 
 
 # --- snapping ------------------------------------------------------------------------------------------
@@ -260,6 +358,11 @@ def _snap_one(ruler: dict, points: list):
             out += [to_page(radius * math.cos(a + (b - a) * k / n), radius * math.sin(a + (b - a) * k / n)) for k in range(n)]
         out.append(to_page(radius * math.cos(angles[-1]), radius * math.sin(angles[-1])))
         return _with(out, points)
+    if kind in SHAPES:
+        poly = shape_outline(ruler)
+        if _nearest_on_polyline(start, poly)[0] > reach:
+            return None
+        return _around(poly, points)
     if kind in ("parallel_curve", "multi_curve", "radial_curve"):
         poly = _curve_through(ruler, start)
         if poly is None:
@@ -409,6 +512,8 @@ def outline(ruler: dict, page_size: tuple[float, float] = (400.0, 500.0)) -> lis
         return [smooth_curve(ruler["points"])]
     if kind == "multi_curve":
         return [smooth_curve(ruler["points"]), smooth_curve(ruler["points2"])]
+    if kind in SHAPES:
+        return [shape_outline(ruler)]
     if kind == "guide":
         at = float(ruler["at"])
         w, h = page_size

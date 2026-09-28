@@ -44,6 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--spreads", action="store_true", help="sns: also one image per spread")
     export.add_argument("--color", default="rgb", choices=["rgb", "cmyk", "gray"], help="pdf/tiff/png: colour of the pages")
     export.add_argument("--icc", default=None, help="cmyk: the printer's CMYK ICC profile")
+    export.add_argument("--screen-lpi", type=float, default=None,
+                        help="tiff (black and white): print the greys as dots at this many lines per inch instead of the threshold")
+    export.add_argument("--screen-shape", default="round", choices=["round", "square", "diamond", "ellipse"], help="with --screen-lpi")
     export.add_argument("--area", default="paper", choices=["paper", "bleed", "trim"])
     export.add_argument("--fps", type=float, default=12, help="timelapse: pictures per second")
     export.add_argument("--seconds", type=float, default=None, help="timelapse: fit the whole recording into this time")
@@ -235,7 +238,8 @@ def main(argv: list[str] | None = None) -> int:
                                           fps=args.fps, seconds=args.seconds)]
             else:
                 paths = export_print(episode, args.out, fmt=args.fmt, dpi=args.dpi, color="cmyk" if args.fmt == "cmyk" else args.color,
-                                     icc=args.icc, area=args.area)
+                                     icc=args.icc, area=args.area,
+                                     screen={"lpi": args.screen_lpi, "shape": args.screen_shape} if args.screen_lpi else None)
             if args.json:
                 _print_json({"ok": True, "count": len(paths), "files": [str(p) for p in paths]})
             else:

@@ -34,10 +34,12 @@ FILTERS = [("levels", "レベル補正"), ("curve", "明るさの曲線（トー
            ("sharpen", "シャープ"), ("mosaic", "モザイク"), ("motion_blur", "移動ぼかし"), ("radial_blur", "放射ぼかし"),
            ("zoom_blur", "ズームぼかし"), ("noise", "ノイズ"), ("wave", "波形"), ("twirl", "渦巻き"), ("lineart", "線画抽出"),
            ("invert", "色調反転"), ("posterize", "階調化（ポスタリゼーション）"), ("threshold", "2 値化（しきい値）"),
-           ("bitonal", "白黒にする"), ("gradient_map", "グラデーションマップ")]
+           ("bitonal", "白黒にする"), ("gradient_map", "グラデーションマップ"), ("brightness_contrast", "明るさ・コントラスト"),
+           ("despeckle", "ゴミ取り")]
 # what a correction layer can hold (it changes colours, not shapes)
 ADJUSTMENTS = [("levels", "レベル補正"), ("curve", "トーンカーブ"), ("hue", "色相・彩度・明度"), ("invert", "色調反転"),
-               ("posterize", "階調化"), ("threshold", "2 値化"), ("gradient_map", "グラデーションマップ")]
+               ("posterize", "階調化"), ("threshold", "2 値化"), ("gradient_map", "グラデーションマップ"),
+               ("brightness_contrast", "明るさ・コントラスト")]
 
 
 def actor(name: str | None) -> str:
@@ -139,6 +141,18 @@ _ERRORS: list[tuple[str, object]] = [
     (r"scale_x must be between 0\.3 and 3", "長体・平体は 0.3〜3 です"),
     (r"screen is .*", "トーン化の設定は、線数・角度・模様です"),
     (r"screen pattern must be .*", "トーン化の模様は、網点・線・交差・砂目から選びます"),
+    (r"(?:screen shape|dot_shape) must be .*", "網の形は、丸・四角・ひし形・楕円から選びます"),
+    (r"offset_mm is \[x, y\] in mm", "網のずれは、右と下へ何ミリかの 2 つの数で決めます"),
+    (r"screen lpi must be between 10 and 150", "網点の線数は 10〜150 です"),
+    (r"a tone curve needs two points or more", "トーンカーブには点が 2 つ以上いります"),
+    (r"a .* ruler needs a box with some size.*", "長方形・楕円の定規は、大きさのある四角（対角の 2 点）で置きます"),
+    (r"grid is 0 \(none\) to 60 lines", "パースのグリッドの線の数は 0〜60 です（0 で消す）"),
+    (r"no 3D on this page to match.*", "このページに合わせる 3D がありません"),
+    (r"no 3D \S+$", "その 3D はこのページにありません"),
+    (r"the 3D is seen straight on.*", "3D を真正面から見ているので、線が平行のままで消失点がありません"),
+    (r"the camera follows a perspective ruler", "カメラを合わせられるのはパース定規です"),
+    (r"the perspective ruler has no vanishing points", "そのパース定規には消失点がありません"),
+    (r"despeckle what must be .*", "ゴミ取りで取るものは、黒い点・白い穴・両方から選びます"),
     (r"spike_jitter must be between 0 and 1", "トゲの乱れは 0〜1 です"),
     (r"tail kind must be one of .*", "しっぽの形は、くさび・ギザギザ・消える・泡から選びます"),
     (r"the ruler is fixed.*", "この定規は固定されています（先に固定を外します）"),
@@ -247,7 +261,7 @@ _ERRORS: list[tuple[str, object]] = [
     (r"the area has no size", "選んだ範囲に大きさがありません"),
     (r"perspective takes four corners.*", "遠近の変形は 4 隅（左上・右上・右下・左下）で指定します"),
     (r"the four corners must enclose an area", "4 隅が一直線に並んでいて、形になりません"),
-    (r"mesh takes nine points.*", "メッシュの変形は 3×3 の 9 点で指定します"),
+    (r"mesh takes .*", "メッシュの変形の点は、格子に並べて行ごとに指定します（ふつうは 3×3 の 9 点、格子の数は 2〜9 点）"),
     (r"a warp is perspective.*", "自由変形は遠近（4 隅）かメッシュ（9 点）で指定します"),
     (r"the transform stretches the area too far", "引き伸ばしすぎです。点を近づけます"),
     (r"a folder cannot be duplicated", "フォルダは複製できません（中のレイヤーを選んで複製します）"),
@@ -292,6 +306,8 @@ _ERRORS: list[tuple[str, object]] = [
     (r"the trace must start and end on the same line.*", "描き直すときは、同じ線の上から描き始めて、その線の上で終えます"),
     (r"no line of this layer is near the trace", "なぞった所の近くに、このレイヤーの線がありません"),
     (r"points needs the trace: two points or more", "なぞった線が短すぎます"),
+    (r"a cut needs its points", "削る所の点が要ります"),
+    (r"points: where the eraser went over the balloon", "フキダシを削る所（なぞった点）が要ります"),
     (r"texture must be hard, soft or rough", "消しゴムの質は硬め・軟らかめ・粗めから選びます"),
     (r"ignore takes draft and text", "見ないものは下描きと台詞から選びます"),
     (r"poly needs three points or more \(the lasso\)", "囲む形は 3 点以上にします"),
