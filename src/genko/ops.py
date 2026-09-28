@@ -69,7 +69,8 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "effect_to_layer", "page": "int", "id": "str", "layer_id": "str", "keep": "bool? (keep the effect too)"},
     {"op": "set_autosave", "enabled": "bool"},
     {"op": "erase_raster", "page": "int", "layer": "ink|name", "points": "[[x,y],...]", "width_mm": "float"},
-    {"op": "fill", "page": "int", "layer_id": "str?", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float? (close gaps up to this)", "expand_mm": "float? (grow under the lines)", "reference": "page|layer|reference? (reference: the layers set as reference)"},
+    {"op": "fill", "page": "int", "layer_id": "str?", "x_mm": "float", "y_mm": "float", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float? (close gaps up to this)", "expand_mm": "float? (grow under the lines)", "reference": "page|layer|reference? (reference: the layers set as reference)", "tolerance": "0..100? (色の誤差: how dark a pixel may be and still be filled over, 37)", "ignore": "[draft|text]? (page: 下描き・ネーム and the lines are not walls)"},
+    {"op": "fill_enclosed", "page": "int", "layer_id": "str?", "poly": "[[x,y],...] (the lasso)", "rgb": "[r,g,b]?", "opacity": "float?", "gap_mm": "float?", "expand_mm": "float?", "reference": "page|layer|reference?", "tolerance": "0..100?", "ignore": "[draft|text]?", "note": "囲って塗る (CLIP): only the areas the lines close inside the lasso are filled"},
     {"op": "fill_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask: {box, png}}", "rgb": "[r,g,b]?", "opacity": "float?"},
     {"op": "transform_area", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}", "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)", "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row)} (instead of matrix)", "interp": "nearest|bilinear|bicubic? (how pixels are resampled)"},
     {"op": "merge_layers", "page": "int", "ids": "[layer id] (two or more: into the lowest, as they show)", "name": "str?"},
@@ -374,6 +375,63 @@ def _vector_edit(episode, op: dict) -> None:
     changed.points = points
     changed.pressure = pressure
     layer.strokes = layer.strokes[:index] + [changed] + layer.strokes[index + 1:]
+
+
+def _ignored(op: dict) -> tuple:
+    ignore = op.get("ignore") or ()
+    if isinstance(ignore, str):
+        ignore = (ignore,)
+    bad = [v for v in ignore if v not in ("draft", "text")]
+    if bad:
+        raise ApplyError("ignore takes draft and text")
+    return tuple(ignore)
+
+
+def _fill_threshold(op: dict) -> int:
+    """色の誤差 (0..100) as the darkness a pixel needs to be a wall (37 → 160, as before)."""
+    tolerance = max(0.0, min(100.0, float(op.get("tolerance", 37.25))))
+    return max(8, min(250, round(255 * (1 - tolerance / 100))))
+
+
+def _fill_enclosed(episode, op: dict) -> None:
+    """囲って塗る (CLIP): inside the lasso, only the areas that the lines close all round are filled; an area
+    that runs out of the lasso, or leaks through a gap wider than `gap_mm`, is left."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    from genko import fill as fills
+
+    page = _require_page(episode, op)
+    target = _paint_target(page, op)
+    poly = [(float(p[0]), float(p[1])) for p in op.get("poly") or []]
+    if len(poly) < 3:
+        raise ApplyError("poly needs three points or more (the lasso)")
+    dpi = fills.FILL_DPI
+    reference = _fill_reference(episode, page, target, str(op.get("reference") or "page"), dpi, _ignored(op))
+    xs, ys = [fills.px(x, dpi) for x, _ in poly], [fills.px(y, dpi) for _, y in poly]
+    x0, y0 = max(0, min(xs) - 2), max(0, min(ys) - 2)
+    x1, y1 = min(reference.width, max(xs) + 3), min(reference.height, max(ys) + 3)
+    if x1 - x0 < 3 or y1 - y0 < 3:
+        raise ApplyError("the lasso is too small")
+    walls = np.asarray(reference.crop((x0, y0, x1, y1))) < _fill_threshold(op)
+    gap = fills.px(float(op.get("gap_mm", 0.3) or 0), dpi)
+    free = ~fills.dilate(walls, gap)
+    inside_img = Image.new("L", (x1 - x0, y1 - y0), 0)
+    ImageDraw.Draw(inside_img).polygon([(x - x0, y - y0) for x, y in zip(xs, ys)], fill=255)
+    inside = np.asarray(inside_img) > 0
+    # outside the lasso nothing is a wall, and a free ring goes round the window: whatever reaches the ring
+    # without crossing a line inside the lasso (an area running out of it, or leaking through a gap) is left
+    open_ = np.pad(free | ~inside, 1, constant_values=True)
+    reach = fills.region(open_, (0, 0))[1:-1, 1:-1]
+    enclosed = free & inside & ~reach
+    if not enclosed.any():
+        raise ApplyError("nothing closed inside the lasso (every area runs out of it, or leaks through a gap)")
+    enclosed = fills.dilate(enclosed, max(0, fills.px(float(op.get("expand_mm", 0.15) or 0), dpi)) + gap)
+    mask = Image.new("L", reference.size, 0)
+    mask.paste(Image.fromarray((enclosed * 255).astype("uint8"), "L"), (x0, y0))
+    patch = fills.mask_patch(mask, dpi, _rgb(op, episode), float(op.get("opacity", 1.0)))
+    if patch is not None:
+        target.patches.append(patch)
 
 
 def _fill_gaps(episode, op: dict) -> None:
@@ -815,15 +873,24 @@ def _frame_contains(page):
     return inside
 
 
-def _fill_reference(episode, page, target, reference: str, dpi: int):
+def _fill_reference(episode, page, target, reference: str, dpi: int, ignore=()):
     """What a fill looks at: the page as seen (every visible layer), only the target layer, or the layers
-    marked as reference (参照レイヤー), each with the panel borders."""
+    marked as reference (参照レイヤー), each with the panel borders. `ignore` (page only): "draft" leaves
+    out the draft and name layers (下描き), "text" the lines and balloons (参照しないレイヤー)."""
+    import copy as _copy
+
     from PIL import Image, ImageDraw
 
     from genko import render
 
     if reference == "page":
-        return render.render_page(page, dpi, mode="name" if not page.name_ok else "proof", episode=episode).convert("L")
+        seen = page
+        if "draft" in ignore:
+            seen = _copy.copy(page)
+            seen.layers = [layer for layer in page.layers
+                           if layer.role not in (LayerRole.DRAFT, LayerRole.NAME) and (layer.exportable or layer is target)]
+        mode = "name" if not page.name_ok and "draft" not in ignore else "proof"
+        return render.render_page(seen, dpi, mode=mode, episode=None if "text" in ignore else episode).convert("L")
     if reference not in ("layer", "reference"):
         raise ApplyError("reference must be page, layer or reference")
     looked = [target] if reference == "layer" else [layer for layer in page.layers if getattr(layer, "reference", False)]
@@ -1779,6 +1846,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
                                         "（コマの外に描くなら、そのレイヤーを set_layer panel_clip:false にする）"}
         return
 
+    if name == "fill_enclosed":
+        _fill_enclosed(episode, op)
+        return
+
     if name == "fill":
         from genko import fill as fills
 
@@ -1786,7 +1857,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         target = _paint_target(page, op)
         dpi = fills.FILL_DPI
         at = (fills.px(float(op["x_mm"]), dpi), fills.px(float(op["y_mm"]), dpi))
-        reference = _fill_reference(episode, page, target, str(op.get("reference") or "page"), dpi)
+        reference = _fill_reference(episode, page, target, str(op.get("reference") or "page"), dpi, _ignored(op))
         panel = page.frame_at(float(op["x_mm"]), float(op["y_mm"]))
         window = None
         if panel is not None:  # search only the clicked panel's box (and a little around it)
@@ -1794,7 +1865,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             window = (max(0, fills.px(r.x - 2, dpi)), max(0, fills.px(r.y - 2, dpi)),
                       min(reference.width, fills.px(r.x + r.width + 2, dpi)), min(reference.height, fills.px(r.y + r.height + 2, dpi)))
         mask = fills.region_mask(reference, at, gap_px=fills.px(float(op.get("gap_mm", 0.3) or 0), dpi),
-                                 expand_px=max(1, fills.px(float(op.get("expand_mm", 0.15) or 0), dpi)), window=window)
+                                 threshold=_fill_threshold(op),
+                                 expand_px=max(0, fills.px(float(op.get("expand_mm", 0.15) or 0), dpi)), window=window)
         if mask is None:
             raise ApplyError("nothing to fill there (the click is on a line)")
         patch = fills.mask_patch(mask, dpi, _rgb(op, episode), float(op.get("opacity", 1.0)))
@@ -3372,7 +3444,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 
 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter", "add_frame", "delete_frame"})
-RASTER_EDIT_OPS = frozenset({"put_raster", "import_psd", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "gradient_fill",
+RASTER_EDIT_OPS = frozenset({"put_raster", "import_psd", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "fill_enclosed", "gradient_fill",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
                              "trace_prims", "effect_to_layer", "add_shape", "smudge", "vector_edit", "fill_gaps", "liquify", "render_prims"})
 
@@ -3464,7 +3536,7 @@ PAGE_LOCAL_OPS = frozenset({
     "set_light_table",
     "split_frame", "cut_frame", "move_gutter", "merge_frame", "resize_frame", "set_frame", "add_frame", "delete_frame",
     "add_line", "name_ok", "advance",
-    "add_stroke", "fill", "fill_area", "transform_area", "delete_area", "paste", "set_stroke_width",
+    "add_stroke", "fill", "fill_area", "fill_enclosed", "transform_area", "delete_area", "paste", "set_stroke_width",
     "reshape_stroke", "delete_stroke", "put_raster", "set_layer", "gradient_fill", "duplicate_layer",
     "merge_down", "set_layer_mask", "paint_mask", "set_note", "select_frame", "flood_fill",
     "add_tone", "set_tone", "delete_tone", "add_effect", "edit_effect", "delete_effect", "effect_to_layer",

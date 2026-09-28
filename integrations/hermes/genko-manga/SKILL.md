@@ -135,6 +135,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   角を丸くするのは `set_frame` の `corner_mm`（半径 mm）。
 - `add_stroke` の線の描き味: `taper_in_mm`・`taper_out_mm`（入り・抜きの長さ）、`pressure_opacity`（弱い筆圧で薄く）、
   `stabilize_speed`（速い所ほど補正）、`post_fit`（この mm までのゆれを除いて曲線に置き換え）。
+- 塗りつぶし（`fill`）: `tolerance`（色の誤差 0〜100、大きいほどうすい線を越える）、`expand_mm`（線の下へ広げる）、
+  `ignore: ["draft", "text"]`（下描き・台詞を壁にしない）。`fill_enclosed`（`poly`）は囲んだ中の線で閉じた所だけを塗る。
 - ペン入れと新しいペン・ペイントのレイヤーの線は、描き始めたコマの中だけに出る（`panel_each`）。
   コマをまたいで引く線は、そのレイヤーを `set_layer panel_each: false` にする。
   `tail_hidden` は尾がフキダシの中に埋もれている所（`move_line` で大きさを変えると尾は外へ出し直される）。

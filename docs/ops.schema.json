@@ -338,7 +338,23 @@
       "opacity": "float?",
       "gap_mm": "float? (close gaps up to this)",
       "expand_mm": "float? (grow under the lines)",
-      "reference": "page|layer|reference? (reference: the layers set as reference)"
+      "reference": "page|layer|reference? (reference: the layers set as reference)",
+      "tolerance": "0..100? (色の誤差: how dark a pixel may be and still be filled over, 37)",
+      "ignore": "[draft|text]? (page: 下描き・ネーム and the lines are not walls)"
+    },
+    {
+      "op": "fill_enclosed",
+      "page": "int",
+      "layer_id": "str?",
+      "poly": "[[x,y],...] (the lasso)",
+      "rgb": "[r,g,b]?",
+      "opacity": "float?",
+      "gap_mm": "float?",
+      "expand_mm": "float?",
+      "reference": "page|layer|reference?",
+      "tolerance": "0..100?",
+      "ignore": "[draft|text]?",
+      "note": "囲って塗る (CLIP): only the areas the lines close inside the lasso are filled"
     },
     {
       "op": "fill_area",

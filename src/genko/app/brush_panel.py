@@ -187,6 +187,38 @@ class BrushPanel(QWidget):
         self.reference.addItem("参照レイヤー", "reference")
         self.reference.setToolTip("参照レイヤー: レイヤー パネルで「参照にする」にしたレイヤーの線を見て塗ります")
         self.reference.currentIndexChanged.connect(lambda _: self._save())
+        self.tolerance = QSpinBox()
+        self.tolerance.setMaximumWidth(110)
+        self.tolerance.setRange(0, 100)
+        self.tolerance.setSuffix(" %")
+        self.tolerance.setToolTip("色の誤差: 大きいほど、灰色やうすい線も越えて塗る。小さいほど、うすい線でも止まる")
+        self.tolerance.valueChanged.connect(lambda _: self._save())
+        self.expand = QDoubleSpinBox()
+        self.expand.setMaximumWidth(110)
+        self.expand.setRange(0, 1.5)
+        self.expand.setSingleStep(0.05)
+        self.expand.setSuffix(" mm")
+        self.expand.setToolTip("領域拡縮: 塗りを線の下へ広げる幅（塗り残しの白いすき間を防ぐ）")
+        self.expand.valueChanged.connect(lambda _: self._save())
+        self.skip_draft = QCheckBox("下描き・ネームは見ない")
+        self.skip_draft.setToolTip("下描きやネームの線を壁にせず、ペン入れの線だけで区切って塗る")
+        self.skip_draft.toggled.connect(lambda _: self._save())
+        self.skip_text = QCheckBox("台詞・フキダシは見ない")
+        self.skip_text.setToolTip("台詞とフキダシの線を壁にしない")
+        self.skip_text.toggled.connect(lambda _: self._save())
+        self.lasso_mode = QComboBox()
+        for label, key in (("囲んだ形を塗る", "shape"), ("囲んだ中の閉じた所だけ", "enclosed"), ("なぞった所の塗り残し", "gaps")):
+            self.lasso_mode.addItem(label, key)
+        self.lasso_mode.setToolTip("囲って塗る（Shift+G）の塗り方。閉じた所だけ: 囲んだ中で、線に囲まれた所だけを塗る。"
+                                   "塗り残し: なぞった所の、塗った色の間に残ったすき間だけを塗る")
+        self.lasso_mode.currentIndexChanged.connect(lambda _: self._save())
+        self.gap_size = QDoubleSpinBox()
+        self.gap_size.setMaximumWidth(110)
+        self.gap_size.setRange(0.2, 6)
+        self.gap_size.setSingleStep(0.1)
+        self.gap_size.setSuffix(" mm")
+        self.gap_size.setToolTip("塗り残しとみなす、すき間の大きさ（これより大きい白は残す）")
+        self.gap_size.valueChanged.connect(lambda _: self._save())
         self.crossing = QCheckBox("消しゴムで交点まで消す")
         self.crossing.setToolTip("線の交わる所までを一度に消します（はみ出しの掃除）")
         self.crossing.toggled.connect(lambda _: self._save())
@@ -217,6 +249,12 @@ class BrushPanel(QWidget):
         fill_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         fill_form.addRow("隙間を閉じる", slider_for(self.gap))
         fill_form.addRow("見る範囲", self.reference)
+        fill_form.addRow(self.skip_draft)
+        fill_form.addRow(self.skip_text)
+        fill_form.addRow("色の誤差", slider_for(self.tolerance))
+        fill_form.addRow("線の下へ広げる", slider_for(self.expand))
+        fill_form.addRow("囲って塗る", self.lasso_mode)
+        fill_form.addRow("塗り残しの大きさ", slider_for(self.gap_size))
         from genko.app import theme
 
         def section(title: str, tip: str = "") -> QLabel:
@@ -316,6 +354,12 @@ class BrushPanel(QWidget):
         self.gap.setValue(float(self.settings.value("fill/gap", 0.3)))
         self.reference.setCurrentIndex(max(0, self.reference.findData(self.settings.value("fill/reference", "page"))))
         self.crossing.setChecked(str(self.settings.value("eraser/crossing", "false")) == "true")
+        self.tolerance.setValue(int(float(self.settings.value("fill/tolerance", 37))))
+        self.expand.setValue(float(self.settings.value("fill/expand", 0.15)))
+        self.skip_draft.setChecked(str(self.settings.value("fill/skip_draft", "false")) == "true")
+        self.skip_text.setChecked(str(self.settings.value("fill/skip_text", "false")) == "true")
+        self.lasso_mode.setCurrentIndex(max(0, self.lasso_mode.findData(self.settings.value("fill/lasso", "shape"))))
+        self.gap_size.setValue(float(self.settings.value("fill/gap_size", 1.5)))
 
     def _apply_kind_defaults(self, kind: str, stored: bool = False) -> None:
         brush = brushes.brush(kind)
@@ -368,7 +412,22 @@ class BrushPanel(QWidget):
         self.settings.setValue("fill/gap", self.gap.value())
         self.settings.setValue("fill/reference", self.reference.currentData())
         self.settings.setValue("eraser/crossing", self.crossing.isChecked())
+        self.settings.setValue("fill/tolerance", self.tolerance.value())
+        self.settings.setValue("fill/expand", self.expand.value())
+        self.settings.setValue("fill/skip_draft", self.skip_draft.isChecked())
+        self.settings.setValue("fill/skip_text", self.skip_text.isChecked())
+        self.settings.setValue("fill/lasso", self.lasso_mode.currentData())
+        self.settings.setValue("fill/gap_size", self.gap_size.value())
         self.changed.emit()
+
+    def fill_fields(self) -> dict:
+        """How a fill looks for its area (fill / fill_enclosed fields)."""
+        out = {"gap_mm": self.gap.value(), "reference": self.reference.currentData(), "tolerance": self.tolerance.value(),
+               "expand_mm": round(self.expand.value(), 2)}
+        ignore = [key for key, box in (("draft", self.skip_draft), ("text", self.skip_text)) if box.isChecked()]
+        if ignore and out["reference"] == "page":
+            out["ignore"] = ignore
+        return out
 
     def _follow_taper(self) -> None:
         """The lengths only mean something while the line tapers."""

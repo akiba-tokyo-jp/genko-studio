@@ -1399,7 +1399,7 @@ class MainWindow(QMainWindow):
             [{"op": "set_frame", "page": self._current().index, "frame_id": frame_id, "bow": {"edge": edge, "mm": mm}}]))
         self.canvas.colourPicked.connect(self._on_colour_picked)
         self.canvas.fillRequested.connect(self._fill_at)
-        self.canvas.areaFilled.connect(lambda pts: self._fill_area({"poly": pts}))
+        self.canvas.areaFilled.connect(self._lasso_filled)
         self.canvas.wandRequested.connect(self._wand)
         self.canvas.shapeDrawn.connect(self._shape_drawn)
         self.canvas.vectorEdited.connect(self._vector_edit)
@@ -3633,8 +3633,29 @@ class MainWindow(QMainWindow):
         if layer is None:
             return
         self.apply_ops([{"op": "fill", "page": self._current().index, "layer_id": layer.id, "x_mm": round(x_mm, 2),
-                         "y_mm": round(y_mm, 2), "gap_mm": self.brush.gap.value(), "reference": self.brush.reference.currentData(),
-                         **self._paint_fields()}])
+                         "y_mm": round(y_mm, 2), **self.brush.fill_fields(), **self._paint_fields()}])
+
+    def _lasso_filled(self, pts: list) -> None:
+        """囲って塗る, as the brush panel says: the shape, only the closed areas inside it, or the gaps along it."""
+        mode = self.brush.lasso_mode.currentData()
+        if mode == "shape":
+            self._fill_area({"poly": pts})
+            return
+        layer = self._paint_layer()
+        if layer is None:
+            return
+        page = self._current()
+        if mode == "enclosed":
+            fields = self.brush.fill_fields()
+            self.apply_ops([{"op": "fill_enclosed", "page": page.index, "layer_id": layer.id, "poly": pts, **fields,
+                             **self._paint_fields()}])
+            return
+        from genko import selops
+
+        area = selops.stroke_area(pts, max(1.0, self.brush.size.value() * 2))
+        if area is not None:
+            self.apply_ops([{"op": "fill_gaps", "page": page.index, "layer_id": layer.id, "area": area,
+                             "max_mm": self.brush.gap_size.value(), **self._paint_fields()}])
 
     def _area(self) -> dict | None:
         return self.canvas.selection["area"] if self.canvas.selection else None
@@ -3742,8 +3763,7 @@ class MainWindow(QMainWindow):
         layer, page = self._paint_layer(), self._current()
         if layer is None or page is None:
             return
-        op = {"op": "fill_gaps", "page": page.index, "layer_id": layer.id, "max_mm": self.gap_size.value()
-              if hasattr(self, "gap_size") else 1.5}
+        op = {"op": "fill_gaps", "page": page.index, "layer_id": layer.id, "max_mm": self.brush.gap_size.value()}
         area = self._area()
         if area is not None:
             op["area"] = area
