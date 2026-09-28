@@ -88,13 +88,27 @@ class Listener(QObject):
     def _take(self) -> None:
         while self.server.hasPendingConnections():
             socket = self.server.nextPendingConnection()
+            socket.setProperty("genko_buffer", b"")
             socket.readyRead.connect(lambda s=socket: self._read(s))
-            socket.disconnected.connect(socket.deleteLater)
+            socket.disconnected.connect(lambda s=socket: self._closed(s))
+            # (on Windows the later start may have written and gone before this runs: read what is there now)
+            if socket.bytesAvailable():
+                self._read(socket)
 
-    def _read(self, socket: QLocalSocket) -> None:
-        for raw in bytes(socket.readAll()).decode("utf-8", "replace").splitlines():
-            if is_link(raw.strip()):
-                self.received.emit(raw.strip())
+    def _read(self, socket: QLocalSocket, final: bool = False) -> None:
+        data = bytes(socket.property("genko_buffer") or b"") + bytes(socket.readAll())
+        *lines, rest = data.split(b"\n")
+        if final:
+            lines, rest = [*lines, rest], b""
+        socket.setProperty("genko_buffer", rest)
+        for raw in lines:
+            text = raw.decode("utf-8", "replace").strip()
+            if is_link(text):
+                self.received.emit(text)
+
+    def _closed(self, socket: QLocalSocket) -> None:
+        self._read(socket, final=True)
+        socket.deleteLater()
 
 
 def command() -> list[str]:

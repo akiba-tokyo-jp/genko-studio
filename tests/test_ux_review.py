@@ -144,7 +144,7 @@ def test_the_ai_dialog_and_the_status_button(qapp, tmp_path):
     try:
         assert window.ai_button.text() == "AI と作る"
         dialog = AiDialog(window, window.path)
-        assert str(tmp_path.resolve()) in dialog.text.toPlainText()
+        assert json.dumps(str(tmp_path.resolve()))[1:-1] in dialog.text.toPlainText()  # (in the JSON, \\ on Windows)
         dialog.client.setCurrentIndex(1)
         assert dialog.text.toPlainText().startswith("claude mcp add genko")
         dialog.close()
