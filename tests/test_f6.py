@@ -238,7 +238,7 @@ def test_a_mesh_bends_through_its_middle():
     assert abs(middle[1] - 110) < 0.5 and abs(pts[0][1] - 130) < 0.01 and abs(pts[-1][1] - 130) < 0.01
     with pytest.raises(ApplyError):
         apply_ops(ep, [{"op": "transform_area", "page": 1, "layer_id": "m", "area": {"poly": [[0, 0], [10, 0], [10, 10]]},
-                        "warp": {"mesh": grid[:4]}}])
+                        "warp": {"mesh": grid[:5]}}])  # (five points make no grid; four are a 2×2 one)
 
 
 def test_free_transform_on_the_canvas(window):
