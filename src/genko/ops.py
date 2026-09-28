@@ -83,7 +83,8 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "liquify", "page": "int", "layer_id": "str?", "points": "[[x,y],...]", "width_mm": "float? (10)", "strength": "0..1? (0.6)", "mode": "push|pinch|bloat|twirl_cw|twirl_ccw"},
     {"op": "add_shape", "page": "int", "layer_id": "str?", "shape": "line|polyline|curve|rect|ellipse|polygon", "points": "[[x,y],…]? (line, polyline, curve)", "box": "[x,y,w,h]? (rect, ellipse, polygon)", "sides": "int? (polygon)", "angle": "float? (polygon, degrees)", "radius_mm": "float? (rect: round corners)", "closed": "bool? (polyline, curve)", "line": "bool? (default true)", "fill": "bool?", "fill_rgb": "[r,g,b]?", "rgb": "[r,g,b]?", "width_mm": "float?", "kind": "brush? (mili)", "opacity": "float?"},
     {"op": "smudge", "page": "int", "layer_id": "str?", "points": "[[x,y,pressure?],...]", "width_mm": "float?", "strength": "0..1? (0.6)", "mode": "blur|smudge|blend? (ぼかし・指先・なじませ)"},
-    {"op": "vector_edit", "page": "int", "layer_id": "str?", "action": "move_point|add_point|delete_point|connect|cut|recolor|delete", "stroke_id": "str? (move_point, add_point, delete_point, cut)", "ids": "[str]? (connect: two; recolor, delete)", "index": "int? (the point)", "to": "[x,y]? (move_point)", "at": "[x,y]? (add_point, cut)", "rgb": "[r,g,b]|null? (recolor; null: the layer's ink)"},
+    {"op": "vector_edit", "page": "int", "layer_id": "str?", "action": "move_point|add_point|delete_point|connect|cut|recolor|delete|set_pressure|simplify", "stroke_id": "str? (move_point, add_point, delete_point, cut, set_pressure, simplify)", "ids": "[str]? (connect: two; recolor, delete)", "index": "int? (the point)", "to": "[x,y]? (move_point)", "at": "[x,y]? (add_point, cut)", "rgb": "[r,g,b]|null? (recolor; null: the layer's ink)", "pressure": "float? (set_pressure: the point's width, 0.05..1.5 of the line's)", "epsilon_mm": "float? (simplify: points within this of the line go, 0.2)"},
+    {"op": "trace_edit", "page": "int", "layer_id": "str?", "action": "widen|narrow|redraw|redraw_width|join|simplify", "points": "[[x,y,pressure?],...] (the trace)", "radius_mm": "float? (how far from the trace lines are touched, 2)", "amount": "float? (widen / narrow: 0..1 a pass, 0.3)", "join_mm": "float? (join: ends this close to the trace and each other are joined, 5)", "epsilon_mm": "float? (simplify, 0.2)", "note": "線の直しをなぞって: 太らせる・細らせる（なぞった所だけ）、描き直す（形 / 太さ）、端をつなぐ、点を減らす"},
     {"op": "fill_gaps", "page": "int", "layer_id": "str?", "max_mm": "float? (1.5: spots up to this across)", "rgb": "[r,g,b]? (default the layer's commonest colour)", "area": "area? (only here)"},
     {"op": "store_area", "page": "int", "name": "str", "area": "area (kept on the page; use it later as {saved: name})"},
     {"op": "forget_area", "page": "int", "name": "str"},
@@ -262,7 +263,8 @@ def shape_points(kind: str, op: dict) -> tuple[list[tuple[float, float]], bool]:
     return points, bool(op.get("closed")) and kind == "polyline"
 
 
-VECTOR_ACTIONS = ("move_point", "add_point", "delete_point", "connect", "cut", "recolor", "delete")
+VECTOR_ACTIONS = ("move_point", "add_point", "delete_point", "connect", "cut", "recolor", "delete", "set_pressure", "simplify")
+TRACE_ACTIONS = ("widen", "narrow", "redraw", "redraw_width", "join", "simplify")
 
 
 def _stroke_by_id(layer, stroke_id: str):
@@ -270,6 +272,125 @@ def _stroke_by_id(layer, stroke_id: str):
         if getattr(stroke, "id", None) == stroke_id:
             return i, stroke
     raise ApplyError(f"no stroke {stroke_id}")
+
+
+def _trace_edit(episode, op: dict) -> None:
+    """線の直しを、なぞって: the lines near the trace (within `radius_mm`) are widened or narrowed there only
+    (線幅修正), redrawn along it (ベクター線描き直し: the part between where the trace starts and ends takes
+    its shape), given its pressure there (線幅描き直し), joined where their ends meet it (ベクター線つなぎ),
+    or given fewer points (単純化)."""
+    import copy as _copy
+
+    from genko.models import stroke_points
+
+    page = _require_page(episode, op)
+    layer = _paint_target(page, op)
+    action = str(op.get("action") or "")
+    if action not in TRACE_ACTIONS:
+        raise ApplyError(f"action must be one of {', '.join(TRACE_ACTIONS)}")
+    trace = [(float(p[0]), float(p[1]), float(p[2]) if len(p) > 2 else 0.7) for p in op.get("points") or []]
+    if len(trace) < 2:
+        raise ApplyError("points needs the trace: two points or more")
+    radius = max(0.1, float(op.get("radius_mm", 2.0)))
+    flat = [(x, y) for x, y, _ in trace]
+
+    def near(x: float, y: float) -> tuple[float, int]:
+        _i, d, _p = _nearest_segment(flat, x, y)
+        return d, _i
+
+    touched = [s for s in layer.strokes if any(near(p[0], p[1])[0] <= radius for p in s.points)]
+    if not touched:
+        raise ApplyError("no line of this layer is near the trace")
+    if action in ("widen", "narrow"):
+        amount = max(0.0, min(1.0, float(op.get("amount", 0.3))))
+        for stroke in touched:
+            pressure = list(stroke.pressure) if len(stroke.pressure) == len(stroke.points) else [0.7] * len(stroke.points)
+            for k, p in enumerate(stroke.points):
+                d = near(p[0], p[1])[0]
+                if d <= radius:
+                    w = 1 - (d / radius) ** 2  # (full at the trace, nothing at the edge of its reach)
+                    factor = 1 + amount * w if action == "widen" else 1 - 0.7 * amount * w
+                    pressure[k] = round(max(0.05, min(1.5, pressure[k] * factor)), 3)
+            stroke.pressure = pressure
+        return
+    if action == "simplify":
+        epsilon = max(0.01, float(op.get("epsilon_mm", 0.2)))
+        for stroke in touched:
+            simpler = _rdp(stroke_points(stroke), epsilon)
+            had = bool(stroke.pressure)
+            stroke.points = [(float(p[0]), float(p[1])) for p in simpler]
+            stroke.pressure = [float(p[2]) for p in simpler] if had else []
+        return
+    if action == "redraw_width":
+        for stroke in touched:
+            pressure = list(stroke.pressure) if len(stroke.pressure) == len(stroke.points) else [0.7] * len(stroke.points)
+            for k, p in enumerate(stroke.points):
+                d, seg = near(p[0], p[1])
+                if d <= radius:
+                    pressure[k] = round(max(0.05, min(1.5, (trace[seg][2] + trace[min(seg + 1, len(trace) - 1)][2]) / 2)), 3)
+            stroke.pressure = pressure
+        return
+    if action == "redraw":
+        # the one line the trace starts and ends on: the part between is replaced by the trace
+        def along_hit(stroke, x, y):
+            seg, d, _p = _nearest_segment(list(stroke.points), x, y)
+            return d, seg
+
+        best = None
+        for stroke in touched:
+            if len(stroke.points) < 2:
+                continue
+            (d0, s0), (d1, s1) = along_hit(stroke, *flat[0]), along_hit(stroke, *flat[-1])
+            if d0 <= radius and d1 <= radius and (best is None or d0 + d1 < best[0]):
+                best = (d0 + d1, stroke, s0, s1)
+        if best is None:
+            raise ApplyError("the trace must start and end on the same line (within radius_mm)")
+        _, stroke, s0, s1 = best
+        pts = stroke_points(stroke)
+        full = [(p[0], p[1], p[2] if len(p) > 2 else 0.7) for p in pts]
+        new = list(trace)
+        if s0 > s1:
+            s0, s1 = s1, s0
+            new = new[::-1]
+        before, after = full[:s0 + 1], full[s1 + 1:]
+        # the trace keeps the line's own pressure where it joins it (its shape changes, not its weight)
+        joined = before + [(x, y, full[min(s0, len(full) - 1)][2]) for x, y, _ in new] + after
+        stroke.points = [(round(x, 3), round(y, 3)) for x, y, _ in joined]
+        stroke.pressure = [round(p, 3) for _, _, p in joined] if stroke.pressure else []
+        return
+    # join: the ends near the trace, paired with the nearest other end near it
+    reach = max(0.1, float(op.get("join_mm", 5.0)))
+    ends = []
+    for stroke in touched:
+        for which in (0, -1):
+            x, y = stroke.points[which]
+            if near(x, y)[0] <= radius:
+                ends.append((stroke, which))
+    joined_any = False
+    used: set[str] = set()
+    for i, (a, wa) in enumerate(ends):
+        if a.id in used:
+            continue
+        options = [(math.dist(a.points[wa], b.points[wb]), b, wb) for b, wb in ends[i + 1:] if b is not a and b.id not in used]
+        options = [o for o in options if o[0] <= reach]
+        if not options:
+            continue
+        _d, b, wb = min(options, key=lambda o: o[0])
+        pa, pb = list(a.points), list(b.points)
+        ra = list(a.pressure) if len(a.pressure) == len(pa) else [0.7] * len(pa)
+        rb = list(b.pressure) if len(b.pressure) == len(pb) else [0.7] * len(pb)
+        if wa == 0:
+            pa, ra = pa[::-1], ra[::-1]
+        if wb == -1:
+            pb, rb = pb[::-1], rb[::-1]
+        merged = _copy.copy(a)
+        merged.points = pa + pb
+        merged.pressure = ra + rb
+        layer.strokes = [merged if s is a else s for s in layer.strokes if s is not b]
+        used.update({a.id, b.id})
+        joined_any = True
+    if not joined_any:
+        raise ApplyError("no two line ends near the trace are close enough to join (join_mm)")
 
 
 def _nearest_segment(points, x: float, y: float) -> tuple[int, float, tuple[float, float]]:
@@ -335,6 +456,23 @@ def _vector_edit(episode, op: dict) -> None:
     index, stroke = _stroke_by_id(layer, stroke_id)
     points, pressure = list(stroke.points), list(stroke.pressure)
     changed = _copy.copy(stroke)
+    if action == "set_pressure":  # 制御点ごとの線幅: one point wider or thinner than the line's width
+        k = int(op.get("index", -1))
+        if not 0 <= k < len(points):
+            raise ApplyError("index is not a point of the line")
+        pressure = pressure if len(pressure) == len(points) else [0.7] * len(points)
+        pressure[k] = round(max(0.05, min(1.5, float(op.get("pressure", 0.7)))), 3)
+        changed.pressure = pressure
+        layer.strokes[index] = changed
+        return
+    if action == "simplify":
+        from genko.models import stroke_points
+
+        simpler = _rdp(stroke_points(stroke), max(0.01, float(op.get("epsilon_mm", 0.2))))
+        changed.points = [(float(p[0]), float(p[1])) for p in simpler]
+        changed.pressure = [float(p[2]) for p in simpler] if stroke.pressure else []
+        layer.strokes[index] = changed
+        return
     if action == "move_point":
         k = int(op.get("index", -1))
         if not 0 <= k < len(points):
@@ -1924,6 +2062,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         _fill_gaps(episode, op)
         return
 
+    if name == "trace_edit":
+        _trace_edit(episode, op)
+        return
+
     from genko import layerops
 
     if name in layerops.OPS:
@@ -3444,7 +3586,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
 
 
 LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter", "add_frame", "delete_frame"})
-RASTER_EDIT_OPS = frozenset({"put_raster", "import_psd", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "fill_enclosed", "gradient_fill",
+RASTER_EDIT_OPS = frozenset({"put_raster", "import_psd", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "fill_enclosed", "trace_edit", "gradient_fill",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
                              "trace_prims", "effect_to_layer", "add_shape", "smudge", "vector_edit", "fill_gaps", "liquify", "render_prims"})
 
@@ -3543,7 +3685,7 @@ PAGE_LOCAL_OPS = frozenset({
     "edit_stroke", "simplify_stroke", "set_ruler", "add_ruler", "edit_ruler", "delete_ruler",
     "add_prim3d", "add_scene", "edit_prim", "delete_prim", "trace_prims", "lt_convert", "erase_raster", "erase",
     "reorder_layers", "stamp_material", "add_mannequin", "pose_mannequin", "set_onion", "step_onion",
-    "set_lt", "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area", "smudge", "vector_edit", "fill_gaps",
+    "set_lt", "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area", "smudge", "vector_edit", "trace_edit", "fill_gaps",
     "merge_layers", "merge_visible", "group_layers", "move_layers", "convert_layer", "set_layers", "liquify", "ruler_to_layer",
     "add_figure", "pose_figure", "add_head", "add_hand", "import_model", "set_camera", "set_light", "render_prims",
 })

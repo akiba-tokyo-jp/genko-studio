@@ -20,6 +20,8 @@ class VectorMixin:
         self.vector_point: int | None = None  # the chosen control point of the first chosen line
         self.vector_cut = False
         self._vector_drag: dict | None = None
+        self.vector_mode = "edit"  # edit | widen | narrow | redraw | redraw_width | join | simplify (なぞって直す)
+        self._vector_trace: list | None = None
 
     def _vector_strokes(self) -> list:
         return list(self.strokes_for_reshape() or []) if self.strokes_for_reshape else []
@@ -52,6 +54,10 @@ class VectorMixin:
         return None
 
     def _vector_press(self, x: float, y: float, modifiers) -> None:
+        if self.vector_mode != "edit":  # (a trace: the lines near it are mended when it ends)
+            self._vector_trace = [(x, y, float(getattr(self, "_last_pressure", 0.7) or 0.7))]
+            self.update()
+            return
         point = self._vector_point_hit(x, y)
         if point is not None and not self.vector_cut:
             self.vector_point = point
@@ -82,6 +88,12 @@ class VectorMixin:
         self.update()
 
     def _vector_move(self, x: float, y: float) -> bool:
+        if self._vector_trace is not None:
+            last = self._vector_trace[-1]
+            if math.dist(last[:2], (x, y)) >= 0.2:
+                self._vector_trace.append((x, y, float(getattr(self, "_last_pressure", 0.7) or 0.7)))
+            self.update()
+            return True
         if self._vector_drag is None:
             return False
         self._vector_drag["to"] = (x, y)
@@ -89,6 +101,12 @@ class VectorMixin:
         return True
 
     def _vector_release(self) -> bool:
+        if self._vector_trace is not None:
+            trace, self._vector_trace = self._vector_trace, None
+            if len(trace) >= 2:
+                self.vectorTraced.emit([[round(x, 3), round(y, 3), round(p, 3)] for x, y, p in trace], self.vector_mode)
+            self.update()
+            return True
         if self._vector_drag is None:
             return False
         drag, self._vector_drag = self._vector_drag, None
@@ -111,6 +129,11 @@ class VectorMixin:
         return True
 
     def _draw_vector(self, painter) -> None:
+        if self.tool == "vector" and self._vector_trace:
+            reach = max(2.0, self.vector_radius_mm * self._scale) if hasattr(self, "vector_radius_mm") else 6.0
+            painter.setPen(QPen(QColor(28, 126, 214, 90), reach * 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
+                                Qt.PenJoinStyle.RoundJoin))
+            painter.drawPolyline([self._pt(x, y) for x, y, _p in self._vector_trace])
         if self.tool != "vector" or not self.vector_ids:
             return
         strokes = {s.id: s for s in self._vector_strokes()}

@@ -472,13 +472,27 @@
       "op": "vector_edit",
       "page": "int",
       "layer_id": "str?",
-      "action": "move_point|add_point|delete_point|connect|cut|recolor|delete",
-      "stroke_id": "str? (move_point, add_point, delete_point, cut)",
+      "action": "move_point|add_point|delete_point|connect|cut|recolor|delete|set_pressure|simplify",
+      "stroke_id": "str? (move_point, add_point, delete_point, cut, set_pressure, simplify)",
       "ids": "[str]? (connect: two; recolor, delete)",
       "index": "int? (the point)",
       "to": "[x,y]? (move_point)",
       "at": "[x,y]? (add_point, cut)",
-      "rgb": "[r,g,b]|null? (recolor; null: the layer's ink)"
+      "rgb": "[r,g,b]|null? (recolor; null: the layer's ink)",
+      "pressure": "float? (set_pressure: the point's width, 0.05..1.5 of the line's)",
+      "epsilon_mm": "float? (simplify: points within this of the line go, 0.2)"
+    },
+    {
+      "op": "trace_edit",
+      "page": "int",
+      "layer_id": "str?",
+      "action": "widen|narrow|redraw|redraw_width|join|simplify",
+      "points": "[[x,y,pressure?],...] (the trace)",
+      "radius_mm": "float? (how far from the trace lines are touched, 2)",
+      "amount": "float? (widen / narrow: 0..1 a pass, 0.3)",
+      "join_mm": "float? (join: ends this close to the trace and each other are joined, 5)",
+      "epsilon_mm": "float? (simplify, 0.2)",
+      "note": "線の直しをなぞって: 太らせる・細らせる（なぞった所だけ）、描き直す（形 / 太さ）、端をつなぐ、点を減らす"
     },
     {
       "op": "fill_gaps",

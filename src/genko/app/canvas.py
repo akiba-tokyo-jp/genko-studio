@@ -104,6 +104,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
     cutRequested = Signal(str, QPointF, QPointF)  # panel id, cut line ends (mm): a cut_frame op
     frameShaped = Signal(str, object)  # panel id, [[x, y], …]: a free-form panel (set_frame poly)
     frameBowed = Signal(str, int, float)  # panel id, edge, mm: an edge bowed out (+) or in (−) (set_frame bow)
+    vectorTraced = Signal(object, str)  # the trace [[x, y, pressure], …] and how it mends the lines (trace_edit)
     frameDrawn = Signal(object)  # [[x, y], …] (mm): a new panel drawn with the panel tool (an add_frame op)
     colourPicked = Signal(object)  # (r, g, b) under the eyedropper
     fillRequested = Signal(float, float)  # the fill tool clicked here (mm)
@@ -184,6 +185,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self.binding = "right"
         self.strokes_for_reshape = None  # callable → the target layer's strokes
         self.reshape_radius_mm = 6.0
+        self.reshape_pin_ends = False  # 線つまみ: the line's ends stay where they are
+        self.vector_radius_mm = 2.0  # how far from a trace the lines are mended
         self._reshape: dict | None = None
         self.editor: InlineEditor | None = None
         self._init_guides()
@@ -1347,7 +1350,11 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 if len(a) > 2 and len(b) > 2:
                     pt.append(a[2] + (b[2] - a[2]) * t)
                 points.append(pt)
-        self._reshape = {"id": stroke.id, "orig": [list(p) for p in points], "points": points, "grab": (x_mm, y_mm)}
+        along = [0.0]
+        for a, b in zip(points, points[1:]):
+            along.append(along[-1] + math.dist(a[:2], b[:2]))
+        self._reshape = {"id": stroke.id, "orig": [list(p) for p in points], "points": points, "grab": (x_mm, y_mm),
+                         "along": along}
 
     def _reshape_move(self, x_mm: float, y_mm: float) -> None:
         import math
@@ -1356,8 +1363,13 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         dx, dy = x_mm - gx, y_mm - gy
         radius = max(0.5, self.reshape_radius_mm)
         moved = []
-        for pt in self._reshape["orig"]:
+        along = self._reshape.get("along") or []
+        total = along[-1] if along else 0.0
+        for k, pt in enumerate(self._reshape["orig"]):
             w = max(0.0, 1 - math.hypot(pt[0] - gx, pt[1] - gy) / radius) ** 2
+            if self.reshape_pin_ends and total > 0:  # (fixed ends: the pull fades to nothing at each end)
+                s, fade = along[k], min(radius, total / 2)
+                w *= min(1.0, s / fade, (total - s) / fade)
             moved.append([pt[0] + dx * w, pt[1] + dy * w] + pt[2:])
         self._reshape["points"] = moved
         self.update()
@@ -1584,7 +1596,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         if self._shape_drag is not None and self.page is not None:
             self._shape_move(*self._to_mm(pos), event.modifiers())
             return
-        if self._vector_drag is not None and self._vector_move(*self._to_mm(pos)):
+        if (self._vector_drag is not None or self._vector_trace is not None) and self._vector_move(*self._to_mm(pos)):
             return
         if self._panning:
             delta = pos - self._last_pos
@@ -1982,6 +1994,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         from PySide6.QtGui import QPointingDevice
 
         etype = event.type()
+        self._last_pressure = float(event.pressure())  # (the vector tool's traces take the pen's pressure)
         side = event.button() in (Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton) or (
             etype == QEvent.Type.TabletMove and event.buttons() & (Qt.MouseButton.RightButton | Qt.MouseButton.MiddleButton))
         if side and self.pen_button != "menu" and self.page is not None:

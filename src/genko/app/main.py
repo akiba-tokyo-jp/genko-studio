@@ -1403,6 +1403,7 @@ class MainWindow(QMainWindow):
         self.canvas.wandRequested.connect(self._wand)
         self.canvas.shapeDrawn.connect(self._shape_drawn)
         self.canvas.vectorEdited.connect(self._vector_edit)
+        self.canvas.vectorTraced.connect(self._vector_traced)
         self.canvas.selectionDrawn.connect(self._selection_drawn)
         self.canvas.selectionPainted.connect(self._selection_painted)
         self.canvas.colourAreaRequested.connect(self._select_colour)
@@ -1824,6 +1825,11 @@ class MainWindow(QMainWindow):
                                 "オンの間、線をクリックするとそこで 2 本に分かれます", True)
         self.act_vector_colour = a("選んだ線をペンの色にする", lambda: self._vector_selected("recolor"))
         self.act_vector_delete = a("選んだ線を消す", lambda: self._vector_selected("delete"))
+        self.act_vector_simplify = a("選んだ線の点を減らす", self._vector_simplify, tip="形を保ったまま、制御点を減らします（単純化）")
+        self.act_point_wider = a("選んだ点を太く", lambda: self._point_width(1.25), "Ctrl+Alt+]",
+                                 tip="線の編集で選んだ制御点のところだけ、線を太くします")
+        self.act_point_thinner = a("選んだ点を細く", lambda: self._point_width(0.8), "Ctrl+Alt+[",
+                                   tip="線の編集で選んだ制御点のところだけ、線を細くします")
         self.act_fill_gaps = a("塗り残しを塗る", self._fill_gaps, None, "塗った色の間に残った小さなすき間を、同じ色で塗ります")
         self.act_swap_colour = a("メインとサブの色を入れ替える", lambda: self.colours.swap(), "X")
         self.act_transparent = a("透明色で描く", lambda on: self.colours.transparent.setChecked(on), None,
@@ -2606,8 +2612,46 @@ class MainWindow(QMainWindow):
                              "Shift+クリックで 2 本目を選ぶ。")
         vector_note.setWordWrap(True)
         theme.hint(vector_note)
-        ts.add(("vector",), action_page([vector_note, "線", self.act_vector_cut, self.act_vector_join, self.act_vector_colour,
-                                         self.act_vector_delete]))
+        self.vector_mode = QComboBox()
+        for label, key in (("点を直す・選ぶ", "edit"), ("なぞって太らせる", "widen"), ("なぞって細らせる", "narrow"),
+                           ("なぞって描き直す（形）", "redraw"), ("なぞって太さを描き直す", "redraw_width"),
+                           ("なぞって端をつなぐ", "join"), ("なぞって点を減らす", "simplify")):
+            self.vector_mode.addItem(label, key)
+        self.vector_mode.setToolTip("なぞって直す: 線の上をなぞった所だけを直します。描き直す（形）: 線の上から描き始めて"
+                                    "同じ線の上で終えると、その間がなぞった形になる。太さを描き直す: ペンの筆圧が線の太さになる")
+        self.vector_mode.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.vector_mode.setMinimumContentsLength(6)
+        self.vector_mode.currentIndexChanged.connect(lambda _: setattr(self.canvas, "vector_mode", self.vector_mode.currentData()))
+        self.vector_reach = QDoubleSpinBox()
+        self.vector_reach.setRange(0.3, 20)
+        self.vector_reach.setSingleStep(0.5)
+        self.vector_reach.setSuffix(" mm")
+        self.vector_reach.setValue(self.canvas.vector_radius_mm)
+        self.vector_reach.setToolTip("なぞった所からこの幅の中の線を直します")
+        self.vector_reach.valueChanged.connect(lambda v: setattr(self.canvas, "vector_radius_mm", float(v)))
+        self.vector_amount = _Spin()
+        self.vector_amount.setRange(5, 100)
+        self.vector_amount.setSuffix(" %")
+        self.vector_amount.setValue(30)
+        self.vector_amount.setToolTip("太らせる・細らせるの 1 回の強さ")
+        self.vector_join = QDoubleSpinBox()
+        self.vector_join.setRange(0.5, 30)
+        self.vector_join.setSuffix(" mm")
+        self.vector_join.setValue(5.0)
+        self.vector_join.setToolTip("端をつなぐ: この距離までの端どうしをつなぐ")
+        vector_form = QWidget()
+        vfl = QFormLayout(vector_form)
+        vfl.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        vfl.setContentsMargins(0, 0, 0, 0)
+        vfl.addRow("直し方", self.vector_mode)
+        from genko.app.fields import slider_for as _slider
+
+        vfl.addRow("なぞる幅", _slider(self.vector_reach, log=True))
+        vfl.addRow("太らせ・細らせの強さ", _slider(self.vector_amount))
+        vfl.addRow("つなぐ距離", _slider(self.vector_join))
+        ts.add(("vector",), action_page([vector_note, "なぞって直す", vector_form, "線", self.act_vector_cut, self.act_vector_join,
+                                         self.act_vector_colour, self.act_vector_simplify, self.act_vector_delete,
+                                         "選んだ点", self.act_point_wider, self.act_point_thinner]))
         self.blend_mode = QComboBox()
         for label, key in (("ぼかし", "blur"), ("指先（色をのばす）", "smudge"), ("なじませ", "blend")):
             self.blend_mode.addItem(label, key)
@@ -2667,6 +2711,10 @@ class MainWindow(QMainWindow):
         radius_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         radius_form.setContentsMargins(0, 0, 0, 0)
         radius_form.addRow("つまんだ所から動く範囲", radius)
+        pin = QCheckBox("線の端は動かさない")
+        pin.setToolTip("つまんでも、線の両端は元の場所にとどまります（端に近いほど動きが小さい）")
+        pin.toggled.connect(lambda on: setattr(self.canvas, "reshape_pin_ends", bool(on)))
+        radius_form.addRow(pin)
         ts.add(("reshape",), radius_page)
         ts.add(("ruler",), action_page(["定規", menu_button("定規の種類", [self.ruler_actions[:5], self.ruler_actions[5:8],
                                                                   self.ruler_actions[8:10], self.ruler_actions[10:]]),
@@ -3743,6 +3791,42 @@ class MainWindow(QMainWindow):
             return
         self.apply_ops([{"op": "vector_edit", "page": page.index, "layer_id": layer.id, **change}])
         self.canvas.update()
+
+    def _vector_traced(self, points: list, mode: str) -> None:
+        """A trace with the vector tool: the lines near it are mended as the tool's 直し方 says."""
+        layer, page = self._paint_layer(), self._current()
+        if layer is None or page is None:
+            return
+        op = {"op": "trace_edit", "page": page.index, "layer_id": layer.id, "action": mode, "points": points,
+              "radius_mm": round(self.canvas.vector_radius_mm, 2)}
+        if mode in ("widen", "narrow"):
+            op["amount"] = self.vector_amount.value() / 100
+        if mode == "join":
+            op["join_mm"] = self.vector_join.value()
+        self.apply_ops([op])
+        self.canvas.update()
+
+    def _vector_simplify(self) -> None:
+        ids = list(self.canvas.vector_ids)
+        if not ids:
+            self.flash("先に「線の編集」（Shift+Y）で線を選びます", 3000)
+            return
+        for stroke_id in ids:
+            self._vector_edit({"action": "simplify", "stroke_id": stroke_id})
+
+    def _point_width(self, factor: float) -> None:
+        """制御点ごとの線幅: the chosen control point wider or thinner."""
+        ids, point = list(self.canvas.vector_ids), self.canvas.vector_point
+        layer = self._paint_layer()
+        if not ids or point is None or layer is None:
+            self.flash("先に「線の編集」で線を選び、□（制御点）をクリックします", 4000)
+            return
+        stroke = next((s for s in layer.strokes if s.id == ids[0]), None)
+        if stroke is None:
+            return
+        now = stroke.pressure[point] if len(stroke.pressure) == len(stroke.points) else 0.7
+        self._vector_edit({"action": "set_pressure", "stroke_id": ids[0], "index": point,
+                           "pressure": round(max(0.05, min(1.5, now * factor)), 3)})
 
     def _vector_selected(self, action: str) -> None:
         ids = list(self.canvas.vector_ids)
