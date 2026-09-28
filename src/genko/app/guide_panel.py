@@ -32,7 +32,7 @@ PRESETS = {"stand": "立つ", "walk": "歩く", "run": "走る", "sit": "座る"
 FIGURE_PRESETS = {"stand": "立つ", "walk": "歩く", "run": "走る", "sit": "座る", "point": "指さす", "arms_up": "両手を上げる",
                   "think": "考える", "kneel": "片ひざ", "peace": "ピース"}
 HAND_POSES = {"open": "開く", "relaxed": "力を抜く", "fist": "握る", "point": "指さす", "peace": "ピース", "grip": "つかむ"}
-KIND_LABELS = {"box": "箱", "cylinder": "円柱", "stairs": "階段", "floor": "床", "scene": "背景", "figure": "デッサン人形（3D）",
+KIND_LABELS = {"box": "箱", "cylinder": "円柱", "sphere": "球", "cone": "円錐", "prop": "小物", "stairs": "階段", "floor": "床", "scene": "背景", "figure": "デッサン人形（3D）",
                "head": "頭部", "hand": "手", "mesh": "モデル", "mannequin": "デッサン人形（棒）"}
 
 
@@ -129,9 +129,19 @@ class GuidePanel(QWidget):
         surfaces = QPushButton("線と面に…")
         surfaces.setToolTip("3D を描く先のレイヤーに、線（見えない所は描かない）と陰の面（トーン化もできる）で写します")
         surfaces.clicked.connect(self.render_dialog)
+        self.save_pose = QPushButton("ポーズを保存…")
+        self.save_pose.setToolTip("今のポーズ（関節と手）を名前を付けて残します。どの原稿でも「ポーズ」の一覧に出ます")
+        self.save_pose.clicked.connect(self.keep_pose)
+        from PySide6.QtCore import QSettings
+
+        self.ik = QCheckBox("手先・足先を引くと腕・脚ごと動く（IK）")
+        self.ik.setChecked(str(QSettings("Genko", "Genko Studio").value("3d/ik", True)).lower() == "true")
+        self.ik.toggled.connect(lambda on: QSettings("Genko", "Genko Studio").setValue("3d/ik", on))
         more.addWidget(self.body_button, 0, 0)
         more.addWidget(camera, 0, 1)
-        more.addWidget(surfaces, 1, 0, 1, 2)
+        more.addWidget(surfaces, 1, 0)
+        more.addWidget(self.save_pose, 1, 1)
+        more.addWidget(self.ik, 2, 0, 1, 2)
         prim_form = QFormLayout()
         prim_form.addRow("ポーズ", self.preset)
         prim_form.addRow("向き", self.turn)
@@ -237,8 +247,14 @@ class GuidePanel(QWidget):
         self.preset.addItem("（ポーズを選ぶ）", "")
         for key, label in (FIGURE_PRESETS if prim.get("kind") == "figure" else HAND_POSES if prim.get("kind") == "hand" else PRESETS).items():
             self.preset.addItem(label, key)
+        if prim.get("kind") == "figure":
+            from genko import poses
+
+            for pose in poses.user_poses():  # (the person's own, kept with the app's settings)
+                self.preset.addItem(f"自分: {pose['name']}", "own:" + pose["name"])
         self.preset.setEnabled(figure or prim.get("kind") == "hand")
         self.body_button.setEnabled(prim.get("kind") in ("figure", "hand"))
+        self.save_pose.setEnabled(prim.get("kind") == "figure")
         self.focal.setEnabled(prim.get("kind") != "mannequin")
         rot = (list(prim.get("rot") or [0, 0, 0]) + [0, 0, 0])[:3]
         self.tip.setValue(round(math.degrees(float(rot[0]))))
@@ -340,6 +356,13 @@ class GuidePanel(QWidget):
             return
         if prim.get("kind") == "mannequin":
             self.window.apply_ops([{"op": "pose_mannequin", "page": self._page().index, "id": prim["id"], "preset": key}])
+        elif prim.get("kind") == "figure" and str(key).startswith("own:"):
+            from genko import poses
+
+            pose = poses.find(key[4:])
+            if pose is not None:
+                self.window.apply_ops([{"op": "pose_figure", "page": self._page().index, "id": prim["id"],
+                                        "set_joints": pose.get("joints") or {}, "hands": pose.get("hands") or {}}])
         elif prim.get("kind") == "figure":
             self.window.apply_ops([{"op": "pose_figure", "page": self._page().index, "id": prim["id"], "preset": key}])
         elif prim.get("kind") == "hand":
@@ -347,6 +370,22 @@ class GuidePanel(QWidget):
         self.preset.setCurrentIndex(0)
 
     # --- the figure's body and hands, the camera and light, 3D into drawing ---------------------------------
+
+    def keep_pose(self) -> None:
+        """ポーズを保存: the selected figure's pose under a name (the same name: replaced)."""
+        from PySide6.QtWidgets import QInputDialog
+
+        from genko import poses
+
+        prim = self._prim()
+        if prim is None or prim.get("kind") != "figure":
+            self.window.flash("先にデッサン人形（3D）を選びます", 3000)
+            return
+        name, ok = QInputDialog.getText(self, "ポーズを保存", "ポーズの名前")
+        if ok and name.strip():
+            poses.save_pose(name, prim)
+            self._show_prim()
+            self.window.flash(f"ポーズ「{name.strip()}」を残しました（ポーズの一覧の「自分: …」）", 4000)
 
     def body_dialog(self) -> None:
         from PySide6.QtWidgets import QDialog, QDialogButtonBox
@@ -359,7 +398,14 @@ class GuidePanel(QWidget):
         dialog.setWindowTitle("体型・手")
         form = QFormLayout(dialog)
         fields = {}
+        sex = None
         if prim["kind"] == "figure":
+            sex = QComboBox()
+            for label, key in (("決めない（数だけ）", ""), ("男性", "male"), ("女性", "female")):
+                sex.addItem(label, key)
+            sex.setCurrentIndex(max(0, sex.findData((prim.get("body") or {}).get("sex") or "")))
+            sex.setToolTip("男女の体型（肩幅・腰幅・胸）。下の数はそのうえで効きます")
+            form.addRow("体型", sex)
             body = {"heads": 7.5, "shoulders": 1.0, "hips": 1.0, "build": 1.0, "legs": 1.0, **(prim.get("body") or {})}
             for key, label, lo, hi in (("heads", "等身", 4, 10), ("shoulders", "肩幅", 0.6, 1.5), ("hips", "腰幅", 0.6, 1.6),
                                        ("build", "体格（太さ）", 0.5, 1.8), ("legs", "脚の長さ", 0.6, 1.5)):
@@ -369,27 +415,54 @@ class GuidePanel(QWidget):
                 box.setValue(float(body[key]))
                 form.addRow(label, box)
                 fields[key] = box
-        hands = {}
+        from genko.mesh3d import hand_curls
+
+        hands, fingers = {}, {}
         for side, label in (("l", "左手"), ("r", "右手")) if prim["kind"] == "figure" else (("pose", "手の形"),):
             combo = QComboBox()
             for key, name in HAND_POSES.items():
                 combo.addItem(name, key)
-            now = (prim.get("hands") or {}).get(side) if prim["kind"] == "figure" else prim.get("pose")
-            combo.setCurrentIndex(max(0, combo.findData(now or "relaxed")))
+            now = (prim.get("hands") or {}).get(side) if prim["kind"] == "figure" else (
+                {"pose": prim.get("pose") or "relaxed", "curls": prim["curls"]} if prim.get("curls") else prim.get("pose"))
+            combo.setCurrentIndex(max(0, combo.findData((now.get("pose") if isinstance(now, dict) else now) or "relaxed")))
             form.addRow(label, combo)
             hands[side] = combo
+            row, spins = QHBoxLayout(), []
+            for curl in hand_curls(now or "relaxed"):  # (親指・人差し指・中指・薬指・小指: 0 まっすぐ〜1 曲げきる)
+                spin = QDoubleSpinBox()
+                spin.setRange(0, 1)
+                spin.setSingleStep(0.1)
+                spin.setDecimals(1)
+                spin.setValue(round(curl, 1))
+                spin.setToolTip("指の曲がり（左から親指・人差し指・中指・薬指・小指。0 まっすぐ、1 曲げきる）")
+                row.addWidget(spin)
+                spins.append(spin)
+            form.addRow("　指ごと", row)
+            fingers[side] = spins
+            combo.currentIndexChanged.connect(lambda _=0, c=combo, sp=spins: [s.setValue(round(v, 1)) for s, v in zip(sp, hand_curls(c.currentData()))])
         ok = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         ok.accepted.connect(dialog.accept)
         ok.rejected.connect(dialog.reject)
         form.addRow(ok)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
+        def chosen(side):
+            pose = hands[side].currentData()
+            curls = [round(sp.value(), 2) for sp in fingers[side]]
+            same = all(abs(a - b) < 0.05 for a, b in zip(curls, hand_curls(pose)))
+            return pose if same else {"pose": pose, "curls": curls}
+
         op = {"op": "pose_figure", "page": self._page().index, "id": prim["id"]}
         if prim["kind"] == "figure":
             op["body"] = {k: round(v.value(), 2) for k, v in fields.items()}
-            op["hands"] = {k: c.currentData() for k, c in hands.items()}
+            if sex is not None:
+                op["body"]["sex"] = sex.currentData()
+            op["hands"] = {k: chosen(k) for k in hands}
         else:
+            picked = chosen("pose")
             op["pose"] = hands["pose"].currentData()
+            if isinstance(picked, dict):
+                op["curls"] = picked["curls"]
         self.window.apply_ops([op])
 
     def camera_dialog(self) -> None:

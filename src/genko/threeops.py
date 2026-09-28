@@ -42,6 +42,11 @@ def _body(raw) -> dict:
         raise ApplyError("body is {heads, shoulders, hips, build, legs}")
     out = {}
     for key, value in raw.items():
+        if key == "sex":  # (男女: the build before the numbers)
+            if value not in (None, "", "male", "female"):
+                raise ApplyError("body sex is male or female")
+            out["sex"] = str(value or "")
+            continue
         if key not in BODY_LIMITS:
             raise ApplyError(f"unknown body key {key} (heads, shoulders, hips, build, legs)")
         lo, hi = BODY_LIMITS[key]
@@ -57,10 +62,27 @@ def _hands(raw) -> dict:
         raise ApplyError("hands is {l: pose, r: pose}")
     out = {}
     for side, pose in raw.items():
-        if side not in ("l", "r") or pose not in mesh3d.HAND_POSES:
+        if side not in ("l", "r"):
             raise ApplyError(f"hand poses are {', '.join(mesh3d.HAND_POSES)} (for l and r)")
-        out[side] = str(pose)
+        out[side] = _hand_pose(pose)
     return out
+
+
+def _hand_pose(pose):
+    """A pose name, or each finger's curl: [five] or {"pose", "curls": [five] | {finger: curl}} (0..1)."""
+    if isinstance(pose, str) and pose in mesh3d.HAND_POSES:
+        return pose
+    if isinstance(pose, (list, tuple)) and len(pose) == 5:
+        return {"pose": "open", "curls": [round(max(0.0, min(1.0, float(c))), 3) for c in pose]}
+    if isinstance(pose, dict):
+        base = str(pose.get("pose") or "relaxed")
+        curls = pose.get("curls")
+        if base not in mesh3d.HAND_POSES or not (curls is None or (isinstance(curls, (list, tuple)) and len(curls) == 5)
+                                                 or (isinstance(curls, dict) and all(k in mesh3d.FINGERS for k in curls))):
+            raise ApplyError(f"a hand is a pose ({', '.join(mesh3d.HAND_POSES)}) or its fingers' curls "
+                             f"({', '.join(mesh3d.FINGERS)}: 0 straight to 1 closed)")
+        return {"pose": base, "curls": [round(c, 3) for c in mesh3d.hand_curls(pose)]}
+    raise ApplyError(f"hand poses are {', '.join(mesh3d.HAND_POSES)} (for l and r)")
 
 
 def _joints(raw) -> dict:
@@ -147,6 +169,45 @@ def drag_joint(prim: dict, handle: str, target, camera=None) -> dict:
     return {"joints": {joint: {best_axis: round(math.remainder(value, math.tau), 4)}}}
 
 
+IK_CHAINS = {**{f"{p}_{end}": ((f"{p}_arm", ("x", "z")), (f"{p}_elbow", ("x",)), f"{p}_{end}") for p in "lr" for end in ("wrist", "hand")},
+             **{f"{p}_{end}": ((f"{p}_leg", ("x", "z")), (f"{p}_knee", ("x",)), f"{p}_{end}") for p in "lr" for end in ("ankle", "toe")}}
+
+
+def reach(prim: dict, handle: str, target, camera=None) -> dict:
+    """IK: the hand (or foot) pulled to `target` (page mm) and the whole limb following — the shoulder (hip)
+    swings and the elbow (knee) bends, as little as it can from where they were."""
+    if handle not in IK_CHAINS:
+        raise ApplyError(f"ik moves {', '.join(IK_CHAINS)}")
+    from genko.persp3d import _minimize
+
+    (upper, upper_axes), (lower, lower_axes), end = IK_CHAINS[handle]
+    joints = {k: dict(v) for k, v in (prim.get("joints") or {}).items()}
+    start = [float((joints.get(upper) or {}).get(a, 0.0)) for a in upper_axes] + [float((joints.get(lower) or {}).get(a, 0.0)) for a in lower_axes]
+    goal = np.array([float(target[0]), float(target[1])])
+    knee_sign = -1.0 if lower.endswith("knee") else 1.0  # (knees bend backward, elbows forward)
+
+    def pose(v) -> dict:
+        moved = {k: dict(val) for k, val in joints.items()}
+        for axis, value in zip(upper_axes, v[: len(upper_axes)]):
+            moved.setdefault(upper, {})[axis] = float(value)
+        moved.setdefault(lower, {})["x"] = float(v[-1])
+        return {**prim, "joints": moved}
+
+    def cost(v) -> float:
+        miss = float(np.linalg.norm(_page_of_joint(pose(v), end, camera) - goal))
+        bent = max(0.0, -knee_sign * float(v[-1]))  # (the elbow or knee bent the wrong way)
+        return miss + 0.02 * float(np.sum((np.array(v) - np.array(start)) ** 2)) + 40.0 * bent
+
+    best = _minimize(cost, np.array(start), steps=300)
+    for guess in ([start[0] + 0.6, start[1], start[2] + knee_sign * 0.8], [start[0] - 0.6, start[1], start[2] + knee_sign * 0.4]):
+        found = _minimize(cost, np.array(guess), steps=300)
+        if cost(found) < cost(best):
+            best = found
+    out = {upper: {a: round(math.remainder(float(v), math.tau), 4) for a, v in zip(upper_axes, best[: len(upper_axes)])},
+           lower: {"x": round(math.remainder(float(best[-1]), math.tau), 4)}}
+    return {"joints": out}
+
+
 def figure_handles(prim: dict, camera=None) -> list[tuple[str, tuple[float, float]]]:
     pts = mesh3d.figure_skeleton(prim)["points"]
     names = ["pelvis", *HANDLES]
@@ -185,6 +246,9 @@ def apply(episode, op: dict[str, Any], name: str) -> None:
                 if op["pose"] not in mesh3d.HAND_POSES:
                     raise ApplyError(f"hand poses are {', '.join(mesh3d.HAND_POSES)} (for l and r)")
                 prim["pose"] = str(op["pose"])
+                prim.pop("curls", None)
+            if op.get("curls") is not None:  # (each finger: 0 straight .. 1 closed)
+                prim["curls"] = _hand_pose({"pose": prim.get("pose") or "relaxed", "curls": op["curls"]})["curls"]
             for key in ("rot", "pos"):
                 if op.get(key) is not None:
                     prim[key] = _vec(op[key], what=key)
@@ -210,7 +274,11 @@ def apply(episode, op: dict[str, Any], name: str) -> None:
         if op.get("drag"):
             drag = dict(op["drag"])
             camera = (page.extra or {}).get("camera")
-            change = drag_joint(prim, str(drag.get("handle")), _vec(drag.get("to") or [0, 0], 2, "to"), camera)
+            to = _vec(drag.get("to") or [0, 0], 2, "to")
+            if drag.get("ik"):
+                change = reach(prim, str(drag.get("handle")), to, camera)
+            else:
+                change = drag_joint(prim, str(drag.get("handle")), to, camera)
             if "pos" in change:
                 prim["pos"] = change["pos"]
             for joint, values in change.get("joints", {}).items():

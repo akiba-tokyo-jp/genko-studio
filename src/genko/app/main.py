@@ -2036,6 +2036,8 @@ class MainWindow(QMainWindow):
                                "選択範囲の 3×3 の点を引っぱって曲げる。Enter で確定、Esc でやめる")
         self.act_warp_mesh_grid = a("自由変形（メッシュ・格子の数を決める）…", self._start_mesh_grid, None,
                                     "横と縦の格子の数（1〜8）を決めてから、点を引っぱって曲げる")
+        self.act_move_pivot = a("基準位置を動かす", self._move_pivot, None,
+                                "次にクリックした所を、選択範囲を回す・数で変形するときの中心にします（置いた＋はドラッグで動かせる）")
         self.act_transform_numbers = a("変形を数で決める…", self._transform_numbers, None,
                                        "選択範囲を、移動（mm）・拡大率（%）・回転（°）の数で変形します。基準位置（選択範囲の中の＋）を中心に")
         self.act_warp_apply = a("自由変形を確定", lambda: self.canvas.finish_warp())
@@ -2095,6 +2097,12 @@ class MainWindow(QMainWindow):
         self.act_add_cylinder = a("3D の円柱を置く", lambda: self._add_prim("cylinder"))
         self.act_add_stairs = a("3D の階段を置く", lambda: self._add_prim("stairs"))
         self.act_add_floor = a("床（パースの格子）を置く", lambda: self._add_prim("floor"), tip="地面の格子で、背景のパースの目安にします")
+        self.act_add_sphere = a("3D の球を置く", lambda: self._add_prim("sphere"))
+        self.act_add_cone = a("3D の円錐を置く", lambda: self._add_prim("cone"))
+        from genko.prim3d import PROP_LABELS
+
+        self.prop_actions = [a(f"小物: {label}", lambda _=False, k=key: self._add_prim("prop", prop=k), tip="1 つずつ置ける 3D の小物（箱の組み合わせ）")
+                             for key, label in PROP_LABELS.items()]
         from genko.prim3d import SCENE_LABELS
 
         self.scene_actions = [a(f"背景: {label}", lambda _=False, k=key: self._add_scene(k),
@@ -2215,7 +2223,8 @@ class MainWindow(QMainWindow):
                                          self.act_persp_grid, self.act_ruler_from_3d, self.act_camera_from_ruler,
                                          None, self.act_grid, self.act_grid_snap, self.act_grid_mm]),
                         ("sub", "3D", [self.act_add_figure, self.act_add_stick, self.act_add_head, self.act_add_hand, self.act_add_box,
-                                       self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, "scenes", self.act_import_obj, "poses",
+                                       self.act_add_cylinder, self.act_add_sphere, self.act_add_cone, self.act_add_stairs, self.act_add_floor,
+                                       ("sub", "小物", self.prop_actions), "scenes", self.act_import_obj, "poses",
                                        self.act_trace, self.act_del_prim])]),
             ("選択", [self.act_marquee, self.act_sel_ellipse, self.act_lasso, self.act_sel_polyline, self.act_wand, self.act_sel_colour,
                       self.act_sel_pen, self.act_sel_erase, None, self.act_select_all, self.act_deselect, self.act_sel_invert,
@@ -2223,7 +2232,7 @@ class MainWindow(QMainWindow):
                       "stock", self.act_quick_mask, None,
                       self.act_cut, self.act_copy, self.act_paste, self.act_delete_area, None, self.act_flip_h, self.act_flip_v,
                       self.act_warp_perspective, self.act_warp_mesh, self.act_warp_mesh_grid, self.act_warp_apply, self.act_transform_numbers,
-                      "interp", None,
+                      self.act_move_pivot, "interp", None,
                       self.act_fill_selection, self.act_line_width]),
             ("レイヤー", [self.act_layer_pen, self.act_layer_paint, self.act_layer_folder, None, self.act_layer_dup,
                           self.act_layer_merge, self.act_layer_delete, None, "layer_special", "layer_many", None,
@@ -3563,6 +3572,14 @@ class MainWindow(QMainWindow):
         QSettings("Genko", "Genko Studio").setValue("warp/mesh", across.value())
         self._start_warp("mesh", across.value(), down.value())
 
+    def _move_pivot(self) -> None:
+        if self._need_area() is None or not self.canvas.selection:
+            return
+        if self.canvas.tool != "marquee":
+            self.canvas.set_tool("marquee")
+        self.canvas.pivot_mode = True
+        self.flash("基準位置にする所をクリックします", 4000)
+
     def _transform_numbers(self) -> None:
         """変形の数値入力: move, scale and turn the selection by numbers, about its 基準位置."""
         from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
@@ -4515,7 +4532,12 @@ class MainWindow(QMainWindow):
         page = self._current()
         prim = next((p for p in page.prims if p.get("id") == prim_id), None) if page else None
         op = "pose_figure" if prim is not None and prim.get("kind") == "figure" else "pose_mannequin"
-        self.apply_ops([{"op": op, "page": page.index, "id": prim_id, "drag": {"handle": handle, "to": to}}])
+        drag = {"handle": handle, "to": to}
+        from genko.threeops import IK_CHAINS
+
+        if op == "pose_figure" and handle in IK_CHAINS and self.guides.ik.isChecked():
+            drag["ik"] = True  # (IK: the hand or foot pulled, the arm or leg follows)
+        self.apply_ops([{"op": op, "page": page.index, "id": prim_id, "drag": drag}])
 
     def _selected_ruler(self):
         page = self._current()
@@ -4664,7 +4686,7 @@ class MainWindow(QMainWindow):
             self.apply_ops([{"op": "delete_ruler", "page": page.index}])
             self.canvas.selected_ruler_id = None
 
-    def _add_prim(self, kind: str) -> None:
+    def _add_prim(self, kind: str, prop: str | None = None) -> None:
         from genko.frames import contains as geo_contains
         from genko.models import new_id
 
@@ -4687,8 +4709,13 @@ class MainWindow(QMainWindow):
         else:
             side = round(max(15.0, min(80.0, min(r.width, r.height) * 0.4)), 1)
             size = {"floor": [min(r.width, 200.0), 1, min(r.width, 200.0)], "stairs": [side, side, side * 1.4],
-                    "cylinder": [side * 0.8, side * 1.3, side * 0.8]}.get(kind, [side, side, side])
-            op = {"op": "add_prim3d", "page": page.index, "kind": kind, "id": prim_id, "pos": [cx, cy, 0], "size": size}
+                    "cylinder": [side * 0.8, side * 1.3, side * 0.8], "cone": [side * 0.8, side * 1.2, side * 0.8]}.get(kind, [side, side, side])
+            if kind == "prop":
+                size = {"door": [side * 0.5, side * 1.1, side * 0.1], "window": [side, side * 0.8, side * 0.1],
+                        "bed": [side * 0.9, side * 0.45, side * 1.6], "car": [side * 1.8, side * 0.7, side * 0.9],
+                        "shelf": [side * 0.8, side * 1.1, side * 0.35]}.get(prop or "", [side * 0.8, side * 0.8, side * 0.8])
+            op = {"op": "add_prim3d", "page": page.index, "kind": kind, "id": prim_id, "pos": [cx, cy, 0], "size": size,
+                  **({"prop": prop} if prop else {})}
         if self.apply_ops([op]):
             self.canvas.selected_prim_id = prim_id
             self._tool("3d")

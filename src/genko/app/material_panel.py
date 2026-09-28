@@ -35,9 +35,11 @@ KIND_WORD = {"tone": "トーン", "effect": "効果線", "image": "画像", "lin
 # the settings people change per effect kind: (key, label, lo, hi, step, default)
 EFFECT_FIELDS = {
     "focus": [("count", "本数", 10, 600, 10, 90), ("inner_r", "中心の空き（mm）", 1, 200, 1, None),
+              ("length_mm", "線の長さ（mm、0 で端まで）", 0, 400, 1, 0),
               ("jitter", "ばらつき", 0, 1, 0.05, 0.25), ("width_mm", "太さ（mm）", 0.05, 5, 0.05, 0.8),
               ("twist", "渦（°）", -180, 180, 5, 0)],
-    "speed": [("count", "本数", 5, 400, 5, 40), ("angle", "向き（°）", -180, 180, 5, 0), ("length", "長さ", 0.05, 1, 0.05, 0.7),
+    "speed": [("count", "本数", 5, 400, 5, 40), ("spacing_mm", "間隔（mm、0 で本数から）", 0, 50, 0.5, 0),
+              ("angle", "向き（°）", -180, 180, 5, 0), ("length", "長さ", 0.05, 1, 0.05, 0.7),
               ("curve", "曲がり（mm）", -80, 80, 1, 0), ("jitter", "ばらつき", 0, 1, 0.05, 0.25), ("width_mm", "太さ（mm）", 0.05, 5, 0.05, 0.5),
               ("spread_mm", "沿わせた時の幅（mm）", 2, 300, 1, 40)],
     "uni_flash": [("count", "本数", 20, 800, 10, 140), ("inner_r", "中心の空き（mm）", 1, 200, 1, None),
@@ -47,6 +49,11 @@ EFFECT_FIELDS = {
                    ("depth", "トゲの長さ", 0.05, 1, 0.05, 0.45), ("jitter", "ばらつき", 0, 1, 0.05, 0.25)],
     "white": [],
 }
+# 集中線と流線の、まとまり・乱れ（種類ごと）: under a fold so the common settings stay short
+EFFECT_MORE = [("bundle", "まとまり（1 束の本数）", 1, 50, 1, 1), ("bundle_gap", "束の間のすき間", 0, 0.95, 0.05, 0.5),
+               ("jitter_length", "乱れ: 長さ", 0, 1, 0.05, None), ("jitter_position", "乱れ: 位置", 0, 1, 0.05, None),
+               ("jitter_width", "乱れ: 太さ", 0, 1, 0.05, None)]
+TAPERS = [("中心側・終わりを細く（入り）", "in"), ("外側・始めを細く（抜き）", "out"), ("両端を細く", "both"), ("なし", "none")]
 
 
 def _icon(image) -> QIcon:
@@ -517,7 +524,9 @@ class MaterialPanel(QWidget):
             return
         params = effect.get("params") or {}
         _, box = effects.area(effect, self.window.current_page())
-        for key, label, lo, hi, step, default in EFFECT_FIELDS.get(effect.get("kind"), []):
+        kind = effect.get("kind")
+        fields = list(EFFECT_FIELDS.get(kind, [])) + (EFFECT_MORE if kind in ("focus", "speed") else [])
+        for key, label, lo, hi, step, default in fields:
             spin = QDoubleSpinBox()
             spin.setRange(lo, hi)
             spin.setSingleStep(step)
@@ -525,17 +534,30 @@ class MaterialPanel(QWidget):
             if key == "inner_r":
                 rx, _ry = effects._inner(params, box)
                 value = rx
+            elif key == "length_mm" and kind == "focus":
+                value = float(params.get(key) or 0)
             elif key == "length_mm":
                 value = float(params.get(key, max(8.0, min(box[2], box[3]) * 0.18)))
+            elif key.startswith("jitter_"):
+                value = float(params.get(key, params.get("jitter", 0.25)))
             else:
                 value = float(params.get(key, default if default is not None else lo))
             spin.setValue(value)
             spin.editingFinished.connect(lambda k=key, sp=spin: self._effect_set(k, sp.value()))
             self.effect_form.addRow(label, spin)
             self.effect_fields[key] = spin
-        kind = effect.get("kind")
         if kind in ("speed", "focus"):
             from PySide6.QtWidgets import QPushButton
+
+            taper = QComboBox()
+            for text, value in TAPERS:
+                taper.addItem(text, value)
+            now = params.get("taper", True)
+            now = ("in" if kind == "focus" else "both") if now in (True, None, "True") else ("none" if now in (False, "", "none") else now)
+            taper.setCurrentIndex(max(0, taper.findData(now)))
+            taper.activated.connect(lambda _=0, box=taper: self._effect_set("taper", box.currentData()))
+            self.effect_form.addRow("入り抜き", taper)
+            self.effect_fields["taper"] = taper
 
             key = "path" if kind == "speed" else "inner_path"
             draw = QPushButton("描いた線に沿わせる" if kind == "speed" else "中心の空きを描いた形にする")
@@ -556,8 +578,12 @@ class MaterialPanel(QWidget):
             _, box = effects.area(effect, self.window.current_page())
             rx, ry = effects._inner(effect.get("params") or {}, box)
             change = {"inner": [round(value, 2), round(value * ry / max(rx, 1e-6), 2)]}
-        elif key in ("count", "spikes"):
+        elif key in ("count", "spikes", "bundle"):
             change = {key: int(value)}
+        elif key == "taper":
+            change = {key: False if value == "none" else value}
+        elif key in ("length_mm", "spacing_mm") and not value and effect.get("kind") in ("focus", "speed"):
+            change = {key: None}  # (0: to the edge / from the count)
         else:
             change = {key: round(value, 3)}
         self.window.apply_ops([{"op": "edit_effect", "page": self.window.current_page().index, "id": effect["id"], "params": change}])

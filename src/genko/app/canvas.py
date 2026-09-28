@@ -141,6 +141,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self.flipped = False  # the view mirrored left to right (to check the drawing's balance)
         self.flipped_v = False  # 上下反転表示: the view upside down
         self.sel_pivot = None  # 基準位置: the point the selection turns about (mm; None: its middle)
+        self.pivot_mode = False  # 「基準位置を動かす」: the next click inside the marquee tool puts the pivot there
         self._zoom_drag = None  # 虫めがね: where a drag to zoom into began (screen)
         self._turning: tuple[float, float] | None = None  # Shift+Space drag: (start angle, rotation then)
         self.live_brush: dict | None = None  # the pen in hand (add_stroke fields); None draws a plain guide line
@@ -1286,7 +1287,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         out = [("scale", key, (x0 + (x1 - x0) * fx, y0 + (y1 - y0) * fy)) for key, (fx, fy) in
                {"nw": (0, 0), "n": (0.5, 0), "ne": (1, 0), "e": (1, 0.5), "se": (1, 1), "s": (0.5, 1), "sw": (0, 1), "w": (0, 0.5)}.items()]
         out.append(("rotate", "r", (cx, y0 - 18 / self._scale)))
-        out.append(("pivot", "p", tuple(self.sel_pivot) if self.sel_pivot else (cx, (y0 + y1) / 2)))  # (基準位置: drag it)
+        if self.sel_pivot:  # (基準位置, once placed: drag it; the middle is left for moving the selection)
+            out.append(("pivot", "p", tuple(self.sel_pivot)))
         # 平行ゆがみ (skew): a diamond a quarter along each side slants the box along that side
         out += [("skew", "n", (x0 + (x1 - x0) * 0.25, y0)), ("skew", "s", (x0 + (x1 - x0) * 0.75, y1)),
                 ("skew", "w", (x0, y0 + (y1 - y0) * 0.75)), ("skew", "e", (x1, y0 + (y1 - y0) * 0.25))]
@@ -1371,6 +1373,12 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         if not self.selection:
             return False
         x_mm, y_mm = self._to_mm(pos)
+        if self.pivot_mode:  # (基準位置を動かす: this click puts it)
+            self.pivot_mode = False
+            self.sel_pivot = [round(x_mm, 3), round(y_mm, 3)]
+            self._sel_drag = {"kind": "pivot", "key": "p", "start": (x_mm, y_mm), "box": self._sel_box()}
+            self.update()
+            return True
         for kind, key, (hx, hy) in self._sel_handles():
             p = self._pt(hx, hy)
             if abs(p.x() - pos.x()) <= 7 and abs(p.y() - pos.y()) <= 7:
