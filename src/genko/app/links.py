@@ -86,6 +86,19 @@ class Listener(QObject):
             QLocalServer.removeServer(_name())  # (a name left by a Genko that did not close cleanly)
             self.server.listen(_name())
         self.server.newConnection.connect(self._take)
+        # (Windows' pipes do not always say a later start has come: look now and then too)
+        from PySide6.QtCore import QTimer
+
+        self._poll = QTimer(self)
+        self._poll.setInterval(250)
+        self._poll.timeout.connect(self._look)
+        self._poll.start()
+
+    def _look(self) -> None:
+        if self.server.isListening():
+            self.server.waitForNewConnection(0)  # (a waiting start is taken in through newConnection)
+        if self.server.hasPendingConnections():
+            self._take()
 
     def _take(self) -> None:
         while self.server.hasPendingConnections():

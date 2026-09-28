@@ -238,7 +238,8 @@ def test_a_second_start_hands_its_link_to_the_open_genko(qapp):
             time.sleep(0.01)
         later.join(1)
         assert sent == [True]
-        assert got == ["genko://use-style?id=shonen"]
+        server = listener.server
+        assert got == ["genko://use-style?id=shonen"], (server.isListening(), server.fullServerName(), server.errorString())
     finally:
         listener.server.close()
         listener.deleteLater()
