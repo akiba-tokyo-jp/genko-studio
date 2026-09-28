@@ -180,7 +180,9 @@ def test_the_finish_draws_marks_by_the_face_rain_and_lines():
     assert {n["kind"] for n in notes} >= {"fx_in_art", "fx_unknown", "add_mark", "add_rain"}
     apply_ops(ep, ops)
     page = ep.pages[0]  # (apply_ops puts new objects in place)
-    assert any(layer.title == "効果（仕上げ）" and len(layer.strokes) >= 12 for layer in page.layers)
+    finishing = [layer for layer in page.layers if layer.id.startswith("fx-")]
+    assert len(finishing) == 2 and all(layer.title.endswith("・仕上げ）") for layer in finishing)  # (汗 and 雨, one layer each)
+    assert any(layer.title.startswith("雨") and len(layer.strokes) >= 12 for layer in finishing)
     again, _ = finish_plan(ep, page)
     assert not any(op["op"] in ("stamp_material", "add_stroke") for op in again)  # (once)
 
