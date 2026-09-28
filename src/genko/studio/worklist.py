@@ -80,7 +80,8 @@ def next_actions(episode: Episode, project: Path | None = None) -> list[dict]:
             continue
         review = (draft.get("reviews") or {}).get("name")
         if not review or review.get("input_hash") != draft.get("input_hash"):
-            out.append(item("review_name", "今のネームをまだ自己点検していない", ["render", "record_review", "submit_name"], n,
+            out.append(item("review_name", "今のネームをまだ自己点検していない（submit_name の返事の画像で見て record_review。"
+                            "見返すときだけ render）", ["record_review", "submit_name", "render"], n,
                             input_hash=draft.get("input_hash", "")))
             continue
         blocker = "requested" if ("name", n) in requested else "await_human:name"
