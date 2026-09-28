@@ -95,4 +95,10 @@ def draw(image, episode, page, dpi: int, colour=(20, 20, 20)) -> None:
         w, h = box[2] - box[0], box[3] - box[1]
         x = mm_to_px(item["x_mm"], dpi) - w / 2 - box[0]
         y = mm_to_px(item["y_mm"], dpi) - h / 2 - box[1]
-        draw_.text((x, y), item["text"], fill=colour, font=font)
+        # over a picture (a panel run out to the bleed) the number gets a white edge, so it reads and does not
+        # look like part of the art; on the white margin it stays as it was
+        pad = max(2, size // 5)
+        area = image.crop((int(x + box[0]) - pad, int(y + box[1]) - pad, int(x + box[2]) + pad, int(y + box[3]) + pad)).convert("L")
+        busy = area.width > 0 and area.height > 0 and area.getextrema()[0] < 235
+        edge = {"stroke_width": max(1, round(size * 0.14)), "stroke_fill": (255, 255, 255)} if busy else {}
+        draw_.text((x, y), item["text"], fill=colour, font=font, **edge)

@@ -79,6 +79,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   顔が正面を向いたアップを必ず入れる（承認時に顔の参照として切り出される）。画像を返された `inbox` のフォルダに保存し、
   `mcp__genko__import_images`（`request_id`、`images: [{file, origin}]`）で取り込む。取り込んだら人間に選んでもらう（承認を頼む）。
 - `gen_panel`: `mcp__genko__generation_request`（`page`, `frame_id`）で依頼パックを受け取る。参照画像（`files.references`）は大事な順に並んでいる。画像ツールが受けられる枚数が少ないときは前から渡す。
+  1〜2 枚しか渡せないなら `files.references_sheet`（顔・設定画・絵柄の見本を並べた 1 枚。コマと同じ縦横比なので、出てくる絵の形もそろう）を渡す。
   - `request.prompt` は下書き。書き直してよいが、登場人物の見た目の記述（`characters[].tokens_en`）は言い換えない。
     `avoid` にあるもの（文字・フキダシ・効果音・署名・枠線、モノクロのページでは色も）は描かせない。
     `request.color` が true のページはカラーで、それ以外はモノクロ（グレースケール）で作る。
@@ -101,9 +102,12 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 1 枚で決まるときの近道: `mcp__genko__take_panel_art`（`request_id`、`image: {file, origin}`、人物のいるコマは `regions`）で、
   取り込み → 採用 → 解像度が足りなければ拡大して採用し直し → 顔と人物の位置の報告、を 1 回で行う。止まったら `stopped_at` に
   どの段かが入る。候補を比べて選ぶとき（2 枚以上）と人の承認は、これまでどおり別に行う。
+  画像ツールが白い余白を残したら `crop01`（`[x, y, 幅, 高さ]`、絵の中の 0..1）で取り込む前に切り抜く（`regions` の `box01` は切り抜いた後の絵の中）。
+  拡大しても本の解像度に届かないときは警告 `dpi_short` が出る。大きい画像で作り直すか、そのまま進めるかを決める。
 - `fix_panel`: 人間の指示（`comments`）どおりに直しの依頼を作る（`instruction` に指示を入れる）。絵を採用し直すとチケットは閉じる。
   絵ではない直し（台詞・線・効果など）なら `apply_ops` で直し、`mcp__genko__resolve_ticket`（`ticket_id` は `tickets` の値、`note` に何をしたか）で閉じる。
 - `fix_page`: ネーム承認後のページへの人間の指示。`apply_ops` で直してから `resolve_ticket` で閉じる。閉じられるのは人からの直しの指示だけ（承認の依頼や質問は人が閉じる）。人は `genko studio reopen-ticket` で開き直せる。
+- 効果の言葉: 「フラッシュ」は絵の上に放射線（ウニフラッシュ）を描く。「白で塗る」「ホワイトアウト」はコマを白で塗るので、絵のあるコマには入らない。
 - `report_regions`: 採用した絵の顔と人物の位置を `mcp__genko__report_regions` で報告する（`box01` は画像の中の 0..1 の `[x, y, 幅, 高さ]`）。
   人物がいない絵なら `apply_ops` の `record_review`（`kind: "regions"`、`frame_id`、`input_hash` に採用中の候補 id）。
 - `upscale_panel`: 採用した絵が印刷の解像度に足りない。`mcp__genko__upscale`（`page`・`frame_id`、`method` は `inspect` の `upscalers`、既定 `genko`）で拡大した候補を作り、`adopt` で置き直す。
@@ -157,6 +161,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 取り消し: `mcp__genko__undo` で自分の最後の変更を取り消す。最後の変更が人のもの・承認が変わる・`project.json` が Genko の外で書き換えられた、のどれかなら断る。
 - 書き出し: `mcp__genko__export`（`format`: pdf・tiff・png・cmyk・layers・psd・pack・epub・kindle・strip・webtoon・sns・timelapse、`pages`、`dpi`、`area`: paper・bleed・trim）。承認は要らない。書き出し先は原稿の `exports/`。
   40 秒で終わらない書き出し（600 dpi の PDF・PNG・PSD など）は `job` を返す。書き出しは続いているので、1〜5 分おいて `mcp__genko__export_status`（`job`）で結果（`result` の `files`）を取る。`upscale` の `job` も同じ。
+  書き出しは Genko（MCP サーバ）の中で動く。呼び出しごとにサーバを立ち上げて閉じるつなぎ方では、閉じたときに書き出しも止まる。そのときは 90 秒ほどで `status: "lost"` になるので、同じつなぎのまま `export` と `export_status` を続けて呼び直す。
   - `color` の既定 `auto`: モノクロの原稿はグレー（劣化なし）、カラーは RGB。`bitonal` で白黒 2 階調。PDF には仕上がり線（TrimBox）と裁ち落とし（BleedBox）が入る。
   - `cmyk`（CMYK の TIFF）と pdf の `color: "cmyk"` は、`icc` に印刷所の CMYK プロファイル（.icc のパス）を渡すとそれで変換する。無ければ黒は K 版だけ・総インキ量 320% 以内。`color: "gray"` も。
   - `epub`・`kindle` は仕上がりで切り、トーンを網点にせずグレーで描く（読むときに縮小されてもモアレが出ない）。印刷と同じ網点にするなら `dots: true`。

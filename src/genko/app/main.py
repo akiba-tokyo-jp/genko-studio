@@ -4540,6 +4540,11 @@ class MainWindow(QMainWindow):
         draw_path.triggered.connect(lambda: self._draw_text_path(line_id))
         if style_of(line).get("text_path"):
             paths.addAction("パスから外す", lambda: self.apply_ops([{"op": "edit_line", "id": line_id, "style": {"text_path": None}}]))
+        if line.frame_id and self.panel_reference(line.frame_id):  # (the panel this line is in, for an AI)
+            menu.addSeparator()
+            ref = menu.addAction("AI 用の参照をコピー（この台詞のコマ）")
+            ref.setToolTip("この台詞があるコマを AI に伝える言葉（ページ・読み順・AI の使う名前）をコピーします")
+            ref.triggered.connect(lambda: self.copy_panel_reference(line.frame_id))
         menu.addSeparator()
         delete = menu.addAction("消す")
         delete.triggered.connect(lambda: self.apply_ops([{"op": "delete_line", "id": line_id}]))
@@ -4841,14 +4846,19 @@ class MainWindow(QMainWindow):
         from genko.app.style_picker import StylePicker
         from genko.studio.genreq import catalog
 
-        dialog = StylePicker(self, catalog(self.episode), self.episode.spec.expression)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        if dialog.back_to_genko:
-            if self.apply_ops([{"op": "set_style_catalog", "catalog": None}]):
-                self.flash("絵柄を Genko の言葉に戻しました", 4000)
-        elif dialog.chosen:
-            self.use_style(dialog.chosen, ask=False)
+        while True:  # (a "no" to the question goes back to the picker, not out of it)
+            dialog = StylePicker(self, catalog(self.episode), self.episode.spec.expression)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            if dialog.back_to_genko:
+                if self.apply_ops([{"op": "set_style_catalog", "catalog": None}]):
+                    self.flash("絵柄を Genko の言葉に戻しました", 4000)
+                return
+            if not dialog.chosen:
+                return
+            self._style_declined = False
+            if self.use_style(dialog.chosen, ask=False) or not self._style_declined:
+                return
 
     def open_link(self, link: str) -> None:
         """A genko:// link from a web page (the style catalog's 「この絵柄を使う」)."""
@@ -4875,6 +4885,12 @@ class MainWindow(QMainWindow):
         if self.path is None:
             self.flash("絵柄を選ぶ前に、原稿を保存します（ファイル → 別の場所に保存）", 6000)
             return False
+        from genko.studio.genreq import catalog
+
+        now = catalog(self.episode)
+        if now is not None and now.get("id") == style_id:  # (the style it has already: nothing to ask or change)
+            self.flash(f"今の絵柄（{now.get('title') or style_id}）のままです", 4000)
+            return True
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             data = stylecat.style(style_id)
@@ -4893,6 +4909,7 @@ class MainWindow(QMainWindow):
         if ask or locked or warn:
             answer = QMessageBox.question(self, "絵柄を選ぶ", f"「{self.episode.title or '無題'}」の絵柄を「{where}」にしますか？{warn}")
             if answer != QMessageBox.StandardButton.Yes:
+                self._style_declined = True
                 return False
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
@@ -5151,6 +5168,11 @@ def remember_project(path: Path) -> None:
 
 
 def run_app(path: Path | None = None, link: str | None = None) -> int:
+    import os
+
+    if os.environ.get("QT_LOGGING_RULES") and "QT_FORCE_STDERR_LOGGING" not in os.environ:
+        # (asked for Qt's log: on Windows it goes to the debugger unless told otherwise, so a log file stays empty)
+        os.environ["QT_FORCE_STDERR_LOGGING"] = "1"
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Genko Studio")
     from genko.app import links

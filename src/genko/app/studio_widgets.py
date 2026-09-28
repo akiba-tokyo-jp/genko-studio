@@ -228,11 +228,13 @@ class ApprovalBox(QWidget):
         layout.addWidget(self.list)
         layout.addWidget(self.empty)
         layout.addWidget(self.detail)
+        # the answer (reason and buttons) over the pictures: many candidates on a short screen never push the
+        # approve button out of reach
+        layout.addWidget(self.reason)
+        layout.addLayout(buttons)
         layout.addLayout(head)
         layout.addWidget(self.preview, 3)
         layout.addWidget(self.choices)
-        layout.addWidget(self.reason)
-        layout.addLayout(buttons)
         theme.primary(self.approve_button)
 
     def refresh(self) -> None:

@@ -1,8 +1,10 @@
 """Long work in the background (M2): an export that takes minutes is started, waited on for a little, and if it is
 not done by then the agent gets a job id and asks export_status later (an agent's call times out after a minute).
 
-studio/jobs/<id>.json: {id, kind, actor, status: running | done | failed, started, finished?, result?}
-The work runs in this process (the MCP server keeps running between calls).
+studio/jobs/<id>.json: {id, kind, actor, status: running | done | failed, started, beat, finished?, result?}
+The work runs in this process (the MCP server keeps running between calls). While it runs, `beat` is written every
+BEAT_S seconds; a "running" job whose beat is older than STALE_S died with its server (a client that starts the
+server for each call and closes it takes the job with it) and is reported "lost", so the agent exports again.
 """
 
 from __future__ import annotations
@@ -16,7 +18,9 @@ from pathlib import Path
 from typing import Callable
 
 WAIT_S = 40.0  # (under the agent's usual 60 s time limit)
-LOST_S = 6 * 3600  # (a job still "running" after this long died with its server)
+LOST_S = 6 * 3600  # (a job still "running" after this long died with its server, whatever its beat says)
+BEAT_S = 15.0
+STALE_S = 90.0
 
 
 def _folder(project: Path) -> Path:
@@ -35,9 +39,21 @@ def start(project: Path, kind: str, work: Callable[[], dict], *, actor: str, wai
     """Run `work` (it returns the reply as a dict) in a thread. Its reply when it ends within `wait` seconds;
     else {"job", "status": "running"}."""
     job_id = "job_" + time.strftime("%Y%m%d-%H%M%S") + "_" + uuid.uuid4().hex[:6]
-    record = {"id": job_id, "kind": kind, "actor": actor, "status": "running", "started": time.time(), "pid": os.getpid()}
+    now = time.time()
+    record = {"id": job_id, "kind": kind, "actor": actor, "status": "running", "started": now, "beat": now, "pid": os.getpid()}
     _write(project, record)
     box: dict = {}
+    ended = threading.Event()
+    lock = threading.Lock()
+
+    def beat() -> None:  # (says the work is still alive, until it ends)
+        while not ended.wait(BEAT_S):
+            with lock:
+                if not ended.is_set():
+                    try:
+                        _write(project, {**record, "beat": time.time()})
+                    except OSError:
+                        pass
 
     def run() -> None:
         try:
@@ -46,7 +62,11 @@ def start(project: Path, kind: str, work: Callable[[], dict], *, actor: str, wai
         except Exception as exc:  # (whatever broke, the job says so instead of staying "running")
             reply, status = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}, "failed"
         box["reply"] = reply
-        _write(project, {**record, "status": status, "finished": time.time(), "result": reply})
+        with lock:
+            ended.set()
+            _write(project, {**record, "status": status, "beat": time.time(), "finished": time.time(), "result": reply})
+
+    threading.Thread(target=beat, name=f"genko-{job_id}-beat", daemon=True).start()
 
     thread = threading.Thread(target=run, name=f"genko-{job_id}", daemon=True)
     thread.start()
@@ -66,14 +86,16 @@ def status(project: Path, job_id: str) -> dict:
     except (OSError, ValueError):
         return {"ok": False, "error": f"job {job_id} はない"}
     elapsed = time.time() - float(record.get("started", 0))
-    if record.get("status") == "running" and elapsed > LOST_S:
+    silent = time.time() - float(record.get("beat", record.get("started", 0)))
+    if record.get("status") == "running" and (elapsed > LOST_S or ("beat" in record and silent > STALE_S)):
         record["status"] = "lost"
     out = {"ok": True, "job": job_id, "status": record["status"], "kind": record.get("kind"), "seconds": round(elapsed, 1)}
     if record["status"] in ("done", "failed"):
         out["seconds"] = round(float(record.get("finished", time.time())) - float(record.get("started", 0)), 1)
         out["result"] = record.get("result")
     if record["status"] == "lost":
-        out["hint"] = "書き出しの途中で Genko が止まった。もう一度 export を呼ぶ"
+        out["hint"] = ("書き出しの途中で、書き出していた Genko（MCP サーバ）が止まった。もう一度 export を呼び、"
+                       "終わるまで同じつなぎのまま export_status で待つ")
     return out
 
 

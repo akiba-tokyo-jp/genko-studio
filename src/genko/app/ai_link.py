@@ -141,9 +141,15 @@ class AiDialog(QDialog):
         self.book = Path(book) if book else None
         mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
 
+        from genko.app.preferences import settings
+
         self.client = QComboBox()
         for key, label in CLIENTS:
             self.client.addItem(label, key)
+        chosen = self.client.findData(str(settings().value("ai/client", "") or ""))  # (the AI chosen last time)
+        if chosen >= 0:
+            self.client.setCurrentIndex(chosen)
+        self.client.currentIndexChanged.connect(lambda _: settings().setValue("ai/client", self.client.currentData()))
         self.client.currentIndexChanged.connect(lambda _: self._fill())
         self.root = QLineEdit(str(default_root(self.book)))
         self.root.setToolTip("AI が原稿を開いてよいフォルダ。この中の .genko の原稿だけを扱います")

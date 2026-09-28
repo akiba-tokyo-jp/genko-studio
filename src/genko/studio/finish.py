@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from genko.models import Episode, Page
+from genko import effects
 from genko.studio import fxwords
 from genko.studio.blocking import Figure
 from genko.studio.letter import _find_spot, _gap, _overlap, tail_to
@@ -156,9 +157,16 @@ def plan(episode: Episode, page: Page) -> tuple[list[dict], list[dict]]:
                 if (kind, frame.id) in existing:
                     continue
                 existing.add((kind, frame.id))
+                if kind == "white" and (panel.get("adopted") or {}).get("art"):
+                    # (白で塗る over an adopted picture would hide it all: not done without a person's hand)
+                    notes.append({"kind": "effect_skipped", "frame_id": frame.id, "effect": kind, "label": effects.LABELS[kind],
+                                  "why": "「白で塗る」はコマの絵を全部白で隠すので、絵のあるコマには入れなかった。光らせるならウニフラッシュ"})
+                    continue
                 params = _aim(kind, figs)
                 ops.append({"op": "add_effect", "page": page.index, "kind": kind, "frame_id": frame.id, "params": params})
-                note = {"kind": "add_effect", "frame_id": frame.id, "effect": kind}
+                note = {"kind": "add_effect", "frame_id": frame.id, "effect": kind, "label": effects.LABELS[kind]}
+                if kind == "white":
+                    note["why"] = "コマを白で塗った（絵はまだ無い）"
                 if kind in AIMED and not params:
                     note["why"] = "顔の位置が報告されていないので、コマの中心に向けた。report_regions で顔を報告すると顔に合わせる"
                 notes.append(note)

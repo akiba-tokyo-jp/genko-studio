@@ -10,11 +10,14 @@ request.
 
 from __future__ import annotations
 
+import io
 import json
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from PIL import Image
 
 from genko import guide
 from genko.assets import AssetStore
@@ -539,6 +542,10 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
         "composition と pose は構図の参考。線をなぞらせる必要はない",
         "画像に文字・フキダシ・効果音を描かせない。台詞は Genko が描く",
     ]
+    ordered_refs = _by_priority(r for r in files if r.startswith("refs/"))
+    sheet = _reference_sheet(files, ordered_refs, box_size.get("suggested_px") or [1024, 1024]) if purpose in ("panel_art", "draft") else None
+    if sheet is not None:
+        files["guides/references_sheet.png"] = sheet
     request: dict[str, Any] = {
         "type": TYPE,
         "purpose": purpose,
@@ -560,13 +567,15 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
             "composition": "guides/composition.png" if "guides/composition.png" in files else None,
             "pose": "guides/pose.png" if "guides/pose.png" in files else None,
             "keepout": "guides/keepout.png" if "guides/keepout.png" in files else None,
-            "references": _by_priority(r for r in files if r.startswith("refs/")),
+            "references": ordered_refs,
+            "references_sheet": "guides/references_sheet.png" if sheet is not None else None,
             "source": source,
             "mask": mask,
         },
         "order_of_instructions": ["共通制約", "ページ", "コマのメモ", "今回の指示"],
         "references_note": "references は大事な順。画像ツールが受けられる枚数が少ないときは、前から順に渡す"
-                           "（人物の顔・設定画 → 絵柄の見本 → 直前のコマ → 小物 → 場所）",
+                           "（人物の顔・設定画 → 絵柄の見本 → 直前のコマ → 小物 → 場所）。1〜2 枚しか渡せないなら "
+                           "references_sheet（大事な参照を並べた 1 枚。コマと同じ縦横比なので、出てくる絵の形もそろう）を渡す",
         "notes_for_agent": notes,
         "instruction": instruction,
     }
@@ -577,8 +586,41 @@ def build(episode: Episode, project: Path, *, purpose: str = "panel_art", mode: 
     request_id = "rq_" + digest[:10]
     request = {"type": TYPE, "id": request_id, **{k: v for k, v in request.items() if k != "type"}}
     request["import"] = {"tool": "import_images", "request_id": request_id, "inbox": f"studio/inbox/{request_id}/"}
-    request["notes_for_agent"] = notes + [f"画像は studio/inbox/{request_id}/ に置いてから import_images を呼ぶ（別マシンなら POST /v1/assets）"]
+    where = f"画像は studio/inbox/{request_id}/ に置く（別マシンなら POST /v1/assets）。"
+    if purpose in ("panel_art", "draft"):
+        request["notes_for_agent"] = notes + [where + "コマの絵は take_panel_art 1 回で取り込み・採用・拡大・顔の位置まで済む"
+                                               "（白い余白が出たら crop01 で切り抜く）"]
+        request["import"] = {"tool": "take_panel_art", "request_id": request_id, "inbox": f"studio/inbox/{request_id}/"}
+    else:
+        request["notes_for_agent"] = notes + [where + "そのあと import_images を呼ぶ"]
     return Pack(request, files)
+
+
+def _reference_sheet(files: dict[str, bytes], names: list[str], size_px) -> bytes | None:
+    """The most needed references (up to three: faces, sheets, the style) side by side on one white sheet with the
+    panel's own shape, for an image tool that takes only one or two references (and makes its picture the shape of
+    the reference it is given). None with fewer than two references."""
+    picked = [n for n in names if n in files][:3]
+    if len(picked) < 2:
+        return None
+    width, height = (int(v) for v in size_px)
+    scale = 1024 / max(width, height)
+    width, height = max(256, round(width * scale)), max(256, round(height * scale))
+    sheet = Image.new("RGB", (width, height), (255, 255, 255))
+    gap = max(8, width // 64)
+    wide = width >= height
+    slot_w = (width - gap * (len(picked) + 1)) // len(picked) if wide else width - 2 * gap
+    slot_h = height - 2 * gap if wide else (height - gap * (len(picked) + 1)) // len(picked)
+    for i, name in enumerate(picked):
+        with Image.open(io.BytesIO(files[name])) as picture:
+            ref = picture.convert("RGB")
+        ref.thumbnail((slot_w, slot_h))
+        x0 = gap + i * (slot_w + gap) if wide else gap
+        y0 = gap if wide else gap + i * (slot_h + gap)
+        sheet.paste(ref, (x0 + (slot_w - ref.width) // 2, y0 + (slot_h - ref.height) // 2))
+    out = io.BytesIO()
+    sheet.save(out, "PNG", optimize=True)
+    return out.getvalue()
 
 
 def _by_priority(names) -> list[str]:

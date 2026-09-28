@@ -553,10 +553,12 @@ class StudioService:
         return result
 
     def take_panel_art(self, project: str, request_id: str, image: dict, regions: list[dict] | None = None,
-                       upscale: bool = True, method: str = "genko") -> ToolResult:
-        """One picture for one panel in one call: import it for the request, adopt it, enlarge it when the book's
-        resolution needs it (and adopt the enlargement), then report the faces and people (when given). Stops at the
-        first step that fails and says which. Reviewing the candidates and the person's approval stay separate."""
+                       upscale: bool = True, method: str = "genko", crop01: list[float] | None = None) -> ToolResult:
+        """One picture for one panel in one call: cut it to `crop01` [x, y, w, h] (0..1 of the picture, when given:
+        a white margin the image tool left), import it for the request, adopt it, enlarge it when the book's
+        resolution needs it (and adopt the enlargement), then report the faces and people (when given; box01 is in
+        the picture as cut). Stops at the first step that fails and says which. A picture still short of the
+        book's resolution is a warning (dpi_short). Reviewing the candidates and the person's approval stay separate."""
         from genko.studio.preflight import art_layers, layer_dpi
 
         path = self.project_path(project)
@@ -575,6 +577,12 @@ class StudioService:
             steps.append({"step": step, "ok": False})
             return ToolResult(False, {"steps": steps, "stopped_at": step, **result.data}, result.issues, result.images, result.files)
 
+        if crop01:
+            cut = self._crop_inbox(path, str(request_id), image, crop01)
+            if isinstance(cut, ToolResult):
+                return stop("crop", cut)
+            image = cut
+            steps.append({"step": "crop", "ok": True, "file": image["file"]})
         imported = self.import_images(project, request_id, [image])
         if not imported.ok:
             return stop("import", imported)
@@ -585,7 +593,8 @@ class StudioService:
             return stop("adopt", adopted)
         steps.append({"step": "adopt", "ok": True, "candidate_id": candidate})
         final, shown, dpi = candidate, adopted, {}
-        if upscale and to == "art":
+        now = wanted = None
+        if to == "art":  # (the resolution is told whether it is enlarged or not)
             episode = load_episode(path)
             pg = next(p for p in episode.pages if p.index == page)
             layer = next((la for la in art_layers(pg) if la.frame_id == frame_id
@@ -593,6 +602,7 @@ class StudioService:
             now = layer_dpi(episode, pg, layer, AssetStore(path)) if layer is not None else None
             wanted = float(episode.spec.dpi or 600)
             dpi = {"dpi_before": now, "dpi_wanted": wanted}
+        if upscale and to == "art":
             if now and now < wanted * 0.95:
                 bigger = self.upscale(project, page, frame_id, candidate, None, method)
                 if not bigger.ok:
@@ -612,10 +622,41 @@ class StudioService:
             if not reported.ok:
                 return stop("report_regions", reported)
             steps.append({"step": "report_regions", "ok": True})
+        extra: list[Issue] = []
+        last = dpi.get("dpi_after") or dpi.get("dpi_before")
+        if to == "art" and last and wanted and last < wanted * 0.95:
+            extra.append(warning("dpi_short", "/image", f"採用した絵は {last:g} dpi で、本の {wanted:g} dpi に届いていない（印刷で粗く見えることがある）",
+                                 "もっと大きい画像を作って取り込み直す（コマの縦横に合わせて描かせる）か、コマを小さくする"
+                                 + ("" if upscale else "。upscale: true で Genko が拡大する")))
         return ToolResult(True, {"steps": steps, "page": page, "frame_id": frame_id, "candidate_id": candidate,
                                  "adopted": final, "upscaled": final != candidate, **dpi,
                                  "note": "候補の点検（review_candidates）と人の承認は別。作画の承認の後に採用し直すと、承認は取り直しになる"},
-                          imported.issues + shown.issues, shown.images, shown.files)
+                          imported.issues + shown.issues + extra, shown.images, shown.files)
+
+    def _crop_inbox(self, path: Path, request_id: str, image: dict, crop01) -> dict | ToolResult:
+        """The picture cut to crop01, saved beside it in the inbox; the image entry for the cut picture."""
+        from genko.studio import importer
+
+        try:
+            x, y, w, h = (float(v) for v in crop01)
+        except (TypeError, ValueError):
+            return fail("crop01 は [x, y, 幅, 高さ]（絵の中の 0..1）", "bad_crop", "/crop01")
+        if not (0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 - x + 1e-6 and 0 < h <= 1 - y + 1e-6):
+            return fail("crop01 は絵の中に収める（x, y は 0 以上、x+幅・y+高さは 1 まで）", "bad_crop", "/crop01")
+        try:
+            data = importer.read_source(path, image, 0)
+        except importer.ImportError_ as exc:
+            return fail(str(exc), "import_failed", exc.path)
+        with Image.open(io.BytesIO(data)) as picture:
+            picture.load()
+            box = (round(x * picture.width), round(y * picture.height), round((x + w) * picture.width), round((y + h) * picture.height))
+            cut = picture.crop(box)
+        folder = importer.inbox(path) / request_id
+        folder.mkdir(parents=True, exist_ok=True)
+        stem = Path(str(image.get("file") or "asset")).stem
+        target = folder / f"{stem}_crop.png"
+        cut.save(target)
+        return {**{k: v for k, v in image.items() if k != "asset"}, "file": target.relative_to(path).as_posix()}
 
     def request_fix(self, project: str, page: int, instruction: str, frame_id: str | None = None,
                     candidate_id: str | None = None, scope: str = "frame") -> ToolResult:
@@ -697,15 +738,22 @@ class StudioService:
         return ToolResult(True, {"ready": report["ok"], **{k: v for k, v in report.items() if k != "ok"},
                                  "checks": {"errors": found["errors"], "warnings": found["warnings"], "issues": found["issues"]}})
 
-    def check(self, project: str) -> ToolResult:
+    def check(self, project: str, pages: list[int] | None = None) -> ToolResult:
         """The same pre-press check a person runs in the app (入稿前の点検): lines off the paper, small or
-        overlapping text, missing art, pages that will not print…"""
+        overlapping text, missing art, pages that will not print… `pages`: only those pages' findings (and the
+        book's own, which belong to no page)."""
         from genko import checks
 
         path = self.project_path(project)
         report = checks.book(load_episode(path), path)
+        found = report["issues"]
+        if pages:
+            wanted = {int(p) for p in pages}
+            found = [i for i in found if i.get("page") is None or i.get("page") in wanted]
         # (the list goes in "checks", as preflight's does: "issues" is the reply's own list of tool problems)
-        return ToolResult(True, {"errors": report["errors"], "warnings": report["warnings"], "checks": report["issues"]})
+        return ToolResult(True, {"errors": sum(1 for i in found if i.get("level") == "error"),
+                                 "warnings": sum(1 for i in found if i.get("level") == "warning"), "checks": found,
+                                 **({"pages": sorted({int(p) for p in pages})} if pages else {})})
 
     def undo(self, project: str) -> ToolResult:
         """Take back this agent's own latest saved change (never a person's, never an approval)."""

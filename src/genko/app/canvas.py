@@ -2014,13 +2014,34 @@ def _gpu_class():
     return _GPU[0]
 
 
-def _gl_resized(canvas, _w: int, _h: int) -> None:
-    """After a resize (maximizing, restoring) some drivers hand the widget a new context, and a picture already sent
-    to the card may come back black (Intel HD 5500): the page's picture is sent again as a new picture."""
+def _gl_resend(canvas) -> None:
     rendered = getattr(canvas, "_rendered", None)
     if rendered is not None:
         canvas._rendered = (rendered[0], QPixmap.fromImage(rendered[1].toImage()))  # (a new picture: sent again)
     canvas.update()
+
+
+def _gl_resized(canvas, _w: int, _h: int) -> None:
+    """After a resize (maximizing, restoring, dragging the window's edge) or the screen turning, some drivers hand
+    the widget a new context, and a picture already sent to the card may come back black (Intel HD 5500): the
+    page's picture is sent again as a new picture now, and once more when the resizing has stopped (an edge drag is
+    dozens of resizes in a row)."""
+    _gl_resend(canvas)
+    timer = getattr(canvas, "_gl_settle", None)
+    if timer is None:
+        timer = QTimer(canvas)
+        timer.setSingleShot(True)
+        timer.setInterval(250)
+        timer.timeout.connect(lambda: _gl_resend(canvas))
+        canvas._gl_settle = timer
+        window = canvas.window().windowHandle()
+        if window is not None:  # (the screen turned or the window moved to another screen)
+            window.screenChanged.connect(lambda _screen: timer.start())
+            screen = window.screen()
+            if screen is not None:
+                screen.orientationChanged.connect(lambda _o: timer.start())
+                screen.geometryChanged.connect(lambda _g: timer.start())
+    timer.start()
 
 
 def gpu_available() -> bool:

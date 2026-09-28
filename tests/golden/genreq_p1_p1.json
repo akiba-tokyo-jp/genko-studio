@@ -120,6 +120,7 @@
       "pose": "guides/pose.png",
       "keepout": "guides/keepout.png",
       "references": [],
+      "references_sheet": null,
       "source": null,
       "mask": null
     },
@@ -129,7 +130,7 @@
       "コマのメモ",
       "今回の指示"
     ],
-    "references_note": "references は大事な順。画像ツールが受けられる枚数が少ないときは、前から順に渡す（人物の顔・設定画 → 絵柄の見本 → 直前のコマ → 小物 → 場所）",
+    "references_note": "references は大事な順。画像ツールが受けられる枚数が少ないときは、前から順に渡す（人物の顔・設定画 → 絵柄の見本 → 直前のコマ → 小物 → 場所）。1〜2 枚しか渡せないなら references_sheet（大事な参照を並べた 1 枚。コマと同じ縦横比なので、出てくる絵の形もそろう）を渡す",
     "notes_for_agent": [
       "英語のプロンプトの (in Japanese) の部分は日本語のまま入っている。英語で受ける画像ツールには訳して渡す",
       "composition と pose は構図の参考。線をなぞらせる必要はない",
@@ -137,7 +138,7 @@
     ],
     "instruction": null,
     "import": {
-      "tool": "import_images"
+      "tool": "take_panel_art"
     }
   },
   "guide_ink": {

@@ -198,7 +198,7 @@ def _art_items(episode: Episode, page, requested: set, requested_sheets: set, pr
         if request is not None:
             files = _inbox_files(project, request["id"])
             why = (f"inbox に取り込んでいない画像が {files} 枚ある" if files else "依頼パックの画像を生成して inbox に置き、取り込む")
-            out.append(item("import_pending", why, ["import_images"], page.index, request_id=request["id"],
+            out.append(item("import_pending", why, ["take_panel_art", "import_images"], page.index, request_id=request["id"],
                             input_hash=request["id"], **target))
         elif status == "candidates":
             out.append(item("review_candidates", "候補を比べて評価し、採用するか直す",
@@ -210,11 +210,11 @@ def _art_items(episode: Episode, page, requested: set, requested_sheets: set, pr
             open_fixes = [t for t in episode.tickets
                           if t.get("status") == "open" and t.get("kind") == "fix" and t.get("frame_id") == frame.id]
             out.append(item("fix_panel", "人間からコマの修正指示がある（絵を採用し直すと閉じる。絵以外の直しは resolve_ticket で閉じる）",
-                            ["inspect", "generation_request", "import_images", "adopt", "apply_ops", "resolve_ticket"], page.index,
+                            ["inspect", "generation_request", "take_panel_art", "apply_ops", "resolve_ticket"], page.index,
                             comments=[t.get("text", "") for t in open_fixes], tickets=[t["id"] for t in open_fixes], **target))
         else:
             out.append(item("gen_panel", "このコマの絵がまだない（依頼パックを作り、外部で生成して取り込む）",
-                            ["inspect", "generation_request", "import_images", "candidates", "adopt"], page.index, **target))
+                            ["inspect", "generation_request", "take_panel_art", "candidates"], page.index, **target))
     if not waiting:
         blocker = "requested" if ("art", page.index) in requested else "await_human:art"
         out.append(item("await_human", "人間の作画承認待ち", ["render", "request_approval"], page.index, blocked_by=[blocker], gate="art"))

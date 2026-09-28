@@ -22,8 +22,10 @@ def _add(kind: str, key: str, en: str, *words: str) -> None:
 
 _add("effect", "focus", "focus lines closing in (drawn later by Genko: leave them out)", "集中線", "focus", "focus_lines", "集中")
 _add("effect", "speed", "motion (speed lines drawn later by Genko: leave them out)", "流線", "speed", "speed_lines", "スピード線", "効果線")
-_add("effect", "white", "a bright flash", "フラッシュ", "white", "flash", "白フラッシュ")
-_add("effect", "uni_flash", "a sudden shock (a spiky flash drawn later by Genko)", "ウニフラッシュ", "uni_flash", "ウニフラ")
+# (a flash keeps the picture: rays drawn over it. Only the plain words for a white-out paint the panel white)
+_add("effect", "white", "a white-out (the panel left plain white)", "white", "ホワイトアウト", "白で塗る", "白塗り")
+_add("effect", "uni_flash", "a sudden shock or a bright flash (a spiky flash drawn later by Genko)", "ウニフラッシュ", "uni_flash",
+     "ウニフラ", "フラッシュ", "flash", "白フラッシュ", "閃光")
 _add("effect", "beta_flash", "a dark shock (a black flash drawn later by Genko)", "ベタフラッシュ", "beta_flash", "ベタフラ")
 _add("rain", "rain", "rainy weather, wet surfaces", "雨", "rain", "rainy", "雨粒", "大雨", "小雨")
 _add("mark", "汗", "a nervous sweat drop", "汗", "sweat", "冷や汗", "焦り")

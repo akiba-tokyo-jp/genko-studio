@@ -242,9 +242,10 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.export_proof, project, format, background=True)
 
     @tool
-    def check(project: str) -> list:
-        """人が使う「入稿前の点検」と同じ点検（はみ出し・文字の小ささや重なり・印刷に出ない絵など）。見つかった一つずつは checks に入る。"""
-        return call(service.check, project)
+    def check(project: str, pages: list[int] | None = None) -> list:
+        """人が使う「入稿前の点検」と同じ点検（はみ出し・文字の小ささや重なり・印刷に出ない絵など）。見つかった一つずつは checks に入る。
+        pages を渡すとそのページの指摘だけ（本全体の指摘＝ページの無いものは入る）。"""
+        return call(service.check, project, pages)
 
     @tool
     def undo(project: str) -> list:
@@ -339,12 +340,14 @@ def build_server(root: Path, actor: str) -> MCPServer:
 
     @tool
     def take_panel_art(project: str, request_id: str, image: dict, regions: list[dict] | None = None,
-                       upscale: bool = True, method: str = "genko") -> list:
+                       upscale: bool = True, method: str = "genko", crop01: list[float] | None = None) -> list:
         """コマ 1 つの絵を 1 回で入れる: 依頼（request_id）の画像を取り込み、採用し、原稿の解像度に足りなければ拡大して
         採用し直し、regions があれば顔と人物の位置を報告する（report_regions と同じ形）。image は import_images の 1 件と
         同じ {file（studio/inbox/ の中）か asset, origin}。止まったら stopped_at にどの段かが入る。候補の点検
-        （review_candidates）と人の承認は別に行う。upscale=false で拡大しない。"""
-        return call(service.take_panel_art, project, request_id, image, regions, upscale, method)
+        （review_candidates）と人の承認は別に行う。upscale=false で拡大しない（dpi_before・dpi_wanted は返る）。
+        crop01 [x, y, 幅, 高さ]（絵の中の 0..1）で、取り込む前に切り抜く（画像ツールが残した白い余白など。regions の
+        box01 は切り抜いた後の絵の中）。拡大しても本の解像度に届かないときは警告 dpi_short。"""
+        return call(service.take_panel_art, project, request_id, image, regions, upscale, method, crop01)
 
     @tool
     def style_catalog(project: str | None = None, style_id: str | None = None) -> list:

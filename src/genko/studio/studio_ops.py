@@ -707,8 +707,20 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
             raise _err(f"nothing adopted as {to} in {frame.id}")
         cand = _by_id(_panel(frame).get("candidates", []), (layer.source or {}).get("candidate", ""))
         px = cand.get("px") if cand else _asset_size(episode, layer.asset)
+        before = layer.placement_mm
         _place(page, frame, layer, px, str(op.get("fit") or layer.fit), str(op.get("clip_to") or layer.clip_to),
                tuple(op.get("offset_mm") or (0.0, 0.0)), float(op.get("scale") or 1.0), _pad(cand or {}))
+        after = layer.placement_mm
+        if to == "art" and before is not None and after is not None and before.width > 0 and before.height > 0:
+            # the faces and people reported on the picture move and scale with it (the checks and the finish
+            # would otherwise look at where they were)
+            sx, sy = after.width / before.width, after.height / before.height
+            for region in _panel(frame).get("regions", []) or []:
+                rect = region.get("rect_mm")
+                if isinstance(rect, (list, tuple)) and len(rect) == 4:
+                    x, y, w, h = (float(v) for v in rect)
+                    region["rect_mm"] = [round(after.x + (x - before.x) * sx, 2), round(after.y + (y - before.y) * sy, 2),
+                                         round(w * sx, 2), round(h * sy, 2)]
         return
 
     if name == "place_asset":
