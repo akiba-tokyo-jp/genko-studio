@@ -372,6 +372,27 @@ class PreferencesDialog(QDialog):
                 box.addItem(label, tool)
             box.setCurrentIndex(max(0, box.findData(workspace.modifier_tool(key))))
             box.setToolTip("押している間だけ、この道具になります（離すと元の道具に戻る）")
+        from PySide6.QtWidgets import QHBoxLayout
+
+        store0 = settings()
+        self.backup_folder = QLineEdit(str(store0.value("backup/folder", "") or ""))
+        self.backup_folder.setPlaceholderText("残さない")
+        self.backup_folder.setToolTip("保存したとき、原稿をまるごと zip にしてこのフォルダに残します（原稿の外のフォルダ）")
+        pick_backup = QPushButton("選ぶ…")
+        pick_backup.clicked.connect(self._pick_backup)
+        self.backup_row = QWidget()
+        brow = QHBoxLayout(self.backup_row)
+        brow.setContentsMargins(0, 0, 0, 0)
+        brow.addWidget(self.backup_folder, 1)
+        brow.addWidget(pick_backup)
+        self.backup_minutes = QSpinBox()
+        self.backup_minutes.setRange(1, 1440)
+        self.backup_minutes.setSuffix(" 分ごと")
+        self.backup_minutes.setValue(int(float(store0.value("backup/minutes", 30) or 30)))
+        self.backup_keep = QSpinBox()
+        self.backup_keep.setRange(1, 200)
+        self.backup_keep.setSuffix(" 個まで残す")
+        self.backup_keep.setValue(int(store0.value("backup/keep", 10) or 10))
         self.hold_swap = QCheckBox("道具のキーを押している間だけ持ち替える")
         self.hold_swap.setChecked(workspace.hold_swap())
         self.hold_swap.setToolTip("道具のキー（E の消しゴムなど）を長く押していると、離したときに前の道具に戻ります。短く押すと持ち替えたまま")
@@ -391,7 +412,9 @@ class PreferencesDialog(QDialog):
                            ("描く・操作", [("ペンのカーソル", self.cursor), ("Alt を押している間", self.alt_tool),
                                          ("Ctrl を押している間", self.ctrl_tool), ("", self.per_tool), ("", self.hold_swap), ("", self.radial)]),
                            ("長い時間の作業", [("休憩の案内", self.rest), ("", self.motion), ("", self.requests)]),
-                           ("原稿と保存", [("新しい原稿の用紙", self.paper), ("変更を保存するまで", self.save_after)])):
+                           ("原稿と保存", [("新しい原稿の用紙", self.paper), ("変更を保存するまで", self.save_after),
+                                        ("バックアップの置き場所", self.backup_row), ("バックアップの間隔", self.backup_minutes),
+                                        ("バックアップの数", self.backup_keep)])):
             wl.addRow(look.section(head))
             for label, widget in rows:
                 wl.addRow(label, widget)
@@ -466,6 +489,13 @@ class PreferencesDialog(QDialog):
         return {name: [editor.keySequence().toString()] if not editor.keySequence().isEmpty() else []
                 for name, editor in self.editors.items()}
 
+    def _pick_backup(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        folder = QFileDialog.getExistingDirectory(self, "バックアップを残すフォルダ", self.backup_folder.text())
+        if folder:
+            self.backup_folder.setText(folder)
+
     def save(self) -> None:
         from genko.app import comfort
 
@@ -510,5 +540,8 @@ class PreferencesDialog(QDialog):
         store.setValue("keys/alt_tool", self.alt_tool.currentData())
         store.setValue("keys/ctrl_tool", self.ctrl_tool.currentData())
         store.setValue("keys/hold_swap", self.hold_swap.isChecked())
+        store.setValue("backup/folder", self.backup_folder.text().strip())
+        store.setValue("backup/minutes", self.backup_minutes.value())
+        store.setValue("backup/keep", self.backup_keep.value())
         apply_all(self.window)
         self.accept()

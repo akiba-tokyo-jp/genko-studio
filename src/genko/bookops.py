@@ -13,18 +13,18 @@ from genko.ops import ApplyError
 
 OPS = ("add_cover", "replace_text", "set_assignee")  # (for_pages is expanded by apply_ops: see expand)
 # ops that for_pages must not repeat (they change the pages themselves or the whole book)
-NOT_PER_PAGE = {"add_page", "delete_page", "duplicate_page", "reorder", "move_page", "set_page_spec", "add_cover", "for_pages",
+NOT_PER_PAGE = {"add_page", "delete_page", "duplicate_page", "import_pages", "reorder", "move_page", "set_page_spec", "add_cover", "for_pages",
                 "replace_text", "approve", "revoke", "name_ok", "advance", "set_bible", "set_script", "define_brush", "set_brush"}
 
 
 def add_cover(episode, op: dict) -> None:
     kind = str(op.get("kind") or "front")
     if kind not in covers.KINDS:
-        raise ApplyError("kind must be front, back or jacket")
+        raise ApplyError("kind must be front, back, jacket or obi")
     if any((covers.cover_of(p) or {}).get("kind") == kind for p in episode.pages):
         raise ApplyError(f"the book already has a {kind} cover")
     cover = {"kind": kind}
-    if kind == "jacket":
+    if kind in covers.WRAPS:
         spine = float(op.get("spine_mm") or 0)
         flap = float(op.get("flap_mm") or 0)
         if not 0 < spine <= 100:
@@ -32,6 +32,11 @@ def add_cover(episode, op: dict) -> None:
         if not 0 <= flap <= 200:
             raise ApplyError("flap_mm is 0..200 mm")
         cover.update(spine_mm=spine, flap_mm=flap)
+        if kind == "obi":
+            height = float(op.get("height_mm") or 50)
+            if not 15 <= height <= 200:
+                raise ApplyError("height_mm is the band's height (15..200 mm)")
+            cover["height_mm"] = height
     spec = covers.spec_for(episode.spec, cover)
     page = Page(index=len(episode.pages) + 1, spec=spec, frames=[], binding=episode.binding)
     page.numero = False

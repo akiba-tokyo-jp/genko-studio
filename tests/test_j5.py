@@ -368,8 +368,15 @@ def test_fill_and_correction_layers_from_the_panel(window, qapp):
     panel._add_special("fill", "ベタ塗り", {"rgb": [1, 2, 3]})
     target = window.target_layer()
     assert target.kind == LayerKind.FILL and target.fill == {"rgb": [1, 2, 3]}
-    params = panel._adjust_fields("gradient_map")
-    assert len(params["colors"]) == 2
+    from PySide6.QtWidgets import QDialog
+
+    exec_ = QDialog.exec
+    QDialog.exec = lambda self: QDialog.DialogCode.Accepted  # (the colours editor, accepted as it opens)
+    try:
+        params = panel._adjust_fields("gradient_map")
+    finally:
+        QDialog.exec = exec_
+    assert len(params["stops"]) == 2 and params["stops"][0][1] == list(window.brush.rgb)
     panel._add_special("adjust", "反転", {"adjust": {"kind": "invert"}})
     assert window.target_layer().kind == LayerKind.ADJUST
     panel._set("color_prints", True)

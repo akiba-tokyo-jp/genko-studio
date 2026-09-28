@@ -11,7 +11,7 @@ import random
 from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps
 
 KINDS = ("blur", "sharpen", "hue", "levels", "curve", "mosaic", "bitonal", "motion_blur", "radial_blur", "zoom_blur", "noise",
-         "wave", "twirl", "lineart", "invert", "posterize", "threshold", "gradient_map", "brightness_contrast", "despeckle")
+         "wave", "twirl", "lineart", "invert", "posterize", "threshold", "gradient_map", "brightness_contrast", "despeckle", "glow", "rain")
 # the ones a correction layer (調整レイヤー) can hold: they change colours, not shapes
 ADJUSTMENTS = ("levels", "curve", "hue", "invert", "posterize", "threshold", "gradient_map", "bitonal", "brightness_contrast")
 CHANNELS = ("rgb", "r", "g", "b")
@@ -231,6 +231,37 @@ def apply_filter(image: Image.Image, kind: str, params: dict | None = None) -> I
     if kind == "brightness_contrast":
         table = brightness_contrast_table(params.get("brightness", 0), params.get("contrast", 0))
         return _by_channel(rgba, table, str(params.get("channel") or "rgb"))
+    if kind == "glow":  # 光彩拡散: the bright parts spread out in a soft light, added over the picture
+        radius = max(0.5, float(params.get("radius", 12)))
+        amount = max(0.0, min(3.0, float(params.get("amount", 0.8))))
+        cut = int(params.get("threshold", 170))
+        rgb = rgba.convert("RGB")
+        bright = ImageOps.grayscale(rgb).point(lambda v: 255 if v >= cut else 0)
+        light = Image.composite(rgb, Image.new("RGB", rgb.size, (0, 0, 0)), bright).filter(ImageFilter.GaussianBlur(radius))
+        glow = ImageEnhance.Brightness(light).enhance(amount)
+        return _keep_alpha(ImageChops.screen(rgb, glow), rgba)
+    if kind == "rain":  # 雨: slanted streaks all over, in the given colour
+        from PIL import ImageDraw
+
+        rng = random.Random(str(params.get("seed", "rain")))
+        w, h = rgba.size
+        count = max(1, min(20000, int(float(params.get("count", 400)))))
+        length = max(2.0, float(params.get("length", 40)))
+        width = max(1, round(float(params.get("width", 1))))
+        angle = math.radians(90 + float(params.get("angle", 15)))  # (0: straight down; + leans to the right)
+        colour = tuple(int(v) for v in (params.get("rgb") or [255, 255, 255]))[:3]
+        opacity = max(0.0, min(1.0, float(params.get("opacity", 0.7))))
+        layer = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        dx, dy = math.cos(angle), math.sin(angle)
+        for _ in range(count):
+            x, y = rng.uniform(-length, w + length), rng.uniform(-length, h)
+            size = length * (0.5 + rng.random())
+            draw.line([(x, y), (x - dx * size, y + dy * size)], fill=(*colour, round(255 * opacity * (0.5 + 0.5 * rng.random()))), width=width)
+        out = rgba.copy()
+        out.alpha_composite(layer)
+        out.putalpha(ImageChops.lighter(rgba.split()[3], layer.split()[3]))
+        return out
     if kind == "despeckle":
         dpi = float(params.get("dpi", 200))
         size = float(params["size_px"]) if params.get("size_px") is not None else float(params.get("size_mm", 0.3)) / 25.4 * dpi
@@ -366,6 +397,16 @@ def apply_filter(image: Image.Image, kind: str, params: dict | None = None) -> I
         return _keep_alpha(grey.convert("RGB"), rgba)
     if kind == "gradient_map":
         # the picture's lightness mapped to a row of colours (dark → first)
+        if params.get("stops"):  # (each colour at its own place: [[position 0..1, [r,g,b]], …])
+            import numpy as np
+
+            placed = sorted((float(st[0]), [int(v) for v in st[1]][:3]) for st in params["stops"])
+            if len(placed) < 2:
+                raise ValueError("a gradient map needs two colours or more")
+            xs = np.linspace(0, 1, 256)
+            table = [[round(v) for v in np.interp(xs, [p for p, _ in placed], [c[ch] for _, c in placed])] for ch in range(3)]
+            grey = ImageOps.grayscale(rgba)
+            return _keep_alpha(Image.merge("RGB", [grey.point(table[ch]) for ch in range(3)]), rgba)
         stops = [tuple(int(v) for v in c)[:3] for c in params.get("colors") or [[0, 0, 0], [255, 255, 255]]]
         if len(stops) < 2:
             raise ValueError("a gradient map needs two colours or more")

@@ -23,7 +23,7 @@ NAMES = {
     "add_layer": "レイヤーを足した", "delete_layer": "レイヤーを消した", "set_layer": "レイヤーの設定を変えた",
     "reorder_layers": "レイヤーの順番を変えた", "duplicate_layer": "レイヤーを複製した", "merge_down": "レイヤーを結合した",
     "set_layer_mask": "マスクを変えた", "paint_mask": "マスクを描いた", "filter_raster": "フィルターをかけた",
-    "add_page": "ページを足した", "delete_page": "ページを消した", "duplicate_page": "ページを複製した", "move_page": "ページを並べ替えた",
+    "add_page": "ページを足した", "delete_page": "ページを消した", "duplicate_page": "ページを複製した", "import_pages": "ほかの原稿のページを取り込んだ", "move_page": "ページを並べ替えた",
     "set_spread": "見開きを変えた", "set_page_spec": "原稿用紙を変えた", "set_nombre": "ノンブルを変えた",
     "add_tone": "トーンを貼った", "set_tone": "トーンを変えた", "add_effect": "効果線を入れた", "edit_effect": "効果線を変えた",
     "delete_effect": "効果線を消した", "effect_to_layer": "効果線を線にした", "stamp_material": "素材を置いた",

@@ -45,6 +45,8 @@ class Brush:
     post_smooth: int = 0  # 0..10: the line is smoothed after it is drawn (後補正)
     aa: str = "normal"  # none | weak | normal | strong (アンチエイリアス)
     stamp_size: float = 1.0  # each stamp's size as a share of the width (spray drops are small)
+    mix: float = 0.0  # 0..1: how much of the colour already on the layer the brush takes up (下地混色)
+    stretch: float = 0.0  # 0..1: how long the colour picked up is carried along the line (色延び)
 
 
 BRUSHES: dict[str, Brush] = {b.key: b for b in (
@@ -92,7 +94,8 @@ PATTERNS = ("", "dots", "dash", "lace", "grass", "hearts", "stars", "leaves")
 AAS = ("none", "weak", "normal", "strong")
 LIMITS = {"width_mm": (0.05, 50.0), "min_pressure": (0.0, 1.0), "gamma": (0.2, 5.0), "opacity": (0.05, 1.0), "stabilize": (0, 15),
           "tip_angle": (-360.0, 360.0), "tip_ratio": (0.02, 1.0), "spacing": (0.0, 5.0), "scatter": (0.0, 5.0),
-          "size_jitter": (0.0, 1.0), "count": (1, 12), "speed": (0.0, 1.0), "post_smooth": (0, 10), "stamp_size": (0.02, 3.0)}
+          "size_jitter": (0.0, 1.0), "count": (1, 12), "speed": (0.0, 1.0), "post_smooth": (0, 10), "stamp_size": (0.02, 3.0),
+          "mix": (0.0, 1.0), "stretch": (0.0, 1.0)}
 
 
 def brush(key: str | None) -> Brush:
@@ -105,7 +108,7 @@ def everything() -> dict[str, Brush]:
 
 
 J3_KEYS = ("tip", "tip_angle", "tip_ratio", "tip_follow", "tip_rotation", "tip_png", "spacing", "scatter", "size_jitter", "turn_jitter", "count",
-           "pattern", "speed", "post_smooth", "aa", "stamp_size")
+           "pattern", "speed", "post_smooth", "aa", "stamp_size", "mix", "stretch")
 
 
 def to_dict(b: Brush) -> dict:
@@ -152,7 +155,7 @@ def from_dict(key: str, data: dict, base: str | None = None) -> Brush:
                  spacing=float(merged["spacing"]), scatter=float(merged["scatter"]), size_jitter=float(merged["size_jitter"]),
                  turn_jitter=bool(merged["turn_jitter"]), count=int(merged["count"]), pattern=str(merged["pattern"] or ""),
                  speed=float(merged["speed"]), post_smooth=int(merged["post_smooth"]), aa=str(merged["aa"]),
-                 stamp_size=float(merged["stamp_size"]))
+                 stamp_size=float(merged["stamp_size"]), mix=float(merged["mix"]), stretch=float(merged["stretch"]))
 
 
 def register(definitions: dict) -> None:

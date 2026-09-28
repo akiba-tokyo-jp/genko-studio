@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import dataclasses
 
-KINDS = ("front", "back", "jacket")
-LABELS = {"front": "表紙", "back": "裏表紙", "jacket": "カバー（表紙・背・裏表紙・袖）"}
+KINDS = ("front", "back", "jacket", "obi")
+LABELS = {"front": "表紙", "back": "裏表紙", "jacket": "カバー（表紙・背・裏表紙・袖）", "obi": "帯（表・背・裏・袖、低い紙）"}
+WRAPS = ("jacket", "obi")  # (one wide sheet round the book: its covers, spine and flaps)
 
 
 def cover_of(page) -> dict | None:
@@ -26,12 +27,17 @@ def is_cover(page) -> bool:
 def spec_for(book, cover: dict):
     """The paper of a cover: a book page for the front and back; for a jacket, the width of both covers, the
     spine and the flaps (the same bleed and paper allowance as the book)."""
-    if cover.get("kind") != "jacket":
+    if cover.get("kind") not in WRAPS:
         return book
     trim_w, trim_h = book.trim_size()
     spine, flap = float(cover.get("spine_mm") or 0), float(cover.get("flap_mm") or 0)
     width = 2 * trim_w + spine + 2 * flap
     allowance_w = book.width_mm - trim_w
+    if cover.get("kind") == "obi":  # 帯: as wide as a jacket, as tall as the band
+        band = float(cover.get("height_mm") or 50)
+        allowance_h = book.height_mm - trim_h
+        return dataclasses.replace(book, width_mm=round(width + allowance_w, 3), height_mm=round(band + allowance_h, 3),
+                                   trim_w_mm=round(width, 3), trim_h_mm=round(band, 3), preset="cover", margins_mm=None)
     return dataclasses.replace(book, width_mm=round(width + allowance_w, 3), trim_w_mm=round(width, 3), trim_h_mm=trim_h,
                                preset="cover", margins_mm=None)
 
@@ -39,7 +45,7 @@ def spec_for(book, cover: dict):
 def folds(page, binding: str = "right") -> list[tuple[float, float, str]]:
     """The parts of a jacket across the page (x0, x1 in mm, name), from the left, and so where it folds."""
     cover = cover_of(page)
-    if not cover or cover.get("kind") != "jacket":
+    if not cover or cover.get("kind") not in WRAPS:
         return []
     t = page.trim_rect_mm()
     spine, flap = float(cover.get("spine_mm") or 0), float(cover.get("flap_mm") or 0)

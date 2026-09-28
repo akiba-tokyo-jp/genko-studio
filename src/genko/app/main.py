@@ -1271,7 +1271,7 @@ class LayerPanel(QWidget):
 
     def _adjust_fields(self, kind: str, now: dict | None = None) -> dict | None:
         if kind == "gradient_map":
-            return {"colors": (now or {}).get("colors") or [list(self.window.brush.rgb), list(self.window.colours.sub_rgb)]}
+            return gradient_map_dialog(self, now or {}, [list(self.window.brush.rgb), list(self.window.colours.sub_rgb)])
         return filter_params(self, kind, now)
 
     def _add_adjust(self, kind: str) -> None:
@@ -1389,6 +1389,26 @@ def _watch_key_releases() -> None:
         _KEY_WATCH.append(watcher)
 
 
+def _page_list(text: str, count: int) -> list[int] | None:
+    """"1-4, 7" → [1, 2, 3, 4, 7] (empty: None, every page); ValueError when it cannot be read or is out of 1..count."""
+    text = (text or "").replace("、", ",").replace("〜", "-").replace("～", "-").strip()
+    if not text:
+        return None
+    out: list[int] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            a, b = (int(v) for v in part.split("-", 1))
+            out += list(range(min(a, b), max(a, b) + 1))
+        else:
+            out.append(int(part))
+    if not out or any(not 1 <= p <= count for p in out):
+        raise ValueError(text)
+    return list(dict.fromkeys(out))
+
+
 def transform_matrix(pivot, dx: float = 0, dy: float = 0, sx: float = 1, sy: float = 1, angle: float = 0) -> list[float]:
     """[a, b, c, d, e, f] (x' = ax + cy + e, y' = bx + dy + f): scale, then turn (degrees, clockwise on the page),
     both about `pivot`, then move by (dx, dy) mm."""
@@ -1457,57 +1477,84 @@ def screen_dialog(parent, now: dict) -> dict | None:
     return spec
 
 
+def gradient_map_dialog(parent, now: dict, default_colours) -> dict | None:
+    """グラデーションマップ: the colours dark to light, any number, each at its place."""
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout
+
+    from genko.app.gradient_editor import StopsEditor
+
+    if now.get("stops"):
+        stops = [[float(p), list(c), 1.0] for p, c in now["stops"]]
+    else:
+        colours = now.get("colors") or default_colours
+        stops = [[i / max(1, len(colours) - 1), list(c), 1.0] for i, c in enumerate(colours)]
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("グラデーションマップ（暗い所 → 明るい所）")
+    layout = QVBoxLayout(dialog)
+    editor = StopsEditor(stops, opacity=False)
+    layout.addWidget(editor)
+    ok = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    ok.accepted.connect(dialog.accept)
+    ok.rejected.connect(dialog.reject)
+    layout.addWidget(ok)
+    dialog.editor = editor
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return {"stops": [[round(p, 4), c] for p, c, _o in editor.stops()]}
+
+
 def gradient_dialog(parent, page, now: dict) -> dict | None:
-    """A gradient layer's settings: which way, colours at each end and how see-through the end is."""
-    from PySide6.QtWidgets import QColorDialog, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
+    """A gradient layer's settings: which way, its shape (straight, round, an ellipse), whether it repeats, and its
+    colours in a row (any number, each with how strong it is; 空・夕焼け… to start from)."""
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
+
+    from genko.app.gradient_editor import StopsEditor, stops_from
 
     w = page.spec.width_mm if page else 210
     h = page.spec.height_mm if page else 297
     ways = [("上から下へ", [w / 2, 0], [w / 2, h], "linear"), ("下から上へ", [w / 2, h], [w / 2, 0], "linear"),
             ("左から右へ", [0, h / 2], [w, h / 2], "linear"), ("右から左へ", [w, h / 2], [0, h / 2], "linear"),
-            ("中心から外へ（円）", [w / 2, h / 2], [w / 2, 0], "radial")]
+            ("中心から外へ（円）", [w / 2, h / 2], [w / 2, 0], "radial"), ("中心から外へ（楕円）", [w / 2, h / 2], [w / 2, 0], "ellipse")]
     dialog = QDialog(parent)
     dialog.setWindowTitle("グラデーション")
     form = QFormLayout(dialog)
     way = QComboBox()
     for label, *_rest in ways:
         way.addItem(label)
-    colours = {"rgb_from": list(now.get("rgb_from") or [20, 20, 20]), "rgb_to": list(now.get("rgb_to") or [255, 255, 255])}
-    buttons_c = {}
-    for key, label in (("rgb_from", "はじめの色"), ("rgb_to", "終わりの色")):
-        button = QPushButton()
-        button.setStyleSheet("background: rgb({},{},{})".format(*colours[key]))
-
-        def pick(_=False, k=key, b=button):
-            colour = QColorDialog.getColor(QColor(*colours[k]), dialog, "色")
-            if colour.isValid():
-                colours[k] = [colour.red(), colour.green(), colour.blue()]
-                b.setStyleSheet("background: rgb({},{},{})".format(*colours[k]))
-
-        button.clicked.connect(pick)
-        buttons_c[key] = button
-    start = QDoubleSpinBox()
-    start.setRange(0, 100)
-    start.setSuffix(" %")
-    start.setValue(100 * float(now.get("opacity_from", 1.0)))
-    end = QDoubleSpinBox()
-    end.setRange(0, 100)
-    end.setSuffix(" %")
-    end.setValue(100 * float(now.get("opacity_to", 1.0)))
+    shape_now = now.get("shape") or "linear"
+    way.setCurrentIndex(next((i for i, item in enumerate(ways) if item[3] == shape_now and shape_now != "linear"), 0))
+    ratio = QDoubleSpinBox()
+    ratio.setRange(0.1, 10)
+    ratio.setSingleStep(0.1)
+    ratio.setValue(float(now.get("ratio", 0.5)))
+    ratio.setToolTip("楕円の横の幅（縦を 1 として）")
+    repeat = QComboBox()
+    for label, key in (("しない", "none"), ("繰り返す", "repeat"), ("折り返す", "mirror")):
+        repeat.addItem(label, key)
+    repeat.setCurrentIndex(max(0, repeat.findData(now.get("repeat") or "none")))
+    colours = StopsEditor(stops_from(now))
     form.addRow("向き", way)
-    form.addRow("はじめの色", buttons_c["rgb_from"])
-    form.addRow("はじめの濃さ", start)
-    form.addRow("終わりの色", buttons_c["rgb_to"])
-    form.addRow("終わりの濃さ", end)
+    form.addRow("楕円の横幅", ratio)
+    form.addRow("端から先", repeat)
+    form.addRow("色", colours)
     ok = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
     ok.accepted.connect(dialog.accept)
     ok.rejected.connect(dialog.reject)
     form.addRow(ok)
+    dialog.colours, dialog.way, dialog.repeat, dialog.ratio = colours, way, repeat, ratio  # (tests)
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     _label, a, b, shape = ways[way.currentIndex()]
-    return {"from": [round(v, 2) for v in a], "to": [round(v, 2) for v in b], "shape": shape, **colours,
-            "opacity_from": start.value() / 100, "opacity_to": end.value() / 100}
+    stops = colours.stops()
+    out = {"from": [round(v, 2) for v in a], "to": [round(v, 2) for v in b], "shape": shape,
+           "rgb_from": stops[0][1], "rgb_to": stops[-1][1], "opacity_from": stops[0][2], "opacity_to": stops[-1][2]}
+    if len(stops) > 2 or stops[0][0] > 0 or stops[-1][0] < 1:
+        out["stops"] = stops
+    if shape == "ellipse":
+        out["ratio"] = round(ratio.value(), 2)
+    if repeat.currentData() != "none":
+        out["repeat"] = repeat.currentData()
+    return out
 
 
 _CHANNELS = [("RGB（全部）", "rgb"), ("赤", "r"), ("緑", "g"), ("青", "b")]
@@ -1522,6 +1569,10 @@ FILTER_FIELDS = {
     "lineart": [("threshold", "拾う強さ（大きいほど薄い線まで）", 0.3, 0.98, 0.72), ("radius", "線の太さの目安（px）", 3, 41, 7),
                 ("min_px", "取るゴミの大きさ（px）", 0, 400, 12),
                 ("drop_blue", "水色の下描き", [("残す", 0), ("消す", 1)], 1), ("keep_solid", "ベタ", [("残す", 1), ("線だけにする", 0)], 1)],
+    "glow": [("radius", "広がり（px）", 1, 120, 12), ("amount", "強さ", 0.1, 3, 0.8), ("threshold", "光らせる明るさ（0〜255）", 0, 255, 170)],
+    "rain": [("count", "本数", 10, 5000, 400), ("length", "長さ（px）", 4, 400, 40), ("angle", "傾き（°、右へ +）", -60, 60, 15),
+             ("width", "太さ（px）", 1, 8, 1), ("opacity", "濃さ", 0.05, 1, 0.7),
+             ("rgb", "色", [("白", [255, 255, 255]), ("灰", [150, 150, 150]), ("黒", [20, 20, 20])], [255, 255, 255])],
     "despeckle": [("size_mm", "取るゴミの大きさ（mm）", 0.05, 5, 0.3),
                   ("what", "取るもの", [("黒い点（ゴミ）", "ink"), ("線の中の白い穴", "holes"), ("両方", "both")], "ink")],
     "hue": [("shift", "色相（°）", -180, 180, 30), ("saturation", "彩度（倍）", 0, 3, 1.0), ("value", "明度（倍）", 0, 3, 1.0)],
@@ -1893,12 +1944,28 @@ class MainWindow(QMainWindow):
             lines = [f"・{wording.error(c['error'])}" for c in result.conflicts[:8]]
             self.flash("AI の変更と重なったため、次の操作は入りませんでした:\n" + "\n".join(lines), 6000)
         self._watch()
+        self._backup()
         if result.rebased or result.conflicts:
             self._reload_pages()  # someone else's changes came in
             self._tell_others()
             comfort.notice_requests(self, before)
         else:
             self._refresh_status()
+
+    def _backup(self) -> None:
+        """バックアップ: after a save, the book zipped into the folder chosen in 環境設定 (not more often than set)."""
+        from genko import backup
+
+        store = QSettings("Genko", "Genko Studio")
+        folder = str(store.value("backup/folder", "") or "")
+        if not folder or self.session.path is None:
+            return
+        minutes = float(store.value("backup/minutes", 30) or 30)
+        try:
+            if backup.due(Path(folder), Path(self.session.path).stem, minutes):
+                backup.make(Path(self.session.path), Path(folder), int(store.value("backup/keep", 10) or 10))
+        except (OSError, ValueError) as exc:
+            self.flash(f"バックアップを残せませんでした: {exc}", 6000, error=True)
 
     def _watch(self) -> None:
         if self._watcher.files():
@@ -1998,6 +2065,8 @@ class MainWindow(QMainWindow):
                                  "紙に描いた絵の画像を新しいレイヤーに置き、線だけを抜き出します（強さ・下描きの青を消す・ゴミ取りを見ながら決める）")
         self.act_scanner = a("スキャナーから取り込む…", lambda: self._import_scan(True), None,
                              "スキャナーで読んだ紙を新しいレイヤーに置き、線だけを抜き出します（Windows・Linux）")
+        self.act_merge_book = a("ほかの原稿のページを取り込む…", self._merge_book, None,
+                                "別の原稿（.genko）のページを、台詞や絵ごとこの原稿の後ろに足します（作品の結合）")
         self.act_import_psd = a("PSD をレイヤーのまま読み込む…", self._import_psd,
                                 tip="Photoshop・CLIP STUDIO PAINT などの PSD／PSB を、レイヤー・フォルダー・マスク・合成モードのままこのページに")
         self.act_timelapse = a("タイムラプスを記録する", self._toggle_timelapse, checkable=True,
@@ -2263,7 +2332,7 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
         menus = [
             ("ファイル", [self.act_new, self.act_open, "recent", None, self.act_ai, None, self.act_save, self.act_save_as, None, self.act_import,
-                         self.act_import_scan, self.act_scanner,
+                         self.act_import_scan, self.act_scanner, self.act_merge_book,
                          self.act_import_psd, self.act_export, self.act_print, None, self.act_timelapse, self.act_timelapse_export, None, "actions", None, self.act_prefs, None, self.act_close, self.act_quit]),
             ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste,
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
@@ -2553,7 +2622,7 @@ class MainWindow(QMainWindow):
             if key not in have:
                 kind.addItem(label, key)
         if not kind.count():
-            self.flash("表紙・裏表紙・カバーは、もう全部あります", 4000)
+            self.flash("表紙・裏表紙・カバー・帯は、もう全部あります", 4000)
             return
         spine, flap = QDoubleSpinBox(), QDoubleSpinBox()
         spine.setRange(1, 100)
@@ -2563,12 +2632,24 @@ class MainWindow(QMainWindow):
         flap.setRange(0, 200)
         flap.setValue(70)
         flap.setSuffix(" mm")
+        band = QDoubleSpinBox()
+        band.setRange(15, 200)
+        band.setValue(50)
+        band.setSuffix(" mm")
+        band.setToolTip("帯の高さ")
         form.addRow("種類", kind)
-        form.addRow("背幅（カバー）", spine)
-        form.addRow("袖（カバー）", flap)
-        kind.currentIndexChanged.connect(lambda _: (spine.setEnabled(kind.currentData() == "jacket"), flap.setEnabled(kind.currentData() == "jacket")))
-        spine.setEnabled(kind.currentData() == "jacket")
-        flap.setEnabled(kind.currentData() == "jacket")
+        form.addRow("背幅（カバー・帯）", spine)
+        form.addRow("袖（カバー・帯）", flap)
+        form.addRow("帯の高さ", band)
+
+        def enable(_=0) -> None:
+            wrap = kind.currentData() in ("jacket", "obi")
+            spine.setEnabled(wrap)
+            flap.setEnabled(wrap)
+            band.setEnabled(kind.currentData() == "obi")
+
+        kind.currentIndexChanged.connect(enable)
+        enable()
         ok = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         ok.accepted.connect(dialog.accept)
         ok.rejected.connect(dialog.reject)
@@ -2576,8 +2657,10 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         op = {"op": "add_cover", "kind": kind.currentData()}
-        if op["kind"] == "jacket":
+        if op["kind"] in ("jacket", "obi"):
             op.update(spine_mm=spine.value(), flap_mm=flap.value())
+        if op["kind"] == "obi":
+            op["height_mm"] = band.value()
         if self.apply_ops([op]):
             self._select_page(len(self.episode.pages) - 1)
 
@@ -5976,6 +6059,45 @@ class MainWindow(QMainWindow):
             self._switch_document(self.documents.index(doc))
             return
         self.add_document(doc.session if doc is not None else Session.open(Path(path), self.session.actor))
+
+    def _merge_book(self) -> None:
+        """作品の結合: the other book's pages (all, or some) after this one's."""
+        from PySide6.QtWidgets import QInputDialog
+
+        from genko import merge
+        from genko.io import load_episode
+
+        if self.path is None:
+            self.flash("取り込む前に、この原稿を保存します（ファイル → 別の場所に保存）", 6000)
+            return
+        folder = QFileDialog.getExistingDirectory(self, "ページを取り込む原稿（.genko のフォルダ）")
+        if not folder:
+            return
+        src = Path(folder)
+        if not (src / "project.json").is_file():
+            QMessageBox.warning(self, "Genko", "Genko の原稿ではありません（.genko のフォルダを選びます）")
+            return
+        if src.resolve() == Path(self.path).resolve():
+            self.flash("同じ原稿は取り込めません（ページの複製を使います）", 5000)
+            return
+        try:
+            count = len(load_episode(src).pages)
+        except Exception as exc:  # noqa: BLE001 (a book that cannot be read)
+            self.flash(f"その原稿を読めませんでした:\n{exc}", 6000, error=True)
+            return
+        text, ok = QInputDialog.getText(self, "作品の結合", f"取り込むページ（1〜{count}。例: 1-4, 7。空ならすべて）")
+        if not ok:
+            return
+        try:
+            pages = _page_list(text, count)
+        except ValueError:
+            self.flash("ページの書き方が読めません（例: 1-4, 7）", 5000, error=True)
+            return
+        self.commit_now()
+        merge.copy_assets(src, Path(self.path))
+        before = len(self.episode.pages)
+        if self.apply_ops([merge.import_op(src, pages)]):
+            self.flash(f"「{src.stem}」の {len(self.episode.pages) - before} ページを後ろに足しました", 5000)
 
     def _open(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "原稿（.genko のフォルダ）を開く")

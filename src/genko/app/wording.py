@@ -35,7 +35,7 @@ FILTERS = [("levels", "レベル補正"), ("curve", "明るさの曲線（トー
            ("zoom_blur", "ズームぼかし"), ("noise", "ノイズ"), ("wave", "波形"), ("twirl", "渦巻き"), ("lineart", "線画抽出"),
            ("invert", "色調反転"), ("posterize", "階調化（ポスタリゼーション）"), ("threshold", "2 値化（しきい値）"),
            ("bitonal", "白黒にする"), ("gradient_map", "グラデーションマップ"), ("brightness_contrast", "明るさ・コントラスト"),
-           ("despeckle", "ゴミ取り")]
+           ("despeckle", "ゴミ取り"), ("glow", "光彩拡散"), ("rain", "雨")]
 # what a correction layer can hold (it changes colours, not shapes)
 ADJUSTMENTS = [("levels", "レベル補正"), ("curve", "トーンカーブ"), ("hue", "色相・彩度・明度"), ("invert", "色調反転"),
                ("posterize", "階調化"), ("threshold", "2 値化"), ("gradient_map", "グラデーションマップ"),
@@ -174,6 +174,8 @@ _ERRORS: list[tuple[str, object]] = [
     (r"ops is the list of ops to run on each page", "各ページで行う操作の一覧が要ります"),
     (r"pages is the list of pages", "ページを選んでください"),
     (r"spine_mm is the spine's width.*", "背幅（0〜100 mm）が要ります"),
+    (r"height_mm is the band's height.*", "帯の高さは 15〜200 mm です"),
+    (r"kind must be front, back, jacket or obi", "表紙・裏表紙・カバー・帯から選びます"),
     (r"(\w+) is a frame number", lambda m: f"{_field(m.group(1))}はフレームの番号で指定します"),
     (r"cels is a list of \[frame, cel id or null\]", "セルの指定は［フレーム, セル］の並びです"),
     (r"folder is an animation folder's id.*", "アニメーションフォルダーを指定します（先にアニメーションフォルダーを作る）"),
@@ -253,6 +255,11 @@ _ERRORS: list[tuple[str, object]] = [
     (r"rgb is \[r, g, b\], each 0\.\.255", "色は 0〜255 の 3 つの数です"),
     (r"set_layers needs something to set.*", "まとめて変える設定がありません"),
     (r"shape must be linear or radial", "グラデーションの形は、直線か円です"),
+    (r"shape must be linear, radial or ellipse", "グラデーションの形は、直線・円・楕円から選びます"),
+    (r"stops are \[\[position.*", "グラデーションの色は 2〜16 色で、それぞれ位置（0〜100 %）・色・濃さ（0〜100 %）を指定します"),
+    (r"repeat is none, repeat or mirror", "繰り返しは、なし・繰り返す・折り返すから選びます"),
+    (r"the other book cannot be read.*", "取り込む原稿を開けませんでした（原稿のフォルダーを選んでください）"),
+    (r"the other book has no page (\d+)", r"取り込む原稿に \1 ページはありません"),
     (r"the adjustment cannot be used: .*", "その補正の数値は使えません"),
     (r"the layer has no marks to trace", "このレイヤーには線にできる絵がありません"),
     (r"this layer cannot become a paint layer", "このレイヤーはペイントのレイヤーに変換できません"),

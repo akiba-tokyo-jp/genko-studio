@@ -349,29 +349,74 @@ def _paint_patch(out: Image.Image, patch: dict, dpi: int, colour=None) -> None:
     out.paste(Image.alpha_composite(region, piece), (x0, y0))
 
 
-def gradient_image(size: tuple[int, int], dpi: int, spec: dict) -> Image.Image:
-    """A page-sized gradient (a gradient layer): from → to (mm), colours and opacities at each end."""
+GRADIENT_SHAPES = ("linear", "radial", "ellipse")
+GRADIENT_REPEATS = ("none", "repeat", "mirror")
+
+
+def gradient_t(gx, gy, spec: dict):
+    """Where each point is along the gradient (0 at `from`, 1 at `to`): straight (linear), round (radial) or an
+    ellipse `ratio` as wide across as along, turned with the drag; past the end it stops, repeats or mirrors."""
     import math
 
     import numpy as np
 
-    w, h = size
-    scale = dpi / 25.4
     (fx, fy), (tx, ty) = [float(v) for v in spec.get("from", [0, 0])[:2]], [float(v) for v in spec.get("to", [0, 100])[:2]]
-    gx, gy = np.meshgrid((np.arange(w) + 0.5) / scale, (np.arange(h) + 0.5) / scale)
     length = math.hypot(tx - fx, ty - fy) or 1.0
-    if spec.get("shape") == "radial":
+    shape = spec.get("shape") or "linear"
+    if shape == "radial":
         t = np.hypot(gx - fx, gy - fy) / length
+    elif shape == "ellipse":
+        ux, uy = (tx - fx) / length, (ty - fy) / length
+        along = (gx - fx) * ux + (gy - fy) * uy
+        across = (-(gx - fx) * uy + (gy - fy) * ux) / max(0.05, float(spec.get("ratio", 0.5)))
+        t = np.hypot(along, across) / length
     else:
         t = ((gx - fx) * (tx - fx) + (gy - fy) * (ty - fy)) / (length * length)
-    t = np.clip(t, 0.0, 1.0)
-    c0 = np.array([int(v) for v in (spec.get("rgb_from") or [20, 20, 20])][:3], dtype=float)
-    c1 = np.array([int(v) for v in (spec.get("rgb_to") or [255, 255, 255])][:3], dtype=float)
-    a0 = max(0.0, min(1.0, float(spec.get("opacity_from", 1.0))))
-    a1 = max(0.0, min(1.0, float(spec.get("opacity_to", 1.0))))
-    rgb = (c0[None, None, :] * (1 - t[..., None]) + c1[None, None, :] * t[..., None]).round().astype("uint8")
-    alpha = ((a0 * (1 - t) + a1 * t) * 255).round().astype("uint8")
-    return Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
+    repeat = spec.get("repeat") or "none"
+    if repeat == "repeat":
+        return t - np.floor(t)
+    if repeat == "mirror":
+        return 1 - np.abs((t % 2.0) - 1)
+    return np.clip(t, 0.0, 1.0)
+
+
+def gradient_stops(spec: dict) -> list[tuple[float, tuple, float]]:
+    """[(position 0..1, (r, g, b), opacity 0..1)], sorted: `stops` (any number of colours) or the two ends."""
+    raw = spec.get("stops")
+    if raw:
+        out = []
+        for stop in raw:
+            pos, rgb = float(stop[0]), [int(v) for v in stop[1]][:3]
+            opacity = float(stop[2]) if len(stop) > 2 and stop[2] is not None else 1.0
+            out.append((max(0.0, min(1.0, pos)), tuple(rgb), max(0.0, min(1.0, opacity))))
+        return sorted(out, key=lambda s: s[0])
+    c0 = tuple(int(v) for v in (spec.get("rgb_from") or [20, 20, 20])[:3])
+    c1 = tuple(int(v) for v in (spec.get("rgb_to") or [255, 255, 255])[:3])
+    return [(0.0, c0, max(0.0, min(1.0, float(spec.get("opacity_from", 1.0))))),
+            (1.0, c1, max(0.0, min(1.0, float(spec.get("opacity_to", 1.0)))))]
+
+
+def gradient_colours(t, spec: dict):
+    """(rgb uint8 H×W×3, opacity float H×W) for positions t along the gradient's colours."""
+    import numpy as np
+
+    stops = gradient_stops(spec)
+    pos = np.array([s[0] for s in stops])
+    rgb = np.dstack([np.interp(t, pos, [s[1][c] for s in stops]) for c in range(3)]).round().astype("uint8")
+    alpha = np.interp(t, pos, [s[2] for s in stops])
+    return rgb, alpha
+
+
+def gradient_image(size: tuple[int, int], dpi: int, spec: dict) -> Image.Image:
+    """A page-sized gradient (a gradient layer): from → to (mm), its colours (two ends or any stops), its shape
+    and whether it repeats."""
+    import numpy as np
+
+    w, h = size
+    scale = dpi / 25.4
+    gx, gy = np.meshgrid((np.arange(w) + 0.5) / scale, (np.arange(h) + 0.5) / scale)
+    rgb, alpha = gradient_colours(gradient_t(gx, gy, spec), spec)
+    return Image.fromarray(np.dstack([rgb, (alpha * 255).round().astype("uint8")]), "RGBA")
 
 
 def fill_layer_image(layer, size: tuple[int, int], dpi: int) -> Image.Image:

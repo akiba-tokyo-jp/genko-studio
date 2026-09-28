@@ -654,6 +654,16 @@ class BrushDialog(QDialog):
         self.post.setRange(0, 10)
         self.post.setValue(b.post_smooth)
         self.post.setToolTip("描き終えた後に線をなめらかに整える強さ（後補正）")
+        self.mix = QSpinBox()
+        self.mix.setRange(0, 100)
+        self.mix.setSuffix(" %")
+        self.mix.setValue(round(b.mix * 100))
+        self.mix.setToolTip("下地混色: 同じレイヤーにもう塗ってある色を、どれだけ混ぜて描くか（0 % で混ぜない）")
+        self.stretch = QSpinBox()
+        self.stretch.setRange(0, 100)
+        self.stretch.setSuffix(" %")
+        self.stretch.setValue(round(b.stretch * 100))
+        self.stretch.setToolTip("色延び: 拾った色を線の先までどれだけ引きずるか（混色が 0 % のときは効きません）")
         self.aa = QComboBox()
         for label, key in AA_LABELS:
             self.aa.addItem(label, key)
@@ -676,6 +686,8 @@ class BrushDialog(QDialog):
         form.addRow(look.section("色と質感"))
         form.addRow("不透明度", self.opacity)
         form.addRow("質感", self.texture)
+        form.addRow("下地混色", self.mix)
+        form.addRow("色延び", self.stretch)
         form.addRow("", self.fixed)
         form.addRow("", self.white)
         tips = look.form()
@@ -741,7 +753,8 @@ class BrushDialog(QDialog):
                 "tip_follow": self.tip_follow.isChecked(), "tip_rotation": self.tip_rotation.isChecked(), "tip_png": self.tip_png or "", "pattern": self.pattern.currentData(),
                 "spacing": self.spacing.value() / 100, "scatter": self.scatter.value() / 100, "stamp_size": self.stamp.value() / 100,
                 "size_jitter": self.jitter.value() / 100, "turn_jitter": self.turn.isChecked(), "count": self.count.value(),
-                "speed": self.speed.value() / 100, "post_smooth": self.post.value(), "aa": self.aa.currentData()}
+                "speed": self.speed.value() / 100, "post_smooth": self.post.value(), "aa": self.aa.currentData(),
+                "mix": self.mix.value() / 100, "stretch": self.stretch.value() / 100}
 
     def _pick_tip(self) -> None:
         from PySide6.QtWidgets import QFileDialog

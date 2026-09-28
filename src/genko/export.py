@@ -330,7 +330,7 @@ def export_epub(episode: Episode, dest: Path, dpi: int = 150, *, kindle: bool = 
     size = None
     for page, part in covers.reading_order(episode):  # (the front cover first, the back cover last)
         image = render_page(page, dpi, mode="print", episode=episode, dots=dots)
-        if (covers.cover_of(page) or {}).get("kind") == "jacket":
+        if (covers.cover_of(page) or {}).get("kind") in covers.WRAPS:
             image = covers.front_of(page, image, dpi, episode.binding.value, "裏表紙" if part == "back" else "表紙")
         else:  # (a reader shows the finished page: no bleed, no marks, no paper around it)
             image = crop_to(image, page, "trim", dpi)

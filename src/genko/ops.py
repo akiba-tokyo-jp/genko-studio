@@ -46,12 +46,13 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "move_line", "id": "str", "x_mm": "float?", "y_mm": "float?", "w_mm": "float? (the balloon's size: edit_line does not change it)", "h_mm": "float?", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "balloon": "str?"},
     {"op": "name_ok", "page": "int, optional (all pages if omitted)"},
     {"op": "advance", "page": "int", "to": "name|ink|finish"},
-    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "taper_in_mm": "float? (入り: how long the start thins, mm; with taper)", "taper_out_mm": "float? (抜き: how long the end thins; 0 keeps that end)", "pressure_opacity": "float? 0..1 (a light touch also lightens the line)", "stabilize_speed": "bool? (quicker strokes are steadied more)", "post_fit": "float? mm (後補正: the wobble within this is dropped and a smooth curve drawn through the line)", "snap_lines_mm": "float? (ベクター吸着: each end within this of a line on the layer moves onto it)", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)", "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"},
+    {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "taper_in_mm": "float? (入り: how long the start thins, mm; with taper)", "taper_out_mm": "float? (抜き: how long the end thins; 0 keeps that end)", "pressure_opacity": "float? 0..1 (a light touch also lightens the line)", "stabilize_speed": "bool? (quicker strokes are steadied more)", "post_fit": "float? mm (後補正: the wobble within this is dropped and a smooth curve drawn through the line)", "snap_lines_mm": "float? (ベクター吸着: each end within this of a line on the layer moves onto it)", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)", "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)", "mix": "float? 0..1 (下地混色: the colour on the layer under the line mixes in; default the brush's)", "stretch": "float? 0..1 (色延び: how far the colour picked up is carried along; default the brush's)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
-    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "panel_each": "bool? (true: each line stays in the panel it begins in)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white, shape: round|square|diamond|ellipse, offset_mm: [x,y]} | null? (トーン化: the layer's greys print as a halftone)"},
+    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "panel_each": "bool? (true: each line stays in the panel it begins in)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape: linear|radial|ellipse, ratio, repeat: none|repeat|mirror, stops: [[pos, [r,g,b], opacity]…]}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white, shape: round|square|diamond|ellipse, offset_mm: [x,y]} | null? (トーン化: the layer's greys print as a halftone)"},
     {"op": "add_page", "count": "int", "after": "int? (insert after this page; default after the last story page, before any covers)"},
     {"op": "delete_page", "page": "int"},
+    {"op": "import_pages", "from": "str (another book: its .genko folder)", "pages": "[int]? (default all)", "after": "int? (insert after this page; default at the end)", "note": "作品の結合: the pages and their lines are copied; the other book's asset files must be copied into this book's assets first (the app and the MCP export do)"},
     {"op": "duplicate_page", "page": "int", "next_to": "bool? (the copy right after the page; default at the end)"},
     {"op": "set_page_spec", "preset": "b4|b5|a5|a4|webtoon?", "paper": "[w,h]? mm", "trim": "[w,h]? (finished size)", "bleed_mm": "float?", "margins": "[top,bottom,inner,outer] | {top,bottom,inner,outer}? (basic frame, from the trim)", "dpi": "int?", "move": "bool? (default true: move everything onto the new basic frame)"},
     {"op": "set_nombre", "page": "int? (with numero: show or hide that page's)", "numero": "bool?", "position": "bottom_center|bottom_outside|top_outside|side_outside?", "font": "str?", "size_mm": "float?", "start": "int? (the number of page 1)", "hidden": "bool? (隠しノンブル)", "hidden_size_mm": "float?", "show": "bool? (visible nombres)"},
@@ -108,13 +109,13 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "delete_layer", "page": "int", "id": "str"},
     {"op": "add_frame", "page": "int", "rect": "[x, y, w, h]? (mm)", "points": "[[x, y], …]? (a polygon or a freehand outline, mm)", "border_mm": "float?", "tolerance_mm": "float? (freehand: how much jitter to drop, 0.4)", "id": "str?", "note": "draw a panel (コマを描く): the page's first drawn panel replaces the basic frame; drawn panels keep their own places (no gutters)"},
     {"op": "delete_frame", "page": "int", "frame_id": "str", "force": "bool? (placed art goes to studio.orphans)", "note": "one panel goes; the others stay where they are"},
-    {"op": "gradient_fill", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}? (default: the whole page)", "from": "[x,y] (mm)", "to": "[x,y] (mm)", "rgb_from": "[r,g,b]?", "rgb_to": "[r,g,b]?", "opacity_from": "0..1? (1)", "opacity_to": "0..1? (0: fades out)", "shape": "linear|radial?"},
-    {"op": "define_brush", "key": "str (my_…)", "label": "str", "base": "a brush to start from?", "width_mm": "float?", "min_pressure": "0..1?", "gamma": "0.2..5?", "opacity": "0.05..1?", "stabilize": "0..15?", "taper": "bool?", "texture": "''|grain|soft|dry?", "rgb": "[r,g,b]|null?", "fixed_width": "bool?", "delete": "bool?"},
+    {"op": "gradient_fill", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}? (default: the whole page)", "from": "[x,y] (mm)", "to": "[x,y] (mm)", "rgb_from": "[r,g,b]?", "rgb_to": "[r,g,b]?", "opacity_from": "0..1? (1)", "opacity_to": "0..1? (0: fades out)", "shape": "linear|radial|ellipse?", "ratio": "float? (ellipse: across ÷ along)", "repeat": "none|repeat|mirror?", "stops": "[[position 0..1, [r,g,b], opacity?], …]? (多色: 2 to 16 colours, instead of the two ends)"},
+    {"op": "define_brush", "key": "str (my_…)", "label": "str", "base": "a brush to start from?", "width_mm": "float?", "min_pressure": "0..1?", "gamma": "0.2..5?", "opacity": "0.05..1?", "stabilize": "0..15?", "taper": "bool?", "texture": "''|grain|soft|dry?", "rgb": "[r,g,b]|null?", "fixed_width": "bool?", "mix": "0..1? (下地混色)", "stretch": "0..1? (色延び)", "delete": "bool?"},
     {"op": "duplicate_layer", "page": "int", "id": "str", "new_id": "str?"},
     {"op": "merge_down", "page": "int", "id": "str (merged into the layer below it; pen onto pen stays lines, anything else becomes pixels)"},
     {"op": "set_layer_mask", "page": "int", "id": "str", "area": "{poly} | {mask}? (only this area shows)", "fill": "show|hide? (the whole mask)", "invert": "bool?", "enabled": "bool?", "delete": "bool?"},
     {"op": "paint_mask", "page": "int", "id": "str", "points": "[[x,y],...]", "width_mm": "float?", "show": "bool (true: the pen shows the layer, false: the eraser hides it)"},
-    {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|brightness_contrast|despeckle|plugin:<key>", "area": "{poly}|{mask}? (選択範囲の中だけ)", "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; sharpen amount (1 usual, 2 strong)/radius; hue shift/saturation/value; levels black/white/gamma (middle, >1 lighter)/out_black/out_white/channel (rgb|r|g|b); curve gamma, or points [[in,out],…] 0..255 and channel; brightness_contrast brightness/contrast (-100..100); despeckle size_mm (specks smaller than this)/what (ink|holes|both); lineart threshold (0.3..0.98, higher picks lighter lines)/radius (px, about twice the widest line)/min_px (specks dropped)/drop_blue (the blue pencil taken as paper)/keep_solid/rgb; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"},
+    {"op": "filter_raster", "page": "int", "layer": "str?", "id": "str?", "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|brightness_contrast|despeckle|glow|rain|plugin:<key>", "area": "{poly}|{mask}? (選択範囲の中だけ)", "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; sharpen amount (1 usual, 2 strong)/radius; hue shift/saturation/value; levels black/white/gamma (middle, >1 lighter)/out_black/out_white/channel (rgb|r|g|b); curve gamma, or points [[in,out],…] 0..255 and channel; brightness_contrast brightness/contrast (-100..100); despeckle size_mm (specks smaller than this)/what (ink|holes|both); lineart threshold (0.3..0.98, higher picks lighter lines)/radius (px, about twice the widest line)/min_px (specks dropped)/drop_blue (the blue pencil taken as paper)/keep_solid/rgb; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…] or stops [[position 0..1, [r,g,b]],…]; glow (光彩拡散) radius (px)/amount/threshold (0..255); rain count/length (px)/angle (° from straight down)/width (px)/opacity/rgb/seed"},
     {"op": "set_brush", "rgb": "[r,g,b]?", "width_mm": "float?", "stabilize": "int?", "taper": "bool?", "curve": "gpen|linear"},
     {"op": "select_frame", "page": "int", "frame_id": "str"},
     {"op": "edit_stroke", "page": "int", "layer": "name|ink", "index": "int", "points": "[[x,y],...]"},
@@ -145,7 +146,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_light_table", "page": "int", "cels": "[cel ids] (always shown faint while drawing)"},
     {"op": "import_psd", "page": "int", "path": "str? (a .psd / .psb file: relative to the book's folder, or absolute; over MCP it must be under --root)", "psd": "str? (the file in base64, instead of path)", "fit": "paper|bleed|trim? (default bleed: the picture fills it, keeping its shape)", "id": "str? (the new layers are <id>-1, <id>-2…)", "parent": "folder id?", "after": "layer id?", "note": "every layer as a Genko layer: pixels, names, opacity, visibility, blend, clipping, folders, masks"},
     {"op": "set_timelapse", "on": "bool (true: every save records a small picture of each changed page, for the timelapse export)"},
-    {"op": "add_cover", "kind": "front|back|jacket (表紙・裏表紙・カバー)", "spine_mm": "float? (jacket: the spine)", "flap_mm": "float? (jacket: each flap, 袖)", "bleed": "bool? (default true: one panel to the bleed)", "note": "covers are pages at the end, without nombre; the book preview, EPUB and Kindle put the front cover first and the back cover last; print exports (PDF, TIFF, PNG) keep the page order, the covers named cover_front / cover_back / cover_jacket"},
+    {"op": "add_cover", "kind": "front|back|jacket|obi (表紙・裏表紙・カバー・帯)", "spine_mm": "float? (jacket, obi: the spine)", "flap_mm": "float? (jacket, obi: each flap, 袖)", "height_mm": "float? (obi: the band's height, 50)", "bleed": "bool? (default true: one panel to the bleed)", "note": "covers are pages at the end, without nombre; the book preview, EPUB and Kindle put the front cover first and the back cover last; print exports (PDF, TIFF, PNG) keep the page order, the covers named cover_front / cover_back / cover_jacket"},
     {"op": "replace_text", "find": "str", "replace": "str", "regex": "bool?", "case": "bool? (default true: case matters)", "pages": "[int]? (none: every page)", "speakers": "bool? (speakers too)", "must_find": "bool? (an error when nothing matched)"},
     {"op": "for_pages", "pages": "[int] | all | body? (body: not the covers; default)", "ops": "[op] (each run on every page, its page set to it)"},
     {"op": "set_assignee", "pages": "[int]", "who": "str (empty: nobody) (担当: who draws the page)"},
@@ -779,6 +780,54 @@ def layer_pixels(page, layer):
     return ensure_raster(page, layer)
 
 
+def _mixed_pieces(page, layer, stroke, mix: float, stretch: float, step_mm: float = 1.5) -> list:
+    """下地混色・色延び: the line as short pieces, each in the brush's colour mixed with what is already on the
+    layer under it (`mix`), the colour picked up carried along (`stretch`: 0 lets go at once; near 1 it is dragged
+    far past where it was picked up)."""
+    import numpy as np
+
+    under = np.asarray(layer_pixels(page, layer).convert("RGBA"), dtype=np.float32)
+    scale = under.shape[1] / page.spec.width_mm
+    base = np.array(stroke.rgb or (20, 20, 20), dtype=np.float32)
+    carried = base.copy()
+    points, pressure, rotation = [stroke.points[0]], stroke.pressure[:1], stroke.rotation[:1]
+    for i in range(1, len(stroke.points)):  # (long straight parts get points in between, so the colour can change)
+        (x0, y0), (x1, y1) = stroke.points[i - 1], stroke.points[i]
+        steps = max(1, math.ceil(math.dist((x0, y0), (x1, y1)) / (step_mm / 3)))
+        for k in range(1, steps + 1):
+            t = k / steps
+            points.append((round(x0 + (x1 - x0) * t, 3), round(y0 + (y1 - y0) * t, 3)))
+            if stroke.pressure:
+                pressure.append(round(stroke.pressure[i - 1] + (stroke.pressure[i] - stroke.pressure[i - 1]) * t, 3))
+            if stroke.rotation:
+                rotation.append(stroke.rotation[i - 1] + (stroke.rotation[i] - stroke.rotation[i - 1]) * t)
+    colours, last = [], points[0]
+    for x, y in points:
+        target = base
+        px, py = int(x * scale), int(y * scale)
+        if 0 <= px < under.shape[1] and 0 <= py < under.shape[0]:
+            r, g, b, a = under[py, px]
+            target = base + (np.array([r, g, b]) - base) * (a / 255)  # (see-through places give nothing to pick up)
+        # the colour on the brush moves toward what is under it (or back to its own); stretch keeps it longer
+        keep = stretch ** (max(math.dist(last, (x, y)), 0.05) / 2.0)
+        carried = carried * keep + target * (1 - keep)
+        last = (x, y)
+        colours.append(base * (1 - mix) + carried * mix)
+    pieces, start, walked = [], 0, 0.0
+    for i in range(1, len(points)):
+        walked += math.dist(points[i - 1], points[i])
+        if walked >= step_mm or i == len(points) - 1:
+            piece = copy.deepcopy(stroke)
+            piece.id = new_id() if pieces else stroke.id
+            piece.points = list(points[start:i + 1])  # (each piece starts where the last one ended)
+            piece.pressure = pressure[start:i + 1]
+            piece.rotation = rotation[start:i + 1]
+            piece.rgb = tuple(int(round(v)) for v in np.mean(colours[start:i + 1], axis=0))
+            pieces.append(piece)
+            start, walked = i, 0.0
+    return pieces
+
+
 def filtered_raster(page, layer, kind: str, op: dict):
     """The layer's pixels with the filter on (only inside op["area"] when given); the layer is not changed.
     The app's preview uses it too. Pen lines not yet baked are drawn in first, on a copy."""
@@ -1359,6 +1408,28 @@ def _rgb3(value, what: str) -> list[int]:
     return rgb
 
 
+def _gradient_extras(g: dict) -> dict:
+    """多色・楕円・繰り返し: `stops` [[position 0..1, [r,g,b], opacity?], …] (2 to 16), `ratio` (ellipse: how wide
+    across), `repeat` none | repeat | mirror."""
+    out = {}
+    if g.get("stops"):
+        try:
+            stops = [[round(float(s[0]), 4), _rgb3(s[1], "stops"), round(float(s[2]), 3) if len(s) > 2 and s[2] is not None else 1.0]
+                     for s in g["stops"]]
+        except (TypeError, ValueError, IndexError) as exc:
+            raise ApplyError("stops are [[position 0..1, [r,g,b], opacity?], …]") from exc
+        if not 2 <= len(stops) <= 16 or any(not 0 <= s[0] <= 1 or not 0 <= s[2] <= 1 for s in stops):
+            raise ApplyError("stops are [[position 0..1, [r,g,b], opacity?], …]")
+        out["stops"] = sorted(stops, key=lambda s: s[0])
+    if g.get("ratio") is not None:
+        out["ratio"] = max(0.05, min(20.0, float(g["ratio"])))
+    if g.get("repeat") not in (None, "", "none"):
+        if g["repeat"] not in ("repeat", "mirror"):
+            raise ApplyError("repeat is none, repeat or mirror")
+        out["repeat"] = str(g["repeat"])
+    return out
+
+
 def _fill_spec(raw) -> dict:
     """A fill layer's colour, or its gradient (from and to in mm, colours and opacities at each end)."""
     if not isinstance(raw, dict):
@@ -1369,8 +1440,9 @@ def _fill_spec(raw) -> dict:
                "rgb_from": _rgb3(g.get("rgb_from") or [20, 20, 20], "rgb_from"), "rgb_to": _rgb3(g.get("rgb_to") or [255, 255, 255], "rgb_to"),
                "opacity_from": max(0.0, min(1.0, float(g.get("opacity_from", 1.0)))),
                "opacity_to": max(0.0, min(1.0, float(g.get("opacity_to", 1.0)))), "shape": str(g.get("shape") or "linear")}
-        if out["shape"] not in ("linear", "radial"):
-            raise ApplyError("shape must be linear or radial")
+        out.update(_gradient_extras(g))
+        if out["shape"] not in ("linear", "radial", "ellipse"):
+            raise ApplyError("shape must be linear, radial or ellipse")
         if len(out["from"]) != 2 or len(out["to"]) != 2:
             raise ApplyError("from and to are [x_mm, y_mm]")
         return {"gradient": out}
@@ -2108,8 +2180,14 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         stroke.rgb = tuple(int(v) for v in rgb) if rgb else None
         if op.get("opacity") is not None:
             stroke.opacity = max(0.0, min(1.0, float(op["opacity"])))
+        mix = op.get("mix", _brushes.brush(stroke.kind).mix)
+        stretch = op.get("stretch", _brushes.brush(stroke.kind).stretch)
         # lines stay vectors: they are drawn at the resolution of each render (no baking)
-        target.strokes.append(stroke)
+        if mix and float(mix) > 0 and (target.strokes or target.patches or target.raster_png):
+            target.strokes.extend(_mixed_pieces(page, target, stroke, max(0.0, min(1.0, float(mix))),
+                                                max(0.0, min(1.0, float(stretch or 0)))))
+        else:
+            target.strokes.append(stroke)
         for copy_points in copies:  # symmetry rulers draw the line again
             twin = copy.deepcopy(stroke)
             twin.id = new_id()
@@ -2431,18 +2509,16 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         xs = (np.arange(w) + x0 + 0.5) / scale
         ys = (np.arange(h) + y0 + 0.5) / scale
         gx, gy = np.meshgrid(xs, ys)
-        if op.get("shape") == "radial":
-            t = np.hypot(gx - fx, gy - fy) / math.hypot(tx - fx, ty - fy)
-        else:
-            dx, dy = tx - fx, ty - fy
-            t = ((gx - fx) * dx + (gy - fy) * dy) / (dx * dx + dy * dy)
-        t = np.clip(t, 0.0, 1.0)
-        c0 = np.array([int(v) for v in (op.get("rgb_from") or [20, 20, 20])][:3], dtype=float)
-        c1 = np.array([int(v) for v in (op.get("rgb_to") or op.get("rgb_from") or [20, 20, 20])][:3], dtype=float)
-        a0 = max(0.0, min(1.0, float(op.get("opacity_from", 1.0))))
-        a1 = max(0.0, min(1.0, float(op.get("opacity_to", 0.0 if not op.get("rgb_to") else 1.0))))
-        rgb = (c0[None, None, :] * (1 - t[..., None]) + c1[None, None, :] * t[..., None]).round().astype("uint8")
-        alpha = ((a0 * (1 - t) + a1 * t) * np.asarray(shown, dtype=float)).round().astype("uint8")
+        from genko.render import gradient_colours, gradient_t
+
+        if op.get("shape") not in (None, "linear", "radial", "ellipse"):
+            raise ApplyError("shape must be linear, radial or ellipse")
+        spec = {"from": [fx, fy], "to": [tx, ty], "shape": op.get("shape") or "linear",
+                "rgb_from": op.get("rgb_from") or [20, 20, 20], "rgb_to": op.get("rgb_to") or op.get("rgb_from") or [20, 20, 20],
+                "opacity_from": op.get("opacity_from", 1.0), "opacity_to": op.get("opacity_to", 0.0 if not op.get("rgb_to") else 1.0),
+                **_gradient_extras(op)}
+        rgb, share = gradient_colours(gradient_t(gx, gy, spec), spec)
+        alpha = (share * np.asarray(shown, dtype=float)).round().astype("uint8")
         image = Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
         patch = selection._to_patch(image, (x0, y0), {"mode": "image", "opacity": 1.0}, dpi)
         if patch is None:
@@ -2596,6 +2672,54 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         mapping: dict[int, int | None] = {item.index: new for new, item in enumerate(episode.pages, start=1)}
         mapping[removed] = None
         remap_page_refs(episode, mapping)
+        return
+
+    if name == "import_pages":  # 作品の結合: pages of another book added after this one's (their lines too)
+        from genko.io import load_episode
+
+        try:
+            other = load_episode(Path(str(op.get("from") or "")))
+        except (OSError, ValueError, KeyError) as exc:
+            raise ApplyError(f"the other book cannot be read ({exc})") from exc
+        wanted = [int(p) for p in op.get("pages") or [p.index for p in other.pages]]
+        by_index = {p.index: p for p in other.pages}
+        missing = [p for p in wanted if p not in by_index]
+        if missing:
+            raise ApplyError(f"the other book has no page {missing[0]}")
+        start = len(episode.pages)
+        for n, index in enumerate(wanted, start=1):
+            source = by_index[index]
+            clone: Page = copy.deepcopy(source)
+            clone.index = start + n
+            clone.id = "pg_" + new_id()
+            clone.spread_with = None
+            frame_map: dict[str, str] = {}
+            for frame in clone.frames:
+                _refresh_frame_ids(frame, frame_map)
+            if clone.selected_frame_id:
+                clone.selected_frame_id = frame_map.get(clone.selected_frame_id)
+            for layer in clone.layers:
+                layer.id = new_id()
+                if layer.frame_id:
+                    layer.frame_id = frame_map.get(layer.frame_id, layer.frame_id)
+            lines: list[StoryLine] = []
+            for line in other.story_for_page(index):
+                copied = copy.deepcopy(line)
+                copied.id = new_id()
+                copied.page_index = clone.index
+                if copied.frame_id:
+                    copied.frame_id = frame_map.get(copied.frame_id, copied.frame_id)
+                lines.append(copied)
+            clone.texts = lines
+            episode.story.extend(lines)
+            episode.pages.append(clone)
+        for key, info in ((other.studio or {}).get("assets") or {}).items():  # (what the pages' pictures are)
+            episode.studio.setdefault("assets", {}).setdefault(key, info)
+        if op.get("after") is not None:
+            after = max(0, min(start, int(op["after"])))
+            order = [p.index for p in episode.pages[:start]]
+            order[after:after] = list(range(start + 1, start + len(wanted) + 1))
+            _reorder(episode, order)
         return
 
     if name == "duplicate_page":

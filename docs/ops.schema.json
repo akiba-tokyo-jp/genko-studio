@@ -149,7 +149,9 @@
       "snap_lines_mm": "float? (ベクター吸着: each end within this of a line on the layer moves onto it)",
       "pressure_gamma": "float? (>1 needs more force)",
       "post_smooth": "int? 0..10 (後補正; default the brush's)",
-      "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"
+      "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)",
+      "mix": "float? 0..1 (下地混色: the colour on the layer under the line mixes in; default the brush's)",
+      "stretch": "float? 0..1 (色延び: how far the colour picked up is carried along; default the brush's)"
     },
     {
       "op": "delete_stroke",
@@ -181,7 +183,7 @@
       "name": "str?",
       "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)",
       "reference": "bool? (fills with reference: reference look at this layer)",
-      "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)",
+      "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape: linear|radial|ellipse, ratio, repeat: none|repeat|mirror, stops: [[pos, [r,g,b], opacity]…]}}? (a fill layer)",
       "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)",
       "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)",
       "color_prints": "bool? (the layer colour is printed too)",
@@ -195,6 +197,13 @@
     {
       "op": "delete_page",
       "page": "int"
+    },
+    {
+      "op": "import_pages",
+      "from": "str (another book: its .genko folder)",
+      "pages": "[int]? (default all)",
+      "after": "int? (insert after this page; default at the end)",
+      "note": "作品の結合: the pages and their lines are copied; the other book's asset files must be copied into this book's assets first (the app and the MCP export do)"
     },
     {
       "op": "duplicate_page",
@@ -692,7 +701,10 @@
       "rgb_to": "[r,g,b]?",
       "opacity_from": "0..1? (1)",
       "opacity_to": "0..1? (0: fades out)",
-      "shape": "linear|radial?"
+      "shape": "linear|radial|ellipse?",
+      "ratio": "float? (ellipse: across ÷ along)",
+      "repeat": "none|repeat|mirror?",
+      "stops": "[[position 0..1, [r,g,b], opacity?], …]? (多色: 2 to 16 colours, instead of the two ends)"
     },
     {
       "op": "define_brush",
@@ -708,6 +720,8 @@
       "texture": "''|grain|soft|dry?",
       "rgb": "[r,g,b]|null?",
       "fixed_width": "bool?",
+      "mix": "0..1? (下地混色)",
+      "stretch": "0..1? (色延び)",
       "delete": "bool?"
     },
     {
@@ -744,9 +758,9 @@
       "page": "int",
       "layer": "str?",
       "id": "str?",
-      "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|brightness_contrast|despeckle|plugin:<key>",
+      "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|brightness_contrast|despeckle|glow|rain|plugin:<key>",
       "area": "{poly}|{mask}? (選択範囲の中だけ)",
-      "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; sharpen amount (1 usual, 2 strong)/radius; hue shift/saturation/value; levels black/white/gamma (middle, >1 lighter)/out_black/out_white/channel (rgb|r|g|b); curve gamma, or points [[in,out],…] 0..255 and channel; brightness_contrast brightness/contrast (-100..100); despeckle size_mm (specks smaller than this)/what (ink|holes|both); lineart threshold (0.3..0.98, higher picks lighter lines)/radius (px, about twice the widest line)/min_px (specks dropped)/drop_blue (the blue pencil taken as paper)/keep_solid/rgb; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…]"
+      "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; sharpen amount (1 usual, 2 strong)/radius; hue shift/saturation/value; levels black/white/gamma (middle, >1 lighter)/out_black/out_white/channel (rgb|r|g|b); curve gamma, or points [[in,out],…] 0..255 and channel; brightness_contrast brightness/contrast (-100..100); despeckle size_mm (specks smaller than this)/what (ink|holes|both); lineart threshold (0.3..0.98, higher picks lighter lines)/radius (px, about twice the widest line)/min_px (specks dropped)/drop_blue (the blue pencil taken as paper)/keep_solid/rgb; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…] or stops [[position 0..1, [r,g,b]],…]; glow (光彩拡散) radius (px)/amount/threshold (0..255); rain count/length (px)/angle (° from straight down)/width (px)/opacity/rgb/seed"
     },
     {
       "op": "set_brush",
@@ -1040,9 +1054,10 @@
     },
     {
       "op": "add_cover",
-      "kind": "front|back|jacket (表紙・裏表紙・カバー)",
-      "spine_mm": "float? (jacket: the spine)",
-      "flap_mm": "float? (jacket: each flap, 袖)",
+      "kind": "front|back|jacket|obi (表紙・裏表紙・カバー・帯)",
+      "spine_mm": "float? (jacket, obi: the spine)",
+      "flap_mm": "float? (jacket, obi: each flap, 袖)",
+      "height_mm": "float? (obi: the band's height, 50)",
       "bleed": "bool? (default true: one panel to the bleed)",
       "note": "covers are pages at the end, without nombre; the book preview, EPUB and Kindle put the front cover first and the back cover last; print exports (PDF, TIFF, PNG) keep the page order, the covers named cover_front / cover_back / cover_jacket"
     },

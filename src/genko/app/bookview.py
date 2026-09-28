@@ -149,7 +149,7 @@ class BookPreview(QDialog):
 
             kind, page = self.pages[index]
             image = render_page(page, PREVIEW_DPI, "print", self.window.episode, finish=False)
-            if (covers.cover_of(page) or {}).get("kind") == "jacket":
+            if (covers.cover_of(page) or {}).get("kind") in covers.WRAPS:
                 part = "表紙" if kind == "front" else "裏表紙"
                 binding = self.window.episode.binding.value
                 box = next(((x0, x1) for x0, x1, name in covers.folds(page, binding) if name == part), None)

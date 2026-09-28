@@ -51,7 +51,7 @@ AGENT_OPS = frozenset({
     "set_tone", "edit_effect", "delete_effect", "effect_to_layer",
     "set_nombre",
     # pages, layers, brushes and pixels: everything a person can do to the drawing (G6)
-    "add_page", "delete_page", "duplicate_page", "reorder", "set_spread", "set_page_spec",
+    "add_page", "delete_page", "duplicate_page", "import_pages", "reorder", "set_spread", "set_page_spec",
     "delete_layer", "duplicate_layer", "merge_down", "set_layer_mask", "paint_mask",
     "define_brush", "filter_raster", "flood_fill", "erase_raster", "gradient_fill",  # (put_raster reads files: import_image instead)
     "set_onion", "step_onion",
@@ -1382,6 +1382,17 @@ class StudioService:
                     return fail(f"path は原稿のフォルダからの相対パスか、--root の中のパス: {op['path']}", "path_outside_root",
                                 f"/ops/{i}/path")
                 op["path"] = str(target)
+            if op.get("op") == "import_pages":  # (作品の結合: another book under --root; its asset files come along)
+                raw = Path(str(op.get("from") or "")).expanduser()
+                target = (raw if raw.is_absolute() else path / raw).resolve()
+                if self.root not in target.parents or not (target / "project.json").is_file():
+                    return fail(f"from は --root の中の別の原稿（.genko のフォルダ）: {op.get('from')}", "path_outside_root",
+                                f"/ops/{i}/from")
+                op["from"] = str(target)
+                if commit:
+                    from genko import merge
+
+                    merge.copy_assets(target, path)
         episode = load_episode(path)
         try:
             result = apply_ops(episode, ops, dry_run=True, agent=self.actor)
