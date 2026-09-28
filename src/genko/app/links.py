@@ -40,7 +40,18 @@ def send(link: str, wait_ms: int = 800) -> bool:
     allow_front()
     socket.write(link.encode("utf-8") + b"\n")
     socket.flush()
-    socket.waitForBytesWritten(wait_ms)
+    # Wait for the open Genko's "ok": a Windows pipe closed right after writing drops the link unread. (Events
+    # keep running meanwhile, so a listener in this same process can answer too.)
+    import time
+
+    from PySide6.QtCore import QCoreApplication
+
+    deadline = time.monotonic() + wait_ms / 1000
+    while (socket.state() == QLocalSocket.LocalSocketState.ConnectedState and not socket.bytesAvailable()
+           and time.monotonic() < deadline):
+        if QCoreApplication.instance() is not None:
+            QCoreApplication.processEvents()
+        socket.waitForReadyRead(10)
     socket.disconnectFromServer()
     return True
 
@@ -90,11 +101,15 @@ class Listener(QObject):
             socket = self.server.nextPendingConnection()
             socket.readyRead.connect(lambda s=socket: self._read(s))
             socket.disconnected.connect(socket.deleteLater)
+            if socket.bytesAvailable():  # (the link can arrive before readyRead is connected)
+                self._read(socket)
 
     def _read(self, socket: QLocalSocket) -> None:
         for raw in bytes(socket.readAll()).decode("utf-8", "replace").splitlines():
             if is_link(raw.strip()):
                 self.received.emit(raw.strip())
+                socket.write(b"ok\n")  # (the sender waits for this before it hangs up)
+                socket.flush()
 
 
 def command() -> list[str]:

@@ -89,7 +89,7 @@ def _when(at) -> str:
 
     moment = datetime.datetime.fromtimestamp(float(at))
     today = datetime.date.today() == moment.date()
-    return moment.strftime("　%H:%M" if today else "　%m/%d %H:%M")
+    return "　" + moment.strftime("%H:%M" if today else "%m/%d %H:%M")  # (strftime garbles non-ASCII on Windows)
 
 
 class HistoryPanel(QWidget):
