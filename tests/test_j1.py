@@ -69,12 +69,14 @@ def test_command_search_finds_and_runs(window, qapp):
 def test_the_command_bar_can_be_changed(window):
     from genko.app import workspace
 
-    names = [a.text() for a in window.command_bar.actions() if not a.isSeparator()]
+    # (the books' tabs sit at the start of the same bar and stay when the commands change)
+    names = [a.text() for a in window.command_bar.actions() if not a.isSeparator() and not a.property("keep")]
     assert names[:2] == ["元に戻す", "やり直す"] and "書き出し…" in names
     workspace.keep("ui/commandbar", ["印刷…", "|", "ペン"])
     workspace.fill_commandbar(window)
-    names = [a.text() for a in window.command_bar.actions() if not a.isSeparator()]
+    names = [a.text() for a in window.command_bar.actions() if not a.isSeparator() and not a.property("keep")]
     assert names == ["印刷…", "ペン"]
+    assert window.command_bar.widgetForAction(window.command_bar.actions()[0]) is window.doc_tabs
 
 
 def test_quick_access_holds_chosen_commands(window, qapp):

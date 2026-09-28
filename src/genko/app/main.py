@@ -8,6 +8,7 @@ from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequ
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QStyledItemDelegate,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -23,10 +24,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGridLayout,
     QTabBar,
     QTabWidget,
     QToolBar,
@@ -539,6 +540,45 @@ LAYER_KIND_NAME = {"strokes": "ペンのレイヤー", "raster": "ペイント�
                    "tone": "トーン", "fill": "塗り", "adjust": "色調補正"}
 
 
+class _LayerRow(QStyledItemDelegate):
+    """A layer's row: the eye, a framed picture of what it holds, its name (本文), and on the right its marks,
+    opacity and blend (補足, only when not the usual); the chosen row has the accent bar on its left edge."""
+
+    def initStyleOption(self, option, index) -> None:  # noqa: N802
+        super().initStyleOption(option, index)
+        option.text = index.data(Qt.ItemDataRole.UserRole + 3) or option.text  # (the name alone; marks go right)
+
+    def paint(self, painter, option, index) -> None:  # noqa: D102
+        from PySide6.QtCore import QRect
+        from PySide6.QtWidgets import QStyle, QStyleOptionViewItem
+
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        meta = index.data(Qt.ItemDataRole.UserRole + 2) or ""
+        t = theme.tokens()
+        width = opt.fontMetrics.horizontalAdvance(meta) + 12 if meta else 0
+        opt.rect = option.rect.adjusted(0, 0, -width, 0) if meta else option.rect
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        painter.save()
+        if option.state & QStyle.StateFlag.State_Selected:  # (the whole row lit, then the bar)
+            painter.fillRect(option.rect.adjusted(0, 1, 0, -1), QColor(t.selected))
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+        picture = style.subElementRect(QStyle.SubElement.SE_ItemViewItemDecoration, opt, opt.widget)
+        if index.data(Qt.ItemDataRole.UserRole + 1) == "picture" and picture.isValid():
+            painter.setPen(QColor(t.divider))
+            painter.drawRect(picture.adjusted(0, 0, -1, -1))
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(QRect(option.rect.left(), option.rect.top() + 6, 3, option.rect.height() - 12), QColor(t.accent))
+        if meta:
+            painter.setPen(QColor(t.muted))
+            painter.drawText(option.rect.adjusted(0, 0, -8, 0), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, meta)
+        painter.restore()
+
+    def sizeHint(self, option, index):  # noqa: N802
+        hint = super().sizeHint(option, index)
+        return QSize(hint.width(), max(hint.height(), 44))
+
+
 class LayerPanel(QWidget):
     """Layers, front first. The selected layer is where the pen and the eraser work."""
 
@@ -553,7 +593,8 @@ class LayerPanel(QWidget):
         self.list = QListWidget()
         self.list.setObjectName("layerList")  # (its check boxes are eyes: theme.py)
         self.list.setUniformItemSizes(True)
-        self.list.setMinimumHeight(72)  # (a short panel keeps its fields below; the list scrolls)
+        self.list.setItemDelegate(_LayerRow(self.list))
+        self.list.setMinimumHeight(96)  # (a short panel keeps its fields below; the list scrolls)
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # Ctrl / Shift+click: several
         self.list.itemChanged.connect(self._visibility)
         self.list.itemDoubleClicked.connect(lambda _item: self._edit_special())
@@ -678,7 +719,7 @@ class LayerPanel(QWidget):
         self.act_mask_off.toggled.connect(lambda on: self._loading or self._mask({"enabled": not on}))
         mask_menu.addAction("マスクを消す", lambda: self._mask({"delete": True}))
         self.mask_button.setMenu(mask_menu)
-        self.list.setIconSize(QSize(18, 24))
+        self.list.setIconSize(QSize(30, 38))  # (big enough to tell the layers apart by what they hold)
         self.filter = QComboBox()
         for key, label in wording.FILTERS:
             self.filter.addItem(label, key)
@@ -688,22 +729,32 @@ class LayerPanel(QWidget):
             self.filter.addItem(f"{plugin['name']}（プラグイン）", plugins.PREFIX + plugin["key"])
         apply_filter = QPushButton("フィルターをかける…")
         apply_filter.clicked.connect(self._filter)
-        adds = QGridLayout()  # (small picture buttons under the list, as painting apps have them)
-        adds.setSpacing(2)
-        pictures = ((add_pen, "pen_layer", "ペンのレイヤーを足す（線を描く。線はあとから消しゴムで切れる）"),
-                    (add_paint, "paint_layer", "ペイントのレイヤーを足す（塗りや筆のにじみ）"),
-                    (add_folder, "folder", "フォルダを足す（レイヤーをまとめる）"),
-                    (add_special, "add", "塗り・グラデーション・色調補正のレイヤーを足す"),
-                    (duplicate, "duplicate", "選んだレイヤーを複製"), (merge, "merge", "下のレイヤーと結合"),
-                    (several, "more", "まとめて: 選んだレイヤーの結合・フォルダにまとめる・変換など"),
-                    (up, "up", "選んだレイヤーを上へ"), (down, "down", "選んだレイヤーを下へ"), (delete, "delete", "選んだレイヤーを消す"))
-        for i, (button, name, tip) in enumerate(pictures):
+        # small picture buttons under the list, in groups: what adds a layer (and, apart on the right, what takes
+        # one away), then what moves and combines them
+        pictures = {add_pen: ("pen_layer", "ペンのレイヤーを足す（線を描く。線はあとから消しゴムで切れる）"),
+                    add_paint: ("paint_layer", "ペイントのレイヤーを足す（塗りや筆のにじみ）"),
+                    add_folder: ("folder", "フォルダを足す（レイヤーをまとめる）"),
+                    add_special: ("add", "塗り・グラデーション・色調補正のレイヤーを足す"),
+                    duplicate: ("duplicate", "選んだレイヤーを複製"), merge: ("merge", "下のレイヤーと結合"),
+                    several: ("more", "まとめて: 選んだレイヤーの結合・フォルダにまとめる・変換など"),
+                    up: ("up", "選んだレイヤーを上へ"), down: ("down", "選んだレイヤーを下へ"), delete: ("delete", "選んだレイヤーを消す")}
+        for button, (name, tip) in pictures.items():
             theme.iconic(button, name, "", tip)
             button.setFixedSize(30, 28)
             button.setIconSize(QSize(18, 18))
             button.setProperty("iconbtn", True)  # (flat pictures, lit on hover: theme.py)
-            adds.addWidget(button, i // 5, i % 5)
-        adds.setColumnStretch(5, 1)
+
+        def group(*buttons) -> QHBoxLayout:
+            row = QHBoxLayout()
+            row.setSpacing(2)
+            for button in buttons:
+                row.addWidget(button) if button is not None else row.addStretch(1)
+            return row
+
+        adds = QVBoxLayout()
+        adds.setSpacing(4)
+        adds.addLayout(group(add_pen, add_paint, add_folder, add_special, None, delete))
+        adds.addLayout(group(up, down, None, duplicate, merge, several))
         props = QFormLayout()
         props.addRow("不透明度", self.opacity)
         props.addRow("合成", self.blend)
@@ -757,6 +808,10 @@ class LayerPanel(QWidget):
                 (getattr(layer, "reference", False), "参照"), (bool(getattr(layer, "mask", None)), "マスク"),
                 (getattr(layer, "locked", False), "ロック")) if on]
             item = QListWidgetItem(f"{indent}{wording.layer_label(layer)}" + (f"　· {' · '.join(marks)}" if marks else ""))
+            item.setData(Qt.ItemDataRole.UserRole + 3, f"{indent}{wording.layer_label(layer)}")
+            blend = dict(wording.BLEND).get(layer.blend, "") if layer.blend != "normal" else ""
+            meta = [*marks, blend, f"{round(layer.opacity * 100)}%" if layer.opacity < 0.995 else ""]
+            item.setData(Qt.ItemDataRole.UserRole + 2, " · ".join(m for m in meta if m))
             item.setToolTip(LAYER_KIND_NAME.get(kind, ""))
             picture = self._thumbnail(page, layer)
             # its picture, or (nothing drawn yet) a quiet mark of its kind; every row the same height
@@ -799,7 +854,7 @@ class LayerPanel(QWidget):
             name = f"kind_{kind}" if f"kind_{kind}" in LUCIDE else "kind_other"
             mark = _lucide(name, t.muted, 64)
             if mark is not None:
-                side = min(size.width(), size.height())
+                side = min(18, size.width(), size.height())  # (a small quiet mark in the picture's room)
                 painter = QPainter(pixmap)
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
                 painter.drawPixmap((size.width() - side) // 2, (size.height() - side) // 2, side, side, mark)
@@ -1388,7 +1443,7 @@ class MainWindow(QMainWindow):
         column = QVBoxLayout(central)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
-        column.addWidget(self.doc_tabs)
+        # (the open books' tabs sit at the start of the command bar: one row over the page, not two — _build_actions)
         self.first_steps = None  # (made when a book with nothing in it is in front: most books never need it)
         self._column = column
         column.addWidget(self.canvas, 1)
@@ -2083,6 +2138,13 @@ class MainWindow(QMainWindow):
         commands.setIconSize(QSize(20, 20))
         commands.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)  # (the names are in the tooltips)
         self.command_bar = commands
+        # the open books' tabs on the left of the bar, the commands on the right (kept when the commands change)
+        tabs = commands.addWidget(self.doc_tabs)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        room = commands.addWidget(spacer)
+        for action in (tabs, room):
+            action.setProperty("keep", True)
         self._make_launcher()
         from genko.app.workspace import fill_commandbar
 
@@ -2677,6 +2739,7 @@ class MainWindow(QMainWindow):
             self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
             self.view_menu.addAction(dock.toggleViewAction())
             dock.visibilityChanged.connect(lambda shown, d=dock: shown and d in self._stale_docks and self._refresh_dock(d))
+            dock.visibilityChanged.connect(lambda shown, d=dock: shown and self._tab_came(d))
             docks.append(dock)
             if title in AGENT_PANELS:
                 self.agent_docks.append(dock)
@@ -2778,6 +2841,9 @@ class MainWindow(QMainWindow):
         box.setVisible(waiting)
         if waiting and self.isVisible():
             QTimer.singleShot(0, self._settle_docks)
+            from genko.app import comfort
+
+            comfort.fade_in(box.widget(), 200)  # (the box comes into sight softly, not with a jump)
 
     def _settle_docks(self) -> None:
         """The panels in front: the approval box (while something waits), then the layers; the overview stays
@@ -2794,6 +2860,13 @@ class MainWindow(QMainWindow):
             tabs.raise_()
         self._hide_stray_tabs()
 
+    def _tab_came(self, dock) -> None:
+        """A tab brought to the front fades in (only once the window is up: not while it is being laid out)."""
+        if getattr(self, "_settled", False) and self.isVisible() and not dock.isFloating():
+            from genko.app import comfort
+
+            comfort.fade_in(dock.widget(), 140)
+
     def _fit_box(self) -> None:
         """The approval box as tall as the request needs: room for a preview when there is one, only its words
         and buttons otherwise; the tabs under it keep the rest."""
@@ -2801,10 +2874,10 @@ class MainWindow(QMainWindow):
         tabs = next((d for d in getattr(self, "studio_docks", []) if d.windowTitle() == "レイヤー"), None)
         if box is None or tabs is None or not box.isVisible() or box.isFloating():
             return
-        most = 2 * self.height() // 5
+        most = self.height() // 2
         box_ = self.approvals
         pictured = box_.preview._source is not None or box_.choices.isVisibleTo(box_)
-        want = max(300, most) if pictured else min(max(box_.sizeHint().height(), box_.minimumSizeHint().height()) + 24, most)
+        want = max(320, most) if pictured else min(max(box_.sizeHint().height(), box_.minimumSizeHint().height()) + 24, most)
         self.resizeDocks([box, tabs], [want, max(200, self.height() - want)], Qt.Orientation.Vertical)
 
     def show_dock(self, title: str) -> None:

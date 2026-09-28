@@ -73,7 +73,8 @@ def test_layers_are_compact_and_empty_ones_have_no_picture(window):
 
     panel = window.layers
     panel.refresh()
-    assert panel.list.iconSize().height() <= 24
+    # (a picture big enough to tell layers apart, in a row that stays one line: about 44 px)
+    assert 30 <= panel.list.iconSize().height() <= 40 and panel.list.sizeHintForRow(0) <= 48
     # nothing drawn yet: each row shows its kind's quiet mark, not a picture of the layer
     assert all(panel.list.item(i).data(Qt.ItemDataRole.UserRole + 1) == "mark" for i in range(panel.list.count()))
 

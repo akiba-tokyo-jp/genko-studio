@@ -402,6 +402,34 @@ def toast(window, text: str, ms: int = 5000) -> QLabel:
     return note
 
 
+def fade_in(widget, ms: int = 160, rise: int = 0) -> None:
+    """A panel coming into sight fades in (and rises a few pixels when asked) instead of popping; nothing moves
+    when the person asks for fewer moving things. The effect is taken off when done, so drawing stays as fast."""
+    if widget is None or reduce_motion() or widget.graphicsEffect() is not None:
+        return
+    from PySide6.QtCore import QEasingCurve, QPropertyAnimation
+    from PySide6.QtWidgets import QGraphicsOpacityEffect
+
+    fade = QGraphicsOpacityEffect(widget)
+    fade.setOpacity(0.0)
+    widget.setGraphicsEffect(fade)
+    move = QPropertyAnimation(fade, b"opacity", fade)  # (owned by the effect: they go together)
+    move.setDuration(ms)
+    move.setStartValue(0.0)
+    move.setEndValue(1.0)
+    move.setEasingCurve(QEasingCurve.Type.OutCubic)
+    move.finished.connect(lambda: _alive(widget) and widget.graphicsEffect() is fade and widget.setGraphicsEffect(None))
+    move.start()
+    if rise:
+        end = widget.pos()
+        slide = QPropertyAnimation(widget, b"pos", widget)
+        slide.setDuration(ms + 20)
+        slide.setStartValue(end + QPointF(0, rise).toPoint())
+        slide.setEndValue(end)
+        slide.setEasingCurve(QEasingCurve.Type.OutCubic)
+        slide.start()
+
+
 def _alive(widget) -> bool:
     try:
         widget.objectName()

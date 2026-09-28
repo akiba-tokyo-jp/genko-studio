@@ -304,7 +304,7 @@ def test_the_top_bar_is_pictures_and_the_panel_is_rows(window):
     from PySide6.QtWidgets import QLabel, QPushButton
 
     assert window.command_bar.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
-    assert all(not a.icon().isNull() for a in window.command_bar.actions() if not a.isSeparator())
+    assert all(not a.icon().isNull() for a in window.command_bar.actions() if not a.isSeparator() and not a.property("keep"))
     window.act_frame.trigger()
     page = window.tool_settings.stack.currentWidget()
     sections = [label.text() for label in page.findChildren(QLabel) if label.property("role") == "section"]

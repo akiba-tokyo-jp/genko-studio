@@ -155,6 +155,10 @@ class PreviewLabel(QLabel):
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._fit()
+        corner = getattr(self, "corner", None)
+        if corner is not None:  # (a button over the picture's top right corner)
+            corner.adjustSize()
+            corner.move(self.width() - corner.width() - 8, 8)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         self.activated.emit()
@@ -177,11 +181,15 @@ class ApprovalBox(QWidget):
         self.page_pick = QComboBox()
         self.page_pick.currentIndexChanged.connect(lambda _: self._page_changed())
         self.preview = PreviewLabel()
+        self.preview.setObjectName("approvalPreview")
         self.preview.activated.connect(self.open_viewer)
         self.preview.setMinimumHeight(170)
-        self.big = theme.iconic(QPushButton("大きく見る"), "expand")
-        self.big.setProperty("row", True)
+        # the page as wide as the box, with 大きく見る over its corner (not a row of its own)
+        self.big = theme.iconic(QPushButton("大きく見る", self.preview), "expand")
+        self.big.setObjectName("overPicture")
+        self.big.setCursor(Qt.CursorShape.PointingHandCursor)
         self.big.clicked.connect(self.open_viewer)
+        self.preview.corner = self.big
         self.choices = QListWidget()
         self.choices.setViewMode(QListWidget.ViewMode.IconMode)
         self.choices.setIconSize(QSize(120, 150))
@@ -199,7 +207,6 @@ class ApprovalBox(QWidget):
         buttons.addWidget(self.approve_button)
         head = QHBoxLayout()
         head.addWidget(self.page_pick, 1)
-        head.addWidget(self.big)
         self.empty = QLabel("承認を待っている依頼はありません。\nAI が依頼を出すと、ここに届きます。")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         theme.role(self.empty, "hint")
@@ -299,6 +306,10 @@ class ApprovalBox(QWidget):
         if follow and item.pages:
             self.window.go_to_page(item.pages[0])
         self._preview()
+        if follow:  # (another request chosen: its page fades in)
+            from genko.app import comfort
+
+            comfort.fade_in(self.preview, 140)
         fit = getattr(self.window, "_fit_box", None)
         if callable(fit):
             QTimer.singleShot(0, self, fit)  # (the box as tall as this request needs)

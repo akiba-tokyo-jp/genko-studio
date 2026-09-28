@@ -289,7 +289,11 @@ class QuickAccess(QWidget):
 def fill_commandbar(window) -> None:
     """The command bar (under the menus) with the chosen commands."""
     bar = window.command_bar
-    bar.clear()
+    for action in bar.actions():  # (the books' tabs and the room after them stay; the commands are put again)
+        if not action.property("keep"):
+            bar.removeAction(action)
+            if action.isSeparator() and action.parent() is bar:
+                action.deleteLater()
     actions = by_text(window)
     for name in chosen("ui/commandbar", DEFAULT_COMMANDBAR):
         if name == "|":

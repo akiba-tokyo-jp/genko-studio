@@ -47,11 +47,11 @@ class Tokens:
     surround: str    # around the page on the canvas
 
 
-LIGHT = Tokens(False, window="#e3e4e6", panel="#eeeff1", base="#f8f8f9", raised="#f4f5f6", hover="#e2e4e8",
-               border="#c9ccd1", divider="#d8dade", text="#1f2124", muted="#62666d", faint="#a3a7ad",
+LIGHT = Tokens(False, window="#d7d9dd", panel="#f1f2f4", base="#fafafb", raised="#f7f8f9", hover="#e5e7eb",
+               border="#c6c9cf", divider="#dcdee2", text="#1f2124", muted="#62666d", faint="#a3a7ad",
                accent="#d9601f", accent_text="#ffffff", accent_soft="#f6dccb", selected="#d9dde4", danger="#c0392b",
                ok="#2f7d4f", surround="#9ea0a4")
-DARK = Tokens(True, window="#232427", panel="#2b2c30", base="#1f2023", raised="#34363a", hover="#3b3d42",
+DARK = Tokens(True, window="#18191b", panel="#2a2b2f", base="#212225", raised="#34363a", hover="#3b3d42",
               border="#44464c", divider="#393b40", text="#dcdde0", muted="#9a9ea6", faint="#62656b",
               accent="#e07a45", accent_text="#1b1b1d", accent_soft="#4a3429", selected="#41444b", danger="#e0685a",
               ok="#6cc18f", surround="#3a3b3e")
@@ -211,11 +211,13 @@ def style_sheet(t: Tokens, pt: float = 9.0) -> str:
     big, head, small = f"{pt + 5:g}pt", f"{pt + 2:g}pt", f"{max(MIN_PT, pt - 1):g}pt"
     return f"""
 QMainWindow, QDialog {{ background: {t.window}; }}
-QMainWindow::separator {{ background: {t.window}; width: 3px; height: 3px; }}
+QMainWindow::separator {{ background: {t.window}; width: 6px; height: 6px; }}
 QMainWindow::separator:hover {{ background: {t.accent_soft}; }}
 QDockWidget {{ color: {t.text}; titlebar-close-icon: none; }}
 QDockWidget::title {{ background: {t.panel}; padding: 5px 8px; border-bottom: 1px solid {t.divider}; text-align: left; font-weight: 500; }}
 QDockWidget > QWidget {{ background: {t.panel}; }}
+QDockWidget QScrollArea, QDockWidget QScrollArea > QWidget, QDockWidget QScrollArea > QWidget > QWidget {{ background: {t.panel}; }}
+QMainWindow > QTabBar {{ background: {t.panel}; }}
 QWidget#panelBody {{ background: {t.panel}; }}
 QTabWidget::pane {{ border: none; border-top: 1px solid {t.divider}; background: {t.panel}; }}
 QTabBar {{ qproperty-drawBase: 0; }}
@@ -321,6 +323,9 @@ QFrame#dialogCard {{ background: {t.panel}; border: 1px solid {t.divider}; borde
 QWidget#dialogFooter {{ border-top: 1px solid {t.divider}; }}
 QWidget#launcher {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; }}
 QLabel#startNotice {{ background: {t.accent_soft}; color: {t.text}; border-radius: 6px; padding: 8px; }}
+QLabel#approvalPreview {{ background: {t.base}; border: 1px solid {t.divider}; border-radius: 8px; padding: 8px; }}
+QPushButton#overPicture {{ background: {_rgba(t.raised, 0.92)}; border: 1px solid {t.border}; border-radius: 6px; padding: 4px 8px; }}
+QPushButton#overPicture:hover {{ background: {t.hover}; }}
 QWidget#firstSteps {{ background: {t.panel}; border-bottom: 1px solid {t.divider}; }}
 QWidget#startCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 8px; }}
 QPushButton#actionCard {{ background: {t.panel}; border: 1px solid {t.divider}; border-radius: 12px; padding: 0; text-align: left; }}
