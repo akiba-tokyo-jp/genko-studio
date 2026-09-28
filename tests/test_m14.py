@@ -206,7 +206,7 @@ def test_boxes_are_seen_in_perspective_and_traced_as_lines():
     with pytest.raises(ApplyError):
         apply_ops(ep, [{"op": "delete_prim", "page": 1, "id": "b"}])
     with pytest.raises(ApplyError):
-        apply_ops(ep, [{"op": "add_prim3d", "page": 1, "kind": "sphere"}])
+        apply_ops(ep, [{"op": "add_prim3d", "page": 1, "kind": "torus"}])
 
 
 def test_agents_have_the_ruler_and_3d_tools():

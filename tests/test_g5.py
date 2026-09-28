@@ -69,7 +69,7 @@ def test_cylinders_stairs_and_floors():
     apply_ops(ep, [{"op": "trace_prims", "page": 1, "layer_id": ink.id}])
     assert len(next(layer for layer in ep.pages[0].layers if layer.role == LayerRole.INK).strokes) > 30
     with pytest.raises(ApplyError):
-        apply_ops(ep, [{"op": "add_prim3d", "page": 1, "kind": "sphere"}])
+        apply_ops(ep, [{"op": "add_prim3d", "page": 1, "kind": "torus"}])
 
 
 # --- the window --------------------------------------------------------------------------------------
