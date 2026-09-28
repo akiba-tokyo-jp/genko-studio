@@ -83,6 +83,18 @@ def _tailed(line) -> bool:
 AIMED = ("focus", "uni_flash", "white")  # (lines that close in on a point: aimed at the faces, which they leave clear)
 
 
+KEEP_CLEAR = ("focus", "speed", "uni_flash", "beta_flash")  # (lines and flashes stop short of every reported face)
+
+
+def _face_clearing(figs: list[Figure]) -> list[dict]:
+    """An ellipse a little larger than each reported face: the effect's lines stop at its edge and thin out."""
+    out = []
+    for f in figs:
+        x, y, w, h = f.head
+        out.append({"ellipse": [round(x + w / 2, 2), round(y + h / 2, 2), round(w / 2 * 1.3 + 1.5, 2), round(h / 2 * 1.3 + 1.5, 2)]})
+    return out
+
+
 def _aim(kind: str, figs: list[Figure]) -> dict:
     """Centre and clear middle of focus lines around the reported faces (all of them), so no line crosses a face."""
     if kind not in AIMED or not figs:
@@ -140,6 +152,13 @@ def plan(episode: Episode, page: Page) -> tuple[list[dict], list[dict]]:
                         notes.append({"kind": "aim_tail", "frame_id": frame.id, "line": line.text[:20]})
                 placed.append(box)
         existing = {(e.get("kind"), e.get("frame_id")) for e in page.effects}
+        if figs:  # (effects put before the faces were reported: they now stop short of them too)
+            for effect in page.effects:
+                if (effect.get("frame_id") == frame.id and effect.get("kind") in KEEP_CLEAR and effect.get("id")
+                        and not (effect.get("params") or {}).get("avoid")):
+                    ops.append({"op": "edit_effect", "page": page.index, "id": effect["id"], "params": {"avoid": _face_clearing(figs)}})
+                    notes.append({"kind": "clear_faces", "frame_id": frame.id, "effect": effect["kind"],
+                                  "label": effects.LABELS.get(effect["kind"], effect["kind"]), "why": f"顔 {len(figs)} つの手前で線を止めた"})
         done = set(panel.get("fx_done") or [])
         drawn: list[str] = []
         for word in panel.get("fx", []) or []:
@@ -163,12 +182,16 @@ def plan(episode: Episode, page: Page) -> tuple[list[dict], list[dict]]:
                                   "why": "「白で塗る」はコマの絵を全部白で隠すので、絵のあるコマには入れなかった。光らせるならウニフラッシュ"})
                     continue
                 params = _aim(kind, figs)
+                if kind in KEEP_CLEAR and figs:
+                    params["avoid"] = _face_clearing(figs)
                 ops.append({"op": "add_effect", "page": page.index, "kind": kind, "frame_id": frame.id, "params": params})
                 note = {"kind": "add_effect", "frame_id": frame.id, "effect": kind, "label": effects.LABELS[kind]}
                 if kind == "white":
                     note["why"] = "コマを白で塗った（絵はまだ無い）"
-                if kind in AIMED and not params:
-                    note["why"] = "顔の位置が報告されていないので、コマの中心に向けた。report_regions で顔を報告すると顔に合わせる"
+                if kind in KEEP_CLEAR and not figs:
+                    note["why"] = "顔の位置が報告されていないので、線は顔を避けていない。report_regions で顔を報告すると、顔の手前で線を止める"
+                elif kind in KEEP_CLEAR:
+                    note["why"] = f"顔 {len(figs)} つの手前で線を止めた"
                 notes.append(note)
                 continue
             if word in done:

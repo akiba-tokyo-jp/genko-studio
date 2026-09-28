@@ -16,6 +16,10 @@ Kinds and their settings (`params`, page mm; everything is optional):
 `rgb` sets the colour (black by default; white lines over black work too). Effects stay inside their
 panel (or the page) and are kept as settings, so they can be changed later, or turned into pen
 lines and fills on a layer to finish by hand.
+
+Keeping clear (any kind): `avoid` [{"ellipse": [cx, cy, rx, ry]} | {"path": [[x, y], …]}, …] — the lines stop
+short of these shapes (a face) and thin out where they stop, as a hand-drawn line stops at a figure's outline;
+`within` [[x, y], …] — the lines are drawn only inside this shape (a selection). Fills are cut the same way.
 """
 
 from __future__ import annotations
@@ -31,6 +35,12 @@ INK = (15, 15, 15)
 def validate(kind: str, params: dict) -> None:
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
+    for shape in params.get("avoid") or []:
+        if not isinstance(shape, dict) or not ((isinstance(shape.get("ellipse"), (list, tuple)) and len(shape["ellipse"]) == 4)
+                                               or (isinstance(shape.get("path"), (list, tuple)) and len(shape["path"]) >= 3)):
+            raise ValueError('avoid is a list of {"ellipse": [cx, cy, rx, ry]} or {"path": [[x, y], …]} (3 points or more)')
+    if params.get("within") is not None and len(params.get("within") or []) < 3:
+        raise ValueError("within is a shape of 3 points or more")
     if int(params.get("count", 1) or 1) > 2000 or int(params.get("spikes", 1) or 1) > 2000:
         raise ValueError("too many lines (at most 2000)")
     for key in ("jitter", "depth", "length"):
@@ -260,7 +270,99 @@ def geometry(effect: dict, page) -> dict:
         fills.append({"points": star, "rgb": [255, 255, 255]})
     elif kind == "white":
         fills.append({"points": outline, "rgb": [255, 255, 255]})
-    return {"lines": lines, "fills": fills, "rgb": rgb, "outline": outline}
+    avoid, within = _clearing(params)
+    if avoid or within:
+        lines = _keep_clear(lines, avoid, within)
+    return {"lines": lines, "fills": fills, "rgb": rgb, "outline": outline, "avoid": avoid, "within": within}
+
+
+# --- keeping clear of faces (avoid) and inside a selection (within) ---------------------------------------------
+
+
+def _clearing(params: dict) -> tuple[list, list | None]:
+    shapes = []
+    for shape in params.get("avoid") or []:
+        if isinstance(shape, dict) and shape.get("ellipse"):
+            cx, cy, rx, ry = (float(v) for v in shape["ellipse"])
+            if rx > 0 and ry > 0:
+                shapes.append(("ellipse", (cx, cy, rx, ry)))
+        elif isinstance(shape, dict) and len(shape.get("path") or []) >= 3:
+            shapes.append(("path", [(float(p[0]), float(p[1])) for p in shape["path"]]))
+    within = [(float(p[0]), float(p[1])) for p in params.get("within") or []]
+    return shapes, (within if len(within) >= 3 else None)
+
+
+def _in_polygon(x: float, y: float, poly) -> bool:
+    inside = False
+    for (ax, ay), (bx, by) in zip(poly, poly[1:] + poly[:1]):
+        if (ay > y) != (by > y) and x < ax + (bx - ax) * (y - ay) / ((by - ay) or 1e-12):
+            inside = not inside
+    return inside
+
+
+def _clear_at(x: float, y: float, avoid, within) -> bool:
+    if within is not None and not _in_polygon(x, y, within):
+        return False
+    for kind, shape in avoid:
+        if kind == "ellipse":
+            cx, cy, rx, ry = shape
+            if ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1:
+                return False
+        elif _in_polygon(x, y, shape):
+            return False
+    return True
+
+
+FADE_MM = 3.0  # (how long a cut line takes to thin out to nothing)
+
+
+def _keep_clear(lines: list[dict], avoid, within) -> list[dict]:
+    """Each line cut where it enters a shape to keep clear of (or leaves `within`); the part left thins out toward
+    the cut, as a pen lifts at a figure's outline. Pieces too short to read are dropped."""
+    out = []
+    for line in lines:
+        pts = line["points"]
+        dense: list[list[float]] = []
+        for a, b in zip(pts, pts[1:]):
+            n = max(1, int(math.dist(a[:2], b[:2]) / 0.4))
+            pa = a[2] if len(a) > 2 else 1.0
+            pb = b[2] if len(b) > 2 else 1.0
+            for k in range(n):
+                t = k / n
+                dense.append([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, pa + (pb - pa) * t])
+        last = pts[-1]
+        dense.append([last[0], last[1], last[2] if len(last) > 2 else 1.0])
+        keep = [_clear_at(p[0], p[1], avoid, within) for p in dense]
+        if all(keep):
+            out.append(line)
+            continue
+        i = 0
+        while i < len(dense):
+            if not keep[i]:
+                i += 1
+                continue
+            j = i
+            while j + 1 < len(dense) and keep[j + 1]:
+                j += 1
+            piece = [list(p) for p in dense[i:j + 1]]
+            length = sum(math.dist(a[:2], b[:2]) for a, b in zip(piece, piece[1:]))
+            if length >= 1.5:
+                fade = min(FADE_MM, length * 0.45)
+                for cut_start, cut_end in ((i > 0, False), (j < len(dense) - 1, True)):
+                    if not cut_start:
+                        continue
+                    walk = 0.0
+                    seq = list(reversed(piece)) if cut_end else piece
+                    prev = seq[0]
+                    for p in seq:
+                        walk += math.dist(prev[:2], p[:2])
+                        prev = p
+                        if walk >= fade:
+                            break
+                        p[2] = p[2] * (0.03 + 0.97 * walk / fade)
+                out.append({**line, "points": [[round(p[0], 3), round(p[1], 3), round(p[2], 3)] for p in piece]})
+            i = j + 1
+    return out
 
 
 def draw(image, effect: dict, page, dpi: int):
@@ -287,6 +389,19 @@ def draw(image, effect: dict, page, dpi: int):
     layer = Image.composite(colour, layer, cover)
     clip = Image.new("L", image.size, 0)
     ImageDraw.Draw(clip).polygon([_xy(p, dpi) for p in geo["outline"]], fill=255)
+    if geo.get("within"):  # (a fill kept inside the selection and clear of the faces, as the lines are)
+        inside = Image.new("L", image.size, 0)
+        ImageDraw.Draw(inside).polygon([_xy(p, dpi) for p in geo["within"]], fill=255)
+        clip = ImageChops.multiply(clip, inside)
+    if geo.get("avoid"):
+        pen = ImageDraw.Draw(clip)
+        for kind, shape in geo["avoid"]:
+            if kind == "ellipse":
+                cx, cy, rx, ry = shape
+                (x0, y0), (x1, y1) = _xy((cx - rx, cy - ry), dpi), _xy((cx + rx, cy + ry), dpi)
+                pen.ellipse((x0, y0, x1, y1), fill=0)
+            else:
+                pen.polygon([_xy(p, dpi) for p in shape], fill=0)
     layer.putalpha(ImageChops.multiply(layer.split()[3], clip))
     return Image.alpha_composite(image.convert("RGBA"), layer).convert(image.mode)
 

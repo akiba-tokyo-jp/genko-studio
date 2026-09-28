@@ -108,6 +108,9 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   絵ではない直し（台詞・線・効果など）なら `apply_ops` で直し、`mcp__genko__resolve_ticket`（`ticket_id` は `tickets` の値、`note` に何をしたか）で閉じる。
 - `fix_page`: ネーム承認後のページへの人間の指示。`apply_ops` で直してから `resolve_ticket` で閉じる。閉じられるのは人からの直しの指示だけ（承認の依頼や質問は人が閉じる）。人は `genko studio reopen-ticket` で開き直せる。
 - 効果の言葉: 「フラッシュ」は絵の上に放射線（ウニフラッシュ）を描く。「白で塗る」「ホワイトアウト」はコマを白で塗るので、絵のあるコマには入らない。
+- 効果線と顔: `finish_page` は、報告された顔（`report_regions`）の手前で集中線・流線・フラッシュの線を止める（止まる所で細くなる）。
+  顔を報告する前に置いた効果線にも、あとから同じ設定を足す。自分で置くときは `add_effect` / `edit_effect` の `params` に
+  `avoid`（`[{"ellipse": [cx, cy, rx, ry]} | {"path": [[x, y], …]}]`、ページの mm）と、描く範囲を絞る `within`（`[[x, y], …]`）を渡せる。
 - `report_regions`: 採用した絵の顔と人物の位置を `mcp__genko__report_regions` で報告する（`box01` は画像の中の 0..1 の `[x, y, 幅, 高さ]`）。
   人物がいない絵なら `apply_ops` の `record_review`（`kind: "regions"`、`frame_id`、`input_hash` に採用中の候補 id）。
 - `upscale_panel`: 採用した絵が印刷の解像度に足りない。`mcp__genko__upscale`（`page`・`frame_id`、`method` は `inspect` の `upscalers`、既定 `genko`）で拡大した候補を作り、`adopt` で置き直す。

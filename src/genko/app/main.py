@@ -1914,6 +1914,12 @@ class MainWindow(QMainWindow):
         self.act_tone_click = a("クリックした所にトーンを貼る", self._tone_click, tip="線で囲まれた所をクリックすると、そこにトーンが入ります")
         self.effect_actions = [a(label, lambda _=False, k=key: self._choose_effect(k)) for key, label in
                                (("focus", "集中線"), ("speed", "流線"), ("uni_flash", "ウニフラッシュ"), ("beta_flash", "ベタフラッシュ"))]
+        self.act_effect_within = a("選択範囲の中にだけ描く", lambda: self._effect_clearing("within"),
+                                   tip="選んだ効果線を、投げ縄・長方形の選択範囲の中にだけ描きます")
+        self.act_effect_avoid = a("選択範囲を避ける", lambda: self._effect_clearing("avoid"),
+                                  tip="選んだ効果線を、選択範囲（顔や人物を投げ縄で囲む）の手前で止めます。線は止まる所で細くなります")
+        self.act_effect_clear = a("避ける範囲を外す", lambda: self._effect_clearing(None),
+                                  tip="選んだ効果線の「中にだけ描く」「避ける」を外して、コマ全体に描きます")
         self.act_materials = a("素材パネルを開く", lambda: self.show_dock("素材"))
         from genko.app.guide_panel import FIGURE_PRESETS as _FIGURE_POSES
 
@@ -2629,7 +2635,9 @@ class MainWindow(QMainWindow):
                                                            self.scene_actions, [self.act_import_obj]]),
                                      "動かす・線にする", menu_button("人形のポーズ", [self.pose_actions]), self.act_trace,
                                      self.act_del_prim]))
-        ts.add(("effect",), action_page(["効果線の種類", *self.effect_actions, "素材", self.act_materials]))
+        ts.add(("effect",), action_page(["効果線の種類", *self.effect_actions,
+                                         "描く範囲（選択範囲で）", self.act_effect_within, self.act_effect_avoid, self.act_effect_clear,
+                                         "素材", self.act_materials]))
         ts.add(("stamp",), action_page([self.act_materials]))
         select_page = action_page(["表示", self.act_fit, self.act_actual, "原稿", self.act_story_editor, self.act_checks])
         select_page.layout().insertWidget(0, self.story.style_box)
@@ -4331,6 +4339,9 @@ class MainWindow(QMainWindow):
         params = {}
         if self._effect_kind in ("focus", "uni_flash", "beta_flash"):
             params["center"] = [round(x_mm, 2), round(y_mm, 2)]
+        shape = self._selection_shape()
+        if shape is not None:  # (as in other manga tools: with a selection, the effect is drawn inside it)
+            params["within"] = shape
         effect_id = new_id()
         if self.apply_ops([{"op": "add_effect", "page": page.index, "kind": self._effect_kind, "id": effect_id,
                             "frame_id": frame.id if frame else None, "params": params}]):
@@ -4338,6 +4349,43 @@ class MainWindow(QMainWindow):
             self.show_dock("素材")
             self.materials.refresh()
             self.materials.select_effect(effect_id)
+
+    def _selection_shape(self) -> list | None:
+        """The selection as a shape for an effect (a lasso or rectangle; a selection by colour or an inverted one has
+        no outline to follow)."""
+        selection = self.canvas.selection
+        poly = (selection or {}).get("area", {}).get("poly") if selection else None
+        if poly and len(poly) >= 3:
+            return [[round(float(p[0]), 2), round(float(p[1]), 2)] for p in poly]
+        rect = (selection or {}).get("area", {}).get("rect") if selection else None
+        if rect:
+            x, y, w, h = (float(v) for v in rect)
+            return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
+        return None
+
+    def _effect_clearing(self, how: str | None) -> None:
+        """The chosen effect drawn only inside the selection, kept clear of it, or over its whole panel again."""
+        page = self._current()
+        effect_id = getattr(self.canvas, "selected_effect_id", None)
+        effect = next((e for e in (page.effects if page else []) if e.get("id") == effect_id), None)
+        if effect is None:
+            self.flash("先に効果線を選びます（効果線の道具でクリック、または素材パネルの一覧で）", 4000)
+            return
+        if how is None:
+            self.apply_ops([{"op": "edit_effect", "page": page.index, "id": effect_id, "params": {"within": None, "avoid": None}}])
+            self.flash("避ける範囲を外しました", 2500)
+            return
+        shape = self._selection_shape()
+        if shape is None:
+            self.flash("投げ縄か長方形で選択範囲を作ってから選びます（色で選んだ範囲や反転した範囲は使えません）", 5000)
+            return
+        if how == "within":
+            change = {"within": shape}
+        else:
+            kept = list((effect.get("params") or {}).get("avoid") or [])
+            change = {"avoid": kept + [{"path": shape}]}
+        if self.apply_ops([{"op": "edit_effect", "page": page.index, "id": effect_id, "params": change}]):
+            self.flash("選択範囲の中にだけ描きます" if how == "within" else "選択範囲の手前で線を止めます", 3000)
 
     def copy_selection_items(self) -> dict | None:
         import copy

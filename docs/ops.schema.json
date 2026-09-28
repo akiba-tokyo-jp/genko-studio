@@ -286,7 +286,7 @@
       "page": "int",
       "kind": "focus|speed|uni_flash|beta_flash|white",
       "frame_id": "str?",
-      "params": "object: focus {center, inner, inner_path [[x,y]…] (any shape), twist (degrees: a swirl), count, jitter, width_mm, taper}; speed {angle, count, length, jitter, width_mm, curve (mm), taper, path [[x,y]…] (along a curve), spread_mm}; uni_flash {center, inner, count, length_mm}; beta_flash {center, inner, spikes, depth}",
+      "params": "object: focus {center, inner, inner_path [[x,y]…] (any shape), twist (degrees: a swirl), count, jitter, width_mm, taper}; speed {angle, count, length, jitter, width_mm, curve (mm), taper, path [[x,y]…] (along a curve), spread_mm}; uni_flash {center, inner, count, length_mm}; beta_flash {center, inner, spikes, depth}; every kind: avoid [{ellipse: [cx,cy,rx,ry]} | {path: [[x,y]…]}] (the lines stop short of these, e.g. faces, and thin out), within [[x,y]…] (drawn only inside this shape)",
       "id": "str?"
     },
     {
