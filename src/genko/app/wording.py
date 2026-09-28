@@ -357,6 +357,8 @@ _ERRORS: list[tuple[str, object]] = [
     (r"no 3D figure or box to trace", "このページに 3D がありません"),
     (r"kind must be box.*", "置ける 3D は箱とデッサン人形です"),
     (r"too many lines.*", "線が多すぎます（2000 本まで）"),
+    (r"within is a shape.*", "効果線を描く範囲は 3 点以上の形で指定します"),
+    (r"avoid is a list.*", "効果線の避ける範囲は、楕円 [中心 x, 中心 y, 横の半径, 縦の半径] か、3 点以上の形で指定します"),
     (r"lpi is 5 to 300", "線数は 5〜300 です"),
     (r"density is 0 to 1.*", "濃さは 0〜100% です"),
     (r"count is 1 to 200", "一度に足せるのは 200 ページまでです"),
