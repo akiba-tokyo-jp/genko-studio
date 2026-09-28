@@ -62,7 +62,7 @@ def test_a_gradient_map_of_ones_own_colours_glow_and_rain():
     glowing = filters.apply_filter(dark, "glow", {"radius": 6, "amount": 1.0})
     assert glowing.getpixel((22, 30))[0] > dark.getpixel((22, 30))[0]  # (the light spreads past the bright square)
     rainy = filters.apply_filter(Image.new("RGBA", (120, 120), (0, 0, 0, 255)), "rain", {"count": 80, "rgb": [255, 255, 255]})
-    assert any(px[0] > 100 for px in rainy.getdata())
+    assert max(rainy.split()[0].getextrema()) > 100
     assert rainy.tobytes() == filters.apply_filter(Image.new("RGBA", (120, 120), (0, 0, 0, 255)), "rain",
                                                    {"count": 80, "rgb": [255, 255, 255]}).tobytes()  # (the same rain each time)
 
