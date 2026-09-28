@@ -5642,7 +5642,7 @@ class MainWindow(QMainWindow):
             self.flash(str(exc), 6000, error=True)
             return False
         QApplication.restoreOverrideCursor()
-        where = "・".join(p.get("title", "") for p in data.get("path") or []) or data.get("title", style_id)
+        where = " › ".join(stylecat.full_path(data)) or data.get("title", style_id)
         warn = ""
         if data.get("expression") == "mono" and self.episode.spec.expression == "color":
             warn = "\n\nこの絵柄は白黒用です。カラーの原稿では、絵の依頼に使われません。"
