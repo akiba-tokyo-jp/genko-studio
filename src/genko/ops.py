@@ -4059,6 +4059,22 @@ def _usage(op: dict) -> str:
     return (f" ‖ unknown keys: {', '.join(strange)}" if strange else "") + f" ‖ {name} takes {{{keys}}}"
 
 
+def _unknown_keys(ops: list) -> list[str]:
+    """Keys an op was given that it does not take: ignored, so said (a misspelt one would otherwise go unnoticed)."""
+    out = []
+    for i, op in enumerate(ops):
+        if not isinstance(op, dict):
+            continue
+        schema = next((s for s in OPS_SCHEMA if s.get("op") == op.get("op")), None)
+        if schema is None:
+            continue
+        known = set(schema) | {"op", "area", "page", "id", "note"}
+        strange = [k for k in op if k not in known and not str(k).startswith("_")]
+        if strange:
+            out.append(f"ops[{i}] {op.get('op')}: unknown keys ignored: {', '.join(strange)}")
+    return out
+
+
 def apply_ops(
     episode: Episode,
     ops: list[dict[str, Any]],
@@ -4130,7 +4146,7 @@ def apply_ops(
         if report:
             results.append({"index": i, "op": str(op.get("op")), **report})
 
-    warnings = validate_episode(work)
+    warnings = validate_episode(work) + _unknown_keys(ops)
     extra = {"results": results} if results else {}
     if dry_run:
         return {"ok": True, "applied": applied, "snapshot": snapshot(work), "job_id": new_id(), "warnings": warnings, **extra}

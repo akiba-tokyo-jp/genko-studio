@@ -34,6 +34,24 @@ render は layer_id でそのレイヤーだけ、mode=print で印刷と同じ�
 変更はその名前で記録され、undo はその会話の変更だけを戻す。別の会話が使っている原稿に書くと、一度だけ book_in_use で止まる。"""
 
 
+def slim_schema(node: Any) -> Any:
+    """A tool's input schema without what tells an agent nothing: every title, `anyOf [X, null]` (X alone: leaving a
+    value out is the same), and `default: null`. The arguments are still checked against the full model."""
+    if isinstance(node, list):
+        return [slim_schema(v) for v in node]
+    if not isinstance(node, dict):
+        return node
+    out = {k: slim_schema(v) for k, v in node.items()
+           if k != "title" and not (k == "default" and v is None) and not (k == "additionalProperties" and v is True)}
+    options = out.get("anyOf")
+    if isinstance(options, list):
+        kept = [o for o in options if o != {"type": "null"}]
+        if len(kept) == 1 and len(kept) < len(options):
+            out.pop("anyOf")
+            out = {**kept[0], **out}
+    return out
+
+
 def _out(result: ToolResult) -> list[Any]:
     content: list[Any] = [json.dumps(result.to_dict(), ensure_ascii=False)]
     content.extend(Image(data=png, format="png") for png in result.images)
@@ -78,7 +96,11 @@ def build_server(root: Path, actor: str) -> MCPServer:
                 current_session.reset(token)
 
         wrapped.__signature__ = signature.replace(parameters=[*signature.parameters.values(), extra])
-        return server.tool(structured_output=False)(wrapped)
+        registered = server.tool(structured_output=False)(wrapped)
+        entry = getattr(server, "_tool_manager", None) and server._tool_manager._tools.get(fn.__name__)
+        if entry is not None:  # (what every agent reads up front: no titles, no "or null", no null defaults)
+            entry.parameters = slim_schema(entry.parameters)
+        return registered
 
     def call(fn, *args, **kwargs) -> list[Any]:
         import time
@@ -131,7 +153,9 @@ def build_server(root: Path, actor: str) -> MCPServer:
                         pass
         if result is None:
             shown = wording_error(error or "")
-            return [json.dumps({"ok": False, "error": shown, **({"detail": error} if shown != error else {})}, ensure_ascii=False)]
+            head = (error or "").split(" ‖ ")[0]
+            return [json.dumps({"ok": False, "error": shown, **({"detail": head} if wording_error(head) != head else {})},
+                               ensure_ascii=False)]
         return _out(result)
 
     @tool
@@ -156,15 +180,16 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.next, project, limit, claim)
 
     @tool
-    def inspect(project: str, target: str, page: int | None = None, frame_id: str | None = None) -> list:
-        """読む。target: bible / script / page（そのページの beat、前後ページ、めくりの位置、定型、コマ一覧） /
+    def inspect(project: str, target: str, page: int | None = None, frame_id: str | None = None, op: str | None = None) -> list:
+        """読む。target: ops（apply_ops の op の名前の一覧。op に名前〔カンマ区切り〕を渡すとその引数の形） / drawing（op と書き出しの
+        詳しい使い方） / bible / script / page（そのページの beat、前後ページ、めくりの位置、定型、コマ一覧） /
         panel（コマのブリーフ・寸法 mm・候補・登場人物の設定画、frame_id 省略でページ全部） / studio / schemas / rules /
         snapshot（ページ・レイヤー〔名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照〕・台詞〔書式・フキダシ〕・3D） /
         materials（stamp_material で貼れる素材: id・名前・種類〔トーン・効果線・画像・パーツ・描き文字・ブラシ・3D〕・フォルダ・タグ） / fonts（style.font に使える書体） /
         brushes（add_stroke の kind に使えるブラシ: 入っているもの・この原稿の自作・自分の自作） / upscalers（upscale の method） / plugins（人が入れた
         フィルターのプラグイン: filter_raster の kind に "plugin:<key>"、params は PARAMS のとおり。置き場所は folder:
         Linux は ~/.config/genko/plugins、Windows は %APPDATA%\\genko\\plugins）。"""
-        return call(service.inspect, project, target, page, frame_id)
+        return call(service.inspect, project, target, page, frame_id, op)
 
     @tool
     def render(project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None,
@@ -431,6 +456,13 @@ def build_server(root: Path, actor: str) -> MCPServer:
     def skill() -> str:
         """Hermes 用のスキル（作業の手順、止まるところ、してはいけないこと）の正本。"""
         return SKILL_PATH.read_text(encoding="utf-8") if SKILL_PATH.is_file() else ""
+
+    @server.resource("genko://guide/drawing", mime_type="text/markdown")
+    def drawing_guide() -> str:
+        """人と同じ道具で描く・直す: op と書き出しの詳しい使い方（inspect target=drawing と同じ）。"""
+        from genko.studio.service import DRAWING_PATH
+
+        return DRAWING_PATH.read_text(encoding="utf-8")
 
     @server.resource("genko://guide/manga-rules", mime_type="text/markdown")
     def manga_rules() -> str:

@@ -103,8 +103,9 @@ def test_the_mcp_tools_take_the_new_arguments():
 
 def test_the_guides_tell_agents_about_it():
     skill = (ROOT / "src" / "genko" / "studio" / "guide" / "SKILL.md").read_text(encoding="utf-8")
+    drawing = (ROOT / "src" / "genko" / "studio" / "guide" / "drawing.md").read_text(encoding="utf-8")  # (inspect drawing)
     for words in ("materials", "fonts", "brushes", "layer_id", "mode: print", "add_scene", "electric", "weight", "reference"):
-        assert words in skill, words
+        assert words in skill + drawing, words
     agent_doc = (ROOT / "docs" / "AGENT.md").read_text(encoding="utf-8")
     assert "H5 additions" in agent_doc and "add_scene" in agent_doc
     claude = (ROOT / "integrations" / "claude-code" / "skills" / "genko-manga" / "SKILL.md").read_text(encoding="utf-8")

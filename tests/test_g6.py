@@ -122,7 +122,7 @@ def test_the_mcp_server_offers_the_tools_and_the_guides_tell_of_them(tmp_path: P
             assert result["ok"] and len(result["files"]) == 2
 
     anyio.run(scenario)
-    guide = GUIDE.read_text(encoding="utf-8")
+    guide = GUIDE.read_text(encoding="utf-8") + GUIDE.with_name("drawing.md").read_text(encoding="utf-8")  # (the details: inspect drawing)
     for word in ("emphasis_runs", "style_runs", "rotate_deg", "set_layer_mask", "merge_down", "warp", "define_brush",
                  "gradient_fill", "mcp__genko__check", "mcp__genko__undo", "mcp__genko__export", "cylinder", "wobble"):
         assert word in guide, word

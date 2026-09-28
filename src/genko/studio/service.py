@@ -32,6 +32,7 @@ from genko.studio.letter import place_page, placements_to_ops
 from genko.studio.schemas import SCHEMAS, fill_nulls
 
 RULES_PATH = Path(__file__).with_name("guide") / "manga_rules.md"
+DRAWING_PATH = Path(__file__).with_name("guide") / "drawing.md"
 
 # Ops an agent may send through apply_ops. Gates, locks, meta (font paths),
 # rasters from local paths and structural page changes are not on the list.
@@ -163,8 +164,12 @@ def wording_error(message: str) -> str:
 
 
 def fail(message: str, code: str = "error", path: str = "/") -> ToolResult:
+    """One failure said once: `error` in full (with how the op is written, when that helps), the issue's message
+    without that part, and `detail` only as the short original when the wording changed it."""
     shown = wording_error(message)
-    return ToolResult(False, {"error": shown, **({"detail": message} if shown != message else {})}, [error(code, path, shown)])
+    head = message.split(" ‖ ")[0]
+    short = wording_error(head) if head != message else shown
+    return ToolResult(False, {"error": shown, **({"detail": head} if short != head else {})}, [error(code, path, short)])
 
 
 class StudioService:
@@ -345,12 +350,28 @@ class StudioService:
         blocked = sum(1 for i in items if i["blocked_by"])
         return ToolResult(True, {"items": runnable, "blocked": blocked, "waiting_for": _waiting(items)})
 
-    def inspect(self, project: str, target: str, page: int | None = None, frame_id: str | None = None) -> ToolResult:
+    def inspect(self, project: str, target: str, page: int | None = None, frame_id: str | None = None,
+                op: str | None = None) -> ToolResult:
+        if target == "ops":  # (the ops apply_ops takes: the names alone, or the ones asked for with their arguments)
+            from genko.ops import OPS_SCHEMA
+
+            usable = [o for o in OPS_SCHEMA if o["op"] in AGENT_OPS]
+            if not op:
+                return ToolResult(True, {"ops": [o["op"] for o in usable],
+                                         "note": "op に名前（カンマ区切りで複数、例 add_stroke,fill）を渡すと引数の形が返る"})
+            wanted = [w.strip() for w in str(op).split(",") if w.strip()]
+            found = [o for o in usable if o["op"] in wanted]
+            unknown = [w for w in wanted if w not in {o["op"] for o in found}]
+            if unknown and not found:
+                return fail(f"その op は無い: {', '.join(unknown)}（inspect target=ops で名前の一覧）", "no_op", "/op")
+            return ToolResult(True, {"ops": found, **({"unknown": unknown} if unknown else {})})
         path = self.project_path(project)
         if target == "schemas":
             return ToolResult(True, {"schemas": SCHEMAS})
         if target == "rules":
             return ToolResult(True, {"rules": RULES_PATH.read_text(encoding="utf-8")})
+        if target == "drawing":
+            return ToolResult(True, {"drawing": DRAWING_PATH.read_text(encoding="utf-8")})
         if target == "materials":
             return ToolResult(True, {"materials": _materials_list()})
         if target == "fonts":
