@@ -68,7 +68,7 @@ READ_ONLY = frozenset({
 
 
 # writes whose reply carries the next work item
-NEXT_AFTER = frozenset({"set_bible", "set_script", "submit_name", "apply_ops", "import_images", "take_panel_art", "adopt",
+NEXT_AFTER = frozenset({"create_project", "record_review", "set_bible", "set_script", "submit_name", "apply_ops", "import_images", "take_panel_art", "adopt",
                         "review_candidates", "report_regions", "finish_page", "request_approval", "resolve_ticket",
                         "record_chat_approval", "upscale", "import_name", "use_style"})
 
