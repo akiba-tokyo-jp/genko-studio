@@ -224,12 +224,20 @@ def test_a_second_start_hands_its_link_to_the_open_genko(qapp):
     listener = links.Listener()
     got: list[str] = []
     listener.received.connect(got.append)
+    import threading
+    import time
+
+    sent: list[bool] = []
     try:
-        assert links.send("genko://use-style?id=shonen")
-        for _ in range(50):
+        # (the later start is another program: here, another thread, while this one's events run)
+        later = threading.Thread(target=lambda: sent.append(links.send("genko://use-style?id=shonen")))
+        later.start()
+        deadline = time.monotonic() + 10
+        while (later.is_alive() or not got) and time.monotonic() < deadline:
             qapp.processEvents()
-            if got:
-                break
+            time.sleep(0.01)
+        later.join(1)
+        assert sent == [True]
         assert got == ["genko://use-style?id=shonen"]
     finally:
         listener.server.close()

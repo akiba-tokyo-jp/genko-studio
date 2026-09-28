@@ -41,6 +41,8 @@ def send(link: str, wait_ms: int = 800) -> bool:
     socket.write(link.encode("utf-8") + b"\n")
     socket.flush()
     socket.waitForBytesWritten(wait_ms)
+    # the open Genko answers once it has the link: going before that can lose it (Windows' pipes)
+    socket.waitForReadyRead(max(wait_ms, 2000))
     socket.disconnectFromServer()
     return True
 
@@ -105,6 +107,9 @@ class Listener(QObject):
             text = raw.decode("utf-8", "replace").strip()
             if is_link(text):
                 self.received.emit(text)
+                if socket.state() == QLocalSocket.LocalSocketState.ConnectedState:
+                    socket.write(b"ok\n")  # (the later start may go now)
+                    socket.flush()
 
     def _closed(self, socket: QLocalSocket) -> None:
         self._read(socket, final=True)
