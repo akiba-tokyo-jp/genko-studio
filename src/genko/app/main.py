@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, QPoint, QPointF, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QFileSystemWatcher, QObject, QPoint, QPointF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -1022,8 +1022,37 @@ class LayerPanel(QWidget):
             return
         layer = next(layer for layer in page.layers if layer.id == self.ids[row])
         visible = item.checkState() == Qt.CheckState.Checked
+        if QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier:
+            self.solo(layer.id)  # (Alt+クリック: only this one shown; again: all back)
+            return
         if layer.visible != visible:
             self.window.apply_ops([{"op": "set_layer", "page": page.index, "id": layer.id, "visible": visible}])
+
+    def solo(self, layer_id: str) -> None:
+        """Alt+クリックでほかのレイヤーを隠す: this layer (and the folders it is in) alone; when it already is alone,
+        every layer hidden that way comes back."""
+        page = self.window.current_page()
+        if page is None:
+            return
+        by_id = {item.id: item for item in page.layers}
+        keep, cur = {layer_id}, by_id.get(layer_id)
+        while cur is not None and cur.parent_id:
+            keep.add(cur.parent_id)
+            cur = by_id.get(cur.parent_id)
+        alone = all(not item.visible for item in page.layers if item.id not in keep)
+        memory = self.__dict__.setdefault("_solo_hidden", {})  # (page id → the layers hidden by it: this session only)
+        hidden = memory.get(page.id) or []
+        if alone and hidden:
+            ops = [{"op": "set_layer", "page": page.index, "id": i, "visible": True} for i in hidden if i in by_id]
+            memory.pop(page.id, None)
+        else:
+            hiding = [item.id for item in page.layers if item.id not in keep and item.visible]
+            ops = [{"op": "set_layer", "page": page.index, "id": i, "visible": False} for i in hiding]
+            ops += [{"op": "set_layer", "page": page.index, "id": i, "visible": True} for i in keep if not by_id[i].visible]
+            memory[page.id] = hiding
+        if ops:
+            self.window.apply_ops(ops)
+        self.refresh()
 
     def _add(self, kind: str, title: str) -> None:
         from genko.models import new_id
@@ -1337,6 +1366,27 @@ class LayerPanel(QWidget):
         if params is None:
             return
         self.window.apply_ops([{"op": "filter_raster", "page": page.index, "id": layer.id, "kind": kind, **params, **area}])
+
+
+class _KeyReleases(QObject):
+    """Key releases for キーを押している間だけ持ち替え: one watcher on the app, handing each to the window in front."""
+
+    def eventFilter(self, _obj, event) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.KeyRelease and not event.isAutoRepeat():
+            front = QApplication.activeWindow()
+            if isinstance(front, MainWindow) and getattr(front, "_tool_switch", None) is not None:
+                front.hold_key_released(event.key())
+        return False
+
+
+_KEY_WATCH: list = []
+
+
+def _watch_key_releases() -> None:
+    if not _KEY_WATCH:
+        watcher = _KeyReleases()
+        QApplication.instance().installEventFilter(watcher)
+        _KEY_WATCH.append(watcher)
 
 
 def transform_matrix(pivot, dx: float = 0, dy: float = 0, sx: float = 1, sy: float = 1, angle: float = 0) -> list[float]:
@@ -1657,6 +1707,7 @@ class MainWindow(QMainWindow):
 
         preferences.name_commands(self)  # (every command's words are its lasting name; keys can be changed)
         preferences.apply_all(self)
+        _watch_key_releases()  # (キーを押している間だけ持ち替え: one watcher for every window)
         theme.name_buttons(self)
         self.layout().activate()
         self.resize(1280, 800)
@@ -2017,6 +2068,7 @@ class MainWindow(QMainWindow):
                              "effect": self.act_effect, "stamp": self.act_stamp, "zoom": self.act_zoom_tool}
         for act in self.tool_actions.values():
             tools.addAction(act)
+            act.setAutoRepeat(False)  # (a held key chooses the tool once: キーを押している間だけ持ち替え)
         self.act_select.setChecked(True)
         self.act_color = a("ペンの色…", self._pick_color, "C")  # (kept for its key; the colour is in ツールの設定)
         self.act_select_all = a("すべて選択", self._select_all, std.SelectAll)
@@ -2689,6 +2741,7 @@ class MainWindow(QMainWindow):
         self.brush = BrushPanel()
         self.brush.changed.connect(self._brush_changed)
         self.brush.make.clicked.connect(self._make_brush)
+        self.brush.edit.clicked.connect(self._edit_brush)
         self.brush.forget.clicked.connect(self._forget_brush)
         from PySide6.QtWidgets import QMenu
 
@@ -3621,7 +3674,14 @@ class MainWindow(QMainWindow):
 
     # --- editing -----------------------------------------------------------------------------
 
+    HOLD_SECONDS = 0.35  # (a tool's key held this long or more is a hold: let go, and the tool before comes back)
+
     def _tool(self, tool: str) -> None:
+        import time
+
+        before = self.canvas.tool
+        if before != ("marquee" if tool in ("rect", "lasso", "wand", "ellipse", "polyline", "colour", "selpen", "selerase") else tool):
+            self._tool_switch = (tool, before, time.monotonic())
         marquee = {"rect": "rect", "lasso": "lasso", "wand": "wand", "ellipse": "ellipse", "polyline": "polyline",
                    "colour": "color", "selpen": "pen", "selerase": "erase"}
         if tool in marquee:
@@ -3635,6 +3695,33 @@ class MainWindow(QMainWindow):
         if hasattr(self, "tool_settings"):
             self.tool_settings.show_tool(self.canvas.tool)
         self._panel_for_tool(tool)
+
+    def hold_key_released(self, key: int, now: float | None = None) -> bool:
+        """キーを押している間だけ持ち替え: the key of the tool chosen last let go after a hold brings back the tool
+        before. True when it did."""
+        import time
+
+        from genko.app import workspace
+
+        switch = getattr(self, "_tool_switch", None)
+        if switch is None or not workspace.hold_swap():
+            return False
+        tool, before, since = switch
+        act = self.tool_actions.get(tool)
+        plain = [seq[0] for seq in (act.shortcuts() if act is not None else []) if seq.count() == 1]
+        if not any(k.key() == key and k.keyboardModifiers() == Qt.KeyboardModifier.NoModifier for k in plain):
+            return False
+        self._tool_switch = None
+        if (now if now is not None else time.monotonic()) - since < self.HOLD_SECONDS:
+            return False  # (a tap: the tool stays)
+        back = next((name for name, a in self.tool_actions.items() if name == before), None)
+        if back is None:
+            back = {"marquee": "rect"}.get(before, before)
+        if back in self.tool_actions:
+            self._tool(back)
+            self._tool_switch = None
+            return True
+        return False
 
     def _panel_for_tool(self, tool: str) -> None:
         """The tab under the approval box follows the work: the lines for the text tool, the layers for the
@@ -3952,6 +4039,30 @@ class MainWindow(QMainWindow):
             self.flash(f"読み込めませんでした: {wording.error(str(exc))}", 5000, error=True)
             return
         self.flash(f"ブラシを {len(keys)} 本読み込みました（一覧の ★）" if keys else "読み込めるブラシがありませんでした", 4000)
+
+    def _edit_brush(self) -> None:
+        """サブツール詳細: one of the person's own brushes opened again, every setting, and kept under its name."""
+        from genko import brushes
+        from genko.app.brush_panel import BrushDialog
+
+        key = self.brush.kind()
+        if not key.startswith("my_"):
+            self.flash("直せるのは自分のブラシ（★）です。元のブラシは「複製して調整…」で自分のブラシにしてから", 5000)
+            return
+        kept = brushes.load_library().get(key) or brushes.to_dict(brushes.brush(key))
+        dialog = BrushDialog(self, key, editing=True)
+        dialog.name.setText(str(kept.get("label") or brushes.brush(key).label))
+        if not dialog.exec():
+            return
+        data = {**dialog.data(), "base": kept.get("base") or dialog.data()["base"]}
+        try:
+            brushes.CUSTOM[key] = brushes.from_dict(key, data)
+        except ValueError as exc:
+            self.flash(wording.error(str(exc)), 6000, error=True)
+            return
+        brushes.save_to_library(key, brushes.to_dict(brushes.CUSTOM[key]))
+        self.brush.reload_kinds(select=key)
+        self.flash(f"ブラシ「{data['label']}」を直しました（これから描く線に効きます）", 4000)
 
     def _forget_brush(self) -> None:
         from genko import brushes

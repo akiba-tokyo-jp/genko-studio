@@ -362,6 +362,34 @@ def cursor_kind() -> str:
     return value if value in dict((k, 1) for _l, k in CURSORS) else "circle"
 
 
+# 道具ごとの修飾キー: the tools that can have their own Alt / Ctrl / Shift, and what those can switch to
+KEYED_TOOLS = [("ペン", "pen"), ("消しゴム", "eraser"), ("塗りつぶし", "fill"), ("選択範囲", "marquee"), ("選択", "select"),
+               ("テキスト", "text"), ("ベクター線の直し", "vector"), ("色混ぜ", "blend"), ("グラデーション", "gradient"), ("コマ", "frame")]
+HELD_TOOLS = [("共通の設定のまま", ""), ("何もしない", "none"), ("スポイト", "picker"), ("選択", "select"), ("レイヤー移動", "move"),
+              ("消しゴム", "eraser"), ("ペン", "pen"), ("塗りつぶし", "fill")]
+
+
+def tool_modifiers() -> dict[str, dict[str, str]]:
+    """{tool: {"alt" | "ctrl" | "shift": tool or "none"}} for the tools given their own (empty: the common one)."""
+    known = {k for _l, k in HELD_TOOLS if k}
+    out: dict[str, dict[str, str]] = {}
+    for _label, tool in KEYED_TOOLS:
+        for key in ("alt", "ctrl", "shift"):
+            value = str(settings().value(f"keys/{tool}/{key}", "") or "")
+            if value in known:
+                out.setdefault(tool, {})[key] = value
+    return out
+
+
+def set_tool_modifier(tool: str, key: str, value: str) -> None:
+    settings().setValue(f"keys/{tool}/{key}", value or "")
+
+
+def hold_swap() -> bool:
+    """キーを押している間だけ持ち替え: a tool's key held down is that tool only while held (on unless turned off)."""
+    return str(settings().value("keys/hold_swap", "true")).lower() in ("1", "true", "yes")
+
+
 def modifier_tool(key: str) -> str:
     """The tool a held modifier switches to: key "alt" (default スポイト) or "ctrl" (default 選択)."""
     default = {"alt": "picker", "ctrl": "select"}.get(key, "")

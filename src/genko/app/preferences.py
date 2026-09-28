@@ -149,7 +149,49 @@ def apply_all(window) -> None:
     window.canvas.update()
     window.canvas.cursor_kind = workspace.cursor_kind()
     window.canvas.modifier_tools = {"alt": workspace.modifier_tool("alt"), "ctrl": workspace.modifier_tool("ctrl")}
+    window.canvas.tool_modifiers = workspace.tool_modifiers()
     window.canvas._update_cursor()
+
+
+def tool_keys_dialog(parent) -> bool:
+    """道具ごとの修飾キー: for each tool, what Alt, Ctrl and Shift held switch to (共通の設定のまま: the common one)."""
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QGridLayout, QLabel
+
+    from genko.app import workspace
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("道具ごとの修飾キー")
+    grid = QGridLayout(dialog)
+    for col, head in enumerate(("", "Alt", "Ctrl", "Shift")):
+        grid.addWidget(QLabel(head), 0, col)
+    now = workspace.tool_modifiers()
+    boxes = {}
+    for row, (label, tool) in enumerate(workspace.KEYED_TOOLS, start=1):
+        grid.addWidget(QLabel(label), row, 0)
+        for col, key in enumerate(("alt", "ctrl", "shift"), start=1):
+            box = QComboBox()
+            for text, value in workspace.HELD_TOOLS:
+                box.addItem(text, value)
+            box.setCurrentIndex(max(0, box.findData((now.get(tool) or {}).get(key, ""))))
+            grid.addWidget(box, row, col)
+            boxes[(tool, key)] = box
+    note = QLabel("Shift は、決めた道具だけで持ち替えます（それ以外は直線を引くなど、いつもの働き）。")
+    note.setWordWrap(True)
+    grid.addWidget(note, len(workspace.KEYED_TOOLS) + 1, 0, 1, 4)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    grid.addWidget(buttons, len(workspace.KEYED_TOOLS) + 2, 0, 1, 4)
+    dialog.boxes = boxes
+    if not dialog.exec():
+        return False
+    for (tool, key), box in boxes.items():
+        workspace.set_tool_modifier(tool, key, box.currentData())
+    window = parent.window() if hasattr(parent, "window") else None
+    canvas = getattr(getattr(parent, "main", None) or window, "canvas", None)
+    if canvas is not None:
+        canvas.tool_modifiers = workspace.tool_modifiers()
+    return True
 
 
 class PressurePad(QWidget):
@@ -330,6 +372,12 @@ class PreferencesDialog(QDialog):
                 box.addItem(label, tool)
             box.setCurrentIndex(max(0, box.findData(workspace.modifier_tool(key))))
             box.setToolTip("押している間だけ、この道具になります（離すと元の道具に戻る）")
+        self.hold_swap = QCheckBox("道具のキーを押している間だけ持ち替える")
+        self.hold_swap.setChecked(workspace.hold_swap())
+        self.hold_swap.setToolTip("道具のキー（E の消しゴムなど）を長く押していると、離したときに前の道具に戻ります。短く押すと持ち替えたまま")
+        self.per_tool = QPushButton("道具ごとの修飾キー…")
+        self.per_tool.setToolTip("ペン・消しゴムなど道具ごとに、Alt・Ctrl・Shift を押している間の道具を決めます")
+        self.per_tool.clicked.connect(lambda: tool_keys_dialog(self))
         from genko.app import dialog_look as look
 
         work = QWidget()
@@ -341,7 +389,7 @@ class PreferencesDialog(QDialog):
                                        ("画面の書体", self.ui_font), ("画面の文字の大きさ", self.font_pt), ("", note),
                                        ("", self.mono_icons), ("", self.hints), ("", self.gpu)]),
                            ("描く・操作", [("ペンのカーソル", self.cursor), ("Alt を押している間", self.alt_tool),
-                                         ("Ctrl を押している間", self.ctrl_tool), ("", self.radial)]),
+                                         ("Ctrl を押している間", self.ctrl_tool), ("", self.per_tool), ("", self.hold_swap), ("", self.radial)]),
                            ("長い時間の作業", [("休憩の案内", self.rest), ("", self.motion), ("", self.requests)]),
                            ("原稿と保存", [("新しい原稿の用紙", self.paper), ("変更を保存するまで", self.save_after)])):
             wl.addRow(look.section(head))
@@ -461,5 +509,6 @@ class PreferencesDialog(QDialog):
         store.setValue("ui/cursor", self.cursor.currentData())
         store.setValue("keys/alt_tool", self.alt_tool.currentData())
         store.setValue("keys/ctrl_tool", self.ctrl_tool.currentData())
+        store.setValue("keys/hold_swap", self.hold_swap.isChecked())
         apply_all(self.window)
         self.accept()

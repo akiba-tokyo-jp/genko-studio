@@ -154,6 +154,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self.layer_colour_at = None  # (x_mm, y_mm) -> rgb | None, set by the window
         self.cursor_kind = "circle_cross"  # circle | circle_cross | cross | dot (環境設定)
         self.modifier_tools = {"alt": "picker", "ctrl": "select"}  # held Alt / Ctrl: this tool for a moment
+        self.tool_modifiers: dict[str, dict[str, str]] = {}  # 道具ごとの修飾キー: {tool: {alt|ctrl|shift: tool | "none"}}
         self._held_tool: str | None = None  # the tool to go back to when the modifier is let go
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
         self.grabGesture(Qt.GestureType.PinchGesture)
@@ -2015,16 +2016,21 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
 
     def hold_modifier(self, key: str, down: bool) -> None:
         """Alt / Ctrl held: the chosen tool for a moment (環境設定), back to the tool before when let go."""
+        base = self._held_tool or self.tool
+        own = (self.tool_modifiers.get(base) or {}).get(key)
         tool = self.modifier_tools.get(key) or ""
-        if (self._held_tool or self.tool) in ("marquee", "zoom") and key == "alt":
+        if base in ("marquee", "zoom") and key == "alt":
             tool = ""  # (Alt takes away from the selection there, and zooms out with the magnifier)
+        if own:  # (this tool's own setting wins; Shift switches only when a tool says so)
+            tool = "" if own == "none" else own
         if down:
             if tool and self._held_tool is None and not self._stroke and tool != self.tool:
                 self._held_tool = self.tool
+                self._held_key = key
                 self.tool = tool
                 self._update_cursor()
                 self.update()
-        elif self._held_tool is not None:
+        elif self._held_tool is not None and getattr(self, "_held_key", key) == key:  # (only the key that switched puts it back)
             self.tool, self._held_tool = self._held_tool, None
             self._update_cursor()
             self.update()
@@ -2034,8 +2040,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             self._space = True
             self._update_cursor()
             return
-        if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_Control) and not event.isAutoRepeat():
-            self.hold_modifier("alt" if event.key() == Qt.Key.Key_Alt else "ctrl", True)
+        if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_Control, Qt.Key.Key_Shift) and not event.isAutoRepeat():
+            self.hold_modifier({Qt.Key.Key_Alt: "alt", Qt.Key.Key_Control: "ctrl"}.get(event.key(), "shift"), True)
         if self._shape_pts and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.finish_points(closed=bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier))
             return
@@ -2073,8 +2079,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self._QtBase.keyPressEvent(self, event)
 
     def keyReleaseEvent(self, event) -> None:  # noqa: N802
-        if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_Control) and not event.isAutoRepeat():
-            self.hold_modifier("alt" if event.key() == Qt.Key.Key_Alt else "ctrl", False)
+        if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_Control, Qt.Key.Key_Shift) and not event.isAutoRepeat():
+            self.hold_modifier({Qt.Key.Key_Alt: "alt", Qt.Key.Key_Control: "ctrl"}.get(event.key(), "shift"), False)
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space = False
             self._panning = False

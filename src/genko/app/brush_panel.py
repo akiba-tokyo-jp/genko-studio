@@ -94,7 +94,9 @@ class BrushPanel(QWidget):
         self.make = QPushButton("複製して調整…")
         self.make.setToolTip("選んでいるペンをもとに、入り抜き・筆圧・質感などを変えた自分のブラシを作ります")
         self.forget = QPushButton("自作のブラシを消す")
-        for button in (self.make, self.forget):
+        self.edit = QPushButton("詳細を直す…")
+        self.edit.setToolTip("選んでいる自分のブラシ（★）の、入り抜き・筆圧・先端・質感などを全部開いて直します")
+        for button in (self.make, self.edit, self.forget):
             button.setProperty("row", True)
         self.forget.setToolTip("自分のブラシ一覧から消します（そのブラシで描いた原稿の線はそのまま）")
         self.kinds.currentRowChanged.connect(lambda _: self._kind_changed())
@@ -107,13 +109,8 @@ class BrushPanel(QWidget):
         self.size.valueChanged.connect(lambda _: self._save())
         sizes = QGridLayout()
         sizes.setSpacing(2)
-        for i, value in enumerate(SIZES):
-            button = QPushButton(f"{value:g}")
-            button.setFixedWidth(34)
-            button.setProperty("chip", True)  # (small flat choices: theme.py)
-            button.setToolTip(f"{value:g} mm")
-            button.clicked.connect(lambda _=False, v=value: self.size.setValue(v))
-            sizes.addWidget(button, i // 5, i % 5)
+        self.size_grid = sizes
+        self._fill_sizes()
         self.opacity = QSlider(Qt.Orientation.Horizontal)
         self.opacity.setRange(5, 100)
         self.opacity.valueChanged.connect(lambda _: self._save())
@@ -284,7 +281,7 @@ class BrushPanel(QWidget):
         make_row.setSpacing(1)
         from genko.app.tool_settings import _or_blank
 
-        for button in (self.make, self.forget, self.files):
+        for button in (self.make, self.edit, self.forget, self.files):
             button.setIcon(_or_blank(button.icon()))  # (the rows' words start together)
             make_row.addWidget(button)
         layout.addLayout(make_row)
@@ -346,6 +343,47 @@ class BrushPanel(QWidget):
         self.forget.setEnabled(self.kind().startswith("my_"))
         if select:
             self._kind_changed()
+
+    def sizes(self) -> list[float]:
+        return _size_presets(self.settings)
+
+    def set_sizes(self, values) -> None:
+        values = sorted({round(float(v), 2) for v in values if 0.05 <= float(v) <= 50})
+        self.settings.setValue("brush/sizes", ",".join(f"{v:g}" for v in values) if values else "")
+        self._fill_sizes()
+
+    def _fill_sizes(self) -> None:
+        """The size chips: click to use; right-click to set it to the size in use or take it away; ＋ keeps the size in use."""
+        grid = self.size_grid
+        while grid.count():
+            item = grid.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        presets = self.sizes()
+        for i, value in enumerate(presets + [None]):
+            button = QPushButton("＋" if value is None else f"{value:g}")
+            button.setFixedWidth(34)
+            button.setProperty("chip", True)  # (small flat choices: theme.py)
+            if value is None:
+                button.setToolTip("今の太さをプリセットに足す")
+                button.clicked.connect(lambda _=False: self.set_sizes([*self.sizes(), self.size.value()]))
+            else:
+                button.setToolTip(f"{value:g} mm（右クリックで今の太さにする・消す）")
+                button.clicked.connect(lambda _=False, v=value: self.size.setValue(v))
+                button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                button.customContextMenuRequested.connect(lambda _pos, v=value, b=button: self._size_menu(v, b))
+            grid.addWidget(button, i // 5, i % 5)
+
+    def _size_menu(self, value: float, button) -> None:
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        menu.addAction(f"今の太さ（{self.size.value():g} mm）にする",
+                       lambda: self.set_sizes([self.size.value() if v == value else v for v in self.sizes()]))
+        remove = menu.addAction("このプリセットを消す", lambda: self.set_sizes([v for v in self.sizes() if v != value]))
+        remove.setEnabled(len(self.sizes()) > 1)
+        menu.addAction("元の 9 つに戻す", lambda: self.set_sizes([]))
+        menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
 
     def kind(self) -> str:
         item = self.kinds.currentItem()
@@ -462,8 +500,9 @@ class BrushPanel(QWidget):
 
     def nudge_size(self, step: int) -> float:
         value = self.size.value()
-        i = min(range(len(SIZES)), key=lambda k: abs(SIZES[k] - value))
-        self.size.setValue(SIZES[max(0, min(len(SIZES) - 1, i + step))])
+        presets = self.sizes()
+        i = min(range(len(presets)), key=lambda k: abs(presets[k] - value))
+        self.size.setValue(presets[max(0, min(len(presets) - 1, i + step))])
         return self.size.value()
 
     def stroke_fields(self) -> dict:
@@ -501,13 +540,24 @@ PATTERN_LABELS = [("なし", ""), ("点", "dots"), ("破線", "dash"), ("レー�
 AA_LABELS = [("なし", "none"), ("弱", "weak"), ("中", "normal"), ("強", "strong")]
 
 
+def _size_presets(settings) -> list[float]:
+    """ブラシサイズのプリセット: the person's own (kept in the settings), or the usual nine."""
+    raw = settings.value("brush/sizes", "")
+    try:
+        values = sorted({round(float(v), 2) for v in str(raw).split(",") if v.strip()})
+    except ValueError:
+        values = []
+    return [v for v in values if 0.05 <= v <= 50] or list(SIZES)
+
+
 class BrushDialog(QDialog):
     """Duplicate a brush and adjust it: size, how thin a light touch gets, the pressure curve, opacity,
     steadiness, tapered ends, texture, a fixed width, drawing in white. A sample line shows the result."""
 
-    def __init__(self, parent, base: str) -> None:
+    def __init__(self, parent, base: str, editing: bool = False) -> None:
         super().__init__(parent)
-        self.setWindowTitle("ブラシを複製して調整")
+        self.editing = editing
+        self.setWindowTitle("ブラシの詳細" if editing else "ブラシを複製して調整")
         b = brushes.brush(base)
         self.base = base
         self.name = QLineEdit(f"{b.label} のコピー")
@@ -668,7 +718,8 @@ class BrushDialog(QDialog):
         change.setWordWrap(True)
         theme.role(change, "hint")
         side.addWidget(change)
-        look.frame(self, look.header("ブラシを複製して調整", f"「{brushes.brush(base).label}」をもとに、自分のブラシを作ります。元のブラシは変わりません。"),
+        look.frame(self, look.header("ブラシの詳細", f"「{brushes.brush(base).label}」の設定を直します。これから描く線に効きます。") if editing else
+                   look.header("ブラシを複製して調整", f"「{brushes.brush(base).label}」をもとに、自分のブラシを作ります。元のブラシは変わりません。"),
                    tabs, look.card(side, "試し描き"), look.footer(buttons))
         self.resize(900, 600)
         for widget in (self.width, self.thin, self.curve, self.opacity, self.steady, self.tip_angle, self.tip_ratio, self.spacing,
