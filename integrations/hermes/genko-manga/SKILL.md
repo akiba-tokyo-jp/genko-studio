@@ -191,7 +191,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 3D: `add_prim3d` の `kind` は `box`・`cylinder`・`stairs`・`floor`（パースの格子）。背景は `add_scene`（`kind`: `room`・`classroom`・`corridor`・`street`）で、壁・床・窓・机・建物をまとめて置き、`edit_prim`・`delete_prim`・`trace_prims` は id 1 つで効く。人形は `add_mannequin`。`trace_prims` で線にする。
 - 点検: `mcp__genko__check` で、人の「入稿前の点検」と同じ問題の一覧を受け取る（`preflight` の結果の `checks` にも入る）。
 - 取り消し: `mcp__genko__undo` で自分の最後の変更を取り消す。最後の変更が人のもの・承認が変わる・`project.json` が Genko の外で書き換えられた、のどれかなら断る。
-- 書き出し: `mcp__genko__export`（`format`: pdf・tiff・png・cmyk・layers・psd・pack・epub・kindle・strip・webtoon・sns・timelapse、`pages`、`dpi`、`area`: paper・bleed・trim）。承認は要らない。書き出し先は原稿の `exports/`。
+- 書き出し: `mcp__genko__export`（`format` の既定は png。ほかの形式は人に頼まれたときだけ: pdf・tiff・cmyk・layers・psd・pack・epub・kindle・strip・webtoon・sns・timelapse、`pages`、`dpi`、`area`: paper・bleed・trim）。承認は要らない。書き出し先は原稿の `exports/`。
   40 秒で終わらない書き出し（600 dpi の PDF・PNG・PSD など）は `job` を返す。書き出しは続いているので、1〜5 分おいて `mcp__genko__export_status`（`job`）で結果（`result` の `files`）を取る。`upscale` の `job` も同じ。
   書き出しは Genko（MCP サーバ）の中で動く。呼び出しごとにサーバを立ち上げて閉じるつなぎ方では、閉じたときに書き出しも止まる。そのときは 90 秒ほどで `status: "lost"` になるので、同じつなぎのまま `export` と `export_status` を続けて呼び直す。
   - `color` の既定 `auto`: モノクロの原稿はグレー（劣化なし）、カラーは RGB。`bitonal` で白黒 2 階調。PDF には仕上がり線（TrimBox）と裁ち落とし（BleedBox）が入る。
@@ -209,7 +209,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - `export`: 全ページの仕上げが済んだら、`mcp__genko__preflight` で止めている理由を確かめ、`mcp__genko__export_proof` で校正を出してから依頼する。
 
 依頼を出したら `mcp__genko__review_page` で確認ページ（review.html）を作り、その場所（`path`）と何を見てほしいかを、
-メッセージで人間に知らせる。承認するのは人間で、Genko アプリの承認箱（または確認ページにあるコマンド）で行う。人間が「OK」と返事をしても、あなたが承認を付けることはできない。
+メッセージで人間に知らせる。review.html は絵を中に入れた 1 ファイルなので、そのまま渡す（zip にまとめない）。承認するのは人間で、Genko アプリの承認箱（または確認ページにあるコマンド）で行う。人間が「OK」と返事をしても、あなたが承認を付けることはできない。
 
 ## してはいけないこと
 

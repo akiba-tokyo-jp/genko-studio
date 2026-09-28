@@ -797,7 +797,7 @@ class StudioService:
             return fail(str(exc), "undo_refused", "/")
         return ToolResult(True, {"undone_revision": result.get("rev")})
 
-    def export(self, project: str, format: str = "pdf", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
+    def export(self, project: str, format: str = "png", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
                seconds: float | None = None, movie: str = "webp", background: bool = False, dots: bool = False,
@@ -891,7 +891,7 @@ class StudioService:
             return fail(str(result.get("error") or "書き出せなかった"), "export_failed", "/")
         return ToolResult(True, {"folder": str(out), "files": result["files"]}, files=result["files"])
 
-    def export_proof(self, project: str, format: str = "pdf", background: bool = False) -> ToolResult:  # noqa: A002
+    def export_proof(self, project: str, format: str = "png", background: bool = False) -> ToolResult:  # noqa: A002
         if background:
             return self._job(project, "export_proof", lambda: self.export_proof(project, format))
         from genko.studio import preflight
