@@ -1469,6 +1469,9 @@ FILTER_FIELDS = {
     "curve": [("channel", "色", _CHANNELS, "rgb")],
     "brightness_contrast": [("brightness", "明るさ", -100, 100, 0), ("contrast", "コントラスト", -100, 100, 0)],
     "sharpen": [("amount", "強さ（1 で普通、2 で強め）", 0.1, 5, 1.0)],
+    "lineart": [("threshold", "拾う強さ（大きいほど薄い線まで）", 0.3, 0.98, 0.72), ("radius", "線の太さの目安（px）", 3, 41, 7),
+                ("min_px", "取るゴミの大きさ（px）", 0, 400, 12),
+                ("drop_blue", "水色の下描き", [("残す", 0), ("消す", 1)], 1), ("keep_solid", "ベタ", [("残す", 1), ("線だけにする", 0)], 1)],
     "despeckle": [("size_mm", "取るゴミの大きさ（mm）", 0.05, 5, 0.3),
                   ("what", "取るもの", [("黒い点（ゴミ）", "ink"), ("線の中の白い穴", "holes"), ("両方", "both")], "ink")],
     "hue": [("shift", "色相（°）", -180, 180, 30), ("saturation", "彩度（倍）", 0, 3, 1.0), ("value", "明度（倍）", 0, 3, 1.0)],
@@ -1940,6 +1943,10 @@ class MainWindow(QMainWindow):
         self.act_guides.setChecked(True)
         self.act_phone = a("スマホの画面の範囲を表示", self._toggle_phone, tip="縦読みの原稿で、スマホ 1 画面に入る範囲と画面の切れ目", checkable=True)
         self.act_import = a("画像を読み込む…", self._import_image, "Ctrl+Shift+I", "選んだコマに（選んでいなければページに）画像を置きます")
+        self.act_import_scan = a("スキャン画像を線画にして取り込む…", lambda: self._import_scan(False), None,
+                                 "紙に描いた絵の画像を新しいレイヤーに置き、線だけを抜き出します（強さ・下描きの青を消す・ゴミ取りを見ながら決める）")
+        self.act_scanner = a("スキャナーから取り込む…", lambda: self._import_scan(True), None,
+                             "スキャナーで読んだ紙を新しいレイヤーに置き、線だけを抜き出します（Windows・Linux）")
         self.act_import_psd = a("PSD をレイヤーのまま読み込む…", self._import_psd,
                                 tip="Photoshop・CLIP STUDIO PAINT などの PSD／PSB を、レイヤー・フォルダー・マスク・合成モードのままこのページに")
         self.act_timelapse = a("タイムラプスを記録する", self._toggle_timelapse, checkable=True,
@@ -2204,6 +2211,7 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
         menus = [
             ("ファイル", [self.act_new, self.act_open, "recent", None, self.act_ai, None, self.act_save, self.act_save_as, None, self.act_import,
+                         self.act_import_scan, self.act_scanner,
                          self.act_import_psd, self.act_export, self.act_print, None, self.act_timelapse, self.act_timelapse_export, None, "actions", None, self.act_prefs, None, self.act_close, self.act_quit]),
             ("編集", [self.act_undo, self.act_redo, self.act_history, None, self.act_cut, self.act_copy, self.act_paste,
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
@@ -5273,6 +5281,65 @@ class MainWindow(QMainWindow):
         if self.apply_ops(ops):
             where = "選んだコマ" if frame is not None else "ページ全体"
             self.flash(f"{where}に「{Path(path).name}」を置きました", 4000)
+
+    def _import_scan(self, from_scanner: bool) -> None:
+        """スキャン画像の線画抽出: the paper (a file, or the scanner) laid on a new layer over the page, then its lines
+        drawn out with the settings chosen while looking at the page."""
+        from io import BytesIO
+
+        from PIL import Image
+
+        from genko.models import new_id
+        from genko.raster import WORKING_DPI
+        from genko.render import mm_to_px
+
+        page = self._current()
+        if page is None:
+            return
+        if from_scanner:
+            from genko import scanner
+
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                blob = scanner.scan(600)
+            except scanner.ScanError as exc:
+                QApplication.restoreOverrideCursor()
+                self.flash(str(exc), 7000, error=True)
+                return
+            QApplication.restoreOverrideCursor()
+            name = "スキャン"
+        else:
+            path, _ = QFileDialog.getOpenFileName(self, "スキャンした画像", "", "画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp)")
+            if not path:
+                return
+            blob, name = Path(path).read_bytes(), Path(path).stem
+        try:
+            with Image.open(BytesIO(blob)) as img:
+                paper = img.convert("RGB")
+        except Exception as exc:  # unreadable file
+            self.flash(f"読み込めない画像です:\n{exc}", 6000, error=True)
+            return
+        size = (mm_to_px(page.spec.width_mm, WORKING_DPI), mm_to_px(page.spec.height_mm, WORKING_DPI))
+        paper.thumbnail(size, Image.Resampling.LANCZOS) if paper.width > size[0] or paper.height > size[1] else None
+        sheet = Image.new("RGB", size, "white")  # (the paper fitted to the page, in the middle)
+        sheet.paste(paper, ((size[0] - paper.width) // 2, (size[1] - paper.height) // 2))
+        buf = BytesIO()
+        sheet.save(buf, format="PNG")
+        layer_id = new_id()
+        import base64
+
+        if not self.apply_ops([{"op": "add_layer", "page": page.index, "kind": "paint", "id": layer_id, "name": f"線画（{name}）"},
+                               {"op": "put_raster", "page": page.index, "id": layer_id, "png_base64": base64.b64encode(buf.getvalue()).decode("ascii")}]):
+            return
+        page = self._current()
+        layer = next(item for item in page.layers if item.id == layer_id)
+        params = filter_params(self, "lineart", {"drop_blue": 1, "keep_solid": 1},
+                               preview=lambda values: self.preview_filter(page, layer, "lineart", values))
+        if params is None:
+            self.flash("紙のままレイヤーに置きました（線画抽出はフィルターからもかけられます）", 5000)
+            return
+        self.apply_ops([{"op": "filter_raster", "page": page.index, "id": layer_id, "kind": "lineart", **params}])
+        self.flash("線だけを新しいレイヤーに取り込みました", 4000)
 
     def _jump(self, delta: int) -> None:
         nxt = self._page_index + delta
