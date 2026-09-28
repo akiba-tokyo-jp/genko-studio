@@ -215,7 +215,7 @@ def test_preflight_reasons_force_and_proof_watermark(tmp_path: Path):
         path.write_bytes(fixture_images.panel([128, 128], []))
         cand = agent.import_images("demo.genko", request["id"], [{"file": str(path.relative_to(project)),
                                                                   "origin": {"kind": "agent"}}]).data["candidates"][0]
-        assert agent.adopt("demo.genko", cand, page=1, frame_id=frame.id).ok
+        assert agent.adopt("demo.genko", cand, page=1, frame_id=frame.id, upscale=False).ok
     for c in load_episode(project).bible.characters:
         episode = load_episode(project)
         apply_ops(episode, [{"op": "upsert_character", "character": {**c, "locked": True}}], agent="human:leaf")

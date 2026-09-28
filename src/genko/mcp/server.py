@@ -20,12 +20,11 @@ SKILL_PATH = Path(__file__).resolve().parent.parent / "studio" / "guide" / "SKIL
 
 INSTRUCTIONS = """Genko は漫画原稿のシステム。文章も絵も作らない。あなた（エージェント）が企画書・脚本・ネーム計画を書き、
 Genko が検査・コマ割り・縦書き写植・プレビュー描画をする。絵はあなたが別の道具で生成し、import_image で取り込む。
-進め方: status → next で次の作業を取る → 書く道具は commit=false で試し、issues の path を直してから commit=true。
+進め方: status → next で次の作業を取る → 書く道具を commit=true で呼ぶ（エラーがあれば何も書かずに返るので issues の path を直して送り直す）。書く道具の返事の next が次の作業。
 ネームの規則は resource genko://guide/manga-rules（inspect target=rules でも読める）。
-作画: generation_request で依頼パック（サイズ・プロンプトの下書き・描かせないもの・ガイドと参照の画像）を受け取る →
-自分の画像ツールで生成し、画像を返された inbox フォルダに保存 → import_images（来歴 origin を必ず付ける）→
-candidates と render kind=compare で比べる → review_candidates → adopt。コマの外にはみ出した部分は自動で切り取られる。
-採用後は report_regions で顔と人物の位置を報告し、作画の承認後に finish_page。最後に check（人と同じ点検）・preflight と export（各形式）。
+作画: generation_request で依頼パックを受け取る → 自分の画像ツールで生成し、返された inbox フォルダに保存 →
+take_panel_art（取り込み・採用・足りなければ拡大・顔と人物の位置の報告を 1 回で）。2 枚以上を比べるときだけ import_images → candidates → review_candidates → adopt。
+作画の承認後に finish_page。最後に check（人と同じ点検）・preflight と export（既定は png）。
 描く・直す: apply_ops でページ・コマ・レイヤー（複製・結合・マスク）・線・塗り・グラデーション・台詞（傍点・部分書式・回転）・3D（背景は add_scene）・トーン・効果線まで、人が画面でできることは全部できる（op 一覧は resource genko://ops）。間違えたら undo（自分の変更だけ）。
 使える素材・書体・ブラシは inspect target=materials / fonts / brushes、レイヤーと台詞の今の設定は inspect target=snapshot。
 render は layer_id でそのレイヤーだけ、mode=print で印刷と同じ見え方。
@@ -45,6 +44,12 @@ READ_ONLY = frozenset({
     "projects", "status", "next", "inspect", "render", "candidates", "preflight", "check", "tickets", "proposals",
     "review_page", "export", "export_proof", "export_status", "style_catalog",
 })
+
+
+# writes whose reply carries the next work item
+NEXT_AFTER = frozenset({"set_bible", "set_script", "submit_name", "apply_ops", "import_images", "take_panel_art", "adopt",
+                        "review_candidates", "report_regions", "finish_page", "request_approval", "resolve_ticket",
+                        "record_chat_approval", "upscale", "import_name", "use_style"})
 
 
 def build_server(root: Path, actor: str) -> MCPServer:
@@ -117,6 +122,13 @@ def build_server(root: Path, actor: str) -> MCPServer:
                            (time.perf_counter() - started) * 1000)
             if writes and result is not None and result.ok:
                 presence.touch(path, who)
+                if fn.__name__ in NEXT_AFTER and isinstance(result.data, dict) and "next" not in result.data:
+                    # (what to do next rides on the reply: no separate next call after each write)
+                    try:
+                        upcoming = StudioService(root, who).next(str(project), limit=1).data
+                        result.data["next"] = (upcoming["items"] or [None])[0] or {"waiting_for": upcoming["waiting_for"]}
+                    except Exception:  # noqa: BLE001 (the write went through; the hint is only a help)
+                        pass
         if result is None:
             shown = wording_error(error or "")
             return [json.dumps({"ok": False, "error": shown, **({"detail": error} if shown != error else {})}, ensure_ascii=False)]
@@ -209,10 +221,11 @@ def build_server(root: Path, actor: str) -> MCPServer:
     @tool
     def adopt(project: str, candidate_id: str, page: int | None = None, frame_id: str | None = None, to: str = "art",
               fit: str | None = None, offset_mm: list[float] | None = None, scale: float | None = None,
-              location_id: str | None = None) -> list:
-        """候補を採用してコマに置く（to: art / bg / draft。fit: cover / contain / stretch）。場所の参照画像は location_id。
-        作画の確定は人間の art 承認で行う。"""
-        return call(service.adopt, project, candidate_id, page, frame_id, to, fit, offset_mm, scale, location_id)
+              location_id: str | None = None, regions: list[dict] | None = None, upscale: bool = True) -> list:
+        """候補を採用してコマに置く（to: art / bg / draft。fit: cover / contain / stretch）。page・frame_id は省くと候補から引く。
+        art は本の解像度に足りなければ拡大して採用し直し（upscale: false で止める）、regions（顔・人物の位置）を渡せば報告まで
+        1 回で済む。場所の参照画像は location_id。作画の確定は人間の art 承認で行う。"""
+        return call(service.adopt, project, candidate_id, page, frame_id, to, fit, offset_mm, scale, location_id, regions, upscale)
 
     @tool
     def request_fix(project: str, page: int, instruction: str, frame_id: str | None = None,

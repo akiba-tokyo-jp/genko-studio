@@ -472,7 +472,7 @@ class StudioService:
                                  "inbox": str(path / "studio" / "inbox" / pack.id)},
                           images=[preview] if preview else [])
 
-    def import_images(self, project: str, request_id: str, images: list[dict]) -> ToolResult:
+    def import_images(self, project: str, request_id: str, images: list[dict], preview: bool = True) -> ToolResult:
         from genko.studio import importer
 
         path = self.project_path(project)
@@ -490,16 +490,16 @@ class StudioService:
             apply_ops(episode, [{"op": "import_candidates", "request_id": request_id, "candidates": items}], agent=self.actor)
             save_episode(episode, path, actor=self.actor)
         ids = [i["id"] for i in items]
-        preview: list[bytes] = []
+        shown: list[bytes] = []
         target = request.get("target") or {}
-        if first is not None and target.get("frame_id"):
+        if preview and first is not None and target.get("frame_id"):
             try:
                 png, _ = _render_kind(episode, path, int(target["page"]), target["frame_id"], "compare", ids[0], 512)
-                preview.append(png)
+                shown.append(png)
             except ApplyError:
                 pass
         return ToolResult(True, {"request_id": request_id, "candidates": ids,
-                                 "metrics": {i["id"]: i["metrics"] for i in items}}, images=preview)
+                                 "metrics": {i["id"]: i["metrics"] for i in items}}, images=shown)
 
     def candidates(self, project: str, page: int | None = None, frame_id: str | None = None,
                    character_id: str | None = None, location_id: str | None = None) -> ToolResult:
@@ -564,7 +564,13 @@ class StudioService:
 
     def adopt(self, project: str, candidate_id: str, page: int | None = None, frame_id: str | None = None,
               to: str = "art", fit: str | None = None, offset_mm: list | None = None, scale: float | None = None,
-              location_id: str | None = None) -> ToolResult:
+              location_id: str | None = None, regions: list[dict] | None = None, upscale: bool = True,
+              method: str = "genko", preview: bool = True) -> ToolResult:
+        """Adopt a candidate, then (art) enlarge it when the book's resolution needs it and adopt the enlargement, and
+        report the faces and people when `regions` are given: one call instead of adopt → upscale → adopt →
+        report_regions. page and frame_id are found from the candidate when left out."""
+        from genko.studio.preflight import art_layers, layer_dpi
+
         path = self.project_path(project)
         if location_id:
             episode = load_episode(path)
@@ -572,15 +578,67 @@ class StudioService:
             if cand is None:
                 return fail(f"場所 {location_id} の候補 {candidate_id} はない", "no_candidate", "/candidate_id")
             return self._ops(project, [{"op": "attach_reference", "target": {"location_id": location_id}, "asset": cand["asset"], "kind": "reference"}])
+        if page is None or not frame_id:  # (the candidate says where it belongs)
+            episode = load_episode(path)
+            found = next(((pg.index, fr.id) for pg in episode.pages for fr in pg.leaf_frames()
+                          if any(c.get("id") == candidate_id for c in (fr.panel or {}).get("candidates", []))), None)
+            if found is None:
+                return fail(f"候補 {candidate_id} はどのコマにも無い", "no_candidate", "/candidate_id")
+            page, frame_id = found
         op = {"op": "adopt_candidate", "page": page, "frame_id": frame_id, "candidate_id": candidate_id, "to": to}
         for key, value in (("fit", fit), ("offset_mm", offset_mm), ("scale", scale)):
             if value is not None:
                 op[key] = value
         result = self._ops(project, [op])
-        if result.ok and page is not None and frame_id:
+        if not result.ok:
+            return result
+        steps = [{"step": "adopt", "ok": True, "candidate_id": candidate_id}]
+        final, dpi, extra = candidate_id, {}, []
+        now = wanted = None
+
+        def stop(step: str, failed: ToolResult) -> ToolResult:
+            steps.append({"step": step, "ok": False})
+            return ToolResult(False, {"steps": steps, "stopped_at": step, **failed.data}, failed.issues)
+
+        if to == "art":  # (the resolution is told whether it is enlarged or not)
+            episode = load_episode(path)
+            pg = next(p for p in episode.pages if p.index == page)
+            layer = next((la for la in art_layers(pg) if la.frame_id == frame_id
+                          and (la.source or {}).get("candidate") == candidate_id), None)
+            now = layer_dpi(episode, pg, layer, AssetStore(path)) if layer is not None else None
+            wanted = float(episode.spec.dpi or 600)
+            dpi = {"dpi_before": now, "dpi_wanted": wanted}
+            if upscale and now and now < wanted * 0.95:
+                bigger = self.upscale(project, page, frame_id, candidate_id, None, method)
+                if not bigger.ok:
+                    return stop("upscale", bigger)
+                steps.append({"step": "upscale", "ok": True, "candidate_id": bigger.data["candidate_id"],
+                              "scale": bigger.data.get("scale")})
+                again = self._ops(project, [{**op, "candidate_id": bigger.data["candidate_id"]}])
+                if not again.ok:
+                    return stop("adopt_upscaled", again)
+                steps.append({"step": "adopt_upscaled", "ok": True, "candidate_id": bigger.data["candidate_id"]})
+                final = bigger.data["candidate_id"]
+                dpi["dpi_after"] = bigger.data.get("dpi_after")
+            elif upscale:
+                steps.append({"step": "upscale", "ok": True, "skipped": "解像度は足りている" if now else "解像度が分からない"})
+        if regions:
+            reported = self.report_regions(project, page, frame_id, regions)
+            if not reported.ok:
+                return stop("report_regions", reported)
+            steps.append({"step": "report_regions", "ok": True})
+        last = dpi.get("dpi_after") or dpi.get("dpi_before")
+        if to == "art" and last and wanted and last < wanted * 0.95:
+            extra.append(warning("dpi_short", "/candidate_id", f"採用した絵は {last:g} dpi で、本の {wanted:g} dpi に届いていない（印刷で粗く見えることがある）",
+                                 "もっと大きい画像を作って取り込み直す（コマの縦横に合わせて描かせる）か、コマを小さくする"
+                                 + ("" if upscale else "。upscale: true で Genko が拡大する")))
+        out = ToolResult(True, {"steps": steps, "page": page, "frame_id": frame_id, "candidate_id": candidate_id,
+                                "adopted": final, "upscaled": final != candidate_id, **dpi}, result.issues + extra)
+        if preview:
             shown = self.render(project, page, "print" if to != "draft" else "proof", 512, frame_id)
-            result.images, result.files = shown.images, shown.files
-        return result
+            out.images, out.files = shown.images, shown.files
+            out.issues += shown.issues
+        return out
 
     def take_panel_art(self, project: str, request_id: str, image: dict, regions: list[dict] | None = None,
                        upscale: bool = True, method: str = "genko", crop01: list[float] | None = None) -> ToolResult:
@@ -589,8 +647,6 @@ class StudioService:
         resolution needs it (and adopt the enlargement), then report the faces and people (when given; box01 is in
         the picture as cut). Stops at the first step that fails and says which. A picture still short of the
         book's resolution is a warning (dpi_short). Reviewing the candidates and the person's approval stay separate."""
-        from genko.studio.preflight import art_layers, layer_dpi
-
         path = self.project_path(project)
         request = genreq.read(path, str(request_id))
         if request is None:
@@ -613,55 +669,21 @@ class StudioService:
                 return stop("crop", cut)
             image = cut
             steps.append({"step": "crop", "ok": True, "file": image["file"]})
-        imported = self.import_images(project, request_id, [image])
+        imported = self.import_images(project, request_id, [image], preview=False)
         if not imported.ok:
             return stop("import", imported)
         candidate = imported.data["candidates"][0]
         steps.append({"step": "import", "ok": True, "candidate_id": candidate})
-        adopted = self.adopt(project, candidate, page, frame_id, to)
+        adopted = self.adopt(project, candidate, page, frame_id, to, regions=regions, upscale=upscale, method=method)
         if not adopted.ok:
-            return stop("adopt", adopted)
-        steps.append({"step": "adopt", "ok": True, "candidate_id": candidate})
-        final, shown, dpi = candidate, adopted, {}
-        now = wanted = None
-        if to == "art":  # (the resolution is told whether it is enlarged or not)
-            episode = load_episode(path)
-            pg = next(p for p in episode.pages if p.index == page)
-            layer = next((la for la in art_layers(pg) if la.frame_id == frame_id
-                          and (la.source or {}).get("candidate") == candidate), None)
-            now = layer_dpi(episode, pg, layer, AssetStore(path)) if layer is not None else None
-            wanted = float(episode.spec.dpi or 600)
-            dpi = {"dpi_before": now, "dpi_wanted": wanted}
-        if upscale and to == "art":
-            if now and now < wanted * 0.95:
-                bigger = self.upscale(project, page, frame_id, candidate, None, method)
-                if not bigger.ok:
-                    return stop("upscale", bigger)
-                steps.append({"step": "upscale", "ok": True, "candidate_id": bigger.data["candidate_id"],
-                              "scale": bigger.data.get("scale")})
-                again = self.adopt(project, bigger.data["candidate_id"], page, frame_id, to)
-                if not again.ok:
-                    return stop("adopt_upscaled", again)
-                steps.append({"step": "adopt_upscaled", "ok": True, "candidate_id": bigger.data["candidate_id"]})
-                final, shown = bigger.data["candidate_id"], again
-                dpi["dpi_after"] = bigger.data.get("dpi_after")
-            else:
-                steps.append({"step": "upscale", "ok": True, "skipped": "解像度は足りている" if now else "解像度が分からない"})
-        if regions:
-            reported = self.report_regions(project, page, frame_id, regions)
-            if not reported.ok:
-                return stop("report_regions", reported)
-            steps.append({"step": "report_regions", "ok": True})
-        extra: list[Issue] = []
-        last = dpi.get("dpi_after") or dpi.get("dpi_before")
-        if to == "art" and last and wanted and last < wanted * 0.95:
-            extra.append(warning("dpi_short", "/image", f"採用した絵は {last:g} dpi で、本の {wanted:g} dpi に届いていない（印刷で粗く見えることがある）",
-                                 "もっと大きい画像を作って取り込み直す（コマの縦横に合わせて描かせる）か、コマを小さくする"
-                                 + ("" if upscale else "。upscale: true で Genko が拡大する")))
-        return ToolResult(True, {"steps": steps, "page": page, "frame_id": frame_id, "candidate_id": candidate,
-                                 "adopted": final, "upscaled": final != candidate, **dpi,
+            steps.extend(adopted.data.get("steps") or [{"step": "adopt", "ok": False}])
+            return ToolResult(False, {**adopted.data, "steps": steps, "stopped_at": adopted.data.get("stopped_at", "adopt")},
+                              adopted.issues)
+        steps.extend(adopted.data["steps"])
+        data = {k: v for k, v in adopted.data.items() if k != "steps"}
+        return ToolResult(True, {"steps": steps, **data,
                                  "note": "候補の点検（review_candidates）と人の承認は別。作画の承認の後に採用し直すと、承認は取り直しになる"},
-                          imported.issues + shown.issues + extra, shown.images, shown.files)
+                          imported.issues + adopted.issues, adopted.images, adopted.files)
 
     def _crop_inbox(self, path: Path, request_id: str, image: dict, crop01) -> dict | ToolResult:
         """The picture cut to crop01, saved beside it in the inbox; the image entry for the cut picture."""

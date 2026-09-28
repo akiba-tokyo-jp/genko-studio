@@ -24,9 +24,10 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 
 ## ループ
 
-1. `mcp__genko__next` で次の作業を1つ取る（他のエージェントと並行して動くときは `claim: true`）。`tools` に使う道具の目安がある。
+1. はじめに `mcp__genko__next` で次の作業を1つ取る（他のエージェントと並行して動くときは `claim: true`）。`tools` に使う道具の目安がある。
+   書く道具の返事には次の作業が `next` に入っているので、続けて `next` を呼ばなくてよい。
 2. 作業の種類ごとに下の手順で進める。
-3. 書く道具は、まず `commit: false` で呼ぶ。`issues` に `severity: "error"` があれば、`path` の場所だけを直して送り直す。エラーが無くなったら `commit: true`。
+3. 書く道具はそのまま `commit: true` で呼んでよい（エラーがあれば何も書かずに返る）。`issues` に `severity: "error"` があれば、`path` の場所だけを直して送り直す。
 4. 同じ指摘が 3 回直しても消えないときは、無理に続けず `mcp__genko__ask_human`（`page`、あれば `frame_id`、`item` に作業の種類）で人間に相談する。その作業は人間が閉じるまで `next` に出なくなるので、次の作業へ進む。
 5. `next` の `items` が空で `waiting_for` だけになったら、人間の承認待ち。下の「承認を頼む」をする。
 
@@ -94,22 +95,24 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
     `notes_for_agent` にマネキンの注記があるときは、`files.pose` の棒人形がポーズの指定。体の向きと手足の角度を合わせる。
   - サイズは `size.suggested_px`。画像ツールが決まったサイズしか出せないときは `size.tool_sizes` の先頭を使う（切れる方向が書いてある）。
   - `keepout` の場所（台詞が入る）は静かに空けておく。プロンプトの下書きにも書いてある。
-  - 1 つの依頼で 2〜4 枚作り、全部 `inbox` に保存して一度に `import_images` する。
+  - ふつうは 1 枚作り、`inbox` に保存して下の `take_panel_art` で取り込む。比べて選びたいときだけ 2〜4 枚作って一度に `import_images` する。
   - `origin` には `tool_id`（例 `openai:gpt-image-1`）、`model`、実際に使ったプロンプト（`prompt`）、`params`、添えた参照（`refs_used`）を書く。
 - 複数人物のコマ（依頼パックに `steps` がある）: まず全員の構図で作って採用候補を決め、`report_regions` で人物ごとの領域を報告し、
   似ていない人物だけを `generation_request`（`mode: "inpaint"`、`parent` に採用候補、`focus_character` に人物 id）で一人ずつ直す。
 - 顔だけ直す: `generation_request`（`mode: "inpaint"`、`parent`、`regions: ["face:<人物 id>"]`）。マスクの白い所だけを描き直させる。
 - 全体を少し直す: `mode: "edit"` と `parent`、`instruction` に直す点。`source.png` を元画像として画像ツールに渡す。
 - `import_pending`: 依頼済みで画像がまだのコマ。`inbox` に画像を置いて `import_images`。
-- `review_candidates`: `mcp__genko__candidates`（metrics の `rank` が小さいほど目安が良い）と `mcp__genko__render`（`kind: "compare"`、`candidate_id`）で比べる。
-  赤い線がネームの構図。構図がネームに合うか、人物が設定画に似ているか、手足の破綻、画内の文字、台詞の場所が空いているかを見て、
-  `review_candidates`（`page` と `frame_id` も必須）で点数（0〜1）とメモを残し（人物のいるコマは `checks`: `likeness` 設定画に似ているか 0〜1・`hands` ok / broken / none・`text` 絵の中の文字 none / some・`cut` 顔や手が枠で切れる none / some も必須）、良いものを `mcp__genko__adopt`。どれも駄目なら直しの依頼を作る。
-  1 コマ 8 枚・直し 2 巡を超えると、そのコマは人間の判断待ちになる。
-- 1 枚で決まるときの近道: `mcp__genko__take_panel_art`（`request_id`、`image: {file, origin}`、人物のいるコマは `regions`）で、
+- 標準の流れ: `mcp__genko__take_panel_art`（`request_id`、`image: {file, origin}`、人物のいるコマは `regions`）で、
   取り込み → 採用 → 解像度が足りなければ拡大して採用し直し → 顔と人物の位置の報告、を 1 回で行う。止まったら `stopped_at` に
-  どの段かが入る。候補を比べて選ぶとき（2 枚以上）と人の承認は、これまでどおり別に行う。
+  どの段かが入る。人の承認は別。
   画像ツールが白い余白を残したら `crop01`（`[x, y, 幅, 高さ]`、絵の中の 0..1）で取り込む前に切り抜く（`regions` の `box01` は切り抜いた後の絵の中）。
   拡大しても本の解像度に届かないときは警告 `dpi_short` が出る。大きい画像で作り直すか、そのまま進めるかを決める。
+- `review_candidates`（2 枚以上を比べるとき）: `mcp__genko__candidates`（metrics の `rank` が小さいほど目安が良い）と `mcp__genko__render`（`kind: "compare"`、`candidate_id`）で比べる。
+  赤い線がネームの構図。構図がネームに合うか、人物が設定画に似ているか、手足の破綻、画内の文字、台詞の場所が空いているかを見て、
+  `review_candidates`（`page` と `frame_id` も必須）で点数（0〜1）とメモを残し（人物のいるコマは `checks`: `likeness` 設定画に似ているか 0〜1・`hands` ok / broken / none・`text` 絵の中の文字 none / some・`cut` 顔や手が枠で切れる none / some も必須）、良いものを `mcp__genko__adopt`（`regions` も渡せば、拡大と位置の報告まで 1 回で済む）。どれも駄目なら直しの依頼を作る。
+  1 コマ 8 枚・直し 2 巡を超えると、そのコマは人間の判断待ちになる。
+- `report_regions`・`upscale_panel`: 作業項目に採用中の候補（`adopted`）と、ネームでの人物の目安（`figures`）が入っている。
+  `inspect` を呼ばずに、絵で位置を確かめて `report_regions`、または `adopt`（`candidate_id` に `adopted`）で拡大し直す。
 - `fix_panel`: 人間の指示（`comments`）どおりに直しの依頼を作る（`instruction` に指示を入れる）。絵を採用し直すとチケットは閉じる。
   絵ではない直し（台詞・線・効果など）なら `apply_ops` で直し、`mcp__genko__resolve_ticket`（`ticket_id` は `tickets` の値、`note` に何をしたか）で閉じる。
 - `fix_page`: ネーム承認後のページへの人間の指示。`apply_ops` で直してから `resolve_ticket` で閉じる。閉じられるのは人からの直しの指示だけ（承認の依頼や質問は人が閉じる）。人は `genko studio reopen-ticket` で開き直せる。
@@ -156,7 +159,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 
 ## 人と同じ道具で描く・直す
 
-人が画面でできることは、`mcp__genko__apply_ops` の op で全部できる（一覧は resource `genko://ops`）。まず `commit: false` で試す。
+人が画面でできることは、`mcp__genko__apply_ops` の op で全部できる（一覧は resource `genko://ops`）。エラーがあれば何も書かずに返るので、そのまま `commit: true` でよい。
 
 - ページ: `add_page`（`after` を省くと本文の最後、表紙より前）・`delete_page`・`duplicate_page`・`reorder`・`set_spread`（見開き）・`set_page_spec`（原稿用紙を変えるとコマや台詞も合わせて動く）。
 - 調べる: `mcp__genko__inspect` の `target` で `snapshot`（レイヤーの名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照、台詞の書式とフキダシ、3D）、`materials`（貼れる素材の id）、`fonts`（`style.font` に使える書体）、`brushes`（`kind` に使えるブラシ）。
