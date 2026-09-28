@@ -351,7 +351,7 @@ class StudioService:
         return ToolResult(True, {"items": runnable, "blocked": blocked, "waiting_for": _waiting(items)})
 
     def inspect(self, project: str, target: str, page: int | None = None, frame_id: str | None = None,
-                op: str | None = None) -> ToolResult:
+                op: str | None = None, full: bool = False) -> ToolResult:
         if target == "ops":  # (the ops apply_ops takes: the names alone, or the ones asked for with their arguments)
             from genko.ops import OPS_SCHEMA
 
@@ -393,7 +393,10 @@ class StudioService:
         if target == "studio":
             return ToolResult(True, {"studio": episode.studio})
         if target == "snapshot":
-            return ToolResult(True, {"snapshot": snapshot(episode)})
+            snap = snapshot(episode)
+            if page is not None:  # (that page alone: the rest of the book is not sent again)
+                snap = {**snap, "pages": [p for p in snap.get("pages", []) if p.get("index") == page]}
+            return ToolResult(True, {"snapshot": snap})
         if target in ("page", "panel"):
             if page is None:
                 return fail("page が要る", "page_required", "/page")
@@ -401,7 +404,7 @@ class StudioService:
                 return fail(f"{page} ページはない", "no_page", "/page")
             if target == "page":
                 return ToolResult(True, self._page_brief(episode, page))
-            return ToolResult(True, _panel_brief(episode, page, frame_id))
+            return ToolResult(True, _panel_brief(episode, page, frame_id, full))
         return fail(f"target {target} はない（bible / script / page / panel / studio / schemas / rules / snapshot / "
                     "materials / fonts / brushes / plugins / upscalers）", "unknown_target", "/target")
 
@@ -537,7 +540,8 @@ class StudioService:
             try:
                 panel = target._find(str(frame_id)).panel or {}
             except (KeyError, IndexError):
-                return fail(f"コマ {frame_id} はない", "no_frame", "/frame_id")
+                return fail(f"コマ {frame_id} はない（{page} ページのコマ: {', '.join(f.id for f in target.leaf_frames())}）",
+                            "no_frame", "/frame_id")
             items = panel.get("candidates", [])
             adopted = panel.get("adopted") or {}
         rows = []
@@ -807,9 +811,12 @@ class StudioService:
 
         episode = load_episode(path)
         report = preflight.check(episode, path, allow_fixture=allow_fixture, force=force)
-        found = checks.book(episode, path)  # (and what a person sees in 入稿前の点検)
-        return ToolResult(True, {"ready": report["ok"], **{k: v for k, v in report.items() if k != "ok"},
-                                 "checks": {"errors": found["errors"], "warnings": found["warnings"], "issues": found["issues"]}})
+        found = checks.book(episode, path)  # (and what a person sees in 入稿前の点検: counted here, listed by check)
+        errors, warnings = (_for_agents(report[k]) for k in ("errors", "warnings"))
+        return ToolResult(True, {"ready": report["ok"], "errors": errors, "warnings": warnings, "dpi": report["dpi"],
+                                 "min_dpi": report["min_dpi"],
+                                 "checks": {"errors": found["errors"], "warnings": found["warnings"],
+                                            "note": "点検の中身は check で読む（pages でページを絞れる）"}})
 
     def check(self, project: str, pages: list[int] | None = None) -> ToolResult:
         """The same pre-press check a person runs in the app (入稿前の点検): lines off the paper, small or
@@ -854,11 +861,18 @@ class StudioService:
             return self._job(project, "export", lambda: self._export(*args))
         return self._export(*args)
 
-    def export_status(self, project: str, job: str) -> ToolResult:
-        """A background export's state; when it is done, its reply is in result."""
+    def export_status(self, project: str, job: str, wait_s: float = 0) -> ToolResult:
+        """A background export's state; when it is done, its reply is in result. wait_s (up to 60): wait that long
+        for it to finish before answering, so no one has to ask again and again."""
+        import time
+
         from genko.studio import jobs
 
+        deadline = time.monotonic() + max(0.0, min(60.0, float(wait_s or 0)))
         record = jobs.status(self.project_path(project), job)
+        while record.get("ok") and record.get("status") == "running" and time.monotonic() < deadline:
+            time.sleep(0.5)
+            record = jobs.status(self.project_path(project), job)
         if not record.get("ok"):
             return fail(record["error"], "no_job", "/job")
         files = list((record.get("result") or {}).get("files") or [])
@@ -1829,7 +1843,8 @@ def _render_kind(episode: Episode, project: Path, page_index: int, frame_id: str
     try:
         frame = page._find(str(frame_id))
     except (KeyError, IndexError) as exc:
-        raise ApplyError(f"{page_index} ページにコマ {frame_id} はない") from exc
+        raise ApplyError(f"{page_index} ページにコマ {frame_id} はない（このページのコマ: "
+                         f"{', '.join(f.id for f in page.leaf_frames())}）") from exc
     panel = frame.panel or {}
     if kind == "compare":
         cand_id = candidate_id or (panel.get("adopted") or {}).get("art")
@@ -1876,7 +1891,40 @@ def _keep_approved(current: list[dict], incoming: list[dict]) -> tuple[list[dict
     return out, issues
 
 
-def _panel_brief(episode: Episode, page_index: int, frame_id: str | None) -> dict:
+def _candidate_brief(cand: dict) -> dict:
+    """A candidate in a few fields (the full one, with its prompt and hashes, comes with full=true)."""
+    review = cand.get("review") or {}
+    return {k: v for k, v in {
+        "id": cand.get("id"), "status": cand.get("status"), "px": cand.get("px"), "parent": cand.get("parent"),
+        "mode": cand.get("mode"), "upscaled": (cand.get("upscaled") or {}).get("scale"),
+        "rank": (cand.get("metrics") or {}).get("rank"), "score": review.get("score"),
+        "origin": (cand.get("origin") or {}).get("tool_id") or (cand.get("origin") or {}).get("kind"),
+    }.items() if v is not None}
+
+
+def _for_agents(found: list[dict]) -> list[dict]:
+    """Pre-press findings as an agent needs them: the same kind on many pages said once (with the pages and
+    where), and what only a person can decide said so, not as a command-line switch the agent does not have."""
+    out: list[dict] = []
+    grouped: dict[str, dict] = {}
+    for item in found:
+        entry = dict(item)
+        if "--" in str(entry.get("hint") or ""):
+            entry["hint"] = "通すかどうかは人が決める（人が書き出すときに選ぶ）。あなたは直せるものを直すか、人に伝える"
+        if entry.get("code") in ("fixture_image", "upscaled", "provenance_missing"):
+            first = grouped.get(entry["code"])
+            if first is not None:
+                first.setdefault("where", [first["path"]]).append(entry["path"])
+                continue
+            grouped[entry["code"]] = entry
+        out.append(entry)
+    for entry in grouped.values():
+        if entry.get("where"):
+            entry["message"] = f"{entry['message']}（ほか {len(entry['where']) - 1} か所: where）"
+    return out
+
+
+def _panel_brief(episode: Episode, page_index: int, frame_id: str | None, full: bool = False) -> dict:
     page = next(p for p in episode.pages if p.index == page_index)
     frames = [page._find(frame_id)] if frame_id else page.leaf_frames()
     chars = {c.get("id"): c for c in episode.bible.characters}
@@ -1890,7 +1938,7 @@ def _panel_brief(episode: Episode, page_index: int, frame_id: str | None) -> dic
             "frame_id": frame.id,
             "rect_mm": [round(v, 2) for v in (frame.rect.x, frame.rect.y, frame.rect.width, frame.rect.height)],
             "bleed": frame.bleed,
-            "panel": panel,
+            "panel": panel if full else {**panel, "candidates": [_candidate_brief(c) for c in panel.get("candidates", [])]},
             "figures": [{"char": f.char_id, "head_mm": [round(v, 2) for v in f.head], "body_mm": [round(v, 2) for v in f.body]}
                         for f in figures_for(frame)],
             "character_refs": {cid: chars[cid].get("refs", []) for cid in cast if cid in chars},
@@ -1919,7 +1967,8 @@ def _preview(episode: Episode, page_index: int, mode: str, max_px: int, plan: di
         try:
             frame = page._find(frame_id)
         except (KeyError, IndexError) as exc:
-            raise ApplyError(f"{page_index} ページにコマ {frame_id} はない") from exc
+            raise ApplyError(f"{page_index} ページにコマ {frame_id} はない（このページのコマ: "
+                         f"{', '.join(f.id for f in page.leaf_frames())}）") from exc
         longest = max(frame.rect.width, frame.rect.height)
         dpi = max(36, min(600, int(max(64, max_px) / (longest / 25.4))))
         image = render_frame(page, frame_id, dpi, mode="proof" if mode == "name" else mode, episode=episode)

@@ -41,8 +41,11 @@ def slim_schema(node: Any) -> Any:
         return [slim_schema(v) for v in node]
     if not isinstance(node, dict):
         return node
-    out = {k: slim_schema(v) for k, v in node.items()
-           if k != "title" and not (k == "default" and v is None) and not (k == "additionalProperties" and v is True)}
+    out = {k: ({name: slim_schema(sub) for name, sub in v.items()} if k in ("properties", "$defs") and isinstance(v, dict)
+               else slim_schema(v))  # (the argument names themselves are kept, "title" among them)
+           for k, v in node.items()
+           if not (k == "title" and isinstance(v, str)) and not (k == "default" and v is None)
+           and not (k == "additionalProperties" and v is True)}
     options = out.get("anyOf")
     if isinstance(options, list):
         kept = [o for o in options if o != {"type": "null"}]
@@ -180,16 +183,17 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.next, project, limit, claim)
 
     @tool
-    def inspect(project: str, target: str, page: int | None = None, frame_id: str | None = None, op: str | None = None) -> list:
+    def inspect(project: str, target: str, page: int | None = None, frame_id: str | None = None, op: str | None = None,
+                full: bool = False) -> list:
         """読む。target: ops（apply_ops の op の名前の一覧。op に名前〔カンマ区切り〕を渡すとその引数の形） / drawing（op と書き出しの
         詳しい使い方） / bible / script / page（そのページの beat、前後ページ、めくりの位置、定型、コマ一覧） /
-        panel（コマのブリーフ・寸法 mm・候補・登場人物の設定画、frame_id 省略でページ全部） / studio / schemas / rules /
-        snapshot（ページ・レイヤー〔名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照〕・台詞〔書式・フキダシ〕・3D） /
+        panel（コマのブリーフ・寸法 mm・候補の要約〔full=true で全部〕・登場人物の設定画、frame_id 省略でページ全部） / studio / schemas / rules /
+        snapshot（page を渡すとそのページだけ。ページ・レイヤー〔名前・種類・不透明度・合成・マスク・表示色・フォルダ・参照〕・台詞〔書式・フキダシ〕・3D） /
         materials（stamp_material で貼れる素材: id・名前・種類〔トーン・効果線・画像・パーツ・描き文字・ブラシ・3D〕・フォルダ・タグ） / fonts（style.font に使える書体） /
         brushes（add_stroke の kind に使えるブラシ: 入っているもの・この原稿の自作・自分の自作） / upscalers（upscale の method） / plugins（人が入れた
         フィルターのプラグイン: filter_raster の kind に "plugin:<key>"、params は PARAMS のとおり。置き場所は folder:
         Linux は ~/.config/genko/plugins、Windows は %APPDATA%\\genko\\plugins）。"""
-        return call(service.inspect, project, target, page, frame_id, op)
+        return call(service.inspect, project, target, page, frame_id, op, full)
 
     @tool
     def render(project: str, page: int, mode: str = "name", max_px: int = 1024, frame_id: str | None = None,
@@ -295,16 +299,19 @@ def build_server(root: Path, actor: str) -> MCPServer:
     def export(project: str, format: str = "png", pages: list[int] | None = None, dpi: int | None = None,  # noqa: A002
                area: str = "bleed", width: int = 800, max_height: int = 1280, long_edge: int | None = None, jpeg: bool = False,
                spreads: bool = False, color: str = "auto", icc: str | None = None, fps: float = 12,
-               seconds: float | None = None, movie: str = "webp", dots: bool = False) -> list:
-        """書き出し（承認は要らない。正式な書き出しは人だけ）: format は png（既定）/ pdf / tiff / cmyk / layers / psd / pack / epub /
+               seconds: float | None = None, movie: str = "webp", dots: bool = False, screen: dict | None = None) -> list:
+        """書き出し（承認は要らない。正式な書き出しは人だけ）: dpi の既定は 300（見せる・確かめる用。印刷用の本番は人が書き出す）。format は png（既定）/ pdf / tiff / cmyk / layers / psd / pack / epub /
         kindle / strip / webtoon / sns / timelapse / animation。pages でページを選ぶ（例 [3, 4, 5]）。area は paper / bleed / trim。
         pdf・png・tiff の color は auto（既定: モノクロの原稿はグレー、カラーは RGB）/ rgb / cmyk / gray / bitonal（白黒 2 階調）、cmyk と pdf の icc は印刷所の CMYK プロファイル（.icc のパス）。long_edge の既定は kindle 2560・sns 2048。timelapse は記録した制作過程（set_timelapse で記録）を movie（webp / gif / png / mp4）で、fps と
         seconds（全体の長さ）、pages は省略で全ページ（描いた順）か、1 ページだけを [n] で。animation はアニメーションのページ（pages に 1 つ）を movie（gif / webp /
         png / mp4 / frames〔連番 PNG〕）で、width で幅を。書いた先は <原稿>/exports/。
         epub と kindle は仕上がりで切り、トーンを網点にせずグレーで描く（網点を縮めるとモアレが出る）。dots=true で印刷と同じ網点。
-        40 秒で終わらないときは job を返す（書き出しは続いている）。export_status で結果を取る。"""
+        screen（{lpi, angle, shape}）は color bitonal のときグレーを網点にする。
+        40 秒で終わらないときは job を返す（書き出しは続いている）。export_status（wait_s で最大 60 秒待つ）で結果を取る。"""
+        if dpi is None and format in ("png", "pdf", "tiff", "cmyk", "layers", "psd", "pack", "strip"):
+            dpi = 300
         return call(service.export, project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc,
-                    fps, seconds, movie, background=True, dots=dots)
+                    fps, seconds, movie, background=True, dots=dots, screen=screen)
 
     @tool
     def record_chat_approval(project: str, gate: str, message: str, pages: list[int] | None = None,
@@ -316,10 +323,10 @@ def build_server(root: Path, actor: str) -> MCPServer:
         return call(service.record_chat_approval, project, gate, message, pages, character_id, candidate_id, face_box01)
 
     @tool
-    def export_status(project: str, job: str) -> list:
+    def export_status(project: str, job: str, wait_s: float = 60) -> list:
         """export / export_proof / upscale が job を返したとき（40 秒で終わらなかった処理）の様子。status: running / done / failed /
-        lost（Genko が途中で止まった）。done なら result に書き出しの返事（files など）が入る。"""
-        return call(service.export_status, project, job)
+        lost（Genko が途中で止まった）。done なら result に書き出しの返事（files など）が入る。wait_s 秒（最大 60）まで終わるのを待ってから返す。"""
+        return call(service.export_status, project, job, wait_s)
 
     @tool
     def upscale(project: str, page: int, frame_id: str, candidate_id: str | None = None, scale: float | None = None,

@@ -166,8 +166,8 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - 調べる: `inspect` の `snapshot`（レイヤーと台詞の今の設定。`page` でそのページだけ）、`materials`・`fonts`・`brushes`・`plugins`。
 - 見る: `mcp__genko__render`（`mode: print` は印刷と同じ見え方、`layer_id` はそのレイヤーだけ）。
 - 点検: `mcp__genko__check`（人の「入稿前の点検」と同じ一覧）。取り消し: `mcp__genko__undo`（自分の最後の変更だけ）。
-- 書き出し: `mcp__genko__export`（`format` の既定は png。ほかの形式は人に頼まれたときだけ）。承認は要らない。書き出し先は原稿の `exports/`。
-  時間がかかると `job` が返るので、`mcp__genko__export_status`（`job`、`wait_s` で最大 60 秒待てる）で結果を取る。
+- 書き出し: `mcp__genko__export`（`format` の既定は png、`dpi` の既定は 300。ほかの形式は人に頼まれたときだけ）。承認は要らない。書き出し先は原稿の `exports/`。
+  時間がかかると `job` が返るので、`mcp__genko__export_status`（`job`。最大 60 秒、終わるまで待ってから返す）で結果を取る。
 
 ## 承認を頼む
 

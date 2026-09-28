@@ -39,7 +39,7 @@ op ごとの引数の形は `inspect` の `target: "ops"`（`op` に名前）で
 - 点検: `mcp__genko__check` で、人の「入稿前の点検」と同じ問題の一覧を受け取る（`preflight` の結果の `checks` にも入る）。
 - 取り消し: `mcp__genko__undo` で自分の最後の変更を取り消す。最後の変更が人のもの・承認が変わる・`project.json` が Genko の外で書き換えられた、のどれかなら断る。
 - 書き出し: `mcp__genko__export`（`format` の既定は png。ほかの形式は人に頼まれたときだけ: pdf・tiff・cmyk・layers・psd・pack・epub・kindle・strip・webtoon・sns・timelapse、`pages`、`dpi`、`area`: paper・bleed・trim）。承認は要らない。書き出し先は原稿の `exports/`。
-  40 秒で終わらない書き出し（600 dpi の PDF・PNG・PSD など）は `job` を返す。書き出しは続いているので、1〜5 分おいて `mcp__genko__export_status`（`job`）で結果（`result` の `files`）を取る。`upscale` の `job` も同じ。
+  `dpi` の既定は 300（見せる・確かめる用。印刷用の本番は人が書き出す）。40 秒で終わらない書き出しは `job` を返す。書き出しは続いているので、`mcp__genko__export_status`（`job`。既定で最大 60 秒、終わるまで待ってから返す）で結果を取る。
   書き出しは Genko（MCP サーバ）の中で動く。呼び出しごとにサーバを立ち上げて閉じるつなぎ方では、閉じたときに書き出しも止まる。そのときは 90 秒ほどで `status: "lost"` になるので、同じつなぎのまま `export` と `export_status` を続けて呼び直す。
   - `color` の既定 `auto`: モノクロの原稿はグレー（劣化なし）、カラーは RGB。`bitonal` で白黒 2 階調。PDF には仕上がり線（TrimBox）と裁ち落とし（BleedBox）が入る。
   - `cmyk`（CMYK の TIFF）と pdf の `color: "cmyk"` は、`icc` に印刷所の CMYK プロファイル（.icc のパス）を渡すとそれで変換する。無ければ黒は K 版だけ・総インキ量 320% 以内。`color: "gray"` も。
