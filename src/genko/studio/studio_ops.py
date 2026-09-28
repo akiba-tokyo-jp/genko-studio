@@ -28,7 +28,7 @@ STUDIO_OPS = frozenset({
     "approve", "revoke", "request_approval", "request_fix", "add_region", "edit_region", "delete_region",
     "replace_regions", "bind_ref", "unbind_ref", "register_assets", "attach_reference",
     "open_request", "close_request", "import_candidates", "review_candidates", "set_candidate",
-    "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish", "ask_human", "reject_sheet",
+    "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish", "ask_human", "reject_sheet", "withdraw_candidates",
     "set_layout", "propose", "resolve_proposal", "resolve_ticket", "reopen_ticket", "set_style_catalog",
 })
 
@@ -72,6 +72,8 @@ STUDIO_SCHEMA = [
     {"op": "set_finish", "page": "int", "frame_id": "str", "finish": "object|null"},
     {"op": "ask_human", "text": "str", "page": "int?", "frame_id": "str?", "item": "str? (work item kind it blocks)"},
     {"op": "reject_sheet", "character_id": "str", "candidate_ids": "[str]? (all if omitted)", "note": "str (person only)"},
+    {"op": "withdraw_candidates", "character_id": "str? (or location_id)", "location_id": "str?", "candidate_ids": "[str]",
+     "note": "An agent takes back its own sheet candidates a person has not approved (a duplicate, a wrong style): they leave the approval box"},
     {"op": "set_layout", "page": "int", "tree": "{rect_mm, axis?, children?}", "force": "bool?"},
     {"op": "propose", "proposal": "{id?, kind: layout|lines, page, …}"},
     {"op": "resolve_proposal", "id": "str", "status": "accepted|rejected", "note": "str? (person only)"},
@@ -261,11 +263,27 @@ def _frame_from_tree(node: dict) -> Frame:
     x, y, w, h = (float(v) for v in node["rect_mm"])
     frame = Frame(id=new_id(), rect=Rect(round(x, 2), round(y, 2), round(w, 2), round(h, 2)))
     children = node.get("children") or []
-    if children:
-        if node.get("axis") not in ("horizontal", "vertical"):
-            raise _err("a node with children needs axis horizontal or vertical")
+    if children or node.get("axis") == "free":
+        if node.get("axis") not in ("horizontal", "vertical", "free"):
+            raise _err("a node with children needs axis horizontal, vertical or free")
         frame.split_axis = node["axis"]
         frame.children = [_frame_from_tree(child) for child in children]
+        if isinstance(node.get("split"), dict):
+            frame.split = dict(node["split"])
+    # (what a panel looks like travels with it: its shape, border, bleed and corners)
+    if node.get("poly"):
+        frame.poly = [(float(p[0]), float(p[1])) for p in node["poly"]]
+    for key in ("bleed", "clip", "custom"):
+        if key in node:
+            setattr(frame, key, bool(node[key]))
+    if node.get("border_mm") is not None:
+        frame.border_mm = float(node["border_mm"])
+    if isinstance(node.get("curves"), list):
+        frame.curves = [float(v) for v in node["curves"]]
+    if isinstance(node.get("line"), dict):
+        frame.line = dict(node["line"])
+    if node.get("corner_mm"):
+        frame.corner_mm = float(node["corner_mm"])
     return frame
 
 
@@ -404,8 +422,11 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
                     raise _err(f"page {page.index}: panels without adopted art: {', '.join(missing)}")
                 page.art_ok = True
                 style = studio.setdefault("style", {})
-                style.setdefault("locked_from_page", page.id)
-                if "locked" not in style:
+                lock = style.get("locked") or {}
+                if not lock or lock.get("stale") or lock.get("from_page") == page.id:
+                    # (the first approval fixes the style; approving the pilot page again, or the first page
+                    # after a person changed the style, fixes it anew: the old reference is not the style any more)
+                    style["locked_from_page"] = page.id
                     style["locked"] = _style_lock(episode, page, agent)
             _close_tickets(episode, agent, "gate", gate, page=page)
         elif gate == "sheet":
@@ -515,6 +536,8 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
                 region["source"] = source
                 new.append(region)
             panel["regions"] = kept + new
+        if (panel.get("adopted") or {}).get("art"):
+            panel["regions_for"] = panel["adopted"]["art"]  # (the art these faces were reported on)
         _refresh_brief(panel)
         return
 
@@ -541,6 +564,12 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
         if style.get("locked") and not person:
             raise _err("the style is fixed by the pilot page: a person changes the style catalog")
         catalog = op.get("catalog")
+        if style.get("locked") and (style.get("catalog") or {}).get("id") != (catalog or {}).get("id"):
+            # (a person changed the style after the pilot page: its picture no longer shows the style, so it is not
+            # sent as the model; the next page whose art is approved fixes the style again)
+            style["locked"] = {**style["locked"], "reference": None, "stale": True, "rev": episode.revision}
+        if (style.get("catalog") or {}).get("id") != (catalog or {}).get("id"):
+            style["changed_rev"] = episode.revision  # (sheets drawn before this are in the old style)
         if catalog is None:
             style.pop("catalog", None)
         else:
@@ -659,6 +688,11 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
                tuple(op.get("offset_mm") or (0.0, 0.0)), float(op.get("scale") or 1.0), _pad(cand))
         adopted = panel.setdefault("adopted", {})
         history = panel.setdefault("adopt_history", [])
+        if to == "art" and adopted.get("art") and adopted["art"] != cand["id"]:
+            if panel.get("regions") and not panel.get("regions_for"):
+                panel["regions_for"] = adopted["art"]  # (the faces reported so far are where they are in the old art)
+            if page.stage == "finish":
+                page.stage = "ink"  # (the finish was made for the old art: tails, moves and marks are done again)
         if adopted.get(to):
             history.append({"to": to, "candidate": adopted[to]})
         adopted[to] = cand["id"]
@@ -827,6 +861,29 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
             frame.panel["status"] = "adopted" if (frame.panel.get("adopted") or {}).get("art") else "briefed"
         return
 
+    if name == "withdraw_candidates":
+        cid, lid = str(op.get("character_id") or ""), str(op.get("location_id") or "")
+        owner = cid or lid
+        cands = studio.get("character_candidates" if cid else "location_candidates", {}).get(owner, [])
+        if not owner or not cands:
+            raise _err("withdraw_candidates needs character_id (or location_id) with candidates")
+        wanted = [str(v) for v in op.get("candidate_ids") or []]
+        if not wanted:
+            raise _err("candidate_ids: the candidates to take back, e.g. [\"cd_…\"]")
+        item = _by_id(episode.bible.characters, cid) if cid else _by_id(studio.get("locations", []), lid)
+        approved = {r.get("asset") for r in (item or {}).get("refs", []) if r.get("kind") in ("sheet", "face")}
+        for key in wanted:
+            cand = _by_id(cands, key)
+            if cand is None:
+                raise _err(f"no candidate {key} for {owner} (its candidates: {', '.join(c['id'] for c in cands)})")
+            if cand["asset"] in approved and not person:
+                raise _err(f"{key} is the approved sheet: only a person changes it")
+            if not person and (cand.get("origin") or {}).get("actor") not in (None, agent):
+                raise _err(f"{key} came from {(cand.get('origin') or {}).get('actor')}: an agent takes back only its own")
+            cand["status"] = "withdrawn"
+            cand["withdrawn_by"] = agent
+        return
+
     if name == "reject_sheet":
         if not person:
             raise _err("reject_sheet needs a person")
@@ -926,6 +983,7 @@ def _import_candidates(episode: Episode, op: dict, agent: str) -> None:
             "origin": origin,
             "px": [int(px[0]), int(px[1])],
             "status": "candidate",
+            "rev": episode.revision,
             **({"metrics": item["metrics"]} if isinstance(item.get("metrics"), dict) else {}),
             **({"face_box01": [float(v) for v in item["face_box01"]]} if item.get("face_box01") else {}),
             **({"mapping": item["mapping"]} if isinstance(item.get("mapping"), dict) else {}),
@@ -935,8 +993,19 @@ def _import_candidates(episode: Episode, op: dict, agent: str) -> None:
         key = "character_candidates" if target.get("character_id") else "location_candidates"
         owner = target.get("character_id") or target.get("location_id")
         bucket = studio.setdefault(key, {}).setdefault(owner, [])
-        known = {c["asset"] for c in bucket}
-        bucket.extend(c for c in prepared if c["asset"] not in known)
+        known = {c["asset"]: c for c in bucket}
+        for cand in prepared:
+            same = known.get(cand["asset"])
+            if same is None:
+                bucket.append(cand)
+                continue
+            # (the same picture again: the old entry takes what is new about it, a face box above all, and is
+            # a candidate again; no second entry for one picture)
+            for key in ("face_box01", "metrics", "mapping"):
+                if key in cand:
+                    same[key] = cand[key]
+            if same.get("status") == "withdrawn":
+                same["status"] = "candidate"
         if request is not None:
             request["status"] = "done"
         if target.get("character_id"):

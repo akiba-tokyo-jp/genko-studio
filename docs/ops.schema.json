@@ -34,7 +34,8 @@
       "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)",
       "curves": "[mm per edge] | null? (edges bowed out +, in -; edge i runs from corner i: top, right, bottom, left for a rectangle)",
       "bow": "{edge, mm}? (one edge)",
-      "line": "{kind: solid|double|dashed|dotted|rough, rgb?, gap_mm?, dash_mm?, wobble_mm?} | null? (the border's look)"
+      "line": "{kind: solid|double|dashed|dotted|rough, rgb?, gap_mm?, dash_mm?, wobble_mm?} | null? (the border's look)",
+      "corner_mm": "float? (角の丸み: corner radius, 0 sharp)"
     },
     {
       "op": "cut_frame",
@@ -161,6 +162,7 @@
       "lock_alpha": "bool?",
       "locked": "bool?",
       "panel_clip": "bool? (false: lines run out of the panels)",
+      "panel_each": "bool? (true: each line stays in the panel it begins in)",
       "name": "str?",
       "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)",
       "reference": "bool? (fills with reference: reference look at this layer)",
@@ -399,6 +401,7 @@
       "exportable": "bool?",
       "reference": "bool?",
       "panel_clip": "bool?",
+      "panel_each": "bool?",
       "color_prints": "bool?",
       "effect": "object|null?"
     },
@@ -601,12 +604,30 @@
       "folder": "bool?",
       "parent": "str?",
       "after": "layer id?",
-      "id": "str?"
+      "id": "str?",
+      "panel_each": "bool? (pen and paint: true by default, each line stays in the panel it begins in)"
     },
     {
       "op": "delete_layer",
       "page": "int",
       "id": "str"
+    },
+    {
+      "op": "add_frame",
+      "page": "int",
+      "rect": "[x, y, w, h]? (mm)",
+      "points": "[[x, y], …]? (a polygon or a freehand outline, mm)",
+      "border_mm": "float?",
+      "tolerance_mm": "float? (freehand: how much jitter to drop, 0.4)",
+      "id": "str?",
+      "note": "draw a panel (コマを描く): the page's first drawn panel replaces the basic frame; drawn panels keep their own places (no gutters)"
+    },
+    {
+      "op": "delete_frame",
+      "page": "int",
+      "frame_id": "str",
+      "force": "bool? (placed art goes to studio.orphans)",
+      "note": "one panel goes; the others stay where they are"
     },
     {
       "op": "gradient_fill",
@@ -1259,6 +1280,13 @@
       "character_id": "str",
       "candidate_ids": "[str]? (all if omitted)",
       "note": "str (person only)"
+    },
+    {
+      "op": "withdraw_candidates",
+      "character_id": "str? (or location_id)",
+      "location_id": "str?",
+      "candidate_ids": "[str]",
+      "note": "An agent takes back its own sheet candidates a person has not approved (a duplicate, a wrong style): they leave the approval box"
     },
     {
       "op": "set_layout",

@@ -16,7 +16,7 @@ NAMES = {
     "add_stroke": "ペンで描いた", "erase": "消しゴムで消した", "fill": "塗りつぶした", "fill_area": "囲って塗った",
     "delete_area": "範囲を消した", "transform_area": "範囲を動かした・変形した", "paste": "貼り付けた",
     "set_stroke_width": "線の太さを変えた", "reshape_stroke": "線を修正した",
-    "split_frame": "コマを割った", "cut_frame": "コマを割った", "merge_frame": "コマを結合した", "move_gutter": "コマの間を動かした",
+    "split_frame": "コマを割った", "cut_frame": "コマを割った", "merge_frame": "コマを結合した", "add_frame": "コマを描いた", "delete_frame": "コマを消した", "move_gutter": "コマの間を動かした",
     "set_frame": "コマの形を変えた", "apply_template": "テンプレートでコマを割った", "set_border": "枠線を変えた",
     "add_line": "台詞を入れた", "edit_line": "台詞を直した", "move_line": "フキダシを動かした", "delete_line": "台詞を消した",
     "reorder_lines": "台詞の順番を変えた", "set_balloon_path": "フキダシの形を描いた",

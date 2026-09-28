@@ -124,6 +124,13 @@ def page_issues(episode, page) -> list[dict]:
         if xs and (min(xs) < b.x - 1 or min(ys) < b.y - 1 or max(xs) > b.x + b.width + 1 or max(ys) > b.y + b.height + 1):
             out.append(_issue("warning", "art_outside_page", page, f"「{label}」の絵が裁ち落としの外まで出ている（はみ出た所は印刷されない）",
                               (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)), "layer", layer.id))
+    from genko.studio.finish import regions_stale
+
+    for frame in page.leaf_frames():
+        if frame.panel and regions_stale(frame.panel):
+            out.append(_issue("warning", "regions_stale", page,
+                              f"{page.index} ページのコマ {frame.panel.get('slot') or frame.id} の顔の位置は、差し替える前の絵のもの"
+                              "（report_regions で送り直し、仕上げをやり直す）", None, "frame", frame.id))
     out.extend(_moire(page))
     if page.spread_with:
         from genko.ops import facing_problem
@@ -155,6 +162,8 @@ def _cut_faces(page) -> list[dict]:
     for frame in page.leaf_frames():
         panel = frame.panel or {}
         box = clip_box(page, frame, "bleed" if frame.bleed else "frame")
+        faces = [r for r in panel.get("regions", []) if r.get("kind") in ("face", "head")
+                 and isinstance(r.get("rect_mm"), (list, tuple)) and len(r["rect_mm"]) == 4]
         for region in panel.get("regions", []):
             rect = region.get("rect_mm")
             if region.get("kind") not in ("face", "head", "person", "body") or not isinstance(rect, (list, tuple)) or len(rect) != 4:
@@ -166,6 +175,9 @@ def _cut_faces(page) -> list[dict]:
             face = region.get("kind") in ("face", "head")
             if worst <= (0.5 if face else max(3.0, 0.15 * max(w, h))):
                 continue
+            if not face and any((region.get("char") and f.get("char") == region.get("char"))
+                                or _overlap((x, y, w, h), tuple(float(v) for v in f["rect_mm"])) > 0 for f in faces):
+                continue  # (a body cut by the edge with its face inside: the usual framing, the face is checked alone)
             dx = (left if left > 0 else 0) - (right if right > 0 else 0)
             dy = (top if top > 0 else 0) - (bottom if bottom > 0 else 0)
             who = region.get("char") or ""

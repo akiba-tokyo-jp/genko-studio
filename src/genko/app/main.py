@@ -622,6 +622,10 @@ class LayerPanel(QWidget):
         self.overhang = QCheckBox("コマの外にもはみ出す")
         self.overhang.setToolTip("このレイヤーの線を、コマの枠で切らずに間の白や外まで描きます")
         self.overhang.clicked.connect(lambda on: self._set("panel_clip", not on))
+        self.each_panel = QCheckBox("描き始めたコマの中だけに描く")
+        self.each_panel.setToolTip("線を、描き始めたコマの枠で切ります（となりのコマにはみ出さない）。"
+                                   "外すと、どのコマの中にも描けます")
+        self.each_panel.clicked.connect(lambda on: self._set("panel_each", on))
         add_pen = theme.iconic(QPushButton("＋ペン"), "pen_layer", "ペン", "ペンのレイヤーを足す（線が拡大してもなめらか）")
         add_pen.setToolTip("線を描くレイヤー（線はあとから消しゴムで切れる）")
         add_pen.clicked.connect(lambda: self._add("pen", "ペン"))
@@ -779,7 +783,7 @@ class LayerPanel(QWidget):
         dl.setSpacing(3)
         dl.addWidget(self.name)
         dl.addLayout(props)
-        for box in (self.clip, self.protect, self.locked, self.overhang, self.draft, self.reference):
+        for box in (self.clip, self.protect, self.locked, self.each_panel, self.overhang, self.draft, self.reference):
             dl.addWidget(box)
         dl.addWidget(self.tint)
         mrow = QHBoxLayout()
@@ -891,6 +895,8 @@ class LayerPanel(QWidget):
         self.protect.setChecked(bool(layer.lock_alpha))
         self.locked.setChecked(bool(getattr(layer, "locked", False)))
         self.overhang.setChecked(not getattr(layer, "panel_clip", True))
+        self.each_panel.setChecked(bool(getattr(layer, "panel_each", False)))
+        self.each_panel.setEnabled(getattr(layer, "panel_clip", True))
         self.draft.setChecked(not layer.exportable)
         self.reference.setChecked(bool(getattr(layer, "reference", False)))
         self.draft.setEnabled(layer.role not in (LayerRole.NAME, LayerRole.DRAFT))  # (those never print)
@@ -1388,6 +1394,7 @@ class MainWindow(QMainWindow):
         self.canvas.cutRequested.connect(self._cut_frame)
         self.canvas.frameShaped.connect(lambda frame_id, poly: self.apply_ops(
             [{"op": "set_frame", "page": self._current().index, "frame_id": frame_id, "poly": poly}]))
+        self.canvas.frameDrawn.connect(self._frame_drawn)
         self.canvas.frameBowed.connect(lambda frame_id, edge, mm: self.apply_ops(
             [{"op": "set_frame", "page": self._current().index, "frame_id": frame_id, "bow": {"edge": edge, "mm": mm}}]))
         self.canvas.colourPicked.connect(self._on_colour_picked)
@@ -1891,6 +1898,8 @@ class MainWindow(QMainWindow):
         self.act_ruler_layer = a("選んだ定規をこのレイヤー専用にする／戻す", self._ruler_to_target_layer,
                                  tip="描く先のレイヤーを描いている時だけ、その定規が見えて効きます")
         self.act_ruler_pen = a("選んだ定規の線を描く（定規ペン）", self._ruler_pen, tip="定規そのものを、描く先のレイヤーにペンの線で描きます")
+        self.act_ruler_frame = a("選んだ定規でコマを割る・作る", self._ruler_frame,
+                                 tip="直線の定規: その線でコマを割ります。円・閉じた曲線の定規: その形のコマを作ります")
         self.act_ruler_fix = a("選んだ定規を固定する／外す", lambda: self._ruler_flag("fixed"), tip="点を動かせないようにします")
         self.act_ruler_horizon = a("パースの目の高さを固定する／外す", lambda: self._ruler_flag("lock_horizon"),
                                    tip="消失点を動かしても、アイレベル（目の高さ）の上を滑るだけにします")
@@ -1934,8 +1943,14 @@ class MainWindow(QMainWindow):
         self.act_split_h = a("コマを横に割る（上下に分ける）", lambda: self._split("horizontal"), "Ctrl+Shift+H")
         self.act_split_v = a("コマを縦に割る（左右に分ける）", lambda: self._split("vertical"), "Ctrl+Shift+V")
         self.act_merge = a("コマを結合（割る前に戻す）", self._merge, "Ctrl+Shift+M")
+        self.act_delete_frame = a("このコマを消す（ほかのコマはそのまま）", self._delete_frame)
+        self.act_frame_selection = a("このコマを選択範囲にする", self._frame_to_selection,
+                                     tip="選んだコマの形を選択範囲にします（塗りつぶし・トーン・消去をコマの中だけに）")
         self.act_gutters = a("コマ間隔の設定…", self._gutter_settings, tip="新しく割るときの上下・左右の間隔")
         self.act_border = a("選んだコマの枠線の太さ…", self._border_width)
+        self.act_corner = a("選んだコマの角の丸み…", self._corner_radius, tip="角を丸くします（0 で角ばる）")
+        self.act_border_detail = a("枠線の間隔・破線の長さ・揺れ…", self._border_detail,
+                                   tip="二重線の 2 本の間・破線と点線の長さと間・手描き風の揺れを決めます")
         self.act_no_border = a("選んだコマの枠線をなくす", lambda: self._set_selected_frame({"border_mm": 0}))
         self.act_bleed = a("選んだコマを断ち切りにする（紙の端まで）", self._toggle_bleed)
         self.act_reset_shape = a("選んだコマの形を元に戻す", lambda: self._set_selected_frame({"poly": None, "curves": None}))
@@ -1946,6 +1961,8 @@ class MainWindow(QMainWindow):
         self.act_frame_numbers = a("コマ番号（読み順）を表示", self._toggle_frame_numbers, tip="コマの読み順を番号で見ます（印刷には出ません）",
                                    checkable=True)
         self.act_template = a("テンプレートでコマを割る…", self._templates, tip="今のページのコマと台詞を作り直します")
+        self.act_save_template = a("今のコマ割りをテンプレートに残す…", self._save_template,
+                                   tip="このページのコマ割り（形・枠線・断ち切り・角の丸み）を、自分のテンプレートとして残します")
         self.act_add_page = a("ページを追加（この後ろに）", self._add_page)
         self.act_del_page = a("このページを消す…", self._del_page)
         self.act_dup_page = a("このページを複製", lambda: self._current() and self.duplicate_page(self._current().index))
@@ -2013,7 +2030,7 @@ class MainWindow(QMainWindow):
                         ("sub", "トーン・効果線", [self.act_tone_here, self.act_tone_click, None, *self.effect_actions, None,
                                               self.act_effect_within, self.act_effect_avoid, self.act_effect_clear, None, self.act_materials]),
                         ("sub", "定規", [*self.ruler_actions, None, self.act_snap, self.act_show_rulers, self.act_del_ruler,
-                                         self.act_clear_rulers, self.act_ruler_layer, self.act_ruler_pen, self.act_ruler_fix, self.act_ruler_horizon,
+                                         self.act_clear_rulers, self.act_ruler_layer, self.act_ruler_pen, self.act_ruler_frame, self.act_ruler_fix, self.act_ruler_horizon,
                                          None, self.act_grid, self.act_grid_snap, self.act_grid_mm]),
                         ("sub", "3D", [self.act_add_figure, self.act_add_stick, self.act_add_head, self.act_add_hand, self.act_add_box,
                                        self.act_add_cylinder, self.act_add_stairs, self.act_add_floor, "scenes", self.act_import_obj, "poses",
@@ -2031,8 +2048,9 @@ class MainWindow(QMainWindow):
             # the book: its pages, and under them the panels and the lines
             ("ページ", [self.act_add_page, self.act_dup_page, self.act_del_page, None, self.act_page_up, self.act_page_down, self.act_spread,
                         None, self.act_paper, self.act_style, self.act_nombre, self.act_page_nombre, self.act_add_cover, self.act_assignee, self.act_timeline, None,
-                        ("sub", "コマ", [self.act_split_h, self.act_split_v, self.act_merge, None, self.act_template, None,
-                                         self.act_gutters, self.act_border, self.act_no_border, *self.border_kind_actions, self.act_border_colour,
+                        ("sub", "コマ", [self.act_split_h, self.act_split_v, self.act_merge, self.act_delete_frame, self.act_frame_selection, None, self.act_template, self.act_save_template, None,
+                                         self.act_gutters, self.act_border, self.act_no_border, *self.border_kind_actions, self.act_border_detail,
+                                         self.act_border_colour, self.act_corner,
                                          self.act_bleed, self.act_reset_shape, None, self.act_frame_numbers]),
                         ("sub", "台詞", [self.act_line_type, self.act_balloon_pen, None, self.act_line_edit, self.act_line_wrap, "shapes",
                                          self.act_line_delete]),
@@ -2504,9 +2522,18 @@ class MainWindow(QMainWindow):
         frame_note = QLabel("コマを選ぶと、辺の中ほどの ◇ をドラッグで辺を曲げられます（外へふくらむ・内へへこむ）。")
         frame_note.setWordWrap(True)
         theme.hint(frame_note)
-        ts.add(("frame",), action_page(["割る", self.act_split_h, self.act_split_v, self.act_merge, self.act_template, self.act_gutters,
-                                        "枠線", self.act_border, self.act_no_border,
-                                        menu_button("枠線の種類・色", [self.border_kind_actions, [self.act_border_colour]]),
+        self.frame_mode = QComboBox()
+        for label, key in (("ドラッグで割る", "cut"), ("長方形を描く", "rect"), ("折れ線で描く", "poly"), ("フリーハンドで描く", "free")):
+            self.frame_mode.addItem(label, key)
+        self.frame_mode.setToolTip("描く: 空いた所に新しいコマを描きます（折れ線は角をクリック、最初の角のクリック・Enter・"
+                                   "ダブルクリックで閉じる）。最初に描いたコマは基本枠と入れ替わります")
+        self.frame_mode.activated.connect(lambda _: setattr(self.canvas, "frame_mode", self.frame_mode.currentData()))
+        self.frame_mode.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.frame_mode.setMinimumContentsLength(6)
+        ts.add(("frame",), action_page(["作り方", self.frame_mode, "割る", self.act_split_h, self.act_split_v, self.act_merge, self.act_delete_frame, self.act_frame_selection, self.act_template, self.act_save_template,
+                                        self.act_gutters, "枠線", self.act_border, self.act_no_border,
+                                        menu_button("枠線の種類・色", [self.border_kind_actions, [self.act_border_detail, self.act_border_colour]]),
+                                        self.act_corner,
                                         "形", self.act_bleed, self.act_reset_shape, self.act_frame_numbers,
                                         "原稿", self.act_paper, frame_note]))
         from PySide6.QtWidgets import QCheckBox as _Check
@@ -2643,7 +2670,7 @@ class MainWindow(QMainWindow):
         ts.add(("reshape",), radius_page)
         ts.add(("ruler",), action_page(["定規", menu_button("定規の種類", [self.ruler_actions[:5], self.ruler_actions[5:8],
                                                                   self.ruler_actions[8:10], self.ruler_actions[10:]]),
-                                        menu_button("選んだ定規", [[self.act_ruler_layer, self.act_ruler_pen],
+                                        menu_button("選んだ定規", [[self.act_ruler_layer, self.act_ruler_pen, self.act_ruler_frame],
                                                                   [self.act_ruler_fix, self.act_ruler_horizon]]),
                                         self.act_del_ruler, self.act_clear_rulers,
                                         "吸着と表示", self.act_snap, self.act_show_rulers,
@@ -4101,6 +4128,48 @@ class MainWindow(QMainWindow):
             self.apply_ops([{"op": "ruler_to_layer", "page": page.index, "id": ruler["id"], "layer_id": layer.id,
                              "width_mm": max(0.1, self.brush.size.value()), "rgb": list(self.brush.rgb)}])
 
+    def _ruler_frame(self) -> None:
+        """A straight ruler cuts the panel it crosses; a circle or a closed curve becomes a panel of its shape."""
+        import math
+
+        from genko import rulers
+
+        page, ruler = self._selected_ruler()
+        if ruler is None:
+            return
+        lines = rulers.outline(ruler, (page.spec.width_mm, page.spec.height_mm))
+        if ruler["kind"] == "line" and lines:
+            (x0, y0), (x1, y1) = lines[0][0], lines[0][-1]
+            target = page.frame_at((x0 + x1) / 2, (y0 + y1) / 2) or page.frame_at(x0, y0) or page.frame_at(x1, y1)
+            if target is None:
+                self.flash("定規の線がどのコマにもかかっていません", 5000)
+                return
+            self.apply_ops([{"op": "cut_frame", "page": page.index, "frame_id": target.id,
+                             "p0": [round(x0, 2), round(y0, 2)], "p1": [round(x1, 2), round(y1, 2)]}])
+            return
+        closed = lines and len(lines[0]) > 3 and math.dist(lines[0][0], lines[0][-1]) < 1.0
+        if not closed:
+            self.flash("コマにできるのは、直線（割る）か、円・閉じた曲線（その形のコマ）の定規です", 6000)
+            return
+        self.apply_ops([{"op": "add_frame", "page": page.index, "points": [[round(x, 2), round(y, 2)] for x, y in lines[0][:-1]],
+                         "tolerance_mm": 0.15}])
+
+    def _frame_to_selection(self) -> None:
+        from genko.frames import outline
+
+        page = self._current()
+        if page is None or not page.selected_frame_id:
+            self.flash("先にコマをクリックして選びます（コマツールか選択ツール）", 6000)
+            return
+        try:
+            frame = page._find(page.selected_frame_id)
+        except KeyError:
+            return
+        if self.canvas.tool != "marquee":
+            self._tool("rect")
+        self.canvas.set_selection({"poly": [[round(x, 3), round(y, 3)] for x, y in outline(frame)]})
+        self.flash("コマの形を選択範囲にしました", 3000)
+
     def _ruler_flag(self, key: str) -> None:
         page, ruler = self._selected_ruler()
         if ruler is not None:
@@ -4727,6 +4796,8 @@ class MainWindow(QMainWindow):
             menu.addAction(self.act_split_h)
             menu.addAction(self.act_split_v)
             menu.addAction(self.act_merge)
+            menu.addAction(self.act_delete_frame)
+            menu.addAction(self.act_frame_selection)
             menu.addSeparator()
             show = menu.addAction("このコマの詳細を見る")
             show.triggered.connect(lambda: self.show_dock("コマの詳細"))
@@ -4837,6 +4908,59 @@ class MainWindow(QMainWindow):
         if ok:
             self._set_selected_frame({"border_mm": value})
 
+    def _corner_radius(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        frame = self.selected_frame()
+        if frame is None:
+            self.flash("先にコマをクリックして選びます", 6000)
+            return
+        value, ok = QInputDialog.getDouble(self, "角の丸み", "角の丸み（半径 mm、0 で角ばる）",
+                                           float(getattr(frame, "corner_mm", 0) or 0), 0.0, 50.0, 1)
+        if ok:
+            self._set_selected_frame({"corner_mm": value})
+
+    def _border_detail(self) -> None:
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout
+
+        frame = self.selected_frame()
+        if frame is None:
+            self.flash("先にコマをクリックして選びます", 6000)
+            return
+        style = dict(frame.line or {"kind": "solid"})
+        width = float(frame.border_mm if frame.border_mm is not None else 0.8)
+        kind = style.get("kind", "solid")
+        dialog = QDialog(self)
+        dialog.setWindowTitle("枠線の間隔・長さ・揺れ")
+        form = QFormLayout(dialog)
+        fields = {}
+        for key, label, lo, hi, now in (
+                ("gap_mm", "二重線の間・破線と点線の間（mm）", 0.1, 10.0,
+                 style.get("gap_mm", 1.8 if kind == "dashed" else (max(0.6, width) if kind == "double" else max(1.0, width * 2.2)))),
+                ("dash_mm", "破線の長さ（mm）", 0.01, 30.0, style.get("dash_mm", 3.0)),
+                ("wobble_mm", "手描き風の揺れ（mm）", 0.0, 3.0, style.get("wobble_mm", 0.35))):
+            box = QDoubleSpinBox()
+            box.setRange(lo, hi)
+            box.setDecimals(2)
+            box.setSingleStep(0.1)
+            box.setValue(float(now))
+            form.addRow(label, box)
+            fields[key] = box
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        wanted = {"gap_mm": kind in ("double", "dashed", "dotted"), "dash_mm": kind == "dashed", "wobble_mm": kind == "rough"}
+        for key, box in fields.items():
+            if wanted[key]:
+                style[key] = round(box.value(), 2)
+        if not any(wanted.values()):
+            self.flash("実線には間隔も長さもありません。先に枠線の種類（二重線・破線・点線・手描き風）を選びます", 6000)
+            return
+        self._set_selected_frame({"line": style})
+
     def _border_kind(self, kind: str) -> None:
         frame = self.selected_frame()
         if frame is None:
@@ -4871,6 +4995,24 @@ class MainWindow(QMainWindow):
         self._set_selected_frame({"bleed": not frame.bleed})
         self.flash("断ち切りにしました（紙の端に接する辺は枠線なし）" if not frame.bleed else "断ち切りをやめました")
 
+    def _save_template(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        from genko.studio import layout
+
+        page = self._current()
+        if page is None:
+            return
+        name, ok = QInputDialog.getText(self, "テンプレートに残す", "テンプレートの名前", text=f"{self.episode.title or '無題'} {page.index} ページ")
+        name = name.strip()
+        if not ok or not name:
+            return
+        if any(t.get("name") == name for t in layout.user_templates()) and QMessageBox.question(
+                self, "Genko", f"「{name}」はもうあります。置き換えますか？") != QMessageBox.StandardButton.Yes:
+            return
+        layout.save_user_template(name, page)
+        self.flash(f"コマ割りを「{name}」として残しました（テンプレートでコマを割る… の最初に出ます）", 6000)
+
     def _templates(self) -> None:
         from genko.app.dialogs import TemplateDialog
 
@@ -4885,6 +5027,30 @@ class MainWindow(QMainWindow):
                 != QMessageBox.StandardButton.Yes:
             return
         self.apply_ops(dialog.ops)
+
+    def _frame_drawn(self, points) -> None:
+        """A panel drawn with the panel tool (長方形・折れ線・フリーハンド)."""
+        page = self._current()
+        if page is None:
+            return
+        rect = len(points) == 4 and points[0][1] == points[1][1] and points[1][0] == points[2][0]
+        op = {"op": "add_frame", "page": page.index}
+        if rect:
+            x0, y0 = points[0]
+            x1, y1 = points[2]
+            op["rect"] = [x0, y0, round(x1 - x0, 2), round(y1 - y0, 2)]
+        else:
+            op["points"] = points
+        first = not (page.frames and page.frames[0].split_axis == "free")
+        if self.apply_ops([op]) and first:
+            self.flash("コマを描きました。最初に描いたコマは、元の基本枠と入れ替わります（元に戻す: Ctrl+Z）", 6000)
+
+    def _delete_frame(self) -> None:
+        page = self._current()
+        if page is None or not page.selected_frame_id:
+            self.flash("先にコマをクリックして選びます（コマツールか選択ツール）", 6000)
+            return
+        self.apply_ops([{"op": "delete_frame", "page": page.index, "frame_id": page.selected_frame_id}])
 
     def _merge(self) -> None:
         page = self._current()
@@ -4972,6 +5138,13 @@ class MainWindow(QMainWindow):
         warn = ""
         if data.get("expression") == "mono" and self.episode.spec.expression == "color":
             warn = "\n\nこの絵柄は白黒用です。カラーの原稿では、絵の依頼に使われません。"
+        try:
+            same = stylecat.namesakes(data.get("id") or style_id, str(data.get("title") or ""))
+        except stylecat.CatalogError:
+            same = []
+        if same:
+            ask = True
+            warn += "\n\n同じ名前の絵柄がほかの分類にもあります: " + "、".join(" › ".join(map(str, o.get("path") or [])) for o in same)
         locked = (self.episode.studio.get("style") or {}).get("locked")
         if locked:
             warn += f"\n\n絵柄は {locked.get('page')} ページの試しで固定されています。変えると、この後の絵の依頼が新しい絵柄になります。"
@@ -4992,7 +5165,9 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
         if not self.apply_ops([{"op": "set_style_catalog", "catalog": kept}]):
             return False
-        self.flash(f"絵柄を「{where}」にしました（版 {kept.get('version')}）。この後の絵の依頼に入ります", 6000)
+        sheets = [c.get("name") or c.get("id") for c in self.episode.bible.characters if c.get("locked")]
+        after = f"。承認済みの設定画（{'、'.join(map(str, sheets[:3]))}{' ほか' if len(sheets) > 3 else ''}）は前の絵柄のままです" if locked and sheets else ""
+        self.flash(f"絵柄を「{where}」にしました（版 {kept.get('version')}）。この後の絵の依頼に入ります{after}", 8000)
         return True
 
     def _first_steps_bar(self) -> QWidget:

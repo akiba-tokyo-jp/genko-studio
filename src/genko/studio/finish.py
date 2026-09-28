@@ -1,11 +1,13 @@
 """finish_page: the deterministic finishing pass after the art is approved.
 
-1. Balloons that cover a reported face move to the best free spot in their
-   panel (same search as the name lettering, with the reported regions as
-   figures). Reading order inside the panel is kept.
+1. Balloons that cover the eyes, nose or mouth of a reported face move to the best free spot in their
+   panel (same search as the name lettering, with the reported regions as figures). Reading order inside
+   the panel is kept. A balloon nearer another face than its speaker's is only suggested a spot (the
+   drawing may have people the regions do not list). Faces reported on art replaced since are not used.
 2. `panel.fx` words (studio/fxwords.py) become effects clipped to the panel (集中線, 流線, フラッシュ…), manga
-   marks next to the panel's first reported face (汗, 怒り…) or rain streaks over it, once each. Words drawn by
-   the image tool (水しぶき…) and unknown words are noted, not drawn.
+   marks next to the panel's first reported face (汗, 怒り…) or rain streaks over it, once each, each mark on
+   its own layer (deleted alone when the art has it already). Words drawn by the image tool (水しぶき…) and
+   unknown words are noted, not drawn.
 3. The page advances to finish.
 """
 
@@ -20,6 +22,19 @@ from genko.studio.letter import _find_spot, _gap, _overlap, tail_to
 FX_LAYER = "効果（仕上げ）"
 FACE_KINDS = ("face", "head")
 BODY_KINDS = ("person", "body")
+
+
+def regions_stale(panel: dict) -> bool:
+    """The faces were reported on art that is no longer the adopted one (the art was replaced since)."""
+    art = (panel.get("adopted") or {}).get("art")
+    return bool(panel.get("regions") and panel.get("regions_for") and art and panel["regions_for"] != art)
+
+
+def face_core(head: tuple) -> tuple:
+    """The part of a reported head a balloon must not cover: eyes, nose and mouth. A head box takes in the hair
+    and some room around it, so a balloon touching its top or sides still leaves the face readable."""
+    x, y, w, h = head
+    return (x + w * 0.15, y + h * 0.3, w * 0.7, h * 0.62)
 
 
 def region_figures(panel: dict) -> list[Figure]:
@@ -37,12 +52,13 @@ def region_figures(panel: dict) -> list[Figure]:
     return figures
 
 
-def _fx_layer(page: Page, ops: list[dict]) -> tuple[list[dict], str]:
-    """The page's pen layer for finishing marks and rain (made once, on top)."""
-    layer_id = f"fx-{page.id}"[:40]
+def _fx_layer(page: Page, ops: list[dict], frame=None, word: str = "") -> tuple[list[dict], str]:
+    """A pen layer on top for one finishing mark or one panel's rain (its own layer, so each can be deleted alone)."""
+    layer_id = f"fx-{page.id}-{frame.id}-{word}"[:60] if frame is not None else f"fx-{page.id}"[:40]
     if any(layer.id == layer_id for layer in page.layers) or any(op.get("id") == layer_id for op in ops):
         return [], layer_id
-    return [{"op": "add_layer", "page": page.index, "name": FX_LAYER, "kind": "pen", "id": layer_id}], layer_id
+    name = f"{word}（コマ {(frame.panel or {}).get('slot') or frame.id}・仕上げ）" if frame is not None else FX_LAYER
+    return [{"op": "add_layer", "page": page.index, "name": name, "kind": "pen", "id": layer_id}], layer_id
 
 
 def _mark_spot(frame, figs: list[Figure]) -> tuple[float, float, str]:
@@ -117,6 +133,10 @@ def plan(episode: Episode, page: Page) -> tuple[list[dict], list[dict]]:
     for frame in page.leaf_frames():
         panel = frame.panel or {}
         figs = region_figures(panel)
+        if figs and regions_stale(panel):
+            notes.append({"kind": "regions_stale", "frame_id": frame.id,
+                          "why": "顔の位置は差し替える前の絵のもの。report_regions で今の絵の顔を送り直してから仕上げる（このコマの台詞は動かしていない）"})
+            figs = []
         in_frame = [line for line in lines if line.frame_id == frame.id]
         if figs and in_frame:
             rect = (frame.rect.x, frame.rect.y, frame.rect.width, frame.rect.height)
@@ -125,10 +145,20 @@ def plan(episode: Episode, page: Page) -> tuple[list[dict], list[dict]]:
                 box = (line.x_mm, line.y_mm, line.w_mm, line.h_mm)
                 who = str((line.style or {}).get("speaker_id") or "")
                 speaker = next((f for f in figs if who and f.char_id == who), None)
-                covers = any(_overlap(box, f.head) > 0 for f in figs)
+                covers = any(_overlap(box, face_core(f.head)) > 0 for f in figs)
                 misread = speaker is not None and any(_gap(box, f.head) + 1.0 < _gap(box, speaker.head)
                                                       for f in figs if f is not speaker)
-                if covers or misread:
+                if misread and not covers:
+                    # (nearer another face than the speaker's: often the drawing's own layout, and people the
+                    # regions do not list may stand where the search would put it. Suggested, not moved)
+                    spot = _find_spot(rect, (line.w_mm, line.h_mm), placed, figs, who or None)
+                    note = {"kind": "suggest_move", "frame_id": frame.id, "line": line.text[:20], "line_id": line.id,
+                            "from": [round(line.x_mm, 1), round(line.y_mm, 1)],
+                            "why": "話していない人の顔のほうが近い。絵を見て、読み違えるなら move_line で動かす（自動では動かしていない）"}
+                    if spot is not None and not spot[1]:
+                        note["to"] = [round(spot[0][0], 1), round(spot[0][1], 1)]
+                    notes.append(note)
+                if covers:
                     spot = _find_spot(rect, (line.w_mm, line.h_mm), placed, figs, who or None)
                     if spot is not None and not spot[1]:
                         new = spot[0]
@@ -139,12 +169,11 @@ def plan(episode: Episode, page: Page) -> tuple[list[dict], list[dict]]:
                         ops.append(move)
                         notes.append({"kind": "move_line", "frame_id": frame.id, "line": line.text[:20],
                                       "from": [round(line.x_mm, 1), round(line.y_mm, 1)], "to": [round(new[0], 1), round(new[1], 1)],
-                                      "why": "顔にかかっていた" if covers else "話していない人の近くにあった"})
+                                      "why": "顔にかかっていた"})
                         placed.append(new)
                         continue
-                    if covers:
-                        notes.append({"kind": "face_covered", "frame_id": frame.id, "line": line.text[:20],
-                                      "why": "顔を避けて置ける場所が無い。台詞を減らすか人の手で動かす"})
+                    notes.append({"kind": "face_covered", "frame_id": frame.id, "line": line.text[:20],
+                                  "why": "目・鼻・口にかかっていて、顔を避けて置ける場所が無い。台詞を減らすか人の手で動かす"})
                 elif speaker is not None and _tailed(line):  # (the tail points at where the speaker really is)
                     tip = tail_to(box, speaker.head, line.balloon or "speech")
                     if tip is not None and (line.tail is None or abs(tip[0] - line.tail[0]) + abs(tip[1] - line.tail[1]) > 1.0):
@@ -196,16 +225,18 @@ def plan(episode: Episode, page: Page) -> tuple[list[dict], list[dict]]:
                 continue
             if word in done:
                 continue
-            layer_ops, layer_id = _fx_layer(page, ops)
+            layer_ops, layer_id = _fx_layer(page, ops, frame, word)
             ops.extend(layer_ops)
+            gone = f"絵に同じ記号がもう描かれていたら delete_layer（id {layer_id}）で消す"
             if found["kind"] == "mark":
                 x, y, why = _mark_spot(frame, figs)
                 ops.append({"op": "stamp_material", "page": page.index, "material_id": f"mark-{found['key']}", "layer_id": layer_id,
                             "x_mm": x, "y_mm": y})
-                notes.append({"kind": "add_mark", "frame_id": frame.id, "mark": found["key"], **({"why": why} if why else {})})
+                notes.append({"kind": "add_mark", "frame_id": frame.id, "mark": found["key"], "layer_id": layer_id,
+                              "why": "。".join(w for w in (why, gone) if w)})
             else:  # rain
                 ops.extend(_rain(page, frame, layer_id))
-                notes.append({"kind": "add_rain", "frame_id": frame.id})
+                notes.append({"kind": "add_rain", "frame_id": frame.id, "layer_id": layer_id, "why": gone.replace("記号", "雨")})
             drawn.append(word)
         if drawn:
             ops.append({"op": "set_panel", "page": page.index, "frame_id": frame.id, "set": {"fx_done": sorted(done | set(drawn))}})

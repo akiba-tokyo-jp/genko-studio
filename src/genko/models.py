@@ -308,6 +308,7 @@ class Layer:
     lock_alpha: bool = False
     locked: bool = False  # nothing can be drawn on or erased from a locked layer
     panel_clip: bool = True  # lines stay inside the panels; False lets them run out (はみ出し)
+    panel_each: bool = False  # each line stays in the panel it begins in (not the next one it runs into)
     # fills and pasted pixels kept at their own resolution over a box:
     # [{"id", "box": [x, y, w, h] mm, "mode": "mask" | "image", "png": bytes, "rgb", "opacity"}]
     patches: list = field(default_factory=list)
@@ -349,6 +350,7 @@ class Frame:
     custom: bool = False  # a person shaped this panel by hand (it keeps its form when the page is re-laid)
     curves: list | None = None  # J6: how far each edge bows out (mm, outward +; edge i runs from corner i)
     line: dict | None = None  # J6: the border's look {kind: solid|double|dashed|dotted|rough, rgb, gap_mm, dash_mm}
+    corner_mm: float = 0.0  # 角の丸み: each corner rounded with this radius (0: sharp)
 
 
 @dataclass
@@ -388,7 +390,7 @@ def default_layers() -> list[Layer]:
     return [
         Layer(id=new_id(), role=LayerRole.BG, kind=LayerKind.FILL, exportable=True),
         Layer(id=new_id(), role=LayerRole.NAME, kind=LayerKind.STROKES, exportable=False),
-        Layer(id=new_id(), role=LayerRole.INK, kind=LayerKind.STROKES, exportable=True),
+        Layer(id=new_id(), role=LayerRole.INK, kind=LayerKind.STROKES, exportable=True, panel_each=True),
         Layer(id=new_id(), role=LayerRole.FINISH, kind=LayerKind.STROKES, exportable=True),
     ]
 
@@ -519,7 +521,11 @@ class Page:
 
         children = list(frame.children)
         # by the middle of each child (slanted panels' boxes overlap): right to left, top to bottom
-        if frame.split_axis == "vertical":
+        if frame.split_axis == "free":
+            from genko.frames import reading_order
+
+            children = reading_order(children, self.binding == Binding.RIGHT)
+        elif frame.split_axis == "vertical":
             children.sort(key=lambda child: -centroid(shape(child))[0])
         else:
             children.sort(key=lambda child: centroid(shape(child))[1])

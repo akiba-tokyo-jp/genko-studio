@@ -93,12 +93,53 @@ def curves_of(frame: Frame, points: list[Point] | None = None) -> list[float] | 
     return [float(c) for c in curves]
 
 
+def rounded(frame: Frame) -> bool:
+    """Whether the panel's outline is not just its corners: bowed edges or rounded corners."""
+    return curves_of(frame) is not None or float(getattr(frame, "corner_mm", 0) or 0) > 0
+
+
+def _round_corners(pts: list[Point], radius: float) -> list[Point]:
+    """Each corner cut back along both edges and joined by a round (a quarter circle at a right angle)."""
+    out: list[Point] = []
+    n = len(pts)
+    for i, p in enumerate(pts):
+        a, b = pts[i - 1], pts[(i + 1) % n]
+        la, lb = math.dist(p, a), math.dist(p, b)
+        if la < EPS or lb < EPS:
+            out.append(p)
+            continue
+        u = ((a[0] - p[0]) / la, (a[1] - p[1]) / la)
+        v = ((b[0] - p[0]) / lb, (b[1] - p[1]) / lb)
+        cos = max(-1.0, min(1.0, u[0] * v[0] + u[1] * v[1]))
+        half = math.acos(cos) / 2
+        if half < 1e-3 or half > math.pi / 2 - 1e-3:
+            out.append(p)
+            continue
+        t = min(radius / math.tan(half), la / 2, lb / 2)  # (never past the middle of an edge)
+        r = t * math.tan(half)
+        s0 = (p[0] + u[0] * t, p[1] + u[1] * t)
+        s1 = (p[0] + v[0] * t, p[1] + v[1] * t)
+        bis = (u[0] + v[0], u[1] + v[1])
+        bl = math.hypot(*bis) or 1.0
+        d = r / math.sin(half)
+        c = (p[0] + bis[0] / bl * d, p[1] + bis[1] / bl * d)
+        a0 = math.atan2(s0[1] - c[1], s0[0] - c[0])
+        a1 = math.atan2(s1[1] - c[1], s1[0] - c[0])
+        sweep = (a1 - a0 + math.pi) % (2 * math.pi) - math.pi
+        steps = max(3, int(abs(sweep) * r / 0.6))
+        out.extend((c[0] + r * math.cos(a0 + sweep * k / steps), c[1] + r * math.sin(a0 + sweep * k / steps))
+                   for k in range(steps + 1))
+    return out
+
+
 def outline(frame: Frame, step_mm: float = 1.0) -> list[Point]:
-    """The panel's outline: its corners, with each bowed edge (curves, 曲線の枠) walked as a curve."""
+    """The panel's outline: its corners, with each bowed edge (curves, 曲線の枠) walked as a curve, and its
+    corners rounded (角の丸み) when it has no bowed edges."""
     pts = shape(frame)
     curves = curves_of(frame, pts)
     if curves is None:
-        return pts
+        radius = float(getattr(frame, "corner_mm", 0) or 0)
+        return _round_corners(pts, radius) if radius > 0 else pts
     out: list[Point] = []
     for i, a in enumerate(pts):
         out.append(a)
@@ -141,7 +182,7 @@ def offset(points: list[Point], d: float) -> list[Point]:
 
 
 def contains(frame: Frame, x: float, y: float) -> bool:
-    if not getattr(frame, "poly", None) and curves_of(frame) is None:
+    if not getattr(frame, "poly", None) and not rounded(frame):
         return frame.rect.contains(x, y)
     inside = False
     pts = outline(frame)
@@ -259,9 +300,31 @@ def axis_line(node: Frame, axis: str, ratio: float, gutter: float, tilt: float =
     return (x - tilt / 2, r.y), (x + tilt / 2, r.y + r.height)
 
 
+FREE = "free"  # a node whose panels were drawn one by one (not cut): no gutters, each keeps its own shape
+
+
+def is_free(node: Frame) -> bool:
+    return getattr(node, "split_axis", None) == FREE
+
+
+def reading_order(children: list[Frame], right_to_left: bool = True) -> list[Frame]:
+    """Drawn panels in reading order: rows from the top (panels whose middles are within the smaller
+    one's half height share a row), right to left in a row for a right-bound book."""
+    rest = sorted(children, key=lambda c: centroid(shape(c))[1])
+    out: list[Frame] = []
+    while rest:
+        first = rest[0]
+        fy, fh = centroid(shape(first))[1], first.rect.height
+        row = [c for c in rest if abs(centroid(shape(c))[1] - fy) < min(fh, c.rect.height) / 2]
+        row.sort(key=lambda c: centroid(shape(c))[0], reverse=right_to_left)
+        out.extend(row)
+        rest = [c for c in rest if c not in row]
+    return out
+
+
 def remember_split(node: Frame) -> None:
     """Give a two-child axis split (made before cuts were stored) its cut, from its children."""
-    if getattr(node, "split", None) or len(node.children) != 2:
+    if getattr(node, "split", None) or len(node.children) != 2 or is_free(node):
         return
     a, b = node.children
     r = node.rect
@@ -288,6 +351,10 @@ def relayout(node: Frame, points: list[Point] | None = None) -> None:
             points = [_map(old, bbox(points), p) for p in node.poly]  # a free-form panel keeps its form
         set_shape(node, points)
     if not node.children:
+        return
+    if is_free(node):  # drawn panels: each moves and stretches with the node, keeping its form
+        for child in node.children:
+            relayout(child, [_map(old, node.rect, p) for p in shape(child)])
         return
     line = cut_line(node)
     if line is not None and len(node.children) == 2:
@@ -331,6 +398,8 @@ def _relayout_stack(node: Frame, old: Rect) -> None:
 
 def move_gutter(node: Frame, index: int, delta: float, gutter: float | None = None, min_span: float = 8.0) -> None:
     """Move the gutter after child `index` (in position order) by `delta` mm; optionally set its width."""
+    if is_free(node):
+        raise ValueError("drawn panels have no gutter to move: move or reshape the panel itself")
     line = cut_line(node)
     if line is not None and len(node.children) == 2:
         p0, p1, g = line
@@ -389,6 +458,10 @@ def gutters(root: Frame) -> list[dict]:
 
     def walk(node: Frame) -> None:
         if not node.children:
+            return
+        if is_free(node):
+            for child in node.children:
+                walk(child)
             return
         line = cut_line(node)
         if line is not None and len(node.children) == 2:

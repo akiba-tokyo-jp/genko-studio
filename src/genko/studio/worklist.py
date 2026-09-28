@@ -142,6 +142,10 @@ def _regions_done(panel: dict) -> bool:
     cast = [c for c in panel.get("characters", []) if isinstance(c, dict)]
     if not cast:
         return True
+    from genko.studio.finish import regions_stale
+
+    if regions_stale(panel):
+        return False  # (reported on the art it had before: the faces are elsewhere in the new one)
     if any(r.get("kind") in ("face", "head", "person", "body") and r.get("source") in ("agent", "user")
            for r in panel.get("regions", [])):
         return True
@@ -182,7 +186,7 @@ def _art_items(episode: Episode, page, requested: set, requested_sheets: set, pr
                 if cid in requested_sheets:
                     out.append(item("await_human", "キャラクター設定画の承認待ち", ["request_approval"], None,
                                     blocked_by=["requested"], gate="sheet", character_id=cid))
-                elif any(c.get("status") != "rejected" for c in (episode.studio.get("character_candidates") or {}).get(cid, [])):
+                elif any(c.get("status") not in ("rejected", "withdrawn") for c in (episode.studio.get("character_candidates") or {}).get(cid, [])):
                     out.append(item("await_human", "設定画の候補がある。人間に選んで承認してもらう", ["candidates", "request_approval"], None,
                                     blocked_by=["await_human:sheet"], gate="sheet", character_id=cid))
                 else:

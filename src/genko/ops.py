@@ -35,7 +35,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "split_frame", "page": "int", "axis": "horizontal|vertical", "ratio": "float", "gutter_mm": "float", "tilt_mm": "float? (slant: the cut's ends differ by this)", "frame_id": "optional", "force": "bool? (placed art goes to studio.orphans)"},
     {"op": "merge_frame", "page": "int", "frame_id": "str", "force": "bool? (placed art goes to studio.orphans)"},
     {"op": "resize_frame", "page": "int", "frame_id": "str", "rect": "{x,y,width,height}"},
-    {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float? (0: no border)", "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)", "curves": "[mm per edge] | null? (edges bowed out +, in -; edge i runs from corner i: top, right, bottom, left for a rectangle)", "bow": "{edge, mm}? (one edge)", "line": "{kind: solid|double|dashed|dotted|rough, rgb?, gap_mm?, dash_mm?, wobble_mm?} | null? (the border's look)"},
+    {"op": "set_frame", "page": "int", "frame_id": "str", "bleed": "bool?", "clip": "bool?", "border_mm": "float? (0: no border)", "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)", "curves": "[mm per edge] | null? (edges bowed out +, in -; edge i runs from corner i: top, right, bottom, left for a rectangle)", "bow": "{edge, mm}? (one edge)", "line": "{kind: solid|double|dashed|dotted|rough, rgb?, gap_mm?, dash_mm?, wobble_mm?} | null? (the border's look)", "corner_mm": "float? (角の丸み: corner radius, 0 sharp)"},
     {"op": "cut_frame", "page": "int", "frame_id": "str?", "p0": "[x,y]", "p1": "[x,y]", "gutter_mm": "float?", "note": "cut a panel along any line (slanted panels)"},
     {"op": "move_gutter", "page": "int", "frame_id": "str (the split)", "index": "int? (gutter after this child)", "delta_mm": "float", "gutter_mm": "float? (new width)"},
     {"op": "add_line", "page": "int", "text": "str", "speaker": "optional", "frame_id": "optional", "balloon": "optional", "x_mm": "optional", "y_mm": "optional", "w_mm": "optional", "h_mm": "optional", "wrap": "vertical|horizontal? (default vertical)", "tail": "[x,y]?", "tails": "[{to, via?, width_mm?}]?", "style": "object?", "ruby_runs": "[[base, ruby]]?", "emphasis_runs": "[str]?", "style_runs": "[[words, {scale, bold, rgb}]]?", "path": "[[x,y]]? (a hand-drawn balloon)", "id": "str? (choose the id)"},
@@ -48,7 +48,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "add_stroke", "page": "int", "layer": "name|ink", "layer_id": "str? (a pen or paint layer)", "points": "[[x,y,pressure?],...]", "space": "page|spread?", "width_mm": "float?", "rgb": "[r,g,b]?", "opacity": "float?", "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?", "stabilize": "int?", "taper": "bool?", "pressure_gamma": "float? (>1 needs more force)", "post_smooth": "int? 0..10 (後補正; default the brush's)", "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)"},
     {"op": "delete_stroke", "page": "int", "layer": "name|ink", "index": "int"},
     {"op": "put_raster", "page": "int", "layer": "name|draft|ink|bg|finish", "path": "optional", "png_base64": "optional"},
-    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white} | null? (トーン化: the layer's greys print as a halftone)"},
+    {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "panel_each": "bool? (true: each line stays in the panel it begins in)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white} | null? (トーン化: the layer's greys print as a halftone)"},
     {"op": "add_page", "count": "int", "after": "int? (insert after this page; default after the last story page, before any covers)"},
     {"op": "delete_page", "page": "int"},
     {"op": "duplicate_page", "page": "int", "next_to": "bool? (the copy right after the page; default at the end)"},
@@ -77,7 +77,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "group_layers", "page": "int", "ids": "[layer id]", "name": "str?", "id": "str? (the new folder)"},
     {"op": "move_layers", "page": "int", "ids": "[layer id]", "parent": "folder id|null? (into / out of a folder)", "after": "layer id|bottom? (just above this layer)"},
     {"op": "convert_layer", "page": "int", "id": "str", "to": "paint|pen (pen: the pixels traced into lines)", "min_mm": "float? (pen: shorter marks are left out)"},
-    {"op": "set_layers", "page": "int", "ids": "[layer id]?", "all": "bool?", "visible": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "locked": "bool?", "lock_alpha": "bool?", "color": "[r,g,b]|null?", "exportable": "bool?", "reference": "bool?", "panel_clip": "bool?", "color_prints": "bool?", "effect": "object|null?"},
+    {"op": "set_layers", "page": "int", "ids": "[layer id]?", "all": "bool?", "visible": "bool?", "opacity": "float?", "blend": "str?", "clip": "bool?", "locked": "bool?", "lock_alpha": "bool?", "color": "[r,g,b]|null?", "exportable": "bool?", "reference": "bool?", "panel_clip": "bool?", "panel_each": "bool?", "color_prints": "bool?", "effect": "object|null?"},
     {"op": "set_paper", "page": "int? (none: every page)", "rgb": "[r,g,b]|null (用紙色; null: white)"},
     {"op": "liquify", "page": "int", "layer_id": "str?", "points": "[[x,y],...]", "width_mm": "float? (10)", "strength": "0..1? (0.6)", "mode": "push|pinch|bloat|twirl_cw|twirl_ccw"},
     {"op": "add_shape", "page": "int", "layer_id": "str?", "shape": "line|polyline|curve|rect|ellipse|polygon", "points": "[[x,y],…]? (line, polyline, curve)", "box": "[x,y,w,h]? (rect, ellipse, polygon)", "sides": "int? (polygon)", "angle": "float? (polygon, degrees)", "radius_mm": "float? (rect: round corners)", "closed": "bool? (polyline, curve)", "line": "bool? (default true)", "fill": "bool?", "fill_rgb": "[r,g,b]?", "rgb": "[r,g,b]?", "width_mm": "float?", "kind": "brush? (mili)", "opacity": "float?"},
@@ -101,8 +101,10 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_lt", "page": "int", "threshold": "float"},
     {"op": "lock_page", "page": "int", "agent": "str"},
     {"op": "unlock_page", "page": "int"},
-    {"op": "add_layer", "page": "int", "name": "str?", "kind": "pen|paint|folder|fill|gradient|adjust?", "rgb": "[r,g,b]? (fill)", "gradient": "{from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}? (gradient)", "adjust": "{kind, …}? (adjust: a correction layer over what is under it)", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?", "after": "layer id?", "id": "str?"},
+    {"op": "add_layer", "page": "int", "name": "str?", "kind": "pen|paint|folder|fill|gradient|adjust?", "rgb": "[r,g,b]? (fill)", "gradient": "{from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}? (gradient)", "adjust": "{kind, …}? (adjust: a correction layer over what is under it)", "blend": "str?", "clip": "bool?", "folder": "bool?", "parent": "str?", "after": "layer id?", "id": "str?", "panel_each": "bool? (pen and paint: true by default, each line stays in the panel it begins in)"},
     {"op": "delete_layer", "page": "int", "id": "str"},
+    {"op": "add_frame", "page": "int", "rect": "[x, y, w, h]? (mm)", "points": "[[x, y], …]? (a polygon or a freehand outline, mm)", "border_mm": "float?", "tolerance_mm": "float? (freehand: how much jitter to drop, 0.4)", "id": "str?", "note": "draw a panel (コマを描く): the page's first drawn panel replaces the basic frame; drawn panels keep their own places (no gutters)"},
+    {"op": "delete_frame", "page": "int", "frame_id": "str", "force": "bool? (placed art goes to studio.orphans)", "note": "one panel goes; the others stay where they are"},
     {"op": "gradient_fill", "page": "int", "layer_id": "str?", "area": "{poly} | {mask}? (default: the whole page)", "from": "[x,y] (mm)", "to": "[x,y] (mm)", "rgb_from": "[r,g,b]?", "rgb_to": "[r,g,b]?", "opacity_from": "0..1? (1)", "opacity_to": "0..1? (0: fades out)", "shape": "linear|radial?"},
     {"op": "define_brush", "key": "str (my_…)", "label": "str", "base": "a brush to start from?", "width_mm": "float?", "min_pressure": "0..1?", "gamma": "0.2..5?", "opacity": "0.05..1?", "stabilize": "0..15?", "taper": "bool?", "texture": "''|grain|soft|dry?", "rgb": "[r,g,b]|null?", "fixed_width": "bool?", "delete": "bool?"},
     {"op": "duplicate_layer", "page": "int", "id": "str", "new_id": "str?"},
@@ -192,7 +194,7 @@ def _bake_vectors(page, layer) -> None:
     size = base.size
     dpi = max(1, round(size[0] / (page.spec.width_mm / 25.4))) if layer.raster_png else WORKING_DPI  # (the pixels' own)
     mask = render._clip_mask(page, size, dpi) if getattr(layer, "panel_clip", True) else None
-    drawn = render._layer_strokes(layer, size, dpi, mask, base)
+    drawn = render._layer_strokes(layer, size, dpi, mask, base, page=page)
     if drawn is not None:
         base = Image.alpha_composite(base.convert("RGBA"), drawn)
     layer.strokes = []
@@ -659,6 +661,28 @@ def _prim(page, prim_id) -> dict:
     return found
 
 
+def _simplify_outline(points: list, tolerance: float) -> list:
+    """Ramer–Douglas–Peucker on a closed freehand outline: the corners stay, the jitter goes."""
+    from genko.frames import distance_to_segment
+
+    def rdp(pts: list) -> list:
+        if len(pts) < 3:
+            return pts
+        a, b = pts[0], pts[-1]
+        far, index = 0.0, 0
+        for i in range(1, len(pts) - 1):
+            d = distance_to_segment(pts[i], a, b)
+            if d > far:
+                far, index = d, i
+        if far <= tolerance:
+            return [a, b]
+        return rdp(pts[:index + 1])[:-1] + rdp(pts[index:])
+
+    far_i = max(range(len(points)), key=lambda i: math.dist(points[0], points[i]))
+    out = rdp(points[:far_i + 1])[:-1] + rdp(points[far_i:] + [points[0]])[:-1]
+    return [(round(x, 3), round(y, 3)) for x, y in out]
+
+
 def _leaf_rects(page) -> dict[str, Rect]:
     return {leaf.id: Rect(leaf.rect.x, leaf.rect.y, leaf.rect.width, leaf.rect.height) for leaf in page.leaf_frames()}
 
@@ -950,6 +974,7 @@ def _merge_down(episode, page, upper) -> None:
     plain = (upper.kind == lower.kind == LayerKind.STROKES and not upper.raster_png and not lower.raster_png
              and not upper.mask and not lower.mask and (upper.blend or "normal") == "normal" and not upper.clip
              and float(upper.opacity if upper.opacity is not None else 1) >= 1 and upper.panel_clip == lower.panel_clip
+             and getattr(upper, "panel_each", False) == getattr(lower, "panel_each", False)
              and upper.color == lower.color)
     if plain:
         lower.strokes.extend(upper.strokes)
@@ -1344,6 +1369,83 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         _carry_lines(episode, page, before)
         return
 
+    if name == "add_frame":
+        from genko import frames as geo
+
+        page = _require_page(episode, op)
+        if op.get("rect") is not None:
+            x, y, w, h = (float(v) for v in op["rect"])
+            if w < 0:
+                x, w = x + w, -w
+            if h < 0:
+                y, h = y + h, -h
+            points = geo.corners(Rect(x, y, w, h))
+        else:
+            raw = op.get("points") or []
+            points = geo._dedupe([(float(p[0]), float(p[1])) for p in raw])
+            if len(points) > 3:  # (a freehand outline: only the points that change its shape)
+                points = _simplify_outline(points, float(op.get("tolerance_mm", 0.4)))
+        if len(points) < 3 or geo.area(points) < 25:
+            raise ApplyError("a panel needs rect [x, y, w, h] or points around at least 25 mm²")
+        box = geo.bbox(points)
+        if min(box.width, box.height) < 4:
+            raise ApplyError("a panel is at least 4 mm across")
+        root = page.frames[0]
+        border = next((leaf.border_mm for leaf in page.leaf_frames()), 0.8)
+        if not geo.is_free(root):
+            blank = (not root.children and root.panel is None and not _placed_on(page, {root.id})
+                     and not getattr(root, "custom", False) and not getattr(root, "poly", None))
+            free = Frame(id=new_id(), rect=Rect(0.0, 0.0, page.spec.width_mm, page.spec.height_mm), split_axis=geo.FREE,
+                         children=[] if blank else [root])
+            if blank:  # (the page's first drawn panel takes the place of the basic frame, as a new page's is)
+                border = root.border_mm
+                for line in episode.story_for_page(page.index):
+                    if line.frame_id == root.id:
+                        line.frame_id = None
+            page.frames[0] = root = free
+        frame = Frame(id=str(op.get("id") or new_id()), rect=box, border_mm=float(op.get("border_mm", border)))
+        if any(leaf.id == frame.id for leaf in page.leaf_frames()):
+            raise ApplyError(f"frame {frame.id} exists")
+        if geo.as_rect(points) is None:
+            geo.set_shape(frame, points)
+            frame.custom = True
+        root.children.append(frame)
+        page.selected_frame_id = frame.id
+        return
+
+    if name == "delete_frame":
+        from genko import frames as geo
+
+        page = _require_page(episode, op)
+        frame_id = str(op.get("frame_id") or page.selected_frame_id or "")
+        try:
+            frame = page._find(frame_id)
+        except KeyError as exc:
+            raise ApplyError(f"no frame {frame_id}") from exc
+        if frame.children:
+            raise ApplyError("delete_frame takes one panel (not a split)")
+        if len(page.leaf_frames()) <= 1:
+            raise ApplyError("the page's last panel cannot be deleted (set_frame border_mm 0 hides its border)")
+        art = _placed_on(page, {frame.id})
+        if art and not op.get("force"):
+            raise ApplyError(f"frame {frame.id} has placed art; pass force to move it to studio.orphans")
+        parent = page.parent_of(frame.id)
+        if parent is None:
+            raise ApplyError("the page's last panel cannot be deleted")
+        # (the others keep their places: the gap is left empty, as when a panel is deleted in CLIP STUDIO)
+        parent.children = [child for child in parent.children if child.id != frame.id]
+        parent.split_axis, parent.split = geo.FREE, None
+        if frame.panel:
+            episode.studio.setdefault("orphans", []).append(
+                {"kind": "panels", "page_id": page.id, "frame_id": frame.id, "panels": [frame.panel], "rev": episode.revision})
+        for line in episode.story_for_page(page.index):
+            if line.frame_id == frame.id:
+                line.frame_id = None
+        _orphan_art(episode, page, art, reason=f"delete {frame.id}")
+        if page.selected_frame_id == frame.id:
+            page.selected_frame_id = None
+        return
+
     if name == "merge_frame":
         page = _require_page(episode, op)
         frame_id = op.get("frame_id") or page.selected_frame_id
@@ -1352,6 +1454,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         parent = page.parent_of(str(frame_id))
         if parent is None:
             raise ApplyError("cannot merge the root frame")
+        if parent.split_axis == "free":
+            raise ApplyError("drawn panels are not merged: delete_frame one, or reshape it with set_frame poly")
         leaves = _leaves_in_reading_order(parent, episode.binding)
         art = _placed_on(page, {leaf.id for leaf in leaves})
         if art and not op.get("force"):
@@ -1400,6 +1504,10 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             frame.border_mm = float(op["border_mm"])
         if "line" in op:
             frame.line = _border_style(op["line"]) if op["line"] else None
+        if "corner_mm" in op:
+            if frame.children:
+                raise ApplyError("only a panel (not a split) takes round corners")
+            frame.corner_mm = max(0.0, min(50.0, float(op["corner_mm"] or 0)))
         if "poly" in op:
             from genko import frames as geo
 
@@ -1912,6 +2020,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             layer.locked = bool(op["locked"])
         if "panel_clip" in op:
             layer.panel_clip = bool(op["panel_clip"])
+        if "panel_each" in op:
+            layer.panel_each = bool(op["panel_each"])
         if "title" in op:
             layer.title = str(op["title"] or "")
         if "parent" in op:
@@ -2868,6 +2978,8 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             lock_alpha=bool(op.get("lock_alpha")),
             parent_id=str(op["parent"]) if op.get("parent") else None,
             exportable=True,
+            # (a new drawing layer keeps each line in the panel it began in, as CLIP STUDIO's panel folders do)
+            panel_each=bool(op.get("panel_each", kind_name in ("pen", "paint"))),
         )
         if kind_name == "fill":
             layer.fill = _fill_spec({"rgb": op.get("rgb") or [255, 255, 255]})
@@ -3229,7 +3341,11 @@ def _leaves_in_reading_order(frame: Frame, binding: Binding) -> list[Frame]:
     if not frame.children:
         return [frame]
     children = list(frame.children)
-    if frame.split_axis == "vertical" and binding == Binding.RIGHT:
+    if frame.split_axis == "free":
+        from genko.frames import reading_order
+
+        children = reading_order(children, binding == Binding.RIGHT)
+    elif frame.split_axis == "vertical" and binding == Binding.RIGHT:
         children.reverse()
     return [leaf for child in children for leaf in _leaves_in_reading_order(child, binding)]
 
@@ -3247,7 +3363,7 @@ def _orphan_art(episode: Episode, page: Page, layers: list[Layer], reason: str) 
     page.layers = [layer for layer in page.layers if layer not in layers]
 
 
-LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter"})
+LAYOUT_OPS = frozenset({"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter", "add_frame", "delete_frame"})
 RASTER_EDIT_OPS = frozenset({"put_raster", "import_psd", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "gradient_fill",
                              "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
                              "trace_prims", "effect_to_layer", "add_shape", "smudge", "vector_edit", "fill_gaps", "liquify", "render_prims"})
@@ -3338,7 +3454,7 @@ def _check_page_lock(episode: Episode, op: dict[str, Any], agent: str) -> None:
 PAGE_LOCAL_OPS = frozenset({
     "import_psd", "set_animation", "add_anim_folder", "add_cel", "set_exposure", "set_exposures", "set_camera_key",
     "set_light_table",
-    "split_frame", "cut_frame", "move_gutter", "merge_frame", "resize_frame", "set_frame",
+    "split_frame", "cut_frame", "move_gutter", "merge_frame", "resize_frame", "set_frame", "add_frame", "delete_frame",
     "add_line", "name_ok", "advance",
     "add_stroke", "fill", "fill_area", "transform_area", "delete_area", "paste", "set_stroke_width",
     "reshape_stroke", "delete_stroke", "put_raster", "set_layer", "gradient_fill", "duplicate_layer",
@@ -3405,6 +3521,19 @@ def _working_copy(episode: Episode, ops: list) -> Episode:
     return work
 
 
+def _usage(op: dict) -> str:
+    """How the failed op is written (its schema line), and the keys it was given that the schema does not have
+    (a misspelt key is the usual cause of "not found")."""
+    name = op.get("op")
+    schema = next((s for s in OPS_SCHEMA if s.get("op") == name), None)  # (the studio ops are in it too)
+    if schema is None:
+        return ""
+    known = set(schema) | {"op", "area"}
+    strange = [k for k in op if k not in known and not str(k).startswith("_")]
+    keys = ", ".join(f"{k}: {v}" for k, v in schema.items() if k not in ("op", "note"))
+    return (f" ‖ unknown keys: {', '.join(strange)}" if strange else "") + f" ‖ {name} takes {{{keys}}}"
+
+
 def apply_ops(
     episode: Episode,
     ops: list[dict[str, Any]],
@@ -3467,9 +3596,10 @@ def apply_ops(
             elif op.get("op") not in ("lock_page", "unlock_page"):
                 _apply_one(work, op)
         except ApplyError as exc:
-            raise ApplyError(f"ops[{i}] {op.get('op')}: {exc}") from exc
+            raise ApplyError(f"ops[{i}] {op.get('op')}: {exc}{_usage(op)}") from exc
         except (KeyError, ValueError, TypeError) as exc:
-            raise ApplyError(f"ops[{i}] {op.get('op')}: {exc}") from exc
+            what = f"a value of the wrong type ({exc})" if isinstance(exc, (ValueError, TypeError)) else f"not found: {exc} (a key the op needs, or an id the book does not have)"
+            raise ApplyError(f"ops[{i}] {op.get('op')}: {what}{_usage(op)}") from exc
         applied.append(str(op.get("op")))
         report = op.pop("_report", None) if isinstance(op, dict) else None
         if report:

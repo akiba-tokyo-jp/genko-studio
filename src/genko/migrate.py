@@ -38,6 +38,7 @@ def _frame(data: dict) -> Frame:
         custom=bool(data.get("custom", False)),
         curves=[float(v) for v in data["curves"]] if isinstance(data.get("curves"), list) else None,
         line=dict(data["line"]) if isinstance(data.get("line"), dict) else None,
+        corner_mm=float(data.get("corner_mm", 0.0) or 0.0),
     )
 
 
@@ -105,6 +106,7 @@ def _layer_fields(data: dict, role: LayerRole) -> Layer:
         lock_alpha=bool(data.get("lock_alpha", False)),
         locked=bool(data.get("locked", False)),
         panel_clip=bool(data.get("panel_clip", True)),
+        panel_each=bool(data.get("panel_each", False)),
         tone=dict(data["tone"]) if data.get("tone") else None,
         parent_id=data.get("parent_id"),
         color=tuple(int(v) for v in data["color"])[:3] if data.get("color") else None,  # type: ignore[arg-type]

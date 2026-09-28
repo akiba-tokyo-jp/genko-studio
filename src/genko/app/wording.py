@@ -287,6 +287,14 @@ _ERRORS: list[tuple[str, object]] = [
     (r"the layer is locked", "このレイヤーはロックされています（レイヤー パネルでロックを外します）"),
     (r"this layer cannot (be painted on|take pen lines).*", "このレイヤーには描けません。ペン・ペイント・トーンのレイヤーを選びます"),
     (r"layer not found|layer id or role required", "レイヤーが見つかりません"),
+    (r"a panel is at least 4 mm across", "コマは 4 mm 以上の大きさにします"),
+    (r"a panel needs rect .* or points around at least 25 mm²", "コマは四角か、25 mm² 以上を囲む点で描きます"),
+    (r"delete_frame takes one panel \(not a split\)", "消せるのはコマ 1 つです（割った親ではなく）"),
+    (r"drawn panels are not merged.*", "描いたコマは結合できません。1 つ消すか、角を動かして形を変えます"),
+    (r"drawn panels have no gutter to move.*", "描いたコマには動かす間の白がありません。コマそのものを動かすか形を変えます"),
+    (r"frame (\S+) exists", "同じ名前のコマ（\\1）がもうあります"),
+    (r"only a panel \(not a split\) takes round corners", "角の丸みはコマ 1 つに付けます（割った親ではなく）"),
+    (r"the page's last panel cannot be deleted.*", "ページの最後のコマは消せません（枠線を消すなら、枠線の太さを 0 に）"),
     (r"that layer is not a tone", "トーンのレイヤーを選びます"),
     (r"layer (.+) (already )?exists", "同じ名前のレイヤーがすでにあります"),
     (r"unknown layer (.+)", "そのレイヤーはありません"),
@@ -391,10 +399,23 @@ def _inner(text: str) -> str:
     return text if shown.startswith("この操作はできませんでした") else shown
 
 
+_USAGE = re.compile(r"^(.*?)(?: ‖ unknown keys: (.*?))? ‖ ([a-z_0-9]+) takes (\{.*\})$", re.S)
+
+
 def error(message: str) -> str:
     """An ApplyError message in plain Japanese (unknown ones are kept, after a short lead)."""
     text = str(message or "").strip()
     text = re.sub(r"^ops\[\d+\] [a-z_]+: ", "", text)
+    usage = _USAGE.match(text)
+    if usage:  # (the op's own way of writing it, and the keys it does not know, after the reason)
+        strange = f"知らない鍵: {usage.group(2)}。" if usage.group(2) else ""
+        return f"{error(usage.group(1))}（{strange}{usage.group(3)} の書き方: {usage.group(4)}）"
+    wrong = re.fullmatch(r"a value of the wrong type \((.*)\)", text, re.S)
+    if wrong:
+        return f"値の型が違います（{wrong.group(1)}）"
+    missing = re.fullmatch(r"not found: '?([^']*)'? \(a key the op needs, or an id the book does not have\)", text)
+    if missing:
+        return f"{missing.group(1)} が見つかりません（op に要る鍵が無いか、原稿に無い id です）"
     for pattern, replacement in _ERRORS:
         match = re.fullmatch(pattern, text)
         if match:

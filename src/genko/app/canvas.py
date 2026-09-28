@@ -104,6 +104,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
     cutRequested = Signal(str, QPointF, QPointF)  # panel id, cut line ends (mm): a cut_frame op
     frameShaped = Signal(str, object)  # panel id, [[x, y], …]: a free-form panel (set_frame poly)
     frameBowed = Signal(str, int, float)  # panel id, edge, mm: an edge bowed out (+) or in (−) (set_frame bow)
+    frameDrawn = Signal(object)  # [[x, y], …] (mm): a new panel drawn with the panel tool (an add_frame op)
     colourPicked = Signal(object)  # (r, g, b) under the eyedropper
     fillRequested = Signal(float, float)  # the fill tool clicked here (mm)
     areaFilled = Signal(object)  # a drawn area to fill: [[x, y], …]
@@ -173,6 +174,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         self.selected_line_id: str | None = None
         self._handle_drag: dict | None = None
         self._frame_drag: dict | None = None  # the panel tool: {"kind": gutter|cut|vertex, ...}
+        self.frame_mode = "cut"  # the panel tool: cut panels, or draw new ones (rect | poly | free)
+        self._frame_poly: list[tuple[float, float]] = []  # a panel being drawn corner by corner (折れ線)
         self._modifiers = Qt.KeyboardModifier.NoModifier
         self.selection: dict | None = None  # {"area": {...}, "outline": [[x, y], …]} (mm)
         self.marquee = "rect"  # rect | lasso | wand
@@ -864,6 +867,22 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         if drag and drag["kind"] == "cut":
             painter.setPen(QPen(QColor("#e03131"), 2, Qt.PenStyle.DashLine))
             painter.drawLine(self._pt(*drag["p0"]), self._pt(*drag["p1"]))
+        if drag and drag["kind"] in ("rect", "free") or self._frame_poly:  # (the panel being drawn)
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            if drag and drag["kind"] == "rect":
+                painter.drawRect(QRectF(self._pt(*drag["p0"]), self._pt(*drag["p1"])).normalized())
+            elif drag and drag["kind"] == "free":
+                painter.drawPolygon([self._pt(x, y) for x, y in drag["points"]])
+            else:
+                pts = [self._pt(x, y) for x, y in self._frame_poly]
+                if self._hover:
+                    pts.append(self._pt(*self._hover))
+                painter.drawPolyline(pts)
+                painter.setBrush(QColor("white"))
+                first = pts[0]
+                painter.drawEllipse(first, HANDLE_PX / 2 + 2, HANDLE_PX / 2 + 2)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
         if drag and drag["kind"] == "vertex":
             painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
             painter.drawPolygon([self._pt(x, y) for x, y in drag["poly"]])
@@ -911,6 +930,17 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 curves = curves_of(frame, pts) or [0.0] * len(pts)
                 self._frame_drag = {"kind": "bow", "edge": i, "frame": frame.id, "curves": curves, "mm": curves[i]}
                 return
+        if self.frame_mode == "poly":  # (corner by corner; a click on the first corner, Enter or a double click closes it)
+            if len(self._frame_poly) >= 3:
+                first = self._pt(*self._frame_poly[0])
+                if abs(first.x() - pos.x()) <= HANDLE_PX + 3 and abs(first.y() - pos.y()) <= HANDLE_PX + 3:
+                    self.finish_frame_poly()
+                    return
+            self._frame_poly.append((round(x_mm, 2), round(y_mm, 2)))
+            return
+        if self.frame_mode in ("rect", "free"):
+            self._frame_drag = {"kind": self.frame_mode, "p0": (x_mm, y_mm), "p1": (x_mm, y_mm), "points": [(x_mm, y_mm)]}
+            return
         gutter = self._hit_gutter(x_mm, y_mm)
         if gutter is not None:
             self._frame_drag = {"kind": "gutter", "gutter": gutter, "start": (x_mm, y_mm), "offset": (0.0, 0.0), "delta": 0.0}
@@ -924,6 +954,12 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
 
         drag = self._frame_drag
         x_mm, y_mm = self._to_mm(pos)
+        if drag["kind"] in ("rect", "free"):
+            drag["p1"] = (x_mm, y_mm)
+            if drag["kind"] == "free" and math.dist(drag["points"][-1], (x_mm, y_mm)) >= 0.5:
+                drag["points"].append((x_mm, y_mm))
+            self.update()
+            return
         if drag["kind"] == "vertex":
             drag["poly"][drag["index"]] = [round(x_mm, 2), round(y_mm, 2)]
         elif drag["kind"] == "bow":
@@ -955,11 +991,29 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             drag["p1"] = (x_mm, y_mm)
         self.update()
 
+    def finish_frame_poly(self) -> bool:
+        """The panel drawn corner by corner is closed: it becomes a panel (three corners or more)."""
+        pts, self._frame_poly = self._frame_poly, []
+        self.update()
+        if len(pts) >= 3:
+            self.frameDrawn.emit([[x, y] for x, y in pts])
+            return True
+        return False
+
     def _frame_release(self) -> None:
         import math
 
         drag, self._frame_drag = self._frame_drag, None
-        if drag["kind"] == "vertex":
+        if drag["kind"] == "rect":
+            (x0, y0), (x1, y1) = drag["p0"], drag["p1"]
+            if abs(x1 - x0) >= 5 and abs(y1 - y0) >= 5:
+                xa, xb, ya, yb = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
+                self.frameDrawn.emit([[round(xa, 2), round(ya, 2)], [round(xb, 2), round(ya, 2)],
+                                      [round(xb, 2), round(yb, 2)], [round(xa, 2), round(yb, 2)]])
+        elif drag["kind"] == "free":
+            if len(drag["points"]) >= 8:
+                self.frameDrawn.emit([[round(x, 2), round(y, 2)] for x, y in drag["points"]])
+        elif drag["kind"] == "vertex":
             self.frameShaped.emit(drag["frame"], drag["poly"])
         elif drag["kind"] == "bow":
             if abs(drag["mm"] - drag["curves"][drag["edge"]]) > 0.05:
@@ -1770,6 +1824,11 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
         if self._shape_pts and (self.tool == "shape" or (self.tool == "marquee" and self.marquee == "polyline")):
             self.finish_points()
             return
+        if self.tool == "frame" and self._frame_poly:
+            if len(self._frame_poly) > 1 and self._frame_poly[-1] == self._frame_poly[-2]:
+                self._frame_poly.pop()  # (the double click's second press added the same corner again)
+            self.finish_frame_poly()
+            return
         if self.tool == "ruler":
             self.finish_curve()
             return
@@ -1872,6 +1931,13 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             self.hold_modifier("alt" if event.key() == Qt.Key.Key_Alt else "ctrl", True)
         if self._shape_pts and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.finish_points(closed=bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier))
+            return
+        if self._frame_poly and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.finish_frame_poly()
+            return
+        if self._frame_poly and event.key() == Qt.Key.Key_Escape:
+            self._frame_poly = []
+            self.update()
             return
         if event.key() == Qt.Key.Key_Escape and self.cancel_points():
             return

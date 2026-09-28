@@ -74,10 +74,15 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   以後の依頼パックの prompt・avoid・参照画像（`refs/style_catalog.png`）に入る。原稿の絵柄はサイトが変わっても変わらない。
   `style_catalog`（`project` だけ）で新しい版が出ているか（`newer`）が分かるが、写し直すのは人に確かめてから。
   白黒の絵柄はカラーの原稿（webtoon）には使われない。試しのページで絵柄が固定されたあとは人しか変えられない。
+  同じ名前の絵柄が別の分類にあることがある。名前だけで指定されたら `style_catalog`（`title`）で重なりを調べ、分類（`path`）と
+  id を人に確かめてから `use_style` する（`same_title_elsewhere`・警告 `style_same_title` が出たら必ず確かめる）。
+  人が絵柄を変えたら、承認済みの設定画は前の絵柄のまま。描き直して承認を頼む。
 
 - `make_sheet`: `mcp__genko__generation_request`（`character_id`）で設定画の依頼パックを受け取り、画像生成で作る。
   顔が正面を向いたアップを必ず入れる（承認時に顔の参照として切り出される）。画像を返された `inbox` のフォルダに保存し、
   `mcp__genko__import_images`（`request_id`、`images: [{file, origin}]`）で取り込む。取り込んだら人間に選んでもらう（承認を頼む）。
+  要らなくなった自分の候補（取り込み直した・前の絵柄）は `apply_ops` の `withdraw_candidates`（`character_id`、`candidate_ids`）で
+  承認箱から下げる。同じ画像を取り込み直すと、前の候補に顔の位置（`face_box01`）などが入り、候補は増えない。
 - `gen_panel`: `mcp__genko__generation_request`（`page`, `frame_id`）で依頼パックを受け取る。参照画像（`files.references`）は大事な順に並んでいる。画像ツールが受けられる枚数が少ないときは前から渡す。
   1〜2 枚しか渡せないなら `files.references_sheet`（顔・設定画・絵柄の見本を並べた 1 枚。コマと同じ縦横比なので、出てくる絵の形もそろう）を渡す。
   - `request.prompt` は下書き。書き直してよいが、登場人物の見た目の記述（`characters[].tokens_en`）は言い換えない。
@@ -115,9 +120,20 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   人物がいない絵なら `apply_ops` の `record_review`（`kind: "regions"`、`frame_id`、`input_hash` に採用中の候補 id）。
 - `upscale_panel`: 採用した絵が印刷の解像度に足りない。`mcp__genko__upscale`（`page`・`frame_id`、`method` は `inspect` の `upscalers`、既定 `genko`）で拡大した候補を作り、`adopt` で置き直す。
   画像ツールに高解像度化があれば `generation_request`（`mode: "upscale"`）でもよい。拡大しないなら `record_review`（`kind: "upscale"`、`input_hash` に採用中の候補 id）で理由を残す。
-- `finish_page`: `mcp__genko__finish_page` を `commit: false` で見て（顔にかかる台詞や話していない人の近くの台詞の移動、尾を報告した顔へ、効果・漫符・雨）、よければ `commit: true`。
+- `finish_page`: `mcp__genko__finish_page` を `commit: false` で見て（目・鼻・口にかかる台詞の移動、尾を報告した顔へ、効果・漫符・雨）、よければ `commit: true`。
+  話していない人の顔のほうが近い台詞は動かさず `suggest_move`（行き先の案 `to`）で知らせる。絵を見て、読み違えるなら `move_line` で動かす。
+  漫符と雨は 1 つずつ別のレイヤー（`layer_id`）に入る。絵に同じ記号がもう描かれていたら、そのレイヤーだけ `delete_layer` で消す。
   報告した顔は、網点が薄くなって白く浮く。
-- `check` の `cut_by_panel` は、報告した顔や人物が枠で切れている所。示された量だけ `set_placement` の `offset_mm` をずらす。
+- 採用した絵を差し替えると、ページは仕上げの前に戻り、顔の位置は古いものになる（`check` の `regions_stale`）。
+  `report_regions` で送り直し、`finish_page` をやり直して、尾と記号を画像で確かめる。
+- `check` の `cut_by_panel` は、報告した顔、または顔の報告のない人物が枠で切れている所。示された量だけ `set_placement` の `offset_mm` をずらす。
+  顔が枠の中にある人物の体（足など）が切れるのは、ふつうの構図なので知らせない。
+- op の鍵や型を間違えると、エラーにその op の書き方（と知らない鍵）が付く。
+- コマは割る（`split_frame`・`cut_frame`）ほかに、描いて作れる: `add_frame`（`rect: [x, y, 幅, 高さ]` か `points`）。
+  最初に描いたコマは基本枠と入れ替わる。`delete_frame` で 1 つだけ消せる（ほかはそのまま）。
+  角を丸くするのは `set_frame` の `corner_mm`（半径 mm）。
+- ペン入れと新しいペン・ペイントのレイヤーの線は、描き始めたコマの中だけに出る（`panel_each`）。
+  コマをまたいで引く線は、そのレイヤーを `set_layer panel_each: false` にする。
   `tail_hidden` は尾がフキダシの中に埋もれている所（`move_line` で大きさを変えると尾は外へ出し直される）。
 - 取り込んだ絵のレイヤーにも `set_layer_mask`・`paint_mask` で範囲を付けられる。
 - 線をくっきりさせたいコマは `mcp__genko__derive`（`kind: "lineart"`）で採用中の絵から線を抜き出し、`adopt`（`to: "ink"`）で絵の上に置く。

@@ -36,7 +36,7 @@ RULES_PATH = Path(__file__).with_name("guide") / "manga_rules.md"
 # Ops an agent may send through apply_ops. Gates, locks, meta (font paths),
 # rasters from local paths and structural page changes are not on the list.
 AGENT_OPS = frozenset({
-    "split_frame", "merge_frame", "resize_frame", "set_frame", "cut_frame", "move_gutter",
+    "split_frame", "merge_frame", "resize_frame", "set_frame", "cut_frame", "move_gutter", "add_frame", "delete_frame",
     "add_line", "edit_line", "delete_line", "move_line", "set_balloon_path", "reorder_lines",
     "add_stroke", "delete_stroke", "edit_stroke", "simplify_stroke", "erase",
     "fill", "fill_area", "transform_area", "delete_area", "paste", "set_stroke_width", "reshape_stroke",
@@ -61,7 +61,7 @@ AGENT_OPS = frozenset({
     "add_region", "edit_region", "delete_region", "replace_regions", "bind_ref", "unbind_ref",
     "register_assets", "attach_reference", "open_request", "close_request", "import_candidates",
     "review_candidates", "set_candidate", "adopt_candidate", "unadopt", "set_placement", "place_asset", "set_finish",
-    "ask_human", "propose", "resolve_ticket", "set_style_catalog",
+    "ask_human", "propose", "resolve_ticket", "set_style_catalog", "withdraw_candidates",
 })
 
 # Agent tools callable by name from `genko studio call` (the MCP tool set, minus project management).
@@ -239,15 +239,29 @@ class StudioService:
             "waiting_for": _waiting(items),
         })
 
-    def style_catalog(self, project: str | None = None, style_id: str | None = None) -> ToolResult:
+    def style_catalog(self, project: str | None = None, style_id: str | None = None, title: str | None = None) -> ToolResult:
         """The manga style catalog: the genres (no id), a branch with its words and the branches under it (an id),
-        or the book's style and whether the catalog has a newer version of it (a project, no id)."""
+        the branches whose title has some words, each with its genre path (title), or the book's style and whether
+        the catalog has a newer version of it (a project, no id)."""
         from genko import stylecat
 
         try:
+            if title:
+                found = stylecat.find(title)
+                data = {"found": found}
+                if len({str(f.get("title")) for f in found}) < len(found):
+                    data["note"] = "同じ名前の絵柄が別の分類にある。path（分類）と見本を人に見せて、id で確かめてから use_style する"
+                return ToolResult(True, data)
             if style_id:
                 data = stylecat.style(style_id)
-                return ToolResult(True, {"style": _catalog_node(data), "page_url": stylecat.page_url(data["id"])})
+                shown = _catalog_node(data)
+                try:
+                    same = stylecat.namesakes(data["id"], str(data.get("title") or ""))
+                except stylecat.CatalogError:
+                    same = []
+                if same:
+                    shown["same_title_elsewhere"] = same
+                return ToolResult(True, {"style": shown, "page_url": stylecat.page_url(data["id"])})
             if project:
                 episode = load_episode(self.project_path(project))
                 kept = genreq.catalog(episode)
@@ -279,6 +293,18 @@ class StudioService:
             return ToolResult(False, {"committed": False}, [error("style_locked", "/style_id",
                               "絵柄は試しのページで固定済み。変えるのは人（Genko の画面で絵柄を選ぶ）")])
         shown = _catalog_node(data) if data else None
+        if data is not None:
+            try:
+                same = stylecat.namesakes(data["id"], str(data.get("title") or ""))
+            except stylecat.CatalogError:
+                same = []
+            if same:
+                shown["same_title_elsewhere"] = same
+                where = " / ".join(" › ".join(map(str, o.get("path") or [])) + f"（{o['id']}）" for o in same)
+                issues.append(warning("style_same_title", "/style_id",
+                                      f"「{data.get('title')}」という名前の絵柄はほかにもある: {where}。"
+                                      f"選んだのは {' › '.join(shown.get('path') or [])}（{data['id']}）",
+                                      "分類と見本を人に見せて、どちらか確かめてから commit する"))
         if not commit:
             return ToolResult(True, {"committed": False, "style": shown}, issues)
         with ProjectLock(path, agent=self.actor):

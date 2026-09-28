@@ -223,7 +223,8 @@ def review_html(project: Path, *, max_px: int = 900) -> str:
             parts.append(_cmd(f"genko studio accept {proj} {pid}", "確定（コマンド）")
                          + _cmd(f"genko studio reject {proj} {pid} --note 理由", "却下（コマンド）") + "</div></div>")
     # character sheets
-    sheets = episode.studio.get("character_candidates") or {}
+    sheets = {cid: [c for c in cands if c.get("status") != "withdrawn"]
+              for cid, cands in (episode.studio.get("character_candidates") or {}).items()}
     if episode.bible.characters:
         parts.append("<h2>キャラクターの設定画</h2>")
         for char in episode.bible.characters:

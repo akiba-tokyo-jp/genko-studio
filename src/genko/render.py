@@ -139,8 +139,97 @@ def rough_needed(page: Page, dpi: int) -> bool:
     return False
 
 
+def _panel_of(page: Page, x: float, y: float):
+    """The panel (a leaf that cuts the layers) that has this point: its bleed shape for a bleed panel."""
+    from genko import frames as geo
+    from genko.placement import bleed_poly, clip_box, in_poly
+
+    for frame in page.leaf_frames():
+        if not getattr(frame, "clip", True):
+            continue
+        shape = bleed_poly(page, frame)
+        if shape is not None:
+            if in_poly(shape, x, y):
+                return frame
+        elif getattr(frame, "bleed", False) and not getattr(frame, "poly", None):
+            if clip_box(page, frame, "bleed").contains(x, y):
+                return frame
+        elif geo.contains(frame, x, y):
+            return frame
+    return None
+
+
+_FRAME_MASKS: dict = {}  # (the panel's shape, size, dpi) → its mask: the same panels are cut again every render
+
+
+def _frame_mask(page: Page, frame, size: tuple[int, int], dpi: int) -> Image.Image:
+    from genko import frames as geo
+    from genko.placement import bleed_poly
+
+    shape = bleed_poly(page, frame)
+    key = (tuple(map(tuple, shape)) if shape is not None else tuple(geo.outline(frame)), bool(getattr(frame, "bleed", False)),
+           tuple(size), dpi, page.spec.width_mm, page.spec.height_mm)
+    with _CACHE_LOCK:
+        cached = _FRAME_MASKS.get(key)
+    if cached is not None:
+        return cached
+    mask = _draw_frame_mask(page, frame, size, dpi)
+    with _CACHE_LOCK:
+        if len(_FRAME_MASKS) > 48:
+            _FRAME_MASKS.clear()
+        _FRAME_MASKS[key] = mask
+    return mask
+
+
+def _draw_frame_mask(page: Page, frame, size: tuple[int, int], dpi: int) -> Image.Image:
+    from genko.placement import bleed_poly, clip_box
+
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    shape = bleed_poly(page, frame)
+    if shape is not None:
+        draw.polygon([_xy(p, dpi) for p in shape], fill=255)
+    elif getattr(frame, "bleed", False) and not getattr(frame, "poly", None):
+        draw.rectangle(rect_px(clip_box(page, frame, "bleed"), dpi), fill=255)
+    else:
+        fill_frame(draw, frame, dpi)
+    return mask
+
+
+def _each_panel(layer, page: Page, size, dpi, panel_mask, raster, rough) -> Image.Image | None:
+    """A layer cut panel by panel: each line stays in the panel it was begun in (CLIP STUDIO's panel folders),
+    so a stroke that runs on into the next panel does not show there. Fills, and lines begun outside every
+    panel, are cut by all the panels together as before."""
+    import copy as _copy
+
+    groups: dict[str | None, list] = {}
+    frames: dict[str, object] = {}
+    for stroke in layer.strokes:
+        frame = _panel_of(page, *stroke.points[0]) if stroke.points else None
+        key = frame.id if frame is not None else None
+        if frame is not None:
+            frames[key] = frame
+        groups.setdefault(key, []).append(stroke)
+    if list(groups) == [None]:
+        return None
+    out = None
+    for key in [None, *[k for k in groups if k is not None]]:
+        part = _copy.copy(layer)
+        part.panel_each = False
+        part.strokes = groups.get(key, [])
+        part.patches = list(getattr(layer, "patches", None) or []) if key is None else []
+        if not part.strokes and not part.patches:
+            continue
+        part.id = f"{layer.id}@{key}" if getattr(layer, "id", None) else None
+        mask = panel_mask if key is None else _frame_mask(page, frames[key], size, dpi)
+        drawn = _layer_strokes(part, size, dpi, mask, raster, rough)
+        if drawn is not None:
+            out = drawn if out is None else Image.alpha_composite(out, drawn)
+    return out if out is not None else Image.new("RGBA", size, (0, 0, 0, 0))
+
+
 def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Image | None,
-                   raster: Image.Image | None, rough: bool = False) -> Image.Image | None:
+                   raster: Image.Image | None, rough: bool = False, page: Page | None = None) -> Image.Image | None:
     """A layer's fills (patches) and pen lines, drawn from their data at this resolution (None if none).
 
     Name and draft lines are drawn in the name colour; the others in their own colour (ink black by
@@ -154,6 +243,11 @@ def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Ima
     patches = getattr(layer, "patches", None) or []
     if not strokes and not patches:
         return None
+    if (page is not None and panel_mask is not None and strokes and getattr(layer, "panel_each", False)
+            and getattr(layer, "panel_clip", True)):
+        each = _each_panel(layer, page, size, dpi, panel_mask, raster, rough)
+        if each is not None:
+            return each
     guide = layer.role in (LayerRole.NAME, LayerRole.DRAFT)
     if dpi <= QUICK_DPI or rough:
         return _clipped(layer, _quick_strokes(strokes, patches, size, dpi, guide), panel_mask, raster)
@@ -363,7 +457,7 @@ def fill_frame(draw: ImageDraw.ImageDraw, frame, dpi: int, fill=255) -> None:
     """A panel's area: its rectangle, or its polygon (or curved outline) when it is slanted or free-form."""
     from genko import frames as geo
 
-    if geo.curves_of(frame) is not None:
+    if geo.rounded(frame):
         draw.polygon([_xy(p, dpi) for p in geo.outline(frame)], fill=fill)
     elif getattr(frame, "poly", None):
         draw.polygon([_xy(p, dpi) for p in frame.poly], fill=fill)
@@ -439,7 +533,8 @@ def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, 
         fitted = _finish_placed(fitted, layer, page, episode, dpi, mode, (vx0, vy0))
     canvas = Image.new("RGBA", size, (0, 0, 0, 0))
     canvas.paste(fitted, (vx0, vy0))
-    if frame is not None and getattr(frame, "poly", None) and layer.clip_to in ("frame", "bleed"):
+    if frame is not None and (getattr(frame, "poly", None) or float(getattr(frame, "corner_mm", 0) or 0) > 0
+                              or getattr(frame, "curves", None)) and layer.clip_to in ("frame", "bleed"):
         from genko.placement import bleed_poly
 
         shape_mask = Image.new("L", size, 0)
@@ -599,7 +694,7 @@ def layer_image(page: Page, layer, dpi: int, episode: Episode | None = None) -> 
         raster = _open_raster(layer)
         if raster is not None:
             raster = raster.resize(size)
-    lines = _layer_strokes(layer, size, dpi, _clip_mask(page, size, dpi), raster)
+    lines = _layer_strokes(layer, size, dpi, _clip_mask(page, size, dpi), raster, page=page)
     if lines is not None:
         raster = lines if raster is None else Image.alpha_composite(raster.convert("RGBA"), lines)
     if raster is None:
@@ -970,14 +1065,14 @@ def _draw_frames(draw: ImageDraw.ImageDraw, page: Page, working_dpi: int) -> Non
         from genko.placement import bleed_poly, on_bleed_edge
 
         shape = bleed_poly(page, frame)
-        if shape is not None and not style and geo.curves_of(frame) is None:
+        if shape is not None and not style and not geo.rounded(frame):
             # a slanted bleed panel: a border on the inner sides only (the sides off the paper are cut)
             for a, b in zip(shape, shape[1:] + shape[:1]):
                 if not on_bleed_edge(page, a, b):
                     draw.line([_xy(a, working_dpi), _xy(b, working_dpi)], fill=(20, 20, 20), width=width_px)
             continue
-        if getattr(frame, "poly", None) or geo.curves_of(frame) is not None or (style and style.get("kind", "solid") != "solid"):
-            if style or geo.curves_of(frame) is not None:
+        if getattr(frame, "poly", None) or geo.rounded(frame) or (style and style.get("kind", "solid") != "solid"):
+            if style or geo.rounded(frame):
                 draw_border(draw, geo.outline(frame), frame.border_mm if frame.border_mm is not None else 0.8, working_dpi,
                             style, frame.id)
             else:
@@ -1082,7 +1177,7 @@ def render_page(
             raster = _open_raster(layer)
             if raster is not None:
                 raster = raster.resize(size)
-        lines = _layer_strokes(layer, size, working_dpi, panel_mask, raster, rough=rough)
+        lines = _layer_strokes(layer, size, working_dpi, panel_mask, raster, rough=rough, page=page)
         if lines is not None:
             raster = lines if raster is None else Image.alpha_composite(raster.convert("RGBA"), lines)
         if raster is None:

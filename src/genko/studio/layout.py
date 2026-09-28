@@ -130,11 +130,87 @@ def is_blank(episode: Episode, page: Page) -> bool:
     return len(page.leaf_frames()) == 1 and not episode.story_for_page(page.index)
 
 
+def frame_tree(frame) -> dict:
+    """A panel tree as set_layout takes it, with each panel's look (shape, border, bleed, corners)."""
+    r = frame.rect
+    node: dict = {"rect_mm": [round(r.x, 3), round(r.y, 3), round(r.width, 3), round(r.height, 3)]}
+    if frame.children or frame.split_axis == "free":
+        node["axis"] = frame.split_axis
+        node["children"] = [frame_tree(child) for child in frame.children]
+        if getattr(frame, "split", None):
+            node["split"] = dict(frame.split)
+    if getattr(frame, "poly", None):
+        node["poly"] = [[round(float(x), 3), round(float(y), 3)] for x, y in frame.poly]
+    for key, plain in (("bleed", False), ("clip", True), ("custom", False)):
+        if bool(getattr(frame, key, plain)) != plain:
+            node[key] = bool(getattr(frame, key))
+    if frame.border_mm is not None and abs(float(frame.border_mm) - 0.8) > 1e-6:
+        node["border_mm"] = float(frame.border_mm)
+    if getattr(frame, "curves", None):
+        node["curves"] = list(frame.curves)
+    if getattr(frame, "line", None):
+        node["line"] = dict(frame.line)
+    if getattr(frame, "corner_mm", 0):
+        node["corner_mm"] = float(frame.corner_mm)
+    return node
+
+
+def scaled_tree(node: dict, sx: float, sy: float) -> dict:
+    """The same tree on paper sx × wider and sy × taller (a template kept on another size)."""
+    out = dict(node)
+    x, y, w, h = node["rect_mm"]
+    out["rect_mm"] = [round(x * sx, 3), round(y * sy, 3), round(w * sx, 3), round(h * sy, 3)]
+    if node.get("poly"):
+        out["poly"] = [[round(px * sx, 3), round(py * sy, 3)] for px, py in node["poly"]]
+    if node.get("children"):
+        out["children"] = [scaled_tree(child, sx, sy) for child in node["children"]]
+    return out
+
+
+def _user_templates_path():
+    from genko.tokens import config_dir
+
+    return config_dir() / "panel_templates.json"
+
+
+def user_templates() -> list[dict]:
+    """The layouts a person kept (コマ割りのテンプレート): [{name, size: [w, h], tree}], newest last."""
+    try:
+        data = json.loads(_user_templates_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [t for t in data if isinstance(t, dict) and t.get("tree") and t.get("size")] if isinstance(data, list) else []
+
+
+def save_user_template(name: str, page: Page) -> None:
+    kept = [t for t in user_templates() if t.get("name") != name]
+    kept.append({"name": name, "size": [page.spec.width_mm, page.spec.height_mm], "tree": frame_tree(page.frames[0])})
+    path = _user_templates_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(kept, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def delete_user_template(name: str) -> None:
+    path = _user_templates_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([t for t in user_templates() if t.get("name") != name], ensure_ascii=False, indent=1),
+                    encoding="utf-8")
+
+
+def user_template_tree(template: dict, page: Page) -> dict:
+    w, h = (float(v) for v in template["size"])
+    return scaled_tree(template["tree"], page.spec.width_mm / (w or 1), page.spec.height_mm / (h or 1))
+
+
 def clear_page(episode: Episode, page: Page, *, agent: str) -> list[dict]:
     """Ops that remove all lines and merge the frames back to the root."""
     ops: list[dict] = [{"op": "delete_line", "id": line.id} for line in list(episode.story_for_page(page.index))]
     root = page.frames[0]
-    if root.children:
+    if root.split_axis == "free":  # (drawn panels are not merged: the page goes back to its basic frame)
+        inner = page.inner_rect_mm(getattr(episode, "start_side", None))
+        ops.append({"op": "set_layout", "page": page.index, "force": True,
+                    "tree": {"rect_mm": [inner.x, inner.y, inner.width, inner.height]}})
+    elif root.children:
         ops.append({"op": "merge_frame", "page": page.index, "frame_id": root.children[0].id})
     # merge_frame only collapses one level: the root keeps no children afterwards.
     if ops:

@@ -252,7 +252,7 @@ def convert_layer(episode, page, op: dict) -> None:
     raise ApplyError("to must be paint or pen")
 
 
-SETTABLE = ("visible", "opacity", "blend", "clip", "lock_alpha", "locked", "panel_clip", "color", "reference", "exportable",
+SETTABLE = ("visible", "opacity", "blend", "clip", "lock_alpha", "locked", "panel_clip", "panel_each", "color", "reference", "exportable",
             "color_prints", "effect")
 
 

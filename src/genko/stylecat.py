@@ -82,6 +82,33 @@ def tree() -> list[dict]:
     return [n for n in nodes if isinstance(n, dict) and n.get("id")]
 
 
+def _with_paths(nodes: list[dict]) -> list[dict]:
+    """The nodes with the titles above each one (genre › … › itself), for telling apart branches of one name."""
+    by_id = {n["id"]: n for n in nodes}
+    out = []
+    for node in nodes:
+        chain, seen, cur = [], set(), node
+        while cur is not None and cur["id"] not in seen:
+            seen.add(cur["id"])
+            chain.append(str(cur.get("title") or cur["id"]))
+            cur = by_id.get(cur.get("parent"))
+        out.append({**node, "path": list(reversed(chain))})
+    return out
+
+
+def find(words: str, nodes: list[dict] | None = None) -> list[dict]:
+    """Branches whose title has these words, each with its path (a name can be in more than one genre)."""
+    key = (words or "").strip()
+    return [{k: n.get(k) for k in ("id", "title", "summary", "path")}
+            for n in _with_paths(tree() if nodes is None else nodes) if key and key in str(n.get("title") or "")]
+
+
+def namesakes(style_id: str, title: str, nodes: list[dict] | None = None) -> list[dict]:
+    """Other branches with exactly this title (the same name in another genre), each with its path."""
+    return [{k: n.get(k) for k in ("id", "path")}
+            for n in _with_paths(tree() if nodes is None else nodes) if n.get("title") == title and n["id"] != style_id]
+
+
 def style(style_id: str) -> dict:
     """One branch as the catalog has it now (with its children)."""
     data = _json(f"/v1/styles/{check_id(style_id)}")

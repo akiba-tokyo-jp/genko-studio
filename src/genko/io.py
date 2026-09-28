@@ -30,7 +30,8 @@ def _frame_to_dict(frame: Frame) -> dict:
         "panel": frame.panel,
     } | ({"poly": [list(p) for p in frame.poly]} if frame.poly else {}) | ({"split": frame.split} if frame.split else {}) \
         | ({"custom": True} if frame.custom else {}) | ({"curves": list(frame.curves)} if frame.curves else {}) \
-        | ({"line": dict(frame.line)} if frame.line else {})
+        | ({"line": dict(frame.line)} if frame.line else {}) \
+        | ({"corner_mm": frame.corner_mm} if getattr(frame, "corner_mm", 0) else {})
 
 
 def _layer_to_dict(layer: Layer, strokes: bool = True) -> dict:
@@ -56,6 +57,7 @@ def _layer_to_dict(layer: Layer, strokes: bool = True) -> dict:
         "parent_id": layer.parent_id,
     } | ({"patches": [{k: v for k, v in p.items() if k != "png"} for p in layer.patches]} if layer.patches else {}) \
         | ({"locked": True} if layer.locked else {}) | ({"panel_clip": False} if not layer.panel_clip else {}) \
+        | ({"panel_each": True} if getattr(layer, "panel_each", False) else {}) \
         | ({"tone": dict(layer.tone)} if layer.tone else {}) \
         | ({"mask": {"enabled": bool(layer.mask.get("enabled", True))}} if layer.mask else {}) \
         | ({"color": list(layer.color)} if layer.color else {}) | ({"reference": True} if layer.reference else {}) \

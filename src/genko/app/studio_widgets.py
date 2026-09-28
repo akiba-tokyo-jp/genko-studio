@@ -323,14 +323,26 @@ class ApprovalBox(QWidget):
         self._preview()
 
     def _sheet_candidates(self, item) -> list[dict]:
+        """The candidates still open, newest first (the one just asked for comes first; older rounds go down)."""
+        return [c for _, c in self._numbered_sheets(item)]
+
+    def _numbered_sheets(self, item) -> list[tuple[str, dict]]:
         episode = self.window.session.episode
-        return [c for c in (episode.studio.get("character_candidates") or {}).get(item.character_id, [])
-                if c.get("status") != "rejected"]
+        changed = int((episode.studio.get("style") or {}).get("changed_rev") or 0)
+        every = (episode.studio.get("character_candidates") or {}).get(item.character_id, [])
+        out = []
+        for n, cand in enumerate(every, 1):
+            if cand.get("status") in ("rejected", "withdrawn"):
+                continue
+            old = changed and int(cand.get("rev") or 0) < changed
+            out.append((f"候補 {n}" + ("（前の絵柄）" if old else ""), cand))
+        fresh = [pair for pair in reversed(out) if "前の絵柄" not in pair[0]]
+        return fresh + [pair for pair in reversed(out) if "前の絵柄" in pair[0]]
 
     def _sheet_choices(self, item) -> None:
-        for n, cand in enumerate(self._sheet_candidates(item), 1):
+        for label, cand in self._numbered_sheets(item):
             image = asset_image(self.window.session.path, cand["asset"])
-            entry = QListWidgetItem(f"候補 {n}")
+            entry = QListWidgetItem(label)
             entry.setData(Qt.ItemDataRole.UserRole, cand["id"])
             entry.setToolTip(cand["id"])
             if image is not None:
@@ -396,10 +408,10 @@ class ApprovalBox(QWidget):
             return
         if item.gate == "sheet" and item.kind == "gate":
             items = []
-            for n, cand in enumerate(self._sheet_candidates(item), 1):
+            for label, cand in self._numbered_sheets(item):
                 image = asset_image(self.window.session.path, cand["asset"])
                 if image is not None:
-                    items.append((f"候補 {n}", image.convert("RGB")))
+                    items.append((label, image.convert("RGB")))
             ViewerDialog(self, item.title, items, "候補を並べて比べます。選ぶのは承認箱の一覧で行います。").exec()
             return
         episode = self.window.session.episode

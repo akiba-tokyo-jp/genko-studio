@@ -962,12 +962,9 @@ class TimelapseDialog(QDialog):
 
 
 def _tree(frame) -> dict:
-    r = frame.rect
-    node = {"rect_mm": [r.x, r.y, r.width, r.height]}
-    if frame.children:
-        node["axis"] = frame.split_axis
-        node["children"] = [_tree(child) for child in frame.children]
-    return node
+    from genko.studio.layout import frame_tree
+
+    return frame_tree(frame)
 
 
 def _plan(key: str) -> dict:
@@ -988,6 +985,7 @@ class TemplateDialog(QDialog):
         from PySide6.QtGui import QIcon
 
         from genko.app.studio_widgets import to_pixmap
+        from genko.ops import apply_ops
         from genko.render import render_page
         from genko.studio import layout
 
@@ -1003,6 +1001,19 @@ class TemplateDialog(QDialog):
         self.list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.list.setSpacing(8)
         self.list.setWordWrap(True)
+        for kept in layout.user_templates():  # (the person's own layouts first: 自分のコマ割り)
+            trial = copy.deepcopy(episode)
+            target = next(p for p in trial.pages if p.index == page.index)
+            try:
+                tree = layout.user_template_tree(kept, target)
+                apply_ops(trial, [{"op": "set_layout", "page": page.index, "tree": tree, "force": True}], agent="human:preview")
+                target = next(p for p in trial.pages if p.index == page.index)
+                icon = QIcon(to_pixmap(render_page(target, 20, mode="print", episode=trial)))
+            except Exception:
+                continue
+            item = QListWidgetItem(icon, f"自分: {kept['name']}")
+            item.setData(Qt.ItemDataRole.UserRole, {"mine": kept["name"]})
+            self.list.addItem(item)
         for key, spec in layout.templates().items():
             trial = copy.deepcopy(episode)
             target = next(p for p in trial.pages if p.index == page.index)
@@ -1017,6 +1028,8 @@ class TemplateDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, key)
             self.list.addItem(item)
         self.list.itemDoubleClicked.connect(lambda _: self.choose())
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._mine_menu)
         note = QLabel("コマと台詞は作り直されます（元に戻す で取り消せます）。" if self.needs_clearing else "空のページをテンプレートで割ります。")
         note.setWordWrap(True)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -1029,6 +1042,22 @@ class TemplateDialog(QDialog):
         layout_box.addWidget(note)
         layout_box.addWidget(buttons)
 
+    def _mine_menu(self, pos) -> None:
+        """Right click on one of the person's own layouts: delete it."""
+        from PySide6.QtWidgets import QMenu
+
+        from genko.studio import layout
+
+        item = self.list.itemAt(pos)
+        key = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        if not isinstance(key, dict):
+            return
+        menu = QMenu(self)
+        gone = menu.addAction("このテンプレートを消す")
+        if menu.exec(self.list.viewport().mapToGlobal(pos)) is gone:
+            layout.delete_user_template(key["mine"])
+            self.list.takeItem(self.list.row(item))
+
     def choose(self) -> None:
         import copy
 
@@ -1036,6 +1065,16 @@ class TemplateDialog(QDialog):
 
         item = self.list.currentItem()
         if item is None:
+            return
+        key = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(key, dict):  # one of the person's own layouts: its tree, fitted to this paper
+            kept = next((t for t in layout.user_templates() if t.get("name") == key["mine"]), None)
+            if kept is None:
+                return
+            self.ops = [{"op": "delete_line", "id": line.id} for line in self.episode.story_for_page(self.page.index)]
+            self.ops.append({"op": "set_layout", "page": self.page.index, "tree": layout.user_template_tree(kept, self.page),
+                             "force": True})
+            self.accept()
             return
         trial = copy.deepcopy(self.episode)
         target = next(p for p in trial.pages if p.index == self.page.index)
