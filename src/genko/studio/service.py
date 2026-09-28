@@ -121,9 +121,11 @@ def _props_by_id(plan: dict, bible: dict) -> list[Issue]:
 
 def _catalog_node(data: dict) -> dict:
     """A branch of the style catalog, for an agent choosing one: where it is, its words, the branches under it."""
+    from genko import stylecat
+
     return {
         "id": data.get("id"), "title": data.get("title"), "summary": data.get("summary"), "level": data.get("level"),
-        "path": [p.get("title") for p in data.get("path") or [] if isinstance(p, dict)],
+        "path": stylecat.full_path(data),
         "expression": data.get("expression"), "version": data.get("version"),
         "prompt_ja": (data.get("prompt") or {}).get("ja"),
         "children": [{k: c.get(k) for k in ("id", "title", "summary")} for c in data.get("children") or [] if isinstance(c, dict)],

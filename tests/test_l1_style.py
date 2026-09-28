@@ -276,3 +276,15 @@ def test_a_shared_page_url_names_its_style(tmp_path: Path):
     agent = StudioService(tmp_path, "ai:test")
     seen = agent.style_catalog(style_id=f"{BASE}/n/shonen-battle?lang=ja")
     assert seen.ok and seen.data["style"]["id"] == "shonen-battle"
+
+
+def test_the_style_path_reads_the_same_from_the_new_and_the_old_catalog():
+    from genko import stylecat
+
+    new = {"id": "gag-surreal-doodle-casual", "title": "ゆるい手描きの落書き風",
+           "path": [{"id": "gag", "title": "ギャグ漫画"}, {"id": "gag-surreal", "title": "シュール"}]}
+    old = {**new, "path": [*new["path"], {"id": "gag-surreal-doodle-casual", "title": "ゆるい手描きの落書き風"}]}
+    want = ["ギャグ漫画", "シュール", "ゆるい手描きの落書き風"]
+    assert stylecat.full_path(new) == want and stylecat.full_path(old) == want
+    assert stylecat.full_path({"id": "gag", "title": "ギャグ漫画", "path": []}) == ["ギャグ漫画"]  # (the first level)
+    assert stylecat.full_path({"id": "x", "title": "ゆるい手描きの落書き風", "path": want}) == want  # (a book saved before)

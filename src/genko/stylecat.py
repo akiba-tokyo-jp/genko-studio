@@ -109,6 +109,20 @@ def namesakes(style_id: str, title: str, nodes: list[dict] | None = None) -> lis
             for n in _with_paths(tree() if nodes is None else nodes) if n.get("title") == title and n["id"] != style_id]
 
 
+def full_path(data: dict) -> list[str]:
+    """The branch's place as titles, genre first and itself last (ギャグ漫画 › シュール › ゆるい手描きの落書き風).
+    The catalog's `path` is the branches above it only; older replies (and books saved then) ended with the branch
+    itself, so a last step that is the branch is not added twice."""
+    steps = [p for p in data.get("path") or [] if isinstance(p, (dict, str))]
+    own_id, own_title = str(data.get("id") or ""), str(data.get("title") or data.get("id") or "")
+    if steps and isinstance(steps[-1], dict) and str(steps[-1].get("id") or "") == own_id:
+        steps = steps[:-1]
+    titles = [str(p.get("title") or p.get("id")) if isinstance(p, dict) else str(p) for p in steps]
+    if titles and titles[-1] == own_title:
+        titles = titles[:-1]
+    return titles + ([own_title] if own_title else [])
+
+
 def style(style_id: str) -> dict:
     """One branch as the catalog has it now (with its children)."""
     data = _json(f"/v1/styles/{check_id(style_id)}")
@@ -146,7 +160,7 @@ def saved(data: dict, sample_asset: str | None) -> dict:
     return {
         "id": str(data["id"]),
         "title": str(data.get("title") or data["id"]),
-        "path": [str(p.get("title") or p.get("id")) for p in data.get("path") or [] if isinstance(p, dict)],
+        "path": full_path(data),
         "summary": str(data.get("summary") or ""),
         "level": data.get("level"),
         "expression": str(data.get("expression") or "mono"),
