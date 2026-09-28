@@ -13,7 +13,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 ## 最初に
 
 1. `mcp__genko__projects` でプロジェクトを確かめる。無ければ `mcp__genko__create_project`（例: name `summer.genko`、pages 8）。
-2. `mcp__genko__inspect` を `target: "rules"` で呼び、ネームの規則を読む。`target: "schemas"` で入力の形を読む。
+2. `mcp__genko__inspect` を `target: "rules"` で呼び、ネームの規則を読む。入力の形（`target: "schemas"`）は、書いたものがエラーで返ってきたときだけ読めばよい。
 
 ## 会話の名前（session）
 
@@ -124,7 +124,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   人物がいない絵なら `apply_ops` の `record_review`（`kind: "regions"`、`frame_id`、`input_hash` に採用中の候補 id）。
 - `upscale_panel`: 採用した絵が印刷の解像度に足りない。`mcp__genko__upscale`（`page`・`frame_id`、`method` は `inspect` の `upscalers`、既定 `genko`）で拡大した候補を作り、`adopt` で置き直す。
   画像ツールに高解像度化があれば `generation_request`（`mode: "upscale"`）でもよい。拡大しないなら `record_review`（`kind: "upscale"`、`input_hash` に採用中の候補 id）で理由を残す。
-- `finish_page`: `mcp__genko__finish_page` を `commit: false` で見て（目・鼻・口にかかる台詞の移動、尾を報告した顔へ、効果・漫符・雨）、よければ `commit: true`。
+- `finish_page`: `mcp__genko__finish_page` を `commit: true` で呼ぶ（目・鼻・口にかかる台詞の移動、尾を報告した顔へ、効果・漫符・雨）。気になるときだけ先に `commit: false` で見る。
   話していない人の顔のほうが近い台詞は動かさず `suggest_move`（行き先の案 `to`）で知らせる。絵を見て、読み違えるなら `move_line` で動かす。
   漫符と雨は 1 つずつ別のレイヤー（`layer_id`）に入る。絵に同じ記号がもう描かれていたら、そのレイヤーだけ `delete_layer` で消す。
   報告した顔は、網点が薄くなって白く浮く。
