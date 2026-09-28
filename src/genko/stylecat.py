@@ -179,12 +179,32 @@ def newer(kept: dict) -> dict | None:
 
 
 def style_from_link(link: str) -> str | None:
-    """genko://use-style?id=… → the id (None for other links)."""
-    parts = urlparse(str(link or ""))
+    """genko://use-style?id=… or the catalog's own page (https://…/n/{id}, as people share it) → the id
+    (None for other links)."""
+    parts = urlparse(str(link or "").strip())
+    if parts.scheme in ("http", "https"):
+        site = urlparse(base())
+        path = parts.path.strip("/").split("/")
+        if parts.netloc.lower() != site.netloc.lower() or len(path) != 2 or path[0] != "n" or not path[1]:
+            return None
+        from urllib.parse import unquote
+
+        return check_id(unquote(path[1]))
     if parts.scheme != LINK_SCHEME or (parts.netloc or parts.path.strip("/")) != "use-style":
         return None
     found = (parse_qs(parts.query).get("id") or [""])[0]
     return check_id(found)
+
+
+def style_id_from(text: str) -> str:
+    """What a person or an agent was given for a style: its id, its genko:// link or its page's URL → the id."""
+    text = str(text or "").strip()
+    if "://" in text:
+        found = style_from_link(text)
+        if found is None:
+            raise CatalogError("絵柄カタログのページの URL か genko://use-style のリンクではない")
+        return found
+    return check_id(text)
 
 
 def validate(catalog: dict) -> dict:

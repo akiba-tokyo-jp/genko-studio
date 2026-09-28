@@ -352,7 +352,7 @@ def build_server(root: Path, actor: str) -> MCPServer:
     @tool
     def style_catalog(project: str | None = None, style_id: str | None = None, title: str | None = None) -> list:
         """マンガの絵柄カタログ（https://manga.akiba.tokyo.jp）を読む。引数なし: 1段目のジャンルの一覧。
-        style_id: その絵柄（言葉 prompt_ja・白黒かカラーか・1 つ下の段の children）。children から選んで下の段へたどる。
+        style_id: その絵柄（言葉 prompt_ja・白黒かカラーか・1 つ下の段の children）。id のほか、サイトのページの URL（人が共有したもの）でもよい。children から選んで下の段へたどる。
         どの段で止めてもよい。同じ名前の絵柄が別の分類にあれば same_title_elsewhere に分類（path）と id が入る。
         title: 名前にその言葉を含む絵柄を全部（分類 path つき）。名前だけで指定されたら、これで重なりを確かめる。
         project だけ: 原稿の絵柄と、カタログに新しい版が出ているか（newer）。"""

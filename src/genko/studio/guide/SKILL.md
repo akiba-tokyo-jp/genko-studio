@@ -74,6 +74,7 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
   以後の依頼パックの prompt・avoid・参照画像（`refs/style_catalog.png`）に入る。原稿の絵柄はサイトが変わっても変わらない。
   `style_catalog`（`project` だけ）で新しい版が出ているか（`newer`）が分かるが、写し直すのは人に確かめてから。
   白黒の絵柄はカラーの原稿（webtoon）には使われない。試しのページで絵柄が固定されたあとは人しか変えられない。
+  人がサイトのページの URL（https://manga.akiba.tokyo.jp/n/…）を渡したら、そのまま `style_id` に入れてよい。
   同じ名前の絵柄が別の分類にあることがある。名前だけで指定されたら `style_catalog`（`title`）で重なりを調べ、分類（`path`）と
   id を人に確かめてから `use_style` する（`same_title_elsewhere`・警告 `style_same_title` が出たら必ず確かめる）。
   人が絵柄を変えたら、承認済みの設定画は前の絵柄のまま。描き直して承認を頼む。

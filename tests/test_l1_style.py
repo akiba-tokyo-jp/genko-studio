@@ -264,3 +264,15 @@ def test_the_picker_finds_and_marks_what_does_not_fit(qapp, monkeypatch):
     assert "カラー" in dialog.fit.text() and "使われません" in dialog.fit.text()
     assert "網点" in dialog.words.text() and not dialog.show_words.isChecked()
     dialog.close()
+
+
+def test_a_shared_page_url_names_its_style(tmp_path: Path):
+    assert stylecat.style_from_link(f"{BASE}/n/shonen-battle?lang=ja") == "shonen-battle"
+    assert stylecat.style_from_link("https://elsewhere.test/n/shonen-battle") is None  # (only the catalog's own pages)
+    assert stylecat.style_id_from(f"  {BASE}/n/shonen-battle?lang=ja&x=1 ") == "shonen-battle"
+    assert stylecat.style_id_from("shonen-battle") == "shonen-battle"
+    with pytest.raises(stylecat.CatalogError):
+        stylecat.style_id_from("https://elsewhere.test/n/shonen-battle")
+    agent = StudioService(tmp_path, "ai:test")
+    seen = agent.style_catalog(style_id=f"{BASE}/n/shonen-battle?lang=ja")
+    assert seen.ok and seen.data["style"]["id"] == "shonen-battle"

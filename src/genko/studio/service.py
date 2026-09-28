@@ -246,6 +246,8 @@ class StudioService:
         from genko import stylecat
 
         try:
+            if style_id:
+                style_id = stylecat.style_id_from(style_id)  # (a page URL a person shared works too)
             if title:
                 found = stylecat.find(title)
                 data = {"found": found}
@@ -283,7 +285,7 @@ class StudioService:
         episode = load_episode(path)
         issues: list[Issue] = []
         try:
-            data = stylecat.style(style_id) if style_id else None
+            data = stylecat.style(stylecat.style_id_from(style_id)) if style_id else None
         except stylecat.CatalogError as exc:
             return fail(str(exc), "style_catalog", "/style_id")
         if data is not None and data.get("expression") == "mono" and episode.spec.expression == "color":

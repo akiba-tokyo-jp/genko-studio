@@ -83,7 +83,7 @@ class StylePicker(QDialog):
         top.addWidget(self.up)
         top.addWidget(self.where, 1)
         self.find = QLineEdit()
-        self.find.setPlaceholderText("この段から探す（名前・説明）")
+        self.find.setPlaceholderText("この段から探す（名前・説明）。サイトのページの URL を貼ると、その絵柄へ")
         self.find.setClearButtonEnabled(True)
         self.find.textChanged.connect(self._filter)
         self.list = QListWidget()
@@ -228,7 +228,21 @@ class StylePicker(QDialog):
         self._filter(self.find.text())
 
     def _filter(self, words: str) -> None:
-        """Only the rows whose name or summary has all the words (the third level has twenty-odd styles)."""
+        """Only the rows whose name or summary has all the words (the third level has twenty-odd styles).
+        A pasted page URL or genko:// link goes to that style."""
+        if "://" in str(words or ""):
+            from genko import stylecat
+
+            try:
+                found = stylecat.style_from_link(words)
+            except stylecat.CatalogError:
+                found = None
+            if found and found in self.nodes:
+                self.find.blockSignals(True)
+                self.find.clear()
+                self.find.blockSignals(False)
+                self._list(self.nodes[found].get("parent"), select=found)
+                return
         wanted = [w for w in str(words or "").split() if w]
         for row in range(self.list.count()):
             item = self.list.item(row)
