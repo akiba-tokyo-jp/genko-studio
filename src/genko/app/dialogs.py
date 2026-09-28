@@ -1,0 +1,1120 @@
+"""Dialogs: start screen, new manuscript, export."""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+from pathlib import Path
+
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
+    QStyledItemDelegate,
+    QVBoxLayout,
+    QWidget,
+)
+
+from genko.app import exporting
+from genko.models import PAPER_PRESETS, Binding, PageSpec
+from genko.app import theme
+
+SCREEN_SHAPES = [("丸", "round"), ("四角", "square"), ("ひし形", "diamond"), ("楕円", "ellipse")]
+
+PAPERS = [(label, key) for key, (label, _make) in PAPER_PRESETS.items()]
+
+
+def spec_for(key: str) -> PageSpec:
+    return PAPER_PRESETS[key][1]()
+
+
+class PaperDialog(QDialog):
+    """用紙の設定: a preset, or every number — paper, finished size, bleed and the basic frame's margins."""
+
+    def __init__(self, parent, spec: PageSpec, changing: bool = False) -> None:
+        from PySide6.QtWidgets import QDoubleSpinBox
+
+        super().__init__(parent)
+        self.setWindowTitle("原稿用紙の設定")
+        self.preset = QComboBox()
+        self.preset.addItem("（数値で決める）", "")
+        for key, (label, _make) in PAPER_PRESETS.items():
+            self.preset.addItem(label, key)
+        self.preset.currentIndexChanged.connect(lambda _: self._from_preset())
+
+        def spin(lo, hi, value):
+            box = QDoubleSpinBox()
+            box.setRange(lo, hi)
+            box.setDecimals(1)
+            box.setSingleStep(0.5)
+            box.setSuffix(" mm")
+            box.setValue(float(value))
+            box.valueChanged.connect(lambda _: self._changed())
+            return box
+
+        tw, th = spec.trim_size()
+        m = spec.margins()
+        self.paper_w, self.paper_h = spin(20, 1000, spec.width_mm), spin(20, 2000, spec.height_mm)
+        self.trim_w, self.trim_h = spin(10, 1000, tw), spin(10, 2000, th)
+        self.bleed = spin(0, 20, spec.bleed_mm)
+        self.top, self.bottom = spin(0, 200, m["top"]), spin(0, 200, m["bottom"])
+        self.inner, self.outer = spin(0, 200, m["inner"]), spin(0, 200, m["outer"])
+        self.dpi = QSpinBox()
+        self.dpi.setRange(72, 1200)
+        self.dpi.setValue(int(spec.dpi))
+        self.dpi.setSuffix(" dpi")
+        from genko.app import dialog_look as look
+
+        def pair(a, b) -> QHBoxLayout:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            row.addWidget(a, 1)
+            row.addWidget(QLabel("×"))
+            row.addWidget(b, 1)
+            return row
+
+        rows = look.form()
+        rows.addRow(look.section("用紙と仕上がり"))
+        rows.addRow("見本", self.preset)
+        rows.addRow("用紙（幅×高さ）", pair(self.paper_w, self.paper_h))
+        rows.addRow("仕上がり（幅×高さ）", pair(self.trim_w, self.trim_h))
+        rows.addRow("裁ち落とし", self.bleed)
+        rows.addRow("解像度", self.dpi)
+        rows.addRow(look.section("基本枠までの余白（仕上がりから）"))
+        rows.addRow("上・下", pair(self.top, self.bottom))
+        rows.addRow("のど・小口", pair(self.inner, self.outer))
+        look.quiet_labels(rows)
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        theme.role(self.summary, "hint")
+        self.move = QCheckBox("コマ・台詞・絵を新しい基本枠に合わせて動かす")
+        self.move.setChecked(True)
+        self.move.setVisible(changing)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("変える" if changing else "決める")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        body = QVBoxLayout()
+        body.setSpacing(8)
+        body.addLayout(rows)
+        body.addWidget(self.move)
+        body.addStretch(1)
+        self.diagram = look.PaperDiagram()
+        side = QVBoxLayout()
+        side.addWidget(self.diagram, 1)
+        side.addWidget(look.legend())
+        side.addWidget(self.summary)
+        look.frame(self, look.header("原稿用紙の設定", "数値は出版社・印刷所で違います。投稿・入稿の前に、先方の原稿用紙の指定を確かめてください。"),
+                   body, look.card(side, "できあがりの形"), look.footer(buttons))
+        self.resize(760, 520)
+        self._preset_key = ""
+        same = next((key for key, (_label, make) in PAPER_PRESETS.items() if dataclasses.replace(make(), preset=spec.preset) == spec), "")
+        if same:  # the book is on a preset: show it as that
+            self.preset.blockSignals(True)
+            self.preset.setCurrentIndex(self.preset.findData(same))
+            self.preset.blockSignals(False)
+            self._preset_key = same
+        self._changed(keep_preset=True)
+
+    def _from_preset(self) -> None:
+        key = self.preset.currentData()
+        if not key:
+            return
+        spec = PAPER_PRESETS[key][1]()
+        tw, th = spec.trim_size()
+        m = spec.margins()
+        widgets = (self.paper_w, self.paper_h, self.trim_w, self.trim_h, self.bleed, self.top, self.bottom, self.inner, self.outer)
+        values = (spec.width_mm, spec.height_mm, tw, th, spec.bleed_mm, m["top"], m["bottom"], m["inner"], m["outer"])
+        for widget, value in zip(widgets, values):
+            widget.blockSignals(True)
+            widget.setValue(float(value))
+            widget.blockSignals(False)
+        self.dpi.setValue(int(spec.dpi))
+        self._preset_key = key
+        self._changed(keep_preset=True)
+
+    def spec(self) -> PageSpec:
+        if self._preset_key:
+            return PAPER_PRESETS[self._preset_key][1]()
+        return PageSpec.custom(self.paper_w.value(), self.paper_h.value(), self.trim_w.value(), self.trim_h.value(), self.bleed.value(),
+                               self.top.value(), self.bottom.value(), self.inner.value(), self.outer.value(), self.dpi.value())
+
+    def _changed(self, keep_preset: bool = False) -> None:
+        if not keep_preset and getattr(self, "_preset_key", ""):
+            self._preset_key = ""
+            self.preset.blockSignals(True)
+            self.preset.setCurrentIndex(0)
+            self.preset.blockSignals(False)
+        try:
+            text = self.spec().describe()
+            ok = True
+        except ValueError as exc:
+            text = {"the paper must hold the finished size and its bleed": "用紙が、仕上がりと裁ち落としより小さくなっています",
+                    "the basic frame must fit inside the finished size": "基本枠が仕上がりに収まりません"}.get(str(exc), str(exc))
+            ok = False
+        self.summary.setText(text)
+        theme.role(self.summary, "hint" if ok else "error")
+        if hasattr(self, "diagram"):
+            try:
+                self.diagram.show_spec(self.spec() if ok else self.diagram.spec, error=not ok)
+            except ValueError:
+                pass
+        if hasattr(self, "ok_button"):
+            self.ok_button.setEnabled(ok)
+
+    def _accept(self) -> None:
+        try:
+            self.spec()
+        except ValueError:
+            return
+        self.accept()
+
+    def op(self) -> dict:
+        """The set_page_spec op for this choice."""
+        if self._preset_key:
+            return {"op": "set_page_spec", "preset": self._preset_key, "move": self.move.isChecked()}
+        return {"op": "set_page_spec", "paper": [self.paper_w.value(), self.paper_h.value()],
+                "trim": [self.trim_w.value(), self.trim_h.value()], "bleed_mm": self.bleed.value(),
+                "margins": [self.top.value(), self.bottom.value(), self.inner.value(), self.outer.value()], "dpi": self.dpi.value(),
+                "move": self.move.isChecked()}
+
+
+def project_title(path: Path) -> str:
+    try:
+        return str(json.loads((Path(path) / "project.json").read_text(encoding="utf-8")).get("title") or Path(path).stem)
+    except (OSError, ValueError):
+        return Path(path).stem
+
+
+# --- start screen -----------------------------------------------------------------------------------
+
+
+def _blank_cover(size) -> QPixmap:
+    pixmap = QPixmap(size)
+    pixmap.fill(QColor(theme.tokens().base))
+    return pixmap
+
+
+def cover_thumbnail(path: Path, height: int = 180) -> QPixmap | None:
+    """The book's first page, small, kept in the settings folder until the book changes."""
+    import hashlib
+
+    from genko.tokens import config_dir
+
+    source = Path(path) / "project.json"
+    try:
+        stamp = int(source.stat().st_mtime)
+    except OSError:
+        return None
+    folder = config_dir() / "thumbs"
+    target = folder / f"{hashlib.sha1(str(Path(path).resolve()).encode('utf-8')).hexdigest()[:16]}_{stamp}.png"
+    if not target.is_file():
+        try:
+            from genko.io import load_episode
+            from genko.render import render_page
+
+            episode = load_episode(Path(path))
+            page = episode.pages[0]
+            image = render_page(page, max(8, int(height / (page.spec.height_mm / 25.4))), mode="print", episode=episode)
+        except Exception:  # (a book that cannot be read shows a plain card)
+            return None
+        folder.mkdir(parents=True, exist_ok=True)
+        for old in folder.glob(target.name.rsplit("_", 1)[0] + "_*.png"):
+            old.unlink(missing_ok=True)
+        image.convert("RGB").save(target)
+    pixmap = QPixmap(str(target))
+    return pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation) if not pixmap.isNull() else None
+
+
+def _book_facts(path: Path) -> str:
+    """A recent book's pages and when it was last worked on, under its cover (read from project.json alone)."""
+    import datetime
+
+    try:
+        project = Path(path) / "project.json"
+        pages = len(json.loads(project.read_text(encoding="utf-8")).get("pages") or [])
+        when = datetime.datetime.fromtimestamp(project.stat().st_mtime)
+    except (OSError, ValueError):
+        return ""
+    today = datetime.date.today()
+    day = "今日" if when.date() == today else "昨日" if (today - when.date()).days == 1 else f"{when.month}月{when.day}日"
+    return f"{pages} ページ · {day}"
+
+
+class _CoverCard(QStyledItemDelegate):
+    """A recent book: its first page on a sheet with a soft edge, its title (本文) and its facts (補足) under it."""
+
+    def paint(self, painter, option, index) -> None:  # noqa: D102
+        from PySide6.QtCore import QRect
+        from PySide6.QtGui import QFont, QPen
+        from PySide6.QtWidgets import QStyle
+
+        t = theme.tokens()
+        painter.save()
+        painter.setRenderHint(painter.RenderHint.Antialiasing)
+        box = option.rect.adjusted(6, 6, -6, -6)
+        chosen = bool(option.state & QStyle.StateFlag.State_Selected)
+        hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        if chosen or hover:
+            painter.setPen(QPen(QColor(t.accent if chosen else t.border), 1.5))
+            painter.setBrush(QColor(t.selected if chosen else t.hover))
+            painter.drawRoundedRect(box, 10, 10)
+        icon = index.data(Qt.ItemDataRole.DecorationRole)
+        size = QSize(132, 180)
+        sheet = QRect(box.center().x() - size.width() // 2, box.top() + 12, size.width(), size.height())
+        painter.setPen(QPen(QColor(t.divider), 1))
+        painter.setBrush(QColor(t.base))
+        painter.drawRoundedRect(sheet.adjusted(-1, -1, 1, 1), 3, 3)
+        if icon is not None:
+            pixmap = icon.pixmap(size)
+            target = QRect(0, 0, pixmap.width(), pixmap.height())
+            target.moveCenter(sheet.center())
+            painter.drawPixmap(target, pixmap)
+        text_box = QRect(box.left() + 8, sheet.bottom() + 10, box.width() - 16, 20)
+        font = QFont(option.font)
+        font.setWeight(QFont.Weight.Medium)
+        painter.setFont(font)
+        painter.setPen(QColor(t.text))
+        title = painter.fontMetrics().elidedText(index.data(Qt.ItemDataRole.DisplayRole) or "", Qt.TextElideMode.ElideRight,
+                                                 text_box.width())
+        painter.drawText(text_box, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, title)
+        painter.setFont(option.font)
+        painter.setPen(QColor(t.muted))
+        painter.drawText(text_box.translated(0, 20), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                         index.data(Qt.ItemDataRole.UserRole + 1) or "")
+        painter.restore()
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802
+        return QSize(172, 262)
+
+
+class _ActionCard(QPushButton):
+    """A way to begin: its picture, its name (見出し) and one line of what it does (補足)."""
+
+    def __init__(self, icon: str, title: str, words: str, main: bool = False) -> None:
+        from genko.app.icons import icon as picture
+
+        super().__init__()
+        self.setObjectName("actionCard")
+        self.setProperty("main", main)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName(title)
+        self.setToolTip(words)
+        self.setMinimumHeight(144)  # (the picture, the name and two lines of words)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        mark = QLabel()
+        mark.setPixmap(picture(icon).pixmap(28, 28))
+        name = theme.role(QLabel(title), "heading")
+        note = theme.role(QLabel(words), "caption")
+        note.setWordWrap(True)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+        for widget in (mark, name, note):
+            widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            layout.addWidget(widget)
+        layout.addStretch(1)
+        self.title = name
+
+
+class StartDialog(QDialog):
+    """The first screen: three ways to begin (draw it yourself, open a book, make it with an AI) as cards, and the
+    recent books by their first pages."""
+
+    def __init__(self) -> None:
+        from genko.app.main import recent_projects
+
+        super().__init__()
+        self.setWindowTitle("Genko Studio")
+        self.chosen: Path | None = None
+        name = QLabel("Genko Studio")
+        theme.role(name, "title")
+        lead = theme.role(QLabel("漫画の原稿を作るアプリです。自分で描くことも、AI に描いてもらって確かめ・直すこともできます。"), "hint")
+        lead.setWordWrap(True)
+        self.notice = QLabel()  # (something waiting for the book that will be opened: a style from the catalog)
+        self.notice.setWordWrap(True)
+        self.notice.setObjectName("startNotice")
+        self.notice.hide()
+        new_card = _ActionCard("page", "新しい原稿を作る", "用紙とページ数を決めて、白い原稿から自分で描きます", main=True)
+        new_card.clicked.connect(self._new)
+        open_card = _ActionCard("open", "原稿を開く", "このパソコンにある .genko の原稿を開きます")
+        open_card.clicked.connect(self._browse)
+        ai_card = _ActionCard("wand", "AI と作る", "Claude などの AI をつなぎ、作りたい話を伝えて、届いた依頼を確かめます")
+        ai_card.clicked.connect(self._ai)
+        cards = QHBoxLayout()
+        cards.setSpacing(16)
+        for card in (new_card, open_card, ai_card):
+            cards.addWidget(card, 1)
+        self.cards = (new_card, open_card, ai_card)
+        self.list = QListWidget()
+        self.list.setObjectName("recentBooks")
+        self.list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.list.setIconSize(QSize(132, 180))
+        self.list.setGridSize(QSize(176, 266))
+        self.list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list.setMovement(QListWidget.Movement.Static)
+        self.list.setMouseTracking(True)
+        self.list.setItemDelegate(_CoverCard(self.list))
+        self._paths = recent_projects()
+        blank = _blank_cover(QSize(132, 180))
+        for path in self._paths:
+            item = QListWidgetItem(blank, project_title(path))
+            item.setData(Qt.ItemDataRole.UserRole, str(path))
+            item.setData(Qt.ItemDataRole.UserRole + 1, _book_facts(path))
+            item.setToolTip(str(path))
+            self.list.addItem(item)
+        if self.list.count():
+            self.list.setCurrentRow(0)
+        self.list.itemActivated.connect(lambda item: self._pick(Path(item.data(Qt.ItemDataRole.UserRole))))
+        empty = theme.role(QLabel("最近開いた原稿は、ここに 1 ページ目の絵で並びます。"), "caption")
+        empty.setVisible(self.list.count() == 0)
+        self.list.setVisible(self.list.count() > 0)
+        open_recent = theme.primary(QPushButton("開く"))
+        open_recent.setToolTip("選んだ原稿を開きます（ダブルクリックでも開きます）")
+        open_recent.setDefault(True)
+        open_recent.setVisible(self.list.count() > 0)
+        open_recent.clicked.connect(lambda: self.list.currentItem() and self._pick(Path(self.list.currentItem().data(Qt.ItemDataRole.UserRole))))
+        recent_head = QHBoxLayout()
+        recent_head.addWidget(theme.role(QLabel("最近の原稿"), "heading"))
+        recent_head.addStretch(1)
+        recent_head.addWidget(open_recent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 32, 32, 24)
+        layout.setSpacing(8)
+        layout.addWidget(name)
+        layout.addWidget(lead)
+        layout.addWidget(self.notice)
+        layout.addSpacing(16)
+        layout.addLayout(cards)
+        layout.addSpacing(24)
+        layout.addLayout(recent_head)
+        layout.addWidget(self.list, 1)
+        layout.addWidget(empty)
+        layout.addStretch(0 if self.list.count() else 1)
+        self.resize(960, 640 if self.list.count() else 440)  # (no recent books: no empty half screen)
+        self._next_cover = 0
+        QTimer.singleShot(0, self._load_cover)
+
+    def _load_cover(self) -> None:
+        """The recent books' first pages, one at a time (the window stays quick to open)."""
+        if self._next_cover >= self.list.count():
+            return
+        item = self.list.item(self._next_cover)
+        self._next_cover += 1
+        cover = cover_thumbnail(Path(item.data(Qt.ItemDataRole.UserRole)))
+        if cover is not None:
+            picture = QIcon()
+            for mode in (QIcon.Mode.Normal, QIcon.Mode.Selected, QIcon.Mode.Active):  # (the page never tinted)
+                picture.addPixmap(cover, mode)
+            item.setIcon(picture)
+        QTimer.singleShot(0, self._load_cover)
+
+    def _pick(self, path: Path) -> None:
+        self.chosen = path
+        self.accept()
+
+    def _browse(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "原稿（.genko のフォルダ）を開く")
+        if path:
+            self._pick(Path(path))
+
+    def _new(self) -> None:
+        dialog = NewProjectDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.created:
+            self._pick(dialog.created)
+
+    def show_notice(self, words: str) -> None:
+        self.notice.setText(words)
+        self.notice.setVisible(bool(words))
+
+    def _ai(self) -> None:
+        from genko.app.ai_link import AiDialog
+
+        AiDialog(self).exec()
+
+
+# --- new manuscript -------------------------------------------------------------------------------
+
+
+class NewProjectDialog(QDialog):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("新しい原稿")
+        self.setMinimumWidth(520)
+        self.created: Path | None = None
+        self.title = QLineEdit()
+        self.title.setPlaceholderText("例: 夏の午後の約束")
+        self.episode = QSpinBox()
+        self.episode.setRange(1, 999)
+        self.pages = QSpinBox()
+        self.pages.setRange(1, 400)
+        self.pages.setValue(16)
+        self.paper = QComboBox()
+        for label, key in PAPERS:
+            self.paper.addItem(label, key)
+        self.paper.addItem("自分で決める…", "custom")
+        from genko.app.preferences import default_paper
+
+        if default_paper() and self.paper.findData(default_paper()) >= 0:  # the paper chosen in the preferences
+            self.paper.setCurrentIndex(self.paper.findData(default_paper()))
+        self.custom_spec: PageSpec | None = None
+        self.paper_note = QLabel()
+        self.paper_note.setWordWrap(True)
+        theme.role(self.paper_note, "hint")
+        self.paper.currentIndexChanged.connect(lambda _: self._paper_changed())
+        self.binding = QComboBox()
+        self.binding.addItem("右綴じ（縦書きの漫画）", "right")
+        self.binding.addItem("左綴じ", "left")
+        self.folder = QLineEdit(str(Path.home()))
+        pick = QPushButton("選ぶ…")
+        pick.clicked.connect(self._pick_folder)
+        where = QHBoxLayout()
+        where.addWidget(self.folder, 1)
+        where.addWidget(pick)
+        self.where_note = QLabel()
+        theme.role(self.where_note, "hint")
+        self.title.textChanged.connect(self._note)
+        self.folder.textChanged.connect(self._note)
+        from genko.app import dialog_look as look
+
+        book = look.form()
+        book.addRow(look.section("作品"))
+        book.addRow("作品名", self.title)
+        counts = QHBoxLayout()
+        counts.addWidget(self.episode, 1)
+        counts.addWidget(QLabel("話　"))
+        counts.addWidget(self.pages, 1)
+        counts.addWidget(QLabel("ページ"))
+        book.addRow("話数・ページ数", counts)
+        book.addRow("綴じ", self.binding)
+        book.addRow(look.section("原稿用紙"))
+        book.addRow("原稿用紙", self.paper)
+        book.addRow("", self.paper_note)
+        book.addRow(look.section("保存"))
+        book.addRow("保存する場所", where)
+        book.addRow("", self.where_note)
+        look.quiet_labels(book)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("作る")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
+        buttons.accepted.connect(self.create)
+        buttons.rejected.connect(self.reject)
+        body = QVBoxLayout()
+        body.addLayout(book)
+        body.addStretch(1)
+        self.diagram = look.PaperDiagram()
+        side = QVBoxLayout()
+        side.addWidget(self.diagram, 1)
+        side.addWidget(look.legend())
+        look.frame(self, look.header("新しい原稿", "あとから「ページ → 原稿用紙の設定」で、用紙もページ数も変えられます。"),
+                   body, look.card(side, "原稿用紙"), look.footer(buttons))
+        self.resize(780, 500)
+        self._note()
+        self._paper_changed()
+
+    def target(self) -> Path:
+        from genko.export import safe_name
+
+        name = safe_name(self.title.text().strip() or "無題", "manga")
+        if self.episode.value() > 1:
+            name += f"_{self.episode.value():02d}"
+        return Path(self.folder.text()).expanduser() / f"{name}.genko"
+
+    def _note(self) -> None:
+        self.where_note.setText(f"作られるフォルダ: {self.target()}")
+
+    def chosen_spec(self) -> PageSpec:
+        if self.paper.currentData() == "custom":
+            return self.custom_spec or PageSpec.b4_comic()
+        return spec_for(self.paper.currentData())
+
+    def _paper_changed(self) -> None:
+        if self.paper.currentData() == "custom":
+            dialog = PaperDialog(self, self.custom_spec or PageSpec.b4_comic())
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.custom_spec = dialog.spec()
+            elif self.custom_spec is None:
+                self.paper.setCurrentIndex(0)
+                return
+        self.paper_note.setText(self.chosen_spec().describe())
+        if hasattr(self, "diagram"):
+            self.diagram.show_spec(self.chosen_spec())
+
+    def _pick_folder(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "保存する場所", self.folder.text())
+        if path:
+            self.folder.setText(path)
+
+    def create(self) -> None:
+        from genko.io import save_episode
+        from genko.models import new_episode
+
+        target = self.target()
+        if (target / "project.json").exists():
+            QMessageBox.warning(self, "Genko", f"同じ名前の原稿がすでにあります:\n{target}")
+            return
+        episode = new_episode(self.title.text().strip() or "無題", self.episode.value(), self.pages.value(),
+                              self.chosen_spec(), Binding(self.binding.currentData()))
+        try:
+            save_episode(episode, target)
+        except OSError as exc:
+            QMessageBox.warning(self, "Genko", f"保存できませんでした:\n{exc}")
+            return
+        self.created = target
+        self.accept()
+
+
+# --- export -------------------------------------------------------------------------------------------
+
+
+def icc_setting() -> str:
+    """The CMYK profile chosen last (kept on this computer, like the app's other settings)."""
+    from PySide6.QtCore import QSettings
+
+    value = QSettings("Genko", "Genko Studio").value("color/icc", "")
+    return value if isinstance(value, str) and Path(value).is_file() else ""
+
+
+def set_icc_setting(path: str) -> None:
+    from PySide6.QtCore import QSettings
+
+    QSettings("Genko", "Genko Studio").setValue("color/icc", path)
+
+
+class ExportDialog(QDialog):
+    """Choose a format, its options and a folder. official=True locks the checked export (approval box)."""
+
+    def __init__(self, parent, episode, project: Path | None, actor: str, official: bool = False, current_page: int = 1) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("正式な書き出し" if official else "書き出し")
+        self.setMinimumWidth(560)
+        self.episode, self.project, self.actor = episode, project, actor
+        self.current_page = current_page
+        self.result_: dict | None = None
+        self.fix_requested = False  # the person chose to fix what the check found first
+        self.which = QComboBox()
+        for label, key in (("全部のページ", "all"), (f"今のページ（{current_page}）", "current"), ("今の見開き", "spread"),
+                           ("範囲を指定", "range")):
+            self.which.addItem(label, key)
+        self.range = QLineEdit()
+        self.range.setPlaceholderText("例: 3-5, 8")
+        self.range.setVisible(False)
+        self.which.currentIndexChanged.connect(lambda _: (self.range.setVisible(self.which.currentData() == "range"), self._preview()))
+        self.range.editingFinished.connect(self._preview)
+        self.preview = QLabel()
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setMinimumSize(220, 300)
+        self.preview.setStyleSheet(f"background:{theme.tokens().surround}; border-radius: 6px")
+        self.preview_note = QLabel()
+        theme.role(self.preview_note, "hint")
+        self.format = QComboBox()
+        for fmt in exporting.FORMATS:
+            if official and not fmt.official:
+                continue
+            self.format.addItem(fmt.label, fmt.key)
+        self.note = QLabel()
+        self.note.setWordWrap(True)
+        theme.role(self.note, "hint")
+        self.dpi = QSpinBox()
+        self.dpi.setRange(72, 1200)
+        self.dpi.setSuffix(" dpi")
+        self.width = QSpinBox()
+        self.width.setRange(200, 4000)
+        self.width.setValue(800)
+        self.width.setSuffix(" px")
+        self.max_height = QSpinBox()
+        self.max_height.setRange(400, 20000)
+        self.max_height.setValue(1280)
+        self.max_height.setSuffix(" px")
+        self.long_edge = QSpinBox()
+        self.long_edge.setRange(400, 8000)
+        self.long_edge.setValue(2048)
+        self.long_edge.setSuffix(" px")
+        from genko.export import AREA_LABELS, AREAS
+
+        self.area = QComboBox()
+        for key in AREAS:
+            self.area.addItem(AREA_LABELS[key], key)
+        self.area.setCurrentIndex(self.area.findData("bleed"))
+        self.area.setToolTip("印刷所の指定に合わせます。多くは「裁ち落としまで」。トンボ付きは用紙全体")
+        self.color = QComboBox()
+        for label, key in (("自動（モノクロの原稿はグレー、カラーは RGB）", "auto"), ("RGB（sRGB を埋め込む）", "rgb"), ("CMYK", "cmyk"),
+                           ("グレー", "gray"), ("2 階調（白黒の 1 ビット）", "bitonal")):
+            self.color.addItem(label, key)
+        self.icc = QLineEdit(icc_setting())
+        self.icc.setPlaceholderText("なし（K 版の黒・総インキ量 320%）")
+        self.icc.setToolTip("印刷所が指定する CMYK のカラープロファイル（Japan Color 2001 Coated など .icc）")
+        pick_icc = QPushButton("選ぶ…")
+        pick_icc.clicked.connect(self._pick_icc)
+        self.icc_row = QWidget()
+        icc_line = QHBoxLayout(self.icc_row)
+        icc_line.setContentsMargins(0, 0, 0, 0)
+        icc_line.addWidget(self.icc, 1)
+        icc_line.addWidget(pick_icc)
+        self.screen_on = QCheckBox("グレーを網点にする")
+        self.screen_on.setToolTip("2 階調で書き出すとき、トーン化していないグレーを、しきい値で白か黒にせず網点にします（書き出しでのトーン化）")
+        self.screen_lpi = QDoubleSpinBox()
+        self.screen_lpi.setRange(10, 150)
+        self.screen_lpi.setValue(60)
+        self.screen_lpi.setSuffix(" 線")
+        self.screen_shape = QComboBox()
+        for label, key in SCREEN_SHAPES:
+            self.screen_shape.addItem(label, key)
+        self.screen_row = QWidget()
+        screen_line = QHBoxLayout(self.screen_row)
+        screen_line.setContentsMargins(0, 0, 0, 0)
+        screen_line.addWidget(self.screen_on)
+        screen_line.addWidget(self.screen_lpi)
+        screen_line.addWidget(self.screen_shape)
+        self.color.currentIndexChanged.connect(lambda _: self.screen_row.setEnabled(self._bitonal()))
+        self.jpeg = QCheckBox("JPEG にする（PNG より軽い）")
+        self.spreads = QCheckBox("見開きも 1 枚ずつ出す")
+        self.official = QCheckBox("正式な書き出し（点検して、書き出しの承認として記録する）")
+        self.official.setChecked(official)
+        self.official.setEnabled(not official)
+        default_dir = (project.parent / f"{project.stem}_書き出し") if project else Path.home() / "genko_書き出し"
+        self.folder = QLineEdit(str(default_dir))
+        pick = QPushButton("選ぶ…")
+        pick.clicked.connect(self._pick_folder)
+        where = QHBoxLayout()
+        where.addWidget(self.folder, 1)
+        where.addWidget(pick)
+        from genko.app import dialog_look as look
+
+        self.form = look.form()
+        self.form.addRow(look.section("形式"))
+        self.form.addRow("形式", self.format)
+        self.form.addRow("", self.note)
+        self.form.addRow(look.section("ページと大きさ"))
+        pages_row = QHBoxLayout()
+        pages_row.addWidget(self.which)
+        pages_row.addWidget(self.range, 1)
+        self.form.addRow("ページ", pages_row)
+        self.rows: dict[str, QWidget] = {}
+        for key, label, widget in (("dpi", "解像度", self.dpi), ("area", "書き出す範囲", self.area), ("width", "幅", self.width), ("max_height", "1 枚の高さの上限", self.max_height),
+                                   ("long_edge", "長辺", self.long_edge), ("jpeg", "", self.jpeg), ("spreads", "", self.spreads)):
+            self.form.addRow(label, widget)
+            self.rows[key] = widget
+        self.colour_head = look.section("色")
+        self.form.addRow(self.colour_head)
+        for key, label, widget in (("color", "色", self.color), ("icc", "カラープロファイル", self.icc_row),
+                                   ("screen", "トーン化", self.screen_row)):
+            self.form.addRow(label, widget)
+            self.rows[key] = widget
+        self.form.addRow(look.section("書き出し先"))
+        self.form.addRow("フォルダ", where)
+        self.form.addRow("", self.official)
+        look.quiet_labels(self.form)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("書き出す")
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
+        self.buttons.accepted.connect(self.run)
+        self.buttons.rejected.connect(self.reject)
+        side = QVBoxLayout()
+        side.addWidget(self.preview, 1)
+        side.addWidget(self.preview_note)
+        body = QVBoxLayout()
+        body.addLayout(self.form)
+        body.addStretch(1)
+        look.frame(self, look.header("書き出し", "形式を選ぶと、その形式で決められることだけが並びます。右は書き出される 1 ページ目です。"),
+                   body, look.card(side, "書き出される形"), look.footer(self.buttons))
+        self.resize(900, 600)
+        self.format.currentIndexChanged.connect(lambda _: self._format_changed())
+        self.area.currentIndexChanged.connect(lambda _: self._preview())
+        self.official.toggled.connect(lambda on: (self.which.setEnabled(not on), on and self.which.setCurrentIndex(0)))
+        self._format_changed()
+
+    def _format_changed(self) -> None:
+        fmt = exporting.BY_KEY[self.format.currentData()]
+        self.note.setText(fmt.note)
+        for key, widget in self.rows.items():
+            visible = key in fmt.options
+            widget.setVisible(visible)
+            label = self.form.labelForField(widget)
+            if label is not None:
+                label.setVisible(visible)
+        self.colour_head.setVisible(any(key in fmt.options for key in ("color", "icc", "screen")))  # (no empty heading)
+        self.screen_row.setEnabled(self._bitonal())
+        self.dpi.setValue(exporting.default_dpi(self.episode, fmt.key))
+        self.long_edge.setValue(2560 if fmt.key == "kindle" else 2048)
+        self.jpeg.setChecked(fmt.key == "sns")
+        if not self.official.isEnabled() or not fmt.official:
+            self.official.setChecked(self.official.isChecked() and fmt.official)
+        self.official.setVisible(fmt.official)
+        self._preview()
+
+    def pages(self) -> list[int]:
+        """The page numbers to write (ValueError when the range cannot be read)."""
+        count = len(self.episode.pages)
+        which = self.which.currentData()
+        if which == "current":
+            return [self.current_page]
+        if which == "spread":
+            page = next((p for p in self.episode.pages if p.index == self.current_page), None)
+            partner = getattr(page, "spread_with", None) if page else None
+            return sorted({self.current_page, partner} - {None})
+        if which == "range":
+            return exporting.parse_pages(self.range.text(), count)
+        return [p.index for p in self.episode.pages]
+
+    def _preview(self) -> None:
+        """The first page to be written, small, cut as it will be."""
+        from PySide6.QtGui import QImage, QPixmap
+
+        from genko.export import crop_to
+        from genko.render import render_page
+
+        try:
+            pages = self.pages()
+        except ValueError as exc:
+            self.preview.clear()
+            self.preview_note.setText(str(exc))
+            return
+        page = next((p for p in self.episode.pages if p.index == pages[0]), None)
+        if page is None:
+            return
+        dpi = 30
+        image = render_page(page, dpi, mode="print", episode=self.episode, crop_marks=self.area.currentData() == "paper")
+        if "area" in exporting.BY_KEY[self.format.currentData()].options:
+            image = crop_to(image, page, self.area.currentData(), dpi)
+        image = image.convert("RGB")
+        data = image.tobytes()
+        qimage = QImage(data, image.width, image.height, image.width * 3, QImage.Format.Format_RGB888).copy()
+        room = max(200, self.preview.height() - 24)
+        self.preview.setPixmap(QPixmap.fromImage(qimage).scaledToHeight(room, Qt.TransformationMode.SmoothTransformation))
+        self.preview_note.setText(f"{pages[0]} ページ（全 {len(pages)} ページを書き出す）")
+
+    def ask_preflight(self, errors: list[dict]) -> str:
+        """What the check found that stops a print: 'go' (write anyway), 'fix' or 'stop'."""
+        lines = [f"・{e['page']} ページ: {e['message']}" if e.get("page") else f"・{e['message']}" for e in errors[:10]]
+        more = f"\n…ほか {len(errors) - 10} 件" if len(errors) > 10 else ""
+        box = QMessageBox(self)
+        box.setWindowTitle("入稿前の点検")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(f"書き出す前に点検したところ、止まる問題が {len(errors)} 件ありました。\n" + "\n".join(lines) + more)
+        go = box.addButton("このまま書き出す", QMessageBox.ButtonRole.AcceptRole)
+        fix = box.addButton("直す（点検パネルを開く）", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("やめる", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        return "go" if box.clickedButton() is go else "fix" if box.clickedButton() is fix else "stop"
+
+    def _pick_icc(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "CMYK のカラープロファイル", self.icc.text(), "カラープロファイル (*.icc *.icm)")
+        if not path:
+            return
+        from genko import colour
+
+        try:
+            ok = colour.is_cmyk_profile(path)
+        except ValueError as exc:
+            from genko.app import wording
+
+            QMessageBox.warning(self, "Genko", wording.error(str(exc)))
+            return
+        if not ok:
+            QMessageBox.warning(self, "Genko", "CMYK の印刷用プロファイルではありません")
+            return
+        self.icc.setText(path)
+        set_icc_setting(path)
+
+    def _pick_folder(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "書き出し先", self.folder.text())
+        if path:
+            self.folder.setText(path)
+
+    def options(self) -> dict:
+        return {"dpi": self.dpi.value(), "width": self.width.value(), "max_height": self.max_height.value(),
+                "long_edge": self.long_edge.value(), "jpeg": self.jpeg.isChecked(), "spreads": self.spreads.isChecked(),
+                "area": self.area.currentData(), "color": self.color.currentData(), "icc": self.icc.text().strip() or None,
+                "screen": ({"lpi": self.screen_lpi.value(), "shape": self.screen_shape.currentData()}
+                           if self.screen_on.isChecked() and self._bitonal() else None)}
+
+    def _bitonal(self) -> bool:
+        """Black and white only (the 2 値 TIFF, or 2 階調 chosen): where greys can be toned at export."""
+        return self.format.currentData() == "tiff" or self.color.currentData() == "bitonal"
+
+    def run(self) -> None:
+        out = Path(self.folder.text()).expanduser()
+        try:
+            pages = self.pages()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Genko", str(exc))
+            return
+        if not self.official.isChecked():  # (the official export runs its own check and stops by itself)
+            from genko import checks
+
+            report = checks.book(self.episode, self.project)
+            errors = [i for i in report["issues"] if i["level"] == "error" and (not i.get("page") or i["page"] in pages)]
+            if errors:
+                answer = self.ask_preflight(errors)
+                if answer == "fix":
+                    self.fix_requested = True
+                    self.reject()
+                    return
+                if answer != "go":
+                    return
+        self.setCursor(Qt.CursorShape.WaitCursor)
+        try:
+            result = exporting.run(self.episode, self.project, self.format.currentData(), out,
+                                   official=self.official.isChecked(), actor=self.actor, pages=pages, **self.options())
+        finally:
+            self.unsetCursor()
+        self.result_ = result
+        if not result.get("ok"):
+            reasons = [e.get("message", "") for e in result.get("errors", [])[:12]]
+            from genko.app import wording
+
+            QMessageBox.warning(self, "Genko", "書き出せませんでした。\n" + ("\n".join(reasons) or wording.error(result.get("error", ""))))
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Genko")
+        box.setText(f"{len(result['files'])} 個のファイルを書き出しました。\n{out}")
+        open_button = box.addButton("フォルダを開く", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("閉じる", QMessageBox.ButtonRole.AcceptRole)
+        box.exec()
+        if box.clickedButton() is open_button:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(out)))
+        self.accept()
+
+
+class TimelapseDialog(QDialog):
+    """The recorded making-of as a moving picture: every page in the order it was drawn, or one page."""
+
+    MOVIES = (("WebP（動く画像・軽い）", "webp"), ("GIF", "gif"), ("PNG（APNG）", "png"), ("MP4（動画）", "mp4"))
+
+    def __init__(self, parent, project: Path, current_page: int = 1):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QDoubleSpinBox
+
+        from genko import timelapse
+
+        self.project, self.current_page = Path(project), current_page
+        self.setWindowTitle("タイムラプスを書き出す")
+        self.which = QComboBox()
+        self.which.addItem("全ページ（描いた順）", "all")
+        self.which.addItem(f"このページだけ（{current_page} ページ）", "page")
+        self.movie = QComboBox()
+        for label, key in self.MOVIES:
+            self.movie.addItem(label, key)
+        if timelapse.ffmpeg() is None:  # (MP4 needs ffmpeg; the others need nothing)
+            item = self.movie.model().item(self.movie.findData("mp4"))
+            item.setEnabled(False)
+            item.setToolTip("ffmpeg が入っていないので使えません")
+        self.fps = QDoubleSpinBox()
+        self.fps.setRange(1, 60)
+        self.fps.setDecimals(0)
+        self.fps.setValue(12)
+        self.fps.setSuffix(" コマ／秒")
+        self.seconds = QDoubleSpinBox()
+        self.seconds.setRange(0, 600)
+        self.seconds.setDecimals(0)
+        self.seconds.setValue(0)
+        self.seconds.setSpecialValueText("すべてのコマ")
+        self.seconds.setSuffix(" 秒に収める")
+        self.count = QLabel()
+        theme.role(self.count, "hint")
+        form = QFormLayout()
+        form.addRow("ページ", self.which)
+        form.addRow("形式", self.movie)
+        form.addRow("速さ", self.fps)
+        form.addRow("長さ", self.seconds)
+        form.addRow("", self.count)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("書き出す…")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
+        buttons.accepted.connect(self.run)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+        self.which.currentIndexChanged.connect(lambda _: self._count())
+        self._count()
+        self.written: Path | None = None
+
+    def page(self) -> int | None:
+        return self.current_page if self.which.currentData() == "page" else None
+
+    def _count(self) -> int:
+        from genko import timelapse
+
+        n = len(timelapse.frames(self.project, self.page()))
+        self.count.setText(f"記録したコマ: {n}" if n else "まだ記録がありません（ファイル → タイムラプスを記録する）")
+        return n
+
+    def write(self, dest: Path) -> Path:
+        from genko import timelapse
+
+        return timelapse.export(self.project, dest, page=self.page(), fps=self.fps.value(),
+                                seconds=self.seconds.value() or None, fmt=self.movie.currentData())
+
+    def run(self) -> None:
+        if not self._count():
+            return
+        ext = self.movie.currentData()
+        start = str(self.project.parent / f"{self.project.stem}_timelapse.{ext}")
+        path, _ = QFileDialog.getSaveFileName(self, "タイムラプスの保存先", start, f"*.{ext}")
+        if not path:
+            return
+        self.setCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.written = self.write(Path(path))
+        except ValueError as exc:
+            from genko.app import wording
+
+            QMessageBox.warning(self, "Genko", wording.error(str(exc)))
+            return
+        finally:
+            self.unsetCursor()
+        self.accept()
+
+
+# --- panel layout templates --------------------------------------------------------------------------------
+
+
+def _tree(frame) -> dict:
+    from genko.studio.layout import frame_tree
+
+    return frame_tree(frame)
+
+
+def _plan(key: str) -> dict:
+    """A template as a layout plan (a person's layout has no panel briefs yet)."""
+    from genko.studio import layout
+
+    slots = layout.slots_in_order(layout.resolve_tiers({"template": key}))
+    return {"template": key, "panels": [{"slot": slot} for slot in slots]}
+
+
+class TemplateDialog(QDialog):
+    """Pick a panel layout; `ops` are the ops that clear the page and cut it (applied by the window)."""
+
+    def __init__(self, parent, episode, page) -> None:
+        import copy
+
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QIcon
+
+        from genko.app.studio_widgets import to_pixmap
+        from genko.ops import apply_ops
+        from genko.render import render_page
+        from genko.studio import layout
+
+        super().__init__(parent)
+        self.setWindowTitle("テンプレートでコマを割る")
+        self.resize(720, 520)
+        self.episode, self.page = episode, page
+        self.ops: list[dict] = []
+        self.needs_clearing = not layout.is_blank(episode, page)
+        self.list = QListWidget()
+        self.list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.list.setIconSize(QSize(120, 170))
+        self.list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list.setSpacing(8)
+        self.list.setWordWrap(True)
+        for kept in layout.user_templates():  # (the person's own layouts first: 自分のコマ割り)
+            trial = copy.deepcopy(episode)
+            target = next(p for p in trial.pages if p.index == page.index)
+            try:
+                tree = layout.user_template_tree(kept, target)
+                apply_ops(trial, [{"op": "set_layout", "page": page.index, "tree": tree, "force": True}], agent="human:preview")
+                target = next(p for p in trial.pages if p.index == page.index)
+                icon = QIcon(to_pixmap(render_page(target, 20, mode="print", episode=trial)))
+            except Exception:
+                continue
+            item = QListWidgetItem(icon, f"自分: {kept['name']}")
+            item.setData(Qt.ItemDataRole.UserRole, {"mine": kept["name"]})
+            self.list.addItem(item)
+        for key, spec in layout.templates().items():
+            trial = copy.deepcopy(episode)
+            target = next(p for p in trial.pages if p.index == page.index)
+            try:
+                layout.clear_page(trial, target, agent="human:preview")
+                layout.apply_layout(trial, page.index, _plan(key), agent="human:preview")
+                target = next(p for p in trial.pages if p.index == page.index)
+                icon = QIcon(to_pixmap(render_page(target, 20, mode="print", episode=trial)))
+            except Exception:
+                continue
+            item = QListWidgetItem(icon, spec.get("description") or key)
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            self.list.addItem(item)
+        self.list.itemDoubleClicked.connect(lambda _: self.choose())
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._mine_menu)
+        note = QLabel("コマと台詞は作り直されます（元に戻す で取り消せます）。" if self.needs_clearing else "空のページをテンプレートで割ります。")
+        note.setWordWrap(True)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("このテンプレートで割る")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
+        buttons.accepted.connect(self.choose)
+        buttons.rejected.connect(self.reject)
+        layout_box = QVBoxLayout(self)
+        layout_box.addWidget(self.list, 1)
+        layout_box.addWidget(note)
+        layout_box.addWidget(buttons)
+
+    def _mine_menu(self, pos) -> None:
+        """Right click on one of the person's own layouts: delete it."""
+        from PySide6.QtWidgets import QMenu
+
+        from genko.studio import layout
+
+        item = self.list.itemAt(pos)
+        key = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        if not isinstance(key, dict):
+            return
+        menu = QMenu(self)
+        gone = menu.addAction("このテンプレートを消す")
+        if menu.exec(self.list.viewport().mapToGlobal(pos)) is gone:
+            layout.delete_user_template(key["mine"])
+            self.list.takeItem(self.list.row(item))
+
+    def choose(self) -> None:
+        import copy
+
+        from genko.studio import layout
+
+        item = self.list.currentItem()
+        if item is None:
+            return
+        key = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(key, dict):  # one of the person's own layouts: its tree, fitted to this paper
+            kept = next((t for t in layout.user_templates() if t.get("name") == key["mine"]), None)
+            if kept is None:
+                return
+            self.ops = [{"op": "delete_line", "id": line.id} for line in self.episode.story_for_page(self.page.index)]
+            self.ops.append({"op": "set_layout", "page": self.page.index, "tree": layout.user_template_tree(kept, self.page),
+                             "force": True})
+            self.accept()
+            return
+        trial = copy.deepcopy(self.episode)
+        target = next(p for p in trial.pages if p.index == self.page.index)
+        try:
+            layout.clear_page(trial, target, agent="human:preview")
+            layout.apply_layout(trial, self.page.index, _plan(item.data(Qt.ItemDataRole.UserRole)), agent="human:preview")
+        except Exception as exc:
+            from genko.app import wording
+
+            QMessageBox.warning(self, "Genko", wording.error(str(exc)))
+            return
+        done = next(p for p in trial.pages if p.index == self.page.index)
+        # one op with the finished tree (split ids made on the copy would not match the book)
+        self.ops = [{"op": "delete_line", "id": line.id} for line in self.episode.story_for_page(self.page.index)]
+        self.ops.append({"op": "set_layout", "page": self.page.index, "tree": _tree(done.frames[0]), "force": True})
+        self.accept()

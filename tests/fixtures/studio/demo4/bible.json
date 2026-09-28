@@ -1,0 +1,25 @@
+{
+  "title": "夏の午後の約束",
+  "logline": "5年前の約束を果たすため、幼馴染が夏の屋上に来る。",
+  "plot": "転校していったソラと、屋上で会う約束をしていたひな。5年後の同じ日、ひなは半信半疑で屋上に上がる。",
+  "themes": ["約束", "再会"],
+  "characters": [
+    {
+      "id": "hina", "name": "日向ひな", "role": "heroine", "age": 16,
+      "look": {"hair": "肩までのストレート、横に流した前髪", "hair_value": "beta", "eyes": "大きく、やや垂れ目", "build": "細身",
+               "height_cm": 156, "outfits": [{"id": "default", "desc": "半袖のセーラー服"}], "marks": ["左側に星形の髪留め"], "silhouette": "髪留め + 前髪"},
+      "speech": {"first_person": "わたし", "tone": "丁寧語まじり"},
+      "tokens_en": "a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip"
+    },
+    {
+      "id": "sora", "name": "天野ソラ", "role": "hero", "age": 16,
+      "look": {"hair": "短い癖毛", "hair_value": "white", "eyes": "切れ長", "build": "やや長身",
+               "height_cm": 172, "outfits": [{"id": "default", "desc": "学ランの前を開けている"}], "marks": [], "silhouette": "癖毛 + 開いた学ラン"},
+      "speech": {"first_person": "俺", "tone": "ぶっきらぼう"},
+      "tokens_en": null
+    }
+  ],
+  "locations": [{"id": "loc_rooftop", "name": "校舎の屋上", "desc": "フェンスと給水塔のある屋上", "times": ["sunset"]}],
+  "style": {"notes": ["背景は描き込みすぎない"]},
+  "constraints": ["台詞・効果音を画像に描かない"]
+}

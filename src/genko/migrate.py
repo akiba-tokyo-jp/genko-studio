@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from genko.models import (
     Binding,
     Episode,
@@ -30,11 +32,59 @@ def _frame(data: dict) -> Frame:
         clip=data.get("clip", True),
         bleed=data.get("bleed", False),
         border_mm=float(data.get("border_mm", 0.8)),
+        panel=data.get("panel"),
+        poly=[tuple(p) for p in data["poly"]] if data.get("poly") else None,
+        split=dict(data["split"]) if data.get("split") else None,
+        custom=bool(data.get("custom", False)),
+        curves=[float(v) for v in data["curves"]] if isinstance(data.get("curves"), list) else None,
+        line=dict(data["line"]) if isinstance(data.get("line"), dict) else None,
+        corner_mm=float(data.get("corner_mm", 0.0) or 0.0),
     )
 
 
-def _layer(data: dict) -> Layer:
+def _layer(data: dict, store=None) -> Layer:
     role = LayerRole(data["role"])
+    layer = _layer_fields(data, role)
+    if layer.kind == LayerKind.PLACED:
+        layer.asset = data.get("asset")
+        layer.frame_id = data.get("frame_id")
+        layer.placement_mm = _rect(data["placement_mm"]) if data.get("placement_mm") else None
+        layer.fit = data.get("fit") or "cover"
+        layer.clip_to = data.get("clip_to") or "frame"
+        layer.source = data.get("source")
+        layer.finish = data.get("finish")
+    mask = data.get("mask") or {}
+    if store is not None and mask.get("asset"):
+        png = store.get_bytes(mask["asset"], ".png")
+        if png:
+            layer.mask = {"png": png, "enabled": bool(mask.get("enabled", True))}
+    if layer.kind == LayerKind.PLACED:
+        return layer
+    if store is not None and data.get("asset"):
+        layer.raster_relpath = store.relpath(data["asset"], ".png")
+        layer.raster_png = store.get_bytes(data["asset"], ".png")
+    for patch in data.get("patches") or []:
+        item = {k: v for k, v in patch.items() if k != "asset"}
+        if store is not None and patch.get("asset"):
+            item["png"] = store.get_bytes(patch["asset"], ".png")
+            item["asset"] = patch["asset"]
+        layer.patches.append(item)
+    if store is not None and data.get("strokes_blob"):
+        from genko import blobcache
+
+        ref = data["strokes_blob"]
+        cached = blobcache.strokes_for(ref)
+        if cached is not None and store.path(ref, ".strokes.json").is_file():
+            layer.strokes = cached
+        else:
+            blob = store.get_bytes(ref, ".strokes.json")
+            if blob is not None:
+                layer.strokes = [coerce_stroke(item) for item in json.loads(blob)]
+                blobcache.remember(ref, layer.strokes)
+    return layer
+
+
+def _layer_fields(data: dict, role: LayerRole) -> Layer:
     return Layer(
         id=data.get("id") or new_id(),
         role=role,
@@ -54,7 +104,19 @@ def _layer(data: dict) -> Layer:
         blend=str(data.get("blend") or "normal"),
         clip=bool(data.get("clip", False)),
         lock_alpha=bool(data.get("lock_alpha", False)),
+        locked=bool(data.get("locked", False)),
+        panel_clip=bool(data.get("panel_clip", True)),
+        panel_each=bool(data.get("panel_each", False)),
+        tone=dict(data["tone"]) if data.get("tone") else None,
         parent_id=data.get("parent_id"),
+        color=tuple(int(v) for v in data["color"])[:3] if data.get("color") else None,  # type: ignore[arg-type]
+        reference=bool(data.get("reference", False)),
+        fill=dict(data["fill"]) if isinstance(data.get("fill"), dict) else None,
+        adjust=dict(data["adjust"]) if isinstance(data.get("adjust"), dict) else None,
+        effect=dict(data["effect"]) if isinstance(data.get("effect"), dict) else None,
+        color_prints=bool(data.get("color_prints", False)),
+        screen=dict(data["screen"]) if isinstance(data.get("screen"), dict) else None,
+        source=dict(data["source"]) if isinstance(data.get("source"), dict) else None,
     )
 
 
@@ -75,10 +137,34 @@ def _line(data: dict) -> StoryLine:
         wrap=data.get("wrap", "horizontal"),
         ruby_runs=[tuple(item) for item in data.get("ruby_runs") or []],
         path=[tuple(pt) for pt in data["path"]] if data.get("path") else None,
+        emphasis_runs=[str(item) for item in data.get("emphasis_runs") or []],
+        style_runs=[[str(r[0]), dict(r[1])] for r in data.get("style_runs") or [] if r and len(r) > 1],
+        style=dict(data.get("style") or {}),
+        tails=[dict(t) for t in data.get("tails") or []],
     )
 
 
-def migrate_payload(payload: dict) -> Episode:
+SUPPORTED_VERSION = 3
+KNOWN_TOP_KEYS = frozenset({
+    "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
+    "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
+})
+KNOWN_PAGE_KEYS = frozenset({
+    "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
+    "effects", "ruler", "rulers", "prims", "frames", "layers", "texts", "fills", "name_strokes", "ink_strokes",
+})
+
+
+class UnsupportedProjectVersion(ValueError):
+    """The file was written by a newer Genko; opening it here could lose data."""
+
+
+def migrate_payload(payload: dict, store=None) -> Episode:
+    version = payload.get("version", 1)
+    if not isinstance(version, int) or version > SUPPORTED_VERSION:
+        raise UnsupportedProjectVersion(
+            f"project.json version {version} is newer than this build supports ({SUPPORTED_VERSION}); update Genko"
+        )
     spec_raw = payload["spec"]
     spec = PageSpec(
         width_mm=spec_raw["width_mm"],
@@ -86,6 +172,9 @@ def migrate_payload(payload: dict) -> Episode:
         dpi=spec_raw["dpi"],
         bleed_mm=spec_raw["bleed_mm"],
         inner_margin_mm=spec_raw["inner_margin_mm"],
+        trim_w_mm=spec_raw.get("trim_w_mm"),
+        trim_h_mm=spec_raw.get("trim_h_mm"),
+        margins_mm=tuple(float(v) for v in spec_raw["margins_mm"]) if spec_raw.get("margins_mm") else None,
         expression=spec_raw.get("expression", "mono"),
         preset=spec_raw.get("preset"),
     )
@@ -94,6 +183,9 @@ def migrate_payload(payload: dict) -> Episode:
     pages: list[Page] = []
     for raw in payload["pages"]:
         page = Page(
+            id=raw.get("id") or "pg_" + new_id(),
+            art_ok=bool(raw.get("art_ok", False)),
+            plan=raw.get("plan"),
             index=raw["index"],
             spec=spec,
             frames=[_frame(frame) for frame in raw["frames"]],
@@ -105,6 +197,7 @@ def migrate_payload(payload: dict) -> Episode:
             numero=raw.get("numero", True),
             effects=list(raw.get("effects") or []),
             ruler=raw.get("ruler"),
+            rulers=list(raw.get("rulers") or []),
             prims=list(raw.get("prims") or []),
             onion_from=raw.get("onion_from"),
             lt_threshold=raw.get("lt_threshold"),
@@ -115,17 +208,24 @@ def migrate_payload(payload: dict) -> Episode:
         }
         page.fills = fills
         if raw.get("layers"):
-            page.layers = [_layer(item) for item in raw["layers"]]
+            page.layers = [_layer(item, store) for item in raw["layers"]]
         else:
             page.layers = default_layers()
             page.name_strokes = [[tuple(pt) for pt in stroke] for stroke in raw.get("name_strokes", [])]  # type: ignore[misc]
             page.ink_strokes = [[tuple(pt) for pt in stroke] for stroke in raw.get("ink_strokes", [])]  # type: ignore[misc]
             for role, rgb in fills.items():
                 page.paint(role, rgb)  # type: ignore[arg-type]
-        page_lines = [_line(item) for item in raw.get("texts", [])]
-        if not page_lines:
+        if story:
+            # One object per line: page.texts and episode.story must not drift apart.
             page_lines = [line for line in story if line.page_index == page.index]
+        else:
+            page_lines = [_line(item) for item in raw.get("texts", [])]
         page.texts = page_lines
+        page.extra = {k: v for k, v in raw.items() if k not in KNOWN_PAGE_KEYS}
+        if isinstance(page.extra.get("cover"), dict):  # (a cover's paper follows from the book's)
+            from genko.covers import spec_for
+
+            page.spec = spec_for(spec, page.extra["cover"])
         pages.append(page)
     if not story:
         story = [line for page in pages for line in page.texts]
@@ -148,8 +248,22 @@ def migrate_payload(payload: dict) -> Episode:
     episode.brush_stabilize = int(brush.get("stabilize", 0) or 0)
     episode.brush_taper = bool(brush.get("taper", False))
     episode.brush_curve = str(brush.get("curve") or "linear")
+    episode.brush_custom = {str(k): dict(v) for k, v in (brush.get("custom") or {}).items()}
+    if episode.brush_custom:
+        from genko import brushes
+
+        brushes.register(episode.brush_custom)  # the book's own brushes draw the same on any computer
+    episode.nombre = dict(payload.get("nombre") or {})
     bible = payload.get("bible") or {}
     episode.bible.plot = bible.get("plot", "")
     episode.bible.characters = list(bible.get("characters") or [])
     episode.bible.constraints = list(bible.get("constraints") or [])
+    episode.extra = {k: v for k, v in payload.items() if k not in KNOWN_TOP_KEYS}
+    episode.revision = int(payload.get("revision") or 0)
+    episode.start_side = payload.get("start_side")
+    episode.strict_gates = bool(payload.get("strict_gates", False))
+    episode.studio = dict(payload.get("studio") or {})
+    by_index = {str(page.index): page.id for page in pages}
+    # v2 keyed locks by page number; v3 by page id.
+    episode.page_locks = {by_index.get(str(key), str(key)): owner for key, owner in episode.page_locks.items()}
     return episode

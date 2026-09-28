@@ -1,45 +1,401 @@
+"""The page canvas: the page as it will print (rendered by Genko) with light overlays on top.
+
+Tools: 選択 (click a panel to select it, drag a balloon to move it, drag elsewhere to move the
+view), ペン and 消しゴム. The view fits the page when it opens; Ctrl+wheel or pinch zooms,
+the wheel or two fingers scroll, Space+drag or the middle button pans.
+"""
+
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QWheelEvent
-from PySide6.QtWidgets import QWidget
+import copy
+import time
+from typing import Callable
 
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap, QTransform, QWheelEvent
+from PySide6.QtWidgets import QLabel, QPlainTextEdit, QWidget
+
+from genko.app.canvas_guides import GuideMixin
+from genko.app.canvas_shapes import ShapeSelectMixin
+from genko.app.canvas_vector import VectorMixin
+from genko.app import theme
 from genko.models import Page, Rect, StoryLine
 from genko.stroke import pack_point
 
+HANDLE_PX = 7
 
-class PageCanvas(QWidget):
+
+BASE_DPI = 220  # rendered at once; enough up to about 230 % on a normal screen
+DETAIL_DPI = 432  # zoomed in further, a finer render follows from a background thread (up to 450 %)
+
+
+class InlineEditor(QPlainTextEdit):
+    """Typing a line where it goes: Ctrl+Enter (or clicking elsewhere) keeps it, Esc drops it."""
+
+    def __init__(self, parent, text: str, on_done) -> None:
+        super().__init__(parent)
+        self.on_done = on_done
+        self.finished = False
+        self.setPlainText(text)
+        self.setStyleSheet(f"QPlainTextEdit{{background:#fffdf5;color:#1f2124;border:2px solid {theme.tokens().accent};font-size:15px}}")
+        self.setPlaceholderText("台詞を入力（改行で次の列、ルビは ｜約束《やくそく》、傍点は 《《強調》》）")
+        self.hint = QLabel("Ctrl+Enter で決定・Esc でやめる", parent)
+        self.hint.setStyleSheet(f"background:{theme.tokens().accent};color:{theme.tokens().accent_text};padding:1px 6px;border-radius:3px")
+        self.hint.adjustSize()
+
+    def place(self, x: float, y: float) -> None:
+        self.setGeometry(int(x), int(y), 260, 110)
+        parent = self.parentWidget()
+        hx = max(0, min(int(x), (parent.width() if parent else 10000) - self.hint.width()))
+        self.hint.move(hx, max(0, int(y) - self.hint.height()))
+        self.show()
+        self.hint.show()
+        self.setFocus()
+        self.moveCursor(self.textCursor().MoveOperation.End)
+
+    def finish(self, keep: bool) -> None:
+        if self.finished:
+            return
+        self.finished = True
+        text = self.toPlainText().strip()
+        self.hide()
+        self.hint.hide()
+        self.hint.deleteLater()
+        self.deleteLater()
+        self.on_done(text if keep else None)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape:
+            self.finish(False)
+            return
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.finish(True)
+            return
+        super().keyPressEvent(event)
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        self.finish(True)
+
+
+MIN_SCALE, MAX_SCALE = 0.3, 12.0  # screen px per mm
+
+
+class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
+    _QtBase = QWidget  # (the GPU canvas below is the same class on QOpenGLWidget)
     changed = Signal()
     strokeCommitted = Signal(list)
     frameSelected = Signal(str)
     textMoved = Signal(str, float, float)
+    contextMenuAt = Signal(str, QPointF)  # frame id ("" if none), global position
+    zoomChanged = Signal(float)
+    lineSelected = Signal(str, bool)  # line id, open the lines panel
+    lineGeometry = Signal(str, object)  # line id, {x_mm, y_mm, w_mm, h_mm} or {tails}: a move_line op
+    lineEditRequested = Signal(str)  # double-click on a balloon: type over it
+    lineContextMenu = Signal(str, QPointF)
+    detailReady = Signal(int, int, object)  # page generation, dpi, QImage (from the detail thread)
+    vectorEdited = Signal(object)  # a vector_edit op without page and layer
+    shapeDrawn = Signal(object)  # {shape, points | box, sides?, closed?}: an add_shape op
+    selectionDrawn = Signal(object, str)  # a new area and how it joins the selection (replace/add/subtract/intersect)
+    selectionPainted = Signal(object, bool)  # selection pen points (mm), True = add / False = take away
+    colourAreaRequested = Signal(float, float)  # 色域選択 clicked here
+    textRequested = Signal(float, float)  # the text tool clicked here (mm)
+    gutterMoved = Signal(str, int, float)  # split node id, gutter index, delta mm (a move_gutter op)
+    cutRequested = Signal(str, QPointF, QPointF)  # panel id, cut line ends (mm): a cut_frame op
+    frameShaped = Signal(str, object)  # panel id, [[x, y], …]: a free-form panel (set_frame poly)
+    frameBowed = Signal(str, int, float)  # panel id, edge, mm: an edge bowed out (+) or in (−) (set_frame bow)
+    vectorTraced = Signal(object, str)  # the trace [[x, y, pressure], …] and how it mends the lines (trace_edit)
+    frameDrawn = Signal(object)  # [[x, y], …] (mm): a new panel drawn with the panel tool (an add_frame op)
+    colourPicked = Signal(object)  # (r, g, b) under the eyedropper
+    fillRequested = Signal(float, float)  # the fill tool clicked here (mm)
+    areaFilled = Signal(object)  # a drawn area to fill: [[x, y], …]
+    areaSelected = Signal(object)  # a new selection area {"poly": …} (the window may replace it, e.g. auto-select)
+    wandRequested = Signal(float, float)
+    selectionTransformed = Signal(object)  # [a, b, c, d, e, f] applied to the selection
+    strokeReshaped = Signal(str, object)  # stroke id, new points
+    rulerPlaced = Signal(object)  # {kind, points, angle?, ratio?, copies?}: an add_ruler op
+    rulerEdited = Signal(str, object)  # ruler id, {points, angle?}: an edit_ruler op
+    primSelected = Signal(str)  # a 3D figure or box ("" for none)
+    primEdited = Signal(str, object)  # id, {pos} or {rot}: an edit_prim op
+    primPosed = Signal(str, str, object)  # figure id, the dragged part, where to (mm): a pose_mannequin drag
+    effectRequested = Signal(float, float)  # the effect tool clicked here (mm): put the chosen effect line
+    effectSelected = Signal(str)
+    effectMoved = Signal(str, object)  # effect id, its new centre [x, y]
+    stampRequested = Signal(float, float)  # the material tool clicked here (mm)
+    selectionWarped = Signal(object)  # a free transform of the selection: {perspective: [4 points]} | {mesh: [9 points]}
+    balloonDrawn = Signal(object)
+    layerMoveStarted = Signal()  # the layer-move tool pressed: the window hands over the layer's picture
+    layerMoved = Signal(float, float)  # the layer-move tool: how far (mm)
+    gradientRequested = Signal(object, object)  # the gradient tool: from, to (mm)  # the text tool's balloon pen: an outline [[x, y], …] (mm)
 
     def __init__(self) -> None:
-        super().__init__()
+        self._QtBase.__init__(self)
         self.page: Page | None = None
         self.lines: list[StoryLine] = []
-        self._stroke: list[tuple[float, float]] = []
+        self._stroke: list[tuple] = []
         self._scale = 2.4
         self._pan_x = 20.0
         self._pan_y = 20.0
+        self._fitted = True  # follow the window size until the person zooms or pans
+        self.rotation = 0.0  # the view only (degrees, clockwise); the page itself never turns
+        self.flipped = False  # the view mirrored left to right (to check the drawing's balance)
+        self.flipped_v = False  # 上下反転表示: the view upside down
+        self.sel_pivot = None  # 基準位置: the point the selection turns about (mm; None: its middle)
+        self.pivot_mode = False  # 「基準位置を動かす」: the next click inside the marquee tool puts the pivot there
+        self._zoom_drag = None  # 虫めがね: where a drag to zoom into began (screen)
+        self._turning: tuple[float, float] | None = None  # Shift+Space drag: (start angle, rotation then)
+        self.live_brush: dict | None = None  # the pen in hand (add_stroke fields); None draws a plain guide line
+        self._live = None  # LiveInk of the line being drawn
+        self._live_of: tuple | None = None  # (the point list, straight/snapped) it was drawn from
+        self._eraser_end: str | None = None
+        self.pen_button = "menu"
+        self.blend_mm = 6.0  # the 色混ぜ brush's size
+        self.pick_source = "view"  # the eyedropper takes what is seen, or the layer drawn on ("layer")
+        self.layer_colour_at = None  # (x_mm, y_mm) -> rgb | None, set by the window
+        self.cursor_kind = "circle_cross"  # circle | circle_cross | cross | dot (環境設定)
+        self.modifier_tools = {"alt": "picker", "ctrl": "select"}  # held Alt / Ctrl: this tool for a moment
+        self.tool_modifiers: dict[str, dict[str, str]] = {}  # 道具ごとの修飾キー: {tool: {alt|ctrl|shift: tool | "none"}}
+        self._held_tool: str | None = None  # the tool to go back to when the modifier is let go
+        self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+        self.grabGesture(Qt.GestureType.PinchGesture)
+        self._tool_drag: dict | None = None  # the layer-move and gradient tools: {"start", "end"} (mm)
+        self.move_image = None  # (QImage, x_mm, y_mm, w_mm, h_mm): the moving layer's picture  # the pen's side button: menu (a right click) | picker | hand
+        self.balloon_pen = False
+        self.warp: dict | None = None  # a free transform being set up: {"kind", "box": (x, y, w, h), "points"}  # the text tool draws a balloon's outline instead of placing a line  # the tool to go back to after the pen's eraser end lifts
         self._panning = False
+        self._space = False
         self._last_pos = QPointF()
+        self._pan_speed = QPointF(0, 0)
+        self._pan_time = 0.0
+        self._press_pos: QPointF | None = None
         self._drag_line: StoryLine | None = None
-        self.tool = "pen"
+        self._drag_pos: tuple[float, float] | None = None  # where the dragged balloon is shown; the model is untouched
+        self._drag_grab = (0.0, 0.0)
+        self.tool = "select"
         self._hover: tuple[float, float] | None = None
         self.brush_width_mm = 0.35
+        self.eraser_mm = 2.0
+        self.show_guides = True  # bleed, trim line and the basic frame
+        self.phone_view = False  # (a vertical-scroll book: how much of it one phone screen shows)
+        self.selected_line_id: str | None = None
+        self._handle_drag: dict | None = None
+        self._frame_drag: dict | None = None  # the panel tool: {"kind": gutter|cut|vertex, ...}
+        self.frame_mode = "cut"  # the panel tool: cut panels, or draw new ones (rect | poly | free)
+        self._frame_poly: list[tuple[float, float]] = []  # a panel being drawn corner by corner (折れ線)
+        self._modifiers = Qt.KeyboardModifier.NoModifier
+        self.selection: dict | None = None  # {"area": {...}, "outline": [[x, y], …]} (mm)
+        self.marquee = "rect"  # rect | lasso | wand
+        self._sel_drag: dict | None = None
+        self.show_frame_numbers = False  # コマ番号 (the reading order) over the panels
+        self.binding = "right"
+        self.strokes_for_reshape = None  # callable → the target layer's strokes
+        self.reshape_radius_mm = 6.0
+        self.reshape_pin_ends = False  # 線つまみ: the line's ends stay where they are
+        self.vector_radius_mm = 2.0  # how far from a trace the lines are mended
+        self._reshape: dict | None = None
+        self.editor: InlineEditor | None = None
+        self._init_guides()
+        self._init_shapes()
+        self._init_vector()
+        self.overlay_name_strokes = False  # show the name strokes faintly over a proof render
+        # renderer(dpi) -> QPixmap of the whole page; set by the window
+        self.renderer: Callable[[int], QPixmap | None] | None = None
+        # detail_job(dpi) -> a function that renders a QImage off the GUI thread (zoomed-in views)
+        self.detail_job: Callable[[int], Callable[[], object]] | None = None
+        # needs_rough(dpi) -> True when a full render now would be slow (many lines not drawn lately):
+        # then a rough render shows at once and the real one follows from the background thread
+        self.needs_rough: Callable[[int], bool] | None = None
+        self._rough = False
+        self._rendered: tuple[int, QPixmap] | None = None
+        self._content_gen = 0  # +1 whenever the page changes (a detail render of an older page is dropped)
+        self._rendered_gen = -1
+        self._detail_thread = None
+        self._detail_cancel = None
+        self._detail_next: tuple[int, int] | None = None
+        self.detailReady.connect(self._detail_done)
+        self._rerender = QTimer(self)
+        self._rerender.setSingleShot(True)
+        self._rerender.setInterval(160)
+        self._rerender.timeout.connect(self._render_now)
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_TabletTracking, True)
-        self.setMinimumSize(480, 640)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setMinimumSize(300, 280)
+
+    # --- state ---------------------------------------------------------------------------------
+
+    @property
+    def background(self) -> QPixmap | None:
+        return self._rendered[1] if self._rendered else None
 
     def set_tool(self, tool: str) -> None:
         self.tool = tool
+        self._stroke = []
+        self._ruler_draft = None
+        self._update_cursor()
+        self.update()
 
     def set_page(self, page: Page | None, lines: list[StoryLine] | None = None) -> None:
+        size_changed = self.page is None or page is None or (self.page.spec.width_mm, self.page.spec.height_mm) != (
+            page.spec.width_mm, page.spec.height_mm)
         self.page = page
         self.lines = list(lines or (page.texts if page else []))
         self._stroke = []
+        if size_changed or self._fitted:
+            self.fit_page()
+        self.invalidate()
+
+    def open_editor(self, x_mm: float, y_mm: float, text: str, on_done) -> InlineEditor:
+        """Type a line at this point of the page; on_done(text or None) when finished."""
+        if self.editor is not None and not self.editor.finished:
+            self.editor.finish(True)
+        p = self._view().map(self._pt(x_mm, y_mm))
+        self.editor = InlineEditor(self, text, on_done)
+        self.editor.place(max(0.0, min(self.width() - 260.0, p.x())), max(20.0, min(self.height() - 110.0, p.y())))
+        return self.editor
+
+    def invalidate(self) -> None:
+        """The page changed: render it again (now, so a new stroke never blinks away)."""
+        self._rendered = None
+        self._content_gen += 1
+        if self._detail_cancel is not None:
+            self._detail_cancel.set()  # (a finer render of the page as it was is of no use now)
+        self._render_now()
+
+    def _wanted_dpi(self) -> int:
+        """The resolution that matches the zoom: one page pixel per screen pixel, up to DETAIL_DPI."""
+        ratio = self.devicePixelRatioF() or 1.0
+        dpi = self._scale * 25.4 * ratio
+        return int(max(48, min(DETAIL_DPI, round(dpi / 24) * 24)))
+
+    def _render_now(self) -> None:
+        if self.page is None or self.renderer is None:
+            self._rendered = None
+            self.update()
+            return
+        wanted = self._wanted_dpi()
+        base = min(wanted, BASE_DPI)
+        # right away at up to BASE_DPI (quick: lines drawn before are remembered); finer in the background
+        current = self._rendered if self._rendered_gen == self._content_gen else None
+        if current is None or current[0] < base or (current[0] > wanted and wanted <= BASE_DPI):
+            rough = self.detail_job is not None and self.needs_rough is not None and self.needs_rough(base)
+            pix = self.renderer(base, rough=True) if rough else self.renderer(base)
+            self._rendered = (base, pix) if pix is not None else None
+            self._rendered_gen = self._content_gen
+            self._rough = rough
+        if self.detail_job is not None and (self._rough or (wanted > BASE_DPI and (
+                self._rendered is None or self._rendered[0] != wanted))):
+            self._start_detail(wanted)
         self.update()
+
+    def _start_detail(self, dpi: int) -> None:
+        import threading
+
+        if self._detail_thread is not None and self._detail_thread.is_alive():
+            self._detail_next = (self._content_gen, dpi)  # after the one running (only the latest)
+            return
+        from genko import render
+
+        self._detail_next = None
+        job = self.detail_job(dpi)
+        gen = self._content_gen
+        cancel = self._detail_cancel = threading.Event()
+
+        def run() -> None:
+            render.cancel_with(cancel)
+            try:
+                image = job()
+            except Exception:  # cancelled, or a broken asset: stay on the quick render
+                image = None
+            try:
+                self.detailReady.emit(gen, dpi, image)
+            except RuntimeError:  # the window was closed while the page was being drawn
+                pass
+
+        self._detail_thread = threading.Thread(target=run, name="genko-detail", daemon=True)
+        self._detail_thread.start()
+
+    def _detail_done(self, gen: int, dpi: int, image) -> None:
+        if image is not None and gen == self._content_gen and dpi == self._wanted_dpi():
+            self._rendered = (dpi, QPixmap.fromImage(image))
+            self._rendered_gen = gen
+            self._rough = False
+            self.update()
+        pending, self._detail_next = self._detail_next, None
+        if pending is not None and pending[0] == self._content_gen and pending[1] == self._wanted_dpi() and (
+                self._rough or self._rendered is None or self._rendered[0] != pending[1]):
+            self._start_detail(pending[1])
+
+    def wait_detail(self, timeout: float = 30.0) -> None:
+        """Let the background render finish and show it (tests, screenshots)."""
+        from PySide6.QtWidgets import QApplication
+
+        while self._detail_thread is not None:
+            thread = self._detail_thread
+            thread.join(timeout)
+            QApplication.processEvents()
+            if self._detail_thread is thread and not thread.is_alive():
+                break
+
+    # --- view --------------------------------------------------------------------------------------
+
+    def _view_rect_mm(self) -> tuple[float, float, float, float]:
+        spec = self.page.spec
+        x0, w = 0.0, spec.width_mm
+        if self.page.spread_with:
+            step = self.page.spread_step_mm()  # the partner's finished size meets this one's at the gutter
+            if self.page.side() == "right":
+                x0, w = -step, spec.width_mm + step
+            else:
+                w = spec.width_mm + step
+        return x0, 0.0, w, spec.height_mm
+
+    def fit_page(self) -> None:
+        if self.page is None or self.width() <= 0 or self.height() <= 0:
+            return
+        x0, y0, w, h = self._view_rect_mm()
+        margin = 16
+        self._scale = max(MIN_SCALE, min(MAX_SCALE, min((self.width() - 2 * margin) / w, (self.height() - 2 * margin) / h)))
+        self._pan_x = (self.width() - w * self._scale) / 2 - x0 * self._scale
+        self._pan_y = (self.height() - h * self._scale) / 2 - y0 * self._scale
+        self._fitted = True
+        self._after_zoom()
+
+    def zoom_by(self, factor: float, anchor: QPointF | None = None) -> None:
+        anchor = anchor or QPointF(self.width() / 2, self.height() / 2)
+        mx, my = self._to_mm(anchor)
+        self._scale = max(MIN_SCALE, min(MAX_SCALE, self._scale * factor))
+        self._pan_x = anchor.x() - mx * self._scale
+        self._pan_y = anchor.y() - my * self._scale
+        self._fitted = False
+        self._after_zoom()
+
+    def center_on(self, x_mm: float, y_mm: float) -> None:
+        """Put this point of the page in the middle of the view (the navigator)."""
+        self._pan_x = self.width() / 2 - x_mm * self._scale
+        self._pan_y = self.height() / 2 - y_mm * self._scale
+        self._fitted = False
+        self._live_reset()
+        self.changed.emit()
+        self.update()
+
+    def actual_size(self) -> None:
+        """About the size of the paper on a typical screen (96 px per inch)."""
+        self.zoom_by((96 / 25.4) / self._scale)
+
+    def _after_zoom(self) -> None:
+        if self._rendered and self._rendered[0] != self._wanted_dpi():
+            self._rerender.start()
+        self.zoomChanged.emit(self._scale)
+        self.update()
+
+    def zoom_percent(self) -> int:
+        return round(self._scale / (96 / 25.4) * 100)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        self._QtBase.resizeEvent(self, event)
+        if self._fitted:
+            self.fit_page()
 
     def _to_mm(self, pos: QPointF) -> tuple[float, float]:
         return (pos.x() - self._pan_x) / self._scale, (pos.y() - self._pan_y) / self._scale
@@ -50,73 +406,1076 @@ class PageCanvas(QWidget):
     def _xy(self, point) -> tuple[float, float]:
         return float(point[0]), float(point[1])
 
-    def paintEvent(self, event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#2b2b2b"))
-        if self.page is None:
+    # --- the line being drawn ---------------------------------------------------------------------------
+
+    def _live_reset(self) -> None:
+        self._live = None
+        self._live_of = None
+
+    def _live_sync(self):
+        """The line so far, drawn with the pen in hand; only the new part is drawn each time."""
+        from genko.app.live_ink import LiveInk
+
+        pan, size = (self._pan_x, self._pan_y), (self.width(), self.height())
+        if self._live is None or not self._live.matches(self._scale, pan, size):
+            self._live = LiveInk(size, self._scale, pan, self.live_brush or {})
+            self._live_of = None
+        shown = self.snapped_preview(self._stroke)
+        plain = len(shown) == 1 and shown[0] is self._stroke
+        if plain:
+            if not (self._live_of is not None and self._live_of[0] is self._stroke and self._live_of[1]):
+                self._live.redraw([])  # a new line: start from nothing
+            self._live.follow(self._stroke)
+        else:
+            self._live.redraw(shown[0], *shown[1:])
+        self._live_of = (self._stroke, plain)
+        return self._live.image
+
+    # --- the view's turn and mirror: painting goes through _view(), every input through _ev() --------
+
+    def _view(self) -> QTransform:
+        view = QTransform()
+        if not self.rotation and not self.flipped and not self.flipped_v:
+            return view
+        cx, cy = self.width() / 2, self.height() / 2
+        view.translate(cx, cy)
+        view.rotate(self.rotation)
+        if self.flipped or self.flipped_v:
+            view.scale(-1 if self.flipped else 1, -1 if self.flipped_v else 1)
+        view.translate(-cx, -cy)
+        return view
+
+    def _ev(self, pos: QPointF) -> QPointF:
+        """A point on the screen, in the unturned view where _pt and _to_mm work."""
+        if not self.rotation and not self.flipped and not self.flipped_v:
+            return QPointF(pos)
+        inverse, _ok = self._view().inverted()
+        return inverse.map(QPointF(pos))
+
+    def rotate_view(self, degrees: float) -> None:
+        self.set_rotation(self.rotation + degrees)
+
+    def set_rotation(self, degrees: float) -> None:
+        turned = (degrees + 180.0) % 360.0 - 180.0
+        self.rotation = 0.0 if abs(turned) < 0.01 else turned
+        self._live_reset()
+        self.changed.emit()
+        self.update()
+
+    def flip_view(self, on: bool | None = None) -> None:
+        self.flipped = (not self.flipped) if on is None else bool(on)
+        self._live_reset()
+        self.changed.emit()
+        self.update()
+
+    def flip_view_vertical(self, on: bool | None = None) -> None:
+        """上下反転表示: only the view, the page stays as it is."""
+        self.flipped_v = (not self.flipped_v) if on is None else bool(on)
+        self._live_reset()
+        self.changed.emit()
+        self.update()
+
+    def set_zoom_percent(self, percent: float) -> None:
+        """表示倍率の直接入力: 100% is the paper's size on a typical screen (as zoom_percent reads)."""
+        percent = max(1.0, float(percent))
+        self.zoom_by((percent / 100 * 96 / 25.4) / self._scale)
+
+    def zoom_to_rect(self, x0: float, y0: float, x1: float, y1: float) -> None:
+        """虫めがね: the area (mm) dragged round fills the view."""
+        w, h = abs(x1 - x0), abs(y1 - y0)
+        if w < 0.5 or h < 0.5:
             return
+        self._scale = max(MIN_SCALE, min(MAX_SCALE, min(self.width() / w, self.height() / h) * 0.95))
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        self._pan_x = self.width() / 2 - cx * self._scale
+        self._pan_y = self.height() / 2 - cy * self._scale
+        self._fitted = False
+        self._after_zoom()
+
+    def show_frame(self, rendered) -> None:
+        """Show a picture made elsewhere (a frame while an animation plays), until the page changes."""
+        self._rendered = rendered
+        self._rendered_gen = self._content_gen
+        self.update()
+
+    def view_state(self) -> dict:
+        """How the page is shown (zoom, scroll, turn, mirror), to come back to it later."""
+        return {"scale": self._scale, "pan": (self._pan_x, self._pan_y), "fitted": self._fitted, "rotation": self.rotation,
+                "flipped": self.flipped, "flipped_v": self.flipped_v}
+
+    def set_view_state(self, state: dict | None) -> None:
+        if not state or state.get("fitted", True):
+            self.rotation = float((state or {}).get("rotation", 0.0))
+            self.flipped = bool((state or {}).get("flipped", False))
+            self.flipped_v = bool((state or {}).get("flipped_v", False))
+            self.fit_page()
+            return
+        self._scale = max(MIN_SCALE, min(MAX_SCALE, float(state["scale"])))
+        self._pan_x, self._pan_y = state["pan"]
+        self._fitted = False
+        self.rotation = float(state.get("rotation", 0.0))
+        self.flipped = bool(state.get("flipped", False))
+        self.flipped_v = bool(state.get("flipped_v", False))
+        self._after_zoom()
+
+    def reset_view(self) -> None:
+        self.rotation = 0.0
+        self.flipped = False
+        self.flipped_v = False
+        self.fit_page()
+        self.changed.emit()
+
+    # --- painting ---------------------------------------------------------------------------------
+
+    def glide(self, change) -> None:
+        """Change the view (zoom in or out, fit, actual size) and draw the way there over a moment. The view is
+        already where it goes (what the pen touches is the new view); only the picture catches up."""
+        before = (self._scale, self._pan_x, self._pan_y)
+        change()
+        after = (self._scale, self._pan_x, self._pan_y)
+        from genko.app.comfort import reduce_motion
+
+        if reduce_motion() or not self.isVisible() or before == after or before[0] <= 0:
+            return
+        from PySide6.QtCore import QEasingCurve, QVariantAnimation
+
+        self._glide = (before, after, 0.0)
+        motion = self.__dict__.get("_glide_motion")
+        if motion is None:
+            motion = self._glide_motion = QVariantAnimation(self)
+            motion.setDuration(170)
+            motion.setStartValue(0.0)
+            motion.setEndValue(1.0)
+            motion.setEasingCurve(QEasingCurve.Type.OutCubic)
+            motion.valueChanged.connect(self._glide_step)
+            motion.finished.connect(self._glide_done)
+        motion.stop()
+        motion.start()
+
+    def _glide_step(self, value) -> None:
+        if getattr(self, "_glide", None) is not None:
+            start, end, _t = self._glide
+            self._glide = (start, end, float(value))
+            self.update()
+
+    def _glide_done(self) -> None:
+        self._glide = None
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        glide = getattr(self, "_glide", None)
+        if glide is None or glide[2] >= 1.0:
+            return self._paint(event)
+        (s0, x0, y0), (s1, x1, y1), t = glide
+        w, h = self.width() / 2, self.height() / 2
+        # the scale moves evenly in steps (as a zoom feels), the page point in the middle slides straight
+        c0, c1 = ((w - x0) / s0, (h - y0) / s0), ((w - x1) / s1, (h - y1) / s1)
+        scale = s0 * (s1 / s0) ** t
+        cx, cy = c0[0] + (c1[0] - c0[0]) * t, c0[1] + (c1[1] - c0[1]) * t
+        kept = (self._scale, self._pan_x, self._pan_y)
+        self._scale, self._pan_x, self._pan_y = scale, w - cx * scale, h - cy * scale
+        try:
+            self._paint(event)
+        finally:
+            self._scale, self._pan_x, self._pan_y = kept
+
+    def _paint(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.fillRect(self.rect(), theme.surround())  # (a neutral grey: it does not sway how the page's greys look)
+        if self.page is None:
+            painter.setPen(QColor(theme.tokens().muted))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ページがありません")
+            return
+        painter.setTransform(self._view())
         spec = self.page.spec
         origin = self._pt(0, 0)
-        painter.fillRect(
-            int(origin.x()),
-            int(origin.y()),
-            int(spec.width_mm * self._scale),
-            int(spec.height_mm * self._scale),
-            QColor("#f6f1e4"),
-        )
+        page_rect = QRectF(origin.x(), origin.y(), spec.width_mm * self._scale, spec.height_mm * self._scale)
         if self.page.spread_with:
-            painter.fillRect(
-                int(origin.x() + spec.width_mm * self._scale),
-                int(origin.y()),
-                int(spec.width_mm * self._scale),
-                int(spec.height_mm * self._scale),
-                QColor("#efe6d4"),
-            )
-        inner = self.page.inner_rect_mm()
-        painter.setPen(QPen(QColor("#c8b89a"), 1, Qt.PenStyle.DashLine))
-        self._draw_rect(painter, inner)
-        for frame in self.page.leaf_frames():
-            selected = frame.id == self.page.selected_frame_id
-            painter.setPen(QPen(QColor("#1f6feb") if selected else QColor("#111111"), 3 if selected else 2))
-            self._draw_rect(painter, frame.rect)
-        self._draw_strokes(painter, self.page.name_strokes, QColor("#3a6ea5"), 1.6)
-        self._draw_strokes(painter, self.page.ink_strokes, QColor("#111111"), 2.2)
+            # the partner sits on the other physical side; strokes drawn there go to the partner page
+            step = self.page.spread_step_mm()
+            offset = -step if self.page.side() == "right" else step
+            painter.fillRect(page_rect.translated(offset * self._scale, 0), QColor("#e9e4d8"))
+        self._draw_shadow(painter, page_rect)
+        painter.fillRect(page_rect, QColor("#ffffff"))
+        if self.background is not None:
+            painter.drawPixmap(page_rect, self.background, QRectF(self.background.rect()))
+        else:
+            self._draw_plain(painter)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.show_guides:
+            self._draw_guides(painter, page_rect)
+        if self.phone_view:
+            self._draw_phone(painter)
+        self._draw_grid(painter)
+        if self.overlay_name_strokes:
+            self._draw_strokes(painter, self.page.name_strokes, QColor(58, 110, 165, 110), 1.2)
+        self._draw_selection(painter)
         for line in self.lines:
-            self._draw_balloon(painter, line)
-        if self._stroke:
-            self._draw_strokes(painter, [self._stroke], QColor("#d35400"), 2.0)
-        if self._hover and not self._stroke:
-            hx, hy = self._pt(*self._hover)
-            radius = max(2.0, self.brush_width_mm * self._scale)
-            painter.setPen(QPen(QColor("#d35400"), 1))
+            if line is self._drag_line:
+                self._draw_balloon_box(painter, line, self._drag_pos, strong=True)
+            elif line.id == self.selected_line_id:
+                self._draw_balloon_box(painter, line, None, strong=True, fill=False)
+            elif self.tool == "select" and self._hover and self._hit_line(*self._hover) is line:
+                self._draw_balloon_box(painter, line, None)
+        self._draw_handles(painter)
+        self._draw_tool_drag(painter)
+        self._draw_rulers(painter)
+        self._draw_prims_overlay(painter)
+        self._draw_effect_handles(painter)
+        self._draw_highlight(painter)
+        self._draw_selection_overlay(painter)
+        if self._zoom_drag is not None:  # (the area the magnifier will fill the view with)
+            a, b = self._zoom_drag["start"], self._zoom_drag["end"]
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(hx, hy, radius, radius)
+            painter.setPen(QPen(theme.accent(), 1.2, Qt.PenStyle.DashLine))
+            painter.drawRect(QRectF(a, b).normalized())
+        if self._reshape is not None:
+            painter.setPen(QPen(theme.accent(), 2))
+            path = QPainterPath(self._pt(*self._reshape["points"][0][:2]))
+            for pt in self._reshape["points"][1:]:
+                path.lineTo(self._pt(*pt[:2]))
+            painter.drawPath(path)
+        if self._stroke and self.tool == "text":
+            painter.setPen(QPen(QColor(20, 20, 20), max(1.0, 0.35 * self._scale)))
+            painter.setBrush(QColor(255, 255, 255, 220))
+            painter.drawPolygon([self._pt(*p[:2]) for p in self._stroke])
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        elif self._stroke and self.tool == "marquee" and self.marquee in ("pen", "erase"):
+            colour = QColor(28, 126, 214, 110) if self.marquee == "pen" else QColor(220, 60, 60, 110)
+            pen = QPen(colour, max(2.0, self.selection_pen_mm * self._scale))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.drawPolyline([self._pt(*p[:2]) for p in self._stroke])
+        elif self._stroke and self.tool in ("lassofill", "marquee"):
+            painter.setPen(QPen(QColor("#1c7ed6") if self.tool == "marquee" else theme.accent(), 1.5, Qt.PenStyle.DashLine))
+            painter.setBrush(QColor(28, 126, 214, 30) if self.tool == "marquee" else QColor(232, 89, 12, 40))
+            pts = self._marquee_points()
+            painter.drawPolygon([self._pt(*p) for p in pts])
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        elif self._stroke and self.tool == "pen" and self.live_brush is not None:
+            painter.drawImage(0, 0, self._live_sync())
+            if self._live.tail is not None:
+                painter.drawImage(self._live.tail[0], self._live.tail[1], self._live.tail[2])
+        elif self._stroke:
+            color = theme.accent() if self.tool == "pen" else QColor(200, 60, 60, 160)
+            shown = (self.snapped_preview(self._stroke) if self.tool == "pen"
+                     else self.snapped_preview(self._stroke)[:1] if self.tool == "eraser" else [self._stroke])
+            self._draw_strokes(painter, shown, color, max(1.5, self.brush_width_mm * self._scale))
+        if self._hover and not self._stroke and self.tool in ("pen", "eraser", "blend", "liquify"):
+            hx, hy = self._pt(*self._hover).x(), self._pt(*self._hover).y()
+            radius = max(2.0, (self.brush_width_mm if self.tool == "pen" else self.blend_mm if self.tool in ("blend", "liquify")
+                               else self.eraser_mm) / 2 * self._scale)
+            painter.setPen(QPen(theme.accent(), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            if self.cursor_kind in ("circle", "circle_cross"):
+                painter.drawEllipse(QPointF(hx, hy), radius, radius)
+            if self.cursor_kind in ("circle", "dot"):
+                painter.setBrush(theme.accent())
+                painter.drawEllipse(QPointF(hx, hy), 1.5, 1.5)
+        self._draw_shape_preview(painter)
+        self._draw_vector(painter)
+        self._draw_guide_drag(painter)
+        self._draw_scale(painter)
+        self._place_launcher()
+
+    def _draw_tool_drag(self, painter: QPainter) -> None:
+        """The layer being moved (its picture, following the pen) or the gradient's direction."""
+        drag = self._tool_drag
+        if drag is None:
+            return
+        (sx, sy), (ex, ey) = drag["start"], drag["end"]
+        if self.tool == "move" and self.move_image is not None:
+            image, x, y, w, h = self.move_image
+            a, b = self._pt(x + ex - sx, y + ey - sy), self._pt(x + w + ex - sx, y + h + ey - sy)
+            painter.setOpacity(0.7)
+            painter.drawImage(QRectF(a, b), image)
+            painter.setOpacity(1.0)
+            painter.setPen(QPen(QColor("#1c7ed6"), 1, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(QRectF(a, b))
+        elif self.tool == "gradient":
+            painter.setPen(QPen(theme.accent(), 2))
+            painter.drawLine(self._pt(sx, sy), self._pt(ex, ey))
+            painter.setBrush(theme.accent())
+            painter.drawEllipse(self._pt(sx, sy), 4, 4)
+            painter.setBrush(QColor("white"))
+            painter.drawEllipse(self._pt(ex, ey), 4, 4)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _draw_shadow(self, painter: QPainter, page_rect: QRectF) -> None:
+        """A soft shadow under the sheet, so the page sits on the surround like paper on a desk."""
+        scale = max(0.2, abs(painter.transform().determinant()) ** 0.5)
+        painter.setPen(Qt.PenStyle.NoPen)
+        dark = theme.tokens().dark
+        for i in range(6, 0, -1):
+            grow = i * 1.6 / scale
+            painter.setBrush(QColor(0, 0, 0, (14 if dark else 9) + (6 - i) * (5 if dark else 3)))
+            painter.drawRoundedRect(page_rect.adjusted(-grow, -grow + 1.5 / scale, grow, grow + 3 / scale), grow, grow)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _draw_guides(self, painter: QPainter, page_rect: QRectF) -> None:
+        """The bleed (cut off, shaded), the trim line (the finished size) and the basic frame."""
+        def box(r) -> QRectF:
+            a = self._pt(r.x, r.y)
+            return QRectF(a.x(), a.y(), r.width * self._scale, r.height * self._scale)
+
+        from PySide6.QtGui import QPainterPath as _Path
+
+        bleed, trim = box(self.page.bleed_rect_mm()), box(self.page.trim_rect_mm())
+        # the paper outside the bleed is never printed (darker); the bleed is cut off (lighter)
+        outside = _Path()
+        outside.addRect(page_rect)
+        inside = _Path()
+        inside.addRect(bleed)
+        painter.fillPath(outside.subtracted(inside), QColor(90, 92, 100, 26))
+        band = _Path()
+        band.addRect(bleed)
+        cut = _Path()
+        cut.addRect(trim)
+        painter.fillPath(band.subtracted(cut), QColor(120, 122, 130, 22))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self.page.spec.bleed_mm > 0:
+            painter.setPen(QPen(QColor(120, 122, 130, 110), 1, Qt.PenStyle.DotLine))
+            painter.drawRect(bleed)
+        painter.setPen(QPen(QColor(200, 60, 120, 130), 1))
+        painter.drawRect(trim)
+        inner = self.page.inner_rect_mm()
+        painter.setPen(QPen(QColor(40, 126, 214, 95), 1, Qt.PenStyle.DashLine))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        self._draw_rect(painter, inner)
+
+    PHONE_ASPECT = 844 / 390  # (a phone held upright: the screen's height to its width)
+
+    def phone_screens(self) -> list[float]:
+        """Where each phone screen ends down the page (mm from the page's top), the page's width filling the screen."""
+        trim = self.page.trim_rect_mm()
+        step = trim.width * self.PHONE_ASPECT
+        ends, y = [], trim.y + step
+        while y < trim.y + trim.height - 1e-6:
+            ends.append(y)
+            y += step
+        return ends
+
+    def _draw_phone(self, painter: QPainter) -> None:
+        """The screens' breaks down the page, and the screen under the cursor (the rest a little dimmed)."""
+        trim = self.page.trim_rect_mm()
+        step = trim.width * self.PHONE_ASPECT
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(0, 150, 136, 170), 1, Qt.PenStyle.DashDotLine))
+        for n, y in enumerate(self.phone_screens(), start=1):
+            a, b = self._pt(trim.x, y), self._pt(trim.x + trim.width, y)
+            painter.drawLine(a, b)
+            painter.drawText(QPointF(b.x() + 4, b.y() + 4), f"{n}")
+        if self._hover is None:
+            return
+        top = min(max(self._hover[1] - step / 2, trim.y), max(trim.y, trim.y + trim.height - step))
+        a = self._pt(trim.x, top)
+        screen = QRectF(a.x(), a.y(), trim.width * self._scale, min(step, trim.height) * self._scale)
+        whole = QPainterPath()
+        whole.addRect(QRectF(self._pt(trim.x, trim.y), self._pt(trim.x + trim.width, trim.y + trim.height)))
+        hole = QPainterPath()
+        hole.addRect(screen)
+        painter.fillPath(whole.subtracted(hole), QColor(0, 0, 0, 22))
+        painter.setPen(QPen(QColor(0, 150, 136, 220), 2))
+        painter.drawRoundedRect(screen, 6, 6)
+
+    def _draw_plain(self, painter: QPainter) -> None:
+        """Without a renderer (tests, or before the first render): frames and balloon boxes."""
+        painter.setPen(QPen(QColor("#111111"), 2))
+        for frame in self.page.leaf_frames():
+            self._draw_frame(painter, frame)
+        for line in self.lines:
+            self._draw_balloon_box(painter, line, None)
+
+    def _draw_selection(self, painter: QPainter) -> None:
+        hover_frame = None
+        if self.tool in ("select", "frame") and self._hover and not self._drag_line:
+            if self._hit_line(*self._hover) is None:
+                hover_frame = self.page.frame_at(*self._hover)
+        for frame in self.page.leaf_frames():
+            if frame.id == self.page.selected_frame_id:
+                painter.setPen(QPen(QColor("#1c7ed6"), 3))
+                painter.setBrush(QColor(28, 126, 214, 16))
+                self._draw_frame(painter, frame)
+            elif hover_frame is not None and frame.id == hover_frame.id:
+                painter.setPen(QPen(QColor(28, 126, 214, 150), 1.5, Qt.PenStyle.DashLine))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                self._draw_frame(painter, frame)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self.show_frame_numbers:
+            self._draw_frame_numbers(painter)
+        if self.tool == "frame":
+            self._draw_frame_tool(painter)
+
+    def _draw_frame_numbers(self, painter: QPainter) -> None:
+        """コマ番号: each panel's place in the reading order, in a small circle at its top outer corner."""
+        from genko.frames import shape
+        from genko.models import Binding
+        from genko.ops import _leaves_in_reading_order
+
+        if not self.page.frames:
+            return
+        binding = self.binding if isinstance(self.binding, Binding) else Binding(self.binding or "right")
+        font = painter.font()
+        font.setBold(True)
+        painter.setFont(font)
+        for n, frame in enumerate(_leaves_in_reading_order(self.page.frames[0], binding), start=1):
+            pts = shape(frame)
+            corner = max(pts, key=lambda p: (p[0] if binding == Binding.RIGHT else -p[0]) - p[1])
+            q = self._pt(*corner)
+            q = QPointF(q.x() + (-14 if binding == Binding.RIGHT else 14), q.y() + 14)
+            painter.setPen(QPen(QColor("#1c7ed6"), 1.5))
+            painter.setBrush(QColor(255, 255, 255, 230))
+            painter.drawEllipse(q, 10, 10)
+            painter.setPen(QColor("#1c7ed6"))
+            painter.drawText(QRectF(q.x() - 10, q.y() - 10, 20, 20), Qt.AlignmentFlag.AlignCenter, str(n))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _draw_frame(self, painter: QPainter, frame) -> None:
+        from genko.frames import outline
+
+        painter.drawPolygon([self._pt(x, y) for x, y in outline(frame)])
+
+    # --- the panel tool: drag gutters, cut panels (any angle), move corners -------------------------------
+
+    def _gutters(self) -> list[dict]:
+        from genko.frames import gutters
+
+        return gutters(self.page.frames[0]) if self.page and self.page.frames else []
+
+    def _hit_gutter(self, x_mm: float, y_mm: float):
+        from genko.frames import distance_to_segment
+
+        tolerance = 6 / self._scale
+        best = None
+        for gutter in self._gutters():
+            d = distance_to_segment((x_mm, y_mm), gutter["p0"], gutter["p1"])
+            if d <= gutter["width"] / 2 + tolerance and (best is None or d < best[0]):
+                best = (d, gutter)
+        return best[1] if best else None
+
+    def _vertex_handles(self) -> list[tuple[int, tuple[float, float]]]:
+        from genko.frames import shape
+
+        if self.tool != "frame" or not self.page or not self.page.selected_frame_id:
+            return []
+        try:
+            frame = self.page._find(self.page.selected_frame_id)
+        except (KeyError, IndexError):
+            return []
+        drag = self._frame_drag
+        pts = drag["poly"] if drag and drag["kind"] == "vertex" else shape(frame)
+        return list(enumerate(pts))
+
+    def _bow_handles(self) -> list[tuple[int, tuple[float, float]]]:
+        """The ◇ in the middle of each edge of the chosen panel: drag it out or in to bow the edge (曲線の枠)."""
+        from genko.frames import curves_of, edge_normal, shape
+
+        if self.tool != "frame" or not self.page or not self.page.selected_frame_id:
+            return []
+        try:
+            frame = self.page._find(self.page.selected_frame_id)
+        except (KeyError, IndexError):
+            return []
+        if frame.children:
+            return []
+        pts = shape(frame)
+        curves = curves_of(frame, pts) or [0.0] * len(pts)
+        drag = self._frame_drag
+        out = []
+        for i in range(len(pts)):
+            mid, n, _b = edge_normal(pts, i)
+            bow = drag["mm"] if drag and drag["kind"] == "bow" and drag["edge"] == i else curves[i]
+            out.append((i, (mid[0] + n[0] * bow, mid[1] + n[1] * bow)))
+        return out
+
+    def _draw_frame_tool(self, painter: QPainter) -> None:
+        drag = self._frame_drag
+        hover = self._hit_gutter(*self._hover) if self._hover and not drag else None
+        for gutter in self._gutters():
+            strong = hover is gutter or (drag and drag["kind"] == "gutter" and drag["gutter"]["node"] == gutter["node"]
+                                        and drag["gutter"]["index"] == gutter["index"])
+            if not strong:
+                continue
+            p0, p1 = gutter["p0"], gutter["p1"]
+            if drag and drag["kind"] == "gutter":
+                dx, dy = drag["offset"]
+                p0, p1 = (p0[0] + dx, p0[1] + dy), (p1[0] + dx, p1[1] + dy)
+            painter.setPen(QPen(QColor(232, 89, 12, 160), max(3.0, gutter["width"] * self._scale)))
+            painter.drawLine(self._pt(*p0), self._pt(*p1))
+        if drag and drag["kind"] == "cut":
+            painter.setPen(QPen(QColor("#e03131"), 2, Qt.PenStyle.DashLine))
+            painter.drawLine(self._pt(*drag["p0"]), self._pt(*drag["p1"]))
+        if drag and drag["kind"] in ("rect", "free") or self._frame_poly:  # (the panel being drawn)
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            if drag and drag["kind"] == "rect":
+                painter.drawRect(QRectF(self._pt(*drag["p0"]), self._pt(*drag["p1"])).normalized())
+            elif drag and drag["kind"] == "free":
+                painter.drawPolygon([self._pt(x, y) for x, y in drag["points"]])
+            else:
+                pts = [self._pt(x, y) for x, y in self._frame_poly]
+                if self._hover:
+                    pts.append(self._pt(*self._hover))
+                painter.drawPolyline(pts)
+                painter.setBrush(QColor("white"))
+                first = pts[0]
+                painter.drawEllipse(first, HANDLE_PX / 2 + 2, HANDLE_PX / 2 + 2)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+        if drag and drag["kind"] == "vertex":
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
+            painter.drawPolygon([self._pt(x, y) for x, y in drag["poly"]])
+        for _i, (x, y) in self._vertex_handles():
+            p = self._pt(x, y)
+            painter.setPen(QPen(QColor("#1c7ed6"), 1.5))
+            painter.setBrush(QColor("white"))
+            painter.drawEllipse(p, HANDLE_PX / 2 + 1, HANDLE_PX / 2 + 1)
+        for _i, (x, y) in self._bow_handles():
+            p = self._pt(x, y)
+            r = HANDLE_PX / 2 + 1
+            painter.setPen(QPen(theme.accent(), 1.5))
+            painter.setBrush(QColor("white"))
+            painter.drawPolygon([QPointF(p.x(), p.y() - r), QPointF(p.x() + r, p.y()), QPointF(p.x(), p.y() + r), QPointF(p.x() - r, p.y())])
+        if drag and drag["kind"] == "bow":
+            from genko.frames import outline
+
+            frame = self.page._find(drag["frame"])
+            ghost = copy.copy(frame)
+            curves = list(drag["curves"])
+            curves[drag["edge"]] = drag["mm"]
+            ghost.curves = curves
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPolygon([self._pt(x, y) for x, y in outline(ghost)])
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _frame_press(self, pos: QPointF) -> None:
+        from genko.frames import shape
+
+        x_mm, y_mm = self._to_mm(pos)
+        for i, (vx, vy) in self._vertex_handles():
+            p = self._pt(vx, vy)
+            if abs(p.x() - pos.x()) <= HANDLE_PX + 2 and abs(p.y() - pos.y()) <= HANDLE_PX + 2:
+                frame = self.page._find(self.page.selected_frame_id)
+                self._frame_drag = {"kind": "vertex", "index": i, "frame": frame.id, "poly": [list(p) for p in shape(frame)]}
+                return
+        for i, (bx, by) in self._bow_handles():
+            p = self._pt(bx, by)
+            if abs(p.x() - pos.x()) <= HANDLE_PX + 2 and abs(p.y() - pos.y()) <= HANDLE_PX + 2:
+                from genko.frames import curves_of
+
+                frame = self.page._find(self.page.selected_frame_id)
+                pts = shape(frame)
+                curves = curves_of(frame, pts) or [0.0] * len(pts)
+                self._frame_drag = {"kind": "bow", "edge": i, "frame": frame.id, "curves": curves, "mm": curves[i]}
+                return
+        if self.frame_mode == "poly":  # (corner by corner; a click on the first corner, Enter or a double click closes it)
+            if len(self._frame_poly) >= 3:
+                first = self._pt(*self._frame_poly[0])
+                if abs(first.x() - pos.x()) <= HANDLE_PX + 3 and abs(first.y() - pos.y()) <= HANDLE_PX + 3:
+                    self.finish_frame_poly()
+                    return
+            self._frame_poly.append((round(x_mm, 2), round(y_mm, 2)))
+            return
+        if self.frame_mode in ("rect", "free"):
+            self._frame_drag = {"kind": self.frame_mode, "p0": (x_mm, y_mm), "p1": (x_mm, y_mm), "points": [(x_mm, y_mm)]}
+            return
+        gutter = self._hit_gutter(x_mm, y_mm)
+        if gutter is not None:
+            self._frame_drag = {"kind": "gutter", "gutter": gutter, "start": (x_mm, y_mm), "offset": (0.0, 0.0), "delta": 0.0}
+            return
+        frame = self.page.frame_at(x_mm, y_mm)
+        # a cut may start outside the panels (from the margin across): the panel is found on release
+        self._frame_drag = {"kind": "cut", "frame": frame.id if frame else None, "p0": (x_mm, y_mm), "p1": (x_mm, y_mm)}
+
+    def _frame_move(self, pos: QPointF) -> None:
+        import math
+
+        drag = self._frame_drag
+        x_mm, y_mm = self._to_mm(pos)
+        if drag["kind"] in ("rect", "free"):
+            drag["p1"] = (x_mm, y_mm)
+            if drag["kind"] == "free" and math.dist(drag["points"][-1], (x_mm, y_mm)) >= 0.5:
+                drag["points"].append((x_mm, y_mm))
+            self.update()
+            return
+        if drag["kind"] == "vertex":
+            drag["poly"][drag["index"]] = [round(x_mm, 2), round(y_mm, 2)]
+        elif drag["kind"] == "bow":
+            from genko.frames import edge_normal, shape
+
+            pts = shape(self.page._find(drag["frame"]))
+            mid, n, _b = edge_normal(pts, drag["edge"])
+            edge = math.dist(pts[drag["edge"]], pts[(drag["edge"] + 1) % len(pts)])
+            bow = (x_mm - mid[0]) * n[0] + (y_mm - mid[1]) * n[1]
+            drag["mm"] = round(max(-edge / 2 + 0.01, min(edge / 2 - 0.01, bow)), 2)
+        elif drag["kind"] == "gutter":
+            g = drag["gutter"]
+            (ax, ay), (bx, by) = g["p0"], g["p1"]
+            length = math.hypot(bx - ax, by - ay) or 1.0
+            nx, ny = -(by - ay) / length, (bx - ax) / length
+            if (g["horizontal"] and ny < 0) or (not g["horizontal"] and nx < 0):
+                nx, ny = -nx, -ny
+            delta = (x_mm - drag["start"][0]) * nx + (y_mm - drag["start"][1]) * ny
+            drag["delta"], drag["offset"] = delta, (nx * delta, ny * delta)
+        else:
+            x0, y0 = drag["p0"]
+            dx, dy = x_mm - x0, y_mm - y0
+            # nearly level or upright cuts snap straight (hold Alt for a free angle)
+            free = bool(self._modifiers & Qt.KeyboardModifier.AltModifier)
+            if not free and abs(dy) <= abs(dx) * 0.07:
+                y_mm = y0
+            elif not free and abs(dx) <= abs(dy) * 0.07:
+                x_mm = x0
+            drag["p1"] = (x_mm, y_mm)
+        self.update()
+
+    def finish_frame_poly(self) -> bool:
+        """The panel drawn corner by corner is closed: it becomes a panel (three corners or more)."""
+        pts, self._frame_poly = self._frame_poly, []
+        self.update()
+        if len(pts) >= 3:
+            self.frameDrawn.emit([[x, y] for x, y in pts])
+            return True
+        return False
+
+    def _frame_release(self) -> None:
+        import math
+
+        drag, self._frame_drag = self._frame_drag, None
+        if drag["kind"] == "rect":
+            (x0, y0), (x1, y1) = drag["p0"], drag["p1"]
+            if abs(x1 - x0) >= 5 and abs(y1 - y0) >= 5:
+                xa, xb, ya, yb = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
+                self.frameDrawn.emit([[round(xa, 2), round(ya, 2)], [round(xb, 2), round(ya, 2)],
+                                      [round(xb, 2), round(yb, 2)], [round(xa, 2), round(yb, 2)]])
+        elif drag["kind"] == "free":
+            if len(drag["points"]) >= 8:
+                self.frameDrawn.emit([[round(x, 2), round(y, 2)] for x, y in drag["points"]])
+        elif drag["kind"] == "vertex":
+            self.frameShaped.emit(drag["frame"], drag["poly"])
+        elif drag["kind"] == "bow":
+            if abs(drag["mm"] - drag["curves"][drag["edge"]]) > 0.05:
+                self.frameBowed.emit(drag["frame"], drag["edge"], float(drag["mm"] if abs(drag["mm"]) > 0.5 else 0.0))
+        elif drag["kind"] == "gutter":
+            if abs(drag["delta"]) > 0.2:
+                self.gutterMoved.emit(drag["gutter"]["node"], drag["gutter"]["index"], round(drag["delta"], 2))
+        elif math.dist(drag["p0"], drag["p1"]) >= 5:
+            mid = ((drag["p0"][0] + drag["p1"][0]) / 2, (drag["p0"][1] + drag["p1"][1]) / 2)
+            target = self.page.frame_at(*mid)
+            frame_id = target.id if target is not None else drag["frame"]
+            if frame_id:
+                self.cutRequested.emit(frame_id, QPointF(*drag["p0"]), QPointF(*drag["p1"]))
+        elif drag["frame"]:
+            self.frameSelected.emit(drag["frame"])
+        self.update()
+
+    # --- balloon handles -----------------------------------------------------------------------------
+
+    def _selected_line(self) -> StoryLine | None:
+        return next((ln for ln in self.lines if ln.id == self.selected_line_id), None)
+
+    @staticmethod
+    def _tails(line) -> list[dict]:
+        tails = [dict(t) for t in (getattr(line, "tails", None) or []) if t.get("to")]
+        if not tails and line.tail:
+            tails = [{"to": list(line.tail)}]
+        return tails
+
+    def _handles(self) -> list[tuple[str, object, tuple[float, float]]]:
+        """(kind, key, point in mm) of the selected balloon: 8 resize handles, and per tail its tip and bend."""
+        line = self._selected_line()
+        if line is None or self.tool != "select":
+            return []
+        box = self._handle_drag["cur"] if self._handle_drag and self._handle_drag["kind"] == "resize" else (
+            line.x_mm, line.y_mm, line.w_mm, line.h_mm)
+        x, y, w, h = box
+        out: list = []
+        for key, (fx, fy) in {"nw": (0, 0), "n": (0.5, 0), "ne": (1, 0), "e": (1, 0.5), "se": (1, 1), "s": (0.5, 1),
+                              "sw": (0, 1), "w": (0, 0.5)}.items():
+            out.append(("resize", key, (x + w * fx, y + h * fy)))
+        tails = self._handle_drag["tails"] if self._handle_drag and self._handle_drag["kind"] == "tail" else self._tails(line)
+        cx, cy = x + w / 2, y + h / 2
+        out.append(("turn", "turn", (cx, y - 7)))  # drag around the centre to turn the balloon
+        for i, tail in enumerate(tails):
+            tip = tail["to"]
+            out.append(("tail", (i, "to"), (tip[0], tip[1])))
+            if tail.get("vias"):  # (a bent tail: a handle at each corner)
+                for k, bend in enumerate(tail["vias"]):
+                    out.append(("tail", (i, "vias", k), (bend[0], bend[1])))
+                continue
+            via = tail.get("via") or [(cx + tip[0]) / 2, (cy + tip[1]) / 2]
+            out.append(("tail", (i, "via"), (via[0], via[1])))
+        return out
+
+    def _hit_handle(self, pos: QPointF):
+        for kind, key, (hx, hy) in reversed(self._handles()):
+            p = self._pt(hx, hy)
+            if abs(p.x() - pos.x()) <= HANDLE_PX + 2 and abs(p.y() - pos.y()) <= HANDLE_PX + 2:
+                return kind, key
+        return None
+
+    def _draw_handles(self, painter: QPainter) -> None:
+        line = self._selected_line()
+        if line is None or self.tool != "select":
+            return
+        drag = self._handle_drag
+        if drag and drag["kind"] == "resize":
+            x, y, w, h = drag["cur"]
+            p = self._pt(x, y)
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(QRectF(p.x(), p.y(), w * self._scale, h * self._scale))
+        if drag and drag["kind"] == "turn" and drag.get("angle") is not None:
+            import math
+
+            cx, cy = line.x_mm + line.w_mm / 2, line.y_mm + line.h_mm / 2
+            a = math.radians(drag["angle"])
+            r = max(line.w_mm, line.h_mm) / 2 + 7
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
+            painter.drawLine(self._pt(cx, cy), self._pt(cx + r * math.sin(a), cy - r * math.cos(a)))
+            painter.drawText(self._pt(cx, cy) + QPointF(6, -6), f"{drag['angle']:+.0f}°")
+        if drag and drag["kind"] == "tail":
+            painter.setPen(QPen(theme.accent(), 2, Qt.PenStyle.DashLine))
+            cx, cy = line.x_mm + line.w_mm / 2, line.y_mm + line.h_mm / 2
+            for tail in drag["tails"]:
+                path = QPainterPath(self._pt(cx, cy))
+                if tail.get("vias"):
+                    for bend in tail["vias"]:
+                        path.lineTo(self._pt(*bend))
+                    path.lineTo(self._pt(*tail["to"]))
+                else:
+                    via = tail.get("via") or [(cx + tail["to"][0]) / 2, (cy + tail["to"][1]) / 2]
+                    path.quadTo(self._pt(*via), self._pt(*tail["to"]))
+                painter.drawPath(path)
+        for kind, key, (hx, hy) in self._handles():
+            p = self._pt(hx, hy)
+            painter.setPen(QPen(theme.accent(), 1.5))
+            painter.setBrush(QColor("white"))
+            if kind == "resize":
+                painter.drawRect(QRectF(p.x() - HANDLE_PX / 2, p.y() - HANDLE_PX / 2, HANDLE_PX, HANDLE_PX))
+            elif kind == "turn":
+                painter.drawLine(p + QPointF(0, HANDLE_PX / 2 + 1), self._pt(hx, hy + 7) + QPointF(0, 0))
+                painter.drawEllipse(p, HANDLE_PX / 2 + 2, HANDLE_PX / 2 + 2)
+            elif key[1] == "to":
+                painter.setBrush(theme.accent())
+                painter.drawEllipse(p, HANDLE_PX / 2 + 1, HANDLE_PX / 2 + 1)
+            else:
+                painter.drawPolygon([p + QPointF(0, -5), p + QPointF(5, 0), p + QPointF(0, 5), p + QPointF(-5, 0)])
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _drag_handle(self, pos: QPointF) -> None:
+        drag = self._handle_drag
+        x_mm, y_mm = self._to_mm(pos)
+        if drag["kind"] == "resize":
+            x, y, w, h = drag["orig"]
+            key = drag["key"]
+            left, top, right, bottom = x, y, x + w, y + h
+            if "w" in key:
+                left = min(x_mm, right - 4)
+            if "e" in key:
+                right = max(x_mm, left + 4)
+            if key.startswith("n"):
+                top = min(y_mm, bottom - 4)
+            if key.startswith("s"):
+                bottom = max(y_mm, top + 4)
+            drag["cur"] = (round(left, 2), round(top, 2), round(right - left, 2), round(bottom - top, 2))
+        elif drag["kind"] == "turn":
+            import math
+
+            x, y, w, h = drag["orig"]
+            angle = math.degrees(math.atan2(x_mm - (x + w / 2), (y + h / 2) - y_mm))  # 0 straight up, clockwise
+            if self._modifiers & Qt.KeyboardModifier.ShiftModifier:
+                angle = round(angle / 15) * 15
+            drag["angle"] = round(angle, 1)
+        else:
+            index, part, *at = drag["key"]
+            if part == "vias":
+                drag["tails"][index]["vias"][at[0]] = [round(x_mm, 2), round(y_mm, 2)]
+            else:
+                drag["tails"][index][part] = [round(x_mm, 2), round(y_mm, 2)]
+        self.update()
+
+    # --- selections: rectangle, lasso, auto; move / scale / rotate by handles -------------------------------
+
+    def _marquee_points(self) -> list:
+        if self.tool == "marquee" and self.marquee == "rect" and len(self._stroke) >= 2:
+            (x0, y0), (x1, y1) = self._stroke[0][:2], self._stroke[-1][:2]
+            return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        return [p[:2] for p in self._stroke]
+
+    def set_selection(self, area: dict | None, outline: list | None = None) -> None:
+        self.warp = None
+        self.sel_pivot = None
+        if area is None:
+            self.selection = None
+        else:
+            if outline is None:
+                if area.get("poly"):
+                    outline = [list(p) for p in area["poly"]]
+                else:
+                    x, y, w, h = area["mask"]["box"]
+                    outline = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
+            self.selection = {"area": area, "outline": outline}
+        self.update()
+
+    def _sel_box(self, outline=None):
+        pts = outline or self.selection["outline"]
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def selection_pivot(self) -> tuple[float, float]:
+        """基準位置: where the selection turns and scales about (its middle unless the ＋ was moved)."""
+        if self.sel_pivot:
+            return tuple(self.sel_pivot)
+        x0, y0, x1, y1 = self._sel_box()
+        return (x0 + x1) / 2, (y0 + y1) / 2
+
+    def start_warp(self, kind: str, columns: int = 2, rows: int = 2) -> bool:
+        """Pull the selection's corners (perspective) or a grid (mesh: `columns`×`rows` cells, 3×3 points by
+        default); Enter applies, Esc cancels."""
+        if not self.selection:
+            return False
+        x0, y0, x1, y1 = self._sel_box()
+        columns, rows = max(1, min(8, int(columns))), max(1, min(8, int(rows)))
+        if kind == "perspective":
+            points = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+        else:
+            points = [[x0 + (x1 - x0) * i / columns, y0 + (y1 - y0) * j / rows] for j in range(rows + 1) for i in range(columns + 1)]
+        self.warp = {"kind": kind, "box": (x0, y0, x1 - x0, y1 - y0), "points": points, "grid": [columns + 1, rows + 1]}
+        self.update()
+        return True
+
+    def finish_warp(self) -> None:
+        if self.warp is None:
+            return
+        warp, self.warp = self.warp, None
+        out = {warp["kind"]: [[round(v, 3) for v in p] for p in warp["points"]]}
+        if warp["kind"] == "mesh" and warp.get("grid") != [3, 3]:
+            out["grid"] = warp["grid"]
+        self.selectionWarped.emit(out)
+        self.update()
+
+    def cancel_warp(self) -> None:
+        self.warp = None
+        self.update()
+
+    def _draw_warp(self, painter: QPainter) -> None:
+        from genko import warp as warps
+
+        try:
+            go = warps.mapping(self.warp["box"], {self.warp["kind"]: self.warp["points"], "grid": self.warp.get("grid")})
+        except warps.WarpError:
+            return
+        x0, y0, w, h = self.warp["box"]
+        painter.setPen(QPen(theme.accent(), 1.2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        steps = 16
+        for k in range(5):  # the box's grid, bent the way the area will be
+            t = k / 4
+            painter.drawPolyline([self._pt(*go(x0 + w * i / steps, y0 + h * t)) for i in range(steps + 1)])
+            painter.drawPolyline([self._pt(*go(x0 + w * t, y0 + h * i / steps)) for i in range(steps + 1)])
+
+    def _sel_handles(self) -> list:
+        if not self.selection or self.tool != "marquee":
+            return []
+        if self.warp is not None:
+            return [("warp", i, tuple(p)) for i, p in enumerate(self.warp["points"])]
+        x0, y0, x1, y1 = self._sel_box()
+        cx = (x0 + x1) / 2
+        out = [("scale", key, (x0 + (x1 - x0) * fx, y0 + (y1 - y0) * fy)) for key, (fx, fy) in
+               {"nw": (0, 0), "n": (0.5, 0), "ne": (1, 0), "e": (1, 0.5), "se": (1, 1), "s": (0.5, 1), "sw": (0, 1), "w": (0, 0.5)}.items()]
+        out.append(("rotate", "r", (cx, y0 - 18 / self._scale)))
+        if self.sel_pivot:  # (基準位置, once placed: drag it; the middle is left for moving the selection)
+            out.append(("pivot", "p", tuple(self.sel_pivot)))
+        # 平行ゆがみ (skew): a diamond a quarter along each side slants the box along that side
+        out += [("skew", "n", (x0 + (x1 - x0) * 0.25, y0)), ("skew", "s", (x0 + (x1 - x0) * 0.75, y1)),
+                ("skew", "w", (x0, y0 + (y1 - y0) * 0.75)), ("skew", "e", (x1, y0 + (y1 - y0) * 0.25))]
+        return out
+
+    def _sel_matrix(self, pos_mm) -> list:
+        import math
+
+        drag = self._sel_drag
+        x0, y0, x1, y1 = drag["box"]
+        px, py = pos_mm
+        sx0, sy0 = drag["start"]
+        if drag["kind"] == "move":
+            return [1, 0, 0, 1, px - sx0, py - sy0]
+        if drag["kind"] == "rotate":
+            cx, cy = self.sel_pivot or ((x0 + x1) / 2, (y0 + y1) / 2)
+            angle = math.atan2(py - cy, px - cx) - math.atan2(sy0 - cy, sx0 - cx)
+            if self._modifiers & Qt.KeyboardModifier.ShiftModifier:
+                angle = round(angle / (math.pi / 12)) * (math.pi / 12)
+            c, s = math.cos(angle), math.sin(angle)
+            return [c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy]
+        key = drag["key"]
+        if drag["kind"] == "skew":  # the side dragged slides along itself; the opposite side stays
+            if key in ("n", "s"):
+                ay = y1 if key == "n" else y0
+                k = (px - sx0) / ((sy0 - ay) or 1e-6)
+                return [1, 0, k, 1, -k * ay, 0]
+            ax = x1 if key == "w" else x0
+            k = (py - sy0) / ((sx0 - ax) or 1e-6)
+            return [1, k, 0, 1, 0, -k * ax]
+        ax = x1 if "w" in key else x0 if "e" in key else (x0 + x1) / 2
+        ay = y1 if key.startswith("n") else y0 if key.startswith("s") else (y0 + y1) / 2
+        sx = (px - ax) / ((sx0 - ax) or 1e-6) if ("w" in key or "e" in key) else 1.0
+        sy = (py - ay) / ((sy0 - ay) or 1e-6) if (key.startswith("n") or key.startswith("s")) else 1.0
+        if self._modifiers & Qt.KeyboardModifier.ShiftModifier and key in ("nw", "ne", "se", "sw"):
+            sx = sy = (abs(sx) + abs(sy)) / 2 * (1 if sx * sy > 0 else -1)
+        return [sx, 0, 0, sy, ax - sx * ax, ay - sy * ay]
+
+    @staticmethod
+    def _apply(m, pts):
+        a, b, c, d, e, f = m
+        return [[a * x + c * y + e, b * x + d * y + f] for x, y in pts]
+
+    def _draw_selection_overlay(self, painter: QPainter) -> None:
+        if not self.selection:
+            return
+        self._draw_selection_mask(painter)
+        outline = self.selection["outline"]
+        if self._sel_drag and self._sel_drag.get("matrix"):
+            outline = self._apply(self._sel_drag["matrix"], outline)
+        pts = [self._pt(*p) for p in outline]
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self.warp is not None:
+            self._draw_warp(painter)
+        painter.setPen(QPen(QColor("white"), 1.5))
+        painter.drawPolygon(pts)
+        painter.setPen(QPen(QColor("#1c7ed6"), 1.5, Qt.PenStyle.DashLine))
+        painter.drawPolygon(pts)
+        for kind, _key, (hx, hy) in self._sel_handles():
+            p = self._pt(hx, hy)
+            painter.setPen(QPen(QColor("#1c7ed6"), 1.5))
+            painter.setBrush(QColor("white"))
+            if kind == "rotate":
+                painter.drawEllipse(p, 5, 5)
+            elif kind == "pivot":  # (a target: the point the selection turns about)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(p, 6, 6)
+                painter.drawLine(QPointF(p.x() - 9, p.y()), QPointF(p.x() + 9, p.y()))
+                painter.drawLine(QPointF(p.x(), p.y() - 9), QPointF(p.x(), p.y() + 9))
+            elif kind == "skew":
+                painter.drawPolygon([QPointF(p.x(), p.y() - 5), QPointF(p.x() + 5, p.y()), QPointF(p.x(), p.y() + 5),
+                                     QPointF(p.x() - 5, p.y())])
+            elif kind == "warp":
+                painter.setPen(QPen(theme.accent(), 1.5))
+                painter.drawEllipse(p, 5, 5)
+            else:
+                painter.drawRect(QRectF(p.x() - 4, p.y() - 4, 8, 8))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _marquee_press(self, pos: QPointF) -> bool:
+        """Start moving / scaling / turning the selection; False when the press starts a new one."""
+        if not self.selection:
+            return False
+        x_mm, y_mm = self._to_mm(pos)
+        if self.pivot_mode:  # (基準位置を動かす: this click puts it)
+            self.pivot_mode = False
+            self.sel_pivot = [round(x_mm, 3), round(y_mm, 3)]
+            self._sel_drag = {"kind": "pivot", "key": "p", "start": (x_mm, y_mm), "box": self._sel_box()}
+            self.update()
+            return True
+        for kind, key, (hx, hy) in self._sel_handles():
+            p = self._pt(hx, hy)
+            if abs(p.x() - pos.x()) <= 7 and abs(p.y() - pos.y()) <= 7:
+                self._sel_drag = {"kind": kind, "key": key, "start": (x_mm, y_mm), "box": self._sel_box()}
+                return True
+        if self.warp is not None:
+            return True  # (only the points move while a free transform is being set up)
+        from genko.selection import contains
+
+        if contains({"poly": self.selection["outline"]}, x_mm, y_mm):
+            self._sel_drag = {"kind": "move", "key": "", "start": (x_mm, y_mm), "box": self._sel_box()}
+            return True
+        return False
+
+    # --- reshaping a line (つまむ) ----------------------------------------------------------------------
+
+    def _reshape_press(self, x_mm: float, y_mm: float) -> None:
+        """Grab the nearest line (anywhere along it); it is walked in 1 mm steps so the pinch bends smoothly."""
+        import math
+
+        strokes = self.strokes_for_reshape() if self.strokes_for_reshape else []
+        reach = max(1.0, 10 / self._scale)  # about 10 px on screen, at least 1 mm
+        best = None
+        for stroke in strokes:
+            pts = stroke.points
+            for a, b in zip(pts, pts[1:] or pts):
+                dx, dy = b[0] - a[0], b[1] - a[1]
+                seg = dx * dx + dy * dy
+                t = 0.0 if seg == 0 else max(0.0, min(1.0, ((x_mm - a[0]) * dx + (y_mm - a[1]) * dy) / seg))
+                d = math.hypot(x_mm - (a[0] + t * dx), y_mm - (a[1] + t * dy))
+                if d <= reach and (best is None or d < best[0]):
+                    best = (d, stroke)
+        if best is None:
+            return
+        stroke = best[1]
+        pressure = stroke.pressure if len(stroke.pressure) == len(stroke.points) else [None] * len(stroke.points)
+        src = [[x, y] + ([p] if p is not None else []) for (x, y), p in zip(stroke.points, pressure)]
+        points = [src[0]]
+        for a, b in zip(src, src[1:]):
+            n = max(1, math.ceil(math.dist(a[:2], b[:2]) / 1.0))
+            for k in range(1, n + 1):
+                t = k / n
+                pt = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+                if len(a) > 2 and len(b) > 2:
+                    pt.append(a[2] + (b[2] - a[2]) * t)
+                points.append(pt)
+        along = [0.0]
+        for a, b in zip(points, points[1:]):
+            along.append(along[-1] + math.dist(a[:2], b[:2]))
+        self._reshape = {"id": stroke.id, "orig": [list(p) for p in points], "points": points, "grab": (x_mm, y_mm),
+                         "along": along}
+
+    def _reshape_move(self, x_mm: float, y_mm: float) -> None:
+        import math
+
+        gx, gy = self._reshape["grab"]
+        dx, dy = x_mm - gx, y_mm - gy
+        radius = max(0.5, self.reshape_radius_mm)
+        moved = []
+        along = self._reshape.get("along") or []
+        total = along[-1] if along else 0.0
+        for k, pt in enumerate(self._reshape["orig"]):
+            w = max(0.0, 1 - math.hypot(pt[0] - gx, pt[1] - gy) / radius) ** 2
+            if self.reshape_pin_ends and total > 0:  # (fixed ends: the pull fades to nothing at each end)
+                s, fade = along[k], min(radius, total / 2)
+                w *= min(1.0, s / fade, (total - s) / fade)
+            moved.append([pt[0] + dx * w, pt[1] + dy * w] + pt[2:])
+        self._reshape["points"] = moved
+        self.update()
 
     def _draw_rect(self, painter: QPainter, rect: Rect) -> None:
         p = self._pt(rect.x, rect.y)
-        painter.drawRect(int(p.x()), int(p.y()), int(rect.width * self._scale), int(rect.height * self._scale))
+        painter.drawRect(QRectF(p.x(), p.y(), rect.width * self._scale, rect.height * self._scale))
 
     def _draw_strokes(self, painter, strokes, color, width) -> None:
         pen = QPen(color, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         for stroke in strokes:
             if len(stroke) < 2:
                 continue
-            start = self._xy(stroke[0])
-            path = QPainterPath(self._pt(*start))
+            path = QPainterPath(self._pt(*self._xy(stroke[0])))
             for point in stroke[1:]:
                 path.lineTo(self._pt(*self._xy(point)))
             painter.drawPath(path)
 
-    def _draw_balloon(self, painter: QPainter, line: StoryLine) -> None:
-        p = self._pt(line.x_mm, line.y_mm)
-        w = max(12, line.w_mm * self._scale)
-        h = max(10, line.h_mm * self._scale)
-        painter.setPen(QPen(QColor("#111111"), 2))
-        painter.setBrush(QColor("#ffffff"))
-        painter.drawEllipse(int(p.x()), int(p.y()), int(w), int(h))
+    def _draw_balloon_box(self, painter: QPainter, line: StoryLine, at: tuple[float, float] | None, strong: bool = False,
+                          fill: bool = True) -> None:
+        p = self._pt(*(at or (line.x_mm, line.y_mm)))
+        rect = QRectF(p.x(), p.y(), max(10, line.w_mm * self._scale), max(10, line.h_mm * self._scale))
+        painter.setPen(QPen(theme.accent(), 2 if strong else 1.5, Qt.PenStyle.DashLine))
+        painter.setBrush(QColor(255, 255, 255, 170) if strong and fill else Qt.BrushStyle.NoBrush)
+        painter.drawRect(rect)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawText(int(p.x()) + 4, int(p.y()) + int(h / 2), line.text)
+
+    # --- hit tests ----------------------------------------------------------------------------------
 
     def _hit_line(self, x_mm: float, y_mm: float) -> StoryLine | None:
         for line in reversed(self.lines):
@@ -124,94 +1483,794 @@ class PageCanvas(QWidget):
                 return line
         return None
 
+    def _update_cursor(self, pos: QPointF | None = None) -> None:
+        if self._panning:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        elif self._space:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        elif self.tool in ("pen", "eraser", "blend", "liquify"):
+            # the brush's circle is drawn on the page (paintEvent); the pointer itself as chosen
+            blank = self.cursor_kind in ("circle", "dot")
+            self.setCursor(Qt.CursorShape.BlankCursor if blank else Qt.CursorShape.CrossCursor)
+        elif self.tool == "text":
+            self.setCursor(Qt.CursorShape.IBeamCursor)
+        elif self.tool == "move":
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+        elif self.tool in ("ruler", "3d", "effect", "stamp", "gradient"):
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        elif self.tool in ("picker", "fill", "lassofill", "marquee", "reshape"):
+            self.setCursor(Qt.CursorShape.PointingHandCursor if self.tool in ("picker", "fill") else Qt.CursorShape.CrossCursor)
+        elif self.tool == "frame" and pos is not None and self.page is not None:
+            gutter = self._hit_gutter(*self._to_mm(pos))
+            if gutter is not None:
+                self.setCursor(Qt.CursorShape.SplitVCursor if gutter["horizontal"] else Qt.CursorShape.SplitHCursor)
+            else:
+                self.setCursor(Qt.CursorShape.CrossCursor)
+        elif pos is not None and self.page is not None and self._hit_line(*self._to_mm(pos)):
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    # --- mouse -----------------------------------------------------------------------------------------
+
+    def _start_pan(self, pos: QPointF) -> None:
+        self._stop_coast()
+        self._panning = True
+        self._last_pos = pos
+        self._pan_speed = QPointF(0, 0)
+        self._pan_time = time.monotonic()
+        self._update_cursor()
+
+    # a page let go while moving slides on a little and slows to a stop (as on a tablet)
+    def _coast(self) -> None:
+        from genko.app.comfort import reduce_motion
+
+        speed = getattr(self, "_pan_speed", QPointF(0, 0))
+        if reduce_motion() or (abs(speed.x()) + abs(speed.y())) < 0.4 or time.monotonic() - self._pan_time > 0.08:
+            return
+        timer = self.__dict__.get("_coast_timer")
+        if timer is None:
+            timer = self._coast_timer = QTimer(self)
+            timer.setInterval(16)
+            timer.timeout.connect(self._coast_step)
+        timer.start()
+
+    def _coast_step(self) -> None:
+        speed = self._pan_speed * 0.88
+        self._pan_speed = speed
+        if abs(speed.x()) + abs(speed.y()) < 0.3:
+            self._stop_coast()
+            return
+        self._pan_x += speed.x()
+        self._pan_y += speed.y()
+        self._fitted = False
+        self.update()
+
+    def _stop_coast(self) -> None:
+        timer = self.__dict__.get("_coast_timer")
+        if timer is not None and timer.isActive():
+            timer.stop()
+            self.changed.emit()
+
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        if event.button() == Qt.MouseButton.MiddleButton:
-            self._panning = True
-            self._last_pos = event.position()
+        self.setFocus()
+        pos = self._ev(event.position())
+        if event.button() == Qt.MouseButton.LeftButton and self._space and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            self._turning = (self._angle_at(event.position()), self.rotation)  # Shift+Space: turn the view
+            return
+        if event.button() == Qt.MouseButton.MiddleButton or (event.button() == Qt.MouseButton.LeftButton and self._space):
+            self._start_pan(pos)
             return
         if self.page is None or event.button() != Qt.MouseButton.LeftButton:
             return
-        x_mm, y_mm = self._to_mm(event.position())
-        hit = self._hit_line(x_mm, y_mm)
-        if hit is not None:
-            self._drag_line = hit
+        if self._guide_press(event.position()):
             return
+        x_mm, y_mm = self._to_mm(pos)
+        self._press_pos = pos
+        if self.tool == "shape":
+            self._shape_press(x_mm, y_mm, event.modifiers())
+            return
+        if self.tool == "vector":
+            self._vector_press(x_mm, y_mm, event.modifiers())
+            return
+        if self.tool in ("move", "gradient"):
+            self._tool_drag = {"start": (x_mm, y_mm), "end": (x_mm, y_mm)}
+            if self.tool == "move":
+                self.layerMoveStarted.emit()
+            self.update()
+            return
+        if self.tool == "text" and self.balloon_pen:
+            self._stroke = [(x_mm, y_mm)]  # the outline of a balloon, drawn by hand
+            self.update()
+            return
+        if self.tool == "text":
+            self.textRequested.emit(x_mm, y_mm)
+            return
+        if self.tool == "frame":
+            self._modifiers = event.modifiers()
+            self._frame_press(pos)
+            self.update()
+            return
+        if self.tool == "picker":
+            self._pick_colour(pos)
+            return
+        if self.tool == "zoom":  # 虫めがね: a click zooms in (Alt: out), a drag zooms into the area
+            self._zoom_drag = {"start": pos, "end": pos, "out": bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)}
+            return
+        if self.tool == "ruler":
+            self._modifiers = event.modifiers()
+            self._ruler_press(pos)
+            return
+        if self.tool == "3d":
+            self._prim_press(pos)
+            return
+        if self.tool == "effect":
+            self._effect_press(pos)
+            return
+        if self.tool == "stamp":
+            self.stampRequested.emit(x_mm, y_mm)
+            return
+        if self.tool == "fill":
+            self.fillRequested.emit(x_mm, y_mm)
+            return
+        if self.tool == "marquee":
+            self._modifiers = event.modifiers()
+            self._sel_how = self.how_from(event.modifiers())
+            if self._sel_how == "replace" and self.marquee != "polyline" and self._marquee_press(pos):
+                return
+            if self.marquee == "wand":
+                self.wandRequested.emit(x_mm, y_mm)
+                return
+            if self.marquee == "color":
+                self.colourAreaRequested.emit(x_mm, y_mm)
+                return
+            if self.marquee == "polyline":
+                self._shape_pts.append((x_mm, y_mm))
+                self.update()
+                return
+            if self.marquee == "ellipse":
+                self._shape_drag = [(x_mm, y_mm), (x_mm, y_mm)]
+                if self._sel_how == "replace":
+                    self.set_selection(None)
+                return
+            if self._sel_how == "replace" and self.marquee not in ("pen", "erase"):
+                self.set_selection(None)
+        if self.tool == "reshape":
+            self._reshape_press(x_mm, y_mm)
+            return
+        if self.tool == "select":
+            handle = self._hit_handle(pos)
+            if handle is not None:
+                line = self._selected_line()
+                kind, key = handle
+                self._handle_drag = {"kind": kind, "key": key, "line": line.id,
+                                     "orig": (line.x_mm, line.y_mm, line.w_mm, line.h_mm),
+                                     "cur": (line.x_mm, line.y_mm, line.w_mm, line.h_mm),
+                                     "tails": [copy.deepcopy(t) for t in self._tails(line)]}
+                return
+            hit = self._hit_line(x_mm, y_mm)
+            if hit is not None:
+                self._drag_line = hit
+                self._drag_grab = (x_mm - hit.x_mm, y_mm - hit.y_mm)
+                self._drag_pos = (hit.x_mm, hit.y_mm)
+                return
+            self._last_pos = pos  # a drag on empty paper moves the view (hand), a click selects
+            return
+        if self.tool == "pen" and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            x_mm, y_mm = self.grid_point(x_mm, y_mm)  # a straight line (Shift) starts on the grid
         self._stroke = [(x_mm, y_mm)]
         self.update()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._turning is not None:
+            start, before = self._turning
+            turn = self._angle_at(event.position()) - start
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                turn = round((before + turn) / 15) * 15 - before  # Ctrl: in 15° steps
+            self.set_rotation(before + turn)
+            return
+        if self._guide_move(event.position()):
+            return
+        pos = self._ev(event.position())
+        if self._zoom_drag is not None:
+            self._zoom_drag["end"] = pos
+            self.update()
+            return
+        if self._shape_drag is not None and self.page is not None:
+            self._shape_move(*self._to_mm(pos), event.modifiers())
+            return
+        if (self._vector_drag is not None or self._vector_trace is not None) and self._vector_move(*self._to_mm(pos)):
+            return
         if self._panning:
-            delta = event.position() - self._last_pos
+            delta = pos - self._last_pos
             self._pan_x += delta.x()
             self._pan_y += delta.y()
-            self._last_pos = event.position()
+            self._last_pos = pos
+            now = time.monotonic()
+            frames = max(1.0, (now - self._pan_time) / 0.016)  # (the speed per screen frame, a little smoothed)
+            self._pan_speed = self._pan_speed * 0.4 + (delta / frames) * 0.6
+            self._pan_time = now
+            self._fitted = False
             self.update()
             return
-        if self._drag_line is not None:
-            x_mm, y_mm = self._to_mm(event.position())
-            self._drag_line.x_mm = x_mm
-            self._drag_line.y_mm = y_mm
+        if self._tool_drag is not None:
+            x_mm, y_mm = self._to_mm(pos)
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:  # Shift: straight across, down or at 45°
+                import math
+
+                sx, sy = self._tool_drag["start"]
+                angle = round(math.atan2(y_mm - sy, x_mm - sx) / (math.pi / 4)) * (math.pi / 4)
+                length = math.hypot(x_mm - sx, y_mm - sy)
+                x_mm, y_mm = sx + length * math.cos(angle), sy + length * math.sin(angle)
+            self._tool_drag["end"] = (x_mm, y_mm)
             self.update()
+            return
+        if self._handle_drag is not None:
+            self._modifiers = event.modifiers()
+            self._drag_handle(pos)
+            return
+        if self._frame_drag is not None:
+            self._modifiers = event.modifiers()
+            self._frame_move(pos)
+            return
+        if self._sel_drag is not None and self._sel_drag["kind"] == "warp":
+            self.warp["points"][self._sel_drag["key"]] = [round(v, 3) for v in self._to_mm(pos)]
+            self.update()
+            return
+        if self._sel_drag is not None and self._sel_drag["kind"] == "pivot":
+            self.sel_pivot = [round(v, 3) for v in self._to_mm(pos)]
+            self.update()
+            return
+        if self._sel_drag is not None:
+            self._modifiers = event.modifiers()
+            self._sel_drag["matrix"] = self._sel_matrix(self._to_mm(pos))
+            self.update()
+            return
+        if self._reshape is not None:
+            self._reshape_move(*self._to_mm(pos))
+            return
+        if self.tool == "ruler":
+            self._modifiers = event.modifiers()
+            if self._ruler_move(pos):
+                return
+        if self._prim_move(pos) or self._effect_move(pos):
+            return
+        if self._drag_line is not None:
+            x_mm, y_mm = self._to_mm(pos)
+            gx, gy = self._drag_grab
+            self._drag_pos = (x_mm - gx, y_mm - gy)
+            self.update()
+            return
+        pressed = bool(event.buttons() & Qt.MouseButton.LeftButton)
+        if self.tool == "select" and pressed and self._press_pos is not None:
+            if (pos - self._press_pos).manhattanLength() > 6:
+                self._start_pan(self._last_pos)
+                self.mouseMoveEvent(event)
             return
         if not self._stroke:
-            self._hover = self._to_mm(event.position())
+            self._hover = self._to_mm(pos)
+            self._update_cursor(pos)
             self.update()
             return
-        self._stroke.append(self._to_mm(event.position()))
+        if self.tool == "pen" and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            self._stroke = [self._stroke[0], self.grid_point(*self._to_mm(pos))]  # Shift: a straight line
+        else:
+            self._stroke.append(self._to_mm(pos))
         self.update()
 
+    def _angle_at(self, pos: QPointF) -> float:
+        import math
+
+        return math.degrees(math.atan2(pos.y() - self.height() / 2, pos.x() - self.width() / 2))
+
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
-        if event.button() == Qt.MouseButton.MiddleButton:
-            self._panning = False
+        if self._turning is not None:
+            self._turning = None
             return
-        if self._drag_line is not None:
-            self.textMoved.emit(self._drag_line.id, self._drag_line.x_mm, self._drag_line.y_mm)
-            self._drag_line = None
+        if self._guide_release(event.position()):
             return
-        if self.page is None or not self._stroke:
-            return
-        if len(self._stroke) < 4:
-            frame = self.page.frame_at(*self._stroke[0])
-            if frame is not None:
-                self.frameSelected.emit(frame.id)
-            self._stroke = []
+        if self._zoom_drag is not None:
+            drag, self._zoom_drag = self._zoom_drag, None
+            start, end = drag["start"], drag["end"]
+            if abs(end.x() - start.x()) > 6 and abs(end.y() - start.y()) > 6:
+                self.zoom_to_rect(*self._to_mm(start), *self._to_mm(end))
+            else:
+                self.glide(lambda: self.zoom_by(0.5 if drag["out"] else 2.0, start))
             self.update()
             return
+        if self._vector_release():
+            return
+        if self._shape_drag is not None and self.tool == "marquee":
+            (x0, y0), (x1, y1) = self._shape_drag
+            self._shape_drag = None
+            if abs(x1 - x0) > 0.5 and abs(y1 - y0) > 0.5:
+                from genko.selops import ellipse_poly
+
+                self._selection_done({"poly": ellipse_poly([min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0)])})
+            self.update()
+            return
+        if self._shape_drag is not None:
+            self._shape_release()
+            return
+        if self.tool == "marquee" and self.marquee in ("pen", "erase") and self._stroke:
+            pts = [[round(p[0], 3), round(p[1], 3)] for p in self._stroke]
+            self._stroke = []
+            self.selectionPainted.emit(pts, self.marquee == "pen")
+            self.update()
+            return
+        if self._tool_drag is not None:
+            drag, self._tool_drag = self._tool_drag, None
+            (sx, sy), (ex, ey) = drag["start"], drag["end"]
+            if self.tool == "move":
+                self.move_image = None
+                if abs(ex - sx) > 0.05 or abs(ey - sy) > 0.05:
+                    self.layerMoved.emit(round(ex - sx, 3), round(ey - sy, 3))
+            elif abs(ex - sx) + abs(ey - sy) > 0.5:
+                self.gradientRequested.emit([round(sx, 3), round(sy, 3)], [round(ex, 3), round(ey, 3)])
+            self.update()
+            return
+        if self._panning:
+            self._panning = False
+            self._press_pos = None
+            self._update_cursor(self._ev(event.position()))
+            self._coast()
+            return
+        if self._frame_drag is not None:
+            self._press_pos = None
+            self._frame_release()
+            return
+        if self._prim_drag is not None:
+            self._prim_release()
+            return
+        if self._effect_drag is not None:
+            self._effect_release()
+            return
+        if self.tool == "ruler":
+            self._ruler_release()
+            return
+        if self._sel_drag is not None and self._sel_drag["kind"] in ("warp", "pivot"):
+            self._sel_drag = None
+            self.update()
+            return
+        if self._sel_drag is not None:
+            drag, self._sel_drag = self._sel_drag, None
+            matrix = drag.get("matrix")
+            if matrix and any(abs(v - w) > 1e-4 for v, w in zip(matrix, [1, 0, 0, 1, 0, 0])):
+                self.selectionTransformed.emit(matrix)
+            self.update()
+            return
+        if self._reshape is not None:
+            shape, self._reshape = self._reshape, None
+            if shape["points"] != shape["orig"]:
+                self.strokeReshaped.emit(shape["id"], shape["points"])
+            self.update()
+            return
+        if self.tool == "text" and self._stroke:
+            import math
+
+            pts = [[round(p[0], 2), round(p[1], 2)] for p in self._stroke[:: max(1, len(self._stroke) // 80)]]
+            self._stroke = []
+            xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+            if len(pts) >= 3 and max(xs) - min(xs) > 4 and max(ys) - min(ys) > 4 and max(math.dist(pts[0], p) for p in pts) > 4:
+                self.balloonDrawn.emit(pts)
+            self.update()
+            return
+        if self.tool in ("lassofill", "marquee") and self._stroke:
+            pts = [list(p) for p in self._marquee_points()]
+            self._stroke = []
+            import math
+
+            if len(pts) >= 3 and max(math.dist(pts[0], p) for p in pts) > 1.0:
+                if self.tool == "lassofill":
+                    self.areaFilled.emit(pts)
+                else:
+                    self._selection_done({"poly": pts})
+            self.update()
+            return
+        if self._handle_drag is not None:
+            drag, self._handle_drag = self._handle_drag, None
+            self._press_pos = None
+            if drag["kind"] == "resize" and drag["cur"] != drag["orig"]:
+                x, y, w, h = drag["cur"]
+                self.lineGeometry.emit(drag["line"], {"x_mm": x, "y_mm": y, "w_mm": w, "h_mm": h})
+            elif drag["kind"] == "tail":
+                self.lineGeometry.emit(drag["line"], {"tails": drag["tails"]})
+            elif drag["kind"] == "turn" and drag.get("angle") is not None:
+                self.lineGeometry.emit(drag["line"], {"style": {"rotate_deg": drag["angle"] or None}})
+            self.update()
+            return
+        if self._drag_line is not None:
+            line, pos = self._drag_line, self._drag_pos
+            self._drag_line = None
+            self._drag_pos = None
+            self._press_pos = None
+            self.selected_line_id = line.id
+            if pos is not None and (abs(pos[0] - line.x_mm) > 0.05 or abs(pos[1] - line.y_mm) > 0.05):
+                self.textMoved.emit(line.id, round(pos[0], 2), round(pos[1], 2))  # becomes a move_line op
+            self.lineSelected.emit(line.id, False)
+            self.update()
+            return
+        if self.page is None or event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self.tool == "select":
+            self._press_pos = None
+            frame = self.page.frame_at(*self._to_mm(self._ev(event.position())))
+            if frame is not None:
+                self.frameSelected.emit(frame.id)
+            return
+        if not self._stroke:
+            return
+        if len(self._stroke) == 1:
+            x, y = self._stroke[0][:2]
+            self._stroke.append((x + 0.01, y + 0.01))  # a tap: a dot with the pen, a spot with the eraser
         packed = [pack_point(float(pt[0]), float(pt[1]), float(pt[2]) if len(pt) > 2 else None) for pt in self._stroke]
-        self.strokeCommitted.emit(packed)
         self._stroke = []
+        self.strokeCommitted.emit(packed)
         self.changed.emit()
         self.update()
 
-    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
-        delta = event.angleDelta().y()
-        factor = 1.1 if delta > 0 else 0.9
-        self._scale = min(8.0, max(0.8, self._scale * factor))
+    def _pick_colour(self, pos: QPointF) -> None:
+        if self.background is None or self.page is None:
+            return
+        x_mm, y_mm = self._to_mm(pos)
+        if self.pick_source == "layer" and self.layer_colour_at is not None:
+            rgb = self.layer_colour_at(x_mm, y_mm)
+            if rgb is not None:
+                self.colourPicked.emit(tuple(rgb))
+            return
+        image = self.background.toImage()
+        px = int(x_mm / self.page.spec.width_mm * image.width())
+        py = int(y_mm / self.page.spec.height_mm * image.height())
+        if 0 <= px < image.width() and 0 <= py < image.height():
+            colour = image.pixelColor(px, py)
+            self.colourPicked.emit((colour.red(), colour.green(), colour.blue()))
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.fit_page()
+            return
+        if self._shape_pts and (self.tool == "shape" or (self.tool == "marquee" and self.marquee == "polyline")):
+            self.finish_points()
+            return
+        if self.tool == "frame" and self._frame_poly:
+            if len(self._frame_poly) > 1 and self._frame_poly[-1] == self._frame_poly[-2]:
+                self._frame_poly.pop()  # (the double click's second press added the same corner again)
+            self.finish_frame_poly()
+            return
+        if self.tool == "ruler":
+            self.finish_curve()
+            return
+        if self.page is not None and event.button() == Qt.MouseButton.LeftButton and self.tool == "select":
+            hit = self._hit_line(*self._to_mm(self._ev(event.position())))
+            if hit is not None:
+                self.selected_line_id = hit.id
+                self.lineSelected.emit(hit.id, False)
+                self.lineEditRequested.emit(hit.id)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hover = None
         self.update()
 
-    def tabletEvent(self, event) -> None:  # noqa: N802
+    def contextMenuEvent(self, event) -> None:  # noqa: N802
         if self.page is None:
             return
-        x_mm, y_mm = self._to_mm(event.position())
-        pressure = float(event.pressure())
-        tilt = abs(float(getattr(event, "xTilt", lambda: 0.0)())) / 60.0
-        etype = event.type()
+        hit = self._hit_line(*self._to_mm(self._ev(QPointF(event.pos()))))
+        if hit is not None:
+            self.selected_line_id = hit.id
+            self.update()
+            self.lineContextMenu.emit(hit.id, QPointF(event.globalPos()))
+            return
+        frame = self.page.frame_at(*self._to_mm(self._ev(QPointF(event.pos()))))
+        if frame is not None and frame.id != self.page.selected_frame_id:
+            self.frameSelected.emit(frame.id)
+        self.contextMenuAt.emit(frame.id if frame else "", QPointF(event.globalPos()))
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y() or event.pixelDelta().y()
+            if delta:
+                self.zoom_by(1.0 + max(-0.5, min(0.5, delta / 600)), self._ev(event.position()))
+            return
+        pixel = event.pixelDelta()
+        dx, dy = (pixel.x(), pixel.y()) if not pixel.isNull() else (event.angleDelta().x() / 3, event.angleDelta().y() / 3)
+        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier and not dx:
+            dx, dy = dy, 0
+        moved = self._ev(QPointF(dx, dy)) - self._ev(QPointF(0, 0))  # the page follows the fingers, turned or not
+        self._pan_x += moved.x()
+        self._pan_y += moved.y()
+        self._fitted = False
+        self.update()
+
+    def event(self, event) -> bool:  # noqa: A003
         from PySide6.QtCore import QEvent
 
+        if event.type() == QEvent.Type.Gesture:  # two fingers on a touch screen: zoom, turn, move
+            pinch = event.gesture(Qt.GestureType.PinchGesture)
+            if pinch is not None:
+                self.pinch(float(pinch.scaleFactor()), float(pinch.rotationAngle() - pinch.lastRotationAngle()),
+                           QPointF(self.mapFromGlobal(pinch.centerPoint().toPoint())),
+                           QPointF(pinch.centerPoint() - pinch.lastCenterPoint()))
+                event.accept()
+                return True
+        if event.type() == QEvent.Type.NativeGesture:  # trackpad pinch (macOS)
+            from PySide6.QtCore import Qt as _Qt
+
+            if event.gestureType() == _Qt.NativeGestureType.ZoomNativeGesture:
+                self.zoom_by(1.0 + float(event.value()), self._ev(event.position()))
+                return True
+        return self._QtBase.event(self, event)
+
+    def pinch(self, scale: float, turn_deg: float, centre: QPointF, moved: QPointF) -> None:
+        """A two-finger gesture: spread to zoom about the fingers, twist to turn the view, slide to move."""
+        if moved.x() or moved.y():
+            self._pan_x += moved.x()
+            self._pan_y += moved.y()
+            self._fitted = False
+        if abs(turn_deg) > 0.01:
+            self.rotate_view(turn_deg)
+        if scale and abs(scale - 1.0) > 1e-3:
+            self.zoom_by(scale, self._ev(centre))
+        self.update()
+
+    # --- keyboard --------------------------------------------------------------------------------------
+
+    def hold_modifier(self, key: str, down: bool) -> None:
+        """Alt / Ctrl held: the chosen tool for a moment (環境設定), back to the tool before when let go."""
+        base = self._held_tool or self.tool
+        own = (self.tool_modifiers.get(base) or {}).get(key)
+        tool = self.modifier_tools.get(key) or ""
+        if base in ("marquee", "zoom") and key == "alt":
+            tool = ""  # (Alt takes away from the selection there, and zooms out with the magnifier)
+        if own:  # (this tool's own setting wins; Shift switches only when a tool says so)
+            tool = "" if own == "none" else own
+        if down:
+            if tool and self._held_tool is None and not self._stroke and tool != self.tool:
+                self._held_tool = self.tool
+                self._held_key = key
+                self.tool = tool
+                self._update_cursor()
+                self.update()
+        elif self._held_tool is not None and getattr(self, "_held_key", key) == key:  # (only the key that switched puts it back)
+            self.tool, self._held_tool = self._held_tool, None
+            self._update_cursor()
+            self.update()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+            self._space = True
+            self._update_cursor()
+            return
+        if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_Control, Qt.Key.Key_Shift) and not event.isAutoRepeat():
+            self.hold_modifier({Qt.Key.Key_Alt: "alt", Qt.Key.Key_Control: "ctrl"}.get(event.key(), "shift"), True)
+        if self._shape_pts and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.finish_points(closed=bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier))
+            return
+        if self._frame_poly and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.finish_frame_poly()
+            return
+        if self._frame_poly and event.key() == Qt.Key.Key_Escape:
+            self._frame_poly = []
+            self.update()
+            return
+        if event.key() == Qt.Key.Key_Escape and self.cancel_points():
+            return
+        if self.tool == "vector" and event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self.vector_delete():
+            return
+        if self.tool == "ruler" and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.finish_curve()
+            return
+        if self.tool == "ruler" and event.key() == Qt.Key.Key_Escape and (self._ruler_draft or self._ruler_drag):
+            self.cancel_ruler()
+            return
+        if self.warp is not None and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.finish_warp()
+            return
+        if self.warp is not None and event.key() == Qt.Key.Key_Escape:
+            self.cancel_warp()
+            return
+        if event.key() == Qt.Key.Key_Escape and self.selection is not None:
+            self.set_selection(None)
+            return
+        if event.key() == Qt.Key.Key_Escape and self._drag_line is not None:
+            self._drag_line = None
+            self._drag_pos = None
+            self.update()
+            return
+        self._QtBase.keyPressEvent(self, event)
+
+    def keyReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_Control, Qt.Key.Key_Shift) and not event.isAutoRepeat():
+            self.hold_modifier({Qt.Key.Key_Alt: "alt", Qt.Key.Key_Control: "ctrl"}.get(event.key(), "shift"), False)
+        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+            self._space = False
+            self._panning = False
+            self._update_cursor(self._ev(QPointF(self.mapFromGlobal(QCursor.pos()))))
+            return
+        self._QtBase.keyReleaseEvent(self, event)
+
+    # --- tablet ------------------------------------------------------------------------------------------
+
+    def tabletEvent(self, event) -> None:  # noqa: N802
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QPointingDevice
+
+        etype = event.type()
+        self._last_pressure = float(event.pressure())  # (the vector tool's traces take the pen's pressure)
+        side = event.button() in (Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton) or (
+            etype == QEvent.Type.TabletMove and event.buttons() & (Qt.MouseButton.RightButton | Qt.MouseButton.MiddleButton))
+        if side and self.pen_button != "menu" and self.page is not None:
+            pos = self._ev(event.position())
+            if self.pen_button == "picker" and etype == QEvent.Type.TabletPress:
+                self._pick_colour(pos)
+            elif self.pen_button == "hand":
+                if etype == QEvent.Type.TabletPress:
+                    self._start_pan(pos)
+                elif etype == QEvent.Type.TabletMove and self._panning:
+                    delta = pos - self._last_pos
+                    self._pan_x += delta.x()
+                    self._pan_y += delta.y()
+                    self._last_pos = pos
+                    self._fitted = False
+                    self.update()
+            if etype == QEvent.Type.TabletRelease:
+                self._panning = False
+                self._update_cursor()
+            event.accept()
+            return
+        eraser_end = event.pointerType() == QPointingDevice.PointerType.Eraser
+        if etype == QEvent.Type.TabletPress and eraser_end and self.page is not None and self.tool != "eraser" \
+                and not self._space:
+            self._eraser_end = self.tool  # the pen turned over: erase for this stroke, then back
+            self.tool = "eraser"
+            self._update_cursor()
+        if self.page is None or self.tool not in ("pen", "eraser", "blend", "liquify") or self._space:
+            event.ignore()  # the select tool works with the pen as a mouse
+            return
+        x_mm, y_mm = self._to_mm(self._ev(event.position()))
+        pressure = float(event.pressure())
+        tilt = abs(float(getattr(event, "xTilt", lambda: 0.0)())) / 60.0
+        turn = float(getattr(event, "rotation", lambda: 0.0)())  # (the barrel, on pens that report it: アートペン)
         if etype == QEvent.Type.TabletPress:
             self._stroke = [tuple(pack_point(x_mm, y_mm, pressure, tilt=tilt))]
+            self._turns = [turn]
             self.update()
             event.accept()
             return
         if etype == QEvent.Type.TabletMove and self._stroke:
-            self._stroke.append(tuple(pack_point(x_mm, y_mm, pressure, tilt=tilt)))
+            if self.tool == "pen" and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                gx, gy = self.grid_point(x_mm, y_mm)  # Shift: a straight line, as with the mouse
+                self._stroke = [self._stroke[0], tuple(pack_point(gx, gy, pressure, tilt=tilt))]
+                self._turns = self._turns[:1] + [turn]
+            else:
+                self._stroke.append(tuple(pack_point(x_mm, y_mm, pressure, tilt=tilt)))
+                self._turns.append(turn)
             self.update()
             event.accept()
             return
         if etype == QEvent.Type.TabletRelease and self._stroke:
-            if len(self._stroke) >= 2:
-                self.strokeCommitted.emit(list(self._stroke))
+            stroke = list(self._stroke)
             self._stroke = []
+            if len(stroke) == 1:
+                x, y, *rest = stroke[0]
+                stroke.append((x + 0.01, y + 0.01, *rest))  # a tap with the pen is a dot
+            turns = list(getattr(self, "_turns", []))
+            self.last_rotation = (turns + turns[-1:]) if len(turns) == 1 else turns
+            self.strokeCommitted.emit(stroke)
+            self.last_rotation = []
+            self._back_from_eraser_end()
             self.changed.emit()
             self.update()
             event.accept()
+            return
+        if etype == QEvent.Type.TabletRelease:
+            self._back_from_eraser_end()
+            event.accept()
+
+    def _back_from_eraser_end(self) -> None:
+        if self._eraser_end is not None:
+            self.tool = self._eraser_end
+            self._eraser_end = None
+            self._update_cursor()
+
+
+# --- the page drawn by the graphics card (stage 2) ----------------------------------------------------------------
+
+_GPU: list = []
+
+
+def _gpu_class():
+    """PageCanvas on a QOpenGLWidget: the same drawing, but scaling, turning and compositing the page's picture
+    happen on the graphics card (smooth zoom and rotation on a large page)."""
+    if not _GPU:
+        from PySide6.QtOpenGLWidgets import QOpenGLWidget
+
+        body = {k: v for k, v in PageCanvas.__dict__.items() if k not in ("__dict__", "__weakref__", "staticMetaObject")}
+        body["_QtBase"] = QOpenGLWidget
+        # a QOpenGLWidget draws in paintGL (its own paintEvent renders into the card's buffer): the same drawing there
+        body.pop("paintEvent")
+        body["paintGL"] = lambda self: PageCanvas.paintEvent(self, None)
+        body["resizeGL"] = _gl_resized
+        _GPU.append(type("GpuPageCanvas", (GuideMixin, ShapeSelectMixin, VectorMixin, QOpenGLWidget), body))
+    return _GPU[0]
+
+
+def _gl_resend(canvas) -> None:
+    rendered = getattr(canvas, "_rendered", None)
+    if rendered is not None:
+        canvas._rendered = (rendered[0], QPixmap.fromImage(rendered[1].toImage()))  # (a new picture: sent again)
+    canvas.update()
+
+
+def _gl_resized(canvas, _w: int, _h: int) -> None:
+    """After a resize (maximizing, restoring, dragging the window's edge) or the screen turning, some drivers hand
+    the widget a new context, and a picture already sent to the card may come back black (Intel HD 5500): the
+    page's picture is sent again as a new picture now, and once more when the resizing has stopped (an edge drag is
+    dozens of resizes in a row)."""
+    _gl_resend(canvas)
+    timer = getattr(canvas, "_gl_settle", None)
+    if timer is None:
+        timer = QTimer(canvas)
+        timer.setSingleShot(True)
+        timer.setInterval(250)
+        timer.timeout.connect(lambda: _gl_resend(canvas))
+        canvas._gl_settle = timer
+        window = canvas.window().windowHandle()
+        if window is not None:  # (the screen turned or the window moved to another screen)
+            window.screenChanged.connect(lambda _screen: timer.start())
+            screen = window.screen()
+            if screen is not None:
+                screen.orientationChanged.connect(lambda _o: timer.start())
+                screen.geometryChanged.connect(lambda _g: timer.start())
+    timer.start()
+
+
+def gpu_available() -> bool:
+    """Turned on by the person, on a real screen with an OpenGL context that can be made (not the offscreen test screen)."""
+    from PySide6.QtGui import QGuiApplication, QOffscreenSurface, QOpenGLContext
+
+    from genko.app.preferences import settings
+
+    app = QGuiApplication.instance()
+    if app is None or app.platformName() in ("offscreen", "minimal", "vnc"):
+        return False
+    if str(settings().value("ui/gpu_canvas", "false")).lower() not in ("1", "true", "yes"):  # (off unless chosen: some
+        return False  # drivers give a blank white page, e.g. older Intel graphics on Windows)
+    try:
+        context = QOpenGLContext()
+        if not context.create():
+            return False
+        surface = QOffscreenSurface()
+        surface.create()
+        if not context.makeCurrent(surface):
+            return False
+        renderer = str(context.functions().glGetString(0x1F01) or "")  # GL_RENDERER
+        context.doneCurrent()
+        return not software_renderer(renderer)
+    except Exception:
+        return False
+
+
+def software_renderer(name: str) -> bool:
+    """OpenGL done by the processor (a virtual machine, a remote desktop): slower than drawing without it."""
+    name = name.lower()
+    return any(word in name for word in ("llvmpipe", "softpipe", "software", "swrast", "basic render", "gdi generic"))
+
+
+def make_canvas() -> PageCanvas:
+    """The page's canvas: on the graphics card where it can be, drawn by the processor otherwise."""
+    if gpu_available():
+        try:
+            from PySide6.QtGui import QSurfaceFormat
+
+            canvas = _gpu_class()()
+            form = QSurfaceFormat()
+            form.setSamples(4)  # (smooth edges on the handles and guides)
+            canvas.setFormat(form)
+            canvas.gpu = True
+            return canvas
+        except Exception:
+            pass
+    canvas = PageCanvas()
+    canvas.gpu = False
+    return canvas
+

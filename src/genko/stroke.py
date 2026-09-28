@@ -7,13 +7,29 @@ def _mm_to_px(mm: float, dpi: int) -> int:
     return max(1, round(mm / 25.4 * dpi))
 
 
-def stabilize_points(points: list, window: int = 5) -> list:
+def stabilize_points(points: list, window: int = 5, by_speed: bool = False) -> list:
+    """手ブレ補正: each point the average of its neighbours. `by_speed` (速度による手ブレ補正): where the hand
+    moved quickly (long steps between the points, which come at a steady rate) the average reaches further,
+    up to twice as far; slow careful parts keep their detail."""
     if window < 3 or len(points) < 3:
         return points
     half = max(1, int(window) // 2)
     out: list = []
+    n = len(points)
+    reach = [half] * n
+    if by_speed and n > 3:
+        import math
+        import statistics
+
+        steps = [math.dist(points[i][:2], points[i + 1][:2]) for i in range(n - 1)]
+        usual = statistics.median(steps) or 1e-6
+        for i in range(n):
+            step = (steps[max(0, i - 1)] + steps[min(n - 2, i)]) / 2
+            quick = max(0.0, min(1.0, (step / usual - 0.5) / 1.5))  # (half the usual step: slow; twice: quick)
+            reach[i] = max(1, round(half * (0.5 + 1.5 * quick)))
     for i, point in enumerate(points):
-        sl = points[max(0, i - half) : min(len(points), i + half + 1)]
+        k = min(reach[i], i, n - 1 - i)  # a window that shrinks evenly at the ends keeps them where they were drawn
+        sl = points[i - k : i + k + 1]
         x = sum(float(item[0]) for item in sl) / len(sl)
         y = sum(float(item[1]) for item in sl) / len(sl)
         extra = list(point[2:]) if len(point) > 2 else []
@@ -21,16 +37,79 @@ def stabilize_points(points: list, window: int = 5) -> list:
     return out
 
 
-def taper_points(points: list) -> list:
+def taper_points(points: list, in_mm: float | None = None, out_mm: float | None = None) -> list:
+    """入り抜き: the line thins towards its ends. Without lengths, a quarter of the points at each end (as
+    before); with them, `in_mm` along the line from its start and `out_mm` back from its end (0: that end
+    keeps its width), so a short hair and a long outline get the same entry and exit."""
     n = len(points)
     if n < 2:
         return points
-    span = max(1, n * 0.25)
+    if in_mm is None and out_mm is None:
+        span = max(1, n * 0.25)
+        factors = [min(1.0, min(i, n - 1 - i) / span) for i in range(n)]
+    else:
+        import math
+
+        along = [0.0]
+        for a, b in zip(points, points[1:]):
+            along.append(along[-1] + math.dist((float(a[0]), float(a[1])), (float(b[0]), float(b[1]))))
+        total = along[-1] or 1e-6
+        first, last = max(0.0, float(in_mm or 0)), max(0.0, float(out_mm or 0))
+        if first + last > total:  # (a line shorter than both: each end takes its share)
+            k = total / (first + last)
+            first, last = first * k, last * k
+        factors = [min(1.0, s / first if first > 0 else 1.0, (total - s) / last if last > 0 else 1.0) for s in along]
     out: list = []
-    for i, point in enumerate(points):
-        factor = min(1.0, min(i, n - 1 - i) / span)
+    for point, factor in zip(points, factors):
         pressure = float(point[2]) if len(point) > 2 else 1.0
         out.append([float(point[0]), float(point[1]), pressure * max(0.15, factor)])
+    return out
+
+
+def fit_curve(points: list, tolerance_mm: float = 0.3, step_mm: float = 0.5) -> list:
+    """後補正（曲線に置き換え）: the line's wobble dropped (only the points that shape it are kept, within
+    `tolerance_mm`) and a smooth curve drawn through them again (Catmull–Rom, points every `step_mm`); the
+    pressure follows along. The ends stay where they were drawn."""
+    import math
+
+    pts = [(float(p[0]), float(p[1]), float(p[2]) if len(p) > 2 else 1.0) for p in points]
+    if len(pts) < 4 or tolerance_mm <= 0:
+        return points
+
+    def dist_seg(p, a, b) -> float:
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        length = dx * dx + dy * dy
+        t = 0.0 if length < 1e-12 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length))
+        return math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
+
+    keep = {0, len(pts) - 1}
+    todo = [(0, len(pts) - 1)]
+    while todo:
+        lo, hi = todo.pop()
+        far, at = 0.0, -1
+        for i in range(lo + 1, hi):
+            d = dist_seg(pts[i], pts[lo], pts[hi])
+            if d > far:
+                far, at = d, i
+        if far > tolerance_mm and at > 0:
+            keep.add(at)
+            todo += [(lo, at), (at, hi)]
+    key = [pts[i] for i in sorted(keep)]
+    if len(key) < 3:
+        key = [pts[0], pts[len(pts) // 2], pts[-1]]
+    out: list = []
+    for i in range(len(key) - 1):
+        p0, p1, p2, p3 = key[max(0, i - 1)], key[i], key[i + 1], key[min(len(key) - 1, i + 2)]
+        steps = max(1, int(math.dist(p1[:2], p2[:2]) / step_mm))
+        for s in range(steps):
+            t = s / steps
+            t2, t3 = t * t, t * t * t
+            x = 0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2
+                       + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3)
+            y = 0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2
+                       + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)
+            out.append([x, y, p1[2] + (p2[2] - p1[2]) * t])
+    out.append([key[-1][0], key[-1][1], key[-1][2]])
     return out
 
 
@@ -79,3 +158,169 @@ def stamp_polyline(
             x = ax + (bx - ax) * t
             y = ay + (by - ay) * t
             draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill)
+
+
+def draw_stroke_mm(draw: ImageDraw.ImageDraw, points: list, dpi: int, width_mm: float, fill, pressure_scale: bool = True,
+                   floor: float = 0.15) -> None:
+    """A pen line from its vector points (mm, optional pressure) at any resolution.
+
+    Each segment is a quad between two round caps whose radii follow the pressure, so the line is
+    smooth at 600 dpi and cheap at screen size (no per-pixel stamping).
+    """
+    import math
+
+    if not points:
+        return
+    scale = dpi / 25.4
+    pts = []
+    for pt in points:
+        pressure = float(pt[2]) if len(pt) > 2 and pressure_scale else 1.0
+        radius = max(0.5, width_mm * max(floor, min(1.5, pressure)) * scale / 2)
+        pts.append((float(pt[0]) * scale, float(pt[1]) * scale, radius))
+    if len(pts) == 1:
+        x, y, r = pts[0]
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=fill)
+        return
+    for (ax, ay, ar), (bx, by, br) in zip(pts, pts[1:]):
+        dx, dy = bx - ax, by - ay
+        length = math.hypot(dx, dy)
+        if length > 1e-6:
+            nx, ny = -dy / length, dx / length
+            draw.polygon([(ax + nx * ar, ay + ny * ar), (bx + nx * br, by + ny * br),
+                          (bx - nx * br, by - ny * br), (ax - nx * ar, ay - ny * ar)], fill=fill)
+        draw.ellipse((bx - br, by - br, bx + br, by + br), fill=fill)
+    x, y, r = pts[0]
+    draw.ellipse((x - r, y - r, x + r, y + r), fill=fill)
+
+
+def split_by_eraser(points: list, eraser: list, radius_mm: float) -> list[list]:
+    """The pieces of a line that survive an eraser path (vector erase: the line is cut, not painted over)."""
+    import math
+
+    def near(p) -> bool:
+        px, py = float(p[0]), float(p[1])
+        for (ax, ay, *_), (bx, by, *_) in zip(eraser, eraser[1:] or eraser):
+            dx, dy = bx - ax, by - ay
+            seg = dx * dx + dy * dy
+            t = 0.0 if seg == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg))
+            if math.hypot(px - (ax + t * dx), py - (ay + t * dy)) <= radius_mm:
+                return True
+        return False
+
+    # densify so a short eraser still cuts a long segment
+    dense: list = []
+    for a, b in zip(points, points[1:]):
+        dist = math.hypot(float(b[0]) - float(a[0]), float(b[1]) - float(a[1]))
+        steps = max(1, int(dist / max(0.2, radius_mm / 2)))
+        for i in range(steps):
+            t = i / steps
+            q = [float(a[0]) + (float(b[0]) - float(a[0])) * t, float(a[1]) + (float(b[1]) - float(a[1])) * t]
+            if len(a) > 2:
+                q.append(float(a[2]) + ((float(b[2]) if len(b) > 2 else float(a[2])) - float(a[2])) * t)
+            dense.append(q)
+    if points:
+        dense.append([float(v) for v in points[-1]])
+    pieces: list[list] = []
+    current: list = []
+    for p in dense:
+        if near(p):
+            if len(current) >= 2:
+                pieces.append(current)
+            current = []
+        else:
+            current.append(p)
+    if len(current) >= 2:
+        pieces.append(current)
+    return pieces
+
+
+def _seg_cross(a, b, c, d):
+    """The parameter t along a→b where it crosses c→d, or None."""
+    rx, ry = b[0] - a[0], b[1] - a[1]
+    sx, sy = d[0] - c[0], d[1] - c[1]
+    den = rx * sy - ry * sx
+    if abs(den) < 1e-12:
+        return None
+    t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den
+    u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den
+    return t if 0 <= t <= 1 and 0 <= u <= 1 else None
+
+
+def erase_to_crossing(strokes: list, eraser: list, radius_mm: float) -> list:
+    """Erase the part of each touched line between the crossings (with other lines) around the touch —
+    the usual way to clean the overshoot where lines cross (交点まで消す)."""
+    import math
+
+    from genko.models import coerce_stroke
+
+    def arc_positions(points):
+        out, total = [0.0], 0.0
+        for a, b in zip(points, points[1:]):
+            total += math.dist(a[:2], b[:2])
+            out.append(total)
+        return out
+
+    # the eraser's path, walked in small steps (a quick drag leaves far-apart points)
+    step = max(0.05, radius_mm / 2)
+    walked = [tuple(eraser[0][:2])] if eraser else []
+    for a, b in zip(eraser, eraser[1:]):
+        n = max(1, math.ceil(math.dist(a[:2], b[:2]) / step))
+        walked.extend((a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n) for k in range(1, n + 1))
+    eraser = walked
+
+    result = []
+    for stroke in strokes:
+        pts = [tuple(p) for p in stroke.points]
+        if len(pts) < 2:
+            result.append(stroke)
+            continue
+        pos = arc_positions(pts)
+        # where the eraser touches this line (arc length)
+        touch = None
+        for i, (a, b) in enumerate(zip(pts, pts[1:])):
+            for e in eraser:
+                dx, dy = b[0] - a[0], b[1] - a[1]
+                seg = dx * dx + dy * dy
+                t = 0.0 if seg == 0 else max(0.0, min(1.0, ((e[0] - a[0]) * dx + (e[1] - a[1]) * dy) / seg))
+                if math.hypot(e[0] - (a[0] + t * dx), e[1] - (a[1] + t * dy)) <= radius_mm:
+                    touch = pos[i] + t * (pos[i + 1] - pos[i])
+                    break
+            if touch is not None:
+                break
+        if touch is None:
+            result.append(stroke)
+            continue
+        crossings = []
+        for other in strokes:
+            if other is stroke:
+                continue
+            ops = [tuple(p) for p in other.points]
+            for i, (a, b) in enumerate(zip(pts, pts[1:])):
+                for c, d in zip(ops, ops[1:]):
+                    t = _seg_cross(a, b, c, d)
+                    if t is not None:
+                        crossings.append(pos[i] + t * (pos[i + 1] - pos[i]))
+        before = max([c for c in crossings if c < touch], default=0.0)
+        after = min([c for c in crossings if c > touch], default=pos[-1])
+
+        def piece(lo: float, hi: float):
+            out = []
+            for i, (a, b) in enumerate(zip(pts, pts[1:])):
+                la, lb = pos[i], pos[i + 1]
+                if lb < lo or la > hi or lb == la:
+                    continue
+                t0, t1 = max(0.0, (lo - la) / (lb - la)), min(1.0, (hi - la) / (lb - la))
+                p0 = (a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0)
+                p1 = (a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1)
+                if not out:
+                    out.append(p0)
+                out.append(p1)
+            return out
+
+        for lo, hi in ((0.0, before), (after, pos[-1])):
+            part = piece(lo, hi)
+            if len(part) >= 2 and math.dist(part[0], part[-1]) > 0.2:
+                new = coerce_stroke(part)
+                new.width_mm, new.kind, new.rgb, new.opacity = stroke.width_mm, stroke.kind, stroke.rgb, stroke.opacity
+                result.append(new)
+    return result

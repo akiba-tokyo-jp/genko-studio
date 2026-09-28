@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from PIL import Image
@@ -81,7 +82,10 @@ def test_put_raster_lands_on_layer_and_roundtrips(tmp_path: Path):
     assert bg.raster_png
     dest = tmp_path / "work.genko"
     save_episode(ep, dest)
-    assert (dest / "pages" / "001" / "bg.png").is_file()
+    stored = json.loads((dest / "project.json").read_text(encoding="utf-8"))
+    ref = next(layer for layer in stored["pages"][0]["layers"] if layer["role"] == "bg")["asset"]
+    digest = ref.split(":", 1)[1]
+    assert (dest / "assets" / digest[:2] / f"{digest}.png").is_file()  # v3: content-addressed
     loaded = load_episode(dest)
     loaded_bg = next(layer for layer in loaded.pages[0].layers if layer.role.value == "bg")
     assert loaded_bg.raster_png

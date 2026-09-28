@@ -182,9 +182,9 @@ def test_folder_layer_parent():
 def test_spread_is_one_canvas():
     ep = new_episode("t", 1, 2, PageSpec.b4_comic())
     apply_ops(ep, [{"op": "set_spread", "page": 1, "with": 2}])
-    img = render_spread(ep, 1, 2, dpi=72, mode="name")
-    w = mm_to_px(ep.spec.width_mm, 72)
-    assert img.width == w * 2
+    img = render_spread(ep, 1, 2, dpi=72, mode="name", to_trim=True)
+    trim = ep.pages[0].trim_rect_mm()
+    assert abs(img.width - 2 * mm_to_px(trim.width, 72)) <= 1  # one canvas: the finished sizes side by side
 
 
 def test_psd_writes_named_layer_bytes(tmp_path):
@@ -194,4 +194,5 @@ def test_psd_writes_named_layer_bytes(tmp_path):
     export_psd(ep, path, dpi=72)
     data = path.read_bytes()
     assert data.startswith(b"8BPS")
-    assert b"ToneA" in data or b"pixels" in data
+    # M6: layers carry Unicode names; an empty user layer has nothing to export
+    assert "コマ枠".encode("utf-16-be") in data and b"ToneA" not in data

@@ -1,0 +1,490 @@
+"""Effect lines (効果線), drawn from a few settings: the same effect always gives the same lines.
+
+Kinds and their settings (`params`, page mm; everything is optional):
+
+- focus (集中線): `center` [x, y], `inner` [rx, ry] (the clear middle), `inner_path` [[x, y], …] (the clear
+  middle as any shape instead of an ellipse), `twist` (degrees the lines turn by on their way in: a swirl),
+  `count`, `jitter` (0..1, how unevenly the lines stop), `width_mm`, `taper` (thin toward the middle),
+  `length_mm` (each line this long from where it stops, instead of reaching the panel's edge).
+- speed (流線): `angle` (degrees, the direction of motion), `count`, `length` (share of the panel, 0..1),
+  `jitter`, `width_mm`, `curve` (mm the lines bow by), `taper`, `spacing_mm` (線の間隔, instead of `count`); or
+  `path` [[x, y], …] (the lines run along this curve, `spread_mm` across it).
+
+Focus and speed lines also take `bundle` (まとまり: lines per bundle) with `bundle_gap` (0..0.95, the room left
+between bundles); the 乱れ one by one — `jitter_length`, `jitter_position`, `jitter_width` (0..1; each falls
+back to `jitter`); and `taper` as "in", "out", "both" or false (入り抜き).
+- uni_flash (ウニフラッシュ): `center`, `inner` [rx, ry], `count`, `length_mm`, `jitter`, `width_mm`.
+- beta_flash (ベタフラッシュ): `center`, `inner` [rx, ry], `spikes`, `depth` (0..1, how far the white
+  spikes reach into the black), `jitter`.
+- white: the panel in plain white.
+
+`rgb` sets the colour (black by default; white lines over black work too). Effects stay inside their
+panel (or the page) and are kept as settings, so they can be changed later, or turned into pen
+lines and fills on a layer to finish by hand.
+
+Keeping clear (any kind): `avoid` [{"ellipse": [cx, cy, rx, ry]} | {"path": [[x, y], …]}, …] — the lines stop
+short of these shapes (a face) and thin out where they stop, as a hand-drawn line stops at a figure's outline;
+`within` [[x, y], …] — the lines are drawn only inside this shape (a selection). Fills are cut the same way.
+"""
+
+from __future__ import annotations
+
+import math
+import random
+
+KINDS = ("focus", "speed", "uni_flash", "beta_flash", "white")
+LABELS = {"focus": "集中線", "speed": "流線", "uni_flash": "ウニフラッシュ", "beta_flash": "ベタフラッシュ", "white": "白で塗る"}
+INK = (15, 15, 15)
+
+
+def validate(kind: str, params: dict) -> None:
+    if kind not in KINDS:
+        raise ValueError(f"kind must be one of {', '.join(KINDS)}")
+    for shape in params.get("avoid") or []:
+        if not isinstance(shape, dict) or not ((isinstance(shape.get("ellipse"), (list, tuple)) and len(shape["ellipse"]) == 4)
+                                               or (isinstance(shape.get("path"), (list, tuple)) and len(shape["path"]) >= 3)):
+            raise ValueError('avoid is a list of {"ellipse": [cx, cy, rx, ry]} or {"path": [[x, y], …]} (3 points or more)')
+    if params.get("within") is not None and len(params.get("within") or []) < 3:
+        raise ValueError("within is a shape of 3 points or more")
+    if int(params.get("count", 1) or 1) > 2000 or int(params.get("spikes", 1) or 1) > 2000:
+        raise ValueError("too many lines (at most 2000)")
+    if params.get("taper") not in (None, True, False, "True", "", "none", "in", "out", "both"):
+        raise ValueError("taper is in, out, both or false")
+    if params.get("bundle") is not None and not 1 <= int(params["bundle"]) <= 50:
+        raise ValueError("bundle is 1 to 50 lines")
+    for key in ("jitter", "depth", "length", "jitter_length", "jitter_position", "jitter_width"):
+        if key in params and not 0 <= float(params[key]) <= 1:
+            raise ValueError(f"{key} is 0 to 1")
+
+
+def area(effect: dict, page) -> tuple[list[tuple[float, float]], tuple[float, float, float, float]]:
+    """The effect's panel outline (mm) and its box."""
+    from genko import frames as geo
+
+    frame = None
+    if effect.get("frame_id"):
+        try:
+            frame = page._find(effect["frame_id"])
+        except (KeyError, IndexError):
+            frame = None
+    if frame is not None:
+        outline = [(float(x), float(y)) for x, y in geo.outline(frame)]
+    else:
+        b = page.bleed_rect_mm()  # without a panel: the whole page out to the bleed
+        outline = [(b.x, b.y), (b.x + b.width, b.y), (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
+    xs, ys = [p[0] for p in outline], [p[1] for p in outline]
+    return outline, (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+
+
+def _centre(params: dict, box) -> tuple[float, float]:
+    x, y, w, h = box
+    c = params.get("center")
+    return (float(c[0]), float(c[1])) if c else (x + w / 2, y + h / 2)
+
+
+def _inner(params: dict, box) -> tuple[float, float]:
+    x, y, w, h = box
+    if params.get("inner"):
+        rx, ry = params["inner"]
+        return max(0.5, float(rx)), max(0.5, float(ry))
+    share = float(params.get("clear", 0.4))  # old books: the clear middle as a share of the panel
+    return max(0.5, w / 2 * share), max(0.5, h / 2 * share)
+
+
+def _ray_to(shape: list, centre, angle: float) -> float:
+    """How far from `centre` a ray at `angle` meets the outline `shape` (the nearest crossing)."""
+    ox, oy = centre
+    dx, dy = math.cos(angle), math.sin(angle)
+    best = None
+    for (ax, ay), (bx, by) in zip(shape, shape[1:] + shape[:1]):
+        ex, ey = bx - ax, by - ay
+        den = dx * ey - dy * ex
+        if abs(den) < 1e-9:
+            continue
+        t = ((ax - ox) * ey - (ay - oy) * ex) / den
+        u = ((ax - ox) * dy - (ay - oy) * dx) / den
+        if t > 0 and 0 <= u <= 1 and (best is None or t < best):
+            best = t
+    return best if best is not None else 5.0
+
+
+def _speed_along(params: dict, rng, box) -> list[dict]:
+    """流線 along a curve: the path walked in even steps, each line an offset copy of a stretch of it."""
+    raw = [(float(p[0]), float(p[1])) for p in params["path"]]
+    dense = [raw[0]]
+    ext = [raw[0], *raw, raw[-1]]
+    for i in range(1, len(ext) - 2):  # (a Catmull-Rom curve through the points: no sharp corners)
+        p0, p1, p2, p3 = ext[i - 1], ext[i], ext[i + 1], ext[i + 2]
+        n = max(2, int(math.dist(p1, p2) / 1.5))
+        for k in range(1, n + 1):
+            t = k / n
+            dense.append(tuple(0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t * t
+                                      + (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t ** 3) for c in (0, 1)))
+    lengths = [0.0]
+    for a, b in zip(dense, dense[1:]):
+        lengths.append(lengths[-1] + math.dist(a, b))
+    total = lengths[-1] or 1.0
+    count = int(params.get("count", 40))
+    width = float(params.get("width_mm", 0.5))
+    share = float(params.get("length", 0.7))
+    jitter = float(params.get("jitter", 0.25))
+    spread = float(params.get("spread_mm", min(box[2], box[3]) * 0.5))
+    taper = "both" if params.get("taper", True) is not False else ""
+
+    def at(s: float):
+        s = max(0.0, min(total, s))
+        k = next((i for i in range(len(lengths) - 1) if lengths[i + 1] >= s), len(lengths) - 2)
+        seg = (lengths[k + 1] - lengths[k]) or 1.0
+        t = (s - lengths[k]) / seg
+        (x0, y0), (x1, y1) = dense[k], dense[k + 1]
+        d = math.hypot(x1 - x0, y1 - y0) or 1.0
+        return x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, -(y1 - y0) / d, (x1 - x0) / d
+
+    out = []
+    for i in range(count):
+        offset = spread * ((i + rng.random()) / count - 0.5)
+        length = total * share * (1 - jitter * rng.random() * 0.8)
+        start = (total - length) * rng.random()
+        steps = max(8, int(length / 2))
+        pts = []
+        for k in range(steps):
+            t = k / (steps - 1)
+            x, y, nx, ny = at(start + length * t)
+            p = 0.03 + 0.97 * math.sin(math.pi * t) if taper else 1.0
+            pts.append([round(x + nx * offset, 3), round(y + ny * offset, 3), round(p, 3)])
+        out.append({"points": pts, "width_mm": width * (0.5 + rng.random())})
+    return out
+
+
+def _taper(params: dict, default: str) -> str:
+    """入り抜き: "in" (thin toward the middle / the end), "out" (thin at the start), "both", or "" (even)."""
+    value = params.get("taper", True)
+    if value is True or value == "True":
+        return default
+    if value in (False, None, "", "none"):
+        return ""
+    return str(value) if value in ("in", "out", "both") else default
+
+
+def _jitter(params: dict, what: str) -> float:
+    """乱れ by kind (length, position, width); each falls back to the one `jitter`."""
+    return max(0.0, min(1.0, float(params.get(f"jitter_{what}", params.get("jitter", 0.25)))))
+
+
+def _slot(i: int, count: int, params: dict, r: float) -> float | None:
+    """まとまり: where line i sits (0..1 round or across) when the lines come in bundles of `bundle`, with
+    `bundle_gap` (0..0.95) of each bundle's room left empty; None without bundles."""
+    size = int(params.get("bundle", 1) or 1)
+    if size <= 1:
+        return None
+    gap = max(0.0, min(0.95, float(params.get("bundle_gap", 0.5))))
+    groups = math.ceil(count / size)
+    b, k = divmod(i, size)
+    spread = (1 - gap) / size
+    return (b + gap / 2 + (k + 0.5) * spread + (r - 0.5) * spread * _jitter(params, "position") * 2) / groups
+
+
+def _line(a, b, taper: str, n: int = 6) -> list[list[float]]:
+    """Points from a to b with pressures for the taper: "in" (thin at b), "out" (thin at a), "both", or "" (even)."""
+    out = []
+    for i in range(n):
+        t = i / (n - 1)
+        if taper == "out":
+            p = 0.03 + 0.97 * t
+        elif taper == "in":
+            p = 1 - t * 0.97
+        elif taper == "both":
+            p = 0.03 + 0.97 * math.sin(math.pi * t)
+        else:
+            p = 1.0
+        out.append([round(a[0] + (b[0] - a[0]) * t, 3), round(a[1] + (b[1] - a[1]) * t, 3), round(p, 3)])
+    return out
+
+
+def geometry(effect: dict, page) -> dict:
+    """{"lines": [{"points", "width_mm"}], "fills": [{"points", "rgb"}], "rgb", "outline"} in page mm."""
+    kind = effect.get("kind")
+    params = dict(effect.get("params") or {})
+    outline, box = area(effect, page)
+    x, y, w, h = box
+    rng = random.Random(str(params.get("seed", effect.get("id"))))
+    rgb = tuple(int(v) for v in params.get("rgb") or INK)
+    lines: list[dict] = []
+    fills: list[dict] = []
+    jitter = float(params.get("jitter", 0.25))
+    if kind == "focus":
+        cx, cy = _centre(params, box)
+        rx, ry = _inner(params, box)
+        count = int(params.get("count", 90))
+        width = float(params.get("width_mm", 0.8))
+        outer = math.hypot(w, h) + math.hypot(cx - (x + w / 2), cy - (y + h / 2))
+        taper = _taper(params, "in")
+        shape = [(float(p[0]), float(p[1])) for p in params.get("inner_path") or []]
+        twist = math.radians(float(params.get("twist", 0)))
+        own = any(f"jitter_{k}" in params for k in ("length", "position", "width"))
+        for i in range(count):
+            r = rng.random()
+            slot = _slot(i, count, params, r)
+            if slot is not None:
+                a = 2 * math.pi * slot
+            elif own:
+                a = 2 * math.pi * (i + 0.5 + (r - 0.5) * _jitter(params, "position") * 2) / count
+            else:
+                a = 2 * math.pi * (i + r * 0.7) / count
+            stop = 1 + _jitter(params, "length") * rng.random() * 1.2
+            if len(shape) >= 3:
+                reach = _ray_to(shape, (cx, cy), a)
+                inner_pt = (cx + reach * stop * math.cos(a), cy + reach * stop * math.sin(a))
+            else:
+                inner_pt = (cx + rx * stop * math.cos(a), cy + ry * stop * math.sin(a))
+            outer_pt = (cx + outer * math.cos(a), cy + outer * math.sin(a))
+            if params.get("length_mm"):  # (線の長さ: from where it stops, straight out from the middle)
+                away = math.dist((cx, cy), inner_pt) or 1.0
+                ux, uy = (inner_pt[0] - cx) / away, (inner_pt[1] - cy) / away
+                outer_pt = (inner_pt[0] + ux * float(params["length_mm"]), inner_pt[1] + uy * float(params["length_mm"]))
+            pts = _line(outer_pt, inner_pt, taper, 16 if twist else 6)
+            if twist:  # a swirl: each point turned about the centre, less toward the middle (the ends stay on the shape)
+                for k, p in enumerate(pts):
+                    turn = twist * (1 - k / (len(pts) - 1)) ** 2
+                    dx, dy = p[0] - cx, p[1] - cy
+                    p[0] = round(cx + dx * math.cos(turn) - dy * math.sin(turn), 3)
+                    p[1] = round(cy + dx * math.sin(turn) + dy * math.cos(turn), 3)
+            spread = rng.random()
+            thick = width * (1 + _jitter(params, "width") * (spread * 2 - 1) * 1.6) if own else width * (0.6 + spread * 0.8)
+            lines.append({"points": pts, "width_mm": max(0.02, thick)})
+    elif kind == "speed" and len(params.get("path") or []) >= 2:
+        lines = _speed_along(params, rng, box)
+    elif kind == "speed":
+        angle = math.radians(float(params.get("angle", 0)))
+        d = (math.cos(angle), math.sin(angle))
+        n = (-d[1], d[0])
+        count = int(params.get("count", 40))
+        width = float(params.get("width_mm", 0.5))
+        share = float(params.get("length", 0.7))
+        curve = float(params.get("curve", 0))
+        cx, cy = x + w / 2, y + h / 2
+        corners = [(px - cx, py - cy) for px, py in outline]
+        across = [c[0] * n[0] + c[1] * n[1] for c in corners]
+        along = [c[0] * d[0] + c[1] * d[1] for c in corners]
+        lo, hi = min(across), max(across)
+        a0, a1 = min(along), max(along)
+        span = a1 - a0
+        taper = _taper(params, "both")
+        if params.get("spacing_mm"):  # (線の間隔 instead of how many)
+            count = max(2, min(2000, int((hi - lo) / max(0.2, float(params["spacing_mm"])))))
+        own = any(f"jitter_{k}" in params for k in ("length", "position", "width"))
+        for i in range(count):
+            r = rng.random()
+            slot = _slot(i, count, params, r)
+            if slot is not None:
+                offset = lo + (hi - lo) * slot
+            elif own:
+                offset = lo + (hi - lo) * (i + 0.5 + (r - 0.5) * _jitter(params, "position") * 2) / count
+            else:
+                offset = lo + (hi - lo) * (i + r) / count
+            length = span * share * (1 - _jitter(params, "length") * rng.random() * 0.8)
+            start = a0 - span * 0.05 + (span * 1.1 - length) * rng.random()
+            pts = []
+            steps = 24 if curve else 8
+            for k in range(steps):
+                t = k / (steps - 1)
+                along_t = start + length * t
+                bow = curve * 4 * t * (1 - t)
+                px = cx + d[0] * along_t + n[0] * (offset + bow)
+                py = cy + d[1] * along_t + n[1] * (offset + bow)
+                if taper == "both":
+                    p = 0.03 + 0.97 * math.sin(math.pi * t)
+                elif taper == "in":
+                    p = 1 - 0.97 * t
+                elif taper == "out":
+                    p = 0.03 + 0.97 * t
+                else:
+                    p = 1.0
+                pts.append([round(px, 3), round(py, 3), round(p, 3)])
+            spread = rng.random()
+            thick = width * (1 + _jitter(params, "width") * (spread * 2 - 1) * 1.6) if own else width * (0.5 + spread)
+            lines.append({"points": pts, "width_mm": max(0.02, thick)})
+    elif kind == "uni_flash":
+        cx, cy = _centre(params, box)
+        rx, ry = _inner(params, box)
+        count = int(params.get("count", 140))
+        width = float(params.get("width_mm", 0.35))
+        length = float(params.get("length_mm", max(8.0, min(w, h) * 0.18)))
+        for i in range(count):
+            a = 2 * math.pi * (i + rng.random() * 0.8) / count
+            start = 1 + jitter * (rng.random() - 0.5) * 0.3
+            size = length * (1 - jitter * rng.random() * 0.7)
+            p0 = (cx + rx * start * math.cos(a), cy + ry * start * math.sin(a))
+            k = size / max(1e-6, math.hypot(rx * math.cos(a), ry * math.sin(a)))
+            p1 = (p0[0] + rx * k * math.cos(a), p0[1] + ry * k * math.sin(a))
+            lines.append({"points": _line(p0, p1, "both"), "width_mm": width * (0.7 + rng.random() * 0.6)})
+    elif kind == "beta_flash":
+        cx, cy = _centre(params, box)
+        rx, ry = _inner(params, box)
+        spikes = int(params.get("spikes", 70))
+        depth = float(params.get("depth", 0.45))
+        fills.append({"points": outline, "rgb": list(rgb)})
+        star = []
+        reach = math.hypot(w, h) / 2
+        for i in range(spikes * 2):
+            a = math.pi * i / spikes
+            if i % 2:  # a white spike's tip, out in the black
+                r = 1 + (reach / max(rx, ry) - 1) * depth * (0.55 + rng.random() * 0.9 * (0.5 + jitter))
+            else:
+                r = 1 + jitter * 0.15 * rng.random()
+            star.append((round(cx + rx * r * math.cos(a), 3), round(cy + ry * r * math.sin(a), 3)))
+        fills.append({"points": star, "rgb": [255, 255, 255]})
+    elif kind == "white":
+        fills.append({"points": outline, "rgb": [255, 255, 255]})
+    avoid, within = _clearing(params)
+    if avoid or within:
+        lines = _keep_clear(lines, avoid, within)
+    return {"lines": lines, "fills": fills, "rgb": rgb, "outline": outline, "avoid": avoid, "within": within}
+
+
+# --- keeping clear of faces (avoid) and inside a selection (within) ---------------------------------------------
+
+
+def _clearing(params: dict) -> tuple[list, list | None]:
+    shapes = []
+    for shape in params.get("avoid") or []:
+        if isinstance(shape, dict) and shape.get("ellipse"):
+            cx, cy, rx, ry = (float(v) for v in shape["ellipse"])
+            if rx > 0 and ry > 0:
+                shapes.append(("ellipse", (cx, cy, rx, ry)))
+        elif isinstance(shape, dict) and len(shape.get("path") or []) >= 3:
+            shapes.append(("path", [(float(p[0]), float(p[1])) for p in shape["path"]]))
+    within = [(float(p[0]), float(p[1])) for p in params.get("within") or []]
+    return shapes, (within if len(within) >= 3 else None)
+
+
+def _in_polygon(x: float, y: float, poly) -> bool:
+    inside = False
+    for (ax, ay), (bx, by) in zip(poly, poly[1:] + poly[:1]):
+        if (ay > y) != (by > y) and x < ax + (bx - ax) * (y - ay) / ((by - ay) or 1e-12):
+            inside = not inside
+    return inside
+
+
+def _clear_at(x: float, y: float, avoid, within) -> bool:
+    if within is not None and not _in_polygon(x, y, within):
+        return False
+    for kind, shape in avoid:
+        if kind == "ellipse":
+            cx, cy, rx, ry = shape
+            if ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1:
+                return False
+        elif _in_polygon(x, y, shape):
+            return False
+    return True
+
+
+FADE_MM = 3.0  # (how long a cut line takes to thin out to nothing)
+
+
+def _keep_clear(lines: list[dict], avoid, within) -> list[dict]:
+    """Each line cut where it enters a shape to keep clear of (or leaves `within`); the part left thins out toward
+    the cut, as a pen lifts at a figure's outline. Pieces too short to read are dropped."""
+    out = []
+    for line in lines:
+        pts = line["points"]
+        dense: list[list[float]] = []
+        for a, b in zip(pts, pts[1:]):
+            n = max(1, int(math.dist(a[:2], b[:2]) / 0.4))
+            pa = a[2] if len(a) > 2 else 1.0
+            pb = b[2] if len(b) > 2 else 1.0
+            for k in range(n):
+                t = k / n
+                dense.append([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, pa + (pb - pa) * t])
+        last = pts[-1]
+        dense.append([last[0], last[1], last[2] if len(last) > 2 else 1.0])
+        keep = [_clear_at(p[0], p[1], avoid, within) for p in dense]
+        if all(keep):
+            out.append(line)
+            continue
+        i = 0
+        while i < len(dense):
+            if not keep[i]:
+                i += 1
+                continue
+            j = i
+            while j + 1 < len(dense) and keep[j + 1]:
+                j += 1
+            piece = [list(p) for p in dense[i:j + 1]]
+            length = sum(math.dist(a[:2], b[:2]) for a, b in zip(piece, piece[1:]))
+            if length >= 1.5:
+                fade = min(FADE_MM, length * 0.45)
+                for cut_start, cut_end in ((i > 0, False), (j < len(dense) - 1, True)):
+                    if not cut_start:
+                        continue
+                    walk = 0.0
+                    seq = list(reversed(piece)) if cut_end else piece
+                    prev = seq[0]
+                    for p in seq:
+                        walk += math.dist(prev[:2], p[:2])
+                        prev = p
+                        if walk >= fade:
+                            break
+                        p[2] = p[2] * (0.03 + 0.97 * walk / fade)
+                out.append({**line, "points": [[round(p[0], 3), round(p[1], 3), round(p[2], 3)] for p in piece]})
+            i = j + 1
+    return out
+
+
+def draw(image, effect: dict, page, dpi: int):
+    """The effect onto an RGB(A) page image, clipped to its panel."""
+    from PIL import Image, ImageChops, ImageDraw
+
+    from genko import brushes
+    from genko.render import _xy
+
+    geo = geometry(effect, page)
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw_ = ImageDraw.Draw(layer)
+    for fill in geo["fills"]:
+        draw_.polygon([_xy(p, dpi) for p in fill["points"]], fill=(*[int(v) for v in fill["rgb"]], 255))
+    colour = Image.new("RGBA", image.size, (*geo["rgb"], 255))
+    cover = Image.new("L", image.size, 0)
+    for line in geo["lines"]:
+        drawn = brushes.draw(image.size, line["points"], dpi, line["width_mm"], "fx")
+        if drawn is None:
+            continue
+        mask, (x0, y0) = drawn
+        region = cover.crop((x0, y0, x0 + mask.width, y0 + mask.height))
+        cover.paste(ImageChops.lighter(region, mask), (x0, y0))
+    layer = Image.composite(colour, layer, cover)
+    clip = Image.new("L", image.size, 0)
+    ImageDraw.Draw(clip).polygon([_xy(p, dpi) for p in geo["outline"]], fill=255)
+    if geo.get("within"):  # (a fill kept inside the selection and clear of the faces, as the lines are)
+        inside = Image.new("L", image.size, 0)
+        ImageDraw.Draw(inside).polygon([_xy(p, dpi) for p in geo["within"]], fill=255)
+        clip = ImageChops.multiply(clip, inside)
+    if geo.get("avoid"):
+        pen = ImageDraw.Draw(clip)
+        for kind, shape in geo["avoid"]:
+            if kind == "ellipse":
+                cx, cy, rx, ry = shape
+                (x0, y0), (x1, y1) = _xy((cx - rx, cy - ry), dpi), _xy((cx + rx, cy + ry), dpi)
+                pen.ellipse((x0, y0, x1, y1), fill=0)
+            else:
+                pen.polygon([_xy(p, dpi) for p in shape], fill=0)
+    layer.putalpha(ImageChops.multiply(layer.split()[3], clip))
+    return Image.alpha_composite(image.convert("RGBA"), layer).convert(image.mode)
+
+
+def to_layer(effect: dict, page, layer) -> None:
+    """Turn an effect into pen lines (効果線ペン) and fills on a layer, to finish by hand."""
+    from genko.fill import polygon_patch
+    from genko.models import coerce_stroke
+
+    geo = geometry(effect, page)
+    for fill in geo["fills"]:
+        patch = polygon_patch(fill["points"], fill["rgb"])
+        if patch:
+            layer.patches.append(patch)
+    for line in geo["lines"]:
+        stroke = coerce_stroke(line["points"])
+        stroke.kind = "fx"
+        stroke.width_mm = round(float(line["width_mm"]), 3)
+        stroke.rgb = tuple(geo["rgb"]) if tuple(geo["rgb"]) != INK else None
+        layer.strokes.append(stroke)

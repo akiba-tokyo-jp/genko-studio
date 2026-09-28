@@ -1,0 +1,21 @@
+{
+  "page": 4, "turn_role": "normal", "template": null,
+  "tiers": [
+    {"h": 0.4, "cols": [{"slot": "p1", "w": 0.5, "rows": null}, {"slot": "p2", "w": 0.5, "rows": null}]},
+    {"h": 0.6, "cols": [{"slot": "p3", "w": 1.0, "rows": null}]}
+  ],
+  "panels": [
+    {"slot": "p1", "shot": "CU", "angle": "eye", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [{"id": "hina", "pose": "微笑む", "expression": "涙ぐむ笑顔", "facing": "left", "pos": "center", "scale": 0.9}],
+     "action": "涙ぐんで笑う", "emotion": "喜び", "fx": [], "emphasis": 0.6, "cross": false,
+     "beat_ids": ["b09"], "lines": [{"beat_id": "b09", "balloon": "speech", "breaks": ["うん…", "約束したから"]}]},
+    {"slot": "p2", "shot": "INSERT", "angle": "eye", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [], "action": "髪留めが夕日に光る", "emotion": "静けさ", "fx": [], "emphasis": 0.3, "cross": false,
+     "beat_ids": [], "lines": []},
+    {"slot": "p3", "shot": "LS", "angle": "eye", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [{"id": "sora", "pose": "並んで座る", "expression": "穏やか", "facing": "back", "pos": "left_third", "scale": 0.4},
+                    {"id": "hina", "pose": "並んで座る", "expression": "穏やか", "facing": "back", "pos": "right_third", "scale": 0.4}],
+     "action": "二人並んで夕日を見る", "emotion": "静けさ", "fx": [], "emphasis": 0.7, "cross": false,
+     "beat_ids": ["b10"], "lines": []}
+  ]
+}

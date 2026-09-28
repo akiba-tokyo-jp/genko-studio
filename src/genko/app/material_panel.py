@@ -1,0 +1,626 @@
+"""The 素材 panel: materials (built-in and the person's own) by folder, the settings of the tone being
+worked on, and the effect lines of the page."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QIcon, QImage, QPixmap
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLineEdit,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+from genko import effects, materials
+
+PATTERNS = [("網点", "dot"), ("線", "line"), ("カケアミ風（交差）", "cross"), ("砂目", "noise"), ("ベタのグレー", "flat"),
+            ("柄: 市松", "check"), ("柄: レンガ", "brick"), ("柄: 波", "wave"), ("柄: 格子", "grid"), ("柄: 斜線", "hatch"),
+            ("柄: 星", "star"), ("柄: 砂", "sand"), ("柄: 画像から…", "image")]
+KIND_WORD = {"tone": "トーン", "effect": "効果線", "image": "画像", "lines": "パーツ", "lettering": "描き文字", "brush": "ブラシ", "prim": "3D"}
+# the settings people change per effect kind: (key, label, lo, hi, step, default)
+EFFECT_FIELDS = {
+    "focus": [("count", "本数", 10, 600, 10, 90), ("inner_r", "中心の空き（mm）", 1, 200, 1, None),
+              ("length_mm", "線の長さ（mm、0 で端まで）", 0, 400, 1, 0),
+              ("jitter", "ばらつき", 0, 1, 0.05, 0.25), ("width_mm", "太さ（mm）", 0.05, 5, 0.05, 0.8),
+              ("twist", "渦（°）", -180, 180, 5, 0)],
+    "speed": [("count", "本数", 5, 400, 5, 40), ("spacing_mm", "間隔（mm、0 で本数から）", 0, 50, 0.5, 0),
+              ("angle", "向き（°）", -180, 180, 5, 0), ("length", "長さ", 0.05, 1, 0.05, 0.7),
+              ("curve", "曲がり（mm）", -80, 80, 1, 0), ("jitter", "ばらつき", 0, 1, 0.05, 0.25), ("width_mm", "太さ（mm）", 0.05, 5, 0.05, 0.5),
+              ("spread_mm", "沿わせた時の幅（mm）", 2, 300, 1, 40)],
+    "uni_flash": [("count", "本数", 20, 800, 10, 140), ("inner_r", "中心の空き（mm）", 1, 200, 1, None),
+                  ("length_mm", "線の長さ（mm）", 2, 150, 1, None), ("jitter", "ばらつき", 0, 1, 0.05, 0.25),
+                  ("width_mm", "太さ（mm）", 0.05, 3, 0.05, 0.35)],
+    "beta_flash": [("spikes", "トゲの数", 10, 400, 5, 70), ("inner_r", "中心の空き（mm）", 1, 200, 1, None),
+                   ("depth", "トゲの長さ", 0.05, 1, 0.05, 0.45), ("jitter", "ばらつき", 0, 1, 0.05, 0.25)],
+    "white": [],
+}
+# 集中線と流線の、まとまり・乱れ（種類ごと）: under a fold so the common settings stay short
+EFFECT_MORE = [("bundle", "まとまり（1 束の本数）", 1, 50, 1, 1), ("bundle_gap", "束の間のすき間", 0, 0.95, 0.05, 0.5),
+               ("jitter_length", "乱れ: 長さ", 0, 1, 0.05, None), ("jitter_position", "乱れ: 位置", 0, 1, 0.05, None),
+               ("jitter_width", "乱れ: 太さ", 0, 1, 0.05, None)]
+TAPERS = [("中心側・終わりを細く（入り）", "in"), ("外側・始めを細く（抜き）", "out"), ("両端を細く", "both"), ("なし", "none")]
+
+
+def _icon(image) -> QIcon:
+    rgb = image.convert("RGB")
+    data = rgb.tobytes("raw", "RGB")
+    qimage = QImage(data, rgb.width, rgb.height, rgb.width * 3, QImage.Format.Format_RGB888).copy()
+    return QIcon(QPixmap.fromImage(qimage))
+
+
+class MaterialPanel(QWidget):
+    def __init__(self, window) -> None:
+        super().__init__()
+        self.window = window
+        self._loading = False
+        self._icons: dict[str, QIcon] = {}
+        # --- materials
+        self.folder = QComboBox()
+        self.folder.currentIndexChanged.connect(lambda _: self._fill_list())
+        self.list = QListWidget()
+        self.list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.list.setIconSize(QSize(56, 56))
+        self.list.setGridSize(QSize(84, 92))
+        self.list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list.setWordWrap(True)
+        self.list.setMinimumHeight(240)
+        self.list.itemDoubleClicked.connect(lambda _: self.use())
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("素材を探す（名前・タグ・種類）")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(lambda _: self._fill_list())
+        use = QPushButton("貼る")
+        use.setToolTip("トーン: 選択範囲か選んだコマに（なければクリックした所に）。効果線: 選んだコマに。画像・パーツ: クリックした所に")
+        use.clicked.connect(self.use)
+        more = QGridLayout()
+        for i, (title, slot, tip) in enumerate((("画像を追加…", self.import_image, "画像ファイルを素材にします"),
+                                 ("範囲を登録…", self.register_selection, "選んだ範囲の線と塗りを素材（パーツ）にします"),
+                                 ("名前…", self.rename, "名前とフォルダを変えます"), ("消す", self.delete, "自分で登録した素材を消します"),
+                                 ("タグ…", self.edit_tags, "探すときの言葉（タグ）を付けます"),
+                                 ("素材パック…", self.pack_menu, "素材パック（フォルダ・zip）を読み込む／選んだ素材を書き出す"))):
+            button = QPushButton(title)
+            button.setToolTip(tip)
+            button.clicked.connect(slot)
+            more.addWidget(button, i // 2, i % 2)
+        new_folder = QPushButton("＋フォルダ…")
+        new_folder.setToolTip("素材を分けるフォルダを作ります")
+        new_folder.clicked.connect(self.new_folder)
+        mat_box = QGroupBox("素材（ダブルクリックで貼る）")
+        ml = QVBoxLayout(mat_box)
+        row = QHBoxLayout()
+        row.addWidget(self.folder, 1)
+        row.addWidget(new_folder)
+        ml.addLayout(row)
+        ml.addWidget(self.search)
+        ml.addWidget(self.list)
+        ml.addWidget(use)
+        ml.addLayout(more)
+        # --- the tone being worked on
+        self.tone_label = QLabel()
+        self.pattern = QComboBox()
+        for label, key in PATTERNS:
+            self.pattern.addItem(label, key)
+        self.pattern.activated.connect(lambda _: self._pattern_chosen())
+        self.scale = QDoubleSpinBox()
+        self.scale.setRange(0.3, 50)
+        self.scale.setSuffix(" mm")
+        self.scale.setValue(3.0)
+        self.scale.setToolTip("柄トーンの模様の大きさ（繰り返しの間隔）")
+        self.scale.editingFinished.connect(lambda: self._tone({"scale_mm": self.scale.value()}))
+        self.lpi = QDoubleSpinBox()
+        self.lpi.setRange(5, 300)
+        self.lpi.setSuffix(" 線")
+        self.lpi.editingFinished.connect(lambda: self._tone({"lpi": self.lpi.value()}))
+        self.density = QSpinBox()
+        self.density.setRange(0, 100)
+        self.density.setSuffix(" %")
+        self.density.editingFinished.connect(lambda: self._tone({"density": self.density.value() / 100}))
+        self.angle = QDoubleSpinBox()
+        self.angle.setRange(-180, 180)
+        self.angle.setSuffix("°")
+        self.angle.editingFinished.connect(lambda: self._tone({"angle": self.angle.value()}))
+        self.dot_shape = QComboBox()
+        from genko.app.dialogs import SCREEN_SHAPES
+
+        for label, key in SCREEN_SHAPES:
+            self.dot_shape.addItem(label, key)
+        self.dot_shape.setToolTip("網点の形（網の種類）。四角は 50% で角どうしがつながる")
+        self.dot_shape.activated.connect(lambda _: self._tone({"dot_shape": self.dot_shape.currentData()}))
+        self.off_x, self.off_y = QDoubleSpinBox(), QDoubleSpinBox()
+        for spin, tip in ((self.off_x, "網を右へずらす（mm）"), (self.off_y, "網を下へずらす（mm）")):
+            spin.setRange(-20, 20)
+            spin.setSingleStep(0.1)
+            spin.setDecimals(2)
+            spin.setSuffix(" mm")
+            spin.setToolTip(tip + "。貼る場所はそのままで、網点の並びだけが動く（隣のトーンと網をそろえる・モアレを避ける）")
+            spin.editingFinished.connect(lambda: self._tone({"offset_mm": [self.off_x.value(), self.off_y.value()]}))
+        offset_row = QHBoxLayout()
+        offset_row.addWidget(self.off_x)
+        offset_row.addWidget(self.off_y)
+        self.gradient = QComboBox()
+        for label, key in (("なし", ""), ("直線", "linear"), ("円", "radial")):
+            self.gradient.addItem(label, key)
+        self.gradient.activated.connect(lambda _: self._gradient())
+        self.g_angle = QDoubleSpinBox()
+        self.g_angle.setRange(-180, 180)
+        self.g_angle.setSuffix("°")
+        self.g_angle.setToolTip("90 で上から下へ")
+        self.g_start = QSpinBox()
+        self.g_end = QSpinBox()
+        for spin in (self.g_start, self.g_end):
+            spin.setRange(0, 100)
+            spin.setSuffix(" %")
+        for widget in (self.g_angle, self.g_start, self.g_end):
+            widget.editingFinished.connect(self._gradient)
+        self.soft = QCheckBox("消しゴムでぼかして削る")
+        tone_form = QFormLayout()
+        tone_form.addRow("", self.tone_label)
+        tone_form.addRow("模様", self.pattern)
+        tone_form.addRow("柄の大きさ", self.scale)
+        tone_form.addRow("線数", self.lpi)
+        tone_form.addRow("濃さ", self.density)
+        tone_form.addRow("角度", self.angle)
+        tone_form.addRow("網の形", self.dot_shape)
+        tone_form.addRow("網のずれ", offset_row)
+        tone_form.addRow("グラデーション", self.gradient)
+        tone_form.addRow("　向き", self.g_angle)
+        tone_form.addRow("　始まり", self.g_start)
+        tone_form.addRow("　終わり", self.g_end)
+        tone_form.addRow("", self.soft)
+        self.tone_box = QGroupBox("トーン（ペンで足す・消しゴムで削る）")
+        self.tone_box.setLayout(tone_form)
+        # --- effect lines on the page
+        self.effects = QListWidget()
+        self.effects.setMaximumHeight(96)
+        self.effects.currentRowChanged.connect(lambda _: self._effect_picked())
+        self.effect_form = QFormLayout()
+        self.effect_fields: dict[str, QDoubleSpinBox] = {}
+        effect_buttons = QHBoxLayout()
+        for title, slot in (("線にする", self.effect_to_layer), ("消す", self.delete_effect)):
+            button = QPushButton(title)
+            button.clicked.connect(slot)
+            effect_buttons.addWidget(button)
+        self.effect_box = QGroupBox("このページの効果線（K）")
+        self.effect_box.setToolTip("効果線ツール（K）でコマの中をクリックすると入ります。中心の＋をドラッグで動かします")
+        el = QVBoxLayout(self.effect_box)
+        el.addWidget(self.effects)
+        el.addLayout(self.effect_form)
+        el.addLayout(effect_buttons)
+        # three pages in the panel, so none of them needs a long scroll
+        from PySide6.QtWidgets import QTabWidget
+
+        self.tabs = QTabWidget()
+        for box, title in ((mat_box, "素材"), (self.tone_box, "トーン"), (self.effect_box, "効果線")):
+            page = QWidget()
+            pl = QVBoxLayout(page)
+            pl.setContentsMargins(0, 0, 0, 0)
+            box.setFlat(True)  # (the tab already frames it)
+            box.layout().setContentsMargins(2, 4, 2, 2)
+            pl.addWidget(box)
+            pl.addStretch(1)
+            self.tabs.addTab(page, title)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.tabs)
+        self._fill_folders()
+
+    # --- materials ------------------------------------------------------------------------------------------
+
+    def _fill_folders(self) -> None:
+        keep = self.folder.currentData()
+        self.folder.blockSignals(True)
+        self.folder.clear()
+        self.folder.addItem("すべて", "")
+        for name in materials.folders():
+            self.folder.addItem(name, name)
+        index = self.folder.findData(keep)
+        self.folder.setCurrentIndex(max(0, index))
+        self.folder.blockSignals(False)
+        self._fill_list()
+
+    def _fill_list(self) -> None:
+        folder = self.folder.currentData()
+        keep = self.current_material()
+        self.list.clear()
+        query = self.search.text().strip() if hasattr(self, "search") else ""
+        found = materials.search(query) if query else materials.all_materials()
+        for item in found:
+            if folder and not query and (item.get("folder") or "その他") != folder:
+                continue  # (a search looks in every folder)
+            entry = QListWidgetItem(item.get("name") or item["id"])
+            entry.setData(Qt.ItemDataRole.UserRole, item["id"])
+            entry.setToolTip(f"{KIND_WORD.get(item.get('kind'), '')} ・ {item.get('folder') or ''}"
+                             + ("" if item.get("builtin") else " ・ マイ素材")
+                             + (f"\nタグ: {'、'.join(item.get('tags') or [])}" if item.get("tags") else ""))
+            if item["id"] not in self._icons:
+                self._icons[item["id"]] = _shared_icon(item)
+            entry.setIcon(self._icons[item["id"]])
+            self.list.addItem(entry)
+            if keep and item["id"] == keep["id"]:
+                self.list.setCurrentItem(entry)
+
+    def current_material(self) -> dict | None:
+        entry = self.list.currentItem()
+        if entry is None:
+            return None
+        try:
+            return materials.get_material(entry.data(Qt.ItemDataRole.UserRole))
+        except KeyError:
+            return None
+
+    def select_material(self, material_id: str) -> None:
+        for row in range(self.list.count()):
+            if self.list.item(row).data(Qt.ItemDataRole.UserRole) == material_id:
+                self.list.setCurrentRow(row)
+                return
+
+    def use(self) -> None:
+        item = self.current_material()
+        if item is None:
+            self.window.flash("先に素材を選びます", 2500)
+            return
+        self.window.use_material(item)
+
+    def import_image(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "画像を素材に取り込む", "", "画像 (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff)")
+        if not path:
+            return
+        folder = self.folder.currentData() or "画像"
+        try:
+            item = materials.import_image(path, folder=folder)
+        except Exception as exc:
+            self.window.flash(f"取り込めませんでした（{exc}）", 6000, error=True)
+            return
+        self._fill_folders()
+        self.select_material(item["id"])
+        self.window.flash(f"「{item['name']}」を素材にしました", 2500)
+
+    def register_selection(self) -> None:
+        items = self.window.copy_selection_items()
+        if items is None:
+            return
+        name, ok = QInputDialog.getText(self, "素材に登録", "名前")
+        if not ok or not name.strip():
+            return
+        folder = self.folder.currentData() or "マイ素材"
+        item = materials.add_material(name, "lines", folder, items=items)
+        self._fill_folders()
+        self.select_material(item["id"])
+        self.window.flash(f"「{item['name']}」を素材にしました（素材 → 貼る）", 3000)
+
+    def rename(self) -> None:
+        item = self.current_material()
+        if item is None or item.get("builtin"):
+            self.window.flash("名前を変えられるのは自分で登録した素材です", 2500)
+            return
+        name, ok = QInputDialog.getText(self, "素材の名前", "名前", text=item.get("name", ""))
+        if not ok:
+            return
+        folders = materials.folders()
+        folder, ok = QInputDialog.getItem(self, "素材のフォルダ", "フォルダ", folders,
+                                          max(0, folders.index(item.get("folder")) if item.get("folder") in folders else 0), True)
+        if ok:
+            materials.update_material(item["id"], name=name or item["name"], folder=folder or item.get("folder", "マイ素材"))
+            self._icons.pop(item["id"], None)
+            self._fill_folders()
+
+    def edit_tags(self) -> None:
+        item = self.current_material()
+        if item is None or item.get("builtin"):
+            self.window.flash("タグを付けられるのは自分で登録した素材です（入っている素材にはタグが付いています）", 4000)
+            return
+        text, ok = QInputDialog.getText(self, "素材のタグ", "タグ（、で区切る）", text="、".join(item.get("tags") or []))
+        if ok:
+            import re
+
+            materials.update_material(item["id"], tags=[t for t in re.split(r"[、,，\s]+", text) if t])
+            self._fill_list()
+
+    def pack_menu(self) -> None:
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        menu.addAction("素材パック（zip）を読み込む…", lambda: self.import_pack(zip_file=True))
+        menu.addAction("フォルダを素材パックとして読み込む…", lambda: self.import_pack(zip_file=False))
+        menu.addSeparator()
+        menu.addAction("このフォルダの自分の素材を書き出す…", self.export_pack)
+        menu.exec(QCursor.pos())
+
+    def import_pack(self, zip_file: bool = True) -> None:
+        if zip_file:
+            path, _ = QFileDialog.getOpenFileName(self, "素材パックを読み込む", "", "素材パック (*.zip)")
+        else:
+            path = QFileDialog.getExistingDirectory(self, "素材パックのフォルダ")
+        if not path:
+            return
+        try:
+            added = materials.import_pack(path)
+        except Exception as exc:
+            self.window.flash(f"読み込めませんでした（{exc}）", 6000, error=True)
+            return
+        self._fill_folders()
+        self.window.flash(f"素材を {len(added)} 個読み込みました", 4000)
+
+    def export_pack(self) -> None:
+        folder = self.folder.currentData()
+        mine = [i for i in materials.user_materials() if not folder or i.get("folder") == folder]
+        if not mine:
+            self.window.flash("書き出せる自分の素材がありません（フォルダを選び直します）", 4000)
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "素材パックを書き出す", f"{folder or '素材'}.zip", "素材パック (*.zip)")
+        if path:
+            materials.export_pack([i["id"] for i in mine], path)
+            self.window.flash(f"素材 {len(mine)} 個を書き出しました", 4000)
+
+    def delete(self) -> None:
+        item = self.current_material()
+        if item is None:
+            return
+        if item.get("builtin"):
+            self.window.flash("最初から入っている素材は消せません", 2500)
+            return
+        answer = QMessageBox.question(self, "Genko", f"素材「{item.get('name')}」を消しますか？（原稿に貼ったものは残ります）")
+        if answer == QMessageBox.StandardButton.Yes:
+            materials.delete_material(item["id"])
+            self._fill_folders()
+
+    def new_folder(self) -> None:
+        name, ok = QInputDialog.getText(self, "フォルダを作る", "フォルダの名前")
+        if ok and name.strip():
+            materials.add_folder(name)
+            self._fill_folders()
+            self.folder.setCurrentIndex(self.folder.findData(name.strip()))
+
+    # --- the tone -----------------------------------------------------------------------------------------
+
+    def _tone_layer(self):
+        layer = self.window.target_layer()
+        kind = getattr(getattr(layer, "kind", None), "value", "")
+        return layer if kind == "tone" else None
+
+    def refresh(self) -> None:
+        self._loading = True
+        layer = self._tone_layer()
+        self.tone_box.setEnabled(layer is not None)
+        if layer is None:
+            self.tone_label.setText("レイヤー パネルでトーンのレイヤーを選ぶと、ここで変えられます")
+        else:
+            from genko.tones import settings
+
+            tone = settings(layer)
+            self.tone_label.setText(f"「{layer.title or 'トーン'}」")
+            self.pattern.setCurrentIndex(max(0, self.pattern.findData(tone["pattern"])))
+            self.scale.setValue(float(tone.get("scale_mm") or 3.0))
+            from genko.tones import MOTIFS
+
+            self.scale.setEnabled(tone["pattern"] in MOTIFS)
+            self.lpi.setValue(tone["lpi"])
+            self.density.setValue(round(tone["density"] * 100))
+            self.angle.setValue(tone["angle"])
+            self.dot_shape.setCurrentIndex(max(0, self.dot_shape.findData(tone.get("dot_shape") or "round")))
+            self.dot_shape.setEnabled(tone["pattern"] == "dot")
+            offset = tone.get("offset_mm") or (0, 0)
+            self.off_x.setValue(float(offset[0]))
+            self.off_y.setValue(float(offset[1]))
+            gradient = tone.get("gradient") or {}
+            self.gradient.setCurrentIndex(max(0, self.gradient.findData(gradient.get("shape", "") if gradient else "")))
+            self.g_angle.setValue(float(gradient.get("angle", 90)))
+            self.g_start.setValue(round(float(gradient.get("start", tone["density"])) * 100))
+            self.g_end.setValue(round(float(gradient.get("end", 0)) * 100))
+        for widget in (self.g_angle, self.g_start, self.g_end):
+            widget.setEnabled(bool(self.gradient.currentData()))
+        self._loading = False
+        self._fill_effects()
+
+    def _pattern_chosen(self) -> None:
+        key = self.pattern.currentData()
+        if key != "image":
+            self._tone({"pattern": key})
+            return
+        import base64
+        import io
+
+        from PIL import Image
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(self, "柄にする画像（白地に黒い模様）", "", "画像 (*.png *.jpg *.jpeg *.bmp *.webp)")
+        if not path:
+            self.refresh()
+            return
+        try:
+            with Image.open(path) as img:
+                img = img.convert("LA")
+                img.thumbnail((512, 512))
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+        except Exception as exc:
+            self.window.flash(f"読み込めない画像です:\n{exc}", 6000, error=True)
+            self.refresh()
+            return
+        self._tone({"pattern": "image", "tile_png": base64.b64encode(buf.getvalue()).decode("ascii")})
+
+    def _tone(self, change: dict) -> None:
+        layer = self._tone_layer()
+        if self._loading or layer is None:
+            return
+        self.window.apply_ops([{"op": "set_tone", "page": self.window.current_page().index, "id": layer.id, **change}])
+
+    def _gradient(self) -> None:
+        shape = self.gradient.currentData()
+        for widget in (self.g_angle, self.g_start, self.g_end):
+            widget.setEnabled(bool(shape))
+        if not shape:
+            self._tone({"gradient": None})
+            return
+        if self.g_start.value() == self.g_end.value():
+            self._loading = True
+            self.g_start.setValue(self.density.value())
+            self.g_end.setValue(0)
+            self._loading = False
+        self._tone({"gradient": {"shape": shape, "angle": self.g_angle.value(), "start": self.g_start.value() / 100,
+                                 "end": self.g_end.value() / 100}})
+
+    # --- effect lines ---------------------------------------------------------------------------------------
+
+    def _fill_effects(self) -> None:
+        page = self.window.current_page()
+        keep = self.window.canvas.selected_effect_id
+        self._loading = True
+        self.effects.clear()
+        for effect in (page.effects if page else []):
+            label = effects.LABELS.get(effect.get("kind"), effect.get("kind"))
+            if effect.get("visible") is False:
+                label += "（隠す）"
+            entry = QListWidgetItem(label)
+            entry.setData(Qt.ItemDataRole.UserRole, effect.get("id"))
+            self.effects.addItem(entry)
+            if effect.get("id") == keep:
+                self.effects.setCurrentItem(entry)
+        self._loading = False
+        self._show_effect()
+
+    def _effect(self) -> dict | None:
+        page, entry = self.window.current_page(), self.effects.currentItem()
+        if page is None or entry is None:
+            return None
+        return next((e for e in page.effects if e.get("id") == entry.data(Qt.ItemDataRole.UserRole)), None)
+
+    def select_effect(self, effect_id: str) -> None:
+        for row in range(self.effects.count()):
+            if self.effects.item(row).data(Qt.ItemDataRole.UserRole) == effect_id:
+                self.effects.setCurrentRow(row)
+                return
+
+    def _effect_picked(self) -> None:
+        if self._loading:
+            return
+        effect = self._effect()
+        self.window.canvas.selected_effect_id = effect.get("id") if effect else None
+        self.window.canvas.update()
+        self._show_effect()
+
+    def _show_effect(self) -> None:
+        while self.effect_form.rowCount():
+            self.effect_form.removeRow(0)
+        self.effect_fields = {}
+        effect = self._effect()
+        if effect is None:
+            return
+        params = effect.get("params") or {}
+        _, box = effects.area(effect, self.window.current_page())
+        kind = effect.get("kind")
+        fields = list(EFFECT_FIELDS.get(kind, [])) + (EFFECT_MORE if kind in ("focus", "speed") else [])
+        for key, label, lo, hi, step, default in fields:
+            spin = QDoubleSpinBox()
+            spin.setRange(lo, hi)
+            spin.setSingleStep(step)
+            spin.setDecimals(0 if step >= 1 else 2)
+            if key == "inner_r":
+                rx, _ry = effects._inner(params, box)
+                value = rx
+            elif key == "length_mm" and kind == "focus":
+                value = float(params.get(key) or 0)
+            elif key == "length_mm":
+                value = float(params.get(key, max(8.0, min(box[2], box[3]) * 0.18)))
+            elif key.startswith("jitter_"):
+                value = float(params.get(key, params.get("jitter", 0.25)))
+            else:
+                value = float(params.get(key, default if default is not None else lo))
+            spin.setValue(value)
+            spin.editingFinished.connect(lambda k=key, sp=spin: self._effect_set(k, sp.value()))
+            self.effect_form.addRow(label, spin)
+            self.effect_fields[key] = spin
+        if kind in ("speed", "focus"):
+            from PySide6.QtWidgets import QPushButton
+
+            taper = QComboBox()
+            for text, value in TAPERS:
+                taper.addItem(text, value)
+            now = params.get("taper", True)
+            now = ("in" if kind == "focus" else "both") if now in (True, None, "True") else ("none" if now in (False, "", "none") else now)
+            taper.setCurrentIndex(max(0, taper.findData(now)))
+            taper.activated.connect(lambda _=0, box=taper: self._effect_set("taper", box.currentData()))
+            self.effect_form.addRow("入り抜き", taper)
+            self.effect_fields["taper"] = taper
+
+            key = "path" if kind == "speed" else "inner_path"
+            draw = QPushButton("描いた線に沿わせる" if kind == "speed" else "中心の空きを描いた形にする")
+            draw.setToolTip("ボタンを押してから、ペンで 1 本引きます（流線はその線に沿い、集中線はその形の外から入る）")
+            draw.clicked.connect(lambda _=False, k=key, e=effect["id"]: self.window.draw_effect_shape(e, k))
+            self.effect_form.addRow(draw)
+            if params.get(key):
+                undo = QPushButton("沿わせるのをやめる" if kind == "speed" else "中心の空きを楕円に戻す")
+                undo.clicked.connect(lambda _=False, k=key: self.window.apply_ops([{"op": "edit_effect", "page": self.window.current_page().index,
+                                                                                  "id": effect["id"], "params": {k: None}}]))
+                self.effect_form.addRow(undo)
+
+    def _effect_set(self, key: str, value: float) -> None:
+        effect = self._effect()
+        if effect is None:
+            return
+        if key == "inner_r":
+            _, box = effects.area(effect, self.window.current_page())
+            rx, ry = effects._inner(effect.get("params") or {}, box)
+            change = {"inner": [round(value, 2), round(value * ry / max(rx, 1e-6), 2)]}
+        elif key in ("count", "spikes", "bundle"):
+            change = {key: int(value)}
+        elif key == "taper":
+            change = {key: False if value == "none" else value}
+        elif key in ("length_mm", "spacing_mm") and not value and effect.get("kind") in ("focus", "speed"):
+            change = {key: None}  # (0: to the edge / from the count)
+        else:
+            change = {key: round(value, 3)}
+        self.window.apply_ops([{"op": "edit_effect", "page": self.window.current_page().index, "id": effect["id"], "params": change}])
+
+    def effect_to_layer(self) -> None:
+        effect = self._effect()
+        layer = self.window._paint_layer()
+        if effect is None or layer is None:
+            return
+        if self.window.apply_ops([{"op": "effect_to_layer", "page": self.window.current_page().index, "id": effect["id"],
+                                   "layer_id": layer.id}]):
+            self.window.flash("効果線を線にしました。消しゴムやペンで手を入れられます", 3500)
+
+    def delete_effect(self) -> None:
+        effect = self._effect()
+        if effect is not None:
+            self.window.apply_ops([{"op": "delete_effect", "page": self.window.current_page().index, "id": effect["id"]}])
+            self.window.canvas.selected_effect_id = None
+
+
+_SHARED: dict = {}  # (a material's picture, drawn once for every window: the same material looks the same)
+
+
+def _shared_icon(item: dict) -> QIcon:
+    import json
+
+    try:
+        key = (item["id"], json.dumps(item, sort_keys=True, default=str))
+    except (TypeError, ValueError):
+        key = None
+    if key is not None and key in _SHARED:
+        return _SHARED[key]
+    try:
+        icon = _icon(materials.thumbnail(item, 56))
+    except Exception:  # a missing picture must not take the panel down
+        icon = QIcon()
+    if key is not None:
+        _SHARED[key] = icon
+    return icon
+

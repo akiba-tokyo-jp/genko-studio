@@ -8,11 +8,13 @@ license = { text = "MIT" }
 authors = [{ name = "Genko Studio" }]
 dependencies = [
   "pillow>=10.0",
+  "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
-app = ["pyside6>=6.6"]
-dev = ["pytest>=8.0"]
+app = ["pyside6>=6.6", "pyobjc-framework-Cocoa>=10; sys_platform == 'darwin'"]  # (pyobjc: the Mac's frosted glass)
+dev = ["pytest>=8.0", "psd-tools>=1.9"]  # psd-tools only reads back exported PSDs in tests
+mcp = ["mcp>=2,<3"]
 
 [project.scripts]
 genko = "genko.__main__:main"

@@ -13,7 +13,7 @@ def test_b4_and_publisher_presets():
     b4 = PageSpec.b4_comic()
     assert b4.width_mm == 257
     assert b4.height_mm == 364
-    assert b4.bleed_mm == 3
+    assert b4.bleed_mm == 5 and b4.trim_size() == (220, 310) and b4.frame_size() == (180, 270)
     shueisha = PageSpec.publisher("shueisha")
     assert shueisha.preset == "shueisha"
     unknown = PageSpec.publisher("mystery-house")

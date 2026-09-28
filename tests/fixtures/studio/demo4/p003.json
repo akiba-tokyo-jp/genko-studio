@@ -1,0 +1,17 @@
+{
+  "page": 3, "turn_role": "normal", "template": null,
+  "tiers": [
+    {"h": 0.5, "cols": [{"slot": "p1", "w": 1.0, "rows": null}]},
+    {"h": 0.5, "cols": [{"slot": "p2", "w": 1.0, "rows": null}]}
+  ],
+  "panels": [
+    {"slot": "p1", "shot": "MS", "angle": "low", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [{"id": "hina", "pose": "振り返る", "expression": "やわらかい笑顔", "facing": "left", "pos": "right", "scale": 0.8}],
+     "action": "振り返って笑う", "emotion": "安堵", "fx": [], "emphasis": 0.6, "cross": false,
+     "beat_ids": ["b07"], "lines": [{"beat_id": "b07", "balloon": "speech", "breaks": ["…やっぱり", "来てくれたんだ"]}]},
+    {"slot": "p2", "shot": "MCU", "angle": "eye", "location_id": "loc_rooftop", "time": "sunset",
+     "characters": [{"id": "sora", "pose": "頭をかく", "expression": "照れ", "facing": "right", "pos": "left_third", "scale": 0.8}],
+     "action": "目をそらして頭をかく", "emotion": "照れ", "fx": [], "emphasis": 0.4, "cross": false,
+     "beat_ids": ["b08"], "lines": [{"beat_id": "b08", "balloon": "speech", "breaks": ["約束", "しただろ"]}]}
+  ]
+}

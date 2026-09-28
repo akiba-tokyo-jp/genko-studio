@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import contextvars
 import io
+import threading
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from genko.models import Episode, LayerKind, LayerRole, Page, Rect, StoryLine
-from genko.tategaki import compose as compose_tategaki
 
 EXPORT_ROLES = (
     LayerRole.INK,
@@ -61,15 +62,454 @@ def _stroke(
     draw.line(xy, fill=color, width=width, joint="curve")
 
 
+_NO_DOTS: contextvars.ContextVar[bool] = contextvars.ContextVar("genko_no_dots", default=False)  # (screens: greys, no dots)
+_STROKE_CACHE: dict = {}  # (layer id, dpi, size, guide) → (patches' signature, lines' signatures, image); oldest first
+STROKE_CACHE_SIZE = 12
+STROKE_CACHE_PIXELS = 80_000_000  # about 320 MB: a few zoomed-in (fine) layers, or a dozen normal ones
+_CACHE_LOCK = threading.Lock()  # the canvas renders zoomed-in views on a second thread
+_LOCAL = threading.local()
+
+
+class Cancelled(Exception):
+    """A background render that is no longer wanted (the page changed or was left)."""
+
+
+def cancel_with(event) -> None:
+    """Renders on this thread stop (raise Cancelled) soon after event is set."""
+    _LOCAL.cancel = event
+
+
+def _check_cancel() -> None:
+    event = getattr(_LOCAL, "cancel", None)
+    if event is not None and event.is_set():
+        raise Cancelled()
+
+
+def _stroke_sig(stroke, brushes) -> tuple:
+    """What decides how a line looks (a changed line gets a different signature)."""
+    points = getattr(stroke, "points", None) or []
+    return (getattr(stroke, "id", None), getattr(stroke, "kind", None), getattr(stroke, "width_mm", None), str(getattr(stroke, "rgb", None)),
+            getattr(stroke, "opacity", None), len(points), tuple(points[0]) if points else None, tuple(points[-1]) if points else None,
+            len(getattr(stroke, "pressure", None) or []), brushes.brush(getattr(stroke, "kind", None)),
+            getattr(stroke, "pressure_opacity", 0.0))
+
+
+QUICK_DPI = 32  # at or below this (small pictures of pages and layers) lines are drawn as plain polylines
+
+
+def _quick_strokes(strokes, patches, size, dpi: int, guide: bool) -> Image.Image:
+    """Lines as plain polylines of their width, straight onto the layer: a thumbnail (or the screen's
+    first look) of a page with thousands of lines in milliseconds. The brush look is left out."""
+    from genko import brushes
+
+    out = Image.new("RGBA", size, (0, 0, 0, 0))
+    for patch in patches:
+        _paint_patch(out, patch, dpi, NAME_COLOR if guide else None)
+    draw = ImageDraw.Draw(out)
+    scale = dpi / 25.4
+    for stroke in strokes:
+        points = getattr(stroke, "points", None) or []
+        if not points:
+            continue
+        b = brushes.brush(getattr(stroke, "kind", None))
+        rgb = NAME_COLOR if guide else tuple(getattr(stroke, "rgb", None) or b.rgb or INK_COLOR)
+        shade = int(255 * max(0.0, min(1.0, float(getattr(stroke, "opacity", 1.0)))) * b.opacity)
+        xy = [(p[0] * scale, p[1] * scale) for p in points]
+        width = max(1, round(float(getattr(stroke, "width_mm", 0.35) or 0.35) * scale))
+        if len(xy) == 1:
+            draw.point(xy, fill=(*rgb, shade))
+        else:
+            draw.line(xy, fill=(*rgb, shade), width=width, joint="curve" if width > 2 else None)
+    return out
+
+
+ROUGH_FROM = 300  # a layer with this many lines not yet drawn at a resolution is roughed out first on screen
+
+
+def rough_needed(page: Page, dpi: int) -> bool:
+    """Would drawing this page now mean drawing many lines from scratch (a page not seen lately)?"""
+    size = (mm_to_px(page.spec.width_mm, dpi), mm_to_px(page.spec.height_mm, dpi))
+    with _CACHE_LOCK:
+        for layer in page.layers:
+            strokes = getattr(layer, "strokes", None) or []
+            if len(strokes) < ROUGH_FROM or not layer.visible:
+                continue
+            cached = _STROKE_CACHE.get((layer.id, dpi, size, layer.role in (LayerRole.NAME, LayerRole.DRAFT)))
+            if cached is None or len(strokes) - len(cached[1]) >= ROUGH_FROM:
+                return True
+    return False
+
+
+def _panel_of(page: Page, x: float, y: float):
+    """The panel (a leaf that cuts the layers) that has this point: its bleed shape for a bleed panel."""
+    from genko import frames as geo
+    from genko.placement import bleed_poly, clip_box, in_poly
+
+    for frame in page.leaf_frames():
+        if not getattr(frame, "clip", True):
+            continue
+        shape = bleed_poly(page, frame)
+        if shape is not None:
+            if in_poly(shape, x, y):
+                return frame
+        elif getattr(frame, "bleed", False) and not getattr(frame, "poly", None):
+            if clip_box(page, frame, "bleed").contains(x, y):
+                return frame
+        elif geo.contains(frame, x, y):
+            return frame
+    return None
+
+
+_FRAME_MASKS: dict = {}  # (the panel's shape, size, dpi) → its mask: the same panels are cut again every render
+
+
+def _frame_mask(page: Page, frame, size: tuple[int, int], dpi: int) -> Image.Image:
+    from genko import frames as geo
+    from genko.placement import bleed_poly
+
+    shape = bleed_poly(page, frame)
+    key = (tuple(map(tuple, shape)) if shape is not None else tuple(geo.outline(frame)), bool(getattr(frame, "bleed", False)),
+           tuple(size), dpi, page.spec.width_mm, page.spec.height_mm)
+    with _CACHE_LOCK:
+        cached = _FRAME_MASKS.get(key)
+    if cached is not None:
+        return cached
+    mask = _draw_frame_mask(page, frame, size, dpi)
+    with _CACHE_LOCK:
+        if len(_FRAME_MASKS) > 48:
+            _FRAME_MASKS.clear()
+        _FRAME_MASKS[key] = mask
+    return mask
+
+
+def _draw_frame_mask(page: Page, frame, size: tuple[int, int], dpi: int) -> Image.Image:
+    from genko.placement import bleed_poly, clip_box
+
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    shape = bleed_poly(page, frame)
+    if shape is not None:
+        draw.polygon([_xy(p, dpi) for p in shape], fill=255)
+    elif getattr(frame, "bleed", False) and not getattr(frame, "poly", None):
+        draw.rectangle(rect_px(clip_box(page, frame, "bleed"), dpi), fill=255)
+    else:
+        fill_frame(draw, frame, dpi)
+    return mask
+
+
+def _each_panel(layer, page: Page, size, dpi, panel_mask, raster, rough) -> Image.Image | None:
+    """A layer cut panel by panel: each line stays in the panel it was begun in (CLIP STUDIO's panel folders),
+    so a stroke that runs on into the next panel does not show there. Fills, and lines begun outside every
+    panel, are cut by all the panels together as before."""
+    import copy as _copy
+
+    groups: dict[str | None, list] = {}
+    frames: dict[str, object] = {}
+    for stroke in layer.strokes:
+        frame = _panel_of(page, *stroke.points[0]) if stroke.points else None
+        key = frame.id if frame is not None else None
+        if frame is not None:
+            frames[key] = frame
+        groups.setdefault(key, []).append(stroke)
+    if list(groups) == [None]:
+        return None
+    out = None
+    for key in [None, *[k for k in groups if k is not None]]:
+        part = _copy.copy(layer)
+        part.panel_each = False
+        part.strokes = groups.get(key, [])
+        part.patches = list(getattr(layer, "patches", None) or []) if key is None else []
+        if not part.strokes and not part.patches:
+            continue
+        part.id = f"{layer.id}@{key}" if getattr(layer, "id", None) else None
+        mask = panel_mask if key is None else _frame_mask(page, frames[key], size, dpi)
+        drawn = _layer_strokes(part, size, dpi, mask, raster, rough)
+        if drawn is not None:
+            out = drawn if out is None else Image.alpha_composite(out, drawn)
+    return out if out is not None else Image.new("RGBA", size, (0, 0, 0, 0))
+
+
+def _layer_strokes(layer, size: tuple[int, int], dpi: int, panel_mask: Image.Image | None,
+                   raster: Image.Image | None, rough: bool = False, page: Page | None = None) -> Image.Image | None:
+    """A layer's fills (patches) and pen lines, drawn from their data at this resolution (None if none).
+
+    Name and draft lines are drawn in the name colour; the others in their own colour (ink black by
+    default) with their brush's look (genko.brushes). Everything stays inside the panels unless the
+    layer runs out of them, and a layer with locked transparency only keeps it where it has pixels.
+    """
+    from genko import brushes
+    from genko.models import stroke_points
+
+    strokes = getattr(layer, "strokes", None) or []
+    patches = getattr(layer, "patches", None) or []
+    if not strokes and not patches:
+        return None
+    if (page is not None and panel_mask is not None and strokes and getattr(layer, "panel_each", False)
+            and getattr(layer, "panel_clip", True)):
+        each = _each_panel(layer, page, size, dpi, panel_mask, raster, rough)
+        if each is not None:
+            return each
+    guide = layer.role in (LayerRole.NAME, LayerRole.DRAFT)
+    if dpi <= QUICK_DPI or rough:
+        return _clipped(layer, _quick_strokes(strokes, patches, size, dpi, guide), panel_mask, raster)
+    # the lines drawn so far are remembered per layer and resolution: a new line is drawn on top of them
+    # instead of drawing the whole layer again (a finished page has thousands of lines)
+    key = (getattr(layer, "id", None), dpi, size, guide)
+    patch_sig = tuple((p.get("id"), tuple(p.get("box") or ()), len(p.get("png") or b""), str(p.get("rgb")), p.get("opacity"),
+                       p.get("mode")) for p in patches)
+    sigs = [_stroke_sig(stroke, brushes) for stroke in strokes]
+    with _CACHE_LOCK:
+        cached = _STROKE_CACHE.get(key) if key[0] else None
+    if cached is not None and cached[0] == patch_sig and cached[1] == sigs[:len(cached[1])]:
+        out = cached[2].copy()
+        todo = strokes[len(cached[1]):]
+    else:
+        out = Image.new("RGBA", size, (0, 0, 0, 0))
+        for patch in patches:
+            _paint_patch(out, patch, dpi, NAME_COLOR if guide else None)
+        todo = strokes
+    # lines of one colour gather in one coverage mask (screen: a + b − ab, the same as laying them over each
+    # other) and go onto the layer once per colour, instead of once per line
+    ink: Image.Image | None = None
+    ink_rgb = None
+
+    def lay() -> None:
+        nonlocal out
+        if ink is not None and ink.getbbox():
+            box = ink.getbbox()
+            patch = Image.new("RGBA", (box[2] - box[0], box[3] - box[1]), (*ink_rgb, 0))
+            patch.putalpha(ink.crop(box))
+            out.alpha_composite(patch, (box[0], box[1]))
+
+    for n, stroke in enumerate(todo):
+        if n % 64 == 63:
+            _check_cancel()
+        b = brushes.brush(getattr(stroke, "kind", None))
+        drawn = brushes.draw(size, stroke_points(stroke), dpi, float(getattr(stroke, "width_mm", 0.35) or 0.35),
+                             getattr(stroke, "kind", None), seed=str(getattr(stroke, "id", "")),
+                             rotation=getattr(stroke, "rotation", None),
+                             pressure_opacity=float(getattr(stroke, "pressure_opacity", 0.0) or 0.0))
+        if drawn is None:
+            continue
+        cover, (x0, y0) = drawn
+        rgb = NAME_COLOR if guide else tuple(getattr(stroke, "rgb", None) or b.rgb or INK_COLOR)
+        opacity = max(0.0, min(1.0, float(getattr(stroke, "opacity", 1.0)))) * b.opacity
+        if opacity < 1:
+            cover = cover.point(lambda v, o=opacity: int(v * o))
+        if rgb != ink_rgb:
+            lay()
+            ink, ink_rgb = Image.new("L", size, 0), rgb
+        box = (x0, y0, x0 + cover.width, y0 + cover.height)
+        ink.paste(ImageChops.screen(ink.crop(box), cover), box[:2])
+    lay()
+    if key[0]:
+        kept = out.copy()
+        with _CACHE_LOCK:
+            _STROKE_CACHE.pop(key, None)
+            _STROKE_CACHE[key] = (patch_sig, sigs, kept)
+            while len(_STROKE_CACHE) > 1 and (len(_STROKE_CACHE) > STROKE_CACHE_SIZE or sum(
+                    item[2].width * item[2].height for item in _STROKE_CACHE.values()) > STROKE_CACHE_PIXELS):
+                _STROKE_CACHE.pop(next(iter(_STROKE_CACHE)))
+    return _clipped(layer, out, panel_mask, raster)
+
+
+def _clipped(layer, out: Image.Image, panel_mask, raster) -> Image.Image:
+    if panel_mask is not None and getattr(layer, "panel_clip", True):
+        out.putalpha(_and_alpha(out, panel_mask))
+    if getattr(layer, "lock_alpha", False) and raster is not None:
+        out.putalpha(ImageChops.multiply(out.split()[3], raster.convert("RGBA").split()[3]))
+    return out
+
+
+def _paint_patch(out: Image.Image, patch: dict, dpi: int, colour=None) -> None:
+    """A fill or a pasted image, kept at its own resolution over its box (mm), onto the layer image."""
+    data = patch.get("png")
+    if not data:
+        return
+    x, y, w, h = (float(v) for v in patch["box"])
+    x0, y0 = round(x / 25.4 * dpi), round(y / 25.4 * dpi)
+    pw, ph = max(1, round(w / 25.4 * dpi)), max(1, round(h / 25.4 * dpi))
+    image = Image.open(io.BytesIO(data))
+    opacity = max(0.0, min(1.0, float(patch.get("opacity", 1.0))))
+    if patch.get("mode", "mask") == "mask":
+        cover = image.convert("L").resize((pw, ph), Image.Resampling.LANCZOS)
+        if pw > image.width * 1.5:  # upscaled fills: keep their edge crisp
+            cover = cover.point(lambda v: 255 if v >= 128 else 0)
+        if opacity < 1:
+            cover = cover.point(lambda v, o=opacity: int(v * o))
+        rgb = colour or tuple(patch.get("rgb") or INK_COLOR)
+        piece = Image.new("RGBA", (pw, ph), (*rgb, 0))
+        piece.putalpha(cover)
+    else:
+        piece = image.convert("RGBA").resize((pw, ph), Image.Resampling.LANCZOS)
+        if opacity < 1:
+            piece.putalpha(piece.split()[3].point(lambda v, o=opacity: int(v * o)))
+    region_box = (x0, y0, x0 + pw, y0 + ph)
+    region = out.crop(region_box)
+    out.paste(Image.alpha_composite(region, piece), (x0, y0))
+
+
+GRADIENT_SHAPES = ("linear", "radial", "ellipse")
+GRADIENT_REPEATS = ("none", "repeat", "mirror")
+
+
+def gradient_t(gx, gy, spec: dict):
+    """Where each point is along the gradient (0 at `from`, 1 at `to`): straight (linear), round (radial) or an
+    ellipse `ratio` as wide across as along, turned with the drag; past the end it stops, repeats or mirrors."""
+    import math
+
+    import numpy as np
+
+    (fx, fy), (tx, ty) = [float(v) for v in spec.get("from", [0, 0])[:2]], [float(v) for v in spec.get("to", [0, 100])[:2]]
+    length = math.hypot(tx - fx, ty - fy) or 1.0
+    shape = spec.get("shape") or "linear"
+    if shape == "radial":
+        t = np.hypot(gx - fx, gy - fy) / length
+    elif shape == "ellipse":
+        ux, uy = (tx - fx) / length, (ty - fy) / length
+        along = (gx - fx) * ux + (gy - fy) * uy
+        across = (-(gx - fx) * uy + (gy - fy) * ux) / max(0.05, float(spec.get("ratio", 0.5)))
+        t = np.hypot(along, across) / length
+    else:
+        t = ((gx - fx) * (tx - fx) + (gy - fy) * (ty - fy)) / (length * length)
+    repeat = spec.get("repeat") or "none"
+    if repeat == "repeat":
+        return t - np.floor(t)
+    if repeat == "mirror":
+        return 1 - np.abs((t % 2.0) - 1)
+    return np.clip(t, 0.0, 1.0)
+
+
+def gradient_stops(spec: dict) -> list[tuple[float, tuple, float]]:
+    """[(position 0..1, (r, g, b), opacity 0..1)], sorted: `stops` (any number of colours) or the two ends."""
+    raw = spec.get("stops")
+    if raw:
+        out = []
+        for stop in raw:
+            pos, rgb = float(stop[0]), [int(v) for v in stop[1]][:3]
+            opacity = float(stop[2]) if len(stop) > 2 and stop[2] is not None else 1.0
+            out.append((max(0.0, min(1.0, pos)), tuple(rgb), max(0.0, min(1.0, opacity))))
+        return sorted(out, key=lambda s: s[0])
+    c0 = tuple(int(v) for v in (spec.get("rgb_from") or [20, 20, 20])[:3])
+    c1 = tuple(int(v) for v in (spec.get("rgb_to") or [255, 255, 255])[:3])
+    return [(0.0, c0, max(0.0, min(1.0, float(spec.get("opacity_from", 1.0))))),
+            (1.0, c1, max(0.0, min(1.0, float(spec.get("opacity_to", 1.0)))))]
+
+
+def gradient_colours(t, spec: dict):
+    """(rgb uint8 H×W×3, opacity float H×W) for positions t along the gradient's colours."""
+    import numpy as np
+
+    stops = gradient_stops(spec)
+    pos = np.array([s[0] for s in stops])
+    rgb = np.dstack([np.interp(t, pos, [s[1][c] for s in stops]) for c in range(3)]).round().astype("uint8")
+    alpha = np.interp(t, pos, [s[2] for s in stops])
+    return rgb, alpha
+
+
+def gradient_image(size: tuple[int, int], dpi: int, spec: dict) -> Image.Image:
+    """A page-sized gradient (a gradient layer): from → to (mm), its colours (two ends or any stops), its shape
+    and whether it repeats."""
+    import numpy as np
+
+    w, h = size
+    scale = dpi / 25.4
+    gx, gy = np.meshgrid((np.arange(w) + 0.5) / scale, (np.arange(h) + 0.5) / scale)
+    rgb, alpha = gradient_colours(gradient_t(gx, gy, spec), spec)
+    return Image.fromarray(np.dstack([rgb, (alpha * 255).round().astype("uint8")]), "RGBA")
+
+
+def fill_layer_image(layer, size: tuple[int, int], dpi: int) -> Image.Image:
+    """A fill layer's picture: one colour over the page, or its gradient."""
+    spec = layer.fill or {}
+    if spec.get("gradient"):
+        return gradient_image(size, dpi, spec["gradient"])
+    rgb = tuple(int(v) for v in (spec.get("rgb") or layer.fill_rgb or (255, 255, 255)))[:3]
+    return Image.new("RGBA", size, (*rgb, 255))
+
+
+def layer_effects(layer, raster: Image.Image, dpi: int) -> Image.Image:
+    """境界効果: an edge line around what the layer shows (フチ), or colour gathered at its edges (水彩境界)."""
+    effect = getattr(layer, "effect", None) or {}
+    if not effect:
+        return raster
+    out = raster.convert("RGBA")
+    alpha = out.split()[3]
+    if effect.get("water_edge"):
+        spec = effect["water_edge"]
+        width = max(1, round(float(spec.get("width_mm", 0.6)) / 25.4 * dpi))
+        strength = max(0.0, min(1.0, float(spec.get("strength", 0.6))))
+        inner = alpha.filter(ImageFilter.MinFilter(width * 2 + 1)) if width < 12 else \
+            alpha.filter(ImageFilter.GaussianBlur(width)).point(lambda v: 255 if v > 245 else 0)
+        rim = ImageChops.subtract(alpha, inner)
+        dark = Image.new("RGBA", out.size, (0, 0, 0, 0))
+        dark.putalpha(rim.point(lambda v, s=strength: int(v * s * 0.6)))
+        shaded = out.copy()
+        shaded.alpha_composite(dark)
+        shaded.putalpha(alpha)
+        out = shaded
+    if effect.get("border"):
+        spec = effect["border"]
+        width = max(1, round(float(spec.get("width_mm", 0.5)) / 25.4 * dpi))
+        rgb = tuple(int(v) for v in (spec.get("rgb") or (255, 255, 255)))[:3]
+        grown = alpha.filter(ImageFilter.GaussianBlur(width / 1.5)).point(lambda v: 255 if v > 12 else 0)
+        border = Image.new("RGBA", out.size, (*rgb, 0))
+        border.putalpha(grown)
+        border.alpha_composite(out)
+        out = border
+    return out
+
+
+def _adjusted(rgba: Image.Image, layer, clip_mask: Image.Image | None) -> Image.Image:
+    """A correction layer at work: what is under it, with its adjustment, through its mask and opacity."""
+    from genko.filters import apply_filter
+
+    spec = dict(layer.adjust or {})
+    kind = spec.pop("kind", "")
+    if not kind:
+        return rgba
+    try:
+        changed = apply_filter(rgba, kind, spec)
+    except ValueError:
+        return rgba
+    strength = Image.new("L", rgba.size, round(255 * max(0.0, min(1.0, float(layer.opacity if layer.opacity is not None else 1)))))
+    if layer.mask and layer.mask.get("enabled", True) and layer.mask.get("png"):
+        shown = Image.open(io.BytesIO(layer.mask["png"])).convert("L").resize(rgba.size)
+        strength = ImageChops.multiply(strength, shown)
+    if clip_mask is not None:
+        strength = ImageChops.multiply(strength, clip_mask.convert("L"))
+    return Image.composite(changed.convert("RGBA"), rgba, strength)
+
+
 def _clip_mask(page: Page, size: tuple[int, int], dpi: int) -> Image.Image | None:
     leaves = [frame for frame in page.leaf_frames() if getattr(frame, "clip", True)]
     if not leaves:
         return None
+    from genko.placement import bleed_poly, clip_box
+
     mask = Image.new("L", size, 0)
     draw = ImageDraw.Draw(mask)
     for frame in leaves:
-        draw.rectangle(rect_px(frame.rect, dpi), fill=255)
+        shape = bleed_poly(page, frame)
+        if shape is not None:  # a slanted bleed panel: out to the bleed, its slanted sides kept
+            draw.polygon([_xy(p, dpi) for p in shape], fill=255)
+        elif getattr(frame, "bleed", False) and not getattr(frame, "poly", None):
+            draw.rectangle(rect_px(clip_box(page, frame, "bleed"), dpi), fill=255)  # a bleed panel runs out to the bleed
+        else:
+            fill_frame(draw, frame, dpi)
     return mask
+
+
+def fill_frame(draw: ImageDraw.ImageDraw, frame, dpi: int, fill=255) -> None:
+    """A panel's area: its rectangle, or its polygon (or curved outline) when it is slanted or free-form."""
+    from genko import frames as geo
+
+    if geo.rounded(frame):
+        draw.polygon([_xy(p, dpi) for p in geo.outline(frame)], fill=fill)
+    elif getattr(frame, "poly", None):
+        draw.polygon([_xy(p, dpi) for p in frame.poly], fill=fill)
+    else:
+        draw.rectangle(rect_px(frame.rect, dpi), fill=fill)
 
 
 def _and_alpha(layer: Image.Image, mask: Image.Image) -> Image.Image:
@@ -77,7 +517,7 @@ def _and_alpha(layer: Image.Image, mask: Image.Image) -> Image.Image:
     return ImageChops.multiply(alpha, mask)
 
 
-_DELA = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "DelaGothicOne-Regular.ttf"
+_DELA = Path(__file__).resolve().parent / "fonts" / "DelaGothicOne-Regular.ttf"  # package data (ships in the wheel)
 _CJK_FONTS = (
     str(_DELA),
     r"C:\Windows\Fonts\YuGothM.ttc",
@@ -101,6 +541,212 @@ def _font(path: str | None = None, size: int = 14) -> ImageFont.ImageFont:
         except (OSError, ValueError):
             continue
     return ImageFont.load_default()
+
+
+def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, int], dpi: int,
+                   mode: str = "print", finish: bool = True) -> Image.Image | None:
+    """Resample a placed image from its asset into its placement, clipped to its panel, and give
+    monochrome pages their finish (print: black and white with dots; proof: the flat grey steps)."""
+    from genko.assets import AssetStore
+    from genko.placement import clip_box
+
+    if episode is None or episode.asset_dir is None or not layer.asset or layer.placement_mm is None:
+        return None
+    data = AssetStore(episode.asset_dir).get_bytes(layer.asset, ".png")
+    if data is None:
+        return None
+    r = layer.placement_mm  # may start left of / above the paper, so no clamping here
+    x0, y0 = round(r.x / 25.4 * dpi), round(r.y / 25.4 * dpi)
+    x1, y1 = round((r.x + r.width) / 25.4 * dpi), round((r.y + r.height) / 25.4 * dpi)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    frame = None
+    if layer.frame_id:
+        try:
+            frame = page._find(layer.frame_id)
+        except (KeyError, IndexError):
+            frame = None
+    cx0, cy0, cx1, cy1 = rect_px(clip_box(page, frame, layer.clip_to), dpi)
+    # only the visible part is resampled, straight from the source pixels
+    vx0, vy0 = max(x0, cx0, 0), max(y0, cy0, 0)
+    vx1, vy1 = min(x1, cx1, size[0]), min(y1, cy1, size[1])
+    if vx1 <= vx0 or vy1 <= vy0:
+        return None
+    source = Image.open(io.BytesIO(data)).convert("RGBA")
+    sx, sy = source.width / (x1 - x0), source.height / (y1 - y0)
+    box = ((vx0 - x0) * sx, (vy0 - y0) * sy, (vx1 - x0) * sx, (vy1 - y0) * sy)
+    fitted = source.resize((vx1 - vx0, vy1 - vy0), Image.Resampling.LANCZOS, box=box)
+    if finish:
+        fitted = _finish_placed(fitted, layer, page, episode, dpi, mode, (vx0, vy0))
+    canvas = Image.new("RGBA", size, (0, 0, 0, 0))
+    canvas.paste(fitted, (vx0, vy0))
+    if frame is not None and (getattr(frame, "poly", None) or float(getattr(frame, "corner_mm", 0) or 0) > 0
+                              or getattr(frame, "curves", None)) and layer.clip_to in ("frame", "bleed"):
+        from genko.placement import bleed_poly
+
+        shape_mask = Image.new("L", size, 0)
+        shape = bleed_poly(page, frame) if layer.clip_to == "bleed" else None
+        if shape is not None:  # (a slanted bleed panel: cut along its slanted sides, out to the bleed elsewhere)
+            ImageDraw.Draw(shape_mask).polygon([_xy(p, dpi) for p in shape], fill=255)
+        else:
+            fill_frame(ImageDraw.Draw(shape_mask), frame, dpi)
+        canvas.putalpha(ImageChops.multiply(canvas.split()[3], shape_mask))
+    return canvas
+
+
+def _has_colour(image: Image.Image) -> bool:
+    """Whether a layer's picture has colour in it (greys and black lines do not count)."""
+    small = image.convert("RGBA")
+    small.thumbnail((96, 96))
+    alpha = small.getchannel("A")
+    sat = small.convert("RGB").convert("HSV").getchannel("S")
+    seen = ImageChops.multiply(sat, alpha.point(lambda v: 255 if v > 32 else 0))
+    return seen.getextrema()[1] > 40
+
+
+def _finish_placed(fitted: Image.Image, layer, page: Page, episode: Episode | None, dpi: int, mode: str,
+                   origin: tuple[int, int]) -> Image.Image:
+    from genko import screentone
+
+    to = (layer.source or {}).get("to", "art")
+    if mode not in ("print", "proof") or page.spec.expression == "color" or layer.role in (LayerRole.DRAFT, LayerRole.NAME):
+        return fitted
+    alpha = fitted.split()[3]
+    grey = Image.alpha_composite(Image.new("RGBA", fitted.size, (255, 255, 255, 255)), fitted).convert("L")
+    if to == "ink":
+        # extracted line art: pure black lines, transparent elsewhere
+        ink = grey.point(lambda v: 255 if v < 128 else 0)
+        out = Image.new("RGBA", fitted.size, (0, 0, 0, 0))
+        out.putalpha(ImageChops.multiply(ink, alpha))
+        return out
+    style = ((episode.studio.get("style") or {}).get("finish") if episode is not None else None) or {}
+    finish = screentone.Finish.from_dict({**style, **(layer.finish or {})})
+    dark, light = _clothes_masks(layer, page, episode, fitted.size, dpi, origin)
+    done = screentone.finish_gray(grey, finish, dpi, screen=mode == "print" and not _NO_DOTS.get(), origin=origin,
+                                  faces=_face_mask(layer, page, fitted.size, dpi, origin), dark=dark, light=light)
+    out = done.convert("RGBA")
+    out.putalpha(alpha if mode == "proof" else alpha.point(lambda v: 255 if v >= 128 else 0))
+    return out
+
+
+def _face_mask(layer, page: Page, size: tuple[int, int], dpi: int, origin: tuple[int, int]) -> Image.Image | None:
+    """White ellipses, softened at the edge, where the panel's reported faces are (in the fitted art's pixels)."""
+    if not getattr(layer, "frame_id", None):
+        return None
+    try:
+        panel = page._find(layer.frame_id).panel or {}
+    except (KeyError, IndexError):
+        return None
+    faces = [r["rect_mm"] for r in panel.get("regions", []) if r.get("kind") in ("face", "head")
+             and isinstance(r.get("rect_mm"), (list, tuple)) and len(r["rect_mm"]) == 4]
+    if not faces:
+        return None
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    for x, y, w, h in faces:
+        x0, y0 = mm_to_px(x, dpi) - origin[0], mm_to_px(y, dpi) - origin[1]
+        draw.ellipse((x0, y0, x0 + mm_to_px(w, dpi), y0 + mm_to_px(h, dpi)), fill=255)
+    return mask.filter(ImageFilter.GaussianBlur(max(1.0, dpi / 100)))
+
+
+def _clothes_masks(layer, page: Page, episode: Episode | None, size: tuple[int, int], dpi: int,
+                   origin: tuple[int, int]) -> tuple[Image.Image | None, Image.Image | None]:
+    """(solid black, white): the reported people whose bible says their clothes print that way, less their faces."""
+    if episode is None or not getattr(layer, "frame_id", None):
+        return None, None
+    values = {c.get("id"): (c.get("look") or {}).get("clothes_value") for c in episode.bible.characters}
+    if not any(v in ("beta", "white") for v in values.values()):
+        return None, None
+    try:
+        panel = page._find(layer.frame_id).panel or {}
+    except (KeyError, IndexError):
+        return None, None
+    regions = [r for r in panel.get("regions", []) if isinstance(r.get("rect_mm"), (list, tuple)) and len(r["rect_mm"]) == 4]
+    out = []
+    for value in ("beta", "white"):
+        bodies = [r["rect_mm"] for r in regions if r.get("kind") in ("person", "body") and values.get(r.get("char")) == value]
+        if not bodies:
+            out.append(None)
+            continue
+        mask = Image.new("L", size, 0)
+        draw = ImageDraw.Draw(mask)
+        for x, y, w, h in bodies:
+            x0, y0 = mm_to_px(x, dpi) - origin[0], mm_to_px(y, dpi) - origin[1]
+            draw.rectangle((x0, y0, x0 + mm_to_px(w, dpi), y0 + mm_to_px(h, dpi)), fill=255)
+        for r in regions:  # (never the faces, nor the hair above them)
+            if r.get("kind") in ("face", "head"):
+                x, y, w, h = r["rect_mm"]
+                x0, y0 = mm_to_px(x - w * 0.15, dpi) - origin[0], mm_to_px(y - h * 0.3, dpi) - origin[1]
+                draw.ellipse((x0, y0, x0 + mm_to_px(w * 1.3, dpi), y0 + mm_to_px(h * 1.45, dpi)), fill=0)
+        out.append(mask.filter(ImageFilter.GaussianBlur(max(1.0, dpi / 150))))
+    return out[0], out[1]
+
+
+def render_frame(page: Page, frame_id: str, working_dpi: int, mode: str = "proof", episode: Episode | None = None) -> Image.Image:
+    """One panel, cropped from the page render (bleed panels include their bleed)."""
+    from genko.placement import clip_box
+
+    frame = page._find(frame_id)
+    image = render_page(page, working_dpi, mode=mode, episode=episode)
+    x0, y0, x1, y1 = rect_px(clip_box(page, frame, "bleed" if frame.bleed else "frame"), working_dpi)
+    return image.crop((max(0, x0), max(0, y0), min(image.width, x1), min(image.height, y1)))
+
+
+def _masked(layer, image: Image.Image) -> Image.Image:
+    """A layer's pixels through its mask (white shows, black hides)."""
+    mask = getattr(layer, "mask", None)
+    if not mask or not mask.get("png") or not mask.get("enabled", True):
+        return image
+    shown = Image.open(io.BytesIO(mask["png"])).convert("L").resize(image.size, Image.Resampling.BILINEAR)
+    image = image.convert("RGBA")
+    image.putalpha(ImageChops.multiply(image.split()[3], shown))
+    return image
+
+
+def _tinted(image: Image.Image, rgb) -> Image.Image:
+    """A layer shown in one colour (its shapes kept by their alpha): a blue draft, a red check."""
+    image = image.convert("RGBA")
+    out = Image.new("RGBA", image.size, tuple(int(v) for v in rgb)[:3] + (0,))
+    out.putalpha(image.split()[3])
+    return out
+
+
+def layer_image(page: Page, layer, dpi: int, episode: Episode | None = None) -> Image.Image:
+    """One layer alone over a transparent page (its pixels, fills and lines, panel clip and mask): for
+    merging layers and for the layer panel's small pictures."""
+    size = (mm_to_px(page.spec.width_mm, dpi), mm_to_px(page.spec.height_mm, dpi))
+    empty = Image.new("RGBA", size, (0, 0, 0, 0))
+    if getattr(layer, "kind", None) == LayerKind.FOLDER:
+        return empty
+    if _is_tone(layer):
+        from genko import tones
+
+        white = Image.new("RGBA", size, (255, 255, 255, 255))
+        drawn = tones.draw_layer(white.copy(), layer, page, dpi, print_mode=False)
+        grey = ImageChops.difference(white.convert("L"), drawn.convert("L"))  # the tone's ink as alpha
+        out = Image.new("RGBA", size, (20, 20, 20, 0))
+        out.putalpha(grey)
+        return _masked(layer, out)
+    if layer.kind == LayerKind.ADJUST:
+        return empty
+    if layer.kind == LayerKind.FILL and getattr(layer, "fill", None):
+        raster = fill_layer_image(layer, size, dpi)
+        panel_mask = _clip_mask(page, size, dpi)
+        if panel_mask is not None and getattr(layer, "panel_clip", True):
+            raster.putalpha(_and_alpha(raster, panel_mask))
+        return _masked(layer, raster)
+    if layer.kind == LayerKind.PLACED:
+        raster = _placed_raster(layer, page, episode, size, dpi, "proof", False)
+    else:
+        raster = _open_raster(layer)
+        if raster is not None:
+            raster = raster.resize(size)
+    lines = _layer_strokes(layer, size, dpi, _clip_mask(page, size, dpi), raster, page=page)
+    if lines is not None:
+        raster = lines if raster is None else Image.alpha_composite(raster.convert("RGBA"), lines)
+    if raster is None:
+        return empty
+    return _masked(layer, layer_effects(layer, raster.convert("RGBA"), dpi))
 
 
 def _open_raster(layer) -> Image.Image | None:
@@ -134,6 +780,8 @@ def _blend_over(base: Image.Image, over: Image.Image, mode: str, opacity: float,
         mixed = ImageChops.add(base_rgb, over_rgb)
     elif mode == "overlay":
         mixed = ImageChops.overlay(base_rgb, over_rgb) if hasattr(ImageChops, "overlay") else ImageChops.multiply(base_rgb, over_rgb)
+    elif mode in BLEND_MODES:
+        mixed = _blend_math(base_rgb, over_rgb, mode)
     else:
         mixed = over_rgb
     mixed_rgba = mixed.convert("RGBA")
@@ -141,284 +789,356 @@ def _blend_over(base: Image.Image, over: Image.Image, mode: str, opacity: float,
     return Image.alpha_composite(base_rgba, mixed_rgba)
 
 
-def _draw_tone(image: Image.Image, page: Page, dpi: int) -> None:
-    draw = ImageDraw.Draw(image)
+BLEND_MODES = ("darken", "lighten", "color_burn", "color_dodge", "linear_burn", "soft_light", "hard_light", "difference",
+               "exclusion", "subtract", "divide", "hue", "saturation", "color", "luminosity")
+
+
+def _blend_math(base: Image.Image, over: Image.Image, mode: str) -> Image.Image:
+    """The rest of the blend modes (比較(暗)・比較(明)・焼き込みカラー・覆い焼きカラー・焼き込み(リニア)・
+    ソフトライト・ハードライト・差の絶対値・除外・減算・除算・色相・彩度・カラー・輝度)."""
+    import numpy as np
+
+    b = np.asarray(base, dtype=np.float32) / 255
+    o = np.asarray(over, dtype=np.float32) / 255
+    if mode == "darken":
+        m = np.minimum(b, o)
+    elif mode == "lighten":
+        m = np.maximum(b, o)
+    elif mode == "color_burn":
+        m = np.where(o <= 0, 0.0, 1 - np.minimum(1, (1 - b) / np.maximum(o, 1e-6)))
+        m = np.where(b >= 1, 1.0, m)
+    elif mode == "color_dodge":
+        m = np.where(o >= 1, 1.0, np.minimum(1, b / np.maximum(1 - o, 1e-6)))
+        m = np.where(b <= 0, 0.0, m)
+    elif mode == "linear_burn":
+        m = np.clip(b + o - 1, 0, 1)
+    elif mode == "soft_light":
+        d = np.where(b <= 0.25, ((16 * b - 12) * b + 4) * b, np.sqrt(b))
+        m = np.where(o <= 0.5, b - (1 - 2 * o) * b * (1 - b), b + (2 * o - 1) * (d - b))
+    elif mode == "hard_light":
+        m = np.where(o <= 0.5, 2 * b * o, 1 - 2 * (1 - b) * (1 - o))
+    elif mode == "difference":
+        m = np.abs(b - o)
+    elif mode == "exclusion":
+        m = b + o - 2 * b * o
+    elif mode == "subtract":
+        m = np.clip(b - o, 0, 1)
+    elif mode == "divide":
+        m = np.where(o <= 0, 1.0, np.minimum(1, b / np.maximum(o, 1e-6)))
+    else:
+        m = _nonseparable(b, o, mode)
+    return Image.fromarray(np.clip(m * 255 + 0.5, 0, 255).astype(np.uint8), "RGB")
+
+
+def _nonseparable(b, o, mode: str):
+    """hue / saturation / color / luminosity, as the W3C compositing rules have them."""
+    import numpy as np
+
+    def lum(c):
+        return c[..., 0:1] * 0.3 + c[..., 1:2] * 0.59 + c[..., 2:3] * 0.11
+
+    def clip(c):
+        el = lum(c)
+        n = c.min(axis=-1, keepdims=True)
+        x = c.max(axis=-1, keepdims=True)
+        c = np.where(n < 0, el + (c - el) * el / np.maximum(el - n, 1e-6), c)
+        return np.where(x > 1, el + (c - el) * (1 - el) / np.maximum(x - el, 1e-6), c)
+
+    def set_lum(c, el):
+        return clip(c + (el - lum(c)))
+
+    def sat(c):
+        return c.max(axis=-1, keepdims=True) - c.min(axis=-1, keepdims=True)
+
+    def set_sat(c, s):
+        lo = c.min(axis=-1, keepdims=True)
+        span = sat(c)
+        return np.where(span > 1e-6, (c - lo) * s / np.maximum(span, 1e-6), 0.0)
+
+    if mode == "hue":
+        return set_lum(set_sat(o, sat(b)), lum(b))
+    if mode == "saturation":
+        return set_lum(set_sat(b, sat(o)), lum(b))
+    if mode == "color":
+        return set_lum(o, lum(b))
+    return set_lum(b, lum(o))  # luminosity
+
+
+def _is_tone(layer) -> bool:
+    return layer.role == LayerRole.TONE or getattr(layer, "kind", None) == LayerKind.TONE
+
+
+def _draw_tone(image: Image.Image, page: Page, dpi: int, mode: str = "print", finish: bool = True) -> Image.Image:
+    """Every visible tone layer (genko.tones) over the image: the pattern in print, its grey otherwise."""
+    from genko import tones
+
     for layer in page.layers:
-        if layer.role != LayerRole.TONE or not layer.visible:
-            continue
-        density = float(layer.density or 0.3)
-        lpi = float(layer.lpi or 60)
-        spacing = max(2, round(dpi / lpi))
-        radius = max(1, round(spacing * density * 0.45))
-        import math
-
-        angle = math.radians(float(getattr(layer, "angle", 45) or 0))
-        ca, sa = math.cos(angle), math.sin(angle)
-        frames = page.leaf_frames()
-        boxes = [rect_px(frame.rect, dpi) for frame in frames]
-        if layer.region:
-            xs = [mm_to_px(pt[0], dpi) for pt in layer.region]
-            ys = [mm_to_px(pt[1], dpi) for pt in layer.region]
-            boxes = [(min(xs), min(ys), max(xs), max(ys))]
-        for x0, y0, x1, y1 in boxes:
-            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-            span = int(((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5)
-            for i in range(-span, span, spacing):
-                for j in range(-span, span, spacing):
-                    x = int(cx + i * ca - j * sa)
-                    y = int(cy + i * sa + j * ca)
-                    if x0 <= x <= x1 and y0 <= y <= y1:
-                        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(20, 20, 20))
+        if _is_tone(layer) and layer.visible:
+            image = tones.draw_layer(image, layer, page, dpi, print_mode=mode == "print" and finish)
+    return image
 
 
-def _draw_effects(image: Image.Image, page: Page, dpi: int) -> None:
-    draw = ImageDraw.Draw(image)
+def _draw_effects(image: Image.Image, page: Page, dpi: int) -> Image.Image:
+    """Effect lines (genko.effects), each inside its panel; the same effect always gives the same lines."""
+    from genko import effects
+
     for effect in page.effects:
-        kind = effect.get("kind")
-        frame = None
-        if effect.get("frame_id"):
-            try:
-                frame = page._find(effect["frame_id"])
-            except KeyError:
-                frame = None
-        box = rect_px(frame.rect, dpi) if frame is not None else (0, 0, image.width, image.height)
-        x0, y0, x1, y1 = box
-        cx = (x0 + x1) // 2
-        cy = (y0 + y1) // 2
-        count = int(effect.get("params", {}).get("count", 36))
-        if kind == "focus":
-            import math
-
-            radius = max(x1 - x0, y1 - y0) // 2
-            for i in range(count):
-                angle = (2 * math.pi * i) / count
-                draw.line(
-                    (cx, cy, int(cx + radius * math.cos(angle)), int(cy + radius * math.sin(angle))),
-                    fill=(20, 20, 20),
-                    width=1,
-                )
-        elif kind == "speed":
-            for i in range(count):
-                y = y0 + int((y1 - y0) * i / max(1, count - 1))
-                draw.line((x0, y, x1, y), fill=(20, 20, 20), width=1)
-        elif kind == "white":
-            draw.rectangle(box, fill=(255, 255, 255))
-
-
-def _project_box(prim: dict, dpi: int) -> list[tuple[int, int]]:
-    pos = prim.get("pos") or [100, 150, 0]
-    size = prim.get("size") or [40, 40, 40]
-    rot = prim.get("rot") or [0, 0.6, 0.4]
-    cx, cy, cz = (float(v) for v in pos)
-    sx, sy, sz = (float(v) / 2 for v in size)
-    corners = []
-    for dx in (-sx, sx):
-        for dy in (-sy, sy):
-            for dz in (-sz, sz):
-                x, y, z = dx, dy, dz
-                ry = rot[1]
-                import math
-
-                x2 = x * math.cos(ry) - z * math.sin(ry)
-                z2 = x * math.sin(ry) + z * math.cos(ry)
-                x, z = x2, z2
-                rx = rot[0]
-                y2 = y * math.cos(rx) - z * math.sin(rx)
-                z2 = y * math.sin(rx) + z * math.cos(rx)
-                y, z = y2, z2
-                depth = 200 + z
-                scale = 180 / max(40, depth)
-                corners.append((mm_to_px(cx + x * scale, dpi), mm_to_px(cy + y * scale, dpi)))
-    return corners
+        if effect.get("kind") in effects.KINDS and effect.get("visible", True):
+            image = effects.draw(image, effect, page, dpi)
+    return image
 
 
 def _draw_prims(image: Image.Image, page: Page, dpi: int, mode: str) -> None:
+    """3D figures and boxes: drawing guides in the name and proof renders (never printed)."""
     if mode == "print" or not page.prims:
         return
-    draw = ImageDraw.Draw(image)
-    edges = [
-        (0, 1), (1, 3), (3, 2), (2, 0),
-        (4, 5), (5, 7), (7, 6), (6, 4),
-        (0, 4), (1, 5), (2, 6), (3, 7),
-    ]
+    from genko import prim3d
+
+    width = max(1, mm_to_px(0.3, dpi))
+    frames = {frame.id: frame for frame in page.leaf_frames()}
+    from genko import mesh3d
+
     for prim in page.prims:
+        prim = mesh3d.with_camera(prim, page)
+        # a guide set in a panel stays in it (a room seen from inside runs far past the panel's edges)
+        frame = frames.get(prim.get("frame_id") or "")
+        sheet = Image.new("RGBA", image.size, (0, 0, 0, 0)) if frame is not None else None
+        draw = ImageDraw.Draw(sheet if sheet is not None else image)
         if prim.get("kind") == "mannequin":
             _draw_mannequin(draw, prim, dpi)
-            continue
-        pts = _project_box(prim, dpi)
-        if len(pts) < 8:
-            continue
-        for a, b in edges:
-            draw.line([pts[a], pts[b]], fill=(90, 90, 140), width=1)
-
-
-def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int) -> None:
-    import math
-
-    pos = prim.get("pos") or [100, 160, 0]
-    cx, cy = mm_to_px(float(pos[0]), dpi), mm_to_px(float(pos[1]), dpi)
-    color = (90, 90, 140)
-    joints = prim.get("joints") or {}
-    head_r = mm_to_px(8, dpi)
-    draw.ellipse((cx - head_r, cy - mm_to_px(42, dpi) - head_r, cx + head_r, cy - mm_to_px(42, dpi) + head_r), outline=color, width=3)
-    draw.line((cx, cy - mm_to_px(34, dpi), cx, cy), fill=color, width=3)
-    l_yaw = float(joints.get("l_arm", {}).get("yaw", 0.4))
-    r_yaw = float(joints.get("r_arm", {}).get("yaw", -0.4))
-    arm = mm_to_px(18, dpi)
-    ay = cy - mm_to_px(20, dpi)
-    l_wx, l_wy = int(cx - arm * math.cos(l_yaw)), int(ay + arm * math.sin(l_yaw))
-    r_wx, r_wy = int(cx + arm * math.cos(abs(r_yaw))), int(ay + arm * math.sin(abs(r_yaw)))
-    draw.line((cx, ay, l_wx, l_wy), fill=color, width=3)
-    draw.line((cx, ay, r_wx, r_wy), fill=color, width=3)
-    hand = mm_to_px(10, dpi)
-    lw = float(joints.get("l_wrist", {}).get("yaw", 0.0))
-    rw = float(joints.get("r_wrist", {}).get("yaw", 0.0))
-    draw.line((l_wx, l_wy, int(l_wx - hand * math.cos(l_yaw + lw)), int(l_wy + hand * math.sin(l_yaw + lw))), fill=color, width=2)
-    draw.line((r_wx, r_wy, int(r_wx + hand * math.cos(abs(r_yaw) + rw)), int(r_wy + hand * math.sin(abs(r_yaw) + rw))), fill=color, width=2)
-    l_leg = float(joints.get("l_leg", {}).get("yaw", 0.15))
-    r_leg = float(joints.get("r_leg", {}).get("yaw", -0.15))
-    leg = mm_to_px(28, dpi)
-    l_ax, l_ay = int(cx - leg * math.sin(l_leg)), cy + leg
-    r_ax, r_ay = int(cx + leg * math.sin(abs(r_leg))), cy + leg
-    draw.line((cx, cy, l_ax, l_ay), fill=color, width=3)
-    draw.line((cx, cy, r_ax, r_ay), fill=color, width=3)
-    foot = mm_to_px(8, dpi)
-    la = float(joints.get("l_ankle", {}).get("yaw", 0.0))
-    ra = float(joints.get("r_ankle", {}).get("yaw", 0.0))
-    draw.line((l_ax, l_ay, int(l_ax - foot * math.cos(la)), l_ay + foot // 3), fill=color, width=2)
-    draw.line((r_ax, r_ay, int(r_ax + foot * math.cos(ra)), r_ay + foot // 3), fill=color, width=2)
-
-
-def _balloon_font(line: StoryLine, dpi: int, font_path: str | None) -> ImageFont.ImageFont:
-    n = max(1, len(line.text or " "))
-    w = mm_to_px(line.w_mm or 40, dpi)
-    h = mm_to_px(line.h_mm or 20, dpi)
-    cap = mm_to_px(5.0, dpi)
-    kind = line.balloon or "speech"
-    if getattr(line, "wrap", "horizontal") == "vertical":
-        if kind == "none":
-            size = max(12, min(w, max(12, h // n)))
+        elif prim.get("kind") in prim3d.MESH_KINDS:
+            _draw_surfaces(sheet if sheet is not None else image, prim, page, dpi)
+            for line in prim3d.trace(prim):
+                draw.line([_xy(p, dpi) for p in line], fill=(70, 70, 120), width=width)
         else:
-            size = max(12, min(cap, (w * 2) // 3))
-    else:
-        size = max(12, min(cap, h // 2))
-    return _font(font_path, size)
+            for a, b, seen in prim3d.edges(prim):
+                draw.line([_xy(a, dpi), _xy(b, dpi)], fill=(90, 90, 140) if seen else (190, 190, 215), width=width)
+        if sheet is not None:
+            inside = Image.new("L", image.size, 0)
+            fill_frame(ImageDraw.Draw(inside), frame, dpi)
+            image.paste(sheet, (0, 0), ImageChops.multiply(sheet.split()[3], inside))
 
 
-def _draw_balloon(draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font_path: str | None = None) -> None:
-    x = mm_to_px(line.x_mm, dpi)
-    y = mm_to_px(line.y_mm, dpi)
-    w = mm_to_px(line.w_mm or 40, dpi)
-    h = mm_to_px(line.h_mm or 20, dpi)
-    box = [x, y, x + w, y + h]
-    kind = line.balloon or "speech"
-    font = _balloon_font(line, dpi, font_path)
-    size = int(getattr(font, "size", 14) or 14)
-    wrap = getattr(line, "wrap", "horizontal")
-    page = getattr(draw, "_image", None)
-    if wrap == "vertical":
-        em = size
-        composed = compose_tategaki(
-            line.text,
-            font,
-            em,
-            max(em, h if kind == "none" else h),
-            fill=(10, 10, 10),
-            ruby_runs=getattr(line, "ruby_runs", None) or None,
-        )
-        pad = 0 if kind == "none" else max(2, em // 4)
-        if kind != "none":
-            bw = composed.width + pad * 2
-            bh = composed.height + pad * 2
-            box = [x, y, x + bw, y + bh]
-            fill = (255, 255, 255)
-            outline = (20, 20, 20)
-            if line.path:
-                xy = [_xy(pt, dpi) for pt in line.path]
-                if len(xy) >= 3:
-                    draw.polygon(xy, fill=fill, outline=outline)
-            elif kind == "narration":
-                draw.rectangle(box, fill=fill, outline=outline, width=2)
-            elif kind == "thought":
-                draw.ellipse(box, fill=fill, outline=outline, width=2)
-                r = max(3, bw // 12)
-                draw.ellipse([x + 4, y + bh, x + 4 + r, y + bh + r], fill=fill, outline=outline, width=2)
-            else:
-                draw.ellipse(box, fill=fill, outline=outline, width=2)
-            if line.tail:
-                tx, ty = _xy(line.tail, dpi)
-                cx = x + bw // 2
-                cy = y + bh
-                draw.polygon([(cx - 6, cy - 2), (cx + 6, cy - 2), (tx, ty)], fill=fill, outline=outline)
-            if line.speaker:
-                draw.text((x, max(0, y - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
-        if page is not None:
-            page.paste(composed, (x + pad, y + pad), composed)
+def _draw_surfaces(image: Image.Image, prim: dict, page: Page, dpi: int) -> None:
+    """A 3D guide's surfaces, lightly shaded by the page's light (the name and proof views only)."""
+    import numpy as np
+
+    from genko import mesh3d, prim3d
+
+    x, y, w, h = prim3d.prim_bbox(prim)
+    if w <= 0 or h <= 0:
         return
-    if line.path:
-        xy = [_xy(pt, dpi) for pt in line.path]
-        if len(xy) >= 3:
-            draw.polygon(xy, fill=(255, 255, 255), outline=(20, 20, 20))
-    elif kind != "none":
-        fill = (255, 255, 255)
-        outline = (20, 20, 20)
-        if kind == "narration":
-            draw.rectangle(box, fill=fill, outline=outline, width=2)
-        elif kind == "thought":
-            draw.ellipse(box, fill=fill, outline=outline, width=2)
-            r = max(3, w // 12)
-            draw.ellipse([x + 4, y + h, x + 4 + r, y + h + r], fill=fill, outline=outline, width=2)
-        else:
-            draw.ellipse(box, fill=fill, outline=outline, width=2)
-        if line.tail:
-            tx, ty = _xy(line.tail, dpi)
-            cx = x + w // 2
-            cy = y + h
-            draw.polygon([(cx - 6, cy - 2), (cx + 6, cy - 2), (tx, ty)], fill=fill, outline=outline)
-    if line.speaker and kind != "none":
-        draw.text((x, max(0, y - size - 2)), line.speaker, fill=(80, 80, 80), font=font)
-    pad_x, pad_y = 6, max(2, h // 8)
-    if line.ruby:
-        draw.text((x + pad_x, y + 2), line.ruby, fill=(10, 10, 10), font=font)
-        draw.text((x + pad_x, y + 2 + size), line.text, fill=(10, 10, 10), font=font)
+    light = (page.extra or {}).get("light") or {}
+    size = (max(1, mm_to_px(w, dpi) + 2), max(1, mm_to_px(h, dpi) + 2))
+    shade, _z, alpha = mesh3d.raster([{k: v for k, v in prim.items() if k != "camera"}], size, dpi, prim.get("camera"),
+                                     light.get("dir"), float(light.get("ambient", 0.35)), box=(x, y))
+    if not alpha.any():
         return
-    max_w = max(8, w - pad_x * 2)
-    row = ""
-    rows: list[str] = []
-    for char in line.text:
-        trial = row + char
-        try:
-            bbox = draw.textbbox((0, 0), trial, font=font)
-            tw = bbox[2] - bbox[0]
-        except Exception:
-            tw = len(trial) * size
-        if tw <= max_w or not row:
-            row = trial
-        else:
-            rows.append(row)
-            row = char
-    if row:
-        rows.append(row)
-    for i, row_text in enumerate(rows):
-        draw.text((x + pad_x, y + pad_y + i * (size + 2)), row_text, fill=(10, 10, 10), font=font)
+    grey = (200 + 55 * np.clip(shade, 0, 1)).astype("uint8")
+    tint = np.dstack([grey - 20, grey - 20, grey, (alpha * 150).astype("uint8")])
+    patch = Image.fromarray(tint, "RGBA")
+    ox, oy = mm_to_px(x, dpi), mm_to_px(y, dpi)
+    base = image.convert("RGBA") if image.mode != "RGBA" else image
+    region = base.crop((ox, oy, ox + size[0], oy + size[1]))
+    region.alpha_composite(patch)
+    image.paste(region.convert(image.mode), (ox, oy))
+
+
+def _draw_mannequin(draw: ImageDraw.ImageDraw, prim: dict, dpi: int, color=(90, 90, 140)) -> None:
+    """The posable figure (genko.mannequin): body, elbows, knees and neck, turned and leaned by rot."""
+    from genko import mannequin
+
+    bone = mannequin.skeleton(prim)
+    width = max(2, mm_to_px(0.5, dpi))
+    shade = {"body": color, "left": (60, 120, 170), "right": (150, 90, 120)}
+    for a, b, part in bone["segments"]:
+        draw.line([_xy(a, dpi), _xy(b, dpi)], fill=shade.get(part, color), width=width)
+    for a, _, part in bone["segments"]:
+        if part != "body":
+            px, py = _xy(a, dpi)
+            r = max(1, width)
+            draw.ellipse((px - r, py - r, px + r, py + r), fill=shade[part])
+    (hx, hy), hr = bone["head"]
+    x0, y0 = _xy((hx - hr, hy - hr), dpi)
+    x1, y1 = _xy((hx + hr, hy + hr), dpi)
+    draw.ellipse((x0, y0, x1, y1), outline=color, width=width)
+    nose = (hx + hr * 0.8 * bone["facing"], hy)
+    draw.line([_xy((hx, hy), dpi), _xy(nose, dpi)], fill=color, width=max(1, width // 2))
+
+
+def _draw_balloon(
+    draw: ImageDraw.ImageDraw, line: StoryLine, dpi: int, font_path: str | None = None, show_speaker: bool = True
+) -> None:
+    """One line's balloon and lettering onto the image behind `draw` (see genko.balloons)."""
+    from genko import balloons
+
+    balloons.draw_lines(draw._image, [line], dpi, font_path, show_speaker)
 
 
 def _draw_crop_marks(draw: ImageDraw.ImageDraw, page: Page, dpi: int) -> None:
-    w = mm_to_px(page.spec.width_mm, dpi)
-    h = mm_to_px(page.spec.height_mm, dpi)
-    bleed = mm_to_px(page.spec.bleed_mm, dpi)
-    mark = mm_to_px(5, dpi)
-    for x, y, dx, dy in (
-        (bleed, bleed, -1, 0),
-        (bleed, bleed, 0, -1),
-        (w - bleed, bleed, 1, 0),
-        (w - bleed, bleed, 0, -1),
-        (bleed, h - bleed, -1, 0),
-        (bleed, h - bleed, 0, 1),
-        (w - bleed, h - bleed, 1, 0),
-        (w - bleed, h - bleed, 0, 1),
-    ):
-        draw.line((x, y, x + dx * mark, y + dy * mark), fill=(0, 0, 0), width=1)
+    """トンボ: at each corner the trim line and the bleed line (内トンボ・外トンボ), and a centre mark on each
+    side, all outside the bleed. Pages without room around the bleed get short marks at the trim."""
+    trim, bleed = page.trim_rect_mm(), page.bleed_rect_mm()
+    room = min(bleed.x, bleed.y, page.spec.width_mm - bleed.x - bleed.width, page.spec.height_mm - bleed.y - bleed.height)
+    ink = (0, 0, 0)
+    px = lambda v: mm_to_px(v, dpi)  # noqa: E731
+    if room < 4:
+        mark = px(5)
+        for x_mm, y_mm, dx, dy in ((trim.x, trim.y, -1, -1), (trim.x + trim.width, trim.y, 1, -1),
+                                   (trim.x, trim.y + trim.height, -1, 1), (trim.x + trim.width, trim.y + trim.height, 1, 1)):
+            x, y = px(x_mm), px(y_mm)
+            draw.line((x, y, x + dx * mark, y), fill=ink, width=1)
+            draw.line((x, y, x, y + dy * mark), fill=ink, width=1)
+        return
+    gap, length = 1.0, min(10.0, room - 1.5)
+    xs = {"l": (trim.x, bleed.x), "r": (trim.x + trim.width, bleed.x + bleed.width)}
+    ys = {"t": (trim.y, bleed.y), "b": (trim.y + trim.height, bleed.y + bleed.height)}
+    for hx, (tx, bx) in xs.items():
+        for vy, (ty, by) in ys.items():
+            out_x = -1 if hx == "l" else 1
+            out_y = -1 if vy == "t" else 1
+            # horizontal marks (at the trim and bleed heights) out beyond the bleed on the left / right
+            x0 = bx + out_x * gap
+            for y in (ty, by):
+                draw.line((px(x0), px(y), px(x0 + out_x * length), px(y)), fill=ink, width=1)
+            y0 = by + out_y * gap
+            for x in (tx, bx):
+                draw.line((px(x), px(y0), px(x), px(y0 + out_y * length)), fill=ink, width=1)
+    cx, cy = trim.x + trim.width / 2, trim.y + trim.height / 2
+    for x in (bleed.x - gap - length, bleed.x + bleed.width + gap):
+        draw.line((px(x), px(cy), px(x + length), px(cy)), fill=ink, width=1)
+    for y in (bleed.y - gap - length, bleed.y + bleed.height + gap):
+        draw.line((px(cx), px(y), px(cx), px(y + length)), fill=ink, width=1)
+
+
+BORDER_KINDS = ("solid", "double", "dashed", "dotted", "rough")
+
+
+def _dashes(points: list, on: float, off: float) -> list[list]:
+    """A closed outline cut into pieces `on` long with `off` between (page mm)."""
+    import math
+
+    ring = list(points) + [points[0]]
+    pieces, current, left, drawing = [], [ring[0]], on, True
+    for a, b in zip(ring, ring[1:]):
+        length = math.dist(a, b)
+        t0 = 0.0
+        while length - t0 > 1e-9:
+            step = min(left, length - t0)
+            t1 = t0 + step
+            p = (a[0] + (b[0] - a[0]) * t1 / length, a[1] + (b[1] - a[1]) * t1 / length)
+            if drawing:
+                current.append(p)
+            left -= step
+            t0 = t1
+            if left <= 1e-9:
+                if drawing and len(current) > 1:
+                    pieces.append(current)
+                drawing = not drawing
+                left = on if drawing else off
+                current = [p]
+    if drawing and len(current) > 1:
+        pieces.append(current)
+    return pieces
+
+
+def _rough(points: list, seed: str, amount_mm: float) -> list:
+    """The outline as drawn by hand: walked in 1 mm steps, drifting slowly across the line (a smooth wobble
+    through random knots about 7 mm apart), never quite the same twice along a panel."""
+    import math
+    import random
+
+    rng = random.Random(seed)
+    ring = list(points) + [points[0]]
+    out = []
+    for a, b in zip(ring, ring[1:]):
+        length = math.dist(a, b)
+        steps = max(1, int(length))
+        nx, ny = (-(b[1] - a[1]) / (length or 1), (b[0] - a[0]) / (length or 1))
+        knots = [rng.uniform(-amount_mm, amount_mm) for _ in range(int(length / 7) + 2)]
+        knots[0] = knots[-1] = 0.0  # (the corners stay where they are)
+        for k in range(steps):
+            t = k / steps
+            pos = t * (len(knots) - 1)
+            i = min(len(knots) - 2, int(pos))
+            f = (1 - math.cos((pos - i) * math.pi)) / 2
+            wobble = knots[i] * (1 - f) + knots[i + 1] * f
+            out.append((a[0] + (b[0] - a[0]) * t + nx * wobble, a[1] + (b[1] - a[1]) * t + ny * wobble))
+    return out
+
+
+def draw_border(draw: ImageDraw.ImageDraw, points: list, width_mm: float, dpi: int, style: dict | None, seed: str = "") -> None:
+    """A panel border along its outline (page mm): solid, double, dashed, dotted or rough, in its colour."""
+    from genko.frames import offset
+
+    style = style or {}
+    kind = style.get("kind") or "solid"
+    rgb = tuple(int(v) for v in (style.get("rgb") or (20, 20, 20)))[:3]
+    width_px = max(1, mm_to_px(width_mm, dpi))
+
+    def ring(pts, width):
+        draw.line([_xy(p, dpi) for p in list(pts) + [pts[0]]], fill=rgb, width=width, joint="curve")
+
+    if kind == "double":
+        gap = float(style.get("gap_mm", max(0.6, width_mm)))
+        thin = max(1, round(width_px * 0.6))
+        ring(points, thin)
+        ring(offset(points, gap + width_mm * 0.6), thin)
+    elif kind in ("dashed", "dotted"):
+        on = float(style.get("dash_mm", 3.0 if kind == "dashed" else 0.01))
+        off = float(style.get("gap_mm", 1.8 if kind == "dashed" else max(1.0, width_mm * 2.2)))
+        for piece in _dashes(points, max(0.01, on), max(0.2, off)):
+            if kind == "dotted":
+                x, y = _xy(piece[0], dpi)
+                r = width_px / 2 + 0.5
+                draw.ellipse((x - r, y - r, x + r, y + r), fill=rgb)
+            else:
+                draw.line([_xy(p, dpi) for p in piece], fill=rgb, width=width_px)
+    elif kind == "rough":
+        pts = _rough(points, seed or "frame", float(style.get("wobble_mm", 0.35)))
+        ring(pts, width_px)
+    else:
+        ring(points, width_px)
+
+
+def _draw_frames(draw: ImageDraw.ImageDraw, page: Page, working_dpi: int) -> None:
+    from genko import frames as geo
+
+    for frame in page.leaf_frames():
+        width_px = max(1, mm_to_px(frame.border_mm if frame.border_mm is not None else 0.8, working_dpi))
+        if frame.border_mm is not None and frame.border_mm <= 0:
+            continue  # a panel without a border
+        style = getattr(frame, "line", None)
+        from genko.placement import bleed_poly, on_bleed_edge
+
+        shape = bleed_poly(page, frame)
+        if shape is not None and not style and not geo.rounded(frame):
+            # a slanted bleed panel: a border on the inner sides only (the sides off the paper are cut)
+            for a, b in zip(shape, shape[1:] + shape[:1]):
+                if not on_bleed_edge(page, a, b):
+                    draw.line([_xy(a, working_dpi), _xy(b, working_dpi)], fill=(20, 20, 20), width=width_px)
+            continue
+        if getattr(frame, "poly", None) or geo.rounded(frame) or (style and style.get("kind", "solid") != "solid"):
+            if style or geo.rounded(frame):
+                draw_border(draw, geo.outline(frame), frame.border_mm if frame.border_mm is not None else 0.8, working_dpi,
+                            style, frame.id)
+            else:
+                draw.polygon([_xy(p, working_dpi) for p in frame.poly], outline=(20, 20, 20), width=width_px)
+            continue
+        if style and style.get("rgb"):
+            draw_border(draw, geo.outline(frame), frame.border_mm if frame.border_mm is not None else 0.8, working_dpi, style, frame.id)
+            continue
+        if not frame.bleed:
+            draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
+            continue
+        # A bleed panel has no border on the sides that run off the paper.
+        from genko.placement import outer_edges
+
+        x0, y0, x1, y1 = rect_px(frame.rect, working_dpi)
+        open_sides = outer_edges(page, frame)
+        for side, line in (("top", (x0, y0, x1, y0)), ("bottom", (x0, y1, x1, y1)), ("left", (x0, y0, x0, y1)), ("right", (x1, y0, x1, y1))):
+            if not open_sides[side]:
+                draw.line(line, fill=(20, 20, 20), width=max(1, width_px))
 
 
 def render_page(
@@ -428,11 +1148,31 @@ def render_page(
     episode: Episode | None = None,
     crop_marks: bool = False,
     onion: bool = True,
+    finish: bool | None = None,
+    rough: bool = False,
+    dots: bool = True,
 ) -> Image.Image:
+    """`finish`: the monochrome print finish (dots and pure black and white). None = by the page
+    (mono pages yes, colour pages no); False for screen and colour outputs (webtoon, SNS).
+    `rough`: lines as plain polylines (the screen's first look at a page; never for output).
+    `dots`: False draws the tones as flat greys (e-books: dots scaled by a reader beat into moiré)."""
+    if not dots:
+        token = _NO_DOTS.set(True)
+        try:
+            return render_page(page, working_dpi, mode, episode, crop_marks, onion, finish, rough)
+        finally:
+            _NO_DOTS.reset(token)
+    if (getattr(page, "extra", None) or {}).get("anim") and not getattr(page, "_at_frame", False):
+        from genko import anim  # (an animation page prints as its first frame, not every cel at once)
+
+        page = anim.at_frame(page, 1)
+    if finish is None:
+        finish = page.spec.expression != "color"
     width = mm_to_px(page.spec.width_mm, working_dpi)
     height = mm_to_px(page.spec.height_mm, working_dpi)
     size = (width, height)
-    image = Image.new("RGB", size, (255, 255, 255))
+    paper = page.extra.get("paper_rgb") if isinstance(getattr(page, "extra", None), dict) else None
+    image = Image.new("RGB", size, tuple(int(v) for v in paper[:3]) if paper else (255, 255, 255))
     include_name = mode in ("name", "proof")
 
     fill_roles = (LayerRole.BG, LayerRole.INK, LayerRole.FINISH)
@@ -448,7 +1188,23 @@ def render_page(
 
     rgba = image.convert("RGBA")
     prev_alpha = None
+    panel_mask = _clip_mask(page, size, working_dpi)
+    # lines set under a layer (テキストの重ね順): drawn just before that layer, not over everything
+    from genko import balloons as _balloons
+
+    all_lines = (episode.story_for_page(page.index) if episode is not None else page.texts) or []
+    below = {}
+    layer_ids = {layer.id for layer in page.layers}
+    for line in all_lines:
+        under = _balloons.style_of(line).get("below_layer")
+        if under and under in layer_ids and (line.x_mm or line.y_mm or line.balloon):
+            below.setdefault(under, []).append(line)
     for layer in page.layers:
+        _check_cancel()
+        if layer.id in below:
+            panels_ = {f.id: (f.rect.x, f.rect.y, f.rect.width, f.rect.height) for f in page.leaf_frames()}
+            _balloons.draw_lines(rgba, below[layer.id], working_dpi, getattr(episode, "font_path", None) if episode else None,
+                                 show_speaker=mode != "print", panels=panels_)
         if getattr(layer, "kind", None) == LayerKind.FOLDER:
             continue
         if not layer.visible:
@@ -457,42 +1213,57 @@ def render_page(
             continue
         if layer.role in (LayerRole.NAME, LayerRole.DRAFT) and mode == "print":
             continue
-        raster = _open_raster(layer)
+        if _is_tone(layer):  # tones sit in the layer order: a layer above can cover them
+            from genko import tones
+
+            rgba = tones.draw_layer(rgba, layer, page, working_dpi, print_mode=mode == "print" and finish and not _NO_DOTS.get())
+            prev_alpha = None
+            continue
+        if layer.kind == LayerKind.ADJUST:  # a correction layer changes what is under it; it has no picture
+            rgba = _adjusted(rgba, layer, prev_alpha if getattr(layer, "clip", False) else None)
+            continue
+        if layer.kind == LayerKind.FILL and layer.fill:
+            raster = fill_layer_image(layer, size, working_dpi)
+            if panel_mask is not None and getattr(layer, "panel_clip", True):
+                raster.putalpha(_and_alpha(raster, panel_mask))
+            raster = _masked(layer, raster)
+            clip_mask = prev_alpha if getattr(layer, "clip", False) else None
+            rgba = _blend_over(rgba, raster, getattr(layer, "blend", "normal") or "normal",
+                               1.0 if layer.opacity is None else float(layer.opacity), clip_mask)
+            prev_alpha = raster.split()[3]
+            continue
+        if layer.kind == LayerKind.PLACED:
+            raster = _placed_raster(layer, page, episode, size, working_dpi, mode, finish)
+        else:
+            raster = _open_raster(layer)
+            if raster is not None:
+                raster = raster.resize(size)
+        lines = _layer_strokes(layer, size, working_dpi, panel_mask, raster, rough=rough, page=page)
+        if lines is not None:
+            raster = lines if raster is None else Image.alpha_composite(raster.convert("RGBA"), lines)
         if raster is None:
             continue
-        raster = raster.resize(size)
+        raster = layer_effects(layer, raster, working_dpi)
+        if (finish and mode in ("print", "proof") and (getattr(layer, "source", None) or {}).get("kind") == "psd"
+                and not getattr(layer, "screen", None) and _has_colour(raster)):
+            # (a picture from a painting app on a monochrome page is finished like placed art: grey and tones)
+            raster = _finish_placed(raster, layer, page, episode, working_dpi, mode, (0, 0))
+        if getattr(layer, "screen", None) and mode == "print" and not _NO_DOTS.get():  # トーン化: its greys as dots in print
+            from genko import tones
+
+            raster = tones.screened(raster, layer.screen, working_dpi)
+        raster = _masked(layer, raster)
+        if getattr(layer, "color", None) and (mode != "print" or getattr(layer, "color_prints", False)):
+            raster = _tinted(raster, layer.color)
         clip_mask = prev_alpha if getattr(layer, "clip", False) else None
-        rgba = _blend_over(rgba, raster, getattr(layer, "blend", "normal") or "normal", float(getattr(layer, "opacity", 1.0) or 1.0), clip_mask)
+        opacity = getattr(layer, "opacity", None)
+        opacity = 1.0 if opacity is None else float(opacity)  # 0 means invisible, not "default"
+        rgba = _blend_over(rgba, raster, getattr(layer, "blend", "normal") or "normal", opacity, clip_mask)
         prev_alpha = raster.split()[3]
     image = rgba.convert("RGB")
 
-    ink_layer = Image.new("RGBA", size, (0, 0, 0, 0))
-    name_layer = Image.new("RGBA", size, (0, 0, 0, 0))
-    _stroke_draw = ImageDraw.Draw(ink_layer)
-    _name_draw = ImageDraw.Draw(name_layer)
-    ink_has_raster = any(layer.role == LayerRole.INK and layer.raster_png for layer in page.layers)
-    if not (mode == "print" and ink_has_raster):
-        for stroke in page.ink_strokes:
-            _stroke(_stroke_draw, stroke, working_dpi, INK_COLOR, 3)
-    if include_name:
-        for stroke in page.name_strokes:
-            _stroke(_name_draw, stroke, working_dpi, NAME_COLOR, 3)
-
-    mask = _clip_mask(page, size, working_dpi)
-    if mask is not None:
-        ink_layer.putalpha(_and_alpha(ink_layer, mask))
-        if include_name:
-            name_layer.putalpha(_and_alpha(name_layer, mask))
-
-    rgba = image.convert("RGBA")
-    if include_name:
-        rgba = Image.alpha_composite(rgba, name_layer)
-    rgba = Image.alpha_composite(rgba, ink_layer)
-    image = rgba.convert("RGB")
-
-    _draw_tone(image, page, working_dpi)
     if page.effects:
-        _draw_effects(image, page, working_dpi)
+        image = _draw_effects(image, page, working_dpi)
     _draw_prims(image, page, working_dpi, mode)
 
     if page.ruler and mode in ("name", "proof"):
@@ -504,31 +1275,35 @@ def render_page(
             draw.line((0, py, image.width, py), fill=(220, 180, 180), width=1)
 
     draw = ImageDraw.Draw(image)
-    for frame in page.leaf_frames():
-        width_px = max(1, mm_to_px(frame.border_mm or 0.8, working_dpi) // 4)
-        draw.rectangle(rect_px(frame.rect, working_dpi), outline=(20, 20, 20), width=max(1, width_px))
+    _draw_frames(draw, page, working_dpi)
+    if mode in ("name", "proof") and (getattr(page, "extra", None) or {}).get("cover"):
+        from genko.covers import draw_folds
+
+        draw_folds(image, page, working_dpi, getattr(getattr(episode, "binding", None), "value", "right"))
 
     font_path = getattr(episode, "font_path", None) if episode is not None else None
     font = _font(font_path)
     lines = episode.story_for_page(page.index) if episode is not None else page.texts
+    from genko import balloons
+
+    drawn_below = {id(line) for group in below.values() for line in group}
+    placed = [line for line in lines if (line.x_mm or line.y_mm or line.balloon) and id(line) not in drawn_below]
+    # Speaker names are a working aid: shown in name/proof, never printed.
+    panels = {f.id: (f.rect.x, f.rect.y, f.rect.width, f.rect.height) for f in page.leaf_frames()}
+    balloons.draw_lines(image, placed, working_dpi, font_path, show_speaker=mode != "print", panels=panels)
     for line in lines:
-        if line.x_mm or line.y_mm or line.balloon:
-            _draw_balloon(draw, line, working_dpi, font_path)
+        if line in placed or id(line) in drawn_below:
+            continue
         else:
             x = mm_to_px(page.inner_rect_mm().x + 4, working_dpi)
             y = mm_to_px(page.inner_rect_mm().y + 4, working_dpi)
             label = f"{line.speaker}: {line.text}" if line.speaker else line.text
             draw.text((x, y), label, fill=(10, 10, 10), font=font)
 
-    if page.numero and mode == "print":
-        label = str(page.index)
-        ty = height - mm_to_px(12, working_dpi)
-        try:
-            bbox = draw.textbbox((0, 0), label, font=font)
-            tw = bbox[2] - bbox[0]
-        except Exception:
-            tw = 6
-        draw.text(((width - tw) / 2, ty), label, fill=(20, 20, 20), font=font)
+    if mode in ("print", "proof"):
+        from genko import nombre
+
+        nombre.draw(image, episode, page, working_dpi)
 
     if crop_marks and mode == "print":
         _draw_crop_marks(draw, page, working_dpi)
@@ -548,21 +1323,51 @@ def render_page(
     return image
 
 
-def to_bitonal(image: Image.Image, threshold: int = 180) -> Image.Image:
-    return image.convert("L").point(lambda p: 255 if p > threshold else 0, mode="1")
+def to_bitonal(image: Image.Image, threshold: int = 180, screen: dict | None = None) -> Image.Image:
+    """Pure black and white. `screen` ({lpi, angle, shape, pattern}: 書き出しでのトーン化): the greys become dots at
+    that screen instead of going white or black at the threshold; solid black and paper stay as they are."""
+    grey = image.convert("L")
+    if not screen:
+        return grey.point(lambda p: 255 if p > threshold else 0, mode="1")
+    import numpy as np
+
+    from genko import tones
+
+    dpi = int(screen.get("dpi") or 600)
+    values = np.asarray(grey, dtype=np.float32) / 255.0
+    black_at, white_at = float(screen.get("black", 0.1)), float(screen.get("white", 0.95))
+    cover = np.clip((white_at - values) / max(0.01, white_at - black_at), 0, 1)
+    pattern = str(screen.get("pattern") or "dot")
+    if pattern == "noise":
+        dotted = np.asarray(Image.fromarray(np.clip(255 * (1 - cover), 0, 255).astype(np.uint8), "L").convert("1").convert("L")) < 128
+    else:
+        dotted = tones._screen(pattern if pattern in ("dot", "line", "cross") else "dot", grey.size, dpi,
+                               float(screen.get("lpi", 60)), float(screen.get("angle", 45)), (0, 0),
+                               str(screen.get("shape") or "round")) < cover
+    return Image.fromarray(np.where(dotted, 0, 255).astype(np.uint8), "L").convert("1", dither=Image.Dither.NONE)
 
 
-def render_spread(episode: Episode, first: int, second: int, dpi: int = 150, mode: str = "print") -> Image.Image:
+def render_spread(episode: Episode, first: int, second: int, dpi: int = 150, mode: str = "print",
+                  finish: bool | None = None, to_trim: bool = False) -> Image.Image:
     pages = {page.index: page for page in episode.pages}
     a, b = pages[first], pages[second]
-    if a.is_recto() and not b.is_recto():
+    # Place by the physical side of the book (binding-aware), not by page parity.
+    if a.side(episode.start_side) == "right" and b.side(episode.start_side) == "left":
         right, left = a, b
-    elif b.is_recto() and not a.is_recto():
+    elif b.side(episode.start_side) == "right" and a.side(episode.start_side) == "left":
         right, left = b, a
     else:
         left, right = a, b
-    left_img = render_page(left, dpi, mode=mode, episode=episode)
-    right_img = render_page(right, dpi, mode=mode, episode=episode)
+    left_img = render_page(left, dpi, mode=mode, episode=episode, finish=finish)
+    right_img = render_page(right, dpi, mode=mode, episode=episode, finish=finish)
+    # the finished sizes meet at the gutter: the left page up to its trim's right edge, the right from its trim's left edge
+    lt, rt = left.trim_rect_mm(), right.trim_rect_mm()
+    top = lambda t, img: mm_to_px(t.y, dpi) if to_trim else 0  # noqa: E731
+    bottom = lambda t, img: mm_to_px(t.y + t.height, dpi) if to_trim else img.height  # noqa: E731
+    left_img = left_img.crop((mm_to_px(lt.x, dpi) if to_trim else 0, top(lt, left_img), mm_to_px(lt.x + lt.width, dpi),
+                              bottom(lt, left_img)))
+    right_img = right_img.crop((mm_to_px(rt.x, dpi), top(rt, right_img), mm_to_px(rt.x + rt.width, dpi) if to_trim else right_img.width,
+                                bottom(rt, right_img)))
     image = Image.new("RGB", (left_img.width + right_img.width, max(left_img.height, right_img.height)), (255, 255, 255))
     image.paste(left_img, (0, 0))
     image.paste(right_img, (left_img.width, 0))

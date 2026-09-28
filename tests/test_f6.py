@@ -1,0 +1,507 @@
+"""F6: the missing features — layers (duplicate, merge down, draft, mask, colour, small pictures), free
+transform, brushes of one's own, export ranges and checks, history, help and preferences."""
+
+import re
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+sys.path.insert(0, str(Path(__file__).parent))
+
+from PIL import ImageChops, ImageStat  # noqa: E402
+
+from genko.io import load_episode, save_episode  # noqa: E402
+from genko.models import LayerKind, LayerRole, PageSpec, new_episode  # noqa: E402
+from genko.ops import ApplyError, apply_ops  # noqa: E402
+from genko.render import render_page  # noqa: E402
+
+DPI = 60
+
+
+@pytest.fixture(autouse=True)
+def _env(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("GENKO_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("GENKO_USER", "leaf")
+
+
+def _book():
+    ep = new_episode("t", 1, 2, PageSpec.b4_comic())
+    ink = next(layer for layer in ep.pages[0].layers if layer.role == LayerRole.INK)
+    apply_ops(ep, [{"op": "add_stroke", "page": 1, "layer_id": ink.id, "points": [[40, 100 + i * 8], [220, 110 + i * 8]],
+                    "width_mm": 2, "stabilize": 0, "taper": False} for i in range(5)])
+    apply_ops(ep, [{"op": "add_layer", "page": 1, "kind": "pen", "name": "影", "id": "u", "after": ink.id},
+                   {"op": "add_stroke", "page": 1, "layer_id": "u", "points": [[60, 60], [60, 300]], "width_mm": 6, "stabilize": 0,
+                    "taper": False, "rgb": [200, 30, 30]}])
+    return ep, ink
+
+
+def _diff(a, b) -> float:
+    return max(ImageStat.Stat(ImageChops.difference(a.convert("RGB"), b.convert("RGB"))).mean)
+
+
+def _layer(ep, layer_id):
+    return next(layer for layer in ep.pages[0].layers if layer.id == layer_id)
+
+
+def test_duplicate_and_merge_down_keep_the_picture():
+    ep, ink = _book()
+    before = render_page(ep.pages[0], DPI, episode=ep)
+    apply_ops(ep, [{"op": "duplicate_layer", "page": 1, "id": "u", "new_id": "u2"}])
+    twin = _layer(ep, "u2")
+    assert twin.title == "影 のコピー" and len(twin.strokes) == 1
+    assert twin.strokes[0].id != _layer(ep, "u").strokes[0].id
+    assert [layer.id for layer in ep.pages[0].layers].index("u2") == [layer.id for layer in ep.pages[0].layers].index("u") + 1
+    # pen onto pen stays lines
+    apply_ops(ep, [{"op": "merge_down", "page": 1, "id": "u2"}])
+    assert "u2" not in [layer.id for layer in ep.pages[0].layers] and len(_layer(ep, "u").strokes) == 2
+    assert _layer(ep, "u").kind == LayerKind.STROKES
+    assert _diff(before, render_page(ep.pages[0], DPI, episode=ep)) < 1.0
+    # a half-see-through layer merged into the ink becomes pixels, and looks the same
+    from genko.raster import WORKING_DPI
+
+    apply_ops(ep, [{"op": "set_layer", "page": 1, "id": "u", "opacity": 0.5}])
+    before = render_page(ep.pages[0], WORKING_DPI, episode=ep)  # (pixels are kept at the working resolution)
+    apply_ops(ep, [{"op": "merge_down", "page": 1, "id": "u"}])
+    merged = _layer(ep, ink.id)
+    assert merged.kind == LayerKind.RASTER and merged.raster_png and not merged.strokes
+    assert _diff(before, render_page(ep.pages[0], WORKING_DPI, episode=ep)) < 0.5
+    with pytest.raises(ApplyError):
+        apply_ops(ep, [{"op": "merge_down", "page": 1, "id": ep.pages[0].layers[0].id}])  # nothing below
+
+
+def test_a_draft_layer_is_seen_but_never_exported():
+    ep, _ink = _book()
+    shown = render_page(ep.pages[0], DPI, mode="proof", episode=ep)
+    apply_ops(ep, [{"op": "set_layer", "page": 1, "id": "u", "exportable": False}])
+    printed = render_page(ep.pages[0], DPI, episode=ep)
+    x = round(60 / 25.4 * DPI)
+    y = round(200 / 25.4 * DPI)
+    assert printed.getpixel((x, y))[0] > 200 and printed.getpixel((x, y))[1] > 200  # no red in print
+    assert shown.getpixel((x, y))[1] < 120  # but on screen
+    assert _diff(shown, render_page(ep.pages[0], DPI, mode="proof", episode=ep)) < 0.01
+
+
+def test_a_mask_hides_and_the_pen_shows_again(tmp_path: Path):
+    ep, _ink = _book()
+    x, y_hidden, y_shown = round(60 / 25.4 * DPI), round(250 / 25.4 * DPI), round(80 / 25.4 * DPI)
+    apply_ops(ep, [{"op": "set_layer_mask", "page": 1, "id": "u", "area": {"poly": [[0, 0], [257, 0], [257, 150], [0, 150]]}}])
+    image = render_page(ep.pages[0], DPI, episode=ep)
+    assert image.getpixel((x, y_shown))[1] < 120  # red where the mask shows
+    assert image.getpixel((x, y_hidden))[1] > 200  # hidden below
+    apply_ops(ep, [{"op": "paint_mask", "page": 1, "id": "u", "points": [[50, 240], [70, 260]], "width_mm": 20, "show": True}])
+    assert render_page(ep.pages[0], DPI, episode=ep).getpixel((x, y_hidden))[1] < 120
+    apply_ops(ep, [{"op": "paint_mask", "page": 1, "id": "u", "points": [[60, 70], [60, 90]], "width_mm": 20, "show": False}])
+    assert render_page(ep.pages[0], DPI, episode=ep).getpixel((x, y_shown))[1] > 200
+    # off, inverted, kept on disk, gone
+    apply_ops(ep, [{"op": "set_layer_mask", "page": 1, "id": "u", "enabled": False}])
+    assert render_page(ep.pages[0], DPI, episode=ep).getpixel((x, y_shown))[1] < 120
+    apply_ops(ep, [{"op": "set_layer_mask", "page": 1, "id": "u", "enabled": True, "invert": True}])
+    assert render_page(ep.pages[0], DPI, episode=ep).getpixel((x, y_shown))[1] < 120
+    apply_ops(ep, [{"op": "set_layer", "page": 1, "id": "u", "color": [40, 110, 230]}])
+    save_episode(ep, tmp_path / "b.genko")
+    again = load_episode(tmp_path / "b.genko")
+    layer = _layer(again, "u")
+    assert layer.mask and layer.mask["enabled"] and layer.mask["png"] and layer.color == (40, 110, 230)
+    assert _diff(render_page(ep.pages[0], DPI, episode=ep), render_page(again.pages[0], DPI, episode=again)) < 0.01
+    apply_ops(again, [{"op": "set_layer_mask", "page": 1, "id": "u", "delete": True}])
+    assert _layer(again, "u").mask is None
+
+
+def test_a_layer_colour_is_for_the_screen_only():
+    ep, _ink = _book()
+    apply_ops(ep, [{"op": "set_layer", "page": 1, "id": "u", "color": [40, 110, 230]}])
+    x, y = round(60 / 25.4 * DPI), round(200 / 25.4 * DPI)
+    r, g, b = render_page(ep.pages[0], DPI, mode="proof", episode=ep).getpixel((x, y))[:3]
+    assert b > 180 and r < 100
+    r, g, b = render_page(ep.pages[0], DPI, episode=ep).getpixel((x, y))[:3]
+    assert r > 150 and b < 100
+    apply_ops(ep, [{"op": "set_layer", "page": 1, "id": "u", "color": None}])
+    assert _layer(ep, "u").color is None
+
+
+# --- the window --------------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets")
+    try:
+        return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    except Exception as exc:
+        pytest.skip(f"Qt cannot start here: {exc}")
+
+
+@pytest.fixture
+def window(qapp, tmp_path: Path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    from genko.app.main import MainWindow
+
+    project = tmp_path / "b.genko"
+    ep, _ink = _book()
+    save_episode(ep, project)
+    win = MainWindow(project)
+    win.resize(1280, 800)
+    win.show()
+    qapp.processEvents()
+    yield win
+    win.close()
+
+
+def test_the_layer_panel_duplicates_merges_masks_and_shows_pictures(window):
+    from test_m13 import _drag
+
+    panel = window.layers
+    window.set_target_layer("u")
+    panel.refresh()
+    assert panel.list.item(panel.ids.index("u")).icon().isNull() is False
+    panel._duplicate()
+    page = window.current_page()
+    assert len([layer for layer in page.layers if layer.title == "影 のコピー"]) == 1
+    panel._merge_down()
+    assert len(window.current_page().layers) == len(page.layers) - 1
+    # draft and colour
+    window.set_target_layer("u")
+    panel.refresh()
+    panel.draft.click()
+    panel.refresh()
+    assert not _layer(window.episode, "u").exportable and "下描き" in panel.list.item(panel.ids.index("u")).text()
+    panel.tint.setCurrentIndex(1)
+    panel.tint.activated.emit(1)
+    assert _layer(window.episode, "u").color == (40, 110, 230)
+    # a mask from the selection, then the pen shows more of it
+    window.canvas.set_selection({"poly": [[0, 0], [257, 0], [257, 150], [0, 150]]})
+    panel._mask_from_selection()
+    assert _layer(window.episode, "u").mask
+    panel.act_mask_edit.setChecked(True)
+    assert window.mask_edit
+    before = _layer(window.episode, "u").mask["png"]
+    strokes = len(_layer(window.episode, "u").strokes)
+    window.act_pen.trigger()
+    _drag(window.canvas, None, None, path=[(60, 240), (62, 250), (64, 260)])
+    after = _layer(window.episode, "u")
+    assert after.mask["png"] != before and len(after.strokes) == strokes  # the mask changed, not the lines
+    panel.act_mask_edit.setChecked(False)
+    assert not window.mask_edit
+
+
+# --- free transform ---------------------------------------------------------------------------------------
+
+
+def test_perspective_moves_the_corners_where_asked():
+    from genko import warp
+
+    go = warp.mapping((50, 100, 100, 60), {"perspective": [[60, 90], [140, 110], [160, 170], [40, 150]]})
+    for (x, y), target in zip([(50, 100), (150, 100), (150, 160), (50, 160)], [(60, 90), (140, 110), (160, 170), (40, 150)]):
+        u, v = go(x, y)
+        assert abs(u - target[0]) < 1e-6 and abs(v - target[1]) < 1e-6
+    ep, _ink = _book()
+    area = {"poly": [[50, 100], [150, 100], [150, 160], [50, 160]]}
+    apply_ops(ep, [{"op": "add_layer", "page": 1, "kind": "paint", "name": "塗り", "id": "p"},
+                   {"op": "add_stroke", "page": 1, "layer_id": "p", "points": [[55, 105], [145, 105], [145, 155], [55, 155], [55, 105]],
+                    "width_mm": 1, "stabilize": 0, "taper": False},
+                   {"op": "fill_area", "page": 1, "layer_id": "p", "area": {"poly": [[70, 120], [130, 120], [130, 140], [70, 140]]},
+                    "rgb": [0, 0, 0]}])
+    corners = [[60, 90], [140, 110], [160, 170], [40, 150]]
+    apply_ops(ep, [{"op": "transform_area", "page": 1, "layer_id": "p", "area": area, "warp": {"perspective": corners}}])
+    layer = _layer(ep, "p")
+    pts = [p for p in layer.strokes[0].points]
+    for corner in ([55, 105], [145, 105], [145, 155], [55, 155]):
+        target = go(*corner)
+        assert min(abs(p[0] - target[0]) + abs(p[1] - target[1]) for p in pts) < 0.05
+    # the fill went through the same mapping: its centre lands where the box's centre goes
+    from genko.selection import _patch_px
+
+    image, (ox, oy) = _patch_px(layer.patches[0])
+    cx, cy = go(100, 130)
+    px, py = round(cx / 25.4 * 300) - ox, round(cy / 25.4 * 300) - oy
+    assert image.getpixel((px, py)) > 200 if image.mode == "L" else image.getpixel((px, py))[3] > 200
+    fx0, fy0 = go(70, 120)
+    assert abs(layer.patches[0]["box"][0] - min(go(70, 120)[0], go(70, 140)[0])) < 1.0 and abs(layer.patches[0]["box"][1] - fy0) < 1.5
+
+
+def test_a_mesh_bends_through_its_middle():
+    ep, _ink = _book()
+    apply_ops(ep, [{"op": "add_layer", "page": 1, "kind": "pen", "name": "線", "id": "m"},
+                   {"op": "add_stroke", "page": 1, "layer_id": "m", "points": [[50, 130], [150, 130]], "width_mm": 1, "stabilize": 0,
+                    "taper": False}])
+    grid = [[50, 100], [100, 100], [150, 100], [50, 130], [100, 110], [150, 130], [50, 160], [100, 160], [150, 160]]
+    apply_ops(ep, [{"op": "transform_area", "page": 1, "layer_id": "m", "area": {"poly": [[50, 100], [150, 100], [150, 160], [50, 160]]},
+                    "warp": {"mesh": grid}}])
+    pts = _layer(ep, "m").strokes[0].points
+    assert len(pts) > 10  # split so it can bend
+    middle = min(pts, key=lambda p: abs(p[0] - 100))
+    assert abs(middle[1] - 110) < 0.5 and abs(pts[0][1] - 130) < 0.01 and abs(pts[-1][1] - 130) < 0.01
+    with pytest.raises(ApplyError):
+        apply_ops(ep, [{"op": "transform_area", "page": 1, "layer_id": "m", "area": {"poly": [[0, 0], [10, 0], [10, 10]]},
+                        "warp": {"mesh": grid[:4]}}])
+
+
+def test_free_transform_on_the_canvas(window):
+    from test_m13 import _drag
+
+    canvas = window.canvas
+    window.set_target_layer("u")
+    window.act_marquee.trigger()
+    canvas.set_selection({"poly": [[40, 50], [80, 50], [80, 310], [40, 310]]})
+    window.act_warp_perspective.trigger()
+    assert canvas.warp and len(canvas._sel_handles()) == 4
+    _drag(canvas, None, None, path=[(80, 50), (100, 55), (120, 60)])  # the top-right corner
+    assert canvas.warp["points"][1] == [120.0, 60.0] or abs(canvas.warp["points"][1][0] - 120) < 0.5
+    before = [list(p) for p in _layer(window.episode, "u").strokes[0].points]
+    window.act_warp_apply.trigger()
+    assert canvas.warp is None and canvas.selection is None
+    after = _layer(window.episode, "u").strokes[0].points
+    assert len(after) > len(before) and max(p[0] for p in after) > max(p[0] for p in before) + 5
+
+
+# --- brushes of one's own -----------------------------------------------------------------------------------
+
+
+def test_a_brush_of_ones_own_draws_the_same_on_another_computer(tmp_path: Path, monkeypatch):
+    from genko import brushes
+
+    ep, ink = _book()
+    apply_ops(ep, [{"op": "define_brush", "key": "my_fude", "label": "かすれ筆", "base": "fude", "width_mm": 3, "min_pressure": 0.02,
+                    "gamma": 2.2, "texture": "dry", "taper": True}])
+    apply_ops(ep, [{"op": "add_stroke", "page": 1, "layer_id": ink.id, "kind": "my_fude", "width_mm": 3, "stabilize": 0,
+                    "points": [[40, 320, 0.1], [120, 330, 1.0], [200, 320, 0.2]]}])
+    before = render_page(ep.pages[0], DPI, episode=ep)
+    save_episode(ep, tmp_path / "b.genko")
+    # another computer: nothing known of the brush, another config folder
+    brushes.CUSTOM.clear()
+    monkeypatch.setenv("GENKO_CONFIG_DIR", str(tmp_path / "elsewhere"))
+    again = load_episode(tmp_path / "b.genko")
+    assert again.brush_custom["my_fude"]["label"] == "かすれ筆" and brushes.brush("my_fude").texture == "dry"
+    assert _diff(before, render_page(again.pages[0], DPI, episode=again)) < 0.01
+    with pytest.raises(ApplyError):
+        apply_ops(again, [{"op": "define_brush", "key": "my_bad", "label": "x", "gamma": 9}])
+    with pytest.raises(ApplyError):
+        apply_ops(again, [{"op": "define_brush", "key": "gpen", "label": "x"}])
+    with pytest.raises(ApplyError):
+        apply_ops(again, [{"op": "add_stroke", "page": 1, "layer_id": ink.id, "kind": "my_unknown", "points": [[1, 1], [5, 5]]}])
+    brushes.CUSTOM.clear()
+
+
+def test_making_a_brush_in_the_window(window, monkeypatch):
+    from test_m13 import _drag
+
+    from genko import brushes
+    from genko.app.brush_panel import BrushDialog
+
+    def accept(dialog):
+        dialog.name.setText("太いかぶら")
+        dialog.width.setValue(1.4)
+        dialog.thin.setValue(40)
+        dialog.texture.setCurrentIndex(dialog.texture.findData("grain"))
+        assert dialog.sample.pixmap() is not None and not dialog.sample.pixmap().isNull()
+        return 1
+
+    monkeypatch.setattr(BrushDialog, "exec", accept)
+    window.brush.kinds.setCurrentRow(list(brushes.BRUSHES).index("kabura"))
+    window.brush.make.click()
+    key = window.brush.kind()
+    assert key.startswith("my_") and window.brush.kinds.currentItem().text() == "★ 太いかぶら"
+    assert window.brush.size.value() == 1.4 and brushes.load_library()[key]["texture"] == "grain"
+    ink = next(layer for layer in window.current_page().layers if layer.role == LayerRole.INK)
+    window.set_target_layer(ink.id)
+    window.act_pen.trigger()
+    _drag(window.canvas, None, None, path=[(60, 330), (90, 332), (120, 334)])
+    assert window.episode.brush_custom[key]["label"] == "太いかぶら"
+    assert _layer(window.episode, ink.id).strokes[-1].kind == key
+    window.brush.forget.click()
+    assert key not in brushes.load_library() and window.brush.kind() == "gpen"
+    brushes.CUSTOM.clear()
+
+
+# --- export: pages, preview, the check before --------------------------------------------------------------
+
+
+def test_export_writes_the_pages_asked_for(tmp_path: Path):
+    from genko.app import exporting
+
+    ep = new_episode("t", 1, 6, PageSpec.b4_comic())
+    assert exporting.parse_pages("2-4, 6, 3", 6) == [2, 3, 4, 6]
+    with pytest.raises(ValueError):
+        exporting.parse_pages("5-9", 6)
+    with pytest.raises(ValueError):
+        exporting.parse_pages("二", 6)
+    result = exporting.run(ep, None, "png", tmp_path / "o", dpi=40, pages=[2, 3, 5])
+    assert result["ok"] and len(result["files"]) == 3
+    assert exporting.run(ep, None, "png", tmp_path / "all", dpi=40)["ok"]
+    assert len(list((tmp_path / "all").glob("*.png"))) == 6
+    assert not exporting.run(ep, tmp_path / "x.genko", "pdf", tmp_path / "p", official=True, pages=[1])["ok"]
+    assert len(ep.pages) == 6  # the book itself is untouched
+
+
+def test_the_export_dialog_previews_and_checks_first(window, tmp_path: Path, monkeypatch):
+    from genko.app.dialogs import ExportDialog
+
+    # a line running off the paper: the check stops the print
+    apply_ops(window.episode, [{"op": "add_line", "page": 1, "text": "はみ出し", "x_mm": 250, "y_mm": 40, "w_mm": 20, "h_mm": 30}])
+    dialog = ExportDialog(window, window.episode, window.path, "human:leaf", current_page=2)
+    dialog.format.setCurrentIndex(dialog.format.findData("png"))
+    dialog.dpi.setValue(40)
+    dialog.folder.setText(str(tmp_path / "out"))
+    assert dialog.preview.pixmap() is not None and not dialog.preview.pixmap().isNull()
+    dialog.which.setCurrentIndex(dialog.which.findData("current"))
+    assert dialog.pages() == [2] and "2 ページ" in dialog.preview_note.text()
+    dialog.which.setCurrentIndex(dialog.which.findData("range"))
+    dialog.range.setText("1-2")
+    assert dialog.pages() == [1, 2]
+    asked = []
+    monkeypatch.setattr(ExportDialog, "ask_preflight", lambda self, errors: asked.append(errors) or "stop")
+    dialog.run()
+    assert asked and dialog.result_ is None and any(e["page"] == 1 for e in asked[0])
+    monkeypatch.setattr(ExportDialog, "ask_preflight", lambda self, errors: "fix")
+    dialog.run()
+    assert dialog.fix_requested and dialog.result_ is None
+    # only page 2: nothing stops it
+    monkeypatch.setattr(ExportDialog, "ask_preflight", lambda self, errors: pytest.fail("page 2 has nothing to fix"))
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
+    dialog.range.setText("2")
+    dialog.run()
+    assert dialog.result_["ok"] and len(dialog.result_["files"]) == 1
+
+
+# --- history ----------------------------------------------------------------------------------------------------
+
+
+def test_the_history_names_each_change_and_goes_back_to_it(window):
+    from genko.app.history import describe
+
+    assert describe([{"op": "add_stroke"}]) == "ペンで描いた"
+    assert describe([{"op": "add_stroke"}] * 3) == "ペンで描いた（3 回）"
+    assert describe([{"op": "split_frame"}, {"op": "add_line"}]) == "コマを割った ほか 1 件"
+    ink = next(layer for layer in window.current_page().layers if layer.role == LayerRole.INK)
+    window.commit_now()
+    first = len(_layer(window.episode, ink.id).strokes)
+    window.apply_ops([{"op": "add_stroke", "page": 1, "layer_id": ink.id, "points": [[10, 10], [20, 20]]}])
+    window.apply_ops([{"op": "add_line", "page": 1, "text": "やあ", "x_mm": 100, "y_mm": 100}])
+    window.apply_ops([{"op": "split_frame", "page": 1, "frame_id": window.current_page().frames[0].id, "axis": "horizontal"}])
+    panel = window.history
+    window.act_history.trigger()
+    panel.refresh()
+    texts = [re.sub(r"　(\d\d/\d\d )?\d\d:\d\d$", "", panel.list.item(i).text()) for i in range(panel.list.count())]  # (no time)
+    assert texts[-3:] == ["ペンで描いた", "台詞を入れた", "▶ コマを割った"]
+    strokes = len(_layer(window.episode, ink.id).strokes)
+    # back to just after the pen line
+    row = texts.index("ペンで描いた")
+    panel._go(panel.list.item(row))
+    assert not window.episode.story_for_page(1) and len(window.current_page().frames[0].children) == 0
+    assert len(_layer(window.episode, ink.id).strokes) == strokes
+    texts = [re.sub(r"　(\d\d/\d\d )?\d\d:\d\d$", "", panel.list.item(i).text()) for i in range(panel.list.count())]  # (no time)
+    assert texts[row] == "▶ ペンで描いた" and texts[-1] == "コマを割った（戻した操作）"
+    # forward again
+    panel._go(panel.list.item(panel.list.count() - 1))
+    assert window.episode.story_for_page(1) and window.current_page().frames[0].children
+    # saved changes too: back to the start undoes through the journal on disk
+    window.commit_now()
+    panel.refresh()
+    panel._go(panel.list.item(0))
+    assert len(_layer(window.episode, ink.id).strokes) == first and not window.episode.story_for_page(1)
+    assert panel.list.item(0).text().startswith("▶")
+
+
+# --- help and preferences ---------------------------------------------------------------------------------
+
+
+def test_help_lists_the_keys_as_they_are(window):
+    from genko.app import help as helps
+
+    rows = helps.shortcut_rows(window)
+    assert ("ツール", "ペン", "B") in rows and any(command == "左右反転して見る" for _m, command, _k in rows)
+    menus = [a.text() for a in window.menuBar().actions()]
+    assert menus[-1] == "ヘルプ"
+    window.act_help_guide.trigger()
+    assert "はじめての 1 冊" in window.help_dialog.text.toPlainText()
+    window.act_help_faq.trigger()
+    assert "線が描けない" in window.help_dialog.text.toPlainText()
+    window.act_help_keys.trigger()
+    assert "ペン" in window.help_dialog.text.toPlainText()
+
+
+def test_preferences_change_keys_pen_and_work(window, qapp):
+    from PySide6.QtGui import QKeySequence
+
+    from genko.app import help as helps
+    from genko.app import preferences
+    from genko.app.preferences import PreferencesDialog
+
+    dialog = PreferencesDialog(window)
+    # two commands on one key are refused
+    dialog.editors["ペン"].setKeySequence(QKeySequence("E"))
+    dialog.save()
+    assert "「E」" in dialog.clash.text() and window.act_pen.shortcut().toString() == "B"
+    dialog.editors["ペン"].setKeySequence(QKeySequence("P"))
+    # the pen tablet: a light hand gets a softer curve
+    dialog.pad.pressures = [0.25 + 0.01 * (i % 10) for i in range(60)]
+    dialog._measure()
+    assert dialog.gamma is not None and dialog.gamma < 1 and "やわらかめ" in dialog.gamma_note.text()
+    dialog.button.setCurrentIndex(dialog.button.findData("picker"))
+    from PySide6.QtWidgets import QApplication
+
+    size_before = QApplication.instance().font().pointSize()
+    dialog.font_pt.setValue(13)
+    dialog.paper.setCurrentIndex(dialog.paper.findData("b5"))
+    dialog.save_after.setValue(5)
+    dialog.save()
+    assert dialog.result() == 1
+    assert window.act_pen.shortcut().toString() == "P"
+    assert ("ツール", "ペン", "P") in helps.shortcut_rows(window)
+    assert window._commit_timer.interval() == 5000 and window.canvas.pen_button == "picker"
+    assert window.brush.pressure.itemText(window.brush.pressure.count() - 1).startswith("自分に合わせた")
+    assert preferences.ui_font_pt() == 13 and preferences.default_paper() == "b5"
+    # a new window keeps the key; the new-book dialog starts on B5
+    from genko.app.dialogs import NewProjectDialog
+    from genko.app.main import MainWindow
+
+    other = MainWindow(window.path)
+    assert other.act_pen.shortcut().toString() == "P"
+    other.close()
+    assert NewProjectDialog(window).paper.currentData() == "b5"
+    # back to the first keys
+    again = PreferencesDialog(window)
+    again._reset_keys()
+    again.save()
+    assert window.act_pen.shortcut().toString() == "B"
+    assert preferences.gamma_for([0.5] * 20) == 1.0
+    with pytest.raises(ValueError):
+        preferences.gamma_for([0.5] * 3)
+    store = preferences.settings()
+    for key in ("ui/font_pt", "new/paper", "save/after_ms", "tablet/gamma", "tablet/button"):
+        store.remove(key)  # (the settings are shared by the tests)
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()  # (the letters' size is the application's, shared by the tests too)
+    font = app.font()
+    font.setPointSize(size_before)
+    app.setFont(font)
+    app._genko_tokens = None
+
+
+def test_the_pens_side_button_picks_a_colour(window):
+    import test_f4
+
+    canvas = window.canvas
+    window.act_pen.trigger()
+    canvas.pen_button = "picker"
+    picked = []
+    canvas.colourPicked.connect(lambda rgb: picked.append(rgb))
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QTabletEvent
+
+    test_f4._tablet(canvas, "move", QPointF(1, 1), eraser=False)  # (makes the device)
+    device = test_f4._DEVICES[False]
+    screen = canvas._view().map(canvas._pt(60, 200))
+    event = QTabletEvent(QEvent.Type.TabletPress, device, QPointF(screen), QPointF(canvas.mapToGlobal(screen)), 0.5, 0.0, 0.0, 0.0,
+                         0.0, 0.0, Qt.KeyboardModifier.NoModifier, Qt.MouseButton.RightButton, Qt.MouseButton.RightButton)
+    before = len(_layer(window.episode, "u").strokes)
+    canvas.tabletEvent(event)
+    assert picked and not canvas._stroke and len(_layer(window.episode, "u").strokes) == before
