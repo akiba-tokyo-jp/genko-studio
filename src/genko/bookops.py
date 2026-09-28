@@ -14,7 +14,7 @@ from genko.ops import ApplyError
 OPS = ("add_cover", "replace_text", "set_assignee")  # (for_pages is expanded by apply_ops: see expand)
 # ops that for_pages must not repeat (they change the pages themselves or the whole book)
 NOT_PER_PAGE = {"add_page", "delete_page", "duplicate_page", "import_pages", "reorder", "move_page", "set_page_spec", "add_cover", "for_pages",
-                "replace_text", "approve", "revoke", "name_ok", "advance", "set_bible", "set_script", "define_brush", "set_brush"}
+                "replace_text", "approve", "revoke", "allow_chat_approval", "name_ok", "advance", "set_bible", "set_script", "define_brush", "set_brush"}
 
 
 def add_cover(episode, op: dict) -> None:

@@ -30,7 +30,7 @@ candidates と render kind=compare で比べる → review_candidates → adopt�
 使える素材・書体・ブラシは inspect target=materials / fonts / brushes、レイヤーと台詞の今の設定は inspect target=snapshot。
 render は layer_id でそのレイヤーだけ、mode=print で印刷と同じ見え方。
 3 回直しても通らないときは ask_human で人間に相談して、その作業を置いておく。
-承認と本番の書き出しは人間だけが行う。承認が要るところでは request_approval を出して待つ。
+承認と本番の書き出しは人間だけが行う。承認が要るところでは request_approval を出して待つ（人がチャットで承認し、原稿がそれを許していれば record_chat_approval で人の名前で記録できる）。
 同じ Genko を複数の会話（Telegram のスレッドなど）で使うときは、どの道具にも session に会話の名前（例 "9204"）を渡す。
 変更はその名前で記録され、undo はその会話の変更だけを戻す。別の会話が使っている原稿に書くと、一度だけ book_in_use で止まる。"""
 
@@ -267,6 +267,15 @@ def build_server(root: Path, actor: str) -> MCPServer:
         40 秒で終わらないときは job を返す（書き出しは続いている）。export_status で結果を取る。"""
         return call(service.export, project, format, pages, dpi, area, width, max_height, long_edge, jpeg, spreads, color, icc,
                     fps, seconds, movie, background=True, dots=dots)
+
+    @tool
+    def record_chat_approval(project: str, gate: str, message: str, pages: list[int] | None = None,
+                             character_id: str | None = None, candidate_id: str | None = None,
+                             face_box01: list[float] | None = None) -> list:
+        """人がチャット（Telegram など）で承認したときに、その承認を人の名前で記録する。人が原稿ごとに許可したときだけ使える
+        （許可が無ければ chat_approval_off）。gate は name / art / sheet。message に人が送った言葉をそのまま入れる。
+        人がはっきり承認していないのに呼ばない。"""
+        return call(service.record_chat_approval, project, gate, message, pages, character_id, candidate_id, face_box01)
 
     @tool
     def export_status(project: str, job: str) -> list:

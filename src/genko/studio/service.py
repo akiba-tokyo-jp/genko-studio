@@ -70,7 +70,7 @@ AGENT_TOOLS = frozenset({
     "record_review", "request_approval", "tickets", "generation_request", "import_images", "candidates",
     "review_candidates", "adopt", "request_fix", "report_regions", "finish_page", "preflight", "export_proof", "ask_human",
     "review_page", "derive", "import_name", "analyze_name", "propose_lines", "proposals", "undo", "export", "check",
-    "resolve_ticket", "export_status", "upscale", "style_catalog", "use_style", "take_panel_art",
+    "resolve_ticket", "export_status", "upscale", "style_catalog", "use_style", "take_panel_art", "record_chat_approval",
 })
 
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
@@ -1420,6 +1420,43 @@ class StudioService:
             save_episode(episode, path, actor=self.actor)
         return ToolResult(True, {"page": page})
 
+    def record_chat_approval(self, project: str, gate: str, message: str, pages: list[int] | None = None,
+                             character_id: str | None = None, candidate_id: str | None = None,
+                             face_box01: list[float] | None = None) -> ToolResult:
+        """チャットでの承認: a person approved in a chat (Telegram, Slack…) and the AI records it for them. Only when
+        the person let this book take chat approvals (`genko studio chat-approval <book> on`, or the app's page menu);
+        the record is the person's, with who passed it on and the person's own words."""
+        path = self.project_path(project)
+        if gate not in ("name", "art", "sheet"):
+            return fail("チャットで記録できる承認は name / art / sheet（正式な書き出しは人が Genko で行う）", "gate_not_available", "/gate")
+        if not str(message or "").strip():
+            return fail("message に、人がチャットで送った承認の言葉をそのまま入れる", "message_required", "/message")
+        episode = load_episode(path)
+        allowed = (episode.studio.get("chat_approval") or {})
+        if not allowed.get("on") or not str(allowed.get("by", "")).startswith("human:"):
+            return fail("この原稿はチャットでの承認を受け付けていない。人が一度だけ Genko の「ページ → チャットでの承認を AI に"
+                        "記録させる」を入れるか、`genko studio chat-approval <原稿> on` を実行すると使える",
+                        "chat_approval_off", "/project")
+        person = str(allowed["by"])
+        extra = {"via": self.actor, "message": str(message).strip()}
+        if gate == "sheet":
+            if not character_id or not candidate_id:
+                return fail("sheet には character_id と candidate_id が要る", "character_required", "/character_id")
+            ops = [{**sheet_approval_op(path, episode, character_id, candidate_id, face_box01), **extra}]
+        else:
+            if not pages:
+                return fail("pages に承認されたページを入れる", "pages_required", "/pages")
+            ops = [{"op": "approve", "gate": gate, "page": int(p), **extra} for p in pages]
+        try:
+            with ProjectLock(path, agent=person):
+                episode = load_episode(path)
+                apply_ops(episode, ops, agent=person)
+                save_episode(episode, path, actor=person)
+        except ApplyError as exc:
+            return fail(str(exc), "apply_failed", "/gate")
+        return ToolResult(True, {"approved": gate, "pages": sorted(int(p) for p in pages or []) or None,
+                                 "character_id": character_id, "by": person, "via": self.actor})
+
     def request_approval(self, project: str, gate: str, pages: list[int], note: str = "", character_id: str | None = None) -> ToolResult:
         path = self.project_path(project)
         if gate not in ("name", "art", "sheet", "export"):
@@ -1563,6 +1600,10 @@ class HumanService:
                                    icc=icc, screen=screen)
         self._apply([{"op": "approve", "gate": "export"}])
         return {"ok": True, "files": [str(p) for p in written], "warnings": report["warnings"], "dpi": report["dpi"]}
+
+    def chat_approval(self, on: bool) -> dict:
+        self._apply([{"op": "allow_chat_approval", "on": bool(on)}])
+        return {"ok": True, "chat_approval": bool(on), "by": self.actor}
 
     def revoke(self, gate: str, pages: list[int], character_id: str | None = None, reason: str = "") -> dict:
         if gate == "sheet":

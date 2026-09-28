@@ -2291,6 +2291,8 @@ class MainWindow(QMainWindow):
         self.act_paper = a("原稿用紙の設定…", self._paper_settings, tip="用紙・仕上がり・裁ち落とし・基本枠。変えるとコマや台詞も新しい枠に合わせて動きます")
         self.act_style = a("絵柄を選ぶ…", self._pick_style,
                            tip="マンガの絵柄カタログから、この原稿の絵柄を選びます（絵の依頼文と見本の参照画像になります）")
+        self.act_chat_approval = a("チャットでの承認を AI に記録させる…", self._chat_approval,
+                                   tip="Telegram などで AI に「承認します」と返したとき、その承認を AI があなたの名前で記録できるようにします")
         self.act_page_nombre = a("このページのノンブルを隠す／出す", self._toggle_page_nombre)
         self.act_story_editor = a("ストーリーエディター…", self.open_story_editor, "Ctrl+Shift+L", "全ページの台詞をまとめて直す・台本を流し込む")
         self.act_replace = a("台詞の検索・置換…", self._replace_dialog, "Ctrl+Alt+F", "全ページの台詞から言葉を探して置き換えます")
@@ -2368,7 +2370,7 @@ class MainWindow(QMainWindow):
                           self.act_layer_up, self.act_layer_down, None, self.act_layer_draft, "layer_effect", "mask", None, self.act_plugins]),
             # the book: its pages, and under them the panels and the lines
             ("ページ", [self.act_add_page, self.act_dup_page, self.act_del_page, None, self.act_page_up, self.act_page_down, self.act_spread,
-                        None, self.act_paper, self.act_style, self.act_nombre, self.act_page_nombre, self.act_add_cover, self.act_assignee, self.act_timeline, None,
+                        None, self.act_paper, self.act_style, self.act_chat_approval, self.act_nombre, self.act_page_nombre, self.act_add_cover, self.act_assignee, self.act_timeline, None,
                         ("sub", "コマ", [self.act_split_h, self.act_split_v, self.act_merge, self.act_delete_frame, self.act_frame_selection, None, self.act_template, self.act_save_template, None,
                                          self.act_gutters, self.act_border, self.act_no_border, *self.border_kind_actions, self.act_border_detail,
                                          self.act_border_colour, self.act_corner,
@@ -5845,6 +5847,21 @@ class MainWindow(QMainWindow):
             self._reload_pages()
             self.canvas.fit_page()
             self.flash(f"原稿用紙を変えました: {self.episode.spec.describe()}", 5000)
+
+    def _chat_approval(self) -> None:
+        """チャットでの承認: whether the AI may record the approvals the person sends it in a chat (this book only)."""
+        on = bool((self.episode.studio.get("chat_approval") or {}).get("on"))
+        if on:
+            text = ("いまは、チャットで AI に承認を伝えると、AI があなたの名前で承認を記録します（記録には AI の名前と、"
+                    "あなたが送った言葉が残ります）。\n\nこれを止めますか？")
+        else:
+            text = ("Telegram などのチャットで AI に「承認します」と返したとき、その承認を AI があなたの名前で記録できるように"
+                    "しますか？\n\nこの原稿だけに効きます。記録には AI の名前と、あなたが送った言葉が残ります。正式な書き出しは"
+                    "これまでどおり Genko で行います。")
+        if QMessageBox.question(self, "チャットでの承認", text) != QMessageBox.StandardButton.Yes:
+            return
+        self.apply_ops([{"op": "allow_chat_approval", "on": not on}])
+        self.flash("チャットでの承認を止めました" if on else "チャットでの承認を AI が記録できるようにしました", 4000)
 
     def _pick_style(self) -> None:
         from genko.app.style_picker import StylePicker

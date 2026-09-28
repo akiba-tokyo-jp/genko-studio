@@ -209,11 +209,16 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 - `export`: 全ページの仕上げが済んだら、`mcp__genko__preflight` で止めている理由を確かめ、`mcp__genko__export_proof` で校正を出してから依頼する。
 
 依頼を出したら `mcp__genko__review_page` で確認ページ（review.html）を作り、その場所（`path`）と何を見てほしいかを、
-メッセージで人間に知らせる。review.html は絵を中に入れた 1 ファイルなので、そのまま渡す（zip にまとめない）。承認するのは人間で、Genko アプリの承認箱（または確認ページにあるコマンド）で行う。人間が「OK」と返事をしても、あなたが承認を付けることはできない。
+メッセージで人間に知らせる。review.html は絵を中に入れた 1 ファイルなので、そのまま渡す（zip にまとめない）。承認するのは人間で、Genko アプリの承認箱（または確認ページにあるコマンド）で行う。
+
+チャットでの承認: 人がこの原稿で「チャットでの承認を AI に記録させる」を入れていれば、人がチャットではっきり承認したときに
+`mcp__genko__record_chat_approval`（`gate`・`pages` か `character_id` と `candidate_id`・`message` に人の言葉をそのまま）で
+人の名前で記録できる。入っていなければ `chat_approval_off` が返るので、人に「Genko のページのメニューで一度だけ入れるか、
+`genko studio chat-approval <原稿> on` を実行してください」と伝える。承認のためのシェルのスクリプトを作って人に流させない。
 
 ## してはいけないこと
 
-- 承認を付けようとしない。承認は人間だけが行う（Genko の MCP には承認の道具が無い）。
+- 人がはっきり承認していないのに承認を記録しない（`record_chat_approval` は人の言葉があるときだけ）。
 - 人間が承認したページのコマ割りを変えない。直す必要があれば人間に頼む。（`cut_frame`・`move_gutter`・`set_frame` の `poly` も同じ）
 - 人間が描いた線・塗り（`fill`・`fill_area`・`transform_area`・`delete_area`・`paste`・`reshape_stroke` で触れるもの）を、頼まれずに動かしたり消したりしない。
 - 人間が固定した欄（pinned）・人間が描いた領域・承認済みの設定画を変えようとしない。
