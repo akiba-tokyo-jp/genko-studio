@@ -60,11 +60,12 @@ SHOTS = ("ELS", "LS", "FS", "MS", "MCU", "CU", "ECU", "INSERT")
 ANGLES = ("eye", "high", "low", "bird", "worm", "dutch")
 POSITIONS = ("left", "left_third", "center", "right_third", "right")
 FACINGS = ("left", "right", "front", "back")
-BALLOONS = ("speech", "thought", "shout", "whisper", "narration", "sfx")
+BALLOONS = ("speech", "rounded", "thought", "shout", "whisper", "electric", "narration", "sfx", "aside",
+            "dotted_box", "tone_box", "fancy_box")  # (aside: 呟き, no balloon, hand-lettered and a little tilted)
 BEAT_KINDS = ("action", "dialogue", "monologue", "narration", "sfx")
 TEXT_BEATS = ("dialogue", "monologue", "narration")
 
-LETTER_KINDS = ("speech", "thought", "shout", "whisper", "narration", "sfx", "title")
+LETTER_KINDS = ("speech", "thought", "shout", "whisper", "narration", "sfx", "title", "aside")
 # the look of one kind of text: a font (a bundled key from inspect fonts, or a font file's path), a size (times the
 # usual) and a weight. Null keeps the default.
 LOOK = obj(font=nullable(STR), scale=nullable(NUM), weight=nullable(enum("normal", "bold", "heavy")))
@@ -148,6 +149,7 @@ NAME_PLAN_V1 = more(obj(
                     facing=enum(*FACINGS),
                     pos=enum(*POSITIONS),
                     scale=NUM,
+                    tag=nullable(STR),  # (名札: a small label set by the character, e.g. 「スクール担当 つら姉」)
                 )
             ),
             action=STR,
