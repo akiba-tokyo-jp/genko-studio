@@ -1211,7 +1211,7 @@
     },
     {
       "op": "allow_chat_approval",
-      "on": "bool (person only: the AI may record approvals a person sends in chat)"
+      "on": "bool (person only: false stops the AI recording approvals a person sends in chat for this book; on by default)"
     },
     {
       "op": "resolve_ticket",

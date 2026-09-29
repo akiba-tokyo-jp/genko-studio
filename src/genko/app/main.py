@@ -2363,8 +2363,8 @@ class MainWindow(QMainWindow):
         self.act_paper = a("原稿用紙の設定…", self._paper_settings, tip="用紙・仕上がり・裁ち落とし・基本枠。変えるとコマや台詞も新しい枠に合わせて動きます")
         self.act_style = a("絵柄を選ぶ…", self._pick_style,
                            tip="マンガの絵柄カタログから、この原稿の絵柄を選びます（絵の依頼文と見本の参照画像になります）")
-        self.act_chat_approval = a("チャットでの承認を AI に記録させる…", self._chat_approval,
-                                   tip="Telegram などで AI に「承認します」と返したとき、その承認を AI があなたの名前で記録できるようにします")
+        self.act_chat_approval = a("チャットでの承認…", self._chat_approval,
+                                   tip="Telegram などで AI に「承認します」と返すと、AI があなたの名前で承認を記録します（既定）。この原稿だけ止めることもできます")
         self.act_page_nombre = a("このページのノンブルを隠す／出す", self._toggle_page_nombre)
         self.act_story_editor = a("ストーリーエディター…", self.open_story_editor, "Ctrl+Shift+L", "全ページの台詞をまとめて直す・台本を流し込む")
         self.act_replace = a("台詞の検索・置換…", self._replace_dialog, "Ctrl+Alt+F", "全ページの台詞から言葉を探して置き換えます")
@@ -5943,19 +5943,21 @@ class MainWindow(QMainWindow):
             self.flash(f"原稿用紙を変えました: {self.episode.spec.describe()}", 5000)
 
     def _chat_approval(self) -> None:
-        """チャットでの承認: whether the AI may record the approvals the person sends it in a chat (this book only)."""
-        on = bool((self.episode.studio.get("chat_approval") or {}).get("on"))
+        """チャットでの承認: whether the AI records the approvals the person sends it in a chat (this book only; on
+        unless stopped)."""
+        from genko.studio.service import chat_approval_open
+
+        on = chat_approval_open(self.episode)
         if on:
             text = ("いまは、チャットで AI に承認を伝えると、AI があなたの名前で承認を記録します（記録には AI の名前と、"
-                    "あなたが送った言葉が残ります）。\n\nこれを止めますか？")
+                    "あなたが送った言葉が残ります）。\n\nこの原稿では止めますか？ 止めると、承認は承認箱でだけ行えます。")
         else:
-            text = ("Telegram などのチャットで AI に「承認します」と返したとき、その承認を AI があなたの名前で記録できるように"
-                    "しますか？\n\nこの原稿だけに効きます。記録には AI の名前と、あなたが送った言葉が残ります。正式な書き出しは"
-                    "これまでどおり Genko で行います。")
+            text = ("この原稿では、チャットでの承認を止めています。\n\nTelegram などのチャットで AI に「承認します」と返したとき、"
+                    "AI があなたの名前で記録できるように戻しますか？ 正式な書き出しはこれまでどおり Genko で行います。")
         if QMessageBox.question(self, "チャットでの承認", text) != QMessageBox.StandardButton.Yes:
             return
         self.apply_ops([{"op": "allow_chat_approval", "on": not on}])
-        self.flash("チャットでの承認を止めました" if on else "チャットでの承認を AI が記録できるようにしました", 4000)
+        self.flash("この原稿ではチャットでの承認を止めました" if on else "チャットでの承認を AI が記録できるようにしました", 4000)
 
     def _pick_style(self) -> None:
         from genko.app.style_picker import StylePicker
