@@ -200,7 +200,7 @@ def test_boxes_are_seen_in_perspective_and_traced_as_lines():
     apply_ops(ep, [{"op": "add_mannequin", "page": 1, "id": "m", "pos": [60, 200, 0]},
                    {"op": "trace_prims", "page": 1, "layer_id": _ink(ep).id}])
     traced = _ink(ep).strokes
-    assert len(traced) >= 6 + 20 and all(s.kind == "pencil" for s in traced)
+    assert len(traced) >= 3 and sum(len(s.points) for s in traced) >= 6 + 20 and all(s.kind == "pencil" for s in traced)
     apply_ops(ep, [{"op": "delete_prim", "page": 1, "id": "b"}])
     assert [p["id"] for p in ep.pages[0].prims] == ["m"]
     with pytest.raises(ApplyError):
@@ -384,7 +384,7 @@ def test_pose_a_figure_and_turn_a_box_on_the_canvas(window):
     # trace everything as pencil lines on the ink layer
     count = len(_ink(window.episode).strokes)
     window.act_trace.trigger()
-    assert len(_ink(window.episode).strokes) > count + 20
+    assert len(_ink(window.episode).strokes) > count and sum(len(s.points) for s in _ink(window.episode).strokes) > 20
     # Delete removes the selected one
     window.act_delete_area.trigger()
     assert len(window.current_page().prims) == 1

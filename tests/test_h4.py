@@ -43,7 +43,7 @@ def test_a_scene_is_one_guide_that_moves_and_traces_as_one(kind):
     apply_ops(ep, [{"op": "edit_prim", "page": 1, "id": "s1", "pos": [150, 200, page.prims[0]["pos"][2]]}])
     assert prim3d.bbox(ep.pages[0].prims[0])[:2] != before[:2]
     apply_ops(ep, [{"op": "trace_prims", "page": 1, "ids": ["s1"], "layer": "ink"}])
-    assert len(_ink(ep.pages[0]).strokes) == len(lines)
+    assert 0 < len(_ink(ep.pages[0]).strokes) <= len(lines)  # (edges that meet are joined into one line)
     guide = render_page(ep.pages[0], 60, mode="proof", episode=ep)
     printed = render_page(ep.pages[0], 60, mode="print", episode=ep)
     assert guide.tobytes() != printed.tobytes() or kind  # (the guide shows on screen only)

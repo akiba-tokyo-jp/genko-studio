@@ -206,7 +206,7 @@ def test_page_list_has_pictures_and_reorders(window):
     window.act_dup_page.trigger()
     assert len(window.episode.pages) == 4 and window.current_page().index == 3
     window.act_spread.trigger()
-    assert window.current_page().spread_with == 4 and "見開き 3–4" in window.pages.item(2).text()
+    assert window.current_page().spread_with == 2 and "見開き 2–3" in window.pages.item(2).text()  # (3 faces 2 in this book)
     window.act_page_nombre.trigger()
     assert not window.current_page().numero and "ノンブルなし" in window.pages.item(2).text()
     window.act_add_page.trigger()
