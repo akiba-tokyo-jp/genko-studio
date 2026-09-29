@@ -172,12 +172,14 @@ def test_ellipse_balloons_hold_their_text_and_tails_are_visible():
     dpi = 200
     image = render_page(ep.pages[0], dpi, mode="print", episode=ep).convert("L")
     x0, y0, x1, y1 = (mm_to_px(v, dpi) for v in (60, 40, 60 + w, 40 + h))
-    # everything dark in the upper half of the balloon's box sits within the ellipse (the text does not
-    # poke out; the lower half also holds the root of the tail)
+    # everything dark in the upper half of the balloon's box sits within its oval (the text does not poke out;
+    # the lower half also holds the root of the tail). A hand-drawn balloon is a fuller oval than an ellipse.
+    from genko.balloons import HAND_POWER
+
     cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
     for y in range(y0, round(cy), 3):
         for x in range(x0, x1, 3):
-            if ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 > 1.08 and image.getpixel((x, y)) < 100:
+            if abs((x - cx) / rx) ** HAND_POWER + abs((y - cy) / ry) ** HAND_POWER > 1.08 and image.getpixel((x, y)) < 100:
                 pytest.fail(f"ink outside the ellipse at {(x, y)}")
     # the tail's base is wide: a horizontal cut just below the balloon crosses at least a few mm of white inside black
     row = [image.getpixel((x, y1 + mm_to_px(3, dpi))) for x in range(x0, x1)]

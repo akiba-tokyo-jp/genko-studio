@@ -108,6 +108,7 @@ def _inner(kind: str, w: float, h: float, pad: float, depth: float | None = None
 FIT_PAD = 0.15  # em between the letters' corners and the outline, at the nearest (their sides keep more)
 HUGGED = ("speech", "thought", "whisper", "flash", "shout")
 UNEVEN = ("speech", "thought", "whisper")  # (drawn a little uneven by hand, unless style.hand is false)
+UNEVEN_MOST = 0.04  # (how far in from its box an uneven outline goes at most; the words keep 0.955 of it)
 
 
 HAND_POWER = 2.6  # (a letterer's oval is fuller than an ellipse: |x/a|^p + |y/b|^p = 1, p = 2 being an ellipse)
@@ -672,10 +673,14 @@ def _uneven(box, seed: str, n: int = 120) -> list:
     a1, p1 = rng.uniform(0.012, 0.03), rng.uniform(0, math.tau)
     a2, p2 = rng.uniform(0.015, 0.035), rng.uniform(0, math.tau)
     a3, p3 = rng.uniform(0.0, 0.01), rng.uniform(0, math.tau)
+    drops = [a1 * (1 + math.cos(math.tau * k / n - p1)) + a2 * (1 + math.cos(2 * math.tau * k / n - p2))
+             + a3 * (1 + math.cos(3 * math.tau * k / n - p3)) for k in range(n)]
+    most = max(drops) or 1.0
+    squeeze = min(1.0, UNEVEN_MOST / most)  # (never more than UNEVEN_MOST in from the box: the words' room)
     points = []
     for k in range(n):
         t = math.tau * k / n
-        r = 1 - a1 * (1 + math.cos(t - p1)) - a2 * (1 + math.cos(2 * t - p2)) - a3 * (1 + math.cos(3 * t - p3))
+        r = 1 - drops[k] * squeeze
         c, s_ = math.cos(t), math.sin(t)  # (a fuller oval than an ellipse: HAND_POWER)
         ex = math.copysign(abs(c) ** (2 / HAND_POWER), c)
         ey = math.copysign(abs(s_) ** (2 / HAND_POWER), s_)
