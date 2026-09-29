@@ -1372,24 +1372,51 @@ class LayerPanel(QWidget):
 
 
 class _KeyReleases(QObject):
-    """Key releases for キーを押している間だけ持ち替え: one watcher on the app, handing each to the window in front."""
+    """Key releases for キーを押している間だけ持ち替え: one watcher on the app, handing each to the window in front.
+    It is on the app only from a tool's key (not a click on its button) until the next key let go (an app-wide watcher runs for every event
+    of every widget, which slows drawing): a modifier let go meanwhile keeps it on."""
 
     def eventFilter(self, _obj, event) -> bool:  # noqa: N802
         if event.type() == QEvent.Type.KeyRelease and not event.isAutoRepeat():
             front = QApplication.activeWindow()
             if isinstance(front, MainWindow) and getattr(front, "_tool_switch", None) is not None:
                 front.hold_key_released(event.key())
+            if event.key() not in _MODIFIER_KEYS:
+                _stop_key_releases()
         return False
 
 
+class _ByKey(QObject):
+    """On each tool's action: chosen by its key (not a click), the key's release is watched from now."""
+
+    def eventFilter(self, _obj, event) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.Shortcut:
+            _watch_key_releases()
+        return False
+
+
+_BY_KEY = _ByKey()
+_MODIFIER_KEYS = {Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Meta, Qt.Key.Key_AltGr,
+                  Qt.Key.Key_Space}
 _KEY_WATCH: list = []
 
 
 def _watch_key_releases() -> None:
+    app = QApplication.instance()
+    if app is None:
+        return
     if not _KEY_WATCH:
-        watcher = _KeyReleases()
-        QApplication.instance().installEventFilter(watcher)
-        _KEY_WATCH.append(watcher)
+        _KEY_WATCH.append(_KeyReleases(app))
+    if not _KEY_WATCH[0].property("genko_on"):
+        _KEY_WATCH[0].setProperty("genko_on", True)
+        app.installEventFilter(_KEY_WATCH[0])
+
+
+def _stop_key_releases() -> None:
+    app = QApplication.instance()
+    if _KEY_WATCH and app is not None and _KEY_WATCH[0].property("genko_on"):
+        _KEY_WATCH[0].setProperty("genko_on", False)
+        app.removeEventFilter(_KEY_WATCH[0])
 
 
 def _page_list(text: str, count: int) -> list[int] | None:
@@ -1775,7 +1802,6 @@ class MainWindow(QMainWindow):
 
         preferences.name_commands(self)  # (every command's words are its lasting name; keys can be changed)
         preferences.apply_all(self)
-        _watch_key_releases()  # (キーを押している間だけ持ち替え: one watcher for every window)
         theme.name_buttons(self)
         self.layout().activate()
         self.resize(1280, 800)
@@ -2183,6 +2209,7 @@ class MainWindow(QMainWindow):
         for act in self.tool_actions.values():
             tools.addAction(act)
             act.setAutoRepeat(False)  # (a held key chooses the tool once: キーを押している間だけ持ち替え)
+            act.installEventFilter(_BY_KEY)  # (chosen by its key: that key's release is watched)
         self.act_select.setChecked(True)
         self.act_color = a("ペンの色…", self._pick_color, "C")  # (kept for its key; the colour is in ツールの設定)
         self.act_select_all = a("すべて選択", self._select_all, std.SelectAll)

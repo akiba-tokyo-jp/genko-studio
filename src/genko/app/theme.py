@@ -440,7 +440,9 @@ def apply(app: QApplication | None = None, which: str | None = None) -> Tokens:
     if getattr(app, "_genko_tokens", None) == key:  # (unchanged: re-styling every open widget again is slow)
         return t
     if app.style().objectName().lower() != "fusion":
-        app.setStyle("Fusion")
+        from genko.app import glass
+
+        app.setStyle(glass.style())
     app.setPalette(palette(t))
     app.setStyleSheet(style_sheet(t, base_pt(app)))
     app._genko_tokens = key

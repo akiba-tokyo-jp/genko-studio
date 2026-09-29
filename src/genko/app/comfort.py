@@ -279,7 +279,8 @@ def radial_on() -> bool:
 
 
 class _Input(QObject):
-    """One watcher for the whole application: when a person last pressed, drew or typed."""
+    """One watcher for the whole application: when a person last pressed, drew or typed. It is on only while the
+    rest reminder is (an app-wide watcher runs for every event of every widget, which slows drawing)."""
 
     KINDS = (QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress, QEvent.Type.TabletPress, QEvent.Type.Wheel,
              QEvent.Type.TabletMove)
@@ -307,6 +308,15 @@ def last_input() -> float:
     return _input.last if _input is not None else time.monotonic()
 
 
+def _stop_input() -> None:
+    global _input
+    app = QApplication.instance()
+    if _input is not None and app is not None:
+        app.removeEventFilter(_input)
+        _input.deleteLater()
+        _input = None
+
+
 class RestReminder(QObject):
     """Counts the time actually spent working (input within the last two minutes) and, after the chosen
     minutes, says so quietly. Off (0) unless the person chooses a length in the preferences."""
@@ -318,7 +328,8 @@ class RestReminder(QObject):
         super().__init__(window)
         self.window = window
         self.worked = 0.0
-        last_input()
+        if self.minutes():
+            last_input()
         self._tick = QTimer(self)
         self._tick.setInterval(15_000)
         self._tick.timeout.connect(self._count)
@@ -337,6 +348,7 @@ class RestReminder(QObject):
             self._tick.stop()
             return
         if not self.minutes():
+            _stop_input()  # (off: nothing watches the input)
             return
         idle = time.monotonic() - last_input()
         if idle > self.RESET_IDLE_S:

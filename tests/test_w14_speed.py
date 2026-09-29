@@ -130,3 +130,39 @@ def test_alt_click_shows_one_layer_alone_and_again_brings_the_rest_back(window):
     assert [layer.id for layer in page.layers if layer.visible] == ["a"]
     window.layers.solo("a")
     assert {layer.id for layer in window._current().layers if layer.visible} == shown_before
+
+
+def test_nothing_watches_every_event_of_the_app_unless_needed(window, qapp, monkeypatch):
+    """App-wide watchers run Python for every event of every widget (slow drawing): each is on only while needed."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QMenu
+
+    from genko.app import comfort, glass
+    from genko.app import main as app_main
+
+    comfort._stop_input()
+    window.rest._count()
+    assert comfort._input is None  # (the rest reminder is off: nothing counts the input)
+    app_main._stop_key_releases()
+    from PySide6.QtGui import QKeySequence, QShortcutEvent
+
+    window.act_pen.trigger()
+    window.act_eraser.trigger()  # (its button clicked: no key to watch)
+    assert not (app_main._KEY_WATCH and app_main._KEY_WATCH[0].property("genko_on"))
+    window.act_pen.trigger()
+    qapp.sendEvent(window.act_eraser, QShortcutEvent(QKeySequence("E"), 0))  # (E pressed: its release is watched)
+    assert window.canvas.tool == "eraser" and app_main._KEY_WATCH[0].property("genko_on")
+    qapp.sendEvent(window, QKeyEvent(QEvent.Type.KeyRelease, Qt.Key.Key_E, Qt.KeyboardModifier.NoModifier))
+    assert not app_main._KEY_WATCH[0].property("genko_on")  # (let go: no longer watched)
+    monkeypatch.setattr(glass, "available", lambda: "windows")
+    shown = []
+    monkeypatch.setattr(glass, "apply", lambda w: shown.append(w) or True)
+    style = glass.GlassStyle()
+    menu = QMenu()
+    style.polish(menu)  # (the style readies the floating parts: no watcher on the app)
+    style.polish(menu)  # (readied again, as when the style is set again: still once)
+    assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    menu.show()
+    assert shown == [menu]
+    menu.close()
