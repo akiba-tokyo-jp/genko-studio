@@ -133,6 +133,8 @@ def brief_hash(panel: dict) -> str:
     from genko.studio.jsonutil import content_hash
 
     brief = {key: panel.get(key) for key in BRIEF_KEYS}
+    if isinstance(brief.get("characters"), list):  # (a character's 名札 is lettering, not part of the picture)
+        brief["characters"] = [{k: v for k, v in c.items() if k != "tag"} if isinstance(c, dict) else c for c in brief["characters"]]
     brief["regions"] = [r for r in panel.get("regions") or [] if r.get("source") == "user"] or None
     return content_hash(brief)
 
