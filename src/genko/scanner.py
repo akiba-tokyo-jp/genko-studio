@@ -31,7 +31,9 @@ def command(how: str, out: Path, dpi: int = 600, mode: str = "gray") -> list[str
         return ["scanimage", "--format=png", f"--resolution={int(dpi)}", f"--mode={colour}", f"--output-file={out}"]
     if how == "wia":
         # the scanner's own window (WIA): the person picks the scanner, the area and the colour there
-        script = ("$d = New-Object -ComObject WIA.CommonDialog; $i = $d.ShowAcquireImage(); "
+        # exit 3: no scanner (WIA says so by throwing), exit 2: the person closed the window
+        script = ("$d = New-Object -ComObject WIA.CommonDialog; "
+                  "try { $i = $d.ShowAcquireImage() } catch { exit 3 }; "
                   f"if ($i -eq $null) {{ exit 2 }}; $i.SaveFile('{out}')")
         return ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
     raise ScanError("このパソコンでは、スキャナーから直接取り込めません。スキャンした画像をファイルに保存して読み込んでください")
@@ -48,6 +50,9 @@ def scan(dpi: int = 600, mode: str = "gray", run=subprocess.run, timeout: float 
             done = run(command(how, out, dpi, mode), capture_output=True, text=True, timeout=timeout)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ScanError(f"スキャナーが応えませんでした（{exc}）") from exc
+        if getattr(done, "returncode", 1) == 3 and how == "wia":
+            raise ScanError("スキャナーが見つかりません（つないであるか、電源が入っているかを確かめてください。"
+                            "スキャンした画像のファイルなら「スキャン画像を線画にして取り込む…」で読めます）")
         if getattr(done, "returncode", 1) == 2 and how == "wia":
             raise ScanError("スキャンをやめました")
         if getattr(done, "returncode", 1) != 0 or not out.exists():

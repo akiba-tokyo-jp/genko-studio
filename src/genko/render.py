@@ -63,6 +63,12 @@ def _stroke(
 
 
 _NO_DOTS: contextvars.ContextVar[bool] = contextvars.ContextVar("genko_no_dots", default=False)  # (screens: greys, no dots)
+SCREEN_DOTS = False  # 表示 → 網点を画面で見る: the editor's page shows the tones as dots, as they print
+
+
+def _screen_dots(mode: str, dpi: int) -> bool:
+    """Dots on the page on screen too (the editor's view at a size where a dot is at least a pixel or two)."""
+    return SCREEN_DOTS and mode != "print" and dpi >= 96 and not _NO_DOTS.get()
 _STROKE_CACHE: dict = {}  # (layer id, dpi, size, guide) → (patches' signature, lines' signatures, image); oldest first
 STROKE_CACHE_SIZE = 12
 STROKE_CACHE_PIXELS = 80_000_000  # about 320 MB: a few zoomed-in (fine) layers, or a dozen normal ones
@@ -188,7 +194,9 @@ def _draw_frame_mask(page: Page, frame, size: tuple[int, int], dpi: int) -> Imag
     mask = Image.new("L", size, 0)
     draw = ImageDraw.Draw(mask)
     shape = bleed_poly(page, frame)
-    if shape is not None:
+    if _bleed_shape_mask(draw, page, frame, dpi):
+        pass
+    elif shape is not None:
         draw.polygon([_xy(p, dpi) for p in shape], fill=255)
     elif getattr(frame, "bleed", False) and not getattr(frame, "poly", None):
         draw.rectangle(rect_px(clip_box(page, frame, "bleed"), dpi), fill=255)
@@ -419,13 +427,19 @@ def gradient_image(size: tuple[int, int], dpi: int, spec: dict) -> Image.Image:
     return Image.fromarray(np.dstack([rgb, (alpha * 255).round().astype("uint8")]), "RGBA")
 
 
-def fill_layer_image(layer, size: tuple[int, int], dpi: int) -> Image.Image:
-    """A fill layer's picture: one colour over the page, or its gradient."""
+def fill_layer_image(layer, size: tuple[int, int], dpi: int, mono: bool = False) -> Image.Image:
+    """A fill layer's picture: one colour over the page, or its gradient (in grey on a monochrome page, as it prints)."""
     spec = layer.fill or {}
     if spec.get("gradient"):
-        return gradient_image(size, dpi, spec["gradient"])
-    rgb = tuple(int(v) for v in (spec.get("rgb") or layer.fill_rgb or (255, 255, 255)))[:3]
-    return Image.new("RGBA", size, (*rgb, 255))
+        image = gradient_image(size, dpi, spec["gradient"])
+    else:
+        rgb = tuple(int(v) for v in (spec.get("rgb") or layer.fill_rgb or (255, 255, 255)))[:3]
+        image = Image.new("RGBA", size, (*rgb, 255))
+    if mono:
+        alpha = image.split()[3]
+        image = image.convert("L").convert("RGBA")
+        image.putalpha(alpha)
+    return image
 
 
 def layer_effects(layer, raster: Image.Image, dpi: int) -> Image.Image:
@@ -491,6 +505,8 @@ def _clip_mask(page: Page, size: tuple[int, int], dpi: int) -> Image.Image | Non
     draw = ImageDraw.Draw(mask)
     for frame in leaves:
         shape = bleed_poly(page, frame)
+        if _bleed_shape_mask(draw, page, frame, dpi):
+            continue
         if shape is not None:  # a slanted bleed panel: out to the bleed, its slanted sides kept
             draw.polygon([_xy(p, dpi) for p in shape], fill=255)
         elif getattr(frame, "bleed", False) and not getattr(frame, "poly", None):
@@ -586,7 +602,9 @@ def _placed_raster(layer, page: Page, episode: Episode | None, size: tuple[int, 
 
         shape_mask = Image.new("L", size, 0)
         shape = bleed_poly(page, frame) if layer.clip_to == "bleed" else None
-        if shape is not None:  # (a slanted bleed panel: cut along its slanted sides, out to the bleed elsewhere)
+        if layer.clip_to == "bleed" and _bleed_shape_mask(ImageDraw.Draw(shape_mask), page, frame, dpi):
+            pass
+        elif shape is not None:  # (a slanted bleed panel: cut along its slanted sides, out to the bleed elsewhere)
             ImageDraw.Draw(shape_mask).polygon([_xy(p, dpi) for p in shape], fill=255)
         else:
             fill_frame(ImageDraw.Draw(shape_mask), frame, dpi)
@@ -730,7 +748,7 @@ def layer_image(page: Page, layer, dpi: int, episode: Episode | None = None) -> 
     if layer.kind == LayerKind.ADJUST:
         return empty
     if layer.kind == LayerKind.FILL and getattr(layer, "fill", None):
-        raster = fill_layer_image(layer, size, dpi)
+        raster = fill_layer_image(layer, size, dpi, mono=page.spec.expression != "color")
         panel_mask = _clip_mask(page, size, dpi)
         if panel_mask is not None and getattr(layer, "panel_clip", True):
             raster.putalpha(_and_alpha(raster, panel_mask))
@@ -1101,6 +1119,38 @@ def draw_border(draw: ImageDraw.ImageDraw, points: list, width_mm: float, dpi: i
         ring(points, width_px)
 
 
+def _bleed_border(draw: ImageDraw.ImageDraw, page: Page, frame, dpi: int, style: dict | None) -> None:
+    """A bleed panel's rounded or styled border: drawn on its own along the outline taken out past the paper, then
+    kept inside the bleed only, so the sides that run off the paper have no border and no rounding."""
+    from genko.placement import bleed_outline
+
+    base = getattr(draw, "_image", None)
+    points = bleed_outline(page, frame)
+    if base is None or points is None:
+        return
+    lines = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw_border(ImageDraw.Draw(lines), points, frame.border_mm if frame.border_mm is not None else 0.8, dpi, style, frame.id)
+    x0, y0, x1, y1 = rect_px(page.bleed_rect_mm(), dpi)
+    x0, y0, x1, y1 = max(0, x0), max(0, y0), min(base.size[0], x1), min(base.size[1], y1)
+    region = lines.crop((x0, y0, x1, y1))
+    if base.mode == "RGBA":
+        base.alpha_composite(region, (x0, y0))
+    else:
+        base.paste(region.convert(base.mode), (x0, y0), region)
+
+
+def _bleed_shape_mask(draw: ImageDraw.ImageDraw, page: Page, frame, dpi: int) -> bool:
+    """A rounded bleed panel's area on a mask (out past the paper where it bleeds, rounded elsewhere). False when
+    the panel is not one."""
+    from genko import frames as geo
+    from genko.placement import bleed_outline
+
+    if not getattr(frame, "bleed", False) or not geo.rounded(frame):
+        return False
+    draw.polygon([_xy(p, dpi) for p in bleed_outline(page, frame, None)], fill=255)
+    return True
+
+
 def _draw_frames(draw: ImageDraw.ImageDraw, page: Page, working_dpi: int) -> None:
     from genko import frames as geo
 
@@ -1112,6 +1162,9 @@ def _draw_frames(draw: ImageDraw.ImageDraw, page: Page, working_dpi: int) -> Non
         from genko.placement import bleed_poly, on_bleed_edge
 
         shape = bleed_poly(page, frame)
+        if frame.bleed and (geo.rounded(frame) or (style and (style.get("kind", "solid") != "solid" or style.get("rgb")))):
+            _bleed_border(draw, page, frame, working_dpi, style)
+            continue
         if shape is not None and not style and not geo.rounded(frame):
             # a slanted bleed panel: a border on the inner sides only (the sides off the paper are cut)
             for a, b in zip(shape, shape[1:] + shape[:1]):
@@ -1172,7 +1225,8 @@ def render_page(
     height = mm_to_px(page.spec.height_mm, working_dpi)
     size = (width, height)
     paper = page.extra.get("paper_rgb") if isinstance(getattr(page, "extra", None), dict) else None
-    image = Image.new("RGB", size, tuple(int(v) for v in paper[:3]) if paper else (255, 255, 255))
+    # (made in RGBA at once: converting a 600 dpi page from RGB costs as much as drawing it)
+    rgba = Image.new("RGBA", size, (*(tuple(int(v) for v in paper[:3]) if paper else (255, 255, 255)), 255))
     include_name = mode in ("name", "proof")
 
     fill_roles = (LayerRole.BG, LayerRole.INK, LayerRole.FINISH)
@@ -1184,9 +1238,8 @@ def render_page(
             continue
         if role in (LayerRole.NAME, LayerRole.DRAFT) and mode == "print":
             continue
-        image.paste(Image.new("RGB", size, fill), (0, 0))
+        rgba.paste(tuple(int(v) for v in fill[:3]) + (255,), (0, 0, *size))
 
-    rgba = image.convert("RGBA")
     prev_alpha = None
     panel_mask = _clip_mask(page, size, working_dpi)
     # lines set under a layer (テキストの重ね順): drawn just before that layer, not over everything
@@ -1216,14 +1269,15 @@ def render_page(
         if _is_tone(layer):  # tones sit in the layer order: a layer above can cover them
             from genko import tones
 
-            rgba = tones.draw_layer(rgba, layer, page, working_dpi, print_mode=mode == "print" and finish and not _NO_DOTS.get())
+            rgba = tones.draw_layer(rgba, layer, page, working_dpi, print_mode=(mode == "print" and finish and not _NO_DOTS.get())
+                                    or _screen_dots(mode, working_dpi))
             prev_alpha = None
             continue
         if layer.kind == LayerKind.ADJUST:  # a correction layer changes what is under it; it has no picture
             rgba = _adjusted(rgba, layer, prev_alpha if getattr(layer, "clip", False) else None)
             continue
         if layer.kind == LayerKind.FILL and layer.fill:
-            raster = fill_layer_image(layer, size, working_dpi)
+            raster = fill_layer_image(layer, size, working_dpi, mono=page.spec.expression != "color")
             if panel_mask is not None and getattr(layer, "panel_clip", True):
                 raster.putalpha(_and_alpha(raster, panel_mask))
             raster = _masked(layer, raster)
@@ -1248,7 +1302,8 @@ def render_page(
                 and not getattr(layer, "screen", None) and _has_colour(raster)):
             # (a picture from a painting app on a monochrome page is finished like placed art: grey and tones)
             raster = _finish_placed(raster, layer, page, episode, working_dpi, mode, (0, 0))
-        if getattr(layer, "screen", None) and mode == "print" and not _NO_DOTS.get():  # トーン化: its greys as dots in print
+        if getattr(layer, "screen", None) and ((mode == "print" and not _NO_DOTS.get()) or _screen_dots(mode, working_dpi)):
+            # トーン化: its greys as dots in print (and on screen when asked)
             from genko import tones
 
             raster = tones.screened(raster, layer.screen, working_dpi)

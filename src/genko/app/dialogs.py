@@ -752,6 +752,10 @@ class ExportDialog(QDialog):
             if label is not None:
                 label.setVisible(visible)
         self.colour_head.setVisible(any(key in fmt.options for key in ("color", "icc", "screen")))  # (no empty heading)
+        cmyk = self.color.findData("cmyk")  # (a PNG has no CMYK)
+        self.color.model().item(cmyk).setEnabled(fmt.key != "png")
+        if fmt.key == "png" and self.color.currentData() == "cmyk":
+            self.color.setCurrentIndex(self.color.findData("auto"))
         self.screen_row.setEnabled(self._bitonal())
         self.dpi.setValue(exporting.default_dpi(self.episode, fmt.key))
         self.long_edge.setValue(2560 if fmt.key == "kindle" else 2048)

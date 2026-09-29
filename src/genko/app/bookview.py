@@ -52,6 +52,26 @@ def spreads(count: int) -> list[list[int]]:
     return out
 
 
+def book_spreads(episode, pages: list) -> list[list[int]]:
+    """Which of `pages` (book_pages) lie open together, as the book is bound: each cover alone, and the pages paired
+    only where they face each other (the same pairs the pre-press check and the page sides use: in a right-bound
+    book page 1 alone, then 2・3, 4・5…)."""
+    from genko.ops import facing_problem
+
+    out: list[list[int]] = []
+    i = 0
+    while i < len(pages):
+        kind, page = pages[i]
+        if kind == "page" and i + 1 < len(pages) and pages[i + 1][0] == "page" \
+                and not facing_problem(episode, page, pages[i + 1][1]):
+            out.append([i, i + 1])
+            i += 2
+            continue
+        out.append([i])
+        i += 1
+    return out
+
+
 class BookView(QWidget):
     def __init__(self, dialog) -> None:
         super().__init__()
@@ -114,7 +134,7 @@ class BookPreview(QDialog):
         self.resize(1000, 700)
         self.pages = book_pages(window.episode)
         self.rtl = window.episode.binding == Binding.RIGHT
-        self.groups = spreads(len(self.pages))
+        self.groups = book_spreads(window.episode, self.pages)
         self.spread = 0
         self._cache: dict[int, QPixmap] = {}
         self._turning: int | None = None
@@ -124,7 +144,8 @@ class BookPreview(QDialog):
         self.slider.setRange(0, max(0, len(self.groups) - 1))
         self.slider.setInvertedAppearance(self.rtl)
         self.slider.valueChanged.connect(self.go)
-        prev_b, next_b = QPushButton("◀"), QPushButton("▶")
+        # (a right-bound book reads to the left: ◀ is the next page there, and the buttons say so)
+        prev_b, next_b = QPushButton("◀ 次へ" if self.rtl else "◀ 前へ"), QPushButton("前へ ▶" if self.rtl else "次へ ▶")
         prev_b.setToolTip("左へめくる")
         next_b.setToolTip("右へめくる")
         prev_b.clicked.connect(lambda: self.flip(1 if self.rtl else -1))
@@ -172,6 +193,9 @@ class BookPreview(QDialog):
             return None, None
         group = self.groups[max(0, min(spread, len(self.groups) - 1))]
         if len(group) == 1:
+            kind, page = self.pages[group[0]]
+            if kind == "page":  # (a page alone lies on its own side of the open book)
+                return (group[0], None) if page.side(self.window.episode.start_side) == "left" else (None, group[0])
             first = group[0] == 0
             # the cover (or the last page) lies on the side the book opens from
             alone_on_left = (first and self.rtl) or (not first and not self.rtl)

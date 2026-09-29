@@ -54,6 +54,8 @@ EFFECT_MORE = [("bundle", "まとまり（1 束の本数）", 1, 50, 1, 1), ("bu
                ("jitter_length", "乱れ: 長さ", 0, 1, 0.05, None), ("jitter_position", "乱れ: 位置", 0, 1, 0.05, None),
                ("jitter_width", "乱れ: 太さ", 0, 1, 0.05, None)]
 TAPERS = [("中心側・終わりを細く（入り）", "in"), ("外側・始めを細く（抜き）", "out"), ("両端を細く", "both"), ("なし", "none")]
+# (流線 has no centre: its ends are where the lines flow to and where they come from)
+SPEED_TAPERS = [("流れる先を細く", "in"), ("流れてくる元を細く", "out"), ("両端を細く", "both"), ("なし", "none")]
 
 
 def _icon(image) -> QIcon:
@@ -142,13 +144,20 @@ class MaterialPanel(QWidget):
         self.dot_shape.setToolTip("網点の形（網の種類）。四角は 50% で角どうしがつながる")
         self.dot_shape.activated.connect(lambda _: self._tone({"dot_shape": self.dot_shape.currentData()}))
         self.off_x, self.off_y = QDoubleSpinBox(), QDoubleSpinBox()
+        from PySide6.QtCore import QTimer
+
+        self._offset_timer = QTimer(self)
+        self._offset_timer.setSingleShot(True)
+        self._offset_timer.setInterval(700)
+        self._offset_timer.timeout.connect(self._offset_now)
         for spin, tip in ((self.off_x, "網を右へずらす（mm）"), (self.off_y, "網を下へずらす（mm）")):
             spin.setRange(-20, 20)
             spin.setSingleStep(0.1)
             spin.setDecimals(2)
             spin.setSuffix(" mm")
             spin.setToolTip(tip + "。貼る場所はそのままで、網点の並びだけが動く（隣のトーンと網をそろえる・モアレを避ける）")
-            spin.editingFinished.connect(lambda: self._tone({"offset_mm": [self.off_x.value(), self.off_y.value()]}))
+            spin.valueChanged.connect(self._offset_typed)  # (kept without Enter)
+            spin.editingFinished.connect(self._offset_now)
         offset_row = QHBoxLayout()
         offset_row.addWidget(self.off_x)
         offset_row.addWidget(self.off_y)
@@ -395,6 +404,8 @@ class MaterialPanel(QWidget):
         return layer if kind == "tone" else None
 
     def refresh(self) -> None:
+        if self._offset_timer.isActive():  # (a shift typed a moment ago is kept before the fields are reloaded)
+            self._offset_now()
         self._loading = True
         layer = self._tone_layer()
         self.tone_box.setEnabled(layer is not None)
@@ -460,6 +471,23 @@ class MaterialPanel(QWidget):
         if self._loading or layer is None:
             return
         self.window.apply_ops([{"op": "set_tone", "page": self.window.current_page().index, "id": layer.id, **change}])
+
+    def _offset_typed(self, _value: float) -> None:
+        if not self._loading:
+            layer = self._tone_layer()
+            self._offset_layer = layer.id if layer is not None else None
+            self._offset_timer.start()
+
+    def _offset_now(self) -> None:
+        self._offset_timer.stop()
+        layer = self._tone_layer()
+        if layer is None or layer.id != getattr(self, "_offset_layer", layer.id):
+            return
+        from genko.tones import settings
+
+        now = [round(self.off_x.value(), 2), round(self.off_y.value(), 2)]
+        if [round(float(v), 2) for v in (settings(layer).get("offset_mm") or (0, 0))] != now:
+            self._tone({"offset_mm": now})
 
     def _gradient(self) -> None:
         shape = self.gradient.currentData()
@@ -550,7 +578,7 @@ class MaterialPanel(QWidget):
             from PySide6.QtWidgets import QPushButton
 
             taper = QComboBox()
-            for text, value in TAPERS:
+            for text, value in (SPEED_TAPERS if kind == "speed" else TAPERS):
                 taper.addItem(text, value)
             now = params.get("taper", True)
             now = ("in" if kind == "focus" else "both") if now in (True, None, "True") else ("none" if now in (False, "", "none") else now)

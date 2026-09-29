@@ -171,7 +171,7 @@ class TextToolSettings(QWidget):
         self.vertical = QCheckBox("縦書き")
         self.vertical.setChecked(True)
         self.draw_balloon = QCheckBox("フキダシを手で描く")
-        self.draw_balloon.setToolTip("ドラッグで囲んだ形がフキダシになり、そのあと台詞を打ちます")
+        self.draw_balloon.setToolTip("ドラッグで囲んだ形がフキダシになり、そのあと台詞を打ちます。クリックだけなら、いつもどおり台詞を置きます")
         self.font = QComboBox()
         self.font.addItem("いつもの書体（アンチック）", "")
         for key, (label, *_rest) in fonts.BUNDLED.items():

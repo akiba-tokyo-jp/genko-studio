@@ -2,6 +2,7 @@
 blend modes; several layers merged, grouped, moved and set at once; the visible layers merged; pen ⇄ paint;
 the paper's colour; liquify; skew handles and the transform's resampling; the added filters."""
 
+import dataclasses
 import os
 import sys
 from pathlib import Path
@@ -56,6 +57,7 @@ def _at(ep, x, y, mode="print"):
 
 def test_a_fill_layer_is_a_colour_that_can_be_changed(tmp_path):
     ep = _book()
+    ep.pages[0].spec = dataclasses.replace(ep.pages[0].spec, expression="color")  # (on a monochrome page a fill shows grey)
     apply_ops(ep, [{"op": "add_layer", "page": 1, "kind": "fill", "id": "f", "rgb": [240, 220, 100], "after": "red"}])
     assert _layer(ep, "f").kind == LayerKind.FILL and _layer(ep, "f").title == "ベタ塗り"
     assert _at(ep, 120, 120)[:3] == (240, 220, 100)
@@ -69,6 +71,7 @@ def test_a_fill_layer_is_a_colour_that_can_be_changed(tmp_path):
 
 def test_a_gradient_layer_runs_from_one_colour_to_the_other():
     ep = new_episode("t", 1, 1, PageSpec.b4_comic())
+    ep.pages[0].spec = dataclasses.replace(ep.pages[0].spec, expression="color")
     h = ep.pages[0].spec.height_mm
     apply_ops(ep, [{"op": "add_layer", "page": 1, "kind": "gradient", "id": "g",
                     "gradient": {"from": [0, 0], "to": [0, h], "rgb_from": [255, 0, 0], "rgb_to": [0, 0, 255]}},

@@ -39,9 +39,12 @@ class InlineEditor(QPlainTextEdit):
         self.setPlainText(text)
         self.setStyleSheet(f"QPlainTextEdit{{background:#fffdf5;color:#1f2124;border:2px solid {theme.tokens().accent};font-size:15px}}")
         self.setPlaceholderText("台詞を入力（改行で次の列、ルビは ｜約束《やくそく》、傍点は 《《強調》》）")
-        self.hint = QLabel("Ctrl+Enter で決定・Esc でやめる", parent)
+        self.hint = QLabel("Ctrl+Enter で決定・Esc でやめる・文字を選んで右クリックで大きく・太く・色", parent)
         self.hint.setStyleSheet(f"background:{theme.tokens().accent};color:{theme.tokens().accent_text};padding:1px 6px;border-radius:3px")
         self.hint.adjustSize()
+        from genko.app import text_style
+
+        text_style.install(self)  # (the chosen characters made larger, bolder or coloured without typing the notation)
 
     def place(self, x: float, y: float) -> None:
         self.setGeometry(int(x), int(y), 260, 110)
@@ -75,6 +78,8 @@ class InlineEditor(QPlainTextEdit):
 
     def focusOutEvent(self, event) -> None:  # noqa: N802
         super().focusOutEvent(event)
+        if getattr(self, "_menu_open", False) or event.reason() == Qt.FocusReason.PopupFocusReason:
+            return  # (its own right-click menu, or the reading asked for a ruby: still typing)
         self.finish(True)
 
 
@@ -102,7 +107,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
     textRequested = Signal(float, float)  # the text tool clicked here (mm)
     gutterMoved = Signal(str, int, float)  # split node id, gutter index, delta mm (a move_gutter op)
     cutRequested = Signal(str, QPointF, QPointF)  # panel id, cut line ends (mm): a cut_frame op
-    frameShaped = Signal(str, object)  # panel id, [[x, y], …]: a free-form panel (set_frame poly)
+    frameShaped = Signal(str, object)
+    toolHeld = Signal(str)  # a key held switched the tool for a moment (or let go: back): the tool now  # panel id, [[x, y], …]: a free-form panel (set_frame poly)
     frameBowed = Signal(str, int, float)  # panel id, edge, mm: an edge bowed out (+) or in (−) (set_frame bow)
     vectorTraced = Signal(object, str)  # the trace [[x, y, pressure], …] and how it mends the lines (trace_edit)
     frameDrawn = Signal(object)  # [[x, y], …] (mm): a new panel drawn with the panel tool (an add_frame op)
@@ -230,6 +236,7 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
 
     def set_tool(self, tool: str) -> None:
         self.tool = tool
+        self._held_tool = None  # (a tool chosen while a key holds another is the tool now: letting go keeps it)
         self._stroke = []
         self._ruler_draft = None
         self._update_cursor()
@@ -1853,6 +1860,8 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
             xs, ys = [p[0] for p in pts], [p[1] for p in pts]
             if len(pts) >= 3 and max(xs) - min(xs) > 4 and max(ys) - min(ys) > 4 and max(math.dist(pts[0], p) for p in pts) > 4:
                 self.balloonDrawn.emit(pts)
+            elif max(math.dist(pts[0], p) for p in pts) <= 2:  # (a click, not a drag: a line is placed as without the pen)
+                self.textRequested.emit(pts[0][0], pts[0][1])
             self.update()
             return
         if self.tool in ("lassofill", "marquee") and self._stroke:
@@ -2030,10 +2039,12 @@ class PageCanvas(GuideMixin, ShapeSelectMixin, VectorMixin, QWidget):
                 self.tool = tool
                 self._update_cursor()
                 self.update()
+                self.toolHeld.emit(tool)
         elif self._held_tool is not None and getattr(self, "_held_key", key) == key:  # (only the key that switched puts it back)
             self.tool, self._held_tool = self._held_tool, None
             self._update_cursor()
             self.update()
+            self.toolHeld.emit(self.tool)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
