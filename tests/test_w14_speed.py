@@ -156,6 +156,7 @@ def test_nothing_watches_every_event_of_the_app_unless_needed(window, qapp, monk
     style = glass.GlassStyle()
     menu = QMenu()
     style.polish(menu)  # (the style readies the floating parts: no watcher on the app)
+    style.polish(menu)  # (readied again, as when the style is set again: still once)
     assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
     menu.show()
     assert shown == [menu]

@@ -121,7 +121,9 @@ class GlassStyle(QProxyStyle):
 
     def polish(self, arg):  # (three overloads: a widget, a palette, the app)
         result = super().polish(arg)
-        if isinstance(arg, QWidget) and arg.isWindow() and arg.property("glass") is None and wants(arg):
+        if isinstance(arg, QWidget) and arg.isWindow() and arg.property("glass") is None \
+                and not arg.property("glass_readied") and wants(arg):
+            arg.setProperty("glass_readied", True)  # (once: a style set again readies every widget again)
             arg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)  # (before its window is made)
             arg.installEventFilter(self._shown)
         return result
