@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from genko.app import review_model, wording
+from genko.app import inputs, review_model, wording
 from genko.app.brush_panel import BrushPanel
 from genko.app.canvas import make_canvas
 from genko.app.guide_panel import PRESETS, GuidePanel
@@ -90,6 +90,9 @@ class StoryPanel(QWidget):
         self.text.setPlaceholderText("台詞を打つ（改行で次の列へ）")
         self.text.setToolTip("ルビは ｜約束《やくそく》、傍点は 《《強調》》、一部を大きく {大|…}・太く {太|…}・赤く {赤|…}、"
                              "好きな色 {#3060c0|…}・大きさ {×1.3|…}・縦中横 {縦中横|12}（重ねるときは {大、赤|…}）")
+        from genko.app import text_style
+
+        text_style.install(self.text)  # (or choose the characters and right-click: 選んだ文字を)
         self.text.setMaximumHeight(80)
         self.kind = QComboBox()
         for key, label in KINDS:
@@ -245,6 +248,8 @@ class StoryPanel(QWidget):
         form.addRow("白フチ", self.outline)
         form.addRow("フキダシの線", self.border)
         form.addRow("フキダシの中", self.fill)
+        form.addRow("", self.line_colour)  # (the balloon's colours beside its line and inside, not at the bottom)
+        form.addRow("", self.fill_colour)
         form.addRow("", self.tcy)
         form.addRow("欧文", self.latin)
         form.addRow("傍点", self.mark)
@@ -264,8 +269,6 @@ class StoryPanel(QWidget):
         form.addRow("", self.yakumono)
         form.addRow("", self.color)
         form.addRow("", self.gradient)
-        form.addRow("", self.line_colour)
-        form.addRow("", self.fill_colour)
         form.addRow("中の塗りの濃さ", self.fill_cover)
         shift = QHBoxLayout()
         shift.addWidget(self.text_dx)
@@ -1589,6 +1592,16 @@ FILTER_FIELDS = {
 }
 
 
+# what the numbers mean in practice (the tester could not tell which were big or small)
+FIELD_TIPS = {
+    "despeckle": {"size_mm": "これより小さい点を取ります。スキャンの細かいゴミは 0.3〜0.5mm、スマホで撮った紙のざらつきは 1〜2mm。"
+                             "大きくしすぎると句読点や細かい描き込みも消えます"},
+    "lineart": {"threshold": "0.6 前後: 濃い線だけ。0.72（標準）: ふつうの鉛筆・ペン。0.85 以上: 薄い線や紙のムラまで拾う",
+                "radius": "線の太さのおよそ（px）。細いペンは 5〜7、太い筆は 11〜21。紙のムラを拾うときは大きく",
+                "min_px": "これより小さい黒い点を捨てます（px）。スキャンなら 8〜20、撮った紙なら 30〜80"},
+}
+
+
 def filter_params(parent, kind: str, now: dict | None = None, preview=None, histogram=None) -> dict | None:
     """The numbers of a filter or a colour adjustment, asked once (None: the person stopped). `preview(params)`
     shows the result on the page while they change."""
@@ -1601,7 +1614,9 @@ def filter_params(parent, kind: str, now: dict | None = None, preview=None, hist
         fields = plugins.fields(kind)
     if not fields and kind != "curve":
         return {}
-    return filter_dialog.ask(parent, kind, fields or [], now, preview, histogram=histogram)
+    title = dict(wording.FILTERS).get(kind) or dict(wording.ADJUSTMENTS).get(kind) or "フィルターの強さ"
+    return filter_dialog.ask(parent, kind, fields or [], now, preview, title=title, histogram=histogram,
+                             tips=FIELD_TIPS.get(kind))
 
 
 class MainWindow(QMainWindow):
@@ -1620,6 +1635,7 @@ class MainWindow(QMainWindow):
         self._doc = 0
         self._closed = False
         documents.register(self)
+        inputs.install()
         self._page_index = 0
         self._commit_timer = QTimer(self)
         self._commit_timer.setSingleShot(True)
@@ -1699,6 +1715,7 @@ class MainWindow(QMainWindow):
         self._dock_timer.timeout.connect(self._refresh_visible_docks)
         self._stale_docks: set = set()
         self.canvas.zoomChanged.connect(lambda _: self._refresh_zoom())
+        self.canvas.toolHeld.connect(self._tool_held)
 
         # the page gets the room; everything else sits in panels around it. Above it, a tab for each open book
         self.doc_tabs = QTabBar()
@@ -1776,8 +1793,29 @@ class MainWindow(QMainWindow):
     def current_page(self):
         return self._current()
 
+    SLOW_OPS = {"trace_prims": "3D を線にしています…", "add_cover": "表紙を作っています…", "add_scene": "3D の背景を置いています…",
+                "add_prim3d": "3D を置いています…", "pose_figure": "3D のポーズを変えています…",
+                "pose_mannequin": "3D のポーズを変えています…", "import_pages": "ページを取り込んでいます…"}
+
     def apply_ops(self, ops: list[dict]) -> bool:
         """Apply in memory as the person, show it at once, and write it after a short pause."""
+        slow = next((self.SLOW_OPS[o.get("op")] for o in ops if o.get("op") in self.SLOW_OPS), None)
+        if slow is None:
+            return self._apply_ops(ops)
+        # (a long one says so and shows the busy cursor until the page is drawn again)
+        self.status.setText(f"<b>{slow}</b>")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QApplication.processEvents()
+        try:
+            return self._apply_ops(ops)
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    # ops that add or take away pages without changing the others (their pictures in the page list are kept)
+    PAGE_COUNT_OPS = {"add_cover", "add_page", "import_pages", "delete_page", "duplicate_page"}
+
+    def _apply_ops(self, ops: list[dict]) -> bool:
+        before = {p.id: p.index for p in self.episode.pages}
         try:
             self.session.apply(ops)
         except ApplyError as exc:
@@ -1790,7 +1828,11 @@ class MainWindow(QMainWindow):
         if self.session.path is not None:
             self._commit_timer.start()
         if self.pages.count() != len(self.episode.pages):
-            self._reload_pages()
+            keep = None
+            if all(o.get("op") in self.PAGE_COUNT_OPS for o in ops):  # (a cover added: the other pages look the same)
+                touched = {o.get("page") for o in ops}
+                keep = {p.id for p in self.episode.pages if before.get(p.id) == p.index and p.index not in touched}
+            self._reload_pages(keep=keep)
         else:
             self._after_edit()
         self._tell_others()
@@ -2074,6 +2116,8 @@ class MainWindow(QMainWindow):
         self.act_timelapse_export = a("タイムラプスを書き出す…", self._export_timelapse, tip="記録した制作過程を動く画像（WebP・GIF・PNG・MP4）に")
         self.act_cmyk_proof = a("CMYK で見る（色校正）", self._toggle_cmyk_proof, checkable=True,
                                 tip="印刷したときの色の見当（CMYK の範囲に収めた色）で表示します。プロファイルは書き出しで選んだもの")
+        self.act_screen_dots = a("網点を画面で見る", self._toggle_screen_dots, checkable=True,
+                                 tip="トーンを、印刷と同じ網点で表示します（拡大すると点が見えます）。切ると平らな灰色で速く描きます")
         self.act_select = a("選択", lambda: self._tool("select"), "V", "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", True)
         self.act_pen = a("ペン", lambda: self._tool("pen"), "B", "レイヤー パネルで選んだレイヤーに描きます", True)
         self.act_eraser = a("消しゴム", lambda: self._tool("eraser"), "E", "ペンの線は触れた所で切れます", True)
@@ -2118,7 +2162,8 @@ class MainWindow(QMainWindow):
                                  tip="線の編集で選んだ制御点のところだけ、線を太くします")
         self.act_point_thinner = a("選んだ点を細く", lambda: self._point_width(0.8), "Ctrl+Alt+[",
                                    tip="線の編集で選んだ制御点のところだけ、線を細くします")
-        self.act_fill_gaps = a("塗り残しを塗る", self._fill_gaps, None, "塗った色の間に残った小さなすき間を、同じ色で塗ります")
+        self.act_fill_gaps = a("塗り残しを塗る", self._fill_gaps, None,
+                               "塗った色の間に残った小さなすき間を、同じ色で塗ります。選択範囲があればその中を、無ければなぞった所を")
         self.act_swap_colour = a("メインとサブの色を入れ替える", lambda: self.colours.swap(), "X")
         self.act_transparent = a("透明色で描く", lambda on: self.colours.transparent.setChecked(on), None,
                                  "ペンで描いた所が消える（もう一度で戻る）", True)
@@ -2340,7 +2385,8 @@ class MainWindow(QMainWindow):
                       self.act_delete_area, None, self.act_select_all, self.act_deselect]),
             ("表示", [self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_actual, self.act_zoom_value, self.act_zoom_tool, None, self.act_turn_left,
                       self.act_turn_right, self.act_mirror, self.act_view_flip_v, self.act_turn_reset, None, self.act_overview, self.act_prev, self.act_next,
-                      None, self.act_guides, self.act_phone, self.act_scale, self.act_onion, self.act_cmyk_proof, None, self.act_tool_names]),
+                      None, self.act_guides, self.act_phone, self.act_scale, self.act_onion, self.act_cmyk_proof,
+                      self.act_screen_dots, None, self.act_tool_names]),
             # the tools, and under them the rulers, the 3D figures and the tones and effect lines (fewer menus in the
             # bar: nine, not thirteen; everything is still found by コマンドを探す)
             ("ツール", [self.act_select, self.act_move, self.act_pen, self.act_eraser, self.act_blend, self.act_shape, self.act_text, self.act_frame, None,
@@ -3395,6 +3441,12 @@ class MainWindow(QMainWindow):
         self.story.refresh()
         self.layers.refresh()
         self.library.refresh()
+        for dock in getattr(self, "studio_docks", ()):  # (the rest follow the page too: now if shown, else when next shown)
+            if dock.windowTitle() in ("素材", "定規・3D", "点検", "履歴"):
+                if self._dock_visible(dock):
+                    self._refresh_dock(dock)
+                else:
+                    self._stale_docks.add(dock)
 
     @staticmethod
     def _has_frame(page, frame_id: str) -> bool:
@@ -3438,10 +3490,10 @@ class MainWindow(QMainWindow):
             extra += f"\n担当 {who}"
         return f"{page.index} ページ\n{name}{art}{done}{extra}"
 
-    def _reload_pages(self) -> None:
+    def _reload_pages(self, keep: set | None = None) -> None:
         if hasattr(self, "agent_docks"):
             self._agent_view(self._agent_book())  # an agent may have started working on this book
-        self.pages.fill(self.episode.pages, self._page_text, dirty="all")
+        self.pages.fill(self.episode.pages, self._page_text, dirty="all", keep=keep)
         self._remember_pages()
         self.pages.blockSignals(True)
         self.pages.setCurrentRow(min(self._page_index, len(self.episode.pages) - 1))
@@ -3780,6 +3832,16 @@ class MainWindow(QMainWindow):
         if hasattr(self, "tool_settings"):
             self.tool_settings.show_tool(self.canvas.tool)
         self._panel_for_tool(tool)
+
+    def _tool_held(self, tool: str) -> None:
+        """A modifier held switched the tool for a moment: its button and its settings show the tool in use."""
+        action = self.tool_actions.get(tool) or (self.tool_actions.get("rect") if tool == "marquee" else None)
+        if action is not None:
+            action.setChecked(True)
+        if hasattr(self, "tool_settings"):
+            self.tool_settings.show_tool(tool)
+            if self.canvas._held_tool is not None:  # (for the moment the key is held)
+                self.tool_settings.title.setText(self.tool_settings.title.text() + "（キーを押している間）")
 
     def hold_key_released(self, key: int, now: float | None = None) -> bool:
         """キーを押している間だけ持ち替え: the key of the tool chosen last let go after a hold brings back the tool
@@ -4376,11 +4438,15 @@ class MainWindow(QMainWindow):
         layer, page = self._paint_layer(), self._current()
         if layer is None or page is None:
             return
-        op = {"op": "fill_gaps", "page": page.index, "layer_id": layer.id, "max_mm": self.brush.gap_size.value()}
         area = self._area()
-        if area is not None:
-            op["area"] = area
-        self.apply_ops([op])
+        if area is None:  # (no range chosen: the tool that traces over the gaps, not the whole layer at once)
+            self.brush.lasso_mode.setCurrentIndex(max(0, self.brush.lasso_mode.findData("gaps")))
+            self._tool("lassofill")
+            self.flash("塗り残しの所をなぞると、そこだけ塗ります（囲って塗る・なぞった所の塗り残し）。"
+                       "レイヤー全体なら、先にすべて選択（Ctrl+A）してから", 6000)
+            return
+        self.apply_ops([{"op": "fill_gaps", "page": page.index, "layer_id": layer.id, "max_mm": self.brush.gap_size.value(),
+                         "area": area}])
 
     def _join_selection(self, area: dict | None, how: str) -> None:
         from genko import selops
@@ -6018,8 +6084,23 @@ class MainWindow(QMainWindow):
             return
         if page.spread_with:
             self.set_spread(page.index, None)
-        elif page.index < len(self.episode.pages):
-            self.set_spread(page.index, page.index + 1)
+            return
+        from genko.ops import facing_problem
+
+        pages = {p.index: p for p in self.episode.pages}
+        nxt, prev = pages.get(page.index + 1), pages.get(page.index - 1)
+        if nxt is not None and not facing_problem(self.episode, page, nxt):
+            self.set_spread(page.index, nxt.index)
+            return
+        # (with the next page it would be the two sides of one sheet: the page it faces is the one before)
+        if prev is not None and not facing_problem(self.episode, prev, page):
+            answer = QMessageBox.question(
+                self, "見開き", f"{page.index} ページと {page.index + 1} ページは 1 枚の紙の表と裏なので、見開きになりません。\n"
+                f"{page.index} ページと向かい合うのは {prev.index} ページです。{prev.index}・{page.index} ページを見開きにしますか？")
+            if answer == QMessageBox.StandardButton.Yes:
+                self.set_spread(prev.index, page.index)
+            return
+        self.flash(f"{page.index} ページには向かい合うページがありません", 4000)
 
     def _toggle_page_nombre(self) -> None:
         page = self._current()
@@ -6191,6 +6272,12 @@ class MainWindow(QMainWindow):
         target = plugins.folder()
         target.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
+    def _toggle_screen_dots(self, on: bool) -> None:
+        from genko import render
+
+        render.SCREEN_DOTS = bool(on)
+        self.canvas.invalidate()
 
     def _toggle_cmyk_proof(self, on: bool) -> None:
         self._cmyk_proof = bool(on)

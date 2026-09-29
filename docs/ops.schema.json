@@ -202,7 +202,7 @@
       "op": "import_pages",
       "from": "str (another book: its .genko folder)",
       "pages": "[int]? (default all)",
-      "after": "int? (insert after this page; default at the end)",
+      "after": "int? (insert after this page; default at the end, before any covers at the back)",
       "note": "作品の結合: the pages and their lines are copied; the other book's asset files must be copied into this book's assets first (the app and the MCP export do)"
     },
     {

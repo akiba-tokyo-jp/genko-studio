@@ -25,7 +25,7 @@ class Format:
 FORMATS: list[Format] = [
     Format("pdf", "PDF（印刷）", "1 冊の PDF。印刷所・校正用。色は自動（モノクロはグレー）・RGB・CMYK・グレー・2 階調から。仕上がりの位置（TrimBox）入り。", ("dpi", "area", "color", "icc", "screen"), True),
     Format("tiff", "TIFF（入稿）", "ページごとの 2 値 TIFF。モノクロの入稿用。", ("dpi", "area", "screen"), True),
-    Format("png", "PNG", "ページごとの PNG。", ("dpi", "area"), True),
+    Format("png", "PNG", "ページごとの PNG。色は自動（モノクロはグレー）・RGB・グレー・2 階調から。", ("dpi", "area", "color", "screen"), True),
     Format("cmyk", "CMYK（カラー入稿）", "ページごとの CMYK の TIFF。印刷所のカラープロファイル（ICC）を選ぶとそれで変換して埋め込む。"
            "選ばなければ、黒い線は K 版だけ・総インキ量は 320% 以内にして変換する。", ("dpi", "area", "icc")),
     Format("layers", "レイヤーごとの PNG", "ページごとのフォルダーに、レイヤーを 1 枚ずつ透明な PNG で（下のレイヤーから番号順）。", ("dpi", "area")),

@@ -61,6 +61,16 @@ def test_the_scanner_through_the_computers_own_command(monkeypatch):
 
     with pytest.raises(scanner.ScanError, match="no SANE devices"):
         scanner.scan(run=fails)
+    # Windows: no scanner at all is said so, not "stopped"; the person closing the window is "stopped"
+    monkeypatch.setattr(scanner, "method", lambda: "wia")
+    for code, words in ((3, "見つかりません"), (2, "やめました")):
+        def wia(cmd, code=code, **kwargs):
+            class Done:
+                returncode, stderr = code, ""
+            return Done()
+
+        with pytest.raises(scanner.ScanError, match=words):
+            scanner.scan(run=wia)
     monkeypatch.setattr(scanner, "method", lambda: None)
     with pytest.raises(scanner.ScanError):
         scanner.scan()

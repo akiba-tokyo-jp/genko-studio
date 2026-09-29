@@ -52,7 +52,7 @@ OPS_SCHEMA: list[dict[str, Any]] = [
     {"op": "set_layer", "page": "int", "layer": "str", "id": "str?", "visible": "bool?", "exportable": "bool?", "opacity": "float?", "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?", "clip": "bool?", "lock_alpha": "bool?", "locked": "bool?", "panel_clip": "bool? (false: lines run out of the panels)", "panel_each": "bool? (true: each line stays in the panel it begins in)", "name": "str?", "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)", "reference": "bool? (fills with reference: reference look at this layer)", "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape: linear|radial|ellipse, ratio, repeat: none|repeat|mirror, stops: [[pos, [r,g,b], opacity]…]}}? (a fill layer)", "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)", "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)", "color_prints": "bool? (the layer colour is printed too)", "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white, shape: round|square|diamond|ellipse, offset_mm: [x,y]} | null? (トーン化: the layer's greys print as a halftone)"},
     {"op": "add_page", "count": "int", "after": "int? (insert after this page; default after the last story page, before any covers)"},
     {"op": "delete_page", "page": "int"},
-    {"op": "import_pages", "from": "str (another book: its .genko folder)", "pages": "[int]? (default all)", "after": "int? (insert after this page; default at the end)", "note": "作品の結合: the pages and their lines are copied; the other book's asset files must be copied into this book's assets first (the app and the MCP export do)"},
+    {"op": "import_pages", "from": "str (another book: its .genko folder)", "pages": "[int]? (default all)", "after": "int? (insert after this page; default at the end, before any covers at the back)", "note": "作品の結合: the pages and their lines are copied; the other book's asset files must be copied into this book's assets first (the app and the MCP export do)"},
     {"op": "duplicate_page", "page": "int", "next_to": "bool? (the copy right after the page; default at the end)"},
     {"op": "set_page_spec", "preset": "b4|b5|a5|a4|webtoon?", "paper": "[w,h]? mm", "trim": "[w,h]? (finished size)", "bleed_mm": "float?", "margins": "[top,bottom,inner,outer] | {top,bottom,inner,outer}? (basic frame, from the trim)", "dpi": "int?", "move": "bool? (default true: move everything onto the new basic frame)"},
     {"op": "set_nombre", "page": "int? (with numero: show or hide that page's)", "numero": "bool?", "position": "bottom_center|bottom_outside|top_outside|side_outside?", "font": "str?", "size_mm": "float?", "start": "int? (the number of page 1)", "hidden": "bool? (隠しノンブル)", "hidden_size_mm": "float?", "show": "bool? (visible nombres)"},
@@ -2674,7 +2674,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         remap_page_refs(episode, mapping)
         return
 
-    if name == "import_pages":  # 作品の結合: pages of another book added after this one's (their lines too)
+    if name == "import_pages":  # 作品の結合: pages of another book added after this one's, before its covers (lines too)
         from genko.io import load_episode
 
         try:
@@ -2715,8 +2715,14 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
             episode.pages.append(clone)
         for key, info in ((other.studio or {}).get("assets") or {}).items():  # (what the pages' pictures are)
             episode.studio.setdefault("assets", {}).setdefault(key, info)
-        if op.get("after") is not None:
-            after = max(0, min(start, int(op["after"])))
+        from genko import covers
+
+        tail = 0  # (covers, jackets and bands at the back stay at the back: the pages go in before them)
+        while tail < start and covers.cover_of(episode.pages[start - 1 - tail]):
+            tail += 1
+        after = op.get("after") if op.get("after") is not None else (start - tail if tail else None)
+        if after is not None:
+            after = max(0, min(start, int(after)))
             order = [p.index for p in episode.pages[:start]]
             order[after:after] = list(range(start + 1, start + len(wanted) + 1))
             _reorder(episode, order)
@@ -3184,7 +3190,7 @@ def _apply_one(episode: Episode, op: dict[str, Any]) -> None:
         from genko import mesh3d
 
         for prim in chosen:
-            for line in prim3d.trace(mesh3d.with_camera(prim, page)):
+            for line in prim3d.join_lines(prim3d.trace(mesh3d.with_camera(prim, page))):
                 stroke = coerce_stroke([(round(x, 3), round(y, 3)) for x, y in line])
                 stroke.kind = kind
                 stroke.width_mm = float(op.get("width_mm") or 0.3)

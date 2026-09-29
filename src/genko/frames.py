@@ -98,11 +98,15 @@ def rounded(frame: Frame) -> bool:
     return curves_of(frame) is not None or float(getattr(frame, "corner_mm", 0) or 0) > 0
 
 
-def _round_corners(pts: list[Point], radius: float) -> list[Point]:
-    """Each corner cut back along both edges and joined by a round (a quarter circle at a right angle)."""
+def _round_corners(pts: list[Point], radius: float, keep: frozenset | set = frozenset()) -> list[Point]:
+    """Each corner cut back along both edges and joined by a round (a quarter circle at a right angle); the
+    corners in `keep` stay sharp (a bleed panel's corners off the paper)."""
     out: list[Point] = []
     n = len(pts)
     for i, p in enumerate(pts):
+        if i in keep:
+            out.append(p)
+            continue
         a, b = pts[i - 1], pts[(i + 1) % n]
         la, lb = math.dist(p, a), math.dist(p, b)
         if la < EPS or lb < EPS:

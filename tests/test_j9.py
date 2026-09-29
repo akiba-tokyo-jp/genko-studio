@@ -122,13 +122,15 @@ def test_who_draws_which_page():
 
 
 def test_spreads_open_as_a_book():
-    from genko.app.bookview import book_pages, spreads
+    from genko.app.bookview import book_pages, book_spreads, spreads
 
     ep = _book(4)
     apply_ops(ep, [{"op": "add_cover", "kind": "jacket", "spine_mm": 6, "flap_mm": 0}])
     pages = book_pages(ep)
     assert [kind for kind, _p in pages] == ["front", "page", "page", "page", "page", "back"]
     assert spreads(len(pages)) == [[0], [1, 2], [3, 4], [5]]
+    # as bound (right): the front, page 1 alone, pages 2・3 facing, page 4 alone, the back — as the check pairs them
+    assert book_spreads(ep, pages) == [[0], [1], [2, 3], [4], [5]]
 
 
 def test_agents():

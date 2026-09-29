@@ -715,7 +715,7 @@ class BrushDialog(QDialog):
         tabs.addTab(basic, "描き味")
         tabs.addTab(shape, "先端・模様")
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("作る")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("直す" if editing else "作る")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("やめる")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)

@@ -46,6 +46,39 @@ def bleed_poly(page: Page, frame: Frame | None) -> list | None:
     return out
 
 
+def bleed_outline(page: Page, frame: Frame, beyond_mm: float | None = 8.0) -> list | None:
+    """A bleed panel with rounded corners or a styled border, as drawn: its corners on the live area's edge taken
+    out past the paper (so no border or rounding shows there), its other corners rounded as asked. None for a
+    panel that does not bleed."""
+    if frame is None or not getattr(frame, "bleed", False):
+        return None
+    from genko import frames as geo
+
+    inner = page.inner_rect_mm()
+    if beyond_mm is None:  # (to the bleed's edge: the panel's area)
+        b = page.bleed_rect_mm()
+        far_left, far_top, far_right, far_bottom = b.x, b.y, b.x + b.width, b.y + b.height
+    else:  # (past the paper: its border, so the sides off the paper draw nothing)
+        far_left, far_top = -beyond_mm, -beyond_mm
+        far_right, far_bottom = page.spec.width_mm + beyond_mm, page.spec.height_mm + beyond_mm
+    out, moved = [], set()
+    for i, (x, y) in enumerate(geo.shape(frame)):
+        nx, ny = x, y
+        if abs(x - inner.x) < EDGE_EPS_MM:
+            nx = far_left
+        elif abs(x - (inner.x + inner.width)) < EDGE_EPS_MM:
+            nx = far_right
+        if abs(y - inner.y) < EDGE_EPS_MM:
+            ny = far_top
+        elif abs(y - (inner.y + inner.height)) < EDGE_EPS_MM:
+            ny = far_bottom
+        if (nx, ny) != (x, y):
+            moved.add(i)
+        out.append((nx, ny))
+    radius = float(getattr(frame, "corner_mm", 0) or 0)
+    return geo._round_corners(out, radius, keep=moved) if radius > 0 else out
+
+
 def on_bleed_edge(page: Page, a, b) -> bool:
     """Whether a side of a bleed polygon lies along the bleed's edge (it is cut off: no border there)."""
     bleed = page.bleed_rect_mm()

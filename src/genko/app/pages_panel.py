@@ -37,10 +37,11 @@ class PageList(QListWidget):
 
     # --- pictures ----------------------------------------------------------------------------------------
 
-    def fill(self, pages, text_of, dirty: str | None = "all") -> None:
-        """The list from the book's pages; `dirty` = "all", a page id, or None (keep the pictures)."""
+    def fill(self, pages, text_of, dirty: str | None = "all", keep: set | None = None) -> None:
+        """The list from the book's pages; `dirty` = "all", a page id, or None (keep the pictures). With "all",
+        the pictures of the pages in `keep` stay (each one drawn again is a whole page rendered)."""
         if dirty == "all":
-            self._thumbs.clear()
+            self._thumbs = {k: v for k, v in self._thumbs.items() if k in (keep or ())}
         elif dirty:
             self._thumbs.pop(dirty, None)
         self.blockSignals(True)

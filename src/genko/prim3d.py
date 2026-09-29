@@ -368,3 +368,37 @@ def trace(prim: dict) -> list[list[tuple[float, float]]]:
         lines.append([(hx + r * math.cos(k * math.pi / 12), hy + r * math.sin(k * math.pi / 12)) for k in range(25)])
         return lines
     return [[a, b] for a, b, seen in edges(prim) if seen]
+
+
+def join_lines(lines: list, eps: float = 0.05) -> list:
+    """Segments that meet end to end joined into polylines (a traced box is a few strokes, not hundreds of bits)."""
+    def key(p) -> tuple:
+        return (round(p[0] / eps), round(p[1] / eps))
+
+    pending = [list(line) for line in lines if len(line) >= 2]
+    ends: dict[tuple, list[int]] = {}
+    for i, line in enumerate(pending):
+        ends.setdefault(key(line[0]), []).append(i)
+        ends.setdefault(key(line[-1]), []).append(i)
+    used = [False] * len(pending)
+
+    def take(point) -> list | None:
+        for j in ends.get(key(point), []):
+            if not used[j]:
+                used[j] = True
+                other = pending[j]
+                return other if key(other[0]) == key(point) else other[::-1]
+        return None
+
+    joined = []
+    for i, line in enumerate(pending):
+        if used[i]:
+            continue
+        used[i] = True
+        chain = list(line)
+        while (nxt := take(chain[-1])) is not None:
+            chain.extend(nxt[1:])
+        while (prev := take(chain[0])) is not None:
+            chain[:0] = prev[::-1][:-1]
+        joined.append(chain)
+    return joined

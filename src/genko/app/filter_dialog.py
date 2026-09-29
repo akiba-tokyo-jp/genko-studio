@@ -128,7 +128,7 @@ def histogram_pixmap(counts, width: int = 202, height: int = 56):
 
 
 def ask(parent, kind: str, fields, now: dict | None = None, preview=None, title: str = "フィルターの強さ",
-        histogram=None) -> dict | None:
+        histogram=None, tips: dict | None = None) -> dict | None:
     """The numbers (None: the person stopped). `fields`: (key, label, lo, hi, default) for a number, or
     (key, label, [(label, value), …], default) for a choice. `preview(params | None)`: called while the numbers
     change (None: take the preview away)."""
@@ -160,7 +160,15 @@ def ask(parent, kind: str, fields, now: dict | None = None, preview=None, title:
             box.setValue(float(now.get(key, value)))
             getters[key] = lambda b=box: round(b.value(), 3)
             signals.append(box.valueChanged)
-        form.addRow(label, box)
+        if (tips or {}).get(key):  # (what the number means in practice, under the field)
+            box.setToolTip(tips[key])
+            form.addRow(label, box)
+            hint = QLabel(tips[key])
+            hint.setWordWrap(True)
+            hint.setProperty("role", "hint")
+            form.addRow("", hint)
+        else:
+            form.addRow(label, box)
     curve = None
     if kind == "curve":
         curve = CurveEditor(now.get("points") or [[0, 0], [255, 255]])
