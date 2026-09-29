@@ -88,8 +88,9 @@
       "style_runs": "[[words, {scale 0.3..3, bold, weight, rgb}]]? (part of the line larger, smaller, bolder, coloured)",
       "frame_id": "str?",
       "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6, scale_x 0.3..3 (長体 < 1 < 平体), gradient {rgb_from, rgb_to, angle}, text_path [[x,y]…] (mm from the box's top left: the letters follow it), features [jp78|jp90|trad|expt|hwid|…] (OpenType forms, across text), yakumono (paired punctuation set half wide; default true), spike_jitter 0..1, bumps 5..60 (cloud), picture (base64 PNG), fill_png (letters painted with a picture), warp [[x,y]×4] (the letters' corners as shares of their box: 遠近・ゆがみ)}? (null resets a key)",
-      "tails": "[{to:[x,y], via?:[x,y], vias?:[[x,y],…] (折れ線: bends at each), width_mm?, kind?: wedge|zigzag|fade|bubbles}]?",
+      "tails": "[{to:[x,y], via?:[x,y], vias?:[[x,y],…] (折れ線: bends at each), width_mm?, kind?: wedge (default: broad at the balloon, bowing a little)|straight|zigzag|fade|bubbles}]?",
       "style (W6)": "line_rgb, fill_rgb, fill_opacity 0..1, text_dx_mm, text_dy_mm (the words moved inside the balloon), path_curve (a hand-drawn outline as a smooth curve), cuts, align justify (均等), ruby_scale 0.25..0.8, mono_ruby, below_layer (a layer id: the line is drawn under it)",
+      "style (B)": "hand (default true: drawn as a letterer would, a fuller oval hugging the words, its line swelling and thinning; false: an even line on a true ellipse), periods (default false: a spoken line drops its closing 。 as manga does; true keeps it)",
       "style_runs (W6)": "[[words, {…, tcy: true}]] (縦中横 on those words)"
     },
     {

@@ -563,3 +563,95 @@ def paste_vertical(
     composed = compose(text, font, em, max_h, fill=fill, ruby_runs=ruby_runs)
     page.paste(composed, (x, y), composed)
     return (x, y, x + composed.width, y + composed.height)
+
+
+# --- breaking a line where it reads (文節で改行) ------------------------------------------------------------
+# A letterer breaks a balloon's columns between phrases, not after a set number of letters: 「まんが作りの／
+# モヤモヤを／ズバッと解決する／このコーナー！」. A phrase here is a run of kanji, katakana or letters with the
+# kana that follow it (its okurigana and particles); punctuation stays with the phrase before it.
+
+_OPENING = set("「『（(［[〈《【〔“‘")
+_CLOSING = set("、。，．,.！？!?…‥」』）)］]〉》】〕”’ー〜～・っゃゅょぁぃぅぇぉッャュョァィゥェォ")
+_BREAKS_AFTER = set("、。，．,！？!?…‥」』）)")
+# (hiragana words that start a phrase of their own after a verb or adjective: この・その・もう・まだ…)
+_KANA_WORDS = ("この", "その", "あの", "どの", "これ", "それ", "あれ", "どれ", "ここ", "そこ", "とても", "もう", "まだ",
+               "すごく", "ちょっと", "なんか", "ずっと", "やっぱり", "きっと", "たぶん", "ぜんぶ", "みんな", "ありがとう",
+               "ございます", "ください", "ごめん", "よろしく")
+
+
+def _kind(char: str) -> str:
+    code = ord(char)
+    if 0x3041 <= code <= 0x309F:
+        return "h"
+    if 0x30A0 <= code <= 0x30FF or 0x31F0 <= code <= 0x31FF or 0xFF66 <= code <= 0xFF9F:
+        return "k"
+    if 0x3400 <= code <= 0x9FFF or 0xF900 <= code <= 0xFAFF or char in "々〆ヶ":
+        return "c"
+    return "o"
+
+
+def phrases(text: str) -> list[str]:
+    """The text cut between phrases (each keeps its punctuation and closing brackets)."""
+    out: list[str] = []
+    cur = ""
+    for i, char in enumerate(text):
+        if cur:
+            prev = cur[-1]
+            start = False
+            if char in _OPENING:
+                start = True
+            elif char in _CLOSING:
+                start = False
+            elif prev in _BREAKS_AFTER:
+                start = True
+            elif _kind(prev) == "h" and _kind(char) in ("c", "k", "o") and not char.isspace():
+                start = True
+            elif _kind(prev) == "h" and _kind(char) == "h" and any(text.startswith(w, i) for w in _KANA_WORDS):
+                start = True
+            elif char.isspace():
+                start = False
+            if start:
+                out.append(cur)
+                cur = ""
+        cur += char
+    if cur:
+        out.append(cur)
+    return [p for p in out if p]
+
+
+def phrase_columns(text: str, per: int, size=len) -> list[str]:
+    """Columns of at most `per` (by `size`), broken between phrases; a phrase longer than a column is cut, never
+    leaving punctuation at a column's head. A last column of one letter joins the one before when it can."""
+    per = max(1, int(per))
+    pieces: list[str] = []
+    for phrase in phrases(text.strip() if text else ""):
+        if size(phrase) > per:  # (a phrase longer than a column: cut into even parts, 5 / 5 not 8 / 2)
+            even = -(-len(phrase) // -(-size(phrase) // per))
+            while size(phrase) > per:
+                cut = min(even, len(phrase) - 1)
+                while cut > 1 and phrase[cut] in _CLOSING:  # (no 、 or っ at the head of the next column)
+                    cut -= 1
+                pieces.append(phrase[:cut])
+                phrase = phrase[cut:]
+        pieces.append(phrase)
+    cols: list[str] = []
+    cur = ""
+    for piece in pieces:
+        if cur and size(cur + piece) > per:
+            cols.append(cur)
+            cur = ""
+        cur += piece
+    if cur:
+        cols.append(cur)
+    if len(cols) > 1 and size(cols[-1]) <= 1 and size(cols[-2] + cols[-1]) <= per + 1:
+        cols[-2:] = [cols[-2] + cols[-1]]
+    return cols or [""]
+
+
+def without_periods(text: str) -> str:
+    """A line as manga sets it: no 。 at the end, and a 。 inside it starts the next column instead."""
+    import re
+
+    text = re.sub(r"[。．]+(?=[」』）)]*\s*$)", "", text or "")
+    text = re.sub(r"[。．]+(?=[」』）)]*$)", "", text, flags=re.M)
+    return re.sub(r"[。．](?![」』）)\n])", "\n", text)

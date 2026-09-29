@@ -96,13 +96,19 @@ def test_lettering_stays_in_panel_in_reading_order_and_off_faces():
     assert len(placements) == 2
     for p in placements:
         x, y, w, h = compiled.leaf_rects_mm[p.slot]
-        assert x <= p.x_mm and p.x_mm + p.w_mm <= x + w
-        assert y <= p.y_mm and p.y_mm + p.h_mm <= y + h
-        assert p.tail is not None  # the speaker is in the panel
-    # the ellipse goes around the text block's corners (M6): 2 columns × √2 + the pad on both sides
-    # (the two columns are 0.15 em apart)
-    assert measure(["…やっぱり", "来てくれたんだ"], "speech")[0] == pytest.approx((2 * EM_MM + 0.15 * EM_MM) * 2 ** 0.5 + EM_MM / 2)
-    assert measure(["…やっぱり", "来てくれたんだ"], "narration")[0] == pytest.approx(2 * EM_MM + 0.15 * EM_MM + EM_MM / 2)
+        # (its middle in its panel; it may run over the border, never into another panel)
+        assert x <= p.x_mm + p.w_mm / 2 <= x + w and y <= p.y_mm + p.h_mm / 2 <= y + h
+        for slot, (ox, oy, ow, oh) in compiled.leaf_rects_mm.items():
+            if slot != p.slot:
+                assert (min(p.x_mm + p.w_mm, ox + ow - 2) <= max(p.x_mm, ox + 2)
+                        or min(p.y_mm + p.h_mm, oy + oh - 2) <= max(p.y_mm, oy + 2))
+    # the ellipse hugs the letters' own shape (B1): smaller than the one around their box's corners (×√2), and the
+    # columns are 0.4 em apart
+    block = 2 * EM_MM + 0.4 * EM_MM
+    w, h = measure(["…やっぱり", "来てくれたんだ"], "speech")
+    assert w > block and h > 7 * EM_MM
+    assert w * h < (block * 2 ** 0.5 + EM_MM / 2) * (7 * EM_MM * 2 ** 0.5 + EM_MM / 2) * 0.9
+    assert measure(["…やっぱり", "来てくれたんだ"], "narration")[0] == pytest.approx(block + EM_MM / 2)
 
 
 def test_lettering_reports_overflow_with_the_line_path():

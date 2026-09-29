@@ -8,7 +8,7 @@ depends on fonts.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 from genko.studio.blocking import Box, Figure, figures
 from genko.studio.issues import Issue, error, warning
@@ -22,6 +22,9 @@ STEP_MM = 1.5
 TAIL_MM = 7.0
 TAIL_ROOM_MM = 3.0  # (a balloon keeps this far from its speaker's face: the tail's point goes between)
 TAIL_MAX_MM = 30.0  # (a tail longer than this past the balloon's edge reads as a line of its own)
+TAIL_PAST_MM = (3.0, 8.0)  # (a tail points at its speaker: short, at most half the balloon's narrow radius past its edge)
+OVER_MM = 6.0  # (a balloon may run over its panel's border this far, into the gutter or the margin, as manga does)
+JOINED = ("speech", "rounded", "thought", "whisper")  # (one speaker's lines in a row: two balloons run together)
 
 
 @dataclass(frozen=True)
@@ -42,7 +45,7 @@ class BalloonPlacement:
 
 
 ELLIPSE_KINDS = ("speech", "thought", "shout", "whisper")
-LEADING = 0.15
+LEADING = 0.4  # (columns this many letters apart: as the renderer sets them)
 SFX_EM_MM = 12.0  # the renderer's largest SFX glyph
 SPIKED = {"shout": 0.26}
 # (when the bible says nothing: a shout is bigger and bold, a whisper smaller; fonts stay the book's own)
@@ -82,10 +85,18 @@ def measure(breaks: list[str], balloon: str, em: float = EM_MM) -> tuple[float, 
     # columns are LEADING em apart (the renderer's default), characters sit edge to edge
     text_w, text_h = em * len(cols) + em * LEADING * (len(cols) - 1), em * longest
     if balloon in ELLIPSE_KINDS or balloon in SPIKED:
-        # the text's corners on an ellipse (half-size × √2); a spiked edge's valleys cut in by its depth, so the
-        # ellipse the text needs is the valleys', and the outline is that much bigger
-        grow = 2 ** 0.5 / (1 - SPIKED.get(balloon, 0.0))
-        return (text_w * grow + 2 * em / 4, text_h * grow + 2 * em / 4)
+        # the ellipse around the letters' own shape (columns from the top, uneven at their feet), a third of a
+        # letter to spare (balloons.FIT_PAD); a spiked edge's valleys cut in, so the outline is that much bigger
+        from genko import balloons
+
+        rects = []
+        for i, col in enumerate(cols):  # (the first column on the right)
+            x1 = text_w - i * em * (1 + LEADING)
+            rects.append((x1 - em, 0.0, x1, em * max(1, len(col))))
+        st = {"spike_depth": SPIKED.get(balloon)} if balloon in SPIKED else {}
+        w, h, _dx, _dy = balloons.ellipse_around(balloons.block_points(rects, em * balloons.FIT_PAD), balloons.hug_power(balloon, st))
+        keep = balloons._hug_keep(balloon, st)
+        return (w / keep, h / keep)
     pad = 0.0 if balloon == "none" else em / 4
     return (text_w + 2 * pad, text_h + 2 * pad)
 
@@ -117,12 +128,18 @@ def place_page(
         title_slot = shape.get("title") or (layout.reading_order[0] if layout.reading_order else None)
     placements: list[BalloonPlacement] = []
     issues: list[Issue] = []
+    rects = list(layout.leaf_rects_mm.values())
+    page = (min(r[0] for r in rects), min(r[1] for r in rects), max(r[0] + r[2] for r in rects),
+            max(r[1] + r[3] for r in rects)) if rects else None
+    on_page: list[Box] = []  # (every balloon so far, so one running over its border never meets the next panel's)
     for pi, panel in enumerate(plan.get("panels", [])):
         rect = layout.leaf_rects_mm.get(panel.get("slot"))
         if rect is None:
             continue
         figs = figures(panel, rect)
         placed: list[Box] = []
+        neighbours = [_grow(r, -2.0) for slot, r in layout.leaf_rects_mm.items() if slot != panel.get("slot")]
+        room = Room(page, neighbours, on_page)
         if panel.get("slot") == title_slot:
             for item in _title_placements(panel["slot"], rect, bible, kinds.get("title", {})):
                 placements.append(item)
@@ -138,7 +155,17 @@ def place_page(
             where = panel.get("sfx_at")
             if balloon == "sfx" and isinstance(where, (list, tuple)) and len(where) == 2:  # (the sound's source, 0..1)
                 near = (rect[0] + rect[2] * min(1.0, max(0.0, float(where[0]))), rect[1] + rect[3] * min(1.0, max(0.0, float(where[1]))))
-            spot = _find_spot(rect, size, placed, figs, speaker_id, near)
+            prev = placements[-1] if placements and placements[-1].slot == panel.get("slot") else None
+            group = None
+            spot = None
+            if (prev is not None and speaker_id and prev.speaker_id == speaker_id and balloon in JOINED
+                    and prev.balloon == balloon):  # (the same person again: the second balloon runs out of the first)
+                spot = _joined_spot((prev.x_mm, prev.y_mm, prev.w_mm, prev.h_mm), size, rect, placed[:-1], figs, room)
+                if spot is not None:
+                    group = (prev.style or {}).get("group") or f"said{pi}.{prev.line_index}"
+                    placements[-1] = replace(prev, style={**(prev.style or {}), "group": group})
+            if spot is None:
+                spot = _find_spot(rect, size, placed, figs, speaker_id, near, room)
             if spot is None:
                 issues.append(
                     error(
@@ -154,6 +181,9 @@ def place_page(
             if covers_face and balloon not in ("sfx", "none"):  # (a sound or bare text over a face is the drawing's business)
                 issues.append(warning("balloon_covers_face", path, f"コマ {panel.get('slot')} で台詞が顔にかかる", "台詞を減らすか、人物の pos を変える"))
             placed.append(box)
+            on_page.append(box)
+            if group:
+                style = {**(style or {}), "group": group}
             placements.append(
                 BalloonPlacement(
                     slot=panel["slot"],
@@ -166,7 +196,7 @@ def place_page(
                     y_mm=round(box[1], 2),
                     w_mm=round(box[2], 2),
                     h_mm=round(box[3], 2),
-                    tail=_tail(box, line.get("balloon", "speech"), speaker_id, figs),
+                    tail=None if group else _tail(box, line.get("balloon", "speech"), speaker_id, figs),
                     speaker_id=speaker_id or "",
                     style=style or None,
                 )
@@ -231,16 +261,48 @@ def placements_to_ops(page_index: int, placements: list[BalloonPlacement], layou
     return ops
 
 
+@dataclass(frozen=True)
+class Room:
+    """Where a balloon may go beyond its panel: `page` (the panels' outer edge), never into `neighbours` (the other
+    panels, 2 mm in) nor onto `taken` (balloons already placed on the page)."""
+    page: tuple[float, float, float, float] | None = None
+    neighbours: list = field(default_factory=list)
+    taken: list = field(default_factory=list)
+
+    def allows(self, box: Box) -> bool:
+        if any(_overlap(box, n) > 0 for n in self.neighbours):
+            return False
+        return not any(_overlap(_grow(box, GAP_MM), t) > 0 for t in self.taken)
+
+
+def _over(box: Box, rect: Box) -> float:
+    """How far (mm, all sides together) a box runs past the panel's inner margin."""
+    x, y, w, h = box
+    x0, y0, rw, rh = rect
+    return (max(0.0, x0 + MARGIN_MM - x) + max(0.0, x + w - (x0 + rw - MARGIN_MM))
+            + max(0.0, y0 + MARGIN_MM - y) + max(0.0, y + h - (y0 + rh - MARGIN_MM)))
+
+
 def _find_spot(rect: Box, size: tuple[float, float], placed: list[Box], figs: list[Figure],
-               speaker_id: str | None = None, near: tuple[float, float] | None = None) -> tuple[Box, bool] | None:
+               speaker_id: str | None = None, near: tuple[float, float] | None = None,
+               room: Room | None = None) -> tuple[Box, bool] | None:
     """The best free place for a balloon in the panel: off the faces and bodies, after the previous balloon in
     reading order, and next to its speaker's head (above or beside it, on the speaker's side, never nearer another
     character). Without a known speaker, the top right as manga places them. `near`: a sound effect's source: the
-    letters sit on the art as close to it as they can (off the faces)."""
+    letters sit on the art as close to it as they can (off the faces). With `room`, a balloon may run over the
+    panel's border (into the gutter or the margin, never into another panel) where that brings it to its speaker."""
     x0, y0, w, h = rect
     bw, bh = size
     left, top = x0 + MARGIN_MM, y0 + MARGIN_MM
     right, bottom = x0 + w - MARGIN_MM, y0 + h - MARGIN_MM
+    inner_right, inner_top = right, top
+    if room is not None and near is None:
+        ox, oy = min(OVER_MM, bw * 0.3), min(OVER_MM, bh * 0.3)
+        left, top, right, bottom = x0 - ox, y0 - oy, x0 + w + ox, y0 + h + oy
+        if room.page is not None:  # (at most a little past the panels' outer edge, into the page's margin)
+            px0, py0, px1, py1 = room.page
+            left, top = max(left, px0 - 4.0), max(top, py0 - 4.0)
+            right, bottom = min(right, px1 + 4.0), min(bottom, py1 + 4.0)
     if bw > right - left or bh > bottom - top:
         return None
     prev = placed[-1] if placed else None
@@ -259,10 +321,11 @@ def _find_spot(rect: Box, size: tuple[float, float], placed: list[Box], figs: li
                     cost = 20000.0 * face / (bw * bh) + ((cx - near[0]) ** 2 + (cy - near[1]) ** 2) ** 0.5
                     if best is None or cost < best[0]:
                         best = (cost, box, face > 0)
-            elif not any(_overlap(_grow(box, GAP_MM), other) > 0 for other in placed) and _after(box, prev):
+            elif (not any(_overlap(_grow(box, GAP_MM), other) > 0 for other in placed) and _after(box, prev)
+                  and (room is None or room.allows(box)) and _centre_in(box, rect)):
                 face = sum(_overlap(box, f.head) for f in figs)
                 body = sum(_overlap(box, f.body) for f in figs)
-                cost = 20000.0 * face / (bw * bh) + 3.0 * body / (bw * bh)
+                cost = 20000.0 * face / (bw * bh) + 3.0 * body / (bw * bh) + 0.6 * _over(box, rect)
                 if speaker is not None:
                     to_speaker = _gap(box, speaker.head)
                     cx = x + bw / 2
@@ -272,7 +335,7 @@ def _find_spot(rect: Box, size: tuple[float, float], placed: list[Box], figs: li
                     if any(_gap(box, f.head) + 1.0 < to_speaker for f in others):
                         cost += 60.0  # (nearer someone else: it would read as their line)
                 else:
-                    cost += (right - (x + bw)) + 1.2 * (y - top)
+                    cost += abs(inner_right - (x + bw)) + 1.2 * abs(y - inner_top)
                 if best is None or cost < best[0]:
                     best = (cost, box, face > 0)
             x -= STEP_MM
@@ -280,6 +343,36 @@ def _find_spot(rect: Box, size: tuple[float, float], placed: list[Box], figs: li
     if best is None:
         return None
     return best[1], best[2]
+
+
+def _centre_in(box: Box, rect: Box) -> bool:
+    """The balloon's middle is in its panel (running over the border, it still belongs to the panel)."""
+    cx, cy = box[0] + box[2] / 2, box[1] + box[3] / 2
+    return rect[0] <= cx <= rect[0] + rect[2] and rect[1] <= cy <= rect[1] + rect[3]
+
+
+def _joined_spot(prev: Box, size: tuple[float, float], rect: Box, placed: list[Box], figs: list[Figure],
+                 room: Room) -> tuple[Box, bool] | None:
+    """A second balloon for the same speaker, run out of the first to its left and a little lower (read next), the
+    two overlapping by about a fifth, so they draw as one outline; None when there is no room for it."""
+    px, py, pw, ph = prev
+    bw, bh = size
+    lap = 0.22 * min(pw, bw)
+    x = px - bw + lap
+    best = None
+    for share in (0.3, 0.2, 0.4, 0.1, 0.5, 0.0, 0.6):
+        box = (x, py + ph * share, bw, bh)
+        if not _centre_in(box, rect) or _over(box, rect) > OVER_MM * 1.5:
+            continue
+        if any(_overlap(_grow(box, GAP_MM), other) > 0 for other in placed):
+            continue
+        if not Room(room.page, room.neighbours, room.taken[:-1]).allows(box):  # (the first balloon is the last placed)
+            continue
+        if any(_overlap(box, f.head) > 0 for f in figs):
+            continue
+        best = box
+        break
+    return (best, False) if best is not None else None
 
 
 def _gap(a: Box, b: Box) -> float:
@@ -329,9 +422,12 @@ def tail_to(box: Box, head: Box, balloon: str = "speech") -> tuple[float, float]
         reach = max(out + 0.3, min(out + 2.0, face - 0.5))
         return (sx + dx / dist * reach, sy + dy / dist * reach)
     reach = ((tx - sx) ** 2 + (ty - sy) ** 2) ** 0.5
-    longest = max(w, h) / 2 + TAIL_MAX_MM
-    if reach > longest:
-        tx, ty = sx + dx / dist * longest, sy + dy / dist * longest
+    ux, uy = dx / dist, dy / dist
+    edge = 1 / max(1e-6, ((ux / (w / 2)) ** 2 + (uy / (h / 2)) ** 2) ** 0.5)  # (the ellipse's edge that way)
+    past = max(TAIL_PAST_MM[0], min(TAIL_PAST_MM[1], min(w, h) / 4))
+    longest = min(edge + past, max(w, h) / 2 + TAIL_MAX_MM)
+    if reach > longest:  # (it points at the mouth and stops well short: the reader's eye does the rest)
+        tx, ty = sx + ux * longest, sy + uy * longest
     return (tx, ty)
 
 
@@ -341,7 +437,19 @@ def _tail(box: Box, balloon: str, speaker_id: str | None, figs: list[Figure]) ->
     fig = next((f for f in figs if f.char_id == speaker_id), None)
     if fig is None:
         return None
+    if balloon not in ("thought", "shout", "electric") and obvious(box, fig, figs):
+        return None
     return tail_to(box, fig.head, balloon)
+
+
+def obvious(box: Box, speaker: Figure, figs: list[Figure]) -> bool:
+    """Whether a balloon needs no tail: its speaker is the only one in the panel, or it sits right by the
+    speaker's head with everyone else well away (manga leaves about half its balloons without one)."""
+    others = [f for f in figs if f is not speaker]
+    if not others:
+        return True
+    near = _gap(box, speaker.head)
+    return near <= 3.0 and all(_gap(box, f.head) >= max(12.0, near + 10.0) for f in others)
 
 
 def _grow(box: Box, by: float) -> Box:
