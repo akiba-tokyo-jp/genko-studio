@@ -42,6 +42,7 @@ class BalloonPlacement:
     tail: tuple[float, float] | None
     speaker_id: str = ""
     style: dict | None = None
+    wrap: str = "vertical"
 
 
 ELLIPSE_KINDS = ("speech", "thought", "shout", "whisper")
@@ -49,7 +50,10 @@ LEADING = 0.4  # (columns this many letters apart: as the renderer sets them)
 SFX_EM_MM = 12.0  # the renderer's largest SFX glyph
 SPIKED = {"shout": 0.26}
 # (when the bible says nothing: a shout is bigger and bold, a whisper smaller; fonts stay the book's own)
-DEFAULT_LOOKS: dict[str, dict] = {"shout": {"scale": 1.3, "weight": "bold"}, "whisper": {"scale": 0.8}}
+DEFAULT_LOOKS: dict[str, dict] = {"shout": {"scale": 1.3, "weight": "bold"}, "whisper": {"scale": 0.8},
+                                   "aside": {"font": "hand", "scale": 0.8, "weight": "bold"}}  # (呟き: hand-lettered, small)
+ASIDE_TILT = 6.0  # (degrees a 呟き leans, one way then the other)
+TAG_EM_MM = 3.2  # (a 名札's letters)
 TITLE_MAX_MM = 18.0  # (the title's letters at most; the author's name is a third of that, 5 mm at least)
 
 
@@ -97,7 +101,11 @@ def measure(breaks: list[str], balloon: str, em: float = EM_MM) -> tuple[float, 
         w, h, _dx, _dy = balloons.ellipse_around(balloons.block_points(rects, em * balloons.FIT_PAD), balloons.hug_power(balloon, st))
         keep = balloons._hug_keep(balloon, st)
         return (w / keep, h / keep)
-    pad = 0.0 if balloon == "none" else em / 4
+    pad = 0.0 if balloon in ("none", "aside") else em / 4
+    if balloon in ("dotted_box", "tone_box", "fancy_box"):  # (as balloons._inner: the frame keeps the words further in)
+        pad *= 3
+    if balloon == "electric":  # (its zigzag edge leaves the words about three quarters of the box)
+        return ((text_w + 2 * pad) / 0.76, (text_h + 2 * pad) / 0.76)
     return (text_w + 2 * pad, text_h + 2 * pad)
 
 
@@ -148,6 +156,8 @@ def place_page(
             path = f"/panels/{pi}/lines/{li}"
             balloon = line.get("balloon", "speech")
             style = look_style(kinds.get(balloon, {}), balloon)
+            if balloon == "aside":  # (呟き: no balloon, hand-lettered, small, leaning one way then the other)
+                style = {**style, "rotate_deg": ASIDE_TILT if li % 2 == 0 else -ASIDE_TILT}
             em = float(style.get("size_mm") or EM_MM)
             size = measure(line.get("breaks", []), balloon, em)
             speaker_id = speakers.get(line.get("beat_id"))
@@ -190,7 +200,7 @@ def place_page(
                     line_index=li,
                     beat_id=line.get("beat_id", ""),
                     text="\n".join(line.get("breaks", [])),
-                    balloon=line.get("balloon", "speech"),
+                    balloon="none" if balloon == "aside" else balloon,
                     speaker=names.get(speaker_id, "") if speaker_id else "",
                     x_mm=round(box[0], 2),
                     y_mm=round(box[1], 2),
@@ -201,6 +211,25 @@ def place_page(
                     style=style or None,
                 )
             )
+        for ci, char in enumerate(panel.get("characters", []) or []):  # (名札: a small label by the character)
+            tag = str(char.get("tag") or "").strip()
+            fig = next((f for f in figs if f.char_id == char.get("id")), None)
+            if not tag or fig is None:
+                continue
+            h, w = measure([tag], "rounded", TAG_EM_MM)  # (set across: the column's size turned)
+            near = (fig.head[0] + fig.head[2] / 2, fig.body[1] + fig.body[3] * 0.55)
+            spot = _find_spot(rect, (w, h), placed, figs, None, near)
+            if spot is None:
+                issues.append(warning("tag_overflow", f"/panels/{pi}/characters/{ci}/tag", f"コマ {panel.get('slot')} に名札が入らない",
+                                      "名札を短くするか、コマを大きくする"))
+                continue
+            box = spot[0]
+            placed.append(box)
+            on_page.append(box)
+            placements.append(BalloonPlacement(slot=panel["slot"], line_index=-10 - ci, beat_id="", text=tag, balloon="rounded",
+                                               speaker="", x_mm=round(box[0], 2), y_mm=round(box[1], 2), w_mm=round(box[2], 2),
+                                               h_mm=round(box[3], 2), tail=None,
+                                               style={"font": "gothic", "size_mm": TAG_EM_MM}, wrap="horizontal"))
     return placements, issues
 
 
@@ -246,7 +275,7 @@ def placements_to_ops(page_index: int, placements: list[BalloonPlacement], layou
             "speaker": "",
             "frame_id": layout.slot_to_frame[p.slot],
             "balloon": p.balloon,
-            "wrap": "vertical",
+            "wrap": p.wrap,
             "x_mm": p.x_mm,
             "y_mm": p.y_mm,
             "w_mm": p.w_mm,
@@ -432,7 +461,7 @@ def tail_to(box: Box, head: Box, balloon: str = "speech") -> tuple[float, float]
 
 
 def _tail(box: Box, balloon: str, speaker_id: str | None, figs: list[Figure]) -> tuple[float, float] | None:
-    if balloon in ("narration", "sfx") or not speaker_id:
+    if balloon in ("narration", "sfx", "aside", "none", "dotted_box", "tone_box", "fancy_box") or not speaker_id:
         return None
     fig = next((f for f in figs if f.char_id == speaker_id), None)
     if fig is None:

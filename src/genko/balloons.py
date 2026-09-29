@@ -21,9 +21,13 @@ from genko import fonts
 from genko.tategaki import bold_px, cells, compose, draw_mark
 
 SHAPES = ("speech", "rounded", "box", "cloud", "thought", "shout", "electric", "flash", "whisper", "narration", "sfx", "none",
-          "picture")
+          "picture", "dotted_box", "tone_box", "fancy_box")
+# 飾り枠 (headings, a theme set out, notes): a box of dots, a box laid with a light dot tone, a double line with its
+# corners marked
+FRAMES = ("dotted_box", "tone_box", "fancy_box")
+SQUARE = ("box", "narration", *FRAMES)
 ELLIPTIC = ("speech", "cloud", "thought", "shout", "electric", "flash", "whisper")
-NO_TAIL = ("narration", "sfx", "none", "flash", "picture")
+NO_TAIL = ("narration", "sfx", "none", "flash", "picture", "dotted_box", "tone_box", "fancy_box")
 SQRT2 = 2 ** 0.5
 CAP_MM = 5.0
 SFX_CAP_MM = 12.0
@@ -94,7 +98,9 @@ def _inner(kind: str, w: float, h: float, pad: float, depth: float | None = None
     if kind == "rounded":
         r = min(w, h) * 0.3
         return w - 2 * pad - r * 0.3, h - 2 * pad - r * 0.3
-    if kind in ("box", "narration"):
+    if kind in FRAMES:  # (a frame's own lines and marks keep the words a little further in)
+        return w - 6 * pad, h - 6 * pad
+    if kind in SQUARE:
         return w - 2 * pad, h - 2 * pad
     if kind == "picture":  # (a picture balloon: the words keep to its middle)
         return (w - 2 * pad) * 0.7, (h - 2 * pad) * 0.7
@@ -442,6 +448,8 @@ def text_layout(line, dpi: int, font_path: str | None = None) -> tuple[Image.Ima
         image = picture_letters(image, st["fill_png"])
     outline = st["outline_mm"]
     grow = px(float(outline), dpi) if outline else (max(2, em // 8) if kind == "sfx" else 0)
+    if kind == "tone_box" and not outline:  # (the words keep a white edge over the tone, so they read)
+        grow = max(2, em // 7)
     if grow:
         image = outlined(image, grow, tuple(st["outline_rgb"]) if st["outline_rgb"] else (255, 255, 255))
     if st["arc"]:
@@ -694,7 +702,7 @@ def _outline(kind: str, box, n: int = 96) -> list | None:
     cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
     if kind in ("speech", "thought", "whisper", "flash"):
         return [_ellipse_point(cx, cy, rx, ry, math.tau * k / n) for k in range(n)]
-    if kind in ("box", "narration", "rounded"):
+    if kind in (*SQUARE, "rounded"):
         per = n // 4
         pts = []
         for (ax, ay), (bx, by) in (((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))):
@@ -714,7 +722,7 @@ def _shape(draw: ImageDraw.ImageDraw, kind: str, box: tuple[float, float, float,
         if points:
             draw.polygon(_wobbly(points, wobble, min(rx, ry) * 2, seed), fill=255)
             return
-    if kind in ("box", "narration"):
+    if kind in SQUARE:
         draw.rectangle(box, fill=255)
     elif kind == "rounded":
         draw.rounded_rectangle(box, radius=min(rx, ry) * 0.6, fill=255)
@@ -773,7 +781,7 @@ def _edge_point(kind: str, box, toward: tuple[float, float], spread: float) -> t
     x0, y0, x1, y1 = box
     cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
     tx, ty = toward
-    if kind in ("box", "narration", "rounded"):
+    if kind in (*SQUARE, "rounded"):
         if abs(tx - cx) / max(rx, 1) > abs(ty - cy) / max(ry, 1):
             ex = cx + (rx if tx > cx else -rx) * 0.9
             my = max(y0 + spread, min(y1 - spread, ty))
@@ -1068,6 +1076,12 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
         shapes = ImageChops.lighter(ImageChops.multiply(shapes, keep), inside)
     if kind == "whisper":
         band = ImageChops.multiply(band, _dashes(size, [local(b) for b in boxes], scale))
+    if kind == "dotted_box":  # (round dots along the edge, not a line)
+        band = _dotted_edge(size, [local(b) for b in boxes], max(2, width))
+    if kind == "fancy_box":  # (a double line, and a small diamond on each corner)
+        inner = _erode(inside, max(2, width * 2))
+        band = ImageChops.lighter(band, ImageChops.subtract(inner, _erode(inner, max(1, width))))
+        band = ImageChops.lighter(band, _corner_marks(size, [local(b) for b in boxes], max(2, width)))
     if kind == "flash":
         band = _flash_lines(size, [local(b) for b in boxes], width)
     cut = _cuts_mask(lines, size, (rx0, ry0), dpi, scale)
@@ -1084,8 +1098,60 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
         if cover is not None and float(cover) < 1:
             shapes = shapes.point(lambda v, k=max(0.0, float(cover)): int(v * k))
         area.paste(paper, (0, 0, area.width, area.height), shapes)
+    if kind == "tone_box":  # (a light dot tone laid inside, under the words)
+        inner = _erode(shapes, max(2, px(1.0, dpi)))
+        area.paste(tuple(int(v) for v in st.get("line_rgb") or OUTLINE)[:3], (0, 0, area.width, area.height),
+                   ImageChops.multiply(inner, _tone_dots(inner.size, dpi, (rx0, ry0))))
     area.paste(tuple(int(v) for v in st.get("line_rgb") or OUTLINE)[:3], (0, 0, area.width, area.height), band)
     image.paste(area, (rx0, ry0))
+
+
+def _dotted_edge(size, boxes, width: int) -> Image.Image:
+    """Round dots along each box's edge, about three line-widths apart."""
+    out = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(out)
+    r = max(1.0, width * 0.9)
+    step = max(3.0, width * 3.2)
+    for x0, y0, x1, y1 in boxes:
+        x0, y0, x1, y1 = x0 + r, y0 + r, x1 - r, y1 - r
+        for (ax, ay), (bx, by) in (((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))):
+            length = math.dist((ax, ay), (bx, by))
+            n = max(1, round(length / step))
+            for i in range(n):
+                t = i / n
+                cx, cy = ax + (bx - ax) * t, ay + (by - ay) * t
+                draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=255)
+    return out
+
+
+def _corner_marks(size, boxes, width: int) -> Image.Image:
+    """A small filled diamond on each corner of each box (the corners of a 飾り枠)."""
+    out = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(out)
+    d = width * 3.5
+    for x0, y0, x1, y1 in boxes:
+        for cx, cy in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
+            draw.polygon([(cx, cy - d), (cx + d, cy), (cx, cy + d), (cx - d, cy)], fill=255)
+    return out
+
+
+def _tone_dots(size, dpi: int, origin) -> Image.Image:
+    """A light dot tone (about 10 %): dots on a grid a millimetre apart, lined up with the page."""
+    out = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(out)
+    pitch = max(3.0, dpi / 25.4 * 1.0)
+    r = max(0.5, pitch * 0.17)
+    ox, oy = origin
+    y = -(oy % pitch)
+    row = 0
+    while y < size[1] + pitch:
+        x = -(ox % pitch) + (pitch / 2 if row % 2 else 0)
+        while x < size[0] + pitch:
+            draw.ellipse((x - r, y - r, x + r, y + r), fill=255)
+            x += pitch
+        y += pitch
+        row += 1
+    return out
 
 
 def _swell(size, seed: str, wave: float) -> Image.Image:

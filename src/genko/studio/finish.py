@@ -93,7 +93,7 @@ def _rain(page: Page, frame, layer_id: str) -> list[dict]:
 
 def _tailed(line) -> bool:
     """A line whose balloon points at its speaker (not narration, sound or a line with hand-drawn tails)."""
-    return (line.balloon or "speech") not in ("narration", "sfx", "none", "box") and not line.tails
+    return (line.balloon or "speech") not in ("narration", "sfx", "none", "box", "dotted_box", "tone_box", "fancy_box") and not line.tails
 
 
 AIMED = ("focus", "uni_flash", "white")  # (lines that close in on a point: aimed at the faces, which they leave clear)
