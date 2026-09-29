@@ -145,9 +145,14 @@ def test_nothing_watches_every_event_of_the_app_unless_needed(window, qapp, monk
     window.rest._count()
     assert comfort._input is None  # (the rest reminder is off: nothing counts the input)
     app_main._stop_key_releases()
-    window._tool("pen")
-    window._tool("eraser")  # (as E pressed: the key's release is watched)
-    assert app_main._KEY_WATCH[0].property("genko_on")
+    from PySide6.QtGui import QKeySequence, QShortcutEvent
+
+    window.act_pen.trigger()
+    window.act_eraser.trigger()  # (its button clicked: no key to watch)
+    assert not (app_main._KEY_WATCH and app_main._KEY_WATCH[0].property("genko_on"))
+    window.act_pen.trigger()
+    qapp.sendEvent(window.act_eraser, QShortcutEvent(QKeySequence("E"), 0))  # (E pressed: its release is watched)
+    assert window.canvas.tool == "eraser" and app_main._KEY_WATCH[0].property("genko_on")
     qapp.sendEvent(window, QKeyEvent(QEvent.Type.KeyRelease, Qt.Key.Key_E, Qt.KeyboardModifier.NoModifier))
     assert not app_main._KEY_WATCH[0].property("genko_on")  # (let go: no longer watched)
     monkeypatch.setattr(glass, "available", lambda: "windows")
