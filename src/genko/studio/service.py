@@ -1505,22 +1505,21 @@ class StudioService:
 
     def record_chat_approval(self, project: str, gate: str, message: str, pages: list[int] | None = None,
                              character_id: str | None = None, candidate_id: str | None = None,
-                             face_box01: list[float] | None = None) -> ToolResult:
-        """チャットでの承認: a person approved in a chat (Telegram, Slack…) and the AI records it for them. Only when
-        the person let this book take chat approvals (`genko studio chat-approval <book> on`, or the app's page menu);
-        the record is the person's, with who passed it on and the person's own words."""
+                             face_box01: list[float] | None = None, person: str | None = None) -> ToolResult:
+        """チャットでの承認: a person approved in a chat (Telegram, Slack…) and the AI records it for them. Open to
+        every book unless a person stopped it for this one (`genko studio chat-approval <book> off`, or the app's page
+        menu); the record is the person's (`person`: the name they have in the chat), with who passed it on and the
+        person's own words."""
         path = self.project_path(project)
         if gate not in ("name", "art", "sheet"):
             return fail("チャットで記録できる承認は name / art / sheet（正式な書き出しは人が Genko で行う）", "gate_not_available", "/gate")
         if not str(message or "").strip():
             return fail("message に、人がチャットで送った承認の言葉をそのまま入れる", "message_required", "/message")
         episode = load_episode(path)
-        allowed = (episode.studio.get("chat_approval") or {})
-        if not allowed.get("on") or not str(allowed.get("by", "")).startswith("human:"):
-            return fail("この原稿はチャットでの承認を受け付けていない。人が一度だけ Genko の「ページ → チャットでの承認を AI に"
-                        "記録させる」を入れるか、`genko studio chat-approval <原稿> on` を実行すると使える",
+        if not chat_approval_open(episode):
+            return fail("この原稿は、人がチャットでの承認を止めている。承認は人が Genko の承認箱で行う",
                         "chat_approval_off", "/project")
-        person = str(allowed["by"])
+        person = _chat_person(episode, person)
         extra = {"via": self.actor, "message": str(message).strip()}
         if gate == "sheet":
             if not character_id or not candidate_id:
@@ -2074,3 +2073,28 @@ def _brushes_list(episode) -> dict:
                      for k, d in (episode.brush_custom or {}).items()],
             "library": [{"key": k, **{kk: v for kk, v in d.items() if kk in ("label", "base", "width_mm", "texture")}}
                         for k, d in library.items()]}
+
+
+def chat_approval_open(episode) -> bool:
+    """Chat approvals are taken unless a person stopped them for this book."""
+    setting = episode.studio.get("chat_approval")
+    return not (isinstance(setting, dict) and setting.get("on") is False)
+
+
+def _chat_person(episode, name: str | None) -> str:
+    """Whose approval a chat approval is: the name the person has in the chat, else the person who last let the chat
+    approvals in, else the person who last approved in this book, else this computer's user."""
+    import re as _re
+
+    if name and str(name).strip():
+        clean = _re.sub(r"[^\w.-]", "_", str(name).strip().removeprefix("human:")) or "user"
+        return f"human:{clean}"
+    setting = episode.studio.get("chat_approval")
+    if isinstance(setting, dict) and str(setting.get("by", "")).startswith("human:"):
+        return str(setting["by"])
+    for record in reversed(episode.studio.get("approvals") or []):
+        if str(record.get("by", "")).startswith("human:"):
+            return str(record["by"])
+    from genko.app.session import default_actor
+
+    return default_actor()

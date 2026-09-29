@@ -194,10 +194,10 @@ Genko は文章も絵も作らない。企画書・脚本・ネーム計画と�
 依頼を出したら `mcp__genko__review_page` で確認ページ（review.html）を作り、その場所（`path`）と何を見てほしいかを、
 メッセージで人間に知らせる。review.html は絵を中に入れた 1 ファイルなので、そのまま渡す（zip にまとめない）。承認するのは人間で、Genko アプリの承認箱（または確認ページにあるコマンド）で行う。
 
-チャットでの承認: 人がこの原稿で「チャットでの承認を AI に記録させる」を入れていれば、人がチャットではっきり承認したときに
-`mcp__genko__record_chat_approval`（`gate`・`pages` か `character_id` と `candidate_id`・`message` に人の言葉をそのまま）で
-人の名前で記録できる。入っていなければ `chat_approval_off` が返るので、人に「Genko のページのメニューで一度だけ入れるか、
-`genko studio chat-approval <原稿> on` を実行してください」と伝える。承認のためのシェルのスクリプトを作って人に流させない。
+チャットでの承認: 人がチャットではっきり承認したら、`mcp__genko__record_chat_approval`（`gate`・`pages` か `character_id` と
+`candidate_id`・`message` に人の言葉をそのまま・`person` にチャットでのその人の名前）で人の名前で記録する。許可や設定は要らない。
+人がその原稿で止めていれば `chat_approval_off` が返るので、承認箱で承認してもらうよう伝える。止めた設定を AI が戻さない。
+承認のためのシェルのコマンドやスクリプトを人に流させない。
 
 ## してはいけないこと
 

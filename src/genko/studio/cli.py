@@ -136,7 +136,7 @@ def _parser() -> argparse.ArgumentParser:
     reopen.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")
     adopt = sub.add_parser("adopt-drafts", help="Move M0 sidecar drafts (studio/drafts) into project.json")
     adopt.add_argument("project", type=Path)
-    chat = sub.add_parser("chat-approval", help="(human) Let the AI record approvals you send in a chat (on / off)")
+    chat = sub.add_parser("chat-approval", help="(human) Whether the AI records approvals you send in a chat for this book (on by default; off stops it)")
     chat.add_argument("project", type=Path)
     chat.add_argument("state", choices=["on", "off"])
     chat.add_argument("--as", dest="actor", default=None, help="who decides (default human:<$GENKO_USER or login name>)")

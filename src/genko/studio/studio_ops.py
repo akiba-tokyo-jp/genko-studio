@@ -48,7 +48,7 @@ STUDIO_SCHEMA = [
     {"op": "record_review", "page": "int", "frame_id": "str?", "kind": "name|art|upscale|regions", "score": "float?", "notes": "str", "input_hash": "str"},
     {"op": "approve", "gate": "bible|script|sheet|name|art|export", "page": "int?", "character_id": "str?", "candidate_id": "str?", "face_asset": "str?"},
     {"op": "revoke", "gate": "name|art|sheet", "page": "int?", "character_id": "str?", "reason": "str"},
-    {"op": "allow_chat_approval", "on": "bool (person only: the AI may record approvals a person sends in chat)"},
+    {"op": "allow_chat_approval", "on": "bool (person only: false stops the AI recording approvals a person sends in chat for this book; on by default)"},
     {"op": "resolve_ticket", "id": "str", "note": "str (what was done)"},
     {"op": "reopen_ticket", "id": "str", "note": "str? (human)"},
     {"op": "request_approval", "gate": "str", "pages": "[int]?", "character_id": "str?", "note": "str?"},
@@ -459,12 +459,9 @@ def apply_studio_op(episode: Episode, op: dict[str, Any], agent: str) -> None:
     if name == "allow_chat_approval":
         if not person:
             raise _err("only a person can let approvals come through a chat")
-        if op.get("on"):
-            import time
+        import time
 
-            studio["chat_approval"] = {"on": True, "by": agent, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
-        else:
-            studio.pop("chat_approval", None)
+        studio["chat_approval"] = {"on": bool(op.get("on")), "by": agent, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         return
 
     if name == "revoke":
