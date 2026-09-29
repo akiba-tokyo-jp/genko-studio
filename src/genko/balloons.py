@@ -31,7 +31,7 @@ OUTLINE = (20, 20, 20)
 PAPER = (255, 255, 255)
 TEXT = (10, 10, 10)
 
-DEFAULTS = {"font": None, "size_mm": None, "tracking": 0.0, "leading": 0.15, "align": "top", "outline_mm": None,
+DEFAULTS = {"font": None, "size_mm": None, "tracking": 0.0, "leading": 0.4, "align": "top", "outline_mm": None,
             "rgb": None, "tcy": True, "border_mm": 0.35, "fill": "white", "group": None, "rotate_deg": 0.0, "skew_deg": 0.0,
             "arc": 0.0, "latin": "rotate", "emphasis_mark": "sesame", "bold": False, "weight": None, "italic": False, "outline_rgb": None,
             "wobble": 0.0, "double": False, "spikes": None, "spike_depth": 0.2,
@@ -45,8 +45,11 @@ DEFAULTS = {"font": None, "size_mm": None, "tracking": 0.0, "leading": 0.15, "al
             # W6: the balloon's own line and fill colours (and how much the fill covers), the words moved inside it,
             # a hand-drawn outline smoothed into a curve, and the parts of it taken away (フキダシ消しゴム)
             "line_rgb": None, "fill_rgb": None, "fill_opacity": None, "text_dx_mm": 0.0, "text_dy_mm": 0.0,
-            "path_curve": False, "cuts": None, "ruby_scale": 0.5, "mono_ruby": False, "below_layer": None}
-TAIL_KINDS = ("wedge", "zigzag", "fade", "bubbles")
+            "path_curve": False, "cuts": None, "ruby_scale": 0.5, "mono_ruby": False, "below_layer": None,
+            # a balloon drawn as a letterer would: the outline's width swells and thins, the ellipse a little uneven
+            # (false: an even line on a true ellipse); periods: keep the 。 that ends a line (manga leaves it off)
+            "hand": True, "periods": False}
+TAIL_KINDS = ("wedge", "straight", "zigzag", "fade", "bubbles")  # (wedge bows a little and fills out at its base)
 VS = (range(0xFE00, 0xFE10), range(0xE0100, 0xE01F0))
 
 
@@ -98,23 +101,148 @@ def _inner(kind: str, w: float, h: float, pad: float, depth: float | None = None
     return w, h
 
 
+# --- the balloon around the letters (B1) ------------------------------------------------------------------
+# An ellipse is fitted to the letters' own outline (columns set from the top, their feet uneven), not to the box
+# around them: the balloon hugs the words closely, as a letterer draws it.
+
+FIT_PAD = 0.15  # em between the letters' corners and the outline, at the nearest (their sides keep more)
+HUGGED = ("speech", "thought", "whisper", "flash", "shout")
+UNEVEN = ("speech", "thought", "whisper")  # (drawn a little uneven by hand, unless style.hand is false)
+UNEVEN_MOST = 0.04  # (how far in from its box an uneven outline goes at most; the words keep 0.955 of it)
+
+
+HAND_POWER = 2.6  # (a letterer's oval is fuller than an ellipse: |x/a|^p + |y/b|^p = 1, p = 2 being an ellipse)
+
+
+def hug_power(kind: str, st: dict) -> float:
+    """The oval's fullness: a hand-drawn balloon is a little squarer than an ellipse, so its words reach its corners."""
+    return HAND_POWER if kind in UNEVEN and st.get("hand", True) and not float(st.get("wobble") or 0) else 2.0
+
+
+def _hug_keep(kind: str, st: dict) -> float:
+    """How much of the box's half-size the letters may use: the spikes' valleys for a shout, a little less for
+    an uneven (hand-drawn) outline."""
+    if kind == "shout":
+        return 1 - max(0.05, min(0.6, float(st.get("spike_depth") if st.get("spike_depth") is not None else 0.2))) - 0.02
+    if kind in UNEVEN and st.get("hand", True) and not float(st.get("wobble") or 0):
+        return 0.955
+    return 1.0
+
+
+def block_points(rects, pad: float):
+    """The corners of the letters' rectangles (x0, y0, x1, y1), `pad` out, around the block's middle."""
+    import numpy as np
+
+    arr = np.asarray(rects, dtype=float)
+    cx = (arr[:, 0].min() + arr[:, 2].max()) / 2
+    cy = (arr[:, 1].min() + arr[:, 3].max()) / 2
+    x0, y0, x1, y1 = arr[:, 0] - pad - cx, arr[:, 1] - pad - cy, arr[:, 2] + pad - cx, arr[:, 3] + pad - cy
+    return np.concatenate([np.stack([x0, y0], 1), np.stack([x1, y0], 1), np.stack([x0, y1], 1), np.stack([x1, y1], 1)])
+
+
+def _offsets(span_x: float, span_y: float, n: int = 9):
+    import numpy as np
+
+    gx, gy = np.meshgrid(np.linspace(-span_x, span_x, n), np.linspace(-span_y, span_y, n))
+    return np.stack([gx.ravel(), gy.ravel()], 1)
+
+
+def ellipse_around(points, power: float = 2.0) -> tuple[float, float, float, float]:
+    """The smallest ellipse (upright; with `power` > 2 a fuller oval) holding every point: (width, height, dx, dy),
+    its middle (dx, dy) from the points' middle."""
+    import numpy as np
+
+    pts = np.asarray(points, dtype=float)
+    n = float(power)
+    span_x = float(np.ptp(pts[:, 0])) or 1.0
+    span_y = float(np.ptp(pts[:, 1])) or 1.0
+    best = None
+    centre = np.zeros(2)
+    for step in (0.18, 0.05):
+        offs = centre + _offsets(span_x * step, span_y * step)
+        for ratio in np.geomspace(0.25, 4.0, 48):
+            d = np.abs((pts[None, :, 0] - offs[:, None, 0]) / ratio) ** n + np.abs(pts[None, :, 1] - offs[:, None, 1]) ** n
+            need = d.max(axis=1)  # (b^n for each middle)
+            k = int(need.argmin())
+            b = float(need[k] ** (1 / n))
+            area = ratio * b * b
+            if best is None or area < best[0]:
+                best = (area, ratio, b, offs[k].copy())
+        centre = best[3]
+    _area, ratio, b, (dx, dy) = best
+    return float(2 * ratio * b), float(2 * b), float(dx), float(dy)
+
+
+def fit_in(points, a: float, b: float, power: float = 2.0) -> tuple[float, float, float]:
+    """How well the points sit in an ellipse (or fuller oval) of half-sizes a, b: (worst, dx, dy), worst ≤ 1 when
+    they all fit, with the points moved by (dx, dy) from its middle to fit best."""
+    import numpy as np
+
+    pts = np.asarray(points, dtype=float)
+    best = None
+    centre = np.zeros(2)
+    n = float(power)
+    for step in (0.25, 0.06):
+        offs = centre + _offsets(a * step, b * step)
+        d = (np.abs((pts[None, :, 0] + offs[:, None, 0]) / max(a, 1e-6)) ** n
+             + np.abs((pts[None, :, 1] + offs[:, None, 1]) / max(b, 1e-6)) ** n)
+        worst = d.max(axis=1)
+        k = int(worst.argmin())
+        if best is None or worst[k] < best[0]:
+            best = (float(worst[k]), offs[k].copy())
+        centre = best[1]
+    return best[0], float(best[1][0]), float(best[1][1])
+
+
+def ink_rects(image: Image.Image, em: int) -> list:
+    """The letters' outline as upright strips (a third of a letter wide): where each strip has ink, top to foot."""
+    import numpy as np
+
+    alpha = np.asarray(image.getchannel("A") if image.mode == "RGBA" else image.convert("L")) > 40
+    if not alpha.any():
+        return []
+    step = max(1, em // 3)
+    rects = []
+    for x in range(0, alpha.shape[1], step):
+        part = alpha[:, x:x + step]
+        rows = np.flatnonzero(part.any(axis=1))
+        if rows.size:
+            cols = np.flatnonzero(part.any(axis=0))
+            rects.append((x + cols[0], rows[0], x + cols[-1] + 1, rows[-1] + 1))
+    return rects
+
+
 def _emphasis(line, face) -> list[str]:
     return [face.normalize(str(run)) for run in getattr(line, "emphasis_runs", None) or [] if run]
 
 
-def _vertical(line, st: dict, face, em: int, inner_h: float, fill) -> Image.Image:
+SPOKEN = ("speech", "rounded", "box", "cloud", "thought", "shout", "electric", "flash", "whisper")
+
+
+def _set_text(line, st: dict, face) -> str:
+    """The words as set: a spoken line without its closing 。 (manga leaves it off; style.periods keeps it)."""
+    from genko.tategaki import without_periods
+
     text = face.normalize(line.text or "")
+    if (line.balloon or "speech") in SPOKEN and not st.get("periods"):
+        text = without_periods(text)
+    return text
+
+
+def _vertical(line, st: dict, face, em: int, inner_h: float, fill) -> Image.Image:
+    from genko.tategaki import phrase_columns
+
+    text = _set_text(line, st, face)
     tracking, leading = float(st["tracking"] or 0), float(st["leading"] or 0)
     latin = st["latin"] != "upright"
     step = em * (1 + tracking)
     column = inner_h
     if "\n" not in text and em > 0:
-        # balance the columns (7 / 7 / 1 reads badly; 5 / 5 / 5 does not)
+        # broken between phrases where a column is full (まんが作りの／モヤモヤを／…), not after so many letters
         count = len(cells(text, bool(st["tcy"]), latin))
         fit = max(1, int((inner_h - em) // step) + 1)
         if count > fit:
-            cols = -(-count // fit)
-            column = min(column, em + step * (-(-count // cols) - 1))
+            text = "\n".join(phrase_columns(text, fit, lambda part: len(cells(part, bool(st["tcy"]), latin))))
     return compose(text, face.font(em), em, max(em, int(column + em * 0.1)), fill=fill,
                    ruby_runs=getattr(line, "ruby_runs", None) or None, face=face, tracking=tracking, leading=leading,
                    tcy=bool(st["tcy"]), align=str(st["align"] or "top"), latin=latin,
@@ -129,7 +257,7 @@ def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Im
     can be larger, smaller, bolder or in another colour (style_runs), which makes its row taller."""
     from genko.tategaki import bold_px, char_styles
 
-    text = face.normalize(line.text or "")
+    text = _set_text(line, st, face)
     tracking = float(st["tracking"] or 0)
     flat = text.replace("\n", "")
     styles_flat = char_styles(flat, getattr(line, "style_runs", None), {"bold": line_weight(st)} if line_weight(st) else None)
@@ -255,6 +383,13 @@ def _horizontal(line, st: dict, face, em: int, inner_w: float, fill) -> Image.Im
 
 def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Image, int]:
     """The lettering of a line (RGBA) and its em in px, fitted into its balloon."""
+    image, em, _corner = text_layout(line, dpi, font_path)
+    return image, em
+
+
+def text_layout(line, dpi: int, font_path: str | None = None) -> tuple[Image.Image, int, tuple[float, float]]:
+    """The lettering, its em, and where its top left sits from the box's middle (px). In an ellipse the letters
+    are fitted to the outline by their own shape, and sit where they fit best."""
     st = style_of(line)
     kind = line.balloon or "speech"
     face = fonts.face(st["font"] or (None if kind == "sfx" else font_path), fonts.DEFAULT_SFX if kind == "sfx" else fonts.DEFAULT_DIALOGUE)
@@ -276,18 +411,31 @@ def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Imag
     else:
         em = max(8, px(CAP_MM, dpi))
         fixed = False
-    pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
-    inner_w, inner_h = _inner(kind, w, h, pad, st.get("spike_depth"))
+    hug = kind in HUGGED
+    keep = _hug_keep(kind, st) if hug else 1.0
+    power = hug_power(kind, st)
+
+    def room(em: int) -> tuple[float, float]:
+        pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
+        if hug:  # (the columns may run the ellipse's height; whether they fit is judged by their shape below)
+            return (w * keep - 2 * em * FIT_PAD) * 0.92, (h * keep - 2 * em * FIT_PAD) * 0.92
+        return _inner(kind, w, h, pad, st.get("spike_depth"))
+
+    inner_w, inner_h = room(em)
     scale_x = max(0.3, min(3.0, float(st.get("scale_x") or 1.0)))
-    for _ in range(10):
+    for _ in range(12):
         image = _vertical(line, st, face, em, inner_h, fill) if vertical else _horizontal(line, st, face, em, inner_w, fill)
         if abs(scale_x - 1) > 1e-3:  # 長体 (< 1) or 平体 (> 1): the letters narrower or wider than tall
             image = image.resize((max(1, round(image.width * scale_x)), image.height), Image.Resampling.LANCZOS)
-        if fixed or (image.width <= inner_w * 1.02 and image.height <= inner_h * 1.02) or em <= 8:
+        if hug:
+            rects = ink_rects(image, em)
+            fits = not rects or fit_in(block_points(rects, em * FIT_PAD), w / 2 * keep, h / 2 * keep, power)[0] <= 1.03
+        else:
+            fits = image.width <= inner_w * 1.02 and image.height <= inner_h * 1.02
+        if fixed or fits or em <= 8:
             break
-        em = max(8, int(em * 0.9))
-        pad = 0 if kind in ("none", "sfx") else max(2, em // 4)
-        inner_w, inner_h = _inner(kind, w, h, pad, st.get("spike_depth"))
+        em = max(8, int(em * 0.92))
+        inner_w, inner_h = room(em)
     if st.get("gradient"):
         image = gradient_letters(image, st["gradient"])
     if st.get("fill_png"):
@@ -303,7 +451,17 @@ def text_image(line, dpi: int, font_path: str | None = None) -> tuple[Image.Imag
         image = skewed(image, skew, vertical)
     if st.get("warp"):
         image = warped_letters(image, st["warp"])
-    return image, em
+    corner = (-image.width / 2, -image.height / 2)
+    if hug:
+        rects = ink_rects(image, em)
+        if rects:
+            _worst, dx, dy = fit_in(block_points(rects, em * FIT_PAD), w / 2 * keep, h / 2 * keep, power)
+            x0 = min(r[0] for r in rects)
+            x1 = max(r[2] for r in rects)
+            y0 = min(r[1] for r in rects)
+            y1 = max(r[3] for r in rects)
+            corner = (dx - (x0 + x1) / 2, dy - (y0 + y1) / 2)  # (the letters' middle moved by the best fit)
+    return image, em, corner
 
 
 _PICTURES: dict = {}
@@ -506,6 +664,30 @@ def _wobbly(points: list, amount: float, size: float, seed: str) -> list:
     return out
 
 
+def _uneven(box, seed: str, n: int = 120) -> list:
+    """An ellipse as a letterer draws it: a little egg-shaped and flatter on one side, never the same twice (the
+    line's id picks how), always inside its box."""
+    x0, y0, x1, y1 = box
+    cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+    rng = random.Random("uneven:" + (seed or "genko"))
+    a1, p1 = rng.uniform(0.012, 0.03), rng.uniform(0, math.tau)
+    a2, p2 = rng.uniform(0.015, 0.035), rng.uniform(0, math.tau)
+    a3, p3 = rng.uniform(0.0, 0.01), rng.uniform(0, math.tau)
+    drops = [a1 * (1 + math.cos(math.tau * k / n - p1)) + a2 * (1 + math.cos(2 * math.tau * k / n - p2))
+             + a3 * (1 + math.cos(3 * math.tau * k / n - p3)) for k in range(n)]
+    most = max(drops) or 1.0
+    squeeze = min(1.0, UNEVEN_MOST / most)  # (never more than UNEVEN_MOST in from the box: the words' room)
+    points = []
+    for k in range(n):
+        t = math.tau * k / n
+        r = 1 - drops[k] * squeeze
+        c, s_ = math.cos(t), math.sin(t)  # (a fuller oval than an ellipse: HAND_POWER)
+        ex = math.copysign(abs(c) ** (2 / HAND_POWER), c)
+        ey = math.copysign(abs(s_) ** (2 / HAND_POWER), s_)
+        points.append((cx + rx * r * ex, cy + ry * r * ey))
+    return points
+
+
 def _outline(kind: str, box, n: int = 96) -> list | None:
     """The outline of an ellipse or box balloon as points (for the hand-drawn wobble)."""
     x0, y0, x1, y1 = box
@@ -560,6 +742,8 @@ def _shape(draw: ImageDraw.ImageDraw, kind: str, box: tuple[float, float, float,
         draw.polygon(points, fill=255)
     elif kind == "electric":
         draw.polygon(_electric(box, st), fill=255)
+    elif kind in UNEVEN and st.get("hand", True):
+        draw.polygon(_uneven(box, seed), fill=255)
     else:  # speech, thought, whisper, flash
         draw.ellipse(box, fill=255)
 
@@ -656,6 +840,12 @@ def _tail_polygon(kind: str, box, tip, via, base: float, style: str = "wedge") -
     p1, p2 = _edge_point(kind, box, via or tip, base)
     mx, my = (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2
     cx, cy = via if via else ((mx + tip[0]) / 2, (my + tip[1]) / 2)
+    bow = style == "wedge" and not via and kind != "electric"
+    if bow:  # (a drawn tail bows a little, away from the balloon's middle: a comma, not a needle)
+        bx, by = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        dx, dy = tip[0] - mx, tip[1] - my
+        side = 1.0 if (dx * (my - by) - dy * (mx - bx)) >= 0 else -1.0
+        cx, cy = cx - dy * 0.16 * side, cy + dx * 0.16 * side
     left, right = [], []
     steps = 16
     for i in range(steps + 1):
@@ -665,7 +855,7 @@ def _tail_polygon(kind: str, box, tip, via, base: float, style: str = "wedge") -
         dx = 2 * (1 - t) * (cx - mx) + 2 * t * (tip[0] - cx)
         dy = 2 * (1 - t) * (cy - my) + 2 * t * (tip[1] - cy)
         n = math.hypot(dx, dy) or 1.0
-        half = math.dist(p1, p2) / 2 * (1 - t)
+        half = math.dist(p1, p2) / 2 * ((1 - t) ** 1.3 if bow else (1 - t))  # (full at the base, then quickly to a point)
         if style == "zigzag" and 0 < i < steps:
             half *= 1.6 if i % 2 else 0.55
         if kind == "electric" and 0 < i < steps:
@@ -836,8 +1026,9 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
         tip = ((px(tail["to"][0], dpi) - rx0) * scale, (px(tail["to"][1], dpi) - ry0) * scale)
         via = ((px(tail["via"][0], dpi) - rx0) * scale, (px(tail["via"][1], dpi) - ry0) * scale) if tail.get("via") else None
         short = min(box[2] - box[0], box[3] - box[1])
-        base = px(float(tail["width_mm"]), dpi) * scale if tail.get("width_mm") else max(4.0, short / 4)
         tail_style = str(tail.get("kind") or "wedge")
+        # (a letterer's tail is broad where it leaves the balloon: about a third of its narrow side)
+        base = px(float(tail["width_mm"]), dpi) * scale if tail.get("width_mm") else max(4.0, short / (3.0 if tail_style == "wedge" else 4))
         if tail.get("vias"):  # 折れ線のしっぽ
             bends = [((px(v[0], dpi) - rx0) * scale, (px(v[1], dpi) - ry0) * scale) for v in tail["vias"]]
             draw.polygon(_polyline_tail(line.balloon or "speech", box, tip, bends, base), fill=255)
@@ -861,6 +1052,13 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
     shapes = ImageChops.lighter(mask, bubbles)
     inside = ImageChops.lighter(_erode(mask, width), _erode(bubbles, max(1, width * 2 // 3)))
     band = ImageChops.subtract(shapes, inside)
+    if st.get("hand", True) and kind not in ("whisper", "flash") and width >= 2:
+        # a pen's line: thinner here, fuller there, as the letterer's hand went round (from 0.6 to 1.5 of the width)
+        thin = ImageChops.subtract(shapes, ImageChops.lighter(_erode(mask, max(1, round(width * 0.6))),
+                                                               _erode(bubbles, max(1, width * 2 // 5))))
+        full = ImageChops.subtract(shapes, ImageChops.lighter(_erode(mask, max(2, round(width * 1.5))), inside))
+        swell = _swell(size, str(getattr(lines[0], "id", "")), max(size) / 3)
+        band = ImageChops.lighter(thin, ImageChops.multiply(full, swell))
     if st.get("double"):  # a second line inside the first
         inner = _erode(inside, max(2, width * 2))
         band = ImageChops.lighter(band, ImageChops.subtract(inner, _erode(inner, max(1, width))))
@@ -888,6 +1086,15 @@ def _paint_shapes(image, lines, boxes, tails, region, dpi: int, st: dict) -> Non
         area.paste(paper, (0, 0, area.width, area.height), shapes)
     area.paste(tuple(int(v) for v in st.get("line_rgb") or OUTLINE)[:3], (0, 0, area.width, area.height), band)
     image.paste(area, (rx0, ry0))
+
+
+def _swell(size, seed: str, wave: float) -> Image.Image:
+    """Where a pen's line swells (white) and where it stays thin (black): a few soft blobs about `wave` px apart."""
+    rng = random.Random("swell:" + (seed or "genko"))
+    cells = (max(2, round(size[0] / max(1.0, wave))) + 1, max(2, round(size[1] / max(1.0, wave))) + 1)
+    small = Image.new("L", cells)
+    small.putdata([rng.choice((0, 0, 90, 255, 255)) for _ in range(cells[0] * cells[1])])
+    return small.resize(size, Image.Resampling.BICUBIC)
 
 
 def _cuts_mask(lines, size, origin, dpi: int, scale: int):
@@ -943,7 +1150,7 @@ def _paint_text(image: Image.Image, line, dpi: int, show_speaker: bool, font_pat
     if style_of(line).get("text_path"):
         path_text(image, line, dpi, font_path)
         return
-    text, em = text_image(line, dpi, font_path)
+    text, em, corner = text_layout(line, dpi, font_path)
     st = style_of(line)
     x = px(line.x_mm + float(st.get("text_dx_mm") or 0), dpi)  # (the words moved inside the balloon)
     y = px(line.y_mm + float(st.get("text_dy_mm") or 0), dpi)
@@ -952,7 +1159,7 @@ def _paint_text(image: Image.Image, line, dpi: int, show_speaker: bool, font_pat
     if (line.balloon or "speech") == "none":
         image.paste(text, (x, y), text)  # text only: set from the box's corner
     else:
-        image.paste(text, (round(cx - text.width / 2), round(cy - text.height / 2)), text)
+        image.paste(text, (round(cx + corner[0]), round(cy + corner[1])), text)
     if show_speaker and line.speaker and (line.balloon or "speech") != "none":
         font = fonts.face(None).font(max(8, em * 2 // 3))
         ImageDraw.Draw(image).text((x, max(0, y - em)), line.speaker, fill=(90, 90, 90), font=font)

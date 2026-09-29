@@ -21,17 +21,13 @@ KIND_LABEL = dict(KINDS)
 
 
 def columns(text: str, per_column: int) -> list[str]:
-    """Break text into vertical columns: explicit line breaks first, then by length."""
+    """Break text into vertical columns: explicit line breaks first, then between phrases (as the renderer
+    does: まんが作りの／モヤモヤを／…), a spoken line without its closing 。."""
+    from genko.tategaki import phrase_columns, without_periods
+
     out: list[str] = []
-    for part in (text or " ").split("\n"):
-        part = part or " "
-        if len(part) > per_column:  # even columns, as the renderer draws them
-            count = -(-len(part) // per_column)
-            per_column = -(-len(part) // count)
-        while len(part) > per_column:
-            out.append(part[:per_column])
-            part = part[per_column:]
-        out.append(part)
+    for part in without_periods(text or " ").split("\n"):
+        out.extend(phrase_columns(part, per_column) if len(part) > per_column else [part or " "])
     return out
 
 

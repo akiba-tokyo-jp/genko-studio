@@ -111,10 +111,11 @@ def test_border_width_and_no_fill():
 
 
 def test_joined_balloons_have_one_outline():
-    lines = [{"text": "ねえ", "x_mm": 60, "y_mm": 60, "w_mm": 24, "h_mm": 30, "wrap": "vertical", "style": {"group": "g"}},
-             {"text": "聞いてる？", "x_mm": 45, "y_mm": 78, "w_mm": 24, "h_mm": 36, "wrap": "vertical", "style": {"group": "g"}}]
+    # (true ellipses, so where their outlines cross is known; a hand-drawn one is a little uneven)
+    lines = [{"text": "ねえ", "x_mm": 60, "y_mm": 60, "w_mm": 24, "h_mm": 30, "wrap": "vertical", "style": {"group": "g", "hand": False}},
+             {"text": "聞いてる？", "x_mm": 45, "y_mm": 78, "w_mm": 24, "h_mm": 36, "wrap": "vertical", "style": {"group": "g", "hand": False}}]
     joined = _page(*lines)
-    apart = _page(*[{**line, "style": {}} for line in lines])
+    apart = _page(*[{**line, "style": {"hand": False}} for line in lines])
     # where the two ellipses overlap, the joined version has no outline running through
     spot = (62, 84, 4, 4)
     assert min(_box(joined, 200, *spot).get_flattened_data()) > 200
