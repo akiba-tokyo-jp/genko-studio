@@ -105,7 +105,7 @@ def test_a_turned_balloon_keeps_its_words_inside():
     for x, y in ink:
         dx, dy = x - cx, y - cy
         ux, uy = dx * math.cos(a) - dy * math.sin(a), dx * math.sin(a) + dy * math.cos(a)  # back to upright
-        assert (ux / rx) ** 2 + (uy / ry) ** 2 <= 1.12, (x, y)
+        assert abs(ux / rx) ** balloons.HAND_POWER + abs(uy / ry) ** balloons.HAND_POWER <= 1.12, (x, y)  # (a letterer's fuller oval)
     # it really turned: an upright balloon's ink differs
     apply_ops(ep, [{"op": "edit_line", "id": "b", "style": {"rotate_deg": None}}])
     upright = render_page(ep.pages[0], dpi, episode=ep)
