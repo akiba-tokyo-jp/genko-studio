@@ -81,6 +81,7 @@ def test_number_fields_select_their_value_and_the_wheel_leaves_unused_fields_alo
 
     inputs.install()
     box = QComboBox()
+    inputs.watch(box)
     box.addItems(["a", "b", "c"])
     box.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     wheel = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, -120), Qt.MouseButton.NoButton,

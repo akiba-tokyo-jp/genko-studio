@@ -3284,6 +3284,7 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        inputs.watch(self)  # (its number fields and lists take input the app's way)
         if not getattr(self, "_settled", False):
             self._settled = True
             self._settle_docks()
