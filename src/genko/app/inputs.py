@@ -29,26 +29,48 @@ class _Inputs(QObject):
 _filter: _Inputs | None = None
 
 
+def _alive(obj) -> bool:
+    import shiboken6
+
+    return obj is not None and shiboken6.isValid(obj)
+
+
 def watch(widget: QWidget) -> None:
     """The fields in `widget` (and itself) take input the app's way; each is set up once."""
-    if _filter is None or widget is None:
+    if _filter is None or not _alive(widget):
         return
     found = [widget] if isinstance(widget, _KINDS) else []
     for kind in _KINDS:
         found += widget.findChildren(kind)
     for field in found:
-        if not field.property("genko_inputs"):
+        if _alive(field) and not field.property("genko_inputs"):
             field.setProperty("genko_inputs", True)
             field.installEventFilter(_filter)
 
 
-def _scan(*_args) -> None:
+_pending = False
+
+
+def _scan_soon(*_args) -> None:
+    """After the event that moved the focus has finished (a window may be closing, half taken apart, as it moves),
+    look once for new fields in the window in front."""
+    global _pending
+    if not _pending:
+        _pending = True
+        QTimer.singleShot(0, _scan)
+
+
+def _scan() -> None:
+    global _pending
+    _pending = False
     app = QApplication.instance()
-    focus = app.focusWidget() if app else None
-    if focus is not None:
+    if app is None:
+        return
+    focus = app.focusWidget()
+    if _alive(focus):
         watch(focus.window())
-    active = app.activeWindow() if app else None
-    if active is not None and (focus is None or active is not focus.window()):
+    active = app.activeWindow()
+    if _alive(active) and not (_alive(focus) and active is focus.window()):
         watch(active)
 
 
@@ -59,7 +81,7 @@ def install() -> None:
     if app is None or _filter is not None:
         return
     _filter = _Inputs(app)
-    app.focusChanged.connect(_scan)
-    app.focusWindowChanged.connect(_scan)
+    app.focusChanged.connect(_scan_soon)
+    app.focusWindowChanged.connect(_scan_soon)
     for top in app.topLevelWidgets():
         watch(top)
