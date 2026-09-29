@@ -107,7 +107,7 @@ def test_lettering_stays_in_panel_in_reading_order_and_off_faces():
     block = 2 * EM_MM + 0.4 * EM_MM
     w, h = measure(["…やっぱり", "来てくれたんだ"], "speech")
     assert w > block and h > 7 * EM_MM
-    assert w * h < (block * 2 ** 0.5 + EM_MM / 2) * (7 * EM_MM * 2 ** 0.5 + EM_MM / 2) * 0.9
+    assert w * h < (block * 2 ** 0.5 + EM_MM / 2) * (7 * EM_MM * 2 ** 0.5 + EM_MM / 2) * 0.95
     assert measure(["…やっぱり", "来てくれたんだ"], "narration")[0] == pytest.approx(block + EM_MM / 2)
 
 

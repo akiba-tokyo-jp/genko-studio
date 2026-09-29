@@ -168,7 +168,7 @@ def test_new_lines_go_inside_the_panel_vertical_and_right_to_left():
         assert r.x <= box["x_mm"] and box["x_mm"] + box["w_mm"] <= r.x + r.width
         assert r.y <= box["y_mm"] and box["y_mm"] + box["h_mm"] <= r.y + r.height
     assert second["x_mm"] + second["w_mm"] <= first["x_mm"]  # the next line is to the left
-    assert lettering.columns("5年前の今日、ここで約束したの", 7) == ["5年前の今", "日、ここで", "約束したの"]
+    assert lettering.columns("5年前の今日、ここで約束したの", 7) == ["5年前の今日、", "ここで", "約束したの"]  # (between phrases)
 
 
 def test_edit_line_switches_kind_and_direction():

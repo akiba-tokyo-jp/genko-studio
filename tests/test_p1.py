@@ -105,6 +105,7 @@ def test_print_render_draws_balloon_not_plain_dump():
                 "w_mm": 50,
                 "h_mm": 30,
                 "balloon": "speech",
+                "style": {"hand": False},  # (a true ellipse: its top is where the box's top is)
             }
         ],
     )
