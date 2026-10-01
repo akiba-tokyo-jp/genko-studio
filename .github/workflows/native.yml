@@ -78,11 +78,10 @@ jobs:
         id: qt-cache
         with:
           path: ${{ runner.temp }}\qt
-          key: qt-${{ env.QT_VERSION }}-win64_msvc2022_64-imageformats
+          key: qt-${{ env.QT_VERSION }}-win64_msvc2022_64-imageformats-v2
       - if: steps.qt-cache.outputs.cache-hit != 'true'
         shell: pwsh
-        run: |
-          pipx run "aqtinstall==$env:AQT_VERSION" install-qt windows desktop "$env:QT_VERSION" win64_msvc2022_64 -m qtimageformats -O "$env:RUNNER_TEMP\qt"
+        run: python tools/ci/fetch_qt.py --os windows --out "$env:RUNNER_TEMP\qt"
       - name: Configure, build, test
         shell: pwsh
         env:
