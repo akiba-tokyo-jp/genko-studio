@@ -3,9 +3,9 @@ name: native
 # The C++ build (docs/cpp-migration). Runs beside the Python tests (ci.yml), which stay the baseline until M7.
 on:
   push:
-    paths: ["native/**", "docs/cpp-migration/**", "tools/migration/**", ".github/workflows/native.yml"]
+    paths: ["native/**", "docs/cpp-migration/**", "tools/migration/**", "tools/ci/**", ".github/workflows/native.yml"]
   pull_request:
-    paths: ["native/**", "docs/cpp-migration/**", "tools/migration/**", ".github/workflows/native.yml"]
+    paths: ["native/**", "docs/cpp-migration/**", "tools/migration/**", "tools/ci/**", ".github/workflows/native.yml"]
 
 permissions:
   contents: read
