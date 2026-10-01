@@ -20,6 +20,12 @@ std::string new_book_id();
 // 32 lowercase hex digits.
 bool is_book_id(std::string_view text);
 
+// A new transaction id for the journal (schema-v4 §4.2): 32 lowercase hex digits, always random.
+std::string new_txn_id();
+
+// 32 lowercase hex digits (a transaction id or a book id).
+inline bool is_txn_id(std::string_view text) { return is_book_id(text); }
+
 // Tests only: while it lives, new_id() returns ids from `source` instead of random ones (one at a time; not for
 // threads). The Python reference harness has the same switch, so books whose ids are made while reading can be
 // compared exactly.

@@ -53,5 +53,12 @@ function(genko_test name)
   else()
     set_tests_properties(${name} PROPERTIES TIMEOUT 300)
   endif()
-  set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  set(_env "QT_QPA_PLATFORM=offscreen")
+  if(GENKO_SANITIZE AND NOT MSVC)
+    # (the tests run genko in child processes and expect exit codes 1–3 from it: a sanitizer report must not pass
+    # for one of those)
+    list(APPEND _env "ASAN_OPTIONS=exitcode=99:detect_leaks=1" "UBSAN_OPTIONS=exitcode=98:print_stacktrace=1"
+                     "TSAN_OPTIONS=exitcode=97")
+  endif()
+  set_tests_properties(${name} PROPERTIES ENVIRONMENT "${_env}")
 endfunction()

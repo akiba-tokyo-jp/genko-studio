@@ -310,11 +310,4 @@ std::string project_json_v4(const core::Document& doc, AssetStore& store) {
     return core::dump_python_indent2(project_payload_v4(doc, store));
 }
 
-void save_document_plain(const core::Document& doc, const std::filesystem::path& dir) {
-    if (!doc.read_only_reason.empty()) throw core::Error("read_only", doc.read_only_reason);
-    AssetStore store(dir);
-    const std::string text = project_json_v4(doc, store);
-    write_atomic(dir / "project.json", text);
-}
-
 }  // namespace genko::storage

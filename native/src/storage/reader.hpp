@@ -1,8 +1,10 @@
 #pragma once
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "core/error.hpp"
@@ -52,9 +54,19 @@ struct LoadReport {
     core::Json to_json() const;
 };
 
+// Strokes and pictures already read from one folder's assets, shared by the loads that are given it (the
+// converter reads many old snapshots of one book: each blob is decoded once). Only assets read without a problem
+// are kept.
+struct LoadCache {
+    std::unordered_map<std::string, core::StrokeListPtr> strokes;
+    std::unordered_map<std::string, core::Bytes> pictures;
+};
+
 struct LoadOptions {
     // Hash every asset read and compare it with its name.
     bool verify_hashes = true;
+    // Assets read before from the same folder (none: read every asset).
+    std::shared_ptr<LoadCache> cache;
 };
 
 struct LoadResult {
@@ -67,6 +79,17 @@ struct LoadResult {
 // core::Error("json") for text that is not JSON (Python's message) and core::Error("format") for JSON that is not
 // a book. Problems with assets and values are not errors: they are in the report (and make the book read-only).
 LoadResult load_document(const std::filesystem::path& dir, const LoadOptions& options = {});
+
+// The same for project.json text (an old snapshot, a state) whose assets and pages/ pictures are under `dir`.
+LoadResult load_document_text(std::string_view text, const std::filesystem::path& dir, const LoadOptions& options = {});
+
+// The same for a payload already parsed (no repairs from parsing).
+LoadResult load_document_payload(const core::Json& payload, const std::filesystem::path& dir,
+                                 const LoadOptions& options = {});
+
+// The version of a project.json payload (1 when it has none; a bool counts as an int, as in Python). Throws
+// UnsupportedProjectVersion for a version above 4 or not an integer, and for a min_reader above 4.
+int project_version(const core::Json& payload);
 
 // The keys of project.json and of a page that this build reads (Python's KNOWN_TOP_KEYS and KNOWN_PAGE_KEYS, and
 // v4's min_reader, writer, book_id, features). Other keys are kept in Document::extra and Page::extra.

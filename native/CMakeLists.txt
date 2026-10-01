@@ -15,6 +15,19 @@ option(GENKO_BUILD_TESTS "Build the CTest suites" ON)
 option(GENKO_WERROR "Treat warnings in Genko's own code as errors (CI)" OFF)
 set(GENKO_SANITIZE "" CACHE STRING "Sanitizers for Debug builds: empty, address,undefined, or thread")
 
+# The save tests' fault injection (GENKO_FAULT, GENKO_TEST_MIGRATE_HOOK): on for Debug and ASan builds. A release
+# configuration never has it, whatever the option says (see genko_storage in src/CMakeLists.txt).
+if(CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
+  set(_genko_fault_default OFF)
+else()
+  set(_genko_fault_default ON)
+endif()
+option(GENKO_FAULT_INJECTION "Test-only fault injection in the save path (never in a release configuration)"
+       ${_genko_fault_default})
+if(GENKO_FAULT_INJECTION AND CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
+  message(FATAL_ERROR "GENKO_FAULT_INJECTION is for Debug and ASan builds; a ${CMAKE_BUILD_TYPE} build must not have it")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(GenkoFlags)
 include(GenkoDeps)

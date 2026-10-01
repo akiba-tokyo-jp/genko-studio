@@ -28,8 +28,7 @@ core::Json project_payload_v4(const core::Document& doc, AssetStore& store);
 // json.dumps(payload, ensure_ascii=False, indent=2)).
 std::string project_json_v4(const core::Document& doc, AssetStore& store);
 
-// Write the book into `dir`: its assets, then project.json (atomically). No journal and no transaction (those come
-// with M1-B). A document with a read_only_reason is refused with core::Error("read_only").
-void save_document_plain(const core::Document& doc, const std::filesystem::path& dir);
+// (Books are written only through storage::Saver — transaction.hpp —, which uses project_payload_v4 for its
+// project.json step: there is no other way to write a book.)
 
 }  // namespace genko::storage

@@ -170,7 +170,7 @@ class TestContractStorage : public QObject {
         expect_equal(genko::storage::snapshot(first.document, true), py_snapshot, name.toStdString() + " snapshot");
 
         const fs::path v4 = to_path(path("cpp/" + name + ".genko"));
-        genko::storage::save_document_plain(first.document, v4);
+        genko::test::write_project(first.document, v4);
         const auto second = genko::storage::load_document(v4);
         QVERIFY2(second.report.clean(), genko::core::dump_python(second.report.to_json()).c_str());
         QCOMPARE(second.report.source_version, 4);
@@ -199,7 +199,7 @@ class TestContractStorage : public QObject {
 
         // written again from the v4 book: the same file
         const fs::path again = to_path(path("cpp2/" + name + ".genko"));
-        genko::storage::save_document_plain(second.document, again);
+        genko::test::write_project(second.document, again);
         QCOMPARE(genko::storage::read_file(again / "project.json"), genko::storage::read_file(v4 / "project.json"));
     }
 

@@ -9,17 +9,25 @@
       "binaryDir": "${sourceDir}/../build/${presetName}",
       "cacheVariables": {"GENKO_WERROR": "ON"}
     },
-    {"name": "linux-release", "inherits": "base", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}},
-    {"name": "linux-debug", "inherits": "base", "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}},
+    {
+      "name": "linux-release",
+      "inherits": "base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "GENKO_FAULT_INJECTION": "OFF"}
+    },
+    {
+      "name": "linux-debug",
+      "inherits": "base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_FAULT_INJECTION": "ON"}
+    },
     {
       "name": "linux-asan",
       "inherits": "base",
-      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_SANITIZE": "address,undefined"}
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_SANITIZE": "address,undefined", "GENKO_FAULT_INJECTION": "ON"}
     },
     {
       "name": "linux-tsan",
       "inherits": "base",
-      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_SANITIZE": "thread"}
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_SANITIZE": "thread", "GENKO_FAULT_INJECTION": "ON"}
     },
     {
       "name": "windows-release",
@@ -27,6 +35,7 @@
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "GENKO_FAULT_INJECTION": "OFF",
         "VCPKG_TARGET_TRIPLET": "x64-windows-static-md",
         "VCPKG_MANIFEST_DIR": "${sourceDir}"
       }

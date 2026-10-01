@@ -5,20 +5,44 @@
 
 #include <cstdio>
 #include <exception>
+#include <map>
+#include <optional>
+#include <set>
+#include <span>
 #include <string>
+#include <system_error>
 #include <vector>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #include "api/buildinfo.hpp"
+#include "core/actor.hpp"
+#include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/ids.hpp"
 #include "core/json.hpp"
 #include "core/ops_schema.hpp"
+#include "core/pyconv.hpp"
+#include "storage/doctor.hpp"
 #include "storage/fsutil.hpp"
+#include "storage/gc.hpp"
+#include "storage/journal.hpp"
+#include "storage/lock.hpp"
+#include "storage/migrate.hpp"
 #include "storage/reader.hpp"
 #include "storage/snapshot.hpp"
+#include "storage/transaction.hpp"
+#include "storage/undo.hpp"
 
 namespace genko::api {
 
 namespace {
+
+namespace fs = std::filesystem;
+using core::Json;
 
 void write_text(const std::string& text, std::FILE* to) {
     std::fwrite(text.data(), 1, text.size(), to);
@@ -32,18 +56,19 @@ void write_json(const nlohmann::json& value, std::FILE* to = stdout) {
 // Python's _print_json: json.dumps(payload, ensure_ascii=…) and a newline, on stdout.
 void print_json(const core::Json& value, bool ascii) { write_text(core::dump_python(value, ascii) + "\n", stdout); }
 
-int usage(const std::string& message) {
+int usage(const std::string& message, int exit_code = 2) {
     write_json({{"ok", false}, {"error", message}, {"code", "usage"}}, stderr);
-    return 2;
+    return exit_code;
 }
 
 // {"ok": false, "error": …, "code": …} on stdout, as Python's __main__ prints its failures (plus the code,
 // docs/cpp-migration/ARCHITECTURE.md §8).
-int fail(const std::string& message, const std::string& code, bool ascii, int exit_code) {
+int fail(const std::string& message, const std::string& code, bool ascii, int exit_code, const Json* report = nullptr) {
     core::Json out = core::Json::object();
     out["ok"] = false;
     out["error"] = message;
     out["code"] = code;
+    if (report != nullptr) out["report"] = *report;
     print_json(out, ascii);
     return exit_code;
 }
@@ -66,6 +91,136 @@ std::string pathlib_text(const std::string& text) {
     if (out.empty()) out = ".";
     return out;
 }
+
+fs::path path_arg(const QString& arg) { return storage::path_from_utf8(pathlib_text(arg.toStdString())); }
+
+// --- arguments (argparse's rules: options anywhere, "--name value" or "--name=value", unique prefixes) ---------
+
+struct Option {
+    const char* name;  // "--title"
+    bool takes_value;
+};
+
+struct Arguments {
+    std::vector<QString> positional;
+    std::map<std::string, QString> values;
+    std::set<std::string> flags;
+
+    bool flag(const char* name) const { return flags.contains(name); }
+    std::optional<QString> value(const char* name) const {
+        const auto it = values.find(name);
+        return it == values.end() ? std::nullopt : std::optional<QString>(it->second);
+    }
+};
+
+bool negative_number(const QString& text) {
+    bool ok = false;
+    text.toDouble(&ok);
+    return ok && text.startsWith(QLatin1Char('-'));
+}
+
+// The error message, or nothing when the arguments are right.
+std::optional<std::string> parse_arguments(const QStringList& args, std::span<const Option> options,
+                                           std::size_t positionals, const char* names, Arguments& out) {
+    for (qsizetype i = 0; i < args.size(); ++i) {
+        const QString& arg = args[i];
+        if (!arg.startsWith(QLatin1String("--")) || arg.size() == 2) {
+            if (arg.startsWith(QLatin1Char('-')) && arg != QLatin1String("-") && !negative_number(arg)) {
+                return "unrecognized arguments: " + arg.toStdString();
+            }
+            out.positional.push_back(arg);
+            continue;
+        }
+        const qsizetype equals = arg.indexOf(QLatin1Char('='));
+        const std::string given = (equals < 0 ? arg : arg.left(equals)).toStdString();
+        const Option* match = nullptr;
+        std::vector<const Option*> prefixed;
+        for (const Option& option : options) {
+            if (given == option.name) match = &option;
+            if (std::string_view(option.name).starts_with(given)) prefixed.push_back(&option);
+        }
+        if (match == nullptr) {
+            if (prefixed.size() > 1) {
+                std::string could;
+                for (const Option* option : prefixed) could += (could.empty() ? "" : ", ") + std::string(option->name);
+                return "ambiguous option: " + given + " could match " + could;
+            }
+            if (prefixed.empty()) return "unrecognized arguments: " + arg.toStdString();
+            match = prefixed.front();
+        }
+        if (!match->takes_value) {
+            if (equals >= 0) return "argument " + std::string(match->name) + ": ignored explicit argument '" + arg.mid(equals + 1).toStdString() + "'";
+            out.flags.insert(match->name);
+            continue;
+        }
+        if (equals >= 0) {
+            out.values[match->name] = arg.mid(equals + 1);
+            continue;
+        }
+        if (i + 1 >= args.size() ||
+            (args[i + 1].startsWith(QLatin1Char('-')) && args[i + 1] != QLatin1String("-") && !negative_number(args[i + 1]))) {
+            return "argument " + std::string(match->name) + ": expected one argument";
+        }
+        out.values[match->name] = args[++i];
+    }
+    if (out.positional.size() < positionals) return std::string("the following arguments are required: ") + names;
+    if (out.positional.size() > positionals) return "unrecognized arguments: " + out.positional[positionals].toStdString();
+    return std::nullopt;
+}
+
+// int(value) for an option (argparse's type=int).
+std::optional<std::int64_t> int_option(const QString& text) {
+    try {
+        return core::py_int(Json(text.toStdString()));
+    } catch (const core::Error&) {
+        return std::nullopt;
+    }
+}
+
+std::string read_stdin() {
+#ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);
+#endif
+    std::string out;
+    char buf[1 << 16];
+    for (;;) {
+        const std::size_t got = std::fread(buf, 1, sizeof buf, stdin);
+        if (got == 0) break;
+        out.append(buf, got);
+    }
+    return out;
+}
+
+core::ParseOptions text_file() {
+    core::ParseOptions options;
+    options.universal_newlines = true;
+    return options;
+}
+
+// A v1–v3 book is never written: found before anything is touched (no project.lock is made in it).
+void refuse_legacy(const fs::path& dir) {
+    const int version = storage::project_version(core::parse_python_json(storage::read_file(dir / "project.json"), nullptr, text_file()));
+    if (version < 4) throw storage::NeedsMigration(dir, version);
+}
+
+// Python's _is_studio_project: an agent's book (strict gates, studio state, or M0 sidecars) does not trust an unnamed
+// caller as a person.
+bool is_studio_project(const fs::path& dir) {
+    std::error_code ec;
+    if (fs::is_directory(dir / "studio" / "drafts", ec)) return true;
+    try {
+        const Json payload = core::parse_python_json(storage::read_file(dir / "project.json"), nullptr, text_file());
+        const auto truthy = [&payload](const char* key) {
+            const auto it = payload.find(key);
+            return it != payload.end() && core::py_truthy(*it);
+        };
+        return payload.is_object() && (truthy("strict_gates") || truthy("studio"));
+    } catch (const core::Error&) {
+        return false;
+    }
+}
+
+// --- commands ----------------------------------------------------------------------------------------------------
 
 int inspect(const QStringList& args, bool ascii) {
     QString src;
@@ -91,7 +246,7 @@ int inspect(const QStringList& args, bool ascii) {
         }
     }
     if (!have_src) return usage("genko inspect <dir> [--full] [--stroke ID]: the following arguments are required: src");
-    const auto loaded = storage::load_document(storage::path_from_utf8(pathlib_text(src.toStdString())));
+    const auto loaded = storage::load_document(path_arg(src));
     if (!stroke.isEmpty()) {
         print_json(storage::inspect_stroke(loaded.document, stroke.toStdString()), ascii);
     } else {
@@ -106,6 +261,199 @@ int schema(const QStringList& args, bool ascii) {
     out["ok"] = true;
     out["ops"] = core::ops_schema();
     print_json(out, ascii);
+    return 0;
+}
+
+int new_book(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--title", true},  {"--episode", true}, {"--pages", true}, {"--webtoon", false},
+                                          {"--b4", false},    {"--preset", true},  {"--paper", true}, {"--json", false},
+                                          {"--plain", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "dest", a)) return usage("genko new: " + *error);
+    const auto episode = int_option(a.value("--episode").value_or(QStringLiteral("1")));
+    if (!episode) return usage("genko new: argument --episode: invalid int value: " + core::py_repr_str(a.value("--episode")->toStdString()));
+    const auto pages = int_option(a.value("--pages").value_or(QStringLiteral("8")));
+    if (!pages) return usage("genko new: argument --pages: invalid int value: " + core::py_repr_str(a.value("--pages")->toStdString()));
+    core::PageSpec spec;
+    const std::string paper = a.value("--paper").value_or(QString()).toStdString();
+    if (!paper.empty()) {
+        const core::PaperPreset* preset = core::find_paper_preset(paper);
+        if (preset == nullptr) {
+            std::string names;
+            for (const auto& item : core::paper_presets()) names += (names.empty() ? "" : ", ") + std::string(item.key);
+            return usage("--paper must be one of " + names, 1);  // (Python: SystemExit with this text, exit 1)
+        }
+        spec = preset->make();
+    } else if (a.flag("--webtoon")) {
+        spec = core::PageSpec::webtoon();
+    } else if (const auto preset = a.value("--preset"); preset && !preset->isEmpty()) {
+        spec = core::PageSpec::publisher(preset->toStdString());
+    } else if (a.flag("--b4")) {
+        spec = core::PageSpec::b4_comic();
+    } else {
+        spec = core::PageSpec::a4_mono();
+    }
+    const std::string dest_text = pathlib_text(a.positional[0].toStdString());
+    const fs::path dest = storage::path_from_utf8(dest_text);
+    std::error_code ec;
+    if (fs::exists(dest / "project.json", ec)) {
+        return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json") +
+                        " (genko new never writes over a book)",
+                    "exists", ascii, 1);
+    }
+    const auto page_count = static_cast<int>(std::clamp<std::int64_t>(*pages, -1, 100000));
+    core::Document doc = core::new_episode(a.value("--title").value_or(QStringLiteral("無題")).toStdString(),
+                                           core::Num(*episode), page_count, spec);
+    storage::ProjectLock lock(dest, std::string(core::kLegacyActor));
+    lock.try_acquire();
+    if (fs::exists(dest / "project.json", ec)) {
+        return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json"), "exists", ascii, 1);
+    }
+    storage::SaveRequest request;
+    request.actor = std::string(core::kLegacyActor);
+    request.base_revision = 0;
+    request.ops = Json::array();
+    storage::Saver(lock).save(doc, request);
+    lock.release();
+    if (a.flag("--plain")) {
+        write_text(dest_text + "\n", stdout);
+    } else {
+        Json out = Json::object();
+        out["ok"] = true;
+        out["path"] = dest_text;
+        out["snapshot"] = storage::snapshot(doc);
+        print_json(out, ascii);
+    }
+    return 0;
+}
+
+int apply(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--dry-run", false}, {"--expect-revision", true}, {"--agent", true}, {"--txn", true}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 2, "src, ops", a)) return usage("genko apply: " + *error);
+    std::optional<std::int64_t> expect;
+    if (const auto value = a.value("--expect-revision")) {
+        expect = int_option(*value);
+        if (!expect) return usage("genko apply: argument --expect-revision: invalid int value: " + core::py_repr_str(value->toStdString()));
+    }
+    const bool dry_run = a.flag("--dry-run");
+    const std::string txn = a.value("--txn").value_or(QString()).toStdString();
+    if (!txn.empty() && !core::is_txn_id(txn)) return usage("genko apply: --txn takes 32 lowercase hex digits");
+
+    // the ops first, as Python reads them
+    const QString source = a.positional[1];
+    const std::string raw = source == QLatin1String("-") ? read_stdin() : storage::read_file(path_arg(source));
+    core::ParseRepairs repairs;
+    const Json ops = core::parse_python_json(raw, &repairs, text_file());
+    if (!repairs.nonfinite.empty()) {
+        throw core::ApplyError("ops must not hold NaN or Infinity (at " + repairs.nonfinite.front() + ")");
+    }
+    if (!ops.is_array()) throw core::ApplyError("ops file must be a JSON array");
+
+    const fs::path dir = path_arg(a.positional[0]);
+    const std::string agent =
+        a.value("--agent").value_or(QString()).isEmpty()
+            ? (is_studio_project(dir) ? std::string("legacy:unknown") : std::string(core::kLegacyActor))
+            : a.value("--agent")->toStdString();
+    refuse_legacy(dir);
+    storage::ProjectLock lock(dir, agent);
+    lock.try_acquire();
+    storage::journal::repair(dir);  // (the book is read at its last consistent point)
+    // Read inside the lock, so a concurrent writer's changes are never overwritten.
+    const storage::LoadResult loaded = storage::load_document(dir);
+    if (loaded.report.source_version < 4) throw storage::NeedsMigration(dir, loaded.report.source_version);
+
+    // A retry of a transaction saved before gets its revision back, whatever revision the book has reached since
+    // (schema-v4 §4.3); then the base revision is checked.
+    if (!txn.empty() && !dry_run) {
+        const auto txns = storage::journal::transactions(storage::journal::read_lines(storage::journal::journal_file(dir)));
+        if (const auto* done = storage::journal::find_committed(txns, txn)) {
+            Json out = Json::object();  // (this transaction was saved before: it is not applied again)
+            out["ok"] = true;
+            Json applied = Json::array();
+            for (const Json& op : ops) {
+                const auto name = op.is_object() ? op.find("op") : op.end();
+                applied.push_back(op.is_object() && name != op.end() ? core::py_str(*name) : std::string("None"));
+            }
+            out["applied"] = applied;
+            out["snapshot"] = storage::snapshot(loaded.document);
+            out["job_id"] = core::new_id();
+            out["warnings"] = Json::array();
+            out["revision"] = done->rev;
+            out["txn"] = txn;
+            out["already_committed"] = true;
+            print_json(out, ascii);
+            return 0;
+        }
+    }
+    if (expect && loaded.document.revision != *expect) throw storage::RevisionConflict(*expect, loaded.document.revision);
+
+    const core::CommandBus bus;
+    const core::ApplyResult result = bus.apply(loaded.document, ops, core::Actor(agent), dry_run);
+    Json out = Json::object();
+    out["ok"] = true;
+    out["applied"] = result.applied;
+    out["snapshot"] = storage::snapshot(result.doc);
+    out["job_id"] = core::new_id();
+    if (result.has_warnings) out["warnings"] = result.warnings;
+    if (dry_run) {
+        out["revision"] = loaded.document.revision;
+    } else {
+        storage::SaveRequest request;
+        request.actor = agent;
+        request.base_revision = loaded.document.revision;
+        request.ops = result.journal_ops;
+        request.txn = txn;
+        const storage::SaveResult saved = storage::Saver(lock).save(result.doc, request);
+        out["revision"] = saved.revision;
+        out["txn"] = saved.txn;
+        if (saved.repaired) out["repaired"] = true;
+    }
+    lock.release();
+    print_json(out, ascii);
+    return 0;
+}
+
+int restore(const QStringList& args, bool ascii, bool redo) {
+    static constexpr Option kOptions[] = {{"--as", true}, {"--force", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "src", a)) return usage(std::string(redo ? "genko redo: " : "genko undo: ") + *error);
+    const fs::path dir = path_arg(a.positional[0]);
+    const std::string actor = a.value("--as").value_or(QStringLiteral("genko")).toStdString();
+    refuse_legacy(dir);
+    print_json(storage::restore(dir, actor, redo, a.flag("--force")).to_json(), ascii);
+    return 0;
+}
+
+int gc(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--dry-run", false}, {"--legacy", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "src", a)) return usage("genko gc: " + *error);
+    const fs::path dir = path_arg(a.positional[0]);
+    refuse_legacy(dir);
+    print_json(storage::gc(dir, a.flag("--dry-run"), std::string(core::kLegacyActor), a.flag("--legacy")), ascii);
+    return 0;
+}
+
+int doctor(const QStringList& args, bool ascii) {
+    Arguments a;
+    if (auto error = parse_arguments(args, {}, 1, "src", a)) return usage("genko doctor: " + *error);
+    const Json report = storage::doctor(path_arg(a.positional[0]));
+    print_json(report, ascii);
+    return report["ok"].get<bool>() ? 0 : 1;
+}
+
+int migrate(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--as", true}, {"--accept-repairs", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 2, "src, dst", a)) return usage("genko migrate: " + *error);
+    const std::string actor = a.value("--as").value_or(QStringLiteral("genko")).toStdString();
+    try {
+        print_json(storage::convert(path_arg(a.positional[0]), path_arg(a.positional[1]), actor, a.flag("--accept-repairs")),
+                   ascii);
+    } catch (const storage::ConvertError& error) {
+        return fail(error.what(), error.code(), ascii, 1, &error.report());
+    }
     return 0;
 }
 
@@ -124,10 +472,18 @@ int run_cli(int argc, char** argv) {
         }
         if (command == QLatin1String("inspect")) return inspect(args, ascii);
         if (command == QLatin1String("schema")) return schema(args, ascii);
+        if (command == QLatin1String("new")) return new_book(args, ascii);
+        if (command == QLatin1String("apply")) return apply(args, ascii);
+        if (command == QLatin1String("undo")) return restore(args, ascii, false);
+        if (command == QLatin1String("redo")) return restore(args, ascii, true);
+        if (command == QLatin1String("gc")) return gc(args, ascii);
+        if (command == QLatin1String("doctor")) return doctor(args, ascii);
+        if (command == QLatin1String("migrate")) return migrate(args, ascii);
         return usage("unknown command: " + command.toStdString());
     } catch (const storage::UnsupportedProjectVersion& error) {
         return fail(error.what(), error.code(), ascii, 2);
     } catch (const core::Error& error) {
+        if (error.code() == "needs_migration") return fail(error.what(), error.code(), ascii, 3);
         const std::string message = error.code() == "not_found" ? "not found: " + std::string(error.what()) : error.what();
         return fail(message, error.code(), ascii, 1);
     } catch (const std::exception& error) {

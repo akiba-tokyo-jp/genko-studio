@@ -8,9 +8,19 @@ Commands (JSON is UTF-8 without escapes):
   snapshot BOOK [--full] [--ids]       genko.headless.snapshot(load_episode(BOOK), full) on stdout
   resave BOOK DEST [--ids]             load_episode(BOOK), then save_episode(…, DEST): the book as Python's v3 writer
                                        writes it
-  batch JOBS                           many snapshot/resave jobs (a JSON list) in one process:
+  batch JOBS                           many jobs (a JSON list) in one process:
                                        {"op": "snapshot", "book", "full", "ids", "out"} | {"op": "resave", "book",
-                                       "dest", "ids"}
+                                       "dest", "ids"} | {"op": "apply", "book", "ops", "agent", "dry_run", "ids",
+                                       "out", "dest"?} (apply_ops on the book read; the reply, or {"ok": false,
+                                       "error"}, to out; saved with save_episode into the new folder dest)
+  restore BOOK --actor A [--redo] [--force]
+                                       journal.restore under ProjectLock, as `genko undo`/`redo` does: the reply (or
+                                       {"ok": false, "error"}) on stdout
+  lock-hold BOOK --agent A             hold genko.lock.ProjectLock until stdin closes: prints "locked" (or "busy:
+                                       <message>" and exits 3), then "released"
+  lock-try BOOK --agent A              take and give back ProjectLock: {"ok": true} or {"ok": false, "error"}
+  upgrade BOOK                         load_episode then save_episode into the same folder (a v1/v2 book becomes v3
+                                       with project.v2.bak.json and its first journal line, as the baseline does)
   make-random OUT --seed N --count K   K random v3 books made with new_episode and direct field assignment
   numbers OUT --seed N --count K       cases for repr(float), round(), sum(), math.hypot/dist and format(x, "g")
   json-dumps OUT --seed N --count K    random JSON documents and json.dumps of each (indent 2, default, canonical,
@@ -96,6 +106,69 @@ def resave(book: str, dest: str, ids: bool) -> None:
     save_episode(episode, Path(dest), actor="genko")
 
 
+def apply_job(job: dict) -> None:
+    from genko.headless import apply_ops
+    from genko.io import load_episode, save_episode
+    from genko.ops import ApplyError
+
+    fresh_process_state(bool(job.get("ids")))
+    episode = load_episode(Path(job["book"]))
+    try:
+        reply = apply_ops(episode, job["ops"], dry_run=bool(job.get("dry_run")), agent=job.get("agent", "genko"))
+    except ApplyError as exc:
+        reply = {"ok": False, "error": str(exc)}
+    Path(job["out"]).write_text(dumps(reply), encoding="utf-8")
+    if job.get("dest") and reply.get("ok") and not job.get("dry_run"):
+        save_episode(episode, Path(job["dest"]), actor=job.get("agent", "genko"))
+
+
+def restore_book(book: str, actor: str, redo: bool, force: bool) -> dict:
+    from genko.journal import restore
+    from genko.lock import ProjectLock
+    from genko.ops import ApplyError
+
+    try:
+        with ProjectLock(Path(book), agent=actor):
+            return restore(Path(book), actor=actor, redo=redo, force=force)
+    except ApplyError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def lock_hold(book: str, agent: str) -> int:
+    from genko.lock import ProjectLock
+    from genko.ops import ApplyError
+
+    lock = ProjectLock(Path(book), agent=agent)
+    try:
+        lock.acquire()
+    except ApplyError as exc:
+        print(f"busy: {exc}", flush=True)
+        return 3
+    print("locked", flush=True)
+    sys.stdin.read()
+    lock.release()
+    print("released", flush=True)
+    return 0
+
+
+def lock_try(book: str, agent: str) -> dict:
+    from genko.lock import ProjectLock
+    from genko.ops import ApplyError
+
+    try:
+        with ProjectLock(Path(book), agent=agent):
+            return {"ok": True}
+    except ApplyError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def upgrade(book: str) -> None:
+    from genko.io import load_episode, save_episode
+
+    fresh_process_state(False)
+    save_episode(load_episode(Path(book)), Path(book), actor="genko")
+
+
 def run_batch(jobs_path: str) -> None:
     jobs = json.loads(Path(jobs_path).read_text(encoding="utf-8"))
     for job in jobs:
@@ -104,6 +177,8 @@ def run_batch(jobs_path: str) -> None:
             Path(job["out"]).write_text(dumps(data), encoding="utf-8")
         elif job["op"] == "resave":
             resave(job["book"], job["dest"], bool(job.get("ids")))
+        elif job["op"] == "apply":
+            apply_job(job)
         else:
             raise SystemExit(f"unknown job {job['op']!r}")
 
@@ -630,9 +705,31 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("json-errors")
     p.add_argument("out")
     sub.add_parser("unit-tables")
+    p = sub.add_parser("restore")
+    p.add_argument("book")
+    p.add_argument("--actor", default="genko")
+    p.add_argument("--redo", action="store_true")
+    p.add_argument("--force", action="store_true")
+    for name in ("lock-hold", "lock-try"):
+        p = sub.add_parser(name)
+        p.add_argument("book")
+        p.add_argument("--agent", default="genko")
+    p = sub.add_parser("upgrade")
+    p.add_argument("book")
     args = parser.parse_args(argv)
     if args.cmd == "unit-tables":
         sys.stdout.write(json.dumps(unit_tables(), ensure_ascii=False, indent=1) + "\n")
+        return 0
+    if args.cmd == "restore":
+        sys.stdout.write(dumps(restore_book(args.book, args.actor, args.redo, args.force)) + "\n")
+        return 0
+    if args.cmd == "lock-hold":
+        return lock_hold(args.book, args.agent)
+    if args.cmd == "lock-try":
+        sys.stdout.write(dumps(lock_try(args.book, args.agent)) + "\n")
+        return 0
+    if args.cmd == "upgrade":
+        upgrade(args.book)
         return 0
     if args.cmd == "snapshot":
         sys.stdout.write(dumps(snapshot_of(args.book, args.full, args.ids)) + "\n")
