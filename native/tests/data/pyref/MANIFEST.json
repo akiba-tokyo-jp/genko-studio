@@ -1,8 +1,35 @@
 {
  "generator": "PYTHONPATH=src /opt/pyref/bin/python tools/migration/pyref_harness.py unit-tables > native/tests/data/pyref/unit_tables.json",
+ "generators": {
+  "unit_tables.json": "PYTHONPATH=src /opt/pyref/bin/python tools/migration/pyref_harness.py unit-tables > native/tests/data/pyref/unit_tables.json",
+  "render_unit_tables.json, png/": "PYTHONPATH=src /opt/pyref/bin/python tools/migration/render_harness.py unit-tables native/tests/data/pyref"
+ },
  "python": "3.12.3",
+ "pillow": "12.3.0",
  "baseline": "src/genko at the M0 baseline (1b7b1d7)",
  "files": {
-  "unit_tables.json": "be661a1b35ba3a219806caa62a688934ce18bcffbed2a1ebd469f1349bcedf72"
+  "unit_tables.json": "be661a1b35ba3a219806caa62a688934ce18bcffbed2a1ebd469f1349bcedf72",
+  "render_unit_tables.json": "10a4ebfad4e17c07b9e8915e0f044936573b8345d34fb414f8f47939d8a74ff4",
+  "png/bit1.png": "8d6ba0915954a1f95697d48d703b8cd353dc6c0a051aaee1d747124e53e494d7",
+  "png/i16.png": "ffdc71f45bca294697422cf7cc9b06054ed4c34737b779094907f4ebae2804d9",
+  "png/interlaced_rgba.png": "8492ffbfc67f30eaf49f921d0fdd732d76e4ec5e0d89fd365c53e39006ee96b2",
+  "png/l2.png": "30c033b1a78def0680aa47acd09a4bae670214e7bb193871178dc854c06a9221",
+  "png/l4.png": "768e04f242ea58c6cdf15af67a85ff0f3f7ed909dd2ea4b000fb1e23b3b3916d",
+  "png/l8.png": "d59eff726c0b17f168882cade18210e5c158757ddc41a4e01e4d450efad6a968",
+  "png/l_trns.png": "ea6b8330ab0db30b806ea52761ae6171b427bf1ebf4411ae6f247344d01b8301",
+  "png/la16.png": "69a5cd64deece08da1521ecb5f95a8ae4738f707837b905e3f8cf3afb5ba7755",
+  "png/la8.png": "b3570a8a77be355f5f5ef74742b08aeda11e6e80297d5f96ed9313fe98bae176",
+  "png/p1_trns.png": "1b09427f03d43a0f269047f94920c93020f9ef9c3d32faa4e8d4839b73b07a0c",
+  "png/p2.png": "e47812618875135fa0c779ba4a64146e80e49ae8751c4b89ff34520e2a9aa5ce",
+  "png/p4.png": "c14606a74a555d14be908a70d765a81fc6ace817076a85990248b850dcdeb189",
+  "png/p8.png": "2495fe4ae251cd5f55e652676d1d72f05b5c11e174bddbdeca6ba45b9fc13d32",
+  "png/p8_trns_bytes.png": "9a125abc73bc17bc0da9421e3dcee1b40e4b9539dae243361ecda6a8110bbaea",
+  "png/p8_trns_index.png": "de8c1292e3b7f99f2aa3c58c9f221ada3411b9fb3993cc6c5291470f6692e9ce",
+  "png/rgb16.png": "9dd706af6869976cc37d0f08b8d1d5bfb032cfaad1370c871b87b7e823abf8b8",
+  "png/rgb16_trns.png": "b75c47173b9f315b6eef5b2bed2fcb61a5f9cc88da04324f9130abccb98a9a4f",
+  "png/rgb8.png": "3559a49a6a6820820788c948b86ec30cc7024b5e7f7d2b90a50e4dd3c56eb292",
+  "png/rgb_trns.png": "105e6be8ff0806c9ac2ae809e3e11dcb1a791a379e35f14e542315e1c923c1f9",
+  "png/rgba16.png": "2897a6272a87cbd6b6e66b141ecd940212344d9b3f9a4b4283303a66c1a963ba",
+  "png/rgba8.png": "7e0e34fca041d2ff497cc6e40f1053f099d08526b723af8c31c749ca8cf0db09"
  }
 }

@@ -14,6 +14,10 @@ namespace genko::api {
 //   genko doctor <dir>
 //   genko migrate <old book> <new folder> [--as A] [--accept-repairs]
 //   genko schema                                 {"ok": true, "ops": [...]} (the public op list)
+//   genko render <dir> --page N [--dpi D] [--mode print|proof|name] --out file.png
+//                                                one page as PNG; {"ok": true, "path", "mode"}, or
+//                                                {"ok": false, "code": "not_yet_ported", "element", …} for a page with
+//                                                something this build does not draw yet
 //   genko --version                              the versions of Genko and its libraries
 int run_cli(int argc, char** argv);
 
