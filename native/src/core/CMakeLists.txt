@@ -24,11 +24,13 @@ genko_library(genko_core
     frames.cpp
     strokes.cpp
     covers.cpp
+    pyrandom.cpp
+    stroke_geom.cpp
     ops_schema.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
 
 # CPython calls libm directly: so must we (no pow(x, 2.0) → x*x, no sin+cos → sincos), for the same last bits.
 if(NOT MSVC)
-  set_source_files_properties(pymath.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
+  set_source_files_properties(pymath.cpp pyrandom.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
 endif()
