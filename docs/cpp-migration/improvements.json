@@ -1,0 +1,247 @@
+{
+  "document_version": "1.0",
+  "status": "全項目未実装。本体変更は未承認。",
+  "items": [
+    {
+      "id": "I01",
+      "improvement": "保存失敗時の保護・復旧",
+      "basis": "詳細再調査 UX-08、保存失敗追試",
+      "spec_ids": [
+        "SAVE-01",
+        "SAVE-02",
+        "SAVE-03"
+      ],
+      "milestones": [
+        "M1",
+        "M2",
+        "M7"
+      ],
+      "acceptance_ids": [
+        "AC-SAVE"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I02",
+      "improvement": "起動・編集・制作工程の速度",
+      "basis": "性能2件未達、追加cProfile",
+      "spec_ids": [
+        "PERF-01",
+        "ARCH-03"
+      ],
+      "milestones": [
+        "M2",
+        "M3",
+        "M5",
+        "M7"
+      ],
+      "acceptance_ids": [
+        "AC-PERF"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I03",
+      "improvement": "Python設定不要の導入",
+      "basis": "READMEのuv/Python導入手順",
+      "spec_ids": [
+        "ARCH-01",
+        "UX-01"
+      ],
+      "milestones": [
+        "M0",
+        "M6"
+      ],
+      "acceptance_ids": [
+        "AC-PACKAGE"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I04",
+      "improvement": "ルビの書体・揃え・間隔",
+      "basis": "漫画制作比較のルビ調整差",
+      "spec_ids": [
+        "TEXT-01"
+      ],
+      "milestones": [
+        "M4"
+      ],
+      "acceptance_ids": [
+        "AC-TEXT"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I05",
+      "improvement": "他ソフトで修正できるPSD文字",
+      "basis": "実PSDの画像台詞・CSP文字出力資料",
+      "spec_ids": [
+        "PSD-01"
+      ],
+      "milestones": [
+        "M4"
+      ],
+      "acceptance_ids": [
+        "AC-PSD"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I06",
+      "improvement": "紙質画像によるブラシ表現",
+      "basis": "漫画制作比較の紙質調整差",
+      "spec_ids": [
+        "BRUSH-01"
+      ],
+      "milestones": [
+        "M3"
+      ],
+      "acceptance_ids": [
+        "AC-BRUSH"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I07",
+      "improvement": "AI接続・依頼・失敗の見える化",
+      "basis": "詳細再調査 UX-01",
+      "spec_ids": [
+        "AI-01",
+        "API-01"
+      ],
+      "milestones": [
+        "M5"
+      ],
+      "acceptance_ids": [
+        "AC-API"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I08",
+      "improvement": "初回書き出しプレビューの全体表示",
+      "basis": "詳細再調査 UX-02",
+      "spec_ids": [
+        "UX-02"
+      ],
+      "milestones": [
+        "M2",
+        "M6"
+      ],
+      "acceptance_ids": [
+        "AC-UX"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I09",
+      "improvement": "小画面の開始案内・パネル配置",
+      "basis": "詳細再調査 UX-03",
+      "spec_ids": [
+        "UX-02"
+      ],
+      "milestones": [
+        "M2",
+        "M6"
+      ],
+      "acceptance_ids": [
+        "AC-UX"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I10",
+      "improvement": "ヘルプと実メニュー経路の一致",
+      "basis": "詳細再調査 UX-04",
+      "spec_ids": [
+        "UX-03"
+      ],
+      "milestones": [
+        "M6"
+      ],
+      "acceptance_ids": [
+        "AC-UX"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I11",
+      "improvement": "最初のコマ操作後の制作導線",
+      "basis": "詳細再調査 UX-05、専門家評価仮説",
+      "spec_ids": [
+        "UX-03"
+      ],
+      "milestones": [
+        "M6"
+      ],
+      "acceptance_ids": [
+        "AC-UX"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I12",
+      "improvement": "長い日本語保存先の全文確認",
+      "basis": "詳細再調査 UX-06",
+      "spec_ids": [
+        "UX-02"
+      ],
+      "milestones": [
+        "M2",
+        "M6"
+      ],
+      "acceptance_ids": [
+        "AC-UX"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I13",
+      "improvement": "AIへの複数行返信・下書き保持",
+      "basis": "詳細再調査 UX-07",
+      "spec_ids": [
+        "UX-02",
+        "AI-01"
+      ],
+      "milestones": [
+        "M5"
+      ],
+      "acceptance_ids": [
+        "AC-UX",
+        "AC-API"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    },
+    {
+      "id": "I14",
+      "improvement": "初見の制作課題を完走できるかの受入",
+      "basis": "詳細再調査で未測定の利用者体験",
+      "spec_ids": [
+        "UX-03",
+        "REL-01"
+      ],
+      "milestones": [
+        "M7"
+      ],
+      "acceptance_ids": [
+        "AC-USER"
+      ],
+      "implementation_status": "not_started",
+      "acceptance_status": "not_run"
+    }
+  ]
+}

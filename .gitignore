@@ -8,3 +8,7 @@ build/
 .genko-work/
 *.png
 !docs/**
+# the C++ build (docs/cpp-migration): its test books keep their pictures
+!native/tests/data/**
+.ccache/
+aqtinstall.log

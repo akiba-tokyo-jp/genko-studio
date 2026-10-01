@@ -1,0 +1,428 @@
+{
+  "future_top": {
+    "kept": true
+  },
+  "version": 2,
+  "title": "旧原稿 v2",
+  "episode": 1,
+  "binding": "right",
+  "autosave": false,
+  "font_path": "",
+  "page_locks": {},
+  "brush": {
+    "rgb": [
+      20,
+      20,
+      20
+    ],
+    "width_mm": 0.35,
+    "stabilize": 0,
+    "taper": false,
+    "curve": "linear"
+  },
+  "spec": {
+    "width_mm": 257,
+    "height_mm": 364,
+    "dpi": 600,
+    "bleed_mm": 3,
+    "inner_margin_mm": 10,
+    "expression": "mono",
+    "preset": "commercial-b4"
+  },
+  "bible": {
+    "plot": "",
+    "characters": [],
+    "constraints": []
+  },
+  "tickets": [],
+  "pages": [
+    {
+      "index": 1,
+      "note": "",
+      "name_ok": true,
+      "stage": "name",
+      "spread_with": null,
+      "numero": true,
+      "onion_from": null,
+      "lt_threshold": null,
+      "effects": [],
+      "ruler": null,
+      "prims": [],
+      "frames": [
+        {
+          "id": "376e0d6cba3c",
+          "rect": {
+            "x": 13,
+            "y": 13,
+            "width": 231,
+            "height": 338
+          },
+          "split_axis": "vertical",
+          "clip": true,
+          "bleed": false,
+          "border_mm": 0.8,
+          "children": [
+            {
+              "id": "f711456c675c",
+              "rect": {
+                "x": 13,
+                "y": 13,
+                "width": 90.4,
+                "height": 338
+              },
+              "split_axis": null,
+              "clip": true,
+              "bleed": false,
+              "border_mm": 0.8,
+              "children": []
+            },
+            {
+              "id": "771cda5bee29",
+              "rect": {
+                "x": 108.4,
+                "y": 13,
+                "width": 135.6,
+                "height": 338
+              },
+              "split_axis": null,
+              "clip": true,
+              "bleed": false,
+              "border_mm": 0.8,
+              "children": []
+            }
+          ]
+        }
+      ],
+      "layers": [
+        {
+          "id": "1e08f450eac6",
+          "role": "bg",
+          "kind": "fill",
+          "visible": true,
+          "exportable": true,
+          "strokes": [],
+          "raster_relpath": "pages/001/bg.png",
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "a17e41815b60",
+          "role": "name",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": false,
+          "strokes": [],
+          "raster_relpath": null,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "a06f4e88e15b",
+          "role": "ink",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "strokes": [
+            {
+              "id": "s1",
+              "points": [
+                [
+                  30.0,
+                  30.0
+                ],
+                [
+                  60.25,
+                  45.5
+                ],
+                [
+                  90.0,
+                  40.0
+                ]
+              ],
+              "pressure": [
+                0.2,
+                0.9,
+                0.5
+              ],
+              "width_mm": 0.5,
+              "kind": "gpen"
+            },
+            {
+              "id": "s2",
+              "points": [
+                [
+                  100.0,
+                  120.0
+                ],
+                [
+                  140.0,
+                  160.0
+                ]
+              ],
+              "pressure": [],
+              "width_mm": 0.35,
+              "kind": "maru"
+            }
+          ],
+          "raster_relpath": null,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "03a32df41370",
+          "role": "finish",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "strokes": [],
+          "raster_relpath": null,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        }
+      ],
+      "texts": [
+        {
+          "id": "8587507e2e77",
+          "page_index": 1,
+          "text": "東京と東京",
+          "speaker": "主人公",
+          "frame_id": null,
+          "ruby": "",
+          "x_mm": 0,
+          "y_mm": 0,
+          "w_mm": 40,
+          "h_mm": 20,
+          "balloon": "speech",
+          "tail": null,
+          "wrap": "vertical",
+          "ruby_runs": [
+            [
+              "東京",
+              "とうきょう"
+            ]
+          ],
+          "path": null
+        }
+      ],
+      "fills": {},
+      "name_strokes": [],
+      "ink_strokes": [
+        [
+          [
+            30.0,
+            30.0,
+            0.2
+          ],
+          [
+            60.25,
+            45.5,
+            0.9
+          ],
+          [
+            90.0,
+            40.0,
+            0.5
+          ]
+        ],
+        [
+          [
+            100.0,
+            120.0
+          ],
+          [
+            140.0,
+            160.0
+          ]
+        ]
+      ],
+      "future_page": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "index": 2,
+      "note": "",
+      "name_ok": false,
+      "stage": "name",
+      "spread_with": null,
+      "numero": true,
+      "onion_from": null,
+      "lt_threshold": null,
+      "effects": [],
+      "ruler": null,
+      "prims": [],
+      "frames": [
+        {
+          "id": "07c06b69c09d",
+          "rect": {
+            "x": 13,
+            "y": 13,
+            "width": 231,
+            "height": 338
+          },
+          "split_axis": null,
+          "clip": true,
+          "bleed": false,
+          "border_mm": 0.8,
+          "children": []
+        }
+      ],
+      "layers": [
+        {
+          "id": "78cb293b177c",
+          "role": "bg",
+          "kind": "fill",
+          "visible": true,
+          "exportable": true,
+          "strokes": [],
+          "raster_relpath": null,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "ad5615903fc8",
+          "role": "name",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": false,
+          "strokes": [],
+          "raster_relpath": null,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "2c288bfcb88f",
+          "role": "ink",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "strokes": [],
+          "raster_relpath": null,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "b3b9b8707a6f",
+          "role": "finish",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "strokes": [],
+          "raster_relpath": null,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        }
+      ],
+      "texts": [],
+      "fills": {},
+      "name_strokes": [],
+      "ink_strokes": []
+    }
+  ],
+  "story": [
+    {
+      "id": "8587507e2e77",
+      "page_index": 1,
+      "text": "東京と東京",
+      "speaker": "主人公",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 0,
+      "y_mm": 0,
+      "w_mm": 40,
+      "h_mm": 20,
+      "balloon": "speech",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [
+        [
+          "東京",
+          "とうきょう"
+        ]
+      ],
+      "path": null
+    }
+  ]
+}

@@ -1,0 +1,1712 @@
+{
+  "baseline_commit": "1b7b1d7030d4188d7ebd5e398d010b3ed98b220f",
+  "inventory_method": "ASTとdocs/ops.schema.jsonの静的抽出。実動作保証・完全仕様の証明ではない。GUIや動的CLIの取りこぼしはM0で照合する。",
+  "ops_schema_names": [
+    "add_anim_folder",
+    "add_cel",
+    "add_cover",
+    "add_effect",
+    "add_figure",
+    "add_frame",
+    "add_hand",
+    "add_head",
+    "add_layer",
+    "add_line",
+    "add_mannequin",
+    "add_page",
+    "add_prim3d",
+    "add_region",
+    "add_ruler",
+    "add_scene",
+    "add_shape",
+    "add_stroke",
+    "add_ticket",
+    "add_tone",
+    "adopt_candidate",
+    "advance",
+    "allow_chat_approval",
+    "approve",
+    "ask_human",
+    "attach_reference",
+    "bind_ref",
+    "camera_from_ruler",
+    "close_request",
+    "convert_layer",
+    "cut_balloon",
+    "cut_frame",
+    "define_brush",
+    "delete_area",
+    "delete_character",
+    "delete_effect",
+    "delete_frame",
+    "delete_layer",
+    "delete_line",
+    "delete_location",
+    "delete_page",
+    "delete_prim",
+    "delete_prop",
+    "delete_region",
+    "delete_ruler",
+    "delete_stroke",
+    "delete_tone",
+    "duplicate_layer",
+    "duplicate_page",
+    "edit_effect",
+    "edit_line",
+    "edit_prim",
+    "edit_region",
+    "edit_ruler",
+    "edit_stroke",
+    "effect_to_layer",
+    "erase",
+    "erase_raster",
+    "fill",
+    "fill_area",
+    "fill_enclosed",
+    "fill_gaps",
+    "filter_raster",
+    "flood_fill",
+    "for_pages",
+    "forget_area",
+    "gradient_fill",
+    "group_layers",
+    "import_candidates",
+    "import_model",
+    "import_pages",
+    "import_psd",
+    "liquify",
+    "lock_page",
+    "lt_convert",
+    "merge_down",
+    "merge_frame",
+    "merge_layers",
+    "merge_visible",
+    "move_gutter",
+    "move_layers",
+    "move_line",
+    "name_ok",
+    "open_request",
+    "paint_mask",
+    "paste",
+    "place_asset",
+    "pose_figure",
+    "pose_mannequin",
+    "propose",
+    "put_raster",
+    "record_review",
+    "register_assets",
+    "reject_sheet",
+    "render_prims",
+    "reopen_ticket",
+    "reorder",
+    "reorder_layers",
+    "reorder_lines",
+    "replace_regions",
+    "replace_text",
+    "request_approval",
+    "request_fix",
+    "reshape_stroke",
+    "resize_frame",
+    "resolve_proposal",
+    "resolve_ticket",
+    "review_candidates",
+    "revoke",
+    "ruler_from_3d",
+    "ruler_to_layer",
+    "select_frame",
+    "set_animation",
+    "set_assignee",
+    "set_autosave",
+    "set_balloon_path",
+    "set_bible",
+    "set_brush",
+    "set_camera",
+    "set_camera_key",
+    "set_candidate",
+    "set_exposure",
+    "set_exposures",
+    "set_finish",
+    "set_frame",
+    "set_layer",
+    "set_layer_mask",
+    "set_layers",
+    "set_layout",
+    "set_light",
+    "set_light_table",
+    "set_lt",
+    "set_meta",
+    "set_nombre",
+    "set_note",
+    "set_onion",
+    "set_page_plan",
+    "set_page_spec",
+    "set_panel",
+    "set_paper",
+    "set_placement",
+    "set_ruler",
+    "set_script",
+    "set_spread",
+    "set_stroke_width",
+    "set_studio",
+    "set_style_catalog",
+    "set_ticket",
+    "set_timelapse",
+    "set_tone",
+    "simplify_stroke",
+    "smudge",
+    "split_frame",
+    "stamp_material",
+    "step_onion",
+    "store_area",
+    "trace_edit",
+    "trace_prims",
+    "transform_area",
+    "unadopt",
+    "unbind_ref",
+    "undo",
+    "unlock_page",
+    "upsert_character",
+    "upsert_location",
+    "upsert_prop",
+    "vector_edit",
+    "withdraw_candidates"
+  ],
+  "ops_schema_duplicate_names": [],
+  "mcp_tools": [
+    {
+      "name": "adopt",
+      "line": 251,
+      "signature": "project: str, candidate_id: str, page: int | None=None, frame_id: str | None=None, to: str='art', fit: str | None=None, offset_mm: list[float] | None=None, scale: float | None=None, location_id: str | None=None, regions: list[dict] | None=None, upscale: bool=True"
+    },
+    {
+      "name": "analyze_name",
+      "line": 354,
+      "signature": "project: str, page: int, params: dict | None=None"
+    },
+    {
+      "name": "apply_ops",
+      "line": 424,
+      "signature": "project: str, ops: list[dict], commit: bool=False"
+    },
+    {
+      "name": "ask_human",
+      "line": 375,
+      "signature": "project: str, text: str, page: int | None=None, frame_id: str | None=None, item: str | None=None"
+    },
+    {
+      "name": "candidates",
+      "line": 238,
+      "signature": "project: str, page: int | None=None, frame_id: str | None=None, character_id: str | None=None, location_id: str | None=None"
+    },
+    {
+      "name": "check",
+      "line": 287,
+      "signature": "project: str, pages: list[int] | None=None"
+    },
+    {
+      "name": "create_project",
+      "line": 170,
+      "signature": "name: str, title: str, pages: int, spec_preset: str='commercial-b4'"
+    },
+    {
+      "name": "derive",
+      "line": 341,
+      "signature": "project: str, page: int, frame_id: str, kind: str='lineart', candidate_id: str | None=None, params: dict | None=None"
+    },
+    {
+      "name": "export",
+      "line": 299,
+      "signature": "project: str, format: str='png', pages: list[int] | None=None, dpi: int | None=None, area: str='bleed', width: int=800, max_height: int=1280, long_edge: int | None=None, jpeg: bool=False, spreads: bool=False, color: str='auto', icc: str | None=None, fps: float=12, seconds: float | None=None, movie: str='webp', dots: bool=False, screen: dict | None=None"
+    },
+    {
+      "name": "export_proof",
+      "line": 282,
+      "signature": "project: str, format: str='png'"
+    },
+    {
+      "name": "export_status",
+      "line": 326,
+      "signature": "project: str, job: str, wait_s: float=60"
+    },
+    {
+      "name": "finish_page",
+      "line": 272,
+      "signature": "project: str, page: int, commit: bool=False"
+    },
+    {
+      "name": "generation_request",
+      "line": 215,
+      "signature": "project: str, page: int | None=None, frame_id: str | None=None, character_id: str | None=None, location_id: str | None=None, purpose: str | None=None, mode: str='new', parent: str | None=None, tool: str | None=None, instruction: str | None=None, regions: list | None=None, focus_character: str | None=None"
+    },
+    {
+      "name": "import_image",
+      "line": 209,
+      "signature": "project: str, path: str | None=None, png_base64: str | None=None"
+    },
+    {
+      "name": "import_images",
+      "line": 230,
+      "signature": "project: str, request_id: str, images: list[dict]"
+    },
+    {
+      "name": "import_name",
+      "line": 348,
+      "signature": "project: str, files: list[str], start_page: int=1, align: str='auto'"
+    },
+    {
+      "name": "inspect",
+      "line": 186,
+      "signature": "project: str, target: str, page: int | None=None, frame_id: str | None=None, op: str | None=None, full: bool=False"
+    },
+    {
+      "name": "next",
+      "line": 180,
+      "signature": "project: str, limit: int=5, claim: bool=False"
+    },
+    {
+      "name": "preflight",
+      "line": 277,
+      "signature": "project: str"
+    },
+    {
+      "name": "projects",
+      "line": 165,
+      "signature": ""
+    },
+    {
+      "name": "proposals",
+      "line": 365,
+      "signature": "project: str, status: str='open'"
+    },
+    {
+      "name": "propose_lines",
+      "line": 359,
+      "signature": "project: str, page: int, lines: list[dict]"
+    },
+    {
+      "name": "record_chat_approval",
+      "line": 317,
+      "signature": "project: str, gate: str, message: str, pages: list[int] | None=None, character_id: str | None=None, candidate_id: str | None=None, face_box01: list[float] | None=None, person: str | None=None"
+    },
+    {
+      "name": "record_review",
+      "line": 432,
+      "signature": "project: str, page: int, notes: str, score: float | None=None"
+    },
+    {
+      "name": "render",
+      "line": 199,
+      "signature": "project: str, page: int, mode: str='name', max_px: int=1024, frame_id: str | None=None, kind: str | None=None, candidate_id: str | None=None, layer_id: str | None=None"
+    },
+    {
+      "name": "report_regions",
+      "line": 266,
+      "signature": "project: str, page: int, frame_id: str, regions: list[dict]"
+    },
+    {
+      "name": "request_approval",
+      "line": 437,
+      "signature": "project: str, pages: list[int] | None=None, note: str='', gate: str='name', character_id: str | None=None, character_ids: list[str] | None=None"
+    },
+    {
+      "name": "request_fix",
+      "line": 260,
+      "signature": "project: str, page: int, instruction: str, frame_id: str | None=None, candidate_id: str | None=None, scope: str='frame'"
+    },
+    {
+      "name": "resolve_ticket",
+      "line": 449,
+      "signature": "project: str, ticket_id: str, note: str"
+    },
+    {
+      "name": "review_candidates",
+      "line": 244,
+      "signature": "project: str, page: int, frame_id: str, reviews: list[dict]"
+    },
+    {
+      "name": "review_page",
+      "line": 370,
+      "signature": "project: str"
+    },
+    {
+      "name": "set_bible",
+      "line": 380,
+      "signature": "project: str, bible: dict, commit: bool=False"
+    },
+    {
+      "name": "set_script",
+      "line": 385,
+      "signature": "project: str, script: dict, commit: bool=False"
+    },
+    {
+      "name": "status",
+      "line": 175,
+      "signature": "project: str"
+    },
+    {
+      "name": "style_catalog",
+      "line": 407,
+      "signature": "project: str | None=None, style_id: str | None=None, title: str | None=None"
+    },
+    {
+      "name": "submit_name",
+      "line": 390,
+      "signature": "project: str, plan: dict, commit: bool=False, replace: bool=False"
+    },
+    {
+      "name": "take_panel_art",
+      "line": 396,
+      "signature": "project: str, request_id: str, image: dict, regions: list[dict] | None=None, upscale: bool=True, method: str='genko', crop01: list[float] | None=None"
+    },
+    {
+      "name": "tickets",
+      "line": 444,
+      "signature": "project: str, status: str='open'"
+    },
+    {
+      "name": "undo",
+      "line": 293,
+      "signature": "project: str"
+    },
+    {
+      "name": "upscale",
+      "line": 332,
+      "signature": "project: str, page: int, frame_id: str, candidate_id: str | None=None, scale: float | None=None, method: str='genko'"
+    },
+    {
+      "name": "use_style",
+      "line": 416,
+      "signature": "project: str, style_id: str | None, commit: bool=False"
+    }
+  ],
+  "mcp_resources": [
+    {
+      "function": "drawing_guide",
+      "uri": "genko://guide/drawing",
+      "line": 468
+    },
+    {
+      "function": "manga_rules",
+      "uri": "genko://guide/manga-rules",
+      "line": 475
+    },
+    {
+      "function": "skill",
+      "uri": "genko://guide/skill",
+      "line": 463
+    },
+    {
+      "function": "ops_catalog",
+      "uri": "genko://ops",
+      "line": 455
+    }
+  ],
+  "cli_literal_commands": {
+    "src/genko/__main__.py": [
+      "app",
+      "apply",
+      "doctor",
+      "export",
+      "gc",
+      "inspect",
+      "mcp",
+      "new",
+      "redo",
+      "register-links",
+      "render",
+      "schema",
+      "serve",
+      "studio",
+      "token",
+      "undo"
+    ],
+    "src/genko/studio/cli.py": [
+      "accept",
+      "adopt-drafts",
+      "analyze",
+      "apply",
+      "approve",
+      "audit",
+      "call",
+      "chat-approval",
+      "close-ticket",
+      "comment",
+      "eval-atari",
+      "eval-sample",
+      "eval-score",
+      "export",
+      "import-image",
+      "import-name",
+      "init",
+      "inspect",
+      "next",
+      "proposals",
+      "record-review",
+      "reject",
+      "render",
+      "reopen-ticket",
+      "request-approval",
+      "review",
+      "revoke",
+      "set-bible",
+      "set-script",
+      "stats",
+      "status",
+      "submit-name",
+      "tickets",
+      "tools",
+      "upscaler"
+    ]
+  },
+  "cli_export_choices": {
+    "src/genko/__main__.py": [
+      "png",
+      "tiff",
+      "pdf",
+      "strip",
+      "psd",
+      "epub",
+      "pack",
+      "webtoon",
+      "sns",
+      "cmyk",
+      "layers",
+      "kindle",
+      "timelapse",
+      "animation"
+    ],
+    "src/genko/studio/cli.py": [
+      "png",
+      "pdf",
+      "tiff",
+      "webtoon",
+      "sns"
+    ]
+  },
+  "python_modules": [
+    {
+      "path": "src/genko/__init__.py",
+      "lines": 3,
+      "sha256": "fccaeff0e0d028418fb47cd22a4cbf94ee1f25dc822740f945391864d566f7ce"
+    },
+    {
+      "path": "src/genko/__main__.py",
+      "lines": 367,
+      "sha256": "4a427ed00cb764dd577744eaa347bb3a633d3e7e911ab327540f16b0930c376a"
+    },
+    {
+      "path": "src/genko/abr.py",
+      "lines": 180,
+      "sha256": "f667f0e99105d791629ef7760de7a6f4ac0aea7d4f0d3f6dc4ea7aac74b7f78e"
+    },
+    {
+      "path": "src/genko/anim.py",
+      "lines": 231,
+      "sha256": "992740349d4132c3c6f9b1d50d98fe96302e99e659022669c61e9abab1636ccd"
+    },
+    {
+      "path": "src/genko/animops.py",
+      "lines": 170,
+      "sha256": "9121f4131d998bae8b3f9097fa978cbff97bda963cc8b9b4caa88dd42fd73499"
+    },
+    {
+      "path": "src/genko/app/__init__.py",
+      "lines": 1,
+      "sha256": "f6029e88fcc4adb771d0647a4adef168e00f0a24b1bba9096ee7a91e4a6b2ee6"
+    },
+    {
+      "path": "src/genko/app/actions.py",
+      "lines": 256,
+      "sha256": "3617ad30422a8d84458bb0c157b52e9259bc3e9cebb20c4c18d209963f7f0c3e"
+    },
+    {
+      "path": "src/genko/app/ai_link.py",
+      "lines": 247,
+      "sha256": "173fc02aa64bc524b3b227e5052e3fbfacb1f88dada75a3d39f3ea9b9bab02d5"
+    },
+    {
+      "path": "src/genko/app/bookview.py",
+      "lines": 337,
+      "sha256": "4ddbefdacea2cda91983e17b835e130b2c25bd97aa8532ed301218b24e2971e1"
+    },
+    {
+      "path": "src/genko/app/brush_panel.py",
+      "lines": 802,
+      "sha256": "596c0861934c2f67a4079b290ffcf2e0c99dd1527ec5caa1bff9e01a8b4a2af2"
+    },
+    {
+      "path": "src/genko/app/canvas.py",
+      "lines": 2287,
+      "sha256": "2c73af9767cf6ee93aef54e8ffbcfb072364cad632553390c089ae92b0f55a04"
+    },
+    {
+      "path": "src/genko/app/canvas_guides.py",
+      "lines": 581,
+      "sha256": "311f413566e63b143ffa4f875b956070ef6ac5d25550f12dbc6f78f96567cb28"
+    },
+    {
+      "path": "src/genko/app/canvas_shapes.py",
+      "lines": 303,
+      "sha256": "9cd7976aeab1cfff840328d60bf7b2f58e79dab9218d623bb36f84569a11aa30"
+    },
+    {
+      "path": "src/genko/app/canvas_vector.py",
+      "lines": 155,
+      "sha256": "de4c6c13c277de010bda5039e4e18644204b7a987c598c3a774d83b7d8b599ea"
+    },
+    {
+      "path": "src/genko/app/check_panel.py",
+      "lines": 61,
+      "sha256": "dc594a0d130f4c44b63d638c14ee4e30bf60c0c95bdf545a5588883dd7fe82e2"
+    },
+    {
+      "path": "src/genko/app/colours.py",
+      "lines": 467,
+      "sha256": "f0b14086ce309b348414f684047c2134b83c8b067be622864600db8a5f86d6bb"
+    },
+    {
+      "path": "src/genko/app/comfort.py",
+      "lines": 584,
+      "sha256": "a233f4fc8a5d117291f0e01d2187f3d3a7e762ed54c89ca135fbb0d4b9095742"
+    },
+    {
+      "path": "src/genko/app/dialog_look.py",
+      "lines": 179,
+      "sha256": "9bc011276bbd018b4606d21ef60a0957a7ac448f489d28139f2df510cf5a5281"
+    },
+    {
+      "path": "src/genko/app/dialogs.py",
+      "lines": 1125,
+      "sha256": "246bc93ddc7570b08fc7892526b50996ed74cd884174918fce9f2bcd05c1617d"
+    },
+    {
+      "path": "src/genko/app/documents.py",
+      "lines": 72,
+      "sha256": "e0c8a440995d7d4802c72df9b6f264b36c5f57f63e8fabea87db4e4c6a8995e6"
+    },
+    {
+      "path": "src/genko/app/exporting.py",
+      "lines": 158,
+      "sha256": "6e5ed4991057f9695b0865431cd13363468cb898584a6f7dd5ee9d3e511e7ab8"
+    },
+    {
+      "path": "src/genko/app/fields.py",
+      "lines": 207,
+      "sha256": "1ce124e2e9654d4c9562f9bd66d0c8d52b0f88e8e9be34d64dc957357b9f3d9b"
+    },
+    {
+      "path": "src/genko/app/filter_dialog.py",
+      "lines": 219,
+      "sha256": "965635efa3329c652e4487ec277ed6a91aa75a99b443d0bba39ad01d86e0f32c"
+    },
+    {
+      "path": "src/genko/app/glass.py",
+      "lines": 151,
+      "sha256": "a4937e5918b88c044f0d118fd7a3d6e886107bdc43d993c272fea9818edd7390"
+    },
+    {
+      "path": "src/genko/app/gradient_editor.py",
+      "lines": 157,
+      "sha256": "b2ed0d2411f70aa91b9c15f5facae439e91cd890fe236eef279877092f79705b"
+    },
+    {
+      "path": "src/genko/app/guide_panel.py",
+      "lines": 543,
+      "sha256": "0c99585a3de5f7c700186168c1bddd8b55afded04783ea84e52e626250283c49"
+    },
+    {
+      "path": "src/genko/app/help.py",
+      "lines": 141,
+      "sha256": "f5da02f03ecb28fa9cc4e3070c2e5c94abaea60118d511592e08a331edec2673"
+    },
+    {
+      "path": "src/genko/app/history.py",
+      "lines": 160,
+      "sha256": "8c3559bf9e8d05c0a446a4f49b437fd5295bbd758ca4e07b6535aac941176c03"
+    },
+    {
+      "path": "src/genko/app/icons.py",
+      "lines": 371,
+      "sha256": "ed6b6fc8745eab712dbddbbb0beae2af486f6959b2e4918376dc143088d0fae2"
+    },
+    {
+      "path": "src/genko/app/inputs.py",
+      "lines": 87,
+      "sha256": "398302834826bf6dcbd86786c7544475a65171ebe4c83e2d7bf3f7acdef6054c"
+    },
+    {
+      "path": "src/genko/app/lettering.py",
+      "lines": 208,
+      "sha256": "815b2815ac335b6c0746d32b5b90fb20f6f247fc5c85c50e1987397cda2572a9"
+    },
+    {
+      "path": "src/genko/app/links.py",
+      "lines": 171,
+      "sha256": "510973ae7fb090d8975b0c17948db029e4b36c46303c281c1d18de9f4001b1ad"
+    },
+    {
+      "path": "src/genko/app/live_ink.py",
+      "lines": 113,
+      "sha256": "83b21418bf6d051bdbc6ea8867be5ddba86f0cb4aa201680bd7914e2049d050a"
+    },
+    {
+      "path": "src/genko/app/main.py",
+      "lines": 6416,
+      "sha256": "02542bea90644318ccb025186e35709ddba4960a07a9e1b97fc7dee1f48e6519"
+    },
+    {
+      "path": "src/genko/app/material_panel.py",
+      "lines": 654,
+      "sha256": "fcaf80232ffc576235d1c3ceea74a9763993469013f293e2e0da7c1ba0fbd732"
+    },
+    {
+      "path": "src/genko/app/navigator.py",
+      "lines": 132,
+      "sha256": "c61e26e5b1f227966c4080498d5adff96678612cbda50d6ba4d1b1bca15a19d8"
+    },
+    {
+      "path": "src/genko/app/pages_panel.py",
+      "lines": 217,
+      "sha256": "9ad844513d561617dff8d5a85d2befd6148e9afada7c99e7836c0e505baf233a"
+    },
+    {
+      "path": "src/genko/app/preferences.py",
+      "lines": 547,
+      "sha256": "ff1afc2470cbb6c0f7389731476d77d61d901a2487b845d634f0a3128f8a9bc4"
+    },
+    {
+      "path": "src/genko/app/printing.py",
+      "lines": 189,
+      "sha256": "7ba5d16dee2d590ec23a7a6fe2e62500957df9d28d62672ac39f4e394eebeea7"
+    },
+    {
+      "path": "src/genko/app/review_model.py",
+      "lines": 132,
+      "sha256": "4907abb8ac658c1f84ba56c82d9a078d644f5ecf79cb220097557adf53a5eeb6"
+    },
+    {
+      "path": "src/genko/app/session.py",
+      "lines": 182,
+      "sha256": "7c251e3635b92c83ba1b9c3b1069b74e6e905515e7660df7a7b81d76f3e6858e"
+    },
+    {
+      "path": "src/genko/app/story_editor.py",
+      "lines": 339,
+      "sha256": "918de203d1e1fe4f30845d80710f319ed7be25ee29535f9badba48b9b0ffd711"
+    },
+    {
+      "path": "src/genko/app/studio_widgets.py",
+      "lines": 881,
+      "sha256": "9959888aba4c33b7c49730ee1262114d92863896ee2fc57c7b6be391d4b82fb1"
+    },
+    {
+      "path": "src/genko/app/style_picker.py",
+      "lines": 360,
+      "sha256": "fd1897a6166ee908a3cb38e0d8f29b0db0887e277a6b73534018d1d27b6833d7"
+    },
+    {
+      "path": "src/genko/app/subview.py",
+      "lines": 141,
+      "sha256": "dea4f632774de3a96a476dcafd233cc6dfa238aa1e2e5ed8b37f555333bbb7b2"
+    },
+    {
+      "path": "src/genko/app/text_style.py",
+      "lines": 71,
+      "sha256": "b693caa948f5fc798084f1e2b7265cfec923b4c05c70183468d36d59c33c46ba"
+    },
+    {
+      "path": "src/genko/app/theme.py",
+      "lines": 559,
+      "sha256": "b70e36b9f4003e9f7de2d9671404d2c65cf75944576b5e31fae2cdd6a7df0710"
+    },
+    {
+      "path": "src/genko/app/timeline.py",
+      "lines": 331,
+      "sha256": "274d2aa6fa6baee44bf5833ef2d535c82c1b7d390ca10f022b875a84b21b1324"
+    },
+    {
+      "path": "src/genko/app/tool_settings.py",
+      "lines": 355,
+      "sha256": "c25a058bad246cb0bfda720974713122af5264f1721c233ad484868e0d229541"
+    },
+    {
+      "path": "src/genko/app/viewer.py",
+      "lines": 141,
+      "sha256": "5f0a35ec64c26e35ad0a5fe1017173a7e18dc559a6970d48050ca8af25b81f95"
+    },
+    {
+      "path": "src/genko/app/wording.py",
+      "lines": 467,
+      "sha256": "40c687564269e848929bbf2585867a8616a7af605d2af401a7e6215a8be51dc1"
+    },
+    {
+      "path": "src/genko/app/workspace.py",
+      "lines": 398,
+      "sha256": "774c4b00b25dfa520217fd423319c4329e5f16838eeb03205829f9a1fd43060a"
+    },
+    {
+      "path": "src/genko/assets.py",
+      "lines": 46,
+      "sha256": "acb0c7bee1ca4c2abdd9e016bebe779696a65fe52ce01b6e2ff8500531bddc37"
+    },
+    {
+      "path": "src/genko/backup.py",
+      "lines": 42,
+      "sha256": "b572b5b9c184ccf32e778443014b24ce010cdd4b72a04d8e015d19b164b90146"
+    },
+    {
+      "path": "src/genko/balloons.py",
+      "lines": 1250,
+      "sha256": "971bc9c39aae48919a68bb479f5a805e32f2d0dcc6b091873fae83b181e062b2"
+    },
+    {
+      "path": "src/genko/blobcache.py",
+      "lines": 58,
+      "sha256": "38cc1cd9a90f3f467b1d717585b2d1e587f3d772d77e5a36369b8ce8dd0a05c0"
+    },
+    {
+      "path": "src/genko/bookops.py",
+      "lines": 129,
+      "sha256": "28c827c0860020a6374819e90ac1de4613572b349fd522881ded24de6c8a2405"
+    },
+    {
+      "path": "src/genko/brushes.py",
+      "lines": 442,
+      "sha256": "714032da70d8f902935529c6705d4e6ac1f683cb16d755507fc2783261af0c5a"
+    },
+    {
+      "path": "src/genko/checks.py",
+      "lines": 259,
+      "sha256": "1f279d99021bef6848c81105f0796d5bb59e8a8dad2af7a931b2b4bbfa4327b3"
+    },
+    {
+      "path": "src/genko/colour.py",
+      "lines": 105,
+      "sha256": "dbf834a3a00e3252f42b72e1b5c3a944cb384c0bbd3a00478303f122404a897b"
+    },
+    {
+      "path": "src/genko/covers.py",
+      "lines": 133,
+      "sha256": "3d73b54395d42325cf2aea4a9dc9b2240d972c1b6d6a3b60ca950be33a3ff48e"
+    },
+    {
+      "path": "src/genko/effects.py",
+      "lines": 490,
+      "sha256": "8cb9a97b6e556a41617096f96babc66f0b18a6eeff7579f9c8c4fded535296a8"
+    },
+    {
+      "path": "src/genko/export.py",
+      "lines": 411,
+      "sha256": "5fe66c278818ac89abf2138b9765e3634c9bdc23cd5efa9e565da313517a0346"
+    },
+    {
+      "path": "src/genko/fileops.py",
+      "lines": 134,
+      "sha256": "459895d4defae18d29967d3c9492397f4c4ae7c9bdb5257d4e22033cc751a291"
+    },
+    {
+      "path": "src/genko/fill.py",
+      "lines": 115,
+      "sha256": "7670fb6dac8b90c5e97c6b60f86e70d9e5cbed23ce8354475b3aa9cc40275765"
+    },
+    {
+      "path": "src/genko/filters.py",
+      "lines": 423,
+      "sha256": "8e1cbc9b5e3da32bd4d48c91b53a4a5d0f94cfc72b4929c536877139a695d7f0"
+    },
+    {
+      "path": "src/genko/fonts.py",
+      "lines": 159,
+      "sha256": "32f6e39f2b3a8f326fa4fff0e36ad2fc7b70adb994fe973133a5c0ff92186040"
+    },
+    {
+      "path": "src/genko/frames.py",
+      "lines": 509,
+      "sha256": "c2e4bf2efe082e5642fe8a22ceac73e895db351174b51c8f8e071b903780be49"
+    },
+    {
+      "path": "src/genko/guide.py",
+      "lines": 193,
+      "sha256": "61042370562f8e7cdce8a638485dddc0180ccb4684a8f8bb7a240857ccc30c2f"
+    },
+    {
+      "path": "src/genko/headless.py",
+      "lines": 130,
+      "sha256": "cdfe3ca74eebc6716375cccb5c874b79ca8442f2dad22538a64f781b200d1cdf"
+    },
+    {
+      "path": "src/genko/io.py",
+      "lines": 310,
+      "sha256": "930e0f1f8738bb288749d19b03bdf7e9ec8e923fa5a2d125d252e00e57c5740f"
+    },
+    {
+      "path": "src/genko/journal.py",
+      "lines": 180,
+      "sha256": "ad5d5d91b33c403b00bd27f912d70c5c091b8dca3da1d5686359343884ffefa7"
+    },
+    {
+      "path": "src/genko/layerops.py",
+      "lines": 426,
+      "sha256": "5fbae94764eb0248e62e31401f06e06aad3e2731b2b36fff5a167bf5bfa6fd6d"
+    },
+    {
+      "path": "src/genko/lineart.py",
+      "lines": 84,
+      "sha256": "bf329594d59160a86fc11393060e4b4d1e061e602a0ace31f42093e2bf35dc65"
+    },
+    {
+      "path": "src/genko/lock.py",
+      "lines": 113,
+      "sha256": "03c1514788fcb4b74f259192c733d32c0148e024d3d897bf7c509899f0e19f2c"
+    },
+    {
+      "path": "src/genko/lt.py",
+      "lines": 36,
+      "sha256": "2777a3ef5322acf1bf0f4270391e53911b9ed3630f80d5cf4425362f12cf4b76"
+    },
+    {
+      "path": "src/genko/maintenance.py",
+      "lines": 61,
+      "sha256": "278cf911ce2f4e74696e22853ff52dca062ab136d64a90deb5c3e115cc65b4fa"
+    },
+    {
+      "path": "src/genko/mannequin.py",
+      "lines": 193,
+      "sha256": "e07071a75976a85338b7b6ba40d032c6e8e6248d143c97e4f5183d234a051c0b"
+    },
+    {
+      "path": "src/genko/materials/__init__.py",
+      "lines": 412,
+      "sha256": "3106b78d0b881e0060ea9c50a41302eafc0ee995784743ba18b5aad9d2fb66c1"
+    },
+    {
+      "path": "src/genko/materials/builtin.py",
+      "lines": 190,
+      "sha256": "658d88b7bd53e755147ed971ddb38f52d2db1450193c3545351083f68659812f"
+    },
+    {
+      "path": "src/genko/mcp/__init__.py",
+      "lines": 1,
+      "sha256": "96f41e61329c47603388be233d58517945ad132cb27f97283aa0af281989b20a"
+    },
+    {
+      "path": "src/genko/mcp/server.py",
+      "lines": 483,
+      "sha256": "01a241042c21cbe65450a1d90263732411ae0a7f57c9e39916c43b38788f68b1"
+    },
+    {
+      "path": "src/genko/merge.py",
+      "lines": 34,
+      "sha256": "ca6bdd477979a6ac58db560dba4faecd6d381e7b89bf577a1ecac9c67ebffce4"
+    },
+    {
+      "path": "src/genko/mesh3d.py",
+      "lines": 760,
+      "sha256": "9e4bbd5bfdd43b230754999d48e769cbe10497b14d8fec5ce06923c2260a3413"
+    },
+    {
+      "path": "src/genko/migrate.py",
+      "lines": 269,
+      "sha256": "79d0a57405d2d0a61982775d08fe0b7f4743331ac8239b2df5ed57254256d558"
+    },
+    {
+      "path": "src/genko/models.py",
+      "lines": 752,
+      "sha256": "d8d24580275e30122f7e0025f772a15de7ecb42eb8ff45f3d4627aaeb35ba299"
+    },
+    {
+      "path": "src/genko/nombre.py",
+      "lines": 104,
+      "sha256": "45a554f5b8d3daec4057dbac2dfaa69acafcd61a5dc9951a378c9b06ea237ef2"
+    },
+    {
+      "path": "src/genko/ops.py",
+      "lines": 4168,
+      "sha256": "5568ad5cc05f17530e42dd1a863ef6fce74154d061e1db5aa6961fee408c7a7b"
+    },
+    {
+      "path": "src/genko/pack.py",
+      "lines": 41,
+      "sha256": "62405e8d65ed0e413abfe1f15874610feb25ca85a0cde18fc1b76d45b3ddb383"
+    },
+    {
+      "path": "src/genko/pagespec.py",
+      "lines": 149,
+      "sha256": "eb1e3934c7df08d4cb24e2c67879158cdbdccd3d396ab463f6cc647e90f5fa3a"
+    },
+    {
+      "path": "src/genko/persp3d.py",
+      "lines": 128,
+      "sha256": "dc219d7f09be4bf893f3fafa97f6ee2d5b3815074b9c68406e4791910eb63eea"
+    },
+    {
+      "path": "src/genko/pipeline.py",
+      "lines": 13,
+      "sha256": "e740d81913aa198d69ea75a8bd396ccbc758184510ed6d5c96ad820db1724329"
+    },
+    {
+      "path": "src/genko/placement.py",
+      "lines": 136,
+      "sha256": "53bfb41be0ca0f9ebc531c4ec2f613e38d012e31a3f5f5e9b3afa6e0e726c948"
+    },
+    {
+      "path": "src/genko/plugins.py",
+      "lines": 97,
+      "sha256": "dd811ba999eadd6308d3d416a47b11cecfadacedfbc3c9967455759d22bf6292"
+    },
+    {
+      "path": "src/genko/poses.py",
+      "lines": 46,
+      "sha256": "6b4f2b2f040277231b58ebda29e939604f8f3c3dfa56e99dad8f7f9e24dffec2"
+    },
+    {
+      "path": "src/genko/prim3d.py",
+      "lines": 404,
+      "sha256": "d1923d483418ff13e26eda40ba4b3b14a4c3dd062cc5987498ed569692c93d81"
+    },
+    {
+      "path": "src/genko/profiles.py",
+      "lines": 126,
+      "sha256": "fb4c112d10183d5716366ab6b00fe8fbf4cec7222eebf7324f7a87ea38f69bcc"
+    },
+    {
+      "path": "src/genko/psd.py",
+      "lines": 599,
+      "sha256": "afb2239a843812f3bb315ba9c3b10fe5c5598ae51e64a48983bb0b3162a234cf"
+    },
+    {
+      "path": "src/genko/raster.py",
+      "lines": 101,
+      "sha256": "bc891d705379a3ad00ce6bd332e33e993611f300db0a7376979c959fd8282f7e"
+    },
+    {
+      "path": "src/genko/render.py",
+      "lines": 1429,
+      "sha256": "dc98dd732f032db2598a93477a1b88f214a574972bbb971514838d665524687c"
+    },
+    {
+      "path": "src/genko/rulers.py",
+      "lines": 546,
+      "sha256": "35181d06af5570afc84bd201dab15542e4af9da980d125367d5c1a25af2c5709"
+    },
+    {
+      "path": "src/genko/scanner.py",
+      "lines": 61,
+      "sha256": "8b13ad771d61cbabe25278bca527be0b586da4fee20a1574567a96156e5ab46c"
+    },
+    {
+      "path": "src/genko/screentone.py",
+      "lines": 236,
+      "sha256": "dc190da489d35800f8947d8f615fe429c4a62187f6c041637f655b87810b6d42"
+    },
+    {
+      "path": "src/genko/selection.py",
+      "lines": 265,
+      "sha256": "6de96349abc5ba632b11651ba120789b39b5490953d538e2bdd7d3951ae0c2d2"
+    },
+    {
+      "path": "src/genko/selops.py",
+      "lines": 211,
+      "sha256": "34ac177c841cc5216f1cb65b28b49046fe8e3c4e84d89b3e2814be5f48f1b64c"
+    },
+    {
+      "path": "src/genko/server.py",
+      "lines": 370,
+      "sha256": "f4a446842862442c3a3fbd8d0f7b4f276f365d5b7fb92362c586238b023c3802"
+    },
+    {
+      "path": "src/genko/stroke.py",
+      "lines": 326,
+      "sha256": "5307df65de6c60c0336f8e4429080756b26050bd02e8f9cb555826c8c3d3491c"
+    },
+    {
+      "path": "src/genko/studio/__init__.py",
+      "lines": 5,
+      "sha256": "507444d305556f94d27289f0700c0b350f2e41b2be788cb7c9614188ef45242d"
+    },
+    {
+      "path": "src/genko/studio/adopt.py",
+      "lines": 88,
+      "sha256": "fabd1040c738ea9ab83e78c6dfe6c77ccfc0f02ca1edc630806ad4a8fcae4e07"
+    },
+    {
+      "path": "src/genko/studio/atari.py",
+      "lines": 192,
+      "sha256": "eaf971e68efac31110b46e5c738bf31594bb484024367373d872d31c283abe2d"
+    },
+    {
+      "path": "src/genko/studio/blocking.py",
+      "lines": 49,
+      "sha256": "c338f8635a81febf306b012ee99f2e699fe11a398cb80b03200c3da7cf6dfefd"
+    },
+    {
+      "path": "src/genko/studio/claims.py",
+      "lines": 77,
+      "sha256": "acc01948fac34377032dd437add43362638ed078cdc9cc219aecadfbac76e88c"
+    },
+    {
+      "path": "src/genko/studio/cli.py",
+      "lines": 363,
+      "sha256": "dfef9f043c0ea2439ae985f38eaa7c61a1ab9e50a8e2da14d6105c2340d5775e"
+    },
+    {
+      "path": "src/genko/studio/drafts.py",
+      "lines": 65,
+      "sha256": "d8bec301bae922a324581449d58eff772b48563976bcd759009892b9680d8e6e"
+    },
+    {
+      "path": "src/genko/studio/evaluate.py",
+      "lines": 249,
+      "sha256": "428d03f1b2105bbd7bc3ae3c0cd59d51b6851556345a0b4ceeac45ecb09952ec"
+    },
+    {
+      "path": "src/genko/studio/finish.py",
+      "lines": 245,
+      "sha256": "4528473183347426f4b07bf8429bd2338f5c07270e8773ba19ae0b944e3d94b2"
+    },
+    {
+      "path": "src/genko/studio/fxwords.py",
+      "lines": 96,
+      "sha256": "7fcdfccfe2973c18312716fdb4847701e098da700d06209ac9d5dfc781ca2392"
+    },
+    {
+      "path": "src/genko/studio/genreq.py",
+      "lines": 760,
+      "sha256": "56e2212b66f337da7f2e1187e5d1ff51b214a77884f28f8c20e2beff8fadbc8a"
+    },
+    {
+      "path": "src/genko/studio/importer.py",
+      "lines": 203,
+      "sha256": "c29b97f24d39d23b7b4a0310185f89b8e30a796848f5f0f46f42c0db459b1cbb"
+    },
+    {
+      "path": "src/genko/studio/issues.py",
+      "lines": 29,
+      "sha256": "b687207ae9ab6f7381d8e67ee99a1fb82673a835b6d3e638d73d2546ad886808"
+    },
+    {
+      "path": "src/genko/studio/jobs.py",
+      "lines": 107,
+      "sha256": "2566c189cb118c90eae99445e8f2c366bfeb6b87b268cc59f11419f1ba672419"
+    },
+    {
+      "path": "src/genko/studio/jsonschema_lite.py",
+      "lines": 101,
+      "sha256": "ab21c0a88aafe7d03fdfc99689232aabb3408c4081e91eccaf9752a4d8723589"
+    },
+    {
+      "path": "src/genko/studio/jsonutil.py",
+      "lines": 47,
+      "sha256": "143135b1a3079ec430e3266afe6cd17c3962eb454f76fdc284b2dad0f772ea9d"
+    },
+    {
+      "path": "src/genko/studio/layout.py",
+      "lines": 357,
+      "sha256": "2909815cef9dcd2a51c9a03d73dfee29f7a2acf5c3233c7ab3fef29959fe5c54"
+    },
+    {
+      "path": "src/genko/studio/letter.py",
+      "lines": 494,
+      "sha256": "c5495747cb479c59c97621617ba81021c85215190e3b4536c953748df92f3372"
+    },
+    {
+      "path": "src/genko/studio/lint.py",
+      "lines": 296,
+      "sha256": "5633479f16f0c52fe6a19282c8c9292d10ac23975c410d6241b952cfa86fa129"
+    },
+    {
+      "path": "src/genko/studio/preflight.py",
+      "lines": 190,
+      "sha256": "516ba1ef574d10ffb290f431de0598164a4a012ff94af75623b91136b4bf92f4"
+    },
+    {
+      "path": "src/genko/studio/presence.py",
+      "lines": 82,
+      "sha256": "b1785cfd1e7d0b59216a837a42f779b92e8193c286e4d5d904563d549895a618"
+    },
+    {
+      "path": "src/genko/studio/review.py",
+      "lines": 305,
+      "sha256": "74744eebcfeb83324fcd03629a24d5eb38750f1b6caf1d36577e574ef277295f"
+    },
+    {
+      "path": "src/genko/studio/schemas.py",
+      "lines": 176,
+      "sha256": "1f061fe0dd66becfd91f85b0df70563c17d56747b03ff87762c0003d8a8d7129"
+    },
+    {
+      "path": "src/genko/studio/service.py",
+      "lines": 2100,
+      "sha256": "ff5353bee0facce7b32e97556bda739a980b506cc9ccea8b762e6db5fa950e2e"
+    },
+    {
+      "path": "src/genko/studio/state.py",
+      "lines": 73,
+      "sha256": "062eb2e7c9eecb536ff03f4879b29426d8e76ad1bd65b89b0e7b5c632ee2487d"
+    },
+    {
+      "path": "src/genko/studio/studio_ops.py",
+      "lines": 1054,
+      "sha256": "6512c871b82bb31093e14d4b4fde6535c503ce712e6f0341caccda199831c7f5"
+    },
+    {
+      "path": "src/genko/studio/toollog.py",
+      "lines": 59,
+      "sha256": "e73b9e4df78248038106b8cf66c67d1a2df10d422af467db3aa33abe06bd7388"
+    },
+    {
+      "path": "src/genko/studio/tools_registry.py",
+      "lines": 72,
+      "sha256": "d66fe1dd6a5b652592176e556ffebe8f5ec75fe1fc9e40d25d8453ee24cff01f"
+    },
+    {
+      "path": "src/genko/studio/worklist.py",
+      "lines": 340,
+      "sha256": "73a6e8f38f0fd5b13d273cfead4b6ea19ba41c0c6e43470b829ebde095804203"
+    },
+    {
+      "path": "src/genko/studio/xycut.py",
+      "lines": 331,
+      "sha256": "03960bbc725ebe9f2708e00894811f7079363be098cfbbf5510063c9af1a7162"
+    },
+    {
+      "path": "src/genko/stylecat.py",
+      "lines": 236,
+      "sha256": "cecb29c39926aefcd8f9301ffe3b40a0c679b750c7ea64f322b8cfa5e129ee07"
+    },
+    {
+      "path": "src/genko/tategaki.py",
+      "lines": 657,
+      "sha256": "3e5eeface0889f101e25628d20fe6544ba2c4907ade7231cfee7deaea530bd93"
+    },
+    {
+      "path": "src/genko/threeops.py",
+      "lines": 407,
+      "sha256": "e9cd2a3a6c6975dd5035960f8ebd88183b78f176936e53f9fce004d3e107aa67"
+    },
+    {
+      "path": "src/genko/timelapse.py",
+      "lines": 199,
+      "sha256": "2bc1a053ace20f4ac6e566d23af82fae513fc87b19ee07ab08521255999e6063"
+    },
+    {
+      "path": "src/genko/tokens.py",
+      "lines": 72,
+      "sha256": "c92b7c99ca349b8767bd4fa191559337cc36e26b744b42227fde7ca538281b1b"
+    },
+    {
+      "path": "src/genko/tones.py",
+      "lines": 319,
+      "sha256": "9756351746f2c5dc380d05ff65360d341b6912c1857c892b89d86b025e764ecc"
+    },
+    {
+      "path": "src/genko/upscale.py",
+      "lines": 113,
+      "sha256": "f35c69e7f779a2850fbd38153e29c1ee7f1f7892d7907533d5ed6c97b2170834"
+    },
+    {
+      "path": "src/genko/vectorize.py",
+      "lines": 138,
+      "sha256": "bb32f9332c2030b19e2f48b006f22110cb2eaefca6ce28119f43bfae5d3c9021"
+    },
+    {
+      "path": "src/genko/warp.py",
+      "lines": 176,
+      "sha256": "07e68f14c7a1d1ab4934f30d89d00d7533249c768b0663318582cfe8dde1e56c"
+    }
+  ],
+  "test_files": [
+    {
+      "path": "tests/test_agent_economy.py",
+      "definitions": 7
+    },
+    {
+      "path": "tests/test_ai_feedback.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_b_lettering.py",
+      "definitions": 8
+    },
+    {
+      "path": "tests/test_battle_report.py",
+      "definitions": 7
+    },
+    {
+      "path": "tests/test_c_extras.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_chat_approval.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_cli.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_effect_clearing.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_f1.py",
+      "definitions": 12
+    },
+    {
+      "path": "tests/test_f2.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_f3.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_f4.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_f5.py",
+      "definitions": 8
+    },
+    {
+      "path": "tests/test_f6.py",
+      "definitions": 16
+    },
+    {
+      "path": "tests/test_frames.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_g1.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_g2.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_g3.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_g4.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_g5.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_g6.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_h1.py",
+      "definitions": 14
+    },
+    {
+      "path": "tests/test_h2.py",
+      "definitions": 8
+    },
+    {
+      "path": "tests/test_h4.py",
+      "definitions": 7
+    },
+    {
+      "path": "tests/test_h5.py",
+      "definitions": 5
+    },
+    {
+      "path": "tests/test_hd_report.py",
+      "definitions": 11
+    },
+    {
+      "path": "tests/test_headless.py",
+      "definitions": 5
+    },
+    {
+      "path": "tests/test_i0.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_io.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_j1.py",
+      "definitions": 9
+    },
+    {
+      "path": "tests/test_j10.py",
+      "definitions": 15
+    },
+    {
+      "path": "tests/test_j11.py",
+      "definitions": 5
+    },
+    {
+      "path": "tests/test_j12.py",
+      "definitions": 9
+    },
+    {
+      "path": "tests/test_j2.py",
+      "definitions": 16
+    },
+    {
+      "path": "tests/test_j3.py",
+      "definitions": 16
+    },
+    {
+      "path": "tests/test_j4.py",
+      "definitions": 8
+    },
+    {
+      "path": "tests/test_j5.py",
+      "definitions": 20
+    },
+    {
+      "path": "tests/test_j6.py",
+      "definitions": 18
+    },
+    {
+      "path": "tests/test_j7.py",
+      "definitions": 8
+    },
+    {
+      "path": "tests/test_j8.py",
+      "definitions": 10
+    },
+    {
+      "path": "tests/test_j9.py",
+      "definitions": 10
+    },
+    {
+      "path": "tests/test_k1.py",
+      "definitions": 5
+    },
+    {
+      "path": "tests/test_l1_style.py",
+      "definitions": 12
+    },
+    {
+      "path": "tests/test_lock.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_m10.py",
+      "definitions": 16
+    },
+    {
+      "path": "tests/test_m11.py",
+      "definitions": 17
+    },
+    {
+      "path": "tests/test_m12.py",
+      "definitions": 9
+    },
+    {
+      "path": "tests/test_m13.py",
+      "definitions": 13
+    },
+    {
+      "path": "tests/test_m14.py",
+      "definitions": 12
+    },
+    {
+      "path": "tests/test_m15.py",
+      "definitions": 14
+    },
+    {
+      "path": "tests/test_m16.py",
+      "definitions": 9
+    },
+    {
+      "path": "tests/test_m1_report.py",
+      "definitions": 15
+    },
+    {
+      "path": "tests/test_m1_security.py",
+      "definitions": 17
+    },
+    {
+      "path": "tests/test_m2_format.py",
+      "definitions": 15
+    },
+    {
+      "path": "tests/test_m2_group_b.py",
+      "definitions": 9
+    },
+    {
+      "path": "tests/test_m3_art.py",
+      "definitions": 17
+    },
+    {
+      "path": "tests/test_m3_report.py",
+      "definitions": 13
+    },
+    {
+      "path": "tests/test_m4_pipeline.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_m4_units.py",
+      "definitions": 13
+    },
+    {
+      "path": "tests/test_m5.py",
+      "definitions": 8
+    },
+    {
+      "path": "tests/test_m6.py",
+      "definitions": 16
+    },
+    {
+      "path": "tests/test_m7_gui.py",
+      "definitions": 5
+    },
+    {
+      "path": "tests/test_m7_session.py",
+      "definitions": 7
+    },
+    {
+      "path": "tests/test_m8.py",
+      "definitions": 9
+    },
+    {
+      "path": "tests/test_m9.py",
+      "definitions": 13
+    },
+    {
+      "path": "tests/test_migrate.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_ops.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_p1.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_p2.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_p3.py",
+      "definitions": 5
+    },
+    {
+      "path": "tests/test_p4.py",
+      "definitions": 7
+    },
+    {
+      "path": "tests/test_p5_balloon.py",
+      "definitions": 2
+    },
+    {
+      "path": "tests/test_p5_erase.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_p5_inspect_stroke.py",
+      "definitions": 2
+    },
+    {
+      "path": "tests/test_p5_layers.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_p5_lt.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_p5_mannequin.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_p5_materials.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_p5_pack.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_p5_psd.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_p5_ruler.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_p5_spread.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_p5_stroke.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_p6_remaining.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_p7_factory.py",
+      "definitions": 12
+    },
+    {
+      "path": "tests/test_p8_shell.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_p9_factory.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_project.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_quality_report.py",
+      "definitions": 23
+    },
+    {
+      "path": "tests/test_render_clip.py",
+      "definitions": 2
+    },
+    {
+      "path": "tests/test_server.py",
+      "definitions": 1
+    },
+    {
+      "path": "tests/test_story_and_export.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_studio_flow.py",
+      "definitions": 7
+    },
+    {
+      "path": "tests/test_studio_mcp.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_studio_units.py",
+      "definitions": 10
+    },
+    {
+      "path": "tests/test_t_report.py",
+      "definitions": 11
+    },
+    {
+      "path": "tests/test_tategaki.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_tibo_report.py",
+      "definitions": 9
+    },
+    {
+      "path": "tests/test_ui_look.py",
+      "definitions": 34
+    },
+    {
+      "path": "tests/test_ux.py",
+      "definitions": 14
+    },
+    {
+      "path": "tests/test_ux_review.py",
+      "definitions": 10
+    },
+    {
+      "path": "tests/test_w10_rulers.py",
+      "definitions": 5
+    },
+    {
+      "path": "tests/test_w11_effects.py",
+      "definitions": 5
+    },
+    {
+      "path": "tests/test_w12_figure.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_w13_scan.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_w14_speed.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_w15_color.py",
+      "definitions": 8
+    },
+    {
+      "path": "tests/test_w1_panels.py",
+      "definitions": 8
+    },
+    {
+      "path": "tests/test_w1_panels_gui.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_w2_lines.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_w3_fill.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_w4_mend.py",
+      "definitions": 6
+    },
+    {
+      "path": "tests/test_w5_snap_erase.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_w6_balloons.py",
+      "definitions": 5
+    },
+    {
+      "path": "tests/test_w6_lettering.py",
+      "definitions": 3
+    },
+    {
+      "path": "tests/test_w7_tone.py",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_w8_filters.py",
+      "definitions": 8
+    },
+    {
+      "path": "tests/test_w9_view.py",
+      "definitions": 4
+    }
+  ],
+  "counts": {
+    "ops_schema_unique": 168,
+    "mcp_tools": 41,
+    "mcp_resources": 4,
+    "python_modules": 146,
+    "test_files": 118,
+    "test_definitions_not_cases": 880
+  },
+  "source_hashes": {
+    "README.md": "61510a14896aa0e65ddf98bc2c12c7a16b2e3bc716b22d7d3d907103b0e142e9",
+    "pyproject.toml": "69f3e169fe9dca50699dd7785c59929e71596031741b113e8452aa2f1e63ebc5",
+    "docs/ops.schema.json": "ac9fefd61d84bc3eba05a3c958b6f3a14452ec1b6e00d820f9bdd146d839e0da",
+    "src/genko/mcp/server.py": "01a241042c21cbe65450a1d90263732411ae0a7f57c9e39916c43b38788f68b1",
+    "src/genko/assets.py": "acb0c7bee1ca4c2abdd9e016bebe779696a65fe52ce01b6e2ff8500531bddc37",
+    "src/genko/io.py": "930e0f1f8738bb288749d19b03bdf7e9ec8e923fa5a2d125d252e00e57c5740f",
+    "src/genko/journal.py": "ad5d5d91b33c403b00bd27f912d70c5c091b8dca3da1d5686359343884ffefa7",
+    "src/genko/lock.py": "03c1514788fcb4b74f259192c733d32c0148e024d3d897bf7c509899f0e19f2c",
+    "src/genko/plugins.py": "dd811ba999eadd6308d3d416a47b11cecfadacedfbc3c9967455759d22bf6292",
+    "src/genko/app/session.py": "7c251e3635b92c83ba1b9c3b1069b74e6e905515e7660df7a7b81d76f3e6858e"
+  }
+}

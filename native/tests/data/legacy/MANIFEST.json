@@ -1,0 +1,21 @@
+{
+ "commits": {
+  "v1": "5b54b42",
+  "v2": "3210633",
+  "v3": "1b7b1d7030d4188d7ebd5e398d010b3ed98b220f"
+ },
+ "files": {
+  "book-v1.genko/project.json": "ecce0d99f8f0fe5f617a810e75c51223f48c804c192f8727f62c71357753e9a4",
+  "book-v2.genko/pages/001/bg.png": "84e95fb1d42be4954e14d82a4b3c8a697cb28a1fa3f999b3448d5d2a1a93d6b7",
+  "book-v2.genko/project.json": "bf3447b4168777e3293a0fd850d17bf9c8506271c66acee2c6c3dbbb0c077be8",
+  "book-v3.genko/assets/0e/0e715a88346d4bf022e8d055ee28c2cde7c1ce5e1e024590959bf98259926eca.project.json": "0e715a88346d4bf022e8d055ee28c2cde7c1ce5e1e024590959bf98259926eca",
+  "book-v3.genko/assets/5c/5cfd1a6061263cca002c105a7ea66f427d1d97d869cf1ec64335c2282f6876a2.project.json": "5cfd1a6061263cca002c105a7ea66f427d1d97d869cf1ec64335c2282f6876a2",
+  "book-v3.genko/assets/6b/6b551ca22f9cf5fdc7fdb9a33a969559e01b03344af81e82dd79f68a7d1e84ba.project.json": "6b551ca22f9cf5fdc7fdb9a33a969559e01b03344af81e82dd79f68a7d1e84ba",
+  "book-v3.genko/assets/90/9036e17cadbc44ed96aa3ee57411c74f062d06acb589fb0075de1e8ad6fb0258.strokes.json": "9036e17cadbc44ed96aa3ee57411c74f062d06acb589fb0075de1e8ad6fb0258",
+  "book-v3.genko/assets/b0/b0ebf2cdae6ea0aaa0e46d8bff4ea34a9cef23451982215329ab467701994d46.project.json": "b0ebf2cdae6ea0aaa0e46d8bff4ea34a9cef23451982215329ab467701994d46",
+  "book-v3.genko/assets/d7/d7b4e11bbe3c84eaf6b6cfc9feb631a3f120a519cf3c8256fa9ddaf78ca77483.png": "d7b4e11bbe3c84eaf6b6cfc9feb631a3f120a519cf3c8256fa9ddaf78ca77483",
+  "book-v3.genko/project.json": "6b551ca22f9cf5fdc7fdb9a33a969559e01b03344af81e82dd79f68a7d1e84ba",
+  "book-v3.genko/studio/audit.jsonl": "02bfb550d0bc29bba73f7916ba61e449e15ff37e0bced27dbc0434384c8b4a3d",
+  "book-v3.genko/studio/journal.jsonl": "e9d4b4b2eb40768bad2b50c46427dcea37f796d482b89d62c5b1bc7ea771a4de"
+ }
+}

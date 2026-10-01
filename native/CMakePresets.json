@@ -1,0 +1,49 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {"major": 3, "minor": 24, "patch": 0},
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/${presetName}",
+      "cacheVariables": {"GENKO_WERROR": "ON"}
+    },
+    {"name": "linux-release", "inherits": "base", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}},
+    {"name": "linux-debug", "inherits": "base", "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}},
+    {
+      "name": "linux-asan",
+      "inherits": "base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_SANITIZE": "address,undefined"}
+    },
+    {
+      "name": "linux-tsan",
+      "inherits": "base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_SANITIZE": "thread"}
+    },
+    {
+      "name": "windows-release",
+      "inherits": "base",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static-md",
+        "VCPKG_MANIFEST_DIR": "${sourceDir}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {"name": "linux-release", "configurePreset": "linux-release"},
+    {"name": "linux-debug", "configurePreset": "linux-debug"},
+    {"name": "linux-asan", "configurePreset": "linux-asan"},
+    {"name": "linux-tsan", "configurePreset": "linux-tsan"},
+    {"name": "windows-release", "configurePreset": "windows-release"}
+  ],
+  "testPresets": [
+    {"name": "linux-release", "configurePreset": "linux-release", "output": {"outputOnFailure": true}},
+    {"name": "linux-debug", "configurePreset": "linux-debug", "output": {"outputOnFailure": true}},
+    {"name": "linux-asan", "configurePreset": "linux-asan", "output": {"outputOnFailure": true}},
+    {"name": "linux-tsan", "configurePreset": "linux-tsan", "output": {"outputOnFailure": true}},
+    {"name": "windows-release", "configurePreset": "windows-release", "output": {"outputOnFailure": true}}
+  ]
+}

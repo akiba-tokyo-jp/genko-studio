@@ -1,0 +1,16 @@
+{
+  "name": "genko-native",
+  "version-string": "0.1.0",
+  "builtin-baseline": "eb2d3a3279fd019cb7733072d86900d0ad2a1aef",
+  "dependencies": [
+    "nlohmann-json",
+    "zlib",
+    "libpng",
+    "libjpeg-turbo",
+    {"name": "tiff", "default-features": false, "features": ["zip", "jpeg"]},
+    {"name": "freetype", "default-features": false, "features": ["zlib", "png"]},
+    "harfbuzz",
+    "libwebp",
+    "lcms"
+  ]
+}
