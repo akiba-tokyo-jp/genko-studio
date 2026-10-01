@@ -1,0 +1,8 @@
+{
+ "generator": "PYTHONPATH=src /opt/pyref/bin/python tools/migration/pyref_harness.py unit-tables > native/tests/data/pyref/unit_tables.json",
+ "python": "3.12.3",
+ "baseline": "src/genko at the M0 baseline (1b7b1d7)",
+ "files": {
+  "unit_tables.json": "be661a1b35ba3a219806caa62a688934ce18bcffbed2a1ebd469f1349bcedf72"
+ }
+}
