@@ -26,13 +26,17 @@ tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開
 
 ## 2. 原稿モデル（core）
 
-- `Document`・`Page`・`Layer`・`Frame`・`StoryLine`・`Stroke` は**不変オブジェクトを `std::shared_ptr<const T>` で共有**する。変更は経路上のノードだけを複製して新しい `Document` を返す（path copying）。Undo 用の旧状態保持と、描画ワーカーへの受け渡しはこの不変スナップショットで行い、深いコピーをしない。
-- Python の型付きフィールドは C++ でも型付きで持つ。Python で自由形式の dict（`panel`、`plan`、`studio`、`style`、`effects`、`prims`、`rulers`、`tone`、`fill`、`adjust`、`effect`、`screen`、`source`、`finish`、`bible.characters`、`tickets`、`nombre`、`brush.custom` 等）は `core::Json`（= `nlohmann::ordered_json`）で持ち、キー順を保つ。
+- `Document`（Python の `Episode`）は値型。ページは `std::shared_ptr<Page>` の配列で、**参照数による書込み時複製（COW）**をする: `Document` のコピーはページのポインターを写すだけ。変更は `doc.edit_page(i)` で行い、そのページが他と共有されていれば（use_count > 1）複製してから書き換える。1 回の op の束は `Document` のコピー（作業用）に対して行い、成功したらそれを新しい状態にする。前の `Document` がそのまま Undo 用の旧状態になる（深いコピーをしない）。作業用のコピーを他のスレッドへ渡さない。
+- 層の筆跡は `std::shared_ptr<const StrokeList>`（不変の `std::shared_ptr<const Stroke>` の配列）。筆跡を変える op は新しい配列を作る（変わらない線のポインターは共有）。ラスターの PNG バイト列も `std::shared_ptr<const Bytes>`。
+- 層は読み込んだ筆跡ブロブの参照（`strokes_ref`）とラスターの参照（`raster_ref`）を覚え、内容が変わっていなければ保存で再利用する（Python の `blobcache` と同じ効果）。
+- 筆跡は開くときに全部読んでよい（ページ単位で並列に復号）。PERF-A を満たせない場合に限り、ページの必要時読込に切り替える。
+- Python の型付きフィールドは C++ でも型付きで持つ。Python で自由形式の dict（`panel`、`plan`、`studio`、`style`、`effects`、`prims`、`rulers`、`tone`、`fill`、`adjust`、`effect`、`screen`、`source`、`finish`、`bible.characters`、`tickets`、`nombre`、`brush.custom`、パッチの属性等）は `core::Json`（= `nlohmann::ordered_json`）で持ち、キー順を保つ。
 - 未知のキーは各階層の `extra`（`Json` object）に保持し、保存で書き戻す（Python の `episode.extra`・`page.extra` と同じ）。
-- 筆跡（ストローク）は層ごとに `StrokesHandle`（元の素材参照 `sha256:…` と、読み込み済みなら不変の配列）で持つ。**未表示ページの筆跡は開いたときに読まない**（必要時読込）。読み込みはスレッド安全に一度だけ行う。変更されていない配列は保存時に元の参照を再利用する。
+- 台詞は `Document::story` だけに持つ（Python の `page.texts` は `story` のページ別の見え方。二重に持たない）。
 - 座標は mm の `double`、筆圧・回転も `double`。`float` へ縮めない。
-- ID は Python と同じ 12 桁の 16 進（`uuid4().hex[:12]` 相当）。ページ ID は `pg_` 接頭辞。乱数は暗号論的乱数源から取る。
+- ID は Python と同じ 12 桁の 16 進（`uuid4().hex[:12]` 相当）。ページ ID は `pg_` 接頭辞。乱数は暗号論的乱数源（QRandomGenerator::system）から取る。
 - `PageSpec`・用紙プリセット・綴じ・ページの左右・基本枠の計算は `models.py` と同じ値を返す（単体試験で固定値を照合）。
+- Python の `round(x, n)` は `core::py_round`（`std::to_chars` の固定小数で丸めて読み戻す。Python と同じ結果）、`random.Random` は `core::PyRandom`（MT19937 と Python と同じ seed 展開・`random()`・`uniform()`）で再現する。
 
 ## 3. JSON・数値・文字列
 

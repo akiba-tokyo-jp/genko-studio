@@ -1,0 +1,1397 @@
+[
+ {
+  "op": "split_frame",
+  "page": "int",
+  "axis": "horizontal|vertical",
+  "ratio": "float",
+  "gutter_mm": "float",
+  "tilt_mm": "float? (slant: the cut's ends differ by this)",
+  "frame_id": "optional",
+  "force": "bool? (placed art goes to studio.orphans)"
+ },
+ {
+  "op": "merge_frame",
+  "page": "int",
+  "frame_id": "str",
+  "force": "bool? (placed art goes to studio.orphans)"
+ },
+ {
+  "op": "resize_frame",
+  "page": "int",
+  "frame_id": "str",
+  "rect": "{x,y,width,height}"
+ },
+ {
+  "op": "set_frame",
+  "page": "int",
+  "frame_id": "str",
+  "bleed": "bool?",
+  "clip": "bool?",
+  "border_mm": "float? (0: no border)",
+  "poly": "[[x,y],...] | null? (a free-form panel; null goes back to the cut shape)",
+  "curves": "[mm per edge] | null? (edges bowed out +, in -; edge i runs from corner i: top, right, bottom, left for a rectangle)",
+  "bow": "{edge, mm}? (one edge)",
+  "line": "{kind: solid|double|dashed|dotted|rough, rgb?, gap_mm?, dash_mm?, wobble_mm?} | null? (the border's look)",
+  "corner_mm": "float? (角の丸み: corner radius, 0 sharp)"
+ },
+ {
+  "op": "cut_frame",
+  "page": "int",
+  "frame_id": "str?",
+  "p0": "[x,y]",
+  "p1": "[x,y]",
+  "gutter_mm": "float?",
+  "note": "cut a panel along any line (slanted panels)"
+ },
+ {
+  "op": "move_gutter",
+  "page": "int",
+  "frame_id": "str (the split)",
+  "index": "int? (gutter after this child)",
+  "delta_mm": "float",
+  "gutter_mm": "float? (new width)"
+ },
+ {
+  "op": "add_line",
+  "page": "int",
+  "text": "str",
+  "speaker": "optional",
+  "frame_id": "optional",
+  "balloon": "optional",
+  "x_mm": "optional",
+  "y_mm": "optional",
+  "w_mm": "optional",
+  "h_mm": "optional",
+  "wrap": "vertical|horizontal? (default vertical)",
+  "tail": "[x,y]?",
+  "tails": "[{to, via?, width_mm?}]?",
+  "style": "object?",
+  "ruby_runs": "[[base, ruby]]?",
+  "emphasis_runs": "[str]?",
+  "style_runs": "[[words, {scale, bold, rgb}]]?",
+  "path": "[[x,y]]? (a hand-drawn balloon)",
+  "id": "str? (choose the id)"
+ },
+ {
+  "op": "edit_line",
+  "id": "str",
+  "text": "optional",
+  "speaker": "optional",
+  "balloon": "speech|rounded|box|cloud|thought|shout|electric|flash|whisper|narration|sfx|none|picture? (picture: style.picture, a base64 PNG stretched over the box)",
+  "wrap": "vertical|horizontal?",
+  "ruby": "str?",
+  "ruby_runs": "[[base, ruby]]?",
+  "emphasis_runs": "[str]? (傍点 on these words)",
+  "style_runs": "[[words, {scale 0.3..3, bold, weight, rgb}]]? (part of the line larger, smaller, bolder, coloured)",
+  "frame_id": "str?",
+  "style": "{font, size_mm, tracking, leading, align, outline_mm, rgb, tcy, border_mm, fill, group, rotate_deg, skew_deg, arc (-1..1), latin: rotate|upright, emphasis_mark: sesame|dot, bold, weight: normal|bold|heavy, italic, outline_rgb, wobble 0..1, double, spikes 6..80, spike_depth 0.05..0.6, scale_x 0.3..3 (長体 < 1 < 平体), gradient {rgb_from, rgb_to, angle}, text_path [[x,y]…] (mm from the box's top left: the letters follow it), features [jp78|jp90|trad|expt|hwid|…] (OpenType forms, across text), yakumono (paired punctuation set half wide; default true), spike_jitter 0..1, bumps 5..60 (cloud), picture (base64 PNG), fill_png (letters painted with a picture), warp [[x,y]×4] (the letters' corners as shares of their box: 遠近・ゆがみ)}? (null resets a key)",
+  "tails": "[{to:[x,y], via?:[x,y], vias?:[[x,y],…] (折れ線: bends at each), width_mm?, kind?: wedge (default: broad at the balloon, bowing a little)|straight|zigzag|fade|bubbles}]?",
+  "style (W6)": "line_rgb, fill_rgb, fill_opacity 0..1, text_dx_mm, text_dy_mm (the words moved inside the balloon), path_curve (a hand-drawn outline as a smooth curve), cuts, align justify (均等), ruby_scale 0.25..0.8, mono_ruby, below_layer (a layer id: the line is drawn under it)",
+  "style (B)": "hand (default true: drawn as a letterer would, a fuller oval hugging the words, its line swelling and thinning; false: an even line on a true ellipse), periods (default false: a spoken line drops its closing 。 as manga does; true keeps it)",
+  "style_runs (W6)": "[[words, {…, tcy: true}]] (縦中横 on those words)"
+ },
+ {
+  "op": "reorder_lines",
+  "page": "int",
+  "order": "[line id] (reading order)"
+ },
+ {
+  "op": "delete_line",
+  "id": "str"
+ },
+ {
+  "op": "cut_balloon",
+  "id": "str",
+  "points": "[[x,y],...] (page mm)",
+  "width_mm": "float? (2)",
+  "note": "フキダシ消しゴム: the balloon (fill and line) taken away there; style cuts: null brings it back"
+ },
+ {
+  "op": "move_line",
+  "id": "str",
+  "x_mm": "float?",
+  "y_mm": "float?",
+  "w_mm": "float? (the balloon's size: edit_line does not change it)",
+  "h_mm": "float?",
+  "tail": "[x,y]?",
+  "tails": "[{to, via?, width_mm?}]?",
+  "balloon": "str?"
+ },
+ {
+  "op": "name_ok",
+  "page": "int, optional (all pages if omitted)"
+ },
+ {
+  "op": "advance",
+  "page": "int",
+  "to": "name|ink|finish"
+ },
+ {
+  "op": "add_stroke",
+  "page": "int",
+  "layer": "name|ink",
+  "layer_id": "str? (a pen or paint layer)",
+  "points": "[[x,y,pressure?],...]",
+  "space": "page|spread?",
+  "width_mm": "float?",
+  "rgb": "[r,g,b]?",
+  "opacity": "float?",
+  "kind": "gpen|maru|kabura|mili|pencil|fude|marker|airbrush|fill_pen|white?",
+  "stabilize": "int?",
+  "taper": "bool?",
+  "taper_in_mm": "float? (入り: how long the start thins, mm; with taper)",
+  "taper_out_mm": "float? (抜き: how long the end thins; 0 keeps that end)",
+  "pressure_opacity": "float? 0..1 (a light touch also lightens the line)",
+  "stabilize_speed": "bool? (quicker strokes are steadied more)",
+  "post_fit": "float? mm (後補正: the wobble within this is dropped and a smooth curve drawn through the line)",
+  "snap_lines_mm": "float? (ベクター吸着: each end within this of a line on the layer moves onto it)",
+  "pressure_gamma": "float? (>1 needs more force)",
+  "post_smooth": "int? 0..10 (後補正; default the brush's)",
+  "rotation": "[degrees, …]? (the pen's barrel turn at each point: flat tips with tip_rotation turn with it)",
+  "mix": "float? 0..1 (下地混色: the colour on the layer under the line mixes in; default the brush's)",
+  "stretch": "float? 0..1 (色延び: how far the colour picked up is carried along; default the brush's)"
+ },
+ {
+  "op": "delete_stroke",
+  "page": "int",
+  "layer": "name|ink",
+  "index": "int"
+ },
+ {
+  "op": "put_raster",
+  "page": "int",
+  "layer": "name|draft|ink|bg|finish",
+  "path": "optional",
+  "png_base64": "optional"
+ },
+ {
+  "op": "set_layer",
+  "page": "int",
+  "layer": "str",
+  "id": "str?",
+  "visible": "bool?",
+  "exportable": "bool?",
+  "opacity": "float?",
+  "blend": "normal|multiply|screen|add|overlay|darken|lighten|color_burn|color_dodge|linear_burn|soft_light|hard_light|difference|exclusion|subtract|divide|hue|saturation|color|luminosity?",
+  "clip": "bool?",
+  "lock_alpha": "bool?",
+  "locked": "bool?",
+  "panel_clip": "bool? (false: lines run out of the panels)",
+  "panel_each": "bool? (true: each line stays in the panel it begins in)",
+  "name": "str?",
+  "color": "[r,g,b]|null? (shown in this colour on screen; printed only with color_prints)",
+  "reference": "bool? (fills with reference: reference look at this layer)",
+  "fill": "{rgb} | {gradient: {from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape: linear|radial|ellipse, ratio, repeat: none|repeat|mirror, stops: [[pos, [r,g,b], opacity]…]}}? (a fill layer)",
+  "adjust": "{kind: levels|curve|hue|invert|posterize|threshold|gradient_map|bitonal, …} (a correction layer)",
+  "effect": "{border: {width_mm, rgb}, water_edge: {width_mm, strength}} | null? (境界効果)",
+  "color_prints": "bool? (the layer colour is printed too)",
+  "screen": "{pattern: dot|line|cross|noise, lpi, angle, black, white, shape: round|square|diamond|ellipse, offset_mm: [x,y]} | null? (トーン化: the layer's greys print as a halftone)"
+ },
+ {
+  "op": "add_page",
+  "count": "int",
+  "after": "int? (insert after this page; default after the last story page, before any covers)"
+ },
+ {
+  "op": "delete_page",
+  "page": "int"
+ },
+ {
+  "op": "import_pages",
+  "from": "str (another book: its .genko folder)",
+  "pages": "[int]? (default all)",
+  "after": "int? (insert after this page; default at the end, before any covers at the back)",
+  "note": "作品の結合: the pages and their lines are copied; the other book's asset files must be copied into this book's assets first (the app and the MCP export do)"
+ },
+ {
+  "op": "duplicate_page",
+  "page": "int",
+  "next_to": "bool? (the copy right after the page; default at the end)"
+ },
+ {
+  "op": "set_page_spec",
+  "preset": "b4|b5|a5|a4|webtoon?",
+  "paper": "[w,h]? mm",
+  "trim": "[w,h]? (finished size)",
+  "bleed_mm": "float?",
+  "margins": "[top,bottom,inner,outer] | {top,bottom,inner,outer}? (basic frame, from the trim)",
+  "dpi": "int?",
+  "move": "bool? (default true: move everything onto the new basic frame)"
+ },
+ {
+  "op": "set_nombre",
+  "page": "int? (with numero: show or hide that page's)",
+  "numero": "bool?",
+  "position": "bottom_center|bottom_outside|top_outside|side_outside?",
+  "font": "str?",
+  "size_mm": "float?",
+  "start": "int? (the number of page 1)",
+  "hidden": "bool? (隠しノンブル)",
+  "hidden_size_mm": "float?",
+  "show": "bool? (visible nombres)"
+ },
+ {
+  "op": "set_note",
+  "page": "int",
+  "note": "str"
+ },
+ {
+  "op": "set_meta",
+  "title": "str?",
+  "episode": "int?",
+  "preset": "str?",
+  "binding": "right|left?",
+  "start_side": "left|right|null?",
+  "strict_gates": "bool?",
+  "font_path": "str?"
+ },
+ {
+  "op": "set_bible",
+  "plot": "str?",
+  "characters": "list?",
+  "constraints": "list?"
+ },
+ {
+  "op": "set_spread",
+  "page": "int",
+  "with": "int|null"
+ },
+ {
+  "op": "reorder",
+  "order": "[int]"
+ },
+ {
+  "op": "flood_fill",
+  "page": "int",
+  "layer": "ink|bg",
+  "x_mm": "float",
+  "y_mm": "float",
+  "rgb": "[r,g,b]",
+  "gap_mm": "float?"
+ },
+ {
+  "op": "add_tone",
+  "page": "int",
+  "frame_id": "str?",
+  "area": "{poly}|{mask}?",
+  "at": "{x_mm, y_mm, gap_mm?, reference?}? (the region a fill would take)",
+  "lpi": "float?",
+  "density": "float? (0..1 black)",
+  "angle": "float?",
+  "pattern": "dot|line|cross|noise|flat|check|brick|wave|grid|hatch|star|sand|image?",
+  "scale_mm": "float? (柄トーン)",
+  "tile_png": "str? (image)",
+  "gradient": "{shape: linear|radial, angle, start, end}?",
+  "dot_shape": "round|square|diamond|ellipse? (網の種類)",
+  "offset_mm": "[x,y]? (網をずらす)",
+  "name": "str?",
+  "after": "layer id?",
+  "id": "str?",
+  "note": "nothing given: every panel"
+ },
+ {
+  "op": "set_tone",
+  "page": "int",
+  "id": "str",
+  "lpi": "float?",
+  "density": "float?",
+  "angle": "float?",
+  "pattern": "dot|line|cross|noise|flat|check|brick|wave|grid|hatch|star|sand|image?",
+  "scale_mm": "float? (柄トーン: the motif's size)",
+  "tile_png": "str? (image: a base64 PNG repeated)",
+  "gradient": "object|null?",
+  "dot_shape": "round|square|diamond|ellipse? (網の種類)",
+  "offset_mm": "[x,y]|null? (網のずれ)",
+  "move_by_mm": "[dx,dy]? (網を動かす: added to the offset)",
+  "name": "str?"
+ },
+ {
+  "op": "delete_tone",
+  "page": "int",
+  "id": "str"
+ },
+ {
+  "op": "add_effect",
+  "page": "int",
+  "kind": "focus|speed|uni_flash|beta_flash|white",
+  "frame_id": "str?",
+  "params": "object: focus {center, inner, inner_path [[x,y]…] (any shape), twist (degrees: a swirl), count, jitter, width_mm, taper}; speed {angle, count, spacing_mm (instead of count), length, jitter, width_mm, curve (mm), taper, path [[x,y]…] (along a curve), spread_mm}; focus and speed: bundle (lines per bundle) and bundle_gap (0..0.95), jitter_length / jitter_position / jitter_width (each 0..1), taper in|out|both|false, focus length_mm; uni_flash {center, inner, count, length_mm}; beta_flash {center, inner, spikes, depth}; every kind: avoid [{ellipse: [cx,cy,rx,ry]} | {path: [[x,y]…]}] (the lines stop short of these, e.g. faces, and thin out), within [[x,y]…] (drawn only inside this shape)",
+  "id": "str?"
+ },
+ {
+  "op": "edit_effect",
+  "page": "int",
+  "id": "str",
+  "params": "object? (merged; null removes a key)",
+  "kind": "str?",
+  "frame_id": "str|null?",
+  "visible": "bool?"
+ },
+ {
+  "op": "delete_effect",
+  "page": "int",
+  "id": "str"
+ },
+ {
+  "op": "effect_to_layer",
+  "page": "int",
+  "id": "str",
+  "layer_id": "str",
+  "keep": "bool? (keep the effect too)"
+ },
+ {
+  "op": "set_autosave",
+  "enabled": "bool"
+ },
+ {
+  "op": "erase_raster",
+  "page": "int",
+  "layer": "ink|name",
+  "points": "[[x,y],...]",
+  "width_mm": "float"
+ },
+ {
+  "op": "fill",
+  "page": "int",
+  "layer_id": "str?",
+  "x_mm": "float",
+  "y_mm": "float",
+  "rgb": "[r,g,b]?",
+  "opacity": "float?",
+  "gap_mm": "float? (close gaps up to this)",
+  "expand_mm": "float? (grow under the lines)",
+  "reference": "page|layer|reference? (reference: the layers set as reference)",
+  "tolerance": "0..100? (色の誤差: how dark a pixel may be and still be filled over, 37)",
+  "ignore": "[draft|text]? (page: 下描き・ネーム and the lines are not walls)"
+ },
+ {
+  "op": "fill_enclosed",
+  "page": "int",
+  "layer_id": "str?",
+  "poly": "[[x,y],...] (the lasso)",
+  "rgb": "[r,g,b]?",
+  "opacity": "float?",
+  "gap_mm": "float?",
+  "expand_mm": "float?",
+  "reference": "page|layer|reference?",
+  "tolerance": "0..100?",
+  "ignore": "[draft|text]?",
+  "note": "囲って塗る (CLIP): only the areas the lines close inside the lasso are filled"
+ },
+ {
+  "op": "fill_area",
+  "page": "int",
+  "layer_id": "str?",
+  "area": "{poly} | {mask: {box, png}}",
+  "rgb": "[r,g,b]?",
+  "opacity": "float?"
+ },
+ {
+  "op": "transform_area",
+  "page": "int",
+  "layer_id": "str?",
+  "area": "{poly} | {mask}",
+  "matrix": "[a,b,c,d,e,f] (x'=ax+cy+e, y'=bx+dy+f, mm)",
+  "warp": "{perspective: [[x,y]×4] (where the box's top-left, top-right, bottom-right, bottom-left go)} | {mesh: [[x,y]×9] (a 3×3 grid over the box, row by row), grid: [across, down]? (another grid: 2..9 points each way)} (instead of matrix)",
+  "interp": "nearest|bilinear|bicubic? (how pixels are resampled)"
+ },
+ {
+  "op": "merge_layers",
+  "page": "int",
+  "ids": "[layer id] (two or more: into the lowest, as they show)",
+  "name": "str?"
+ },
+ {
+  "op": "merge_visible",
+  "page": "int",
+  "copy": "bool? (default true: a new layer on top; false: the visible layers merged)",
+  "name": "str?",
+  "id": "str?"
+ },
+ {
+  "op": "group_layers",
+  "page": "int",
+  "ids": "[layer id]",
+  "name": "str?",
+  "id": "str? (the new folder)"
+ },
+ {
+  "op": "move_layers",
+  "page": "int",
+  "ids": "[layer id]",
+  "parent": "folder id|null? (into / out of a folder)",
+  "after": "layer id|bottom? (just above this layer)"
+ },
+ {
+  "op": "convert_layer",
+  "page": "int",
+  "id": "str",
+  "to": "paint|pen (pen: the pixels traced into lines)",
+  "min_mm": "float? (pen: shorter marks are left out)"
+ },
+ {
+  "op": "set_layers",
+  "page": "int",
+  "ids": "[layer id]?",
+  "all": "bool?",
+  "visible": "bool?",
+  "opacity": "float?",
+  "blend": "str?",
+  "clip": "bool?",
+  "locked": "bool?",
+  "lock_alpha": "bool?",
+  "color": "[r,g,b]|null?",
+  "exportable": "bool?",
+  "reference": "bool?",
+  "panel_clip": "bool?",
+  "panel_each": "bool?",
+  "color_prints": "bool?",
+  "effect": "object|null?"
+ },
+ {
+  "op": "set_paper",
+  "page": "int? (none: every page)",
+  "rgb": "[r,g,b]|null (用紙色; null: white)"
+ },
+ {
+  "op": "liquify",
+  "page": "int",
+  "layer_id": "str?",
+  "points": "[[x,y],...]",
+  "width_mm": "float? (10)",
+  "strength": "0..1? (0.6)",
+  "mode": "push|pinch|bloat|twirl_cw|twirl_ccw"
+ },
+ {
+  "op": "add_shape",
+  "page": "int",
+  "layer_id": "str?",
+  "shape": "line|polyline|curve|rect|ellipse|polygon",
+  "points": "[[x,y],…]? (line, polyline, curve)",
+  "box": "[x,y,w,h]? (rect, ellipse, polygon)",
+  "sides": "int? (polygon)",
+  "angle": "float? (polygon, degrees)",
+  "radius_mm": "float? (rect: round corners)",
+  "closed": "bool? (polyline, curve)",
+  "line": "bool? (default true)",
+  "fill": "bool?",
+  "fill_rgb": "[r,g,b]?",
+  "rgb": "[r,g,b]?",
+  "width_mm": "float?",
+  "kind": "brush? (mili)",
+  "opacity": "float?"
+ },
+ {
+  "op": "smudge",
+  "page": "int",
+  "layer_id": "str?",
+  "points": "[[x,y,pressure?],...]",
+  "width_mm": "float?",
+  "strength": "0..1? (0.6)",
+  "mode": "blur|smudge|blend? (ぼかし・指先・なじませ)"
+ },
+ {
+  "op": "vector_edit",
+  "page": "int",
+  "layer_id": "str?",
+  "action": "move_point|add_point|delete_point|connect|cut|recolor|delete|set_pressure|simplify",
+  "stroke_id": "str? (move_point, add_point, delete_point, cut, set_pressure, simplify)",
+  "ids": "[str]? (connect: two; recolor, delete)",
+  "index": "int? (the point)",
+  "to": "[x,y]? (move_point)",
+  "at": "[x,y]? (add_point, cut)",
+  "rgb": "[r,g,b]|null? (recolor; null: the layer's ink)",
+  "pressure": "float? (set_pressure: the point's width, 0.05..1.5 of the line's)",
+  "epsilon_mm": "float? (simplify: points within this of the line go, 0.2)"
+ },
+ {
+  "op": "trace_edit",
+  "page": "int",
+  "layer_id": "str?",
+  "action": "widen|narrow|redraw|redraw_width|join|simplify",
+  "points": "[[x,y,pressure?],...] (the trace)",
+  "radius_mm": "float? (how far from the trace lines are touched, 2)",
+  "amount": "float? (widen / narrow: 0..1 a pass, 0.3)",
+  "join_mm": "float? (join: ends this close to the trace and each other are joined, 5)",
+  "epsilon_mm": "float? (simplify, 0.2)",
+  "note": "線の直しをなぞって: 太らせる・細らせる（なぞった所だけ）、描き直す（形 / 太さ）、端をつなぐ、点を減らす"
+ },
+ {
+  "op": "fill_gaps",
+  "page": "int",
+  "layer_id": "str?",
+  "max_mm": "float? (1.5: spots up to this across)",
+  "rgb": "[r,g,b]? (default the layer's commonest colour)",
+  "area": "area? (only here)"
+ },
+ {
+  "op": "store_area",
+  "page": "int",
+  "name": "str",
+  "area": "area (kept on the page; use it later as {saved: name})"
+ },
+ {
+  "op": "forget_area",
+  "page": "int",
+  "name": "str"
+ },
+ {
+  "op": "delete_area",
+  "page": "int",
+  "layer_id": "str?",
+  "area": "{poly} | {mask}"
+ },
+ {
+  "op": "paste",
+  "page": "int",
+  "layer_id": "str?",
+  "items": "{strokes, patches} (copied)",
+  "matrix": "[a,b,c,d,e,f]?"
+ },
+ {
+  "op": "set_stroke_width",
+  "page": "int",
+  "layer_id": "str?",
+  "area": "object?",
+  "ids": "[stroke id]?",
+  "width_mm": "float?",
+  "scale": "float?",
+  "kind": "str?",
+  "rgb": "[r,g,b]?"
+ },
+ {
+  "op": "reshape_stroke",
+  "page": "int",
+  "layer_id": "str?",
+  "stroke_id": "str",
+  "points": "[[x,y,p?],...]?",
+  "width_mm": "float?"
+ },
+ {
+  "op": "erase",
+  "page": "int",
+  "layer_id": "str? (else layer: role)",
+  "layer": "str?",
+  "points": "[[x,y],...]",
+  "width_mm": "float",
+  "mode": "cut|to_crossing|whole? (cut: where it touches; to_crossing: up to where it crosses others; whole: every line touched)",
+  "texture": "hard|soft|rough? (paint: a soft edge or a rough grain)",
+  "snap_ruler": "bool? (along the page's rulers)",
+  "note": "cuts pen lines (vector) and clears paint"
+ },
+ {
+  "op": "reorder_layers",
+  "page": "int",
+  "order": "[id]"
+ },
+ {
+  "op": "stamp_material",
+  "page": "int",
+  "material_id": "str",
+  "frame_id": "str?",
+  "area": "object?",
+  "at": "object?",
+  "layer_id": "str? (pictures and drawn parts)",
+  "line_id": "str? (a picture material: it becomes this line's balloon, 画像のフキダシ)",
+  "kinds": "tone (a tone layer) | effect | image | lines (on layer_id at x/y) | lettering (a line at x/y) | brush (the book gets the brush) | prim (a 3D guide at x/y)",
+  "x_mm": "float?",
+  "y_mm": "float? (where a picture's / part's middle goes)",
+  "width_mm": "float?"
+ },
+ {
+  "op": "set_balloon_path",
+  "id": "str",
+  "path": "[[x,y]]? (a hand-drawn outline; the box becomes its bounds; null goes back to the shape)",
+  "wrap": "vertical|horizontal",
+  "ruby_runs": "[[base,ruby]]",
+  "emphasis_runs": "[str]"
+ },
+ {
+  "op": "add_mannequin",
+  "page": "int",
+  "pos": "[x,y,z] (pelvis, mm)",
+  "height_mm": "float?",
+  "rot": "[tip,turn,lean]?",
+  "preset": "stand|walk|run|sit|point|look_back|arms_up?",
+  "id": "str?"
+ },
+ {
+  "op": "pose_mannequin",
+  "page": "int",
+  "id": "str",
+  "joints": "{name: {yaw, pitch}}?",
+  "rot": "[tip,turn,lean]?",
+  "pos": "[x,y,z]?",
+  "height_mm": "float?",
+  "preset": "str?",
+  "drag": "{handle: pelvis|chest|head|l_elbow|l_hand|l_knee|…, to: [x,y]}?"
+ },
+ {
+  "op": "set_onion",
+  "page": "int",
+  "from": "int?"
+ },
+ {
+  "op": "step_onion",
+  "page": "int",
+  "delta": "int"
+ },
+ {
+  "op": "set_lt",
+  "page": "int",
+  "threshold": "float"
+ },
+ {
+  "op": "lock_page",
+  "page": "int",
+  "agent": "str"
+ },
+ {
+  "op": "unlock_page",
+  "page": "int"
+ },
+ {
+  "op": "add_layer",
+  "page": "int",
+  "name": "str?",
+  "kind": "pen|paint|folder|fill|gradient|adjust?",
+  "rgb": "[r,g,b]? (fill)",
+  "gradient": "{from, to, rgb_from, rgb_to, opacity_from, opacity_to, shape}? (gradient)",
+  "adjust": "{kind, …}? (adjust: a correction layer over what is under it)",
+  "blend": "str?",
+  "clip": "bool?",
+  "folder": "bool?",
+  "parent": "str?",
+  "after": "layer id?",
+  "id": "str?",
+  "panel_each": "bool? (pen and paint: true by default, each line stays in the panel it begins in)"
+ },
+ {
+  "op": "delete_layer",
+  "page": "int",
+  "id": "str"
+ },
+ {
+  "op": "add_frame",
+  "page": "int",
+  "rect": "[x, y, w, h]? (mm)",
+  "points": "[[x, y], …]? (a polygon or a freehand outline, mm)",
+  "border_mm": "float?",
+  "tolerance_mm": "float? (freehand: how much jitter to drop, 0.4)",
+  "id": "str?",
+  "note": "draw a panel (コマを描く): the page's first drawn panel replaces the basic frame; drawn panels keep their own places (no gutters)"
+ },
+ {
+  "op": "delete_frame",
+  "page": "int",
+  "frame_id": "str",
+  "force": "bool? (placed art goes to studio.orphans)",
+  "note": "one panel goes; the others stay where they are"
+ },
+ {
+  "op": "gradient_fill",
+  "page": "int",
+  "layer_id": "str?",
+  "area": "{poly} | {mask}? (default: the whole page)",
+  "from": "[x,y] (mm)",
+  "to": "[x,y] (mm)",
+  "rgb_from": "[r,g,b]?",
+  "rgb_to": "[r,g,b]?",
+  "opacity_from": "0..1? (1)",
+  "opacity_to": "0..1? (0: fades out)",
+  "shape": "linear|radial|ellipse?",
+  "ratio": "float? (ellipse: across ÷ along)",
+  "repeat": "none|repeat|mirror?",
+  "stops": "[[position 0..1, [r,g,b], opacity?], …]? (多色: 2 to 16 colours, instead of the two ends)"
+ },
+ {
+  "op": "define_brush",
+  "key": "str (my_…)",
+  "label": "str",
+  "base": "a brush to start from?",
+  "width_mm": "float?",
+  "min_pressure": "0..1?",
+  "gamma": "0.2..5?",
+  "opacity": "0.05..1?",
+  "stabilize": "0..15?",
+  "taper": "bool?",
+  "texture": "''|grain|soft|dry?",
+  "rgb": "[r,g,b]|null?",
+  "fixed_width": "bool?",
+  "mix": "0..1? (下地混色)",
+  "stretch": "0..1? (色延び)",
+  "delete": "bool?"
+ },
+ {
+  "op": "duplicate_layer",
+  "page": "int",
+  "id": "str",
+  "new_id": "str?"
+ },
+ {
+  "op": "merge_down",
+  "page": "int",
+  "id": "str (merged into the layer below it; pen onto pen stays lines, anything else becomes pixels)"
+ },
+ {
+  "op": "set_layer_mask",
+  "page": "int",
+  "id": "str",
+  "area": "{poly} | {mask}? (only this area shows)",
+  "fill": "show|hide? (the whole mask)",
+  "invert": "bool?",
+  "enabled": "bool?",
+  "delete": "bool?"
+ },
+ {
+  "op": "paint_mask",
+  "page": "int",
+  "id": "str",
+  "points": "[[x,y],...]",
+  "width_mm": "float?",
+  "show": "bool (true: the pen shows the layer, false: the eraser hides it)"
+ },
+ {
+  "op": "filter_raster",
+  "page": "int",
+  "layer": "str?",
+  "id": "str?",
+  "kind": "blur|sharpen|hue|levels|curve|mosaic|bitonal|motion_blur|radial_blur|zoom_blur|noise|wave|twirl|lineart|invert|posterize|threshold|gradient_map|brightness_contrast|despeckle|glow|rain|plugin:<key>",
+  "area": "{poly}|{mask}? (選択範囲の中だけ)",
+  "note": "plugin:<key> runs a filter plugin the person installed (inspect plugins); params by kind: blur radius; sharpen amount (1 usual, 2 strong)/radius; hue shift/saturation/value; levels black/white/gamma (middle, >1 lighter)/out_black/out_white/channel (rgb|r|g|b); curve gamma, or points [[in,out],…] 0..255 and channel; brightness_contrast brightness/contrast (-100..100); despeckle size_mm (specks smaller than this)/what (ink|holes|both); lineart threshold (0.3..0.98, higher picks lighter lines)/radius (px, about twice the widest line)/min_px (specks dropped)/drop_blue (the blue pencil taken as paper)/keep_solid/rgb; mosaic block; bitonal/threshold threshold; motion_blur distance/angle; radial_blur/zoom_blur amount/cx/cy (0..1); noise amount/mono; wave amplitude/wavelength (px); twirl angle/radius (0..1); posterize levels; gradient_map colors [[r,g,b],…] or stops [[position 0..1, [r,g,b]],…]; glow (光彩拡散) radius (px)/amount/threshold (0..255); rain count/length (px)/angle (° from straight down)/width (px)/opacity/rgb/seed"
+ },
+ {
+  "op": "set_brush",
+  "rgb": "[r,g,b]?",
+  "width_mm": "float?",
+  "stabilize": "int?",
+  "taper": "bool?",
+  "curve": "gpen|linear"
+ },
+ {
+  "op": "select_frame",
+  "page": "int",
+  "frame_id": "str"
+ },
+ {
+  "op": "edit_stroke",
+  "page": "int",
+  "layer": "name|ink",
+  "index": "int",
+  "points": "[[x,y],...]"
+ },
+ {
+  "op": "simplify_stroke",
+  "page": "int",
+  "layer": "name|ink",
+  "index": "int",
+  "epsilon_mm": "float?"
+ },
+ {
+  "op": "set_ruler",
+  "page": "int",
+  "kind": "str",
+  "pos": "[x,y]?",
+  "points": "[[x,y],...]?",
+  "note": "old single ruler; use add_ruler"
+ },
+ {
+  "op": "add_ruler",
+  "page": "int",
+  "kind": "line|curve|parallel|concentric|radial|perspective|symmetry|guide|parallel_curve|multi_curve|radial_curve|rect|ellipse|polygon (rect/ellipse: points = two opposite corners, angle; polygon: 3+ corners)",
+  "grid": "int? (perspective: the ground grid's lines, 0 none)",
+  "points2": "[[x,y],...]? (multi_curve: the second curve)",
+  "center": "[x,y]? (radial_curve)",
+  "layer_id": "str? (only while drawing on this layer)",
+  "lock_horizon": "bool? (perspective: the eye level stays)",
+  "fixed": "bool?",
+  "axis": "h|v? (guide)",
+  "at": "float? (guide: mm from the top or left)",
+  "points": "[[x,y],...]?",
+  "angle": "float? (deg)",
+  "ratio": "float? (concentric height/width)",
+  "copies": "int? (symmetry)",
+  "mirror": "bool?",
+  "frame_id": "str? (only in this panel)",
+  "reach_mm": "float?",
+  "id": "str?"
+ },
+ {
+  "op": "ruler_to_layer",
+  "page": "int",
+  "id": "str (the ruler)",
+  "layer_id": "str?",
+  "width_mm": "float?",
+  "kind": "str? (brush, mili)",
+  "rgb": "[r,g,b]?",
+  "note": "定規ペン: the ruler's own line drawn as pen lines"
+ },
+ {
+  "op": "ruler_from_3d",
+  "page": "int",
+  "prim_id": "str? (default: the first 3D on the page)",
+  "grid": "int?",
+  "id": "str?",
+  "note": "a perspective ruler through the vanishing points the 3D (and the page camera) makes"
+ },
+ {
+  "op": "camera_from_ruler",
+  "page": "int",
+  "id": "str (a perspective ruler)",
+  "prim_id": "str?",
+  "note": "the page camera turned (and its focal length set) so the 3D's vanishing points sit on the ruler's"
+ },
+ {
+  "op": "edit_ruler",
+  "page": "int",
+  "id": "str",
+  "grid": "int?",
+  "points": "[[x,y],...]?",
+  "points2": "[[x,y],...]?",
+  "center": "[x,y]?",
+  "horizon_y": "float? (perspective: move the eye level)",
+  "lock_horizon": "bool?",
+  "fixed": "bool?",
+  "layer_id": "str|null?",
+  "angle": "float?",
+  "ratio": "float?",
+  "copies": "int?",
+  "mirror": "bool?",
+  "frame_id": "str|null?",
+  "active": "bool?",
+  "visible": "bool?"
+ },
+ {
+  "op": "delete_ruler",
+  "page": "int",
+  "id": "str? (none: every ruler on the page)"
+ },
+ {
+  "op": "add_prim3d",
+  "kind": "box|cylinder|stairs|floor|sphere|cone|prop",
+  "prop": "chair|desk|table|bed|door|window|shelf|car? (prop: 小物)",
+  "steps": "int? (stairs)",
+  "lines": "int? (floor grid)",
+  "page": "int",
+  "pos": "[x,y,z]?",
+  "size": "[w,h,d] | float?",
+  "rot": "[tip,turn,lean]?",
+  "focal_mm": "float?",
+  "frame_id": "str? (drawn only inside this panel)",
+  "id": "str?"
+ },
+ {
+  "op": "add_scene",
+  "page": "int",
+  "kind": "room|classroom|corridor|street",
+  "pos": "[x,y,z]? (centre; z = depth)",
+  "size": "[w,h,d]|number? (mm; a number scales the usual size)",
+  "rot": "[tip,turn,lean]? radians",
+  "focal_mm": "float? (smaller = stronger perspective; 220)",
+  "frame_id": "str? (kept inside this panel; default the panel under pos, false for none)",
+  "id": "str?"
+ },
+ {
+  "op": "add_figure",
+  "page": "int",
+  "pos": "[x,y,z] (the pelvis, mm)",
+  "height_mm": "float? (90)",
+  "body": "{sex: male|female (the build first), heads (等身 4..10), shoulders, hips, build, legs (0.6..1.5)}?",
+  "preset": "stand|walk|run|sit|point|arms_up|think|kneel|peace?",
+  "joints": "{hip|spine|chest|neck|head|l_arm|r_arm|l_elbow|r_elbow|l_wrist|r_wrist|l_leg|r_leg|l_knee|r_knee|l_ankle|r_ankle: {x (toward the viewer), y (twist), z (in the picture, counter-clockwise)}}? (radians)",
+  "hands": "{l, r: open|relaxed|fist|point|peace|grip | {pose, curls: [thumb,index,middle,ring,little] | {finger: 0..1}}}?",
+  "rot": "[tip,turn,lean]?",
+  "focal_mm": "float?",
+  "frame_id": "str?",
+  "id": "str?"
+ },
+ {
+  "op": "pose_figure",
+  "page": "int",
+  "id": "str (a figure or a hand)",
+  "joints": "{name: {x,y,z}}? (merged; radians: x swings toward the viewer, y twists along the bone, z turns in the picture counter-clockwise; names: hip, spine, chest, neck, head, l_arm, r_arm, l_elbow, r_elbow, l_wrist, r_wrist, l_leg, r_leg, l_knee, r_knee, l_ankle, r_ankle — e.g. both arms up: l_arm z 2.8, r_arm z -2.8)",
+  "set_joints": "object? (replaces)",
+  "body": "object? (sex: male|female too)",
+  "hands": "object? (a pose, or {pose, curls}: each finger 0 straight..1 closed)",
+  "preset": "str?",
+  "pose": "str? (a hand)",
+  "curls": "[5]|{finger: curl}? (a hand: each finger)",
+  "drag_ik": "note: drag {handle: l_wrist|r_wrist|l_hand|r_hand|l_ankle|r_ankle|l_toe|r_toe, to, ik: true} pulls the hand or foot and the arm or leg follows",
+  "rot": "[tip,turn,lean]?",
+  "pos": "[x,y,z]?",
+  "height_mm": "float?",
+  "drag": "{handle: pelvis|neck|head|l_elbow|l_wrist|l_hand|l_knee|l_ankle|l_toe|r_…, to: [x,y]}?"
+ },
+ {
+  "op": "add_head",
+  "page": "int",
+  "pos": "[x,y,z]",
+  "size_mm": "float? (30)",
+  "rot": "[tip,turn,lean]? (the face's direction)",
+  "frame_id": "str?",
+  "id": "str?"
+ },
+ {
+  "op": "add_hand",
+  "page": "int",
+  "pos": "[x,y,z]",
+  "size_mm": "float? (25)",
+  "side": "l|r?",
+  "pose": "open|relaxed|fist|point|peace|grip?",
+  "rot": "[tip,turn,lean]?",
+  "frame_id": "str?",
+  "id": "str?"
+ },
+ {
+  "op": "import_model",
+  "page": "int",
+  "obj": "str? (the OBJ file's text: v and f lines)",
+  "glb": "str? (a .glb / .vrm file, base64)",
+  "gltf": "str? (a .gltf's text with its data inside)",
+  "size_mm": "float? (its longest side, 60)",
+  "pos": "[x,y,z]?",
+  "rot": "[tip,turn,lean]?",
+  "name": "str?",
+  "frame_id": "str?",
+  "id": "str?"
+ },
+ {
+  "op": "set_camera",
+  "page": "int",
+  "turn": "float? (radians, about the upright axis)",
+  "tip": "float? (looking down +, up −)",
+  "roll": "float?",
+  "focal_mm": "float? (20..5000: short = strong perspective)",
+  "target": "[x,y]? (the point the camera turns about)",
+  "off": "bool? (back to each 3D seen on its own)"
+ },
+ {
+  "op": "set_light",
+  "page": "int",
+  "dir": "[x,y,z]? (toward the light: x right, y down, z away from the viewer)",
+  "ambient": "0..1?"
+ },
+ {
+  "op": "render_prims",
+  "page": "int",
+  "layer_id": "str?",
+  "ids": "[prim id]? (none: all)",
+  "lines": "bool? (true: the pen lines, hidden parts left out)",
+  "surfaces": "bool? (default true: the shaded surfaces as greys; false for the lines alone)",
+  "tone": "{lpi, angle}? (the layer tone-ized: the greys print as dots)",
+  "light": "[x,y,z]?",
+  "ambient": "0..1?",
+  "width_mm": "float?",
+  "kind": "str? (brush, mili)",
+  "rgb": "[r,g,b]?"
+ },
+ {
+  "op": "set_animation",
+  "page": "int",
+  "fps": "float? (1..60)",
+  "frames": "int? (the length)",
+  "loop": "bool?",
+  "off": "bool? (an ordinary page again)",
+  "note": "a page as a short animation: its timeline in page.extra.anim"
+ },
+ {
+  "op": "add_anim_folder",
+  "page": "int",
+  "id": "str?",
+  "name": "str?",
+  "note": "an animation folder: a row of the timeline that holds cels"
+ },
+ {
+  "op": "add_cel",
+  "page": "int",
+  "folder": "animation folder id",
+  "kind": "pen|paint?",
+  "id": "str?",
+  "name": "str?",
+  "at": "int? (the frame it shows from; a folder's first cel shows from 1)"
+ },
+ {
+  "op": "set_exposure",
+  "page": "int",
+  "folder": "str",
+  "frame": "int",
+  "cel": "cel id | null (nothing)",
+  "clear": "bool? (remove this frame's entry)"
+ },
+ {
+  "op": "set_exposures",
+  "page": "int",
+  "folder": "str",
+  "cels": "[[frame, cel id | null], …] (the whole exposure sheet)"
+ },
+ {
+  "op": "set_camera_key",
+  "page": "int",
+  "frame": "int",
+  "rect": "[x, y, w, h] mm | null (カメラワーク: the camera moves evenly between keys)"
+ },
+ {
+  "op": "set_light_table",
+  "page": "int",
+  "cels": "[cel ids] (always shown faint while drawing)"
+ },
+ {
+  "op": "import_psd",
+  "page": "int",
+  "path": "str? (a .psd / .psb file: relative to the book's folder, or absolute; over MCP it must be under --root)",
+  "psd": "str? (the file in base64, instead of path)",
+  "fit": "paper|bleed|trim? (default bleed: the picture fills it, keeping its shape)",
+  "id": "str? (the new layers are <id>-1, <id>-2…)",
+  "parent": "folder id?",
+  "after": "layer id?",
+  "note": "every layer as a Genko layer: pixels, names, opacity, visibility, blend, clipping, folders, masks"
+ },
+ {
+  "op": "set_timelapse",
+  "on": "bool (true: every save records a small picture of each changed page, for the timelapse export)"
+ },
+ {
+  "op": "add_cover",
+  "kind": "front|back|jacket|obi (表紙・裏表紙・カバー・帯)",
+  "spine_mm": "float? (jacket, obi: the spine)",
+  "flap_mm": "float? (jacket, obi: each flap, 袖)",
+  "height_mm": "float? (obi: the band's height, 50)",
+  "bleed": "bool? (default true: one panel to the bleed)",
+  "note": "covers are pages at the end, without nombre; the book preview, EPUB and Kindle put the front cover first and the back cover last; print exports (PDF, TIFF, PNG) keep the page order, the covers named cover_front / cover_back / cover_jacket"
+ },
+ {
+  "op": "replace_text",
+  "find": "str",
+  "replace": "str",
+  "regex": "bool?",
+  "case": "bool? (default true: case matters)",
+  "pages": "[int]? (none: every page)",
+  "speakers": "bool? (speakers too)",
+  "must_find": "bool? (an error when nothing matched)"
+ },
+ {
+  "op": "for_pages",
+  "pages": "[int] | all | body? (body: not the covers; default)",
+  "ops": "[op] (each run on every page, its page set to it)"
+ },
+ {
+  "op": "set_assignee",
+  "pages": "[int]",
+  "who": "str (empty: nobody) (担当: who draws the page)"
+ },
+ {
+  "op": "edit_prim",
+  "page": "int",
+  "id": "str",
+  "pos": "[x,y,z]?",
+  "size": "[w,h,d]?",
+  "rot": "[tip,turn,lean]?",
+  "focal_mm": "float?"
+ },
+ {
+  "op": "delete_prim",
+  "page": "int",
+  "id": "str"
+ },
+ {
+  "op": "trace_prims",
+  "page": "int",
+  "layer_id": "str",
+  "ids": "[id]? (none: all)",
+  "kind": "str? (pencil)",
+  "width_mm": "float?",
+  "rgb": "[r,g,b]?"
+ },
+ {
+  "op": "lt_convert",
+  "page": "int",
+  "layer": "str?",
+  "to": "ink|name?"
+ },
+ {
+  "op": "add_ticket",
+  "page": "int",
+  "id": "str?",
+  "frame_id": "str?",
+  "role": "str?",
+  "assignee": "str?",
+  "rate": "str?"
+ },
+ {
+  "op": "set_ticket",
+  "id": "str",
+  "status": "str?",
+  "assignee": "str?",
+  "rate": "str?"
+ },
+ {
+  "op": "undo"
+ },
+ {
+  "op": "set_studio",
+  "bible_doc": "object?",
+  "style": "object?",
+  "policy": "object? (human)",
+  "premise": "str?"
+ },
+ {
+  "op": "set_style_catalog",
+  "catalog": "object | null (a branch of the manga style catalog as the style_catalog tool keeps it; null: back to Genko's own words). Once the pilot page fixed the style, only a person changes it"
+ },
+ {
+  "op": "upsert_character",
+  "character": "{id, …}",
+  "unlock": "bool? (human)"
+ },
+ {
+  "op": "delete_character",
+  "id": "str",
+  "force": "bool?"
+ },
+ {
+  "op": "upsert_location",
+  "location": "{id, …}"
+ },
+ {
+  "op": "delete_location",
+  "id": "str"
+ },
+ {
+  "op": "upsert_prop",
+  "prop": "{id, …}"
+ },
+ {
+  "op": "delete_prop",
+  "id": "str"
+ },
+ {
+  "op": "set_script",
+  "script": "script@1"
+ },
+ {
+  "op": "set_page_plan",
+  "page": "int",
+  "plan": "object"
+ },
+ {
+  "op": "set_panel",
+  "page": "int",
+  "frame_id": "str",
+  "set": "object",
+  "unset": "[str]?",
+  "pin": "[str]?",
+  "unpin": "[str]?"
+ },
+ {
+  "op": "record_review",
+  "page": "int",
+  "frame_id": "str?",
+  "kind": "name|art|upscale|regions",
+  "score": "float?",
+  "notes": "str",
+  "input_hash": "str"
+ },
+ {
+  "op": "approve",
+  "gate": "bible|script|sheet|name|art|export",
+  "page": "int?",
+  "character_id": "str?",
+  "candidate_id": "str?",
+  "face_asset": "str?"
+ },
+ {
+  "op": "revoke",
+  "gate": "name|art|sheet",
+  "page": "int?",
+  "character_id": "str?",
+  "reason": "str"
+ },
+ {
+  "op": "allow_chat_approval",
+  "on": "bool (person only: false stops the AI recording approvals a person sends in chat for this book; on by default)"
+ },
+ {
+  "op": "resolve_ticket",
+  "id": "str",
+  "note": "str (what was done)"
+ },
+ {
+  "op": "reopen_ticket",
+  "id": "str",
+  "note": "str? (human)"
+ },
+ {
+  "op": "request_approval",
+  "gate": "str",
+  "pages": "[int]?",
+  "character_id": "str?",
+  "note": "str?"
+ },
+ {
+  "op": "request_fix",
+  "page": "int",
+  "frame_id": "str?",
+  "candidate_id": "str?",
+  "instruction": "str",
+  "scope": "frame|person|background|text|regions?"
+ },
+ {
+  "op": "add_region",
+  "page": "int",
+  "frame_id": "str",
+  "region": "{id?, kind, rect_mm, char?, confidence?}"
+ },
+ {
+  "op": "edit_region",
+  "page": "int",
+  "frame_id": "str",
+  "id": "str",
+  "set": "object"
+ },
+ {
+  "op": "delete_region",
+  "page": "int",
+  "frame_id": "str",
+  "id": "str"
+ },
+ {
+  "op": "replace_regions",
+  "page": "int",
+  "frame_id": "str",
+  "source": "agent|detected|derived",
+  "regions": "[region]"
+ },
+ {
+  "op": "bind_ref",
+  "page": "int",
+  "frame_id": "str",
+  "ref": "{id?, source, role, order?}"
+ },
+ {
+  "op": "unbind_ref",
+  "page": "int",
+  "frame_id": "str",
+  "id": "str"
+ },
+ {
+  "op": "register_assets",
+  "assets": "{sha256:…: {kind, origin?, note?}}"
+ },
+ {
+  "op": "attach_reference",
+  "target": "{character_id|location_id|prop_id}",
+  "asset": "str",
+  "kind": "str"
+ },
+ {
+  "op": "open_request",
+  "request": "{id, purpose, mode, target, brief_hash?, parent?}"
+ },
+ {
+  "op": "close_request",
+  "id": "str",
+  "reason": "done|cancelled|superseded"
+ },
+ {
+  "op": "import_candidates",
+  "request_id": "str?",
+  "page": "int?",
+  "frame_id": "str?",
+  "character_id": "str?",
+  "location_id": "str?",
+  "candidates": "[{id?, asset, px:[w,h], mode?, parent?, origin}]"
+ },
+ {
+  "op": "review_candidates",
+  "page": "int",
+  "frame_id": "str",
+  "reviews": "[{candidate_id, score, note?, fix?}]"
+ },
+ {
+  "op": "set_candidate",
+  "page": "int",
+  "frame_id": "str",
+  "candidate_id": "str",
+  "status": "candidate|shortlisted|rejected"
+ },
+ {
+  "op": "adopt_candidate",
+  "page": "int",
+  "frame_id": "str",
+  "candidate_id": "str",
+  "to": "art|bg|draft|ink?",
+  "fit": "cover|contain|stretch?",
+  "offset_mm": "[dx,dy]?",
+  "scale": "float?",
+  "clip_to": "frame|bleed|none?"
+ },
+ {
+  "op": "unadopt",
+  "page": "int",
+  "frame_id": "str",
+  "to": "art|bg|draft|ink?"
+ },
+ {
+  "op": "set_placement",
+  "page": "int",
+  "frame_id": "str",
+  "to": "art|bg|draft|ink?",
+  "fit": "str?",
+  "offset_mm": "[dx,dy]?",
+  "scale": "float?",
+  "clip_to": "str?"
+ },
+ {
+  "op": "place_asset",
+  "page": "int",
+  "asset": "sha256:…",
+  "to": "art|bg|draft|name?",
+  "frame_id": "str?",
+  "fit": "str?",
+  "clip_to": "str?",
+  "placement_mm": "[x,y,w,h]?",
+  "title": "str?"
+ },
+ {
+  "op": "set_finish",
+  "page": "int",
+  "frame_id": "str",
+  "finish": "object|null"
+ },
+ {
+  "op": "ask_human",
+  "text": "str",
+  "page": "int?",
+  "frame_id": "str?",
+  "item": "str? (work item kind it blocks)"
+ },
+ {
+  "op": "reject_sheet",
+  "character_id": "str",
+  "candidate_ids": "[str]? (all if omitted)",
+  "note": "str (person only)"
+ },
+ {
+  "op": "withdraw_candidates",
+  "character_id": "str? (or location_id)",
+  "location_id": "str?",
+  "candidate_ids": "[str]",
+  "note": "An agent takes back its own sheet candidates a person has not approved (a duplicate, a wrong style): they leave the approval box"
+ },
+ {
+  "op": "set_layout",
+  "page": "int",
+  "tree": "{rect_mm, axis?, children?}",
+  "force": "bool?"
+ },
+ {
+  "op": "propose",
+  "proposal": "{id?, kind: layout|lines, page, …}"
+ },
+ {
+  "op": "resolve_proposal",
+  "id": "str",
+  "status": "accepted|rejected",
+  "note": "str? (person only)"
+ }
+]
