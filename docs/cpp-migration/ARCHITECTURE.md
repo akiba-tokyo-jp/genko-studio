@@ -51,6 +51,14 @@ tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開
 - 乱数を使う描画（効果線・手描き風の揺れ・紙質・ノイズ）は、入力から決まる seed と自前の決定的な乱数器を使う。`std::uniform_*_distribution` は実装依存なので使わない。Python と同じ乱数列が必要な箇所は Mersenne Twister（MT19937）と Python の `random` と同じ変換を実装し、試験で数列を照合する。
 - 並列化しても結果の画素が変わらないこと（タイル順・合成順を固定）。
 
+## 4a. 画素処理の土台（render）
+
+- 継承する描画（線・ブラシ・コマ枠・合成・マスク・トーン・フィルター等）は、現行版が使う **Pillow 12.3.0 の C 実装 `libImaging`** を `native/third_party/pillow/` に同梱してそのまま使う（MIT-CMU ライセンス。変更点は同フォルダーの `GENKO_CHANGES.md` に記録）。Python 版の `ImageDraw`・`ImageChops`・`Image` の Python 層（`line(joint="curve")`、`alpha_composite`、`resize` の既定補間など）は C++ に移植する。これにより現行の原稿が**同じ画素**で描かれる。
+- `libImaging` の Python 依存部（`Python.h`、Arrow、コーデック）は使わない。小さな互換ヘッダーで置き換える。PNG の読み書きは libpng、JPEG は libjpeg-turbo、TIFF は libtiff（いずれも画素は同じ。PNG のバイト列は Pillow と異なってよい）。
+- numpy を使う現行処理は C++ のループへ移す。numpy と同じ演算順・型変換（float64 計算→`astype(uint8)` の切捨て等）にする。
+- 画面用の部分描画: `render_page` は出力範囲（原点と大きさ、画素）を受け取り、全体を描いて切り出した結果と**同じ画素**を返す（タイル描画・拡大表示の精細化に使う）。
+- 未移植の描画要素（その工程で移植しない機能）を含むページは、黙って省かず `NotYetPorted` 例外で止める。
+
 ## 5. CommandBus と op
 
 - `CommandBus::apply(const Document&, const Json& ops, const Actor&, ApplyOptions)` は**全部成功したときだけ**新しい `Document` を返す。途中で失敗したら元の `Document` は変わらず、エラーに `ops[i] <op名>: <理由>` を返す（Python の `ApplyError` と同じ位置情報）。

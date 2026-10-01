@@ -14,6 +14,7 @@
 | HarfBuzz | 8.3.0 / 10.x | MIT | 字形の配置（縦書きの字形置換・OpenType 機能） | 静的 |
 | libwebp | 1.3.2 / 1.5.x | BSD-3-Clause | WebP（タイムラプス・アニメーション） | 静的 |
 | Little CMS 2 | 2.14 / 2.16 | MIT | 色変換（CMYK、ICC） | 静的 |
+| Pillow の `libImaging`（C 実装のみ） | 12.3.0（sdist sha256 3b8182a7…7cce） | MIT-CMU（HPND） | 継承描画の画素処理（線・合成・変換・フィルター）。現行版と同じ画素を出すため | 静的。`native/third_party/pillow/`、ライセンス文と変更記録を同梱 |
 
 ## 同梱フォント・アイコン（現行版から継承）
 
