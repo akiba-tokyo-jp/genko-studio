@@ -56,6 +56,7 @@ def main() -> int:
         print("7z is needed", file=sys.stderr)
         return 1
     args.out.mkdir(parents=True, exist_ok=True)
+    prefix = args.out / VERSION / layout["dir"]
     got = []
     for name in names:
         package = packages.get(name)
@@ -76,10 +77,22 @@ def main() -> int:
                 return 1
             target = args.out / archive
             target.write_bytes(data)
-            subprocess.run([seven, "x", "-y", f"-o{args.out}", str(target)], check=True, stdout=subprocess.DEVNULL)
+            # Newer repositories put the files at the archive's root (bin/, lib/…); older ones under
+            # <version>/<arch>/. Unpack into a scratch folder and move whichever it is into place.
+            scratch = args.out / "_unpack"
+            shutil.rmtree(scratch, ignore_errors=True)
+            subprocess.run([seven, "x", "-y", f"-o{scratch}", str(target)], check=True, stdout=subprocess.DEVNULL)
+            nested = scratch / VERSION / layout["dir"]
+            source = nested if nested.is_dir() else scratch
+            prefix.mkdir(parents=True, exist_ok=True)
+            for item in source.rglob("*"):
+                if item.is_file():
+                    dest = prefix / item.relative_to(source)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(item), dest)
+            shutil.rmtree(scratch, ignore_errors=True)
             target.unlink()
             got.append(archive)
-    prefix = args.out / VERSION / layout["dir"]
     if not (prefix / "lib" / "cmake" / "Qt6").is_dir():
         print(f"Qt not found under {prefix}", file=sys.stderr)
         return 1
