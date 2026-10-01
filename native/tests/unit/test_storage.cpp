@@ -18,8 +18,10 @@
 #include "core/strokes.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
+#include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "storage/snapshot.hpp"
+#include "storage/transaction.hpp"
 #include "storage/writer.hpp"
 #include "testsupport.hpp"
 
@@ -268,8 +270,11 @@ private slots:
         QVERIFY(!page.layers[3].patches[0].png && page.layers[3].patches[1].png);
         QCOMPARE(page.layers[4].stroke_count(), std::size_t{0});
         QVERIFY(result.document.read_only_reason.find("needs repairs") != std::string::npos);
+        genko::storage::ProjectLock lock(to_path(tmp.path()) / "out");
+        lock.try_acquire();
         QVERIFY_THROWS_EXCEPTION(genko::core::Error,
-                                 genko::storage::save_document_plain(result.document, to_path(tmp.path()) / "out"));
+                                 genko::storage::Saver(lock).save(result.document, genko::storage::SaveRequest{}));
+        QVERIFY(!QFile::exists(tmp.path() + "/out/project.json"));
     }
 
     void brokenAssetsAreReported() {
@@ -330,7 +335,9 @@ private slots:
         QCOMPARE(result.document.page(0).extra["future_page_key"].get<std::string>(), std::string("kept"));
         QCOMPARE(result.document.extra["future_top"].size(), std::size_t{1});
         try {
-            genko::storage::save_document_plain(result.document, to_path(tmp.path()) / "out");
+            genko::storage::ProjectLock lock(to_path(tmp.path()) / "out");
+            lock.try_acquire();
+            genko::storage::Saver(lock).save(result.document, genko::storage::SaveRequest{});
             QFAIL("a read-only book was saved");
         } catch (const genko::core::Error& error) {
             QCOMPARE(error.code(), std::string("read_only"));
@@ -376,7 +383,7 @@ private slots:
         QVERIFY2(first.report.clean(), genko::core::dump_python(first.report.to_json()).c_str());
         QCOMPARE(first.report.source_version, 3);
         const fs::path out = to_path(tmp.path()) / "book.genko";
-        genko::storage::save_document_plain(first.document, out);
+        genko::test::write_project(first.document, out);
         const std::string text = genko::storage::read_file(out / "project.json");
         const Json payload = genko::core::parse_python_json(text);
         QCOMPARE(keys_of(payload),
@@ -404,7 +411,7 @@ private slots:
         // writing the same book again changes nothing and adds no asset
         AssetStore store(out);
         const auto files = store.all_files();
-        genko::storage::save_document_plain(second.document, out);
+        genko::test::write_project(second.document, out);
         QCOMPARE(genko::storage::read_file(out / "project.json"), text);
         QCOMPARE(store.all_files(), files);
     }
@@ -446,7 +453,7 @@ private slots:
         page.split_frame(page.frames[0].id, "vertical", 0.4, 5);
         doc.add_line(1, "台詞", "A");
         const fs::path out = to_path(tmp.path()) / "new.genko";
-        genko::storage::save_document_plain(doc, out);
+        genko::test::write_project(doc, out);
         const auto loaded = genko::storage::load_document(out);
         QVERIFY(loaded.report.clean());
         const Json payload = genko::core::parse_python_json(genko::storage::read_file(out / "project.json"));
@@ -466,7 +473,7 @@ private slots:
         const auto loaded = genko::storage::load_document(to_path(copy));
         AssetStore store(to_path(copy));
         const auto before = store.all_files();
-        genko::storage::save_document_plain(loaded.document, to_path(copy));
+        genko::test::write_project(loaded.document, to_path(copy));
         QCOMPARE(store.all_files(), before);
     }
 };

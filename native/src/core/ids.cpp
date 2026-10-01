@@ -52,6 +52,8 @@ std::string new_book_id() {
     return out;
 }
 
+std::string new_txn_id() { return new_book_id(); }
+
 bool is_book_id(std::string_view text) {
     if (text.size() != 32) return false;
     for (const char c : text) {

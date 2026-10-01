@@ -448,6 +448,12 @@ core::Bytes Reader::read_png(const Json& ref_value, const std::string& at, core:
         return nullptr;
     }
     const std::string& ref = ref_value.get_ref<const std::string&>();
+    if (options_.cache) {
+        if (const auto it = options_.cache->pictures.find(ref); it != options_.cache->pictures.end()) {
+            if (memo != nullptr && options_.verify_hashes) memo->remember(it->second, ref);
+            return it->second;
+        }
+    }
     auto bytes = store_.get_bytes(ref, ".png");
     if (!bytes) {
         issue("missing_asset", at, ref, "the picture " + AssetStore::relpath(ref, ".png") + " is missing");
@@ -460,6 +466,8 @@ core::Bytes Reader::read_png(const Json& ref_value, const std::string& at, core:
             issue("hash_mismatch", at, ref,
                   "the picture " + AssetStore::relpath(ref, ".png") + " does not hold the bytes its name says (" +
                       actual + ")");
+        } else if (options_.cache) {
+            options_.cache->pictures.emplace(ref, shared);
         }
         if (memo != nullptr) memo->remember(shared, std::move(actual));
     }
@@ -495,17 +503,26 @@ core::StrokeListPtr Reader::read_strokes_blob(const Json& ref_value, const std::
     }
     const std::string& ref = ref_value.get_ref<const std::string&>();
     if (auto it = blobs_.find(ref); it != blobs_.end()) return it->second;
+    if (options_.cache) {
+        if (const auto it = options_.cache->strokes.find(ref); it != options_.cache->strokes.end()) {
+            blobs_.emplace(ref, it->second);
+            return it->second;
+        }
+    }
     const auto bytes = store_.get_bytes(ref, ".strokes.json");
     if (!bytes) {
         issue("missing_asset", at, ref, "the strokes " + AssetStore::relpath(ref, ".strokes.json") + " are missing");
         return nullptr;
     }
+    bool verified = false;
     if (options_.verify_hashes) {
         const std::string actual = AssetStore::ref(*bytes);
         if (actual != ref) {
             issue("hash_mismatch", at, ref,
                   "the strokes " + AssetStore::relpath(ref, ".strokes.json") + " do not hold the bytes their name says (" +
                       actual + ")");
+        } else {
+            verified = true;
         }
     }
     std::vector<core::StrokePtr> items;
@@ -530,6 +547,7 @@ core::StrokeListPtr Reader::read_strokes_blob(const Json& ref_value, const std::
     }
     auto list = core::make_strokes(std::move(items), ref);
     blobs_.emplace(ref, list);
+    if (options_.cache && verified && report_.issues.size() == issues_before) options_.cache->strokes.emplace(ref, list);
     return list;
 }
 
@@ -689,31 +707,8 @@ core::Document Reader::migrate(const Json& payload) {
     if (!payload.is_object()) format_error("", "project.json must hold an object, not " + core::py_repr(payload));
 
     // The version: an int (Python: a bool is one too) no newer than this build.
-    std::int64_t version = 1;
-    if (const Json* v = find(payload, "version")) {
-        if (v->is_boolean()) {
-            version = v->get<bool>() ? 1 : 0;
-        } else if (v->is_number_integer() && !v->is_number_unsigned()) {
-            version = v->get<std::int64_t>();
-        } else {
-            version = kReadableVersion + 1;  // not an int, or an int too big for this build
-        }
-        if (version > kReadableVersion) {
-            throw UnsupportedProjectVersion("project.json version " + core::py_str(*v) +
-                                            " is newer than this build supports (" + std::to_string(kReadableVersion) +
-                                            "); update Genko");
-        }
-    }
-    if (const Json* m = find(payload, "min_reader"); m && !m->is_null()) {
-        const bool readable = m->is_boolean() || (m->is_number_integer() && !m->is_number_unsigned() &&
-                                                  m->get<std::int64_t>() <= kReadableVersion);
-        if (!readable) {
-            throw UnsupportedProjectVersion("project.json needs Genko that reads version " + core::py_str(*m) +
-                                            " (this build reads up to " + std::to_string(kReadableVersion) +
-                                            "); update Genko");
-        }
-    }
-    report_.source_version = static_cast<int>(std::clamp<std::int64_t>(version, -1000000, kReadableVersion));
+    const std::int64_t version = project_version(payload);
+    report_.source_version = static_cast<int>(version);
 
     const Json* spec_raw = find(payload, "spec");
     if (spec_raw == nullptr) format_error("", "missing key 'spec'");
@@ -955,17 +950,61 @@ bool is_known_top_key(std::string_view key) { return in(kTopKeys, key); }
 bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }
 bool is_known_feature(std::string_view) { return false; }
 
-LoadResult load_document(const fs::path& dir, const LoadOptions& options) {
-    const std::string text = read_file(dir / "project.json");
-    core::ParseRepairs repairs;
-    core::ParseOptions parse;
-    parse.universal_newlines = true;  // (Python reads project.json with read_text)
-    const Json payload = core::parse_python_json(text, &repairs, parse);
+int project_version(const Json& payload) {
+    std::int64_t version = 1;
+    if (const Json* v = find(payload, "version")) {
+        if (v->is_boolean()) {
+            version = v->get<bool>() ? 1 : 0;
+        } else if (v->is_number_integer() && !v->is_number_unsigned()) {
+            version = v->get<std::int64_t>();
+        } else {
+            version = kReadableVersion + 1;  // not an int, or an int too big for this build
+        }
+        if (version > kReadableVersion) {
+            throw UnsupportedProjectVersion("project.json version " + core::py_str(*v) +
+                                            " is newer than this build supports (" + std::to_string(kReadableVersion) +
+                                            "); update Genko");
+        }
+    }
+    if (const Json* m = find(payload, "min_reader"); m && !m->is_null()) {
+        const bool readable = m->is_boolean() || (m->is_number_integer() && !m->is_number_unsigned() &&
+                                                  m->get<std::int64_t>() <= kReadableVersion);
+        if (!readable) {
+            throw UnsupportedProjectVersion("project.json needs Genko that reads version " + core::py_str(*m) +
+                                            " (this build reads up to " + std::to_string(kReadableVersion) +
+                                            "); update Genko");
+        }
+    }
+    return static_cast<int>(std::clamp<std::int64_t>(version, -1000000, kReadableVersion));
+}
+
+namespace {
+
+LoadResult load_parsed(const Json& payload, const core::ParseRepairs& repairs, const fs::path& dir,
+                       const LoadOptions& options) {
     LoadResult result;
     Reader reader(dir, options, result.report, repairs);
     result.document = reader.migrate(payload);
     result.document.read_only_reason = read_only_reason(result.report);
     return result;
+}
+
+}  // namespace
+
+LoadResult load_document_text(std::string_view text, const fs::path& dir, const LoadOptions& options) {
+    core::ParseRepairs repairs;
+    core::ParseOptions parse;
+    parse.universal_newlines = true;  // (Python reads project.json with read_text)
+    const Json payload = core::parse_python_json(text, &repairs, parse);
+    return load_parsed(payload, repairs, dir, options);
+}
+
+LoadResult load_document_payload(const Json& payload, const fs::path& dir, const LoadOptions& options) {
+    return load_parsed(payload, core::ParseRepairs{}, dir, options);
+}
+
+LoadResult load_document(const fs::path& dir, const LoadOptions& options) {
+    return load_document_text(read_file(dir / "project.json"), dir, options);
 }
 
 }  // namespace genko::storage
