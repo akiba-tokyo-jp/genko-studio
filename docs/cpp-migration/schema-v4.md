@@ -84,6 +84,18 @@ Undo は「今の状態 = 対象の `after`」を確かめ（違えば外部変�
 
 保持: journal は削除しない。GC が守る範囲は直近 100 個の `commit` と、§6 の旧履歴全体。
 
+### 4.5 実装で確定した細則（M1）
+
+- `rev` は確定世代。中断された `prepare`（abort または修復で abort した txn）の `rev` も再利用しないため、確定世代は飛ぶことがある（単調増加は保つ）。
+- `abort` 行と、修復で書く `commit` 行（`recovered: true`）にも `v: 4` を付ける。
+- 旧履歴（§6）を対象にする Undo/Redo の `target` は `legacy:<map.json の entries の番号>`。
+- v4 の監査行の `rev` は、その変更を確定した世代（Undo/Redo なら Undo/Redo 自身の世代）。対象の世代は `target` で辿る。変換の `migrated` 行は `txn` を持つ。
+- 状態素材は正準 JSON（キー辞書順）なので、Undo/Redo で戻した後の `project.json` では、自由形式の辞書（`panel`・`studio`・`extra` 等）のキー順が辞書順になる。内容と、型付きの項目の順序は変わらない。
+- 大きい op 記録を `.ops.json` に分ける基準は Python と同じく正準 JSON の**文字数** 16000 超。
+- 変換で使えない旧スナップショット（Python の gc で消えた、または補修が必要）は変換を止めず、`legacy/report.json` に記録する。その地点への Undo は拒否する。
+- 変換は `project.lock` 以外の全ファイルを二度読みして比べ、`studio/*`・`exports/` などのその他のファイルは同じバイトで新しい原稿へ持ち越す。中断した変換の作業フォルダー `.<名前>.migrating-*` は出力先の隣に残る（次の変換の前に削除してよい）。
+- 書込みの排他は待たずに失敗する（CLI・API。Python と同じ）。GUI は `ProjectLock::acquire(timeout)` で待つ。
+
 ## 5. 承認監査（studio/audit.jsonl）
 
 v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し、v4 は `txn` を加える。txn が同じ行は 1 つだけ（修復で二重に書かない）。読み手は v3 行と v4 行の両方を読む。

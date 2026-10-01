@@ -63,6 +63,10 @@ jobs:
 
   windows:
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [windows-release, windows-debug]
     env:
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
     steps:
@@ -91,6 +95,6 @@ jobs:
           $env:CMAKE_PREFIX_PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64"
           $env:PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64\bin;$env:PATH"
           cd native
-          cmake --preset windows-release
-          cmake --build --preset windows-release
-          ctest --preset windows-release --label-exclude "perf|contract"
+          cmake --preset ${{ matrix.preset }}
+          cmake --build --preset ${{ matrix.preset }}
+          ctest --preset ${{ matrix.preset }} --label-exclude "perf|contract"
