@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "core/error.hpp"
+#include "core/paths.hpp"
 #include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
 
@@ -408,10 +409,10 @@ std::string write_png(const Image& image, int compress_level) {
 void save_png(const Image& image, const std::filesystem::path& path, int compress_level) {
     const std::string bytes = write_png(image, compress_level);
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out) throw core::Error("io", "cannot write " + path.string());
+    if (!out) throw core::Error("io", "cannot write " + core::path_to_utf8(path));
     out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     out.close();
-    if (!out) throw core::Error("io", "cannot write " + path.string());
+    if (!out) throw core::Error("io", "cannot write " + core::path_to_utf8(path));
 }
 
 }  // namespace genko::render
