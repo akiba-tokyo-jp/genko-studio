@@ -38,10 +38,17 @@ genko_library(genko_core
     command_bus.cpp
     ops_util.cpp
     ops_book.cpp
+<<<<<<< HEAD
     ops_frames.cpp
     ops_pages.cpp
     ops_strokes.cpp
     ops_layers.cpp
+=======
+    pyvalue.cpp
+    rulers.cpp
+    op_targets.cpp
+    ops_rulers.cpp
+>>>>>>> native/m3-tones
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
 

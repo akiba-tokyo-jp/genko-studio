@@ -34,6 +34,9 @@ genko_test(test_stroke_geom SOURCES unit/test_stroke_geom.cpp DEPS genko_test_su
 genko_test(test_image SOURCES unit/test_image.cpp DEPS genko_test_support genko_render LABELS unit)
 genko_test(test_png SOURCES unit/test_png.cpp DEPS genko_test_support genko_render LABELS unit)
 genko_test(test_render_page SOURCES unit/test_render_page.cpp DEPS genko_render LABELS unit)
+# Tones, effect lines and rulers (M3-B).
+genko_test(test_rulers SOURCES unit/test_rulers.cpp DEPS genko_test_support genko_render LABELS unit)
+genko_test(test_tones_effects SOURCES unit/test_tones_effects.cpp DEPS genko_test_support genko_render LABELS unit TIMEOUT 900)
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
@@ -52,6 +55,16 @@ genko_test(test_contract_render SOURCES contract/test_contract_render.cpp DEPS g
 # 12 minutes in Debug and 40 under ASan)
 set_tests_properties(test_contract_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
 genko_test(test_contract_render_cli SOURCES contract/test_contract_render_cli.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 1800)
+# Tones, effect lines and rulers against Python (M3-B): the ops (fixed cases, random sequences, the command line), the
+# drawing, the snapping.
+genko_test(test_contract_tone_ops SOURCES contract/test_contract_tone_ops.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 3600)
+set_tests_properties(test_contract_tone_ops PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
+genko_test(test_contract_tone_render SOURCES contract/test_contract_tone_render.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 7200)
+set_tests_properties(test_contract_tone_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=7000000")
+genko_test(test_contract_rulers SOURCES contract/test_contract_rulers.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 1800)
 set_tests_properties(test_contract_render_cli PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
 # The ops of M2-O1 against Python's apply_ops (fixed cases, random sequences, saved and read back) and the command line.

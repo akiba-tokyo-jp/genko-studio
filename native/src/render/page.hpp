@@ -17,10 +17,10 @@
 // panel borders, crop marks, the ruler's points and the onion skin, the same pixels as the Python baseline.
 //
 // Not drawn in this step (render::NotYetPorted names them, unless RenderOptions::skip_unported): lines and balloons
-// ("balloons"), tone layers ("tones"), effect lines ("effects"), 3D guides ("prims"), placed pictures ("placed"),
-// nombres ("nombre"), a jacket's folds ("covers"), animation pages ("anim"), a layer's screen ("screen") and the
-// monochrome finish of a painting app's colour layer ("finish"); correction layers other than the colour
-// adjustments ("adjust:<kind>").
+// ("balloons"), 3D guides ("prims"), placed pictures ("placed"), nombres ("nombre"), a jacket's folds ("covers"),
+// animation pages ("anim") and the monochrome finish of a painting app's colour layer ("finish"); correction layers
+// other than the colour adjustments ("adjust:<kind>"). Tone layers, effect lines and a layer's screen are drawn
+// (render/tones.hpp, render/effects.hpp).
 
 namespace genko::render {
 
@@ -91,8 +91,8 @@ Image render_spread(const core::Document& episode, const core::Num& first, const
 Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,
                   bool skip_unported = false);
 
-// Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern ("noise" only in
-// this step; dot, line and cross patterns are NotYetPorted("screen")).
+// Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
+// noise; 書き出しでのトーン化).
 Image to_bitonal(const Image& image, int threshold = 180, const core::Json* screen = nullptr);
 
 // Would drawing this page now mean drawing many lines from scratch (no recent drawing of them at this resolution)?
