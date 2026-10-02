@@ -22,7 +22,9 @@
 namespace genko::core {
 
 // A batch (or one of its ops) that cannot be applied. Codes: "apply" (Python's ApplyError), "nothing_to_undo",
-// "not_implemented" (an op of the public list that this build has not ported yet).
+// "not_yet_ported" (an op of the public list, or a part of one, that this build has not ported yet: "ops[3] fill: fill
+// is not in the C++ build yet"), "python_error" (an exception Python's apply_ops lets through, so Python stops with a
+// traceback there: "ops[0] add_frame: IndexError: list index out of range").
 class ApplyError : public Error {
 public:
     explicit ApplyError(const std::string& message, std::string code = "apply");
@@ -43,11 +45,12 @@ public:
 };
 
 // What an op works on: the working copy of the book (change pages only through doc.edit_page), the op and who is
-// applying it.
+// applying it. An op may leave a report for the reply's "results" (Python's op["_report"]).
 struct OpContext {
     Document& doc;
     const Json& op;
     const Actor& actor;
+    std::optional<Json> report = std::nullopt;
 };
 
 using OpFunction = std::function<void(OpContext&)>;
@@ -68,9 +71,10 @@ private:
 
 struct ApplyResult {
     Document doc;                     // the book after the ops (the input book for [{"op": "undo"}] with dry_run)
-    Json applied = Json::array();     // the op names, in order
+    Json applied = Json::array();     // the op names, in order (for_pages: the ops it stands for)
     Json warnings = Json::array();    // Python's validate_episode and unknown-key warnings
     bool has_warnings = true;         // false for [{"op": "undo"}] (Python's reply has no "warnings" then)
+    Json results = Json::array();     // what some ops report: {"index", "op", …} (the reply's "results" when any)
     Json journal_ops = Json::array(); // the ops as the journal records them (Python's _journal_op)
 };
 
@@ -80,6 +84,11 @@ public:
 
     // Apply `ops` (a JSON array of op objects) as `actor`. Throws ApplyError and leaves `doc` as it was when any op
     // fails. With dry_run the result is the same, and the caller does not save it.
+    //
+    // As Python's apply_ops: for_pages is expanded first (against the book as it was given); then each op is checked
+    // (its area, the page locks and approvals, strict_gates) and applied. An op of the public list that this build
+    // does not have is refused with not_yet_ported, never skipped; so is an area that would need resolving (the
+    // selection's kinds beyond {poly} and {mask}: M3).
     ApplyResult apply(const Document& doc, const Json& ops, const Actor& actor, bool dry_run = false) const;
 
 private:
@@ -96,6 +105,19 @@ Json journal_op(const Json& op);
 // The page lock and approval checks made before each op (Python's _check_page_lock): name_ok needs a person;
 // lock_page and unlock_page take effect here.
 void check_page_lock(Document& doc, const Json& op, const Actor& actor);
+
+// The strict_gates checks made before each op of a studio book (Python's _check_strict, every rule, by the op's
+// name: the layout of an approved name, finishing without the art approved, printed layers before the name is
+// approved, …). Throws OpError.
+void check_strict(const Document& doc, const Json& op, const Actor& actor);
+
+// for_pages as the ops it stands for (Python's bookops.expand): each op once per page, its "page" set to the page.
+// Throws OpError (Python's ApplyError) and, for values Python fails on outside its checks, PyValueError/PyTypeError.
+Json expand_for_pages(const Document& doc, const Json& op);
+
+// selops.needs_resolving: an area of a kind beyond {poly} and {mask} (rect, ellipse, layer, color, all, saved,
+// union, intersect, subtract, invert, grow_mm, feather_mm).
+bool area_needs_resolving(const Json& area);
 
 // --- helpers shared by the op implementations -------------------------------------------------------------------
 
@@ -122,7 +144,7 @@ void remap_page_refs(Document& doc, const PageMapping& mapping);
 void reorder_pages(Document& doc, const std::vector<Num>& order);
 
 // Register the book and page ops of M1 (set_note, set_meta, name_ok, lock_page, unlock_page, set_autosave,
-// add_page, delete_page).
+// add_page, delete_page). The ops of M2 are registered by core/ops_util.hpp's register_*_ops.
 void register_book_ops(OpRegistry& registry);
 
 }  // namespace genko::core

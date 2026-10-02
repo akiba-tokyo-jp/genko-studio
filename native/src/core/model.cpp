@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <bit>
+#include <cstdint>
 #include <utility>
 
 #include "core/error.hpp"
@@ -448,6 +451,64 @@ StoryLine& Document::add_line(const Num& page_index, std::string text, std::stri
     line.tail = tail;
     story.push_back(std::move(line));
     return story.back();
+}
+
+std::uint64_t new_layer_identity() {
+    static std::atomic<std::uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+namespace {
+
+// (as json.dumps writes them: ints and floats apart, floats exact)
+bool same_json(const Json& a, const Json& b) { return dump_python(a) == dump_python(b); }
+
+template <class T, class Same>
+bool same_optional(const std::optional<T>& a, const std::optional<T>& b, Same same) {
+    return a.has_value() == b.has_value() && (!a || same(*a, *b));
+}
+
+template <class T, class Same>
+bool same_items(const std::vector<T>& a, const std::vector<T>& b, Same same) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (!same(a[i], b[i])) return false;
+    }
+    return true;
+}
+
+bool same_bytes(const Bytes& a, const Bytes& b) { return a == b || (a && b && *a == *b); }
+bool same_double(double a, double b) { return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b); }
+bool same_num(const Num& a, const Num& b) { return a.same(b); }
+bool same_point(const Point& a, const Point& b) { return a.x.same(b.x) && a.y.same(b.y); }
+bool same_rect(const Rect& a, const Rect& b) {
+    return a.x.same(b.x) && a.y.same(b.y) && a.width.same(b.width) && a.height.same(b.height);
+}
+bool same_patch(const Patch& a, const Patch& b) {
+    return same_json(a.attrs, b.attrs) && same_bytes(a.png, b.png) && a.asset == b.asset && same_json(a.after_asset, b.after_asset);
+}
+bool same_mask(const Mask& a, const Mask& b) { return same_bytes(a.png, b.png) && a.enabled == b.enabled; }
+
+}  // namespace
+
+bool same_layer(const Layer& a, const Layer& b) {
+    const auto same_points = [](const std::vector<Point>& x, const std::vector<Point>& y) { return same_items(x, y, same_point); };
+    const auto same_nums = [](const NumList& x, const NumList& y) { return same_items(x, y, same_num); };
+    return a.id == b.id && a.role == b.role && a.kind == b.kind && a.visible == b.visible && a.exportable == b.exportable &&
+           a.strokes == b.strokes && a.raster_relpath == b.raster_relpath && same_optional(a.fill_rgb, b.fill_rgb, same_nums) &&
+           same_bytes(a.raster_png, b.raster_png) && same_optional(a.lpi, b.lpi, same_num) &&
+           same_optional(a.density, b.density, same_num) && same_optional(a.region, b.region, same_points) &&
+           same_double(a.opacity, b.opacity) && a.material_id == b.material_id && same_double(a.angle, b.angle) &&
+           a.title == b.title && a.blend == b.blend && a.clip == b.clip && a.lock_alpha == b.lock_alpha &&
+           a.locked == b.locked && a.panel_clip == b.panel_clip && a.panel_each == b.panel_each &&
+           same_items(a.patches, b.patches, same_patch) && same_optional(a.tone, b.tone, same_json) &&
+           same_json(a.parent_id, b.parent_id) && a.asset == b.asset && a.frame_id == b.frame_id &&
+           same_optional(a.placement_mm, b.placement_mm, same_rect) && a.fit == b.fit && a.clip_to == b.clip_to &&
+           same_optional(a.source, b.source, same_json) && same_optional(a.finish, b.finish, same_json) &&
+           same_optional(a.mask, b.mask, same_mask) && a.color == b.color && a.reference == b.reference &&
+           same_optional(a.fill, b.fill, same_json) && same_optional(a.adjust, b.adjust, same_json) &&
+           same_optional(a.effect, b.effect, same_json) && a.color_prints == b.color_prints &&
+           same_optional(a.screen, b.screen, same_json);
 }
 
 std::vector<Layer> default_layers() {

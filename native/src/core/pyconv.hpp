@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -24,6 +25,10 @@ double py_float(const Json& value);
 
 // int(x): ints, floats (truncated), booleans and decimal strings.
 std::int64_t py_int(const Json& value);
+
+// str(int(x)) when int(x) is past 64 bits (Python's ints have no bound; py_int throws for these): a float of 2**63
+// or more (its exact value), an int past 2**63 - 1, a decimal string past either end. Nothing for other values.
+std::optional<std::string> py_big_int_text(const Json& value);
 
 // str(x): a str as it is, numbers as Python prints them, True/False/None, lists and dicts as Python's repr.
 std::string py_str(const Json& value);

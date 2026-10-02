@@ -139,7 +139,13 @@ struct Patch {
     Bytes png;                    // null: the picture was missing (the patch is not written back, as in Python)
     std::optional<std::string> asset;  // the ref it was read from
     BlobMemo memo;
+    // Keys set after the patch was read that it did not have (duplicate_layer's new "id"): Python's dict keeps them
+    // after "asset", which it added when it read the patch, and writes them there.
+    Json after_asset = Json::object();
 };
+
+// A new Layer::identity.
+std::uint64_t new_layer_identity();
 
 struct Layer {
     std::string id;
@@ -167,7 +173,9 @@ struct Layer {
     bool panel_each = false;   // each line stays in the panel it begins in
     std::vector<Patch> patches;
     std::optional<Json> tone;  // tone layers: {pattern, gradient}
-    std::optional<std::string> parent_id;
+    // The folder it is in (null: none). As Python keeps it: a str when read (the reader repairs other values), and
+    // set_layer's "parent" as it is given.
+    Json parent_id = nullptr;
     std::optional<std::string> asset;     // placed: "sha256:…" in assets/
     std::optional<std::string> frame_id;  // placed: the panel it belongs to
     std::optional<Rect> placement_mm;     // placed: where the whole image lands on the page
@@ -183,9 +191,18 @@ struct Layer {
     std::optional<Json> effect;
     bool color_prints = false;
     std::optional<Json> screen;
+    // Which of Python's Layer objects this is (never saved). A copy is the same object, as the copy of a page made
+    // for an edit stands for the same page; a layer made anew (read, added, duplicated) gets a new one. A page whose
+    // layers hold one object twice (reorder_layers given an id twice) shows an edit of it in both places: the
+    // CommandBus makes such entries alike again after each op (same_layer: a field added here goes there too).
+    std::uint64_t identity = new_layer_identity();
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };
+
+// Every field the same (not identity): ints and floats told apart, floats bit for bit, pictures by their bytes,
+// stroke lists as the same list.
+bool same_layer(const Layer& a, const Layer& b);
 
 struct Frame {
     std::string id;
@@ -243,7 +260,7 @@ struct Page {
     std::vector<std::pair<LayerRole, NumList>> fills;  // in the order they were set (Python's dict)
     std::vector<Layer> layers;
     std::optional<Num> spread_with;
-    std::optional<std::string> selected_frame_id;  // (not saved)
+    Json selected_frame_id = nullptr;  // (not saved) select_frame's "frame_id" as it is given; null: none
     Json effects = Json::array();
     std::optional<Json> ruler;  // the old single perspective ruler (kept for old books)
     Json rulers = Json::array();

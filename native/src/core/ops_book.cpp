@@ -20,16 +20,6 @@ const Json* find(const Json& object, std::string_view key) {
     return it == object.end() ? nullptr : &*it;
 }
 
-// Python's covers.cover_of: the page's cover entry when it is one (front, back, jacket or obi).
-const Json* cover_of(const Page& page) {
-    const Json* cover = find(page.extra, "cover");
-    if (cover == nullptr || !cover->is_object()) return nullptr;
-    const Json* kind = find(*cover, "kind");
-    if (kind == nullptr || !kind->is_string()) return nullptr;
-    const auto& k = kind->get_ref<const std::string&>();
-    return k == "front" || k == "back" || k == "jacket" || k == "obi" ? cover : nullptr;
-}
-
 // Python's _covered: a page's paper on the book's spec (a cover's is its own).
 PageSpec covered(const Page& page, const PageSpec& spec) {
     const Json* cover = cover_of(page);
