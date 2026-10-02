@@ -3,9 +3,9 @@ name: native
 # The C++ build (docs/cpp-migration). Runs beside the Python tests (ci.yml), which stay the baseline until M7.
 on:
   push:
-    paths: ["native/**", "docs/cpp-migration/**", "tools/migration/**", "tools/ci/**", ".github/workflows/native.yml"]
+    paths: ["native/**", "docs/cpp-migration/**", "tools/migration/**", "tools/ci/**", "tools/acceptance/**", ".github/workflows/native.yml"]
   pull_request:
-    paths: ["native/**", "docs/cpp-migration/**", "tools/migration/**", "tools/ci/**", ".github/workflows/native.yml"]
+    paths: ["native/**", "docs/cpp-migration/**", "tools/migration/**", "tools/ci/**", "tools/acceptance/**", ".github/workflows/native.yml"]
 
 permissions:
   contents: read
@@ -56,10 +56,11 @@ jobs:
           CMAKE_PREFIX_PATH: ${{ runner.temp }}/qt/${{ env.QT_VERSION }}/gcc_64
           QT_QPA_PLATFORM: offscreen
         run: |
+          set -euo pipefail
           cd native
           cmake --preset ${{ matrix.preset }}
           cmake --build --preset ${{ matrix.preset }}
-          ctest --preset ${{ matrix.preset }} --label-exclude perf
+          ctest --preset ${{ matrix.preset }} --label-exclude perf --no-tests=error
 
   windows:
     runs-on: windows-2022
@@ -68,14 +69,11 @@ jobs:
       matrix:
         preset: [windows-release, windows-debug]
     env:
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      VCPKG_ROOT: ${{ runner.temp }}\vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}\vcpkg-bin
+      VCPKG_BINARY_SOURCES: "clear;files,${{ runner.temp }}\\vcpkg-bin,readwrite"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Qt (official binaries, LGPL modules only)
         uses: actions/cache@v4
@@ -86,15 +84,46 @@ jobs:
       - if: steps.qt-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: python tools/ci/fetch_qt.py --os windows --out "$env:RUNNER_TEMP\qt"
+      - name: vcpkg at the manifest baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $baseline = (Get-Content native/vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          git clone --quiet https://github.com/microsoft/vcpkg "$env:VCPKG_ROOT"
+          git -C "$env:VCPKG_ROOT" checkout --quiet $baseline
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+      - name: vcpkg binary cache (restore)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\vcpkg-bin
+          key: vcpkg-bin-${{ hashFiles('native/vcpkg.json') }}-${{ matrix.preset }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-bin-${{ hashFiles('native/vcpkg.json') }}-${{ matrix.preset }}-
+            vcpkg-bin-${{ hashFiles('native/vcpkg.json') }}-
       - name: Configure, build, test
+        id: build
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            $vsNinja = Join-Path $env:VSINSTALLDIR 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja'
+            if (Test-Path (Join-Path $vsNinja 'ninja.exe')) { $env:PATH = "$vsNinja;$env:PATH" } else { choco install ninja --no-progress -y }
+          }
+          ninja --version
           $env:CMAKE_PREFIX_PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64"
           $env:PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64\bin;$env:PATH"
           cd native
           cmake --preset ${{ matrix.preset }}
           cmake --build --preset ${{ matrix.preset }}
-          ctest --preset ${{ matrix.preset }} --label-exclude "perf|contract"
+          ctest --preset ${{ matrix.preset }} --label-exclude "perf|contract" --no-tests=error
+      - name: vcpkg binary cache (save, also after a failed build)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}\vcpkg-bin
+          key: vcpkg-bin-${{ hashFiles('native/vcpkg.json') }}-${{ matrix.preset }}-${{ github.run_id }}
