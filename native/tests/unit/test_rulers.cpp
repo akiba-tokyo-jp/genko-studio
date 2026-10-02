@@ -83,7 +83,7 @@ private slots:
         for (const char* kind : {"line", "curve", "parallel_curve", "multi_curve", "radial_curve"}) {
             Json ruler = j(R"({"id":"r", "points":[[0,0],[1e19,0]], "points2":[[0,1],[1e19,1]], "center":[0,-1], "active":true})");
             ruler["kind"] = kind;
-            QVERIFY_EXCEPTION_THROWN(rulers::snap(pts({{0, 0}, {1e19, 0}}), Json::array({ruler})), genko::core::PyValueError);
+            QVERIFY_THROWS_EXCEPTION(genko::core::PyValueError, rulers::snap(pts({{0, 0}, {1e19, 0}}), Json::array({ruler})));
         }
     }
 

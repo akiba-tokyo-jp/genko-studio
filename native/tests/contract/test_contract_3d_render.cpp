@@ -14,6 +14,7 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <vector>
@@ -55,6 +56,7 @@ class TestContract3dRender : public QObject {
             if (b.path == path) return b;
         }
         qFatal("no book %s", path.c_str());
+        std::abort();  // qFatal cannot return; state that for MSVC's control-flow warning too.
     }
 
     static const genko::core::Page* page_of(const genko::core::Document& doc, const genko::core::Num& index) {

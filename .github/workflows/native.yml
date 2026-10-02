@@ -23,6 +23,11 @@ jobs:
 
   linux:
     runs-on: ubuntu-24.04
+    # Match the measured reference: NumPy 2.4.6, OpenBLAS Haswell, X86_V2 ufuncs.
+    # CPU auto-dispatch changes reduction rounding; keep all bitwise/pixel checks intact.
+    env:
+      OPENBLAS_CORETYPE: Haswell
+      NPY_DISABLE_CPU_FEATURES: "X86_V3,X86_V4,AVX512_ICL,AVX512_SPR"
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +56,7 @@ jobs:
           python3 -m venv /tmp/pyref
           /tmp/pyref/bin/pip install -q 'pillow==12.3.0' 'numpy==2.4.6' 'psd-tools==1.10.9'
           echo "GENKO_PYREF=/tmp/pyref/bin/python" >> "$GITHUB_ENV"
+          /tmp/pyref/bin/python tools/ci/check_pyref_numerics.py
       - name: Configure, build, test
         env:
           CMAKE_PREFIX_PATH: ${{ runner.temp }}/qt/${{ env.QT_VERSION }}/gcc_64
