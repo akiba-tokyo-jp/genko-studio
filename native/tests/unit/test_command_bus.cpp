@@ -10,6 +10,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/model.hpp"
+#include "render/ops_registry.hpp"
 #include "testsupport.hpp"
 
 using genko::core::ApplyError;
@@ -29,10 +30,16 @@ Document book(int pages = 3) {
     return doc;
 }
 
+// The bus with every op of this build, as the command line has it.
+const CommandBus& bus() {
+    static const CommandBus b(genko::render::ops_registry());
+    return b;
+}
+
 // The error of a batch: "code: message".
 std::string error_of(const Document& doc, const Json& batch, const std::string& actor = "genko", bool dry_run = false) {
     try {
-        CommandBus().apply(doc, batch, Actor(actor), dry_run);
+        bus().apply(doc, batch, Actor(actor), dry_run);
     } catch (const ApplyError& error) {
         return error.code() + ": " + error.what();
     }
@@ -40,7 +47,7 @@ std::string error_of(const Document& doc, const Json& batch, const std::string& 
 }
 
 genko::core::ApplyResult apply(const Document& doc, const char* batch, const std::string& actor = "genko") {
-    return CommandBus().apply(doc, ops(batch), Actor(actor));
+    return bus().apply(doc, ops(batch), Actor(actor));
 }
 
 std::vector<std::string> strings(const Json& list) {
@@ -55,6 +62,59 @@ class TestCommandBus : public QObject {
     Q_OBJECT
 
 private slots:
+    // One registry for the whole build (render::ops_registry: core's ops and the ops that draw), each module's ops
+    // registered by its own register_*_ops; core::OpRegistry::builtin() has core's alone.
+    void registries() {
+        const auto& core_ops = genko::core::OpRegistry::builtin();
+        const auto& all = genko::render::ops_registry();
+        for (const char* name : {"set_note", "add_page", "split_frame", "add_stroke", "erase", "add_layer", "add_ruler",
+                                 "ruler_to_layer"}) {
+            QVERIFY2(core_ops.find(name) != nullptr, name);
+            QVERIFY2(all.find(name) != nullptr, name);
+        }
+        for (const char* name : {"add_tone", "set_tone", "delete_tone", "add_effect", "effect_to_layer", "add_figure",
+                                 "render_prims", "trace_prims", "camera_from_ruler"}) {
+            QVERIFY2(core_ops.find(name) == nullptr, name);
+            QVERIFY2(all.find(name) != nullptr, name);
+        }
+        const std::vector<std::string> core_names = core_ops.names();
+        const std::vector<std::string> all_names = all.names();
+        for (const std::string& name : core_names) QVERIFY2(all.find(name) != nullptr, name.c_str());
+        QCOMPARE(all_names.size(), core_names.size() + 3 + 4 + 17);  // (tones, effect lines, 3D)
+        // the bus without a registry has core's
+        QCOMPARE(error_of(book(), ops(R"([{"op": "add_tone", "page": 1}])")).substr(0, 7), std::string("(applie"));
+        try {
+            CommandBus().apply(book(), ops(R"([{"op": "add_tone", "page": 1}])"), Actor());
+            QFAIL("core's bus has no tone ops");
+        } catch (const ApplyError& error) {
+            QCOMPARE(error.code(), std::string("not_yet_ported"));
+        }
+    }
+
+    // An op's area, resolved before the op as Python's apply_ops does (selops.resolve): a rect or an ellipse alone is its
+    // polygon for every op; one that needs the selection tools is not ported; the page comes first.
+    void areas() {
+        const Document doc = book();
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1, "note": "x", "area": {"rect": [0, 0, 10, 5]}}])")),
+                 std::string("(applied)"));
+        const auto rect = genko::core::resolve_plain_area(ops(R"({"rect": [1, 2, 10, "5"]})"));
+        QVERIFY(rect.has_value());
+        QCOMPARE(genko::core::dump_python(*rect), std::string("{\"poly\": [[1.0, 2.0], [11.0, 2.0], [11.0, 7.0], [1.0, 7.0]]}"));
+        const auto ellipse = genko::core::resolve_plain_area(ops(R"({"ellipse": [0, 0, 20, 10]})"));
+        QVERIFY(ellipse.has_value());
+        QCOMPARE((*ellipse)["poly"].size(), std::size_t{72});
+        QCOMPARE(genko::core::dump_python((*ellipse)["poly"][0]), std::string("[20.0, 5.0]"));
+        QVERIFY(!genko::core::resolve_plain_area(ops(R"({"rect": [0, 0, 1, 1], "invert": true})")).has_value());
+        QVERIFY(!genko::core::resolve_plain_area(ops(R"({"poly": [[0, 0], [1, 0], [1, 1]]})")).has_value());
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1, "area": {"rect": [0, 0, 10]}}])")),
+                 std::string("apply: ops[0] set_note: a value of the wrong type (not enough values to unpack (expected 4, got 3)) ‖ "
+                             "set_note takes {page: int}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "note": "x", "area": {"rect": [0, 0, 10, 5]}}])")),
+                 std::string("apply: ops[0] set_note: page (int) is required ‖ set_note takes {page: int}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1, "area": {"all": true}}])")).substr(0, 46),
+                 std::string("not_yet_ported: ops[0] set_note: an area of th"));
+    }
+
     void canApprove() {
         QVERIFY(genko::core::can_approve("genko"));
         QVERIFY(genko::core::can_approve("human"));
@@ -124,7 +184,7 @@ private slots:
     void undoOfTheSession() {
         const Document doc = book();
         QCOMPARE(error_of(doc, ops(R"([{"op": "undo"}])")), std::string("nothing_to_undo: nothing to undo"));
-        const auto dry = CommandBus().apply(doc, ops(R"([{"op": "undo"}])"), Actor(), true);
+        const auto dry = bus().apply(doc, ops(R"([{"op": "undo"}])"), Actor(), true);
         QCOMPARE(strings(dry.applied), std::vector<std::string>({"undo"}));
         QVERIFY(!dry.has_warnings);
         QVERIFY(dry.doc.pages[0].get() == doc.pages[0].get());

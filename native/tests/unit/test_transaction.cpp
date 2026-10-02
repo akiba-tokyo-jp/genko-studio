@@ -15,6 +15,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "render/ops_registry.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/doctor.hpp"
 #include "storage/fault.hpp"
@@ -57,7 +58,8 @@ SaveResult edit(const fs::path& dir, const char* ops, const std::string& actor =
     lock.try_acquire();
     journal::repair(dir);
     const auto loaded = genko::storage::load_document(dir);
-    const auto result = genko::core::CommandBus().apply(loaded.document, genko::core::parse_python_json(ops), genko::core::Actor(actor));
+    const auto result = genko::core::CommandBus(genko::render::ops_registry())
+                            .apply(loaded.document, genko::core::parse_python_json(ops), genko::core::Actor(actor));
     SaveRequest request;
     request.actor = actor;
     request.base_revision = base.value_or(loaded.document.revision);

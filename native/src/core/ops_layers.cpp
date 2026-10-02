@@ -148,44 +148,6 @@ Json effect_spec(const Json& raw) {
     return out;
 }
 
-// ops._screen_spec: レイヤーのトーン化 (the layer's greys printed as a halftone).
-Json screen_spec(const Json& raw) {
-    if (!raw.is_object()) throw OpError("screen is {pattern, lpi, angle}");
-    const Json* pattern_value = get(raw, "pattern");
-    const std::string pattern = pattern_value != nullptr && py_truthy(*pattern_value) ? py_str(*pattern_value) : "dot";
-    if (pattern != "dot" && pattern != "line" && pattern != "cross" && pattern != "noise") {
-        throw OpError("screen pattern must be dot, line, cross or noise");
-    }
-    const double lpi = to_float(get_or(raw, "lpi", Json(60)));
-    if (!(10 <= lpi && lpi <= 150)) throw OpError("lpi must be between 10 and 150");
-    const Json* shape_value = get(raw, "shape");
-    const std::string shape = shape_value != nullptr && py_truthy(*shape_value) ? py_str(*shape_value) : "round";
-    if (shape != "round" && shape != "square" && shape != "diamond" && shape != "ellipse") {
-        throw OpError("screen shape must be one of round, square, diamond, ellipse");
-    }
-    Json spec = Json::object();
-    spec["pattern"] = pattern;
-    spec["lpi"] = lpi;
-    spec["angle"] = py_fmod(to_float(get_or(raw, "angle", Json(45))), 180);
-    spec["black"] = py_clamp(to_float(get_or(raw, "black", Json(0.1))), 0.0, 0.9);
-    spec["white"] = py_clamp(to_float(get_or(raw, "white", Json(0.95))), 0.1, 1.0);
-    if (shape != "round") spec["shape"] = shape;
-    if (truthy_at(raw, "offset_mm")) {
-        Json offset = Json::array();
-        try {
-            for (const Json& v : iterate(raw["offset_mm"])) offset.push_back(to_float(v));
-        } catch (const PyTypeError&) {
-            throw OpError("offset_mm is [x, y] in mm");
-        } catch (const PyValueError&) {
-            throw OpError("offset_mm is [x, y] in mm");
-        }
-        Json two = Json::array();
-        for (std::size_t i = 0; i < offset.size() && i < 2; ++i) two.push_back(offset[i]);
-        spec["offset_mm"] = std::move(two);
-    }
-    return spec;
-}
-
 // The parent a layer may be put in: a folder layer of the page (layerops.move_layers' rule). Python's set_layer and
 // add_layer keep any value, so a layer could be in what is not a folder, or a folder in itself (the layer panel's
 // walk up the folders then never ends): refused here.

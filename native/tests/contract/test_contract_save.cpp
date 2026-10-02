@@ -26,6 +26,7 @@
 
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
+#include "render/ops_registry.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
@@ -268,7 +269,7 @@ private slots:
                 const genko::core::ScopedIdSource ids(genko::core::counting_ids());
                 const auto loaded = genko::storage::load_document(to_path(book));
                 try {
-                    const auto result = genko::core::CommandBus().apply(loaded.document, genko::core::parse_python_json(c.ops),
+                    const auto result = genko::core::CommandBus(genko::render::ops_registry()).apply(loaded.document, genko::core::parse_python_json(c.ops),
                                                                         genko::core::Actor(c.agent), c.dry_run);
                     got = Json::object();
                     got["ok"] = true;

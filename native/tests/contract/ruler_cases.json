@@ -1,0 +1,23 @@
+{
+"note": "Cases for test_contract_rulers (penLinesAlongTheRulers): the pen lines and erasers that snap to the rulers, moved from M2-O1's ops_cases.json when the rulers became one module (core::rulers, M3-I). On the book `pyref_harness.py make-opsbook` makes: page 4 has the old single perspective ruler, page 5 a ruler of every kind (locked by ai:other). The format is ops_cases.json's. New ids count from first_id (0x1000).",
+"first_id": 4096,
+"cases": [
+{"n": "add_stroke old ruler", "op": "add_stroke", "ok": true, "ops": [{"op": "add_stroke", "page": 4, "points": [[40, 60, 0.5], [70, 80, 0.6], [100, 150, 0.7]], "snap_ruler": true}]},
+{"n": "add_stroke snap to the rulers", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[30, 102], [60, 104], [100, 107]], "snap_ruler": true}]},
+{"n": "add_stroke ruler curve", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[30, 148, 0.5], [70, 145, 0.7], [110, 158, 0.6]], "ruler_id": "r-curve"}]},
+{"n": "add_stroke ruler concentric", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[130, 150], [125, 170], [110, 180]], "ruler_id": "r-circle"}]},
+{"n": "add_stroke ruler rect", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[60, 48], [100, 45], [140, 50], [152, 90], [150, 120]], "ruler_id": "r-rect"}]},
+{"n": "add_stroke ruler ellipse", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[140, 190], [130, 210], [100, 221], [65, 205]], "ruler_id": "r-ellipse"}]},
+{"n": "add_stroke ruler polygon", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[22, 21], [45, 23], [58, 30], [52, 60], [30, 45]], "ruler_id": "r-polygon"}]},
+{"n": "add_stroke ruler parallel curve", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[40, 80, 0.4], [90, 75, 0.8], [120, 90, 0.5]], "ruler_id": "r-pcurve"}]},
+{"n": "add_stroke ruler multi curve", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[40, 245], [100, 236], [160, 248]], "ruler_id": "r-mcurve"}]},
+{"n": "add_stroke ruler radial curve", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[50, 120], [80, 112], [110, 125]], "ruler_id": "r-rcurve"}]},
+{"n": "add_stroke ruler parallel", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[40, 80, 0.5], [90, 100, 0.9], [120, 110, 0.4]], "ruler_id": "r-parallel"}]},
+{"n": "add_stroke ruler radial", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[40, 60], [70, 100]], "ruler_id": "r-radial"}]},
+{"n": "add_stroke ruler two vanishing points", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[40, 200], [120, 170]], "ruler_id": "r-persp2"}]},
+{"n": "add_stroke ruler guide", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[40, 52, 0.5], [90, 49, 0.6], [140, 51, 0.7]], "ruler_id": "r-guide"}]},
+{"n": "add_stroke rulers of a layer", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "layer_id": "pen-5", "points": [[110, 130], [130, 145], [150, 150]], "snap_ruler": true}]},
+{"n": "add_stroke unknown ruler id", "op": "add_stroke", "ok": true, "agent": "ai:other", "ops": [{"op": "add_stroke", "page": 5, "points": [[30, 102], [100, 107]], "ruler_id": "nope"}]},
+{"n": "erase along a ruler", "op": "erase", "ok": true, "agent": "ai:other", "ops": [{"op": "erase", "page": 5, "points": [[30, 202], [95, 212]], "snap_ruler": true}]}
+]
+}

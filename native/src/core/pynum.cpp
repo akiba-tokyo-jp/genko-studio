@@ -439,8 +439,25 @@ double py_trunc(double x) {
     return std::trunc(x);
 }
 
+double py_floor(double x) {
+    require_finite(x);
+    return std::floor(x);
+}
+
+double py_ceil(double x) {
+    require_finite(x);
+    return std::ceil(x);
+}
+
 std::int64_t py_round_int(double x) { return whole_to_int(py_round_whole(x)); }
 
 std::int64_t py_trunc_int(double x) { return whole_to_int(py_trunc(x)); }
+
+std::int64_t py_trunc_held(double x) {
+    const double whole = py_trunc(x);
+    if (whole >= 9223372036854775808.0) return std::numeric_limits<std::int64_t>::max();
+    if (whole < -9223372036854775808.0) return std::numeric_limits<std::int64_t>::min();
+    return static_cast<std::int64_t>(whole);
+}
 
 }  // namespace genko::core

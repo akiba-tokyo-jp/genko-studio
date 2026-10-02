@@ -1,5 +1,5 @@
 // Python 3.12's random.Random. MT19937 as in Modules/_randommodule.c, the seeding and the derived numbers as in
-// Lib/random.py. Compiled with -fno-builtin (see CMakeLists.txt): gauss calls libm's log as CPython does.
+// Lib/random.py. gauss's math.log, math.cos and math.sin are core/pymath's (libm called as CPython calls it).
 
 #include "core/pyrandom.hpp"
 
@@ -220,7 +220,7 @@ double PyRandom::gauss(double mu, double sigma) {
     gauss_next_.reset();
     if (!z) {
         const double x2pi = random() * kTwoPi;
-        const double g2rad = std::sqrt(-2.0 * std::log(1.0 - random()));
+        const double g2rad = std::sqrt(-2.0 * py_log(1.0 - random()));
         z = py_cos(x2pi) * g2rad;
         gauss_next_ = py_sin(x2pi) * g2rad;
     }

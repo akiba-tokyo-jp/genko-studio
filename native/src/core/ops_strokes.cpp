@@ -76,7 +76,7 @@ std::pair<std::size_t, PenPoints> stroke_target(const Document& doc, std::size_t
 }
 
 // ops._frame_contains(page)
-FrameContains frame_contains_for(const Page& page) {
+rulers::FrameContains frame_contains_for(const Page& page) {
     return [&page](const Json& frame_id, double x, double y) {
         if (page.frames.empty() || !frame_id.is_string()) return false;
         const Frame* frame = page.find_frame(frame_id.get_ref<const std::string&>());
@@ -232,12 +232,12 @@ void add_stroke(OpContext& c) {
     std::vector<PenPoints> copies;
     if (truthy_at(op, "snap_ruler") || truthy_at(op, "ruler_id")) {
         if (py_truthy(page.rulers)) {
-            const FrameContains inside = frame_contains_for(page);
+            const rulers::FrameContains inside = frame_contains_for(page);
             const Json* layer_id = get(op, "layer_id");
             const Json* lid = layer_id != nullptr && !layer_id->is_null() ? layer_id : nullptr;
             const Json only = op.contains("ruler_id") ? op["ruler_id"] : Json(nullptr);
-            points = ruler_snap(points, page.rulers, inside, only, lid);
-            copies = symmetry_copies(points, page.rulers, inside, lid);
+            points = rulers::snap(points, page.rulers, inside, only, lid);
+            copies = rulers::symmetry_copies(points, page.rulers, inside, lid);
         } else {
             points = snap_points_old(page, points);
         }
@@ -418,7 +418,7 @@ void erase(OpContext& c) {
         const std::string lid = layer_id != nullptr && py_truthy(*layer_id) ? py_str(*layer_id) : "";
         const Json lid_json(lid);
         const Json only = op.contains("ruler_id") ? op["ruler_id"] : Json(nullptr);
-        points = ruler_snap(points, page.rulers, frame_contains_for(page), only, lid.empty() ? nullptr : &lid_json);
+        points = rulers::snap(points, page.rulers, frame_contains_for(page), only, lid.empty() ? nullptr : &lid_json);
     }
     const Json* texture_value = get(op, "texture");
     const std::string texture = texture_value != nullptr && py_truthy(*texture_value) ? py_str(*texture_value) : "";

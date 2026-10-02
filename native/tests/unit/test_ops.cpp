@@ -19,6 +19,7 @@
 #include "core/error.hpp"
 #include "core/ids.hpp"
 #include "core/model.hpp"
+#include "render/ops_registry.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/snapshot.hpp"
@@ -42,14 +43,20 @@ const std::string kAi = "ai:hermes";
 
 Json parse(const std::string& text) { return genko::core::parse_python_json(text); }
 
+// The bus with every op of this build, as the command line has it.
+const CommandBus& bus() {
+    static const CommandBus b(genko::render::ops_registry());
+    return b;
+}
+
 // (not "apply": std::apply would be found for a std::string argument)
 ApplyResult run_ops(const Document& doc, const std::string& batch, const std::string& actor = "genko", bool dry_run = false) {
-    return CommandBus().apply(doc, parse(batch), Actor(actor), dry_run);
+    return bus().apply(doc, parse(batch), Actor(actor), dry_run);
 }
 
 std::string error_of(const Document& doc, const std::string& batch, const std::string& actor = "genko") {
     try {
-        CommandBus().apply(doc, parse(batch), Actor(actor));
+        bus().apply(doc, parse(batch), Actor(actor));
     } catch (const ApplyError& error) {
         return error.code() + ": " + error.what();
     }

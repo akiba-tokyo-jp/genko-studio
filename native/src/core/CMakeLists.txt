@@ -42,10 +42,19 @@ genko_library(genko_core
     ops_pages.cpp
     ops_strokes.cpp
     ops_layers.cpp
+    ops_rulers.cpp
+    linalg3.cpp
+    mesh3d.cpp
+    prim3d.cpp
+    persp3d.cpp
+    mannequin.cpp
+    poses.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
 
-# CPython calls libm directly: so must we (no pow(x, 2.0) → x*x, no sin+cos → sincos), for the same last bits.
+# CPython calls libm directly: so must we (no pow(x, 2.0) → x*x, no sin+cos → sincos), for the same last bits. Every
+# call of libm for Python's math module is in pymath.cpp; linalg3.cpp calls libm's hypot as numpy does. (MSVC: the
+# same with /fp:precise, and the intrinsics turned off by #pragma function in each file.)
 if(NOT MSVC)
-  set_source_files_properties(pymath.cpp pyrandom.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
+  set_source_files_properties(pymath.cpp linalg3.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
 endif()

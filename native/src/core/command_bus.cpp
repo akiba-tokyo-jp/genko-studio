@@ -228,14 +228,19 @@ ApplyError::ApplyError(const std::string& message, std::string code) : Error(std
 
 // --- OpRegistry --------------------------------------------------------------------------------------------------
 
+void register_core_ops(OpRegistry& registry) {
+    register_book_ops(registry);
+    register_frame_ops(registry);
+    register_page_ops(registry);
+    register_stroke_ops(registry);
+    register_layer_ops(registry);
+    register_ruler_ops(registry);
+}
+
 const OpRegistry& OpRegistry::builtin() {
     static const OpRegistry registry = [] {
         OpRegistry r;
-        register_book_ops(r);
-        register_frame_ops(r);
-        register_page_ops(r);
-        register_stroke_ops(r);
-        register_layer_ops(r);
+        register_core_ops(r);
         return r;
     }();
     return registry;
@@ -480,6 +485,27 @@ bool area_needs_resolving(const Json& area) {
     return false;
 }
 
+std::optional<Json> resolve_plain_area(const Json& area) {
+    if (!area.is_object() || area.size() != 1) return std::nullopt;
+    const bool rect = area.contains("rect");
+    if (!rect && !area.contains("ellipse")) return std::nullopt;
+    // x, y, w, h = (float(v) for v in box)
+    const std::vector<double> box = unpack_floats(area.begin().value(), 4);
+    const double x = box[0], y = box[1], w = box[2], h = box[3];
+    Json poly = Json::array();
+    if (rect) {  // selops.rect_poly
+        poly = Json::array({Json::array({x, y}), Json::array({x + w, y}), Json::array({x + w, y + h}), Json::array({x, y + h})});
+    } else {  // selops.ellipse_poly(box, n=72)
+        constexpr double kTau = 6.283185307179586;  // math.tau
+        const double cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
+        for (int k = 0; k < 72; ++k) {
+            const double angle = kTau * k / 72;
+            poly.push_back(Json::array({py_round(cx + rx * py_cos(angle), 3), py_round(cy + ry * py_sin(angle), 3)}));
+        }
+    }
+    return Json::object({{"poly", std::move(poly)}});
+}
+
 std::vector<std::string> validate_document(const Document& doc) {
     std::vector<std::string> warnings;
     std::set<std::string> ids;
@@ -675,25 +701,37 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
         const Json* name = get(op, "op");
         const std::string name_text = name != nullptr ? py_str(*name) : std::string("None");
         const std::string prefix = "ops[" + std::to_string(i) + "] " + name_text + ": ";
-        OpContext context{work, op, actor};
+        // Python's op = {**op, "area": selops.resolve(…)}: the checks and the op see the area resolved; the batch's
+        // record (the journal, the unknown keys) keeps it as it was given
+        std::optional<Json> resolved;
+        std::optional<Json> report;
         try {
             if (const Json* area = get(op, "area"); area != nullptr && area_needs_resolving(*area)) {
-                not_yet_ported("an area of this kind (rect, ellipse, layer, color, all, saved, union, intersect, "
-                               "subtract, invert, grow_mm, feather_mm): the C++ areas come with M3");
+                (void)require_page(work, op);  // (selops.resolve(op["area"], _require_page(work, op), work))
+                std::optional<Json> plain = resolve_plain_area(*area);
+                if (!plain) {
+                    not_yet_ported("an area of this kind (layer, color, all, saved, union, intersect, subtract, invert, "
+                                   "grow_mm, feather_mm): the C++ selection tools come later");
+                }
+                resolved = op;
+                (*resolved)["area"] = std::move(*plain);
             }
+            const Json& seen = resolved ? *resolved : op;
             if (name != nullptr) require_hashable(*name);  // (Python looks the name up in sets of ops)
-            check_page_lock(work, op, actor);
-            if (work.strict_gates) check_strict(work, op, actor);
-            const bool lock_op = is_op(op, "lock_page") || is_op(op, "unlock_page");
+            check_page_lock(work, seen, actor);
+            if (work.strict_gates) check_strict(work, seen, actor);
+            const bool lock_op = is_op(seen, "lock_page") || is_op(seen, "unlock_page");
             if (!lock_op) {  // (lock_page and unlock_page took effect in check_page_lock)
                 if (name == nullptr || !py_truthy(*name)) throw OpError("op is required");
                 const OpFunction* function = name->is_string() ? registry_.find(name->get_ref<const std::string&>()) : nullptr;
                 if (function == nullptr) {
                     // (undo is an op only on its own: in a batch Python does not know it)
-                    if (schema_of(op) != nullptr && !is_op(op, "undo")) not_yet_ported(name_text + " is not in the C++ build yet");
+                    if (schema_of(seen) != nullptr && !is_op(seen, "undo")) not_yet_ported(name_text + " is not in the C++ build yet");
                     throw OpError("unknown op: " + name_text);
                 }
+                OpContext context{work, seen, actor};
                 (*function)(context);
+                report = std::move(context.report);
             }
         } catch (const ApplyError&) {
             throw;
@@ -709,11 +747,11 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
             throw ApplyError(prefix + "a value of the wrong type (" + error.what() + ")" + usage(op));
         }
         result.applied.push_back(name_text);
-        // (Python: op.pop("_report") — what the op reported, or the key as it was given)
-        std::optional<Json> report = std::move(context.report);
-        if (const auto given = op.find("_report"); given != op.end()) {
+        // (Python: op.pop("_report") — what the op reported, or the key as it was given — from the op it applied)
+        Json& applied = resolved ? *resolved : op;
+        if (const auto given = applied.find("_report"); given != applied.end()) {
             if (!report) report = *given;
-            op.erase(given);
+            applied.erase(given);
         }
         if (report && py_truthy(*report)) {
             if (!report->is_object()) {

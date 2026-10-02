@@ -76,8 +76,9 @@ private slots:
     void not_yet_ported_data() {
         QTest::addColumn<QString>("what");
         QTest::addColumn<QString>("mode");
-        for (const char* what : {"balloons", "nombre", "tones", "effects", "prims", "covers", "anim", "screen", "placed"}) {
-            const char* mode = std::string(what) == "prims" || std::string(what) == "covers" ? "proof" : "print";
+        // (tones, effect lines and screens are drawn since M3-B, the 3D guides since M3-C)
+        for (const char* what : {"balloons", "nombre", "covers", "anim", "placed"}) {
+            const char* mode = std::string(what) == "covers" ? "proof" : "print";
             QTest::newRow(what) << QString(what) << QString(mode);
         }
     }
@@ -90,22 +91,8 @@ private slots:
         const std::string w = what.toStdString();
         if (w == "balloons") doc.add_line(page.index, "台詞", "A", std::nullopt, "", Num(10), Num(12));
         if (w == "nombre") page.numero = true;
-        if (w == "tones") {
-            Layer tone;
-            tone.id = genko::core::new_id();
-            tone.role = LayerRole::Tone;
-            tone.kind = LayerKind::Tone;
-            page.layers.push_back(tone);
-        }
-        if (w == "effects") page.effects = Json::array({Json::object({{"kind", "speed"}})});
-        if (w == "prims") page.prims = Json::array({Json::object({{"kind", "cube"}})});
         if (w == "covers") page.extra["cover"] = Json::object({{"kind", "jacket"}, {"spine_mm", 5}, {"flap_mm", 10}});
         if (w == "anim") page.extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
-        if (w == "screen") {  // (on a layer with lines: an empty layer is never screened)
-            for (auto& layer : page.layers) {
-                if (layer.role == LayerRole::Ink) layer.screen = Json::object({{"pattern", "dot"}, {"lpi", 60}});
-            }
-        }
         if (w == "placed") {
             Layer placed;
             placed.id = genko::core::new_id();
@@ -127,11 +114,8 @@ private slots:
         Document doc = book();
         genko::core::Page& page = doc.edit_page(0);
         page.numero = true;  // nombres are printed and proofed, not shown in the name
-        page.prims = Json::array({Json::object({{"kind", "cube"}})});  // 3D guides are never printed
         render::RenderOptions name;
         name.mode = "name";
-        QCOMPARE(unported_element(*doc.pages[0], doc, name), std::string("prims"));
-        page.prims = Json::array();
         QVERIFY(unported_element(*doc.pages[0], doc, name).empty());
         // a hidden tone layer is not drawn
         Layer tone;
@@ -237,7 +221,7 @@ private slots:
         QVERIFY(panel.width() > 0 && panel.height() > 0);
         QCOMPARE(std::string(render::to_bitonal(panel).mode()), std::string("1"));
         const Json dots = Json::object({{"pattern", "dot"}});
-        QVERIFY_THROWS_EXCEPTION(render::NotYetPorted, render::to_bitonal(panel, 180, &dots));
+        QCOMPARE(std::string(render::to_bitonal(panel, 180, &dots).mode()), std::string("1"));
         QCOMPARE(render::export_plan(*doc.pages[0]).size(), std::size_t{7});
         QCOMPARE(render::mm_to_px(0.0, 600), 1);
         QCOMPARE(render::mm_to_px(25.4, 72), 72);
