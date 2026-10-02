@@ -21,6 +21,13 @@ GENKO = os.environ.get("GENKO_BIN", "/src/build/linux-release/src/api/genko")
 PY = "/opt/pyref/bin/python"
 ID_RE = re.compile(r"^(pg_)?[0-9a-f]{12}$")
 SKIP_KEYS = {"revision", "txn", "job_id", "code"}
+# COMP-01a (SPEC.md): inputs Python accepts but that damage the book; C++ refuses them with these messages
+COMP01A = ("order must list every layer of the page once", "ids must not repeat", "parent must be a folder",
+           "a folder cannot hold itself", "pages must be all, body or a list of page numbers", "no page ",
+           " on page ")
+
+
+ID_IN_TEXT = re.compile(r"(?<![0-9a-f])(pg_)?[0-9a-f]{12}(?![0-9a-f])")
 
 
 def norm(value, ids):
@@ -30,6 +37,9 @@ def norm(value, ids):
         return [norm(v, ids) for v in value]
     if isinstance(value, str) and ID_RE.match(value):
         return ids.setdefault(value, f"<id{len(ids)}>")
+    if isinstance(value, str):
+        # ids quoted inside a message (both sides use their own random ids): the same place, any id
+        return ID_IN_TEXT.sub("<id>", value)
     return value
 
 
@@ -190,8 +200,9 @@ def main():
     base = work / "base.genko"
     subprocess.run([PY, "/src/tools/migration/pyref_harness.py", "make-opsbook", str(base)], check=True, capture_output=True)
     stats = {"lists": 0, "steps": 0, "same": 0, "stopped_not_yet_ported": 0, "comp01a_refusals": 0, "diff": 0, "books_same": 0}
-    diffs = []
-    for seed in range(n_lists):
+    diffs, refusals = [], []
+    chosen = [int(x) for x in os.environ.get("HERMES_SEEDS", "").split(",") if x.strip()]
+    for seed in (chosen or range(n_lists)):
         rng = random.Random(7000 + seed)
         py_book, cpp_book = str(work / f"py{seed}.genko"), str(work / f"cpp{seed}.genko")
         shutil.copytree(base, py_book)
@@ -205,6 +216,7 @@ def main():
             snap = inspect(py_book, False) or {}
             mapping = {}
             pair_ids(snap, inspect(cpp_book, True) or {}, mapping)
+            mapping_back = {v: k for k, v in mapping.items()}
             ops = rand_ops(rng, snap)
             f = work / f"ops{seed}_{step}.json"
             fc = work / f"ops{seed}_{step}.cpp.json"
@@ -217,19 +229,34 @@ def main():
                 stats["stopped_not_yet_ported"] += 1
                 stopped = True
                 break
-            if isinstance(cout, dict) and cout.get("code") in ("refused_python_bug", "comp01a") or (
-                    isinstance(cout, dict) and "COMP-01a" in str(cout.get("error", ""))):
-                stats["comp01a_refusals"] += 1
-                stopped = True
-                break
             if pout is None and pc != 0:
                 last = perr.strip().splitlines()[-1] if perr.strip() else ""
                 pout = {"ok": False, "error": last}
+            if os.environ.get("HERMES_TRACE"):
+                pg = ops[0].get("page") if isinstance(ops[0].get("page"), int) else None
+                ps_, cs_ = inspect(py_book, False) or {}, inspect(cpp_book, True) or {}
+                def lay(s):
+                    for q in s.get("pages") or []:
+                        if q.get("index") == pg:
+                            return [(l.get("id"), l.get("kind"), l.get("role")) for l in q.get("layers") or []]
+                    return None
+                print("TRACE", seed, step, json.dumps(ops, ensure_ascii=False)[:300])
+                print("   py ", pc, json.dumps({k: (pout or {}).get(k) for k in ("ok", "error", "applied")}, ensure_ascii=False)[:300])
+                print("   cpp", cc, json.dumps({k: (cout or {}).get(k) for k in ("ok", "error", "applied")}, ensure_ascii=False)[:300])
+                print("   py layers ", lay(ps_))
+                print("   cpp layers", [(mapping_back.get(i, i), k, r) for i, k, r in (lay(cs_) or [])])
             pn, cn = norm(pout, {}), norm(cout, {})
             keys = ("ok", "error", "applied", "warnings")
             pk = {k: pn.get(k) for k in keys} if isinstance(pn, dict) else pn
             ck = {k: cn.get(k) for k in keys} if isinstance(cn, dict) else cn
             if pc != cc or pk != ck:
+                py_ok = isinstance(pk, dict) and pk.get("ok") is True
+                c_err = str(ck.get("error") or "") if isinstance(ck, dict) else ""
+                if py_ok and isinstance(ck, dict) and ck.get("ok") is False and any(m in c_err for m in COMP01A):
+                    stats["comp01a_refusals"] += 1
+                    refusals.append({"seed": seed, "step": step, "ops": ops, "cpp_error": c_err[:200]})
+                    stopped = True
+                    break
                 stats["diff"] += 1
                 diffs.append({"seed": seed, "step": step, "ops": ops, "py": [pc, pk], "cpp": [cc, ck]})
                 stopped = True
@@ -244,6 +271,8 @@ def main():
             else:
                 stats["books_same"] += 1
     print(json.dumps(stats, ensure_ascii=False))
+    for r in refusals[:6]:
+        print("refused (COMP-01a):", json.dumps(r, ensure_ascii=False)[:500])
     for d in diffs[:10]:
         print(json.dumps(d, ensure_ascii=False)[:1500])
     shutil.rmtree(work, ignore_errors=True)
