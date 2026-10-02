@@ -53,7 +53,7 @@ set_target_properties(pillow_imaging PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRE
 
 if(MSVC)
   target_compile_options(pillow_imaging PRIVATE /fp:precise /W1 /utf-8)
-  target_compile_definitions(pillow_imaging PRIVATE _CRT_SECURE_NO_WARNINGS WIN32_LEAN_AND_MEAN)
+  target_compile_definitions(pillow_imaging PRIVATE _CRT_SECURE_NO_WARNINGS)
 else()
   target_compile_options(pillow_imaging PRIVATE -ffp-contract=off -fno-fast-math -fno-strict-aliasing -fwrapv -w)
   # (optimized in Debug builds too, as the wheel is: the pixel loops are not debugged here, and the drawing tests

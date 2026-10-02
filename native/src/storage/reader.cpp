@@ -187,7 +187,8 @@ private:
     static std::optional<Json> asis_json(const Json& object, std::string_view key) {
         const Json* v = find(object, key);
         if (v == nullptr || v->is_null()) return std::nullopt;
-        return *v;
+        // (make_optional: MSVC finds `return *v` ambiguous, as Json converts to any type)
+        return std::make_optional<Json>(*v);
     }
 
     // --- values Python converts -----------------------------------------------------------------------------------
@@ -264,7 +265,7 @@ private:
     static std::optional<Json> dict_if_dict(const Json& object, std::string_view key) {
         const Json* v = find(object, key);
         if (v == nullptr || !v->is_object()) return std::nullopt;
-        return *v;
+        return std::make_optional<Json>(*v);
     }
 
     // dict(obj[key]) if obj.get(key) else None

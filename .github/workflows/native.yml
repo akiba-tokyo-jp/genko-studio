@@ -123,7 +123,8 @@ jobs:
           $env:PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64\bin;$env:PATH"
           cd native
           cmake --preset ${{ matrix.preset }}
-          cmake --build --preset ${{ matrix.preset }}
+          # (-k 0: report every file that fails to compile, not only the first)
+          cmake --build --preset ${{ matrix.preset }} -- -k 0
           ctest --preset ${{ matrix.preset }} --label-exclude "perf|contract" --no-tests=error
       - name: vcpkg binary cache (save, also after a failed build)
         if: always()

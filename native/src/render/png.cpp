@@ -5,6 +5,12 @@
 
 #include <png.h>
 
+// MSVC warns (C4611) on every setjmp in a C++ file. Each setjmp here is in a function that owns no C++ object made
+// after it (see above), so the longjmp from libpng skips no destructor.
+#if defined(_MSC_VER)
+#pragma warning(disable : 4611)
+#endif
+
 #include <array>
 #include <cstdio>
 #include <cstdlib>
