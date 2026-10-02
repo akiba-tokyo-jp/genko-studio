@@ -1,33 +1,5 @@
 #pragma once
 
-<<<<<<< HEAD
-#include <functional>
-#include <vector>
-
-#include "core/geometry.hpp"
-#include "core/json.hpp"
-
-// Rulers a pen line snaps to (Python's genko/rulers.py): snap() and symmetry_copies(), the parts the drawing ops
-// use. The rulers are the page's JSON as Python keeps it; a ruler that lacks what its kind needs fails as it does in
-// Python (OpKeyError "not found: 'points'", …).
-
-namespace genko::core {
-
-// frame_contains(frame_id, x, y): whether the point is in the page's panel with that id (false when there is none).
-using FrameContains = std::function<bool(const Json& frame_id, double x, double y)>;
-
-// rulers.snap: the stroke snapped to the ruler that suits it best (the one whose line stays nearest to what was
-// drawn); the points as they are when no ruler takes it. `only`: one ruler by id (when truthy); `layer_id`: the layer
-// drawn on (nullptr: Python's None).
-PenPoints ruler_snap(const PenPoints& points, const Json& rulers, const FrameContains& frame_contains, const Json& only,
-                     const Json* layer_id);
-
-// rulers.symmetry_copies: the extra strokes the active symmetry rulers make from one stroke.
-std::vector<PenPoints> symmetry_copies(const PenPoints& points, const Json& rulers, const FrameContains& frame_contains,
-                                       const Json* layer_id);
-
-}  // namespace genko::core
-=======
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -36,20 +8,21 @@ std::vector<PenPoints> symmetry_copies(const PenPoints& points, const Json& rule
 #include <utility>
 #include <vector>
 
+#include "core/geometry.hpp"
 #include "core/json.hpp"
 #include "core/pynum.hpp"
-#include "core/stroke_geom.hpp"
 
 // Rulers (Python's genko/rulers.py): guides a pen line snaps to, kept on the page (Page::rulers, each a JSON object
 // as Python keeps it; page mm). The snapping, the symmetry copies, the lines a ruler draws as and the perspective
 // grid, with Python's numbers to the last bit (the same operations in the same order, Python 3.12's sum(), libm called
-// as CPython calls it). No pictures: the screen (GUI) and the ops use these.
+// as CPython calls it). No pictures: the screen (GUI) and the ops (add_stroke, erase, the ruler ops) use these.
 //
 // Kinds: line, curve, parallel, concentric, radial, perspective, symmetry, guide, parallel_curve, multi_curve,
 // radial_curve, rect, ellipse, polygon (see rulers.py for what each uses).
 //
-// A ruler or point that is not what Python expects raises what Python raises: core::PyValueError, core::PyTypeError,
-// core::PyIndexError or core::OpKeyError.
+// A ruler or point that is not what Python expects raises what Python raises (core/pyops.hpp): PyValueError,
+// PyTypeError, OpKeyError (KeyError), or PyUncaught for what apply_ops lets through (IndexError, AttributeError,
+// OverflowError).
 
 namespace genko::core::rulers {
 
@@ -93,14 +66,14 @@ using FrameContains = std::function<bool(const Json& frame_id, double x, double 
 
 // snap(points, rulers, frame_contains, only, layer_id): the stroke snapped to the ruler that suits it best (whose line
 // stays nearest to what was drawn), its points rounded to 4 places with the pressures spread along them; the points
-// unchanged when no ruler takes the stroke. `rulers` is a JSON list (Page::rulers).
+// unchanged when no ruler takes the stroke. `rulers` is a JSON list (Page::rulers); `only` is one ruler's id (taken
+// when truthy, compared with ==), `layer_id` the layer drawn on (nullptr: Python's None).
 PenPoints snap(const PenPoints& points, const Json& rulers, const FrameContains& frame_contains = {},
-               const std::optional<std::string>& only = std::nullopt,
-               const std::optional<std::string>& layer_id = std::nullopt);
+               const Json& only = Json(), const Json* layer_id = nullptr);
 
 // symmetry_copies(points, rulers, frame_contains, layer_id): the extra strokes the active symmetry rulers make.
 std::vector<PenPoints> symmetry_copies(const PenPoints& points, const Json& rulers, const FrameContains& frame_contains = {},
-                                       const std::optional<std::string>& layer_id = std::nullopt);
+                                       const Json* layer_id = nullptr);
 
 // A page size as Python passes it (page.spec's numbers: ints stay ints).
 struct PageSize {
@@ -124,4 +97,3 @@ std::vector<std::array<XY, 2>> perspective_grid(const Json& ruler, const PageSiz
 XY snap_to_grid(XY point, double spacing_mm, XY origin = {});
 
 }  // namespace genko::core::rulers
->>>>>>> native/m3-tones

@@ -17,10 +17,10 @@
 // panel borders, crop marks, the ruler's points and the onion skin, the same pixels as the Python baseline.
 //
 // Not drawn in this step (render::NotYetPorted names them, unless RenderOptions::skip_unported): lines and balloons
-// ("balloons"), 3D guides ("prims"), placed pictures ("placed"), nombres ("nombre"), a jacket's folds ("covers"),
-// animation pages ("anim") and the monochrome finish of a painting app's colour layer ("finish"); correction layers
-// other than the colour adjustments ("adjust:<kind>"). Tone layers, effect lines and a layer's screen are drawn
-// (render/tones.hpp, render/effects.hpp).
+// ("balloons"), placed pictures ("placed"), nombres ("nombre"), a jacket's folds ("covers"), animation pages ("anim")
+// and the monochrome finish of a painting app's colour layer ("finish"); correction layers other than the colour
+// adjustments ("adjust:<kind>"). Tone layers, effect lines and a layer's screen (render/tones.hpp, render/effects.hpp)
+// and the 3D guides (render/prims.hpp) are drawn.
 
 namespace genko::render {
 

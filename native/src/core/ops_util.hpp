@@ -10,7 +10,8 @@
 #include "core/model.hpp"
 #include "core/pyops.hpp"
 
-// Helpers shared by the op implementations (Python's small functions in genko/ops.py).
+// Helpers shared by the op implementations of every module (Python's small functions in genko/ops.py): what an op
+// works on, found as Python finds it, with Python's messages (OpError: the batch reports "ops[i] <op>: <message>").
 
 namespace genko::core {
 
@@ -22,6 +23,27 @@ std::size_t layer_by_id(const Page& page, std::string_view layer_id);
 
 // Page._layer(role): the first layer with the role, made (with a new id) and appended when there is none.
 std::size_t layer_for_role(Page& page, LayerRole role);
+
+// ops._paint_target: the layer op["layer_id"] names, else the first layer with the role op["layer"] ("ink" by
+// default; the page gets one when it has none). OpError when it is locked or is not a pen, paint or tone layer;
+// PyValueError for a role that is not one ("'x' is not a valid LayerRole").
+Layer& paint_target(Page& page, const Json& op);
+
+// ops._frame_or_fail: the panel page._find(str(frame_id)) finds; OpError "no panel <frame_id>".
+const Frame& frame_or_fail(const Page& page, const Json& frame_id);
+
+// ops._ruler: the position of the first ruler whose id == ruler_id; OpError "no ruler <ruler_id>".
+std::size_t ruler_index(const Page& page, const Json& ruler_id);
+
+// ops._screen_spec: レイヤーのトーン化 ({pattern, lpi, angle, black, white, shape?, offset_mm?}); OpError for what it
+// does not take.
+Json screen_spec(const Json& raw);
+
+// The op is refused when what it would keep holds a number that is not finite (Python keeps it, and its json.dumps
+// writes Infinity or NaN into project.json): OpError "<what> must be a finite number", `what` naming the key that holds
+// it ("<key>.<inner key>" inside objects; an empty `what` names an object's own keys). Ops call it once they have done
+// everything else, so every error Python gives comes first.
+void require_finite(const Json& value, const std::string& what = {});
 
 // The role a stroke op's "layer" names: ink, name, or any other role by its name (LayerRole(name)).
 LayerRole stroke_role(const std::string& layer_name);

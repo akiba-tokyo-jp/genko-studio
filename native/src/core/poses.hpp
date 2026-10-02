@@ -19,8 +19,9 @@ std::filesystem::path config_dir();
 // [{name, joints, hands}], oldest first (nothing when the file is missing or not JSON).
 Json user_poses();
 
-// Keeps (or replaces) the pose `name` taken from the figure prim; core::Error("value", "a pose needs a name") for a
-// blank name, core::Error("io") when the file cannot be written.
+// Keeps (or replaces) the pose `name` taken from the figure prim; PyValueError "a pose needs a name" for a blank name,
+// and when the library already holds core::limits::kUserPoses other poses (Python keeps any number); core::Error("io")
+// when the file cannot be written.
 Json save_pose(std::string_view name, const Json& prim);
 
 void delete_pose(std::string_view name);

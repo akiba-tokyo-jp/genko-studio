@@ -530,7 +530,6 @@ int apply(const QStringList& args, bool ascii) {
     }
     if (expect && loaded.document.revision != *expect) throw storage::RevisionConflict(*expect, loaded.document.revision);
 
-<<<<<<< HEAD
     // [{"op": "undo"}] on its own undoes the latest saved change, as `genko undo --as <agent>` does (the same checks:
     // another actor's change, approvals that need a person, an outside edit). Python's apply_ops undoes its session's
     // changes here; a book's saved changes are in its journal. (A dry run only shows the book, as Python's does.)
@@ -552,10 +551,7 @@ int apply(const QStringList& args, bool ascii) {
         return 0;
     }
 
-    const core::CommandBus bus;
-=======
-    const core::CommandBus bus(render::ops_registry());
->>>>>>> native/m3-3d
+    const core::CommandBus bus(render::ops_registry());  // (every op of this build: core's and those that draw)
     const core::ApplyResult result = bus.apply(loaded.document, ops, core::Actor(agent), dry_run);
     Json out = Json::object();
     out["ok"] = true;

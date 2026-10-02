@@ -5,7 +5,9 @@
 //      project.json payload are the same as Python's apply_ops gives, ids counted the same on both sides. Every op of
 //      M2-O1 has 10 or more cases that succeed and 5 or more that fail (undo: test_contract_ops_cli). A case marked
 //      "cpp": "not_yet_ported" is a part of an op this build refuses on purpose (the pixels of a paint layer, the colour
-//      mixing under a line): C++ must refuse it with not_yet_ported.
+//      mixing under a line): C++ must refuse it with not_yet_ported. (The pen lines and erasers that snap to the
+//      rulers are in contract/ruler_cases.json since the rulers became one module: test_contract_rulers compares
+//      them the same way, and saves and reads them back as 4 does.)
 //   2. random op sequences (300, made by `pyref_harness.py make-sequences` with a fixed seed: 1 to 12 ops each, with
 //      for_pages, strict_gates, page locks and other actors) on 20 random books: each step the same as Python's. (The
 //      sequences do not ask for what this build refuses where Python breaks the book: a reorder_layers names the layers
@@ -342,7 +344,7 @@ private slots:
             return genko::storage::load_document(to_path(opsbook_));
         }();
         std::map<std::string, int> counts;  // op → cases saved and read back as they were
-        int unselected = 0, refilled = 0, floated = 0;
+        genko::test::ReadBackNotes notes;
         std::vector<std::string> failures;
         for (std::size_t k = 0; k < chosen.size(); ++k) {
             const Json& c = cases[chosen[k]];
@@ -350,74 +352,10 @@ private slots:
             genko::storage::AssetStore store(to_path(path(QStringLiteral("saved/cpp-store-%1").arg(chosen[k]))));
             genko::core::Document doc;
             genko::test::run_steps(loaded.document, steps_of(c), first_id, store, false, &doc);
-            genko::test::StepOutcome before = genko::test::state_of(doc, store);
-
-            const fs::path dir = to_path(path(QStringLiteral("saved/cpp-%1.genko").arg(chosen[k])));
-            fs::create_directories(dir);
-            {
-                genko::storage::ProjectLock lock(dir, "genko");
-                lock.try_acquire();
-                genko::storage::SaveRequest request;
-                request.ops = Json::array();
-                genko::storage::Saver(lock).save(doc, request);
-            }
-            const auto reread = [&] {
-                const genko::core::ScopedIdSource ids(genko::core::counting_ids());
-                return genko::storage::load_document(dir);
-            }();
-            if (!reread.report.clean()) {
-                failures.push_back(name + ": read back with " + genko::core::dump_python(reread.report.to_json()).substr(0, 600));
-                continue;
-            }
-            const genko::test::StepOutcome after = genko::test::state_of(reread.document, store);
-
-            // the same as Python's, saved and read back
-            const Json& py = python[k].back();
-            std::string where;
-            if (!py.contains("reread")) {
-                failures.push_back(name + ": Python did not read it back");
-                continue;
-            }
-            if (!genko::test::strict_equal(after.full, py["full"], &where)) {
-                failures.push_back(name + ": read back, full snapshot (Python's read back): " + where.substr(0, 1200));
-                continue;
-            }
-            if (!genko::test::strict_equal(after.payload, py["payload"], &where)) {
-                failures.push_back(name + ": read back, payload (Python's read back): " + where.substr(0, 1200));
-                continue;
-            }
-            // the same as before the save, but for the selection, the default layers of a page that had none and the
-            // margins of a paper preset (ints there; Python's reader makes them floats)
-            for (Json* spec : {&before.full["spec"], &before.payload["spec"]}) {
-                if (!spec->contains("margins_mm")) continue;
-                for (Json& margin : (*spec)["margins_mm"]) {
-                    if (margin.is_number_integer()) {
-                        margin = static_cast<double>(margin.get<std::int64_t>());
-                        ++floated;
-                    }
-                }
-            }
-            for (std::size_t p = 0; p < before.full["pages"].size(); ++p) {
-                Json& page = before.full["pages"][p];
-                if (!page["selected_frame_id"].is_null()) ++unselected;
-                page["selected_frame_id"] = nullptr;
-                if (page["layers"].empty() && p < after.full["pages"].size()) {
-                    std::string roles;
-                    for (const Json& layer : after.full["pages"][p]["layers"]) roles += layer["role"].get<std::string>() + " ";
-                    if (roles != "bg name ink finish ") {
-                        failures.push_back(name + ": page " + std::to_string(p + 1) + " had no layers, read back with " + roles);
-                    }
-                    page["layers"] = after.full["pages"][p]["layers"];
-                    before.payload["pages"][p]["layers"] = after.payload["pages"][p]["layers"];
-                    ++refilled;
-                }
-            }
-            if (!genko::test::strict_equal(after.full, before.full, &where)) {
-                failures.push_back(name + ": read back, full snapshot: " + where.substr(0, 1200));
-                continue;
-            }
-            if (!genko::test::strict_equal(after.payload, before.payload, &where)) {
-                failures.push_back(name + ": read back, payload: " + where.substr(0, 1200));
+            const std::string difference = genko::test::read_back_difference(
+                doc, to_path(path(QStringLiteral("saved/cpp-%1.genko").arg(chosen[k]))), store, python[k].back(), notes);
+            if (!difference.empty()) {
+                failures.push_back(name + ": " + difference);
                 continue;
             }
             counts[c["op"].get<std::string>()] += 1;
@@ -432,7 +370,7 @@ private slots:
         }
         qInfo("saved and read back as they were: %s(%d selections not saved, %d pages without layers read back with the "
               "default ones, %d int margins read back as floats)",
-              summary.c_str(), unselected, refilled, floated);
+              summary.c_str(), notes.unselected, notes.refilled, notes.floated);
     }
 };
 

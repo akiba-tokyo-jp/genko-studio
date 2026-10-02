@@ -12,13 +12,13 @@
 
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
-#include "core/op_targets.hpp"
+#include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
-#include "core/pyvalue.hpp"
+#include "core/pyops.hpp"
 #include "render/effects.hpp"
 #include "render/fill_patches.hpp"
-#include "render/render_ops.hpp"
+#include "render/ops_registry.hpp"
 
 namespace genko::render {
 
@@ -28,26 +28,20 @@ using core::Json;
 using core::OpContext;
 using core::OpError;
 
-const Json* find(const Json& object, std::string_view key) {
-    if (!object.is_object()) return nullptr;
-    const auto it = object.find(std::string(key));
-    return it == object.end() ? nullptr : &*it;
-}
-
 const Json* truthy(const Json& op, std::string_view key) {
-    const Json* value = find(op, key);
+    const Json* value = core::get(op, key);
     return value != nullptr && core::py_truthy(*value) ? value : nullptr;
 }
 
 Json op_id(const Json& op) {
-    const Json* id = find(op, "id");
+    const Json* id = core::get(op, "id");
     return id != nullptr ? *id : Json();
 }
 
 // ops._effect(page, effect_id): the position of the first effect whose id == effect_id; OpError "no effect <id>".
 std::size_t effect_index(const core::Page& page, const Json& effect_id) {
     for (std::size_t i = 0; i < page.effects.size(); ++i) {
-        if (core::py_equal(core::py_get(page.effects[i], "id"), effect_id)) return i;
+        if (core::py_equals(core::py_get(page.effects[i], "id"), effect_id)) return i;
     }
     throw OpError("no effect " + core::py_str(effect_id));
 }
@@ -74,7 +68,7 @@ void add_effect(OpContext& c) {
     const Json* id = truthy(c.op, "id");
     effect["id"] = id != nullptr ? core::py_str(*id) : core::new_id();
     effect["kind"] = kind;
-    const Json* given_frame = find(c.op, "frame_id");
+    const Json* given_frame = core::get(c.op, "frame_id");
     effect["frame_id"] = given_frame != nullptr ? *given_frame : Json();
     effect["params"] = params;
     c.doc.edit_page(at).effects.push_back(std::move(effect));
@@ -105,11 +99,11 @@ void edit_effect(OpContext& c) {
     validated(kind, params);
     core::Page& page = c.doc.edit_page(at);
     Json& effect = page.effects[index];
-    if (const Json* frame_id = find(c.op, "frame_id")) {
+    if (const Json* frame_id = core::get(c.op, "frame_id")) {
         if (core::py_truthy(*frame_id)) (void)core::frame_or_fail(page, *frame_id);
         effect["frame_id"] = core::py_truthy(*frame_id) ? *frame_id : Json();
     }
-    if (const Json* visible = find(c.op, "visible")) effect["visible"] = core::py_truthy(*visible);
+    if (const Json* visible = core::get(c.op, "visible")) effect["visible"] = core::py_truthy(*visible);
     core::require_finite(params);
     effect["kind"] = kind;
     effect["params"] = std::move(params);
@@ -122,7 +116,7 @@ void delete_effect(OpContext& c) {
     core::Page& page = c.doc.edit_page(at);
     Json kept = Json::array();
     for (const Json& e : page.effects) {
-        if (!core::py_equal(core::py_get(e, "id"), id)) kept.push_back(e);
+        if (!core::py_equals(core::py_get(e, "id"), id)) kept.push_back(e);
     }
     page.effects = std::move(kept);
 }
@@ -169,8 +163,7 @@ void to_layer(const Json& effect, const core::Page& page, core::Layer& layer) {
     layer.strokes = core::make_strokes(std::move(items));
 }
 
-void effect_to_layer(OpContext& c) {
-    core::check_strict_raster_edit(c.doc, c.op, "effect_to_layer");
+void effect_to_layer(OpContext& c) {  // (strict_gates: the CommandBus's check of the raster edits)
     const std::size_t at = core::require_page(c.doc, c.op);
     const Json id = op_id(c.op);
     const Json effect = c.doc.page(at).effects[effect_index(c.doc.page(at), id)];
@@ -180,7 +173,7 @@ void effect_to_layer(OpContext& c) {
     if (truthy(c.op, "keep") == nullptr) {
         Json kept = Json::array();
         for (const Json& e : page.effects) {
-            if (!core::py_equal(core::py_get(e, "id"), id)) kept.push_back(e);
+            if (!core::py_equals(core::py_get(e, "id"), id)) kept.push_back(e);
         }
         page.effects = std::move(kept);
     }

@@ -32,9 +32,7 @@ using Line2 = std::vector<Point2>;
 
 inline constexpr std::int64_t kMaxFaces = 30000;  // mesh3d.MAX_FACES
 inline constexpr int kSmooth = 1000;               // added to a face's part when it belongs to a rounded piece
-// The most vertices and face corners a model may bring (the C++ build only: Python reads any number of them).
-inline constexpr std::int64_t kMaxVertices = 8 * kMaxFaces;
-inline constexpr std::int64_t kMaxCorners = 16 * kMaxFaces;
+// (the most vertices and face corners a model may bring, the C++ build's alone: core/limits.hpp)
 
 extern const std::array<std::string_view, 17> kFigureJoints;  // FIGURE_JOINTS
 extern const std::array<std::string_view, 6> kHandPoses;      // HAND_POSES
@@ -127,9 +125,8 @@ struct Raster {
     bool alpha(std::size_t i) const;
     bool any() const;
 };
-// The most pixels a picture of surfaces may have (a larger one is core::Error("image_too_large"), where numpy would
-// run out of memory).
-inline constexpr std::int64_t kMaxRasterPixels = 200'000'000;
+// A picture of surfaces of more than limits::kSurfacePixels is core::Error("image_too_large"), where numpy would run out
+// of memory.
 Raster raster(std::span<const Json> prims, int width, int height, double dpi, const Json* camera, const Json* light,
               double ambient, double box_x = 0.0, double box_y = 0.0, const Window* window = nullptr);
 

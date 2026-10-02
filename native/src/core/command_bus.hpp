@@ -55,8 +55,10 @@ struct OpContext {
 
 using OpFunction = std::function<void(OpContext&)>;
 
-// The ops by name. builtin() holds the ops this build implements, each with Python's arguments, behaviour and
-// messages; the other ops of the public list (`genko schema`) come with later milestones.
+// The ops by name, each with Python's arguments, behaviour and messages; the other ops of the public list (`genko
+// schema`) come with later milestones. builtin() holds core's ops (register_core_ops); every entry point that applies
+// ops (the command line, the tests) uses render::ops_registry(), which has those and the ops that draw (tones, effect
+// lines, 3D: render/ops_registry.hpp).
 class OpRegistry {
 public:
     static const OpRegistry& builtin();
@@ -87,8 +89,9 @@ public:
     //
     // As Python's apply_ops: for_pages is expanded first (against the book as it was given); then each op is checked
     // (its area, the page locks and approvals, strict_gates) and applied. An op of the public list that this build
-    // does not have is refused with not_yet_ported, never skipped; so is an area that would need resolving (the
-    // selection's kinds beyond {poly} and {mask}: M3).
+    // does not have is refused with not_yet_ported, never skipped. An area is resolved as selops.resolve does it: a
+    // rect or an ellipse alone becomes its polygon; one that needs the selection tools (layer, color, all, saved,
+    // union, intersect, subtract, invert, grow_mm, feather_mm) is refused with not_yet_ported.
     ApplyResult apply(const Document& doc, const Json& ops, const Actor& actor, bool dry_run = false) const;
 
 private:
@@ -122,6 +125,11 @@ Json expand_for_pages(const Document& doc, const Json& op);
 // union, intersect, subtract, invert, grow_mm, feather_mm).
 bool area_needs_resolving(const Json& area);
 
+// selops.resolve for the areas that are only geometry: {rect: [x, y, w, h]} or {ellipse: [x, y, w, h]} alone as
+// {poly} (rect_poly, ellipse_poly); Python's ValueError and TypeError for a box that is not four numbers. Nothing for
+// the other kinds, which need the selection tools.
+std::optional<Json> resolve_plain_area(const Json& area);
+
 // --- helpers shared by the op implementations -------------------------------------------------------------------
 
 // Python's _require_page: the position of the first page whose index is int(op["page"]). Throws OpError("page (int)
@@ -153,8 +161,7 @@ void register_book_ops(OpRegistry& registry);
 // Register the ruler ops of M3 (set_ruler, add_ruler, edit_ruler, delete_ruler, ruler_to_layer).
 void register_ruler_ops(OpRegistry& registry);
 
-// The ops of the libraries above core (genko_render_ops: tones, effects, …) join builtin() through a registrar each
-// such library adds once, before builtin() is first used (from a static initializer: render/render_ops.hpp).
-void add_builtin_registrar(void (*registrar)(OpRegistry&));
+// Register every op of core: the book ops, the frame, page, stroke and layer ops, the ruler ops (what builtin() holds).
+void register_core_ops(OpRegistry& registry);
 
 }  // namespace genko::core

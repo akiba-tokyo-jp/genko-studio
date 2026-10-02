@@ -5,9 +5,10 @@
 //    every border style, paper colours, rulers and onion skins; in print, proof and name at 72, 150 and 350 dpi;
 //  - the three legacy books (data/legacy);
 //  - a line added to a page drawn before (the remembered layer picture is drawn on, as in Python).
-// Pages with what this step does not draw yet (lines and balloons, nombres, tones, effect lines, 3D guides, placed
-// pictures and their finish, cover folds, animation, layer screens) must say so (NotYetPorted) and are then drawn
-// with skip_unported, against Python with the same things left out.
+// Tone layers, effect lines and layer screens (M3-B) and the 3D guides (M3-C) are drawn on both sides. Pages with
+// what this step does not draw yet (lines and balloons, nombres, placed pictures and their finish, cover folds,
+// animation) must say so (NotYetPorted) and are then drawn with skip_unported, against Python with the same things
+// left out.
 // Regions: parts of a page drawn alone are the same as the whole page cut (with and without remembered lines).
 // Skipped without the Python reference.
 
@@ -83,7 +84,7 @@ class TestContractRender : public QObject {
             add(page.index);
             if (page.onion_from) add(*page.onion_from);
         } else {
-            out = {"balloons", "nombre", "tones", "effects", "prims", "screen", "placed", "covers", "anim", "finish"};
+            out = {"balloons", "nombre", "placed", "covers", "anim", "finish"};
         }
         out.erase("onion");
         return out;

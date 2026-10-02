@@ -17,9 +17,11 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "core/limits.hpp"
 #include "core/linalg3.hpp"
 #include "core/model.hpp"
 #include "core/poses.hpp"
+#include "core/pynum.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -450,14 +452,25 @@ private slots:
             const std::string error = error_of(base_, Json::array({std::move(op)}));
             QVERIFY2(error.starts_with("ops[0] " + name + ": " + reason), error.c_str());
         };
-        refused(Json::object({{"op", "add_figure"}, {"page", 1}, {"pos", Json::array({inf, 0, 0})}}), "pos is [x, y, z]");
+        // (a number that is not finite: "<key> must be a finite number", once the op has done everything else, as the
+        // other ops have it)
+        refused(Json::object({{"op", "add_figure"}, {"page", 1}, {"pos", Json::array({inf, 0, 0})}}), "pos must be a finite number");
+        refused(Json::object({{"op", "add_figure"}, {"page", 1}, {"joints", ops(R"({"l_knee": {"x": 1}})")}, {"rot", Json::array({0, inf, 0})}}),
+                "rot must be a finite number");
+        refused(Json::object({{"op", "pose_figure"}, {"page", 1}, {"id", "fig"}, {"height_mm", inf}}), "height_mm must be a finite number");
         refused(Json::object({{"op", "add_head"}, {"page", 1}, {"size_mm", inf}}), "size_mm must be a finite number");
         refused(Json::object({{"op", "set_camera"}, {"page", 1}, {"turn", inf}}), "turn must be a finite number");
-        refused(Json::object({{"op", "set_light"}, {"page", 1}, {"dir", Json::array({inf, 0, 0})}}), "dir is [x, y, z]");
-        refused(Json::object({{"op", "edit_prim"}, {"page", 1}, {"id", "box"}, {"pos", Json::array({inf, 1, 1})}}), "pos is [x, y, z]");
+        refused(Json::object({{"op", "set_camera"}, {"page", 1}, {"target", Json::array({inf, 5})}}), "target must be a finite number");
+        refused(Json::object({{"op", "set_light"}, {"page", 1}, {"dir", Json::array({inf, 0, 0})}}), "dir must be a finite number");
+        refused(Json::object({{"op", "edit_prim"}, {"page", 1}, {"id", "box"}, {"pos", Json::array({inf, 1, 1})}}), "pos must be a finite number");
+        refused(Json::object({{"op", "add_prim3d"}, {"page", 1}, {"focal_mm", inf}}), "focal_mm must be a finite number");
+        refused(Json::object({{"op", "add_scene"}, {"page", 1}, {"size", inf}}), "size must be a finite number");
+        refused(Json::object({{"op", "add_mannequin"}, {"page", 1}, {"height_mm", inf}}), "height_mm must be a finite number");
         refused(Json::object({{"op", "trace_prims"}, {"page", 1}, {"layer_id", "pen"}, {"width_mm", inf}}), "width_mm must be a finite number");
         refused(Json::object({{"op", "render_prims"}, {"page", 1}, {"layer_id", "paint"}, {"tone", Json::object({{"angle", inf}})}}),
-                "screen angle must be a finite number");
+                "tone.angle must be a finite number");
+        // Python's own errors come first: a hand of an unknown side (ApplyError) with a size of infinity
+        refused(Json::object({{"op", "add_hand"}, {"page", 1}, {"size_mm", inf}, {"side", "x"}}), "side is l or r");
         refused(Json::object({{"op", "add_mannequin"}, {"page", 1}, {"height_mm", -50}}), "a mannequin's height must be above 0");
         refused(Json::object({{"op", "add_mannequin"}, {"page", 1}, {"pos", Json::array({"a", "b"})}}), "pos is [x, y, z]");
         refused(Json::object({{"op", "pose_mannequin"}, {"page", 1}, {"id", "man"}, {"joints", ops(R"({"l_arm": {"yaw": "x"}})")}}),
@@ -470,7 +483,7 @@ private slots:
         const Json loop = ops(R"({"scenes": [{"nodes": [0]}], "nodes": [{"children": [1]}, {"children": [0]}]})");
         refused(Json::object({{"op", "import_model"}, {"page", 1}, {"gltf", genko::core::dump_python(loop)}}), "the model's nodes contain themselves");
         std::string huge;
-        for (int i = 0; i <= genko::core::mesh3d::kMaxVertices; ++i) huge += "v " + std::to_string(i % 1000) + " " + std::to_string(i / 1000) + " 0\n";
+        for (int i = 0; i <= genko::core::limits::kModelVertices; ++i) huge += "v " + std::to_string(i % 1000) + " " + std::to_string(i / 1000) + " 0\n";
         huge += "f 1 2 3\n";
         refused(Json::object({{"op", "import_model"}, {"page", 1}, {"obj", huge}}), "the model has too many corners (at most 240000)");
         refused(Json::object({{"op", "import_model"}, {"page", 1}, {"obj", "v 1e999 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 3"}}),
@@ -482,6 +495,44 @@ private slots:
         QCOMPARE(error_of(base_, Json::array({Json::object({{"op", "pose_figure"}, {"page", 1}, {"id", "fig"},
                                                              {"drag", Json::object({{"handle", "r_hand"}, {"to", Json::array({inf, 0})}})}})})),
                  std::string("(applied)"));
+    }
+
+    void renderPrimsKeepsOwnCameraAlive() {
+        Document doc = base_;
+        doc.edit_page(0).extra.erase("camera");
+        const Json camera = ops(R"({"turn":0.25,"tip":0,"focal_mm":400,"target":[100,150]})");
+        for (Json& p : doc.edit_page(0).prims) {
+            if (p.value("id", std::string()) == "box") p["camera"] = camera;
+        }
+        const Json batch = ops(R"([{"op":"render_prims","page":1,"ids":["box"],"layer_id":"pen","surfaces":false,"lines":true}])");
+        const Document own = bus().apply(doc, batch, Actor("genko")).doc;
+        doc.edit_page(0).extra["camera"] = camera;
+        const Document shared = bus().apply(doc, batch, Actor("genko")).doc;
+        const auto& a = layer(own, "pen")->strokes->items;
+        const auto& b = layer(shared, "pen")->strokes->items;
+        QVERIFY(!a.empty());
+        QCOMPARE(a.size(), b.size());
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            QCOMPARE(a[i]->points.size(), b[i]->points.size());
+            for (std::size_t k = 0; k < a[i]->points.size(); ++k) {
+                QCOMPARE(a[i]->points[k].x, b[i]->points[k].x);
+                QCOMPARE(a[i]->points[k].y, b[i]->points[k].y);
+            }
+        }
+    }
+
+    // A mannequin-specific op may not rewrite a different kind of 3D object (SPEC COMP-01a).
+    void mannequinKindRefusal() {
+        const Json before = held(base_);
+        for (const char* id : {"box", "fig", "head", "hand"}) {
+            const Json batch = Json::array({Json::object({{"op", "set_note"}, {"page", 1}, {"note", "rollback"}}),
+                                           Json::object({{"op", "pose_mannequin"}, {"page", 1}, {"id", id}, {"height_mm", 100}})});
+            const std::string error = error_of(base_, batch);
+            QVERIFY2(error.starts_with("ops[1] pose_mannequin: 3D " + std::string(id) + " is not a mannequin"), error.c_str());
+            same(held(base_), before, "book after wrong-kind refusal");
+        }
+        const auto changed = bus().apply(base_, ops(R"([{"op":"pose_mannequin","page":1,"id":"man","height_mm":100}])"), Actor("genko"));
+        QCOMPARE((*prim(changed.doc, "man"))["size"], Json::array({50.0, 100.0, 25.0}));
     }
 
     // What is too large to draw (the C++ build only: Python would draw a street's floor lines for as long as it takes,
@@ -527,6 +578,18 @@ private slots:
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, poses::save_pose("  ", figure));
         poses::delete_pose("立ち");
         QVERIFY(!poses::find("立ち").has_value());
+        // at most limits::kUserPoses poses (Python keeps any number): a new name past them is refused, a pose kept is
+        // replaced. (The full library written at once: each save reads and writes the whole file.)
+        Json full = Json::array();
+        for (std::size_t i = 0; i < genko::core::limits::kUserPoses; ++i) {
+            full.push_back(Json::object({{"name", "p" + std::to_string(i)}, {"joints", Json::object()}, {"hands", Json::object()}}));
+        }
+        genko::test::write_bytes(config.path() + "/poses.json", genko::core::dump_python(full));
+        QCOMPARE(poses::user_poses().size(), genko::core::limits::kUserPoses);
+        QVERIFY_THROWS_EXCEPTION(genko::core::PyValueError, poses::save_pose("one more", figure));
+        (void)poses::save_pose("p7", ops(R"({"joints": {"head": {"y": 0.25}}})"));
+        QCOMPARE((*poses::find("p7"))["joints"], ops(R"({"head": {"y": 0.25}})"));
+        QCOMPARE(poses::user_poses().size(), genko::core::limits::kUserPoses);
         genko::test::write_bytes(config.path() + "/poses.json", "not json");
         QCOMPARE(poses::user_poses(), Json::array());  // (a file that is not JSON: none)
         QCOMPARE(QString::fromStdString(genko::storage::path_to_utf8(poses::config_dir())), config.path());
@@ -564,11 +627,10 @@ private slots:
 
     // A few of the numbers the geometry rests on (all of it against Python: test_contract_3d_geometry).
     void geometryBasics() {
-        namespace la = genko::core::la;
-        QCOMPARE(la::py_remainder(5.5, 2.0), -0.5);  // (math.remainder: to the nearest, halves to even)
-        QCOMPARE(la::py_remainder(7.0, 2.0), -1.0);
-        QCOMPARE(la::py_remainder(-7.0, 2.0), 1.0);
-        QCOMPARE(la::py_hypot3(3.0, 4.0, 12.0), 13.0);
+        QCOMPARE(genko::core::py_remainder(5.5, 2.0), -0.5);  // (math.remainder: to the nearest, halves to even)
+        QCOMPARE(genko::core::py_remainder(7.0, 2.0), -1.0);
+        QCOMPARE(genko::core::py_remainder(-7.0, 2.0), 1.0);
+        QCOMPARE(genko::core::py_hypot(3.0, 4.0, 12.0), 13.0);
         // a page's surfaces drawn in a window are the whole picture's pixels there
         const std::vector<Json> prims(base_.page(0).prims.begin(), base_.page(0).prims.end());
         const auto whole = genko::core::mesh3d::raster(prims, 300, 400, 40.0, nullptr, nullptr, 0.35);

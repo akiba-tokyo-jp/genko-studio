@@ -8,10 +8,11 @@
 #include <optional>
 
 #include "core/frames.hpp"
+#include "core/limits.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
+#include "core/pyops.hpp"
 #include "core/pyrandom.hpp"
-#include "core/pyvalue.hpp"
 #include "core/stroke_geom.hpp"
 #include "render/brushes.hpp"
 #include "render/draw.hpp"
@@ -24,12 +25,13 @@ namespace {
 
 using core::Json;
 using core::kPi;
-using core::math_cos;  // (math.cos: ValueError for an infinity, as in Python)
-using core::math_sin;
+using core::py_cos;  // (math.cos: ValueError for an infinity, as in Python)
+using core::py_max;
+using core::py_min;
+using core::py_sin;
 
 constexpr double kDegToRad = kPi / 180.0;  // math.radians
 constexpr double kFadeMm = 3.0;            // FADE_MM: how long a cut line takes to thin out to nothing
-constexpr std::int64_t kMaxLines = 100'000;
 
 Size size_of(const Box& b) { return Size{b.width(), b.height()}; }
 bool intersects(const Box& a, const Box& b) { return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1; }
@@ -38,8 +40,6 @@ Box intersection(const Box& a, const Box& b) {
 }
 Box shifted(const Box& b, int dx, int dy) { return Box{b.x0 + dx, b.y0 + dy, b.x1 + dx, b.y1 + dy}; }
 
-double pmin(double a, double b) { return b < a ? b : a; }
-double pmax(double a, double b) { return b > a ? b : a; }
 double dist(const XY& a, const XY& b) { return core::py_dist(a.x, a.y, b.x, b.y); }
 double r3(double v) { return core::py_round(v, 3); }
 
@@ -54,7 +54,7 @@ double fget(const Json& params, const char* key, const Json& fallback) { return 
 // for x, y in pairs: (float(x), float(y)) — each item unpacked into two
 XY pair_of(const Json& item) {
     if (item.is_array() || item.is_string() || item.is_object()) {
-        const Json values = core::py_iter(item);
+        const std::vector<Json> values = core::iterate(item);
         if (values.size() != 2) {
             throw core::PyValueError(values.size() > 2 ? "too many values to unpack (expected 2)"
                                                        : "not enough values to unpack (expected 2, got " + std::to_string(values.size()) + ")");
@@ -66,8 +66,8 @@ XY pair_of(const Json& item) {
 
 // (float(p[0]), float(p[1]))
 XY xy_of(const Json& p) {
-    const double x = core::to_float(core::py_item(p, 0));
-    const double y = core::to_float(core::py_item(p, 1));
+    const double x = core::to_float(core::subscript(p, 0));
+    const double y = core::to_float(core::subscript(p, 1));
     return XY{x, y};
 }
 
@@ -86,10 +86,10 @@ std::pair<std::vector<XY>, std::array<double, 4>> area(const Json& effect, const
     }
     double x0 = outline.front().x, y0 = outline.front().y, x1 = x0, y1 = y0;
     for (const XY& p : outline) {
-        x0 = pmin(x0, p.x);
-        y0 = pmin(y0, p.y);
-        x1 = pmax(x1, p.x);
-        y1 = pmax(y1, p.y);
+        x0 = py_min(x0, p.x);
+        y0 = py_min(y0, p.y);
+        x1 = py_max(x1, p.x);
+        y1 = py_max(y1, p.y);
     }
     return {outline, {x0, y0, x1 - x0, y1 - y0}};
 }
@@ -103,16 +103,16 @@ XY centre_of(const Json& params, const std::array<double, 4>& box) {
 XY inner_of(const Json& params, const std::array<double, 4>& box) {
     if (core::py_truthy(pget(params, "inner"))) {
         const XY r = pair_of(params.at("inner"));
-        return XY{pmax(0.5, r.x), pmax(0.5, r.y)};
+        return XY{py_max(0.5, r.x), py_max(0.5, r.y)};
     }
     const double share = fget(params, "clear", Json(0.4));  // old books: the clear middle as a share of the panel
-    return XY{pmax(0.5, box[2] / 2 * share), pmax(0.5, box[3] / 2 * share)};
+    return XY{py_max(0.5, box[2] / 2 * share), py_max(0.5, box[3] / 2 * share)};
 }
 
 // _ray_to(shape, centre, angle): how far from `centre` a ray at `angle` meets the outline `shape`.
 double ray_to(const std::vector<XY>& shape, const XY& centre, double angle) {
-    const double dx = math_cos(angle);
-    const double dy = math_sin(angle);
+    const double dx = py_cos(angle);
+    const double dy = py_sin(angle);
     std::optional<double> best;
     for (std::size_t i = 0; i < shape.size(); ++i) {
         const XY& a = shape[i];
@@ -132,7 +132,7 @@ double ray_to(const std::vector<XY>& shape, const XY& centre, double angle) {
 std::string taper_of(const Json& params, const std::string& fallback) {
     const Json value = pget(params, "taper", Json(true));
     if ((value.is_boolean() && value.get<bool>()) || is_str(value, "True")) return fallback;
-    if (core::py_equal(value, Json(false)) || value.is_null() || is_str(value, "") || is_str(value, "none")) return "";
+    if (core::py_equals(value, Json(false)) || value.is_null() || is_str(value, "") || is_str(value, "none")) return "";
     if (is_str(value, "in") || is_str(value, "out") || is_str(value, "both")) return value.get<std::string>();
     return fallback;
 }
@@ -140,15 +140,15 @@ std::string taper_of(const Json& params, const std::string& fallback) {
 // _jitter(params, what): 乱れ by kind; each falls back to the one `jitter`.
 double jitter_of(const Json& params, const std::string& what) {
     const Json value = pget(params, ("jitter_" + what).c_str(), pget(params, "jitter", Json(0.25)));
-    return pmax(0.0, pmin(1.0, core::to_float(value)));
+    return py_max(0.0, py_min(1.0, core::to_float(value)));
 }
 
 // _slot(i, count, params, r): まとまり
 std::optional<double> slot_of(std::int64_t i, std::int64_t count, const Json& params, double r) {
-    const std::int64_t size = core::to_int(core::py_or(pget(params, "bundle", Json(1)), Json(1)));
+    const std::int64_t size = core::to_int_held(core::py_or(pget(params, "bundle", Json(1)), Json(1)));
     if (size <= 1) return std::nullopt;
-    const double gap = pmax(0.0, pmin(0.95, fget(params, "bundle_gap", Json(0.5))));
-    const auto groups = core::py_int_of(std::ceil(static_cast<double>(count) / static_cast<double>(size)));
+    const double gap = py_max(0.0, py_min(0.95, fget(params, "bundle_gap", Json(0.5))));
+    const auto groups = core::py_trunc_held(std::ceil(static_cast<double>(count) / static_cast<double>(size)));
     const std::int64_t b = i / size;  // (i >= 0, size > 1: Python's divmod)
     const std::int64_t k = i % size;
     const double spread = (1 - gap) / static_cast<double>(size);
@@ -169,7 +169,7 @@ std::vector<std::array<double, 3>> line_of(const XY& a, const XY& b, const std::
         } else if (taper == "in") {
             p = 1 - t * 0.97;
         } else if (taper == "both") {
-            p = 0.03 + 0.97 * math_sin(kPi * t);
+            p = 0.03 + 0.97 * py_sin(kPi * t);
         }
         out.push_back({r3(a.x + (b.x - a.x) * t), r3(a.y + (b.y - a.y) * t), r3(p)});
     }
@@ -177,13 +177,13 @@ std::vector<std::array<double, 3>> line_of(const XY& a, const XY& b, const std::
 }
 
 std::int64_t count_of(const Json& params, const char* key, std::int64_t fallback) {
-    return core::checked_count(core::to_int(pget(params, key, Json(fallback))), kMaxLines);
+    return core::checked_count(core::to_int_held(pget(params, key, Json(fallback))), core::limits::kEffectLines);
 }
 
 // _speed_along(params, rng, box): 流線 along a curve.
 std::vector<Line> speed_along(const Json& params, core::PyRandom& rng, const std::array<double, 4>& box) {
     std::vector<XY> raw;
-    for (const Json& p : core::py_iter(params.at("path"))) raw.push_back(xy_of(p));
+    for (const Json& p : core::iterate(params.at("path"))) raw.push_back(xy_of(p));
     std::vector<XY> dense{raw.front()};
     std::vector<XY> ext;
     ext.push_back(raw.front());
@@ -194,7 +194,7 @@ std::vector<Line> speed_along(const Json& params, core::PyRandom& rng, const std
         const XY& p1 = ext[i];
         const XY& p2 = ext[i + 1];
         const XY& p3 = ext[i + 2];
-        const auto n = core::checked_count(std::max<std::int64_t>(2, core::py_int_of(dist(p1, p2) / 1.5)));
+        const auto n = core::checked_count(std::max<std::int64_t>(2, core::py_trunc_held(dist(p1, p2) / 1.5)));
         for (std::int64_t k = 1; k <= n; ++k) {
             const double t = static_cast<double>(k) / static_cast<double>(n);
             const auto coord = [&](double q0, double q1, double q2, double q3) {
@@ -211,7 +211,7 @@ std::vector<Line> speed_along(const Json& params, core::PyRandom& rng, const std
     const double width = fget(params, "width_mm", Json(0.5));
     const double share = fget(params, "length", Json(0.7));
     const double jitter = fget(params, "jitter", Json(0.25));
-    const double spread = fget(params, "spread_mm", Json(pmin(box[2], box[3]) * 0.5));
+    const double spread = fget(params, "spread_mm", Json(py_min(box[2], box[3]) * 0.5));
     const Json taper_value = pget(params, "taper", Json(true));
     const bool taper = !(taper_value.is_boolean() && !taper_value.get<bool>());
 
@@ -219,7 +219,7 @@ std::vector<Line> speed_along(const Json& params, core::PyRandom& rng, const std
         double x, y, nx, ny;
     };
     const auto at = [&](double s) {
-        s = pmax(0.0, pmin(total, s));
+        s = py_max(0.0, py_min(total, s));
         std::size_t k = lengths.size() - 2;
         for (std::size_t i = 0; i + 1 < lengths.size(); ++i) {
             if (lengths[i + 1] >= s) {
@@ -242,12 +242,12 @@ std::vector<Line> speed_along(const Json& params, core::PyRandom& rng, const std
         const double offset = spread * ((static_cast<double>(i) + rng.random()) / static_cast<double>(count) - 0.5);
         const double length = total * share * (1 - jitter * rng.random() * 0.8);
         const double start = (total - length) * rng.random();
-        const auto steps = core::checked_count(std::max<std::int64_t>(8, core::py_int_of(length / 2)));
+        const auto steps = core::checked_count(std::max<std::int64_t>(8, core::py_trunc_held(length / 2)));
         Line line;
         for (std::int64_t k = 0; k < steps; ++k) {
             const double t = static_cast<double>(k) / static_cast<double>(steps - 1);
             const At q = at(start + length * t);
-            const double p = taper ? 0.03 + 0.97 * math_sin(kPi * t) : 1.0;
+            const double p = taper ? 0.03 + 0.97 * py_sin(kPi * t) : 1.0;
             line.points.push_back({r3(q.x + q.nx * offset), r3(q.y + q.ny * offset), r3(p)});
         }
         line.width_mm = width * (0.5 + rng.random());
@@ -260,9 +260,9 @@ std::vector<Line> speed_along(const Json& params, core::PyRandom& rng, const std
 
 std::pair<std::vector<Shape>, std::optional<std::vector<XY>>> clearing(const Json& params) {
     std::vector<Shape> shapes;
-    for (const Json& shape : core::py_iter(core::py_or(pget(params, "avoid"), Json::array()))) {
+    for (const Json& shape : core::iterate(core::py_or(pget(params, "avoid"), Json::array()))) {
         if (shape.is_object() && core::py_truthy(core::py_get(shape, "ellipse"))) {
-            const Json values = core::py_iter(shape.at("ellipse"));
+            const std::vector<Json> values = core::iterate(shape.at("ellipse"));
             if (values.size() != 4) {
                 throw core::PyValueError(values.size() > 4 ? "too many values to unpack (expected 4)"
                                                            : "not enough values to unpack (expected 4, got " + std::to_string(values.size()) + ")");
@@ -271,14 +271,14 @@ std::pair<std::vector<Shape>, std::optional<std::vector<XY>>> clearing(const Jso
             s.ellipse = true;
             for (std::size_t i = 0; i < 4; ++i) s.box[i] = core::to_float(values[i]);
             if (s.box[2] > 0 && s.box[3] > 0) shapes.push_back(std::move(s));
-        } else if (shape.is_object() && core::py_len(core::py_or(core::py_get(shape, "path"), Json::array())) >= 3) {
+        } else if (shape.is_object() && core::length(core::py_or(core::py_get(shape, "path"), Json::array())) >= 3) {
             Shape s;
-            for (const Json& p : core::py_iter(shape.at("path"))) s.path.push_back(xy_of(p));
+            for (const Json& p : core::iterate(shape.at("path"))) s.path.push_back(xy_of(p));
             shapes.push_back(std::move(s));
         }
     }
     std::vector<XY> within;
-    for (const Json& p : core::py_iter(core::py_or(pget(params, "within"), Json::array()))) within.push_back(xy_of(p));
+    for (const Json& p : core::iterate(core::py_or(pget(params, "within"), Json::array()))) within.push_back(xy_of(p));
     if (within.size() >= 3) return {shapes, within};
     return {shapes, std::nullopt};
 }
@@ -318,7 +318,7 @@ std::vector<Line> keep_clear(const std::vector<Line>& lines, const std::vector<S
         for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
             const auto& a = pts[i];
             const auto& b = pts[i + 1];
-            const auto n = core::checked_count(std::max<std::int64_t>(1, core::py_int_of(core::py_dist(a[0], a[1], b[0], b[1]) / 0.4)));
+            const auto n = core::checked_count(std::max<std::int64_t>(1, core::py_trunc_held(core::py_dist(a[0], a[1], b[0], b[1]) / 0.4)));
             for (std::int64_t k = 0; k < n; ++k) {
                 const double t = static_cast<double>(k) / static_cast<double>(n);
                 dense.push_back({a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t});
@@ -348,7 +348,7 @@ std::vector<Line> keep_clear(const std::vector<Line>& lines, const std::vector<S
             }
             const double length = core::py_float_sum(parts);
             if (length >= 1.5) {
-                const double fade = pmin(kFadeMm, length * 0.45);
+                const double fade = py_min(kFadeMm, length * 0.45);
                 const bool cuts[2][2] = {{i > 0, false}, {j < dense.size() - 1, true}};
                 for (const auto& cut : cuts) {
                     if (!cut[0]) continue;
@@ -390,7 +390,7 @@ void validate(const Json& kind, const Json& params) {
         for (const auto& k : all) names += (names.empty() ? "" : ", ") + k;
         throw core::PyValueError("kind must be one of " + names);
     }
-    for (const Json& shape : core::py_iter(core::py_or(pget(params, "avoid"), Json::array()))) {
+    for (const Json& shape : core::iterate(core::py_or(pget(params, "avoid"), Json::array()))) {
         bool good = false;
         if (shape.is_object()) {
             const Json ellipse = core::py_get(shape, "ellipse");
@@ -399,21 +399,21 @@ void validate(const Json& kind, const Json& params) {
         }
         if (!good) throw core::PyValueError("avoid is a list of {\"ellipse\": [cx, cy, rx, ry]} or {\"path\": [[x, y], …]} (3 points or more)");
     }
-    if (!pget(params, "within").is_null() && core::py_len(core::py_or(pget(params, "within"), Json::array())) < 3) {
+    if (!pget(params, "within").is_null() && core::length(core::py_or(pget(params, "within"), Json::array())) < 3) {
         throw core::PyValueError("within is a shape of 3 points or more");
     }
-    if (core::to_int(core::py_or(pget(params, "count", Json(1)), Json(1))) > 2000 ||
-        core::to_int(core::py_or(pget(params, "spikes", Json(1)), Json(1))) > 2000) {
+    if (core::to_int_held(core::py_or(pget(params, "count", Json(1)), Json(1))) > 2000 ||
+        core::to_int_held(core::py_or(pget(params, "spikes", Json(1)), Json(1))) > 2000) {
         throw core::PyValueError("too many lines (at most 2000)");
     }
     const Json taper = pget(params, "taper");
-    const bool taper_ok = taper.is_null() || core::py_equal(taper, Json(true)) || core::py_equal(taper, Json(false)) ||
+    const bool taper_ok = taper.is_null() || core::py_equals(taper, Json(true)) || core::py_equals(taper, Json(false)) ||
                           is_str(taper, "True") || is_str(taper, "") || is_str(taper, "none") || is_str(taper, "in") ||
                           is_str(taper, "out") || is_str(taper, "both");
     if (!taper_ok) throw core::PyValueError("taper is in, out, both or false");
     const Json bundle = pget(params, "bundle");
     if (!bundle.is_null()) {
-        const std::int64_t n = core::to_int(bundle);
+        const std::int64_t n = core::to_int_held(bundle);
         if (!(1 <= n && n <= 50)) throw core::PyValueError("bundle is 1 to 50 lines");
     }
     for (const char* key : {"jitter", "depth", "length", "jitter_length", "jitter_position", "jitter_width"}) {
@@ -431,7 +431,7 @@ Geometry geometry(const Json& effect, const core::Page& page) {
     const double x = box[0], y = box[1], w = box[2], h = box[3];
     core::PyRandom rng = core::PyRandom::from_str(core::py_str(pget(params, "seed", core::py_get(effect, "id"))));
     Geometry geo;
-    for (const Json& v : core::py_iter(core::py_or(pget(params, "rgb"), Json::array({15, 15, 15})))) geo.rgb.push_back(core::to_int(v));
+    for (const Json& v : core::iterate(core::py_or(pget(params, "rgb"), Json::array({15, 15, 15})))) geo.rgb.push_back(core::to_int_held(v));
     const double jitter = fget(params, "jitter", Json(0.25));
     if (is_str(kind, "focus")) {
         const XY c = centre_of(params, box);
@@ -441,7 +441,7 @@ Geometry geometry(const Json& effect, const core::Page& page) {
         const double outer = core::py_hypot(w, h) + core::py_hypot(c.x - (x + w / 2), c.y - (y + h / 2));
         const std::string taper = taper_of(params, "in");
         std::vector<XY> shape;
-        for (const Json& p : core::py_iter(core::py_or(pget(params, "inner_path"), Json::array()))) shape.push_back(xy_of(p));
+        for (const Json& p : core::iterate(core::py_or(pget(params, "inner_path"), Json::array()))) shape.push_back(xy_of(p));
         const double twist = fget(params, "twist", Json(0)) * kDegToRad;
         const bool own = params.contains("jitter_length") || params.contains("jitter_position") || params.contains("jitter_width");
         for (std::int64_t i = 0; i < count; ++i) {
@@ -461,11 +461,11 @@ Geometry geometry(const Json& effect, const core::Page& page) {
             XY inner_pt;
             if (shape.size() >= 3) {
                 const double reach = ray_to(shape, c, a);
-                inner_pt = XY{c.x + reach * stop * math_cos(a), c.y + reach * stop * math_sin(a)};
+                inner_pt = XY{c.x + reach * stop * py_cos(a), c.y + reach * stop * py_sin(a)};
             } else {
-                inner_pt = XY{c.x + inner.x * stop * math_cos(a), c.y + inner.y * stop * math_sin(a)};
+                inner_pt = XY{c.x + inner.x * stop * py_cos(a), c.y + inner.y * stop * py_sin(a)};
             }
-            XY outer_pt{c.x + outer * math_cos(a), c.y + outer * math_sin(a)};
+            XY outer_pt{c.x + outer * py_cos(a), c.y + outer * py_sin(a)};
             if (core::py_truthy(pget(params, "length_mm"))) {  // (線の長さ: from where it stops, straight out from the middle)
                 double away = dist(c, inner_pt);
                 if (away == 0.0) away = 1.0;
@@ -483,20 +483,20 @@ Geometry geometry(const Json& effect, const core::Page& page) {
                     const double turn = twist * core::py_pow(1 - static_cast<double>(k) / static_cast<double>(n - 1), 2.0);
                     const double dx = p[0] - c.x;
                     const double dy = p[1] - c.y;
-                    p[0] = r3(c.x + dx * math_cos(turn) - dy * math_sin(turn));
-                    p[1] = r3(c.y + dx * math_sin(turn) + dy * math_cos(turn));
+                    p[0] = r3(c.x + dx * py_cos(turn) - dy * py_sin(turn));
+                    p[1] = r3(c.y + dx * py_sin(turn) + dy * py_cos(turn));
                 }
             }
             const double spread = rng.random();
             const double thick = own ? width * (1 + jitter_of(params, "width") * (spread * 2 - 1) * 1.6) : width * (0.6 + spread * 0.8);
-            line.width_mm = pmax(0.02, thick);
+            line.width_mm = py_max(0.02, thick);
             geo.lines.push_back(std::move(line));
         }
-    } else if (is_str(kind, "speed") && core::py_len(core::py_or(pget(params, "path"), Json::array())) >= 2) {
+    } else if (is_str(kind, "speed") && core::length(core::py_or(pget(params, "path"), Json::array())) >= 2) {
         geo.lines = speed_along(params, rng, box);
     } else if (is_str(kind, "speed")) {
         const double angle = fget(params, "angle", Json(0)) * kDegToRad;
-        const XY d{math_cos(angle), math_sin(angle)};
+        const XY d{py_cos(angle), py_sin(angle)};
         const XY n{-d.y, d.x};
         std::int64_t count = count_of(params, "count", 40);
         const double width = fget(params, "width_mm", Json(0.5));
@@ -513,18 +513,18 @@ Geometry geometry(const Json& effect, const core::Page& page) {
         }
         double lo = across.front(), hi = across.front(), a0 = along.front(), a1 = along.front();
         for (const double v : across) {
-            lo = pmin(lo, v);
-            hi = pmax(hi, v);
+            lo = py_min(lo, v);
+            hi = py_max(hi, v);
         }
         for (const double v : along) {
-            a0 = pmin(a0, v);
-            a1 = pmax(a1, v);
+            a0 = py_min(a0, v);
+            a1 = py_max(a1, v);
         }
         const double span = a1 - a0;
         const std::string taper = taper_of(params, "both");
         if (core::py_truthy(pget(params, "spacing_mm"))) {  // (線の間隔 instead of how many)
             count = std::max<std::int64_t>(
-                2, std::min<std::int64_t>(2000, core::py_int_of((hi - lo) / pmax(0.2, core::to_float(params.at("spacing_mm"))))));
+                2, std::min<std::int64_t>(2000, core::py_trunc_held((hi - lo) / py_max(0.2, core::to_float(params.at("spacing_mm"))))));
         }
         const bool own = params.contains("jitter_length") || params.contains("jitter_position") || params.contains("jitter_width");
         for (std::int64_t i = 0; i < count; ++i) {
@@ -552,7 +552,7 @@ Geometry geometry(const Json& effect, const core::Page& page) {
                 const double py = cy + d.y * along_t + n.y * (offset + bow);
                 double p = 1.0;
                 if (taper == "both") {
-                    p = 0.03 + 0.97 * math_sin(kPi * t);
+                    p = 0.03 + 0.97 * py_sin(kPi * t);
                 } else if (taper == "in") {
                     p = 1 - 0.97 * t;
                 } else if (taper == "out") {
@@ -562,7 +562,7 @@ Geometry geometry(const Json& effect, const core::Page& page) {
             }
             const double spread = rng.random();
             const double thick = own ? width * (1 + jitter_of(params, "width") * (spread * 2 - 1) * 1.6) : width * (0.5 + spread);
-            line.width_mm = pmax(0.02, thick);
+            line.width_mm = py_max(0.02, thick);
             geo.lines.push_back(std::move(line));
         }
     } else if (is_str(kind, "uni_flash")) {
@@ -570,14 +570,14 @@ Geometry geometry(const Json& effect, const core::Page& page) {
         const XY inner = inner_of(params, box);
         const std::int64_t count = count_of(params, "count", 140);
         const double width = fget(params, "width_mm", Json(0.35));
-        const double length = fget(params, "length_mm", Json(pmax(8.0, pmin(w, h) * 0.18)));
+        const double length = fget(params, "length_mm", Json(py_max(8.0, py_min(w, h) * 0.18)));
         for (std::int64_t i = 0; i < count; ++i) {
             const double a = 2 * kPi * (static_cast<double>(i) + rng.random() * 0.8) / static_cast<double>(count);
             const double start = 1 + jitter * (rng.random() - 0.5) * 0.3;
             const double size = length * (1 - jitter * rng.random() * 0.7);
-            const XY p0{c.x + inner.x * start * math_cos(a), c.y + inner.y * start * math_sin(a)};
-            const double k = size / pmax(1e-6, core::py_hypot(inner.x * math_cos(a), inner.y * math_sin(a)));
-            const XY p1{p0.x + inner.x * k * math_cos(a), p0.y + inner.y * k * math_sin(a)};
+            const XY p0{c.x + inner.x * start * py_cos(a), c.y + inner.y * start * py_sin(a)};
+            const double k = size / py_max(1e-6, core::py_hypot(inner.x * py_cos(a), inner.y * py_sin(a)));
+            const XY p1{p0.x + inner.x * k * py_cos(a), p0.y + inner.y * k * py_sin(a)};
             Line line;
             line.points = line_of(p0, p1, "both");
             line.width_mm = width * (0.7 + rng.random() * 0.6);
@@ -595,11 +595,11 @@ Geometry geometry(const Json& effect, const core::Page& page) {
             const double a = kPi * static_cast<double>(i) / static_cast<double>(spikes);
             double r = 0.0;
             if (i % 2 != 0) {  // a white spike's tip, out in the black
-                r = 1 + (reach / pmax(inner.x, inner.y) - 1) * depth * (0.55 + rng.random() * 0.9 * (0.5 + jitter));
+                r = 1 + (reach / py_max(inner.x, inner.y) - 1) * depth * (0.55 + rng.random() * 0.9 * (0.5 + jitter));
             } else {
                 r = 1 + jitter * 0.15 * rng.random();
             }
-            star.points.push_back(XY{r3(c.x + inner.x * r * math_cos(a)), r3(c.y + inner.y * r * math_sin(a))});
+            star.points.push_back(XY{r3(c.x + inner.x * r * py_cos(a)), r3(c.y + inner.y * r * py_sin(a))});
         }
         star.rgb = {255, 255, 255};
         geo.fills.push_back(std::move(star));

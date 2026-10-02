@@ -76,13 +76,9 @@ private slots:
     void not_yet_ported_data() {
         QTest::addColumn<QString>("what");
         QTest::addColumn<QString>("mode");
-<<<<<<< HEAD
-        for (const char* what : {"balloons", "nombre", "prims", "covers", "anim", "placed"}) {
-            const char* mode = std::string(what) == "prims" || std::string(what) == "covers" ? "proof" : "print";
-=======
-        for (const char* what : {"balloons", "nombre", "tones", "effects", "covers", "anim", "screen", "placed"}) {
+        // (tones, effect lines and screens are drawn since M3-B, the 3D guides since M3-C)
+        for (const char* what : {"balloons", "nombre", "covers", "anim", "placed"}) {
             const char* mode = std::string(what) == "covers" ? "proof" : "print";
->>>>>>> native/m3-3d
             QTest::newRow(what) << QString(what) << QString(mode);
         }
     }
@@ -95,21 +91,8 @@ private slots:
         const std::string w = what.toStdString();
         if (w == "balloons") doc.add_line(page.index, "台詞", "A", std::nullopt, "", Num(10), Num(12));
         if (w == "nombre") page.numero = true;
-        if (w == "tones") {
-            Layer tone;
-            tone.id = genko::core::new_id();
-            tone.role = LayerRole::Tone;
-            tone.kind = LayerKind::Tone;
-            page.layers.push_back(tone);
-        }
-        if (w == "effects") page.effects = Json::array({Json::object({{"kind", "speed"}})});
         if (w == "covers") page.extra["cover"] = Json::object({{"kind", "jacket"}, {"spine_mm", 5}, {"flap_mm", 10}});
         if (w == "anim") page.extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
-        if (w == "screen") {  // (on a layer with lines: an empty layer is never screened)
-            for (auto& layer : page.layers) {
-                if (layer.role == LayerRole::Ink) layer.screen = Json::object({{"pattern", "dot"}, {"lpi", 60}});
-            }
-        }
         if (w == "placed") {
             Layer placed;
             placed.id = genko::core::new_id();

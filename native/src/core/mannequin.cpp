@@ -8,7 +8,7 @@
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
-#include "core/pyvalue.hpp"
+#include "core/pyops.hpp"
 
 namespace genko::core::mannequin {
 
@@ -16,8 +16,6 @@ const std::array<std::string_view, 16> kJoints{"hip",     "spine",   "neck",  "h
                                                "l_wrist", "r_wrist", "l_leg", "r_leg", "l_knee", "r_knee",  "l_ankle", "r_ankle"};
 
 namespace {
-
-double py_max(double a, double b) { return b > a ? b : a; }
 
 constexpr std::string_view kHandles[][3] = {
     {"chest", "pelvis", "spine"},       {"head", "neck", "head"},          {"l_elbow", "l_shoulder", "l_arm"},
@@ -31,28 +29,28 @@ constexpr std::string_view kHandles[][3] = {
 Json joints_of(const Json& prim) {
     Json joints = default_joints();
     static const Json kNone = Json::object();
-    const Json& own = pyv::get_or(prim, "joints", kNone);
-    if (!own.is_object()) throw Error("type", "'" + py_type_name(own) + "' object is not a mapping");
+    const Json& own = get_else(prim, "joints", kNone);
+    if (!own.is_object()) throw PyTypeError("'" + py_type_name(own) + "' object is not a mapping");
     for (const auto& [k, v] : own.items()) joints[k] = v;
     return joints;
 }
 
 // _joint: (yaw, pitch)
 std::pair<double, double> joint(const Json& joints, std::string_view name) {
-    const Json* slot_value = pyv::get(joints, name);
+    const Json* slot_value = dict_get(joints, name);
     static const Json kNone = Json::object();
     const Json& slot = slot_value != nullptr && py_truthy(*slot_value) ? *slot_value : kNone;
-    const Json* yaw = pyv::get(slot, "yaw");
-    const Json* pitch = pyv::get(slot, "pitch");
-    const double y = yaw != nullptr ? pyv::to_float(*yaw) : 0.0;
-    const double p = pitch != nullptr ? pyv::to_float(*pitch) : 0.0;
+    const Json* yaw = dict_get(slot, "yaw");
+    const Json* pitch = dict_get(slot, "pitch");
+    const double y = yaw != nullptr ? to_float(*yaw) : 0.0;
+    const double p = pitch != nullptr ? to_float(*pitch) : 0.0;
     return {y, p};
 }
 
 // [x, y, z…] + [0, 0, 0] of prim["rot"]
 Json rot_items(const Json& prim) {
     static const Json kNone = Json::array({0, 0, 0});
-    Json rot = py_list(pyv::get_or(prim, "rot", kNone));
+    Json rot = py_list(get_else(prim, "rot", kNone));
     for (int i = 0; i < 3; ++i) rot.push_back(0);
     return rot;
 }
@@ -93,8 +91,8 @@ Json default_joints() {
 }
 
 void apply_preset(Json& prim, std::string_view name) {
-    const Json* preset = pyv::find(presets(), name);
-    if (preset == nullptr) throw Error("value", "preset must be one of " + names_of_presets());
+    const Json* preset = get(presets(), name);
+    if (preset == nullptr) throw PyValueError("preset must be one of " + names_of_presets());
     Json joints = default_joints();
     for (const auto& [key, values] : preset->items()) {
         if (key == "rot") {
@@ -116,26 +114,26 @@ const Point2& Bone::point(std::string_view name) const {
 
 Bone skeleton(const Json& prim) {
     static const Json kDefaultPos = Json::array({100, 160, 0});
-    const Json& pos_value = pyv::get_or(prim, "pos", kDefaultPos);
-    Json first = pos_value.is_array() ? pyv::slice(pos_value, 0, 2)
-                                      : (pos_value.is_string() ? pyv::slice(py_list(pos_value), 0, 2) : Json());
+    const Json& pos_value = get_else(prim, "pos", kDefaultPos);
+    Json first = pos_value.is_array() ? py_slice(pos_value, 0, 2)
+                                      : (pos_value.is_string() ? py_slice(py_list(pos_value), 0, 2) : Json());
     if (first.is_null()) {
-        throw Error("type", pos_value.is_object() ? "unhashable type: 'slice'"
+        throw PyTypeError(pos_value.is_object() ? "unhashable type: 'slice'"
                                                   : "'" + py_type_name(pos_value) + "' object is not subscriptable");
     }
     std::vector<double> xy;
-    for (const Json& v : first) xy.push_back(pyv::to_float(v));
-    if (xy.size() != 2) throw Error("value", "not enough values to unpack (expected 2, got " + std::to_string(xy.size()) + ")");
+    for (const Json& v : first) xy.push_back(to_float(v));
+    if (xy.size() != 2) throw PyValueError("not enough values to unpack (expected 2, got " + std::to_string(xy.size()) + ")");
     const double x0 = xy[0];
     const double y0 = xy[1];
     static const Json kDefaultSize = Json::array({40, 80, 20});
-    const Json& size = pyv::get_or(prim, "size", kDefaultSize);
-    double height = pyv::to_float(size.is_array() ? pyv::at(size, 1) : size);
+    const Json& size = get_else(prim, "size", kDefaultSize);
+    double height = to_float(size.is_array() ? subscript(size, 1) : size);
     if (height == 0.0) height = 80.0;
     const Json rot = rot_items(prim);
-    const double tip = pyv::to_float(rot[0]);
-    const double turn = pyv::to_float(rot[1]);
-    const double lean = pyv::to_float(rot[2]);
+    const double tip = to_float(rot[0]);
+    const double turn = to_float(rot[1]);
+    const double lean = to_float(rot[2]);
     const Json joints = joints_of(prim);
     const double unit = height / 8.0;  // one head
     const double narrow = std::fabs(py_cos(turn));  // widths as seen when the figure turns
@@ -240,10 +238,10 @@ Bone skeleton(const Json& prim) {
 Json pose_to(const Json& prim, std::string_view handle, const Json& target) {
     if (handle == "pelvis") {
         static const Json kDefault = Json::array({100, 160, 0});
-        Json pos = py_list(pyv::get_or(prim, "pos", kDefault));
+        Json pos = py_list(get_else(prim, "pos", kDefault));
         for (int i = 0; i < 3; ++i) pos.push_back(0);
-        const double x = pyv::to_float(pyv::at(target, 0));
-        const double y = pyv::to_float(pyv::at(target, 1));
+        const double x = to_float(subscript(target, 0));
+        const double y = to_float(subscript(target, 1));
         return Json::object({{"pos", Json::array({py_round(x, 3), py_round(y, 3), pos[2]})}});
     }
     const std::string_view* found = nullptr;
@@ -253,18 +251,18 @@ Json pose_to(const Json& prim, std::string_view handle, const Json& target) {
     if (found == nullptr) {
         std::string names;
         for (const auto& h : kHandles) names += (names.empty() ? "" : ", ") + std::string(h[0]);
-        throw Error("value", "handle must be pelvis or one of " + names);
+        throw PyValueError("handle must be pelvis or one of " + names);
     }
     const Bone bone = skeleton(prim);
     const std::string_view base_name = found[1];
     const std::string joint_name(found[2]);
     const Point2 base = bone.point(base_name);
     const Json rot = rot_items(prim);
-    const double lean = pyv::to_float(rot[2]);
-    const double squash = py_max(0.2, std::fabs(py_cos(pyv::to_float(rot[0]))));
+    const double lean = to_float(rot[2]);
+    const double squash = py_max(0.2, std::fabs(py_cos(to_float(rot[0]))));
     const int facing = bone.facing;
-    const double dx = pyv::to_float(pyv::at(target, 0)) - base[0];
-    const double dy = pyv::to_float(pyv::at(target, 1)) - base[1];
+    const double dx = to_float(subscript(target, 0)) - base[0];
+    const double dy = to_float(subscript(target, 1)) - base[1];
     if (py_hypot(dx, dy) < 1e-6) return Json::object();
     const double a = py_atan2(dx, dy / squash) - lean;  // the drawn angle (0 = down the page)
     const Json joints = joints_of(prim);

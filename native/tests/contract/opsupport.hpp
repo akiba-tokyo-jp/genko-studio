@@ -47,4 +47,19 @@ StepOutcome state_of(const core::Document& doc, storage::AssetStore& store);
 // "<exception>: <message>" (where Python's command line stops with a traceback).
 std::string compare_step(const StepOutcome& cpp, const core::Json& python);
 
+// What saving a book and reading it back leaves out on both sides (Python's save_episode and load_episode, this
+// build's Saver and reader), counted: the frame selected, the layers of a page that has none (read back with the
+// default ones), the int margins of a paper preset (read back as floats).
+struct ReadBackNotes {
+    int unselected = 0;
+    int refilled = 0;
+    int floated = 0;
+};
+
+// `doc` saved by storage::Saver as a new v4 book in `dir` and read back: "" when it reads back as it was (but for what
+// `notes` counts) and as Python's book saved by save_episode and read back (`reread`: the "reread" record of a harness
+// "steps" job); else what differs. `store` holds the assets the payloads refer to.
+std::string read_back_difference(const core::Document& doc, const std::filesystem::path& dir, storage::AssetStore& store,
+                                 const core::Json& reread, ReadBackNotes& notes);
+
 }  // namespace genko::test

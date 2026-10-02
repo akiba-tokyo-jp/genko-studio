@@ -19,22 +19,14 @@
 #include "core/pyconv.hpp"
 #include "core/placement.hpp"
 #include "core/pynum.hpp"
-<<<<<<< HEAD
 #include "core/pyops.hpp"
 #include "core/strokes.hpp"
-=======
-#include "core/pyvalue.hpp"
-#include "core/stroke_geom.hpp"
->>>>>>> native/m3-tones
 #include "render/brushes.hpp"
 #include "render/effects.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
-<<<<<<< HEAD
-#include "render/tones.hpp"
-=======
 #include "render/prims.hpp"
->>>>>>> native/m3-3d
+#include "render/tones.hpp"
 
 namespace genko::render {
 
@@ -620,7 +612,7 @@ Image screened_layer(const Ctx& ctx, const Layer& layer, const Image& raster, co
 Image draw_effects(const Ctx& ctx, const Image& image, const Box& area) {
     Image rgba = image.convert("RGBA");
     bool drawn = false;
-    for (const Json& effect : core::py_iter(ctx.page->effects)) {
+    for (const Json& effect : core::iterate(ctx.page->effects)) {
         if (!effects::drawn(effect)) continue;
         rgba = effects::draw(std::move(rgba), effect, *ctx.page, ctx.dpi, ctx.size, area);
         drawn = true;
@@ -851,13 +843,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     }
     Image image = rgba.convert("RGB");
 
-<<<<<<< HEAD
-    if (core::py_truthy(page.effects)) image = draw_effects(ctx, image, area);
-    if (!print && core::py_truthy(page.prims)) skip_unported(ctx, "prims");
-=======
-    if (effects_draw(page)) skip_unported(ctx, "effects");
-    if (!print && core::py_truthy(page.prims)) draw_prims(image, area, ctx);  // 3D guides (never printed)
->>>>>>> native/m3-3d
+    if (core::py_truthy(page.effects)) image = draw_effects(ctx, image, area);  // effect lines (M3-B)
+    if (!print && core::py_truthy(page.prims)) draw_prims(image, area, ctx);  // 3D guides, never printed (M3-C)
     if (truthy_json(page.ruler) && name_or_proof) draw_ruler(image, area, ctx);
     draw_frames(image, area, page, ctx.size, dpi);
     if (name_or_proof && get(page.extra, "cover") != nullptr && core::py_truthy(*get(page.extra, "cover")) && folds_draw(page)) {

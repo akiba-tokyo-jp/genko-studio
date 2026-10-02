@@ -8,9 +8,10 @@
 #include <string>
 
 #include "core/error.hpp"
+#include "core/limits.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
-#include "core/pyvalue.hpp"
+#include "core/pyops.hpp"
 
 namespace genko::core::poses {
 
@@ -98,7 +99,7 @@ Json user_poses() {
     if (!data.is_array()) return out;
     for (const Json& p : data) {
         if (!p.is_object()) continue;
-        const Json* name = pyv::find(p, "name");
+        const Json* name = get(p, "name");
         if (name != nullptr && py_truthy(*name)) out.push_back(p);
     }
     return out;
@@ -106,20 +107,24 @@ Json user_poses() {
 
 Json save_pose(std::string_view name_in, const Json& prim) {
     const std::string name = strip(name_in);
-    if (name.empty()) throw Error("value", "a pose needs a name");
+    if (name.empty()) throw PyValueError("a pose needs a name");
     static const Json kNone = Json::object();
-    const Json& joints = pyv::get_or(prim, "joints", kNone);
-    if (!joints.is_object()) pyv::raise_attribute(joints, "items");
+    const Json& joints = get_else(prim, "joints", kNone);
+    if (!joints.is_object()) raise_attribute_error(joints, "items");
     Json copied = Json::object();
     for (const auto& [k, v] : joints.items()) copied[k] = py_dict(v);
     Json pose = Json::object();
     pose["name"] = name;
     pose["joints"] = std::move(copied);
-    pose["hands"] = py_dict(pyv::get_or(prim, "hands", kNone));
+    pose["hands"] = py_dict(get_else(prim, "hands", kNone));
     Json kept = Json::array();
     for (const Json& p : user_poses()) {
-        const Json* own = pyv::find(p, "name");
-        if (!(own != nullptr && pyv::eq(*own, Json(name)))) kept.push_back(p);
+        const Json* own = get(p, "name");
+        if (!(own != nullptr && py_equals(*own, Json(name)))) kept.push_back(p);
+    }
+    // (Python keeps any number; the file is read and written whole at each save)
+    if (kept.size() >= limits::kUserPoses) {
+        throw PyValueError("the pose library is full (at most " + std::to_string(limits::kUserPoses) + " poses): delete one first");
     }
     kept.push_back(pose);
     write(kept);
@@ -129,16 +134,16 @@ Json save_pose(std::string_view name_in, const Json& prim) {
 void delete_pose(std::string_view name) {
     Json kept = Json::array();
     for (const Json& p : user_poses()) {
-        const Json* own = pyv::find(p, "name");
-        if (!(own != nullptr && pyv::eq(*own, Json(std::string(name))))) kept.push_back(p);
+        const Json* own = get(p, "name");
+        if (!(own != nullptr && py_equals(*own, Json(std::string(name))))) kept.push_back(p);
     }
     write(kept);
 }
 
 std::optional<Json> find(std::string_view name) {
     for (const Json& p : user_poses()) {
-        const Json* own = pyv::find(p, "name");
-        if (own != nullptr && pyv::eq(*own, Json(std::string(name)))) return p;
+        const Json* own = get(p, "name");
+        if (own != nullptr && py_equals(*own, Json(std::string(name)))) return std::make_optional<Json>(p);
     }
     return std::nullopt;
 }

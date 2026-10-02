@@ -1,9 +1,12 @@
 // The tone ops (Python's ops._apply_one: add_tone with _new_tone, set_tone, delete_tone). A tone layer's patch (its
 // area, panel or the region a fill would take) is made here as Python makes it (genko/fill.py), so these ops are in
-// genko_render_ops.
+// genko_render_ops. (An area of a rect or an ellipse comes resolved to its polygon by the CommandBus, as Python's
+// apply_ops resolves it.)
 //
 // Where Python would keep a number that is not finite (an offset or angle of "inf" or "nan", written by its json.dumps
-// as Infinity / NaN), the op is refused: a book never holds one (docs/cpp-migration/ARCHITECTURE.md §3).
+// as Infinity / NaN), the op is refused: a book never holds one (docs/cpp-migration/ARCHITECTURE.md §3). Python's
+// delete_tone takes away any layer of the id it is given, a pen or paint layer with its drawing too: refused here
+// (docs/cpp-migration/SPEC.md COMP-01a).
 
 #include <cmath>
 #include <optional>
@@ -11,15 +14,15 @@
 #include "core/command_bus.hpp"
 #include "core/frames.hpp"
 #include "core/ids.hpp"
-#include "core/op_targets.hpp"
+#include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
-#include "core/pyvalue.hpp"
+#include "core/pyops.hpp"
 #include "render/fill_patches.hpp"
+#include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
-#include "render/render_ops.hpp"
 #include "render/tones.hpp"
 
 namespace genko::render {
@@ -30,39 +33,46 @@ using core::Json;
 using core::OpContext;
 using core::OpError;
 
-const Json* find(const Json& object, std::string_view key) {
-    if (!object.is_object()) return nullptr;
-    const auto it = object.find(std::string(key));
-    return it == object.end() ? nullptr : &*it;
-}
-
 const Json* given(const Json& op, std::string_view key) {
-    const Json* value = find(op, key);
+    const Json* value = core::get(op, key);
     return value != nullptr && !value->is_null() ? value : nullptr;
 }
 
 const Json* truthy(const Json& op, std::string_view key) {
-    const Json* value = find(op, key);
+    const Json* value = core::get(op, key);
     return value != nullptr && core::py_truthy(*value) ? value : nullptr;
 }
 
+// A tone layer, as set_tone takes one (its kind or its role is tone).
+bool is_tone(const core::Layer& layer) { return layer.kind == core::LayerKind::Tone || layer.role == core::LayerRole::Tone; }
+
 // The op is refused when the layer would keep a number that is not finite (Python keeps it and writes Infinity or NaN
 // into project.json). Checked once the op has done everything else, so every other error comes first, as in Python.
-void require_finite(const core::Layer& layer) {
+void require_finite_tone(const core::Layer& layer) {
     if (!std::isfinite(layer.angle)) throw OpError("angle must be a finite number");
-    if (layer.tone) core::require_finite(*layer.tone);  // (offset_mm, gradient.angle, …)
+    if (layer.tone) {
+        core::require_finite(*layer.tone);  // (offset_mm, gradient.angle, …)
+        // Gradient angles are stored as supplied, including numeric strings; inspect the value the renderer reads.
+        const Json* gradient = core::get(*layer.tone, "gradient");
+        if (gradient != nullptr && core::py_truthy(*gradient)) {
+            const Json* angle = core::get(*gradient, "angle");
+            if (angle != nullptr && !std::isfinite(core::to_float(*angle))) {
+                throw OpError("gradient.angle must be a finite number");
+            }
+        }
+    }
 }
 
 // _tone_screen_keys(tone, op): 網の種類 (dot_shape) and 網のずれ (offset_mm; move_by adds to it); null takes them away.
 void tone_screen_keys(Json& tone, const Json& op) {
-    if (const Json* shape = find(op, "dot_shape")) {
+    if (const Json* shape = core::get(op, "dot_shape")) {
         if (shape->is_null() || (shape->is_string() && (shape->get<std::string>().empty() || shape->get<std::string>() == "round"))) {
             tone.erase("dot_shape");
         } else {
             tone["dot_shape"] = core::py_str(*shape);
         }
     }
-    const Json* offset = find(op, "offset_mm");
+    const Json* offset = core::get(op, "offset_mm");
     const Json* move = truthy(op, "move_by_mm");
     if (offset == nullptr && move == nullptr) return;
     const Json base = offset != nullptr ? *offset : core::py_get(tone, "offset_mm");
@@ -70,7 +80,7 @@ void tone_screen_keys(Json& tone, const Json& op) {
     double y = 0.0;
     try {
         const auto pair = [](const Json& value) {
-            const Json items = core::py_iter(value);
+            const std::vector<Json> items = core::iterate(value);
             if (items.size() != 2) throw core::PyValueError("unpack");
             return std::pair<double, double>{core::to_float(items[0]), core::to_float(items[1])};
         };
@@ -115,54 +125,12 @@ void validated(const Json& tone) {
     }
 }
 
-// selops.resolve for the areas that are only geometry (a rect or an ellipse alone): the polygon they are.
-Json resolved_area(const Json& area) {
-    static const char* const kExtra[] = {"rect", "ellipse", "layer", "color", "all", "saved", "union", "intersect",
-                                         "subtract", "invert", "grow_mm", "feather_mm"};
-    if (!area.is_object()) return area;
-    bool needs = false;
-    for (const char* key : kExtra) needs = needs || area.contains(key);
-    if (!needs) return area;
-    const auto only = [&](const char* key) {
-        for (const auto& [k, v] : area.items()) {
-            if (k != key) return false;
-        }
-        return true;
-    };
-    const auto box_of = [](const Json& box) {
-        const Json items = core::py_iter(box);
-        if (items.size() != 4) {
-            throw core::PyValueError(items.size() > 4 ? "too many values to unpack (expected 4)"
-                                                      : "not enough values to unpack (expected 4, got " + std::to_string(items.size()) + ")");
-        }
-        return std::array<double, 4>{core::to_float(items[0]), core::to_float(items[1]), core::to_float(items[2]), core::to_float(items[3])};
-    };
-    if (only("rect")) {
-        const auto [x, y, w, h] = box_of(area.at("rect"));
-        return Json::object({{"poly", Json::array({Json::array({x, y}), Json::array({x + w, y}), Json::array({x + w, y + h}),
-                                                    Json::array({x, y + h})})}});
-    }
-    if (only("ellipse")) {
-        const auto [x, y, w, h] = box_of(area.at("ellipse"));
-        const double cx = x + w / 2, cy = y + h / 2, rx = w / 2, ry = h / 2;
-        Json poly = Json::array();
-        constexpr double kTau = 6.283185307179586;
-        for (int k = 0; k < 72; ++k) {
-            const double angle = kTau * k / 72;
-            poly.push_back(Json::array({core::py_round(cx + rx * core::math_cos(angle), 3), core::py_round(cy + ry * core::math_sin(angle), 3)}));
-        }
-        return Json::object({{"poly", std::move(poly)}});
-    }
-    // (an area made of layers, colours, saved areas, unions …: worked out by the selection tools, not ported yet)
-    throw OpError("an area of this kind (" + core::py_str(area) + ") is not implemented in this build yet");
-}
-
 // ops._area(op): a {poly} or {mask} area.
 Json area_of(const Json& op) {
-    const Json area = resolved_area(core::py_or(core::py_get(op, "area"), Json::object()));
+    const Json area = core::py_or(core::py_get(op, "area"), Json::object());
     const Json poly = core::py_get(area, "poly");
     if (core::py_truthy(poly)) {
-        if (core::py_len(poly) < 3) throw OpError("an area needs at least three corners");
+        if (core::length(poly) < 3) throw OpError("an area needs at least three corners");
         return area;
     }
     const Json mask = core::py_get(area, "mask");
@@ -172,9 +140,9 @@ Json area_of(const Json& op) {
 
 std::vector<std::array<double, 2>> points_of(const Json& points) {
     std::vector<std::array<double, 2>> out;
-    for (const Json& p : core::py_iter(points)) {
-        const double x = core::to_float(core::py_item(p, 0));
-        const double y = core::to_float(core::py_item(p, 1));
+    for (const Json& p : core::iterate(points)) {
+        const double x = core::to_float(core::subscript(p, 0));
+        const double y = core::to_float(core::subscript(p, 1));
         out.push_back({x, y});
     }
     return out;
@@ -309,28 +277,28 @@ void add_tone(OpContext& c) {
     if (const Json* after = truthy(c.op, "after")) {
         place = page.layers.size() + 1;
         for (std::size_t i = 0; i < page.layers.size(); ++i) {
-            if (core::py_equal(Json(page.layers[i].id), *after)) {
+            if (core::py_equals(Json(page.layers[i].id), *after)) {
                 place = i + 1;
                 break;
             }
         }
         if (place > page.layers.size()) throw OpError("no layer " + core::py_str(*after));
     }
-    require_finite(layer);
+    require_finite_tone(layer);
     page.layers.insert(page.layers.begin() + static_cast<std::ptrdiff_t>(place), std::move(layer));
 }
 
 void set_tone(OpContext& c) {
     const std::size_t at = core::require_page(c.doc, c.op);
-    const Json* id = find(c.op, "id");
-    const std::size_t index = core::layer_index_by_id(c.doc.page(at), core::py_str(id != nullptr ? *id : Json()));
+    const Json* id = core::get(c.op, "id");
+    const std::size_t index = core::layer_by_id(c.doc.page(at), core::py_str(id != nullptr ? *id : Json()));
     core::Page& page = c.doc.edit_page(at);
     core::Layer& layer = page.layers[index];
-    if (layer.kind != core::LayerKind::Tone && layer.role != core::LayerRole::Tone) throw OpError("that layer is not a tone");
+    if (!is_tone(layer)) throw OpError("that layer is not a tone");
     Json tone = layer.tone && layer.tone->is_object() ? *layer.tone : Json::object();
     if (const Json* pattern = truthy(c.op, "pattern")) tone["pattern"] = core::py_str(*pattern);
     for (const char* key : {"scale_mm", "tile_png"}) {
-        if (const Json* value = find(c.op, key)) {
+        if (const Json* value = core::get(c.op, key)) {
             if (value->is_null()) {
                 tone.erase(key);
             } else {
@@ -338,23 +306,28 @@ void set_tone(OpContext& c) {
             }
         }
     }
-    if (const Json* gradient = find(c.op, "gradient")) tone["gradient"] = core::py_truthy(*gradient) ? core::py_dict(*gradient) : Json();
+    if (const Json* gradient = core::get(c.op, "gradient")) tone["gradient"] = core::py_truthy(*gradient) ? core::py_dict(*gradient) : Json();
     tone_screen_keys(tone, c.op);
     validated(tone);
     layer.tone = tone;
     tone_numbers(layer, c.op);
     if (const Json* name = truthy(c.op, "name")) layer.title = core::py_str(*name);
-    require_finite(layer);
+    require_finite_tone(layer);
 }
 
 void delete_tone(OpContext& c) {
     const std::size_t at = core::require_page(c.doc, c.op);
-    const Json* id = find(c.op, "id");
+    const Json* id = core::get(c.op, "id");
     const Json tone_id = id != nullptr ? *id : Json();
     const core::Page& seen = c.doc.page(at);
     std::vector<core::Layer> kept;
     for (const core::Layer& layer : seen.layers) {
-        if (!core::py_equal(Json(layer.id), tone_id)) kept.push_back(layer);
+        if (!core::py_equals(Json(layer.id), tone_id)) {
+            kept.push_back(layer);
+        } else if (!is_tone(layer)) {
+            // (Python takes this layer away too, its drawing with it: a tone op does not delete another kind of layer)
+            throw OpError("layer " + layer.id + " is not a tone layer");
+        }
     }
     if (kept.size() == seen.layers.size()) throw OpError("no tone " + core::py_str(tone_id));
     c.doc.edit_page(at).layers = std::move(kept);

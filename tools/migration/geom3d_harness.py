@@ -924,7 +924,8 @@ def random_op(rng, book: dict) -> dict:
     index = page["index"] if rng.random() < 0.95 else 9
     prims = page["prims"] or ["nothing"]
     figures = page["figures"] or prims
-    mannequins = page["mannequins"] or prims
+    # Wrong-kind rewriting is tested as a refusal in test_ops_3d/m3_kind_check, not as Python-compatible success.
+    mannequins = page["mannequins"] or ["nothing"]
     layers = page["layers"] or ["nothing"]
     pos = [round(rng.uniform(0, 180), 2), round(rng.uniform(0, 260), 2), rng.choice([0, round(rng.uniform(-50, 150), 1)])]
     new = "n%04d" % rng.randrange(10000)

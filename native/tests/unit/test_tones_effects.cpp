@@ -22,8 +22,8 @@
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
-#include "core/pyvalue.hpp"
 #include "m3b_support.hpp"
+#include "render/ops_registry.hpp"
 #include "render/effects.hpp"
 #include "render/npcompat.hpp"
 #include "render/page.hpp"
@@ -149,9 +149,13 @@ private slots:
     void initTestCase() { QVERIFY(scratch_.isValid()); }
     void init() { render::clear_render_caches(); }
 
-    void the_ops_are_built_in_where_pages_are_drawn() {
+    void the_ops_are_in_the_registry() {
         for (const char* name : {"add_tone", "set_tone", "delete_tone", "add_effect", "edit_effect", "delete_effect", "effect_to_layer",
                                  "add_ruler", "edit_ruler", "delete_ruler", "set_ruler", "ruler_to_layer"}) {
+            QVERIFY2(render::ops_registry().find(name) != nullptr, name);
+        }
+        // (the rulers are core's: no pictures)
+        for (const char* name : {"add_ruler", "edit_ruler", "delete_ruler", "set_ruler", "ruler_to_layer"}) {
             QVERIFY2(genko::core::OpRegistry::builtin().find(name) != nullptr, name);
         }
     }
@@ -205,7 +209,9 @@ private slots:
             {R"([{"op": "add_tone", "page": 1, "area": {"mask": {"box": [5, 5, 10, 10], "png": "$EMPTYPNG"}}}])", "ops[0] add_tone: the area is empty"},
             {R"([{"op": "add_tone", "page": 1, "after": "nope"}])", "ops[0] add_tone: no layer nope"},
             {R"([{"op": "add_tone", "page": 1, "angle": "inf"}])", "ops[0] add_tone: angle must be a finite number"},
-            {R"([{"op": "add_tone", "page": 1, "area": {"layer": "x"}}])", "ops[0] add_tone: an area of this kind"}};
+            {R"([{"op": "add_tone", "page": 1, "area": {"layer": "x"}}])", "ops[0] add_tone: an area of this kind"},
+            {R"([{"op": "add_tone", "page": 1, "area": {"rect": [1, 2, 3]}}])",
+             "ops[0] add_tone: a value of the wrong type (not enough values to unpack (expected 4, got 3))"}};
         const Values empty{{"$EMPTYPNG", genko::core::b64encode(render::write_png(render::Image::create("L", render::Size{4, 4}, render::Ink(0))))}};
         for (const auto& [ops, message] : refused) {
             QVERIFY2(error_of(doc, ops, empty).starts_with(message), (ops + " → " + error_of(doc, ops, empty)).c_str());
@@ -257,6 +263,47 @@ private slots:
         const Document gone = applied(doc, R"([{"op": "delete_tone", "page": 1, "id": "g"}])");
         QVERIFY(layer_of(gone, "g") == nullptr);
         QVERIFY(error_of(gone, R"([{"op": "delete_tone", "page": 1, "id": "g"}])").starts_with("ops[0] delete_tone: no tone g"));
+    }
+
+    // delete_tone takes away tone layers only (docs/cpp-migration/SPEC.md COMP-01a): Python takes away any layer of the
+    // id, a pen or paint layer with its drawing too. The inputs of the M3-B cases that did so (the ink layer, a locked
+    // pen layer), refused here with the book as it was; a layer of the tone role or the tone kind is a tone.
+    void delete_tone_deletes_tones_only() {
+        Document doc = applied(book(), R"([{"op": "add_tone", "page": 1, "id": "t"}, {"op": "add_layer", "page": 1, "kind": "pen", "id": "pen"},
+                                          {"op": "set_layer", "page": 1, "id": "pen", "locked": true},
+                                          {"op": "add_layer", "page": 1, "kind": "paint", "id": "paint"}])");
+        const std::string ink = role_id(doc, LayerRole::Ink);
+        QCOMPARE(error_of(doc, R"([{"op": "delete_tone", "page": 1, "id": "$INK"}])", {{"$INK", ink}}),
+                 "ops[0] delete_tone: layer " + ink + " is not a tone layer ‖ delete_tone takes {page: int, id: str}");
+        QVERIFY(error_of(doc, R"([{"op": "delete_tone", "page": 1, "id": "pen"}])").starts_with("ops[0] delete_tone: layer pen is not a tone layer"));
+        QVERIFY(error_of(doc, R"([{"op": "delete_tone", "page": 1, "id": "paint"}])").starts_with("ops[0] delete_tone: layer paint is not a tone layer"));
+        // a batch that would take a tone and then a pen layer leaves the book as it was
+        QVERIFY(error_of(doc, R"([{"op": "delete_tone", "page": 1, "id": "t"}, {"op": "delete_tone", "page": 1, "id": "pen"}])")
+                    .starts_with("ops[1] delete_tone: layer pen is not a tone layer"));
+        // a layer of the tone role whose kind is not tone (an older book) is a tone, as set_tone has it
+        for (auto& layer : doc.edit_page(0).layers) {
+            if (layer.id == "paint") layer.role = LayerRole::Tone;
+        }
+        QVERIFY(layer_of(applied(doc, R"([{"op": "delete_tone", "page": 1, "id": "paint"}])"), "paint") == nullptr);
+        QVERIFY(layer_of(applied(doc, R"([{"op": "delete_tone", "page": 1, "id": "t"}])"), "t") == nullptr);
+    }
+
+    void nonfinite_string_gradient_angles_are_refused() {
+        const Document doc = applied(book(), R"([{"op":"add_tone","page":1,"id":"t","gradient":{"shape":"linear","angle":"30"}}])");
+        const Json before_tone = *layer_of(doc, "t")->tone;
+        const Json before_full = genko::storage::snapshot(doc, true);
+        for (const char* op : {"add_tone", "set_tone"}) {
+            for (const char* angle : {"inf", "-Infinity", "nan", "1e999"}) {
+                Json batch = j(R"([{"op":"set_note","page":1,"note":"rollback"},{"page":1,"id":"t","gradient":{"shape":"linear"}}])");
+                batch[1]["op"] = op;
+                batch[1]["id"] = std::string(op) == "add_tone" ? "new" : "t";
+                batch[1]["gradient"]["angle"] = angle;
+                const std::string error = error_of(doc, genko::core::dump_python(batch));
+                QVERIFY2(error.starts_with("ops[1] " + std::string(op) + ": gradient.angle must be a finite number"), error.c_str());
+                QCOMPARE(*layer_of(doc, "t")->tone, before_tone);
+                QCOMPARE(genko::storage::snapshot(doc, true), before_full);
+            }
+        }
     }
 
     // --- effect lines ---------------------------------------------------------------------------------------------
@@ -492,8 +539,8 @@ private slots:
             {"focus", R"({"twist": "inf"})", false, "a value of the wrong type (math domain error)"},
             {"speed", R"({"angle": "inf"})", false, "a value of the wrong type (math domain error)"},
             {"beta_flash", R"({"center": ["nan", 2]})", false, "a value of the wrong type (cannot convert float NaN to integer)"},
-            // (Python: an OverflowError apply_ops lets out, a traceback)
-            {"beta_flash", R"({"center": ["inf", 2]})", false, "a value of the wrong type (cannot convert float infinity to integer)"},
+            // (Python: an OverflowError apply_ops lets out, a traceback: python_error, the traceback's last line)
+            {"beta_flash", R"({"center": ["inf", 2]})", false, "OverflowError: cannot convert float infinity to integer"},
             {"white", R"({"twist": "inf"})", true, ""},
             {"speed", R"({"spacing_mm": "nan"})", true, ""},
             {"speed", R"({"center": ["inf", 2]})", true, ""}};
@@ -516,8 +563,12 @@ private slots:
                 QVERIFY2(refused.starts_with(std::string("ops[0] effect_to_layer: ") + c.to_layer), (label + " → " + refused).c_str());
             }
         }
-        // a tone's gradient at an angle of "inf" (kept as a str): Python's math.cos raises when the page is drawn
-        const Document toned = applied(book(), R"([{"op": "add_tone", "page": 1, "id": "g", "area": $SQUARE, "gradient": {"shape": "linear", "angle": "inf"}}])");
+        // A legacy tone may contain an angle of "inf": reading it is lossless, drawing it still fails as in Python.
+        // Newly creating this corrupting value through an op is refused by nonfinite_string_gradient_angles_are_refused.
+        Document toned = applied(book(), R"([{"op": "add_tone", "page": 1, "id": "g", "area": $SQUARE, "gradient": {"shape": "linear", "angle": 0}}])");
+        for (auto& layer : toned.edit_page(0).layers) {
+            if (layer.id == "g") (*layer.tone)["gradient"]["angle"] = "inf";
+        }
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, (void)render::render_page(toned.page(0), 72, render::RenderOptions{}, &toned));
     }
 

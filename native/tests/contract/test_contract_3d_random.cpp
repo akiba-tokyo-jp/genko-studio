@@ -3,8 +3,10 @@
 // (geom3d_harness.py make-books and random-ops, seeds fixed), by three actors. After every op both sides must give the
 // same reply or error, the same full snapshot and the same 3D state (prims, rulers, camera and light, strokes by their
 // bytes, pictures by their pixels); at the end of each sequence the same book as saved.
-// Where Python fails harder than an error (an exception apply_ops lets through) the C++ build must refuse the op and keep
-// the book as it was. Skipped without the Python reference.
+// Where Python stops with an exception apply_ops lets through (a traceback in its command line), the C++ build gives
+// python_error, its error ending with the traceback's last line, and keeps the book as it was. A lock on a page the
+// book does not have, which Python takes without a word and without a change, is refused here ("no page <n>":
+// docs/cpp-migration/SPEC.md COMP-01a, M2); counted, and the book compared on. Skipped without the Python reference.
 
 #include <QtTest>
 
@@ -16,6 +18,7 @@
 
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
+#include "core/pyops.hpp"
 #include "render/ops_registry.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
@@ -25,6 +28,23 @@
 #include "test3d.hpp"
 
 using genko::core::Json;
+
+namespace {
+
+// The refusal of a lock on a page the book does not have (see the file comment): Python's reply `want` applied the
+// batch and shows no such page.
+bool lock_on_no_page(const Json& batch, const Json& got, const Json& want) {
+    if (batch.size() != 1 || !batch[0].is_object() || got.value("ok", true) || !want.value("ok", false)) return false;
+    const std::string name = batch[0].value("op", std::string());
+    if ((name != "lock_page" && name != "unlock_page") || !batch[0].contains("page")) return false;
+    if (!got.value("error", std::string()).starts_with("ops[0] " + name + ": no page ")) return false;
+    for (const Json& page : want["snapshot"]["pages"]) {
+        if (genko::core::py_equals(page["index"], batch[0]["page"])) return false;
+    }
+    return true;
+}
+
+}  // namespace
 
 class TestContract3dRandom : public QObject {
     Q_OBJECT
@@ -64,6 +84,7 @@ private slots:
         int steps = 0;
         int refused = 0;
         int crashes = 0;
+        int locks_refused = 0;
         std::map<std::string, int> ops;
         std::set<std::string> books;
         for (std::size_t n = 0; n < sequences_.size(); ++n) {
@@ -83,6 +104,7 @@ private slots:
                 ++steps;
                 ++ops[batch[0]["op"].get<std::string>()];
                 Json got;
+                std::string code;
                 try {
                     const auto result = genko::core::CommandBus(genko::render::ops_registry())
                                             .apply(doc, batch, genko::core::Actor(seq["agent"].get<std::string>()));
@@ -95,13 +117,17 @@ private slots:
                     doc = result.doc;
                 } catch (const genko::core::ApplyError& error) {
                     got = Json::object({{"ok", false}, {"error", error.what()}});
+                    code = error.code();
                     ++refused;
                 }
                 if (w["reply"].contains("crash")) {
-                    // (Python fails harder there: the C++ build refuses the op, the book stays as it was on both sides)
+                    // (an exception apply_ops lets through, a traceback in Python's command line: python_error here, the
+                    // error ending with the traceback's last line; the book stays as it was on both sides)
                     ++crashes;
-                    if (got["ok"] == Json(true)) {
-                        qWarning("%s: Python crashed (%s), C++ applied it", label.c_str(), w["reply"]["crash"].get<std::string>().c_str());
+                    const std::string last = w["reply"]["crash"].get<std::string>() + ": " + w["reply"]["error"].get<std::string>();
+                    if (got["ok"] == Json(true) || code != "python_error" || !got["error"].get<std::string>().ends_with(last)) {
+                        qWarning("%s: Python stopped with %s, C++ gave %s (%s)", label.c_str(), last.c_str(),
+                                 genko::core::dump_python(got).substr(0, 300).c_str(), code.c_str());
                         ++failures;
                     }
                 } else if (w["nonfinite"].get<bool>()) {
@@ -111,6 +137,11 @@ private slots:
                     }
                     diverged = true;  // (Python's book now holds what C++ refused: the rest cannot be compared)
                     break;
+                } else if (lock_on_no_page(batch, got, w["reply"])) {
+                    // (the book unchanged on both sides; Python's reply took an id for its job_id: so does this side, for
+                    // the ids of the steps after it to be counted alike)
+                    ++locks_refused;
+                    (void)genko::core::new_id();
                 } else {
                     std::string where;
                     if (!genko::test::strict_equal(got, w["reply"], &where)) {
@@ -147,8 +178,9 @@ private slots:
         }
         std::string spread;
         for (const auto& [op, count] : ops) spread += op + ":" + std::to_string(count) + " ";
-        qInfo("random: %d steps over %zu books, %d refused (%d where Python fails harder); %s", steps, books.size(), refused, crashes,
-              spread.c_str());
+        qInfo("random: %d steps over %zu books, %d refused (%d where Python fails harder, %d locks on a page the book does not "
+              "have); %s",
+              steps, books.size(), refused, crashes, locks_refused, spread.c_str());
         QCOMPARE(books.size(), std::size_t{15});
         QVERIFY(steps > 600);
         QCOMPARE(failures, 0);

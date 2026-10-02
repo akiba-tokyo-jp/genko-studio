@@ -5,11 +5,18 @@
 #include <utility>
 
 #include "core/command_bus.hpp"
+#include "core/limits.hpp"
 #include "core/pyconv.hpp"
 
 namespace genko::core {
 
 void not_yet_ported(const std::string& message) { throw Error("not_yet_ported", message); }
+
+void raise_index_error(std::string_view message) { throw PyUncaught("IndexError", std::string(message)); }
+
+void raise_attribute_error(const Json& value, std::string_view attribute) {
+    throw PyUncaught("AttributeError", "'" + py_type_name(value) + "' object has no attribute '" + std::string(attribute) + "'");
+}
 
 const Json* get(const Json& object, std::string_view key) {
     if (!object.is_object()) return nullptr;
@@ -28,6 +35,24 @@ bool truthy_at(const Json& object, std::string_view key) {
     const Json* value = get(object, key);
     return value != nullptr && py_truthy(*value);
 }
+
+const Json* dict_get(const Json& object, std::string_view key) {
+    if (!object.is_object()) raise_attribute_error(object, "get");
+    const auto it = object.find(key);
+    return it == object.end() ? nullptr : &*it;
+}
+
+Json py_get(const Json& object, std::string_view key, const Json& fallback) {
+    const Json* value = dict_get(object, key);
+    return value != nullptr ? *value : fallback;
+}
+
+const Json& get_else(const Json& object, std::string_view key, const Json& fallback) {
+    const Json* value = dict_get(object, key);
+    return value != nullptr && py_truthy(*value) ? *value : fallback;
+}
+
+Json py_or(const Json& value, const Json& fallback) { return py_truthy(value) ? value : fallback; }
 
 double to_float(const Json& value) {
     try {
@@ -52,10 +77,26 @@ std::int64_t to_int(const Json& value) {
     }
 }
 
+std::int64_t to_int_held(const Json& value) {
+    if (value.is_number_float()) return py_trunc_held(value.get<double>());
+    if (value.is_number_unsigned() || value.is_string()) {
+        if (const auto big = py_big_int_text(value)) {
+            return big->front() == '-' ? std::numeric_limits<std::int64_t>::min() : std::numeric_limits<std::int64_t>::max();
+        }
+    }
+    return to_int(value);
+}
+
 Num to_num(const Json& value) {
     if (value.is_boolean()) return Num(value.get<bool>() ? 1 : 0);
     if (const auto n = Num::from_json(value)) return *n;
     throw PyTypeError("expected a number, not '" + py_type_name(value) + "'");
+}
+
+double to_real(const Json& value) {
+    if (value.is_boolean()) return value.get<bool>() ? 1.0 : 0.0;
+    if (value.is_number()) return value.get<double>();
+    throw PyTypeError("must be real number, not " + py_type_name(value));
 }
 
 std::vector<Json> iterate(const Json& value) {
@@ -75,12 +116,11 @@ std::size_t length(const Json& value) {
 
 Json subscript(const Json& value, std::int64_t index) {
     if (value.is_array() || value.is_string()) {
-        const Json items = value.is_array() ? value : py_list(value);
+        const Json characters = value.is_string() ? py_list(value) : Json();
+        const Json& items = value.is_string() ? characters : value;
         const auto size = static_cast<std::int64_t>(items.size());
         const std::int64_t at = index < 0 ? index + size : index;
-        if (at < 0 || at >= size) {
-            throw PyUncaught("IndexError", value.is_array() ? "list index out of range" : "string index out of range");
-        }
+        if (at < 0 || at >= size) raise_index_error(value.is_array() ? "list index out of range" : "string index out of range");
         return items[static_cast<std::size_t>(at)];
     }
     if (value.is_object()) {
@@ -99,6 +139,19 @@ Json subscript(const Json& value, std::string_view key) {
     if (value.is_array()) throw PyTypeError("list indices must be integers or slices, not str");
     if (value.is_string()) throw PyTypeError("string indices must be integers, not 'str'");
     throw PyTypeError("'" + py_type_name(value) + "' object is not subscriptable");
+}
+
+Json py_slice(const Json& list, std::int64_t start, std::int64_t stop) {
+    const auto n = static_cast<std::int64_t>(list.size());
+    const auto clamp = [n](std::int64_t i) {
+        if (i < 0) i += n;
+        return i < 0 ? 0 : (i > n ? n : i);
+    };
+    const std::int64_t a = clamp(start);
+    const std::int64_t b = clamp(stop);
+    Json out = Json::array();
+    for (std::int64_t i = a; i < b; ++i) out.push_back(list[static_cast<std::size_t>(i)]);
+    return out;
 }
 
 std::vector<double> unpack_floats(const Json& value, std::size_t expected) {
@@ -177,6 +230,40 @@ bool py_equals(const Json& a, const Json& b) {
     return a == b;
 }
 
+bool is_one_of(const Json& value, std::initializer_list<std::string_view> names) {
+    if (!value.is_string()) return false;
+    for (const std::string_view name : names) {
+        if (value.get_ref<const std::string&>() == name) return true;
+    }
+    return false;
+}
+
+bool is_blank(std::string_view text) {
+    std::size_t at = 0;
+    while (at < text.size()) {
+        const auto c = static_cast<unsigned char>(text[at]);
+        std::uint32_t cp = c;
+        std::size_t n = 1;
+        if (c >= 0xF0) {
+            n = 4;
+            cp = c & 0x07u;
+        } else if (c >= 0xE0) {
+            n = 3;
+            cp = c & 0x0Fu;
+        } else if (c >= 0xC0) {
+            n = 2;
+            cp = c & 0x1Fu;
+        }
+        for (std::size_t k = 1; k < n && at + k < text.size(); ++k) cp = (cp << 6) | (static_cast<unsigned char>(text[at + k]) & 0x3Fu);
+        const bool space = (cp >= 0x09 && cp <= 0x0D) || (cp >= 0x1C && cp <= 0x20) || cp == 0x85 || cp == 0xA0 || cp == 0x1680 ||
+                           (cp >= 0x2000 && cp <= 0x200A) || cp == 0x2028 || cp == 0x2029 || cp == 0x202F || cp == 0x205F ||
+                           cp == 0x3000;
+        if (!space) return false;
+        at += n;
+    }
+    return true;
+}
+
 Json round_json(const Json& value, int ndigits) {
     if (value.is_boolean()) return Json(value.get<bool>() ? 1 : 0);
     if (const auto n = Num::from_json(value)) return py_round(*n, ndigits).json();
@@ -186,7 +273,7 @@ Json round_json(const Json& value, int ndigits) {
 std::int64_t loop_count(double steps) {
     if (std::isnan(steps)) throw PyValueError("cannot convert float NaN to integer");
     if (std::isinf(steps)) throw PyUncaught("OverflowError", "cannot convert float infinity to integer");
-    constexpr double kMost = 1e7;
+    constexpr double kMost = limits::kLoopSteps;
     if (steps >= kMost) throw PyUncaught("MemoryError", "");
     if (steps <= -kMost) return -static_cast<std::int64_t>(kMost);  // (callers take max(1, …))
     return py_trunc_int(steps);

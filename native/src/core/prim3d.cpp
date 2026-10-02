@@ -7,10 +7,11 @@
 #include <unordered_map>
 
 #include "core/error.hpp"
+#include "core/limits.hpp"
 #include "core/mannequin.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
-#include "core/pyvalue.hpp"
+#include "core/pyops.hpp"
 #include "core/stroke_geom.hpp"
 
 namespace genko::core::prim3d {
@@ -54,8 +55,6 @@ const std::vector<std::pair<std::string_view, std::vector<Box6>>>& props() {
 constexpr int kEdges[12][2] = {{0, 1}, {1, 3}, {3, 2}, {2, 0}, {4, 5}, {5, 7}, {7, 6}, {6, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
 constexpr int kFaces[6][4] = {{0, 1, 3, 2}, {4, 6, 7, 5}, {0, 4, 5, 1}, {2, 3, 7, 6}, {0, 2, 6, 4}, {1, 5, 7, 3}};
 
-double py_max(double a, double b) { return b > a ? b : a; }
-
 // Python's float a // b (CPython's _float_div_mod)
 double py_floordiv(double vx, double wx) {
     double mod = std::fmod(vx, wx);
@@ -74,22 +73,22 @@ double py_floordiv(double vx, double wx) {
 const Json* truthy(const Json* camera) { return camera != nullptr && py_truthy(*camera) ? camera : nullptr; }
 
 std::string kind_of(const Json& prim) {
-    const Json* kind = pyv::get(prim, "kind");
+    const Json* kind = dict_get(prim, "kind");
     return kind != nullptr && kind->is_string() ? kind->get<std::string>() : std::string();
 }
 
 bool kind_is(const Json& prim, std::initializer_list<std::string_view> names) {
-    const Json* kind = pyv::get(prim, "kind");
-    return kind != nullptr && pyv::is_one_of(*kind, names);
+    const Json* kind = dict_get(prim, "kind");
+    return kind != nullptr && is_one_of(*kind, names);
 }
 
 // prim.get("kind", "box") == "box"
 bool is_box(const Json& prim) {
-    const Json* kind = pyv::get(prim, "kind");
-    return kind == nullptr || pyv::eq(*kind, Json("box"));
+    const Json* kind = dict_get(prim, "kind");
+    return kind == nullptr || py_equals(*kind, Json("box"));
 }
 
-const Json& rot_or(const Json& prim, const Json& fallback) { return pyv::get_or(prim, "rot", fallback); }
+const Json& rot_or(const Json& prim, const Json& fallback) { return get_else(prim, "rot", fallback); }
 
 const Json& seen_on_its_own() {
     static const Json kRot = Json::array({0.3, 0.6, 0});
@@ -105,15 +104,15 @@ struct Place {
 // cx, cy, cz = (list(prim.get("pos") or [100, 150, 0]) + [0, 0, 0])[:3]
 Place place_of(const Json& prim) {
     static const Json kDefault = Json::array({100, 150, 0});
-    Json pos = py_list(pyv::get_or(prim, "pos", kDefault));
+    Json pos = py_list(get_else(prim, "pos", kDefault));
     for (int i = 0; i < 3; ++i) pos.push_back(0);
     return Place{pos[0], pos[1], pos[2]};
 }
 
 // float(prim.get("focal_mm", 400) or 400)
 double focal_of(const Json& prim) {
-    const Json* f = pyv::get(prim, "focal_mm");
-    return f == nullptr || !py_truthy(*f) ? 400.0 : pyv::to_float(*f);
+    const Json* f = dict_get(prim, "focal_mm");
+    return f == nullptr || !py_truthy(*f) ? 400.0 : to_float(*f);
 }
 
 std::vector<Segment3> box_edges(double cx, double cy, double cz, double w, double h, double d) {
@@ -165,15 +164,15 @@ Json scene_size(std::string_view kind) {
 
 Vec3 size_of(const Json& prim) {
     static const Json kDefault = Json::array({40, 40, 40});
-    Json size = pyv::get_or(prim, "size", kDefault);
+    Json size = get_else(prim, "size", kDefault);
     if (!size.is_array()) size = Json::array({size, size, size});
     Json items = size;
     if (items.size() < 3) {
-        const Json last = pyv::at(size, -1);
+        const Json last = subscript(size, -1);
         while (items.size() < 3) items.push_back(last);
     }
     Vec3 out{};
-    for (std::size_t i = 0; i < 3; ++i) out[i] = py_max(0.1, pyv::to_float(items[i]));
+    for (std::size_t i = 0; i < 3; ++i) out[i] = py_max(0.1, to_float(items[i]));
     return out;
 }
 
@@ -184,17 +183,17 @@ Vec3 rotate(const Vec3& p, const Json& rot) {
     double y = p[1];
     double z = p[2];
     // turn (about the upright axis), then tip (about the across axis), then lean (in the page)
-    const double turn = pyv::real(items[1]);
+    const double turn = to_real(items[1]);
     const double nx = x * py_cos(turn) - z * py_sin(turn);
     const double nz = x * py_sin(turn) + z * py_cos(turn);
     x = nx;
     z = nz;
-    const double tip = pyv::real(items[0]);
+    const double tip = to_real(items[0]);
     const double ny = y * py_cos(tip) - z * py_sin(tip);
     const double nz2 = y * py_sin(tip) + z * py_cos(tip);
     y = ny;
     z = nz2;
-    const double lean = pyv::real(items[2]);
+    const double lean = to_real(items[2]);
     const double nx2 = x * py_cos(lean) - y * py_sin(lean);
     const double ny2 = x * py_sin(lean) + y * py_cos(lean);
     return Vec3{nx2, ny2, z};
@@ -234,8 +233,8 @@ std::vector<Point2> project(const Json& prim, const Json* camera) {
     const double focal = focal_of(prim);
     std::vector<Point2> out;
     for (const Vec3& c : corners3d(prim)) {
-        const double scale = focal / py_max(focal * 0.2, focal + pyv::to_float(at.cz) + c[2]);
-        out.push_back(Point2{pyv::to_float(at.cx) + c[0] * scale, pyv::to_float(at.cy) + c[1] * scale});
+        const double scale = focal / py_max(focal * 0.2, focal + to_float(at.cz) + c[2]);
+        out.push_back(Point2{to_float(at.cx) + c[0] * scale, to_float(at.cy) + c[1] * scale});
     }
     return out;
 }
@@ -346,11 +345,9 @@ std::vector<Segment3> scene_parts(std::string_view kind, const Vec3& size) {
                 const double x = side * (w * 0.36 + w * 0.07);
                 append(out, box_edges(x, g - bh / 2, z + depth / 2, w * 0.14, bh, depth * 0.9));
                 // floors, as lines on the street side (range(1, int(bh // 18) + 1))
-                const double floors = py_floordiv(bh, 18);
-                if (!std::isfinite(floors)) throw Error(std::isnan(floors) ? "value" : "overflow", "cannot convert float to integer");
-                const auto count = static_cast<std::int64_t>(std::trunc(std::min(floors, 1e9)));
+                const std::int64_t count = py_trunc_held(py_floordiv(bh, 18));
                 // (a building a few kilometres tall would have more floor lines than anyone could draw)
-                if (count > 10000) throw Error("image_too_large", "the scene is too large to draw");
+                if (count > limits::kStoreyLines) throw Error("image_too_large", "the scene is too large to draw");
                 for (std::int64_t floor = 1; floor <= count; ++floor) {
                     const double y = g - static_cast<double>(floor * 18);
                     const double xs = x - side * w * 0.07;
@@ -414,7 +411,7 @@ std::vector<Segment3> segments3d(const Json& prim) {
         return out;
     }
     if (kind == "prop") {
-        const Json* prop = pyv::get(prim, "prop");
+        const Json* prop = dict_get(prim, "prop");
         const std::string name = prop != nullptr && py_truthy(*prop) ? py_str(*prop) : std::string("chair");
         const auto* boxes = prop_boxes(name);
         if (boxes == nullptr) boxes = prop_boxes("chair");
@@ -438,12 +435,12 @@ std::vector<Segment3> segments3d(const Json& prim) {
             out.emplace_back(Vec3{rx * py_cos(a), -h / 2, rz * py_sin(a)}, Vec3{rx * py_cos(a), h / 2, rz * py_sin(a)});
         }
     } else if (kind == "scene") {
-        const Json* scene = pyv::get(prim, "scene");
+        const Json* scene = dict_get(prim, "scene");
         out = scene_parts(scene != nullptr && py_truthy(*scene) ? py_str(*scene) : std::string("room"), Vec3{w, h, d});
     } else if (kind == "stairs") {
-        const Json* steps_value = pyv::get(prim, "steps");
+        const Json* steps_value = dict_get(prim, "steps");
         const std::int64_t steps =
-            std::max<std::int64_t>(2, std::min<std::int64_t>(30, steps_value != nullptr && py_truthy(*steps_value) ? pyv::to_int(*steps_value) : 6));
+            std::max<std::int64_t>(2, std::min<std::int64_t>(30, steps_value != nullptr && py_truthy(*steps_value) ? to_int(*steps_value) : 6));
         const double rise = h / static_cast<double>(steps);
         const double run = d / static_cast<double>(steps);
         std::vector<std::pair<double, double>> profile{{h / 2, -d / 2}};  // (y, z): up is −y; the stairs climb toward the back
@@ -463,9 +460,9 @@ std::vector<Segment3> segments3d(const Json& prim) {
             out.emplace_back(Vec3{-w / 2, profile[i].first, profile[i].second}, Vec3{w / 2, profile[i].first, profile[i].second});
         }
     } else {  // floor: a grid on the ground
-        const Json* lines_value = pyv::get(prim, "lines");
+        const Json* lines_value = dict_get(prim, "lines");
         const std::int64_t n =
-            std::max<std::int64_t>(2, std::min<std::int64_t>(40, lines_value != nullptr && py_truthy(*lines_value) ? pyv::to_int(*lines_value) : 8));
+            std::max<std::int64_t>(2, std::min<std::int64_t>(40, lines_value != nullptr && py_truthy(*lines_value) ? to_int(*lines_value) : 8));
         for (std::int64_t k = 0; k <= n; ++k) {
             const double x = -w / 2 + w * static_cast<double>(k) / static_cast<double>(n);
             const double z = -d / 2 + d * static_cast<double>(k) / static_cast<double>(n);
@@ -482,8 +479,8 @@ Point2 to_page(const Json& prim, const Vec3& p, const Json* camera) {
     const Place at = place_of(prim);
     const double focal = focal_of(prim);
     const Vec3 r = rotate(p, rot_or(prim, seen_on_its_own()));
-    const double scale = focal / py_max(focal * 0.2, focal + pyv::to_float(at.cz) + r[2]);
-    return Point2{pyv::to_float(at.cx) + r[0] * scale, pyv::to_float(at.cy) + r[1] * scale};
+    const double scale = focal / py_max(focal * 0.2, focal + to_float(at.cz) + r[2]);
+    return Point2{to_float(at.cx) + r[0] * scale, to_float(at.cy) + r[1] * scale};
 }
 
 std::vector<Edge> edges(const Json& prim, const Json* camera) {
@@ -505,9 +502,9 @@ std::vector<Edge> edges(const Json& prim, const Json* camera) {
     const std::vector<Point2> pts = project(prim, camera);
     const double focal = focal_of(prim);
     static const Json kOrigin = Json::array({0, 0, 0});
-    Json pos = py_list(pyv::get_or(prim, "pos", kOrigin));
+    Json pos = py_list(get_else(prim, "pos", kOrigin));
     for (int i = 0; i < 3; ++i) pos.push_back(0);
-    const double cz = pyv::to_float(pos[2]);
+    const double cz = to_float(pos[2]);
     bool seen_faces[6]{};
     int seen_count = 0;
     for (int f = 0; f < 6; ++f) {
@@ -552,7 +549,7 @@ namespace {
 
 std::array<double, 4> box_of(const std::vector<Point2>& pts) {
     // min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys) with Python's min and max
-    if (pts.empty()) throw Error("value", "min() arg is an empty sequence");
+    if (pts.empty()) throw PyValueError("min() arg is an empty sequence");
     double x0 = pts[0][0];
     double y0 = pts[0][1];
     double x1 = pts[0][0];
@@ -588,8 +585,8 @@ std::array<double, 4> prim_bbox(const Json& prim, const Json* camera) {
         const mesh3d::Seen s = mesh3d::seen(prim, camera);
         if (s.at.pts.empty()) {
             static const Json kOrigin = Json::array({0, 0});
-            const Json& pos = pyv::get_or(prim, "pos", kOrigin);
-            return {pyv::to_float(pyv::at(pos, 0)), pyv::to_float(pyv::at(pos, 1)), 0.0, 0.0};
+            const Json& pos = get_else(prim, "pos", kOrigin);
+            return {to_float(subscript(pos, 0)), to_float(subscript(pos, 1)), 0.0, 0.0};
         }
         // (numpy's min and max: a NaN wins)
         double x0 = s.at.pts[0][0];
@@ -648,11 +645,8 @@ struct EndHash {
 std::vector<Line2> join_lines(const std::vector<Line2>& lines, double eps) {
     // key(p) = (round(p[0] / eps), round(p[1] / eps)): Python's round to an int (half to even)
     const auto key = [eps](const Point2& p) {
-        const double x = p[0] / eps;
-        const double y = p[1] / eps;
-        if (std::isnan(x) || std::isnan(y)) throw Error("value", "cannot convert float NaN to integer");
-        if (std::isinf(x) || std::isinf(y)) throw Error("overflow", "cannot convert float infinity to integer");
-        EndKey k{std::nearbyint(x), std::nearbyint(y)};
+        const double x = py_round_whole(p[0] / eps);
+        EndKey k{x, py_round_whole(p[1] / eps)};
         if (k.x == 0.0) k.x = 0.0;  // (an int has no -0)
         if (k.y == 0.0) k.y = 0.0;
         return k;

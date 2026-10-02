@@ -103,17 +103,31 @@ std::int64_t py_trunc_int(double x);
 // their errors.
 double py_round_whole(double x);
 double py_trunc(double x);
+// math.floor(x) and math.ceil(x) of a float, as the whole float each is (Python's int), with int()'s errors.
+double py_floor(double x);
+double py_ceil(double x);
+// int(x) of a float as a count or a bound (points along a line, a page number compared with a few): an int past 64
+// bits is held at the end of the int64 range on its side. Python's int has no bound; what such a count makes is
+// refused by core/limits.hpp first, and a held bound compares the same. PyValueError for NaN, PyUncaught
+// OverflowError for an infinity, as int() raises them.
+std::int64_t py_trunc_held(double x);
 
 // The math module as CPython 3.12 computes it: hypot and dist with CPython's own correctly rounded algorithm,
 // the rest with the platform's libm called as Python calls it (never folded or merged by the compiler, so the
-// last bit matches the Python build on the same OS).
+// last bit matches the Python build on the same OS). Python's errors: PyValueError "math domain error" (the sine of
+// an infinity, the log of 0, …), PyUncaught OverflowError "math range error".
 double py_hypot(double x, double y);
+double py_hypot(double x, double y, double z);
 double py_dist(double ax, double ay, double bx, double by);
 double py_sin(double x);
 double py_cos(double x);
 double py_tan(double x);
 double py_acos(double x);
 double py_atan2(double y, double x);
+double py_exp(double x);
+double py_log(double x);
+// math.remainder(x, y): the exact IEEE remainder.
+double py_remainder(double x, double y);
 // Python's float ** float (its special cases, then libm pow). Throws core::Error("value") where Python raises.
 double py_pow(double x, double y);
 // Python's float % float.

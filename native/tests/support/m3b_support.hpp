@@ -14,8 +14,8 @@
 #include "core/command_bus.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
+#include "render/ops_registry.hpp"
 #include "render/png.hpp"
-#include "render/render_ops.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/journal.hpp"
@@ -32,7 +32,7 @@ inline fs::path to_path(const QString& path) { return storage::path_from_utf8(pa
 
 // The command bus with every op this build has, the drawing ops included.
 inline const core::CommandBus& bus() {
-    static const core::CommandBus b(render::registry_with_render_ops());
+    static const core::CommandBus b(render::ops_registry());
     return b;
 }
 

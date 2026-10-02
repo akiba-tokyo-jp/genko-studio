@@ -14,7 +14,7 @@
 #include "core/mesh3d.hpp"
 #include "core/prim3d.hpp"
 #include "core/pyconv.hpp"
-#include "core/pyvalue.hpp"
+#include "core/pyops.hpp"
 #include "render/draw.hpp"
 
 namespace genko::render::detail {
@@ -24,7 +24,6 @@ namespace {
 using core::Json;
 namespace mesh3d = core::mesh3d;
 namespace prim3d = core::prim3d;
-namespace pyv = core::pyv;
 
 PointD at(const mesh3d::Point2& p, int dpi) { return xy_point(p[0], p[1], dpi); }
 
@@ -38,11 +37,11 @@ void draw_surfaces(Image& target, const Box& area, const Ctx& ctx, const Json& p
     const auto [x, y, w, h] = prim3d::prim_bbox(prim, camera);
     if (w <= 0 || h <= 0) return;
     static const Json kNone = Json::object();
-    const Json* light_value = pyv::find(ctx.page->extra, "light");
+    const Json* light_value = core::get(ctx.page->extra, "light");
     const Json& light = light_value != nullptr && core::py_truthy(*light_value) ? *light_value : kNone;
-    const Json* dir = pyv::get(light, "dir");
-    const Json* ambient_value = pyv::get(light, "ambient");
-    const double ambient = ambient_value != nullptr ? pyv::to_float(*ambient_value) : 0.35;
+    const Json* dir = core::dict_get(light, "dir");
+    const Json* ambient_value = core::dict_get(light, "ambient");
+    const double ambient = ambient_value != nullptr ? core::to_float(*ambient_value) : 0.35;
     const int sw = std::max(1, mm_to_px(w, dpi) + 2);
     const int sh = std::max(1, mm_to_px(h, dpi) + 2);
     const int ox = mm_to_px(x, dpi);
@@ -116,17 +115,15 @@ void draw_prims(Image& part, const Box& area, const Ctx& ctx) {
     const int width = std::max(1, mm_to_px(0.3, dpi));
     std::map<std::string, const core::Frame*> frames;  // (a dict: the last panel of an id wins)
     for (const core::Frame* frame : page.leaf_frames()) frames[frame->id] = frame;
-    const Json* page_camera = pyv::find(page.extra, "camera");
+    const Json* page_camera = core::get(page.extra, "camera");
     for (const Json& prim : core::py_list(page.prims)) {
         check_cancel(ctx);
         const Json* camera = mesh3d::camera_of(prim, page_camera);
         // a guide set in a panel stays in it (a room seen from inside runs far past the panel's edges)
-        const Json* frame_id = pyv::get(prim, "frame_id");
+        const Json* frame_id = core::dict_get(prim, "frame_id");
         const core::Frame* frame = nullptr;
         if (frame_id != nullptr && core::py_truthy(*frame_id)) {
-            if (frame_id->is_array() || frame_id->is_object()) {
-                throw core::Error("type", "unhashable type: '" + core::py_type_name(*frame_id) + "'");
-            }
+            core::require_hashable(*frame_id);  // ({frame.id: frame}.get(frame_id))
             if (frame_id->is_string()) {
                 const auto it = frames.find(frame_id->get<std::string>());
                 if (it != frames.end()) frame = it->second;
@@ -135,8 +132,8 @@ void draw_prims(Image& part, const Box& area, const Ctx& ctx) {
         Image sheet;
         if (frame != nullptr) sheet = Image::create("RGBA", Size{area.width(), area.height()}, Ink{0, 0, 0, 0});
         Image& target = frame != nullptr ? sheet : part;
-        const Json* kind = pyv::get(prim, "kind");
-        if (kind != nullptr && pyv::eq(*kind, Json("mannequin"))) {
+        const Json* kind = core::dict_get(prim, "kind");
+        if (kind != nullptr && core::py_equals(*kind, Json("mannequin"))) {
             PageCanvas canvas(target, area, ctx.size);
             draw_mannequin(canvas.draw(), prim, dpi);
             canvas.commit();

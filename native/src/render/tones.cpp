@@ -17,17 +17,18 @@
 #include <mutex>
 
 #include "core/base64.hpp"
+#include "core/limits.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
-#include "core/pyvalue.hpp"
+#include "core/pyops.hpp"
 #include "core/stroke_geom.hpp"
+#include "core/strokes.hpp"
 #include "render/brushes.hpp"
 #include "render/draw.hpp"
 #include "render/npcompat.hpp"
 #include "render/page.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
-#include "render/render_ops.hpp"
 
 namespace genko::render::tones {
 
@@ -58,10 +59,6 @@ std::string joined(const std::vector<std::string>& names) {
     return out;
 }
 
-// Python's min(a, b) / max(a, b) for floats (the first unless the second is smaller / larger).
-double pmin(double a, double b) { return b < a ? b : a; }
-double pmax(double a, double b) { return b > a ? b : a; }
-
 float f32(double v) { return static_cast<float>(v); }
 
 // np.clip for float32 (NaN stays NaN)
@@ -77,7 +74,7 @@ std::uint8_t to_u8(float v) {
 }
 
 // Python's round(x) (an int, ties to even).
-std::int64_t round_int(double x) { return core::py_int_of(std::nearbyint(x)); }
+std::int64_t round_int(double x) { return core::py_trunc_held(core::py_round_whole(x)); }
 
 // --- int(x) as a list of 32-bit words (numpy's SeedSequence entropy), for numbers of any size ---------------------
 
@@ -115,7 +112,7 @@ std::vector<std::uint32_t> seed_words(const Json& value) {
         }
         case Json::value_t::number_float: {
             const double d = std::trunc(value.get<double>());
-            (void)core::py_int_of(d);  // (NaN and infinities raise)
+            (void)core::py_trunc_held(d);  // (NaN and infinities raise)
             if (d < 0) negative();
             if (d < 18446744073709551616.0) return words_of(static_cast<std::uint64_t>(d));
             int exp = 0;
@@ -126,7 +123,7 @@ std::vector<std::uint32_t> seed_words(const Json& value) {
             return out;
         }
         case Json::value_t::string: {
-            const std::int64_t small = core::to_int(value);  // (ValueError for what is not a number)
+            const std::int64_t small = core::to_int_held(value);  // (ValueError for what is not a number)
             if (small < 0) negative();
             if (small != INT64_MAX) return words_of(static_cast<std::uint64_t>(small));
             std::vector<std::uint32_t> out{0};  // (beyond 64 bits: from its decimal digits)
@@ -178,7 +175,7 @@ std::int64_t nanos(double dist) {
 
 Image make_threshold_tile(int m, int n, std::string_view shape) {
     const std::int64_t size = static_cast<std::int64_t>(m) * m + static_cast<std::int64_t>(n) * n;
-    if (size > 4096) {
+    if (size > core::limits::kScreenTile) {
         throw core::Error("value", "the screen is too coarse for this resolution (" + std::to_string(size) + " px a side)");
     }
     const double norm = static_cast<double>(size);
@@ -197,7 +194,7 @@ Image make_threshold_tile(int m, int n, std::string_view shape) {
             const double dv = v - std::floor(v) - 0.5;
             double dist = 0.0;
             if (shape == "square") {
-                dist = core::py_pow(pmax(std::fabs(du), std::fabs(dv)), 2.0) + (du * du + dv * dv) * 1e-3;
+                dist = core::py_pow(core::py_max(std::fabs(du), std::fabs(dv)), 2.0) + (du * du + dv * dv) * 1e-3;
             } else if (shape == "diamond") {
                 dist = core::py_pow(std::fabs(du) + std::fabs(dv), 2.0) + (du * du + dv * dv) * 1e-3;
             } else if (shape == "ellipse") {
@@ -260,22 +257,22 @@ Coverage coverage_of(const Settings& s, const std::optional<Box>& where_box, Siz
         c.radial = true;
         c.cx = f32((x0 + x1) / 2);
         c.cy = f32((y0 + y1) / 2);
-        c.radius = f32(pmax(1.0, core::py_hypot(x1 - x0, y1 - y0) / 2));
+        c.radius = f32(core::py_max(1.0, core::py_hypot(x1 - x0, y1 - y0) / 2));
     } else {
         const double a = core::to_float(core::py_get(gradient, "angle", Json(90))) * kDegToRad;
-        const double dx = core::math_cos(a);
-        const double dy = core::math_sin(a);
+        const double dx = core::py_cos(a);
+        const double dy = core::py_sin(a);
         const double proj[4] = {x0 * dx + y0 * dy, x1 * dx + y0 * dy, x0 * dx + y1 * dy, x1 * dx + y1 * dy};
         double lo = proj[0];
         double hi = proj[0];
         for (const double p : proj) {
-            lo = pmin(lo, p);
-            hi = pmax(hi, p);
+            lo = core::py_min(lo, p);
+            hi = core::py_max(hi, p);
         }
         c.dx = f32(dx);
         c.dy = f32(dy);
         c.lo = f32(lo);
-        c.span = f32(pmax(1.0, hi - lo));
+        c.span = f32(core::py_max(1.0, hi - lo));
     }
     c.start = f32(start);
     c.delta = f32(end - start);
@@ -303,7 +300,7 @@ struct Lines {
     }
 };
 
-Lines lines_at(double theta, double period) { return Lines{f32(core::math_cos(theta)), f32(core::math_sin(theta)), f32(period)}; }
+Lines lines_at(double theta, double period) { return Lines{f32(core::py_cos(theta)), f32(core::py_sin(theta)), f32(period)}; }
 
 // The threshold field of tones._screen over a box (each value: below the coverage is black).
 class Screen {
@@ -325,7 +322,7 @@ public:
             (void)size;
             return;
         }
-        const double period = pmax(2.0, static_cast<double>(dpi) / pmax(1.0, lpi));
+        const double period = core::py_max(2.0, static_cast<double>(dpi) / core::py_max(1.0, lpi));
         const double a = angle * kDegToRad;
         first_ = lines_at(a + core::kPi / 2, period);
         cross_ = !is_str(pattern, "line");
@@ -375,17 +372,17 @@ public:
     Motif(const Settings& s, Size size, int dpi, const Coverage& cover) : size_(size) {
         pattern_ = s.pattern.get<std::string>();
         const Json scale = s.scale_mm ? *s.scale_mm : Json();
-        period_ = pmax(3.0, core::to_float(core::py_or(scale, Json(3.0))) / 25.4 * dpi);
+        period_ = core::py_max(3.0, core::to_float(core::py_or(scale, Json(3.0))) / 25.4 * dpi);
         const auto [dx, dy] = shift_px(s.offset_mm, dpi);
         dx_ = dx;
         dy_ = dy;
         const double a = s.angle * kDegToRad;
-        cos_ = f32(core::math_cos(a));
-        sin_ = f32(core::math_sin(a));
+        cos_ = f32(core::py_cos(a));
+        sin_ = f32(core::py_sin(a));
         fperiod_ = f32(period_);
         if (pattern_ == "star") {
             const double mean = static_cast<double>(coverage_mean(cover, size));
-            star_k_ = f32(0.18 + 0.5 * std::sqrt(pmax(0.01, mean)));
+            star_k_ = f32(0.18 + 0.5 * std::sqrt(core::py_max(0.01, mean)));
         } else if (pattern_ == "sand") {
             const auto rng_seed = seed_words(s.seed ? *s.seed : Json(7));
             grain_ = std::max<std::int64_t>(1, round_int(period_ / 6));
@@ -512,7 +509,7 @@ Image tone_mask(const core::Layer& layer, const Page& p, const Box& box) {
         const std::string& kind = stroke->kind;
         const bool scrape = kind.starts_with("scrape");
         const std::string brush = kind == "scrape_soft" ? "airbrush" : (scrape ? "mili" : kind);
-        const core::PenPoints points = core::stroke_pen_points(*stroke);
+        const core::PenPoints points = core::stroke_points(*stroke);
         const double width = stroke->width_mm != 0.0 ? stroke->width_mm : 1.0;
         const auto reach = brushes::extent(p.size, points, p.dpi, width, brush);
         if (!reach || !intersects(*reach, box)) continue;  // (it changes nothing of this box)
@@ -587,10 +584,6 @@ Image tone_alpha(const Settings& s, const Image& where, int dpi, bool print_mode
 
 Image transparent(Size size) { return Image::create("RGBA", size, Ink{0, 0, 0, 0}); }
 
-// The drawing ops (render_ops.hpp) join core::OpRegistry::builtin() in every program that draws pages: this file is
-// linked into each of them through the page drawing.
-[[maybe_unused]] const bool kOpsRegistered = (core::add_builtin_registrar(&register_render_ops), true);
-
 }  // namespace
 
 const std::vector<std::string>& patterns() {
@@ -656,25 +649,27 @@ Settings settings(const core::Layer& layer) {
     keep("offset_mm", s.offset_mm);
     s.gradient = core::py_get(tone, "gradient");
     s.lpi = layer.lpi && layer.lpi->truthy() ? layer.lpi->value() : 60.0;
-    s.density = pmax(0.0, pmin(1.0, layer.density ? layer.density->value() : 0.3));
+    s.density = core::py_max(0.0, core::py_min(1.0, layer.density ? layer.density->value() : 0.3));
     s.angle = layer.angle;
     return s;
 }
 
 std::pair<int, int> shift_px(const std::optional<Json>& offset_mm, int dpi) {
     if (!offset_mm || !core::py_truthy(*offset_mm)) return {0, 0};
-    const double x = core::to_float(core::py_item(*offset_mm, 0));
-    const double y = core::to_float(core::py_item(*offset_mm, 1));
+    const double x = core::to_float(core::subscript(*offset_mm, 0));
+    const double y = core::to_float(core::subscript(*offset_mm, 1));
     return {static_cast<int>(round_int(x / 25.4 * dpi)), static_cast<int>(round_int(y / 25.4 * dpi))};
 }
 
 std::pair<int, int> screen_vector(double dpi, double lpi, double angle) {
-    const double cell = pmax(2.0, dpi / pmax(1.0, lpi));
+    const double cell = core::py_max(2.0, dpi / core::py_max(1.0, lpi));
     const double theta = angle * kDegToRad;
-    std::int64_t m = round_int(cell * core::math_cos(theta));
-    const std::int64_t n = round_int(cell * core::math_sin(theta));
+    std::int64_t m = round_int(cell * core::py_cos(theta));
+    const std::int64_t n = round_int(cell * core::py_sin(theta));
     if (m == 0 && n == 0) m = 2;
-    if (std::llabs(m) > 100000 || std::llabs(n) > 100000) throw core::Error("value", "the screen is too coarse for this resolution");
+    if (std::llabs(m) > core::limits::kScreenCell || std::llabs(n) > core::limits::kScreenCell) {
+        throw core::Error("value", "the screen is too coarse for this resolution");
+    }
     return {static_cast<int>(m), static_cast<int>(n)};
 }
 
@@ -766,7 +761,7 @@ Image screened(const Image& raster, const Json& spec, int dpi, Size page_size, c
     const double black_at = core::to_float(core::py_get(spec, "black", Json(0.1)));
     const double white_at = core::to_float(core::py_get(spec, "white", Json(0.95)));
     const float white = f32(white_at);
-    const float span = f32(pmax(0.01, white_at - black_at));
+    const float span = f32(core::py_max(0.01, white_at - black_at));
     const auto cover_at = [&](std::size_t i) {
         const float g = static_cast<float>(static_cast<unsigned char>(grey[i])) / 255.0f;
         const float a = static_cast<float>(static_cast<unsigned char>(alpha[i])) / 255.0f;

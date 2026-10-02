@@ -1,5 +1,7 @@
 #include "core/ops_util.hpp"
 
+#include <cmath>
+
 #include "core/pyconv.hpp"
 
 namespace genko::core {
@@ -52,6 +54,80 @@ std::size_t layer_by_id(const Page& page, std::string_view layer_id) {
 std::size_t layer_for_role(Page& page, LayerRole role) {
     Layer& layer = page.layer_for(role);
     return static_cast<std::size_t>(&layer - page.layers.data());
+}
+
+Layer& paint_target(Page& page, const Json& op) {
+    Layer* target = nullptr;
+    if (truthy_at(op, "layer_id")) {
+        target = &page.layers[layer_by_id(page, py_str(op["layer_id"]))];
+    } else {
+        const Json* role = get(op, "layer");
+        target = &page.layers[layer_for_role(page, role_from(Json(role != nullptr && py_truthy(*role) ? py_str(*role) : "ink")))];
+    }
+    if (target->locked) throw OpError("the layer is locked");
+    if (target->kind != LayerKind::Strokes && target->kind != LayerKind::Raster && target->kind != LayerKind::Tone) {
+        throw OpError("this layer cannot be painted on (choose a pen, paint or tone layer)");
+    }
+    return *target;
+}
+
+const Frame& frame_or_fail(const Page& page, const Json& frame_id) {
+    const Frame* frame = page.find_frame(py_str(frame_id));
+    if (frame == nullptr) throw OpError("no panel " + py_str(frame_id));
+    return *frame;
+}
+
+std::size_t ruler_index(const Page& page, const Json& ruler_id) {
+    for (std::size_t i = 0; i < page.rulers.size(); ++i) {
+        if (py_equals(py_get(page.rulers[i], "id"), ruler_id)) return i;
+    }
+    throw OpError("no ruler " + py_str(ruler_id));
+}
+
+Json screen_spec(const Json& raw) {
+    if (!raw.is_object()) throw OpError("screen is {pattern, lpi, angle}");
+    const Json* pattern_value = get(raw, "pattern");
+    const std::string pattern = pattern_value != nullptr && py_truthy(*pattern_value) ? py_str(*pattern_value) : "dot";
+    if (pattern != "dot" && pattern != "line" && pattern != "cross" && pattern != "noise") {
+        throw OpError("screen pattern must be dot, line, cross or noise");
+    }
+    const double lpi = to_float(get_or(raw, "lpi", Json(60)));
+    if (!(10 <= lpi && lpi <= 150)) throw OpError("lpi must be between 10 and 150");
+    const Json* shape_value = get(raw, "shape");
+    const std::string shape = shape_value != nullptr && py_truthy(*shape_value) ? py_str(*shape_value) : "round";
+    if (shape != "round" && shape != "square" && shape != "diamond" && shape != "ellipse") {
+        throw OpError("screen shape must be one of round, square, diamond, ellipse");
+    }
+    Json spec = Json::object();
+    spec["pattern"] = pattern;
+    spec["lpi"] = lpi;
+    spec["angle"] = py_fmod(to_float(get_or(raw, "angle", Json(45))), 180);
+    spec["black"] = py_clamp(to_float(get_or(raw, "black", Json(0.1))), 0.0, 0.9);
+    spec["white"] = py_clamp(to_float(get_or(raw, "white", Json(0.95))), 0.1, 1.0);
+    if (shape != "round") spec["shape"] = shape;
+    if (truthy_at(raw, "offset_mm")) {
+        Json offset = Json::array();
+        try {
+            for (const Json& v : iterate(raw["offset_mm"])) offset.push_back(to_float(v));
+        } catch (const PyTypeError&) {
+            throw OpError("offset_mm is [x, y] in mm");
+        } catch (const PyValueError&) {
+            throw OpError("offset_mm is [x, y] in mm");
+        }
+        Json two = Json::array();
+        for (std::size_t i = 0; i < offset.size() && i < 2; ++i) two.push_back(offset[i]);
+        spec["offset_mm"] = std::move(two);
+    }
+    return spec;
+}
+
+void require_finite(const Json& value, const std::string& what) {
+    if (value.is_number_float() && !std::isfinite(value.get<double>())) throw OpError(what + " must be a finite number");
+    if (value.is_object()) {
+        for (const auto& [key, item] : value.items()) require_finite(item, what.empty() ? key : what + "." + key);
+    } else if (value.is_array()) {
+        for (const Json& item : value) require_finite(item, what);
+    }
 }
 
 LayerRole stroke_role(const std::string& layer_name) {

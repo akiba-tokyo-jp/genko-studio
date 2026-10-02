@@ -634,8 +634,12 @@ class Gen:
         return op
 
     def delete_tone(self):
+        # (a tone layer, or an id no layer has: the C++ build refuses to delete a layer that is not a tone, which Python
+        # deletes; docs/cpp-migration/SPEC.md COMP-01a, checked by the unit tests)
         page = self.page()
-        return {"op": "delete_tone", "page": self.page_no(page), "id": self.layer_id(page, tone=self.rng.random() < 0.8)}
+        page_no = self.page_no(page)
+        self.rng.random()  # (the draw that chose a layer of either kind)
+        return {"op": "delete_tone", "page": page_no, "id": self.layer_id(page, tone=True)}
 
     def add_effect(self):
         page = self.page()

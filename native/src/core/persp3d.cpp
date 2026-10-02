@@ -11,7 +11,7 @@
 #include "core/mesh3d.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
-#include "core/pyvalue.hpp"
+#include "core/pyops.hpp"
 
 namespace genko::core::persp3d {
 
@@ -24,19 +24,19 @@ const Json* truthy(const Json* camera) { return camera != nullptr && py_truthy(*
 
 // x[:2] of a list or a str
 Json first_two(const Json& value) {
-    if (value.is_array()) return pyv::slice(value, 0, 2);
-    if (value.is_string()) return pyv::slice(py_list(value), 0, 2);
-    if (value.is_object()) throw Error("type", "unhashable type: 'slice'");
-    throw Error("type", "'" + py_type_name(value) + "' object is not subscriptable");
+    if (value.is_array()) return py_slice(value, 0, 2);
+    if (value.is_string()) return py_slice(py_list(value), 0, 2);
+    if (value.is_object()) throw PyTypeError("unhashable type: 'slice'");
+    throw PyTypeError("'" + py_type_name(value) + "' object is not subscriptable");
 }
 
-const Json& pos_or(const Json& prim, const Json& fallback) { return pyv::get_or(prim, "pos", fallback); }
+const Json& pos_or(const Json& prim, const Json& fallback) { return get_else(prim, "pos", fallback); }
 
 // camera.get("tip", 0), camera.get("turn", 0), camera.get("roll", 0)
 Json view_of(const Json& camera) {
     Json out = Json::array();
     for (const char* key : {"tip", "turn", "roll"}) {
-        const Json* v = pyv::get(camera, key);
+        const Json* v = dict_get(camera, key);
         out.push_back(v != nullptr ? *v : Json(0));
     }
     return out;
@@ -51,35 +51,35 @@ struct Parts {
 
 Parts parts(const Json& prim, const Json* camera) {
     camera = truthy(camera);
-    const Json* rot = pyv::get(prim, "rot");
+    const Json* rot = dict_get(prim, "rot");
     static const Json kSeenStraight = Json::array({0, 0, 0});
     static const Json kSeenOnItsOwn = Json::array({0.3, 0.6, 0});
     const Mat3 turn = mesh3d::prim_rotation(rot != nullptr && !rot->is_null() ? *rot : (camera != nullptr ? kSeenStraight : kSeenOnItsOwn));
     Parts out;
     if (camera != nullptr) {
         const Mat3 view = mesh3d::prim_rotation(view_of(*camera));
-        const Json* target_value = pyv::get(*camera, "target");
+        const Json* target_value = dict_get(*camera, "target");
         static const Json kCentre = Json::array({100, 150});
         const Json target = target_value != nullptr && py_truthy(*target_value) ? *target_value : first_two(pos_or(prim, kCentre));
-        const Json* focal_value = pyv::get(*camera, "focal_mm");
+        const Json* focal_value = dict_get(*camera, "focal_mm");
         if (focal_value != nullptr && py_truthy(*focal_value)) {
-            out.focal = pyv::to_float(*focal_value);
-        } else if (const Json* own = pyv::get(prim, "focal_mm"); own != nullptr && py_truthy(*own)) {
-            out.focal = pyv::to_float(*own);
+            out.focal = to_float(*focal_value);
+        } else if (const Json* own = dict_get(prim, "focal_mm"); own != nullptr && py_truthy(*own)) {
+            out.focal = to_float(*own);
         }
         out.rotation = la::matmul(view, turn);
-        out.cx = pyv::to_float(pyv::at(target, 0));
-        out.cy = pyv::to_float(pyv::at(target, 1));
+        out.cx = to_float(subscript(target, 0));
+        out.cy = to_float(subscript(target, 1));
         return out;
     }
     static const Json kDefault = Json::array({100, 150, 0});
     Json pos = py_list(pos_or(prim, kDefault));
     for (int i = 0; i < 3; ++i) pos.push_back(0);
     out.rotation = turn;
-    out.cx = pyv::to_float(pos[0]);
-    out.cy = pyv::to_float(pos[1]);
-    const Json* focal_value = pyv::get(prim, "focal_mm");
-    out.focal = focal_value == nullptr || !py_truthy(*focal_value) ? 400.0 : pyv::to_float(*focal_value);
+    out.cx = to_float(pos[0]);
+    out.cy = to_float(pos[1]);
+    const Json* focal_value = dict_get(prim, "focal_mm");
+    out.focal = focal_value == nullptr || !py_truthy(*focal_value) ? 400.0 : to_float(*focal_value);
     return out;
 }
 
@@ -111,13 +111,10 @@ std::size_t argmin(const std::vector<double>& v) {
     return best;
 }
 
-double py_max(double a, double b) { return b > a ? b : a; }
-double py_min(double a, double b) { return b < a ? b : a; }
-
 // float(x) where Python's ValueError is reported as the op's own error (camera_for's `except ValueError`)
 double value_float(const Json& v) {
     try {
-        return pyv::to_float(v);
+        return to_float(v);
     } catch (const Error& error) {
         if (error.code() == "value") throw OpError(error.what());
         throw;
@@ -148,7 +145,7 @@ std::optional<Json> ruler_from(const Json& prim, const Json* camera) {
     if (points.empty()) return std::nullopt;
     Json out = Json::object();
     out["kind"] = "perspective";
-    out["points"] = pyv::slice(points, 0, 3);
+    out["points"] = py_slice(points, 0, 3);
     out["lock_horizon"] = points.size() >= 2;
     return out;
 }
@@ -156,7 +153,7 @@ std::optional<Json> ruler_from(const Json& prim, const Json* camera) {
 Json camera_for(const Json& ruler, const Json& prim, const Json& camera) {
     static const Json kNone = Json::array();
     std::vector<std::vector<double>> goal;
-    for (const Json& p : py_list(pyv::get_or(ruler, "points", kNone))) {
+    for (const Json& p : py_list(get_else(ruler, "points", kNone))) {
         std::vector<double> xy;
         for (const Json& c : py_list(first_two(p))) xy.push_back(value_float(c));
         goal.push_back(std::move(xy));
@@ -171,9 +168,9 @@ Json camera_for(const Json& ruler, const Json& prim, const Json& camera) {
         }
     }
     const Json base = py_dict(py_truthy(camera) ? camera : Json::object());
-    const Json* target_value = pyv::get(base, "target");
+    const Json* target_value = dict_get(base, "target");
     static const Json kCentre = Json::array({100, 150});
-    const Json target = target_value != nullptr && py_truthy(*target_value) ? *target_value : first_two(pyv::get_or(prim, "pos", kCentre));
+    const Json target = target_value != nullptr && py_truthy(*target_value) ? *target_value : first_two(get_else(prim, "pos", kCentre));
     Json flat = prim;
     flat["rot"] = Json::array({0, 0, 0});
     const bool three = goal.size() >= 3;
@@ -186,7 +183,7 @@ Json camera_for(const Json& ruler, const Json& prim, const Json& camera) {
         cam["tip"] = tip;
         cam["turn"] = turn;
         cam["roll"] = three ? roll : 0.0;
-        cam["focal_mm"] = la::py_exp(v[3]);
+        cam["focal_mm"] = py_exp(v[3]);
         cam["target"] = target;
         const Json vps = vanishing_points(flat, &cam);
         double total = 0.0;
@@ -209,11 +206,11 @@ Json camera_for(const Json& ruler, const Json& prim, const Json& camera) {
     std::optional<Vector> best;
     for (const double turn : {-1.2, -0.6, 0.0, 0.6, 1.2}) {
         for (const double tip : {-0.3, 0.0, 0.3}) {
-            const Json* focal_value = pyv::get(base, "focal_mm");
+            const Json* focal_value = dict_get(base, "focal_mm");
             const double focal = focal_value != nullptr && py_truthy(*focal_value) ? value_float(*focal_value) : 400.0;
             double log_focal = 0.0;
             try {
-                log_focal = la::py_log(focal);
+                log_focal = py_log(focal);
             } catch (const Error& error) {
                 throw OpError(error.what());  // (ValueError: math domain error)
             }
@@ -226,8 +223,8 @@ Json camera_for(const Json& ruler, const Json& prim, const Json& camera) {
     out["tip"] = py_round(v[0], 4);
     out["turn"] = py_round(v[1], 4);
     out["roll"] = py_round(three ? v[2] : 0.0, 4);
-    out["focal_mm"] = py_round(py_min(5000.0, py_max(20.0, la::py_exp(v[3]))), 1);
-    out["target"] = Json::array({value_float(pyv::at(target, 0)), value_float(pyv::at(target, 1))});
+    out["focal_mm"] = py_round(py_min(5000.0, py_max(20.0, py_exp(v[3]))), 1);
+    out["target"] = Json::array({value_float(subscript(target, 0)), value_float(subscript(target, 1))});
     return out;
 }
 

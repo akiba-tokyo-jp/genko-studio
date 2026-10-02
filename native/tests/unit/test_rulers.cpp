@@ -11,10 +11,10 @@
 #include <string>
 #include <vector>
 
+#include "core/brushes.hpp"
 #include "core/command_bus.hpp"
+#include "core/error.hpp"
 #include "core/ids.hpp"
-#include "core/op_targets.hpp"
-#include "core/pyvalue.hpp"
 #include "core/rulers.hpp"
 #include "m3b_support.hpp"
 #include "render/brushes.hpp"
@@ -78,6 +78,21 @@ class TestRulers : public QObject {
 
 private slots:
     void initTestCase() { QVERIFY(scratch_.isValid()); }
+
+    void huge_sample_counts_are_refused_before_integer_arithmetic() {
+        for (const char* kind : {"line", "curve", "parallel_curve", "multi_curve", "radial_curve"}) {
+            Json ruler = j(R"({"id":"r", "points":[[0,0],[1e19,0]], "points2":[[0,1],[1e19,1]], "center":[0,-1], "active":true})");
+            ruler["kind"] = kind;
+            QVERIFY_EXCEPTION_THROWN(rulers::snap(pts({{0, 0}, {1e19, 0}}), Json::array({ruler})), genko::core::PyValueError);
+        }
+    }
+
+    void ruler_pen_refuses_computed_nonfinite_points() {
+        const Document doc = applied(book(), R"([{"op":"add_ruler","page":1,"id":"r","kind":"rect","points":[[1e308,0],[1.1e308,1]]}])");
+        const std::string error = error_of(doc, R"([{"op":"set_note","page":1,"note":"rollback"},{"op":"ruler_to_layer","page":1,"id":"r"}])");
+        QVERIFY2(error.starts_with("ops[1] ruler_to_layer: points must be finite"), error.c_str());
+        QVERIFY(!error.ends_with("[the book changed]"));
+    }
 
     // --- the snapping ---------------------------------------------------------------------------------------------
 
@@ -202,18 +217,60 @@ private slots:
         QVERIFY(std::fabs(rulers::snap(pts({{60, 20}, {150, 40}}), in_panel, inside).back().y - 20) < 1e-9);
         QVERIFY(std::fabs(rulers::snap(pts({{60, 120}, {150, 140}}), in_panel, inside).back().y - 140) < 1e-9);
         const Json for_layer = j(R"([{"kind": "parallel", "angle": 0, "layer_id": "ink"}])");
-        QVERIFY(std::fabs(rulers::snap(pts({{60, 20}, {150, 40}}), for_layer, {}, std::nullopt, std::string("other")).back().y - 40) < 1e-9);
-        QVERIFY(std::fabs(rulers::snap(pts({{60, 20}, {150, 40}}), for_layer, {}, std::nullopt, std::string("ink")).back().y - 20) < 1e-9);
+        const Json other("other");
+        const Json ink("ink");
+        QVERIFY(std::fabs(rulers::snap(pts({{60, 20}, {150, 40}}), for_layer, {}, Json(), &other).back().y - 40) < 1e-9);
+        QVERIFY(std::fabs(rulers::snap(pts({{60, 20}, {150, 40}}), for_layer, {}, Json(), &ink).back().y - 20) < 1e-9);
+        QVERIFY(std::fabs(rulers::snap(pts({{60, 20}, {150, 40}}), for_layer).back().y - 20) < 1e-9);  // (no layer: every ruler)
+        // one ruler by its id (any value Python compares with ==)
+        const Json two_ids = j(R"([{"id": 7, "kind": "parallel", "angle": 0}, {"id": "b", "kind": "parallel", "angle": 90}])");
+        QVERIFY(std::fabs(rulers::snap(pts({{60, 20}, {150, 40}}), two_ids, {}, Json(7)).back().y - 20) < 1e-9);
+        QVERIFY(std::fabs(rulers::snap(pts({{60, 20}, {150, 40}}), two_ids, {}, Json("b")).back().x - 60) < 1e-9);
         const auto g = rulers::snap_to_grid(rulers::XY{12.4, 17.6}, 5);
         QCOMPARE(g.x, 10.0);
         QCOMPARE(g.y, 20.0);
         QCOMPARE(rulers::snap_to_grid(rulers::XY{12.4, 17.6}, 0).x, 12.4);
     }
 
+    // ruler_to_layer's kinds are the brushes the lines are drawn with (core/brushes.hpp for both).
     void the_brush_kinds_are_the_drawings() {
-        std::vector<std::string> drawn;
-        for (const auto& b : genko::render::brushes::builtin()) drawn.push_back(b.key);
-        QVERIFY(drawn == genko::core::builtin_brush_kinds());
+        const Document doc = book();
+        for (const auto& b : genko::core::builtin_brushes()) {
+            QCOMPARE(genko::core::brush_kind(Json(b.key), doc), b.key);
+            QCOMPARE(genko::render::brushes::brush(b.key).key, b.key);
+        }
+        QCOMPARE(genko::core::brush_kind(Json("oil"), doc), std::string("marker"));
+    }
+
+    // What apply_ops lets through (IndexError, ZeroDivisionError, …: a traceback in Python's command line) is the
+    // CommandBus's python_error, its error ending with the traceback's last line.
+    void python_errors() {
+        const Document doc = book();
+        const auto error = [&](const char* ops) {
+            try {
+                (void)m3b::bus().apply(doc, j(ops), genko::core::Actor("genko"));
+            } catch (const genko::core::ApplyError& e) {
+                return e.code() + ": " + e.what();
+            }
+            return std::string("(applied)");
+        };
+        QCOMPARE(error(R"([{"op": "add_ruler", "page": 1, "kind": "radial_curve", "points": [[0, 0], [5, 5], [9, 0]], "center": [1]}])"),
+                 std::string("python_error: ops[0] add_ruler: IndexError: list index out of range"));
+        QCOMPARE(error(R"([{"op": "add_ruler", "page": 1, "kind": "line", "points": [[0, 0], [5]]}])"),
+                 std::string("python_error: ops[0] add_ruler: IndexError: list index out of range"));
+        // a symmetry ruler of copies 0.5 (int 0) a book may hold: 2 * math.pi / 0
+        Document held = book();
+        held.edit_page(0).rulers = j(R"([{"kind": "symmetry", "points": [[10, 0], [10, 50]], "copies": 0.5}])");
+        QVERIFY_THROWS_EXCEPTION(genko::core::PyUncaught,
+                                 rulers::symmetry_copies(pts({{1, 1}, {2, 2}}), held.page(0).rulers));
+        try {
+            (void)m3b::bus().apply(held, j(R"([{"op": "add_stroke", "page": 1, "points": [[1, 1], [2, 2]], "snap_ruler": true}])"),
+                                   genko::core::Actor("genko"));
+            QFAIL("applied");
+        } catch (const genko::core::ApplyError& e) {
+            QCOMPARE(std::string(e.what()), std::string("ops[0] add_stroke: ZeroDivisionError: float division by zero"));
+            QCOMPARE(e.code(), std::string("python_error"));
+        }
     }
 
     // --- the ops ------------------------------------------------------------------------------------------------------

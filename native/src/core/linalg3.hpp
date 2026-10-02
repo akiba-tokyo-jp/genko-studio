@@ -61,22 +61,10 @@ inline Vec3 operator*(const Vec3& a, const Vec3& b) { return {a[0] * b[0], a[1] 
 double np_maximum(double a, double b);
 double np_minimum(double a, double b);
 
-// --- the math module and numpy's own math (libm called as Python and numpy call it) -----------------------------------
+// --- numpy's own math (libm called as numpy calls it; the math module is core/pymath's) --------------------------------
 
-// np.hypot: libm's hypot (math.hypot is CPython's own: core::py_hypot).
+// np.hypot of float64: libm's hypot (math.hypot is CPython's own: core::py_hypot).
 double np_hypot(double x, double y);
-// math.hypot of three numbers (CPython's vector_norm).
-double py_hypot3(double x, double y, double z);
-// math.exp: core::Error("overflow", "math range error") where Python raises OverflowError.
-double py_exp(double x);
-// math.log: core::Error("value", "math domain error") for x <= 0.
-double py_log(double x);
-// math.remainder (IEEE remainder): core::Error("value", "math domain error") for an infinite x or a zero y.
-double py_remainder(double x, double y);
-// math.floor / math.ceil to an integer: core::Error("value", …) for NaN, core::Error("overflow", …) for infinities
-// (Python's ValueError and OverflowError).
-double py_floor_int(double x);
-double py_ceil_int(double x);
 
 inline constexpr double kTau = 6.283185307179586;  // math.tau
 

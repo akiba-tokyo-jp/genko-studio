@@ -18,11 +18,12 @@
 
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
+#include "core/limits.hpp"
 #include "core/persp3d.hpp"
 #include "core/prim3d.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
-#include "core/pyvalue.hpp"
+#include "core/pyops.hpp"
 
 namespace genko::core::mesh3d {
 
@@ -38,9 +39,6 @@ namespace {
 
 using la::matmul;
 using la::matvec;
-
-double py_max(double a, double b) { return b > a ? b : a; }
-double py_min(double a, double b) { return b < a ? b : a; }
 
 const Json& json_of(const char* text) {
     // (a table written as Python writes its literals: 1.0 stays a float, 0 an int)
@@ -98,7 +96,7 @@ std::size_t vertex(std::int64_t i, std::size_t n) {
     const auto size = static_cast<std::int64_t>(n);
     const std::int64_t at = i < 0 ? i + size : i;
     if (at < 0 || at >= size) {
-        pyv::raise_index("index " + std::to_string(i) + " is out of bounds for axis 0 with size " + std::to_string(n));
+        raise_index_error("index " + std::to_string(i) + " is out of bounds for axis 0 with size " + std::to_string(n));
     }
     return static_cast<std::size_t>(at);
 }
@@ -263,19 +261,19 @@ std::vector<std::vector<Vec3>> head_marks(const Vec3& centre, const Mat3& turn, 
 std::shared_ptr<const Model> figure(const Json& prim) {
     const Skeleton sk = figure_skeleton(prim);
     const double u = sk.unit;
-    const double build = py_max(0.5, py_min(1.8, pyv::to_float(sk.body.at("build"))));
+    const double build = py_max(0.5, py_min(1.8, to_float(sk.body.at("build"))));
     Builder b;
     const double t = u * 0.2 * build;  // limb radius
     const Mat3& chest_turn = sk.turn("chest");
     // the torso: chest, belly and pelvis as eggs; the neck; the head
     b.ellipsoid((sk.point("waist") + sk.point("neck")) / 2 + matvec(chest_turn, Vec3{0.0, 0.1 * u, 0.0}),
-                Vec3{0.95 * u * py_max(0.6, pyv::to_float(sk.body.at("shoulders"))) * 0.85 * py_pow(build, 0.3), 0.85 * u,
+                Vec3{0.95 * u * py_max(0.6, to_float(sk.body.at("shoulders"))) * 0.85 * py_pow(build, 0.3), 0.85 * u,
                      0.5 * u * build},
                 &chest_turn, 14, 9, 1);
     b.ellipsoid((sk.point("pelvis") + sk.point("waist")) / 2,
-                Vec3{0.62 * u * py_pow(build, 0.3) * py_max(0.6, pyv::to_float(sk.body.at("hips"))), 0.75 * u, 0.42 * u * build},
+                Vec3{0.62 * u * py_pow(build, 0.3) * py_max(0.6, to_float(sk.body.at("hips"))), 0.75 * u, 0.42 * u * build},
                 &sk.turn("spine"), 14, 9, 1);
-    const Json* sex = pyv::find(sk.body, "sex");
+    const Json* sex = get(sk.body, "sex");
     if (sex != nullptr && sex->is_string() && sex->get_ref<const std::string&>() == "female") {
         // (the chest's shape, and a narrower waist)
         const Vec3 chest = (sk.point("waist") + sk.point("neck")) / 2 + matvec(chest_turn, Vec3{0.0, 0.25 * u, 0.0});
@@ -287,13 +285,13 @@ std::shared_ptr<const Model> figure(const Json& prim) {
     b.capsule(sk.point("neck"), sk.point("head_base"), t * 0.8, 10, 1);
     head_mesh(b, sk.point("head"), sk.turn("head"), u, 2);
     static const Json kNoHands = Json::object();
-    const Json& hands = pyv::get_or(prim, "hands", kNoHands);
+    const Json& hands = get_else(prim, "hands", kNoHands);
     static const Json kRelaxed = "relaxed";
     for (const auto& [p, s] : {std::pair<const char*, int>{"l", 1}, {"r", -1}}) {
         const std::string side(p);
         b.capsule(sk.point(side + "_shoulder"), sk.point(side + "_elbow"), t * 1.05, 10, 3);
         b.capsule(sk.point(side + "_elbow"), sk.point(side + "_wrist"), t * 0.85, 10, 3);
-        const Json* pose = pyv::get(hands, side);
+        const Json* pose = dict_get(hands, side);
         hand(b, sk.point(side + "_wrist"), sk.turn(side + "_wrist"), 0.8 * u, pose != nullptr && py_truthy(*pose) ? *pose : kRelaxed,
              s, 4);
         b.capsule(sk.point(side + "_hip"), sk.point(side + "_knee"), t * 1.45, 10, 5);
@@ -322,7 +320,7 @@ FigureCache& figure_cache() {
 std::shared_ptr<const Model> cached_figure(const Json& prim) {
     Json key_value = Json::object();
     for (const char* k : {"size", "body", "joints", "hands"}) {
-        const Json* v = pyv::get(prim, k);
+        const Json* v = dict_get(prim, k);
         key_value[k] = v != nullptr ? *v : Json();
     }
     const std::string key = dump_canonical(key_value);
@@ -350,7 +348,7 @@ std::shared_ptr<const Model> solid(const Json& prim) {
     const double w = size[0];
     const double h = size[1];
     const double d = size[2];
-    const Json* kind_value = pyv::get(prim, "kind");
+    const Json* kind_value = dict_get(prim, "kind");
     const std::string kind = kind_value != nullptr && kind_value->is_string() ? kind_value->get<std::string>() : std::string();
     Builder b;
     if (kind == "box") {
@@ -371,9 +369,9 @@ std::shared_ptr<const Model> solid(const Json& prim) {
         faces.push_back(bottom);
         b.add(verts, faces, 0, true);
     } else if (kind == "stairs") {
-        const Json* steps_value = pyv::get(prim, "steps");
+        const Json* steps_value = dict_get(prim, "steps");
         const std::int64_t steps =
-            std::max<std::int64_t>(2, std::min<std::int64_t>(30, steps_value != nullptr && py_truthy(*steps_value) ? pyv::to_int(*steps_value) : 6));
+            std::max<std::int64_t>(2, std::min<std::int64_t>(30, steps_value != nullptr && py_truthy(*steps_value) ? to_int(*steps_value) : 6));
         const double rise = h / static_cast<double>(steps);
         const double run = d / static_cast<double>(steps);
         for (std::int64_t k = 0; k < steps; ++k) {  // each step a box from the ground up
@@ -396,7 +394,7 @@ std::shared_ptr<const Model> solid(const Json& prim) {
         faces.push_back(base);
         b.add(verts, faces, 0, true);
     } else if (kind == "prop") {
-        const std::string name = str_or(pyv::get(prim, "prop"), "chair");
+        const std::string name = str_or(dict_get(prim, "prop"), "chair");
         const auto* boxes = prim3d::prop_boxes(name);
         if (boxes == nullptr) boxes = prim3d::prop_boxes("chair");
         for (const auto& [bx, by, bz, bw, bh, bd] : *boxes) {
@@ -407,8 +405,8 @@ std::shared_ptr<const Model> solid(const Json& prim) {
         const double top = -h / 2;
         const double back = d / 2;
         b.add({Vec3{-w / 2, g, -d / 2}, Vec3{w / 2, g, -d / 2}, Vec3{w / 2, g, back}, Vec3{-w / 2, g, back}}, {{0, 1, 2, 3}}, 0, false);
-        const Json* scene = pyv::get(prim, "scene");
-        if (!(scene != nullptr && pyv::eq(*scene, Json("street")))) {
+        const Json* scene = dict_get(prim, "scene");
+        if (!(scene != nullptr && py_equals(*scene, Json("street")))) {
             b.add({Vec3{-w / 2, top, back}, Vec3{w / 2, top, back}, Vec3{w / 2, g, back}, Vec3{-w / 2, g, back}}, {{0, 1, 2, 3}}, 0, false);
             for (const double x : {-w / 2, w / 2}) {
                 b.add({Vec3{x, top, -d / 2}, Vec3{x, top, back}, Vec3{x, g, back}, Vec3{x, g, -d / 2}}, {{0, 1, 2, 3}}, 0, false);
@@ -425,13 +423,13 @@ std::vector<double> light_vector(const Json* light) {
     if (light == nullptr) return {-0.5, -0.7, -0.6};
     if (!light->is_array()) {
         if (light->is_number() || light->is_boolean() || light->is_string()) {
-            throw Error("value", "matmul: Input operand 1 does not have enough dimensions (has 0, gufunc core with signature "
+            throw PyValueError("matmul: Input operand 1 does not have enough dimensions (has 0, gufunc core with signature "
                                  "(n?,k),(k,m?)->(n?,m?) requires 1)");
         }
-        throw Error("type", "float() argument must be a string or a real number, not '" + py_type_name(*light) + "'");
+        throw PyTypeError("float() argument must be a string or a real number, not '" + py_type_name(*light) + "'");
     }
     std::vector<double> out;
-    for (const Json& v : *light) out.push_back(v.is_null() ? std::nan("") : pyv::to_float(v));
+    for (const Json& v : *light) out.push_back(v.is_null() ? std::nan("") : to_float(v));
     return out;
 }
 
@@ -446,10 +444,10 @@ void fill_triangle(const std::array<Point2, 3>& p, const std::array<double, 3>& 
     const double min_y = low(low(p[0][1], p[1][1]), p[2][1]);
     const double max_x = high(high(p[0][0], p[1][0]), p[2][0]);
     const double max_y = high(high(p[0][1], p[1][1]), p[2][1]);
-    const double fx0 = py_max(0.0, la::py_floor_int(min_x));
-    const double fy0 = py_max(0.0, la::py_floor_int(min_y));
-    const double fx1 = py_min(static_cast<double>(w - 1), la::py_ceil_int(max_x));
-    const double fy1 = py_min(static_cast<double>(h - 1), la::py_ceil_int(max_y));
+    const double fx0 = py_max(0.0, py_floor(min_x));
+    const double fy0 = py_max(0.0, py_floor(min_y));
+    const double fx1 = py_min(static_cast<double>(w - 1), py_ceil(max_x));
+    const double fy1 = py_min(static_cast<double>(h - 1), py_ceil(max_y));
     if (fx1 < fx0 || fy1 < fy0) return;
     // (only the window's pixels: each pixel's value depends on nothing but the triangle)
     const int x0 = std::max(static_cast<int>(fx0), out.x0);
@@ -493,11 +491,11 @@ void fill_triangle(const std::array<Point2, 3>& p, const std::array<double, 3>& 
 // _turned: the prim's points turned as they are seen (its own turn, then the camera's)
 std::vector<Vec3> turned(const Json& prim, std::span<const Vec3> verts, const Json* camera) {
     static const Json kZeroRot = Json::array({0, 0, 0});
-    std::vector<Vec3> out = la::rows_mt(verts, prim_rotation(pyv::get_or(prim, "rot", kZeroRot)));
+    std::vector<Vec3> out = la::rows_mt(verts, prim_rotation(get_else(prim, "rot", kZeroRot)));
     if (camera != nullptr) {
-        const Json* tip = pyv::get(*camera, "tip");
-        const Json* turn = pyv::get(*camera, "turn");
-        const Json* roll = pyv::get(*camera, "roll");
+        const Json* tip = dict_get(*camera, "tip");
+        const Json* turn = dict_get(*camera, "turn");
+        const Json* roll = dict_get(*camera, "roll");
         const Json view = Json::array({tip != nullptr ? *tip : Json(0), turn != nullptr ? *turn : Json(0), roll != nullptr ? *roll : Json(0)});
         out = la::rows_mt(out, prim_rotation(view));
     }
@@ -508,7 +506,7 @@ std::vector<Vec3> normals(const std::vector<Vec3>& verts3, const std::vector<std
     std::vector<Vec3> out;
     out.reserve(faces.size());
     for (const auto& face : faces) {
-        if (face.size() < 2) pyv::raise_index("tuple index out of range");
+        if (face.size() < 2) raise_index_error("tuple index out of range");
         const Vec3& a = verts3[vertex(face[0], verts3.size())];
         const Vec3& b = verts3[vertex(face[1], verts3.size())];
         const Vec3& c = verts3[vertex(face[face.size() > 2 ? 2 : 1], verts3.size())];
@@ -553,7 +551,7 @@ LinesCache& lines_cache() {
 
 // --- tables and small helpers ----------------------------------------------------------------------------------------
 
-bool is_mesh_kind(const Json& kind) { return pyv::is_one_of(kind, {"figure", "head", "hand", "mesh"}); }
+bool is_mesh_kind(const Json& kind) { return is_one_of(kind, {"figure", "head", "hand", "mesh"}); }
 
 const Json& figure_presets() { return json_of(kPresets); }
 const Json& sex_body() { return json_of(kSexBody); }
@@ -561,18 +559,18 @@ const Json& sex_body() { return json_of(kSexBody); }
 std::array<double, 5> hand_curls(const Json& value) {
     if (value.is_array() && value.size() == 5) {
         std::array<double, 5> out{};
-        for (std::size_t i = 0; i < 5; ++i) out[i] = clamp01(pyv::to_float(value[i]));
+        for (std::size_t i = 0; i < 5; ++i) out[i] = clamp01(to_float(value[i]));
         return out;
     }
     if (value.is_object()) {
-        std::array<double, 5> base = curls_of(str_or(pyv::get(value, "pose"), "relaxed"));
-        const Json* curls = pyv::get(value, "curls");
+        std::array<double, 5> base = curls_of(str_or(dict_get(value, "pose"), "relaxed"));
+        const Json* curls = dict_get(value, "curls");
         if (curls != nullptr && curls->is_array() && curls->size() == 5) {
-            for (std::size_t i = 0; i < 5; ++i) base[i] = pyv::to_float((*curls)[i]);
+            for (std::size_t i = 0; i < 5; ++i) base[i] = to_float((*curls)[i]);
         } else if (curls != nullptr && curls->is_object()) {
             for (const auto& [name, c] : curls->items()) {
                 for (std::size_t i = 0; i < kFingers.size(); ++i) {
-                    if (kFingers[i] == name) base[i] = pyv::to_float(c);
+                    if (kFingers[i] == name) base[i] = to_float(c);
                 }
             }
         }
@@ -604,11 +602,11 @@ Mat3 prim_rotation(const Json& rot) {
     // tip, turn, lean = (list(rot or [0, 0, 0]) + [0, 0, 0])[:3]
     Json items = py_truthy(rot) ? py_list(rot) : Json::array({0, 0, 0});
     for (int i = 0; i < 3; ++i) items.push_back(0);
-    const double turn = pyv::real(items[1]);
+    const double turn = to_real(items[1]);
     const Mat3 m_turn{Vec3{py_cos(turn), 0.0, -py_sin(turn)}, Vec3{0.0, 1.0, 0.0}, Vec3{py_sin(turn), 0.0, py_cos(turn)}};
-    const double tip = pyv::real(items[0]);
+    const double tip = to_real(items[0]);
     const Mat3 m_tip{Vec3{1.0, 0.0, 0.0}, Vec3{0.0, py_cos(tip), -py_sin(tip)}, Vec3{0.0, py_sin(tip), py_cos(tip)}};
-    const double lean = pyv::real(items[2]);
+    const double lean = to_real(items[2]);
     const Mat3 m_lean{Vec3{py_cos(lean), -py_sin(lean), 0.0}, Vec3{py_sin(lean), py_cos(lean), 0.0}, Vec3{0.0, 0.0, 1.0}};
     return matmul(matmul(m_lean, m_tip), m_turn);
 }
@@ -617,8 +615,8 @@ Mat3 joint_matrix(const Json& joint) {
     static const Json kNone = Json::object();
     const Json& j = py_truthy(joint) ? joint : kNone;
     const auto axis = [&](const char* key) {
-        const Json* v = pyv::get(j, key);
-        return v != nullptr ? pyv::to_float(*v) : 0.0;
+        const Json* v = dict_get(j, key);
+        return v != nullptr ? to_float(*v) : 0.0;
     };
     const Mat3 z = rz(axis("z"));
     const Mat3 x = rx(axis("x"));
@@ -643,30 +641,30 @@ const Mat3& Skeleton::turn(std::string_view name) const {
 Skeleton figure_skeleton(const Json& prim) {
     static const Json kDefaultSize = Json::array({40, 80, 20});
     static const Json kNone = Json::object();
-    const Json& size = pyv::get_or(prim, "size", kDefaultSize);
-    double height = pyv::to_float(size.is_array() ? pyv::at(size, 1) : size);
+    const Json& size = get_else(prim, "size", kDefaultSize);
+    double height = to_float(size.is_array() ? subscript(size, 1) : size);
     if (height == 0.0) height = 80.0;  // (float(…) or 80.0)
-    const Json own = py_dict(pyv::get_or(prim, "body", kNone));
+    const Json own = py_dict(get_else(prim, "body", kNone));
     Json body = Json::object({{"heads", 7.5}, {"shoulders", 1.0}, {"hips", 1.0}, {"build", 1.0}, {"legs", 1.0}});
-    if (const Json* sb = pyv::find(sex_body(), str_or(pyv::get(own, "sex"), ""))) {
+    if (const Json* sb = get(sex_body(), str_or(dict_get(own, "sex"), ""))) {
         for (const auto& [k, v] : sb->items()) body[k] = v;
     }
     for (const auto& [k, v] : own.items()) body[k] = v;
-    const double u = height / py_max(4.0, py_min(10.0, pyv::to_float(body["heads"])));
-    const Json& joints = pyv::get_or(prim, "joints", kNone);
-    const double legs = py_max(0.6, py_min(1.5, pyv::to_float(body["legs"])));
+    const double u = height / py_max(4.0, py_min(10.0, to_float(body["heads"])));
+    const Json& joints = get_else(prim, "joints", kNone);
+    const double legs = py_max(0.6, py_min(1.5, to_float(body["legs"])));
 
     const auto j = [&](const std::string& name) {
         Json base = Json::object();
         if (name == "l_arm") base["z"] = 0.12;
         if (name == "r_arm") base["z"] = -0.12;
-        const Json* given = pyv::get(joints, name);
+        const Json* given = dict_get(joints, name);
         if (given != nullptr && py_truthy(*given)) {
-            if (!given->is_object()) pyv::raise_attribute(*given, "items");
+            if (!given->is_object()) raise_attribute_error(*given, "items");
             for (const auto& [axis, value] : given->items()) {
-                const Json* before = pyv::find(base, axis);
+                const Json* before = get(base, axis);
                 const double b = before != nullptr ? before->get<double>() : 0.0;
-                base[axis] = b + pyv::to_float(value);
+                base[axis] = b + to_float(value);
             }
         }
         return joint_matrix(base);
@@ -693,8 +691,8 @@ Skeleton figure_skeleton(const Json& prim) {
     sk.turns.emplace_back("chest", chest_r);
     sk.turns.emplace_back("neck", neck_r);
     sk.turns.emplace_back("head", head_r);
-    const double shoulder_w = 0.95 * u * py_max(0.6, py_min(1.5, pyv::to_float(body["shoulders"])));
-    const double hip_w = 0.5 * u * py_max(0.6, py_min(1.6, pyv::to_float(body["hips"])));
+    const double shoulder_w = 0.95 * u * py_max(0.6, py_min(1.5, to_float(body["shoulders"])));
+    const double hip_w = 0.5 * u * py_max(0.6, py_min(1.6, to_float(body["hips"])));
     for (const auto& [p, s] : {std::pair<const char*, int>{"l", 1}, {"r", -1}}) {
         const std::string side(p);
         const Vec3 shoulder = neck_base + matvec(chest_r, Vec3{s * shoulder_w, 0.2 * u, 0.0});
@@ -731,13 +729,13 @@ Skeleton figure_skeleton(const Json& prim) {
 }
 
 std::shared_ptr<const Model> model_of(const Json& prim) {
-    const Json* kind_value = pyv::get(prim, "kind");
+    const Json* kind_value = dict_get(prim, "kind");
     const Json kind = kind_value != nullptr ? *kind_value : Json();
     static const Json kDefaultSize = Json::array({40, 40, 40});
-    const Json& size = pyv::get_or(prim, "size", kDefaultSize);
-    if (pyv::eq(kind, Json("figure"))) return cached_figure(prim);
-    if (pyv::eq(kind, Json("head"))) {
-        double height = pyv::to_float(size.is_array() ? pyv::at(size, 1) : size);
+    const Json& size = get_else(prim, "size", kDefaultSize);
+    if (py_equals(kind, Json("figure"))) return cached_figure(prim);
+    if (py_equals(kind, Json("head"))) {
+        double height = to_float(size.is_array() ? subscript(size, 1) : size);
         if (height == 0.0) height = 30.0;
         const double u = height / 1.1;
         Builder b;
@@ -747,47 +745,47 @@ std::shared_ptr<const Model> model_of(const Json& prim) {
         model->marks = head_marks(Vec3{0.0, 0.0, 0.0}, la::identity3(), u);
         return model;
     }
-    if (pyv::eq(kind, Json("hand"))) {
-        double length = pyv::to_float(size.is_array() ? pyv::at(size, 1) : size);
+    if (py_equals(kind, Json("hand"))) {
+        double length = to_float(size.is_array() ? subscript(size, 1) : size);
         if (length == 0.0) length = 20.0;
         Builder b;
-        const Json* side_value = pyv::get(prim, "side");
-        const int side = pyv::eq(side_value != nullptr ? *side_value : Json("r"), Json("l")) ? 1 : -1;
-        const Json* pose_value = pyv::get(prim, "pose");
+        const Json* side_value = dict_get(prim, "side");
+        const int side = py_equals(side_value != nullptr ? *side_value : Json("r"), Json("l")) ? 1 : -1;
+        const Json* pose_value = dict_get(prim, "pose");
         const Json pose = pose_value != nullptr && py_truthy(*pose_value) ? *pose_value : Json("relaxed");
-        const Json* curls = pyv::get(prim, "curls");
+        const Json* curls = dict_get(prim, "curls");
         const Json shape = curls != nullptr && py_truthy(*curls) ? Json::object({{"pose", pose}, {"curls", *curls}}) : pose;
         hand(b, Vec3{0.0, -length / 2, 0.0}, la::identity3(), length, shape, side, 4);
         auto model = std::make_shared<Model>();
         model->mesh = std::move(b.m);
         return model;
     }
-    if (pyv::is_one_of(kind, {"box", "cylinder", "stairs", "floor", "scene", "sphere", "cone", "prop"})) return solid(prim);
-    if (pyv::eq(kind, Json("mesh"))) {
+    if (is_one_of(kind, {"box", "cylinder", "stairs", "floor", "scene", "sphere", "cone", "prop"})) return solid(prim);
+    if (py_equals(kind, Json("mesh"))) {
         static const Json kNone = Json::object();
-        const Json& data = pyv::get_or(prim, "mesh", kNone);
+        const Json& data = get_else(prim, "mesh", kNone);
         static const Json kEmpty = Json::array();
-        const Json& flat = pyv::get_or(data, "v", kEmpty);
+        const Json& flat = get_else(data, "v", kEmpty);
         std::vector<double> values;
-        for (const Json& c : py_list(flat)) values.push_back(c.is_null() ? std::nan("") : pyv::to_float(c));
+        for (const Json& c : py_list(flat)) values.push_back(c.is_null() ? std::nan("") : to_float(c));
         if (values.size() % 3 != 0) {
-            throw Error("value", "cannot reshape array of size " + std::to_string(values.size()) + " into shape (3)");
+            throw PyValueError("cannot reshape array of size " + std::to_string(values.size()) + " into shape (3)");
         }
         Json dims = size.is_array() ? size : Json::array({size, size, size});
         if (size.is_array()) {
-            const Json last = pyv::at(size, -1);
+            const Json last = subscript(size, -1);
             for (int i = 0; i < 3; ++i) dims.push_back(last);
         }
-        const double w = pyv::to_float(dims[0]);
-        const double h = pyv::to_float(dims[1]);
-        const double d = pyv::to_float(dims[2]);
+        const double w = to_float(dims[0]);
+        const double h = to_float(dims[1]);
+        const double d = to_float(dims[2]);
         auto model = std::make_shared<Model>();
         for (std::size_t i = 0; i + 2 < values.size(); i += 3) {
             model->mesh.v.push_back(Vec3{values[i] * w, values[i + 1] * h, values[i + 2] * d});
         }
-        for (const Json& face : py_list(pyv::get_or(data, "f", kEmpty))) {
+        for (const Json& face : py_list(get_else(data, "f", kEmpty))) {
             std::vector<std::int64_t> f;
-            for (const Json& i : py_list(face)) f.push_back(pyv::to_int(i));
+            for (const Json& i : py_list(face)) f.push_back(to_int(i));
             model->mesh.f.push_back(std::move(f));
             model->mesh.parts.push_back(0);
         }
@@ -798,7 +796,7 @@ std::shared_ptr<const Model> model_of(const Json& prim) {
 
 const Json* camera_of(const Json& prim, const Json* page_camera) {
     if (page_camera != nullptr && py_truthy(*page_camera)) return page_camera;
-    return truthy(pyv::find(prim, "camera"));
+    return truthy(get(prim, "camera"));
 }
 
 std::vector<Vec3> face_normals(const Json& prim, const Mesh& mesh, const Json* camera) {
@@ -808,36 +806,36 @@ std::vector<Vec3> face_normals(const Json& prim, const Mesh& mesh, const Json* c
 OnPage to_page(const Json& prim, std::span<const Vec3> local, const Json* camera) {
     camera = truthy(camera);
     static const Json kDefaultPos = Json::array({100, 150, 0});
-    Json pos = py_list(pyv::get_or(prim, "pos", kDefaultPos));
+    Json pos = py_list(get_else(prim, "pos", kDefaultPos));
     for (int i = 0; i < 3; ++i) pos.push_back(0);
     const Json cx = pos[0];
     const Json cy = pos[1];
     const Json cz = pos[2];
     static const Json kZeroRot = Json::array({0, 0, 0});
-    const std::vector<Vec3> turned_pts = la::rows_mt(local, prim_rotation(pyv::get_or(prim, "rot", kZeroRot)));
+    const std::vector<Vec3> turned_pts = la::rows_mt(local, prim_rotation(get_else(prim, "rot", kZeroRot)));
     OnPage out;
     out.pts.reserve(local.size());
     out.depth.reserve(local.size());
     if (camera != nullptr) {
-        const Vec3 at{pyv::to_float(cx), pyv::to_float(cy), pyv::to_float(cz)};
-        const Json* target_value = pyv::get(*camera, "target");
+        const Vec3 at{to_float(cx), to_float(cy), to_float(cz)};
+        const Json* target_value = dict_get(*camera, "target");
         const Json target = target_value != nullptr && py_truthy(*target_value) ? *target_value : Json::array({cx, cy});
-        const double tx = pyv::to_float(pyv::at(target, 0));
-        const double ty = pyv::to_float(pyv::at(target, 1));
-        const Json* tip = pyv::get(*camera, "tip");
-        const Json* turn = pyv::get(*camera, "turn");
-        const Json* roll = pyv::get(*camera, "roll");
+        const double tx = to_float(subscript(target, 0));
+        const double ty = to_float(subscript(target, 1));
+        const Json* tip = dict_get(*camera, "tip");
+        const Json* turn = dict_get(*camera, "turn");
+        const Json* roll = dict_get(*camera, "roll");
         const Mat3 view = prim_rotation(
             Json::array({tip != nullptr ? *tip : Json(0), turn != nullptr ? *turn : Json(0), roll != nullptr ? *roll : Json(0)}));
         std::vector<Vec3> rel(turned_pts.size());
         for (std::size_t i = 0; i < turned_pts.size(); ++i) rel[i] = (turned_pts[i] + at) - Vec3{tx, ty, 0.0};
         rel = la::rows_mt(rel, view);
-        const Json* focal_value = pyv::get(*camera, "focal_mm");
+        const Json* focal_value = dict_get(*camera, "focal_mm");
         double focal = 400.0;
         if (focal_value != nullptr && py_truthy(*focal_value)) {
-            focal = pyv::to_float(*focal_value);
-        } else if (const Json* own = pyv::get(prim, "focal_mm"); own != nullptr && py_truthy(*own)) {
-            focal = pyv::to_float(*own);
+            focal = to_float(*focal_value);
+        } else if (const Json* own = dict_get(prim, "focal_mm"); own != nullptr && py_truthy(*own)) {
+            focal = to_float(*own);
         }
         for (const Vec3& r : rel) {
             const double scale = focal / la::np_maximum(focal * 0.2, focal + r[2]);
@@ -846,12 +844,12 @@ OnPage to_page(const Json& prim, std::span<const Vec3> local, const Json* camera
         }
         return out;
     }
-    const Json* focal_value = pyv::get(prim, "focal_mm");
-    const double focal = focal_value == nullptr ? 400.0 : (py_truthy(*focal_value) ? pyv::to_float(*focal_value) : 400.0);
-    const double z = focal + pyv::to_float(cz);
-    const double x = pyv::to_float(cx);
-    const double y = pyv::to_float(cy);
-    const double zc = pyv::to_float(cz);
+    const Json* focal_value = dict_get(prim, "focal_mm");
+    const double focal = focal_value == nullptr ? 400.0 : (py_truthy(*focal_value) ? to_float(*focal_value) : 400.0);
+    const double z = focal + to_float(cz);
+    const double x = to_float(cx);
+    const double y = to_float(cy);
+    const double zc = to_float(cz);
     for (const Vec3& t : turned_pts) {
         const double scale = focal / la::np_maximum(focal * 0.2, z + t[2]);
         out.pts.push_back(Point2{x + t[0] * scale, y + t[1] * scale});
@@ -879,7 +877,7 @@ bool Raster::any() const {
 
 Raster raster(std::span<const Json> prims, int width, int height, double dpi, const Json* camera, const Json* light,
               double ambient, double box_x, double box_y, const Window* window) {
-    if (width <= 0 || height <= 0) throw Error("value", "negative dimensions are not allowed");
+    if (width <= 0 || height <= 0) throw PyValueError("negative dimensions are not allowed");
     Raster out;
     if (window != nullptr) {
         out.x0 = std::max(0, window->x0);
@@ -890,7 +888,7 @@ Raster raster(std::span<const Json> prims, int width, int height, double dpi, co
         out.width = width;
         out.height = height;
     }
-    if (static_cast<std::int64_t>(out.width) * out.height > kMaxRasterPixels) {
+    if (static_cast<std::int64_t>(out.width) * out.height > limits::kSurfacePixels) {
         throw Error("image_too_large", "the 3D is too large to draw at this resolution");
     }
     out.zbuf.assign(static_cast<std::size_t>(out.width) * static_cast<std::size_t>(out.height), std::numeric_limits<float>::infinity());
@@ -923,7 +921,7 @@ Raster raster(std::span<const Json> prims, int width, int height, double dpi, co
             // (a face turned away still shows its inside from the other side: light it by the side seen)
             if (n[2] > 0) n = -n;
             if (lit.size() != 3) {
-                throw Error("value", "matmul: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature "
+                throw PyValueError("matmul: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature "
                                      "(n?,k),(k,m?)->(n?,m?) (size " + std::to_string(lit.size()) + " is different from 3)");
             }
             const double d = la::dot(n, Vec3{lit[0], lit[1], lit[2]});
@@ -944,7 +942,7 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
     camera = truthy(camera);
     std::vector<Json> meshy;
     for (const Json& p : prims) {
-        const Json* kind = pyv::get(p, "kind");
+        const Json* kind = dict_get(p, "kind");
         if (kind != nullptr && is_mesh_kind(*kind)) meshy.push_back(p);
     }
     if (meshy.empty()) return {};
@@ -1023,14 +1021,14 @@ std::vector<Line2> lines(std::span<const Json> prims, const Json* camera, double
     y1 = y1 + 2;
     const double k = dpi / 25.4;
     const auto int_of = [](double v) {
-        if (std::isnan(v)) throw Error("value", "cannot convert float NaN to integer");
-        if (std::isinf(v)) throw Error("overflow", "cannot convert float infinity to integer");
+        if (std::isnan(v)) throw PyValueError("cannot convert float NaN to integer");
+        if (std::isinf(v)) throw PyUncaught("OverflowError", "cannot convert float infinity to integer");
         return std::trunc(v);
     };
     const double fw = py_max(1.0, int_of((x1 - x0) * k) + 2);
     const double fh = py_max(1.0, int_of((y1 - y0) * k) + 2);
     // (a depth picture for the lines, at their own small resolution: one this big is a 3D far too large to trace)
-    if (fw * fh > 64'000'000.0) throw Error("image_too_large", "the 3D is too large to draw at this resolution");
+    if (fw * fh > limits::kLineDepthPixels) throw Error("image_too_large", "the 3D is too large to draw at this resolution");
     const Raster depth = raster(meshy, static_cast<int>(fw), static_cast<int>(fh), dpi, camera, nullptr, 0.35, x0, y0);
     const double tolerance = py_max(0.8, 2.5 * 25.4 / dpi);  // (a pixel's worth of depth, and the rim of rounded parts)
     const float tolerance_f = static_cast<float>(tolerance);
@@ -1089,7 +1087,7 @@ std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Jso
             if (k != "camera") own[k] = v;
         }
     } else {
-        pyv::raise_attribute(prim, "items");
+        raise_attribute_error(prim, "items");
     }
     Json key_value = Json::object({{"camera", camera != nullptr ? *camera : Json()}, {"prim", own}});
     char dpi_text[32];
@@ -1198,7 +1196,7 @@ std::vector<std::string_view> split_words(std::string_view line) {
     return out;
 }
 
-double text_float(std::string_view word) { return pyv::to_float(Json(std::string(word))); }
+double text_float(std::string_view word) { return to_float(Json(std::string(word))); }
 
 // A corner index of an "f" line (int(token.split("/")[0])); an int too large for 64 bits points nowhere.
 std::optional<std::int64_t> text_int(std::string_view word) {
@@ -1207,7 +1205,7 @@ std::optional<std::int64_t> text_int(std::string_view word) {
         return py_int(Json(head));
     } catch (const Error& error) {
         if (std::string_view(error.what()).find("too large") != std::string_view::npos) return std::nullopt;
-        throw Error("value", error.what());
+        throw PyValueError(error.what());
     }
 }
 
@@ -1243,8 +1241,8 @@ Json fitted(const std::vector<Vec3>& verts, const std::vector<std::vector<std::i
 // The checks the C++ build adds once Python's own have passed (a model that cannot be drawn, or that would make the
 // book enormous, is not taken in).
 void check_model(const std::vector<Vec3>& verts, const std::vector<std::vector<std::int64_t>>& faces, bool check_corners) {
-    if (static_cast<std::int64_t>(verts.size()) > kMaxVertices) {
-        throw ObjError("the model has too many corners (at most " + std::to_string(kMaxVertices) + ")");
+    if (static_cast<std::int64_t>(verts.size()) > limits::kModelVertices) {
+        throw ObjError("the model has too many corners (at most " + std::to_string(limits::kModelVertices) + ")");
     }
     std::int64_t corners = 0;
     for (const auto& face : faces) {
@@ -1255,7 +1253,7 @@ void check_model(const std::vector<Vec3>& verts, const std::vector<std::vector<s
             }
         }
     }
-    if (corners > kMaxCorners) throw ObjError("the model's faces have too many corners (at most " + std::to_string(kMaxCorners) + ")");
+    if (corners > limits::kModelCorners) throw ObjError("the model's faces have too many corners (at most " + std::to_string(limits::kModelCorners) + ")");
     for (const Vec3& v : verts) {
         for (const double c : v) {
             if (!std::isfinite(c)) throw ObjError("the model has a corner that is not a finite number");
@@ -1316,11 +1314,11 @@ std::uint32_t u32(std::string_view data, std::size_t at) {
 
 // json.loads(bytes.decode("utf-8"))
 Json json_text(std::string_view bytes) {
-    if (auto problem = utf8_error(bytes)) throw Error("value", *problem);
+    if (auto problem = utf8_error(bytes)) throw PyValueError(*problem);
     try {
         return parse_python_json(bytes);
     } catch (const Error& error) {
-        throw Error("value", error.what());
+        throw PyValueError(error.what());
     }
 }
 
@@ -1328,24 +1326,24 @@ Json json_text(std::string_view bytes) {
 const Json& item(const Json& container, const Json& key) {
     if (container.is_array()) {
         if (!(key.is_number_integer() || key.is_number_unsigned() || key.is_boolean())) {
-            throw Error("type", "list indices must be integers or slices, not " + py_type_name(key));
+            throw PyTypeError("list indices must be integers or slices, not " + py_type_name(key));
         }
         const std::int64_t i = key.is_boolean() ? (key.get<bool>() ? 1 : 0) : py_int(key);
         const auto n = static_cast<std::int64_t>(container.size());
         const std::int64_t at = i < 0 ? i + n : i;
-        if (at < 0 || at >= n) pyv::raise_index();
+        if (at < 0 || at >= n) raise_index_error();
         return container[static_cast<std::size_t>(at)];
     }
     if (container.is_object()) {
-        if (key.is_array() || key.is_object()) throw Error("type", "unhashable type: '" + py_type_name(key) + "'");
+        if (key.is_array() || key.is_object()) throw PyTypeError("unhashable type: '" + py_type_name(key) + "'");
         if (key.is_string()) {
             const auto it = container.find(key.get_ref<const std::string&>());
             if (it != container.end()) return *it;
         }
         throw OpKeyError(py_repr(key));
     }
-    if (container.is_string()) throw Error("type", "string indices must be integers, not '" + py_type_name(key) + "'");
-    throw Error("type", "'" + py_type_name(container) + "' object is not subscriptable");
+    if (container.is_string()) throw PyTypeError("string indices must be integers, not '" + py_type_name(key) + "'");
+    throw PyTypeError("'" + py_type_name(container) + "' object is not subscriptable");
 }
 
 // container["key"]
@@ -1355,10 +1353,10 @@ const Json& field(const Json& container, const char* key) { return item(containe
 bool contains(const Json& container, std::string_view key) {
     if (container.is_object()) return container.contains(key);
     if (container.is_array()) {
-        return std::any_of(container.begin(), container.end(), [&](const Json& v) { return pyv::eq(v, Json(std::string(key))); });
+        return std::any_of(container.begin(), container.end(), [&](const Json& v) { return py_equals(v, Json(std::string(key))); });
     }
     if (container.is_string()) return container.get_ref<const std::string&>().find(key) != std::string::npos;
-    throw Error("type", "argument of type '" + py_type_name(container) + "' is not iterable");
+    throw PyTypeError("argument of type '" + py_type_name(container) + "' is not iterable");
 }
 
 struct Component {
@@ -1367,7 +1365,7 @@ struct Component {
 };
 
 Component component(const Json& type) {
-    if (type.is_array() || type.is_object()) throw Error("type", "unhashable type: '" + py_type_name(type) + "'");
+    if (type.is_array() || type.is_object()) throw PyTypeError("unhashable type: '" + py_type_name(type) + "'");
     if (type.is_number() && !type.is_boolean()) {
         const double v = type.get<double>();
         for (const auto& [code, c] : {std::pair<double, Component>{5120, {'b', 1}}, {5121, {'B', 1}}, {5122, {'h', 2}},
@@ -1379,7 +1377,7 @@ Component component(const Json& type) {
 }
 
 int width_of(const Json& type) {
-    if (type.is_array() || type.is_object()) throw Error("type", "unhashable type: '" + py_type_name(type) + "'");
+    if (type.is_array() || type.is_object()) throw PyTypeError("unhashable type: '" + py_type_name(type) + "'");
     if (type.is_string()) {
         const std::string& t = type.get_ref<const std::string&>();
         if (t == "SCALAR") return 1;
@@ -1419,13 +1417,13 @@ Accessor accessor(const Json& doc, const std::vector<std::string>& buffers, cons
     const Component c = component(field(acc, "componentType"));
     const int width = width_of(field(acc, "type"));
     const auto get_int = [](const Json& obj, const char* key, std::int64_t fallback) {
-        const Json* v = pyv::get(obj, key);
-        return v != nullptr ? pyv::to_int(*v) : fallback;
+        const Json* v = dict_get(obj, key);
+        return v != nullptr ? to_int(*v) : fallback;
     };
     const std::int64_t start = get_int(view, "byteOffset", 0) + get_int(acc, "byteOffset", 0);
     std::int64_t stride = get_int(view, "byteStride", 0);
     if (stride == 0) stride = c.size * width;
-    const Json* buffer_index = pyv::get(view, "buffer");
+    const Json* buffer_index = dict_get(view, "buffer");
     static const Json kFirst = 0;
     const Json buffer_list = [&] {  // (buffers[view.get("buffer", 0)], indexed as Python indexes a list)
         Json list = Json::array();
@@ -1434,14 +1432,14 @@ Accessor accessor(const Json& doc, const std::vector<std::string>& buffers, cons
     }();
     const std::size_t which = static_cast<std::size_t>(item(buffer_list, buffer_index != nullptr ? *buffer_index : kFirst).get<std::int64_t>());
     const std::string& data = buffers[which];
-    const std::int64_t count = pyv::to_int(field(acc, "count"));
+    const std::int64_t count = to_int(field(acc, "count"));
     Accessor out;
     out.width = width;
     // values.reshape(count, width): a negative count is numpy's unknown dimension (as many rows as the values make)
     const auto rows = [&](std::int64_t items) {
         if (count >= 0) return count;
         if (items % width != 0) {
-            throw Error("value", "cannot reshape array of size " + std::to_string(items) + " into shape (" + std::to_string(width) + ")");
+            throw PyValueError("cannot reshape array of size " + std::to_string(items) + " into shape (" + std::to_string(width) + ")");
         }
         return items / width;
     };
@@ -1449,19 +1447,19 @@ Accessor accessor(const Json& doc, const std::vector<std::string>& buffers, cons
     if (stride == static_cast<std::int64_t>(c.size) * width) {
         // np.frombuffer(raw, dtype, count=count * width, offset=start): a negative count reads to the end of the buffer
         if (count < std::numeric_limits<std::int64_t>::min() / width) {
-            // (Python stops with an OverflowError that import_model does not catch: refused here)
-            throw Error("overflow", "Python int too large to convert to C ssize_t");
+            // (an OverflowError import_model does not catch: Python stops with a traceback)
+            throw PyUncaught("OverflowError", "Python int too large to convert to C ssize_t");
         }
         if (start < 0 || start > length) {
-            throw Error("value", "offset must be non-negative and no greater than buffer length (" + std::to_string(length) + ")");
+            throw PyValueError("offset must be non-negative and no greater than buffer length (" + std::to_string(length) + ")");
         }
         std::int64_t items = 0;
         if (count < 0) {
-            if ((length - start) % c.size != 0) throw Error("value", "buffer size must be a multiple of element size");
+            if ((length - start) % c.size != 0) throw PyValueError("buffer size must be a multiple of element size");
             items = (length - start) / c.size;
         } else {
             const std::int64_t room = (length - start) / c.size;
-            if (count > room / width) throw Error("value", "buffer is smaller than requested size");
+            if (count > room / width) throw PyValueError("buffer is smaller than requested size");
             items = count * width;
         }
         out.count = rows(items);
@@ -1477,7 +1475,7 @@ Accessor accessor(const Json& doc, const std::vector<std::string>& buffers, cons
     for (std::int64_t i = 0; i < count; ++i) {
         const std::int64_t at = start + i * stride;
         if (at < 0 || at + static_cast<std::int64_t>(c.size) * width > length) {
-            throw Error("value", "unpack_from requires a buffer of at least " + std::to_string(at + c.size * width) + " bytes");
+            throw PyValueError("unpack_from requires a buffer of at least " + std::to_string(at + c.size * width) + " bytes");
         }
         for (int k = 0; k < width; ++k) out.values.push_back(element(data, static_cast<std::size_t>(at + k * c.size), c));
     }
@@ -1488,7 +1486,7 @@ Accessor accessor(const Json& doc, const std::vector<std::string>& buffers, cons
 Num number(const Json& v) {
     if (v.is_boolean()) return Num(v.get<bool>() ? 1 : 0);
     if (const auto n = Num::from_json(v)) return *n;
-    throw Error("type", v.is_string() || v.is_array() ? "can't multiply sequence by non-int of type '" + py_type_name(v) + "'"
+    throw PyTypeError(v.is_string() || v.is_array() ? "can't multiply sequence by non-int of type '" + py_type_name(v) + "'"
                                                        : "unsupported operand type(s) for *: '" + py_type_name(v) + "' and '" +
                                                              py_type_name(v) + "'");
 }
@@ -1500,17 +1498,17 @@ std::vector<double> floats(const Json& list) {
         if (v.is_array()) {
             for (const double x : floats(v)) out.push_back(x);
         } else {
-            out.push_back(v.is_null() ? std::nan("") : pyv::to_float(v));
+            out.push_back(v.is_null() ? std::nan("") : to_float(v));
         }
     }
     return out;
 }
 
 la::Mat4 node_matrix(const Json& node) {
-    if (const Json* matrix = pyv::get(node, "matrix"); matrix != nullptr && py_truthy(*matrix)) {
+    if (const Json* matrix = dict_get(node, "matrix"); matrix != nullptr && py_truthy(*matrix)) {
         const std::vector<double> values = floats(*matrix);
         if (values.size() != 16) {
-            throw Error("value", "cannot reshape array of size " + std::to_string(values.size()) + " into shape (4,4)");
+            throw PyValueError("cannot reshape array of size " + std::to_string(values.size()) + " into shape (4,4)");
         }
         la::Mat4 m{};
         for (int r = 0; r < 4; ++r) {
@@ -1522,10 +1520,10 @@ la::Mat4 node_matrix(const Json& node) {
     static const Json kNoMove = Json::array({0, 0, 0});
     static const Json kNoTurn = Json::array({0, 0, 0, 1});
     static const Json kNoScale = Json::array({1, 1, 1});
-    const Json t = pyv::get_or(node, "translation", kNoMove);
-    const Json q = py_list(pyv::get_or(node, "rotation", kNoTurn));
+    const Json t = get_else(node, "translation", kNoMove);
+    const Json q = py_list(get_else(node, "rotation", kNoTurn));
     if (q.size() != 4) {
-        throw Error("value", q.size() > 4 ? "too many values to unpack (expected 4)"
+        throw PyValueError(q.size() > 4 ? "too many values to unpack (expected 4)"
                                           : "not enough values to unpack (expected 4, got " + std::to_string(q.size()) + ")");
     }
     const Num x = number(q[0]);
@@ -1537,16 +1535,16 @@ la::Mat4 node_matrix(const Json& node) {
     const Num rot[3][3] = {{one - two * (y * y + z * z), two * (x * y - z * w), two * (x * z + y * w)},
                            {two * (x * y + z * w), one - two * (x * x + z * z), two * (y * z - x * w)},
                            {two * (x * z - y * w), two * (y * z + x * w), one - two * (x * x + y * y)}};
-    const Json s = py_list(pyv::get_or(node, "scale", kNoScale));
+    const Json s = py_list(get_else(node, "scale", kNoScale));
     if (s.size() != 3 && s.size() != 1) {
-        throw Error("value", "operands could not be broadcast together with shapes (3,3) (" + std::to_string(s.size()) + ",) ");
+        throw PyValueError("operands could not be broadcast together with shapes (3,3) (" + std::to_string(s.size()) + ",) ");
     }
     for (int r = 0; r < 3; ++r) {
         for (int col = 0; col < 3; ++col) m[r][col] = (rot[r][col] * number(s[s.size() == 1 ? 0 : col])).value();
     }
     const std::vector<double> move = floats(t);
     if (move.size() != 3 && move.size() != 1) {
-        throw Error("value", "could not broadcast input array from shape (" + std::to_string(move.size()) + ",) into shape (3,)");
+        throw PyValueError("could not broadcast input array from shape (" + std::to_string(move.size()) + ",) into shape (3,)");
     }
     for (int r = 0; r < 3; ++r) m[r][3] = move[move.size() == 1 ? 0 : static_cast<std::size_t>(r)];
     return m;
@@ -1566,24 +1564,24 @@ struct GltfReader {
         const std::int64_t id = index.is_number() || index.is_boolean() ? py_int(index) : -1;
         const std::int64_t at = id < 0 && nodes.is_array() ? id + static_cast<std::int64_t>(nodes.size()) : id;
         if (std::find(path.begin(), path.end(), at) != path.end()) throw ObjError("the model's nodes contain themselves");
-        if (path.size() >= 900) throw ObjError("the model's nodes are too deep");
-        if (++visits > 100000) throw ObjError("the model has too many nodes");
+        if (path.size() >= limits::kModelNodeDepth) throw ObjError("the model's nodes are too deep");
+        if (++visits > limits::kModelNodeVisits) throw ObjError("the model has too many nodes");
         path.push_back(at);
         const la::Mat4 m = la::matmul(parent, node_matrix(node));
-        const Json* mesh = pyv::get(node, "mesh");
+        const Json* mesh = dict_get(node, "mesh");
         if (mesh != nullptr && !mesh->is_null()) {
             static const Json kNone = Json::array();
-            const Json& primitives = pyv::get_or(item(field(doc, "meshes"), *mesh), "primitives", kNone);
+            const Json& primitives = get_else(item(field(doc, "meshes"), *mesh), "primitives", kNone);
             for (const Json& primitive : py_list(primitives)) {
-                const Json* mode = pyv::get(primitive, "mode");
+                const Json* mode = dict_get(primitive, "mode");
                 static const Json kNoAttributes = Json::object();
-                if (!pyv::eq(mode != nullptr ? *mode : Json(4), Json(4)) ||
-                    !contains(pyv::get_or(primitive, "attributes", kNoAttributes), "POSITION")) {
+                if (!py_equals(mode != nullptr ? *mode : Json(4), Json(4)) ||
+                    !contains(get_else(primitive, "attributes", kNoAttributes), "POSITION")) {
                     continue;
                 }
                 const Accessor pos = accessor(doc, buffers, field(field(primitive, "attributes"), "POSITION"));
                 if (pos.width + 1 != 4) {
-                    throw Error("value", "matmul: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature "
+                    throw PyValueError("matmul: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature "
                                          "(n?,k),(k,m?)->(n?,m?) (size 4 is different from " + std::to_string(pos.width + 1) + ")");
                 }
                 std::vector<la::Vec4> rows;
@@ -1595,7 +1593,7 @@ struct GltfReader {
                 const std::vector<la::Vec4> world = la::rows_mt(rows, m);
                 const auto base = static_cast<std::int64_t>(verts.size());
                 std::vector<std::int64_t> idx;
-                const Json* indices = pyv::get(primitive, "indices");
+                const Json* indices = dict_get(primitive, "indices");
                 if (indices != nullptr && !indices->is_null()) {
                     const Accessor ix = accessor(doc, buffers, *indices);
                     for (const double v : ix.values) {
@@ -1611,13 +1609,13 @@ struct GltfReader {
                 if (static_cast<std::int64_t>(faces.size()) > kMaxFaces) {
                     throw ObjError("the model has too many faces (at most " + std::to_string(kMaxFaces) + ")");
                 }
-                if (static_cast<std::int64_t>(verts.size()) > kMaxVertices) {
-                    throw ObjError("the model has too many corners (at most " + std::to_string(kMaxVertices) + ")");
+                if (static_cast<std::int64_t>(verts.size()) > limits::kModelVertices) {
+                    throw ObjError("the model has too many corners (at most " + std::to_string(limits::kModelVertices) + ")");
                 }
             }
         }
         static const Json kNoChildren = Json::array();
-        for (const Json& child : py_list(pyv::get_or(node, "children", kNoChildren))) visit(child, m);
+        for (const Json& child : py_list(get_else(node, "children", kNoChildren))) visit(child, m);
         path.pop_back();
     }
 };
@@ -1656,36 +1654,36 @@ Json read_gltf(std::string_view data) {
         }
         if (!doc.is_object()) throw ObjError("the model file is not glTF");
         static const Json kNone = Json::array();
-        for (const Json& buffer : py_list(pyv::get_or(doc, "buffers", kNone))) {
-            const Json* uri_value = pyv::get(buffer, "uri");
+        for (const Json& buffer : py_list(get_else(doc, "buffers", kNone))) {
+            const Json* uri_value = dict_get(buffer, "uri");
             const std::string uri = uri_value != nullptr && py_truthy(*uri_value) ? py_str(*uri_value) : std::string();
             if (!uri.starts_with("data:")) throw ObjError("a .gltf must carry its data inside (or use .glb)");
             const std::size_t comma = uri.find(',');
-            if (comma == std::string::npos) pyv::raise_index();
+            if (comma == std::string::npos) raise_index_error();
             try {
                 buffers.push_back(a2b_base64(std::string_view(uri).substr(comma + 1)));
             } catch (const Error& error) {
-                throw Error("value", error.what());
+                throw PyValueError(error.what());
             }
         }
     }
     if (!doc.is_object()) throw ObjError("the model file is not glTF");
     GltfReader reader{doc, buffers, {}, {}, {}, 0};
-    const Json* scenes = pyv::get(doc, "scenes");
+    const Json* scenes = dict_get(doc, "scenes");
     Json fallback = Json::array();
     if (!(scenes != nullptr && py_truthy(*scenes))) {
-        const Json* nodes = pyv::get(doc, "nodes");
+        const Json* nodes = dict_get(doc, "nodes");
         Json all = Json::array();
-        const std::size_t n = nodes != nullptr && py_truthy(*nodes) ? pyv::len(*nodes) : 0;
+        const std::size_t n = nodes != nullptr && py_truthy(*nodes) ? length(*nodes) : 0;
         for (std::size_t i = 0; i < n; ++i) all.push_back(static_cast<std::int64_t>(i));
         fallback.push_back(Json::object({{"nodes", all}}));
     }
     const Json& scene_list = scenes != nullptr && py_truthy(*scenes) ? *scenes : fallback;
-    const Json* scene_index = pyv::get(doc, "scene");
-    const Json which = pyv::to_int(scene_index != nullptr ? *scene_index : Json(0));
+    const Json* scene_index = dict_get(doc, "scene");
+    const Json which = to_int(scene_index != nullptr ? *scene_index : Json(0));
     const Json& scene = item(scene_list, which);
     static const Json kNoRoots = Json::array();
-    for (const Json& root : py_list(pyv::get_or(scene, "nodes", kNoRoots))) reader.visit(root, la::identity4());
+    for (const Json& root : py_list(get_else(scene, "nodes", kNoRoots))) reader.visit(root, la::identity4());
     if (reader.verts.empty() || reader.faces.empty()) throw ObjError("the OBJ file has no faces");
     std::vector<Vec3> v = reader.verts;
     for (Vec3& p : v) p = p * Vec3{1.0, -1.0, -1.0};  // (glTF: y up, z toward the viewer)
@@ -1736,8 +1734,8 @@ std::string names_of_handles() {
 // {k: dict(v) for k, v in (prim.get("joints") or {}).items()}
 Json copied_joints(const Json& prim) {
     static const Json kNone = Json::object();
-    const Json& joints = pyv::get_or(prim, "joints", kNone);
-    if (!joints.is_object()) pyv::raise_attribute(joints, "items");
+    const Json& joints = get_else(prim, "joints", kNone);
+    if (!joints.is_object()) raise_attribute_error(joints, "items");
     Json out = Json::object();
     for (const auto& [k, v] : joints.items()) out[k] = py_dict(v);
     return out;
@@ -1760,7 +1758,7 @@ Point2 page_of_joint(const Json& prim, std::string_view name, const Json* camera
 Json drag_joint(const Json& prim, std::string_view handle, Point2 target, const Json* camera) {
     if (handle == "pelvis") {
         static const Json kDefault = Json::array({100, 160, 0});
-        Json pos = py_list(pyv::get_or(prim, "pos", kDefault));
+        Json pos = py_list(get_else(prim, "pos", kDefault));
         for (int i = 0; i < 3; ++i) pos.push_back(0);
         return Json::object({{"pos", Json::array({py_round(target[0], 3), py_round(target[1], 3), pos[2]})}});
     }
@@ -1785,18 +1783,18 @@ Json drag_joint(const Json& prim, std::string_view handle, Point2 target, const 
         return with_joints(prim, std::move(joints));
     };
     static const Json kNone = Json::object();
-    const Json& joints = pyv::get_or(prim, "joints", kNone);
-    const Json* own = pyv::get(joints, joint);
+    const Json& joints = get_else(prim, "joints", kNone);
+    const Json* own = dict_get(joints, joint);
     const Json current = py_dict(own != nullptr && py_truthy(*own) ? *own : kNone);
     const auto axis_value = [&](const std::string& axis) {
-        const Json* v = pyv::get(current, axis);
-        return v != nullptr ? pyv::to_float(*v) : 0.0;
+        const Json* v = dict_get(current, axis);
+        return v != nullptr ? to_float(*v) : 0.0;
     };
     std::string best_axis = "z";
     double best_slope = 0.0;
     for (const std::string axis : {"z", "x"}) {
         const double base = axis_value(axis);
-        const double slope = la::py_remainder(angle(with_value(axis, base + 0.05)) - angle(with_value(axis, base)), la::kTau) / 0.05;
+        const double slope = py_remainder(angle(with_value(axis, base + 0.05)) - angle(with_value(axis, base)), la::kTau) / 0.05;
         if (std::fabs(slope) > std::fabs(best_slope)) {
             best_axis = axis;
             best_slope = slope;
@@ -1805,15 +1803,15 @@ Json drag_joint(const Json& prim, std::string_view handle, Point2 target, const 
     double value = axis_value(best_axis);
     for (int i = 0; i < 6; ++i) {
         const double now = angle(with_value(best_axis, value));
-        const double miss = la::py_remainder(goal - now, la::kTau);
+        const double miss = py_remainder(goal - now, la::kTau);
         if (std::fabs(miss) < 0.002) break;
-        const double slope = la::py_remainder(angle(with_value(best_axis, value + 0.02)) - now, la::kTau) / 0.02;
+        const double slope = py_remainder(angle(with_value(best_axis, value + 0.02)) - now, la::kTau) / 0.02;
         if (std::fabs(slope) < 1e-4) break;
         const double step = miss / slope;
         value += py_max(-0.8, py_min(0.8, step));
     }
     Json change = Json::object();
-    change[best_axis] = py_round(la::py_remainder(value, la::kTau), 4);
+    change[best_axis] = py_round(py_remainder(value, la::kTau), 4);
     return Json::object({{"joints", Json::object({{joint, change}})}});
 }
 
@@ -1832,11 +1830,11 @@ Json reach(const Json& prim, std::string_view handle, Point2 target, const Json*
     const std::string end(chain->handle);
     const Json joints = copied_joints(prim);
     const auto axis_of = [&](const std::string& joint, const char* axis) {
-        const Json* j = pyv::get(joints, joint);
+        const Json* j = dict_get(joints, joint);
         static const Json kNone = Json::object();
         const Json& slot = j != nullptr && py_truthy(*j) ? *j : kNone;
-        const Json* v = pyv::get(slot, axis);
-        return v != nullptr ? pyv::to_float(*v) : 0.0;
+        const Json* v = dict_get(slot, axis);
+        return v != nullptr ? to_float(*v) : 0.0;
     };
     const persp3d::Vector start{axis_of(upper, "x"), axis_of(upper, "z"), axis_of(lower, "x")};
     const Point2 goal{target[0], target[1]};
@@ -1869,8 +1867,8 @@ Json reach(const Json& prim, std::string_view handle, Point2 target, const Json*
         if (cost(found) < cost(best)) best = found;
     }
     Json out = Json::object();
-    out[upper] = Json::object({{"x", py_round(la::py_remainder(best[0], la::kTau), 4)}, {"z", py_round(la::py_remainder(best[1], la::kTau), 4)}});
-    out[lower] = Json::object({{"x", py_round(la::py_remainder(best.back(), la::kTau), 4)}});
+    out[upper] = Json::object({{"x", py_round(py_remainder(best[0], la::kTau), 4)}, {"z", py_round(py_remainder(best[1], la::kTau), 4)}});
+    out[lower] = Json::object({{"x", py_round(py_remainder(best.back(), la::kTau), 4)}});
     return Json::object({{"joints", std::move(out)}});
 }
 

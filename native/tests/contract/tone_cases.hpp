@@ -4,7 +4,8 @@
 // works and 4 times as it is refused, on the books tone_harness.py `fixture` makes ("A": fixture.genko; "B":
 // strict.genko — strict_gates, page 2 locked by ai:other). $NAME is filled in from the book at run time (the ink
 // square of panel f-bottom: $IN_X/$IN_Y inside it, $LINE_X/$LINE_Y on its left side; $MASK: a mask picture; $TILE:
-// a tile picture).
+// a tile picture). Python's behaviours the C++ build refuses on purpose (docs/cpp-migration/SPEC.md COMP-01a) are not
+// here: they are checked as refusals in the unit tests.
 
 namespace genko::test::tones {
 
@@ -65,8 +66,10 @@ inline const Case kCases[] = {
     {"delete_tone", 'A', "genko", true, R"([{"op": "delete_tone", "page": 1, "id": "t-dot"}])"},
     {"delete_tone", 'A', "genko", true, R"([{"op": "delete_tone", "page": 1, "id": "t-grad"}])"},
     {"delete_tone", 'A', "genko", true, R"([{"op": "delete_tone", "page": 1, "id": "t-img"}])"},
-    {"delete_tone", 'A', "genko", true, R"([{"op": "delete_tone", "page": 1, "id": "ink"}])"},
-    {"delete_tone", 'A', "genko", true, R"([{"op": "delete_tone", "page": 1, "id": "locked"}])"},
+    // (Python's delete_tone also takes a layer that is not a tone, with its drawing: the ink layer, the locked pen
+    // layer. Refused in the C++ build: unit/test_tones_effects.cpp delete_tone_deletes_tones_only)
+    {"delete_tone", 'A', "genko", true, R"([{"op": "set_tone", "page": 1, "id": "t-dot", "pattern": "line"}, {"op": "delete_tone", "page": 1, "id": "t-dot"}])"},
+    {"delete_tone", 'A', "genko", true, R"([{"op": "add_tone", "page": 1, "id": "y", "frame_id": "f-top"}, {"op": "delete_tone", "page": 1, "id": "t-grad"}])"},
     {"delete_tone", 'A', "genko", true, R"([{"op": "add_tone", "page": 2, "id": "x"}, {"op": "delete_tone", "page": 2, "id": "x"}])"},
     {"delete_tone", 'A', "human:作者", true, R"([{"op": "delete_tone", "page": 1, "id": "t-dot"}, {"op": "delete_tone", "page": 1, "id": "t-img"}])"},
     {"delete_tone", 'B', "genko", true, R"([{"op": "delete_tone", "page": 1, "id": "t-grad"}])"},

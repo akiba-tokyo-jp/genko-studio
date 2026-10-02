@@ -9,9 +9,10 @@
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
+#include "core/limits.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
-#include "core/pyvalue.hpp"
+#include "core/pyops.hpp"
 #include "render/draw.hpp"
 #include "render/png.hpp"
 
@@ -20,15 +21,14 @@ namespace genko::render::fills {
 namespace {
 
 using core::Json;
+using core::py_max;
+using core::py_min;
 
-constexpr std::int64_t kMaxPatchPixels = 400'000'000;
-
-double pmin(double a, double b) { return b < a ? b : a; }
-double pmax(double a, double b) { return b > a ? b : a; }
+constexpr std::int64_t kMaxPatchPixels = core::limits::kPatchPixels;
 
 int to_int_px(double v) {
-    const std::int64_t n = core::py_int_of(v);
-    if (n > 1'000'000'000 || n < -1'000'000'000) throw core::Error("value", "the area is far too large");
+    const std::int64_t n = core::py_trunc_held(v);
+    if (n > core::limits::kFillCoordinate || n < -core::limits::kFillCoordinate) throw core::Error("value", "the area is far too large");
     return static_cast<int>(n);
 }
 
@@ -113,10 +113,10 @@ std::optional<core::Patch> polygon_patch(const std::vector<std::array<double, 2>
     if (points_mm.size() < 3) return std::nullopt;
     double min_x = points_mm.front()[0], min_y = points_mm.front()[1], max_x = min_x, max_y = min_y;
     for (const auto& p : points_mm) {
-        min_x = pmin(min_x, p[0]);
-        min_y = pmin(min_y, p[1]);
-        max_x = pmax(max_x, p[0]);
-        max_y = pmax(max_y, p[1]);
+        min_x = py_min(min_x, p[0]);
+        min_y = py_min(min_y, p[1]);
+        max_x = py_max(max_x, p[0]);
+        max_y = py_max(max_y, p[1]);
     }
     const int x0 = px(min_x, dpi);
     const int y0 = px(min_y, dpi);
@@ -140,7 +140,7 @@ std::optional<Image> region_mask(const Image& reference, Point at, int gap_px, i
     const Image crop = grey.crop(win);
     const int w = crop.width();
     const int h = crop.height();
-    if (w <= 0 || h <= 0) throw core::PyIndexError("index 0 is out of bounds for axis 0 with size 0");
+    if (w <= 0 || h <= 0) core::raise_index_error("index 0 is out of bounds for axis 0 with size 0");
     const std::string pixels = crop.tobytes();
     std::vector<char> walls(pixels.size());
     for (std::size_t i = 0; i < pixels.size(); ++i) walls[i] = static_cast<unsigned char>(pixels[i]) < threshold ? 1 : 0;
@@ -170,8 +170,8 @@ std::pair<Image, Point> area_mask(const Json& area, int dpi) {
     const Json poly = core::py_get(area, "poly");
     if (core::py_truthy(poly)) {
         std::vector<std::array<double, 2>> pts;
-        for (const Json& item : core::py_iter(poly)) {
-            const Json pair = core::py_iter(item);
+        for (const Json& item : core::iterate(poly)) {
+            const std::vector<Json> pair = core::iterate(item);
             if (pair.size() != 2) {
                 throw core::PyValueError(pair.size() > 2 ? "too many values to unpack (expected 2)"
                                                          : "not enough values to unpack (expected 2, got " + std::to_string(pair.size()) + ")");
@@ -180,10 +180,10 @@ std::pair<Image, Point> area_mask(const Json& area, int dpi) {
         }
         double min_x = pts.front()[0], min_y = pts.front()[1], max_x = min_x, max_y = min_y;
         for (const auto& p : pts) {
-            min_x = pmin(min_x, p[0]);
-            min_y = pmin(min_y, p[1]);
-            max_x = pmax(max_x, p[0]);
-            max_y = pmax(max_y, p[1]);
+            min_x = py_min(min_x, p[0]);
+            min_y = py_min(min_y, p[1]);
+            max_x = py_max(max_x, p[0]);
+            max_y = py_max(max_y, p[1]);
         }
         const int x0 = to_int_px(min_x) - 1;
         const int y0 = to_int_px(min_y) - 1;
@@ -200,7 +200,7 @@ std::pair<Image, Point> area_mask(const Json& area, int dpi) {
     }
     const Json spec = core::py_or(core::py_get(area, "mask"), Json::object());
     if (!spec.is_object() || !spec.contains("box")) throw core::OpKeyError("'box'");
-    const Json box = core::py_iter(spec["box"]);
+    const std::vector<Json> box = core::iterate(spec["box"]);
     if (box.size() != 4) {
         throw core::PyValueError(box.size() > 4 ? "too many values to unpack (expected 4)"
                                                 : "not enough values to unpack (expected 4, got " + std::to_string(box.size()) + ")");

@@ -38,33 +38,23 @@ genko_library(genko_core
     command_bus.cpp
     ops_util.cpp
     ops_book.cpp
-<<<<<<< HEAD
-<<<<<<< HEAD
     ops_frames.cpp
     ops_pages.cpp
     ops_strokes.cpp
     ops_layers.cpp
-=======
-    pyvalue.cpp
-    rulers.cpp
-    op_targets.cpp
     ops_rulers.cpp
->>>>>>> native/m3-tones
-=======
     linalg3.cpp
-    pyvalue.cpp
     mesh3d.cpp
     prim3d.cpp
     persp3d.cpp
     mannequin.cpp
     poses.cpp
->>>>>>> native/m3-3d
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
 
-# CPython calls libm directly: so must we (no pow(x, 2.0) → x*x, no sin+cos → sincos), for the same last bits.
+# CPython calls libm directly: so must we (no pow(x, 2.0) → x*x, no sin+cos → sincos), for the same last bits. Every
+# call of libm for Python's math module is in pymath.cpp; linalg3.cpp calls libm's hypot as numpy does. (MSVC: the
+# same with /fp:precise, and the intrinsics turned off by #pragma function in each file.)
 if(NOT MSVC)
-  set_source_files_properties(pymath.cpp pyrandom.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
-  # (numpy on OpenBLAS: libm's hypot, exp, log as numpy and CPython call them; the fused multiply-adds are explicit)
-  set_source_files_properties(linalg3.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
+  set_source_files_properties(pymath.cpp linalg3.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
 endif()

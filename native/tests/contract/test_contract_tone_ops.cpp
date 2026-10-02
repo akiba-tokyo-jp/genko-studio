@@ -3,19 +3,27 @@
 //      tone_harness.py `fixture`: the same reply (applied, snapshot, warnings, results) and the same book after it
 //      (snapshot(full=True); project.json as Python's writer writes it, each patch picture compared by its pixels and
 //      each stroke blob by its bytes) — or the same error;
-//   2. 150 random op sequences (tone_harness.py `sequences`: these ops mixed with the basic ops this build has) over
+//   2. 160 random op sequences (tone_harness.py `sequences`: these ops mixed with the basic ops this build has) over
 //      15 random books, each step compared the same way;
 //   3. the command line: `genko apply` and `python -m genko apply` given the same ops files print the same JSON with
 //      the same exit code, step after step on the same book.
 // Ids are counted on both sides (ScopedIdSource / tone_harness ids_from), so the books compare exactly.
 //
+// Where Python stops with an exception apply_ops lets through (IndexError, AttributeError, OverflowError: a traceback in
+// its command line), the C++ build gives the error code python_error, its error ending with the traceback's last line
+// ("IndexError: list index out of range"); counted.
 // Differences on purpose, each counted and checked, never taken for a match:
 //   - Python keeps a number that is not finite (an angle of "inf", written into project.json as Infinity; the lines
 //     effect_to_layer makes from a centre of "inf"): refused here ("… must be a finite number", "… not finite
 //     numbers"); the case's Python reply must hold such a number. A sequence stops there (the books differ from then
-//     on).
-//   - Python stops with an exception that is not ApplyError (IndexError, AttributeError: a traceback in its command
-//     line): refused here with an error.
+//     on). (The other refusals of docs/cpp-migration/SPEC.md COMP-01a, as delete_tone of a layer that is not a tone,
+//     are not asked for here: the unit tests check them.)
+//   - The basic ops mixed in are M2's, with M2's refusals of COMP-01a: a lock on a page the book does not have ("no
+//     page <n>") and a selected panel that is not on its page ("no frame <id> on page <n>"), which Python takes
+//     without a word (an earlier op of the batch may have moved the pages). Counted as refused on purpose where
+//     Python's book after the step shows why (no such page; the selection is no panel of the page); a sequence stops
+//     there. Where Python refuses a later op of the same batch (or stops with a traceback), both leave the book as it
+//     was: counted, and the sequence goes on.
 //   - A pen line's point Python keeps as an int in memory (a guide drawn to the edge of a page whose size is an int,
 //     ruler_to_layer): a float here; the saved strokes are the same bytes. snapshot(full)'s name_strokes / ink_strokes
 //     are compared by value, and the cases where Python had an int are counted.
@@ -27,6 +35,7 @@
 #include <QTemporaryDir>
 
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -35,6 +44,7 @@
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
 #include "core/pynum.hpp"
+#include "core/pyops.hpp"
 #include "m3b_support.hpp"
 #include "render/png.hpp"
 #include "storage/fsutil.hpp"
@@ -97,6 +107,7 @@ Json strokes_by_value(Json snapshot, int& ints) {
 struct Tally {
     int same = 0;
     int refused_on_purpose = 0;
+    int both_refused = 0;  // (Python at a later op of the batch)
     int python_raised = 0;
     int int_points = 0;
     std::vector<std::string> failures;
@@ -120,19 +131,81 @@ Json cpp_reply(const genko::core::Document& doc, const Json& ops, const std::str
             if (after != nullptr) *after = result.doc;
         }
     } catch (const genko::core::ApplyError& error) {
-        got = Json::object({{"ok", false}, {"error", error.what()}});
+        got = Json::object({{"ok", false}, {"error", error.what()}, {"code", error.code()}});
     }
     return got;
 }
 
-// "" when C++ did what Python did; "on purpose" / "python raised" for the counted differences; else what differs.
-std::string compare(const Json& got, const Json& want, bool want_nonfinite, Tally& tally) {
+// The index N of an error "ops[N] <op>: …".
+std::optional<std::size_t> op_index(const std::string& error) {
+    const std::size_t close = error.find("] ");
+    if (!error.starts_with("ops[") || close == std::string::npos) return std::nullopt;
+    const std::string digits = error.substr(4, close - 4);
+    if (digits.empty() || digits.size() > 6 || digits.find_first_not_of("0123456789") != std::string::npos) return std::nullopt;
+    return static_cast<std::size_t>(std::stoul(digits));
+}
+
+// M2's refusals of docs/cpp-migration/SPEC.md COMP-01a among the basic ops (see the file comment): the batch's op
+// `error` names when it is one of them ("no page <n>" of lock_page and unlock_page, "no frame <id> on page <n>" of
+// select_frame), else nullptr.
+const Json* m2_refused_op(const std::string& error, const Json& ops) {
+    const auto i = op_index(error);
+    if (!i || *i >= ops.size() || !ops[*i].is_object() || !ops[*i].contains("page")) return nullptr;
+    const Json& op = ops[*i];
+    const std::string name = op.value("op", std::string());
+    const std::string head = "ops[" + std::to_string(*i) + "] " + name + ": ";
+    if (!error.starts_with(head)) return nullptr;
+    const std::string message = error.substr(head.size());
+    if ((name == "lock_page" || name == "unlock_page") && message.starts_with("no page ")) return &op;
+    if (name == "select_frame" && message.starts_with("no frame ")) return &op;
+    return nullptr;
+}
+
+// Python applied the batch: whether its book after it (the reply's snapshot) shows why the op was refused here (no
+// such page; a selection that is no panel of its page).
+bool shown_after(const Json& op, const Json& want) {
+    if (!want.contains("snapshot")) return false;
+    const Json* page = nullptr;
+    for (const Json& p : want["snapshot"]["pages"]) {
+        if (genko::core::py_equals(p["index"], op["page"])) page = &p;
+    }
+    if (op["op"] != Json("select_frame")) return page == nullptr;
+    if (page == nullptr) return false;
+    const Json frame = op.contains("frame_id") ? op["frame_id"] : Json();
+    if ((*page)["selected_frame_id"] != frame) return false;
+    for (const Json& leaf : (*page)["leaves"]) {
+        if (leaf["id"] == frame) return false;
+    }
+    return true;
+}
+
+// Python refused the batch too, at a later op (or stopped with a traceback): whether the book before it, the same on
+// both sides, shows why the op was refused here.
+bool shown_before(const Json& op, const genko::core::Document& before) {
+    const genko::core::Page* page = nullptr;
+    for (const auto& p : before.pages) {
+        if (genko::core::py_equals(p->index.json(), op["page"])) page = p.get();
+    }
+    if (op["op"] != Json("select_frame")) return page == nullptr;
+    if (page == nullptr) return false;
+    const Json frame = op.contains("frame_id") ? op["frame_id"] : Json();
+    return !frame.is_string() || page->find_frame(frame.get<std::string>()) == nullptr;
+}
+
+// "" when C++ did what Python did; "on purpose…" / "python raised" / "both refused (M2)" for the counted differences;
+// else what differs. `before`: the book the batch was given (the same on both sides).
+std::string compare(const Json& got, const Json& want, const Json& ops, const genko::core::Document& before, bool want_nonfinite,
+                    Tally& tally) {
     if (want.value("ok", false)) {
         if (!got.value("ok", false)) {
             const std::string error = got.value("error", std::string());
             if (want_nonfinite && (error.find("must be a finite number") != std::string::npos || error.find("not finite numbers") != std::string::npos)) {
                 ++tally.refused_on_purpose;
                 return "on purpose";
+            }
+            if (const Json* op = m2_refused_op(error, ops); op != nullptr && shown_after(*op, want)) {
+                ++tally.refused_on_purpose;
+                return "on purpose (M2)";
             }
             return "Python applied it, here: " + error;
         }
@@ -155,13 +228,29 @@ std::string compare(const Json& got, const Json& want, bool want_nonfinite, Tall
         ++tally.same;
         return {};
     }
+    // (an op of the batch refused here on purpose, which Python passed before refusing a later one, or stopping: the
+    // book stays as it was on both sides)
+    if (const Json* op = got.value("ok", true) ? nullptr : m2_refused_op(got.value("error", std::string()), ops); op != nullptr) {
+        const bool python_later = want.value("raised", std::string("ApplyError")) != "ApplyError" ||
+                                  op_index(want.value("error", std::string())) > op_index(got.value("error", std::string()));
+        if (python_later && shown_before(*op, before)) {
+            ++tally.both_refused;
+            return "both refused (M2)";
+        }
+    }
     if (want.value("raised", std::string("ApplyError")) != "ApplyError") {
-        if (got.value("ok", true)) return "Python raised " + want.value("error", std::string()) + ", here it was applied";
+        // (python_error, the error ending with the traceback's last line: "<type>: <message>")
+        const std::string error = got.value("error", std::string());
+        const std::string last = want.value("error", std::string());
+        if (got.value("ok", true) || got.value("code", std::string()) != "python_error" || !error.ends_with(last)) {
+            return "Python raised " + last + ", here: " + (got.value("ok", true) ? std::string("applied") : got.value("code", std::string()) + " " + error);
+        }
         ++tally.python_raised;
         return "python raised";
     }
     if (got.value("ok", true)) return "Python refused it (" + want.value("error", std::string()) + "), here it was applied";
     if (got["error"] != want["error"]) return "errors differ: " + got["error"].get<std::string>() + " ≠ " + want["error"].get<std::string>();
+    if (got.value("code", std::string()) == "python_error") return "Python's ApplyError is python_error here";
     ++tally.same;
     return {};
 }
@@ -245,8 +334,10 @@ private slots:
             const auto doc = genko::storage::load_document(m3b::to_path(QString::fromStdString(job["book"].get<std::string>()))).document;
             const Json got = cpp_reply(doc, job["ops"], c.agent, false, job["ids_from"].get<std::int64_t>(),
                                        m3b::to_path(path(QStringLiteral("cases/cpp-%1").arg(i))), nullptr);
-            const std::string diff = compare(got, want, !repairs.nonfinite.empty(), tally);
-            if (!diff.empty() && diff != "on purpose" && diff != "python raised") tally.failures.push_back(label + ": " + diff);
+            const std::string diff = compare(got, want, job["ops"], doc, !repairs.nonfinite.empty(), tally);
+            if (!diff.empty() && !diff.starts_with("on purpose") && diff != "python raised" && diff != "both refused (M2)") {
+                tally.failures.push_back(label + ": " + diff);
+            }
         }
         for (const auto& [op, count] : counts) {
             qInfo("%s: %d applied, %d refused", op.c_str(), count.first, count.second);
@@ -265,16 +356,18 @@ private slots:
         QVERIFY2(made.finished && made.exit_code == 0, made.err.constData());
         QStringList basic;
         for (const char* name : kBasicOps) {
-            if (genko::render::registry_with_render_ops().find(name) != nullptr) basic << name;
+            if (genko::render::ops_registry().find(name) != nullptr) basic << name;
         }
         qInfo("basic ops mixed in: %s", basic.join(',').toUtf8().constData());
         const QString out = path("sequences.json");
-        made = tone_harness({"sequences", out, "--books", books, "--seed", "7", "--count", "150", "--steps", "12", "--ops", basic.join(',')},
+        // (160 sequences: with M2's basic ops some stop at a refusal on purpose; 10 more than M3-B's 150 keep the steps
+        // compared at least M3-B's 1,371)
+        made = tone_harness({"sequences", out, "--books", books, "--seed", "7", "--count", "160", "--steps", "12", "--ops", basic.join(',')},
                             scratch_.path());
         QVERIFY2(made.finished && made.exit_code == 0, made.err.right(3000).constData());
         genko::core::ParseRepairs repairs;
         const Json sequences = genko::core::parse_python_json(genko::test::read_bytes(out), &repairs);
-        QCOMPARE(sequences.size(), std::size_t{150});
+        QCOMPARE(sequences.size(), std::size_t{160});
 
         Tally tally;
         int steps = 0;
@@ -296,18 +389,20 @@ private slots:
                 Json want = step["reply"];
                 if (step.contains("payload")) want["payload"] = step["payload"];
                 ++steps;
-                const std::string diff = compare(got, want, has_prefix(repairs.nonfinite, at), tally);
-                if (diff == "on purpose" || diff == "python raised") {  // (each shown, for the report)
-                    const std::string python = diff == "on purpose" ? std::string("kept a number that is not finite")
-                                                                    : want.value("raised", std::string()) + ": " + want.value("error", std::string());
+                const std::string diff = compare(got, want, step["ops"], doc, has_prefix(repairs.nonfinite, at), tally);
+                if (diff.starts_with("on purpose") || diff == "python raised" || diff == "both refused (M2)") {  // (each shown, for the report)
+                    const std::string python = diff == "on purpose"          ? std::string("kept a number that is not finite")
+                                               : diff == "on purpose (M2)"   ? std::string("applied it (COMP-01a, M2)")
+                                               : diff == "both refused (M2)" ? "refused a later op (COMP-01a, M2): " + want.value("error", std::string())
+                                                                             : want.value("raised", std::string()) + ": " + want.value("error", std::string());
                     qInfo("sequence %zu step %zu %s: Python %s; here: %s", k, s, genko::core::dump_python(step["ops"]).substr(0, 300).c_str(),
                           python.c_str(), got.value("error", std::string()).c_str());
                 }
-                if (diff == "on purpose") {
+                if (diff.starts_with("on purpose")) {
                     ++stopped;  // (the books differ from here on)
                     break;
                 }
-                if (!diff.empty() && diff != "python raised") {
+                if (!diff.empty() && diff != "python raised" && diff != "both refused (M2)") {
                     tally.failures.push_back("sequence " + std::to_string(k) + " step " + std::to_string(s) + " " +
                                              genko::core::dump_python(step["ops"]).substr(0, 400) + " as " + step["agent"].get<std::string>() + ": " + diff);
                     break;
@@ -316,12 +411,14 @@ private slots:
             }
         }
         for (const auto& [op, n] : ops_seen) qInfo("  %s: %d", op.c_str(), n);
-        qInfo("sequences: %d steps, %d the same, %d refused here on purpose (sequence stopped), %d Python raised, %d with int points",
-              steps, tally.same, tally.refused_on_purpose, tally.python_raised, tally.int_points);
+        qInfo("sequences: %d steps, %d the same, %d refused here on purpose (sequence stopped), %d refused on both sides (here "
+              "on purpose at an earlier op), %d Python raised, %d with int points",
+              steps, tally.same, tally.refused_on_purpose, tally.both_refused, tally.python_raised, tally.int_points);
         for (const auto& f : tally.failures) qWarning("%s", f.c_str());
         QCOMPARE(books_used.size(), std::size_t{15});
         QVERIFY(tally.failures.empty());
         QVERIFY(stopped <= 15);  // (rare: most sequences run to their end)
+        QVERIFY(steps >= 1371);  // (M3-B's own test compared 1,371)
     }
 
     void commandLine() {

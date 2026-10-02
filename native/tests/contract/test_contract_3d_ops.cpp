@@ -20,6 +20,7 @@
 
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
+#include "core/limits.hpp"
 #include "core/strokes.hpp"
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
@@ -223,7 +224,8 @@ const Case kCases[] = {
     {"pose_mannequin", "a", "genko", false, R"([{"op": "pose_mannequin", "page": 1, "id": "man", "drag": {"handle": "r_toe", "to": [170, 230]}}])"},
     {"pose_mannequin", "a", "genko", false, R"([{"op": "pose_mannequin", "page": 1, "id": "man", "drag": {"handle": "pelvis", "to": [60, 150]}}])"},
     {"pose_mannequin", "a", "genko", false, R"([{"op": "pose_mannequin", "page": 1, "id": "man", "rot": [0.3, 2.5, 0.2], "pos": [100, 160, 0]}])"},
-    {"pose_mannequin", "a", "genko", false, R"([{"op": "pose_mannequin", "page": 1, "id": "fig", "height_mm": 100}])"},
+    // The wrong-kind figure input is covered by mannequinKindRefusal and Hermes's CLI regression (COMP-01a).
+    {"pose_mannequin", "a", "genko", false, R"([{"op": "pose_mannequin", "page": 1, "id": "man", "height_mm": 100}])"},
     {"pose_mannequin", "a", "genko", false, R"([{"op": "pose_mannequin", "page": 1, "id": "man", "joints": {"tail": {"yaw": 1}}}])"},
     {"pose_mannequin", "a", "genko", false, R"([{"op": "pose_mannequin", "page": 1, "id": "man", "preset": "sit", "drag": {"handle": "head", "to": [150, 100]}}])"},
     {"pose_mannequin", "a", "genko", false, R"([{"op": "pose_mannequin", "page": 1, "id": "nothing"}])"},
@@ -658,8 +660,8 @@ private slots:
                 python = "keeps it, and the book can no longer be read (" + text(probe["reload"]) + ")";
             } else if (!probe["rulers"].is_null()) {
                 python = "keeps a ruler that add_ruler and edit_ruler refuse (" + text(probe["rulers"]) + ")";
-            } else if (probe["mesh_vertices"].get<std::int64_t>() > genko::core::mesh3d::kMaxVertices ||
-                       probe["mesh_corners"].get<std::int64_t>() > genko::core::mesh3d::kMaxCorners) {
+            } else if (probe["mesh_vertices"].get<std::int64_t>() > genko::core::limits::kModelVertices ||
+                       probe["mesh_corners"].get<std::int64_t>() > genko::core::limits::kModelCorners) {
                 python = "keeps a model of " + text(probe["mesh_vertices"]) + " corners and faces of " + text(probe["mesh_corners"]) +
                          " corners in all";
             }
