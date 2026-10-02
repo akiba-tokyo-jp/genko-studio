@@ -49,6 +49,40 @@ def make_book(seed: int, root: Path) -> Path:
                 op["opacity"] = round(rnd.uniform(0.2, 1.0), 2)
             ops.append(op)
     apply_ops(ep, ops, agent="human:確認")
+    if os.environ.get("HERMES_TONES"):
+        # M3-B: tones, effect lines and rulers (drawn as pen lines), placed with Python's own ops
+        more = []
+        for page in ep.pages:
+            idx = page.index
+            for _ in range(rnd.randint(1, 3)):
+                tone = {"op": "add_tone", "page": idx, "density": round(rnd.uniform(0.05, 0.6), 2),
+                        "lpi": rnd.choice([42.5, 55, 60, 85]), "angle": rnd.choice([0, 15, 45, 30.5]),
+                        "pattern": rnd.choice(["dot", "line", "cross", "noise", "flat", "check", "brick", "wave", "grid",
+                                               "hatch", "star", "sand"])}
+                if rnd.random() < 0.5:
+                    x, y = rnd.uniform(20, 120), rnd.uniform(20, 180)
+                    tone["area"] = {"poly": [[x, y], [x + rnd.uniform(20, 60), y], [x + 30, y + rnd.uniform(20, 70)]]}
+                if rnd.random() < 0.3:
+                    tone["dot_shape"] = rnd.choice(["round", "square", "diamond", "ellipse"])
+                if rnd.random() < 0.25:
+                    tone["gradient"] = {"shape": rnd.choice(["linear", "radial"]), "angle": rnd.choice([0, 90, 30]),
+                                        "start": 0.1, "end": 0.9}
+                more.append(tone)
+            for _ in range(rnd.randint(0, 2)):
+                kind = rnd.choice(["focus", "speed", "uni_flash", "beta_flash"])
+                params = {"center": [rnd.uniform(60, 120), rnd.uniform(60, 180)], "count": rnd.randint(20, 90)}
+                if kind == "speed":
+                    params = {"angle": rnd.uniform(0, 180), "count": rnd.randint(15, 60), "length": rnd.uniform(0.3, 0.9)}
+                more.append({"op": "add_effect", "page": idx, "kind": kind, "params": params})
+            if rnd.random() < 0.5:
+                more.append({"op": "add_ruler", "page": idx, "kind": rnd.choice(["line", "curve", "ellipse", "rect"]),
+                             "points": [[rnd.uniform(20, 90), rnd.uniform(20, 120)], [rnd.uniform(100, 170), rnd.uniform(130, 240)],
+                                        [rnd.uniform(40, 150), rnd.uniform(40, 200)]][: rnd.choice([2, 3])],
+                             "id": f"r{idx}"})
+                more.append({"op": "ruler_to_layer", "page": idx, "id": f"r{idx}", "width_mm": rnd.choice([0.3, 0.8])})
+        result = apply_ops(ep, more, agent="human:確認")
+        if not result.get("ok", True):
+            raise SystemExit(f"tone ops failed: {result}")
     for page in ep.pages:
         for layer in page.layers:
             if rnd.random() < 0.3:
