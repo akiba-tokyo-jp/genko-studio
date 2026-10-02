@@ -91,21 +91,10 @@ std::string blend_mode(const Json& value) {
     throw OpError("unknown blend mode " + mode);
 }
 
-std::vector<std::int64_t> int_tuple(const Json& value) {
-    std::vector<std::int64_t> out;
-    for (const Json& v : iterate(value)) out.push_back(to_int(v));
-    return out;
-}
-
 Json ints_json(const std::vector<std::int64_t>& values) {
     Json out = Json::array();
     for (const auto v : values) out.push_back(v);
     return out;
-}
-
-double clamp(double v, double lo, double hi) {
-    const double m = v < hi ? v : hi;
-    return m > lo ? m : lo;
 }
 
 Json layer_to_dict(const Layer& layer) {

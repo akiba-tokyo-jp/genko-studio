@@ -190,7 +190,7 @@ private slots:
         ])"),
                     person)["snapshot"];
         QCOMPARE(snap["pages"][1]["layers"].size(), std::size_t{7});
-        Json order = Json::array();  // (reorder_layers keeps only the layers it is given)
+        Json order = Json::array();  // (reorder_layers takes every layer of the page, each once)
         for (const Json& layer : snap["pages"][1]["layers"]) order.insert(order.begin(), layer["id"]);
         snap = step("layer order", Json::array({Json::object({{"op", "reorder_layers"}, {"page", 2}, {"order", order}}),
                                                 Json::object({{"op", "delete_layer"}, {"page", 2}, {"id", "e2e-copy"}}),

@@ -1,5 +1,6 @@
 #include "core/pynum.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <charconv>
@@ -8,6 +9,7 @@
 #include <limits>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include "core/error.hpp"
 
@@ -395,5 +397,50 @@ Num py_sum(std::span<const Num> items) {
     if (compensating && c != 0.0 && std::isfinite(c)) sum += c;
     return Num(sum);
 }
+
+double py_float_sum(std::span<const double> items) {
+    const std::vector<Num> nums(items.begin(), items.end());
+    return py_sum(nums).value();
+}
+
+double py_median(std::vector<double> items) {
+    if (items.empty()) throw Error("value", "no median for empty data");
+    // sorted(data): a stable sort with <
+    std::stable_sort(items.begin(), items.end(), [](double a, double b) { return a < b; });
+    const std::size_t n = items.size();
+    if (n % 2 == 1) return items[n / 2];
+    const std::size_t i = n / 2;
+    return (items[i - 1] + items[i]) / 2;
+}
+
+namespace {
+
+void require_finite(double x) {
+    if (std::isnan(x)) throw PyValueError("cannot convert float NaN to integer");
+    if (std::isinf(x)) throw PyUncaught("OverflowError", "cannot convert float infinity to integer");
+}
+
+std::int64_t whole_to_int(double whole) {
+    if (whole >= 9223372036854775808.0 || whole < -9223372036854775808.0) {
+        throw PyUncaught("OverflowError", "int too large for this build");  // (Python's int has no bound)
+    }
+    return static_cast<std::int64_t>(whole);
+}
+
+}  // namespace
+
+double py_round_whole(double x) {
+    require_finite(x);
+    return std::nearbyint(x);  // (ties to even, as round() of a float)
+}
+
+double py_trunc(double x) {
+    require_finite(x);
+    return std::trunc(x);
+}
+
+std::int64_t py_round_int(double x) { return whole_to_int(py_round_whole(x)); }
+
+std::int64_t py_trunc_int(double x) { return whole_to_int(py_trunc(x)); }
 
 }  // namespace genko::core

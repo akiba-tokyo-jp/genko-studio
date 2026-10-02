@@ -25,18 +25,10 @@ struct XY {
     double y = 0.0;
 };
 
-// int(v) for a value that is small by construction (an index along a list)
-std::int64_t trunc_int(double v) { return static_cast<std::int64_t>(std::trunc(v)); }
-
 // min(hi, int(v)) without overflowing (Python's int is unbounded)
 std::int64_t trunc_at_most(double v, std::int64_t hi) {
     if (!(v < static_cast<double>(hi))) return hi;
-    return std::max<std::int64_t>(-hi, static_cast<std::int64_t>(std::trunc(std::max(v, -static_cast<double>(hi)))));
-}
-
-double clamp01(double v) {
-    const double m = v < 1.0 ? v : 1.0;
-    return m > 0.0 ? m : 0.0;
+    return std::max<std::int64_t>(-hi, py_trunc_int(std::max(v, -static_cast<double>(hi))));
 }
 
 double dist(const XY& a, const XY& b) { return py_dist(a.x, a.y, b.x, b.y); }
@@ -55,12 +47,6 @@ const Json& as_object(const Json& ruler) {
         throw PyUncaught("AttributeError", "'" + py_type_name(ruler) + "' object has no attribute 'get'");
     }
     return ruler;
-}
-
-// ruler.get(key, fallback)
-Json get_or(const Json& ruler, const char* key, const Json& fallback) {
-    const Json* value = get(ruler, key);
-    return value != nullptr ? *value : fallback;
 }
 
 // [_xy(p) for p in value]
@@ -85,7 +71,7 @@ PenPoints with_pressure(const std::vector<XY>& points_xy, const PenPoints& sourc
     for (std::int64_t i = 0; i < n; ++i) {
         const double t = static_cast<double>(i) / static_cast<double>(std::max<std::int64_t>(1, n - 1)) *
                          static_cast<double>(m - 1);
-        const std::int64_t k = m > 1 ? std::min<std::int64_t>(m - 2, trunc_int(t)) : 0;
+        const std::int64_t k = m > 1 ? std::min<std::int64_t>(m - 2, py_trunc_int(t)) : 0;
         const double f = t - static_cast<double>(k);
         const double p = pressures[static_cast<std::size_t>(k)] * (1 - f) +
                          pressures[static_cast<std::size_t>(std::min<std::int64_t>(m - 1, k + 1))] * f;
@@ -166,7 +152,7 @@ Nearest nearest_on_polyline(const XY& p, const std::vector<XY>& poly) {
         const XY& b = poly[i + 1];
         const double seg = dist(a, b);
         if (seg > 1e-9) {
-            const double t = clamp01(((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / (seg * seg));
+            const double t = py_clamp(((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / (seg * seg), 0.0, 1.0);
             const XY q{a.x + t * (b.x - a.x), a.y + t * (b.y - a.y)};
             const double d = dist(p, q);
             if (d < best.distance) best = Nearest{d, pos + t * seg, q};
@@ -195,7 +181,7 @@ XY at_arc(const std::vector<XY>& poly, double s) {
 double polyline_length(const std::vector<XY>& poly) {
     std::vector<double> parts;
     for (std::size_t i = 0; i + 1 < poly.size(); ++i) parts.push_back(dist(poly[i], poly[i + 1]));
-    return py_sum_doubles(parts);
+    return py_float_sum(parts);
 }
 
 bool is_kind(const Json& kind, const char* name) { return kind.is_string() && kind.get_ref<const std::string&>() == name; }
@@ -532,7 +518,7 @@ PenPoints ruler_snap(const PenPoints& points, const Json& rulers, const FrameCon
         for (const PenPoint& q : *snapped) line.push_back(xy(q));
         std::vector<double> parts;
         for (std::size_t i = 0; i < points.size(); i += step) parts.push_back(nearest_on_polyline(xy(points[i]), line).distance);
-        const double cost = py_sum_doubles(parts);
+        const double cost = py_float_sum(parts);
         if (cost < best_cost) {
             best = std::move(snapped);
             best_cost = cost;

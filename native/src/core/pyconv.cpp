@@ -215,6 +215,8 @@ std::int64_t py_int(const Json& value) {
     }
 }
 
+std::int64_t py_int(const Num& value) { return value.is_int() ? value.int_value() : py_int(Json(value.value())); }
+
 std::optional<std::string> py_big_int_text(const Json& value) {
     if (value.is_number_unsigned()) {
         const auto u = value.get<std::uint64_t>();

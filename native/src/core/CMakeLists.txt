@@ -33,6 +33,7 @@ genko_library(genko_core
     placement.cpp
     stroke_tools.cpp
     brushes.cpp
+    filters.cpp
     rulers.cpp
     command_bus.cpp
     ops_util.cpp

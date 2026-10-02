@@ -228,7 +228,7 @@ void add_stroke(OpContext& c) {
     const std::string kind = brush_kind(kind_value, doc);
     const Json post_smooth = op.contains("post_smooth") ? op["post_smooth"] : Json(brush_for(Json(kind), doc).post_smooth);
     if (py_truthy(post_smooth)) points = smoothed(points, to_int(post_smooth));
-    if (truthy_at(op, "post_fit")) points = fit_curve(points, clamp(to_float(op["post_fit"]), 0.05, 3.0));
+    if (truthy_at(op, "post_fit")) points = fit_curve(points, py_clamp(to_float(op["post_fit"]), 0.05, 3.0));
     std::vector<PenPoints> copies;
     if (truthy_at(op, "snap_ruler") || truthy_at(op, "ruler_id")) {
         if (py_truthy(page.rulers)) {
@@ -242,7 +242,7 @@ void add_stroke(OpContext& c) {
             points = snap_points_old(page, points);
         }
     }
-    if (truthy_at(op, "snap_lines_mm")) points = snap_ends(page, op, points, clamp(to_float(op["snap_lines_mm"]), 0.1, 10.0));
+    if (truthy_at(op, "snap_lines_mm")) points = snap_ends(page, op, points, py_clamp(to_float(op["snap_lines_mm"]), 0.1, 10.0));
     const bool taper = op.contains("taper") ? py_truthy(op["taper"]) : doc.brush_taper;
     if (taper) {
         std::optional<double> in_mm, out_mm;
@@ -250,7 +250,7 @@ void add_stroke(OpContext& c) {
         for (const char* key : {"taper_in_mm", "taper_out_mm"}) {
             const Json* value = get(op, key);
             if (value == nullptr || value->is_null()) continue;
-            const double v = clamp(to_float(*value), 0.0, 80.0);
+            const double v = py_clamp(to_float(*value), 0.0, 80.0);
             (std::string_view(key) == "taper_in_mm" ? in_mm : out_mm) = v;
             any = true;
         }
@@ -261,9 +261,9 @@ void add_stroke(OpContext& c) {
         points = taper_points(points, in_mm, out_mm);
     }
     if (truthy_at(op, "pressure_gamma")) {
-        const double gamma = clamp(to_float(op["pressure_gamma"]), 0.2, 5.0);
+        const double gamma = py_clamp(to_float(op["pressure_gamma"]), 0.2, 5.0);
         for (PenPoint& p : points) {
-            if (p.p) p.p = py_pow(clamp(*p.p, 0.0, 1.0), gamma);
+            if (p.p) p.p = py_pow(py_clamp(*p.p, 0.0, 1.0), gamma);
         }
     }
     const Json* curve_value = get(op, "curve");
@@ -277,7 +277,7 @@ void add_stroke(OpContext& c) {
     stroke.kind = brush_kind(kind_value, doc);
     const Json* width = get(op, "width_mm");
     stroke.width_mm = width != nullptr && !width->is_null() ? to_float(*width) : doc.brush_width_mm;
-    if (truthy_at(op, "pressure_opacity")) stroke.pressure_opacity = py_round(clamp(to_float(op["pressure_opacity"]), 0.0, 1.0), 3);
+    if (truthy_at(op, "pressure_opacity")) stroke.pressure_opacity = py_round(py_clamp(to_float(op["pressure_opacity"]), 0.0, 1.0), 3);
     if (truthy_at(op, "rotation")) {  // the pen's barrel turn, along the line as drawn
         std::vector<double> values;
         for (const Json& v : iterate(op["rotation"])) values.push_back(to_float(v));
@@ -307,7 +307,7 @@ void add_stroke(OpContext& c) {
         stroke.rgb.reset();
     }
     const Json* opacity = get(op, "opacity");
-    if (opacity != nullptr && !opacity->is_null()) stroke.opacity = clamp(to_float(*opacity), 0.0, 1.0);
+    if (opacity != nullptr && !opacity->is_null()) stroke.opacity = py_clamp(to_float(*opacity), 0.0, 1.0);
     const Brush brush = brush_for(Json(stroke.kind), doc);
     const Json mix = op.contains("mix") ? op["mix"] : Json(brush.mix);
     if (py_truthy(mix) && to_float(mix) > 0 &&

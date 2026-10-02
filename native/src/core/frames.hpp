@@ -52,9 +52,16 @@ std::optional<std::vector<double>> curves_of(const Frame& frame, std::span<const
 // Whether the panel's outline is more than its corners: bowed edges or rounded corners.
 bool rounded(const Frame& frame);
 
+// frames._round_corners: each corner cut back along both edges and joined by a round (a quarter circle at a right
+// angle); the corners whose `keep` is true stay sharp (a bleed panel's corners off the paper).
+std::vector<Point> round_corners(std::span<const Point> pts, double radius, const std::vector<bool>& keep = {});
+
 // The panel's outline: its corners, each bowed edge walked as a curve, its corners rounded (角の丸み) when it has
 // no bowed edges.
 std::vector<Point> outline(const Frame& frame, double step_mm = 1.0);
+
+// frames.offset: the outline moved inward by d mm (outward when d < 0), corner by corner along the mitre.
+std::vector<Point> offset(std::span<const Point> points, double d);
 
 // Whether (x, y) is inside the panel (its box, or its outline when it is slanted, bowed or rounded).
 bool contains(const Frame& frame, const Num& x, const Num& y);

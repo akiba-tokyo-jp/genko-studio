@@ -297,7 +297,7 @@ Json border_style(const Json& raw) {
         {"gap_mm", 0.1, 10.0}, {"dash_mm", 0.01, 30.0}, {"wobble_mm", 0.0, 3.0}};
     for (const auto& [key, lo, hi] : kRanges) {
         const Json* value = get(raw, key);
-        if (value != nullptr && !value->is_null()) out[key] = clamp(to_float(*value), lo, hi);
+        if (value != nullptr && !value->is_null()) out[key] = py_clamp(to_float(*value), lo, hi);
     }
     return out;
 }
@@ -626,7 +626,7 @@ void set_frame(OpContext& c) {
     }
     if (has(op, "corner_mm")) {
         if (!frame.children.empty()) throw OpError("only a panel (not a split) takes round corners");
-        frame.corner_mm = clamp(py_truthy(op["corner_mm"]) ? to_float(op["corner_mm"]) : 0.0, 0.0, 50.0);
+        frame.corner_mm = py_clamp(py_truthy(op["corner_mm"]) ? to_float(op["corner_mm"]) : 0.0, 0.0, 50.0);
     }
     if (has(op, "poly")) {
         if (!frame.children.empty()) throw OpError("only a panel (not a split) takes a shape");
@@ -691,7 +691,13 @@ void set_frame(OpContext& c) {
 
 void select_frame(OpContext& c) {
     const std::size_t i = require_page(c.doc, c.op);
-    c.doc.edit_page(i).selected_frame_id = c.op.contains("frame_id") ? c.op["frame_id"] : Json(nullptr);
+    const Json frame_id = c.op.contains("frame_id") ? c.op["frame_id"] : Json(nullptr);
+    // (Python keeps whatever it is given, a panel of the page or not; refused here)
+    const Page& page = c.doc.page(i);
+    if (!frame_id.is_string() || page.find_frame(frame_id.get_ref<const std::string&>()) == nullptr) {
+        throw OpError("no frame " + py_str(frame_id) + " on page " + page.index.repr());
+    }
+    c.doc.edit_page(i).selected_frame_id = frame_id;
 }
 
 }  // namespace

@@ -59,6 +59,12 @@ genko_test(test_contract_ops SOURCES contract/test_contract_ops.cpp contract/ops
            LABELS contract TIMEOUT 3600)
 genko_test(test_contract_ops_cli SOURCES contract/test_contract_ops_cli.cpp DEPS genko_test_support LABELS contract
            TIMEOUT 3600)
+# core/filters, the correction layers' adjustments for the ops and the renderer, against Python's filters.apply_filter.
+genko_test(test_contract_filters SOURCES contract/test_contract_filters.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 600)
+# The two together: a book made by the ops (C++ and Python), drawn by `genko render` and `python -m genko render`.
+genko_test(test_contract_drawn_by_ops SOURCES contract/test_contract_drawn_by_ops.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render LABELS contract TIMEOUT 1800)
 
 genko_test(test_cli_e2e SOURCES e2e/test_cli_e2e.cpp DEPS genko_test_support LABELS e2e)
 genko_test(test_save_e2e SOURCES e2e/test_save_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)

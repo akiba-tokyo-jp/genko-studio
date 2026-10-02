@@ -2,7 +2,9 @@
 // test_contract_ops). For every op: a batch that succeeds and does what it says, with the book it was given left as
 // it was and only the pages it changes copied (the others stay shared); the same batch as a dry run; a batch that
 // fails and leaves the book as it was; and, for an op on a page, the page locked by a person refusing an AI. Then
-// the rules of strict_gates, one by one, and a layer listed twice on a page (Python's one object in two places).
+// the rules of strict_gates, one by one, and what this build refuses where Python goes on and breaks the book (one
+// layer object listed twice, layers lost, locks on no page, a selection or a parent that is not there, page numbers
+// read from a text).
 
 #include <QtTest>
 
@@ -129,6 +131,9 @@ private slots:
             {"ROOT2", p2.frames[0].id},
             {"TOP2", p2.frames[0].children.at(0).id},
             {"INK1", p1.first_layer(LayerRole::Ink)->id},
+            {"BG1", p1.first_layer(LayerRole::Bg)->id},
+            {"NAME1", p1.first_layer(LayerRole::Name)->id},
+            {"FINISH1", p1.first_layer(LayerRole::Finish)->id},
         };
         const std::string leaf1 = p1.frames[0].id;
         const std::vector<Case> cases{
@@ -188,7 +193,7 @@ private slots:
              R"([{"op": "lock_page", "page": 1, "agent": "ai:other"}])", "cannot lock page 1 as ai:other (actor is ai:hermes)", 1, kAi},
             {"unlock_page", R"([{"op": "lock_page", "page": 1}, {"op": "unlock_page", "page": 1}])", kAi, {},
              [](const Document& d) { return d.page_locks.empty(); },
-             R"([{"op": "unlock_page", "page": 9}, {"op": "set_note", "page": 9}])", "no page 9", 1},
+             R"([{"op": "unlock_page", "page": 9}, {"op": "set_note", "page": 9}])", "ops[0] unlock_page: no page 9", 1},
             {"set_note", R"([{"op": "set_note", "page": 3, "note": "メモ"}])", kAi, {3}, [](const Document& d) { return d.page(2).note == "メモ"; },
              R"([{"op": "set_note", "page": 9}])", "no page 9", 3},
             {"set_meta", R"([{"op": "set_meta", "title": "題", "binding": "left"}])", "genko", {1, 2, 3, 4},
@@ -225,7 +230,7 @@ private slots:
                  const Layer* copy = layer_by_id(d.page(0), "pen-2");
                  const Layer* source = layer_by_id(d.page(0), "pen-1");
                  return copy != nullptr && copy->stroke_count() == 1 && copy->strokes->items[0]->id != source->strokes->items[0]->id &&
-                        copy->identity != source->identity && (copy - source) == 1;
+                        (copy - source) == 1;
              },
              R"([{"op": "duplicate_layer", "page": 1, "id": "folder-1"}])", "a folder cannot be duplicated", 1},
             {"set_layer", R"([{"op": "set_layer", "page": 1, "layer": "ink", "opacity": 0.5, "blend": "multiply", "visible": false}])", "genko", {1},
@@ -240,8 +245,9 @@ private slots:
                                     [](const Layer& l) { return l.locked == (l.kind != genko::core::LayerKind::Folder); });
              },
              R"([{"op": "set_layers", "page": 1, "all": true}])", "set_layers needs something to set", 1},
-            {"reorder_layers", R"([{"op": "reorder_layers", "page": 1, "order": ["folder-1", "pen-1", "INK1"]}])", "genko", {1},
-             [](const Document& d) { return d.page(0).layers.size() == 3 && d.page(0).layers[0].id == "folder-1"; },
+            {"reorder_layers",
+             R"([{"op": "reorder_layers", "page": 1, "order": ["folder-1", "pen-1", "INK1", "FINISH1", "NAME1", "BG1"]}])", "genko", {1},
+             [](const Document& d) { return d.page(0).layers.size() == 6 && d.page(0).layers[0].id == "folder-1"; },
              R"([{"op": "reorder_layers", "page": 9, "order": []}])", "no page 9", 1},
             {"set_brush", R"([{"op": "set_brush", "rgb": [10, 20, 30], "width_mm": 0.9}])", kAi, {},
              [](const Document& d) { return d.brush_rgb == std::vector<std::int64_t>{10, 20, 30} && d.brush_width_mm == 0.9; },
@@ -359,41 +365,116 @@ private slots:
         QCOMPARE(error_of(plain, R"([{"op": "delete_layer", "page": 2, "id": "pen-2"}])", kAi), std::string("(applied)"));
     }
 
-    void aLayerListedTwice() {
+    // What Python applies and this build refuses, the book left as it was (docs: the points where C++ differs).
+    void refusedWherePythonBreaksTheBook() {
         const Document doc = fixture();
-        const std::string ink = doc.page(0).first_layer(LayerRole::Ink)->id;
-        const std::string name = doc.page(0).first_layer(LayerRole::Name)->id;
-        // Python's reorder_layers lists the one layer object twice: an edit shows in both places, in this batch and
-        // in the next
-        const auto twice = run_ops(doc, R"([{"op": "reorder_layers", "page": 1, "order": [")" + ink + R"(", ")" + name + R"(", ")" + ink +
-                                          R"("]}, {"op": "set_layer", "page": 1, "layer": "ink", "opacity": 0.25}])");
-        const auto& layers = twice.doc.page(0).layers;
-        QCOMPARE(layers.size(), std::size_t{3});
-        QCOMPARE(layers[0].identity, layers[2].identity);
-        QVERIFY(layers[0].opacity == 0.25 && layers[2].opacity == 0.25);
-        const auto drawn = run_ops(twice.doc, R"([{"op": "add_stroke", "page": 1, "layer": "ink", "points": [[1, 1], [2, 2]]}])");
-        QCOMPARE(drawn.doc.page(0).layers[0].stroke_count(), std::size_t{3});
-        QCOMPARE(drawn.doc.page(0).layers[2].stroke_count(), std::size_t{3});
-        QVERIFY(drawn.doc.page(0).layers[0].strokes == drawn.doc.page(0).layers[2].strokes);
-        QCOMPARE(twice.doc.page(0).layers[2].stroke_count(), std::size_t{2});  // (the book before is as it was)
-        // a page copied: the copy lists its own layer twice, under the id Python's loop gave it last
-        const auto copied = run_ops(twice.doc, R"([{"op": "duplicate_page", "page": 1},
-                                                 {"op": "set_layer", "page": 5, "layer": "ink", "visible": false}])");
-        const auto& copy = copied.doc.page(4).layers;
-        QCOMPARE(copy[0].identity, copy[2].identity);
-        QVERIFY(copy[0].identity != layers[0].identity);
-        QCOMPARE(copy[0].id, copy[2].id);
-        QVERIFY(copy[0].id != copy[1].id && copy[0].id != ink);
-        QVERIFY(!copy[0].visible && !copy[2].visible);
-        QVERIFY(copied.doc.page(0).layers[0].visible && copied.doc.page(0).layers[2].visible);
-        // deleted: both go
-        const auto deleted = run_ops(twice.doc, R"([{"op": "add_layer", "page": 1, "kind": "pen", "id": "p"},
-            {"op": "reorder_layers", "page": 1, "order": ["p", ")" + ink + R"(", "p"]}, {"op": "delete_layer", "page": 1, "id": "p"}])");
-        QCOMPARE(deleted.doc.page(0).layers.size(), std::size_t{1});
-        // ordinary copies of a book keep their layers apart from the book's
-        const auto separate = run_ops(doc, R"([{"op": "set_layer", "page": 1, "layer": "ink", "opacity": 0.5}])");
-        QVERIFY(doc.page(0).first_layer(LayerRole::Ink)->opacity == 1.0);
-        QVERIFY(separate.doc.page(0).first_layer(LayerRole::Ink)->identity == doc.page(0).first_layer(LayerRole::Ink)->identity);
+        const Page& p1 = doc.page(0);
+        const std::string bg = p1.first_layer(LayerRole::Bg)->id;
+        const std::string name = p1.first_layer(LayerRole::Name)->id;
+        const std::string ink = p1.first_layer(LayerRole::Ink)->id;
+        const std::string finish = p1.first_layer(LayerRole::Finish)->id;
+        const std::string before = state(doc);
+        const auto refused = [&](const Document& book, const std::string& batch, const std::string& words) {
+            const std::string error = error_of(book, batch);
+            QVERIFY2(error.starts_with("apply: ") && error.find(words) != std::string::npos, (batch + " → " + error).c_str());
+        };
+        const auto quoted = [](const std::vector<std::string>& ids) {
+            std::string out;
+            for (const std::string& id : ids) out += (out.empty() ? "\"" : ", \"") + id + "\"";
+            return out;
+        };
+        const auto reorder = [&](const std::string& order) {
+            return R"([{"op": "reorder_layers", "page": 1, "order": )" + order + "}]";
+        };
+
+        // reorder_layers: an id given twice (Python: one layer object in two places, an edit of one showing in the
+        // other), a layer left out (Python: lost; with no order, every layer), an id the page does not have
+        refused(doc, reorder("[" + quoted({ink, name, ink}) + "]"), "ops[0] reorder_layers: ids must not repeat");
+        refused(doc, reorder("[" + quoted({ink, name, ink, bg, finish, "pen-1", "folder-1"}) + "]"), "ids must not repeat");
+        const std::string every_layer = "order must list every layer of the page once";
+        refused(doc, reorder("[" + quoted({ink, name}) + "]"), "ops[0] reorder_layers: " + every_layer);
+        refused(doc, reorder("[]"), every_layer);
+        refused(doc, R"([{"op": "reorder_layers", "page": 1}])", every_layer);
+        refused(doc, reorder("[" + quoted({ink, name, bg, finish, "pen-1", "nope"}) + "]"), every_layer);
+        refused(doc, reorder("[" + quoted({ink, name, bg, finish, "pen-1", "folder-1", "nope"}) + "]"), every_layer);
+        refused(doc, reorder(R"("ab")"), every_layer);
+        refused(doc, reorder("[" + quoted({ink, name, bg, finish, "pen-1"}) + ", 5]"), every_layer);
+        // (what Python itself refuses is refused as Python refuses it)
+        refused(doc, reorder(R"([["pen-1"]])"), "a value of the wrong type (unhashable type: 'list')");
+        // a page with two layers of one id (a book Python wrote after such a reorder): its layers cannot be listed once
+        Document doubled = doc;
+        doubled.edit_page(0).layers.push_back(doubled.page(0).layers[2]);
+        refused(doubled, reorder("[" + quoted({ink, name, bg, finish, "pen-1", "folder-1"}) + "]"), every_layer);
+        refused(doubled, reorder("[" + quoted({ink, name, bg, finish, "pen-1", "folder-1", ink}) + "]"), "ids must not repeat");
+        QVERIFY(state(doc) == before);
+        // every layer once: the new order, each layer its own (an edit of one is not seen in another)
+        const auto moved = run_ops(doc, reorder("[" + quoted({"folder-1", ink, "pen-1", finish, name, bg}) + "]"));
+        const auto& layers = moved.doc.page(0).layers;
+        QCOMPARE(layers.size(), std::size_t{6});
+        QCOMPARE(layers[0].id, std::string("folder-1"));
+        QCOMPARE(layers[5].id, bg);
+        const auto edited = run_ops(moved.doc, R"([{"op": "set_layer", "page": 1, "layer": "ink", "opacity": 0.25},
+            {"op": "duplicate_page", "page": 1}, {"op": "set_layer", "page": 5, "layer": "ink", "visible": false}])");
+        for (const Layer& layer : edited.doc.page(0).layers) QCOMPARE(layer.opacity, layer.id == ink ? 0.25 : 1.0);
+        QVERIFY(edited.doc.page(0).first_layer(LayerRole::Ink)->visible);
+        QVERIFY(!edited.doc.page(4).first_layer(LayerRole::Ink)->visible);
+        std::set<std::string> copied_ids;
+        for (const Layer& layer : edited.doc.page(4).layers) copied_ids.insert(layer.id);
+        QCOMPARE(copied_ids.size(), std::size_t{6});  // (each layer of the copy its own new id)
+
+        // lock_page and unlock_page on a page the book does not have (Python: nothing done, nothing said)
+        refused(doc, R"([{"op": "lock_page", "page": 9}])", "ops[0] lock_page: no page 9");
+        refused(doc, R"([{"op": "unlock_page", "page": 9}])", "ops[0] unlock_page: no page 9");
+        refused(doc, R"([{"op": "lock_page", "page": "12"}])", "no page 12");
+        refused(doc, R"([{"op": "lock_page", "page": 1e19}])", "no page 10000000000000000000");
+        refused(doc, R"([{"op": "unlock_page", "page": 9223372036854775808}])", "no page 9223372036854775808");
+        QCOMPARE(error_of(doc, R"([{"op": "lock_page", "page": "x"}])"), std::string("(applied)"));  // (not a page number: as Python)
+        QCOMPARE(error_of(doc, R"([{"op": "lock_page", "page": 4}, {"op": "unlock_page", "page": "4"}])"), std::string("(applied)"));
+
+        // select_frame: only a panel of the page (Python keeps any value)
+        refused(doc, R"([{"op": "select_frame", "page": 1, "frame_id": "nope"}])", "ops[0] select_frame: no frame nope on page 1");
+        refused(doc, R"([{"op": "select_frame", "page": 1, "frame_id": null}])", "no frame None on page 1");
+        refused(doc, R"([{"op": "select_frame", "page": 1}])", "no frame None on page 1");
+        refused(doc, R"([{"op": "select_frame", "page": 1, "frame_id": 5}])", "no frame 5 on page 1");
+        refused(doc, R"([{"op": "select_frame", "page": 1, "frame_id": ["a", 1]}])", "no frame ['a', 1] on page 1");
+        const std::string top2 = doc.page(1).frames[0].children.at(0).id;
+        refused(doc, R"([{"op": "select_frame", "page": 1, "frame_id": ")" + top2 + R"("}])", "no frame " + top2 + " on page 1");
+        const std::string root2 = doc.page(1).frames[0].id;
+        const auto selected = run_ops(doc, R"([{"op": "select_frame", "page": 2, "frame_id": ")" + top2 + R"("},
+            {"op": "select_frame", "page": 2, "frame_id": ")" + root2 + R"("}])");
+        QCOMPARE(selected.doc.page(1).selected_frame_id, Json(root2));
+
+        // set_layer's and add_layer's parent: a folder of the page, never a folder inside itself (Python keeps any value)
+        refused(doc, R"([{"op": "set_layer", "page": 1, "id": "pen-1", "parent": "nope"}])", "ops[0] set_layer: parent must be a folder");
+        refused(doc, R"([{"op": "set_layer", "page": 1, "id": "pen-1", "parent": ")" + ink + R"("}])", "parent must be a folder");
+        refused(doc, R"([{"op": "set_layer", "page": 1, "id": "pen-1", "parent": 5}])", "parent must be a folder");
+        refused(doc, R"([{"op": "set_layer", "page": 1, "id": "pen-1", "parent": ""}])", "parent must be a folder");
+        refused(doc, R"([{"op": "set_layer", "page": 1, "id": "folder-1", "parent": "folder-1"}])", "a folder cannot hold itself");
+        refused(doc, R"([{"op": "add_layer", "page": 1, "kind": "folder", "id": "folder-2", "parent": "folder-1"},
+            {"op": "set_layer", "page": 1, "id": "folder-1", "parent": "folder-2"}])", "ops[1] set_layer: a folder cannot hold itself");
+        refused(doc, R"([{"op": "add_layer", "page": 1, "kind": "pen", "parent": "pen-1"}])", "ops[0] add_layer: parent must be a folder");
+        refused(doc, R"([{"op": "add_layer", "page": 1, "kind": "folder", "id": "f", "parent": "f"}])", "parent must be a folder");
+        QVERIFY(state(doc) == before);
+        const auto nested = run_ops(doc, R"([{"op": "add_layer", "page": 1, "kind": "folder", "id": "folder-2", "parent": "folder-1"},
+            {"op": "set_layer", "page": 1, "id": "pen-1", "parent": "folder-2"}, {"op": "add_layer", "page": 1, "kind": "pen", "id": "pen-3", "parent": ""},
+            {"op": "set_layer", "page": 1, "id": "folder-1", "parent": null}])");
+        const Page& np = nested.doc.page(0);
+        QCOMPARE(layer_by_id(np, "pen-1")->parent_id, Json("folder-2"));
+        QVERIFY(layer_by_id(np, "pen-3")->parent_id.is_null());
+        QVERIFY(layer_by_id(np, "folder-1")->parent_id.is_null());
+
+        // for_pages: "all", "body" or a list of page numbers (Python reads "12" as pages 1 and 2, 2.7 as page 2)
+        const std::string pages_words = "ops[0] for_pages: pages must be all, body or a list of page numbers";
+        refused(doc, R"([{"op": "for_pages", "pages": "12", "ops": [{"op": "set_note", "note": "x"}]}])", pages_words);
+        refused(doc, R"([{"op": "for_pages", "pages": [1, 2.7], "ops": [{"op": "set_note", "note": "x"}]}])", pages_words);
+        refused(doc, R"([{"op": "for_pages", "pages": [1, 2.0], "ops": [{"op": "set_note", "note": "x"}]}])", pages_words);
+        refused(doc, R"([{"op": "for_pages", "pages": [true], "ops": [{"op": "set_note", "note": "x"}]}])", pages_words);
+        refused(doc, R"([{"op": "for_pages", "pages": {"1": 1}, "ops": [{"op": "set_note", "note": "x"}]}])", pages_words);
+        refused(doc, R"([{"op": "for_pages", "pages": ["3"], "ops": [{"op": "set_note", "note": "x"}]}])", pages_words);
+        QVERIFY(state(doc) == before);
+        const auto notes = run_ops(doc, R"([{"op": "for_pages", "pages": [1, 3], "ops": [{"op": "set_note", "note": "x"}]},
+            {"op": "for_pages", "pages": "body", "ops": [{"op": "set_note", "note": "y"}]}])");
+        QCOMPARE(notes.applied.size(), std::size_t{6});
     }
 };
 

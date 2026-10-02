@@ -27,6 +27,8 @@ Commands (JSON is UTF-8 without escapes):
   make-random OUT --seed N --count K   K random v3 books made with new_episode and direct field assignment
   make-opsbook DEST                    the v3 book of the op contract tests (native/tests/contract/ops_cases.json
                                        names its ids: they are counted, so it is the same book every time)
+  make-drawbook DEST                   the v3 book test_contract_drawn_by_ops draws lines on (nothing the C++ build
+                                       does not draw yet; ids counted)
   make-sequences OUT --books DIR --seed N --count K
                                        K random op sequences (1 to 12 ops, in batches by various actors, some dry
                                        runs, for_pages, strict_gates, page locks) over the make-random books in DIR
@@ -721,6 +723,37 @@ def make_opsbook(dest: str) -> None:
     save_episode(episode, root, actor="human:作者")
 
 
+def make_drawbook(dest: str) -> None:
+    """The v3 book test_contract_drawn_by_ops draws after the ops: two A4 pages with nothing the C++ build does not draw
+    yet (no lines, nombres off): page 1 split in three panels, page 2 one panel with a fill layer and a pen layer."""
+    from genko import models
+    from genko.headless import apply_ops
+    from genko.io import save_episode
+    from genko.models import Binding, PageSpec
+
+    fresh_process_state(True)
+    root = Path(dest)
+    root.mkdir(parents=True, exist_ok=True)
+    episode = models.new_episode("線の試験", 1, 2, PageSpec.a4_mono(), Binding.RIGHT)
+    episode.nombre = {"show": False}
+
+    def run(ops):
+        reply = apply_ops(episode, ops, agent="human:作者")
+        if not reply.get("ok"):
+            raise SystemExit(f"make-drawbook: {ops}: {reply}")
+
+    root1 = episode.pages[0].frames[0].id
+    run([{"op": "split_frame", "page": 1, "frame_id": root1, "axis": "horizontal", "ratio": 0.45, "gutter_mm": 6},
+         {"op": "name_ok", "page": 1}])
+    top = episode.pages[0].frames[0].children[0].id
+    run([{"op": "split_frame", "page": 1, "frame_id": top, "axis": "vertical", "ratio": 0.4, "gutter_mm": 3},
+         {"op": "add_layer", "page": 2, "kind": "fill", "id": "fill-2", "rgb": [235, 240, 250]},
+         {"op": "add_layer", "page": 2, "kind": "pen", "id": "pen-2", "name": "線画"},
+         {"op": "set_frame", "page": 2, "frame_id": episode.pages[1].frames[0].id, "corner_mm": 6,
+          "line": {"kind": "double", "rgb": [40, 40, 90]}}])
+    save_episode(episode, root, actor="human:作者")
+
+
 def make_random(out: str, seed: int, count: int) -> None:
     root = Path(out)
     root.mkdir(parents=True, exist_ok=True)
@@ -733,6 +766,57 @@ def make_random(out: str, seed: int, count: int) -> None:
 
 AGENTS = ["genko", "genko", "human:作者", "ai:hermes", "legacy:unknown", "ai:other"]
 SEQ_FIRST_ID = 0x100000  # (new ids count from here: above every id a random book has)
+
+
+class _Replay:
+    """A sequence's book as test_contract_ops's Python side (steps_job) has it after each step, while the sequence is
+    made: what an op will find in the book once the ops before it have changed it."""
+
+    def __init__(self, book: Path, store: Path):
+        from genko.assets import AssetStore
+        from genko.io import load_episode
+
+        fresh_process_state(True)
+        self.episode = load_episode(book)
+        counting_ids(SEQ_FIRST_ID)
+        self.store = AssetStore(store)
+
+    def layer_ids(self, step: dict, k: int):
+        """The ids of the layers of the page that op k of `step` names, when op k runs (the ops before it in the
+        batch applied); None when no op k runs (an op before fails) or there is no such page."""
+        import copy
+
+        import genko.models as models
+        from genko.headless import apply_ops
+
+        counter = models.uuid4
+        mark = counter.next
+        trial = copy.deepcopy(self.episode)
+        try:
+            if k > 0:
+                apply_ops(trial, copy.deepcopy(step["ops"][:k]), dry_run=False, agent=step.get("agent", "genko"))
+            index = int(step["ops"][k]["page"])
+        except Exception:  # (the batch stops before op k, or op k names no page)
+            return None
+        finally:
+            counter.next = mark  # (the ids the trial used are made again when the batch really runs)
+        page = next((page for page in trial.pages if page.index == index), None)
+        return [layer.id for layer in page.layers] if page is not None else None
+
+    def apply(self, step: dict) -> None:
+        """The step as steps_job applies it, with the payload and full snapshot it takes after each."""
+        import copy
+
+        from genko.headless import apply_ops
+        from genko.io import _payload
+
+        try:
+            apply_ops(self.episode, copy.deepcopy(step["ops"]), dry_run=bool(step.get("dry_run")),
+                      agent=step.get("agent", "genko"))
+        except Exception:  # (refused, or one of the errors apply_ops lets through: the book is as it was)
+            pass
+        _payload(self.episode, self.store)
+        _full_snapshot(self.episode)
 
 
 def _book_pools(book: Path) -> dict:
@@ -757,7 +841,8 @@ def _book_pools(book: Path) -> dict:
         # finishes; the sequences leave those layers alone)
         layers = [{"id": layer.id, "role": layer.role.value, "kind": layer.kind.value, "strokes": len(layer.strokes),
                    "pixels": bool(layer.raster_png) or (layer.kind == LayerKind.RASTER and bool(layer.patches)),
-                   "huge": any(not abs(v) < 1e5 for s in layer.strokes for p in s.points for v in p[:2])}
+                   "huge": any(not abs(v) < 1e5 for s in layer.strokes for p in s.points for v in p[:2]),
+                   "parent": layer.parent_id}
                   for layer in page.layers]
         pages.append({"index": page.index, "leaves": [f.id for f in page.leaf_frames()],
                       "splits": [f.id for f in nodes if f.children], "frames": [f.id for f in nodes], "layers": layers,
@@ -766,11 +851,36 @@ def _book_pools(book: Path) -> dict:
     return {"pages": pages, "huge": huge}
 
 
-def _sequence(rng: random.Random, pool: dict) -> list:
+def _sequence(rng: random.Random, pool: dict, replay: _Replay) -> list:
     """1 to 12 ops of M2-O1 for one book, in steps (most one op; some two or three; some dry runs), by several actors,
-    with for_pages, strict_gates switched on and off, page locks and name approvals among them."""
+    with for_pages, strict_gates switched on and off, page locks and name approvals among them.
+
+    Not made (the C++ build refuses them where Python goes on and breaks the book): a reorder_layers order that leaves
+    a layer out, names one twice or one the page does not have (the order names the layers the page has when the op
+    runs: `replay`); select_frame of what is not a panel of the page; a parent that is not a folder of the page;
+    lock_page and unlock_page of a page the book does not have. The random draws for them are made as before, so the
+    sequences keep their other ops. (What the ops before change in the book can still make one of the others refused:
+    test_contract_ops stops comparing such a sequence there.)"""
     pages = pool["pages"]
     made = [f"{SEQ_FIRST_ID + k:012x}" for k in range(40)]  # (ids the sequence's own ops make)
+
+    def pool_page(p):  # the page an op names, as the pool has it (None: not a page of the book)
+        if isinstance(p, dict):
+            return p
+        return next((q for q in pages if str(q["index"]) == str(p)), None)
+
+    def folder_or_none(p, layer_id, moved=None):  # layer_id when it is a folder of the page (not in `moved`)
+        page = pool_page(p)
+        layers = {layer["id"]: layer for layer in page["layers"]} if page else {}
+        at, seen = layers.get(layer_id), set()
+        if at is None or at["kind"] != "folder":
+            return None
+        while at is not None and at["id"] not in seen:  # (a folder is never put inside itself)
+            if at["id"] == moved:
+                return None
+            seen.add(at["id"])
+            at = layers.get(at["parent"] or "")
+        return layer_id
 
     def pick(items, fallback="nope"):
         return rng.choice(items) if items and rng.random() < 0.9 else fallback
@@ -962,7 +1072,9 @@ def _sequence(rng: random.Random, pool: dict) -> list:
         if rng.random() < 0.3:
             op["after"] = layer_of(p)
         if rng.random() < 0.2:
-            op["parent"] = layer_of(p)
+            parent = folder_or_none(p, layer_of(p))
+            if parent is not None:
+                op["parent"] = parent
         if rng.random() < 0.2:
             op["blend"] = rng.choice(["multiply", "screen", "luminosity", "glow"])
         if op["kind"] == "fill" and rng.random() < 0.5:
@@ -988,6 +1100,8 @@ def _sequence(rng: random.Random, pool: dict) -> list:
                        "screen": rng.choice([None, {"pattern": "dot", "lpi": 60}, {"lpi": 5}]),
                        "fill": rng.choice([None, {"rgb": [1, 2, 3]}]), "parent": rng.choice([None, layer_of(p)])
                        }.get(key, rng.random() < 0.5)
+        if "parent" in op:
+            op["parent"] = folder_or_none(p, op["parent"], op.get("id"))
         return op
 
     def op_set_layers(p):
@@ -1003,14 +1117,17 @@ def _sequence(rng: random.Random, pool: dict) -> list:
     def op_reorder_layers(p):
         ids = [layer["id"] for layer in (p["layers"] if isinstance(p, dict) else [])]
         rng.shuffle(ids)
+        # (every layer once: the draws that once cut the order short or added an id are made and not used)
         if rng.random() < 0.3 and ids:
-            ids = ids[:rng.randint(0, len(ids))]
+            rng.randint(0, len(ids))
         if rng.random() < 0.2:
-            ids.append(rng.choice(["nope", 5]))
+            rng.choice(["nope", 5])
+        if not isinstance(p, dict) and pool_page(p):  # (a page named by its text: its layers as they are)
+            ids = [layer["id"] for layer in pool_page(p)["layers"]]
         return {"op": "reorder_layers", "page": page_no(p), "order": ids}
 
     def op_for_pages():
-        inner = rng.choice([lambda: {"op": "set_note", "note": "毎"}, lambda: {"op": "select_frame", "frame_id": "x"},
+        inner = rng.choice([lambda: {"op": "set_note", "note": "毎"}, lambda: {"op": "set_note", "note": "選"},
                             lambda: {"op": "add_layer", "kind": "pen"}, lambda: {"op": "split_frame", "axis": "vertical"},
                             lambda: {"op": "add_stroke", "points": [[30, 40], [60, 70]]}, lambda: {"op": "name_ok"},
                             lambda: {"op": "set_layers", "all": True, "opacity": 0.5}])
@@ -1047,7 +1164,10 @@ def _sequence(rng: random.Random, pool: dict) -> list:
         if kind == "delete_frame":
             return op_delete_frame(p)
         if kind == "select_frame":
-            return {"op": "select_frame", "page": page_no(p), "frame_id": frame_of(p)}
+            frame_id, page = frame_of(p), pool_page(p)
+            if page and frame_id not in page["frames"]:  # (a panel of the page: its first, for an id it does not have)
+                frame_id = page["leaves"][0] if page["leaves"] else page["frames"][0]
+            return {"op": "select_frame", "page": page_no(p), "frame_id": frame_id}
         if kind == "add_page":
             op = {"op": "add_page", "count": rng.choice([1, 1, 2, 3, 0])}
             if rng.random() < 0.4:
@@ -1068,6 +1188,8 @@ def _sequence(rng: random.Random, pool: dict) -> list:
         if kind == "name_ok":
             return {"op": "name_ok", **({"page": page_no(p)} if rng.random() < 0.7 else {})}
         if kind in ("lock_page", "unlock_page"):
+            if p in (0, len(pages) + 1):  # (a page the book has; "x" and None name none, as in Python)
+                p = pages[0]
             return {"op": kind, "page": page_no(p), **({"agent": rng.choice(AGENTS)} if kind == "lock_page" and rng.random() < 0.4 else {})}
         if kind == "set_note":
             return {"op": "set_note", "page": page_no(p), "note": rng.choice(["メモ", 5, None, "a\nb"])}
@@ -1110,6 +1232,15 @@ def _sequence(rng: random.Random, pool: dict) -> list:
         step = {"ops": [one_op() for _ in range(size)], "agent": rng.choice(AGENTS)}
         if rng.random() < 0.1:
             step["dry_run"] = True
+        for k, op in enumerate(step["ops"]):
+            # a reorder_layers order drawn from the book as it was read: the layers the page has when it runs (those
+            # still there in the order drawn, then the ones the ops before added)
+            if op["op"] == "reorder_layers":
+                now = replay.layer_ids(step, k)
+                if now is not None and sorted(now) != sorted(op["order"]):
+                    kept = [i for i in op["order"] if i in now]
+                    op["order"] = kept + [i for i in now if i not in kept]
+        replay.apply(step)
         steps.append(step)
     return steps
 
@@ -1117,13 +1248,17 @@ def _sequence(rng: random.Random, pool: dict) -> list:
 def make_sequences(out: str, books: str, seed: int, count: int) -> None:
     """`count` op sequences over the books in `books` (each sequence for one book, in turn): a JSON list of
     {"book", "first_id", "steps"} for test_contract_ops."""
+    import tempfile
+
     paths = sorted(Path(books).glob("book-*.genko"))
     pools = [_book_pools(p) for p in paths]
     rng = random.Random(seed)
     sequences = []
-    for i in range(count):
-        b = i % len(paths)
-        sequences.append({"book": str(paths[b]), "first_id": SEQ_FIRST_ID, "steps": _sequence(rng, pools[b])})
+    with tempfile.TemporaryDirectory() as scratch:
+        for i in range(count):
+            b = i % len(paths)
+            replay = _Replay(paths[b], Path(scratch) / f"store-{i}")
+            sequences.append({"book": str(paths[b]), "first_id": SEQ_FIRST_ID, "steps": _sequence(rng, pools[b], replay)})
     Path(out).write_text(dumps(sequences), encoding="utf-8")
 
 
@@ -1331,8 +1466,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--agent", default="genko")
     p = sub.add_parser("upgrade")
     p.add_argument("book")
-    p = sub.add_parser("make-opsbook")
-    p.add_argument("out")
+    for name in ("make-opsbook", "make-drawbook"):
+        p = sub.add_parser(name)
+        p.add_argument("out")
     p = sub.add_parser("make-sequences")
     p.add_argument("out")
     p.add_argument("--books", required=True)
@@ -1341,6 +1477,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "make-opsbook":
         make_opsbook(args.out)
+        return 0
+    if args.cmd == "make-drawbook":
+        make_drawbook(args.out)
         return 0
     if args.cmd == "make-sequences":
         make_sequences(args.out, args.books, args.seed, args.count)

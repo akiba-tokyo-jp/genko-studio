@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <vector>
+
 #include "core/json.hpp"
 #include "core/pynum.hpp"
 
@@ -15,7 +18,20 @@ struct Point {
 struct PointF {
     double x = 0.0;
     double y = 0.0;
+
+    friend bool operator==(const PointF&, const PointF&) = default;
 };
+
+// A point of a pen line as Python passes it along: [x, y] or [x, y, pressure] (mm, floats).
+struct PenPoint {
+    double x = 0.0;
+    double y = 0.0;
+    std::optional<double> p;
+
+    friend bool operator==(const PenPoint&, const PenPoint&) = default;
+};
+
+using PenPoints = std::vector<PenPoint>;
 
 // A box on the page in mm (Python's models.Rect).
 struct Rect {

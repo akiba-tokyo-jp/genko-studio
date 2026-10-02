@@ -3,8 +3,8 @@
 #include <functional>
 #include <vector>
 
+#include "core/geometry.hpp"
 #include "core/json.hpp"
-#include "core/stroke_tools.hpp"
 
 // Rulers a pen line snaps to (Python's genko/rulers.py): snap() and symmetry_copies(), the parts the drawing ops
 // use. The rulers are the page's JSON as Python keeps it; a ruler that lacks what its kind needs fails as it does in

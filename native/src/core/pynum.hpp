@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "core/json.hpp"
 
@@ -80,6 +81,28 @@ bool operator==(const Num& a, const Num& b);
 // Python 3.12's sum(items): ints are added exactly; once a float is met, floats are added with Neumaier's
 // compensation and ints plainly, as CPython 3.12 does (the last bit of a centroid depends on it).
 Num py_sum(std::span<const Num> items);
+// sum(items) of floats (from the int 0: the first added plainly, so -0.0 becomes 0.0): py_sum of them.
+double py_float_sum(std::span<const double> items);
+
+// statistics.median of floats (core::Error("value") when there are none).
+double py_median(std::vector<double> items);
+
+// Python's min(a, b) and max(a, b) for floats: the first unless the second is smaller (larger). NaN as Python has
+// it: min(1.0, nan) is 1.0, min(nan, 1.0) is nan.
+inline double py_min(double a, double b) { return b < a ? b : a; }
+inline double py_max(double a, double b) { return b > a ? b : a; }
+// max(lo, min(hi, v))
+inline double py_clamp(double v, double lo, double hi) { return py_max(lo, py_min(hi, v)); }
+
+// Python's round(x) and int(x) for a float, as an int (round: ties to even; int: towards zero). Python's exceptions
+// (core/error.hpp): PyValueError for NaN, PyUncaught OverflowError for an infinity; and OverflowError past 64 bits,
+// where Python's int has no bound.
+std::int64_t py_round_int(double x);
+std::int64_t py_trunc_int(double x);
+// round(x) and int(x) as the whole float each is (unbounded, as Python's int: for comparing and clamping), with
+// their errors.
+double py_round_whole(double x);
+double py_trunc(double x);
 
 // The math module as CPython 3.12 computes it: hypot and dist with CPython's own correctly rounded algorithm,
 // the rest with the platform's libm called as Python calls it (never folded or merged by the compiler, so the

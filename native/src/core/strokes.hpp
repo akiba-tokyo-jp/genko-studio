@@ -30,7 +30,13 @@ std::string strokes_blob(const StrokeList& strokes);
 // core::Error("format") where Python's coerce_stroke raises.
 Stroke coerce_stroke(const Json& raw);
 
-// Python's stroke_points: [[x, y, p], …] when there is a pressure for every point, else [[x, y], …].
+// coerce_stroke of a list of points: a new stroke (new id) with these points and, when every point has one, their
+// pressure.
+Stroke coerce_stroke(const PenPoints& points);
+
+// Python's stroke_points: the points with their pressure when there is one for every point.
+PenPoints stroke_points(const Stroke& stroke);
+// The same as JSON: [[x, y, p], …] or [[x, y], …].
 Json stroke_points_json(const Stroke& stroke);
 
 }  // namespace genko::core

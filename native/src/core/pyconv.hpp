@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "core/json.hpp"
+#include "core/pynum.hpp"
 
 namespace genko::core {
 
@@ -25,6 +26,8 @@ double py_float(const Json& value);
 
 // int(x): ints, floats (truncated), booleans and decimal strings.
 std::int64_t py_int(const Json& value);
+// int(x) for a number as Python holds it (a page's number, a colour read from the book).
+std::int64_t py_int(const Num& value);
 
 // str(int(x)) when int(x) is past 64 bits (Python's ints have no bound; py_int throws for these): a float of 2**63
 // or more (its exact value), an int past 2**63 - 1, a decimal string past either end. Nothing for other values.

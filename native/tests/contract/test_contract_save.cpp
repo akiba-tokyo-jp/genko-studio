@@ -94,7 +94,8 @@ const Case kCases[] = {
                            {"op": "unlock_page", "page": 2}])", "ai:x", false},
     {"person takes an AI's lock", R"([{"op": "lock_page", "page": 1, "agent": "ai:z"}, {"op": "lock_page", "page": 1, "agent": "human:a"},
                                      {"op": "unlock_page", "page": 1}])", "genko", false},
-    {"lock a page that is not there", R"([{"op": "lock_page", "page": 7}])", "ai:x", false},
+    // (a page that is not there: refused here, where Python locks nothing; test_ops, test_command_bus)
+    {"lock a page given as text", R"([{"op": "lock_page", "page": "2"}])", "ai:x", false},
     {"set_autosave", R"([{"op": "set_autosave"}, {"op": "set_autosave", "enabled": 0}])", "genko", false},
     {"add_page after", R"([{"op": "add_page", "count": 2, "after": 1}])", "genko", false},
     {"add_page", R"([{"op": "add_page"}])", "genko", false},

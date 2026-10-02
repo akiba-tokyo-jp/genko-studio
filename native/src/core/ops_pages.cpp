@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <map>
 #include <string>
 #include <utility>
 
@@ -71,17 +70,6 @@ void duplicate_page(OpContext& c) {
         if (layer.frame_id && !layer.frame_id->empty()) {
             if (const std::string* mapped = map_get(frame_map, *layer.frame_id)) layer.frame_id = *mapped;
         }
-    }
-    // copy.deepcopy: other layers, one layer listed twice still one (Python's loop gave it a new id each time it came
-    // to it: it keeps the last)
-    std::map<std::uint64_t, std::uint64_t> identities;
-    std::map<std::uint64_t, std::string> last_ids;
-    for (const Layer& layer : clone.layers) last_ids[layer.identity] = layer.id;
-    for (Layer& layer : clone.layers) {
-        layer.id = last_ids[layer.identity];
-        const auto [it, added] = identities.emplace(layer.identity, 0);
-        if (added) it->second = new_layer_identity();
-        layer.identity = it->second;
     }
     std::vector<StoryLine> new_lines;
     for (const StoryLine& line : doc.story) {

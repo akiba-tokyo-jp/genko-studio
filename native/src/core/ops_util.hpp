@@ -35,14 +35,8 @@ std::vector<std::int64_t> rgb3(const Json& value, std::string_view what);
 // ops._blend_mode: OpError "unknown blend mode <mode>".
 std::string blend_mode(const Json& value);
 
-// tuple(int(v) for v in value) (any length; Python's errors).
-std::vector<std::int64_t> int_tuple(const Json& value);
-
 // The JSON of a list of ints.
 Json ints_json(const std::vector<std::int64_t>& values);
-
-// Python's max(lo, min(hi, v)) for floats.
-double clamp(double v, double lo, double hi);
 
 // io._layer_to_dict(layer) (with its strokes as models.stroke_to_dict): what studio.orphans keeps of a layer.
 Json layer_to_dict(const Layer& layer);

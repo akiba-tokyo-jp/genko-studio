@@ -67,12 +67,17 @@ Num max_all(const std::vector<Num>& values) {
 
 double dist(const Point& a, const Point& b) { return py_dist(a.x.value(), a.y.value(), b.x.value(), b.y.value()); }
 
-// Each corner cut back along both edges and joined by a round (frames._round_corners, with no corners kept).
-std::vector<Point> round_corners(std::span<const Point> pts, double radius) {
+}  // namespace
+
+std::vector<Point> round_corners(std::span<const Point> pts, double radius, const std::vector<bool>& keep) {
     std::vector<Point> out;
     const std::size_t n = pts.size();
     for (std::size_t i = 0; i < n; ++i) {
         const Point& p = pts[i];
+        if (i < keep.size() && keep[i]) {
+            out.push_back(p);
+            continue;
+        }
         const Point& a = pts[(i + n - 1) % n];
         const Point& b = pts[(i + 1) % n];
         const double la = dist(p, a);
@@ -112,6 +117,8 @@ std::vector<Point> round_corners(std::span<const Point> pts, double radius) {
     }
     return out;
 }
+
+namespace {
 
 // frames._norm: a point in its box's 0..1 coordinates, rounded to 6 places.
 Json norm(const Rect& rect, const Point& p) {
@@ -317,6 +324,40 @@ std::vector<Point> outline(const Frame& frame, double step_mm) {
             const double y = w0 * a.y.value() + 2 * (1 - t) * t * cy + t * t * b.y.value();
             out.push_back(Point{Num(x), Num(y)});
         }
+    }
+    return out;
+}
+
+std::vector<Point> offset(std::span<const Point> points, double d) {
+    const std::size_t n = points.size();
+    if (n < 3) return std::vector<Point>(points.begin(), points.end());
+    const double sign = signed_area(points) > 0 ? 1.0 : -1.0;
+    std::vector<Point> out;
+    for (std::size_t i = 0; i < n; ++i) {
+        const Point& p0 = points[(i + n - 1) % n];
+        const Point& p1 = points[i];
+        const Point& p2 = points[(i + 1) % n];
+        double normals[2][2];
+        const Point* ends[2][2] = {{&p0, &p1}, {&p1, &p2}};
+        for (int k = 0; k < 2; ++k) {
+            const Num dx = ends[k][1]->x - ends[k][0]->x;
+            const Num dy = ends[k][1]->y - ends[k][0]->y;
+            double length = py_hypot(dx.value(), dy.value());
+            if (length == 0.0) length = 1.0;
+            normals[k][0] = (-dy).value() / length * sign;  // (inward)
+            normals[k][1] = dx.value() / length * sign;
+        }
+        double mx = normals[0][0] + normals[1][0];
+        double my = normals[0][1] + normals[1][1];
+        const double length = py_hypot(mx, my);
+        if (length < 1e-6) {
+            out.push_back(Point{p1.x + Num(normals[0][0] * d), p1.y + Num(normals[0][1] * d)});
+            continue;
+        }
+        mx = mx / length;
+        my = my / length;
+        const double cos = std::max(0.25, mx * normals[0][0] + my * normals[0][1]);  // (a sharp corner's mitre is kept short)
+        out.push_back(Point{p1.x + Num(mx * d / cos), p1.y + Num(my * d / cos)});
     }
     return out;
 }

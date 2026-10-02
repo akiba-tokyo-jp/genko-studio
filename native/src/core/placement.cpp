@@ -1,6 +1,9 @@
 #include "core/placement.hpp"
 
 #include <cmath>
+#include <utility>
+
+#include "core/frames.hpp"
 
 namespace genko::core {
 
@@ -38,6 +41,58 @@ std::optional<std::vector<PointF>> bleed_poly(const Page& page, const Frame* fra
         out.push_back(PointF{x, y});
     }
     return out;
+}
+
+std::optional<std::vector<Point>> bleed_outline(const Page& page, const Frame* frame, std::optional<double> beyond_mm) {
+    if (frame == nullptr || !frame->bleed) return std::nullopt;
+    const Rect inner = page.inner_rect_mm();
+    Num far_left, far_top, far_right, far_bottom;
+    if (!beyond_mm) {  // (to the bleed's edge: the panel's area)
+        const Rect b = page.bleed_rect_mm();
+        far_left = b.x;
+        far_top = b.y;
+        far_right = b.x + b.width;
+        far_bottom = b.y + b.height;
+    } else {  // (past the paper: its border, so the sides off the paper draw nothing)
+        far_left = Num(-*beyond_mm);
+        far_top = Num(-*beyond_mm);
+        far_right = page.spec.width_mm + Num(*beyond_mm);
+        far_bottom = page.spec.height_mm + Num(*beyond_mm);
+    }
+    const Num eps(kEdgeEpsMm);
+    std::vector<Point> out;
+    std::vector<bool> moved;
+    for (const Point& p : shape(*frame)) {
+        Num nx = p.x;
+        Num ny = p.y;
+        if (py_abs(p.x - inner.x) < eps) {
+            nx = far_left;
+        } else if (py_abs(p.x - (inner.x + inner.width)) < eps) {
+            nx = far_right;
+        }
+        if (py_abs(p.y - inner.y) < eps) {
+            ny = far_top;
+        } else if (py_abs(p.y - (inner.y + inner.height)) < eps) {
+            ny = far_bottom;
+        }
+        moved.push_back(!(nx == p.x && ny == p.y));
+        out.push_back(Point{nx, ny});
+    }
+    const double radius = frame->corner_mm;
+    if (radius > 0) return round_corners(out, radius, moved);
+    return out;
+}
+
+bool on_bleed_edge(const Page& page, const PointF& a, const PointF& b) {
+    const Rect bleed = page.bleed_rect_mm();
+    const std::pair<Num, bool> sides[] = {{bleed.x, true}, {bleed.x + bleed.width, true}, {bleed.y, false},
+                                          {bleed.y + bleed.height, false}};
+    for (const auto& [fixed, along_x] : sides) {
+        const double ca = along_x ? a.x : a.y;
+        const double cb = along_x ? b.x : b.y;
+        if (std::fabs(ca - fixed.value()) < kEdgeEpsMm && std::fabs(cb - fixed.value()) < kEdgeEpsMm) return true;
+    }
+    return false;
 }
 
 bool in_poly(std::span<const PointF> points, double x, double y) {

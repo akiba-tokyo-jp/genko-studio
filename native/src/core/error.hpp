@@ -24,4 +24,26 @@ private:
     std::string path_;
 };
 
+// Python's exceptions where C++ does what Python does (its conversions, math and checks, core/pynum.hpp and
+// core/pyops.hpp): ValueError and TypeError, and the others by their type name (OverflowError, IndexError, …).
+class PyValueError : public Error {
+public:
+    explicit PyValueError(const std::string& message) : Error("value", message) {}
+};
+
+class PyTypeError : public Error {
+public:
+    explicit PyTypeError(const std::string& message) : Error("type", message) {}
+};
+
+// An exception Python's apply_ops lets through (its type, e.g. "IndexError", and message).
+class PyUncaught : public Error {
+public:
+    PyUncaught(std::string type, const std::string& message);
+    const std::string& type() const noexcept { return type_; }
+
+private:
+    std::string type_;
+};
+
 }  // namespace genko::core

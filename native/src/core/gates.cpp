@@ -5,21 +5,11 @@
 #include <string>
 
 #include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 
 namespace genko::core {
 
 namespace {
-
-const Json* get(const Json& object, const char* key) {
-    if (!object.is_object()) return nullptr;
-    const auto it = object.find(key);
-    return it == object.end() ? nullptr : &*it;
-}
-
-bool truthy_at(const Json& object, const char* key) {
-    const Json* v = get(object, key);
-    return v != nullptr && py_truthy(*v);
-}
 
 // A gate's value as Python compares it: a bool or an int (False == 0).
 std::int64_t as_int(const Json& value) {

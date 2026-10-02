@@ -1,7 +1,8 @@
 // render::brushes against Python's genko.brushes: every built-in brush and twenty custom ones (J3: flat and image
 // tips, spacing, scatter, patterns, speed, anti-aliasing, textures), each with and without pressure at 72, 150 and
 // 600 dpi; brushes.draw's coverage picture and its origin must be the same, every pixel. The custom brushes are
-// registered the same way on both sides (bad definitions skipped) and to_dict gives the same settings.
+// registered the same way on both sides (bad definitions skipped) and to_dict gives the same settings (the brushes
+// themselves are core/brushes.hpp's, the ops' too).
 
 #include <QtTest>
 
@@ -56,13 +57,13 @@ private slots:
         std::vector<std::string> got;
         for (const brushes::Brush& b : brushes::everything()) {
             bool builtin = false;
-            for (const brushes::Brush& o : brushes::builtin()) builtin = builtin || o.key == b.key;
+            for (const brushes::Brush& o : genko::core::builtin_brushes()) builtin = builtin || o.key == b.key;
             if (!builtin) got.push_back(b.key);
         }
         QCOMPARE(got, data_["registered"].get<std::vector<std::string>>());
         for (const auto& [key, want] : data_["to_dict"].items()) {
             std::string where;
-            QVERIFY2(genko::test::strict_equal(brushes::to_dict(brushes::brush(key)), want, &where), (key + ": " + where).c_str());
+            QVERIFY2(genko::test::strict_equal(genko::core::brush_to_dict(brushes::brush(key)), want, &where), (key + ": " + where).c_str());
         }
         QCOMPARE(brushes::brush("oil").key, std::string("marker"));
         QCOMPARE(brushes::brush("").key, std::string("gpen"));
@@ -74,7 +75,7 @@ private slots:
         int drawn = 0;
         const Json& cases = data_["cases"];
         // every brush, with and without pressure, at three resolutions
-        QCOMPARE(cases.size(), (brushes::builtin().size() + data_["registered"].size()) * 6);
+        QCOMPARE(cases.size(), (genko::core::builtin_brushes().size() + data_["registered"].size()) * 6);
         for (std::size_t i = 0; i < cases.size(); ++i) {
             const Json& c = cases[i];
             std::vector<double> rotation;

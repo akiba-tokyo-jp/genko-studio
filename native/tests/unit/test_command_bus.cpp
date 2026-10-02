@@ -218,9 +218,13 @@ private slots:
                  std::string("apply: ops[0] unlock_page: page 1 locked by human:作者; ai:x cannot unlock it ‖ unlock_page takes {page: int}"));
         const auto unlocked = apply(human.doc, R"([{"op": "unlock_page", "page": 1}])", "human:other");
         QVERIFY(!unlocked.doc.page_locks.contains(id1));
-        // the unnamed caller may lock in anyone's name; a page that is not there is not locked
+        // the unnamed caller may lock in anyone's name; a page that is not there is refused (Python locks nothing and
+        // says nothing)
         QCOMPARE(apply(doc, R"([{"op": "lock_page", "page": 2, "agent": "ai:z"}])").doc.page_locks[doc.page(1).id], Json("ai:z"));
-        QVERIFY(apply(doc, R"([{"op": "lock_page", "page": 9}])", "ai:x").doc.page_locks.empty());
+        QCOMPARE(error_of(doc, ops(R"([{"op": "lock_page", "page": 9}])"), "ai:x"),
+                 std::string("apply: ops[0] lock_page: no page 9 ‖ lock_page takes {page: int, agent: str}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "unlock_page", "page": 9}])"), "ai:x"),
+                 std::string("apply: ops[0] unlock_page: no page 9 ‖ unlock_page takes {page: int}"));
         // within one batch, later ops see the lock
         QVERIFY(error_of(doc, ops(R"([{"op": "lock_page", "page": 3}, {"op": "set_note", "page": 3}])"), "ai:x") == "(applied)");
     }

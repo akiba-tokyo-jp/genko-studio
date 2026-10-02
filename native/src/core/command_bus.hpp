@@ -103,7 +103,8 @@ std::vector<std::string> validate_document(const Document& doc);
 Json journal_op(const Json& op);
 
 // The page lock and approval checks made before each op (Python's _check_page_lock): name_ok needs a person;
-// lock_page and unlock_page take effect here.
+// lock_page and unlock_page take effect here, on a page the book has (OpError "no page N" for a number no page has,
+// where Python does nothing and says nothing).
 void check_page_lock(Document& doc, const Json& op, const Actor& actor);
 
 // The strict_gates checks made before each op of a studio book (Python's _check_strict, every rule, by the op's
@@ -113,6 +114,8 @@ void check_strict(const Document& doc, const Json& op, const Actor& actor);
 
 // for_pages as the ops it stands for (Python's bookops.expand): each op once per page, its "page" set to the page.
 // Throws OpError (Python's ApplyError) and, for values Python fails on outside its checks, PyValueError/PyTypeError.
+// "pages" is "all", "body" or a list of ints: what else Python turns into page numbers (a text of digits, floats, a
+// dict's keys) is refused with OpError "pages must be all, body or a list of page numbers".
 Json expand_for_pages(const Document& doc, const Json& op);
 
 // selops.needs_resolving: an area of a kind beyond {poly} and {mask} (rect, ellipse, layer, color, all, saved,

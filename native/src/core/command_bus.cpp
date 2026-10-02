@@ -19,23 +19,17 @@ namespace {
 
 constexpr std::string_view kSeparator = " ‖ ";  // " ‖ " (Python's _usage)
 
-const Json* find(const Json& object, std::string_view key) {
-    if (!object.is_object()) return nullptr;
-    const auto it = object.find(std::string(key));
-    return it == object.end() ? nullptr : &*it;
-}
-
 bool is_op(const Json& op, std::string_view name) {
-    const Json* value = find(op, "op");
+    const Json* value = get(op, "op");
     return value != nullptr && value->is_string() && value->get_ref<const std::string&>() == name;
 }
 
 // The op's entry in the public list (`genko schema`), when it has one.
 const Json* schema_of(const Json& op) {
-    const Json* name = find(op, "op");
+    const Json* name = get(op, "op");
     if (name == nullptr || !name->is_string()) return nullptr;
     for (const Json& entry : ops_schema()) {
-        const Json* op_name = find(entry, "op");
+        const Json* op_name = get(entry, "op");
         if (op_name != nullptr && *op_name == *name) return &entry;
     }
     return nullptr;
@@ -64,7 +58,7 @@ std::string usage(const Json& op) {
     }
     std::string out;
     if (!strange.empty()) out += std::string(kSeparator) + "unknown keys: " + join(strange, ", ");
-    out += std::string(kSeparator) + py_str(*find(op, "op")) + " takes {" + join(keys, ", ") + "}";
+    out += std::string(kSeparator) + py_str(*get(op, "op")) + " takes {" + join(keys, ", ") + "}";
     return out;
 }
 
@@ -83,7 +77,7 @@ std::vector<std::string> unknown_key_warnings(const Json& ops) {
             if (!known && !key.starts_with("_")) strange.push_back(key);
         }
         if (!strange.empty()) {
-            out.push_back("ops[" + std::to_string(i) + "] " + py_str(*find(op, "op")) +
+            out.push_back("ops[" + std::to_string(i) + "] " + py_str(*get(op, "op")) +
                           ": unknown keys ignored: " + join(strange, ", "));
         }
     }
@@ -123,7 +117,7 @@ std::optional<std::string> facing_problem(const Document& doc, const Page& a, co
 
 // Python's _op_page_index: the page an op is about (its "page", or the page of the line a line op names).
 std::optional<Num> op_page_index(const Document& doc, const Json& op) {
-    if (const Json* page = find(op, "page")) {
+    if (const Json* page = get(op, "page")) {
         try {
             return Num(py_int(*page));
         } catch (const Error&) {
@@ -132,8 +126,8 @@ std::optional<Num> op_page_index(const Document& doc, const Json& op) {
     }
     static const std::set<std::string, std::less<>> kLineOps{"edit_line", "move_line", "delete_line",
                                                               "set_balloon_path", "cut_balloon"};
-    const Json* name = find(op, "op");
-    const Json* id = find(op, "id");
+    const Json* name = get(op, "op");
+    const Json* id = get(op, "id");
     if (name != nullptr && name->is_string() && kLineOps.contains(name->get_ref<const std::string&>()) &&
         id != nullptr && py_truthy(*id)) {
         for (const StoryLine& line : doc.story) {
@@ -209,7 +203,7 @@ void read_as_touched_pages_does(const Json& ops) {
     for (std::size_t i = 0; i < ops.size(); ++i) {
         const Json& op = ops[i];
         if (!op.is_object()) return;
-        const Json* name = find(op, "op");
+        const Json* name = get(op, "op");
         if (name != nullptr && (name->is_array() || name->is_object())) {
             throw ApplyError("ops[" + std::to_string(i) + "] " + py_str(*name) + ": TypeError: unhashable type: '" +
                                  py_type_name(*name) + "'",
@@ -264,7 +258,7 @@ std::vector<std::string> OpRegistry::names() const {
 
 std::size_t require_page(const Document& doc, const Json& op) {
     std::int64_t index = 0;
-    const Json* page = find(op, "page");
+    const Json* page = get(op, "page");
     if (page != nullptr) {
         // (Python's int has no bound: a page number past 64 bits is only a page the book does not have)
         if (const auto big = py_big_int_text(*page)) throw OpError("no page " + *big);
@@ -282,22 +276,30 @@ std::size_t require_page(const Document& doc, const Json& op) {
 }
 
 void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
-    const Json* name_value = find(op, "op");
+    const Json* name_value = get(op, "op");
     const std::string name = name_value != nullptr && name_value->is_string() ? name_value->get<std::string>() : "";
     const bool named = name_value != nullptr && name_value->is_string();
     if (named && name == "name_ok" && !actor.can_approve()) {  // (GATE_OPS)
         throw OpError(name + " needs a person (actor " + actor.name() + " cannot approve)");
     }
     if (named && (name == "undo" || name == "set_meta" || name == "set_bible" || name == "set_autosave")) return;
+    // (Python takes a lock on a page the book does not have, and lets it go, without a word: refused here)
+    const bool lock_op = named && (name == "lock_page" || name == "unlock_page");
+    if (const Json* page_value = get(op, "page"); lock_op && page_value != nullptr) {
+        if (const auto big = py_big_int_text(*page_value)) throw OpError("no page " + *big);
+    }
     const auto index = op_page_index(doc, op);
     if (!index) return;
     const Page* page = first_page(doc, *index);
-    if (page == nullptr) return;
+    if (page == nullptr) {
+        if (lock_op) throw OpError("no page " + index->repr());
+        return;
+    }
     const std::string key = page->id;  // (v3: locks follow the page, not its position)
-    const Json* owner = find(doc.page_locks, key);
+    const Json* owner = get(doc.page_locks, key);
     const bool owned = owner != nullptr && py_truthy(*owner);
     if (named && name == "lock_page") {
-        const Json* agent = find(op, "agent");
+        const Json* agent = get(op, "agent");
         const std::string wanted = agent != nullptr && py_truthy(*agent) ? py_str(*agent) : actor.name();
         if (actor.name() != kLegacyActor && wanted != actor.name()) {
             throw OpError("cannot lock page " + index->repr() + " as " + wanted + " (actor is " + actor.name() + ")");
@@ -324,7 +326,7 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
 }
 
 void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
-    const Json* name_value = find(op_in, "op");
+    const Json* name_value = get(op_in, "op");
     std::string name = name_value != nullptr && name_value->is_string() ? name_value->get<std::string>() : std::string();
     const bool named = name_value != nullptr && name_value->is_string();
     const auto page_of = [&doc](const Json& op) -> const Page& { return doc.page(require_page(doc, op)); };
@@ -344,7 +346,7 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
         std::vector<Json> ids;  // set(op.get("ids") or []), or every layer's id
         const bool every = truthy_at(op_in, "all") || name == "merge_visible";
         if (!every) {
-            const Json* given = find(op_in, "ids");
+            const Json* given = get(op_in, "ids");
             if (given != nullptr && py_truthy(*given)) {
                 for (const Json& id : iterate(*given)) {
                     require_hashable(id);
@@ -404,7 +406,7 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
         }
     }
     if (named && raster_edit_op(name)) {
-        const Json* layer_value = find(op, "layer");
+        const Json* layer_value = get(op, "layer");
         const std::string layer = layer_value != nullptr && py_truthy(*layer_value) ? py_str(*layer_value)
                                   : name != "filter_raster"                        ? std::string("ink")
                                                                                    : std::string();
@@ -421,19 +423,19 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
 }
 
 Json expand_for_pages(const Document& doc, const Json& op) {
-    const Json* ops = find(op, "ops");
+    const Json* ops = get(op, "ops");
     if (ops == nullptr || !ops->is_array() || ops->empty()) throw OpError("ops is the list of ops to run on each page");
     std::vector<std::string> names;
     for (const Json& item : *ops) {
         if (!item.is_object()) continue;
-        const Json* name = find(item, "op");
+        const Json* name = get(item, "op");
         names.push_back(name != nullptr ? py_str(*name) : std::string("None"));
     }
     if (names.size() != ops->size()) throw OpError("ops is the list of ops to run on each page");
     for (const std::string& name : names) {
         if (not_per_page(name)) throw OpError(name + " cannot be repeated page by page");
     }
-    const Json* pages_value = find(op, "pages");
+    const Json* pages_value = get(op, "pages");
     const Json wanted = pages_value != nullptr && py_truthy(*pages_value) ? *pages_value : Json("body");
     std::vector<Json> indexes;
     if (wanted == Json("all") || wanted == Json("body")) {
@@ -451,6 +453,12 @@ Json expand_for_pages(const Document& doc, const Json& op) {
                 throw OpError("no page " + py_str(index));
             }
         }
+        // (Python also takes what it can turn into ints one by one: the text "12" is pages 1 and 2, a dict its keys,
+        // 2.7 page 2; refused here)
+        const bool page_numbers = wanted.is_array() && std::all_of(wanted.begin(), wanted.end(), [](const Json& v) {
+            return v.is_number_integer();
+        });
+        if (!page_numbers) throw OpError("pages must be all, body or a list of page numbers");
     }
     Json out = Json::array();
     for (const Json& index : indexes) {
@@ -609,67 +617,6 @@ void reorder_pages(Document& doc, const std::vector<Num>& order) {
     remap_page_refs(doc, mapping);
 }
 
-// --- one layer listed twice ------------------------------------------------------------------------------------------
-// Python's pages hold their layers as objects, and reorder_layers given an id twice lists the same object twice: an
-// edit of it shows in both places (until the book is saved, which writes two layers). Here they are two values with
-// the same Layer::identity, made alike again after each op as the one the op changed.
-
-namespace {
-
-// The positions of the layers listed more than once, by identity (groups of two or more).
-std::vector<std::vector<std::size_t>> listed_twice(const Page& page) {
-    std::map<std::uint64_t, std::vector<std::size_t>> at;
-    for (std::size_t n = 0; n < page.layers.size(); ++n) at[page.layers[n].identity].push_back(n);
-    std::vector<std::vector<std::size_t>> out;
-    for (auto& [identity, positions] : at) {
-        if (positions.size() > 1) out.push_back(std::move(positions));
-    }
-    return out;
-}
-
-bool lists_a_layer_twice(const Document& doc) {
-    for (const auto& page : doc.pages) {
-        std::set<std::uint64_t> seen;
-        for (const Layer& layer : page->layers) {
-            if (!seen.insert(layer.identity).second) return true;
-        }
-    }
-    return false;
-}
-
-// After an op: each group as the entry the op changed (its value before the op is in `before`, the book's pages
-// then).
-void make_alike(Document& doc, const std::vector<PagePtr>& before) {
-    const auto old_value = [&before](std::uint64_t identity) -> const Layer* {
-        for (const auto& page : before) {
-            for (const Layer& layer : page->layers) {
-                if (layer.identity == identity) return &layer;
-            }
-        }
-        return nullptr;
-    };
-    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        for (const auto& group : listed_twice(*doc.pages[i])) {
-            const auto& layers = doc.pages[i]->layers;
-            const Layer* old = old_value(layers[group.front()].identity);
-            std::size_t changed = group.front();
-            for (const std::size_t n : group) {
-                if (old != nullptr && !same_layer(layers[n], *old)) {
-                    changed = n;
-                    break;
-                }
-            }
-            const bool alike = std::all_of(group.begin(), group.end(), [&](std::size_t n) { return same_layer(layers[n], layers[changed]); });
-            if (alike) continue;
-            Page& page = doc.edit_page(i);
-            const Layer value = page.layers[changed];
-            for (const std::size_t n : group) page.layers[n] = value;
-        }
-    }
-}
-
-}  // namespace
-
 // --- CommandBus ----------------------------------------------------------------------------------------------------
 
 CommandBus::CommandBus(const OpRegistry& registry) : registry_(registry) {}
@@ -725,15 +672,12 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     for (std::size_t i = 0; i < ops.size(); ++i) {
         Json& op = ops[i];
         if (!op.is_object()) throw ApplyError("ops[" + std::to_string(i) + "] must be an object");
-        const Json* name = find(op, "op");
+        const Json* name = get(op, "op");
         const std::string name_text = name != nullptr ? py_str(*name) : std::string("None");
         const std::string prefix = "ops[" + std::to_string(i) + "] " + name_text + ": ";
-        // (a page that lists a layer twice: its pages as they were, to tell which entry the op changes)
-        std::vector<PagePtr> before;
-        if (lists_a_layer_twice(work)) before = work.pages;
         OpContext context{work, op, actor};
         try {
-            if (const Json* area = find(op, "area"); area != nullptr && area_needs_resolving(*area)) {
+            if (const Json* area = get(op, "area"); area != nullptr && area_needs_resolving(*area)) {
                 not_yet_ported("an area of this kind (rect, ellipse, layer, color, all, saved, union, intersect, "
                                "subtract, invert, grow_mm, feather_mm): the C++ areas come with M3");
             }
@@ -764,7 +708,6 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
             if (error.code() == "not_yet_ported") throw ApplyError(prefix + error.what(), "not_yet_ported");
             throw ApplyError(prefix + "a value of the wrong type (" + error.what() + ")" + usage(op));
         }
-        if (!before.empty()) make_alike(work, before);
         result.applied.push_back(name_text);
         // (Python: op.pop("_report") — what the op reported, or the key as it was given)
         std::optional<Json> report = std::move(context.report);

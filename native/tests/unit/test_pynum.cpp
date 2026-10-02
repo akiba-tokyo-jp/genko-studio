@@ -137,6 +137,34 @@ private slots:
         QVERIFY(checked >= 10);
     }
 
+    void floatSumMedianRoundInt() {
+        // Python 3.12: sum([0.1] * 10) == 1.0 (compensated); sum([1e16, 1.0, -1e16]) == 1.0; sum([-0.0]) == 0.0
+        const std::vector<double> tenths(10, 0.1);
+        QCOMPARE(genko::core::py_float_sum(tenths), 1.0);
+        const std::vector<double> big{1e16, 1.0, -1e16};
+        QCOMPARE(genko::core::py_float_sum(big), 1.0);
+        const std::vector<double> negzero{-0.0};
+        QVERIFY(!std::signbit(genko::core::py_float_sum(negzero)));
+        QCOMPARE(genko::core::py_float_sum({}), 0.0);
+        // statistics.median
+        QCOMPARE(genko::core::py_median({3.0, 1.0, 2.0}), 2.0);
+        QCOMPARE(genko::core::py_median({4.0, 1.0, 3.0, 2.0}), 2.5);
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, genko::core::py_median({}));
+        // round(x) and int(x) as ints; min/max as Python picks
+        QCOMPARE(genko::core::py_round_int(2.5), std::int64_t{2});
+        QCOMPARE(genko::core::py_round_int(3.5), std::int64_t{4});
+        QCOMPARE(genko::core::py_round_int(-2.5), std::int64_t{-2});
+        QCOMPARE(genko::core::py_trunc_int(-2.9), std::int64_t{-2});
+        QCOMPARE(genko::core::py_trunc(1e30), 1e30);
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, genko::core::py_round_int(std::nan("")));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, genko::core::py_trunc_int(HUGE_VAL));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, genko::core::py_trunc_int(1e30));
+        QCOMPARE(genko::core::py_min(1.0, std::nan("")), 1.0);
+        QVERIFY(std::isnan(genko::core::py_min(std::nan(""), 1.0)));
+        QCOMPARE(genko::core::py_clamp(std::nan(""), 0.0, 1.0), 1.0);
+        QCOMPARE(genko::core::py_clamp(-3.0, 0.0, 1.0), 0.0);
+    }
+
     void moduloAsPython() {
         QVERIFY(genko::core::py_mod(Num(-1), Num(2)).same(Num(1)));
         QVERIFY(genko::core::py_mod(Num(5), Num(-3)).same(Num(-1)));

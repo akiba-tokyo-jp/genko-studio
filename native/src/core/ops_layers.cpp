@@ -7,6 +7,7 @@
 #include <set>
 #include <utility>
 
+#include "core/filters.hpp"
 #include "core/ids.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
@@ -15,146 +16,21 @@ namespace genko::core {
 
 namespace {
 
-constexpr const char* kAdjustments[] = {"levels",    "curve",        "hue",     "invert",           "posterize",
-                                        "threshold", "gradient_map", "bitonal", "brightness_contrast"};
-
-Json value_or(const Json& object, const char* key, const Json& fallback) {
-    const Json* value = get(object, key);
-    return value != nullptr ? *value : fallback;
-}
-
-// float(params.get(key, fallback))
-double param_float(const Json& params, const char* key, const Json& fallback) { return to_float(value_or(params, key, fallback)); }
-std::int64_t param_int(const Json& params, const char* key, const Json& fallback) { return to_int(value_or(params, key, fallback)); }
-
-// `x, y = item` for two values
-std::pair<Json, Json> unpack_two(const Json& item) {
-    if (!(item.is_array() || item.is_string() || item.is_object())) {
-        throw PyTypeError("cannot unpack non-iterable " + py_type_name(item) + " object");
-    }
-    const std::vector<Json> items = iterate(item);
-    if (items.size() < 2) {
-        throw PyValueError("not enough values to unpack (expected 2, got " + std::to_string(items.size()) + ")");
-    }
-    if (items.size() > 2) throw PyValueError("too many values to unpack (expected 2)");
-    return {items[0], items[1]};
-}
-
-// The checks filters.apply_filter makes of an adjustment's settings (Python tries the adjustment on a 4×4 picture;
-// only its settings can fail there).
-void try_adjustment(const std::string& kind, const Json& params) {
-    if (kind == "levels") {
-        static const char* const kTableKeys[] = {"gamma", "out_black", "out_white", "channel"};
-        const bool table = std::any_of(std::begin(kTableKeys), std::end(kTableKeys), [&](const char* key) {
-            const Json* v = get(params, key);
-            return v != nullptr && !v->is_null();
-        });
-        if (table) {  // filters.levels_table
-            param_float(params, "black", Json(0));
-            param_float(params, "black", Json(0));
-            param_float(params, "white", Json(255));
-            param_float(params, "gamma", Json(1.0));
-            param_float(params, "out_black", Json(0));
-            param_float(params, "out_white", Json(255));
-            return;
-        }
-        param_int(params, "black", Json(0));
-        param_int(params, "white", Json(255));
-        return;
-    }
-    if (kind == "curve") {
-        const Json* points = get(params, "points");
-        if (points != nullptr && py_truthy(*points)) {  // filters.curve_table
-            std::set<double> keys;  // (int(round(x)): the rounded values, as doubles)
-            for (const Json& item : iterate(*points)) {
-                const auto [x, y] = unpack_two(item);
-                keys.insert(py_round(to_float(x), 0));
-                to_float(y);
-            }
-            if (keys.size() < 2) throw PyValueError("a tone curve needs two points or more");
-            return;
-        }
-        param_float(params, "gamma", Json(1.6));
-        return;
-    }
-    if (kind == "hue") {
-        param_float(params, "shift", Json(30));
-        param_float(params, "saturation", Json(1.0));
-        param_float(params, "value", Json(1.0));
-        return;
-    }
-    if (kind == "posterize") {
-        param_int(params, "levels", Json(4));
-        return;
-    }
-    if (kind == "threshold") {
-        param_int(params, "threshold", Json(128));
-        return;
-    }
-    if (kind == "bitonal") {
-        param_int(params, "threshold", Json(180));
-        return;
-    }
-    if (kind == "brightness_contrast") {
-        param_float(params, "brightness", Json(0));
-        param_float(params, "contrast", Json(0));
-        return;
-    }
-    if (kind == "gradient_map") {
-        const Json* stops = get(params, "stops");
-        if (stops != nullptr && py_truthy(*stops)) {
-            std::vector<std::size_t> sizes;
-            for (const Json& st : iterate(*stops)) {
-                to_float(subscript(st, 0));
-                std::size_t n = 0;
-                for (const Json& v : iterate(subscript(st, 1))) {
-                    to_int(v);
-                    ++n;
-                }
-                sizes.push_back(std::min<std::size_t>(n, 3));
-            }
-            if (sizes.size() < 2) throw PyValueError("a gradient map needs two colours or more");
-            for (const std::size_t n : sizes) {
-                if (n < 3) throw PyUncaught("IndexError", "list index out of range");
-            }
-            return;
-        }
-        const Json* colors = get(params, "colors");
-        const Json list = colors != nullptr && py_truthy(*colors) ? *colors
-                                                                  : Json::array({Json::array({0, 0, 0}), Json::array({255, 255, 255})});
-        std::vector<std::size_t> sizes;
-        for (const Json& c : iterate(list)) {
-            std::size_t n = 0;
-            for (const Json& v : iterate(c)) {
-                to_int(v);
-                ++n;
-            }
-            sizes.push_back(n);
-        }
-        if (sizes.size() < 2) throw PyValueError("a gradient map needs two colours or more");
-        for (const std::size_t n : sizes) {
-            if (n < 3) throw PyUncaught("IndexError", "tuple index out of range");
-        }
-        return;
-    }
-    // invert: nothing to check
-}
-
 // ops._adjust_spec
 Json adjust_spec(const Json& raw) {
     std::string names;
-    for (const char* name : kAdjustments) names += (names.empty() ? "" : ", ") + std::string(name);
+    for (const std::string_view name : kAdjustments) names += (names.empty() ? "" : ", ") + std::string(name);
     const Json* kind = get(raw, "kind");
     const bool known = raw.is_object() && kind != nullptr && kind->is_string() &&
-                       std::find(std::begin(kAdjustments), std::end(kAdjustments), kind->get<std::string>()) !=
-                           std::end(kAdjustments);
+                       std::find(kAdjustments.begin(), kAdjustments.end(), kind->get<std::string>()) != kAdjustments.end();
     if (!known) throw OpError("adjust kind must be one of " + names);
     Json params = Json::object();
     for (const auto& [key, value] : raw.items()) {
         if (key != "kind") params[key] = value;
     }
+    // (Python tries the adjustment once on a small picture, where only its settings can fail: its tables here)
     try {
-        try_adjustment(kind->get<std::string>(), params);
+        (void)adjustment(kind->get<std::string>(), params);
     } catch (const PyValueError& error) {
         throw OpError(std::string("the adjustment cannot be used: ") + error.what());
     } catch (const PyTypeError& error) {
@@ -202,7 +78,7 @@ Json gradient_extras(const Json& g) {
         for (auto& [position, stop] : stops) sorted.push_back(std::move(stop));
         out["stops"] = std::move(sorted);
     }
-    if (const Json* ratio = get(g, "ratio"); ratio != nullptr && !ratio->is_null()) out["ratio"] = clamp(to_float(*ratio), 0.05, 20.0);
+    if (const Json* ratio = get(g, "ratio"); ratio != nullptr && !ratio->is_null()) out["ratio"] = py_clamp(to_float(*ratio), 0.05, 20.0);
     const Json* repeat = get(g, "repeat");
     if (repeat != nullptr && !repeat->is_null() && *repeat != Json("") && *repeat != Json("none")) {
         if (*repeat != Json("repeat") && *repeat != Json("mirror")) throw OpError("repeat is none, repeat or mirror");
@@ -232,8 +108,8 @@ Json fill_spec(const Json& raw) {
         out["rgb_from"] = ints_json(rgb3(rgb_from != nullptr && py_truthy(*rgb_from) ? *rgb_from : Json::array({20, 20, 20}), "rgb_from"));
         const Json* rgb_to = get(g, "rgb_to");
         out["rgb_to"] = ints_json(rgb3(rgb_to != nullptr && py_truthy(*rgb_to) ? *rgb_to : Json::array({255, 255, 255}), "rgb_to"));
-        out["opacity_from"] = clamp(to_float(value_or(g, "opacity_from", Json(1.0))), 0.0, 1.0);
-        out["opacity_to"] = clamp(to_float(value_or(g, "opacity_to", Json(1.0))), 0.0, 1.0);
+        out["opacity_from"] = py_clamp(to_float(get_or(g, "opacity_from", Json(1.0))), 0.0, 1.0);
+        out["opacity_to"] = py_clamp(to_float(get_or(g, "opacity_to", Json(1.0))), 0.0, 1.0);
         const Json* shape = get(g, "shape");
         out["shape"] = shape != nullptr && py_truthy(*shape) ? py_str(*shape) : std::string("linear");
         const Json extras = gradient_extras(g);
@@ -255,15 +131,15 @@ Json effect_spec(const Json& raw) {
         if (key == "border" && py_truthy(item)) {
             const Json value = item.is_object() ? item : Json::object();
             Json border = Json::object();
-            border["width_mm"] = clamp(to_float(value_or(value, "width_mm", Json(0.5))), 0.05, 10.0);
+            border["width_mm"] = py_clamp(to_float(get_or(value, "width_mm", Json(0.5))), 0.05, 10.0);
             const Json* rgb = get(value, "rgb");
             border["rgb"] = ints_json(rgb3(rgb != nullptr && py_truthy(*rgb) ? *rgb : Json::array({255, 255, 255}), "rgb"));
             out["border"] = std::move(border);
         } else if (key == "water_edge" && py_truthy(item)) {
             const Json value = item.is_object() ? item : Json::object();
             Json edge = Json::object();
-            edge["width_mm"] = clamp(to_float(value_or(value, "width_mm", Json(0.6))), 0.05, 10.0);
-            edge["strength"] = clamp(to_float(value_or(value, "strength", Json(0.6))), 0.0, 1.0);
+            edge["width_mm"] = py_clamp(to_float(get_or(value, "width_mm", Json(0.6))), 0.05, 10.0);
+            edge["strength"] = py_clamp(to_float(get_or(value, "strength", Json(0.6))), 0.0, 1.0);
             out["water_edge"] = std::move(edge);
         } else if (key != "border" && key != "water_edge") {
             throw OpError("unknown effect " + key + " (border, water_edge)");
@@ -280,7 +156,7 @@ Json screen_spec(const Json& raw) {
     if (pattern != "dot" && pattern != "line" && pattern != "cross" && pattern != "noise") {
         throw OpError("screen pattern must be dot, line, cross or noise");
     }
-    const double lpi = to_float(value_or(raw, "lpi", Json(60)));
+    const double lpi = to_float(get_or(raw, "lpi", Json(60)));
     if (!(10 <= lpi && lpi <= 150)) throw OpError("lpi must be between 10 and 150");
     const Json* shape_value = get(raw, "shape");
     const std::string shape = shape_value != nullptr && py_truthy(*shape_value) ? py_str(*shape_value) : "round";
@@ -290,9 +166,9 @@ Json screen_spec(const Json& raw) {
     Json spec = Json::object();
     spec["pattern"] = pattern;
     spec["lpi"] = lpi;
-    spec["angle"] = py_fmod(to_float(value_or(raw, "angle", Json(45))), 180);
-    spec["black"] = clamp(to_float(value_or(raw, "black", Json(0.1))), 0.0, 0.9);
-    spec["white"] = clamp(to_float(value_or(raw, "white", Json(0.95))), 0.1, 1.0);
+    spec["angle"] = py_fmod(to_float(get_or(raw, "angle", Json(45))), 180);
+    spec["black"] = py_clamp(to_float(get_or(raw, "black", Json(0.1))), 0.0, 0.9);
+    spec["white"] = py_clamp(to_float(get_or(raw, "white", Json(0.95))), 0.1, 1.0);
     if (shape != "round") spec["shape"] = shape;
     if (truthy_at(raw, "offset_mm")) {
         Json offset = Json::array();
@@ -308,6 +184,28 @@ Json screen_spec(const Json& raw) {
         spec["offset_mm"] = std::move(two);
     }
     return spec;
+}
+
+// The parent a layer may be put in: a folder layer of the page (layerops.move_layers' rule). Python's set_layer and
+// add_layer keep any value, so a layer could be in what is not a folder, or a folder in itself (the layer panel's
+// walk up the folders then never ends): refused here.
+void check_parent(const Page& page, const std::string& parent_id, const std::string* moved_id) {
+    const auto by_id = [&page](const std::string& id) -> const Layer* {
+        const Layer* found = nullptr;
+        for (const Layer& layer : page.layers) {
+            if (layer.id == id) found = &layer;  // (a dict: the last layer with the id)
+        }
+        return found;
+    };
+    const Layer* folder = by_id(parent_id);
+    if (folder == nullptr || folder->kind != LayerKind::Folder) throw OpError("parent must be a folder");
+    if (moved_id == nullptr) return;
+    // the folder, and every folder it is in, must not be the layer moved (layerops._inside)
+    std::set<std::string> seen;
+    for (const Layer* up = folder; up != nullptr && seen.insert(up->id).second;) {
+        if (up->id == *moved_id) throw OpError("a folder cannot hold itself");
+        up = up->parent_id.is_string() ? by_id(up->parent_id.get<std::string>()) : nullptr;
+    }
 }
 
 // set_layer on the book (also each layer of set_layers).
@@ -339,7 +237,14 @@ void set_layer_with(Document& doc, const Json& op) {
     if (has(op, "panel_clip")) layer.panel_clip = py_truthy(op["panel_clip"]);
     if (has(op, "panel_each")) layer.panel_each = py_truthy(op["panel_each"]);
     if (has(op, "title")) layer.title = py_truthy(op["title"]) ? py_str(op["title"]) : "";
-    if (has(op, "parent")) layer.parent_id = op["parent"];
+    if (has(op, "parent")) {
+        const Json& parent = op["parent"];
+        if (!parent.is_null()) {
+            if (!parent.is_string()) throw OpError("parent must be a folder");
+            check_parent(page, parent.get<std::string>(), &layer.id);
+        }
+        layer.parent_id = parent;
+    }
     if (has(op, "name")) layer.title = py_str(op["name"]);
     if (has(op, "color")) {
         if (py_truthy(op["color"])) {
@@ -420,6 +325,7 @@ void add_layer(OpContext& c) {
     for (const Layer& item : page.layers) {
         if (item.id == layer.id) throw OpError("layer " + layer.id + " exists");
     }
+    if (layer.parent_id.is_string()) check_parent(page, layer.parent_id.get<std::string>(), nullptr);
     std::size_t index = page.layers.size();
     if (truthy_at(op, "after")) {
         const Json& after = op["after"];
@@ -455,7 +361,6 @@ void duplicate_layer(OpContext& c) {
     const Layer& source = page.layers[source_at];
     if (source.kind == LayerKind::Folder) throw OpError("a folder cannot be duplicated");
     Layer twin = source;
-    twin.identity = new_layer_identity();  // (copy.deepcopy: another layer)
     twin.id = truthy_at(c.op, "new_id") ? py_str(c.op["new_id"]) : new_id();
     for (const Layer& item : page.layers) {
         if (item.id == twin.id) throw OpError("layer " + twin.id + " exists");
@@ -549,20 +454,32 @@ void reorder_layers(OpContext& c) {
     const Json* order_value = get(c.op, "order");
     const Json order = order_value != nullptr && py_truthy(*order_value) ? *order_value : Json::array();
     const std::vector<Json> items = iterate(order);
-    Page& page = doc.edit_page(at);
-    const auto by_id = [&page](const std::string& id) -> const Layer* {
-        const Layer* found = nullptr;
-        for (const Layer& layer : page.layers) {
-            if (layer.id == id) found = &layer;  // (a dict: the last layer with the id)
+    for (const Json& item : items) require_hashable(item);  // (Python looks each up in a dict of the layers)
+    // Python lists a layer given twice as the one object in two places (an edit of one shows in the other) and drops
+    // the layers not given (and so loses them, and with an empty order every layer): refused here. The order is the
+    // page's layers, each once.
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        for (std::size_t j = 0; j < i; ++j) {
+            if (py_equals(items[i], items[j])) throw OpError("ids must not repeat");
         }
-        return found;
-    };
-    std::vector<Layer> layers;
-    for (const Json& item : items) {
-        require_hashable(item);
-        if (!item.is_string()) continue;
-        if (const Layer* layer = by_id(item.get_ref<const std::string&>())) layers.push_back(*layer);
     }
+    const std::vector<Layer>& now = doc.page(at).layers;
+    std::vector<std::size_t> positions;
+    for (const Json& item : items) {
+        std::vector<std::size_t> found;
+        for (std::size_t i = 0; i < now.size(); ++i) {
+            if (item.is_string() && now[i].id == item.get_ref<const std::string&>()) found.push_back(i);
+        }
+        if (found.size() != 1) break;  // (unknown, or not one layer: a page with two layers of one id)
+        positions.push_back(found.front());
+    }
+    if (positions.size() != items.size() || positions.size() != now.size()) {
+        throw OpError("order must list every layer of the page once");
+    }
+    Page& page = doc.edit_page(at);
+    std::vector<Layer> layers;
+    layers.reserve(positions.size());
+    for (const std::size_t i : positions) layers.push_back(std::move(page.layers[i]));
     page.layers = std::move(layers);
 }
 

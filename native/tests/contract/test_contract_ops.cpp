@@ -7,7 +7,9 @@
 //      "cpp": "not_yet_ported" is a part of an op this build refuses on purpose (the pixels of a paint layer, the colour
 //      mixing under a line): C++ must refuse it with not_yet_ported.
 //   2. random op sequences (300, made by `pyref_harness.py make-sequences` with a fixed seed: 1 to 12 ops each, with
-//      for_pages, strict_gates, page locks and other actors) on 20 random books: each step the same as Python's.
+//      for_pages, strict_gates, page locks and other actors) on 20 random books: each step the same as Python's. (The
+//      sequences do not ask for what this build refuses where Python breaks the book: a reorder_layers names the layers
+//      its page has when it runs. Should the ops before an op still make it one, the books go apart there: listed.)
 //   4. saved and read back: the book after each successful fixed case, saved by storage::Saver and read again, has
 //      the same full snapshot and payload as before the save (but for what Python does not keep either: the frame
 //      selected, the layers of a page that has none, int margins) and as Python's book saved by save_episode and read
@@ -60,6 +62,19 @@ const char* const kOps[] = {"split_frame", "cut_frame",   "move_gutter",    "mer
                             "set_meta",    "set_autosave", "add_stroke",    "delete_stroke", "edit_stroke", "simplify_stroke",
                             "erase",       "erase_raster", "add_layer",     "delete_layer", "duplicate_layer", "set_layer",
                             "set_layers",  "reorder_layers", "set_brush"};
+
+// An op this build refuses where Python goes on and breaks the book (a layer listed twice or lost, a lock on no page,
+// a selection or a parent that is not there, page numbers read from a text): test_ops checks each.
+bool refused_where_python_breaks(const genko::test::StepOutcome& cpp) {
+    if (cpp.code != "apply") return false;
+    const std::string error = cpp.reply.value("error", std::string());
+    for (const char* words : {": ids must not repeat", ": order must list every layer of the page once", "lock_page: no page ",
+                              "unlock_page: no page ", "select_frame: no frame ", ": parent must be a folder",
+                              ": a folder cannot hold itself", "for_pages: pages must be all, body or a list of page numbers"}) {
+        if (error.find(words) != std::string::npos) return true;
+    }
+    return false;
+}
 
 }  // namespace
 
@@ -212,9 +227,10 @@ private slots:
         QCOMPARE(python.size(), sequences.size());
 
         std::map<std::string, genko::core::Document> loaded;  // (each book read once)
-        int steps = 0, ops = 0, stopped = 0, failed_steps = 0;
+        int steps = 0, ops = 0, stopped = 0, refused = 0, refused_earlier = 0, failed_steps = 0;
         std::set<std::string> books_used;
         std::vector<std::pair<std::size_t, std::string>> differ;
+        std::vector<std::string> refusals;  // (where this build refuses what Python goes on with)
         for (std::size_t n = 0; n < sequences.size(); ++n) {
             const std::string book = sequences[n]["book"].get<std::string>();
             books_used.insert(book);
@@ -233,7 +249,24 @@ private slots:
                     ++stopped;
                     break;
                 }
-                const std::string diff = genko::test::compare_step(outcomes[s], record);
+                // a refusal of this build where Python goes on (the ops before made it one): apart from here too; where
+                // Python's batch fails at a later op, both books are as they were (only the books are compared)
+                std::string diff;
+                if (refused_where_python_breaks(outcomes[s])) {
+                    refusals.push_back("sequence " + std::to_string(n) + " step " + std::to_string(s) + ": " +
+                                       outcomes[s].reply.value("error", std::string()).substr(0, 200) +
+                                       (record["reply"]["ok"] == Json(true) ? " (Python: applied)" : " (Python: refused later)"));
+                    if (record["reply"]["ok"] == Json(true)) {
+                        ++refused;
+                        break;
+                    }
+                    std::string where;
+                    if (!genko::test::strict_equal(outcomes[s].full, record["full"], &where)) diff = "full snapshot: " + where;
+                    if (!genko::test::strict_equal(outcomes[s].payload, record["payload"], &where)) diff = "payload: " + where;
+                    ++refused_earlier;
+                } else {
+                    diff = genko::test::compare_step(outcomes[s], record);
+                }
                 if (!diff.empty()) {
                     differ.emplace_back(n, "step " + std::to_string(s) + ": " + diff.substr(0, 800));
                     break;
@@ -264,12 +297,15 @@ private slots:
             differ[k].second += " | " + detail;
         }
         for (const auto& [n, why] : differ) qWarning("sequence %zu: %s", n, why.c_str());
+        for (const std::string& refusal : refusals) qInfo("refused here, where Python breaks the book: %s", refusal.c_str());
         QVERIFY2(differ.empty(), (std::to_string(differ.size()) + " of 300 sequences differ from Python").c_str());
         QCOMPARE(books_used.size(), std::size_t{20});
         qInfo("%d steps (%d ops, %d of the steps refused by both) the same as Python; %d sequences stopped at a part not "
-              "ported yet",
-              steps, ops, failed_steps, stopped);
+              "ported yet, %d at a refusal of this build where Python breaks the book (and %d steps refused by both, here "
+              "at an earlier op of the batch: the books compared)",
+              steps, ops, failed_steps, stopped, refused, refused_earlier);
         QVERIFY2(stopped <= 30, "too many sequences stop at a part not ported yet: the sequences test too little");
+        QVERIFY2(refused <= 30, "too many sequences stop at a refusal of this build: the sequences test too little");
     }
 
     // 4. Each successful fixed case's book saved by storage::Saver as a new book and read back is the book before the

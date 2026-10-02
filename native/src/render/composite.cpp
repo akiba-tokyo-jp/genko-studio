@@ -1,5 +1,6 @@
 // How layers come together (Python's genko/render.py _blend_over, _blend_math, _nonseparable, fill_layer_image,
-// gradient_*, layer_effects, _adjusted, _has_colour; genko/filters.py's colour adjustments). The parts Python does with
+// gradient_*, layer_effects, _adjusted, _has_colour; genko/filters.py's colour adjustments laid on the picture, their
+// tables made by core/filters.hpp). The parts Python does with
 // numpy are loops here, with numpy's types (float32 for the blend modes, float64 for the gradients) and its order of
 // operations, so the pixels are the same.
 
@@ -11,8 +12,10 @@
 #include <tuple>
 
 #include "core/error.hpp"
+#include "core/filters.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
+#include "core/pyops.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
 
@@ -20,30 +23,17 @@ namespace genko::render::detail {
 
 namespace {
 
+using core::get;
 using core::Json;
-
-double pmin(double a, double b) { return b < a ? b : a; }
-double pmax(double a, double b) { return b > a ? b : a; }
+using core::py_max;
+using core::py_min;
 
 // libm's hypot (numpy's np.hypot), called through a pointer the compiler cannot replace
 double (*volatile g_hypot)(double, double) = [](double a, double b) { return std::hypot(a, b); };
 
-// Python's round(x) → int, ties to even
-int py_round_i(double x) {
-    if (!std::isfinite(x)) throw core::Error("value", "cannot convert float to integer");
-    return static_cast<int>(std::nearbyint(x));
-}
-
-int py_int_trunc(double x) {
-    if (!std::isfinite(x)) throw core::Error("value", "cannot convert float to integer");
-    return static_cast<int>(std::trunc(x));
-}
-
-const Json* get(const Json& object, std::string_view key) {
-    if (!object.is_object()) return nullptr;
-    const auto it = object.find(key);
-    return it == object.end() ? nullptr : &*it;
-}
+// round(x) and int(x) for a value of a pixel or a table
+int py_round_i(double x) { return static_cast<int>(core::py_round_int(x)); }
+int py_int_trunc(double x) { return static_cast<int>(core::py_trunc_int(x)); }
 
 // spec.get(key, fallback) as float(…)
 double number(const Json& spec, std::string_view key, double fallback) {
@@ -53,39 +43,6 @@ double number(const Json& spec, std::string_view key, double fallback) {
 
 // a numpy uint8 from a float in 0..255 (astype("uint8") truncates)
 unsigned char to_u8(double v) { return static_cast<unsigned char>(static_cast<int>(v)); }
-
-// --- numpy.interp -------------------------------------------------------------------------------------------------
-
-struct Interp {
-    std::vector<double> xp;
-    std::vector<double> fp;
-    std::vector<double> slopes;
-
-    Interp(std::vector<double> x, std::vector<double> f) : xp(std::move(x)), fp(std::move(f)) {
-        if (xp.empty()) throw core::Error("value", "array of sample points is empty");
-        if (xp.size() != fp.size()) throw core::Error("value", "fp and xp are not of the same length.");
-        for (std::size_t i = 0; i + 1 < xp.size(); ++i) slopes.push_back((fp[i + 1] - fp[i]) / (xp[i + 1] - xp[i]));
-    }
-
-    double operator()(double x) const {
-        const std::size_t n = xp.size();
-        if (n == 1) return x < xp[0] ? fp[0] : (x > xp[0] ? fp[0] : fp[0]);
-        if (std::isnan(x)) return x;
-        // the last sample point at or before x (sorted points)
-        if (x > xp[n - 1]) return fp[n - 1];
-        if (x < xp[0]) return fp[0];
-        const std::size_t j = static_cast<std::size_t>(std::upper_bound(xp.begin(), xp.end(), x) - xp.begin()) - 1;
-        if (j == n - 1) return fp[j];
-        if (xp[j] == x) return fp[j];
-        const double slope = slopes[j];
-        double res = slope * (x - xp[j]) + fp[j];
-        if (std::isnan(res)) {
-            res = slope * (x - xp[j + 1]) + fp[j + 1];
-            if (std::isnan(res) && fp[j] == fp[j + 1]) res = fp[j];
-        }
-        return res;
-    }
-};
 
 // --- gradients ------------------------------------------------------------------------------------------------------
 
@@ -102,22 +59,22 @@ std::vector<Stop> gradient_stops(const Json& spec) {
     if (raw != nullptr && core::py_truthy(*raw)) {
         for (const Json& stop : core::py_list(*raw)) {
             const double pos = core::py_float(stop.at(0));
-            std::vector<std::int64_t> rgb = json_ints(stop.at(1));
+            std::vector<std::int64_t> rgb = core::int_tuple(stop.at(1));
             if (rgb.size() > 3) rgb.resize(3);
             const double opacity = stop.size() > 2 && !stop[2].is_null() ? core::py_float(stop[2]) : 1.0;
-            out.push_back(Stop{pmax(0.0, pmin(1.0, pos)), rgb, pmax(0.0, pmin(1.0, opacity))});
+            out.push_back(Stop{py_max(0.0, py_min(1.0, pos)), rgb, py_max(0.0, py_min(1.0, opacity))});
         }
         std::stable_sort(out.begin(), out.end(), [](const Stop& a, const Stop& b) { return a.pos < b.pos; });
         return out;
     }
     const auto ends = [&](std::string_view key, std::vector<std::int64_t> fallback) {
         const Json* v = get(spec, key);
-        std::vector<std::int64_t> rgb = (v != nullptr && core::py_truthy(*v)) ? json_ints(*v) : std::move(fallback);
+        std::vector<std::int64_t> rgb = (v != nullptr && core::py_truthy(*v)) ? core::int_tuple(*v) : std::move(fallback);
         if (rgb.size() > 3) rgb.resize(3);
         return rgb;
     };
-    out.push_back(Stop{0.0, ends("rgb_from", {20, 20, 20}), pmax(0.0, pmin(1.0, number(spec, "opacity_from", 1.0)))});
-    out.push_back(Stop{1.0, ends("rgb_to", {255, 255, 255}), pmax(0.0, pmin(1.0, number(spec, "opacity_to", 1.0)))});
+    out.push_back(Stop{0.0, ends("rgb_from", {20, 20, 20}), py_max(0.0, py_min(1.0, number(spec, "opacity_from", 1.0)))});
+    out.push_back(Stop{1.0, ends("rgb_to", {255, 255, 255}), py_max(0.0, py_min(1.0, number(spec, "opacity_to", 1.0)))});
     return out;
 }
 
@@ -153,7 +110,7 @@ struct GradientT {
         if (shape_id == Shape::Ellipse) {
             ux = (tx - fx) / length;
             uy = (ty - fy) / length;
-            ratio = pmax(0.05, number(spec, "ratio", 0.5));
+            ratio = py_max(0.05, number(spec, "ratio", 0.5));
         }
     }
 
@@ -183,7 +140,7 @@ Image gradient_image(Size size, int dpi, const Json& spec, const Box& area) {
     const std::vector<Stop> stops = gradient_stops(spec);
     std::vector<double> pos;
     for (const Stop& s : stops) pos.push_back(s.pos);
-    std::vector<Interp> colour;
+    std::vector<core::NumpyInterp> colour;
     for (std::size_t c = 0; c < 3; ++c) {
         std::vector<double> fp;
         for (const Stop& s : stops) {
@@ -194,7 +151,7 @@ Image gradient_image(Size size, int dpi, const Json& spec, const Box& area) {
     }
     std::vector<double> alpha_fp;
     for (const Stop& s : stops) alpha_fp.push_back(s.opacity);
-    const Interp alpha(pos, alpha_fp);
+    const core::NumpyInterp alpha(pos, alpha_fp);
     const int w = area.width();
     const int h = area.height();
     std::string data(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4, '\0');
@@ -339,35 +296,10 @@ Image blend_math(const Image& base, const Image& over, std::string_view mode_nam
     return Image::frombytes("RGB", base.size(), out);
 }
 
-// --- filters.py: the colour adjustments ----------------------------------------------------------------------------
+// --- filters.py: the colour adjustments (their settings and tables: core/filters.hpp) -------------------------------
 
-constexpr const char* kAdjustments[] = {"levels", "curve", "hue", "invert", "posterize", "threshold", "gradient_map",
-                                        "bitonal", "brightness_contrast"};
 constexpr const char* kOtherFilters[] = {"blur", "sharpen", "mosaic", "motion_blur", "radial_blur", "zoom_blur", "noise",
                                          "wave", "twirl", "lineart", "despeckle", "glow", "rain"};
-
-// A ValueError of filters.py: the correction layer leaves the picture as it is.
-struct FilterValueError {
-    std::string message;
-};
-
-double fnum(const Json& params, std::string_view key, double fallback) {
-    try {
-        return number(params, key, fallback);
-    } catch (const core::Error& e) {
-        throw FilterValueError{e.what()};
-    }
-}
-
-std::int64_t inum(const Json& params, std::string_view key, std::int64_t fallback) {
-    const Json* v = get(params, key);
-    if (v == nullptr) return fallback;
-    try {
-        return core::py_int(*v);
-    } catch (const core::Error& e) {
-        throw FilterValueError{e.what()};
-    }
-}
 
 Image keep_alpha(const Image& rgb, const Image& source) {
     Image out = rgb.convert("RGBA");
@@ -375,137 +307,12 @@ Image keep_alpha(const Image& rgb, const Image& source) {
     return out;
 }
 
-std::vector<int> tripled(const std::vector<int>& table) {
-    std::vector<int> out;
-    for (int k = 0; k < 3; ++k) out.insert(out.end(), table.begin(), table.end());
-    return out;
-}
-
-Image by_channel(const Image& rgba, const std::vector<int>& table, std::string channel) {
-    if (channel != "rgb" && channel != "r" && channel != "g" && channel != "b") channel = "rgb";
-    const Image rgb = rgba.convert("RGB");
-    if (channel == "rgb") return keep_alpha(rgb.point(tripled(table)), rgba);
-    std::vector<int> lut;
-    for (const char* name : {"r", "g", "b"}) {
-        if (channel == name) {
-            lut.insert(lut.end(), table.begin(), table.end());
-        } else {
-            for (int i = 0; i < 256; ++i) lut.push_back(i);
-        }
-    }
-    return keep_alpha(rgb.point(lut), rgba);
-}
-
-std::string channel_of(const Json& params) {
-    const Json* v = get(params, "channel");
-    return (v != nullptr && core::py_truthy(*v)) ? core::py_str(*v) : std::string("rgb");
-}
-
-std::vector<int> curve_table(const Json& points_json) {
-    // {int(round(float(x))): float(y) for x, y in points}: later points win, then sorted by x
-    std::vector<std::pair<std::int64_t, double>> pts;
-    for (const Json& p : core::py_list(points_json)) {
-        const Json pair = core::py_list(p);
-        if (pair.size() != 2) throw FilterValueError{"too many values to unpack"};
-        const std::int64_t x = static_cast<std::int64_t>(std::nearbyint(core::py_float(pair[0])));
-        const double y = core::py_float(pair[1]);
-        bool found = false;
-        for (auto& item : pts) {
-            if (item.first == x) {
-                item.second = y;
-                found = true;
-            }
-        }
-        if (!found) pts.emplace_back(x, y);
-    }
-    std::stable_sort(pts.begin(), pts.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    if (pts.size() < 2) throw FilterValueError{"a tone curve needs two points or more"};
-    std::vector<double> xs;
-    std::vector<double> ys;
-    for (const auto& [x, y] : pts) {
-        xs.push_back(static_cast<double>(x));
-        ys.push_back(pmax(0.0, pmin(255.0, y)));
-    }
-    const std::size_t n = xs.size();
-    std::vector<double> d;
-    for (std::size_t k = 0; k + 1 < n; ++k) d.push_back((ys[k + 1] - ys[k]) / pmax(1e-9, xs[k + 1] - xs[k]));
-    std::vector<double> m{d[0]};
-    for (std::size_t k = 1; k + 1 < n; ++k) m.push_back(d[k - 1] * d[k] <= 0 ? 0.0 : (d[k - 1] + d[k]) / 2);
-    m.push_back(d.back());
-    for (std::size_t k = 0; k + 1 < n; ++k) {
-        if (d[k] == 0) {
-            m[k] = m[k + 1] = 0.0;
-            continue;
-        }
-        const double a = m[k] / d[k];
-        const double b = m[k + 1] / d[k];
-        if (a * a + b * b > 9) {
-            const double t = 3 / std::sqrt(a * a + b * b);
-            m[k] = t * a * d[k];
-            m[k + 1] = t * b * d[k];
-        }
-    }
-    std::vector<int> table;
-    for (int i = 0; i < 256; ++i) {
-        if (i <= xs[0]) {
-            table.push_back(py_round_i(ys[0]));
-            continue;
-        }
-        if (i >= xs.back()) {
-            table.push_back(py_round_i(ys.back()));
-            continue;
-        }
-        std::size_t k = 0;
-        while (!(xs[k] <= i && i <= xs[k + 1])) ++k;
-        const double h = xs[k + 1] - xs[k];
-        const double t = (i - xs[k]) / h;
-        const double t3 = core::py_pow(t, 3.0);
-        const double t2 = core::py_pow(t, 2.0);
-        const double h00 = 2 * t3 - 3 * t2 + 1;
-        const double h10 = core::py_pow(t, 3.0) - 2 * core::py_pow(t, 2.0) + t;
-        const double h01 = -2 * core::py_pow(t, 3.0) + 3 * core::py_pow(t, 2.0);
-        const double h11 = core::py_pow(t, 3.0) - core::py_pow(t, 2.0);
-        const double value = h00 * ys[k] + h10 * h * m[k] + h01 * ys[k + 1] + h11 * h * m[k + 1];
-        table.push_back(std::max(0, std::min(255, py_round_i(value))));
-    }
-    return table;
-}
-
-std::vector<int> levels_table(double black, double white, double gamma, double out_black, double out_white) {
-    white = pmax(black + 1, white);
-    gamma = pmax(0.1, pmin(9.99, gamma));
-    std::vector<int> table;
-    for (int p = 0; p < 256; ++p) {
-        double t = pmin(1.0, pmax(0.0, (p - black) / (white - black)));
-        t = core::py_pow(t, 1 / gamma);
-        table.push_back(std::max(0, std::min(255, py_round_i(out_black + t * (out_white - out_black)))));
-    }
-    return table;
-}
-
-std::vector<int> brightness_contrast_table(double brightness, double contrast) {
-    const double b = pmax(-100.0, pmin(100.0, brightness)) * 1.275;
-    const double c = pmax(-100.0, pmin(100.0, contrast));
-    const double k = c <= 0 ? 1 + c / 100 : 1 / pmax(0.01, 1 - c / 100 * 0.99);
-    std::vector<int> table;
-    for (int p = 0; p < 256; ++p) table.push_back(std::max(0, std::min(255, py_round_i((p - 127.5) * k + 127.5 + b))));
-    return table;
-}
-
-// numpy.linspace(0, 1, 256)
-std::vector<double> linspace01() {
-    std::vector<double> out(256);
-    const double step = 1.0 / 255;
-    for (int i = 0; i < 256; ++i) out[static_cast<std::size_t>(i)] = static_cast<double>(i) * step + 0.0;
-    out[255] = 1.0;
-    return out;
-}
-
-// filters.apply_filter for the colour adjustments; other filters are not drawn yet.
+// filters.apply_filter for the colour adjustments; other filters are not drawn yet. Python's exceptions as they are
+// (core::PyValueError: the ValueError _adjusted catches).
 Image apply_filter(const Ctx& ctx, const Image& image, const std::string& kind, const Json& params, bool* skipped) {
     *skipped = false;
     const Image rgba = image.convert("RGBA");
-    const bool known = std::find(std::begin(kAdjustments), std::end(kAdjustments), kind) != std::end(kAdjustments);
+    const bool known = std::find(core::kAdjustments.begin(), core::kAdjustments.end(), kind) != core::kAdjustments.end();
     if (!known) {
         const bool other = kind.starts_with("plugin:") ||
                            std::find(std::begin(kOtherFilters), std::end(kOtherFilters), kind) != std::end(kOtherFilters);
@@ -515,134 +322,27 @@ Image apply_filter(const Ctx& ctx, const Image& image, const std::string& kind, 
                 return rgba;
             }
         }
-        throw FilterValueError{"unknown filter " + kind};
+        throw core::PyValueError("unknown filter " + kind);
     }
-    if (kind == "hue") {
-        const std::int64_t shift_raw = static_cast<std::int64_t>(std::trunc(fnum(params, "shift", 30)));
-        const std::int64_t shift = ((shift_raw % 360) + 360) % 360;
-        const double sat = pmax(0.0, fnum(params, "saturation", 1.0));
-        const double val = pmax(0.0, fnum(params, "value", 1.0));
-        const std::vector<Image> hsv = rgba.convert("RGB").convert("HSV").split();
-        const int turn = py_round_i(static_cast<double>(shift) * 255 / 360);
-        const Image h = hsv[0].point([&](int p) { return (p + turn) % 256; });
-        const Image s = hsv[1].point([&](int p) { return std::min(255, py_round_i(p * sat)); });
-        const Image v = hsv[2].point([&](int p) { return std::min(255, py_round_i(p * val)); });
-        return keep_alpha(Image::merge("HSV", {h, s, v}).convert("RGB"), rgba);
-    }
-    if (kind == "brightness_contrast") {
-        return by_channel(rgba, brightness_contrast_table(fnum(params, "brightness", 0), fnum(params, "contrast", 0)),
-                          channel_of(params));
-    }
-    if (kind == "levels") {
-        bool extended = false;
-        for (const char* key : {"gamma", "out_black", "out_white", "channel"}) {
-            const Json* v = get(params, key);
-            extended = extended || (v != nullptr && !v->is_null());
+    const core::Adjustment adjustment = core::adjustment(kind, params);
+    const auto& [first, second, third] = adjustment.tables;
+    switch (adjustment.way) {
+        case core::Adjustment::Way::Hsv: {
+            const std::vector<Image> hsv = rgba.convert("RGB").convert("HSV").split();
+            return keep_alpha(Image::merge("HSV", {hsv[0].point(first), hsv[1].point(second), hsv[2].point(third)}).convert("RGB"),
+                              rgba);
         }
-        if (extended) {
-            return by_channel(rgba,
-                              levels_table(fnum(params, "black", 0), fnum(params, "white", 255), fnum(params, "gamma", 1.0),
-                                           fnum(params, "out_black", 0), fnum(params, "out_white", 255)),
-                              channel_of(params));
+        case core::Adjustment::Way::Grey: {
+            const Image grey = rgba.convert("L");  // (ImageOps.grayscale)
+            if (first == second && second == third) return keep_alpha(grey.point(first).convert("RGB"), rgba);
+            return keep_alpha(Image::merge("RGB", {grey.point(first), grey.point(second), grey.point(third)}), rgba);
         }
-        const std::int64_t black = inum(params, "black", 0);
-        const std::int64_t white = inum(params, "white", 255);
-        const std::int64_t span = std::max<std::int64_t>(1, white - black);
-        std::vector<int> table;
-        for (int p = 0; p < 256; ++p) {
-            if (p <= black) {
-                table.push_back(0);
-            } else if (p >= white) {
-                table.push_back(255);
-            } else {
-                table.push_back(py_round_i(static_cast<double>((p - black) * 255) / static_cast<double>(span)));
-            }
-        }
-        return keep_alpha(rgba.convert("RGB").point(tripled(table)), rgba);
+        case core::Adjustment::Way::Rgb: break;
     }
-    if (kind == "curve") {
-        const Json* points = get(params, "points");
-        if (points != nullptr && core::py_truthy(*points)) {
-            try {
-                return by_channel(rgba, curve_table(*points), channel_of(params));
-            } catch (const core::Error& e) {
-                throw FilterValueError{e.what()};
-            }
-        }
-        const double gamma = pmax(0.2, pmin(5.0, fnum(params, "gamma", 1.6)));
-        std::vector<int> table;
-        for (int i = 0; i < 256; ++i) table.push_back(py_round_i(255 * core::py_pow(i / 255.0, gamma)));
-        return keep_alpha(rgba.convert("RGB").point(tripled(table)), rgba);
-    }
-    if (kind == "bitonal") {
-        const std::int64_t threshold = inum(params, "threshold", 180);
-        const Image bw = rgba.convert("L").point([&](int p) { return p > threshold ? 255 : 0; });
-        return keep_alpha(bw.convert("RGB"), rgba);
-    }
-    if (kind == "invert") return keep_alpha(ops::invert(rgba.convert("RGB")), rgba);
-    if (kind == "posterize") {
-        const std::int64_t levels = std::max<std::int64_t>(2, std::min<std::int64_t>(64, inum(params, "levels", 4)));
-        const double step = 255.0 / static_cast<double>(levels - 1);
-        std::vector<int> table;
-        for (int i = 0; i < 256; ++i) table.push_back(py_round_i(py_round_i(i / step) * step));
-        return keep_alpha(rgba.convert("RGB").point(tripled(table)), rgba);
-    }
-    if (kind == "threshold") {
-        const std::int64_t cut = inum(params, "threshold", 128);
-        const Image grey = rgba.convert("L").point([&](int p) { return p >= cut ? 255 : 0; });
-        return keep_alpha(grey.convert("RGB"), rgba);
-    }
-    // gradient_map
-    const Image grey = rgba.convert("L");
-    std::vector<int> tables[3];
-    const Json* stops_json = get(params, "stops");
-    try {
-        if (stops_json != nullptr && core::py_truthy(*stops_json)) {
-            std::vector<std::pair<double, std::vector<std::int64_t>>> placed;
-            for (const Json& st : core::py_list(*stops_json)) {
-                std::vector<std::int64_t> c = json_ints(st.at(1));
-                if (c.size() > 3) c.resize(3);
-                placed.emplace_back(core::py_float(st.at(0)), c);
-            }
-            std::stable_sort(placed.begin(), placed.end());
-            if (placed.size() < 2) throw FilterValueError{"a gradient map needs two colours or more"};
-            const std::vector<double> xs = linspace01();
-            std::vector<double> at;
-            for (const auto& p : placed) at.push_back(p.first);
-            for (std::size_t ch = 0; ch < 3; ++ch) {
-                std::vector<double> fp;
-                for (const auto& p : placed) fp.push_back(static_cast<double>(p.second.at(ch)));
-                const Interp interp(at, fp);
-                for (const double x : xs) tables[ch].push_back(py_round_i(interp(x)));
-            }
-        } else {
-            std::vector<std::vector<std::int64_t>> stops;
-            const Json* colors = get(params, "colors");
-            if (colors != nullptr && core::py_truthy(*colors)) {
-                for (const Json& c : core::py_list(*colors)) {
-                    std::vector<std::int64_t> rgb = json_ints(c);
-                    if (rgb.size() > 3) rgb.resize(3);
-                    stops.push_back(rgb);
-                }
-            } else {
-                stops = {{0, 0, 0}, {255, 255, 255}};
-            }
-            if (stops.size() < 2) throw FilterValueError{"a gradient map needs two colours or more"};
-            for (int i = 0; i < 256; ++i) {
-                const double pos = i / 255.0 * static_cast<double>(stops.size() - 1);
-                const std::size_t k = std::min(stops.size() - 2, static_cast<std::size_t>(std::trunc(pos)));
-                const double t = pos - static_cast<double>(k);
-                for (std::size_t c = 0; c < 3; ++c) {
-                    const double a = static_cast<double>(stops[k].at(c));
-                    const double b = static_cast<double>(stops[k + 1].at(c));
-                    tables[c].push_back(py_round_i(a + (b - a) * t));
-                }
-            }
-        }
-    } catch (const std::out_of_range&) {
-        throw core::Error("value", "list index out of range");
-    }
-    return keep_alpha(Image::merge("RGB", {grey.point(tables[0]), grey.point(tables[1]), grey.point(tables[2])}), rgba);
+    std::vector<int> lut(first);
+    lut.insert(lut.end(), second.begin(), second.end());
+    lut.insert(lut.end(), third.begin(), third.end());
+    return keep_alpha(rgba.convert("RGB").point(lut), rgba);
 }
 
 // ImageFilter.GaussianBlur(radius): the box radius each of its three passes uses (BoxBlur.c _gaussian_blur_radius)
@@ -719,12 +419,10 @@ Image fill_layer_image(const core::Layer& layer, Size size, int dpi, bool mono, 
         std::vector<std::int64_t> rgb{255, 255, 255};
         const Json* own = get(spec, "rgb");
         if (own != nullptr && core::py_truthy(*own)) {
-            rgb = json_ints(*own);
+            rgb = core::int_tuple(*own);
         } else if (layer.fill_rgb && !layer.fill_rgb->empty()) {
             rgb.clear();
-            for (const core::Num& n : *layer.fill_rgb) {
-                rgb.push_back(n.is_int() ? n.int_value() : static_cast<std::int64_t>(std::trunc(n.value())));
-            }
+            for (const core::Num& n : *layer.fill_rgb) rgb.push_back(core::py_int(n));
         }
         if (rgb.size() > 3) rgb.resize(3);
         image = Image::create("RGBA", Size{area.width(), area.height()}, Ink::with_alpha(rgb, 255));
@@ -765,7 +463,7 @@ Image layer_effects(const core::Layer& layer, Image raster, int dpi) {
     if (water != nullptr && core::py_truthy(*water)) {
         if (!water->is_object()) throw core::Error("value", "'" + core::py_type_name(*water) + "' object has no attribute 'get'");
         const int width = std::max(1, py_round_i(number(*water, "width_mm", 0.6) / 25.4 * dpi));
-        const double strength = pmax(0.0, pmin(1.0, number(*water, "strength", 0.6)));
+        const double strength = py_max(0.0, py_min(1.0, number(*water, "strength", 0.6)));
         const Image inner = width < 12 ? alpha.filter(Filter::min_filter(width * 2 + 1))
                                        : alpha.filter(Filter::gaussian_blur(width)).point([](int v) { return v > 245 ? 255 : 0; });
         const Image rim = chops::subtract(alpha, inner);
@@ -784,7 +482,7 @@ Image layer_effects(const core::Layer& layer, Image raster, int dpi) {
         const int width = std::max(1, py_round_i(number(*border_spec, "width_mm", 0.5) / 25.4 * dpi));
         std::vector<std::int64_t> rgb{255, 255, 255};
         const Json* own = get(*border_spec, "rgb");
-        if (own != nullptr && core::py_truthy(*own)) rgb = json_ints(*own);
+        if (own != nullptr && core::py_truthy(*own)) rgb = core::int_tuple(*own);
         if (rgb.size() > 3) rgb.resize(3);
         const Image grown = alpha.filter(Filter::gaussian_blur(width / 1.5)).point([](int v) { return v > 12 ? 255 : 0; });
         Image border = Image::create("RGBA", out.size(), Ink::with_alpha(rgb, 0));
@@ -812,11 +510,11 @@ Image adjusted(const Ctx& ctx, Image rgba, const core::Layer& layer, const Image
         bool skipped = false;
         changed = apply_filter(ctx, rgba, kind, spec, &skipped);
         if (skipped) return rgba;
-    } catch (const FilterValueError&) {
+    } catch (const core::PyValueError&) {
         return rgba;  // (a ValueError: the layer does nothing)
     }
     const double opacity = layer.opacity;
-    Image strength = Image::create("L", rgba.size(), Ink(py_round_i(255 * pmax(0.0, pmin(1.0, opacity)))));
+    Image strength = Image::create("L", rgba.size(), Ink(py_round_i(255 * py_max(0.0, py_min(1.0, opacity)))));
     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty()) {
         const Image shown =
             resized_part(open_image(*layer.mask->png, kPillowOpenLimits).convert("L"), ctx.size, area, Resample::Bicubic);

@@ -26,31 +26,15 @@
 
 namespace genko::core {
 
-class PyValueError : public Error {
-public:
-    explicit PyValueError(const std::string& message) : Error("value", message) {}
-};
-
-class PyTypeError : public Error {
-public:
-    explicit PyTypeError(const std::string& message) : Error("type", message) {}
-};
-
-// An exception Python's apply_ops lets through (its type, e.g. "IndexError", and message).
-class PyUncaught : public Error {
-public:
-    PyUncaught(std::string type, const std::string& message);
-    const std::string& type() const noexcept { return type_; }
-
-private:
-    std::string type_;
-};
+// (PyValueError, PyTypeError and PyUncaught: core/error.hpp)
 
 // core::Error("not_yet_ported", message): a part of an op that this build does not have yet.
 [[noreturn]] void not_yet_ported(const std::string& message);
 
 // op.get(key): the value, or null when the key is missing.
 const Json* get(const Json& object, std::string_view key);
+// op.get(key, fallback)
+Json get_or(const Json& object, std::string_view key, const Json& fallback);
 // key in op
 bool has(const Json& object, std::string_view key);
 // bool(op.get(key))
@@ -77,6 +61,9 @@ Json subscript(const Json& value, std::string_view key);
 // a, b, … = (float(v) for v in x): the items converted one by one; Python's unpacking errors ("not enough values to
 // unpack (expected 4, got 3)", "too many values to unpack (expected 4)").
 std::vector<double> unpack_floats(const Json& value, std::size_t expected);
+
+// tuple(int(v) for v in x) (any length; Python's errors).
+std::vector<std::int64_t> int_tuple(const Json& value);
 
 // Python's `a < b` (and <=, >, >=) for JSON numbers and bools; PyTypeError "'<' not supported between instances of
 // 'int' and 'str'" for other values.

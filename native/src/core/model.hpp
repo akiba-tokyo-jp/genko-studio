@@ -144,9 +144,6 @@ struct Patch {
     Json after_asset = Json::object();
 };
 
-// A new Layer::identity.
-std::uint64_t new_layer_identity();
-
 struct Layer {
     std::string id;
     LayerRole role = LayerRole::User;
@@ -191,18 +188,9 @@ struct Layer {
     std::optional<Json> effect;
     bool color_prints = false;
     std::optional<Json> screen;
-    // Which of Python's Layer objects this is (never saved). A copy is the same object, as the copy of a page made
-    // for an edit stands for the same page; a layer made anew (read, added, duplicated) gets a new one. A page whose
-    // layers hold one object twice (reorder_layers given an id twice) shows an edit of it in both places: the
-    // CommandBus makes such entries alike again after each op (same_layer: a field added here goes there too).
-    std::uint64_t identity = new_layer_identity();
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };
-
-// Every field the same (not identity): ints and floats told apart, floats bit for bit, pictures by their bytes,
-// stroke lists as the same list.
-bool same_layer(const Layer& a, const Layer& b);
 
 struct Frame {
     std::string id;

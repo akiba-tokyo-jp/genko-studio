@@ -9,26 +9,17 @@
 #include "core/covers.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 
 namespace genko::core {
 
 namespace {
-
-const Json* find(const Json& object, std::string_view key) {
-    if (!object.is_object()) return nullptr;
-    const auto it = object.find(std::string(key));
-    return it == object.end() ? nullptr : &*it;
-}
 
 // Python's _covered: a page's paper on the book's spec (a cover's is its own).
 PageSpec covered(const Page& page, const PageSpec& spec) {
     const Json* cover = cover_of(page);
     return cover != nullptr ? spec_for(spec, *cover) : spec;
 }
-
-// int(x) for the "after" of add_page: the op's value, or a page number.
-std::int64_t int_of(const Json& value) { return py_int(value); }
-std::int64_t int_of(const Num& value) { return value.is_int() ? value.int_value() : py_int(Json(value.value())); }
 
 // Python's list slicing bounds: a[:n] and a[n:].
 std::size_t slice_at(std::int64_t n, std::size_t size) {
@@ -39,15 +30,15 @@ std::size_t slice_at(std::int64_t n, std::size_t size) {
 
 void set_note(OpContext& c) {
     const std::size_t i = require_page(c.doc, c.op);
-    const Json* note = find(c.op, "note");
+    const Json* note = get(c.op, "note");
     c.doc.edit_page(i).note = note != nullptr ? py_str(*note) : std::string();
 }
 
 void set_meta(OpContext& c) {
     Document& doc = c.doc;
-    if (const Json* title = find(c.op, "title")) doc.title = py_str(*title);
-    if (const Json* episode = find(c.op, "episode")) doc.episode = Num(py_int(*episode));
-    if (const Json* value = find(c.op, "binding")) {
+    if (const Json* title = get(c.op, "title")) doc.title = py_str(*title);
+    if (const Json* episode = get(c.op, "episode")) doc.episode = Num(py_int(*episode));
+    if (const Json* value = get(c.op, "binding")) {
         const auto binding = value->is_string() ? binding_from(value->get_ref<const std::string&>()) : std::nullopt;
         if (!binding) throw Error("value", py_repr(*value) + " is not a valid Binding");
         doc.binding = *binding;
@@ -55,13 +46,13 @@ void set_meta(OpContext& c) {
             if (doc.pages[i]->binding != *binding) doc.edit_page(i).binding = *binding;
         }
     }
-    if (const Json* side = find(c.op, "start_side")) {
+    if (const Json* side = get(c.op, "start_side")) {
         const bool valid = side->is_null() || (side->is_string() && (side->get_ref<const std::string&>() == "left" ||
                                                                      side->get_ref<const std::string&>() == "right"));
         if (!valid) throw OpError("start_side must be left, right or null");
         doc.start_side = side->is_null() ? std::nullopt : std::optional<std::string>(side->get<std::string>());
     }
-    if (const Json* strict = find(c.op, "strict_gates")) doc.strict_gates = py_truthy(*strict);
+    if (const Json* strict = get(c.op, "strict_gates")) doc.strict_gates = py_truthy(*strict);
     const auto respec = [&doc](const PageSpec& spec) {
         doc.spec = spec;
         for (std::size_t i = 0; i < doc.pages.size(); ++i) {
@@ -69,11 +60,11 @@ void set_meta(OpContext& c) {
             page.spec = covered(page, doc.spec);
         }
     };
-    if (const Json* preset = find(c.op, "preset")) respec(PageSpec::publisher(py_str(*preset)));
-    if (const Json* webtoon = find(c.op, "webtoon"); webtoon != nullptr && py_truthy(*webtoon)) {
+    if (const Json* preset = get(c.op, "preset")) respec(PageSpec::publisher(py_str(*preset)));
+    if (const Json* webtoon = get(c.op, "webtoon"); webtoon != nullptr && py_truthy(*webtoon)) {
         respec(PageSpec::webtoon());
     }
-    if (const Json* font = find(c.op, "font_path")) doc.font_path = py_str(*font);
+    if (const Json* font = get(c.op, "font_path")) doc.font_path = py_str(*font);
 }
 
 void name_ok(OpContext& c) {
@@ -85,7 +76,7 @@ void name_ok(OpContext& c) {
         edited.name_ok = true;
         edited.stage = "ink";
     };
-    if (find(c.op, "page") == nullptr) {
+    if (get(c.op, "page") == nullptr) {
         for (std::size_t i = 0; i < c.doc.pages.size(); ++i) approve(i);
     } else {
         approve(require_page(c.doc, c.op));
@@ -93,27 +84,27 @@ void name_ok(OpContext& c) {
 }
 
 void set_autosave(OpContext& c) {
-    const Json* enabled = find(c.op, "enabled");
+    const Json* enabled = get(c.op, "enabled");
     c.doc.autosave = enabled == nullptr || py_truthy(*enabled);
 }
 
 void add_page(OpContext& c) {
     Document& doc = c.doc;
-    const Json* count_value = find(c.op, "count");
+    const Json* count_value = get(c.op, "count");
     const std::int64_t count = count_value != nullptr ? py_int(*count_value) : 1;
     if (count < 1 || count > 200) throw OpError("count is 1 to 200");
     // after: the op's value (int() of it is taken where Python takes it), or the last page that is not a cover
     std::optional<Json> after_value;
-    if (const Json* after = find(c.op, "after"); after != nullptr && !after->is_null()) after_value = *after;
+    if (const Json* after = get(c.op, "after"); after != nullptr && !after->is_null()) after_value = *after;
     if (after_value) {
         bool found = false;
         for (const auto& page : doc.pages) {
-            if (page->index == Num(int_of(*after_value))) {
+            if (page->index == Num(py_int(*after_value))) {
                 found = true;
                 break;
             }
         }
-        if (!found && int_of(*after_value) != 0) throw OpError("no page " + py_str(*after_value));
+        if (!found && py_int(*after_value) != 0) throw OpError("no page " + py_str(*after_value));
     }
     std::optional<Num> after_page;
     const bool any_cover = std::any_of(doc.pages.begin(), doc.pages.end(),
@@ -139,8 +130,8 @@ void add_page(OpContext& c) {
         doc.pages.push_back(std::make_shared<Page>(std::move(page)));
     }
     std::optional<std::int64_t> after;
-    if (after_value) after = int_of(*after_value);
-    if (after_page) after = int_of(*after_page);
+    if (after_value) after = py_int(*after_value);
+    if (after_page) after = py_int(*after_page);
     if (after && *after < static_cast<std::int64_t>(first_new) - 1) {
         std::vector<Num> old;
         for (const auto& page : doc.pages) old.push_back(page->index);

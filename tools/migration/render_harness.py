@@ -12,6 +12,8 @@ Commands:
                                 small images, with the pixels Pillow draws
   brush-cases OUT --seed N      brushes.draw for every built-in brush and custom brushes (J3 settings) with and
                                 without pressure at 72, 150 and 600 dpi: the coverage and its origin
+  adjust-cases OUT              filters.apply_filter for correction-layer settings (good, bad and odd ones): the
+                                tables Image.point gets, or the exception
   make-books OUT --seed N --count K
                                 K random books for drawing (layers, brushes, rasters, patches, masks, blend modes,
                                 fills and gradients, corrections, panels): OUT/book-NN.genko
@@ -1065,6 +1067,125 @@ def render_jobs_parallel(jobs_path: str, workers: int) -> None:
             pass
 
 
+# --- correction layers: filters.apply_filter's tables -------------------------------------------------------------------
+
+# (NaN and infinities as text, "nan" and "inf": the C++ build reads the JSON literals NaN and Infinity as null)
+ADJUST_CASES = [
+    # levels: ints (any size), then the table form
+    ("levels", {}), ("levels", {"black": 30, "white": 220}), ("levels", {"black": 2.7, "white": "200"}),
+    ("levels", {"black": 300, "white": 100}), ("levels", {"black": -50, "white": 5000}),
+    ("levels", {"black": 100, "white": 100}), ("levels", {"black": 254, "white": 255}), ("levels", {"black": True, "white": 200}),
+    ("levels", {"black": "x"}), ("levels", {"black": None}), ("levels", {"black": [1]}), ("levels", {"white": "nan"}),
+    ("levels", {"black": 1e300}), ("levels", {"white": -1e300}), ("levels", {"black": -1e30}), ("levels", {"black": 1e19, "white": 2e19}),
+    ("levels", {"black": "99999999999999999999"}), ("levels", {"white": "-99999999999999999999"}),
+    ("levels", {"gamma": 0.5}),
+    ("levels", {"black": 10.5, "white": 240, "gamma": 1.7, "out_black": 20, "out_white": 250, "channel": "g"}),
+    ("levels", {"gamma": None, "out_black": 10}), ("levels", {"black": 1e17, "white": 0, "gamma": 1}),
+    ("levels", {"black": "inf", "gamma": 1}), ("levels", {"black": "nan", "gamma": 1}), ("levels", {"out_black": "nan"}),
+    ("levels", {"out_white": "inf"}), ("levels", {"out_white": 1e308, "out_black": -1e308}), ("levels", {"out_white": 1e300}),
+    ("levels", {"gamma": 1, "channel": "q"}), ("levels", {"gamma": 1, "channel": "b"}), ("levels", {"gamma": 1, "channel": 5}),
+    ("levels", {"gamma": 1, "channel": ""}), ("levels", {"channel": "r"}), ("levels", {"gamma": "x"}), ("levels", {"gamma": 100}),
+    ("levels", {"gamma": -1}), ("levels", {"gamma": 1, "white": 5, "black": 10}),
+    ("levels", {"out_black": 300, "out_white": -40, "gamma": 2}), ("levels", {"gamma": 1, "out_black": "x", "out_white": None}),
+    # curve: a gamma, or a curve through points
+    ("curve", {}), ("curve", {"gamma": 2.2}), ("curve", {"gamma": "abc"}), ("curve", {"gamma": "nan"}), ("curve", {"gamma": 0.01}),
+    ("curve", {"points": [[0, 10], [64, 90], [128, 120], [200, 230], [255, 250]], "channel": "rgb"}),
+    ("curve", {"points": [[0, 0], [100, 200], [100, 180], [255, 255]], "channel": "r"}), ("curve", {"points": [[0, 0]]}),
+    ("curve", {"points": [[0, 0], [0.4, 9]]}), ("curve", {"points": [[0, 0, 0]]}), ("curve", {"points": [5, 6]}),
+    ("curve", {"points": [["1", "2"], ["200", 100]]}), ("curve", {"points": [["nan", 1], [3, 4]]}),
+    ("curve", {"points": [["inf", 1], [3, 4]]}), ("curve", {"points": [[0, "nan"], [255, 255]]}), ("curve", {"points": "ab"}),
+    ("curve", {"points": {"a": 1}}), ("curve", {"points": [[0, 0], [10, 300], [20, -50], [255, 255]], "channel": "g"}),
+    ("curve", {"points": [[-100, 0], [400, 255]]}), ("curve", {"points": [[0, 0], [128, 128], [129, 255], [255, 255]]}),
+    ("curve", {"points": [[0, 255], [255, 0]]}), ("curve", {"points": [[1e300, 0], [0, 1]]}),
+    ("curve", {"points": [[2.5, 0], [3.5, 255]]}), ("curve", {"points": [[0, 0], [255, 255]], "gamma": 3}),
+    ("curve", {"points": [], "gamma": 3}), ("curve", {"points": 0}), ("curve", {"points": [[None, 1], [2, 3]]}),
+    ("curve", {"points": [[1, None], [2, 3]]}), ("curve", {"points": [[1, 2], 7]}), ("curve", {"points": [[1, 2], [3]]}),
+    # hue
+    ("hue", {}), ("hue", {"shift": 75, "saturation": 1.4, "value": 0.9}), ("hue", {"shift": -30.5}), ("hue", {"shift": 1e20}),
+    ("hue", {"shift": "nan"}), ("hue", {"shift": "inf"}), ("hue", {"saturation": "inf"}), ("hue", {"value": 1e308}),
+    ("hue", {"saturation": -5}), ("hue", {"saturation": None}), ("hue", {"shift": [1]}), ("hue", {"shift": "12"}),
+    ("hue", {"shift": 359.9}), ("hue", {"shift": -720}), ("hue", {"value": 0.5, "saturation": 0}),
+    ("hue", {"shift": 180, "saturation": 2.5, "value": 1.5}), ("hue", {"shift": True}),
+    # invert, posterize, threshold, bitonal
+    ("invert", {}), ("invert", {"anything": 1}),
+    ("posterize", {}), ("posterize", {"levels": 3}), ("posterize", {"levels": 1}), ("posterize", {"levels": 1000}),
+    ("posterize", {"levels": "4"}), ("posterize", {"levels": 2.9}), ("posterize", {"levels": "2.9"}),
+    ("posterize", {"levels": "nan"}), ("posterize", {"levels": 1e30}), ("posterize", {"levels": "inf"}),
+    ("posterize", {"levels": -1e300}), ("posterize", {"levels": None}), ("posterize", {"levels": 7}), ("posterize", {"levels": 64}),
+    ("posterize", {"levels": -3}),
+    ("threshold", {}), ("threshold", {"threshold": 140}), ("threshold", {"threshold": "x"}), ("threshold", {"threshold": 1e30}),
+    ("threshold", {"threshold": -1e30}), ("threshold", {"threshold": 127.9}), ("threshold", {"threshold": "0"}),
+    ("threshold", {"threshold": 256}),
+    ("bitonal", {}), ("bitonal", {"threshold": 100}), ("bitonal", {"threshold": None}), ("bitonal", {"threshold": 254.5}),
+    ("bitonal", {"threshold": -1}),
+    # gradient_map: colours spread evenly, or stops; table values Pillow keeps in 0..255 its own way
+    ("gradient_map", {}), ("gradient_map", {"colors": [[20, 10, 80], [250, 200, 40], [255, 255, 255]]}),
+    ("gradient_map", {"stops": [[0.0, [0, 0, 0]], [0.3, [200, 20, 20]], [0.3, [20, 200, 20]], [1.0, [255, 255, 255]]]}),
+    ("gradient_map", {"colors": [[0, 0, 0]]}), ("gradient_map", {"stops": [[0.5, [1, 2, 3]]]}),
+    ("gradient_map", {"colors": [[0, 0], [255, 255, 255]]}), ("gradient_map", {"stops": [[0, [0, 0]], [1, [255, 255, 255]]]}),
+    ("gradient_map", {"colors": [[300, -20, 1000], [-500, 128, 70000]]}),
+    ("gradient_map", {"colors": [[0, 0, 0], [10000000000, -10000000000, 4294967296]]}),
+    ("gradient_map", {"colors": [[0, 0, 0], [1e19, 0, 0]]}), ("gradient_map", {"colors": [[0, 0, 0], [1e19, 0, 0], [1, 2]]}),
+    ("gradient_map", {"stops": [[0, [0, 0, 0]], [1, [1e19, 0, 0]]]}),
+    ("gradient_map", {"stops": [[0, [0, 0, 0]], ["1", ["255", 0, 0]]]}),
+    ("gradient_map", {"stops": [[0.5, [10, 20, 30]], [0.2, [200, 100, 50]]]}),
+    ("gradient_map", {"stops": [[0.5, [10, 20, 30]], [0.5, [5, 5, 5]], [1, [0, 0, 0]]]}),
+    ("gradient_map", {"stops": [[-1, [0, 0, 0]], [2, [255, 255, 255]]]}),
+    ("gradient_map", {"stops": [["nan", [0, 0, 0]], [1, [255, 255, 255]]]}),
+    ("gradient_map", {"stops": [[0, [0, 0, 0]], [1, {"a": 1}]]}), ("gradient_map", {"stops": [[0, 5], [1, [1, 2, 3]]]}),
+    ("gradient_map", {"stops": [{"a": 1}, [1, [1, 2, 3]]]}), ("gradient_map", {"stops": [[0], [1, [1, 2, 3]]]}),
+    ("gradient_map", {"stops": "ab"}), ("gradient_map", {"stops": [[0, "123"], [1, "456"]]}), ("gradient_map", {"colors": "abc"}),
+    ("gradient_map", {"colors": [[0, 0, 0, 99], [255, 255, 255, "x"]]}),
+    ("gradient_map", {"stops": [[0, [0, 0, 0, "x"]], [1, [1, 1, 1]]]}),
+    # brightness_contrast
+    ("brightness_contrast", {}), ("brightness_contrast", {"brightness": 25, "contrast": -40}),
+    ("brightness_contrast", {"brightness": -10, "contrast": 60, "channel": "b"}), ("brightness_contrast", {"brightness": "x"}),
+    ("brightness_contrast", {"contrast": None}), ("brightness_contrast", {"brightness": "nan"}),
+    ("brightness_contrast", {"contrast": "-inf"}), ("brightness_contrast", {"brightness": 1e300, "contrast": 1e300}),
+    ("brightness_contrast", {"contrast": 100}), ("brightness_contrast", {"contrast": -100}),
+    ("brightness_contrast", {"brightness": 100, "channel": "rgb"}), ("brightness_contrast", {"channel": "r"}),
+    # not an adjustment at all
+    ("nope", {}),
+]
+
+
+def adjust_cases(out: str) -> None:
+    """filters.apply_filter for each setting of ADJUST_CASES on a small picture (as ops._adjust_spec tries one): the
+    tables Pillow makes of what Image.point is given (each band's 256 values, read back from a picture of every value),
+    or the exception (its type and message)."""
+    from PIL import Image
+
+    from genko import filters
+
+    original = Image.Image.point
+    records: list = []
+
+    def point(self, lut, mode=None):
+        result = original(self, lut, mode)
+        bands = len(self.getbands())
+        probe = Image.new(self.mode, (256, 1))
+        probe.putdata([(i,) * bands if bands > 1 else i for i in range(256)])
+        records.append([list(band.tobytes()) for band in original(probe, lut, mode).split()])
+        return result
+
+    cases = []
+    Image.Image.point = point
+    try:
+        for kind, params in ADJUST_CASES:
+            records.clear()
+            entry = {"kind": kind, "params": params}
+            try:
+                filters.apply_filter(Image.new("RGBA", (4, 4), (120, 80, 40, 255)), kind, dict(params))
+                entry["tables"] = list(records)
+            except Exception as exc:  # (the ops refuse ValueError, TypeError and KeyError; the renderer passes ValueError)
+                entry["error"] = [type(exc).__name__, str(exc)]
+            cases.append(entry)
+    finally:
+        Image.Image.point = original
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    Path(out).write_text(dumps({"cases": cases}) + "\n", encoding="utf-8")
+
+
 def unit_tables(outdir: str) -> None:
     root = Path(outdir)
     root.mkdir(parents=True, exist_ok=True)
@@ -1085,6 +1206,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("brush-cases")
     p.add_argument("outdir")
     p.add_argument("--seed", type=int, default=1)
+    p = sub.add_parser("adjust-cases")
+    p.add_argument("out")
     p = sub.add_parser("make-books")
     p.add_argument("out")
     p.add_argument("--seed", type=int, default=1)
@@ -1099,6 +1222,8 @@ def main(argv: list[str] | None = None) -> int:
         draw_cases(args.out, args.seed, args.count)
     elif args.cmd == "brush-cases":
         brush_cases(args.outdir, args.seed)
+    elif args.cmd == "adjust-cases":
+        adjust_cases(args.out)
     elif args.cmd == "make-books":
         make_books(args.out, args.seed, args.count)
     elif args.cmd == "render":

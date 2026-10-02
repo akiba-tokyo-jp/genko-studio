@@ -9,15 +9,17 @@
 
 namespace genko::core {
 
-PyUncaught::PyUncaught(std::string type, const std::string& message)
-    : Error("python_error", message), type_(std::move(type)) {}
-
 void not_yet_ported(const std::string& message) { throw Error("not_yet_ported", message); }
 
 const Json* get(const Json& object, std::string_view key) {
     if (!object.is_object()) return nullptr;
     const auto it = object.find(std::string(key));
     return it == object.end() ? nullptr : &*it;
+}
+
+Json get_or(const Json& object, std::string_view key, const Json& fallback) {
+    const Json* value = get(object, key);
+    return value != nullptr ? *value : fallback;
 }
 
 bool has(const Json& object, std::string_view key) { return get(object, key) != nullptr; }
@@ -112,6 +114,12 @@ std::vector<double> unpack_floats(const Json& value, std::size_t expected) {
     return out;
 }
 
+std::vector<std::int64_t> int_tuple(const Json& value) {
+    std::vector<std::int64_t> out;
+    for (const Json& v : iterate(value)) out.push_back(to_int(v));
+    return out;
+}
+
 bool py_less(const Json& a, const Json& b, std::string_view op) {
     const auto number = [](const Json& v) -> std::optional<Num> {
         if (v.is_boolean()) return Num(v.get<bool>() ? 1 : 0);
@@ -181,7 +189,7 @@ std::int64_t loop_count(double steps) {
     constexpr double kMost = 1e7;
     if (steps >= kMost) throw PyUncaught("MemoryError", "");
     if (steps <= -kMost) return -static_cast<std::int64_t>(kMost);  // (callers take max(1, …))
-    return static_cast<std::int64_t>(std::trunc(steps));
+    return py_trunc_int(steps);
 }
 
 Json nums_json(const std::vector<Num>& values) {

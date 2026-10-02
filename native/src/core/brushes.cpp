@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <tuple>
 #include <utility>
 
 #include "core/command_bus.hpp"
@@ -144,98 +145,88 @@ std::vector<Brush> make_builtins() {
 // LEGACY.get(key, key)
 std::string legacy(std::string key) { return key == "oil" ? std::string("marker") : key; }
 
-// The settings of a brush as from_dict starts from them (to_dict, with every J3 key).
-Json settings(const Brush& b) {
-    Json out = Json::object();
-    out["label"] = b.label;
-    out["width_mm"] = b.width_mm;
-    out["min_pressure"] = b.min_pressure;
-    out["gamma"] = b.gamma;
-    out["opacity"] = b.opacity;
-    out["stabilize"] = b.stabilize;
-    out["taper"] = b.taper;
-    out["texture"] = b.texture;
-    if (b.rgb && !b.rgb->empty()) {
-        Json rgb = Json::array();
-        for (const auto v : *b.rgb) rgb.push_back(v);
-        out["rgb"] = std::move(rgb);
-    } else {
-        out["rgb"] = nullptr;
+const char* const kTextures[] = {"", "grain", "soft", "dry", "water"};
+const char* const kTips[] = {"round", "flat", "image"};
+const char* const kPatterns[] = {"", "dots", "dash", "lace", "grass", "hearts", "stars", "leaves"};
+const char* const kAas[] = {"none", "weak", "normal", "strong"};
+
+// value in CHOICES (a tuple of str: only a str equal to one of them is in it)
+template <std::size_t N>
+bool one_of(const Json& value, const char* const (&choices)[N]) {
+    if (!value.is_string()) return false;
+    const auto& text = value.get_ref<const std::string&>();
+    for (const char* c : choices) {
+        if (text == c) return true;
     }
-    out["fixed_width"] = b.fixed_width;
-    out["tip"] = b.tip;
-    out["tip_angle"] = b.tip_angle;
-    out["tip_ratio"] = b.tip_ratio;
-    out["tip_follow"] = b.tip_follow;
-    out["tip_rotation"] = b.tip_rotation;
-    out["tip_png"] = b.tip_png;
-    out["spacing"] = b.spacing;
-    out["scatter"] = b.scatter;
-    out["size_jitter"] = b.size_jitter;
-    out["turn_jitter"] = b.turn_jitter;
-    out["count"] = b.count;
-    out["pattern"] = b.pattern;
-    out["speed"] = b.speed;
-    out["post_smooth"] = b.post_smooth;
-    out["aa"] = b.aa;
-    out["stamp_size"] = b.stamp_size;
-    out["mix"] = b.mix;
-    out["stretch"] = b.stretch;
+    return false;
+}
+
+const char* const kJ3Keys[] = {"tip", "tip_angle", "tip_ratio", "tip_follow", "tip_rotation", "tip_png", "spacing",
+                               "scatter", "size_jitter", "turn_jitter", "count", "pattern", "speed", "post_smooth",
+                               "aa", "stamp_size", "mix", "stretch"};
+
+// getattr(b, key) for a J3 key, as Python holds it
+Json j3_value(const Brush& b, std::string_view key) {
+    if (key == "tip") return b.tip;
+    if (key == "tip_angle") {
+        // (the built-in calligraphy pen says tip_angle=35: an int in Python)
+        if (b.key == "calligraphy" && find_builtin("calligraphy") != nullptr && b == *find_builtin("calligraphy")) {
+            return static_cast<std::int64_t>(b.tip_angle);
+        }
+        return b.tip_angle;
+    }
+    if (key == "tip_ratio") return b.tip_ratio;
+    if (key == "tip_follow") return b.tip_follow;
+    if (key == "tip_rotation") return b.tip_rotation;
+    if (key == "tip_png") return b.tip_png;
+    if (key == "spacing") return b.spacing;
+    if (key == "scatter") return b.scatter;
+    if (key == "size_jitter") return b.size_jitter;
+    if (key == "turn_jitter") return b.turn_jitter;
+    if (key == "count") return b.count;
+    if (key == "pattern") return b.pattern;
+    if (key == "speed") return b.speed;
+    if (key == "post_smooth") return b.post_smooth;
+    if (key == "aa") return b.aa;
+    if (key == "stamp_size") return b.stamp_size;
+    if (key == "mix") return b.mix;
+    return b.stretch;
+}
+
+// Python's str.isspace() for one code point.
+bool py_space(char32_t c) {
+    return (c >= 0x09 && c <= 0x0d) || (c >= 0x1c && c <= 0x20) || c == 0x85 || c == 0xa0 || c == 0x1680 ||
+           (c >= 0x2000 && c <= 0x200a) || c == 0x2028 || c == 0x2029 || c == 0x202f || c == 0x205f || c == 0x3000;
+}
+
+// The code points of UTF-8 text with where each starts.
+std::vector<std::pair<char32_t, std::size_t>> code_points(const std::string& s) {
+    std::vector<std::pair<char32_t, std::size_t>> out;
+    std::size_t i = 0;
+    while (i < s.size()) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        std::size_t n = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
+        if (i + n > s.size()) n = s.size() - i;
+        char32_t cp = n == 1 ? c : n == 2 ? (c & 0x1f) : n == 3 ? (c & 0x0f) : (c & 0x07);
+        for (std::size_t k = 1; k < n; ++k) cp = (cp << 6) | (static_cast<unsigned char>(s[i + k]) & 0x3f);
+        out.emplace_back(cp, i);
+        i += n;
+    }
     return out;
 }
 
-// brushes.brush(key) among the presets and `registered` (Python's CUSTOM). PyTypeError for a key that is no hashable.
-const Brush& lookup(const Json& key, std::span<const Brush> registered) {
-    require_hashable(key);
-    const std::span<const Brush> presets = builtin_brushes();
-    if (!py_truthy(key)) return presets.front();
-    if (!key.is_string()) return presets.front();
-    const std::string name = legacy(key.get<std::string>());
-    if (const Brush* found = find_builtin(name)) return *found;
-    for (const Brush& b : registered) {
-        if (b.key == name) return b;
-    }
-    return presets.front();
-}
-
-// Py_UNICODE_ISSPACE for the code point.
-bool unicode_space(std::uint32_t cp) {
-    return (cp >= 0x09 && cp <= 0x0D) || (cp >= 0x1C && cp <= 0x20) || cp == 0x85 || cp == 0xA0 || cp == 0x1680 ||
-           (cp >= 0x2000 && cp <= 0x200A) || cp == 0x2028 || cp == 0x2029 || cp == 0x202F || cp == 0x205F || cp == 0x3000;
-}
-
-// str.strip() is not empty
-bool has_text(const std::string& text) {
-    std::size_t i = 0;
-    while (i < text.size()) {
-        const auto c = static_cast<unsigned char>(text[i]);
-        std::size_t length = 1;
-        std::uint32_t cp = c;
-        if (c >= 0xF0) {
-            length = 4;
-            cp = c & 0x07u;
-        } else if (c >= 0xE0) {
-            length = 3;
-            cp = c & 0x0Fu;
-        } else if (c >= 0xC0) {
-            length = 2;
-            cp = c & 0x1Fu;
-        }
-        for (std::size_t k = 1; k < length && i + k < text.size(); ++k) {
-            cp = (cp << 6) | (static_cast<unsigned char>(text[i + k]) & 0x3Fu);
-        }
-        if (!unicode_space(cp)) return true;
-        i += length;
-    }
-    return false;
-}
-
-bool one_of(const Json& value, std::initializer_list<const char*> names) {
-    if (!value.is_string()) return false;
-    for (const char* name : names) {
-        if (value.get_ref<const std::string&>() == name) return true;
-    }
-    return false;
+// str(label).strip()[:40]
+std::string clean_label(const std::string& text) {
+    const auto cps = code_points(text);
+    std::size_t first = 0;
+    std::size_t last = cps.size();
+    while (first < last && py_space(cps[first].first)) ++first;
+    while (last > first && py_space(cps[last - 1].first)) --last;
+    if (last - first > 40) last = first + 40;
+    if (first == last) return {};
+    const std::size_t begin = cps[first].second;
+    const std::size_t end = last < cps.size() ? cps[last].second : text.size();
+    return text.substr(begin, end - begin);
 }
 
 }  // namespace
@@ -252,6 +243,155 @@ const Brush* find_builtin(std::string_view key) {
     return nullptr;
 }
 
+Brush find_brush(const Json& key, std::span<const Brush> custom) {
+    // LEGACY.get(key or "", key or DEFAULT), then BRUSHES.get(key) or CUSTOM.get(key) or BRUSHES[DEFAULT]
+    require_hashable(key);
+    const Brush& fallback = *find_builtin(kDefaultBrush);
+    if (!py_truthy(key) || !key.is_string()) return fallback;  // (no brush has a key that is not a str)
+    const std::string name = legacy(key.get<std::string>());
+    if (const Brush* found = find_builtin(name)) return *found;
+    for (const Brush& b : custom) {
+        if (b.key == name) return b;
+    }
+    return fallback;
+}
+
+Json brush_to_dict(const Brush& b) {
+    Json out = Json::object();
+    out["label"] = b.label;
+    out["width_mm"] = b.width_mm;
+    out["min_pressure"] = b.min_pressure;
+    out["gamma"] = b.gamma;
+    out["opacity"] = b.opacity;
+    out["stabilize"] = b.stabilize;
+    out["taper"] = b.taper;
+    out["texture"] = b.texture;
+    if (b.rgb && !b.rgb->empty()) {
+        out["rgb"] = *b.rgb;
+    } else {
+        out["rgb"] = nullptr;
+    }
+    out["fixed_width"] = b.fixed_width;
+    const Brush plain = make("", "", 1.0);
+    for (const char* key : kJ3Keys) {  // (only what differs from a plain round pen: older books stay as they were)
+        const Json mine = j3_value(b, key);
+        const Json theirs = j3_value(plain, key);
+        if (mine != theirs) out[key] = mine;
+    }
+    return out;
+}
+
+Brush brush_from_dict(std::string_view key, const Json& data, const std::optional<std::string>& base,
+                      std::span<const Brush> custom) {
+    // brush(base or data.get("base") or DEFAULT)
+    Json start_key = Json(std::string(kDefaultBrush));
+    if (base && !base->empty()) {
+        start_key = *base;
+    } else if (const Json* given = get(data, "base"); given != nullptr && py_truthy(*given)) {
+        start_key = *given;
+    }
+    const Brush start_brush = find_brush(start_key, custom);
+    const Brush plain = make("", "", 1.0);
+    Json merged = Json::object();
+    for (const char* k : kJ3Keys) merged[k] = j3_value(plain, k);
+    const Json start = brush_to_dict(start_brush);
+    for (const auto& [k, v] : start.items()) merged[k] = v;
+    if (data.is_object()) {
+        for (const auto& [k, v] : data.items()) {
+            if (merged.contains(k)) merged[k] = v;
+        }
+    }
+
+    static const std::array<std::tuple<const char*, double, double>, 16> kLimits{{
+        {"width_mm", 0.05, 50.0}, {"min_pressure", 0.0, 1.0}, {"gamma", 0.2, 5.0}, {"opacity", 0.05, 1.0},
+        {"stabilize", 0, 15}, {"tip_angle", -360.0, 360.0}, {"tip_ratio", 0.02, 1.0}, {"spacing", 0.0, 5.0},
+        {"scatter", 0.0, 5.0}, {"size_jitter", 0.0, 1.0}, {"count", 1, 12}, {"speed", 0.0, 1.0},
+        {"post_smooth", 0, 10}, {"stamp_size", 0.02, 3.0}, {"mix", 0.0, 1.0}, {"stretch", 0.0, 1.0}}};
+    for (const auto& [name, lo, hi] : kLimits) {
+        const double value = to_float(merged[name]);
+        if (!(lo <= value && value <= hi)) {
+            throw PyValueError(std::string("brush ") + name + " must be between " + py_format_g(lo) + " and " +
+                               py_format_g(hi));
+        }
+    }
+    if (!one_of(merged["texture"], kTextures)) throw PyValueError("brush texture must be none, grain, soft, dry or water");
+    if (!one_of(merged["tip"], kTips)) throw PyValueError("brush tip must be round, flat or image");
+    if (!one_of(merged["pattern"], kPatterns)) {
+        throw PyValueError("brush pattern must be dots, dash, lace, grass, hearts, stars or leaves");
+    }
+    if (!one_of(merged["aa"], kAas)) throw PyValueError("brush aa must be none, weak, normal or strong");
+    if (merged["tip"] == Json("image") && !py_truthy(merged["tip_png"])) {
+        throw PyValueError("an image tip needs its picture (tip_png)");
+    }
+    const Json& raw_label = merged["label"];
+    const std::string label = clean_label(py_truthy(raw_label) ? py_str(raw_label) : std::string());
+    if (label.empty()) throw PyValueError("a brush needs a name");
+
+    // (in the order Python's Brush(…) takes them: the first that fails decides the error)
+    const auto text = [&](const char* name) { return py_truthy(merged[name]) ? py_str(merged[name]) : std::string(); };
+    Brush out;
+    out.key = std::string(key);
+    out.label = label;
+    out.width_mm = to_float(merged["width_mm"]);
+    out.min_pressure = to_float(merged["min_pressure"]);
+    out.gamma = to_float(merged["gamma"]);
+    out.opacity = to_float(merged["opacity"]);
+    out.stabilize = to_int(merged["stabilize"]);
+    out.taper = py_truthy(merged["taper"]);
+    out.texture = text("texture");
+    if (py_truthy(merged["rgb"])) {
+        std::vector<std::int64_t> rgb = int_tuple(merged["rgb"]);
+        if (rgb.size() > 3) rgb.resize(3);
+        out.rgb = std::move(rgb);
+    }
+    out.fixed_width = py_truthy(merged["fixed_width"]);
+    out.tip = py_str(merged["tip"]);
+    out.tip_angle = to_float(merged["tip_angle"]);
+    out.tip_ratio = to_float(merged["tip_ratio"]);
+    out.tip_follow = py_truthy(merged["tip_follow"]);
+    out.tip_rotation = py_truthy(merged["tip_rotation"]);
+    out.tip_png = text("tip_png");
+    out.spacing = to_float(merged["spacing"]);
+    out.scatter = to_float(merged["scatter"]);
+    out.size_jitter = to_float(merged["size_jitter"]);
+    out.turn_jitter = py_truthy(merged["turn_jitter"]);
+    out.count = to_int(merged["count"]);
+    out.pattern = text("pattern");
+    out.speed = to_float(merged["speed"]);
+    out.post_smooth = to_int(merged["post_smooth"]);
+    out.aa = py_str(merged["aa"]);
+    out.stamp_size = to_float(merged["stamp_size"]);
+    out.mix = to_float(merged["mix"]);
+    out.stretch = to_float(merged["stretch"]);
+    return out;
+}
+
+void register_brushes(const Json& definitions, std::vector<Brush>& custom) {
+    if (!definitions.is_object()) return;
+    for (const auto& [key, data] : definitions.items()) {
+        if (find_builtin(key) != nullptr) continue;
+        Brush made;
+        try {
+            made = brush_from_dict(key, py_dict(data), std::nullopt, custom);
+        } catch (const PyUncaught&) {
+            throw;  // (OverflowError: register does not catch it)
+        } catch (const Error&) {
+            continue;  // (ValueError, TypeError: a brush that does not make sense is skipped)
+        } catch (const OpKeyError&) {
+            continue;  // (KeyError)
+        }
+        bool replaced = false;
+        for (Brush& existing : custom) {
+            if (existing.key == key) {
+                existing = made;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) custom.push_back(std::move(made));
+    }
+}
+
 std::string brush_kind(const Json& kind, const Document& doc) {
     const std::string name = legacy(py_str(kind));
     if (find_builtin(name) == nullptr && !doc.brush_custom.contains(name)) {
@@ -262,97 +402,10 @@ std::string brush_kind(const Json& kind, const Document& doc) {
     return name;
 }
 
-std::optional<Brush> brush_from_dict(const std::string& key, const Json& data, std::span<const Brush> registered) {
-    try {
-        const Json* base = get(data, "base");
-        const Brush start_brush = lookup(base != nullptr && py_truthy(*base) ? *base : Json("gpen"), registered);
-        Json merged = settings(start_brush);
-        if (data.is_object()) {
-            for (const auto& [k, v] : data.items()) {
-                if (merged.contains(k)) merged[k] = v;
-            }
-        }
-        static const std::array<std::tuple<const char*, double, double>, 16> kLimits{{
-            {"width_mm", 0.05, 50.0}, {"min_pressure", 0.0, 1.0}, {"gamma", 0.2, 5.0}, {"opacity", 0.05, 1.0},
-            {"stabilize", 0, 15}, {"tip_angle", -360.0, 360.0}, {"tip_ratio", 0.02, 1.0}, {"spacing", 0.0, 5.0},
-            {"scatter", 0.0, 5.0}, {"size_jitter", 0.0, 1.0}, {"count", 1, 12}, {"speed", 0.0, 1.0},
-            {"post_smooth", 0, 10}, {"stamp_size", 0.02, 3.0}, {"mix", 0.0, 1.0}, {"stretch", 0.0, 1.0}}};
-        for (const auto& [name, lo, hi] : kLimits) {
-            const double value = to_float(merged[name]);
-            if (!(lo <= value && value <= hi)) return std::nullopt;
-        }
-        if (!one_of(merged["texture"], {"", "grain", "soft", "dry", "water"})) return std::nullopt;
-        if (!one_of(merged["tip"], {"round", "flat", "image"})) return std::nullopt;
-        if (!one_of(merged["pattern"], {"", "dots", "dash", "lace", "grass", "hearts", "stars", "leaves"})) return std::nullopt;
-        if (!one_of(merged["aa"], {"none", "weak", "normal", "strong"})) return std::nullopt;
-        if (merged["tip"] == Json("image") && !py_truthy(merged["tip_png"])) return std::nullopt;
-        const std::string label = py_truthy(merged["label"]) ? py_str(merged["label"]) : std::string();
-        if (!has_text(label)) return std::nullopt;
-        Brush b;
-        b.key = key;
-        b.label = label;
-        b.width_mm = to_float(merged["width_mm"]);
-        b.min_pressure = to_float(merged["min_pressure"]);
-        b.gamma = to_float(merged["gamma"]);
-        b.opacity = to_float(merged["opacity"]);
-        b.stabilize = to_int(merged["stabilize"]);
-        b.taper = py_truthy(merged["taper"]);
-        b.texture = py_truthy(merged["texture"]) ? py_str(merged["texture"]) : "";
-        if (py_truthy(merged["rgb"])) {
-            std::vector<std::int64_t> rgb;
-            for (const Json& v : iterate(merged["rgb"])) rgb.push_back(to_int(v));
-            if (rgb.size() > 3) rgb.resize(3);
-            b.rgb = std::move(rgb);
-        }
-        b.fixed_width = py_truthy(merged["fixed_width"]);
-        b.tip = py_str(merged["tip"]);
-        b.tip_angle = to_float(merged["tip_angle"]);
-        b.tip_ratio = to_float(merged["tip_ratio"]);
-        b.tip_follow = py_truthy(merged["tip_follow"]);
-        b.tip_rotation = py_truthy(merged["tip_rotation"]);
-        b.tip_png = py_truthy(merged["tip_png"]) ? py_str(merged["tip_png"]) : "";
-        b.spacing = to_float(merged["spacing"]);
-        b.scatter = to_float(merged["scatter"]);
-        b.size_jitter = to_float(merged["size_jitter"]);
-        b.turn_jitter = py_truthy(merged["turn_jitter"]);
-        b.count = to_int(merged["count"]);
-        b.pattern = py_truthy(merged["pattern"]) ? py_str(merged["pattern"]) : "";
-        b.speed = to_float(merged["speed"]);
-        b.post_smooth = to_int(merged["post_smooth"]);
-        b.aa = py_str(merged["aa"]);
-        b.stamp_size = to_float(merged["stamp_size"]);
-        b.mix = to_float(merged["mix"]);
-        b.stretch = to_float(merged["stretch"]);
-        return b;
-    } catch (const PyValueError&) {
-        return std::nullopt;
-    } catch (const PyTypeError&) {
-        return std::nullopt;
-    } catch (const OpKeyError&) {
-        return std::nullopt;
-    }
-}
-
 Brush brush_for(const Json& key, const Document& doc) {
-    // brushes.register(episode.brush_custom), as Python does when it reads the book
-    std::vector<Brush> registered;
-    if (doc.brush_custom.is_object()) {
-        for (const auto& [name, data] : doc.brush_custom.items()) {
-            if (find_builtin(name) != nullptr) continue;
-            if (!data.is_object()) continue;  // (dict(data) fails: skipped)
-            if (auto made = brush_from_dict(name, data, registered)) {
-                bool replaced = false;
-                for (Brush& b : registered) {
-                    if (b.key == name) {
-                        b = *made;
-                        replaced = true;
-                    }
-                }
-                if (!replaced) registered.push_back(std::move(*made));
-            }
-        }
-    }
-    return lookup(key, registered);
+    std::vector<Brush> custom;
+    register_brushes(doc.brush_custom, custom);
+    return find_brush(key, custom);
 }
 
 }  // namespace genko::core
