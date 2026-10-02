@@ -17,10 +17,13 @@
 #include "core/frames.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
+#include "core/pyvalue.hpp"
 #include "core/stroke_geom.hpp"
 #include "render/brushes.hpp"
+#include "render/effects.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
+#include "render/tones.hpp"
 
 namespace genko::render {
 
@@ -595,6 +598,32 @@ Image tinted(const Image& image, const std::vector<std::int64_t>& rgb) {
 
 bool is_tone(const Layer& layer) { return layer.role == LayerRole::Tone || layer.kind == LayerKind::Tone; }
 
+// What tones::draw_layer needs from this drawing: the page and render._paint_patch.
+tones::Page tone_page(const Ctx& ctx) {
+    const int dpi = ctx.dpi;
+    return tones::Page{ctx.page, dpi, ctx.size,
+                       [dpi](Image& out, const Box& box, const core::Patch& patch) { paint_patch(out, box, patch, dpi, nullptr); }};
+}
+
+// render._screen_dots: the tones as dots on screen too (render.SCREEN_DOTS, at a size where a dot is a pixel or two).
+bool screen_dots(const Ctx& ctx) { return ctx.screen_dots && ctx.mode != "print" && ctx.dpi >= 96 && ctx.dots; }
+
+// tones.screened for the layer's picture over `area` (トーン化). A noise screen runs from the top of the page: the rows
+// above the area are drawn too.
+Image screened_layer(const Ctx& ctx, const Layer& layer, const Image& raster, const Box& area, const Image* panel_mask);
+
+// render._draw_effects: every visible effect of a known kind over the RGB picture of `area`.
+Image draw_effects(const Ctx& ctx, const Image& image, const Box& area) {
+    Image rgba = image.convert("RGBA");
+    bool drawn = false;
+    for (const Json& effect : core::py_iter(ctx.page->effects)) {
+        if (!effects::drawn(effect)) continue;
+        rgba = effects::draw(std::move(rgba), effect, *ctx.page, ctx.dpi, ctx.size, area);
+        drawn = true;
+    }
+    return drawn ? rgba.convert("RGB") : image;
+}
+
 // The layer's own picture and lines over `area` (render_page: _open_raster, raster.resize, _layer_strokes), or nothing.
 std::optional<Image> layer_pixels(const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel_mask, bool rough) {
     std::optional<Image> raster;
@@ -625,6 +654,19 @@ std::optional<Image> layer_with_effects(const Ctx& ctx, const Layer& layer, cons
     if (!raster) return std::nullopt;
     const Image done = layer_effects(layer, std::move(*raster), ctx.dpi);
     return done.crop(shifted(area, -wide.x0, -wide.y0));
+}
+
+Image screened_layer(const Ctx& ctx, const Layer& layer, const Image& raster, const Box& area, const Image* panel_mask) {
+    const Json& spec = *layer.screen;
+    const Json* pattern = get(spec, "pattern");
+    const Box band{0, 0, ctx.size.width, area.y1};
+    if (pattern != nullptr && core::py_truthy(*pattern) && core::py_str(*pattern) == "noise" && area != band) {
+        std::optional<Image> band_mask;
+        if (panel_mask != nullptr) band_mask = clip_mask(*ctx.page, ctx.size, ctx.dpi, band);
+        const auto full = layer_with_effects(ctx, layer, band, band_mask ? &*band_mask : nullptr, ctx.rough);
+        return tones::screened(*full, spec, ctx.dpi, ctx.size, band).crop(area);
+    }
+    return tones::screened(raster, spec, ctx.dpi, ctx.size, area);
 }
 
 // --- what else a page can carry ---------------------------------------------------------------------------------------
@@ -658,21 +700,6 @@ bool folds_draw(const Page& page) {
     const double flap = mm("flap_mm");
     const double face = (t.width.value() - spine - 2 * flap) / 2;
     return flap > 0 || face > 0 || spine > 0;
-}
-
-// An effect line effects.draw would draw (a known kind, visible)
-bool effects_draw(const Page& page) {
-    static const char* const kKinds[] = {"focus", "speed", "uni_flash", "beta_flash", "white"};
-    if (!page.effects.is_array()) return core::py_truthy(page.effects);
-    for (const Json& e : page.effects) {
-        if (!e.is_object()) return true;
-        const Json* kind = get(e, "kind");
-        if (kind == nullptr || !kind->is_string()) continue;
-        if (std::find(std::begin(kKinds), std::end(kKinds), kind->get<std::string>()) == std::end(kKinds)) continue;
-        const Json* visible = get(e, "visible");
-        if (visible == nullptr || core::py_truthy(*visible)) return true;
-    }
-    return false;
 }
 
 // The story lines of this page (Episode.story_for_page; a page alone has none here: C++ keeps lines in the book).
@@ -778,8 +805,9 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (!layer.visible) continue;
         if (print && !layer.exportable) continue;
         if (guide_role(layer.role) && print) continue;
-        if (is_tone(layer)) {  // tones sit in the layer order
-            skip_unported(ctx, "tones");
+        if (is_tone(layer)) {  // tones sit in the layer order: a layer above can cover them
+            const bool dots = (print && ctx.finish && ctx.dots) || screen_dots(ctx);
+            rgba = tones::draw_layer(std::move(rgba), layer, tone_page(ctx), area, panel, dots);
             prev_alpha.reset();
             continue;
         }
@@ -813,8 +841,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                                         }();
             if (colour) skip_unported(ctx, "finish");
         }
-        if (truthy_json(layer.screen) && ((print && ctx.dots) || (ctx.screen_dots && !print && dpi >= 96 && ctx.dots))) {
-            skip_unported(ctx, "screen");  // トーン化 (left out: the layer's greys as they are)
+        if (truthy_json(layer.screen) && ((print && ctx.dots) || screen_dots(ctx))) {
+            raster = screened_layer(ctx, layer, *raster, area, panel);  // トーン化: its greys as dots in print
         }
         Image picture = masked(ctx, layer, std::move(*raster), area);
         if (layer.color && !layer.color->empty() && (!print || layer.color_prints)) picture = tinted(picture, *layer.color);
@@ -824,7 +852,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     }
     Image image = rgba.convert("RGB");
 
-    if (effects_draw(page)) skip_unported(ctx, "effects");
+    if (core::py_truthy(page.effects)) image = draw_effects(ctx, image, area);
     if (!print && core::py_truthy(page.prims)) skip_unported(ctx, "prims");
     if (truthy_json(page.ruler) && name_or_proof) draw_ruler(image, area, ctx);
     draw_frames(image, area, page, ctx.size, dpi);
@@ -976,9 +1004,13 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
     const Box area{0, 0, ctx.size.width, ctx.size.height};
     Image empty = transparent(area);
     if (layer.kind == LayerKind::Folder) return empty;
-    if (is_tone(layer)) {
-        skip_unported(ctx, "tones");
-        return masked(ctx, layer, Image::create("RGBA", ctx.size, Ink{20, 20, 20, 0}), area);
+    if (is_tone(layer)) {  // the tone's ink as alpha, drawn on white
+        const Image white = Image::create("RGBA", ctx.size, Ink{255, 255, 255, 255});
+        const std::optional<Image> panels = clip_mask(page, ctx.size, dpi, area);
+        const Image drawn = tones::draw_layer(white, layer, tone_page(ctx), area, panels ? &*panels : nullptr, false);
+        Image out = Image::create("RGBA", ctx.size, Ink{20, 20, 20, 0});
+        out.putalpha(chops::difference(white.convert("L"), drawn.convert("L")));
+        return masked(ctx, layer, std::move(out), area);
     }
     if (layer.kind == LayerKind::Adjust) return empty;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
@@ -999,11 +1031,34 @@ Image to_bitonal(const Image& image, int threshold, const core::Json* screen) {
     }
     const Json* pattern_json = get(*screen, "pattern");
     const std::string pattern = (pattern_json != nullptr && core::py_truthy(*pattern_json)) ? core::py_str(*pattern_json) : "dot";
-    if (pattern != "noise") throw NotYetPorted("screen");
     const auto number = [&](std::string_view key, double fallback) {
         const Json* v = get(*screen, key);
         return v != nullptr ? core::py_float(*v) : fallback;
     };
+    if (pattern != "noise") {
+        // the greys as dots (or lines) at that screen; solid black and paper stay as they are
+        const Json* dpi_json = get(*screen, "dpi");
+        const std::int64_t dpi_value = dpi_json != nullptr && core::py_truthy(*dpi_json) ? core::py_int(*dpi_json) : 600;
+        if (dpi_value > 1'000'000 || dpi_value < -1'000'000) throw core::Error("value", "the screen's dpi is out of range");
+        const auto dpi = static_cast<int>(dpi_value);
+        const auto black_at = number("black", 0.1);
+        const auto white_at = number("white", 0.95);
+        const float white = static_cast<float>(white_at);
+        const float span = static_cast<float>(std::max(0.01, white_at - black_at));
+        const Json* shape_json = get(*screen, "shape");
+        const std::string shape = shape_json != nullptr && core::py_truthy(*shape_json) ? core::py_str(*shape_json) : "round";
+        const std::string kind = pattern == "dot" || pattern == "line" || pattern == "cross" ? pattern : "dot";
+        const std::vector<float> limit = tones::screen(kind, grey.size(), dpi, number("lpi", 60), number("angle", 45), {0, 0}, shape,
+                                                       Box{0, 0, grey.width(), grey.height()});
+        const std::string values = grey.tobytes();
+        std::string bw(values.size(), '\0');
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            const float v = static_cast<float>(static_cast<unsigned char>(values[i])) / 255.0f;
+            const float cover = std::min(std::max((white - v) / span, 0.0f), 1.0f);
+            bw[i] = limit[i] < cover ? '\0' : static_cast<char>(255);
+        }
+        return Image::frombytes("L", grey.size(), bw).convert("1", Dither::None);
+    }
     // (numpy float32 like the Python code: the Python floats meet the float32 array one by one)
     const double black_at = number("black", 0.1);
     const double white_at_d = number("white", 0.95);

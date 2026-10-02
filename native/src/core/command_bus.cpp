@@ -146,10 +146,23 @@ ApplyError::ApplyError(const std::string& message, std::string code) : Error(std
 
 // --- OpRegistry --------------------------------------------------------------------------------------------------
 
+namespace {
+
+std::vector<void (*)(OpRegistry&)>& builtin_registrars() {
+    static std::vector<void (*)(OpRegistry&)> registrars;
+    return registrars;
+}
+
+}  // namespace
+
+void add_builtin_registrar(void (*registrar)(OpRegistry&)) { builtin_registrars().push_back(registrar); }
+
 const OpRegistry& OpRegistry::builtin() {
     static const OpRegistry registry = [] {
         OpRegistry r;
         register_book_ops(r);
+        register_ruler_ops(r);
+        for (auto* registrar : builtin_registrars()) registrar(r);
         return r;
     }();
     return registry;

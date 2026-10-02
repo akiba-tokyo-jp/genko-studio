@@ -31,6 +31,10 @@ genko_library(genko_core
     gates.cpp
     command_bus.cpp
     ops_book.cpp
+    pyvalue.cpp
+    rulers.cpp
+    op_targets.cpp
+    ops_rulers.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
 

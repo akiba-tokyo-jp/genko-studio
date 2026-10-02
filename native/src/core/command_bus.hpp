@@ -125,4 +125,11 @@ void reorder_pages(Document& doc, const std::vector<Num>& order);
 // add_page, delete_page).
 void register_book_ops(OpRegistry& registry);
 
+// Register the ruler ops of M3 (set_ruler, add_ruler, edit_ruler, delete_ruler, ruler_to_layer).
+void register_ruler_ops(OpRegistry& registry);
+
+// The ops of the libraries above core (genko_render_ops: tones, effects, …) join builtin() through a registrar each
+// such library adds once, before builtin() is first used (from a static initializer: render/render_ops.hpp).
+void add_builtin_registrar(void (*registrar)(OpRegistry&));
+
 }  // namespace genko::core

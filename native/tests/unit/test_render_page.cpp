@@ -76,7 +76,7 @@ private slots:
     void not_yet_ported_data() {
         QTest::addColumn<QString>("what");
         QTest::addColumn<QString>("mode");
-        for (const char* what : {"balloons", "nombre", "tones", "effects", "prims", "covers", "anim", "screen", "placed"}) {
+        for (const char* what : {"balloons", "nombre", "prims", "covers", "anim", "placed"}) {
             const char* mode = std::string(what) == "prims" || std::string(what) == "covers" ? "proof" : "print";
             QTest::newRow(what) << QString(what) << QString(mode);
         }
@@ -237,7 +237,7 @@ private slots:
         QVERIFY(panel.width() > 0 && panel.height() > 0);
         QCOMPARE(std::string(render::to_bitonal(panel).mode()), std::string("1"));
         const Json dots = Json::object({{"pattern", "dot"}});
-        QVERIFY_THROWS_EXCEPTION(render::NotYetPorted, render::to_bitonal(panel, 180, &dots));
+        QCOMPARE(std::string(render::to_bitonal(panel, 180, &dots).mode()), std::string("1"));
         QCOMPARE(render::export_plan(*doc.pages[0]).size(), std::size_t{7});
         QCOMPARE(render::mm_to_px(0.0, 600), 1);
         QCOMPARE(render::mm_to_px(25.4, 72), 72);
