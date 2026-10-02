@@ -24,6 +24,7 @@ genko_test(test_storage SOURCES unit/test_storage.cpp DEPS genko_test_support LA
 genko_test(test_lock SOURCES unit/test_lock.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_journal SOURCES unit/test_journal.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_command_bus SOURCES unit/test_command_bus.cpp DEPS genko_test_support LABELS unit)
+genko_test(test_ops SOURCES unit/test_ops.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_transaction SOURCES unit/test_transaction.cpp DEPS genko_test_support LABELS unit TIMEOUT 600)
 
 # Drawing (M2-R1): Python's random and stroke geometry, Pillow's Image layer and PNG reading, against tables made by
@@ -53,10 +54,22 @@ set_tests_properties(test_contract_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFOR
 genko_test(test_contract_render_cli SOURCES contract/test_contract_render_cli.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 1800)
 set_tests_properties(test_contract_render_cli PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
+# The ops of M2-O1 against Python's apply_ops (fixed cases, random sequences, saved and read back) and the command line.
+genko_test(test_contract_ops SOURCES contract/test_contract_ops.cpp contract/opsupport.cpp DEPS genko_test_support
+           LABELS contract TIMEOUT 3600)
+genko_test(test_contract_ops_cli SOURCES contract/test_contract_ops_cli.cpp DEPS genko_test_support LABELS contract
+           TIMEOUT 3600)
+# core/filters, the correction layers' adjustments for the ops and the renderer, against Python's filters.apply_filter.
+genko_test(test_contract_filters SOURCES contract/test_contract_filters.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 600)
+# The two together: a book made by the ops (C++ and Python), drawn by `genko render` and `python -m genko render`.
+genko_test(test_contract_drawn_by_ops SOURCES contract/test_contract_drawn_by_ops.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render LABELS contract TIMEOUT 1800)
 
 genko_test(test_cli_e2e SOURCES e2e/test_cli_e2e.cpp DEPS genko_test_support LABELS e2e)
 genko_test(test_save_e2e SOURCES e2e/test_save_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
 genko_test(test_migrate_e2e SOURCES e2e/test_migrate_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
+genko_test(test_ops_e2e SOURCES e2e/test_ops_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
 
 # Timings, shown and not judged (not run by the usual CI: ctest -L perf).
 genko_test(test_perf_render SOURCES perf/test_perf_render.cpp DEPS genko_render LABELS perf TIMEOUT 1800)

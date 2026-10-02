@@ -12,4 +12,10 @@ namespace genko::core {
 // (帯), one wide sheet with both covers, the spine and the flaps, with the book's bleed and paper allowance.
 PageSpec spec_for(const PageSpec& book, const Json& cover);
 
+// covers.cover_of: the page's cover entry when it is one (kind front, back, jacket or obi), else null.
+const Json* cover_of(const Page& page);
+
+// covers.is_cover
+inline bool is_cover(const Page& page) { return cover_of(page) != nullptr; }
+
 }  // namespace genko::core

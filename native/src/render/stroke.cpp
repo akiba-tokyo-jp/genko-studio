@@ -1,6 +1,8 @@
 #include "render/stroke.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 #include "core/error.hpp"
@@ -10,14 +12,11 @@ namespace genko::render {
 
 namespace {
 
-// Python's max(a, b) / min(a, b) for floats (the first unless the second is larger / smaller).
-double pmax(double a, double b) { return b > a ? b : a; }
-double pmin(double a, double b) { return b < a ? b : a; }
+using core::py_max;
+using core::py_min;
 
-int round_int(double v) {
-    if (!std::isfinite(v)) throw core::Error("value", "cannot convert float to integer");
-    return static_cast<int>(std::nearbyint(v));
-}
+// round(v) for a size in pixels
+int round_int(double v) { return static_cast<int>(core::py_round_int(v)); }
 
 }  // namespace
 
@@ -33,7 +32,7 @@ void stamp_polyline(Draw& draw, const core::PenPoints& points, int dpi, double w
         const core::PenPoint& b = points[i + 1];
         const double pressure = a.p.value_or(1.0);
         const int radius = [&] {
-            const int r = round_int(stroke_mm_to_px(width_mm * pmax(0.15, pressure), dpi) / 2.0);
+            const int r = round_int(stroke_mm_to_px(width_mm * py_max(0.15, pressure), dpi) / 2.0);
             return r > 1 ? r : 1;
         }();
         double ax = a.x;
@@ -47,7 +46,7 @@ void stamp_polyline(Draw& draw, const core::PenPoints& points, int dpi, double w
             by = stroke_mm_to_px(by, dpi);
         }
         const double distance = core::py_pow(core::py_pow(bx - ax, 2) + core::py_pow(by - ay, 2), 0.5);
-        const auto steps = static_cast<int>(pmax(1.0, std::trunc(distance)));
+        const auto steps = static_cast<int>(std::max<std::int64_t>(1, core::py_trunc_int(distance)));
         for (int k = 0; k <= steps; ++k) {
             const double t = static_cast<double>(k) / steps;
             const double x = ax + (bx - ax) * t;
@@ -68,7 +67,7 @@ void draw_stroke_mm(Draw& draw, const core::PenPoints& points, int dpi, double w
     pts.reserve(points.size());
     for (const core::PenPoint& pt : points) {
         const double pressure = (pt.p && pressure_scale) ? *pt.p : 1.0;
-        const double radius = pmax(0.5, width_mm * pmax(floor, pmin(1.5, pressure)) * scale / 2);
+        const double radius = py_max(0.5, width_mm * py_max(floor, py_min(1.5, pressure)) * scale / 2);
         pts.push_back(P{pt.x * scale, pt.y * scale, radius});
     }
     if (pts.size() == 1) {

@@ -2,7 +2,7 @@
 
 #include <optional>
 
-#include "core/stroke_geom.hpp"
+#include "core/geometry.hpp"
 #include "render/draw.hpp"
 
 // The drawing half of Python's genko/stroke.py: a pen line from its points (mm, with pressure) at any resolution.

@@ -184,11 +184,10 @@ void bomb_check(std::int64_t w, std::int64_t h) {
     }
 }
 
-// Python's round(x) for a float, as an int.
-int py_round_int(double x) {
-    if (!std::isfinite(x)) throw core::Error("value", "cannot convert float to integer");
-    const double r = std::nearbyint(x);
-    if (r > static_cast<double>(std::numeric_limits<int>::max()) || r < static_cast<double>(std::numeric_limits<int>::min())) {
+// round(x) as a C int (Pillow's coordinates).
+int round_to_int(double x) {
+    const std::int64_t r = core::py_round_int(x);
+    if (r > std::numeric_limits<int>::max() || r < std::numeric_limits<int>::min()) {
         throw core::Error("value", "integer out of range");
     }
     return static_cast<int>(r);
@@ -495,7 +494,7 @@ Image Image::crop(const Box& box) const {
 Image Image::crop(const BoxF& box) const {
     if (box.x1 < box.x0) throw core::Error("value", "Coordinate 'right' is less than 'left'");
     if (box.y1 < box.y0) throw core::Error("value", "Coordinate 'lower' is less than 'upper'");
-    return crop(Box{py_round_int(box.x0), py_round_int(box.y0), py_round_int(box.x1), py_round_int(box.y1)});
+    return crop(Box{round_to_int(box.x0), round_to_int(box.y0), round_to_int(box.x1), round_to_int(box.y1)});
 }
 
 void Image::paste(const Image& im, Point at, const Image* mask) {

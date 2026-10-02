@@ -602,7 +602,8 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     layer.panel_clip = to_bool(data, "panel_clip", true);
     layer.panel_each = to_bool(data, "panel_each", false);
     layer.tone = dict_if_truthy(data, "tone");
-    layer.parent_id = asis_opt_str(data, "parent_id", at);
+    // (any value, as Python's _layer_from_dict keeps it: set_layer stores the op's "parent" as it is given)
+    if (const Json* parent = find(data, "parent_id")) layer.parent_id = *parent;
     if (const Json* color = find(data, "color"); color && core::py_truthy(*color)) {
         auto values = ints_of(*color, at_key(at, "color"));
         if (values.size() > 3) values.resize(3);

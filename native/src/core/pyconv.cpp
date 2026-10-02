@@ -1,11 +1,13 @@
 #include "core/pyconv.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <limits>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include "core/error.hpp"
 #include "core/pynum.hpp"
@@ -211,6 +213,63 @@ std::int64_t py_int(const Json& value) {
             throw Error("format", "int() argument must be a string, a bytes-like object or a real number, not '" +
                                       py_type_name(value) + "'");
     }
+}
+
+std::int64_t py_int(const Num& value) { return value.is_int() ? value.int_value() : py_int(Json(value.value())); }
+
+std::optional<std::string> py_big_int_text(const Json& value) {
+    if (value.is_number_unsigned()) {
+        const auto u = value.get<std::uint64_t>();
+        if (u <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) return std::nullopt;
+        return std::to_string(u);
+    }
+    if (value.is_string()) {
+        std::string text;
+        if (!remove_underscores(strip(value.get_ref<const std::string&>()), text) || text.empty()) return std::nullopt;
+        std::string_view body = text;
+        const bool negative = body.front() == '-';
+        if (body.front() == '+' || body.front() == '-') body.remove_prefix(1);
+        if (body.empty()) return std::nullopt;
+        for (const char c : body) {
+            if (!is_digit(c)) return std::nullopt;
+        }
+        while (body.size() > 1 && body.front() == '0') body.remove_prefix(1);
+        // past 2**63 - 1 (or below -2**63): more than 19 digits, or 19 digits beyond the bound
+        const std::string_view bound = negative ? "9223372036854775808" : "9223372036854775807";
+        if (body.size() < bound.size() || (body.size() == bound.size() && body <= bound)) return std::nullopt;
+        return (negative ? "-" : "") + std::string(body);
+    }
+    if (!value.is_number_float()) return std::nullopt;
+    const double d = value.get<double>();
+    if (!std::isfinite(d)) return std::nullopt;
+    const double t = std::trunc(d);
+    if (t < 9223372036854775808.0 && t >= -9223372036854775808.0) return std::nullopt;
+    // |t| = mantissa * 2**shift exactly (mantissa < 2**53, shift >= 11): its digits in base 10**9, lowest first
+    int exponent = 0;
+    const double fraction = std::frexp(std::fabs(t), &exponent);
+    auto mantissa = static_cast<std::uint64_t>(std::ldexp(fraction, 53));
+    int shift = exponent - 53;
+    constexpr std::uint64_t kBase = 1000000000;
+    std::vector<std::uint64_t> limbs;
+    for (; mantissa > 0; mantissa /= kBase) limbs.push_back(mantissa % kBase);
+    while (shift > 0) {
+        const int step = std::min(shift, 29);
+        std::uint64_t carry = 0;
+        for (auto& limb : limbs) {
+            const std::uint64_t v = (limb << step) + carry;
+            limb = v % kBase;
+            carry = v / kBase;
+        }
+        for (; carry > 0; carry /= kBase) limbs.push_back(carry % kBase);
+        shift -= step;
+    }
+    std::string text = t < 0 ? "-" : "";
+    text += std::to_string(limbs.back());
+    for (std::size_t i = limbs.size() - 1; i-- > 0;) {
+        const std::string part = std::to_string(limbs[i]);
+        text += std::string(9 - part.size(), '0') + part;
+    }
+    return text;
 }
 
 std::string py_repr_str(std::string_view text) {

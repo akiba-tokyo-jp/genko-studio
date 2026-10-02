@@ -139,6 +139,9 @@ struct Patch {
     Bytes png;                    // null: the picture was missing (the patch is not written back, as in Python)
     std::optional<std::string> asset;  // the ref it was read from
     BlobMemo memo;
+    // Keys set after the patch was read that it did not have (duplicate_layer's new "id"): Python's dict keeps them
+    // after "asset", which it added when it read the patch, and writes them there.
+    Json after_asset = Json::object();
 };
 
 struct Layer {
@@ -167,7 +170,9 @@ struct Layer {
     bool panel_each = false;   // each line stays in the panel it begins in
     std::vector<Patch> patches;
     std::optional<Json> tone;  // tone layers: {pattern, gradient}
-    std::optional<std::string> parent_id;
+    // The folder it is in (null: none). As Python keeps it: a str when read (the reader repairs other values), and
+    // set_layer's "parent" as it is given.
+    Json parent_id = nullptr;
     std::optional<std::string> asset;     // placed: "sha256:…" in assets/
     std::optional<std::string> frame_id;  // placed: the panel it belongs to
     std::optional<Rect> placement_mm;     // placed: where the whole image lands on the page
@@ -243,7 +248,7 @@ struct Page {
     std::vector<std::pair<LayerRole, NumList>> fills;  // in the order they were set (Python's dict)
     std::vector<Layer> layers;
     std::optional<Num> spread_with;
-    std::optional<std::string> selected_frame_id;  // (not saved)
+    Json selected_frame_id = nullptr;  // (not saved) select_frame's "frame_id" as it is given; null: none
     Json effects = Json::array();
     std::optional<Json> ruler;  // the old single perspective ruler (kept for old books)
     Json rulers = Json::array();

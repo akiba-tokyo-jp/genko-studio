@@ -98,11 +98,22 @@ private slots:
         QCOMPARE(error_of(doc, ops(R"([{"page": 1}])")), std::string("apply: ops[0] None: op is required"));
         QCOMPARE(error_of(doc, ops(R"([{"op": "frobnicate"}])")), std::string("apply: ops[0] frobnicate: unknown op: frobnicate"));
         QCOMPARE(error_of(doc, ops(R"([{"op": 5}])")), std::string("apply: ops[0] 5: unknown op: 5"));
-        const std::string missing = error_of(doc, ops(R"([{"op": "add_stroke", "page": 1}])"));
-        QVERIFY2(missing.starts_with("not_implemented: ops[0] add_stroke: add_stroke is not implemented in this build yet ‖ "
-                                     "add_stroke takes {page: int, layer: name|ink"),
-                 missing.c_str());
-        QVERIFY(error_of(doc, ops(R"([{"op": "for_pages", "pages": "all", "ops": []}])")).starts_with("not_implemented: ops[0] for_pages:"));
+        // an op of the public list that this build does not have: refused, never skipped
+        QCOMPARE(error_of(doc, ops(R"([{"op": "fill", "page": 1, "x_mm": 1, "y_mm": 2}])")),
+                 std::string("not_yet_ported: ops[0] fill: fill is not in the C++ build yet"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1}, {"op": "approve", "page": 1}])")),
+                 std::string("not_yet_ported: ops[1] approve: approve is not in the C++ build yet"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "for_pages", "pages": "all", "ops": []}])")),
+                 std::string("apply: ops[0] for_pages: ops is the list of ops to run on each page"));
+        // undo is an op only on its own (Python's _apply_one does not know it)
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1}, {"op": "undo"}])")),
+                 std::string("apply: ops[1] undo: unknown op: undo ‖ undo takes {}"));
+        // an op name Python cannot look up in its sets of ops: before the ops run (where Python stops with a
+        // traceback), or, after an op that may change any page, when the op is checked
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1}, {"op": ["set_note"], "page": 1}])")),
+                 std::string("python_error: ops[1] ['set_note']: TypeError: unhashable type: 'list'"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "add_page"}, {"op": {"a": 1}, "page": 1}])")),
+                 std::string("apply: ops[1] {'a': 1}: a value of the wrong type (unhashable type: 'dict')"));
         // the page lock is checked before the op is looked up (Python's order)
         Document locked = book();
         locked.page_locks[locked.page(0).id] = "ai:x";
@@ -207,9 +218,13 @@ private slots:
                  std::string("apply: ops[0] unlock_page: page 1 locked by human:作者; ai:x cannot unlock it ‖ unlock_page takes {page: int}"));
         const auto unlocked = apply(human.doc, R"([{"op": "unlock_page", "page": 1}])", "human:other");
         QVERIFY(!unlocked.doc.page_locks.contains(id1));
-        // the unnamed caller may lock in anyone's name; a page that is not there is not locked
+        // the unnamed caller may lock in anyone's name; a page that is not there is refused (Python locks nothing and
+        // says nothing)
         QCOMPARE(apply(doc, R"([{"op": "lock_page", "page": 2, "agent": "ai:z"}])").doc.page_locks[doc.page(1).id], Json("ai:z"));
-        QVERIFY(apply(doc, R"([{"op": "lock_page", "page": 9}])", "ai:x").doc.page_locks.empty());
+        QCOMPARE(error_of(doc, ops(R"([{"op": "lock_page", "page": 9}])"), "ai:x"),
+                 std::string("apply: ops[0] lock_page: no page 9 ‖ lock_page takes {page: int, agent: str}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "unlock_page", "page": 9}])"), "ai:x"),
+                 std::string("apply: ops[0] unlock_page: no page 9 ‖ unlock_page takes {page: int}"));
         // within one batch, later ops see the lock
         QVERIFY(error_of(doc, ops(R"([{"op": "lock_page", "page": 3}, {"op": "set_note", "page": 3}])"), "ai:x") == "(applied)");
     }

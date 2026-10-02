@@ -529,6 +529,27 @@ int apply(const QStringList& args, bool ascii) {
     }
     if (expect && loaded.document.revision != *expect) throw storage::RevisionConflict(*expect, loaded.document.revision);
 
+    // [{"op": "undo"}] on its own undoes the latest saved change, as `genko undo --as <agent>` does (the same checks:
+    // another actor's change, approvals that need a person, an outside edit). Python's apply_ops undoes its session's
+    // changes here; a book's saved changes are in its journal. (A dry run only shows the book, as Python's does.)
+    const bool undo_op = ops.size() == 1 && ops[0].is_object() && ops[0].contains("op") && ops[0]["op"] == Json("undo");
+    if (undo_op && !dry_run) {
+        const storage::RestoreResult restored = storage::restore(lock, agent, false, false, txn);
+        const storage::LoadResult after = storage::load_document(dir);
+        Json out = Json::object();
+        out["ok"] = true;
+        out["applied"] = Json::array({"undo"});
+        out["snapshot"] = storage::snapshot(after.document);
+        out["job_id"] = core::new_id();
+        out["kind"] = restored.kind;
+        out["rev"] = restored.rev;
+        out["revision"] = restored.revision;
+        out["txn"] = restored.txn;
+        lock.release();
+        print_json(out, ascii);
+        return 0;
+    }
+
     const core::CommandBus bus;
     const core::ApplyResult result = bus.apply(loaded.document, ops, core::Actor(agent), dry_run);
     Json out = Json::object();
@@ -537,6 +558,7 @@ int apply(const QStringList& args, bool ascii) {
     out["snapshot"] = storage::snapshot(result.doc);
     out["job_id"] = core::new_id();
     if (result.has_warnings) out["warnings"] = result.warnings;
+    if (!result.results.empty()) out["results"] = result.results;
     if (dry_run) {
         out["revision"] = loaded.document.revision;
     } else {

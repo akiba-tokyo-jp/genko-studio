@@ -15,6 +15,16 @@ double number_or(const Json& cover, const char* key, double fallback) {
 
 }  // namespace
 
+const Json* cover_of(const Page& page) {
+    if (!page.extra.is_object()) return nullptr;
+    const auto it = page.extra.find("cover");
+    if (it == page.extra.end() || !it->is_object()) return nullptr;
+    const auto kind = it->find("kind");
+    if (kind == it->end() || !kind->is_string()) return nullptr;
+    const auto& k = kind->get_ref<const std::string&>();
+    return k == "front" || k == "back" || k == "jacket" || k == "obi" ? &*it : nullptr;
+}
+
 PageSpec spec_for(const PageSpec& book, const Json& cover) {
     const auto kind = cover.find("kind");
     const bool wrap = kind != cover.end() && kind->is_string() &&

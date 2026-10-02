@@ -19,12 +19,8 @@
 
 namespace genko::render::detail {
 
-struct PointMM {
-    double x = 0.0;
-    double y = 0.0;
-
-    friend bool operator==(const PointMM&, const PointMM&) = default;
-};
+// A point on the page in mm, as a float.
+using PointMM = core::PointF;
 
 // What a render is doing: the page, its size in pixels and the options.
 struct Ctx {
@@ -48,28 +44,18 @@ void check_cancel(const Ctx& ctx);
 // Something this build does not draw yet: left out and recorded with skip_unported (true), NotYetPorted otherwise.
 bool skip_unported(const Ctx& ctx, const std::string& element);
 
-// --- geometry (genko/placement.py, genko/frames.py) ------------------------------------------------------------
+// --- geometry (genko/placement.py and genko/frames.py are core's: core/placement.hpp, core/frames.hpp) ----------
 
 // render._xy: each coordinate through mm_to_px.
 std::pair<int, int> xy(double x_mm, double y_mm, int dpi);
 PointD xy_point(double x_mm, double y_mm, int dpi);
 
-struct Edges {
-    bool left = false;
-    bool top = false;
-    bool right = false;
-    bool bottom = false;
-};
-
-Edges outer_edges(const core::Page& page, const core::Frame& frame);
-std::optional<std::vector<PointMM>> bleed_poly(const core::Page& page, const core::Frame* frame);
-std::optional<std::vector<PointMM>> bleed_outline(const core::Page& page, const core::Frame* frame,
-                                                  std::optional<double> beyond_mm = 8.0);
-bool on_bleed_edge(const core::Page& page, const PointMM& a, const PointMM& b);
-bool in_poly(std::span<const PointMM> points, double x, double y);
-core::Rect clip_box(const core::Page& page, const core::Frame* frame, std::string_view clip_to);
+// The points as floats (for drawing).
+std::vector<PointMM> mm_points(std::span<const core::Point> points);
+// frames.outline, placement.bleed_outline and frames.offset with the points as floats.
 std::vector<PointMM> outline_mm(const core::Frame& frame);
-// frames.offset: the outline moved inward by d mm.
+std::optional<std::vector<PointMM>> bleed_outline_mm(const core::Page& page, const core::Frame* frame,
+                                                     std::optional<double> beyond_mm = 8.0);
 std::vector<PointMM> offset_outline(const std::vector<PointMM>& points, double d);
 // render._panel_of: the panel (a leaf that cuts the layers) that has this point.
 const core::Frame* panel_of(const core::Page& page, double x, double y);
@@ -89,11 +75,6 @@ void draw_border(Draw& draw, const std::vector<PointMM>& points, double width_mm
 std::vector<std::vector<PointMM>> dashes(const std::vector<PointMM>& points, double on, double off);
 std::vector<PointMM> rough_outline(const std::vector<PointMM>& points, std::string_view seed, double amount_mm);
 void draw_crop_marks(Draw& draw, const core::Page& page, int dpi);
-
-// --- colours from JSON --------------------------------------------------------------------------------------------
-
-// The ints of a JSON list (Python's tuple(int(v) for v in …)); core::Error where Python's int() fails.
-std::vector<std::int64_t> json_ints(const core::Json& list);
 
 // --- compositing (composite.cpp) -----------------------------------------------------------------------------------
 

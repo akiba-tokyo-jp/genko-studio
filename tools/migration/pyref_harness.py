@@ -12,7 +12,10 @@ Commands (JSON is UTF-8 without escapes):
                                        {"op": "snapshot", "book", "full", "ids", "out"} | {"op": "resave", "book",
                                        "dest", "ids"} | {"op": "apply", "book", "ops", "agent", "dry_run", "ids",
                                        "out", "dest"?} (apply_ops on the book read; the reply, or {"ok": false,
-                                       "error"}, to out; saved with save_episode into the new folder dest)
+                                       "error"}, to out; saved with save_episode into the new folder dest) |
+                                       {"op": "steps", "book", "steps": [{"ops", "agent"?, "dry_run"?}], "ids",
+                                       "first_id"?, "store", "out", "digest"?, "reread"?} (batches one after another
+                                       on the book in memory, as a session: see steps_job)
   restore BOOK --actor A [--redo] [--force]
                                        journal.restore under ProjectLock, as `genko undo`/`redo` does: the reply (or
                                        {"ok": false, "error"}) on stdout
@@ -22,6 +25,13 @@ Commands (JSON is UTF-8 without escapes):
   upgrade BOOK                         load_episode then save_episode into the same folder (a v1/v2 book becomes v3
                                        with project.v2.bak.json and its first journal line, as the baseline does)
   make-random OUT --seed N --count K   K random v3 books made with new_episode and direct field assignment
+  make-opsbook DEST                    the v3 book of the op contract tests (native/tests/contract/ops_cases.json
+                                       names its ids: they are counted, so it is the same book every time)
+  make-drawbook DEST                   the v3 book test_contract_drawn_by_ops draws lines on (nothing the C++ build
+                                       does not draw yet; ids counted)
+  make-sequences OUT --books DIR --seed N --count K
+                                       K random op sequences (1 to 12 ops, in batches by various actors, some dry
+                                       runs, for_pages, strict_gates, page locks) over the make-random books in DIR
   numbers OUT --seed N --count K       cases for repr(float), round(), sum(), math.hypot/dist and format(x, "g")
   json-dumps OUT --seed N --count K    random JSON documents and json.dumps of each (indent 2, default, canonical,
                                        ensure_ascii)
@@ -32,7 +42,8 @@ Commands (JSON is UTF-8 without escapes):
 
 --ids makes genko.models.new_id return 000000000001, 000000000002, … (from 1 again for each book), the same ids as
 genko::core::ScopedIdSource(counting_ids()) in C++, so books whose ids are made while reading (v1: layers, pages,
-strokes) compare exactly. Each job also starts with an empty blob cache, as a new process would.
+strokes) compare exactly. Each job also starts with an empty blob cache and only the built-in brushes, as a new
+process would.
 """
 from __future__ import annotations
 
@@ -60,8 +71,8 @@ class _Uuid:
 
 
 class _Counter:
-    def __init__(self) -> None:
-        self.next = 1
+    def __init__(self, first: int = 1) -> None:
+        self.next = first
 
     def __call__(self) -> _Uuid:
         n = self.next
@@ -69,18 +80,19 @@ class _Counter:
         return _Uuid(f"{n:012x}" + "0" * 20)
 
 
-def counting_ids() -> None:
+def counting_ids(first: int = 1) -> None:
     import genko.models as models
 
-    models.uuid4 = _Counter()
+    models.uuid4 = _Counter(first)
 
 
-def fresh_process_state(ids: bool) -> None:
-    from genko import blobcache
+def fresh_process_state(ids: bool, first: int = 1) -> None:
+    from genko import blobcache, brushes
 
     blobcache.clear()
+    brushes.CUSTOM.clear()  # (a new process knows only the brushes of the book it reads)
     if ids:
-        counting_ids()
+        counting_ids(first)
 
 
 def dumps(value) -> str:
@@ -120,6 +132,82 @@ def apply_job(job: dict) -> None:
     Path(job["out"]).write_text(dumps(reply), encoding="utf-8")
     if job.get("dest") and reply.get("ok") and not job.get("dry_run"):
         save_episode(episode, Path(job["dest"]), actor=job.get("agent", "genko"))
+
+
+def _digest(value) -> str:
+    import hashlib
+
+    return hashlib.sha256(dumps(value).encode("utf-8")).hexdigest()
+
+
+def _full_snapshot(episode) -> dict:
+    """snapshot(full=True) without its side effect. It reads page.name_strokes and page.ink_strokes, and Page._layer
+    adds a NAME or INK layer (with a new id) to a page that has none. `genko inspect --full` and the server's
+    /v1/inspect take it of a book just read and never save it, so that layer is never seen (the "layers" of the same
+    snapshot are listed before it is added); here the session goes on, so the pages get their layers back and the
+    ids the snapshot used are given back."""
+    import genko.models as models
+    from genko.headless import snapshot
+
+    counter = models.uuid4
+    mark = getattr(counter, "next", None)
+    kept = [(page, list(page.layers)) for page in episode.pages]
+    full = snapshot(episode, full=True)
+    for page, layers in kept:
+        page.layers[:] = layers
+    if mark is not None:
+        counter.next = mark
+    return full
+
+
+def steps_job(job: dict) -> None:
+    """Batches applied one after another to one book in memory, as a session does: after each, the reply (or the
+    error), the full snapshot (see _full_snapshot) and the project.json payload (Python's v3 writer, without
+    "revision"). With "digest", the snapshot and payload (and the reply's snapshot) are replaced by the sha256 of
+    their json.dumps. With "reread" (a new folder), the book is then saved there with save_episode and read back as
+    a new process would (ids counted from 1 again with "ids"): one more record, {"reread": true, "full",
+    "payload"}."""
+    import copy
+
+    from genko.assets import AssetStore
+    from genko.headless import apply_ops
+    from genko.io import _payload, load_episode, save_episode
+    from genko.ops import ApplyError
+
+    fresh_process_state(bool(job.get("ids")))
+    episode = load_episode(Path(job["book"]))
+    if job.get("ids"):  # (reading makes ids too, for the default layers each Page starts with: the ops' count anew)
+        counting_ids(int(job.get("first_id", 1)))
+    store = AssetStore(Path(job["store"]))
+    digest = bool(job.get("digest"))
+    records = []
+    for step in job["steps"]:
+        try:
+            reply = apply_ops(episode, copy.deepcopy(step["ops"]), dry_run=bool(step.get("dry_run")),
+                              agent=step.get("agent", "genko"))
+        except ApplyError as exc:
+            reply = {"ok": False, "error": str(exc)}
+        except Exception as exc:  # (apply_ops lets these through: Python's command line stops with a traceback)
+            reply = {"ok": False, "error": str(exc), "uncaught": type(exc).__name__}
+        payload = _payload(episode, store)
+        payload.pop("revision", None)
+        full = _full_snapshot(episode)
+        if digest:
+            if "snapshot" in reply:
+                reply["snapshot"] = _digest(reply["snapshot"])
+            full, payload = _digest(full), _digest(payload)
+        records.append({"reply": reply, "full": full, "payload": payload})
+    if job.get("reread"):
+        save_episode(episode, Path(job["reread"]), actor="genko")
+        fresh_process_state(bool(job.get("ids")))
+        again = load_episode(Path(job["reread"]))
+        payload = _payload(again, store)
+        payload.pop("revision", None)
+        full = _full_snapshot(again)
+        if digest:
+            full, payload = _digest(full), _digest(payload)
+        records.append({"reread": True, "full": full, "payload": payload})
+    Path(job["out"]).write_text(dumps(records), encoding="utf-8")
 
 
 def restore_book(book: str, actor: str, redo: bool, force: bool) -> dict:
@@ -179,6 +267,8 @@ def run_batch(jobs_path: str) -> None:
             resave(job["book"], job["dest"], bool(job.get("ids")))
         elif job["op"] == "apply":
             apply_job(job)
+        elif job["op"] == "steps":
+            steps_job(job)
         else:
             raise SystemExit(f"unknown job {job['op']!r}")
 
@@ -504,12 +594,672 @@ def make_random_book(rng: random.Random, dest: Path) -> None:
     save_episode(episode, dest, actor="human:作者")
 
 
+def _tiny_png(rgba=(200, 30, 30, 255), size=(4, 3)) -> bytes:
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGBA", size, rgba).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def make_opsbook(dest: str) -> None:
+    """The book the op contract cases run on (native/tests/contract/ops_cases.json names its ids; they come from
+    the counting ids, so the book is the same every time): six pages and a front cover, with split, cut, drawn,
+    stacked and slanted panels, panel briefs, placed art, lines with tails, pen / paint / tone / fill / folder layers,
+    patches, rulers of every kind (and the old single one), a spread, the book's own brushes, a page lock and
+    tickets."""
+    import base64
+
+    from genko import models
+    from genko.assets import AssetStore
+    from genko.headless import apply_ops
+    from genko.io import save_episode
+    from genko.models import Binding, Layer, LayerKind, LayerRole, PageSpec, Rect
+
+    fresh_process_state(True)
+    root = Path(dest)
+    root.mkdir(parents=True, exist_ok=True)
+    store = AssetStore(root)
+    episode = models.new_episode("操作の試験", 3, 6, PageSpec.b5_doujin(), Binding.RIGHT)
+
+    def run(ops, agent="genko"):
+        reply = apply_ops(episode, ops, agent=agent)
+        if not reply.get("ok"):
+            raise SystemExit(f"make-opsbook: {ops}: {reply}")
+        return reply
+
+    def page(n):  # (apply_ops replaces the pages with their copies: look them up again)
+        return next(p for p in episode.pages if p.index == n)
+
+    # page 1: a stacked split, its top half split again; a brief on a panel; lines with tails; placed art
+    run([{"op": "split_frame", "page": 1, "axis": "horizontal", "ratio": 0.4, "gutter_mm": 5}])
+    top = page(1).frames[0].children[0]
+    run([{"op": "split_frame", "page": 1, "frame_id": top.id, "axis": "vertical", "ratio": 0.5, "gutter_mm": 3}])
+    leaves1 = page(1).leaf_frames()
+    leaves1[0].panel = {"shot": "close-up", "notes": ["目線"]}
+    leaves1[2].panel = {"shot": "wide"}
+    run([{"op": "add_line", "page": 1, "text": "こんにちは", "frame_id": leaves1[0].id, "x_mm": 120, "y_mm": 40,
+          "w_mm": 20, "h_mm": 30, "tails": [{"to": [118, 75], "via": [121, 72]}]},
+         {"op": "add_line", "page": 1, "text": "外の台詞", "x_mm": 30, "y_mm": 200, "tail": [60, 230]},
+         {"op": "add_line", "page": 1, "text": "枠の台詞", "frame_id": leaves1[2].id, "x_mm": 40, "y_mm": 150,
+          "tails": [{"to": [50, 170], "vias": [[45, 160], [48, 165]]}]}])
+    art = store.put_bytes(_tiny_png(), ".png")
+    placed = Layer(id=models.new_id(), role=LayerRole.USER, kind=LayerKind.PLACED, title="配置画像", asset=art,
+                   frame_id=leaves1[1].id, placement_mm=Rect(20, 30, 60.5, 40), fit="contain", clip_to="frame",
+                   source={"candidate": "c1", "request": "r1"})
+    page(1).layers.append(placed)
+    run([{"op": "name_ok", "page": 1}], agent="human:作者")
+    # page 2: drawn panels (a box and a polygon); the spread 2–3
+    run([{"op": "add_frame", "page": 2, "rect": [20, 25, 70, 90], "id": "drawn-a"},
+         {"op": "add_frame", "page": 2, "points": [[100, 25], [170, 30], [165, 120], [95, 110]], "id": "drawn-b"},
+         {"op": "set_spread", "page": 2, "with": 3}, {"op": "set_spread", "page": 3, "with": 2}])
+    # page 3: a brief on the root, then a slanted cut; a line in the lower panel; a tone with a patch
+    page(3).frames[0].panel = {"shot": "establishing"}
+    run([{"op": "cut_frame", "page": 3, "p0": [10, 120], "p1": [200, 140], "gutter_mm": 6}])
+    run([{"op": "add_line", "page": 3, "text": "下の台詞", "x_mm": 60, "y_mm": 180, "w_mm": 30, "h_mm": 25,
+          "tails": [{"to": [70, 220]}]},
+         {"op": "add_tone", "page": 3, "id": "tone-1", "area": {"poly": [[30, 40], [90, 40], [90, 90]]}}])
+    # page 4: strokes, pen / paint / fill / folder layers, a locked layer, patches, a raster; the old single ruler
+    run([{"op": "add_stroke", "page": 4, "layer": "name", "points": [[30, 30], [60, 40], [90, 35]]},
+         {"op": "add_stroke", "page": 4, "layer": "name", "points": [[30, 80, 0.4], [70, 90, 0.8], [110, 85, 0.6]]},
+         {"op": "add_stroke", "page": 4, "layer": "ink", "points": [[40, 50, 0.5], [80, 52, 0.9], [120, 60, 0.7],
+                                                                   [150, 90, 0.3]], "width_mm": 0.6},
+         {"op": "add_stroke", "page": 4, "layer": "ink", "points": [[40, 120], [160, 125]], "rgb": [10, 20, 200]},
+         {"op": "add_stroke", "page": 4, "layer": "ink", "points": [[100, 100], [100, 160]], "kind": "maru",
+          "rotation": [0, 45], "opacity": 0.5, "pressure_opacity": 0.4},
+         {"op": "add_layer", "page": 4, "kind": "pen", "id": "pen-1", "name": "線画"},
+         {"op": "add_stroke", "page": 4, "layer_id": "pen-1", "points": [[20, 20, 0.5], [40, 25, 0.6], [60, 22, 0.7],
+                                                                        [80, 30, 0.8], [100, 28, 0.9]]},
+         {"op": "add_layer", "page": 4, "kind": "paint", "id": "paint-1", "name": "塗り"},
+         {"op": "fill_area", "page": 4, "layer_id": "paint-1", "area": {"poly": [[10, 10], [50, 10], [50, 40]]},
+          "rgb": [250, 200, 0]},
+         {"op": "add_layer", "page": 4, "kind": "fill", "id": "fill-1", "rgb": [240, 240, 255]},
+         {"op": "add_layer", "page": 4, "kind": "folder", "id": "folder-1", "name": "フォルダー"},
+         {"op": "add_layer", "page": 4, "kind": "pen", "id": "pen-2", "parent": "folder-1", "after": "folder-1"},
+         {"op": "add_layer", "page": 4, "kind": "adjust", "id": "adjust-1", "adjust": {"kind": "levels", "black": 10}},
+         {"op": "add_layer", "page": 4, "kind": "pen", "id": "locked-1"},
+         {"op": "set_layer", "page": 4, "id": "locked-1", "locked": True},
+         {"op": "put_raster", "page": 4, "layer": "bg", "png_base64": base64.b64encode(_tiny_png((255, 255, 255, 255))).decode()},
+         {"op": "set_ruler", "page": 4, "kind": "perspective", "points": [[100, 40]]}])
+    # page 5: a ruler of every kind; a line drawn; locked by an AI
+    root5 = page(5).frames[0].id
+    rulers = [{"kind": "line", "points": [[20, 100], [180, 110]], "id": "r-line"},
+              {"kind": "curve", "points": [[20, 150], [60, 140], [100, 160], [140, 150]], "id": "r-curve", "frame_id": root5},
+              {"kind": "parallel", "angle": 30, "id": "r-parallel"},
+              {"kind": "concentric", "points": [[100, 150]], "ratio": 0.5, "angle": 20, "id": "r-circle"},
+              {"kind": "radial", "points": [[100, 140]], "id": "r-radial"},
+              {"kind": "perspective", "points": [[100, -50]], "id": "r-persp"},
+              {"kind": "perspective", "points": [[-200, 60], [400, 60]], "id": "r-persp2", "grid": 6},
+              {"kind": "symmetry", "points": [[104, 0], [104, 283]], "id": "r-sym"},
+              {"kind": "symmetry", "points": [[100, 140], [100, 100]], "copies": 3, "mirror": True, "id": "r-sym3",
+               "layer_id": "pen-5"},
+              {"kind": "guide", "axis": "h", "at": 50, "id": "r-guide"},
+              {"kind": "parallel_curve", "points": [[30, 60], [80, 50], [130, 70]], "id": "r-pcurve"},
+              {"kind": "multi_curve", "points": [[30, 230], [100, 220], [170, 235]],
+               "points2": [[30, 260], [100, 250], [170, 262]], "id": "r-mcurve"},
+              {"kind": "radial_curve", "points": [[40, 100], [80, 90], [120, 110]], "center": [100, 200], "id": "r-rcurve"},
+              {"kind": "rect", "points": [[50, 50], [150, 120]], "angle": 10, "id": "r-rect"},
+              {"kind": "ellipse", "points": [[60, 160], [140, 220]], "id": "r-ellipse"},
+              {"kind": "polygon", "points": [[20, 20], [60, 25], [50, 70]], "id": "r-polygon"}]
+    run([{"op": "add_layer", "page": 5, "kind": "pen", "id": "pen-5"}]
+        + [{"op": "add_ruler", "page": 5, **ruler} for ruler in rulers]
+        + [{"op": "add_stroke", "page": 5, "layer": "ink", "points": [[30, 200], [90, 210]]},
+           {"op": "lock_page", "page": 5, "agent": "ai:other"}])
+    # page 6: stacked splits (made before cuts were stored: no "split"); a line in the bottom panel
+    stack = page(6)
+    a, b = stack.split_frame(stack.frames[0].id, axis="horizontal", ratio=0.5, gutter_mm=4)
+    stack.split_frame(a.id, axis="vertical", ratio=0.4, gutter_mm=3)
+    run([{"op": "add_line", "page": 6, "text": "積み", "x_mm": 50, "y_mm": 160, "frame_id": b.id}])
+    # a front cover at the end (page 7)
+    run([{"op": "add_cover", "kind": "front"}])
+    episode.brush_custom = {"my_soft": {"label": "やわらか", "base": "gpen", "post_smooth": 2, "width_mm": 0.6},
+                            "my_mix": {"label": "混色", "mix": 0.4, "stretch": 0.5},
+                            "my_bad": {"label": "", "width_mm": 0.5}}
+    episode.tickets = [{"id": "t1", "page_index": 3, "page_id": page(3).id, "role": "bg", "status": "open"},
+                       {"id": "t2", "page_index": 5, "page_id": page(5).id, "role": "ink", "status": "open"}]
+    episode.nombre = {"start": 1}
+    save_episode(episode, root, actor="human:作者")
+
+
+def make_drawbook(dest: str) -> None:
+    """The v3 book test_contract_drawn_by_ops draws after the ops: two A4 pages with nothing the C++ build does not draw
+    yet (no lines, nombres off): page 1 split in three panels, page 2 one panel with a fill layer and a pen layer."""
+    from genko import models
+    from genko.headless import apply_ops
+    from genko.io import save_episode
+    from genko.models import Binding, PageSpec
+
+    fresh_process_state(True)
+    root = Path(dest)
+    root.mkdir(parents=True, exist_ok=True)
+    episode = models.new_episode("線の試験", 1, 2, PageSpec.a4_mono(), Binding.RIGHT)
+    episode.nombre = {"show": False}
+
+    def run(ops):
+        reply = apply_ops(episode, ops, agent="human:作者")
+        if not reply.get("ok"):
+            raise SystemExit(f"make-drawbook: {ops}: {reply}")
+
+    root1 = episode.pages[0].frames[0].id
+    run([{"op": "split_frame", "page": 1, "frame_id": root1, "axis": "horizontal", "ratio": 0.45, "gutter_mm": 6},
+         {"op": "name_ok", "page": 1}])
+    top = episode.pages[0].frames[0].children[0].id
+    run([{"op": "split_frame", "page": 1, "frame_id": top, "axis": "vertical", "ratio": 0.4, "gutter_mm": 3},
+         {"op": "add_layer", "page": 2, "kind": "fill", "id": "fill-2", "rgb": [235, 240, 250]},
+         {"op": "add_layer", "page": 2, "kind": "pen", "id": "pen-2", "name": "線画"},
+         {"op": "set_frame", "page": 2, "frame_id": episode.pages[1].frames[0].id, "corner_mm": 6,
+          "line": {"kind": "double", "rgb": [40, 40, 90]}}])
+    save_episode(episode, root, actor="human:作者")
+
+
 def make_random(out: str, seed: int, count: int) -> None:
     root = Path(out)
     root.mkdir(parents=True, exist_ok=True)
     for i in range(count):
         fresh_process_state(True)
         make_random_book(random.Random(seed * 1000 + i), root / f"book-{i:02d}.genko")
+
+
+# --- random op sequences (the ops of M2-O1) ---------------------------------------------------------------------------
+
+AGENTS = ["genko", "genko", "human:作者", "ai:hermes", "legacy:unknown", "ai:other"]
+SEQ_FIRST_ID = 0x100000  # (new ids count from here: above every id a random book has)
+
+
+class _Replay:
+    """A sequence's book as test_contract_ops's Python side (steps_job) has it after each step, while the sequence is
+    made: what an op will find in the book once the ops before it have changed it."""
+
+    def __init__(self, book: Path, store: Path):
+        from genko.assets import AssetStore
+        from genko.io import load_episode
+
+        fresh_process_state(True)
+        self.episode = load_episode(book)
+        counting_ids(SEQ_FIRST_ID)
+        self.store = AssetStore(store)
+
+    def layer_ids(self, step: dict, k: int):
+        """The ids of the layers of the page that op k of `step` names, when op k runs (the ops before it in the
+        batch applied); None when no op k runs (an op before fails) or there is no such page."""
+        import copy
+
+        import genko.models as models
+        from genko.headless import apply_ops
+
+        counter = models.uuid4
+        mark = counter.next
+        trial = copy.deepcopy(self.episode)
+        try:
+            if k > 0:
+                apply_ops(trial, copy.deepcopy(step["ops"][:k]), dry_run=False, agent=step.get("agent", "genko"))
+            index = int(step["ops"][k]["page"])
+        except Exception:  # (the batch stops before op k, or op k names no page)
+            return None
+        finally:
+            counter.next = mark  # (the ids the trial used are made again when the batch really runs)
+        page = next((page for page in trial.pages if page.index == index), None)
+        return [layer.id for layer in page.layers] if page is not None else None
+
+    def apply(self, step: dict) -> None:
+        """The step as steps_job applies it, with the payload and full snapshot it takes after each."""
+        import copy
+
+        from genko.headless import apply_ops
+        from genko.io import _payload
+
+        try:
+            apply_ops(self.episode, copy.deepcopy(step["ops"]), dry_run=bool(step.get("dry_run")),
+                      agent=step.get("agent", "genko"))
+        except Exception:  # (refused, or one of the errors apply_ops lets through: the book is as it was)
+            pass
+        _payload(self.episode, self.store)
+        _full_snapshot(self.episode)
+
+
+def _book_pools(book: Path) -> dict:
+    """What a sequence may name in a book: its pages, and on each its panels, layers and strokes."""
+    from genko.io import load_episode
+    from genko.models import LayerKind
+
+    fresh_process_state(True)
+    episode = load_episode(book)
+    pages = []
+    for page in episode.pages:
+        nodes = []
+
+        def walk(frame):
+            nodes.append(frame)
+            for child in frame.children:
+                walk(child)
+
+        for frame in page.frames:
+            walk(frame)
+        # (huge: a line with points far off the page — Python's eraser walks such a line in 0.2 mm steps and never
+        # finishes; the sequences leave those layers alone)
+        layers = [{"id": layer.id, "role": layer.role.value, "kind": layer.kind.value, "strokes": len(layer.strokes),
+                   "pixels": bool(layer.raster_png) or (layer.kind == LayerKind.RASTER and bool(layer.patches)),
+                   "huge": any(not abs(v) < 1e5 for s in layer.strokes for p in s.points for v in p[:2]),
+                   "parent": layer.parent_id}
+                  for layer in page.layers]
+        pages.append({"index": page.index, "leaves": [f.id for f in page.leaf_frames()],
+                      "splits": [f.id for f in nodes if f.children], "frames": [f.id for f in nodes], "layers": layers,
+                      "w": float(page.spec.width_mm), "h": float(page.spec.height_mm)})
+    huge = any(layer["huge"] for page in pages for layer in page["layers"])
+    return {"pages": pages, "huge": huge}
+
+
+def _sequence(rng: random.Random, pool: dict, replay: _Replay) -> list:
+    """1 to 12 ops of M2-O1 for one book, in steps (most one op; some two or three; some dry runs), by several actors,
+    with for_pages, strict_gates switched on and off, page locks and name approvals among them.
+
+    Not made (the C++ build refuses them where Python goes on and breaks the book): a reorder_layers order that leaves
+    a layer out, names one twice or one the page does not have (the order names the layers the page has when the op
+    runs: `replay`); select_frame of what is not a panel of the page; a parent that is not a folder of the page;
+    lock_page and unlock_page of a page the book does not have. The random draws for them are made as before, so the
+    sequences keep their other ops. (What the ops before change in the book can still make one of the others refused:
+    test_contract_ops stops comparing such a sequence there.)"""
+    pages = pool["pages"]
+    made = [f"{SEQ_FIRST_ID + k:012x}" for k in range(40)]  # (ids the sequence's own ops make)
+
+    def pool_page(p):  # the page an op names, as the pool has it (None: not a page of the book)
+        if isinstance(p, dict):
+            return p
+        return next((q for q in pages if str(q["index"]) == str(p)), None)
+
+    def folder_or_none(p, layer_id, moved=None):  # layer_id when it is a folder of the page (not in `moved`)
+        page = pool_page(p)
+        layers = {layer["id"]: layer for layer in page["layers"]} if page else {}
+        at, seen = layers.get(layer_id), set()
+        if at is None or at["kind"] != "folder":
+            return None
+        while at is not None and at["id"] not in seen:  # (a folder is never put inside itself)
+            if at["id"] == moved:
+                return None
+            seen.add(at["id"])
+            at = layers.get(at["parent"] or "")
+        return layer_id
+
+    def pick(items, fallback="nope"):
+        return rng.choice(items) if items and rng.random() < 0.9 else fallback
+
+    def num(lo, hi, digits=None):
+        v = rng.uniform(lo, hi)
+        if digits is not None:
+            v = round(v, digits)
+        return rng.choice([v, v, v, int(v)])
+
+    def page_of():
+        if rng.random() < 0.06:
+            return rng.choice([0, len(pages) + 1, "x", "1", None])
+        return rng.choice(pages)
+
+    def page_no(p):
+        return p if not isinstance(p, dict) else p["index"]
+
+    def points(p, n=None, pressure=None):
+        n = n or rng.randint(2, 9)
+        w, h = (p["w"], p["h"]) if isinstance(p, dict) else (200.0, 280.0)
+        with_p = rng.random() < 0.5 if pressure is None else pressure
+        out = []
+        x, y = rng.uniform(-10, w), rng.uniform(-10, h)
+        for _ in range(n):
+            x, y = x + rng.uniform(-25, 25), y + rng.uniform(-25, 25)
+            pt = [round(x, rng.choice([0, 1, 3, 6])), round(y, rng.choice([0, 1, 3, 6]))]
+            if with_p:
+                pt.append(round(rng.uniform(-0.1, 1.3), 3))
+            out.append(pt)
+        if rng.random() < 0.05:
+            out[rng.randrange(len(out))] = rng.choice([[1], "ab", 5])
+        return out
+
+    def layer_of(p, safe=False):
+        layers = p["layers"] if isinstance(p, dict) else []
+        if safe:
+            layers = [layer for layer in layers if not layer["pixels"] and not layer["huge"]]
+            return rng.choice([layer["id"] for layer in layers] + ["nope"])
+        return pick([layer["id"] for layer in layers] + made[:3])
+
+    def frame_of(p, kind="leaves"):
+        return pick((p[kind] if isinstance(p, dict) else []) + made[:6])
+
+    def rgb():
+        return rng.choice([[rng.randrange(256) for _ in range(3)], [1, 2], "123", [10, 20, 30, 40], None])
+
+    def op_split(p):
+        op = {"op": "split_frame", "page": page_no(p), "axis": rng.choice(["horizontal", "vertical", "vertical", "diag"])}
+        if rng.random() < 0.6:
+            op["frame_id"] = frame_of(p)
+        if rng.random() < 0.6:
+            op["ratio"] = num(0.05, 0.95, rng.choice([None, 2]))
+        if rng.random() < 0.5:
+            op["gutter_mm"] = num(0, 8)
+        if rng.random() < 0.25:
+            op["tilt_mm"] = num(-20, 20)
+        if rng.random() < 0.3:
+            op["force"] = True
+        return op
+
+    def op_cut(p):
+        w, h = (p["w"], p["h"]) if isinstance(p, dict) else (200, 280)
+        op = {"op": "cut_frame", "page": page_no(p), "p0": [num(0, w), num(0, h)], "p1": [num(0, w), num(0, h)]}
+        if rng.random() < 0.5:
+            y = rng.uniform(40, h - 40)
+            op["p0"], op["p1"] = [0, round(y, 2)], [round(w, 2), round(y + rng.uniform(-30, 30), 2)]
+        if rng.random() < 0.4:
+            op["frame_id"] = frame_of(p)
+        if rng.random() < 0.4:
+            op["gutter_mm"] = num(0, 6)
+        if rng.random() < 0.3:
+            op["force"] = True
+        return op
+
+    def op_move_gutter(p):
+        op = {"op": "move_gutter", "page": page_no(p), "frame_id": frame_of(p, "splits"), "delta_mm": num(-35, 35, 1)}
+        if rng.random() < 0.4:
+            op["index"] = rng.choice([0, 0, 1, 2, "0"])
+        if rng.random() < 0.3:
+            op["gutter_mm"] = num(0, 9)
+        return op
+
+    def op_merge(p):
+        op = {"op": "merge_frame", "page": page_no(p), "frame_id": frame_of(p)}
+        if rng.random() < 0.4:
+            op["force"] = True
+        return op
+
+    def op_resize(p):
+        w, h = (p["w"], p["h"]) if isinstance(p, dict) else (200, 280)
+        x, y = rng.uniform(0, w * 0.6), rng.uniform(0, h * 0.6)
+        return {"op": "resize_frame", "page": page_no(p), "frame_id": frame_of(p),
+                "rect": {"x": num(x, x + 1, 2), "y": num(y, y + 1, 2), "width": num(5, w * 0.4, 2), "height": num(5, h * 0.4, 2)}}
+
+    def op_set_frame(p):
+        op = {"op": "set_frame", "page": page_no(p), "frame_id": frame_of(p, rng.choice(["leaves", "leaves", "frames"]))}
+        for key in rng.sample(["bleed", "clip", "border_mm", "line", "corner_mm", "poly", "curves", "bow"], rng.randint(1, 3)):
+            if key in ("bleed", "clip"):
+                op[key] = rng.random() < 0.5
+            elif key == "border_mm":
+                op[key] = num(0, 3, 2)
+            elif key == "line":
+                op[key] = rng.choice([None, {"kind": rng.choice(["solid", "double", "dashed", "dotted", "rough", "wavy"]),
+                                             "rgb": [1, 2, 3], "gap_mm": num(0, 12), "wobble_mm": num(0, 4)}])
+            elif key == "corner_mm":
+                op[key] = rng.choice([None, num(0, 60)])
+            elif key == "poly":
+                if rng.random() < 0.4:
+                    op[key] = None
+                else:
+                    cx, cy = rng.uniform(40, 150), rng.uniform(40, 220)
+                    op[key] = [[round(cx + rng.uniform(-40, 40), 2), round(cy + rng.uniform(-40, 40), 2)]
+                               for _ in range(rng.randint(2, 6))]
+            elif key == "curves":
+                op[key] = rng.choice([None, [num(-4, 4, 2) for _ in range(rng.choice([4, 4, 3, 5]))]])
+            else:
+                op[key] = {"edge": rng.randint(-1, 4), "mm": num(-5, 5, 1)}
+        return op
+
+    def op_add_frame(p):
+        op = {"op": "add_frame", "page": page_no(p)}
+        if rng.random() < 0.5:
+            op["rect"] = [num(0, 150), num(0, 200), num(-60, 80), num(-60, 80)]
+        else:
+            op["points"] = points(p, rng.randint(3, 14), False)
+        if rng.random() < 0.2:
+            op["id"] = rng.choice(["drawn-" + str(rng.randrange(3)), frame_of(p)])
+        if rng.random() < 0.2:
+            op["border_mm"] = num(0, 2)
+        if rng.random() < 0.2:
+            op["tolerance_mm"] = num(0.1, 3)
+        return op
+
+    def op_delete_frame(p):
+        op = {"op": "delete_frame", "page": page_no(p), "frame_id": frame_of(p)}
+        if rng.random() < 0.4:
+            op["force"] = True
+        return op
+
+    def op_stroke(p):
+        op = {"op": "add_stroke", "page": page_no(p), "points": points(p)}
+        r = rng.random()
+        if r < 0.35:
+            op["layer"] = rng.choice(["ink", "name", "draft", "finish", "nope"])
+        elif r < 0.6:
+            op["layer_id"] = layer_of(p)
+        for key in rng.sample(["stabilize", "taper", "pressure_gamma", "curve", "kind", "width_mm", "rgb", "opacity", "rotation",
+                               "post_fit", "post_smooth", "snap_lines_mm", "space", "pressure_opacity", "taper_in_mm",
+                               "stabilize_speed", "snap_ruler"], rng.randint(0, 4)):
+            op[key] = {"stabilize": lambda: rng.choice([0, 3, 5, 9, "4"]), "taper": lambda: rng.random() < 0.7,
+                       "pressure_gamma": lambda: num(0.1, 6), "curve": lambda: rng.choice(["gpen", "linear", "soft"]),
+                       "kind": lambda: rng.choice(["gpen", "maru", "mili", "oil", "my-pen", "crayon", "fude"]),
+                       "width_mm": lambda: num(0.1, 3, 2), "rgb": rgb, "opacity": lambda: num(-0.5, 1.5, 2),
+                       "rotation": lambda: [num(-180, 180) for _ in range(rng.randint(1, 4))],
+                       "post_fit": lambda: num(0.01, 4, 2), "post_smooth": lambda: rng.choice([0, 1, 3, 10]),
+                       "snap_lines_mm": lambda: num(0.05, 12), "space": lambda: rng.choice(["page", "page", "spread", "x"]),
+                       "pressure_opacity": lambda: num(0, 1.2, 2), "taper_in_mm": lambda: num(0, 90),
+                       "stabilize_speed": lambda: True, "snap_ruler": lambda: True}[key]()
+        return op
+
+    def op_index(name, p):
+        op = {"op": name, "page": page_no(p), "index": rng.choice([0, 0, 1, 2, 5, -1, "1"])}
+        if rng.random() < 0.7:
+            op["layer"] = rng.choice(["ink", "name", "name", "ink", "finish"])
+        if name == "edit_stroke":
+            op["points"] = points(p)
+        if name == "simplify_stroke" and rng.random() < 0.5:
+            op["epsilon_mm"] = num(0.01, 20)
+        return op
+
+    def op_erase(name, p):
+        op = {"op": name, "page": page_no(p), "points": points(p, rng.randint(1, 5), False), "width_mm": num(0.3, 12, 1)}
+        if rng.random() < 0.5 or pool["huge"]:  # (by role only where no layer of the book has a line far off)
+            op["layer_id"] = layer_of(p, safe=True)
+        else:
+            op["layer"] = rng.choice(["ink", "name", "name", "draft", "finish"])
+        if rng.random() < 0.5:
+            op["mode"] = rng.choice(["cut", "whole", "to_crossing", "to_crossing", "smear"])
+        if rng.random() < 0.15:
+            op["texture"] = rng.choice(["hard", "soft", "rough", "glitter"])
+        return op
+
+    def op_add_layer(p):
+        op = {"op": "add_layer", "page": page_no(p), "kind": rng.choice(["pen", "paint", "folder", "fill", "gradient",
+                                                                          "adjust", "vector"])}
+        if rng.random() < 0.3:
+            op["id"] = rng.choice(["L" + str(rng.randrange(4)), layer_of(p)])
+        if rng.random() < 0.3:
+            op["after"] = layer_of(p)
+        if rng.random() < 0.2:
+            parent = folder_or_none(p, layer_of(p))
+            if parent is not None:
+                op["parent"] = parent
+        if rng.random() < 0.2:
+            op["blend"] = rng.choice(["multiply", "screen", "luminosity", "glow"])
+        if op["kind"] == "fill" and rng.random() < 0.5:
+            op["rgb"] = rgb()
+        if op["kind"] == "gradient" and rng.random() < 0.5:
+            op["gradient"] = {"from": [0, 0], "to": [num(10, 100), num(10, 200)], "shape": rng.choice(["linear", "radial", "x"]),
+                              "stops": [[0, [0, 0, 0]], [num(0, 1.2, 2), [255, 0, 0], 0.5]]}
+        if op["kind"] == "adjust" and rng.random() < 0.6:
+            op["adjust"] = rng.choice([{"kind": "levels", "black": rng.choice([10, "x", 2.5])}, {"kind": "hue", "shift": 30},
+                                       {"kind": "curve", "points": [[0, 0], [255, 255]]}, {"kind": "blur"}])
+        return op
+
+    def op_set_layer(p):
+        op = {"op": "set_layer", "page": page_no(p)}
+        if rng.random() < 0.8:
+            op["id"] = layer_of(p)
+        else:
+            op["layer"] = rng.choice(["ink", "name", "bg", "draft", "tone", "xyz"])
+        for key in rng.sample(["visible", "opacity", "exportable", "blend", "clip", "locked", "panel_clip", "panel_each", "name",
+                               "color", "reference", "effect", "screen", "fill", "parent"], rng.randint(1, 3)):
+            op[key] = {"opacity": num(0, 1.2, 2), "blend": rng.choice(["normal", "multiply", "dodge"]), "name": "名" + str(rng.randrange(9)),
+                       "color": rgb(), "effect": rng.choice([None, {"border": {"width_mm": 1}}, {"glow": 1}]),
+                       "screen": rng.choice([None, {"pattern": "dot", "lpi": 60}, {"lpi": 5}]),
+                       "fill": rng.choice([None, {"rgb": [1, 2, 3]}]), "parent": rng.choice([None, layer_of(p)])
+                       }.get(key, rng.random() < 0.5)
+        if "parent" in op:
+            op["parent"] = folder_or_none(p, op["parent"], op.get("id"))
+        return op
+
+    def op_set_layers(p):
+        op = {"op": "set_layers", "page": page_no(p)}
+        if rng.random() < 0.3:
+            op["all"] = True
+        else:
+            op["ids"] = [layer_of(p) for _ in range(rng.randint(1, 3))]
+        for key in rng.sample(["visible", "opacity", "locked", "blend", "color", "panel_clip"], rng.randint(0, 2)):
+            op[key] = {"opacity": num(0, 1, 2), "blend": rng.choice(["multiply", "zz"]), "color": rgb()}.get(key, rng.random() < 0.5)
+        return op
+
+    def op_reorder_layers(p):
+        ids = [layer["id"] for layer in (p["layers"] if isinstance(p, dict) else [])]
+        rng.shuffle(ids)
+        # (every layer once: the draws that once cut the order short or added an id are made and not used)
+        if rng.random() < 0.3 and ids:
+            rng.randint(0, len(ids))
+        if rng.random() < 0.2:
+            rng.choice(["nope", 5])
+        if not isinstance(p, dict) and pool_page(p):  # (a page named by its text: its layers as they are)
+            ids = [layer["id"] for layer in pool_page(p)["layers"]]
+        return {"op": "reorder_layers", "page": page_no(p), "order": ids}
+
+    def op_for_pages():
+        inner = rng.choice([lambda: {"op": "set_note", "note": "毎"}, lambda: {"op": "set_note", "note": "選"},
+                            lambda: {"op": "add_layer", "kind": "pen"}, lambda: {"op": "split_frame", "axis": "vertical"},
+                            lambda: {"op": "add_stroke", "points": [[30, 40], [60, 70]]}, lambda: {"op": "name_ok"},
+                            lambda: {"op": "set_layers", "all": True, "opacity": 0.5}])
+        op = {"op": "for_pages", "ops": [inner() for _ in range(rng.randint(1, 2))]}
+        r = rng.random()
+        if r < 0.3:
+            op["pages"] = "all"
+        elif r < 0.6:
+            op["pages"] = sorted({rng.randint(1, len(pages) + (1 if rng.random() < 0.1 else 0)) for _ in range(2)})
+        return op
+
+    def one_op():
+        p = page_of()
+        kind = rng.choice(["split_frame", "cut_frame", "move_gutter", "merge_frame", "resize_frame", "set_frame", "add_frame",
+                           "delete_frame", "select_frame", "add_page", "delete_page", "duplicate_page", "reorder", "advance",
+                           "name_ok", "lock_page", "unlock_page", "set_note", "set_meta", "set_autosave", "add_stroke",
+                           "add_stroke", "add_stroke", "delete_stroke", "edit_stroke", "simplify_stroke", "erase",
+                           "erase_raster", "add_layer", "delete_layer", "duplicate_layer", "set_layer", "set_layers",
+                           "reorder_layers", "set_brush", "for_pages", "strict"])
+        if kind == "split_frame":
+            return op_split(p)
+        if kind == "cut_frame":
+            return op_cut(p)
+        if kind == "move_gutter":
+            return op_move_gutter(p)
+        if kind == "merge_frame":
+            return op_merge(p)
+        if kind == "resize_frame":
+            return op_resize(p)
+        if kind == "set_frame":
+            return op_set_frame(p)
+        if kind == "add_frame":
+            return op_add_frame(p)
+        if kind == "delete_frame":
+            return op_delete_frame(p)
+        if kind == "select_frame":
+            frame_id, page = frame_of(p), pool_page(p)
+            if page and frame_id not in page["frames"]:  # (a panel of the page: its first, for an id it does not have)
+                frame_id = page["leaves"][0] if page["leaves"] else page["frames"][0]
+            return {"op": "select_frame", "page": page_no(p), "frame_id": frame_id}
+        if kind == "add_page":
+            op = {"op": "add_page", "count": rng.choice([1, 1, 2, 3, 0])}
+            if rng.random() < 0.4:
+                op["after"] = rng.randint(0, len(pages) + 1)
+            return op
+        if kind == "delete_page":
+            return {"op": "delete_page", "page": page_no(p)}
+        if kind == "duplicate_page":
+            return {"op": "duplicate_page", "page": page_no(p), **({"next_to": True} if rng.random() < 0.5 else {})}
+        if kind == "reorder":
+            order = list(range(1, len(pages) + 1))
+            rng.shuffle(order)
+            if rng.random() < 0.15:
+                order = order[:-1] or [1, 1]
+            return {"op": "reorder", "order": order}
+        if kind == "advance":
+            return {"op": "advance", "page": page_no(p), "to": rng.choice(["name", "ink", "finish", "done"])}
+        if kind == "name_ok":
+            return {"op": "name_ok", **({"page": page_no(p)} if rng.random() < 0.7 else {})}
+        if kind in ("lock_page", "unlock_page"):
+            if p in (0, len(pages) + 1):  # (a page the book has; "x" and None name none, as in Python)
+                p = pages[0]
+            return {"op": kind, "page": page_no(p), **({"agent": rng.choice(AGENTS)} if kind == "lock_page" and rng.random() < 0.4 else {})}
+        if kind == "set_note":
+            return {"op": "set_note", "page": page_no(p), "note": rng.choice(["メモ", 5, None, "a\nb"])}
+        if kind == "set_meta":
+            return rng.choice([{"op": "set_meta", "title": "題" + str(rng.randrange(9))}, {"op": "set_meta", "binding": rng.choice(["left", "right", "up"])},
+                               {"op": "set_meta", "start_side": rng.choice([None, "left", "right"])}, {"op": "set_meta", "episode": rng.choice([2, "3", "x"])}])
+        if kind == "strict":
+            return {"op": "set_meta", "strict_gates": rng.random() < 0.6}
+        if kind == "set_autosave":
+            return {"op": "set_autosave", "enabled": rng.random() < 0.5}
+        if kind == "add_stroke":
+            return op_stroke(p)
+        if kind in ("delete_stroke", "edit_stroke", "simplify_stroke"):
+            return op_index(kind, p)
+        if kind in ("erase", "erase_raster"):
+            return op_erase(kind, p)
+        if kind == "add_layer":
+            return op_add_layer(p)
+        if kind == "delete_layer":
+            return {"op": "delete_layer", "page": page_no(p), "id": layer_of(p)}
+        if kind == "duplicate_layer":
+            return {"op": "duplicate_layer", "page": page_no(p), "id": layer_of(p), **({"new_id": "dup-" + str(rng.randrange(3))} if rng.random() < 0.3 else {})}
+        if kind == "set_layer":
+            return op_set_layer(p)
+        if kind == "set_layers":
+            return op_set_layers(p)
+        if kind == "reorder_layers":
+            return op_reorder_layers(p)
+        if kind == "set_brush":
+            return {"op": "set_brush", **{k: v for k, v in (("rgb", rgb()), ("width_mm", num(0.1, 2, 2)), ("stabilize", rng.choice([0, 3, None])),
+                                                            ("taper", rng.random() < 0.5), ("curve", rng.choice(["gpen", "linear", None])))
+                                         if rng.random() < 0.5}}
+        return op_for_pages()
+
+    steps = []
+    left = rng.randint(1, 12)
+    while left > 0:
+        size = min(left, rng.choice([1, 1, 1, 1, 2, 3]))
+        left -= size
+        step = {"ops": [one_op() for _ in range(size)], "agent": rng.choice(AGENTS)}
+        if rng.random() < 0.1:
+            step["dry_run"] = True
+        for k, op in enumerate(step["ops"]):
+            # a reorder_layers order drawn from the book as it was read: the layers the page has when it runs (those
+            # still there in the order drawn, then the ones the ops before added)
+            if op["op"] == "reorder_layers":
+                now = replay.layer_ids(step, k)
+                if now is not None and sorted(now) != sorted(op["order"]):
+                    kept = [i for i in op["order"] if i in now]
+                    op["order"] = kept + [i for i in now if i not in kept]
+        replay.apply(step)
+        steps.append(step)
+    return steps
+
+
+def make_sequences(out: str, books: str, seed: int, count: int) -> None:
+    """`count` op sequences over the books in `books` (each sequence for one book, in turn): a JSON list of
+    {"book", "first_id", "steps"} for test_contract_ops."""
+    import tempfile
+
+    paths = sorted(Path(books).glob("book-*.genko"))
+    pools = [_book_pools(p) for p in paths]
+    rng = random.Random(seed)
+    sequences = []
+    with tempfile.TemporaryDirectory() as scratch:
+        for i in range(count):
+            b = i % len(paths)
+            replay = _Replay(paths[b], Path(scratch) / f"store-{i}")
+            sequences.append({"book": str(paths[b]), "first_id": SEQ_FIRST_ID, "steps": _sequence(rng, pools[b], replay)})
+    Path(out).write_text(dumps(sequences), encoding="utf-8")
 
 
 # --- numbers and JSON -------------------------------------------------------------------------------------------------
@@ -716,7 +1466,24 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--agent", default="genko")
     p = sub.add_parser("upgrade")
     p.add_argument("book")
+    for name in ("make-opsbook", "make-drawbook"):
+        p = sub.add_parser(name)
+        p.add_argument("out")
+    p = sub.add_parser("make-sequences")
+    p.add_argument("out")
+    p.add_argument("--books", required=True)
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--count", type=int, default=300)
     args = parser.parse_args(argv)
+    if args.cmd == "make-opsbook":
+        make_opsbook(args.out)
+        return 0
+    if args.cmd == "make-drawbook":
+        make_drawbook(args.out)
+        return 0
+    if args.cmd == "make-sequences":
+        make_sequences(args.out, args.books, args.seed, args.count)
+        return 0
     if args.cmd == "unit-tables":
         sys.stdout.write(json.dumps(unit_tables(), ensure_ascii=False, indent=1) + "\n")
         return 0

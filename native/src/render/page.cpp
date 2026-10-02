@@ -13,11 +13,14 @@
 #include <mutex>
 #include <utility>
 
+#include "core/covers.hpp"
 #include "core/error.hpp"
 #include "core/frames.hpp"
 #include "core/pyconv.hpp"
+#include "core/placement.hpp"
 #include "core/pynum.hpp"
-#include "core/stroke_geom.hpp"
+#include "core/pyops.hpp"
+#include "core/strokes.hpp"
 #include "render/brushes.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
@@ -43,6 +46,7 @@ bool skip_unported(const Ctx& ctx, const std::string& element) {
 namespace {
 
 using namespace detail;
+using core::get;
 using core::Json;
 using core::Layer;
 using core::LayerKind;
@@ -76,12 +80,6 @@ Size size_of(const Box& b) { return Size{b.width(), b.height()}; }
 
 Image transparent(const Box& area) { return Image::create("RGBA", size_of(area), Ink{0, 0, 0, 0}); }
 
-const Json* get(const Json& object, std::string_view key) {
-    if (!object.is_object()) return nullptr;
-    const auto it = object.find(key);
-    return it == object.end() ? nullptr : &*it;
-}
-
 std::vector<std::int64_t> first3(std::vector<std::int64_t> v) {
     if (v.size() > 3) v.resize(3);
     return v;
@@ -93,8 +91,6 @@ std::vector<std::int64_t> stroke_rgb(const core::Stroke& stroke, const brushes::
     if (b.rgb && !b.rgb->empty()) return *b.rgb;
     return kInkColor;
 }
-
-double clamp01(double v) { return std::max(0.0, std::min(1.0, v)); }
 
 // float(stroke.width_mm or 0.35)
 double stroke_width(const core::Stroke& s) { return s.width_mm != 0.0 ? s.width_mm : 0.35; }
@@ -290,11 +286,11 @@ std::string mask_key(const Page& page, const core::Frame& frame, Size size, int 
         for (const PointMM& p : v) out.push_back(Json::array({p.x, p.y}));
         return out;
     };
-    const auto shape = bleed_poly(page, &frame);
+    const auto shape = core::bleed_poly(page, &frame);
     key.push_back(shape ? pts(*shape) : pts(outline_mm(frame)));
-    const auto outline = bleed_outline(page, &frame, std::nullopt);
+    const auto outline = bleed_outline_mm(page, &frame, std::nullopt);
     key.push_back(outline ? pts(*outline) : Json());
-    const Box clip = rect_px(clip_box(page, &frame, "bleed"), dpi);
+    const Box clip = rect_px(core::clip_box(page, &frame, "bleed"), dpi);
     key.push_back(Json::array({frame.bleed, frame.poly.has_value(), core::rounded(frame), clip.x0, clip.y0, clip.x1, clip.y1}));
     const Box r = rect_px(frame.rect, dpi);
     key.push_back(Json::array({r.x0, r.y0, r.x1, r.y1, size.width, size.height, dpi, area.x0, area.y0, area.x1, area.y1}));
@@ -331,7 +327,7 @@ void paint_patch(Image& out, const Box& area, const core::Patch& patch, int dpi,
     const double y = core::py_float(box[1]);
     const double w = core::py_float(box[2]);
     const double h = core::py_float(box[3]);
-    const auto round_px = [&](double mm) { return static_cast<int>(std::nearbyint(mm / 25.4 * dpi)); };
+    const auto round_px = [&](double mm) { return static_cast<int>(core::py_round_int(mm / 25.4 * dpi)); };
     const int x0 = round_px(x);
     const int y0 = round_px(y);
     const int pw = std::max(1, round_px(w));
@@ -341,7 +337,7 @@ void paint_patch(Image& out, const Box& area, const core::Patch& patch, int dpi,
     const Box part = intersection(where, area);
     const Box in_piece = shifted(part, -x0, -y0);
     const Json* opacity_json = get(patch.attrs, "opacity");
-    const double opacity = clamp01(opacity_json != nullptr ? core::py_float(*opacity_json) : 1.0);
+    const double opacity = core::py_clamp(opacity_json != nullptr ? core::py_float(*opacity_json) : 1.0, 0.0, 1.0);
     const Json* mode = get(patch.attrs, "mode");
     const bool mask_mode = mode == nullptr || (mode->is_string() && mode->get<std::string>() == "mask");
     Image piece;
@@ -349,13 +345,13 @@ void paint_patch(Image& out, const Box& area, const core::Patch& patch, int dpi,
         const Image source = decoded(patch.png, "L");
         Image cover = source.resize_region(Size{pw, ph}, in_piece, Resample::Lanczos);
         if (pw > source.width() * 1.5) cover = cover.point([](int v) { return v >= 128 ? 255 : 0; });  // upscaled fills
-        if (opacity < 1) cover = cover.point([&](int v) { return static_cast<int>(std::trunc(v * opacity)); });
+        if (opacity < 1) cover = cover.point([&](int v) { return static_cast<int>(core::py_trunc_int(v * opacity)); });
         std::vector<std::int64_t> rgb;
         if (colour != nullptr) {
             rgb = *colour;
         } else {
             const Json* own = get(patch.attrs, "rgb");
-            rgb = (own != nullptr && core::py_truthy(*own)) ? json_ints(*own) : kInkColor;
+            rgb = (own != nullptr && core::py_truthy(*own)) ? core::int_tuple(*own) : kInkColor;
         }
         piece = Image::create("RGBA", size_of(in_piece), Ink::with_alpha(rgb, 0));
         piece.putalpha(cover);
@@ -368,7 +364,7 @@ void paint_patch(Image& out, const Box& area, const core::Patch& patch, int dpi,
             piece = decoded(patch.png, "RGBa").resize_region(Size{pw, ph}, in_piece, Resample::Lanczos).convert("RGBA");
         }
         if (opacity < 1) {
-            piece.putalpha(piece.getchannel(3).point([&](int v) { return static_cast<int>(std::trunc(v * opacity)); }));
+            piece.putalpha(piece.getchannel(3).point([&](int v) { return static_cast<int>(core::py_trunc_int(v * opacity)); }));
         }
     }
     const Box local = shifted(part, -area.x0, -area.y0);
@@ -387,7 +383,7 @@ Image quick_strokes(const Ctx& ctx, std::span<const core::StrokePtr> strokes, st
         if (stroke->points.empty()) continue;
         const brushes::Brush b = brushes::brush(stroke->kind);
         const std::vector<std::int64_t> rgb = guide ? kNameColor : stroke_rgb(*stroke, b);
-        const auto shade = static_cast<std::int64_t>(std::trunc(255 * clamp01(stroke->opacity) * b.opacity));
+        const auto shade = core::py_trunc_int(255 * core::py_clamp(stroke->opacity, 0.0, 1.0) * b.opacity);
         std::vector<PointD> pts;
         double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
         for (const core::PointF& p : stroke->points) {
@@ -402,7 +398,7 @@ Image quick_strokes(const Ctx& ctx, std::span<const core::StrokePtr> strokes, st
             y1 = std::max(y1, q.y);
             pts.push_back(q);
         }
-        const int width = std::max(1, static_cast<int>(std::nearbyint(stroke_width(*stroke) * scale)));
+        const int width = std::max(1, static_cast<int>(core::py_round_int(stroke_width(*stroke) * scale)));
         // (a line far from this part of the page changes none of its pixels)
         const double reach = width + 4;
         if (x1 + reach < area.x0 || x0 - reach > area.x1 || y1 + reach < area.y0 || y0 - reach > area.y1) continue;
@@ -480,7 +476,7 @@ std::optional<Image> draw_strokes(const Ctx& ctx, const Layer& layer, const Stro
         if ((n - start) % 64 == 63) check_cancel(ctx);
         const core::Stroke& stroke = *set.strokes[n];
         const brushes::Brush b = brushes::brush(stroke.kind);
-        const core::PenPoints points = core::stroke_pen_points(stroke);
+        const core::PenPoints points = core::stroke_points(stroke);
         const double width = stroke_width(stroke);
         const auto reach = brushes::extent(ctx.size, points, ctx.dpi, width, stroke.kind);
         if (!reach) continue;  // (drawn is None)
@@ -494,8 +490,8 @@ std::optional<Image> draw_strokes(const Ctx& ctx, const Layer& layer, const Stro
                                    stroke.pressure_opacity);
         if (!drawn) continue;
         Image cover = std::move(drawn->mask);
-        const double opacity = clamp01(stroke.opacity) * b.opacity;
-        if (opacity < 1) cover = cover.point([&](int v) { return static_cast<int>(std::trunc(v * opacity)); });
+        const double opacity = core::py_clamp(stroke.opacity, 0.0, 1.0) * b.opacity;
+        if (opacity < 1) cover = cover.point([&](int v) { return static_cast<int>(core::py_trunc_int(v * opacity)); });
         const Box box{drawn->origin.x, drawn->origin.y, drawn->origin.x + cover.width(), drawn->origin.y + cover.height()};
         const Box part = intersection(box, area);
         if (part.x1 <= part.x0 || part.y1 <= part.y0) continue;
@@ -643,12 +639,10 @@ bool nombre_draws(const Page& page, const core::Document* episode) {
 
 // covers.folds(page) is not empty
 bool folds_draw(const Page& page) {
-    const Json* cover = get(page.extra, "cover");
-    if (cover == nullptr || !cover->is_object()) return false;
-    const Json* kind = get(*cover, "kind");
-    if (kind == nullptr || !kind->is_string()) return false;
-    const std::string k = kind->get<std::string>();
-    if (k != "jacket" && k != "obi") return false;
+    const Json* cover = core::cover_of(page);
+    if (cover == nullptr) return false;
+    const std::string k = (*cover)["kind"].get<std::string>();
+    if (k != "jacket" && k != "obi") return false;  // (covers.WRAPS)
     const core::Rect t = page.trim_rect_mm();
     const auto mm = [&](std::string_view key) {
         const Json* v = get(*cover, key);
@@ -741,7 +735,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     // the paper, made in RGBA at once
     std::vector<std::int64_t> paper{255, 255, 255};
     const Json* paper_json = get(page.extra, "paper_rgb");
-    if (paper_json != nullptr && core::py_truthy(*paper_json)) paper = first3(json_ints(*paper_json));
+    if (paper_json != nullptr && core::py_truthy(*paper_json)) paper = first3(core::int_tuple(*paper_json));
     Image rgba = Image::create("RGBA", size_of(area), Ink::with_alpha(paper, 255));
     std::vector<LayerRole> fill_roles{LayerRole::Bg, LayerRole::Ink, LayerRole::Finish};
     if (name_or_proof) fill_roles = {LayerRole::Bg, LayerRole::Name, LayerRole::Ink, LayerRole::Finish};
@@ -750,10 +744,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (fill == nullptr) continue;
         if (guide_role(role) && print) continue;
         std::vector<std::int64_t> rgb;
-        for (std::size_t i = 0; i < fill->size() && i < 3; ++i) {
-            const Num& n = (*fill)[i];
-            rgb.push_back(n.is_int() ? n.int_value() : static_cast<std::int64_t>(std::trunc(n.value())));
-        }
+        for (std::size_t i = 0; i < fill->size() && i < 3; ++i) rgb.push_back(core::py_int((*fill)[i]));
         rgba.paste(Ink::with_alpha(rgb, 255), Box{0, 0, area.width(), area.height()});
     }
 
@@ -860,9 +851,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             if (ghost_size != ctx.size) throw core::Error("value", "images do not match");
             const Image ghost = render(*prev, dpi, ghost_options, episode, omitted).image.convert("RGBA");
             const std::vector<Image> c = ghost.split();
-            const Image tint = Image::merge("RGBA", {c[0].point([](int p) { return static_cast<int>(std::trunc(p * 0.4)); }),
-                                                     c[1].point([](int p) { return static_cast<int>(std::trunc(p * 0.4)); }), c[2],
-                                                     c[3].point([](int) { return 70; })});
+            const auto dim = [](int p) { return static_cast<int>(core::py_trunc_int(p * 0.4)); };  // int(p * 0.4)
+            const Image tint = Image::merge("RGBA", {c[0].point(dim), c[1].point(dim), c[2], c[3].point([](int) { return 70; })});
             image = alpha_composite(image.convert("RGBA"), tint).convert("RGB");
         }
     }
@@ -885,10 +875,11 @@ std::vector<core::LayerRole> export_plan(const core::Page&) {
 }
 
 int mm_to_px(double mm, int dpi) {
-    const double v = std::nearbyint(mm / 25.4 * dpi);
-    if (!std::isfinite(v)) throw core::Error("value", "cannot convert float to integer");
-    if (v > 2147483647.0) return 2147483647;
-    return std::max(1, static_cast<int>(v));
+    const double px = mm / 25.4 * dpi;
+    // max(1, round(px)); a size an int cannot hold is held as the largest (the page is refused as too large)
+    if (std::isfinite(px) && px > 2147483647.0) return 2147483647;
+    if (std::isfinite(px) && px < -2147483648.0) return 1;
+    return std::max(1, static_cast<int>(core::py_round_int(px)));
 }
 
 Box rect_px(const core::Rect& rect, int dpi) {
@@ -911,7 +902,7 @@ Image render_frame(const core::Page& page, std::string_view frame_id, int dpi, c
     const core::Frame* frame = page.find_frame(frame_id);
     if (frame == nullptr) throw core::Error("key", std::string(frame_id));
     const Size size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
-    const Box b = rect_px(detail::clip_box(page, frame, frame->bleed ? "bleed" : "frame"), dpi);
+    const Box b = rect_px(core::clip_box(page, frame, frame->bleed ? "bleed" : "frame"), dpi);
     const Box box{std::max(0, b.x0), std::max(0, b.y0), std::min(size.width, b.x1), std::min(size.height, b.y1)};
     if (box.x1 < box.x0) throw core::Error("value", "Coordinate 'right' is less than 'left'");
     if (box.y1 < box.y0) throw core::Error("value", "Coordinate 'lower' is less than 'upper'");

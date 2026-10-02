@@ -1,14 +1,18 @@
-// core/stroke_geom against Python's genko/stroke.py (and brushes.smoothed): the table of
-// tools/migration/render_harness.py unit-tables, every coordinate bit for bit.
+// core/stroke_geom (the one C++ stroke.py: the ops draw and erase with it, the renderer smooths with it) against
+// Python's genko/stroke.py (and brushes.smoothed): the table of tools/migration/render_harness.py unit-tables, every
+// coordinate bit for bit; and where Python fails, the same exceptions as the ops report them.
 
 #include <QtTest>
 
 #include <bit>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "core/pyops.hpp"
 #include "core/stroke_geom.hpp"
 #include "testsupport.hpp"
 
@@ -103,7 +107,8 @@ private slots:
     void crosses() {
         for (const Json& c : tables()["stroke"]["crosses"]) {
             const PenPoints abcd = points_of(c["abcd"]);
-            const auto t = genko::core::seg_cross(abcd[0], abcd[1], abcd[2], abcd[3]);
+            const auto xy = [&](std::size_t i) { return genko::core::PointF{abcd[i].x, abcd[i].y}; };
+            const auto t = genko::core::seg_cross(xy(0), xy(1), xy(2), xy(3));
             if (c["t"].is_null()) {
                 QVERIFY(!t);
             } else {
@@ -155,14 +160,47 @@ private slots:
         }
     }
 
-    void python_sum() {
-        // Python 3.12: sum([0.1] * 10) == 1.0 (compensated); sum([1e16, 1.0, -1e16]) == 1.0
-        const std::vector<double> tenths(10, 0.1);
-        QCOMPARE(genko::core::py_float_sum(tenths), 1.0);
-        const std::vector<double> big{1e16, 1.0, -1e16};
-        QCOMPARE(genko::core::py_float_sum(big), 1.0);
-        const std::vector<double> negzero{-0.0};
-        QVERIFY(!std::signbit(genko::core::py_float_sum(negzero)));
+    // Where Python raises, the exception the ops report (an op's "a value of the wrong type (…)", or Python stopping).
+    void errorsAsPython() {
+        using genko::core::PyTypeError;
+        using genko::core::PyUncaught;
+        using genko::core::PyValueError;
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        const double inf = std::numeric_limits<double>::infinity();
+        // (-0.5) ** 1.8 is a complex number, which min() refuses; -inf ** 1.8 is inf, so the pressure is 1.0
+        const PenPoints negative{{1, 1, 0.5}, {2, 2, -0.5}};
+        QVERIFY_THROWS_EXCEPTION(PyTypeError, genko::core::apply_pressure_curve(negative));
+        const PenPoints minus_inf{{1, 1, -inf}, {2, 2, -0.0}};
+        const PenPoints curved = genko::core::apply_pressure_curve(minus_inf);
+        QCOMPARE(*curved[0].p, 1.0);
+        QCOMPARE(*curved[1].p, 0.05);
+        QVERIFY(genko::core::apply_pressure_curve(negative, "linear") == negative);
+        // int(nan) is a ValueError, int(inf) an OverflowError (not caught by apply_ops), a walk of 1e30 steps
+        // Python's MemoryError
+        const PenPoints far{{0, 0, std::nullopt}, {1, 1, std::nullopt}, {nan, 2, std::nullopt}, {3, 3, std::nullopt},
+                            {4, 4, std::nullopt}};
+        QVERIFY_THROWS_EXCEPTION(PyValueError, genko::core::fit_curve(far, 0.1));
+        const PenPoints huge{{0, 0, std::nullopt}, {1e30, 5, std::nullopt}, {2e30, 0, std::nullopt}, {3e30, 7, std::nullopt}};
+        try {
+            genko::core::fit_curve(huge, 0.1);
+            QFAIL("no error");
+        } catch (const PyUncaught& error) {
+            QCOMPARE(error.type(), std::string("MemoryError"));
+        }
+        const PenPoints endless{{0, 0, std::nullopt}, {inf, 0, std::nullopt}};
+        try {
+            genko::core::split_by_eraser(endless, PenPoints{{1, 1, std::nullopt}}, 1.0);
+            QFAIL("no error");
+        } catch (const PyUncaught& error) {
+            QCOMPARE(error.type(), std::string("OverflowError"));
+        }
+        // the defaults are Python's: stabilize_points(points) is window 5, fit_curve(points) tolerance 0.3, step 0.5
+        const PenPoints wavy{{0, 0, 0.5}, {1, 2, 0.6}, {2, 0, 0.7}, {3, 2, 0.8}, {4, 0, 0.9}, {5, 2, 1.0}};
+        QVERIFY(genko::core::stabilize_points(wavy) == genko::core::stabilize_points(wavy, 5, false));
+        QVERIFY(genko::core::fit_curve(wavy) == genko::core::fit_curve(wavy, 0.3, 0.5));
+        QVERIFY(genko::core::taper_points(wavy) == genko::core::taper_points(wavy, std::nullopt, std::nullopt));
+        QVERIFY(genko::core::apply_pressure_curve(wavy) == genko::core::apply_pressure_curve(wavy, "gpen"));
+        QVERIFY(genko::core::pack_point(1, 2) == genko::core::pack_point(1, 2, std::nullopt, 0.0));
     }
 };
 

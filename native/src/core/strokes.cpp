@@ -8,15 +8,11 @@
 #include "core/error.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 
 namespace genko::core {
 
 namespace {
-
-const Json* get(const Json& object, std::string_view key) {
-    const auto it = object.find(key);
-    return it == object.end() ? nullptr : &*it;
-}
 
 // raw.get(key) or new_id()
 std::string stroke_id(const Json& raw) {
@@ -166,21 +162,43 @@ Stroke coerce_stroke(const Json& raw) {
         return stroke;
     }
     if (!raw.is_array()) throw Error("format", "'" + py_type_name(raw) + "' object is not iterable");
+    PenPoints points;
     for (const Json& pt : raw) {
-        stroke.points.push_back(PointF{py_float(item(pt, 0)), py_float(item(pt, 1))});
-        if (pt.size() > 2) stroke.pressure.push_back(py_float(pt[2]));
+        PenPoint p{py_float(item(pt, 0)), py_float(item(pt, 1)), std::nullopt};
+        if (pt.size() > 2) p.p = py_float(pt[2]);
+        points.push_back(p);
+    }
+    return coerce_stroke(points);
+}
+
+Stroke coerce_stroke(const PenPoints& points) {
+    Stroke stroke;
+    for (const PenPoint& p : points) {
+        stroke.points.push_back(PointF{p.x, p.y});
+        if (p.p) stroke.pressure.push_back(*p.p);
     }
     if (stroke.pressure.size() != stroke.points.size()) stroke.pressure.clear();
     stroke.id = new_id();
     return stroke;
 }
 
-Json stroke_points_json(const Stroke& stroke) {
-    Json out = Json::array();
+PenPoints stroke_points(const Stroke& stroke) {
+    PenPoints out;
+    out.reserve(stroke.points.size());
     const bool with_pressure = !stroke.pressure.empty() && stroke.pressure.size() == stroke.points.size();
     for (std::size_t i = 0; i < stroke.points.size(); ++i) {
-        Json pt = Json::array({stroke.points[i].x, stroke.points[i].y});
-        if (with_pressure) pt.push_back(stroke.pressure[i]);
+        PenPoint p{stroke.points[i].x, stroke.points[i].y, std::nullopt};
+        if (with_pressure) p.p = stroke.pressure[i];
+        out.push_back(p);
+    }
+    return out;
+}
+
+Json stroke_points_json(const Stroke& stroke) {
+    Json out = Json::array();
+    for (const PenPoint& p : stroke_points(stroke)) {
+        Json pt = Json::array({p.x, p.y});
+        if (p.p) pt.push_back(*p.p);
         out.push_back(std::move(pt));
     }
     return out;
