@@ -68,12 +68,14 @@ jobs:
       fail-fast: false
       matrix:
         preset: [windows-release, windows-debug]
-    env:
-      VCPKG_ROOT: ${{ runner.temp }}\vcpkg
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}\vcpkg-bin
-      VCPKG_BINARY_SOURCES: "clear;files,${{ runner.temp }}\\vcpkg-bin,readwrite"
     steps:
       - uses: actions/checkout@v4
+      - name: Paths
+        shell: pwsh
+        run: |
+          "VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg" >> $env:GITHUB_ENV
+          "VCPKG_DEFAULT_BINARY_CACHE=$env:RUNNER_TEMP\vcpkg-bin" >> $env:GITHUB_ENV
+          "VCPKG_BINARY_SOURCES=clear;files,$env:RUNNER_TEMP\vcpkg-bin,readwrite" >> $env:GITHUB_ENV
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Qt (official binaries, LGPL modules only)
         uses: actions/cache@v4
