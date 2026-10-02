@@ -5,7 +5,8 @@
 
 function(genko_target_flags target)
   if(MSVC)
-    target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8 /fp:precise /Zc:__cplusplus /EHsc /bigobj)
+    # (/wd4100: unused parameters are allowed, as with -Wno-unused-parameter below)
+    target_compile_options(${target} PRIVATE /W4 /wd4100 /permissive- /utf-8 /fp:precise /Zc:__cplusplus /EHsc /bigobj)
     target_compile_definitions(${target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
     if(GENKO_WERROR)
       target_compile_options(${target} PRIVATE /WX)

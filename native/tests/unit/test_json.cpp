@@ -194,11 +194,13 @@ private slots:
     }
 
     void surrogates() {
-        QCOMPARE(genko::core::parse_python_json(R"("\ud83d\ude00")").get<std::string>(), std::string("😀"));
+        // (escaped backslashes, not raw strings: MSVC reads \uD800-style names in raw strings as characters and
+        // rejects the surrogates)
+        QCOMPARE(genko::core::parse_python_json("\"\\ud83d\\ude00\"").get<std::string>(), std::string("😀"));
         // Python keeps a lone surrogate in a str but cannot write it out again; UTF-8 has no way to hold one.
-        QVERIFY(error_of(R"("\ud800")").starts_with("Lone surrogate \\ud800 cannot be read"));
-        QVERIFY(error_of(R"("\ud800\u0041")").starts_with("Lone surrogate"));
-        QVERIFY(error_of(R"("\udc00")").starts_with("Lone surrogate"));
+        QVERIFY(error_of("\"\\ud800\"").starts_with("Lone surrogate \\ud800 cannot be read"));
+        QVERIFY(error_of("\"\\ud800\\u0041\"").starts_with("Lone surrogate"));
+        QVERIFY(error_of("\"\\udc00\"").starts_with("Lone surrogate"));
     }
 
     void subnormalsAndExtremes() {
