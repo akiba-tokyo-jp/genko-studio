@@ -10,6 +10,7 @@ genko_library(genko_render
     panels.cpp
     composite.cpp
     page.cpp
+<<<<<<< HEAD
     npcompat.cpp
     tones.cpp
     effects.cpp
@@ -30,3 +31,16 @@ add_library(genko_render_ops OBJECT
 target_link_libraries(genko_render_ops PUBLIC genko_core Qt6::Core)
 genko_target_flags(genko_render_ops)
 target_link_libraries(genko_render PRIVATE genko_render_ops)
+=======
+    prims.cpp
+  PUBLIC_DEPS genko_core Qt6::Core
+  PRIVATE_DEPS pillow_imaging PNG::PNG)
+# (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
+
+# The ops that draw (each module's ops_*.cpp registers them in ops_registry.cpp), applied through core's CommandBus.
+genko_library(genko_render_ops
+  SOURCES
+    ops_registry.cpp
+    ops_3d.cpp
+  PUBLIC_DEPS genko_render genko_core Qt6::Core)
+>>>>>>> native/m3-3d

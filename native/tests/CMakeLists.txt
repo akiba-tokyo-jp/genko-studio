@@ -34,9 +34,14 @@ genko_test(test_stroke_geom SOURCES unit/test_stroke_geom.cpp DEPS genko_test_su
 genko_test(test_image SOURCES unit/test_image.cpp DEPS genko_test_support genko_render LABELS unit)
 genko_test(test_png SOURCES unit/test_png.cpp DEPS genko_test_support genko_render LABELS unit)
 genko_test(test_render_page SOURCES unit/test_render_page.cpp DEPS genko_render LABELS unit)
+<<<<<<< HEAD
 # Tones, effect lines and rulers (M3-B).
 genko_test(test_rulers SOURCES unit/test_rulers.cpp DEPS genko_test_support genko_render LABELS unit)
 genko_test(test_tones_effects SOURCES unit/test_tones_effects.cpp DEPS genko_test_support genko_render LABELS unit TIMEOUT 900)
+=======
+# 3D (M3-C): the ops, their refusals, Undo and saving, the pose library, the guides drawn (no Python needed).
+genko_test(test_ops_3d SOURCES unit/test_ops_3d.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+>>>>>>> native/m3-3d
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
@@ -78,6 +83,23 @@ genko_test(test_contract_filters SOURCES contract/test_contract_filters.cpp DEPS
 # The two together: a book made by the ops (C++ and Python), drawn by `genko render` and `python -m genko render`.
 genko_test(test_contract_drawn_by_ops SOURCES contract/test_contract_drawn_by_ops.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render LABELS contract TIMEOUT 1800)
+
+# 3D (M3-C): the geometry of figures, guides and models bit for bit against Python, the ops, the drawing.
+genko_test(test_contract_3d_geometry SOURCES contract/test_contract_3d_geometry.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 3600)
+set_tests_properties(test_contract_3d_geometry PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
+genko_test(test_contract_3d_ops SOURCES contract/test_contract_3d_ops.cpp DEPS genko_test_support genko_render_ops
+           LABELS contract TIMEOUT 3600)
+set_tests_properties(test_contract_3d_ops PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
+genko_test(test_contract_3d_random SOURCES contract/test_contract_3d_random.cpp DEPS genko_test_support genko_render_ops
+           LABELS contract TIMEOUT 3600)
+set_tests_properties(test_contract_3d_random PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
+genko_test(test_contract_3d_render SOURCES contract/test_contract_3d_render.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 5400)
+set_tests_properties(test_contract_3d_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=5000000")
+genko_test(test_contract_3d_cli SOURCES contract/test_contract_3d_cli.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 1800)
+set_tests_properties(test_contract_3d_cli PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
 
 genko_test(test_cli_e2e SOURCES e2e/test_cli_e2e.cpp DEPS genko_test_support LABELS e2e)
 genko_test(test_save_e2e SOURCES e2e/test_save_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
