@@ -9,6 +9,7 @@
 #include <QtTest>
 
 #include <QDir>
+#include <QSettings>
 #include <QTemporaryDir>
 
 #include <filesystem>
@@ -396,17 +397,22 @@ private slots:
     void unicodeSpacesAndLongPaths() {
         QString deep = tmp_.path() + "/原稿 フォルダ";
 #ifdef Q_OS_WIN
-        const int levels = 1;  // (beyond MAX_PATH Windows needs long paths turned on: Linux checks the long path)
+        // Beyond MAX_PATH (260) Windows needs long paths turned on (LongPathsEnabled; the executables say they are
+        // long-path aware): checked here when it is on, and Unicode and spaces only otherwise.
+        const QSettings fs_settings(QStringLiteral("HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\FileSystem"),
+                                    QSettings::NativeFormat);
+        const bool long_paths = fs_settings.value(QStringLiteral("LongPathsEnabled")).toInt() == 1;
+        const int levels = long_paths ? 6 : 0;
+        qInfo("Windows long paths: %s", long_paths ? "on" : "off (Unicode and spaces only)");
 #else
+        const bool long_paths = true;
         const int levels = 6;
 #endif
         for (int i = 0; i < levels; ++i) deep += "/とても長い名前のフォルダ 第" + QString::number(i) + "階層 " + QString(20, QChar(u'あ'));
         const QString source = deep + "/旧 原稿.genko";
         genko::test::copy_tree(genko::test::test_data("legacy/book-v3.genko"), source);
         const QString book = deep + "/新しい 原稿 v4.genko";
-#ifndef Q_OS_WIN
-        QVERIFY(book.size() > 200);
-#endif
+        if (long_paths) QVERIFY(book.size() > 200);
         const auto before = genko::test::tree_hashes(source);
         auto r = run_genko({"migrate", source, book});
         QVERIFY2(r.exit_code == 0, r.out.constData());

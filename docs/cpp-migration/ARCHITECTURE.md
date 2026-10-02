@@ -44,6 +44,9 @@ tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開
 - 書き出す JSON は UTF-8、LF。`project.json` はインデント 2・キーは保持順（Python の `json.dumps(indent=2, ensure_ascii=False)` と同等の見た目）。素材として保存する JSON（筆跡ブロブ・op 記録）は**正準形**（キーを辞書順、区切り `,` `:`、空白なし、`ensure_ascii=false`）。数値の書式はロケール非依存。
 - NaN・±Infinity を書かない。旧形式の読込で見つけた場合は null に置き換えて JSON ポインターを変換報告に記録し、利用者の明示（`--accept-repairs`）がない限り v4 を書かない。
 - 文字列は UTF-8 の `std::string`。Qt との境界でだけ `QString` に変換する。パスは `std::filesystem::path`。UTF-8 との変換は `core/paths.hpp` の関数だけで行う（Windows で ANSI コードページを経由しない）。
+- パスを文字列にするとき（エラー文言・報告・GC の `removed` 等）は、どの OS でも区切りを `/` にする（`generic_u8string`）。Python は Windows で `\` を使うが、出力を OS で変えないためにそろえる（Windows は `/` のパスも受け付ける）。
+- CLI の標準出力・標準エラーはどの OS でも UTF-8・LF（Windows でもバイナリモードにし、CRLF へ変換しない）。
+- Windows の実行ファイルは長いパス対応を宣言する（`longPathAware`。MAX_PATH を超えるパスは Windows の LongPathsEnabled 設定が有効なときに使える。Python と同じ条件）。
 
 ## 4. 決定性
 

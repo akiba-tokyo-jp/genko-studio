@@ -1,0 +1,3 @@
+# The test books are byte-exact (their manifests hold the sha256 of each file): no line-end conversion on checkout
+# (Git for Windows turns LF into CRLF otherwise).
+native/tests/data/** -text

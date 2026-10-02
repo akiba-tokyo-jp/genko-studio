@@ -601,6 +601,11 @@ int migrate(const QStringList& args, bool ascii) {
 }  // namespace
 
 int run_cli(int argc, char** argv) {
+#ifdef _WIN32
+    // UTF-8 with "\n" line ends on every OS (ARCHITECTURE.md §8): no CRLF translation on Windows.
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+#endif
     QCoreApplication app(argc, argv);  // (arguments in UTF-8 on Windows too)
     QStringList args = QCoreApplication::arguments().mid(1);
     const bool ascii = args.removeAll(QStringLiteral("--ascii")) > 0;

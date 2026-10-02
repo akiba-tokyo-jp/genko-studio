@@ -16,6 +16,7 @@ function(genko_target_flags target)
     get_target_property(_type ${target} TYPE)
     if(_type STREQUAL "EXECUTABLE")
       target_link_options(${target} PRIVATE /STACK:8388608)
+      target_sources(${target} PRIVATE "${GENKO_SOURCE_ROOT}/cmake/genko.manifest")
     endif()
   else()
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow=local -Wno-unused-parameter

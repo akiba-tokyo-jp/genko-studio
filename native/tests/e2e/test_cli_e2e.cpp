@@ -108,7 +108,13 @@ private slots:
         QCOMPARE(one_line(r.out)["error"].get<std::string>(), std::string("missing key 'spec'"));
         const auto file = genko_run({"inspect", dir + "/project.json"});  // a file, not a folder
         QCOMPARE(file.exit_code, 1);
+#ifdef Q_OS_WIN
+        // (Windows reports a file in the middle of a path as a missing path, as Python's open() does there)
+        QVERIFY(one_line(file.out)["error"].get<std::string>().find("[Errno 2] No such file or directory") !=
+                std::string::npos);
+#else
         QVERIFY(one_line(file.out)["error"].get<std::string>().starts_with("[Errno 20] Not a directory"));
+#endif
     }
 
     void usageErrors() {
