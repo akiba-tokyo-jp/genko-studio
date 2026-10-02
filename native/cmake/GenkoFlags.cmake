@@ -11,6 +11,12 @@ function(genko_target_flags target)
     if(GENKO_WERROR)
       target_compile_options(${target} PRIVATE /WX)
     endif()
+    # The main thread gets 8 MB of stack, as on Linux (Windows gives 1 MB): JSON up to the 1000 levels the readers
+    # accept is read recursively, and Debug frames are large.
+    get_target_property(_type ${target} TYPE)
+    if(_type STREQUAL "EXECUTABLE")
+      target_link_options(${target} PRIVATE /STACK:8388608)
+    endif()
   else()
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow=local -Wno-unused-parameter
                                               -ffp-contract=off -fno-fast-math -fno-strict-aliasing)

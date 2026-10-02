@@ -127,12 +127,36 @@ jobs:
           cmake --build --preset ${{ matrix.preset }} -- -k 0
           # (every test's own output goes to ctest-output.log: QtTest prints which check failed)
           ctest --preset ${{ matrix.preset }} --label-exclude "perf|contract" --no-tests=error -V --output-log "$env:RUNNER_TEMP\ctest-output.log"
+      - name: Failed tests, run one by one
+        if: failure() && steps.build.outcome == 'failure'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $env:PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64\bin;$env:PATH"
+          Set-Location "build\${{ matrix.preset }}"
+          foreach ($exe in Get-ChildItem -Filter 'test_*.exe') {
+            $name = $exe.BaseName
+            $log = "$env:RUNNER_TEMP\qtest-$name.txt"
+            Push-Location tests
+            & $exe.FullName -o "$log,txt" *> "$env:RUNNER_TEMP\stdout-$name.txt"
+            $code = $LASTEXITCODE
+            Pop-Location
+            if ($code -ne 0) {
+              Write-Output ("=== {0}: exit 0x{1:X8}" -f $name, $code)
+              if (Test-Path $log) { Get-Content $log | Select-String -Pattern 'FAIL!|Loc:|Actual|Expected|QWARN|QFATAL|QCRITICAL|Totals' | Select-Object -First 40 | ForEach-Object { $_.Line } }
+              else { Write-Output '(no QtTest log)'; Get-Content "$env:RUNNER_TEMP\stdout-$name.txt" -ErrorAction SilentlyContinue | Select-Object -First 20 }
+            }
+          }
       - name: Test output (also after a failed test)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ctest-${{ matrix.preset }}
-          path: ${{ runner.temp }}/ctest-output.log
+          path: |
+            ${{ runner.temp }}/ctest-output.log
+            ${{ runner.temp }}/qtest-*.txt
+            ${{ runner.temp }}/stdout-*.txt
           if-no-files-found: ignore
           retention-days: 7
       - name: vcpkg binary cache (save, also after a failed build)
