@@ -27,7 +27,7 @@ Json RestoreResult::to_json() const {
     return out;
 }
 
-RestoreResult restore(const ProjectLock& lock, const std::string& actor, bool redo, bool force) {
+RestoreResult restore(const ProjectLock& lock, const std::string& actor, bool redo, bool force, const std::string& txn) {
     const fs::path dir = lock.project();
     const std::string kind = redo ? "redo" : "undo";
     const DiskState disk = read_disk_state(dir);
@@ -86,6 +86,7 @@ RestoreResult restore(const ProjectLock& lock, const std::string& actor, bool re
     request.action = kind;
     request.target_txn = target.id;
     request.expect_state = *wanted;
+    request.txn = txn;
     Saver saver(lock);
     const SaveResult saved = saver.save_payload(payload, request);
     RestoreResult result;

@@ -98,7 +98,7 @@ Json layer_json(const core::Layer& layer, AssetStore& store) {
     out["blend"] = layer.blend;
     out["clip"] = layer.clip;
     out["lock_alpha"] = layer.lock_alpha;
-    out["parent_id"] = opt_string(layer.parent_id);
+    out["parent_id"] = layer.parent_id;
     if (!layer.patches.empty()) {
         Json patches = Json::array();
         for (const auto& patch : layer.patches) {
@@ -106,10 +106,12 @@ Json layer_json(const core::Layer& layer, AssetStore& store) {
                 // (_layer_to_v3 returns before the patches of a placed layer: they keep the refs they were read with)
                 Json item = patch.attrs;
                 if (patch.asset) item["asset"] = *patch.asset;
+                for (const auto& [key, value] : patch.after_asset.items()) item[key] = value;
                 patches.push_back(std::move(item));
             } else if (patch.png && !patch.png->empty()) {
                 Json item = patch.attrs;
                 item["asset"] = put_png(store, patch.png, patch.memo);
+                for (const auto& [key, value] : patch.after_asset.items()) item[key] = value;
                 patches.push_back(std::move(item));
             }
         }

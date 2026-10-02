@@ -1,0 +1,193 @@
+#include "core/pyops.hpp"
+
+#include <cmath>
+#include <limits>
+#include <utility>
+
+#include "core/command_bus.hpp"
+#include "core/pyconv.hpp"
+
+namespace genko::core {
+
+PyUncaught::PyUncaught(std::string type, const std::string& message)
+    : Error("python_error", message), type_(std::move(type)) {}
+
+void not_yet_ported(const std::string& message) { throw Error("not_yet_ported", message); }
+
+const Json* get(const Json& object, std::string_view key) {
+    if (!object.is_object()) return nullptr;
+    const auto it = object.find(std::string(key));
+    return it == object.end() ? nullptr : &*it;
+}
+
+bool has(const Json& object, std::string_view key) { return get(object, key) != nullptr; }
+
+bool truthy_at(const Json& object, std::string_view key) {
+    const Json* value = get(object, key);
+    return value != nullptr && py_truthy(*value);
+}
+
+double to_float(const Json& value) {
+    try {
+        return py_float(value);
+    } catch (const Error& error) {
+        if (value.is_string()) throw PyValueError(error.what());
+        throw PyTypeError(error.what());
+    }
+}
+
+std::int64_t to_int(const Json& value) {
+    if (value.is_number_float()) {
+        const double d = value.get<double>();
+        if (std::isnan(d)) throw PyValueError("cannot convert float NaN to integer");
+        if (std::isinf(d)) throw PyUncaught("OverflowError", "cannot convert float infinity to integer");
+    }
+    try {
+        return py_int(value);
+    } catch (const Error& error) {
+        if (value.is_string()) throw PyValueError(error.what());
+        throw PyTypeError(error.what());
+    }
+}
+
+Num to_num(const Json& value) {
+    if (value.is_boolean()) return Num(value.get<bool>() ? 1 : 0);
+    if (const auto n = Num::from_json(value)) return *n;
+    throw PyTypeError("expected a number, not '" + py_type_name(value) + "'");
+}
+
+std::vector<Json> iterate(const Json& value) {
+    if (value.is_array()) return std::vector<Json>(value.begin(), value.end());
+    if (value.is_string() || value.is_object()) {
+        const Json items = py_list(value);
+        return std::vector<Json>(items.begin(), items.end());
+    }
+    throw PyTypeError("'" + py_type_name(value) + "' object is not iterable");
+}
+
+std::size_t length(const Json& value) {
+    if (value.is_array() || value.is_object()) return value.size();
+    if (value.is_string()) return py_list(value).size();
+    throw PyTypeError("object of type '" + py_type_name(value) + "' has no len()");
+}
+
+Json subscript(const Json& value, std::int64_t index) {
+    if (value.is_array() || value.is_string()) {
+        const Json items = value.is_array() ? value : py_list(value);
+        const auto size = static_cast<std::int64_t>(items.size());
+        const std::int64_t at = index < 0 ? index + size : index;
+        if (at < 0 || at >= size) {
+            throw PyUncaught("IndexError", value.is_array() ? "list index out of range" : "string index out of range");
+        }
+        return items[static_cast<std::size_t>(at)];
+    }
+    if (value.is_object()) {
+        // (a JSON object's keys are strings: an int key is never there)
+        throw OpKeyError(std::to_string(index));
+    }
+    throw PyTypeError("'" + py_type_name(value) + "' object is not subscriptable");
+}
+
+Json subscript(const Json& value, std::string_view key) {
+    if (value.is_object()) {
+        const Json* found = get(value, key);
+        if (found == nullptr) throw OpKeyError(py_repr_str(key));
+        return *found;
+    }
+    if (value.is_array()) throw PyTypeError("list indices must be integers or slices, not str");
+    if (value.is_string()) throw PyTypeError("string indices must be integers, not 'str'");
+    throw PyTypeError("'" + py_type_name(value) + "' object is not subscriptable");
+}
+
+std::vector<double> unpack_floats(const Json& value, std::size_t expected) {
+    const std::vector<Json> items = iterate(value);
+    std::vector<double> out;
+    // (unpacking takes one item more than it needs, to see that there is none: that one is converted too)
+    for (std::size_t i = 0; i < items.size() && i <= expected; ++i) out.push_back(to_float(items[i]));
+    if (out.size() < expected) {
+        throw PyValueError("not enough values to unpack (expected " + std::to_string(expected) + ", got " +
+                           std::to_string(out.size()) + ")");
+    }
+    if (out.size() > expected) throw PyValueError("too many values to unpack (expected " + std::to_string(expected) + ")");
+    return out;
+}
+
+bool py_less(const Json& a, const Json& b, std::string_view op) {
+    const auto number = [](const Json& v) -> std::optional<Num> {
+        if (v.is_boolean()) return Num(v.get<bool>() ? 1 : 0);
+        return Num::from_json(v);
+    };
+    const auto x = number(a);
+    const auto y = number(b);
+    if (!x || !y) {
+        if (a.is_string() && b.is_string()) {
+            const auto& s = a.get_ref<const std::string&>();
+            const auto& t = b.get_ref<const std::string&>();
+            if (op == "<") return s < t;
+            if (op == "<=") return s <= t;
+            if (op == ">") return s > t;
+            return s >= t;
+        }
+        throw PyTypeError("'" + std::string(op) + "' not supported between instances of '" + py_type_name(a) + "' and '" +
+                          py_type_name(b) + "'");
+    }
+    if (op == "<") return *x < *y;
+    if (op == "<=") return *x <= *y;
+    if (op == ">") return *x > *y;
+    return *x >= *y;
+}
+
+void require_hashable(const Json& value) {
+    if (value.is_array()) throw PyTypeError("unhashable type: 'list'");
+    if (value.is_object()) throw PyTypeError("unhashable type: 'dict'");
+}
+
+bool py_equals(const Json& a, const Json& b) {
+    const auto number = [](const Json& v) -> std::optional<Num> {
+        if (v.is_boolean()) return Num(v.get<bool>() ? 1 : 0);
+        return Num::from_json(v);
+    };
+    const auto x = number(a);
+    const auto y = number(b);
+    if (x || y) return x && y && *x == *y;
+    if (a.type() != b.type()) return false;
+    if (a.is_array()) {
+        if (a.size() != b.size()) return false;
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            if (!py_equals(a[i], b[i])) return false;
+        }
+        return true;
+    }
+    if (a.is_object()) {
+        if (a.size() != b.size()) return false;
+        for (const auto& [key, item] : a.items()) {
+            const Json* other = get(b, key);
+            if (other == nullptr || !py_equals(item, *other)) return false;
+        }
+        return true;
+    }
+    return a == b;
+}
+
+Json round_json(const Json& value, int ndigits) {
+    if (value.is_boolean()) return Json(value.get<bool>() ? 1 : 0);
+    if (const auto n = Num::from_json(value)) return py_round(*n, ndigits).json();
+    throw PyTypeError("type " + py_type_name(value) + " doesn't define __round__ method");
+}
+
+std::int64_t loop_count(double steps) {
+    if (std::isnan(steps)) throw PyValueError("cannot convert float NaN to integer");
+    if (std::isinf(steps)) throw PyUncaught("OverflowError", "cannot convert float infinity to integer");
+    constexpr double kMost = 1e7;
+    if (steps >= kMost) throw PyUncaught("MemoryError", "");
+    if (steps <= -kMost) return -static_cast<std::int64_t>(kMost);  // (callers take max(1, …))
+    return static_cast<std::int64_t>(std::trunc(steps));
+}
+
+Json nums_json(const std::vector<Num>& values) {
+    Json out = Json::array();
+    for (const Num& v : values) out.push_back(v.json());
+    return out;
+}
+
+}  // namespace genko::core

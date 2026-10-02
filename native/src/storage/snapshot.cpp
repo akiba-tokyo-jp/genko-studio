@@ -64,7 +64,7 @@ Json layer_brief(const core::Layer& layer) {
         for (const auto v : *layer.color) color.push_back(v);
         out["color"] = std::move(color);
     }
-    if (layer.parent_id && !layer.parent_id->empty()) out["parent_id"] = *layer.parent_id;
+    if (core::py_truthy(layer.parent_id)) out["parent_id"] = layer.parent_id;
     if (layer.reference) out["reference"] = true;
     if (!layer.panel_clip) out["panel_clip"] = false;
     return out;
@@ -115,7 +115,7 @@ Json snapshot(const core::Document& doc, bool full) {
         item["story"] = std::move(story);
         item["name_stroke_count"] = count(page, core::LayerRole::Name);
         item["ink_stroke_count"] = count(page, core::LayerRole::Ink);
-        item["selected_frame_id"] = page.selected_frame_id ? Json(*page.selected_frame_id) : Json(nullptr);
+        item["selected_frame_id"] = page.selected_frame_id;
         Json layers = Json::array();
         for (const auto& layer : page.layers) layers.push_back(layer_brief(layer));
         item["layers"] = std::move(layers);

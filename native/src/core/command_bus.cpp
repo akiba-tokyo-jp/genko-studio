@@ -1,10 +1,17 @@
 #include "core/command_bus.hpp"
 
+#include <algorithm>
+#include <cstdint>
+#include <map>
 #include <set>
 #include <utility>
+#include <vector>
 
+#include "core/covers.hpp"
 #include "core/ops_schema.hpp"
+#include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 
 namespace genko::core {
 
@@ -140,6 +147,87 @@ bool json_equals_string(const Json& value, std::string_view text) {
     return value.is_string() && value.get_ref<const std::string&>() == text;
 }
 
+bool one_of(std::string_view name, std::initializer_list<std::string_view> names) {
+    return std::find(names.begin(), names.end(), name) != names.end();
+}
+
+// strict_gates' families of ops (Python's LAYOUT_OPS and RASTER_EDIT_OPS, with the ops of later milestones: the
+// rules go by name)
+bool layout_op(std::string_view name) {
+    return one_of(name, {"split_frame", "merge_frame", "resize_frame", "set_layout", "cut_frame", "move_gutter",
+                         "add_frame", "delete_frame"});
+}
+
+bool raster_edit_op(std::string_view name) {
+    return one_of(name, {"put_raster", "import_psd", "erase_raster", "erase", "filter_raster", "flood_fill", "fill",
+                         "fill_area", "fill_enclosed", "trace_edit", "gradient_fill", "transform_area", "delete_area",
+                         "paste", "set_stroke_width", "reshape_stroke", "trace_prims", "effect_to_layer", "add_shape",
+                         "smudge", "vector_edit", "fill_gaps", "liquify", "render_prims"});
+}
+
+// bookops.NOT_PER_PAGE
+bool not_per_page(std::string_view name) {
+    return one_of(name, {"add_page", "delete_page", "duplicate_page", "import_pages", "reorder", "move_page",
+                         "set_page_spec", "add_cover", "for_pages", "replace_text", "approve", "revoke",
+                         "allow_chat_approval", "name_ok", "advance", "set_bible", "set_script", "define_brush",
+                         "set_brush"});
+}
+
+bool printed(const Layer& layer) { return layer.role != LayerRole::Name && layer.role != LayerRole::Draft; }
+
+// ops.PAGE_LOCAL_OPS, BOOK_OPS and LINE_OPS (the sets _touched_pages looks names up in)
+bool page_local_op(std::string_view name) {
+    return one_of(name, {"import_psd", "set_animation", "add_anim_folder", "add_cel", "set_exposure", "set_exposures",
+                         "set_camera_key", "set_light_table", "split_frame", "cut_frame", "move_gutter", "merge_frame",
+                         "resize_frame", "set_frame", "add_frame", "delete_frame", "add_line", "name_ok", "advance",
+                         "add_stroke", "fill", "fill_area", "fill_enclosed", "transform_area", "delete_area", "paste",
+                         "set_stroke_width", "reshape_stroke", "delete_stroke", "put_raster", "set_layer", "gradient_fill",
+                         "duplicate_layer", "merge_down", "set_layer_mask", "paint_mask", "set_note", "select_frame",
+                         "flood_fill", "add_tone", "set_tone", "delete_tone", "add_effect", "edit_effect", "delete_effect",
+                         "effect_to_layer", "edit_stroke", "simplify_stroke", "set_ruler", "add_ruler", "edit_ruler",
+                         "delete_ruler", "ruler_from_3d", "camera_from_ruler", "add_prim3d", "add_scene", "edit_prim",
+                         "delete_prim", "trace_prims", "lt_convert", "erase_raster", "erase", "reorder_layers",
+                         "stamp_material", "add_mannequin", "pose_mannequin", "set_onion", "step_onion", "set_lt",
+                         "add_layer", "delete_layer", "filter_raster", "add_shape", "store_area", "forget_area", "smudge",
+                         "vector_edit", "trace_edit", "fill_gaps", "merge_layers", "merge_visible", "group_layers",
+                         "move_layers", "convert_layer", "set_layers", "liquify", "ruler_to_layer", "add_figure",
+                         "pose_figure", "add_head", "add_hand", "import_model", "set_camera", "set_light", "render_prims"});
+}
+
+bool book_op(std::string_view name) {
+    return one_of(name, {"set_brush", "define_brush", "set_autosave", "add_ticket", "set_ticket", "reorder_lines"});
+}
+
+bool line_op(std::string_view name) {
+    return one_of(name, {"edit_line", "move_line", "delete_line", "set_balloon_path", "cut_balloon"});
+}
+
+// Python reads the ops once before it applies any (ops._touched_pages, to know which pages to copy): it looks each
+// op's name up in sets of ops until it meets one that may change any page. A name it cannot hash stops it there with
+// a TypeError, outside apply_ops' checks (Python's command line ends with a traceback).
+void read_as_touched_pages_does(const Json& ops) {
+    for (std::size_t i = 0; i < ops.size(); ++i) {
+        const Json& op = ops[i];
+        if (!op.is_object()) return;
+        const Json* name = find(op, "op");
+        if (name != nullptr && (name->is_array() || name->is_object())) {
+            throw ApplyError("ops[" + std::to_string(i) + "] " + py_str(*name) + ": TypeError: unhashable type: '" +
+                                 py_type_name(*name) + "'",
+                             "python_error");
+        }
+        const std::string text = name != nullptr && name->is_string() ? name->get<std::string>() : std::string();
+        const bool named = name != nullptr && name->is_string();
+        if (named && (book_op(text) || line_op(text))) continue;
+        if (!named || !page_local_op(text)) return;
+        if ((text == "name_ok" || text == "advance") && !op.contains("page")) return;
+        try {
+            py_int(op.at("page"));
+        } catch (const std::exception&) {
+            return;
+        }
+    }
+}
+
 }  // namespace
 
 ApplyError::ApplyError(const std::string& message, std::string code) : Error(std::move(code), message) {}
@@ -150,6 +238,10 @@ const OpRegistry& OpRegistry::builtin() {
     static const OpRegistry registry = [] {
         OpRegistry r;
         register_book_ops(r);
+        register_frame_ops(r);
+        register_page_ops(r);
+        register_stroke_ops(r);
+        register_layer_ops(r);
         return r;
     }();
     return registry;
@@ -173,6 +265,10 @@ std::vector<std::string> OpRegistry::names() const {
 std::size_t require_page(const Document& doc, const Json& op) {
     std::int64_t index = 0;
     const Json* page = find(op, "page");
+    if (page != nullptr) {
+        // (Python's int has no bound: a page number past 64 bits is only a page the book does not have)
+        if (const auto big = py_big_int_text(*page)) throw OpError("no page " + *big);
+    }
     try {
         if (page == nullptr) throw OpError("page (int) is required");
         index = py_int(*page);
@@ -225,6 +321,155 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
     if (owned && !json_equals_string(*owner, actor.name())) {
         throw OpError("page " + index->repr() + " locked by " + py_str(*owner));
     }
+}
+
+void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
+    const Json* name_value = find(op_in, "op");
+    std::string name = name_value != nullptr && name_value->is_string() ? name_value->get<std::string>() : std::string();
+    const bool named = name_value != nullptr && name_value->is_string();
+    const auto page_of = [&doc](const Json& op) -> const Page& { return doc.page(require_page(doc, op)); };
+    if (named && (layout_op(name) || (name == "set_frame" && op_in.contains("poly"))) && !actor.can_approve()) {
+        const Page& page = page_of(op_in);
+        if (page.name_ok) {
+            throw OpError("page " + page.index.repr() +
+                          ": the name is approved; a person must revoke it before the layout changes (strict_gates)");
+        }
+    }
+    if (named && name == "advance" && json_equals_string(op_in.value("to", Json(nullptr)), "finish")) {
+        const Page& page = page_of(op_in);
+        if (!page.art_ok) throw OpError("page " + page.index.repr() + ": finish needs the art approved (strict_gates)");
+    }
+    if (named && one_of(name, {"merge_layers", "merge_visible", "set_layers", "move_layers", "group_layers"})) {
+        const Page& page = page_of(op_in);
+        std::vector<Json> ids;  // set(op.get("ids") or []), or every layer's id
+        const bool every = truthy_at(op_in, "all") || name == "merge_visible";
+        if (!every) {
+            const Json* given = find(op_in, "ids");
+            if (given != nullptr && py_truthy(*given)) {
+                for (const Json& id : iterate(*given)) {
+                    require_hashable(id);
+                    ids.push_back(id);
+                }
+            }
+        }
+        const auto chosen = [&](const Layer& layer) {
+            if (every) return true;
+            return std::any_of(ids.begin(), ids.end(), [&](const Json& id) { return json_equals_string(id, layer.id); });
+        };
+        const bool any_printed =
+            std::any_of(page.layers.begin(), page.layers.end(), [&](const Layer& l) { return chosen(l) && printed(l); });
+        if (any_printed && !page.name_ok && (name == "merge_layers" || name == "merge_visible")) {
+            throw OpError(name + " on a printed layer needs name_ok on page " + page.index.repr() + " (strict_gates)");
+        }
+        return;
+    }
+    Json op = op_in;
+    if (named && one_of(name, {"set_layer_mask", "paint_mask", "merge_down", "delete_layer", "duplicate_layer", "convert_layer"}) &&
+        truthy_at(op_in, "id")) {
+        op["layer_id"] = op_in["id"];  // (these name the layer by id: the same rule as drawing on it)
+        name = "fill";
+    }
+    if (named && (name == "add_stroke" || raster_edit_op(name)) && truthy_at(op, "layer_id")) {
+        const Page& page = page_of(op);
+        const Json& layer_id = op["layer_id"];
+        const Layer* target = nullptr;
+        for (const Layer& layer : page.layers) {
+            if (json_equals_string(layer_id, layer.id)) {
+                target = &layer;
+                break;
+            }
+        }
+        // (a layer that is not printed — the name, a draft, or one set exportable:false — may be drawn on before the
+        // name is approved: trying a line out does not change the page)
+        if (target != nullptr && printed(*target) && target->exportable && !page.name_ok) {
+            throw OpError(name + " on a printed layer needs name_ok on page " + page.index.repr() + " (strict_gates)");
+        }
+        return;
+    }
+    if (named && name == "set_layer" && op.contains("exportable") && op["exportable"] == Json(true)) {
+        const Page& page = page_of(op);
+        const Json key = truthy_at(op, "id") ? op["id"] : (op.contains("layer") ? op["layer"] : Json(nullptr));
+        const Layer* target = nullptr;
+        for (const Layer& layer : page.layers) {
+            if (json_equals_string(key, layer.id) || json_equals_string(key, to_string(layer.role))) {
+                target = &layer;
+                break;
+            }
+        }
+        const bool drawn = target != nullptr && (target->stroke_count() > 0 || !target->patches.empty() ||
+                                                 (target->raster_png && !target->raster_png->empty()));
+        if (drawn && printed(*target) && !target->exportable && !page.name_ok) {
+            throw OpError("set_layer exportable on a drawn layer needs name_ok on page " + page.index.repr() +
+                          " (strict_gates)");
+        }
+    }
+    if (named && raster_edit_op(name)) {
+        const Json* layer_value = find(op, "layer");
+        const std::string layer = layer_value != nullptr && py_truthy(*layer_value) ? py_str(*layer_value)
+                                  : name != "filter_raster"                        ? std::string("ink")
+                                                                                   : std::string();
+        if (layer != "name" && layer != "draft" && !layer.empty()) {
+            const Page& page = page_of(op);
+            if (!page.name_ok) {
+                throw OpError(name + " on " + layer + " needs name_ok on page " + page.index.repr() + " (strict_gates)");
+            }
+        }
+    }
+    if (named && name == "add_line" && truthy_at(op, "frame_id") && !(op.contains("x_mm") && op.contains("y_mm"))) {
+        throw OpError("add_line with frame_id needs explicit x_mm/y_mm (strict_gates)");
+    }
+}
+
+Json expand_for_pages(const Document& doc, const Json& op) {
+    const Json* ops = find(op, "ops");
+    if (ops == nullptr || !ops->is_array() || ops->empty()) throw OpError("ops is the list of ops to run on each page");
+    std::vector<std::string> names;
+    for (const Json& item : *ops) {
+        if (!item.is_object()) continue;
+        const Json* name = find(item, "op");
+        names.push_back(name != nullptr ? py_str(*name) : std::string("None"));
+    }
+    if (names.size() != ops->size()) throw OpError("ops is the list of ops to run on each page");
+    for (const std::string& name : names) {
+        if (not_per_page(name)) throw OpError(name + " cannot be repeated page by page");
+    }
+    const Json* pages_value = find(op, "pages");
+    const Json wanted = pages_value != nullptr && py_truthy(*pages_value) ? *pages_value : Json("body");
+    std::vector<Json> indexes;
+    if (wanted == Json("all") || wanted == Json("body")) {
+        for (const auto& page : doc.pages) {
+            if (wanted == Json("all") || !is_cover(*page)) indexes.push_back(page->index.json());
+        }
+    } else {
+        for (const Json& v : iterate(wanted)) {
+            // (a page number past 64 bits stays its text: no page has it)
+            const auto big = py_big_int_text(v);
+            indexes.push_back(big ? Json(*big) : Json(to_int(v)));
+        }
+        for (const Json& index : indexes) {
+            if (index.is_string() || first_page(doc, Num(index.get<std::int64_t>())) == nullptr) {
+                throw OpError("no page " + py_str(index));
+            }
+        }
+    }
+    Json out = Json::array();
+    for (const Json& index : indexes) {
+        for (const Json& item : *ops) {
+            Json one = item;
+            one["page"] = index;
+            out.push_back(std::move(one));
+        }
+    }
+    return out;
+}
+
+bool area_needs_resolving(const Json& area) {
+    if (!area.is_object()) return false;
+    for (const char* key : {"rect", "ellipse", "layer", "color", "all", "saved", "union", "intersect", "subtract", "invert",
+                            "grow_mm", "feather_mm"}) {
+        if (area.contains(key)) return true;
+    }
+    return false;
 }
 
 std::vector<std::string> validate_document(const Document& doc) {
@@ -302,6 +547,7 @@ std::optional<std::int64_t> PageMapping::get(const Num& from) const {
 }
 
 std::optional<std::int64_t> PageMapping::get(const Json& from) const {
+    require_hashable(from);  // (a dict lookup: a list or a dict is a TypeError)
     if (from.is_boolean()) return get(Num(from.get<bool>() ? 1 : 0));  // (Python: True == 1)
     if (const auto number = Num::from_json(from)) return get(*number);
     return std::nullopt;
@@ -332,7 +578,9 @@ void remap_page_refs(Document& doc, const PageMapping& mapping) {
     }
     if (doc.tickets.is_array()) {
         for (Json& ticket : doc.tickets) {
-            if (!ticket.is_object()) continue;
+            if (!ticket.is_object()) {
+                throw PyUncaught("AttributeError", "'" + py_type_name(ticket) + "' object has no attribute 'get'");
+            }
             const auto at = ticket.find("page_index");
             if (at == ticket.end() || at->is_null()) continue;
             if (const auto to = mapping.get(*at)) {
@@ -361,16 +609,81 @@ void reorder_pages(Document& doc, const std::vector<Num>& order) {
     remap_page_refs(doc, mapping);
 }
 
+// --- one layer listed twice ------------------------------------------------------------------------------------------
+// Python's pages hold their layers as objects, and reorder_layers given an id twice lists the same object twice: an
+// edit of it shows in both places (until the book is saved, which writes two layers). Here they are two values with
+// the same Layer::identity, made alike again after each op as the one the op changed.
+
+namespace {
+
+// The positions of the layers listed more than once, by identity (groups of two or more).
+std::vector<std::vector<std::size_t>> listed_twice(const Page& page) {
+    std::map<std::uint64_t, std::vector<std::size_t>> at;
+    for (std::size_t n = 0; n < page.layers.size(); ++n) at[page.layers[n].identity].push_back(n);
+    std::vector<std::vector<std::size_t>> out;
+    for (auto& [identity, positions] : at) {
+        if (positions.size() > 1) out.push_back(std::move(positions));
+    }
+    return out;
+}
+
+bool lists_a_layer_twice(const Document& doc) {
+    for (const auto& page : doc.pages) {
+        std::set<std::uint64_t> seen;
+        for (const Layer& layer : page->layers) {
+            if (!seen.insert(layer.identity).second) return true;
+        }
+    }
+    return false;
+}
+
+// After an op: each group as the entry the op changed (its value before the op is in `before`, the book's pages
+// then).
+void make_alike(Document& doc, const std::vector<PagePtr>& before) {
+    const auto old_value = [&before](std::uint64_t identity) -> const Layer* {
+        for (const auto& page : before) {
+            for (const Layer& layer : page->layers) {
+                if (layer.identity == identity) return &layer;
+            }
+        }
+        return nullptr;
+    };
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        for (const auto& group : listed_twice(*doc.pages[i])) {
+            const auto& layers = doc.pages[i]->layers;
+            const Layer* old = old_value(layers[group.front()].identity);
+            std::size_t changed = group.front();
+            for (const std::size_t n : group) {
+                if (old != nullptr && !same_layer(layers[n], *old)) {
+                    changed = n;
+                    break;
+                }
+            }
+            const bool alike = std::all_of(group.begin(), group.end(), [&](std::size_t n) { return same_layer(layers[n], layers[changed]); });
+            if (alike) continue;
+            Page& page = doc.edit_page(i);
+            const Layer value = page.layers[changed];
+            for (const std::size_t n : group) page.layers[n] = value;
+        }
+    }
+}
+
+}  // namespace
+
 // --- CommandBus ----------------------------------------------------------------------------------------------------
 
 CommandBus::CommandBus(const OpRegistry& registry) : registry_(registry) {}
 
-ApplyResult CommandBus::apply(const Document& doc, const Json& ops, const Actor& actor, bool dry_run) const {
-    if (!ops.is_array()) throw ApplyError("ops must be a JSON array");
+ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Actor& actor, bool dry_run) const {
+    if (!ops_in.is_array()) throw ApplyError("ops must be a JSON array");
     ApplyResult result;
-    if (ops.size() == 1 && ops[0].is_object() && is_op(ops[0], "undo")) {
+    // (Python looks at ops[0].get("op") first: a lone op that is not an object stops it there)
+    if (ops_in.size() == 1 && !ops_in[0].is_object()) {
+        throw ApplyError("AttributeError: '" + py_type_name(ops_in[0]) + "' object has no attribute 'get'", "python_error");
+    }
+    if (ops_in.size() == 1 && is_op(ops_in[0], "undo")) {
         // Python undoes the session's own changes here; a book just read has none. (Saved changes are undone with
-        // `genko undo`, from the journal.)
+        // `genko undo`, from the journal; `genko apply` gives this op to it.)
         if (!dry_run) throw ApplyError("nothing to undo", "nothing_to_undo");
         result.doc = doc;
         result.applied.push_back("undo");
@@ -379,28 +692,63 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops, const Actor&
         return result;
     }
 
+    // for_pages: the same ops page by page, expanded against the book as it was given, each then checked like any other
+    Json ops = ops_in;
+    if (std::any_of(ops_in.begin(), ops_in.end(), [](const Json& op) { return op.is_object() && is_op(op, "for_pages"); })) {
+        Json expanded = Json::array();
+        for (std::size_t i = 0; i < ops_in.size(); ++i) {
+            const Json& op = ops_in[i];
+            if (!(op.is_object() && is_op(op, "for_pages"))) {
+                expanded.push_back(op);
+                continue;
+            }
+            const std::string prefix = "ops[" + std::to_string(i) + "] for_pages: ";
+            try {
+                for (Json& item : expand_for_pages(doc, op)) expanded.push_back(std::move(item));
+            } catch (const OpError& error) {
+                throw ApplyError(prefix + error.what());
+            } catch (const PyValueError& error) {
+                // (Python lets it through apply_ops; its command line prints the message alone)
+                throw ApplyError(error.what(), "python_error");
+            } catch (const PyUncaught& error) {
+                throw ApplyError(prefix + error.type() + ": " + error.what(), "python_error");
+            } catch (const Error& error) {
+                // (a TypeError: Python lets it through apply_ops, and its command line stops with a traceback)
+                throw ApplyError(prefix + "TypeError: " + error.what(), "python_error");
+            }
+        }
+        ops = std::move(expanded);
+    }
+
+    read_as_touched_pages_does(ops);
     Document work = doc;  // (the pages stay shared until an op changes one)
     for (std::size_t i = 0; i < ops.size(); ++i) {
-        const Json& op = ops[i];
+        Json& op = ops[i];
         if (!op.is_object()) throw ApplyError("ops[" + std::to_string(i) + "] must be an object");
         const Json* name = find(op, "op");
         const std::string name_text = name != nullptr ? py_str(*name) : std::string("None");
         const std::string prefix = "ops[" + std::to_string(i) + "] " + name_text + ": ";
+        // (a page that lists a layer twice: its pages as they were, to tell which entry the op changes)
+        std::vector<PagePtr> before;
+        if (lists_a_layer_twice(work)) before = work.pages;
+        OpContext context{work, op, actor};
         try {
+            if (const Json* area = find(op, "area"); area != nullptr && area_needs_resolving(*area)) {
+                not_yet_ported("an area of this kind (rect, ellipse, layer, color, all, saved, union, intersect, "
+                               "subtract, invert, grow_mm, feather_mm): the C++ areas come with M3");
+            }
+            if (name != nullptr) require_hashable(*name);  // (Python looks the name up in sets of ops)
             check_page_lock(work, op, actor);
-            // (strict_gates checks the drawing and layout ops; they come with those ops in M2)
+            if (work.strict_gates) check_strict(work, op, actor);
             const bool lock_op = is_op(op, "lock_page") || is_op(op, "unlock_page");
             if (!lock_op) {  // (lock_page and unlock_page took effect in check_page_lock)
                 if (name == nullptr || !py_truthy(*name)) throw OpError("op is required");
                 const OpFunction* function = name->is_string() ? registry_.find(name->get_ref<const std::string&>()) : nullptr;
                 if (function == nullptr) {
-                    if (schema_of(op) != nullptr) {
-                        throw ApplyError(prefix + name_text + " is not implemented in this build yet" + usage(op),
-                                         "not_implemented");
-                    }
+                    // (undo is an op only on its own: in a batch Python does not know it)
+                    if (schema_of(op) != nullptr && !is_op(op, "undo")) not_yet_ported(name_text + " is not in the C++ build yet");
                     throw OpError("unknown op: " + name_text);
                 }
-                OpContext context{work, op, actor};
                 (*function)(context);
             }
         } catch (const ApplyError&) {
@@ -410,10 +758,30 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops, const Actor&
         } catch (const OpKeyError& error) {
             throw ApplyError(prefix + "not found: " + error.what() +
                              " (a key the op needs, or an id the book does not have)" + usage(op));
+        } catch (const PyUncaught& error) {
+            throw ApplyError(prefix + error.type() + ": " + error.what(), "python_error");
         } catch (const Error& error) {
+            if (error.code() == "not_yet_ported") throw ApplyError(prefix + error.what(), "not_yet_ported");
             throw ApplyError(prefix + "a value of the wrong type (" + error.what() + ")" + usage(op));
         }
+        if (!before.empty()) make_alike(work, before);
         result.applied.push_back(name_text);
+        // (Python: op.pop("_report") — what the op reported, or the key as it was given)
+        std::optional<Json> report = std::move(context.report);
+        if (const auto given = op.find("_report"); given != op.end()) {
+            if (!report) report = *given;
+            op.erase(given);
+        }
+        if (report && py_truthy(*report)) {
+            if (!report->is_object()) {
+                throw ApplyError(prefix + "TypeError: '" + py_type_name(*report) + "' object is not a mapping", "python_error");
+            }
+            Json item = Json::object();
+            item["index"] = static_cast<std::int64_t>(i);
+            item["op"] = name_text;
+            for (const auto& [key, value] : report->items()) item[key] = value;
+            result.results.push_back(std::move(item));
+        }
     }
     for (auto& warning : validate_document(work)) result.warnings.push_back(std::move(warning));
     for (auto& warning : unknown_key_warnings(ops)) result.warnings.push_back(std::move(warning));

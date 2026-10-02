@@ -27,8 +27,18 @@ genko_library(genko_core
     ops_schema.cpp
     actor.cpp
     gates.cpp
+    pyops.cpp
+    placement.cpp
+    stroke_tools.cpp
+    brushes.cpp
+    rulers.cpp
     command_bus.cpp
+    ops_util.cpp
     ops_book.cpp
+    ops_frames.cpp
+    ops_pages.cpp
+    ops_strokes.cpp
+    ops_layers.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
 
