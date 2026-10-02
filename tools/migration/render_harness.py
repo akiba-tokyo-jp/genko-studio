@@ -35,6 +35,7 @@ import math
 import random
 import struct
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -974,16 +975,39 @@ def leave_out_unported() -> None:
     balloons.draw_lines = lambda *args, **kwargs: None
 
 
+@contextmanager
+def _unported_scope(enabled: bool):
+    """Keep reference-only omissions local even when groups run in the parent."""
+    if not enabled:
+        yield
+        return
+    from genko import anim, balloons, covers, nombre, render, tones
+    names = [(tones, 'draw_layer'), (tones, 'screened'), (render, '_draw_effects'),
+             (render, '_draw_prims'), (render, '_placed_raster'), (render, '_finish_placed'),
+             (nombre, 'draw'), (covers, 'draw_folds'), (anim, 'at_frame'), (balloons, 'draw_lines')]
+    originals = [(module, name, getattr(module, name)) for module, name in names]
+    try:
+        leave_out_unported()
+        yield
+    finally:
+        for module, name, function in originals:
+            setattr(module, name, function)
+        render._STROKE_CACHE.clear()
+        render._FRAME_MASKS.clear()
+
+
 def render_jobs(jobs_path: str) -> None:
-    """Each job: {"book", "page", "dpi", "mode", "out", "skip_unported", "crop_marks", "then": [ops…]}."""
+    """Render one homogeneous book/mode batch without leaking skip mode to its caller."""
+    jobs = json.loads(Path(jobs_path).read_text(encoding="utf-8"))
+    with _unported_scope(any(job.get('skip_unported') for job in jobs)):
+        _render_jobs(jobs)
+
+
+def _render_jobs(jobs: list) -> None:
     from genko import render
     from genko.io import load_episode
-
     from genko import brushes
 
-    jobs = json.loads(Path(jobs_path).read_text(encoding="utf-8"))
-    if any(job.get("skip_unported") for job in jobs):
-        leave_out_unported()
     books = {}
     for job in jobs:
         render._STROKE_CACHE.clear()
@@ -1033,6 +1057,43 @@ def render_jobs(jobs_path: str) -> None:
         image.save(job["out"])
 
 
+def effective_render_workers(requested: int) -> int:
+    """Cap reference processes by the actual CPU quota and a conservative image-memory budget.
+
+    A high-DPI renderer can peak above 1 GiB with stroke pictures, masks,
+    RGBA working images and numpy buffers (1.11 GiB measured in the M3-A1
+    contract). Reserve half the container for native/other CTest work, then
+    budget 1536 MiB per Python renderer.
+    This is admission control for this test workload, not a per-image hard limit.
+    """
+    import os
+
+    cpus = max(1, os.cpu_count() or 1)
+    if hasattr(os, 'sched_getaffinity'):
+        try:
+            cpus = min(cpus, max(1, len(os.sched_getaffinity(0))))
+        except OSError:
+            pass
+    cgroup = Path('/sys/fs/cgroup')
+    try:
+        quota, period = (cgroup / 'cpu.max').read_text().split()
+        if quota != 'max' and int(period) > 0:
+            cpus = min(cpus, max(1, int(quota) // int(period)))
+    except (OSError, ValueError):
+        pass
+    # Unknown/unlimited memory: choose the safe serial fallback, not all host CPUs.
+    memory_workers = 1
+    try:
+        limit = int((cgroup / 'memory.max').read_text())
+        current = int((cgroup / 'memory.current').read_text())
+        if limit > 0 and current >= 0:
+            available = max(0, limit - max(current, limit // 2))
+            memory_workers = max(1, available // (1536 * 1024**2))
+    except (OSError, ValueError):
+        pass
+    return min(max(1, requested), cpus, memory_workers)
+
+
 def render_jobs_parallel(jobs_path: str, workers: int) -> None:
     """render_jobs split by book over `workers` processes (the parts are written next to the jobs file). A worker that
     dies (killed for memory, say) fails the run at once: multiprocessing.Pool would wait for it for ever."""
@@ -1050,7 +1111,14 @@ def render_jobs_parallel(jobs_path: str, workers: int) -> None:
         path = parts / f"jobs-{i:03d}.json"
         path.write_text(dumps(group), encoding="utf-8")
         files.append(str(path))
-    with ProcessPoolExecutor(max(1, workers), mp_context=multiprocessing.get_context("spawn")) as pool:
+    effective = min(effective_render_workers(workers), max(1, len(files)))
+    print(dumps({'render_resources': {'requested_workers': workers, 'effective_workers': effective,
+                                    'groups': len(files)}}), file=sys.stderr, flush=True)
+    if effective == 1:
+        for path in files:
+            render_jobs(path)
+        return
+    with ProcessPoolExecutor(effective, mp_context=multiprocessing.get_context("spawn")) as pool:
         for _ in pool.map(render_jobs, files):
             pass
 
