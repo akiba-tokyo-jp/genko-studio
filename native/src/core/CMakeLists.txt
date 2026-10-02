@@ -31,10 +31,19 @@ genko_library(genko_core
     gates.cpp
     command_bus.cpp
     ops_book.cpp
+    linalg3.cpp
+    pyvalue.cpp
+    mesh3d.cpp
+    prim3d.cpp
+    persp3d.cpp
+    mannequin.cpp
+    poses.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
 
 # CPython calls libm directly: so must we (no pow(x, 2.0) → x*x, no sin+cos → sincos), for the same last bits.
 if(NOT MSVC)
   set_source_files_properties(pymath.cpp pyrandom.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
+  # (numpy on OpenBLAS: libm's hypot, exp, log as numpy and CPython call them; the fused multiply-adds are explicit)
+  set_source_files_properties(linalg3.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
 endif()

@@ -21,6 +21,7 @@
 #include "render/brushes.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
+#include "render/prims.hpp"
 
 namespace genko::render {
 
@@ -825,7 +826,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     Image image = rgba.convert("RGB");
 
     if (effects_draw(page)) skip_unported(ctx, "effects");
-    if (!print && core::py_truthy(page.prims)) skip_unported(ctx, "prims");
+    if (!print && core::py_truthy(page.prims)) draw_prims(image, area, ctx);  // 3D guides (never printed)
     if (truthy_json(page.ruler) && name_or_proof) draw_ruler(image, area, ctx);
     draw_frames(image, area, page, ctx.size, dpi);
     if (name_or_proof && get(page.extra, "cover") != nullptr && core::py_truthy(*get(page.extra, "cover")) && folds_draw(page)) {

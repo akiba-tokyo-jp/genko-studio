@@ -32,6 +32,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/brushes.hpp"
+#include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "storage/doctor.hpp"
@@ -529,7 +530,7 @@ int apply(const QStringList& args, bool ascii) {
     }
     if (expect && loaded.document.revision != *expect) throw storage::RevisionConflict(*expect, loaded.document.revision);
 
-    const core::CommandBus bus;
+    const core::CommandBus bus(render::ops_registry());
     const core::ApplyResult result = bus.apply(loaded.document, ops, core::Actor(agent), dry_run);
     Json out = Json::object();
     out["ok"] = true;

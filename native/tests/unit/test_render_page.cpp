@@ -76,8 +76,8 @@ private slots:
     void not_yet_ported_data() {
         QTest::addColumn<QString>("what");
         QTest::addColumn<QString>("mode");
-        for (const char* what : {"balloons", "nombre", "tones", "effects", "prims", "covers", "anim", "screen", "placed"}) {
-            const char* mode = std::string(what) == "prims" || std::string(what) == "covers" ? "proof" : "print";
+        for (const char* what : {"balloons", "nombre", "tones", "effects", "covers", "anim", "screen", "placed"}) {
+            const char* mode = std::string(what) == "covers" ? "proof" : "print";
             QTest::newRow(what) << QString(what) << QString(mode);
         }
     }
@@ -98,7 +98,6 @@ private slots:
             page.layers.push_back(tone);
         }
         if (w == "effects") page.effects = Json::array({Json::object({{"kind", "speed"}})});
-        if (w == "prims") page.prims = Json::array({Json::object({{"kind", "cube"}})});
         if (w == "covers") page.extra["cover"] = Json::object({{"kind", "jacket"}, {"spine_mm", 5}, {"flap_mm", 10}});
         if (w == "anim") page.extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
         if (w == "screen") {  // (on a layer with lines: an empty layer is never screened)
@@ -127,11 +126,8 @@ private slots:
         Document doc = book();
         genko::core::Page& page = doc.edit_page(0);
         page.numero = true;  // nombres are printed and proofed, not shown in the name
-        page.prims = Json::array({Json::object({{"kind", "cube"}})});  // 3D guides are never printed
         render::RenderOptions name;
         name.mode = "name";
-        QCOMPARE(unported_element(*doc.pages[0], doc, name), std::string("prims"));
-        page.prims = Json::array();
         QVERIFY(unported_element(*doc.pages[0], doc, name).empty());
         // a hidden tone layer is not drawn
         Layer tone;

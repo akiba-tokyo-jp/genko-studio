@@ -19,7 +19,7 @@ Commands:
                                 "skip_unported": bool} → a PNG of the page; "story": false removes the lines
   layer-image JOBS              layer_image for each job: {"book", "page", "layer", "dpi", "out"}
 
-With skip_unported the elements this C++ step does not draw yet (lines and balloons, tones, effect lines, 3D guides,
+With skip_unported the elements this C++ step does not draw yet (lines and balloons, tones, effect lines,
 placed pictures, nombres, cover folds, animation, layer screens) are left out the way the C++
 RenderOptions::skip_unported leaves them out.
 """
@@ -940,8 +940,6 @@ def unported_of(episode) -> dict:
             names.add("tones")
         if page.effects:
             names.add("effects")
-        if page.prims:
-            names.add("prims")
         if any(layer.screen for layer in page.layers):
             names.add("screen")
         if page.onion_from:  # (the page underneath is drawn too)
@@ -975,7 +973,6 @@ def leave_out_unported() -> None:
     tones.draw_layer = lambda image, layer, page, dpi, print_mode: image
     tones.screened = lambda raster, spec, dpi: raster
     render._draw_effects = lambda image, page, dpi: image
-    render._draw_prims = lambda image, page, dpi, mode: None
     render._placed_raster = lambda *args, **kwargs: None
     render._finish_placed = lambda fitted, *args, **kwargs: fitted
     nombre.draw = lambda *args, **kwargs: None
