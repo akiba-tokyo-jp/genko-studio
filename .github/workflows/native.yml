@@ -73,7 +73,7 @@ jobs:
       - name: Paths
         shell: pwsh
         run: |
-          "VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg" >> $env:GITHUB_ENV
+          "GENKO_VCPKG=$env:RUNNER_TEMP\vcpkg" >> $env:GITHUB_ENV
           "VCPKG_DEFAULT_BINARY_CACHE=$env:RUNNER_TEMP\vcpkg-bin" >> $env:GITHUB_ENV
           "VCPKG_BINARY_SOURCES=clear;files,$env:RUNNER_TEMP\vcpkg-bin,readwrite" >> $env:GITHUB_ENV
       - uses: ilammy/msvc-dev-cmd@v1
@@ -92,9 +92,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $baseline = (Get-Content native/vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
-          git clone --quiet https://github.com/microsoft/vcpkg "$env:VCPKG_ROOT"
-          git -C "$env:VCPKG_ROOT" checkout --quiet $baseline
-          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          # (msvc-dev-cmd sets VCPKG_ROOT to the copy bundled with Visual Studio; ours is GENKO_VCPKG)
+          git clone --quiet https://github.com/microsoft/vcpkg "$env:GENKO_VCPKG"
+          git -C "$env:GENKO_VCPKG" checkout --quiet $baseline
+          & "$env:GENKO_VCPKG\bootstrap-vcpkg.bat" -disableMetrics
           New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
       - name: vcpkg binary cache (restore)
         uses: actions/cache/restore@v4
@@ -117,6 +118,7 @@ jobs:
             if (Test-Path (Join-Path $vsNinja 'ninja.exe')) { $env:PATH = "$vsNinja;$env:PATH" } else { choco install ninja --no-progress -y }
           }
           ninja --version
+          $env:VCPKG_ROOT = $env:GENKO_VCPKG
           $env:CMAKE_PREFIX_PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64"
           $env:PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64\bin;$env:PATH"
           cd native
