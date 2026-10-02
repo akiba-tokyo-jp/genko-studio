@@ -251,13 +251,26 @@ private slots:
         if (!genko::test::fault_injection()) QSKIP("the hook that writes mid-copy is only in builds with fault injection");
         const QString source = copy_of("v3", "changing.genko");
         const QString book = tmp_.path() + "/changing-v4.genko";
-        const auto hook = [](const QString& command) {
+        // The hook writes a file while the old book is being copied: `text` appended to (or written as) `file`.
+        // (Windows has no /bin/sh: PowerShell there)
+        const auto hook = [](const QString& file, const QString& text, bool append) {
+#ifdef Q_OS_WIN
+            QString path = file;
+            path.replace(QStringLiteral("'"), QStringLiteral("''"));
+            QString body = text;
+            body.replace(QStringLiteral("'"), QStringLiteral("''"));
+            const QString command = QStringLiteral("[System.IO.File]::%1('%2', '%3')")
+                                        .arg(append ? QStringLiteral("AppendAllText") : QStringLiteral("WriteAllText"), path, body);
+            const Json argv = Json::array({"powershell", "-NoProfile", "-NonInteractive", "-Command", command.toStdString()});
+#else
+            const std::string script = append ? "printf '%s' \"$1\" >> \"$2\"" : "printf '%s' \"$1\" > \"$2\"";
+            const Json argv = Json::array({"/bin/sh", "-c", script, "hook", text.toStdString(), file.toStdString()});
+#endif
             QProcessEnvironment env;
-            env.insert("GENKO_TEST_MIGRATE_HOOK",
-                       QString::fromStdString(genko::core::dump_python(Json::array({"/bin/sh", "-c", command.toStdString()}))));
+            env.insert("GENKO_TEST_MIGRATE_HOOK", QString::fromStdString(genko::core::dump_python(argv)));
             return env;
         };
-        auto r = run_genko({"migrate", source, book}, hook("printf '{}\\n' >> '" + source + "/studio/journal.jsonl'"));
+        auto r = run_genko({"migrate", source, book}, hook(source + "/studio/journal.jsonl", QStringLiteral("{}\n"), true));
         QCOMPARE(r.exit_code, 1);
         Json out = one_line(r.out);
         QCOMPARE(out["code"], Json("source_changed"));
@@ -265,11 +278,12 @@ private slots:
         QVERIFY(!QFileInfo::exists(book));
         QCOMPARE(staging_left(tmp_.path()), QStringList());
         // a new file is a change too
-        r = run_genko({"migrate", source, book}, hook("printf x > '" + source + "/assets/new.png'"));
+        r = run_genko({"migrate", source, book}, hook(source + "/assets/new.png", QStringLiteral("x"), false));
         QCOMPARE(one_line(r.out)["code"], Json("source_changed"));
         QFile::remove(source + "/assets/new.png");
         // only project.lock: not the book's content
-        r = run_genko({"migrate", source, book}, hook("printf '{\"agent\": \"x\", \"released\": true}' > '" + source + "/project.lock'"));
+        r = run_genko({"migrate", source, book},
+                      hook(source + "/project.lock", QStringLiteral(R"({"agent": "x", "released": true})"), false));
         QVERIFY2(r.exit_code == 0, r.out.constData());
     }
 
