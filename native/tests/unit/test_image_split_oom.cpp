@@ -10,6 +10,9 @@ struct Injection {
     bool requested = false;
     bool armed = false;
     bool metadata = false;
+    std::size_t vector_bytes = 0;
+    std::size_t metadata_bytes = 0;
+    std::size_t failed_bytes = 0;
     int remaining = 0;
     int failures = 0;
     int splits = 0;
@@ -29,9 +32,11 @@ extern "C" void genko_test_after_split() {
 }
 // Test-executable-only replacement. C pixel allocations are never intercepted.
 void* operator new(std::size_t size) {
-    const bool vector = size >= sizeof(Image) && size <= 4 * sizeof(Image) && size % sizeof(Image) == 0;
-    if (injection.armed && vector != injection.metadata && --injection.remaining == 0) {
+    // Target the payload allocation, not MSVC Debug's iterator proxies inside noexcept string constructors.
+    const std::size_t target = injection.metadata ? injection.metadata_bytes : injection.vector_bytes;
+    if (injection.armed && size == target && --injection.remaining == 0) {
         injection.armed = false;
+        injection.failed_bytes = size;
         ++injection.failures;
         throw std::bad_alloc();
     }
@@ -80,6 +85,8 @@ private slots:
             injection = {};
             injection.requested = true;
             injection.metadata = metadata;
+            injection.vector_bytes = std::size_t(src.bands()) * sizeof(Image);
+            injection.metadata_bytes = metadata ? src.transparency().bytes.capacity() + 1 : 0;
             injection.remaining = allocation;
             injection.budget = &budget;
             bool threw = false;
@@ -90,6 +97,7 @@ private slots:
             }
             QVERIFY(threw);
             QCOMPARE(injection.failures, 1);
+            QCOMPARE(injection.failed_bytes, metadata ? injection.metadata_bytes : injection.vector_bytes);
             QCOMPARE(injection.splits, 1);
             QVERIFY(injection.live_after_split > live);
             QCOMPARE(budget.live(), live);

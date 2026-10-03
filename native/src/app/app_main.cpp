@@ -24,24 +24,30 @@ namespace genko::app {
 namespace fs = std::filesystem;
 
 int run_app(int argc, char** argv) {
-    std::optional<fs::path> path;
+    // Validate control arguments before Qt consumes its own switches or initializes the display.
+    // Only the ASCII controls are read from CRT argv; the accepted path is decoded by Qt below.
+    bool has_path = false;
     for (int i = 2; i < argc; ++i) {
         const std::string_view arg = argv[i];
         if (arg == "-h" || arg == "--help") {
             std::fputs("genko app [book]: the desktop app (with no book, the start screen)\n", stdout);
             return 0;
         }
-        if (arg.starts_with("-") || path) {
+        if (arg.starts_with("-") || has_path) {
             std::fprintf(stderr, "genko app: unrecognized arguments: %s\n", argv[i]);
             return 2;
         }
-        path = core::path_from_utf8(std::string(arg));
+        has_path = true;
     }
     if (qEnvironmentVariableIsSet("QT_LOGGING_RULES") && !qEnvironmentVariableIsSet("QT_FORCE_STDERR_LOGGING")) {
         // (asked for Qt's log: on Windows it goes to the debugger unless told otherwise, so a log file stays empty)
         qputenv("QT_FORCE_STDERR_LOGGING", "1");
     }
+    // Qt reads the native wide command line on Windows; CRT argv loses Japanese paths.
     QApplication app(argc, argv);
+    const QStringList arguments = QCoreApplication::arguments().mid(2);
+    std::optional<fs::path> path;
+    if (!arguments.isEmpty()) path = core::path_from_utf8(arguments.front().toStdString());
     QApplication::setApplicationName(QStringLiteral("Genko Studio"));
     qRegisterMetaType<BookChange>();
     qRegisterMetaType<StrokeInput>();

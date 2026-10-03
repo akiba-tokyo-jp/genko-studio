@@ -298,6 +298,26 @@ private slots:
         app.start(QString::fromUtf8(GENKO_CLI), {QStringLiteral("app"), QStringLiteral("a"), QStringLiteral("b")});
         QVERIFY(app.waitForFinished(60000));
         QCOMPARE(app.exitCode(), 2);
+        // Qt must not consume app-invalid options before Genko validates its own CLI.
+        QTemporaryDir dir;
+        for (const QStringList& args : {QStringList{QStringLiteral("app"), QStringLiteral("-reverse")},
+                                        QStringList{QStringLiteral("app"), QStringLiteral("-platform"), QStringLiteral("offscreen")}}) {
+            const Run run = run_app(dir, QStringLiteral("qt-option"), args,
+                                    Json::array({Json::object({{"do", "start_dialog"}, {"close", true}})}));
+            QCOMPARE(run.exit_code, 2);
+        }
+    }
+
+    void helpDoesNotRequireADisplay() {
+        QProcess app;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("genko-no-such-platform"));
+        app.setProcessEnvironment(env);
+        app.start(QString::fromUtf8(GENKO_CLI), {QStringLiteral("app"), QStringLiteral("--help")});
+        QVERIFY(app.waitForFinished(60000));
+        QCOMPARE(app.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(app.exitCode(), 0);
+        QVERIFY(app.readAllStandardOutput().contains("genko app [book]"));
     }
 };
 

@@ -1,0 +1,240 @@
+{
+  "base_commit": "0aedd7e66eab72032fdb956e3191426573bcbaf0",
+  "scope": "Windows CI portability修正。工程全体の合格ではない。",
+  "source_pins": {
+    "native/src/app/app_main.cpp": "8948d4603854681897d8abc3c7f021a57317071f8da7e36226c6673377ef2d3e",
+    "native/tests/e2e/test_app_e2e.cpp": "8dcab6b9af03bebbc6fffa422a6fc2523a37822dc2ccc04beb21e15bae6c78cb",
+    "native/tests/gui/test_gui_layout.cpp": "d0ad5a2f3ace9a5a2c91290bbfa650a5f3ef68b8c3cb2d3dadd0259bffbf0ce5",
+    "native/tests/unit/test_image_split_oom.cpp": "835ad77791139775c9596e82ab40a71aa3e732324fd5fd3175ccab132e5f64d3"
+  },
+  "original_ci": 37129870529,
+  "root_causes": [
+    "Qt platform optionsのcolon区切りによるWindowsドライブパス切断",
+    "表示/コピーのnative separatorと旧fixture期待の不一致",
+    "MSVC Debugのnoexcept string proxy確保を誤ったmetadata故障注入が巻き込む",
+    "app bookのCRTargvによる日本語パス破損"
+  ],
+  "red_evidence": [
+    "ci-layout-colon-test-red-verified.log exit1",
+    "original windows debug qtest-test_image_split_oom / exit3",
+    "original windows debug qtest-test_app_e2e / exit70",
+    "ci-app-argument-guard-red.log exit2"
+  ],
+  "configs": {
+    "debug": {
+      "CMAKE_BUILD_TYPE": "Debug",
+      "GENKO_WERROR": "ON",
+      "GENKO_FAULT_INJECTION": "ON",
+      "GENKO_SANITIZE": ""
+    },
+    "release": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "GENKO_WERROR": "ON",
+      "GENKO_FAULT_INJECTION": "OFF",
+      "GENKO_SANITIZE": ""
+    },
+    "asan": {
+      "CMAKE_BUILD_TYPE": "Debug",
+      "GENKO_WERROR": "ON",
+      "GENKO_FAULT_INJECTION": "ON",
+      "GENKO_SANITIZE": "address,undefined,float-cast-overflow"
+    }
+  },
+  "tests": {
+    "debug": {
+      "ctest": "3/3",
+      "qt_totals": [
+        [
+          "7",
+          "0",
+          "0"
+        ],
+        [
+          "31",
+          "0",
+          "0"
+        ],
+        [
+          "8",
+          "0",
+          "0"
+        ]
+      ],
+      "source_unchanged": true,
+      "binary_unchanged": true,
+      "resources": [
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "13471744",
+          "memory.swap.max": "0"
+        },
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "1330139136",
+          "memory.swap.max": "0"
+        }
+      ]
+    },
+    "release": {
+      "ctest": "3/3",
+      "qt_totals": [
+        [
+          "7",
+          "0",
+          "0"
+        ],
+        [
+          "31",
+          "0",
+          "0"
+        ],
+        [
+          "0",
+          "0",
+          "1"
+        ]
+      ],
+      "source_unchanged": true,
+      "binary_unchanged": true,
+      "resources": [
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "5906432",
+          "memory.swap.max": "0"
+        },
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "963207168",
+          "memory.swap.max": "0"
+        }
+      ]
+    },
+    "asan": {
+      "ctest": "3/3",
+      "qt_totals": [
+        [
+          "7",
+          "0",
+          "0"
+        ],
+        [
+          "31",
+          "0",
+          "0"
+        ],
+        [
+          "8",
+          "0",
+          "0"
+        ]
+      ],
+      "source_unchanged": true,
+      "binary_unchanged": true,
+      "resources": [
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "5906432",
+          "memory.swap.max": "0"
+        },
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 1424\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "2147483648",
+          "memory.swap.max": "0"
+        }
+      ]
+    }
+  },
+  "reviews": {
+    "ci-layout-review": {
+      "scope_passed": true,
+      "findings": [],
+      "limitations": [
+        "読み取り専用の独立静的レビュー。read_file/search_filesで比較し、terminal、git、build/test、子agentを使用していない。唯一の書込みはこの報告JSONで、ソースの変更はない。",
+        "主担当のRED/GREENログを読み取ったが、レビュアーによる独立動的再実行、ソース・実行物のハッシュ計算またはログとのバイト同一性検証は行っていない。REDログはQtのconfig missingとテストFAILを裏付けるが、子プロセスexit139や外側exit1を直接記録していないため、その数値はこのレビューの独立確認事項に含めない。",
+        "Windows Release/Debugで修正後の再実行は確認していない。Linuxのcolon回帰と既存製品仕様に対する静的整合性の合格であり、Windows CI合格、実機GUI合格、GUI全体またはM7受入の合格ではない。layout以外のWindows CIの2失敗は範囲外。",
+        "Linux追加行のガードは厳密には#ifndef Q_OS_WINであり、Linux専用ではなく非Windows全般に追加される。今回確認した実行ログはLinuxのみ。",
+        "既存の7Windowチェックはレポート行数のQCOMPARE(windows, 7)であり、名前集合の重複・欠落を独立assertするものではない。ただしprobeの7出力と各Windowの監視対象はintegrationから維持されており、今回の変更による保証低下ではない。"
+      ]
+    },
+    "ci-image-ownership-review": {
+      "scope_passed": true,
+      "findings": [
+        {
+          "id": "IMG-DIAG-01",
+          "severity": "info",
+          "location": "wt/ci-layout/native/src/render/image.hpp:86-92,157,161,256,261-262; image.cpp:344-345,755-768; 旧native/tests/unit/test_image_split_oom.cpp:24-36; Windows artifact:1-4",
+          "evidence": "元fixtureは実C split成功後にarmedとなり、metadata=trueではvector判定以外の全newを数えていた。splitの最初のImage構築は761行のstd::array<Image,4> default構築であり、そのTransparency::bytesのdefault構築も対象になる。従ってmetadata-firstが767行のpayloadコピーより先にDebug string proxy確保へ投下されるという主担当診断はsource順序と整合する。Windows artifactもinitとvector行のPASSのみで終了しており矛盾しない。追加の主担当証拠として、Microsoft STL vs-2022-17.14のxstringにおけるbasic_string default／move ctor自体がnoexceptで_Alloc_proxy(new)を呼ぶことが確認済みと通知された。これは本レビュー自身がそのheadersを取得した証拠ではないが、提示された証拠を前提とすると、Image側のnoexcept削除だけではstring内部terminateは直らないという訂正は妥当である。",
+          "recommendation": "元CIの説明を『metadata payloadコピーの回収不良が実証された』ではなく『非vector全確保注入がDebug STLの内部noexcept proxy確保へ入り、狙った回復可能な例外より前に停止したという有力診断』として扱う。製品Imageのnoexcept削除を今回のfixture修正に含めず、実OOM全般の保証へ結論を拡張しない。"
+        },
+        {
+          "id": "IMG-FIXTURE-02",
+          "severity": "info",
+          "location": "wt/ci-layout/native/tests/unit/test_image_split_oom.cpp:9-20,27-41,61-68,76-100; image.cpp:763-768",
+          "evidence": "追加指示後の再読ではfixtureが実際に更新され、metadata_bytes、vector_bytes、failed_bytesを持ち、armedかつsize==targetの場合だけremainingを減らしてbad_allocを投げる形になっていた。vector_bytesはsrc.bands()*sizeof(Image)で、固定RGBA sourceとreserve(src.bands())に対応するため、要求の4*sizeof(Image)の確保だけを狙う。metadata_bytesはsrc.transparency().bytes.capacity()+1で、97文字の非SSO string payloadと終端の確保を狙い、従来の『非vectorならすべて』というproxy巻き込み条件を除去している。失敗時はarmedを解除し、failed_bytesを記録して100行でtarget一致を検査する。正常なpayload copy failureは完成済みownedとoutの破棄で全C bandが回収され、reserve failure時も全bandはownedにある。既存製品コードをそのままにして、vector storage／payloadコピーの狙った例外安全性を試すという狭いscopeに対し静的な阻害所見はない。",
+          "recommendation": "このfixture限定修正は静的レビュー上承認する。size一致はallocationの呼出箇所まで識別するものではないため、Debug proxyが偶然targetと同サイズになる構成やSTLの確保戦略変更は別途注意する。source capacity+1がempty destinationへのコピー確保量と一致することもC++一般の保証ではない。今回の固定入力・toolsetで元の全データ行が実行されることを主担当の実テストで確認する。一致しない場合はQVERIFY(threw)やfailures検査で不合格になる構造なので、注入が外れたままの偽PASSにはならない。"
+        },
+        {
+          "id": "IMG-ASSERT-03",
+          "severity": "info",
+          "location": "wt/ci-layout/native/tests/unit/test_image_split_oom.cpp:61-68,94-118; native/tests/unit/split_failure.c:1-9; native/tests/CMakeLists.txt:37-40",
+          "evidence": "更新後もvector、metadata-first、metadata-second、metadata-third、metadata-fourthの元データ行が残っている。C split wrapperは現在のvendor実装成功後だけafter_splitを呼び、そこでlive_after_splitを取得してarmedにする。更新後98-104行にはbad_alloc捕捉、failures==1、splits==1、live_after_split>live、例外後budget.live()==live、src pixels不変が残り、105-118行には無注入再split、全bandのmode／size／pixels／transparency一致、結果保持中live==live_after_split、結果破棄後live復帰、最終live==0が残っている。failed_bytesの一致assertも追加されている。Disarmの後に再splitするため再試行に再注入されない。",
+          "recommendation": "既存assert維持という受入条件はsource上満たされている。Linuxと元Windows Debug toolsetで全データ行の実PASSを主担当が確認し、fixture修正の実行受入条件にする。これは本レビューによるbuild/test実行の代替ではない。"
+        },
+        {
+          "id": "IMG-BOUNDARY-04",
+          "severity": "info",
+          "location": "wt/ci-layout/native/src/render/image.cpp:328-329,344-354,358-363,374-382,758-768; image.hpp:252-262; native/third_party/pillow/libImaging/Bands.c:87-95,173",
+          "evidence": "狭いfixture scopeを越える製品側の境界は未解決である。C split成功からarray default構築と各Image(bands[i])構築・代入完了まで、未取得bandは生ポインタ配列にしかなく、通常例外を伝播できる構築に変えた場合は回収するguardが必要になる。raw ctorはim_を設定後にtransparency_を構築するが、後者の例外でctor未完了ならImage destructorは呼ばれず、生ポインタも解放されない。従って将来raw ctorのnoexceptだけを外すとadopt／derived／create等にも回収漏れを露出させる。一方、現move ctorはmetadata move成功後にother.im_をnullにするので、通常例外が伝播する場合の元所有者を保持する順序になっている。さらに提示されたSTL内noexceptの問題はC guardを置くだけでは回復しない。これらは今回のvector／payload確保注入だけの合格範囲外であり、製品Image変更を今行う理由にはしない。",
+          "recommendation": "今回の製品image変更は不要とし、全allocator OOM保証を表明しない。将来広い例外安全性を扱う場合は、C成功直後に非確保・固定長C画像guardで全bandを所有し、失敗可能なmetadata構築が終わってから非throwなポインタ移管で各slotを解除する。raw adoption失敗時の消費／返却契約を全呼出箇所と揃え、guardとの二重解放を避ける。C split失敗時は既生成bandがC側で解放されるがslotはnull化されないため、guardを失敗出力へ無条件に適用してはならない。std::string内部noexcept proxy OOMの扱いは別問題として明記する。"
+        }
+      ],
+      "limitations": [
+        "scope_passed=trueは、追加指示により限定された『製品Imageを変更せず、C確保成功後のvector storage／metadata payloadコピーを狙うfixture是正』の静的レビュー承認を意味する。実行合格、全allocator実OOM保証、Debug STL proxy OOMからの回復、全Image adoption経路の例外安全性を承認するものではない。",
+        "terminal、build/test、git、ソース変更、子agent、外部調査は実施していない。唯一の書込みは指定されたこのJSON報告である。追加のSTL実装証拠は主担当から提供された情報として評価し、本レビュー自身による独立header取得とは区別した。",
+        "依頼のtests/unit/test_image_split_oom.cppはworktree直下には存在しなかったため、読取検索でnative/tests/unit/test_image_split_oom.cppを特定した。追加読取は関連するC wrapper、実C producer Bands.c、imaging.hpp、テスト登録CMake行に限定した。",
+        "初回読取のimage.hppは303行・13170 bytes、image.cppは1303行・58282 bytes。image.hpp:150-264、image.cpp:326-365および755-772を再読して初回と該当内容が一致することを確認し、追加指示後のimage.cpp読取もtoolからunchangedを返された。製品コード変更は観測していないが、全ファイルの原子的snapshotではない。",
+        "テストは並行更新を実際に観測した。初回は114行・4609 bytesの非vector全確保注入版、追加指示後の最後の読取は122行・5127 bytesのtarget size一致注入版だった。旧CI診断は旧版、fixture承認は最後に読んだ新版に対応する。hash未取得・git版未確認であり、行数やbyte数はhash代替ではない。保存artifact名の0aedd7と現worktreeの同一性は確認していない。",
+        "Windows artifactを実読したところQt 6.11.2／MSVC 2022 Debug表示、initTestCase PASS、ownershipFailure(vector) PASSのみだった。exit3とCI37129870529との関連は提供contextによる。artifact単独では正確な停止row、stack、失敗allocation、exit codeを確定できない。",
+        "Microsoft STL vs-2022-17.14のdefault／move string ctor内noexcept proxy確保については主担当の追加証拠に依拠する。現buildの_ITERATOR_DEBUG_LEVEL、proxyサイズ、payload確保のgrowth実装、確保target間の衝突は独立に実測していない。Linux旧版全行PASSも提供contextであって再実行していない。更新fixtureのWindows／Linux実行結果は本レビューでは未検証である。",
+        "明示的な未検証範囲は、Debug STL proxy OOM、Image default／raw／move ctor内の真の実OOM、C allocator自体の失敗、size filterで選ばれない全確保、および他の入力・他のSTL確保戦略である。"
+      ]
+    },
+    "ci-app-unicode-review": {
+      "scope_passed": true,
+      "findings": [],
+      "limitations": [
+        "これは主担当から並行更新の通知を受け、app_main.cppと追加回帰試験を再読した最新版2phase方式の静的レビューである。同じJSONパスへ先に保存した、QApplication後に全引数を検証する旧案の不合格判定を上書きする。旧案と最新版の読取を混同しない。integration版app_main.cppは再読時も変更なしと確認された。",
+        "依頼どおりread_file/search_filesによる読み取りと指定JSONへのwrite_fileのみを使用した。terminal、build、test、git、ソース編集、子agent起動は実施していない。ソースdigest、コミット同一性、実行物との同一性は確認していない。",
+        "比較範囲はwt/ci-layoutとwt/integrationのapp_main.cpp。api/main.cpp、core/paths.cpp、documents登録・解放実装、Sessionデストラクタ、test_app_e2e.cpp、関連CMake、既存ログを補助的に読んだ。別レビュー済みlayoutfixture/splitOOMfixture変更や製品全体の受入には拡張しない。",
+        "Windows修正後の実行証拠は未確認。QtがWindowsネイティブのUnicodeコマンドラインを取得する標準契約に依存する。最新版の先行検査はargc/argvを書き換えず、QApplicationへ通常のmain引数を渡すことを静的確認したが、ローカルのqcoreapplication.cppは検索で見つからず内部実装は直接点検していない。",
+        "ci-app-argument-guard-red.log:7-16を読んだ。旧案のbadArgumentsAreAUsageErrorはrun.exit_code=0対期待2、helpDoesNotRequireADisplayはCrashExit対期待NormalExitで実FAILしている。これは旧案のREDであり、最新版のGREEN証拠ではない。実行コマンド全体のexit2は主担当の報告であり、このログ本文には明示されていない。",
+        "ci-fix-debug-three.log:279-286とci-fix-asan-three.log:285-292のTestAppE2eは7 passed、0 failed、0 skippedだが、今回の再検索時点でもhelpDoesNotRequireADisplayの実行行はない。新回帰追加前の結果を最新版2phase方式の再実行成功に流用しない。Releaseのci-fix-release-three.log:276-278はinitTestCaseの既存SKIP、0 passed、1 skippedでありE2E成功に数えない。",
+        "追加回帰のソースは検査済みだが、本レビューでは実行禁止のため最新版でのGREENを確認していない。Windowsの日本語原稿パス、追加Qt-option対照、壊れたQPAでのhelpの実行確認は主担当の受入作業に残る。"
+      ]
+    }
+  },
+  "security_scan": {
+    "added_lines": 65,
+    "findings": [],
+    "scope": "簡易追加行scan、全security auditではない"
+  },
+  "limitations": [
+    "Release appE2Eは既存faultOFF init未実施、Debug/ASan全8PASSで対応。",
+    "Debug STL proxy OOM/全allocator実OOM回復を保証しない。payloadコピー4箇所とvector確保の既存5行を維持。",
+    "Windows修正後CIはまだnot_run。",
+    "ASan peakは2GiB上限、max圧迫あり。OOM/kill0だが余裕は保証しない。",
+    "全M3/M4〜M7と性能受入は未完。"
+  ]
+}

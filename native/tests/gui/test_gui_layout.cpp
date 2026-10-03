@@ -188,9 +188,15 @@ private slots:
     void theWindowsFitEveryScreen_data() {
         QTest::addColumn<QSize>("screen");
         QTest::addColumn<double>("scale");
+        QTest::addColumn<bool>("colon_directory");
         for (const QSize size : {QSize(1024, 640), QSize(1366, 768), QSize(1920, 1080)}) {
             for (const double scale : {1.0, 1.25, 1.5, 2.0}) {
-                QTest::newRow(qPrintable(QStringLiteral("%1x%2@%3").arg(size.width()).arg(size.height()).arg(scale))) << size << scale;
+                const QString name = QStringLiteral("%1x%2@%3").arg(size.width()).arg(size.height()).arg(scale);
+                QTest::newRow(qPrintable(name)) << size << scale << false;
+#ifndef Q_OS_WIN
+                // Qt splits platform options at colons; reproduce the Windows drive delimiter on Linux too.
+                QTest::newRow(qPrintable(name + QStringLiteral("-colon-path"))) << size << scale << true;
+#endif
             }
         }
     }
@@ -198,7 +204,9 @@ private slots:
     void theWindowsFitEveryScreen() {
         QFETCH(QSize, screen);
         QFETCH(double, scale);
-        QTemporaryDir dir;
+        QFETCH(bool, colon_directory);
+        QTemporaryDir dir(QDir::tempPath() + (colon_directory ? QStringLiteral("/genko:layout-XXXXXX") : QStringLiteral("/genko-layout-XXXXXX")));
+        QVERIFY(dir.isValid());
         const QString config = dir.filePath("screen.json");
         {
             QFile file(config);
@@ -213,15 +221,19 @@ private slots:
         const QString report = dir.filePath("report.jsonl");
         QProcess child;
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-        env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen:configfile=") + config);
+        // The platform parser splits at ':' even inside a Windows drive path.
+        // Resolve the config relative to this child's private working directory instead.
+        env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen:configfile=screen.json"));
         env.insert(QStringLiteral("QT_SCALE_FACTOR"), QString::number(scale));
         env.insert(QStringLiteral("GENKO_LAYOUT_PROBE"), QStringLiteral("1"));
         env.insert(QStringLiteral("GENKO_LAYOUT_OUT"), report);
         env.insert(QStringLiteral("GENKO_CONFIG_DIR"), dir.filePath("config"));
         child.setProcessEnvironment(env);
+        child.setWorkingDirectory(dir.path());
         child.start(QCoreApplication::applicationFilePath(), {});
         QVERIFY(child.waitForFinished(120000));
-        QVERIFY2(child.exitCode() == 0, child.readAllStandardError().constData());
+        QVERIFY2(child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0,
+                 qPrintable(QStringLiteral("status %1, exit %2: %3").arg(child.exitStatus()).arg(child.exitCode()).arg(QString::fromUtf8(child.readAllStandardError()))));
         QFile file(report);
         QVERIFY(file.open(QIODevice::ReadOnly));
         int windows = 0;
@@ -269,7 +281,10 @@ private slots:
 
     // 試験 5: a long Japanese path, cut to fit, all of it one click away, copied whole
     void aLongPathIsShownWhole() {
-        const QString path = long_path(QStringLiteral("/home/漫画家/作品"));
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = long_path(dir.path() + QStringLiteral("/漫画家/作品"));
+        const QString native = QDir::toNativeSeparators(path);
         QVERIFY(path.size() > 200);
         app::PathLabel label;
         label.resize(320, 24);
@@ -283,19 +298,19 @@ private slots:
         QCOMPARE(cut.count(QStringLiteral("…")), 1);
         const QString head = cut.section(QStringLiteral("…"), 0, 0);
         const QString tail = cut.section(QStringLiteral("…"), 1, 1);
-        QVERIFY(!head.isEmpty() && path.startsWith(head));
-        QVERIFY(tail.endsWith(QStringLiteral(".genko")) && path.endsWith(tail));
+        QVERIFY(!head.isEmpty() && native.startsWith(head));
+        QVERIFY(tail.endsWith(QStringLiteral(".genko")) && native.endsWith(tail));
         QVERIFY(label.shown().size() < path.size());
-        QVERIFY(label.toolTip().contains(path));
+        QVERIFY(label.toolTip().contains(native));
         QSignalSpy opened(&label, &app::PathLabel::opened);
         QTest::mouseClick(&label, Qt::LeftButton);
         QCOMPARE(opened.count(), 1);
         auto* dialog = opened.at(0).at(0).value<app::PathDialog*>();
         QVERIFY(dialog != nullptr);
-        QCOMPARE(dialog->shown(), path);
-        QCOMPARE(dialog->findChild<QPlainTextEdit*>(QStringLiteral("fullPath"))->toPlainText(), path);
+        QCOMPARE(dialog->shown(), native);
+        QCOMPARE(dialog->findChild<QPlainTextEdit*>(QStringLiteral("fullPath"))->toPlainText(), native);
         dialog->copy_button()->click();
-        QCOMPARE(QGuiApplication::clipboard()->text(), path);
+        QCOMPARE(QGuiApplication::clipboard()->text(), native);
         QCOMPARE(dialog->open_button()->text(), QStringLiteral("フォルダーを開く"));
         QCOMPARE(app::PathLabel::folder_of(path), path.left(path.lastIndexOf(QLatin1Char('/'))));
         dialog->close();
