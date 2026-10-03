@@ -1,0 +1,47 @@
+{
+  "classification": "未統合M2-G7 ReleaseのF1標準Gペン5分の測定を回収。全AC-PERF合格ではない。",
+  "log": "/home/hermes/genko-test/cpp-impl/reviews/m2g7-release-f1-five-minute.log",
+  "log_sha256": "94e0b4288ee063adee8299133ac93a4b48f07d9ebb6004a5a714e0a25ed89c38",
+  "process": "proc_75510a0a834f",
+  "process_exit": 0,
+  "qt_passed": 3,
+  "qt_skipped": 0,
+  "platform": "xcb",
+  "measurements": [
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() F1 written (32 pages × 1500 lines) in 2340 ms",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() opened and drawn in 1029 ms (window 1280×800, canvas 912×680)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() platform: xcb; series: 5.0 min of G pen input; 174116 events in the log",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() input → live line drawn: n=43780 p50=0.58 p95=27.10 p99=45.41 mean=3.48 max=69.75 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() input → update asked for: n=43780 p50=0.58 p95=27.10 p99=45.41 mean=3.48 max=69.75 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() input → paint done: n=43780 p50=0.96 p95=30.55 p99=48.91 mean=4.28 max=75.58 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() input waiting in the event loop: n=43780 p50=0.22 p95=26.76 p99=44.95 mean=3.14 max=69.71 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() change applied in memory (CommandBus, GUI thread): n=220 p50=4.05 p95=52.06 p99=52.92 mean=9.40 max=53.32 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() line committed → shown (paint): n=220 p50=9.92 p95=22.00 p99=57.49 mean=12.58 max=76.26 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() undo → shown (paint): n=22 p50=12.75 p95=59.23 p99=61.87 mean=23.16 max=61.87 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() page switch → first picture: n=4 p50=49.93 p95=65.60 p99=65.60 mean=49.83 max=65.60 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() page switch → fine picture: n=4 p50=257.09 p95=380.15 p99=380.15 mean=270.42 max=380.15 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() save (autosave) duration: n=31 p50=2544.80 p95=5548.69 p99=6559.78 mean=2491.16 max=6559.78 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() event loop stalls > 4 ms during saves: n=855 p50=48.40 p95=64.23 p99=72.32 mean=45.08 max=145.32 (ms)",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() event loop during saves (77.2 s in all): p99 lateness 54.51 ms; stalls over 250 ms: 0",
+    "QINFO  : TestPerfApp::fiveMinutesOfPenOnF1() event loop stalls > 4 ms, whole run: n=1715 p50=23.88 p95=60.62 p99=69.36 mean=29.84 max=145.32 (ms); 51000 ticks of 5 ms in all"
+  ],
+  "failed_thresholds": [
+    {
+      "id": "PERF-E F1差分保存",
+      "p95_ms": 5548.69,
+      "required_p95_ms": 1000,
+      "n": 31
+    },
+    {
+      "id": "PERF-E 保存中イベントループ",
+      "p99_ms": 54.51,
+      "required_p99_ms": 50
+    }
+  ],
+  "limitations": [
+    "未統合木・未完の機能範囲。全F1/F2/全ブラシ/100回編集/2時間/Windowsの性能受入ではない。",
+    "単体試験はshown/not judgedであり、Qt PASSと性能ゲート合格を混同しない。",
+    "保存時間測定は複数編集を含む可能性があり、1線差分条件は改めて分離して測る。",
+    "測定時のsource/binary/cgroupの完全pinsは未回収なので実行物の現hashから逆算しない。"
+  ]
+}

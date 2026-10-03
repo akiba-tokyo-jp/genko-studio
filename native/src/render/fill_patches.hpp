@@ -13,7 +13,7 @@
 // selection.area_mask): a mask over its box at FILL_DPI that the renderer colours at any resolution. The patch's PNG
 // holds the same pixels as Python's (its bytes are libpng's, not Pillow's).
 
-namespace genko::render::fills {
+namespace genko::render::tone_fills {
 
 inline constexpr int kFillDpi = 300;  // FILL_DPI
 
@@ -38,4 +38,4 @@ std::optional<Image> region_mask(const Image& reference, Point at, int gap_px = 
 // selection.area_mask(area, dpi): a {"poly"} or {"mask"} area as a mask (L) and its top-left in px.
 std::pair<Image, Point> area_mask(const core::Json& area, int dpi = kFillDpi);
 
-}  // namespace genko::render::fills
+}  // namespace genko::render::tone_fills

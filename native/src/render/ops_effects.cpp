@@ -144,7 +144,7 @@ void to_layer(const Json& effect, const core::Page& page, core::Layer& layer) {
     for (const effects::Fill& fill : geo.fills) {  // (first, as in Python: their errors come before the lines')
         std::vector<std::array<double, 2>> points;
         for (const effects::XY& p : fill.points) points.push_back({p.x, p.y});
-        if (auto patch = fills::polygon_patch(points, fill.rgb)) layer.patches.push_back(std::move(*patch));
+        if (auto patch = tone_fills::polygon_patch(points, fill.rgb)) layer.patches.push_back(std::move(*patch));
     }
     if (!finite(geo)) throw OpError("this effect's settings give lines that are not finite numbers");
     std::vector<core::StrokePtr> items = layer.strokes->items;

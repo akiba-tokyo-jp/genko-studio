@@ -16,7 +16,7 @@
 #include "render/draw.hpp"
 #include "render/png.hpp"
 
-namespace genko::render::fills {
+namespace genko::render::tone_fills {
 
 namespace {
 
@@ -223,4 +223,4 @@ std::pair<Image, Point> area_mask(const Json& area, int dpi) {
             Point{to_int_px(std::nearbyint(mm2px(x))), to_int_px(std::nearbyint(mm2px(y)))}};
 }
 
-}  // namespace genko::render::fills
+}  // namespace genko::render::tone_fills

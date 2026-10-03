@@ -5,6 +5,7 @@
 
 #include <QtTest>
 
+#include <set>
 #include <string>
 
 #include "core/command_bus.hpp"
@@ -80,7 +81,26 @@ private slots:
         const std::vector<std::string> core_names = core_ops.names();
         const std::vector<std::string> all_names = all.names();
         for (const std::string& name : core_names) QVERIFY2(all.find(name) != nullptr, name.c_str());
-        QCOMPARE(all_names.size(), core_names.size() + 3 + 4 + 17);  // (tones, effect lines, 3D)
+        std::set<std::string> expected(core_names.begin(), core_names.end());
+        // Every module's public names, including the two deliberate erase overrides.
+        const std::set<std::string> drawing_names{
+            "add_tone", "set_tone", "delete_tone", "add_effect", "edit_effect",
+            "delete_effect", "effect_to_layer", "add_figure", "pose_figure", "add_head",
+            "add_hand", "import_model", "set_camera", "set_light", "render_prims",
+            "add_mannequin", "pose_mannequin", "add_prim3d", "add_scene", "edit_prim",
+            "delete_prim", "trace_prims", "ruler_from_3d", "camera_from_ruler", "convert_layer",
+            "merge_down", "merge_layers", "merge_visible", "set_layer_mask", "paint_mask",
+            "put_raster", "filter_raster", "fill", "fill_area", "fill_enclosed",
+            "fill_gaps", "flood_fill", "gradient_fill", "delete_area", "transform_area",
+            "paste", "erase", "erase_raster"};
+        expected.insert(drawing_names.begin(), drawing_names.end());
+        const std::set<std::string> actual(all_names.begin(), all_names.end());
+        QCOMPARE(actual, expected);
+        QCOMPARE(all_names.size(), expected.size());
+        QVERIFY(all.area_resolver());
+        QVERIFY(!core_ops.area_resolver());
+        QVERIFY(all.find("erase") != core_ops.find("erase"));
+        QVERIFY(all.find("erase_raster") != core_ops.find("erase_raster"));
         // the bus without a registry has core's
         QCOMPARE(error_of(book(), ops(R"([{"op": "add_tone", "page": 1}])")).substr(0, 7), std::string("(applie"));
         try {
@@ -92,7 +112,7 @@ private slots:
     }
 
     // An op's area, resolved before the op as Python's apply_ops does (selops.resolve): a rect or an ellipse alone is its
-    // polygon for every op; one that needs the selection tools is not ported; the page comes first.
+    // polygon for every op; richer areas are resolved by render, refused by core-only; the page comes first.
     void areas() {
         const Document doc = book();
         QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1, "note": "x", "area": {"rect": [0, 0, 10, 5]}}])")),
@@ -111,8 +131,18 @@ private slots:
                              "set_note takes {page: int}"));
         QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "note": "x", "area": {"rect": [0, 0, 10, 5]}}])")),
                  std::string("apply: ops[0] set_note: page (int) is required ‖ set_note takes {page: int}"));
-        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1, "area": {"all": true}}])")).substr(0, 46),
-                 std::string("not_yet_ported: ops[0] set_note: an area of th"));
+        const Json full_area = ops(R"([{"op": "set_note", "page": 1, "note": "area resolved", "area": {"all": true}}])");
+        const auto resolved = bus().apply(doc, full_area, Actor());
+        QCOMPARE(resolved.doc.page(0).note, std::string("area resolved"));
+        QCOMPARE(doc.page(0).note, std::string(""));
+        // The core-only refusal is still required; the GUI/CLI registry now resolves this area.
+        try {
+            CommandBus().apply(doc, full_area, Actor());
+            QFAIL("core's bus must not resolve a raster area");
+        } catch (const ApplyError& error) {
+            QCOMPARE(error.code(), std::string("not_yet_ported"));
+            QVERIFY(std::string(error.what()).starts_with("ops[0] set_note: an area of this kind"));
+        }
     }
 
     void canApprove() {
@@ -159,8 +189,15 @@ private slots:
         QCOMPARE(error_of(doc, ops(R"([{"op": "frobnicate"}])")), std::string("apply: ops[0] frobnicate: unknown op: frobnicate"));
         QCOMPARE(error_of(doc, ops(R"([{"op": 5}])")), std::string("apply: ops[0] 5: unknown op: 5"));
         // an op of the public list that this build does not have: refused, never skipped
-        QCOMPARE(error_of(doc, ops(R"([{"op": "fill", "page": 1, "x_mm": 1, "y_mm": 2}])")),
-                 std::string("not_yet_ported: ops[0] fill: fill is not in the C++ build yet"));
+        const Json fill = ops(R"([{"op": "fill", "page": 1, "x_mm": 1, "y_mm": 2}])");
+        QCOMPARE(error_of(doc, fill), std::string("(applied)"));
+        try {
+            CommandBus().apply(doc, fill, Actor());
+            QFAIL("core's bus has no raster fill");
+        } catch (const ApplyError& error) {
+            QCOMPARE(error.code() + ": " + error.what(),
+                     std::string("not_yet_ported: ops[0] fill: fill is not in the C++ build yet"));
+        }
         QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1}, {"op": "approve", "page": 1}])")),
                  std::string("not_yet_ported: ops[1] approve: approve is not in the C++ build yet"));
         QCOMPARE(error_of(doc, ops(R"([{"op": "for_pages", "pages": "all", "ops": []}])")),

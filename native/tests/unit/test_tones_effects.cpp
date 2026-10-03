@@ -209,7 +209,7 @@ private slots:
             {R"([{"op": "add_tone", "page": 1, "area": {"mask": {"box": [5, 5, 10, 10], "png": "$EMPTYPNG"}}}])", "ops[0] add_tone: the area is empty"},
             {R"([{"op": "add_tone", "page": 1, "after": "nope"}])", "ops[0] add_tone: no layer nope"},
             {R"([{"op": "add_tone", "page": 1, "angle": "inf"}])", "ops[0] add_tone: angle must be a finite number"},
-            {R"([{"op": "add_tone", "page": 1, "area": {"layer": "x"}}])", "ops[0] add_tone: an area of this kind"},
+            {R"([{"op": "add_tone", "page": 1, "area": {"layer": "x"}}])", "ops[0] add_tone: no layer x"},
             {R"([{"op": "add_tone", "page": 1, "area": {"rect": [1, 2, 3]}}])",
              "ops[0] add_tone: a value of the wrong type (not enough values to unpack (expected 4, got 3))"}};
         const Values empty{{"$EMPTYPNG", genko::core::b64encode(render::write_png(render::Image::create("L", render::Size{4, 4}, render::Ink(0))))}};
@@ -220,6 +220,29 @@ private slots:
         // (a polygon of no size is one pixel of tone, as in Python)
         QCOMPARE(layer_of(applied(doc, R"([{"op": "add_tone", "page": 1, "id": "p", "area": {"poly": [[1, 1], [1, 1], [1, 1]]}}])"), "p")->patches[0].attrs["box"],
                  j("[1.016, 1.016, 0.085, 0.085]"));
+    }
+
+    void toneUsesTheRasterLayerResolver() {
+        Document doc = book();
+        const std::string ink = role_id(doc, LayerRole::Ink);
+        for (auto& layer : doc.edit_page(0).layers) {
+            if (layer.id == ink) layer.strokes = genko::core::make_strokes({line(40, 50, 70, 50, 0.6, "mili")});
+        }
+        QTemporaryDir scratch;
+        QVERIFY(scratch.isValid());
+        const auto directory = m3b::to_path(scratch.path());
+        const Json before = m3b::state_of(doc, directory);
+        const Json batch = Json::array({Json::object({{"op", "add_tone"}, {"page", 1}, {"id", "resolved-tone"},
+            {"density", 0.3}, {"area", Json::object({{"layer", ink}})}})});
+        const auto result = m3b::bus().apply(doc, batch, genko::core::Actor());
+        const auto* tone = layer_of(result.doc, "resolved-tone");
+        QVERIFY(tone != nullptr);
+        QCOMPARE(tone->patches.size(), std::size_t{1});
+        QVERIFY(tone->patches[0].png && !tone->patches[0].png->empty());
+        QVERIFY(render::read_png(*tone->patches[0].png).getbbox().has_value());
+        QVERIFY(m3b::state_of(doc, directory) == before);
+        QVERIFY(error_of(doc, R"([{"op":"add_tone","page":1,"area":{"layer":"x"}}])").starts_with("ops[0] add_tone: no layer x"));
+        QVERIFY(m3b::state_of(doc, directory) == before);
     }
 
     void tone_by_the_region_a_fill_takes() {

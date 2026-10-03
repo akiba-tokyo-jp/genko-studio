@@ -229,19 +229,19 @@ core::Layer new_tone(const core::Document& doc, const core::Page& page, const Js
     if (truthy(op, "area") != nullptr) {
         const Json area = area_of(op);
         if (core::py_truthy(core::py_get(area, "poly"))) {
-            patch = fills::polygon_patch(points_of(area.at("poly")), black);
+            patch = tone_fills::polygon_patch(points_of(area.at("poly")), black);
         } else {
-            const auto [mask, origin] = fills::area_mask(area);
-            patch = fills::mask_patch(mask, fills::kFillDpi, black, 1.0, origin);
+            const auto [mask, origin] = tone_fills::area_mask(area);
+            patch = tone_fills::mask_patch(mask, tone_fills::kFillDpi, black, 1.0, origin);
         }
     } else if (const Json* frame_id = truthy(op, "frame_id")) {
         const core::Frame& frame = core::frame_or_fail(page, *frame_id);
         std::vector<std::array<double, 2>> outline;
         for (const core::Point& p : core::outline(frame)) outline.push_back({p.x.value(), p.y.value()});
-        patch = fills::polygon_patch(outline, black);
+        patch = tone_fills::polygon_patch(outline, black);
     } else if (const Json* at_value = truthy(op, "at")) {
         const Json at = core::py_dict(*at_value);
-        const int dpi = fills::kFillDpi;
+        const int dpi = tone_fills::kFillDpi;
         if (!at.contains("x_mm")) throw core::OpKeyError("'x_mm'");
         const double x = core::to_float(at["x_mm"]);
         if (!at.contains("y_mm")) throw core::OpKeyError("'y_mm'");
@@ -252,14 +252,14 @@ core::Layer new_tone(const core::Document& doc, const core::Page& page, const Js
         std::optional<Box> window;
         if (const core::Frame* panel = page.frame_at(core::Num(x), core::Num(y))) {
             const core::Rect& r = panel->rect;
-            window = Box{std::max(0, fills::px((r.x - core::Num(2)).value(), dpi)), std::max(0, fills::px((r.y - core::Num(2)).value(), dpi)),
-                         std::min(reference.width(), fills::px((r.x + r.width + core::Num(2)).value(), dpi)),
-                         std::min(reference.height(), fills::px((r.y + r.height + core::Num(2)).value(), dpi))};
+            window = Box{std::max(0, tone_fills::px((r.x - core::Num(2)).value(), dpi)), std::max(0, tone_fills::px((r.y - core::Num(2)).value(), dpi)),
+                         std::min(reference.width(), tone_fills::px((r.x + r.width + core::Num(2)).value(), dpi)),
+                         std::min(reference.height(), tone_fills::px((r.y + r.height + core::Num(2)).value(), dpi))};
         }
         const double gap = core::to_float(core::py_or(core::py_get(at, "gap_mm", Json(0.3)), Json(0)));
-        const auto mask = fills::region_mask(reference, Point{fills::px(x, dpi), fills::px(y, dpi)}, fills::px(gap, dpi), 160, 1, window);
+        const auto mask = tone_fills::region_mask(reference, Point{tone_fills::px(x, dpi), tone_fills::px(y, dpi)}, tone_fills::px(gap, dpi), 160, 1, window);
         if (!mask) throw OpError("nothing to fill there (the click is on a line)");
-        patch = fills::mask_patch(*mask, dpi, black);
+        patch = tone_fills::mask_patch(*mask, dpi, black);
     }
     if (patch) {
         layer.patches.push_back(std::move(*patch));

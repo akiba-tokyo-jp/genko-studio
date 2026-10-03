@@ -68,7 +68,7 @@ constexpr std::int64_t kOpsMaxImagePixels = 120'000'000;  // ops.MAX_IMAGE_PIXEL
 // --- the helpers of ops.py ------------------------------------------------------------------------------------------
 
 // ops._paint_target: the layer an edit works on (layer_id, else the role in "layer", ink by default)
-std::size_t paint_target(Page& page, const Json& op) {
+std::size_t raster_paint_target(Page& page, const Json& op) {
     std::size_t at = 0;
     if (core::truthy_at(op, "layer_id")) {
         at = core::layer_by_id(page, core::py_str(op["layer_id"]));
@@ -226,7 +226,7 @@ void fill(OpContext& c) {
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
     Page& page = doc.edit_page(at);
-    const std::size_t ti = paint_target(page, op);
+    const std::size_t ti = raster_paint_target(page, op);
     const int dpi = fills::kFillDpi;
     const double x_mm = core::finite_float(core::subscript(op, "x_mm"), "x_mm");
     const double ax = fills::px(x_mm, dpi);
@@ -261,7 +261,7 @@ void fill_area(OpContext& c) {
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
     Page& page = doc.edit_page(at);
-    const std::size_t ti = paint_target(page, op);
+    const std::size_t ti = raster_paint_target(page, op);
     const Json area = core::op_area(op);
     std::optional<core::Patch> patch;
     if (core::truthy_at(area, "poly")) {
@@ -283,7 +283,7 @@ void fill_enclosed(OpContext& c) {
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
     Page& page = doc.edit_page(at);
-    const std::size_t ti = paint_target(page, op);
+    const std::size_t ti = raster_paint_target(page, op);
     std::vector<std::pair<double, double>> poly;
     const Json* given = core::get(op, "poly");
     const std::vector<Json> items = core::iterate(given != nullptr && core::py_truthy(*given) ? *given : Json::array());
@@ -351,7 +351,7 @@ void fill_gaps(OpContext& c) {
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
     Page& page = doc.edit_page(at);
-    const std::size_t ti = paint_target(page, op);
+    const std::size_t ti = raster_paint_target(page, op);
     const int dpi = 150;
     const Size size = page_px(page, dpi);
     const Image painted =
@@ -487,7 +487,7 @@ void gradient_fill(OpContext& c) {
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
     Page& page = doc.edit_page(at);
-    const std::size_t ti = paint_target(page, op);
+    const std::size_t ti = raster_paint_target(page, op);
     // (fx, fy), (tx, ty) = [float(v) for v in op["from"][:2]], [float(v) for v in op["to"][:2]]
     const std::string message = "gradient_fill needs from and to: [x_mm, y_mm]";
     const auto two = [&](std::string_view key) {
@@ -1095,7 +1095,7 @@ void delete_or_transform_area(OpContext& c, bool transform) {
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
     Page& page = doc.edit_page(at);
-    const std::size_t ti = paint_target(page, op);
+    const std::size_t ti = raster_paint_target(page, op);
     const Json area = core::op_area(op);
     selection::Items items = selection::lift(page.layers[ti], area, page);
     if (!transform) return;
@@ -1126,7 +1126,7 @@ void paste(OpContext& c) {
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
     Page& page = doc.edit_page(at);
-    const std::size_t ti = paint_target(page, op);
+    const std::size_t ti = raster_paint_target(page, op);
     selection::Items items = selection::items_from_json(core::truthy_at(op, "items") ? op["items"] : Json::object());
     if (items.strokes.empty() && items.patches.empty()) throw OpError("nothing to paste");
     // (a patch Python keeps without its box or a picture it can open would break every drawing of the page: refused)
@@ -1466,12 +1466,12 @@ void erase(OpContext& c) {
         const Json* layer_id = core::get(op, "layer_id");
         const Json lid(layer_id != nullptr && core::py_truthy(*layer_id) ? core::py_str(*layer_id) : std::string());
         const Json only = op.contains("ruler_id") ? op["ruler_id"] : Json(nullptr);
-        const core::FrameContains inside = [&page](const Json& frame_id, double x, double y) {
+        const core::rulers::FrameContains inside = [&page](const Json& frame_id, double x, double y) {
             if (page.frames.empty() || !frame_id.is_string()) return false;
             const core::Frame* frame = page.find_frame(frame_id.get_ref<const std::string&>());
             return frame != nullptr && core::contains(*frame, Num(x), Num(y));
         };
-        points = core::ruler_snap(points, page.rulers, inside, only, lid.get_ref<const std::string&>().empty() ? nullptr : &lid);
+        points = core::rulers::snap(points, page.rulers, inside, only, lid.get_ref<const std::string&>().empty() ? nullptr : &lid);
     }
     const Json* texture_value = core::get(op, "texture");
     const std::string texture = texture_value != nullptr && core::py_truthy(*texture_value) ? core::py_str(*texture_value) : "";
