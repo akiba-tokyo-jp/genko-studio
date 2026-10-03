@@ -53,7 +53,11 @@ signals:
     void saveAs();
     void recoveryCopy();
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
+    void refresh_words_height();
     QLabel* words_ = nullptr;
     PathLabel* where_ = nullptr;
     QPushButton* retry_ = nullptr;

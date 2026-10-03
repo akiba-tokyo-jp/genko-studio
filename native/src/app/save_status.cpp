@@ -3,6 +3,7 @@
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QMessageBox>
+#include <QResizeEvent>
 #include <QVBoxLayout>
 
 #include "app/ask.hpp"
@@ -88,11 +89,13 @@ void SaveStatusLabel::show_status(const SaveStatus& status) {
 SaveFailureBar::SaveFailureBar(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("saveFailure"));
     setAttribute(Qt::WA_StyledBackground, true);
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(10, 6, 10, 6);
     layout->setSpacing(4);
     words_ = new QLabel;
     words_->setWordWrap(true);
+    words_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     words_->setTextFormat(Qt::PlainText);
     where_ = new PathLabel;
     auto* row = new QHBoxLayout;
@@ -117,8 +120,10 @@ SaveFailureBar::SaveFailureBar(QWidget* parent) : QWidget(parent) {
 
 void SaveFailureBar::show_status(const SaveStatus& status) {
     const bool bad = status.kind == SaveKind::Failed || status.kind == SaveKind::RecoveryOnly;
-    setVisible(bad);
-    if (!bad) return;
+    if (!bad) {
+        hide();
+        return;
+    }
     QString text = QStringLiteral("⚠ 原稿に保存できませんでした: %1。").arg(failure_reason(status));
     text += status.last_saved.isValid() ? QStringLiteral("最後に保存できたのは %1（世代 %2）です。").arg(when(status.last_saved)).arg(status.last_revision)
                                         : QStringLiteral("この原稿を開いてからは、まだ保存できていません。");
@@ -132,6 +137,28 @@ void SaveFailureBar::show_status(const SaveStatus& status) {
     words_->setText(text);
     words_->setToolTip(status.reason);
     where_->set_path(target_of(status), QStringLiteral("保存先: "));
+    refresh_words_height();
+    show();  // present the new text and its wrap height together, not an old one-line hint
+}
+
+void SaveFailureBar::refresh_words_height() {
+    if (words_ == nullptr || layout() == nullptr) return;
+    const QMargins margins = layout()->contentsMargins();
+    const int available = qMax(1, contentsRect().width() - margins.left() - margins.right());
+    const QMargins text_margins = words_->contentsMargins();
+    const int inset = 2 * words_->margin();
+    const int text_width = qMax(1, available - text_margins.left() - text_margins.right() - inset);
+    // QLabel::heightForWidth is clamped by our previous minimumHeight. Measure the plain
+    // wrapped text independently so narrower/longer messages cannot keep a stale minimum.
+    const QRect bounds = words_->fontMetrics().boundingRect(QRect(0, 0, text_width, 0),
+            Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, words_->text());
+    const int needed = bounds.height() + text_margins.top() + text_margins.bottom() + inset;
+    if (needed > 0 && words_->minimumHeight() != needed) words_->setMinimumHeight(needed);
+}
+
+void SaveFailureBar::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    refresh_words_height();
 }
 
 CloseGuard::CloseGuard(QWidget* parent, const SaveStatus& status, const QString& title, const QString& verb) : QDialog(parent) {
@@ -164,6 +191,7 @@ CloseGuard::CloseGuard(QWidget* parent, const SaveStatus& status, const QString&
     }
     cancel_->setAutoDefault(true);
     cancel_->setDefault(true);
+    theme::primary(cancel_);  // the safe default must be visible, not merely an internal Qt flag
     if (!status.target) save_->setEnabled(false);  // (a book never given a folder: only 別の場所に保存)
     connect(save_, &QPushButton::clicked, this, [this] {
         choice_ = Choice::Save;

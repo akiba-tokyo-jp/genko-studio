@@ -95,7 +95,7 @@
     {"n": "merge_visible nothing showing", "op": "merge_visible", "ok": false, "ops": [
       {"op": "set_layers", "page": 4, "all": true, "visible": false}, {"op": "merge_visible", "page": 4}]},
     {"n": "merge_visible no page", "op": "merge_visible", "ok": false, "ops": [{"op": "merge_visible", "page": 7}]},
-    {"n": "merge_visible tone", "op": "merge_visible", "ok": true, "cpp": "not_yet_ported", "ops": [{"op": "merge_visible", "page": 3}]},
+    {"n": "merge_visible tone", "op": "merge_visible", "ok": true, "ops": [{"op": "merge_visible", "page": 3}]},
     {"n": "merge_visible strict", "op": "merge_visible", "ok": false, "steps": [
       {"ops": [{"op": "set_meta", "strict_gates": true}], "agent": "human:作者"},
       {"ops": [{"op": "merge_visible", "page": 4}], "agent": "ai:hermes"}]},

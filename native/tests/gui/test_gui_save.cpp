@@ -25,6 +25,7 @@
 #include <QPushButton>
 #include <QTemporaryFile>
 #include <QTimer>
+#include <QVBoxLayout>
 
 #include <memory>
 #include <optional>
@@ -237,6 +238,34 @@ private slots:
         if (!genko::storage::fault::compiled_in()) QSKIP("this build has no fault injection (a release configuration)");
     }
 
+    void failureNoticeReturnsUnusedHeight() {
+        QWidget window;
+        auto* layout = new QVBoxLayout(&window);
+        auto* bar = new genko::app::SaveFailureBar;
+        layout->addWidget(bar);
+        genko::app::SaveStatus status;
+        status.kind = SaveKind::Failed;
+        status.nowhere = true;
+        status.reason = QStringLiteral("保存先に書き込めない理由を表示します。").repeated(12);
+        bar->show_status(status);
+        window.resize(700, 400);
+        window.show();
+        QApplication::processEvents();
+        const int narrow = bar->words()->minimumHeight();
+        QVERIFY(narrow > 0);
+        window.resize(1400, 400);
+        QApplication::processEvents();
+        const int wide = bar->words()->minimumHeight();
+        QVERIFY2(wide < narrow, "幅が広がったら古いwrapの余剰高さを返す");
+        status.reason = QStringLiteral("短い理由");
+        bar->show_status(status);
+        QApplication::processEvents();
+        QVERIFY2(bar->words()->minimumHeight() < wide, "本文が短くなったら余剰高さを返す");
+        const QRect bounds = bar->words()->fontMetrics().boundingRect(bar->words()->contentsRect(),
+                static_cast<int>(bar->words()->alignment()) | Qt::TextWordWrap, bar->words()->text());
+        QVERIFY(bar->words()->contentsRect().contains(bounds));
+    }
+
     void nativeWindowSaveFailureCancelAndReopen() {
         QTemporaryDir tmp;
         const auto blocker = path_of(tmp.filePath("recovery-blocker"));
@@ -260,12 +289,45 @@ private slots:
         QVERIFY(desk.wait_kind(SaveKind::Failed));
         QVERIFY(desk.session->status().nowhere);
         QVERIFY(desk.window->failure_bar()->isVisible());
+        QApplication::processEvents();
+        auto* words = desk.window->failure_bar()->words();
+        QVERIFY(words->text().contains(QStringLiteral("最後に保存できた")));
+        QVERIFY(words->text().contains(QStringLiteral("この変更は、まだどこにも保存されていません")));
+        const int required_height = words->heightForWidth(words->width());
+        qInfo() << "failure layout before assertion" << desk.window->size() << desk.window->failure_bar()->size()
+                << "bar hints" << desk.window->failure_bar()->sizeHint() << desk.window->failure_bar()->minimumSizeHint()
+                << "words" << words->size() << words->sizeHint() << words->minimumSizeHint() << "width height need" << required_height;
+        QVERIFY(required_height > 0);
+        QVERIFY2(words->height() >= required_height,
+                 qPrintable(QStringLiteral("保存警告の高さ %1 は全文に必要な %2 未満").arg(words->height()).arg(required_height)));
+        QVERIFY(desk.window->failure_bar()->rect().contains(words->geometry()));
+        const QRect text_bounds = words->fontMetrics().boundingRect(words->contentsRect(),
+                static_cast<int>(words->alignment()) | Qt::TextWordWrap, words->text());
+        qInfo() << "save failure text geometry" << words->geometry() << "need" << required_height
+                << "contents" << words->contentsRect() << "text" << text_bounds;
+        QVERIFY2(words->contentsRect().contains(text_bounds), "保存警告の全文が可視の文字領域からはみ出す");
+        for (const QSize size : {QSize(900, 680), QSize(1200, 860), QSize(820, 620), QSize(1200, 860)}) {
+            desk.window->resize(size);
+            QApplication::processEvents();
+            const int needed = words->heightForWidth(words->width());
+            QVERIFY2(words->height() >= needed, "幅変更後も保存失敗・最後の保存・メモリのみ警告を切らない");
+            const QRect bounds = words->fontMetrics().boundingRect(words->contentsRect(),
+                    static_cast<int>(words->alignment()) | Qt::TextWordWrap, words->text());
+            QVERIFY(words->contentsRect().contains(bounds));
+        }
         capture(desk.window.get(), QStringLiteral("02-failed-memory-only"));
         const auto before = desk.session->snapshot();
+        bool cancel_default = false;
+        bool cancel_focus = false;
+        QColor cancel_background;
         desk.answers->responder->exec = [&](QDialog* dialog) {
             auto* guard = qobject_cast<CloseGuard*>(dialog);
             if (!guard) return 0;
             QTimer::singleShot(120, guard, [&, guard] {
+                cancel_default = guard->cancel_button()->isDefault();
+                cancel_focus = guard->cancel_button()->hasFocus();
+                const QImage cancel = guard->cancel_button()->grab().toImage();
+                cancel_background = cancel.pixelColor(8, cancel.height() / 2);
                 capture(guard, QStringLiteral("03-close-cancel-default"));
                 QTest::mouseClick(guard->cancel_button(), Qt::LeftButton);
             });
@@ -274,6 +336,9 @@ private slots:
         QVERIFY(!desk.window->close());
         QCOMPARE(desk.session->snapshot().get(), before.get());
         QVERIFY(desk.window->isVisible());
+        QVERIFY(cancel_default);
+        QVERIFY(cancel_focus);
+        QCOMPARE(cancel_background, genko::app::theme::accent());
         capture(desk.window.get(), QStringLiteral("04-cancel-preserved"));
         make_writable(desk.book, true);
         desk.session->save_now();
