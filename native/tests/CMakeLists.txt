@@ -131,6 +131,39 @@ genko_test(test_save_e2e SOURCES e2e/test_save_e2e.cpp DEPS genko_test_support L
 genko_test(test_migrate_e2e SOURCES e2e/test_migrate_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
 genko_test(test_ops_e2e SOURCES e2e/test_ops_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
 
+# The desktop app (M2-G1): the editing session alone, then the windows on the offscreen platform (label gui).
+if(GENKO_BUILD_APP)
+  genko_test(test_session SOURCES unit/test_session.cpp DEPS genko_app LABELS unit TIMEOUT 300)
+  # the pen: Python's packing of mouse and tablet input, and the live line's pixels against the renderer's per brush
+  genko_test(test_gui_pen SOURCES gui/test_gui_pen.cpp DEPS genko_app GUI TIMEOUT 1200)
+  # the 52 commands of M2 and their groups: Python's words, keys and tips, the menus, and what each does
+  genko_test(test_gui_actions SOURCES gui/test_gui_actions.cpp DEPS genko_app GUI TIMEOUT 900)
+  # the canvas's gestures: the panel tool (cuts, gutters, corners, drawn panels) and the view
+  genko_test(test_gui_canvas SOURCES gui/test_gui_canvas.cpp DEPS genko_app GUI TIMEOUT 600)
+  # saving and closing (AC-SAVE 2, 3, 4, 6, 8, 10): failures shown, the question before closing, recovery, retries
+  genko_test(test_gui_save SOURCES gui/test_gui_save.cpp DEPS genko_app GUI TIMEOUT 900)
+  target_compile_definitions(test_gui_save PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")
+  add_dependencies(test_gui_save genko)
+  # the windows on 1024×640 … 1920×1080 at 100–200 %, the long path, the preview, typed Japanese, the picture cache
+  genko_test(test_gui_layout SOURCES gui/test_gui_layout.cpp DEPS genko_app GUI TIMEOUT 1200)
+  # `genko app` in processes of its own: draw, undo, save, quit, open again; the autosave and the recovery copy across
+  # processes (AC-SAVE 1, 8); `genko` alone
+  genko_test(test_app_e2e SOURCES e2e/test_app_e2e.cpp DEPS genko_test_support LABELS e2e GUI TIMEOUT 1200)
+  target_compile_definitions(test_app_e2e PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")
+endif()
+
+# `genko` alone starts the desktop app when it is built (test_app_e2e); without it, it is a usage error
+if(GENKO_BUILD_APP)
+  target_compile_definitions(test_cli_e2e PRIVATE GENKO_WITH_APP=1)
+else()
+  target_compile_definitions(test_cli_e2e PRIVATE GENKO_WITH_APP=0)
+endif()
+
 # Timings, shown and not judged (not run by the usual CI: ctest -L perf).
 genko_test(test_perf_render SOURCES perf/test_perf_render.cpp DEPS genko_render LABELS perf TIMEOUT 1800)
 set_tests_properties(test_perf_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
+if(GENKO_BUILD_APP)
+  # the app's internal timings: five minutes of G pen input on the F1 book in `genko app` on Xvfb (ACCEPTANCE.md §6)
+  genko_test(test_perf_app SOURCES perf/test_perf_app.cpp DEPS genko_app LABELS perf TIMEOUT 3600)
+  set_tests_properties(test_perf_app PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
+endif()

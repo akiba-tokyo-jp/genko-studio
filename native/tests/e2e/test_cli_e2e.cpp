@@ -118,7 +118,9 @@ private slots:
     }
 
     void usageErrors() {
-        QCOMPARE(genko_run({}).exit_code, 2);
+#if !GENKO_WITH_APP
+        QCOMPARE(genko_run({}).exit_code, 2);  // (with the desktop app built, `genko` alone starts it: test_app_e2e)
+#endif
         QCOMPARE(genko_run({"frobnicate"}).exit_code, 2);
         QCOMPARE(genko_run({"inspect"}).exit_code, 2);
         QCOMPARE(genko_run({"inspect", genko::test::test_data("legacy/book-v3.genko"), "--fast"}).exit_code, 2);

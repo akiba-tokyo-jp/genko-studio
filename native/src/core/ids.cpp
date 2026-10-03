@@ -26,12 +26,32 @@ std::string hex_bits(std::uint64_t bits, int digits) {
     return out;
 }
 
-}  // namespace
+// The innermost ScopedIdScript of this thread (none: new_id() as it always was).
+thread_local ScopedIdScript* g_script = nullptr;
 
-std::string new_id() {
+std::string unscripted_id() {
     if (const auto& source = test_source()) return source();
     // The first 48 bits of a version 4 UUID are all random (its version digit comes after them).
     return hex_bits(QRandomGenerator::system()->generate64() >> 16, 12);
+}
+
+}  // namespace
+
+std::string new_id() {
+    if (g_script != nullptr) return g_script->next();
+    return unscripted_id();
+}
+
+ScopedIdScript::ScopedIdScript(std::vector<std::string> given) : given_(std::move(given)), outer_(g_script) {
+    g_script = this;
+}
+
+ScopedIdScript::~ScopedIdScript() { g_script = outer_; }
+
+std::string ScopedIdScript::next() {
+    std::string id = used_ < given_.size() ? given_[used_++] : unscripted_id();
+    taken_.push_back(id);
+    return id;
 }
 
 std::string new_page_id() { return "pg_" + new_id(); }

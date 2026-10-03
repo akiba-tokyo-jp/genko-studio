@@ -2,4 +2,7 @@ add_subdirectory("${GENKO_SOURCE_ROOT}/third_party/pillow" "${CMAKE_BINARY_DIR}/
 add_subdirectory(core)
 add_subdirectory(storage)
 add_subdirectory(render)
+if(GENKO_BUILD_APP)
+  add_subdirectory(app)
+endif()
 add_subdirectory(api)

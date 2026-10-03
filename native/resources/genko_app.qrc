@@ -1,0 +1,67 @@
+<!DOCTYPE RCC>
+<!-- The app's resources, taken from the Python baseline as they are (not copied): the Lucide icons (ISC licence,
+     src/genko/app/lucide/LICENSE) and the panel layout templates (src/genko/studio/layouts.json). -->
+<RCC version="1.0">
+  <qresource prefix="/genko">
+    <file alias="lucide/LICENSE">../../src/genko/app/lucide/LICENSE</file>
+    <file alias="lucide/arrow-down-to-line.svg">../../src/genko/app/lucide/arrow-down-to-line.svg</file>
+    <file alias="lucide/arrow-down.svg">../../src/genko/app/lucide/arrow-down.svg</file>
+    <file alias="lucide/arrow-up.svg">../../src/genko/app/lucide/arrow-up.svg</file>
+    <file alias="lucide/blend.svg">../../src/genko/app/lucide/blend.svg</file>
+    <file alias="lucide/book-open.svg">../../src/genko/app/lucide/book-open.svg</file>
+    <file alias="lucide/box.svg">../../src/genko/app/lucide/box.svg</file>
+    <file alias="lucide/chevron-down.svg">../../src/genko/app/lucide/chevron-down.svg</file>
+    <file alias="lucide/chevron-left.svg">../../src/genko/app/lucide/chevron-left.svg</file>
+    <file alias="lucide/chevron-right.svg">../../src/genko/app/lucide/chevron-right.svg</file>
+    <file alias="lucide/chevron-up.svg">../../src/genko/app/lucide/chevron-up.svg</file>
+    <file alias="lucide/circle-check.svg">../../src/genko/app/lucide/circle-check.svg</file>
+    <file alias="lucide/clipboard-check.svg">../../src/genko/app/lucide/clipboard-check.svg</file>
+    <file alias="lucide/contrast.svg">../../src/genko/app/lucide/contrast.svg</file>
+    <file alias="lucide/copy.svg">../../src/genko/app/lucide/copy.svg</file>
+    <file alias="lucide/corner-up-left.svg">../../src/genko/app/lucide/corner-up-left.svg</file>
+    <file alias="lucide/ellipsis.svg">../../src/genko/app/lucide/ellipsis.svg</file>
+    <file alias="lucide/eraser.svg">../../src/genko/app/lucide/eraser.svg</file>
+    <file alias="lucide/eye-off.svg">../../src/genko/app/lucide/eye-off.svg</file>
+    <file alias="lucide/eye.svg">../../src/genko/app/lucide/eye.svg</file>
+    <file alias="lucide/file-text.svg">../../src/genko/app/lucide/file-text.svg</file>
+    <file alias="lucide/file.svg">../../src/genko/app/lucide/file.svg</file>
+    <file alias="lucide/folder-open.svg">../../src/genko/app/lucide/folder-open.svg</file>
+    <file alias="lucide/folder-plus.svg">../../src/genko/app/lucide/folder-plus.svg</file>
+    <file alias="lucide/folder.svg">../../src/genko/app/lucide/folder.svg</file>
+    <file alias="lucide/grid-3x3.svg">../../src/genko/app/lucide/grid-3x3.svg</file>
+    <file alias="lucide/image.svg">../../src/genko/app/lucide/image.svg</file>
+    <file alias="lucide/info.svg">../../src/genko/app/lucide/info.svg</file>
+    <file alias="lucide/lasso-select.svg">../../src/genko/app/lucide/lasso-select.svg</file>
+    <file alias="lucide/lasso.svg">../../src/genko/app/lucide/lasso.svg</file>
+    <file alias="lucide/layers.svg">../../src/genko/app/lucide/layers.svg</file>
+    <file alias="lucide/layout-dashboard.svg">../../src/genko/app/lucide/layout-dashboard.svg</file>
+    <file alias="lucide/maximize-2.svg">../../src/genko/app/lucide/maximize-2.svg</file>
+    <file alias="lucide/mouse-pointer-2.svg">../../src/genko/app/lucide/mouse-pointer-2.svg</file>
+    <file alias="lucide/move.svg">../../src/genko/app/lucide/move.svg</file>
+    <file alias="lucide/paint-bucket.svg">../../src/genko/app/lucide/paint-bucket.svg</file>
+    <file alias="lucide/paintbrush.svg">../../src/genko/app/lucide/paintbrush.svg</file>
+    <file alias="lucide/pen-line.svg">../../src/genko/app/lucide/pen-line.svg</file>
+    <file alias="lucide/pen-tool.svg">../../src/genko/app/lucide/pen-tool.svg</file>
+    <file alias="lucide/pipette.svg">../../src/genko/app/lucide/pipette.svg</file>
+    <file alias="lucide/plus.svg">../../src/genko/app/lucide/plus.svg</file>
+    <file alias="lucide/redo-2.svg">../../src/genko/app/lucide/redo-2.svg</file>
+    <file alias="lucide/ruler.svg">../../src/genko/app/lucide/ruler.svg</file>
+    <file alias="lucide/scan.svg">../../src/genko/app/lucide/scan.svg</file>
+    <file alias="lucide/search.svg">../../src/genko/app/lucide/search.svg</file>
+    <file alias="lucide/settings.svg">../../src/genko/app/lucide/settings.svg</file>
+    <file alias="lucide/shapes.svg">../../src/genko/app/lucide/shapes.svg</file>
+    <file alias="lucide/share.svg">../../src/genko/app/lucide/share.svg</file>
+    <file alias="lucide/spline.svg">../../src/genko/app/lucide/spline.svg</file>
+    <file alias="lucide/square-dashed.svg">../../src/genko/app/lucide/square-dashed.svg</file>
+    <file alias="lucide/square.svg">../../src/genko/app/lucide/square.svg</file>
+    <file alias="lucide/stamp.svg">../../src/genko/app/lucide/stamp.svg</file>
+    <file alias="lucide/trash-2.svg">../../src/genko/app/lucide/trash-2.svg</file>
+    <file alias="lucide/type.svg">../../src/genko/app/lucide/type.svg</file>
+    <file alias="lucide/undo-2.svg">../../src/genko/app/lucide/undo-2.svg</file>
+    <file alias="lucide/wand-sparkles.svg">../../src/genko/app/lucide/wand-sparkles.svg</file>
+    <file alias="lucide/x.svg">../../src/genko/app/lucide/x.svg</file>
+    <file alias="lucide/zoom-in.svg">../../src/genko/app/lucide/zoom-in.svg</file>
+    <file alias="lucide/zoom-out.svg">../../src/genko/app/lucide/zoom-out.svg</file>
+    <file alias="templates/layouts.json">../../src/genko/studio/layouts.json</file>
+  </qresource>
+</RCC>
