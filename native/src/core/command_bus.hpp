@@ -55,10 +55,16 @@ struct OpContext {
 
 using OpFunction = std::function<void(OpContext&)>;
 
-// The ops by name, each with Python's arguments, behaviour and messages; the other ops of the public list (`genko
-// schema`) come with later milestones. builtin() holds core's ops (register_core_ops); every entry point that applies
-// ops (the command line, the tests) uses render::ops_registry(), which has those and the ops that draw (tones, effect
-// lines, 3D: render/ops_registry.hpp).
+// Python's selops.resolve: an op's "area" of a kind beyond {poly} and {mask} (rect, ellipse, layer, color, all, saved,
+// union, intersect, subtract, invert, grow_mm, feather_mm) as the {poly} or {mask} the drawing ops take, on the page
+// at `page` of the book. Some kinds need the page or a layer drawn, so the resolver is render's (render::ops_registry).
+// Throws OpError with selops.AreaError's words ("the area is empty", "no saved area x", …); Python's other exceptions
+// as the ops raise them.
+using AreaResolver = std::function<Json(const Document& doc, std::size_t page, const Json& area)>;
+
+// The ops by name. builtin() holds the ops of core, each with Python's arguments, behaviour and messages; the ops that
+// draw are render's (render::ops_registry() holds both); the other ops of the public list (`genko schema`) come with
+// later milestones.
 class OpRegistry {
 public:
     static const OpRegistry& builtin();
@@ -67,8 +73,13 @@ public:
     const OpFunction* find(std::string_view name) const;
     std::vector<std::string> names() const;
 
+    // Without a resolver the bus refuses an area that needs one with not_yet_ported.
+    void set_area_resolver(AreaResolver resolver);
+    const AreaResolver& area_resolver() const { return area_resolver_; }
+
 private:
     std::map<std::string, OpFunction, std::less<>> ops_;
+    AreaResolver area_resolver_;
 };
 
 struct ApplyResult {
@@ -88,10 +99,9 @@ public:
     // fails. With dry_run the result is the same, and the caller does not save it.
     //
     // As Python's apply_ops: for_pages is expanded first (against the book as it was given); then each op is checked
-    // (its area, the page locks and approvals, strict_gates) and applied. An op of the public list that this build
-    // does not have is refused with not_yet_ported, never skipped. An area is resolved as selops.resolve does it: a
-    // rect or an ellipse alone becomes its polygon; one that needs the selection tools (layer, color, all, saved,
-    // union, intersect, subtract, invert, grow_mm, feather_mm) is refused with not_yet_ported.
+    // (its area resolved by the registry's AreaResolver, the page locks and approvals, strict_gates) and applied. An
+    // op of the public list that this build does not have is refused with not_yet_ported, never skipped; so is an
+    // area that needs resolving when the registry has no resolver.
     ApplyResult apply(const Document& doc, const Json& ops, const Actor& actor, bool dry_run = false) const;
 
 private:
@@ -107,12 +117,13 @@ Json journal_op(const Json& op);
 
 // The page lock and approval checks made before each op (Python's _check_page_lock): name_ok needs a person;
 // lock_page and unlock_page take effect here, on a page the book has (OpError "no page N" for a number no page has,
-// where Python does nothing and says nothing).
+// where Python does nothing and says nothing); set_paper on every page asks each page's lock (Python asks none).
 void check_page_lock(Document& doc, const Json& op, const Actor& actor);
 
 // The strict_gates checks made before each op of a studio book (Python's _check_strict, every rule, by the op's
 // name: the layout of an approved name, finishing without the art approved, printed layers before the name is
-// approved, …). Throws OpError.
+// approved, …), the layer an op draws on found as the op finds it (Python reads "layer_id" for every op). Throws
+// OpError.
 void check_strict(const Document& doc, const Json& op, const Actor& actor);
 
 // for_pages as the ops it stands for (Python's bookops.expand): each op once per page, its "page" set to the page.
@@ -135,6 +146,10 @@ std::optional<Json> resolve_plain_area(const Json& area);
 // Python's _require_page: the position of the first page whose index is int(op["page"]). Throws OpError("page (int)
 // is required") or OpError("no page N").
 std::size_t require_page(const Document& doc, const Json& op);
+
+// Whether set_paper changes every page: its "page" is none, null, "" or 0 (Python's op.get("page") in (None, "", 0):
+// False and 0.0 are 0 too). check_page_lock then asks every page's lock.
+bool paper_on_every_page(const Json& op);
 
 // A page number → its new number (Python's dict in remap_page_refs; nothing for a page that went away).
 class PageMapping {

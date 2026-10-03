@@ -551,7 +551,7 @@ int apply(const QStringList& args, bool ascii) {
         return 0;
     }
 
-    const core::CommandBus bus(render::ops_registry());  // (every op of this build: core's and those that draw)
+    const core::CommandBus bus(render::ops_registry());
     const core::ApplyResult result = bus.apply(loaded.document, ops, core::Actor(agent), dry_run);
     Json out = Json::object();
     out["ok"] = true;

@@ -6,6 +6,7 @@
  */
 #ifndef GENKO_PILLOW_IMAGING_GLUE_H
 #define GENKO_PILLOW_IMAGING_GLUE_H
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +20,15 @@ const char *
 genko_imaging_error_message(void);
 void
 genko_imaging_clear_error(void);
+
+/* Scoped per-thread allocation budget. Images retain the state until their final deletion. */
+int genko_imaging_budget_begin(uint64_t limit);
+void genko_imaging_budget_end(void);
+uint64_t genko_imaging_budget_live(void);
+uint64_t genko_imaging_budget_peak(void);
+struct ImagingMemoryInstance;
+int genko_imaging_budget_reserve(struct ImagingMemoryInstance *im, uint64_t bytes);
+void genko_imaging_budget_release(struct ImagingMemoryInstance *im);
 
 #ifdef __cplusplus
 }

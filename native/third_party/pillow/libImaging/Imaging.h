@@ -100,6 +100,8 @@ struct ImagingMemoryInstance {
 
     int pixelsize; /* Size of a pixel, in bytes (1, 2 or 4) */
     int linesize;  /* Size of a line, in bytes (xsize * pixelsize) */
+    void *genko_budget;
+    uint64_t genko_budget_bytes;
 
     /* Virtual methods */
     void (*destroy)(Imaging im);

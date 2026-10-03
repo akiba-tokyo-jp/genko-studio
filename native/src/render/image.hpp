@@ -142,6 +142,16 @@ struct Filter {
 // A picture: mode (Pillow's: "1", "L", "LA", "La", "P", "PA", "I", "I;16", "F", "RGB", "RGBA", "RGBa", "RGBX",
 // "HSV", "CMYK", "YCbCr"), size and pixels. A value: copying copies the pixels, moving is cheap. An Image made with
 // the default constructor holds nothing (empty()).
+class ImageAllocationBudget {
+public:
+    explicit ImageAllocationBudget(std::uint64_t limit_bytes);
+    ~ImageAllocationBudget();
+    ImageAllocationBudget(const ImageAllocationBudget&) = delete;
+    ImageAllocationBudget& operator=(const ImageAllocationBudget&) = delete;
+    std::uint64_t live() const;
+    std::uint64_t peak() const;
+};
+
 class Image {
 public:
     Image() noexcept = default;

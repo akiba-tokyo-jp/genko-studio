@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/base64.hpp"
+#include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "render/image.hpp"
 #include "testsupport.hpp"
@@ -213,6 +214,46 @@ private slots:
             while (at < got.size() && at < expected.size() && got[at] == expected[at]) ++at;
             QFAIL(qPrintable(QStringLiteral("pixels differ at byte %1 of %2").arg(at).arg(expected.size())));
         }
+    }
+
+    void convertBudgetError() {
+        render::ImageAllocationBudget budget(100);
+        Image a = Image::create("L", {10, 10});
+        QVERIFY_THROWS_EXCEPTION(genko::core::OpError, a.convert("RGB"));
+        QCOMPARE(budget.live(), std::uint64_t{100});
+        a = Image{};
+        QCOMPARE(budget.live(), std::uint64_t{0});
+        QVERIFY(!Image::create("L", {10, 10}).empty());
+    }
+
+    void liveAllocationBudget() {
+        Image escaped;
+        {
+            render::ImageAllocationBudget budget(300);
+            Image a = Image::create("L", {10, 10});
+            Image b = a.copy();
+            QCOMPARE(budget.live(), std::uint64_t(200));
+            {
+                const Image c = render::chops::lighter(a, b);
+                QCOMPARE(budget.live(), std::uint64_t(300));
+                QVERIFY_THROWS_EXCEPTION(genko::core::OpError, c.copy());
+                QCOMPARE(budget.live(), std::uint64_t(300));
+            }
+            QCOMPARE(budget.live(), std::uint64_t(200));
+            QVERIFY_THROWS_EXCEPTION(genko::core::OpError, a.filter(render::Filter::gaussian_blur(1)));
+            QCOMPARE(budget.live(), std::uint64_t(200));
+            QCOMPARE(budget.peak(), std::uint64_t(300));
+            escaped = std::move(a);
+        }
+        {
+            render::ImageAllocationBudget budget(400);
+            const Image rgb = Image::create("RGB", {10, 10});
+            QCOMPARE(budget.live(), std::uint64_t(400)); // libImaging stores RGB as four bytes.
+            escaped = Image{}; // old budget stays alive independently of this scope.
+            QCOMPARE(budget.live(), std::uint64_t(400));
+            QVERIFY_THROWS_EXCEPTION(genko::core::OpError, rgb.getchannel(0));
+        }
+        QVERIFY(!Image::create("L", {20, 20}).empty()); // exception cleanup restores the normal allocator.
     }
 
     void errors() {

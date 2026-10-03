@@ -3,6 +3,7 @@
 // Internal to genko_render: the parts of the page renderer (render.py, placement.py, frames.py, filters.py) shared
 // by page.cpp, panels.cpp and composite.cpp.
 
+#include <memory>
 #include <optional>
 #include <span>
 #include <stop_token>
@@ -88,9 +89,33 @@ Image layer_effects(const core::Layer& layer, Image raster, int dpi);
 int effect_margin(const core::Layer& layer, int dpi);
 // render._adjusted over `area`: a correction layer at work on what is under it.
 Image adjusted(const Ctx& ctx, Image rgba, const core::Layer& layer, const Image* clip, const Box& area);
+// Whether the page has a correction layer whose filter looks beyond each pixel or at where it is on the page (blur,
+// mosaic, wave, noise, …: render/filters.cpp): a part of such a page is cut from the whole page drawn.
+bool needs_whole_page(const core::Page& page);
 // render._has_colour
 bool has_colour(const Image& image);
 // The picture of a mask (or of a raster layer) resized to the page, the part `area` only.
 Image resized_part(const Image& source, Size size, const Box& area, Resample resample);
+
+// render.gradient_colours(gradient_t(gx, gy, spec), spec) one point at a time (gradient_fill): the colour, each band
+// np.round()ed and cast to uint8 as numpy does, and the opacity (float64) at (gx, gy) in mm.
+class GradientColours {
+public:
+    explicit GradientColours(const core::Json& spec);
+    ~GradientColours();
+    GradientColours(const GradientColours&) = delete;
+    GradientColours& operator=(const GradientColours&) = delete;
+    void at(double gx, double gy, unsigned char rgb[3], double& opacity) const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+// render._layer_strokes(layer, size, dpi, panel_mask, raster[, page=page]) over the whole picture of `ctx` (ctx.page,
+// size and dpi): the layer's fills and lines drawn from their data (nothing when it has none). `with_page`: each line
+// cut by the panel it begins in when the layer asks for it. (The ops that bake a layer's lines into its pixels.)
+std::optional<Image> layer_lines(const Ctx& ctx, const core::Layer& layer, const Image* panel_mask, const Image* raster,
+                                 bool with_page);
 
 }  // namespace genko::render::detail

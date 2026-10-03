@@ -732,6 +732,14 @@ Box area_of(const RenderOptions& options, Size size) {
 
 RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, const core::Document* episode,
                     std::vector<std::string>& omitted) {
+    if (options.region && needs_whole_page(page_in)) {
+        const Box box = area_of(options, Size{mm_to_px(page_in.spec.width_mm.value(), dpi), mm_to_px(page_in.spec.height_mm.value(), dpi)});
+        RenderOptions whole = options;
+        whole.region.reset();
+        RenderResult out = render(page_in, dpi, whole, episode, omitted);
+        out.image = out.image.crop(box);
+        return out;
+    }
     Ctx ctx;
     ctx.page = &page_in;
     ctx.episode = episode;
@@ -888,6 +896,11 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
 }
 
 }  // namespace
+
+std::optional<Image> detail::layer_lines(const Ctx& ctx, const core::Layer& layer, const Image* panel_mask, const Image* raster,
+                                         bool with_page) {
+    return layer_strokes(ctx, layer, Box{0, 0, ctx.size.width, ctx.size.height}, panel_mask, raster, false, with_page);
+}
 
 // --- public ---------------------------------------------------------------------------------------------------------
 

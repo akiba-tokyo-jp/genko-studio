@@ -4,10 +4,10 @@
 //      reply (applied, snapshot, job_id, warnings, results — or the error's words), the full snapshot and the
 //      project.json payload are the same as Python's apply_ops gives, ids counted the same on both sides. Every op of
 //      M2-O1 has 10 or more cases that succeed and 5 or more that fail (undo: test_contract_ops_cli). A case marked
-//      "cpp": "not_yet_ported" is a part of an op this build refuses on purpose (the pixels of a paint layer, the colour
-//      mixing under a line): C++ must refuse it with not_yet_ported. (The pen lines and erasers that snap to the
-//      rulers are in contract/ruler_cases.json since the rulers became one module: test_contract_rulers compares
-//      them the same way, and saves and reads them back as 4 does.)
+//      "cpp": "not_yet_ported" is a part of an op this build refuses on purpose (the colour mixing under a line): C++
+//      must refuse it with not_yet_ported. (The pixels of a paint layer the erasers reach, and the areas the bus
+//      resolves, come with the ops of M3-A1: render::ops_registry.)
+// The ruler cases remain in test_contract_rulers, including saving and rereading.
 //   2. random op sequences (300, made by `pyref_harness.py make-sequences` with a fixed seed: 1 to 12 ops each, with
 //      for_pages, strict_gates, page locks and other actors) on 20 random books: each step the same as Python's. (The
 //      sequences do not ask for what this build refuses where Python breaks the book: a reorder_layers names the layers
@@ -245,7 +245,7 @@ private slots:
                                                          sequences[n]["first_id"].get<std::uint64_t>(), store, true);
             for (std::size_t s = 0; s < outcomes.size(); ++s) {
                 const Json& record = python[n][s];
-                // a part this build refuses on purpose (the pixels of a paint layer, the colour under a line): the
+                // a part this build refuses on purpose (the colour under a line, what a page has that is not drawn yet): the
                 // books go apart from here
                 if (outcomes[s].code == "not_yet_ported" && record["reply"]["ok"] == Json(true)) {
                     ++stopped;

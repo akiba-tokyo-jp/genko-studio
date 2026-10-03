@@ -35,6 +35,7 @@
  */
 
 #include "Imaging.h"
+#include "imaging_glue.h"
 #include <string.h>
 
 /* --------------------------------------------------------------------
@@ -208,6 +209,13 @@ ImagingNewPrologueSubtype(const ModeID mode, int xsize, int ysize, int size) {
 
     im->linesize = xsize * im->pixelsize;
 
+    /* Reserve before allocating rows or pixel storage, including C-internal temporaries. */
+    if (!genko_imaging_budget_reserve(im, (uint64_t)im->linesize * (uint64_t)ysize)) {
+        if (im->palette) ImagingPaletteDelete(im->palette);
+        free(im);
+        return NULL;
+    }
+
     /* Setup image descriptor */
     im->mode = mode;
 
@@ -216,6 +224,8 @@ ImagingNewPrologueSubtype(const ModeID mode, int xsize, int ysize, int size) {
     im->image = (char **)calloc((ysize > 0) ? ysize : 1, sizeof(void *));
 
     if (!im->image) {
+        genko_imaging_budget_release(im);
+        if (im->palette) ImagingPaletteDelete(im->palette);
         free(im);
         return (Imaging)ImagingError_MemoryError();
     }
@@ -274,6 +284,8 @@ ImagingDelete(Imaging im) {
     if (im->image) {
         free(im->image);
     }
+
+    genko_imaging_budget_release(im);
 
     free(im);
 }
@@ -399,18 +411,23 @@ memory_return_block(ImagingMemoryArena arena, ImagingMemoryBlock block) {
 }
 
 static void
-ImagingDestroyArray(Imaging im) {
+ImagingDestroyArrayLocked(Imaging im, ImagingMemoryArena arena) {
     int y = 0;
-
     if (im->blocks) {
-        MUTEX_LOCK(&ImagingDefaultArena.mutex);
         while (im->blocks[y].ptr) {
-            memory_return_block(&ImagingDefaultArena, im->blocks[y]);
+            memory_return_block(arena, im->blocks[y]);
             y += 1;
         }
-        MUTEX_UNLOCK(&ImagingDefaultArena.mutex);
         free(im->blocks);
+        im->blocks = NULL;
     }
+}
+
+static void
+ImagingDestroyArray(Imaging im) {
+    MUTEX_LOCK(&ImagingDefaultArena.mutex);
+    ImagingDestroyArrayLocked(im, &ImagingDefaultArena);
+    MUTEX_UNLOCK(&ImagingDefaultArena.mutex);
 }
 
 Imaging
@@ -455,7 +472,8 @@ ImagingAllocateArray(Imaging im, ImagingMemoryArena arena, int dirty, int block_
             required = lines_remaining * aligned_linesize + arena->alignment - 1;
             block = memory_get_block(arena, required, dirty);
             if (!block.ptr) {
-                ImagingDestroyArray(im);
+                /* ImagingNewInternal already holds this non-recursive arena mutex. */
+                ImagingDestroyArrayLocked(im, arena);
                 return (Imaging)ImagingError_MemoryError();
             }
             im->blocks[current_block] = block;

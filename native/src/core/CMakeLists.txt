@@ -49,6 +49,8 @@ genko_library(genko_core
     persp3d.cpp
     mannequin.cpp
     poses.cpp
+    areas.cpp
+    ops_arrange.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
 

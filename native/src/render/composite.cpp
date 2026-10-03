@@ -11,11 +11,13 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/filters.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "render/filters.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
 
@@ -42,7 +44,8 @@ double number(const Json& spec, std::string_view key, double fallback) {
 }
 
 // a numpy uint8 from a float in 0..255 (astype("uint8") truncates)
-unsigned char to_u8(double v) { return static_cast<unsigned char>(static_cast<int>(v)); }
+// (NaN, an infinity or a value past an int: 0, what numpy gives there on x86, without the undefined cast)
+unsigned char to_u8(double v) { return v > -2147483649.0 && v < 2147483648.0 ? static_cast<unsigned char>(static_cast<int>(v)) : 0; }
 
 // --- gradients ------------------------------------------------------------------------------------------------------
 
@@ -168,6 +171,49 @@ Image gradient_image(Size size, int dpi, const Json& spec, const Box& area) {
     }
     return Image::frombytes("RGBA", Size{w, h}, data);
 }
+
+}  // namespace
+
+struct GradientColours::Impl {
+    explicit Impl(const Json& spec) : t_of(spec), stops(gradient_stops(spec)) {
+        std::vector<double> pos;
+        for (const Stop& s : stops) pos.push_back(s.pos);
+        for (std::size_t c = 0; c < 3; ++c) {
+            std::vector<double> fp;
+            for (const Stop& s : stops) {
+                if (c >= s.rgb.size()) throw core::PyUncaught("IndexError", "tuple index out of range");
+                fp.push_back(static_cast<double>(s.rgb[c]));
+            }
+            colour.emplace_back(pos, fp);
+        }
+        std::vector<double> alpha_fp;
+        for (const Stop& s : stops) alpha_fp.push_back(s.opacity);
+        alpha.emplace_back(pos, alpha_fp);
+    }
+    GradientT t_of;
+    std::vector<Stop> stops;
+    std::vector<core::NumpyInterp> colour;
+    std::vector<core::NumpyInterp> alpha;
+};
+
+GradientColours::GradientColours(const Json& spec) : impl_(std::make_unique<Impl>(spec)) {}
+GradientColours::~GradientColours() = default;
+
+void GradientColours::at(double gx, double gy, unsigned char rgb[3], double& opacity) const {
+    const double t = impl_->t_of(gx, gy);
+    // (a place along the gradient that is not a number: from and to so far apart or so far off the page that it cannot
+    // be worked out; a colour past an int: refused, not cast)
+    if (!std::isfinite(t)) throw core::OpError("from and to of the gradient are too far apart or off the page");
+    for (std::size_t c = 0; c < 3; ++c) {
+        const double v = std::nearbyint(impl_->colour[c](t));
+        if (!(v > -2147483649.0 && v < 2147483648.0)) throw core::OpError("the colours of the gradient are too large");
+        rgb[c] = to_u8(v);
+    }
+    opacity = impl_->alpha[0](t);
+    if (!std::isfinite(opacity)) throw core::OpError("from and to of the gradient are too far apart or off the page");
+}
+
+namespace {
 
 // --- blend modes (numpy float32) --------------------------------------------------------------------------------
 
@@ -314,12 +360,17 @@ Image apply_filter(const Ctx& ctx, const Image& image, const std::string& kind, 
     const Image rgba = image.convert("RGBA");
     const bool known = std::find(core::kAdjustments.begin(), core::kAdjustments.end(), kind) != core::kAdjustments.end();
     if (!known) {
-        const bool other = kind.starts_with("plugin:") ||
-                           std::find(std::begin(kOtherFilters), std::end(kOtherFilters), kind) != std::end(kOtherFilters);
-        if (other) {
-            if (skip_unported(ctx, "adjust:" + (kind.starts_with("plugin:") ? std::string("plugin") : kind))) {
-                *skipped = true;
-                return rgba;
+        // (a person's filter plugin runs in the external runner, not here)
+        if (kind.starts_with("plugin:") && skip_unported(ctx, "adjust:plugin")) {
+            *skipped = true;
+            return rgba;
+        }
+        // the filters that change shapes too (an old book's correction layer may hold one): render/filters.cpp
+        if (std::find(std::begin(kOtherFilters), std::end(kOtherFilters), kind) != std::end(kOtherFilters)) {
+            try {
+                return filters::apply_filter(rgba, kind, params);
+            } catch (const core::OpError& error) {
+                throw core::PyValueError(error.what());  // (a setting this build refuses: the layer does nothing)
             }
         }
         throw core::PyValueError("unknown filter " + kind);
@@ -491,6 +542,16 @@ Image layer_effects(const core::Layer& layer, Image raster, int dpi) {
         out = std::move(border);
     }
     return out;
+}
+
+bool needs_whole_page(const core::Page& page) {
+    for (const core::Layer& layer : page.layers) {
+        if (layer.kind != core::LayerKind::Adjust || !layer.visible || !layer.adjust || !layer.adjust->is_object()) continue;
+        const auto it = layer.adjust->find("kind");
+        if (it == layer.adjust->end() || !it->is_string()) continue;
+        if (std::find(std::begin(kOtherFilters), std::end(kOtherFilters), it->get<std::string>()) != std::end(kOtherFilters)) return true;
+    }
+    return false;
 }
 
 // --- render._adjusted --------------------------------------------------------------------------------------------------

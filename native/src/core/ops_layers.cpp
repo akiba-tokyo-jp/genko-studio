@@ -41,6 +41,8 @@ Json adjust_spec(const Json& raw) {
     return raw;
 }
 
+}  // namespace
+
 // ops._gradient_extras: 多色 (stops), 楕円 (ratio), 繰り返し (repeat).
 Json gradient_extras(const Json& g) {
     Json out = Json::object();
@@ -86,6 +88,8 @@ Json gradient_extras(const Json& g) {
     }
     return out;
 }
+
+namespace {
 
 // ops._fill_spec: a fill layer's colour, or its gradient.
 Json fill_spec(const Json& raw) {

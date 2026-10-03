@@ -209,8 +209,8 @@ private slots:
         step("lock", Json::parse(R"([{"op": "lock_page", "page": 3, "agent": "human:作者"}])"), person);
         refused("a locked page", Json::parse(R"([{"op": "set_note", "page": 3, "note": "x"}])"), ai, "apply", "locked by human:作者");
         refused("an op this build does not have yet",
-                Json::parse(R"([{"op": "set_note", "page": 1, "note": "x"}, {"op": "flood_fill", "page": 1, "x_mm": 1, "y_mm": 2}])"),
-                person, "not_yet_ported", "ops[1] flood_fill: flood_fill is not in the C++ build yet");
+                Json::parse(R"([{"op": "set_note", "page": 1, "note": "x"}, {"op": "add_tone", "page": 1}])"),
+                person, "not_yet_ported", "ops[1] add_tone: add_tone is not in the C++ build yet");
         step("for_pages", Json::parse(R"([{"op": "for_pages", "pages": [1, 2, 4], "ops": [{"op": "set_note", "note": "全"}]}])"), ai);
         step("unlock", Json::parse(R"([{"op": "unlock_page", "page": 3}])"), person);
         const std::int64_t last = revision;
