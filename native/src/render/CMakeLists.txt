@@ -10,6 +10,14 @@ genko_library(genko_render
     panels.cpp
     composite.cpp
     page.cpp
+    fill.cpp
+    selection.cpp
+    warp.cpp
+    raster.cpp
+    filters.cpp
+    vectorize.cpp
+    raster_ops.cpp
+    ops_registry.cpp
   PUBLIC_DEPS genko_core Qt6::Core
   PRIVATE_DEPS pillow_imaging PNG::PNG)
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)

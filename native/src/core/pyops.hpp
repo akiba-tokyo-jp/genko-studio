@@ -65,6 +65,10 @@ std::vector<double> unpack_floats(const Json& value, std::size_t expected);
 // tuple(int(v) for v in x) (any length; Python's errors).
 std::vector<std::int64_t> int_tuple(const Json& value);
 
+// a, b, … = x (the values as they are, unconverted): PyTypeError "cannot unpack non-iterable int object", PyValueError
+// "not enough values to unpack (expected 2, got 1)" / "too many values to unpack (expected 2)".
+std::vector<Json> unpack_values(const Json& value, std::size_t expected);
+
 // Python's `a < b` (and <=, >, >=) for JSON numbers and bools; PyTypeError "'<' not supported between instances of
 // 'int' and 'str'" for other values.
 bool py_less(const Json& a, const Json& b, std::string_view op = "<");
@@ -86,5 +90,19 @@ std::int64_t loop_count(double steps);
 
 // The JSON of a number list (ints stay ints).
 Json nums_json(const std::vector<Num>& values);
+
+// str.strip(): the text without Python's whitespace (str.isspace: ASCII spaces, \x1c-\x1f, \x85, \xa0, U+1680,
+// U+2000-U+200A, U+2028, U+2029, U+202F, U+205F, U+3000) at either end.
+std::string py_strip(std::string_view text);
+
+// float(op[key]) for a number that is drawn with or stored: NaN and the infinities (float("nan"), "inf", 1e999 read
+// as a string) are refused with OpError "<key> must be a finite number", where Python goes on and draws nothing, hangs
+// or writes NaN into the book. Python's errors of float() otherwise.
+double finite_float(const Json& value, std::string_view key);
+
+// int(x) as the whole number it is, as a double (Python's int has no bound: a text of digits past 64 bits, a float
+// past 2**63, compared and clamped as Python compares them). int()'s errors; NaN and the infinities refused as
+// finite_float refuses them.
+double int_whole(const Json& value, std::string_view key);
 
 }  // namespace genko::core

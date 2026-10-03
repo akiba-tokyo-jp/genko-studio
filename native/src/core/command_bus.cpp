@@ -141,6 +141,14 @@ bool json_equals_string(const Json& value, std::string_view text) {
     return value.is_string() && value.get_ref<const std::string&>() == text;
 }
 
+// An op on a page someone else has locked: refused ("page N locked by <them>").
+void check_held(const Document& doc, const Page& page, const Num& index, const Actor& actor) {
+    const Json* owner = get(doc.page_locks, page.id);  // (v3: locks follow the page, not its position)
+    if (owner != nullptr && py_truthy(*owner) && !json_equals_string(*owner, actor.name())) {
+        throw OpError("page " + index.repr() + " locked by " + py_str(*owner));
+    }
+}
+
 bool one_of(std::string_view name, std::initializer_list<std::string_view> names) {
     return std::find(names.begin(), names.end(), name) != names.end();
 }
@@ -157,6 +165,15 @@ bool raster_edit_op(std::string_view name) {
                          "fill_area", "fill_enclosed", "trace_edit", "gradient_fill", "transform_area", "delete_area",
                          "paste", "set_stroke_width", "reshape_stroke", "trace_prims", "effect_to_layer", "add_shape",
                          "smudge", "vector_edit", "fill_gaps", "liquify", "render_prims"});
+}
+
+// The key a drawing op reads the id of the layer it works on from (without it, the op takes the role in "layer"):
+// put_raster and filter_raster read "id", flood_fill a role only, add_stroke and the other drawing ops "layer_id".
+// strict_gates looks at that layer, found as the op finds it.
+std::string_view layer_key(std::string_view name) {
+    if (name == "put_raster" || name == "filter_raster") return "id";
+    if (name == "flood_fill") return {};
+    return "layer_id";
 }
 
 // bookops.NOT_PER_PAGE
@@ -236,12 +253,15 @@ const OpRegistry& OpRegistry::builtin() {
         register_page_ops(r);
         register_stroke_ops(r);
         register_layer_ops(r);
+        register_arrange_ops(r);
         return r;
     }();
     return registry;
 }
 
 void OpRegistry::add(std::string name, OpFunction function) { ops_[std::move(name)] = std::move(function); }
+
+void OpRegistry::set_area_resolver(AreaResolver resolver) { area_resolver_ = std::move(resolver); }
 
 const OpFunction* OpRegistry::find(std::string_view name) const {
     const auto it = ops_.find(name);
@@ -275,6 +295,11 @@ std::size_t require_page(const Document& doc, const Json& op) {
     throw OpError("no page " + std::to_string(index));
 }
 
+bool paper_on_every_page(const Json& op) {
+    const Json* page = get(op, "page");
+    return page == nullptr || page->is_null() || *page == Json("") || py_equals(*page, Json(0));
+}
+
 void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
     const Json* name_value = get(op, "op");
     const std::string name = name_value != nullptr && name_value->is_string() ? name_value->get<std::string>() : "";
@@ -283,6 +308,11 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
         throw OpError(name + " needs a person (actor " + actor.name() + " cannot approve)");
     }
     if (named && (name == "undo" || name == "set_meta" || name == "set_bible" || name == "set_autosave")) return;
+    if (named && name == "set_paper" && paper_on_every_page(op)) {
+        // (every page it changes is asked, as an op on each one is: Python asks none of them)
+        for (const auto& each : doc.pages) check_held(doc, *each, each->index, actor);
+        return;
+    }
     // (Python takes a lock on a page the book does not have, and lets it go, without a word: refused here)
     const bool lock_op = named && (name == "lock_page" || name == "unlock_page");
     if (const Json* page_value = get(op, "page"); lock_op && page_value != nullptr) {
@@ -320,9 +350,7 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
         doc.page_locks.erase(key);
         return;
     }
-    if (owned && !json_equals_string(*owner, actor.name())) {
-        throw OpError("page " + index->repr() + " locked by " + py_str(*owner));
-    }
+    check_held(doc, *page, *index, actor);
 }
 
 void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
@@ -371,9 +399,12 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
         op["layer_id"] = op_in["id"];  // (these name the layer by id: the same rule as drawing on it)
         name = "fill";
     }
-    if (named && (name == "add_stroke" || raster_edit_op(name)) && truthy_at(op, "layer_id")) {
+    // (Python reads "layer_id" here for every op, which put_raster, filter_raster and flood_fill do not: a filter by id
+    // went through, and a layer_id they ignore stood in for the layer they change)
+    const std::string_view id_key = named ? layer_key(name) : std::string_view();
+    if (named && (name == "add_stroke" || raster_edit_op(name)) && !id_key.empty() && truthy_at(op, id_key)) {
         const Page& page = page_of(op);
-        const Json& layer_id = op["layer_id"];
+        const Json& layer_id = *get(op, id_key);
         const Layer* target = nullptr;
         for (const Layer& layer : page.layers) {
             if (json_equals_string(layer_id, layer.id)) {
@@ -675,16 +706,27 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
         const Json* name = get(op, "op");
         const std::string name_text = name != nullptr ? py_str(*name) : std::string("None");
         const std::string prefix = "ops[" + std::to_string(i) + "] " + name_text + ": ";
-        OpContext context{work, op, actor};
+        // The op as it is applied: with its area resolved it is a copy (Python's {**op, "area": …}); the journal and
+        // the unknown-key warnings keep the op as it was given.
+        Json resolved;
+        Json* current = &op;
+        std::optional<Json> report;
         try {
             if (const Json* area = get(op, "area"); area != nullptr && area_needs_resolving(*area)) {
-                not_yet_ported("an area of this kind (rect, ellipse, layer, color, all, saved, union, intersect, "
-                               "subtract, invert, grow_mm, feather_mm): the C++ areas come with M3");
+                const std::size_t at = require_page(work, op);
+                if (!registry_.area_resolver()) {
+                    not_yet_ported("an area of this kind (rect, ellipse, layer, color, all, saved, union, intersect, "
+                                   "subtract, invert, grow_mm, feather_mm) is resolved by the drawing ops "
+                                   "(render::ops_registry)");
+                }
+                resolved = op;
+                resolved["area"] = registry_.area_resolver()(work, at, *area);
+                current = &resolved;
             }
             if (name != nullptr) require_hashable(*name);  // (Python looks the name up in sets of ops)
-            check_page_lock(work, op, actor);
-            if (work.strict_gates) check_strict(work, op, actor);
-            const bool lock_op = is_op(op, "lock_page") || is_op(op, "unlock_page");
+            check_page_lock(work, *current, actor);
+            if (work.strict_gates) check_strict(work, *current, actor);
+            const bool lock_op = is_op(*current, "lock_page") || is_op(*current, "unlock_page");
             if (!lock_op) {  // (lock_page and unlock_page took effect in check_page_lock)
                 if (name == nullptr || !py_truthy(*name)) throw OpError("op is required");
                 const OpFunction* function = name->is_string() ? registry_.find(name->get_ref<const std::string&>()) : nullptr;
@@ -693,27 +735,30 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     if (schema_of(op) != nullptr && !is_op(op, "undo")) not_yet_ported(name_text + " is not in the C++ build yet");
                     throw OpError("unknown op: " + name_text);
                 }
+                OpContext context{work, *current, actor};
                 (*function)(context);
+                report = std::move(context.report);
             }
         } catch (const ApplyError&) {
             throw;
         } catch (const OpError& error) {
-            throw ApplyError(prefix + error.what() + usage(op));
+            throw ApplyError(prefix + error.what() + usage(*current));
         } catch (const OpKeyError& error) {
             throw ApplyError(prefix + "not found: " + error.what() +
-                             " (a key the op needs, or an id the book does not have)" + usage(op));
+                             " (a key the op needs, or an id the book does not have)" + usage(*current));
         } catch (const PyUncaught& error) {
-            throw ApplyError(prefix + error.type() + ": " + error.what(), "python_error");
+            // (a traceback's last line: the exception's type alone when it has no message)
+            const std::string what = error.what();
+            throw ApplyError(prefix + error.type() + (what.empty() ? std::string() : ": " + what), "python_error");
         } catch (const Error& error) {
             if (error.code() == "not_yet_ported") throw ApplyError(prefix + error.what(), "not_yet_ported");
-            throw ApplyError(prefix + "a value of the wrong type (" + error.what() + ")" + usage(op));
+            throw ApplyError(prefix + "a value of the wrong type (" + error.what() + ")" + usage(*current));
         }
         result.applied.push_back(name_text);
         // (Python: op.pop("_report") — what the op reported, or the key as it was given)
-        std::optional<Json> report = std::move(context.report);
-        if (const auto given = op.find("_report"); given != op.end()) {
+        if (const auto given = current->find("_report"); given != current->end()) {
             if (!report) report = *given;
-            op.erase(given);
+            current->erase(given);
         }
         if (report && py_truthy(*report)) {
             if (!report->is_object()) {

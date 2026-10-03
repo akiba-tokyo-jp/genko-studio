@@ -35,6 +35,10 @@ std::vector<std::int64_t> rgb3(const Json& value, std::string_view what);
 // ops._blend_mode: OpError "unknown blend mode <mode>".
 std::string blend_mode(const Json& value);
 
+// ops._gradient_extras(g): 多色 (stops), 楕円 (ratio), 繰り返し (repeat) of a gradient, checked (core/ops_layers.cpp; also
+// gradient_fill's). OpError with Python's words.
+Json gradient_extras(const Json& g);
+
 // The JSON of a list of ints.
 Json ints_json(const std::vector<std::int64_t>& values);
 
@@ -49,5 +53,8 @@ void register_frame_ops(OpRegistry& registry);
 void register_page_ops(OpRegistry& registry);
 void register_stroke_ops(OpRegistry& registry);
 void register_layer_ops(OpRegistry& registry);
+// Register the ops of M3-A that draw nothing (move_layers, group_layers, set_paper, set_timelapse, store_area,
+// forget_area: core/ops_arrange.cpp). The ones that draw are render's (render/ops_registry.hpp).
+void register_arrange_ops(OpRegistry& registry);
 
 }  // namespace genko::core

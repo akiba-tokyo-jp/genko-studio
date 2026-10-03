@@ -1,7 +1,9 @@
 #include "core/pyops.hpp"
 
 #include <cmath>
+#include <cstdlib>
 #include <limits>
+#include <string>
 #include <utility>
 
 #include "core/command_bus.hpp"
@@ -120,6 +122,19 @@ std::vector<std::int64_t> int_tuple(const Json& value) {
     return out;
 }
 
+std::vector<Json> unpack_values(const Json& value, std::size_t expected) {
+    if (!(value.is_array() || value.is_string() || value.is_object())) {
+        throw PyTypeError("cannot unpack non-iterable " + py_type_name(value) + " object");
+    }
+    std::vector<Json> items = iterate(value);
+    if (items.size() < expected) {
+        throw PyValueError("not enough values to unpack (expected " + std::to_string(expected) + ", got " +
+                           std::to_string(items.size()) + ")");
+    }
+    if (items.size() > expected) throw PyValueError("too many values to unpack (expected " + std::to_string(expected) + ")");
+    return items;
+}
+
 bool py_less(const Json& a, const Json& b, std::string_view op) {
     const auto number = [](const Json& v) -> std::optional<Num> {
         if (v.is_boolean()) return Num(v.get<bool>() ? 1 : 0);
@@ -196,6 +211,59 @@ Json nums_json(const std::vector<Num>& values) {
     Json out = Json::array();
     for (const Num& v : values) out.push_back(v.json());
     return out;
+}
+
+namespace {
+
+bool py_space(char32_t c) {
+    return (c >= 0x09 && c <= 0x0d) || (c >= 0x1c && c <= 0x20) || c == 0x85 || c == 0xa0 || c == 0x1680 ||
+           (c >= 0x2000 && c <= 0x200a) || c == 0x2028 || c == 0x2029 || c == 0x202f || c == 0x205f || c == 0x3000;
+}
+
+// The code point that starts at text[i] and its length in bytes (UTF-8).
+std::pair<char32_t, std::size_t> code_point_at(std::string_view text, std::size_t i) {
+    const auto c = static_cast<unsigned char>(text[i]);
+    std::size_t n = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
+    if (i + n > text.size()) n = text.size() - i;
+    char32_t cp = n == 1 ? c : n == 2 ? (c & 0x1f) : n == 3 ? (c & 0x0f) : (c & 0x07);
+    for (std::size_t k = 1; k < n; ++k) cp = (cp << 6) | (static_cast<unsigned char>(text[i + k]) & 0x3f);
+    return {cp, n};
+}
+
+}  // namespace
+
+std::string py_strip(std::string_view text) {
+    std::size_t begin = 0;
+    std::size_t end = text.size();
+    std::size_t i = 0;
+    bool leading = true;
+    while (i < text.size()) {
+        const auto [cp, n] = code_point_at(text, i);
+        if (!py_space(cp)) {
+            if (leading) begin = i;
+            leading = false;
+            end = i + n;
+        }
+        i += n;
+    }
+    if (leading) return {};
+    return std::string(text.substr(begin, end - begin));
+}
+
+double finite_float(const Json& value, std::string_view key) {
+    const double x = to_float(value);
+    if (!std::isfinite(x)) throw OpError(std::string(key) + " must be a finite number");
+    return x;
+}
+
+double int_whole(const Json& value, std::string_view key) {
+    if (value.is_number_float()) {
+        const double d = value.get<double>();
+        if (!std::isfinite(d)) throw OpError(std::string(key) + " must be a finite number");
+        return py_trunc(d);
+    }
+    if (const auto big = py_big_int_text(value)) return std::strtod(big->c_str(), nullptr);
+    return static_cast<double>(to_int(value));
 }
 
 }  // namespace genko::core

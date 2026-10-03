@@ -32,8 +32,19 @@ genko_test(test_transaction SOURCES unit/test_transaction.cpp DEPS genko_test_su
 genko_test(test_pyrandom SOURCES unit/test_pyrandom.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_stroke_geom SOURCES unit/test_stroke_geom.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_image SOURCES unit/test_image.cpp DEPS genko_test_support genko_render LABELS unit)
+# Include current Geometry.c with a test-only allocation interceptor; no production fault hook.
+genko_test(test_image_oom SOURCES unit/test_image_oom.cpp unit/geometry_failure.c DEPS genko_render pillow_imaging LABELS unit)
+# C succeeds first; only then inject C++ vector/metadata allocation failures.
+genko_test(test_image_split_oom SOURCES unit/test_image_split_oom.cpp unit/split_failure.c DEPS genko_render pillow_imaging LABELS unit)
+if(MSVC)
+  set_source_files_properties(unit/geometry_failure.c unit/split_failure.c PROPERTIES COMPILE_OPTIONS "/W0")
+else()
+  set_source_files_properties(unit/geometry_failure.c unit/split_failure.c PROPERTIES COMPILE_OPTIONS "-w;-fwrapv;-ffp-contract=off")
+endif()
 genko_test(test_png SOURCES unit/test_png.cpp DEPS genko_test_support genko_render LABELS unit)
 genko_test(test_render_page SOURCES unit/test_render_page.cpp DEPS genko_render LABELS unit)
+# The ops of M3-A1 (layers, masks, pixels, fills, areas, paper) without Python.
+genko_test(test_raster_ops SOURCES unit/test_raster_ops.cpp DEPS genko_test_support genko_render LABELS unit TIMEOUT 900)
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
@@ -56,9 +67,19 @@ genko_test(test_contract_render_cli SOURCES contract/test_contract_render_cli.cp
 set_tests_properties(test_contract_render_cli PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
 # The ops of M2-O1 against Python's apply_ops (fixed cases, random sequences, saved and read back) and the command line.
 genko_test(test_contract_ops SOURCES contract/test_contract_ops.cpp contract/opsupport.cpp DEPS genko_test_support
-           LABELS contract TIMEOUT 3600)
+           genko_render LABELS contract TIMEOUT 3600)
 genko_test(test_contract_ops_cli SOURCES contract/test_contract_ops_cli.cpp DEPS genko_test_support LABELS contract
            TIMEOUT 3600)
+# The ops of M3-A1 (layers, masks, pixels, fills, areas, paper) against Python's apply_ops: fixed cases, random sequences,
+# saved and read back.
+genko_test(test_contract_raster_ops SOURCES contract/test_contract_raster_ops.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render LABELS contract TIMEOUT 7200)
+# … the pages they make, drawn (whole and in parts), and the command line.
+genko_test(test_contract_raster_render SOURCES contract/test_contract_raster_render.cpp
+           DEPS genko_test_support genko_render LABELS contract TIMEOUT 3600)
+set_tests_properties(test_contract_raster_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
+genko_test(test_contract_raster_cli SOURCES contract/test_contract_raster_cli.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render LABELS contract TIMEOUT 5400)
 # core/filters, the correction layers' adjustments for the ops and the renderer, against Python's filters.apply_filter.
 genko_test(test_contract_filters SOURCES contract/test_contract_filters.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 600)

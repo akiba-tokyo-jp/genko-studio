@@ -14,8 +14,11 @@ Commands (JSON is UTF-8 without escapes):
                                        "out", "dest"?} (apply_ops on the book read; the reply, or {"ok": false,
                                        "error"}, to out; saved with save_episode into the new folder dest) |
                                        {"op": "steps", "book", "steps": [{"ops", "agent"?, "dry_run"?}], "ids",
-                                       "first_id"?, "store", "out", "digest"?, "reread"?} (batches one after another
-                                       on the book in memory, as a session: see steps_job)
+                                       "first_id"?, "store", "out", "digest"?, "reread"?, "dump"?} (batches one after
+                                       another on the book in memory, as a session: see steps_job; "dump", a folder:
+                                       the layers' PNGs after each step written there, see _png_pixels) |
+                                       {"op": "add_adjust_layers", "book", "dest", "layers"} (correction layers of
+                                       any filter put on pages by hand: add_adjust_layers_job)
   restore BOOK --actor A [--redo] [--force]
                                        journal.restore under ProjectLock, as `genko undo`/`redo` does: the reply (or
                                        {"ok": false, "error"}) on stdout
@@ -32,6 +35,17 @@ Commands (JSON is UTF-8 without escapes):
   make-sequences OUT --books DIR --seed N --count K
                                        K random op sequences (1 to 12 ops, in batches by various actors, some dry
                                        runs, for_pages, strict_gates, page locks) over the make-random books in DIR
+  show-cases CASES BOOK [--only TEXT]  each case of a contract case file run on BOOK: its last reply, flagged where
+                                       it does not do what the case says (for writing cases)
+  make-rasterbook DEST                 the v3 book of the raster op contract tests (native/tests/contract/
+                                       raster_cases.json names its layers; ids counted)
+  make-raster-books OUT --seed N --count K
+                                       K random books for drawing (render_harness.py make-books) without what the C++
+                                       build does not draw yet
+  make-raster-sequences OUT --books DIR --seed N --count K
+                                       K random sequences of the ops of M3-A1 (with basic ops of M2) over those books
+  filter-edges OUT                     pictures on the edges of the filters' float32 decisions (despeckle's luminance,
+                                       lineart's ratio) and filters.apply_filter of each
   numbers OUT --seed N --count K       cases for repr(float), round(), sum(), math.hypot/dist and format(x, "g")
   json-dumps OUT --seed N --count K    random JSON documents and json.dumps of each (indent 2, default, canonical,
                                        ensure_ascii)
@@ -48,6 +62,7 @@ process would.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import math
 import random
@@ -140,6 +155,65 @@ def _digest(value) -> str:
     return hashlib.sha256(dumps(value).encode("utf-8")).hexdigest()
 
 
+def _pixels_digest(data: bytes | None) -> str:
+    """What a PNG holds: "png:" and the sha256 of "<mode>|<w>x<h>|" and its pixels as RGBA ("unreadable:" and the sha256
+    of the bytes when Pillow cannot read them; "missing" for no bytes). The C++ tests make the same of their PNGs."""
+    import hashlib
+
+    from PIL import Image
+
+    if data is None:
+        return "missing"
+    try:
+        im = Image.open(io.BytesIO(data))
+        im.load()
+        rgba = im.convert("RGBA")
+    except Exception:
+        return "unreadable:" + hashlib.sha256(data).hexdigest()
+    h = hashlib.sha256(f"{im.mode}|{im.size[0]}x{im.size[1]}|".encode("utf-8"))
+    h.update(rgba.tobytes())
+    return "png:" + h.hexdigest()
+
+
+def _png_pixels(payload: dict, store, dump: Path | None = None, prefix: str = "") -> dict:
+    """The payload with each PNG it refers to as the pixels it holds (_pixels_digest): a layer's pixels, its mask and its
+    patches, and the mask of an area kept on a page (saved_areas). The C++ build writes other PNG bytes for the same
+    pixels; the tests compare the pixels (and the JSON assets, strokes, byte for byte). With `dump` (a folder), the
+    layers' PNGs are also written there as "<prefix>p<page>-l<layer>-<asset|mask|patchN>.png" (the C++ tests write theirs
+    under the same names, to show where pictures differ)."""
+    import base64
+
+    def digest(data, name):
+        if dump is not None and data is not None:
+            dump.mkdir(parents=True, exist_ok=True)
+            (dump / f"{prefix}{name}.png").write_bytes(data)
+        return _pixels_digest(data)
+
+    for p, page in enumerate(payload.get("pages") or []):
+        if not isinstance(page, dict):
+            continue
+        for k, layer in enumerate(page.get("layers") or []):
+            if not isinstance(layer, dict) or layer.get("kind") == "placed":
+                continue
+            if isinstance(layer.get("asset"), str):
+                layer["asset"] = digest(store.get_bytes(layer["asset"], ".png"), f"p{p}-l{k}-asset")
+            if isinstance(layer.get("mask"), dict) and isinstance(layer["mask"].get("asset"), str):
+                layer["mask"]["asset"] = digest(store.get_bytes(layer["mask"]["asset"], ".png"), f"p{p}-l{k}-mask")
+            for n, patch in enumerate(layer.get("patches") or []):
+                if isinstance(patch, dict) and isinstance(patch.get("asset"), str):
+                    patch["asset"] = digest(store.get_bytes(patch["asset"], ".png"), f"p{p}-l{k}-patch{n}")
+        areas = page.get("saved_areas")
+        if isinstance(areas, dict):
+            for area in areas.values():
+                mask = area.get("mask") if isinstance(area, dict) else None
+                if isinstance(mask, dict) and isinstance(mask.get("png"), str):
+                    try:
+                        mask["png"] = _pixels_digest(base64.b64decode(mask["png"]))
+                    except ValueError:
+                        pass
+    return payload
+
+
 def _full_snapshot(episode) -> dict:
     """snapshot(full=True) without its side effect. It reads page.name_strokes and page.ink_strokes, and Page._layer
     adds a NAME or INK layer (with a new id) to a page that has none. `genko inspect --full` and the server's
@@ -163,10 +237,10 @@ def _full_snapshot(episode) -> dict:
 def steps_job(job: dict) -> None:
     """Batches applied one after another to one book in memory, as a session does: after each, the reply (or the
     error), the full snapshot (see _full_snapshot) and the project.json payload (Python's v3 writer, without
-    "revision"). With "digest", the snapshot and payload (and the reply's snapshot) are replaced by the sha256 of
-    their json.dumps. With "reread" (a new folder), the book is then saved there with save_episode and read back as
-    a new process would (ids counted from 1 again with "ids"): one more record, {"reread": true, "full",
-    "payload"}."""
+    "revision"; its PNGs as the pixels they hold: _png_pixels). With "digest", the snapshot and payload (and the
+    reply's snapshot) are replaced by the sha256 of their json.dumps. With "reread" (a new folder), the book is then
+    saved there with save_episode and read back as a new process would (ids counted from 1 again with "ids"): one
+    more record, {"reread": true, "full", "payload"}."""
     import copy
 
     from genko.assets import AssetStore
@@ -180,8 +254,9 @@ def steps_job(job: dict) -> None:
         counting_ids(int(job.get("first_id", 1)))
     store = AssetStore(Path(job["store"]))
     digest = bool(job.get("digest"))
+    dump = Path(job["dump"]) if job.get("dump") else None
     records = []
-    for step in job["steps"]:
+    for s, step in enumerate(job["steps"]):
         try:
             reply = apply_ops(episode, copy.deepcopy(step["ops"]), dry_run=bool(step.get("dry_run")),
                               agent=step.get("agent", "genko"))
@@ -189,7 +264,11 @@ def steps_job(job: dict) -> None:
             reply = {"ok": False, "error": str(exc)}
         except Exception as exc:  # (apply_ops lets these through: Python's command line stops with a traceback)
             reply = {"ok": False, "error": str(exc), "uncaught": type(exc).__name__}
-        payload = _payload(episode, store)
+        raw_payload = _payload(episode, store)
+        if dump is not None:
+            dump.mkdir(parents=True, exist_ok=True)
+            (dump / f"{s}-project.json").write_text(dumps(raw_payload), encoding="utf-8")
+        payload = _png_pixels(raw_payload, store, dump, f"{s}-")
         payload.pop("revision", None)
         full = _full_snapshot(episode)
         if digest:
@@ -201,7 +280,7 @@ def steps_job(job: dict) -> None:
         save_episode(episode, Path(job["reread"]), actor="genko")
         fresh_process_state(bool(job.get("ids")))
         again = load_episode(Path(job["reread"]))
-        payload = _payload(again, store)
+        payload = _png_pixels(_payload(again, store), store, dump, "reread-")
         payload.pop("revision", None)
         full = _full_snapshot(again)
         if digest:
@@ -257,10 +336,27 @@ def upgrade(book: str) -> None:
     save_episode(load_episode(Path(book)), Path(book), actor="genko")
 
 
+def add_adjust_layers_job(job: dict) -> None:
+    """Correction layers of the kinds add_layer does not make (blur, mosaic, wave, …: filters.py draws them when a
+    book has them) put on top of pages by hand, as a book made elsewhere has them: {"book", "dest", "ids"?, "layers":
+    [{"page", "id", "adjust"}]}, saved into the new folder dest."""
+    from genko.io import load_episode, save_episode
+    from genko.models import Layer, LayerKind, LayerRole
+
+    fresh_process_state(bool(job.get("ids")))
+    episode = load_episode(Path(job["book"]))
+    for spec in job["layers"]:
+        page = next(p for p in episode.pages if p.index == spec["page"])
+        page.layers.append(Layer(id=spec["id"], role=LayerRole.USER, kind=LayerKind.ADJUST, adjust=dict(spec["adjust"])))
+    save_episode(episode, Path(job["dest"]), actor="genko")
+
+
 def run_batch(jobs_path: str) -> None:
     jobs = json.loads(Path(jobs_path).read_text(encoding="utf-8"))
     for job in jobs:
-        if job["op"] == "snapshot":
+        if job["op"] == "add_adjust_layers":
+            add_adjust_layers_job(job)
+        elif job["op"] == "snapshot":
             data = snapshot_of(job["book"], bool(job.get("full")), bool(job.get("ids")))
             Path(job["out"]).write_text(dumps(data), encoding="utf-8")
         elif job["op"] == "resave":
@@ -754,6 +850,213 @@ def make_drawbook(dest: str) -> None:
     save_episode(episode, root, actor="human:作者")
 
 
+def _picture_png(size, shapes, mode="RGBA", background=(0, 0, 0, 0)) -> bytes:
+    """A small picture drawn with Pillow: [(kind, box, colour)] with kind rectangle, ellipse or line."""
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGBA", size, background)
+    d = ImageDraw.Draw(im)
+    for kind, box, colour in shapes:
+        if kind == "line":
+            d.line(box, fill=colour, width=6)
+        else:
+            getattr(d, kind)(box, fill=colour)
+    buf = io.BytesIO()
+    (im if mode == "RGBA" else im.convert(mode)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def make_rasterbook(dest: str) -> None:
+    """The book the raster op contract tests run on (native/tests/contract/raster_cases.json names its layers; ids are
+    counted, so it is the same book every time): four small pages (70 × 95 mm) with lines that close areas for the
+    fills, paint layers with pixels, pen layers, a folder, fill, gradient and correction layers, a mask, a locked
+    layer, a reference layer and a kept area. Pages 1, 2 and 4 carry nothing the C++ build does not draw yet (no
+    nombre, no lines, no tones); page 3 carries a nombre, a line and a tone (for what the C++ build refuses as not yet
+    ported)."""
+    import base64
+
+    from genko import models
+    from genko.headless import apply_ops
+    from genko.io import save_episode
+    from genko.models import Binding, PageSpec
+
+    fresh_process_state(True)
+    root = Path(dest)
+    root.mkdir(parents=True, exist_ok=True)
+    episode = models.new_episode("塗りの試験", 1, 4, PageSpec.custom(70, 95, 60, 85, 3, 8, 8, 7, 6), Binding.RIGHT)
+
+    def run(ops, agent="human:作者"):
+        reply = apply_ops(episode, ops, agent=agent)
+        if not reply.get("ok"):
+            raise SystemExit(f"make-rasterbook: {ops}: {reply}")
+
+    def b64png(data: bytes) -> str:
+        return base64.b64encode(data).decode("ascii")
+
+    def loop(points):
+        return [list(p) for p in points] + [list(points[0])]
+
+    circle = [(45 + 7 * math.cos(math.tau * k / 24), 30 + 7 * math.sin(math.tau * k / 24)) for k in range(24)]
+    paint = _picture_png((551, 748), [("rectangle", (60, 80, 220, 260), (200, 40, 40, 255)),
+                                      ("ellipse", (300, 120, 480, 300), (30, 90, 200, 200)),
+                                      ("line", (80, 500, 470, 640), (20, 20, 20, 255)),
+                                      ("rectangle", (330, 420, 345, 435), (10, 10, 10, 255))])
+    small = _picture_png((120, 160), [("ellipse", (10, 10, 110, 150), (240, 180, 20, 255))], mode="RGB")
+    root1 = episode.pages[0].frames[0].id
+    run([{"op": "split_frame", "page": 1, "frame_id": root1, "axis": "vertical", "ratio": 0.5, "gutter_mm": 3},
+         {"op": "name_ok", "page": 1}])
+    run([{"op": "add_stroke", "page": 1, "layer": "ink", "stabilize": 0, "points": loop([(15, 20), (30, 20), (30, 40), (15, 40)]),
+          "width_mm": 0.8},
+         {"op": "add_stroke", "page": 1, "layer": "ink", "stabilize": 0, "points": loop(circle), "width_mm": 0.6},
+         {"op": "add_stroke", "page": 1, "layer": "ink", "stabilize": 0,
+          "points": [[15, 50], [30, 50], [30, 70], [15, 70], [15, 52.5]], "width_mm": 0.7},
+         {"op": "add_stroke", "page": 1, "layer": "ink", "stabilize": 0, "points": [[38, 55], [55, 75]], "width_mm": 1.2,
+          "rgb": [120, 120, 120]},
+         {"op": "add_layer", "page": 1, "kind": "paint", "id": "paint-1", "name": "塗り"},
+         {"op": "put_raster", "page": 1, "id": "paint-1", "png_base64": b64png(paint)},
+         {"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"poly": [[40, 60], [55, 60], [50, 72]]}, "rgb": [0, 160, 80]},
+         {"op": "add_layer", "page": 1, "kind": "pen", "id": "pen-1", "name": "線画"},
+         {"op": "add_stroke", "page": 1, "layer_id": "pen-1", "stabilize": 0, "points": [[14, 78, 0.4], [30, 74, 0.9], [52, 80, 0.6]],
+          "width_mm": 1.0, "rgb": [30, 30, 160]},
+         {"op": "add_stroke", "page": 1, "layer_id": "pen-1", "stabilize": 0, "points": [[40, 15], [56, 18], [50, 44]], "width_mm": 0.5},
+         {"op": "add_layer", "page": 1, "kind": "folder", "id": "fold-1", "name": "フォルダー"},
+         {"op": "add_layer", "page": 1, "kind": "pen", "id": "in-a", "parent": "fold-1", "after": "fold-1"},
+         {"op": "add_stroke", "page": 1, "layer_id": "in-a", "stabilize": 0, "points": [[20, 60], [26, 66]], "width_mm": 1.5},
+         {"op": "add_layer", "page": 1, "kind": "paint", "id": "in-b", "parent": "fold-1", "after": "in-a"},
+         {"op": "fill_area", "page": 1, "layer_id": "in-b", "area": {"rect": [44, 48, 8, 6]}, "rgb": [250, 120, 0], "opacity": 0.6},
+         {"op": "add_layer", "page": 1, "kind": "fill", "id": "fill-1", "rgb": [240, 230, 200]},
+         {"op": "set_layer", "page": 1, "id": "fill-1", "opacity": 0.5, "blend": "multiply"},
+         {"op": "add_layer", "page": 1, "kind": "adjust", "id": "adj-1", "adjust": {"kind": "levels", "black": 20, "white": 230}},
+         {"op": "add_layer", "page": 1, "kind": "paint", "id": "mask-1"},
+         {"op": "put_raster", "page": 1, "id": "mask-1", "png_base64": b64png(small)},
+         {"op": "set_layer_mask", "page": 1, "id": "mask-1", "area": {"poly": [[10, 10], [40, 12], [30, 45]]}},
+         {"op": "add_layer", "page": 1, "kind": "paint", "id": "lock-1"},
+         {"op": "set_layer", "page": 1, "id": "lock-1", "locked": True},
+         {"op": "add_layer", "page": 1, "kind": "pen", "id": "ref-1", "name": "参照"},
+         {"op": "add_stroke", "page": 1, "layer_id": "ref-1", "stabilize": 0, "points": loop([(40, 50), (56, 50), (56, 66), (40, 66)]),
+          "width_mm": 0.6},
+         {"op": "set_layer", "page": 1, "id": "ref-1", "reference": True},
+         {"op": "store_area", "page": 1, "name": "空", "area": {"rect": [12, 12, 20, 10]}},
+         {"op": "store_area", "page": 1, "name": "丸", "area": {"ellipse": [40, 20, 12, 12]}}])
+    # page 2: not approved (the name is what a fill looks at): name lines, a draft, ink shapes, a gradient layer under
+    # them
+    run([{"op": "add_stroke", "page": 2, "layer": "name", "stabilize": 0, "points": loop([(14, 14), (40, 14), (40, 36), (14, 36)]),
+          "width_mm": 0.5},
+         {"op": "add_stroke", "page": 2, "layer": "draft", "stabilize": 0, "points": [[20, 50], [50, 50], [50, 70]], "width_mm": 0.8},
+         {"op": "add_stroke", "page": 2, "layer": "ink", "stabilize": 0, "points": loop([(18, 45), (48, 45), (48, 75), (18, 75)]),
+          "width_mm": 0.7},
+         {"op": "add_layer", "page": 2, "kind": "gradient", "id": "grad-2", "after": episode.pages[1].layers[0].id,
+          "gradient": {"from": [10, 10], "to": [60, 80], "rgb_from": [255, 200, 200], "rgb_to": [200, 200, 255]}},
+         {"op": "add_layer", "page": 2, "kind": "paint", "id": "paint-2"}])
+    # page 3: what the C++ build does not draw yet: a nombre, a line, a tone
+    run([{"op": "add_stroke", "page": 3, "layer": "ink", "stabilize": 0, "points": loop([(15, 20), (45, 20), (45, 50), (15, 50)]),
+          "width_mm": 0.7},
+         {"op": "add_line", "page": 3, "text": "台詞", "x_mm": 20, "y_mm": 60},
+         {"op": "add_tone", "page": 3, "id": "tone-3", "area": {"poly": [[20, 25], [40, 25], [40, 45]]}},
+         {"op": "add_layer", "page": 3, "kind": "paint", "id": "paint-3"}])
+    # page 4: plain
+    run([{"op": "add_stroke", "page": 4, "layer": "ink", "stabilize": 0, "points": loop([(14, 16), (54, 16), (54, 78), (14, 78)]),
+          "width_mm": 1.0},
+         {"op": "add_layer", "page": 4, "kind": "paint", "id": "blank-4"},
+         {"op": "add_layer", "page": 4, "kind": "pen", "id": "multi-4"},
+         {"op": "add_stroke", "page": 4, "layer_id": "multi-4", "stabilize": 0, "points": [[20, 30], [48, 60]], "width_mm": 3.0,
+          "rgb": [200, 60, 60]},
+         {"op": "set_layer", "page": 4, "id": "multi-4", "blend": "multiply", "opacity": 0.6}])
+    for page in episode.pages:
+        page.numero = page.index == 3
+    save_episode(episode, root, actor="human:作者")
+
+
+def show_cases(cases_path: str, book: str, only: str | None) -> int:
+    """Each case of a contract case file (ops_cases.json, raster_cases.json) run on `book` as the tests run it: its
+    last reply, flagged where it does not do what the case says (marked ok or failing; a failure in another op). For
+    writing cases; the tests check the same."""
+    import copy
+
+    from genko.headless import apply_ops
+    from genko.io import load_episode
+    from genko.ops import ApplyError
+
+    data = json.loads(Path(cases_path).read_text(encoding="utf-8"))
+    flagged = 0
+    for case in data["cases"]:
+        if only and only not in case["n"] and only != case["op"]:
+            continue
+        steps = case.get("steps") or [{"ops": case["ops"], **({"agent": case["agent"]} if "agent" in case else {}),
+                                       **({"dry_run": case["dry"]} if "dry" in case else {})}]
+        fresh_process_state(True)
+        episode = load_episode(Path(book))
+        counting_ids(int(data.get("first_id", 1)))
+        reply = {}
+        for step in steps:
+            try:
+                reply = apply_ops(episode, copy.deepcopy(step["ops"]), dry_run=bool(step.get("dry_run")),
+                                  agent=step.get("agent", "genko"))
+            except ApplyError as exc:
+                reply = {"ok": False, "error": str(exc)}
+            except Exception as exc:
+                reply = {"ok": False, "error": str(exc), "uncaught": type(exc).__name__}
+        flag = "" if reply.get("ok") == case["ok"] else f"  <<< marked {case['ok']}"
+        if (not reply.get("ok") and "uncaught" not in reply and not case.get("other") and not case["op"].startswith("_")
+                and f"] {case['op']}: " not in reply.get("error", "")):
+            flag += "  <<< in another op"
+        flagged += bool(flag)
+        shown = {k: v for k, v in reply.items() if k in ("ok", "error", "uncaught", "warnings", "results")}
+        print(f"{case['n']} => {dumps(shown)[:400]}{flag}")
+    print(f"{flagged} flagged")
+    return 1 if flagged else 0
+
+
+def filter_edges(out: str) -> None:
+    """Pictures made to sit on the edges of the filters' float32 decisions, and filters.apply_filter of each, into OUT
+    (cases.json: [{"name", "kind", "params", "input", "output"}], the pictures as PNG): despeckle's ink (numpy's float32
+    luminance below 128) for every colour whose luminance is within 0.03 of 128, each pixel alone on paper (a speck
+    taken away when it is ink) or alone in ink (a hole filled when it is not); lineart's ratio (a grey over the
+    lightest grey around it, in float32, against the threshold) for the greys g and m whose g / m is next to it."""
+    from PIL import Image
+
+    from genko import filters
+
+    root = Path(out)
+    root.mkdir(parents=True, exist_ok=True)
+    cases = []
+
+    def run(name, image, kind, params):
+        image = image.convert("RGBA")
+        image.save(root / f"{name}-in.png")
+        filters.apply_filter(image, kind, dict(params)).save(root / f"{name}-out.png")
+        cases.append({"name": name, "kind": kind, "params": params, "input": f"{name}-in.png", "output": f"{name}-out.png"})
+
+    triples = []
+    for r in range(256):
+        for g in range(256):
+            base = 0.299 * r + 0.587 * g
+            b0 = int((128 - base) / 0.114)
+            for b in range(b0 - 1, b0 + 3):
+                if 0 <= b <= 255 and abs(base + 0.114 * b - 128) < 0.03:
+                    triples.append((r, g, b))
+    half = int(math.ceil(math.sqrt(len(triples))))
+    for what, background in (("ink", (255, 255, 255, 255)), ("holes", (0, 0, 0, 255))):
+        im = Image.new("RGBA", (2 * half, 2 * half), background)
+        px = im.load()
+        for k, (r, g, b) in enumerate(triples):
+            px[(k % half) * 2, (k // half) * 2] = (r, g, b, 255)
+        run(f"despeckle-{what}", im, "despeckle", {"size_px": 1.5, "what": what})
+    for t in (0.55, 0.6, 0.65, 0.7, 0.72, 0.75, 0.8, 0.85, 0.9, 0.95):
+        pairs = [(g, m) for m in range(1, 256) for g in range(m) if abs(g / m - t) <= 1.5 / m]
+        cols = 64
+        im = Image.new("RGB", (cols * 5, ((len(pairs) + cols - 1) // cols) * 5), (255, 255, 255))
+        px = im.load()
+        for k, (g, m) in enumerate(pairs):
+            x0, y0 = (k % cols) * 5, (k // cols) * 5
+            for dy in range(1, 4):
+                for dx in range(1, 4):
+                    px[x0 + dx, y0 + dy] = (m, m, m)
+            px[x0 + 2, y0 + 2] = (g, g, g)
+        run(f"lineart-{t}", im, "lineart", {"threshold": t, "radius": 3, "min_px": 0, "keep_solid": False})
+    (root / "cases.json").write_text(dumps(cases), encoding="utf-8")
+
+
 def make_random(out: str, seed: int, count: int) -> None:
     root = Path(out)
     root.mkdir(parents=True, exist_ok=True)
@@ -772,13 +1075,13 @@ class _Replay:
     """A sequence's book as test_contract_ops's Python side (steps_job) has it after each step, while the sequence is
     made: what an op will find in the book once the ops before it have changed it."""
 
-    def __init__(self, book: Path, store: Path):
+    def __init__(self, book: Path, store: Path, first_id: int = SEQ_FIRST_ID):
         from genko.assets import AssetStore
         from genko.io import load_episode
 
         fresh_process_state(True)
         self.episode = load_episode(book)
-        counting_ids(SEQ_FIRST_ID)
+        counting_ids(first_id)
         self.store = AssetStore(store)
 
     def layer_ids(self, step: dict, k: int):
@@ -1262,6 +1565,474 @@ def make_sequences(out: str, books: str, seed: int, count: int) -> None:
     Path(out).write_text(dumps(sequences), encoding="utf-8")
 
 
+# --- random op sequences (the ops of M3-A1, with the basic ones of M2) --------------------------------------------------
+
+RASTER_FIRST_ID = 0x200000  # (new ids count from here: above every id a random book for drawing has)
+
+
+def make_raster_books(out: str, seed: int, count: int) -> None:
+    """`count` random books for drawing (render_harness.make_render_book: rasters of every PNG mode, patches, masks,
+    blend modes, fills and gradients, corrections, panels) without what the C++ build does not draw yet (nombres, lines,
+    tones, effect lines, 3D guides, layer screens): the books the raster op sequences run on."""
+    import render_harness
+    from genko.io import load_episode, save_episode
+    from genko.models import LayerKind, LayerRole
+
+    root = Path(out)
+    root.mkdir(parents=True, exist_ok=True)
+    for i in range(count):
+        dest = root / f"book-{i:02d}.genko"
+        fresh_process_state(True)
+        render_harness.make_render_book(random.Random(seed * 1000 + i), dest, i)
+        fresh_process_state(True)
+        episode = load_episode(dest)
+        episode.story = []
+        for page in episode.pages:
+            page.numero = False
+            page.effects = []
+            page.prims = []
+            page.layers = [layer for layer in page.layers if layer.kind != LayerKind.TONE and layer.role != LayerRole.TONE]
+            for layer in page.layers:
+                layer.screen = None
+        save_episode(episode, dest, actor="human:作者")
+
+
+def _raster_pool(episode) -> list:
+    """What an op may name in the book as it is now: each page's size, panels and layers."""
+    from genko.models import LayerKind
+
+    pages = []
+    for page in episode.pages:
+        layers = [{"id": layer.id, "kind": layer.kind.value, "role": layer.role.value, "parent": layer.parent_id}
+                  for layer in page.layers]
+        saved = (page.extra or {}).get("saved_areas")
+        pages.append({"index": page.index, "w": float(page.spec.width_mm), "h": float(page.spec.height_mm),
+                      "layers": layers, "folders": [layer.id for layer in page.layers if layer.kind == LayerKind.FOLDER],
+                      "areas": sorted(saved) if isinstance(saved, dict) else []})
+    return pages
+
+
+def _raster_sequence(rng: random.Random, replay: _Replay) -> list:
+    """1 to 10 ops for one book, in steps (most one op; some two or three; some dry runs), by several actors: the ops of
+    M3-A1 mostly, with add_stroke, add_layer, set_layer, delete_layer, duplicate_layer, erase, name_ok, page locks and
+    strict_gates among them. Each op is drawn from the book as the ops before it left it (`replay`), so most name what
+    is there; some name what is not, or give what the op refuses."""
+
+    def num(lo, hi, digits=2):
+        return round(rng.uniform(lo, hi), digits)
+
+    def pt(p, margin=5.0):
+        return [num(-margin, p["w"] + margin, rng.choice([0, 1, 2])), num(-margin, p["h"] + margin, rng.choice([0, 1, 2]))]
+
+    def inner_pt(p):
+        return [num(p["w"] * 0.1, p["w"] * 0.9, 1), num(p["h"] * 0.1, p["h"] * 0.9, 1)]
+
+    def points(p, lo=2, hi=7, pressure=None):
+        n = rng.randint(lo, hi)
+        x, y = inner_pt(p)
+        with_p = rng.random() < 0.4 if pressure is None else pressure
+        out = []
+        for _ in range(n):
+            x, y = x + rng.uniform(-15, 15), y + rng.uniform(-15, 15)
+            q = [round(x, 2), round(y, 2)]
+            if with_p:
+                q.append(round(rng.uniform(0.1, 1.0), 2))
+            out.append(q)
+        return out
+
+    def rgb():
+        return rng.choice([[rng.randrange(256) for _ in range(3)], [rng.randrange(256) for _ in range(3)], None])
+
+    def layer_id(p, kinds=None, fallback=0.05):
+        layers = [layer for layer in p["layers"] if kinds is None or layer["kind"] in kinds]
+        if not layers or rng.random() < fallback:
+            return rng.choice(["nope", made[0]])
+        return rng.choice(layers)["id"]
+
+    def paintable(p):
+        return layer_id(p, ("strokes", "raster"))
+
+    def area(p, depth=0):
+        r = rng.random()
+        if r < 0.3 or depth > 1:
+            cx, cy = inner_pt(p)
+            out = {"poly": [[round(cx + rng.uniform(-25, 25), 2), round(cy + rng.uniform(-25, 25), 2)]
+                            for _ in range(rng.randint(3, 6))]}
+        elif r < 0.45:
+            x, y = inner_pt(p)
+            out = {"rect": [x - 10, y - 10, num(3, 40), num(3, 40)]}
+        elif r < 0.6:
+            x, y = inner_pt(p)
+            out = {"ellipse": [x - 10, y - 10, num(3, 40), num(3, 40)]}
+        elif r < 0.68:
+            out = {"layer": paintable(p)}
+        elif r < 0.73:
+            out = {"saved": rng.choice(p["areas"] + ["a", "b"])}
+        elif r < 0.77:
+            out = {"all": True}
+        elif r < 0.85:
+            x, y = inner_pt(p)
+            out = {"color": {"x_mm": x, "y_mm": y, **({"tolerance": rng.randrange(0, 100)} if rng.random() < 0.5 else {}),
+                             **({"contiguous": rng.random() < 0.5} if rng.random() < 0.5 else {})}}
+        else:
+            out = {rng.choice(["union", "intersect", "subtract"]): [area(p, depth + 1) for _ in range(rng.randint(2, 3))]}
+        if rng.random() < 0.1:
+            out["invert"] = True
+        if rng.random() < 0.1:
+            out["grow_mm"] = num(-2, 3)
+        if rng.random() < 0.1:
+            out["feather_mm"] = num(0, 2)
+        return out
+
+    def picture_b64(p):
+        import base64
+
+        w = rng.randint(4, max(5, int(p["w"] / 25.4 * 120)))
+        h = rng.randint(4, max(5, int(p["h"] / 25.4 * 120)))
+        shapes = []
+        for _ in range(rng.randint(1, 4)):
+            x0, y0 = rng.uniform(-w * 0.2, w), rng.uniform(-h * 0.2, h)
+            box = (x0, y0, x0 + rng.uniform(1, w), y0 + rng.uniform(1, h))
+            shapes.append((rng.choice(["rectangle", "ellipse", "line"]), box,
+                           tuple(rng.randrange(256) for _ in range(3)) + (rng.choice([255, 255, 160, 60]),)))
+        background = rng.choice([(0, 0, 0, 0), (255, 255, 255, 255), (250, 240, 200, 255)])
+        return base64.b64encode(_picture_png((w, h), shapes, rng.choice(["RGBA", "RGBA", "RGB", "L", "LA", "P"]),
+                                             background)).decode("ascii")
+
+    def op_convert(p):
+        op = {"op": "convert_layer", "page": p["index"], "id": layer_id(p), "to": rng.choice(["paint", "paint", "pen", "x"])}
+        if op["to"] == "pen" and rng.random() < 0.5:
+            op["min_mm"] = num(0.2, 4)
+        return op
+
+    def op_merge_down(p):
+        return {"op": "merge_down", "page": p["index"], "id": layer_id(p)}
+
+    def op_merge_layers(p):
+        ids = [layer_id(p, fallback=0.02) for _ in range(rng.randint(1, 3))]
+        op = {"op": "merge_layers", "page": p["index"], "ids": ids}
+        if rng.random() < 0.3:
+            op["name"] = "まとめ" + str(rng.randrange(9))
+        return op
+
+    def op_merge_visible(p):
+        op = {"op": "merge_visible", "page": p["index"]}
+        if rng.random() < 0.4:
+            op["copy"] = rng.random() < 0.5
+        if rng.random() < 0.2:
+            op["id"] = rng.choice(["vis-" + str(rng.randrange(3)), layer_id(p)])
+        return op
+
+    def op_move_layers(p):
+        op = {"op": "move_layers", "page": p["index"], "ids": [layer_id(p, fallback=0.02) for _ in range(rng.randint(1, 2))]}
+        r = rng.random()
+        if r < 0.4:
+            op["after"] = rng.choice(["bottom", layer_id(p)])
+        if rng.random() < 0.35:
+            op["parent"] = rng.choice(p["folders"] + [None, ""]) if p["folders"] else None
+        return op
+
+    def op_group(p):
+        op = {"op": "group_layers", "page": p["index"], "ids": [layer_id(p, fallback=0.02) for _ in range(rng.randint(1, 3))]}
+        if rng.random() < 0.4:
+            op["id"] = "grp-" + str(rng.randrange(4))
+        if rng.random() < 0.3:
+            op["name"] = "組" + str(rng.randrange(9))
+        return op
+
+    def op_layer_mask(p):
+        op = {"op": "set_layer_mask", "page": p["index"], "id": layer_id(p)}
+        r = rng.random()
+        if r < 0.4:
+            op["area"] = area(p)
+        elif r < 0.6:
+            op["fill"] = rng.choice(["hide", "show", "hide", "maybe"])
+        elif r < 0.7:
+            op["delete"] = True
+        elif r < 0.8:
+            op["enabled"] = rng.random() < 0.5
+        if rng.random() < 0.25:
+            op["invert"] = True
+        return op
+
+    def op_paint_mask(p):
+        op = {"op": "paint_mask", "page": p["index"], "id": layer_id(p), "points": points(p, 1, 5)}
+        if rng.random() < 0.6:
+            op["width_mm"] = num(0.5, 8)
+        if rng.random() < 0.7:
+            op["show"] = rng.random() < 0.5
+        return op
+
+    def op_put_raster(p):
+        op = {"op": "put_raster", "page": p["index"], "png_base64": picture_b64(p)}
+        if rng.random() < 0.5:
+            op["id"] = layer_id(p, ("raster", "strokes"))
+        elif rng.random() < 0.8:
+            op["layer"] = rng.choice(["ink", "bg", "finish", "name", "draft"])
+        return op
+
+    def op_filter(p):
+        kind = rng.choice(["blur", "sharpen", "hue", "levels", "curve", "mosaic", "bitonal", "motion_blur", "radial_blur",
+                           "zoom_blur", "noise", "wave", "twirl", "lineart", "invert", "posterize", "threshold",
+                           "gradient_map", "brightness_contrast", "despeckle", "glow", "rain", "sparkle"])
+        params = {"blur": lambda: {"radius": num(0.5, 6)}, "sharpen": lambda: {"amount": num(0.5, 2), "radius": num(0.5, 3)},
+                  "hue": lambda: {"shift": num(-180, 180), "saturation": num(0, 2), "value": num(0.5, 1.5)},
+                  "levels": lambda: {"black": rng.randrange(0, 80), "white": rng.randrange(150, 256), "gamma": num(0.5, 2)},
+                  "curve": lambda: rng.choice([{"gamma": num(0.4, 2.5)}, {"points": [[0, rng.randrange(60)], [128, rng.randrange(256)], [255, rng.randrange(180, 256)]]}]),
+                  "mosaic": lambda: {"block": rng.randint(2, 20)}, "bitonal": lambda: {"threshold": rng.randrange(256)},
+                  "motion_blur": lambda: {"distance": rng.randint(1, 15), "angle": num(-90, 90)},
+                  "radial_blur": lambda: {"amount": num(0.02, 0.2), "cx": num(0, 1), "cy": num(0, 1)},
+                  "zoom_blur": lambda: {"amount": num(0.02, 0.3)}, "noise": lambda: {"amount": num(0.05, 0.5), "mono": rng.random() < 0.5, "seed": rng.choice(["a", "b", 5])},
+                  "wave": lambda: {"amplitude": num(1, 8), "wavelength": num(10, 60)},
+                  "twirl": lambda: {"angle": num(-180, 180), "radius": num(0.1, 0.8)},
+                  "lineart": lambda: rng.choice([{}, {"threshold": num(0.5, 0.95), "radius": rng.randint(2, 6), "drop_blue": rng.random() < 0.5}]),
+                  "invert": dict, "posterize": lambda: {"levels": rng.randint(2, 6)}, "threshold": lambda: {"threshold": rng.randrange(256)},
+                  "gradient_map": lambda: {"colors": [[rng.randrange(256) for _ in range(3)] for _ in range(rng.randint(2, 3))]},
+                  "brightness_contrast": lambda: {"brightness": rng.randrange(-50, 50), "contrast": rng.randrange(-50, 50)},
+                  "despeckle": lambda: rng.choice([{"size_px": rng.randint(2, 30)}, {"size_mm": num(0.2, 1.5), "what": rng.choice(["dark", "light", "both"])}]),
+                  "glow": lambda: {"radius": num(1, 8), "threshold": rng.randrange(100, 250)},
+                  "rain": lambda: {"count": rng.randint(5, 80), "length": num(5, 30), "seed": rng.choice(["r", 3])},
+                  "sparkle": dict}[kind]()
+        op = {"op": "filter_raster", "page": p["index"], "kind": kind, **params}
+        if rng.random() < 0.85:
+            op["id"] = layer_id(p, ("raster", "strokes"))
+        else:
+            op["layer"] = rng.choice(["ink", "bg", "name"])
+        if rng.random() < 0.2:
+            op["area"] = area(p)
+        return op
+
+    def fill_common(p, op):
+        if rng.random() < 0.4:
+            op["layer_id"] = paintable(p)
+        if rng.random() < 0.4:
+            op["rgb"] = rgb()
+        if rng.random() < 0.2:
+            op["opacity"] = num(0.2, 1)
+        if rng.random() < 0.3:
+            op["gap_mm"] = num(0, 2.5)
+        if rng.random() < 0.2:
+            op["expand_mm"] = num(0, 1)
+        if rng.random() < 0.2:
+            op["tolerance"] = rng.randrange(0, 101)
+        if rng.random() < 0.15:
+            op["reference"] = rng.choice(["page", "layer", "reference", "x"])
+        if rng.random() < 0.1:
+            op["ignore"] = rng.choice([["draft"], ["text"], "draft", ["draft", "text"]])
+        return op
+
+    def op_fill(p):
+        x, y = inner_pt(p)
+        return fill_common(p, {"op": "fill", "page": p["index"], "x_mm": x, "y_mm": y})
+
+    def op_fill_area(p):
+        op = {"op": "fill_area", "page": p["index"], "area": area(p)}
+        if rng.random() < 0.5:
+            op["layer_id"] = paintable(p)
+        if rng.random() < 0.5:
+            op["rgb"] = rgb()
+        if rng.random() < 0.2:
+            op["opacity"] = num(0.1, 1)
+        return op
+
+    def op_fill_enclosed(p):
+        x, y = inner_pt(p)
+        s = rng.uniform(10, 40)
+        poly = [[round(x - s, 1), round(y - s, 1)], [round(x + s, 1), round(y - s, 1)], [round(x + s, 1), round(y + s, 1)],
+                [round(x - s, 1), round(y + s, 1)]]
+        return fill_common(p, {"op": "fill_enclosed", "page": p["index"], "poly": poly})
+
+    def op_fill_gaps(p):
+        op = {"op": "fill_gaps", "page": p["index"], "layer_id": paintable(p)}
+        if rng.random() < 0.6:
+            op["max_mm"] = num(0.5, 4)
+        if rng.random() < 0.3:
+            op["rgb"] = rgb()
+        if rng.random() < 0.2:
+            op["area"] = area(p)
+        return op
+
+    def op_flood(p):
+        x, y = pt(p, 2)
+        op = {"op": "flood_fill", "page": p["index"], "x_mm": x, "y_mm": y,
+              "rgb": rng.choice([[rng.randrange(256) for _ in range(3)], [1, 2], [10, 20, 30, 40]])}
+        if rng.random() < 0.7:
+            op["layer"] = rng.choice(["ink", "bg", "name", "finish", "draft"])
+        if rng.random() < 0.3:
+            op["gap_mm"] = num(0, 2)
+        return op
+
+    def op_gradient(p):
+        op = {"op": "gradient_fill", "page": p["index"], "from": inner_pt(p), "to": inner_pt(p)}
+        if rng.random() < 0.5:
+            op["layer_id"] = paintable(p)
+        if rng.random() < 0.4:
+            op["shape"] = rng.choice(["linear", "radial", "ellipse", "star"])
+            if op["shape"] == "ellipse":
+                op["ratio"] = num(0.2, 2)
+        if rng.random() < 0.3:
+            op["repeat"] = rng.choice(["none", "repeat", "mirror"])
+        if rng.random() < 0.3:
+            op["stops"] = [[num(0, 1), [rng.randrange(256) for _ in range(3)], num(0, 1)] for _ in range(rng.randint(2, 3))]
+        else:
+            for key in ("rgb_from", "rgb_to"):
+                if rng.random() < 0.5:
+                    op[key] = [rng.randrange(256) for _ in range(3)]
+            for key in ("opacity_from", "opacity_to"):
+                if rng.random() < 0.3:
+                    op[key] = num(0, 1)
+        if rng.random() < 0.25:
+            op["area"] = area(p)
+        return op
+
+    def op_delete_area(p):
+        return {"op": "delete_area", "page": p["index"], "layer_id": paintable(p), "area": area(p)}
+
+    def op_transform(p):
+        op = {"op": "transform_area", "page": p["index"], "layer_id": paintable(p), "area": area(p)}
+        r = rng.random()
+        if r < 0.55:
+            a = math.radians(rng.uniform(-30, 30))
+            s = rng.uniform(0.6, 1.4)
+            op["matrix"] = [round(s * math.cos(a), 4), round(s * math.sin(a), 4), round(-s * math.sin(a), 4),
+                            round(s * math.cos(a), 4), num(-10, 10), num(-10, 10)]
+        elif r < 0.75:
+            x, y = inner_pt(p)
+            op["warp"] = {"perspective": [[round(x + dx + rng.uniform(-4, 4), 1), round(y + dy + rng.uniform(-4, 4), 1)]
+                                          for dx, dy in ((-15, -15), (15, -15), (15, 15), (-15, 15))]}
+        elif r < 0.9:
+            x, y = inner_pt(p)
+            op["warp"] = {"mesh": [[round(x + i * 10 + rng.uniform(-3, 3), 1), round(y + j * 10 + rng.uniform(-3, 3), 1)]
+                                   for j in range(3) for i in range(3)]}
+        else:
+            op["matrix"] = rng.choice([[1, 0, 0, 1, 0], [1, 1, 1, 1, 0, 0]])
+        if rng.random() < 0.3:
+            op["interp"] = rng.choice(["nearest", "bicubic", "bilinear", "soft"])
+        return op
+
+    def op_paste(p):
+        import base64
+
+        items = {}
+        if rng.random() < 0.7:
+            items["strokes"] = [{"points": points(p), "width_mm": num(0.2, 2), **({"rgb": rgb()} if rng.random() < 0.4 else {})}
+                                for _ in range(rng.randint(1, 3))]
+        if rng.random() < 0.5 or not items:
+            x, y = inner_pt(p)
+            items["patches"] = [{"box": [x, y, num(2, 20), num(2, 20)], "mode": rng.choice(["mask", "image"]),
+                                 "png": base64.b64encode(_picture_png((rng.randint(4, 40), rng.randint(4, 40)),
+                                                                      [("ellipse", (2, 2, 30, 30), (200, 20, 20, 255))],
+                                                                      rng.choice(["RGBA", "L"]))).decode("ascii"),
+                                 **({"rgb": [rng.randrange(256) for _ in range(3)]} if rng.random() < 0.5 else {})}]
+        op = {"op": "paste", "page": p["index"], "items": items}
+        if rng.random() < 0.5:
+            op["layer_id"] = paintable(p)
+        if rng.random() < 0.5:
+            op["matrix"] = [1, 0, 0, 1, num(-10, 10), num(-10, 10)]
+        return op
+
+    def op_store(p):
+        return {"op": "store_area", "page": p["index"], "name": rng.choice(["a", "b", "空", " c "]), "area": area(p)}
+
+    def op_forget(p):
+        return {"op": "forget_area", "page": p["index"], "name": rng.choice(p["areas"] + ["a", "b", "zz"])}
+
+    def op_paper(p):
+        op = {"op": "set_paper", "rgb": rng.choice([[rng.randrange(256) for _ in range(3)], None, [300, 0, 0]])}
+        if rng.random() < 0.6:
+            op["page"] = p["index"]
+        return op
+
+    def op_timelapse(p):
+        return {"op": "set_timelapse", **({"on": rng.random() < 0.6} if rng.random() < 0.7 else {})}
+
+    def op_erase(p, name):
+        op = {"op": name, "page": p["index"], "points": points(p, 1, 5), "width_mm": num(0.5, 8, 1)}
+        if rng.random() < 0.8:
+            op["layer_id"] = paintable(p)
+        else:
+            op["layer"] = rng.choice(["ink", "name", "finish"])
+        if rng.random() < 0.4:
+            op["texture"] = rng.choice(["hard", "soft", "rough"])
+        return op
+
+    def op_m2(p):
+        kind = rng.choice(["add_stroke", "add_stroke", "add_layer", "add_layer", "set_layer", "delete_layer", "duplicate_layer",
+                           "name_ok", "strict", "lock_page"])
+        if kind == "add_stroke":
+            op = {"op": "add_stroke", "page": p["index"], "points": points(p), "stabilize": 0}
+            if rng.random() < 0.6:
+                op["layer_id"] = paintable(p)
+            else:
+                op["layer"] = rng.choice(["ink", "name", "finish"])
+            if rng.random() < 0.4:
+                op["width_mm"] = num(0.3, 3)
+            if rng.random() < 0.3:
+                op["rgb"] = rgb()
+            return op
+        if kind == "add_layer":
+            op = {"op": "add_layer", "page": p["index"], "kind": rng.choice(["pen", "paint", "paint", "folder", "fill", "gradient", "adjust"])}
+            if rng.random() < 0.3:
+                op["id"] = "L" + str(rng.randrange(4))
+            if rng.random() < 0.3:
+                op["after"] = layer_id(p)
+            if op["kind"] == "adjust":
+                op["adjust"] = rng.choice([{"kind": "levels", "black": 20}, {"kind": "hue", "shift": 40}, {"kind": "blur", "radius": 2},
+                                           {"kind": "invert"}, {"kind": "mosaic", "block": 6}])
+            return op
+        if kind == "set_layer":
+            op = {"op": "set_layer", "page": p["index"], "id": layer_id(p)}
+            for key in rng.sample(["visible", "opacity", "blend", "clip", "locked", "reference", "parent"], rng.randint(1, 2)):
+                op[key] = {"opacity": num(0, 1), "blend": rng.choice(["multiply", "screen", "normal", "overlay"]),
+                           "parent": rng.choice(p["folders"] + [None]) if p["folders"] else None,
+                           "locked": rng.random() < 0.3}.get(key, rng.random() < 0.6)
+            return op
+        if kind == "delete_layer":
+            return {"op": "delete_layer", "page": p["index"], "id": layer_id(p)}
+        if kind == "duplicate_layer":
+            return {"op": "duplicate_layer", "page": p["index"], "id": layer_id(p)}
+        if kind == "name_ok":
+            return {"op": "name_ok", "page": p["index"]}
+        if kind == "strict":
+            return {"op": "set_meta", "strict_gates": rng.random() < 0.5}
+        return {"op": rng.choice(["lock_page", "unlock_page"]), "page": p["index"]}
+
+    makers = [op_convert, op_merge_down, op_merge_layers, op_merge_visible, op_move_layers, op_group, op_layer_mask,
+              op_paint_mask, op_put_raster, op_filter, op_filter, op_fill, op_fill, op_fill_area, op_fill_enclosed,
+              op_fill_gaps, op_flood, op_gradient, op_delete_area, op_transform, op_transform, op_paste, op_store,
+              op_forget, op_paper, op_timelapse, lambda p: op_erase(p, "erase"), lambda p: op_erase(p, "erase_raster"),
+              op_m2, op_m2, op_m2]
+    made = [f"{RASTER_FIRST_ID + k:012x}" for k in range(4)]
+    steps = []
+    left = rng.randint(1, 10)
+    while left > 0:
+        size = min(left, rng.choice([1, 1, 1, 1, 2, 3]))
+        left -= size
+        pages = _raster_pool(replay.episode)
+        step = {"ops": [rng.choice(makers)(rng.choice(pages)) for _ in range(size)], "agent": rng.choice(AGENTS)}
+        if rng.random() < 0.1:
+            step["dry_run"] = True
+        replay.apply(step)
+        steps.append(step)
+    return steps
+
+
+def make_raster_sequences(out: str, books: str, seed: int, count: int) -> None:
+    """`count` op sequences of M3-A1 over the books in `books` (make-raster-books; each sequence for one book, in turn):
+    a JSON list of {"book", "first_id", "steps"} for test_contract_raster_ops."""
+    import tempfile
+
+    paths = sorted(Path(books).glob("book-*.genko"))
+    rng = random.Random(seed)
+    sequences = []
+    with tempfile.TemporaryDirectory() as scratch:
+        for i in range(count):
+            b = i % len(paths)
+            replay = _Replay(paths[b], Path(scratch) / f"store-{i}", RASTER_FIRST_ID)
+            sequences.append({"book": str(paths[b]), "first_id": RASTER_FIRST_ID, "steps": _raster_sequence(rng, replay)})
+    Path(out).write_text(dumps(sequences), encoding="utf-8")
+
+
 # --- numbers and JSON -------------------------------------------------------------------------------------------------
 
 
@@ -1466,7 +2237,7 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--agent", default="genko")
     p = sub.add_parser("upgrade")
     p.add_argument("book")
-    for name in ("make-opsbook", "make-drawbook"):
+    for name in ("make-opsbook", "make-drawbook", "make-rasterbook"):
         p = sub.add_parser(name)
         p.add_argument("out")
     p = sub.add_parser("make-sequences")
@@ -1474,12 +2245,41 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--books", required=True)
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--count", type=int, default=300)
+    p = sub.add_parser("show-cases")
+    p.add_argument("cases")
+    p.add_argument("book")
+    p.add_argument("--only")
+    p = sub.add_parser("filter-edges")
+    p.add_argument("out")
+    p = sub.add_parser("make-raster-books")
+    p.add_argument("out")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--count", type=int, default=15)
+    p = sub.add_parser("make-raster-sequences")
+    p.add_argument("out")
+    p.add_argument("--books", required=True)
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--count", type=int, default=150)
     args = parser.parse_args(argv)
+    if args.cmd == "show-cases":
+        return show_cases(args.cases, args.book, args.only)
+    if args.cmd == "filter-edges":
+        filter_edges(args.out)
+        return 0
+    if args.cmd == "make-raster-books":
+        make_raster_books(args.out, args.seed, args.count)
+        return 0
+    if args.cmd == "make-raster-sequences":
+        make_raster_sequences(args.out, args.books, args.seed, args.count)
+        return 0
     if args.cmd == "make-opsbook":
         make_opsbook(args.out)
         return 0
     if args.cmd == "make-drawbook":
         make_drawbook(args.out)
+        return 0
+    if args.cmd == "make-rasterbook":
+        make_rasterbook(args.out)
         return 0
     if args.cmd == "make-sequences":
         make_sequences(args.out, args.books, args.seed, args.count)

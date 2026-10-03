@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 
+#include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/pynum.hpp"
 #include "render/imaging.hpp"
@@ -23,6 +24,7 @@ namespace detail {
     genko_imaging_clear_error();
     if (message.empty()) message = std::string(fallback);
     if (kind == 1) throw core::Error("memory", message);
+    if (kind == 3) throw core::OpError(message);
     throw core::Error("value", message);
 }
 
@@ -210,6 +212,13 @@ double filter_support(Resample r) {
 }  // namespace
 
 // --- Ink ------------------------------------------------------------------------------------------------------------
+
+ImageAllocationBudget::ImageAllocationBudget(std::uint64_t limit_bytes) {
+    if (!genko_imaging_budget_begin(limit_bytes)) detail::throw_imaging_error("out of memory");
+}
+ImageAllocationBudget::~ImageAllocationBudget() { genko_imaging_budget_end(); }
+std::uint64_t ImageAllocationBudget::live() const { return genko_imaging_budget_live(); }
+std::uint64_t ImageAllocationBudget::peak() const { return genko_imaging_budget_peak(); }
 
 Ink Ink::tuple(std::vector<std::int64_t> values) {
     Ink out;
@@ -635,6 +644,8 @@ Image Image::convert(std::string_view mode, Dither dither) const {
     ImagingMemoryInstance* converted =
         ImagingConvert(const_cast<Imaging>(src), detail::mode_id(mode), nullptr, static_cast<int>(dither));
     if (converted == nullptr) {
+        const int kind = genko_imaging_error_kind();
+        if (kind == 1 || kind == 3) detail::throw_imaging_error("out of memory");
         // normalize the source image and try again (its base mode first, without dithering)
         const std::string message = genko_imaging_error_message();
         genko_imaging_clear_error();
@@ -746,8 +757,16 @@ std::vector<Image> Image::split() const {
     if (im_->bands == 1) return {copy()};
     Imaging bands[4] = {nullptr, nullptr, nullptr, nullptr};
     if (!ImagingSplit(im_, bands)) detail::throw_imaging_error();
+    // Own every C result before any vector or metadata allocation can throw.
+    std::array<Image, 4> owned;
+    for (int i = 0; i < im_->bands; ++i) owned[static_cast<std::size_t>(i)] = Image(bands[i]);
     std::vector<Image> out;
-    for (int i = 0; i < im_->bands; ++i) out.push_back(derived(bands[i]));
+    out.reserve(static_cast<std::size_t>(im_->bands));
+    for (int i = 0; i < im_->bands; ++i) {
+        Image& band = owned[static_cast<std::size_t>(i)];
+        band.transparency_ = transparency_;
+        out.push_back(std::move(band));
+    }
     return out;
 }
 

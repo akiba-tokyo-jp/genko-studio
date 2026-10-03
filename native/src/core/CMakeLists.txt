@@ -42,6 +42,8 @@ genko_library(genko_core
     ops_pages.cpp
     ops_strokes.cpp
     ops_layers.cpp
+    areas.cpp
+    ops_arrange.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
 

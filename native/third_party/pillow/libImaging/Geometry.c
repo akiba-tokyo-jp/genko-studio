@@ -1,4 +1,5 @@
 #include "Imaging.h"
+#include <limits.h>
 
 /* For large images rotation is an inefficient operation in terms of CPU cache.
    One row in the source image affects each column in destination.
@@ -863,7 +864,7 @@ ImagingScaleAffine(
     /* malloc check ok, uses calloc for overflow */
     xintab = (int *)calloc(imOut->xsize, sizeof(int));
     if (!xintab) {
-        ImagingDelete(imOut);
+        /* imOut is borrowed from the caller, which owns failure cleanup. */
         return (Imaging)ImagingError_MemoryError();
     }
 
@@ -926,6 +927,30 @@ check_fixed(double a[6], int x, int y) {
         fabs(x * a[0] + y * a[1] + a[2]) < 32768.0 &&
         fabs(x * a[3] + y * a[4] + a[5]) < 32768.0
     );
+}
+
+static inline int
+fixed_arithmetic_safe(double a[6], int width, int height) {
+    /* The old corner test does not protect FIX(coefficient), half-pixel
+       intercepts, or post-increment additions. Unsafe fixed arithmetic uses
+       the existing floating path, preserving safe large skinny rotations. */
+    const double values[6] = {a[0], a[1], a[2] + 0.5*a[0] + 0.5*a[1],
+                             a[3], a[4], a[5] + 0.5*a[3] + 0.5*a[4]};
+    long double fixed[6];
+    int i, x, y;
+    for (i = 0; i < 6; ++i) {
+        const double rounded = floor(values[i]*65536.0 + 0.5);
+        if (!isfinite(rounded) || rounded < INT_MIN || rounded > INT_MAX) return 0;
+        fixed[i] = rounded;
+    }
+    for (x = 0; x < 2; ++x) {
+        for (y = 0; y < 2; ++y) {
+            const long double xx = fixed[2] + (x ? width : 0)*fixed[0] + (y ? height : 0)*fixed[1];
+            const long double yy = fixed[5] + (x ? width : 0)*fixed[3] + (y ? height : 0)*fixed[4];
+            if (xx < INT_MIN || xx > INT_MAX || yy < INT_MIN || yy > INT_MAX) return 0;
+        }
+    }
+    return 1;
 }
 
 static inline Imaging
@@ -1060,7 +1085,8 @@ ImagingTransformAffine(
        range that can be represented by the fixed point arithmetics */
 
     if (check_fixed(a, 0, 0) && check_fixed(a, x1 - x0, y1 - y0) &&
-        check_fixed(a, 0, y1 - y0) && check_fixed(a, x1 - x0, 0)) {
+        check_fixed(a, 0, y1 - y0) && check_fixed(a, x1 - x0, 0) &&
+        fixed_arithmetic_safe(a, x1 - x0, y1 - y0)) {
         return affine_fixed(imOut, imIn, x0, y0, x1, y1, a, filterid, fill);
     }
 

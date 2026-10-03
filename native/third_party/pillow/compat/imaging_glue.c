@@ -26,7 +26,7 @@
 #define GENKO_THREAD_LOCAL __thread
 #endif
 
-enum { kNoError = 0, kMemoryError = 1, kValueError = 2 };
+enum { kNoError = 0, kMemoryError = 1, kValueError = 2, kBudgetError = 3 };
 
 static GENKO_THREAD_LOCAL int error_kind = kNoError;
 static GENKO_THREAD_LOCAL char error_message[256];
@@ -58,6 +58,90 @@ genko_imaging_error_message(void) {
 void
 genko_imaging_clear_error(void) {
     set_error(kNoError, "");
+}
+
+typedef struct {
+    uint64_t limit, live, peak;
+    size_t refs;
+    PyMutex mutex;
+} GenkoBudget;
+static GENKO_THREAD_LOCAL GenkoBudget *active_budget;
+static GENKO_THREAD_LOCAL unsigned budget_depth;
+
+int genko_imaging_budget_begin(uint64_t limit) {
+    if (active_budget) {
+        ++budget_depth; /* Recursive area calls share the same budget. */
+        return 1;
+    }
+    active_budget = (GenkoBudget *)calloc(1, sizeof(GenkoBudget));
+    if (!active_budget) { ImagingError_MemoryError(); return 0; }
+    active_budget->limit = limit;
+    active_budget->refs = 1;
+    budget_depth = 1;
+    return 1;
+}
+
+static void budget_unref(GenkoBudget *budget) {
+    int last;
+    PyMutex_Lock(&budget->mutex);
+    last = --budget->refs == 0;
+    PyMutex_Unlock(&budget->mutex);
+    if (last) free(budget);
+}
+
+void genko_imaging_budget_end(void) {
+    if (active_budget && --budget_depth == 0) {
+        GenkoBudget *budget = active_budget;
+        active_budget = NULL;
+        budget_unref(budget);
+    }
+}
+
+uint64_t genko_imaging_budget_live(void) {
+    uint64_t value = 0;
+    if (active_budget) {
+        PyMutex_Lock(&active_budget->mutex);
+        value = active_budget->live;
+        PyMutex_Unlock(&active_budget->mutex);
+    }
+    return value;
+}
+uint64_t genko_imaging_budget_peak(void) {
+    uint64_t value = 0;
+    if (active_budget) {
+        PyMutex_Lock(&active_budget->mutex);
+        value = active_budget->peak;
+        PyMutex_Unlock(&active_budget->mutex);
+    }
+    return value;
+}
+
+int genko_imaging_budget_reserve(Imaging im, uint64_t bytes) {
+    GenkoBudget *budget = active_budget;
+    if (!budget) return 1;
+    PyMutex_Lock(&budget->mutex);
+    if (bytes > budget->limit - budget->live) {
+        PyMutex_Unlock(&budget->mutex);
+        set_error(kBudgetError, "the area holds too many masks at once");
+        return 0;
+    }
+    budget->live += bytes;
+    if (budget->live > budget->peak) budget->peak = budget->live;
+    ++budget->refs;
+    im->genko_budget = budget;
+    im->genko_budget_bytes = bytes;
+    PyMutex_Unlock(&budget->mutex);
+    return 1;
+}
+
+void genko_imaging_budget_release(Imaging im) {
+    GenkoBudget *budget = (GenkoBudget *)im->genko_budget;
+    if (!budget) return;
+    PyMutex_Lock(&budget->mutex);
+    budget->live -= im->genko_budget_bytes;
+    PyMutex_Unlock(&budget->mutex);
+    im->genko_budget = NULL;
+    budget_unref(budget);
 }
 
 /* --- _imaging.c --------------------------------------------------------------------------------------------- */

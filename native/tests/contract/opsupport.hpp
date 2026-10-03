@@ -4,7 +4,11 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
+#include <optional>
+#include <set>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -29,14 +33,24 @@ struct StepOutcome {
 // revision.
 core::Json as_v3_payload(core::Json payload);
 
+// What a PNG holds: "png:" and the sha256 of "<mode>|<w>x<h>|" and its pixels as RGBA ("unreadable:" and the sha256
+// of the bytes when they cannot be read; "missing" for none): the harness's _pixels_digest.
+std::string pixels_digest(const std::optional<std::string>& bytes);
+
+// The payload with each PNG it refers to (a layer's pixels, its mask and its patches, and an area kept on a page) as
+// the pixels it holds (the harness's _png_pixels): this build writes other PNG bytes for the same pixels.
+core::Json with_png_pixels(core::Json payload, const storage::AssetStore& store);
+
 // sha256 of json.dumps(value, ensure_ascii=False) (the harness's digests).
 std::string json_digest(const core::Json& value);
 
 // Apply the steps ([{"ops", "agent"?, "dry_run"?}]) to `doc` as the harness does, with new ids counted from
-// `first_id` (the harness's --ids). `store` holds the assets the payloads refer to. `digest` replaces the snapshots
-// and payloads with their digests (the harness's "digest"). `last` gets the book after the steps.
+// `first_id` (the harness's --ids), through every op of this build (render::ops_registry). `store` holds the assets
+// the payloads refer to. `digest` replaces the snapshots and payloads with their digests (the harness's "digest").
+// `last` gets the book after the steps.
 std::vector<StepOutcome> run_steps(core::Document doc, const core::Json& steps, std::uint64_t first_id,
-                                   storage::AssetStore& store, bool digest = false, core::Document* last = nullptr);
+                                   storage::AssetStore& store, bool digest = false, core::Document* last = nullptr,
+                                   const std::function<void(core::Document&, std::size_t, const StepOutcome&)>& after_step = {});
 
 // The full snapshot and the project.json payload as Python's v3 writer writes it (without "revision") of `doc`.
 StepOutcome state_of(const core::Document& doc, storage::AssetStore& store);
@@ -46,5 +60,45 @@ StepOutcome state_of(const core::Document& doc, storage::AssetStore& store);
 // C++ "python_error" whose message is the ValueError's (Python's command line prints it as the error) or ends with
 // "<exception>: <message>" (where Python's command line stops with a traceback).
 std::string compare_step(const StepOutcome& cpp, const core::Json& python);
+
+// Python's words without the addresses of its objects ("<_io.BytesIO object at 0x7f…>" → "<_io.BytesIO object>").
+std::string without_addresses(std::string text);
+
+// The layers' PNGs of `doc` (its pixels, masks and patches) written into `dir` as
+// "<prefix>p<page>-l<layer>-<asset|mask|patchN>.png", as the harness's "dump" writes Python's.
+void dump_pictures(const core::Document& doc, storage::AssetStore& store, const QString& dir, const std::string& prefix);
+
+// Where the pictures `dump_pictures` wrote in `cpp_dir` differ from Python's in `py_dir` (the files whose names start
+// with `prefix`): for each, the mode and size or the pixels that differ (how many, by how much at most, where). ""
+// when they hold the same pixels.
+std::string picture_differences(const QString& cpp_dir, const QString& py_dir, const std::string& prefix);
+
+// Where compare_step cannot ask for the same bits (a perspective warp: Python's homography comes from numpy's SVD,
+// LAPACK through OpenBLAS, whose last bits depend on its kernels and the machine — this build solves the same
+// equations its own way): what C++ and Python each kept, for compare_step_near.
+struct NearSides {
+    storage::AssetStore* cpp_store = nullptr;  // the C++ payload's JSON assets (the lines of a layer)
+    QString py_store;                          // the Python job's "store"
+    QString cpp_dump;                          // the C++ pictures of the step (dump_pictures)
+    QString py_dump;                           // Python's (the harness's "dump")
+    std::string prefix;                        // "<step>-"
+    std::vector<std::string> numeric_paths;
+    std::vector<std::string> picture_paths;
+};
+
+// compare_step, with numbers equal within 1e-9 (relative), a layer's lines (its JSON asset) read on each side and
+// compared so, and the pictures (compared by their pixels) within ARCHITECTURE.md §9: the same mode and size, the mean
+// difference of the values at most 2/255 and 99% of the pixels within 32/255. `tolerated` (when given) counts what
+// differed within the tolerance. "" when they match so.
+// Require all generated steps exactly once, with their full operation count.
+std::string step_coverage_error(const core::Json& sequences, const std::vector<std::size_t>& taken,
+    const std::set<std::pair<std::size_t, std::size_t>>& compared, std::size_t steps, std::size_t ops);
+
+std::string compare_picture_near(const QString& cpp_file, const QString& py_file);
+std::string compare_step_near(const StepOutcome& cpp, const core::Json& python, const NearSides& sides, int* tolerated = nullptr);
+
+// Whether a batch (its "ops") warps an area in perspective (transform_area with warp.perspective).
+void affect_perspective(NearSides& sides, const core::Json& ops, const core::Json& payload);
+bool warps_in_perspective(const core::Json& ops);
 
 }  // namespace genko::test
