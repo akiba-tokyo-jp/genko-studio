@@ -1,0 +1,223 @@
+{
+  "classification": "M2-G7主担当・未統合木。M2-G6のSaveAs拒否とpending Recovery交差所見を修正。全工程受入ではない。",
+  "source_pins": {
+    "native/src/app/session.cpp": "3e73f0cc73588c76a3d7d6b3a43aac4898c86daf1275a8d3d4cb354bcb08fead",
+    "native/src/app/session.hpp": "ed41ed68a47f30979ee054ed7f81b2d410ebec41e7cd731a11b83f35c421d4ee",
+    "native/src/app/main_window.cpp": "e1d501bdcdcdd1601d962f45c29917a3539887fada62b47d64c88127c133cf12",
+    "native/src/app/main_window.hpp": "af7a5840e47179940b3907c37b45a13e7d53e8e3ccac848d0aa40a20df3af0b2",
+    "native/src/app/main_window_actions.cpp": "e1dab44e4cbb75e9f17c1693dd599bf85db1433d14bc4d580d9f639d2fc251b3",
+    "native/tests/unit/test_session.cpp": "0e45274cd5c2a04d8404128612ee4a57c08d9e9457fcd3c4ad36689ce3716275",
+    "native/tests/gui/test_gui_save.cpp": "6bbd5337e77af9fe65c68ddb9bce7db1d68a38564edf650328662178a90d7299",
+    "tools/acceptance/native_gui_proof.py": "bccfc587630e6ccf7034f162b23409ec3a0f850346ffec616f38bf9091f46321"
+  },
+  "debug_log": "m2g7-debug-four-verified.log",
+  "prior_session_review": "m2g6-session-review.json",
+  "prior_window_review": "m2g6-window-review.json",
+  "asan_log": "m2g7-asan-four-verified.log",
+  "failed_oracle_logs_preserved": [
+    "m2g7-debug-four-final.log",
+    "m2g7-asan-four-final.log"
+  ],
+  "debug_exit_code": 0,
+  "debug_ctest_total": 4,
+  "debug_qt_totals": [
+    {
+      "passed": 44,
+      "failed": 0,
+      "skipped": 0,
+      "blacklisted": 0
+    },
+    {
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "blacklisted": 0
+    },
+    {
+      "passed": 35,
+      "failed": 0,
+      "skipped": 0,
+      "blacklisted": 0
+    },
+    {
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "blacklisted": 0
+    }
+  ],
+  "source_unchanged_after_debug": true,
+  "asan_process": "proc_c894777ccdfb",
+  "asan_exit_code": 0,
+  "asan_ctest_total": 4,
+  "asan_qt_totals": [
+    {
+      "passed": 44,
+      "failed": 0,
+      "skipped": 0,
+      "blacklisted": 0
+    },
+    {
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "blacklisted": 0
+    },
+    {
+      "passed": 35,
+      "failed": 0,
+      "skipped": 0,
+      "blacklisted": 0
+    },
+    {
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "blacklisted": 0
+    }
+  ],
+  "source_unchanged_after_asan": true,
+  "artifact_pins": {
+    "build/linux-debug/tests/test_session": "e717387757e42163b67d322f5a41dff577b751b67954b528267a0ceffd0aaa1e",
+    "build/linux-debug/tests/test_app_e2e": "7ed744c6c5d490758fb81018853f51115f1502ca5de9863f9cf49d5766c2a536",
+    "build/linux-debug/tests/test_gui_actions": "392bc3146504209cfb64563fc65939f3590f8eeeada7f158b5271048bab6fe2e",
+    "build/linux-debug/tests/test_gui_save": "d30994ea0b94cc3eba225c9f25d6030eb3fe9c97c4bffb6ad85dc44625dbe73f",
+    "build/linux-asan/tests/test_session": "e3b6ea80a4c29e001128f336559da54d6d32cbc242a0320fd72b558d3993b7bd",
+    "build/linux-asan/tests/test_app_e2e": "779a7b651d60d22df4196db413ea186a7c049afa57d98f3fc22609a0241508e6",
+    "build/linux-asan/tests/test_gui_actions": "7f19aa42173e6b074186265660e75e93e3f5f8a2579703e8e450fce638541ad2",
+    "build/linux-asan/tests/test_gui_save": "a9ee6430249a5ddabdcfed9d3e3992156b30c9bfbbdcc8eb8b74e7a87ac6166e"
+  },
+  "independent_session_review": {
+    "scope_passed": true,
+    "report": "m2g7-session-review.json",
+    "kind": "限定静的。独立実行なし"
+  },
+  "independent_window_review": {
+    "scope_passed": true,
+    "report": "m2g6-window-review.json",
+    "kind": "限定静的。独立実行なし"
+  },
+  "native_gui": {
+    "exit_code": 0,
+    "platform": "xcb",
+    "archive": "/home/hermes/genko-test/cpp-impl/reviews/m2g7-native-gui-proof",
+    "qt_passed": 35,
+    "source_pins": {
+      "native/src/app/session.cpp": "3e73f0cc73588c76a3d7d6b3a43aac4898c86daf1275a8d3d4cb354bcb08fead",
+      "native/src/app/session.hpp": "ed41ed68a47f30979ee054ed7f81b2d410ebec41e7cd731a11b83f35c421d4ee",
+      "native/src/app/main_window.cpp": "e1d501bdcdcdd1601d962f45c29917a3539887fada62b47d64c88127c133cf12",
+      "native/src/app/main_window.hpp": "af7a5840e47179940b3907c37b45a13e7d53e8e3ccac848d0aa40a20df3af0b2",
+      "native/src/app/main_window_actions.cpp": "e1dab44e4cbb75e9f17c1693dd599bf85db1433d14bc4d580d9f639d2fc251b3",
+      "native/tests/unit/test_session.cpp": "0e45274cd5c2a04d8404128612ee4a57c08d9e9457fcd3c4ad36689ce3716275",
+      "native/tests/gui/test_gui_save.cpp": "6bbd5337e77af9fe65c68ddb9bce7db1d68a38564edf650328662178a90d7299",
+      "tools/acceptance/native_gui_proof.py": "bccfc587630e6ccf7034f162b23409ec3a0f850346ffec616f38bf9091f46321"
+    },
+    "binary_sha256": "d30994ea0b94cc3eba225c9f25d6030eb3fe9c97c4bffb6ad85dc44625dbe73f"
+  },
+  "performance": {
+    "five_minute_exit_code": 0,
+    "kind": "1CPU/2GiBの内部ストレス測定。正式AC-PERFではない。",
+    "summary": {
+      "platform": "xcb",
+      "minutes": 5.0,
+      "input_to_live": {
+        "n": 43780,
+        "p50": 0.579765,
+        "p95": 27.098658,
+        "p99": 45.409038,
+        "mean": 3.4755397780493125,
+        "max": 69.752623
+      },
+      "input_to_update": {
+        "n": 43780,
+        "p50": 0.583217,
+        "p95": 27.102128,
+        "p99": 45.413067,
+        "mean": 3.479029505230677,
+        "max": 69.754676
+      },
+      "input_to_paint": {
+        "n": 43780,
+        "p50": 0.959274,
+        "p95": 30.549526,
+        "p99": 48.910405,
+        "mean": 4.276434249246287,
+        "max": 75.577631
+      },
+      "input_queue": {
+        "n": 43780,
+        "p50": 0.222066,
+        "p95": 26.755527,
+        "p99": 44.949721,
+        "mean": 3.1448674716308966,
+        "max": 69.714353
+      },
+      "applied": {
+        "n": 220,
+        "p50": 4.049117,
+        "p95": 52.059805,
+        "p99": 52.924136,
+        "mean": 9.399492359090909,
+        "max": 53.315654
+      },
+      "commit_shown": {
+        "n": 220,
+        "p50": 9.919841,
+        "p95": 21.996054,
+        "p99": 57.4942,
+        "mean": 12.58129917272727,
+        "max": 76.260275
+      },
+      "undo_shown": {
+        "n": 22,
+        "p50": 12.750112,
+        "p95": 59.230889,
+        "p99": 61.868531,
+        "mean": 23.16472390909091,
+        "max": 61.868531
+      },
+      "page_first": {
+        "n": 4,
+        "p50": 49.933389,
+        "p95": 65.601336,
+        "p99": 65.601336,
+        "mean": 49.826719,
+        "max": 65.601336
+      },
+      "page_fine": {
+        "n": 4,
+        "p50": 257.089485,
+        "p95": 380.15305,
+        "p99": 380.15305,
+        "mean": 270.4224495,
+        "max": 380.15305
+      },
+      "saves": {
+        "n": 31,
+        "p50": 2544.795261,
+        "p95": 5548.689618,
+        "p99": 6559.784898,
+        "mean": 2491.1584730000004,
+        "max": 6559.784898
+      },
+      "stalls_during_saves": {
+        "n": 855,
+        "p50": 48.395485,
+        "p95": 64.225091,
+        "p99": 72.320323,
+        "mean": 45.0810307157895,
+        "max": 145.316367
+      },
+      "stalls_all": {
+        "n": 1715,
+        "p50": 23.879572,
+        "p95": 60.623301,
+        "p99": 69.35998,
+        "mean": 29.8365143959184,
+        "max": 145.316367
+      },
+      "saving_seconds": 77.225912663,
+      "p99_lateness_during_saves": "54.51 ms"
+    }
+  }
+}

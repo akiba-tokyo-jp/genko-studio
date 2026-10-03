@@ -1,0 +1,10 @@
+<!DOCTYPE RCC>
+<!-- The screen's letters (theme.py: IBM Plex Sans JP, SIL OFL; src/genko/fonts/licenses/), built in as Python bundles
+     them. A big resource: compiled straight to an object file (qt_add_big_resources). -->
+<RCC version="1.0">
+  <qresource prefix="/genko">
+    <file alias="fonts/IBMPlexSansJP-Regular.ttf">../../src/genko/fonts/ui/IBMPlexSansJP-Regular.ttf</file>
+    <file alias="fonts/IBMPlexSansJP-Medium.ttf">../../src/genko/fonts/ui/IBMPlexSansJP-Medium.ttf</file>
+    <file alias="fonts/IBMPlexSansJP-Bold.ttf">../../src/genko/fonts/ui/IBMPlexSansJP-Bold.ttf</file>
+  </qresource>
+</RCC>

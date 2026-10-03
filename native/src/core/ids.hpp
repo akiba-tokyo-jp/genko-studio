@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace genko::core {
 
@@ -43,5 +45,29 @@ private:
 
 // "000000000001", "000000000002", … (tools/migration/pyref_harness.py --ids makes the same).
 ScopedIdSource::Source counting_ids(std::uint64_t first = 1);
+
+// The ids new_id() gives on this thread while it lives: first `given` (in order), then new ones as usual; every id it
+// gives is recorded (taken()). The app uses it to give a pen line the id its live picture was drawn with (the id is
+// the seed of the brush's grain and scatter), and to apply a change again on a rebase with the ids it had. Scripts on
+// one thread nest (the innermost one answers); other threads are not affected.
+class ScopedIdScript {
+public:
+    explicit ScopedIdScript(std::vector<std::string> given = {});
+    ~ScopedIdScript();
+    ScopedIdScript(const ScopedIdScript&) = delete;
+    ScopedIdScript& operator=(const ScopedIdScript&) = delete;
+
+    // The ids new_id() gave while this script was the innermost one, in order.
+    const std::vector<std::string>& taken() const { return taken_; }
+
+private:
+    friend std::string new_id();
+    std::string next();
+
+    std::vector<std::string> given_;
+    std::size_t used_ = 0;
+    std::vector<std::string> taken_;
+    ScopedIdScript* outer_ = nullptr;
+};
 
 }  // namespace genko::core
