@@ -1540,8 +1540,10 @@ void set_stroke_width(OpContext& c) {
         }
         if (const Json* scale = core::get(c.op, "scale"); scale != nullptr && !scale->is_null()) {
             const double scaled = copy.width_mm * core::finite_float(*scale, "scale");
-            if (!std::isfinite(scaled)) throw OpError("scaled width_mm must be a finite number");
-            copy.width_mm = core::py_max(0.05, scaled);
+            const double bounded = core::py_max(0.05, scaled);
+            // A negative overflow still has Python's valid minimum-width result.
+            if (std::isnan(scaled) || !std::isfinite(bounded)) throw OpError("scaled width_mm must be a finite number");
+            copy.width_mm = bounded;
         }
         if (core::truthy_at(c.op, "kind")) copy.kind = core::brush_kind(c.op["kind"], c.doc);
         if (core::truthy_at(c.op, "rgb")) {

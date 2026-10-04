@@ -319,6 +319,20 @@ private slots:
         QCOMPARE(layer_by_id(changed.doc.page(0), "pen-1")->strokes->items.front()->pressure, (std::vector<double>{0.2,0.5}));
     }
 
+    void strokeWidthClampsNegativeOverflow() {
+        const Document doc = fixture();
+        const auto selected = layer_by_id(doc.page(0), "pen-1")->strokes->items.front();
+        const std::string before = state(doc);
+        const Json ops = Json::array({Json::object({
+            {"op", "set_stroke_width"}, {"page", 1}, {"layer_id", "pen-1"},
+            {"ids", Json::array({selected->id})}, {"width_mm", 1e308}, {"scale", -1e308}})});
+        QCOMPARE(error_of(doc, ops.dump(), kPerson), std::string("(applied)"));
+        const auto changed = bus().apply(doc, ops, Actor(kPerson));
+        QCOMPARE(layer_by_id(changed.doc.page(0), "pen-1")->strokes->items.front()->width_mm, 0.05);
+        QCOMPARE(layer_by_id(changed.doc.page(0), "pen-1")->strokes->items.front()->id, selected->id);
+        QCOMPARE(state(doc), before);
+    }
+
     void strokeWidthRejectsOverflowAtomically() {
         const Document doc = fixture();
         const std::string before = state(doc);

@@ -574,6 +574,7 @@
     {"n": "reshape_stroke missing line", "op": "reshape_stroke", "ok": false, "ops": [{"op": "reshape_stroke", "page": 1, "layer_id": "pen-1", "stroke_id": "missing", "width_mm": 1}]},
     {"n": "reshape_stroke one coordinate", "op": "reshape_stroke", "ok": false, "ops": [{"op": "reshape_stroke", "page": 1, "layer_id": "pen-1", "stroke_id": "000000000021", "points": [[1, 2]]}]},
     {"n": "reshape_stroke invalid width", "op": "reshape_stroke", "ok": false, "ops": [{"op": "reshape_stroke", "page": 1, "layer_id": "pen-1", "stroke_id": "000000000021", "width_mm": "x"}]},
-    {"n": "reshape_stroke locked target", "op": "reshape_stroke", "ok": false, "ops": [{"op": "reshape_stroke", "page": 1, "layer_id": "lock-1", "stroke_id": "000000000021", "width_mm": 1}]}
+    {"n": "reshape_stroke locked target", "op": "reshape_stroke", "ok": false, "ops": [{"op": "reshape_stroke", "page": 1, "layer_id": "lock-1", "stroke_id": "000000000021", "width_mm": 1}]},
+    {"n": "set_stroke_width negative overflow clamps safely", "op": "set_stroke_width", "ok": true, "ops": [{"op": "set_stroke_width", "page": 1, "layer_id": "pen-1", "ids": ["000000000021"], "width_mm": 1e+308, "scale": -1e+308}]}
   ]
 }

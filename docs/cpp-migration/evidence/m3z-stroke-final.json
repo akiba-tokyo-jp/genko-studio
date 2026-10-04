@@ -1,0 +1,365 @@
+{
+  "schema": "genko-m3z-final-evidence@1",
+  "scope": "線幅/線形状backend限定。full M3・統合後全体・Windows未受入。",
+  "configurations": {
+    "debug": {
+      "qt_totals": [
+        [
+          "19",
+          "0",
+          "0"
+        ],
+        [
+          "73",
+          "0",
+          "0"
+        ],
+        [
+          "24",
+          "0",
+          "0"
+        ],
+        [
+          "3",
+          "0",
+          "0"
+        ]
+      ],
+      "qt_skip_lines": [],
+      "source_manifest_sha256": "9dc275ade15904127191f64024ac2963c746975bad70447280707e1a4fbab7e1",
+      "binary_sha256": {
+        "build/hermes-merged-debug/src/api/genko": "f713b2a1b16d5cdef4bb78544ab770c532049584494eef487341b8d62c65b12d",
+        "build/hermes-merged-debug/tests/test_command_bus": "23fb10e72179a4de0f34682aa31cf240da29db4294e2dc49cf6507bb2e4a4201",
+        "build/hermes-merged-debug/tests/test_raster_ops": "b2613bc9ef29be66ed5bc886d966bc83aa92b7bc9f57cc3b49dd4527e406eabe",
+        "build/hermes-merged-debug/tests/test_contract_raster_ops": "579bee788228639d6581604f70f301b4370a2326aca3104cece00a404d427ef7",
+        "build/hermes-merged-debug/tests/test_contract_raster_cli": "99bcdcdd4c7e98179e7bb65190b40be057d3c7f78fee87218e5c10480c2cf7e4"
+      },
+      "resources": [
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "6029312",
+          "memory.swap.max": "0"
+        },
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "1382010880",
+          "memory.swap.max": "0"
+        }
+      ],
+      "log_sha256": "7d593fd65ff268a16563b5ccba246f747582ff8f5e1c3837c09dd61e6f6968b5",
+      "ctest_ok": true,
+      "sanitizer_clean": true,
+      "cli23": {
+        "passed": true,
+        "count": 23,
+        "log_sha256": "1924d7f47799b6069effd174f03b6b808e49924784ca5f19552a86686d1eda2c"
+      },
+      "finite_input_checks": {
+        "passed": true,
+        "count": 8,
+        "checks": [
+          {
+            "field": "width_mm",
+            "value": "nan",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "width_mm",
+            "value": "inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "width_mm",
+            "value": "-inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "width_mm",
+            "value": "1e999",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "nan",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "-inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "1e999",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          }
+        ],
+        "binary_sha256": "f713b2a1b16d5cdef4bb78544ab770c532049584494eef487341b8d62c65b12d",
+        "sanitizer_checked_per_child": true
+      }
+    },
+    "release": {
+      "qt_totals": [
+        [
+          "19",
+          "0",
+          "0"
+        ],
+        [
+          "73",
+          "0",
+          "0"
+        ],
+        [
+          "24",
+          "0",
+          "0"
+        ],
+        [
+          "3",
+          "0",
+          "0"
+        ]
+      ],
+      "qt_skip_lines": [],
+      "source_manifest_sha256": "9dc275ade15904127191f64024ac2963c746975bad70447280707e1a4fbab7e1",
+      "binary_sha256": {
+        "build/hermes-merged-release/src/api/genko": "62ac55d920240749231227ce32b87ccd0baad83e8ae378cfe34c9421d9120fe1",
+        "build/hermes-merged-release/tests/test_command_bus": "db4d19948260c26533d0ab0133074418c52bec2c2fd146b1529bd38d25ee98f0",
+        "build/hermes-merged-release/tests/test_raster_ops": "bf4a43a7c0aec7b0b6d2a4c07b23ade11f21ef6f80dffe6d11ee9f5270018d88",
+        "build/hermes-merged-release/tests/test_contract_raster_ops": "94baca2342bbc4be2902791472447d73b5adfadf62354ad018e081f4fa4a87f2",
+        "build/hermes-merged-release/tests/test_contract_raster_cli": "2db98f436296c80cbbed58636ae039bf86ceb86fe458ead63949d09649e2fd21"
+      },
+      "resources": [
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "5890048",
+          "memory.swap.max": "0"
+        },
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "1396633600",
+          "memory.swap.max": "0"
+        }
+      ],
+      "log_sha256": "022192180b5daf1654911d6b8db81d38e2ab9707ab1d17cd72df82a904e9c86f",
+      "ctest_ok": true,
+      "sanitizer_clean": true,
+      "cli23": {
+        "passed": true,
+        "count": 23,
+        "log_sha256": "9ddb491f9fe7a8a3a15fc614b5ef4585eb8fb104aabebbcc2d8b7f2bd3a3c6a7"
+      },
+      "finite_input_checks": {
+        "passed": true,
+        "count": 8,
+        "checks": [
+          {
+            "field": "width_mm",
+            "value": "nan",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "width_mm",
+            "value": "inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "width_mm",
+            "value": "-inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "width_mm",
+            "value": "1e999",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "nan",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "-inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "1e999",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          }
+        ],
+        "binary_sha256": "62ac55d920240749231227ce32b87ccd0baad83e8ae378cfe34c9421d9120fe1",
+        "sanitizer_checked_per_child": true
+      }
+    },
+    "asan": {
+      "qt_totals": [
+        [
+          "19",
+          "0",
+          "0"
+        ],
+        [
+          "73",
+          "0",
+          "0"
+        ],
+        [
+          "24",
+          "0",
+          "0"
+        ],
+        [
+          "3",
+          "0",
+          "0"
+        ]
+      ],
+      "qt_skip_lines": [],
+      "source_manifest_sha256": "9dc275ade15904127191f64024ac2963c746975bad70447280707e1a4fbab7e1",
+      "binary_sha256": {
+        "build/hermes-merged-asan/src/api/genko": "9c58b13f4bdc56399155c829ae10674333b1da8a27473d42f8a1c83291640ca6",
+        "build/hermes-merged-asan/tests/test_command_bus": "322b380ca4ee2cb368716874a321081aa3ebee69bb026c066fdb2a4bbf1ab680",
+        "build/hermes-merged-asan/tests/test_raster_ops": "ec55ebe7f076319bb0af3a6886295eba1a726456218e128178542f20e7895a7b",
+        "build/hermes-merged-asan/tests/test_contract_raster_ops": "5b7e84a30891bcdd521dcc44e2e900908230a248447f3f1317991f97b86c96cf",
+        "build/hermes-merged-asan/tests/test_contract_raster_cli": "c11c5b2e98b4535b7b2f1075272949a3437971c987db61792eab30e8d5aba5ad"
+      },
+      "resources": [
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "5857280",
+          "memory.swap.max": "0"
+        },
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 3684\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "2147483648",
+          "memory.swap.max": "0"
+        }
+      ],
+      "log_sha256": "81cc118216d5cbe8958d706a1ef835e842ec573e207eaa99b8464e03af93f40d",
+      "ctest_ok": true,
+      "sanitizer_clean": true,
+      "cli23": {
+        "passed": true,
+        "count": 23,
+        "log_sha256": "4ab478e04ea2667f66e8296813ef87cd8aff0fbbfcf8da454c99b149d81eb22e"
+      },
+      "finite_input_checks": {
+        "passed": true,
+        "count": 8,
+        "checks": [
+          {
+            "field": "width_mm",
+            "value": "nan",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "width_mm",
+            "value": "inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "width_mm",
+            "value": "-inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "width_mm",
+            "value": "1e999",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "nan",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "-inf",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          },
+          {
+            "field": "scale",
+            "value": "1e999",
+            "refused": true,
+            "original_bytes_and_paths_preserved": true
+          }
+        ],
+        "binary_sha256": "9c58b13f4bdc56399155c829ae10674333b1da8a27473d42f8a1c83291640ca6",
+        "sanitizer_checked_per_child": true
+      }
+    }
+  },
+  "fixtures": {
+    "prior_498_preserved_order_and_contents": true,
+    "current_fixed": 499,
+    "original_generated": 150,
+    "additional_generated": 5,
+    "fixed_pictures_compared": 1981,
+    "unreadable_or_missing_pictures": 0,
+    "sequences_stopped_unported": 0
+  },
+  "review": {
+    "scope_passed": true,
+    "report_sha256": "3782ebaaf5ac280b561e1d197d18c5ce1c327fdb3cbf5984efc54fc29ef5db81",
+    "low_test_gap_direct_cli_checks": "width_mm/scale各nan,inf,-inf,1e999を当該genko binaryで全3構成、前置note/元filebyte/path/解放lockの不変拒否を追加実測。production/test cpp sourceは変更しない。"
+  },
+  "regression": {
+    "normal_negative_overflow": "Python max(0.05, -inf)の正常0.05を受理。負overflowRED→GREEN＋実Python snapshot/6画像一致。",
+    "unsafe_positive_overflow": "前置変更も原子的拒否し通常有限scaleを受理する対照を維持。",
+    "nan": "isnan(scaled)の明示拒否を維持。",
+    "other_initial_four_fixes": "元source/試験を変更せず。"
+  }
+}
