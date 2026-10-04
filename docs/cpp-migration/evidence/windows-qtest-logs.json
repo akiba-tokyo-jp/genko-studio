@@ -1,0 +1,54 @@
+{
+  "schema": "genko-ci-qtest-evidence@1",
+  "scope": "Windows成功後に同じ実行物を再実行してQtTestログとskip理由を監査。元CTestそのもののslotログとは区別。",
+  "target": "native/integrationの92d6 Windows修正を含む将来統合木向け。m3z旧app7件を新8件の実測としない。",
+  "workflow_sha256": "5508b36fa14cdc9cb8228545b566b75880d5f41a4530282a7bc19c14ea0172c8",
+  "static_review_sha256": "2c78cc44980738cf8a77937a8b565ca3c07c6c7f3f446bc499dde57961ad71ef",
+  "static_scope_passed": true,
+  "actual_windows_path_evidence": {
+    "debug": {
+      "artifact_sha256": "f349854ea170dbd8a512d66bf324e47a364a5e1b12957be7de9dcd2f6666d7c0",
+      "actual_windows_executables": {
+        "test_image_split_oom": "D:\\a\\genko-studio\\genko-studio\\build\\windows-debug\\test_image_split_oom.exe",
+        "test_gui_layout": "D:\\a\\genko-studio\\genko-studio\\build\\windows-debug\\test_gui_layout.exe",
+        "test_app_e2e": "D:\\a\\genko-studio\\genko-studio\\build\\windows-debug\\test_app_e2e.exe"
+      },
+      "ctest": "33/33",
+      "qt_slot_pass_skip_counts_from_this_artifact": "unknown"
+    },
+    "release": {
+      "artifact_sha256": "c0a444d5ecf59c2005b4999648420d2194d5f10aa1eb3fc37cc0b009c0201e3e",
+      "actual_windows_executables": {
+        "test_image_split_oom": "D:\\a\\genko-studio\\genko-studio\\build\\windows-release\\test_image_split_oom.exe",
+        "test_gui_layout": "D:\\a\\genko-studio\\genko-studio\\build\\windows-release\\test_gui_layout.exe",
+        "test_app_e2e": "D:\\a\\genko-studio\\genko-studio\\build\\windows-release\\test_app_e2e.exe"
+      },
+      "ctest": "33/33",
+      "qt_slot_pass_skip_counts_from_this_artifact": "unknown"
+    }
+  },
+  "expected_counts": {
+    "WindowsDebug": {
+      "gui": 19,
+      "split": 7,
+      "app": 8,
+      "skip": 0
+    },
+    "WindowsRelease": {
+      "gui": 19,
+      "split": 7,
+      "app_pass": 0,
+      "app_fault_disabled_skip": 1
+    }
+  },
+  "new_step_windows_runtime": "pending_target_CI",
+  "retracted_finding": "Linuxのtests/配置からWindows配置を推測した旧QTEST-SUCCESS-EXE-PATH。実Windowsexeはbuildルートでcwdのみtests。元レポートは保全。",
+  "unchanged": [
+    "認証・権限・費用設定",
+    "画面/DPI条件",
+    "既存CTest対象",
+    "既存artifact保持7日",
+    "RootQt設定/offscreen",
+    "ビルド構成/fault設定"
+  ]
+}

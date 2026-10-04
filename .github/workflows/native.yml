@@ -133,6 +133,39 @@ jobs:
           cmake --build --preset ${{ matrix.preset }} -- -k 0
           # (every test's own output goes to ctest-output.log: QtTest prints which check failed)
           ctest --preset ${{ matrix.preset }} --label-exclude "perf|contract" --no-tests=error -V --output-log "$env:RUNNER_TEMP\ctest-output.log"
+      - name: QtTestの成功時ログを保持
+        if: success() && steps.build.outcome == 'success'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64\bin;$env:PATH"
+          $build = Join-Path $PWD 'build\${{ matrix.preset }}'
+          foreach ($name in @('test_gui_layout', 'test_image_split_oom', 'test_app_e2e')) {
+            $exe = Join-Path $build "$name.exe"
+            $log = "$env:RUNNER_TEMP\qtest-$name.txt"
+            Push-Location (Join-Path $build 'tests')
+            try {
+              & $exe -o "$log,txt" *> "$env:RUNNER_TEMP\stdout-$name.txt"
+              if ($LASTEXITCODE -ne 0) { throw "$name exited with $LASTEXITCODE" }
+            } finally { Pop-Location }
+            $text = Get-Content $log -Raw -Encoding utf8
+            $totals = [regex]::Matches($text, 'Totals: ([0-9]+) passed, ([0-9]+) failed, ([0-9]+) skipped')
+            if ($totals.Count -ne 1) { throw "$name has no unambiguous QtTest totals" }
+            $allowFaultSkip = $name -eq 'test_app_e2e' -and '${{ matrix.preset }}' -eq 'windows-release'
+            $expectedPassed = if ($name -eq 'test_gui_layout') { 19 } elseif ($name -eq 'test_image_split_oom') { 7 } elseif ($allowFaultSkip) { 0 } else { 8 }
+            $expectedSkipped = if ($allowFaultSkip) { 1 } else { 0 }
+            if ([int]$totals[0].Groups[1].Value -ne $expectedPassed -or [int]$totals[0].Groups[2].Value -ne 0 -or [int]$totals[0].Groups[3].Value -ne $expectedSkipped) {
+              throw "$name unexpected QtTest totals: $($totals[0].Value)"
+            }
+            if ($allowFaultSkip -and $text -notmatch 'SKIP\s+: TestAppE2e::initTestCase\(\).*fault injection') {
+              throw 'Release E2E skip was not the expected disabled fault-injection suite'
+            }
+            Write-Output "=== ${name}: QtTest records ==="
+            Get-Content $log -Encoding utf8
+          }
       - name: Failed tests, run one by one
         if: failure() && steps.build.outcome == 'failure'
         shell: pwsh

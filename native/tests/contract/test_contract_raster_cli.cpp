@@ -90,7 +90,8 @@ const char* const kOps[] = {"convert_layer", "merge_down",    "merge_layers", "m
                             "group_layers",  "set_layer_mask", "paint_mask",   "put_raster",    "filter_raster",
                             "fill",          "fill_area",     "fill_enclosed", "fill_gaps",     "flood_fill",
                             "gradient_fill", "delete_area",   "transform_area", "paste",        "store_area",
-                            "forget_area",   "set_paper",     "set_timelapse", "erase",         "erase_raster"};
+                            "forget_area",   "set_paper",     "set_timelapse", "erase",         "erase_raster",
+                            "set_stroke_width", "reshape_stroke"};
 
 }  // namespace
 

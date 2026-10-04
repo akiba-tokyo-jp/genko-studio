@@ -1486,6 +1486,77 @@ void erase(OpContext& c) {
     }
 }
 
+// ops.reshape_stroke: edit the existing line, never introduce a new identity.
+void reshape_stroke(OpContext& c) {
+    Page& page = c.doc.edit_page(core::require_page(c.doc, c.op));
+    Layer& target = core::paint_target(page, c.op);
+    const Json* id = core::get(c.op, "stroke_id");
+    std::vector<core::StrokePtr> lines = target.strokes->items;
+    const auto found = std::find_if(lines.begin(), lines.end(), [id](const core::StrokePtr& line) {
+        return id != nullptr && Json(line->id) == *id;
+    });
+    if (found == lines.end()) throw OpError("no line " + core::py_str(id == nullptr ? Json(nullptr) : *id));
+    core::Stroke copy = **found;
+    if (core::truthy_at(c.op, "points")) {
+        const auto points = core::parse_points(c.op["points"]);
+        if (points.size() < 2) throw OpError("points needs at least two [x_mm, y_mm] pairs");
+        for (const auto& point : points) {
+            if (!std::isfinite(point.x) || !std::isfinite(point.y) || (point.p && !std::isfinite(*point.p))) {
+                throw OpError("points and pressure must be finite numbers");
+            }
+        }
+        const auto shape = core::coerce_stroke(points);
+        copy.points = shape.points;
+        if (!shape.pressure.empty()) copy.pressure = shape.pressure;
+        else copy.pressure.resize(std::min(copy.pressure.size(), copy.points.size()));
+        if (!copy.pressure.empty() && copy.pressure.size() != copy.points.size()) copy.pressure.clear();
+    }
+    if (const Json* width = core::get(c.op, "width_mm"); width != nullptr && !width->is_null()) {
+        copy.width_mm = core::py_max(0.05, core::finite_float(*width, "width_mm"));
+    }
+    *found = std::make_shared<const core::Stroke>(std::move(copy));
+    target.strokes = core::make_strokes(std::move(lines));
+}
+
+// ops.set_stroke_width: selected immutable pen lines keep their identities and other data.
+void set_stroke_width(OpContext& c) {
+    Page& page = c.doc.edit_page(core::require_page(c.doc, c.op));
+    Layer& target = core::paint_target(page, c.op);
+    const Json* given = core::get(c.op, "ids");
+    const std::vector<Json> ids = given != nullptr && core::py_truthy(*given)
+            ? core::iterate(*given) : std::vector<Json>{};
+    for (const Json& id : ids) core::require_hashable(id);
+    const Json* area = core::get(c.op, "area");
+    std::optional<selection::AreaTest> inside;
+    if (area != nullptr && core::py_truthy(*area)) inside.emplace(*area);
+    std::vector<core::StrokePtr> lines = target.strokes->items;
+    bool changed = false;
+    for (auto& line : lines) {
+        const bool named = std::find(ids.begin(), ids.end(), Json(line->id)) != ids.end();
+        if (!named && !(inside && inside->stroke_inside(*line))) continue;
+        core::Stroke copy = *line;
+        if (const Json* width = core::get(c.op, "width_mm"); width != nullptr && !width->is_null()) {
+            copy.width_mm = core::py_max(0.05, core::finite_float(*width, "width_mm"));
+        }
+        if (const Json* scale = core::get(c.op, "scale"); scale != nullptr && !scale->is_null()) {
+            const double scaled = copy.width_mm * core::finite_float(*scale, "scale");
+            const double bounded = core::py_max(0.05, scaled);
+            // A negative overflow still has Python's valid minimum-width result.
+            if (std::isnan(scaled) || !std::isfinite(bounded)) throw OpError("scaled width_mm must be a finite number");
+            copy.width_mm = bounded;
+        }
+        if (core::truthy_at(c.op, "kind")) copy.kind = core::brush_kind(c.op["kind"], c.doc);
+        if (core::truthy_at(c.op, "rgb")) {
+            if (core::iterate(c.op["rgb"]).size() != 3) throw OpError("rgb is [r, g, b]");
+            copy.rgb = core::rgb3(c.op["rgb"], "rgb");
+        }
+        line = std::make_shared<const core::Stroke>(std::move(copy));
+        changed = true;
+    }
+    if (!changed) throw OpError("no line there");
+    target.strokes = core::make_strokes(std::move(lines));
+}
+
 // The bus's resolver of the richer areas (selops.resolve on the page the op names)
 // Python's reader makes the book's own brushes known to the process (brushes.register, and define_brush adds to
 // them): the lines these ops draw are drawn with them, as the page is.
@@ -1509,6 +1580,8 @@ Json resolve_area(const Document& doc, std::size_t page, const Json& area) {
 }  // namespace
 
 void register_raster_ops(core::OpRegistry& registry) {
+    registry.add("reshape_stroke", drawing(reshape_stroke));
+    registry.add("set_stroke_width", drawing(set_stroke_width));
     registry.add("convert_layer", drawing(convert_layer));
     registry.add("merge_down", drawing(merge_down));
     registry.add("merge_layers", drawing(merge_layers));
