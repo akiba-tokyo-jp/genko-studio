@@ -144,6 +144,21 @@ const Case kCases[] = {
     {"onion step after source", R"([{"op":"set_onion","page":2,"from":1},{"op":"step_onion","page":2,"delta":1}])", "genko", false},
     {"onion step invalid atomic", R"([{"op":"set_note","page":2,"note":"前置"},{"op":"step_onion","page":2,"delta":{"bad":1}}])", "genko", false},
     {"onion step dry run", R"([{"op":"step_onion","page":2,"delta":100}])", "ai:mine", true},
+    {"lt finite", R"([{"op":"set_lt","page":2,"threshold":0.25}])", "genko", false},
+    {"lt negative no clamp", R"([{"op":"set_lt","page":2,"threshold":"-17.25"}])", "genko", false},
+    {"lt finite large", R"([{"op":"set_lt","page":2,"threshold":1e308}])", "genko", false},
+    {"lt finite large text", R"([{"op":"set_lt","page":2,"threshold":"1e308"}])", "genko", false},
+    {"lt zero float", R"([{"op":"set_lt","page":2,"threshold":0}])", "genko", false},
+    {"lt bool", R"([{"op":"set_lt","page":2,"threshold":false},{"op":"set_lt","page":1,"threshold":true}])", "genko", false},
+    {"lt overwrite", R"([{"op":"set_lt","page":2,"threshold":5},{"op":"set_lt","page":2,"threshold":0.5}])", "genko", false},
+    {"lt missing atomic", R"([{"op":"set_note","page":2,"note":"前置"},{"op":"set_lt","page":2}])", "genko", false},
+    {"lt null atomic", R"([{"op":"set_note","page":2,"note":"前置"},{"op":"set_lt","page":2,"threshold":null}])", "genko", false},
+    {"lt list atomic", R"([{"op":"set_note","page":2,"note":"前置"},{"op":"set_lt","page":2,"threshold":[]}])", "genko", false},
+    {"lt dict atomic", R"([{"op":"set_note","page":2,"note":"前置"},{"op":"set_lt","page":2,"threshold":{"bad":1}}])", "genko", false},
+    {"lt invalid text atomic", R"([{"op":"set_note","page":2,"note":"前置"},{"op":"set_lt","page":2,"threshold":"wrong"}])", "genko", false},
+    {"lt wrong page", R"([{"op":"set_lt","page":9,"threshold":0.25}])", "genko", false},
+    {"lt dry run", R"([{"op":"set_note","page":2,"note":"前置"},{"op":"set_lt","page":2,"threshold":0.25}])", "genko", true},
+    {"lt existing other lock", R"([{"op":"lock_page","page":2,"agent":"ai:other"},{"op":"set_lt","page":2,"threshold":0.25}])", "genko", false},
 };
 
 }  // namespace
@@ -337,7 +352,7 @@ private slots:
             ++n;
         }
         QCOMPARE(n, static_cast<int>(cases.size()));
-        qInfo("Compared %d cases, original 40 retained, onion additions %d", n, n - 40);
+        qInfo("Compared %d cases, original 40 retained, metadata additions %d", n, n - 40);
     }
 
     void legacyUndoMatchesPython() {

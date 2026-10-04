@@ -1,0 +1,117 @@
+{
+  "scope": "保存metadata set_ltの限定受入",
+  "base_commit": "e10c65a9c069cd40dfd556a6a8a42bd97de96ac9",
+  "configurations": {
+    "debug": {
+      "passed": true,
+      "totals": [
+        [
+          "26",
+          "0",
+          "0"
+        ],
+        [
+          "10",
+          "0",
+          "0"
+        ],
+        [
+          "5",
+          "0",
+          "0"
+        ]
+      ],
+      "skips": [],
+      "oracle_cases": 85,
+      "previous_oracle_cases_preserved": 70,
+      "new_lt_cases": 15,
+      "cli23": true,
+      "current_source_binary_verified": true
+    },
+    "release": {
+      "passed": true,
+      "totals": [
+        [
+          "26",
+          "0",
+          "0"
+        ],
+        [
+          "9",
+          "0",
+          "1"
+        ],
+        [
+          "5",
+          "0",
+          "0"
+        ]
+      ],
+      "skips": [
+        "25: SKIP   : TestContractSave::oldWriterWhileConverting() the hook that runs Python mid-copy is only in builds with fault injection"
+      ],
+      "oracle_cases": 85,
+      "previous_oracle_cases_preserved": 70,
+      "new_lt_cases": 15,
+      "cli23": true,
+      "current_source_binary_verified": true
+    },
+    "asan": {
+      "passed": true,
+      "totals": [
+        [
+          "26",
+          "0",
+          "0"
+        ],
+        [
+          "10",
+          "0",
+          "0"
+        ],
+        [
+          "5",
+          "0",
+          "0"
+        ]
+      ],
+      "skips": [],
+      "oracle_cases": 85,
+      "previous_oracle_cases_preserved": 70,
+      "new_lt_cases": 15,
+      "cli23": true,
+      "current_source_binary_verified": true
+    }
+  },
+  "M3_all_features": "未受入",
+  "M7": "未受入",
+  "preview": "未実装・未受入",
+  "whole_matrix": "未実行",
+  "windows": "未実行",
+  "COMP_01a": [
+    "raw JSON非有限3値はCLI dispatch前で拒否",
+    "数値文字列nonfinite3値は前置set_note後の変換時に拒否・原稿不変",
+    "direct Json double nonfinite3値もunitでfinite拒否"
+  ],
+  "implementation": "正しいRED観測後に主担当がfresh実装。先行公式CLI版は主担当test API誤りによる不適格試行として破棄し未採用。",
+  "previous_table_byte_prefix_sha256": "3b257b3298f2024545ea85281c3ae3aa040597a19f57edef13c763908268764a",
+  "independent_static_recheck": {
+    "scope_passed": true,
+    "findings": [],
+    "limitations": [
+      "読み取り専用の限定静的再レビュー。指定された最新版4ファイルと、経路確認に必要な既存helper・parser・CommandBus・CLI・restoreの定義をread/searchで確認した。source変更、git、build、test、terminal、network、子agentは使用していない。書き込みは本JSONのみで、初回レビューは変更していない。",
+      "scope_passedはmetadata単一op set_ltと初回4所見のテスト修正に対する静的判定であり、実コンパイル・実試験の成功を意味しない。主担当のRED/GREEN報告および実行中の正式3構成ゲートを本レビューの実行証拠にしていない。",
+      "初回レビューで指摘されたraw NaN/Infinity/-Infinityとquoted nan/inf/-infはunit・E2Eの両方に残っており、正常値、保存読戻し、Undo/Redo、dry-run、revision拒否、lock拒否の対照も確認した。ただしgitおよび旧版の全ソース比較は禁止されているため、全既存ケースの履歴上の無削除・製品本体の全差分不変は独立証明していない。contractのoriginal 40 retainedというログ文だけを旧ケース不変の証拠にしていない。",
+      "unitの拒否後不変assertは入力docの対象ページnoteとlt_thresholdを確認するもの。全docのstrict比較ではない。E2Eのfiles()はtree_hashes(book_, false)を用いproject.lockを除外するため、files不変はlockファイルを含む全パス不変の意味ではない。いずれもassertの静的確認で、実際の拒否・復元・保存不変の実行観測ではない。",
+      "評価は保存metadataのset_ltに限定する。実lighttable preview、描画、GUI、全M3、M7、移行全体、Windows成功は推定・承認しない。Python floatの全入力文法・全境界の網羅的同値性も承認しない。"
+    ],
+    "summary": "限定静的再レビューは合格。初回M3L-LT-01〜04に未解消の所見はない。01: native/tests/e2e/test_ops_e2e.cpp:37のapply(const std::string&, const QString&, const QStringList&)に対し:342はtext.toStdString()を明示し、QString/std::string不一致を解消。helper:40はactorを--agentとして渡し、support/testsupport.cpp:204-209のrun_genkoも引数を改変しない。02: E2E:333の保存actor human:作者と:335/:337のundo/redo --as human:作者が一致する。CLI:581-588のrestore actorおよびstorage/undo.cpp:48-50の同一actor条件に適合し、nullへの復元と-17.25への再復元assertを維持。03: unit:197-206は元のraw3/quoted3を削除せず、raw3にはNoneType、quoted3にはthreshold must be a finite numberを期待する。unit helper:27はParseRepairsを受け取らずparse_python_jsonを呼び、core/json.cpp:371-373がraw非有限リテラルをnullへ修復するため、raw3はto_float(null)の型拒否経路であり、非有限doubleがset_ltへ到達した証拠ではない。quoted3は文字列を数値へ変換後、core/pyops.cpp:340-343のisfiniteで拒否する。追加unit:207-214はnumeric_limits<double>のquiet_NaN、正Infinity、負Infinityを直接Json::objectのthresholdに入れ、serialize/parseを介さずerror_of→CommandBusへ渡す。pyconv.cpp:170-182はnumber_floatのdoubleを返すため、directdouble3はset_lt→finite_floatの有限性拒否経路を独立に検査する。全拒否ケースで元docのnote空・lt_threshold未設定assertを保持し、:215-216に通常値0.25の正対照を残す。04: E2E:339-347もraw3/quoted3を維持し、raw3にはops must not hold NaN or Infinity (at /1/threshold)、quoted3にはthreshold must be a finite numberを分けて期待する。いずれもexit 1、code apply、files不変を要求する。CLI:488-492はraw3をParseRepairs.nonfiniteでlock取得・dispatch・前置set_noteより前に拒否し、quoted3だけがCLI:554-555のbus.applyへ到達して前置set_note後のset_lt変換で拒否される。CommandBus:729の作業コピー、model.cpp:420-423のページCOW、set_ltのedit_pageより前のfinite検査、およびCLI:571のSaver呼出しがbus.apply成功後にのみある構造と整合する。ops_pages.cpp:217-223の本体はrequire_page→missing threshold拒否→finite_float→Num(double)のmetadata更新で、負値・大きい有限値のclampを導入していない。contract/test_contract_save.cpp:147-161には通常値・数値文字列・整数・bool・overwrite・型/ページ拒否・前置変更・dry-run・lockのケースが残り、:294でkCases全体を取り込み、:330-349でPython返信とproject.jsonをexpect_same/strict_equalで比較し、:354で比較完了をcases.size()に照合する。非有限値のCOMP-01a安全拒否を通常Python成功parityに混ぜていない。範囲内に追加の静的欠陥は認めないが、正式build/unit/contract/E2Eの実成功は主担当のゲート結果で別途確認が必要。"
+  },
+  "source_sha256": {
+    "native/src/core/ops_pages.cpp": "5e6d1444924d5fb27424f28dc8fa2cc423c6d0341f3939194f551024616bfdfd",
+    "native/tests/unit/test_command_bus.cpp": "fb80083e2df2f96397379369f4e0bcc70f044787d6e52031699c94b2dab7dd13",
+    "native/tests/contract/test_contract_save.cpp": "e58a8e0146867a010431e19bb3adbdc06fd835f4ed0a20d1fa1b4e810440cdef",
+    "native/tests/e2e/test_ops_e2e.cpp": "de131f294fe0a9286f8555edb4771bec54a7dc821a627849a7bb1697402751b9"
+  },
+  "limited_acceptance_passed": true
+}

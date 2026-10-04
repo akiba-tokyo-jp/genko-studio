@@ -177,6 +177,45 @@ private slots:
         QVERIFY(from_page.doc.page(2).onion_from->same(Num(2)));
     }
 
+    void lightTableThresholdKeepsFinitePythonValues() {
+        const Document doc = book();
+        const Json first = ops(R"([{"op":"set_lt","page":2,"threshold":"-17.25"}])");
+        const std::string error = error_of(doc, first);
+        QVERIFY2(error == "(applied)", error.c_str());
+        const auto set = apply(doc, R"([{"op":"set_lt","page":2,"threshold":"-17.25"}])");
+        QVERIFY(set.doc.page(0).lt_threshold == std::nullopt);
+        QVERIFY(set.doc.page(1).lt_threshold->same(Num(-17.25)));
+        const auto big = apply(set.doc, R"([{"op":"set_lt","page":2,"threshold":1e308}])");
+        QVERIFY(big.doc.page(1).lt_threshold->same(Num(1e308)));
+        const auto zero = apply(big.doc, R"([{"op":"set_lt","page":2,"threshold":false}])");
+        QVERIFY(zero.doc.page(1).lt_threshold->same(Num(0.0)));
+        QVERIFY(doc.page(1).lt_threshold == std::nullopt);
+    }
+
+    void lightTableThresholdRejectsNonFiniteAtomically() {
+        const Document doc = book();
+        for (const char* raw : {"NaN", "Infinity", "-Infinity", "\"nan\"", "\"inf\"", "\"-inf\""}) {
+            const std::string text = std::string("[{\"op\":\"set_note\",\"page\":2,\"note\":\"前置\"},{\"op\":\"set_lt\",\"page\":2,\"threshold\":") + raw + "}]";
+            const Json batch = ops(text.c_str());
+            const std::string error = error_of(doc, batch);
+            // JSON's existing parser repairs bare non-finite constants to null.
+            const char* expected = raw[0] == '"' ? "threshold must be a finite number" : "NoneType";
+            QVERIFY2(error.find(expected) != std::string::npos, error.c_str());
+            QVERIFY(doc.page(1).note.empty());
+            QVERIFY(doc.page(1).lt_threshold == std::nullopt);
+        }
+        for (const double value : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()}) {
+            const Json batch = Json::array({Json::object({{"op", "set_note"}, {"page", 2}, {"note", "前置"}}),
+                Json::object({{"op", "set_lt"}, {"page", 2}, {"threshold", value}})});
+            const std::string error = error_of(doc, batch);
+            QVERIFY2(error.find("threshold must be a finite number") != std::string::npos, error.c_str());
+            QVERIFY(doc.page(1).note.empty());
+            QVERIFY(doc.page(1).lt_threshold == std::nullopt);
+        }
+        const auto normal = apply(doc, R"([{"op":"set_lt","page":2,"threshold":"0.25"}])");
+        QVERIFY(normal.doc.page(1).lt_threshold->same(Num(0.25)));
+    }
+
     // One registry for the whole build (render::ops_registry: core's ops and the ops that draw), each module's ops
     // registered by its own register_*_ops; core::OpRegistry::builtin() has core's alone.
     void registries() {

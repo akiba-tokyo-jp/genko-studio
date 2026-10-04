@@ -214,6 +214,14 @@ void step_onion(OpContext& c) {
     c.doc.edit_page(i).onion_from = reference;
 }
 
+void set_lt(OpContext& c) {
+    const std::size_t i = require_page(c.doc, c.op);
+    const Json* threshold = get(c.op, "threshold");
+    if (threshold == nullptr) throw OpKeyError(py_repr_str("threshold"));
+    const double value = finite_float(*threshold, "threshold");
+    c.doc.edit_page(i).lt_threshold = Num(value);
+}
+
 void set_brush(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -233,6 +241,7 @@ void register_page_ops(OpRegistry& registry) {
     registry.add("set_brush", set_brush);
     registry.add("set_onion", set_onion);
     registry.add("step_onion", step_onion);
+    registry.add("set_lt", set_lt);
 }
 
 }  // namespace genko::core
