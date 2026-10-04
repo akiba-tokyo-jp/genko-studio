@@ -23,7 +23,7 @@ genko_library(genko_render
     vectorize.cpp
     raster_ops.cpp
   PUBLIC_DEPS genko_core Qt6::Core
-  PRIVATE_DEPS pillow_imaging PNG::PNG)
+  PRIVATE_DEPS pillow_imaging PNG::PNG JPEG::JPEG)
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
 # (numpy's float32 sinf, cosf, hypotf, atan2f: called in libm as numpy calls them. MSVC: /fp:precise, with which these
 # have no intrinsic forms)

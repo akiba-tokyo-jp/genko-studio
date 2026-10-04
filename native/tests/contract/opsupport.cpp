@@ -48,7 +48,7 @@ std::string pixels_digest(const std::optional<std::string>& bytes) {
     if (!bytes) return "missing";
     QCryptographicHash hash(QCryptographicHash::Sha256);
     try {
-        const render::Image image = render::read_png(*bytes, render::kPillowOpenLimits);
+        const render::Image image = render::open_image(*bytes, render::kPillowOpenLimits);
         const std::string rgba = image.convert("RGBA").tobytes();
         const std::string head = std::string(image.mode()) + "|" + std::to_string(image.width()) + "x" + std::to_string(image.height()) + "|";
         hash.addData(QByteArrayView(head.data(), static_cast<qsizetype>(head.size())));

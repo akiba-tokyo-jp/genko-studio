@@ -9,6 +9,7 @@
 
 #include "core/base64.hpp"
 #include "core/error.hpp"
+#include "core/command_bus.hpp"
 #include "render/png.hpp"
 #include "testsupport.hpp"
 
@@ -45,6 +46,182 @@ class TestPng : public QObject {
     Q_OBJECT
 
 private slots:
+    void jpegPixelsMatchPillow_data() {
+        QTest::addColumn<int>("index");
+        const Json data = genko::test::read_json(genko::test::test_data("pyref/jpeg/tables.json"));
+        for (std::size_t i = 0; i < data.size(); ++i)
+            QTest::newRow(data[i]["name"].get<std::string>().c_str()) << static_cast<int>(i);
+    }
+
+    void jpegPixelsMatchPillow() {
+        QFETCH(int, index);
+        const Json data = genko::test::read_json(genko::test::test_data("pyref/jpeg/tables.json"));
+        const Json& c = data[static_cast<std::size_t>(index)];
+        const std::string bytes = genko::test::read_bytes(genko::test::test_data("pyref/" + QString::fromStdString(c["file"].get<std::string>())));
+        QVERIFY(!bytes.empty());
+        try {
+            const render::Image im = render::open_image(bytes);
+            QCOMPARE(std::string(im.mode()), c["mode"].get<std::string>());
+            QCOMPARE(im.width(), c["size"][0].get<int>());
+            QCOMPARE(im.height(), c["size"][1].get<int>());
+            QVERIFY(im.tobytes() == genko::core::a2b_base64(c["data"].get<std::string>()));
+            QVERIFY(im.convert("RGBA").tobytes() == genko::core::a2b_base64(c["rgba"].get<std::string>()));
+            QVERIFY(im.convert("L").tobytes() == genko::core::a2b_base64(c["l"].get<std::string>()));
+        } catch (const genko::core::Error& error) {
+            QFAIL(error.what());
+        }
+    }
+
+    void jpegPixelLimit() {
+        const std::string bytes = genko::test::read_bytes(genko::test::test_data("pyref/jpeg/gray.jpg"));
+        render::PngLimits limits;
+        limits.max_pixels = 1;
+        try {
+            (void)render::open_image(bytes, limits);
+            QFAIL("JPEG must honor the configured pixel limit");
+        } catch (const genko::core::Error& error) {
+            QVERIFY2(error.code() == "image_too_large", error.what());
+        }
+    }
+
+    void jpegOversizedHeader() {
+        std::string bytes = genko::test::read_bytes(genko::test::test_data("pyref/jpeg/gray.jpg"));
+        const std::size_t sof = bytes.find(std::string("\xff\xc0", 2));
+        QVERIFY(sof != std::string::npos);
+        QVERIFY(sof + 9 < bytes.size());
+        constexpr unsigned dimension = 40000;
+        for (std::size_t offset : {std::size_t{5}, std::size_t{7}}) {
+            bytes[sof + offset] = static_cast<char>(dimension >> 8);
+            bytes[sof + offset + 1] = static_cast<char>(dimension & 255);
+        }
+        try {
+            (void)render::open_image(bytes);
+            QFAIL("Oversized JPEG must be rejected before decompression/allocation");
+        } catch (const genko::core::Error& error) {
+            QVERIFY2(error.code() == "image_too_large", error.what());
+        }
+    }
+
+    void jpegMalformed_data() {
+        QTest::addColumn<int>("index");
+        const Json rows = genko::test::read_json(genko::test::test_data("pyref/jpeg/broken.json"));
+        for (std::size_t i = 0; i < rows.size(); ++i)
+            QTest::newRow(rows[i]["name"].get<std::string>().c_str()) << static_cast<int>(i);
+    }
+
+    void jpegMalformed() {
+        QFETCH(int, index);
+        const Json rows = genko::test::read_json(genko::test::test_data("pyref/jpeg/broken.json"));
+        const Json good = genko::test::read_json(genko::test::test_data("pyref/jpeg/tables.json"));
+        const std::string broken = genko::core::a2b_base64(rows[static_cast<std::size_t>(index)]["data"].get<std::string>());
+        const std::string valid = genko::test::read_bytes(genko::test::test_data("pyref/jpeg/gray.jpg"));
+        const std::string expected = rows[static_cast<std::size_t>(index)]["python_error"] == "UnidentifiedImageError"
+                                         ? "unidentified_image" : "format";
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            try {
+                (void)render::open_image(broken);
+                QFAIL("Pillow-rejected JPEG must not become a successful partial image");
+            } catch (const genko::core::Error& error) {
+                QVERIFY2(error.code() == expected, error.what());
+            }
+            const render::Image decoded = render::open_image(valid);
+            QVERIFY(decoded.tobytes() == genko::core::a2b_base64(good[0]["data"].get<std::string>()));
+        }
+    }
+
+    void jpegUnsupportedPrecision() {
+        std::string bytes = genko::test::read_bytes(genko::test::test_data("pyref/jpeg/gray.jpg"));
+        const std::size_t sof = bytes.find("\xff\xc0");
+        QVERIFY(sof != std::string::npos && sof + 9 < bytes.size());
+        bytes[sof + 4] = 12;
+        try {
+            (void)render::open_image(bytes);
+            QFAIL("an unsupported precision was accepted");
+        } catch (const genko::core::Error& error) {
+            QVERIFY2(error.code() == "unidentified_image", error.what());
+        }
+    }
+    void jpegCoefficientBudget() {
+        std::string bytes = genko::test::read_bytes(genko::test::test_data("pyref/jpeg/progressive.jpg"));
+        const std::size_t sof = bytes.find("\xff\xc2");
+        QVERIFY(sof != std::string::npos && sof + 18 < bytes.size());
+        bytes[sof + 5] = bytes[sof + 7] = static_cast<char>(20000 >> 8);
+        bytes[sof + 6] = bytes[sof + 8] = static_cast<char>(20000 & 255);
+        for (std::size_t i = 0; i < 3; ++i) bytes[sof + 11 + 3 * i] = '\x11';
+        render::ImageAllocationBudget budget(128ull << 20);
+        try {
+            (void)render::open_image(bytes);
+            QFAIL("a progressive coefficient allocation exceeding the budget was accepted");
+        } catch (const genko::core::Error& error) {
+            QVERIFY2(error.code() == "image_too_large", error.what());
+        }
+        QCOMPARE(budget.live(), std::uint64_t{0});
+        const render::Image good = render::open_image(genko::test::read_bytes(genko::test::test_data("pyref/jpeg/gray.jpg")));
+        QVERIFY(!good.empty());
+        QVERIFY(budget.live() > 0);
+    }
+    void jpegActiveBudget() {
+        render::ImageAllocationBudget budget(4096);
+        try {
+            (void)render::open_image(genko::test::read_bytes(genko::test::test_data("pyref/jpeg/progressive.jpg")));
+            QFAIL("the existing image allocation budget did not account for JPEG working memory");
+        } catch (const genko::core::OpError& error) {
+            QVERIFY2(std::string(error.what()).find("too many masks") != std::string::npos, error.what());
+        }
+        QCOMPARE(budget.live(), std::uint64_t{0});
+    }
+    void jpegAllocationAndDecodeFailuresReturnBudget() {
+        const std::string valid = genko::test::read_bytes(genko::test::test_data("pyref/jpeg/gray.jpg"));
+        {
+            // Working reservation succeeds; the output image allocation must then fail without leaking it.
+            render::ImageAllocationBudget budget((64ull << 20) + valid.size() + 1);
+            try {
+                (void)render::open_image(valid);
+                QFAIL("an output image exceeding the remaining active budget was accepted");
+            } catch (const genko::core::OpError& error) {
+                QVERIFY2(std::string(error.what()).find("too many masks") != std::string::npos, error.what());
+            }
+            QCOMPARE(budget.live(), std::uint64_t{0});
+        }
+        render::ImageAllocationBudget budget(128ull << 20);
+        const Json rows = genko::test::read_json(genko::test::test_data("pyref/jpeg/broken.json"));
+        for (const auto& row : rows) {
+            try {
+                (void)render::open_image(genko::core::a2b_base64(row["data"].get<std::string>()));
+                QFAIL("a truncated JPEG was accepted");
+            } catch (const genko::core::Error&) {}
+            QCOMPARE(budget.live(), std::uint64_t{0});
+            {
+                const render::Image recovered = render::open_image(valid);
+                QVERIFY(!recovered.empty());
+                QVERIFY(budget.live() > 0);
+            }
+            QCOMPARE(budget.live(), std::uint64_t{0});
+        }
+    }
+    void jpegBudgetIncludesAlreadyLivePixels() {
+        const std::string valid = genko::test::read_bytes(genko::test::test_data("pyref/jpeg/progressive.jpg"));
+        render::ImageAllocationBudget budget(65ull << 20);
+        {
+            const auto existing = render::Image::create_blank("RGBA", {1024, 1024});
+            const auto live_before = budget.live();
+            QVERIFY(live_before >= (4ull << 20));
+            try {
+                (void)render::open_image(valid);
+                QFAIL("JPEG working memory ignored existing live image allocations");
+            } catch (const genko::core::OpError& error) {
+                QVERIFY2(std::string(error.what()).find("too many masks") != std::string::npos, error.what());
+            }
+            QCOMPARE(budget.live(), live_before);
+            QVERIFY(!existing.empty());
+        }
+        QCOMPARE(budget.live(), std::uint64_t{0});
+        {
+            const auto recovered = render::open_image(valid);
+            QVERIFY(!recovered.empty());
+        }
+        QCOMPARE(budget.live(), std::uint64_t{0});
+    }
     void read_data() {
         QTest::addColumn<int>("index");
         const Json& cases = tables()["png"];

@@ -1202,6 +1202,16 @@ std::uint32_t crc32_of(std::string_view data, std::uint32_t crc = 0) {
 // Python keeps it and can never draw the page again.)
 void verify_image(const std::string& blob) {
     const std::string_view b = blob;
+    if (b.substr(0, 3) == "\xff\xd8\xff") {
+        try {
+            // Apply the operation's stricter cap in the header, before JPEG coefficient/pixel allocation.
+            (void)open_image(blob, PngLimits{kOpsMaxImagePixels});
+        } catch (const core::Error& error) {
+            if (error.code() == "unidentified_image") unreadable("cannot identify image file <_io.BytesIO object>");
+            unreadable(error.what());
+        }
+        return;
+    }
     static constexpr std::string_view kSignature("\x89PNG\r\n\x1a\n", 8);
     const std::string unknown = "cannot identify image file <_io.BytesIO object>";
     if (b.substr(0, 8) != kSignature) {

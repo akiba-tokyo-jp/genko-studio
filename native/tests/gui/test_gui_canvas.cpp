@@ -189,6 +189,56 @@ private slots:
         if (!folder.isEmpty()) QVERIFY(desk.window->grab().save(folder + "/onion-after.png"));
     }
 
+    void jpegAppearsInTheStudioWindow_data() {
+        QTest::addColumn<QString>("name");
+        for (const char* name : {"gray", "rgb444", "rgb420", "progressive", "cmyk"})
+            QTest::newRow(name) << QString::fromLatin1(name);
+    }
+
+    void jpegAppearsInTheStudioWindow() {
+        QFETCH(QString, name);
+        Desk desk;
+        QVERIFY(QTest::qWaitForWindowExposed(desk.window.get()));
+        desk.canvas()->fit_page();
+        QTRY_VERIFY_WITH_TIMEOUT(desk.canvas()->renderer().settled(), 10000);
+        const auto original = desk.session->snapshot();
+        const auto referenceAt = [](const genko::app::DocPtr& doc, int dpi) {
+            genko::render::RenderOptions options;
+            options.mode = "proof";
+            options.skip_unported = true;  // Matches preview; nombre is separately pending in M4.
+            const auto image = genko::render::render_page(doc->page(0), dpi, options, doc.get()).image;
+            const auto bytes = image.tobytes();
+            return QImage(reinterpret_cast<const uchar*>(bytes.data()), image.width(), image.height(),
+                          image.width() * 3, QImage::Format_RGB888).convertToFormat(QImage::Format_RGB32);
+        };
+        const QString path = QStringLiteral(GENKO_TEST_DATA) + "/pyref/jpeg/" + name + ".jpg";
+        desk.session->apply(Json::array({Json::object({{"op", "put_raster"}, {"page", 1}, {"layer", "bg"},
+                                                    {"path", path.toStdString()}})}));
+        QTRY_VERIFY_WITH_TIMEOUT(desk.canvas()->renderer().settled(), 10000);
+        const auto doc = desk.session->snapshot();
+        QTRY_COMPARE_WITH_TIMEOUT(desk.canvas()->renderer().compose(desk.canvas()->renderer().shown_dpi()),
+                                 referenceAt(doc, desk.canvas()->renderer().shown_dpi()), 10000);
+        const int dpi = desk.canvas()->renderer().shown_dpi();
+        const QImage shown = desk.canvas()->renderer().compose(dpi);
+        QVERIFY(shown != referenceAt(original, dpi));
+        QCoreApplication::processEvents();
+        const QString folder = qEnvironmentVariable("GENKO_TEST_SCREENSHOT_DIR");
+        if (!folder.isEmpty()) {
+            QVERIFY(QDir().mkpath(folder));
+            QVERIFY(desk.window->grab().save(folder + "/jpeg-" + name + ".png"));
+        }
+        desk.session->undo();
+        // Fit-to-page may choose a new DPI after the window layout changes; compare at the real current DPI.
+        QTRY_COMPARE_WITH_TIMEOUT(desk.canvas()->renderer().compose(desk.canvas()->renderer().shown_dpi()),
+                                 referenceAt(original, desk.canvas()->renderer().shown_dpi()), 10000);
+        desk.session->redo();
+        QTRY_COMPARE_WITH_TIMEOUT(desk.canvas()->renderer().compose(desk.canvas()->renderer().shown_dpi()),
+                                 referenceAt(doc, desk.canvas()->renderer().shown_dpi()), 10000);
+        QVERIFY(desk.session->wait_saved(std::chrono::seconds(10)));
+        const auto loaded = std::make_shared<core::Document>(read_book(desk.book));
+        QCOMPARE(referenceAt(loaded, dpi), shown);
+    }
+
     void aNearlyLevelCutIsLevel() {
         Desk desk;
         desk.window->choose_tool(QStringLiteral("frame"));

@@ -12,11 +12,16 @@
 #endif
 
 #include <array>
+#include <csetjmp>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <vector>
+
+#include <jpeglib.h>
+#include <jerror.h>
 
 #include "core/error.hpp"
 #include "core/paths.hpp"
@@ -153,6 +158,139 @@ bool mode_of(int bit_depth, int color_type, const char** mode, const char** rawm
         }
     }
     return false;
+}
+
+// --- JPEG reading -------------------------------------------------------------------------------------------------
+
+// The error manager is the first member, as required by libjpeg's callback extension convention.
+struct JpegError {
+    jpeg_error_mgr base{};
+    std::jmp_buf jump{};
+    char message[JMSG_LENGTH_MAX]{};
+};
+
+void jpeg_error_exit(j_common_ptr codec) {
+    auto* error = reinterpret_cast<JpegError*>(codec->err);
+    codec->err->format_message(codec, error->message);
+    std::longjmp(error->jump, 1);
+}
+
+void jpeg_emit_message(j_common_ptr codec, int level) {
+    // jpeg_mem_src otherwise substitutes a synthetic EOI on truncated input. Pillow's non-truncated load rejects it.
+    if (level < 0 && codec->err->msg_code == JWRN_JPEG_EOF) jpeg_error_exit(codec);
+}
+
+struct JpegGuard {
+    jpeg_decompress_struct codec{};
+    JpegError error{};
+    // Only budget bookkeeping fields are used; the token owns no pixels.
+    ImagingMemoryInstance reservation{};
+    ~JpegGuard() {
+        // jpeg_create_decompress may fail partway through initialization, after assigning its memory manager.
+        if (codec.mem != nullptr) jpeg_destroy_decompress(&codec);
+        genko_imaging_budget_release(&reservation);
+    }
+};
+
+// Each jump target lives in a helper without C++ owners. Mutable codec/error state belongs to its caller;
+// no automatic local modified after setjmp is read after the jump.
+bool jpeg_header(JpegGuard* state, const unsigned char* bytes, unsigned long size) {
+    if (setjmp(state->error.jump)) return false;
+    jpeg_create_decompress(&state->codec);
+    jpeg_mem_src(&state->codec, bytes, size);
+    return jpeg_read_header(&state->codec, TRUE) == JPEG_HEADER_OK;
+}
+
+bool jpeg_start(JpegGuard* state) {
+    if (setjmp(state->error.jump)) return false;
+    return jpeg_start_decompress(&state->codec) != FALSE;
+}
+
+bool jpeg_rows(JpegGuard* state, ImagingMemoryInstance* image, ImagingShuffler unpack,
+               unsigned char* row) {
+    if (setjmp(state->error.jump)) return false;
+    while (state->codec.output_scanline < state->codec.output_height) {
+        const JDIMENSION y = state->codec.output_scanline;
+        JSAMPROW pointer = row;
+        if (jpeg_read_scanlines(&state->codec, &pointer, 1) != 1) return false;
+        unpack(reinterpret_cast<UINT8*>(image->image[y]), row, static_cast<int>(state->codec.output_width));
+    }
+    return jpeg_finish_decompress(&state->codec) != FALSE;
+}
+
+[[noreturn]] void jpeg_failed(const JpegGuard& state, bool in_header = false) {
+    if (state.error.base.msg_code == JERR_BAD_PRECISION)
+        throw core::Error("unidentified_image", "unsupported JPEG precision");
+    if (in_header && state.error.base.msg_code == JWRN_JPEG_EOF && state.codec.image_width != 0)
+        throw core::Error("format", "Truncated File Read");
+    const char* code = state.error.base.msg_code == JERR_OUT_OF_MEMORY ? "memory" :
+                       state.codec.image_width != 0 || state.codec.unread_marker != 0 ? "format" : "unidentified_image";
+    throw core::Error(code, std::string("cannot read JPEG: ") + state.error.message);
+}
+
+Image read_jpeg(std::string_view bytes, const PngLimits& limits) {
+    if (bytes.size() > std::numeric_limits<unsigned long>::max())
+        throw core::Error("image_too_large", "JPEG input too large");
+    JpegGuard state;
+    state.codec.err = jpeg_std_error(&state.error.base);
+    state.error.base.error_exit = jpeg_error_exit;
+    state.error.base.emit_message = jpeg_emit_message;
+    if (!jpeg_header(&state, reinterpret_cast<const unsigned char*>(bytes.data()),
+                     static_cast<unsigned long>(bytes.size()))) jpeg_failed(state, true);
+    const std::int64_t pixels = static_cast<std::int64_t>(state.codec.image_width) * state.codec.image_height;
+    if (pixels > limits.max_pixels || state.codec.image_width > 0x7fffffffU / 4U ||
+        state.codec.image_height > 0x7fffffffU)
+        throw core::Error("image_too_large", "JPEG image exceeds pixel/dimension limit");
+    const char* mode = nullptr;
+    const char* rawmode = nullptr;
+    if (state.codec.data_precision != 8) throw core::Error("unidentified_image", "unsupported JPEG precision");
+    if (state.codec.num_components == 1) {
+        mode = rawmode = "L";
+        state.codec.out_color_space = JCS_GRAYSCALE;
+    } else if (state.codec.num_components == 3) {
+        mode = rawmode = "RGB";
+        state.codec.out_color_space = JCS_RGB;
+    } else if (state.codec.num_components == 4) {
+        mode = "CMYK";
+        rawmode = "CMYK;I";  // Pillow's JpegImagePlugin inverts all four decoded components.
+        state.codec.out_color_space = JCS_CMYK;
+    } else {
+        throw core::Error("unidentified_image", "unsupported JPEG component count");
+    }
+    // libjpeg allocates padded full-image DCT arrays before reading progressive/multiscan entropy.
+    // Bound and charge that memory, the input and working space before start; its memory setting is advisory.
+    constexpr std::uint64_t kDecodeBudget = 1ull << 30;
+    std::uint64_t work = static_cast<std::uint64_t>(bytes.size()) + (64ull << 20);
+    if (jpeg_has_multiple_scans(&state.codec)) {
+        for (int i = 0; i < state.codec.num_components; ++i) {
+            const jpeg_component_info& component = state.codec.comp_info[i];
+            const auto h = static_cast<std::uint64_t>(component.h_samp_factor);
+            const auto v = static_cast<std::uint64_t>(component.v_samp_factor);
+            const std::uint64_t columns = (component.width_in_blocks + h - 1) / h * h;
+            const std::uint64_t rows = (component.height_in_blocks + v - 1) / v * v;
+            work += columns * rows * sizeof(JBLOCK);
+        }
+    }
+    const std::uint64_t output = static_cast<std::uint64_t>(pixels) * (state.codec.num_components == 1 ? 1 : 4) +
+                                 static_cast<std::uint64_t>(state.codec.image_height) * sizeof(void*);
+    if (work > kDecodeBudget || output > kDecodeBudget - work)
+        throw core::Error("image_too_large", "JPEG decoding exceeds memory budget");
+    ImageAllocationBudget budget(kDecodeBudget);  // Nested callers retain their existing, possibly stricter budget.
+    if (!genko_imaging_budget_reserve(&state.reservation, work)) detail::throw_imaging_error();
+    Image image = Image::create_blank(mode, Size{static_cast<int>(state.codec.image_width),
+                                                static_cast<int>(state.codec.image_height)});
+    if (!jpeg_start(&state)) jpeg_failed(state);
+    if (state.codec.output_width != state.codec.image_width || state.codec.output_height != state.codec.image_height ||
+        state.codec.output_components != state.codec.num_components)
+        throw core::Error("format", "unexpected JPEG output dimensions/components");
+    const std::size_t stride = static_cast<std::size_t>(state.codec.output_width) *
+                               static_cast<std::size_t>(state.codec.output_components);
+    std::vector<unsigned char> row(stride);
+    int bits = 0;
+    const ImagingShuffler unpack = ImagingFindUnpacker(image.raw()->mode, detail::rawmode_id(rawmode), &bits);
+    if (unpack == nullptr) throw core::Error("format", "no JPEG pixel unpacker");
+    if (!jpeg_rows(&state, image.raw(), unpack, row.data())) jpeg_failed(state);
+    return image;
 }
 
 // --- writing ------------------------------------------------------------------------------------------------------
@@ -330,7 +468,8 @@ Image open_image(std::string_view bytes, const PngLimits& limits) {
     if (bytes.size() >= 8 && png_sig_cmp(reinterpret_cast<png_const_bytep>(bytes.data()), 0, 8) == 0) {
         return read_png(bytes, limits);
     }
-    // Pillow would open these; this build reads PNG only so far
+    if (bytes.substr(0, 3) == "\xff\xd8\xff") return read_jpeg(bytes, limits);
+    // Pillow would open these; the remaining formats are not ported yet.
     if (other_image_format(bytes)) throw NotYetPorted("image_format");
     throw core::Error("unidentified_image", "cannot identify image file");
 }
