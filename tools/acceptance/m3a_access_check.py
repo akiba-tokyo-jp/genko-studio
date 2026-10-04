@@ -14,15 +14,16 @@ import zlib
 from pathlib import Path
 
 from PIL import Image, PngImagePlugin
+from cli_environment import fixture_directory, find_cgroup
 
 G = os.environ.get('GENKO_BIN', sys.argv[1] if len(sys.argv) > 1 else '/src/build/hermes-m3a-release/src/api/genko')
-ROOT = Path(tempfile.mkdtemp(prefix='hermes-m3a-access-', dir='/src/build'))
+ROOT = fixture_directory(Path(__file__).resolve().parents[2], os.environ)
 os.environ['GENKO_CONFIG_DIR'] = str(ROOT / 'config')
 HUMAN = 'human:確認'
 AI = 'ai:確認'
 OTHER = 'human:別の作者'
 results = []
-CG = Path('/sys/fs/cgroup')
+CG = find_cgroup()
 
 
 def memory_events():
