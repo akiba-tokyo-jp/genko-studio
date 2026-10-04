@@ -165,14 +165,16 @@ bool mode_of(int bit_depth, int color_type, const char** mode, const char** rawm
 // The error manager is the first member, as required by libjpeg's callback extension convention.
 struct JpegError {
     jpeg_error_mgr base{};
-    std::jmp_buf jump{};
+    // Keep the platform-aligned jump buffer outside this codec callback structure.
+    // Windows jmp_buf requires 16-byte alignment; embedding it adds implicit padding (C4324).
+    std::jmp_buf* jump = nullptr;
     char message[JMSG_LENGTH_MAX]{};
 };
 
 void jpeg_error_exit(j_common_ptr codec) {
     auto* error = reinterpret_cast<JpegError*>(codec->err);
     codec->err->format_message(codec, error->message);
-    std::longjmp(error->jump, 1);
+    std::longjmp(*error->jump, 1);
 }
 
 void jpeg_emit_message(j_common_ptr codec, int level) {
@@ -195,20 +197,20 @@ struct JpegGuard {
 // Each jump target lives in a helper without C++ owners. Mutable codec/error state belongs to its caller;
 // no automatic local modified after setjmp is read after the jump.
 bool jpeg_header(JpegGuard* state, const unsigned char* bytes, unsigned long size) {
-    if (setjmp(state->error.jump)) return false;
+    if (setjmp(*state->error.jump)) return false;
     jpeg_create_decompress(&state->codec);
     jpeg_mem_src(&state->codec, bytes, size);
     return jpeg_read_header(&state->codec, TRUE) == JPEG_HEADER_OK;
 }
 
 bool jpeg_start(JpegGuard* state) {
-    if (setjmp(state->error.jump)) return false;
+    if (setjmp(*state->error.jump)) return false;
     return jpeg_start_decompress(&state->codec) != FALSE;
 }
 
 bool jpeg_rows(JpegGuard* state, ImagingMemoryInstance* image, ImagingShuffler unpack,
                unsigned char* row) {
-    if (setjmp(state->error.jump)) return false;
+    if (setjmp(*state->error.jump)) return false;
     while (state->codec.output_scanline < state->codec.output_height) {
         const JDIMENSION y = state->codec.output_scanline;
         JSAMPROW pointer = row;
@@ -231,7 +233,9 @@ bool jpeg_rows(JpegGuard* state, ImagingMemoryInstance* image, ImagingShuffler u
 Image read_jpeg(std::string_view bytes, const PngLimits& limits) {
     if (bytes.size() > std::numeric_limits<unsigned long>::max())
         throw core::Error("image_too_large", "JPEG input too large");
+    std::jmp_buf jump{};
     JpegGuard state;
+    state.error.jump = &jump;
     state.codec.err = jpeg_std_error(&state.error.base);
     state.error.base.error_exit = jpeg_error_exit;
     state.error.base.emit_message = jpeg_emit_message;
