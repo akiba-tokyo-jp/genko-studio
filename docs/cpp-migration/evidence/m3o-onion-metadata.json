@@ -1,0 +1,136 @@
+{
+  "scope": "set_onion・step_onionの限定metadata実装",
+  "base_commit": "596f0f7c4b2e6a5dd4543a5ae6b0e08979ac2131",
+  "configurations": {
+    "debug": {
+      "passed": true,
+      "qt_totals": [
+        [
+          "24",
+          "0",
+          "0"
+        ],
+        [
+          "10",
+          "0",
+          "0"
+        ],
+        [
+          "4",
+          "0",
+          "0"
+        ]
+      ],
+      "skip_lines": [],
+      "oracle_cases": 70,
+      "original_cases_retained": 40,
+      "new_cases": 30,
+      "cli23": true,
+      "same_source_and_binary_verified": true
+    },
+    "release": {
+      "passed": true,
+      "qt_totals": [
+        [
+          "24",
+          "0",
+          "0"
+        ],
+        [
+          "9",
+          "0",
+          "1"
+        ],
+        [
+          "4",
+          "0",
+          "0"
+        ]
+      ],
+      "skip_lines": [
+        "25: SKIP   : TestContractSave::oldWriterWhileConverting() the hook that runs Python mid-copy is only in builds with fault injection"
+      ],
+      "oracle_cases": 70,
+      "original_cases_retained": 40,
+      "new_cases": 30,
+      "cli23": true,
+      "same_source_and_binary_verified": true
+    },
+    "asan": {
+      "passed": true,
+      "qt_totals": [
+        [
+          "24",
+          "0",
+          "0"
+        ],
+        [
+          "10",
+          "0",
+          "0"
+        ],
+        [
+          "4",
+          "0",
+          "0"
+        ]
+      ],
+      "skip_lines": [],
+      "oracle_cases": 70,
+      "original_cases_retained": 40,
+      "new_cases": 30,
+      "cli23": true,
+      "same_source_and_binary_verified": true
+    }
+  },
+  "M3_all_features": "未受入",
+  "whole_matrix": "未実行",
+  "Windows_new_ops": "未実行",
+  "limitations": [
+    "set_onionのfrom保存には既存Numモデルのint64制限が残る。Python unbounded整数保存の完全互換は未受入。",
+    "桁数境界は実Python参照環境のint_max_str_digits=4300に固定。設定変更・無効化との互換は未受入。",
+    "Release旧writer fault hookはOFFで1skip。Debug/ASanの同slot成功を対応監査。"
+  ],
+  "original_table_prefix_sha256": "1a3059a7a49bf7c3711d0c291ea53aa0b48f95139b2f7b09f524b7251e03dd9a",
+  "m3o-onion-initial-review": {
+    "scope_passed": false,
+    "findings": [
+      {
+        "id": "M3O-ONION-001",
+        "severity": "medium",
+        "description": "native/src/core/ops_pages.cpp:147-149,191 の新しい wide-delta 経路は py_big_int_text の戻り値をそのまま採用し、Python の十進整数文字列の桁数制限を通らない。pyconv.cpp:226-240 は桁数に上限を設けず canonical 化するだけである。requires-python >=3.11 の通常の CPython 設定（int_max_str_digits=4300）では、delta に数字 '9' を4301文字並べた文字列を与えると src/genko/ops.py:3489 の int(delta) は ValueError となり、ops.py:4147-4149 でバッチ全体を拒否する。一方、この実装は正の巨大整数として受理し上限ページへ clamp するため、先行変更まで保存可能になる。これは有限結果へ clamp できるかどうかとは別の入力受理条件であり、追加された wide delta 試験では検出されない。主担当で通常の CPython 設定と桁数制限を無効化した設定の扱いを確認し、Python が拒否する文字列について oracle 契約／atomicity 試験を追加すること。実環境の桁数設定は本レビューでは未取得であり、無効化されている環境ではこの具体例は発現しない。"
+      },
+      {
+        "id": "M3O-ONION-002",
+        "severity": "low",
+        "description": "native/tests/contract/test_contract_save.cpp:135 の 'onion locked page' は actor='ai:mine' のまま lock_page.agent='ai:other' を指定している。command_bus.cpp:339-340 と ops.py:3967-3968 により最初の lock_page 自体が拒否され、後続 set_onion に到達しないため、名前に反して onion の他者 lock 拒否を oracle と照合できていない。E2E:312-319 は別の人が実際に取得した lock に対して両 onion op を拒否するので、実装の lock 漏れという指摘ではない。oracle 側も lock 保持状態を事前設定するか、legacy actor で他者 lock を取得してから onion に到達するケースへ差し替えると意図した検証になる。"
+      },
+      {
+        "id": "M3O-ONION-003",
+        "severity": "low",
+        "description": "native/tests/unit/test_command_bus.cpp:104-112 と contract/test_contract_save.cpp:138-140 は page=2、onion_from 未設定で delta=0／false／文字列 '0'／小数を検証しているが、default -1 と int('0')=0 の差が clamp 後の自己ページ回避によって同じ最終値1へ潰れる。この組合せでは py_or を誤って実装しても差を検出しにくい。また指定された from=0.9 が None ではなく int0 として保持されるケースは、この追加試験には存在しない。実装の set_onion:138-141 と step_onion:189-193 の読み取りでは両意味論は正しい。例えば3ページの page=3 に from=2 を設定して delta=0／false は1、delta='0'／0.9 は2とする分岐試験、および set_onion.from=0.9 の has_value と same(Num(0))、次の step で page.index に戻ることを追加すると、要求された差を直接固定できる。"
+      }
+    ]
+  },
+  "m3o-onion-recheck": {
+    "scope_passed": false,
+    "findings": [
+      {
+        "id": "M3O-ONION-001-R1",
+        "severity": "low",
+        "description": "4300桁制限の受理不一致そのものは修正されているが、set_onion の制限エラーには変換順序による残差がある。native/src/core/ops_pages.cpp:153-154 は to_int(*from) を check_onion_digit_limit(*from) より先に実行する。from に数字 '9' を4301文字並べた有効な十進文字列を渡すと、pyconv.cpp:80-105 の parse_int_text は構文検査を通過した後、int64変換の範囲超過で 'int(...) is too large for this build' を投げ、pyops.cpp:74-78 が PyValueError にするため、4300桁検査に到達しない。Python側は src/genko/ops.py:3483 の int(op['from']) で、4300桁制限が有効なら 'Exceeds the limit (4300 digits) ...' の ValueError となり、ops.py:4147-4149 の拒否応答が異なる。これはPythonで保存可能なunbounded fromの一致を要求する指摘ではなく、双方が拒否する制限超過文字列の診断差である。今回のcontract:273-278はfromに先頭ゼロ4300文字+'1'だけを渡すのでint64変換に成功し、この残差を検出しない。step_onionはops_pages.cpp:163-165でwide文字列をcanonical化してから桁数検査するため、同じ4301文字の'9'でも新しい制限エラーになる。構文不正時の個別invalid-literalエラーを維持しながら、有効な十進文字列についてはint64範囲検査より先に桁数制限を適用し、fromの非ゼロ4301桁も契約試験へ追加すること。双方ともバッチを拒否するため、初回001の受理／atomicity欠陥の再発ではない。"
+      }
+    ]
+  },
+  "m3o-onion-final-review": {
+    "scope_passed": true,
+    "findings": []
+  },
+  "source_sha256": {
+    "native/src/core/ops_pages.cpp": "7d045f207505de2a68d5416f103a973ec73923d6eea6ad7abfb829b92362c2b1",
+    "native/tests/unit/test_command_bus.cpp": "101578becefec904bb75882635dcda6da3490d0cda29a3c9d6f9a52a4424bb27",
+    "native/tests/contract/test_contract_save.cpp": "713687e4bd53e512add67f3c7e368c15b458f6a4c8f2e988474f8d810dc35126",
+    "native/tests/e2e/test_ops_e2e.cpp": "b9a0f0dcfb0ab895d701fb0c2205d520230d12b71604e2a41a3957817dc8d6d8"
+  },
+  "limited_acceptance_passed": true
+}

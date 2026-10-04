@@ -5,6 +5,7 @@
 
 #include <QtTest>
 
+#include <limits>
 #include <set>
 #include <string>
 
@@ -63,6 +64,119 @@ class TestCommandBus : public QObject {
     Q_OBJECT
 
 private slots:
+    void onionReferenceCanBeSetAndCleared() {
+        const Document doc = book();
+        const Json first = ops(R"([{"op":"set_onion","page":2,"from":"1"}])");
+        const std::string error = error_of(doc, first);
+        QVERIFY2(error == "(applied)", error.c_str());
+        auto result = bus().apply(doc, first, Actor("genko"));
+        QVERIFY(result.doc.page(1).onion_from.has_value());
+        QVERIFY(result.doc.page(1).onion_from->same(Num(1)));
+        QVERIFY(!doc.page(1).onion_from.has_value());
+        QVERIFY(result.doc.pages[0] == doc.pages[0]);
+        QVERIFY(result.doc.pages[2] == doc.pages[2]);
+        for (const char* batch : {
+                 R"([{"op":"set_onion","page":2}])",
+                 R"([{"op":"set_onion","page":2,"from":null}])",
+                 R"([{"op":"set_onion","page":2,"from":""}])",
+                 R"([{"op":"set_onion","page":2,"from":0}])",
+                 R"([{"op":"set_onion","page":2,"from":0.0}])",
+                 R"([{"op":"set_onion","page":2,"from":false}])"}) {
+            const auto cleared = apply(result.doc, batch);
+            QVERIFY(!cleared.doc.page(1).onion_from.has_value());
+            QVERIFY(result.doc.page(1).onion_from->same(Num(1)));
+        }
+        const auto same_page = apply(doc, R"([{"op":"set_onion","page":2,"from":2.9}])");
+        QVERIFY(same_page.doc.page(1).onion_from->same(Num(2)));
+        const auto outside = apply(doc, R"([{"op":"set_onion","page":2,"from":-8}])");
+        QVERIFY(outside.doc.page(1).onion_from->same(Num(-8)));
+    }
+
+    void onionStepClampsAndAvoidsTheCurrentPage() {
+        const Document doc = book();
+        const Json first = ops(R"([{"op":"step_onion","page":2}])");
+        const std::string error = error_of(doc, first);
+        QVERIFY2(error == "(applied)", error.c_str());
+        const auto result = bus().apply(doc, first, Actor("genko"));
+        QVERIFY(result.doc.page(1).onion_from->same(Num(1)));
+        const auto next = apply(doc, R"([{"op":"step_onion","page":2,"delta":1}])");
+        QVERIFY(next.doc.page(1).onion_from->same(Num(3)));
+        for (const char* batch : {
+                 R"([{"op":"step_onion","page":2,"delta":0}])",
+                 R"([{"op":"step_onion","page":2,"delta":false}])",
+                 R"([{"op":"step_onion","page":2,"delta":null}])",
+                 R"([{"op":"step_onion","page":2,"delta":"0"}])",
+                 R"([{"op":"step_onion","page":2,"delta":0.9}])",
+                 R"([{"op":"step_onion","page":2,"delta":-100}])"}) {
+            const auto lower = apply(doc, batch);
+            QVERIFY(lower.doc.page(1).onion_from->same(Num(1)));
+        }
+        const auto upper = apply(doc, R"([{"op":"step_onion","page":2,"delta":100}])");
+        QVERIFY(upper.doc.page(1).onion_from->same(Num(3)));
+        const auto back = apply(next.doc, R"([{"op":"step_onion","page":2}])");
+        QVERIFY(back.doc.page(1).onion_from->same(Num(1)));
+        const auto first_page = apply(doc, R"([{"op":"step_onion","page":1}])");
+        QVERIFY(first_page.doc.page(0).onion_from->same(Num(1)));
+        QVERIFY(!doc.page(1).onion_from.has_value());
+    }
+
+    void onionStepSupportsWideOffsetsWithoutRoundingCancellation() {
+        Document doc = book();
+        doc.edit_page(2).onion_from = Num(std::numeric_limits<std::int64_t>::min());
+        const Json batch = ops(R"([{"op":"step_onion","page":3,"delta":"9223372036854775810"}])");
+        const std::string error = error_of(doc, batch);
+        QVERIFY2(error == "(applied)", error.c_str());
+        const auto result = bus().apply(doc, batch, Actor("genko"));
+        QVERIFY(result.doc.page(2).onion_from->same(Num(2)));
+        const auto huge = apply(doc, R"([{"op":"step_onion","page":1,"delta":1e100}])");
+        QVERIFY(huge.doc.page(0).onion_from->same(Num(3)));
+        doc.edit_page(2).onion_from = Num(1e20);
+        const auto cancelled = apply(doc, R"([{"op":"step_onion","page":3,"delta":"-99999999999999999998"}])");
+        QVERIFY(cancelled.doc.page(2).onion_from->same(Num(2)));
+    }
+
+    void onionIntegerStringsKeepPythonsDigitLimit() {
+        const Document doc = book();
+        const std::string long_zeroes(4300, '0');
+        for (const char* name : {"set_onion", "step_onion"}) {
+          for (const std::string& text : {long_zeroes + "1", std::string(4301, '9')}) {
+            Json op = Json::object({{"op", name}, {"page", 2}});
+            op[std::string(name) == "set_onion" ? "from" : "delta"] = text;
+            const Json batch = Json::array({Json::object({{"op", "set_note"}, {"page", 2}, {"note", "前置"}}), op});
+            const std::string error = error_of(doc, batch);
+            QVERIFY2(error.find("Exceeds the limit (4300 digits)") != std::string::npos, error.c_str());
+            QVERIFY(doc.page(1).note.empty());
+            QVERIFY(!doc.page(1).onion_from.has_value());
+            QVERIFY(doc.page(2).note.empty());
+            QVERIFY(!doc.page(2).onion_from.has_value());
+          }
+        }
+    }
+
+    void onionZeroInputsRetainTheirDifferentMeanings() {
+        const Document doc = book();
+        const auto source = apply(doc, R"([{"op":"set_onion","page":3,"from":2}])");
+        for (const char* batch : {
+                 R"([{"op":"step_onion","page":3,"delta":0}])",
+                 R"([{"op":"step_onion","page":3,"delta":false}])",
+                 R"([{"op":"step_onion","page":3,"delta":null}])"}) {
+            const auto stepped = apply(source.doc, batch);
+            QVERIFY(stepped.doc.page(2).onion_from->same(Num(1)));
+        }
+        for (const char* batch : {
+                 R"([{"op":"step_onion","page":3,"delta":"0"}])",
+                 R"([{"op":"step_onion","page":3,"delta":0.9}])",
+                 R"([{"op":"step_onion","page":3,"delta":-0.9}])"}) {
+            const auto stepped = apply(source.doc, batch);
+            QVERIFY(stepped.doc.page(2).onion_from->same(Num(2)));
+        }
+        const auto zero = apply(doc, R"([{"op":"set_onion","page":3,"from":0.9}])");
+        QVERIFY(zero.doc.page(2).onion_from.has_value());
+        QVERIFY(zero.doc.page(2).onion_from->same(Num(0)));
+        const auto from_page = apply(zero.doc, R"([{"op":"step_onion","page":3,"delta":1}])");
+        QVERIFY(from_page.doc.page(2).onion_from->same(Num(2)));
+    }
+
     // One registry for the whole build (render::ops_registry: core's ops and the ops that draw), each module's ops
     // registered by its own register_*_ops; core::OpRegistry::builtin() has core's alone.
     void registries() {

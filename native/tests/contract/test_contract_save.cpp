@@ -119,6 +119,31 @@ const Case kCases[] = {
     {"dry run", R"([{"op": "set_note", "page": 1, "note": "dry"}, {"op": "add_page"}])", "genko", true},
     {"failure after changes", R"([{"op": "set_note", "page": 1, "note": "x"}, {"op": "add_page"}, {"op": "set_note", "page": 9}])",
      "genko", false},
+    {"onion source string", R"([{"op":"set_onion","page":2,"from":"1"}])", "genko", false},
+    {"onion source float", R"([{"op":"set_onion","page":2,"from":1.9}])", "genko", false},
+    {"onion source bool", R"([{"op":"set_onion","page":2,"from":true}])", "genko", false},
+    {"onion source self", R"([{"op":"set_onion","page":2,"from":2}])", "genko", false},
+    {"onion source outside", R"([{"op":"set_onion","page":2,"from":-8}])", "genko", false},
+    {"onion clear absent", R"([{"op":"set_onion","page":2,"from":1},{"op":"set_onion","page":2}])", "genko", false},
+    {"onion clear null", R"([{"op":"set_onion","page":2,"from":1},{"op":"set_onion","page":2,"from":null}])", "genko", false},
+    {"onion clear empty", R"([{"op":"set_onion","page":2,"from":1},{"op":"set_onion","page":2,"from":""}])", "genko", false},
+    {"onion clear false", R"([{"op":"set_onion","page":2,"from":1},{"op":"set_onion","page":2,"from":false}])", "genko", false},
+    {"onion zero text is int", R"([{"op":"set_onion","page":2,"from":"0"}])", "genko", false},
+    {"onion invalid list atomic", R"([{"op":"set_note","page":2,"note":"前置"},{"op":"set_onion","page":2,"from":[]}])", "genko", false},
+    {"onion invalid text atomic", R"([{"op":"set_note","page":2,"note":"前置"},{"op":"set_onion","page":2,"from":"bad"}])", "genko", false},
+    {"onion no page", R"([{"op":"set_onion","page":9,"from":1}])", "genko", false},
+    {"onion locked page", R"([{"op":"lock_page","page":2,"agent":"ai:other"},{"op":"set_onion","page":2,"from":1}])", "genko", false},
+    {"onion dry run", R"([{"op":"set_onion","page":2,"from":1}])", "ai:mine", true},
+    {"onion step default", R"([{"op":"step_onion","page":2}])", "genko", false},
+    {"onion step zero defaults", R"([{"op":"step_onion","page":2,"delta":0}])", "genko", false},
+    {"onion step zero text", R"([{"op":"step_onion","page":2,"delta":"0"}])", "genko", false},
+    {"onion step fractional", R"([{"op":"step_onion","page":2,"delta":-0.9}])", "genko", false},
+    {"onion step wide plus", R"([{"op":"step_onion","page":1,"delta":1e100}])", "genko", false},
+    {"onion step wide minus", R"([{"op":"step_onion","page":2,"delta":"-9999999999999999999999999999"}])", "genko", false},
+    {"onion step cancellation", R"([{"op":"set_onion","page":1,"from":-9223372036854775808},{"op":"step_onion","page":1,"delta":"9223372036854775810"}])", "genko", false},
+    {"onion step after source", R"([{"op":"set_onion","page":2,"from":1},{"op":"step_onion","page":2,"delta":1}])", "genko", false},
+    {"onion step invalid atomic", R"([{"op":"set_note","page":2,"note":"前置"},{"op":"step_onion","page":2,"delta":{"bad":1}}])", "genko", false},
+    {"onion step dry run", R"([{"op":"step_onion","page":2,"delta":100}])", "ai:mine", true},
 };
 
 }  // namespace
@@ -239,9 +264,27 @@ private slots:
 
     void opsMatchPython() {
         const QString book = genko::test::test_data("legacy/book-v3.genko");
+        const auto digit_batch = [](const char* name, const char* key, const std::string& value) {
+            Json op = Json::object({{"op", name}, {"page", 2}});
+            op[key] = value;
+            return genko::core::dump_python(Json::array({
+                Json::object({{"op", "set_note"}, {"page", 2}, {"note", "前置"}}), op}));
+        };
+        const std::string from_digits = digit_batch("set_onion", "from", std::string(4300, '0') + "1");
+        const std::string delta_digits = digit_batch("step_onion", "delta", std::string(4301, '9'));
+        const std::string nonzero_from_digits = digit_batch("set_onion", "from", std::string(4301, '9'));
+        const std::string boundary_from = digit_batch("set_onion", "from", std::string(4299, '0') + "1");
+        const std::string boundary_delta = digit_batch("step_onion", "delta", std::string(4299, '0') + "1");
+        std::vector<Case> cases;
+        for (const Case& c : kCases) cases.push_back(c);
+        cases.push_back({"onion source digit limit atomic", from_digits.c_str(), "genko", false});
+        cases.push_back({"onion delta digit limit atomic", delta_digits.c_str(), "genko", false});
+        cases.push_back({"onion source nonzero digit limit atomic", nonzero_from_digits.c_str(), "genko", false});
+        cases.push_back({"onion source digit boundary", boundary_from.c_str(), "genko", false});
+        cases.push_back({"onion delta digit boundary", boundary_delta.c_str(), "genko", false});
         Json jobs = Json::array();
         int n = 0;
-        for (const Case& c : kCases) {
+        for (const Case& c : cases) {
             Json job = Json::object();
             job["op"] = "apply";
             job["book"] = book.toStdString();
@@ -260,7 +303,7 @@ private slots:
         QVERIFY2(ran.finished && ran.exit_code == 0, ran.err.right(3000).constData());
 
         n = 0;
-        for (const Case& c : kCases) {
+        for (const Case& c : cases) {
             const QString out = path(QStringLiteral("apply/%1").arg(n));
             const Json want = genko::test::read_json(out + ".json");
             Json got;
@@ -293,6 +336,8 @@ private slots:
             }
             ++n;
         }
+        QCOMPARE(n, static_cast<int>(cases.size()));
+        qInfo("Compared %d cases, original 40 retained, onion additions %d", n, n - 40);
     }
 
     void legacyUndoMatchesPython() {

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -129,6 +130,90 @@ void advance(OpContext& c) {
     if (doc.page(i).stage != to) doc.edit_page(i).stage = to;
 }
 
+// Call after validating/converting the string: malformed literals must keep their
+// own Python error, but even a long sequence of leading zeroes counts as digits.
+void check_onion_digit_limit(const Json& value) {
+    if (!value.is_string()) return;
+    const auto& text = value.get_ref<const std::string&>();
+    const auto digits = std::count_if(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; });
+    if (digits > 4300) {
+        throw PyValueError("Exceeds the limit (4300 digits) for integer string conversion: value has " +
+                           std::to_string(digits) + " digits; use sys.set_int_max_str_digits() to increase the limit");
+    }
+}
+
+std::string onion_integer_text(const Json& value);
+
+// ops.set_onion: only None, the empty string, and values equal to 0 clear the reference.
+// A nonzero reference is kept even when it names this page or no existing page.
+void set_onion(OpContext& c) {
+    const std::size_t i = require_page(c.doc, c.op);
+    const Json* from = get(c.op, "from");
+    const bool clear = from == nullptr || from->is_null() || py_equals(*from, Json("")) || py_equals(*from, Json(0));
+    std::optional<Num> reference;
+    if (!clear) {
+        // Validate Python's syntax and digit limit before the model's int64 bound.
+        (void)onion_integer_text(*from);
+        reference = Num(to_int(*from));
+    }
+    c.doc.edit_page(i).onion_from = reference;
+}
+
+// int(current) + int(delta) is unbounded in Python, but only its clamp to [1, pages]
+// is stored. Keep decimal magnitudes exact so wide opposite offsets cannot lose a
+// small difference in floating-point arithmetic (no new big-integer dependency).
+std::string onion_integer_text(const Json& value) {
+    const auto big = py_big_int_text(value);
+    const std::string text = big ? *big : std::to_string(to_int(value));
+    check_onion_digit_limit(value);
+    return text;
+}
+
+int magnitude_compare(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return a.size() < b.size() ? -1 : 1;
+    return a == b ? 0 : (a < b ? -1 : 1);
+}
+
+Num bounded_onion_sum(std::string a, std::string b, const Num& upper) {
+    const bool negative_a = a.front() == '-';
+    const bool negative_b = b.front() == '-';
+    if (negative_a) a.erase(0, 1);
+    if (negative_b) b.erase(0, 1);
+    const std::string bound = upper.repr();
+    if (negative_a == negative_b) {
+        if (negative_a) return Num(1);
+        if (magnitude_compare(a, bound) >= 0 || magnitude_compare(b, bound) >= 0) return upper;
+        const Num sum = Num(to_int(Json(a))) + Num(to_int(Json(b)));
+        return std::max(Num(1), std::min(upper, sum));
+    }
+    const std::string& positive = negative_a ? b : a;
+    const std::string& negative = negative_a ? a : b;
+    if (magnitude_compare(positive, negative) <= 0) return Num(1);
+    std::string difference = positive;
+    std::size_t j = negative.size();
+    int borrow = 0;
+    for (std::size_t i = difference.size(); i-- > 0;) {
+        int digit = positive[i] - '0' - borrow;
+        if (j > 0) digit -= negative[--j] - '0';
+        borrow = digit < 0 ? 1 : 0;
+        difference[i] = static_cast<char>('0' + digit + 10 * borrow);
+    }
+    difference.erase(0, difference.find_first_not_of('0'));
+    if (magnitude_compare(difference, bound) >= 0) return upper;
+    return std::max(Num(1), Num(to_int(Json(difference))));
+}
+
+void step_onion(OpContext& c) {
+    const std::size_t i = require_page(c.doc, c.op);
+    const Page& page = c.doc.page(i);
+    const Num current = page.onion_from && page.onion_from->truthy() ? *page.onion_from : page.index;
+    const std::string current_text = onion_integer_text(current.json());
+    const std::string delta_text = onion_integer_text(py_or(py_get(c.op, "delta"), Json(-1)));
+    Num reference = bounded_onion_sum(current_text, delta_text, Num(c.doc.pages.size()));
+    if (reference == page.index) reference = std::max(Num(1), page.index - Num(1));
+    c.doc.edit_page(i).onion_from = reference;
+}
+
 void set_brush(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -146,6 +231,8 @@ void register_page_ops(OpRegistry& registry) {
     registry.add("reorder", reorder);
     registry.add("advance", advance);
     registry.add("set_brush", set_brush);
+    registry.add("set_onion", set_onion);
+    registry.add("step_onion", step_onion);
 }
 
 }  // namespace genko::core
