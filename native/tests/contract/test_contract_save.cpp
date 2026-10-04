@@ -290,6 +290,12 @@ private slots:
         const std::string nonzero_from_digits = digit_batch("set_onion", "from", std::string(4301, '9'));
         const std::string boundary_from = digit_batch("set_onion", "from", std::string(4299, '0') + "1");
         const std::string boundary_delta = digit_batch("step_onion", "delta", std::string(4299, '0') + "1");
+        const std::string tiny_positive = digit_batch("set_lt", "threshold", "0." + std::string(400, '0') + "1");
+        const std::string tiny_negative = digit_batch("set_lt", "threshold", "-0." + std::string(400, '0') + "1");
+        const std::string tiny_positive_exp = digit_batch("set_lt", "threshold", "0." + std::string(400, '0') + "1e+1");
+        const std::string tiny_negative_exp = digit_batch("set_lt", "threshold", "-0." + std::string(400, '0') + "1e+1");
+        const std::string wide_coefficient = digit_batch("set_lt", "threshold", "1" + std::string(400, '0') + "e-400");
+        const std::string wide_negative_coefficient = digit_batch("set_lt", "threshold", "-1" + std::string(400, '0') + "e-400");
         std::vector<Case> cases;
         for (const Case& c : kCases) cases.push_back(c);
         cases.push_back({"onion source digit limit atomic", from_digits.c_str(), "genko", false});
@@ -297,6 +303,12 @@ private slots:
         cases.push_back({"onion source nonzero digit limit atomic", nonzero_from_digits.c_str(), "genko", false});
         cases.push_back({"onion source digit boundary", boundary_from.c_str(), "genko", false});
         cases.push_back({"onion delta digit boundary", boundary_delta.c_str(), "genko", false});
+        cases.push_back({"lt decimal underflow positive", tiny_positive.c_str(), "genko", false});
+        cases.push_back({"lt decimal underflow negative", tiny_negative.c_str(), "genko", false});
+        cases.push_back({"lt decimal underflow positive exp", tiny_positive_exp.c_str(), "genko", false});
+        cases.push_back({"lt decimal underflow negative exp", tiny_negative_exp.c_str(), "genko", false});
+        cases.push_back({"lt wide finite coefficient", wide_coefficient.c_str(), "genko", false});
+        cases.push_back({"lt wide finite negative coefficient", wide_negative_coefficient.c_str(), "genko", false});
         Json jobs = Json::array();
         int n = 0;
         for (const Case& c : cases) {

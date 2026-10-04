@@ -10,6 +10,8 @@
 #include <memory>
 
 #include "app/canvas.hpp"
+#include "app/tiles.hpp"
+#include "render/page.hpp"
 #include "app/frame_tools.hpp"
 #include "app/icons.hpp"
 #include "app/inject.hpp"
@@ -21,6 +23,7 @@ using namespace gui_test;
 using genko::app::MainWindow;
 using genko::app::PageCanvas;
 using genko::app::Session;
+using genko::core::Num;
 namespace inject = genko::app::inject;
 namespace core = genko::core;
 
@@ -73,6 +76,117 @@ private slots:
         qRegisterMetaType<genko::app::BookChange>();
         genko::app::icons::init_resources();
         genko::app::theme::apply(qApp);
+    }
+
+    void onionReferenceChangesRefreshTheVisibleTiles() {
+        auto doc = std::make_shared<core::Document>(core::new_episode(
+            "オニオン試験", Num(1), 3, core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6)));
+        doc->edit_page(0).paint(core::LayerRole::Bg, core::NumList{Num(240), Num(40), Num(20)});
+        doc->edit_page(1).onion_from = Num(1);
+        genko::app::PageRenderer renderer;
+        renderer.show(doc, 1);
+        renderer.want(72, 72, QRectF(0, 0, 70, 95));
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        const QImage before = renderer.compose(72);
+        const auto generation = renderer.generation();
+        auto updated = std::make_shared<core::Document>(*doc);
+        updated->edit_page(0).paint(core::LayerRole::Bg, core::NumList{Num(20), Num(40), Num(240)});
+        QCOMPARE(updated->pages[1].get(), doc->pages[1].get());
+        renderer.show(updated, 1);
+        QVERIFY(renderer.generation() > generation);
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        const QImage after = renderer.compose(72);
+        QVERIFY(after != before);
+        genko::render::RenderOptions options;
+        options.mode = "proof";
+        options.skip_unported = true;
+        const auto expected = genko::render::render_page(updated->page(1), 72, options, updated.get()).image;
+        const auto bytes = expected.tobytes();
+        const QImage reference(reinterpret_cast<const uchar*>(bytes.data()), expected.width(), expected.height(),
+                               expected.width() * 3, QImage::Format_RGB888);
+        QCOMPARE(after, reference.convertToFormat(QImage::Format_RGB32));
+        renderer.set_mode("print");
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        const QImage printed = renderer.compose(72);
+        const auto print_generation = renderer.generation();
+        auto again = std::make_shared<core::Document>(*updated);
+        again->edit_page(0).paint(core::LayerRole::Bg, core::NumList{Num(80), Num(200), Num(40)});
+        renderer.show(again, 1);
+        QCOMPARE(renderer.generation(), print_generation);
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        QCOMPARE(renderer.compose(72), printed);
+    }
+
+    void unrelatedPageChangesKeepCurrentOnionTiles() {
+        auto doc = std::make_shared<core::Document>(core::new_episode(
+            "オニオン局所性", Num(1), 3, core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6)));
+        doc->edit_page(1).onion_from = Num(1);
+        genko::app::PageRenderer renderer;
+        renderer.show(doc, 1);
+        renderer.want(72, 72, QRectF(0, 0, 70, 95));
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        const auto generation = renderer.generation();
+        const QImage before = renderer.compose(72);
+        auto updated = std::make_shared<core::Document>(*doc);
+        updated->edit_page(2).paint(core::LayerRole::Bg, core::NumList{Num(20), Num(40), Num(240)});
+        renderer.show(updated, 1);
+        QCOMPARE(renderer.generation(), generation);
+        QVERIFY(renderer.settled());
+        QCOMPARE(renderer.compose(72), before);
+    }
+
+    void onionReferenceAppearsAndDisappears() {
+        auto doc = std::make_shared<core::Document>(core::new_episode(
+            "参照先の変化", Num(1), 3, core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6)));
+        doc->edit_page(0).index = Num(42);
+        doc->edit_page(0).paint(core::LayerRole::Bg, core::NumList{Num(240), Num(40), Num(20)});
+        doc->edit_page(1).onion_from = Num(1);
+        genko::app::PageRenderer renderer;
+        renderer.show(doc, 1);
+        renderer.want(72, 72, QRectF(0, 0, 70, 95));
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        const QImage absent = renderer.compose(72);
+        const auto generation = renderer.generation();
+        auto appeared = std::make_shared<core::Document>(*doc);
+        appeared->edit_page(0).index = Num(1);
+        QCOMPARE(appeared->pages[1].get(), doc->pages[1].get());
+        renderer.show(appeared, 1);
+        QVERIFY(renderer.generation() > generation);
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        QVERIFY(renderer.compose(72) != absent);
+        const auto appearance_generation = renderer.generation();
+        auto gone = std::make_shared<core::Document>(*appeared);
+        gone->edit_page(0).index = Num(42);
+        renderer.show(gone, 1);
+        QVERIFY(renderer.generation() > appearance_generation);
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        QCOMPARE(renderer.compose(72), absent);
+    }
+
+    void onionUpdatesInTheStudioWindow() {
+        Desk desk;
+        desk.session->apply(Json::array({
+            Json::object({{"op", "add_layer"}, {"page", 2}, {"kind", "paint"}, {"id", "onion-paint"}}),
+            Json::object({{"op", "fill_area"}, {"page", 2}, {"layer_id", "onion-paint"},
+                          {"area", Json::object({{"rect", Json::array({20, 20, 100, 100})}})}, {"rgb", Json::array({240, 40, 20})}}),
+            Json::object({{"op", "set_onion"}, {"page", 1}, {"from", 2}})}));
+        QTRY_VERIFY_WITH_TIMEOUT(desk.canvas()->renderer().settled(), 10000);
+        const int dpi = desk.canvas()->renderer().shown_dpi();
+        const QImage before = desk.canvas()->renderer().compose(dpi);
+        const auto generation = desk.canvas()->renderer().generation();
+        const QString folder = qEnvironmentVariable("GENKO_TEST_SCREENSHOT_DIR");
+        if (!folder.isEmpty()) {
+            QVERIFY(QDir().mkpath(folder));
+            QVERIFY(desk.window->grab().save(folder + "/onion-before.png"));
+        }
+        desk.session->apply(Json::array({
+            Json::object({{"op", "fill_area"}, {"page", 2}, {"layer_id", "onion-paint"},
+                          {"area", Json::object({{"rect", Json::array({20, 20, 100, 100})}})}, {"rgb", Json::array({20, 40, 240})}})}));
+        QVERIFY(desk.canvas()->renderer().generation() > generation);
+        QTRY_VERIFY_WITH_TIMEOUT(desk.canvas()->renderer().settled(), 10000);
+        QVERIFY(desk.canvas()->renderer().compose(dpi) != before);
+        QCoreApplication::processEvents();
+        if (!folder.isEmpty()) QVERIFY(desk.window->grab().save(folder + "/onion-after.png"));
     }
 
     void aNearlyLevelCutIsLevel() {

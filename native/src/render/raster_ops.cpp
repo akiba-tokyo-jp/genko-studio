@@ -1557,6 +1557,87 @@ void set_stroke_width(OpContext& c) {
     target.strokes = core::make_strokes(std::move(lines));
 }
 
+// --- the light table -------------------------------------------------------------------------------------------------
+
+// lt.runs_to_strokes's runs: along each row of the line art ("L"), every run of two dark pixels (below 80) or more, as
+// (row, first, past the last) — a shorter run is dropped, one running to the row's end kept
+template <class Each>
+void lt_runs(std::string_view pixels, int width, int height, Each each) {
+    for (int y = 0; y < height; ++y) {
+        const std::size_t row = static_cast<std::size_t>(y) * static_cast<std::size_t>(width);
+        int first = 0;
+        for (int x = 0; x <= width; ++x) {
+            if (x < width && static_cast<unsigned char>(pixels[row + static_cast<std::size_t>(x)]) < 80) continue;
+            if (x - first >= 2) each(y, first, x);
+            first = x + 1;
+        }
+    }
+}
+
+// ops._lt_convert: the picture of the layer in "layer" (bg by default) as line art (lt.to_line_art), its runs pen lines
+// (lt.runs_to_strokes) added after those of the layer in "to" (ink by default) — one across the top when it has none
+void lt_convert(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const std::size_t at = core::require_page(doc, op);
+    const LayerRole src_role = core::role_from(Json(core::truthy_at(op, "layer") ? core::py_str(op["layer"]) : std::string("bg")));
+    const LayerRole dest_role = core::role_from(Json(core::truthy_at(op, "to") ? core::py_str(op["to"]) : std::string("ink")));
+    if (dest_role == LayerRole::Ink && !doc.page(at).name_ok && core::gated(doc)) throw OpError("lt_convert to ink requires name_ok");
+    Page& page = doc.edit_page(at);
+    // (its bytes held, not the layer: the layer the lines go to may yet be added to the page's layers)
+    const core::Bytes picture = page.layers[core::layer_for_role(page, src_role)].raster_png;
+    if (!picture || picture->empty()) throw OpError("lt_convert needs a raster on the source layer");
+    const Json* threshold = core::get(op, "threshold");
+    const std::string method = core::truthy_at(op, "method") ? core::py_str(op["method"]) : std::string("adaptive");
+    // lt.to_line_art
+    const Image gray = selection::open_picture(*picture).convert("L");
+    Image binary;
+    if (method == "edges" || method == "sobel") {
+        binary = ops::invert(gray.filter(Filter::find_edges()));
+    } else {
+        double cut = 0;
+        if (threshold != nullptr && !threshold->is_null()) {
+            cut = core::finite_float(*threshold, "threshold");
+        } else if (page.lt_threshold) {  // (the one set_lt keeps)
+            cut = page.lt_threshold->value();
+            if (!std::isfinite(cut)) throw OpError("the page's lt_threshold must be a finite number");
+        } else {  // the picture's mean less 12, at least 8
+            const std::string raw = gray.tobytes();
+            std::uint64_t sum = 0;
+            for (const char ch : raw) sum += static_cast<unsigned char>(ch);
+            cut = core::py_max(8.0, static_cast<double>(sum) / static_cast<double>(std::max<std::size_t>(1, raw.size())) - 12);
+        }
+        binary = gray.point([cut](int p) { return p < cut ? 0 : 255; });
+    }
+    Layer& dest = page.layers[core::layer_for_role(page, dest_role)];
+    if (dest.locked) throw OpError("the layer is locked");  // (Python draws on it)
+    if (dest.kind == LayerKind::Placed) throw OpError("a placed layer cannot receive strokes");
+    // lt.runs_to_strokes (points that are not finite, or more of them than an op may make, refused before a line is added)
+    const double width_mm = page.spec.width_mm.value();
+    const double height_mm = page.spec.height_mm.value();
+    if (!std::isfinite(width_mm)) throw OpError("the page's width_mm must be a finite number");
+    if (!std::isfinite(height_mm)) throw OpError("the page's height_mm must be a finite number");
+    const int w = binary.width();
+    const int h = binary.height();
+    const std::string pixels = binary.tobytes();
+    std::int64_t count = 0;
+    lt_runs(pixels, w, h, [&count](int, int first, int past) { count += past - first; });
+    limits::check_count(static_cast<double>(count), static_cast<double>(limits::kPoints), "the line art");
+    const double sx = width_mm / std::max(1, w);
+    const double sy = height_mm / std::max(1, h);
+    std::vector<core::StrokePtr> lines = dest.strokes->items;
+    lt_runs(pixels, w, h, [&](int y, int first, int past) {
+        core::PenPoints run;
+        for (int x = first; x < past; ++x) run.push_back(core::PenPoint{x * sx, y * sy, std::nullopt});
+        lines.push_back(std::make_shared<const core::Stroke>(core::coerce_stroke(run)));
+    });
+    if (lines.empty()) {
+        lines.push_back(std::make_shared<const core::Stroke>(core::coerce_stroke(
+            core::PenPoints{core::PenPoint{10.0, 10.0, std::nullopt}, core::PenPoint{width_mm - 10, 10.0, std::nullopt}})));
+    }
+    if (lines.size() != dest.stroke_count()) dest.strokes = core::make_strokes(std::move(lines));
+}
+
 // The bus's resolver of the richer areas (selops.resolve on the page the op names)
 // Python's reader makes the book's own brushes known to the process (brushes.register, and define_brush adds to
 // them): the lines these ops draw are drawn with them, as the page is.
@@ -1601,6 +1682,7 @@ void register_raster_ops(core::OpRegistry& registry) {
     registry.add("paste", drawing(paste));
     registry.add("erase", drawing(erase));
     registry.add("erase_raster", drawing(erase));
+    registry.add("lt_convert", drawing(lt_convert));
     registry.set_area_resolver(resolve_area);
 }
 

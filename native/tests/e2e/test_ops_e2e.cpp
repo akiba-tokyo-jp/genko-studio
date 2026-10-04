@@ -8,6 +8,7 @@
 
 #include <QtTest>
 
+#include <cmath>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -345,6 +346,21 @@ private slots:
             const char* expected = raw[0] == '"' ? "threshold must be a finite number" : "ops must not hold NaN or Infinity (at /1/threshold)";
             QVERIFY2(one_line(refused.out)["error"].get<std::string>().find(expected) != std::string::npos, refused.out.constData());
             QVERIFY(files() == before);
+        }
+        for (const std::string& sign : {std::string(), std::string("-")}) {
+            const Json batch = Json::array({Json::object({{"op", "set_note"}, {"page", 2}, {"note", "前置"}}),
+                Json::object({{"op", "set_lt"}, {"page", 2}, {"threshold", sign + "1" + std::string(400, '0') + "e-1"}})});
+            const auto before = files();
+            const auto overflow = apply(genko::core::dump_python(batch), "human:作者");
+            QCOMPARE(overflow.exit_code, 1);
+            QVERIFY2(one_line(overflow.out)["error"].get<std::string>().find("finite") != std::string::npos, overflow.out.constData());
+            QVERIFY(files() == before);
+            const Json tiny = Json::array({Json::object({{"op", "set_lt"}, {"page", 2},
+                {"threshold", sign + "0." + std::string(400, '0') + "1"}})});
+            QCOMPARE(apply(genko::core::dump_python(tiny), "human:作者").exit_code, 0);
+            QVERIFY(threshold().is_number_float());
+            QCOMPARE(threshold().get<double>(), 0.0);
+            QCOMPARE(std::signbit(threshold().get<double>()), !sign.empty());
         }
         const auto saved = files();
         QCOMPARE(apply(R"([{"op":"set_lt","page":2,"threshold":0.25}])", "human:作者", {"--dry-run"}).exit_code, 0);

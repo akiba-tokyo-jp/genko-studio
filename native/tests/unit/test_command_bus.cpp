@@ -5,6 +5,9 @@
 
 #include <QtTest>
 
+#include <bit>
+#include <cmath>
+#include <cstdint>
 #include <limits>
 #include <set>
 #include <string>
@@ -64,6 +67,55 @@ class TestCommandBus : public QObject {
     Q_OBJECT
 
 private slots:
+    void lightTableFiniteSubnormalsKeepTheirBits() {
+        struct Case { const char* text; std::uint64_t bits; };
+        // Bit patterns cross-checked against Python float(), including the half-denormal rounding boundary.
+        const Case cases[] = {
+            {"4.9406564584124654e-324", 0x1ULL},
+            {"2.4703282292062328e-324", 0x1ULL},
+            {"2.4703282292062327e-324", 0x0ULL},
+            {"-4.9406564584124654e-324", 0x8000000000000001ULL},
+            {"-2.4703282292062327e-324", 0x8000000000000000ULL},
+            {"1e-320", 0x7e8ULL},
+            {"-1e-320", 0x80000000000007e8ULL},
+            {"0e99999999999999999999999999999999999999", 0x0ULL}};
+        for (const Case& c : cases) {
+            const auto changed = CommandBus(genko::render::ops_registry()).apply(book(),
+                Json::array({Json::object({{"op", "set_lt"}, {"page", 2}, {"threshold", c.text}})}), Actor("genko"));
+            QCOMPARE(std::bit_cast<std::uint64_t>(changed.doc.page(1).lt_threshold.value().value()), c.bits);
+        }
+    }
+
+    void lightTableOverflowRejectsDespiteANegativeExponent() {
+        const Document doc = book();
+        for (const std::string& sign : {std::string(), std::string("-")}) {
+            const std::string threshold = sign + "1" + std::string(400, '0') + "e-1";
+            const Json batch = Json::array({Json::object({{"op", "set_note"}, {"page", 2}, {"note", "must not survive"}}),
+                Json::object({{"op", "set_lt"}, {"page", 2}, {"threshold", threshold}})});
+            const auto error = error_of(doc, batch);
+            QVERIFY2(error.find("finite") != std::string::npos, error.c_str());
+            QCOMPARE(doc.page(1).note, std::string());
+            QVERIFY(!doc.page(1).lt_threshold);
+        }
+    }
+
+    void lightTableUnderflowKeepsSignedZeroWithoutAnExponent() {
+        const Document doc = book();
+        for (const std::string& sign : {std::string(), std::string("-")}) {
+            for (const std::string& exponent : {std::string(), std::string("e+1")}) {
+                const std::string threshold = sign + "0." + std::string(400, '0') + "1" + exponent;
+                const Json batch = Json::array({Json::object({{"op", "set_lt"}, {"page", 2}, {"threshold", threshold}})});
+                const auto error = error_of(doc, batch);
+                QVERIFY2(error == "(applied)", error.c_str());
+                const auto result = bus().apply(doc, batch, Actor("genko"));
+                QVERIFY(result.doc.page(1).lt_threshold);
+                const double value = result.doc.page(1).lt_threshold->value();
+                QCOMPARE(value, 0.0);
+                QCOMPARE(std::signbit(value), !sign.empty());
+            }
+        }
+    }
+
     void onionReferenceCanBeSetAndCleared() {
         const Document doc = book();
         const Json first = ops(R"([{"op":"set_onion","page":2,"from":"1"}])");
@@ -227,7 +279,7 @@ private slots:
             QVERIFY2(all.find(name) != nullptr, name);
         }
         for (const char* name : {"add_tone", "set_tone", "delete_tone", "add_effect", "effect_to_layer", "add_figure",
-                                 "render_prims", "trace_prims", "camera_from_ruler", "set_stroke_width", "reshape_stroke"}) {
+                                 "render_prims", "trace_prims", "camera_from_ruler", "set_stroke_width", "reshape_stroke", "lt_convert"}) {
             QVERIFY2(core_ops.find(name) == nullptr, name);
             QVERIFY2(all.find(name) != nullptr, name);
         }
@@ -245,7 +297,7 @@ private slots:
             "merge_down", "merge_layers", "merge_visible", "set_layer_mask", "paint_mask",
             "put_raster", "filter_raster", "fill", "fill_area", "fill_enclosed",
             "fill_gaps", "flood_fill", "gradient_fill", "delete_area", "transform_area",
-            "paste", "erase", "erase_raster", "set_stroke_width", "reshape_stroke"};
+            "paste", "erase", "erase_raster", "set_stroke_width", "reshape_stroke", "lt_convert"};
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

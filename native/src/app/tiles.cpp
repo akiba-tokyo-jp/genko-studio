@@ -68,6 +68,15 @@ bool same_layer_look(const core::Layer& a, const core::Layer& b) {
            a.screen == b.screen && a.asset == b.asset && a.region.has_value() == b.region.has_value() && a.angle == b.angle;
 }
 
+// The page drawn faintly over `page` (render_page's onion: in name and proof, the first page of that index), or none.
+const core::Page* onion_page(const core::Document& doc, const core::Page& page, const std::string& mode) {
+    if ((mode != "name" && mode != "proof") || !page.onion_from || !page.onion_from->truthy()) return nullptr;
+    for (const auto& p : doc.pages) {
+        if (p->index == *page.onion_from) return p.get();
+    }
+    return nullptr;
+}
+
 QImage to_qimage(const render::Image& image) {
     const render::Image rgb = image.mode() == "RGB" ? image : image.convert("RGB");
     const std::string bytes = rgb.tobytes();
@@ -139,6 +148,8 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
     const std::shared_ptr<core::Page>& ptr = doc->pages[index];
     const core::Page& page = *ptr;
     const bool same_page = doc_ && page.id == page_id_ && shown_page_ != nullptr;
+    // (the page drawn faintly over it, edited, gone or come: all of it changed)
+    const bool same_onion = !same_page || onion_page(*doc_, *shown_page_, mode_) == onion_page(*doc, page, mode_);
     if (!same_page) {
         for (auto& [dpi, level] : levels_) {
             for (Tile& tile : level.tiles) {
@@ -152,14 +163,14 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
         rough_first_ = true;
         omitted_.clear();
         emit omittedChanged(omitted_);
-    } else if (shown_page_ != &page || doc_->brush_custom != doc->brush_custom || doc_->story.size() != doc->story.size()) {
+    } else if (shown_page_ != &page || doc_->brush_custom != doc->brush_custom || doc_->story.size() != doc->story.size() || !same_onion) {
         // the same page, changed: only the tiles its new or removed lines cover are drawn again (anything else
         // changed: all of them)
         const core::Page& old = *shown_page_;
         bool whole = !(same_spec(old.spec, page.spec) && same_frames(old.frames, page.frames) && old.binding == page.binding &&
                        old.fills == page.fills && old.extra == page.extra && old.effects == page.effects && old.ruler == page.ruler &&
                        old.rulers == page.rulers && old.prims == page.prims && old.numero == page.numero &&
-                       old.onion_from == page.onion_from && old.layers.size() == page.layers.size() &&
+                       old.onion_from == page.onion_from && same_onion && old.layers.size() == page.layers.size() &&
                        doc_->brush_custom == doc->brush_custom && doc_->story.size() == doc->story.size());
         std::vector<core::StrokePtr> touched;
         if (!whole) {

@@ -71,7 +71,7 @@ const char* const kOps[] = {"convert_layer", "merge_down",    "merge_layers", "m
                             "fill",          "fill_area",     "fill_enclosed", "fill_gaps",     "flood_fill",
                             "gradient_fill", "delete_area",   "transform_area", "paste",        "store_area",
                             "forget_area",   "set_paper",     "set_timelapse", "erase",         "erase_raster",
-                            "set_stroke_width", "reshape_stroke"};
+                            "set_stroke_width", "reshape_stroke", "lt_convert"};
 
 // How many strings in `value` start with `prefix` (the pictures a payload refers to: "png:…", "unreadable:…").
 int count_prefixed(const Json& value, const std::string& prefix) {
@@ -431,7 +431,26 @@ private slots:
             }
             QVERIFY2(added, "generated book needs an unlocked pen line for the appended edits");
         }
-        QCOMPARE(sequences.size(), std::size_t{155});
+        // Keep the original corpus and the five stroke-edit series; append LT series on five generated books.
+        const std::string lt_picture = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAAAAADbboAnAAAAFElEQVR4nGNgYFiw4M4dBhAgngEA3mUR0cIRCv0AAAAASUVORK5CYII=";
+        const char* lt_methods[] = {"adaptive", "edges", "sobel", "unknown", "adaptive"};
+        for (std::size_t n = 0; n < 5; ++n) {
+            const std::string book = original_sequences[n]["book"].get<std::string>();
+            const auto loaded_book = genko::storage::load_document(genko::storage::path_from_utf8(book));
+            QVERIFY(!loaded_book.document.pages.empty());
+            const auto& page = loaded_book.document.page(loaded_book.document.pages.size() - 1);
+            const Json page_index = page.index.json();
+            const Json put = Json::object({{"op", "put_raster"}, {"page", page_index}, {"layer", "bg"}, {"png_base64", lt_picture}});
+            const Json threshold = Json::object({{"op", "set_lt"}, {"page", page_index}, {"threshold", 80.0 + 30.0 * static_cast<double>(n)}});
+            const Json convert = Json::object({{"op", "lt_convert"}, {"page", page_index}, {"layer", "bg"}, {"to", "draft"}, {"method", lt_methods[n]}});
+            const Json again = Json::object({{"op", "lt_convert"}, {"page", page_index}, {"layer", "bg"}, {"to", "draft"}, {"threshold", 0}});
+            sequences.push_back(Json::object({{"book", book}, {"first_id", original_sequences[n]["first_id"]},
+                {"steps", Json::array({
+                    Json::object({{"ops", Json::array({put, threshold})}, {"agent", "human:作者"}}),
+                    Json::object({{"ops", Json::array({convert})}, {"agent", "human:作者"}}),
+                    Json::object({{"ops", Json::array({again})}, {"agent", "human:作者"}})})}}));
+        }
+        QCOMPARE(sequences.size(), original_sequences.size() + std::size_t{10});
         for (std::size_t n = 0; n < original_sequences.size(); ++n) QVERIFY(sequences[n] == original_sequences[n]);
         QDir().mkpath(path("seq"));
         const auto job_of = [&](std::size_t n, bool digest) {

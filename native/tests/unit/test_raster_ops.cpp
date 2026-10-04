@@ -242,6 +242,133 @@ class TestRasterOps : public QObject {
     }
 
 private slots:
+    void lightTableConvertsRunsAndUsesTheSavedThreshold() {
+        Document doc = genko::core::new_episode("ライトテーブル", 1, 2,
+            genko::core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6, 150));
+        const std::string pixels{"\0\0\240\240\334\334\0\0", 8};
+        const auto image = genko::render::Image::frombytes("L", {4, 2}, pixels);
+        auto& source = doc.edit_page(0);
+        source.layer_for(LayerRole::Bg).raster_png =
+            std::make_shared<const std::string>(genko::render::write_png(image));
+        source.lt_threshold = genko::core::Num(128);
+        const auto before = state(doc);
+        const auto converted = run_ops(doc, R"([{"op":"lt_convert","page":1}])", kPerson);
+        const auto& lines = converted.doc.page(0).first_layer(LayerRole::Ink)->strokes->items;
+        QCOMPARE(lines.size(), std::size_t(2));
+        QCOMPARE(lines[0]->points.front().x, 0.0);
+        QCOMPARE(lines[0]->points.back().x, 70.0 / 4);
+        QCOMPARE(lines[1]->points.front().x, 70.0 / 2);
+        QCOMPARE(lines[1]->points.front().y, 95.0 / 2);
+        QCOMPARE(state(doc), before);
+        QCOMPARE(converted.doc.pages[1].get(), doc.pages[1].get());
+        const auto changed = run_ops(doc, R"([{"op":"set_lt","page":1,"threshold":180},{"op":"lt_convert","page":1}])", kPerson);
+        const auto& changed_lines = changed.doc.page(0).first_layer(LayerRole::Ink)->strokes->items;
+        QCOMPARE(changed_lines.size(), std::size_t(2));
+        QCOMPARE(changed_lines[0]->points.back().x, 70.0 * 3 / 4);
+        const auto explicit_cut = run_ops(changed.doc, R"([{"op":"lt_convert","page":1,"threshold":128}])", kPerson);
+        const auto& explicit_lines = explicit_cut.doc.page(0).first_layer(LayerRole::Ink)->strokes->items;
+        QCOMPARE(explicit_lines.size(), std::size_t(4));
+        QCOMPARE(explicit_lines[2]->points.back().x, 70.0 / 4);
+        (void)run_ops(doc, R"([{"op":"lt_convert","page":1}])", kPerson, true);
+        QCOMPARE(state(doc), before);
+    }
+
+    void lightTableRefusalsAreAtomicAndKeepTheGates() {
+        Document doc = genko::core::new_episode("拒否の試験", 1, 2,
+            genko::core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6, 150));
+        const auto before = state(doc);
+        const auto no_raster = error_of(doc, R"([{"op":"set_note","page":1,"note":"keep out"},{"op":"lt_convert","page":1}])", kPerson);
+        QVERIFY2(no_raster.find("needs a raster") != std::string::npos, no_raster.c_str());
+        QCOMPARE(state(doc), before);
+        doc.edit_page(0).layer_for(LayerRole::Bg).raster_png =
+            std::make_shared<const std::string>(genko::render::write_png(genko::render::Image::create("L", {4, 2}, {0})));
+        doc.strict_gates = true;
+        const auto unapproved = state(doc);
+        const auto refused = error_of(doc, R"([{"op":"lt_convert","page":1}])", kPerson);
+        QVERIFY2(refused.find("requires name_ok") != std::string::npos, refused.c_str());
+        QCOMPARE(state(doc), unapproved);
+        const auto draft = run_ops(doc, R"([{"op":"lt_convert","page":1,"to":"draft"}])", kPerson);
+        QCOMPARE(draft.doc.page(0).first_layer(LayerRole::Draft)->strokes->items.size(), std::size_t(2));
+        doc.edit_page(0).name_ok = true;
+        const auto approved = run_ops(doc, R"([{"op":"lt_convert","page":1}])", kAi);
+        QCOMPARE(approved.doc.page(0).first_layer(LayerRole::Ink)->strokes->items.size(), std::size_t(2));
+        const auto finite_before = state(doc);
+        const auto nonfinite = error_of(doc, R"([{"op":"lt_convert","page":1,"threshold":"nan"}])", kPerson);
+        QVERIFY2(nonfinite.find("finite") != std::string::npos, nonfinite.c_str());
+        QCOMPARE(state(doc), finite_before);
+    }
+
+    void lightTableRejectsLockedLayersAndExcessiveGeneratedPoints() {
+        Document doc = genko::core::new_episode("線画変換の安全境界", 1, 2,
+            genko::core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6, 150));
+        doc.edit_page(0).layer_for(LayerRole::Bg).raster_png =
+            std::make_shared<const std::string>(genko::render::write_png(genko::render::Image::create("L", {4, 2}, {0})));
+        doc.edit_page(0).layer_for(LayerRole::Ink).locked = true;
+        const auto locked_before = state(doc);
+        const auto locked = error_of(doc,
+            R"([{"op":"set_note","page":1,"note":"must not survive"},{"op":"lt_convert","page":1}])", kPerson);
+        QVERIFY2(locked.find("the layer is locked") != std::string::npos, locked.c_str());
+        QCOMPARE(state(doc), locked_before);
+        doc.edit_page(0).layer_for(LayerRole::Ink).locked = false;
+        doc.edit_page(0).layer_for(LayerRole::Bg).raster_png =
+            std::make_shared<const std::string>(genko::render::write_png(genko::render::Image::create("L", {1001, 1000}, {0})));
+        const auto huge_before = state(doc);
+        const auto huge = error_of(doc,
+            R"([{"op":"set_note","page":1,"note":"must not survive"},{"op":"lt_convert","page":1}])", kPerson);
+        QVERIFY2(huge.find("line art is too large") != std::string::npos, huge.c_str());
+        QCOMPARE(state(doc), huge_before);
+    }
+
+    void lightTableCannotDiscardLinesInAPlacedDestination() {
+        Document doc = genko::core::new_episode("配置画像を保護", 1, 2,
+            genko::core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 8, 8));
+        doc = run_ops(doc, genko::core::dump_python(Json::array({
+            Json::object({{"op", "put_raster"}, {"page", 1}, {"layer", "bg"}, {"png_base64", png_base64("L", 4, 2, {0})}}),
+            Json::object({{"op", "name_ok"}, {"page", 1}})})), kPerson).doc;
+        auto& page = doc.edit_page(0);
+        const auto target = std::find_if(page.layers.begin(), page.layers.end(), [](const Layer& layer) { return layer.role == LayerRole::Ink; });
+        QVERIFY(target != page.layers.end());
+        target->kind = LayerKind::Placed;
+        target->strokes = genko::core::empty_strokes();
+        const Json before = genko::storage::snapshot(doc);
+        const Json batch = Json::array({
+            Json::object({{"op", "set_note"}, {"page", 2}, {"note", "前置変更"}}),
+            Json::object({{"op", "lt_convert"}, {"page", 1}})});
+        try {
+            bus().apply(doc, batch, Actor(kPerson));
+            QFAIL("a placed destination must not lose generated lines when saved");
+        } catch (const ApplyError& error) {
+            QVERIFY(QString::fromUtf8(error.what()).contains("a placed layer cannot receive strokes"));
+        }
+        QVERIFY(genko::test::strict_equal(genko::storage::snapshot(doc), before));
+    }
+
+    void lightTableRespectsAnotherActorsPageLock() {
+        Document doc = genko::core::new_episode("他者のロック", 1, 2,
+            genko::core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 8, 8));
+        doc = run_ops(doc, genko::core::dump_python(Json::array({
+            Json::object({{"op", "put_raster"}, {"page", 1}, {"layer", "bg"}, {"png_base64", png_base64("L", 4, 2, {0})}}),
+            Json::object({{"op", "name_ok"}, {"page", 1}})})), kPerson).doc;
+        const Document locked = bus().apply(doc,
+            Json::array({Json::object({{"op", "lock_page"}, {"page", 1}})}), Actor("human:作者")).doc;
+        const Json before = genko::storage::snapshot(locked);
+        const Json batch = Json::array({
+            Json::object({{"op", "set_note"}, {"page", 2}, {"note", "前置変更"}}),
+            Json::object({{"op", "lt_convert"}, {"page", 1}})});
+        try {
+            bus().apply(locked, batch, Actor(kAi));
+            QFAIL("AI cannot convert lines on another actor's locked page");
+        } catch (const ApplyError& error) {
+            QVERIFY(QString::fromUtf8(error.what()).contains("human:作者"));
+        }
+        QVERIFY(genko::test::strict_equal(genko::storage::snapshot(locked), before));
+        const auto own = bus().apply(locked,
+            Json::array({Json::object({{"op", "lt_convert"}, {"page", 1}})}), Actor("human:作者"));
+        const auto& ink = own.doc.page(0).layers;
+        const auto found = std::find_if(ink.begin(), ink.end(), [](const auto& layer) { return layer.role == LayerRole::Ink; });
+        QVERIFY(found != ink.end() && found->stroke_count() == 2);
+    }
+
     void strokeEditsCannotBypassApprovalWithNumericLayerIds() {
         const Document doc = run_ops(fixture(), R"([{"op":"add_layer","page":2,"kind":"pen","id":"1"},{"op":"add_stroke","page":2,"layer_id":"1","stabilize":0,"points":[[10,10],[20,20]]},{"op":"set_meta","strict_gates":true}])", kPerson).doc;
         const auto line = layer_by_id(doc.page(1), "1")->strokes->items.front();

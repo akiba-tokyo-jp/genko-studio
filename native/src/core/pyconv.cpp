@@ -49,6 +49,31 @@ bool equals_ignore_case(std::string_view a, std::string_view b) {
     return true;
 }
 
+// Whether a decimal literal (digits with an optional point, then an optional exponent) is below 1 in magnitude: its
+// digits are all zero, or the power of ten of its first nonzero digit, plus the exponent, is negative. The exponent
+// saturates at the literal's length, past which its sign alone decides, so an exponent of any length cannot overflow.
+bool below_one(std::string_view body) {
+    const std::string_view mantissa = body.substr(0, body.find_first_of("eE"));
+    const auto first = mantissa.find_first_of("123456789");
+    if (first == std::string_view::npos) return true;
+    const auto point = std::min(mantissa.find('.'), mantissa.size());
+    // 10**order is the place of the first nonzero digit: 10**0 just before the point, 10**-1 just after it
+    const std::int64_t order = first < point ? static_cast<std::int64_t>(point - first - 1)
+                                             : -static_cast<std::int64_t>(first - point);
+    if (mantissa.size() == body.size()) return order < 0;
+    std::string_view exponent = body.substr(mantissa.size() + 1);
+    const bool negative = exponent.starts_with('-');
+    if (negative || exponent.starts_with('+')) exponent.remove_prefix(1);
+    const auto limit = static_cast<std::int64_t>(body.size());
+    std::int64_t shift = 0;
+    for (const char c : exponent) {
+        const std::int64_t digit = c - '0';
+        if (shift > limit / 10 || (shift == limit / 10 && digit > limit % 10)) shift = limit;
+        else shift = shift * 10 + digit;
+    }
+    return negative ? shift > order : order < 0 && shift < -order;
+}
+
 std::optional<double> parse_float_text(std::string_view original) {
     std::string text;
     if (!remove_underscores(strip(original), text) || text.empty()) return std::nullopt;
@@ -68,9 +93,7 @@ std::optional<double> parse_float_text(std::string_view original) {
     if (r.ptr != body.data() + body.size()) return std::nullopt;
     if (r.ec == std::errc::result_out_of_range) {
         // overflow → inf, underflow → 0 (Python's float() does not raise for either)
-        const auto e = body.find_first_of("eE");
-        const bool tiny = e != std::string_view::npos && body.substr(e + 1).starts_with('-');
-        value = tiny ? 0.0 : HUGE_VAL;
+        value = below_one(body) ? 0.0 : HUGE_VAL;
     } else if (r.ec != std::errc{}) {
         return std::nullopt;
     }
