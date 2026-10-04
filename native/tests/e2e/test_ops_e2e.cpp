@@ -269,6 +269,96 @@ private slots:
         QVERIFY(files() == unchanged);
         QVERIFY2(genko::test::book_problems(book_).empty(), genko::test::book_problems(book_).c_str());
     }
+
+    void onionOperationsPersistUndoAndRefuseAtomically() {
+        book_ = tmp_.path() + "/onion.genko";
+        QCOMPARE(genko::test::run_genko({"new", book_, "--pages", "3"}).exit_code, 0);
+        const auto onion = [&]() {
+            return genko::test::read_json(book_ + "/project.json")["pages"][1]["onion_from"];
+        };
+        QCOMPARE(onion(), Json(nullptr));
+        QCOMPARE(apply(R"([{"op":"set_onion","page":2,"from":1}])", "human:作者").exit_code, 0);
+        QCOMPARE(onion(), Json(1));
+        QCOMPARE(apply(R"([{"op":"step_onion","page":2,"delta":100}])", "human:作者").exit_code, 0);
+        QCOMPARE(onion(), Json(3));
+        QCOMPARE(genko::test::run_genko({"undo", book_, "--as", "human:作者"}).exit_code, 0);
+        QCOMPARE(onion(), Json(1));
+        QCOMPARE(genko::test::run_genko({"undo", book_, "--as", "human:作者"}).exit_code, 0);
+        QCOMPARE(onion(), Json(nullptr));
+        QCOMPARE(genko::test::run_genko({"redo", book_, "--as", "human:作者"}).exit_code, 0);
+        QCOMPARE(onion(), Json(1));
+        QCOMPARE(genko::test::run_genko({"redo", book_, "--as", "human:作者"}).exit_code, 0);
+        QCOMPARE(onion(), Json(3));
+        const auto saved = files();
+        for (const char* batch : {
+                 R"([{"op":"set_note","page":2,"note":"前置"},{"op":"set_onion","page":2,"from":[]}])",
+                 R"([{"op":"set_note","page":2,"note":"前置"},{"op":"step_onion","page":2,"delta":{"bad":1}}])",
+                 R"([{"op":"set_note","page":2,"note":"前置"},{"op":"set_onion","page":9,"from":1}])"}) {
+            const auto refused = apply(batch, "human:作者");
+            QCOMPARE(refused.exit_code, 1);
+            QCOMPARE(one_line(refused.out)["ok"], Json(false));
+            QVERIFY(files() == saved);
+            QCOMPARE(onion(), Json(3));
+        }
+        const auto dry = apply(R"([{"op":"set_onion","page":2,"from":1},{"op":"step_onion","page":2}])",
+                               "ai:hermes", {"--dry-run"});
+        QCOMPARE(dry.exit_code, 0);
+        QVERIFY(files() == saved);
+        const auto stale = apply(R"([{"op":"set_onion","page":2,"from":1}])", "human:作者",
+                                 {"--expect-revision", "1"});
+        QCOMPARE(stale.exit_code, 1);
+        QCOMPARE(one_line(stale.out)["code"], Json("revision_conflict"));
+        QVERIFY(files() == saved);
+        QCOMPARE(apply(R"([{"op":"lock_page","page":2}])", "human:other").exit_code, 0);
+        const auto locked = files();
+        for (const char* batch : {R"([{"op":"set_onion","page":2,"from":1}])",
+                                 R"([{"op":"step_onion","page":2}])"}) {
+            const auto refused = apply(batch, "ai:hermes");
+            QCOMPARE(refused.exit_code, 1);
+            QCOMPARE(one_line(refused.out)["code"], Json("apply"));
+            QVERIFY2(one_line(refused.out)["error"].get<std::string>().find("page 2 locked by human:other") != std::string::npos,
+                     refused.out.constData());
+            QVERIFY(files() == locked);
+        }
+        QVERIFY2(genko::test::book_problems(book_).empty(), genko::test::book_problems(book_).c_str());
+    }
+
+    void lightThresholdPersistsUndoAndRejectsUnsafeBatches() {
+        book_ = tmp_.path() + "/light-threshold.genko";
+        QCOMPARE(genko::test::run_genko({"new", book_, "--pages", "3"}).exit_code, 0);
+        const auto threshold = [this]() {
+            return genko::test::read_json(book_ + "/project.json")["pages"][1]["lt_threshold"];
+        };
+        QVERIFY(threshold().is_null());
+        QCOMPARE(apply(R"([{"op":"set_lt","page":2,"threshold":"-17.25"}])", "human:作者").exit_code, 0);
+        QCOMPARE(threshold(), Json(-17.25));
+        QCOMPARE(genko::test::run_genko({"undo", book_, "--as", "human:作者"}).exit_code, 0);
+        QVERIFY(threshold().is_null());
+        QCOMPARE(genko::test::run_genko({"redo", book_, "--as", "human:作者"}).exit_code, 0);
+        QCOMPARE(threshold(), Json(-17.25));
+        for (const char* raw : {"NaN", "Infinity", "-Infinity", "\"nan\"", "\"inf\"", "\"-inf\""}) {
+            const auto before = files();
+            const QString text = QStringLiteral("[{\"op\":\"set_note\",\"page\":2,\"note\":\"前置\"},{\"op\":\"set_lt\",\"page\":2,\"threshold\":%1}]").arg(QString::fromLatin1(raw));
+            const auto refused = apply(text.toStdString(), "human:作者");
+            QCOMPARE(refused.exit_code, 1);
+            QCOMPARE(one_line(refused.out)["code"], Json("apply"));
+            const char* expected = raw[0] == '"' ? "threshold must be a finite number" : "ops must not hold NaN or Infinity (at /1/threshold)";
+            QVERIFY2(one_line(refused.out)["error"].get<std::string>().find(expected) != std::string::npos, refused.out.constData());
+            QVERIFY(files() == before);
+        }
+        const auto saved = files();
+        QCOMPARE(apply(R"([{"op":"set_lt","page":2,"threshold":0.25}])", "human:作者", {"--dry-run"}).exit_code, 0);
+        QVERIFY(files() == saved);
+        QCOMPARE(apply(R"([{"op":"set_lt","page":2,"threshold":0.25}])", "human:作者", {"--expect-revision", "0"}).exit_code, 1);
+        QVERIFY(files() == saved);
+        QCOMPARE(apply(R"([{"op":"lock_page","page":2}])", "human:other").exit_code, 0);
+        const auto locked = files();
+        const auto refused = apply(R"([{"op":"set_lt","page":2,"threshold":0.25}])", "human:作者");
+        QCOMPARE(refused.exit_code, 1);
+        QVERIFY2(one_line(refused.out)["error"].get<std::string>().find("page 2 locked by human:other") != std::string::npos, refused.out.constData());
+        QVERIFY(files() == locked);
+        QVERIFY2(genko::test::book_problems(book_).empty(), genko::test::book_problems(book_).c_str());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestOpsE2e)
