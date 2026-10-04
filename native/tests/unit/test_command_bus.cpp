@@ -74,7 +74,7 @@ private slots:
             QVERIFY2(all.find(name) != nullptr, name);
         }
         for (const char* name : {"add_tone", "set_tone", "delete_tone", "add_effect", "effect_to_layer", "add_figure",
-                                 "render_prims", "trace_prims", "camera_from_ruler"}) {
+                                 "render_prims", "trace_prims", "camera_from_ruler", "set_stroke_width", "reshape_stroke"}) {
             QVERIFY2(core_ops.find(name) == nullptr, name);
             QVERIFY2(all.find(name) != nullptr, name);
         }
@@ -92,7 +92,7 @@ private slots:
             "merge_down", "merge_layers", "merge_visible", "set_layer_mask", "paint_mask",
             "put_raster", "filter_raster", "fill", "fill_area", "fill_enclosed",
             "fill_gaps", "flood_fill", "gradient_fill", "delete_area", "transform_area",
-            "paste", "erase", "erase_raster"};
+            "paste", "erase", "erase_raster", "set_stroke_width", "reshape_stroke"};
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);
@@ -108,6 +108,20 @@ private slots:
             QFAIL("core's bus has no tone ops");
         } catch (const ApplyError& error) {
             QCOMPARE(error.code(), std::string("not_yet_ported"));
+        }
+        const Document with_line = bus().apply(book(), ops(R"([{"op":"add_stroke","page":1,"layer":"ink","stabilize":0,"points":[[10,10],[20,20]]}])"), Actor()).doc;
+        const auto line = with_line.page(0).first_layer(genko::core::LayerRole::Ink)->strokes->items.front();
+        for (const Json& request : {Json::object({{"op","set_stroke_width"},{"page",1},{"layer","ink"},{"ids",Json::array({line->id})},{"width_mm",0.3}}),
+                                   Json::object({{"op","reshape_stroke"},{"page",1},{"layer","ink"},{"stroke_id",line->id},{"width_mm",0.4}})}) {
+            const Json batch = Json::array({request});
+            try {
+                CommandBus().apply(with_line, batch, Actor());
+                QFAIL("core-only must refuse a raster stroke edit");
+            } catch (const ApplyError& error) { QCOMPARE(error.code(), std::string("not_yet_ported")); }
+            const auto changed = bus().apply(with_line, batch, Actor());
+            QCOMPARE(changed.doc.page(0).first_layer(genko::core::LayerRole::Ink)->strokes->items.front()->width_mm,
+                     request["width_mm"].get<double>());
+            QVERIFY(with_line.page(0).first_layer(genko::core::LayerRole::Ink)->strokes->items.front() == line);
         }
     }
 

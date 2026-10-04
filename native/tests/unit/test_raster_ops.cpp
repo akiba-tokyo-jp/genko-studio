@@ -242,6 +242,226 @@ class TestRasterOps : public QObject {
     }
 
 private slots:
+    void strokeEditsCannotBypassApprovalWithNumericLayerIds() {
+        const Document doc = run_ops(fixture(), R"([{"op":"add_layer","page":2,"kind":"pen","id":"1"},{"op":"add_stroke","page":2,"layer_id":"1","stabilize":0,"points":[[10,10],[20,20]]},{"op":"set_meta","strict_gates":true}])", kPerson).doc;
+        const auto line = layer_by_id(doc.page(1), "1")->strokes->items.front();
+        const std::string before = state(doc);
+        for (const std::string& name : {std::string("set_stroke_width"),std::string("reshape_stroke")}) {
+            Json request = Json::object({{"op",name},{"page",2},{"layer_id",1},{"width_mm",0.3}});
+            if (name == "set_stroke_width") request["ids"] = Json::array({line->id});
+            else request["stroke_id"] = line->id;
+            for (const Json& id : {Json(1),Json("1")}) {
+                request["layer_id"] = id;
+                const std::string refused = error_of(doc, genko::core::dump_python(Json::array({request})), kAi);
+                QVERIFY2(refused.find("needs name_ok") != std::string::npos, refused.c_str());
+                QCOMPARE(state(doc), before);
+            }
+            request["layer_id"] = 1;
+            for (const Document& allowed : {run_ops(doc, R"([{"op":"name_ok","page":2}])", kPerson).doc,
+                                           run_ops(doc, R"([{"op":"set_layer","page":2,"id":"1","exportable":false}])", kPerson).doc}) {
+                const auto result = bus().apply(allowed, Json::array({request}), Actor(kAi));
+                QCOMPARE(layer_by_id(result.doc.page(1), "1")->strokes->items.front()->width_mm, 0.3);
+            }
+        }
+    }
+
+    void strokeWidthRejectsExcessColourComponents() {
+        const Document doc = fixture();
+        const auto selected = layer_by_id(doc.page(0), "pen-1")->strokes->items.front();
+        const std::string before = state(doc);
+        for (const Json& rgb : {Json::array({1,2,3,4}), Json::array({1,2,3,-1})}) {
+            const Json batch = Json::array({Json::object({{"op","set_note"},{"page",1},{"note","must not survive"}}),
+                Json::object({{"op","set_stroke_width"},{"page",1},{"layer_id","pen-1"},
+                    {"ids",Json::array({selected->id})},{"rgb",rgb}})});
+            const std::string error = error_of(doc, genko::core::dump_python(batch), kPerson);
+            QVERIFY2(error != "(applied)" && error.find("rgb") != std::string::npos, error.c_str());
+            QCOMPARE(state(doc), before);
+        }
+        const Json valid = Json::array({Json::object({{"op","set_stroke_width"},{"page",1},{"layer_id","pen-1"},
+            {"ids",Json::array({selected->id})},{"rgb",Json::array({1,2,3})}})});
+        const auto changed = bus().apply(doc, valid, Actor(kPerson));
+        QCOMPARE(layer_by_id(changed.doc.page(0), "pen-1")->strokes->items.front()->rgb, (std::vector<std::int64_t>{1,2,3}));
+    }
+
+    void strokeWidthRejectsUnhashableIdsBeforeEditing() {
+        const Document doc = fixture();
+        const auto selected = layer_by_id(doc.page(0), "pen-1")->strokes->items.front();
+        const std::string before = state(doc);
+        for (const Json& invalid : {Json::array(), Json::object()}) {
+            const Json batch = Json::array({Json::object({{"op","set_note"},{"page",1},{"note","must not survive"}}),
+                Json::object({{"op","set_stroke_width"},{"page",1},{"layer_id","pen-1"},
+                    {"ids",Json::array({selected->id,invalid})},{"area",Json::object({{"rect",Json::array({5,60,50,30})}})},{"width_mm",0.3}})});
+            const std::string error = error_of(doc, genko::core::dump_python(batch), kPerson);
+            QVERIFY2(error != "(applied)" && error.find("unhashable") != std::string::npos, error.c_str());
+            QCOMPARE(state(doc), before);
+        }
+        const Json valid = Json::array({Json::object({{"op","set_stroke_width"},{"page",1},{"layer_id","pen-1"},
+            {"ids",Json::array({selected->id,42,nullptr})},{"width_mm",0.3}})});
+        const auto changed = bus().apply(doc, valid, Actor(kPerson));
+        QCOMPARE(layer_by_id(changed.doc.page(0), "pen-1")->strokes->items.front()->width_mm, 0.3);
+    }
+
+    void reshapeRejectsNonFiniteCoordinatesAndPressure() {
+        const Document doc = fixture();
+        const auto selected = layer_by_id(doc.page(0), "pen-1")->strokes->items.front();
+        const std::string before = state(doc);
+        for (const Json& point : {Json::array({"nan",0}), Json::array({0,"inf"}), Json::array({0,0,"-inf"}), Json::array({0,0,"1e999"})}) {
+            const Json batch = Json::array({Json::object({{"op","set_note"},{"page",1},{"note","must not survive"}}),
+                Json::object({{"op","reshape_stroke"},{"page",1},{"layer_id","pen-1"},{"stroke_id",selected->id},
+                    {"points",Json::array({point,Json::array({20,30,0.5})})}})});
+            const std::string error = error_of(doc, genko::core::dump_python(batch), kPerson);
+            QVERIFY2(error != "(applied)" && error.find("finite") != std::string::npos, error.c_str());
+            QCOMPARE(state(doc), before);
+        }
+        const Json valid = Json::array({Json::object({{"op","reshape_stroke"},{"page",1},{"layer_id","pen-1"},{"stroke_id",selected->id},
+            {"points",Json::array({Json::array({"10","20","0.2"}),Json::array({20,30,0.5})})}})});
+        const auto changed = bus().apply(doc, valid, Actor(kPerson));
+        QCOMPARE(layer_by_id(changed.doc.page(0), "pen-1")->strokes->items.front()->pressure, (std::vector<double>{0.2,0.5}));
+    }
+
+    void strokeWidthRejectsOverflowAtomically() {
+        const Document doc = fixture();
+        const std::string before = state(doc);
+        const std::string batch = R"([{"op":"set_note","page":1,"note":"must not survive"},{"op":"set_stroke_width","page":1,"layer_id":"pen-1","area":{"rect":[5,60,50,30]},"width_mm":1e308,"scale":1e308}])";
+        const std::string error = error_of(doc, batch, kPerson);
+        QVERIFY2(error != "(applied)" && error.find("finite") != std::string::npos, error.c_str());
+        QCOMPARE(state(doc), before);
+        const auto valid = run_ops(doc, R"([{"op":"set_stroke_width","page":1,"layer_id":"pen-1","area":{"rect":[5,60,50,30]},"width_mm":0.2,"scale":2}])", kPerson);
+        QCOMPARE(layer_by_id(valid.doc.page(0), "pen-1")->strokes->items.front()->width_mm, 0.4);
+    }
+
+    void reshapeWithMorePointsClearsAnIncompletePressure() {
+        Document doc = fixture();
+        auto& page = doc.edit_page(0);
+        for (auto& layer : page.layers) {
+            if (layer.id != "pen-1") continue;
+            auto stroke = *layer.strokes->items.front();
+            stroke.points = {{10,70},{30,75},{50,80}};
+            stroke.pressure = {0.2,0.4,0.8};
+            layer.strokes = genko::core::make_strokes({std::make_shared<const genko::core::Stroke>(std::move(stroke))});
+        }
+        const auto selected = layer_by_id(doc.page(0), "pen-1")->strokes->items.front();
+        const std::string unchanged = state(doc);
+        const Json ops = Json::array({Json::object({{"op","reshape_stroke"},{"page",1},{"layer_id","pen-1"},
+            {"stroke_id",selected->id},{"points",Json::array({Json::array({11,71}),Json::array({20,72}),Json::array({30,73}),Json::array({40,75})})}})});
+        const auto after = bus().apply(doc, ops, Actor(kPerson));
+        QCOMPARE(layer_by_id(after.doc.page(0), "pen-1")->strokes->items.front()->pressure,
+                (std::vector<double>{}));
+        QCOMPARE(state(doc), unchanged);
+    }
+
+    void reshapeWithoutPressureKeepsTheExistingPrefix() {
+        Document doc = fixture();
+        auto& page = doc.edit_page(0);
+        for (auto& layer : page.layers) {
+            if (layer.id != "pen-1") continue;
+            auto stroke = *layer.strokes->items.front();
+            stroke.points = {{10,70},{30,75},{50,80}};
+            stroke.pressure = {0.2,0.4,0.8};
+            layer.strokes = genko::core::make_strokes({std::make_shared<const genko::core::Stroke>(std::move(stroke))});
+        }
+        const auto selected = layer_by_id(doc.page(0), "pen-1")->strokes->items.front();
+        const std::string unchanged = state(doc);
+        const Json ops = Json::array({Json::object({{"op","reshape_stroke"},{"page",1},{"layer_id","pen-1"},
+            {"stroke_id",selected->id},{"points",Json::array({Json::array({11,71}),Json::array({40,75})})}})});
+        const auto after = bus().apply(doc, ops, Actor(kPerson));
+        QCOMPARE(layer_by_id(after.doc.page(0), "pen-1")->strokes->items.front()->pressure,
+                (std::vector<double>{0.2,0.4}));
+        QCOMPARE(state(doc), unchanged);
+    }
+
+    void reshapeKeepsIdentityAndReplacesPressure() {
+        const Document doc = fixture();
+        const auto selected = layer_by_id(doc.page(0), "pen-1")->strokes->items.front();
+        const std::string unchanged = state(doc);
+        const Json ops = Json::array({Json::object({{"op","reshape_stroke"},{"page",1},{"layer_id","pen-1"},
+            {"stroke_id",selected->id},{"points",Json::array({Json::array({11,71,0.2}),Json::array({40,75,0.7})})},
+            {"width_mm",0.4}})});
+        std::optional<ApplyResult> outcome;
+        try { outcome.emplace(bus().apply(doc, ops, Actor(kPerson))); }
+        catch (const ApplyError& error) { QFAIL(error.what()); }
+        const auto after = layer_by_id(outcome->doc.page(0), "pen-1")->strokes->items.front();
+        QCOMPARE(after->id, selected->id);
+        QCOMPARE(after->kind, selected->kind);
+        QCOMPARE(after->rgb, selected->rgb);
+        QCOMPARE(after->points.size(), std::size_t(2));
+        QCOMPARE(after->points[0].x, 11.0);
+        QCOMPARE(after->points[0].y, 71.0);
+        QCOMPARE(after->points[1].x, 40.0);
+        QCOMPARE(after->points[1].y, 75.0);
+        QCOMPARE(after->pressure, (std::vector<double>{0.2,0.7}));
+        QCOMPARE(after->width_mm, 0.4);
+        QVERIFY(after != selected);
+        QVERIFY(outcome->doc.pages[1] == doc.pages[1]);
+        QCOMPARE(state(doc), unchanged);
+    }
+
+    void strokeWidthRefusesInvalidColourAtomically() {
+        const Document doc = fixture();
+        const std::string unchanged = state(doc);
+        const auto selected = layer_by_id(doc.page(0), "pen-1")->strokes->items.front();
+        const Json ops = Json::array({Json::object({{"op","set_note"},{"page",1},{"note","rejected prefix"}}),
+            Json::object({{"op","set_stroke_width"},{"page",1},{"layer_id","pen-1"},
+                {"ids",Json::array({selected->id})},{"width_mm",2},{"rgb",Json::array({-1,2,3})}})});
+        bool refused = false;
+        try { bus().apply(doc, ops, Actor(kPerson)); }
+        catch (const ApplyError& error) {
+            refused = true;
+            QVERIFY(std::string(error.what()).find("ops[1] set_stroke_width") != std::string::npos);
+            QVERIFY(std::string(error.what()).find("rgb") != std::string::npos);
+        }
+        QVERIFY2(refused, "RGB outside 0..255 must not enter a saved stroke");
+        QCOMPARE(state(doc), unchanged);
+    }
+
+    void strokeWidthRestylesTheAreaSelection() {
+        const Document doc = run_ops(fixture(), R"([{"op":"add_stroke","page":1,"layer_id":"pen-1","stabilize":0,"points":[[25,60],[45,60]],"width_mm":1.5}])", kPerson).doc;
+        const auto before = layer_by_id(doc.page(0), "pen-1")->strokes;
+        const std::string unchanged = state(doc);
+        std::optional<ApplyResult> outcome;
+        try {
+            outcome.emplace(run_ops(doc, R"([{"op":"set_stroke_width","page":1,"layer_id":"pen-1","area":{"rect":[5,65,20,20]},"width_mm":0.1,"scale":3,"kind":"oil","rgb":[1,2,3]}])", kPerson));
+        } catch (const ApplyError& error) { QFAIL(error.what()); }
+        const auto after = layer_by_id(outcome->doc.page(0), "pen-1")->strokes;
+        QCOMPARE(after->items[0]->width_mm, 0.1 * 3.0);
+        QCOMPARE(after->items[0]->kind, std::string("marker"));
+        QCOMPARE(after->items[0]->rgb, (std::vector<std::int64_t>{1,2,3}));
+        QCOMPARE(after->items[0]->points, before->items[0]->points);
+        QCOMPARE(after->items[0]->pressure, before->items[0]->pressure);
+        QCOMPARE(after->items[0]->id, before->items[0]->id);
+        QVERIFY(after->items[1] == before->items[1]);
+        QCOMPARE(state(doc), unchanged);
+    }
+
+    void strokeWidthChangesOnlyRequestedIds() {
+        const Document doc = run_ops(fixture(), R"([{"op":"add_stroke","page":1,"layer_id":"pen-1","stabilize":0,"points":[[25,60],[45,60]],"width_mm":1.5}])", kPerson).doc;
+        const Layer* before = layer_by_id(doc.page(0), "pen-1");
+        QVERIFY(before != nullptr && before->strokes->items.size() == 2);
+        const auto selected = before->strokes->items[0];
+        const auto other = before->strokes->items[1];
+        const std::string unchanged = state(doc);
+        const Json ops = Json::array({Json::object({{"op", "set_stroke_width"}, {"page", 1},
+                {"layer_id", "pen-1"}, {"ids", Json::array({selected->id})}, {"width_mm", 0.25}})});
+        std::optional<ApplyResult> outcome;
+        try {
+            outcome.emplace(bus().apply(doc, ops, Actor(kPerson)));
+        } catch (const ApplyError& error) {
+            QFAIL(error.what());
+        }
+        const auto& result = *outcome;
+        const Layer* after = layer_by_id(result.doc.page(0), "pen-1");
+        QVERIFY(after != nullptr);
+        QCOMPARE(after->strokes->items.size(), std::size_t(2));
+        QCOMPARE(after->strokes->items[0]->width_mm, 0.25);
+        QCOMPARE(after->strokes->items[0]->id, selected->id);
+        QCOMPARE(after->strokes->items[0]->points, selected->points);
+        QCOMPARE(after->strokes->items[0]->pressure, selected->pressure);
+        QVERIFY(after->strokes->items[0] != selected);
+        QVERIFY(after->strokes->items[1] == other);
+        QVERIFY(result.doc.pages[0] != doc.pages[0]);
+        QVERIFY(result.doc.pages[1] == doc.pages[1]);
+        QCOMPARE(state(doc), unchanged);
+    }
     void initTestCase() {
         QVERIFY(tmp_.isValid());
         QDir().mkpath(tmp_.path() + "/config/plugins");
@@ -251,8 +471,16 @@ private slots:
     void everyOp() {
         const Document doc = fixture();
         const Page& p1 = doc.page(0);
-        const std::vector<std::pair<std::string, std::string>> names{{"BG1", p1.first_layer(LayerRole::Bg)->id}};
+        const std::vector<std::pair<std::string, std::string>> names{{"BG1", p1.first_layer(LayerRole::Bg)->id},
+            {"SID1", layer_by_id(p1, "pen-1")->strokes->items.front()->id}};
         const std::vector<Case> cases{
+            {"set_stroke_width", R"([{"op":"set_stroke_width","page":1,"layer_id":"pen-1","ids":["SID1"],"width_mm":0.25}])", kPerson, {1},
+             [](const Document& d) { return layer_by_id(d.page(0), "pen-1")->strokes->items.front()->width_mm == 0.25; },
+             R"([{"op":"set_note","page":1,"note":"must not survive"},{"op":"set_stroke_width","page":1,"layer_id":"pen-1","ids":["missing"],"width_mm":0.5}])", "no line there", 1},
+            {"reshape_stroke", R"([{"op":"reshape_stroke","page":1,"layer_id":"pen-1","stroke_id":"SID1","points":[[20,71,0.3],[40,79,0.7]],"width_mm":0.4}])", kPerson, {1},
+             [](const Document& d) { const auto& s = *layer_by_id(d.page(0), "pen-1")->strokes->items.front();
+                 return s.width_mm == 0.4 && s.points.size() == 2 && s.points.front().x == 20 && s.pressure == std::vector<double>{0.3,0.7}; },
+             R"([{"op":"set_note","page":1,"note":"must not survive"},{"op":"reshape_stroke","page":1,"layer_id":"pen-1","stroke_id":"SID1","points":[[1,2]]}])", "points needs at least two", 1},
             {"convert_layer", R"([{"op": "convert_layer", "page": 1, "id": "pen-1", "to": "paint"}])", "genko", {1},
              [](const Document& d) {
                  const Layer* l = layer_by_id(d.page(0), "pen-1");
@@ -357,7 +585,7 @@ private slots:
              {1}, [](const Document& d) { return has_pixels(layer_by_id(d.page(0), "paint-1")); },
              R"([{"op": "erase_raster", "page": 1, "layer_id": "lock-1", "points": [[40, 50], [50, 60]]}])", "the layer is locked", 1},
         };
-        QCOMPARE(cases.size(), std::size_t{25});
+        QCOMPARE(cases.size(), std::size_t{27});
         std::set<std::string> ops;
         const std::string before = state(doc);
         for (const Case& c : cases) {
@@ -400,7 +628,7 @@ private slots:
                          what + "on a locked page: " + QByteArray::fromStdString(refused));
             }
         }
-        QCOMPARE(ops.size(), std::size_t{25});
+        QCOMPARE(ops.size(), std::size_t{27});
     }
 
     void strictGates() {
@@ -503,7 +731,10 @@ private slots:
     // A change saved through the journal is undone (the book as it was) and redone (as it was after the change).
     void undoAndRedo() {
         const Document doc = fixture();
+        const std::vector<std::pair<std::string, std::string>> names{{"SID1", layer_by_id(doc.page(0), "pen-1")->strokes->items.front()->id}};
         const std::vector<std::string> batches{
+            R"([{"op":"set_stroke_width","page":1,"layer_id":"pen-1","ids":["SID1"],"width_mm":0.3,"scale":2,"rgb":[30,40,50]}])",
+            R"([{"op":"reshape_stroke","page":1,"layer_id":"pen-1","stroke_id":"SID1","points":[[20,71,0.3],[40,79,0.7]],"width_mm":0.4}])",
             R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"ellipse": [10, 10, 20, 20]}, "rgb": [0, 0, 255]}])",
             R"([{"op": "put_raster", "page": 2, "png_base64": "PICTURE"}])",
             R"([{"op": "merge_down", "page": 1, "id": "pen-1"}])",
@@ -524,7 +755,7 @@ private slots:
             {
                 genko::storage::ProjectLock lock(dir, kPerson);
                 lock.try_acquire();
-                result = run_ops(original, batch, kPerson);
+                result = run_ops(original, replaced(batch, names), kPerson);
                 genko::storage::SaveRequest request;
                 request.actor = kPerson;
                 request.base_revision = original.revision;

@@ -70,7 +70,8 @@ const char* const kOps[] = {"convert_layer", "merge_down",    "merge_layers", "m
                             "group_layers",  "set_layer_mask", "paint_mask",   "put_raster",    "filter_raster",
                             "fill",          "fill_area",     "fill_enclosed", "fill_gaps",     "flood_fill",
                             "gradient_fill", "delete_area",   "transform_area", "paste",        "store_area",
-                            "forget_area",   "set_paper",     "set_timelapse", "erase",         "erase_raster"};
+                            "forget_area",   "set_paper",     "set_timelapse", "erase",         "erase_raster",
+                            "set_stroke_width", "reshape_stroke"};
 
 // How many strings in `value` start with `prefix` (the pictures a payload refers to: "png:…", "unreadable:…").
 int count_prefixed(const Json& value, const std::string& prefix) {
@@ -292,7 +293,7 @@ private slots:
         }();
         QVERIFY2(loaded.report.clean(), genko::core::dump_python(loaded.report.to_json()).c_str());
         std::map<std::string, std::pair<int, int>> counts;  // op → (successes, failures) matched with Python
-        int not_ported = 0, pictures = 0, unreadable = 0;
+        int not_ported = 0, safety_refused = 0, pictures = 0, unreadable = 0;
         std::vector<std::string> failures;
         for (std::size_t k = 0; k < taken.size(); ++k) {
             const std::size_t n = taken[k];
@@ -338,7 +339,8 @@ private slots:
                         failures.push_back(name + ": intentional refusal changed the book or gave another error: " + where);
                     }
                 }
-                ++not_ported;
+                if (final.code == "not_yet_ported") ++not_ported;
+                else ++safety_refused;
                 continue;
             }
             // a perspective warp (one step): compared within the tolerance (see randomSequences)
@@ -382,10 +384,10 @@ private slots:
             QVERIFY2(failing >= 4, (std::string(op) + ": " + std::to_string(failing) + " failures match Python (4 needed)").c_str());
         }
         const auto [bus_ok, bus_failing] = counts["_bus"];
-        qInfo("matched (ok/failing): %sthe bus's area resolution %d/%d; %d refused as not yet ported. The books after the "
+        qInfo("matched (ok/failing): %sthe bus's area resolution %d/%d; %d refused as not yet ported, %d refused for data safety. The books after the "
               "successful cases refer to %d pictures, compared by their pixels (%d unreadable or missing on both sides). %d "
               "perspective warps compared within the tolerance (%d numbers, lines and pictures differing within it)",
-              summary.c_str(), bus_ok, bus_failing, not_ported, pictures, unreadable, near, tolerated);
+              summary.c_str(), bus_ok, bus_failing, not_ported, safety_refused, pictures, unreadable, near, tolerated);
         QCOMPARE(unreadable, 0);
     }
 
@@ -403,8 +405,34 @@ private slots:
             const auto sequenced = py({"make-raster-sequences", listed, "--books", books, "--seed", "7", "--count", "150"});
             QVERIFY2(sequenced.finished && sequenced.exit_code == 0, sequenced.err.right(4000).constData());
         }
-        const Json sequences = genko::test::read_json(listed);
+        Json sequences = genko::test::read_json(listed);
         QCOMPARE(sequences.size(), std::size_t{150});
+        const Json original_sequences = sequences;
+        // Keep every original generated sequence; append stroke edits on five generated books.
+        for (std::size_t n = 0; n < 5; ++n) {
+            const std::string book = original_sequences[n]["book"].get<std::string>();
+            const auto loaded_book = genko::storage::load_document(genko::storage::path_from_utf8(book));
+            bool added = false;
+            for (std::size_t page = 0; page < loaded_book.document.pages.size() && !added; ++page) {
+                for (const auto& layer : loaded_book.document.page(page).layers) {
+                    if (layer.locked || !layer.strokes || layer.strokes->items.empty()) continue;
+                    const std::string id = layer.strokes->items.front()->id;
+                    const double delta = static_cast<double>(n);
+                    const Json width = Json::object({{"op","set_stroke_width"},{"page",page+1},
+                        {"layer_id",layer.id},{"ids",Json::array({id})},{"width_mm",0.1+0.05*delta},{"scale",0.5+0.2*delta}});
+                    const Json reshape = Json::object({{"op","reshape_stroke"},{"page",page+1},
+                        {"layer_id",layer.id},{"stroke_id",id},{"points",Json::array({Json::array({10+delta,20,0.2}),Json::array({30+delta,40,0.8})})}});
+                    sequences.push_back(Json::object({{"book",book},{"first_id",original_sequences[n]["first_id"]},
+                        {"steps",Json::array({Json::object({{"ops",Json::array({width})},{"agent","human:作者"}}),
+                                             Json::object({{"ops",Json::array({reshape})},{"agent","human:作者"}})})}}));
+                    added = true;
+                    break;
+                }
+            }
+            QVERIFY2(added, "generated book needs an unlocked pen line for the appended edits");
+        }
+        QCOMPARE(sequences.size(), std::size_t{155});
+        for (std::size_t n = 0; n < original_sequences.size(); ++n) QVERIFY(sequences[n] == original_sequences[n]);
         QDir().mkpath(path("seq"));
         const auto job_of = [&](std::size_t n, bool digest) {
             Json job = Json::object();

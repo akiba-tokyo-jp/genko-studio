@@ -409,10 +409,11 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
     const std::string_view id_key = named ? layer_key(name) : std::string_view();
     if (named && (name == "add_stroke" || raster_edit_op(name)) && !id_key.empty() && truthy_at(op, id_key)) {
         const Page& page = page_of(op);
-        const Json& layer_id = *get(op, id_key);
+        // Match the drawing resolver's py_str conversion, including numeric ids.
+        const std::string layer_id = py_str(*get(op, id_key));
         const Layer* target = nullptr;
         for (const Layer& layer : page.layers) {
-            if (json_equals_string(layer_id, layer.id)) {
+            if (layer_id == layer.id) {
                 target = &layer;
                 break;
             }

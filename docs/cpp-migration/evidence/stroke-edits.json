@@ -1,0 +1,520 @@
+{
+  "scope": "M3の線幅・線形状編集のbackend移植。M3全体/GUI編集/Windows受入/性能/M7ではない。",
+  "configurations": {
+    "debug": {
+      "source_manifest_sha256": "ce17274f1c2d53118802b402da3c4ed81d7758a3bf0af8779d258d762801e608",
+      "source_current_sha_verified": true,
+      "source_count": 691,
+      "binary_current_sha_verified": true,
+      "binary_pins": {
+        "build/hermes-merged-debug/src/api/genko": "069b2522e485c57d61e419e2b067358e7e3de684527300e38eb6aedc82db5864",
+        "build/hermes-merged-debug/tests/test_command_bus": "2a7e5ef8fab291c85fa84bbc6d0dee91627a302a740342165360aaf3b841b1fe",
+        "build/hermes-merged-debug/tests/test_raster_ops": "6f26dde519ccfe23bb3e9bffb377b230e3c43fd403774f13bc13af1ec861f5bf",
+        "build/hermes-merged-debug/tests/test_contract_raster_ops": "dd51610f9a1721e927aec2c313eb7a4fa710cb24bcd510de5f63cd18a45bc1bd",
+        "build/hermes-merged-debug/tests/test_contract_raster_cli": "85bcfa0c71f1ca84962f6e40523363c85faed4b0c03e8ebd795456bfe3b35649"
+      },
+      "ctest": "4/4",
+      "qt_totals": [
+        [
+          "19",
+          "0",
+          "0"
+        ],
+        [
+          "72",
+          "0",
+          "0"
+        ],
+        [
+          "24",
+          "0",
+          "0"
+        ],
+        [
+          "3",
+          "0",
+          "0"
+        ]
+      ],
+      "skips": 0,
+      "fixed_cases": 498,
+      "original_fixed_cases_preserved": 474,
+      "generated_sequences": 155,
+      "compared_steps": 625,
+      "input_ops": 846,
+      "resources": [
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "5922816",
+          "memory.swap.max": "0"
+        },
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "1791889408",
+          "memory.swap.max": "0"
+        }
+      ],
+      "sanitizer_clean": true,
+      "log_sha256": "8ff23b68ef6d34da2b8f8f8725535ba161f83e8b9d4021a568b31fed6c02d3cd",
+      "cli23": {
+        "passed": 23,
+        "checks": [
+          {
+            "case": "finite_paste_and_normal",
+            "passed": true
+          },
+          {
+            "case": "nearest_inverse_and_normal",
+            "passed": true
+          },
+          {
+            "case": "live_masks_and_normal",
+            "passed": true
+          },
+          {
+            "case": "folder_cycles_and_normal_group",
+            "passed": true
+          },
+          {
+            "case": "invalid_pngs_and_original_bytes",
+            "passed": true
+          },
+          {
+            "case": "flood_termination_and_normal_colour",
+            "passed": true
+          },
+          {
+            "case": "locked_put_raster",
+            "passed": true
+          },
+          {
+            "case": "locked_filter_raster",
+            "passed": true
+          },
+          {
+            "case": "locked_set_layer_mask",
+            "passed": true
+          },
+          {
+            "case": "locked_paint_mask",
+            "passed": true
+          },
+          {
+            "case": "locked_flood_fill",
+            "passed": true
+          },
+          {
+            "case": "strict_put",
+            "passed": true
+          },
+          {
+            "case": "strict_put_misleading_layer_id",
+            "passed": true
+          },
+          {
+            "case": "strict_filter",
+            "passed": true
+          },
+          {
+            "case": "strict_filter_misleading_layer_id",
+            "passed": true
+          },
+          {
+            "case": "strict_flood",
+            "passed": true
+          },
+          {
+            "case": "strict_flood_misleading_layer_id",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_missing",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_None",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_''",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_0",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_False",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_0.0",
+            "passed": true
+          }
+        ],
+        "binary_sha256": "069b2522e485c57d61e419e2b067358e7e3de684527300e38eb6aedc82db5864",
+        "log_sha256": "769e85ac88ea55a4038a62849fefbd21bd9c331735fc6d5a6bf33fb1e996ca97"
+      }
+    },
+    "release": {
+      "source_manifest_sha256": "ce17274f1c2d53118802b402da3c4ed81d7758a3bf0af8779d258d762801e608",
+      "source_current_sha_verified": true,
+      "source_count": 691,
+      "binary_current_sha_verified": true,
+      "binary_pins": {
+        "build/hermes-merged-release/src/api/genko": "ac94adc075098874125ed1044d00078781ddd4554155ed147ca72d22c19dcb8b",
+        "build/hermes-merged-release/tests/test_command_bus": "30c4aa949c45b5e0c3930f03d2e0e24a4022234b0bdf745f6b87f620ce7ebc35",
+        "build/hermes-merged-release/tests/test_raster_ops": "020be632da8b79f39a566e1c0c9de28d60bb0257dc3131346002b824fb9a31d6",
+        "build/hermes-merged-release/tests/test_contract_raster_ops": "828019679ecfbe8d3129ca944b8f9b6b368b2671b5a1ea0fd16fe1fcfbbf4d5c",
+        "build/hermes-merged-release/tests/test_contract_raster_cli": "b1b3cfb135a0d97957fab965feafdf9e8d00b5c246b5d13fe2e073e3a31e81a3"
+      },
+      "ctest": "4/4",
+      "qt_totals": [
+        [
+          "19",
+          "0",
+          "0"
+        ],
+        [
+          "72",
+          "0",
+          "0"
+        ],
+        [
+          "24",
+          "0",
+          "0"
+        ],
+        [
+          "3",
+          "0",
+          "0"
+        ]
+      ],
+      "skips": 0,
+      "fixed_cases": 498,
+      "original_fixed_cases_preserved": 474,
+      "generated_sequences": 155,
+      "compared_steps": 625,
+      "input_ops": 846,
+      "resources": [
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "6037504",
+          "memory.swap.max": "0"
+        },
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "1580412928",
+          "memory.swap.max": "0"
+        }
+      ],
+      "sanitizer_clean": true,
+      "log_sha256": "951f24c045ac66440f5ab78da16969e88697947bd26c620a6a2206a6c7b4801a",
+      "cli23": {
+        "passed": 23,
+        "checks": [
+          {
+            "case": "finite_paste_and_normal",
+            "passed": true
+          },
+          {
+            "case": "nearest_inverse_and_normal",
+            "passed": true
+          },
+          {
+            "case": "live_masks_and_normal",
+            "passed": true
+          },
+          {
+            "case": "folder_cycles_and_normal_group",
+            "passed": true
+          },
+          {
+            "case": "invalid_pngs_and_original_bytes",
+            "passed": true
+          },
+          {
+            "case": "flood_termination_and_normal_colour",
+            "passed": true
+          },
+          {
+            "case": "locked_put_raster",
+            "passed": true
+          },
+          {
+            "case": "locked_filter_raster",
+            "passed": true
+          },
+          {
+            "case": "locked_set_layer_mask",
+            "passed": true
+          },
+          {
+            "case": "locked_paint_mask",
+            "passed": true
+          },
+          {
+            "case": "locked_flood_fill",
+            "passed": true
+          },
+          {
+            "case": "strict_put",
+            "passed": true
+          },
+          {
+            "case": "strict_put_misleading_layer_id",
+            "passed": true
+          },
+          {
+            "case": "strict_filter",
+            "passed": true
+          },
+          {
+            "case": "strict_filter_misleading_layer_id",
+            "passed": true
+          },
+          {
+            "case": "strict_flood",
+            "passed": true
+          },
+          {
+            "case": "strict_flood_misleading_layer_id",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_missing",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_None",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_''",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_0",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_False",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_0.0",
+            "passed": true
+          }
+        ],
+        "binary_sha256": "ac94adc075098874125ed1044d00078781ddd4554155ed147ca72d22c19dcb8b",
+        "log_sha256": "f4865563b92ac502a5487ea2e6937ebb2e55b2d4b24916fd41188e6388ebd0cb"
+      }
+    },
+    "asan": {
+      "source_manifest_sha256": "ce17274f1c2d53118802b402da3c4ed81d7758a3bf0af8779d258d762801e608",
+      "source_current_sha_verified": true,
+      "source_count": 691,
+      "binary_current_sha_verified": true,
+      "binary_pins": {
+        "build/hermes-merged-asan/src/api/genko": "b9cd8d0cbd1bca70bc51f39de434b8a8c094629ad332997fe3d72a0ab2d9c528",
+        "build/hermes-merged-asan/tests/test_command_bus": "1ffb5cbff2b83344d76307f480a4e17cc61360dfe3ff1ec6876aac96a87b6e3d",
+        "build/hermes-merged-asan/tests/test_raster_ops": "b48c92cd941c9f5b0c8679e23176b76f38b59571f37c001307123f2ae9e0e56a",
+        "build/hermes-merged-asan/tests/test_contract_raster_ops": "19729d00b9934f30128edea1d846956fc6b21f885585ced4c7ab136b2b96a60f",
+        "build/hermes-merged-asan/tests/test_contract_raster_cli": "d6371295dc93ea2d830978f0c3e069a7491aa03035696a8a4ce897476a483988"
+      },
+      "ctest": "4/4",
+      "qt_totals": [
+        [
+          "19",
+          "0",
+          "0"
+        ],
+        [
+          "72",
+          "0",
+          "0"
+        ],
+        [
+          "24",
+          "0",
+          "0"
+        ],
+        [
+          "3",
+          "0",
+          "0"
+        ]
+      ],
+      "skips": 0,
+      "fixed_cases": 498,
+      "original_fixed_cases_preserved": 474,
+      "generated_sequences": 155,
+      "compared_steps": 625,
+      "input_ops": 846,
+      "resources": [
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "5976064",
+          "memory.swap.max": "0"
+        },
+        {
+          "cpu.max": "100000 100000",
+          "memory.max": "2147483648",
+          "memory.events": "low 0\nhigh 0\nmax 7623\noom 0\noom_kill 0\noom_group_kill 0",
+          "memory.peak": "2147483648",
+          "memory.swap.max": "0"
+        }
+      ],
+      "sanitizer_clean": true,
+      "log_sha256": "d3987e4d61cb567044d626babd0d33a4331014e81c5b29f33c9961364d8731b6",
+      "cli23": {
+        "passed": 23,
+        "checks": [
+          {
+            "case": "finite_paste_and_normal",
+            "passed": true
+          },
+          {
+            "case": "nearest_inverse_and_normal",
+            "passed": true
+          },
+          {
+            "case": "live_masks_and_normal",
+            "passed": true
+          },
+          {
+            "case": "folder_cycles_and_normal_group",
+            "passed": true
+          },
+          {
+            "case": "invalid_pngs_and_original_bytes",
+            "passed": true
+          },
+          {
+            "case": "flood_termination_and_normal_colour",
+            "passed": true
+          },
+          {
+            "case": "locked_put_raster",
+            "passed": true
+          },
+          {
+            "case": "locked_filter_raster",
+            "passed": true
+          },
+          {
+            "case": "locked_set_layer_mask",
+            "passed": true
+          },
+          {
+            "case": "locked_paint_mask",
+            "passed": true
+          },
+          {
+            "case": "locked_flood_fill",
+            "passed": true
+          },
+          {
+            "case": "strict_put",
+            "passed": true
+          },
+          {
+            "case": "strict_put_misleading_layer_id",
+            "passed": true
+          },
+          {
+            "case": "strict_filter",
+            "passed": true
+          },
+          {
+            "case": "strict_filter_misleading_layer_id",
+            "passed": true
+          },
+          {
+            "case": "strict_flood",
+            "passed": true
+          },
+          {
+            "case": "strict_flood_misleading_layer_id",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_missing",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_None",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_''",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_0",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_False",
+            "passed": true
+          },
+          {
+            "case": "all_page_lock_0.0",
+            "passed": true
+          }
+        ],
+        "binary_sha256": "b9cd8d0cbd1bca70bc51f39de434b8a8c094629ad332997fe3d72a0ab2d9c528",
+        "log_sha256": "3da85f308670df2085910af46ef43f1e59de066460b0cadf01c108f98ad5c261"
+      }
+    }
+  },
+  "reviews": {
+    "m3z-stroke-recheck.json": {
+      "sha256": "8d6d7b71e6334d231519a6d33be839c36f5aedfd7d231f402dc1b5a2be732f5e",
+      "scope_passed": true
+    }
+  },
+  "M3_all_features": false,
+  "GUI_Windows": false,
+  "integrated": false,
+  "notes": [
+    "ASan構成はビルドを含むcgroup peakが2GiB制限に到達しmax圧迫イベントあり。OOM/killは0、枠を拡大せず全4対象完走。",
+    "src/tools/nativeのbyte一致と実binary一致を検査。異なるHEADへ無条件流用しない。",
+    "統合前の限定gate。統合後全通常試験と対象commit CIを別に検証する。"
+  ],
+  "schema": "genko-migration-stroke-evidence@1",
+  "base_commit": "0aedd7e66eab72032fdb956e3191426573bcbaf0",
+  "operations": [
+    "set_stroke_width",
+    "reshape_stroke"
+  ],
+  "safety_rejections": [
+    "非有限座標・pressure",
+    "有限値のwidth*scale乗算overflow",
+    "余剰RGB成分の黙示切捨て拒否"
+  ],
+  "compatibility_restored": [
+    "ids内list/dictをPython同様にunhashable拒否"
+  ],
+  "approval_boundary_fix": "strict gateを実ターゲットのpy_str変換と整合し数値layer_idによる未承認出力層編集を拒否。",
+  "owned_source_pins": {
+    "native/src/core/command_bus.cpp": "383592d8e4bc493708ee4be7913809a21c5d482c2db70c0a87a885dfa3c769c8",
+    "native/src/render/raster_ops.cpp": "efe975c109003003aab83b266402ac029fc009e5259475f24d671b79ecff3547",
+    "native/tests/unit/test_raster_ops.cpp": "0fce7f669a4534738fce2293c6d353bb84ae3868a93be16503ef3e3f845d35c6",
+    "native/tests/unit/test_command_bus.cpp": "967e74882498c0bf865a4392bb936a1f03decb96384f27d3dbd62fd23909f458",
+    "native/tests/contract/raster_cases.json": "00c04dca92a008ec3f21a7b698c95d88d7ba98016052c3084682070947b304d9",
+    "native/tests/contract/test_contract_raster_ops.cpp": "286e32dee7c7b1641ae80f58c1ee28c18e7e7475ca6154f9496c416a33ff50a3",
+    "native/tests/contract/test_contract_raster_cli.cpp": "c35279b6781eb07e93d473d06c90ae741821c06b41790fa7c299e308f93c6ed9"
+  }
+}
