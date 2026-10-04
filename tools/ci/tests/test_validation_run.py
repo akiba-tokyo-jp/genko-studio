@@ -79,6 +79,12 @@ class ConfigurationTests(unittest.TestCase):
     def test_asan_requires_real_sanitizer_build(self):
         self.assertTrue(runner.configuration_errors(self.cache('linux-debug'), 'linux-asan'))
 
+    def test_real_cache_comments_do_not_become_part_of_keys(self):
+        cache = '# CMake cache\n\n//Chosen config\nCMAKE_BUILD_TYPE:STRING=Debug\n\n//Enable warnings\nGENKO_WERROR:BOOL=ON\n\n//Fault injection\nGENKO_FAULT_INJECTION:BOOL=ON\n\n//Sanitizers\nGENKO_SANITIZE:STRING=address,undefined\n'
+        self.assertEqual(runner.configuration_errors(cache, 'linux-asan'), [])
+        self.assertEqual(runner.configuration_errors(cache.replace('\n', '\r\n'), 'linux-asan'), [])
+        self.assertTrue(runner.configuration_errors(cache.replace('GENKO_WERROR:BOOL=ON', 'GENKO_WERROR:BOOL=OFF'), 'linux-asan'))
+
     def test_expected_presets_match(self):
         for preset in ('linux-debug', 'linux-release', 'linux-asan', 'windows-debug', 'windows-release'):
             self.assertEqual(runner.configuration_errors(self.cache(preset), preset), [])

@@ -73,7 +73,7 @@ def plan_hash(plan):
 
 
 def configuration_errors(cache, preset):
-    values = dict(re.findall(r'^([^:#]+):[^=]+=(.*)$', cache, re.M))
+    values = dict(re.findall(r'^([A-Za-z0-9_]+):[^=\r\n]+=([^\r\n]*)\r?$', cache, re.M))
     expected = {'GENKO_WERROR': 'ON', 'GENKO_FAULT_INJECTION': 'OFF' if preset.endswith('release') else 'ON',
                 'CMAKE_BUILD_TYPE': 'Release' if preset.endswith('release') else 'Debug',
                 'GENKO_SANITIZE': 'address,undefined' if preset == 'linux-asan' else ''}
@@ -121,7 +121,7 @@ def run(args):
             raise ValueError('登録集合に欠落があります。空試験や未移植を合格にしません')
         (out / 'registered.json').write_text(json.dumps(registered, indent=2), encoding='utf-8')
         with (out / 'build.log').open('wb') as log:
-            subprocess.run(['cmake', '--build', str(build), '--parallel', '1', '--target', *row['tests']], cwd=root, stdout=log, stderr=subprocess.STDOUT, check=True)
+            subprocess.run(['cmake', '--build', str(build), '--parallel', '1', '--verbose', '--target', *row['tests']], cwd=root, stdout=log, stderr=subprocess.STDOUT, check=True)
         # 未buildのCTest JSONにはcommandが無い場合があるので、build後に再読込する。
         built = json.loads(subprocess.check_output(['ctest', '--test-dir', str(build), '--show-only=json-v1', '-R', regex], cwd=root))
         commands = [Path(t['command'][0]) for t in built['tests']]

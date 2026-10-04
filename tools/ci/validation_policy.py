@@ -123,6 +123,29 @@ def make_plan(paths, phase, root):
             'performance_required': phase == 'milestone' or any('/perf/' in p for p in paths)}
 
 
+def choose_baseline(runs, branch, is_ancestor):
+    for row in runs:
+        sha = row.get('head_sha', '')
+        if row.get('head_branch') == branch and row.get('event') == 'push' and row.get('status') == 'completed' and row.get('conclusion') == 'success' and re.fullmatch(r'[0-9a-f]{40}', sha) and is_ancestor(sha):
+            return row
+    return None
+
+
+def last_successful_push(root, repository, branch, head):
+    # 公開リポジトリのmetadataだけ。認証/permission追加なし。取得不能は全体へ。
+    import urllib.parse
+    import urllib.request
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository):
+        raise ValueError('repository識別子が不正')
+    query = urllib.parse.urlencode({'branch': branch, 'event': 'push', 'status': 'success', 'per_page': 20})
+    url = f'https://api.github.com/repos/{repository}/actions/workflows/native.yml/runs?{query}'
+    with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'genko-validation-policy'}), timeout=15) as response:
+        data = json.load(response)
+    def ancestor(sha):
+        return subprocess.run(['git', 'merge-base', '--is-ancestor', sha, head], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0
+    return choose_baseline(data['workflow_runs'], branch, ancestor)
+
+
 def changed_paths(root, base, head):
     # diff失敗は例外で停止。差分なしはmake_plan側で全体へ拡大する。
     for ref in (base, head):
@@ -137,10 +160,27 @@ def main():
     parser.add_argument('--phase', choices=PHASES, default='development')
     parser.add_argument('--output', required=True)
     parser.add_argument('--github-output')
+    parser.add_argument('--ci-baseline-branch')
+    parser.add_argument('--repository')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
-    plan = make_plan(changed_paths(root, args.base, args.head), args.phase, root)
-    plan.update(base=args.base, head=args.head)
+    base = args.base
+    evidence = None
+    baseline_error = None
+    if args.ci_baseline_branch:
+        if not args.repository:
+            parser.error('--repositoryが必要です')
+        try:
+            evidence = last_successful_push(root, args.repository, args.ci_baseline_branch, args.head)
+            base = evidence['head_sha'] if evidence else None
+        except (OSError, ValueError, KeyError) as error:
+            base = None
+            baseline_error = str(error)
+    plan = make_plan(changed_paths(root, base, args.head) if base else [], args.phase, root)
+    plan.update(base=base, head=args.head, baseline_run=evidence.get('html_url') if evidence else None,
+                baseline_error=baseline_error)
+    if args.ci_baseline_branch and not base:
+        plan['reasons'].append('前回合格を照合できないため全体へ拡大')
     Path(args.output).write_text(json.dumps(plan, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     if args.github_output:
         with open(args.github_output, 'a', encoding='utf-8') as out:

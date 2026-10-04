@@ -53,7 +53,7 @@
 
 - featureブランチのpushは保管だけ。native/integration/mainへのpushまたはそれらへのPRで実行する。feature pushとPRの二重起動を避ける。integration→mainの公開候補PRは別の境界として検査する。ブランチ名だけで検査を省略しない。今回の方針変更は独立レビュー後に統合木へ取り込み、統合pushの一回で確認する。
 - PRはV1、統合pushはV2。工程出口V3はnative.ymlの手動起動 `phase=milestone`。新cron・observer・夜間自動実行は作らない。
-- 差分から `validation_policy.py` が対象・構成・除外理由をJSONへ記録する。差分取得失敗は停止、差分が空/分類不能なら全体。変更されたテストを除外しない。
+- 差分から `validation_policy.py` が対象・構成・除外理由をJSONへ記録する。統合pushの基点は同じbranchの前回合格runの祖先SHAとし、前のCI失敗分を直前commit差分だけで落とさない。公開CI metadataを一度読むだけで、新認証/permission/cronは追加しない。基点の合格を照合できなければ全体へ拡大する。差分取得失敗は停止、差分が空/分類不能なら全体。変更されたテストを除外しない。
 - Python pytestはsrc/tests/依存設定/公開op schema/Python workflow変更時だけLinux/Windowsで実行する。C++専用変更のたびにPython全pytestを実行しない。ただし必要なPython参照契約はnative試験に残す。
 - CTestをverboseで一度実行し、そのrawログでQt Totals/FAIL/SKIPを検査する。ログ取得のための再実行と、失敗後の全exe再実行を廃止する。
 - 0試験、欠落/重複Totals、未完走、未知SKIP、sanitizer診断、構成artifact欠落を成功にしない。Releaseの既知SKIPだけを許可し、Debug/ASan側の同slot PASSを総合auditで要求する。
