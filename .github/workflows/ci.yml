@@ -2,7 +2,19 @@ name: tests
 
 on:
   push:
+    branches: [main, native/integration]
+    paths: ["src/**", "tests/**", "pyproject.toml", "uv.lock", "docs/ops.schema.json", ".github/workflows/ci.yml"]
   pull_request:
+    branches: [main, native/integration]
+    paths: ["src/**", "tests/**", "pyproject.toml", "uv.lock", "docs/ops.schema.json", ".github/workflows/ci.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -12,7 +24,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
-      QT_QPA_PLATFORM: offscreen  # the GUI tests run without a display
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

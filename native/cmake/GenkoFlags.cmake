@@ -48,7 +48,13 @@ function(genko_test name)
   target_compile_definitions(${name} PRIVATE GENKO_REPO_ROOT="${GENKO_REPO_ROOT}"
                                              GENKO_TEST_DATA="${GENKO_SOURCE_ROOT}/tests/data")
   genko_target_flags(${name})
-  add_test(NAME ${name} COMMAND ${name})
+  # WindowsのQtTestはconsoleへTotalsを出さない構成がある。
+  # CTestの一回の実行でファイルへ記録し、CIが同じ実行のrawログを監査する。
+  if(WIN32)
+    add_test(NAME ${name} COMMAND ${name} -o "${CMAKE_CURRENT_BINARY_DIR}/qtest-${name}.txt,txt")
+  else()
+    add_test(NAME ${name} COMMAND ${name})
+  endif()
   set(_labels ${GT_LABELS})
   if(GT_GUI)
     list(APPEND _labels gui)

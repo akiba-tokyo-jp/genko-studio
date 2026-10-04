@@ -3,9 +3,21 @@ name: native
 # The C++ build (docs/cpp-migration). Runs beside the Python tests (ci.yml), which stay the baseline until M7.
 on:
   push:
-    paths: ["native/**", "docs/cpp-migration/**", "tools/migration/**", "tools/ci/**", "tools/acceptance/**", ".github/workflows/native.yml"]
+    branches: [main, native/integration]
   pull_request:
-    paths: ["native/**", "docs/cpp-migration/**", "tools/migration/**", "tools/ci/**", "tools/acceptance/**", ".github/workflows/native.yml"]
+    branches: [main, native/integration]
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "integration=統合候補、milestone=工程出口の全構成"
+        type: choice
+        options: [milestone, integration]
+        default: milestone
+        required: true
+
+concurrency:
+  group: native-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}-${{ inputs.phase || 'integration' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -15,13 +27,39 @@ env:
   AQT_VERSION: "3.3.0"
 
 jobs:
-  ledger:
+  plan:
     runs-on: ubuntu-24.04
+    outputs:
+      has_native: ${{ steps.plan.outputs.has_native }}
+      linux_matrix: ${{ steps.plan.outputs.linux_matrix }}
+      windows_matrix: ${{ steps.plan.outputs.windows_matrix }}
     steps:
       - uses: actions/checkout@v4
-      - run: python3 tools/migration/build_ledger.py --check
+        with:
+          fetch-depth: 0
+      - name: 検証方針の回帰試験と台帳
+        run: |
+          python3 -m unittest discover -s tools/ci/tests -v
+          python3 tools/migration/build_ledger.py --check
+      - name: 差分から検証範囲を決定
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.phase || (github.event_name == 'pull_request' && 'development' || 'integration') }}
+        run: |
+          set -euo pipefail
+          base="$BASE_SHA"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then base="HEAD^"; fi
+          python3 tools/ci/validation_policy.py --base "$base" --phase "$PHASE" --output validation-plan.json --github-output "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-plan
+          path: validation-plan.json
+          retention-days: 7
 
   linux:
+    needs: plan
+    if: needs.plan.outputs.has_native == 'true'
     runs-on: ubuntu-24.04
     # Match the measured reference: NumPy 2.4.6, OpenBLAS Haswell, X86_V2 ufuncs.
     # CPU auto-dispatch changes reduction rounding; keep all bitwise/pixel checks intact.
@@ -30,10 +68,12 @@ jobs:
       NPY_DISABLE_CPU_FEATURES: "X86_V3,X86_V4,AVX512_ICL,AVX512_SPR"
     strategy:
       fail-fast: false
-      matrix:
-        preset: [linux-release, linux-asan]
+      matrix: ${{ fromJSON(needs.plan.outputs.linux_matrix) }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: validation-plan
       - name: System packages
         run: |
           sudo apt-get update -q
@@ -65,17 +105,30 @@ jobs:
           set -euo pipefail
           cd native
           cmake --preset ${{ matrix.preset }}
-          cmake --build --preset ${{ matrix.preset }}
-          ctest --preset ${{ matrix.preset }} --label-exclude perf --no-tests=error
+          cd ..
+          python3 tools/ci/validation_run.py --plan validation-plan.json --preset ${{ matrix.preset }} --build build/${{ matrix.preset }} --output validation/${{ matrix.preset }}
+
+      - name: 一回の試験のログと実行物証跡
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-${{ matrix.preset }}
+          path: validation/${{ matrix.preset }}
+          if-no-files-found: error
+          retention-days: 7
 
   windows:
+    needs: plan
+    if: needs.plan.outputs.has_native == 'true'
     runs-on: windows-2022
     strategy:
       fail-fast: false
-      matrix:
-        preset: [windows-release, windows-debug]
+      matrix: ${{ fromJSON(needs.plan.outputs.windows_matrix) }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: validation-plan
       - name: Paths
         shell: pwsh
         run: |
@@ -129,74 +182,15 @@ jobs:
           $env:PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64\bin;$env:PATH"
           cd native
           cmake --preset ${{ matrix.preset }}
-          # (-k 0: report every file that fails to compile, not only the first)
-          cmake --build --preset ${{ matrix.preset }} -- -k 0
-          # (every test's own output goes to ctest-output.log: QtTest prints which check failed)
-          ctest --preset ${{ matrix.preset }} --label-exclude "perf|contract" --no-tests=error -V --output-log "$env:RUNNER_TEMP\ctest-output.log"
-      - name: QtTestの成功時ログを保持
-        if: success() && steps.build.outcome == 'success'
-        shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $env:PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64\bin;$env:PATH"
-          $build = Join-Path $PWD 'build\${{ matrix.preset }}'
-          foreach ($name in @('test_gui_layout', 'test_image_split_oom', 'test_app_e2e')) {
-            $exe = Join-Path $build "$name.exe"
-            $log = "$env:RUNNER_TEMP\qtest-$name.txt"
-            Push-Location (Join-Path $build 'tests')
-            try {
-              & $exe -o "$log,txt" *> "$env:RUNNER_TEMP\stdout-$name.txt"
-              if ($LASTEXITCODE -ne 0) { throw "$name exited with $LASTEXITCODE" }
-            } finally { Pop-Location }
-            $text = Get-Content $log -Raw -Encoding utf8
-            $totals = [regex]::Matches($text, 'Totals: ([0-9]+) passed, ([0-9]+) failed, ([0-9]+) skipped')
-            if ($totals.Count -ne 1) { throw "$name has no unambiguous QtTest totals" }
-            $allowFaultSkip = $name -eq 'test_app_e2e' -and '${{ matrix.preset }}' -eq 'windows-release'
-            $expectedPassed = if ($name -eq 'test_gui_layout') { 19 } elseif ($name -eq 'test_image_split_oom') { 7 } elseif ($allowFaultSkip) { 0 } else { 8 }
-            $expectedSkipped = if ($allowFaultSkip) { 1 } else { 0 }
-            if ([int]$totals[0].Groups[1].Value -ne $expectedPassed -or [int]$totals[0].Groups[2].Value -ne 0 -or [int]$totals[0].Groups[3].Value -ne $expectedSkipped) {
-              throw "$name unexpected QtTest totals: $($totals[0].Value)"
-            }
-            if ($allowFaultSkip -and $text -notmatch 'SKIP\s+: TestAppE2e::initTestCase\(\).*fault injection') {
-              throw 'Release E2E skip was not the expected disabled fault-injection suite'
-            }
-            Write-Output "=== ${name}: QtTest records ==="
-            Get-Content $log -Encoding utf8
-          }
-      - name: Failed tests, run one by one
-        if: failure() && steps.build.outcome == 'failure'
-        shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          $env:PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64\bin;$env:PATH"
-          Set-Location "build\${{ matrix.preset }}"
-          foreach ($exe in Get-ChildItem -Filter 'test_*.exe') {
-            $name = $exe.BaseName
-            $log = "$env:RUNNER_TEMP\qtest-$name.txt"
-            Push-Location tests
-            & $exe.FullName -o "$log,txt" *> "$env:RUNNER_TEMP\stdout-$name.txt"
-            $code = $LASTEXITCODE
-            Pop-Location
-            if ($code -ne 0) {
-              Write-Output ("=== {0}: exit 0x{1:X8}" -f $name, $code)
-              if (Test-Path $log) { Get-Content $log | Select-String -Pattern 'FAIL!|Loc:|Actual|Expected|QWARN|QFATAL|QCRITICAL|Totals' | Select-Object -First 40 | ForEach-Object { $_.Line } }
-              else { Write-Output '(no QtTest log)'; Get-Content "$env:RUNNER_TEMP\stdout-$name.txt" -ErrorAction SilentlyContinue | Select-Object -First 20 }
-            }
-          }
-      - name: Test output (also after a failed test)
+          Set-Location ..
+          python tools/ci/validation_run.py --plan validation-plan.json --preset ${{ matrix.preset }} --build build/${{ matrix.preset }} --output validation/${{ matrix.preset }}
+      - name: 一回の試験のログと実行物証跡
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ctest-${{ matrix.preset }}
-          path: |
-            ${{ runner.temp }}/ctest-output.log
-            ${{ runner.temp }}/qtest-*.txt
-            ${{ runner.temp }}/stdout-*.txt
-          if-no-files-found: ignore
+          name: validation-${{ matrix.preset }}
+          path: validation/${{ matrix.preset }}
+          if-no-files-found: error
           retention-days: 7
       - name: vcpkg binary cache (save, also after a failed build)
         if: always()
@@ -204,3 +198,26 @@ jobs:
         with:
           path: ${{ runner.temp }}\vcpkg-bin
           key: vcpkg-bin-${{ hashFiles('native/vcpkg.json') }}-${{ matrix.preset }}-${{ github.run_id }}
+
+  audit:
+    needs: [plan, linux, windows]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.has_native == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: validation-plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: validation-*
+          path: validation-artifacts
+      - name: 構成の完走とRelease未実施のDebug対照を照合
+        run: python3 tools/ci/validation_run.py --plan validation-plan.json --pair --output validation-artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-matrix-audit
+          path: validation-artifacts/matrix-audit.json
+          if-no-files-found: error
+          retention-days: 7
