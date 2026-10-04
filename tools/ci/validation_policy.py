@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+from typing import Any
 
 PHASES = ('development', 'integration', 'milestone')
 SAFETY = {
@@ -131,19 +132,50 @@ def choose_baseline(runs, branch, is_ancestor):
     return None
 
 
+# 再利用するPRは工程出口の全構成だけ。通常PRの関連試験は基点にしない。
+REUSE_CONTROLS = ('.github/workflows/native.yml', 'tools/ci', 'native/cmake',
+                  'native/CMakeLists.txt', 'native/CMakePresets.json', 'native/vcpkg.json')
+
+
+def choose_milestone_baseline(runs, is_ancestor, same_controls) -> dict[str, Any] | None:
+    for row in runs:
+        sha = row.get('head_sha', '')
+        if (row.get('event') == 'pull_request' and row.get('status') == 'completed'
+                and row.get('conclusion') == 'success'
+                and row.get('head_branch', '').startswith('native/milestone/')
+                and re.fullmatch(r'[0-9a-f]{40}', sha)
+                and is_ancestor(sha) and same_controls(sha)):
+            return dict(row, _verified_full_milestone=True)
+    return None
+
+
 def last_successful_push(root, repository, branch, head):
     # 公開リポジトリのmetadataだけ。認証/permission追加なし。取得不能は全体へ。
     import urllib.parse
     import urllib.request
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository):
         raise ValueError('repository識別子が不正')
-    query = urllib.parse.urlencode({'branch': branch, 'event': 'push', 'status': 'success', 'per_page': 20})
-    url = f'https://api.github.com/repos/{repository}/actions/workflows/native.yml/runs?{query}'
-    with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'genko-validation-policy'}), timeout=15) as response:
-        data = json.load(response)
+    resolved = subprocess.check_output(['git', 'rev-parse', '--verify', '--end-of-options', head + '^{commit}'], cwd=root).decode('ascii').strip()
+    def fetch(event, event_branch=None):
+        query = {'event': event, 'status': 'success', 'per_page': 20}
+        if event_branch is not None:
+            query['branch'] = event_branch
+        url = f'https://api.github.com/repos/{repository}/actions/workflows/native.yml/runs?' + urllib.parse.urlencode(query)
+        with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'genko-validation-policy'}), timeout=15) as response:
+            return json.load(response)['workflow_runs']
     def ancestor(sha):
-        return subprocess.run(['git', 'merge-base', '--is-ancestor', sha, head], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0
-    return choose_baseline(data['workflow_runs'], branch, ancestor)
+        return subprocess.run(['git', 'merge-base', '--is-ancestor', sha, resolved], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0
+    def controls(sha):
+        return subprocess.run(['git', 'diff', '--quiet', sha, resolved, '--', *REUSE_CONTROLS], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0
+    push = choose_baseline(fetch('push', branch), branch, ancestor)
+    try:
+        full_pr = choose_milestone_baseline(fetch('pull_request'), ancestor, controls)
+    except (OSError, ValueError, KeyError):
+        # 照合できるpush基点があればそれを使い、照合不能なPRを合格扱いにしない。
+        return push
+    if full_pr and (not push or subprocess.run(['git', 'merge-base', '--is-ancestor', push['head_sha'], full_pr['head_sha']], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0):
+        return full_pr
+    return push
 
 
 def changed_paths(root, base, head):
@@ -176,7 +208,16 @@ def main():
         except (OSError, ValueError, KeyError) as error:
             base = None
             baseline_error = str(error)
-    plan = make_plan(changed_paths(root, base, args.head) if base else [], args.phase, root)
+    paths = changed_paths(root, base, args.head) if base else []
+    if (evidence and evidence.get('event') == 'pull_request'
+            and evidence.get('_verified_full_milestone') and not paths
+            and args.phase == 'integration'):
+        plan = {'schema': 1, 'phase': args.phase, 'paths': [], 'tier': 'reused-full-milestone',
+                'has_native': False, 'matrix': {'include': []},
+                'performance_required': False,
+                'reasons': ['全構成合格PRと全tree・検証制御が同一。証跡を再使用し再buildしない']}
+    else:
+        plan = make_plan(paths, args.phase, root)
     plan.update(base=base, head=args.head, baseline_run=evidence.get('html_url') if evidence else None,
                 baseline_error=baseline_error)
     if args.ci_baseline_branch and not base:

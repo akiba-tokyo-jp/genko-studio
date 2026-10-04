@@ -51,11 +51,11 @@
 
 ## 3. CIの起動と重複の除去
 
-- featureブランチのpushは保管だけ。native/integration/mainへのpushまたはそれらへのPRで実行する。feature pushとPRの二重起動を避ける。integration→mainの公開候補PRは別の境界として検査する。ブランチ名だけで検査を省略しない。今回の方針変更は独立レビュー後に統合木へ取り込み、統合pushの一回で確認する。
-- PRはV1、統合pushはV2。工程出口V3はnative.ymlの手動起動 `phase=milestone`。新cron・observer・夜間自動実行は作らない。
-- 差分から `validation_policy.py` が対象・構成・除外理由をJSONへ記録する。統合pushの基点は同じbranchの前回合格runの祖先SHAとし、前のCI失敗分を直前commit差分だけで落とさない。公開CI metadataを一度読むだけで、新認証/permission/cronは追加しない。基点の合格を照合できなければ全体へ拡大する。差分取得失敗は停止、差分が空/分類不能なら全体。変更されたテストを除外しない。
+- featureブランチのpushは保管だけ。native/integration/mainへのpushまたはそれらへのPRで実行する。feature pushとPRの二重起動を避ける。integration→mainの公開候補PRは別の境界として検査する。ブランチ名だけで検査を省略しない。PRの全jobはmerge treeではなくhead SHAそのものをcheckoutする。実workflow定義がhead側と異なれば停止しrebaseする。統合後にtarget由来の製品差分があれば別の全体候補として検査する。今回の基盤変更は独立レビュー後、工程出口PRの全構成で受入し、全treeが同一の統合pushは証跡を再使用する。
+- 通常PRはV1、統合pushはV2。`native/milestone/<工程名>`からのPRはV3の全5構成。現mainにはnative workflowがないため、default branchへの反映前はこのPR経路を使う。mainへの反映後は手動起動 `phase=milestone` も可能。新cron・observer・夜間自動実行は作らない。
+- 差分から `validation_policy.py` が対象・構成・除外理由をJSONへ記録する。統合pushの基点は同じbranchの前回合格runの祖先SHA、または全構成合格の工程出口PR（祖先SHAとworkflow/script/CMake/preset/依存制御が同一）とし、前のCI失敗分を直前commit差分だけで落とさない。通常PR・別の制御・不明な履歴は再利用しない。候補決定時だけ公開CI metadataを読み、新認証/permission/cronは追加しない。基点の合格を照合できなければ全体へ拡大する。合格工程出口PRと全treeまで同一のマージpushはrun URLを記録して再buildしない。差分取得失敗は停止、それ以外の差分空/分類不能は全体へ拡大する。変更されたテストを除外しない。
 - Python pytestはsrc/tests/依存設定/公開op schema/Python workflow変更時だけLinux/Windowsで実行する。C++専用変更のたびにPython全pytestを実行しない。ただし必要なPython参照契約はnative試験に残す。
-- CTestをverboseで一度実行し、そのrawログでQt Totals/FAIL/SKIPを検査する。ログ取得のための再実行と、失敗後の全exe再実行を廃止する。
+- CTestをverboseで一度実行し、Windowsでは同じCTest登録から`-o file,txt`で全選択QtTestのrawログも出す。その一回のrawログでQt Totals/FAIL/SKIPを検査する。ログ取得のための再実行と、失敗後の全exe再実行を廃止する。
 - 0試験、欠落/重複Totals、未完走、未知SKIP、sanitizer診断、構成artifact欠落を成功にしない。Releaseの既知SKIPだけを許可し、Debug/ASan側の同slot PASSを総合auditで要求する。
 - CIは自動で実行中候補をcancelしない。手動V3は通常push/PRとconcurrencyを分離する。不要になった同じ検査対象の候補のみ、理由とログを保存して明示的に停止する。cancelは未受入であり成功に数えない。ローカルの意図的停止は理由・元ログ・状態を保存する。
 

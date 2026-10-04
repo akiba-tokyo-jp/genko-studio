@@ -15,8 +15,10 @@ policy = importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
 
 
 class BaselineTests(unittest.TestCase):
-    def row(self, sha='a' * 40, branch='native/integration', conclusion='success'):
-        return {'head_sha': sha, 'head_branch': branch, 'event': 'push', 'status': 'completed', 'conclusion': conclusion, 'html_url': 'https://github.com/example/runs/1'}
+    def row(self, sha='a' * 40, branch='native/integration', conclusion='success', **changes):
+        row = {'head_sha': sha, 'head_branch': branch, 'event': 'push', 'status': 'completed', 'conclusion': conclusion, 'html_url': 'https://github.com/example/runs/1'}
+        row.update(changes)
+        return row
 
     def test_last_pass_not_last_failed_commit(self):
         rows = [self.row('b' * 40, conclusion='failure'), self.row()]
@@ -58,6 +60,32 @@ class BaselineTests(unittest.TestCase):
         plan, calls, _, diffs = self.run_main()
         self.assertEqual((calls, diffs), (1, 0))
         self.assertEqual(plan['tier'], 'full')
+
+
+    def test_full_milestone_pr_can_be_reused_with_identical_controls(self):
+        row = self.row(event='pull_request', head_branch='native/milestone/example')
+        result = policy.choose_milestone_baseline([row], lambda s: True, lambda s: True)
+        self.assertEqual(result['head_sha'], 'a' * 40)
+        self.assertTrue(result['_verified_full_milestone'])
+
+    def test_plain_pr_and_changed_controls_are_not_reused(self):
+        plain = self.row(event='pull_request', head_branch='native/ordinary')
+        full = self.row(event='pull_request', head_branch='native/milestone/example')
+        self.assertIsNone(policy.choose_milestone_baseline([plain], lambda s: True, lambda s: True))
+        self.assertIsNone(policy.choose_milestone_baseline([full], lambda s: True, lambda s: False))
+        self.assertIsNone(policy.choose_milestone_baseline([full], lambda s: False, lambda s: True))
+
+    def test_same_tree_of_full_milestone_pr_reuses_evidence_not_empty_tests(self):
+        row = self.row(event='pull_request', head_branch='native/milestone/example', _verified_full_milestone=True)
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / 'plan.json'
+            args = ['validation_policy.py', '--base', 'b' * 40, '--phase', 'integration', '--ci-baseline-branch', 'native/integration', '--repository', 'example/repo', '--output', str(output)]
+            with mock.patch('sys.argv', args), mock.patch.object(policy, 'last_successful_push', return_value=row), mock.patch.object(policy, 'changed_paths', return_value=[]), contextlib.redirect_stdout(io.StringIO()):
+                policy.main()
+            plan = json.loads(output.read_text())
+            self.assertEqual(plan['tier'], 'reused-full-milestone')
+            self.assertFalse(plan['has_native'])
+            self.assertEqual(plan['matrix']['include'], [])
 
 
 if __name__ == '__main__':
