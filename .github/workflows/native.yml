@@ -45,12 +45,20 @@ jobs:
         id: plan
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
           PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.phase || (github.event_name == 'pull_request' && 'development' || 'integration') }}
         run: |
           set -euo pipefail
           base="$BASE_SHA"
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then base="HEAD^"; fi
-          python3 tools/ci/validation_policy.py --base "$base" --phase "$PHASE" --output validation-plan.json --github-output "$GITHUB_OUTPUT"
+          # PRはtarget基点、pushは直前commitではなく前回合格からの全変更を検査。
+          if [ "$EVENT" = "push" ]; then
+            python3 tools/ci/validation_policy.py --base "$base" --phase "$PHASE" --ci-baseline-branch "$BRANCH" --repository "$REPOSITORY" --output validation-plan.json --github-output "$GITHUB_OUTPUT"
+          else
+            python3 tools/ci/validation_policy.py --base "$base" --phase "$PHASE" --output validation-plan.json --github-output "$GITHUB_OUTPUT"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: validation-plan
