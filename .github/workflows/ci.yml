@@ -1,8 +1,9 @@
 name: tests
 
+# Automatic runs are off: push and pull_request no longer trigger this.
+# Run it by hand from the Actions tab when wanted.
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
