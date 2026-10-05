@@ -2,6 +2,7 @@
 // owns no C++ object created after it, and the callbacks keep no C++ objects alive when they call png_error.
 
 #include "render/png.hpp"
+#include "render/bmp.hpp"
 
 #include <png.h>
 
@@ -473,6 +474,7 @@ Image open_image(std::string_view bytes, const PngLimits& limits) {
         return read_png(bytes, limits);
     }
     if (bytes.substr(0, 3) == "\xff\xd8\xff") return read_jpeg(bytes, limits);
+    if (bytes.substr(0, 2) == "BM") return read_bmp(bytes, limits);
     // Pillow would open these; the remaining formats are not ported yet.
     if (other_image_format(bytes)) throw NotYetPorted("image_format");
     throw core::Error("unidentified_image", "cannot identify image file");

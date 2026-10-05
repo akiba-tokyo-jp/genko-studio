@@ -144,6 +144,25 @@ void genko_imaging_budget_release(Imaging im) {
     budget_unref(budget);
 }
 
+int genko_imaging_budget_transfer(Imaging from, Imaging to) {
+    GenkoBudget *budget;
+    if (!from || !to) { set_error(kValueError, "invalid allocation reservation"); return 0; }
+    if (from == to || !from->genko_budget) return 1;
+    budget = (GenkoBudget *)from->genko_budget;
+    if (to->genko_budget != budget) {
+        set_error(kValueError, "allocations belong to different budgets");
+        return 0;
+    }
+    PyMutex_Lock(&budget->mutex);
+    /* Both charges are already part of live <= limit; their sum cannot overflow. */
+    to->genko_budget_bytes += from->genko_budget_bytes;
+    from->genko_budget_bytes = 0;
+    from->genko_budget = NULL;
+    --budget->refs; /* One owner replaces two; the destination still holds a ref. */
+    PyMutex_Unlock(&budget->mutex);
+    return 1;
+}
+
 /* --- _imaging.c --------------------------------------------------------------------------------------------- */
 
 void *

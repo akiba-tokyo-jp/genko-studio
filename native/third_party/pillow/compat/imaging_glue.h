@@ -29,6 +29,9 @@ uint64_t genko_imaging_budget_peak(void);
 struct ImagingMemoryInstance;
 int genko_imaging_budget_reserve(struct ImagingMemoryInstance *im, uint64_t bytes);
 void genko_imaging_budget_release(struct ImagingMemoryInstance *im);
+/* Merge a temporary reservation into an existing allocation of the same budget.
+   Live bytes do not change; ownership lasts until the destination is destroyed. */
+int genko_imaging_budget_transfer(struct ImagingMemoryInstance *from, struct ImagingMemoryInstance *to);
 
 #ifdef __cplusplus
 }

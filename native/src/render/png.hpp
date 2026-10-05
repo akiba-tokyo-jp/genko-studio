@@ -28,9 +28,10 @@ inline constexpr PngLimits kPillowOpenLimits{2 * kMaxImagePixels};
 // Pillow's load() fails), core::Error("image_too_large") for one that is too big.
 Image read_png(std::string_view bytes, const PngLimits& limits = {});
 
-// Image.open(bytes) and load() for PNG and 8-bit JPEG (L/RGB/CMYK, including progressive JPEG).
-// Both apply limits before pixel decoding. JPEG uses Pillow's CMYK inversion and rejects truncated input.
-// Other formats Pillow opens (GIF, BMP, TIFF, WebP, PSD) throw NotYetPorted("image_format");
+// Image.open(bytes) and load() for PNG, 8-bit JPEG (L/RGB/CMYK, including progressive),
+// and BMP (1/4/8/16/24/32-bit, OS2, bitfields, RLE4/8). Caps precede pixel allocation.
+// Decoders reject incomplete pixel output; BMP retains complete short RLE packets and optional row padding.
+// Other formats Pillow opens (GIF, TIFF, WebP, PSD) throw NotYetPorted("image_format");
 // anything else core::Error("unidentified_image").
 Image open_image(std::string_view bytes, const PngLimits& limits = {});
 

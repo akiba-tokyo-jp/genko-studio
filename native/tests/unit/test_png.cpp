@@ -46,6 +46,182 @@ class TestPng : public QObject {
     Q_OBJECT
 
 private slots:
+    void bmpPixelsMatchPillow_data() {
+        QTest::addColumn<int>("index");
+        const Json data = genko::test::read_json(genko::test::test_data("pyref/bmp/tables.json"));
+        for (std::size_t i = 0; i < data.size(); ++i)
+            QTest::newRow(data[i]["name"].get<std::string>().c_str()) << static_cast<int>(i);
+    }
+    void bmpPixelsMatchPillow() {
+        QFETCH(int, index);
+        const Json data = genko::test::read_json(genko::test::test_data("pyref/bmp/tables.json"));
+        const Json& c = data[static_cast<std::size_t>(index)];
+        const std::string bytes = genko::test::read_bytes(genko::test::test_data("pyref/" + QString::fromStdString(c["file"].get<std::string>())));
+        QVERIFY(!bytes.empty());
+        try {
+            const render::Image im = render::open_image(bytes);
+            QCOMPARE(std::string(im.mode()), c["mode"].get<std::string>());
+            QCOMPARE(im.width(), c["size"][0].get<int>());
+            QCOMPARE(im.height(), c["size"][1].get<int>());
+            QVERIFY(im.tobytes() == genko::core::a2b_base64(c["data"].get<std::string>()));
+            QVERIFY(im.convert("RGBA").tobytes() == genko::core::a2b_base64(c["rgba"].get<std::string>()));
+            QVERIFY(im.convert("L").tobytes() == genko::core::a2b_base64(c["l"].get<std::string>()));
+        } catch (const genko::core::Error& error) {
+            QFAIL(error.what());
+        }
+    }
+
+    void bmpGuardsDimensionsTruncationAndBudget() {
+        const auto source = genko::test::read_bytes(genko::test::test_data("pyref/bmp/rgb24.bmp"));
+        const auto put32 = [](std::string& data, std::size_t at, std::uint32_t value) {
+            for (std::size_t i = 0; i < 4; ++i) data[at + i] = static_cast<char>((value >> (i * 8)) & 0xff);
+        };
+        auto invalid = source;
+        invalid.resize(53);
+        const auto rejected = [](const std::string& bytes) {
+            try { (void)render::open_image(bytes); }
+            catch (const genko::core::Error& error) { return error.code(); }
+            return std::string("accepted");
+        };
+        QCOMPARE(rejected(invalid), std::string("format"));  // Same truncated DIB header as Pillow.
+        invalid = source.substr(0, source.size() - 4);  // The last 3 bytes are padding, not pixels.
+        QCOMPARE(rejected(invalid), std::string("format"));
+        for (const std::size_t field : {std::size_t{18}, std::size_t{22}}) {
+            invalid = source; put32(invalid, field, 0);
+            QCOMPARE(rejected(invalid), std::string("unidentified_image"));
+        }
+        invalid = source; put32(invalid, 10, 20);
+        QCOMPARE(rejected(invalid), std::string("unidentified_image"));
+        invalid = source; invalid[26] = 2;
+        QCOMPARE(rejected(invalid), std::string("unidentified_image"));
+        bool capped = false;
+        try { (void)render::open_image(source, render::PngLimits{34}); }
+        catch (const genko::core::Error& error) { capped = error.code() == "image_too_large" && std::string(error.what()) == "image has too many pixels"; }
+        QVERIFY(capped);
+        invalid = source; put32(invalid, 22, 300000000);
+        capped = false;
+        try { (void)render::open_image(invalid); }
+        catch (const genko::core::Error& error) { capped = error.code() == "image_too_large" && std::string(error.what()) == "image has too many pixels"; }
+        QVERIFY(capped);
+        {
+            render::ImageAllocationBudget budget(32);
+            bool exhausted = false;
+            try { (void)render::open_image(source); }
+            catch (const genko::core::OpError& error) { exhausted = std::string(error.what()).find("too many masks") != std::string::npos; }
+            QVERIFY(exhausted);
+            QCOMPARE(budget.live(), std::uint64_t{0});
+        }
+        {
+            render::ImageAllocationBudget budget(source.size() + 1);
+            bool exhausted = false;
+            try { (void)render::open_image(source); }
+            catch (const genko::core::OpError& error) { exhausted = std::string(error.what()).find("too many masks") != std::string::npos; }
+            QVERIFY(exhausted);
+            QCOMPARE(budget.live(), std::uint64_t{0});
+        }
+        QCOMPARE(render::open_image(source).width(), 7);
+    }
+
+    void bmpEveryShortPixelPrefixIsRefused() {
+        const auto source = genko::test::read_bytes(genko::test::test_data("pyref/bmp/rgb24.bmp"));
+        // Omit actual pixels, not the three legal last-row padding bytes.
+        for (std::size_t n = 0; n < source.size() - 3; ++n) {
+            bool refused = false;
+            try { (void)render::open_image(source.substr(0, n)); }
+            catch (const genko::core::Error& error) { refused = error.code() != "not_yet_ported"; }
+            QVERIFY2(refused, ("accepted truncated BMP prefix " + std::to_string(n)).c_str());
+        }
+        QCOMPARE(render::open_image(source).width(), 7);
+    }
+
+    void bmpClassifiedErrorsMatchPillow_data() {
+        QTest::addColumn<int>("index");
+        const auto data = genko::test::read_json(genko::test::test_data("pyref/bmp/errors.json"));
+        for (std::size_t i = 0; i < data.size(); ++i) QTest::newRow(data.at(i).at("name").get<std::string>().c_str()) << static_cast<int>(i);
+    }
+    void bmpClassifiedErrorsMatchPillow() {
+        QFETCH(int, index);
+        const auto data = genko::test::read_json(genko::test::test_data("pyref/bmp/errors.json")).at(static_cast<std::size_t>(index));
+        const auto bytes = genko::core::a2b_base64(data.at("b64").get<std::string>());
+        bool refused = false;
+        try { (void)render::open_image(bytes); }
+        catch (const genko::core::Error& error) {
+            refused = true;
+            QCOMPARE(error.code(), data.at("code").get<std::string>());
+            QCOMPARE(std::string(error.what()), data.at("message").get<std::string>());
+        }
+        QVERIFY(refused);
+    }
+    void bmpAccountsForRowPointersBeforeAllocation() {
+        auto bytes = genko::test::read_bytes(genko::test::test_data("pyref/bmp/gray8.bmp"));
+        const auto put32 = [](std::string& b, std::size_t at, std::uint32_t v) { for (std::size_t i=0;i<4;++i) b.at(at+i)=static_cast<char>((v>>(8*i))&255U); };
+        // Keep only the small header and palette; no enormous payload is created.
+        bytes.resize(1078); put32(bytes,2,1078); put32(bytes,18,1); put32(bytes,30,1); put32(bytes,34,0);
+        {
+            render::ImageAllocationBudget budget(4096);
+            put32(bytes,22,400000000);
+            bool beforeAllocation = false;
+            try { (void)render::open_image(bytes); }
+            catch (const genko::core::Error& error) { beforeAllocation = error.code()=="memory"; }
+            catch (const genko::core::OpError&) { /* Safe RED: old pixel reservation fails before calloc. */ }
+            QVERIFY(beforeAllocation);
+            QCOMPARE(budget.live(), std::uint64_t{0});
+        }
+        {
+            render::ImageAllocationBudget budget(128 << 10);
+            put32(bytes,22,20000);
+            bool withActiveBudget = false;
+            try { (void)render::open_image(bytes); }
+            catch (const genko::core::OpError& error) { withActiveBudget = std::string(error.what()).find("too many masks")!=std::string::npos; }
+            catch (const genko::core::Error&) {}
+            QVERIFY(withActiveBudget);
+            QCOMPARE(budget.live(), std::uint64_t{0});
+        }
+    }
+    void bmpKeepsRowReservationsUntilImageDestruction() {
+        const auto bytes = genko::test::read_bytes(genko::test::test_data("pyref/bmp/rgb24.bmp"));
+        render::ImageAllocationBudget budget(4096);
+        auto a = render::open_image(bytes);
+        const std::uint64_t owned = 7 * 5 * 4 + 5 * sizeof(void*);
+        QCOMPARE(budget.live(), owned);
+        auto b = render::open_image(bytes);
+        QCOMPARE(budget.live(), owned * 2);
+        a = render::Image{};
+        QCOMPARE(budget.live(), owned);
+        b = render::Image{};
+        QCOMPARE(budget.live(), std::uint64_t{0});
+    }
+    void bmpActiveBudgetAndFailedRleReleaseEverything() {
+        const auto bytes = genko::test::read_bytes(genko::test::test_data("pyref/bmp/rgb24.bmp"));
+        {
+            const std::uint64_t limit = 400 + bytes.size() + 5 * sizeof(void*) + 7 * 5 * 4 - 1;
+            render::ImageAllocationBudget budget(limit);
+            auto held = render::Image::create_blank("RGBA", {10, 10});
+            const auto before = budget.live();
+            bool refused = false;
+            try { (void)render::open_image(bytes); }
+            catch (const genko::core::OpError& error) { refused = std::string(error.what()).find("too many masks") != std::string::npos; }
+            QVERIFY(refused);
+            QCOMPARE(budget.live(), before);
+            held = render::Image{};
+            QCOMPARE(budget.live(), std::uint64_t{0});
+            QVERIFY(!render::open_image(bytes).empty());
+        }
+        const auto cases = genko::test::read_json(genko::test::test_data("pyref/bmp/errors.json"));
+        render::ImageAllocationBudget budget(1 << 20);
+        auto held = render::Image::create_blank("RGBA", {10, 10});
+        const auto before = budget.live();
+        for (const auto& c : cases) {
+            if (c.at("stage") != "load") continue;
+            bool refused = false;
+            try { (void)render::open_image(genko::core::a2b_base64(c.at("b64").get<std::string>())); }
+            catch (const genko::core::Error&) { refused = true; }
+            QVERIFY(refused);
+            QCOMPARE(budget.live(), before);
+        }
+        held = render::Image{};
+        QCOMPARE(budget.live(), std::uint64_t{0});
+    }
     void jpegPixelsMatchPillow_data() {
         QTest::addColumn<int>("index");
         const Json data = genko::test::read_json(genko::test::test_data("pyref/jpeg/tables.json"));

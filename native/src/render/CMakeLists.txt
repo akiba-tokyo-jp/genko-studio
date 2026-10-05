@@ -5,6 +5,7 @@ genko_library(genko_render
     image.cpp
     draw.cpp
     png.cpp
+    bmp.cpp
     stroke.cpp
     brushes.cpp
     panels.cpp
