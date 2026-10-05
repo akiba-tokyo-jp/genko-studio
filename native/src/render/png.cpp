@@ -3,6 +3,7 @@
 
 #include "render/png.hpp"
 #include "render/bmp.hpp"
+#include "render/gif.hpp"
 
 #include <png.h>
 
@@ -475,6 +476,7 @@ Image open_image(std::string_view bytes, const PngLimits& limits) {
     }
     if (bytes.substr(0, 3) == "\xff\xd8\xff") return read_jpeg(bytes, limits);
     if (bytes.substr(0, 2) == "BM") return read_bmp(bytes, limits);
+    if (bytes.substr(0, 6) == "GIF87a" || bytes.substr(0, 6) == "GIF89a") return read_gif(bytes, limits);
     // Pillow would open these; the remaining formats are not ported yet.
     if (other_image_format(bytes)) throw NotYetPorted("image_format");
     throw core::Error("unidentified_image", "cannot identify image file");

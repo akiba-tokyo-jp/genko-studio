@@ -22,6 +22,8 @@ struct ImagingMemoryInstance;
 
 namespace genko::render {
 
+struct PngLimits;
+
 struct Size {
     int width = 0;
     int height = 0;
@@ -260,6 +262,11 @@ private:
 
     ImagingMemoryInstance* im_ = nullptr;
     Transparency transparency_;
+    // A GIF wrapper can report L while its underlying Pillow core owns a P palette.
+    // Value copies and moves preserve the opened wrapper (including decoded-cache copies).
+    // Explicit copy()/derived images report their own core mode, like Pillow's Image._new.
+    bool gif_logical_l_ = false;
+    friend Image read_gif(std::string_view bytes, PngLimits limits);
 };
 
 // Image.alpha_composite(a, b): b over a (both RGBA, or both LA, of one size).

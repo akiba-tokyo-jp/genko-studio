@@ -31,7 +31,9 @@ Image read_png(std::string_view bytes, const PngLimits& limits = {});
 // Image.open(bytes) and load() for PNG, 8-bit JPEG (L/RGB/CMYK, including progressive),
 // and BMP (1/4/8/16/24/32-bit, OS2, bitfields, RLE4/8). Caps precede pixel allocation.
 // Decoders reject incomplete pixel output; BMP retains complete short RLE packets and optional row padding.
-// Other formats Pillow opens (GIF, TIFF, WebP, PSD) throw NotYetPorted("image_format");
+// GIF87a/89a first-frame P/L pixels: global/local palette, transparency, frame extents and interlace.
+// Other GIF metadata extensions are skipped as Pillow does; the first frame is decoded completely.
+// Other formats Pillow opens (TIFF, WebP, PSD) throw NotYetPorted("image_format");
 // anything else core::Error("unidentified_image").
 Image open_image(std::string_view bytes, const PngLimits& limits = {});
 

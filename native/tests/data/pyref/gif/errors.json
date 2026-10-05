@@ -1,0 +1,127 @@
+[
+  {
+    "name": "short-header",
+    "b64": "R0lGODdhEQATAA==",
+    "python": {
+      "ok": false,
+      "type": "UnidentifiedImageError",
+      "message": "cannot identify image file <_io.BytesIO object at 0x7d6def899e90>",
+      "stage": "open",
+      "code": "unidentified_image"
+    }
+  },
+  {
+    "name": "short-palette",
+    "b64": "R0lGODdhEQATAIcAAAAAAAcNHQ4aOhUnVxw0dCNBkSpOrjFbyzho6D91BUaCIk2PP1ScXFupeWK2lmnDs3DQ0Hfd7X7qCoX3J4wERJMRYZoefqErm6g4uK9F1bZS8r1fD8RsLMt5SdKGZtmTg+CgoOetve662vXH",
+    "python": {
+      "ok": false,
+      "type": "UnidentifiedImageError",
+      "message": "cannot identify image file <_io.BytesIO object at 0x7d6def899e90>",
+      "stage": "open",
+      "code": "unidentified_image"
+    }
+  },
+  {
+    "name": "short-frame",
+    "b64": "R0lGODdhEQATAIcAAAAAAAcNHQ4aOhUnVxw0dCNBkSpOrjFbyzho6D91BUaCIk2PP1ScXFupeWK2lmnDs3DQ0Hfd7X7qCoX3J4wERJMRYZoefqErm6g4uK9F1bZS8r1fD8RsLMt5SdKGZtmTg+CgoOetve662vXH9/zUFAPhMQruThH7axgIiB8VpSYiwi0v3zQ8/DtJGUJWNkljU1BwcFd9jV6KqmWXx2yk5HOxAXq+HoHLO4jYWI/ldZbykp3/r6QMzKsZ6bImBrkzI8BAQMdNXc5aetVnl9x0tOOB0eqO7vGbC/ioKP+1RQbCYg3PfxTcnBvpuSL21ikD8zAQEDcdLT4qSkU3Z0xEhFNRoVpevmFr22h4+G+FFXaSMn2fT4SsbIu5iZLGppnTw6Dg4Kft/a76GrUHN7wUVMMhccoujtE7q9hIyN9V5eZiAu1vH/R8PPuJWQKWdgmjkxCwsBe9zR7K6iXXByzkJDPxQTr+XkELe0gYmE8ltVYy0l0/72RMDGtZKXJmRnlzY4CAgIeNnY6aupWn15y09KPBEarOLrHbS7joaL/1hcYCos0Pv9Qc3Nsp+eI2FulDM/BQUPddbf5qigV3pwyExBOR4Rqe/iGrGyi4OC/FVTbScj3fj0TsrEv5yVIG5lkTA2AgIGctPW46WnVHd3xUlINhsYpuzpF765iICJ+VJaaiQq2vX7S8fLvJmcLWtsnj09Dw8Nf9Dd4KKuUXR+wkZPMxgfo+ngFLuwhY2A9l9RZyEh1/LySMTCuZaTKmhjmzo0DAwEfN3U7a+lXnF1z0NGMBUWoObnEbi3goqH81xYZC4o1P/5RcHJtpOaJ2VqmDc7CQkLedrb6qysW358zEBNPRIdrePuHrW+j4eO8FlfYSsv0fzwQs7As5CRJGJhlTQyBgYCdtfS56mjWHtzyU1EOh8UquDlG7K1jISF/VZWbigm3vn3T8vHsJ2YIW9okjE5AwMJc9TZ5KaqVXh6xkpLNxwbp+3sGL+8iYGM+lNdayUt2/b+TMjOvZqfLmxvnz4ywAAAAA",
+    "python": {
+      "ok": false,
+      "type": "UnidentifiedImageError",
+      "message": "cannot identify image file <_io.BytesIO object at 0x7d6def899e90>",
+      "stage": "open",
+      "code": "unidentified_image"
+    }
+  },
+  {
+    "name": "short-LZW",
+    "b64": "R0lGODdhEQATAIcAAAAAAAcNHQ4aOhUnVxw0dCNBkSpOrjFbyzho6D91BUaCIk2PP1ScXFupeWK2lmnDs3DQ0Hfd7X7qCoX3J4wERJMRYZoefqErm6g4uK9F1bZS8r1fD8RsLMt5SdKGZtmTg+CgoOetve662vXH9/zUFAPhMQruThH7axgIiB8VpSYiwi0v3zQ8/DtJGUJWNkljU1BwcFd9jV6KqmWXx2yk5HOxAXq+HoHLO4jYWI/ldZbykp3/r6QMzKsZ6bImBrkzI8BAQMdNXc5aetVnl9x0tOOB0eqO7vGbC/ioKP+1RQbCYg3PfxTcnBvpuSL21ikD8zAQEDcdLT4qSkU3Z0xEhFNRoVpevmFr22h4+G+FFXaSMn2fT4SsbIu5iZLGppnTw6Dg4Kft/a76GrUHN7wUVMMhccoujtE7q9hIyN9V5eZiAu1vH/R8PPuJWQKWdgmjkxCwsBe9zR7K6iXXByzkJDPxQTr+XkELe0gYmE8ltVYy0l0/72RMDGtZKXJmRnlzY4CAgIeNnY6aupWn15y09KPBEarOLrHbS7joaL/1hcYCos0Pv9Qc3Nsp+eI2FulDM/BQUPddbf5qigV3pwyExBOR4Rqe/iGrGyi4OC/FVTbScj3fj0TsrEv5yVIG5lkTA2AgIGctPW46WnVHd3xUlINhsYpuzpF765iICJ+VJaaiQq2vX7S8fLvJmcLWtsnj09Dw8Nf9Dd4KKuUXR+wkZPMxgfo+ngFLuwhY2A9l9RZyEh1/LySMTCuZaTKmhjmzo0DAwEfN3U7a+lXnF1z0NGMBUWoObnEbi3goqH81xYZC4o1P/5RcHJtpOaJ2VqmDc7CQkLedrb6qysW358zEBNPRIdrePuHrW+j4eO8FlfYSsv0fzwQs7As5CRJGJhlTQyBgYCdtfS56mjWHtzyU1EOh8UquDlG7K1jISF/VZWbigm3vn3T8vHsJ2YIW9okjE5AwMJc9TZ5KaqVXh6xkpLNxwbp+3sGL+8iYGM+lNdayUt2/b+TMjOvZqfLmxvnz4ywAAAAAEQATAAAIegABBBAwgEABAwcQJFCwgEED",
+    "python": {
+      "ok": false,
+      "type": "OSError",
+      "message": "image file is truncated (18 bytes not processed)",
+      "stage": "load",
+      "code": "format"
+    }
+  },
+  {
+    "name": "mid-LZW",
+    "b64": "R0lGODdhEQATAIcAAAAAAAcNHQ4aOhUnVxw0dCNBkSpOrjFbyzho6D91BUaCIk2PP1ScXFupeWK2lmnDs3DQ0Hfd7X7qCoX3J4wERJMRYZoefqErm6g4uK9F1bZS8r1fD8RsLMt5SdKGZtmTg+CgoOetve662vXH9/zUFAPhMQruThH7axgIiB8VpSYiwi0v3zQ8/DtJGUJWNkljU1BwcFd9jV6KqmWXx2yk5HOxAXq+HoHLO4jYWI/ldZbykp3/r6QMzKsZ6bImBrkzI8BAQMdNXc5aetVnl9x0tOOB0eqO7vGbC/ioKP+1RQbCYg3PfxTcnBvpuSL21ikD8zAQEDcdLT4qSkU3Z0xEhFNRoVpevmFr22h4+G+FFXaSMn2fT4SsbIu5iZLGppnTw6Dg4Kft/a76GrUHN7wUVMMhccoujtE7q9hIyN9V5eZiAu1vH/R8PPuJWQKWdgmjkxCwsBe9zR7K6iXXByzkJDPxQTr+XkELe0gYmE8ltVYy0l0/72RMDGtZKXJmRnlzY4CAgIeNnY6aupWn15y09KPBEarOLrHbS7joaL/1hcYCos0Pv9Qc3Nsp+eI2FulDM/BQUPddbf5qigV3pwyExBOR4Rqe/iGrGyi4OC/FVTbScj3fj0TsrEv5yVIG5lkTA2AgIGctPW46WnVHd3xUlINhsYpuzpF765iICJ+VJaaiQq2vX7S8fLvJmcLWtsnj09Dw8Nf9Dd4KKuUXR+wkZPMxgfo+ngFLuwhY2A9l9RZyEh1/LySMTCuZaTKmhjmzo0DAwEfN3U7a+lXnF1z0NGMBUWoObnEbi3goqH81xYZC4o1P/5RcHJtpOaJ2VqmDc7CQkLedrb6qysW358zEBNPRIdrePuHrW+j4eO8FlfYSsv0fzwQs7As5CRJGJhlTQyBgYCdtfS56mjWHtzyU1EOh8UquDlG7K1jISF/VZWbigm3vn3T8vHsJ2YIW9okjE5AwMJc9TZ5KaqVXh6xkpLNxwbp+3sGL+8iYGM+lNdayUt2/b+TMjOvZqfLmxvnz4ywAAAAAEQATAAAIegABBBAwgEABAwcQJFCwgEEDBw8AFDyYcGHDhxEHDkCokKFDiAIJGjRg8WNGkRQVmgw5kWPJky0reg==",
+    "python": {
+      "ok": false,
+      "type": "OSError",
+      "message": "image file is truncated (58 bytes not processed)",
+      "stage": "load",
+      "code": "format"
+    }
+  },
+  {
+    "name": "bad-LZW-size",
+    "b64": "R0lGODdhEQATAIcAAAAAAAcNHQ4aOhUnVxw0dCNBkSpOrjFbyzho6D91BUaCIk2PP1ScXFupeWK2lmnDs3DQ0Hfd7X7qCoX3J4wERJMRYZoefqErm6g4uK9F1bZS8r1fD8RsLMt5SdKGZtmTg+CgoOetve662vXH9/zUFAPhMQruThH7axgIiB8VpSYiwi0v3zQ8/DtJGUJWNkljU1BwcFd9jV6KqmWXx2yk5HOxAXq+HoHLO4jYWI/ldZbykp3/r6QMzKsZ6bImBrkzI8BAQMdNXc5aetVnl9x0tOOB0eqO7vGbC/ioKP+1RQbCYg3PfxTcnBvpuSL21ikD8zAQEDcdLT4qSkU3Z0xEhFNRoVpevmFr22h4+G+FFXaSMn2fT4SsbIu5iZLGppnTw6Dg4Kft/a76GrUHN7wUVMMhccoujtE7q9hIyN9V5eZiAu1vH/R8PPuJWQKWdgmjkxCwsBe9zR7K6iXXByzkJDPxQTr+XkELe0gYmE8ltVYy0l0/72RMDGtZKXJmRnlzY4CAgIeNnY6aupWn15y09KPBEarOLrHbS7joaL/1hcYCos0Pv9Qc3Nsp+eI2FulDM/BQUPddbf5qigV3pwyExBOR4Rqe/iGrGyi4OC/FVTbScj3fj0TsrEv5yVIG5lkTA2AgIGctPW46WnVHd3xUlINhsYpuzpF765iICJ+VJaaiQq2vX7S8fLvJmcLWtsnj09Dw8Nf9Dd4KKuUXR+wkZPMxgfo+ngFLuwhY2A9l9RZyEh1/LySMTCuZaTKmhjmzo0DAwEfN3U7a+lXnF1z0NGMBUWoObnEbi3goqH81xYZC4o1P/5RcHJtpOaJ2VqmDc7CQkLedrb6qysW358zEBNPRIdrePuHrW+j4eO8FlfYSsv0fzwQs7As5CRJGJhlTQyBgYCdtfS56mjWHtzyU1EOh8UquDlG7K1jISF/VZWbigm3vn3T8vHsJ2YIW9okjE5AwMJc9TZ5KaqVXh6xkpLNxwbp+3sGL+8iYGM+lNdayUt2/b+TMjOvZqfLmxvnz4ywAAAAAEQATAAANegABBBAwgEABAwcQJFCwgEEDBw8AFDyYcGHDhxEHDkCokKFDiAIJGjRg8WNGkRQVmgw5kWPJky0resSI0uVMkANTlsTI0mDHizhrJgQKc6TMBUFj/vyo0ehSngGc7kxK4OjKphRvFtWpAKrQpz25EpUoVStLm2OxGggIADs=",
+    "python": {
+      "ok": false,
+      "type": "OSError",
+      "message": "codec configuration error when reading image file",
+      "stage": "load",
+      "code": "format"
+    }
+  },
+  {
+    "name": "bad-LZW-data",
+    "b64": "R0lGODdhEQATAIcAAAAAAAcNHQ4aOhUnVxw0dCNBkSpOrjFbyzho6D91BUaCIk2PP1ScXFupeWK2lmnDs3DQ0Hfd7X7qCoX3J4wERJMRYZoefqErm6g4uK9F1bZS8r1fD8RsLMt5SdKGZtmTg+CgoOetve662vXH9/zUFAPhMQruThH7axgIiB8VpSYiwi0v3zQ8/DtJGUJWNkljU1BwcFd9jV6KqmWXx2yk5HOxAXq+HoHLO4jYWI/ldZbykp3/r6QMzKsZ6bImBrkzI8BAQMdNXc5aetVnl9x0tOOB0eqO7vGbC/ioKP+1RQbCYg3PfxTcnBvpuSL21ikD8zAQEDcdLT4qSkU3Z0xEhFNRoVpevmFr22h4+G+FFXaSMn2fT4SsbIu5iZLGppnTw6Dg4Kft/a76GrUHN7wUVMMhccoujtE7q9hIyN9V5eZiAu1vH/R8PPuJWQKWdgmjkxCwsBe9zR7K6iXXByzkJDPxQTr+XkELe0gYmE8ltVYy0l0/72RMDGtZKXJmRnlzY4CAgIeNnY6aupWn15y09KPBEarOLrHbS7joaL/1hcYCos0Pv9Qc3Nsp+eI2FulDM/BQUPddbf5qigV3pwyExBOR4Rqe/iGrGyi4OC/FVTbScj3fj0TsrEv5yVIG5lkTA2AgIGctPW46WnVHd3xUlINhsYpuzpF765iICJ+VJaaiQq2vX7S8fLvJmcLWtsnj09Dw8Nf9Dd4KKuUXR+wkZPMxgfo+ngFLuwhY2A9l9RZyEh1/LySMTCuZaTKmhjmzo0DAwEfN3U7a+lXnF1z0NGMBUWoObnEbi3goqH81xYZC4o1P/5RcHJtpOaJ2VqmDc7CQkLedrb6qysW358zEBNPRIdrePuHrW+j4eO8FlfYSsv0fzwQs7As5CRJGJhlTQyBgYCdtfS56mjWHtzyU1EOh8UquDlG7K1jISF/VZWbigm3vn3T8vHsJ2YIW9okjE5AwMJc9TZ5KaqVXh6xkpLNxwbp+3sGL+8iYGM+lNdayUt2/b+TMjOvZqfLmxvnz4ywAAAAAEQATAAAIegD//////////////////////////zyYcGHDhxEHDkCokKFDiAIJGjRg8WNGkRQVmgw5kWPJky0resSI0uVMkANTlsTI0mDHizhrJgQKc6TMBUFj/vyo0ehSngGc7kxK4OjKphRvFtWpAKrQpz25EpUoVStLm2OxGggIADs=",
+    "python": {
+      "ok": false,
+      "type": "OSError",
+      "message": "broken data stream when reading image file",
+      "stage": "load",
+      "code": "format"
+    }
+  },
+  {
+    "name": "empty-extension-sequence",
+    "b64": "R0lGODdhEQATAIcAAAAAAAcNHQ4aOhUnVxw0dCNBkSpOrjFbyzho6D91BUaCIk2PP1ScXFupeWK2lmnDs3DQ0Hfd7X7qCoX3J4wERJMRYZoefqErm6g4uK9F1bZS8r1fD8RsLMt5SdKGZtmTg+CgoOetve662vXH9/zUFAPhMQruThH7axgIiB8VpSYiwi0v3zQ8/DtJGUJWNkljU1BwcFd9jV6KqmWXx2yk5HOxAXq+HoHLO4jYWI/ldZbykp3/r6QMzKsZ6bImBrkzI8BAQMdNXc5aetVnl9x0tOOB0eqO7vGbC/ioKP+1RQbCYg3PfxTcnBvpuSL21ikD8zAQEDcdLT4qSkU3Z0xEhFNRoVpevmFr22h4+G+FFXaSMn2fT4SsbIu5iZLGppnTw6Dg4Kft/a76GrUHN7wUVMMhccoujtE7q9hIyN9V5eZiAu1vH/R8PPuJWQKWdgmjkxCwsBe9zR7K6iXXByzkJDPxQTr+XkELe0gYmE8ltVYy0l0/72RMDGtZKXJmRnlzY4CAgIeNnY6aupWn15y09KPBEarOLrHbS7joaL/1hcYCos0Pv9Qc3Nsp+eI2FulDM/BQUPddbf5qigV3pwyExBOR4Rqe/iGrGyi4OC/FVTbScj3fj0TsrEv5yVIG5lkTA2AgIGctPW46WnVHd3xUlINhsYpuzpF765iICJ+VJaaiQq2vX7S8fLvJmcLWtsnj09Dw8Nf9Dd4KKuUXR+wkZPMxgfo+ngFLuwhY2A9l9RZyEh1/LySMTCuZaTKmhjmzo0DAwEfN3U7a+lXnF1z0NGMBUWoObnEbi3goqH81xYZC4o1P/5RcHJtpOaJ2VqmDc7CQkLedrb6qysW358zEBNPRIdrePuHrW+j4eO8FlfYSsv0fzwQs7As5CRJGJhlTQyBgYCdtfS56mjWHtzyU1EOh8UquDlG7K1jISF/VZWbigm3vn3T8vHsJ2YIW9okjE5AwMJc9TZ5KaqVXh6xkpLNxwbp+3sGL+8iYGM+lNdayUt2/b+TMjOvZqfLmxvnz4yH+ACH/ACEBACH5ACwAAAAAEQATAAAIegABBBAwgEABAwcQJFCwgEEDBw8AFDyYcGHDhxEHDkCokKFDiAIJGjRg8WNGkRQVmgw5kWPJky0resSI0uVMkANTlsTI0mDHizhrJgQKc6TMBUFj/vyo0ehSngGc7kxK4OjKphRvFtWpAKrQpz25EpUoVStLm2OxGggIADs=",
+    "sha256": "3bc40a97e2d73c487d85ca2c0f2bade5ea82a93b058e6fdcf9d36448b6d94692",
+    "python": {
+      "ok": false,
+      "type": "UnidentifiedImageError",
+      "message": "cannot identify image file <_io.BytesIO object at 0x79d6ccca47c0>",
+      "stage": "open",
+      "code": "unidentified_image"
+    }
+  },
+  {
+    "name": "short-GCE-one",
+    "b64": "R0lGODdhEQATAIcAAAAAAAcNHQ4aOhUnVxw0dCNBkSpOrjFbyzho6D91BUaCIk2PP1ScXFupeWK2lmnDs3DQ0Hfd7X7qCoX3J4wERJMRYZoefqErm6g4uK9F1bZS8r1fD8RsLMt5SdKGZtmTg+CgoOetve662vXH9/zUFAPhMQruThH7axgIiB8VpSYiwi0v3zQ8/DtJGUJWNkljU1BwcFd9jV6KqmWXx2yk5HOxAXq+HoHLO4jYWI/ldZbykp3/r6QMzKsZ6bImBrkzI8BAQMdNXc5aetVnl9x0tOOB0eqO7vGbC/ioKP+1RQbCYg3PfxTcnBvpuSL21ikD8zAQEDcdLT4qSkU3Z0xEhFNRoVpevmFr22h4+G+FFXaSMn2fT4SsbIu5iZLGppnTw6Dg4Kft/a76GrUHN7wUVMMhccoujtE7q9hIyN9V5eZiAu1vH/R8PPuJWQKWdgmjkxCwsBe9zR7K6iXXByzkJDPxQTr+XkELe0gYmE8ltVYy0l0/72RMDGtZKXJmRnlzY4CAgIeNnY6aupWn15y09KPBEarOLrHbS7joaL/1hcYCos0Pv9Qc3Nsp+eI2FulDM/BQUPddbf5qigV3pwyExBOR4Rqe/iGrGyi4OC/FVTbScj3fj0TsrEv5yVIG5lkTA2AgIGctPW46WnVHd3xUlINhsYpuzpF765iICJ+VJaaiQq2vX7S8fLvJmcLWtsnj09Dw8Nf9Dd4KKuUXR+wkZPMxgfo+ngFLuwhY2A9l9RZyEh1/LySMTCuZaTKmhjmzo0DAwEfN3U7a+lXnF1z0NGMBUWoObnEbi3goqH81xYZC4o1P/5RcHJtpOaJ2VqmDc7CQkLedrb6qysW358zEBNPRIdrePuHrW+j4eO8FlfYSsv0fzwQs7As5CRJGJhlTQyBgYCdtfS56mjWHtzyU1EOh8UquDlG7K1jISF/VZWbigm3vn3T8vHsJ2YIW9okjE5AwMJc9TZ5KaqVXh6xkpLNxwbp+3sGL+8iYGM+lNdayUt2/b+TMjOvZqfLmxvnz4yH5AQAALAAAAAARABMAAAh6AAEEEDCAQAEDBxAkULCAQQMHDwAUPJhwYcOHEQcOQKiQoUOIAgkaNGDxY0aRFBWaDDmRY8mTLSt6xIjS5UyQA1OWxMjSYMeLOGsmBApzpMwFQWP+/KjR6FKeAZzuTErg6MqmFG8W1akAqtCnPbkSlShVK0ubY7EaCAgAOw==",
+    "sha256": "e5436aa00cb3089eaff8a185ac69bcb75c7f5751fd2fe621e1ff2492517e0296",
+    "python": {
+      "ok": false,
+      "type": "UnidentifiedImageError",
+      "message": "cannot identify image file <_io.BytesIO object at 0x79d6ccca4860>",
+      "stage": "open",
+      "code": "unidentified_image"
+    }
+  },
+  {
+    "name": "short-GCE-two",
+    "b64": "R0lGODdhEQATAIcAAAAAAAcNHQ4aOhUnVxw0dCNBkSpOrjFbyzho6D91BUaCIk2PP1ScXFupeWK2lmnDs3DQ0Hfd7X7qCoX3J4wERJMRYZoefqErm6g4uK9F1bZS8r1fD8RsLMt5SdKGZtmTg+CgoOetve662vXH9/zUFAPhMQruThH7axgIiB8VpSYiwi0v3zQ8/DtJGUJWNkljU1BwcFd9jV6KqmWXx2yk5HOxAXq+HoHLO4jYWI/ldZbykp3/r6QMzKsZ6bImBrkzI8BAQMdNXc5aetVnl9x0tOOB0eqO7vGbC/ioKP+1RQbCYg3PfxTcnBvpuSL21ikD8zAQEDcdLT4qSkU3Z0xEhFNRoVpevmFr22h4+G+FFXaSMn2fT4SsbIu5iZLGppnTw6Dg4Kft/a76GrUHN7wUVMMhccoujtE7q9hIyN9V5eZiAu1vH/R8PPuJWQKWdgmjkxCwsBe9zR7K6iXXByzkJDPxQTr+XkELe0gYmE8ltVYy0l0/72RMDGtZKXJmRnlzY4CAgIeNnY6aupWn15y09KPBEarOLrHbS7joaL/1hcYCos0Pv9Qc3Nsp+eI2FulDM/BQUPddbf5qigV3pwyExBOR4Rqe/iGrGyi4OC/FVTbScj3fj0TsrEv5yVIG5lkTA2AgIGctPW46WnVHd3xUlINhsYpuzpF765iICJ+VJaaiQq2vX7S8fLvJmcLWtsnj09Dw8Nf9Dd4KKuUXR+wkZPMxgfo+ngFLuwhY2A9l9RZyEh1/LySMTCuZaTKmhjmzo0DAwEfN3U7a+lXnF1z0NGMBUWoObnEbi3goqH81xYZC4o1P/5RcHJtpOaJ2VqmDc7CQkLedrb6qysW358zEBNPRIdrePuHrW+j4eO8FlfYSsv0fzwQs7As5CRJGJhlTQyBgYCdtfS56mjWHtzyU1EOh8UquDlG7K1jISF/VZWbigm3vn3T8vHsJ2YIW9okjE5AwMJc9TZ5KaqVXh6xkpLNxwbp+3sGL+8iYGM+lNdayUt2/b+TMjOvZqfLmxvnz4yH5AgAAACwAAAAAEQATAAAIegABBBAwgEABAwcQJFCwgEEDBw8AFDyYcGHDhxEHDkCokKFDiAIJGjRg8WNGkRQVmgw5kWPJky0resSI0uVMkANTlsTI0mDHizhrJgQKc6TMBUFj/vyo0ehSngGc7kxK4OjKphRvFtWpAKrQpz25EpUoVStLm2OxGggIADs=",
+    "sha256": "21baceabb36c5bf655d26d34183f0d591a0ee66fd7c015b413cc1eaa76c74dc8",
+    "python": {
+      "ok": false,
+      "type": "UnidentifiedImageError",
+      "message": "cannot identify image file <_io.BytesIO object at 0x79d6ccca4860>",
+      "stage": "open",
+      "code": "unidentified_image"
+    }
+  },
+  {
+    "name": "short-GCE-transparent",
+    "b64": "R0lGODdhEQATAIcAAAAAAAcNHQ4aOhUnVxw0dCNBkSpOrjFbyzho6D91BUaCIk2PP1ScXFupeWK2lmnDs3DQ0Hfd7X7qCoX3J4wERJMRYZoefqErm6g4uK9F1bZS8r1fD8RsLMt5SdKGZtmTg+CgoOetve662vXH9/zUFAPhMQruThH7axgIiB8VpSYiwi0v3zQ8/DtJGUJWNkljU1BwcFd9jV6KqmWXx2yk5HOxAXq+HoHLO4jYWI/ldZbykp3/r6QMzKsZ6bImBrkzI8BAQMdNXc5aetVnl9x0tOOB0eqO7vGbC/ioKP+1RQbCYg3PfxTcnBvpuSL21ikD8zAQEDcdLT4qSkU3Z0xEhFNRoVpevmFr22h4+G+FFXaSMn2fT4SsbIu5iZLGppnTw6Dg4Kft/a76GrUHN7wUVMMhccoujtE7q9hIyN9V5eZiAu1vH/R8PPuJWQKWdgmjkxCwsBe9zR7K6iXXByzkJDPxQTr+XkELe0gYmE8ltVYy0l0/72RMDGtZKXJmRnlzY4CAgIeNnY6aupWn15y09KPBEarOLrHbS7joaL/1hcYCos0Pv9Qc3Nsp+eI2FulDM/BQUPddbf5qigV3pwyExBOR4Rqe/iGrGyi4OC/FVTbScj3fj0TsrEv5yVIG5lkTA2AgIGctPW46WnVHd3xUlINhsYpuzpF765iICJ+VJaaiQq2vX7S8fLvJmcLWtsnj09Dw8Nf9Dd4KKuUXR+wkZPMxgfo+ngFLuwhY2A9l9RZyEh1/LySMTCuZaTKmhjmzo0DAwEfN3U7a+lXnF1z0NGMBUWoObnEbi3goqH81xYZC4o1P/5RcHJtpOaJ2VqmDc7CQkLedrb6qysW358zEBNPRIdrePuHrW+j4eO8FlfYSsv0fzwQs7As5CRJGJhlTQyBgYCdtfS56mjWHtzyU1EOh8UquDlG7K1jISF/VZWbigm3vn3T8vHsJ2YIW9okjE5AwMJc9TZ5KaqVXh6xkpLNxwbp+3sGL+8iYGM+lNdayUt2/b+TMjOvZqfLmxvnz4yH5AwEAAAAsAAAAABEAEwAACHoAAQQQMIBAAQMHECRQsIBBAwcPABQ8mHBhw4cRBw5AqJChQ4gCCRo0YPFjRpEUFZoMOZFjyZMtK3rEiNLlTJADU5bEyNJgx4s4ayYECnOkzAVBY/78qNHoUp4BnO5MSuDoyqYUbxbVqQCq0Kc9uRKVKFUrS5tjsRoICAA7",
+    "sha256": "89ac4e0fff9b9a5a0b17d1d197625886c3e5202e9368997cbf311cc52352553f",
+    "python": {
+      "ok": false,
+      "type": "UnidentifiedImageError",
+      "message": "cannot identify image file <_io.BytesIO object at 0x79d6ccca47c0>",
+      "stage": "open",
+      "code": "unidentified_image"
+    }
+  }
+]

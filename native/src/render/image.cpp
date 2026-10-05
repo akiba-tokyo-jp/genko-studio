@@ -329,7 +329,7 @@ Image::~Image() {
     if (im_ != nullptr) ImagingDelete(im_);
 }
 
-Image::Image(const Image& other) : transparency_(other.transparency_) {
+Image::Image(const Image& other) : transparency_(other.transparency_), gif_logical_l_(other.gif_logical_l_) {
     if (other.im_ != nullptr) im_ = check(ImagingCopy(other.im_));
 }
 
@@ -341,8 +341,10 @@ Image& Image::operator=(const Image& other) {
     return *this;
 }
 
-Image::Image(Image&& other) noexcept : im_(other.im_), transparency_(std::move(other.transparency_)) {
+Image::Image(Image&& other) noexcept
+    : im_(other.im_), transparency_(std::move(other.transparency_)), gif_logical_l_(other.gif_logical_l_) {
     other.im_ = nullptr;
+    other.gif_logical_l_ = false;
 }
 
 Image& Image::operator=(Image&& other) noexcept {
@@ -351,6 +353,8 @@ Image& Image::operator=(Image&& other) noexcept {
         im_ = other.im_;
         other.im_ = nullptr;
         transparency_ = std::move(other.transparency_);
+        gif_logical_l_ = other.gif_logical_l_;
+        other.gif_logical_l_ = false;
     }
     return *this;
 }
@@ -401,7 +405,7 @@ Image Image::frombytes(std::string_view mode, Size size, std::string_view data, 
 
 std::string_view Image::mode() const {
     require();
-    return detail::mode_name(im_->mode);
+    return gif_logical_l_ ? std::string_view("L") : detail::mode_name(im_->mode);
 }
 
 Size Image::size() const {
@@ -448,7 +452,7 @@ std::string Image::tobytes() const {
     require();
     if (im_->xsize == 0 || im_->ysize == 0) return {};
     int bits = 0;
-    const ImagingShuffler pack = ImagingFindPacker(im_->mode, detail::rawmode_id(mode()), &bits);
+    const ImagingShuffler pack = ImagingFindPacker(detail::mode_id(mode()), detail::rawmode_id(mode()), &bits);
     if (pack == nullptr) throw core::Error("value", "unknown raw mode for given image mode");
     const std::size_t stride = (static_cast<std::size_t>(bits) * static_cast<std::size_t>(im_->xsize) + 7) / 8;
     std::string out(stride * static_cast<std::size_t>(im_->ysize), '\0');
@@ -725,6 +729,9 @@ void Image::putalpha(const Image& alpha) {
             im_ = converted.im_;
             converted.im_ = nullptr;
         }
+        // Pillow updates the wrapper mode after adding alpha to its core.
+        // A GIF's logical L/core P distinction no longer applies to LA/PA/RGBA.
+        gif_logical_l_ = false;
         m = mode();
     }
     const int band = (m == "LA" || m == "PA") ? 1 : 3;

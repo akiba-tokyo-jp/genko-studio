@@ -1,6 +1,7 @@
 # Pillow 12.3.0's libImaging (C, MIT-CMU), the pixel code the Python baseline draws with
-# (docs/cpp-migration/ARCHITECTURE.md §4a). Only the pixel-processing files are built: no codecs (*Decode.c,
-# *Encode.c), no Arrow, no codec_fd.c, no quantizer. compat/ stands in for Python.h and _imaging.c.
+# (docs/cpp-migration/ARCHITECTURE.md §4a). Pixel-processing files and GifDecode.c for native GIF first-frame
+# input are built; no other *Decode.c / *Encode.c, Arrow, codec_fd.c or quantizer.
+# compat/ stands in for Python.h and _imaging.c; production code does not invoke Python.
 #
 # Third-party code: built with its own warnings (never -Werror), but with Genko's floating-point rules, so a pixel
 # comes out the same as in the Pillow wheel the baseline uses: no FMA contraction, no fast-math; -fwrapv and NDEBUG
@@ -12,7 +13,7 @@ set(_pillow_dir "${CMAKE_CURRENT_SOURCE_DIR}/libImaging")
 set(_pillow_sources
   Access AlphaComposite Bands Blend BoxBlur Chops ColorLUT Convert ConvertYCbCr Copy Crop Draw Effects Fill
   Filter Geometry GetBBox Histo Matrix Mode ModeFilter Negative Offset Pack Palette Paste Point RankFilter
-  Reduce Storage UnpackYCC Unpack UnsharpMask)
+  Reduce Storage UnpackYCC Unpack UnsharpMask GifDecode)
 list(TRANSFORM _pillow_sources PREPEND "${_pillow_dir}/")
 list(TRANSFORM _pillow_sources APPEND ".c")
 list(APPEND _pillow_sources compat/resample_region.c)
