@@ -1,0 +1,410 @@
+{
+  "scope": "最初のRGBA16/32＋露光量縦断単位",
+  "branch": "native/photocraft-features",
+  "source_base": "f9bb7a1",
+  "native": "in_progress",
+  "all_features_done": false,
+  "integration": "not yet committed/integrated; V1 current-source audit passed",
+  "published": false,
+  "v1_linux_debug": {
+    "qt": {
+      "pass": 148,
+      "fail": 0,
+      "skip": 0
+    },
+    "cli": "pass",
+    "gui_dialog": "pass",
+    "gui_color_canvas_full_pixel": "pass・一時probe・Qt4 PASS",
+    "record": "build/photocraft-v1/regression-v6/execution.json",
+    "review": "build/photocraft-v1/review-core-v3.json",
+    "review_passed": true,
+    "pins_current": false,
+    "note": "修正前候補の限定合格を保全。修正後候補の実検証と区別する。"
+  },
+  "broader_validation": {
+    "plan": "build/photocraft-v2-plan.json",
+    "stage": "保存済み初回カラー候補のLinux試験完走。後続レビュー2件により本体修正済みで、修正後候補の受入へ流用しない。",
+    "same_source_required": true,
+    "linux_release": "finished-before-review-fixes",
+    "linux_asan_ubsan": "finished-before-review-fixes",
+    "windows": "deferred・既存VALIDATION.md §0・配布前に必須",
+    "process_session": "proc_f508bcadf914",
+    "pid": 1203855,
+    "execution": "build/photocraft-full-repaired/execution.json",
+    "cpu_max": "100000 100000",
+    "memory_max": "2147483648",
+    "known_failed_suites": [
+      "test_contract_ops",
+      "test_contract_raster_ops",
+      "test_contract_filters"
+    ],
+    "status": "completed-before-review-fixes",
+    "initial_asan_completed_tests": 58,
+    "initial_asan_passed_tests": 55,
+    "initial_asan_failed_tests": [
+      "test_contract_ops",
+      "test_contract_raster_ops",
+      "test_contract_filters"
+    ],
+    "initial_oom_kill_delta": 0,
+    "retry_root": "build/photocraft-full-repaired",
+    "latest_candidate_passed": false,
+    "initial_execution": "build/photocraft-full/execution.json",
+    "preflight": {
+      "scope": "本体適用後候補の短いASan/UBSan正常・保存安全・拒否対照。全58試験合格ではない。",
+      "passed": true,
+      "ctest_tests": 2,
+      "qt_passed": 16,
+      "qt_failed": 0,
+      "qt_skipped": 0,
+      "raw_log": "build/photocraft-full-repaired/linux-asan-preflight.log",
+      "raw_sha256": "baee1d7307d50180bb20f32e93cc2588fe3922dd874b4616dd8b9ee75fc2df5d",
+      "source_unchanged_since_start": true,
+      "full_asan": "running",
+      "release": "queued",
+      "process_session": "proc_f508bcadf914"
+    },
+    "container": "0ad113a6ae39",
+    "current_formal_color_cli": {
+      "status": "passed",
+      "record": "build/photocraft-full-repaired/current-color-cli/execution.json",
+      "commands": 20,
+      "checks": [
+        {
+          "name": "u16 print 中心画素",
+          "passed": true,
+          "pixel": [
+            4,
+            8,
+            12
+          ],
+          "dimensions": [
+            227,
+            1134
+          ],
+          "png_sha256": "c523d92c2fc98712b1ad406544625e3a6a653e7691ec8fa3b187d571c8ce8674"
+        },
+        {
+          "name": "u16 proof 中心画素",
+          "passed": true,
+          "pixel": [
+            4,
+            8,
+            12
+          ],
+          "dimensions": [
+            227,
+            1134
+          ],
+          "png_sha256": "c523d92c2fc98712b1ad406544625e3a6a653e7691ec8fa3b187d571c8ce8674"
+        },
+        {
+          "name": "u16 元bytes・feature・disk Undo/Redo・前置変更を含む拒否の全files不変・GC・読戻し",
+          "passed": true
+        },
+        {
+          "name": "f32 print 中心画素",
+          "passed": true,
+          "pixel": [
+            255,
+            0,
+            31
+          ],
+          "dimensions": [
+            227,
+            1134
+          ],
+          "png_sha256": "98179a1e910827dbcf17dc3ce9292c334058374cfc05dc42b1e4a9bb2debbba7"
+        },
+        {
+          "name": "f32 proof 中心画素",
+          "passed": true,
+          "pixel": [
+            255,
+            0,
+            31
+          ],
+          "dimensions": [
+            227,
+            1134
+          ],
+          "png_sha256": "98179a1e910827dbcf17dc3ce9292c334058374cfc05dc42b1e4a9bb2debbba7"
+        },
+        {
+          "name": "f32 元bytes・feature・disk Undo/Redo・前置変更を含む拒否の全files不変・GC・読戻し",
+          "passed": true
+        }
+      ],
+      "source_same_as_running_candidate": true,
+      "binary_before_after_equal": true,
+      "oom_kill_delta": 0
+    },
+    "combined_review_source_check": "build/photocraft-full-repaired/combined-review-source-check.json",
+    "latest_completed_tests": 41,
+    "latest_failed_tests": [],
+    "legacy_guard_controls": {
+      "status": "passed",
+      "passed": true,
+      "record": "build/photocraft-full-repaired/legacy-guards-cli/execution.json",
+      "completed_cases": 8,
+      "expected_cases": 8,
+      "next": "全体検証の完走と同ソースReleaseへ結合。高精度mergeそのものの実装は未完。",
+      "first_attempt": "build/photocraft-full-repaired/legacy-guards-cli-actor-attempt/execution.json",
+      "resource_scope": "同じ1CPU/2GiB内でclean inactive cacheだけを可用見積に含める。dirty/active cacheは含めず、最低768MiB・実memory.maxは維持。",
+      "command_count": 32,
+      "source_and_binary_before_after_equal": true,
+      "oom_kill_delta": 0,
+      "actor_setup": "各対照の直前にhuman actorで正式保存し、そのlock基準も比較。",
+      "cases": [
+        {
+          "precision": "u16",
+          "op": "merge_down",
+          "refusal_batch_all_files_unchanged": true,
+          "other_page_normal_operation_changed_document": true,
+          "color_page_and_source_bytes_unchanged": true,
+          "doctor_passed": true
+        },
+        {
+          "precision": "u16",
+          "op": "merge_layers",
+          "refusal_batch_all_files_unchanged": true,
+          "other_page_normal_operation_changed_document": true,
+          "color_page_and_source_bytes_unchanged": true,
+          "doctor_passed": true
+        },
+        {
+          "precision": "u16",
+          "op": "merge_visible",
+          "refusal_batch_all_files_unchanged": true,
+          "other_page_normal_operation_changed_document": true,
+          "color_page_and_source_bytes_unchanged": true,
+          "doctor_passed": true
+        },
+        {
+          "precision": "u16",
+          "op": "convert_layer",
+          "refusal_batch_all_files_unchanged": true,
+          "other_page_normal_operation_changed_document": true,
+          "color_page_and_source_bytes_unchanged": true,
+          "doctor_passed": true
+        },
+        {
+          "precision": "f32",
+          "op": "merge_down",
+          "refusal_batch_all_files_unchanged": true,
+          "other_page_normal_operation_changed_document": true,
+          "color_page_and_source_bytes_unchanged": true,
+          "doctor_passed": true
+        },
+        {
+          "precision": "f32",
+          "op": "merge_layers",
+          "refusal_batch_all_files_unchanged": true,
+          "other_page_normal_operation_changed_document": true,
+          "color_page_and_source_bytes_unchanged": true,
+          "doctor_passed": true
+        },
+        {
+          "precision": "f32",
+          "op": "merge_visible",
+          "refusal_batch_all_files_unchanged": true,
+          "other_page_normal_operation_changed_document": true,
+          "color_page_and_source_bytes_unchanged": true,
+          "doctor_passed": true
+        },
+        {
+          "precision": "f32",
+          "op": "convert_layer",
+          "refusal_batch_all_files_unchanged": true,
+          "other_page_normal_operation_changed_document": true,
+          "color_page_and_source_bytes_unchanged": true,
+          "doctor_passed": true
+        }
+      ]
+    },
+    "latest_observation": "2026-10-06T15:36:36.395506+09:00",
+    "ops_compatibility_current_asan": {
+      "fixed_cases_slot_passed": true,
+      "random_sequences_slot_passed": true,
+      "compared_steps": 1351,
+      "input_ops": 1907,
+      "whole_ctest_passed": true,
+      "evidence": "build/photocraft-full-repaired/linux-asan/ctest-output.log"
+    },
+    "current_gui_probe": {
+      "status": "blocked-resource-headroom",
+      "passed": false,
+      "product_test_ran": false,
+      "driver": "build/photocraft-full-repaired/current-gui-probe.py",
+      "minimum_free_bytes": 1073741824,
+      "same_cpu_memory_limits": true
+    },
+    "prior_failed_tests_now_passed": [
+      "test_contract_ops",
+      "test_contract_raster_ops",
+      "test_contract_filters"
+    ],
+    "all_linux_gate_passed": false,
+    "raster_compatibility_current_asan": {
+      "whole_ctest_passed": true,
+      "fixed_reference_images": 2526,
+      "unreadable_on_both_sides": 0,
+      "random_steps": 640,
+      "random_input_ops": 866,
+      "random_unported_stops": 0,
+      "filter_edge_images": 12,
+      "filter_edge_pixels": 245792,
+      "evidence": "build/photocraft-full-repaired/linux-asan/ctest-output.log"
+    }
+  },
+  "last_report": "2026-10-06T22:32:02.967066+09:00",
+  "report_interval_minutes": 15,
+  "original_inputs_modified": false,
+  "next": "機能群commit→native/integrationへ統合→元CPU/RAMでV2全通常Releaseと共通境界全ASan、正式CLI23/audit。Windows保留は未合格。続いてM2残とM3/PhotoCraft全件。",
+  "review_notes_pending": false,
+  "report_policy": {
+    "strict_interval_guaranteed": false,
+    "rough_minutes": 15,
+    "user_request": "守れなくても良いので、報告は下さい\n進めてくださいね？",
+    "rule": "実際の進展・障害・待ち状態を日本語で報告し、間隔を確約しない。新cron等は追加しない。"
+  },
+  "compatibility_candidate": {
+    "scope": "コピーの限定検証・読取レビュー合格を保全し、同じ修正差分を本体候補へ適用済み。本体候補の全体合格は再検証待ち。",
+    "patch": "build/legacy-adjust-compat/compatibility.patch",
+    "native_source_applied": true,
+    "legacy_ops_fixed_cases": 772,
+    "ops_passed": true,
+    "legacy_not_yet_ported_refusals_preserved": 2,
+    "python_filter_settings": 155,
+    "filter_tables": 100,
+    "filter_exceptions": 55,
+    "filters_passed": true,
+    "native_exposure_controls": [
+      "全3x256 identity",
+      "gamma文字列NaN拒否",
+      "未知parameter拒否"
+    ],
+    "source_before_after_mismatches": [],
+    "evidence": [
+      "build/legacy-adjust-compat/contract-result.json",
+      "build/legacy-adjust-compat/contract-red-qt.txt",
+      "build/legacy-adjust-compat/contract-green-qt.txt",
+      "build/legacy-adjust-compat/filters-result.json",
+      "build/legacy-adjust-compat/filters-green-qt.txt"
+    ],
+    "review": "build/legacy-adjust-compat/review.json",
+    "review_status": "passed-copy-only",
+    "review_sha256": "426353f1e64813c5bb2d67b9d74c1cc145d073f750fc59518a01f139b05f125f",
+    "review_current_pins_match": false,
+    "python_equal_ops_cases": 770,
+    "review_scope": "修正コピー差分と保存済み限定証跡の読取確認。適用後候補の全ASan/UBSan・Windows実検証は未認定。",
+    "delegation": "deleg_75545572",
+    "applied_to_main_candidate": true,
+    "application_evidence": "build/legacy-adjust-compat/applied-result.json",
+    "review_original_pins_matched_before_application": true
+  },
+  "review_notes_resolved_in_scoped_cli": {
+    "legacy_four_guards": "16/32bit各4種の拒否・別頁正常・元bytes/頁不変・doctorが全8組合格。",
+    "proof_pixel_assertions": "修正後正式CLIで16/32bitともprint/proof中心画素を必須assert。全出力/全画素同等性の認定ではない。"
+  },
+  "linux_repaired_full_live": {
+    "updated_at": "2026-10-06T17:27:22.963588+09:00",
+    "status": "historical-completed-before-review-fixes",
+    "asan_passed": true,
+    "asan_selected": 58,
+    "asan_ctest_exit": 0,
+    "asan_result": "build/photocraft-full-repaired/linux-asan/result.json",
+    "asan_cli23": "not_run in feature phase; separate 23-case check queued",
+    "release_finished_tests": 34,
+    "release_failed_tests": 0,
+    "release_current_test": "test_contract_ops_cli",
+    "frozen_source_mismatches": []
+  },
+  "post_full_supplemental": {
+    "status": "historical-parent-timeout",
+    "scope": "既存CLI23両構成を変更せず実行し、実xcb/全画素GUIを確認",
+    "owned_background_session": "proc_d56c617bda55",
+    "result": "build/photocraft-full-repaired/after-full-gui-execution.json",
+    "cpu_limit": "1",
+    "memory_limit": "2g",
+    "source_frozen_until_completion": true,
+    "note": "保存済みCLI23両構成成功、親driverは1199秒timeout。製品失敗と親失敗を分離。新修正sourceの合格ではない。"
+  },
+  "review_fixes": {
+    "review": {
+      "delegation_id": "deleg_af2c98d1",
+      "status": "running",
+      "record": "build/photocraft-review-fixes/review-package.json"
+    },
+    "initial_review_passed": false,
+    "open_findings": [
+      "L01",
+      "L02"
+    ],
+    "red": "build/photocraft-review-fixes/red-selection-corrected/execution.json",
+    "red_status": "passed-expected-red",
+    "red_cases": {
+      "L01": 8,
+      "L02": 8
+    },
+    "product_changes_applied": true,
+    "green_status": "running",
+    "green_process": "proc_242e8d2c9198",
+    "green_record": "build/photocraft-review-fixes/green-release-v1/execution.json",
+    "green_passed": false,
+    "rereview": "not_run",
+    "status": "product-fixed-release-green-asan-running-review-running",
+    "red_compiled": true,
+    "red_failed_cases": {
+      "page_target": 8,
+      "inactive_precision": 8
+    },
+    "green_release": {
+      "record": "build/photocraft-review-fixes/green-release-v2/execution.json",
+      "qt_passed": 33,
+      "qt_failed": 0,
+      "qt_skipped": 0,
+      "oom_kill_delta": 0
+    },
+    "green_asan": {
+      "record": "build/photocraft-review-fixes/green-asan-v1/execution.json",
+      "status": "running",
+      "session_id": "proc_fd4638a304f2",
+      "ctest_count": 8
+    },
+    "test_corrections": [
+      "save_now(void)→wait_saved",
+      "go_to_pageはstored番号。移動後current_page番号もassert"
+    ],
+    "attempts_preserved": [
+      "red-compile-attempt",
+      "red-save-now-compile-attempt",
+      "red",
+      "green-release-v1"
+    ]
+  },
+  "updated_at": "2026-10-06T23:24:04.901851+09:00",
+  "last_user_report_at": "2026-10-06T23:24:04.901851+09:00",
+  "review_corrections": {
+    "status": "passed-limited-v1-current-source",
+    "formal_red": "build/photocraft-review-fixes/red-selection-corrected/execution.json",
+    "original_two_review": "build/photocraft-review-fixes/review-package.json",
+    "original_two_review_bound_to_37_pins": true,
+    "cache_red": "build/photocraft-review-fixes/cache-test-red/execution.json",
+    "cache_release": "build/photocraft-review-fixes/cache-green-release/execution.json",
+    "cache_release_qt": {
+      "passed": 144,
+      "failed": 0,
+      "skipped": 0,
+      "blacklisted": 0
+    },
+    "cache_asan": "build/photocraft-review-fixes/cache-green-asan/execution.json",
+    "supplement_review": "build/photocraft-review-fixes/review-cache.json",
+    "cache_scope": "valid合成Documentのimmutable color_raster更新。正式CLI既存層bytes置換は未実装。",
+    "integrated": false,
+    "complete": false,
+    "v1_audit": "docs/cpp-migration/photocraft/V1-ACCEPTANCE.json",
+    "review_manifest": "build/photocraft-review-fixes/review-input-cache.json",
+    "debug": "current-debug-v2: 7CTest/171Qt, zero fail/skip/blacklist/OOM"
+  }
+}

@@ -14,9 +14,9 @@
 namespace genko::core {
 
 // filters.ADJUSTMENTS, in Python's order.
-inline constexpr std::array<std::string_view, 9> kAdjustments{"levels",       "curve",   "hue",
+inline constexpr std::array<std::string_view, 10> kAdjustments{"levels",       "curve",   "hue",
                                                               "invert",       "posterize", "threshold",
-                                                              "gradient_map", "bitonal", "brightness_contrast"};
+                                                              "gradient_map", "bitonal", "brightness_contrast", "exposure"};
 
 // What an adjustment does to the picture: tables of 256 values each, as Image.point takes them (it keeps each value in
 // 0..255).

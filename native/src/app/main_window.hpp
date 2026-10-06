@@ -173,6 +173,7 @@ private:
     void name_ok();
     void point_width(double factor);
     void pick_colour();
+    void exposure_dialog();
     void ask_zoom();
     void jump(int delta);
     void apply_stage(const QString& key);

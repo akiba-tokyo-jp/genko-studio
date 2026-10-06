@@ -3,6 +3,7 @@
 genko_library(genko_render
   SOURCES
     image.cpp
+    color_canvas.cpp
     draw.cpp
     png.cpp
     bmp.cpp

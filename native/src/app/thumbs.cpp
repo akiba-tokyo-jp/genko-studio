@@ -113,6 +113,10 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
         if (layer.placement_mm) look["placement"] = core::rect_to_json(*layer.placement_mm);
         h.add(look);
         h.add_bytes(layer.raster_png, &layer.raster_memo);
+        if (layer.color_raster) {
+            h.add(std::string_view("native-color-raster/1"));
+            h.add_bytes(layer.color_raster, nullptr);
+        }
         if (layer.mask) {
             h.add(Json(layer.mask->enabled));
             h.add_bytes(layer.mask->png, &layer.mask->memo);

@@ -10,6 +10,8 @@
 #include <utility>
 
 #include "core/covers.hpp"
+#include "core/color_raster.hpp"
+#include "core/exposure.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/strokes.hpp"
@@ -50,13 +52,13 @@ constexpr std::array<std::string_view, 19> kLineKeys{"id", "page_index", "text",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "path", "emphasis_runs", "style_runs", "style",
                                                      "tails"};
-constexpr std::array<std::string_view, 41> kLayerKeys{
+constexpr std::array<std::string_view, 42> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
     "color_prints", "screen", "source", "strokes_blob", "stroke_count",
     // placed layers only
-    "frame_id", "placement_mm", "fit", "clip_to", "finish"};
+    "frame_id", "placement_mm", "fit", "clip_to", "finish", "color_raster"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 2> kMaskKeys{"enabled", "asset"};
 constexpr std::array<std::string_view, 9> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po"};
@@ -101,6 +103,7 @@ private:
     fs::path dir_;
     LoadOptions options_;
     LoadReport& report_;
+    std::size_t color_bytes_ = 0;
     std::unordered_set<std::string> nonfinite_;
     std::unordered_map<std::string, core::StrokeListPtr> blobs_;  // strokes read in this load (Python's blobcache)
 
@@ -571,6 +574,24 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     const auto kind = kind_value.is_string() ? core::layer_kind_from(kind_value.get<std::string>()) : std::nullopt;
     if (!kind) format_error(at_key(at, "kind"), core::py_repr(kind_value) + " is not a valid LayerKind");
     layer.kind = *kind;
+    if (const Json* m = find(data, "color_raster")) {
+        const auto here = at_key(at, "color_raster");
+        std::string ref;
+        try {
+            if (!m->is_object() || !m->contains("asset") || !(*m)["asset"].is_string())
+                throw core::Error("format", "color raster metadata must name an asset");
+            ref = (*m)["asset"].get<std::string>();
+            const auto maximum = std::min<std::size_t>(16 + core::kColorRasterMaxPixels*16,
+                                                       core::kColorRasterBookBytes-color_bytes_);
+            auto bytes = store_.get_bytes(ref, core::kColorRasterSuffix, maximum);
+            if (bytes) color_bytes_ += bytes->size();
+            if (!bytes || AssetStore::ref(*bytes) != ref) throw core::Error("format", "color raster hash mismatch");
+            core::ColorRasterView(*bytes).check_metadata(*m);
+            layer.color_raster = std::make_shared<const std::string>(std::move(*bytes));
+        } catch (const core::Error& error) {
+            issue("broken_asset", here, ref, error.what());
+        }
+    }
     layer.visible = asis_bool(data, "visible", true, at);
     layer.exportable = asis_bool(data, "exportable", *role != core::LayerRole::Name && *role != core::LayerRole::Draft, at);
     {
@@ -896,6 +917,8 @@ core::Document Reader::migrate(const Json& payload) {
             issue("unknown_feature", "/features", {}, "this build does not know the feature " + core::py_repr_str(feature));
         }
     }
+    try { core::validate_color_document(doc); }
+    catch (const core::Error& error) { issue("broken_asset", "/pages", {}, error.what()); }
     return doc;
 }
 
@@ -950,7 +973,7 @@ Json LoadReport::to_json() const {
 
 bool is_known_top_key(std::string_view key) { return in(kTopKeys, key); }
 bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }
-bool is_known_feature(std::string_view) { return false; }
+bool is_known_feature(std::string_view feature) { return feature == core::kColorRasterFeature || feature == core::kExposureFeature; }
 
 int project_version(const Json& payload) {
     std::int64_t version = 1;

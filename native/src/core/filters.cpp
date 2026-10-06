@@ -1,4 +1,5 @@
 #include "core/filters.hpp"
+#include "core/exposure.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -249,6 +250,15 @@ Adjustment gradient_map(const Json& params) {
 }  // namespace
 
 Adjustment adjustment(std::string_view kind, const Json& params) {
+    if (kind == "exposure") {
+        const auto exposure = Exposure::parse(params);
+        Adjustment out;
+        for (int i = 0; i < 256; ++i) {
+            const int value = static_cast<int>(std::lround(linear_to_srgb(exposure.apply(srgb_to_linear(i/255.0)))*255));
+            for (auto& table : out.tables) table.push_back(value);
+        }
+        return out;
+    }
     if (kind == "hue") {
         // int(float(params.get("shift", 30))) % 360 (a whole float is an int's value: its float % 360 is exact)
         const double shift_float = to_float(get_or(params, "shift", Json(30)));

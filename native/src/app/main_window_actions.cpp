@@ -4,6 +4,8 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDialogButtonBox>
+#include <QPushButton>
+#include <QVBoxLayout>
 #include <QDir>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
@@ -36,6 +38,7 @@
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "core/exposure.hpp"
 #include "core/pynum.hpp"
 #include "render/image.hpp"
 #include "render/page.hpp"
@@ -108,6 +111,7 @@ void MainWindow::build_actions() {
     make("act_open", QStringLiteral("開く…"), [this] { open_book(); }, keys({std_key(Std::Open)}));
     make("act_save", QStringLiteral("保存"), [this] { save(); }, keys({std_key(Std::Save)}), QStringLiteral("変更は自動で保存されます。今すぐ書き込むときに使います"));
     make("act_save_as", QStringLiteral("別の場所に保存…"), [this] { save_as(); }, keys({std_key(Std::SaveAs)}));
+    make("act_exposure", QStringLiteral("露光量の調整層…"), [this] { exposure_dialog(); });
     make("act_undo", QStringLiteral("元に戻す"), [this] { undo(); }, keys({std_key(Std::Undo)}));
     make("act_redo", QStringLiteral("やり直す"), [this] { redo(); }, keys({std_key(Std::Redo), QKeySequence(QStringLiteral("Ctrl+Y"))}));
     make("act_fit", QStringLiteral("全体を表示"), [c] { c->glide([c] { c->fit_page(); }); }, keys({QKeySequence(QStringLiteral("Ctrl+0"))}));
@@ -286,6 +290,7 @@ void MainWindow::build_menus() {
     for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_frame"}) tools->addAction(action(name));
     tools->addSeparator();
     tools->addAction(action("act_color"));
+    tools->addAction(action("act_exposure"));
     tools->addAction(action("act_point_wider"));
     QMenu* pages = bar->addMenu(QStringLiteral("ページ"));
     for (const char* name : {"act_add_page", "act_dup_page", "act_del_page"}) pages->addAction(action(name));
@@ -603,6 +608,58 @@ void MainWindow::border_kind(const QString& kind) {
     Json style = frame->line && frame->line->is_object() ? *frame->line : Json::object();
     style["kind"] = kind.toStdString();
     set_selected_frame(Json::object({{"line", style == Json::object({{"kind", "solid"}}) ? Json(nullptr) : style}}));
+}
+
+void MainWindow::exposure_dialog() {
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    if (!current_page() || !origin->read_only_reason().empty()) return;
+    const core::Layer* target = target_layer();
+    const bool editing = target && target->kind == core::LayerKind::Adjust && target->adjust && target->adjust->value("kind", Json()) == "exposure";
+    const std::string id = editing ? target->id : std::string();
+    core::Exposure now;
+    try {
+        if (editing) now = core::Exposure::parse(*target->adjust);
+    } catch (const std::exception&) {
+        flash(QStringLiteral("露光量の値が不正なため調整できません。原稿は変更していません。"), 8000);
+        return;
+    }
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("exposure_dialog"));
+    dialog.setWindowTitle(editing ? QStringLiteral("露光量の調整") : QStringLiteral("露光量の調整層を追加"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* explanation = new QLabel(QStringLiteral("元画像の画素は変更しません。調整層より下の色を補正します。"));
+    explanation->setWordWrap(true);
+    layout->addWidget(explanation);
+    auto* form = new QFormLayout;
+    auto* ev = new QDoubleSpinBox;
+    ev->setObjectName(QStringLiteral("exposure_ev"));
+    ev->setRange(-20, 20); ev->setDecimals(3); ev->setSingleStep(.1); ev->setValue(now.stops);
+    auto* offset = new QDoubleSpinBox;
+    offset->setObjectName(QStringLiteral("exposure_offset"));
+    offset->setRange(-.5, .5); offset->setDecimals(3); offset->setSingleStep(.01); offset->setValue(now.offset);
+    auto* gamma = new QDoubleSpinBox;
+    gamma->setObjectName(QStringLiteral("exposure_gamma"));
+    gamma->setRange(.01, 9.99); gamma->setDecimals(3); gamma->setSingleStep(.1); gamma->setValue(now.gamma);
+    form->addRow(QStringLiteral("露光量（EV）"), ev);
+    form->addRow(QStringLiteral("オフセット"), offset);
+    form->addRow(QStringLiteral("ガンマ"), gamma);
+    layout->addLayout(form);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText(editing ? QStringLiteral("適用") : QStringLiteral("調整層を追加"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("キャンセル"));
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.resize(400, dialog.sizeHint().height());
+    if (ask::exec(&dialog) != QDialog::Accepted || !modal_target_unchanged(origin, snapshot, page_index)) return;
+    const Json spec = {{"kind", "exposure"}, {"exposure", ev->value()}, {"offset", offset->value()}, {"gamma", gamma->value()}};
+    Json op = {{"op", editing ? "set_layer" : "add_layer"},
+               {"page", snapshot->page(static_cast<std::size_t>(page_index)).index.json()}, {"adjust", spec}};
+    if (editing) op["id"] = id;
+    else { op["layer"] = "finish"; op["kind"] = "adjust"; op["title"] = "露光量"; }
+    apply_ops(Json::array({op}));
 }
 
 void MainWindow::border_colour() {

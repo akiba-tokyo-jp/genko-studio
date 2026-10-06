@@ -217,6 +217,43 @@ std::string read_file(const fs::path& path) {
 #endif
 }
 
+std::string read_file_bounded(const fs::path& path, std::size_t maximum) {
+#ifdef _WIN32
+    Handle file(open_read(path));
+    if (!file.valid()) fail(errno_from_windows(GetLastError()), path);
+    if (GetFileType(file.h) != FILE_TYPE_DISK) throw core::Error("format", "bounded asset must be a regular file");
+    LARGE_INTEGER length{};
+    if (!GetFileSizeEx(file.h, &length)) fail(errno_from_windows(GetLastError()), path);
+    if (length.QuadPart < 0 || static_cast<std::uintmax_t>(length.QuadPart) > maximum)
+        throw core::Error("memory", "bounded asset read limit exceeded");
+    const auto size = static_cast<std::size_t>(length.QuadPart);
+    const auto read = [&](char* out, std::size_t count) { return read_some(file.h, out, count, path); };
+#else
+    Fd file;
+    file.fd = open_retry(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (file.fd < 0) fail(errno, path);
+    struct stat st{};
+    if (::fstat(file.fd, &st) != 0) fail(errno, path);
+    if (!S_ISREG(st.st_mode)) throw core::Error("format", "bounded asset must be a regular file");
+    if (st.st_size < 0 || static_cast<std::uintmax_t>(st.st_size) > maximum)
+        throw core::Error("memory", "bounded asset read limit exceeded");
+    const auto size = static_cast<std::size_t>(st.st_size);
+    const auto read = [&](char* out, std::size_t count) { return read_some(file.fd, out, count, path); };
+#endif
+    // Allocate exactly the checked size. Content-addressed assets must not change
+    // while being read; never append a growth discovered after this allocation.
+    std::string out(size, '\0');
+    std::size_t at = 0;
+    while (at < size) {
+        const auto got = read(out.data()+at, std::min(kChunk, size-at));
+        if (!got) throw core::Error("format", "asset shrank during bounded read");
+        at += got;
+    }
+    char extra = 0;
+    if (read(&extra, 1)) throw core::Error("format", "asset grew during bounded read");
+    return out;
+}
+
 void sync_dir(const fs::path& dir) {
 #ifdef _WIN32
     (void)dir;  // (NTFS keeps its folders consistent; MoveFileEx is asked to write through)

@@ -42,6 +42,7 @@ else()
   set_source_files_properties(unit/geometry_failure.c unit/split_failure.c PROPERTIES COMPILE_OPTIONS "-w;-fwrapv;-ffp-contract=off")
 endif()
 genko_test(test_png SOURCES unit/test_png.cpp DEPS genko_test_support genko_render LABELS unit)
+genko_test(test_color_raster SOURCES unit/test_color_raster.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit)
 genko_test(test_render_page SOURCES unit/test_render_page.cpp DEPS genko_render LABELS unit)
 # Tones, effect lines and rulers (M3-B).
 genko_test(test_rulers SOURCES unit/test_rulers.cpp DEPS genko_test_support genko_render_ops LABELS unit)
@@ -133,6 +134,7 @@ genko_test(test_ops_e2e SOURCES e2e/test_ops_e2e.cpp DEPS genko_test_support LAB
 
 # The desktop app (M2-G1): the editing session alone, then the windows on the offscreen platform (label gui).
 if(GENKO_BUILD_APP)
+  genko_test(test_gui_color SOURCES gui/test_gui_color.cpp DEPS genko_app GUI TIMEOUT 300)
   genko_test(test_session SOURCES unit/test_session.cpp DEPS genko_app LABELS unit TIMEOUT 300)
   # the pen: Python's packing of mouse and tablet input, and the live line's pixels against the renderer's per brush
   genko_test(test_gui_pen SOURCES gui/test_gui_pen.cpp DEPS genko_app GUI TIMEOUT 1200)

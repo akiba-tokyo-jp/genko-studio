@@ -32,7 +32,7 @@ public:
     void put_known(std::string_view ref, std::string_view bytes, std::string_view suffix);
 
     // The bytes, or nothing when there is no such file.
-    std::optional<std::string> get_bytes(std::string_view ref, std::string_view suffix) const;
+    std::optional<std::string> get_bytes(std::string_view ref, std::string_view suffix, std::optional<std::size_t> maximum = {}) const;
 
     // Every stored file (not the temporary files of unfinished writes), sorted.
     std::vector<std::filesystem::path> all_files() const;

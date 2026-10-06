@@ -8,6 +8,8 @@
 #include <QTemporaryDir>
 
 #include <string>
+#include <set>
+#include <numeric>
 #include <vector>
 
 #include "core/command_bus.hpp"
@@ -98,8 +100,16 @@ private slots:
             ++(want.contains("tables") ? tables : errors);
         }
         QCOMPARE(failures, 0);
-        // every adjustment, each with good settings and with bad ones (invert has none that can fail)
+        // Python's reference kinds retain all original good/bad coverage. Native-only extensions
+        // are classified explicitly and tested here without inventing Python reference cases.
+        std::set<std::string> python_kinds;
+        std::set<std::string> native_kinds;
+        for (const Json& c : cases_) python_kinds.insert(c["kind"].get<std::string>());
         for (const std::string_view kind : core::kAdjustments) {
+            if (!python_kinds.contains(std::string(kind))) {
+                native_kinds.insert(std::string(kind));
+                continue;
+            }
             bool good = false;
             bool bad = false;
             for (const Json& c : cases_) {
@@ -108,6 +118,19 @@ private slots:
             }
             QVERIFY2(good && (bad || kind == "invert"), std::string(kind).c_str());
         }
+        QCOMPARE(core::kAdjustments.size() - native_kinds.size(), std::size_t(9));
+        QVERIFY(native_kinds == std::set<std::string>{"exposure"});
+        std::vector<int> identity(256);
+        std::iota(identity.begin(), identity.end(), 0);
+        const auto native_identity = core::adjustment("exposure", Json::object());
+        for (const auto& band : native_identity.tables) QCOMPARE(band, identity);
+        for (const Json& bad : {Json{{"gamma", "nan"}}, Json{{"unknown-key", 1}}}) {
+            bool refused = false;
+            try { (void)core::adjustment("exposure", bad); }
+            catch (const core::PyValueError&) { refused = true; }
+            QVERIFY(refused);
+        }
+        qInfo("native exposure: identity on all 3x256 entries and both invalid-input controls passed");
         qInfo("%d settings the same as Python: %d of them tables, %d an exception", tables + errors, tables, errors);
     }
 };

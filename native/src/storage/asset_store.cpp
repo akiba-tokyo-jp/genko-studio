@@ -72,11 +72,11 @@ void AssetStore::put_known(std::string_view ref_value, std::string_view bytes, s
     write_atomic(target, bytes);
 }
 
-std::optional<std::string> AssetStore::get_bytes(std::string_view ref_value, std::string_view suffix) const {
+std::optional<std::string> AssetStore::get_bytes(std::string_view ref_value, std::string_view suffix, std::optional<std::size_t> maximum) const {
     const fs::path target = path(ref_value, suffix);
     std::error_code ec;
     if (!fs::is_regular_file(target, ec)) return std::nullopt;
-    return read_file(target);
+    return maximum ? read_file_bounded(target, *maximum) : read_file(target);
 }
 
 std::vector<fs::path> AssetStore::all_files() const {

@@ -75,6 +75,7 @@ void register_frame_ops(OpRegistry& registry);
 void register_page_ops(OpRegistry& registry);
 void register_stroke_ops(OpRegistry& registry);
 void register_layer_ops(OpRegistry& registry);
+void register_color_ops(OpRegistry& registry);
 // Register the ops of M3-A that draw nothing (move_layers, group_layers, set_paper, set_timelapse, store_area,
 // forget_area: core/ops_arrange.cpp). The ones that draw are render's (render/ops_registry.hpp).
 void register_arrange_ops(OpRegistry& registry);

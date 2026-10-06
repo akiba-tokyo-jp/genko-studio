@@ -186,6 +186,7 @@ struct Layer {
     std::optional<Json> fill;
     std::optional<Json> adjust;
     std::optional<Json> effect;
+    Bytes color_raster;  // immutable native RGBA16/32 asset; never an 8-bit preview
     bool color_prints = false;
     std::optional<Json> screen;
 

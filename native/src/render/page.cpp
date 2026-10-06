@@ -22,6 +22,7 @@
 #include "core/pyops.hpp"
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
+#include "render/color_canvas.hpp"
 #include "render/effects.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
@@ -625,6 +626,9 @@ std::optional<Image> layer_pixels(const Ctx& ctx, const Layer& layer, const Box&
     std::optional<Image> raster;
     if (layer.kind == LayerKind::Placed) {
         skip_unported(ctx, "placed");  // (left out: as if it had no picture)
+    } else if (layer.color_raster) {
+        if (is_tone(layer)) throw NotYetPorted("high_precision_tone");
+        raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), ctx.size, area);
     } else if (layer.raster_png && !layer.raster_png->empty()) {
         raster = raster_part(layer.raster_png, ctx.size, area);
     }
@@ -783,6 +787,13 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         rgba.paste(Ink::with_alpha(rgb, 255), Box{0, 0, area.width(), area.height()});
     }
 
+    std::optional<ColorCanvas> precision;
+    if (std::any_of(page.layers.begin(), page.layers.end(), [print](const Layer& l) {
+            // Only sources participating in this render may change its compositing precision.
+            return l.color_raster && l.kind != LayerKind::Folder && l.visible &&
+                   (!print || (l.exportable && !guide_role(l.role)));
+        }))
+        precision.emplace(rgba);
     std::optional<Image> prev_alpha;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     const Image* panel = panel_mask ? &*panel_mask : nullptr;
@@ -804,13 +815,32 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (!layer.visible) continue;
         if (print && !layer.exportable) continue;
         if (guide_role(layer.role) && print) continue;
+        if (precision && layer.color_raster) {
+            if (is_tone(layer)) throw NotYetPorted("high_precision_tone");
+            if (layer.blend != "normal" || layer.mask || layer.effect || layer.screen || layer.color ||
+                !layer.patches.empty() || layer.stroke_count() || layer.panel_clip)
+                throw NotYetPorted("high_precision_layer_style");
+            precision->blend(core::ColorRasterView(*layer.color_raster), ctx.size, area, layer.opacity, layer.clip);
+            continue;
+        }
+        if (precision && layer.blend != "normal") throw NotYetPorted("high_precision_blend:"+layer.blend);
         if (is_tone(layer)) {  // tones sit in the layer order: a layer above can cover them
+            if (precision) throw NotYetPorted("high_precision_tone");
             const bool dots = (print && ctx.finish && ctx.dots) || screen_dots(ctx);
             rgba = tones::draw_layer(std::move(rgba), layer, tone_page(ctx), area, panel, dots);
             prev_alpha.reset();
             continue;
         }
         if (layer.kind == LayerKind::Adjust) {  // a correction layer changes what is under it
+            if (precision) {
+                if (!layer.adjust || !layer.adjust->contains("kind") || (*layer.adjust)["kind"] != "exposure")
+                    throw NotYetPorted("high_precision_adjustment");
+                std::optional<Image> mask;
+                if (layer.mask && layer.mask->enabled && layer.mask->png)
+                    mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+                precision->expose(core::Exposure::parse(*layer.adjust), layer.opacity, layer.clip, mask ? &*mask : nullptr);
+                continue;
+            }
             rgba = adjusted(ctx, std::move(rgba), layer, layer.clip && prev_alpha ? &*prev_alpha : nullptr, area);
             continue;
         }
@@ -819,7 +849,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             if (panel != nullptr && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *panel));
             raster = masked(ctx, layer, std::move(raster), area);
             const Image* clip = layer.clip && prev_alpha ? &*prev_alpha : nullptr;
-            rgba = blend_over(rgba, raster, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
+            if (precision) precision->blend(raster, layer.opacity, layer.clip);
+            else rgba = blend_over(rgba, raster, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
             prev_alpha = alpha_of(raster);
             continue;
         }
@@ -846,10 +877,11 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         Image picture = masked(ctx, layer, std::move(*raster), area);
         if (layer.color && !layer.color->empty() && (!print || layer.color_prints)) picture = tinted(picture, *layer.color);
         const Image* clip = layer.clip && prev_alpha ? &*prev_alpha : nullptr;
-        rgba = blend_over(rgba, picture, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
+        if (precision) precision->blend(picture, layer.opacity, layer.clip);
+        else rgba = blend_over(rgba, picture, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
         prev_alpha = alpha_of(picture);
     }
-    Image image = rgba.convert("RGB");
+    Image image = (precision ? precision->image() : rgba).convert("RGB");
 
     if (core::py_truthy(page.effects)) image = draw_effects(ctx, image, area);  // effect lines (M3-B)
     if (!print && core::py_truthy(page.prims)) draw_prims(image, area, ctx);  // 3D guides, never printed (M3-C)

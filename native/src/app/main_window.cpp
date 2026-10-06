@@ -501,6 +501,7 @@ void MainWindow::refresh_zoom() {
 }
 
 void MainWindow::refresh_actions() {
+    if (auto* exposure = action("act_exposure")) exposure->setEnabled(current_page() && session_->read_only_reason().empty());
     if (QAction* name_ok = action(QStringLiteral("act_name_ok"))) name_ok->setVisible(agent_book());  // (stages are for books made with agents)
 }
 

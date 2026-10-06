@@ -1661,6 +1661,11 @@ void use_book_brushes(const Document& doc) {
 
 core::OpFunction drawing(void (*op)(OpContext&)) {
     return [op](OpContext& c) {
+        if (op == merge_down || op == merge_layers || op == merge_visible || op == convert_layer) {
+            const auto& page = c.doc.page(core::require_page(c.doc, c.op));
+            if (std::any_of(page.layers.begin(), page.layers.end(), [](const Layer& layer) { return bool(layer.color_raster); }))
+                throw NotYetPorted("high-precision raster conversion or merge");
+        }
         use_book_brushes(c.doc);
         op(c);
     };

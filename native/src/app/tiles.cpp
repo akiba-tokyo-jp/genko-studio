@@ -62,7 +62,7 @@ bool same_layer_look(const core::Layer& a, const core::Layer& b) {
     }
     const bool masks = a.mask.has_value() == b.mask.has_value() && (!a.mask || (a.mask->png == b.mask->png && a.mask->enabled == b.mask->enabled));
     return masks && a.id == b.id && a.role == b.role && a.kind == b.kind && a.visible == b.visible && a.exportable == b.exportable &&
-           a.raster_png == b.raster_png && a.fill_rgb == b.fill_rgb && a.opacity == b.opacity && a.blend == b.blend && a.clip == b.clip &&
+           a.raster_png == b.raster_png && a.color_raster == b.color_raster && a.fill_rgb == b.fill_rgb && a.opacity == b.opacity && a.blend == b.blend && a.clip == b.clip &&
            a.lock_alpha == b.lock_alpha && a.panel_clip == b.panel_clip && a.panel_each == b.panel_each && a.tone == b.tone &&
            a.color == b.color && a.fill == b.fill && a.adjust == b.adjust && a.effect == b.effect && a.color_prints == b.color_prints &&
            a.screen == b.screen && a.asset == b.asset && a.region.has_value() == b.region.has_value() && a.angle == b.angle;

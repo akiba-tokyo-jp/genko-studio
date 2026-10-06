@@ -236,7 +236,9 @@ private slots:
         Studio studio;
         MainWindow* w = studio.window.get();
         QCOMPARE(expected().size(), std::size_t{52});
-        QCOMPARE(w->actions_by_name().size(), std::size_t{52});
+        // Preserve all 52 Python actions; the native exposure extension is tested separately.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{53});
+        QVERIFY(w->action("act_exposure"));
         for (const Expected& e : expected()) {
             const QString name = QString::fromLatin1(e.attribute);
             QAction* a = w->action(name);

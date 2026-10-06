@@ -4,6 +4,8 @@
 #include <vector>
 
 #include "core/error.hpp"
+#include "core/color_raster.hpp"
+#include "core/exposure.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/strokes.hpp"
@@ -99,6 +101,10 @@ Json layer_json(const core::Layer& layer, AssetStore& store) {
     out["clip"] = layer.clip;
     out["lock_alpha"] = layer.lock_alpha;
     out["parent_id"] = layer.parent_id;
+    if (layer.color_raster) {
+        const core::ColorRasterView view(*layer.color_raster);
+        out["color_raster"] = view.metadata(store.put_bytes(*layer.color_raster, core::kColorRasterSuffix));
+    }
     if (!layer.patches.empty()) {
         Json patches = Json::array();
         for (const auto& patch : layer.patches) {
@@ -263,7 +269,13 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     if (!core::is_book_id(doc.book_id)) {
         throw core::Error("value", "the book has no valid book_id (32 hex digits): " + core::py_repr_str(doc.book_id));
     }
+    core::validate_color_document(doc);
     std::vector<std::string> features = doc.features;
+    for (const auto& page : doc.pages) for (const auto& layer : page->layers) {
+        if (layer.color_raster) features.emplace_back(core::kColorRasterFeature);
+        if (layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->value("kind", core::Json()) == "exposure")
+            features.emplace_back(core::kExposureFeature);
+    }
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

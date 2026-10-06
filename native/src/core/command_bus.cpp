@@ -10,6 +10,7 @@
 #include "core/covers.hpp"
 #include "core/ops_schema.hpp"
 #include "core/ops_util.hpp"
+#include "core/color_raster.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 
@@ -251,6 +252,7 @@ void register_core_ops(OpRegistry& registry) {
     register_page_ops(registry);
     register_stroke_ops(registry);
     register_layer_ops(registry);
+    register_color_ops(registry);
     register_ruler_ops(registry);
     register_arrange_ops(registry);
 }
@@ -765,6 +767,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                 }
                 OpContext context{work, *current, actor};
                 (*function)(context);
+                validate_color_document(work);
                 report = std::move(context.report);
             }
         } catch (const ApplyError&) {

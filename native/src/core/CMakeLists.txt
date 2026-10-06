@@ -21,6 +21,9 @@ genko_library(genko_core
     base64.cpp
     geometry.cpp
     model.cpp
+    color_raster.cpp
+    exposure.cpp
+    ops_color.cpp
     frames.cpp
     strokes.cpp
     covers.cpp

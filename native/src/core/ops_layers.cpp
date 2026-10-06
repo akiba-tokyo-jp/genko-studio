@@ -19,7 +19,10 @@ namespace {
 // ops._adjust_spec
 Json adjust_spec(const Json& raw) {
     std::string names;
-    for (const std::string_view name : kAdjustments) names += (names.empty() ? "" : ", ") + std::string(name);
+    // Preserve Python's legacy invalid-input response while accepting native exposure below.
+    constexpr std::array<std::string_view, 9> legacy_names{"levels", "curve", "hue", "invert", "posterize",
+        "threshold", "gradient_map", "bitonal", "brightness_contrast"};
+    for (const std::string_view name : legacy_names) names += (names.empty() ? "" : ", ") + std::string(name);
     const Json* kind = get(raw, "kind");
     const bool known = raw.is_object() && kind != nullptr && kind->is_string() &&
                        std::find(kAdjustments.begin(), kAdjustments.end(), kind->get<std::string>()) != kAdjustments.end();

@@ -1,0 +1,256 @@
+[
+  {
+    "depth": 32,
+    "steps": [
+      [
+        "layer.newAdjustmentLayer.exposure",
+        {
+          "exposure": 1.0
+        }
+      ]
+    ],
+    "exit_code": 0,
+    "output": [
+      {
+        "command": "layer.newAdjustmentLayer.exposure",
+        "result": {
+          "layer": 3
+        }
+      },
+      {
+        "command": "document.inspect",
+        "result": {
+          "activeLayer": 3,
+          "canRedo": false,
+          "canUndo": true,
+          "channels": {
+            "alpha": [],
+            "colors": [
+              {
+                "name": "Red",
+                "visible": true
+              },
+              {
+                "name": "Green",
+                "visible": true
+              },
+              {
+                "name": "Blue",
+                "visible": true
+              }
+            ],
+            "composite": "RGB",
+            "compositeVisible": true,
+            "quickMask": null,
+            "target": {
+              "kind": "composite"
+            }
+          },
+          "depth": 32,
+          "hasSelection": false,
+          "height": 8,
+          "history": [
+            "Open",
+            "New Exposure Layer"
+          ],
+          "isolatedLayers": [],
+          "lastAppliedComp": null,
+          "layerComps": [],
+          "layers": [
+            {
+              "adjustment": {
+                "Exposure": {
+                  "exposure": 1.0,
+                  "gamma": 1.0,
+                  "offset": 0.0
+                }
+              },
+              "blend": "Normal",
+              "bounds": null,
+              "clipped": false,
+              "fill": 1.0,
+              "hasMask": false,
+              "id": 3,
+              "kind": "Adjustment",
+              "linkGroup": null,
+              "name": "Exposure 1",
+              "opacity": 1.0,
+              "selected": true,
+              "visible": true
+            },
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "clipped": false,
+              "fill": 1.0,
+              "hasMask": false,
+              "id": 2,
+              "kind": "Pixel",
+              "linkGroup": null,
+              "name": "Background",
+              "opacity": 1.0,
+              "selected": false,
+              "visible": true
+            }
+          ],
+          "measurement": {
+            "count": 0,
+            "countGroups": 0,
+            "ruler": null,
+            "scale": "1 pixels = 1.0000 pixels"
+          },
+          "mode": "Rgb",
+          "name": "Untitled",
+          "notes": [],
+          "quickMask": false,
+          "resolution": 72.0,
+          "revision": 2,
+          "selectedLayers": [
+            3
+          ],
+          "selectionBounds": null,
+          "timeline": null,
+          "variables": null,
+          "width": 8
+        }
+      }
+    ],
+    "stderr": "",
+    "scope": "upstream functional probe, NOT Genko verification"
+  },
+  {
+    "depth": 16,
+    "steps": [
+      [
+        "layer.smartObjects.convertToSmartObject",
+        {}
+      ],
+      [
+        "filter.blur.gaussianBlur",
+        {
+          "radius": 2.0
+        }
+      ]
+    ],
+    "exit_code": 0,
+    "output": [
+      {
+        "command": "layer.smartObjects.convertToSmartObject",
+        "result": {
+          "layer": 4
+        }
+      },
+      {
+        "command": "filter.blur.gaussianBlur",
+        "result": {
+          "filter": {
+            "filter": "gaussianBlur",
+            "radius": 2.0
+          },
+          "layer": 4
+        }
+      },
+      {
+        "command": "document.inspect",
+        "result": {
+          "activeLayer": 4,
+          "canRedo": false,
+          "canUndo": true,
+          "channels": {
+            "alpha": [],
+            "colors": [
+              {
+                "name": "Red",
+                "visible": true
+              },
+              {
+                "name": "Green",
+                "visible": true
+              },
+              {
+                "name": "Blue",
+                "visible": true
+              }
+            ],
+            "composite": "RGB",
+            "compositeVisible": true,
+            "quickMask": null,
+            "target": {
+              "kind": "composite"
+            }
+          },
+          "depth": 16,
+          "hasSelection": false,
+          "height": 8,
+          "history": [
+            "Open",
+            "Convert to Smart Object",
+            "Gaussian Blur"
+          ],
+          "isolatedLayers": [],
+          "lastAppliedComp": null,
+          "layerComps": [],
+          "layers": [
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "clipped": false,
+              "fill": 1.0,
+              "hasMask": false,
+              "id": 4,
+              "kind": "Smart Object",
+              "linkGroup": null,
+              "name": "Layer 0",
+              "opacity": 1.0,
+              "selected": true,
+              "smartFilters": [
+                {
+                  "blend": "Normal",
+                  "command": "filter.blur.gaussianBlur",
+                  "opacity": 1.0,
+                  "params": {
+                    "radius": 2.0
+                  },
+                  "visible": true
+                }
+              ],
+              "smartFiltersEnabled": true,
+              "visible": true
+            }
+          ],
+          "measurement": {
+            "count": 0,
+            "countGroups": 0,
+            "ruler": null,
+            "scale": "1 pixels = 1.0000 pixels"
+          },
+          "mode": "Rgb",
+          "name": "Untitled",
+          "notes": [],
+          "quickMask": false,
+          "resolution": 72.0,
+          "revision": 3,
+          "selectedLayers": [
+            4
+          ],
+          "selectionBounds": null,
+          "timeline": null,
+          "variables": null,
+          "width": 8
+        }
+      }
+    ],
+    "stderr": "",
+    "scope": "upstream functional probe, NOT Genko verification"
+  }
+]

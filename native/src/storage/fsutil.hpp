@@ -52,6 +52,8 @@ void rename_new(const std::filesystem::path& from, const std::filesystem::path& 
 // The whole file. Throws core::Error("not_found") when it does not exist and core::Error("io") otherwise, with
 // Python's message ("[Errno 2] No such file or directory: 'book.genko/project.json'").
 std::string read_file(const std::filesystem::path& path);
+// Immutable regular asset: size checked on the opened handle; growth/shrinkage is refused.
+std::string read_file_bounded(const std::filesystem::path& path, std::size_t maximum);
 
 // Python's OSError text for an errno and a path: "[Errno 13] Permission denied: '…'".
 std::string os_error_text(int error_number, const std::filesystem::path& path);

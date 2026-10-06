@@ -1,0 +1,139 @@
+{
+  "status": "passed-v1-scope",
+  "scope": "RGBA16/32素材・露光量基盤と4退行の限定V1。PhotoCraft全機能・M2/M3全体・V2・M7完成ではない",
+  "review_file_count": 39,
+  "coverage_negative_controls": 41,
+  "source_pins": {
+    "native/src/app/main_window.cpp": "72de5f7fd54a3c6e51a646e41c98048ebc5b3c2c4a95db38e1b45ae677e39f35",
+    "native/src/app/main_window.hpp": "dd8c2daba4e68da240a453c0bde22a43e3ebfb07088e09418a0f4f79846d165a",
+    "native/src/app/main_window_actions.cpp": "b42982ad44842cf84e3045c9834129e5f937f17fd89a181124ed1e5ca32762b2",
+    "native/src/app/thumbs.cpp": "3b2e4ef3e88ff3c2b419a4eb117fc99221ada28c6e9e59d4dcde642eff03df29",
+    "native/src/app/tiles.cpp": "b7a0078d25a266740bad30fb96cde1c8c3cef6999d3b90301b9a654c7a0bc2e7",
+    "native/src/core/CMakeLists.txt": "4e86c9fcbddcb7dc753f92d315bc2ed891b9921b3d7d9f74d2fe872a2728f33b",
+    "native/src/core/color_raster.cpp": "bdf70560b8d771b64f121d1372c34a8abc67a8d317a245ec8a16d32b2d9a73bf",
+    "native/src/core/color_raster.hpp": "5e273ec5b378c405f73ba9af3d6a5d11fc26a6283b92758254152d5d62beb672",
+    "native/src/core/command_bus.cpp": "4661f9ad99227da76b12734b549c63e01b33f605192668c161cb3600685d6b1b",
+    "native/src/core/exposure.cpp": "59a15a44afd98b677b02c49425e8138cc344a0df83fe29b3c76ac5949d417e9e",
+    "native/src/core/exposure.hpp": "3200b7494998f4481c30b6761ce74be9a95becdd2236073cc9e30f2863c5cd42",
+    "native/src/core/filters.cpp": "035dad55247a32feb14bfc7fb750169c685d88c85b4651c88d0ce320d4651c91",
+    "native/src/core/filters.hpp": "4afc58e5356b705f2e79c4233cf76969a66821e8cd515d94206d5cb27190f789",
+    "native/src/core/model.hpp": "35b1bfba22fe0e600fe5f0ce0a34aa1d2a6bd3b80cb2c5c960a1ecad26a49db4",
+    "native/src/core/ops_color.cpp": "fd0f46bdf2d26becfad4dac4541488e52502e26950e10bdb6c7409ba590d26ed",
+    "native/src/core/ops_layers.cpp": "3b33694c1f8a748ecd7dfe34a24a323c32feac0885c72b767272d996623a7f70",
+    "native/src/core/ops_util.hpp": "8ac86f3f88827c0e889a2b90a6fb2fc0fdfa6ce0c0cec90c67ed3018c4bb0005",
+    "native/src/render/CMakeLists.txt": "6ef5eaa1fe6e69d7d6553324c81b9ab740ea2234d96b0b930e57c312cdc2d4bb",
+    "native/src/render/color_canvas.cpp": "34567209e646ab4f07259f29e45cdeef4f4dd8ba54ceb1bddf9f2077e24c4213",
+    "native/src/render/color_canvas.hpp": "93501e879a4317cd6176c1f97709e7832801affe9484cf4b2371189d8eccf1fa",
+    "native/src/render/page.cpp": "97376de77e2fdca2e10f2533baa126722b6037ac8dd13de87f79724c1c8e86fe",
+    "native/src/render/raster_ops.cpp": "5490687e9aa37726c24213c438b61d862fe15548f44a54d018b3f3710d745878",
+    "native/src/storage/asset_store.cpp": "6346f37012e59d955a7aaaf15b778a469b8dc70d607e309403853b9af471216e",
+    "native/src/storage/asset_store.hpp": "1e45689348c6118a477a9354a43b207e07cb31f286130ccc89549ad165839a24",
+    "native/src/storage/fsutil.cpp": "dba7d24fe173a74a424ed78fc830030e48f6b5282ed6353c559e463cb6f9a39a",
+    "native/src/storage/fsutil.hpp": "98c2c913c6dc4776c2f639f94fc806eb7c2ce4224bd181534453787fd9354173",
+    "native/src/storage/reader.cpp": "e930149b32b7ad168e6f10bae00f5ddff4a131c27ff923a420a42d6ce0bf602f",
+    "native/src/storage/writer.cpp": "986e9abce89c01b6f690a6839527a68e20f289904ac5dabccd3e60f3bf542236",
+    "native/tests/CMakeLists.txt": "c6fc367d0c91c982bd948004fc5f5858367ca7a6b3b9da5d67077a598bf71f7d",
+    "native/tests/contract/test_contract_filters.cpp": "dbb85e17022f8a081951ac88a7b32623c4c03a034246f9ce4dcbc58e37f9c365",
+    "native/tests/gui/test_gui_actions.cpp": "c1b1280cf787867309e63fa43881207f142082baeb544acbd931f264291190cc",
+    "native/tests/gui/test_gui_color.cpp": "17c400a6d2765b87489791c627af55a9678526b1cb388620596c96c753c48be8",
+    "native/tests/unit/test_color_raster.cpp": "cbbb0774c48ae2912b16f38407baca44527f99de6af7b93e0e21d6d64e8469c8",
+    "native/third_party/photocraft/LICENSE-MIT": "1a8f66d8a86b146f5336fa0d4b1186576c8aa98e60823080c85c7811cfd810af",
+    "native/third_party/photocraft/NOTICE.md": "2d79244aa02ada6a8e0e94d30d6e1caa38dc2f0f46055b6947361e2f961971ec",
+    "tools/acceptance/photocraft_growth_probe.c": "73874b928efcd1b68f271b535404b99d748ced4c2e09d44db73269157af37e24",
+    "tools/acceptance/photocraft_gui_build.py": "9654016593bfb72244c2e3ef25a28d7202a75583bf4ddc1138b923be21748644",
+    "tools/acceptance/photocraft_gui_settled_probe.py": "c33fc5089da695f01be1c6e7b20b4f090dcd25041b32cc6b0718f5a4610f5c10",
+    "tools/acceptance/photocraft_v1_check.py": "4173b1e0474e577cc96f1ceaf81cd2e01912c99057eb2bd759d4f3147a28ad8f"
+  },
+  "results": [
+    {
+      "name": "current-debug-v2",
+      "preset": "linux-debug",
+      "ctest": 7,
+      "qt": {
+        "passed": 171,
+        "failed": 0,
+        "skipped": 0,
+        "blacklisted": 0
+      },
+      "result_sha256": "a53abe10ffd03021788cf140c8821d85ee3732c4b3753faf395e800ee5e7f34a",
+      "binary_pins": {
+        "test_color_raster": "9d3598ccd2e71d7ee3ba70691c0f84d4f10a70236a4fda82af507a9340384085",
+        "test_gui_color": "2398d74ff275163bd3af6844852dbfe8626e786cb5e5f090a80d0e20d7c30c3d",
+        "test_gui_canvas": "463642a51ceec4cebed2e001cb3b78c34ff4688daf721a711190468c826d8b0b",
+        "test_gui_layout": "bd0f79cdef815899711cda5c7de5009a52656d9b7d5a9c0c177a2012c177fdb6",
+        "test_contract_filters": "f644d90762895c23c570586a44348dc695d5618bf6fd6627415e2e80a8756a31",
+        "test_contract_ops": "20de4544ece5e097448d51fbd737eae8f5e64fafcba10962f305b108e6679726",
+        "test_storage": "e89021456e2dea2ed6c5d7d385e645d77557eab3a679f099fba3d19e8d907028"
+      },
+      "config_sha256": "cb3c6e126787c30ef7ad9d9b389960c86c0f401be7029350f6dc8e7509a5e971"
+    },
+    {
+      "name": "cache-green-release",
+      "preset": "linux-release",
+      "ctest": 4,
+      "qt": {
+        "passed": 144,
+        "failed": 0,
+        "skipped": 0,
+        "blacklisted": 0
+      },
+      "result_sha256": "06ed9cb24867d4e57040066436a56a7482cec7faae36396304fbf7cc5b2620ee",
+      "binary_pins": {
+        "test_color_raster": "54224886faaff633b95d24cfa358263547f725680eef96ad30526ea4ba7e0ae1",
+        "test_gui_color": "8b086e79383da90cfe5d554f962e9e18117992509e11f962d81067b6c21862e1",
+        "test_gui_canvas": "26c13c0a07e26e2ef2527a028840d27f28fd52c21881cf01bcdf71b78cb3ea93",
+        "test_gui_layout": "30cddc64d182c25dab6e7c1586d5584706311a4b29ff5c14fc05a7a367d7e466"
+      },
+      "config_sha256": "05656b01aa2ba939a03047461c389168aedbd53926a0d9338b77b20c82b4fcd0"
+    },
+    {
+      "name": "cache-green-asan",
+      "preset": "linux-asan",
+      "ctest": 10,
+      "qt": {
+        "passed": 273,
+        "failed": 0,
+        "skipped": 0,
+        "blacklisted": 0
+      },
+      "result_sha256": "3acf911a5ab7ebd89b3182c8ff61a6a8cf4abf1222e1c2b45192c585bbeb6fbb",
+      "binary_pins": {
+        "test_color_raster": "8820e5542e42a5954e7b86eebebae1ceed35dc14cc9196feac72da5055f873fb",
+        "test_gui_color": "9d70273289e1b98df4d25d04e0831f32a8213521f2c518a5574c48e96bb2d513",
+        "test_gui_canvas": "f9caa3ba57cd47c3a8c3fa6e192f14bb9dccab66524aa70063ddad671169907f",
+        "test_gui_layout": "553deb182900add6c4665d8ba3408647bc3ace05634324c2fa3479842096deb2",
+        "test_render_page": "b29038e23514843d3481eb3f4ab79d4ddfc5d68dbfa58c06c88197335aff49d0",
+        "test_gui_actions": "297464fa93d0ec9878c84b66e023e43e634bb18d60d4fb464e4864b8bd410bdd",
+        "test_gui_save": "ba2689ea415fb7b22aa45aa76541139a8ee2270dc07fb1ac7c37ecf69d08e340",
+        "test_storage": "f75092a73a1c18dd7b8c122bfe2336d5705448188fc48289f50198c44628417d",
+        "test_session": "f837f59c21ec86c84f3db07db26cb44e0ebfe581d849d589419547dc592289d1",
+        "test_contract_filters": "dcd7dd38cf4164aec483224920b0a6e4dee996fe9bd3ed7fd0fee8da8135f96d"
+      },
+      "config_sha256": "d3abeaac6457fd2e2eb1ae7186e323870a67c3a1a3aa132db5ea233c07317775"
+    },
+    {
+      "name": "formal-color-cli",
+      "status": "passed",
+      "result_sha256": "357b27b30381d9045dd664d5a35f30efa1bc20b3d29cdd738efc4cd6ee98b192",
+      "checks": 14
+    },
+    {
+      "name": "legacy-guards-cli",
+      "status": "passed",
+      "result_sha256": "f6b8a450a512fdd2ed963937aed0ae173d561f02acf25452c1c7c5a36db2b934",
+      "checks": 8
+    },
+    {
+      "name": "thumbmaker-green-v4",
+      "checks": 8,
+      "result_sha256": "adc8a8dcdc14ccfcf579162b2fe4187bcf44e6dbccedfa85448ee6f1b4afd561"
+    },
+    {
+      "name": "gui-rgb-nine-release",
+      "qt_passed": 16,
+      "result_sha256": "8035b70b76b9d72c5c03d93affcf3eeea872ec874d0492004e50d2a29c4be6e7",
+      "visual_observations_sha256": "132428c183710da3755818887cf397bcd03b8f7a2b86b5c43b2c4ec25baf20ac"
+    }
+  ],
+  "windows": "deferred・成功ではない"
+}
