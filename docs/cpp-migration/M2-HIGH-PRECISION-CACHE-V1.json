@@ -1,0 +1,109 @@
+{
+  "scope": "M2 高精度素材のbook-local共有・allocation別予算のV1関連検証だけ。M2全体/統合V2/性能/配布は未合格",
+  "release_ctest": 8,
+  "release_qt_pass": 154,
+  "release_skips": 14,
+  "asan_ctest": 8,
+  "asan_qt_pass": 168,
+  "asan_skips": 0,
+  "paired_fault_skips": [
+    {
+      "release_skip": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(assets)",
+      "asan_pass": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(assets)"
+    },
+    {
+      "release_skip": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(prepare)",
+      "asan_pass": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(prepare)"
+    },
+    {
+      "release_skip": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(project)",
+      "asan_pass": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(project)"
+    },
+    {
+      "release_skip": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(audit)",
+      "asan_pass": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(audit)"
+    },
+    {
+      "release_skip": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(commit)",
+      "asan_pass": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(commit)"
+    },
+    {
+      "release_skip": "TestTransaction::lateFailuresAreSettledAtOnce(assets)",
+      "asan_pass": "TestTransaction::lateFailuresAreSettledAtOnce(assets)"
+    },
+    {
+      "release_skip": "TestTransaction::lateFailuresAreSettledAtOnce(prepare)",
+      "asan_pass": "TestTransaction::lateFailuresAreSettledAtOnce(prepare)"
+    },
+    {
+      "release_skip": "TestTransaction::lateFailuresAreSettledAtOnce(project)",
+      "asan_pass": "TestTransaction::lateFailuresAreSettledAtOnce(project)"
+    },
+    {
+      "release_skip": "TestTransaction::lateFailuresAreSettledAtOnce(audit)",
+      "asan_pass": "TestTransaction::lateFailuresAreSettledAtOnce(audit)"
+    },
+    {
+      "release_skip": "TestTransaction::lateFailuresAreSettledAtOnce(commit)",
+      "asan_pass": "TestTransaction::lateFailuresAreSettledAtOnce(commit)"
+    },
+    {
+      "release_skip": "TestContractSave::oldWriterWhileConverting()",
+      "asan_pass": "TestContractSave::oldWriterWhileConverting()"
+    },
+    {
+      "release_skip": "TestSession::aFailedSaveWritesARecoveryPoint()",
+      "asan_pass": "TestSession::aFailedSaveWritesARecoveryPoint()"
+    },
+    {
+      "release_skip": "TestSession::aRetryAfterTheDiskIsBackSavesOnce()",
+      "asan_pass": "TestSession::aRetryAfterTheDiskIsBackSavesOnce()"
+    },
+    {
+      "release_skip": "TestSession::neitherTheBookNorTheRecoveryAreaCanBeWritten()",
+      "asan_pass": "TestSession::neitherTheBookNorTheRecoveryAreaCanBeWritten()"
+    }
+  ],
+  "oom_delta": 0,
+  "oom_kill_delta": 0,
+  "sources_matched": 792,
+  "files": {
+    "native/src/core/color_raster.cpp": "49ba6b85eef87a4fba7fec172ac363c72403047c35c76586b2154abdf4595e65",
+    "native/src/storage/reader.cpp": "fd7b13b4edf2f7ce4d563da26100691ced726842afecd16c3bc519a3b9dcf157",
+    "native/tests/unit/test_color_raster.cpp": "665d6b6f0489d00303e530df29449ee8f72c8a342b96a9965a3bef23845b7844"
+  },
+  "raw_sha256": {
+    "regression/tests.log": "bd46116745137fea818b4a7985fb9c0aafcd817dc30102eee9bcc6377b78bef8",
+    "regression-asan/tests.log": "83223a1380a387570becac753684006c64b255e24939297d83feb402dfc13470",
+    "review-result.json": "5da136d5ef89f7e89d63d446abfb805954b49db01fc3d60d20264d9bc848aa6a",
+    "regression/execution.json": "1b1d9c4a0726366beb43ac46aca5656d97bae1233640077ff2cf4168493d433c",
+    "regression-asan/execution.json": "b5914ad9d8d1c37956f5bee7d045e15f3b765c9fdf0a349f332cfe97df33ce7b"
+  },
+  "full_validation": "not_run_after_this_change",
+  "formal_cli": {
+    "status": "passed",
+    "commands": 45,
+    "controls": 14,
+    "raw_execution_sha256": "41d64a2c3d464e6255e4594187c9269fe88dd9cf0443d898dba51ba43c76ce11",
+    "source_and_binary_matched": true,
+    "oom_delta": 0,
+    "oom_kill_delta": 0
+  },
+  "independent_review": "passed-blocking0;4 nonblocking suggestions, deferred with scope",
+  "gui_xcb": {
+    "status": "passed",
+    "qt_totals": [
+      16,
+      0,
+      0,
+      0
+    ],
+    "execution_sha256": "8bc40cf312edff8317345d10f603548a031ff93490b99e80ba2cb38716eb78e4",
+    "visual_scope": "実xcbの露光量ダイアログのみ。原稿色/settled画素の証明ではない"
+  },
+  "integration": "not_yet_integrated",
+  "all_m2_done": false,
+  "date": "2026-10-07T05:41:02.062092+09:00",
+  "evidence_root": "/home/hermes/genko-test/cpp-impl/wt/m2-assets-resume/build/m2-shared-color",
+  "base_commit": "527a65395aea164a3d85f6e29503b8ededae3848"
+}

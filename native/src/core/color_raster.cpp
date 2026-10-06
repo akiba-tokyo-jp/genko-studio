@@ -3,6 +3,7 @@
 #include <bit>
 #include <cmath>
 #include <limits>
+#include <unordered_set>
 #include "core/error.hpp"
 #include "core/exposure.hpp"
 #include "core/pyconv.hpp"
@@ -94,14 +95,18 @@ std::string encode_color_raster(const Json& op) {
 }
 void validate_color_document(const Document& doc) {
     std::size_t bytes = 0;
+    std::unordered_set<const std::string*> allocations;
     for (const auto& page : doc.pages) {
         const bool color = std::any_of(page->layers.begin(), page->layers.end(), [](const Layer& l) { return bool(l.color_raster); });
         for (const auto& layer : page->layers) {
             if (layer.color_raster) {
-                if (layer.color_raster->size() > kColorRasterBookBytes - bytes)
-                    throw Error("value", "high-precision color raster book budget exceeded");
-                bytes += layer.color_raster->size();
-                (void)ColorRasterView(*layer.color_raster);
+                // Charge each live immutable allocation once, not each layer reference.
+                if (allocations.insert(layer.color_raster.get()).second) {
+                    if (layer.color_raster->size() > kColorRasterBookBytes - bytes)
+                        throw Error("value", "high-precision color raster book budget exceeded");
+                    bytes += layer.color_raster->size();
+                    (void)ColorRasterView(*layer.color_raster);
+                }
                 if (layer.kind != LayerKind::Raster || layer.role == LayerRole::Tone || layer.raster_png || layer.stroke_count() || !layer.patches.empty() ||
                     layer.panel_clip || layer.mask || layer.effect || layer.screen || layer.color)
                     throw Error("not_yet_ported", "high-precision color layer style is not supported yet");

@@ -106,6 +106,8 @@ private:
     std::size_t color_bytes_ = 0;
     std::unordered_set<std::string> nonfinite_;
     std::unordered_map<std::string, core::StrokeListPtr> blobs_;  // strokes read in this load (Python's blobcache)
+    // Scope is one book load; immutable bytes are owned by the resulting layers.
+    std::unordered_map<std::string, core::Bytes> color_blobs_;
 
     void issue(std::string kind, std::string pointer, std::string ref, std::string message) {
         report_.issues.push_back(LoadIssue{std::move(kind), std::move(pointer), std::move(ref), std::move(message)});
@@ -581,13 +583,21 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             if (!m->is_object() || !m->contains("asset") || !(*m)["asset"].is_string())
                 throw core::Error("format", "color raster metadata must name an asset");
             ref = (*m)["asset"].get<std::string>();
-            const auto maximum = std::min<std::size_t>(16 + core::kColorRasterMaxPixels*16,
-                                                       core::kColorRasterBookBytes-color_bytes_);
-            auto bytes = store_.get_bytes(ref, core::kColorRasterSuffix, maximum);
-            if (bytes) color_bytes_ += bytes->size();
-            if (!bytes || AssetStore::ref(*bytes) != ref) throw core::Error("format", "color raster hash mismatch");
-            core::ColorRasterView(*bytes).check_metadata(*m);
-            layer.color_raster = std::make_shared<const std::string>(std::move(*bytes));
+            const auto cached = color_blobs_.find(ref);
+            if (cached != color_blobs_.end()) {
+                // Sharing bytes must not make a later layer's metadata trusted.
+                core::ColorRasterView(*cached->second).check_metadata(*m);
+                layer.color_raster = cached->second;
+            } else {
+                const auto maximum = std::min<std::size_t>(16 + core::kColorRasterMaxPixels*16,
+                                                           core::kColorRasterBookBytes-color_bytes_);
+                auto bytes = store_.get_bytes(ref, core::kColorRasterSuffix, maximum);
+                if (!bytes || AssetStore::ref(*bytes) != ref) throw core::Error("format", "color raster hash mismatch");
+                core::ColorRasterView(*bytes).check_metadata(*m);
+                layer.color_raster = std::make_shared<const std::string>(std::move(*bytes));
+                color_bytes_ += layer.color_raster->size();
+                color_blobs_.emplace(ref, layer.color_raster);
+            }
         } catch (const core::Error& error) {
             issue("broken_asset", here, ref, error.what());
         }
