@@ -1,0 +1,194 @@
+{
+  "status": "passed-linux-v2-scope-only",
+  "scope": "初回カラー機能群統合候補のLinux部分受入。全OS/M7/PhotoCraft全機能完成ではない",
+  "commit": "8fb309db9ba9f5256f3d4bc840fab7e1bf7a09dc",
+  "plan_sha256": "57e5c8d667eef21f04ebab9fe2b60ebaf6e2ca0a451b19a9ea7aacf38f533e69",
+  "full_matrix_audit": {
+    "passed": false,
+    "failures": [
+      "構成artifactの欠落・重複"
+    ],
+    "presets": [
+      "linux-asan",
+      "linux-release"
+    ],
+    "performance": "not_run"
+  },
+  "windows": "deferred-development-final-required-not-pass",
+  "results": [
+    {
+      "preset": "linux-release",
+      "ctest": 58,
+      "qt": {
+        "passed": 1145,
+        "failed": 0,
+        "skipped": 33
+      },
+      "blacklisted": 0,
+      "cli23": 23,
+      "source_count": 792,
+      "binary_count": 60,
+      "result_sha256": "fbbff13f5881425512d65ed76897fb5cea6446e3d5dad7df7c55566a4e979c8b",
+      "cli23_sha256": "d7d8703057e7f0fd8774eae772ca3f40c745e2a716b1b37d816f45462074b20d",
+      "raw_sha256": "f802ce5a4976b5442e9ccba374a464ff3e5252eeefe99fb5768fb2c491e93c9d"
+    },
+    {
+      "preset": "linux-asan",
+      "ctest": 58,
+      "qt": {
+        "passed": 1220,
+        "failed": 0,
+        "skipped": 0
+      },
+      "blacklisted": 0,
+      "cli23": 23,
+      "source_count": 792,
+      "binary_count": 60,
+      "result_sha256": "ff269e79cf87c5065bb8c4166544482fdbabff49cb61272b81b49a2e930c5b98",
+      "cli23_sha256": "2faba4fbe7e35cae6cbe8898137dad83cf38bee66e2c0810f203afae916b6b51",
+      "raw_sha256": "adc099d7258fd15cae7a71e5f9c730d03ab5674de7aee07f126e18f1afb77367"
+    }
+  ],
+  "release_skip_pairing": [
+    {
+      "release_skipped": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(assets)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(prepare)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(project)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(audit)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestTransaction::failuresAtEachStepRetriedInTheSameProcess(commit)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestTransaction::lateFailuresAreSettledAtOnce(assets)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestTransaction::lateFailuresAreSettledAtOnce(prepare)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestTransaction::lateFailuresAreSettledAtOnce(project)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestTransaction::lateFailuresAreSettledAtOnce(audit)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestTransaction::lateFailuresAreSettledAtOnce(commit)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestContractSave::oldWriterWhileConverting()",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::crashAtEachStep(assets)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::crashAtEachStep(prepare)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::crashAtEachStep(project)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::crashAtEachStep(audit)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::crashAtEachStep(commit)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::cutLinesAreKeptApart(prepare)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::cutLinesAreKeptApart(audit)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::cutLinesAreKeptApart(commit)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::failureThenTheSameCommandAgain(assets)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::failureThenTheSameCommandAgain(prepare)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::failureThenTheSameCommandAgain(project)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::failureThenTheSameCommandAgain(audit)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::failureThenTheSameCommandAgain(commit)",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::lateFailureIsSettledAtOnce()",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::writesWaitForTheRepair()",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSaveE2e::undoAndAnotherSaveAfterAFailure()",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestMigrateE2e::changedWhileCopied()",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSession::aFailedSaveWritesARecoveryPoint()",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSession::aRetryAfterTheDiskIsBackSavesOnce()",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestSession::neitherTheBookNorTheRecoveryAreaCanBeWritten()",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestGuiSave::initTestCase()",
+      "asan_passed": true
+    },
+    {
+      "release_skipped": "TestAppE2e::initTestCase()",
+      "asan_passed": true
+    }
+  ],
+  "oom_delta": 0,
+  "oom_kill_delta": 0,
+  "memory_peak": "2147483648",
+  "memory_events": "low 0\nhigh 0\nmax 79302\noom 0\noom_kill 0\noom_group_kill 0",
+  "performance": "not_run",
+  "duration_seconds": 19529.32766532898,
+  "audit_sha256": "84c1bd4eef4d320f9a0fd014e833d4d068143285fd51c79681c04953a4c08693",
+  "evidence_root": "/home/hermes/genko-test/cpp-impl/wt/integration/build/photocraft-integrated-full"
+}

@@ -406,5 +406,82 @@
     "v1_audit": "docs/cpp-migration/photocraft/V1-ACCEPTANCE.json",
     "review_manifest": "build/photocraft-review-fixes/review-input-cache.json",
     "debug": "current-debug-v2: 7CTest/171Qt, zero fail/skip/blacklist/OOM"
+  },
+  "integration_linux_v2": {
+    "schema": 1,
+    "updated_at": "2026-10-07T05:08:39.974236+09:00",
+    "phase": "V2-linux-scoped-accepted-windows-deferred",
+    "commit": "8fb309db9ba9f5256f3d4bc840fab7e1bf7a09dc",
+    "integration_worktree": "/home/hermes/genko-test/cpp-impl/wt/integration",
+    "source_count": 792,
+    "plan": "build/photocraft-integrated-plan.json",
+    "manifest": "build/photocraft-integrated-manifest.json",
+    "execution": "build/photocraft-integrated-full/execution.json",
+    "process_session": "proc_a2067f27869c",
+    "pid": 2106911,
+    "container": "3efc25cfeae8",
+    "cpu": 1,
+    "memory_bytes": 2147483648,
+    "linux_presets": {
+      "linux-release": 58,
+      "linux-asan": 58
+    },
+    "cli23": "23/23 per Linux configuration raw/binary/resource verified",
+    "status": "passed-linux-v2-scope-only",
+    "windows": "deferred-development-final-required",
+    "completed": [
+      "39file exact source/review audit",
+      "current Debug171/Release144/ASan273 and CLI/GUI/ThumbMaker evidence binding",
+      "feature commit",
+      "local fast-forward integration and exact tree verification"
+    ],
+    "uncompleted": [
+      "M2 remaining",
+      "M3 remaining",
+      "PhotoCraft full parity",
+      "M4-M7",
+      "Windows final acceptance",
+      "distribution"
+    ],
+    "next_action": "M2素材cache/必要時読込の既存台帳・実装を現統合8fb309dから再確認し、既存作業を保全して専用木でRED→実装→GREEN→レビュー。全機能/M7/Windowsの完成とは扱わない。",
+    "audit": "build/photocraft-integrated-full/linux-scoped-audit.json",
+    "results": [
+      {
+        "preset": "linux-release",
+        "ctest": 58,
+        "qt": {
+          "passed": 1145,
+          "failed": 0,
+          "skipped": 33
+        },
+        "blacklisted": 0,
+        "cli23": 23,
+        "source_count": 792,
+        "binary_count": 60,
+        "result_sha256": "fbbff13f5881425512d65ed76897fb5cea6446e3d5dad7df7c55566a4e979c8b",
+        "cli23_sha256": "d7d8703057e7f0fd8774eae772ca3f40c745e2a716b1b37d816f45462074b20d",
+        "raw_sha256": "f802ce5a4976b5442e9ccba374a464ff3e5252eeefe99fb5768fb2c491e93c9d"
+      },
+      {
+        "preset": "linux-asan",
+        "ctest": 58,
+        "qt": {
+          "passed": 1220,
+          "failed": 0,
+          "skipped": 0
+        },
+        "blacklisted": 0,
+        "cli23": 23,
+        "source_count": 792,
+        "binary_count": 60,
+        "result_sha256": "ff269e79cf87c5065bb8c4166544482fdbabff49cb61272b81b49a2e930c5b98",
+        "cli23_sha256": "2faba4fbe7e35cae6cbe8898137dad83cf38bee66e2c0810f203afae916b6b51",
+        "raw_sha256": "adc099d7258fd15cae7a71e5f9c730d03ab5674de7aee07f126e18f1afb77367"
+      }
+    ],
+    "release_skip_count": 33,
+    "release_skip_paired_in_asan": true,
+    "oom_delta": 0,
+    "oom_kill_delta": 0
   }
 }
