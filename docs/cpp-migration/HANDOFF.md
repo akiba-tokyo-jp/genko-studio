@@ -50,5 +50,11 @@
 - 続くM3/PhotoCraft: 高精度filter/画素消去・選択、色モデル/チャンネル/補正、紙質/ブラシ/ABR、残描画/アニメ/タイムラプス/plugin。M4写植/ルビ/フキダシ/全出力/PSD、M5制作サービスとMCP/HTTP/CLI、M6両OS配布、M7最終受入は未完。
 - 計画/台帳を全件再生成しない。短試験→review→必須修正→凍結→規定重受入→統合の単位を保ち、合格済みの同一source/binary/config/fixture/scopeを再利用する。review1回/受入1回は目安であり、重大不具合や無効化された証拠の再確認を禁止する意味ではない。
 
+## GitHub反映の停止状態
+- ローカルnative/integrationへマージ済み。GitHubのnative/integrationは `b4f8fc35ab055edd70edf248ecb6627b57324715` のまま。
+- git pushは通常/HTTP1.1/固定長転送/単一祖先commit/別branchの全経路でGitHub側Internal Server Error。REST git/blobsの小さな書込みでもHTTP500・Content-Length0を確認。認証は有効、rate limit残4996、Actions無効を維持。権限変更やforce pushで回避しない。
+- GitHub反映は未完。次の操作はGitHub書込みサービス復旧後に `git push origin native/integration`、remote SHAとHANDOFF.mdをGETして照合すること。新規buildや再mergeは不要。
+- `/home/hermes/genko-test/cpp-impl/genko-integration-handoff-20261008.bundle` はGitHubに既存のb4f8fc3を前提とする差分bundle。既存repositoryへfetchでき、ソースと引継ぎ書を別環境へ持ち出せる。旧証拠/binaryは元ホストに残る。
+
 ## 他セッションへ渡す文
 「Genko C++作業を引き継いでください。`/home/hermes/genko-test/cpp-impl/wt/integration/docs/cpp-migration/HANDOFF.md` を読み、native/integrationの未受入マージ候補から、既存キューのM2出口を継続してください。Python安定版・元作業木・証拠を保全し、主担当が直接実装してください。」
