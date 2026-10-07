@@ -7,7 +7,7 @@
 //
 //   {"log": "<file.jsonl>", "steps": [{"do": "wait_book"}, {"do": "stroke", "points": [[x, y], …]}, …]}
 //
-// Steps: wait_book {path?, ms?} · tool {name} · stroke {points: [[x_mm, y_mm, pressure?], …], device: mouse|tablet,
+// Steps: wait_book {path?, ms?} · wait_read (the book's pages all read) · tool {name} · stroke {points: [[x_mm, y_mm, pressure?], …], device: mouse|tablet,
 // tilt?: [x, y], rotation?} · action {name: act_…} · ops {ops: […]} (applied as the window's commands apply theirs) ·
 // page {row} · wait_saved {ms?} · wait_status {kind: saved|dirty|saving|failed|recovery_only} · wait_rendered {ms?} ·
 // sleep {ms} · answers {close: save|save_as|discard|cancel, question: bool, questions: {title: bool}, save_path} ·

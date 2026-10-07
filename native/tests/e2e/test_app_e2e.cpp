@@ -163,9 +163,11 @@ private slots:
         }
         QCOMPARE(Json(stroke.pressure), kept["pressure"]);
         QVERIFY(std::abs(stroke.points.front().x - 60) < 0.01 && std::abs(stroke.points.front().y - 80) < 0.01);
-        // a new process: the line is there; undo and redo go through the book's journal
+        // a new process: the line is there; undo and redo go through the book's journal (once the book's pages are all
+        // read: the first page is shown first)
         const Json second = Json::array({
             Json::object({{"do", "wait_book"}}),
+            Json::object({{"do", "wait_read"}}),
             Json::object({{"do", "report"}, {"tag", "reopened"}}),
             Json::object({{"do", "action"}, {"name", "act_undo"}}),
             Json::object({{"do", "wait_saved"}}),
@@ -180,6 +182,7 @@ private slots:
         const Json& reopened = *two.step("report", "reopened");
         QCOMPARE(reopened["lines"], saved["lines"]);
         QCOMPARE(reopened["status"].get<std::string>(), std::string("saved"));
+        QVERIFY(!reopened["loading"].get<bool>());
         QVERIFY(reopened["can_undo"].get<bool>());
         QCOMPARE(two.step("report", "undone")->at("lines").size(), std::size_t{0});
         QCOMPARE(two.step("report", "redone")->at("lines"), saved["lines"]);

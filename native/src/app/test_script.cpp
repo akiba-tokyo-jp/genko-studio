@@ -77,6 +77,7 @@ Json state_of(MainWindow* w) {
     r["unsaved"] = s.unsaved();
     r["can_undo"] = s.can_undo();
     r["can_redo"] = s.can_redo();
+    r["loading"] = s.loading();
     r["pages"] = book.pages.size();
     r["page_index"] = w->page_index();
     r["read_only"] = s.read_only_reason();
@@ -276,6 +277,11 @@ private:
             const auto& path = w->session().path();
             const bool there = path && (!s.contains("path") || same_place(*path, core::path_from_utf8(s["path"].get<std::string>())));
             if (!w->isVisible() || !there || w->canvas()->page() == nullptr) out.state = State::Wait;
+            return out;
+        }
+        if (what == "wait_read") {
+            // (the book's pages all read: a window shows the first page first and reads the others meanwhile)
+            if (w->session().loading()) out.state = State::Wait;
             return out;
         }
         if (what == "report") {
