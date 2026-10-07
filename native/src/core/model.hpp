@@ -93,6 +93,7 @@ struct Stroke {
     double width_mm = 0.35;
     std::string kind = "gpen";
     std::optional<std::vector<std::int64_t>> rgb;  // none: the layer's ink colour
+    std::optional<Json> color_rgb;  // native.color_stroke_v1: precise straight sRGB, not a preview
     double opacity = 1.0;
     std::vector<double> rotation;  // the pen's barrel turn at each point (degrees; アートペン)
     double pressure_opacity = 0.0;  // 0..1: how much a light touch also lightens the line

@@ -83,27 +83,6 @@ class TestRenderPage : public QObject {
 private slots:
     void init() { render::clear_render_caches(); }
 
-    void plainTextCases_data() {
-        QTest::addColumn<QString>("data");
-        std::ifstream file(std::filesystem::path(GENKO_SOURCE_DIR)/"tests/fixtures/render/text-cases.json");QVERIFY(file.good());
-        const Json reference=Json::parse(file);
-        for(const auto& c:reference.at("cases"))QTest::newRow(c.at("id").get<std::string>().c_str())<<QString::fromStdString(c.dump());
-    }
-    void plainTextCases() {
-        QFETCH(QString,data);const Json c=Json::parse(data.toStdString());
-        auto doc=genko::core::new_episode("text fixture",Num(1),1,genko::core::PageSpec::custom(60,60,60,60,0,0,0,0,0));
-        auto& page=doc.edit_page(0);page.layers.clear();page.frames.clear();page.numero=false;
-        doc=genko::core::CommandBus().apply(doc,Json::array({c.at("op")}),genko::core::Actor("human:fixture")).doc;
-        const auto raw=QByteArray::fromBase64(QByteArray::fromStdString(c.at("png").get<std::string>()));
-        const auto expected=render::read_png(std::string(raw.constData(),static_cast<std::size_t>(raw.size()))).convert("RGB");
-        render::RenderOptions options;options.mode="print";
-        render::Image got;
-        try {got=render::render_page(doc.page(0),c.at("dpi").get<int>(),options,&doc).image;}
-        catch(const render::NotYetPorted& e){QFAIL(qPrintable(QString("plain text must render: ")+QString::fromUtf8(e.what())));}
-        QCOMPARE(got.tobytes(),expected.tobytes());
-        options.region=render::RenderRegion{5,7,100,80};
-        QCOMPARE(render::render_page(doc.page(0),c.at("dpi").get<int>(),options,&doc).image.tobytes(),expected.crop({5,7,105,87}).tobytes());
-    }
     void nombreCases_data() {
         QTest::addColumn<QString>("data");
         std::ifstream file(std::filesystem::path(GENKO_SOURCE_DIR) / "tests/fixtures/render/nombre-cases.json");

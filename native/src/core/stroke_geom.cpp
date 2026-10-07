@@ -355,6 +355,7 @@ std::vector<StrokePtr> erase_to_crossing(std::span<const StrokePtr> strokes, con
                 fresh.width_mm = stroke->width_mm;
                 fresh.kind = stroke->kind;
                 fresh.rgb = stroke->rgb;
+                fresh.color_rgb = stroke->color_rgb;
                 fresh.opacity = stroke->opacity;
                 result.push_back(std::make_shared<const Stroke>(std::move(fresh)));
             }

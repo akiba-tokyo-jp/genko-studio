@@ -20,6 +20,9 @@ std::vector<double> unpack_doubles(std::string_view base64);
 
 // A stroke for a .strokes.json blob: {"id", "kind", "width_mm", "xy"} and, when they say something, "p" (pressure),
 // "rgb", "opacity" (not 1.0), "r" (rotation) and "po" (pressure opacity, not 0).
+inline constexpr std::string_view kColorStrokeFeature = "native.color_stroke_v1";
+void validate_stroke_color(const Json& color);
+bool has_color_strokes(const Layer& layer);
 Json stroke_to_packed(const Stroke& stroke);
 
 // The bytes of a .strokes.json asset: the canonical JSON of the packed strokes, the same bytes Python writes.

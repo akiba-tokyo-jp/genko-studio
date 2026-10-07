@@ -221,6 +221,7 @@ core::Stroke transform_stroke(const core::Stroke& stroke, const Matrix& m) {
     if (!std::isfinite(out.width_mm)) throw core::OpError("the transform makes a line too wide");
     out.kind = stroke.kind;
     out.rgb = stroke.rgb;
+    out.color_rgb = stroke.color_rgb;
     out.opacity = stroke.opacity;
     return out;
 }
@@ -362,6 +363,8 @@ std::pair<std::optional<core::Patch>, std::optional<core::Patch>> split_patch(co
 
 Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
     (void)page;
+    if (layer.color_raster)
+        core::not_yet_ported("selection edits on high-precision raster pixels are not supported yet");
     AreaTest test(area);
     Items in;
     std::vector<core::StrokePtr> strokes_out;

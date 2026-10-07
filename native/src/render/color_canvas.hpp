@@ -12,10 +12,16 @@ public:
     ~ColorCanvas();
     ColorCanvas(const ColorCanvas&) = delete;
     ColorCanvas& operator=(const ColorCanvas&) = delete;
-    void blend(const Image& rgba, double opacity, bool clip);
-    void blend(const core::ColorRasterView& source, Size full, Box area, double opacity, bool clip);
+    static bool supports_blend(std::string_view mode);
+    void blend(const Image& rgba, double opacity, bool clip, std::string_view mode = "normal");
+    void blend(const core::ColorRasterView& source, Size full, Box area, double opacity, bool clip, std::string_view mode = "normal");
+    void blend(const ColorCanvas& source, double opacity, bool clip, std::string_view mode = "normal");
+    void blend_stroke(const Image& mask, const core::Json& color, double opacity);
     void expose(const core::Exposure& exposure, double opacity, bool clip, const Image* mask = nullptr);
     Image image() const;
+    bool is_opaque() const;
+    bool keeps_preceding_alpha() const;
+    std::string color_raster(std::string_view precision) const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

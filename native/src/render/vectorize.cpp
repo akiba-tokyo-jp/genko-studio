@@ -7,6 +7,7 @@
 
 #include "core/ids.hpp"
 #include "core/pynum.hpp"
+#include "core/strokes.hpp"
 #include "render/grid.hpp"
 #include "render/op_limits.hpp"
 
@@ -257,7 +258,7 @@ std::vector<core::PointF> simplify(const std::vector<core::PointF>& points, doub
 
 }  // namespace
 
-std::vector<core::Stroke> trace_layer(const Image& picture, int dpi, double min_mm) {
+std::vector<core::Stroke> trace_layer(const Image& picture, int dpi, double min_mm, const core::ColorRasterView* precise) {
     if (static_cast<std::int64_t>(picture.width()) * picture.height() == 0) return {};
     const double factor = static_cast<double>(kTraceDpi) / dpi;
     Image small = picture.mode() == "RGBA" ? picture : picture.convert("RGBA");
@@ -315,7 +316,21 @@ std::vector<core::Stroke> trace_layer(const Image& picture, int dpi, double min_
         stroke.pressure.assign(simple.size(), 1.0);
         stroke.width_mm = core::py_round(width, 3);
         stroke.kind = "mili";
-        stroke.rgb = rgb;
+        if (precise) {
+            std::array<double, 4> mean{};
+            for (const auto& [y, x] : chain) {
+                const auto sx = std::min(precise->width()-1, static_cast<std::uint32_t>((x+x0+.5)*precise->width()/small.width()));
+                const auto sy = std::min(precise->height()-1, static_cast<std::uint32_t>((y+y0+.5)*precise->height()/small.height()));
+                const auto p = precise->pixel(std::size_t(sy)*precise->width()+sx);
+                for (unsigned c=0;c<4;++c) mean[c] += p[c]/chain.size();
+            }
+            core::Json values = core::Json::array();
+            const auto precision = precise->metadata("")["precision"];
+            for (unsigned c=0;c<3;++c) values.push_back(precision == "u16" ? std::nearbyint(mean[c]*65535)/65535 : mean[c]);
+            stroke.color_rgb = core::Json{{"precision", precision}, {"values", std::move(values)}};
+            core::validate_stroke_color(*stroke.color_rgb);
+            stroke.opacity = std::clamp(mean[3],0.,1.);
+        } else stroke.rgb = rgb;
         strokes.push_back(std::move(stroke));
     }
     return strokes;

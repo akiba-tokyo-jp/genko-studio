@@ -273,6 +273,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     std::vector<std::string> features = doc.features;
     for (const auto& page : doc.pages) for (const auto& layer : page->layers) {
         if (layer.color_raster) features.emplace_back(core::kColorRasterFeature);
+        if (core::has_color_strokes(layer)) features.emplace_back(core::kColorStrokeFeature);
         if (layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->value("kind", core::Json()) == "exposure")
             features.emplace_back(core::kExposureFeature);
     }

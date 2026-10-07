@@ -1,6 +1,9 @@
 #include "core/strokes.hpp"
 
 #include <bit>
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <cstdint>
 #include <cstring>
 
@@ -63,6 +66,22 @@ std::vector<double> unpack_doubles(std::string_view base64) {
     return out;
 }
 
+void validate_stroke_color(const Json& color) {
+    if (!color.is_object() || color.size() != 2 || !color.contains("precision") || !color.contains("values") ||
+        (color["precision"] != "u16" && color["precision"] != "f32") || !color["values"].is_array() || color["values"].size() != 3)
+        throw Error("format", "color_rgb is {precision: u16|f32, values: [r,g,b]}");
+    for (const auto& v : color["values"]) {
+        if (!v.is_number()) throw Error("format", "color_rgb values must be finite numbers");
+        const double x = v.get<double>();
+        if (!std::isfinite(x) || std::abs(x) > std::numeric_limits<float>::max() ||
+            (color["precision"] == "u16" && (x < 0 || x > 1)))
+            throw Error("format", "color_rgb sample exceeds its precision range");
+    }
+}
+bool has_color_strokes(const Layer& layer) {
+    return layer.strokes && std::any_of(layer.strokes->items.begin(), layer.strokes->items.end(),
+        [](const StrokePtr& s) { return s && s->color_rgb.has_value(); });
+}
 Json stroke_to_packed(const Stroke& stroke) {
     Json out = Json::object();
     out["id"] = stroke.id;
@@ -81,6 +100,7 @@ Json stroke_to_packed(const Stroke& stroke) {
         for (const auto v : *stroke.rgb) rgb.push_back(v);
         out["rgb"] = std::move(rgb);
     }
+    if (stroke.color_rgb) { validate_stroke_color(*stroke.color_rgb); out["color_rgb"] = *stroke.color_rgb; }
     if (stroke.opacity != 1.0) out["opacity"] = stroke.opacity;
     if (!stroke.rotation.empty()) out["r"] = pack_doubles(stroke.rotation);
     if (stroke.pressure_opacity != 0.0) out["po"] = stroke.pressure_opacity;
@@ -95,6 +115,7 @@ std::string strokes_blob(const StrokeList& strokes) {
 
 Stroke coerce_stroke(const Json& raw) {
     Stroke stroke;
+    if (const Json* color = get(raw, "color_rgb")) { validate_stroke_color(*color); stroke.color_rgb = *color; }
     if (raw.is_object() && raw.contains("xy")) {
         const Json& xy_text = raw["xy"];
         if (!xy_text.is_string()) {

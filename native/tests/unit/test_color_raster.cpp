@@ -15,6 +15,54 @@ using core::Json;
 class TestColorRaster : public QObject {
     Q_OBJECT
 private slots:
+    void highPrecisionMergeAndConversion_data() {
+        QTest::addColumn<QString>("precision"); QTest::addColumn<QString>("operation");
+        for (const QString& precision : {QStringLiteral("u16"), QStringLiteral("f32")})
+            for (const QString& op : {QStringLiteral("merge_down"), QStringLiteral("merge_layers"),
+                                     QStringLiteral("merge_visible"), QStringLiteral("convert_layer")})
+                QTest::newRow((precision+"-"+op).toUtf8().constData()) << precision << op;
+    }
+    void highPrecisionMergeAndConversion() {
+        QFETCH(QString,precision); QFETCH(QString,operation);
+        auto doc=core::new_episode("高精度結合",core::Num(1),2,
+            core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        auto& p=doc.edit_page(0); p.numero=false; p.frames.clear(); p.layers.clear();
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+            {"precision",precision.toStdString()},{"pixels",precision=="u16" ?
+                Json::array({1,2,3,65535}) : Json::array({-0.125,1.00000011920928955078125,2.0,1.0})}};
+        auto base=core::CommandBus().apply(doc,Json::array({put,put}),core::Actor("human:test")).doc;
+        const auto lower=base.page(0).layers[0].id, upper=base.page(0).layers[1].id;
+        const auto original=base.page(0).layers[1].color_raster;
+        const auto before=render::render_page(base.page(0),72).image;
+        Json op={{"op",operation.toStdString()},{"page",1}};
+        if(operation=="merge_down" || operation=="convert_layer") op["id"]=upper;
+        if(operation=="convert_layer") op["to"]="paint";
+        if(operation=="merge_layers") op["ids"]=Json::array({lower,upper});
+        if(operation=="merge_visible") op["copy"]=false;
+        std::optional<core::ApplyResult> result;
+        try { result=core::CommandBus(render::ops_registry()).apply(base,Json::array({op}),core::Actor("human:test")); }
+        catch(const std::exception& e) { QFAIL(e.what()); }
+        QVERIFY(result.has_value());
+        const auto& page=result->doc.page(0);
+        QCOMPARE(page.layers.size(),operation=="convert_layer" ? std::size_t(2) : std::size_t(1));
+        const auto bytes=operation=="convert_layer" ? page.layers[1].color_raster : page.layers[0].color_raster;
+        QVERIFY(bytes); QVERIFY(!page.layers[0].raster_png);
+        core::ColorRasterView pixels(*bytes);
+        QCOMPARE(pixels.metadata("x")["precision"].get<std::string>(),precision.toStdString());
+        const auto expected=core::ColorRasterView(*original).pixel(0);
+        const auto actual=pixels.pixel(0);
+        for(unsigned c=0;c<4;++c) QVERIFY2(std::abs(actual[c]-expected[c])<1e-8,"merge must retain low bits/negative/HDR values");
+        const auto after=render::render_page(page,72).image;
+        QCOMPARE(after.tobytes(),before.tobytes());
+        QTemporaryDir tmp; QVERIFY(tmp.isValid());
+        const std::filesystem::path dir(tmp.path().toStdString()); storage::AssetStore assets(dir);
+        const auto saved=storage::project_payload_v4(result->doc,assets);
+        const auto reloaded=storage::load_document_payload(saved,dir);
+        QVERIFY2(reloaded.document.read_only_reason.empty(),reloaded.document.read_only_reason.c_str());
+        const auto loaded=operation=="convert_layer" ? reloaded.document.page(0).layers[1].color_raster : reloaded.document.page(0).layers[0].color_raster;
+        QVERIFY(loaded); QCOMPARE(*loaded,*bytes);
+        QCOMPARE(base.page(0).layers[1].color_raster,original);
+    }
     void repeatedColorAssetSharesBytes_data() {
         QTest::addColumn<QString>("precision");
         QTest::newRow("u16") << QStringLiteral("u16");
@@ -241,16 +289,30 @@ private slots:
                          {"precision","u16"},{"pixels",Json::array({1000,1001,1002,65535})}};
         const auto base = core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
         const auto bytes = base.page(0).layers.back().color_raster;
-        bool rejected = false;
+        const auto result = core::CommandBus(render::ops_registry()).apply(base,Json::array({
+            Json{{"op","set_note"},{"page",2},{"note","前置変更"}},
+            Json{{"op","merge_down"},{"page",1},{"id",base.page(0).layers.back().id}}}),core::Actor("human:test"));
+        const auto& merged = result.doc.page(0).layers.back().color_raster;
+        QVERIFY(merged);
+        QCOMPARE(core::ColorRasterView(*merged).pixel(0),core::ColorRasterView(*bytes).pixel(0));
+        QCOMPARE(result.doc.page(1).note,std::string("前置変更"));
+        QVERIFY(base.page(1).note.empty());
+        QCOMPARE(base.page(0).layers.back().color_raster,bytes);
+    }
+    void vectorConversionRefusesPrecisionLossAtomically() {
+        auto doc=core::new_episode("精度喪失拒否",core::Num(1),2,
+            core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+                        {"precision","u16"},{"pixels",Json::array({1000,1001,1002,65535})}};
+        const auto base=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        const auto bytes=base.page(0).layers.back().color_raster;
+        bool rejected=false;
         try {
             (void)core::CommandBus(render::ops_registry()).apply(base,Json::array({
                 Json{{"op","set_note"},{"page",2},{"note","前置変更"}},
-                Json{{"op","merge_down"},{"page",1},{"id",base.page(0).layers.back().id}}}),core::Actor("human:test"));
-        } catch (const core::ApplyError& e) {
-            rejected = std::string(e.what()).find("high-precision") != std::string::npos;
-        }
-        QVERIFY(rejected);
-        QVERIFY(base.page(1).note.empty());
+                Json{{"op","convert_layer"},{"page",1},{"id",base.page(0).layers.back().id},{"to","pen"}}}),core::Actor("human:test"));
+        } catch (const core::ApplyError& e) { rejected=std::string(e.what()).find("high-precision")!=std::string::npos; }
+        QVERIFY(rejected);QVERIFY(base.page(1).note.empty());
         QCOMPARE(base.page(0).layers.back().color_raster,bytes);
     }
     void exposureOnlyBookAdvertisesRequiredFeature() {
@@ -273,7 +335,7 @@ private slots:
         try {
             (void)core::CommandBus().apply(base, Json::array({
                 Json{{"op", "set_note"}, {"page", 2}, {"note", "前置変更"}},
-                Json{{"op", "set_layer"}, {"page", 1}, {"id", base.page(0).layers.back().id}, {"blend", "multiply"}}}),
+                Json{{"op", "set_layer"}, {"page", 1}, {"id", base.page(0).layers.back().id}, {"color", Json::array({1,2,3})}}}),
                 core::Actor("human:test"));
         } catch (const core::ApplyError& e) {
             rejected = std::string(e.what()).find("high-precision") != std::string::npos;
