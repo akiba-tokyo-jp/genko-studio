@@ -76,6 +76,14 @@ int mm_to_px(double mm, int dpi);
 // A box in mm as pixels: (x0, y0, x1, y1), each corner through mm_to_px.
 Box rect_px(const core::Rect& rect, int dpi);
 
+// The same participation rule for page rendering and destructive layer editing.
+bool uses_color_precision(const core::Page& page, bool print);
+class ColorCanvas;
+// Blend an editable precise-colour stroke layer without an RGBA8 intermediate.
+void blend_color_strokes(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, Box area, const core::Document* episode = nullptr);
+// Same paper/legacy-page-fill background used by regular drawing and destructive flatten.
+Image page_background(const core::Page& page, Size size, bool name_or_proof);
+
 RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options = {},
                          const core::Document* episode = nullptr);
 
@@ -89,7 +97,9 @@ Image render_spread(const core::Document& episode, const core::Num& first, const
 
 // One layer alone over a transparent page (its pixels, fills and lines, panel clip and mask).
 Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,
-                  bool skip_unported = false);
+                  bool skip_unported = false, bool bake_color = false);
+std::optional<Image> drawable_layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,
+                  bool skip_unported = false, bool bake_color = false);
 
 // Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
 // noise; 書き出しでのトーン化).

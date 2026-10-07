@@ -174,6 +174,7 @@ private:
     void point_width(double factor);
     void pick_colour();
     void exposure_dialog();
+    void layer_operation(const std::string& operation);
     void ask_zoom();
     void jump(int delta);
     void apply_stage(const QString& key);

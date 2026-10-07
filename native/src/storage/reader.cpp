@@ -61,9 +61,9 @@ constexpr std::array<std::string_view, 42> kLayerKeys{
     "frame_id", "placement_mm", "fit", "clip_to", "finish", "color_raster"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 2> kMaskKeys{"enabled", "asset"};
-constexpr std::array<std::string_view, 9> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po"};
-constexpr std::array<std::string_view, 10> kDictStrokeKeys{"id", "points", "pressure", "width_mm", "kind", "rgb",
-                                                           "opacity", "rotation", "po", "pressure_opacity"};
+constexpr std::array<std::string_view, 10> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb"};
+constexpr std::array<std::string_view, 11> kDictStrokeKeys{"id", "points", "pressure", "width_mm", "kind", "rgb",
+                                                           "opacity", "rotation", "po", "pressure_opacity", "color_rgb"};
 
 template <std::size_t N>
 bool in(const std::array<std::string_view, N>& keys, std::string_view key) {
@@ -983,7 +983,7 @@ Json LoadReport::to_json() const {
 
 bool is_known_top_key(std::string_view key) { return in(kTopKeys, key); }
 bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }
-bool is_known_feature(std::string_view feature) { return feature == core::kColorRasterFeature || feature == core::kExposureFeature; }
+bool is_known_feature(std::string_view feature) { return feature == core::kColorRasterFeature || feature == core::kExposureFeature || feature == core::kColorStrokeFeature; }
 
 int project_version(const Json& payload) {
     std::int64_t version = 1;

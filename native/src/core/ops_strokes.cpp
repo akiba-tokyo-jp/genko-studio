@@ -374,7 +374,10 @@ void edit_stroke(OpContext& c) {
     const PenPoints points = parse_points(raw != nullptr && py_truthy(*raw) ? *raw : Json::array());
     if (points.size() < 2) throw OpError("points needs at least two [x_mm, y_mm] pairs");
     std::vector<StrokePtr> items = layer.strokes->items;
-    items[static_cast<std::size_t>(index)] = std::make_shared<const Stroke>(coerce_stroke(points));
+    Stroke edited=coerce_stroke(points);
+    const auto& old=*items[static_cast<std::size_t>(index)];
+    if(old.color_rgb) {edited.id=old.id;edited.color_rgb=old.color_rgb;edited.rgb=old.rgb;edited.width_mm=old.width_mm;edited.kind=old.kind;edited.opacity=old.opacity;edited.pressure_opacity=old.pressure_opacity;}
+    items[static_cast<std::size_t>(index)] = std::make_shared<const Stroke>(std::move(edited));
     layer.strokes = make_strokes(std::move(items));
 }
 
@@ -389,7 +392,10 @@ void simplify_stroke(OpContext& c) {
     const Json* epsilon = get(c.op, "epsilon_mm");
     const PenPoints simplified = rdp(raw, epsilon != nullptr ? to_float(*epsilon) : 0.8);
     std::vector<StrokePtr> items = layer.strokes->items;
-    items[static_cast<std::size_t>(index)] = std::make_shared<const Stroke>(coerce_stroke(simplified));
+    Stroke edited=coerce_stroke(simplified);
+    const auto& old=*items[static_cast<std::size_t>(index)];
+    if(old.color_rgb) {edited.id=old.id;edited.color_rgb=old.color_rgb;edited.rgb=old.rgb;edited.width_mm=old.width_mm;edited.kind=old.kind;edited.opacity=old.opacity;edited.pressure_opacity=old.pressure_opacity;}
+    items[static_cast<std::size_t>(index)] = std::make_shared<const Stroke>(std::move(edited));
     layer.strokes = make_strokes(std::move(items));
 }
 
@@ -409,6 +415,8 @@ void erase(OpContext& c) {
         li = layer_for_role(page, role_from(Json(layer != nullptr && py_truthy(*layer) ? py_str(*layer) : "ink")));
     }
     if (page.layers[li].locked) throw OpError("the layer is locked");
+    if (page.layers[li].color_raster)
+        not_yet_ported(name + " on high-precision raster pixels is not supported yet");
     const Json* raw = get(op, "points");
     PenPoints points = parse_points(raw != nullptr && py_truthy(*raw) ? *raw : Json::array());
     const Json* width_value = get(op, "width_mm");
@@ -468,6 +476,7 @@ void erase(OpContext& c) {
                 part.width_mm = stroke->width_mm;
                 part.kind = stroke->kind;
                 part.rgb = stroke->rgb;
+                part.color_rgb = stroke->color_rgb;
                 part.opacity = stroke->opacity;
                 kept.push_back(std::make_shared<const Stroke>(std::move(part)));
             }

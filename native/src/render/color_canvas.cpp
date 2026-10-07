@@ -1,4 +1,5 @@
 #include "render/color_canvas.hpp"
+#include "core/strokes.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -13,6 +14,51 @@ struct Work {
     ~Work() { genko_imaging_budget_release(&reservation); }
 };
 using Pixel = std::array<double, 5>; // straight linear RGB, alpha, preceding layer alpha
+using RGB = std::array<double,3>;
+// PhotoCraft color/blend.rs scalar formulas, evaluated without an RGBA8 intermediate.
+// The existing RGB8/Python compositor is deliberately unchanged (its float32 and Soft Light semantics differ).
+double luminosity(const RGB& c) { return .3*c[0]+.59*c[1]+.11*c[2]; }
+RGB set_luminosity(RGB c,double target) {
+    const double delta=target-luminosity(c);for(auto& v:c)v+=delta;
+    const double l=luminosity(c),lo=*std::min_element(c.begin(),c.end()),hi=*std::max_element(c.begin(),c.end());
+    if(lo<0)for(auto& v:c)v=std::abs(l-lo)<1e-12?l:l+(v-l)*l/(l-lo);
+    if(hi>1)for(auto& v:c)v=std::abs(hi-l)<1e-12?l:l+(v-l)*(1-l)/(hi-l);
+    return c;
+}
+double saturation(const RGB& c) { return *std::max_element(c.begin(),c.end())-*std::min_element(c.begin(),c.end()); }
+RGB set_saturation(RGB c,double target) {
+    const double lo=*std::min_element(c.begin(),c.end()),span=saturation(c);
+    for(auto& v:c)v=span>0?(v-lo)*target/span:0;
+    return c;
+}
+double color_burn(double b,double s) { return b>=1?1:s<=0?0:1-std::min(1.0,(1-b)/s); }
+double color_dodge(double b,double s) { return b<=0?0:s>=1?1:std::min(1.0,b/(1-s)); }
+RGB blend_rgb(std::string_view mode,const RGB& b,const RGB& s) {
+    if(mode=="hue")return set_luminosity(set_saturation(s,saturation(b)),luminosity(b));
+    if(mode=="saturation")return set_luminosity(set_saturation(b,saturation(s)),luminosity(b));
+    if(mode=="color")return set_luminosity(s,luminosity(b));
+    if(mode=="luminosity")return set_luminosity(b,luminosity(s));
+    RGB out{};
+    for(unsigned c=0;c<3;++c){const double cb=b[c],cs=s[c];
+        if(mode=="multiply")out[c]=cb*cs;
+        else if(mode=="screen")out[c]=cb+cs-cb*cs;
+        else if(mode=="overlay")out[c]=cb<=.5?2*cb*cs:1-2*(1-cb)*(1-cs);
+        else if(mode=="add")out[c]=std::min(1.0,cb+cs);
+        else if(mode=="darken")out[c]=std::min(cb,cs);
+        else if(mode=="lighten")out[c]=std::max(cb,cs);
+        else if(mode=="color_burn")out[c]=color_burn(cb,cs);
+        else if(mode=="color_dodge")out[c]=color_dodge(cb,cs);
+        else if(mode=="linear_burn")out[c]=std::max(0.0,cb+cs-1);
+        else if(mode=="soft_light")out[c]=cs<=.5?2*cb*cs+cb*cb*(1-2*cs):2*cb*(1-cs)+std::sqrt(std::max(0.0,cb))*(2*cs-1);
+        else if(mode=="hard_light")out[c]=cs<=.5?2*cb*cs:cb+(2*cs-1)-cb*(2*cs-1);
+        else if(mode=="difference")out[c]=std::abs(cb-cs);
+        else if(mode=="exclusion")out[c]=cb+cs-2*cb*cs;
+        else if(mode=="subtract")out[c]=std::max(0.0,cb-cs);
+        else if(mode=="divide")out[c]=cs<=0?(cb<=0?0:1):std::min(1.0,cb/cs);
+        else out[c]=cs; // normal (unknown modes are refused at the public entry)
+    }
+    return out;
+}
 std::array<double, 4> linear(std::array<double, 4> p) {
     for (unsigned c = 0; c < 3; ++c) p[c] = core::srgb_to_linear(p[c]);
     return p;
@@ -51,14 +97,25 @@ struct ColorCanvas::Impl {
         if (!genko_imaging_budget_reserve(&work.reservation, n*sizeof(Pixel))) detail::throw_imaging_error();
         pixels.resize(static_cast<std::size_t>(n));
     }
-    void over(std::size_t i, const std::array<double, 4>& src, double opacity, bool clip) {
+    void over(std::size_t i, const std::array<double, 4>& src, double opacity, bool clip, std::string_view mode) {
         auto& dst = pixels[i];
         const double a = src[3]*std::clamp(opacity, 0.0, 1.0)*(clip && previous ? dst[4] : 1);
-        const double alpha = a+dst[3]*(1-a);
-        if (alpha > 0) for (unsigned c = 0; c < 3; ++c)
-            dst[c] = (src[c]*a+dst[c]*dst[3]*(1-a))/alpha;
-        dst[3] = alpha;
-        dst[4] = src[3];
+        const bool normal=mode.empty() || mode=="normal";
+        // Never evaluate zero-weight colour terms: HDR multiplication can overflow even when invisible.
+        if(a==0){dst[4]=src[3];return;}
+        if((normal && a==1) || dst[3]==0){
+            for(unsigned c=0;c<3;++c){dst[c]=src[c];}dst[3]=a;dst[4]=src[3];return;
+        }
+        const double alpha=a+dst[3]*(1-a);
+        const RGB mixed=normal?RGB{}:blend_rgb(mode,{dst[0],dst[1],dst[2]},{src[0],src[1],src[2]});
+        RGB next{};
+        if(alpha>0)for(unsigned c=0;c<3;++c){
+            if(normal)next[c]=(src[c]*a+dst[c]*dst[3]*(1-a))/alpha;
+            else next[c]=(dst[c]*dst[3]*(1-a)+src[c]*a*(1-dst[3])+mixed[c]*a*dst[3])/alpha;
+            if(!std::isfinite(next[c]))throw core::Error("value","high-precision composite exceeds finite working range");
+        }
+        for(unsigned c=0;c<3;++c)dst[c]=next[c];
+        dst[3]=alpha;dst[4]=src[3];
     }
 };
 ColorCanvas::ColorCanvas(const Image& initial) : impl_(std::make_unique<Impl>(initial.size())) {
@@ -72,26 +129,52 @@ ColorCanvas::ColorCanvas(const Image& initial) : impl_(std::make_unique<Impl>(in
     }
 }
 ColorCanvas::~ColorCanvas() = default;
-void ColorCanvas::blend(const Image& input, double opacity, bool clip) {
+bool ColorCanvas::supports_blend(std::string_view mode) {
+    static constexpr std::array<std::string_view,20> modes={"normal","multiply","screen","add","overlay","darken","lighten",
+        "color_burn","color_dodge","linear_burn","soft_light","hard_light","difference","exclusion","subtract","divide",
+        "hue","saturation","color","luminosity"};
+    return mode.empty() || std::find(modes.begin(),modes.end(),mode)!=modes.end();
+}
+void ColorCanvas::blend(const Image& input, double opacity, bool clip, std::string_view mode) {
+    if(!supports_blend(mode))throw core::Error("not_yet_ported","high-precision blend:"+std::string(mode));
     if (input.size() != impl_->size) throw core::Error("value", "color canvas images do not match");
     const auto rgba = input.convert("RGBA");
     for (int y = 0; y < rgba.height(); ++y) {
         const auto* row = reinterpret_cast<const unsigned char*>(rgba.raw()->image[y]);
         for (int x = 0; x < rgba.width(); ++x)
             impl_->over(std::size_t(y)*rgba.width()+x,
-                linear({row[x*4]/255.0, row[x*4+1]/255.0, row[x*4+2]/255.0, row[x*4+3]/255.0}), opacity, clip);
+                linear({row[x*4]/255.0, row[x*4+1]/255.0, row[x*4+2]/255.0, row[x*4+3]/255.0}), opacity, clip, mode);
     }
     impl_->previous = true;
 }
-void ColorCanvas::blend(const core::ColorRasterView& source, Size full, Box area, double opacity, bool clip) {
+void ColorCanvas::blend(const core::ColorRasterView& source, Size full, Box area, double opacity, bool clip, std::string_view mode) {
+    if(!supports_blend(mode))throw core::Error("not_yet_ported","high-precision blend:"+std::string(mode));
     if (full.width <= 0 || full.height <= 0 || area.width() != impl_->size.width || area.height() != impl_->size.height)
         throw core::Error("value", "color canvas region does not match");
     for (int y = 0; y < area.height(); ++y) for (int x = 0; x < area.width(); ++x) {
         const auto p = sampled(source, (area.x0+x+.5)*source.width()/full.width-.5,
             (area.y0+y+.5)*source.height()/full.height-.5);
-        impl_->over(std::size_t(y)*area.width()+x, p, opacity, clip);
+        impl_->over(std::size_t(y)*area.width()+x, p, opacity, clip, mode);
     }
     impl_->previous = true;
+}
+void ColorCanvas::blend(const ColorCanvas& source, double opacity, bool clip, std::string_view mode) {
+    if (!supports_blend(mode) || source.impl_->size != impl_->size) throw core::Error("value","color canvas source does not match");
+    for (std::size_t i=0;i<impl_->pixels.size();++i) {
+        const auto& p=source.impl_->pixels[i];
+        impl_->over(i,{p[0],p[1],p[2],p[3]},opacity,clip,mode);
+    }
+    impl_->previous=true;
+}
+void ColorCanvas::blend_stroke(const Image& mask, const core::Json& color, double opacity) {
+    core::validate_stroke_color(color);
+    if (mask.mode() != "L" || mask.size() != impl_->size) throw core::Error("value","stroke coverage does not match");
+    auto p=linear({color["values"][0].get<double>(),color["values"][1].get<double>(),color["values"][2].get<double>(),1});
+    for (int y=0;y<mask.height();++y) {
+        const auto* row=reinterpret_cast<const unsigned char*>(mask.raw()->image[y]);
+        for (int x=0;x<mask.width();++x) { p[3]=row[x]/255.;impl_->over(std::size_t(y)*mask.width()+x,p,opacity,false,"normal"); }
+    }
+    impl_->previous=true;
 }
 void ColorCanvas::expose(const core::Exposure& e, double opacity, bool clip, const Image* mask) {
     if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "exposure mask does not match");
@@ -108,11 +191,30 @@ Image ColorCanvas::image() const {
         auto* row = reinterpret_cast<unsigned char*>(out.raw()->image[y]);
         for (int x = 0; x < impl_->size.width; ++x) {
             const auto& p = impl_->pixels[std::size_t(y)*impl_->size.width+x];
-            for (unsigned c = 0; c < 3; ++c) row[x*4+c] = static_cast<unsigned char>(byte(core::linear_to_srgb(p[c])));
+            for (unsigned c = 0; c < 3; ++c) {
+                const auto encoded=core::linear_to_srgb(p[c]);
+                if(!std::isfinite(encoded))throw core::Error("value","high-precision output exceeds finite working range");
+                row[x*4+c]=static_cast<unsigned char>(byte(encoded));
+            }
             row[x*4+3] = static_cast<unsigned char>(byte(p[3]));
         }
     }
     return out;
+}
+bool ColorCanvas::is_opaque() const {
+    return std::all_of(impl_->pixels.begin(), impl_->pixels.end(), [](const Pixel& p) { return p[3] == 1; });
+}
+bool ColorCanvas::keeps_preceding_alpha() const {
+    return std::all_of(impl_->pixels.begin(), impl_->pixels.end(), [](const Pixel& p) { return p[3] == p[4]; });
+}
+std::string ColorCanvas::color_raster(std::string_view precision) const {
+    return core::encode_color_pixels(static_cast<std::uint32_t>(impl_->size.width),
+                                    static_cast<std::uint32_t>(impl_->size.height), precision,
+        [this](std::size_t i) {
+            const auto& p = impl_->pixels[i];
+            return std::array<double, 4>{core::linear_to_srgb(p[0]), core::linear_to_srgb(p[1]),
+                                         core::linear_to_srgb(p[2]), p[3]};
+        });
 }
 Image color_raster_preview(const core::ColorRasterView& src, Size full, Box area) {
     const auto transparent = Image::create("RGBA", Size{area.width(), area.height()}, Ink{0, 0, 0, 0});

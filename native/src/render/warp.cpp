@@ -193,6 +193,7 @@ core::Stroke warp_stroke(const core::Stroke& stroke, const Go& go) {
     if (!std::isfinite(out.width_mm)) warp_error("the transform stretches the area too far");
     out.kind = stroke.kind;
     out.rgb = stroke.rgb;
+    out.color_rgb = stroke.color_rgb;
     out.opacity = stroke.opacity;
     out.id = stroke.id;
     return out;

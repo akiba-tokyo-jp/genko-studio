@@ -734,6 +734,33 @@ Box area_of(const RenderOptions& options, Size size) {
     return Box{r.x, r.y, r.x + r.w, r.y + r.h};
 }
 
+void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
+    if (layer.mask || layer.effect || layer.screen || layer.color || layer.panel_each || !layer.patches.empty() || layer.raster_png)
+        throw NotYetPorted("precise stroke layer style");
+    ColorCanvas own(transparent(area));
+    for (const auto& stroke : layer.strokes->items) {
+        check_cancel(ctx);
+        const auto brush=brushes::brush(stroke->kind);
+        const auto reach=brushes::extent(ctx.size,core::stroke_points(*stroke),ctx.dpi,stroke_width(*stroke),stroke->kind);
+        if (!reach || !intersects(*reach,area)) continue;
+        auto drawn=brushes::draw(ctx.size,core::stroke_points(*stroke),ctx.dpi,stroke_width(*stroke),stroke->kind,stroke->id,stroke->rotation,stroke->pressure_opacity);
+        if (!drawn) continue;
+        const Box box{drawn->origin.x,drawn->origin.y,drawn->origin.x+drawn->mask.width(),drawn->origin.y+drawn->mask.height()};
+        const auto part=intersection(box,area);
+        if (part.width()<=0 || part.height()<=0) continue;
+        Image mask=Image::create("L",size_of(area),Ink(0));
+        mask.paste(drawn->mask.crop(shifted(part,-box.x0,-box.y0)),Point{part.x0-area.x0,part.y0-area.y0});
+        if (panel && layer.panel_clip) mask=chops::multiply(mask,*panel);
+        Json color;
+        if (stroke->color_rgb && !guide_role(layer.role)) color=*stroke->color_rgb;
+        else {
+            const auto rgb=guide_role(layer.role)?kNameColor:stroke_rgb(*stroke,brush);
+            color=Json{{"precision","f32"},{"values",Json::array({rgb[0]/255.,rgb[1]/255.,rgb[2]/255.})}};
+        }
+        own.blend_stroke(mask,color,core::py_clamp(stroke->opacity,0.,1.)*brush.opacity);
+    }
+    target.blend(own,layer.opacity,layer.clip,layer.blend);
+}
 RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, const core::Document* episode,
                     std::vector<std::string>& omitted) {
     if (options.region && needs_whole_page(page_in)) {
@@ -771,28 +798,10 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     const bool print = mode == "print";
     const bool name_or_proof = mode == "name" || mode == "proof";
 
-    // the paper, made in RGBA at once
-    std::vector<std::int64_t> paper{255, 255, 255};
-    const Json* paper_json = get(page.extra, "paper_rgb");
-    if (paper_json != nullptr && core::py_truthy(*paper_json)) paper = first3(core::int_tuple(*paper_json));
-    Image rgba = Image::create("RGBA", size_of(area), Ink::with_alpha(paper, 255));
-    std::vector<LayerRole> fill_roles{LayerRole::Bg, LayerRole::Ink, LayerRole::Finish};
-    if (name_or_proof) fill_roles = {LayerRole::Bg, LayerRole::Name, LayerRole::Ink, LayerRole::Finish};
-    for (const LayerRole role : fill_roles) {
-        const core::NumList* fill = page.fill_of(role);
-        if (fill == nullptr) continue;
-        if (guide_role(role) && print) continue;
-        std::vector<std::int64_t> rgb;
-        for (std::size_t i = 0; i < fill->size() && i < 3; ++i) rgb.push_back(core::py_int((*fill)[i]));
-        rgba.paste(Ink::with_alpha(rgb, 255), Box{0, 0, area.width(), area.height()});
-    }
+    Image rgba = page_background(page,size_of(area),name_or_proof);
 
     std::optional<ColorCanvas> precision;
-    if (std::any_of(page.layers.begin(), page.layers.end(), [print](const Layer& l) {
-            // Only sources participating in this render may change its compositing precision.
-            return l.color_raster && l.kind != LayerKind::Folder && l.visible &&
-                   (!print || (l.exportable && !guide_role(l.role)));
-        }))
+    if (uses_color_precision(page, print))
         precision.emplace(rgba);
     std::optional<Image> prev_alpha;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
@@ -815,15 +824,18 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (!layer.visible) continue;
         if (print && !layer.exportable) continue;
         if (guide_role(layer.role) && print) continue;
+        if (precision && core::has_color_strokes(layer)) {
+            precise_strokes(*precision,ctx,layer,area,panel);continue;
+        }
         if (precision && layer.color_raster) {
             if (is_tone(layer)) throw NotYetPorted("high_precision_tone");
-            if (layer.blend != "normal" || layer.mask || layer.effect || layer.screen || layer.color ||
+            if (!ColorCanvas::supports_blend(layer.blend) || layer.mask || layer.effect || layer.screen || layer.color ||
                 !layer.patches.empty() || layer.stroke_count() || layer.panel_clip)
                 throw NotYetPorted("high_precision_layer_style");
-            precision->blend(core::ColorRasterView(*layer.color_raster), ctx.size, area, layer.opacity, layer.clip);
+            precision->blend(core::ColorRasterView(*layer.color_raster), ctx.size, area, layer.opacity, layer.clip, layer.blend);
             continue;
         }
-        if (precision && layer.blend != "normal") throw NotYetPorted("high_precision_blend:"+layer.blend);
+        if (precision && !ColorCanvas::supports_blend(layer.blend)) throw NotYetPorted("high_precision_blend:"+layer.blend);
         if (is_tone(layer)) {  // tones sit in the layer order: a layer above can cover them
             if (precision) throw NotYetPorted("high_precision_tone");
             const bool dots = (print && ctx.finish && ctx.dots) || screen_dots(ctx);
@@ -833,6 +845,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         }
         if (layer.kind == LayerKind::Adjust) {  // a correction layer changes what is under it
             if (precision) {
+                if (!layer.blend.empty() && layer.blend!="normal")throw NotYetPorted("high_precision_adjustment_blend");
                 if (!layer.adjust || !layer.adjust->contains("kind") || (*layer.adjust)["kind"] != "exposure")
                     throw NotYetPorted("high_precision_adjustment");
                 std::optional<Image> mask;
@@ -849,7 +862,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             if (panel != nullptr && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *panel));
             raster = masked(ctx, layer, std::move(raster), area);
             const Image* clip = layer.clip && prev_alpha ? &*prev_alpha : nullptr;
-            if (precision) precision->blend(raster, layer.opacity, layer.clip);
+            if (precision) precision->blend(raster, layer.opacity, layer.clip, layer.blend);
             else rgba = blend_over(rgba, raster, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
             prev_alpha = alpha_of(raster);
             continue;
@@ -877,7 +890,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         Image picture = masked(ctx, layer, std::move(*raster), area);
         if (layer.color && !layer.color->empty() && (!print || layer.color_prints)) picture = tinted(picture, *layer.color);
         const Image* clip = layer.clip && prev_alpha ? &*prev_alpha : nullptr;
-        if (precision) precision->blend(picture, layer.opacity, layer.clip);
+        if (precision) precision->blend(picture, layer.opacity, layer.clip, layer.blend);
         else rgba = blend_over(rgba, picture, layer.blend.empty() ? "normal" : layer.blend, layer.opacity, clip);
         prev_alpha = alpha_of(picture);
     }
@@ -963,8 +976,57 @@ Box rect_px(const core::Rect& rect, int dpi) {
     return Box{x, y, x + w, y + h};
 }
 
+bool uses_color_precision(const core::Page& page, bool print) {
+    return std::any_of(page.layers.begin(), page.layers.end(), [print](const Layer& l) {
+        return (l.color_raster || core::has_color_strokes(l)) && l.kind != LayerKind::Folder && l.visible &&
+               (!print || (l.exportable && !guide_role(l.role)));
+    });
+}
+
+Image page_background(const core::Page& page, Size size, bool name_or_proof) {
+    // Keep the established fill order and integer/channel semantics unchanged.
+    std::vector<std::int64_t> paper{255, 255, 255};
+    const Json* paper_json = get(page.extra, "paper_rgb");
+    if (paper_json != nullptr && core::py_truthy(*paper_json)) paper = first3(core::int_tuple(*paper_json));
+    Image rgba = Image::create("RGBA", size, Ink::with_alpha(paper, 255));
+    std::vector<LayerRole> fill_roles{LayerRole::Bg, LayerRole::Ink, LayerRole::Finish};
+    if (name_or_proof) fill_roles = {LayerRole::Bg, LayerRole::Name, LayerRole::Ink, LayerRole::Finish};
+    for (const LayerRole role : fill_roles) {
+        const core::NumList* fill = page.fill_of(role);
+        if (fill == nullptr) continue;
+        if (guide_role(role) && !name_or_proof) continue;
+        std::vector<std::int64_t> rgb;
+        for (std::size_t i = 0; i < fill->size() && i < 3; ++i) rgb.push_back(core::py_int((*fill)[i]));
+        rgba.paste(Ink::with_alpha(rgb, 255), Box{0, 0, size.width, size.height});
+    }
+    return rgba;
+}
+
 RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
     std::vector<std::string> omitted;
+    // Keep every layer in high precision within a region; quantize only the final output pixels.
+    // Reuse the established global-coordinate region renderer, not an RGBA8 layer intermediate.
+    if(uses_color_precision(page,options.mode=="print") && !needs_whole_page(page)){
+        const Size size{mm_to_px(page.spec.width_mm.value(),dpi),mm_to_px(page.spec.height_mm.value(),dpi)};
+        if(size.width>0x7fffffff/4 || size.height>0x7fffffff/4)throw core::Error("image_too_large","the page is too large at this resolution");
+        const Box area=area_of(options,size);
+        const auto pixels=static_cast<std::int64_t>(area.width())*area.height();
+        if(pixels>kMaxAreaPixels)throw core::Error("image_too_large","the picture is too large at this resolution");
+        if(pixels>1024LL*1024){
+            if(options.stop.stop_requested())throw Cancelled();
+            RenderResult out{Image::create_blank("RGB",size_of(area)),{}};
+            constexpr int tile=512;
+            for(int y=area.y0;y<area.y1;y+=tile){
+                for(int x=area.x0;x<area.x1;x+=tile){
+                    if(options.stop.stop_requested())throw Cancelled();
+                    RenderOptions part=options;part.region=RenderRegion{x,y,std::min(tile,area.x1-x),std::min(tile,area.y1-y)};
+                    const auto piece=render(page,dpi,part,episode,omitted);
+                    out.image.paste(piece.image,Point{x-area.x0,y-area.y0});
+                }
+            }
+            out.omitted=std::move(omitted);return out;
+        }
+    }
     RenderResult out = render(page, dpi, options, episode, omitted);
     out.omitted = std::move(omitted);
     return out;
@@ -1026,8 +1088,15 @@ Image render_spread(const core::Document& episode, const core::Num& first, const
     return image;
 }
 
+void blend_color_strokes(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, Box area, const core::Document* episode) {
+    std::vector<std::string> omitted;
+    Ctx ctx;ctx.page=&page;ctx.episode=episode;ctx.dpi=dpi;ctx.mode="proof";ctx.omitted=&omitted;
+    ctx.size=Size{mm_to_px(page.spec.width_mm.value(),dpi),mm_to_px(page.spec.height_mm.value(),dpi)};
+    const auto panels=clip_mask(page,ctx.size,dpi,area);
+    precise_strokes(canvas,ctx,layer,area,panels?&*panels:nullptr);
+}
 Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode,
-                  bool skip_unported_flag) {
+                  bool skip_unported_flag, bool bake_color) {
     std::vector<std::string> omitted;
     Ctx ctx;
     ctx.page = &page;
@@ -1039,6 +1108,9 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
     ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
     const Box area{0, 0, ctx.size.width, ctx.size.height};
     Image empty = transparent(area);
+    const auto colored = [&](Image image) {
+        return bake_color && layer.color && !layer.color->empty() ? tinted(image, *layer.color) : image;
+    };
     if (layer.kind == LayerKind::Folder) return empty;
     if (is_tone(layer)) {  // the tone's ink as alpha, drawn on white
         const Image white = Image::create("RGBA", ctx.size, Ink{255, 255, 255, 255});
@@ -1046,9 +1118,45 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
         const Image drawn = tones::draw_layer(white, layer, tone_page(ctx), area, panels ? &*panels : nullptr, false);
         Image out = Image::create("RGBA", ctx.size, Ink{20, 20, 20, 0});
         out.putalpha(chops::difference(white.convert("L"), drawn.convert("L")));
-        return masked(ctx, layer, std::move(out), area);
+        return colored(masked(ctx, layer, std::move(out), area));
     }
     if (layer.kind == LayerKind::Adjust) return empty;
+    const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
+    if (layer.kind == LayerKind::Fill && truthy_json(layer.fill)) {
+        Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area);
+        if (panel_mask && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *panel_mask));
+        return colored(masked(ctx, layer, std::move(raster), area));
+    }
+    std::optional<Image> raster = layer_pixels(ctx, layer, area, panel_mask ? &*panel_mask : nullptr, false);
+    if (!raster) return empty;
+    return colored(masked(ctx, layer, layer_effects(layer, std::move(*raster), dpi), area));
+}
+
+std::optional<Image> drawable_layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode,
+                  bool skip_unported_flag, bool bake_color) {
+    std::vector<std::string> omitted;
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = episode;
+    ctx.dpi = dpi;
+    ctx.mode = "proof";
+    ctx.skip_unported = skip_unported_flag;
+    ctx.omitted = &omitted;
+    ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+    const Box area{0, 0, ctx.size.width, ctx.size.height};
+    const auto colored = [&](Image image) {
+        return bake_color && layer.color && !layer.color->empty() ? tinted(image, *layer.color) : image;
+    };
+    if (layer.kind == LayerKind::Folder) return std::nullopt;
+    if (is_tone(layer)) {  // the tone's ink as alpha, drawn on white
+        const Image white = Image::create("RGBA", ctx.size, Ink{255, 255, 255, 255});
+        const std::optional<Image> panels = clip_mask(page, ctx.size, dpi, area);
+        const Image drawn = tones::draw_layer(white, layer, tone_page(ctx), area, panels ? &*panels : nullptr, false);
+        Image out = Image::create("RGBA", ctx.size, Ink{20, 20, 20, 0});
+        out.putalpha(chops::difference(white.convert("L"), drawn.convert("L")));
+        return colored(masked(ctx, layer, std::move(out), area));
+    }
+    if (layer.kind == LayerKind::Adjust) return std::nullopt;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     if (layer.kind == LayerKind::Fill && truthy_json(layer.fill)) {
         Image raster = fill_layer_image(layer, ctx.size, dpi, page.spec.expression != "color", area);
@@ -1056,8 +1164,8 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
         return masked(ctx, layer, std::move(raster), area);
     }
     std::optional<Image> raster = layer_pixels(ctx, layer, area, panel_mask ? &*panel_mask : nullptr, false);
-    if (!raster) return empty;
-    return masked(ctx, layer, layer_effects(layer, std::move(*raster), dpi), area);
+    if (!raster) return std::nullopt;
+    return masked(ctx, layer, colored(layer_effects(layer, std::move(*raster), dpi)), area);
 }
 
 Image to_bitonal(const Image& image, int threshold, const core::Json* screen) {

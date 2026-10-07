@@ -38,6 +38,7 @@
 #include "render/filters.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
+#include "render/color_canvas.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
@@ -697,15 +698,16 @@ void into_pixels(const Page& page, Layer& target, const Image& picture) {
 }
 
 // layerops._composite: the layers drawn over each other as they show (blend, opacity, clip), over transparency
-Image composite_layers(const Document& doc, const Page& page, const std::vector<std::size_t>& layers, int dpi) {
+bool merge_draws(const Layer& layer);
+Image composite_layers(const Document& doc, const Page& page, const std::vector<std::size_t>& layers, int dpi, const Image* background = nullptr) {
     const Size size = page_px(page, dpi);
-    Image out = Image::create("RGBA", size, Ink{0, 0, 0, 0});
+    Image out = background ? *background : Image::create("RGBA", size, Ink{0, 0, 0, 0});
     std::optional<Image> prev;
     std::vector<std::string> omitted;
     const detail::Ctx ctx = context(page, &doc, dpi, size, omitted);
     for (const std::size_t i : layers) {
         const Layer& layer = page.layers[i];
-        if (layer.kind == LayerKind::Folder) continue;
+        if (layer.kind == LayerKind::Folder || (background && !merge_draws(layer))) continue;
         if (layer.kind == LayerKind::Adjust) {
             out = detail::adjusted(ctx, std::move(out), layer, layer.clip && prev ? &*prev : nullptr, Box{0, 0, size.width, size.height});
             continue;
@@ -724,6 +726,123 @@ Image composite_layers(const Document& doc, const Page& page, const std::vector<
         prev = picture.getchannel(3);
     }
     return out;
+}
+
+bool selected_precision(const Page& page, const std::vector<std::size_t>& layers) {
+    return std::any_of(layers.begin(), layers.end(), [&page](std::size_t i) { return bool(page.layers[i].color_raster) || core::has_color_strokes(page.layers[i]); });
+}
+bool has_precision(const Page& page, const std::vector<std::size_t>& layers) {
+    return uses_color_precision(page, false) || selected_precision(page, layers);
+}
+bool merge_printed(const Layer& layer) {
+    return layer.exportable && layer.role != LayerRole::Name && layer.role != LayerRole::Draft;
+}
+bool merge_draws(const Layer& l) {
+    return l.color_raster || l.raster_png || l.stroke_count() || !l.patches.empty() ||
+           (l.kind == LayerKind::Fill && l.fill && core::py_truthy(*l.fill)) ||
+           (l.kind == LayerKind::Adjust && l.adjust && core::py_truthy(*l.adjust)) ||
+           l.kind == LayerKind::Tone || l.kind == LayerKind::Placed;
+}
+bool merge_tail_clipped(const Page& page, const std::vector<std::size_t>& layers) {
+    bool proof = true, print = merge_printed(page.layers[layers.front()]);
+    for (std::size_t i = layers.back() + 1; i < page.layers.size(); ++i) {
+        const Layer& l = page.layers[i];
+        if (!l.visible || l.kind == LayerKind::Folder) continue;
+        if (l.kind == LayerKind::Adjust) {
+            if (l.clip && l.opacity > 0 && (proof || (print && merge_printed(l)))) return true;
+            continue; // An adjustment consumes the preceding alpha but does not replace it.
+        }
+        if (!merge_draws(l)) continue;
+        if (l.clip && (proof || (print && merge_printed(l)))) return true;
+        if (l.role != LayerRole::Name && l.role != LayerRole::Draft) proof = false;
+        if (merge_printed(l)) print = false;
+        if (!proof && !print) break;
+    }
+    return false;
+}
+void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
+    target.strokes = core::empty_strokes(); target.patches.clear(); target.mask.reset();
+    target.kind = pixels.first.empty() ? LayerKind::Strokes : LayerKind::Raster;
+    target.raster_png.reset(); target.asset.reset();
+    target.fill.reset(); target.adjust.reset(); target.effect.reset(); target.fill_rgb.reset();
+    target.screen.reset(); target.color.reset(); target.tone.reset(); target.source.reset();
+    target.blend = "normal"; target.opacity = 1; target.clip = pixels.second; target.panel_clip = false;
+    target.color_raster = pixels.first.empty() ? core::Bytes{} : std::make_shared<const std::string>(std::move(pixels.first));
+}
+std::pair<std::string, bool> composite_color_layers(const Document& doc, const Page& page,
+                                   const std::vector<std::size_t>& layers, bool flatten = false) {
+    const Size size = page_px(page, kWorkingDpi);
+    if (size.width <= 0 || size.height <= 0 ||
+        std::uint64_t(size.width) * std::uint64_t(size.height) > core::kColorRasterMaxPixels)
+        throw OpError("high-precision merge pixel budget exceeded");
+    if (layers.empty()) throw OpError("no layers to merge");
+    const Layer& first = page.layers[layers.front()];
+    const bool printed = merge_printed(first);
+    if (printed && uses_color_precision(page, false) != uses_color_precision(page, true))
+        throw NotYetPorted("high-precision merge has different proof/print compositing");
+    for (const auto i : layers) {
+        const Layer& l = page.layers[i];
+        if (l.role == LayerRole::Name || l.role == LayerRole::Draft ||
+            merge_printed(l) != printed || l.visible != first.visible)
+            throw NotYetPorted("high-precision merge with mixed display/print participation");
+        if (l.screen && core::py_truthy(*l.screen))
+            throw NotYetPorted("high-precision merge with print screening");
+        if (printed && l.kind != LayerKind::Fill && l.color && !l.color->empty() && !l.color_prints)
+            throw NotYetPorted("high-precision merge has different proof/print tint");
+    }
+    for (std::size_t i = layers.front(); i <= layers.back(); ++i)
+        if (!std::binary_search(layers.begin(), layers.end(), i) && page.layers[i].visible &&
+            page.layers[i].kind != LayerKind::Folder && merge_draws(page.layers[i]))
+            throw NotYetPorted("high-precision merge spans an unselected visible layer");
+    ColorCanvas out(flatten ? page_background(page,size,false) : Image::create("RGBA",size,Ink{0,0,0,0}));
+    const Box all{0, 0, size.width, size.height};
+    bool floating = !selected_precision(page, layers);
+    std::size_t drawn = 0; bool external_clip = false, adjustment = false;
+    const auto participate = [&](const Layer& layer) {
+        if (drawn++ == 0) external_clip = layer.clip;
+    };
+    for (const auto i : layers) {
+        const Layer& layer = page.layers[i];
+        if (layer.kind == LayerKind::Folder) continue;
+        if (!ColorCanvas::supports_blend(layer.blend))
+            throw NotYetPorted("high-precision merge blend:" + layer.blend);
+        if (!layer.blend.empty() && layer.blend!="normal" && !out.is_opaque())
+            throw NotYetPorted("high-precision merge blend depends on external background");
+        if (layer.kind == LayerKind::Adjust) {
+            if (!layer.blend.empty() && layer.blend!="normal")throw NotYetPorted("high-precision merge adjustment blend");
+            adjustment = true;
+            if (!layer.adjust || layer.adjust->value("kind", Json()) != "exposure")
+                throw NotYetPorted("high-precision merge adjustment");
+            std::optional<Image> mask;
+            if (layer.mask && layer.mask->enabled && layer.mask->png)
+                mask = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bilinear);
+            const auto exposure = core::Exposure::parse(*layer.adjust);
+            if (layer.opacity > 0 && (exposure.stops != 0 || exposure.offset != 0 || exposure.gamma != 1) && !out.is_opaque())
+                throw NotYetPorted("high-precision merge adjustment depends on external background");
+            out.expose(exposure, layer.opacity, layer.clip, mask ? &*mask : nullptr);
+            floating = true; // An adjustment can produce HDR even from a u16 input.
+        } else if (core::has_color_strokes(layer)) {
+            participate(layer);
+            for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
+            blend_color_strokes(out,page,layer,kWorkingDpi,all,&doc);
+        } else if (layer.color_raster) {
+            participate(layer);
+            const core::ColorRasterView pixels(*layer.color_raster);
+            floating = floating || pixels.metadata("")["precision"] == "f32";
+            out.blend(pixels, size, all, layer.opacity, layer.clip, layer.blend);
+        } else {
+            auto picture = drawable_layer_image(page, layer, kWorkingDpi, &doc, false, true);
+            if (!picture) continue;
+            participate(layer);
+            out.blend(*picture, layer.opacity, layer.clip, layer.blend);
+        }
+    }
+    if (drawn == 0) return {"", false};
+    if (external_clip && (drawn != 1 || adjustment))
+        throw NotYetPorted("high-precision merge with external clipping");
+    if (merge_tail_clipped(page, layers) && !out.keeps_preceding_alpha())
+        throw NotYetPorted("high-precision merge changes downstream clipping alpha");
+    return {out.color_raster(floating ? "f32" : "u16"), external_clip};
 }
 
 // layerops._ids
@@ -760,6 +879,10 @@ void after_merge(Page& page, const std::vector<std::size_t>& merged) {
             layer.strokes = core::empty_strokes();
             layer.patches.clear();
             layer.raster_png.reset();
+            layer.color_raster.reset();
+            if (!merged.empty() && page.layers[merged.front()].color_raster) {
+                layer.fill.reset(); layer.adjust.reset(); layer.kind = LayerKind::Strokes;
+            }
         } else {
             gone[merged[k]] = true;
         }
@@ -784,9 +907,14 @@ void merge_layers(OpContext& c) {
     }
     if (layers.size() < 2) throw OpError("choose two or more layers to merge");
     check_mergeable(page, layers);
-    const Image picture = composite_layers(doc, page, layers, kWorkingDpi);
+    if (has_precision(page, layers)) {
+        auto bytes = composite_color_layers(doc, page, layers);
+        into_color_pixels(page.layers[layers.front()], std::move(bytes));
+    } else {
+        const Image picture = composite_layers(doc, page, layers, kWorkingDpi);
+        into_pixels(page, page.layers[layers.front()], picture);
+    }
     Layer& target = page.layers[layers.front()];
-    into_pixels(page, target, picture);
     if (core::truthy_at(op, "name")) target.title = core::py_str(op["name"]);
     after_merge(page, layers);
 }
@@ -816,17 +944,71 @@ void merge_visible(OpContext& c) {
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
     Page& page = doc.edit_page(at);
+    const bool copy = core::py_truthy(core::get_or(op, "copy", Json(true)));
+    const bool flatten = core::py_truthy(core::get_or(op, "flatten", Json(false)));
+    if (flatten && copy) throw OpError("flatten requires copy=false");
     std::vector<std::size_t> shown;
     for (std::size_t i = 0; i < page.layers.size(); ++i) {
         const Layer& layer = page.layers[i];
         if (layer.visible && layer.kind != LayerKind::Folder && layer.role != LayerRole::Name && layer.role != LayerRole::Draft &&
-            parents_visible(page, layer)) {
-            shown.push_back(i);
-        }
+            parents_visible(page, layer)) shown.push_back(i);
     }
     if (shown.empty()) throw OpError("no layer is showing");
-    const Image picture = composite_layers(doc, page, shown, kWorkingDpi);
-    if (core::py_truthy(core::get_or(op, "copy", Json(true)))) {
+    std::vector<std::size_t> removed=shown;
+    if (flatten) {
+        if (page_background(page,Size{1,1},false).tobytes()!=page_background(page,Size{1,1},true).tobytes())
+            throw NotYetPorted("flatten with different proof/print background");
+        removed={shown.front()};
+        for (std::size_t i=0;i<page.layers.size();++i) {
+            const Layer& layer=page.layers[i];
+            if (i!=shown.front() && layer.role!=LayerRole::Name && layer.role!=LayerRole::Draft) removed.push_back(i);
+        }
+    }
+    if (!copy) check_mergeable(page, removed);
+    const auto finish = [&] {
+        if (flatten) {
+            Layer& target=page.layers[shown.front()];target.lock_alpha=true;
+            target.title=core::truthy_at(op,"name")?core::py_str(op["name"]):std::string("背景（フラット化）");
+            for (const auto i:removed) {
+                if (i==shown.front() || !core_role(page.layers[i].role)) continue;
+                const Layer& previous=page.layers[i];Layer empty;
+                empty.id=previous.id;empty.role=previous.role;empty.title=previous.title;empty.visible=previous.visible;
+                empty.exportable=previous.exportable;page.layers[i]=std::move(empty);
+            }
+        }
+        after_merge(page, removed);
+    };
+    if (has_precision(page, shown)) {
+        auto bytes = composite_color_layers(doc, page, shown, flatten);
+        if (flatten && bytes.second) throw NotYetPorted("flatten with external clipping");
+        if (copy) {
+            Layer layer; layer.id = core::truthy_at(op, "id") ? core::py_str(op["id"]) : core::new_id();
+            layer.role = LayerRole::User; layer.exportable = page.layers[shown.front()].exportable;
+            layer.title = core::truthy_at(op, "name") ? core::py_str(op["name"]) : std::string("表示レイヤーのコピー");
+            for (const auto& item : page.layers) if (item.id == layer.id) throw OpError("layer " + layer.id + " exists");
+            into_color_pixels(layer, std::move(bytes)); page.layers.push_back(std::move(layer));
+        } else {
+            into_color_pixels(page.layers[shown.front()], std::move(bytes));
+            finish();
+        }
+        return;
+    }
+    Image picture;
+    if (flatten) {
+        // RGB8/monochrome keeps its existing display compositing instead of silently becoming linear-light f32.
+        const bool printed=merge_printed(page.layers[shown.front()]);
+        for (const auto i:shown) {
+            const Layer& layer=page.layers[i];
+            if (merge_printed(layer)!=printed || (layer.screen && core::py_truthy(*layer.screen)) ||
+                (printed && layer.color && !layer.color->empty() && !layer.color_prints))
+                throw NotYetPorted("flatten with different proof/print participation");
+        }
+        const Image background=page_background(page,page_px(page,kWorkingDpi),false);
+        picture=composite_layers(doc,page,shown,kWorkingDpi,&background);
+        into_pixels(page,page.layers[shown.front()],picture);finish();return;
+    }
+    picture=composite_layers(doc,page,shown,kWorkingDpi);
+    if (copy) {
         Layer layer;
         layer.id = core::truthy_at(op, "id") ? core::py_str(op["id"]) : core::new_id();
         layer.role = LayerRole::User;
@@ -840,7 +1022,6 @@ void merge_visible(OpContext& c) {
         page.layers.push_back(std::move(layer));
         return;
     }
-    check_mergeable(page, shown);
     into_pixels(page, page.layers[shown.front()], picture);
     after_merge(page, shown);
 }
@@ -988,6 +1169,12 @@ void merge_down(OpContext& c) {
         }
         if (item.locked) throw OpError("the layer is locked");
     }
+    if (has_precision(page, {li, ui})) {
+        auto bytes = composite_color_layers(doc, page, {li, ui});
+        into_color_pixels(page.layers[li], std::move(bytes));
+        page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(ui));
+        return;
+    }
     const Layer& upper = page.layers[ui];
     const Layer& lower = page.layers[li];
     const bool has_raster = [](const Layer& l) { return l.raster_png && !l.raster_png->empty(); }(upper) ||
@@ -1035,7 +1222,45 @@ void convert_layer(OpContext& c) {
     Layer& layer = page.layers[named.front()];
     const std::string to = core::truthy_at(op, "to") ? core::py_str(op["to"]) : std::string();
     if (layer.locked) throw OpError("the layer is locked");
+    if (layer.color_raster) {
+        if (to == "paint") return; // Already editable raster pixels: preserve every source bit and property.
+        if (to == "pen") {
+            const auto* preserve=core::get(op,"preserve_precision");
+            if(!preserve || !preserve->is_boolean() || !preserve->get<bool>())
+                throw OpError("high-precision vector conversion requires preserve_precision: true");
+            if(layer.mask || layer.effect || layer.screen || layer.color || !layer.patches.empty() || layer.stroke_count() || layer.panel_each)
+                throw OpError("high-precision vector source style is not supported yet");
+            const auto min_mm = core::finite_float(core::get_or(op,"min_mm",Json(.8)),"min_mm");
+            const Image picture = layer_image(page,layer,kWorkingDpi,&doc);
+            const core::ColorRasterView source(*layer.color_raster);
+            auto traced = vectorize::trace_layer(picture,kWorkingDpi,min_mm,&source);
+            if (traced.empty()) throw OpError("the layer has no marks to trace");
+            std::vector<core::StrokePtr> strokes;
+            strokes.reserve(traced.size());
+            for (auto& stroke : traced) strokes.push_back(std::make_shared<const core::Stroke>(std::move(stroke)));
+            layer.strokes = core::make_strokes(std::move(strokes));
+            layer.color_raster.reset();layer.raster_png.reset();layer.asset.reset();layer.patches.clear();
+            layer.kind = LayerKind::Strokes;
+            if (std::find(doc.features.begin(),doc.features.end(),core::kColorStrokeFeature)==doc.features.end())
+                doc.features.emplace_back(core::kColorStrokeFeature);
+            return;
+        }
+        throw OpError("to must be paint or pen");
+    }
     if (to == "paint") {
+        if (core::has_color_strokes(layer)) {
+            const auto size=page_px(page,kWorkingDpi);const Box all{0,0,size.width,size.height};
+            ColorCanvas canvas(Image::create("RGBA",size,Ink{0,0,0,0}));
+            Layer own=layer;own.opacity=1;own.blend="normal";own.clip=false;
+            blend_color_strokes(canvas,page,own,kWorkingDpi,all,&doc);
+            bool floating=false;
+            for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
+            const auto blend=layer.blend;const auto opacity=layer.opacity;const auto clip=layer.clip;
+            auto bytes=canvas.color_raster(floating?"f32":"u16");
+            into_color_pixels(layer,{std::move(bytes),clip});layer.blend=blend;layer.opacity=opacity;
+            if (std::find(doc.features.begin(),doc.features.end(),core::kColorRasterFeature)==doc.features.end())doc.features.emplace_back(core::kColorRasterFeature);
+            return;
+        }
         if (layer.kind == LayerKind::Folder || layer.kind == LayerKind::Adjust || layer.kind == LayerKind::Tone ||
             (layer.tone && core::py_truthy(*layer.tone))) {
             throw OpError("this layer cannot become a paint layer");
@@ -1055,6 +1280,8 @@ void convert_layer(OpContext& c) {
         return;
     }
     if (to == "pen") {
+        // Already editable precise lines: retracing through layer_image would lose their colour/HDR.
+        if (core::has_color_strokes(layer)) return;
         if (layer.kind != LayerKind::Raster && layer.kind != LayerKind::Strokes) throw OpError("only a paint layer can become a pen layer");
         const Image picture = layer_image(page, layer, kWorkingDpi, &doc);
         const double min_mm = float_at(op, "min_mm", 0.8);
@@ -1418,6 +1645,8 @@ void filter_raster(OpContext& c) {
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[resolve_layer(page, op)];
     if (layer.locked) throw OpError("the layer is locked");  // (Python filters it)
+    if (layer.color_raster || core::has_color_strokes(layer))
+        throw NotYetPorted("filter_raster on high-precision pixels or pen lines is not supported yet");
     // (pen lines and shape fills become pixels, so the filter reaches them)
     if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer);
     const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();
@@ -1562,6 +1791,7 @@ void set_stroke_width(OpContext& c) {
         if (core::truthy_at(c.op, "rgb")) {
             if (core::iterate(c.op["rgb"]).size() != 3) throw OpError("rgb is [r, g, b]");
             copy.rgb = core::rgb3(c.op["rgb"], "rgb");
+            copy.color_rgb.reset();
         }
         line = std::make_shared<const core::Stroke>(std::move(copy));
         changed = true;
@@ -1661,11 +1891,6 @@ void use_book_brushes(const Document& doc) {
 
 core::OpFunction drawing(void (*op)(OpContext&)) {
     return [op](OpContext& c) {
-        if (op == merge_down || op == merge_layers || op == merge_visible || op == convert_layer) {
-            const auto& page = c.doc.page(core::require_page(c.doc, c.op));
-            if (std::any_of(page.layers.begin(), page.layers.end(), [](const Layer& layer) { return bool(layer.color_raster); }))
-                throw NotYetPorted("high-precision raster conversion or merge");
-        }
         use_book_brushes(c.doc);
         op(c);
     };

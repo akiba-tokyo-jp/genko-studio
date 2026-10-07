@@ -31,6 +31,7 @@ Json stroke_to_dict(const Stroke& stroke) {
     out["width_mm"] = stroke.width_mm;
     out["kind"] = stroke.kind;
     if (stroke.rgb) out["rgb"] = ints_json(*stroke.rgb);
+    if (stroke.color_rgb) out["color_rgb"] = *stroke.color_rgb;
     if (stroke.opacity != 1.0) out["opacity"] = stroke.opacity;
     return out;
 }

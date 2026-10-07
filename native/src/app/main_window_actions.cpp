@@ -12,8 +12,10 @@
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QLabel>
+#include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QSizePolicy>
 #include <QTabBar>
 #include <QTabWidget>
@@ -166,6 +168,12 @@ void MainWindow::build_actions() {
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
+    make("act_layer_merge_down", QStringLiteral("下のレイヤーと結合"), [this] { layer_operation("merge_down"); });
+    make("act_layer_merge_layers", QStringLiteral("選んだレイヤーを結合…"), [this] { layer_operation("merge_layers"); });
+    make("act_layer_merge_visible", QStringLiteral("表示レイヤーの結合コピーを作る"), [this] { layer_operation("merge_visible"); });
+    make("act_layer_flatten", QStringLiteral("画像をフラット化…"), [this] { layer_operation("flatten"); });
+    make("act_layer_convert_paint", QStringLiteral("ペイントレイヤーに変換"), [this] { layer_operation("convert_layer"); });
+    make("act_layer_convert_pen", QStringLiteral("ペンレイヤーに変換…"), [this] { layer_operation("convert_pen"); });
     // panels
     make("act_split_h", QStringLiteral("コマを横に割る（上下に分ける）"), [this] { split(QStringLiteral("horizontal")); },
          keys({QKeySequence(QStringLiteral("Ctrl+Shift+H"))}));
@@ -292,6 +300,9 @@ void MainWindow::build_menus() {
     tools->addAction(action("act_color"));
     tools->addAction(action("act_exposure"));
     tools->addAction(action("act_point_wider"));
+    QMenu* layers = bar->addMenu(QStringLiteral("レイヤー"));
+    for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten", "act_layer_convert_paint", "act_layer_convert_pen"})
+        layers->addAction(action(name));
     QMenu* pages = bar->addMenu(QStringLiteral("ページ"));
     for (const char* name : {"act_add_page", "act_dup_page", "act_del_page"}) pages->addAction(action(name));
     pages->addSeparator();
@@ -608,6 +619,72 @@ void MainWindow::border_kind(const QString& kind) {
     Json style = frame->line && frame->line->is_object() ? *frame->line : Json::object();
     style["kind"] = kind.toStdString();
     set_selected_frame(Json::object({{"line", style == Json::object({{"kind", "solid"}}) ? Json(nullptr) : style}}));
+}
+
+void MainWindow::layer_operation(const std::string& operation) {
+    const core::Page* current = current_page();
+    if (!current || !session_->read_only_reason().empty()) return;
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    const core::Page page = *current;
+    const bool pen = operation == "convert_pen";
+    Json op = {{"op", pen ? "convert_layer" : operation}, {"page", page.index.json()}};
+    if (operation == "merge_visible") {
+        op["copy"] = true;
+    } else if (operation == "flatten") {
+        QMessageBox confirm(QMessageBox::Warning,QStringLiteral("画像をフラット化"),
+            QStringLiteral("用紙色を背景に、表示中の作画を1つの不透明レイヤーへ結合します。\n非表示の作画レイヤーは破棄します（ネーム・下描き・コマ枠は保持）。\n操作は取り消せます。続けますか？"),QMessageBox::Yes|QMessageBox::No,this);
+        confirm.setObjectName(QStringLiteral("flatten_layer_confirm"));confirm.setDefaultButton(QMessageBox::No);
+        confirm.button(QMessageBox::Yes)->setText(QStringLiteral("フラット化"));confirm.button(QMessageBox::No)->setText(QStringLiteral("取消"));
+        if (confirm.exec()!=QMessageBox::Yes) return;
+        op["op"]="merge_visible";op["copy"]=false;op["flatten"]=true;
+    } else {
+        const bool multi = operation == "merge_layers";
+        const int minimum = multi ? 2 : 1;
+        QDialog dialog(this); dialog.setObjectName("merge_layer_dialog");
+        dialog.setWindowTitle(multi ? QStringLiteral("結合するレイヤーを選ぶ") : QStringLiteral("対象レイヤーを選ぶ"));
+        auto* layout = new QVBoxLayout(&dialog);
+        layout->addWidget(new QLabel(multi ? QStringLiteral("2つ以上選びます。元に戻す操作で結合前に戻せます。") :
+                                             QStringLiteral("操作するレイヤーを1つ選びます。"), &dialog));
+        auto* choices = new QListWidget(&dialog); choices->setObjectName("merge_layer_choices");
+        choices->setSelectionMode(multi ? QAbstractItemView::ExtendedSelection : QAbstractItemView::SingleSelection);
+        for (const auto& layer : page.layers) {
+            auto* item = new QListWidgetItem(wording::layer_label(layer), choices);
+            item->setData(Qt::UserRole, QString::fromStdString(layer.id));
+            item->setToolTip(QString::fromStdString(layer.id));
+            if (layer.locked) item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
+            else if (target_layer_id_ && *target_layer_id_ == layer.id) item->setSelected(true);
+        }
+        layout->addWidget(choices);
+        QDoubleSpinBox* minimum_length=nullptr;
+        if (pen) {
+            layout->addWidget(new QLabel(QStringLiteral("短い印を除く最小の線長（mm）"),&dialog));
+            minimum_length=new QDoubleSpinBox(&dialog);minimum_length->setObjectName("convert_pen_min_mm");
+            minimum_length->setRange(0,100);minimum_length->setDecimals(2);minimum_length->setValue(.8);
+            layout->addWidget(minimum_length);
+        }
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        buttons->button(QDialogButtonBox::Ok)->setText((operation == "convert_layer" || pen) ? QStringLiteral("変換") : QStringLiteral("結合"));
+        buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(choices->selectedItems().size() >= minimum);
+        connect(choices, &QListWidget::itemSelectionChanged, &dialog, [choices, buttons, minimum] {
+            buttons->button(QDialogButtonBox::Ok)->setEnabled(choices->selectedItems().size() >= minimum);
+        });
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+        if (dialog.exec() != QDialog::Accepted) return;
+        Json ids = Json::array();
+        for (const auto* item : choices->selectedItems()) ids.push_back(item->data(Qt::UserRole).toString().toStdString());
+        if (ids.size() < static_cast<std::size_t>(minimum)) return;
+        if (multi) op["ids"] = std::move(ids);
+        else op["id"] = ids.front();
+        if (pen) {op["to"]="pen";op["min_mm"]=minimum_length->value();op["preserve_precision"]=true;}
+        else if (operation == "convert_layer") op["to"] = "paint";
+    }
+    if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+    (void)apply_ops(Json::array({op}));
 }
 
 void MainWindow::exposure_dialog() {
