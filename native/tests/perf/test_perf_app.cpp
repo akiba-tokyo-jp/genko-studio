@@ -219,12 +219,20 @@ private slots:
         const double minutes = qEnvironmentVariableIsSet("GENKO_PERF_MINUTES") ? qEnvironmentVariable("GENKO_PERF_MINUTES").toDouble() : 5.0;
         QElapsedTimer opening;
         opening.start();
-        auto window = std::make_unique<app::MainWindow>(app::Session::open(book));
+        // (as a window opens a book: the first page read and shown first, the other pages read meanwhile — PERF-A)
+        app::Session::Options first_page_first;
+        first_page_first.defer_pages = true;
+        auto window = std::make_unique<app::MainWindow>(
+            app::Session::from(app::Session::read(book, first_page_first), book, first_page_first));
         window->show();
         QVERIFY(QTest::qWaitForWindowExposed(window.get()));
         QVERIFY(window->canvas()->wait_rendered(300000));
-        qInfo("opened and drawn in %lld ms (window %d×%d, canvas %d×%d)", static_cast<long long>(opening.elapsed()), window->width(), window->height(),
-              window->canvas()->width(), window->canvas()->height());
+        const qint64 first_page_ms = opening.elapsed();
+        qInfo("opened and drawn in %lld ms: the first page (window %d×%d, canvas %d×%d)", static_cast<long long>(first_page_ms),
+              window->width(), window->height(), window->canvas()->width(), window->canvas()->height());
+        QVERIFY(wait_until([&] { return !window->session().loading(); }, 300000));
+        const qint64 whole_book_ms = opening.elapsed();
+        qInfo("the other pages read in %lld ms from the start", static_cast<long long>(whole_book_ms));
         window->choose_tool(QStringLiteral("pen"));
         Player player(window.get(), pen_series(minutes));
         player.start();
@@ -332,6 +340,8 @@ private slots:
               static_cast<int>(std::count_if(stalls_saving.v.begin(), stalls_saving.v.end(), [](double x) { return x > 250; })));
         qInfo("%s; %lld ticks of 5 ms in all", qPrintable(stalls_all.line("event loop stalls > 4 ms, whole run")), static_cast<long long>(ticks));
         const Json summary = Json::object({{"platform", platform.toStdString()},
+                                           {"open_first_page_ms", first_page_ms},
+                                           {"open_whole_book_ms", whole_book_ms},
                                            {"minutes", minutes},
                                            {"input_to_live", to_live.json()},
                                            {"input_to_update", to_update.json()},

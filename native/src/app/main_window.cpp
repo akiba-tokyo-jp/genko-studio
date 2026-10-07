@@ -45,6 +45,13 @@ namespace {
 
 QString qpath(const fs::path& path) { return QString::fromStdString(core::path_to_utf8(path)); }
 
+// A book opened in a window: its first page read and shown first, the other pages read meanwhile (SPEC PERF-01).
+Session::Options opening_options() {
+    Session::Options options;
+    options.defer_pages = true;
+    return options;
+}
+
 std::vector<MainWindow*>& open_windows() {
     static std::vector<MainWindow*> list;
     return list;
@@ -389,6 +396,9 @@ void MainWindow::show_page() {
     // (a person alone sees the page as it will print, name lines in blue; the name view is for the agent's name stage)
     canvas_->set_render_mode(!page->name_ok && agent_book() ? "name" : "proof");
     canvas_->set_page(session_->snapshot(), static_cast<std::size_t>(page_index_));
+    if (book().is_deferred(static_cast<std::size_t>(page_index_))) {
+        flash(QStringLiteral("このページを読み込んでいます。読み込みが終わると表示します。"), 3000);
+    }
     pen_changed();
     refresh_status();
     if (navigator_ != nullptr) navigator_->update();
@@ -634,7 +644,7 @@ void MainWindow::open_project(const fs::path& path) {
         // the modal question) must not escape a Qt callback or replace the desk.
         try {
             // (the session, its thread and its timers are made here, on the window's thread)
-            std::shared_ptr<Session> opened = Session::from(std::move(*read.first), where, Session::Options{});
+            std::shared_ptr<Session> opened = Session::from(std::move(*read.first), where, opening_options());
             if (const auto& offer = opened->recovery_offer()) {
                 const QString when = offer->written.toString(QStringLiteral("M月d日 HH:mm"));
                 if (ask::question(this, QStringLiteral("復旧用のコピー"),
@@ -657,7 +667,7 @@ void MainWindow::open_project(const fs::path& path) {
     });
     watcher->setFuture(QtConcurrent::run([where]() -> Read {
         try {
-            return {Session::read(where, Session::Options{}), QString()};
+            return {Session::read(where, opening_options()), QString()};
         } catch (const std::exception& error) {
             return {std::nullopt, QString::fromUtf8(error.what())};
         }

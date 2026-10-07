@@ -35,6 +35,10 @@
 // leaves the changes in memory and writes a recovery point (the book's state and the assets it needs) in the config
 // folder's recovery/<book_id>/; when neither can be written the state says so.
 
+namespace genko::storage {
+struct LoadCache;
+}
+
 namespace genko::app {
 
 using DocPtr = std::shared_ptr<const core::Document>;
@@ -86,6 +90,12 @@ public:
         std::filesystem::path recovery_root;       // empty: <config>/recovery
         bool autosave = true;
         const core::OpRegistry* registry = nullptr;  // null: render::ops_registry()
+        // read(): the strokes and pictures of the first page only, the rest on the worker after from() (SPEC
+        // PERF-01, ACCEPTANCE PERF-A: the first page shown and taking the pen without waiting for the others). Until
+        // then the book takes ops on that page only, and nothing is written.
+        bool defer_pages = false;
+        // from(): start reading the rest at once (tests: when read_rest() is called).
+        bool read_rest_now = true;
     };
 
     // A book read from its folder, not yet a session (read() may run on any thread; the session is made on the thread
@@ -97,6 +107,8 @@ public:
         std::optional<RecoveryPoint> offer;   // a recovery point newer than the book
         bool recovery_present = false;        // a recovery point of this book is there (removed by the next full save)
         std::filesystem::path recovery_folder;
+        // defer_pages: what was read already (the rest of the read takes it instead of reading it again)
+        std::shared_ptr<storage::LoadCache> read_so_far;
     };
     // Read a book: its journal repaired first when the lock can be had, then project.json and its assets. Throws
     // core::Error (and storage::UnsupportedProjectVersion) when it cannot be read. A book of an older version, or one
@@ -123,6 +135,11 @@ public:
     std::int64_t base_revision() const { return base_revision_; }
     // Why this book cannot be changed (empty: it can).
     const std::string& read_only_reason() const { return read_only_; }
+    // Pages of the book are still being read (Options::defer_pages): ops only on the pages read, nothing written.
+    bool loading() const { return loading_; }
+    // Read the pages not read yet, on the worker; when they are in, the changes made meanwhile are applied to the
+    // whole book again (BookChange::Why::Reload) and saved. A no-op when nothing is missing or it has begun.
+    void read_rest();
 
     // --- editing ----------------------------------------------------------------------------------------------
     // Apply ops at once in memory (throws core::ApplyError and leaves the book as it was). `ids`: the ids new_id()
@@ -214,6 +231,7 @@ private:
     void after_failure(const QString& code, const QString& message);
     void start_rebase();
     void rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo_depth, std::int64_t redo_depth);
+    void finish_reading(const JobResult& result);
     void request_recovery();
     std::uint64_t new_change_id() { return ++next_change_; }
 
@@ -225,6 +243,10 @@ private:
     std::int64_t base_revision_ = 0;
     std::uint64_t generation_ = 0;
     std::string read_only_;
+    bool loading_ = false;          // Document::deferred pages wait for the rest of the read
+    bool reading_rest_ = false;     // its job is on the worker
+    std::optional<std::filesystem::path> save_as_after_reading_;  // save_as asked while pages were read
+    std::shared_ptr<storage::LoadCache> read_so_far_;
 
     std::vector<std::shared_ptr<Change>> done_;    // this session's changes, oldest first
     std::vector<std::shared_ptr<Change>> undone_;  // the ones undone, next to redo last

@@ -104,6 +104,8 @@ private:
     LoadOptions options_;
     LoadReport& report_;
     std::size_t color_bytes_ = 0;
+    // LoadOptions::assets_of_page: the page being read now is not that one (its strokes and pictures are left unread)
+    bool skip_assets_ = false;
     std::unordered_set<std::string> nonfinite_;
     std::unordered_map<std::string, core::StrokeListPtr> blobs_;  // strokes read in this load (Python's blobcache)
     // Scope is one book load; immutable bytes are owned by the resulting layers.
@@ -449,6 +451,7 @@ core::Stroke Reader::read_stroke(const Json& raw, const std::string& at) {
 }
 
 core::Bytes Reader::read_png(const Json& ref_value, const std::string& at, core::BlobMemo* memo) {
+    if (skip_assets_) return nullptr;
     if (!ref_value.is_string() || !AssetStore::is_ref(ref_value.get_ref<const std::string&>())) {
         issue("broken_ref", at, core::py_str(ref_value), "not an asset ref: " + core::py_repr(ref_value));
         return nullptr;
@@ -483,6 +486,7 @@ core::Bytes Reader::read_png(const Json& ref_value, const std::string& at, core:
 core::Bytes Reader::read_legacy_raster(const std::string& relpath, const std::string& at) {
     // io._attach_legacy_rasters: a v2 layer's picture under pages/NNN/. Python reads any path it is given; here it
     // must stay inside the book.
+    if (skip_assets_) return nullptr;
     const fs::path rel = path_from_utf8(relpath);
     bool safe = !relpath.empty() && rel.is_relative() && !rel.has_root_name() && !rel.has_root_directory() &&
                 relpath.find('\\') == std::string::npos;
@@ -503,6 +507,7 @@ core::Bytes Reader::read_legacy_raster(const std::string& relpath, const std::st
 }
 
 core::StrokeListPtr Reader::read_strokes_blob(const Json& ref_value, const std::string& at) {
+    if (skip_assets_) return nullptr;
     if (!ref_value.is_string() || !AssetStore::is_ref(ref_value.get_ref<const std::string&>())) {
         issue("broken_ref", at, core::py_str(ref_value), "not an asset ref: " + core::py_repr(ref_value));
         return nullptr;
@@ -576,7 +581,7 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     const auto kind = kind_value.is_string() ? core::layer_kind_from(kind_value.get<std::string>()) : std::nullopt;
     if (!kind) format_error(at_key(at, "kind"), core::py_repr(kind_value) + " is not a valid LayerKind");
     layer.kind = *kind;
-    if (const Json* m = find(data, "color_raster")) {
+    if (const Json* m = find(data, "color_raster"); m && !skip_assets_) {
         const auto here = at_key(at, "color_raster");
         std::string ref;
         try {
@@ -762,9 +767,11 @@ core::Document Reader::migrate(const Json& payload) {
     if (pages_raw == nullptr) format_error("", "missing key 'pages'");
     const Json pages = iterable(*pages_raw, "/pages");
     std::vector<core::PagePtr> page_list;
+    std::vector<core::PagePtr> deferred;
     for (std::size_t p = 0; p < pages.size(); ++p) {
         const Json& raw = pages[p];
         const std::string at = at_index("/pages", p);
+        skip_assets_ = options_.assets_of_page && *options_.assets_of_page != p;
         if (!raw.is_object()) format_error(at, "a page must be an object, not " + core::py_repr(raw));
         core::Page page;
         // Page(id=raw.get("id") or "pg_" + new_id(), art_ok=…, plan=…, index=raw["index"], frames=[…], …)
@@ -843,7 +850,9 @@ core::Document Reader::migrate(const Json& payload) {
             page.spec = core::spec_for(spec, *cover);
         }
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
+        if (skip_assets_) deferred.push_back(page_list.back());
     }
+    skip_assets_ = false;
     if (!had_story) story = std::move(page_texts);
 
     core::Document doc;
@@ -854,6 +863,7 @@ core::Document Reader::migrate(const Json& payload) {
     doc.spec = spec;
     doc.binding = *binding;
     doc.pages = std::move(page_list);
+    doc.deferred = std::move(deferred);
     doc.story = std::move(story);
     doc.tickets = list_or_empty(payload, "tickets");
     doc.autosave = to_bool(payload, "autosave", false);

@@ -699,6 +699,39 @@ void reorder_pages(Document& doc, const std::vector<Num>& order) {
 
 CommandBus::CommandBus(const OpRegistry& registry) : registry_(registry) {}
 
+namespace {
+
+// A book whose pages are not all read yet (Document::deferred: the first page is shown while the others are read)
+// takes the ops that keep to a page that is read, the book's own settings and its lines; any other op could reach a
+// page whose strokes and pictures are missing here, and waits until they are read.
+void refuse_unread_pages(const Document& doc, const Json& ops) {
+    if (doc.deferred.empty()) return;
+    for (const Json& op : ops) {
+        const Json* name = op.is_object() ? get(op, "op") : nullptr;
+        const std::string text = name != nullptr && name->is_string() ? name->get<std::string>() : std::string();
+        if (book_op(text) || line_op(text)) continue;
+        bool read = false;
+        if (page_local_op(text)) {
+            try {
+                read = !doc.is_deferred(require_page(doc, op));
+            } catch (const std::exception&) {
+            }
+        }
+        if (!read) throw ApplyError("the book's pages are still being read: try again in a moment", "page_not_loaded");
+    }
+}
+
+// ... and an op that did change such a page anyway is refused with the whole batch.
+void refuse_changed_unread_pages(const Document& before, const Document& after) {
+    for (const PagePtr& page : before.deferred) {
+        if (std::find(after.pages.begin(), after.pages.end(), page) == after.pages.end()) {
+            throw ApplyError("the book's pages are still being read: try again in a moment", "page_not_loaded");
+        }
+    }
+}
+
+}  // namespace
+
 ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Actor& actor, bool dry_run) const {
     if (!ops_in.is_array()) throw ApplyError("ops must be a JSON array");
     ApplyResult result;
@@ -746,6 +779,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     }
 
     read_as_touched_pages_does(ops);
+    refuse_unread_pages(doc, ops);
     Document work = doc;  // (the pages stay shared until an op changes one)
     for (std::size_t i = 0; i < ops.size(); ++i) {
         Json& op = ops[i];
@@ -820,6 +854,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
             result.results.push_back(std::move(item));
         }
     }
+    refuse_changed_unread_pages(doc, work);
     for (auto& warning : validate_document(work)) result.warnings.push_back(std::move(warning));
     for (auto& warning : unknown_key_warnings(ops)) result.warnings.push_back(std::move(warning));
     for (const Json& op : ops) result.journal_ops.push_back(journal_op(op));

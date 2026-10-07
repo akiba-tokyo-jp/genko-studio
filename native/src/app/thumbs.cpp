@@ -221,7 +221,7 @@ ThumbMaker::~ThumbMaker() {
 void ThumbMaker::cancel_waiting() { pool_.clear(); }
 
 void ThumbMaker::request(DocPtr doc, std::size_t index, int height, const std::string& mode) {
-    if (!doc || index >= doc->pages.size()) return;
+    if (!doc || index >= doc->pages.size() || doc->is_deferred(index)) return;
     std::weak_ptr<ThumbMaker*> self = self_;
     const ThumbCache* cache = &cache_;
     pool_.start([self, cache, doc, index, height, mode]() {

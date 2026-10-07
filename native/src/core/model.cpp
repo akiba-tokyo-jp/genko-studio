@@ -417,6 +417,11 @@ const NumList* Page::fill_of(LayerRole role) const {
 
 // --- Document -------------------------------------------------------------------------------------------------------
 
+bool Document::is_deferred(std::size_t i) const {
+    const PagePtr& page = pages.at(i);
+    return std::find(deferred.begin(), deferred.end(), page) != deferred.end();
+}
+
 Page& Document::edit_page(std::size_t i) {
     PagePtr& page = pages.at(i);
     if (page.use_count() > 1) page = std::make_shared<Page>(*page);

@@ -33,7 +33,7 @@ namespace fs = std::filesystem;
 using core::Json;
 
 struct Session::Job {
-    enum class Kind { Save, Probe, Rebase, Recovery, DeleteRecovery, SaveAs };
+    enum class Kind { Save, Probe, Rebase, Recovery, DeleteRecovery, SaveAs, ReadRest };
     struct Step {
         Action::Kind kind = Action::Kind::Edit;
         DocPtr doc;            // Edit: the book to save
@@ -55,6 +55,7 @@ struct Session::Job {
     std::optional<fs::path> book;
     std::uint64_t generation = 0;
     std::uint64_t ticket = 0;
+    std::shared_ptr<storage::LoadCache> cache;  // ReadRest: what was read already
 };
 
 struct Session::JobResult {
@@ -248,6 +249,18 @@ Session::JobResult Session::execute(const Job& job) {
             r.ok = true;
             break;
         }
+        case Job::Kind::ReadRest: {
+            storage::LoadOptions load;
+            load.cache = job.cache;
+            r.doc = std::make_shared<const core::Document>(std::move(storage::load_document(job.dir, load).document));
+            r.revision = r.doc->revision;
+            try {
+                std::tie(r.undo_depth, r.redo_depth) = journal_depths(job.dir);
+            } catch (const core::Error&) {
+            }
+            r.ok = true;
+            break;
+        }
         }
     } catch (const storage::LockedError& error) {
         r.code = QStringLiteral("locked");
@@ -283,7 +296,14 @@ Session::Opened Session::read(const fs::path& dir, const Options& options) {
         }
     }
     Opened out;
-    out.doc = std::move(storage::load_document(dir).document);
+    storage::LoadOptions load;
+    if (options.defer_pages && disk.version >= 4) {
+        // (the first page now, the others on the session's worker: read_rest())
+        load.cache = std::make_shared<storage::LoadCache>();
+        load.assets_of_page = 0;
+    }
+    out.doc = std::move(storage::load_document(dir, load).document);
+    if (!out.doc.deferred.empty()) out.read_so_far = load.cache;
     if (disk.version >= 4) {
         try {
             std::tie(out.undo_depth, out.redo_depth) = journal_depths(dir);
@@ -315,7 +335,116 @@ std::shared_ptr<Session> Session::from(Opened opened, const fs::path& dir, Optio
     session->recovery_written_ = opened.recovery_present;
     session->recovery_path_ = opened.recovery_folder;
     session->recovery_offer_ = std::move(opened.offer);
+    session->read_so_far_ = std::move(opened.read_so_far);
+    if (options.read_rest_now) session->read_rest();
     return session;
+}
+
+void Session::read_rest() {
+    if (!loading_ || reading_rest_ || !path_ || discarded_) return;
+    reading_rest_ = true;
+    Job job;
+    job.kind = Job::Kind::ReadRest;
+    job.dir = *path_;
+    job.cache = read_so_far_;
+    run(std::move(job));
+}
+
+void Session::finish_reading(const JobResult& r) {
+    read_so_far_.reset();
+    if (!r.ok) {
+        // the pages read stay shown; nothing can be changed or written, as for any book that cannot be read whole
+        read_only_ = "the rest of the book could not be read: " + r.message.toStdString();
+        idle_timer_.stop();
+        longest_timer_.stop();
+        save_wanted_ = false;
+        emit notice(QStringLiteral("原稿の残りのページを読み込めませんでした。読み取り専用で開いています（%1）").arg(r.message), true);
+        if (save_as_after_reading_) {
+            save_as_after_reading_.reset();
+            emit savedAs(false, QString::fromStdString(read_only_));
+        }
+        emit statusChanged();
+        return;
+    }
+    loading_ = false;
+    const DocPtr before = doc_;
+    base_revision_ = r.revision;
+    last_revision_ = r.revision;
+    disk_undo_ = r.undo_depth;
+    disk_redo_ = r.redo_depth;
+    if (!r.doc->read_only_reason.empty()) {
+        // A problem on a page read just now: the book opens read-only, as it would have at once. The changes made
+        // meanwhile cannot be saved to it, so they are not kept as if they could be.
+        const std::size_t dropped = done_.size();
+        doc_ = r.doc;
+        done_.clear();
+        undone_.clear();
+        queue_.clear();
+        read_only_ = doc_->read_only_reason;
+        idle_timer_.stop();
+        longest_timer_.stop();
+        save_wanted_ = false;
+        ++generation_;
+        touch(BookChange{BookChange::Why::Reload, Json::array(), before, doc_});
+        emit notice(dropped == 0 ? QStringLiteral("後のページに問題が見つかったため、原稿を読み取り専用で開きました。")
+                                 : QStringLiteral("後のページに問題が見つかったため、原稿を読み取り専用で開きました。読み込み中の変更 %1 件は保存できないため取り消しました。")
+                                       .arg(dropped),
+                    true);
+        if (const auto target = std::exchange(save_as_after_reading_, std::nullopt)) save_as(*target);  // (refused: read-only)
+        return;
+    }
+    // The changes made meanwhile, again on the whole book: they kept to the page that was read (CommandBus refused
+    // any other), so they apply as they did. (Nothing else is queued while pages are read: no save has run.)
+    const core::CommandBus bus(*registry_);
+    DocPtr current = r.doc;
+    std::vector<std::shared_ptr<Change>> replayed;
+    std::deque<Action> keep;
+    QStringList conflicts_found;
+    for (const Action& action : queue_) {
+        const std::shared_ptr<Change>& change = action.change;
+        if (action.kind != Action::Kind::Edit || !change) continue;
+        auto again = std::make_shared<Change>();
+        again->id = new_change_id();
+        again->ops = change->ops;
+        again->recover = change->recover;
+        again->before = current;
+        if (change->recover) {
+            // (an adopted recovery point is the whole book already)
+            again->journal_ops = change->journal_ops;
+            again->after = change->after;
+        } else {
+            try {
+                core::ScopedIdScript script(change->ids);
+                core::ApplyResult result = bus.apply(*current, change->ops, core::Actor(actor_));
+                again->journal_ops = result.journal_ops;
+                again->ids = script.taken();
+                again->after = std::make_shared<const core::Document>(std::move(result.doc));
+            } catch (const core::Error& error) {
+                conflicts_found << QString::fromUtf8(error.what());
+                continue;
+            }
+        }
+        current = again->after;
+        replayed.push_back(again);
+        keep.push_back(Action{Action::Kind::Edit, again, core::new_txn_id(), ++next_seq_, false});
+    }
+    doc_ = current;
+    done_ = std::move(replayed);
+    undone_.clear();
+    queue_ = std::move(keep);
+    read_only_ = doc_->read_only_reason;
+    ++generation_;
+    touch(BookChange{BookChange::Why::Reload, Json::array(), before, doc_});
+    if (!conflicts_found.isEmpty()) emit conflicts(conflicts_found);
+    if (const auto target = std::exchange(save_as_after_reading_, std::nullopt)) {
+        save_as(*target);  // (the changes made meanwhile go with it)
+    } else if (!queue_.empty()) {
+        if (save_wanted_) {
+            save_now();
+        } else {
+            schedule_save();
+        }
+    }
 }
 
 std::shared_ptr<Session> Session::open(const fs::path& dir, Options options) {
@@ -354,6 +483,7 @@ Session::Session(core::Document doc, std::optional<fs::path> dir, Options option
     base_revision_ = doc.revision;
     last_revision_ = doc.revision;
     read_only_ = doc.read_only_reason;
+    loading_ = !doc.deferred.empty();
     doc_ = std::make_shared<const core::Document>(std::move(doc));
     idle_timer_.setSingleShot(true);
     longest_timer_.setSingleShot(true);
@@ -449,6 +579,7 @@ void Session::undo() {
         schedule_save();
         return;
     }
+    if (loading_) throw core::ApplyError("原稿の残りのページを読み込み中です。読み込みが終わってから元に戻してください。", "loading");
     if (path_ && disk_undo_ > 0) {
         // a change saved before this session: undone through the journal, and the book read again after it
         queue_.push_back(Action{Action::Kind::DiskUndo, nullptr, core::new_txn_id(), ++next_seq_, false});
@@ -486,6 +617,7 @@ void Session::redo() {
         schedule_save();
         return;
     }
+    if (loading_) throw core::ApplyError("原稿の残りのページを読み込み中です。読み込みが終わってからやり直してください。", "loading");
     if (path_ && disk_redo_ > 0) {
         queue_.push_back(Action{Action::Kind::DiskRedo, nullptr, core::new_txn_id(), ++next_seq_, false});
         --disk_redo_;
@@ -497,9 +629,9 @@ void Session::redo() {
     throw core::ApplyError("nothing to redo", "nothing_to_redo");
 }
 
-bool Session::can_undo() const { return !saving_as_ && read_only_.empty() && (!done_.empty() || (path_ && disk_undo_ > 0)); }
+bool Session::can_undo() const { return !saving_as_ && read_only_.empty() && (!done_.empty() || (path_ && disk_undo_ > 0 && !loading_)); }
 
-bool Session::can_redo() const { return !saving_as_ && read_only_.empty() && (!undone_.empty() || (path_ && disk_redo_ > 0)); }
+bool Session::can_redo() const { return !saving_as_ && read_only_.empty() && (!undone_.empty() || (path_ && disk_redo_ > 0 && !loading_)); }
 
 void Session::touch(BookChange change) {
     emit changed(change);
@@ -523,6 +655,12 @@ void Session::save_now() {
     idle_timer_.stop();
     longest_timer_.stop();
     if (discarded_) return;
+    if (loading_) {
+        // (written when the rest of the book is read: a book missing pages is never written)
+        save_wanted_ = true;
+        emit statusChanged();
+        return;
+    }
     if (!path_) {
         if (!done_.empty()) request_recovery();
         return;
@@ -774,6 +912,10 @@ void Session::job_done(const JobResult& r) {
         emit statusChanged();
         break;
     }
+    case Job::Kind::ReadRest:
+        reading_rest_ = false;
+        if (loading_ && !discarded_) finish_reading(r);
+        break;
     }
 }
 
@@ -807,7 +949,7 @@ void Session::after_failure(const QString& code, const QString& message) {
 }
 
 void Session::request_recovery() {
-    if (discarded_ || !doc_ || doc_->book_id.empty()) return;
+    if (discarded_ || loading_ || !doc_ || doc_->book_id.empty()) return;
     if (recovery_job_) {
         recovery_requested_ = true;
         return;
@@ -832,7 +974,7 @@ void Session::write_recovery_copy() {
 }
 
 void Session::start_rebase() {
-    if (rebasing_ || saving_as_ || !path_ || discarded_) return;
+    if (rebasing_ || saving_as_ || loading_ || !path_ || discarded_) return;
     rebasing_ = true;
     Job job;
     job.kind = Job::Kind::Rebase;
@@ -926,7 +1068,8 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
 }
 
 void Session::check_outside() {
-    if (!path_ || job_running_ || rebasing_ || saving_as_ || discarded_) return;
+    // (while pages are read, the rest of the read sees the book as it is on disk)
+    if (!path_ || job_running_ || rebasing_ || saving_as_ || loading_ || discarded_) return;
     Job job;
     job.kind = Job::Kind::Probe;
     job.dir = *path_;
@@ -935,6 +1078,12 @@ void Session::check_outside() {
 
 void Session::save_as(const fs::path& dir) {
     if (saving_as_ || discarded_) return;
+    if (loading_) {
+        // (written when the rest of the book is read: a book missing pages is never written)
+        save_as_after_reading_ = dir;
+        emit statusChanged();
+        return;
+    }
     if (job_running_ || rebasing_) {
         emit savedAs(false, QStringLiteral("現在の保存・再照合が完了してから、別名保存を再試行してください。"));
         return;
@@ -1016,7 +1165,7 @@ void Session::decline_recovery() { recovery_offer_.reset(); }
 bool Session::wait_idle(std::chrono::milliseconds timeout) {
     QElapsedTimer clock;
     clock.start();
-    while (job_running_ || rebasing_ || saving_as_ || recovery_job_ || worker_jobs_ > 0) {
+    while (job_running_ || rebasing_ || saving_as_ || recovery_job_ || reading_rest_ || worker_jobs_ > 0) {
         if (clock.elapsed() >= timeout.count()) return false;
         QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
         QThread::msleep(2);
@@ -1028,7 +1177,9 @@ bool Session::wait_saved(std::chrono::milliseconds timeout) {
     QElapsedTimer clock;
     clock.start();
     for (;;) {
-        if (!job_running_ && !rebasing_ && !saving_as_) {
+        // (pages not read and no read of them under way — it failed, or was not asked for: nothing will be written)
+        if (loading_ && !reading_rest_) return false;
+        if (!job_running_ && !rebasing_ && !saving_as_ && !loading_) {
             if (queue_.empty()) return path_.has_value() && status().kind == SaveKind::Saved;
             if (failed_ || !path_ || discarded_) return false;
             save_now();

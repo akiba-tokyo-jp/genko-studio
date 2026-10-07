@@ -236,10 +236,15 @@ private slots:
         Studio studio;
         MainWindow* w = studio.window.get();
         QCOMPARE(expected().size(), std::size_t{52});
-        // Preserve all 52 Python actions; exposure and nombre settings have their own GUI E2E tests.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{54});
+        // Preserve all 52 Python actions; exposure, nombre and the six layer operations (merge, flatten, convert) have
+        // their own GUI E2E tests (test_gui_materials, test_gui_color).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{60});
         QVERIFY(w->action("act_exposure"));
         QVERIFY(w->action("act_nombre"));
+        for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten",
+                                 "act_layer_convert_paint", "act_layer_convert_pen"}) {
+            QVERIFY2(w->action(name), name);
+        }
         QCOMPARE(w->action("act_nombre")->text(),QStringLiteral("ノンブル（ページ番号）の設定…"));
         QVERIFY(menus_of(w,w->action("act_nombre")).contains(QStringLiteral("ページ")));
         for (const Expected& e : expected()) {

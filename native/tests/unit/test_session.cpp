@@ -116,6 +116,44 @@ std::map<fs::path, std::string> book_files(const fs::path& root) {
     return files;
 }
 
+// A saved book with `lines` ink lines on each of its pages (their strokes in .strokes.json assets).
+void make_drawn_book(const fs::path& dir, const fs::path& recovery, int pages, int lines) {
+    make_book(dir, pages);
+    Session::Options options = quick(recovery);
+    options.autosave = false;
+    auto session = Session::open(dir, options);
+    Json ops = Json::array();
+    for (int page = 1; page <= pages; ++page) {
+        for (int i = 0; i < lines; ++i) ops.push_back(stroke_op(20.0 + i, page)[0]);
+    }
+    session->apply(ops);
+    session->save_now();
+    if (!session->wait_saved(10000ms)) throw genko::core::Error("test", "the drawn book was not saved");
+}
+
+// Opened with the first page's strokes and pictures only; the rest is read when the test says (read_rest()).
+Session::Options first_page_first(const fs::path& recovery) {
+    Session::Options options = quick(recovery);
+    options.defer_pages = true;
+    options.read_rest_now = false;
+    return options;
+}
+
+// project.json as this book would be written (its assets go to a scratch folder).
+Json payload_of(const genko::core::Document& doc, const fs::path& scratch) {
+    genko::storage::AssetStore store(scratch);
+    return genko::storage::project_payload_v4(doc, store);
+}
+
+std::string apply_error_code(Session& session, const Json& ops) {
+    try {
+        session.apply(ops);
+    } catch (const genko::core::ApplyError& error) {
+        return error.code();
+    }
+    return "applied";
+}
+
 // Fault injection for this process while it lives (the build must have it).
 struct Fault {
     explicit Fault(const char* spec) { genko::storage::fault::set_for_testing(spec); }
@@ -1092,6 +1130,147 @@ private slots:
         QVERIFY(session->wait_saved(10000ms));
         QCOMPARE(ink_strokes_on_disk(copy), std::size_t{2});
         QCOMPARE(ink_strokes_on_disk(book), std::size_t{0});  // (the first place keeps what it had)
+    }
+
+    // --- the pages read when needed (SPEC PERF-01; ACCEPTANCE PERF-A: the first page does not wait for the others) ---
+
+    void theFirstPageIsReadFirstAndTheRestAfter() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 3, 4);
+        const Session::Options options = first_page_first(recovery);
+        Session::Opened opened = Session::read(book, options);
+        QCOMPARE(ink_strokes(opened.doc, 0), std::size_t{4});
+        QVERIFY(!opened.doc.is_deferred(0));
+        QVERIFY(opened.doc.is_deferred(1));
+        QVERIFY(opened.doc.is_deferred(2));
+        QCOMPARE(ink_strokes(opened.doc, 1), std::size_t{0});  // (not read yet)
+        auto session = Session::from(std::move(opened), book, options);
+        QVERIFY(session->loading());
+        QVERIFY(session->read_only_reason().empty());
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        QVERIFY(session->document().deferred.empty());
+        for (std::size_t page = 0; page < 3; ++page) QCOMPARE(ink_strokes(session->document(), page), std::size_t{4});
+        // the whole book, as reading it at once gives it
+        QCOMPARE(payload_of(session->document(), path_of(tmp.filePath("a"))),
+                 payload_of(genko::storage::load_document(book).document, path_of(tmp.filePath("b"))));
+        QCOMPARE(session->status().kind, SaveKind::Saved);
+        QCOMPARE(session->base_revision(), disk_revision(book));
+    }
+
+    void editsMadeWhileTheRestIsReadAreKeptAndSavedWhole() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 3, 2);
+        const std::int64_t revision = disk_revision(book);
+        const Session::Options options = first_page_first(recovery);
+        auto session = Session::from(Session::read(book, options), book, options);
+        session->apply(stroke_op(90, 1));
+        session->apply(stroke_op(95, 1));
+        session->undo();  // (in memory: it never reached the disk)
+        session->redo();
+        session->undo();
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{3});
+        QCOMPARE(session->status().kind, SaveKind::Dirty);
+        // the autosave's pause (50 ms here) comes and goes: nothing is written, nor a recovery point, while pages are
+        // missing
+        QTest::qWait(300);
+        QCOMPARE(disk_revision(book), revision);
+        QCOMPARE(session->status().kind, SaveKind::Dirty);
+        QVERIFY(!fs::exists(recovery));
+        session->read_rest();
+        QVERIFY(session->wait_saved(10000ms));
+        QVERIFY(!session->loading());
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{3});
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{3});
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{2});
+        QCOMPARE(ink_strokes_on_disk(book, 2), std::size_t{2});
+        QCOMPARE(disk_revision(book), revision + 1);
+        // and the change made while the rest was read is undone as any other
+        session->undo();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{2});
+        QCOMPARE(ink_strokes_on_disk(book, 2), std::size_t{2});
+    }
+
+    void nothingTouchesThePagesNotReadYet() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        const fs::path copy = path_of(tmp.filePath("写し.genko"));
+        make_drawn_book(book, recovery, 3, 1);
+        const Session::Options options = first_page_first(recovery);
+        auto session = Session::from(Session::read(book, options), book, options);
+        const auto before = session->snapshot();
+        // a line on a page not read yet, a change of the pages, and a batch that reaches one: refused, book as it was
+        QCOMPARE(apply_error_code(*session, stroke_op(40, 2)), std::string("page_not_loaded"));
+        QCOMPARE(apply_error_code(*session, Json::array({Json::object({{"op", "add_page"}})})), std::string("page_not_loaded"));
+        QCOMPARE(apply_error_code(*session, Json::array({stroke_op(40, 1)[0], stroke_op(40, 3)[0]})), std::string("page_not_loaded"));
+        QCOMPARE(session->snapshot(), before);
+        QCOMPARE(session->status().kind, SaveKind::Saved);
+        // the book's saved history waits too
+        try {
+            session->undo();
+            QFAIL("a saved change was undone while pages were missing");
+        } catch (const genko::core::ApplyError& error) {
+            QCOMPARE(QString::fromStdString(error.code()), QStringLiteral("loading"));
+        }
+        // a copy elsewhere waits for the rest: nothing is written while pages are missing
+        QSignalSpy saved(session.get(), &Session::savedAs);
+        session->save_as(copy);
+        QTest::qWait(200);
+        QCOMPARE(saved.count(), 0);
+        QVERIFY(!fs::exists(copy));
+        // and a book with pages not read is never written by anything (save, save-as, recovery point, undo, convert)
+        try {
+            payload_of(session->document(), path_of(tmp.filePath("scratch")));
+            QFAIL("a book with pages not read was written");
+        } catch (const genko::core::Error& error) {
+            QCOMPARE(QString::fromStdString(error.code()), QStringLiteral("partial"));
+        }
+        session->read_rest();
+        QVERIFY(wait_for([&] { return saved.count() == 1; }));
+        QCOMPARE(saved.at(0).at(0).toBool(), true);
+        QVERIFY(!session->loading());
+        QCOMPARE(*session->path(), copy);
+        for (std::size_t page = 0; page < 3; ++page) QCOMPARE(ink_strokes_on_disk(copy, page), std::size_t{1});  // (every page)
+        QCOMPARE(apply_error_code(*session, stroke_op(40, 2)), std::string("applied"));
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(copy, 1), std::size_t{2});
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{1});  // (the first place keeps what it had)
+    }
+
+    void aProblemFoundOnALaterPageOpensTheBookReadOnly() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 2, 1);
+        std::string ref;
+        const genko::core::Document whole = genko::storage::load_document(book).document;
+        for (const auto& layer : whole.page(1).layers) {
+            if (layer.role == genko::core::LayerRole::Ink) ref = layer.strokes->blob_ref;
+        }
+        QVERIFY(!ref.empty());
+        QVERIFY(fs::remove(book / genko::core::path_from_utf8(genko::storage::AssetStore::relpath(ref, ".strokes.json"))));
+        const auto files = book_files(book);
+        const Session::Options options = first_page_first(recovery);
+        auto session = Session::from(Session::read(book, options), book, options);
+        QVERIFY(session->read_only_reason().empty());  // (the missing lines are on the second page)
+        session->apply(stroke_op(50, 1));
+        QSignalSpy notices(session.get(), &Session::notice);
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        QVERIFY(!session->read_only_reason().empty());
+        // the book cannot be saved: the line drawn meanwhile is not kept as if it could, and the person is told
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{1});
+        QVERIFY(!session->unsaved());
+        QVERIFY(notices.count() >= 1);
+        QCOMPARE(notices.last().at(1).toBool(), true);
+        QVERIFY(session->wait_idle(5000ms));
+        QCOMPARE(book_files(book), files);
     }
 };
 

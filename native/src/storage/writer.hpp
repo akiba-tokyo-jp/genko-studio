@@ -21,7 +21,8 @@ core::Json spec_to_json(const core::PageSpec& spec);
 
 // project.json v4 as a Json value. Every asset it refers to is in `store` when it returns: pictures are stored by
 // their hash, strokes as .strokes.json blobs (a list read from a blob that `store` already holds is not written
-// again). Throws core::Error("value") for a document without a valid book_id.
+// again). Throws core::Error("value") for a document without a valid book_id, and core::Error("partial") for one
+// whose pages are not all read (Document::deferred).
 core::Json project_payload_v4(const core::Document& doc, AssetStore& store);
 
 // The same, as the text of project.json: UTF-8, LF, indent 2, no trailing newline (Python's

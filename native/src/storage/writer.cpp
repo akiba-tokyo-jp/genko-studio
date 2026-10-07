@@ -266,6 +266,11 @@ Json spec_to_json(const core::PageSpec& spec) {
 }
 
 Json project_payload_v4(const core::Document& doc, AssetStore& store) {
+    if (!doc.deferred.empty()) {
+        // (pages whose strokes and pictures were not read would be written without them)
+        throw core::Error("partial", "the book is not wholly read yet (" + std::to_string(doc.deferred.size()) +
+                                         " page(s) without their strokes and pictures): it is not written");
+    }
     if (!core::is_book_id(doc.book_id)) {
         throw core::Error("value", "the book has no valid book_id (32 hex digits): " + core::py_repr_str(doc.book_id));
     }

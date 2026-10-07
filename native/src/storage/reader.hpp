@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -67,6 +68,10 @@ struct LoadOptions {
     bool verify_hashes = true;
     // Assets read before from the same folder (none: read every asset).
     std::shared_ptr<LoadCache> cache;
+    // Read the strokes and pictures of this page (its position in "pages") only: the others' are left unread, their
+    // pages listed in Document::deferred, and their problems reported by the full read that follows. (A book read so
+    // can be shown and edited on that page; it is never written.) None: every page's.
+    std::optional<std::size_t> assets_of_page;
 };
 
 struct LoadResult {

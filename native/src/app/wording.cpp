@@ -98,6 +98,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(unknown style_runs key (\S+).*)", "文字の一部の書式に知らない項目があります（大きさ・太字・色だけ）"));
         r.push_back(rule("gradient_fill needs from and to.*", "グラデーションは、始めと終わりの点で指定します"));
         r.push_back(rule("the gradient needs a longer drag", "もう少し長くドラッグします"));
+        r.push_back(rule("the book's pages are still being read: try again in a moment",
+                         "原稿の残りのページを読み込み中です。読み込みが終わってから、もう一度操作してください"));
         r.push_back(rule("the gradient has nothing to show there", "そこにはグラデーションを塗れる所がありません"));
         r.push_back(rule("kind must be box, cylinder, stairs or floor.*", "3D の形は、箱・円柱・階段・床から選びます"));
         r.push_back(rule("scene kind must be one of .*", "背景の 3D は、部屋・教室・廊下・街並みから選びます"));

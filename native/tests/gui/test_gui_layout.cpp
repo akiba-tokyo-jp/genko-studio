@@ -41,7 +41,9 @@
 #include "app/save_status.hpp"
 #include "app/theme.hpp"
 #include "app/thumbs.hpp"
+#include "core/strokes.hpp"
 #include "gui_support.hpp"
+#include "storage/reader.hpp"
 
 using namespace gui_test;
 namespace app = genko::app;
@@ -439,6 +441,73 @@ private slots:
         list.request_visible();
         QVERIFY(list.wait_pictures(60000));
         QVERIFY(list.has_picture(39));
+    }
+
+    // SPEC PERF-01 (必要頁の遅延読込): a book read for its first page only — the others are read while it is shown —
+    // draws no picture of the pages not read yet (neither in the list nor on the canvas, nor into the cache); once read,
+    // they are drawn as any page. A window opens a book so, and the person can draw on its first page at once.
+    void pagesNotReadYetAreNotDrawn() {
+        QTemporaryDir dir;
+        const fs::path book = path_of(dir.filePath("遅れて読む.genko"));
+        core::Document drawn = new_doc(3, "遅れて読む");
+        for (std::size_t page = 0; page < drawn.pages.size(); ++page) {
+            const double y = 30.0 + 10.0 * static_cast<double>(page);
+            drawn.edit_page(page).layer_for(core::LayerRole::Ink).strokes = core::make_strokes(
+                {std::make_shared<const core::Stroke>(core::coerce_stroke(Json::array({Json::array({20.0, y, 0.7}), Json::array({150.0, y + 40, 0.7})})))});
+        }
+        write_book(book, drawn);
+        genko::storage::LoadOptions first;
+        first.assets_of_page = 0;
+        auto partial = std::make_shared<const core::Document>(genko::storage::load_document(book, first).document);
+        QVERIFY(!partial->is_deferred(0));
+        QVERIFY(partial->is_deferred(1) && partial->is_deferred(2));
+
+        app::PageList list;
+        list.resize(180, 600);
+        list.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&list));
+        list.fill(partial, 0);
+        QVERIFY(list.wait_pictures(60000));
+        QVERIFY(list.has_picture(0));
+        QVERIFY(!list.has_picture(1) && !list.has_picture(2));
+        QCOMPARE(list.maker().drawn(), 1);
+
+        app::PageCanvas canvas;
+        canvas.resize(500, 600);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.set_page(partial, 1);
+        QTest::qWait(300);
+        QVERIFY(!canvas.renderer().any_shown());
+
+        // read whole: the same rows and canvas draw them
+        auto whole = std::make_shared<const core::Document>(genko::storage::load_document(book).document);
+        list.fill(whole, 0);
+        QVERIFY(list.wait_pictures(60000));
+        QVERIFY(list.has_picture(1) && list.has_picture(2));
+        canvas.set_page(whole, 1);
+        QVERIFY(canvas.wait_rendered(60000));
+        QVERIFY(canvas.renderer().any_shown());
+
+        // a window: the book opened, its first page drawn on, the rest read, saved whole
+        app::MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.open_project(book);
+        QVERIFY(QTest::qWaitFor([&] { return window.session().path() == std::optional<fs::path>(book); }, 60000));
+        app::Session& session = window.session();
+        QVERIFY(session.apply(Json::array({Json::object({{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"},
+                                                         {"points", Json::array({Json::array({40.0, 200.0, 0.7}), Json::array({90.0, 210.0, 0.7})})},
+                                                         {"stabilize", 0}})})).applied.size() == 1);
+        QVERIFY(QTest::qWaitFor([&] { return !session.loading(); }, 60000));
+        QVERIFY2(session.wait_saved(30000ms), qPrintable(QStringLiteral("%1 %2 (kind %3)").arg(session.status().code, session.status().reason)
+                                                            .arg(static_cast<int>(session.status().kind))));
+        const core::Document disk = genko::storage::load_document(book).document;
+        QCOMPARE(ink_strokes(disk, 0), std::size_t{2});
+        QCOMPARE(ink_strokes(disk, 1), std::size_t{1});
+        QCOMPARE(ink_strokes(disk, 2), std::size_t{1});
+        window.close();
     }
 };
 

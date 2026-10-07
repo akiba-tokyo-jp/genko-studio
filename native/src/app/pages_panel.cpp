@@ -126,6 +126,7 @@ void PageList::request_visible() {
         if (!visualItemRect(item(row)).intersects(seen)) continue;
         const auto& page = doc_->pages[static_cast<std::size_t>(row)];
         if (has_picture(row)) continue;
+        if (doc_->is_deferred(static_cast<std::size_t>(row))) continue;  // (drawn when its strokes and pictures are read)
         if (const auto asked = asked_.find(page->id); asked != asked_.end() && asked->second == page.get()) continue;
         asked_[page->id] = page.get();
         maker_->request(doc_, static_cast<std::size_t>(row), kThumbHeight, page->name_ok ? "proof" : "name");
@@ -140,7 +141,8 @@ bool PageList::wait_pictures(int ms) {
         bool all = true;
         const QRect seen = viewport()->rect();
         for (int row = 0; row < count(); ++row) {
-            if (visualItemRect(item(row)).intersects(seen) && !has_picture(row)) all = false;
+            const bool unread = doc_ && row < static_cast<int>(doc_->pages.size()) && doc_->is_deferred(static_cast<std::size_t>(row));
+            if (visualItemRect(item(row)).intersects(seen) && !has_picture(row) && !unread) all = false;
         }
         if (all) return true;
         if (clock.elapsed() > ms) return false;

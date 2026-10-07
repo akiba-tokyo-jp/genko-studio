@@ -327,8 +327,14 @@ struct Document {
     std::vector<std::string> features;
     // Why this book must not be saved (unknown features, missing assets, repairs); empty when it may be.
     std::string read_only_reason;
+    // (not saved) The pages whose strokes and pictures are not read yet (storage::LoadOptions::assets_of_page: the
+    // first page is shown while the others are read). Such a book is never written (storage::project_payload_v4
+    // refuses it), and an op batch may not reach these pages (CommandBus refuses it with "page_not_loaded").
+    std::vector<PagePtr> deferred;
 
     const Page& page(std::size_t i) const { return *pages.at(i); }
+    // pages[i] is one of `deferred` (its strokes and pictures are not read yet).
+    bool is_deferred(std::size_t i) const;
     // The page to change: copied first when another Document still shares it.
     Page& edit_page(std::size_t i);
 

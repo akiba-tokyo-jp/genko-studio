@@ -141,8 +141,8 @@ void PageRenderer::set_mode(const std::string& mode) {
 }
 
 void PageRenderer::show(DocPtr doc, std::size_t index) {
-    if (!doc || index >= doc->pages.size()) {
-        clear();
+    if (!doc || index >= doc->pages.size() || doc->is_deferred(index)) {
+        clear();  // (a page whose strokes and pictures are not read yet: shown when they are)
         return;
     }
     const std::shared_ptr<core::Page>& ptr = doc->pages[index];

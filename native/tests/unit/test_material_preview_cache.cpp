@@ -1,12 +1,13 @@
+// The disposable material preview cache (M2): keys, persistence across restarts, regeneration of corrupt or unbound
+// files, budgets, and originals (unowned files, symlinks) never written or removed. One QtTest row per case.
 #include "app/material_preview_cache.hpp"
-#include <QCoreApplication>
+#include <QtTest>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
 #include <functional>
-#include <iostream>
 #include <stdexcept>
 #include <vector>
 
@@ -31,10 +32,9 @@ static void throws(const std::function<void()>& action) {
     try { action(); } catch (const std::invalid_argument&) { rejected = true; }
     check(rejected, "invalid input must be rejected");
 }
-int main(int argc, char** argv) {
-    QCoreApplication app(argc, argv);
-    using Case = std::pair<const char*, std::function<void()>>;
-    const std::vector<Case> cases = {
+using Case = std::pair<const char*, std::function<void()>>;
+static std::vector<Case> all_cases() {
+    return {
         {"construction-is-lazy", [] {
             QTemporaryDir tmp; check(tmp.isValid(), "temporary root");
             const QString root = tmp.path() + QStringLiteral("/not-created");
@@ -148,13 +148,22 @@ int main(int argc, char** argv) {
             check(caught && !QDir(root).exists(), "renderer error must propagate without cache writes");
         }}
     };
-    int count = 0, failures = 0;
-    for (const auto& [name, run] : cases) {
-        if (argc == 2 && QString::fromLocal8Bit(argv[1]) != QString::fromLatin1(name)) continue;
-        ++count;
-        try { run(); std::cout << "PASS " << name << '\n'; }
-        catch (const std::exception& e) { ++failures; std::cout << "FAIL " << name << ": " << e.what() << '\n'; }
-    }
-    std::cout << "TOTAL " << count << " FAILED " << failures << '\n';
-    return count == 0 || failures != 0 ? 1 : 0;
 }
+
+class TestMaterialPreviewCache : public QObject {
+    Q_OBJECT
+private slots:
+    void cases_data() {
+        QTest::addColumn<int>("index");
+        const auto cases = all_cases();
+        for (int i = 0; i != static_cast<int>(cases.size()); ++i) QTest::newRow(cases[static_cast<std::size_t>(i)].first) << i;
+    }
+    void cases() {
+        QFETCH(int, index);
+        try { all_cases()[static_cast<std::size_t>(index)].second(); }
+        catch (const std::exception& e) { QFAIL(e.what()); }
+    }
+};
+
+QTEST_GUILESS_MAIN(TestMaterialPreviewCache)
+#include "test_material_preview_cache.moc"
