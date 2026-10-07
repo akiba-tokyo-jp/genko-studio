@@ -40,8 +40,8 @@ class RenderResources(unittest.TestCase):
             self.assertEqual(HARNESS.effective_render_workers(4), 1)
 
     def test_skip_mode_is_restored_after_render_failure(self):
-        from genko import nombre, render
-        originals = [(nombre, 'draw', nombre.draw), (render, '_placed_raster', render._placed_raster)]
+        from genko import balloons, render
+        originals = [(balloons, 'draw_lines', balloons.draw_lines), (render, '_placed_raster', render._placed_raster)]
         try:
             with tempfile.TemporaryDirectory() as root:
                 jobs = Path(root) / 'jobs.json'
@@ -60,10 +60,12 @@ class RenderResources(unittest.TestCase):
         from genko.models import PageSpec, new_episode
         from genko.ops import apply_ops
         episode = new_episode('参照描画の分離', 1, 1, PageSpec.b5_doujin())
-        episode.pages[0].numero = True
+        episode.pages[0].numero = False
         apply_ops(episode, [{'op': 'name_ok', 'page': 1},
                             {'op': 'add_tone', 'page': 1, 'pattern': 'flat', 'density': 1,
-                             'area': {'rect': [30, 35, 50, 60]}}], agent='human:確認')
+                             'area': {'rect': [30, 35, 50, 60]}},
+                            {'op': 'add_line', 'page': 1, 'text': '分離の確認', 'x_mm': 60, 'y_mm': 40,
+                             'w_mm': 40, 'h_mm': 30}], agent='human:確認')
         with tempfile.TemporaryDirectory() as root:
             book = Path(root) / 'book.genko'
             save_episode(episode, book, actor='human:確認')
@@ -76,7 +78,7 @@ class RenderResources(unittest.TestCase):
                 HARNESS.render_jobs(str(jobs))
                 with Image.open(out) as image:
                     images.append(image.convert('RGB').tobytes())
-            self.assertNotEqual(images[0], images[1], 'nombre positive control must be visible')
+            self.assertNotEqual(images[0], images[1], 'balloon positive control must be visible')
             self.assertEqual(images[0], images[2], 'skip mode must not erase subsequent normal drawing')
 
     def test_one_cpu_two_gib_does_not_start_four_renderers(self):

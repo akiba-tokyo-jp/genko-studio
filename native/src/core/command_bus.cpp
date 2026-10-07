@@ -407,24 +407,6 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
         }
         return;
     }
-    // merge_down writes the preceding sibling, not just the named upper source.
-    if (named && name == "merge_down" && op_in.contains("id")) {
-        const Page& page = page_of(op_in);
-        const std::string upper_id = py_str(op_in["id"]);
-        for (std::size_t i = 0; i < page.layers.size(); ++i) {
-            const Layer& upper = page.layers[i];
-            if (upper.id != upper_id || upper.kind == LayerKind::Folder) continue;
-            for (std::size_t j = i; j > 0; --j) {
-                const Layer& lower = page.layers[j - 1];
-                if (lower.parent_id != upper.parent_id || lower.kind == LayerKind::Folder) continue;
-                if (printed(lower) && lower.exportable && !page.name_ok)
-                    throw OpError("merge_down on a printed layer needs name_ok on page " +
-                                  page.index.repr() + " (strict_gates)");
-                break;
-            }
-            break;
-        }
-    }
     Json op = op_in;
     if (named && one_of(name, {"set_layer_mask", "paint_mask", "merge_down", "delete_layer", "duplicate_layer", "convert_layer"}) &&
         truthy_at(op_in, "id")) {

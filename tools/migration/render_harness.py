@@ -21,9 +21,12 @@ Commands:
                                 "skip_unported": bool} → a PNG of the page; "story": false removes the lines
   layer-image JOBS              layer_image for each job: {"book", "page", "layer", "dpi", "out"}
 
-With skip_unported the elements this C++ step does not draw yet (lines and balloons, placed pictures, nombres, cover
-folds, animation) are left out the way the C++ RenderOptions::skip_unported leaves them out (tones, effect lines and
-layer screens are drawn on both sides since M3-B, the 3D guides since M3-C).
+With skip_unported the elements this C++ step does not draw yet (lines and balloons, placed pictures, cover folds,
+animation) are left out the way the C++ RenderOptions::skip_unported leaves them out (tones, effect lines and
+layer screens are drawn on both sides since M3-B, the 3D guides since M3-C, nombres since the M2 material work).
+
+The reference lays text out as the measured one did: Pillow without raqm (BASIC layout, FreeType 2.14.3). A Pillow that
+has raqm (and finds fribidi) is held to BASIC here, so the nombres compare with the C++ drawing of them.
 """
 from __future__ import annotations
 
@@ -41,6 +44,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
+
+try:  # (the measured reference's text layout: BASIC, without raqm)
+    from PIL import ImageFont as _ImageFont
+    _ImageFont.core.HAVE_RAQM = False
+except ImportError:
+    pass
 
 
 def bits(x: float) -> str:
@@ -935,8 +944,6 @@ def unported_of(episode) -> dict:
     out = {}
     for page in episode.pages:
         names = set()
-        if page.numero:
-            names.add("nombre")
         if episode.story_for_page(page.index):
             names.add("balloons")
         if page.onion_from:  # (the page underneath is drawn too)
@@ -965,11 +972,10 @@ def make_books(out: str, seed: int, count: int) -> None:
 
 def leave_out_unported() -> None:
     """What RenderOptions::skip_unported leaves out, left out here too (each drawing function does nothing)."""
-    from genko import anim, balloons, covers, nombre, render
+    from genko import anim, balloons, covers, render
 
     render._placed_raster = lambda *args, **kwargs: None
     render._finish_placed = lambda fitted, *args, **kwargs: fitted
-    nombre.draw = lambda *args, **kwargs: None
     covers.draw_folds = lambda *args, **kwargs: None
     anim.at_frame = lambda page, frame: page
     balloons.draw_lines = lambda *args, **kwargs: None
@@ -981,10 +987,10 @@ def _unported_scope(enabled: bool):
     if not enabled:
         yield
         return
-    from genko import anim, balloons, covers, nombre, render, tones
+    from genko import anim, balloons, covers, render, tones
     names = [(tones, 'draw_layer'), (tones, 'screened'), (render, '_draw_effects'),
              (render, '_draw_prims'), (render, '_placed_raster'), (render, '_finish_placed'),
-             (nombre, 'draw'), (covers, 'draw_folds'), (anim, 'at_frame'), (balloons, 'draw_lines')]
+             (covers, 'draw_folds'), (anim, 'at_frame'), (balloons, 'draw_lines')]
     originals = [(module, name, getattr(module, name)) for module, name in names]
     try:
         leave_out_unported()
