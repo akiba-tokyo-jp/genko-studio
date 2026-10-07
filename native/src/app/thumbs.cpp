@@ -247,7 +247,8 @@ void ThumbMaker::request(DocPtr doc, std::size_t index, int height, const std::s
                 image = QImage(reinterpret_cast<const uchar*>(bytes.data()), rgb.width(), rgb.height(), rgb.width() * 3,
                                QImage::Format_RGB888)
                             .copy();
-                if (!cache->root().empty()) cache->put(key, image);
+                // (not kept while pages of the book are not read: a page drawn faintly under it may be one of them)
+                if (!cache->root().empty() && doc->deferred.empty()) cache->put(key, image);
             } catch (const std::exception&) {
                 return;  // (a page that cannot be drawn keeps its blank picture)
             }

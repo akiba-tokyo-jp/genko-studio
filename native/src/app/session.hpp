@@ -96,6 +96,8 @@ public:
         bool defer_pages = false;
         // from(): start reading the rest at once (tests: when read_rest() is called).
         bool read_rest_now = true;
+        // a read of the rest that failed is tried again after this (twice, the second wait twice as long)
+        std::chrono::milliseconds read_retry{2000};
     };
 
     // A book read from its folder, not yet a session (read() may run on any thread; the session is made on the thread
@@ -137,6 +139,8 @@ public:
     const std::string& read_only_reason() const { return read_only_; }
     // Pages of the book are still being read (Options::defer_pages): ops only on the pages read, nothing written.
     bool loading() const { return loading_; }
+    // The book was opened with its first page first (Options::defer_pages), whether or not the rest is read now.
+    bool read_in_parts() const { return read_in_parts_; }
     // Read the pages not read yet, on the worker; when they are in, the changes made meanwhile are applied to the
     // whole book again (BookChange::Why::Reload) and saved. A no-op when nothing is missing or it has begun.
     void read_rest();
@@ -245,6 +249,9 @@ private:
     std::string read_only_;
     bool loading_ = false;          // Document::deferred pages wait for the rest of the read
     bool reading_rest_ = false;     // its job is on the worker
+    bool read_in_parts_ = false;
+    int read_failures_ = 0;
+    bool read_failed_ = false;      // the rest could not be read (after the retries): read-only, nothing written
     std::optional<std::filesystem::path> save_as_after_reading_;  // save_as asked while pages were read
     std::shared_ptr<storage::LoadCache> read_so_far_;
 

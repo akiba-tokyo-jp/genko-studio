@@ -22,6 +22,27 @@ private slots:
                                      QStringLiteral("merge_visible"), QStringLiteral("convert_layer")})
                 QTest::newRow((precision+"-"+op).toUtf8().constData()) << precision << op;
     }
+    // A book whose other pages are still being read (Document::deferred, the first page shown first): its budget for
+    // precise colour pictures cannot count them, so no op may make them bigger until they are read.
+    void precisePicturesDoNotGrowWhilePagesAreRead() {
+        auto doc=core::new_episode("読込中",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        auto& p=doc.edit_page(0); p.numero=false; p.frames.clear(); p.layers.clear();
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},{"precision","u16"},
+                        {"pixels",Json::array({1,2,3,65535})}};
+        auto base=core::CommandBus().apply(doc,Json::array({put,put}),core::Actor("human:test")).doc;
+        const Json copy={{"op","merge_visible"},{"page",1},{"copy",true}};
+        const auto merged=core::CommandBus(render::ops_registry()).apply(base,Json::array({copy}),core::Actor("human:test")).doc;
+        QCOMPARE(merged.page(0).layers.size(),std::size_t(3));
+        QVERIFY(merged.page(0).layers[2].color_raster);  // (read whole: the merged copy is one more precise picture)
+        base.deferred.push_back(base.pages[1]);
+        try {
+            core::CommandBus(render::ops_registry()).apply(base,Json::array({copy}),core::Actor("human:test"));
+            QFAIL("a precise picture grew while pages were not read");
+        } catch(const core::ApplyError& e) {
+            QCOMPARE(QString::fromStdString(e.code()),QStringLiteral("page_not_loaded"));
+        }
+    }
+
     void highPrecisionMergeAndConversion() {
         QFETCH(QString,precision); QFETCH(QString,operation);
         auto doc=core::new_episode("高精度結合",core::Num(1),2,

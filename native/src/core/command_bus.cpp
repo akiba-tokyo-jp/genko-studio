@@ -721,12 +721,26 @@ void refuse_unread_pages(const Document& doc, const Json& ops) {
     }
 }
 
-// ... and an op that did change such a page anyway is refused with the whole batch.
+std::size_t color_raster_bytes(const Document& doc) {
+    std::size_t bytes = 0;
+    for (const PagePtr& page : doc.pages) {
+        for (const Layer& layer : page->layers) bytes += layer.color_raster ? layer.color_raster->size() : 0;
+    }
+    return bytes;
+}
+
+// ... and an op that did change such a page anyway is refused with the whole batch; so is one that makes the
+// precise colour pictures bigger, since the book's budget for them (validate_color_document) cannot count the pages
+// not read yet.
 void refuse_changed_unread_pages(const Document& before, const Document& after) {
+    if (before.deferred.empty()) return;
     for (const PagePtr& page : before.deferred) {
         if (std::find(after.pages.begin(), after.pages.end(), page) == after.pages.end()) {
             throw ApplyError("the book's pages are still being read: try again in a moment", "page_not_loaded");
         }
+    }
+    if (color_raster_bytes(after) > color_raster_bytes(before)) {
+        throw ApplyError("the book's pages are still being read: try again in a moment", "page_not_loaded");
     }
 }
 

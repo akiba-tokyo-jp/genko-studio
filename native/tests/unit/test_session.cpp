@@ -1272,6 +1272,144 @@ private slots:
         QVERIFY(session->wait_idle(5000ms));
         QCOMPARE(book_files(book), files);
     }
+
+    void aBookReadOnlyFromItsFirstPageSaysNothingMore() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 2, 1);
+        Json project = genko::core::parse_python_json(genko::storage::read_file(book / "project.json"));
+        project["features"] = Json::array({"zz.unknown@1"});
+        genko::storage::write_atomic(book / "project.json", genko::core::dump_python_indent2(project));
+        const Session::Options options = first_page_first(recovery);
+        auto session = Session::from(Session::read(book, options), book, options);
+        QVERIFY(!session->read_only_reason().empty());
+        QSignalSpy notices(session.get(), &Session::notice);
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        QVERIFY(!session->read_only_reason().empty());
+        QCOMPARE(notices.count(), 0);  // (it said so when it opened: no "a later page" warning)
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+    }
+
+    void aReadOfTheRestThatFailsIsTriedAgain() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path away = path_of(tmp.filePath("away.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 2, 1);
+        Session::Options options = first_page_first(recovery);
+        options.read_retry = 500ms;
+        auto session = Session::from(Session::read(book, options), book, options);
+        session->apply(stroke_op(50, 1));
+        // the book's folder is out of reach for a moment (a drive taken out, a folder renamed)
+        fs::rename(book, away);
+        QSignalSpy notices(session.get(), &Session::notice);
+        session->read_rest();
+        QVERIFY(wait_for([&] { return notices.count() >= 1; }));
+        QCOMPARE(notices.at(0).at(1).toBool(), false);  // (said, and tried again)
+        QVERIFY(session->loading());
+        fs::rename(away, book);
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        QVERIFY(session->read_only_reason().empty());
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{2});
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{1});
+    }
+
+    void aReadOfTheRestThatKeepsFailingLeavesTheBookReadOnly() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path away = path_of(tmp.filePath("away.genko"));
+        const fs::path copy = path_of(tmp.filePath("写し.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 2, 1);
+        Session::Options options = first_page_first(recovery);
+        options.read_retry = 20ms;
+        auto session = Session::from(Session::read(book, options), book, options);
+        session->apply(stroke_op(50, 1));
+        QSignalSpy saved(session.get(), &Session::savedAs);
+        session->save_as(copy);  // (waits for the rest)
+        fs::rename(book, away);
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->read_only_reason().empty(); }));
+        // given up: the pages read stay shown, nothing is written anywhere, and nothing waits for ever
+        QVERIFY(session->loading());
+        QCOMPARE(saved.count(), 1);
+        QCOMPARE(saved.at(0).at(0).toBool(), false);
+        session->save_as(copy);
+        QCOMPARE(saved.count(), 2);
+        QCOMPARE(saved.at(1).at(0).toBool(), false);
+        QVERIFY(!fs::exists(copy));
+        QElapsedTimer clock;
+        clock.start();
+        QVERIFY(!session->wait_saved(30000ms));
+        QVERIFY(clock.elapsed() < 5000);
+        QCOMPARE(apply_error_code(*session, stroke_op(60, 1)), std::string("read_only"));
+        fs::rename(away, book);
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{1});
+    }
+
+    void aPageNumberThatNamesAnotherPageMeanwhileIsNotWrittenTo() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 2, 1);
+        const std::string first_id = genko::storage::load_document(book).document.page(0).id;
+        const Session::Options options = first_page_first(recovery);
+        auto session = Session::from(Session::read(book, options), book, options);
+        session->apply(stroke_op(70, 1));  // (on the page it shows: page 1)
+        // meanwhile another writer swaps the pages: page 1 is now the other page
+        {
+            Session::Options other = quick(path_of(tmp.filePath("recovery-other")));
+            other.actor = "agent:other";
+            auto writer = Session::open(book, other);
+            writer->apply(Json::array({Json::object({{"op", "reorder"}, {"order", Json::array({2, 1})}})}));
+            QVERIFY(writer->wait_saved(10000ms));
+        }
+        QCOMPARE(genko::storage::load_document(book).document.page(1).id, first_id);
+        QSignalSpy conflicts(session.get(), &Session::conflicts);
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        QCOMPARE(conflicts.count(), 1);
+        QVERIFY(session->wait_idle(10000ms));
+        // the line was not put on the page that now has its number; neither page got it
+        const genko::core::Document disk = genko::storage::load_document(book).document;
+        QCOMPARE(ink_strokes(disk, 0), std::size_t{1});
+        QCOMPARE(ink_strokes(disk, 1), std::size_t{1});
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{1});
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+    }
+
+    void undoAndRedoAfterTheRestIsRead() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 2, 1);
+        // the lines undone through the journal: the book on disk has something to redo
+        {
+            auto first = Session::open(book, quick(recovery));
+            first->undo();
+            QVERIFY(first->wait_saved(10000ms));
+        }
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{0});
+        const Session::Options options = first_page_first(recovery);
+        auto session = Session::from(Session::read(book, options), book, options);
+        QVERIFY(!session->can_redo());  // (the journal's redo waits for the rest)
+        session->apply(stroke_op(80, 1));
+        session->apply(stroke_op(85, 1));
+        session->undo();  // (in memory)
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        // the line undone meanwhile can be redone; the journal's redo is gone with the line drawn since
+        QVERIFY(session->can_redo());
+        session->redo();
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{2});
+        QVERIFY(!session->can_redo());
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{2});
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{0});
+    }
 };
 
 QTEST_GUILESS_MAIN(TestSession)

@@ -466,11 +466,21 @@ private slots:
         list.resize(180, 600);
         list.show();
         QVERIFY(QTest::qWaitForWindowExposed(&list));
+        const auto kept = [&list] {
+            std::size_t files = 0;
+            std::error_code ec;
+            if (fs::exists(list.maker().cache().root(), ec)) {
+                for (const auto& entry : fs::recursive_directory_iterator(list.maker().cache().root())) files += entry.is_regular_file() ? 1 : 0;
+            }
+            return files;
+        };
+        const std::size_t kept_before = kept();
         list.fill(partial, 0);
         QVERIFY(list.wait_pictures(60000));
         QVERIFY(list.has_picture(0));
         QVERIFY(!list.has_picture(1) && !list.has_picture(2));
         QCOMPARE(list.maker().drawn(), 1);
+        QCOMPARE(kept(), kept_before);  // (no picture is kept while pages are not read: one may show through another)
 
         app::PageCanvas canvas;
         canvas.resize(500, 600);
@@ -485,6 +495,7 @@ private slots:
         list.fill(whole, 0);
         QVERIFY(list.wait_pictures(60000));
         QVERIFY(list.has_picture(1) && list.has_picture(2));
+        QCOMPARE(kept(), kept_before + 3);
         canvas.set_page(whole, 1);
         QVERIFY(canvas.wait_rendered(60000));
         QVERIFY(canvas.renderer().any_shown());
@@ -497,6 +508,7 @@ private slots:
         window.open_project(book);
         QVERIFY(QTest::qWaitFor([&] { return window.session().path() == std::optional<fs::path>(book); }, 60000));
         app::Session& session = window.session();
+        QVERIFY(session.read_in_parts());  // (opened with its first page first)
         QVERIFY(session.apply(Json::array({Json::object({{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"},
                                                          {"points", Json::array({Json::array({40.0, 200.0, 0.7}), Json::array({90.0, 210.0, 0.7})})},
                                                          {"stabilize", 0}})})).applied.size() == 1);

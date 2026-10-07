@@ -351,9 +351,17 @@ void Session::read_rest() {
 }
 
 void Session::finish_reading(const JobResult& r) {
-    read_so_far_.reset();
     if (!r.ok) {
+        if (++read_failures_ < 3) {
+            // (a drive back, a folder reachable again: read again a little later)
+            emit notice(QStringLiteral("原稿の残りのページを読み込めませんでした。もう一度読み込みます（%1）").arg(r.message), false);
+            QTimer::singleShot(options_.read_retry * read_failures_, this, [this] { read_rest(); });
+            emit statusChanged();
+            return;
+        }
         // the pages read stay shown; nothing can be changed or written, as for any book that cannot be read whole
+        read_failed_ = true;
+        read_so_far_.reset();
         read_only_ = "the rest of the book could not be read: " + r.message.toStdString();
         idle_timer_.stop();
         longest_timer_.stop();
@@ -366,6 +374,7 @@ void Session::finish_reading(const JobResult& r) {
         emit statusChanged();
         return;
     }
+    read_so_far_.reset();
     loading_ = false;
     const DocPtr before = doc_;
     base_revision_ = r.revision;
@@ -375,6 +384,7 @@ void Session::finish_reading(const JobResult& r) {
     if (!r.doc->read_only_reason.empty()) {
         // A problem on a page read just now: the book opens read-only, as it would have at once. The changes made
         // meanwhile cannot be saved to it, so they are not kept as if they could be.
+        const bool told = !before->read_only_reason.empty();  // (read-only from its first page on: nothing new to say)
         const std::size_t dropped = done_.size();
         doc_ = r.doc;
         done_.clear();
@@ -386,52 +396,76 @@ void Session::finish_reading(const JobResult& r) {
         save_wanted_ = false;
         ++generation_;
         touch(BookChange{BookChange::Why::Reload, Json::array(), before, doc_});
-        emit notice(dropped == 0 ? QStringLiteral("後のページに問題が見つかったため、原稿を読み取り専用で開きました。")
-                                 : QStringLiteral("後のページに問題が見つかったため、原稿を読み取り専用で開きました。読み込み中の変更 %1 件は保存できないため取り消しました。")
-                                       .arg(dropped),
-                    true);
+        if (!told) {
+            emit notice(dropped == 0 ? QStringLiteral("後のページに問題が見つかったため、原稿を読み取り専用で開きました。")
+                                     : QStringLiteral("後のページに問題が見つかったため、原稿を読み取り専用で開きました。読み込み中の変更 %1 件は保存できないため取り消しました。")
+                                           .arg(dropped),
+                        true);
+        }
         if (const auto target = std::exchange(save_as_after_reading_, std::nullopt)) save_as(*target);  // (refused: read-only)
         return;
     }
     // The changes made meanwhile, again on the whole book: they kept to the page that was read (CommandBus refused
-    // any other), so they apply as they did. (Nothing else is queued while pages are read: no save has run.)
+    // any other), so they apply as they did. (Nothing else is queued while pages are read: no save has run.) Another
+    // writer may have saved meanwhile: a page number that now names another page is not written to (as in a rebase).
     const core::CommandBus bus(*registry_);
-    DocPtr current = r.doc;
-    std::vector<std::shared_ptr<Change>> replayed;
-    std::deque<Action> keep;
     QStringList conflicts_found;
-    for (const Action& action : queue_) {
-        const std::shared_ptr<Change>& change = action.change;
-        if (action.kind != Action::Kind::Edit || !change) continue;
+    const auto replay = [&](const std::shared_ptr<Change>& change, const DocPtr& base) -> std::shared_ptr<Change> {
         auto again = std::make_shared<Change>();
         again->id = new_change_id();
         again->ops = change->ops;
         again->recover = change->recover;
-        again->before = current;
+        again->before = base;
         if (change->recover) {
             // (an adopted recovery point is the whole book already)
             again->journal_ops = change->journal_ops;
             again->after = change->after;
-        } else {
-            try {
-                core::ScopedIdScript script(change->ids);
-                core::ApplyResult result = bus.apply(*current, change->ops, core::Actor(actor_));
-                again->journal_ops = result.journal_ops;
-                again->ids = script.taken();
-                again->after = std::make_shared<const core::Document>(std::move(result.doc));
-            } catch (const core::Error& error) {
-                conflicts_found << QString::fromUtf8(error.what());
-                continue;
-            }
+            return again;
         }
-        current = again->after;
-        replayed.push_back(again);
-        keep.push_back(Action{Action::Kind::Edit, again, core::new_txn_id(), ++next_seq_, false});
+        try {
+            for (const auto& original : change->before->pages) {
+                const auto at_number = std::find_if(base->pages.begin(), base->pages.end(),
+                    [&](const core::PagePtr& page) { return page->index == original->index; });
+                if (at_number != base->pages.end() && (*at_number)->id != original->id) {
+                    throw core::ApplyError("ページの番号とIDの対応が変わったため、読み込み中の変更を適用しませんでした。", "rebase_conflict");
+                }
+            }
+            core::ScopedIdScript script(change->ids);
+            core::ApplyResult result = bus.apply(*base, change->ops, core::Actor(actor_));
+            again->journal_ops = result.journal_ops;
+            again->ids = script.taken();
+            again->after = std::make_shared<const core::Document>(std::move(result.doc));
+            return again;
+        } catch (const core::Error& error) {
+            conflicts_found << QString::fromUtf8(error.what());
+            return nullptr;
+        }
+    };
+    DocPtr current = r.doc;
+    std::vector<std::shared_ptr<Change>> replayed;
+    std::deque<Action> keep;
+    for (const Action& action : queue_) {
+        if (action.kind != Action::Kind::Edit || !action.change) continue;
+        if (auto again = replay(action.change, current)) {
+            current = again->after;
+            replayed.push_back(again);
+            keep.push_back(Action{Action::Kind::Edit, again, core::new_txn_id(), ++next_seq_, false});
+        }
+    }
+    // what was undone meanwhile (in memory) can be redone, on top of the changes kept
+    std::vector<std::shared_ptr<Change>> redo_chain;
+    DocPtr tip = current;
+    for (auto it = undone_.rbegin(); it != undone_.rend(); ++it) {
+        auto again = replay(*it, tip);
+        if (!again) break;  // (the ones after it were made on top of it)
+        tip = again->after;
+        redo_chain.push_back(again);
     }
     doc_ = current;
     done_ = std::move(replayed);
-    undone_.clear();
+    undone_.assign(redo_chain.rbegin(), redo_chain.rend());
     queue_ = std::move(keep);
+    if (!done_.empty()) disk_redo_ = 0;  // (saving a change clears the journal's redo, as apply() says)
     read_only_ = doc_->read_only_reason;
     ++generation_;
     touch(BookChange{BookChange::Why::Reload, Json::array(), before, doc_});
@@ -445,6 +479,8 @@ void Session::finish_reading(const JobResult& r) {
             schedule_save();
         }
     }
+    // (the window's file watcher was not heeded while pages were read: the book may have moved on since)
+    check_outside();
 }
 
 std::shared_ptr<Session> Session::open(const fs::path& dir, Options options) {
@@ -484,6 +520,7 @@ Session::Session(core::Document doc, std::optional<fs::path> dir, Options option
     last_revision_ = doc.revision;
     read_only_ = doc.read_only_reason;
     loading_ = !doc.deferred.empty();
+    read_in_parts_ = loading_;
     doc_ = std::make_shared<const core::Document>(std::move(doc));
     idle_timer_.setSingleShot(true);
     longest_timer_.setSingleShot(true);
@@ -1079,6 +1116,10 @@ void Session::check_outside() {
 void Session::save_as(const fs::path& dir) {
     if (saving_as_ || discarded_) return;
     if (loading_) {
+        if (read_failed_) {
+            emit savedAs(false, QString::fromStdString(read_only_));
+            return;
+        }
         // (written when the rest of the book is read: a book missing pages is never written)
         save_as_after_reading_ = dir;
         emit statusChanged();
