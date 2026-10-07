@@ -64,6 +64,12 @@ std::string usage(const Json& op) {
     return out;
 }
 
+// Keys this build's ops take beyond Python's (the precise colour work: merge_visible's flatten, convert_layer's
+// preserve_precision). They are used, so not reported as ignored; the public list (`genko schema`) stays Python's.
+bool native_key(std::string_view op, std::string_view key) {
+    return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision");
+}
+
 // Python's _unknown_keys: keys an op was given that it does not take (ignored, so said).
 std::vector<std::string> unknown_key_warnings(const Json& ops) {
     std::vector<std::string> out;
@@ -75,7 +81,7 @@ std::vector<std::string> unknown_key_warnings(const Json& ops) {
         std::vector<std::string> strange;
         for (const auto& [key, value] : op.items()) {
             const bool known = schema->contains(key) || key == "op" || key == "area" || key == "page" || key == "id" ||
-                               key == "note";
+                               key == "note" || native_key(py_str(*get(op, "op")), key);
             if (!known && !key.starts_with("_")) strange.push_back(key);
         }
         if (!strange.empty()) {

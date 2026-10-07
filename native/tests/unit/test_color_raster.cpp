@@ -47,6 +47,23 @@ private slots:
         QCOMPARE(copied.page(0).layers.size(),std::size_t(3));
     }
 
+    // The precise colour work's own keys (merge_visible's flatten) are not in Python's public list (`genko schema`,
+    // test_contract_cli): they are taken, and not reported as ignored; a key no op takes still is.
+    void nativeKeysAreNotReportedAsIgnored() {
+        auto doc=core::new_episode("拡張キー",core::Num(1),1,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        auto& p=doc.edit_page(0); p.numero=false; p.frames.clear(); p.layers.clear();
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},{"precision","u16"},
+                        {"pixels",Json::array({1,2,3,65535})}};
+        const auto base=core::CommandBus().apply(doc,Json::array({put,put}),core::Actor("human:test")).doc;
+        const Json flatten={{"op","merge_visible"},{"page",1},{"copy",false},{"flatten",true}};
+        const auto flat=core::CommandBus(render::ops_registry()).apply(base,Json::array({flatten}),core::Actor("human:test"));
+        for(const Json& warning:flat.warnings) QVERIFY2(warning.get<std::string>().find("unknown keys")==std::string::npos,warning.dump().c_str());
+        const Json odd={{"op","merge_visible"},{"page",1},{"copy",true},{"colour","red"}};
+        const auto other=core::CommandBus(render::ops_registry()).apply(base,Json::array({odd}),core::Actor("human:test"));
+        QVERIFY(std::any_of(other.warnings.begin(),other.warnings.end(),[](const Json& w){
+            return w.get<std::string>()=="ops[0] merge_visible: unknown keys ignored: colour";}));
+    }
+
     void highPrecisionMergeAndConversion() {
         QFETCH(QString,precision); QFETCH(QString,operation);
         auto doc=core::new_episode("高精度結合",core::Num(1),2,

@@ -405,7 +405,6 @@
   "op": "merge_visible",
   "page": "int",
   "copy": "bool? (default true: a new layer on top; false: the visible layers merged)",
-  "flatten": "bool? (default false; requires copy=false: opaque background in the paper color, drops hidden art; undoable)",
   "name": "str?",
   "id": "str?"
  },
