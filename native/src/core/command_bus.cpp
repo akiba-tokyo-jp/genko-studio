@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <set>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -721,10 +722,14 @@ void refuse_unread_pages(const Document& doc, const Json& ops) {
     }
 }
 
+// (each picture once, however many layers share it: as validate_color_document counts the budget)
 std::size_t color_raster_bytes(const Document& doc) {
+    std::unordered_set<const std::string*> seen;
     std::size_t bytes = 0;
     for (const PagePtr& page : doc.pages) {
-        for (const Layer& layer : page->layers) bytes += layer.color_raster ? layer.color_raster->size() : 0;
+        for (const Layer& layer : page->layers) {
+            if (layer.color_raster && seen.insert(layer.color_raster.get()).second) bytes += layer.color_raster->size();
+        }
     }
     return bytes;
 }

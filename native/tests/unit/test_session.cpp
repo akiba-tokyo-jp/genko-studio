@@ -1310,9 +1310,10 @@ private slots:
         QCOMPARE(notices.at(0).at(1).toBool(), false);  // (said, and tried again)
         QVERIFY(session->loading());
         fs::rename(away, book);
-        QVERIFY(wait_for([&] { return !session->loading(); }));
-        QVERIFY(session->read_only_reason().empty());
+        // (a save asked for while the read waits to be tried again waits for it: it is not a failure)
         QVERIFY(session->wait_saved(10000ms));
+        QVERIFY(!session->loading());
+        QVERIFY(session->read_only_reason().empty());
         QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{2});
         QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{1});
     }
@@ -1379,6 +1380,57 @@ private slots:
         QCOMPARE(ink_strokes(disk, 1), std::size_t{1});
         QCOMPARE(ink_strokes(session->document(), 0), std::size_t{1});
         QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+    }
+
+    void aLineUndoneMeanwhileStillReplacesTheJournalsRedo() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 2, 1);
+        {
+            auto first = Session::open(book, quick(recovery));
+            first->undo();  // (the journal has something to redo)
+            QVERIFY(first->wait_saved(10000ms));
+        }
+        const Session::Options options = first_page_first(recovery);
+        auto session = Session::from(Session::read(book, options), book, options);
+        session->apply(stroke_op(80, 1));
+        session->undo();  // (in memory: nothing kept, one change to redo)
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        QVERIFY(session->can_redo());
+        session->redo();
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{1});
+        // the line drawn replaced what the journal could redo, as any new change does
+        QVERIFY(!session->can_redo());
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{1});
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{0});
+    }
+
+    void anUnrelatedReorderMeanwhileKeepsTheChange() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 3, 1);
+        const Session::Options options = first_page_first(recovery);
+        auto session = Session::from(Session::read(book, options), book, options);
+        session->apply(stroke_op(70, 1));
+        {
+            Session::Options other = quick(path_of(tmp.filePath("recovery-other")));
+            other.actor = "agent:other";
+            auto writer = Session::open(book, other);
+            writer->apply(Json::array({Json::object({{"op", "reorder"}, {"order", Json::array({1, 3, 2})}})}));
+            QVERIFY(writer->wait_saved(10000ms));
+        }
+        QSignalSpy conflicts(session.get(), &Session::conflicts);
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(conflicts.count(), 0);  // (page 1 is still the page the line was drawn on)
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{2});
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{1});
+        QCOMPARE(ink_strokes_on_disk(book, 2), std::size_t{1});
     }
 
     void undoAndRedoAfterTheRestIsRead() {

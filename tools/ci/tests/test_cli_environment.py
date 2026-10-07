@@ -44,6 +44,51 @@ class CliEnvironmentTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 helper.find_cgroup(Path(folder), '0::/missing\n')
 
+    def v1(self, folder, memory_path, cpu_dir='cpu', cpu_path=''):
+        memory = Path(folder) / 'memory' / memory_path
+        memory.mkdir(parents=True, exist_ok=True)
+        (memory / 'memory.oom_control').write_text('oom_kill_disable 0\nunder_oom 0\noom_kill 3\n')
+        (memory / 'memory.failcnt').write_text('2\n')
+        (memory / 'memory.limit_in_bytes').write_text('2147483648\n')
+        (memory / 'memory.max_usage_in_bytes').write_text('1048576\n')
+        cpu = Path(folder) / cpu_dir / cpu_path
+        cpu.mkdir(parents=True, exist_ok=True)
+        (cpu / 'cpu.cfs_quota_us').write_text('-1\n')
+        (cpu / 'cpu.cfs_period_us').write_text('100000\n')
+        return memory, cpu
+
+    def test_v2_records_are_read_as_they_are(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cg = Path(folder) / 'job'
+            cg.mkdir()
+            (cg / 'memory.events').write_text('low 0\nhigh 0\nmax 0\noom 1\noom_kill 0\n')
+            (cg / 'memory.max').write_text('2147483648\n')
+            (cg / 'memory.peak').write_text('4096\n')
+            (cg / 'cpu.max').write_text('100000 100000\n')
+            found = helper.find_resources(Path(folder), '0::/job\n')
+            self.assertEqual(found.events(), {'low': 0, 'high': 0, 'max': 0, 'oom': 1, 'oom_kill': 0})
+            self.assertEqual((found.memory_max(), found.memory_peak(), found.cpu_max()), ('2147483648', '4096', '100000 100000'))
+
+    def test_v1_controllers_records_are_used(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.v1(folder, 'process/job')
+            found = helper.find_resources(Path(folder), '4:memory:/process/job\n1:cpu:/\n0::/\n')
+            self.assertEqual(found.events(), {'max': 2, 'oom': 3, 'oom_kill': 3})
+            self.assertEqual((found.memory_max(), found.memory_peak(), found.cpu_max()), ('2147483648', '1048576', 'max 100000'))
+
+    def test_v1_joined_cpu_controllers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.v1(folder, 'job', 'cpu,cpuacct', 'job')
+            found = helper.find_resources(Path(folder), '5:memory:/job\n3:cpu,cpuacct:/job\n')
+            self.assertEqual(found.cpu_max(), 'max 100000')
+
+    def test_v1_without_a_controller_is_not_invented(self):
+        with tempfile.TemporaryDirectory() as folder:
+            memory, cpu = self.v1(folder, 'job')
+            (memory / 'memory.oom_control').unlink()
+            with self.assertRaises(RuntimeError):
+                helper.find_resources(Path(folder), '4:memory:/job\n1:cpu:/\n')
+
 
 if __name__ == '__main__':
     unittest.main()

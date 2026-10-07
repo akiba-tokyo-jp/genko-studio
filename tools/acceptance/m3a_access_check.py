@@ -14,7 +14,7 @@ import zlib
 from pathlib import Path
 
 from PIL import Image, PngImagePlugin
-from cli_environment import fixture_directory, find_cgroup
+from cli_environment import fixture_directory, find_resources
 
 G = os.environ.get('GENKO_BIN', sys.argv[1] if len(sys.argv) > 1 else '/src/build/hermes-m3a-release/src/api/genko')
 ROOT = fixture_directory(Path(__file__).resolve().parents[2], os.environ)
@@ -23,11 +23,11 @@ HUMAN = 'human:確認'
 AI = 'ai:確認'
 OTHER = 'human:別の作者'
 results = []
-CG = find_cgroup()
+CG = find_resources()
 
 
 def memory_events():
-    return {k: int(v) for k, v in (row.split() for row in (CG / 'memory.events').read_text().splitlines())}
+    return CG.events()
 
 
 events_before = memory_events()
@@ -282,8 +282,8 @@ oom_delta = events_after['oom'] - events_before['oom']
 oom_kill_delta = events_after['oom_kill'] - events_before['oom_kill']
 summary = {'checks': results, 'count': len(results), 'passed': sum(row['passed'] for row in results), 'fixture_root': str(ROOT),
            'binary_sha256': binary_before, 'binary_unchanged': binary_before == binary_after,
-           'memory_max': (CG / 'memory.max').read_text().strip(), 'memory_peak': (CG / 'memory.peak').read_text().strip(),
-           'cpu_max': (CG / 'cpu.max').read_text().strip(), 'oom_delta': oom_delta, 'oom_kill_delta': oom_kill_delta}
+           'memory_max': CG.memory_max(), 'memory_peak': CG.memory_peak(),
+           'cpu_max': CG.cpu_max(), 'oom_delta': oom_delta, 'oom_kill_delta': oom_kill_delta}
 print(json.dumps(summary, ensure_ascii=False, indent=1))
 raise SystemExit(0 if len(results) == 23 and all(row['passed'] for row in results)
                  and oom_delta == 0 and oom_kill_delta == 0 and binary_before == binary_after else 1)

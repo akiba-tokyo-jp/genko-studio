@@ -355,7 +355,11 @@ void Session::finish_reading(const JobResult& r) {
         if (++read_failures_ < 3) {
             // (a drive back, a folder reachable again: read again a little later)
             emit notice(QStringLiteral("原稿の残りのページを読み込めませんでした。もう一度読み込みます（%1）").arg(r.message), false);
-            QTimer::singleShot(options_.read_retry * read_failures_, this, [this] { read_rest(); });
+            read_retry_pending_ = true;
+            QTimer::singleShot(options_.read_retry * read_failures_, this, [this] {
+                read_retry_pending_ = false;
+                read_rest();
+            });
             emit statusChanged();
             return;
         }
@@ -410,6 +414,8 @@ void Session::finish_reading(const JobResult& r) {
     // writer may have saved meanwhile: a page number that now names another page is not written to (as in a rebase).
     const core::CommandBus bus(*registry_);
     QStringList conflicts_found;
+    QStringList* failures = &conflicts_found;
+    QStringList redo_lost;
     const auto replay = [&](const std::shared_ptr<Change>& change, const DocPtr& base) -> std::shared_ptr<Change> {
         auto again = std::make_shared<Change>();
         again->id = new_change_id();
@@ -423,10 +429,19 @@ void Session::finish_reading(const JobResult& r) {
             return again;
         }
         try {
-            for (const auto& original : change->before->pages) {
-                const auto at_number = std::find_if(base->pages.begin(), base->pages.end(),
-                    [&](const core::PagePtr& page) { return page->index == original->index; });
-                if (at_number != base->pages.end() && (*at_number)->id != original->id) {
+            // (the pages its ops name by number — while pages are read, only ops on a read page carry one)
+            for (const Json& op : change->ops) {
+                const auto named = op.is_object() ? op.find("page") : op.end();
+                if (!op.is_object() || named == op.end()) continue;
+                const auto page_named = [&](const DocPtr& doc) -> const core::Page* {
+                    for (const auto& page : doc->pages) {
+                        if (page->index.json() == *named) return page.get();
+                    }
+                    return nullptr;
+                };
+                const core::Page* then = page_named(change->before);
+                const core::Page* now = page_named(base);
+                if ((then == nullptr) != (now == nullptr) || (then != nullptr && then->id != now->id)) {
                     throw core::ApplyError("ページの番号とIDの対応が変わったため、読み込み中の変更を適用しませんでした。", "rebase_conflict");
                 }
             }
@@ -437,10 +452,11 @@ void Session::finish_reading(const JobResult& r) {
             again->after = std::make_shared<const core::Document>(std::move(result.doc));
             return again;
         } catch (const core::Error& error) {
-            conflicts_found << QString::fromUtf8(error.what());
+            *failures << QString::fromUtf8(error.what());
             return nullptr;
         }
     };
+    const bool changed_meanwhile = !done_.empty() || !undone_.empty();
     DocPtr current = r.doc;
     std::vector<std::shared_ptr<Change>> replayed;
     std::deque<Action> keep;
@@ -455,6 +471,7 @@ void Session::finish_reading(const JobResult& r) {
     // what was undone meanwhile (in memory) can be redone, on top of the changes kept
     std::vector<std::shared_ptr<Change>> redo_chain;
     DocPtr tip = current;
+    failures = &redo_lost;  // (not in the book: only the chance to redo them is lost)
     for (auto it = undone_.rbegin(); it != undone_.rend(); ++it) {
         auto again = replay(*it, tip);
         if (!again) break;  // (the ones after it were made on top of it)
@@ -465,7 +482,8 @@ void Session::finish_reading(const JobResult& r) {
     done_ = std::move(replayed);
     undone_.assign(redo_chain.rbegin(), redo_chain.rend());
     queue_ = std::move(keep);
-    if (!done_.empty()) disk_redo_ = 0;  // (saving a change clears the journal's redo, as apply() says)
+    // (a change made meanwhile, kept or undone in memory, replaced the journal's redo, as apply() does)
+    if (changed_meanwhile) disk_redo_ = 0;
     read_only_ = doc_->read_only_reason;
     ++generation_;
     touch(BookChange{BookChange::Why::Reload, Json::array(), before, doc_});
@@ -1219,7 +1237,7 @@ bool Session::wait_saved(std::chrono::milliseconds timeout) {
     clock.start();
     for (;;) {
         // (pages not read and no read of them under way — it failed, or was not asked for: nothing will be written)
-        if (loading_ && !reading_rest_) return false;
+        if (loading_ && !reading_rest_ && !read_retry_pending_) return false;
         if (!job_running_ && !rebasing_ && !saving_as_ && !loading_) {
             if (queue_.empty()) return path_.has_value() && status().kind == SaveKind::Saved;
             if (failed_ || !path_ || discarded_) return false;

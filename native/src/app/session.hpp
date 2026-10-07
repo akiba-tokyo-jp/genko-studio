@@ -252,6 +252,7 @@ private:
     bool read_in_parts_ = false;
     int read_failures_ = 0;
     bool read_failed_ = false;      // the rest could not be read (after the retries): read-only, nothing written
+    bool read_retry_pending_ = false;  // a read that failed waits to be tried again
     std::optional<std::filesystem::path> save_as_after_reading_;  // save_as asked while pages were read
     std::shared_ptr<storage::LoadCache> read_so_far_;
 

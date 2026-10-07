@@ -41,6 +41,10 @@ private slots:
         } catch(const core::ApplyError& e) {
             QCOMPARE(QString::fromStdString(e.code()),QStringLiteral("page_not_loaded"));
         }
+        // a layer copied shares its picture: the precise pictures do not grow, and the op is taken
+        const Json duplicate={{"op","duplicate_layer"},{"page",1},{"id",base.page(0).layers[0].id}};
+        const auto copied=core::CommandBus(render::ops_registry()).apply(base,Json::array({duplicate}),core::Actor("human:test")).doc;
+        QCOMPARE(copied.page(0).layers.size(),std::size_t(3));
     }
 
     void highPrecisionMergeAndConversion() {
