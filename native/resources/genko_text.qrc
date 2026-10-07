@@ -1,0 +1,10 @@
+<RCC>
+  <qresource prefix="/genko/text">
+    <file alias="gothic">../../src/genko/fonts/ZenKakuGothicNew-Bold.ttf</file>
+    <file alias="mincho">../../src/genko/fonts/ZenOldMincho-SemiBold.ttf</file>
+    <file alias="maru">../../src/genko/fonts/ZenMaruGothic-Bold.ttf</file>
+    <file alias="hand">../../src/genko/fonts/Yomogi-Regular.ttf</file>
+    <file alias="sfx">../../src/genko/fonts/DelaGothicOne-Regular.ttf</file>
+    <file alias="sfx_pop">../../src/genko/fonts/ReggaeOne-Regular.ttf</file>
+  </qresource>
+</RCC>

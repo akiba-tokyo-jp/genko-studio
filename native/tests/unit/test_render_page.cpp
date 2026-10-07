@@ -3,13 +3,23 @@
 // page are the same as the whole page cut, and the remembered lines are used (rough_needed).
 
 #include <QtTest>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QTemporaryDir>
+#include "render/draw.hpp"
+#include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 
 #include <memory>
+#include <fstream>
+#include <filesystem>
+#include "render/selection.hpp"
 #include <stop_token>
 #include <thread>
 #include <vector>
 
 #include "core/error.hpp"
+#include "core/command_bus.hpp"
 #include "core/ids.hpp"
 #include "core/model.hpp"
 #include "render/page.hpp"
@@ -73,11 +83,208 @@ class TestRenderPage : public QObject {
 private slots:
     void init() { render::clear_render_caches(); }
 
+    void plainTextCases_data() {
+        QTest::addColumn<QString>("data");
+        std::ifstream file(std::filesystem::path(GENKO_SOURCE_DIR)/"tests/fixtures/render/text-cases.json");QVERIFY(file.good());
+        const Json reference=Json::parse(file);
+        for(const auto& c:reference.at("cases"))QTest::newRow(c.at("id").get<std::string>().c_str())<<QString::fromStdString(c.dump());
+    }
+    void plainTextCases() {
+        QFETCH(QString,data);const Json c=Json::parse(data.toStdString());
+        auto doc=genko::core::new_episode("text fixture",Num(1),1,genko::core::PageSpec::custom(60,60,60,60,0,0,0,0,0));
+        auto& page=doc.edit_page(0);page.layers.clear();page.frames.clear();page.numero=false;
+        doc=genko::core::CommandBus().apply(doc,Json::array({c.at("op")}),genko::core::Actor("human:fixture")).doc;
+        const auto raw=QByteArray::fromBase64(QByteArray::fromStdString(c.at("png").get<std::string>()));
+        const auto expected=render::read_png(std::string(raw.constData(),static_cast<std::size_t>(raw.size()))).convert("RGB");
+        render::RenderOptions options;options.mode="print";
+        render::Image got;
+        try {got=render::render_page(doc.page(0),c.at("dpi").get<int>(),options,&doc).image;}
+        catch(const render::NotYetPorted& e){QFAIL(qPrintable(QString("plain text must render: ")+QString::fromUtf8(e.what())));}
+        QCOMPARE(got.tobytes(),expected.tobytes());
+        options.region=render::RenderRegion{5,7,100,80};
+        QCOMPARE(render::render_page(doc.page(0),c.at("dpi").get<int>(),options,&doc).image.tobytes(),expected.crop({5,7,105,87}).tobytes());
+    }
+    void nombreCases_data() {
+        QTest::addColumn<QString>("data");
+        std::ifstream file(std::filesystem::path(GENKO_SOURCE_DIR) / "tests/fixtures/render/nombre-cases.json");
+        QVERIFY(file.good());
+        const Json reference = Json::parse(file);
+        for (const auto& c : reference.at("cases")) QTest::newRow(c.at("id").get<std::string>().c_str()) << QString::fromStdString(c.dump());
+    }
+    void nombreCases() {
+        QFETCH(QString, data);
+        const Json c = Json::parse(data.toStdString());
+        auto doc = genko::core::new_episode("nombre fixture", Num(1), 2, genko::core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6));
+        doc.nombre = c.at("config");
+        if (c.at("start_side").is_string()) doc.start_side = c.at("start_side").get<std::string>();
+        if (c.at("cover_before").get<bool>()) doc.edit_page(0).extra["cover"] = {{"kind", "front"}};
+        auto& page = doc.edit_page(1); page.index = Num(c.at("index").get<int>()); page.numero = c.at("numero").get<bool>();
+        page.layers.clear(); page.frames.clear(); page.extra["paper_rgb"] = c.at("paper");
+        const int dpi = c.at("dpi").get<int>();
+        std::ifstream file(std::filesystem::path(GENKO_SOURCE_DIR) / "tests/fixtures/render" / c.at("png").get<std::string>(), std::ios::binary);
+        QVERIFY(file.good()); const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const auto expected = render::selection::open_picture(bytes).convert("RGB");
+        for (const std::string mode : {"proof", "print"}) {
+            render::RenderOptions options; options.mode = mode; options.finish = false;
+            const auto whole = render::render_page(page, dpi, options, &doc);
+            QVERIFY(whole.omitted.empty()); QCOMPARE(whole.image.size(), expected.size());
+            if (whole.image.tobytes() != expected.tobytes()) {
+                const auto out = std::filesystem::path(GENKO_SOURCE_DIR) / "../build/text-diagnostics";
+                std::filesystem::create_directories(out);
+                render::save_png(whole.image, out / (c.at("id").get<std::string>() + "-native.png"));
+                for (int size : {9,13}) {
+                    const auto mask = render::text_mask("12", c.at("config").value("font",std::string("gothic")),size,{0.5,0.5});
+                    qWarning() << "native mask" << size << mask.second[0] << mask.second[1] << mask.second[2] << mask.second[3];
+                    render::save_png(mask.first, out / (c.at("config").value("font",std::string("gothic")) + "-" + std::to_string(size) + "-native.png"));
+                }
+                QFAIL("nombre full pixels must match unmodified Python");
+            }
+            // Cut through every label, including fractional placement and white-edge neighbourhood.
+            for (const auto& p : c.at("placements")) {
+                const int x = render::mm_to_px(p.at("x_mm").get<double>(), dpi);
+                const int y = render::mm_to_px(p.at("y_mm").get<double>(), dpi);
+                render::RenderOptions part = options;
+                part.region = render::RenderRegion{std::max(0,x-2), std::max(0,y-2), 4, 4};
+                const auto roi = render::render_page(page, dpi, part, &doc);
+                const auto r = *part.region;
+                QCOMPARE(roi.image.tobytes(), expected.crop(render::Box{r.x,r.y,r.x+r.w,r.y+r.h}).tobytes());
+            }
+        }
+        render::RenderOptions name; name.mode = "name"; name.finish = false;
+        const auto named = render::render_page(page, dpi, name, &doc);
+        const auto blank = render::Image::create("RGB", expected.size(), render::Ink::tuple(genko::core::int_tuple(c.at("paper"))));
+        QCOMPARE(named.image.tobytes(), blank.tobytes());
+    }
+    void fontBrotliBudget() {
+        const std::string path=std::string(GENKO_SOURCE_DIR)+"/tests/fixtures/render/font-wide-glyph.woff2";
+        {
+            render::ImageAllocationBudget budget(4*1024*1024);
+            QVERIFY(!render::text_mask("A",path,6).first.empty());
+            QCOMPARE(budget.live(),std::uint64_t(0));
+        }
+        render::ImageAllocationBudget budget(48*1024);
+        QVERIFY2(([&](){try{(void)render::text_mask("A",path,6);return false;}catch(const genko::core::OpError&){return true;}}()),
+                 "WOFF2 Brotli temporary memory must be budgeted before decoding");
+        QCOMPARE(budget.live(),std::uint64_t(0));
+    }
+    void fontCodecBudget() {
+        const std::string path=std::string(GENKO_SOURCE_DIR)+"/tests/fixtures/render/font-png-profile.ttf";
+        {
+            render::ImageAllocationBudget budget(32*1024*1024);
+            QVERIFY(!render::text_mask("A",path,128).first.empty());
+            QCOMPARE(budget.live(),std::uint64_t(0));
+        }
+        render::ImageAllocationBudget budget(128*1024);
+        QVERIFY2(([&](){try{(void)render::text_mask("A",path,128);return false;}catch(const genko::core::OpError&){return true;}}()),
+                 "embedded PNG metadata must be budgeted before decoding");
+        QVERIFY(budget.peak()<=128*1024);QCOMPARE(budget.live(),std::uint64_t(0));
+    }
+    void fontRasterBudget() {
+        const std::string path=std::string(GENKO_SOURCE_DIR)+"/tests/fixtures/render/font-wide-glyph.ttf";
+        { // Positive control proves the font is valid and reaches the native renderer, rather than fallback.
+            render::ImageAllocationBudget budget(4*1024*1024);
+            const auto [mask,box]=render::text_mask("A",path,128);
+            QCOMPARE(mask.width(),512);QCOMPARE(mask.height(),480);
+            QVERIFY(mask.getbbox().has_value());QCOMPARE(box[2]-box[0],512);
+        }
+        { // Large glyph: the library cap refuses before a roughly 225 MiB bitmap can be allocated.
+            render::ImageAllocationBudget budget(4*1024*1024);
+            try { (void)render::text_mask("A",path,4096);QFAIL("large glyph must refuse before bitmap allocation"); }
+            catch(const genko::core::Error& e){QCOMPARE(e.code(),std::string("memory"));}
+            QVERIFY(budget.peak()<=4*1024*1024);QCOMPARE(budget.live(),std::uint64_t(0));
+        }
+        { // Stroke creates its own FreeType bitmap while the output mask is alive.
+            render::ImageAllocationBudget budget(32*1024*1024);
+            QVERIFY(!render::text_mask("A",path,128,{}, {},512).first.empty());
+            QCOMPARE(budget.live(),std::uint64_t(0));
+        }
+        { // The same valid stroke must refuse under the shared temporary/output limit and recover.
+            render::ImageAllocationBudget budget(4*1024*1024);
+            QVERIFY_THROWS_EXCEPTION(genko::core::OpError,render::text_mask("A",path,128,{}, {},512));
+            QVERIFY(budget.peak()<=4*1024*1024);QCOMPARE(budget.live(),std::uint64_t(0));
+        }
+        render::ImageAllocationBudget budget(128*1024);
+        QVERIFY_THROWS_EXCEPTION(genko::core::OpError,render::text_mask("A",path,128));
+        QVERIFY2(budget.peak()>0,"font work must participate in the image allocation budget before rasterization");
+        QVERIFY(budget.peak()<=128*1024);QCOMPARE(budget.live(),std::uint64_t(0));
+        const auto image=render::Image::create("L",{8,8},0);QVERIFY(!image.empty());
+    }
+    void fontGlyphs_data() {
+        QFile f(QString::fromUtf8(GENKO_SOURCE_DIR)+"/tests/fixtures/render/font-glyphs.json"); QVERIFY(f.open(QIODevice::ReadOnly));
+        const Json data=Json::parse(f.readAll().toStdString());QTest::addColumn<int>("index");
+        for(std::size_t n=0;n<data.at("cases").size();++n)QTest::newRow(data.at("cases")[n].at("id").get<std::string>().c_str())<<static_cast<int>(n);
+    }
+    void fontGlyphs() {
+        QFETCH(int,index);QFile f(QString::fromUtf8(GENKO_SOURCE_DIR)+"/tests/fixtures/render/font-glyphs.json");QVERIFY(f.open(QIODevice::ReadOnly));
+        const Json data=Json::parse(f.readAll().toStdString());const Json& c=data.at("cases")[static_cast<std::size_t>(index)];
+        std::string font=c.at("font").get<std::string>();if(font.starts_with("file:"))font=std::string(GENKO_REPO_ROOT)+"/"+font.substr(5);
+        const auto [image,box]=render::text_mask(c.at("text").get<std::string>(),font,c.at("size").get<int>());
+        const auto expected=c.at("bbox").get<std::array<int,4>>();
+        QCOMPARE(box[0],static_cast<int>(expected[0]));QCOMPARE(box[1],static_cast<int>(expected[1]));QCOMPARE(box[2],static_cast<int>(expected[2]));QCOMPARE(box[3],static_cast<int>(expected[3]));
+        QCOMPARE(image.width(),c.at("mask_size")[0].get<int>());QCOMPARE(image.height(),c.at("mask_size")[1].get<int>());
+        QCOMPARE(image.tobytes(),QByteArray::fromBase64(QByteArray::fromStdString(c.at("data").get<std::string>())).toStdString());
+        QCOMPARE(render::text_length(c.at("text").get<std::string>(),font,c.at("size").get<int>()),c.at("advance").get<double>());
+    }
+    void nombreSafety() {
+        const QString root = QString::fromUtf8(GENKO_SOURCE_DIR) + "/tests/fixtures/render/";
+        QFile file(root + "MANIFEST.json"); QVERIFY(file.open(QIODevice::ReadOnly));
+        const Json manifest = Json::parse(file.readAll().toStdString());
+        QStringList listed;
+        for (const auto& [name, hash] : manifest.items()) {
+            QFile fixture(root + QString::fromStdString(name)); QVERIFY(fixture.open(QIODevice::ReadOnly));
+            QCOMPARE(QCryptographicHash::hash(fixture.readAll(), QCryptographicHash::Sha256).toHex().toStdString(), hash.get<std::string>());
+            listed.push_back(QString::fromStdString(name));
+        }
+        auto actual = QDir(root).entryList(QDir::Files); actual.removeAll("MANIFEST.json"); listed.sort(); QCOMPARE(actual, listed);
+        for (const double size : {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN(), -1.0, 21.0}) {
+            auto doc = genko::core::new_episode("invalid", Num(1), 1, genko::core::PageSpec::custom(70,95,60,85,3,8,8,7,6));
+            doc.edit_page(0).frames.clear(); doc.edit_page(0).layers.clear(); doc.nombre = {{"size_mm",size}};
+            QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::render_page(*doc.pages[0], 110, {}, &doc));
+        }
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::text_mask("12", "gothic", 8193));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::text_mask(std::string(65537,'a'), "gothic", 12));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::text_mask("12", "gothic", 12, {1,0}));
+        std::stop_source stop; stop.request_stop();
+        QVERIFY_THROWS_EXCEPTION(render::Cancelled, render::text_mask("12", "gothic", 12, {}, stop.get_token()));
+        QTemporaryDir font_dir;QVERIFY(font_dir.isValid());
+        QFile huge(font_dir.path()+"/huge.ttf");QVERIFY(huge.open(QIODevice::WriteOnly));QVERIFY(huge.resize(32LL*1024*1024+1));huge.close();
+        QFile broken(font_dir.path()+"/broken.ttf");QVERIFY(broken.open(QIODevice::WriteOnly));QCOMPARE(broken.write("not a font"),qint64(10));broken.close();
+        for(const auto& font_file:{huge.fileName(),broken.fileName()}) {
+            QVERIFY_THROWS_EXCEPTION(genko::core::Error,render::text_mask("漢",font_file.toStdString(),12));
+            QVERIFY_THROWS_EXCEPTION(genko::core::Error,render::text_length("漢",font_file.toStdString(),12));
+        }
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error,render::text_mask(std::string("\xff",1),"gothic",12));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error,render::text_font(std::string("\xff",1),"あ"));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error,render::text_length("a","gothic",8193));
+        {
+            render::ImageAllocationBudget budget(1024);
+            const auto live = budget.live();
+            QVERIFY_THROWS_EXCEPTION(genko::core::OpError, render::text_mask("0123456789", "gothic", 512));
+            QCOMPARE(budget.live(), live);
+            QVERIFY(!render::Image::create("L",{8,8},0).empty());
+        }
+        // A glyph also owns font bytes/library scratch now; a 1 KiB budget cannot hold those.
+        // Verify normal glyph recovery after restoring the enclosing budget, not by ignoring font work.
+        QVERIFY(!render::text_mask("1", "gothic", 6).first.empty());
+    }
+    void nombreVisible_data(){QTest::addColumn<QString>("mode");QTest::newRow("proof")<<QString("proof");QTest::newRow("print")<<QString("print");}
+    void nombreVisible(){
+        QFETCH(QString,mode);
+        auto doc=genko::core::new_episode("nombre fixture",Num(1),1,genko::core::PageSpec::custom(70,95,60,85,3,8,8,7,6));
+        auto& page=doc.edit_page(0);page.frames.clear();page.layers.clear();doc.nombre={{"font","gothic"},{"start",12}};
+        render::RenderOptions options;options.mode=mode.toStdString();options.finish=false;
+        try{
+            const auto actual=render::render_page(page,110,options,&doc);
+            std::ifstream file(std::filesystem::path(GENKO_SOURCE_DIR)/"tests/fixtures/render/nombre-gothic-110.png",std::ios::binary);QVERIFY(file.good());
+            const std::string bytes((std::istreambuf_iterator<char>(file)),std::istreambuf_iterator<char>());const auto expected=render::selection::open_picture(bytes).convert("RGB");
+            QCOMPARE(actual.image.size(),expected.size());QCOMPARE(actual.image.tobytes(),expected.tobytes());
+        }catch(const render::NotYetPorted& e){QVERIFY(std::string(e.what()).find("nombre")!=std::string::npos);QFAIL("nombre component must be ported");}catch(const std::exception& e){QFAIL((std::string("unexpected nombre failure: ")+e.what()).c_str());}
+    }
     void not_yet_ported_data() {
         QTest::addColumn<QString>("what");
         QTest::addColumn<QString>("mode");
         // (tones, effect lines and screens are drawn since M3-B, the 3D guides since M3-C)
-        for (const char* what : {"balloons", "nombre", "covers", "anim", "placed"}) {
+        for (const char* what : {"balloons", "covers", "anim", "placed"}) {
             const char* mode = std::string(what) == "covers" ? "proof" : "print";
             QTest::newRow(what) << QString(what) << QString(mode);
         }
@@ -101,6 +308,13 @@ private slots:
         }
         render::RenderOptions options;
         options.mode = mode.toStdString();
+        if (w == "nombre") {
+            QVERIFY(unported_element(*doc.pages[0], doc, options).empty());
+            const auto result = render::render_page(*doc.pages[0], 72, options, &doc);
+            QVERIFY(result.omitted.empty());
+            QVERIFY(result.image.getextrema().front().first < 255);
+            return;
+        }
         QCOMPARE(unported_element(*doc.pages[0], doc, options), w);
         options.skip_unported = true;
         const render::RenderResult r = render::render_page(*doc.pages[0], 72, options, &doc);

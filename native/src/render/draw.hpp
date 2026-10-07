@@ -1,9 +1,13 @@
 #pragma once
 
 #include <memory>
+#include <array>
+#include <utility>
+#include <stop_token>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <string>
 #include <vector>
 
 #include "render/image.hpp"
@@ -20,6 +24,13 @@ struct PointD {
 };
 
 enum class Joint { None, Curve };
+
+std::string text_font(std::string_view spec,std::string_view text,std::stop_token stop={});
+double text_length(std::string_view text,std::string_view font,int size,std::stop_token stop={});
+
+// A shared horizontal text mask and its LA-anchor bounds; immutable bundled font, no display required.
+std::pair<Image,std::array<int,4>> text_mask(std::string_view text,std::string_view font,int size,
+                                         PointD fraction={},std::stop_token stop={},int stroke=0);
 
 class Draw {
 public:

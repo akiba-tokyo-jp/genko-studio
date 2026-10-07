@@ -1,0 +1,30 @@
+{
+  "placements": [
+    {
+      "text": "12",
+      "x_mm": 35.0,
+      "y_mm": 86.0,
+      "size_mm": 3.0,
+      "hidden": false
+    }
+  ],
+  "spec": {
+    "paper": [
+      70,
+      95
+    ],
+    "trim": [
+      60,
+      85
+    ],
+    "bleed": 3,
+    "margins": [
+      8,
+      8,
+      7,
+      6
+    ]
+  },
+  "dpi": 110,
+  "source": "genko.nombre.draw + bundled gothic; unmodified reference"
+}

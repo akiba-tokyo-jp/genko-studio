@@ -674,13 +674,104 @@ Image screened_layer(const Ctx& ctx, const Layer& layer, const Image& raster, co
 bool truthy_json(const std::optional<Json>& v) { return v && core::py_truthy(*v); }
 
 // nombre.placements(episode, page) is not empty
-bool nombre_draws(const Page& page, const core::Document* episode) {
-    if (!page.numero) return false;
-    Json cfg = Json::object({{"show", true}, {"hidden", false}});
-    if (episode != nullptr && episode->nombre.is_object()) {
-        for (const auto& [k, v] : episode->nombre.items()) cfg[k] = v;
+Json nombre_settings(const core::Document* episode) {
+    Json cfg = Json::object({{"show", true}, {"hidden", false}, {"position", "bottom_center"},
+                             {"font", "gothic"}, {"size_mm", 3.0}, {"hidden_size_mm", 2.0}, {"start", 1}});
+    if (episode != nullptr && episode->nombre.is_object()) for (const auto& [k, v] : episode->nombre.items()) cfg[k] = v;
+    return cfg;
+}
+
+std::string nombre_text(const Page& page, const core::Document* episode) {
+    std::int64_t before = 0;
+    if (episode != nullptr) for (const auto& p : episode->pages) if (p->index < page.index && core::is_cover(*p)) ++before;
+    return (Num(core::py_int(nombre_settings(episode)["start"])) - Num(1) + page.index - Num(before)).repr();
+}
+
+std::vector<std::array<double, 3>> nombre_items(const Page& page, const core::Document* episode) {
+    if (!page.numero) return {};
+    const Json cfg = nombre_settings(episode);
+    if (!core::py_truthy(cfg["show"]) && !core::py_truthy(cfg["hidden"])) return {};
+    const std::string start_side = episode != nullptr ? episode->start_side.value_or("") : "";
+    const core::Rect trim = page.trim_rect_mm(), inner = page.inner_rect_mm(start_side);
+    const double x0 = trim.x.value(), y0 = trim.y.value(), x1 = x0 + trim.width.value(), y1 = y0 + trim.height.value();
+    const bool outer_right = page.binding_edge(start_side) == "left";
+    std::vector<std::array<double, 3>> out;
+    const auto item = [&](double x, double y, double size) {
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(size) || size < 0 || size > 20)
+            throw core::Error("value", "invalid nombre geometry");
+        out.push_back({core::py_round(x, 3), core::py_round(y, 3), size});
+    };
+    if (core::py_truthy(cfg["show"])) {
+        const double size = core::py_float(cfg["size_mm"]);
+        const std::string position = core::py_str(cfg["position"]);
+        const double below = (inner.y.value() + inner.height.value() + y1) / 2;
+        const double near = outer_right ? inner.x.value() + inner.width.value() - size : inner.x.value() + size;
+        if (position == "bottom_outside") item(near, below, size);
+        else if (position == "top_outside") item(near, (y0 + inner.y.value()) / 2, size);
+        else if (position == "side_outside") item(outer_right ? (inner.x.value() + inner.width.value() + x1) / 2 : (x0 + inner.x.value()) / 2,
+                                                    inner.y.value() + inner.height.value() / 2, size);
+        else item((x0 + x1) / 2, below, size);
     }
-    return core::py_truthy(cfg["show"]) || core::py_truthy(cfg["hidden"]);
+    if (core::py_truthy(cfg["hidden"])) {
+        const double small = core::py_float(cfg["hidden_size_mm"]);
+        item(outer_right ? x0 + small : x1 - small, y1 - 15, small);
+    }
+    return out;
+}
+
+std::string nombre_font(const core::Document* episode) {
+    const Json cfg = nombre_settings(episode);
+    return core::py_truthy(cfg["font"]) ? core::py_str(cfg["font"]) : "gothic";
+}
+
+std::pair<PointD, Box> nombre_geometry(const std::string& text, const std::string& font, int size,
+                                     const std::array<double, 3>& item, const Ctx& ctx) {
+    auto measured = text_mask(text, font, size, {}, ctx.stop);
+    const auto& box = measured.second;
+    const double x = mm_to_px(item[0], ctx.dpi) - (box[2] - box[0]) / 2.0 - box[0];
+    const double y = mm_to_px(item[1], ctx.dpi) - (box[3] - box[1]) / 2.0 - box[1];
+    const int pad = std::max(2, size / 5);
+    return {{x, y}, {static_cast<int>(x + box[0]) - pad, static_cast<int>(y + box[1]) - pad,
+                     static_cast<int>(x + box[2]) + pad, static_cast<int>(y + box[3]) + pad}};
+}
+
+Box nombre_required_area(const Box& area, const Ctx& ctx) {
+    const auto items = nombre_items(*ctx.page, ctx.episode);
+    if (items.empty()) return area;
+    const auto text = nombre_text(*ctx.page, ctx.episode), font = nombre_font(ctx.episode);
+    Box out = area;
+    for (const auto& item : items) {
+        const int size = std::max(6, mm_to_px(item[2], ctx.dpi));
+        const Box sample = nombre_geometry(text, font, size, item, ctx).second;
+        if (!intersects(sample, area)) continue;
+        out.x0 = std::min(out.x0, std::max(0, sample.x0)); out.y0 = std::min(out.y0, std::max(0, sample.y0));
+        out.x1 = std::max(out.x1, std::min(ctx.size.width, sample.x1)); out.y1 = std::max(out.y1, std::min(ctx.size.height, sample.y1));
+    }
+    return out;
+}
+
+void draw_nombre(Image& image, const Box& area, const Ctx& ctx) {
+    const auto items = nombre_items(*ctx.page, ctx.episode);
+    if (items.empty()) return;
+    const auto text = nombre_text(*ctx.page, ctx.episode), font = nombre_font(ctx.episode);
+    for (const auto& item : items) {
+        check_cancel(ctx);
+        const int size = std::max(6, mm_to_px(item[2], ctx.dpi));
+        const auto [origin, sample] = nombre_geometry(text, font, size, item, ctx);
+        if (!intersects(sample, area)) continue;
+        const Image background = image.crop(shifted(sample, -area.x0, -area.y0)).convert("L");
+        const bool busy = background.width() > 0 && background.height() > 0 && background.getextrema().front().first < 235;
+        // Pillow ImageDraw keeps the fractional part separately, not as a subpixel FT transform.
+        const PointD fraction{origin.x - std::floor(origin.x), origin.y - std::floor(origin.y)};
+        const auto paint = [&](int stroke, const Ink& color) {
+            auto glyph = text_mask(text, font, size, fraction, ctx.stop, stroke);
+            const int left = static_cast<int>(std::floor(origin.x)) + glyph.second[0] - area.x0;
+            const int top = static_cast<int>(std::floor(origin.y)) + glyph.second[1] - area.y0;
+            image.paste(color, Box{left, top, left + glyph.first.width(), top + glyph.first.height()}, &glyph.first);
+        };
+        if (busy) paint(std::max(1, static_cast<int>(core::py_round_int(size * 0.14))), Ink{255, 255, 255});
+        paint(0, Ink{20, 20, 20});
+    }
 }
 
 // covers.folds(page) is not empty
@@ -764,6 +855,18 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     if (width > 0x7fffffff / 4 || height > 0x7fffffff / 4) throw core::Error("image_too_large", "the page is too large at this resolution");
     ctx.size = Size{width, height};
     const Box area = area_of(options, ctx.size);
+    // Background inspection for white text edges must see the same neighbouring pixels in a region render.
+    // Widen only intersecting labels' small sampling boxes, never force a whole-page high-precision canvas.
+    if (options.region && (ctx.mode == "print" || ctx.mode == "proof")) {
+        const Box expanded = nombre_required_area(area, ctx);
+        if (expanded != area) {
+            RenderOptions widened = options;
+            widened.region = RenderRegion{expanded.x0, expanded.y0, expanded.width(), expanded.height()};
+            RenderResult out = render(page_in, dpi, widened, episode, omitted);
+            out.image = out.image.crop(shifted(area, -expanded.x0, -expanded.y0));
+            return out;
+        }
+    }
     if (static_cast<std::int64_t>(area.width()) * area.height() > kMaxAreaPixels) {
         throw core::Error("image_too_large", "the picture is too large at this resolution");
     }
@@ -892,7 +995,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     }
     // lines: placed ones in balloons, the others as labels (both drawn with text, in M4)
     if (!lines.empty()) skip_unported(ctx, "balloons");
-    if ((print || mode == "proof") && nombre_draws(page, episode)) skip_unported(ctx, "nombre");
+    if (print || mode == "proof") draw_nombre(image, area, ctx);
     if (options.crop_marks && print) {
         PageCanvas canvas(image, area, ctx.size);
         draw_crop_marks(canvas.draw(), page, dpi);

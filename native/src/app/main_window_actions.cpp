@@ -3,12 +3,16 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QCryptographicHash>
 #include <QDialogButtonBox>
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QDir>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QLineEdit>
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QLabel>
@@ -28,6 +32,7 @@
 #include "app/dialogs.hpp"
 #include "app/frame_tools.hpp"
 #include "app/icons.hpp"
+#include "app/material_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
@@ -112,6 +117,7 @@ void MainWindow::build_actions() {
     make("act_save", QStringLiteral("保存"), [this] { save(); }, keys({std_key(Std::Save)}), QStringLiteral("変更は自動で保存されます。今すぐ書き込むときに使います"));
     make("act_save_as", QStringLiteral("別の場所に保存…"), [this] { save_as(); }, keys({std_key(Std::SaveAs)}));
     make("act_exposure", QStringLiteral("露光量の調整層…"), [this] { exposure_dialog(); });
+    make("act_nombre", QStringLiteral("ノンブル（ページ番号）の設定…"), [this] { nombre_dialog(); });
     make("act_undo", QStringLiteral("元に戻す"), [this] { undo(); }, keys({std_key(Std::Undo)}));
     make("act_redo", QStringLiteral("やり直す"), [this] { redo(); }, keys({std_key(Std::Redo), QKeySequence(QStringLiteral("Ctrl+Y"))}));
     make("act_fit", QStringLiteral("全体を表示"), [c] { c->glide([c] { c->fit_page(); }); }, keys({QKeySequence(QStringLiteral("Ctrl+0"))}));
@@ -297,6 +303,7 @@ void MainWindow::build_menus() {
     pages->addSeparator();
     pages->addAction(action("act_page_up"));
     pages->addAction(action("act_page_down"));
+    pages->addAction(action("act_nombre"));
     pages->addSeparator();
     QMenu* frames = pages->addMenu(QStringLiteral("コマ"));
     for (const char* name : {"act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection"}) frames->addAction(action(name));
@@ -374,6 +381,25 @@ void MainWindow::build_docks() {
     pages_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     addDockWidget(Qt::RightDockWidgetArea, pages_dock_);
     view_menu_->addAction(pages_dock_->toggleViewAction());
+    auto* materials = new QDockWidget(QStringLiteral("素材"), this);
+    materials->setObjectName(QStringLiteral("素材"));
+    materials->setWidget(make_builtin_material_panel(materials,[this](const QString& material_id, const QString& kind) {
+        const core::Page* page=current_page();if(!page)return;
+        Json op={{"op","stamp_material"},{"page",page->index.json()},{"material_id",material_id.toStdString()},
+                 {"x_mm",page->spec.width_mm.value()/2},{"y_mm",page->spec.height_mm.value()/2}};
+        if(const core::Layer* layer=target_layer())op["after"]=layer->id;
+        if(!apply_ops(Json::array({std::move(op)})))return;
+        if(kind==QLatin1String("brush")) {
+            const auto key="my_"+QCryptographicHash::hash(material_id.toUtf8(),QCryptographicHash::Sha1).toHex().left(10).toStdString();
+            if(!book().brush_custom.contains(key))return;
+            pen_=PenSettings::for_kind(key);
+            choose_tool(QStringLiteral("pen")); // Updates the live pen after the successful registration.
+            flash(QStringLiteral("選んだブラシで描けます"),3500);
+        }
+    }));
+    addDockWidget(Qt::RightDockWidgetArea, materials);
+    materials->hide();  // Keep the initial canvas room; the window menu and work stages expose the panel.
+    view_menu_->addAction(materials->toggleViewAction());
     setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
     setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
 }
@@ -608,6 +634,45 @@ void MainWindow::border_kind(const QString& kind) {
     Json style = frame->line && frame->line->is_object() ? *frame->line : Json::object();
     style["kind"] = kind.toStdString();
     set_selected_frame(Json::object({{"line", style == Json::object({{"kind", "solid"}}) ? Json(nullptr) : style}}));
+}
+
+void MainWindow::nombre_dialog() {
+    const auto origin=session_;const auto snapshot=origin->snapshot();const int page_index=page_index_;
+    if (!current_page() || !origin->read_only_reason().empty()) return;
+    Json cfg={{"position","bottom_center"},{"font","gothic"},{"size_mm",3.0},{"start",1},{"hidden",false},{"hidden_size_mm",2.0},{"show",true}};
+    if (snapshot->nombre.is_object()) for (const auto& [key,value]:snapshot->nombre.items()) cfg[key]=value;
+    double visible_size=3,hidden_size=2;
+    try { visible_size=core::py_float(cfg["size_mm"]);hidden_size=core::py_float(cfg["hidden_size_mm"]); }
+    catch (const std::exception&) {flash(QStringLiteral("ノンブルの値が不正です。原稿は変更していません。"),6000,true);return;}
+    if(!std::isfinite(visible_size)||!std::isfinite(hidden_size)||visible_size<1||visible_size>20||hidden_size<1||hidden_size>10){flash(QStringLiteral("ノンブルは1〜20mm、隠しノンブルは1〜10mmです。原稿は変更していません。"),6000,true);return;}
+    QDialog dialog(this);dialog.setObjectName("nombre_dialog");dialog.setWindowTitle(QStringLiteral("ノンブル（ページ番号）の設定"));
+    auto* layout=new QVBoxLayout(&dialog);auto* note=new QLabel(QStringLiteral("書体・位置は原稿全体に適用します。ページ番号は校正・印刷に入り、ネーム表示には入りません。"));note->setWordWrap(true);layout->addWidget(note);
+    auto* form=new QFormLayout;layout->addLayout(form);
+    auto* enabled=new QCheckBox(QStringLiteral("このページにノンブルを入れる"));enabled->setObjectName("nombre_numero");enabled->setChecked(snapshot->page(static_cast<std::size_t>(page_index)).numero);form->addRow(enabled);
+    auto* position=new QComboBox;position->setObjectName("nombre_position");
+    for(const auto& [label,key]:{std::pair{"下・中央","bottom_center"},{"下・外側","bottom_outside"},{"上・外側","top_outside"},{"横・外側","side_outside"}})position->addItem(QString::fromUtf8(label),key);
+    position->setCurrentIndex(std::max(0,position->findData(QString::fromStdString(core::py_str(cfg["position"])) )));const int pos_before=position->currentIndex();form->addRow(QStringLiteral("位置"),position);
+    auto* font=new QComboBox;font->setObjectName("nombre_font");
+    for(const auto& [label,key]:{std::pair{"アンチック","antique"},{"ゴシック","gothic"},{"明朝","mincho"},{"丸ゴシック","maru"},{"手書き","hand"},{"効果音","sfx"},{"ポップ","sfx_pop"}})font->addItem(QString::fromUtf8(label),key);
+    font->setCurrentIndex(std::max(0,font->findData(QString::fromStdString(core::py_str(cfg["font"])) )));const int font_before=font->currentIndex();form->addRow(QStringLiteral("書体"),font);
+    const auto size_box=[](const char* name,double value){auto* box=new QDoubleSpinBox;box->setObjectName(name);box->setDecimals(6);box->setRange(1,20);box->setSuffix(QStringLiteral(" mm"));box->setSingleStep(.1);box->setValue(value);return box;};
+    auto* size=size_box("nombre_size",visible_size);auto* hidden_size_box=size_box("nombre_hidden_size",hidden_size);hidden_size_box->setMaximum(10);const double size_before=size->value(),hidden_size_before=hidden_size_box->value();
+    form->addRow(QStringLiteral("大きさ"),size);
+    auto* start=new QLineEdit(QString::fromStdString(core::py_str(cfg["start"])));start->setObjectName("nombre_start");const QString start_before=start->text();form->addRow(QStringLiteral("最初のページ番号"),start);
+    auto* show=new QCheckBox(QStringLiteral("見えるノンブルを入れる"));show->setObjectName("nombre_show");show->setChecked(core::py_truthy(cfg["show"]));const bool show_before=show->isChecked();form->addRow(show);
+    auto* hidden=new QCheckBox(QStringLiteral("隠しノンブルも入れる"));hidden->setObjectName("nombre_hidden");hidden->setChecked(core::py_truthy(cfg["hidden"]));const bool hidden_before=hidden->isChecked();form->addRow(hidden);form->addRow(QStringLiteral("隠しノンブルの大きさ"),hidden_size_box);
+    auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("適用"));buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("キャンセル"));connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);layout->addWidget(buttons);
+    dialog.resize(440,dialog.sizeHint().height());
+    if(ask::exec(&dialog)!=QDialog::Accepted||!modal_target_unchanged(origin,snapshot,page_index))return;
+    Json op={{"op","set_nombre"},{"page",snapshot->page(static_cast<std::size_t>(page_index)).index.json()},{"numero",enabled->isChecked()}};
+    if(position->currentIndex()!=pos_before)op["position"]=position->currentData().toString().toStdString();
+    if(font->currentIndex()!=font_before)op["font"]=font->currentData().toString().toStdString();
+    if(size->value()!=size_before)op["size_mm"]=size->value();
+    if(start->text()!=start_before)op["start"]=start->text().toStdString();
+    if(show->isChecked()!=show_before)op["show"]=show->isChecked();
+    if(hidden->isChecked()!=hidden_before)op["hidden"]=hidden->isChecked();
+    if(hidden_size_box->value()!=hidden_size_before)op["hidden_size_mm"]=hidden_size_box->value();
+    apply_ops(Json::array({op}));
 }
 
 void MainWindow::exposure_dialog() {

@@ -1,0 +1,22 @@
+{
+  "version": "2.14.3",
+  "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+  "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+  "signature_fingerprint": "E30674707856409FF1948010BE6C3AAC63AD8E3F",
+  "signature_verified": true,
+  "license": "FTL",
+  "changes": "unmodified source; matches fixed Pillow reference FreeType engine",
+  "reason": "system 2.13.2 and reference 2.14.3 yield different Yomogi glyph bounds at 9/13px; exact pixels retained",
+  "local_overrides": {
+    "overrides/pngshim.c": {
+      "upstream_sha256": "c6eab902d978bee5907911dae15783a3600ed61f777160e227af062840e65fe5",
+      "sha256": "ec8aee82f32e907d268afc0e5cf9d0af3b73e9a68431fabba15c0bc8aac1960d",
+      "purpose": "libpng internal allocations use the caller FT_Memory"
+    },
+    "overrides/sfwoff2.c": {
+      "upstream_sha256": "9c67d2b0e2d0a88520bbfe132827252d0f7bd731bb735fba7a36575222d7cc72",
+      "sha256": "147dcd340b790c3779c95eabc0726ac132546bc80e09609b28d318a0c8a25800",
+      "purpose": "Brotli internal allocations use the caller FT_Memory"
+    }
+  }
+}

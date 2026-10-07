@@ -1,5 +1,7 @@
 # Drawing (docs/cpp-migration/ARCHITECTURE.md §4a): Pillow's libImaging with its Python layer ported, brushes, pages,
 # tones, effect lines, the 3D guides. QtCore only (no QtGui): pages are drawn the same with or without a display.
+qt_add_resources(GENKO_MATERIAL_RESOURCES "${GENKO_SOURCE_ROOT}/resources/genko_materials.qrc")
+qt_add_big_resources(GENKO_TEXT_RESOURCES "${GENKO_SOURCE_ROOT}/resources/genko_text.qrc")
 genko_library(genko_render
   SOURCES
     image.cpp
@@ -25,8 +27,10 @@ genko_library(genko_render
     filters.cpp
     vectorize.cpp
     raster_ops.cpp
+    ${GENKO_MATERIAL_RESOURCES}
+    ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
-  PRIVATE_DEPS pillow_imaging PNG::PNG JPEG::JPEG)
+  PRIVATE_DEPS pillow_imaging PNG::PNG JPEG::JPEG Freetype::Freetype)
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
 # (numpy's float32 sinf, cosf, hypotf, atan2f: called in libm as numpy calls them. MSVC: /fp:precise, with which these
 # have no intrinsic forms)

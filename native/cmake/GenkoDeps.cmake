@@ -10,7 +10,7 @@ find_package(ZLIB REQUIRED)
 find_package(PNG REQUIRED)
 find_package(JPEG REQUIRED)
 find_package(TIFF REQUIRED)
-find_package(Freetype REQUIRED)
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../third_party/freetype" "${CMAKE_CURRENT_BINARY_DIR}/third_party/freetype")
 
 find_package(harfbuzz CONFIG QUIET)
 if(TARGET harfbuzz::harfbuzz)

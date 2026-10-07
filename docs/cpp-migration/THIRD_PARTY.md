@@ -10,7 +10,7 @@
 | libpng | 1.6.43 / 1.6.x | libpng-2.0 | PNG | 静的 |
 | libjpeg-turbo | 2.1.5 / 3.x | IJG AND BSD-3-Clause AND Zlib | JPEG | 静的 |
 | libtiff | 4.5.1 / 4.7.x | libtiff | TIFF（CMYK、1bit） | 静的 |
-| FreeType | 2.13.2 / 2.13.x | FTL（BSD 型） | 字形 | 静的 |
+| FreeType | 2.14.3（署名検証済みの固定archive＋メモリ予算接続override、ソースは両OS共通） | FTL（BSD 型） | 字形。参照Pillowと同じrasterizerで画素互換を保つ | 静的。`native/third_party/freetype/`に原archive・SHA256・来歴・ライセンス |
 | HarfBuzz | 8.3.0 / 10.x | MIT | 字形の配置（縦書きの字形置換・OpenType 機能） | 静的 |
 | libwebp | 1.3.2 / 1.5.x | BSD-3-Clause | WebP（タイムラプス・アニメーション） | 静的 |
 | Little CMS 2 | 2.14 / 2.16 | MIT | 色変換（CMYK、ICC） | 静的 |

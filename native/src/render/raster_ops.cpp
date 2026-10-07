@@ -1,5 +1,10 @@
 #include "render/raster_ops.hpp"
 
+#include <QCryptographicHash>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QResource>
 #include <QString>
 #include <QtGlobal>
 
@@ -37,6 +42,7 @@
 #include "render/fill.hpp"
 #include "render/filters.hpp"
 #include "render/op_limits.hpp"
+#include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
@@ -45,6 +51,8 @@
 #include "render/stroke.hpp"
 #include "render/vectorize.hpp"
 #include "render/warp.hpp"
+
+static void initialize_stamp_resources() { Q_INIT_RESOURCE(genko_materials); }
 
 namespace genko::render {
 
@@ -1121,15 +1129,7 @@ void delete_or_transform_area(OpContext& c, bool transform) {
 void delete_area(OpContext& c) { delete_or_transform_area(c, false); }
 void transform_area(OpContext& c) { delete_or_transform_area(c, true); }
 
-void paste(OpContext& c) {
-    Document& doc = c.doc;
-    const Json& op = c.op;
-    const std::size_t at = core::require_page(doc, op);
-    Page& page = doc.edit_page(at);
-    const std::size_t ti = raster_paint_target(page, op);
-    selection::Items items = selection::items_from_json(core::truthy_at(op, "items") ? op["items"] : Json::object());
-    if (items.strokes.empty() && items.patches.empty()) throw OpError("nothing to paste");
-    // (a patch Python keeps without its box or a picture it can open would break every drawing of the page: refused)
+void validate_patch_items(const selection::Items& items,bool bounded=false){
     for (const core::Patch& patch : items.patches) {
         const Json* box = patch.attrs.contains("box") ? &patch.attrs["box"] : core::get(patch.after_asset, "box");
         bool good = box != nullptr && box->is_array() && box->size() == 4;
@@ -1142,15 +1142,29 @@ void paste(OpContext& c) {
                 }
             }
         }
-        if (good) {
+        if(good && bounded){
+            for(const Json& v:*box)limits::check_coordinate(core::to_float(v)*selection::kWorkingDpi/25.4,"material patch box");
+        }
+        if (good && patch.png) {
             try {
                 (void)selection::open_picture(*patch.png);
             } catch (const core::Error&) {
                 good = false;
             }
         }
-        if (!good) throw OpError("items: a patch needs a box [x, y, w, h] (mm) and a png (a picture, base64)");
+        if (!good || !patch.png) throw OpError("items: a patch needs a box [x, y, w, h] (mm) and a png (a picture, base64)");
     }
+}
+
+void paste(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const std::size_t at = core::require_page(doc, op);
+    Page& page = doc.edit_page(at);
+    const std::size_t ti = raster_paint_target(page, op);
+    selection::Items items = selection::items_from_json(core::truthy_at(op, "items") ? op["items"] : Json::object());
+    if (items.strokes.empty() && items.patches.empty()) throw OpError("nothing to paste");
+    validate_patch_items(items);
     const std::vector<double> m = matrix_of(op);
     if (m.size() != 6) {
         throw core::PyValueError(m.size() < 6 ? "not enough values to unpack (expected 6, got " + std::to_string(m.size()) + ")"
@@ -1382,6 +1396,115 @@ void put_raster(OpContext& c) {
     const std::string name = layer.role == LayerRole::User ? "user-" + layer.id : std::string(core::to_string(layer.role));
     layer.raster_relpath = raster::page_folder(page) + "/" + name + ".png";
     if (layer.role == LayerRole::Name || layer.role == LayerRole::Draft) layer.exportable = false;
+}
+
+// Native materials reuse the same packaged catalog as the GUI; CLI and desktop never need Python.
+std::filesystem::path config_dir();
+Json builtin_material(const std::string& id) {
+    static const Json catalog=[] {
+        initialize_stamp_resources();QFile file(QStringLiteral(":/genko/materials/catalog.json"));
+        if (!file.open(QIODevice::ReadOnly)) throw OpError("cannot read built-in materials");
+        return core::parse_python_json(file.readAll().toStdString());
+    }();
+    for (const auto& item:catalog) if (item.value("id",std::string())==id) return item;
+    // Existing read-only user library, bounded like the GUI; never rewrite source or manifest.
+    const QString root=QDir(QString::fromStdString(core::path_to_utf8(config_dir()))).filePath("materials");
+    const QFileInfo directory(root),manifest(QDir(root).filePath("library.json"));
+    if(directory.isDir()&&!directory.isSymLink()&&directory.canonicalFilePath()==directory.absoluteFilePath()&&
+       manifest.isFile()&&!manifest.isSymLink()&&manifest.canonicalPath()==directory.canonicalFilePath()&&manifest.size()<=1024*1024){
+        QFile library(manifest.absoluteFilePath());if(library.open(QIODevice::ReadOnly)){
+            const QByteArray bytes=library.read(1024*1024+1);if(bytes.size()<=1024*1024){core::ParseRepairs repairs;const Json items=core::parse_python_json(bytes.toStdString(),&repairs);if(!repairs.nonfinite.empty())throw core::OpError("material library contains nonfinite numbers");
+                if(items.is_array())for(const auto& item:items)if(item.is_object()&&item.contains("id")&&item["id"].is_string()&&item["id"]==id)return item;
+            }
+        }
+    }
+    throw OpError("no material "+id);
+}
+void stamp_material(OpContext& c) {
+    const auto at=core::require_page(c.doc,c.op);
+    const std::string id=core::py_str(core::get_or(c.op,"material_id",Json()));
+    const Json material=builtin_material(id);
+    const std::string kind=material.value("kind",std::string());
+    const auto apply=[&](Json op) { c.doc=core::CommandBus(ops_registry()).apply(c.doc,Json::array({std::move(op)}),c.actor).doc; };
+    const auto positioned=[&](Json op) {
+        op["page"]=c.doc.page(at).index.json();
+        for (const char* key:{"frame_id","id"}) if(core::truthy_at(c.op,key))op[key]=c.op[key];
+        if(!core::truthy_at(op,"id"))op["id"]=core::new_id();
+        return op;
+    };
+    const auto centre=[&] {
+        return std::pair<double,double>{float_at(c.op,"x_mm",c.doc.page(at).spec.width_mm.value()/2),
+                                      float_at(c.op,"y_mm",c.doc.page(at).spec.height_mm.value()/2)};
+    };
+    if(kind=="effect") {
+        Json params=material.value("params",Json::object());
+        if(core::get(c.op,"x_mm") && core::get(c.op,"y_mm")){const auto [x,y]=centre();params["center"]=Json::array({x,y});}
+        apply(positioned(Json{{"op","add_effect"},{"kind",material.value("effect",std::string("speed"))},{"params",params}}));return;
+    }
+    if(kind=="brush") {
+        const auto key="my_"+QCryptographicHash::hash(QByteArray::fromStdString(id),QCryptographicHash::Sha1).toHex().left(10).toStdString();
+        Json op={{"label",material.value("name",std::string("ブラシ"))}};
+        const Json brush=material.value("brush",Json::object());
+        for(const auto& [k,v]:brush.items())op[k]=v;
+        op["op"]="define_brush";op["key"]=key;apply(op);return;
+    }
+    if(kind=="prim") {
+        const auto [x,y]=centre();const std::string shape=material.value("prim",std::string("box"));Json op;
+        if(core::truthy_at(material,"scene"))op={{"op","add_scene"},{"kind",material["scene"]}};
+        else if(shape=="mannequin" || shape=="figure" || shape=="head" || shape=="hand") {
+            op={{"op",shape=="mannequin"?"add_mannequin":shape=="figure"?"add_figure":shape=="head"?"add_head":"add_hand"},{"pos",Json::array({x,y,0})}};
+            if(shape=="hand" && core::truthy_at(material,"pose"))op["pose"]=material["pose"];
+        }else op={{"op","add_prim3d"},{"kind",shape},{"pos",Json::array({x,y,0})}};
+        op=positioned(std::move(op));
+        // Match the actual 3D producer's stored identifier before either comparing or locating it.
+        const Json created=core::py_str(op["id"]);op["id"]=created;
+        for(const auto& prim:c.doc.page(at).prims)
+            if(core::py_equals(core::get_or(prim,"id",Json()),created))throw OpError("duplicate 3D id "+core::py_str(created));
+        const bool scene=op["op"]=="add_scene";apply(op);
+        if(scene)for(auto& prim:c.doc.edit_page(at).prims)if(prim["id"]==created){prim["pos"][0]=core::py_round(x,3);prim["pos"][1]=core::py_round(y,3);break;}
+        return;
+    }
+    if(kind=="image"){
+        if(core::truthy_at(c.op,"line_id"))throw NotYetPorted("picture balloon requires the common balloons/text renderer");
+        constexpr qint64 maxSourceBytes=64ll<<20; // Same original-file cap as the existing user-preview reader.
+        const QString root=QDir(QString::fromStdString(core::path_to_utf8(config_dir()))).filePath("materials");const QFileInfo directory(root);
+        const QString name=QString::fromStdString(material.value("file",std::string()));
+        if(name.isEmpty()||QDir::isAbsolutePath(name))throw core::OpError("material image must be inside the material library");
+        const QFileInfo source(QDir(root).filePath(name));const QString canonical=source.canonicalFilePath();
+        if(!directory.isDir()||directory.isSymLink()||directory.canonicalFilePath()!=directory.absoluteFilePath()||
+           !source.isFile()||source.isSymLink()||canonical!=source.absoluteFilePath()||!canonical.startsWith(directory.canonicalFilePath()+"/")||source.size()>maxSourceBytes)
+            throw core::OpError("unsafe material image source");
+        QFile file(canonical);if(!file.open(QIODevice::ReadOnly))throw core::OpError("material image unavailable");
+        const QByteArray bytes=file.read(maxSourceBytes+1);if(bytes.size()>maxSourceBytes)throw core::OpError("material image exceeds byte budget");
+        const std::string blob=bytes.toStdString();verify_image(blob);const auto picture=selection::open_picture(blob);limits::check_picture(picture.width(),picture.height(),"material image");
+        const double width=core::truthy_at(c.op,"width_mm")?float_at(c.op,"width_mm",60):core::truthy_at(material,"width_mm")?float_at(material,"width_mm",60):60;
+        const double height=width*(core::truthy_at(material,"aspect")?float_at(material,"aspect",1):1);if(width<=0||height<=0)throw core::OpError("material image size must be positive");
+        const auto [x,y]=centre();const Json box=Json::array({x-width/2,y-height/2,width,height});core::require_finite(box);
+        for(const auto& value:box)limits::check_coordinate(core::py_float(value)*selection::kWorkingDpi/25.4,"material image box");
+        auto& target=core::paint_target(c.doc.edit_page(at),c.op);core::Patch patch;patch.attrs=Json{{"id",core::new_id()},{"box",Json::array({core::py_round(x-width/2,3),core::py_round(y-height/2,3),core::py_round(width,3),core::py_round(height,3)})},{"mode","image"},{"opacity",1.0}};
+        patch.png=std::make_shared<const std::string>(blob);target.patches.push_back(std::move(patch));return;
+    }
+    if(kind=="lettering") throw NotYetPorted("material lettering requires text/balloon rendering");
+    if(kind=="lines") {
+        auto items=selection::items_from_json(material.value("items",Json::object()));validate_patch_items(items,true);auto matrix=selection::kIdentity;
+        if(c.op.contains("x_mm") && !c.op["x_mm"].is_null() && c.op.contains("y_mm") && !c.op["y_mm"].is_null()){
+            double loX=std::numeric_limits<double>::infinity(),loY=loX,hiX=-loX,hiY=-loX;
+            const auto point=[&](double x,double y){loX=std::min(loX,x);loY=std::min(loY,y);hiX=std::max(hiX,x);hiY=std::max(hiY,y);};
+            for(const auto& stroke:items.strokes)for(const auto& p:stroke->points)point(p.x,p.y);
+            for(const auto& patch:items.patches){const auto& b=patch.attrs.at("box");const double x=core::py_float(b[0]),y=core::py_float(b[1]);point(x,y);point(x+core::py_float(b[2]),y+core::py_float(b[3]));}
+            if(std::isfinite(loX)){matrix[4]=core::py_float(c.op["x_mm"])-(loX+hiX)/2;matrix[5]=core::py_float(c.op["y_mm"])-(loY+hiY)/2;}
+        }
+        auto& target=core::paint_target(c.doc.edit_page(at),c.op);selection::drop(target,std::move(items),matrix,true);return;
+    }
+    if (kind!="tone") throw NotYetPorted("material kind:"+kind);
+    Json op=material.value("tone",Json::object());
+    for (const char* key:{"frame_id","area","at","after","id"}) if(core::truthy_at(c.op,key))op[key]=c.op[key];
+    op["op"]="add_tone";op["page"]=c.doc.page(at).index.json();op["name"]=material.value("name",std::string());
+    if(!core::truthy_at(op,"id"))op["id"]=core::new_id();
+    auto result=core::CommandBus(ops_registry()).apply(c.doc,Json::array({op}),c.actor).doc;
+    auto& page=result.edit_page(at);
+    page.layers[core::layer_by_id(page,core::py_str(op["id"]))].material_id=id;
+    c.doc=std::move(result);
 }
 
 // --- filters ----------------------------------------------------------------------------------------------------------
@@ -1701,6 +1824,7 @@ void register_raster_ops(core::OpRegistry& registry) {
     registry.add("erase", drawing(erase));
     registry.add("erase_raster", drawing(erase));
     registry.add("lt_convert", drawing(lt_convert));
+    registry.add("stamp_material", drawing(stamp_material));
     registry.set_area_resolver(resolve_area);
 }
 

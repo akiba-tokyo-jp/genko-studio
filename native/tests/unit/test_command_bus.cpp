@@ -67,6 +67,39 @@ class TestCommandBus : public QObject {
     Q_OBJECT
 
 private slots:
+    void nombreRejectsOutsideContract_data() {
+        QTest::addColumn<QString>("input");
+        for(const auto& row:{std::pair{"visible-small",R"({"size_mm":0.5})"},std::pair{"hidden-small",R"({"hidden_size_mm":0.5})"},std::pair{"hidden-large",R"({"hidden_size_mm":11})"},std::pair{"start-negative",R"({"start":-1})"},std::pair{"start-string-negative",R"({"start":"-1"})"},std::pair{"font-unknown",R"({"font":"not-a-font"})"},std::pair{"font-number",R"({"font":1})"},std::pair{"font-list",R"({"font":["hand"]})"},std::pair{"font-boolean",R"({"font":true})"}})QTest::newRow(row.first)<<QString::fromLatin1(row.second);
+    }
+    void nombreRejectsOutsideContract() {
+        QFETCH(QString,input);const auto doc=book(2);const auto pages=doc.pages;Json bad=ops(input.toUtf8().constData());bad["op"]="set_nombre";bad["page"]=1;bad["numero"]=false;
+        bool refused=false;try{(void)bus().apply(doc,Json::array({Json{{"op","set_note"},{"page",2},{"note","must not survive"}},bad}),Actor("human:test"));}catch(const ApplyError& error){refused=true;QVERIFY(error.code()!="not_yet_ported");}
+        QVERIFY2(refused,"nombre contract must refuse invalid size/start/font");QCOMPARE(doc.pages,pages);QVERIFY(doc.page(0).numero);QVERIFY(doc.page(1).note.empty());QVERIFY(doc.nombre.empty());
+        for(const Json& valid:Json::array({Json{{"size_mm",1},{"hidden_size_mm",10},{"start",0},{"font","hand"}},Json{{"font",nullptr}},Json{{"font",false}},Json{{"font",""}}})) {
+            Json good=valid;good["op"]="set_nombre";const auto changed=bus().apply(doc,Json::array({good}),Actor("human:test")).doc;
+            for(const auto& [key,value]:valid.items())QCOMPARE(changed.nombre.at(key),value);
+        }
+    }
+    void nombreOptionsAreAtomicAndEditable() {
+        const auto doc = book(2); const auto pages = doc.pages;
+        const Json options = {{"op","set_nombre"},{"page",1},{"numero",false},{"font","hand"},{"position","top_outside"},{"size_mm",4},{"start",12},{"show",true},{"hidden",true},{"hidden_size_mm",1.5}};
+        Document changed; bool accepted = false; std::string reason;
+        try { changed = bus().apply(doc, Json::array({options}), Actor("human:test")).doc; accepted = true; }
+        catch (const ApplyError& error) { reason = error.what(); }
+        QVERIFY2(accepted, ("nombre editing must be implemented: " + reason).c_str());
+        QVERIFY(!changed.page(0).numero); QVERIFY(doc.page(0).numero); QCOMPARE(changed.pages[1], pages[1]);
+        for (const auto& [key, value] : options.items()) if (key != "op" && key != "page" && key != "numero") QCOMPARE(changed.nombre.at(key), value);
+        const auto enabled = bus().apply(changed, Json::array({Json{{"op","set_nombre"},{"page",1},{"numero",true}}}), Actor("human:test")).doc;
+        QVERIFY(enabled.page(0).numero); QCOMPARE(enabled.nombre, changed.nombre);
+        for (const Json& invalid : Json::array({Json{{"position","invalid"}}, Json{{"size_mm",0}},Json{{"size_mm",21}},Json{{"hidden_size_mm","inf"}},Json{{"start","inf"}},Json{{"start","not a number"}}})) {
+            Json bad = invalid; bad["op"]="set_nombre";bad["page"]=1;bad["numero"]=false;
+            QVERIFY_THROWS_EXCEPTION(ApplyError, bus().apply(doc,Json::array({Json{{"op","set_note"},{"page",2},{"note","must not survive"}},bad}),Actor("human:test")));
+            QCOMPARE(doc.pages,pages); QVERIFY(doc.page(1).note.empty()); QVERIFY(doc.nombre.empty());
+        }
+        auto locked = doc; locked.page_locks[locked.page(0).id]="human:other";
+        QVERIFY_THROWS_EXCEPTION(ApplyError,bus().apply(locked,Json::array({options}),Actor("ai:test")));
+        QCOMPARE(doc.pages,pages);
+    }
     void lightTableFiniteSubnormalsKeepTheirBits() {
         struct Case { const char* text; std::uint64_t bits; };
         // Bit patterns cross-checked against Python float(), including the half-denormal rounding boundary.
@@ -297,7 +330,7 @@ private slots:
             "merge_down", "merge_layers", "merge_visible", "set_layer_mask", "paint_mask",
             "put_raster", "filter_raster", "fill", "fill_area", "fill_enclosed",
             "fill_gaps", "flood_fill", "gradient_fill", "delete_area", "transform_area",
-            "paste", "erase", "erase_raster", "set_stroke_width", "reshape_stroke", "lt_convert"};
+            "paste", "erase", "erase_raster", "set_stroke_width", "reshape_stroke", "lt_convert", "stamp_material"};
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

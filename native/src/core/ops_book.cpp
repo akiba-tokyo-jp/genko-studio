@@ -10,6 +10,8 @@
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/ops_util.hpp"
+#include <cmath>
 
 namespace genko::core {
 
@@ -26,6 +28,32 @@ std::size_t slice_at(std::int64_t n, std::size_t size) {
     const auto length = static_cast<std::int64_t>(size);
     if (n < 0) n = std::max<std::int64_t>(0, n + length);
     return static_cast<std::size_t>(std::min(n, length));
+}
+
+void set_nombre(OpContext& c) {
+    Json change = Json::object();
+    for (const char* key : {"position","font","size_mm","start","hidden","hidden_size_mm","show"})
+        if (const Json* value = get(c.op,key)) change[key] = *value;
+    if (const auto* position = get(change,"position")) {
+        const std::string s = py_str(*position);
+        if (!position->is_string() || (s!="bottom_center" && s!="bottom_outside" && s!="top_outside" && s!="side_outside")) throw OpError("unknown nombre position");
+    }
+    for (const char* key : {"size_mm","hidden_size_mm"}) if (const auto* value=get(change,key)) {
+        const double size=py_float(*value);
+        const double maximum=std::string_view(key)=="size_mm"?20.0:10.0;
+        if (!std::isfinite(size) || size<1 || size>maximum) throw OpError(std::string(key)+(maximum==20?" is 1 to 20":" is 1 to 10"));
+    }
+    if (const auto* value=get(change,"start");value && py_int(*value)<0)throw OpError("start is 0 or more");
+    if (const auto* value=get(change,"font");value && py_truthy(*value)) {
+        require_hashable(*value);
+        const auto& keys=Json::array({"antique","gothic","mincho","maru","hand","sfx","sfx_pop"});
+        if(!value->is_string() || std::find(keys.begin(),keys.end(),*value)==keys.end())throw OpError("font must be a bundled typeface");
+    }
+    require_finite(change);
+    // The bus owns a copy-on-write transaction; validate before adopting either the page flag or settings.
+    if (const auto* page=get(c.op,"page");page && !page->is_null() && c.op.contains("numero")) c.doc.edit_page(require_page(c.doc,c.op)).numero=py_truthy(c.op.at("numero"));
+    if (!c.doc.nombre.is_object()) throw OpError("nombre settings must be an object");
+    for (const auto& [key,value] : change.items()) c.doc.nombre[key]=value;
 }
 
 void set_note(OpContext& c) {
@@ -171,6 +199,7 @@ void handled_by_check(OpContext&) {}  // lock_page, unlock_page: see check_page_
 void register_book_ops(OpRegistry& registry) {
     registry.add("set_note", set_note);
     registry.add("set_meta", set_meta);
+    registry.add("set_nombre", set_nombre);
     registry.add("name_ok", name_ok);
     registry.add("lock_page", handled_by_check);
     registry.add("unlock_page", handled_by_check);

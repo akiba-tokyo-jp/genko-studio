@@ -26,6 +26,8 @@ genko_library(genko_app
     canvas_paint.cpp
     canvas_input.cpp
     thumbs.cpp
+    material_panel.cpp
+    material_preview_cache.cpp
     pages_panel.cpp
     navigator.cpp
     templates.cpp

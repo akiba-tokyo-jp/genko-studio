@@ -236,9 +236,12 @@ private slots:
         Studio studio;
         MainWindow* w = studio.window.get();
         QCOMPARE(expected().size(), std::size_t{52});
-        // Preserve all 52 Python actions; the native exposure extension is tested separately.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{53});
+        // Preserve all 52 Python actions; exposure and nombre settings have their own GUI E2E tests.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{54});
         QVERIFY(w->action("act_exposure"));
+        QVERIFY(w->action("act_nombre"));
+        QCOMPARE(w->action("act_nombre")->text(),QStringLiteral("ノンブル（ページ番号）の設定…"));
+        QVERIFY(menus_of(w,w->action("act_nombre")).contains(QStringLiteral("ページ")));
         for (const Expected& e : expected()) {
             const QString name = QString::fromLatin1(e.attribute);
             QAction* a = w->action(name);

@@ -483,6 +483,14 @@ void erase(OpContext& c) {
 }  // namespace
 
 void register_stroke_ops(OpRegistry& registry) {
+    registry.add("define_brush",[](OpContext& c) {
+        const std::string key=truthy_at(c.op,"key")?py_str(c.op["key"]):std::string();
+        if(!key.starts_with("my_") || key.size()>40)throw OpError("a brush of one's own has a key starting with my_");
+        if(truthy_at(c.op,"delete")){c.doc.brush_custom.erase(key);return;}
+        Json data=c.op;for(const char* k:{"op","key","delete"})data.erase(k);
+        std::vector<Brush> known;register_brushes(c.doc.brush_custom,known);
+        c.doc.brush_custom[key]=brush_to_dict(brush_from_dict(key,data,std::nullopt,known));
+    });
     registry.add("add_stroke", add_stroke);
     registry.add("delete_stroke", delete_stroke);
     registry.add("edit_stroke", edit_stroke);
