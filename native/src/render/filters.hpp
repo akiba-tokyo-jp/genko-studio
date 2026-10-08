@@ -34,6 +34,10 @@ Image rain_layer(Size size, const core::Json& params);
 // filters.within: the filter only inside the selection (`mask`, "L" of the picture's size).
 Image within(const Image& original, const Image& filtered, const Image& mask);
 
+// filters._remap with float64 maps (width × height, rows first): the picture's pixels fetched from (map_x, map_y)
+// for each place (bilinear; outside: transparent), an RGBA picture of the maps' size.
+Image remap_area(const Image& rgba, int width, int height, const std::vector<double>& map_x, const std::vector<double>& map_y);
+
 // filters._components: the sizes of the connected parts (8-neighbour) of a grid, as each true cell's part's size
 // (0 for false cells).
 std::vector<std::int64_t> component_sizes(const BoolGrid& grid);

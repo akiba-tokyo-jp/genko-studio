@@ -40,9 +40,21 @@ genko_library(genko_app
     main_window_select.cpp
     main_window_brushes.cpp
     main_window_anim.cpp
+    main_window_paint.cpp
+    main_window_vector.cpp
+    main_window_guides.cpp
+    main_window_materials.cpp
+    canvas_tools.cpp
+    canvas_vector.cpp
+    canvas_guides.cpp
+    canvas_effects.cpp
+    guide_panel.cpp
+    material_tabs.cpp
+    scanner.cpp
     timeline.cpp
     plugins_dialog.cpp
     brush_panel.cpp
+    colours.cpp
     fields.cpp
     tool_settings.cpp
     layer_panel.cpp

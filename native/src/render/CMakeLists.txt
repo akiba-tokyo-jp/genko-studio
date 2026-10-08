@@ -35,6 +35,9 @@ genko_library(genko_render
     plugins.cpp
     colour.cpp
     raster_ops.cpp
+    ops_paint.cpp
+    zip.cpp
+    materials.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

@@ -8,6 +8,7 @@
 #include <QTimer>
 
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -39,6 +40,9 @@ class QDockWidget;
 namespace genko::app {
 
 class BrushPanel;
+class ColourPanel;
+class GuidePanel;
+class MaterialPanel;
 class LayerPanel;
 class TimelinePanel;
 class ToolSettings;
@@ -66,6 +70,8 @@ std::array<double, 6> transform_matrix(QPointF pivot, double dx = 0, double dy =
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
+    friend class GuidePanel;     // (its edits are the window's: the chosen panel, the layer drawn on)
+    friend class MaterialPanel;  // (likewise)
 
 public:
     // A window on a book (shared with any other window on it); none: a new untitled book in memory (8 pages, A4).
@@ -107,6 +113,7 @@ public:
     void preview_ops(const std::optional<core::Json>& ops);
     LayerPanel* layer_panel() const { return layer_panel_; }
     BrushPanel* brush_panel() const { return brush_; }
+    ColourPanel* colours() const { return colours_; }
     ToolSettings* tool_settings() const { return tool_settings_; }
     // Brushes from a .genkobrush or a Photoshop .abr into one's own list: their keys (the file's errors throw).
     std::vector<std::string> import_brushes(const QString& path);
@@ -121,6 +128,23 @@ public:
     std::int64_t current_frame(const core::Page* page = nullptr) const;
     // A panel by its title brought to the front (タイムライン, 全体図, …).
     void show_dock(const QString& title);
+    // 定規・3D: the panel; the page's 3D traced as pencil lines on the layer drawn on (only the chosen one).
+    GuidePanel* guides() const { return guides_; }
+    void trace_prims(bool selected_only = false);
+    // 素材: the panel; a material put as Python's use_material puts it (a brush chosen, a tone on the selection or the
+    // chosen panel, an effect in the chosen panel, else the material tool waiting for a click); a double click in the
+    // list (at once, in the middle of the page); the selection's lines and fills as a part ({strokes, patches}); the
+    // next pen line as an effect's path or clear middle (key: path | inner_path).
+    MaterialPanel* materials() const { return materials_; }
+    void use_material(const core::Json& item);
+    void material_activated(const QString& material_id, const QString& kind);
+    std::optional<core::Json> copy_selection_items();
+    void draw_effect_shape(const std::string& effect_id, const std::string& key);
+    // The material the material tool puts (none: the one chosen in the panel); the effect kind the effect tool puts.
+    const std::optional<core::Json>& pending_material() const { return pending_material_; }
+    const std::string& effect_kind() const { return effect_kind_; }
+    // スキャナーから取り込む: where the scan comes from (tests; none: the scanner, scanner::scan).
+    std::function<std::string(int dpi)> scanner_source;
 
     PageCanvas* canvas() const { return canvas_; }
     PageList* pages() const { return pages_; }
@@ -244,6 +268,71 @@ private:
     void forget_brush();
     void import_brushes_dialog();
     core::Json eraser_fields(const core::Layer& layer) const;
+    // the drawing tools and the colour (main_window_paint.cpp)
+    void build_paint_actions();
+    void build_paint_pages(ToolSettings* ts);
+    void build_colour_dock();
+    core::Json paint_fields() const;
+    std::optional<std::array<int, 3>> layer_colour_at(double x_mm, double y_mm) const;
+    void colour_picked(const std::array<int, 3>& rgb);
+    void fill_at(double x_mm, double y_mm);
+    void lasso_filled(const QVector<QPointF>& points);
+    void shape_drawn(const core::Json& shape);
+    void gradient(const QPointF& from, const QPointF& to);
+    void fill_gaps();
+    void nudge_brush(int step);
+    bool paint_stroke(const StrokeInput& stroke, const core::Page& page, const core::Layer& layer);
+    // rulers, the grid and 3D (main_window_guides.cpp)
+    void build_guide_actions();
+    void build_guide_menus(QMenu* tools);
+    void build_guide_pages(ToolSettings* ts);
+    void build_guide_dock();
+    void guide_toggles();
+    void grid_spacing();
+    void choose_ruler(const std::string& kind, int vps, int copies, bool ask_copies);
+    void place_ruler(const core::Json& ruler);
+    const core::Json* selected_ruler();
+    void ruler_to_target_layer();
+    void ruler_pen();
+    std::optional<core::Json> closed_ruler_outline(const core::Json& ruler) const;
+    void ruler_selection();
+    void perspective_grid();
+    void ruler_from_3d();
+    void camera_from_ruler();
+    void ruler_frame();
+    void ruler_flag(const std::string& key);
+    void clear_rulers();
+    void after_prim(const std::string& id);
+    void add_prim(const std::string& kind, const std::string& prop = {});
+    void import_model();
+    void add_scene(const std::string& kind);
+    void pose(const std::string& preset);
+    void prim_posed(const QString& prim_id, const QString& handle, const core::Json& to);
+    // materials, tones, effect lines, the view's extras and the layer commands (main_window_materials.cpp)
+    void build_material_actions();
+    void build_material_dock();
+    void build_material_pages(ToolSettings* ts);
+    core::Json default_tone() const;
+    void after_tone(const std::string& layer_id);
+    void tone_here();
+    void tone_click();
+    void put_tone(const core::Json& item, bool ask_click);
+    void stamp_at(double x_mm, double y_mm);
+    void choose_effect(const std::string& kind);
+    void effect_at(double x_mm, double y_mm);
+    std::optional<core::Json> selection_shape() const;
+    void effect_clearing(const std::optional<std::string>& how);
+    bool effect_shape_stroke(const StrokeInput& stroke, const core::Page& page);
+    void onion();
+    void import_scan(bool from_scanner);
+    // editing lines (main_window_vector.cpp)
+    void build_vector_actions();
+    void build_vector_pages(ToolSettings* ts);
+    void vector_edit(const core::Json& change);
+    void vector_traced(const core::Json& points, const QString& mode);
+    void vector_simplify();
+    void vector_selected(const std::string& what);
+    void reshaped(const QString& stroke_id, const core::Json& points);
     // animation and the timelapse (main_window_anim.cpp)
     void build_anim_actions();
     void build_anim_dock();
@@ -290,7 +379,31 @@ private:
     LayerPanel* layer_panel_ = nullptr;
     QMenu* stock_menu_ = nullptr;
     BrushPanel* brush_ = nullptr;
+    ColourPanel* colours_ = nullptr;
+    GuidePanel* guides_ = nullptr;
+    MaterialPanel* materials_ = nullptr;
+    QDockWidget* materials_dock_ = nullptr;
+    std::optional<core::Json> pending_material_;
+    std::string effect_kind_ = "focus";
+    std::optional<std::pair<std::string, std::string>> effect_shape_for_;  // (effect id, path | inner_path)
+    std::vector<QAction*> effect_actions_;  // the effect kinds (Python's effect_actions)
+    std::vector<QAction*> ruler_actions_;  // the ruler kinds (Python's ruler_actions)
+    std::vector<QAction*> prop_actions_;
+    std::vector<QAction*> scene_actions_;
+    std::vector<QAction*> pose_actions_;
     ToolSettings* tool_settings_ = nullptr;
+    QComboBox* shape_kind_ = nullptr;
+    QComboBox* shape_style_ = nullptr;
+    QSpinBox* shape_sides_ = nullptr;
+    QDoubleSpinBox* shape_radius_ = nullptr;
+    QComboBox* blend_mode_ = nullptr;
+    QSpinBox* blend_strength_ = nullptr;
+    QComboBox* liquify_mode_ = nullptr;
+    QSpinBox* liquify_strength_ = nullptr;
+    QComboBox* gradient_mode_ = nullptr;
+    QComboBox* vector_mode_ = nullptr;
+    QSpinBox* vector_amount_ = nullptr;
+    QDoubleSpinBox* vector_join_ = nullptr;
     QDockWidget* tool_settings_dock_ = nullptr;
     TimelinePanel* timeline_ = nullptr;
     QDockWidget* timeline_dock_ = nullptr;

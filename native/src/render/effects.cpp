@@ -378,6 +378,12 @@ std::vector<Line> keep_clear(const std::vector<Line>& lines, const std::vector<S
 
 }  // namespace
 
+std::pair<std::vector<XY>, std::array<double, 4>> panel_area(const Json& effect, const core::Page& page) { return area(effect, page); }
+
+XY centre(const Json& params, const std::array<double, 4>& box) { return centre_of(params, box); }
+
+XY inner_size(const Json& params, const std::array<double, 4>& box) { return inner_of(params, box); }
+
 const std::vector<std::string>& kinds() {
     static const std::vector<std::string> k{"focus", "speed", "uni_flash", "beta_flash", "white"};
     return k;

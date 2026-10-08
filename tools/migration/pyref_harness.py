@@ -2377,6 +2377,37 @@ def plugin_run(config: str, kind: str, src: str, dest: str, params: str) -> None
     out.save(dest)
 
 
+def colour_grids(config: str, out: str, rgbs: str) -> None:
+    """The colour panel's sums (genko.app.colours without a screen: its Qt names stand in): the built-in sets,
+    load_sets with a config folder, 中間色 for corner sets and 近似色 for colours."""
+    import os
+    import sys
+    import types
+
+    class _Stand:  # (any Qt name: a class to subclass, a value to call)
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __getattr__(self, name):
+            return _Stand()
+
+    for name in ("PySide6", "PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets"):
+        module = types.ModuleType(name)
+        module.__getattr__ = lambda attr: _Stand  # type: ignore[attr-defined]
+        sys.modules[name] = module
+    os.environ["GENKO_CONFIG_DIR"] = config
+    from genko.app import colours
+
+    asked = json.loads(rgbs)
+    results = {
+        "built_in": {k: [list(c) for c in v] for k, v in colours.BUILT_IN_SETS.items()},
+        "load_sets": {k: [list(c) for c in v] for k, v in colours.load_sets().items()},
+        "near": [[[list(c) for c in row] for row in colours.near(tuple(rgb))] for rgb in asked["near"]],
+        "between": [[[list(c) for c in row] for row in colours.between([tuple(c) for c in corners])] for corners in asked["between"]],
+    }
+    Path(out).write_text(json.dumps(results, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -2445,7 +2476,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("plugin-run")
     for name in ("config", "kind", "src", "dest", "params"):
         p.add_argument(name)
+    p = sub.add_parser("colour-grids")
+    for name in ("config", "out", "rgbs"):
+        p.add_argument(name)
     args = parser.parse_args(argv)
+    if args.cmd == "colour-grids":
+        colour_grids(args.config, args.out, args.rgbs)
+        return 0
     if args.cmd == "plugin-run":
         plugin_run(args.config, args.kind, args.src, args.dest, args.params)
         return 0

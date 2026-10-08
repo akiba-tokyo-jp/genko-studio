@@ -1,6 +1,8 @@
 #include "app/tool_settings.hpp"
 #include "app/main_window.hpp"
 #include "app/timeline.hpp"
+#include "app/guide_panel.hpp"
+#include "app/material_tabs.hpp"
 #include "app/layer_panel.hpp"
 
 #include <QCheckBox>
@@ -211,6 +213,50 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     connect(canvas_, &PageCanvas::colourAreaRequested, this, &MainWindow::select_colour);
     connect(canvas_, &PageCanvas::selectionTransformed, this, &MainWindow::transform_selection);
     connect(canvas_, &PageCanvas::selectionWarped, this, &MainWindow::warp_selection);
+    // the drawing tools (main_window_paint.cpp)
+    canvas_->layer_colour_at = [this](double x_mm, double y_mm) { return layer_colour_at(x_mm, y_mm); };
+    connect(canvas_, &PageCanvas::colourPicked, this, &MainWindow::colour_picked);
+    connect(canvas_, &PageCanvas::fillRequested, this, &MainWindow::fill_at);
+    connect(canvas_, &PageCanvas::areaFilled, this, &MainWindow::lasso_filled);
+    connect(canvas_, &PageCanvas::shapeDrawn, this, &MainWindow::shape_drawn);
+    connect(canvas_, &PageCanvas::gradientRequested, this, &MainWindow::gradient);
+    // editing lines (main_window_vector.cpp): the lines of the layer drawn on
+    canvas_->drawing_layer = [this] { return target_layer(); };
+    connect(canvas_, &PageCanvas::vectorEdited, this, &MainWindow::vector_edit);
+    connect(canvas_, &PageCanvas::vectorTraced, this, &MainWindow::vector_traced);
+    connect(canvas_, &PageCanvas::strokeReshaped, this, &MainWindow::reshaped);
+    // rulers and 3D (main_window_guides.cpp)
+    connect(canvas_, &PageCanvas::rulerPlaced, this, &MainWindow::place_ruler);
+    connect(canvas_, &PageCanvas::rulerEdited, this, [this](const QString& id, const Json& change) {
+        if (const core::Page* page = current_page()) {
+            Json op{{"op", "edit_ruler"}, {"page", page->index.json()}, {"id", id.toStdString()}};
+            for (const auto& [key, value] : change.items()) op[key] = value;
+            apply_ops(Json::array({op}));
+        }
+    });
+    connect(canvas_, &PageCanvas::primSelected, this, [this](const QString& id) {
+        if (guides_ != nullptr) guides_->select_prim(id.toStdString());
+    });
+    connect(canvas_, &PageCanvas::primEdited, this, [this](const QString& id, const Json& change) {
+        if (const core::Page* page = current_page()) {
+            Json op{{"op", "edit_prim"}, {"page", page->index.json()}, {"id", id.toStdString()}};
+            for (const auto& [key, value] : change.items()) op[key] = value;
+            apply_ops(Json::array({op}));
+        }
+    });
+    connect(canvas_, &PageCanvas::primPosed, this, &MainWindow::prim_posed);
+    // effect lines and materials (main_window_materials.cpp)
+    connect(canvas_, &PageCanvas::effectRequested, this, &MainWindow::effect_at);
+    connect(canvas_, &PageCanvas::effectSelected, this, [this](const QString& id) {
+        if (materials_ != nullptr) materials_->select_effect(id.toStdString());
+    });
+    connect(canvas_, &PageCanvas::effectMoved, this, [this](const QString& id, const QPointF& centre) {
+        if (const core::Page* page = current_page()) {
+            apply_ops(Json::array({Json{{"op", "edit_effect"}, {"page", page->index.json()}, {"id", id.toStdString()},
+                                        {"params", Json{{"center", Json::array({centre.x(), centre.y()})}}}}}));
+        }
+    });
+    connect(canvas_, &PageCanvas::stampRequested, this, &MainWindow::stamp_at);
 
     // the page gets the room; above it, a tab for each open book (in the command bar)
     doc_tabs_ = new QTabBar;
@@ -333,8 +379,12 @@ const core::Layer* MainWindow::target_layer() const {
 void MainWindow::set_target_layer(const std::string& layer_id) {
     target_layer_id_ = layer_id;
     pen_changed();
-    if (const core::Layer* layer = target_layer()) flash(QStringLiteral("描く先: %1").arg(wording::layer_label(*layer)), 2500);
+    if (const core::Layer* layer = target_layer()) {
+        const bool tone = layer->kind == core::LayerKind::Tone;
+        flash(QStringLiteral("描く先: %1").arg(wording::layer_label(*layer)) + (tone ? QStringLiteral("（ペンでトーンを足す・消しゴムで削る）") : QString()), 2500);
+    }
     if (layer_panel_ != nullptr) layer_panel_->show_target();  // (not built again: a Ctrl / Shift+click keeps the others)
+    if (materials_ != nullptr) materials_->refresh();
 }
 
 std::optional<core::Json> MainWindow::selection_area() const {
@@ -447,6 +497,8 @@ void MainWindow::show_page() {
     refresh_status();
     if (navigator_ != nullptr) navigator_->update();
     if (layer_panel_ != nullptr) layer_panel_->refresh();
+    if (guides_ != nullptr && guides_->isVisible()) guides_->refresh();
+    if (materials_ != nullptr && materials_->isVisible()) materials_->refresh();
     if (timeline_ != nullptr) {
         timeline_->frame = current_frame(page);
         if (timeline_->isVisible()) timeline_->refresh();

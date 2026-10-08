@@ -262,6 +262,7 @@ void register_core_ops(OpRegistry& registry) {
     register_color_ops(registry);
     register_ruler_ops(registry);
     register_anim_ops(registry);
+    register_vector_ops(registry);
     register_arrange_ops(registry);
 }
 

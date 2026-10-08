@@ -94,6 +94,8 @@ void PageCanvas::paint_page(QPainter& painter) {
     if (committing_) draw_in_page_px(painter, committing_->image(), committing_->box(), committing_->dpi());
     painter.setRenderHint(QPainter::Antialiasing);
     if (show_guides) draw_guides(painter, page_rect);
+    draw_grid(painter);    // (canvas_guides.cpp)
+    draw_rulers(painter);
     draw_selection(painter);
     if (tool_drag_ && tool_ == QLatin1String("move") && !move_image_.isNull()) {
         // the layer being moved: its picture following the pen
@@ -108,6 +110,9 @@ void PageCanvas::paint_page(QPainter& painter) {
         painter.drawRect(where);
     }
     draw_marquee(painter);  // (the selection, its handles, what the marquee tool is drawing: canvas_select.cpp)
+    draw_tools(painter);    // (the area being filled, the gradient's drag, the figure being drawn: canvas_tools.cpp)
+    draw_prims(painter);    // (the 3D tool's handles: canvas_guides.cpp)
+    draw_effect_handles(painter);  // (the effect tool's centres: canvas_effects.cpp)
     if (zoom_drag_) {  // (the area the magnifier will fill the view with)
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(theme::accent(), 1.2, Qt::DashLine));
@@ -126,9 +131,10 @@ void PageCanvas::paint_page(QPainter& painter) {
             painter.drawPath(path);
         }
     }
-    if (hover_ && stroke_.empty() && (tool_ == QLatin1String("pen") || tool_ == QLatin1String("eraser"))) {
+    if (hover_ && stroke_.empty() && is_stroke_tool(tool_)) {
         const QPointF h = pt(hover_->x(), hover_->y());
-        const double radius = std::max(2.0, (tool_ == QLatin1String("pen") ? brush_width_mm : eraser_mm) / 2 * view_.scale);
+        const double size = tool_ == QLatin1String("pen") ? brush_width_mm : tool_ == QLatin1String("eraser") ? eraser_mm : blend_mm;
+        const double radius = std::max(2.0, size / 2 * view_.scale);
         painter.setPen(QPen(theme::accent(), 1));
         painter.setBrush(Qt::NoBrush);
         painter.drawEllipse(h, radius, radius);  // (the circle and the cross cursor: circle_cross, the default)

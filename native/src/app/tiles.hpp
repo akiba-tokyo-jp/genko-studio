@@ -4,6 +4,7 @@
 #include <functional>
 #include <optional>
 
+#include <QColor>
 #include <QImage>
 #include <QObject>
 #include <QRect>
@@ -58,6 +59,9 @@ public:
     // without one), or as it is (nothing).
     void set_cmyk_proof(std::optional<std::optional<std::filesystem::path>> proof);
     bool cmyk_proof() const { return proof_.has_value(); }
+    // 網点を画面で見る (render.SCREEN_DOTS): the tones drawn as their dots on screen too.
+    void set_screen_dots(bool on);
+    bool screen_dots() const { return screen_dots_; }
     // Where the proof's profile is looked up each time tiles are drawn (Python's icc_setting: the one chosen last for
     // export, while its file is there; none: the plain conversion): one chosen or taken away meanwhile is followed.
     void set_proof_profile(std::function<std::optional<std::filesystem::path>()> profile) { proof_profile_ = std::move(profile); }
@@ -86,6 +90,8 @@ public:
     const core::Page* page() const;
     // The page's pixels at `dpi` composed from the tiles there are (tests: compare with render_page).
     QImage compose(int dpi) const;
+    // The colour shown at this point of the page (the whole page's tiles: スポイト), when it is drawn.
+    std::optional<QColor> pixel_at(double x_mm, double y_mm) const;
 
 signals:
     // New pixels for this part of the page (mm; empty: all of it).
@@ -133,6 +139,7 @@ private:
     std::uint64_t generation_ = 0;
     std::string mode_ = "proof";
     std::optional<std::optional<std::filesystem::path>> proof_;  // set_cmyk_proof
+    bool screen_dots_ = false;                                    // set_screen_dots
     std::function<std::optional<std::filesystem::path>()> proof_profile_;
     std::map<int, Level> levels_;
     int base_dpi_ = 0;

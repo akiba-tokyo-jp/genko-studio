@@ -125,9 +125,53 @@ public:
     // The polyline selection's corners: Enter or a double click closes it; Esc forgets them.
     bool finish_points();
     bool cancel_points();
-    // The lines and the point chosen with the vector tool (M3), for 選んだ点を太く.
+    // 図形 (canvas_tools.cpp): line | polyline | curve | rect | ellipse | polygon, and a polygon's corners.
+    QString shape_kind = QStringLiteral("line");
+    int shape_sides = 5;
+    // 色混ぜ and ゆがみ: the brush's size (mm).
+    double blend_mm = 6.0;
+    // スポイト: the colour as seen ("view") or the drawing layer's own ("layer": asked of layer_colour_at).
+    QString pick_source = QStringLiteral("view");
+    std::function<std::optional<std::array<int, 3>>(double x_mm, double y_mm)> layer_colour_at;
+    // The polyline or curve being drawn with 図形 ended (Enter or a double click; closed: Shift+Enter), or forgotten (Esc).
+    bool finish_shape(bool closed = false);
+    bool cancel_shape();
+    // A tool that draws a line as the pen does: pen, eraser, 色混ぜ (blend), ゆがみ (liquify).
+    static bool is_stroke_tool(const QString& tool);
+    // 線の編集 (the vector tool, canvas_vector.cpp): the lines chosen and the point chosen of the first; cut where clicked
+    // (クリックした所で線を切る); edit | widen | narrow | redraw | redraw_width | join | simplify (なぞって直す) and how far
+    // from a trace the lines are mended. 線の修正（つまむ）: how far the pinch reaches, the line's ends kept.
     std::vector<std::string> vector_ids;
     std::optional<int> vector_point;
+    bool vector_cut = false;
+    QString vector_mode = QStringLiteral("edit");
+    double vector_radius_mm = 2.0;
+    double reshape_radius_mm = 6.0;
+    bool reshape_pin_ends = false;
+    // The layer drawn on (its lines are the ones edited, its rulers the ones shown), as the window says.
+    std::function<const core::Layer*()> drawing_layer;
+    // 定規 and the grid (canvas_guides.cpp): shown, the pen snapping to them; the kind the ruler tool places (and a
+    // perspective ruler's vanishing points, a symmetry ruler's copies); the ruler chosen (its points dragged).
+    bool rulers_visible = true;
+    bool snap_rulers = true;
+    bool grid_visible = false;
+    bool grid_snap = false;
+    double grid_mm = 5.0;
+    QString ruler_kind = QStringLiteral("line");
+    int ruler_vps = 1;
+    int ruler_copies = 2;
+    std::optional<std::string> selected_ruler_id;
+    // 3D: the figure or box chosen (its handles dragged with the 3D tool).
+    std::optional<std::string> selected_prim_id;
+    // 効果線: the effect line chosen (its centre dragged with the effect tool).
+    std::optional<std::string> selected_effect_id;
+    // A point on the grid when snapping to it is on (else the point itself).
+    QPointF grid_point(double x, double y) const;
+    // The ruler being placed click by click ended (Enter, a double click) or forgotten (Esc).
+    bool finish_curve();
+    bool cancel_ruler();
+    // Delete with the vector tool: the chosen point, else the chosen lines.
+    bool vector_delete();
     // The moving layer's picture (QImage and where it sits, mm), given by the window when a layer move starts.
     void set_move_image(const QImage& image, const QRectF& where_mm);
 
@@ -205,6 +249,32 @@ signals:
     void colourAreaRequested(double x_mm, double y_mm);
     void selectionTransformed(const QVector<double>& matrix);
     void selectionWarped(const genko::core::Json& warp);
+    // the drawing tools: the colour under the eyedropper; the fill tool's click; the area drawn around to fill; the
+    // gradient's drag (mm); a figure drawn ({shape, points | box, sides?, closed?}: an add_shape op)
+    void colourPicked(const std::array<int, 3>& rgb);
+    void fillRequested(double x_mm, double y_mm);
+    void areaFilled(const QVector<QPointF>& points);
+    void gradientRequested(const QPointF& from, const QPointF& to);
+    void shapeDrawn(const genko::core::Json& shape);
+    // the lines edited: a vector_edit op's change (without page and layer); a trace [[x, y, pressure], …] and how it
+    // mends the lines (a trace_edit op); a line pinched into new points (a reshape_stroke op)
+    void vectorEdited(const genko::core::Json& change);
+    void vectorTraced(const genko::core::Json& points, const QString& mode);
+    void strokeReshaped(const QString& stroke_id, const genko::core::Json& points);
+    // the guides: a ruler placed ({kind, points, …}: an add_ruler op), one's points moved ({points, angle?}: edit_ruler);
+    // a 3D figure or box chosen ("" for none), moved or turned ({pos} | {rot}: edit_prim), a figure's part dragged
+    // (the part, where to: pose_mannequin / pose_figure)
+    void rulerPlaced(const genko::core::Json& ruler);
+    void rulerEdited(const QString& ruler_id, const genko::core::Json& change);
+    void primSelected(const QString& prim_id);
+    void primEdited(const QString& prim_id, const genko::core::Json& change);
+    void primPosed(const QString& prim_id, const QString& handle, const genko::core::Json& to);
+    // 効果線 and 素材を置く: the effect tool clicked here (mm), an effect's centre chosen or dragged to (mm); the material
+    // tool clicked here
+    void effectRequested(double x_mm, double y_mm);
+    void effectSelected(const QString& effect_id);
+    void effectMoved(const QString& effect_id, const QPointF& centre);
+    void stampRequested(double x_mm, double y_mm);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -288,6 +358,51 @@ private:
     void draw_polygon_mm(QPainter& painter, const std::vector<QPointF>& points) const;
     void draw_in_page_px(QPainter& painter, const QImage& image, const QRect& box, int dpi) const;
 
+    // the drawing tools (canvas_tools.cpp): true when the press, move or release was theirs
+    bool tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed);
+    bool tool_release();
+    QPointF constrained(const QPointF& a, const QPointF& b, Qt::KeyboardModifiers modifiers) const;
+    std::vector<QPointF> shape_preview(bool& closed) const;
+    void pick_colour(const QPointF& pos);
+    void draw_tools(QPainter& painter) const;
+    // 定規, the grid and 3D (canvas_guides.cpp)
+    core::Json page_rulers() const;
+    bool near_point(const QPointF& pos, const QPointF& mm, double px = 8) const;
+    void draw_grid(QPainter& painter) const;
+    void line_across(QPainter& painter, const QPointF& a, const QPointF& d, double length = 2000.0) const;
+    void draw_one_ruler(QPainter& painter, const core::Json& ruler, bool selected) const;
+    void draw_rulers(QPainter& painter) const;
+    std::optional<core::Json> draft_ruler(const std::vector<QPointF>& points) const;
+    void ruler_press(const QPointF& pos);
+    bool ruler_move(const QPointF& pos);
+    void ruler_release();
+    void finish_ruler();
+    std::vector<std::pair<std::string, QPointF>> prim_handles(const core::Json& prim) const;
+    std::vector<std::pair<QPointF, QPointF>> prim_lines(const core::Json& prim) const;
+    void draw_prims(QPainter& painter) const;
+    void select_prim(std::optional<std::string> prim_id);
+    void prim_press(const QPointF& pos);
+    bool prim_move(const QPointF& pos);
+    void prim_release();
+    // 効果線 (canvas_effects.cpp)
+    std::vector<std::pair<std::string, QPointF>> effect_handles() const;
+    void draw_effect_handles(QPainter& painter) const;
+    void effect_press(const QPointF& pos);
+    bool effect_move(const QPointF& mm);
+    bool effect_release();
+    // 線の編集 and 線の修正 (canvas_vector.cpp)
+    std::vector<core::StrokePtr> vector_strokes() const;
+    core::StrokePtr vector_hit(double x, double y) const;
+    std::optional<int> vector_point_hit(double x, double y) const;
+    void vector_press(double x, double y, Qt::KeyboardModifiers modifiers);
+    bool vector_move(double x, double y);
+    bool vector_release();
+    void draw_vector(QPainter& painter) const;
+    void reshape_press(double x, double y);
+    void reshape_move(double x, double y);
+    bool reshape_release();
+
     // the panel tool
     std::optional<Gutter> hit_gutter(double x_mm, double y_mm) const;
     std::vector<std::pair<int, QPointF>> vertex_handles() const;
@@ -356,6 +471,51 @@ private:
     std::vector<QPointF> marquee_stroke_;  // the rectangle's, lasso's or selection pen's drag (mm)
     std::optional<std::pair<QPointF, QPointF>> ellipse_drag_;
     std::vector<QPointF> poly_points_;  // the polyline selection's corners
+    std::optional<std::pair<QPointF, QPointF>> shape_drag_;  // 図形 dragged (mm)
+    std::vector<QPointF> shape_pts_;                         // 図形's polyline or curve clicked (mm)
+    std::vector<QPointF> lasso_fill_;                        // 囲って塗る's drag (mm)
+    struct VectorDrag {
+        std::string id;
+        int index = 0;
+        QPointF to;
+    };
+    std::optional<VectorDrag> vector_drag_;                         // a control point dragged
+    std::optional<std::vector<std::array<double, 3>>> vector_trace_;  // なぞって直す: [x, y, pressure]
+    struct Reshape {
+        std::string id;
+        std::vector<std::vector<double>> orig;  // the line walked in 1 mm steps: [x, y(, pressure)]
+        std::vector<std::vector<double>> points;
+        QPointF grab;
+        std::vector<double> along;  // how far along the line each point is (mm)
+    };
+    std::optional<Reshape> reshape_;
+    double last_pressure_ = 0.7;  // the pen's pressure at its last event (a trace takes it)
+    std::optional<std::vector<QPointF>> ruler_draft_;  // the points of a ruler being placed
+    std::optional<core::Json> ruler_first_;           // a multi-curve ruler's first curve, while the second is placed
+    struct RulerDrag {
+        std::string id;
+        int index = 0;
+        core::Json ruler;
+        bool moved = false;
+    };
+    std::optional<RulerDrag> ruler_drag_;
+    struct PrimDrag {
+        std::string id;
+        std::string handle;
+        core::Json prim;
+        core::Json orig;
+        QPointF start;
+        bool moved = false;
+        bool grab = false;
+        core::Json to;
+    };
+    std::optional<PrimDrag> prim_drag_;
+    struct EffectDrag {
+        std::string id;
+        QPointF to;
+        bool moved = false;
+    };
+    std::optional<EffectDrag> effect_drag_;
     struct Warp {
         QString kind;  // perspective | mesh
         std::array<double, 4> box{};  // x, y, w, h

@@ -43,6 +43,14 @@ std::optional<QString> get_text(QWidget* parent, const QString& title, const QSt
     return ok ? std::optional<QString>(out) : std::nullopt;
 }
 
+std::optional<QString> get_item(QWidget* parent, const QString& title, const QString& label, const QStringList& items, int index,
+                                bool editable) {
+    if (const auto r = current(); r && r->get_item) return r->get_item(title, label, items, index, editable);
+    bool ok = false;
+    const QString out = QInputDialog::getItem(parent, title, label, items, index, editable, &ok);
+    return ok ? std::optional<QString>(out) : std::nullopt;
+}
+
 std::optional<QColor> colour(QWidget* parent, const QColor& now, const QString& title) {
     if (const auto r = current(); r && r->colour) return r->colour(now, title);
     const QColor chosen = QColorDialog::getColor(now, parent, title);

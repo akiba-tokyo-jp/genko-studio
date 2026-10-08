@@ -126,6 +126,7 @@ struct Answers {
         responder->get_double = [](const QString&, const QString&, double, double, double, int) { return std::optional<double>(); };
         responder->get_int = [](const QString&, const QString&, int, int, int) { return std::optional<int>(); };
         responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(); };
+        responder->get_item = [](const QString&, const QString&, const QStringList&, int, bool) { return std::optional<QString>(); };
         responder->colour = [](const QColor&, const QString&) { return std::optional<QColor>(); };
         responder->existing_dir = [](const QString&, const QString&) { return QString(); };
         responder->save_path = [](const QString&, const QString&) { return QString(); };

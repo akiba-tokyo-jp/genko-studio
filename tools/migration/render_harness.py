@@ -22,6 +22,11 @@ Commands:
                                 the exception
   brush-library OUT CONFIG      brushes.save_to_library / load_library in the config folder CONFIG (a few brushes
                                 kept, one forgotten): the file's text and what it reads back
+  material-library STEPS OUT CONFIG
+                                materials.add_material / import_image / update_material / delete_material /
+                                add_folder / folders / get_material / import_pack / export_pack, one step of the JSON
+                                list STEPS after another in the config folder CONFIG: each step's result (or error)
+                                and the library's files after it (new ids as $0, $1, … in the order made)
   make-books OUT --seed N --count K
                                 K random books for drawing (layers, brushes, rasters, patches, masks, blend modes,
                                 fills and gradients, corrections, panels): OUT/book-NN.genko
@@ -1350,6 +1355,121 @@ def brush_library(out: str, config: str) -> None:
     Path(out).write_text(json.dumps({"text": text, "loaded": brushes.load_library()}, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def material_library(steps_path: str, out: str, config: str) -> None:
+    """The person's material library changed step by step, as test_contract_materials changes it in C++."""
+    import hashlib
+    import os
+    import zipfile
+
+    from PIL import Image
+
+    os.environ["GENKO_CONFIG_DIR"] = config
+    from genko import materials
+
+    steps = json.loads(Path(steps_path).read_text(encoding="utf-8"))
+    created: list[str] = []
+
+    def ref(value):
+        return created[int(value[1:])] if isinstance(value, str) and value.startswith("$") else value
+
+    def hide(text: str) -> str:
+        for n, made in sorted(enumerate(created), key=lambda e: -len(e[1])):
+            text = text.replace(made, f"${n}")
+        return text
+
+    def note(made: str) -> None:
+        if made.startswith("u-") and made not in created:
+            created.append(made)
+
+    def pixels(data: bytes) -> dict:
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+            return {"mode": image.mode, "size": list(image.size), "sha256": hashlib.sha256(image.tobytes()).hexdigest()}
+
+    results = []
+    for step in steps:
+        do = step["do"]
+        result: dict = {}
+        if do == "picture":  # (inputs: made here, read by both sides)
+            Path(step["path"]).parent.mkdir(parents=True, exist_ok=True)
+            w, h = step["size"]
+            mode = step["mode"]
+            image = Image.new("RGBA", (w, h))
+            image.putdata([((x * 37 + y * 11) % 256, (x * 7 + y * 53) % 256, (x * x + y) % 256, (x * 13 + y * 29) % 256)
+                           for y in range(h) for x in range(w)])
+            if mode == "P":
+                image = Image.new("P", (w, h))
+                image.putpalette([v for k in range(16) for v in ((k * 16) % 256, (k * 85) % 256, (255 - k * 16) % 256)])
+                image.putdata([(x + y) % 16 for y in range(h) for x in range(w)])
+                image.save(step["path"], step["format"], transparency=3)
+            else:
+                image.convert(mode).save(step["path"], step["format"])
+            continue
+        if do == "file":
+            Path(step["path"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(step["path"]).write_bytes(step["text"].encode("utf-8"))
+            continue
+        if do == "zip":
+            with zipfile.ZipFile(step["path"], "w", zipfile.ZIP_DEFLATED) as archive:
+                for name, source, text in step["members"]:
+                    archive.writestr(name, Path(source).read_bytes() if source else text.encode("utf-8"))
+            continue
+        if do == "write_library":
+            library = materials.library_dir()
+            library.mkdir(parents=True, exist_ok=True)
+            (library / step["name"]).write_text(step["text"], encoding="utf-8")
+        try:
+            if do == "write_library":
+                value = None
+            elif do == "add_material":
+                value = materials.add_material(step["name"], step["kind"], step.get("folder", "マイ素材"), **step.get("data", {}))
+            elif do == "import_image":
+                value = materials.import_image(Path(step["path"]), step.get("name"), step.get("folder", "画像"), step.get("width_mm"))
+            elif do == "update_material":
+                value = materials.update_material(ref(step["id"]), **step["change"])
+            elif do == "delete_material":
+                value = materials.delete_material(ref(step["id"]))
+            elif do == "add_folder":
+                value = materials.add_folder(step["name"])
+            elif do == "folders":
+                value = materials.folders()
+            elif do == "get_material":
+                value = materials.get_material(ref(step["id"]))
+            elif do == "user_materials":
+                value = materials.user_materials()
+            elif do == "import_pack":
+                value = materials.import_pack(step["path"], step.get("folder"))
+            elif do == "export_pack":
+                target = materials.export_pack([ref(i) for i in step["ids"]], step["path"])
+                with zipfile.ZipFile(target) as archive:
+                    value = [[name, archive.read(name).decode("utf-8") if name.endswith(".json") else pixels(archive.read(name))]
+                             for name in archive.namelist()]
+            else:
+                raise SystemExit(f"unknown step {do}")
+            for item in value if isinstance(value, list) else [value]:
+                if isinstance(item, dict) and isinstance(item.get("id"), str):
+                    note(item["id"])
+            result["ok"] = value
+        except Exception as exc:  # (as the C++ side reports it: the type and the message)
+            result["error"] = [type(exc).__name__, str(exc)]
+        library = materials.library_dir()
+        try:
+            for item in json.loads((library / "library.json").read_text(encoding="utf-8")):
+                if isinstance(item, dict) and isinstance(item.get("id"), str):
+                    note(item["id"])
+        except (OSError, ValueError, TypeError):
+            pass
+        files = {}
+        for file in sorted(library.iterdir()) if library.is_dir() else []:
+            if file.suffix == ".png":
+                files[file.name] = pixels(file.read_bytes())
+            elif file.name in ("library.json", "folders.json"):
+                files[file.name] = file.read_text(encoding="utf-8")
+        result["files"] = files
+        results.append(json.loads(hide(json.dumps(result, ensure_ascii=False))))
+    Path(out).write_text(json.dumps(results, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1371,6 +1491,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("out")
     p.add_argument("files", nargs="+")
     p = sub.add_parser("brush-library")
+    p.add_argument("out")
+    p.add_argument("config")
+    p = sub.add_parser("material-library")
+    p.add_argument("steps")
     p.add_argument("out")
     p.add_argument("config")
     p = sub.add_parser("make-books")
@@ -1395,6 +1519,8 @@ def main(argv: list[str] | None = None) -> int:
         abr_cases(args.out, args.files)
     elif args.cmd == "brush-library":
         brush_library(args.out, args.config)
+    elif args.cmd == "material-library":
+        material_library(args.steps, args.out, args.config)
     elif args.cmd == "make-books":
         make_books(args.out, args.seed, args.count)
     elif args.cmd == "render":

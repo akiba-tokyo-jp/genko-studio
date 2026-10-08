@@ -29,7 +29,7 @@ constexpr double kPi = 3.14159265358979323846;
 
 double r2(double v) { return core::py_round(v, 2); }
 
-bool is_drawing_tool(const QString& tool) { return tool == QLatin1String("pen") || tool == QLatin1String("eraser"); }
+bool is_drawing_tool(const QString& tool) { return PageCanvas::is_stroke_tool(tool); }
 
 }  // namespace
 
@@ -108,6 +108,12 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
         setCursor(Qt::CrossCursor);  // (the brush's circle is drawn on the page)
     } else if (tool_ == QLatin1String("move")) {
         setCursor(Qt::SizeAllCursor);
+    } else if (tool_ == QLatin1String("picker") || tool_ == QLatin1String("fill")) {
+        setCursor(Qt::PointingHandCursor);
+    } else if (tool_ == QLatin1String("lassofill") || tool_ == QLatin1String("gradient") || tool_ == QLatin1String("shape") ||
+               tool_ == QLatin1String("reshape") || tool_ == QLatin1String("ruler") || tool_ == QLatin1String("3d") ||
+               tool_ == QLatin1String("effect") || tool_ == QLatin1String("stamp")) {
+        setCursor(Qt::CrossCursor);
     } else if (tool_ == QLatin1String("frame") && pos && page() != nullptr) {
         const QPointF mm = mm_of(*pos);
         if (const auto gutter = hit_gutter(mm.x(), mm.y())) {
@@ -167,6 +173,7 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         update();
         return;
     }
+    if (tool_press(pos, mm, event->modifiers())) return;  // (スポイト・塗りつぶし・囲って塗る・グラデーション・図形)
     if (tool_ == QLatin1String("frame")) {
         modifiers_ = event->modifiers();
         frame_press(pos);
@@ -188,7 +195,9 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
     }
     if (is_drawing_tool(tool_)) {
         perf::input(event, "mouse_press");
-        const PenSample sample = mouse_sample(mm.x(), mm.y());
+        // (a straight line (Shift) starts on the grid)
+        const QPointF start = tool_ == QLatin1String("pen") && (event->modifiers() & Qt::ShiftModifier) ? grid_point(mm.x(), mm.y()) : mm;
+        const PenSample sample = mouse_sample(start.x(), start.y());
         begin_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, false);
     }
 }
@@ -239,6 +248,12 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
     const bool pressed = (event->buttons() & Qt::LeftButton) != 0;
+    if (tool_ == QLatin1String("ruler")) {
+        modifiers_ = event->modifiers();
+        if (ruler_move(pos)) return;
+    }
+    if (prim_move(pos)) return;
+    if (tool_move(mm_of(pos), event->modifiers(), pressed)) return;
     if (tool_ == QLatin1String("marquee") && marquee_move(mm_of(pos), event->modifiers(), pressed)) return;
     if (tool_ == QLatin1String("select") && pressed && press_pos_) {
         if ((pos - *press_pos_).manhattanLength() > 6) {
@@ -254,7 +269,8 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
     const std::uint64_t seq = perf::input(event, "mouse");
-    const QPointF mm = mm_of(pos);
+    const bool straight = tool_ == QLatin1String("pen") && (event->modifiers() & Qt::ShiftModifier);
+    const QPointF mm = straight ? grid_point(mm_of(pos).x(), mm_of(pos).y()) : mm_of(pos);  // (Shift: a straight line, to the grid)
     const PenSample sample = mouse_sample(mm.x(), mm.y());
     extend_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, (event->modifiers() & Qt::ShiftModifier) != 0);
     if (seq != 0) {
@@ -290,6 +306,8 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
             if (std::abs(e.x() - s.x()) > 0.05 || std::abs(e.y() - s.y()) > 0.05) {
                 emit layerMoved(core::py_round(e.x() - s.x(), 3), core::py_round(e.y() - s.y(), 3));
             }
+        } else if (std::abs(e.x() - s.x()) + std::abs(e.y() - s.y()) > 0.5) {  // (グラデーション: from, to)
+            emit gradientRequested(QPointF(core::py_round(s.x(), 3), core::py_round(s.y(), 3)), QPointF(core::py_round(e.x(), 3), core::py_round(e.y(), 3)));
         }
         update();
         return;
@@ -307,6 +325,15 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         frame_release();
         return;
     }
+    if (prim_drag_) {
+        prim_release();
+        return;
+    }
+    if (tool_ == QLatin1String("ruler")) {
+        ruler_release();
+        return;
+    }
+    if (tool_release()) return;
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
     if (tool_ == QLatin1String("marquee")) {
         press_pos_.reset();
@@ -331,6 +358,14 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
     }
     if (tool_ == QLatin1String("marquee") && !poly_points_.empty()) {
         finish_points();
+        return;
+    }
+    if (tool_ == QLatin1String("shape") && !shape_pts_.empty()) {
+        finish_shape();
+        return;
+    }
+    if (tool_ == QLatin1String("ruler")) {
+        finish_curve();
         return;
     }
     if (tool_ == QLatin1String("frame") && !frame_poly_.empty()) {
@@ -400,13 +435,15 @@ bool PageCanvas::event(QEvent* e) {
 // --- the keys ------------------------------------------------------------------------------------------------------
 
 void PageCanvas::hold_modifier(const QString& key, bool down) {
-    // Ctrl held: the select tool for a moment, back to the tool before when let go (Alt's eyedropper comes with M3)
+    // Ctrl held: the select tool for a moment, Alt the eyedropper (スポイト); back to the tool before when let go
+    // (環境設定's own choice of these comes with the preferences)
     const QString base = held_tool_.value_or(tool_);
-    QString tool = key == QLatin1String("ctrl") ? QStringLiteral("select") : QString();
+    QString tool = key == QLatin1String("ctrl") ? QStringLiteral("select") : key == QLatin1String("alt") ? QStringLiteral("picker") : QString();
     if ((base == QLatin1String("zoom") || base == QLatin1String("marquee")) && key == QLatin1String("alt")) tool.clear();
     if (down) {
         // (not while a line, a selection or its handles are being dragged: the drag ends with the tool it began with)
-        const bool dragging = !stroke_.empty() || !marquee_stroke_.empty() || sel_drag_ || ellipse_drag_;
+        const bool dragging = !stroke_.empty() || !marquee_stroke_.empty() || sel_drag_ || ellipse_drag_ || !lasso_fill_.empty() || shape_drag_ ||
+                              vector_drag_ || vector_trace_ || reshape_;
         if (!tool.isEmpty() && !held_tool_ && !dragging && tool != tool_) {
             held_tool_ = tool_;
             held_key_ = key;
@@ -435,6 +472,17 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
                                                                                                                : QStringLiteral("shift"),
                       true);
     }
+    if (!shape_pts_.empty() && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)) {
+        finish_shape((event->modifiers() & Qt::ShiftModifier) != 0);  // (Shift+Enter: closed)
+        return;
+    }
+    if (event->key() == Qt::Key_Escape && cancel_shape()) return;
+    if (tool_ == QLatin1String("vector") && (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && vector_delete()) return;
+    if (tool_ == QLatin1String("ruler") && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)) {
+        finish_curve();
+        return;
+    }
+    if (tool_ == QLatin1String("ruler") && event->key() == Qt::Key_Escape && cancel_ruler()) return;
     if (!frame_poly_.empty() && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)) {
         finish_frame_poly();
         return;
@@ -479,6 +527,7 @@ void PageCanvas::back_from_eraser_end() {
 
 void PageCanvas::tabletEvent(QTabletEvent* event) {
     const auto type = event->type();
+    last_pressure_ = event->pressure();  // (the vector tool's traces take the pen's pressure)
     const bool eraser_end = event->pointerType() == QPointingDevice::PointerType::Eraser;
     if (type == QEvent::TabletPress && eraser_end && page() != nullptr && tool_ != QLatin1String("eraser") && !space_) {
         eraser_end_ = tool_;  // the pen turned over: erase for this stroke, then back

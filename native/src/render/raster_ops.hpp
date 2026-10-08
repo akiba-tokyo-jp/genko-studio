@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <string>
+#include <vector>
 
 #include "core/command_bus.hpp"
 #include "render/image.hpp"
@@ -26,5 +28,17 @@ void use_brushes_of(const core::Document& doc);
 // Adds these ops (erase and erase_raster take over core's, which stop at a paint layer's pixels) and the area
 // resolver to `registry`.
 void register_raster_ops(core::OpRegistry& registry);
+
+// Adds the paint ops of M3④ (add_shape, smudge, liquify: render/ops_paint.cpp).
+void register_paint_ops(core::OpRegistry& registry);
+
+// ops.shape_points: a figure's outline (mm) and whether it is closed — line, polyline, curve (Catmull–Rom through the
+// points) from op["points"]; rect (op["radius_mm"] rounds its corners), ellipse, polygon (op["sides"], op["angle"]) from
+// op["box"]. The 図形 tool draws its preview with it. Throws core::OpError.
+struct ShapeOutline {
+    std::vector<std::array<double, 2>> points;
+    bool closed = false;
+};
+ShapeOutline shape_points(const std::string& kind, const core::Json& op);
 
 }  // namespace genko::render

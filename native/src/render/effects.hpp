@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/json.hpp"
@@ -56,6 +57,14 @@ struct Geometry {
 
 // effects.geometry(effect, page): the lines and fills in page mm.
 Geometry geometry(const core::Json& effect, const core::Page& page);
+
+// effects.area(effect, page): the effect's panel outline (mm) and its box [x, y, w, h] (the page out to the bleed when
+// it has no panel).
+std::pair<std::vector<XY>, std::array<double, 4>> panel_area(const core::Json& effect, const core::Page& page);
+// The centre of a focus line or flash: params' "center", else the middle of its box.
+XY centre(const core::Json& params, const std::array<double, 4>& box);
+// effects._inner(params, box): the clear middle's radii (mm).
+XY inner_size(const core::Json& params, const std::array<double, 4>& box);
 
 // Whether render._draw_effects draws this effect (a known kind, visible); TypeError (Python's AttributeError) for an
 // effect that is not an object.

@@ -214,6 +214,14 @@ void PageRenderer::set_cmyk_proof(std::optional<std::optional<std::filesystem::p
     dispatch();
 }
 
+void PageRenderer::set_screen_dots(bool on) {
+    if (on == screen_dots_) return;
+    screen_dots_ = on;
+    ++generation_;
+    for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
+    dispatch();
+}
+
 void PageRenderer::show(DocPtr doc, std::size_t index) {
     if (!doc || index >= doc->pages.size() || doc->is_deferred(index)) {
         clear();  // (a page whose strokes and pictures are not read yet: shown when they are)
@@ -420,12 +428,13 @@ void PageRenderer::dispatch() {
             const int dpi = l->dpi;
             const std::string mode = mode_;
             const auto proof = proof_;
+            const bool dots = screen_dots_;
             const std::stop_token stop = tile.stop->get_token();
             const std::int64_t frame = frame_;
             const bool onion = onion_;
             if (!onions_) onions_ = std::make_shared<OnionStore>();
             const std::shared_ptr<OnionStore> onions = onions_;
-            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, stop, frame, onion, onions]() {
+            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, dots, stop, frame, onion, onions]() {
                 Result result;
                 result.page_id = page_id;
                 result.dpi = dpi;
@@ -437,6 +446,7 @@ void PageRenderer::dispatch() {
                     render::RenderOptions options;
                     options.mode = mode;
                     options.rough = rough;
+                    options.screen_dots = dots;
                     options.skip_unported = true;  // (a preview on screen: what is not drawn yet is reported)
                     options.region = render::RenderRegion{region.x(), region.y(), region.width(), region.height()};
                     options.stop = stop;
@@ -612,6 +622,21 @@ void PageRenderer::paint(QPainter& painter, const QRectF& visible_mm) const {
         }
     }
     painter.setTransform(to_screen);
+}
+
+std::optional<QColor> PageRenderer::pixel_at(double x_mm, double y_mm) const {
+    const core::Page* p = page();
+    if (p == nullptr || base_dpi_ == 0) return std::nullopt;
+    const auto it = levels_.find(base_dpi_);
+    if (it == levels_.end()) return std::nullopt;
+    const Level& l = it->second;
+    // (as Python's canvas reads its picture of the page: int(x / width * pixels))
+    const int px = static_cast<int>(x_mm / p->spec.width_mm.value() * l.size.width());
+    const int py = static_cast<int>(y_mm / p->spec.height_mm.value() * l.size.height());
+    if (!(0 <= px && px < l.size.width() && 0 <= py && py < l.size.height())) return std::nullopt;
+    const Tile& tile = l.tiles[static_cast<std::size_t>((py / kTile) * l.cols + px / kTile)];
+    if (tile.image.isNull() || tile.valid == 0) return std::nullopt;
+    return tile.image.pixelColor(px % kTile, py % kTile);
 }
 
 QImage PageRenderer::compose(int dpi) const {

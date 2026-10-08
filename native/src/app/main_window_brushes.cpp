@@ -27,6 +27,7 @@
 #include "app/config.hpp"
 #include "app/fields.hpp"
 #include "app/main_window.hpp"
+#include "app/material_tabs.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "app/wording.hpp"
@@ -165,9 +166,13 @@ void MainWindow::build_tool_settings() {
                                                            {{action("act_copy"), action("act_cut"), action("act_paste"), action("act_delete_area")},
                                                             {action("act_flip_h"), action("act_flip_v"), action("act_warp_perspective"), action("act_warp_mesh"),
                                                              action("act_warp_apply")},
-                                                            {action("act_fill_selection"), action("act_line_width")}}))}));
+                                                            {action("act_fill_selection"), action("act_line_width"), action("act_tone_here")}}))}));
     ts->add({QStringLiteral("select")}, action_page({QStringLiteral("表示"), action("act_fit"), action("act_actual")}));
-    ts->add({QStringLiteral("move")}, action_page({QStringLiteral("レイヤー"), action("act_select_all")}));
+    ts->add({QStringLiteral("move")}, action_page({QStringLiteral("レイヤー"), action("act_layer_dup"), action("act_select_all")}));
+    build_paint_pages(ts);  // (図形・色混ぜ・ゆがみ・グラデーション: main_window_paint.cpp)
+    build_vector_pages(ts);  // (線の編集・線の修正: main_window_vector.cpp)
+    build_guide_pages(ts);   // (定規・3D: main_window_guides.cpp)
+    build_material_pages(ts);  // (効果線・素材を置く: main_window_materials.cpp)
 
     auto* dock = new QDockWidget(QStringLiteral("ツールの設定"), this);
     auto* scroll = new QScrollArea;
@@ -329,6 +334,7 @@ Json MainWindow::eraser_fields(const core::Layer& layer) const {
     Json out = Json::object();
     if (layer.kind == core::LayerKind::Tone) {
         // (a tone layer is scraped: how soft is the materials panel's)
+        if (materials_ != nullptr && materials_->soft->isChecked()) out["soft"] = true;
     } else if (eraser_mode_ != nullptr && !eraser_mode_->currentData().toString().isEmpty()) {
         out["mode"] = eraser_mode_->currentData().toString().toStdString();
     } else if (brush_ != nullptr && brush_->crossing->isChecked()) {

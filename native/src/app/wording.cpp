@@ -252,6 +252,22 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the pack has a file outside itself", "素材パックの中に、パックの外を指すファイルがあります（読み込みません）"));
         r.push_back(rule(R"(a material pack is a folder or a \.zip)", "素材パックは、フォルダか zip ファイルです"));
         r.push_back(rule("the pack has no materials.*", "素材パックに素材がありません（素材の一覧か画像が要ります）"));
+        r.push_back(rule(R"(the pack cannot be read as a zip file \(it is not a zip file\))", "zip ファイルとして読めません"));
+        r.push_back(rule(R"(the pack cannot be read as a zip file \((zip64 is not read|a file inside is encrypted|a file inside is packed in a way that is not read|it is split over several files)\))",
+                         "この zip ファイルは読めません（暗号化・分割・特殊な圧縮・大きすぎる形式には対応していません）"));
+        r.push_back(rule(R"(the pack cannot be read as a zip file \((it is too large|it holds too many files|a file inside is too large|its files are too large)\))",
+                         "素材パックが大きすぎます（zip 1 GB・中身の合計 512 MB・1 ファイル 64 MB・1 万ファイルまで）"));
+        r.push_back(rule(R"(the pack cannot be read as a zip file \(.*\))", "zip ファイルが壊れていて読めません"));
+        r.push_back(rule("the pack holds too many files", "素材パックのファイルが多すぎます（1 万まで）"));
+        r.push_back(rule("the material library cannot be read, so it is left as it is: (.*)",
+                         "素材ライブラリ（\\1）が読めないので、書き換えずにそのままにしました。ファイルを直すか別の場所へ移してからやり直します"));
+        r.push_back(rule("the material library folder is a link or not a folder, so it is left as it is: (.*)",
+                         "素材ライブラリのフォルダ（\\1）がリンクかフォルダではないので、書き換えずにそのままにしました"));
+        r.push_back(rule("the material (library|folders) cannot be written: (.*?) \\(.*\\)", "素材ライブラリ（\\2）に書き込めませんでした"));
+        r.push_back(rule(R"(the picture cannot be written into the material library.*)", "画像を素材ライブラリに書き込めませんでした"));
+        r.push_back(rule("the picture is too large \\(at most 64 MB\\).*", "画像ファイルが大きすぎます（64 MB まで）"));
+        r.push_back(rule("the picture is a link or not a file.*", "画像がリンクかファイルではないので読みません"));
+        r.push_back(rule("kind must be one of tone, effect, image, lines, lettering, brush, prim", "素材の種類が違います"));
         r.push_back(rule("adjust is set on a correction layer", "補正の設定は、色調補正のレイヤーにだけできます"));
         r.push_back(rule("adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"));
         r.push_back(rule("choose two or more layers to merge", "結合するレイヤーを 2 枚以上選びます"));

@@ -263,19 +263,20 @@ float to_float32(double x) {
     return static_cast<float>(x);
 }
 
-// filters._remap: the pixels fetched from (map_x, map_y) for each place (bilinear; outside: transparent), the maps
-// float32 (as wave and twirl make them): the weights float64, as numpy mixes float32 and int64
-Image remap(const Image& rgba, const std::vector<float>& map_x, const std::vector<float>& map_y) {
+// filters._remap: the pixels fetched from (map_x, map_y) for each place (bilinear; outside: transparent): a picture of
+// the maps' size (out_w × out_h). The weights float64, as numpy mixes the maps (float32 or float64) and int64.
+template <typename T>
+Image remap_maps(const Image& rgba, std::int64_t out_w, std::int64_t out_h, const std::vector<T>& map_x, const std::vector<T>& map_y) {
     const std::string src = rgba.tobytes();
     const std::int64_t w = rgba.width();
     const std::int64_t h = rgba.height();
-    std::string out(src.size(), '\0');
+    std::string out(static_cast<std::size_t>(out_w * out_h * 4), '\0');
     const auto sample = [&](std::int64_t yy, std::int64_t xx, int c) -> double {
         const bool inside = xx >= 0 && xx < w && yy >= 0 && yy < h;
         if (!inside) return 0.0;
         return static_cast<unsigned char>(src[static_cast<std::size_t>((yy * w + xx) * 4 + c)]);
     };
-    for (std::int64_t i = 0; i < w * h; ++i) {
+    for (std::int64_t i = 0; i < out_w * out_h; ++i) {
         const auto mx = static_cast<double>(map_x[static_cast<std::size_t>(i)]);
         const auto my = static_cast<double>(map_y[static_cast<std::size_t>(i)]);
         const double fx0 = std::floor(mx);
@@ -295,7 +296,12 @@ Image remap(const Image& rgba, const std::vector<float>& map_x, const std::vecto
             out[static_cast<std::size_t>(i * 4 + c)] = static_cast<char>(static_cast<unsigned char>(static_cast<int>(v)));
         }
     }
-    return Image::frombytes("RGBA", rgba.size(), out);
+    return Image::frombytes("RGBA", Size{static_cast<int>(out_w), static_cast<int>(out_h)}, out);
+}
+
+// the maps float32 (as wave and twirl make them), of the picture's size
+Image remap(const Image& rgba, const std::vector<float>& map_x, const std::vector<float>& map_y) {
+    return remap_maps(rgba, rgba.width(), rgba.height(), map_x, map_y);
 }
 
 // lineart.LineParams.from_dict
@@ -617,6 +623,11 @@ Image within(const Image& original, const Image& filtered, const Image& mask) {
     const Image m = mask.mode() == "L" ? mask : mask.convert("L");
     return composite(filtered.mode() == "RGBA" ? filtered : filtered.convert("RGBA"),
                      original.mode() == "RGBA" ? original : original.convert("RGBA"), m.resize(original.size()));
+}
+
+Image remap_area(const Image& rgba, int width, int height, const std::vector<double>& map_x, const std::vector<double>& map_y) {
+    const Image src = rgba.mode() == "RGBA" ? rgba : rgba.convert("RGBA");
+    return remap_maps(src, width, height, map_x, map_y);
 }
 
 }  // namespace genko::render::filters

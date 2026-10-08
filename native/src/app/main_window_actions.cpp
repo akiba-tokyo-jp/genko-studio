@@ -32,12 +32,14 @@
 
 #include "app/ask.hpp"
 #include "app/brush_panel.hpp"
+#include "app/colours.hpp"
 #include "app/config.hpp"
 #include "app/layer_panel.hpp"
 #include "app/dialogs.hpp"
 #include "app/frame_tools.hpp"
 #include "app/icons.hpp"
 #include "app/material_panel.hpp"
+#include "app/material_tabs.hpp"
 #include "app/main_window.hpp"
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
@@ -193,6 +195,10 @@ void MainWindow::build_actions() {
     actions_.at("act_select")->setChecked(true);
     build_selection_actions();  // (範囲選択 and the selection's commands: main_window_select.cpp)
     build_anim_actions();       // (アニメーション, タイムラプス: main_window_anim.cpp)
+    build_paint_actions();      // (スポイト … ゆがみ, 色の入れ替え, 透明色, 太く・細く: main_window_paint.cpp)
+    build_vector_actions();     // (線の修正, 線の編集 and its commands: main_window_vector.cpp)
+    build_guide_actions();      // (定規, 3D and their commands: main_window_guides.cpp)
+    build_material_actions();   // (効果線, 素材を置く, トーン, the view's extras, the layer commands: main_window_materials.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -275,6 +281,10 @@ void MainWindow::build_actions() {
     make("act_quit", QStringLiteral("Genko を終わる"), [] { QApplication::closeAllWindows(); }, keys({std_key(Std::Quit)}));
     // the tools' pictures and their tooltips with their keys
     for (const auto& [name, attribute] : {std::pair{"select", "act_select"}, {"pen", "act_pen"}, {"eraser", "act_eraser"}, {"frame", "act_frame"},
+                                          {"picker", "act_picker"}, {"fill", "act_fill"}, {"lassofill", "act_lassofill"},
+                                          {"gradient", "act_gradient"}, {"shape", "act_shape"}, {"blend", "act_blend"}, {"reshape", "act_reshape"},
+                                          {"rect", "act_marquee"}, {"lasso", "act_lasso"}, {"wand", "act_wand"}, {"ruler", "act_ruler"},
+                                          {"3d", "act_3d"}, {"effect", "act_effect"}, {"stamp", "act_stamp"},
                                           {"move", "act_move"}, {"undo", "act_undo"}, {"redo", "act_redo"}, {"fit", "act_fit"},
                                           {"zoom_in", "act_zoom_in"}, {"zoom_out", "act_zoom_out"}, {"prev", "act_prev"}, {"next", "act_next"}}) {
         QAction* act = actions_.at(QString::fromLatin1(attribute));
@@ -309,6 +319,9 @@ void MainWindow::build_menus() {
     file->addAction(action("act_save"));
     file->addAction(action("act_save_as"));
     file->addSeparator();
+    file->addAction(action("act_import_scan"));
+    file->addAction(action("act_scanner"));
+    file->addSeparator();
     file->addAction(action("act_timelapse"));
     file->addAction(action("act_timelapse_export"));
     file->addSeparator();
@@ -324,20 +337,53 @@ void MainWindow::build_menus() {
     QMenu* view = bar->addMenu(QStringLiteral("表示"));
     for (const char* name : {"act_fit", "act_zoom_in", "act_zoom_out", "act_actual", "act_zoom_value", "act_zoom_tool"}) view->addAction(action(name));
     view->addSeparator();
-    for (const char* name : {"act_turn_left", "act_turn_right", "act_mirror", "act_turn_reset"}) view->addAction(action(name));
+    for (const char* name : {"act_turn_left", "act_turn_right", "act_mirror", "act_view_flip_v", "act_turn_reset"}) view->addAction(action(name));
     view->addSeparator();
     for (const char* name : {"act_overview", "act_prev", "act_next"}) view->addAction(action(name));
     view->addSeparator();
     view->addAction(action("act_guides"));
+    view->addAction(action("act_onion"));
     view->addAction(action("act_cmyk_proof"));
+    view->addAction(action("act_screen_dots"));
     QMenu* tools = bar->addMenu(QStringLiteral("ツール"));
-    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_frame"}) tools->addAction(action(name));
+    // (Python's order; the tools not ported yet join it as they come)
+    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_blend", "act_shape", "act_frame"}) tools->addAction(action(name));
     tools->addSeparator();
+    for (const char* name : {"act_picker", "act_fill", "act_lassofill", "act_fill_gaps", "act_gradient", "act_reshape", "act_vector", "act_liquify"})
+        tools->addAction(action(name));
+    tools->addSeparator();
+    for (const char* name : {"act_marquee", "act_lasso", "act_wand"}) tools->addAction(action(name));
+    tools->addSeparator();
+    for (const char* name : {"act_ruler", "act_3d", "act_effect", "act_stamp"}) tools->addAction(action(name));
+    tools->addSeparator();
+    for (const char* name : {"act_thicker", "act_thinner"}) tools->addAction(action(name));
+    tools->addSeparator();
+    for (const char* name : {"act_swap_colour", "act_transparent"}) tools->addAction(action(name));
+    tools->addSeparator();
+    QMenu* tones = tools->addMenu(QStringLiteral("トーン・効果線"));
+    for (const char* name : {"act_tone_here", "act_tone_click"}) tones->addAction(action(name));
+    tones->addSeparator();
+    for (QAction* act : effect_actions_) tones->addAction(act);
+    tones->addSeparator();
+    for (const char* name : {"act_effect_within", "act_effect_avoid", "act_effect_clear"}) tones->addAction(action(name));
+    tones->addSeparator();
+    tones->addAction(action("act_materials"));
     tools->addAction(action("act_color"));
     tools->addAction(action("act_exposure"));
     tools->addAction(action("act_point_wider"));
+    tools->addAction(action("act_point_thinner"));
+    tools->addSeparator();
+    build_guide_menus(tools);  // (定規 and 3D: main_window_guides.cpp)
     build_selection_menu(bar->addMenu(QStringLiteral("選択")));
     QMenu* layers = bar->addMenu(QStringLiteral("レイヤー"));
+    for (const char* name : {"act_layer_pen", "act_layer_paint", "act_layer_folder"}) layers->addAction(action(name));
+    layers->addSeparator();
+    for (const char* name : {"act_layer_dup", "act_layer_merge", "act_layer_delete"}) layers->addAction(action(name));
+    layers->addSeparator();
+    for (const char* name : {"act_layer_up", "act_layer_down"}) layers->addAction(action(name));
+    layers->addSeparator();
+    layers->addAction(action("act_layer_draft"));
+    layers->addSeparator();
     for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten", "act_layer_convert_paint", "act_layer_convert_pen"})
         layers->addAction(action(name));
     layers->addSeparator();
@@ -362,6 +408,7 @@ void MainWindow::build_menus() {
     frames->addAction(action("act_border_colour"));
     frames->addAction(action("act_corner"));
     frames->addAction(action("act_bleed"));
+    frames->addAction(action("act_reset_shape"));
     frames->addSeparator();
     frames->addAction(action("act_frame_numbers"));
     pages->addSeparator();
@@ -387,9 +434,18 @@ void MainWindow::build_toolbars() {
     palette_->setOrientation(Qt::Vertical);
     palette_->setIconSize(QSize(24, 24));
     palette_->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser"}) palette_->addAction(action(name));
+    // (Python's palette: select, move, pen, eraser, blend, shape, fill, lassofill, gradient, picker | frame | the selection)
+    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_blend", "act_shape", "act_fill", "act_lassofill", "act_gradient",
+                             "act_picker"})
+        palette_->addAction(action(name));
     palette_->addSeparator();
     palette_->addAction(action("act_frame"));
+    palette_->addSeparator();
+    for (const char* name : {"act_marquee", "act_lasso", "act_wand", "act_reshape"}) palette_->addAction(action(name));
+    palette_->addSeparator();
+    for (const char* name : {"act_ruler", "act_3d", "act_effect"}) palette_->addAction(action(name));
+    for (const auto& [name, label] : {std::pair{"act_marquee", "長方形選択"}, {"act_lasso", "投げ縄選択"}, {"act_reshape", "線の修正"}, {"act_3d", "3D"}})
+        action(QString::fromLatin1(name))->setIconText(QString::fromUtf8(label));  // (the palette's names stay short; menus keep the full name)
     addToolBar(Qt::LeftToolBarArea, palette_);
     commands_ = new QToolBar(QStringLiteral("操作"));
     commands_->setObjectName(QStringLiteral("commands"));
@@ -446,25 +502,9 @@ void MainWindow::build_docks() {
     tabifyDockWidget(pages_dock_, layers);
     pages_dock_->raise();
     view_menu_->addAction(layers->toggleViewAction());
-    auto* materials = new QDockWidget(QStringLiteral("素材"), this);
-    materials->setObjectName(QStringLiteral("素材"));
-    materials->setWidget(make_builtin_material_panel(materials,[this](const QString& material_id, const QString& kind) {
-        const core::Page* page=current_page();if(!page)return;
-        Json op={{"op","stamp_material"},{"page",page->index.json()},{"material_id",material_id.toStdString()},
-                 {"x_mm",page->spec.width_mm.value()/2},{"y_mm",page->spec.height_mm.value()/2}};
-        if(const core::Layer* layer=target_layer())op["after"]=layer->id;
-        if(!apply_ops(Json::array({std::move(op)})))return;
-        if(kind==QLatin1String("brush")) {
-            const auto key="my_"+QCryptographicHash::hash(material_id.toUtf8(),QCryptographicHash::Sha1).toHex().left(10).toStdString();
-            if(!book().brush_custom.contains(key))return;
-            brush_->reload_kinds(key);  // (the brush panel chooses it: the pen follows)
-            choose_tool(QStringLiteral("pen")); // Updates the live pen after the successful registration.
-            flash(QStringLiteral("選んだブラシで描けます"),3500);
-        }
-    }));
-    addDockWidget(Qt::RightDockWidgetArea, materials);
-    materials->hide();  // Keep the initial canvas room; the window menu and work stages expose the panel.
-    view_menu_->addAction(materials->toggleViewAction());
+    build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)
+    build_guide_dock();   // (定規・3D, a tab when it is opened: main_window_guides.cpp)
+    build_material_dock();  // (素材, トーン, 効果線: main_window_materials.cpp)
     setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
     setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
 }
@@ -479,6 +519,7 @@ void MainWindow::choose_tool(const QString& tool) {
         canvas_->set_tool(tool);
     }
     if (const auto it = tool_actions_.find(tool); it != tool_actions_.end()) it->second->setChecked(true);
+    if (tool == QLatin1String("effect")) set_effect_pictures(effect_actions_, {"focus", "speed", "uni_flash", "beta_flash"});  // (drawn when first needed)
     if (tool_settings_ != nullptr) tool_settings_->show_tool(canvas_->tool());
     pen_changed();
 }
@@ -521,12 +562,14 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
         canvas_->stroke_dropped();
         return;
     }
+    if (effect_shape_stroke(stroke, *page)) return;  // (this stroke shapes an effect, not ink: main_window_materials.cpp)
     const core::Layer* layer = paint_layer();
     if (layer == nullptr) {
         canvas_->stroke_dropped();
         return;
     }
-    const bool rulers = page->rulers.is_array() && !page->rulers.empty();
+    if (paint_stroke(stroke, *page, *layer)) return;  // (透明色, ゆがみ, 色混ぜ: main_window_paint.cpp)
+    const bool rulers = canvas_->snap_rulers && page->rulers.is_array() && !page->rulers.empty();
     if (stroke.tool == QLatin1String("eraser")) {
         Json points = Json::array();
         for (const core::PenPoint& p : stroke.points) points.push_back(Json::array({p.x, p.y}));
@@ -574,6 +617,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
     if (rulers) ops.back()["snap_ruler"] = true;
     if (apply_ops(ops, {stroke.id})) {
         canvas_->stroke_applied(stroke.id);
+        if (colours_ != nullptr) colours_->remember(brush_->rgb());  // (a colour just used: the front of 履歴)
     } else {
         canvas_->stroke_dropped();
     }

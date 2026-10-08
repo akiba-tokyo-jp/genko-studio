@@ -1,0 +1,848 @@
+{
+ "note": "Cases for test_contract_paint (opsLikePython): the paint ops of M3④ (Python's ops._add_shape, ops._smudge, layerops.liquify) on the book `pyref_harness.py make-opsbook` makes (page 6 plain; page 4 with pen-1, paint-1 (a filled triangle), the ink lines, a locked and a fill layer). The format is ops_cases.json's. New ids count from first_id (0x1000).",
+ "first_id": 4096,
+ "cases": [
+  {
+   "n": "add_shape line",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "line",
+     "points": [
+      [
+       20,
+       30
+      ],
+      [
+       80,
+       40.12345
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "add_shape polyline closed",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "polyline",
+     "points": [
+      [
+       20,
+       30
+      ],
+      [
+       80,
+       40
+      ],
+      [
+       60,
+       90
+      ]
+     ],
+     "closed": true,
+     "fill": true
+    }
+   ]
+  },
+  {
+   "n": "add_shape curve",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "curve",
+     "points": [
+      [
+       20,
+       30
+      ],
+      [
+       50,
+       60
+      ],
+      [
+       80,
+       40
+      ],
+      [
+       120,
+       90
+      ]
+     ],
+     "kind": "maru",
+     "width_mm": 1.2
+    }
+   ]
+  },
+  {
+   "n": "add_shape curve closed filled",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "curve",
+     "points": [
+      [
+       20,
+       130
+      ],
+      [
+       60,
+       160
+      ],
+      [
+       100,
+       120
+      ]
+     ],
+     "closed": true,
+     "fill": true,
+     "fill_rgb": [
+      200,
+      100,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "n": "add_shape curve of two",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "curve",
+     "points": [
+      [
+       20,
+       30
+      ],
+      [
+       50,
+       60
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "add_shape rect",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "rect",
+     "box": [
+      20,
+      30,
+      60,
+      40
+     ]
+    }
+   ]
+  },
+  {
+   "n": "add_shape rect rounded",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "rect",
+     "box": [
+      20,
+      30,
+      60,
+      40
+     ],
+     "radius_mm": 8,
+     "rgb": [
+      10,
+      20,
+      200
+     ],
+     "opacity": 0.5
+    }
+   ]
+  },
+  {
+   "n": "add_shape rect rounded too much",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "rect",
+     "box": [
+      20,
+      30,
+      60,
+      40
+     ],
+     "radius_mm": 100
+    }
+   ]
+  },
+  {
+   "n": "add_shape ellipse filled only",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "ellipse",
+     "box": [
+      30,
+      40,
+      80,
+      50
+     ],
+     "fill": true,
+     "line": false,
+     "rgb": [
+      0,
+      128,
+      255
+     ]
+    }
+   ]
+  },
+  {
+   "n": "add_shape polygon",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "polygon",
+     "box": [
+      30,
+      40,
+      80,
+      80
+     ],
+     "sides": 6,
+     "angle": 15,
+     "fill": true,
+     "rgb": [
+      250,
+      0,
+      0
+     ],
+     "fill_rgb": [
+      0,
+      250,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "n": "add_shape polygon many sides",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "polygon",
+     "box": [
+      30,
+      40,
+      80,
+      80
+     ],
+     "sides": 100
+    }
+   ]
+  },
+  {
+   "n": "add_shape on a pen layer",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 4,
+     "shape": "line",
+     "points": [
+      [
+       10,
+       10
+      ],
+      [
+       30,
+       30
+      ]
+     ],
+     "layer_id": "pen-1"
+    }
+   ]
+  },
+  {
+   "n": "add_shape on a paint layer",
+   "op": "add_shape",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 4,
+     "shape": "rect",
+     "box": [
+      10,
+      10,
+      30,
+      30
+     ],
+     "layer_id": "paint-1",
+     "fill": true
+    }
+   ]
+  },
+  {
+   "n": "add_shape unknown shape",
+   "op": "add_shape",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "star",
+     "box": [
+      1,
+      1,
+      2,
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "n": "add_shape no box",
+   "op": "add_shape",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "rect"
+    }
+   ]
+  },
+  {
+   "n": "add_shape box of three",
+   "op": "add_shape",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "ellipse",
+     "box": [
+      1,
+      2,
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "n": "add_shape one point",
+   "op": "add_shape",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "polyline",
+     "points": [
+      [
+       1,
+       2
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "add_shape sides text",
+   "op": "add_shape",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 6,
+     "shape": "polygon",
+     "box": [
+      30,
+      40,
+      80,
+      80
+     ],
+     "sides": "six"
+    }
+   ]
+  },
+  {
+   "n": "add_shape locked layer",
+   "op": "add_shape",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 4,
+     "shape": "line",
+     "points": [
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       2
+      ]
+     ],
+     "layer_id": "locked-1"
+    }
+   ]
+  },
+  {
+   "n": "add_shape fill layer",
+   "op": "add_shape",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_shape",
+     "page": 4,
+     "shape": "line",
+     "points": [
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       2
+      ]
+     ],
+     "layer_id": "fill-1"
+    }
+   ]
+  },
+  {
+   "n": "smudge blur",
+   "op": "smudge",
+   "ok": true,
+   "ops": [
+    {
+     "op": "smudge",
+     "page": 4,
+     "layer_id": "paint-1",
+     "points": [
+      [
+       20,
+       15
+      ],
+      [
+       45,
+       30
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "smudge blend wide",
+   "op": "smudge",
+   "ok": true,
+   "ops": [
+    {
+     "op": "smudge",
+     "page": 4,
+     "layer_id": "paint-1",
+     "mode": "blend",
+     "points": [
+      [
+       15,
+       12
+      ],
+      [
+       48,
+       25
+      ],
+      [
+       40,
+       38
+      ]
+     ],
+     "width_mm": 9,
+     "strength": 1
+    }
+   ]
+  },
+  {
+   "n": "smudge fingertip",
+   "op": "smudge",
+   "ok": true,
+   "ops": [
+    {
+     "op": "smudge",
+     "page": 4,
+     "layer_id": "paint-1",
+     "mode": "smudge",
+     "points": [
+      [
+       12,
+       12,
+       0.4
+      ],
+      [
+       30,
+       20,
+       0.9
+      ],
+      [
+       48,
+       30,
+       0.6
+      ]
+     ],
+     "width_mm": 4,
+     "strength": 0.8
+    }
+   ]
+  },
+  {
+   "n": "smudge ink lines",
+   "op": "smudge",
+   "ok": true,
+   "ops": [
+    {
+     "op": "smudge",
+     "page": 4,
+     "layer": "ink",
+     "points": [
+      [
+       60,
+       52
+      ],
+      [
+       90,
+       58
+      ]
+     ],
+     "width_mm": 3
+    }
+   ]
+  },
+  {
+   "n": "smudge nothing there",
+   "op": "smudge",
+   "ok": false,
+   "ops": [
+    {
+     "op": "smudge",
+     "page": 4,
+     "layer_id": "paint-1",
+     "points": [
+      [
+       150,
+       200
+      ],
+      [
+       160,
+       210
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "smudge bad mode",
+   "op": "smudge",
+   "ok": false,
+   "ops": [
+    {
+     "op": "smudge",
+     "page": 4,
+     "layer_id": "paint-1",
+     "mode": "swirl",
+     "points": [
+      [
+       20,
+       15
+      ],
+      [
+       45,
+       30
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "smudge one point",
+   "op": "smudge",
+   "ok": false,
+   "ops": [
+    {
+     "op": "smudge",
+     "page": 4,
+     "layer_id": "paint-1",
+     "points": [
+      [
+       20,
+       15
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "smudge off the page",
+   "op": "smudge",
+   "ok": false,
+   "ops": [
+    {
+     "op": "smudge",
+     "page": 4,
+     "layer_id": "paint-1",
+     "points": [
+      [
+       500,
+       500
+      ],
+      [
+       510,
+       510
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "liquify push lines",
+   "op": "liquify",
+   "ok": true,
+   "ops": [
+    {
+     "op": "liquify",
+     "page": 4,
+     "layer_id": "pen-1",
+     "points": [
+      [
+       30,
+       22
+      ],
+      [
+       50,
+       30
+      ]
+     ],
+     "width_mm": 12
+    }
+   ]
+  },
+  {
+   "n": "liquify pinch pixels",
+   "op": "liquify",
+   "ok": true,
+   "ops": [
+    {
+     "op": "liquify",
+     "page": 4,
+     "layer_id": "paint-1",
+     "mode": "pinch",
+     "points": [
+      [
+       35,
+       20
+      ],
+      [
+       40,
+       25
+      ]
+     ],
+     "width_mm": 20
+    }
+   ]
+  },
+  {
+   "n": "liquify bloat",
+   "op": "liquify",
+   "ok": true,
+   "ops": [
+    {
+     "op": "liquify",
+     "page": 4,
+     "layer_id": "paint-1",
+     "mode": "bloat",
+     "points": [
+      [
+       35,
+       20
+      ]
+     ],
+     "strength": 1
+    }
+   ]
+  },
+  {
+   "n": "liquify twirl ink",
+   "op": "liquify",
+   "ok": true,
+   "ops": [
+    {
+     "op": "liquify",
+     "page": 4,
+     "layer": "ink",
+     "mode": "twirl_cw",
+     "points": [
+      [
+       80,
+       52
+      ],
+      [
+       90,
+       60
+      ],
+      [
+       100,
+       70
+      ]
+     ],
+     "width_mm": 30
+    }
+   ]
+  },
+  {
+   "n": "liquify twirl ccw",
+   "op": "liquify",
+   "ok": true,
+   "ops": [
+    {
+     "op": "liquify",
+     "page": 4,
+     "layer": "ink",
+     "mode": "twirl_ccw",
+     "points": [
+      [
+       100,
+       120
+      ],
+      [
+       110,
+       125
+      ]
+     ],
+     "width_mm": 8
+    }
+   ]
+  },
+  {
+   "n": "liquify bad mode",
+   "op": "liquify",
+   "ok": false,
+   "ops": [
+    {
+     "op": "liquify",
+     "page": 4,
+     "layer_id": "pen-1",
+     "mode": "melt",
+     "points": [
+      [
+       1,
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "liquify no points",
+   "op": "liquify",
+   "ok": false,
+   "ops": [
+    {
+     "op": "liquify",
+     "page": 4,
+     "layer_id": "pen-1",
+     "points": []
+    }
+   ]
+  },
+  {
+   "n": "liquify points text",
+   "op": "liquify",
+   "ok": false,
+   "ops": [
+    {
+     "op": "liquify",
+     "page": 4,
+     "layer_id": "pen-1",
+     "points": [
+      [
+       "a",
+       "b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "liquify one number",
+   "op": "liquify",
+   "ok": false,
+   "ops": [
+    {
+     "op": "liquify",
+     "page": 4,
+     "layer_id": "pen-1",
+     "points": [
+      [
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "liquify locked",
+   "op": "liquify",
+   "ok": false,
+   "ops": [
+    {
+     "op": "liquify",
+     "page": 4,
+     "layer_id": "locked-1",
+     "points": [
+      [
+       1,
+       1
+      ]
+     ]
+    }
+   ]
+  }
+ ]
+}

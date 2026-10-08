@@ -2,6 +2,7 @@
 
 #include <QColor>
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 #include <memory>
@@ -21,6 +22,9 @@ struct Responder {
         get_double;
     std::function<std::optional<int>(const QString& title, const QString& label, int value, int lo, int hi)> get_int;
     std::function<std::optional<QString>(const QString& title, const QString& label, const QString& text)> get_text;
+    // one of the items (or, editable, any text)
+    std::function<std::optional<QString>(const QString& title, const QString& label, const QStringList& items, int current, bool editable)>
+        get_item;
     std::function<std::optional<QColor>(const QColor& now, const QString& title)> colour;
     std::function<bool(const QString& title, const QString& text)> question;  // yes
     std::function<void(const QString& title, const QString& text)> warning;
@@ -40,6 +44,9 @@ std::optional<double> get_double(QWidget* parent, const QString& title, const QS
                                  double hi, int decimals);
 std::optional<int> get_int(QWidget* parent, const QString& title, const QString& label, int value, int lo, int hi);
 std::optional<QString> get_text(QWidget* parent, const QString& title, const QString& label, const QString& text = {});
+// QInputDialog::getItem: one of the items, or (editable) any text typed; nothing when cancelled.
+std::optional<QString> get_item(QWidget* parent, const QString& title, const QString& label, const QStringList& items, int current = 0,
+                                bool editable = false);
 std::optional<QColor> colour(QWidget* parent, const QColor& now, const QString& title);
 bool question(QWidget* parent, const QString& title, const QString& text);
 void warning(QWidget* parent, const QString& title, const QString& text);

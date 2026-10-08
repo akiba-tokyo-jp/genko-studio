@@ -11,6 +11,7 @@ void register_render_ops(core::OpRegistry& registry) {
     register_effect_ops(registry);
     register_3d_ops(registry);
     register_raster_ops(registry);
+    register_paint_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

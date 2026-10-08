@@ -113,11 +113,20 @@ genko_test(test_contract_colour SOURCES contract/test_contract_colour.cpp DEPS g
 # render/abr (Photoshop brush files) and the brush library against Python's genko/abr.py and brushes.py.
 genko_test(test_contract_abr SOURCES contract/test_contract_abr.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 600)
+# render/materials (the person's material library, packs) against Python's genko/materials/__init__.py.
+genko_test(test_contract_materials SOURCES contract/test_contract_materials.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 600)
 # The two together: a book made by the ops (C++ and Python), drawn by `genko render` and `python -m genko render`.
 genko_test(test_contract_drawn_by_ops SOURCES contract/test_contract_drawn_by_ops.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
 # Animation (M3③): the ops against Python's apply_ops (anim_cases.json), an animation page drawn as its first frame.
 genko_test(test_contract_anim SOURCES contract/test_contract_anim.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# The vector line edits (M3④): vector_edit and trace_edit against Python's apply_ops (vector_cases.json).
+genko_test(test_contract_vector SOURCES contract/test_contract_vector.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# The paint ops of M3④: add_shape, smudge and liquify against Python's apply_ops (paint_cases.json).
+genko_test(test_contract_paint SOURCES contract/test_contract_paint.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
 # Filter plugins (M3③, COMP-04): the runner against Python's plugins.run, the choice, the bounds.
 genko_test(test_contract_plugins SOURCES contract/test_contract_plugins.cpp DEPS genko_test_support genko_render_ops
@@ -166,6 +175,10 @@ if(GENKO_BUILD_APP)
   # the brush panel and ツールの設定: brushes kept per kind, one's own made, opened, given and read back (.abr too)
   genko_test(test_gui_brushes SOURCES gui/test_gui_brushes.cpp DEPS genko_app GUI TIMEOUT 600)
   genko_test(test_gui_anim SOURCES gui/test_gui_anim.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  genko_test(test_gui_paint SOURCES gui/test_gui_paint.cpp DEPS genko_app GUI TIMEOUT 600)
+  genko_test(test_gui_guides SOURCES gui/test_gui_guides.cpp DEPS genko_app GUI TIMEOUT 900)
+  genko_test(test_gui_colours SOURCES gui/test_gui_colours.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  genko_test(test_gui_effects SOURCES gui/test_gui_effects.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_session SOURCES unit/test_session.cpp DEPS genko_app LABELS unit TIMEOUT 300)
   # the pen: Python's packing of mouse and tablet input, and the live line's pixels against the renderer's per brush
   genko_test(test_gui_pen SOURCES gui/test_gui_pen.cpp DEPS genko_app GUI TIMEOUT 1200)

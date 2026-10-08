@@ -1,0 +1,4312 @@
+{
+ "note": "Cases for test_contract_vector (opsLikePython): the vector line edits of M3④ (Python's ops._vector_edit and ops._trace_edit) on the book `pyref_harness.py make-opsbook` makes (page 6: four lines drawn first in each case, their ids counted from first_id; page 4 for a locked and a fill layer). The format is ops_cases.json's. New ids count from first_id (0x1000).",
+ "first_id": 4096,
+ "cases": [
+  {
+   "n": "vector_edit move_point",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "move_point",
+     "stroke_id": "000000001000",
+     "index": 1,
+     "to": [
+      50.12345,
+      60.98765
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit move_point last",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "move_point",
+     "stroke_id": "000000001001",
+     "index": 2,
+     "to": [
+      "70",
+      "90"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit move_point out of range",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "move_point",
+     "stroke_id": "000000001000",
+     "index": 4,
+     "to": [
+      1,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit move_point negative",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "move_point",
+     "stroke_id": "000000001000",
+     "index": -1,
+     "to": [
+      1,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit move_point no to",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "move_point",
+     "stroke_id": "000000001000",
+     "index": 0
+    }
+   ]
+  },
+  {
+   "n": "vector_edit add_point",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "add_point",
+     "stroke_id": "000000001000",
+     "at": [
+      80,
+      40
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit add_point with pressure",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "add_point",
+     "stroke_id": "000000001001",
+     "at": [
+      41,
+      90
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit delete_point",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "delete_point",
+     "stroke_id": "000000001001",
+     "index": 1
+    }
+   ]
+  },
+  {
+   "n": "vector_edit delete_point of two",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "delete_point",
+     "stroke_id": "000000001002",
+     "index": 0
+    }
+   ]
+  },
+  {
+   "n": "vector_edit delete_point index text",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "delete_point",
+     "stroke_id": "000000001000",
+     "index": "x"
+    }
+   ]
+  },
+  {
+   "n": "vector_edit set_pressure",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "set_pressure",
+     "stroke_id": "000000001000",
+     "index": 2,
+     "pressure": 2
+    }
+   ]
+  },
+  {
+   "n": "vector_edit set_pressure low",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "set_pressure",
+     "stroke_id": "000000001001",
+     "index": 0,
+     "pressure": 0.01234
+    }
+   ]
+  },
+  {
+   "n": "vector_edit set_pressure default",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "set_pressure",
+     "stroke_id": "000000001002",
+     "index": 1
+    }
+   ]
+  },
+  {
+   "n": "vector_edit simplify",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "simplify",
+     "stroke_id": "000000001000",
+     "epsilon_mm": 3
+    }
+   ]
+  },
+  {
+   "n": "vector_edit simplify pressure",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "simplify",
+     "stroke_id": "000000001001",
+     "epsilon_mm": 0.001
+    }
+   ]
+  },
+  {
+   "n": "vector_edit connect",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "connect",
+     "ids": [
+      "000000001000",
+      "000000001002"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit connect turned",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "connect",
+     "ids": [
+      "000000001002",
+      "000000001001"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit connect with pressure",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "connect",
+     "ids": [
+      "000000001001",
+      "000000001003"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit connect one",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "connect",
+     "ids": [
+      "000000001000"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit connect same",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "connect",
+     "ids": [
+      "000000001000",
+      "000000001000"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit connect unknown",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "connect",
+     "ids": [
+      "000000001000",
+      "nope"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit cut",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "cut",
+     "stroke_id": "000000001000",
+     "at": [
+      80,
+      45
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit cut pressure",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "cut",
+     "stroke_id": "000000001001",
+     "at": [
+      59,
+      86
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit cut at an end",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "cut",
+     "stroke_id": "000000001002",
+     "at": [
+      200,
+      200
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit recolor",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "recolor",
+     "ids": [
+      "000000001000",
+      "000000001002"
+     ],
+     "rgb": [
+      255,
+      10,
+      20,
+      99
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit recolor stroke_id",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "recolor",
+     "stroke_id": "000000001001",
+     "rgb": [
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "recolor",
+     "stroke_id": "000000001001"
+    }
+   ]
+  },
+  {
+   "n": "vector_edit recolor nothing named",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "recolor",
+     "rgb": [
+      1,
+      2,
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit delete",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "delete",
+     "ids": [
+      "000000001001",
+      "000000001003"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit delete unknown",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "delete",
+     "ids": [
+      "000000001001",
+      "x1"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit unknown stroke",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "simplify",
+     "stroke_id": "missing"
+    }
+   ]
+  },
+  {
+   "n": "vector_edit unknown action",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "bend",
+     "stroke_id": "000000001000"
+    }
+   ]
+  },
+  {
+   "n": "vector_edit locked layer",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "vector_edit",
+     "page": 4,
+     "layer_id": "locked-1",
+     "action": "delete",
+     "ids": [
+      "x"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "vector_edit a fill layer",
+   "op": "vector_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "vector_edit",
+     "page": 4,
+     "layer_id": "fill-1",
+     "action": "delete",
+     "ids": [
+      "x"
+     ]
+    }
+   ]
+  },
+  {
+   "n": "trace_edit widen",
+   "op": "trace_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "widen",
+     "points": [
+      [
+       60,
+       40,
+       0.5
+      ],
+      [
+       60,
+       95,
+       0.9
+      ]
+     ],
+     "radius_mm": 8
+    }
+   ]
+  },
+  {
+   "n": "trace_edit narrow",
+   "op": "trace_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "narrow",
+     "points": [
+      [
+       60,
+       40,
+       0.5
+      ],
+      [
+       60,
+       95,
+       0.9
+      ]
+     ],
+     "radius_mm": 8,
+     "amount": 1
+    }
+   ]
+  },
+  {
+   "n": "trace_edit widen amount text",
+   "op": "trace_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "widen",
+     "points": [
+      [
+       60,
+       40,
+       0.5
+      ],
+      [
+       60,
+       95,
+       0.9
+      ]
+     ],
+     "amount": "0.8"
+    }
+   ]
+  },
+  {
+   "n": "trace_edit redraw_width",
+   "op": "trace_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "redraw_width",
+     "points": [
+      [
+       50,
+       45,
+       0.2
+      ],
+      [
+       60,
+       55,
+       1.4
+      ],
+      [
+       70,
+       48,
+       0.9
+      ]
+     ],
+     "radius_mm": 6
+    }
+   ]
+  },
+  {
+   "n": "trace_edit redraw",
+   "op": "trace_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "redraw",
+     "points": [
+      [
+       40,
+       51
+      ],
+      [
+       60,
+       70
+      ],
+      [
+       80,
+       70
+      ],
+      [
+       100,
+       51
+      ]
+     ],
+     "radius_mm": 3
+    }
+   ]
+  },
+  {
+   "n": "trace_edit redraw backwards",
+   "op": "trace_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "redraw",
+     "points": [
+      [
+       100,
+       81,
+       0.3
+      ],
+      [
+       80,
+       95,
+       0.5
+      ],
+      [
+       40,
+       95
+      ],
+      [
+       20,
+       81
+      ]
+     ],
+     "radius_mm": 3
+    }
+   ]
+  },
+  {
+   "n": "trace_edit redraw not on one line",
+   "op": "trace_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "redraw",
+     "points": [
+      [
+       40,
+       51
+      ],
+      [
+       40,
+       81
+      ]
+     ],
+     "radius_mm": 3
+    }
+   ]
+  },
+  {
+   "n": "trace_edit join",
+   "op": "trace_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "join",
+     "points": [
+      [
+       136,
+       50
+      ],
+      [
+       146,
+       62
+      ]
+     ],
+     "radius_mm": 6
+    }
+   ]
+  },
+  {
+   "n": "trace_edit join too far",
+   "op": "trace_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "join",
+     "points": [
+      [
+       136,
+       50
+      ],
+      [
+       146,
+       62
+      ]
+     ],
+     "radius_mm": 6,
+     "join_mm": 1
+    }
+   ]
+  },
+  {
+   "n": "trace_edit simplify",
+   "op": "trace_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "simplify",
+     "points": [
+      [
+       60,
+       40,
+       0.5
+      ],
+      [
+       60,
+       95,
+       0.9
+      ]
+     ],
+     "epsilon_mm": 4
+    }
+   ]
+  },
+  {
+   "n": "trace_edit nothing near",
+   "op": "trace_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "widen",
+     "points": [
+      [
+       180,
+       250
+      ],
+      [
+       181,
+       251
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "trace_edit one point",
+   "op": "trace_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "widen",
+     "points": [
+      [
+       60,
+       40
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "trace_edit unknown action",
+   "op": "trace_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "smooth",
+     "points": [
+      [
+       60,
+       40,
+       0.5
+      ],
+      [
+       60,
+       95,
+       0.9
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "n": "trace_edit radius tiny",
+   "op": "trace_edit",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       50
+      ],
+      [
+       60,
+       52
+      ],
+      [
+       100,
+       50
+      ],
+      [
+       140,
+       55
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       20,
+       80,
+       0.4
+      ],
+      [
+       60,
+       85,
+       0.8
+      ],
+      [
+       100,
+       80,
+       0.6
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       142,
+       58
+      ],
+      [
+       170,
+       90
+      ]
+     ]
+    },
+    {
+     "op": "add_stroke",
+     "page": 6,
+     "layer": "ink",
+     "points": [
+      [
+       30,
+       120
+      ],
+      [
+       30,
+       160
+      ]
+     ]
+    },
+    {
+     "op": "trace_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "widen",
+     "points": [
+      [
+       60,
+       40
+      ],
+      [
+       60,
+       45
+      ]
+     ],
+     "radius_mm": 0
+    }
+   ]
+  }
+ ]
+}
