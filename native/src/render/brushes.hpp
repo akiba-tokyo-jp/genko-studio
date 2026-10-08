@@ -36,6 +36,12 @@ void register_brushes(const core::Json& definitions);
 // Forget the registered brushes (a new process starts without them; the tests use this between books).
 void clear_custom();
 
+// CUSTOM[key] = from_dict(key, data): one brush made known, or made again in its place (Python's errors when its
+// settings do not make sense: PyValueError, PyTypeError …, and nothing changes); and one forgotten
+// (CUSTOM.pop(key, None)). A built-in name is never replaced (PyValueError).
+void define_brush(std::string_view key, const core::Json& data);
+void forget_brush(std::string_view key);
+
 // _decode_tip: the ink of an image tip given as base64 PNG (its alpha, or its darkness), or nothing for a picture that
 // cannot be opened.
 std::optional<Image> tip_ink(const std::string& base64_png);

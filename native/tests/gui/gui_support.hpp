@@ -129,6 +129,7 @@ struct Answers {
         responder->colour = [](const QColor&, const QString&) { return std::optional<QColor>(); };
         responder->existing_dir = [](const QString&, const QString&) { return QString(); };
         responder->save_path = [](const QString&, const QString&) { return QString(); };
+        responder->open_path = [](const QString&, const QString&) { return QString(); };
         responder->exec = [self](QDialog* dialog) {
             self->asked << QString::fromLatin1(dialog->metaObject()->className());
             return 0;

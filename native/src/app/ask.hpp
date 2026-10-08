@@ -25,6 +25,7 @@ struct Responder {
     std::function<void(const QString& title, const QString& text)> warning;
     std::function<QString(const QString& caption, const QString& start)> existing_dir;
     std::function<QString(const QString& caption, const QString& suggested)> save_path;
+    std::function<QString(const QString& caption, const QString& filter)> open_path;
     std::function<int(QDialog* dialog)> exec;  // QDialog::exec's result for a dialog the app runs
 };
 
@@ -40,7 +41,9 @@ std::optional<QColor> colour(QWidget* parent, const QColor& now, const QString& 
 bool question(QWidget* parent, const QString& title, const QString& text);
 void warning(QWidget* parent, const QString& title, const QString& text);
 QString existing_dir(QWidget* parent, const QString& caption, const QString& start = {});
-QString save_path(QWidget* parent, const QString& caption, const QString& suggested);
+QString save_path(QWidget* parent, const QString& caption, const QString& suggested, const QString& filter = {});
+// A file to read (nothing: none chosen); `filter` as QFileDialog takes it ("画像 (*.png *.jpg)").
+QString open_path(QWidget* parent, const QString& caption, const QString& filter = {});
 int exec(QDialog* dialog);
 
 }  // namespace genko::app::ask

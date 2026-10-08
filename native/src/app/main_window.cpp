@@ -1,3 +1,4 @@
+#include "app/tool_settings.hpp"
 #include "app/main_window.hpp"
 #include "app/layer_panel.hpp"
 
@@ -131,7 +132,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
                        : std::make_shared<Session>(core::new_episode("無題", core::Num(1), 8, core::PageSpec::a4_mono()), std::nullopt);
     documents_.push_back(Document{session_});
     documents::add(this);
-    pen_ = PenSettings::load();
+    pen_ = PenSettings::load();  // (until the brush panel is made: it drives the pen from then on)
     // the book's own brushes are known to the drawing (as Python's reader registers them)
     render::brushes::register_brushes(book().brush_custom);
 
@@ -194,6 +195,10 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     connect(canvas_, &PageCanvas::toolHeld, this, [this](const QString& tool) {
         const QString name = tool == QLatin1String("marquee") ? marquee_tool_of(canvas_->marquee) : tool;
         if (const auto it = tool_actions_.find(name); it != tool_actions_.end()) it->second->setChecked(true);
+        if (tool_settings_ != nullptr) {  // (its settings show the tool in use, for the moment the key is held)
+            tool_settings_->show_tool(tool);
+            if (canvas_->tool_held()) tool_settings_->title()->setText(tool_settings_->title()->text() + QStringLiteral("（キーを押している間）"));
+        }
     });
     // the selection (main_window_select.cpp)
     connect(canvas_, &PageCanvas::selectionDrawn, this, &MainWindow::selection_drawn);

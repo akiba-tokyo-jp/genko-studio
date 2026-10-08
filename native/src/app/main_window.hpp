@@ -18,6 +18,9 @@
 #include "app/pen.hpp"
 #include "app/session.hpp"
 
+class QCheckBox;
+class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
 class QSpinBox;
 class QTabBar;
@@ -35,7 +38,9 @@ class QDockWidget;
 
 namespace genko::app {
 
+class BrushPanel;
 class LayerPanel;
+class ToolSettings;
 
 class Navigator;
 class PageList;
@@ -100,6 +105,12 @@ public:
     // The page shown as these ops would leave it, without changing the book (フィルターのプレビュー); none: as it is.
     void preview_ops(const std::optional<core::Json>& ops);
     LayerPanel* layer_panel() const { return layer_panel_; }
+    BrushPanel* brush_panel() const { return brush_; }
+    ToolSettings* tool_settings() const { return tool_settings_; }
+    // Brushes from a .genkobrush or a Photoshop .abr into one's own list: their keys (the file's errors throw).
+    std::vector<std::string> import_brushes(const QString& path);
+    // The chosen brush in a file (.genkobrush); none: asked where.
+    bool export_brush(std::optional<QString> path = std::nullopt);
     PenSettings& pen() { return pen_; }
     void pen_changed();
 
@@ -217,6 +228,14 @@ private:
     bool agent_book() const;
     // The layer drawn on when it can be painted on; otherwise a notice and null.
     const core::Layer* paint_layer();
+    // the brushes and the tool settings (main_window_brushes.cpp)
+    void build_tool_settings();
+    void brush_changed();
+    void make_brush();
+    void edit_brush();
+    void forget_brush();
+    void import_brushes_dialog();
+    core::Json eraser_fields(const core::Layer& layer) const;
     // the selection (main_window_select.cpp)
     void build_selection_actions();
     void build_selection_menu(QMenu* menu);
@@ -257,6 +276,17 @@ private:
     std::optional<std::string> target_layer_id_;
     LayerPanel* layer_panel_ = nullptr;
     QMenu* stock_menu_ = nullptr;
+    BrushPanel* brush_ = nullptr;
+    ToolSettings* tool_settings_ = nullptr;
+    QDockWidget* tool_settings_dock_ = nullptr;
+    QDoubleSpinBox* eraser_size_ = nullptr;
+    QComboBox* eraser_mode_ = nullptr;
+    QComboBox* eraser_texture_ = nullptr;
+    QComboBox* frame_mode_ = nullptr;
+    QComboBox* marquee_mode_ = nullptr;
+    QDoubleSpinBox* selection_pen_ = nullptr;
+    QSpinBox* colour_tolerance_box_ = nullptr;
+    QCheckBox* colour_contiguous_box_ = nullptr;
     std::string transform_interp_ = "bilinear";  // how pixels are resampled when the selection is transformed
     std::optional<core::Json> clipboard_;        // copied items (paste's "items"), where they were, its outline
     std::optional<core::Json> clipboard_area_;

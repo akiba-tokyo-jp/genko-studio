@@ -396,6 +396,24 @@ void clear_custom() {
     g_custom.clear();
 }
 
+void define_brush(std::string_view key, const Json& data) {
+    std::unique_lock lock(g_custom_mutex);
+    if (core::find_builtin(key) != nullptr) throw core::PyValueError("a built-in brush cannot be replaced: " + std::string(key));
+    Brush made = core::brush_from_dict(key, data, std::nullopt, g_custom);
+    for (Brush& existing : g_custom) {
+        if (existing.key == key) {
+            existing = std::move(made);
+            return;
+        }
+    }
+    g_custom.push_back(std::move(made));
+}
+
+void forget_brush(std::string_view key) {
+    std::unique_lock lock(g_custom_mutex);
+    std::erase_if(g_custom, [key](const Brush& b) { return b.key == key; });
+}
+
 std::optional<Image> tip_ink(const std::string& base64_png) { return decode_tip(base64_png); }
 
 std::filesystem::path library_path(const std::filesystem::path& config_dir) { return config_dir / "brushes.json"; }

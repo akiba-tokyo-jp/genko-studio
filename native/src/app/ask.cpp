@@ -67,9 +67,14 @@ QString existing_dir(QWidget* parent, const QString& caption, const QString& sta
     return QFileDialog::getExistingDirectory(parent, caption, start);
 }
 
-QString save_path(QWidget* parent, const QString& caption, const QString& suggested) {
+QString save_path(QWidget* parent, const QString& caption, const QString& suggested, const QString& filter) {
     if (const auto r = current(); r && r->save_path) return r->save_path(caption, suggested);
-    return QFileDialog::getSaveFileName(parent, caption, suggested);
+    return QFileDialog::getSaveFileName(parent, caption, suggested, filter);
+}
+
+QString open_path(QWidget* parent, const QString& caption, const QString& filter) {
+    if (const auto r = current(); r && r->open_path) return r->open_path(caption, filter);
+    return QFileDialog::getOpenFileName(parent, caption, QString(), filter);
 }
 
 int exec(QDialog* dialog) {

@@ -31,6 +31,7 @@
 #include <cmath>
 
 #include "app/ask.hpp"
+#include "app/brush_panel.hpp"
 #include "app/config.hpp"
 #include "app/layer_panel.hpp"
 #include "app/dialogs.hpp"
@@ -43,12 +44,15 @@
 #include "app/perf.hpp"
 #include "app/templates.hpp"
 #include "app/theme.hpp"
+#include "app/tool_settings.hpp"
 #include "app/wording.hpp"
+#include "core/brushes.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/exposure.hpp"
 #include "core/pynum.hpp"
+#include "render/brushes.hpp"
 #include "render/image.hpp"
 #include "render/page.hpp"
 
@@ -401,12 +405,14 @@ void MainWindow::build_toolbars() {
 }
 
 void MainWindow::build_docks() {
+    build_tool_settings();  // (ツールの設定, on the left: main_window_brushes.cpp)
     navigator_ = new Navigator(canvas_);
     navigator_dock_ = new QDockWidget(QStringLiteral("全体図"), this);
     navigator_dock_->setObjectName(QStringLiteral("全体図"));
     navigator_dock_->setWidget(navigator_);
     navigator_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
     addDockWidget(Qt::LeftDockWidgetArea, navigator_dock_);
+    splitDockWidget(tool_settings_dock_, navigator_dock_, Qt::Vertical);
     view_menu_->addAction(navigator_dock_->toggleViewAction());
     pages_dock_ = new QDockWidget(QStringLiteral("ページ"), this);
     pages_dock_->setObjectName(QStringLiteral("ページ"));
@@ -442,7 +448,7 @@ void MainWindow::build_docks() {
         if(kind==QLatin1String("brush")) {
             const auto key="my_"+QCryptographicHash::hash(material_id.toUtf8(),QCryptographicHash::Sha1).toHex().left(10).toStdString();
             if(!book().brush_custom.contains(key))return;
-            pen_=PenSettings::for_kind(key);
+            brush_->reload_kinds(key);  // (the brush panel chooses it: the pen follows)
             choose_tool(QStringLiteral("pen")); // Updates the live pen after the successful registration.
             flash(QStringLiteral("選んだブラシで描けます"),3500);
         }
@@ -459,10 +465,12 @@ void MainWindow::build_docks() {
 void MainWindow::choose_tool(const QString& tool) {
     if (is_marquee_tool(tool)) {  // (範囲選択: the marquee tool, in one of its ways)
         choose_marquee(tool);
+        if (marquee_mode_ != nullptr) marquee_mode_->setCurrentIndex(std::max(0, marquee_mode_->findData(tool)));
     } else {
         canvas_->set_tool(tool);
     }
     if (const auto it = tool_actions_.find(tool); it != tool_actions_.end()) it->second->setChecked(true);
+    if (tool_settings_ != nullptr) tool_settings_->show_tool(canvas_->tool());
     pen_changed();
 }
 
@@ -514,6 +522,8 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
         Json points = Json::array();
         for (const core::PenPoint& p : stroke.points) points.push_back(Json::array({p.x, p.y}));
         Json op = Json::object({{"op", "erase"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"points", points}, {"width_mm", eraser_mm_}});
+        const Json eraser = eraser_fields(*layer);
+        for (const auto& [key, value] : eraser.items()) op[key] = value;
         if (rulers) op["snap_ruler"] = true;
         canvas_->stroke_dropped();
         apply_ops(Json::array({op}));
@@ -530,8 +540,17 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
         for (const double v : stroke.rotation) turns.push_back(core::py_round(v, 1));  // (a pen that reports its barrel turn)
         op["rotation"] = turns;
     }
-    if (rulers) op["snap_ruler"] = true;
-    if (apply_ops(Json::array({op}), {stroke.id})) {
+    Json ops = Json::array({op});
+    const std::string kind = op.value("kind", std::string());
+    if (kind.starts_with("my_") && !book().brush_custom.contains(kind)) {
+        // the book keeps the brush's settings, so the line looks the same on any computer
+        Json define{{"op", "define_brush"}, {"key", kind}};
+        const Json settings_of = core::brush_to_dict(render::brushes::brush(kind));
+        for (const auto& [key, value] : settings_of.items()) define[key] = value;
+        ops.insert(ops.begin(), define);
+    }
+    if (rulers) ops.back()["snap_ruler"] = true;
+    if (apply_ops(ops, {stroke.id})) {
         canvas_->stroke_applied(stroke.id);
     } else {
         canvas_->stroke_dropped();
@@ -1033,11 +1052,7 @@ void MainWindow::point_width(double factor) {
 
 void MainWindow::pick_colour() {
     const QColor now(static_cast<int>(pen_.rgb[0]), static_cast<int>(pen_.rgb[1]), static_cast<int>(pen_.rgb[2]));
-    if (const auto colour = ask::colour(this, now, QStringLiteral("色"))) {
-        pen_.rgb = {colour->red(), colour->green(), colour->blue()};
-        pen_.save();
-        pen_changed();
-    }
+    if (const auto colour = ask::colour(this, now, QStringLiteral("色"))) brush_->set_colour({colour->red(), colour->green(), colour->blue()});
 }
 
 void MainWindow::ask_zoom() {

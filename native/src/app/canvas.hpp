@@ -81,6 +81,8 @@ public:
 
     // --- tools ----------------------------------------------------------------------------------------------
     const QString& tool() const { return tool_; }
+    // A key held switched the tool for a moment (letting it go brings back the one before).
+    bool tool_held() const { return held_tool_.has_value(); }
     void set_tool(const QString& tool);
     // The pen in hand (add_stroke fields) and the layer it draws on (none: no live line, a plain guide line).
     void set_live_pen(const core::Json& fields, std::optional<std::string> layer_id);
