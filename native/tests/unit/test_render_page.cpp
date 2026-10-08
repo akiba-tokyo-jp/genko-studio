@@ -262,8 +262,9 @@ private slots:
     void not_yet_ported_data() {
         QTest::addColumn<QString>("what");
         QTest::addColumn<QString>("mode");
-        // (tones, effect lines and screens are drawn since M3-B, the 3D guides since M3-C)
-        for (const char* what : {"balloons", "covers", "anim", "placed"}) {
+        // (tones, effect lines and screens are drawn since M3-B, the 3D guides since M3-C, a page's animation since
+        // M3-③: anim_is_drawn)
+        for (const char* what : {"balloons", "covers", "placed"}) {
             const char* mode = std::string(what) == "covers" ? "proof" : "print";
             QTest::newRow(what) << QString(what) << QString(mode);
         }
@@ -301,6 +302,18 @@ private slots:
         // the other page has none of it
         options.skip_unported = false;
         QVERIFY(unported_element(*doc.pages[1], doc, options).empty());
+    }
+
+    void anim_is_drawn() {
+        Document doc = book();
+        doc.edit_page(0).extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
+        for (const char* mode : {"print", "proof", "name"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            QVERIFY(unported_element(*doc.pages[0], doc, options).empty());
+            const render::RenderResult r = render::render_page(*doc.pages[0], 72, options, &doc);
+            QVERIFY(r.omitted.empty());
+        }
     }
 
     void unported_only_where_drawn() {

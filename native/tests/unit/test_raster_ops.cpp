@@ -1011,14 +1011,14 @@ private slots:
             Json::object({{"a", Json::object({{"saved", "b"}})}, {"b", Json::object({{"saved", "a"}})}});
         const std::string error = error_of(looped, R"([{"op": "fill_area", "page": 1, "area": {"saved": "a"}}])");
         QVERIFY2(error.find("the area is nested too deeply (saved areas in a loop?)") != std::string::npos, error.c_str());
-        // a filter plugin someone installed runs in the plugin runner (COMP-04), not here; one that is not there is
-        // refused as Python refuses it
+        // a filter plugin someone installed runs in the plugin runner (COMP-04) only once it is chosen in the plugin
+        // settings; one that is not there is refused as Python refuses it
         QVERIFY(error_of(doc, R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "plugin:sepia"}])")
                     .find("no plugin sepia") != std::string::npos);
         genko::test::write_bytes(tmp_.path() + "/config/plugins/sepia.py", "def run(image, params):\n    return image\n");
         const std::string plugin = error_of(doc, R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "plugin:sepia"}])");
-        QVERIFY2(plugin.starts_with("not_yet_ported: "), plugin.c_str());
-        QVERIFY2(plugin.find("a filter plugin (sepia)") != std::string::npos, plugin.c_str());
+        QVERIFY2(!plugin.starts_with("not_yet_ported: "), plugin.c_str());
+        QVERIFY2(plugin.find("plugin sepia is not chosen to run") != std::string::npos, plugin.c_str());
     }
 
     // flood_fill on a picture of three white pixels writes the colour asked for, as Pillow's fill does (all three; none
