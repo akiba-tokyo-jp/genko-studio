@@ -30,6 +30,7 @@
 #include <functional>
 #include <iterator>
 
+#include "app/brush_panel.hpp"
 #include "app/canvas.hpp"
 #include "app/inject.hpp"
 #include "app/layer_panel.hpp"
@@ -37,6 +38,7 @@
 #include "app/material_panel.hpp"
 #include "app/material_tabs.hpp"
 #include "app/scanner.hpp"
+#include "app/subview.hpp"
 #include "app/tiles.hpp"
 #include "app/tool_settings.hpp"
 #include "core/pynum.hpp"
@@ -606,6 +608,48 @@ private slots:
             return app::scanner::Ran{0, {}, {}};
         }, 1000, std::optional<QString>(QStringLiteral("sane")));
         QCOMPARE(bytes, std::string("PNGDATA"));
+    }
+
+    // サブビュー: reference pictures kept for every book; a click takes the colour under it for the pen
+    void referencePicturesBesideThePage() {
+        Studio s;
+        auto* view = s.window->subview();
+        QVERIFY(view != nullptr);
+        auto* dock = s.window->findChild<QDockWidget*>(QStringLiteral("サブビュー"));
+        QVERIFY(dock != nullptr);
+        QCOMPARE(view->choice->count(), 0);
+        const QString file = s.tmp.path() + QStringLiteral("/資料.png");
+        render::Image picture = render::Image::create("RGB", render::Size{40, 20}, render::Ink{200, 10, 10});
+        picture.paste(render::Ink{10, 200, 10}, render::Box{20, 0, 40, 20});
+        render::save_png(picture, gui_test::path_of(file));
+        s.answers.responder->open_path = [&](const QString&, const QString&) { return file; };
+        view->add_dialog();
+        QCOMPARE(view->choice->count(), 1);
+        QCOMPARE(view->choice->currentText(), QStringLiteral("資料.png"));
+        QCOMPARE(app::kept_pictures(), QStringList{file});
+        QVERIFY(!view->picture->image().isNull());
+        // a file that is not a picture: said so, nothing kept
+        const QString junk = s.tmp.path() + QStringLiteral("/junk.png");
+        { std::ofstream(gui_test::path_of(junk), std::ios::binary) << "not a picture"; }
+        s.answers.responder->open_path = [&](const QString&, const QString&) { return junk; };
+        view->add_dialog();
+        QCOMPARE(s.window->last_notice(), QStringLiteral("その画像は開けませんでした"));
+        QCOMPARE(app::kept_pictures(), QStringList{file});
+        // the colour under a click (the picture fitted to the panel)
+        view->picture->resize(200, 100);
+        QCOMPARE(view->picture->colour_at(QPointF(50, 50)), (std::optional<std::array<int, 3>>{{200, 10, 10}}));
+        QCOMPARE(view->picture->colour_at(QPointF(150, 50)), (std::optional<std::array<int, 3>>{{10, 200, 10}}));
+        view->picture->resize(200, 200);  // (letterboxed: above the picture is nothing)
+        QVERIFY(!view->picture->colour_at(QPointF(100, 10)));
+        QTest::mouseClick(view->picture, Qt::LeftButton, Qt::NoModifier, QPoint(150, 100));
+        QCOMPARE(s.window->brush_panel()->rgb(), (std::array<int, 3>{10, 200, 10}));
+        QVERIFY(s.window->last_notice().startsWith(QStringLiteral("資料の色 (10, 200, 10)")));
+        // kept for the next window; taken away
+        app::SubView again(s.window.get());
+        QCOMPARE(again.choice->count(), 1);
+        view->remove_current();
+        QCOMPARE(view->choice->count(), 0);
+        QVERIFY(app::kept_pictures().isEmpty());
     }
 
     void layerAndViewCommands() {

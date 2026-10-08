@@ -40,6 +40,7 @@
 #include "app/icons.hpp"
 #include "app/material_panel.hpp"
 #include "app/material_tabs.hpp"
+#include "app/subview.hpp"
 #include "app/main_window.hpp"
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
@@ -479,6 +480,16 @@ void MainWindow::build_docks() {
     splitDockWidget(tool_settings_dock_, navigator_dock_, Qt::Vertical);
     view_menu_->addAction(navigator_dock_->toggleViewAction());
     build_anim_dock();  // (タイムライン, a tab beside the navigator: main_window_anim.cpp)
+    // サブビュー: the reference pictures, a tab beside the navigator too
+    subview_ = new SubView(this);
+    auto* sub_dock = new QDockWidget(QStringLiteral("サブビュー"), this);
+    sub_dock->setObjectName(QStringLiteral("サブビュー"));
+    sub_dock->setWidget(subview_);
+    sub_dock->setFeatures(navigator_dock_->features());
+    addDockWidget(Qt::LeftDockWidgetArea, sub_dock);
+    tabifyDockWidget(navigator_dock_, sub_dock);
+    navigator_dock_->raise();
+    view_menu_->addAction(sub_dock->toggleViewAction());
     pages_dock_ = new QDockWidget(QStringLiteral("ページ"), this);
     pages_dock_->setObjectName(QStringLiteral("ページ"));
     pages_dock_->setWidget(pages_);

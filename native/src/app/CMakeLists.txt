@@ -51,6 +51,7 @@ genko_library(genko_app
     guide_panel.cpp
     material_tabs.cpp
     scanner.cpp
+    subview.cpp
     timeline.cpp
     plugins_dialog.cpp
     brush_panel.cpp

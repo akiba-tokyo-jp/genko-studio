@@ -42,6 +42,7 @@ namespace genko::app {
 class BrushPanel;
 class ColourPanel;
 class GuidePanel;
+class SubView;
 class MaterialPanel;
 class LayerPanel;
 class TimelinePanel;
@@ -136,6 +137,8 @@ public:
     // list (at once, in the middle of the page); the selection's lines and fills as a part ({strokes, patches}); the
     // next pen line as an effect's path or clear middle (key: path | inner_path).
     MaterialPanel* materials() const { return materials_; }
+    // サブビュー: the reference pictures beside the page.
+    SubView* subview() const { return subview_; }
     void use_material(const core::Json& item);
     void material_activated(const QString& material_id, const QString& kind);
     std::optional<core::Json> copy_selection_items();
@@ -382,6 +385,7 @@ private:
     ColourPanel* colours_ = nullptr;
     GuidePanel* guides_ = nullptr;
     MaterialPanel* materials_ = nullptr;
+    SubView* subview_ = nullptr;
     QDockWidget* materials_dock_ = nullptr;
     std::optional<core::Json> pending_material_;
     std::string effect_kind_ = "focus";
