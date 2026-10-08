@@ -268,6 +268,7 @@ private:
     std::vector<std::shared_ptr<Change>> undone_;  // the ones undone, next to redo last
     std::deque<Action> queue_;                     // what the disk still has to get, in order
     std::int64_t disk_undo_ = 0;  // saved changes before this session that the journal can undo
+    bool trimmed_ = false;        // trim_history let changes of this session go to the journal
     std::int64_t disk_redo_ = 0;
 
     bool job_running_ = false;

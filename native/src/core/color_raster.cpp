@@ -117,6 +117,66 @@ std::string encode_color_raster(const Json& op) {
     }
     return out;
 }
+std::vector<std::string> color_tiles(std::string_view raster) {
+    const ColorRasterView view(raster);
+    const unsigned sample = static_cast<unsigned char>(raster[5]);
+    const std::uint32_t w = view.width(), h = view.height();
+    std::vector<std::string> out;
+    for (std::uint32_t ty = 0; ty < h; ty += kColorTile) {
+        for (std::uint32_t tx = 0; tx < w; tx += kColorTile) {
+            const std::uint32_t tw = std::min(kColorTile, w - tx), th = std::min(kColorTile, h - ty);
+            std::string tile(raster.substr(0, 8));
+            tile.reserve(16 + std::size_t(tw) * th * 4 * sample);
+            append_le(tile, tw, 4); append_le(tile, th, 4);
+            for (std::uint32_t y = 0; y < th; ++y)
+                tile.append(raster.substr(16 + (std::size_t(ty + y) * w + tx) * 4 * sample, std::size_t(tw) * 4 * sample));
+            out.push_back(std::move(tile));
+        }
+    }
+    return out;
+}
+std::string join_color_tiles(std::uint32_t width, std::uint32_t height, std::string_view precision,
+                             const std::function<std::string(std::size_t)>& tile) {
+    if (precision != "u16" && precision != "f32") invalid();
+    const unsigned sample = precision == "u16" ? 2 : 4;
+    const auto n = pixels(width, height);
+    std::string out("GKCR\1\2\0\0", 8);
+    out[5] = static_cast<char>(sample);
+    append_le(out, width, 4); append_le(out, height, 4);
+    out.resize(16 + n * 4 * sample);
+    std::size_t i = 0;
+    for (std::uint32_t ty = 0; ty < height; ty += kColorTile) {
+        for (std::uint32_t tx = 0; tx < width; tx += kColorTile, ++i) {
+            const std::string bytes = tile(i);
+            const ColorRasterView view(bytes);  // (a tile is a raster: checked as one, f32 samples too)
+            const std::uint32_t tw = std::min(kColorTile, width - tx), th = std::min(kColorTile, height - ty);
+            if (view.width() != tw || view.height() != th || static_cast<unsigned char>(bytes[5]) != sample) invalid();
+            for (std::uint32_t y = 0; y < th; ++y)
+                std::copy_n(bytes.data() + 16 + std::size_t(y) * tw * 4 * sample, std::size_t(tw) * 4 * sample,
+                            out.data() + 16 + (std::size_t(ty + y) * width + tx) * 4 * sample);
+        }
+    }
+    return out;
+}
+Json tiled_metadata(const ColorRasterView& raster, const std::vector<std::string>& refs) {
+    Json out = raster.metadata("");
+    out.erase("asset");
+    out["tile"] = kColorTile;
+    out["tiles"] = refs;
+    return out;
+}
+void check_tiled_metadata(const ColorRasterView& raster, const Json& m) {
+    if (!m.is_object() || !m.contains("tiles") || !m["tiles"].is_array()) invalid();
+    std::vector<std::string> refs;
+    for (const Json& ref : m["tiles"]) {
+        if (!ref.is_string()) invalid();
+        refs.push_back(ref.get<std::string>());
+    }
+    const Json expected = tiled_metadata(raster, refs);
+    if (m.size() != expected.size()) invalid();
+    for (const auto& [key, value] : expected.items())
+        if (!m.contains(key) || m[key] != value) invalid();
+}
 std::string encode_color_pixels(std::uint32_t width, std::uint32_t height, std::string_view precision,
                                const std::function<std::array<double, 4>(std::size_t)>& pixel) {
     if (precision != "u16" && precision != "f32") invalid();

@@ -645,6 +645,7 @@ void Session::trim_history() {
         held -= oldest->held;
         done_.erase(done_.begin());
         ++disk_undo_;  // (in the journal, under the changes still in memory)
+        trimmed_ = true;
     }
 }
 
@@ -659,8 +660,13 @@ void Session::undo() {
             return std::find_if(queue_.rbegin(), queue_.rend(),
                                 [&](const Action& a) { return a.kind == kind && a.change == change && !a.in_flight; });
         };
-        if (auto it = queued(Action::Kind::Edit); it != queue_.rend()) {
+        if (auto it = queued(Action::Kind::Edit); it != queue_.rend() && !trimmed_) {
             queue_.erase(std::next(it).base());  // (it never reached the disk: undone in memory only)
+        } else if (it != queue_.rend()) {
+            // Once changes of this session are undone through the journal (trim_history), an Undo reaching past
+            // them reads the book again and its redo comes from the journal: a change undone before it was saved
+            // goes to the journal too (made and undone), so that redo still finds it.
+            queue_.push_back(Action{Action::Kind::Undo, change, core::new_txn_id(), ++next_seq_, false});
         } else if (auto redo = queued(Action::Kind::Redo); redo != queue_.rend()) {
             queue_.erase(std::next(redo).base());
         } else {
@@ -1026,7 +1032,7 @@ void Session::simplify_queue() {
                               (a.kind == Action::Kind::Undo && b.kind == Action::Kind::Redo) ||
                               (a.kind == Action::Kind::Redo && b.kind == Action::Kind::Undo);
             if (!pair) continue;
-            if (a.kind == Action::Kind::Edit && a.change->on_disk) continue;
+            if (a.kind == Action::Kind::Edit && (a.change->on_disk || trimmed_)) continue;  // (trimmed_: see undo())
             queue_.erase(queue_.begin() + static_cast<std::ptrdiff_t>(i), queue_.begin() + static_cast<std::ptrdiff_t>(i) + 2);
             again = true;
             break;

@@ -352,6 +352,55 @@ private slots:
         }
     }
 
+    // After the history went to the journal, a change undone before it was saved still comes back with Redo, after
+    // an Undo that reached through the journal (and read the book again).
+    void aChangeUndoneBeforeItWasSavedIsRedoneAfterTheJournal() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        options.history_bytes = 1;
+        auto session = Session::open(book, options);
+        Json pixels = Json::array();
+        for (int i = 0; i < 16; ++i) for (const int v : {1000 * i, 2000, 3000 + i, 65535}) pixels.push_back(v);
+        session->apply(Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 4}, {"height", 4}, {"precision", "u16"}, {"pixels", pixels}}}));
+        const std::string id = session->document().page(0).layers.back().id;
+        const auto precise = [&]() -> std::string {
+            for (const auto& layer : session->document().page(0).layers) if (layer.color_raster) return *layer.color_raster;
+            return {};
+        };
+        const auto cut = [&](double x) {
+            const Json part{{"poly", Json::array({Json::array({x, 0.0}), Json::array({x + 70, 0.0}), Json::array({x + 70, 297.0}), Json::array({x, 297.0})})}};
+            session->apply(Json::array({Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", id}, {"area", part}}}));
+        };
+        cut(0);
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(session->changes_in_memory(), std::size_t{1});  // (the raster put: through the journal now)
+        const std::string first = precise();
+        cut(70);
+        const std::string second = precise();
+        session->undo();  // not saved yet
+        QCOMPARE(precise(), first);
+        session->undo();  // the first cut, in memory
+        session->undo();  // the raster put: through the journal
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(precise(), std::string());
+        for (const std::string& expected : {std::string(), first, second}) {
+            if (expected.empty()) {  // (the raster again)
+                session->redo();
+                QVERIFY(session->wait_saved(10000ms));
+                QVERIFY(!precise().empty());
+                continue;
+            }
+            QVERIFY2(session->can_redo(), "a change undone before it was saved must still be redone");
+            session->redo();
+            QVERIFY(session->wait_saved(10000ms));
+            QCOMPARE(precise(), expected);
+        }
+    }
+
     void undoWhileTheChangeIsBeingSaved() {
         QTemporaryDir tmp;
         const fs::path book = path_of(tmp.filePath("book.genko"));

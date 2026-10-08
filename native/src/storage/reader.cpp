@@ -585,6 +585,44 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
         const auto here = at_key(at, "color_raster");
         std::string ref;
         try {
+            if (m->is_object() && m->contains("tiles")) {  // (saved in tiles: each its own asset)
+                if (!(*m)["tiles"].is_array()) throw core::Error("format", "color raster tiles must be a list of assets");
+                for (const Json& tile : (*m)["tiles"]) {
+                    if (!tile.is_string()) throw core::Error("format", "color raster tiles must be a list of assets");
+                    ref += tile.get<std::string>() + ";";
+                }
+                const auto cached = color_blobs_.find(ref);
+                if (cached != color_blobs_.end()) {
+                    core::check_tiled_metadata(core::ColorRasterView(*cached->second), *m);
+                    layer.color_raster = cached->second;
+                } else {
+                    const auto dimension = [&](const char* key) {
+                        if (!(*m).contains(key) || !(*m)[key].is_number_integer() || (*m)[key].get<std::int64_t>() < 1)
+                            throw core::Error("format", "invalid color raster size");
+                        return static_cast<std::uint64_t>((*m)[key].get<std::int64_t>());
+                    };
+                    const auto w = dimension("width"), h = dimension("height");
+                    if (!w || !h || w > core::kColorRasterMaxPixels || h > core::kColorRasterMaxPixels / w ||
+                        !(*m).contains("precision") || !(*m)["precision"].is_string())
+                        throw core::Error("format", "invalid color raster size");
+                    const auto across = (w + core::kColorTile - 1) / core::kColorTile, down = (h + core::kColorTile - 1) / core::kColorTile;
+                    if ((*m)["tiles"].size() != across * down) throw core::Error("format", "color raster tiles do not cover it");
+                    const std::string precision = (*m)["precision"].get<std::string>();
+                    const std::size_t sample = precision == "f32" ? 4 : 2;
+                    if (16 + w * h * 4 * sample > core::kColorRasterBookBytes - color_bytes_)
+                        throw core::Error("format", "invalid or oversized high-precision color raster");
+                    auto bytes = core::join_color_tiles(static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), precision, [&](std::size_t i) {
+                        const std::string tile_ref = (*m)["tiles"][i].get<std::string>();
+                        auto tile = store_.get_bytes(tile_ref, core::kColorRasterSuffix, 16 + std::size_t(core::kColorTile) * core::kColorTile * 16);
+                        if (!tile || AssetStore::ref(*tile) != tile_ref) throw core::Error("format", "color raster hash mismatch");
+                        return std::move(*tile);
+                    });
+                    core::check_tiled_metadata(core::ColorRasterView(bytes), *m);
+                    layer.color_raster = std::make_shared<const std::string>(std::move(bytes));
+                    color_bytes_ += layer.color_raster->size();
+                    color_blobs_.emplace(ref, layer.color_raster);
+                }
+            } else {
             if (!m->is_object() || !m->contains("asset") || !(*m)["asset"].is_string())
                 throw core::Error("format", "color raster metadata must name an asset");
             ref = (*m)["asset"].get<std::string>();
@@ -602,6 +640,7 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
                 layer.color_raster = std::make_shared<const std::string>(std::move(*bytes));
                 color_bytes_ += layer.color_raster->size();
                 color_blobs_.emplace(ref, layer.color_raster);
+            }
             }
         } catch (const core::Error& error) {
             issue("broken_asset", here, ref, error.what());
@@ -993,7 +1032,10 @@ Json LoadReport::to_json() const {
 
 bool is_known_top_key(std::string_view key) { return in(kTopKeys, key); }
 bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }
-bool is_known_feature(std::string_view feature) { return feature == core::kColorRasterFeature || feature == core::kExposureFeature || feature == core::kColorStrokeFeature; }
+bool is_known_feature(std::string_view feature) {
+    return feature == core::kColorRasterFeature || feature == core::kColorTilesFeature || feature == core::kExposureFeature ||
+           feature == core::kColorStrokeFeature;
+}
 
 int project_version(const Json& payload) {
     std::int64_t version = 1;

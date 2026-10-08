@@ -447,12 +447,16 @@ private slots:
         const auto payload = storage::read_disk_state(dir).payload;
         const auto& features = payload.at("features");
         QVERIFY(std::find(features.begin(), features.end(), "native.color_raster_v1") != features.end());
+        QVERIFY(std::find(features.begin(), features.end(), "native.color_raster_tiles_v1") != features.end());
         const auto& layers = payload.at("pages").at(0).at("layers");
         const Json* encoded = nullptr;
         for (const auto& layer : layers) if (layer.contains("color_raster")) encoded = &layer.at("color_raster");
         QVERIFY(encoded != nullptr);
         QCOMPARE(encoded->at("precision").get<std::string>(), std::string("u16"));
-        const auto ref = encoded->at("asset").get<std::string>();
+        QVERIFY(!encoded->contains("asset"));  // (saved in tiles: this one fits in one)
+        QCOMPARE(encoded->at("tile").get<int>(), 256);
+        QCOMPARE(encoded->at("tiles").size(), std::size_t(1));
+        const auto ref = encoded->at("tiles").at(0).get<std::string>();
         storage::AssetStore assets(dir);
         const auto raw = *assets.get_bytes(ref, ".colorrgba");
         QCOMPARE(raw.size(), std::size_t(32)); // 16-byte header + eight little-endian u16 samples

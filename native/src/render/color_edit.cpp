@@ -50,10 +50,14 @@ Grid grid_of(const core::Page& page, const core::ColorRasterView& raster) {
             return g;
         }
     }
-    g.page = Size{mm_to_px(w_mm, g.dpi), mm_to_px(h_mm, g.dpi)};
-    limits::check_picture(g.page.width, g.page.height, "the page");
+    // not a whole dpi: drawn at the raster's resolution or finer (the working dpi at least), then boxed down onto it
     g.sx = g.width / w_mm;
     g.sy = g.height / h_mm;
+    const double finest = std::ceil(std::max(g.sx, g.sy) * 25.4);
+    limits::check_count(finest, limits::kResolution, "the raster's resolution");
+    g.dpi = std::max(raster::kWorkingDpi, static_cast<int>(finest));
+    g.page = Size{mm_to_px(w_mm, g.dpi), mm_to_px(h_mm, g.dpi)};
+    limits::check_picture(g.page.width, g.page.height, "the page");
     return g;
 }
 
@@ -176,17 +180,23 @@ public:
         };
         const auto wx = weights(tx), wy = weights(ty);
         Rgba sum{};
+        std::array<double, 3> lo{INFINITY, INFINITY, INFINITY}, hi{-INFINITY, -INFINITY, -INFINITY};
         for (int j = 0; j < 4; ++j) {
             if (wy[j] == 0) continue;
             for (int k = 0; k < 4; ++k) {
                 if (wx[k] == 0) continue;
                 const Rgba p = premultiplied(ix + k - 1, iy + j - 1);
                 for (unsigned c = 0; c < 4; ++c) sum[c] += p[c] * wx[k] * wy[j];
+                if (p[3] > 0)
+                    for (unsigned c = 0; c < 3; ++c) { lo[c] = std::min(lo[c], p[c] / p[3]); hi[c] = std::max(hi[c], p[c] / p[3]); }
             }
         }
         if (!(sum[3] > 1e-12)) return;
-        const double alpha = std::min(1.0, sum[3]);
-        lay(out, i, Rgba{sum[0] / sum[3], sum[1] / sum[3], sum[2] / sum[3], alpha});
+        // (a cubic's overshoot, or a colour divided by almost no alpha, stays within the colours it was made of)
+        Rgba mixed{};
+        for (unsigned c = 0; c < 3; ++c) mixed[c] = std::clamp(sum[c] / sum[3], lo[c], hi[c]);
+        mixed[3] = std::min(1.0, sum[3]);
+        lay(out, i, mixed);
     }
 
 private:
@@ -320,31 +330,45 @@ std::string warp_area(const core::Page& page, const core::Layer& layer, const co
     }
     const Box reach = covering(all, 3, g);
     if (reach.width() <= 0 || reach.height() <= 0) return std::move(out).take();
-    std::vector<bool> done(std::size_t(reach.width()) * reach.height(), false);
-    const auto triangle = [&](const std::array<P, 3>& s, const std::array<P, 3>& d) {
+    std::vector<std::array<P, 3>> sources, places;
+    for (int j = 0; j < cells; ++j) {
+        for (int i = 0; i < cells; ++i) {
+            sources.push_back({from[j][i], from[j][i + 1], from[j + 1][i + 1]});
+            places.push_back({to[j][i], to[j][i + 1], to[j + 1][i + 1]});
+            sources.push_back({from[j][i], from[j + 1][i + 1], from[j + 1][i]});
+            places.push_back({to[j][i], to[j + 1][i + 1], to[j + 1][i]});
+        }
+    }
+    // where each triangle lands (barycentric weights of a pixel's centre, all of them at least 0), or nothing
+    const auto weights = [](const std::array<P, 3>& d, double x, double y) -> std::optional<std::array<double, 3>> {
         const double ax = d[1].first - d[0].first, ay = d[1].second - d[0].second;
         const double bx = d[2].first - d[0].first, by = d[2].second - d[0].second;
         const double det = ax * by - ay * bx;
-        if (std::abs(det) < 1e-12) return;
-        const Box part = intersection(covering({d[0], d[1], d[2]}, 1, g), reach);
-        for (int y = part.y0; y < part.y1; ++y) {
-            for (int x = part.x0; x < part.x1; ++x) {
-                const std::size_t at = std::size_t(y - reach.y0) * reach.width() + (x - reach.x0);
-                if (done[at]) continue;
-                const double px = x + .5 - d[0].first, py = y + .5 - d[0].second;
-                const double l1 = (px * by - py * bx) / det, l2 = (ax * py - ay * px) / det, l0 = 1 - l1 - l2;
-                if (l0 < -1e-9 || l1 < -1e-9 || l2 < -1e-9) continue;
-                done[at] = true;
-                const double u = l0 * s[0].first + l1 * s[1].first + l2 * s[2].first;
-                const double v = l0 * s[0].second + l1 * s[1].second + l2 * s[2].second;
-                lifted.lay_at(out, std::size_t(y) * g.width + x, u, v, resample);
-            }
-        }
+        if (!(std::abs(det) >= 1e-12)) return std::nullopt;
+        const double px = x - d[0].first, py = y - d[0].second;
+        const double l1 = (px * by - py * bx) / det, l2 = (ax * py - ay * px) / det, l0 = 1 - l1 - l2;
+        if (!(l0 >= -1e-9 && l1 >= -1e-9 && l2 >= -1e-9)) return std::nullopt;
+        return std::array<double, 3>{l0, l1, l2};
     };
-    for (int j = 0; j < cells; ++j) {
-        for (int i = 0; i < cells; ++i) {
-            triangle({from[j][i], from[j][i + 1], from[j + 1][i + 1]}, {to[j][i], to[j][i + 1], to[j + 1][i + 1]});
-            triangle({from[j][i], from[j + 1][i + 1], from[j + 1][i]}, {to[j][i], to[j + 1][i + 1], to[j + 1][i]});
+    // the last triangle over a pixel is the one it shows (warp.warp_image pastes its pieces in order)
+    constexpr std::uint16_t kNone = 0xffff;
+    std::vector<std::uint16_t> shown(std::size_t(reach.width()) * reach.height(), kNone);
+    for (std::size_t t = 0; t < places.size(); ++t) {
+        const Box part = intersection(covering({places[t][0], places[t][1], places[t][2]}, 1, g), reach);
+        for (int y = part.y0; y < part.y1; ++y)
+            for (int x = part.x0; x < part.x1; ++x)
+                if (weights(places[t], x + .5, y + .5)) shown[std::size_t(y - reach.y0) * reach.width() + (x - reach.x0)] = static_cast<std::uint16_t>(t);
+    }
+    for (int y = reach.y0; y < reach.y1; ++y) {
+        for (int x = reach.x0; x < reach.x1; ++x) {
+            const std::uint16_t t = shown[std::size_t(y - reach.y0) * reach.width() + (x - reach.x0)];
+            if (t == kNone) continue;
+            const auto l = weights(places[t], x + .5, y + .5);
+            if (!l) continue;
+            const auto& s = sources[t];
+            const double u = (*l)[0] * s[0].first + (*l)[1] * s[1].first + (*l)[2] * s[2].first;
+            const double v = (*l)[0] * s[0].second + (*l)[1] * s[1].second + (*l)[2] * s[2].second;
+            lifted.lay_at(out, std::size_t(y) * g.width + x, u, v, resample);
         }
     }
     return std::move(out).take();
@@ -354,29 +378,68 @@ std::string paste(const core::Page& page, const core::Layer& layer, const core::
     const core::ColorRasterView source(*layer.color_raster);
     const Grid g = grid_of(page, source);
     core::ColorRasterEdit out(*layer.color_raster);
-    std::unique_ptr<ColorCanvas> drawn;
-    Box at{0, 0, static_cast<int>(g.width), static_cast<int>(g.height)};
     if (core::has_color_strokes(pasted)) {
-        // precise lines keep their colour: drawn in linear light at the raster's own resolution
-        if (!g.exact() || !pasted.patches.empty())
-            core::not_yet_ported("pasting precise-colour lines onto a stretched high-precision raster or with pictures is not supported yet");
-        drawn = std::make_unique<ColorCanvas>(Image::create("RGBA", g.page, Ink{0, 0, 0, 0}));
-        blend_color_strokes(*drawn, page, pasted, g.dpi, Box{0, 0, g.page.width, g.page.height}, episode);
-    } else {
-        auto picture = drawable_layer_image(page, pasted, g.dpi, episode);
-        if (!picture) return std::move(out).take();
-        if (!g.exact()) picture = picture->resize(Size{static_cast<int>(g.width), static_cast<int>(g.height)}, Resample::Bilinear);
-        const auto box = picture->getbbox();
-        if (!box) return std::move(out).take();
-        at = *box;
-        drawn = std::make_unique<ColorCanvas>(Image::create("RGBA", Size{at.width(), at.height()}, Ink{0, 0, 0, 0}));
-        drawn->blend(picture->crop(at), 1, false);
-    }
-    for (int y = at.y0; y < at.y1; ++y) {
-        for (int x = at.x0; x < at.x1; ++x) {
-            lay(out, std::size_t(y) * g.width + x, drawn->linear_pixel(std::size_t(y - at.y0) * at.width() + (x - at.x0)), layer.lock_alpha);
+        // precise lines keep their colour: drawn in linear light at the grid's dpi, over the box they can reach
+        if (!pasted.patches.empty())
+            core::not_yet_ported("pasting precise-colour lines together with pictures onto high-precision pixels is not supported yet");
+        std::vector<std::pair<double, double>> reach;
+        for (const core::StrokePtr& stroke : pasted.strokes->items) {
+            const double margin = (stroke->width_mm * 2 + 1) / 25.4 * g.dpi + 4;
+            for (const auto& p : stroke->points) {
+                const double x = p.x / 25.4 * g.dpi, y = p.y / 25.4 * g.dpi;
+                reach.emplace_back(x - margin, y - margin);
+                reach.emplace_back(x + margin, y + margin);
+            }
         }
+        const Box all{0, 0, g.page.width, g.page.height};
+        Grid page_grid = g;  // (covering() keeps a box on the page's pixels here)
+        page_grid.width = static_cast<std::uint32_t>(g.page.width);
+        page_grid.height = static_cast<std::uint32_t>(g.page.height);
+        const Box box = reach.empty() ? Box{0, 0, 0, 0} : intersection(covering(reach, 0, page_grid), all);
+        if (box.width() <= 0 || box.height() <= 0) return std::move(out).take();
+        ColorCanvas drawn(Image::create("RGBA", Size{box.width(), box.height()}, Ink{0, 0, 0, 0}));
+        blend_color_strokes(drawn, page, pasted, g.dpi, box, episode);
+        if (g.exact()) {
+            for (int y = box.y0; y < box.y1; ++y)
+                for (int x = box.x0; x < box.x1; ++x)
+                    lay(out, std::size_t(y) * g.width + x, drawn.linear_pixel(std::size_t(y - box.y0) * box.width() + (x - box.x0)), layer.lock_alpha);
+            return std::move(out).take();
+        }
+        // boxed down onto the raster: each raster pixel the mean of the drawn pixels whose centres fall in it
+        // (premultiplied, in linear light)
+        const double kx = static_cast<double>(g.width) / g.page.width, ky = static_cast<double>(g.height) / g.page.height;
+        const Box onto = intersection(Box{static_cast<int>(std::floor(box.x0 * kx)), static_cast<int>(std::floor(box.y0 * ky)),
+                                          static_cast<int>(std::ceil(box.x1 * kx)), static_cast<int>(std::ceil(box.y1 * ky))},
+                                      Box{0, 0, static_cast<int>(g.width), static_cast<int>(g.height)});
+        for (int y = onto.y0; y < onto.y1; ++y) {
+            const int y0 = std::max(box.y0, static_cast<int>(std::ceil(y / ky - .5))), y1 = std::min(box.y1, static_cast<int>(std::ceil((y + 1) / ky - .5)));
+            for (int x = onto.x0; x < onto.x1; ++x) {
+                const int x0 = std::max(box.x0, static_cast<int>(std::ceil(x / kx - .5))), x1 = std::min(box.x1, static_cast<int>(std::ceil((x + 1) / kx - .5)));
+                Rgba sum{};
+                const double whole = std::max(1.0, (std::ceil((x + 1) / kx - .5) - std::ceil(x / kx - .5)) * (std::ceil((y + 1) / ky - .5) - std::ceil(y / ky - .5)));
+                for (int py = y0; py < y1; ++py) {
+                    for (int px = x0; px < x1; ++px) {
+                        const Rgba p = drawn.linear_pixel(std::size_t(py - box.y0) * box.width() + (px - box.x0));
+                        for (unsigned c = 0; c < 3; ++c) sum[c] += p[c] * p[3];
+                        sum[3] += p[3];
+                    }
+                }
+                if (!(sum[3] > 0)) continue;
+                lay(out, std::size_t(y) * g.width + x, Rgba{sum[0] / sum[3], sum[1] / sum[3], sum[2] / sum[3], sum[3] / whole}, layer.lock_alpha);
+            }
+        }
+        return std::move(out).take();
     }
+    auto picture = drawable_layer_image(page, pasted, g.dpi, episode);
+    if (!picture) return std::move(out).take();
+    if (!g.exact()) picture = picture->resize(Size{static_cast<int>(g.width), static_cast<int>(g.height)}, Resample::Box);
+    const auto box = picture->getbbox();
+    if (!box) return std::move(out).take();
+    ColorCanvas drawn(Image::create("RGBA", Size{box->width(), box->height()}, Ink{0, 0, 0, 0}));
+    drawn.blend(picture->crop(*box), 1, false);
+    for (int y = box->y0; y < box->y1; ++y)
+        for (int x = box->x0; x < box->x1; ++x)
+            lay(out, std::size_t(y) * g.width + x, drawn.linear_pixel(std::size_t(y - box->y0) * box->width() + (x - box->x0)), layer.lock_alpha);
     return std::move(out).take();
 }
 
@@ -396,7 +459,8 @@ void bake_marks(core::Document& doc) {
             marks.panel_clip = false;
             marks.strokes = target.strokes;
             marks.patches = target.patches;
-            target.color_raster = std::make_shared<const std::string>(paste(page, target, marks, &doc));
+            std::string pixels = paste(page, target, marks, &doc);
+            if (pixels != *target.color_raster) target.color_raster = std::make_shared<const std::string>(std::move(pixels));
             target.strokes = core::empty_strokes();
             target.patches.clear();
         }

@@ -5,12 +5,18 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 #include "core/json.hpp"
 #include "core/model.hpp"
 
 namespace genko::core {
 inline constexpr std::string_view kColorRasterFeature = "native.color_raster_v1";
 inline constexpr std::string_view kColorRasterSuffix = ".colorrgba";
+// A book's precise rasters saved in tiles (each tile its own content-addressed asset, so a change to part of a
+// raster adds only the tiles it changed): metadata {"tiles": [refs, row by row], "tile": side, width, height,
+// precision, space, alpha}. A raster saved whole (metadata {"asset": ref, …}) is still read.
+inline constexpr std::string_view kColorTilesFeature = "native.color_raster_tiles_v1";
+inline constexpr std::uint32_t kColorTile = 256;
 inline constexpr std::size_t kColorRasterBookBytes = 256 * 1024 * 1024;
 // Use the existing book byte ceiling (worst-case RGBA f32 plus GKCR header),
 // rather than a prototype-only 4M limit. Book/work/allocator budgets stay intact.
@@ -52,6 +58,16 @@ private:
     unsigned sample_bytes_;
 };
 std::string encode_color_raster(const Json& op);
+// The raster in tiles of kColorTile pixels square (smaller at its right and bottom edges), row by row, each a raster
+// of its own (GKCR, the same precision).
+std::vector<std::string> color_tiles(std::string_view raster);
+// The tiles put back together: core::Error("format") unless they are the tiles of a raster of that size and
+// precision. `tile(i)` gives the i-th tile's bytes.
+std::string join_color_tiles(std::uint32_t width, std::uint32_t height, std::string_view precision,
+                             const std::function<std::string(std::size_t)>& tile);
+// The metadata of a raster saved in tiles (the refs as given), and its check against the raster read.
+Json tiled_metadata(const ColorRasterView& raster, const std::vector<std::string>& refs);
+void check_tiled_metadata(const ColorRasterView& raster, const Json& metadata);
 // Serializes computed straight sRGB samples without an RGBA8 intermediate or a large JSON pixel array.
 std::string encode_color_pixels(std::uint32_t width, std::uint32_t height, std::string_view precision,
                                const std::function<std::array<double, 4>(std::size_t)>& pixel);

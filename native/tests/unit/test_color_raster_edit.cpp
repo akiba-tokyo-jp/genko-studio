@@ -9,6 +9,7 @@
 #include "core/error.hpp"
 #include "core/model.hpp"
 #include "storage/asset_store.hpp"
+#include "core/json.hpp"
 #include "storage/reader.hpp"
 #include "storage/writer.hpp"
 #include "render/ops_registry.hpp"
@@ -16,6 +17,7 @@
 #include "render/page.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/warp.hpp"
 using namespace genko;
 using core::Json;
 
@@ -385,6 +387,7 @@ private slots:
             QVERIFY(std::abs(under_line[0] - 250 / 255.) < 1e-6 && under_line[3] == 1);
         } else if (operation == "lock_alpha") {
             QCOMPARE(after.pixel(std::size_t(110) * 200 + 100)[3], 0.0);  // (the clear half stays clear: 透明保護)
+            QVERIFY(after.pixel(std::size_t(99) * 200 + 30)[3] == 1);
             QVERIFY(std::abs(after.pixel(std::size_t(95) * 200 + 100)[0] - 250 / 255.) < 1e-6);
         } else if (operation == "precise_stroke") {
             if (precision == "f32") QVERIFY(std::abs(under_line[0] - 1.5) < 1e-6);  // (HDR: above 1, as it was given)
@@ -400,6 +403,130 @@ private slots:
             for (std::uint32_t x = 0; x < 200; ++x)
                 if (sample_bytes(drawn, std::size_t(y) * 200 + x) != sample_bytes(doc, std::size_t(y) * 200 + x)) QFAIL("a pixel nothing covered changed");
         same_book_after_reopening(drawn);
+    }
+
+    void stretchedRastersTakeTheTools_data() {
+        QTest::addColumn<QString>("operation");
+        for (const char* op : {"move", "warp", "paste", "precise_pen", "pen"}) QTest::newRow(op) << QString(op);
+    }
+    // A raster of no whole dpi (300 × 150 over the page) takes the selection, the pen and precise lines too: drawn
+    // at its resolution or finer and boxed down onto it; what they do not reach keeps its bytes.
+    void stretchedRastersTakeTheTools() {
+        QFETCH(QString, operation);
+        const auto doc = page_with("f32", 300, 150, [](std::uint32_t x, std::uint32_t y) {
+            return x >= 60 && x < 120 && y >= 30 && y < 60 ? Pixel{1.25, .5, .25, 1} : Pixel{0, 0, 0, 0};
+        });
+        const auto original = paint(doc).color_raster;
+        const Json area{{"poly", Json::array({Json::array({4.0, 4.0}), Json::array({11.0, 4.0}), Json::array({11.0, 11.0}), Json::array({4.0, 11.0})})}};
+        const Json line = Json::array({Json::array({2.0, 20.0}), Json::array({23.0, 20.0})});
+        Json op{{"page", 1}, {"layer_id", "paint"}};
+        if (operation == "move") op.update(Json{{"op", "transform_area"}, {"area", area}, {"matrix", Json::array({1.0, 0.0, 0.0, 1.0, 8.0, 0.0})}});
+        else if (operation == "warp") op.update(Json{{"op", "transform_area"}, {"area", area}, {"warp", Json{{"perspective", Json::array({Json::array({12.0, 4.0}), Json::array({19.0, 4.0}), Json::array({19.0, 11.0}), Json::array({12.0, 11.0})})}}}});
+        else if (operation == "paste") op.update(Json{{"op", "paste"}, {"items", Json{{"strokes", Json::array({Json{{"points", line}, {"width_mm", 1.5}, {"kind", "mili"}, {"rgb", Json::array({0, 0, 255})}}})}}}});
+        else if (operation == "precise_pen") op.update(Json{{"op", "paste"}, {"items", Json{{"strokes", Json::array({Json{{"points", line}, {"width_mm", 1.5}, {"kind", "mili"},
+                                                            {"color_rgb", Json{{"precision", "f32"}, {"values", Json::array({.125, 2.0, .5})}}}}})}}}});
+        else op.update(Json{{"op", "add_stroke"}, {"points", line}, {"width_mm", 1.5}, {"kind", "mili"}, {"rgb", Json::array({0, 0, 255})}});
+        const auto changed = edit(doc, op);
+        still_precise(doc, original, changed, "f32");
+        const auto after = pixels(changed);
+        const auto at = [&](double x_mm, double y_mm) { return after.pixel(std::size_t(y_mm / kInch * 150) * 300 + std::size_t(x_mm / kInch * 300)); };
+        if (operation == "move" || operation == "warp") {
+            QCOMPARE(at(7.5, 7.5)[3], 0.0);                                  // (left behind)
+            QVERIFY(std::abs(at(15.5, 7.5)[0] - 1.25) < 1e-5 && at(15.5, 7.5)[3] == 1);  // (arrived, HDR as it was)
+        } else {
+            const Pixel ink = at(12.7, 20.0);
+            QVERIFY2(ink[3] > .99, qPrintable(QString::number(ink[3])));
+            if (operation == "precise_pen") QVERIFY2(std::abs(ink[1] - 2.0) < 1e-4, qPrintable(QString::number(ink[1])));
+            else QVERIFY(std::abs(ink[2] - 1.0) < 1e-6 && ink[0] < 1e-6);
+        }
+        for (std::uint32_t y = 0; y < 20; ++y)  // (the top rows: nothing reached them)
+            for (std::uint32_t x = 0; x < 300; ++x)
+                if (sample_bytes(changed, std::size_t(y) * 300 + x) != sample_bytes(doc, std::size_t(y) * 300 + x)) QFAIL("an untouched pixel changed");
+        same_book_after_reopening(changed);
+    }
+
+    void warpsAndScalesLandWhereTheyShould_data() {
+        QTest::addColumn<QString>("how");
+        for (const char* how : {"scale", "turn", "perspective", "mesh"}) QTest::newRow(how) << QString(how);
+    }
+    // Where a transformed piece lands: its alpha's centre of mass within a tenth of a pixel of the transform's own
+    // (the square's points through the matrix or the warp), its area within one part in a hundred. (An 8-bit layer's
+    // piece lands about half a pixel off this: Python moves a patch's pixels by their corners, not their centres.)
+    void warpsAndScalesLandWhereTheyShould() {
+        QFETCH(QString, how);
+        const auto inside = [](double x, double y) { return x >= 64 && x < 118 && y >= 70 && y < 130; };
+        const auto doc = page_with("u16", 200, 200, [&](std::uint32_t x, std::uint32_t y) { return inside(x, y) ? Pixel{.1, .2, .3, 1} : Pixel{0, 0, 0, 0}; });
+        const Json area{{"poly", Json::array({Json::array({5.0, 5.0}), Json::array({20.0, 5.0}), Json::array({20.0, 20.0}), Json::array({5.0, 20.0})})}};
+        Json op{{"op", "transform_area"}, {"page", 1}, {"layer_id", "paint"}, {"area", area}, {"interp", "bilinear"}};
+        std::array<double, 6> m{1, 0, 0, 1, 0, 0};
+        if (how == "scale") m = {1.3, 0.0, 0.0, 0.8, -2.5, 1.9};
+        else if (how == "turn") m = {0.9659258, 0.2588190, -0.2588190, 0.9659258, 3.7, -2.9};  // (15°)
+        if (how == "scale" || how == "turn") op["matrix"] = Json::array({m[0], m[1], m[2], m[3], m[4], m[5]});
+        else if (how == "perspective")
+            op["warp"] = Json{{"perspective", Json::array({Json::array({4.0, 6.0}), Json::array({21.0, 5.0}), Json::array({20.0, 20.0}), Json::array({5.0, 21.0})})}};
+        else op["warp"] = Json{{"mesh", Json::array({Json::array({5.0, 5.0}), Json::array({12.5, 4.0}), Json::array({20.0, 5.0}),
+                                                    Json::array({4.0, 12.5}), Json::array({13.0, 12.0}), Json::array({21.0, 12.5}),
+                                                    Json::array({5.0, 20.0}), Json::array({12.5, 21.0}), Json::array({20.0, 20.0})})}};
+        const render::warp::Go go = op.contains("warp") ? render::warp::mapping({5.0, 5.0, 15.0, 15.0}, op["warp"])
+                                                        : render::warp::Go([&](double x, double y) { return std::pair<double, double>{m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]}; });
+        // the transform's own: the square sampled finely, each point carried by it (its area by the cells' images)
+        constexpr double px = kInch / 200, step = 0.125;
+        double weight = 0, cx = 0, cy = 0;
+        for (double y = 70; y < 130; y += step) {
+            for (double x = 64; x < 118; x += step) {
+                const auto a = go((x + step / 2) * px, (y + step / 2) * px);
+                const auto b = go((x + step) * px, y * px), c = go(x * px, (y + step) * px), o = go(x * px, y * px);
+                const double cell = std::abs((b.first - o.first) * (c.second - o.second) - (b.second - o.second) * (c.first - o.first)) / (px * px);
+                weight += cell; cx += cell * a.first / px; cy += cell * a.second / px;
+            }
+        }
+        cx /= weight; cy /= weight;
+        const auto changed = edit(doc, op);
+        const auto after = pixels(changed);
+        double mine = 0, mx = 0, my = 0;
+        for (std::uint32_t y = 0; y < 200; ++y)
+            for (std::uint32_t x = 0; x < 200; ++x) {
+                const double a = after.pixel(std::size_t(y) * 200 + x)[3];
+                mine += a; mx += a * (x + .5); my += a * (y + .5);
+            }
+        mx /= mine; my /= mine;
+        QVERIFY2(std::abs(mx - cx) < 0.1 && std::abs(my - cy) < 0.1, qPrintable(QString("centre %1,%2 against %3,%4").arg(mx).arg(my).arg(cx).arg(cy)));
+        QVERIFY2(std::abs(mine / weight - 1) < 0.01, qPrintable(QString("area %1 against %2").arg(mine).arg(weight)));
+    }
+
+    // Tiles: saved again after a small change, a raster adds the one tile the change touched, and reads back whole.
+    void aSmallChangeAddsOneTile() {
+        const auto doc = patterned_page("f32", 600);
+        QTemporaryDir temporary; QVERIFY(temporary.isValid());
+        const auto path = std::filesystem::path(temporary.path().toStdString()) / "book";
+        storage::AssetStore store(path);
+        const auto tiles = [&] {
+            std::size_t n = 0;
+            for (const auto& file : store.all_files()) n += file.extension() == ".colorrgba";
+            return n;
+        };
+        (void)storage::project_json_v4(doc, store);
+        QCOMPARE(tiles(), std::size_t(9));  // (600 px: three tiles of 256 each way, the last ones smaller)
+        const auto erased = edit(doc, Json{{"op", "erase"}, {"page", 1}, {"layer_id", "paint"}, {"width_mm", 1.0},
+                                           {"points", Json::array({Json::array({2.0, 2.0}), Json::array({4.0, 4.0})})}});
+        const auto text = storage::project_json_v4(erased, store);
+        QCOMPARE(tiles(), std::size_t(10));
+        const auto loaded = storage::load_document_text(text, path);
+        QVERIFY2(loaded.report.clean(), loaded.report.to_json().dump().c_str());
+        QCOMPARE(*paint(loaded.document).color_raster, *paint(erased).color_raster);
+        const auto features = core::parse_python_json(text)["features"];
+        QVERIFY(std::find(features.begin(), features.end(), Json(std::string(core::kColorTilesFeature))) != features.end());
+    }
+
+    // An op that changes nothing keeps the very picture (no new copy, nothing new to save).
+    void nothingChangedKeepsThePicture() {
+        const auto doc = patterned_page("u16", 40);
+        const auto original = paint(doc).color_raster;
+        const Json far{{"poly", Json::array({Json::array({30.0, 30.0}), Json::array({40.0, 30.0}), Json::array({40.0, 40.0})})}};
+        for (const Json& op : {Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", "paint"}, {"area", far}},
+                               Json{{"op", "erase"}, {"page", 1}, {"layer_id", "paint"}, {"points", Json::array({Json::array({40.0, 40.0}), Json::array({50.0, 50.0})})}},
+                               Json{{"op", "transform_area"}, {"page", 1}, {"layer_id", "paint"}, {"area", far}, {"matrix", Json::array({1, 0, 0, 1, 2, 0})}}})
+            QCOMPARE(paint(edit(doc, op)).color_raster, original);
     }
 
     // A locked layer is not erased, nor its area deleted or moved.

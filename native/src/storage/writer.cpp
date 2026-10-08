@@ -101,9 +101,11 @@ Json layer_json(const core::Layer& layer, AssetStore& store) {
     out["clip"] = layer.clip;
     out["lock_alpha"] = layer.lock_alpha;
     out["parent_id"] = layer.parent_id;
-    if (layer.color_raster) {
+    if (layer.color_raster) {  // (in tiles: a change to part of it adds only the tiles it changed)
         const core::ColorRasterView view(*layer.color_raster);
-        out["color_raster"] = view.metadata(store.put_bytes(*layer.color_raster, core::kColorRasterSuffix));
+        std::vector<std::string> refs;
+        for (const std::string& tile : core::color_tiles(*layer.color_raster)) refs.push_back(store.put_bytes(tile, core::kColorRasterSuffix));
+        out["color_raster"] = core::tiled_metadata(view, refs);
     }
     if (!layer.patches.empty()) {
         Json patches = Json::array();
@@ -277,7 +279,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     core::validate_color_document(doc);
     std::vector<std::string> features = doc.features;
     for (const auto& page : doc.pages) for (const auto& layer : page->layers) {
-        if (layer.color_raster) features.emplace_back(core::kColorRasterFeature);
+        if (layer.color_raster) {
+            features.emplace_back(core::kColorRasterFeature);
+            features.emplace_back(core::kColorTilesFeature);
+        }
         if (core::has_color_strokes(layer)) features.emplace_back(core::kColorStrokeFeature);
         if (layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->value("kind", core::Json()) == "exposure")
             features.emplace_back(core::kExposureFeature);
