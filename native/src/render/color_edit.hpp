@@ -3,6 +3,7 @@
 #include <string>
 #include <string_view>
 
+#include "core/color_raster.hpp"
 #include "core/geometry.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
@@ -19,6 +20,12 @@
 // an 8-bit paint layer is — and otherwise at the working dpi and resized onto the raster.
 
 namespace genko::render::color_edit {
+
+// An area of the page as a mask ("L") on the raster's own pixels.
+Image area_on(const core::Page& page, const core::ColorRasterView& raster, const core::Json& area);
+
+// How many of the raster's pixels span one pixel of the working 200 dpi (for sizes given in an 8-bit layer's pixels).
+double pixel_scale(const core::Page& page, const core::ColorRasterView& raster);
 
 // raster.erase_raster on precise pixels: the alpha loses what the 8-bit eraser's mask takes (a hard eraser clears the
 // pixel); the colour of what stays is kept.

@@ -37,6 +37,7 @@ genko_library(genko_core
     stroke_tools.cpp
     brushes.cpp
     filters.cpp
+    color_adjust.cpp
     rulers.cpp
     command_bus.cpp
     ops_util.cpp

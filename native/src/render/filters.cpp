@@ -487,9 +487,19 @@ Image wave_twirl(const Image& rgba, std::string_view kind, const Json& params) {
 }
 
 Image rain(const Image& rgba, const Json& params) {
+    const Image layer = rain_layer(rgba.size(), params);
+    Image out = rgba.copy();
+    out.alpha_composite(layer);
+    out.putalpha(chops::lighter(rgba.getchannel(3), layer.getchannel(3)));
+    return out;
+}
+
+}  // namespace
+
+Image rain_layer(Size picture, const Json& params) {
     core::PyRandom rng = core::PyRandom::from_str(core::py_str(core::get_or(params, "seed", Json("rain"))));
-    const int w = rgba.width();
-    const int h = rgba.height();
+    const int w = picture.width;
+    const int h = picture.height;
     const double count = core::py_max(1.0, core::py_min(20000.0, core::py_trunc(fparam(params, "count", 400))));
     const double length = core::py_max(2.0, fparam(params, "length", 40));
     limits::check_count(length, limits::kStreak, "length");
@@ -503,7 +513,7 @@ Image rain(const Image& rgba, const Json& params) {
     }
     if (colour.size() > 3) colour.resize(3);
     const double opacity = core::py_max(0.0, core::py_min(1.0, fparam(params, "opacity", 0.7)));
-    Image layer = Image::create("RGBA", rgba.size(), Ink{0, 0, 0, 0});
+    Image layer = Image::create("RGBA", picture, Ink{0, 0, 0, 0});
     {
         Draw draw(layer);
         const double dx = core::py_cos(angle);
@@ -517,11 +527,10 @@ Image rain(const Image& rgba, const Json& params) {
             draw.line(line, Ink::with_alpha(colour, static_cast<std::int64_t>(alpha)), static_cast<int>(width));
         }
     }
-    Image out = rgba.copy();
-    out.alpha_composite(layer);
-    out.putalpha(chops::lighter(rgba.getchannel(3), layer.getchannel(3)));
-    return out;
+    return layer;
 }
+
+namespace {
 
 Image glow(const Image& rgba, const Json& params) {
     const double radius = core::py_max(0.5, fparam(params, "radius", 12));

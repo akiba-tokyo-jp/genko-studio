@@ -1,6 +1,8 @@
 #pragma once
 #include <array>
 #include <memory>
+#include <optional>
+#include "core/color_adjust.hpp"
 #include "core/color_raster.hpp"
 #include "core/exposure.hpp"
 #include "render/image.hpp"
@@ -21,6 +23,9 @@ public:
     void blend(const ColorCanvas& source, double opacity, bool clip, std::string_view mode = "normal");
     void blend_stroke(const Image& mask, const core::Json& color, double opacity);
     void expose(const core::Exposure& exposure, double opacity, bool clip, const Image* mask = nullptr);
+    // A correction layer of filters.ADJUSTMENTS: its change laid over the pixels below in their sRGB samples (as the
+    // 8-bit page composites a correction: by opacity × mask × the clipped-to layer's alpha).
+    void adjust(const core::PreciseAdjustment& adjustment, double opacity, bool clip, const Image* mask = nullptr);
     Image image() const;
     Size size() const;
     // One pixel as composited: straight linear-light RGB and its alpha.
@@ -33,4 +38,8 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 Image color_raster_preview(const core::ColorRasterView& source, Size full, Box area);
+// A correction layer's adjustment (its "adjust": a kind of filters.ADJUSTMENTS but exposure, and its settings), or
+// none when it does nothing: no kind, or settings the 8-bit page refuses with a ValueError (render._adjusted).
+// NotYetPorted for a kind of filter that is not a colour adjustment.
+std::optional<core::PreciseAdjustment> correction_of(const core::Layer& layer);
 } // namespace genko::render

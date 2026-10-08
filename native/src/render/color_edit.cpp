@@ -233,6 +233,15 @@ Box covering(const std::vector<std::pair<double, double>>& points, int margin, c
 
 }  // namespace
 
+Image area_on(const core::Page& page, const core::ColorRasterView& raster, const core::Json& area) {
+    return area_on_raster(area, grid_of(page, raster));
+}
+
+double pixel_scale(const core::Page& page, const core::ColorRasterView& raster) {
+    const Grid g = grid_of(page, raster);
+    return std::sqrt(g.sx * g.sy) / (raster::kWorkingDpi / 25.4);
+}
+
 std::string erase(const core::Page& page, const core::Layer& layer, const core::PenPoints& points, double width_mm,
                   std::string_view texture, const std::string& seed) {
     core::ColorRasterEdit out(*layer.color_raster);

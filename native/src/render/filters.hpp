@@ -28,6 +28,9 @@ inline constexpr std::array<std::string_view, 22> kKinds{
 // non-finite number, a size past render/op_limits.hpp).
 Image apply_filter(const Image& image, std::string_view kind, const core::Json& params);
 
+// The streaks of the rain filter, on a clear "RGBA" picture of `size` (its random streaks seeded as Python seeds them).
+Image rain_layer(Size size, const core::Json& params);
+
 // filters.within: the filter only inside the selection (`mask`, "L" of the picture's size).
 Image within(const Image& original, const Image& filtered, const Image& mask);
 

@@ -39,6 +39,7 @@
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
 #include "render/color_edit.hpp"
+#include "render/color_filters.hpp"
 #include "render/draw.hpp"
 #include "render/fill.hpp"
 #include "render/filters.hpp"
@@ -820,8 +821,16 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
         if (layer.kind == LayerKind::Adjust) {
             if (!layer.blend.empty() && layer.blend!="normal")throw NotYetPorted("high-precision merge adjustment blend");
             adjustment = true;
-            if (!layer.adjust || layer.adjust->value("kind", Json()) != "exposure")
-                throw NotYetPorted("high-precision merge adjustment");
+            if (!layer.adjust || !layer.adjust->is_object() || layer.adjust->value("kind", Json()) != "exposure") {
+                const auto correction = correction_of(layer);
+                if (!correction || layer.opacity <= 0) continue;
+                if (!out.is_opaque()) throw NotYetPorted("high-precision merge adjustment depends on external background");
+                std::optional<Image> mask;
+                if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
+                    mask = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bicubic);
+                out.adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr);
+                continue;
+            }
             std::optional<Image> mask;
             if (layer.mask && layer.mask->enabled && layer.mask->png)
                 mask = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bilinear);
@@ -1224,6 +1233,21 @@ void merge_down(OpContext& c) {
     page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(ui));
 }
 
+// A layer of precise-colour pen lines as precise paint (its lines drawn at the working dpi, u16, or f32 when a line
+// is f32): its blend, opacity and clipping kept.
+void precise_lines_to_paint(Document& doc, const Page& page, Layer& layer) {
+    const auto size=page_px(page,kWorkingDpi);const Box all{0,0,size.width,size.height};
+    ColorCanvas canvas(Image::create("RGBA",size,Ink{0,0,0,0}));
+    Layer own=layer;own.opacity=1;own.blend="normal";own.clip=false;
+    blend_color_strokes(canvas,page,own,kWorkingDpi,all,&doc);
+    bool floating=false;
+    for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
+    const auto blend=layer.blend;const auto opacity=layer.opacity;const auto clip=layer.clip;
+    auto bytes=canvas.color_raster(floating?"f32":"u16");
+    into_color_pixels(layer,{std::move(bytes),clip});layer.blend=blend;layer.opacity=opacity;
+    if (std::find(doc.features.begin(),doc.features.end(),core::kColorRasterFeature)==doc.features.end())doc.features.emplace_back(core::kColorRasterFeature);
+}
+
 void convert_layer(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -1261,16 +1285,7 @@ void convert_layer(OpContext& c) {
     }
     if (to == "paint") {
         if (core::has_color_strokes(layer)) {
-            const auto size=page_px(page,kWorkingDpi);const Box all{0,0,size.width,size.height};
-            ColorCanvas canvas(Image::create("RGBA",size,Ink{0,0,0,0}));
-            Layer own=layer;own.opacity=1;own.blend="normal";own.clip=false;
-            blend_color_strokes(canvas,page,own,kWorkingDpi,all,&doc);
-            bool floating=false;
-            for (const auto& stroke : layer.strokes->items) if (stroke->color_rgb && (*stroke->color_rgb)["precision"]=="f32") floating=true;
-            const auto blend=layer.blend;const auto opacity=layer.opacity;const auto clip=layer.clip;
-            auto bytes=canvas.color_raster(floating?"f32":"u16");
-            into_color_pixels(layer,{std::move(bytes),clip});layer.blend=blend;layer.opacity=opacity;
-            if (std::find(doc.features.begin(),doc.features.end(),core::kColorRasterFeature)==doc.features.end())doc.features.emplace_back(core::kColorRasterFeature);
+            precise_lines_to_paint(doc, page, layer);
             return;
         }
         if (layer.kind == LayerKind::Folder || layer.kind == LayerKind::Adjust || layer.kind == LayerKind::Tone ||
@@ -1807,8 +1822,28 @@ void filter_raster(OpContext& c) {
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[resolve_layer(page, op)];
     if (layer.locked) throw OpError("the layer is locked");  // (Python filters it)
-    if (layer.color_raster || core::has_color_strokes(layer))
-        throw NotYetPorted("filter_raster on high-precision pixels or pen lines is not supported yet");
+    // (precise pen lines become precise pixels, so the filter reaches them: as 8-bit lines become pixels below)
+    if (core::has_color_strokes(layer)) precise_lines_to_paint(doc, page, layer);
+    if (layer.color_raster) {  // the precise pixels themselves (render/color_filters)
+        const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();
+        Json params = Json::object();
+        for (const auto& [key, value] : op.items()) {
+            if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area") params[key] = value;
+        }
+        const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
+        std::string pixels;
+        try {
+            if (kind.starts_with("plugin:")) plugin_filter(kind);
+            pixels = color_filters::apply(page, layer, kind, params, area ? &*area : nullptr);
+        } catch (const core::PyUncaught&) {
+            throw;
+        } catch (const core::Error& error) {
+            if (error.code() != "value" && error.code() != "type") throw;
+            throw OpError(error.what());
+        }
+        layer.color_raster = std::make_shared<const std::string>(std::move(pixels));
+        return;
+    }
     // (pen lines and shape fills become pixels, so the filter reaches them)
     if (layer.stroke_count() > 0 || !layer.patches.empty()) raster::bake_vectors(page, layer);
     const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();

@@ -953,12 +953,19 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (layer.kind == LayerKind::Adjust) {  // a correction layer changes what is under it
             if (precision) {
                 if (!layer.blend.empty() && layer.blend!="normal")throw NotYetPorted("high_precision_adjustment_blend");
-                if (!layer.adjust || !layer.adjust->contains("kind") || (*layer.adjust)["kind"] != "exposure")
-                    throw NotYetPorted("high_precision_adjustment");
-                std::optional<Image> mask;
-                if (layer.mask && layer.mask->enabled && layer.mask->png)
-                    mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
-                precision->expose(core::Exposure::parse(*layer.adjust), layer.opacity, layer.clip, mask ? &*mask : nullptr);
+                if (layer.adjust && layer.adjust->is_object() && layer.adjust->value("kind", Json()) == "exposure") {
+                    std::optional<Image> mask;
+                    if (layer.mask && layer.mask->enabled && layer.mask->png)
+                        mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+                    precision->expose(core::Exposure::parse(*layer.adjust), layer.opacity, layer.clip, mask ? &*mask : nullptr);
+                    continue;
+                }
+                if (const auto correction = correction_of(layer)) {  // (its mask as render._adjusted resizes it)
+                    std::optional<Image> mask;
+                    if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
+                        mask = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bicubic);
+                    precision->adjust(*correction, layer.opacity, layer.clip, mask ? &*mask : nullptr);
+                }
                 continue;
             }
             rgba = adjusted(ctx, std::move(rgba), layer, layer.clip && prev_alpha ? &*prev_alpha : nullptr, area);

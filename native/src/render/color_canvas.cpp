@@ -5,6 +5,9 @@
 #include <cmath>
 #include <vector>
 #include "core/error.hpp"
+#include "core/filters.hpp"
+#include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 #include "render/imaging.hpp"
 
 namespace genko::render {
@@ -191,6 +194,21 @@ void ColorCanvas::expose(const core::Exposure& e, double opacity, bool clip, con
         for (unsigned c = 0; c < 3; ++c) p[c] = std::lerp(p[c], e.apply(p[c]), amount);
     }
 }
+void ColorCanvas::adjust(const core::PreciseAdjustment& adjustment, double opacity, bool clip, const Image* mask) {
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "adjustment mask does not match");
+    for (int y = 0; y < impl_->size.height; ++y) for (int x = 0; x < impl_->size.width; ++x) {
+        auto& p = impl_->pixels[std::size_t(y)*impl_->size.width+x];
+        double amount = std::clamp(opacity, 0.0, 1.0)*(clip && impl_->previous ? p[4] : 1);
+        if (mask) amount *= reinterpret_cast<const unsigned char*>(mask->raw()->image[y])[x]/255.0;
+        if (amount == 0) continue;
+        const std::array<double, 3> was{core::linear_to_srgb(p[0]), core::linear_to_srgb(p[1]), core::linear_to_srgb(p[2])};
+        const auto changed = adjustment(was);
+        for (unsigned c = 0; c < 3; ++c) {
+            p[c] = core::srgb_to_linear(std::lerp(was[c], changed[c], amount));
+            if (!std::isfinite(p[c])) throw core::Error("value", "high-precision adjustment exceeds finite working range");
+        }
+    }
+}
 Image ColorCanvas::image() const {
     auto out = Image::create("RGBA", impl_->size, Ink{0, 0, 0, 0});
     for (int y = 0; y < impl_->size.height; ++y) {
@@ -227,6 +245,22 @@ std::string ColorCanvas::color_raster(std::string_view precision) const {
             return std::array<double, 4>{core::linear_to_srgb(p[0]), core::linear_to_srgb(p[1]),
                                          core::linear_to_srgb(p[2]), p[3]};
         });
+}
+std::optional<core::PreciseAdjustment> correction_of(const core::Layer& layer) {
+    core::Json spec = layer.adjust && layer.adjust->is_object() ? *layer.adjust : core::Json::object();
+    std::string kind;
+    if (const auto it = spec.find("kind"); it != spec.end()) {
+        if (core::py_truthy(*it)) kind = it->is_string() ? it->get<std::string>() : core::py_str(*it);
+        spec.erase(it);
+    }
+    if (kind.empty()) return std::nullopt;
+    if (kind == "exposure" || std::find(core::kAdjustments.begin(), core::kAdjustments.end(), kind) == core::kAdjustments.end())
+        throw core::Error("not_yet_ported", "high-precision correction: " + kind);
+    try {
+        return core::PreciseAdjustment(kind, spec);
+    } catch (const core::PyValueError&) {
+        return std::nullopt;  // (a ValueError: the layer does nothing)
+    }
 }
 Image color_raster_preview(const core::ColorRasterView& src, Size full, Box area) {
     const auto transparent = Image::create("RGBA", Size{area.width(), area.height()}, Ink{0, 0, 0, 0});
