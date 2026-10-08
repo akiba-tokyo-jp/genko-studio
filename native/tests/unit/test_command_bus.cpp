@@ -330,7 +330,8 @@ private slots:
             "merge_down", "merge_layers", "merge_visible", "set_layer_mask", "paint_mask",
             "put_raster", "filter_raster", "fill", "fill_area", "fill_enclosed",
             "fill_gaps", "flood_fill", "gradient_fill", "delete_area", "transform_area",
-            "paste", "erase", "erase_raster", "set_stroke_width", "reshape_stroke", "lt_convert", "stamp_material"};
+            "paste", "erase", "erase_raster", "set_stroke_width", "reshape_stroke", "lt_convert", "stamp_material",
+            "add_shape", "smudge", "liquify"};
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);
