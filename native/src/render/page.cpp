@@ -960,6 +960,11 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                     precision->expose(core::Exposure::parse(*layer.adjust), layer.opacity, layer.clip, mask ? &*mask : nullptr);
                     continue;
                 }
+                if (layer.adjust && layer.adjust->is_object() && layer.adjust->value("kind", Json()).is_string() &&
+                    layer.adjust->value("kind", Json()).get<std::string>().starts_with("plugin:")) {
+                    skip_unported(ctx, "adjust:plugin");  // (a person's filter plugin runs in the external runner)
+                    continue;
+                }
                 if (const auto correction = correction_of(layer)) {  // (its mask as render._adjusted resizes it)
                     std::optional<Image> mask;
                     if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())

@@ -16,6 +16,7 @@
 #include "render/color_edit.hpp"
 #include "render/filters.hpp"
 #include "render/imaging.hpp"
+#include "render/op_limits.hpp"
 
 namespace genko::render::color_filters {
 
@@ -78,6 +79,13 @@ std::string write(const Picture& picture, bool floating) {
     });
 }
 
+// A double as a float sample: beyond float's range, an infinity (refused when the raster is written), never UB.
+float to_sample(double v) {
+    if (v >= 3.4028234663852886e38) return INFINITY;
+    if (v <= -3.4028234663852886e38) return -INFINITY;
+    return static_cast<float>(v);
+}
+
 // What an 8-bit filter clips to 0..255: an in-range sample held to 0..1, an HDR one (from beyond it) left as it is.
 float held(float out, float in) { return in >= 0 && in <= 1 ? std::clamp(out, 0.0f, 1.0f) : out; }
 
@@ -114,13 +122,17 @@ void box_line(Px* line, std::size_t stride, int n, float radius, const std::arra
     const double fw = (1.0 - (r * 2 + 1) * w) / 2.0;
     scratch.resize(static_cast<std::size_t>(n));
     const auto in = [&](int x) -> const Px& { return line[std::size_t(std::clamp(x, 0, n - 1)) * stride]; };
-    for (unsigned c = 0; c < 4; ++c) {
-        if (!channels[c]) continue;
-        double acc = 0;
-        for (int k = -r; k <= r; ++k) acc += in(k)[c];
-        for (int x = 0; x < n; ++x) {
-            scratch[std::size_t(x)][c] = static_cast<float>(acc * w + (static_cast<double>(in(x - r - 1)[c]) + in(x + r + 1)[c]) * fw);
-            acc += static_cast<double>(in(x + r + 1)[c]) - in(x - r)[c];
+    std::array<double, 4> acc{};
+    for (int k = -r; k <= r; ++k)
+        for (unsigned c = 0; c < 4; ++c) acc[c] += in(k)[c];
+    for (int x = 0; x < n; ++x) {
+        const Px& far_left = in(x - r - 1);
+        const Px& far_right = in(x + r + 1);
+        const Px& leaving = in(x - r);
+        for (unsigned c = 0; c < 4; ++c) {
+            if (!channels[c]) continue;
+            scratch[std::size_t(x)][c] = to_sample(acc[c] * w + (static_cast<double>(far_left[c]) + far_right[c]) * fw);
+            acc[c] += static_cast<double>(far_right[c]) - leaving[c];
         }
     }
     for (int x = 0; x < n; ++x) {
@@ -152,7 +164,7 @@ void unsharp(Picture& p, double radius, double percent, double threshold) {
         for (unsigned c = 0; c < 3; ++c) {
             const float in = p[i][c];
             const float diff = in - blurred[i][c];
-            if (std::abs(diff) * 255 > threshold) p[i][c] = held(static_cast<float>(in + diff * percent / 100), in);
+            if (std::abs(diff) * 255 > threshold) p[i][c] = held(to_sample(in + static_cast<double>(diff) * percent / 100), in);
         }
     }
 }
@@ -160,7 +172,7 @@ void unsharp(Picture& p, double radius, double percent, double threshold) {
 // ImageEnhance.Brightness(f): towards black (the colours times f)
 void brightness(Picture& p, double factor) {
     for (std::size_t i = 0; i < p.size(); ++i)
-        for (unsigned c = 0; c < 3; ++c) p[i][c] = held(static_cast<float>(p[i][c] * factor), p[i][c]);
+        for (unsigned c = 0; c < 3; ++c) p[i][c] = held(to_sample(p[i][c] * factor), p[i][c]);
 }
 
 // --- Pillow's resampling, without its 8-bit steps ------------------------------------------------------------------
@@ -249,20 +261,38 @@ void glow(Picture& p, const Json& params, double scale) {
     gaussian(light, radius, kColour);
     brightness(light, amount);
     for (std::size_t i = 0; i < p.size(); ++i)  // ImageChops.screen
-        for (unsigned c = 0; c < 3; ++c) p[i][c] = 1 - (1 - p[i][c]) * (1 - light[i][c]);
+        for (unsigned c = 0; c < 3; ++c) p[i][c] = p[i][c] + light[i][c] * std::max(0.0f, 1 - p[i][c]);  // (screen; an HDR sample stays)
 }
 
 void mosaic(Picture& p, const Json& params, double scale) {
     const double block = core::py_max(2.0, std::round(core::py_max(2.0, whole(params, "block", 8)) * scale));
     const int w = p.width(), h = p.height();
     const int sw = static_cast<int>(std::max(1.0, std::floor(w / block))), sh = static_cast<int>(std::max(1.0, std::floor(h / block)));
-    // resize NEAREST down and back: each pixel's centre through the scale, the pixel it falls in
-    const auto from = [](int x, int to, int size) { return std::min(size - 1, static_cast<int>((x + 0.5) * size / to)); };
+    // resize NEAREST down and back, as Pillow's affine scale finds the pixels: the first centre's place, then the
+    // step added pixel by pixel (COORD: truncated; outside: none)
+    const auto nearest = [](int to, int size) {
+        std::vector<int> out(static_cast<std::size_t>(to), -1);
+        const double step = static_cast<double>(size) / to;
+        double at = step * 0.5;
+        for (int x = 0; x < to; ++x) {
+            const int in = at < 0.0 ? -1 : static_cast<int>(at);
+            if (in >= 0 && in < size) out[static_cast<std::size_t>(x)] = in;
+            at += step;
+        }
+        return out;
+    };
+    const auto down_x = nearest(sw, w), down_y = nearest(sh, h), up_x = nearest(w, sw), up_y = nearest(h, sh);
     const Picture source = p;
     for (int y = 0; y < h; ++y) {
-        const int sy = from(from(y, h, sh), sh, h);
+        const int my = up_y[static_cast<std::size_t>(y)];
+        const int sy = my < 0 ? -1 : down_y[static_cast<std::size_t>(my)];
         for (int x = 0; x < w; ++x) {
-            const int sx = from(from(x, w, sw), sw, w);
+            const int mx = up_x[static_cast<std::size_t>(x)];
+            const int sx = mx < 0 ? -1 : down_x[static_cast<std::size_t>(mx)];
+            if (sx < 0 || sy < 0) {  // (nothing there: black, as the resized picture leaves it)
+                for (unsigned c = 0; c < 3; ++c) p.at(x, y)[c] = 0;
+                continue;
+            }
             for (unsigned c = 0; c < 3; ++c) p.at(x, y)[c] = held(source.at(sx, sy)[c] * 0.88f, source.at(sx, sy)[c]);
         }
     }
@@ -328,8 +358,8 @@ void wave_twirl(Picture& p, std::string_view kind, const Json& params, double sc
     const int w = p.width(), h = p.height();
     std::vector<float> map_x(p.size()), map_y(p.size());
     if (kind == "wave") {
-        const auto amplitude = static_cast<float>(number(params, "amplitude", 6) * scale);
-        const auto wavelength = static_cast<float>(core::py_max(2.0, number(params, "wavelength", 60)) * scale);
+        const auto amplitude = to_sample(number(params, "amplitude", 6) * scale);
+        const auto wavelength = to_sample(core::py_max(2.0, number(params, "wavelength", 60)) * scale);
         const auto pi = static_cast<float>(core::kPi);
         const auto along = [&](float v) { return filters::numpy_sinf(((v * 2.0f) * pi) / wavelength); };
         for (int y = 0; y < h; ++y) {
@@ -362,7 +392,7 @@ void wave_twirl(Picture& p, std::string_view kind, const Json& params, double sc
     };
     for (std::size_t i = 0; i < p.size(); ++i) {
         const double mx = map_x[i], my = map_y[i];
-        if (!std::isfinite(mx) || !std::isfinite(my)) { p[i] = Px{0, 0, 0, 0}; continue; }
+        if (!(mx > -2 && mx < w + 1 && my > -2 && my < h + 1)) { p[i] = Px{0, 0, 0, 0}; continue; }  // (all four taps outside)
         const auto x0 = static_cast<long long>(std::floor(mx)), y0 = static_cast<long long>(std::floor(my));
         const double fx = mx - static_cast<double>(x0), fy = my - static_cast<double>(y0);
         for (unsigned c = 0; c < 4; ++c) {
@@ -375,8 +405,8 @@ void wave_twirl(Picture& p, std::string_view kind, const Json& params, double sc
 
 void rain(Picture& p, const Json& params, double scale) {
     Json scaled = params;  // (the streaks' length and width on the raster's pixels)
-    scaled["length"] = core::py_max(2.0, number(params, "length", 40)) * scale;
-    scaled["width"] = std::max(1.0, core::py_round_whole(number(params, "width", 1) * scale));
+    scaled["length"] = std::min(limits::kStreak, core::py_max(2.0, number(params, "length", 40)) * scale);
+    scaled["width"] = std::min(limits::kReach, std::max(1.0, core::py_round_whole(number(params, "width", 1) * scale)));
     const Image layer = filters::rain_layer(Size{p.width(), p.height()}, scaled);
     const std::string streaks = layer.tobytes();
     for (std::size_t i = 0; i < p.size(); ++i) {
@@ -424,8 +454,14 @@ void despeckle(Picture& p, const Json& params, double scale) {
     }
 }
 
-void lineart(Picture& p, const Json& params) {
-    // a line drawing of the layer as its 8-bit picture shows it
+void lineart(Picture& p, const Json& params_in, double scale) {
+    // a line drawing of the layer as its 8-bit picture shows it (its sizes on the raster's pixels: the window's side
+    // scaled, the specks' area by the square)
+    Json params = params_in;
+    if (scale != 1) {
+        params["radius"] = std::min<double>(limits::kRankSize, std::round(number(params_in, "radius", 7) * scale));
+        params["min_px"] = std::round(number(params_in, "min_px", 12) * scale * scale);
+    }
     std::string bytes(p.size() * 4, '\0');
     for (std::size_t i = 0; i < p.size(); ++i)
         for (unsigned c = 0; c < 4; ++c) bytes[i * 4 + c] = static_cast<char>(std::lround(std::clamp(p[i][c], 0.0f, 1.0f) * 255));
@@ -437,9 +473,12 @@ void lineart(Picture& p, const Json& params) {
 
 }  // namespace
 
-std::string apply(const core::Page& page, const core::Layer& layer, std::string_view kind, const Json& params, const Json* area) {
-    // the settings read and refused as the 8-bit filter reads them (on a picture of a few pixels)
+void check(std::string_view kind, const Json& params) {
     (void)filters::apply_filter(Image::create("RGBA", Size{2, 2}, Ink{0, 0, 0, 0}), kind, params);
+}
+
+std::string apply(const core::Page& page, const core::Layer& layer, std::string_view kind, const Json& params, const Json* area) {
+    check(kind, params);
     const core::ColorRasterView raster(*layer.color_raster);
     const bool floating = raster.metadata("")["precision"] == "f32";
     const double scale = color_edit::pixel_scale(page, raster);
@@ -467,7 +506,7 @@ std::string apply(const core::Page& page, const core::Layer& layer, std::string_
     } else if (kind == "wave" || kind == "twirl") {
         wave_twirl(p, kind, params, scale);
     } else if (kind == "lineart") {
-        lineart(p, params);
+        lineart(p, params, scale);
     } else {
         point(p, core::PreciseAdjustment(kind, params));
     }

@@ -344,8 +344,7 @@ Image blend_math(const Image& base, const Image& over, std::string_view mode_nam
 
 // --- filters.py: the colour adjustments (their settings and tables: core/filters.hpp) -------------------------------
 
-constexpr const char* kOtherFilters[] = {"blur", "sharpen", "mosaic", "motion_blur", "radial_blur", "zoom_blur", "noise",
-                                         "wave", "twirl", "lineart", "despeckle", "glow", "rain"};
+constexpr const auto& kOtherFilters = core::kShapeFilters;
 
 Image keep_alpha(const Image& rgb, const Image& source) {
     Image out = rgb.convert("RGBA");

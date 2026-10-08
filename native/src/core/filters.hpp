@@ -18,6 +18,12 @@ inline constexpr std::array<std::string_view, 10> kAdjustments{"levels",       "
                                                               "invert",       "posterize", "threshold",
                                                               "gradient_map", "bitonal", "brightness_contrast", "exposure"};
 
+// The filters of filters.apply_filter that move shapes too (not a table per value): an old book's correction layer may
+// hold one.
+inline constexpr std::array<std::string_view, 13> kShapeFilters{"blur", "sharpen", "mosaic", "motion_blur", "radial_blur",
+                                                               "zoom_blur", "noise", "wave", "twirl", "lineart",
+                                                               "despeckle", "glow", "rain"};
+
 // What an adjustment does to the picture: tables of 256 values each, as Image.point takes them (it keeps each value in
 // 0..255).
 struct Adjustment {

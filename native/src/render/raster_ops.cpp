@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "core/areas.hpp"
+#include "core/filters.hpp"
 #include "core/frames.hpp"
 #include "core/ids.hpp"
 #include "core/ops_util.hpp"
@@ -822,6 +823,13 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             if (!layer.blend.empty() && layer.blend!="normal")throw NotYetPorted("high-precision merge adjustment blend");
             adjustment = true;
             if (!layer.adjust || !layer.adjust->is_object() || layer.adjust->value("kind", Json()) != "exposure") {
+                if (layer.adjust && layer.adjust->is_object() && layer.adjust->value("kind", Json()).is_string() &&
+                    layer.adjust->value("kind", Json()).get<std::string>().starts_with("plugin:"))
+                    throw NotYetPorted("adjust:plugin");  // (as the 8-bit merge)
+                if (layer.adjust && layer.adjust->is_object() && layer.adjust->value("kind", Json()).is_string() &&
+                    std::find(core::kShapeFilters.begin(), core::kShapeFilters.end(),
+                              layer.adjust->value("kind", Json()).get<std::string>()) != core::kShapeFilters.end())
+                    throw NotYetPorted("high-precision merge of a correction that moves shapes");
                 const auto correction = correction_of(layer);
                 if (!correction || layer.opacity <= 0) continue;
                 if (!out.is_opaque()) throw NotYetPorted("high-precision merge adjustment depends on external background");
@@ -1838,17 +1846,23 @@ void filter_raster(OpContext& c) {
         for (const auto& [key, value] : op.items()) {
             if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area") params[key] = value;
         }
-        const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
-        std::string pixels;
-        try {
+        const auto refused = [](const auto& work) {  // (Python's ValueError and TypeError become the op's error)
+            try {
+                return work();
+            } catch (const core::PyUncaught&) {
+                throw;
+            } catch (const core::Error& error) {
+                if (error.code() != "value" && error.code() != "type") throw;
+                throw OpError(error.what());
+            }
+        };
+        refused([&] {
             if (kind.starts_with("plugin:")) plugin_filter(kind);
-            pixels = color_filters::apply(page, layer, kind, params, area ? &*area : nullptr);
-        } catch (const core::PyUncaught&) {
-            throw;
-        } catch (const core::Error& error) {
-            if (error.code() != "value" && error.code() != "type") throw;
-            throw OpError(error.what());
-        }
+            color_filters::check(kind, params);
+        });
+        // (its area read after the settings, as the 8-bit op reads it)
+        const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
+        std::string pixels = refused([&] { return color_filters::apply(page, layer, kind, params, area ? &*area : nullptr); });
         layer.color_raster = std::make_shared<const std::string>(std::move(pixels));
         return;
     }

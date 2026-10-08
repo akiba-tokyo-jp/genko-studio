@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include "core/error.hpp"
 #include "core/exposure.hpp"
+#include "core/filters.hpp"
 #include "core/strokes.hpp"
 #include "core/pyconv.hpp"
 #include "core/ops_util.hpp"
@@ -203,6 +204,14 @@ std::string encode_color_pixels(std::uint32_t width, std::uint32_t height, std::
     }
     return out;
 }
+namespace {
+bool is_shape_filter(const Layer& layer) {
+    if (!layer.adjust || !layer.adjust->is_object()) return false;
+    const auto it = layer.adjust->find("kind");
+    return it != layer.adjust->end() && it->is_string() &&
+           std::find(kShapeFilters.begin(), kShapeFilters.end(), it->get<std::string>()) != kShapeFilters.end();
+}
+}  // namespace
 void validate_color_document(const Document& doc) {
     std::size_t bytes = 0;
     std::unordered_set<const std::string*> allocations;
@@ -233,6 +242,8 @@ void validate_color_document(const Document& doc) {
             (void)blend_mode(Json(layer.blend));
             if ((layer.kind == LayerKind::Adjust && layer.blend != "normal") || py_truthy(layer.parent_id) || layer.kind == LayerKind::Tone || layer.role == LayerRole::Tone)
                 throw Error("not_yet_ported", "high-precision color composition style is not supported yet");
+            if (layer.kind == LayerKind::Adjust && is_shape_filter(layer))
+                throw Error("not_yet_ported", "high-precision correction that moves shapes is not supported yet");
             // (any other correction is read as the 8-bit page reads it: one it cannot read does nothing)
         }
     }

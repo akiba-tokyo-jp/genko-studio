@@ -15,6 +15,9 @@ namespace genko::core {
 
 namespace {
 
+// A sample within this of 0..1 is in range (a composite's rounding, not HDR)
+constexpr double kSlack = 1e-9;
+
 // The settings as core::adjustment reads them (it has refused anything it cannot read by then).
 double number(const Json& params, std::string_view key, double fallback) {
     const Json* v = get(params, key);
@@ -141,7 +144,7 @@ PreciseAdjustment::PreciseAdjustment(std::string_view kind, const Json& params) 
             way_ = Way::Stops;
             std::vector<std::pair<double, std::array<double, 3>>> placed;
             for (const Json& st : iterate(*stops)) placed.emplace_back(to_float(subscript(st, 0)), colour(subscript(st, 1)));
-            std::stable_sort(placed.begin(), placed.end(), [](const auto& l, const auto& r) { return l.first < r.first; });
+            std::stable_sort(placed.begin(), placed.end());  // (Python's sorted(): the place, then the colour)
             std::vector<double> places;
             for (const auto& [at, rgb] : placed) { places.push_back(at); colours_.push_back(rgb); }
             for (unsigned c = 0; c < 3; ++c) {
@@ -173,8 +176,7 @@ double PreciseAdjustment::through(double u) const {
     case Way::Tone: {
         if (u <= xs_.front()) return ys_.front();
         if (u >= xs_.back()) return ys_.back();
-        std::size_t k = 0;
-        while (!(xs_[k] <= u && u <= xs_[k + 1])) ++k;
+        const std::size_t k = std::min<std::size_t>(xs_.size() - 2, static_cast<std::size_t>(std::upper_bound(xs_.begin(), xs_.end(), u) - xs_.begin()) - 1);
         const double h = xs_[k + 1] - xs_[k], t = (u - xs_[k]) / h;
         const double h00 = 2 * t * t * t - 3 * t * t + 1, h10 = t * t * t - 2 * t * t + t;
         const double h01 = -2 * t * t * t + 3 * t * t, h11 = t * t * t - t * t;
@@ -186,7 +188,7 @@ double PreciseAdjustment::through(double u) const {
     }
     case Way::Brightness: {
         const double out = (u - 127.5) * b_ + 127.5 + a_;
-        return u >= 0 && u <= 255 ? std::clamp(out, 0.0, 255.0) : out;
+        return u >= -kSlack * 255 && u <= 255 * (1 + kSlack) ? std::clamp(out, 0.0, 255.0) : out;
     }
     case Way::Invert:
         return 255 - u;
@@ -241,9 +243,12 @@ std::array<double, 3> PreciseAdjustment::operator()(const std::array<double, 3>&
             h = rgb[0] == hi ? bc - gc : rgb[1] == hi ? 2.0 + rc - bc : 4.0 + gc - rc;
             h = std::fmod(h / 6.0 + 1.0, 1.0);
         }
-        h = std::fmod(h + a_, 1.0);
-        s = s <= 1 ? std::min(1.0, s * b_) : s * b_;
-        const double v = hi <= 1 ? std::min(1.0, hi * c_) : hi * c_;
+        // (the 8-bit hue turns its byte modulo 256 and reads it back as 255 steps a turn: the same wrap here)
+        double turned = h * 255 + a_ * 255;
+        if (turned >= 256) turned -= 256;
+        h = std::fmod(turned / 255, 1.0);
+        s = s <= 1 + kSlack ? std::min(1.0, s * b_) : s * b_;
+        const double v = hi <= 1 + kSlack ? std::min(1.0, hi * c_) : hi * c_;
         if (s == 0) return {v, v, v};
         const double six = h * 6, i = std::floor(six), f = six - i;
         const double p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f));

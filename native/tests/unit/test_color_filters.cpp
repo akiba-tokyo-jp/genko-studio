@@ -12,6 +12,7 @@
 #include "storage/reader.hpp"
 #include "storage/writer.hpp"
 #include "render/ops_registry.hpp"
+#include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
@@ -53,16 +54,26 @@ core::Document precise(const QString& precision, std::uint32_t side, const std::
     doc.edit_page(0).layers[0].id = "paint";
     return doc;
 }
-core::Document eight_bit_page(std::uint32_t side, bool clear_band = true) {
+core::Document eight_bit_page_of(std::uint32_t side, const std::function<std::array<int, 4>(std::uint32_t, std::uint32_t)>& at) {
     auto doc = blank();
     core::Layer layer; layer.id = "paint"; layer.role = core::LayerRole::User; layer.kind = core::LayerKind::Raster; layer.panel_clip = false;
     std::string bytes;
     for (std::uint32_t y = 0; y < side; ++y)
         for (std::uint32_t x = 0; x < side; ++x)
-            for (const int v : eight_bit(x, y, clear_band)) bytes.push_back(static_cast<char>(v));
+            for (const int v : at(x, y)) bytes.push_back(static_cast<char>(v));
     render::raster::save_raster(doc.page(0), layer, render::Image::frombytes("RGBA", render::Size{int(side), int(side)}, bytes));
     doc.edit_page(0).layers.push_back(layer);
     return doc;
+}
+core::Document eight_bit_page(std::uint32_t side, bool clear_band = true) {
+    return eight_bit_page_of(side, [clear_band](std::uint32_t x, std::uint32_t y) { return eight_bit(x, y, clear_band); });
+}
+// The same picture, precise
+core::Document precise_of(const QString& precision, std::uint32_t side, const std::function<std::array<int, 4>(std::uint32_t, std::uint32_t)>& at) {
+    return precise(precision, side, [&at](std::uint32_t x, std::uint32_t y) {
+        const auto v = at(x, y);
+        return Pixel{v[0] / 255.0, v[1] / 255.0, v[2] / 255.0, v[3] / 255.0};
+    });
 }
 core::Document edit(const core::Document& doc, const Json& op) {
     return core::CommandBus(render::ops_registry()).apply(doc, Json::array({op}), core::Actor("human:test")).doc;
@@ -103,6 +114,9 @@ const std::vector<std::pair<QString, Json>>& filters() {
         {"threshold", Json{{"threshold", 120}}},
         {"gradient_map", Json{{"colors", Json::array({Json::array({20, 0, 80}), Json::array({250, 200, 40}), Json::array({255, 255, 255})})}}},
         {"gradient_map-stops", Json{{"stops", Json::array({Json::array({0.0, Json::array({0, 0, 0})}), Json::array({0.3, Json::array({200, 20, 20})}), Json::array({1.0, Json::array({255, 255, 200})})})}}},
+        // (two colours at one place, the lighter given first: Python's sorted() puts the darker first)
+        {"gradient_map-same", Json{{"stops", Json::array({Json::array({0.0, Json::array({0, 0, 0})}), Json::array({0.5, Json::array({0, 200, 200})}),
+                                                          Json::array({0.5, Json::array({0, 0, 120})}), Json::array({1.0, Json::array({255, 255, 200})})})}}},
         {"brightness_contrast", Json{{"brightness", 20}, {"contrast", 30}, {"channel", "g"}}},
         {"despeckle", Json{{"size_px", 3}}},
         {"glow", Json{{"radius", 6}, {"threshold", 200}}},
@@ -142,9 +156,10 @@ private slots:
         const std::string expected = render::selection::open_picture(*paint(expected_doc).raster_png).convert("RGBA").tobytes();
         const auto after = view(filtered);
         // the steps the 8-bit filter rounds at: one level for a table or a remap, more for its passes of blur
-        // (the 8-bit hue goes through HSV in whole levels: its hue and saturation cut down to 1/255 of their range)
+        // (the 8-bit hue goes through HSV in whole levels: a hue cut to 1/255 of a turn moves a full colour up to three
+        // levels, its saturation and value one each)
         // (its motion, radial and zoom blurs average by Image.blend, which cuts each step down to a whole level)
-        const double tolerance = name == "hue" ? 8 : name == "blur" || name == "glow" || name.startsWith("gradient_map") ? 2
+        const double tolerance = name == "hue" ? 5 : name == "blur" || name == "glow" || name.startsWith("gradient_map") ? 2
                                  : name.startsWith("sharpen") ? 6 : name == "motion_blur" ? 4 : name.endsWith("_blur") ? 7 : 1;
         std::size_t off = 0, worst_at = 0; double worst = 0;
         for (std::size_t i = 0; i < std::size_t(side) * side; ++i) {
@@ -196,6 +211,7 @@ private slots:
         QTest::newRow("motion_blur") << QString("motion_blur") << 1.5;
         QTest::newRow("mosaic") << QString("mosaic") << 1.5 * 0.88;
         QTest::newRow("sharpen") << QString("sharpen") << 1.5 + 12 / 255.0;  // (then contrast and unsharp: checked as above 1)
+        QTest::newRow("glow") << QString("glow") << 1.5;  // (the light added up to 1: more than 1 is already brighter)
     }
     // f32 samples above 1 come out of a filter as HDR, not clipped to 1 as 8 bits would.
     void hdrStays() {
@@ -227,7 +243,7 @@ private slots:
     void correctionLayersLikeEightBit_data() {
         QTest::addColumn<QString>("precision"); QTest::addColumn<QString>("name"); QTest::addColumn<double>("opacity"); QTest::addColumn<bool>("masked");
         const std::vector<QString> kinds{"levels", "levels-table", "curve", "curve-points", "hue", "invert", "posterize", "threshold",
-                                         "gradient_map", "gradient_map-stops", "bitonal", "brightness_contrast"};
+                                         "gradient_map", "gradient_map-stops", "gradient_map-same", "bitonal", "brightness_contrast"};
         for (const QString precision : {"u16", "f32"}) {
             for (const QString& name : kinds) QTest::newRow(qPrintable(precision + "-" + name)) << precision << name << 1.0 << false;
             QTest::newRow(qPrintable(precision + "-hue-faded-masked")) << precision << QString("hue") << 0.6 << true;
@@ -257,7 +273,7 @@ private slots:
         const auto shown = render::render_page(doc.page(0), 200, render::proof_options(), &doc).image.tobytes();
         const auto expected = render::render_page(eight.page(0), 200, render::proof_options(), &eight).image.tobytes();
         QCOMPARE(shown.size(), expected.size());
-        const int limit = name == "hue" ? 8 : 2;  // (the 8-bit hue's HSV in whole levels, as for the filter)
+        const int limit = name == "hue" ? 5 : 2;  // (the 8-bit hue's HSV in whole levels, as for the filter)
         std::size_t off = 0; int worst = 0;
         for (std::size_t i = 0; i < shown.size(); ++i) {
             const int diff = std::abs(int(static_cast<unsigned char>(shown[i])) - int(static_cast<unsigned char>(expected[i])));
@@ -294,6 +310,111 @@ private slots:
         std::set<std::uint32_t> greys;
         for (std::size_t i = 0; i < 64 * 64; ++i) greys.insert(static_cast<std::uint32_t>(std::lround(after.pixel(i)[0] * 65535)));
         QVERIFY2(greys.size() > 1000, qPrintable(QString("%1 distinct greys").arg(greys.size())));
+    }
+
+    // A mosaic's block is the 8-bit layer's at 200 dpi: on a raster of 100 dpi it is half as many pixels, the same size
+    // on the page.
+    void sizesScaleWithTheRaster() {
+        for (const std::uint32_t side : {200u, 100u}) {
+            const auto doc = precise("u16", side, [side](std::uint32_t x, std::uint32_t y) {
+                return Pixel{double(x) / side, double(y) / side, 0.5, 1};
+            });
+            const auto after = view(edit(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "mosaic"}, {"block", 10}}));
+            std::set<std::uint32_t> reds;
+            for (std::uint32_t x = 0; x < side; ++x) reds.insert(static_cast<std::uint32_t>(std::lround(after.pixel(side / 2 * side + x)[0] * 65535)));
+            QCOMPARE(reds.size(), std::size_t(20));  // 25.4 mm in blocks of 10 pixels at 200 dpi
+        }
+    }
+
+    // A correction clipped to the layer under it: only where that layer is, as on the 8-bit page (fully clear and
+    // fully covered, where linear light and sRGB samples composite alike).
+    void clippedCorrectionLikeEightBit() {
+        const auto at = [](std::uint32_t x, std::uint32_t y) {
+            auto v = eight_bit(x, y, false);
+            if (y >= 100 && y < 140) v[3] = 0;
+            return v;
+        };
+        const Json add{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"adjust", Json{{"kind", "invert"}}}, {"clip", true}};
+        const auto doc = edit(precise_of("u16", 200, at), add);
+        const auto eight = edit(eight_bit_page_of(200, at), add);
+        QVERIFY(doc.page(0).layers.back().clip);
+        const auto shown = render::render_page(doc.page(0), 200, render::proof_options(), &doc).image.tobytes();
+        const auto expected = render::render_page(eight.page(0), 200, render::proof_options(), &eight).image.tobytes();
+        QCOMPARE(shown.size(), expected.size());
+        int worst = 0;
+        for (std::size_t i = 0; i < shown.size(); ++i)
+            worst = std::max(worst, std::abs(int(static_cast<unsigned char>(shown[i])) - int(static_cast<unsigned char>(expected[i]))));
+        QVERIFY2(worst <= 1, qPrintable(QString("off by %1").arg(worst)));
+        // where the layer is clear (the band: some 30 rows of the page's picture), what is under it is as it was; not
+        // clipped, the correction changes it too
+        const auto bare = precise_of("u16", 200, at);
+        const auto paper_image = render::render_page(bare.page(0), 200, render::proof_options(), &bare).image;
+        const auto paper = paper_image.tobytes();
+        std::size_t same = 0;
+        for (std::size_t i = 0; i < shown.size(); i += 4) same += shown.compare(i, 4, paper, i, 4) == 0;
+        auto unclipped_add = add; unclipped_add["clip"] = false;
+        const auto unclipped = edit(precise_of("u16", 200, at), unclipped_add);
+        const auto everywhere = render::render_page(unclipped.page(0), 200, render::proof_options(), &unclipped).image.tobytes();
+        std::size_t same_unclipped = 0;
+        for (std::size_t i = 0; i < shown.size(); i += 4) same_unclipped += everywhere.compare(i, 4, paper, i, 4) == 0;
+        QVERIFY2(same >= 25 * 200, qPrintable(QString::number(same)));
+        QCOMPARE(same_unclipped, std::size_t(0));
+    }
+
+    // A correction layer of another kind (an old book's, or a newer one's): one apply_filter does not know does nothing,
+    // as on the 8-bit page; a plugin is left out of a preview and refused elsewhere (it runs in the external runner);
+    // one that moves shapes is refused on a precise page (not ported for precise pixels yet).
+    void otherCorrections() {
+        const auto doc = precise_of("u16", 200, [](std::uint32_t x, std::uint32_t y) { return eight_bit(x, y, false); });
+        const auto with = [&doc](const Json& adjust) {
+            auto out = doc;
+            core::Layer layer; layer.id = "other"; layer.kind = core::LayerKind::Adjust; layer.adjust = adjust;
+            out.edit_page(0).layers.push_back(layer);
+            return out;
+        };
+        const auto plain = render::render_page(doc.page(0), 200, render::proof_options(), &doc).image.tobytes();
+
+        const auto unknown = with(Json{{"kind", "nothing"}});
+        core::validate_color_document(unknown);
+        QCOMPARE(render::render_page(unknown.page(0), 200, render::proof_options(), &unknown).image.tobytes(), plain);
+        const auto merged = edit(unknown, Json{{"op", "merge_down"}, {"page", 1}, {"id", "other"}});
+        QCOMPARE(merged.page(0).layers.size(), std::size_t(1));
+        QCOMPARE(*paint(merged).color_raster, *paint(doc).color_raster);
+
+        const auto plugin = with(Json{{"kind", "plugin:sepia"}});
+        core::validate_color_document(plugin);
+        QVERIFY_EXCEPTION_THROWN(render::render_page(plugin.page(0), 200, render::proof_options(), &plugin), render::NotYetPorted);
+        auto preview = render::proof_options();
+        preview.skip_unported = true;
+        const auto left_out = render::render_page(plugin.page(0), 200, preview, &plugin);
+        QCOMPARE(left_out.image.tobytes(), plain);
+        QCOMPARE(left_out.omitted, std::vector<std::string>{"adjust:plugin"});
+        QVERIFY_EXCEPTION_THROWN(edit(plugin, Json{{"op", "merge_down"}, {"page", 1}, {"id", "other"}}), core::Error);
+
+        for (const char* kind : {"blur", "glow", "rain"}) {
+            const auto shapes = with(Json{{"kind", kind}});
+            try {
+                core::validate_color_document(shapes);
+                QFAIL(kind);
+            } catch (const core::Error& error) {
+                QCOMPARE(QString::fromStdString(error.code()), QString("not_yet_ported"));
+            }
+            auto hidden = shapes;
+            hidden.edit_page(0).layers.back().visible = false;
+            core::validate_color_document(hidden);  // (hidden: the page shows nothing of it)
+        }
+    }
+
+    // A correction merged into f32 HDR keeps going past 1 as the filter does.
+    void mergedCorrectionKeepsHdr() {
+        const auto doc = edit(precise("f32", 8, [](std::uint32_t, std::uint32_t) { return Pixel{1.5, 0.25, 0.5, 1}; }),
+                              Json{{"op", "add_layer"}, {"page", 1}, {"kind", "adjust"}, {"adjust", Json{{"kind", "invert"}}}});
+        const auto merged = edit(doc, Json{{"op", "merge_down"}, {"page", 1}, {"id", doc.page(0).layers.back().id}});
+        const core::ColorRasterView after(*merged.page(0).layers[0].color_raster);
+        QCOMPARE(after.metadata("")["precision"], Json("f32"));
+        const Pixel got = after.pixel(4 * 8 + 4);
+        QVERIFY2(std::abs(got[0] + 0.5) < 1e-5 && std::abs(got[1] - 0.75) < 1e-5 && std::abs(got[2] - 0.5) < 1e-5,
+                 qPrintable(QString("%1 %2 %3").arg(got[0]).arg(got[1]).arg(got[2])));
     }
 
     // A plugin runs in the external runner, not here; precise pen lines are converted to paint first: both refused,

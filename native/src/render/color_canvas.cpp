@@ -241,10 +241,13 @@ bool ColorCanvas::keeps_preceding_alpha() const {
 std::string ColorCanvas::color_raster(std::string_view precision) const {
     return core::encode_color_pixels(static_cast<std::uint32_t>(impl_->size.width),
                                     static_cast<std::uint32_t>(impl_->size.height), precision,
-        [this](std::size_t i) {
+        [this, u16 = precision == "u16"](std::size_t i) {
+            // (a blend or a correction of values in 0..1 may land an ulp outside: back to the end it came from)
+            const auto snap = [](double v) { return v < 0 && v > -1e-9 ? 0.0 : v > 1 && v < 1 + 1e-9 ? 1.0 : v; };
             const auto& p = impl_->pixels[i];
-            return std::array<double, 4>{core::linear_to_srgb(p[0]), core::linear_to_srgb(p[1]),
-                                         core::linear_to_srgb(p[2]), p[3]};
+            std::array<double, 4> out{core::linear_to_srgb(p[0]), core::linear_to_srgb(p[1]), core::linear_to_srgb(p[2]), snap(p[3])};
+            if (u16) for (int c = 0; c < 3; ++c) out[c] = snap(out[c]);
+            return out;
         });
 }
 std::optional<core::PreciseAdjustment> correction_of(const core::Layer& layer) {
@@ -254,9 +257,11 @@ std::optional<core::PreciseAdjustment> correction_of(const core::Layer& layer) {
         if (core::py_truthy(*it)) kind = it->is_string() ? it->get<std::string>() : core::py_str(*it);
         spec.erase(it);
     }
-    if (kind.empty()) return std::nullopt;
-    if (kind == "exposure" || std::find(core::kAdjustments.begin(), core::kAdjustments.end(), kind) == core::kAdjustments.end())
-        throw core::Error("not_yet_ported", "high-precision correction: " + kind);
+    // (another kind: as apply_filter's "unknown filter", the layer does nothing; a plugin, an exposure and the filters
+    // that move shapes are the callers' and validate_color_document's)
+    if (kind.empty() || kind == "exposure" ||
+        std::find(core::kAdjustments.begin(), core::kAdjustments.end(), kind) == core::kAdjustments.end())
+        return std::nullopt;
     try {
         return core::PreciseAdjustment(kind, spec);
     } catch (const core::PyValueError&) {
