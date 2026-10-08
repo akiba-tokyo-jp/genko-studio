@@ -514,9 +514,20 @@ void GuidePanel::keep_pose(const std::optional<QString>& asked) {
     if (asked) {
         name = *asked;
     } else {
+        const Json kept = *p;  // (the figure as it was asked about: the dialog runs the event loop)
         const auto typed = ask::get_text(this, QStringLiteral("ポーズを保存"), QStringLiteral("ポーズの名前"));
         if (!typed) return;
         name = *typed;
+        if (name.trimmed().isEmpty()) return;
+        try {
+            core::poses::save_pose(name.toStdString(), kept);
+        } catch (const std::exception& error) {
+            window_->flash(QString::fromUtf8(error.what()), 5000, true);
+            return;
+        }
+        show_prim();
+        window_->flash(QStringLiteral("ポーズ「%1」を残しました（ポーズの一覧の「自分: …」）").arg(name.trimmed()), 4000);
+        return;
     }
     if (name.trimmed().isEmpty()) return;
     try {

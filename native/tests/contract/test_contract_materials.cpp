@@ -416,6 +416,89 @@ private slots:
         QCOMPARE(added[0]["folder"], Json("pack"));
     }
 
+    // Names inside a zip as Python's zipfile reads them: code page 437 without the UTF-8 flag ('éá.png' for the bytes
+    // 82 A0), "./a.png" unpacked as "a.png" and found by pack.json's "./a.png" (Python 3.12 gives the same: the
+    // material "éá" in "cp", "点" in "dot").
+    void zipNamesAsPythonReadsThem() {
+        QTemporaryDir config;
+        const fs::path dir = core::path_from_utf8(config.path().toStdString());
+        const std::string png = render::write_png(render::Image::create("RGB", render::Size{2, 2}));
+        render::zip::write(dir / "cp.zip", {{"AB.png", png}});
+        std::string bytes = slurp(dir / "cp.zip");
+        for (std::size_t at = bytes.find("AB.png"); at != std::string::npos; at = bytes.find("AB.png", at)) bytes.replace(at, 2, "\x82\xA0");
+        spit(dir / "cp.zip", bytes);
+        const auto files = render::zip::read(dir / "cp.zip");
+        QCOMPARE(files.size(), std::size_t(1));
+        QCOMPARE(files.begin()->first, std::string("éá.png"));
+        Json added = materials::import_pack(dir, dir / "cp.zip");
+        QCOMPARE(added.size(), std::size_t(1));
+        QCOMPARE(added[0]["name"], Json("éá"));
+        QCOMPARE(added[0]["folder"], Json("cp"));
+        QCOMPARE(render::zip::member_path("./a.png"), std::string("a.png"));
+        QCOMPARE(render::zip::inside_path("./a.png"), std::optional<std::string>("a.png"));
+        render::zip::write(dir / "dot.zip", {{"pack.json", R"([{"name": "点", "kind": "image", "file": "./a.png"}])"}, {"./a.png", png}});
+        added = materials::import_pack(dir, dir / "dot.zip");
+        QCOMPARE(added.size(), std::size_t(1));
+        QCOMPARE(added[0]["name"], Json("点"));
+        QCOMPARE(added[0]["folder"], Json("dot"));
+    }
+
+    // Beyond Python: pack.json's "file" is read only inside the pack. "../x.png", an absolute path and a path through
+    // a linked folder are skipped like a missing picture (Python 3.12 reads all four here: 外, 絶対, リンク越し, 中).
+    void packFilesStayInsideThePack() {
+        QTemporaryDir config;
+        const fs::path dir = core::path_from_utf8(config.path().toStdString());
+        const std::string png = render::write_png(render::Image::create("RGB", render::Size{2, 2}));
+        spit(dir / "outside.png", png);
+        spit(dir / "pack" / "real" / "in.png", png);
+        fs::create_directory_symlink(dir, dir / "pack" / "linked");
+        const Json manifest = Json::array({Json{{"name", "外"}, {"kind", "image"}, {"file", "../outside.png"}},
+                                           Json{{"name", "絶対"}, {"kind", "image"}, {"file", core::path_to_utf8(dir / "outside.png")}},
+                                           Json{{"name", "リンク越し"}, {"kind", "image"}, {"file", "linked/outside.png"}},
+                                           Json{{"name", "中"}, {"kind", "image"}, {"file", "real/in.png"}}});
+        spit(dir / "pack" / "pack.json", core::dump(manifest, core::DumpOptions{}));
+        const Json added = materials::import_pack(dir, dir / "pack");
+        QCOMPARE(added.size(), std::size_t(1));
+        QCOMPARE(added[0]["name"], Json("中"));
+        QCOMPARE(render::zip::inside_path("../outside.png"), std::nullopt);
+        QCOMPARE(render::zip::inside_path("/x/outside.png"), std::nullopt);
+        // the same in a zip
+        render::zip::write(dir / "out.zip", {{"pack.json", core::dump(Json::array({manifest[0], manifest[1], Json{{"name", "中"}, {"kind", "image"}, {"file", "in.png"}}}), core::DumpOptions{})},
+                                             {"in.png", png}});
+        const Json zipped = materials::import_pack(dir, dir / "out.zip");
+        QCOMPARE(zipped.size(), std::size_t(1));
+        QCOMPARE(zipped[0]["name"], Json("中"));
+    }
+
+    // Beyond Python: a picture that cannot be kept leaves nothing behind (no picture in the library without its entry).
+    void aRefusedPictureLeavesNoFile() {
+        QTemporaryDir config;
+        const fs::path dir = core::path_from_utf8(config.path().toStdString());
+        spit(dir / "a.png", render::write_png(render::Image::create("RGB", render::Size{4, 4})));
+        const auto pictures = [&] {
+            std::size_t n = 0;
+            for (const auto& entry : fs::directory_iterator(materials::library_dir(dir))) n += entry.path().extension() == ".png" ? 1 : 0;
+            return n;
+        };
+        // a width that is not a number (float("wide"))
+        materials::add_material(dir, "x", "lines", "マイ素材");
+        QVERIFY_THROWS_EXCEPTION(core::Error, materials::import_image(dir, dir / "a.png", Json(), Json("画像"), Json("wide")));
+        QCOMPARE(pictures(), std::size_t(0));
+        // a library that would pass 1 MB
+        const std::string big(1048576 - 200, 'x');
+        spit(materials::library_dir(dir) / "library.json", "[{\"id\": \"u-big\", \"name\": \"" + big + "\", \"kind\": \"lines\", \"folder\": \"f\"}]");
+        QVERIFY(slurp(materials::library_dir(dir) / "library.json").size() <= 1048576);
+        const std::string kept = slurp(materials::library_dir(dir) / "library.json");
+        try {
+            materials::import_image(dir, dir / "a.png");
+            QFAIL("a library past 1 MB was written");
+        } catch (const core::PyValueError& e) {
+            QCOMPARE(std::string(e.what()), std::string("the material library would be too large for the materials panel (at most 1 MB)"));
+        }
+        QCOMPARE(pictures(), std::size_t(0));
+        QCOMPARE(slurp(materials::library_dir(dir) / "library.json"), kept);
+    }
+
     // zip files that are broken, encrypted, zip64 or too large are refused before anything is added.
     void badZipsAreRefused() {
         QTemporaryDir config;

@@ -35,7 +35,9 @@ using core::Json;
 namespace {
 
 constexpr std::int64_t kMaxPictureBytes = 64ll << 20;  // (one picture read into the library or out of it)
-constexpr std::int64_t kMaxListBytes = 16ll << 20;     // (library.json, folders.json, pack.json)
+// (library.json, folders.json: as large as the materials panel reads them, so what the panel cannot show is never changed)
+constexpr std::int64_t kMaxListBytes = 1ll << 20;
+constexpr std::int64_t kMaxPackListBytes = 16ll << 20;  // (a pack's pack.json)
 
 fs::path library_file(const fs::path& config_dir) { return library_dir(config_dir) / "library.json"; }
 fs::path folders_file(const fs::path& config_dir) { return library_dir(config_dir) / "folders.json"; }
@@ -104,12 +106,19 @@ Json read_entries(const fs::path& config_dir) {
     return out;
 }
 
-void save(const fs::path& config_dir, const Json& items) {
-    need_safe_folder(config_dir);
+// library.json's text for the entries (core::Error when one cannot be written as JSON: a name that is not UTF-8, NaN)
+std::string library_text(const Json& items) {
     core::DumpOptions options;
     options.indent = 1;
     options.item_separator = ",";
-    const std::string text = core::dump(items, options);
+    return core::dump(items, options);
+}
+
+void save_text(const fs::path& config_dir, const std::string& text) {
+    need_safe_folder(config_dir);
+    if (static_cast<std::int64_t>(text.size()) > kMaxListBytes) {
+        throw core::PyValueError("the material library would be too large for the materials panel (at most 1 MB)");
+    }
     try {
         storage::write_atomic(library_file(config_dir), text);
     } catch (const core::Error& error) {
@@ -117,6 +126,8 @@ void save(const fs::path& config_dir, const Json& items) {
                                               " (" + error.what() + ")");
     }
 }
+
+void save(const fs::path& config_dir, const Json& items) { save_text(config_dir, library_text(items)); }
 
 // The empty folders' list: lenient as Python reads it, or strictly.
 std::vector<std::string> empty_folders(const fs::path& config_dir, bool strict) {
@@ -150,19 +161,23 @@ bool plain_name(const std::string& name) {
            !(name.size() >= 2 && name[1] == ':');
 }
 
-std::string read_picture(const fs::path& path) {
+// A file read whole: a picture (64 MB at most), or a pack's pack.json (`what` "pack.json", 16 MB at most).
+std::string read_picture(const fs::path& path, const std::string& what = "picture") {
+    const std::int64_t most = what == "picture" ? kMaxPictureBytes : kMaxPackListBytes;
     std::error_code ec;
     const auto status = fs::symlink_status(path, ec);
     if (ec || status.type() == fs::file_type::not_found) {
         throw core::PyUncaught("FileNotFoundError", "[Errno 2] No such file or directory: " + core::py_repr_str(core::path_to_utf8(path)));
     }
-    if (status.type() != fs::file_type::regular) throw core::PyValueError("the picture is a link or not a file: " + core::path_to_utf8(path));
+    if (status.type() != fs::file_type::regular) throw core::PyValueError("the " + what + " is a link or not a file: " + core::path_to_utf8(path));
     const auto size = fs::file_size(path, ec);
-    if (ec || static_cast<std::int64_t>(size) > kMaxPictureBytes) throw core::PyValueError("the picture is too large (at most 64 MB): " + core::path_to_utf8(path));
+    if (ec || static_cast<std::int64_t>(size) > most) {
+        throw core::PyValueError("the " + what + " is too large (at most " + std::to_string(most >> 20) + " MB): " + core::path_to_utf8(path));
+    }
     std::ifstream file(path, std::ios::binary);
     if (!file) throw core::PyUncaught("PermissionError", "[Errno 13] Permission denied: " + core::py_repr_str(core::path_to_utf8(path)));
     std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    if (file.bad()) throw core::PyUncaught("OSError", "the picture cannot be read: " + core::path_to_utf8(path));
+    if (file.bad()) throw core::PyUncaught("OSError", "the " + what + " cannot be read: " + core::path_to_utf8(path));
     return bytes;
 }
 
@@ -183,14 +198,15 @@ std::string ascii_lower(std::string text) {
 // import_image for a picture already read: copied as an RGBA PNG, then registered.
 Json import_picture(const fs::path& config_dir, const std::string& bytes, const Json& name, const std::string& fallback_name,
                     const Json& folder, const Json& width_mm) {
+    // (as Python: the picture opened, float(width_mm or 60.0), then add_material's checks of the name and the folder)
     const Image rgba = selection::open_picture(bytes).convert("RGBA");
-    Json items = read_entries(config_dir);  // (a library that cannot be read is refused before anything is written)
+    const double width = core::py_truthy(width_mm) ? core::to_float(width_mm) : 60.0;
     const Json given = core::py_truthy(name) ? name : Json(fallback_name);
     const std::string clean = stripped(given);
     if (clean.empty()) throw core::PyValueError("a material needs a name");
     std::string where = stripped(folder);
     if (where.empty()) where = "マイ素材";
-    const double width = core::py_truthy(width_mm) ? core::py_float(width_mm) : 60.0;
+    Json items = read_entries(config_dir);  // (a library that cannot be read is refused before anything is written)
     Json item = Json::object();
     item["id"] = "u-" + core::new_id();
     item["name"] = clean;
@@ -198,22 +214,29 @@ Json import_picture(const fs::path& config_dir, const std::string& bytes, const 
     item["kind"] = "image";
     item["width_mm"] = width;
     const std::string file = item["id"].get<std::string>() + ".png";
+    item["file"] = file;
+    item["aspect"] = core::py_round(static_cast<double>(rgba.height()) / std::max(1, rgba.width()), 5);
+    items.push_back(item);
+    // (the library's new text is made first: what cannot be kept leaves no picture behind)
+    const std::string text = library_text(items);
+    need_safe_folder(config_dir);
+    if (static_cast<std::int64_t>(text.size()) > kMaxListBytes) {
+        throw core::PyValueError("the material library would be too large for the materials panel (at most 1 MB)");
+    }
     try {
         storage::write_atomic(library_dir(config_dir) / file, write_png(rgba));
     } catch (const core::Error& error) {
         throw core::PyUncaught("OSError", "the picture cannot be written into the material library (" + std::string(error.what()) + ")");
     }
-    item["file"] = file;
-    item["aspect"] = core::py_round(static_cast<double>(rgba.height()) / std::max(1, rgba.width()), 5);
-    items.push_back(item);
-    save(config_dir, items);
+    save_text(config_dir, text);
     return get_material(config_dir, item["id"].get<std::string>());
 }
 
 // The files of a pack, by their path inside it ("a/b.png"), and how to read one.
 struct PackFiles {
     std::vector<std::string> names;
-    std::function<std::optional<std::string>(const std::string&)> read;  // nothing: no such file
+    // a file by its path inside the pack (nothing: no such file); `what`: "picture" or "pack.json", for its size cap
+    std::function<std::optional<std::string>(const std::string&, const std::string& what)> read;
 };
 
 // The parts of a path inside a pack, as sorted(Path.rglob(…)) compares them.
@@ -231,7 +254,7 @@ std::vector<std::string> parts_of(const std::string& name) {
 
 Json import_files(const fs::path& config_dir, const PackFiles& pack, const std::string& folder) {
     Json added = Json::array();
-    if (const auto manifest = pack.read("pack.json")) {
+    if (const auto manifest = pack.read("pack.json", "pack.json")) {
         if (core::utf8_error(*manifest)) throw core::PyValueError(*core::utf8_error(*manifest));
         const Json entries = core::parse_python_json(*manifest, nullptr, core::ParseOptions{.universal_newlines = true});
         if (!entries.is_array()) return added;
@@ -250,8 +273,10 @@ Json import_files(const fs::path& config_dir, const PackFiles& pack, const std::
             const Json where = core::py_truthy(own) ? own : Json(folder);
             Json item;
             if (kind == "image") {
+                // (Path(pack) / file: its "." and empty parts go; one that leaves the pack is never read)
                 const std::string file = core::py_str(core::py_truthy(core::py_get(entry, "file")) ? entry["file"] : Json(""));
-                const auto picture = file.empty() || file.back() == '/' ? std::nullopt : pack.read(file);
+                const std::optional<std::string> inside = zip::inside_path(file);
+                const auto picture = inside ? pack.read(*inside, "picture") : std::nullopt;
                 if (!picture) continue;  // (not a file in the pack)
                 item = import_picture(config_dir, *picture, entry["name"], "", where, core::py_get(entry, "width_mm"));
                 if (core::py_truthy(core::py_get(data, "tags"))) {
@@ -272,7 +297,7 @@ Json import_files(const fs::path& config_dir, const PackFiles& pack, const std::
         const std::string base = slash == std::string::npos ? name : name.substr(slash + 1);
         const auto [stem, suffix] = stem_suffix(base);
         if (std::find(pictures.begin(), pictures.end(), ascii_lower(suffix)) == pictures.end()) continue;
-        const auto bytes = pack.read(name);
+        const auto bytes = pack.read(name, "picture");
         if (!bytes) continue;
         const std::string where = slash == std::string::npos ? folder : folder + "/" + name.substr(0, slash);
         added.push_back(import_picture(config_dir, *bytes, Json(stem), stem, Json(where), Json()));
@@ -364,6 +389,8 @@ std::vector<std::string> folders(const fs::path& config_dir) {
     for (const std::string& extra : empty_folders(config_dir, false)) add(extra);
     return seen;
 }
+
+std::vector<std::string> empty_folders(const fs::path& config_dir) { return empty_folders(config_dir, false); }
 
 void add_folder(const fs::path& config_dir, const std::string& name) {
     const std::string clean = core::py_strip(name);
@@ -484,9 +511,13 @@ Json import_pack(const fs::path& config_dir, const fs::path& path, const std::op
         auto files = std::make_shared<std::map<std::string, std::string>>(zip::read(path));
         PackFiles pack;
         for (const auto& [name, _] : *files) pack.names.push_back(name);
-        pack.read = [files](const std::string& name) -> std::optional<std::string> {
+        pack.read = [files](const std::string& name, const std::string& what) -> std::optional<std::string> {
             const auto found = files->find(name);
             if (found == files->end()) return std::nullopt;
+            const std::int64_t most = what == "picture" ? kMaxPictureBytes : kMaxPackListBytes;
+            if (static_cast<std::int64_t>(found->second.size()) > most) {
+                throw core::PyValueError("the " + what + " is too large (at most " + std::to_string(most >> 20) + " MB): " + name);
+            }
             return found->second;
         };
         return import_files(config_dir, pack, folder && !folder->empty() ? *folder : stem);
@@ -506,15 +537,19 @@ Json import_pack(const fs::path& config_dir, const fs::path& path, const std::op
         pack.names.push_back(std::move(name));
     }
     if (ec) throw core::PyUncaught("OSError", "the pack cannot be read: " + core::path_to_utf8(path) + " (" + ec.message() + ")");
-    pack.read = [root = path](const std::string& name) -> std::optional<std::string> {
+    pack.read = [root = path](const std::string& name, const std::string& what) -> std::optional<std::string> {
+        // (a path already inside the pack: each folder on the way a real folder, the file a real file — no link followed)
         if (name.empty()) return std::nullopt;
-        for (const std::string& part : parts_of(name)) {
-            if (part == ".." || part.empty()) return std::nullopt;
+        fs::path at = root;
+        const std::vector<std::string> parts = parts_of(name);
+        for (std::size_t i = 0; i < parts.size(); ++i) {
+            if (parts[i].empty() || parts[i] == "." || parts[i] == "..") return std::nullopt;
+            at /= core::path_from_utf8(parts[i]);
+            std::error_code missing;
+            const auto type = fs::symlink_status(at, missing).type();
+            if (type != (i + 1 < parts.size() ? fs::file_type::directory : fs::file_type::regular)) return std::nullopt;
         }
-        const fs::path file = root / core::path_from_utf8(name);
-        std::error_code missing;
-        if (fs::symlink_status(file, missing).type() != fs::file_type::regular) return std::nullopt;
-        return read_picture(file);
+        return read_picture(at, what);
     };
     return import_files(config_dir, pack, folder && !folder->empty() ? *folder : file_name);
 }

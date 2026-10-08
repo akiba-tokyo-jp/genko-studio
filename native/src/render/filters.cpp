@@ -626,6 +626,10 @@ Image within(const Image& original, const Image& filtered, const Image& mask) {
 }
 
 Image remap_area(const Image& rgba, int width, int height, const std::vector<double>& map_x, const std::vector<double>& map_y) {
+    const std::size_t cells = static_cast<std::size_t>(std::max(0, width)) * static_cast<std::size_t>(std::max(0, height));
+    if (width < 0 || height < 0 || map_x.size() != cells || map_y.size() != cells) {
+        throw core::Error("value", "remap_area: the maps must hold width × height places");
+    }
     const Image src = rgba.mode() == "RGBA" ? rgba : rgba.convert("RGBA");
     return remap_maps(src, width, height, map_x, map_y);
 }

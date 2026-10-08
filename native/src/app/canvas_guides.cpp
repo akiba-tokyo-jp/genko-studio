@@ -12,6 +12,7 @@
 
 #include "app/canvas.hpp"
 #include "app/theme.hpp"
+#include "core/frames.hpp"
 #include "core/mannequin.hpp"
 #include "core/mesh3d.hpp"
 #include "core/prim3d.hpp"
@@ -106,6 +107,27 @@ core::Json PageCanvas::page_rulers() const {
         out.push_back(r);
     }
     return out;
+}
+
+std::optional<std::vector<core::PenPoints>> PageCanvas::snapped_preview(const core::PenPoints& points) const {
+    const core::Json rs = page_rulers();
+    const core::Page* p = page();
+    if (!(snap_rulers && !rs.empty() && points.size() >= 2) || p == nullptr) return std::nullopt;
+    const core::rulers::FrameContains inside = [p](const core::Json& frame_id, double x, double y) {  // (ops._frame_contains)
+        if (p->frames.empty() || !frame_id.is_string()) return false;
+        const core::Frame* frame = p->find_frame(frame_id.get_ref<const std::string&>());
+        return frame != nullptr && core::contains(*frame, core::Num(x), core::Num(y));
+    };
+    const core::Layer* layer = drawing_layer ? drawing_layer() : nullptr;
+    const core::Json layer_id = layer != nullptr ? core::Json(layer->id) : core::Json();
+    const core::Json* lid = layer != nullptr ? &layer_id : nullptr;
+    std::vector<core::PenPoints> out{core::rulers::snap(points, rs, inside, core::Json(), lid)};
+    for (core::PenPoints& copy : core::rulers::symmetry_copies(out.front(), rs, inside, lid)) out.push_back(std::move(copy));
+    return out;
+}
+
+bool PageCanvas::snapped_preview_applies() const {
+    return snap_rulers && stroke_.size() >= 2 && page() != nullptr && !page_rulers().empty();
 }
 
 QPointF PageCanvas::grid_point(double x, double y) const {
@@ -249,11 +271,9 @@ void PageCanvas::draw_one_ruler(QPainter& painter, const core::Json& ruler, bool
                 const double angle = copies > 2 ? base + k * 2 * kPi / copies : base;
                 line_across(painter, a, QPointF(std::cos(angle), std::sin(angle)));
             }
-        } else if (kind == "guide") {
-            const auto lines = core::rulers::outline(ruler, page_size);
-            painter.setPen(QPen(QColor(0, 170, 200), 1, Qt::DashLine));
-            for (const auto& line : lines) draw_poly(line, out_x, out_y);
         }
+        // (a guide line pulled from the scale shows only while it is dragged, as Python's _draw_one_ruler has no
+        // branch for it: placed, it snaps lines without being drawn)
     } catch (const std::exception&) {
         // (a ruler that cannot be drawn as it is: its points only)
     }
@@ -644,15 +664,17 @@ bool PageCanvas::prim_move(const QPointF& pos) {
     const double sx = drag.start.x(), sy = drag.start.y();
     try {
         if (drag.handle == "pelvis" || drag.handle == "move") {
-            std::array<double, 3> at{0, 0, 0};
-            if (orig.contains("pos") && orig["pos"].is_array())
-                for (std::size_t i = 0; i < 3 && i < orig["pos"].size(); ++i) at[i] = core::to_float(orig["pos"][i]);
-            prim["pos"] = core::Json::array({core::py_round(at[0] + mm.x() - sx, 3), core::py_round(at[1] + mm.y() - sy, 3), at[2]});
+            // ox, oy, *rest = list(orig.get("pos") or [0, 0, 0]) + [0]: the height kept as it was (0 stays 0)
+            core::Json was = orig.contains("pos") && core::py_truthy(orig["pos"]) ? core::py_list(orig["pos"]) : core::Json::array({0, 0, 0});
+            was.push_back(0);
+            const core::Json z = was.size() > 2 ? was[2] : core::Json(0);
+            prim["pos"] = core::Json::array({core::py_round(core::to_float(was[0]) + mm.x() - sx, 3), core::py_round(core::to_float(was[1]) + mm.y() - sy, 3), z});
         } else if (drag.handle == "turn") {
-            std::array<double, 3> r{0, 0, 0};
-            if (orig.contains("rot") && orig["rot"].is_array())
-                for (std::size_t i = 0; i < 3 && i < orig["rot"].size(); ++i) r[i] = core::to_float(orig["rot"][i]);
-            prim["rot"] = core::Json::array({core::py_round(r[0] - (mm.y() - sy) / 40, 4), core::py_round(r[1] + (mm.x() - sx) / 40, 4), r[2]});
+            // tip, turn, lean = (list(orig.get("rot") or [0, 0, 0]) + [0, 0, 0])[:3]: the lean kept as it was
+            core::Json was = orig.contains("rot") && core::py_truthy(orig["rot"]) ? core::py_list(orig["rot"]) : core::Json::array({0, 0, 0});
+            for (int k = 0; k < 3; ++k) was.push_back(0);
+            prim["rot"] = core::Json::array({core::py_round(core::to_float(was[0]) - (mm.y() - sy) / 40, 4),
+                                             core::py_round(core::to_float(was[1]) + (mm.x() - sx) / 40, 4), was[2]});
         } else {
             core::Json change;
             if (kind_of(prim) == "figure") {

@@ -41,6 +41,8 @@ void PageCanvas::begin_stroke(const QPointF& mm, double pressure, double rotatio
     stroke_tablet_ = tablet;
     stroke_id_ = core::new_id();  // (the id the line will get: its grain and scatter are drawn with it now)
     live_.reset();
+    live_copies_.clear();
+    live_snapped_ = false;
     live_sync();
     update();
 }
@@ -58,7 +60,12 @@ void PageCanvas::extend_stroke(const QPointF& mm, double pressure, double rotati
     }
     const bool had_live = live_ != nullptr;
     live_sync();
-    // only the part of the screen the line changed is painted again (the rest of the page is as it was)
+    // only the part of the screen the line changed is painted again (the rest of the page is as it was); a line
+    // snapped to a ruler moves as a whole, so it is painted again everywhere
+    if (live_snapped_ || (!live_ && (tool_ == QLatin1String("pen") || tool_ == QLatin1String("eraser")) && snapped_preview_applies())) {
+        update();
+        return;
+    }
     if (redrawn || !had_live || !live_) {
         if (live_ || redrawn) {
             update();
@@ -89,6 +96,8 @@ void PageCanvas::finish_stroke() {
     if (turns.size() == 1) turns.push_back(turns.back());
     StrokeInput input{std::move(points), std::move(turns), stroke_id_, tool_};
     committing_ = std::move(live_);
+    live_copies_.clear();  // (the copies are drawn by their own tiles once the window has added them)
+    live_snapped_ = false;
     emit strokeCommitted(input);  // (the window applies it now: stroke_applied or stroke_dropped)
     committing_.reset();
     perf::event("stroke_committed", {{"points", static_cast<std::int64_t>(input.points.size())}});
@@ -110,7 +119,7 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
         setCursor(Qt::SizeAllCursor);
     } else if (tool_ == QLatin1String("picker") || tool_ == QLatin1String("fill")) {
         setCursor(Qt::PointingHandCursor);
-    } else if (tool_ == QLatin1String("lassofill") || tool_ == QLatin1String("gradient") || tool_ == QLatin1String("shape") ||
+    } else if (tool_ == QLatin1String("lassofill") || tool_ == QLatin1String("gradient") ||
                tool_ == QLatin1String("reshape") || tool_ == QLatin1String("ruler") || tool_ == QLatin1String("3d") ||
                tool_ == QLatin1String("effect") || tool_ == QLatin1String("stamp")) {
         setCursor(Qt::CrossCursor);
@@ -298,6 +307,7 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         update();
         return;
     }
+    if (tool_release()) return;  // (線の編集・つまむ・図形・囲って塗る・効果線: before the others, as Python releases them)
     if (tool_drag_) {
         const auto [s, e] = *tool_drag_;
         tool_drag_.reset();
@@ -333,7 +343,6 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         ruler_release();
         return;
     }
-    if (tool_release()) return;
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
     if (tool_ == QLatin1String("marquee")) {
         press_pos_.reset();
@@ -375,7 +384,7 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
         finish_frame_poly();
         return;
     }
-    QWidget::mouseDoubleClickEvent(event);
+    // (otherwise the second press of a double click is swallowed, as in Python: never a second fill, stamp or cut)
 }
 
 void PageCanvas::leaveEvent(QEvent*) {
@@ -443,7 +452,8 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
     if (down) {
         // (not while a line, a selection or its handles are being dragged: the drag ends with the tool it began with)
         const bool dragging = !stroke_.empty() || !marquee_stroke_.empty() || sel_drag_ || ellipse_drag_ || !lasso_fill_.empty() || shape_drag_ ||
-                              vector_drag_ || vector_trace_ || reshape_;
+                              vector_drag_ || vector_trace_ || reshape_ || tool_drag_ || zoom_drag_ || frame_drag_ || prim_drag_ ||
+                              ruler_drag_ || effect_drag_ || panning_;
         if (!tool.isEmpty() && !held_tool_ && !dragging && tool != tool_) {
             held_tool_ = tool_;
             held_key_ = key;

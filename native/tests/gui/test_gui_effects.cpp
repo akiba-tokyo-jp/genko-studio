@@ -10,7 +10,9 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDir>
 #include <QDockWidget>
+#include <QScrollArea>
 #include <QDoubleSpinBox>
 #include <QGroupBox>
 #include <QToolButton>
@@ -41,6 +43,7 @@
 #include "app/subview.hpp"
 #include "app/tiles.hpp"
 #include "app/tool_settings.hpp"
+#include "app/wording.hpp"
 #include "core/pynum.hpp"
 #include "gui_support.hpp"
 #include "render/materials.hpp"
@@ -203,12 +206,17 @@ private slots:
         // the materials panel: three pages
         auto* dock = s.window->findChild<QDockWidget*>(QStringLiteral("素材"));
         QVERIFY(dock != nullptr);
+        // (as Python's side panels: it scrolls on a small screen, a tab in the right row that closes when done with)
+        QVERIFY(qobject_cast<QScrollArea*>(dock->widget()) != nullptr);
+        QVERIFY(dock->features().testFlag(QDockWidget::DockWidgetClosable));
+        QCOMPARE(dock->minimumWidth(), 200);
         QCOMPARE(s.panel().tabs->count(), 3);
         QCOMPARE(s.panel().tabs->tabText(0), QStringLiteral("素材"));
         QCOMPARE(s.panel().tabs->tabText(1), QStringLiteral("トーン"));
         QCOMPARE(s.panel().tabs->tabText(2), QStringLiteral("効果線"));
         s.trigger("act_materials");
         QVERIFY(dock->isVisible());
+        QVERIFY(s.window->tabifiedDockWidgets(dock).contains(s.window->findChild<QDockWidget*>(QStringLiteral("ページ"))));
     }
 
     void effectLinesPutMovedAndEdited() {
@@ -259,6 +267,22 @@ private slots:
         taper->setCurrentIndex(taper->findData(QStringLiteral("none")));
         emit taper->activated(taper->currentIndex());
         QCOMPARE(s.last()["params"], Json({{"taper", false}}));
+        // typed and ended with Return while the field has the focus: one edit only (the fields are made again under
+        // the focus, and the one losing it sends nothing more)
+        s.window->activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(s.window.get()));
+        auto* width = effect_spin(panel, "width_mm");
+        width->setFocus();
+        QApplication::processEvents();
+        const std::size_t edits = s.ops.size();
+        width->selectAll();
+        QTest::keyClicks(width, QStringLiteral("0.75"));
+        QTest::keyClick(width, Qt::Key_Return);
+        QApplication::processEvents();
+        s.canvas()->setFocus();
+        QApplication::processEvents();
+        QCOMPARE(s.ops.size(), edits + 1);
+        QCOMPARE(s.last()["params"], Json({{"width_mm", 0.75}}));
         // inside the selection only, clear of it, both taken away
         s.trigger("act_marquee");
         inject::mouse_stroke(s.canvas(), {QPointF(30, 40), QPointF(50, 60), QPointF(70, 90)});
@@ -324,12 +348,13 @@ private slots:
         QCOMPARE(s.canvas()->tool(), QStringLiteral("stamp"));
         QVERIFY(s.window->pending_material().has_value());
         QCOMPARE((*s.window->pending_material())["id"], Json("dot-60-30"));
+        s.window->brush_panel()->gap->setValue(1.7);
         inject::click_mm(s.canvas(), QPointF(40, 60));
         Json op = s.last();
         QCOMPARE(op["op"], Json("stamp_material"));
         QCOMPARE(op["material_id"], Json("dot-60-30"));
         QVERIFY(close_to(op["at"]["x_mm"], 40) && close_to(op["at"]["y_mm"], 60));
-        QVERIFY(op["at"].contains("gap_mm"));
+        QCOMPARE(op["at"]["gap_mm"], Json(1.7));  // (the brush panel's 隙間を閉じる: self.brush.gap)
         // the tone made is the layer drawn on: the トーン tab edits it
         const std::string tone = op["id"].get<std::string>();
         QCOMPARE(s.window->target_layer()->id, tone);
@@ -576,7 +601,12 @@ private slots:
                  (QStringList{"scanimage", "--format=png", "--resolution=300", "--mode=Color", "--output-file=/t/scan.png"}));
         QCOMPARE(app::scanner::command(QStringLiteral("sane"), QStringLiteral("o.png")).at(3), QStringLiteral("--mode=Gray"));
         QCOMPARE(app::scanner::command(QStringLiteral("wia"), QStringLiteral("C:/t/scan.bmp")).front(), QStringLiteral("powershell"));
-        QVERIFY(app::scanner::command(QStringLiteral("wia"), QStringLiteral("C:/t/scan.bmp")).back().contains(QStringLiteral("SaveFile('C:/t/scan.bmp')")));
+        QVERIFY(app::scanner::command(QStringLiteral("wia"), QStringLiteral("C:/t/scan.bmp"))
+                    .back()
+                    .contains(QStringLiteral("SaveFile('%1')").arg(QDir::toNativeSeparators(QStringLiteral("C:/t/scan.bmp")))));
+        QVERIFY(app::scanner::command(QStringLiteral("wia"), QStringLiteral("C:/O'Brien/scan.bmp"))
+                    .back()
+                    .contains(QStringLiteral("SaveFile('%1')").arg(QDir::toNativeSeparators(QStringLiteral("C:/O''Brien/scan.bmp")))));
         const auto fails = [](const app::scanner::Runner& run, const QString& how) {
             try {
                 app::scanner::scan(600, QStringLiteral("gray"), run, 1000, std::optional<QString>(how));
@@ -617,6 +647,7 @@ private slots:
         QVERIFY(view != nullptr);
         auto* dock = s.window->findChild<QDockWidget*>(QStringLiteral("サブビュー"));
         QVERIFY(dock != nullptr);
+        QVERIFY(!dock->isVisible());  // (for some work only: brought from the menu, as Python's; a small screen fits without it)
         QCOMPARE(view->choice->count(), 0);
         const QString file = s.tmp.path() + QStringLiteral("/資料.png");
         render::Image picture = render::Image::create("RGB", render::Size{40, 20}, render::Ink{200, 10, 10});
@@ -647,9 +678,26 @@ private slots:
         // kept for the next window; taken away
         app::SubView again(s.window.get());
         QCOMPARE(again.choice->count(), 1);
+        QVERIFY(again.picture->image().isNull());  // (read when the panel is first shown)
+        again.show();
+        QVERIFY(!again.picture->image().isNull());
         view->remove_current();
         QCOMPARE(view->choice->count(), 0);
         QVERIFY(app::kept_pictures().isEmpty());
+    }
+
+    void libraryRefusalsInThePersonsWords() {
+        // (the library's and the packs' refusals beyond Python, as the person reads them)
+        using app::wording::error;
+        QCOMPARE(error(std::string("the material library would be too large for the materials panel (at most 1 MB)")),
+                 QStringLiteral("素材ライブラリの一覧が大きくなりすぎるので、書き換えませんでした（1 MB まで）"));
+        QCOMPARE(error(std::string("the pack.json is too large (at most 16 MB): pack.json")), QStringLiteral("素材パックの pack.json が大きすぎます（16 MB まで）"));
+        QCOMPARE(error(std::string("the pack.json is a link or not a file: /x/pack.json")),
+                 QStringLiteral("素材パックの pack.json がリンクかファイルではないので読みません"));
+        QCOMPARE(error(std::string("the pack cannot be read as a zip file (a name inside is not UTF-8)")),
+                 QStringLiteral("zip ファイルの中のファイル名が読めません（UTF-8 ではありません）"));
+        QCOMPARE(error(std::string("the pack cannot be read as a zip file (it ends too soon)")), QStringLiteral("zip ファイルが壊れていて読めません"));
+        QCOMPARE(error(std::string("the picture is too large (at most 64 MB): a.png")), QStringLiteral("画像ファイルが大きすぎます（64 MB まで）"));
     }
 
     void layerAndViewCommands() {

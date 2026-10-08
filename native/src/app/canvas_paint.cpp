@@ -119,15 +119,29 @@ void PageCanvas::paint_page(QPainter& painter) {
         painter.drawRect(QRectF(zoom_drag_->first, zoom_drag_->second).normalized());
     }
     if (!stroke_.empty() && tool_ == QLatin1String("pen") && live_) {
+        if (live_snapped_) {
+            for (const auto& copy : live_copies_) draw_in_page_px(painter, copy->image(), copy->box(), copy->dpi());
+        }
         draw_in_page_px(painter, live_->image(), live_->box(), live_->dpi());
     } else if (!stroke_.empty()) {
         const QColor colour = tool_ == QLatin1String("pen") ? theme::accent() : QColor(200, 60, 60, 160);
         QPen line(colour, std::max(1.5, brush_width_mm * view_.scale), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
         painter.setPen(line);
         painter.setBrush(Qt::NoBrush);
-        if (stroke_.size() >= 2) {
-            QPainterPath path(pt(stroke_[0].x, stroke_[0].y));
-            for (std::size_t i = 1; i < stroke_.size(); ++i) path.lineTo(pt(stroke_[i].x, stroke_[i].y));
+        // the line snapped to the rulers (the pen: with its symmetry copies; the eraser: the line alone)
+        std::optional<std::vector<core::PenPoints>> snapped;
+        if (tool_ == QLatin1String("pen") || tool_ == QLatin1String("eraser")) snapped = snapped_preview(stroke_);
+        if (snapped && tool_ == QLatin1String("eraser")) snapped->resize(1);
+        std::vector<const core::PenPoints*> shown;
+        if (snapped) {
+            for (const core::PenPoints& points : *snapped) shown.push_back(&points);
+        } else {
+            shown.push_back(&stroke_);
+        }
+        for (const core::PenPoints* points : shown) {
+            if (points->size() < 2) continue;
+            QPainterPath path(pt((*points)[0].x, (*points)[0].y));
+            for (std::size_t i = 1; i < points->size(); ++i) path.lineTo(pt((*points)[i].x, (*points)[i].y));
             painter.drawPath(path);
         }
     }

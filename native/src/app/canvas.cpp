@@ -144,6 +144,8 @@ void PageCanvas::set_tool(const QString& tool) {
     held_tool_.reset();  // (a tool chosen while a key holds another is the tool now: letting go keeps it)
     stroke_.clear();
     marquee_stroke_.clear();
+    lasso_fill_.clear();  // (Python's _stroke: the area being drawn round to fill, too)
+    ruler_draft_.reset();
     live_.reset();
     update_cursor();
     update();
@@ -411,15 +413,33 @@ void PageCanvas::live_reset() {
 void PageCanvas::live_sync() {
     const core::Page* p = page();
     if (p == nullptr || tool_ != QLatin1String("pen") || !pen_layer_ || stroke_.empty()) return;
-    if (!live_) {
-        const core::Layer* layer = nullptr;
-        for (const core::Layer& item : p->layers) {
-            if (item.id == *pen_layer_) layer = &item;
-        }
-        if (layer == nullptr) return;
-        live_ = std::make_unique<LiveInk>(doc_, *p, *layer, wanted_dpi(), pen_fields_, stroke_id_);
+    const core::Layer* layer = nullptr;
+    for (const core::Layer& item : p->layers) {
+        if (item.id == *pen_layer_) layer = &item;
     }
-    live_->follow(stroke_, turns_);
+    if (layer == nullptr) return;
+    const auto shown = snapped_preview(stroke_);
+    if (!shown) {
+        if (live_snapped_) {  // (no longer snapped: drawn plainly again, from the start)
+            live_.reset();
+            live_copies_.clear();
+            live_snapped_ = false;
+        }
+        if (!live_) live_ = std::make_unique<LiveInk>(doc_, *p, *layer, wanted_dpi(), pen_fields_, stroke_id_);
+        live_->follow(stroke_, turns_);
+        return;
+    }
+    // snapped to a ruler, with its symmetry copies: drawn whole again each time (Python's LiveInk.redraw)
+    const core::PenPoints& main = shown->front();
+    live_ = std::make_unique<LiveInk>(doc_, *p, *layer, wanted_dpi(), pen_fields_, stroke_id_);
+    live_->follow(main, main.size() == turns_.size() ? std::span<const double>(turns_) : std::span<const double>());
+    live_copies_.clear();
+    for (std::size_t i = 1; i < shown->size(); ++i) {
+        auto copy = std::make_unique<LiveInk>(doc_, *p, *layer, wanted_dpi(), pen_fields_, stroke_id_);
+        copy->follow((*shown)[i]);
+        live_copies_.push_back(std::move(copy));
+    }
+    live_snapped_ = true;
 }
 
 }  // namespace genko::app

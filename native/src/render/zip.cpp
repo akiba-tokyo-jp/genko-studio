@@ -12,7 +12,9 @@
 #include <zlib.h>
 
 #include "core/error.hpp"
+#include "core/json.hpp"
 #include "core/paths.hpp"
+#include "core/pyconv.hpp"
 #include "storage/fsutil.hpp"
 
 namespace genko::render::zip {
@@ -29,6 +31,47 @@ std::uint32_t u16(std::string_view b, std::size_t at) {
 std::uint32_t u32(std::string_view b, std::size_t at) {
     if (at + 4 > b.size()) bad("it ends too soon");
     return u16(b, at) | u16(b, at + 2) << 16;
+}
+
+// The upper half of code page 437, as Python's zipfile reads a name without the UTF-8 flag (0x00-0x7f are ASCII).
+const char16_t kCp437[128] = {
+    0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7, 0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+    0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9, 0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+    0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA, 0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+    0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556, 0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+    0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F, 0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+    0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B, 0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+    0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4, 0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+    0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248, 0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0};
+
+// A name as Python's zipfile has it: UTF-8 when the archive says so (flag 0x800), else code page 437; cut at a NUL;
+// on Windows "\" is "/".
+std::string decoded_name(std::string_view raw, bool utf8) {
+    std::string name;
+    if (utf8) {
+        if (core::utf8_error(raw)) bad("a name inside is not UTF-8");
+        name.assign(raw);
+    } else {
+        for (const char c : raw) {
+            const auto byte = static_cast<unsigned char>(c);
+            const char32_t u = byte < 0x80 ? byte : kCp437[byte - 0x80];
+            if (u < 0x80) {
+                name.push_back(static_cast<char>(u));
+            } else if (u < 0x800) {
+                name.push_back(static_cast<char>(0xC0 | (u >> 6)));
+                name.push_back(static_cast<char>(0x80 | (u & 0x3F)));
+            } else {
+                name.push_back(static_cast<char>(0xE0 | (u >> 12)));
+                name.push_back(static_cast<char>(0x80 | ((u >> 6) & 0x3F)));
+                name.push_back(static_cast<char>(0x80 | (u & 0x3F)));
+            }
+        }
+    }
+    if (const std::size_t nul = name.find('\0'); nul != std::string::npos) name.resize(nul);
+#ifdef _WIN32
+    std::replace(name.begin(), name.end(), '\\', '/');
+#endif
+    return name;
 }
 
 // Whether the name stays inside the folder it is unpacked into (Python checks (tmp / member).resolve() against tmp;
@@ -74,13 +117,58 @@ void put32(std::string& out, std::uint32_t v) {
 
 }  // namespace
 
+std::string member_path(const std::string& name) {
+    std::string out;
+    std::size_t start = 0;
+#ifdef _WIN32
+    if (name.size() >= 2 && name[1] == ':') start = 2;  // (os.path.splitdrive)
+    const char* separators = "/\\";
+#else
+    const char* separators = "/";
+#endif
+    while (start <= name.size()) {
+        const std::size_t end = name.find_first_of(separators, start);
+        std::string part = name.substr(start, end == std::string::npos ? std::string::npos : end - start);
+#ifdef _WIN32
+        for (char& c : part) {
+            if (std::string_view(":<>|\"?*").find(c) != std::string_view::npos) c = '_';
+        }
+        while (!part.empty() && part.back() == '.') part.pop_back();
+#endif
+        if (!part.empty() && part != "." && part != "..") out += (out.empty() ? "" : "/") + part;
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return out;
+}
+
+std::optional<std::string> inside_path(const std::string& path) {
+    if (!inside(path)) return std::nullopt;
+    std::string out;
+    std::size_t start = 0;
+#ifdef _WIN32
+    const char* separators = "/\\";
+#else
+    const char* separators = "/";  // (a "\\" is part of a name here, as on this system's disks)
+#endif
+    while (start <= path.size()) {
+        const std::size_t end = path.find_first_of(separators, start);
+        const std::string part = path.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!part.empty() && part != ".") out += (out.empty() ? "" : "/") + part;
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    if (out.empty()) return std::nullopt;
+    return out;
+}
+
 std::map<std::string, std::string> read(const std::filesystem::path& path, const Limits& limits) {
     std::error_code ec;
     const auto length = std::filesystem::file_size(path, ec);
-    if (ec) throw core::PyUncaught("FileNotFoundError", "[Errno 2] No such file or directory: '" + core::path_to_utf8(path) + "'");
+    if (ec) throw core::PyUncaught("FileNotFoundError", "[Errno 2] No such file or directory: " + core::py_repr_str(core::path_to_utf8(path)));
     if (static_cast<std::int64_t>(length) > limits.max_archive_bytes) bad("it is too large");
     std::ifstream file(path, std::ios::binary);
-    if (!file) throw core::PyUncaught("PermissionError", "[Errno 13] Permission denied: '" + core::path_to_utf8(path) + "'");
+    if (!file) throw core::PyUncaught("PermissionError", "[Errno 13] Permission denied: " + core::py_repr_str(core::path_to_utf8(path)));
     const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     if (file.bad() || bytes.size() != length) bad("it could not be read whole");
     const std::string_view b(bytes);
@@ -117,10 +205,12 @@ std::map<std::string, std::string> read(const std::filesystem::path& path, const
         const std::uint32_t comment_len = u16(b, at + 32);
         const std::uint32_t local = u32(b, at + 42);
         if (at + 46 + name_len > b.size()) bad("its directory is broken");
-        const std::string name(b.substr(at + 46, name_len));
+        const std::string name = decoded_name(b.substr(at + 46, name_len), (flags & 0x800) != 0);
         at += 46 + name_len + extra_len + comment_len;
         if (!inside(name)) throw core::PyValueError("the pack has a file outside itself");
         if (name.back() == '/') continue;  // (a folder)
+        const std::string unpacked = member_path(name);  // (where ZipFile.extractall puts it)
+        if (unpacked.empty()) continue;
         if (flags & 0x1) bad("a file inside is encrypted");
         if (packed == 0xffffffff || size == 0xffffffff || local == 0xffffffff) bad("zip64 is not read");
         if (method != 0 && method != 8) bad("a file inside is packed in a way that is not read");
@@ -139,7 +229,7 @@ std::map<std::string, std::string> read(const std::filesystem::path& path, const
             content = inflate_raw(data, size);
         }
         if (crc32(0, reinterpret_cast<const Bytef*>(content.data()), static_cast<uInt>(content.size())) != crc) bad("a file inside is broken");
-        files[name] = std::move(content);
+        files[unpacked] = std::move(content);
     }
     return files;
 }
@@ -166,11 +256,12 @@ void write(const std::filesystem::path& path, const std::vector<std::pair<std::s
         if (result != Z_STREAM_END) throw core::Error("io", "zlib");
         if (out.size() + packed.size() > 0xfffffffeu) throw core::PyValueError("the pack is too large");
         const auto offset = static_cast<std::uint32_t>(out.size());
+        const bool ascii = std::all_of(name.begin(), name.end(), [](char ch) { return static_cast<unsigned char>(ch) < 0x80; });
         const auto header = [&](std::string& to, bool central) {
             put32(to, central ? 0x02014b50 : 0x04034b50);
             if (central) put16(to, 3 << 8 | 20);  // (made on Unix, zip 2.0)
             put16(to, 20);
-            put16(to, 0x800);  // (the name is UTF-8)
+            put16(to, ascii ? 0 : 0x800);  // (a name past ASCII is UTF-8, said so as ZipFile says it)
             put16(to, 8);
             put16(to, dos_time);
             put16(to, dos_date);

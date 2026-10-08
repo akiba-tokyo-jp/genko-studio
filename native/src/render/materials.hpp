@@ -43,6 +43,9 @@ core::Json all_materials(const std::filesystem::path& config_dir);
 // folders(): every material's folder ("その他" for none), in order, then the empty folders made with add_folder.
 std::vector<std::string> folders(const std::filesystem::path& config_dir);
 
+// The empty folders made with add_folder (folders.json), as read to be listed (nothing when it cannot be read).
+std::vector<std::string> empty_folders(const std::filesystem::path& config_dir);
+
 // add_folder(name): PyValueError "a folder needs a name" for a blank one.
 void add_folder(const std::filesystem::path& config_dir, const std::string& name);
 

@@ -655,6 +655,60 @@
    ]
   },
   {
+   "n": "vector_edit add_point on a line with no point, and with one",
+   "op": "vector_edit",
+   "ok": true,
+   "ops": [
+    {
+     "op": "paste",
+     "page": 6,
+     "layer": "ink",
+     "items": {
+      "strokes": [
+       {
+        "id": "e1",
+        "points": [],
+        "width_mm": 0.5
+       },
+       {
+        "id": "e2",
+        "points": [
+         [
+          1,
+          2
+         ]
+        ],
+        "width_mm": 0.5
+       }
+      ],
+      "patches": []
+     }
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "add_point",
+     "stroke_id": "000000001000",
+     "at": [
+      3.3333,
+      4
+     ]
+    },
+    {
+     "op": "vector_edit",
+     "page": 6,
+     "layer": "ink",
+     "action": "add_point",
+     "stroke_id": "000000001001",
+     "at": [
+      3.3333,
+      4
+     ]
+    }
+   ]
+  },
+  {
    "n": "vector_edit delete_point",
    "op": "vector_edit",
    "ok": true,

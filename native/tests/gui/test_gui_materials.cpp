@@ -9,6 +9,8 @@
 #include <QDockWidget>
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/tones.hpp"
+#include <cstring>
 #include <QBuffer>
 #include <QImageReader>
 #include <QDir>
@@ -319,6 +321,56 @@ private slots:
         if(!screenshots.isEmpty()){QVERIFY(QDir().mkpath(screenshots));QVERIFY(window.grab().save(screenshots+"/material-stamp-tone.png"));render::save_png(output.image,gui_test::path_of(screenshots+"/material-stamp-proof.png"));}
         QCOMPARE(reopened->document().page(1).layers.size(),doc.page(1).layers.size());
         QCOMPARE(render::render_page(reopened->document().page(1),72,render::proof_options()).image.tobytes(),render::render_page(doc.page(1),72,render::proof_options()).image.tobytes());
+    }
+
+    void userTonesAndPartsShowTheirPictures() {
+        // (materials.thumbnail: a tone as its swatch at 110 dpi, drawn parts as their lines on white — made when the
+        // item is seen, not when the panel is made)
+        QTemporaryDir config;
+        QVERIFY(config.isValid());
+        const QByteArray previous = qgetenv("GENKO_CONFIG_DIR");
+        struct Restore {
+            QByteArray value;
+            ~Restore() {
+                if (value.isNull()) qunsetenv("GENKO_CONFIG_DIR");
+                else qputenv("GENKO_CONFIG_DIR", value);
+            }
+        } restore{previous};
+        qputenv("GENKO_CONFIG_DIR", config.path().toUtf8());
+        const QString root = config.path() + "/materials";
+        QVERIFY(QDir().mkpath(root));
+        const QJsonObject tone{{"pattern", "dot"}, {"lpi", 30}, {"density", 0.4}, {"angle", 45}};
+        const QJsonObject stroke{{"id", "s1"}, {"points", QJsonArray{QJsonArray{0, 0, 1}, QJsonArray{20, 10, 1}, QJsonArray{40, 0, 1}}}, {"width_mm", 0.5}};
+        const QJsonArray entries{QJsonObject{{"id", "u-tone"}, {"name", QStringLiteral("私のトーン")}, {"kind", "tone"}, {"folder", "seen-test"}, {"tone", tone}},
+                                 QJsonObject{{"id", "u-lines"}, {"name", QStringLiteral("私のパーツ")}, {"kind", "lines"}, {"folder", "seen-test"},
+                                             {"items", QJsonObject{{"strokes", QJsonArray{stroke}}}}}};
+        QFile manifest(root + "/library.json");
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(QJsonDocument(entries).toJson());
+        manifest.close();
+        auto panel = std::unique_ptr<QWidget>(app::make_builtin_material_panel());
+        auto* list = panel->findChild<QListWidget*>("materialList");
+        auto* search = panel->findChild<QLineEdit*>("materialSearch");
+        QVERIFY(list && search);
+        search->setText("seen-test");
+        QCOMPARE(list->count(), 2);
+        QVERIFY(list->item(0)->icon().isNull() && list->item(1)->icon().isNull());
+        panel->resize(700, 500);
+        panel->show();
+        QVERIFY(QTest::qWaitForWindowExposed(panel.get()));
+        QTRY_VERIFY_WITH_TIMEOUT(list->item(0)->data(Qt::UserRole + 3).toBool() && list->item(1)->data(Qt::UserRole + 3).toBool(), 5000);
+        QCOMPARE(list->item(0)->data(Qt::UserRole).toString(), QStringLiteral("u-tone"));
+        const QImage shown = list->item(0)->icon().pixmap(56, 56).toImage().convertToFormat(QImage::Format_RGB888);
+        const render::Image want = render::tones::swatch(core::parse_python_json(QJsonDocument(tone).toJson().toStdString()), render::Size{56, 56}, 110).convert("RGB");
+        QCOMPARE(shown.size(), QSize(want.width(), want.height()));
+        const std::string raw = want.tobytes();
+        for (int y = 0; y < shown.height(); ++y)
+            QVERIFY2(std::memcmp(shown.constScanLine(y), raw.data() + static_cast<std::size_t>(y) * 56 * 3, 56 * 3) == 0, "the tone's preview is its swatch");
+        const QImage lines = list->item(1)->icon().pixmap(56, 56).toImage();
+        int dark = 0;
+        for (int y = 0; y < lines.height(); ++y)
+            for (int x = 0; x < lines.width(); ++x) dark += lines.pixelColor(x, y).lightness() < 80 ? 1 : 0;
+        QVERIFY2(dark > 20 && lines.pixelColor(1, 55) == QColor(Qt::white), "the parts' preview is their lines on white");
     }
 
     void corruptUserImageDoesNotStopHealthyPreview() {

@@ -257,6 +257,7 @@ const std::vector<Rule>& rules() {
                          "この zip ファイルは読めません（暗号化・分割・特殊な圧縮・大きすぎる形式には対応していません）"));
         r.push_back(rule(R"(the pack cannot be read as a zip file \((it is too large|it holds too many files|a file inside is too large|its files are too large)\))",
                          "素材パックが大きすぎます（zip 1 GB・中身の合計 512 MB・1 ファイル 64 MB・1 万ファイルまで）"));
+        r.push_back(rule(R"(the pack cannot be read as a zip file \(a name inside is not UTF-8\))", "zip ファイルの中のファイル名が読めません（UTF-8 ではありません）"));
         r.push_back(rule(R"(the pack cannot be read as a zip file \(.*\))", "zip ファイルが壊れていて読めません"));
         r.push_back(rule("the pack holds too many files", "素材パックのファイルが多すぎます（1 万まで）"));
         r.push_back(rule("the material library cannot be read, so it is left as it is: (.*)",
@@ -267,6 +268,10 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the picture cannot be written into the material library.*)", "画像を素材ライブラリに書き込めませんでした"));
         r.push_back(rule("the picture is too large \\(at most 64 MB\\).*", "画像ファイルが大きすぎます（64 MB まで）"));
         r.push_back(rule("the picture is a link or not a file.*", "画像がリンクかファイルではないので読みません"));
+        r.push_back(rule("the pack\\.json is too large \\(at most 16 MB\\).*", "素材パックの pack.json が大きすぎます（16 MB まで）"));
+        r.push_back(rule("the pack\\.json is a link or not a file.*", "素材パックの pack.json がリンクかファイルではないので読みません"));
+        r.push_back(rule(R"(the material library would be too large for the materials panel \(at most 1 MB\))",
+                         "素材ライブラリの一覧が大きくなりすぎるので、書き換えませんでした（1 MB まで）"));
         r.push_back(rule("kind must be one of tone, effect, image, lines, lettering, brush, prim", "素材の種類が違います"));
         r.push_back(rule("adjust is set on a correction layer", "補正の設定は、色調補正のレイヤーにだけできます"));
         r.push_back(rule("adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"));

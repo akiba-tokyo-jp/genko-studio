@@ -31,6 +31,11 @@ namespace genko::render {
 
 namespace {
 
+// A pixel position as Python's whole number, held to where it still means "far off the picture" (an int cannot hold
+// every one Python's can; past a billion pixels each is off any picture alike).
+// (v: a whole number held as a double, as core::py_round_whole and std::trunc give it)
+int held_px(double v) { return static_cast<int>(std::clamp(v, -1e9, 1e9)); }
+
 using core::Document;
 using core::Json;
 using core::Layer;
@@ -172,7 +177,9 @@ void add_shape(OpContext& c) {
     const bool filled = core::truthy_at(op, "fill");
     if (filled && (shape.closed || kind == "rect" || kind == "ellipse" || kind == "polygon")) {
         const Json fill_rgb = core::py_or(op_get(op, "fill_rgb"), op_get(op, "rgb"));
-        if (auto patch = fills::polygon_patch(shape.points, rgb_of(fill_rgb, c.doc), float_at(op, "opacity", 1.0))) {
+        const auto fill_ink = rgb_of(fill_rgb, c.doc);  // (before the opacity, as Python reads them)
+        const double fill_opacity = float_at(op, "opacity", 1.0);
+        if (auto patch = fills::polygon_patch(shape.points, fill_ink, fill_opacity)) {
             target.patches.push_back(std::move(*patch));
         }
     }
@@ -231,9 +238,11 @@ void smudge(OpContext& c) {
     const double pad = width * 1.5;
     const double x0 = core::py_max(0.0, min_x - pad), y0 = core::py_max(0.0, min_y - pad);
     const double x1 = core::py_min(page.spec.width_mm.value(), max_x + pad), y1 = core::py_min(page.spec.height_mm.value(), max_y + pad);
-    const Box box{static_cast<int>(core::py_round_int(x0 * scale)), static_cast<int>(core::py_round_int(y0 * scale)),
-                  static_cast<int>(core::py_round_int(x1 * scale)), static_cast<int>(core::py_round_int(y1 * scale))};
-    if (box.x1 - box.x0 < 2 || box.y1 - box.y0 < 2) throw OpError("the brush is off the page");
+    // (compared as Python's whole numbers first: past the page, the box is never made)
+    const double bx0 = core::py_round_whole(x0 * scale), by0 = core::py_round_whole(y0 * scale);
+    const double bx1 = core::py_round_whole(x1 * scale), by1 = core::py_round_whole(y1 * scale);
+    if (bx1 - bx0 < 2 || by1 - by0 < 2) throw OpError("the brush is off the page");
+    const Box box{static_cast<int>(bx0), static_cast<int>(by0), static_cast<int>(bx1), static_cast<int>(by1)};
     const Image layer = layer_image(page, target, dpi, &c.doc).crop(box);
     if (!layer.getbbox()) throw OpError("there is nothing on this layer to blend there");
     core::PenPoints shifted;
@@ -257,11 +266,11 @@ void smudge(OpContext& c) {
         for (std::size_t i = 0; i + 1 < shifted.size(); ++i) {
             const double ax = shifted[i].x, ay = shifted[i].y, bx = shifted[i + 1].x, by = shifted[i + 1].y;
             const auto steps = std::max<std::int64_t>(
-                1, static_cast<std::int64_t>(core::py_dist(ax, ay, bx, by) * scale / core::py_max(1.0, r / 3.0)));
+                1, core::loop_count(core::py_dist(ax, ay, bx, by) * scale / core::py_max(1.0, r / 3.0)));
             for (std::int64_t k = 0; k < steps; ++k) {
                 const double t = static_cast<double>(k) / static_cast<double>(steps);
-                const auto cx = static_cast<int>(core::py_round_int((ax + (bx - ax) * t) * scale));
-                const auto cy = static_cast<int>(core::py_round_int((ay + (by - ay) * t) * scale));
+                const int cx = held_px(core::py_round_whole((ax + (bx - ax) * t) * scale));
+                const int cy = held_px(core::py_round_whole((ay + (by - ay) * t) * scale));
                 const Box spot{cx - r, cy - r, cx + r, cy + r};
                 const Image here = worked.crop(spot);
                 carried = carried ? blend(*carried, here, 1 - strength) : here;
@@ -324,7 +333,7 @@ std::vector<Dab> dabs_of(const std::vector<std::array<double, 2>>& points, doubl
     for (std::size_t i = 0; i + 1 < points.size(); ++i) {
         const double x0 = points[i][0], y0 = points[i][1], x1 = points[i + 1][0], y1 = points[i + 1][1];
         const double length = core::py_hypot(x1 - x0, y1 - y0);
-        const auto n = std::max<std::int64_t>(1, static_cast<std::int64_t>(length / step));
+        const auto n = std::max<std::int64_t>(1, core::loop_count(length / step));
         for (std::int64_t k = 0; k < n; ++k) {
             const double t = static_cast<double>(k) / static_cast<double>(n);
             out.push_back(Dab{x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, (x1 - x0) / static_cast<double>(n), (y1 - y0) / static_cast<double>(n)});
@@ -343,8 +352,8 @@ void densify(core::Stroke& stroke, const std::array<double, 4>& box, double step
     std::vector<double> out_p{pressure[0]};
     for (std::size_t k = 1; k < pts.size(); ++k) {
         const double ax = pts[k - 1].x, ay = pts[k - 1].y, bx = pts[k].x, by = pts[k].y;
-        const bool near = !(core::py_max(ax, bx) < x0 || core::py_min(ax, bx) > x1 || core::py_max(ay, by) < y0 || core::py_min(ay, by) > y1);
-        const auto n = near ? std::max<std::int64_t>(1, static_cast<std::int64_t>(core::py_hypot(bx - ax, by - ay) / step)) : 1;
+        const bool touches = !(core::py_max(ax, bx) < x0 || core::py_min(ax, bx) > x1 || core::py_max(ay, by) < y0 || core::py_min(ay, by) > y1);
+        const auto n = touches ? std::max<std::int64_t>(1, core::loop_count(core::py_hypot(bx - ax, by - ay) / step)) : std::int64_t{1};
         for (std::int64_t i = 1; i <= n; ++i) {
             const double t = static_cast<double>(i) / static_cast<double>(n);
             out.push_back(core::PointF{ax + (bx - ax) * t, ay + (by - ay) * t});
@@ -420,10 +429,10 @@ void liquify(OpContext& c) {
         Image picture = layer_image(page, pixels_only, dpi, &c.doc);
         if (picture.getbbox()) {
             const double scale = dpi / 25.4;
-            const int x0 = std::max(0, static_cast<int>(reach[0] * scale) - 2);
-            const int y0 = std::max(0, static_cast<int>(reach[1] * scale) - 2);
-            const int x1 = std::min(picture.width(), static_cast<int>(reach[2] * scale) + 3);
-            const int y1 = std::min(picture.height(), static_cast<int>(reach[3] * scale) + 3);
+            const int x0 = std::max(0, held_px(std::trunc(reach[0] * scale)) - 2);
+            const int y0 = std::max(0, held_px(std::trunc(reach[1] * scale)) - 2);
+            const int x1 = std::min(picture.width(), held_px(std::trunc(reach[2] * scale)) + 3);
+            const int y1 = std::min(picture.height(), held_px(std::trunc(reach[3] * scale)) + 3);
             if (x1 > x0 && y1 > y0) {
                 const int w = x1 - x0, h = y1 - y0;
                 std::vector<double> map_x(static_cast<std::size_t>(w) * static_cast<std::size_t>(h));

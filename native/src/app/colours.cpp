@@ -590,9 +590,18 @@ void ColourPanel::from_hex() {
     if (text.size() != 6) return;
     Rgb rgb{};
     for (int i = 0; i < 3; ++i) {
-        const QString pair = text.mid(i * 2, 2);
-        if (std::any_of(pair.begin(), pair.end(), [](QChar ch) { return !std::isxdigit(ch.unicode() < 128 ? ch.toLatin1() : 'g'); })) return;
-        rgb[static_cast<std::size_t>(i)] = pair.toInt(nullptr, 16);
+        // int(pair, 16): the spaces around it and a "+" go; a digit may be any decimal digit (０-９ too), a-f or A-F
+        QString pair = text.mid(i * 2, 2).trimmed();
+        if (pair.startsWith(QLatin1Char('+'))) pair.remove(0, 1);
+        if (pair.isEmpty()) return;
+        int value = 0;
+        for (const QChar ch : pair) {
+            int digit = ch.digitValue();
+            if (digit < 0 && ch.unicode() < 128 && std::isxdigit(ch.toLatin1())) digit = QString(ch).toInt(nullptr, 16);
+            if (digit < 0) return;
+            value = value * 16 + digit;
+        }
+        rgb[static_cast<std::size_t>(i)] = value;
     }
     choose(rgb);
 }

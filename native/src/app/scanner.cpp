@@ -2,6 +2,7 @@
 
 #include "app/scanner.hpp"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
@@ -71,7 +72,9 @@ QStringList command(const QString& how, const QString& out, int dpi, const QStri
         const QString script = QStringLiteral("$d = New-Object -ComObject WIA.CommonDialog; "
                                               "try { $i = $d.ShowAcquireImage() } catch { exit 3 }; "
                                               "if ($i -eq $null) { exit 2 }; $i.SaveFile('%1')")
-                                   .arg(out);
+                                   .arg(QDir::toNativeSeparators(out).replace(QLatin1Char('\''), QStringLiteral("''")));
+        // (the path as Windows writes it, as Python's Path gives it; a ' doubled, so a folder named O'Brien stays
+        // inside the quotes: Python's f-string would end them there)
         return {QStringLiteral("powershell"), QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"), QStringLiteral("-Command"), script};
     }
     throw ScanError(kCannot);

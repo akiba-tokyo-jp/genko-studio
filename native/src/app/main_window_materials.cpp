@@ -123,9 +123,18 @@ void MainWindow::build_material_dock() {
     materials_ = new MaterialPanel(this);
     materials_dock_ = new QDockWidget(QStringLiteral("素材"), this);
     materials_dock_->setObjectName(QStringLiteral("素材"));
-    materials_dock_->setWidget(materials_);
+    auto* scroll = new QScrollArea;  // (a tall panel scrolls on a small screen instead of making the window taller)
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setWidget(materials_);
+    materials_dock_->setWidget(scroll);
+    materials_dock_->setMinimumWidth(200);
+    // (for occasional work: its tab has a close button and it joins the row of tabs when opened)
+    materials_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
     addDockWidget(Qt::RightDockWidgetArea, materials_dock_);
-    materials_dock_->hide();  // Keep the initial canvas room; the window menu and work stages expose the panel.
+    tabifyDockWidget(pages_dock_, materials_dock_);
+    materials_dock_->hide();
     connect(materials_dock_, &QDockWidget::visibilityChanged, this, [this](bool shown) {
         if (shown) materials_->refresh();
     });
@@ -244,7 +253,7 @@ void MainWindow::stamp_at(double x_mm, double y_mm) {
     const Json kind = core::py_get(*item, "kind");
     if (kind == "tone") {
         op["id"] = core::new_id();
-        op["at"] = Json{{"x_mm", core::py_round(x_mm, 2)}, {"y_mm", core::py_round(y_mm, 2)}, {"gap_mm", brush_->gap_size->value()}};
+        op["at"] = Json{{"x_mm", core::py_round(x_mm, 2)}, {"y_mm", core::py_round(y_mm, 2)}, {"gap_mm", brush_->gap->value()}};
         if (apply_ops(Json::array({op}))) after_tone(op["id"].get<std::string>());
         return;
     }
@@ -421,6 +430,8 @@ void MainWindow::import_scan(bool from_scanner) {
         name = QFileInfo(path).completeBaseName();
         if (name.isEmpty()) name = QFileInfo(path).fileName();
     }
+    page = current_page();  // (the dialog or the scan ran the event loop: the page may be another)
+    if (page == nullptr) return;
     std::string png;
     try {
         render::Image paper = render::selection::open_picture(blob).convert("RGB");

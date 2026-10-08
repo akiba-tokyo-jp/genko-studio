@@ -105,18 +105,28 @@ SubView::SubView(MainWindow* window) : window_(window) {
     layout->addWidget(choice);
     layout->addWidget(picture, 1);
     layout->addLayout(row);
-    refresh();
+    fill();
 }
 
-void SubView::refresh() {
+void SubView::fill() {
     const QString current = choice->currentData().toString();
     choice->clear();
     for (const QString& path : kept_pictures()) choice->addItem(QFileInfo(path).fileName(), path);
     if (!current.isEmpty()) choice->setCurrentIndex(std::max(0, choice->findData(current)));
+}
+
+void SubView::refresh() {
+    fill();
     show_current();
 }
 
+void SubView::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    if (!shown_) show_current();
+}
+
 void SubView::show_current() {
+    shown_ = true;
     const QString path = choice->currentData().toString();
     picture->set_image(path.isEmpty() ? QImage() : QImage(path));
 }

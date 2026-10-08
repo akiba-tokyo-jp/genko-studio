@@ -49,6 +49,7 @@ class SubView : public QWidget {
     Q_OBJECT
 public:
     explicit SubView(MainWindow* window);
+    // The list read again and the chosen picture shown.
     void refresh();
     void show_current();
     // A picture added (and shown); false: it cannot be opened.
@@ -59,8 +60,14 @@ public:
     QComboBox* choice = nullptr;
     SubPicture* picture = nullptr;
 
+protected:
+    // (the picture is read when the panel is first shown, not with the window: a big photo costs nothing until then)
+    void showEvent(QShowEvent* event) override;
+
 private:
+    void fill();
     MainWindow* window_ = nullptr;
+    bool shown_ = false;  // a picture has been read (show_current)
 };
 
 }  // namespace genko::app

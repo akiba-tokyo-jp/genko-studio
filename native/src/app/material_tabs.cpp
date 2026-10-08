@@ -121,8 +121,14 @@ QString effect_label(const std::string& kind) {
 }
 
 QPixmap effect_picture(const std::string& kind) {
-    static std::map<std::string, QPixmap> pictures;
-    if (const auto found = pictures.find(kind); found != pictures.end()) return found->second;
+    // (kept as images: a QPixmap must not outlive the application, and a static one would)
+    static std::map<std::string, QImage> pictures;
+    const auto as_pixmap = [](const QImage& image) {
+        QPixmap pixmap = QPixmap::fromImage(image);
+        pixmap.setDevicePixelRatio(2);
+        return pixmap;
+    };
+    if (const auto found = pictures.find(kind); found != pictures.end()) return as_pixmap(found->second);
     const QSize size(60, 44);
     const core::Document doc = core::new_episode("t", core::Num(1), 1, core::PageSpec::custom(72, 52, 72, 52, 0, 0, 0, 0, 0, 600));
     const core::Page& page = doc.page(0);
@@ -139,11 +145,10 @@ QPixmap effect_picture(const std::string& kind) {
                                    : render::Size{size.width() * 2, static_cast<int>(core::py_round_int(size.width() * 2.0 * h / w))};
     image = image.resize(twice, render::Resample::Lanczos).crop(render::Box{0, 0, size.width() * 2, size.height() * 2}).convert("RGBA");
     const std::string raw = image.tobytes();
-    QPixmap pixmap = QPixmap::fromImage(QImage(reinterpret_cast<const uchar*>(raw.data()), image.width(), image.height(), image.width() * 4,
-                                               QImage::Format_RGBA8888).copy());
-    pixmap.setDevicePixelRatio(2);
-    pictures[kind] = pixmap;
-    return pixmap;
+    const QImage picture =
+        QImage(reinterpret_cast<const uchar*>(raw.data()), image.width(), image.height(), image.width() * 4, QImage::Format_RGBA8888).copy();
+    pictures[kind] = picture;
+    return as_pixmap(picture);
 }
 
 void set_effect_pictures(const std::vector<QAction*>& actions, const std::vector<std::string>& kinds) {
@@ -403,7 +408,7 @@ void MaterialPanel::rename() {
     try {
         const Json fallback_folder = item->contains("folder") ? (*item)["folder"] : Json("マイ素材");
         render::materials::update_material(library_config(), (*item)["id"].get<std::string>(),
-                                           Json{{"name", name->isEmpty() ? (*item)["name"] : Json(name->toStdString())},
+                                           Json{{"name", name->isEmpty() ? core::subscript(*item, "name") : Json(name->toStdString())},  // (item["name"])
                                                 {"folder", folder->isEmpty() ? fallback_folder : Json(folder->toStdString())}});
     } catch (const std::exception& error) {
         window_->flash(QStringLiteral("変えられませんでした（%1）").arg(error_text(error)), 6000, true);
@@ -697,6 +702,10 @@ void MaterialPanel::show_effect() {
         for (QLayoutItem* item : {row.labelItem, row.fieldItem}) {
             if (item == nullptr) continue;
             if (QWidget* widget = item->widget()) {
+                // (silent first: hiding the field being edited moves the focus, and a field losing it would send its
+                // value again — each one down the form)
+                widget->disconnect(this);
+                widget->blockSignals(true);
                 widget->hide();
                 widget->setParent(nullptr);  // (out of the panel at once: never found again)
                 widget->deleteLater();

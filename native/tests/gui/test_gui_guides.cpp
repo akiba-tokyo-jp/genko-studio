@@ -270,6 +270,54 @@ private slots:
         QVERIFY(s.page().rulers.empty());
     }
 
+    void theLineShowsWhereTheRulerPutsIt() {
+        // Python's snapped_preview: while the pen is down its line is shown snapped to the ruler, with the copies the
+        // symmetry ruler will make; the eraser's line is shown snapped, alone
+        Studio s;
+        s.titled(QStringLiteral("直線定規"))->trigger();
+        inject::mouse_stroke(s.canvas(), {QPointF(20, 60), QPointF(80, 60), QPointF(140, 60)});
+        s.titled(QStringLiteral("対称定規（左右）"))->trigger();
+        inject::mouse_stroke(s.canvas(), {QPointF(80, 20), QPointF(80, 100), QPointF(80, 180)});
+        QCOMPARE(s.page().rulers.size(), std::size_t{2});
+        s.window->choose_tool(QStringLiteral("pen"));
+        inject::mouse(s.canvas(), inject::Phase::Press, QPointF(30, 62));
+        inject::mouse(s.canvas(), inject::Phase::Move, QPointF(45, 63.5));
+        inject::mouse(s.canvas(), inject::Phase::Move, QPointF(60, 62.5));
+        QVERIFY(s.canvas()->live() != nullptr && s.canvas()->live_copy(0) != nullptr);
+        QVERIFY(s.canvas()->live_copy(1) == nullptr);
+        // (where the drawn pixels lie, in mm: the ink's box has room to grow round them)
+        const auto drawn = [](const app::LiveInk* ink) {
+            const QImage& image = ink->image();
+            double sx = 0, sy = 0, n = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    if (qAlpha(image.pixel(x, y)) > 0) sx += x, sy += y, n += 1;
+            const double px = 25.4 / ink->dpi();
+            return n == 0 ? QPointF(-1, -1) : QPointF((ink->box().x() + sx / n + 0.5) * px, (ink->box().y() + sy / n + 0.5) * px);
+        };
+        const QPointF main = drawn(s.canvas()->live()), copy = drawn(s.canvas()->live_copy(0));
+        QVERIFY2(std::abs(main.y() - 60) < 0.5, qPrintable(QString::number(main.y())));  // (not 62.75)
+        QVERIFY2(std::abs(main.x() - 45) < 1, qPrintable(QString::number(main.x())));
+        QVERIFY2(std::abs(copy.x() - 115) < 1, qPrintable(QString::number(copy.x())));  // (mirrored about x = 80)
+        QVERIFY2(std::abs(copy.y() - 60) < 0.5, qPrintable(QString::number(copy.y())));
+        inject::mouse(s.canvas(), inject::Phase::Release, QPointF(60, 62.5));
+        QCOMPARE(s.last()["snap_ruler"], Json(true));
+        QVERIFY(s.canvas()->live() == nullptr && s.canvas()->live_copy(0) == nullptr);
+        // the eraser: its line on the ruler, no copy
+        s.window->choose_tool(QStringLiteral("eraser"));
+        QApplication::processEvents();
+        const QImage before = s.canvas()->grab().toImage();
+        inject::mouse(s.canvas(), inject::Phase::Press, QPointF(135, 66));  // (within the ruler's reach, 10 mm)
+        inject::mouse(s.canvas(), inject::Phase::Move, QPointF(142, 66));
+        inject::mouse(s.canvas(), inject::Phase::Move, QPointF(150, 66));
+        const QImage during = s.canvas()->grab().toImage();
+        const auto at = [&](const QImage& image, double x, double y) { return image.pixelColor(s.canvas()->to_widget(QPointF(x, y)).toPoint()); };
+        QVERIFY(at(during, 142, 66) == at(before, 142, 66));  // (the line is not shown where it was drawn …)
+        QVERIFY(at(during, 142, 60) != at(before, 142, 60));  // (… but on the ruler)
+        QVERIFY(at(during, 18, 60) == at(before, 18, 60));    // (and not mirrored)
+        inject::mouse(s.canvas(), inject::Phase::Release, QPointF(150, 66));
+    }
+
     void figuresAndBoxesPlacedDraggedAndPosed() {
         Studio s;
         s.trigger("act_add_box");

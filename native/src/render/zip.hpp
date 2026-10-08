@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,6 +26,14 @@ struct Limits {
 // earlier one). A name that would land outside the folder it is unpacked into ("/x", "../x", "a/../../x", "C:x",
 // "a\\..\\x") is refused with "the pack has a file outside itself", as Python's import_pack refuses it.
 std::map<std::string, std::string> read(const std::filesystem::path& path, const Limits& limits = {});
+
+// Where ZipFile.extractall puts a member (a name already found inside): its parts that are empty, "." or ".." left
+// out (and on Windows, a drive left out, :<>|"?* made _ and trailing dots taken off); "" for none.
+std::string member_path(const std::string& name);
+
+// A path inside a pack as `Path(pack) / path` finds it (pack.json's "file"): its empty and "." parts left out; nothing
+// for one that leaves the pack (absolute, a drive, a ".." part), which is never read.
+std::optional<std::string> inside_path(const std::string& path);
 
 // The files (name, bytes) as a new archive at `path`, each deflated (zlib's default level), written whole or not at
 // all. core::Error("io") when it cannot be written.

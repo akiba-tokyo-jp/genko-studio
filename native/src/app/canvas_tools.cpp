@@ -255,7 +255,7 @@ void PageCanvas::draw_tools(QPainter& painter) const {
     }
     // the figure being drawn
     bool closed = false;
-    const std::vector<QPointF> outline = tool_ == QLatin1String("shape") ? shape_preview(closed) : std::vector<QPointF>{};
+    const std::vector<QPointF> outline = shape_preview(closed);  // (whatever the tool now: a figure still pending shows)
     if (!outline.empty()) {
         painter.setPen(QPen(theme::accent(), 1.5));
         painter.setBrush(Qt::NoBrush);

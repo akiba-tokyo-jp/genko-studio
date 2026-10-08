@@ -415,7 +415,9 @@ private slots:
         QCOMPARE(op["index"], Json(1));
         QVERIFY(close2(op["to"], 40, 30));
         QCOMPARE(s.canvas()->vector_point, std::optional<int>(1));
-        // Delete takes the chosen point away; Alt+click on the line adds one
+        // Delete takes the chosen point away; Alt+click on the line adds one (the canvas's own key and click, as
+        // Python's canvas keyPressEvent and mousePressEvent take them: no command of the window has Delete in either,
+        // so the window behaves the same; a desktop that keeps Alt+drag for moving windows does so for both)
         QTest::keyClick(s.canvas(), Qt::Key_Delete);
         QCOMPARE(s.last()["action"], Json("delete_point"));
         inject::click_mm(s.canvas(), QPointF(30, 20));

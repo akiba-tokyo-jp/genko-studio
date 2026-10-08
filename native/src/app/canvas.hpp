@@ -218,6 +218,7 @@ public:
     // Wait (processing events) until every tile wanted now is drawn for the page as it is now.
     bool wait_rendered(int ms);
     const LiveInk* live() const { return live_.get(); }
+    const LiveInk* live_copy(std::size_t i) const { return i < live_copies_.size() ? live_copies_[i].get() : nullptr; }
     std::size_t overlays() const { return overlays_.size(); }
     // The picture of a line committed a moment ago, shown until its tiles are drawn (null: none at i).
     const LiveInk* overlay(std::size_t i) const { return i < overlays_.size() ? overlays_[i].ink.get() : nullptr; }
@@ -368,6 +369,10 @@ private:
     void draw_tools(QPainter& painter) const;
     // 定規, the grid and 3D (canvas_guides.cpp)
     core::Json page_rulers() const;
+    // snapped_preview: what the line will become on the rulers (and its symmetry copies), for showing while the pen is
+    // down; nothing when no ruler takes it (snapping off, no rulers, fewer than two points).
+    std::optional<std::vector<core::PenPoints>> snapped_preview(const core::PenPoints& points) const;
+    bool snapped_preview_applies() const;  // (for the line being drawn)
     bool near_point(const QPointF& pos, const QPointF& mm, double px = 8) const;
     void draw_grid(QPainter& painter) const;
     void line_across(QPainter& painter, const QPointF& a, const QPointF& d, double length = 2000.0) const;
@@ -430,6 +435,8 @@ private:
     std::string stroke_id_;
     bool stroke_tablet_ = false;
     std::unique_ptr<LiveInk> live_;
+    std::vector<std::unique_ptr<LiveInk>> live_copies_;  // the symmetry copies of a snapped line
+    bool live_snapped_ = false;                          // live_ holds the snapped line (drawn whole each time)
     std::unique_ptr<LiveInk> committing_;
     struct Overlay {
         std::unique_ptr<LiveInk> ink;

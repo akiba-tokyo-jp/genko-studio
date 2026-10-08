@@ -489,6 +489,7 @@ void MainWindow::build_docks() {
     addDockWidget(Qt::LeftDockWidgetArea, sub_dock);
     tabifyDockWidget(navigator_dock_, sub_dock);
     navigator_dock_->raise();
+    sub_dock->hide();  // (for some work only, as Python's: ウィンドウ brings it; the tabs fit a small screen without it)
     view_menu_->addAction(sub_dock->toggleViewAction());
     pages_dock_ = new QDockWidget(QStringLiteral("ページ"), this);
     pages_dock_->setObjectName(QStringLiteral("ページ"));

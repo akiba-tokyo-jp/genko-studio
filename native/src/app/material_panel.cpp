@@ -29,6 +29,7 @@
 #include <QVBoxLayout>
 
 #include "core/json.hpp"
+#include "core/paths.hpp"
 #include "render/materials.hpp"
 #include "render/selection.hpp"
 #include "render/tones.hpp"
@@ -201,8 +202,9 @@ MaterialBrowser::MaterialBrowser(QWidget* parent, std::function<void(const QStri
 }
 
 void MaterialBrowser::reload() {
-    library_=QString::fromStdString((config_dir()/"materials").string());
-    cache_root_=QString::fromStdString((config_dir()/"cache"/"material-previews").string());
+    // (UTF-8 paths: on Windows, path::string() is the ANSI code page, which a Japanese user folder may not fit)
+    library_=QString::fromStdString(core::path_to_utf8(config_dir()/"materials"));
+    cache_root_=QString::fromStdString(core::path_to_utf8(config_dir()/"cache"/"material-previews"));
     entries_.clear();
     QFile input(QStringLiteral(":/genko/materials/catalog.json"));
     if (!input.open(QIODevice::ReadOnly)) {
@@ -232,8 +234,8 @@ void MaterialBrowser::fill_folders() {
         const QString shown=name.isEmpty()?QStringLiteral("その他"):name;
         if(!names.contains(shown))names<<shown;
     }
-    try {  // (and the empty folders made with ＋フォルダ)
-        for(const std::string& name:render::materials::folders(config_dir()))if(!names.contains(QString::fromStdString(name)))names<<QString::fromStdString(name);
+    try {  // (and the empty folders made with ＋フォルダ; the catalog is not read again)
+        for(const std::string& name:render::materials::empty_folders(config_dir()))if(!names.contains(QString::fromStdString(name)))names<<QString::fromStdString(name);
     } catch (const std::exception&) {}
     for(const QString& name:names)folder_->addItem(name,name);
     folder_->setCurrentIndex(std::max(0,folder_->findData(keep)));

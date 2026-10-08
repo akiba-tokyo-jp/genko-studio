@@ -183,10 +183,12 @@ void vector_edit(OpContext& c) {
         points[k] = PointF{py_round(x, 3), py_round(y, 3)};
     } else if (action == "add_point") {
         const auto [x, y] = xy_of(op_get(op, "at"));
-        const NearestSegment near = nearest_segment(points, x, y);
-        points.insert(points.begin() + static_cast<std::ptrdiff_t>(near.index) + 1, PointF{py_round(near.x, 3), py_round(near.y, 3)});
+        const NearestSegment closest = nearest_segment(points, x, y);
+        // (list.insert: past the end is the end — a line with no points takes the point as its first)
+        const std::size_t at = std::min(closest.index + 1, points.size());
+        points.insert(points.begin() + static_cast<std::ptrdiff_t>(at), PointF{py_round(closest.x, 3), py_round(closest.y, 3)});
         if (!pressure.empty()) {
-            const std::size_t seg = near.index;
+            const std::size_t seg = closest.index;
             const std::size_t next = std::min(seg + 1, pressure.size() - 1);
             if (seg >= pressure.size()) raise_index_error();
             pressure.insert(pressure.begin() + static_cast<std::ptrdiff_t>(seg) + 1, (pressure[seg] + pressure[next]) / 2);
@@ -201,11 +203,11 @@ void vector_edit(OpContext& c) {
         }
     } else if (action == "cut") {
         const auto [x, y] = xy_of(op_get(op, "at"));
-        const NearestSegment near = nearest_segment(points, x, y);
-        const std::size_t seg = near.index;
+        const NearestSegment closest = nearest_segment(points, x, y);
+        const std::size_t seg = closest.index;
         std::vector<PointF> first(points.begin(), points.begin() + static_cast<std::ptrdiff_t>(std::min(seg + 1, points.size())));
-        first.push_back(PointF{near.x, near.y});
-        std::vector<PointF> second{PointF{near.x, near.y}};
+        first.push_back(PointF{closest.x, closest.y});
+        std::vector<PointF> second{PointF{closest.x, closest.y}};
         if (seg + 1 < points.size()) second.insert(second.end(), points.begin() + static_cast<std::ptrdiff_t>(seg) + 1, points.end());
         if (first.size() < 2 || second.size() < 2) throw OpError("that is the end of the line");
         auto tail = std::make_shared<Stroke>(stroke);
@@ -252,12 +254,12 @@ void trace_edit(OpContext& c) {
     const double radius = py_max(0.1, radius_given != nullptr ? to_float(*radius_given) : 2.0);
     std::vector<PointF> flat;
     for (const TracePoint& t : trace) flat.push_back(PointF{t.x, t.y});
-    const auto near = [&](double x, double y) { return nearest_segment(flat, x, y); };
+    const auto closest_to = [&](double x, double y) { return nearest_segment(flat, x, y); };
 
     std::vector<StrokePtr> items = layer.strokes->items;
     std::vector<std::size_t> touched;  // (positions in items)
     for (std::size_t i = 0; i < items.size(); ++i) {
-        if (std::any_of(items[i]->points.begin(), items[i]->points.end(), [&](const PointF& p) { return near(p.x, p.y).distance <= radius; }))
+        if (std::any_of(items[i]->points.begin(), items[i]->points.end(), [&](const PointF& p) { return closest_to(p.x, p.y).distance <= radius; }))
             touched.push_back(i);
     }
     if (touched.empty()) throw OpError("no line of this layer is near the trace");
@@ -269,7 +271,7 @@ void trace_edit(OpContext& c) {
             auto stroke = std::make_shared<Stroke>(*items[i]);
             std::vector<double> pressure = pressure_or_default(*stroke);
             for (std::size_t k = 0; k < stroke->points.size(); ++k) {
-                const double d = near(stroke->points[k].x, stroke->points[k].y).distance;
+                const double d = closest_to(stroke->points[k].x, stroke->points[k].y).distance;
                 if (d <= radius) {
                     const double w = 1 - py_pow(d / radius, 2);  // (full at the trace, nothing at the edge of its reach)
                     const double factor = action == "widen" ? 1 + amount * w : 1 - 0.7 * amount * w;
@@ -306,7 +308,7 @@ void trace_edit(OpContext& c) {
             auto stroke = std::make_shared<Stroke>(*items[i]);
             std::vector<double> pressure = pressure_or_default(*stroke);
             for (std::size_t k = 0; k < stroke->points.size(); ++k) {
-                const NearestSegment hit = near(stroke->points[k].x, stroke->points[k].y);
+                const NearestSegment hit = closest_to(stroke->points[k].x, stroke->points[k].y);
                 if (hit.distance <= radius) {
                     const std::size_t seg = hit.index;
                     pressure[k] = held_pressure((trace[seg].p + trace[std::min(seg + 1, trace.size() - 1)].p) / 2);
@@ -369,7 +371,7 @@ void trace_edit(OpContext& c) {
         const StrokePtr& s = items[i];
         for (const bool first : {true, false}) {
             const PointF& p = first ? s->points.front() : s->points.back();
-            if (near(p.x, p.y).distance <= radius) ends.push_back(End{s, first});
+            if (closest_to(p.x, p.y).distance <= radius) ends.push_back(End{s, first});
         }
     }
     bool joined_any = false;

@@ -217,9 +217,9 @@ private slots:
         // 近似色 follow the colour
         brush.set_colour({200, 120, 40});
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        const auto near = panel.near_page->findChildren<app::Swatch*>();
-        QCOMPARE(near.size(), 25);
-        QCOMPARE(near[12]->rgb(), (Rgb{200, 120, 40}));
+        const auto nearby_swatches = panel.near_page->findChildren<app::Swatch*>();
+        QCOMPARE(nearby_swatches.size(), 25);
+        QCOMPARE(nearby_swatches[12]->rgb(), (Rgb{200, 120, 40}));
 
         // スポイト's source
         QSignalSpy chosen(&panel, &app::ColourPanel::pick_source_chosen);
