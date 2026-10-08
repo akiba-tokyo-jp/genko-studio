@@ -226,7 +226,7 @@ std::vector<std::filesystem::path> record(const std::filesystem::path& project, 
         try {
             RenderOptions options;
             options.mode = "proof";
-            // (what this build cannot draw yet — lines and balloons, placed pictures… — is left out of the picture:
+            // (what this build cannot draw yet — placed pictures, a jacket's folds… — is left out of the picture:
             // a page is recorded without it rather than not at all, since a frame missed at a save is missed for good)
             options.skip_unported = true;
             bytes = write_jpeg(render_page(*page, dpi, options, &doc).image, 85);

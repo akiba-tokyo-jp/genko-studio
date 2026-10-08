@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -17,7 +18,7 @@
 // the words set across (rows with kinsoku, 約物の詰め, ruby above, 傍点) or down (tategaki.compose, broken between
 // phrases), shrunk until they fit the balloon by their own outline, then the letter effects in Python's order
 // (gradient, picture, outline, arc, lean, warp) and where the letters sit; text on a path; the letters and the
-// speaker's name painted on the page. The balloons themselves (shapes, tails, joined outlines) are a later step.
+// speaker's name painted on the page. The balloons themselves (shapes, tails, joined outlines): balloons.hpp.
 
 namespace genko::render::text {
 
@@ -59,14 +60,25 @@ Layout text_layout(const core::StoryLine& line, int dpi, const std::optional<std
 // text_image(line, dpi, font_path): the lettering and its em.
 std::pair<Image, std::int64_t> text_image(const core::StoryLine& line, int dpi,
                                           const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {});
+// text_layout's result remembered for the same line (what it reads of it: its text, kind, wrap, size, style and
+// runs), dpi and font: a page drawn again, or in parts, sets each line once. clear_layout_cache() forgets them.
+std::shared_ptr<const Layout> remembered_layout(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path,
+                                                std::stop_token stop = {});
+void clear_layout_cache();
 
 // _paint_text(image, line, dpi, show_speaker, font_path): the line's letters on the page (from its box's middle, or
-// its corner for "none"; along its path when it has one) and the speaker's name above the box.
+// its corner for "none"; along its path when it has one) and the speaker's name above the box. `origin`: where the
+// image's top left lies on the page, when it holds a part of it (the same pixels as the whole page cut there).
 void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_speaker,
-                const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {});
+                const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {}, Point origin = {});
 // path_text(image, line, dpi, font_path): 文字をパスに沿わせる — each letter stood on the path, turned with it.
 void path_text(Image& image, const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path = std::nullopt,
-               std::stop_token stop = {});
+               std::stop_token stop = {}, Point origin = {});
+
+// picture_of(data): a picture balloon's (or picture letters') image, base64 PNG, JPEG, BMP or GIF decoded to RGBA;
+// nothing when the data is not a picture (Python's `except Exception`). Unhashable data (a list, a dict) is Python's
+// TypeError; other formats Pillow opens: NotYetPorted("image_format").
+std::optional<Image> picture_of(const core::Json& data);
 
 // The letter effects.
 // outlined(text_img, grow, colour): a halo (白フチ) grow px wide.

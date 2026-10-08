@@ -135,6 +135,11 @@ genko_test(test_contract_lines SOURCES contract/test_contract_lines.cpp contract
 genko_test(test_contract_text SOURCES contract/test_contract_text.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 3600)
 set_tests_properties(test_contract_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
+# Balloons (M4): the shapes, tails and joined balloons of balloons.py against Python's (render_harness.py
+# balloon-cases): the geometry bit for bit, draw_lines's pictures byte for byte, whole and drawn in parts.
+genko_test(test_contract_balloons SOURCES contract/test_contract_balloons.cpp
+           DEPS genko_test_support genko_render LABELS contract TIMEOUT 3600)
+set_tests_properties(test_contract_balloons PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
 # The paint ops of M3④: add_shape, smudge and liquify against Python's apply_ops (paint_cases.json).
 genko_test(test_contract_paint SOURCES contract/test_contract_paint.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)

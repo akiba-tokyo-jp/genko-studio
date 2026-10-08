@@ -1,7 +1,9 @@
 // `genko render` against `python -m genko render`: the same arguments give the same JSON and a PNG with the same
 // pixels, for pages of random books (tools/migration/render_harness.py make-books) in every mode; a page with
 // something not drawn yet says so ({"code": "not_yet_ported"}) and writes nothing; the usage and save errors match
-// (a page that is not there: the same exit code, an error in JSON where Python stops with a traceback).
+// (a page that is not there: the same exit code, an error in JSON where Python stops with a traceback). Python's
+// command line runs with Pillow held to its BASIC text layout, as the reference was measured (render_harness.py does
+// the same): a reference Python whose Pillow has raqm would otherwise lay out the letters of the balloons by it.
 // Skipped without the Python reference.
 
 #include <QtTest>
@@ -24,8 +26,12 @@ class TestContractRenderCli : public QObject {
     QString books_;
     Json manifest_;
 
+    // `python -m genko <args>`, Pillow held to BASIC (ImageFont.core.HAVE_RAQM = False before genko is imported)
     genko::test::Run python(const QStringList& args) {
-        return genko::test::run(genko::test::python_ref(), QStringList{"-m", "genko"} + args, genko::test::python_env(scratch_.path()));
+        static const QString basic = QStringLiteral(
+            "import runpy\nfrom PIL import ImageFont\nImageFont.core.HAVE_RAQM = False\n"
+            "runpy.run_module('genko', run_name='__main__', alter_sys=True)\n");
+        return genko::test::run(genko::test::python_ref(), QStringList{"-c", basic} + args, genko::test::python_env(scratch_.path()));
     }
     genko::test::Run cpp(const QStringList& args) {
         return genko::test::run(genko::test::genko_cli(), args, QProcessEnvironment::systemEnvironment());

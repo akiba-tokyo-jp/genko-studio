@@ -31,17 +31,24 @@ Commands:
                                 K random books for drawing (layers, brushes, rasters, patches, masks, blend modes,
                                 fills and gradients, corrections, panels): OUT/book-NN.genko
   render JOBS                   render_page for each job of a JSON list: {"book", "page", "dpi", "mode", "out",
-                                "skip_unported": bool} → a PNG of the page; "story": false removes the lines
+                                "skip_unported": bool} → a PNG of the page
   layer-image JOBS              layer_image for each job: {"book", "page", "layer", "dpi", "out"}
   text-cases OUT --seed N --count K
                                 the letters of chosen lines and K random ones (every style key that changes them,
                                 every balloon kind, vertical and across, at a few dpi) as balloons._paint_text draws
                                 them, with text_layout's picture, em and corner; tategaki's pure functions; each cell's
                                 glyph: OUT (JSON, pictures as PNG)
+  balloon-cases OUT --seed N --count K
+                                balloons.draw_lines for chosen groups of lines (every shape, every tail kind, bent
+                                and curved tails, joined balloons, turned ones, picture balloons, cuts, hand-drawn
+                                outlines, every style key of the balloon) and K random ones, on RGB and RGBA pictures
+                                at a few dpi; and the shapes' geometry (_edge_point, _tail_polygon, _polyline_tail,
+                                _uneven, _electric, _outline, _wobbly, _smooth_closed, _turned, _thought_trail): OUT
 
-With skip_unported the elements this C++ step does not draw yet (lines and balloons, placed pictures, cover folds,
-animation) are left out the way the C++ RenderOptions::skip_unported leaves them out (tones, effect lines and
-layer screens are drawn on both sides since M3-B, the 3D guides since M3-C, nombres since the M2 material work).
+With skip_unported the elements this C++ step does not draw yet (placed pictures, cover folds, animation) are left
+out the way the C++ RenderOptions::skip_unported leaves them out (tones, effect lines and layer screens are drawn on
+both sides since M3-B, the 3D guides since M3-C, nombres since the M2 material work, lines and their balloons since
+M4).
 
 The reference lays text out as the measured one did: Pillow without raqm (BASIC layout, FreeType 2.14.3). A Pillow that
 has raqm (and finds fribidi) is held to BASIC here, so the nombres compare with the C++ drawing of them.
@@ -841,7 +848,9 @@ def rand_frames(rng, page, models):
     return leaves
 
 
-def make_render_book(rng, dest: Path, index: int) -> None:
+def make_render_book(rng, dest: Path, index: int, story: bool = False) -> None:
+    """A random book for drawing. `story`: with lines of dialogue in balloons, and a jacket in every fourth book (whose
+    folds this build does not draw yet), drawn from numbers of their own (the pages are the same either way)."""
     from genko import brushes, models
     from genko.io import save_episode
     from genko.models import Binding, Layer, LayerKind, LayerRole, PageSpec
@@ -953,17 +962,58 @@ def make_render_book(rng, dest: Path, index: int) -> None:
             target = rng.choice([layer for layer in page.layers if layer.kind in (LayerKind.STROKES, LayerKind.RASTER)])
             target.screen = {"pattern": "dot", "lpi": 60.0, "angle": 45.0, "black": 0.1, "white": 0.95}
         _ = leaf_ids
+    if story:
+        srng = random.Random(rng.getrandbits(64))
+        for page in episode.pages:
+            if srng.random() < 0.55:
+                rand_story(srng, episode, page)
+        if index % 4 == 3:  # (what is still not drawn: a jacket's folds, in name and proof)
+            jacket = episode.pages[-1]
+            jacket.extra["cover"] = {"kind": "jacket", "spine_mm": srng.choice([0, 8, 15]), "flap_mm": srng.choice([0, 20])}
+            for page in episode.pages:  # (a jacket is wider than the pages: no onion skin between them)
+                if page is jacket or page.onion_from == jacket.index:
+                    page.onion_from = None
     save_episode(episode, dest, actor="human:作者")
     return unported_of(episode)
 
 
+def rand_story(rng, episode, page) -> None:
+    """A few lines on the page: balloons of every shape with tails, joined, turned, cut, drawn by hand, set under a
+    layer; some not placed (drawn as labels)."""
+    from genko.migrate import _line
+
+    w_page, h_page = float(page.spec.width_mm), float(page.spec.height_mm)
+    panels = {f.id: (f.rect.x, f.rect.y, f.rect.width, f.rect.height) for f in page.leaf_frames()}
+    layer_ids = [layer.id for layer in page.layers]
+    group = None
+    for n in range(rng.randrange(1, 5)):
+        if rng.random() < 0.12:  # not placed: a label at the inner frame's corner
+            data = {"id": "%012x" % rng.getrandbits(48), "page_index": page.index, "text": _rand_text(rng, 6), "x_mm": 0, "y_mm": 0,
+                    "balloon": ""}
+            if rng.random() < 0.5:
+                data["speaker"] = rng.choice(["主人公", "A", ""])
+        else:
+            data = rand_balloon_line(rng, "%012x" % rng.getrandbits(48), w_page, h_page, list(panels), small_text=True)
+            data["page_index"] = page.index
+            if group is not None or rng.random() < 0.15:
+                group = group or rng.choice(["g", "会話", 1])
+                data["style"]["group"] = group
+            if rng.random() < 0.08 and layer_ids:
+                data["style"]["below_layer"] = rng.choice(layer_ids + ["no-such-layer"])
+        line = _line(data)
+        episode.story.append(line)
+        page.texts.append(line)
+
+
 def unported_of(episode) -> dict:
     """What each page carries that M2-R1 does not draw (page index → names, as render::NotYetPorted names them)."""
+    from genko import covers
+
     out = {}
     for page in episode.pages:
         names = set()
-        if episode.story_for_page(page.index):
-            names.add("balloons")
+        if covers.folds(page):  # (drawn in name and proof)
+            names.add("covers")
         if page.onion_from:  # (the page underneath is drawn too)
             prev = next((p for p in episode.pages if p.index == page.onion_from), None)
             if prev is not None and prev is not page:
@@ -981,7 +1031,7 @@ def make_books(out: str, seed: int, count: int) -> None:
     for i in range(count):
         pyref_harness.fresh_process_state(True)
         name = f"book-{i:02d}.genko"
-        manifest[name] = make_render_book(random.Random(seed * 1000 + i), root / name, i)
+        manifest[name] = make_render_book(random.Random(seed * 1000 + i), root / name, i, story=True)
     (root / "MANIFEST.json").write_text(dumps(manifest), encoding="utf-8")
 
 
@@ -990,13 +1040,12 @@ def make_books(out: str, seed: int, count: int) -> None:
 
 def leave_out_unported() -> None:
     """What RenderOptions::skip_unported leaves out, left out here too (each drawing function does nothing)."""
-    from genko import anim, balloons, covers, render
+    from genko import anim, covers, render
 
     render._placed_raster = lambda *args, **kwargs: None
     render._finish_placed = lambda fitted, *args, **kwargs: fitted
     covers.draw_folds = lambda *args, **kwargs: None
     anim.at_frame = lambda page, frame: page
-    balloons.draw_lines = lambda *args, **kwargs: None
 
 
 @contextmanager
@@ -1008,7 +1057,7 @@ def _unported_scope(enabled: bool):
     from genko import anim, balloons, covers, render, tones
     names = [(tones, 'draw_layer'), (tones, 'screened'), (render, '_draw_effects'),
              (render, '_draw_prims'), (render, '_placed_raster'), (render, '_finish_placed'),
-             (covers, 'draw_folds'), (anim, 'at_frame'), (balloons, 'draw_lines')]
+             (covers, 'draw_folds'), (anim, 'at_frame'), (balloons, 'draw_lines')]  # (balloons: drawn, kept as it is)
     originals = [(module, name, getattr(module, name)) for module, name in names]
     try:
         leave_out_unported()
@@ -1040,8 +1089,6 @@ def _render_jobs(jobs: list) -> None:
         if key not in books or job.get("then"):  # (a job that changes the book gets its own copy)
             brushes.CUSTOM.clear()
             episode = load_episode(Path(job["book"]))
-            if job.get("skip_unported"):
-                episode.story = []
             if job.get("then"):
                 books.pop(key, None)
             else:
@@ -1822,6 +1869,310 @@ def text_cases(out: str, seed: int, count: int) -> None:
     Path(out).write_text(dumps({"units": units, "glyphs": glyphs, "cases": cases}), encoding="utf-8")
 
 
+# --- balloons (M4: the shapes, tails and joined balloons of balloons.py, as draw_lines draws them) ----------------------
+
+TAIL_KINDS = ("wedge", "straight", "zigzag", "fade", "bubbles")
+
+
+def _balloon_picture() -> str:
+    """A small picture with see-through parts, for a picture balloon (style.picture)."""
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGBA", (36, 24), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(im)
+    draw.ellipse((1, 1, 34, 22), fill=(250, 245, 210, 255), outline=(40, 30, 20, 255), width=2)
+    draw.polygon([(6, 18), (2, 23), (12, 20)], fill=(40, 30, 20, 200))
+    return _text_png(im)
+
+
+def _rand_point(rng, x, y, w, h, spread=18.0) -> list:
+    return [round(rng.uniform(x - spread, x + w + spread), 1), round(rng.uniform(y - spread, y + h + spread), 1)]
+
+
+def _rand_tail(rng, x, y, w, h) -> dict:
+    tail = {"to": _rand_point(rng, x, y, w, h)}
+    r = rng.random()
+    if r < 0.25:
+        tail["via"] = _rand_point(rng, x, y, w, h, 8.0)
+    elif r < 0.4:
+        tail["vias"] = [_rand_point(rng, x, y, w, h, 10.0) for _ in range(rng.randrange(1, 4))]
+    if rng.random() < 0.7:
+        tail["kind"] = rng.choice(TAIL_KINDS + ("", "unknown"))
+    if rng.random() < 0.25:
+        tail["width_mm"] = rng.choice([0.8, 2.5, 4.0])
+    return tail
+
+
+def rand_balloon_line(rng, ident: str, area_w: float, area_h: float, frame_ids=(), small_text=False) -> dict:
+    """A line in a balloon (as project.json keeps it): every shape, tails of every kind, the balloon's style keys."""
+    w, h = round(rng.uniform(9, min(42, area_w * 0.6)), 1), round(rng.uniform(7, min(32, area_h * 0.5)), 1)
+    x, y = round(rng.uniform(-4, area_w - w + 4), 1), round(rng.uniform(-4, area_h - h + 4), 1)
+    kind = rng.choice(["speech"] * 4 + list(TEXT_KINDS) + ["", "mystery"])
+    style: dict = {}
+
+    def maybe(p, key, value):
+        if rng.random() < p:
+            style[key] = value
+
+    maybe(0.25, "border_mm", rng.choice([0.1, 0.2, 0.5, 0.8, 1.4, None]))
+    maybe(0.1, "fill", "none")
+    maybe(0.12, "fill_rgb", [rng.randrange(256) for _ in range(3)])
+    maybe(0.1, "fill_opacity", rng.choice([0.0, 0.35, 0.8, 1.0, -0.5]))
+    maybe(0.12, "line_rgb", [rng.randrange(256) for _ in range(3)])
+    maybe(0.1, "double", True)
+    maybe(0.15, "hand", False)
+    maybe(0.1, "wobble", rng.choice([0.3, 0.8, 1.5]))
+    maybe(0.15, "spikes", rng.choice([5, 9, 16, 31]))
+    maybe(0.15, "spike_depth", rng.choice([0.03, 0.12, 0.3, 0.55, 0.7]))
+    maybe(0.12, "spike_jitter", rng.choice([0.2, 0.6, 1.0, 1.5]))
+    maybe(0.12, "bumps", rng.choice([4, 9, 15, 0.5]))
+    maybe(0.08, "rotate_deg", rng.choice([12.5, -30, 90, 180, 0.005, -0.5]))
+    maybe(0.08, "cuts", [{"points": [[round(rng.uniform(-2, w + 2), 1), round(rng.uniform(-2, h + 2), 1)]
+                                     for _ in range(rng.randrange(1, 4))], "width_mm": rng.choice([0.6, 2.0, 3.5])}
+                         for _ in range(rng.randrange(1, 3))])
+    maybe(0.06, "text_dx_mm", round(rng.uniform(-2, 2), 1))
+    maybe(0.3 if small_text else 0.1, "size_mm", rng.choice([2.0, 2.5, 3.2]))
+    if kind == "picture" and rng.random() < 0.8:
+        style["picture"] = _balloon_picture() if rng.random() < 0.85 else "@@not a picture@@"
+    text = _rand_text(rng, 5 if small_text else rng.choice([4, 8, 12]))
+    line = {"id": ident, "page_index": 1, "text": text, "x_mm": x, "y_mm": y, "w_mm": w, "h_mm": h, "balloon": kind,
+            "style": style, "wrap": rng.choice(["horizontal", "vertical"])}
+    r = rng.random()
+    if r < 0.55:
+        line["tails"] = [_rand_tail(rng, x, y, w, h) for _ in range(rng.choice([1, 1, 1, 2, 3]))]
+    elif r < 0.65:
+        line["tail"] = _rand_point(rng, x, y, w, h)
+    if rng.random() < 0.1:
+        n = rng.randrange(3, 9)
+        cx, cy = x + w / 2, y + h / 2
+        line["path"] = [[round(cx + w / 2 * math.cos(math.tau * k / n) * rng.uniform(0.8, 1.15), 2),
+                         round(cy + h / 2 * math.sin(math.tau * k / n) * rng.uniform(0.8, 1.15), 2)] for k in range(n)]
+        style["path_curve"] = rng.random() < 0.5
+    if rng.random() < 0.2:
+        line["speaker"] = rng.choice(["主人公", "A", "名無し"])
+    if frame_ids and rng.random() < 0.6:
+        line["frame_id"] = rng.choice(list(frame_ids) + ["no-such-frame"])
+    return line
+
+
+def _chosen_balloons() -> list:
+    """Groups of lines chosen to reach every shape, tail kind and balloon style key: (name, lines, canvas mm, panels)."""
+    picture = _balloon_picture()
+    cases = []
+    counter = [0]
+
+    def ln(text, x, y, w, h, balloon="speech", style=None, **kw) -> dict:
+        counter[0] += 1
+        data = {"id": "%012x" % (0xb0b0000000 + counter[0] * 7919), "page_index": 1, "text": text, "x_mm": x, "y_mm": y,
+                "w_mm": w, "h_mm": h, "balloon": balloon, "style": dict(style or {})}
+        data.update(kw)
+        return data
+
+    def add(name, lines, canvas=(80.0, 70.0), panels=None):
+        cases.append((name, lines, canvas, panels))
+
+    kinds = list(TEXT_KINDS) + ["mystery", ""]
+    for kind in kinds:  # every shape, with a tail where it has one
+        add(f"shape-{kind or 'empty'}", [ln("フキダシの形", 15, 12, 40, 26, kind, tails=[{"to": [62, 58]}])])
+        add(f"shape-{kind or 'empty'}-plain", [ln("形だけ", 10, 10, 36, 22, kind, {"hand": False, "border_mm": 0.6})])
+        add(f"shape-{kind or 'empty'}-wobble", [ln("揺れる", 12, 14, 38, 24, kind, {"wobble": 0.9}, tails=[{"to": [8, 60]}])])
+    for tail_kind in TAIL_KINDS + ("unknown",):
+        for kind in ("speech", "box", "rounded", "shout", "electric", "cloud", "whisper", "narration"):
+            add(f"tail-{tail_kind}-{kind}", [ln("しっぽ", 20, 10, 34, 22, kind, tails=[
+                {"to": [70, 60], "kind": tail_kind},
+                {"to": [5, 52], "kind": tail_kind, "via": [12, 42]},
+                {"to": [44, 66], "kind": tail_kind, "width_mm": 3.0}])])
+    add("tail-vias", [ln("折れ線", 25, 8, 30, 20, "speech", tails=[{"to": [70, 62], "vias": [[50, 40], [40, 55]]},
+                                                                  {"to": [4, 60], "vias": [[10, 30]], "kind": "fade"}])])
+    add("tail-vias-box", [ln("折れ線", 25, 8, 30, 20, "box", tails=[{"to": [70, 62], "vias": [[60, 20], [64, 50], [50, 60]]}])])
+    add("tail-old", [ln("昔のしっぽ", 20, 10, 36, 22, "speech", tail=[60, 60])])
+    add("tail-old-and-new", [ln("両方", 20, 10, 36, 22, "speech", tail=[60, 60], tails=[{"to": [5, 60]}])])
+    add("tail-empty-to", [ln("先なし", 20, 10, 36, 22, "speech", tails=[{"to": []}, {"to": [10, 60], "kind": "zigzag"}])])
+    add("tail-outside", [ln("外へ", 30, 20, 30, 20, "speech", tails=[{"to": [120, -30]}, {"to": [-40, 95]}])])
+    add("tail-inside", [ln("中へ", 20, 20, 40, 30, "speech", tails=[{"to": [40, 35]}])])
+    add("tail-fade-many", [ln("消える", 20, 15, 34, 20, "speech", tails=[{"to": [70, 65], "kind": "fade"}, {"to": [5, 65], "kind": "fade"}])])
+    # a thought's bubbles: toward its speaker, or down and away inside its panel
+    panels = {"left": (0.0, 0.0, 40.0, 70.0), "right": (40.0, 0.0, 40.0, 70.0), "tiny": (30.0, 30.0, 5.0, 5.0)}
+    add("thought-no-panel", [ln("考え", 25, 10, 30, 20, "thought")])
+    for frame, x, y in (("left", 8, 8), ("left", 8, 45), ("right", 46, 8), ("right", 47, 50), ("tiny", 20, 20), ("nowhere", 10, 10)):
+        add(f"thought-panel-{frame}-{x}-{y}", [ln("考え中", x, y, 24, 14, "thought", frame_id=frame)], panels=panels)
+    add("thought-tail", [ln("考え", 25, 10, 30, 20, "thought", tails=[{"to": [70, 65]}])], panels=panels)
+    add("bubbles-tail", [ln("泡", 25, 10, 30, 20, "speech", tails=[{"to": [70, 65], "kind": "bubbles"}])])
+    # joined balloons: one outline
+    add("group-speech", [ln("一つ目", 8, 8, 34, 22, "speech", {"group": "a"}, tails=[{"to": [10, 62]}]),
+                         ln("二つ目", 30, 22, 36, 24, "speech", {"group": "a"})])
+    add("group-mixed", [ln("雲と", 8, 8, 34, 22, "cloud", {"group": "b", "border_mm": 0.8}),
+                        ln("箱", 34, 26, 30, 22, "box", {"group": "b"}, tails=[{"to": [70, 66]}]),
+                        ln("考え", 10, 40, 24, 16, "thought", {"group": "b"})])
+    add("group-keys", [ln("1", 5, 5, 24, 16, "speech", {"group": 1}), ln("1.0", 20, 15, 24, 16, "speech", {"group": 1.0}),
+                       ln("True", 35, 25, 24, 16, "speech", {"group": True}), ln("'1'", 45, 45, 24, 16, "speech", {"group": "1"})])
+    add("group-first-sfx", [ln("ドン", 8, 8, 30, 20, "sfx", {"group": "s"}), ln("台詞", 30, 30, 30, 20, "speech", {"group": "s"})])
+    add("group-first-none", [ln("文字", 8, 8, 30, 20, "none", {"group": "n"}), ln("台詞", 30, 30, 30, 20, "speech", {"group": "n"})])
+    add("group-picture-second", [ln("台詞", 8, 8, 30, 20, "speech", {"group": "p"}),
+                                 ln("絵", 34, 30, 34, 24, "picture", {"group": "p", "picture": picture})])
+    add("group-double", [ln("二重", 10, 10, 30, 20, "speech", {"group": "d", "double": True, "border_mm": 0.5}),
+                         ln("線", 30, 28, 34, 22, "rounded", {"group": "d"})])
+    # turned balloons
+    for deg in (15, -40, 90, 180, 0.005):
+        add(f"turned-{deg}", [ln("回る台詞", 20, 15, 36, 22, "speech", {"rotate_deg": deg}, speaker="主人公",
+                                 tails=[{"to": [60, 60], "via": [55, 45]}, {"to": [10, 60], "vias": [[12, 50]]}])])
+    add("turned-group", [ln("回る", 10, 10, 30, 20, "box", {"rotate_deg": 20, "group": "t"}),
+                         ln("組", 32, 28, 30, 20, "speech", {"rotate_deg": -5, "group": "t"}, tails=[{"to": [70, 66]}])])
+    add("turned-path", [ln("手描き", 20, 20, 30, 20, "speech", {"rotate_deg": 30},
+                           path=[[20, 20], [52, 18], [55, 42], [18, 40]])])
+    add("turned-picture", [ln("絵", 20, 20, 36, 24, "picture", {"rotate_deg": 25, "picture": picture})])
+    add("turned-thought", [ln("考え", 20, 20, 30, 20, "thought", {"rotate_deg": 10}, frame_id="left")], panels=panels)
+    # picture balloons
+    add("picture", [ln("絵の台詞", 15, 15, 40, 26, "picture", {"picture": picture}, speaker="A")])
+    add("picture-bad", [ln("読めない絵", 15, 15, 40, 26, "picture", {"picture": "@@not a picture@@"})])
+    add("picture-none", [ln("絵なし", 15, 15, 40, 26, "picture")])
+    add("picture-on-speech", [ln("絵の鍵", 15, 15, 40, 26, "speech", {"picture": picture})])
+    # the balloon eraser (cuts) and hand-drawn outlines
+    add("cuts", [ln("消しゴム", 15, 15, 40, 26, "speech", {"cuts": [{"points": [[0, 0], [20, 5], [40, 0]], "width_mm": 3.0},
+                                                                      {"points": [[38, 24]]}, {"points": [[5, 20], [10, 26]], "width_mm": 0.4}]},
+                    tails=[{"to": [70, 65]}])])
+    add("cuts-group", [ln("一", 8, 8, 30, 20, "box", {"group": "c"}), ln("二", 30, 25, 30, 20, "box", {"group": "c", "cuts": [{"points": [[0, 0], [30, 20]]}]})])
+    add("cuts-empty", [ln("空", 15, 15, 40, 26, "speech", {"cuts": [{"points": []}]})])
+    add("path", [ln("手描き", 20, 20, 30, 20, "speech", path=[[20, 20], [52, 18], [55, 42], [30, 50], [18, 40]], tails=[{"to": [70, 66]}])])
+    add("path-curve", [ln("曲線", 20, 20, 30, 20, "speech", {"path_curve": True}, path=[[20, 20], [52, 18], [55, 42], [30, 50], [18, 40]])])
+    add("path-curve-two", [ln("二点", 20, 20, 30, 20, "speech", {"path_curve": True}, path=[[20, 20], [52, 48]])])
+    # the balloon's own style keys
+    for key, values in (("border_mm", [0.05, 0.2, 0.6, 1.2, None]), ("fill", ["none", "white", None]),
+                        ("fill_rgb", [[255, 240, 200], [30, 30, 30]]), ("fill_opacity", [0.0, 0.4, 1.0, -1, 2]),
+                        ("line_rgb", [[200, 20, 20], [0, 0, 255]]), ("double", [True]), ("hand", [False, True]),
+                        ("spikes", [6, 24, 2.7]), ("spike_depth", [0.01, 0.4, 0.9]), ("spike_jitter", [0.5, 1.0, 3.0]),
+                        ("bumps", [3, 10, 25, 0.4]), ("wobble", [0.2, 2.0, -1])):
+        for value in values:
+            for kind in ("speech", "shout", "cloud", "electric", "box"):
+                add(f"style-{key}-{value}-{kind}", [ln("様式", 14, 12, 40, 26, kind, {key: value}, tails=[{"to": [66, 62]}])])
+    for kind in ("dotted_box", "tone_box", "fancy_box", "narration"):
+        for border in (0.1, 0.35, 0.9):
+            add(f"frame-{kind}-{border}", [ln("飾り枠の文", 10, 10, 50, 30, kind, {"border_mm": border})])
+        add(f"frame-{kind}-group", [ln("一", 5, 5, 30, 24, kind, {"group": "f"}), ln("二", 30, 25, 40, 30, kind, {"group": "f"})])
+    add("tone-box-colours", [ln("トーン", 10, 10, 50, 30, "tone_box", {"line_rgb": [30, 60, 200], "fill_rgb": [250, 250, 200]})])
+    # at the picture's edges, partly outside it, tiny and large
+    add("edge-left-top", [ln("端", -10, -8, 30, 20, "speech", tails=[{"to": [-5, 30]}])])
+    add("edge-right-bottom", [ln("端", 60, 55, 30, 20, "box", tails=[{"to": [90, 80]}])])
+    add("tiny", [ln("小", 30, 30, 2, 1.5, "speech", tails=[{"to": [40, 40]}]), ln("小", 10, 10, 3, 2, "cloud")])
+    add("tiny-shout", [ln("小", 30, 30, 4, 3, "shout"), ln("小", 10, 10, 4, 3, "electric")])
+    add("large", [ln("大きな台詞です。とても大きい。", 2, 2, 76, 64, "rounded", tails=[{"to": [40, 69]}])])
+    add("speakers", [ln("話す", 15, 15, 30, 20, "speech", speaker="主人公"), ln("無し", 40, 40, 30, 20, "none", speaker="名無し")])
+    add("negative-size", [ln("負", 40, 40, -20, -10, "speech")])
+    return cases
+
+
+def balloon_units(rng) -> dict:
+    """The shapes' geometry on chosen and random boxes, tips and seeds (floats as their bits)."""
+    from genko import balloons as b
+
+    out: dict = {"edge_point": [], "tail_polygon": [], "polyline_tail": [], "uneven": [], "electric": [], "outline": [],
+                 "wobbly": [], "smooth_closed": [], "turned": [], "thought_trail": [], "tails_of": []}
+    kinds = list(TEXT_KINDS) + ["mystery"]
+    for n in range(400):
+        x0, y0 = rng.randrange(0, 300), rng.randrange(0, 300)
+        box = (x0, y0, x0 + rng.randrange(1, 400), y0 + rng.randrange(1, 300))
+        tip = (rng.randrange(-100, 800), rng.randrange(-100, 700))
+        kind = rng.choice(kinds)
+        spread = rng.choice([4.0, 7.5, 12, 30.0, 0.5, 9.333333333333334, 500])
+        out["edge_point"].append([kind, list(box), list(tip), bits(spread), pts_json(b._edge_point(kind, box, tip, spread))])
+        via = rng.choice([None, (rng.randrange(-50, 700), rng.randrange(-50, 600))])
+        style = rng.choice(TAIL_KINDS + ("unknown",))
+        out["tail_polygon"].append([kind, list(box), list(tip), list(via) if via else None, bits(spread), style,
+                                    pts_json(b._tail_polygon(kind, box, tip, via, spread, style))])
+        vias = [(rng.randrange(-50, 700), rng.randrange(-50, 600)) for _ in range(rng.randrange(1, 4))]
+        if n % 7 == 0:
+            vias.append(vias[-1])  # (a bend repeated: a piece of no length)
+        out["polyline_tail"].append([kind, list(box), list(tip), [list(v) for v in vias], bits(spread),
+                                     pts_json(b._polyline_tail(kind, box, tip, vias, spread))])
+        seed = rng.choice(["", "genko", "%012x" % rng.getrandbits(48)])
+        fbox = tuple(v * rng.choice([1, 0.5]) for v in box)
+        out["uneven"].append([[bits(v) for v in fbox], seed, pts_json(b._uneven(fbox, seed))])
+        st = {k: v for k, v in (("spikes", rng.choice([None, 0, 7, 20, 3.9])), ("spike_depth", rng.choice([None, 0.01, 0.2, 0.7])))
+              if v is not None or rng.random() < 0.3}
+        out["electric"].append([list(box), st, pts_json(b._electric(box, st))])
+        points = b._outline(kind, box)
+        out["outline"].append([kind, list(box), None if points is None else pts_json(points)])
+        if points:
+            amount, size = rng.choice([0.2, 0.8, 1.5]), rng.choice([10, 33.5, 200])
+            out["wobbly"].append([pts_json(points), bits(amount), bits(size), seed, pts_json(b._wobbly(points, amount, size, seed))])
+        ring = [(rng.randrange(0, 500), rng.randrange(0, 500)) for _ in range(rng.randrange(1, 9))]
+        out["smooth_closed"].append([[list(p) for p in ring], pts_json(b._smooth_closed(ring))])
+        point = (rng.uniform(-50, 250), rng.uniform(-50, 250))
+        centre = (rng.uniform(0, 200), rng.uniform(0, 200))
+        degrees = rng.choice([0.0, 15.0, -30.5, 90.0, 180.0, rng.uniform(-360, 360)])
+        out["turned"].append([pts_json([point])[0], pts_json([centre])[0], bits(degrees), pts_json([b._turned(point, centre, degrees)])[0]])
+    from genko.migrate import _line
+
+    frames = {"a": (0.0, 0.0, 60.0, 80.0), "b": (60.0, 0.0, 50.0, 40.0), "c": (60.0, 40.0, 5.0, 6.0), "d": (0, 0, 1000, 1000)}
+    for n in range(120):
+        data = {"id": "t%d" % n, "page_index": 1, "text": "", "x_mm": round(rng.uniform(-10, 120), 2), "y_mm": round(rng.uniform(-10, 90), 2),
+                "w_mm": rng.choice([0, 10, 25.5, 40]), "h_mm": rng.choice([0, 8, 20, 33.3])}
+        if rng.random() < 0.85:
+            data["frame_id"] = rng.choice(list(frames) + ["zz"])
+        line = _line(data)
+        panels = frames if rng.random() < 0.85 else None
+        out["thought_trail"].append([data, panels, pts_json([b._thought_trail(line, panels)])[0]])
+    for n in range(40):
+        data = {"id": "u%d" % n, "page_index": 1, "text": ""}
+        if rng.random() < 0.6:
+            data["tails"] = [rng.choice([{"to": [1, 2]}, {"to": []}, {"to": None}, {}, {"to": [3.5, 4], "kind": "fade"}, {"via": [1, 1]}])
+                             for _ in range(rng.randrange(0, 4))]
+        if rng.random() < 0.5:
+            data["tail"] = [rng.randrange(0, 50), rng.uniform(0, 50)]
+        out["tails_of"].append([data, b.tails_of(_line(data))])
+    return out
+
+
+def balloon_cases(out: str, seed: int, count: int) -> None:
+    """balloons.draw_lines on chosen and random groups of lines (their pictures, or Python's error) and the shapes'
+    geometry: what the C++ balloons must match byte for byte."""
+    from PIL import Image
+
+    from genko import balloons
+
+    rng = random.Random(seed)
+    units = balloon_units(rng)
+    root = ROOT / "src" / "genko" / "fonts"
+    jobs = []
+    for n, (name, lines, canvas, panels) in enumerate(_chosen_balloons()):
+        for dpi in ((150, 350) if n % 3 else (72, 200, 300)):
+            mode = "RGBA" if n % 5 == 0 else "RGB"
+            jobs.append((f"chosen-{name}-{dpi}", lines, canvas, panels, dpi, None, n % 2 == 0, mode))
+    for n in range(count):
+        canvas = (rng.choice([60.0, 80.0, 100.0]), rng.choice([50.0, 70.0, 90.0]))
+        panels = None
+        if rng.random() < 0.6:
+            half = canvas[0] / 2
+            panels = {"p1": (0.0, 0.0, half, canvas[1]), "p2": (half, 0.0, half, canvas[1] / 2), "p3": (half, canvas[1] / 2, half, canvas[1] / 2)}
+        group_key = rng.choice([None, None, "g", 1, 1.0])
+        lines = []
+        for k in range(rng.choice([1, 1, 1, 2, 2, 3, 4])):
+            data = rand_balloon_line(rng, "%012x" % rng.getrandbits(48), canvas[0], canvas[1], list(panels or {}))
+            if group_key is not None and (k > 0 or rng.random() < 0.8):
+                data["style"]["group"] = group_key
+            lines.append(data)
+        font_path = str(root / "ZenOldMincho-SemiBold.ttf") if rng.random() < 0.05 else None
+        dpi = rng.choice([72, 96, 150, 150, 200, 299, 300, 350, 400])
+        jobs.append((f"random-{n}", lines, canvas, panels, dpi, font_path, rng.random() < 0.6, rng.choice(["RGB", "RGB", "RGBA"])))
+    from genko.migrate import _line
+
+    cases = []
+    for name, lines, canvas, panels, dpi, font_path, show_speaker, mode in jobs:
+        size = (balloons.px(canvas[0], dpi), balloons.px(canvas[1], dpi))
+        background = (255, 255, 255) if mode == "RGB" else (230, 240, 255, 255) if len(cases) % 2 else (0, 0, 0, 0)
+        case = {"id": name, "lines": lines, "canvas": list(size), "mode": mode, "background": list(background), "dpi": dpi,
+                "font_path": font_path, "show_speaker": show_speaker,
+                "panels": None if panels is None else {k: list(v) for k, v in panels.items()}}
+        try:
+            image = Image.new(mode, size, background)
+            balloons.draw_lines(image, [_line(dict(d)) for d in lines], dpi, font_path, show_speaker, panels)
+            case["png"] = _text_png(image)
+        except Exception as e:  # (Python's own error: the C++ build raises the same)
+            case["error"] = [type(e).__name__, str(e.args[0]) if e.args else str(e)]
+        cases.append(case)
+    Path(out).write_text(dumps({"units": units, "cases": cases}), encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1857,6 +2208,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("out")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--count", type=int, default=400)
+    p = sub.add_parser("balloon-cases")
+    p.add_argument("out")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--count", type=int, default=300)
     p = sub.add_parser("render")
     p.add_argument("jobs")
     p.add_argument("--workers", type=int, default=1)
@@ -1879,6 +2234,8 @@ def main(argv: list[str] | None = None) -> int:
         material_library(args.steps, args.out, args.config)
     elif args.cmd == "text-cases":
         text_cases(args.out, args.seed, args.count)
+    elif args.cmd == "balloon-cases":
+        balloon_cases(args.out, args.seed, args.count)
     elif args.cmd == "make-books":
         make_books(args.out, args.seed, args.count)
     elif args.cmd == "render":

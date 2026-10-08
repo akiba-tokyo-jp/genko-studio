@@ -2,13 +2,14 @@
 //  - 40 random books (tools/migration/render_harness.py make-books, seed fixed): 1–3 pages, up to 8 layers with every
 //    brush and custom brushes, rasters of every PNG mode and size, patches, masks, every blend mode, opacity, clipping,
 //    lock_alpha, fills and gradients, corrections, layer effects, panels cut, slanted, bowed, rounded, bleeding, with
-//    every border style, paper colours, rulers and onion skins; in print, proof and name at 72, 150 and 350 dpi;
+//    every border style, paper colours, rulers and onion skins, lines of dialogue in balloons of every shape with
+//    tails of every kind (joined, turned, cut, drawn by hand, set under a layer) and lines not placed (labels); in
+//    print, proof and name at 72, 150 and 350 dpi;
 //  - the three legacy books (data/legacy);
 //  - a line added to a page drawn before (the remembered layer picture is drawn on, as in Python).
-// Tone layers, effect lines and layer screens (M3-B) and the 3D guides (M3-C) are drawn on both sides. Pages with
-// what this step does not draw yet (lines and balloons, nombres, placed pictures and their finish, cover folds,
-// animation) must say so (NotYetPorted) and are then drawn with skip_unported, against Python with the same things
-// left out.
+// Tone layers, effect lines and layer screens (M3-B), the 3D guides (M3-C) and lines with their balloons (M4) are drawn
+// on both sides. Pages with what this step does not draw yet (placed pictures and their finish, cover folds) must say
+// so (NotYetPorted) and are then drawn with skip_unported, against Python with the same things left out.
 // Regions: parts of a page drawn alone are the same as the whole page cut (with and without remembered lines).
 // Skipped without the Python reference.
 
@@ -84,7 +85,7 @@ class TestContractRender : public QObject {
             add(page.index);
             if (page.onion_from) add(*page.onion_from);
         } else {
-            out = {"balloons", "nombre", "placed", "covers", "anim", "finish"};
+            out = {"nombre", "placed", "covers", "anim", "finish"};  // (lines and balloons are drawn since M4)
         }
         out.erase("onion");
         return out;

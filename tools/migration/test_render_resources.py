@@ -66,6 +66,8 @@ class RenderResources(unittest.TestCase):
                              'area': {'rect': [30, 35, 50, 60]}},
                             {'op': 'add_line', 'page': 1, 'text': '分離の確認', 'x_mm': 60, 'y_mm': 40,
                              'w_mm': 40, 'h_mm': 30}], agent='human:確認')
+        # (what skip mode still leaves out: a jacket's folds, drawn in proof; lines and balloons are drawn on both sides)
+        episode.pages[0].extra['cover'] = {'kind': 'jacket', 'spine_mm': 12, 'flap_mm': 30}
         with tempfile.TemporaryDirectory() as root:
             book = Path(root) / 'book.genko'
             save_episode(episode, book, actor='human:確認')
@@ -78,7 +80,7 @@ class RenderResources(unittest.TestCase):
                 HARNESS.render_jobs(str(jobs))
                 with Image.open(out) as image:
                     images.append(image.convert('RGB').tobytes())
-            self.assertNotEqual(images[0], images[1], 'balloon positive control must be visible')
+            self.assertNotEqual(images[0], images[1], 'cover-fold positive control must be visible')
             self.assertEqual(images[0], images[2], 'skip mode must not erase subsequent normal drawing')
 
     def test_one_cpu_two_gib_does_not_start_four_renderers(self):

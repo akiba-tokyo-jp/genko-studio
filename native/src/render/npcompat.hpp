@@ -41,6 +41,8 @@ float sinf(float x);
 float cosf(float x);
 float hypotf(float x, float y);
 float atan2f(float y, float x);
+// np.hypot of float64 arrays (and of int64 ones, cast to float64): libm's hypot (balloons._fade_mask).
+double hypot(double x, double y);
 
 // np.remainder for float32 (Python's %: the sign of the divisor).
 float remainder(float a, float b);

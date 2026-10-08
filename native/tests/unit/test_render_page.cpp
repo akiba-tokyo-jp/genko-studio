@@ -263,8 +263,8 @@ private slots:
         QTest::addColumn<QString>("what");
         QTest::addColumn<QString>("mode");
         // (tones, effect lines and screens are drawn since M3-B, the 3D guides since M3-C, a page's animation since
-        // M3-③: anim_is_drawn)
-        for (const char* what : {"balloons", "covers", "placed"}) {
+        // M3-③: anim_is_drawn, lines and their balloons since M4: balloons_are_drawn)
+        for (const char* what : {"covers", "placed"}) {
             const char* mode = std::string(what) == "covers" ? "proof" : "print";
             QTest::newRow(what) << QString(what) << QString(mode);
         }
@@ -276,7 +276,6 @@ private slots:
         Document doc = book();
         genko::core::Page& page = doc.edit_page(0);
         const std::string w = what.toStdString();
-        if (w == "balloons") doc.add_line(page.index, "台詞", "A", std::nullopt, "", Num(10), Num(12));
         if (w == "nombre") page.numero = true;
         if (w == "covers") page.extra["cover"] = Json::object({{"kind", "jacket"}, {"spine_mm", 5}, {"flap_mm", 10}});
         if (w == "anim") page.extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
@@ -314,6 +313,73 @@ private slots:
             const render::RenderResult r = render::render_page(*doc.pages[0], 72, options, &doc);
             QVERIFY(r.omitted.empty());
         }
+    }
+
+    void balloons_are_drawn() {
+        // lines in balloons of several kinds (with tails, joined, turned, one set under the ink layer) and one not placed
+        // (a label): drawn in every mode with nothing left out, the page not the one without them, and parts of it
+        // drawn alone the same as the whole page cut
+        Document doc = book();
+        const Num index = doc.pages[0]->index;
+        std::string ink;
+        for (const auto& layer : doc.pages[0]->layers) {
+            if (layer.role == LayerRole::Ink) ink = layer.id;
+        }
+        doc.add_line(index, "台詞です", "A", std::nullopt, "", Num(10), Num(12)).tails.push_back(
+            Json::object({{"to", Json::array({30, 50})}, {"kind", "zigzag"}}));
+        doc.add_line(index, "叫び", "", std::nullopt, "", Num(30), Num(40), Num(25), Num(18), "shout").style["group"] = "g";
+        doc.add_line(index, "組の箱", "", std::nullopt, "", Num(40), Num(52), Num(22), Num(14), "box").style["group"] = "g";
+        doc.add_line(index, "回る雲", "B", std::nullopt, "", Num(8), Num(60), Num(26), Num(16), "cloud").style["rotate_deg"] = 20;
+        doc.add_line(index, "下の台詞", "", std::nullopt, "", Num(15), Num(30), Num(30), Num(16), "rounded").style["below_layer"] = ink;
+        doc.add_line(index, "置かれない台詞", "C", std::nullopt, "", Num(0), Num(0), Num(40), Num(20), "");  // (a label)
+        const Document plain = book();
+        for (const char* mode : {"print", "proof", "name"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            QVERIFY(unported_element(*doc.pages[0], doc, options).empty());
+            const render::RenderResult r = render::render_page(*doc.pages[0], 150, options, &doc);
+            QVERIFY(r.omitted.empty());
+            QVERIFY(r.image.tobytes() != render::render_page(*plain.pages[0], 150, options, &plain).image.tobytes());
+            for (const render::RenderRegion part : {render::RenderRegion{0, 0, 1, 1}, render::RenderRegion{40, 60, 150, 120},
+                                                    render::RenderRegion{0, 150, r.image.width(), 90},
+                                                    render::RenderRegion{r.image.width() - 70, r.image.height() - 60, 70, 60}}) {
+                for (const bool fresh : {true, false}) {
+                    if (fresh) render::clear_render_caches();
+                    render::RenderOptions o = options;
+                    o.region = part;
+                    const render::Image got = render::render_page(*doc.pages[0], 150, o, &doc).image;
+                    QVERIFY(got.tobytes() == r.image.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes());
+                }
+            }
+        }
+        // each kind of line changes the page: the label, the line set under the ink, the joined and the turned balloons
+        render::RenderOptions proof;
+        proof.mode = "proof";
+        const std::string all = render::render_page(*doc.pages[0], 100, proof, &doc).image.tobytes();
+        for (std::size_t i = 0; i < doc.story.size(); ++i) {
+            Document fewer = doc;
+            fewer.story.erase(fewer.story.begin() + static_cast<std::ptrdiff_t>(i));
+            QVERIFY2(render::render_page(*fewer.pages[0], 100, proof, &fewer).image.tobytes() != all, doc.story[i].text.c_str());
+        }
+        // a line set under a layer of a page in precise colour: that canvas has no balloons yet
+        Document precise = doc;
+        genko::core::Page& coloured_page = precise.edit_page(0);
+        genko::core::StrokePtr first;
+        for (const auto& layer : coloured_page.layers) {
+            if (layer.role == LayerRole::Ink) first = layer.strokes->items.front();
+        }
+        for (auto& layer : coloured_page.layers) {
+            if (layer.role != LayerRole::Finish) continue;
+            auto coloured = std::make_shared<genko::core::Stroke>(*first);
+            coloured->id = genko::core::new_id();
+            coloured->color_rgb = Json{{"precision", "f32"}, {"values", Json::array({1.25, 0.125, 0.5})}};
+            layer.strokes = genko::core::make_strokes({coloured});
+        }
+        render::RenderOptions print;
+        QCOMPARE(unported_element(*precise.pages[0], precise, print), std::string("high_precision_balloons"));
+        print.skip_unported = true;
+        const render::RenderResult left_out = render::render_page(*precise.pages[0], 72, print, &precise);
+        QCOMPARE(left_out.omitted, std::vector<std::string>{"high_precision_balloons"});
     }
 
     void unported_only_where_drawn() {

@@ -6,7 +6,8 @@
 //      payload refers to (a layer's pixels, its mask, its patches, an area kept on a page) hold the same pixels (this
 //      build writes other PNG bytes for them), the JSON assets are the same bytes. Every op of M3-A1 has 8 or more
 //      cases that succeed and 4 or more that fail. A case marked "cpp": "not_yet_ported" draws a page with what this
-//      build does not draw yet (a nombre, a line, a tone): C++ must refuse it with not_yet_ported.
+//      build does not draw yet: C++ must refuse it with not_yet_ported (page 3's nombre, tone and line of dialogue are
+//      drawn since M4: the fill that looks at that page is compared with Python's).
 //   2. random op sequences (150, made by `pyref_harness.py make-raster-sequences` with a fixed seed: these ops and the
 //      basic ones of M2, 1 to 10 ops each, by several actors, some dry runs, strict_gates and page locks) on 15 random
 //      books for drawing (`render_harness.py make-books`, without what this build does not draw yet): each step the

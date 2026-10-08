@@ -162,7 +162,7 @@ private slots:
     }
 
     void timelapseRecordsAndExports() {
-        // (page 2 has a line of dialogue: recorded too, without what this build cannot draw yet)
+        // (page 2 has a line of dialogue: recorded too, in its balloon)
         core::Document lined = book_doc();
         lined.add_line(core::Num(2), "台詞です", "", std::nullopt, "", core::Num(50), core::Num(50));
         Studio s(lined);

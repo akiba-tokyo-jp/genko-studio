@@ -41,6 +41,7 @@ genko_library(genko_render
     text/fonts.cpp
     text/tategaki.cpp
     text/lettering.cpp
+    text/balloons.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

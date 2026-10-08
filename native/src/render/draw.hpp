@@ -114,6 +114,9 @@ public:
     // rectangle(xy, fill=None, outline=None, width=1)
     void rectangle(const BoxF& box, const std::optional<Ink>& fill = std::nullopt,
                    const std::optional<Ink>& outline = std::nullopt, int width = 1);
+    // rounded_rectangle(xy, radius=0, fill=None) (all four corners rounded; a fill only): its corners as pie slices,
+    // the rest as rectangles; an ellipse when the corners meet both ways, a rectangle when they have no curve.
+    void rounded_rectangle(const BoxF& box, double radius, const Ink& fill);
     // point(xy, fill=None)
     void point(std::span<const PointD> xy, const std::optional<Ink>& fill = std::nullopt);
     // arc(xy, start, end, fill=None, width=1)

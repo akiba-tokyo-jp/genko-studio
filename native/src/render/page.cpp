@@ -13,6 +13,8 @@
 #include <mutex>
 #include <utility>
 
+#include <QFileInfo>
+
 #include "core/anim.hpp"
 #include "core/covers.hpp"
 #include "core/error.hpp"
@@ -29,6 +31,9 @@
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
 #include "render/prims.hpp"
+#include "render/text/balloons.hpp"
+#include "render/text/fonts.hpp"
+#include "render/text/lettering.hpp"
 #include "render/tones.hpp"
 
 namespace genko::render {
@@ -799,6 +804,61 @@ std::vector<const core::StoryLine*> lines_of(const Page& page, const core::Docum
     return episode->story_for_page(page.index);
 }
 
+// `line.x_mm or line.y_mm or line.balloon`: a line placed on the page (drawn in its balloon, not as a label).
+bool placed_line(const core::StoryLine& line) { return line.x_mm.truthy() || line.y_mm.truthy() || !line.balloon.empty(); }
+
+// {f.id: (f.rect.x, f.rect.y, f.rect.width, f.rect.height) for f in page.leaf_frames()}
+text::Panels panels_of(const Page& page) {
+    text::Panels out;
+    for (const core::Frame* f : page.leaf_frames()) {
+        out.emplace_back(f->id, std::array<double, 4>{f->rect.x.value(), f->rect.y.value(), f->rect.width.value(), f->rect.height.value()});
+    }
+    return out;
+}
+
+// render._font(font_path) at its size 14: the book's font file when it opens, else the first of _CJK_FONTS, the
+// bundled Dela Gothic (which always opens).
+const TrueTypeFont& label_font(TrueTypeFonts& fonts, const std::optional<std::string>& font_path) {
+    if (font_path && !font_path->empty() && QFileInfo(QString::fromStdString(*font_path)).isFile()) {
+        try {
+            return fonts.truetype(*font_path, 14);
+        } catch (const NotYetPorted& e) {  // (Python's OSError: not a font it reads)
+            if (e.element() != "default_font") throw;
+        }
+    }
+    return fonts.truetype("sfx", 14);
+}
+
+// The lines of a page drawn over everything (render_page after the panels' borders): the placed ones in balloons
+// (balloons.draw_lines, speaker names shown but in print), the others as labels at the inner frame's corner.
+void draw_story(Image& image, const Box& area, const Ctx& ctx, const std::vector<const core::StoryLine*>& lines,
+                const std::vector<const core::StoryLine*>& drawn_below, const text::Panels& panels,
+                const std::optional<std::string>& font_path, const text::Unported& unported) {
+    const auto below = [&](const core::StoryLine* line) {
+        return std::find(drawn_below.begin(), drawn_below.end(), line) != drawn_below.end();
+    };
+    std::vector<const core::StoryLine*> placed;
+    for (const core::StoryLine* line : lines) {
+        if (placed_line(*line) && !below(line)) placed.push_back(line);
+    }
+    // Speaker names are a working aid: shown in name/proof, never printed.
+    text::draw_lines(text::PagePart{&image, Point{area.x0, area.y0}, ctx.size}, placed, ctx.dpi, font_path, ctx.mode != "print",
+                     &panels, ctx.stop, &unported);
+    std::optional<TrueTypeFonts> fonts;
+    for (const core::StoryLine* line : lines) {
+        if (placed_line(*line) || below(line)) continue;
+        check_cancel(ctx);
+        if (!fonts) fonts.emplace(ctx.stop);
+        const TrueTypeFont& font = label_font(*fonts, font_path);
+        const core::Rect inner = ctx.page->inner_rect_mm();
+        const int x = mm_to_px(inner.x.value() + 4, ctx.dpi);
+        const int y = mm_to_px(inner.y.value() + 4, ctx.dpi);
+        const std::string label = line->speaker.empty() ? line->text : line->speaker + ": " + line->text;
+        Draw draw(image);  // (whole pixels: the part's corner moves them exactly)
+        draw.text(PointD{static_cast<double>(x - area.x0), static_cast<double>(y - area.y0)}, text::u32(label), font, Ink{10, 10, 10});
+    }
+}
+
 void draw_ruler(Image& image, const Box& area, const Ctx& ctx) {
     const Json& ruler = *ctx.page->ruler;
     if (!ruler.is_object()) throw core::Error("value", "'" + core::py_type_name(ruler) + "' object has no attribute 'get'");
@@ -917,20 +977,45 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     std::optional<Image> prev_alpha;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     const Image* panel = panel_mask ? &*panel_mask : nullptr;
-    // lines set under a layer are drawn just before it
+    // lines set under a layer (テキストの重ね順): drawn just before that layer, not over everything
     const std::vector<const core::StoryLine*> lines = lines_of(page, episode);
-    std::vector<std::string> below;
+    std::vector<std::pair<std::string, std::vector<const core::StoryLine*>>> below;  // (layer id, its lines), as met
+    std::vector<const core::StoryLine*> drawn_below;
     for (const core::StoryLine* line : lines) {
-        const Json* under = get(line->style, "below_layer");
-        if (under == nullptr || !under->is_string()) continue;
-        const std::string id = under->get<std::string>();
-        const bool placed = line->x_mm.truthy() || line->y_mm.truthy() || !line->balloon.empty();
+        const Json st = text::style_of(*line);
+        const Json under = st.contains("below_layer") ? st.at("below_layer") : Json();
+        if (!core::py_truthy(under)) continue;
+        core::require_hashable(under);  // (`under in layer_ids`)
+        if (!under.is_string()) continue;  // (a layer's id is a str)
+        const std::string id = under.get<std::string>();
         const bool known = std::any_of(page.layers.begin(), page.layers.end(), [&](const Layer& l) { return l.id == id; });
-        if (!id.empty() && known && placed) below.push_back(id);
+        if (!known || !placed_line(*line)) continue;
+        auto it = std::find_if(below.begin(), below.end(), [&](const auto& b) { return b.first == id; });
+        if (it == below.end()) {
+            below.emplace_back(id, std::vector<const core::StoryLine*>{});
+            it = below.end() - 1;
+        }
+        it->second.push_back(line);
+        drawn_below.push_back(line);
     }
+    const text::Panels panels = lines.empty() ? text::Panels{} : panels_of(page);
+    const std::optional<std::string> font_path = episode != nullptr ? std::optional<std::string>(episode->font_path) : std::nullopt;
+    // (what a balloon cannot draw yet — a font file that does not open, a warp with no map — stops the render, or is
+    // left out and reported with skip_unported)
+    const text::Unported unported = [&ctx](const NotYetPorted& e) { skip_unported(ctx, e.element()); };
     for (const Layer& layer : page.layers) {
         check_cancel(ctx);
-        if (std::find(below.begin(), below.end(), layer.id) != below.end()) skip_unported(ctx, "balloons");
+        if (const auto under = std::find_if(below.begin(), below.end(), [&](const auto& b) { return b.first == layer.id; });
+            under != below.end()) {
+            // (drawn on the picture so far; a page of precise colour keeps it in its own canvas, which balloons are
+            // not drawn into yet)
+            if (precision) {
+                skip_unported(ctx, "high_precision_balloons");
+            } else {
+                text::draw_lines(text::PagePart{&rgba, Point{area.x0, area.y0}, ctx.size}, under->second, dpi, font_path, !print, &panels,
+                                 ctx.stop, &unported);
+            }
+        }
         if (layer.kind == LayerKind::Folder) continue;
         if (!layer.visible) continue;
         if (print && !layer.exportable) continue;
@@ -1037,8 +1122,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     if (name_or_proof && get(page.extra, "cover") != nullptr && core::py_truthy(*get(page.extra, "cover")) && folds_draw(page)) {
         skip_unported(ctx, "covers");
     }
-    // lines: placed ones in balloons, the others as labels (both drawn with text, in M4)
-    if (!lines.empty()) skip_unported(ctx, "balloons");
+    // lines: placed ones in balloons, the others as labels
+    if (!lines.empty()) draw_story(image, area, ctx, lines, drawn_below, panels, font_path, unported);
     if (print || mode == "proof") draw_nombre(image, area, ctx);
     if (options.crop_marks && print) {
         PageCanvas canvas(image, area, ctx.size);
@@ -1399,6 +1484,7 @@ bool rough_needed(const core::Page& page, int dpi) {
 }
 
 void clear_render_caches() {
+    text::clear_balloon_cache();
     {
         std::lock_guard lock(g_cache_mutex);
         g_stroke_cache.clear();

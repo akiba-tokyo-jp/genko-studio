@@ -3613,7 +3613,6 @@
       "n": "fill page with a nombre",
       "op": "fill",
       "ok": true,
-      "cpp": "not_yet_ported",
       "ops": [
         {
           "op": "fill",

@@ -176,6 +176,7 @@ float sinf(float x) { return ::sinf(x); }
 float cosf(float x) { return ::cosf(x); }
 float hypotf(float x, float y) { return ::hypotf(x, y); }
 float atan2f(float y, float x) { return ::atan2f(y, x); }
+double hypot(double x, double y) { return ::hypot(x, y); }
 
 float remainder(float a, float b) {
     float mod = std::fmod(a, b);

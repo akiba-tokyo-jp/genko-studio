@@ -74,6 +74,12 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
+try:  # (the measured reference's text layout: BASIC, without raqm, as render_harness holds it)
+    from PIL import ImageFont as _ImageFont
+    _ImageFont.core.HAVE_RAQM = False
+except ImportError:
+    pass
+
 
 # --- deterministic ids ------------------------------------------------------------------------------------------
 

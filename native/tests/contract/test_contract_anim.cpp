@@ -344,8 +344,8 @@ private slots:
         const QString py_book = path("lapse-py"), cpp_book = path("lapse-cpp");
         const auto made_py = python({"new", py_book, "--pages", "2"});
         QVERIFY2(made_py.finished && made_py.exit_code == 0, made_py.err.right(2000).constData());
-        // a line of dialogue on page 2 first (written by Python: this build does not type lines yet), and this build's
-        // book converted from that one: a page with lines is recorded too, without what this build cannot draw yet
+        // a line of dialogue on page 2 first (written by Python), and this build's book converted from that one: a page
+        // with lines is recorded too
         {
             const QString file = path("lapse-line.json");
             genko::test::write_bytes(file, R"([{"op": "add_line", "page": 2, "text": "台詞です", "x_mm": 50, "y_mm": 50}])");

@@ -20,6 +20,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/png.hpp"
 #include "render/text/fonts.hpp"
+#include "render/text/memo.hpp"
 
 namespace genko::render::text {
 
@@ -667,6 +668,36 @@ std::pair<Image, std::int64_t> text_image(const core::StoryLine& line, int dpi, 
     return {std::move(layout.image), layout.em};
 }
 
+namespace {
+
+detail::Memo<Layout>& layouts() {
+    static detail::Memo<Layout> memo(512, 96LL * 1024 * 1024);
+    return memo;
+}
+
+}  // namespace
+
+std::shared_ptr<const Layout> remembered_layout(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path,
+                                                std::stop_token stop) {
+    // (everything text_layout reads of the line, and the font files it opens by name)
+    Json style_runs = Json::array();
+    for (const auto& [words, style] : line.style_runs) style_runs.push_back(Json::array({words, style}));
+    const std::optional<std::string> key = detail::memo_key(Json::array(
+        {line.text, line.balloon, line.wrap, line.w_mm.json(), line.h_mm.json(), line.style, Json(line.ruby_runs),
+         Json(line.emphasis_runs), style_runs, dpi, font_path ? Json(*font_path) : Json()}));
+    if (key) {
+        if (auto found = layouts().get(*key)) return found;
+    }
+    auto made = std::make_shared<const Layout>(text_layout(line, dpi, font_path, std::move(stop)));
+    if (key) {
+        const std::int64_t bytes = static_cast<std::int64_t>(made->image.width()) * made->image.height() * 4;
+        layouts().put(*key, made, bytes);
+    }
+    return made;
+}
+
+void clear_layout_cache() { layouts().clear(); }
+
 Image outlined(const Image& text, std::int64_t grow, const Rgb& colour) {
     const Image alpha = text.split()[3];
     const std::int64_t pad = grow + 1;
@@ -767,19 +798,24 @@ Image gradient_letters(const Image& image, const Json& spec) {
     return out;
 }
 
-Image picture_letters(const Image& image, const Json& data) {
-    // picture_of(data): a base64 picture, or None when it cannot be read
-    std::optional<Image> picture;
-    if (data.is_string()) {
-        try {
-            const std::string bytes = core::a2b_base64(data.get_ref<const std::string&>());
-            picture = open_image(bytes, kPillowOpenLimits).convert("RGBA");
-        } catch (const NotYetPorted&) {
-            throw;
-        } catch (const core::Error& e) {
-            if (e.code() != "format" && e.code() != "unidentified_image" && e.code() != "image_too_large") throw;
-        }
+std::optional<Image> picture_of(const Json& data) {
+    // `key = hash(data)` first: a list or a dict is a TypeError; base64.b64decode of anything but a str (a number,
+    // None) raises inside the try: no picture
+    core::require_hashable(data);
+    if (!data.is_string()) return std::nullopt;
+    try {
+        const std::string bytes = core::a2b_base64(data.get_ref<const std::string&>());
+        return open_image(bytes, kPillowOpenLimits).convert("RGBA");
+    } catch (const NotYetPorted&) {
+        throw;
+    } catch (const core::Error& e) {
+        if (e.code() != "format" && e.code() != "unidentified_image" && e.code() != "image_too_large") throw;
     }
+    return std::nullopt;
+}
+
+Image picture_letters(const Image& image, const Json& data) {
+    const std::optional<Image> picture = picture_of(data);
     if (!picture) return image;
     const Image alpha = image.getchannel(3);
     const Box box = alpha.getbbox().value_or(Box{0, 0, image.width(), image.height()});
@@ -850,7 +886,8 @@ Image warped_letters(const Image& image, const Json& corners) {
     return image.transform(size, TransformMethod::Perspective, coeffs, Resample::Bicubic);
 }
 
-void path_text(Image& image, const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path, std::stop_token stop) {
+void path_text(Image& image, const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path, std::stop_token stop,
+               Point origin) {
     const Json st = style_of(line);
     Fonts fonts(std::move(stop));
     const Json& font_value = at(st, "font");
@@ -935,19 +972,20 @@ void path_text(Image& image, const core::StoryLine& line, int dpi, const std::op
         const Image turned = cell.rotate(-angle, Resample::Bicubic, false,
                                          std::pair<double, double>{static_cast<double>(cell.width()) / 2, static_cast<double>(cell.height()) / 2});
         image.paste(turned,
-                    Point{static_cast<int>(core::py_round_int(x - static_cast<double>(turned.width()) / 2)),
-                          static_cast<int>(core::py_round_int(y - static_cast<double>(turned.height()) / 2))},
+                    Point{static_cast<int>(core::py_round_int(x - static_cast<double>(turned.width()) / 2) - origin.x),
+                          static_cast<int>(core::py_round_int(y - static_cast<double>(turned.height()) / 2) - origin.y)},
                     &turned);
     }
 }
 
 void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_speaker, const std::optional<std::string>& font_path,
-                std::stop_token stop) {
+                std::stop_token stop, Point origin) {
     if (core::py_truthy(at(style_of(line), "text_path"))) {
-        path_text(image, line, dpi, font_path, std::move(stop));
+        path_text(image, line, dpi, font_path, std::move(stop), origin);
         return;
     }
-    const Layout layout = text_layout(line, dpi, font_path, stop);
+    const std::shared_ptr<const Layout> remembered = remembered_layout(line, dpi, font_path, stop);
+    const Layout& layout = *remembered;
     const Json st = style_of(line);
     const std::int64_t x = px(line.x_mm.value() + float_or(at(st, "text_dx_mm"), 0), dpi);  // (the words moved inside the balloon)
     const std::int64_t y = px(line.y_mm.value() + float_or(at(st, "text_dy_mm"), 0), dpi);
@@ -956,19 +994,21 @@ void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_sp
     const double cx = static_cast<double>(x) + static_cast<double>(w) / 2;
     const double cy = static_cast<double>(y) + static_cast<double>(h) / 2;
     const std::string kind = kind_of(line);
+    // (a part of the page: every place below is a whole pixel, so moving it by the part's corner is exact)
     if (kind == "none") {
-        image.paste(layout.image, Point{static_cast<int>(x), static_cast<int>(y)}, &layout.image);  // text only: from the box's corner
+        image.paste(layout.image, Point{static_cast<int>(x - origin.x), static_cast<int>(y - origin.y)}, &layout.image);  // text only: from the box's corner
     } else {
         image.paste(layout.image,
-                    Point{static_cast<int>(core::py_round_int(cx + layout.corner_x)), static_cast<int>(core::py_round_int(cy + layout.corner_y))},
+                    Point{static_cast<int>(core::py_round_int(cx + layout.corner_x) - origin.x),
+                          static_cast<int>(core::py_round_int(cy + layout.corner_y) - origin.y)},
                     &layout.image);
     }
     if (show_speaker && !line.speaker.empty() && kind != "none") {
         Fonts fonts(stop);
         const TrueTypeFont& font = fonts.font(face_of(Json()), std::max<std::int64_t>(8, floordiv(layout.em * 2, 3)));
         Draw draw(image);
-        draw.text(PointD{static_cast<double>(x), static_cast<double>(std::max<std::int64_t>(0, y - layout.em))}, u32(line.speaker), font,
-                  Ink{90, 90, 90});
+        draw.text(PointD{static_cast<double>(x - origin.x), static_cast<double>(std::max<std::int64_t>(0, y - layout.em) - origin.y)},
+                  u32(line.speaker), font, Ink{90, 90, 90});
     }
 }
 

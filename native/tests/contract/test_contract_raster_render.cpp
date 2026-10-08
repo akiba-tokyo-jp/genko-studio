@@ -2,14 +2,14 @@
 // pasted; masks set and painted; layers merged and converted; correction layers with each filter of filters.py; paper
 // colours — drawn by render::render_page against Python's genko.render.render_page, every pixel (RGB):
 //   1. the book `pyref_harness.py make-rasterbook` makes, after the ops below (kDressing) applied by Python's apply_ops
-//      and saved by save_episode: its pages 1, 2 and 4 drawn on both sides in print, proof and name at 72, 150 and
-//      350 dpi;
+//      and saved by save_episode: its pages 1 to 4 drawn on both sides in print, proof and name at 72, 150 and 350
+//      dpi (page 3 with a nombre, a tone and a line of dialogue in its balloon);
 //   2. the same ops applied by this build (render::ops_registry) to the same book, drawn by this build: the same pixels
 //      as Python's drawing of its own book;
 //   3. five random parts of each page (proof at 150 dpi, print at 350), drawn alone: the same pixels as Python's whole
 //      page cut there — of the book before the correction layers put on by hand (each part drawn by itself) and with
 //      them (their filters look beyond each pixel: such a page's part is cut from the whole page drawn).
-// (Page 3 carries what this build does not draw yet: a nombre, a line, a tone.) Skipped without the Python reference.
+// Skipped without the Python reference.
 
 #include <QtTest>
 
@@ -35,7 +35,7 @@ namespace {
 
 const std::vector<std::string> kModes{"print", "proof", "name"};
 const std::vector<int> kDpis{72, 150, 350};
-const std::vector<int> kPages{1, 2, 4};
+const std::vector<int> kPages{1, 2, 3, 4};
 
 // A small RGBA picture (Pillow: rectangles and an ellipse on 24 × 18) and a grey one (30 × 20).
 constexpr const char* kPicture =
@@ -273,7 +273,7 @@ private slots:
             }
         }
         qInfo("%d drawings the same as Python's, every pixel", compared - failures);
-        QCOMPARE(compared, 54);
+        QCOMPARE(compared, 72);
         QCOMPARE(failures, 0);
     }
 
@@ -309,7 +309,7 @@ private slots:
             }
         }
         qInfo("regions: %d the same as Python's pages cut", checked - failures);
-        QCOMPARE(checked, 60);
+        QCOMPARE(checked, 80);
         QCOMPARE(failures, 0);
     }
 

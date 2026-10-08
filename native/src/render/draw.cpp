@@ -880,6 +880,52 @@ void Draw::rectangle(const BoxF& box, const std::optional<Ink>& fill, const std:
     }
 }
 
+void Draw::rounded_rectangle(const BoxF& box, double radius, const Ink& fill) {
+    // ImageDraw.rounded_rectangle with corners=None and no outline
+    if (box.x1 < box.x0) throw core::Error("value", "x1 must be greater than or equal to x0");
+    if (box.y1 < box.y0) throw core::Error("value", "y1 must be greater than or equal to y0");
+    double d = core::py_min(core::py_min(box.x1 - box.x0, box.y1 - box.y0), radius * 2);
+    const double x0 = core::py_round_whole(box.x0);
+    const double y0 = core::py_round_whole(box.y0);
+    const double x1 = core::py_round_whole(box.x1);
+    const double y1 = core::py_round_whole(box.y1);
+    const bool full_x = d >= x1 - x0 - 1;
+    if (full_x) d = x1 - x0;  // (the two left and two right corners are joined)
+    const bool full_y = d >= y1 - y0 - 1;
+    if (full_y) d = y1 - y0;  // (the two top and two bottom corners are joined)
+    if (full_x && full_y) {  // (all corners joined: a circle)
+        ellipse(box, fill);
+        return;
+    }
+    if (d == 0) {  // (corners without a curve: a rectangle)
+        rectangle(box, fill);
+        return;
+    }
+    const double r = core::py_trunc(core::py_floor(d / 2));  // int(d // 2)
+    // the corners (self.draw.draw_pieslice(box, start, end, fill_ink, 1)), then the rectangles between them
+    if (full_x) {
+        pieslice(BoxF{x0, y0, x0 + d, y0 + d}, 180, 360, fill);
+        pieslice(BoxF{x0, y1 - d, x0 + d, y1}, 0, 180, fill);
+    } else if (full_y) {
+        pieslice(BoxF{x0, y0, x0 + d, y0 + d}, 90, 270, fill);
+        pieslice(BoxF{x1 - d, y0, x1, y0 + d}, 270, 90, fill);
+    } else {
+        pieslice(BoxF{x0, y0, x0 + d, y0 + d}, 180, 270, fill);
+        pieslice(BoxF{x1 - d, y0, x1, y0 + d}, 270, 360, fill);
+        pieslice(BoxF{x1 - d, y1 - d, x1, y1}, 0, 90, fill);
+        pieslice(BoxF{x0, y1 - d, x0 + d, y1}, 90, 180, fill);
+    }
+    if (full_x) {
+        rectangle(BoxF{x0, y0 + r + 1, x1, y1 - r - 1}, fill);
+    } else if (x1 - r - 1 >= x0 + r + 1) {
+        rectangle(BoxF{x0 + r + 1, y0, x1 - r - 1, y1}, fill);
+    }
+    if (!full_x && !full_y) {
+        rectangle(BoxF{x0, y0 + r + 1, x0 + r, y1 - r - 1}, fill);
+        rectangle(BoxF{x1 - r, y0 + r + 1, x1, y1 - r - 1}, fill);
+    }
+}
+
 void Draw::point(std::span<const PointD> xy, const std::optional<Ink>& fill) {
     Target& t = *target_;
     const INT32 ink = t.ink_of(fill);
