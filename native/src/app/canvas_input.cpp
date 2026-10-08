@@ -182,6 +182,10 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         last_pos_ = pos;  // a drag on empty paper moves the view (hand), a click chooses a panel
         return;
     }
+    if (tool_ == QLatin1String("marquee")) {
+        marquee_press(pos, mm, event->modifiers());
+        return;
+    }
     if (is_drawing_tool(tool_)) {
         perf::input(event, "mouse_press");
         const PenSample sample = mouse_sample(mm.x(), mm.y());
@@ -235,6 +239,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
     const bool pressed = (event->buttons() & Qt::LeftButton) != 0;
+    if (tool_ == QLatin1String("marquee") && marquee_move(mm_of(pos), event->modifiers(), pressed)) return;
     if (tool_ == QLatin1String("select") && pressed && press_pos_) {
         if ((pos - *press_pos_).manhattanLength() > 6) {
             start_pan(last_pos_);
@@ -303,6 +308,11 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
+    if (tool_ == QLatin1String("marquee")) {
+        press_pos_.reset();
+        marquee_release();
+        return;
+    }
     if (tool_ == QLatin1String("select")) {
         press_pos_.reset();
         const QPointF mm = to_mm(event->position());
@@ -317,6 +327,10 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
 void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton) {
         fit_page();
+        return;
+    }
+    if (tool_ == QLatin1String("marquee") && !poly_points_.empty()) {
+        finish_points();
         return;
     }
     if (tool_ == QLatin1String("frame") && !frame_poly_.empty()) {
@@ -389,7 +403,7 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
     // Ctrl held: the select tool for a moment, back to the tool before when let go (Alt's eyedropper comes with M3)
     const QString base = held_tool_.value_or(tool_);
     QString tool = key == QLatin1String("ctrl") ? QStringLiteral("select") : QString();
-    if (base == QLatin1String("zoom") && key == QLatin1String("alt")) tool.clear();
+    if ((base == QLatin1String("zoom") || base == QLatin1String("marquee")) && key == QLatin1String("alt")) tool.clear();
     if (down) {
         if (!tool.isEmpty() && !held_tool_ && stroke_.empty() && tool != tool_) {
             held_tool_ = tool_;
@@ -428,6 +442,7 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
         update();
         return;
     }
+    if (marquee_key(event)) return;
     if (event->key() == Qt::Key_Escape && selection_) {
         set_selection(std::nullopt);
         return;

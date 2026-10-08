@@ -8,6 +8,7 @@
 #include <QVector>
 #include <QWidget>
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -21,6 +22,7 @@
 #include "core/json.hpp"
 #include "core/model.hpp"
 
+class QKeyEvent;
 class QVariantAnimation;
 
 // The page canvas (Python's genko/app/canvas.py PageCanvas): the page as it will print (drawn by the renderer in
@@ -30,7 +32,9 @@ class QVariantAnimation;
 // Tools: 選択 (click a panel to choose it, drag elsewhere to move the view), レイヤー移動, ペン and 消しゴム
 // (the pen's lines are cut where it passes), コマ割り (drag across a panel to cut it — level and upright cuts snap,
 // Alt for a free angle —, drag a gutter, a chosen panel's corners and the ◇ on its edges; or draw new panels:
-// rect, poly, free) and 虫めがね. The view fits the page when it opens; Ctrl+wheel or a pinch zooms, the wheel or two
+// rect, poly, free), 範囲選択 (canvas_select.cpp: a rectangle, an ellipse, a lasso, a polyline, auto-select, colour,
+// the selection pen and eraser; Shift adds, Alt takes away; the area moved, scaled, turned, slanted or pulled freely
+// by its handles) and 虫めがね. The view fits the page when it opens; Ctrl+wheel or a pinch zooms, the wheel or two
 // fingers scroll, Space+drag or the middle button pans (a page let go while moving slides on and slows down),
 // Shift+Space+drag turns the view; the view can be mirrored either way. The page itself never turns.
 
@@ -87,9 +91,34 @@ public:
     bool show_guides = true;
     bool show_frame_numbers = false;
     core::Binding binding = core::Binding::Right;
-    // The selection's outline (mm): このコマを選択範囲にする (the selection tools come with M3).
-    void set_selection(std::optional<std::vector<QPointF>> outline);
-    const std::optional<std::vector<QPointF>>& selection() const { return selection_; }
+    // --- the selection (範囲選択: the marquee tool) --------------------------------------------------------------
+    // The area chosen (an op's area: {"poly"} or {"mask"}, mm) and its outline on the screen (a mask's box).
+    struct Selection {
+        core::Json area;
+        std::vector<QPointF> outline;
+    };
+    void set_selection(std::optional<core::Json> area, std::optional<std::vector<QPointF>> outline = std::nullopt);
+    const std::optional<Selection>& selection() const { return selection_; }
+    // How the marquee tool chooses: rect | ellipse | lasso | polyline | wand | color | pen | erase (選択ペン・選択消し).
+    QString marquee = QStringLiteral("rect");
+    double selection_pen_mm = 4.0;
+    bool quick_mask = false;  // the selection shown in red where it is not, to be painted with the selection pen
+    bool pivot_mode = false;  // 基準位置を動かす: the next press with the marquee tool puts the pivot there
+    // How a new area joins the selection: Shift adds, Alt takes away, both keep the overlap.
+    static QString how_from(Qt::KeyboardModifiers modifiers);
+    const QString& selection_how() const { return sel_how_; }
+    // The box (x0, y0, x1, y1 mm) of the outline, and where it turns and scales about (its middle unless moved).
+    std::array<double, 4> selection_box() const;
+    QPointF selection_pivot() const;
+    // 自由変形: pull the corners (perspective) or a grid of points (mesh, columns × rows cells); Enter applies, Esc
+    // stops.
+    bool start_warp(const QString& kind, int columns = 2, int rows = 2);
+    void finish_warp();
+    void cancel_warp();
+    bool warping() const { return warp_.has_value(); }
+    // The polyline selection's corners: Enter or a double click closes it; Esc forgets them.
+    bool finish_points();
+    bool cancel_points();
     // The lines and the point chosen with the vector tool (M3), for 選んだ点を太く.
     std::vector<std::string> vector_ids;
     std::optional<int> vector_point;
@@ -161,6 +190,15 @@ signals:
     void toolHeld(const QString& tool);
     void omittedChanged(const QStringList& elements);
     void renderFailed(const QString& message);
+    // the selection: a new area and how it joins (replace | add | subtract | intersect); the selection pen's line
+    // (true: add, false: take away); auto-select and colour-select asked at a point; the chosen area moved, scaled,
+    // turned or slanted ([a, b, c, d, e, f]) or pulled freely ({perspective | mesh: points, grid?})
+    void selectionDrawn(const genko::core::Json& area, const QString& how);
+    void selectionPainted(const QVector<QPointF>& points, bool add);
+    void wandRequested(double x_mm, double y_mm);
+    void colourAreaRequested(double x_mm, double y_mm);
+    void selectionTransformed(const QVector<double>& matrix);
+    void selectionWarped(const genko::core::Json& warp);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -221,6 +259,24 @@ private:
     void draw_guides(QPainter& painter, const QRectF& page_rect) const;
     void draw_plain(QPainter& painter) const;
     void draw_selection(QPainter& painter) const;
+    void draw_marquee(QPainter& painter) const;
+    void draw_selection_mask(QPainter& painter) const;
+
+    // the marquee tool (canvas_select.cpp)
+    struct SelHandle {
+        QString kind;  // scale | rotate | pivot | skew | warp
+        QString key;
+        int index = 0;
+        QPointF at;  // mm
+    };
+    std::vector<SelHandle> sel_handles() const;
+    std::array<double, 6> sel_matrix(const QPointF& mm) const;
+    std::vector<QPointF> marquee_points() const;
+    void selection_done(const core::Json& area);
+    bool marquee_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool marquee_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed);
+    bool marquee_release();
+    bool marquee_key(QKeyEvent* event);
     void draw_frame_numbers(QPainter& painter) const;
     void draw_frame_tool(QPainter& painter) const;
     void draw_polygon_mm(QPainter& painter, const std::vector<QPointF>& points) const;
@@ -278,7 +334,30 @@ private:
     std::optional<FrameDrag> frame_drag_;
     std::vector<QPointF> frame_poly_;
     Qt::KeyboardModifiers modifiers_;
-    std::optional<std::vector<QPointF>> selection_;
+    std::optional<Selection> selection_;
+    QString sel_how_ = QStringLiteral("replace");
+    struct SelDrag {
+        QString kind;  // move | scale | rotate | skew | pivot | warp
+        QString key;
+        int index = 0;
+        QPointF start;
+        std::array<double, 4> box{};
+        std::optional<std::array<double, 6>> matrix;
+    };
+    std::optional<SelDrag> sel_drag_;
+    std::optional<QPointF> sel_pivot_;
+    std::vector<QPointF> marquee_stroke_;  // the rectangle's, lasso's or selection pen's drag (mm)
+    std::optional<std::pair<QPointF, QPointF>> ellipse_drag_;
+    std::vector<QPointF> poly_points_;  // the polyline selection's corners
+    struct Warp {
+        QString kind;  // perspective | mesh
+        std::array<double, 4> box{};  // x, y, w, h
+        std::vector<QPointF> points;
+        int columns = 3;  // points across and down
+        int rows = 3;
+    };
+    std::optional<Warp> warp_;
+    mutable std::optional<std::pair<std::string, QImage>> mask_picture_;  // (the area and the quick mask it shows)
 
     // gliding between views
     std::optional<std::pair<ViewState, ViewState>> glide_;

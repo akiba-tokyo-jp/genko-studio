@@ -9,6 +9,7 @@
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
+#include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
@@ -769,6 +770,64 @@ std::optional<Json> from_mask(const Image& mask, int dpi) {
     spec["png"] = core::b64encode(fills::png_data(crop));
     const Json out = Json::object({{"mask", std::move(spec)}});
     return std::make_optional<Json>(out);
+}
+
+std::optional<Json> combine(const std::optional<Json>& current, const Json& area, std::string_view how, const core::Page& page,
+                            const core::Document* episode) {
+    if (!current || how == "replace") {
+        const bool plain = area.is_object() && (core::py_truthy(area.value("poly", Json())) || core::py_truthy(area.value("mask", Json())));
+        return plain ? area : resolve(area, page, episode);
+    }
+    const std::string key = how == "add" ? "union" : how == "subtract" ? "subtract" : how == "intersect" ? "intersect" : "";
+    if (key.empty()) throw core::OpError("how must be replace, add, subtract or intersect");
+    return from_mask(to_mask(Json{{key, Json::array({*current, area})}}, page, episode));
+}
+
+std::optional<Json> stroke_area(const std::vector<std::array<double, 2>>& points, double width_mm) {
+    if (points.empty()) return std::nullopt;
+    double x_lo = points[0][0], x_hi = points[0][0], y_lo = points[0][1], y_hi = points[0][1];
+    for (const auto& [x, y] : points) {
+        x_lo = std::min(x_lo, x);
+        x_hi = std::max(x_hi, x);
+        y_lo = std::min(y_lo, y);
+        y_hi = std::max(y_hi, y);
+    }
+    const double pad = width_mm;
+    const double x0 = x_lo - pad, y0 = y_lo - pad;
+    const double w = x_hi - x_lo + 2 * pad, h = y_hi - y_lo + 2 * pad;
+    const double side_w = std::max(1.0, core::py_round_whole(mm2px(w, kSelDpi)));
+    const double side_h = std::max(1.0, core::py_round_whole(mm2px(h, kSelDpi)));
+    limits::check_sides(side_w, side_h, "the selection pen's line");
+    Image mask = Image::create("L", Size{static_cast<int>(side_w), static_cast<int>(side_h)}, Ink(0));
+    std::vector<PointD> pts;
+    pts.reserve(points.size());
+    for (const auto& [x, y] : points) pts.push_back(PointD{mm2px(x - x0, kSelDpi), mm2px(y - y0, kSelDpi)});
+    const double r = std::max(1.0, mm2px(width_mm, kSelDpi) / 2);
+    {
+        Draw draw(mask);
+        if (pts.size() > 1) draw.line(pts, Ink(255), std::max(1, static_cast<int>(core::py_round_whole(2 * r))), Joint::Curve);
+        for (const PointD& end : {pts.front(), pts.back()}) draw.ellipse(BoxF{end.x - r, end.y - r, end.x + r, end.y + r}, Ink(255));
+    }
+    Json spec = Json::object();
+    spec["box"] = Json::array({core::py_round(x0, 3), core::py_round(y0, 3), core::py_round(w, 3), core::py_round(h, 3)});
+    spec["png"] = core::b64encode(fills::png_data(mask));
+    return Json::object({{"mask", std::move(spec)}});
+}
+
+Json items_to_json(const Items& items) {
+    Json strokes = Json::array();
+    for (const core::StrokePtr& stroke : items.strokes) strokes.push_back(core::stroke_to_dict(*stroke));
+    Json patches = Json::array();
+    for (const core::Patch& patch : items.patches) {
+        if (!patch.png || patch.png->empty()) continue;
+        Json out = patch.attrs;  // (its keys but png and asset, in order; then the png)
+        for (const auto& [key, value] : patch.after_asset.items()) out[key] = value;
+        out.erase("png");
+        out.erase("asset");
+        out["png"] = core::b64encode(*patch.png);
+        patches.push_back(std::move(out));
+    }
+    return Json{{"strokes", std::move(strokes)}, {"patches", std::move(patches)}};
 }
 
 Json resolve(const Json& area, const core::Page& page, const core::Document* episode) {

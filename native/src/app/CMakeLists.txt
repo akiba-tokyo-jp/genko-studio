@@ -25,6 +25,7 @@ genko_library(genko_app
     canvas.cpp
     canvas_paint.cpp
     canvas_input.cpp
+    canvas_select.cpp
     thumbs.cpp
     material_panel.cpp
     material_preview_cache.cpp
@@ -36,6 +37,7 @@ genko_library(genko_app
     ime.cpp
     main_window.cpp
     main_window_actions.cpp
+    main_window_select.cpp
     layer_panel.cpp
     layer_dialogs.cpp
     inject.cpp

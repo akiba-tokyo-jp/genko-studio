@@ -64,6 +64,9 @@ Json gradient_extras(const Json& g);
 // The JSON of a list of ints.
 Json ints_json(const std::vector<std::int64_t>& values);
 
+// models.stroke_to_dict: {"id", "points", "pressure", "width_mm", "kind"} and "rgb", "color_rgb", "opacity" when set.
+Json stroke_to_dict(const Stroke& stroke);
+
 // io._layer_to_dict(layer) (with its strokes as models.stroke_to_dict): what studio.orphans keeps of a layer.
 Json layer_to_dict(const Layer& layer);
 

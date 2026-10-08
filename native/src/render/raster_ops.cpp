@@ -2131,6 +2131,15 @@ Json resolve_area(const Document& doc, std::size_t page, const Json& area) {
 
 }  // namespace
 
+void use_brushes_of(const Document& doc) { use_book_brushes(doc); }
+
+Image fill_reference_of(const Document& doc, const Page& page, const std::string& layer_id, const std::string& reference, int dpi) {
+    use_book_brushes(doc);
+    for (std::size_t i = 0; i < page.layers.size(); ++i)
+        if (page.layers[i].id == layer_id) return fill_reference(doc, page, i, reference, dpi, Ignore{});
+    throw OpError("layer " + layer_id + " not found");
+}
+
 void register_raster_ops(core::OpRegistry& registry) {
     registry.add("reshape_stroke", drawing(reshape_stroke));
     registry.add("set_stroke_width", drawing(set_stroke_width));

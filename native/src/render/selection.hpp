@@ -124,6 +124,17 @@ core::Json resolve(const core::Json& area, const core::Page& page, const core::D
 // selops.from_mask: a page-sized mask back to {"mask": {"box", "png"}} (cropped to what it covers); nothing when empty.
 std::optional<core::Json> from_mask(const Image& mask, int dpi = kSelDpi);
 
+// selops.combine: a selection drawn with Shift (add), Alt (subtract) or both (intersect) joined to the one there
+// (none, or replace: the new one, resolved when it is not plain); nothing when nothing is left.
+std::optional<core::Json> combine(const std::optional<core::Json>& current, const core::Json& area, std::string_view how,
+                                  const core::Page& page, const core::Document* episode);
+
+// selops.stroke_area: the area a selection pen's line covers (nothing for no points).
+std::optional<core::Json> stroke_area(const std::vector<std::array<double, 2>>& points, double width_mm);
+
+// selection.items_to_json: copied items in a form that travels in an op (the clipboard; paste's "items").
+core::Json items_to_json(const Items& items);
+
 // selops.rect_poly / ellipse_poly
 core::Json rect_poly(const core::Json& box);
 core::Json ellipse_poly(const core::Json& box, int n = 72);

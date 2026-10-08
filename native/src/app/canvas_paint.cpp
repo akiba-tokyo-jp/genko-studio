@@ -105,15 +105,7 @@ void PageCanvas::paint_page(QPainter& painter) {
         painter.setBrush(Qt::NoBrush);
         painter.drawRect(where);
     }
-    if (selection_ && selection_->size() >= 3) {
-        QPolygonF outline;
-        for (const QPointF& q : *selection_) outline << pt(q.x(), q.y());
-        painter.setBrush(Qt::NoBrush);
-        painter.setPen(QPen(Qt::white, 1.5));
-        painter.drawPolygon(outline);
-        painter.setPen(QPen(kChosen, 1.5, Qt::DashLine));
-        painter.drawPolygon(outline);
-    }
+    draw_marquee(painter);  // (the selection, its handles, what the marquee tool is drawing: canvas_select.cpp)
     if (zoom_drag_) {  // (the area the magnifier will fill the view with)
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(theme::accent(), 1.2, Qt::DashLine));

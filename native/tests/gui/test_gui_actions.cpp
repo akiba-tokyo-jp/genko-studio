@@ -238,8 +238,9 @@ private slots:
         MainWindow* w = studio.window.get();
         QCOMPARE(expected().size(), std::size_t{53});
         // Preserve all 53 Python actions; exposure, nombre and the six layer operations (merge, flatten, convert) have
-        // their own GUI E2E tests (test_gui_materials, test_gui_color).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{61});
+        // their own GUI E2E tests (test_gui_materials, test_gui_color), the 31 of the selection (M3) theirs
+        // (test_gui_select).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{92});
         QVERIFY(w->action("act_exposure"));
         QVERIFY(w->action("act_nombre"));
         for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten",
@@ -270,15 +271,18 @@ private slots:
                              .trimmed());
             }
         }
-        // the palette and the command bar (Python's order)
-        QCOMPARE(w->tools_group()->actions().size(), 6);
+        // the palette and the command bar (Python's order); with M3's eight ways of the marquee (test_gui_select)
+        QCOMPARE(w->tools_group()->actions().size(), 14);
     }
 
     void theToolsAreOneGroup() {
         Studio studio;
         MainWindow* w = studio.window.get();
-        const std::map<QString, QString> tools = {{"select", "act_select"}, {"pen", "act_pen"},   {"eraser", "act_eraser"},
-                                                  {"frame", "act_frame"},   {"move", "act_move"}, {"zoom", "act_zoom_tool"}};
+        const std::map<QString, QString> tools = {{"select", "act_select"},    {"pen", "act_pen"},       {"eraser", "act_eraser"},
+                                                  {"frame", "act_frame"},      {"move", "act_move"},     {"zoom", "act_zoom_tool"},
+                                                  {"rect", "act_marquee"},     {"lasso", "act_lasso"},   {"wand", "act_wand"},
+                                                  {"ellipse", "act_sel_ellipse"}, {"polyline", "act_sel_polyline"},
+                                                  {"colour", "act_sel_colour"}, {"selpen", "act_sel_pen"}, {"selerase", "act_sel_erase"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());
@@ -288,7 +292,7 @@ private slots:
             QCOMPARE(a->actionGroup(), w->tools_group());
             QVERIFY(!a->autoRepeat());  // (a held key chooses the tool once)
             studio.trigger(attribute.toLatin1().constData());
-            QCOMPARE(studio.canvas()->tool(), tool);
+            QCOMPARE(studio.canvas()->tool(), MainWindow::is_marquee_tool(tool) ? QStringLiteral("marquee") : tool);
             QVERIFY(a->isChecked());
             for (const auto& [other, other_attribute] : tools) {
                 if (other != tool) QVERIFY(!w->action(other_attribute)->isChecked());
@@ -526,7 +530,7 @@ private slots:
         QVERIFY(studio.canvas()->show_frame_numbers);
         studio.trigger("act_frame_selection");
         QVERIFY(studio.canvas()->selection().has_value());
-        QVERIFY(studio.canvas()->selection()->size() >= 4);
+        QVERIFY(studio.canvas()->selection()->outline.size() >= 4);
         QCOMPARE(w->last_notice(), QStringLiteral("コマの形を選択範囲にしました"));
         // 結合: a panel of the second cut, back with its neighbour (its split undone); 消す: one panel gone, the others
         // kept

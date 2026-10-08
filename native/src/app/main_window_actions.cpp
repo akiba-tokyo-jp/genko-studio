@@ -182,6 +182,7 @@ void MainWindow::build_actions() {
         tool_actions_[QString::fromLatin1(tool)] = act;
     }
     actions_.at("act_select")->setChecked(true);
+    build_selection_actions();  // (範囲選択 and the selection's commands: main_window_select.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -303,6 +304,10 @@ void MainWindow::build_menus() {
     QMenu* edit = bar->addMenu(QStringLiteral("編集"));
     edit->addAction(action("act_undo"));
     edit->addAction(action("act_redo"));
+    edit->addSeparator();
+    for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area"}) edit->addAction(action(name));
+    edit->addSeparator();
+    for (const char* name : {"act_select_all", "act_deselect"}) edit->addAction(action(name));
     QMenu* view = bar->addMenu(QStringLiteral("表示"));
     for (const char* name : {"act_fit", "act_zoom_in", "act_zoom_out", "act_actual", "act_zoom_value", "act_zoom_tool"}) view->addAction(action(name));
     view->addSeparator();
@@ -318,6 +323,7 @@ void MainWindow::build_menus() {
     tools->addAction(action("act_color"));
     tools->addAction(action("act_exposure"));
     tools->addAction(action("act_point_wider"));
+    build_selection_menu(bar->addMenu(QStringLiteral("選択")));
     QMenu* layers = bar->addMenu(QStringLiteral("レイヤー"));
     for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten", "act_layer_convert_paint", "act_layer_convert_pen"})
         layers->addAction(action(name));
@@ -446,7 +452,11 @@ void MainWindow::build_docks() {
 // --- what the commands do ---------------------------------------------------------------------------------------------
 
 void MainWindow::choose_tool(const QString& tool) {
-    canvas_->set_tool(tool);
+    if (is_marquee_tool(tool)) {  // (範囲選択: the marquee tool, in one of its ways)
+        choose_marquee(tool);
+    } else {
+        canvas_->set_tool(tool);
+    }
     if (const auto it = tool_actions_.find(tool); it != tool_actions_.end()) it->second->setChecked(true);
     pen_changed();
 }
@@ -873,10 +883,10 @@ void MainWindow::frame_to_selection() {
     }
     const core::Frame* frame = selected_frame();
     if (frame == nullptr) return;
-    // (the selection tools come with M3: the selection is shown and kept on the canvas until then)
-    std::vector<QPointF> outline;
-    for (const QPointF& p : outline_of(*frame)) outline.emplace_back(core::py_round(p.x(), 3), core::py_round(p.y(), 3));
-    canvas_->set_selection(outline);
+    core::Json poly = core::Json::array();
+    for (const QPointF& p : outline_of(*frame)) poly.push_back(core::Json::array({core::py_round(p.x(), 3), core::py_round(p.y(), 3)}));
+    if (canvas_->tool() != QLatin1String("marquee")) choose_tool(QStringLiteral("rect"));
+    canvas_->set_selection(core::Json{{"poly", poly}});
     flash(QStringLiteral("コマの形を選択範囲にしました"), 3000);
 }
 

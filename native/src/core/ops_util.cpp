@@ -18,6 +18,8 @@ Json opt_num(const std::optional<Num>& value) { return value ? value->json() : J
 Json opt_json(const std::optional<Json>& value) { return value ? *value : Json(nullptr); }
 bool truthy(const std::optional<Json>& value) { return value && py_truthy(*value); }
 
+}  // namespace
+
 // models.stroke_to_dict
 Json stroke_to_dict(const Stroke& stroke) {
     Json out = Json::object();
@@ -35,8 +37,6 @@ Json stroke_to_dict(const Stroke& stroke) {
     if (stroke.opacity != 1.0) out["opacity"] = stroke.opacity;
     return out;
 }
-
-}  // namespace
 
 LayerRole role_from(const Json& value) {
     if (value.is_string()) {

@@ -137,6 +137,7 @@ void PageCanvas::set_tool(const QString& tool) {
     tool_ = tool;
     held_tool_.reset();  // (a tool chosen while a key holds another is the tool now: letting go keeps it)
     stroke_.clear();
+    marquee_stroke_.clear();
     live_.reset();
     update_cursor();
     update();
@@ -145,11 +146,6 @@ void PageCanvas::set_tool(const QString& tool) {
 void PageCanvas::set_live_pen(const core::Json& fields, std::optional<std::string> layer_id) {
     pen_fields_ = fields;
     pen_layer_ = std::move(layer_id);
-}
-
-void PageCanvas::set_selection(std::optional<std::vector<QPointF>> outline) {
-    selection_ = std::move(outline);
-    update();
 }
 
 void PageCanvas::set_move_image(const QImage& image, const QRectF& where_mm) {

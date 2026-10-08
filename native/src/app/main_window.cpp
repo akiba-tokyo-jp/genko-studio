@@ -192,8 +192,16 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
         flash(QStringLiteral("ページの一部を描けませんでした: %1").arg(wording::error(message)), 6000, true);
     });
     connect(canvas_, &PageCanvas::toolHeld, this, [this](const QString& tool) {
-        if (const auto it = tool_actions_.find(tool); it != tool_actions_.end()) it->second->setChecked(true);
+        const QString name = tool == QLatin1String("marquee") ? marquee_tool_of(canvas_->marquee) : tool;
+        if (const auto it = tool_actions_.find(name); it != tool_actions_.end()) it->second->setChecked(true);
     });
+    // the selection (main_window_select.cpp)
+    connect(canvas_, &PageCanvas::selectionDrawn, this, &MainWindow::selection_drawn);
+    connect(canvas_, &PageCanvas::selectionPainted, this, &MainWindow::selection_painted);
+    connect(canvas_, &PageCanvas::wandRequested, this, &MainWindow::wand);
+    connect(canvas_, &PageCanvas::colourAreaRequested, this, &MainWindow::select_colour);
+    connect(canvas_, &PageCanvas::selectionTransformed, this, &MainWindow::transform_selection);
+    connect(canvas_, &PageCanvas::selectionWarped, this, &MainWindow::warp_selection);
 
     // the page gets the room; above it, a tab for each open book (in the command bar)
     doc_tabs_ = new QTabBar;
@@ -321,11 +329,9 @@ void MainWindow::set_target_layer(const std::string& layer_id) {
 }
 
 std::optional<core::Json> MainWindow::selection_area() const {
-    const auto& outline = canvas_->selection();
-    if (!outline || outline->size() < 3) return std::nullopt;
-    core::Json poly = core::Json::array();
-    for (const QPointF& p : *outline) poly.push_back(core::Json::array({p.x(), p.y()}));
-    return core::Json{{"poly", poly}};
+    const auto& selection = canvas_->selection();
+    if (!selection) return std::nullopt;
+    return selection->area;
 }
 
 void MainWindow::preview_ops(const std::optional<core::Json>& ops) {

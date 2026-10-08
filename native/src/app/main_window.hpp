@@ -54,6 +54,10 @@ struct Document {
     QString title() const;
 };
 
+// transform_matrix: [a, b, c, d, e, f] (x' = ax + cy + e, y' = bx + dy + f): scale, then turn (degrees, clockwise on
+// the page), both about `pivot`, then move by (dx, dy) mm.
+std::array<double, 6> transform_matrix(QPointF pivot, double dx = 0, double dy = 0, double sx = 1, double sy = 1, double angle = 0);
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -74,8 +78,14 @@ public:
     void set_target_layer(const std::string& layer_id);
     // A pen, paint or tone layer, not locked.
     static bool drawable(const core::Layer& layer);
-    // The selection as an op's area ({"poly": …}), or none.
+    // The selection as an op's area ({"poly": …} or {"mask": …}), or none.
     std::optional<core::Json> selection_area() const;
+    // 色域選択: how different a colour may be and still be the same (0..255); only the touching ones.
+    double colour_tolerance = 24;
+    bool colour_contiguous = false;
+    // The tools of the marquee (rect, lasso, wand, ellipse, polyline, colour, selpen, selerase), and the one of a way.
+    static bool is_marquee_tool(const QString& tool);
+    static QString marquee_tool_of(const QString& way);
     // The page shown as these ops would leave it, without changing the book (フィルターのプレビュー); none: as it is.
     void preview_ops(const std::optional<core::Json>& ops);
     LayerPanel* layer_panel() const { return layer_panel_; }
@@ -197,6 +207,38 @@ private:
     bool agent_book() const;
     // The layer drawn on when it can be painted on; otherwise a notice and null.
     const core::Layer* paint_layer();
+    // the selection (main_window_select.cpp)
+    void build_selection_actions();
+    void build_selection_menu(QMenu* menu);
+    void choose_marquee(const QString& tool);
+    std::optional<core::Json> need_area();
+    void join_selection(const std::optional<core::Json>& area, const QString& how);
+    void selection_drawn(const core::Json& area, const QString& how);
+    void selection_painted(const QVector<QPointF>& points, bool add);
+    void wand(double x_mm, double y_mm);
+    void select_colour(double x_mm, double y_mm);
+    void change_selection(const core::Json& change);
+    void change_selection_by(const char* key, int sign);
+    void select_all();
+    void select_drawn();
+    bool keep_selection(std::optional<QString> name = std::nullopt);
+    void fill_stock();
+    void use_stock(const std::string& name);
+    void quick_mask(bool on);
+    static core::Json moved_area(const core::Json& area, const std::array<double, 6>& m);
+    void transform_selection(const QVector<double>& matrix);
+    void start_warp(const QString& kind, int columns = 2, int rows = 2);
+    void start_mesh_grid();
+    void warp_selection(const core::Json& warp);
+    void move_pivot();
+    void transform_numbers();
+    void flip(int sx, int sy);
+    void delete_area();
+    bool copy();
+    void cut();
+    void paste();
+    void fill_selection();
+    void line_width();
 
     std::shared_ptr<Session> session_;
     std::vector<Document> documents_;
@@ -204,6 +246,11 @@ private:
     int page_index_ = 0;
     std::optional<std::string> target_layer_id_;
     LayerPanel* layer_panel_ = nullptr;
+    QMenu* stock_menu_ = nullptr;
+    std::string transform_interp_ = "bilinear";  // how pixels are resampled when the selection is transformed
+    std::optional<core::Json> clipboard_;        // copied items (paste's "items"), where they were, its outline
+    std::optional<core::Json> clipboard_area_;
+    std::vector<QPointF> clipboard_outline_;
     bool closed_ = false;
     PenSettings pen_;
     double eraser_mm_ = 2.0;
