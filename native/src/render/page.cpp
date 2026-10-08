@@ -1007,13 +1007,16 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         check_cancel(ctx);
         if (const auto under = std::find_if(below.begin(), below.end(), [&](const auto& b) { return b.first == layer.id; });
             under != below.end()) {
-            // (drawn on the picture so far; a page of precise colour keeps it in its own canvas, which balloons are
-            // not drawn into yet)
+            // (drawn on the picture so far. A page in precise colour, which Python does not have, keeps that picture in
+            // its own canvas: the balloons are drawn as here on its 8-bit picture, and what they paint goes into it.)
+            const auto draw = [&](Image& picture) {
+                text::draw_lines(text::PagePart{&picture, Point{area.x0, area.y0}, ctx.size}, under->second, dpi, font_path, !print,
+                                 &panels, ctx.stop, &unported);
+            };
             if (precision) {
-                skip_unported(ctx, "high_precision_balloons");
+                precision->draw_8bit(draw);
             } else {
-                text::draw_lines(text::PagePart{&rgba, Point{area.x0, area.y0}, ctx.size}, under->second, dpi, font_path, !print, &panels,
-                                 ctx.stop, &unported);
+                draw(rgba);
             }
         }
         if (layer.kind == LayerKind::Folder) continue;

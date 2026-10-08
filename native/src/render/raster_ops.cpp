@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "core/areas.hpp"
+#include "core/base64.hpp"
 #include "core/filters.hpp"
 #include "core/frames.hpp"
 #include "core/ids.hpp"
@@ -1744,11 +1745,79 @@ Json builtin_material(const std::string& id) {
     }
     throw OpError("no material "+id);
 }
+
+// The picture of an image material (materials.image_bytes: library_dir() / item["file"], read when it is there): none
+// when it has no file, the file is not there or holds nothing (the op then says the picture is missing), and Python's
+// own errors (a name that is not a str; a folder or a file that cannot be read, which apply_ops lets through). A
+// picture this build does not read — outside the library or through a link, or past 64 MB — is not read: what refuses
+// it is kept in `refused`, for the op to throw once Python's own errors have had their turn.
+struct MaterialPicture {
+    std::string bytes;
+    std::string refused;
+};
+
+std::optional<MaterialPicture> material_picture(const Json& material) {
+    const Json file = core::get_or(material, "file", Json());
+    if (!core::py_truthy(file)) return std::nullopt;
+#ifdef _WIN32
+    constexpr const char* kPathType = "WindowsPath";
+#else
+    constexpr const char* kPathType = "PosixPath";
+#endif
+    if (!file.is_string()) {
+        throw core::PyTypeError(std::string("unsupported operand type(s) for /: '") + kPathType + "' and '" + core::py_type_name(file) +
+                                "'");
+    }
+    const std::string name = file.get<std::string>();
+    const std::string root = core::path_to_utf8(config_dir() / "materials");
+    const std::string text = pathlib_text(name.front() == '/' ? name : root + "/" + name);  // (pathlib: a whole path replaces)
+    const std::filesystem::path path = core::path_from_utf8(text);
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) return std::nullopt;
+    if (std::filesystem::is_directory(path, ec)) {
+        throw core::PyUncaught("IsADirectoryError", "[Errno 21] Is a directory: " + core::py_repr_str(text));
+    }
+    constexpr qint64 kMaxSourceBytes = 64ll << 20;  // (the user-preview reader's cap on an original file)
+    const QString library = QString::fromStdString(root);
+    const QFileInfo directory(library);
+    const QString relative = QString::fromStdString(name);
+    const QFileInfo source(QDir(library).filePath(relative));
+    const QString canonical = source.canonicalFilePath();
+    MaterialPicture out;
+    if (QDir::isAbsolutePath(relative)) {
+        out.refused = "material image must be inside the material library";
+    } else if (!directory.isDir() || directory.isSymLink() || directory.canonicalFilePath() != directory.absoluteFilePath() ||
+               !source.isFile() || source.isSymLink() || canonical != source.absoluteFilePath() ||
+               !canonical.startsWith(directory.canonicalFilePath() + "/")) {
+        out.refused = "unsafe material image source";
+    } else if (source.size() > kMaxSourceBytes) {
+        out.refused = "material image exceeds byte budget";
+    }
+    if (!out.refused.empty()) {  // (not read; one that holds nothing is still Python's missing picture)
+        const auto size = std::filesystem::file_size(path, ec);
+        if (!ec && size == 0) return std::nullopt;
+        return out;
+    }
+    QFile read(canonical);
+    if (!read.open(QIODevice::ReadOnly)) {
+        throw core::PyUncaught("PermissionError", "[Errno 13] Permission denied: " + core::py_repr_str(text));
+    }
+    const QByteArray bytes = read.read(kMaxSourceBytes + 1);
+    if (bytes.size() > kMaxSourceBytes) {
+        out.refused = "material image exceeds byte budget";
+        return out;
+    }
+    if (bytes.isEmpty()) return std::nullopt;
+    out.bytes = bytes.toStdString();
+    return out;
+}
+
 void stamp_material(OpContext& c) {
     const auto at=core::require_page(c.doc,c.op);
     const std::string id=core::py_str(core::get_or(c.op,"material_id",Json()));
     const Json material=builtin_material(id);
-    const std::string kind=material.value("kind",std::string());
+    const Json kind_value = core::get_or(material, "kind", Json());  // (any value a library holds: a str is a kind)
+    const std::string kind = kind_value.is_string() ? kind_value.get<std::string>() : std::string();
     const auto apply=[&](Json op) { c.doc=core::CommandBus(ops_registry()).apply(c.doc,Json::array({std::move(op)}),c.actor).doc; };
     const auto positioned=[&](Json op) {
         op["page"]=c.doc.page(at).index.json();
@@ -1788,27 +1857,74 @@ void stamp_material(OpContext& c) {
         if(scene)for(auto& prim:c.doc.edit_page(at).prims)if(prim["id"]==created){prim["pos"][0]=core::py_round(x,3);prim["pos"][1]=core::py_round(y,3);break;}
         return;
     }
-    if(kind=="image"){
-        if(core::truthy_at(c.op,"line_id"))throw NotYetPorted("picture balloon requires the common balloons/text renderer");
-        constexpr qint64 maxSourceBytes=64ll<<20; // Same original-file cap as the existing user-preview reader.
-        const QString root=QDir(QString::fromStdString(core::path_to_utf8(config_dir()))).filePath("materials");const QFileInfo directory(root);
-        const QString name=QString::fromStdString(material.value("file",std::string()));
-        if(name.isEmpty()||QDir::isAbsolutePath(name))throw core::OpError("material image must be inside the material library");
-        const QFileInfo source(QDir(root).filePath(name));const QString canonical=source.canonicalFilePath();
-        if(!directory.isDir()||directory.isSymLink()||directory.canonicalFilePath()!=directory.absoluteFilePath()||
-           !source.isFile()||source.isSymLink()||canonical!=source.absoluteFilePath()||!canonical.startsWith(directory.canonicalFilePath()+"/")||source.size()>maxSourceBytes)
-            throw core::OpError("unsafe material image source");
-        QFile file(canonical);if(!file.open(QIODevice::ReadOnly))throw core::OpError("material image unavailable");
-        const QByteArray bytes=file.read(maxSourceBytes+1);if(bytes.size()>maxSourceBytes)throw core::OpError("material image exceeds byte budget");
-        const std::string blob=bytes.toStdString();verify_image(blob);const auto picture=selection::open_picture(blob);limits::check_picture(picture.width(),picture.height(),"material image");
-        const double width=core::truthy_at(c.op,"width_mm")?float_at(c.op,"width_mm",60):core::truthy_at(material,"width_mm")?float_at(material,"width_mm",60):60;
-        const double height=width*(core::truthy_at(material,"aspect")?float_at(material,"aspect",1):1);if(width<=0||height<=0)throw core::OpError("material image size must be positive");
-        const auto [x,y]=centre();const Json box=Json::array({x-width/2,y-height/2,width,height});core::require_finite(box);
-        for(const auto& value:box)limits::check_coordinate(core::py_float(value)*selection::kWorkingDpi/25.4,"material image box");
-        auto& target=core::paint_target(c.doc.edit_page(at),c.op);core::Patch patch;patch.attrs=Json{{"id",core::new_id()},{"box",Json::array({core::py_round(x-width/2,3),core::py_round(y-height/2,3),core::py_round(width,3),core::py_round(height,3)})},{"mode","image"},{"opacity",1.0}};
-        patch.png=std::make_shared<const std::string>(blob);target.patches.push_back(std::move(patch));return;
+    if (kind == "lettering") {  // 描き文字: a line set as the material has it
+        core::stamp_lettering(c.doc, at, c.op, material, verify_style_picture);
+        return;
     }
-    if(kind=="lettering") throw NotYetPorted("material lettering requires text/balloon rendering");
+    if (kind == "image" && core::truthy_at(c.op, "line_id")) {  // 画像のフキダシ: the picture becomes the line's balloon
+        const std::optional<MaterialPicture> picture = material_picture(material);
+        if (!picture) throw OpError("the picture file of this material is missing");
+        core::StoryLine& line = core::find_line(c.doc, core::py_str(c.op["line_id"]));
+        // (Python keeps any bytes there; this build refuses, after Python's own errors, a picture it does not read and one
+        // a balloon cannot draw, as add_line and edit_line refuse it in a line's style)
+        if (!picture->refused.empty()) throw OpError(picture->refused);
+        try {
+            verify_style_picture(picture->bytes);
+        } catch (const core::PyValueError& error) {
+            unreadable(error.what());
+        } catch (const core::PyUncaught& error) {
+            unreadable(error.what());
+        }
+        line.balloon = "picture";
+        Json style = line.style.is_object() ? line.style : Json::object();  // ({**(line.style or {}), "picture": …})
+        style["picture"] = core::b64encode(picture->bytes);
+        line.style = std::move(style);
+        return;
+    }
+    if (kind == "tone") {
+        Json op=material.value("tone",Json::object());
+        for (const char* key:{"frame_id","area","at","after","id"}) if(core::truthy_at(c.op,key))op[key]=c.op[key];
+        op["op"]="add_tone";op["page"]=c.doc.page(at).index.json();op["name"]=material.value("name",std::string());
+        if(!core::truthy_at(op,"id"))op["id"]=core::new_id();
+        auto result=core::CommandBus(ops_registry()).apply(c.doc,Json::array({op}),c.actor).doc;
+        auto& page=result.edit_page(at);
+        page.layers[core::layer_by_id(page,core::py_str(op["id"]))].material_id=id;
+        c.doc=std::move(result);
+        return;
+    }
+    // ops._paint_target before the kind is looked at further (its errors come first; a page without an ink layer gets one)
+    Layer& target = core::paint_target(c.doc.edit_page(at), c.op);
+    if (kind == "image") {
+        const std::optional<MaterialPicture> picture = material_picture(material);
+        if (!picture) throw OpError("the picture file of this material is missing");
+        // float(op.get("width_mm") or material.get("width_mm") or 60), its height by the aspect, and where its middle goes
+        const Json given_width = core::py_or(core::get_or(c.op, "width_mm", Json()), core::get_or(material, "width_mm", Json()));
+        const double width = core::to_float(core::py_or(given_width, Json(60)));
+        const double height = width * core::to_float(core::py_or(core::get_or(material, "aspect", Json()), Json(1)));
+        const Json* given_x = core::get(c.op, "x_mm");
+        const double x = given_x != nullptr ? core::to_float(*given_x) : c.doc.page(at).spec.width_mm.value() / 2;
+        const Json* given_y = core::get(c.op, "y_mm");
+        const double y = given_y != nullptr ? core::to_float(*given_y) : c.doc.page(at).spec.height_mm.value() / 2;
+        // (then what this build refuses beyond Python: a picture it does not read or cannot draw, a box it cannot keep)
+        if (!picture->refused.empty()) throw OpError(picture->refused);
+        const std::string& blob = picture->bytes;
+        verify_image(blob);
+        const auto opened = selection::open_picture(blob);
+        limits::check_picture(opened.width(), opened.height(), "material image");
+        if (width <= 0 || height <= 0) throw OpError("material image size must be positive");
+        const Json box = Json::array({x - width / 2, y - height / 2, width, height});
+        core::require_finite(box);
+        for (const auto& value : box) limits::check_coordinate(core::py_float(value) * selection::kWorkingDpi / 25.4, "material image box");
+        core::Patch patch;
+        patch.attrs = Json{{"id", core::new_id()},
+                           {"box", Json::array({core::py_round(x - width / 2, 3), core::py_round(y - height / 2, 3), core::py_round(width, 3),
+                                                core::py_round(height, 3)})},
+                           {"mode", "image"},
+                           {"opacity", 1.0}};
+        patch.png = std::make_shared<const std::string>(blob);
+        target.patches.push_back(std::move(patch));
+        return;
+    }
     if(kind=="lines") {
         auto items=selection::items_from_json(material.value("items",Json::object()));validate_patch_items(items,true);auto matrix=selection::kIdentity;
         if(c.op.contains("x_mm") && !c.op["x_mm"].is_null() && c.op.contains("y_mm") && !c.op["y_mm"].is_null()){
@@ -1818,17 +1934,9 @@ void stamp_material(OpContext& c) {
             for(const auto& patch:items.patches){const auto& b=patch.attrs.at("box");const double x=core::py_float(b[0]),y=core::py_float(b[1]);point(x,y);point(x+core::py_float(b[2]),y+core::py_float(b[3]));}
             if(std::isfinite(loX)){matrix[4]=core::py_float(c.op["x_mm"])-(loX+hiX)/2;matrix[5]=core::py_float(c.op["y_mm"])-(loY+hiY)/2;}
         }
-        auto& target=core::paint_target(c.doc.edit_page(at),c.op);selection::drop(target,std::move(items),matrix,true);return;
+        selection::drop(target,std::move(items),matrix,true);return;
     }
-    if (kind!="tone") throw NotYetPorted("material kind:"+kind);
-    Json op=material.value("tone",Json::object());
-    for (const char* key:{"frame_id","area","at","after","id"}) if(core::truthy_at(c.op,key))op[key]=c.op[key];
-    op["op"]="add_tone";op["page"]=c.doc.page(at).index.json();op["name"]=material.value("name",std::string());
-    if(!core::truthy_at(op,"id"))op["id"]=core::new_id();
-    auto result=core::CommandBus(ops_registry()).apply(c.doc,Json::array({op}),c.actor).doc;
-    auto& page=result.edit_page(at);
-    page.layers[core::layer_by_id(page,core::py_str(op["id"]))].material_id=id;
-    c.doc=std::move(result);
+    throw OpError("unknown material kind " + core::py_str(kind_value));
 }
 
 // --- filters ----------------------------------------------------------------------------------------------------------

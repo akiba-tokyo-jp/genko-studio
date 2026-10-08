@@ -1,8 +1,8 @@
 // The lines of dialogue and their balloons (Python's ops._apply_one and bookops.replace_text): add_line, edit_line,
 // move_line, delete_line, reorder_lines, cut_balloon (フキダシ消しゴム), set_balloon_path (a balloon drawn by hand) and
 // replace_text (一括置換), with the helpers they share: the style keys a line takes (_merge_style), its tails
-// (_parse_tails, and _tails_outside for a balloon moved over its own tail), its ruby, dots (傍点) and styled words.
-// Nothing is drawn.
+// (_parse_tails, and _tails_outside for a balloon moved over its own tail), its ruby, dots (傍点) and styled words; and
+// the line stamp_material makes of a lettering material (the rest of that op is render's). Nothing is drawn.
 //
 // Python also keeps each page's lines in page.texts (the same objects as the story's, read from the story); this build
 // keeps the story alone. Every id page.texts holds is in the story too (add_line and delete_line change both, and the
@@ -127,14 +127,6 @@ Point tail_point(const Json& to) {
         if (x && y) return Point{*x, *y};
     }
     throw OpError("a tail's to must be two numbers [x, y]");
-}
-
-// ops._find_line: the first line of the story with this id (see the top of the file for page.texts)
-StoryLine& find_line(Document& doc, const std::string& line_id) {
-    for (StoryLine& line : doc.story) {
-        if (line.id == line_id) return line;
-    }
-    throw OpError("no line " + line_id);
 }
 
 // ops._parse_tail: None, or (float(value[0]), float(value[1]))
@@ -364,17 +356,20 @@ Json style_value(const StyleKey& spec, const Json& value, const PictureCheck& ch
     return value;
 }
 
+// _merge_style's refusal of a key that is not one of STYLE_KEYS (the key as Python's f-string writes it)
+[[noreturn]] void unknown_style_key(const std::string& key) {
+    std::string names;
+    for (const StyleKey& k : kStyleKeys) names += (names.empty() ? "" : ", ") + std::string(k.name);
+    throw OpError("unknown style key " + key + " (one of " + names + ")");
+}
+
 // ops._merge_style: style keys merged into a line's style; a key set to null (or "") goes back to the default
 Json merge_style(const Json& current, const Json& change, const PictureCheck& check) {
     if (!change.is_object()) throw OpError("style must be an object");
     Json out = current.is_object() ? current : Json::object();
     for (const auto& [key, value] : change.items()) {
         const auto* spec = std::find_if(std::begin(kStyleKeys), std::end(kStyleKeys), [&](const StyleKey& k) { return k.name == key; });
-        if (spec == std::end(kStyleKeys)) {
-            std::string names;
-            for (const StyleKey& k : kStyleKeys) names += (names.empty() ? "" : ", ") + std::string(k.name);
-            throw OpError("unknown style key " + key + " (one of " + names + ")");
-        }
+        if (spec == std::end(kStyleKeys)) unknown_style_key(key);
         if (value.is_null() || value == Json("")) {
             out.erase(key);
             continue;
@@ -412,6 +407,42 @@ Json merge_style(const Json& current, const Json& change, const PictureCheck& ch
         if (key == "spike_jitter") must(0 <= number() && number() <= 1, "spike_jitter must be between 0 and 1");
         if (key == "bumps") must(5 <= number() && number() <= 60, "bumps must be between 5 and 60");
         out[key] = std::move(kept);
+    }
+    return out;
+}
+
+// _merge_style({}, dict(value or {})): the style of a lettering material. dict() takes a dict or a sequence of pairs
+// (Python's TypeError and ValueError for what it cannot take; a key it cannot hash is a TypeError too), a later pair
+// with an equal key keeping the first one's place; _merge_style then goes through the keys in that order, and a key
+// that is not a str is never one of STYLE_KEYS.
+Json lettering_style(const Json& value, const PictureCheck& check) {
+    if (!py_truthy(value)) return Json::object();
+    if (value.is_object()) return merge_style(Json::object(), value, check);
+    if (!value.is_array() && !value.is_string()) throw PyTypeError("'" + py_type_name(value) + "' object is not iterable");
+    std::vector<std::pair<Json, Json>> pairs;
+    std::size_t n = 0;
+    for (const Json& item : iterate(value)) {
+        if (!item.is_array() && !item.is_string() && !item.is_object()) {
+            throw PyTypeError("cannot convert dictionary update sequence element #" + std::to_string(n) + " to a sequence");
+        }
+        const std::vector<Json> pair = iterate(item);
+        if (pair.size() != 2) {
+            throw PyValueError("dictionary update sequence element #" + std::to_string(n) + " has length " +
+                               std::to_string(pair.size()) + "; 2 is required");
+        }
+        require_hashable(pair[0]);
+        const auto same = std::find_if(pairs.begin(), pairs.end(), [&](const auto& kept) { return py_equals(kept.first, pair[0]); });
+        if (same != pairs.end()) {
+            same->second = pair[1];
+        } else {
+            pairs.emplace_back(pair[0], pair[1]);
+        }
+        ++n;
+    }
+    Json out = Json::object();
+    for (const auto& [key, item] : pairs) {
+        if (!key.is_string()) unknown_style_key(py_str(key));
+        out = merge_style(out, Json::object({{key.get<std::string>(), item}}), check);
     }
     return out;
 }
@@ -725,6 +756,43 @@ std::vector<std::string> line_style_keys() {
     std::vector<std::string> keys;
     for (const StyleKey& key : kStyleKeys) keys.emplace_back(key.name);
     return keys;
+}
+
+// ops._find_line: the first line of the story with this id (see the top of the file for page.texts)
+StoryLine& find_line(Document& doc, const std::string& line_id) {
+    for (StoryLine& line : doc.story) {
+        if (line.id == line_id) return line;
+    }
+    throw OpError("no line " + line_id);
+}
+
+void stamp_lettering(Document& doc, std::size_t at, const Json& op, const Json& material, const PictureCheck& check) {
+    // (each value worked out in Python's order, so the first error is Python's)
+    const double width = to_float(py_or(py_or(op_value(op, "width_mm"), op_value(material, "w_mm")), Json(50)));
+    const double tall = width * to_float(py_or(op_value(material, "h_mm"), Json(30)));
+    const double height = divided(tall, to_float(py_or(op_value(material, "w_mm"), Json(50))));
+    const Page& page = doc.page(at);
+    const Json* x = get(op, "x_mm");
+    const double cx = x != nullptr ? to_float(*x) : page.spec.width_mm.value() / 2;
+    const Json* y = get(op, "y_mm");
+    const double cy = y != nullptr ? to_float(*y) : page.spec.height_mm.value() / 2;
+    // episode.add_line(page.index, str(material.get("text") or "ド"), x_mm=…, y_mm=…, w_mm=…, h_mm=…, balloon=…,
+    // frame_id=op.get("frame_id")): the balloon and the wrap as the material has them, unchecked
+    std::string text = py_str(py_or(op_value(material, "text"), Json("ド")));
+    const Num left(py_round(cx - width / 2, 2));
+    const Num top(py_round(cy - height / 2, 2));
+    const Num w(py_round(width, 2));
+    const Num h(py_round(height, 2));
+    std::string balloon = py_str(py_or(op_value(material, "balloon"), Json("sfx")));
+    const Json frame_id = op_value(op, "frame_id");
+    std::optional<std::string> frame;
+    if (frame_id.is_string()) frame = frame_id.get<std::string>();
+    StoryLine& line =
+        doc.add_line(page.index, std::move(text), "", std::move(frame), "", left, top, w, h, std::move(balloon), std::nullopt);
+    line.wrap = py_str(py_or(op_value(material, "wrap"), Json("horizontal")));
+    line.style = lettering_style(op_value(material, "style"), check);
+    if (truthy_at(op, "id")) line.id = py_str(op["id"]);  // (unchecked: Python keeps a second line with a line's id)
+    require_kept(line, &frame_id);
 }
 
 void register_line_ops(OpRegistry& registry, PictureCheck check) {

@@ -209,6 +209,35 @@ void ColorCanvas::adjust(const core::PreciseAdjustment& adjustment, double opaci
         }
     }
 }
+void ColorCanvas::draw_8bit(const std::function<void(Image&)>& draw) {
+    const Image before = image();
+    Image drawn = before;
+    draw(drawn);
+    Image probe = before;
+    for (int y = 0; y < probe.height(); ++y) {
+        auto* row = reinterpret_cast<unsigned char*>(probe.raw()->image[y]);
+        for (int x = 0; x < probe.width(); ++x)
+            for (unsigned c = 0; c < 3; ++c) row[x*4+c] = static_cast<unsigned char>((row[x*4+c] + 128) & 255);
+    }
+    const Image probe_before = probe;
+    draw(probe);
+    for (const Image* out : {&drawn, &probe})
+        if (out->mode() != "RGBA" || out->size() != impl_->size)
+            throw core::Error("value", "8-bit drawing does not match the color canvas");
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* was = reinterpret_cast<const unsigned char*>(before.raw()->image[y]);
+        const auto* now = reinterpret_cast<const unsigned char*>(drawn.raw()->image[y]);
+        const auto* probe_was = reinterpret_cast<const unsigned char*>(probe_before.raw()->image[y]);
+        const auto* probe_now = reinterpret_cast<const unsigned char*>(probe.raw()->image[y]);
+        for (int x = 0; x < impl_->size.width; ++x) {
+            const auto* d = now + x*4;
+            if (std::equal(d, d+4, was + x*4) && std::equal(probe_now + x*4, probe_now + x*4 + 4, probe_was + x*4)) continue;
+            auto& p = impl_->pixels[std::size_t(y)*impl_->size.width+x];
+            const auto v = linear({d[0]/255.0, d[1]/255.0, d[2]/255.0, d[3]/255.0});
+            for (unsigned c = 0; c < 4; ++c) p[c] = v[c];  // (p[4], the alpha of the layer before, stays)
+        }
+    }
+}
 Image ColorCanvas::image() const {
     auto out = Image::create("RGBA", impl_->size, Ink{0, 0, 0, 0});
     for (int y = 0; y < impl_->size.height; ++y) {

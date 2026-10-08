@@ -96,4 +96,14 @@ void register_line_ops(OpRegistry& registry, PictureCheck check = {});
 // ops.STYLE_KEYS: the keys a line's style takes, in Python's order (the app's 既定の設定に戻す clears them).
 std::vector<std::string> line_style_keys();
 
+// ops._find_line: the first line of the story with this id. OpError "no line <id>".
+StoryLine& find_line(Document& doc, const std::string& line_id);
+
+// stamp_material's lettering material (描き文字, Python's ops._apply_one): a line on the page at `page` set as the
+// material has it ("text", "balloon", "wrap", "style", "w_mm", "h_mm"), centred on op's x_mm/y_mm (the page's middle by
+// default), op's width_mm wide (the material's w_mm by default), in op's frame_id; op's id is the line's id. The style
+// goes through _merge_style as add_line's does (`check` for its pictures); what this build's book cannot hold (a number
+// that is not finite, a frame_id that is not a panel's id) is refused last, as add_line refuses it.
+void stamp_lettering(Document& doc, std::size_t page, const Json& op, const Json& material, const PictureCheck& check);
+
 }  // namespace genko::core

@@ -21,7 +21,9 @@
 #include "core/error.hpp"
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
+#include "core/color_raster.hpp"
 #include "core/model.hpp"
+#include "render/color_canvas.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
 
@@ -361,7 +363,8 @@ private slots:
             fewer.story.erase(fewer.story.begin() + static_cast<std::ptrdiff_t>(i));
             QVERIFY2(render::render_page(*fewer.pages[0], 100, proof, &fewer).image.tobytes() != all, doc.story[i].text.c_str());
         }
-        // a line set under a layer of a page in precise colour: that canvas has no balloons yet
+        // a line set under a layer of a page in precise colour: drawn into that canvas (as precise_page_balloons shows),
+        // nothing left out, and parts of the page the same as the whole page cut
         Document precise = doc;
         genko::core::Page& coloured_page = precise.edit_page(0);
         genko::core::StrokePtr first;
@@ -376,10 +379,103 @@ private slots:
             layer.strokes = genko::core::make_strokes({coloured});
         }
         render::RenderOptions print;
-        QCOMPARE(unported_element(*precise.pages[0], precise, print), std::string("high_precision_balloons"));
-        print.skip_unported = true;
-        const render::RenderResult left_out = render::render_page(*precise.pages[0], 72, print, &precise);
-        QCOMPARE(left_out.omitted, std::vector<std::string>{"high_precision_balloons"});
+        QVERIFY(render::uses_color_precision(*precise.pages[0], true));
+        QVERIFY(unported_element(*precise.pages[0], precise, print).empty());
+        const render::Image whole = render::render_page(*precise.pages[0], 150, print, &precise).image;
+        Document unset = precise;  // (without the line set under the ink)
+        std::erase_if(unset.story, [](const genko::core::StoryLine& l) { return l.text == "下の台詞"; });
+        QVERIFY(whole.tobytes() != render::render_page(*unset.pages[0], 150, print, &unset).image.tobytes());
+        for (const render::RenderRegion part :
+             {render::RenderRegion{40, 60, 150, 120}, render::RenderRegion{0, 150, whole.width(), 90}}) {
+            render::RenderOptions o = print;
+            o.region = part;
+            QVERIFY(render::render_page(*precise.pages[0], 150, o, &precise).image.tobytes() ==
+                    whole.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes());
+        }
+    }
+
+    void precise_page_balloons() {
+        // A page in precise colour (a canvas Python does not have) draws the lines set under a layer as the 8-bit page
+        // draws them, on its own picture so far, and what they paint goes into the canvas. Where the canvas holds just
+        // what the 8-bit page holds — under the balloons a precise picture of whole 8-bit values and full alpha where
+        // the 8-bit page has a fill of that colour; above them layers that are opaque or clear — the two pages are the
+        // same pixels: the balloons over what is under them, covered where the layer above covers them.
+        const auto page_of = [](bool precise) {
+            Document doc =
+                genko::core::new_episode("精密な台詞", Num(1), 1, genko::core::PageSpec::custom(60, 80, 50, 70, 3, 5, 5, 5, 5, 600, "color"));
+            genko::core::Page& page = doc.edit_page(0);
+            page.numero = false;
+            page.layers.clear();
+            Layer base;
+            base.id = "base";
+            base.panel_clip = false;
+            if (precise) {  // (one pixel stretched over the page: 40, 160, 90 as 16-bit samples, opaque)
+                base.kind = LayerKind::Raster;
+                base.role = LayerRole::User;
+                const Json pixels = Json::array({40 * 257, 160 * 257, 90 * 257, 65535});
+                base.color_raster = std::make_shared<const std::string>(
+                    genko::core::encode_color_raster(Json{{"width", 1}, {"height", 1}, {"precision", "u16"}, {"pixels", pixels}}));
+            } else {
+                base.kind = LayerKind::Fill;
+                base.fill = Json{{"rgb", Json::array({40, 160, 90})}};
+            }
+            Layer cover;  // (the left half opaque, the right half clear: at 100 dpi, a pixel of it for each of the page's)
+            cover.id = "cover";
+            cover.kind = LayerKind::Raster;
+            cover.role = LayerRole::User;
+            cover.panel_clip = false;
+            render::Image half =
+                render::Image::create("RGBA", {render::mm_to_px(60, 100), render::mm_to_px(80, 100)}, render::Ink{0, 0, 0, 0});
+            half.paste(render::Ink{200, 30, 30, 255}, render::Box{0, 0, half.width() / 2, half.height()});
+            cover.raster_png = std::make_shared<const std::string>(render::write_png(half));
+            page.layers = {base, cover};
+            doc.add_line(page.index, "下に置く台詞", "", std::nullopt, "", Num(18), Num(20), Num(26), Num(16), "speech").style["below_layer"] =
+                "cover";
+            doc.add_line(page.index, "見える台詞", "", std::nullopt, "", Num(34), Num(45), Num(20), Num(14), "box").style["below_layer"] =
+                "cover";
+            doc.add_line(page.index, "上の台詞", "", std::nullopt, "", Num(8), Num(60), Num(22), Num(12), "rounded");
+            // (the same ids on both pages: a balloon's hand-drawn outline follows its line's id)
+            for (std::size_t i = 0; i < doc.story.size(); ++i) doc.story[i].id = "line-" + std::to_string(i);
+            return doc;
+        };
+        const Document eight = page_of(false);
+        const Document precise = page_of(true);
+        QVERIFY(!render::uses_color_precision(*eight.pages[0], true));
+        QVERIFY(render::uses_color_precision(*precise.pages[0], true));
+        for (const char* mode : {"print", "proof"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            const render::RenderResult got = render::render_page(*precise.pages[0], 100, options, &precise);
+            QVERIFY(got.omitted.empty());
+            const render::Image want = render::render_page(*eight.pages[0], 100, options, &eight).image;
+            QCOMPARE(got.image.size(), want.size());
+            QVERIFY2(got.image.tobytes() == want.tobytes(), mode);
+            // the lines under the cover are drawn (the page is not the one without them), and covered on its left half
+            Document bare = precise;
+            bare.story.erase(bare.story.begin(), bare.story.begin() + 2);
+            QVERIFY(render::render_page(*bare.pages[0], 100, options, &bare).image.tobytes() != got.image.tobytes());
+            Document over = precise;  // (the first line over everything instead: it shows where the cover hid it)
+            over.story[0].style.erase("below_layer");
+            QVERIFY(render::render_page(*over.pages[0], 100, options, &over).image.tobytes() != got.image.tobytes());
+        }
+        // what the balloons paint goes in as 8-bit pixels and covers the precise colour under them, though that rounds
+        // to the balloon's own colour (white over a white brighter than white); what they leave keeps its precise value,
+        // and a clipped layer still clips to the layer before them
+        render::ColorCanvas canvas(render::Image::create("RGBA", {4, 1}, render::Ink{255, 255, 255, 255}));
+        const std::string bright = genko::core::encode_color_raster(
+            Json{{"width", 1}, {"height", 1}, {"precision", "f32"}, {"pixels", Json::array({1.25, 1.25, 1.25, 0.5})}});
+        canvas.blend(genko::core::ColorRasterView(bright), {4, 1}, render::Box{0, 0, 4, 1}, 1.0, false);
+        const auto kept = canvas.linear_pixel(2);
+        QVERIFY(kept[0] > 1.0);
+        canvas.draw_8bit([](render::Image& picture) {
+            picture.paste(render::Ink{255, 255, 255, 255}, render::Box{0, 0, 1, 1});
+            picture.paste(render::Ink{0, 0, 0, 255}, render::Box{1, 0, 2, 1});
+        });
+        QCOMPARE(canvas.linear_pixel(0), (std::array<double, 4>{1.0, 1.0, 1.0, 1.0}));
+        QCOMPARE(canvas.linear_pixel(1), (std::array<double, 4>{0.0, 0.0, 0.0, 1.0}));
+        QCOMPARE(canvas.linear_pixel(2), kept);
+        canvas.blend(render::Image::create("RGBA", {4, 1}, render::Ink{255, 0, 0, 255}), 1.0, true);  // (clipped: half of it)
+        QCOMPARE(canvas.linear_pixel(0), (std::array<double, 4>{1.0, 0.5, 0.5, 1.0}));
     }
 
     void unported_only_where_drawn() {

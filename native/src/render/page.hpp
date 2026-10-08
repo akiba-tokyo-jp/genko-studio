@@ -16,13 +16,13 @@
 // lines with every brush, fills and gradients, corrections, effects, masks, blend modes, opacity, clipping), the
 // panel borders, crop marks, the ruler's points, the lines of dialogue (in their balloons, render/text/balloons.hpp,
 // set under a layer when they ask; the others as labels) and the onion skin, the same pixels as the Python baseline.
+// (A page in precise colour, which Python does not have, is composited in its own canvas: render/color_canvas.hpp.)
 //
 // Not drawn in this step (render::NotYetPorted names them, unless RenderOptions::skip_unported): placed pictures
 // ("placed"), a jacket's folds ("covers") and the monochrome finish of a painting app's colour layer ("finish");
-// correction layers other than the colour adjustments ("adjust:<kind>"); lines set under a layer of a page in precise
-// colour ("high_precision_balloons"); what a line's letters cannot be drawn with yet (a font file that does not open:
-// "default_font"; a warp without a map: "text_warp"). Tone layers, effect lines and a layer's screen
-// (render/tones.hpp, render/effects.hpp), the 3D guides (render/prims.hpp) and nombres are drawn.
+// correction layers other than the colour adjustments ("adjust:<kind>"); what a line's letters cannot be drawn with
+// yet (a font file that does not open: "default_font"; a warp without a map: "text_warp"). Tone layers, effect lines
+// and a layer's screen (render/tones.hpp, render/effects.hpp), the 3D guides (render/prims.hpp) and nombres are drawn.
 
 namespace genko::render {
 

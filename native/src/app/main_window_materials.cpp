@@ -263,7 +263,9 @@ void MainWindow::stamp_at(double x_mm, double y_mm) {
         op["x_mm"] = core::py_round(x_mm, 2);
         op["y_mm"] = core::py_round(y_mm, 2);
         if (kind == "lettering") op["id"] = core::new_id();
-        apply_ops(Json::array({op}));  // (a lettering's words are typed over in the story panel: M4)
+        if (apply_ops(Json::array({op})) && kind == "lettering") {
+            on_line_selected(op["id"].get<std::string>(), false);  // (its words can be typed over at once)
+        }
         return;
     }
     const core::Layer* layer = paint_layer();

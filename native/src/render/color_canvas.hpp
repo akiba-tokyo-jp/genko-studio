@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <functional>
 #include <memory>
 #include <optional>
 #include "core/color_adjust.hpp"
@@ -26,6 +27,13 @@ public:
     // A correction layer of filters.ADJUSTMENTS: its change laid over the pixels below in their sRGB samples (as the
     // 8-bit page composites a correction: by opacity × mask × the clipped-to layer's alpha).
     void adjust(const core::PreciseAdjustment& adjustment, double opacity, bool clip, const Image* mask = nullptr);
+    // Drawing in 8 bits on the canvas's own picture (image(), RGBA), as the 8-bit page draws on its picture so far
+    // (the balloons set under a layer): each pixel `draw` paints takes the value it is given there, brought in as an
+    // 8-bit picture is (its sRGB samples in linear light, as the paper comes in); the others keep their precise values.
+    // A pixel is painted where the drawing changes it on that picture or on one whose colour samples all lie half the
+    // range away (so a balloon over a precise colour that rounds to its own colour still covers it). What is drawn so
+    // is not a layer: the alpha a clipped layer clips to stays that of the layer before.
+    void draw_8bit(const std::function<void(Image&)>& draw);
     Image image() const;
     Size size() const;
     // One pixel as composited: straight linear-light RGB and its alpha.

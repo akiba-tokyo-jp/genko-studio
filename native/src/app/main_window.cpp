@@ -70,10 +70,9 @@ std::vector<MainWindow*>& open_windows() {
 
 QString omitted_words(const QString& element) {
     static const std::map<QString, QString> words = {
-        {"high_precision_balloons", "高精度カラーのページでレイヤーの下に置いた台詞"}, {"default_font", "読めないフォントの文字"},
-        {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"}, {"prims", "3D"}, {"placed", "配置した画像"},
-        {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"}, {"screen", "トーン化"},
-        {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"}};
+        {"default_font", "読めないフォントの文字"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
+        {"prims", "3D"}, {"placed", "配置した画像"}, {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"},
+        {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"}};
     if (const auto it = words.find(element); it != words.end()) return it->second;
     if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
     return element;

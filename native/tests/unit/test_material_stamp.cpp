@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include "core/command_bus.hpp"
 #include "core/paths.hpp"
+#include "core/pynum.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -120,12 +121,128 @@ private slots:
         else{QVERIFY2(accepted,"user image must be placed from the existing read-only library");const auto& layers=result.page(0).layers;const auto& target=*std::find_if(layers.begin(),layers.end(),[](const auto&l){return l.role==core::LayerRole::Ink;});QCOMPARE(target.patches.size(),std::size_t(1));QCOMPARE(*target.patches[0].png,original.toStdString());QCOMPARE(target.patches[0].attrs["box"],Json::array({4.0,7.0,12.0,6.0}));const auto image=render::render_page(result.page(0),72,render::proof_options()).image;QCOMPARE(image.getpixel(image.width()/2,image.height()/2),(std::vector<double>{12,123,234}));}
         QVERIFY(manifest.open(QIODevice::ReadOnly));QCOMPARE(manifest.readAll(),QByteArray::fromStdString(library));QVERIFY(picture.open(QIODevice::ReadOnly));QCOMPARE(picture.readAll(),original);QVERIFY(external.open(QIODevice::ReadOnly));QCOMPARE(external.readAll(),original);
     }
-    void drawnBuiltinKinds_data(){QTest::addColumn<QString>("material");QTest::newRow("lines")<<QString("mark-汗");}
-    void letteringRefusesWithoutHidingUndrawnContent(){
-        const auto doc=core::new_episode("描き文字保護",core::Num(1),2,core::PageSpec::b4_comic());const auto before=doc.pages[0];bool refused=false;
-        try{core::CommandBus(render::ops_registry()).apply(doc,Json::array({Json{{"op","set_note"},{"page",2},{"note","前置変更"}},Json{{"op","stamp_material"},{"page",1},{"material_id","sfx-ドーン"}}}),core::Actor("human:test"));}
-        catch(const core::ApplyError&e){refused=std::string(e.what()).find("requires text/balloon rendering")!=std::string::npos;}
-        QVERIFY(refused);QCOMPARE(doc.pages[0],before);QVERIFY(doc.story.empty());QVERIFY(doc.page(1).note.empty());
+    void drawnBuiltinKinds_data(){QTest::addColumn<QString>("material");QTest::newRow("lines")<<QString("mark-汗");QTest::newRow("lettering")<<QString("sfx-ドーン");}
+    void letteringPutsALineAsTheMaterialHasIt() {
+        // 描き文字 (ops._apply_one): a line set as the material has it, centred where asked and as wide as asked (the
+        // page's middle and the material's size otherwise), in the panel and with the id given; the page itself is not
+        // touched
+        const auto doc = core::new_episode("描き文字", core::Num(1), 2, core::PageSpec::b4_comic());
+        const auto before = doc.pages[0];
+        const std::string panel = doc.page(0).frames[0].id;
+        const auto result = core::CommandBus(render::ops_registry()).apply(doc, Json::array({
+            Json{{"op", "set_note"}, {"page", 2}, {"note", "前置変更"}},
+            Json{{"op", "stamp_material"}, {"page", 1}, {"material_id", "sfx-ゴゴゴ"}, {"x_mm", 50}, {"y_mm", 60}, {"width_mm", 20},
+                 {"frame_id", panel}, {"id", "sfx-1"}},
+            Json{{"op", "stamp_material"}, {"page", 1}, {"material_id", "sfx-ヒュー"}}}), core::Actor("human:test")).doc;
+        QCOMPARE(result.story.size(), std::size_t(2));
+        const core::StoryLine& down = result.story[0];
+        QCOMPARE(down.id, std::string("sfx-1"));
+        QCOMPARE(down.text, std::string("ゴゴゴゴ"));
+        QCOMPARE(down.wrap, std::string("vertical"));
+        QCOMPARE(down.balloon, std::string("sfx"));
+        QVERIFY(down.frame_id == panel);
+        QCOMPARE(down.x_mm.json(), Json(40.0));
+        QCOMPARE(down.y_mm.json(), Json(32.0));
+        QCOMPARE(down.w_mm.json(), Json(20.0));
+        QCOMPARE(down.h_mm.json(), Json(56.0));
+        QCOMPARE(down.style, (Json{{"outline_mm", 1.0}, {"spike_jitter", 0.0}, {"skew_deg", 10.0}}));
+        const core::StoryLine& across = result.story[1];
+        const double middle = doc.page(0).spec.width_mm.value() / 2;
+        QCOMPARE(across.x_mm.json(), Json(core::py_round(middle - 30, 2)));
+        QCOMPARE(across.w_mm.json(), Json(60.0));
+        QCOMPARE(across.h_mm.json(), Json(25.0));
+        QCOMPARE(across.balloon, std::string("none"));
+        QCOMPARE(across.wrap, std::string("horizontal"));
+        QVERIFY(!across.frame_id);
+        QCOMPARE(across.style.at("font"), Json("sfx"));
+        const Json path = Json::array({Json::array({0.0, 20.0}), Json::array({20.0, 5.0}), Json::array({40.0, 15.0}), Json::array({60.0, 0.0})});
+        QCOMPARE(across.style.at("text_path"), path);
+        QCOMPARE(result.pages[0], before);
+        QCOMPARE(result.page(1).note, std::string("前置変更"));
+        const auto drawn = render::render_page(result.page(0), 72, render::proof_options(), &result).image;
+        QVERIFY(drawn.tobytes() != render::render_page(doc.page(0), 72, render::proof_options(), &doc).image.tobytes());
+    }
+    void pictureBalloonFromTheLibrary_data() {
+        QTest::addColumn<QString>("material");
+        QTest::addColumn<QString>("line");
+        QTest::addColumn<QString>("refusal");
+        QTest::newRow("balloon") << QString("u-blue") << QString("l1") << QString();
+        QTest::newRow("no line") << QString("u-blue") << QString("nope") << QString("no line nope");
+        QTest::newRow("missing") << QString("u-gone") << QString("l1") << QString("the picture file of this material is missing");
+        QTest::newRow("missing, no line") << QString("u-gone") << QString("nope") << QString("the picture file of this material is missing");
+        QTest::newRow("outside") << QString("u-out") << QString("l1") << QString("unsafe material image source");
+        QTest::newRow("outside, no line") << QString("u-out") << QString("nope") << QString("no line nope");
+        QTest::newRow("not a picture") << QString("u-text") << QString("l1") << QString("not a readable image");
+    }
+    void pictureBalloonFromTheLibrary() {
+        // 画像のフキダシ: an image material with a line_id becomes that line's balloon (its picture, base64, in the line's
+        // style); Python's errors first (the picture missing, then the line), then what this build refuses (a picture
+        // outside the library, one it cannot draw); the library never written
+        QFETCH(QString, material);
+        QFETCH(QString, line);
+        QFETCH(QString, refusal);
+        QTemporaryDir cfg;
+        QVERIFY(cfg.isValid());
+        struct Restore {
+            QByteArray value;
+            ~Restore() {
+                if (value.isNull()) qunsetenv("GENKO_CONFIG_DIR");
+                else qputenv("GENKO_CONFIG_DIR", value);
+            }
+        } restore{qgetenv("GENKO_CONFIG_DIR")};
+        qputenv("GENKO_CONFIG_DIR", cfg.path().toUtf8());
+        const QString root = cfg.path() + "/materials";
+        QVERIFY(QDir().mkpath(root));
+        const auto blue = render::Image::create("RGBA", {2, 1}, render::Ink{12, 123, 234, 255});
+        render::save_png(blue, core::path_from_utf8((root + "/u-blue.png").toStdString()));
+        render::save_png(blue, core::path_from_utf8((cfg.path() + "/outside.png").toStdString()));
+        QFile text(root + "/notes.png");
+        QVERIFY(text.open(QIODevice::WriteOnly));
+        text.write("not a picture");
+        text.close();
+        const std::string library = Json::array({Json{{"id", "u-blue"}, {"kind", "image"}, {"name", "青"}, {"file", "u-blue.png"}},
+                                                 Json{{"id", "u-gone"}, {"kind", "image"}, {"name", "ない"}, {"file", "gone.png"}},
+                                                 Json{{"id", "u-out"}, {"kind", "image"}, {"name", "外"}, {"file", "../outside.png"}},
+                                                 Json{{"id", "u-text"}, {"kind", "image"}, {"name", "文字"}, {"file", "notes.png"}}}).dump();
+        QFile manifest(root + "/library.json");
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(QByteArray::fromStdString(library));
+        manifest.close();
+        QFile picture(root + "/u-blue.png");
+        QVERIFY(picture.open(QIODevice::ReadOnly));
+        const QByteArray original = picture.readAll();
+        picture.close();
+        core::CommandBus bus(render::ops_registry());
+        auto doc = core::new_episode("画像のフキダシ", core::Num(1), 2, core::PageSpec::custom(40, 40, 36, 36, 1, 2, 2, 2, 2, 72, "color"));
+        doc.edit_page(0).numero = false;
+        doc = bus.apply(doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "台詞"}, {"id", "l1"}, {"x_mm", 4}, {"y_mm", 4},
+                                                {"w_mm", 30}, {"h_mm", 20}, {"style", Json{{"font", "gothic"}}}}}), core::Actor("human:test")).doc;
+        const Json ops = Json::array({Json{{"op", "set_note"}, {"page", 2}, {"note", "前置変更"}},
+                                      Json{{"op", "stamp_material"}, {"page", 1}, {"material_id", material.toStdString()}, {"line_id", line.toStdString()}}});
+        if (refusal.isEmpty()) {
+            const auto result = bus.apply(doc, ops, core::Actor("human:test")).doc;
+            const core::StoryLine& balloon = result.story.front();
+            QCOMPARE(balloon.balloon, std::string("picture"));
+            QCOMPARE(balloon.style, (Json{{"font", "gothic"}, {"picture", original.toBase64().toStdString()}}));
+            QCOMPARE(result.pages[0], doc.pages[0]);
+            const auto image = render::render_page(result.page(0), 72, render::proof_options(), &result).image;
+            const auto corner = image.getpixel(render::mm_to_px(6, 72), render::mm_to_px(6, 72));  // (the picture stretched over the box)
+            QVERIFY(corner[0] < 40 && corner[2] > 200);
+        } else {
+            std::string error;
+            try {
+                (void)bus.apply(doc, ops, core::Actor("human:test"));
+            } catch (const core::ApplyError& e) {
+                error = e.what();
+            }
+            QVERIFY2(error.find(refusal.toStdString()) != std::string::npos, error.c_str());
+            QCOMPARE(doc.story.front().balloon, std::string("speech"));
+            QVERIFY(doc.page(1).note.empty());
+        }
+        QVERIFY(manifest.open(QIODevice::ReadOnly));
+        QCOMPARE(manifest.readAll(), QByteArray::fromStdString(library));
+        QVERIFY(picture.open(QIODevice::ReadOnly));
+        QCOMPARE(picture.readAll(), original);
     }
     void drawnBuiltinKinds(){
         QFETCH(QString,material);auto initial=core::new_episode("描画素材",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"mono"));
