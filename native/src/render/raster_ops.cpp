@@ -24,6 +24,7 @@
 #include <set>
 #include <string>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1507,38 +1508,22 @@ std::uint32_t crc32_of(std::string_view data, std::uint32_t crc = 0) {
 
 [[noreturn]] void unreadable(const std::string& why) { throw OpError("not a readable image: " + why); }
 
-// ops._verify_image: what Pillow's Image.open and verify() say of the bytes — for a PNG, its chunks up to the image
-// data read with their checksums (a broken one: the file is not identified), the size Pillow refuses, then the
-// checksums of the rest — and the size Python refuses; then its pixels decoded. Other formats Pillow reads come with
-// a later step. (A PNG of a bit depth Pillow cannot read, or whose pixels cannot be decoded, is refused here, where
-// Python keeps it and can never draw the page again.)
-void verify_image(const std::string& blob) {
-    const std::string_view b = blob;
-    if (b.substr(0, 3) == "\xff\xd8\xff" || b.substr(0, 2) == "BM" ||
-        b.substr(0, 6) == "GIF87a" || b.substr(0, 6) == "GIF89a") {
-        try {
-            // Apply the operation's stricter cap before JPEG/BMP/GIF decoding and pixel allocation.
-            (void)open_image(blob, PngLimits{kOpsMaxImagePixels});
-        } catch (const NotYetPorted&) {
-            throw;
-        } catch (const core::Error& error) {
-            if (error.code() == "unidentified_image") unreadable("cannot identify image file <_io.BytesIO object>");
-            unreadable(error.what());
-        }
-        return;
-    }
-    static constexpr std::string_view kSignature("\x89PNG\r\n\x1a\n", 8);
+// An exception Pillow raised: its type ("PIL.UnidentifiedImageError", "OSError", "ValueError", "IndexError",
+// "SyntaxError", "PIL.Image.DecompressionBombError") and its words.
+struct PillowError {
+    std::string type;
+    std::string message;
+};
+
+constexpr std::string_view kPngSignature("\x89PNG\r\n\x1a\n", 8);
+
+// Image.open(BytesIO(png)) and verify() for the bytes of a PNG file (they start with its signature): Pillow's
+// PngImagePlugin reads the chunks up to the image data with their checksums (a broken one: the file is not
+// identified), Image.open refuses the size of a decompression bomb, then verify() reads the checksums of the rest.
+// Throws PillowError; gives the picture's width and height.
+std::pair<std::int64_t, std::int64_t> open_verify_png(std::string_view b) {
+    const auto fail = [](std::string type, std::string message) { throw PillowError{std::move(type), std::move(message)}; };
     const std::string unknown = "cannot identify image file <_io.BytesIO object>";
-    if (b.substr(0, 8) != kSignature) {
-        try {
-            (void)open_image(blob);
-        } catch (const NotYetPorted&) {
-            throw;
-        } catch (const core::Error&) {
-            unreadable(unknown);
-        }
-        unreadable(unknown);
-    }
     std::size_t pos = 8;
     struct Header {
         std::string cid;
@@ -1562,7 +1547,7 @@ void verify_image(const std::string& blob) {
     };
     // ImageFile._safe_read
     const auto safe_read = [&](std::uint32_t length) -> std::string_view {
-        if (b.size() - std::min(pos, b.size()) < length) unreadable("Truncated File Read");
+        if (b.size() - std::min(pos, b.size()) < length) fail("OSError", "Truncated File Read");
         const std::string_view data = b.substr(pos, length);
         pos += length;
         return data;
@@ -1580,7 +1565,7 @@ void verify_image(const std::string& blob) {
     std::optional<std::size_t> idat;
     for (;;) {  // PngImageFile._open: the chunks up to the first IDAT (or IEND)
         const Header h = header();
-        if (h.short_header || !is_cid(h.cid)) unreadable(unknown);
+        if (h.short_header || !is_cid(h.cid)) fail("PIL.UnidentifiedImageError", unknown);
         if (h.cid == "IDAT") {
             idat = h.start;
             break;
@@ -1588,33 +1573,74 @@ void verify_image(const std::string& blob) {
         if (h.cid == "IEND") break;
         const std::string_view data = safe_read(h.length);
         if (h.cid == "IHDR") {
-            if (h.length < 13) unreadable("Truncated IHDR chunk");
+            if (h.length < 13) fail("ValueError", "Truncated IHDR chunk");
             width = be32(data, 0);
             height = be32(data, 4);
             static constexpr std::pair<int, int> kModes[] = {{1, 0}, {2, 0}, {4, 0}, {8, 0}, {16, 0}, {8, 2}, {16, 2}, {1, 3},
                                                              {2, 3}, {4, 3}, {8, 3}, {8, 4}, {16, 4}, {8, 6}, {16, 6}};
             const std::pair<int, int> mode{static_cast<unsigned char>(data[8]), static_cast<unsigned char>(data[9])};
-            if (std::find(std::begin(kModes), std::end(kModes), mode) == std::end(kModes)) unreadable(unknown);
-            if (data[11] != 0) unreadable(unknown);  // (SyntaxError "unknown filter category")
+            if (std::find(std::begin(kModes), std::end(kModes), mode) == std::end(kModes)) fail("PIL.UnidentifiedImageError", unknown);
+            if (data[11] != 0) fail("PIL.UnidentifiedImageError", unknown);  // (SyntaxError "unknown filter category")
         }
-        if (checksum(h.cid, data)) unreadable(unknown);
+        if (checksum(h.cid, data)) fail("PIL.UnidentifiedImageError", unknown);
     }
     // Image._decompression_bomb_check (two sides of 32 bits: their product, as Python's int, fits 64 bits unsigned)
     const std::uint64_t pixels = std::max<std::uint64_t>(1, width) * std::max<std::uint64_t>(1, height);
     if (pixels > static_cast<std::uint64_t>(2 * render::kMaxImagePixels)) {
-        unreadable("Image size (" + std::to_string(pixels) + " pixels) exceeds limit of " + std::to_string(2 * render::kMaxImagePixels) +
-                   " pixels, could be decompression bomb DOS attack.");
+        fail("PIL.Image.DecompressionBombError", "Image size (" + std::to_string(pixels) + " pixels) exceeds limit of " +
+                                                     std::to_string(2 * render::kMaxImagePixels) +
+                                                     " pixels, could be decompression bomb DOS attack.");
     }
     // verify(): from the image data's chunk to IEND, every checksum
-    if (!idat) unreadable("list index out of range");
+    if (!idat) fail("IndexError", "list index out of range");
     pos = *idat - 8;
     for (;;) {
         const Header h = header();
-        if (h.short_header) unreadable("truncated PNG file");
-        if (!is_cid(h.cid)) unreadable("broken PNG file (chunk " + cid_repr(h.cid) + ")");
+        if (h.short_header) fail("OSError", "truncated PNG file");
+        if (!is_cid(h.cid)) fail("SyntaxError", "broken PNG file (chunk " + cid_repr(h.cid) + ")");
         if (h.cid == "IEND") break;
         const std::string_view data = safe_read(h.length);
-        if (const auto bad = checksum(h.cid, data)) unreadable(*bad);
+        if (const auto bad = checksum(h.cid, data)) fail("SyntaxError", *bad);
+    }
+    return {width, height};
+}
+
+// ops._verify_image: what Pillow's Image.open and verify() say of the bytes — for a PNG, open_verify_png — and the
+// size Python refuses; then its pixels decoded. Other formats Pillow reads come with a later step. (A PNG of a bit
+// depth Pillow cannot read, or whose pixels cannot be decoded, is refused here, where Python keeps it and can never
+// draw the page again.)
+void verify_image(const std::string& blob) {
+    const std::string_view b = blob;
+    if (b.substr(0, 3) == "\xff\xd8\xff" || b.substr(0, 2) == "BM" ||
+        b.substr(0, 6) == "GIF87a" || b.substr(0, 6) == "GIF89a") {
+        try {
+            // Apply the operation's stricter cap before JPEG/BMP/GIF decoding and pixel allocation.
+            (void)open_image(blob, PngLimits{kOpsMaxImagePixels});
+        } catch (const NotYetPorted&) {
+            throw;
+        } catch (const core::Error& error) {
+            if (error.code() == "unidentified_image") unreadable("cannot identify image file <_io.BytesIO object>");
+            unreadable(error.what());
+        }
+        return;
+    }
+    const std::string unknown = "cannot identify image file <_io.BytesIO object>";
+    if (b.substr(0, 8) != kPngSignature) {
+        try {
+            (void)open_image(blob);
+        } catch (const NotYetPorted&) {
+            throw;
+        } catch (const core::Error&) {
+            unreadable(unknown);
+        }
+        unreadable(unknown);
+    }
+    std::int64_t width = 0;
+    std::int64_t height = 0;
+    try {
+        std::tie(width, height) = open_verify_png(b);
+    } catch (const PillowError& error) {
+        unreadable(error.message);
     }
     if (width * height > kOpsMaxImagePixels) {  // (within the limit above: no overflow)
         throw OpError("image too large: " + std::to_string(width) + "x" + std::to_string(height));
@@ -2139,6 +2165,37 @@ Json resolve_area(const Document& doc, std::size_t page, const Json& area) {
 }
 
 }  // namespace
+
+void verify_style_picture(const std::string& blob) {
+    if (std::string_view(blob).substr(0, 8) == kPngSignature) {
+        try {
+            (void)open_verify_png(blob);
+        } catch (const PillowError& error) {
+            // (_merge_style catches OSError, ValueError and IndexError; verify()'s SyntaxError and Image.open's
+            // DecompressionBombError go through apply_ops)
+            if (error.type == "SyntaxError" || error.type == "PIL.Image.DecompressionBombError") {
+                throw core::PyUncaught(error.type, error.message);
+            }
+            throw core::PyValueError(error.message);
+        }
+        // its pixels, read as the page will draw them (Python keeps image data that cannot be decoded)
+        try {
+            (void)read_png(blob, kPillowOpenLimits);
+        } catch (const core::Error& error) {
+            throw core::PyValueError(error.what());
+        }
+        return;
+    }
+    try {
+        (void)open_image(blob, kPillowOpenLimits);
+    } catch (const NotYetPorted&) {
+        throw;
+    } catch (const core::Error& error) {
+        if (error.code() == "unidentified_image") throw core::PyValueError("cannot identify image file <_io.BytesIO object>");
+        if (error.code() == "image_too_large") throw core::PyUncaught("PIL.Image.DecompressionBombError", error.what());
+        throw core::PyValueError(error.what());
+    }
+}
 
 void use_brushes_of(const Document& doc) { use_book_brushes(doc); }
 

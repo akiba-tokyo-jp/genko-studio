@@ -264,6 +264,7 @@ void register_core_ops(OpRegistry& registry) {
     register_anim_ops(registry);
     register_vector_ops(registry);
     register_arrange_ops(registry);
+    register_line_ops(registry);
 }
 
 const OpRegistry& OpRegistry::builtin() {

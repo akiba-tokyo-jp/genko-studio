@@ -25,6 +25,13 @@ Image fill_reference_of(const core::Document& doc, const core::Page& page, const
 // areas (selops with "layer" or "color", auto-select).
 void use_brushes_of(const core::Document& doc);
 
+// The picture of a line's style (style.picture, style.fill_png) as ops._merge_style asks Pillow about it:
+// Image.open(BytesIO(bytes)).verify(). What _merge_style catches (Python's OSError, ValueError, IndexError) is thrown as
+// core::PyValueError with Pillow's words, what goes through apply_ops (verify()'s SyntaxError, a decompression bomb) as
+// core::PyUncaught. A picture whose pixels cannot be decoded is refused too, where Python keeps it and the page can
+// never be drawn; other formats as open_image reads them (core::PictureCheck).
+void verify_style_picture(const std::string& bytes);
+
 // Adds these ops (erase and erase_raster take over core's, which stop at a paint layer's pixels) and the area
 // resolver to `registry`.
 void register_raster_ops(core::OpRegistry& registry);

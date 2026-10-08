@@ -125,6 +125,10 @@ genko_test(test_contract_anim SOURCES contract/test_contract_anim.cpp contract/o
 # The vector line edits (M3④): vector_edit and trace_edit against Python's apply_ops (vector_cases.json).
 genko_test(test_contract_vector SOURCES contract/test_contract_vector.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# The line ops of M4: add_line, edit_line, move_line, delete_line, reorder_lines, cut_balloon, set_balloon_path and
+# replace_text against Python's apply_ops (lines_cases.json).
+genko_test(test_contract_lines SOURCES contract/test_contract_lines.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
 # The paint ops of M3④: add_shape, smudge and liquify against Python's apply_ops (paint_cases.json).
 genko_test(test_contract_paint SOURCES contract/test_contract_paint.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -82,5 +83,15 @@ void register_color_ops(OpRegistry& registry);
 // Register the ops of M3-A that draw nothing (move_layers, group_layers, set_paper, set_timelapse, store_area,
 // forget_area: core/ops_arrange.cpp). The ones that draw are render's (render/ops_registry.hpp).
 void register_arrange_ops(OpRegistry& registry);
+
+// Image.open(BytesIO(bytes)).verify() for a picture an op is given as base64 (a line's style.picture and
+// style.fill_png): render's (render/raster_ops.hpp). Throws PyValueError with Pillow's words for what Python raises as
+// OSError, ValueError or IndexError there, and PyUncaught for the others.
+using PictureCheck = std::function<void(const std::string& bytes)>;
+
+// Register the line ops of M4 (add_line, edit_line, move_line, delete_line, reorder_lines, cut_balloon,
+// set_balloon_path, replace_text: core/ops_lines.cpp). Without `check` a picture in a line's style is refused with
+// not_yet_ported (as an area that needs resolving is): render::ops_registry registers them again with its check.
+void register_line_ops(OpRegistry& registry, PictureCheck check = {});
 
 }  // namespace genko::core

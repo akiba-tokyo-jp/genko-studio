@@ -398,6 +398,33 @@ private slots:
         }
     }
 
+    // The line ops are core's; a picture in a line's style is looked at by the drawing ops' check (Pillow's Image.open
+    // and verify()), so core's own bus refuses one with not_yet_ported, after reading its base64 as Python does, and the
+    // bus of the whole build takes it. (The ops against Python: test_contract_lines.)
+    void linePictures() {
+        const std::string png = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGM8ISf3n4GBgYGJAQoAHxICB2m00JwAAAAASUVORK5CYII=";
+        const Json batch = Json::array({Json::object({{"op", "add_line"}, {"page", 1}, {"text", "絵"}, {"style", {{"picture", png}}}})});
+        try {
+            CommandBus().apply(book(), batch, Actor());
+            QFAIL("core's bus cannot look at a picture");
+        } catch (const ApplyError& error) {
+            QCOMPARE(error.code(), std::string("not_yet_ported"));
+            QVERIFY2(std::string(error.what()).starts_with("ops[0] add_line: a picture in a line's style (style.picture)"), error.what());
+        }
+        try {
+            CommandBus().apply(book(), ops(R"([{"op": "add_line", "page": 1, "text": "x", "style": {"fill_png": "abc"}}])"), Actor());
+            QFAIL("the base64 is read first");
+        } catch (const ApplyError& error) {
+            QCOMPARE(error.code(), std::string("apply"));
+            QVERIFY2(std::string(error.what()).starts_with("ops[0] add_line: style fill_png: Incorrect padding ‖ "), error.what());
+        }
+        const auto drawn = bus().apply(book(), batch, Actor());
+        QCOMPARE(drawn.doc.story.size(), std::size_t{1});
+        QCOMPARE(drawn.doc.story[0].style["picture"].get<std::string>(), png);
+        const auto plain = CommandBus().apply(book(), ops(R"([{"op": "add_line", "page": 1, "text": "x", "style": {"font": "gothic"}}])"), Actor());
+        QCOMPARE(plain.doc.story.size(), std::size_t{1});
+    }
+
     void canApprove() {
         QVERIFY(genko::core::can_approve("genko"));
         QVERIFY(genko::core::can_approve("human"));
