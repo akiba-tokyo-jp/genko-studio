@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "core/base64.hpp"
+#include "core/paths.hpp"
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -21,6 +22,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/png.hpp"
 #include "render/stroke.hpp"
+#include "storage/fsutil.hpp"
 
 namespace genko::render::brushes {
 
@@ -45,6 +47,8 @@ int clamp_int(double v) {
 // CUSTOM: the registered brushes, in the order they were first registered (Python's dict).
 std::shared_mutex g_custom_mutex;
 std::vector<Brush> g_custom;
+// The book's brushes as last made known (register_book, follow_book).
+Json g_book_seen = Json::object();
 
 // --- drawing --------------------------------------------------------------------------------------------------------
 
@@ -391,9 +395,28 @@ void register_brushes(const Json& definitions) {
     core::register_brushes(definitions, g_custom);
 }
 
+void register_book(const Json& definitions) {
+    std::unique_lock lock(g_custom_mutex);
+    core::register_brushes(definitions, g_custom);
+    g_book_seen = definitions.is_object() ? definitions : Json::object();
+}
+
+void follow_book(const Json& definitions) {
+    std::unique_lock lock(g_custom_mutex);
+    const Json now = definitions.is_object() ? definitions : Json::object();
+    Json changed = Json::object();
+    for (const auto& [key, value] : now.items()) {
+        const auto seen = g_book_seen.find(key);
+        if (seen == g_book_seen.end() || *seen != value) changed[key] = value;
+    }
+    if (!changed.empty()) core::register_brushes(changed, g_custom);
+    g_book_seen = now;
+}
+
 void clear_custom() {
     std::unique_lock lock(g_custom_mutex);
     g_custom.clear();
+    g_book_seen = Json::object();
 }
 
 void define_brush(std::string_view key, const Json& data) {
@@ -418,19 +441,33 @@ std::optional<Image> tip_ink(const std::string& base64_png) { return decode_tip(
 
 std::filesystem::path library_path(const std::filesystem::path& config_dir) { return config_dir / "brushes.json"; }
 
-core::Json load_library(const std::filesystem::path& config_dir) {
+namespace {
+
+// The library as Python reads it: nothing (an empty library) for a file that is not there, cannot be read or is not
+// JSON; `strict`: only a file that is not there is an empty library, and any other that cannot be read throws.
+core::Json read_library(const std::filesystem::path& config_dir, bool strict) {
+    const std::filesystem::path path = library_path(config_dir);
+    const auto unreadable = [&]() -> core::Json {
+        if (strict) throw core::PyUncaught("OSError", "the brush library cannot be read, so it is left as it is: " + core::path_to_utf8(path));
+        return core::Json::object();
+    };
     core::Json data;
     try {
-        std::ifstream file(library_path(config_dir), std::ios::binary);
-        if (!file) return core::Json::object();
+        std::error_code missing;
+        if (!std::filesystem::exists(path, missing) && !missing) return core::Json::object();
+        std::ifstream file(path, std::ios::binary);
+        if (!file) return unreadable();
         const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        if (core::utf8_error(text)) return core::Json::object();  // (UnicodeDecodeError is a ValueError)
+        if (file.bad()) return unreadable();
+        if (core::utf8_error(text)) return unreadable();  // (UnicodeDecodeError is a ValueError)
         data = core::parse_python_json(text);
+    } catch (const core::PyUncaught&) {
+        throw;
     } catch (const core::Error&) {
-        return core::Json::object();
+        return unreadable();
     }
     core::Json out = core::Json::object();
-    if (!data.is_object()) return out;
+    if (!data.is_object()) return strict ? unreadable() : out;
     const auto found = data.find("brushes");
     if (found == data.end() || !core::py_truthy(*found)) return out;
     if (!found->is_object()) throw core::PyUncaught("AttributeError", "'" + core::py_type_name(*found) + "' object has no attribute 'items'");
@@ -441,19 +478,23 @@ core::Json load_library(const std::filesystem::path& config_dir) {
     return out;
 }
 
+}  // namespace
+
+core::Json load_library(const std::filesystem::path& config_dir) { return read_library(config_dir, false); }
+
 void save_to_library(const std::filesystem::path& config_dir, std::string_view key, const std::optional<core::Json>& data) {
-    core::Json brushes = load_library(config_dir);
+    core::Json brushes = read_library(config_dir, true);
     if (data) brushes[std::string(key)] = *data;
     else brushes.erase(std::string(key));
-    const std::filesystem::path path = library_path(config_dir);
-    std::filesystem::create_directories(path.parent_path());
     core::DumpOptions options;
     options.indent = 1;
     options.item_separator = ",";
     const std::string text = core::dump(core::Json{{"brushes", brushes}}, options);
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    file.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!file) throw core::PyUncaught("OSError", "the brush library cannot be written: " + path.string());
+    try {
+        storage::write_atomic(library_path(config_dir), text);
+    } catch (const core::Error& error) {
+        throw core::PyUncaught("OSError", "the brush library cannot be written: " + core::path_to_utf8(library_path(config_dir)) + " (" + error.what() + ")");
+    }
 }
 
 std::optional<Coverage> draw(Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view kind,

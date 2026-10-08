@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <optional>
 
@@ -21,9 +22,11 @@ using core::Json;
 
 [[noreturn]] void abr_error(const std::string& message) { throw core::PyValueError(message); }
 
+using TipSink = std::function<void(Tip&&)>;
+
 class Reader {
 public:
-    explicit Reader(std::string_view data) : data_(data) {}
+    Reader(std::string_view data, std::int64_t max_pixels) : data_(data), pixels_left_(max_pixels) {}
     std::string_view take(std::size_t n) {
         if (pos_ > data_.size() || n > data_.size() - pos_) abr_error("the file ends too early");
         const std::string_view out = data_.substr(pos_, n);
@@ -44,11 +47,23 @@ public:
     std::size_t pos() const { return pos_; }
     void seek(std::size_t pos) { pos_ = pos; }  // (past the end as Python's slicing allows: the next take fails)
     std::size_t size() const { return data_.size(); }
+    // The tips' pixels counted against what one file may hold (a file of rows packed to nothing, or of records that
+    // point back at the same tip, would otherwise unpack far more than it holds).
+    void charge(std::int64_t pixels) {
+        pixels_left_ -= pixels;
+        if (pixels_left_ < 0) throw core::Error("abr_too_large", "the file's tips are too large to read");
+    }
 
 private:
     std::string_view data_;
     std::size_t pos_ = 0;
+    std::int64_t pixels_left_;
 };
+
+// A record that does not move on (its end at or before its start) is a broken file, not one to read again.
+void moves_on(std::int64_t end, std::int64_t start) {
+    if (end <= start) abr_error("a brush record points back into the file");
+}
 
 // PackBits rows: a count for each row first, then the rows.
 std::string unpack_bits(Reader& reader, int width, int height) {
@@ -84,6 +99,7 @@ Image tip_image(Reader& reader, std::int64_t width, std::int64_t height, int dep
     if (width <= 0 || height <= 0 || width > 16384 || height > 16384) abr_error("a tip has no size");
     if (depth != 8) abr_error("only 8-bit tips are read (this one is " + std::to_string(depth) + "-bit)");
     const int w = static_cast<int>(width), h = static_cast<int>(height);
+    reader.charge(width * height);
     const std::string data = compressed ? unpack_bits(reader, w, h) : std::string(reader.take(static_cast<std::size_t>(w) * static_cast<std::size_t>(h)));
     return Image::frombytes("L", Size{w, h}, data);
 }
@@ -144,14 +160,15 @@ std::string first_chars(const std::string& text, std::size_t n) {
     return text.substr(0, std::min(at, text.size()));
 }
 
-std::vector<Tip> read_v12(Reader& reader, int version) {
+void read_v12(Reader& reader, int version, const TipSink& take) {
     const std::uint32_t count = reader.u16();
-    std::vector<Tip> out;
     for (std::uint32_t n = 0; n < count; ++n) {
+        const auto start = static_cast<std::int64_t>(reader.pos());
         const int kind = reader.i16();
         const std::int64_t size = reader.i32();
         const std::int64_t end = static_cast<std::int64_t>(reader.pos()) + size;
-        const auto go_to_end = [&] { reader.seek(static_cast<std::size_t>(std::max<std::int64_t>(0, end))); };
+        moves_on(end, start);
+        const auto go_to_end = [&] { reader.seek(static_cast<std::size_t>(end)); };
         if (kind != 2) {  // (computed round tips carry no picture)
             go_to_end();
             continue;
@@ -170,14 +187,13 @@ std::vector<Tip> read_v12(Reader& reader, int version) {
         const int depth = reader.i16();
         const bool compressed = reader.u8() != 0;
         Image image = tip_image(reader, right - left, bottom - top, depth, compressed);
-        out.push_back(Tip{name.empty() ? "ブラシ " + std::to_string(n + 1) : name, std::move(image), spacing});
+        take(Tip{name.empty() ? "ブラシ " + std::to_string(n + 1) : name, std::move(image), spacing});
         go_to_end();
     }
-    return out;
 }
 
-std::vector<Tip> read_v6(Reader& reader, int subversion) {
-    std::vector<Tip> out;
+void read_v6(Reader& reader, int subversion, const TipSink& take) {
+    std::size_t taken = 0;
     while (reader.pos() + 12 <= reader.size()) {
         if (reader.take(4) != "8BIM") abr_error("a section does not start with 8BIM");
         const std::string_view key = reader.take(4);
@@ -195,32 +211,37 @@ std::vector<Tip> read_v6(Reader& reader, int subversion) {
             const std::int64_t top = reader.i32(), left = reader.i32(), bottom = reader.i32(), right = reader.i32();
             const int depth = reader.i16();
             const bool compressed = reader.u8() != 0;
+            std::optional<Image> image;
             try {
-                Image image = tip_image(reader, right - left, bottom - top, depth, compressed);
-                out.push_back(Tip{"ブラシ " + std::to_string(out.size() + 1), std::move(image), 25});
+                image = tip_image(reader, right - left, bottom - top, depth, compressed);
             } catch (const core::PyValueError&) {
                 // (a tip this does not read: the next one)
             }
+            if (image) take(Tip{"ブラシ " + std::to_string(++taken), std::move(*image), 25});
             reader.seek(brush_end);
         }
         reader.seek(end);
     }
-    return out;
+}
+
+// The tips one by one as they are read (each let go before the next is unpacked).
+void read_tips(std::string_view data, std::int64_t max_pixels, const TipSink& take) {
+    Reader reader(data, max_pixels);
+    const int version = reader.i16();
+    if (version == 1 || version == 2) {
+        read_v12(reader, version, take);
+    } else if (version == 6 || version == 7 || version == 10) {
+        read_v6(reader, reader.i16(), take);
+    } else {
+        abr_error("version " + std::to_string(version) + " brush files are not read");
+    }
 }
 
 }  // namespace
 
-std::vector<Tip> read(std::string_view data) {
-    Reader reader(data);
-    const int version = reader.i16();
+std::vector<Tip> read(std::string_view data, std::int64_t max_pixels) {
     std::vector<Tip> tips;
-    if (version == 1 || version == 2) {
-        tips = read_v12(reader, version);
-    } else if (version == 6 || version == 7 || version == 10) {
-        tips = read_v6(reader, reader.i16());
-    } else {
-        abr_error("version " + std::to_string(version) + " brush files are not read");
-    }
+    read_tips(data, max_pixels, [&tips](Tip&& tip) { tips.push_back(std::move(tip)); });
     if (tips.empty()) abr_error("the file has no picture tips");
     return tips;
 }
@@ -231,9 +252,9 @@ std::string tip_png(const Image& image, int longest) {
     return core::b64encode(fills::png_data(small));
 }
 
-std::vector<Json> brushes_from(std::string_view data, std::string_view prefix) {
+std::vector<Json> brushes_from(std::string_view data, std::string_view prefix, std::int64_t max_pixels) {
     std::vector<Json> out;
-    for (const Tip& tip : read(data)) {
+    read_tips(data, max_pixels, [&](Tip&& tip) {
         Json brush = Json::object();
         brush["label"] = first_chars(std::string(prefix) + tip.name, 40);
         brush["base"] = "gpen";
@@ -243,7 +264,8 @@ std::vector<Json> brushes_from(std::string_view data, std::string_view prefix) {
         brush["min_pressure"] = 0.3;
         brush["taper"] = false;
         out.push_back(std::move(brush));
-    }
+    });
+    if (out.empty()) abr_error("the file has no picture tips");
     return out;
 }
 

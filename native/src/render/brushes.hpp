@@ -33,7 +33,16 @@ std::vector<Brush> everything();
 // and built-in names are never replaced. Thread-safe.
 void register_brushes(const core::Json& definitions);
 
-// Forget the registered brushes (a new process starts without them; the tests use this between books).
+// A book read: its brushes made known (register), each in place of one of the same key, and kept as the book's last
+// known brushes for follow_book.
+void register_book(const core::Json& definitions);
+// After a change to the book: only its brushes that are new or changed since it was last followed (define_brush, as
+// Python's op puts the brush into CUSTOM) are made known again. The others stay as they are: the person's own brushes
+// and the edits made to them this session are never replaced by the book's older copy, and nothing is ever taken out.
+void follow_book(const core::Json& definitions);
+
+// Forget the registered brushes and the book's last known ones (a new process starts without them; the tests use this
+// between books).
 void clear_custom();
 
 // CUSTOM[key] = from_dict(key, data): one brush made known, or made again in its place (Python's errors when its
@@ -48,7 +57,10 @@ std::optional<Image> tip_ink(const std::string& base64_png);
 
 // The person's own brushes (key → settings) in the config folder's brushes.json (Python's library_path,
 // load_library, save_to_library; the folder is the app's: app/config.hpp). A file that cannot be read is an empty
-// library; saving writes json.dumps({"brushes": …}, ensure_ascii=False, indent=1).
+// library; saving writes json.dumps({"brushes": …}, ensure_ascii=False, indent=1). Beyond Python, so a library is
+// never lost: saving refuses (PyUncaught OSError "the brush library cannot be read, so it is left as it is: <path>")
+// when the file is there but cannot be read as a library, where Python would write only the one brush over it; and
+// the file is written whole or not at all (storage::write_atomic).
 std::filesystem::path library_path(const std::filesystem::path& config_dir);
 core::Json load_library(const std::filesystem::path& config_dir);
 void save_to_library(const std::filesystem::path& config_dir, std::string_view key, const std::optional<core::Json>& data);

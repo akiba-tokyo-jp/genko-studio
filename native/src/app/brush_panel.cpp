@@ -802,7 +802,8 @@ Json BrushDialog::data() const {
 }
 
 void BrushDialog::pick_tip() {
-    const QString path = ask::open_path(this, QStringLiteral("先端にする画像"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.webp *.bmp)"));
+    // (Python offers *.webp too: WebP pictures are not read by this build yet, so they are not offered)
+    const QString path = ask::open_path(this, QStringLiteral("先端にする画像"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.bmp)"));
     if (path.isEmpty()) return;
     try {
         tip_png = render::abr::tip_from_picture(std::filesystem::path(path.toStdU16String()));

@@ -35,6 +35,7 @@
 #include "core/paths.hpp"
 #include "render/abr.hpp"
 #include "render/brushes.hpp"
+#include "storage/fsutil.hpp"
 
 namespace genko::app {
 
@@ -267,9 +268,9 @@ bool MainWindow::export_brush(std::optional<QString> path) {
     options.indent = 1;
     options.item_separator = ",";
     const std::string text = core::dump(Json{{"genko_brush", 1}, {"brushes", Json{{key, definition}}}}, options);
-    std::ofstream file(path_of(*path), std::ios::binary | std::ios::trunc);
-    file.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!file) {
+    try {
+        storage::write_atomic(path_of(*path), text);  // (the whole file or none: never a cut-off one reported written)
+    } catch (const std::exception&) {
         flash(QStringLiteral("書き出せませんでした: %1").arg(*path), 5000, true);
         return false;
     }

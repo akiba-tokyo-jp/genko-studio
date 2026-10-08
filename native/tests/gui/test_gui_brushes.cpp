@@ -246,6 +246,52 @@ private slots:
         QCOMPARE(brush.kinds->count(), count);
     }
 
+    // One's own brushes outlive the ops: a library brush still draws as itself after an erase (and the book gets its
+    // settings, not the G pen's), an edit of a brush the book already has stays after the next change, and a library
+    // that cannot be read is never written over.
+    void ownBrushesOutliveTheOps() {
+        render::brushes::save_to_library(app::config_dir(), "my_lib",
+                                         Json{{"label", "かすれ"}, {"base", "gpen"}, {"texture", "dry"}, {"width_mm", 1.2}});
+        Studio studio;
+        auto& brush = studio.brush();
+        studio.draw({QPointF(10, 20), QPointF(40, 20)});
+        studio.window->choose_tool(QStringLiteral("eraser"));
+        inject::mouse_stroke(studio.window->canvas(), {QPointF(20, 16), QPointF(20, 24)});  // (an op that draws)
+        QCOMPARE(render::brushes::brush("my_lib").texture, std::string("dry"));
+        studio.choose("my_lib");
+        QCOMPARE(brush.kind(), std::string("my_lib"));
+        studio.draw({QPointF(10, 35), QPointF(40, 35)});
+        const Json& kept = studio.session->document().brush_custom;
+        QVERIFY(kept.contains("my_lib"));
+        QCOMPARE(kept["my_lib"]["label"], Json("かすれ"));
+        QCOMPARE(kept["my_lib"]["texture"], Json("dry"));
+        QCOMPARE(studio.ink().strokes->items.back()->kind, std::string("my_lib"));
+        // edited while the book has it: the edit stays through the next change (Python's CUSTOM keeps it)
+        studio.answers.responder->exec = [](QDialog* dialog) {
+            auto* d = qobject_cast<app::BrushDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            d->opacity->setValue(50);
+            return int(QDialog::Accepted);
+        };
+        brush.edit->click();
+        QCOMPARE(render::brushes::brush("my_lib").opacity, 0.5);
+        studio.draw({QPointF(10, 45), QPointF(40, 45)});
+        studio.window->choose_tool(QStringLiteral("eraser"));
+        inject::mouse_stroke(studio.window->canvas(), {QPointF(30, 41), QPointF(30, 49)});
+        QCOMPARE(render::brushes::brush("my_lib").opacity, 0.5);
+        QCOMPARE(render::brushes::load_library(app::config_dir())["my_lib"]["opacity"], Json(0.5));
+        // a library that cannot be read: making a brush says so and leaves the file as it is
+        const std::string broken = "{\"brushes\": {\"my_lib\": ";
+        std::ofstream(render::brushes::library_path(app::config_dir()), std::ios::binary | std::ios::trunc) << broken;
+        studio.answers.responder->exec = [](QDialog* dialog) {
+            return qobject_cast<app::BrushDialog*>(dialog) != nullptr ? int(QDialog::Accepted) : int(QDialog::Rejected);
+        };
+        brush.make->click();
+        QVERIFY(!studio.window->last_error().isEmpty());
+        std::ifstream in(render::brushes::library_path(app::config_dir()), std::ios::binary);
+        QCOMPARE(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()), broken);
+    }
+
     // The eraser's ways in its op: how it cuts, how soft; the crossing switch.
     void eraserWays() {
         Studio studio;
@@ -306,14 +352,23 @@ private slots:
         QCOMPARE(studio.window->canvas()->frame_mode, QStringLiteral("poly"));
         studio.window->choose_tool(QStringLiteral("zoom"));
         QVERIFY(ts->page_for(QStringLiteral("zoom")) == nullptr);
-        // a page's command rows trigger their commands
+        // a page's command rows trigger their commands: 原寸 on the selection tool's page
         studio.window->choose_tool(QStringLiteral("select"));
-        QList<QPushButton*> rows = ts->current_page()->findChildren<QPushButton*>();
-        QVERIFY(!rows.isEmpty());
-        // folded: only the name
+        QPushButton* actual = nullptr;
+        for (QPushButton* row : ts->current_page()->findChildren<QPushButton*>()) {
+            if (row->toolTip().contains(QStringLiteral("原寸")) || row->text().contains(QStringLiteral("原寸"))) actual = row;
+        }
+        QVERIFY(actual != nullptr);
+        studio.window->canvas()->fit_page();
+        const double fitted = studio.window->canvas()->scale();
+        actual->click();
+        QTRY_VERIFY(studio.window->canvas()->scale() != fitted);
+        // folded: only the name (neither the page nor the hint)
         ts->set_folded(true);
-        QVERIFY(!ts->current_page()->isVisibleTo(ts) || !ts->hint()->isVisibleTo(ts));
+        QVERIFY(!ts->current_page()->isVisibleTo(ts));
+        QVERIFY(!ts->hint()->isVisibleTo(ts));
         ts->set_folded(false);
+        QVERIFY(ts->current_page()->isVisibleTo(ts));
     }
 };
 

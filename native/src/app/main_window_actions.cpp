@@ -544,8 +544,21 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
     const std::string kind = op.value("kind", std::string());
     if (kind.starts_with("my_") && !book().brush_custom.contains(kind)) {
         // the book keeps the brush's settings, so the line looks the same on any computer
+        render::brushes::Brush own = render::brushes::brush(kind);
+        if (own.key != kind) {  // (not known: from the library again, never the G pen's settings under its name)
+            try {
+                render::brushes::register_brushes(render::brushes::load_library(config_dir()));
+            } catch (const std::exception&) {
+            }
+            own = render::brushes::brush(kind);
+        }
+        if (own.key != kind) {
+            flash(QStringLiteral("このブラシ（%1）が見つからないため描けませんでした。一覧から選び直してください").arg(QString::fromStdString(kind)), 5000, true);
+            canvas_->stroke_dropped();
+            return;
+        }
         Json define{{"op", "define_brush"}, {"key", kind}};
-        const Json settings_of = core::brush_to_dict(render::brushes::brush(kind));
+        const Json settings_of = core::brush_to_dict(own);
         for (const auto& [key, value] : settings_of.items()) define[key] = value;
         ops.insert(ops.begin(), define);
     }

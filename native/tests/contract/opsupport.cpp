@@ -19,6 +19,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "render/brushes.hpp"
 #include "render/ops_registry.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
@@ -108,6 +109,8 @@ std::vector<StepOutcome> run_steps(core::Document doc, const Json& steps, std::u
                                    bool digest, core::Document* last,
                                    const std::function<void(core::Document&, std::size_t, const StepOutcome&)>& after_step) {
     const core::ScopedIdSource ids(core::counting_ids(first_id));
+    render::brushes::clear_custom();  // (as the harness's fresh process: only the brushes of the book it reads)
+    render::brushes::register_book(doc.brush_custom);
     std::vector<StepOutcome> out;
     for (const Json& step : steps) {
         StepOutcome outcome;

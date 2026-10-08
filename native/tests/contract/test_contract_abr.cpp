@@ -110,6 +110,16 @@ std::string v6_file(int subversion, const std::vector<std::string>& tips, bool w
     return out.data;
 }
 
+// one version 1 sampled brush whose tip is packed as given (`packed`: the row lengths, then the rows)
+std::string v1_packed(int w, int h, const std::string& packed) {
+    Bytes body;
+    body.u32(0).u16(25).u8(1).u16(0).u16(0).u16(h).u16(w);
+    body.u32(0).u32(0).u32(h).u32(w).u16(8).u8(1).raw(packed);
+    Bytes out;
+    out.u16(1).u16(1).u16(2).u32(static_cast<std::int64_t>(body.data.size())).raw(body.data);
+    return out.data;
+}
+
 std::map<std::string, std::string> files() {
     std::map<std::string, std::string> out;
     {  // version 1: a computed tip skipped, then two sampled ones (plain)
@@ -134,6 +144,22 @@ std::map<std::string, std::string> files() {
     out["not-8bim.abr"] = Bytes().u16(6).u16(1).raw("XXXXsamp").u32(0).data;
     out["no-tips.abr"] = Bytes().u16(1).u16(0).data;
     out["only-16-bit.abr"] = v6_file(1, {v6_tip(1, 5, 5, 16, false, 1)}, false);
+    {  // packed rows of nothing (filled out with \0), a run that stops short, a literal past the row's end
+        Bytes rows;
+        rows.u16(0).u16(3).u16(0).u16(2).u16(0).u16(4);
+        rows.u8(1).u8(200).u8(201);  // (two literal bytes)
+        rows.u8(0xfd).u8(150);       // (a run of four)
+        rows.u8(5).u8(1).u8(2).u8(3);  // (six literal bytes promised, three there)
+        out["zero-rows.abr"] = v1_packed(40, 6, rows.data);
+        Bytes short_run;
+        short_run.u16(2).u16(1).u8(0).u8(9).u8(0xfe);  // (the second row's run has no byte)
+        out["run-at-end.abr"] = v1_packed(8, 2, short_run.data);
+        Bytes body;
+        body.zeros(47).u32(0).u32(0).u32(2).u32(8).u16(8).u8(1).raw(short_run.data);
+        Bytes tip;
+        tip.u32(static_cast<std::int64_t>(body.data.size())).raw(body.data).zeros((4 - body.data.size() % 4) % 4);
+        out["new-run-at-end.abr"] = v6_file(1, {v6_tip(1, 6, 6, 8, false, 3), tip.data}, false);
+    }
     {  // pictures made tips: dark marks on light paper, and marks on transparency
         std::string rgb, rgba;
         for (int y = 0; y < 40; ++y)
@@ -208,7 +234,40 @@ private slots:
             // (the PNG of a tip is the encoder's own: its pixels are what both keep)
             QCOMPARE(QString::fromStdString(got.dump()), QString::fromStdString(expected.dump()));
         }
-        QVERIFY(brushes >= 8);
+        QVERIFY(brushes >= 9);
+    }
+
+    // Beyond Python: a broken file cannot unpack without end. A record that points back where it began is refused
+    // (Python reads the file again from there), and the tips of one file unpack to at most so many pixels together
+    // (checked before each is unpacked: rows packed to nothing cost no input).
+    void brokenFilesStopEarly() {
+        Bytes back;
+        back.u16(1).u16(2).u16(1).u32(-10).zeros(16);
+        try {
+            (void)render::abr::brushes_from(back.data);
+            QFAIL("a record pointing back was read");
+        } catch (const core::PyValueError& e) {
+            QCOMPARE(QString::fromUtf8(e.what()), QStringLiteral("a brush record points back into the file"));
+        }
+        Bytes three;
+        three.u16(1).u16(3);
+        for (int n = 0; n < 3; ++n) three.raw(v12_brush(1, 10, 10, 25, false, u"", n + 1));
+        QCOMPARE(render::abr::brushes_from(three.data, "", 300).size(), std::size_t(3));
+        try {
+            (void)render::abr::brushes_from(three.data, "", 299);
+            QFAIL("past the budget");
+        } catch (const core::Error& e) {
+            QCOMPARE(QString::fromStdString(e.code()), QStringLiteral("abr_too_large"));
+        }
+        Bytes nothing;  // (16384 × 16384 from 32 KB of row lengths of 0, again and again)
+        for (int r = 0; r < 16384; ++r) nothing.u16(0);
+        const std::string huge = v1_packed(16384, 16384, nothing.data);
+        try {
+            (void)render::abr::brushes_from(huge, "", 1 << 20);
+            QFAIL("past the budget");
+        } catch (const core::Error& e) {
+            QCOMPARE(QString::fromStdString(e.code()), QStringLiteral("abr_too_large"));
+        }
     }
 
     void libraryLikePython() {
@@ -226,9 +285,18 @@ private slots:
         const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         QCOMPARE(QString::fromStdString(text), QString::fromStdString(want["text"].get<std::string>()));
         QCOMPARE(render::brushes::load_library(config), want["loaded"]);
-        // a file that is not JSON: an empty library, as Python reads it
+        // a file that is not JSON: an empty library, as Python reads it; but never written over (beyond Python, which
+        // would keep only the one brush saved)
         std::ofstream(render::brushes::library_path(config), std::ios::binary | std::ios::trunc) << "{not json";
         QCOMPARE(render::brushes::load_library(config), Json::object());
+        try {
+            render::brushes::save_to_library(config, "my_d", Json{{"label", "D"}});
+            QFAIL("a library that cannot be read was written over");
+        } catch (const core::PyUncaught& e) {
+            QCOMPARE(QString::fromStdString(e.type()), QStringLiteral("OSError"));
+        }
+        std::ifstream again(render::brushes::library_path(config), std::ios::binary);
+        QCOMPARE(std::string((std::istreambuf_iterator<char>(again)), std::istreambuf_iterator<char>()), std::string("{not json"));
     }
 };
 
