@@ -36,6 +36,11 @@ Image layer_pixels(const core::Page& page, const core::Layer& layer);
 void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoints& points, double width_mm, int dpi,
                   std::string_view texture, const std::string& seed);
 
+// What erase_raster takes away, as an "L" mask of `size` (pixels at dpi): 255 where the eraser clears all, less at a
+// soft edge or between the grains of a rough one ("" or "hard": a clean edge).
+Image eraser_mask(Size size, const core::PenPoints& points, double width_mm, int dpi, std::string_view texture,
+                  const std::string& seed);
+
 // repr(points[0]) of the eraser's points as Python passes them (a tuple of floats), "" when there are none.
 std::string first_point_repr(const core::PenPoints& points);
 

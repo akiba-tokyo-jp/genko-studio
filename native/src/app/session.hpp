@@ -98,6 +98,10 @@ public:
         bool read_rest_now = true;
         // a read of the rest that failed is tried again after this (twice, the second wait twice as long)
         std::chrono::milliseconds read_retry{2000};
+        // A precise colour picture is copied whole by each change to it: past this many bytes of them kept only by
+        // the changes in memory, the oldest changes already in the journal leave memory, and Undo reaches them
+        // through the journal (as a change saved before this session).
+        std::size_t history_bytes = std::size_t(1) << 30;
     };
 
     // A book read from its folder, not yet a session (read() may run on any thread; the session is made on the thread
@@ -184,6 +188,8 @@ public:
 
     // Tests: how many changes wait to be written (an action each: an edit, an undo or a redo).
     std::size_t waiting() const { return queue_.size(); }
+    // Tests: how many of this session's changes are undone in memory (the rest through the journal).
+    std::size_t changes_in_memory() const { return done_.size(); }
     bool job_running() const { return job_running_; }
 
 signals:
@@ -208,6 +214,7 @@ private:
         std::string txn;               // the transaction that first saved it (the journal's entry for it)
         bool on_disk = false;          // that transaction is committed: undo and redo now go through the journal
         bool undone_on_disk = false;   // a journal undo of it is committed (and no redo since)
+        std::size_t held = 0;          // the precise colour pictures it replaced (kept alive by `before` alone)
     };
 
     // What the disk still has to get, in order.
@@ -237,6 +244,7 @@ private:
     void rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo_depth, std::int64_t redo_depth);
     void finish_reading(const JobResult& result);
     void request_recovery();
+    void trim_history();
     std::uint64_t new_change_id() { return ++next_change_; }
 
     Options options_;

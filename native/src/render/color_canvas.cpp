@@ -147,14 +147,20 @@ void ColorCanvas::blend(const Image& input, double opacity, bool clip, std::stri
     }
     impl_->previous = true;
 }
-void ColorCanvas::blend(const core::ColorRasterView& source, Size full, Box area, double opacity, bool clip, std::string_view mode) {
+void ColorCanvas::blend(const core::ColorRasterView& source, Size full, Box area, double opacity, bool clip, std::string_view mode,
+                        const Image* mask) {
     if(!supports_blend(mode))throw core::Error("not_yet_ported","high-precision blend:"+std::string(mode));
     if (full.width <= 0 || full.height <= 0 || area.width() != impl_->size.width || area.height() != impl_->size.height)
         throw core::Error("value", "color canvas region does not match");
-    for (int y = 0; y < area.height(); ++y) for (int x = 0; x < area.width(); ++x) {
-        const auto p = sampled(source, (area.x0+x+.5)*source.width()/full.width-.5,
-            (area.y0+y+.5)*source.height()/full.height-.5);
-        impl_->over(std::size_t(y)*area.width()+x, p, opacity, clip, mode);
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "layer mask does not match");
+    for (int y = 0; y < area.height(); ++y) {
+        const auto* shown = mask ? reinterpret_cast<const unsigned char*>(mask->raw()->image[y]) : nullptr;
+        for (int x = 0; x < area.width(); ++x) {
+            auto p = sampled(source, (area.x0+x+.5)*source.width()/full.width-.5,
+                (area.y0+y+.5)*source.height()/full.height-.5);
+            if (shown) p[3] *= shown[x]/255.0;
+            impl_->over(std::size_t(y)*area.width()+x, p, opacity, clip, mode);
+        }
     }
     impl_->previous = true;
 }
@@ -200,6 +206,12 @@ Image ColorCanvas::image() const {
         }
     }
     return out;
+}
+Size ColorCanvas::size() const { return impl_->size; }
+std::array<double, 4> ColorCanvas::linear_pixel(std::size_t i) const {
+    if (i >= impl_->pixels.size()) throw core::Error("value", "color canvas pixel out of range");
+    const auto& p = impl_->pixels[i];
+    return {p[0], p[1], p[2], p[3]};
 }
 bool ColorCanvas::is_opaque() const {
     return std::all_of(impl_->pixels.begin(), impl_->pixels.end(), [](const Pixel& p) { return p[3] == 1; });

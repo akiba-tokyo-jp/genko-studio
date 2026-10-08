@@ -126,6 +126,29 @@ Json recovery_meta(const core::Document& doc, const std::optional<fs::path>& boo
     return meta;
 }
 
+// The bytes of the precise colour pictures `before` has and `after` no longer has (each picture once).
+std::size_t replaced_precise_bytes(const core::Document& before, const core::Document& after) {
+    std::vector<const std::string*> gone;
+    for (std::size_t i = 0; i < before.pages.size(); ++i) {
+        if (i < after.pages.size() && after.pages[i] == before.pages[i]) continue;
+        for (const core::Layer& layer : before.pages[i]->layers)
+            if (layer.color_raster) gone.push_back(layer.color_raster.get());
+    }
+    if (gone.empty()) return 0;
+    std::sort(gone.begin(), gone.end());
+    gone.erase(std::unique(gone.begin(), gone.end()), gone.end());
+    for (const core::PagePtr& page : after.pages) {
+        for (const core::Layer& layer : page->layers) {
+            if (!layer.color_raster) continue;
+            const auto at = std::lower_bound(gone.begin(), gone.end(), layer.color_raster.get());
+            if (at != gone.end() && *at == layer.color_raster.get()) gone.erase(at);
+        }
+    }
+    std::size_t bytes = 0;
+    for (const std::string* picture : gone) bytes += picture->size();
+    return bytes;
+}
+
 }  // namespace
 
 // --- the worker's side -------------------------------------------------------------------------------------------
@@ -599,6 +622,7 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
     change->ids = script.taken();
     change->before = doc_;
     change->after = std::make_shared<const core::Document>(std::move(result.doc));
+    change->held = replaced_precise_bytes(*change->before, *change->after);
     doc_ = change->after;
     done_.push_back(change);
     undone_.clear();
@@ -608,6 +632,20 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
     touch(BookChange{BookChange::Why::Edit, ops, change->before, change->after});
     schedule_save();
     return result;
+}
+
+
+void Session::trim_history() {
+    std::size_t held = 0;
+    for (const auto& change : done_) held += change->held;
+    while (held > options_.history_bytes && done_.size() > 1 && path_) {
+        const std::shared_ptr<Change> oldest = done_.front();
+        if (!oldest->on_disk || oldest->undone_on_disk || oldest->recover) break;
+        if (std::any_of(queue_.begin(), queue_.end(), [&](const Action& a) { return a.change == oldest; })) break;
+        held -= oldest->held;
+        done_.erase(done_.begin());
+        ++disk_undo_;  // (in the journal, under the changes still in memory)
+    }
 }
 
 void Session::undo() {
@@ -867,6 +905,7 @@ void Session::job_done(const JobResult& r) {
             start_rebase();  // (another writer's change after ours: read the book again, ours kept on top)
         }
         simplify_queue();
+        trim_history();  // (the changes just written may leave memory now)
         if (r.ok && queue_.empty() && recovery_written_ && doc_ && !doc_->book_id.empty()) {
             // the book holds everything now: its recovery point is of no more use
             Job remove;
@@ -1090,6 +1129,7 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
             again->ids = script.taken();
             again->before = current;
             again->after = std::make_shared<const core::Document>(std::move(result.doc));
+            again->held = replaced_precise_bytes(*again->before, *again->after);
             current = again->after;
             replayed.push_back(again);
             keep.push_back(Action{Action::Kind::Edit, again, core::new_txn_id(), ++next_seq_, false});

@@ -198,6 +198,17 @@ private slots:
             storage::AssetStore output(path);const auto text=storage::project_json_v4(changed,output);
             const auto loaded=storage::load_document_text(text,path);QVERIFY(loaded.report.clean());const auto& reopened=loaded.document;
             QCOMPARE(core::strokes_blob(*reopened.page(0).layers[0].strokes),core::strokes_blob(*changed.page(0).layers[0].strokes));
+        }else if(operation.startsWith("pixel")){
+            // The eraser and the selection work on the precise pixels themselves (test_color_raster_edit).
+            const auto changed=core::CommandBus(render::ops_registry()).apply(doc,Json::array({op}),core::Actor("human:test")).doc;
+            const auto& after=changed.page(0).layers[0];
+            QVERIFY(after.color_raster);QVERIFY(!after.raster_png);QVERIFY(after.patches.empty());QCOMPARE(after.stroke_count(),std::size_t(0));
+            QCOMPARE(core::ColorRasterView(*after.color_raster).metadata("")["precision"],Json(precision.toStdString()));
+            QVERIFY(*after.color_raster!=*pixels);
+            const auto path=std::filesystem::path(temporary.path().toStdString())/"book";
+            storage::AssetStore output(path);const auto text=storage::project_json_v4(changed,output);
+            const auto loaded=storage::load_document_text(text,path);QVERIFY(loaded.report.clean());
+            QCOMPARE(*loaded.document.page(0).layers[0].color_raster,*after.color_raster);
         }else{
             const Json precursor{{"op","set_note"},{"page",1},{"note","successful precursor"}};
             QCOMPARE(core::CommandBus(render::ops_registry()).apply(doc,Json::array({precursor}),core::Actor("human:test")).doc.page(0).note,std::string("successful precursor"));

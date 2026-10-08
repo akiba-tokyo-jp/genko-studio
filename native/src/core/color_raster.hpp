@@ -30,6 +30,27 @@ private:
     std::uint32_t width_ = 0, height_ = 0;
     unsigned sample_bytes_ = 2;
 };
+// A raster's samples changed in place (the eraser, the selection): a copy of its bytes, read and written in its own
+// precision. Pixels never set keep their bytes; a u16 sample is rounded to 16 bits, an f32 one kept to 32.
+class ColorRasterEdit {
+public:
+    explicit ColorRasterEdit(std::string bytes);
+    ColorRasterEdit(const ColorRasterEdit&) = delete;
+    ColorRasterEdit& operator=(const ColorRasterEdit&) = delete;
+    std::uint32_t width() const { return view_.width(); }
+    std::uint32_t height() const { return view_.height(); }
+    bool floating() const { return sample_bytes_ == 4; }
+    std::array<double, 4> pixel(std::size_t i) const { return view_.pixel(i); }
+    // Straight sRGB RGBA; a u16 raster takes 0..1, an f32 one any finite colour and an alpha in 0..1.
+    void set(std::size_t i, const std::array<double, 4>& rgba);
+    void set_alpha(std::size_t i, double alpha);
+    std::string take() &&;
+private:
+    void put(std::size_t i, unsigned c, double v);
+    std::string bytes_;
+    ColorRasterView view_;
+    unsigned sample_bytes_;
+};
 std::string encode_color_raster(const Json& op);
 // Serializes computed straight sRGB samples without an RGBA8 intermediate or a large JSON pixel array.
 std::string encode_color_pixels(std::uint32_t width, std::uint32_t height, std::string_view precision,

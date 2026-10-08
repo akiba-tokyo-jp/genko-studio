@@ -12,6 +12,7 @@
 #include "gui_support.hpp"
 #include "app/main_window.hpp"
 #include "app/canvas.hpp"
+#include "app/inject.hpp"
 #include "app/tiles.hpp"
 #include "app/thumbs.hpp"
 #include "core/color_raster.hpp"
@@ -144,6 +145,59 @@ private slots:
         checkView("redo");
         saved=gui_test::read_book(path);
         QCOMPARE(*(operation=="merge_visible" ? saved.page(0).layers.back().color_raster : saved.page(0).layers.front().color_raster),*merged);
+        window.hide();
+    }
+    void eraserAndPenOnPrecisePixels_data() {
+        QTest::addColumn<QString>("precision");
+        QTest::newRow("u16")<<QString("u16");QTest::newRow("f32")<<QString("f32");
+    }
+    // The eraser and the pen, drawn on the canvas over a precise colour layer, go into its own samples (no 8-bit
+    // picture, no lines kept on it); shown as the page renders, saved, undone and redone.
+    void eraserAndPenOnPrecisePixels() {
+        QFETCH(QString,precision);
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        auto seed=core::new_episode("高精度消しゴム",core::Num(1),1,core::PageSpec::custom(25.4,25.4,20,20,1,2,2,2,2,200,"color"));
+        seed.edit_page(0).numero=false;seed.edit_page(0).layers.clear();seed.edit_page(0).frames.clear();
+        Json pixels=Json::array();
+        for(int i=0;i<200*200;++i)for(const double v:{.2,.6,.9,1.})pixels.push_back(precision=="u16"?Json(std::lround(v*65535)):Json(v));
+        const auto doc=core::CommandBus().apply(seed,Json::array({Json{{"op","put_color_raster"},{"page",1},{"width",200},{"height",200},
+            {"precision",precision.toStdString()},{"pixels",pixels}}}),core::Actor("human:tester")).doc;
+        const auto id=doc.page(0).layers.back().id;const auto original=doc.page(0).layers.back().color_raster;
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,doc);
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(1000,720);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.set_target_layer(id);
+        const auto precise=[&]{return core::ColorRasterView(*window.book().page(0).layers.back().color_raster);};
+        window.choose_tool("eraser");
+        app::inject::mouse_stroke(window.canvas(),{QPointF(3,12.7),QPointF(12,12.7),QPointF(22,12.7)});
+        QVERIFY(window.book().page(0).layers.back().color_raster!=original);
+        QCOMPARE(precise().metadata("")["precision"],Json(precision.toStdString()));
+        QCOMPARE(precise().pixel(std::size_t(100)*200+100)[3],0.0);      // (under the eraser)
+        QCOMPARE(precise().pixel(std::size_t(20)*200+100),core::ColorRasterView(*original).pixel(std::size_t(20)*200+100));
+        window.pen()=app::PenSettings::for_kind("mili");window.pen().width_mm=1.0;window.pen_changed();window.choose_tool("pen");
+        app::inject::mouse_stroke(window.canvas(),{QPointF(12.7,3),QPointF(12.7,8),QPointF(12.7,20)});
+        QCOMPARE(window.book().page(0).layers.back().stroke_count(),std::size_t(0));  // (drawn into the pixels)
+        QCOMPARE(precise().pixel(std::size_t(50)*200+100)[3],1.0);
+        QVERIFY(precise().pixel(std::size_t(50)*200+100)[0]<.2);  // (the pen's dark ink over the light paint)
+        QTRY_VERIFY_WITH_TIMEOUT(window.canvas()->doc()==session->snapshot(),10000);
+        QVERIFY(window.canvas()->wait_rendered(10000));
+        const int dpi=window.canvas()->renderer().shown_dpi();QVERIFY(dpi>0);
+        render::RenderOptions options;options.mode="proof";options.skip_unported=true;
+        const auto image=render::render_page(session->document().page(0),dpi,options,&session->document()).image;
+        const auto bytes=image.tobytes();
+        QCOMPARE(window.canvas()->renderer().compose(dpi),QImage(reinterpret_cast<const uchar*>(bytes.data()),image.width(),image.height(),
+            image.width()*3,QImage::Format_RGB888).convertToFormat(QImage::Format_RGB32));
+        session->save_now();QVERIFY(session->wait_saved(std::chrono::milliseconds(10000)));
+        const auto drawn=*window.book().page(0).layers.back().color_raster;
+        QCOMPARE(*gui_test::read_book(path).page(0).layers.back().color_raster,drawn);
+        window.action("act_undo")->trigger();window.action("act_undo")->trigger();
+        QCOMPARE(*window.book().page(0).layers.back().color_raster,*original);
+        window.action("act_redo")->trigger();window.action("act_redo")->trigger();
+        QCOMPARE(*window.book().page(0).layers.back().color_raster,drawn);
+        session->save_now();QVERIFY(session->wait_saved(std::chrono::milliseconds(10000)));
+        QCOMPARE(*gui_test::read_book(path).page(0).layers.back().color_raster,drawn);
+        const QString folder=QString::fromUtf8(qgetenv("GENKO_COLOR_SCREENSHOT_DIR"));
+        if (!folder.isEmpty()) {QVERIFY(QDir().mkpath(folder));QVERIFY(window.grab().save(folder+"/"+precision+"-eraser-pen.png"));}
         window.hide();
     }
     void precisionPenConversionKeepsDiskUndo_data() {precisionPaintConversionKeepsSource_data();}

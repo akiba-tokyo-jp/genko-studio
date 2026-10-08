@@ -166,7 +166,15 @@ void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoi
         save_raster(page, layer, image);
         return;
     }
-    Image mask = Image::create("L", image.size(), Ink(0));
+    const Image mask = eraser_mask(image.size(), points, width_mm, dpi, texture, seed);
+    const Image alpha = image.getchannel(3);
+    image.putalpha(chops::subtract(alpha, mask));
+    save_raster(page, layer, image);
+}
+
+Image eraser_mask(Size size, const core::PenPoints& points, double width_mm, int dpi, std::string_view texture,
+                  const std::string& seed) {
+    Image mask = Image::create("L", size, Ink(0));
     const double width = width_mm * (texture == "soft" ? 0.7 : 1.0);
     check_stamps(points, dpi, width);
     {
@@ -177,7 +185,7 @@ void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoi
         const double radius = core::py_max(1.0, width_mm / 25.4 * dpi / 4);
         limits::check_count(radius, limits::kReach, "width_mm");
         mask = mask.filter(Filter::gaussian_blur(radius));
-    } else {
+    } else if (texture == "rough") {
         core::PyRandom rng = core::PyRandom::from_str(seed);
         const int grain = static_cast<int>(std::max<std::int64_t>(1, core::py_round_int(dpi / 100.0)));
         const Size small_size{std::max(1, mask.width() / grain), std::max(1, mask.height() / grain)};
@@ -186,9 +194,7 @@ void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoi
         const Image small = Image::frombytes("L", small_size, grains);
         mask = chops::multiply(mask, small.resize(mask.size(), Resample::Nearest));
     }
-    const Image alpha = image.getchannel(3);
-    image.putalpha(chops::subtract(alpha, mask));
-    save_raster(page, layer, image);
+    return mask;
 }
 
 std::string first_point_repr(const core::PenPoints& points) {

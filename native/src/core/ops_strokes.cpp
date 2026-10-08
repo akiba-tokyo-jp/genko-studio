@@ -400,7 +400,7 @@ void simplify_stroke(OpContext& c) {
 }
 
 // erase and erase_raster (one op in Python): pen lines are cut where the eraser went (or up to their crossings, or
-// whole); a tone is scraped; a paint layer's pixels are the canvas's (not_yet_ported).
+// whole); a tone is scraped; a paint layer's pixels, 8-bit or precise, are render's (not_yet_ported here).
 void erase(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -415,8 +415,6 @@ void erase(OpContext& c) {
         li = layer_for_role(page, role_from(Json(layer != nullptr && py_truthy(*layer) ? py_str(*layer) : "ink")));
     }
     if (page.layers[li].locked) throw OpError("the layer is locked");
-    if (page.layers[li].color_raster)
-        not_yet_ported(name + " on high-precision raster pixels is not supported yet");
     const Json* raw = get(op, "points");
     PenPoints points = parse_points(raw != nullptr && py_truthy(*raw) ? *raw : Json::array());
     const Json* width_value = get(op, "width_mm");
@@ -483,6 +481,7 @@ void erase(OpContext& c) {
         }
         target.strokes = make_strokes(std::move(kept));
     }
+    if (target.color_raster) not_yet_ported(name + " on high-precision raster pixels: they are erased by the drawing build");
     const bool raster = target.raster_png && !target.raster_png->empty();
     if ((target.kind == LayerKind::Raster && !target.patches.empty() && !raster) || raster) {
         not_yet_ported(name + " on a raster layer: the C++ raster tools come with the canvas (M2)");

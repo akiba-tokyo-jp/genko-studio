@@ -69,6 +69,28 @@ void ColorRasterView::check_metadata(const Json& m) const {
     for (const auto& [key, value] : expected.items())
         if (!m.contains(key) || m[key] != value) invalid();
 }
+ColorRasterEdit::ColorRasterEdit(std::string bytes)
+    : bytes_(std::move(bytes)), view_(bytes_), sample_bytes_(static_cast<unsigned char>(bytes_[5])) {}
+void ColorRasterEdit::put(std::size_t i, unsigned c, double v) {
+    if (i >= std::size_t(width())*height()) invalid();
+    if (!std::isfinite(v) || (c == 3 && !(-1e-12 <= v && v <= 1 + 1e-12))) invalid();
+    std::uint32_t bits = 0;
+    if (sample_bytes_ == 2) {
+        if (v < -1e-12 || v > 1 + 1e-12) invalid();
+        bits = static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0, 1.0) * 65535));
+    } else {
+        if (std::abs(v) > std::numeric_limits<float>::max()) invalid();
+        bits = std::bit_cast<std::uint32_t>(static_cast<float>(c == 3 ? std::clamp(v, 0.0, 1.0) : v));
+    }
+    // (in place: the view reads these same bytes)
+    char* at = bytes_.data() + 16 + (i*4 + c)*sample_bytes_;
+    for (unsigned k = 0; k < sample_bytes_; ++k) at[k] = static_cast<char>((bits >> (k*8)) & 255);
+}
+void ColorRasterEdit::set(std::size_t i, const std::array<double, 4>& rgba) {
+    for (unsigned c = 0; c < 4; ++c) put(i, c, rgba[c]);
+}
+void ColorRasterEdit::set_alpha(std::size_t i, double alpha) { put(i, 3, alpha); }
+std::string ColorRasterEdit::take() && { return std::move(bytes_); }
 std::string encode_color_raster(const Json& op) {
     static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559);
     if (!op.is_object() || !op.contains("precision") || (op["precision"] != "u16" && op["precision"] != "f32")) invalid();
@@ -142,7 +164,7 @@ void validate_color_document(const Document& doc) {
                     (void)ColorRasterView(*layer.color_raster);
                 }
                 if (layer.kind != LayerKind::Raster || layer.role == LayerRole::Tone || layer.raster_png || layer.stroke_count() || !layer.patches.empty() ||
-                    layer.panel_clip || layer.mask || layer.effect || layer.screen || layer.color)
+                    layer.panel_clip || layer.effect || layer.screen || layer.color)
                     throw Error("not_yet_ported", "high-precision color layer style is not supported yet");
             }
             if (layer.kind == LayerKind::Adjust && layer.adjust &&

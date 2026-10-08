@@ -932,10 +932,14 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         }
         if (precision && layer.color_raster) {
             if (is_tone(layer)) throw NotYetPorted("high_precision_tone");
-            if (!ColorCanvas::supports_blend(layer.blend) || layer.mask || layer.effect || layer.screen || layer.color ||
+            if (!ColorCanvas::supports_blend(layer.blend) || layer.effect || layer.screen || layer.color ||
                 !layer.patches.empty() || layer.stroke_count() || layer.panel_clip)
                 throw NotYetPorted("high_precision_layer_style");
-            precision->blend(core::ColorRasterView(*layer.color_raster), ctx.size, area, layer.opacity, layer.clip, layer.blend);
+            std::optional<Image> shown;  // (its mask, as masked() takes it)
+            if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled)
+                shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+            precision->blend(core::ColorRasterView(*layer.color_raster), ctx.size, area, layer.opacity, layer.clip, layer.blend,
+                             shown ? &*shown : nullptr);
             continue;
         }
         if (precision && !ColorCanvas::supports_blend(layer.blend)) throw NotYetPorted("high_precision_blend:"+layer.blend);

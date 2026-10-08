@@ -305,6 +305,53 @@ private slots:
         QCOMPARE(stacks.redo.size(), std::size_t{0});
     }
 
+    // A precise colour picture is copied whole by each change to it: past the history's budget, the oldest changes
+    // already saved leave memory and are undone and redone through the journal, the book coming back as it was.
+    void aLongPreciseHistoryIsUndoneThroughTheJournal() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        options.history_bytes = 1;
+        auto session = Session::open(book, options);
+        Json pixels = Json::array();
+        for (int i = 0; i < 16; ++i) for (const int v : {1000 * i, 2000, 3000 + i, 65535}) pixels.push_back(v);
+        session->apply(Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 4}, {"height", 4}, {"precision", "u16"}, {"pixels", pixels}}}));
+        const auto precise = [&]() -> std::string {
+            for (const auto& layer : session->document().page(0).layers) if (layer.color_raster) return *layer.color_raster;
+            return {};
+        };
+        const std::string id = session->document().page(0).layers.back().id;
+        std::vector<std::string> states{precise()};
+        for (const double x : {0.0, 105.0}) {
+            const Json half{{"poly", Json::array({Json::array({x, 0.0}), Json::array({x + 105, 0.0}), Json::array({x + 105, 297.0}), Json::array({x, 297.0})})}};
+            session->apply(Json::array({Json{{"op", "delete_area"}, {"page", 1}, {"layer_id", id}, {"area", half}}}));
+            states.push_back(precise());
+            QVERIFY(states.back() != states[states.size() - 2]);
+        }
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(session->changes_in_memory(), std::size_t{1});  // (the last one: the others through the journal)
+        for (int i = 2; i >= 0; --i) {
+            QVERIFY(session->can_undo());
+            session->undo();
+            QVERIFY(session->wait_saved(10000ms));
+            QCOMPARE(precise(), i == 0 ? std::string() : states[std::size_t(i) - 1]);
+            const auto on_disk = genko::storage::load_document(book).document;  // (kept: the loop reads its layers)
+            std::string saved;
+            for (const auto& layer : on_disk.page(0).layers) if (layer.color_raster) saved = *layer.color_raster;
+            QCOMPARE(precise(), saved);
+        }
+        QVERIFY(!session->can_undo());
+        for (std::size_t i = 0; i < 3; ++i) {
+            QVERIFY(session->can_redo());
+            session->redo();
+            QVERIFY(session->wait_saved(10000ms));
+            QCOMPARE(precise(), states[i]);
+        }
+    }
+
     void undoWhileTheChangeIsBeingSaved() {
         QTemporaryDir tmp;
         const fs::path book = path_of(tmp.filePath("book.genko"));

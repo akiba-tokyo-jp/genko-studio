@@ -38,6 +38,7 @@
 #include "core/stroke_tools.hpp"
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
+#include "render/color_edit.hpp"
 #include "render/draw.hpp"
 #include "render/fill.hpp"
 #include "render/filters.hpp"
@@ -837,7 +838,10 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
             participate(layer);
             const core::ColorRasterView pixels(*layer.color_raster);
             floating = floating || pixels.metadata("")["precision"] == "f32";
-            out.blend(pixels, size, all, layer.opacity, layer.clip, layer.blend);
+            std::optional<Image> shown;  // (its mask, as the page shows it)
+            if (layer.mask && layer.mask->enabled && layer.mask->png && !layer.mask->png->empty())
+                shown = read_png(*layer.mask->png).convert("L").resize(size, Resample::Bilinear);
+            out.blend(pixels, size, all, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
         } else {
             auto picture = drawable_layer_image(page, layer, kWorkingDpi, &doc, false, true);
             if (!picture) continue;
@@ -1332,6 +1336,30 @@ void delete_or_transform_area(OpContext& c, bool transform) {
     Page& page = doc.edit_page(at);
     const std::size_t ti = raster_paint_target(page, op);
     const Json area = core::op_area(op);
+    if (page.layers[ti].color_raster) {  // (the precise pixels themselves: render/color_edit)
+        Layer& target = page.layers[ti];
+        std::string pixels;
+        if (!transform) {
+            pixels = color_edit::delete_area(page, target, area);
+        } else if (core::truthy_at(op, "warp")) {
+            const warp::Go go = warp::mapping(selection::area_bbox(area), op["warp"]);
+            pixels = color_edit::warp_area(page, target, area, go, interp(op));
+        } else {
+            const std::vector<double> m = matrix_of(op);
+            if (m.size() != 6) throw OpError("matrix is [a, b, c, d, e, f]");
+            const Resample resample = interp(op);
+            try {
+                pixels = color_edit::move_area(page, target, area, selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, resample);
+            } catch (const core::PyUncaught&) {
+                throw;
+            } catch (const core::Error& error) {
+                if (error.code() != "value") throw;
+                throw OpError(error.what());
+            }
+        }
+        target.color_raster = std::make_shared<const std::string>(std::move(pixels));
+        return;
+    }
     selection::Items items = selection::lift(page.layers[ti], area, page);
     if (!transform) return;
     Layer& target = page.layers[ti];
@@ -1396,6 +1424,17 @@ void paste(OpContext& c) {
     if (m.size() != 6) {
         throw core::PyValueError(m.size() < 6 ? "not enough values to unpack (expected 6, got " + std::to_string(m.size()) + ")"
                                               : "too many values to unpack (expected 6)");
+    }
+    if (page.layers[ti].color_raster) {  // drawn into the precise pixels (render/color_edit)
+        Layer pasted;
+        pasted.id = page.layers[ti].id;
+        pasted.role = LayerRole::User;
+        pasted.kind = LayerKind::Raster;
+        pasted.panel_clip = false;
+        selection::drop(pasted, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
+        Layer& target = page.layers[ti];
+        target.color_raster = std::make_shared<const std::string>(color_edit::paste(page, target, pasted, &doc));
+        return;
     }
     selection::drop(page.layers[ti], std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
 }
@@ -1810,7 +1849,10 @@ void erase(OpContext& c) {
         (*lines)(c);
         return;
     } catch (const core::Error& error) {
-        if (error.code() != "not_yet_ported" || std::string_view(error.what()).find(" on a raster layer") == std::string_view::npos) throw;
+        const std::string_view why = error.what();
+        if (error.code() != "not_yet_ported" ||
+            (why.find(" on a raster layer") == std::string_view::npos && why.find(" on high-precision raster pixels") == std::string_view::npos))
+            throw;
     }
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -1841,6 +1883,11 @@ void erase(OpContext& c) {
     const Json* texture_value = core::get(op, "texture");
     const std::string texture = texture_value != nullptr && core::py_truthy(*texture_value) ? core::py_str(*texture_value) : "";
     Layer& target = page.layers[li];
+    if (target.color_raster) {
+        target.color_raster = std::make_shared<const std::string>(color_edit::erase(
+            page, target, points, width, texture == "hard" ? "" : texture, target.id + raster::first_point_repr(points)));
+        return;
+    }
     const bool has_raster = target.raster_png && !target.raster_png->empty();
     if (target.kind == LayerKind::Raster && !target.patches.empty() && !has_raster) {
         raster::bake_vectors(page, target);  // (fills on a paint layer are erased like its pixels)
