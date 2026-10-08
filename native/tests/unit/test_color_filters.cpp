@@ -319,7 +319,9 @@ private slots:
             const auto doc = precise("u16", side, [side](std::uint32_t x, std::uint32_t y) {
                 return Pixel{double(x) / side, double(y) / side, 0.5, 1};
             });
-            const auto after = view(edit(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "mosaic"}, {"block", 10}}));
+            // (the book edited is kept while its pixels are read: the view is into its raster)
+            const auto edited = edit(doc, Json{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "mosaic"}, {"block", 10}});
+            const auto after = view(edited);
             std::set<std::uint32_t> reds;
             for (std::uint32_t x = 0; x < side; ++x) reds.insert(static_cast<std::uint32_t>(std::lround(after.pixel(side / 2 * side + x)[0] * 65535)));
             QCOMPARE(reds.size(), std::size_t(20));  // 25.4 mm in blocks of 10 pixels at 200 dpi
