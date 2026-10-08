@@ -36,6 +36,8 @@ genko_library(genko_app
     ime.cpp
     main_window.cpp
     main_window_actions.cpp
+    layer_panel.cpp
+    layer_dialogs.cpp
     inject.cpp
     test_script.cpp
     app_main.cpp

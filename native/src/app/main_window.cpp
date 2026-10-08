@@ -1,4 +1,5 @@
 #include "app/main_window.hpp"
+#include "app/layer_panel.hpp"
 
 #include <QApplication>
 #include <QPointer>
@@ -32,9 +33,12 @@
 #include "app/save_status.hpp"
 #include "app/theme.hpp"
 #include "app/wording.hpp"
+#include "core/actor.hpp"
+#include "core/command_bus.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/brushes.hpp"
+#include "render/ops_registry.hpp"
 
 namespace genko::app {
 
@@ -313,6 +317,29 @@ void MainWindow::set_target_layer(const std::string& layer_id) {
     target_layer_id_ = layer_id;
     pen_changed();
     if (const core::Layer* layer = target_layer()) flash(QStringLiteral("描く先: %1").arg(wording::layer_label(*layer)), 2500);
+    if (layer_panel_ != nullptr) layer_panel_->refresh();
+}
+
+std::optional<core::Json> MainWindow::selection_area() const {
+    const auto& outline = canvas_->selection();
+    if (!outline || outline->size() < 3) return std::nullopt;
+    core::Json poly = core::Json::array();
+    for (const QPointF& p : *outline) poly.push_back(core::Json::array({p.x(), p.y()}));
+    return core::Json{{"poly", poly}};
+}
+
+void MainWindow::preview_ops(const std::optional<core::Json>& ops) {
+    if (!ops) {
+        show_page();
+        return;
+    }
+    try {
+        const core::CommandBus bus(render::ops_registry());
+        auto result = bus.apply(*session_->snapshot(), *ops, core::Actor(session_->actor()));
+        canvas_->set_page(std::make_shared<const core::Document>(std::move(result.doc)), static_cast<std::size_t>(page_index_));
+    } catch (const core::Error&) {
+        show_page();  // (a preview that cannot be made: the page as it is)
+    }
 }
 
 void MainWindow::pen_changed() {
@@ -402,6 +429,7 @@ void MainWindow::show_page() {
     pen_changed();
     refresh_status();
     if (navigator_ != nullptr) navigator_->update();
+    if (layer_panel_ != nullptr) layer_panel_->refresh();
 }
 
 void MainWindow::select_page(int row) {

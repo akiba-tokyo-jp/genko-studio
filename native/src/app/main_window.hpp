@@ -35,6 +35,8 @@ class QDockWidget;
 
 namespace genko::app {
 
+class LayerPanel;
+
 class Navigator;
 class PageList;
 class SaveFailureBar;
@@ -70,6 +72,13 @@ public:
     // stage).
     const core::Layer* target_layer() const;
     void set_target_layer(const std::string& layer_id);
+    // A pen, paint or tone layer, not locked.
+    static bool drawable(const core::Layer& layer);
+    // The selection as an op's area ({"poly": …}), or none.
+    std::optional<core::Json> selection_area() const;
+    // The page shown as these ops would leave it, without changing the book (フィルターのプレビュー); none: as it is.
+    void preview_ops(const std::optional<core::Json>& ops);
+    LayerPanel* layer_panel() const { return layer_panel_; }
     PenSettings& pen() { return pen_; }
     void pen_changed();
 
@@ -186,7 +195,6 @@ private:
     void layer_moved(double dx, double dy);
     void show_omitted(const QStringList& elements);
     bool agent_book() const;
-    static bool drawable(const core::Layer& layer);
     // The layer drawn on when it can be painted on; otherwise a notice and null.
     const core::Layer* paint_layer();
 
@@ -195,6 +203,7 @@ private:
     int doc_ = 0;
     int page_index_ = 0;
     std::optional<std::string> target_layer_id_;
+    LayerPanel* layer_panel_ = nullptr;
     bool closed_ = false;
     PenSettings pen_;
     double eraser_mm_ = 2.0;

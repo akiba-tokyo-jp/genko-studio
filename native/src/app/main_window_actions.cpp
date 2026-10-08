@@ -9,6 +9,7 @@
 #include <QVBoxLayout>
 #include <QDir>
 #include <QDockWidget>
+#include <QScrollArea>
 #include <QDoubleSpinBox>
 #include <QCheckBox>
 #include <QComboBox>
@@ -31,6 +32,7 @@
 
 #include "app/ask.hpp"
 #include "app/config.hpp"
+#include "app/layer_panel.hpp"
 #include "app/dialogs.hpp"
 #include "app/frame_tools.hpp"
 #include "app/icons.hpp"
@@ -402,6 +404,22 @@ void MainWindow::build_docks() {
     pages_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     addDockWidget(Qt::RightDockWidgetArea, pages_dock_);
     view_menu_->addAction(pages_dock_->toggleViewAction());
+    layer_panel_ = new LayerPanel(this);
+    auto* layers = new QDockWidget(QStringLiteral("レイヤー"), this);
+    layers->setObjectName(QStringLiteral("レイヤー"));
+    // (a tall panel scrolls on a small screen instead of making the window taller; a tab beside the pages)
+    auto* layer_scroll = new QScrollArea;
+    layer_scroll->setWidgetResizable(true);
+    layer_scroll->setFrameShape(QFrame::NoFrame);
+    layer_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    layer_scroll->setWidget(layer_panel_);
+    layers->setWidget(layer_scroll);
+    layers->setMinimumWidth(200);
+    layers->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::RightDockWidgetArea, layers);
+    tabifyDockWidget(pages_dock_, layers);
+    pages_dock_->raise();
+    view_menu_->addAction(layers->toggleViewAction());
     auto* materials = new QDockWidget(QStringLiteral("素材"), this);
     materials->setObjectName(QStringLiteral("素材"));
     materials->setWidget(make_builtin_material_panel(materials,[this](const QString& material_id, const QString& kind) {
