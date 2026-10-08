@@ -33,6 +33,11 @@ Commands:
   render JOBS                   render_page for each job of a JSON list: {"book", "page", "dpi", "mode", "out",
                                 "skip_unported": bool} → a PNG of the page; "story": false removes the lines
   layer-image JOBS              layer_image for each job: {"book", "page", "layer", "dpi", "out"}
+  text-cases OUT --seed N --count K
+                                the letters of chosen lines and K random ones (every style key that changes them,
+                                every balloon kind, vertical and across, at a few dpi) as balloons._paint_text draws
+                                them, with text_layout's picture, em and corner; tategaki's pure functions; each cell's
+                                glyph: OUT (JSON, pictures as PNG)
 
 With skip_unported the elements this C++ step does not draw yet (lines and balloons, placed pictures, cover folds,
 animation) are left out the way the C++ RenderOptions::skip_unported leaves them out (tones, effect lines and
@@ -1470,6 +1475,353 @@ def material_library(steps_path: str, out: str, config: str) -> None:
     Path(out).write_text(json.dumps(results, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
 
 
+# --- lettering (M4: the text of a line, as tategaki.compose and balloons.text_layout set it) ------------------------
+
+TEXT_FONTS = ("antique", "gothic", "mincho", "maru", "hand", "sfx", "sfx_pop")
+TEXT_KINDS = ("speech", "rounded", "box", "cloud", "thought", "shout", "electric", "flash", "whisper", "narration", "sfx",
+              "none", "picture", "dotted_box", "tone_box", "fancy_box")
+_HIRA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんがぎぐげござじずぜぞだでどばびぶべぼぱぴぷぺぽ"
+_SMALL = "ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ"
+_KATA = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンガギグゲゴヴー"
+_KANJI = "日本語漫画原稿台詞今日天気世界東京大阪先生学校時間言葉心夢空海山川花鳥風月雨雪光影力戦勝負愛葛辻々〆"
+_PUNCT = "、。，．！？!?…‥―～〜「」『』（）()【】［］〈〉《》・：；ー−‐∼"
+_LATIN = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+_TOKENS = ["この", "その", "ちょっと", "ありがとう", "ございます", "やっぱり", "Hello", "OK", "Mr. Smith", "E-mail", "NASA",
+           "12", "100", "2024", "!?", "!!", "！？", "？！？", "!!!!", "１２", "１２３", "１２３４", "ふう〜", "えっ", "ドドドド",
+           "ゴゴゴ", "ズバッ", "まんが作りの", "モヤモヤを", "ズバッと解決する", "このコーナー！", "「そうか」", "（笑）",
+           "葛\U000e0100", "辻\ufe00", "A\ufe0f", "\ufe0e", "…", "。", "。」", "．", "\n", " ", "\u3000", "a b", "x-y"]
+
+
+def _text_png(im) -> str:
+    return b64(png_bytes(im))
+
+
+def _rand_text(rng, longest: int = 14) -> str:
+    out = []
+    for _ in range(rng.randrange(1, longest)):
+        pool = rng.choice(["hira", "hira", "kanji", "kata", "punct", "small", "latin", "digit", "token", "token"])
+        if pool == "token":
+            out.append(rng.choice(_TOKENS))
+        elif pool == "latin":
+            out.append("".join(rng.choice(_LATIN) for _ in range(rng.randrange(1, 7))))
+        elif pool == "digit":
+            out.append(str(rng.randrange(0, 10 ** rng.randrange(1, 5))))
+        else:
+            chars = {"hira": _HIRA, "kanji": _KANJI, "kata": _KATA, "punct": _PUNCT, "small": _SMALL}[pool]
+            out.append("".join(rng.choice(chars) for _ in range(rng.randrange(1, 5))))
+    return "".join(out)
+
+
+def _substring(rng, text: str) -> str:
+    if not text:
+        return ""
+    a = rng.randrange(len(text))
+    return text[a:a + rng.randrange(1, 5)]
+
+
+def _text_picture() -> str:
+    """A small picture for style.fill_png (letters painted with it)."""
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGB", (24, 16), (240, 200, 40))
+    draw = ImageDraw.Draw(im)
+    draw.rectangle((0, 8, 23, 15), fill=(30, 60, 200))
+    draw.ellipse((4, 2, 14, 12), fill=(220, 20, 60))
+    return _text_png(im)
+
+
+def text_units(rng) -> dict:
+    """The pure functions of tategaki and fonts on random and chosen texts."""
+    from genko import fonts, tategaki
+
+    texts = ["", "\n", "あ", "12", "１２", "１２３４", "!?", "！？！", "!!!!", "Hello World", "Mr. Smith", "E-mail me",
+             "葛\U000e0100城", "\ufe0e先", "あ\n\ufe0fい", "\x01ab\x02c", "\x01", "x\x01yz", "こんにちは。", "「はい。」",
+             "まんが作りのモヤモヤをズバッと解決するこのコーナー！", "そうか。。。わかった．", "えっ。\nほんと。」", "。", "。」\u3000",
+             "ありがとうございます", "この本はとても面白い", "ちょっと待って（笑）", "東京へ行く、大阪へ行く。"]
+    texts += [_rand_text(rng) for _ in range(120)]
+    out: dict = {"cells": [], "columns": [], "phrases": [], "phrase_columns": [], "without_periods": [], "mark_tcy": [],
+                 "mono_runs": [], "char_styles": [], "weight_level": [], "bold_px": [], "normalize": [], "has_glyph": [],
+                 "face_font": [], "ruby_spans": [], "emphasis_cells": []}
+    for text in texts:
+        for tcy, latin in ((True, False), (False, False), (True, True), (False, True)):
+            out["cells"].append([text, tcy, latin, tategaki.cells(text, tcy, latin)])
+        tcy, latin, per = rng.random() < 0.7, rng.random() < 0.5, rng.choice([1, 2, 3, 4, 5, 7, 9])
+        cols = tategaki.columns_of(text, per, tcy, latin)
+        out["columns"].append([text, per, tcy, latin, cols])
+        out["phrases"].append([text, tategaki.phrases(text)])
+        out["phrase_columns"].append([text, per, tcy, latin, tategaki.phrase_columns(
+            text, per, lambda part: len(tategaki.cells(part, tcy, latin)))])
+        out["without_periods"].append([text, tategaki.without_periods(text)])
+        runs = [[_substring(rng, text), rng.choice([{"tcy": True}, {"scale": 1.4}, {"tcy": 1, "bold": True}, {}])]
+                for _ in range(rng.randrange(0, 4))]
+        out["mark_tcy"].append([text, runs, tategaki.mark_tcy(text, runs)])
+        base = rng.choice([None, {"bold": 1}, {"bold": 2, "scale": 0.8}])
+        out["char_styles"].append([text, runs, base, tategaki.char_styles(text, runs, base)])
+        ruby = [[_substring(rng, text), rng.choice(["あ", "あい", "かんじ", "とうきょう", "x", ""])] for _ in range(rng.randrange(0, 4))]
+        ruby += [["", "a"], ["a"]] if rng.random() < 0.2 else []
+        out["mono_runs"].append([ruby, tategaki.mono_runs(ruby)])
+        out["ruby_spans"].append([text, per, tcy, latin, ruby, [list(s) for s in tategaki._ruby_spans(cols, ruby)]])
+        marks = [_substring(rng, text) for _ in range(rng.randrange(0, 4))]
+        out["emphasis_cells"].append([text, per, tcy, latin, marks, sorted(list(c) for c in tategaki.emphasis_cells(cols, marks))])
+    for value in (None, True, False, 0, 1, 2, 3, -1, 1.7, 2.9, -0.5, "bold", "heavy", "normal", "x", "", [1], {"a": 1}):
+        out["weight_level"].append([value, tategaki.weight_level(value)])
+    for em in (4, 8, 16, 22, 23, 45, 46, 67, 68, 100, 135):
+        for level in (0, 1, 2, True, "heavy", None):
+            out["bold_px"].append([em, level, tategaki.bold_px(em, level)])
+    look = "―～〜−‐∼—－-あ漢A"
+    for key in TEXT_FONTS:
+        face = fonts.face(key)
+        out["normalize"].append([key, look, face.normalize(look)])
+        for char in "あ漢A―～〜−‐∼—－-ー…‥。、「」﹁﹂︵︶ゕゖヵヶ \u3000\ufe0f\U000e0100\uffff😀ß":
+            out["face_font"].append([key, char, Path(face.font(20, char).path).name])
+    names = {str(fonts.GOTHIC): "gothic", str(fonts.MINCHO): "mincho", str(fonts.MARU): "maru", str(fonts.HAND): "hand",
+             str(fonts.SFX): "sfx", str(fonts.SFX_POP): "sfx_pop"}
+    for path, name in names.items():
+        for char in "あ漢Aろ―～〜−‐∼—－-﹁﹂︵︶ \u3000\ufe0f\uffff😀":
+            out["has_glyph"].append([name, char, fonts.has_glyph(path, char)])
+    return out
+
+
+def text_glyphs(rng) -> list:
+    """tategaki.glyph, tcy_glyph, latin_glyph and draw_mark: each cell's picture."""
+    from PIL import Image
+
+    from genko import fonts, tategaki
+
+    out = []
+    chars = list("あ漢A。、，．ぁっゃゕヵ「」『』（）()【】［］〈〉《》ー―〜～…‥：；=−‐\n ") + ["葛\U000e0100", "A\ufe0f"]
+    for key in TEXT_FONTS:
+        face = fonts.face(key)
+        for char in chars:
+            em, bold = rng.choice([9, 12, 23, 40]), rng.choice([0, 0, 1, 3])
+            fill = rng.choice([(10, 10, 10), (200, 30, 30)])
+            image = tategaki.glyph(char, face.font(em, char), em, fill, bold)
+            out.append({"kind": "glyph", "font": key, "text": char, "em": em, "fill": list(fill), "bold": bold, "png": _text_png(image)})
+        for cell in ("12", "100", "!?", "OK", "!!!"):
+            em, bold = rng.choice([9, 16, 31]), rng.choice([0, 2])
+            image = tategaki.tcy_glyph(cell, face.font(em, "0"), em, (10, 10, 10), bold)
+            out.append({"kind": "tcy", "font": key, "text": cell, "em": em, "fill": [10, 10, 10], "bold": bold, "png": _text_png(image)})
+        for word in ("Hello", "Mr. Smith", "NASA", "iiii"):
+            em, bold = rng.choice([9, 16, 31]), rng.choice([0, 2])
+            image = tategaki.latin_glyph(word, face.font(em, "A"), em, (10, 10, 10), bold)
+            out.append({"kind": "latin", "font": key, "text": word, "em": em, "fill": [10, 10, 10], "bold": bold, "png": _text_png(image)})
+    for _ in range(24):
+        image = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
+        cx, cy, size = rng.uniform(5, 35), rng.uniform(5, 35), rng.uniform(1, 20)
+        kind, vertical = rng.choice(["sesame", "dot"]), rng.random() < 0.5
+        tategaki.draw_mark(image, (cx, cy), size, kind, (30, 80, 200), vertical)
+        out.append({"kind": "mark", "centre": [bits(cx), bits(cy)], "size": bits(size), "mark": kind, "vertical": vertical,
+                    "png": _text_png(image)})
+    return out
+
+
+def _chosen_lines() -> list:
+    """Lines chosen to reach every style key that changes the letters, and every balloon kind."""
+    root = ROOT / "src" / "genko" / "fonts"
+    long = "まんが作りのモヤモヤをズバッと解決するこのコーナー！今日はいい天気ですね。でも明日は雨かもしれない。"
+    lines = []
+
+    def add(text, style=None, **kw):
+        line = {"text": text, "style": dict(style or {})}
+        line.update(kw)
+        lines.append(line)
+
+    for wrap in ("horizontal", "vertical"):
+        for key in TEXT_FONTS:
+            add("こんにちは、世界！漢字とカナ。ABC 123", {"font": key}, wrap=wrap)
+        add(long, wrap=wrap)
+        add(long, {"size_mm": 3.5}, wrap=wrap)
+        add(long, {"size_mm": 6.2, "tracking": 0.15, "leading": 0.8}, wrap=wrap)
+        add(long, {"tracking": -0.1, "leading": 0.0}, wrap=wrap)
+        for align in ("top", "center", "bottom", "justify", "left", "right"):
+            add("一行目\n二行目は長いです\n三", {"align": align}, wrap=wrap)
+        add("2024年12月の!?と！？と!!!!", {"tcy": True}, wrap=wrap)
+        add("2024年12月の!?と！？と!!!!", {"tcy": False}, wrap=wrap)
+        add("Hello World と Mr. Smith の E-mail", {"latin": "rotate"}, wrap=wrap)
+        add("Hello World と Mr. Smith の E-mail", {"latin": "upright"}, wrap=wrap)
+        add("東京と大阪の先生", wrap=wrap, ruby_runs=[["東京", "とうきょう"], ["大阪", "おおさか"], ["先生", "せんせい"]])
+        add("東京と大阪の先生", {"mono_ruby": True, "ruby_scale": 0.35}, wrap=wrap,
+            ruby_runs=[["東京", "とうきょう"], ["大阪", "おおさか"], ["先生", "せんせい"]])
+        add("東京と大阪", {"ruby_scale": 0.8}, wrap=wrap, ruby_runs=[["東京", "とう\nきょう"], ["ない", "x"], ["", "a"], ["大阪", ""]])
+        add("ここが大事なところ", wrap=wrap, emphasis_runs=["大事", "ところ"])
+        add("ここが大事なところ", {"emphasis_mark": "dot"}, wrap=wrap, emphasis_runs=["大事", "ところ"])
+        add("大事なところと東京", {"emphasis_mark": "dot"}, wrap=wrap, emphasis_runs=["大事"], ruby_runs=[["大事", "だいじ"]])
+        add("小さく大きく太く赤く縦中横12", wrap=wrap,
+            style_runs=[["小さく", {"scale": 0.7}], ["大きく", {"scale": 1.8}], ["太く", {"bold": 2}], ["赤く", {"rgb": [210, 30, 30]}],
+                        ["12", {"tcy": True}], ["縦中", {"weight": "heavy", "bold": True}]])
+        add("太字の台詞", {"bold": True}, wrap=wrap)
+        add("極太の台詞", {"weight": "heavy"}, wrap=wrap)
+        add("標準の台詞", {"weight": "normal", "bold": True}, wrap=wrap)
+        add("斜体の台詞", {"italic": True}, wrap=wrap)
+        add("フチ付き", {"outline_mm": 0.5}, wrap=wrap)
+        add("赤いフチ", {"outline_mm": 0.8, "outline_rgb": [255, 0, 0], "rgb": [255, 255, 255]}, wrap=wrap)
+        add("色の台詞", {"rgb": [30, 80, 200]}, wrap=wrap)
+        add("長体の台詞です", {"scale_x": 0.6}, wrap=wrap)
+        add("平体の台詞です", {"scale_x": 1.6}, wrap=wrap)
+        add("傾いた台詞", {"skew_deg": 15}, wrap=wrap)
+        add("逆に傾く", {"skew_deg": -25}, wrap=wrap)
+        add("弓なりの台詞です", {"arc": 0.6}, wrap=wrap)
+        add("逆の弓なり", {"arc": -1.0}, wrap=wrap)
+        add("グラデーション", {"gradient": {"rgb_from": [20, 20, 200], "rgb_to": [230, 40, 40]}}, wrap=wrap)
+        add("斜めのグラデ", {"gradient": {"rgb_from": [0, 0, 0], "rgb_to": [250, 250, 0], "angle": 30}}, wrap=wrap)
+        add("横のグラデ", {"gradient": {"angle": 0}}, wrap=wrap)
+        add("ゆがみ", {"warp": [[0.1, 0.0], [0.9, 0.1], [1.0, 1.0], [0.0, 0.85]]}, wrap=wrap)
+        add("遠近の文字", {"warp": [[0.0, 0.0], [1.0, 0.2], [1.0, 0.8], [0.0, 1.0]]}, wrap=wrap)
+        add("絵の文字", {"fill_png": _text_picture(), "size_mm": 8}, wrap=wrap)
+        add("読めない絵", {"fill_png": "@@not base64@@"}, wrap=wrap)
+        add("こんにちは。元気ですか。", wrap=wrap)
+        add("こんにちは。元気ですか。", {"periods": True}, wrap=wrap)
+        add("「そうか。」そうだ．。", wrap=wrap)
+        add("ぁぃぅぇぉっゃゅょゎ、。！？ーーー「（」）", wrap=wrap)
+        add("葛\U000e0100城と辻\ufe00堂とA\ufe0fと\ufe0e", wrap=wrap)
+        add("半角123と全角１２３と12345", wrap=wrap)
+        add("!?!!？？！!?", wrap=wrap)
+        add("約物「（括弧）」、『二重』。", {"yakumono": False}, wrap=wrap)
+        add("約物「（括弧）」、『二重』。", wrap=wrap)
+        add("", wrap=wrap)
+        add(" ", wrap=wrap)
+        add("\n", wrap=wrap)
+        add("。", wrap=wrap)
+        add("ー", wrap=wrap)
+        add("あ" * 60, wrap=wrap)
+        add(long * 2, {"size_mm": 2.5}, wrap=wrap, w_mm=60, h_mm=50)
+        add("話す人", wrap=wrap, speaker="主人公")
+        add("ずらした文字", {"text_dx_mm": 3.0, "text_dy_mm": -2.0}, wrap=wrap, speaker="誰か")
+        add("OpenType", {"features": ["jp78"]}, wrap=wrap)
+        add("ファイルの字", {"font": str(root / "ZenMaruGothic-Bold.ttf")}, wrap=wrap)
+        add("無い字体", {"font": str(root / "missing.ttf")}, wrap=wrap)
+        add("手描きでない", {"hand": False}, wrap=wrap)
+        add("揺れる線", {"wobble": 0.5}, wrap=wrap)
+        for kind in TEXT_KINDS:
+            add("フキダシの中の台詞です！", wrap=wrap, balloon=kind)
+        add("ドドドド", {"spike_depth": 0.5}, wrap=wrap, balloon="shout")
+        add("ドドドドド", wrap=wrap, balloon="sfx")
+        add("ドン\nガン", {"font": "sfx_pop"}, wrap=wrap, balloon="sfx")
+        add("文字だけ\n二行", wrap=wrap, balloon="none")
+        add("知らない形", wrap=wrap, balloon="mystery")
+    for path in ([[0, 10], [40, 10]], [[0, 18], [15, 2], [30, 18], [45, 2]], [[5, 5]], [[0, 0], [0, 0], [30, 20]]):
+        for align in ("center", "left", "right"):
+            add("パスに沿う文字 OK!", {"text_path": path, "align": align}, w_mm=45, h_mm=20)
+    add("太いパスの字", {"text_path": [[0, 15], [40, 5]], "weight": "bold", "scale_x": 0.8, "outline_mm": 0.4,
+                         "gradient": {"rgb_to": [0, 120, 255]}, "tracking": 0.1, "size_mm": 6}, w_mm=45, h_mm=20)
+    add("効果音のパス", {"text_path": [[0, 15], [40, 5]]}, balloon="sfx", w_mm=45, h_mm=20)
+    return lines
+
+
+def _rand_line(rng) -> dict:
+    text = _rand_text(rng, rng.choice([4, 8, 14, 22]))
+    style: dict = {}
+
+    def maybe(p, key, value):
+        if rng.random() < p:
+            style[key] = value
+
+    maybe(0.5, "font", rng.choice(TEXT_FONTS + (None,)))
+    maybe(0.3, "size_mm", round(rng.uniform(2.5, 8.5), 2))
+    maybe(0.2, "tracking", rng.choice([0.0, 0.05, -0.05, 0.12, 0.25]))
+    maybe(0.2, "leading", rng.choice([0.0, 0.2, 0.4, 0.9]))
+    maybe(0.3, "align", rng.choice(["top", "center", "bottom", "justify", "left", "right"]))
+    maybe(0.2, "tcy", rng.random() < 0.5)
+    maybe(0.2, "latin", rng.choice(["rotate", "upright"]))
+    maybe(0.15, "ruby_scale", rng.choice([0.3, 0.5, 0.7, 0.9, 0.2]))
+    maybe(0.15, "mono_ruby", True)
+    maybe(0.2, "emphasis_mark", rng.choice(["sesame", "dot", "star"]))
+    maybe(0.15, "bold", rng.choice([True, False, 2]))
+    maybe(0.15, "weight", rng.choice([None, "normal", "bold", "heavy"]))
+    maybe(0.1, "italic", True)
+    maybe(0.15, "outline_mm", rng.choice([0.3, 0.6, 1.2]))
+    maybe(0.1, "outline_rgb", rng.choice([[255, 255, 255], [0, 0, 0], [255, 0, 0]]))
+    maybe(0.15, "rgb", rng.choice([[200, 30, 30], [0, 0, 0], [30, 80, 200], [255, 255, 255]]))
+    maybe(0.1, "scale_x", rng.choice([0.5, 0.7, 1.3, 2.0]))
+    maybe(0.1, "skew_deg", rng.choice([8, -12, 30, 70]))
+    maybe(0.1, "arc", rng.choice([0.3, -0.5, 1.0]))
+    maybe(0.08, "gradient", {"rgb_from": [rng.randrange(256) for _ in range(3)], "rgb_to": [rng.randrange(256) for _ in range(3)],
+                             "angle": rng.choice([90, 0, 45, 135, -30, 200])})
+    maybe(0.06, "warp", [[round(rng.uniform(-0.15, 0.25), 3), round(rng.uniform(-0.15, 0.25), 3)],
+                         [round(rng.uniform(0.75, 1.15), 3), round(rng.uniform(-0.15, 0.25), 3)],
+                         [round(rng.uniform(0.75, 1.15), 3), round(rng.uniform(0.75, 1.15), 3)],
+                         [round(rng.uniform(-0.15, 0.25), 3), round(rng.uniform(0.75, 1.15), 3)]])
+    maybe(0.15, "periods", True)
+    maybe(0.1, "yakumono", False)
+    maybe(0.1, "hand", False)
+    maybe(0.05, "wobble", 0.4)
+    maybe(0.1, "spike_depth", round(rng.uniform(0.05, 0.6), 2))
+    maybe(0.05, "text_dx_mm", round(rng.uniform(-3, 3), 2))
+    maybe(0.05, "text_dy_mm", round(rng.uniform(-3, 3), 2))
+    maybe(0.03, "features", ["jp90"])
+    maybe(0.04, "fill_png", _text_picture())
+    w, h = round(rng.uniform(14, 60), 1), round(rng.uniform(10, 50), 1)
+    if rng.random() < 0.06:
+        style["text_path"] = [[round(rng.uniform(0, w), 1), round(rng.uniform(0, h), 1)] for _ in range(rng.randrange(1, 5))]
+    line = {"text": text, "style": style, "w_mm": w, "h_mm": h, "x_mm": round(rng.uniform(2, 9), 1), "y_mm": round(rng.uniform(4, 9), 1),
+            "wrap": rng.choice(["horizontal", "vertical"]),
+            "balloon": rng.choice(["speech"] * 6 + list(TEXT_KINDS) + [""])}
+    if rng.random() < 0.3:
+        line["ruby_runs"] = [[_substring(rng, text), "".join(rng.choice(_HIRA) for _ in range(rng.randrange(1, 6)))]
+                             for _ in range(rng.randrange(1, 4))]
+    if rng.random() < 0.25:
+        line["emphasis_runs"] = [_substring(rng, text) for _ in range(rng.randrange(1, 3))]
+    if rng.random() < 0.25:
+        line["style_runs"] = [[_substring(rng, text), rng.choice([{"scale": rng.choice([0.6, 1.4, 2.2])}, {"bold": rng.choice([True, 2])},
+                                                                   {"rgb": [rng.randrange(256) for _ in range(3)]}, {"tcy": True},
+                                                                   {"weight": "heavy"}])]
+                              for _ in range(rng.randrange(1, 3))]
+    if rng.random() < 0.15:
+        line["speaker"] = rng.choice(["主人公", "A", "名無し"])
+    return line
+
+
+def text_cases(out: str, seed: int, count: int) -> None:
+    """The letters of lines as balloons._paint_text draws them (text_layout's picture, em and corner on the way), the
+    pure functions of tategaki, and each cell's glyph: what the C++ text module must match byte for byte."""
+    from PIL import Image
+
+    from genko import balloons
+    from genko.migrate import _line
+
+    rng = random.Random(seed)
+    units = text_units(rng)
+    glyphs = text_glyphs(rng)
+    root = ROOT / "src" / "genko" / "fonts"
+    jobs = []
+    for n, line in enumerate(_chosen_lines()):
+        for dpi in ((150, 350) if n % 3 else (72, 200, 600)):
+            jobs.append((f"chosen-{n}-{dpi}", line, dpi, None, True))
+    for n in range(count):
+        line = _rand_line(rng)
+        font_path = str(root / rng.choice(["ZenOldMincho-SemiBold.ttf", "DelaGothicOne-Regular.ttf"])) if rng.random() < 0.08 else None
+        jobs.append((f"random-{n}", line, rng.choice([72, 96, 150, 150, 200, 300, 300, 350, 400, 600]), font_path, rng.random() < 0.7))
+    cases = []
+    for name, data, dpi, font_path, show_speaker in jobs:
+        data = {"id": name, "page_index": 0, "x_mm": 6.0, "y_mm": 8.0, **data}
+        line = _line(data)
+        size = (balloons.px((line.x_mm or 0) + (line.w_mm or 40) + 14, dpi), balloons.px((line.y_mm or 0) + (line.h_mm or 20) + 14, dpi))
+        captured = []
+        layout = balloons.text_layout
+
+        def spy(*args, **kwargs):
+            result = layout(*args, **kwargs)
+            captured.append(result)
+            return result
+
+        case = {"id": name, "line": data, "dpi": dpi, "font_path": font_path, "show_speaker": show_speaker, "canvas": list(size)}
+        balloons.text_layout = spy
+        try:
+            canvas = Image.new("RGB", size, (255, 255, 255))
+            balloons._paint_text(canvas, line, dpi, show_speaker, font_path)
+            case["painted"] = _text_png(canvas)
+        except Exception as e:  # (Python's own error: the C++ build raises the same)
+            case["error"] = [type(e).__name__, str(e.args[0]) if e.args else str(e)]
+        finally:
+            balloons.text_layout = layout
+        if captured:
+            image, em, corner = captured[0]
+            case["layout"] = {"mode": image.mode, "size": list(image.size), "png": _text_png(image), "em": int(em),
+                              "corner": [bits(float(corner[0])), bits(float(corner[1]))]}
+        cases.append(case)
+    Path(out).write_text(dumps({"units": units, "glyphs": glyphs, "cases": cases}), encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1501,6 +1853,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("out")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--count", type=int, default=40)
+    p = sub.add_parser("text-cases")
+    p.add_argument("out")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--count", type=int, default=400)
     p = sub.add_parser("render")
     p.add_argument("jobs")
     p.add_argument("--workers", type=int, default=1)
@@ -1521,6 +1877,8 @@ def main(argv: list[str] | None = None) -> int:
         brush_library(args.out, args.config)
     elif args.cmd == "material-library":
         material_library(args.steps, args.out, args.config)
+    elif args.cmd == "text-cases":
+        text_cases(args.out, args.seed, args.count)
     elif args.cmd == "make-books":
         make_books(args.out, args.seed, args.count)
     elif args.cmd == "render":

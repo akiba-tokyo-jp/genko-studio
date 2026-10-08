@@ -38,6 +38,9 @@ genko_library(genko_render
     ops_paint.cpp
     zip.cpp
     materials.cpp
+    text/fonts.cpp
+    text/tategaki.cpp
+    text/lettering.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
