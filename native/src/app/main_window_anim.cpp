@@ -105,7 +105,12 @@ void MainWindow::export_timelapse() {
         flash(QStringLiteral("原稿を保存してから使えます"), 5000);
         return;
     }
+    // (the frames of the save made now are counted and written too: the save is waited for, as Python's commit_now)
     session_->save_now();
+    if (!session_->wait_saved(std::chrono::seconds(30))) {
+        flash(QStringLiteral("保存がまだ終わっていません。最後の変更のコマは、次に書き出すときに入ります"), 5000);
+    }
+    if (!session_->path()) return;
     const core::Page* page = current_page();
     TimelapseDialog dialog(this, *session_->path(), page != nullptr ? page->index.json() : Json(1));
     ask::exec(&dialog);

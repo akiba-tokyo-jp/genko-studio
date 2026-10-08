@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <sstream>
 
 #include "core/error.hpp"
@@ -31,6 +32,16 @@ std::string read_text(const std::filesystem::path& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) return {};
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+// The first bytes of a file (a picture's header).
+std::string read_head(const std::filesystem::path& path, std::size_t count) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return {};
+    std::string out(count, '\0');
+    file.read(out.data(), static_cast<std::streamsize>(count));
+    out.resize(static_cast<std::size_t>(file.gcount()));
+    return out;
 }
 
 // (pages a recording names by a plain file name in the folder only)
@@ -96,27 +107,84 @@ std::vector<Json> frames(const std::filesystem::path& project, std::optional<Jso
     return out;
 }
 
+namespace {
+
+// A page index as Python's dict keys it (1 and 1.0 are one key; anything else by its JSON).
+std::string index_key(const Json& index) {
+    if (index.is_number() || index.is_boolean()) {
+        const double v = index.is_boolean() ? (index.get<bool>() ? 1.0 : 0.0) : index.get<double>();
+        return "n" + core::py_float_repr(v);
+    }
+    return "j" + index.dump();
+}
+
+// The payload's pages and story lines by page index, read once (by reference: the payload is never copied).
+struct PagesByIndex {
+    std::map<std::string, const Json*> pages;              // (the last page of an index, as Python's dict keeps it)
+    std::map<std::string, std::vector<const Json*>> lines;  // (each page's lines, in the story's order)
+    Json owned;                                             // (a payload that is not a list of pages, read as Python iterates it)
+
+    explicit PagesByIndex(const Json& payload) {
+        if (!payload.is_object()) return;
+        const auto pages_at = payload.find("pages");
+        if (pages_at != payload.end()) {
+            const Json* list = &*pages_at;
+            if (!list->is_array()) {
+                owned = core::iterate(*list);
+                list = &owned;
+            }
+            for (const Json& page : *list) pages[index_key(core::py_get(page, "index"))] = &page;
+        }
+        const auto story_at = payload.find("story");
+        if (story_at != payload.end() && story_at->is_array()) {
+            for (const Json& line : *story_at) {
+                if (line.is_object()) {
+                    const auto at = line.find("page_index");
+                    lines[index_key(at != line.end() ? *at : Json())].push_back(&line);
+                } else {
+                    lines[index_key(Json())].push_back(&line);
+                }
+            }
+        }
+    }
+};
+
+bool same_lines(const std::vector<const Json*>* a, const std::vector<const Json*>* b) {
+    const std::size_t na = a != nullptr ? a->size() : 0, nb = b != nullptr ? b->size() : 0;
+    if (na != nb) return false;
+    for (std::size_t i = 0; i < na; ++i)
+        if (!core::py_equals(*(*a)[i], *(*b)[i])) return false;
+    return true;
+}
+
+}  // namespace
+
 std::vector<Json> changed_pages(const Json& before, const Json& after) {
-    const auto pages_of = [](const Json& payload) {
-        return payload.is_object() ? core::py_get(payload, "pages", Json::array()) : Json::array();
-    };
-    const auto lines_of = [](const Json& payload, const Json& index) {
-        Json out = Json::array();
-        if (!payload.is_object()) return out;
-        for (const Json& line : core::iterate(core::py_or(core::py_get(payload, "story", Json::array()), Json::array()))) {
-            if (core::py_equals(core::py_get(line, "page_index"), index)) out.push_back(line);
-        }
-        return out;
-    };
-    const Json old_pages = pages_of(before);
+    const PagesByIndex old(before), now(after);
     std::vector<Json> out;
-    for (const Json& page : core::iterate(pages_of(after))) {
-        const Json index = core::py_get(page, "index");
-        Json old;  // (the last page of that index, as Python's dict keeps it)
-        for (const Json& p : core::iterate(old_pages)) {
-            if (core::py_equals(core::py_get(p, "index"), index)) old = p;
+    const Json* pages = nullptr;
+    Json owned;
+    if (after.is_object()) {
+        const auto at = after.find("pages");
+        if (at != after.end()) {
+            if (at->is_array()) {
+                pages = &*at;
+            } else {
+                owned = core::iterate(*at);
+                pages = &owned;
+            }
         }
-        if (old.is_null() || !core::py_equals(old, page) || !core::py_equals(lines_of(before, index), lines_of(after, index))) {
+    }
+    if (pages == nullptr) return out;
+    const auto lines_at = [](const PagesByIndex& in, const std::string& key) -> const std::vector<const Json*>* {
+        const auto found = in.lines.find(key);
+        return found != in.lines.end() ? &found->second : nullptr;
+    };
+    for (const Json& page : *pages) {
+        const Json index = core::py_get(page, "index");
+        const std::string key = index_key(index);
+        const auto found = old.pages.find(key);
+        if (found == old.pages.end() || !core::py_equals(*found->second, page) || !same_lines(lines_at(old, key), lines_at(now, key))) {
             out.push_back(index);
         }
     }
@@ -158,6 +226,9 @@ std::vector<std::filesystem::path> record(const std::filesystem::path& project, 
         try {
             RenderOptions options;
             options.mode = "proof";
+            // (what this build cannot draw yet — lines and balloons, placed pictures… — is left out of the picture:
+            // a page is recorded without it rather than not at all, since a frame missed at a save is missed for good)
+            options.skip_unported = true;
             bytes = write_jpeg(render_page(*page, dpi, options, &doc).image, 85);
             number = core::py_int(index);
         } catch (const std::exception&) {  // (a picture that cannot be made now must never stop the save)
@@ -240,7 +311,7 @@ std::filesystem::path export_timelapse(const std::filesystem::path& project, con
         const Json file = core::py_get(item, "file");
         if (!file.is_string() || !plain_name(file.get<std::string>())) continue;
         const std::filesystem::path path = dir / core::path_from_utf8(file.get<std::string>());
-        std::optional<Size> size = jpeg_size(read_text(path));
+        std::optional<Size> size = jpeg_size(read_head(path, 64 * 1024));  // (the pictures recorded here: their SOF is near the start)
         if (!size) {
             const auto image = open_recorded(path);
             if (!image) continue;

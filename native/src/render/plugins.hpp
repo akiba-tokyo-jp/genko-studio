@@ -1,8 +1,10 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -22,7 +24,8 @@
 //     (<name>.json: {"name", "params"}), never the code; a plugin's own NAME and PARAMS are read through the runner, once
 //     chosen.
 //   - The runner gets the pixels and the settings only: not the book, not the environment's secrets (a short list of
-//     variables: PATH, the home folder, the language, the temporary folder), and runs in a folder of its own. Asking a
+//     variables: PATH, the home and application data folders, the language, the temporary folder), and runs in a
+//     folder of its own, with a copy of the plugin's code as it was chosen (a file changed since is refused). Asking a
 //     plugin is bounded in time and in how much it may write back.
 // Python is needed only for this: Genko and its own filters never need it.
 
@@ -31,6 +34,7 @@ namespace genko::render::plugins {
 inline constexpr std::string_view kPrefix = "plugin:";
 inline constexpr std::chrono::seconds kDescribeTime{10};
 inline constexpr std::chrono::seconds kRunTime{120};
+inline constexpr std::size_t kRunPixels = 8'000'000;  // (kRunTime for each this many pixels or part: a larger picture is given longer)
 
 // <config>/plugins
 std::filesystem::path folder();
@@ -53,18 +57,20 @@ struct Settings {
 };
 Settings settings();
 void save_settings(const Settings& settings);
-// Choose a plugin to run (as its file is now), or take the choice back.
-void choose(const std::string& key, bool on);
+// Choose a plugin to run (as its file is now), or take the choice back. `listed_sha256`: the file as the person was shown
+// it; core::Error("plugin_changed") when it has changed since (nothing is chosen then).
+void choose(const std::string& key, bool on, const std::optional<std::string>& listed_sha256 = std::nullopt);
 // Plugins are on and this one is chosen, as its file is now.
 bool allowed(const std::string& key);
 
 // The Python the runner is started with (none when there is none).
 std::optional<std::filesystem::path> python();
 
-// A chosen plugin's own name and settings (NAME, PARAMS), read through the runner. Throws PyValueError with Python's
-// words ("no plugin x", "plugin x cannot be loaded (…)", "plugin x has no run(image)") and the runner's ("plugin x
-// failed (…)"); core::Error("plugin_not_allowed") when it is not chosen; core::Error("plugin_runner") when there is no
-// Python or no Pillow in it.
+// A chosen plugin's own name and settings (NAME, PARAMS), read through the runner (once for each file as chosen and each
+// Python; its failures too, until the settings are saved again). Throws PyValueError with Python's words ("no plugin
+// x", "plugin x cannot be loaded (…)", "plugin x has no run(image)"); core::Error("plugin_not_allowed") when it is not
+// chosen (or its file changed since); core::Error("plugin_runner") for the runner's own trouble: no Python, no Pillow in
+// it, not started, stopped before it answered, too slow, too much written back.
 struct Described {
     std::string key;
     std::string name;
@@ -77,7 +83,11 @@ std::vector<Described> available();
 std::vector<std::tuple<std::string, std::string, double, double, double>> fields(std::string_view kind);
 
 // plugins.run: the picture (RGBA, the same size back; its transparency kept when the plugin returns RGB) through the
-// plugin. Its errors as describe's, and "plugin x failed (…)" / "plugin x did not return a picture".
-Image run(std::string_view kind, const Image& image, const core::Json& params = core::Json::object());
+// plugin. Its errors as describe's, and "plugin x failed (…)" / "plugin x did not return a picture". The same request
+// asked again while it runs waits for that run; the last few pictures are kept (at most 256 MB). `stop`: no longer
+// wanted — the runner is stopped and render::Cancelled thrown.
+Image run(std::string_view kind, const Image& image, const core::Json& params = core::Json::object(), const std::stop_token& stop = {});
+// The pictures kept forgotten (tests).
+void forget_made();
 
 }  // namespace genko::render::plugins

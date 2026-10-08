@@ -573,10 +573,31 @@ void MainWindow::show_omitted(const QStringList& elements) {
         unported_->hide();
         return;
     }
-    QStringList words;
-    for (const QString& element : elements) words << omitted_words(element);
-    unported_->setText(QStringLiteral("未移植の要素があります（%1）。このページの編集はできますが、これらはこの版ではまだ表示されません（原稿からは消えません）。")
-                           .arg(words.join(QStringLiteral("・"))));
+    // (what this build cannot draw yet, and the filter plugins left out for their own reasons: said apart)
+    QStringList words, off, failed;
+    for (const QString& element : elements) {
+        if (element.startsWith(QStringLiteral("plugin_off:"))) {
+            off << element.mid(11);
+        } else if (element.startsWith(QStringLiteral("plugin_failed:"))) {
+            failed << element.mid(14);
+        } else {
+            words << omitted_words(element);
+        }
+    }
+    QStringList text;
+    if (!words.isEmpty()) {
+        text << QStringLiteral("未移植の要素があります（%1）。このページの編集はできますが、これらはこの版ではまだ表示されません（原稿からは消えません）。")
+                    .arg(words.join(QStringLiteral("・")));
+    }
+    if (!off.isEmpty()) {
+        text << QStringLiteral("プラグイン（%1）は使う設定になっていないため、その補正を表示していません（レイヤー → プラグインの設定）。")
+                    .arg(off.join(QStringLiteral("・")));
+    }
+    if (!failed.isEmpty()) {
+        text << QStringLiteral("プラグイン（%1）を動かせなかったため、その補正を表示していません（Python と Pillow、プラグインの設定を確かめてください）。")
+                    .arg(failed.join(QStringLiteral("・")));
+    }
+    unported_->setText(text.join(QLatin1Char(' ')));
     unported_->show();
 }
 

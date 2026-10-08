@@ -8,9 +8,12 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <deque>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <mutex>
 
 #include "core/error.hpp"
@@ -18,6 +21,7 @@
 #include "core/poses.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "render/page.hpp"
 #include "storage/fsutil.hpp"
 
 namespace genko::render::plugins {
@@ -38,7 +42,7 @@ from pathlib import Path
 def main():
     out = sys.stdout.buffer
     sys.stdout = sys.stderr  # (a plugin's prints never reach the reply)
-    what, path = sys.argv[1], Path(sys.argv[2])
+    what, path, home = sys.argv[1], Path(sys.argv[2]), sys.argv[3]
     stem = path.stem
 
     def reply(header, data=b""):
@@ -56,6 +60,7 @@ def main():
         if spec is None or spec.loader is None:
             raise ValueError(f"plugin {stem} cannot be loaded")
         module = importlib.util.module_from_spec(spec)
+        module.__file__ = home  # (the code run is the copy chosen; files beside the plugin are found where it lives)
         try:
             spec.loader.exec_module(module)
         except Exception as exc:
@@ -96,12 +101,13 @@ std::string read_file(const std::filesystem::path& path) {
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
-std::string sha256_of(const std::filesystem::path& path) {
-    const std::string bytes = read_file(path);
+std::string sha256_bytes(const std::string& bytes) {
     return QCryptographicHash::hash(QByteArray::fromRawData(bytes.data(), static_cast<qsizetype>(bytes.size())), QCryptographicHash::Sha256)
         .toHex()
         .toStdString();
 }
+
+std::string sha256_of(const std::filesystem::path& path) { return sha256_bytes(read_file(path)); }
 
 std::filesystem::path settings_file() { return core::poses::config_dir() / "plugin_settings.json"; }
 
@@ -116,11 +122,22 @@ std::filesystem::path plugin_file(const std::string& key) {
     return path;
 }
 
-void require_allowed(const std::string& key) {
-    if (!allowed(key)) {
+// The plugin's code as it was chosen: read once, and only these bytes are run (a file changed since is refused).
+struct Code {
+    std::string bytes;
+    std::string sha256;
+};
+Code chosen_code(const std::string& key) {
+    const std::filesystem::path path = plugin_file(key);
+    Code code{read_file(path), {}};
+    code.sha256 = sha256_bytes(code.bytes);
+    const Settings s = settings();
+    const auto chosen = s.chosen.find(key);
+    if (!s.enabled || chosen == s.chosen.end() || !chosen->is_string() || chosen->get<std::string>() != code.sha256) {
         throw core::Error("plugin_not_allowed",
                           "plugin " + key + " is not chosen to run (turn plugins on and choose it in the plugin settings)");
     }
+    return code;
 }
 
 struct Reply {
@@ -128,27 +145,39 @@ struct Reply {
     std::string data;
 };
 
-// One request to the runner, bounded in time and in what it may write back.
-Reply ask_runner(const std::string& key, const std::filesystem::path& plugin, const char* what, const std::string& input,
-                 std::chrono::seconds limit, std::size_t most) {
+// The runner's own trouble (no Python, not started, stopped, too slow, too much written back): never the plugin's
+// answer, so a correction layer is not quietly left as it was — refused for output, left out (and said) on screen.
+[[noreturn]] void runner_trouble(const std::string& message) { throw core::Error("plugin_runner", message); }
+
+// One request to the runner, bounded in time and in what it may write back; `input` streamed to it in pieces after
+// `header`. The plugin's code goes to the runner's own folder as the bytes chosen (never the file as it is by then).
+Reply ask_runner(const std::string& key, const Code& code, const char* what, const std::string& header, const std::string& input,
+                 std::chrono::seconds limit, std::size_t most, const std::stop_token& stop) {
     const auto py = python();
-    if (!py) throw core::Error("plugin_runner", "plugins need Python on this computer (none was found: choose it in the plugin settings)");
+    if (!py) runner_trouble("plugins need Python on this computer (none was found: choose it in the plugin settings)");
     QTemporaryDir dir;
     if (!dir.isValid()) throw core::Error("io", "cannot make a folder for the plugin runner");
     const std::filesystem::path runner = core::path_from_utf8(dir.filePath(QStringLiteral("genko_plugin_runner.py")).toStdString());
+    const std::filesystem::path plugin = core::path_from_utf8(dir.filePath(QStringLiteral("plugin")).toStdString()) / core::path_from_utf8(key + ".py");
     {
+        std::error_code ec;
+        std::filesystem::create_directories(plugin.parent_path(), ec);
         std::ofstream file(runner, std::ios::binary | std::ios::trunc);
         file << kRunner;
-        if (!file) throw core::Error("io", "cannot write the plugin runner");
+        std::ofstream copy(plugin, std::ios::binary | std::ios::trunc);
+        copy.write(code.bytes.data(), static_cast<std::streamsize>(code.bytes.size()));
+        if (!file || !copy) throw core::Error("io", "cannot write the plugin runner");
     }
     QProcess process;
     process.setProgram(QString::fromStdString(core::path_to_utf8(*py)));
     process.setArguments({QString::fromStdString(core::path_to_utf8(runner)), QString::fromLatin1(what),
-                          QString::fromStdString(core::path_to_utf8(plugin))});
+                          QString::fromStdString(core::path_to_utf8(plugin)), QString::fromStdString(core::path_to_utf8(plugin_file(key)))});
     process.setWorkingDirectory(dir.path());
     const QProcessEnvironment outside = QProcessEnvironment::systemEnvironment();
     QProcessEnvironment env;
-    for (const char* name : {"PATH", "HOME", "USERPROFILE", "LANG", "LC_ALL", "LC_CTYPE", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"}) {
+    // (Windows: APPDATA and LOCALAPPDATA are where `pip install --user` puts Pillow)
+    for (const char* name : {"PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "LANG", "LC_ALL", "LC_CTYPE", "SYSTEMROOT", "TEMP", "TMP",
+                             "TMPDIR"}) {
         const QString n = QString::fromLatin1(name);
         if (outside.contains(n)) env.insert(n, outside.value(n));
     }
@@ -157,10 +186,12 @@ Reply ask_runner(const std::string& key, const std::filesystem::path& plugin, co
     process.setProcessEnvironment(env);
     process.start();
     if (!process.waitForStarted(10000)) {
-        throw core::PyValueError("plugin " + key + " failed (the runner could not be started: " + process.errorString().toStdString() + ")");
+        runner_trouble("plugin " + key + " could not be started (" + process.errorString().toStdString() + ")");
     }
-    if (!input.empty()) process.write(input.data(), static_cast<qint64>(input.size()));
-    process.closeWriteChannel();
+    const auto stop_now = [&process] {
+        process.kill();
+        process.waitForFinished(5000);
+    };
     QElapsedTimer clock;
     clock.start();
     std::string out;
@@ -171,54 +202,89 @@ Reply ask_runner(const std::string& key, const std::filesystem::path& plugin, co
         const QByteArray e = process.readAllStandardError();
         if (err.size() < 65536) err.append(e.constData(), static_cast<std::size_t>(std::min<qsizetype>(e.size(), 65536)));
     };
+    const auto check = [&] {
+        if (stop.stop_requested()) {
+            stop_now();
+            throw Cancelled();
+        }
+        if (out.size() > most) {
+            stop_now();
+            runner_trouble("plugin " + key + " wrote back more than a picture");
+        }
+        if (clock.elapsed() > std::chrono::duration_cast<std::chrono::milliseconds>(limit).count()) {
+            stop_now();
+            runner_trouble("plugin " + key + " did not finish in " + std::to_string(limit.count()) + " seconds");
+        }
+    };
+    // the request in pieces (only a few of them waiting in the pipe at a time: the pixels are not copied again)
+    constexpr std::size_t kPiece = 1 << 20;
+    std::size_t sent = 0;
+    if (!header.empty()) process.write(header.data(), static_cast<qint64>(header.size()));
+    while (sent < input.size() && process.state() != QProcess::NotRunning) {
+        if (process.bytesToWrite() < static_cast<qint64>(4 * kPiece)) {
+            const std::size_t n = std::min(kPiece, input.size() - sent);
+            process.write(input.data() + sent, static_cast<qint64>(n));
+            sent += n;
+        }
+        process.waitForBytesWritten(50);
+        drain();
+        check();
+    }
+    process.closeWriteChannel();
     while (process.state() != QProcess::NotRunning) {
         if (process.bytesToWrite() > 0) process.waitForBytesWritten(50);
         process.waitForFinished(50);
         drain();
-        if (out.size() > most) {
-            process.kill();
-            process.waitForFinished(5000);
-            throw core::PyValueError("plugin " + key + " failed (it wrote back more than a picture)");
-        }
-        if (clock.elapsed() > std::chrono::duration_cast<std::chrono::milliseconds>(limit).count()) {
-            process.kill();
-            process.waitForFinished(5000);
-            throw core::PyValueError("plugin " + key + " failed (it did not finish in " + std::to_string(limit.count()) + " seconds)");
-        }
+        check();
     }
     drain();
+    check();
     const auto line = out.find('\n');
-    Json header;
+    Json reply;
     if (line != std::string::npos) {
         try {
-            header = core::parse_python_json(out.substr(0, line));
+            reply = core::parse_python_json(std::string_view(out).substr(0, line));
         } catch (const core::Error&) {
         }
     }
-    if (!header.is_object()) {
+    if (!reply.is_object()) {
         std::string tail = err.size() > 300 ? err.substr(err.size() - 300) : err;
         while (!tail.empty() && (tail.back() == '\n' || tail.back() == '\r')) tail.pop_back();
-        throw core::PyValueError("plugin " + key + " failed (the runner stopped" + (tail.empty() ? std::string() : ": " + tail) + ")");
+        runner_trouble("plugin " + key + " stopped before it answered" + (tail.empty() ? std::string() : " (" + tail + ")"));
     }
-    if (!core::py_truthy(core::py_get(header, "ok"))) {
-        const std::string message = core::py_str(core::py_get(header, "error", "the runner refused"));
-        if (core::py_truthy(core::py_get(header, "runner"))) throw core::Error("plugin_runner", message);
-        throw core::PyValueError(message);
+    if (!core::py_truthy(core::py_get(reply, "ok"))) {
+        const std::string message = core::py_str(core::py_get(reply, "error", "the runner refused"));
+        if (core::py_truthy(core::py_get(reply, "runner"))) runner_trouble(message);
+        throw core::PyValueError(message);  // (the plugin's own errors: Python's ValueError)
     }
-    return Reply{std::move(header), out.substr(line + 1)};
+    out.erase(0, line + 1);
+    return Reply{std::move(reply), std::move(out)};
 }
 
-// The last pictures made (a page drawn in tiles asks a correction layer's plugin for the same picture again and again).
+// The last pictures made (a page drawn in tiles asks a correction layer's plugin for the same picture again and again),
+// and the ones being made (asked again meanwhile: the same run is waited for, not started again).
 struct Made {
     std::string request;  // sha256 of the key, the file, the settings and the pixels
-    Image picture;
+    std::shared_ptr<const Image> picture;
+    std::size_t bytes = 0;
 };
 std::mutex g_made_mutex;
-std::vector<Made> g_made;
+std::deque<Made> g_made;
+std::size_t g_made_bytes = 0;
 constexpr std::size_t kMadeKept = 4;
+constexpr std::size_t kMadeMostBytes = std::size_t{256} << 20;
+std::map<std::string, std::shared_future<std::shared_ptr<const Image>>> g_running;
 
+// What each chosen plugin said about itself (its failures too, so a broken or slow one is not asked again and again);
+// forgotten when the plugin settings are saved.
+struct Said {
+    std::string sha256;
+    std::string python;
+    std::optional<Described> described;
+    std::exception_ptr failed;
+};
 std::mutex g_described_mutex;
-std::map<std::string, std::pair<std::string, Described>> g_described;  // key → (the file's sha256, what it said)
+std::map<std::string, Said> g_described;
 
 }  // namespace
 
@@ -262,10 +328,12 @@ Settings settings() {
         if (text.empty()) return out;
         const Json data = core::parse_python_json(text);
         if (!data.is_object()) return out;
-        out.enabled = data.value("enabled", false) == true;
+        const auto enabled = data.find("enabled");
+        out.enabled = enabled != data.end() && enabled->is_boolean() && enabled->get<bool>();
         if (data.contains("python") && data["python"].is_string()) out.python = data["python"].get<std::string>();
         if (data.contains("chosen") && data["chosen"].is_object()) out.chosen = data["chosen"];
-    } catch (const core::Error&) {
+    } catch (const std::exception&) {  // (a settings file that cannot be read: plugins off)
+        return Settings{};
     }
     return out;
 }
@@ -279,12 +347,18 @@ void save_settings(const Settings& s) {
     options.indent = 1;
     options.item_separator = ",";
     storage::write_atomic(settings_file(), core::dump(data, options));
+    std::lock_guard lock(g_described_mutex);
+    g_described.clear();  // (saved again: each plugin is asked again, e.g. with another Python or Pillow installed)
 }
 
-void choose(const std::string& key, bool on) {
+void choose(const std::string& key, bool on, const std::optional<std::string>& listed_sha256) {
     Settings s = settings();
     if (on) {
-        s.chosen[key] = sha256_of(plugin_file(key));
+        const std::string now = sha256_of(plugin_file(key));
+        if (listed_sha256 && *listed_sha256 != now) {
+            throw core::Error("plugin_changed", "plugin " + key + " changed since the list was shown (look at it again and choose it again)");
+        }
+        s.chosen[key] = now;
     } else {
         s.chosen.erase(key);
     }
@@ -321,22 +395,34 @@ std::optional<std::filesystem::path> python() {
 }
 
 Described describe(const std::string& key) {
-    const std::filesystem::path path = plugin_file(key);
-    require_allowed(key);
-    const std::string sha = sha256_of(path);
+    const Code code = chosen_code(key);
+    const auto py = python();
+    const std::string which = py ? core::path_to_utf8(*py) : std::string();
     {
         std::lock_guard lock(g_described_mutex);
-        if (const auto found = g_described.find(key); found != g_described.end() && found->second.first == sha) return found->second.second;
+        if (const auto found = g_described.find(key); found != g_described.end() && found->second.sha256 == code.sha256 && found->second.python == which) {
+            if (found->second.failed) std::rethrow_exception(found->second.failed);
+            return *found->second.described;
+        }
     }
-    const Reply reply = ask_runner(key, path, "describe", {}, kDescribeTime, 1 << 20);
-    Described out;
-    out.key = key;
-    out.name = core::py_str(core::py_get(reply.header, "name", key));
-    const Json params = core::py_get(reply.header, "params", Json::object());
-    out.params = params.is_object() ? params : Json::object();
-    std::lock_guard lock(g_described_mutex);
-    g_described[key] = {sha, out};
-    return out;
+    Said said{code.sha256, which, std::nullopt, nullptr};
+    try {
+        const Reply reply = ask_runner(key, code, "describe", {}, {}, kDescribeTime, 1 << 20, {});
+        Described out;
+        out.key = key;
+        out.name = core::py_str(core::py_get(reply.header, "name", key));
+        const Json params = core::py_get(reply.header, "params", Json::object());
+        out.params = params.is_object() ? params : Json::object();
+        said.described = out;
+    } catch (const std::exception&) {
+        said.failed = std::current_exception();
+    }
+    {
+        std::lock_guard lock(g_described_mutex);
+        g_described[key] = said;
+    }
+    if (said.failed) std::rethrow_exception(said.failed);
+    return *said.described;
 }
 
 std::vector<Described> available() {
@@ -374,38 +460,81 @@ std::vector<std::tuple<std::string, std::string, double, double, double>> fields
     return out;
 }
 
-Image run(std::string_view kind, const Image& image, const Json& params) {
+Image run(std::string_view kind, const Image& image, const Json& params, const std::stop_token& stop) {
     const std::string key(kind.starts_with(kPrefix) ? kind.substr(kPrefix.size()) : kind);
-    const std::filesystem::path path = plugin_file(key);
-    require_allowed(key);
+    const Code code = chosen_code(key);
     const Image rgba = image.mode() == "RGBA" ? image : image.convert("RGBA");
     Json header = Json::object();
     header["width"] = rgba.width();
     header["height"] = rgba.height();
     header["params"] = params.is_object() ? params : Json::object();
-    std::string input = core::dump(header, core::DumpOptions{}) + "\n";
-    input += rgba.tobytes();
+    const std::string head = core::dump(header, core::DumpOptions{}) + "\n";
+    const std::string pixels = rgba.tobytes();
     QCryptographicHash hash(QCryptographicHash::Sha256);
-    hash.addData(QByteArray::fromStdString(key + "\n" + sha256_of(path) + "\n"));
-    hash.addData(QByteArray::fromRawData(input.data(), static_cast<qsizetype>(input.size())));
+    hash.addData(QByteArray::fromStdString(key + "\n" + code.sha256 + "\n" + head));
+    hash.addData(QByteArray::fromRawData(pixels.data(), static_cast<qsizetype>(pixels.size())));
     const std::string request = hash.result().toHex().toStdString();
-    {
-        std::lock_guard lock(g_made_mutex);
-        for (const Made& made : g_made) {
-            if (made.request == request) return made.picture;
+    for (;;) {
+        std::promise<std::shared_ptr<const Image>> making;
+        std::shared_future<std::shared_ptr<const Image>> waiting;
+        {
+            std::lock_guard lock(g_made_mutex);
+            for (const Made& made : g_made) {
+                if (made.request == request) return *made.picture;
+            }
+            if (const auto running = g_running.find(request); running != g_running.end()) {
+                waiting = running->second;
+            } else {
+                g_running[request] = making.get_future().share();
+            }
         }
+        if (waiting.valid()) {  // (the same picture asked for elsewhere: its run is waited for)
+            while (waiting.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready) {
+                if (stop.stop_requested()) throw Cancelled();
+            }
+            try {
+                return *waiting.get();
+            } catch (const Cancelled&) {
+                continue;  // (that one was no longer wanted: this one asks again)
+            }
+        }
+        std::shared_ptr<const Image> picture;
+        try {
+            // (a large picture is given longer: the time limit is for a page-sized one at screen resolution)
+            const std::size_t count = static_cast<std::size_t>(rgba.width()) * static_cast<std::size_t>(rgba.height());
+            const auto limit = kRunTime * static_cast<std::int64_t>(std::max<std::size_t>(1, (count + kRunPixels - 1) / kRunPixels));
+            Reply reply = ask_runner(key, code, "run", head, pixels, limit, count * 4 + 65536, stop);
+            if (core::py_get(reply.header, "width") != Json(rgba.width()) || core::py_get(reply.header, "height") != Json(rgba.height()) ||
+                reply.data.size() != count * 4) {
+                throw core::PyValueError("plugin " + key + " did not return a picture");
+            }
+            picture = std::make_shared<const Image>(Image::frombytes("RGBA", rgba.size(), reply.data));
+        } catch (...) {
+            making.set_exception(std::current_exception());
+            std::lock_guard lock(g_made_mutex);
+            g_running.erase(request);
+            throw;
+        }
+        making.set_value(picture);
+        std::lock_guard lock(g_made_mutex);
+        g_running.erase(request);
+        const std::size_t bytes = static_cast<std::size_t>(picture->width()) * static_cast<std::size_t>(picture->height()) * 4;
+        if (bytes <= kMadeMostBytes) {
+            g_made.push_back(Made{request, picture, bytes});
+            g_made_bytes += bytes;
+            while (g_made.size() > kMadeKept || g_made_bytes > kMadeMostBytes) {
+                g_made_bytes -= g_made.front().bytes;
+                g_made.pop_front();
+            }
+        }
+        return *picture;
     }
-    const std::size_t pixels = static_cast<std::size_t>(rgba.width()) * static_cast<std::size_t>(rgba.height()) * 4;
-    const Reply reply = ask_runner(key, path, "run", input, kRunTime, pixels + 65536);
-    if (core::py_get(reply.header, "width") != Json(rgba.width()) || core::py_get(reply.header, "height") != Json(rgba.height()) ||
-        reply.data.size() != pixels) {
-        throw core::PyValueError("plugin " + key + " did not return a picture");
-    }
-    Image picture = Image::frombytes("RGBA", rgba.size(), reply.data);
+}
+
+void forget_made() {
     std::lock_guard lock(g_made_mutex);
-    g_made.push_back(Made{request, picture});
-    if (g_made.size() > kMadeKept) g_made.erase(g_made.begin());
-    return picture;
+    g_made.clear();
+    g_made_bytes = 0;
 }
 
 }  // namespace genko::render::plugins

@@ -9,9 +9,13 @@
 #include <QtTest>
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QTemporaryDir>
 
+#include <chrono>
 #include <fstream>
+#include <stop_token>
+#include <thread>
 
 #include "core/actor.hpp"
 #include "core/base64.hpp"
@@ -19,6 +23,7 @@
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/plugins.hpp"
 #include "render/png.hpp"
 #include "rendertest.hpp"
@@ -100,6 +105,14 @@ private slots:
         write(folder_ + "/nopicture.py", "def run(image):\n    return 5\n");
         write(folder_ + "/fails.py", "def run(image):\n    raise RuntimeError('boom')\n");
         write(folder_ + "/smaller.py", "def run(image):\n    return image.convert('RGB').resize((10, 10))\n");
+        write(folder_ + "/counted.py", "import time\ndef run(image):\n    open(" +
+                                           genko::core::dump(Json((scratch_.path() + "/counted.txt").toStdString()), genko::core::DumpOptions{}) +
+                                           ", 'a').write('x')\n    time.sleep(2)\n    return image\n");
+        write(folder_ + "/slowrun.py", "import time\ndef run(image):\n    time.sleep(60)\n    return image\n");
+        write(folder_ + "/beside.py", "from pathlib import Path\nfrom PIL import Image\ndef run(image):\n"
+                                      "    v = int((Path(__file__).parent / 'beside.txt').read_text())\n"
+                                      "    return Image.new('RGBA', image.size, (v, v, v, 255))\n");
+        write(folder_ + "/beside.txt", "77");
         write(folder_ + "/env.py", "import os\nfrom PIL import Image\ndef run(image):\n"
                                    "    bad = 'GENKO_TEST_SECRET' in os.environ\n"
                                    "    return Image.new('RGBA', image.size, (255, 0, 0, 255) if bad else (0, 255, 0, 255))\n");
@@ -108,8 +121,8 @@ private slots:
     void listingRunsNothing() {
         std::vector<std::string> keys;
         for (const auto& item : plugins::listed()) keys.push_back(item.key);
-        QCOMPARE(keys, (std::vector<std::string>{"broken", "crasher", "env", "fails", "flood", "nopicture", "norun", "printer", "sepia",
-                                                 "sideeffect", "sleepy", "smaller"}));
+        QCOMPARE(keys, (std::vector<std::string>{"beside", "broken", "counted", "crasher", "env", "fails", "flood", "nopicture", "norun", "printer", "sepia",
+                                                 "sideeffect", "sleepy", "slowrun", "smaller"}));
         for (const auto& item : plugins::listed()) {
             if (item.key == "sepia") {
                 QVERIFY(item.manifest.has_value());
@@ -198,14 +211,32 @@ private slots:
         QCOMPARE(error_of([] { plugins::describe("norun"); }), QStringLiteral("plugin norun has no run(image)"));
         QVERIFY(error_of([] { plugins::run("plugin:fails", picture()); }).startsWith(QStringLiteral("plugin fails failed (boom")));
         QCOMPARE(error_of([] { plugins::run("plugin:nopicture", picture()); }), QStringLiteral("plugin nopicture did not return a picture"));
-        QVERIFY(error_of([] { plugins::run("plugin:crasher", picture()); }).startsWith(QStringLiteral("plugin crasher failed (the runner stopped")));
-        QVERIFY(error_of([] { plugins::run("plugin:flood", picture()); }).contains("wrote back more than a picture"));
-        QVERIFY(error_of([] { plugins::describe("sleepy"); }).contains("did not finish in 10 seconds"));
+        // the runner's own trouble is its own error (never the plugin's answer: a correction layer is not quietly left as it was)
+        const auto runner_code = [](auto&& f) {
+            try {
+                f();
+            } catch (const genko::core::Error& e) {
+                return QString::fromStdString(e.code()) + QStringLiteral(": ") + QString::fromUtf8(e.what());
+            }
+            return QString();
+        };
+        QVERIFY(runner_code([] { plugins::run("plugin:crasher", picture()); }).startsWith(QStringLiteral("plugin_runner: plugin crasher stopped before it answered")));
+        QVERIFY(runner_code([] { plugins::run("plugin:flood", picture()); }).startsWith(QStringLiteral("plugin_runner: plugin flood wrote back more than a picture")));
+        QElapsedTimer slow;
+        slow.start();
+        QCOMPARE(runner_code([] { plugins::describe("sleepy"); }), QStringLiteral("plugin_runner: plugin sleepy did not finish in 10 seconds"));
+        QVERIFY(slow.elapsed() >= 9000);
+        slow.restart();  // (its failure is kept: asked again, it is not run again)
+        QCOMPARE(runner_code([] { plugins::describe("sleepy"); }), QStringLiteral("plugin_runner: plugin sleepy did not finish in 10 seconds"));
+        QVERIFY2(slow.elapsed() < 2000, qPrintable(QString::number(slow.elapsed())));
         // what a plugin prints never reaches the reply; a smaller picture comes back resized, its alpha kept
         QCOMPARE(plugins::run("plugin:printer", picture()).tobytes(), picture().tobytes());
         const genko::render::Image small = plugins::run("plugin:smaller", picture());
         QCOMPARE(small.size(), picture().size());
         QCOMPARE(small.getpixel(90, 130)[3], 0.0);
+        // a plugin finds the files beside it (its __file__ is where it lives, though the copy chosen is what runs)
+        plugins::choose("beside", true);
+        QCOMPARE(plugins::run("plugin:beside", picture()).getpixel(5, 5), (std::vector<double>{77, 77, 77, 255}));
         // the environment's secrets stay here
         QCOMPARE(plugins::run("plugin:env", picture()).getpixel(0, 0), (std::vector<double>{0, 255, 0, 255}));
         // the broken ones are left out of the list
@@ -213,7 +244,8 @@ private slots:
         for (const auto& d : plugins::available()) names.push_back(d.key);
         QVERIFY(std::find(names.begin(), names.end(), "broken") == names.end());
         QVERIFY(std::find(names.begin(), names.end(), "sepia") != names.end());
-        // no Python: said, nothing run
+        // no Python: said, nothing run (the pictures made before forgotten: nothing comes from a run kept)
+        plugins::forget_made();
         enable(true, scratch_.path() + "/no-such-python");
         try {
             plugins::run("plugin:sepia", picture());
@@ -221,6 +253,112 @@ private slots:
         } catch (const genko::core::Error& e) {
             QCOMPARE(QString::fromStdString(e.code()), QStringLiteral("plugin_runner"));
         }
+        enable(false);
+    }
+
+    void chosenAsShown() {
+        enable(true);
+        plugins::choose("sepia", false);
+        const std::string listed = [] {
+            for (const auto& item : plugins::listed())
+                if (item.key == "sepia") return item.sha256;
+            return std::string();
+        }();
+        write(folder_ + "/sepia.py", std::string(kSepia) + "\n# changed after it was shown\n");
+        try {
+            plugins::choose("sepia", true, listed);
+            QFAIL("chose a file other than the one shown");
+        } catch (const genko::core::Error& e) {
+            QCOMPARE(QString::fromStdString(e.code()), QStringLiteral("plugin_changed"));
+        }
+        QVERIFY(!plugins::allowed("sepia"));
+        write(folder_ + "/sepia.py", kSepia);
+        plugins::choose("sepia", true, listed);
+        QVERIFY(plugins::allowed("sepia"));
+        // a settings file a person changed by hand: read as far as it can be, never a crash
+        const QString file = config_ + "/plugin_settings.json";
+        const std::string kept = genko::test::read_bytes(file);
+        for (const char* odd : {R"({"enabled": 1})", R"({"enabled": "yes", "chosen": []})", "[1, 2]", "{not json", R"({"python": 5})"}) {
+            write(file, odd);
+            QVERIFY2(!plugins::settings().enabled, odd);
+            QVERIFY2(!plugins::allowed("sepia"), odd);
+        }
+        write(file, kept);
+        QVERIFY(plugins::allowed("sepia"));
+        enable(false);
+    }
+
+    void oneRunForOneRequest() {
+        enable(true);
+        plugins::choose("counted", true);
+        plugins::forget_made();
+        QFile::remove(scratch_.path() + "/counted.txt");
+        std::vector<std::thread> asking;
+        std::vector<std::string> got(4);
+        for (std::size_t i = 0; i < got.size(); ++i) {
+            asking.emplace_back([&got, i] { got[i] = plugins::run("plugin:counted", picture()).tobytes(); });
+        }
+        for (auto& t : asking) t.join();
+        for (const auto& bytes : got) QVERIFY(bytes == picture().tobytes());
+        QCOMPARE(genko::test::read_bytes(scratch_.path() + "/counted.txt"), std::string("x"));  // (asked four times, run once)
+        enable(false);
+    }
+
+    void stoppedWhenNoLongerWanted() {
+        enable(true);
+        plugins::choose("slowrun", true);
+        std::stop_source stop;
+        std::thread later([&stop] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            stop.request_stop();
+        });
+        QElapsedTimer clock;
+        clock.start();
+        bool cancelled = false;
+        try {
+            plugins::run("plugin:slowrun", picture(), Json::object(), stop.get_token());
+        } catch (const genko::render::Cancelled&) {
+            cancelled = true;
+        }
+        later.join();
+        QVERIFY(cancelled);
+        QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));  // (the runner was stopped, not waited for)
+        enable(false);
+    }
+
+    void correctionLayerNeverQuietlyLeftOut() {
+        // a correction layer whose plugin cannot run: refused for output, left out and said (with why) on screen
+        enable(true);
+        plugins::choose("crasher", true);
+        genko::core::Document doc = genko::core::new_episode("p", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        const genko::core::Actor person("human:作者");
+        doc = bus.apply(doc, Json::parse(R"([{"op": "add_layer", "page": 1, "kind": "adjust", "id": "a1"},
+                                             {"op": "add_layer", "page": 1, "kind": "adjust", "id": "a2"}])"),
+                        person, false)
+                  .doc;
+        // (no op makes a correction layer of a plugin — add_layer takes the built-in adjustments only — but a book may
+        // hold one, and the page draws it as Python's _adjusted does)
+        for (genko::core::Layer& layer : doc.edit_page(0).layers) {
+            if (layer.id == "a1") layer.adjust = Json{{"kind", "plugin:crasher"}};
+            if (layer.id == "a2") layer.adjust = Json{{"kind", "plugin:sepia"}};
+        }
+        plugins::choose("sepia", false);
+        genko::render::RenderOptions output;
+        const QString refused = [&] {
+            try {
+                (void)genko::render::render_page(doc.page(0), 20, output, &doc);
+            } catch (const genko::core::Error& e) {
+                return QString::fromStdString(e.code());
+            }
+            return QString();
+        }();
+        QVERIFY2(refused == QStringLiteral("plugin_runner") || refused == QStringLiteral("plugin_not_allowed"), qPrintable(refused));
+        genko::render::RenderOptions screen;
+        screen.skip_unported = true;
+        const auto shown = genko::render::render_page(doc.page(0), 20, screen, &doc);
+        QVERIFY(std::find(shown.omitted.begin(), shown.omitted.end(), "plugin_failed:crasher") != shown.omitted.end());
+        QVERIFY(std::find(shown.omitted.begin(), shown.omitted.end(), "plugin_off:sepia") != shown.omitted.end());
         enable(false);
     }
 };

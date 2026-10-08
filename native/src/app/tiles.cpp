@@ -5,6 +5,7 @@
 #include <QThread>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <future>
 #include <mutex>
@@ -149,11 +150,17 @@ void PageRenderer::set_mode(const std::string& mode) {
 // that needs it while the others wait for it.
 struct PageRenderer::OnionStore {
     using Value = std::shared_ptr<const render::Image>;
+    // (two kept: the whole page's tiles and the finer ones in sight ask at their own resolutions, turn about)
+    struct Slot {
+        std::shared_ptr<const core::Page> page;
+        std::int64_t frame = 0;
+        int dpi = 0;
+        std::shared_future<Value> value;
+        std::uint64_t used = 0;
+    };
     std::mutex mutex;
-    std::shared_ptr<const core::Page> page;
-    std::int64_t frame = 0;
-    int dpi = 0;
-    std::shared_future<Value> value;
+    std::array<Slot, 2> kept;  // (not "slots": a Qt word)
+    std::uint64_t clock = 0;
 
     Value get(const std::shared_ptr<const core::Page>& of, std::int64_t at, int resolution, const DocPtr& doc) {
         std::promise<Value> made;
@@ -161,14 +168,20 @@ struct PageRenderer::OnionStore {
         bool mine = false;
         {
             std::lock_guard lock(mutex);
-            if (page != of || frame != at || dpi != resolution || !value.valid()) {
-                page = of;
-                frame = at;
-                dpi = resolution;
-                value = made.get_future().share();
+            Slot* slot = nullptr;
+            for (Slot& s : kept) {
+                if (s.value.valid() && s.page == of && s.frame == at && s.dpi == resolution) slot = &s;
+            }
+            if (slot == nullptr) {
+                slot = &*std::min_element(kept.begin(), kept.end(), [](const Slot& a, const Slot& b) { return a.used < b.used; });
+                slot->page = of;
+                slot->frame = at;
+                slot->dpi = resolution;
+                slot->value = made.get_future().share();
                 mine = true;
             }
-            wait = value;
+            slot->used = ++clock;
+            wait = slot->value;
         }
         if (mine) {
             try {
@@ -427,7 +440,7 @@ void PageRenderer::dispatch() {
                     options.skip_unported = true;  // (a preview on screen: what is not drawn yet is reported)
                     options.region = render::RenderRegion{region.x(), region.y(), region.width(), region.height()};
                     options.stop = stop;
-                    const std::shared_ptr<const core::Page> raw = doc->pages[page_index];
+                    const std::shared_ptr<const core::Page> raw = doc->pages.at(page_index);  // (a page gone meanwhile: caught below)
                     render::RenderResult drawn;
                     if (core::anim::is_animation(*raw)) {  // (the frame shown, with the frames around it faint)
                         options.at_frame = true;

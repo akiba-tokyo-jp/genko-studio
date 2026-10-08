@@ -52,7 +52,8 @@ PluginsDialog::PluginsDialog(QWidget* parent) : QDialog(parent) {
     auto* note = new QLabel(QStringLiteral(
         "プラグインは、Genko の外の別のプロセスとして、このコンピューターの Python で動きます。落ちても原稿は壊れませんが、"
         "安全な隔離（サンドボックス）ではありません。プラグインはそのコードにできることを何でもできるので、信頼できるものだけを選んでください。"
-        "渡すのは、フィルターをかけるレイヤーの絵と設定だけです（原稿の他の部分やパスワードは渡しません）。"));
+        "渡すのは、フィルターをかける絵（そのレイヤーの絵。補正レイヤーでは、その下に描かれたページの絵）と設定だけです"
+        "（原稿のファイルやパスワードは渡しません）。"));
     note->setWordWrap(true);
     theme::role(note, "hint");
     list = new QListWidget;
@@ -62,6 +63,7 @@ PluginsDialog::PluginsDialog(QWidget* parent) : QDialog(parent) {
         if (item.manifest && item.manifest->contains("name")) text += QStringLiteral(" — ") + QString::fromStdString(core::py_str((*item.manifest)["name"]));
         auto* row = new QListWidgetItem(text, list);
         row->setData(Qt::UserRole, QString::fromStdString(item.key));
+        row->setData(Qt::UserRole + 1, QString::fromStdString(item.sha256));  // (the file as shown: only that is chosen)
         row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
         row->setCheckState(item.chosen ? Qt::Checked : Qt::Unchecked);
         row->setToolTip(QStringLiteral("sha256 %1（ファイルが変わったら選び直します）").arg(QString::fromStdString(item.sha256.substr(0, 16))));
@@ -137,7 +139,7 @@ bool PluginsDialog::keep() {
                 row->setCheckState(Qt::Unchecked);
                 continue;
             }
-            render::plugins::choose(key.toStdString(), on);
+            render::plugins::choose(key.toStdString(), on, row->data(Qt::UserRole + 1).toString().toStdString());
         }
     } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));

@@ -45,10 +45,10 @@ struct Studio {
     std::shared_ptr<app::Session> session;
     std::unique_ptr<app::MainWindow> window;
     gui_test::Answers answers;
-    Studio() {
+    explicit Studio(const core::Document& doc = book_doc()) {
         (void)gui_test::config_folder();
         book = gui_test::path_of(tmp.path() + "/w.genko");
-        gui_test::write_book(book, book_doc());
+        gui_test::write_book(book, doc);
         session = app::Session::open(book, gui_test::quick(gui_test::path_of(tmp.path() + "/recovery")));
         window = std::make_unique<app::MainWindow>(session);
         window->resize(1280, 800);
@@ -162,7 +162,10 @@ private slots:
     }
 
     void timelapseRecordsAndExports() {
-        Studio s;
+        // (page 2 has a line of dialogue: recorded too, without what this build cannot draw yet)
+        core::Document lined = book_doc();
+        lined.add_line(core::Num(2), "台詞です", "", std::nullopt, "", core::Num(50), core::Num(50));
+        Studio s(lined);
         app::MainWindow* w = s.window.get();
         QAction* lapse = w->action("act_timelapse");
         QVERIFY(lapse != nullptr && lapse->isCheckable());
@@ -183,6 +186,8 @@ private slots:
         QVERIFY(gui_test::wait_for([&] { return render::timelapse::frames(s.book).size() == 3; }, 20000));
         QCOMPARE(render::timelapse::frames(s.book).back()["page"], Json(1));
         QCOMPARE(render::timelapse::frames(s.book, Json(1)).size(), std::size_t{2});
+        // a change to page 2, written out at once: the save is waited for, so its picture is in
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_note"}, {"page", 2}, {"note", "あとで直す"}}})));
         // written out from its dialog: all pages as a GIF
         const QString out = s.tmp.path() + "/lapse.gif";
         s.answers.responder->save_path = [out](const QString&, const QString&) { return out; };
@@ -190,7 +195,7 @@ private slots:
         s.answers.responder->exec = [&](QDialog* dialog) {
             auto* d = qobject_cast<app::TimelapseDialog*>(dialog);
             if (d == nullptr) return int(QDialog::Rejected);
-            if (d->count() != 3) return int(QDialog::Rejected);
+            if (d->count() != 4) return int(QDialog::Rejected);
             d->movie->setCurrentIndex(d->movie->findData(QStringLiteral("gif")));
             d->run();
             ran = d->written.has_value();
@@ -199,6 +204,7 @@ private slots:
         w->action("act_timelapse_export")->trigger();
         QVERIFY(ran);
         QVERIFY(QFile::exists(out));
+        QCOMPARE(render::timelapse::frames(s.book).back()["page"], Json(2));
         // off
         lapse->trigger();
         QVERIFY(!render::timelapse::is_on(w->book()));

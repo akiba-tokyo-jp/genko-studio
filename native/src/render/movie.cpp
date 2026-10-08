@@ -94,7 +94,12 @@ public:
             }
             current = value;
         }
-        if (current >= 0) put(current, size);
+        if (current >= 0) {
+            put(current, size);
+            // the decoder adds an entry for this last code too (unless it is the first after a clear), and widens its
+            // codes when that fills the size: the clear and end codes come at the width it then reads (giflib)
+            if (max_code > clear + 1 && max_code + 1 >= (1 << size) && size < 12) ++size;
+        }
         put(clear, size);
         put(clear + 1, min_bits + 1);
         if (bits_ > 0) byte(static_cast<std::uint8_t>(held_ & 0xff));
@@ -145,7 +150,7 @@ std::string chunk(std::string_view type, std::string_view data) {
     out.append(data);
     uLong crc = crc32(0L, Z_NULL, 0);
     crc = crc32(crc, reinterpret_cast<const Bytef*>(type.data()), static_cast<uInt>(type.size()));
-    crc = crc32(crc, reinterpret_cast<const Bytef*>(data.data()), static_cast<uInt>(data.size()));
+    if (!data.empty()) crc = crc32(crc, reinterpret_cast<const Bytef*>(data.data()), static_cast<uInt>(data.size()));  // (zlib: crc32(c, NULL, 0) is 0)
     put32be(out, static_cast<std::uint32_t>(crc));
     return out;
 }
@@ -534,7 +539,14 @@ std::filesystem::path Writer::finish(int* frames) {
                           QString::fromStdString(core::path_to_utf8(w.part))});
         run.start();
         if (!run.waitForStarted(30000)) throw core::PyValueError("ffmpeg failed: it could not be started");
-        run.waitForFinished(-1);
+        run.closeWriteChannel();  // (nothing to read: ffmpeg never waits on its input)
+        // (a long movie takes long; one that never ends is stopped: half an hour and a second a frame)
+        const int limit_s = 1800 + w.mp4_count;
+        if (!run.waitForFinished(limit_s * 1000)) {
+            run.kill();
+            run.waitForFinished(5000);
+            throw core::PyValueError("ffmpeg failed: it did not finish in " + std::to_string(limit_s / 60) + " minutes");
+        }
         if (run.exitStatus() != QProcess::NormalExit || run.exitCode() != 0) {
             const QString err = QString::fromUtf8(run.readAllStandardError()).trimmed();
             throw core::PyValueError("ffmpeg failed: " + err.left(300).toStdString());
@@ -598,6 +610,11 @@ std::filesystem::path write_movie(const std::vector<Image>& pictures, const std:
     Writer writer(dest, fps, fmt, hold, loop);
     for (const Image& picture : pictures) writer.add(picture);
     return writer.finish(frames);
+}
+
+std::string gif_lzw(const std::vector<std::uint8_t>& indices, int min_bits) {
+    LzwEncoder lzw;
+    return lzw.encode(indices.data(), indices.size(), min_bits);
 }
 
 std::optional<std::filesystem::path> ffmpeg() {

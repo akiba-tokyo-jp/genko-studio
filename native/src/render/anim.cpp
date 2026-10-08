@@ -142,7 +142,8 @@ std::vector<std::filesystem::path> export_animation(const core::Page& page, cons
     }
     if (first.size() != size) first = first.resize(size, Resample::Lanczos);
     if (format == "frames") {
-        // (each file written beside its name and renamed when all are drawn: a failed export leaves none)
+        // (each file written beside its name and renamed only when all are drawn: a failed drawing leaves the folder as
+        // it was; a failure while renaming — rare, in one folder — may leave some new frames beside old ones)
         std::error_code error;
         std::filesystem::create_directories(dest, error);
         if (error) throw core::Error("io", "cannot make the folder: " + core::path_to_utf8(dest));

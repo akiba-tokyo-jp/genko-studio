@@ -167,6 +167,7 @@ void add_anim_folder(OpContext& c) {
     }
     const std::string id = folder.id;
     page.layers.push_back(std::move(folder));
+    if (!data.contains("tracks")) (void)subscript(data, "tracks");  // (Python's KeyError('tracks'), never a new key)
     Json& tracks = data["tracks"];
     if (!tracks.is_array()) raise_attribute_error(tracks, "append");
     tracks.push_back(Json{{"folder", id}, {"cels", Json::array()}});

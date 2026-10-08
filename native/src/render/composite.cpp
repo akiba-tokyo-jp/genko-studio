@@ -367,7 +367,7 @@ Image apply_filter(const Ctx& ctx, const Image& image, const std::string& kind, 
             const std::string key = kind.substr(plugins::kPrefix.size());
             if (!plugins::allowed(key)) {
                 if (ctx.skip_unported) {
-                    skip_unported(ctx, "plugin:" + key);
+                    skip_unported(ctx, "plugin_off:" + key);  // (said on screen as not chosen, not as not ported)
                     *skipped = true;
                     return rgba;
                 }
@@ -379,11 +379,13 @@ Image apply_filter(const Ctx& ctx, const Image& image, const std::string& kind, 
                                   "plugin " + key + " is not chosen to run (turn plugins on and choose it in the plugin settings)");
             }
             try {
-                return plugins::run(kind, rgba, params);
+                return plugins::run(kind, rgba, params, ctx.stop);
             } catch (const core::Error& error) {
-                // (no Python or no Pillow to run it: left out on screen and reported, refused for output)
-                if (error.code() != "plugin_runner" || !ctx.skip_unported) throw;
-                skip_unported(ctx, "plugin:" + key);
+                // (the runner's trouble — no Python or Pillow, too slow, stopped… — or a file changed since it was
+                // chosen: left out on screen and said, refused for output; never quietly drawn without it)
+                const bool trouble = error.code() == "plugin_runner" || error.code() == "plugin_not_allowed";
+                if (!trouble || !ctx.skip_unported) throw;
+                skip_unported(ctx, (error.code() == "plugin_runner" ? "plugin_failed:" : "plugin_off:") + key);
                 *skipped = true;
                 return rgba;
             }

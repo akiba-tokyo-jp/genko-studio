@@ -1,9 +1,11 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -51,6 +53,10 @@ private:
 // timelapse.write_movie(pictures, dest, fps, fmt, hold=hold, loop=loop): Writer with each picture added.
 std::filesystem::path write_movie(const std::vector<Image>& pictures, const std::filesystem::path& dest, double fps,
                                   std::string_view fmt, double hold = 0.0, bool loop = true, int* frames = nullptr);
+
+// GIF's LZW of a frame's colour indices (codes of min_bits + 1 bits and up, least significant bit first, in sub-blocks of
+// up to 255 bytes, ended by the empty block): what a frame's image data holds (tests decode it strictly).
+std::string gif_lzw(const std::vector<std::uint8_t>& indices, int min_bits);
 
 // shutil.which("ffmpeg").
 std::optional<std::filesystem::path> ffmpeg();

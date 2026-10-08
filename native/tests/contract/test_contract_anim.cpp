@@ -15,6 +15,10 @@
 
 #include <QtTest>
 
+#include <array>
+#include <optional>
+#include <random>
+
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
@@ -319,8 +323,8 @@ private slots:
                 keys = {"names", "sizes", "frames"};
             } else if (std::string(fmt) == "webp") {
                 keys = {"format", "size", "n_frames", "loop", "durations", "sizes"};
-            } else {
-                keys = {"format", "size", "n_frames", "loop", "durations", "sizes", "frames"};
+            } else {  // (strict: a reader stricter than Pillow — every PNG chunk's CRC, every GIF code — finds nothing wrong)
+                keys = {"format", "size", "n_frames", "loop", "durations", "sizes", "frames", "strict"};
             }
             for (const std::string& key : keys) {
                 QVERIFY2(mine.value(key, Json()) == expected.value(key, Json()),
@@ -340,7 +344,15 @@ private slots:
         const QString py_book = path("lapse-py"), cpp_book = path("lapse-cpp");
         const auto made_py = python({"new", py_book, "--pages", "2"});
         QVERIFY2(made_py.finished && made_py.exit_code == 0, made_py.err.right(2000).constData());
-        const auto made_cpp = genko::test::run_genko({"new", cpp_book, "--pages", "2"});
+        // a line of dialogue on page 2 first (written by Python: this build does not type lines yet), and this build's
+        // book converted from that one: a page with lines is recorded too, without what this build cannot draw yet
+        {
+            const QString file = path("lapse-line.json");
+            genko::test::write_bytes(file, R"([{"op": "add_line", "page": 2, "text": "台詞です", "x_mm": 50, "y_mm": 50}])");
+            const auto line = python({"apply", py_book, file});
+            QVERIFY2(line.finished && line.exit_code == 0, (line.out + line.err.right(2000)).constData());
+        }
+        const auto made_cpp = genko::test::run_genko({"migrate", py_book, cpp_book});
         QVERIFY2(made_cpp.finished && made_cpp.exit_code == 0, (made_cpp.out + made_cpp.err).constData());
         const char* const steps[] = {
             R"([{"op": "set_timelapse", "on": true}])",
@@ -390,11 +402,81 @@ private slots:
         const auto read = genko::test::harness({"movie-info", path("lapse.json"), py_gif, cpp_gif}, path("pyenv"));
         QVERIFY2(read.finished && read.exit_code == 0, read.err.right(2000).constData());
         const Json info = genko::test::read_json(path("lapse.json"));
-        for (const char* key : {"format", "size", "n_frames", "loop", "durations", "sizes"}) {
+        for (const char* key : {"format", "size", "n_frames", "loop", "durations", "sizes", "strict"}) {
             QVERIFY2(info[py_gif.toStdString()][key] == info[cpp_gif.toStdString()][key],
                      (std::string(key) + ": Python " + info[py_gif.toStdString()][key].dump() + ", this build " +
                       info[cpp_gif.toStdString()][key].dump()).c_str());
         }
+    }
+
+    // GIF's codes read as strictly as giflib reads them (Pillow forgives a code of the wrong width at the end): random
+    // pictures of every kind of colour count and length, the table filled and cleared, each decoded to the same pixels.
+    void gifCodesReadStrictly() {
+        std::mt19937 rng(11);
+        const auto decode = [](const std::string& stream, int min_bits) -> std::optional<std::vector<std::uint8_t>> {
+            std::string data;
+            for (std::size_t at = 0; at < stream.size() && stream[at] != 0;) {
+                const auto n = static_cast<std::size_t>(static_cast<unsigned char>(stream[at]));
+                data.append(stream, at + 1, n);
+                at += n + 1;
+            }
+            const int clear = 1 << min_bits, end = clear + 1;
+            int size = min_bits + 1;
+            std::vector<std::string> table;
+            const auto reset = [&] {
+                table.clear();
+                for (int i = 0; i < clear; ++i) table.push_back(std::string(1, static_cast<char>(i)));
+                table.emplace_back();
+                table.emplace_back();
+                size = min_bits + 1;
+            };
+            reset();
+            std::vector<std::uint8_t> out;
+            int prev = -1;
+            std::size_t bit = 0;
+            for (;;) {
+                if (bit + static_cast<std::size_t>(size) > data.size() * 8) return std::nullopt;
+                int code = 0;
+                for (int k = 0; k < size; ++k, ++bit)
+                    code |= ((static_cast<unsigned char>(data[bit / 8]) >> (bit % 8)) & 1) << k;
+                if (code == clear) {
+                    reset();
+                    prev = -1;
+                    continue;
+                }
+                if (code == end) break;
+                std::string entry;
+                if (prev < 0) {
+                    if (code >= clear) return std::nullopt;
+                    entry = table[static_cast<std::size_t>(code)];
+                } else if (code < static_cast<int>(table.size())) {
+                    entry = table[static_cast<std::size_t>(code)];
+                    if (table.size() < 4096) table.push_back(table[static_cast<std::size_t>(prev)] + entry.substr(0, 1));
+                } else if (code == static_cast<int>(table.size()) && table.size() < 4096) {
+                    entry = table[static_cast<std::size_t>(prev)] + table[static_cast<std::size_t>(prev)].substr(0, 1);
+                    table.push_back(entry);
+                } else {
+                    return std::nullopt;
+                }
+                for (const char c : entry) out.push_back(static_cast<std::uint8_t>(c));
+                prev = code;
+                if (prev >= 0 && static_cast<int>(table.size()) == (1 << size) && size < 12) ++size;
+            }
+            return out;
+        };
+        int checked = 0;
+        for (int t = 0; t < 3000; ++t) {
+            const int min_bits = std::array<int, 5>{2, 3, 4, 7, 8}[rng() % 5];
+            const std::size_t n = std::array<std::size_t, 7>{1, 2, 5, 50, 300, 3000, 20000}[rng() % 7];
+            const int colours = std::array<int, 3>{2, 3, 1 << min_bits}[rng() % 3];
+            std::vector<std::uint8_t> indices(n);
+            for (auto& v : indices) v = static_cast<std::uint8_t>(rng() % static_cast<unsigned>(std::min(colours, 1 << min_bits)));
+            const auto back = decode(genko::render::movie::gif_lzw(indices, min_bits), min_bits);
+            QVERIFY2(back.has_value(), qPrintable(QStringLiteral("stream %1 (%2 bits, %3 pixels) does not decode").arg(t).arg(min_bits).arg(n)));
+            QVERIFY2(*back == indices, qPrintable(QStringLiteral("stream %1 decodes to other pixels").arg(t)));
+            ++checked;
+        }
+        QCOMPARE(checked, 3000);
     }
 
     // Beyond Python: a camera rect that is not finite is refused (Python keeps NaN and writes it into the book).

@@ -2205,6 +2205,100 @@ def unit_tables() -> dict:
     }
 
 
+def _gif_lzw_strict(data: bytes, min_bits: int, count: int) -> str:
+    """A frame's image data decoded as strictly as giflib: every code within the table, codes widened when the table
+    fills its size, the end code at the width then read, exactly the pixels of the frame."""
+    clear, end = 1 << min_bits, (1 << min_bits) + 1
+    size = min_bits + 1
+    table = [bytes([i]) for i in range(clear)] + [b"", b""]
+    out = bytearray()
+    prev = None
+    value, total, at = int.from_bytes(data, "little"), len(data) * 8, 0
+    while True:
+        if at + size > total:
+            return "the data ends before the end code"
+        code = (value >> at) & ((1 << size) - 1)
+        at += size
+        if code == clear:
+            table, size, prev = table[:clear + 2], min_bits + 1, None
+            continue
+        if code == end:
+            break
+        if prev is None:
+            if code >= clear:
+                return f"illegal first code {code}"
+            out += table[code]
+            prev = code
+            continue
+        if code < len(table):
+            entry = table[code]
+            if len(table) < 4096:
+                table.append(table[prev] + entry[:1])
+        elif code == len(table) and len(table) < 4096:
+            entry = table[prev] + table[prev][:1]
+            table.append(entry)
+        else:
+            return f"illegal code {code} (table of {len(table)})"
+        out += entry
+        prev = code
+        if len(table) == (1 << size) and size < 12:
+            size += 1
+    return "ok" if len(out) == count else f"{len(out)} pixels for {count}"
+
+
+def strict_check(path: Path) -> str:
+    """What a strict reader says of a PNG (every chunk's CRC, ending with IEND) or a GIF (every frame's LZW); "ok"."""
+    import zlib
+
+    data = path.read_bytes()
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        at = 8
+        while at + 12 <= len(data):
+            length = int.from_bytes(data[at:at + 4], "big")
+            kind, body = data[at + 4:at + 8], data[at + 8:at + 8 + length]
+            crc = int.from_bytes(data[at + 8 + length:at + 12 + length], "big")
+            if zlib.crc32(kind + body) & 0xFFFFFFFF != crc:
+                return f"bad CRC in {kind.decode('latin-1')}"
+            at += 12 + length
+            if kind == b"IEND":
+                return "ok" if at == len(data) else "bytes after IEND"
+        return "no IEND"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        at = 13
+        if data[10] & 0x80:
+            at += 3 << ((data[10] & 7) + 1)
+        while at < len(data):
+            kind = data[at]
+            if kind == 0x3B:
+                return "ok"
+            if kind == 0x21:
+                at += 2
+                while data[at]:
+                    at += data[at] + 1
+                at += 1
+                continue
+            if kind != 0x2C:
+                return f"unknown block {kind:#x}"
+            w = int.from_bytes(data[at + 5:at + 7], "little")
+            h = int.from_bytes(data[at + 7:at + 9], "little")
+            flags = data[at + 9]
+            at += 10
+            if flags & 0x80:
+                at += 3 << ((flags & 7) + 1)
+            min_bits = data[at]
+            at += 1
+            blocks = bytearray()
+            while data[at]:
+                blocks += data[at + 1:at + 1 + data[at]]
+                at += data[at] + 1
+            at += 1
+            said = _gif_lzw_strict(bytes(blocks), min_bits, w * h)
+            if said != "ok":
+                return said
+        return "no trailer"
+    return "not checked"
+
+
 def movie_info(path: str) -> dict:
     """A moving picture as Pillow plays it (or a folder of numbered PNGs, or an MP4 as ffprobe counts it): its
     format, size, frames (each one's RGB pixels as sha256, and how long it shows), loop."""
@@ -2242,7 +2336,7 @@ def movie_info(path: str) -> dict:
             durations.append(frame.info.get("duration"))
             sizes.append(list(rgb.size))
         return {"format": im.format, "size": list(im.size), "n_frames": getattr(im, "n_frames", 1), "loop": im.info.get("loop"),
-                "durations": durations, "sizes": sizes, "frames": frames}
+                "durations": durations, "sizes": sizes, "frames": frames, "strict": strict_check(target)}
 
 
 def movie_infos(out: str, paths: list[str]) -> None:

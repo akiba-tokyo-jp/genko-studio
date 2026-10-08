@@ -191,6 +191,14 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(plugin (.*?) has no run\(image\))", "プラグイン「\\1」に処理（run）がありません"));
         r.push_back(rule("plugin (.*?) failed.*", "プラグイン「\\1」の処理が失敗しました"));
         r.push_back(rule("plugin (.*?) did not return a picture", "プラグイン「\\1」が絵を返しませんでした"));
+        r.push_back(rule("plugins need Python on this computer.*", "プラグインを使うには、このパソコンに Python が要ります（レイヤー → プラグインの設定で選べます）"));
+        r.push_back(rule("plugins need Pillow in the Python that runs them.*", "プラグインを動かす Python に Pillow が要ります（pip install Pillow）"));
+        r.push_back(rule("plugin (.*?) is not chosen to run.*", "プラグイン「\\1」は使う設定になっていません（レイヤー → プラグインの設定で選びます）"));
+        r.push_back(rule("plugin (.*?) could not be started.*", "プラグイン「\\1」を動かす Python を起動できませんでした（プラグインの設定で Python を確かめてください）"));
+        r.push_back(rule("plugin (.*?) stopped before it answered.*", "プラグイン「\\1」が途中で止まりました（落ちたか、メモリが足りなかった可能性があります）"));
+        r.push_back(rule(R"(plugin (.*?) did not finish in (\d+) seconds)", "プラグイン「\\1」が \\2 秒で終わらなかったため止めました"));
+        r.push_back(rule("plugin (.*?) wrote back more than a picture", "プラグイン「\\1」が絵より多くのデータを返したため止めました"));
+        r.push_back(rule("plugin (.*?) changed since the list was shown.*", "プラグイン「\\1」は一覧を出した後に変わっています。確かめてから選び直してください"));
         r.push_back(rule("CMYK is written as TIFF or PDF", "CMYK は TIFF か PDF で書き出します"));
         r.push_back(rule("Lab PSD files are not supported: save it as RGB or CMYK", "Lab カラーの PSD は読めません。RGB か CMYK で保存し直してください"));
         r.push_back(rule("MP4 needs ffmpeg on this computer; WebP, GIF and PNG need nothing",
@@ -198,6 +206,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(PSD depth (\d+) is not supported)", "\\1 ビットの PSD は読めません"));
         r.push_back(rule("broken PSD layer record", "PSD のレイヤーの情報が壊れています"));
         r.push_back(rule("color must be (?:auto, )?rgb, cmyk(?:, gray)? or (?:gray|bitonal)", "色は自動・RGB・CMYK・グレー・2 階調のどれかです"));
+        r.push_back(rule(R"(ffmpeg failed: it did not finish in (\d+) minutes)", "動画にできませんでした（ffmpeg が \\1 分で終わらなかったため止めました）"));
+        r.push_back(rule("ffmpeg failed: it could not be started", "動画にできませんでした（ffmpeg を起動できませんでした）"));
         r.push_back(rule("ffmpeg failed: (.*)", "動画にできませんでした（\\1）"));
         r.push_back(rule("format must be one of (.*)", "形式は \\1 のどれかです"));
         r.push_back(rule(R"(import_psd needs path or psd \(base64\))", "読み込む PSD のファイルを指定します"));
