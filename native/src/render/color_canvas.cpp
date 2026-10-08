@@ -232,7 +232,8 @@ std::array<double, 4> ColorCanvas::linear_pixel(std::size_t i) const {
     return {p[0], p[1], p[2], p[3]};
 }
 bool ColorCanvas::is_opaque() const {
-    return std::all_of(impl_->pixels.begin(), impl_->pixels.end(), [](const Pixel& p) { return p[3] == 1; });
+    // (a raster stretched over the page is resampled: an opaque one's weights sum to 1 within rounding)
+    return std::all_of(impl_->pixels.begin(), impl_->pixels.end(), [](const Pixel& p) { return p[3] >= 1 - 1e-12; });
 }
 bool ColorCanvas::keeps_preceding_alpha() const {
     return std::all_of(impl_->pixels.begin(), impl_->pixels.end(), [](const Pixel& p) { return p[3] == p[4]; });
