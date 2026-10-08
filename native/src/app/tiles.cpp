@@ -12,6 +12,7 @@
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
 #include "render/not_yet_ported.hpp"
+#include "render/colour.hpp"
 #include "render/page.hpp"
 
 namespace genko::app {
@@ -135,6 +136,14 @@ void PageRenderer::clear() {
 void PageRenderer::set_mode(const std::string& mode) {
     if (mode == mode_) return;
     mode_ = mode;
+    ++generation_;
+    for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
+    dispatch();
+}
+
+void PageRenderer::set_cmyk_proof(std::optional<std::optional<std::filesystem::path>> proof) {
+    if (proof == proof_) return;
+    proof_ = std::move(proof);
     ++generation_;
     for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
     dispatch();
@@ -337,8 +346,9 @@ void PageRenderer::dispatch() {
             const std::uint64_t generation = generation_;
             const int dpi = l->dpi;
             const std::string mode = mode_;
+            const auto proof = proof_;
             const std::stop_token stop = tile.stop->get_token();
-            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, stop]() {
+            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, stop]() {
                 Result result;
                 result.page_id = page_id;
                 result.dpi = dpi;
@@ -354,6 +364,7 @@ void PageRenderer::dispatch() {
                     options.region = render::RenderRegion{region.x(), region.y(), region.width(), region.height()};
                     options.stop = stop;
                     render::RenderResult drawn = render::render_page(doc->page(page_index), dpi, options, doc.get());
+                    if (proof) drawn.image = render::colour::proof(drawn.image, *proof);  // (per pixel: a tile as the page)
                     result.image = to_qimage(drawn.image);
                     result.omitted = std::move(drawn.omitted);
                 } catch (const render::Cancelled&) {

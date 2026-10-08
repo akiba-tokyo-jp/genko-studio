@@ -28,11 +28,12 @@ genko_library(genko_render
     vectorize.cpp
     color_edit.cpp
     color_filters.cpp
+    colour.cpp
     raster_ops.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
-  PRIVATE_DEPS pillow_imaging PNG::PNG JPEG::JPEG Freetype::Freetype)
+  PRIVATE_DEPS pillow_imaging PNG::PNG JPEG::JPEG Freetype::Freetype ${GENKO_LCMS2})
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
 # (numpy's float32 sinf, cosf, hypotf, atan2f: called in libm as numpy calls them. MSVC: /fp:precise, with which these
 # have no intrinsic forms)

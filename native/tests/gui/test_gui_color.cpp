@@ -17,6 +17,7 @@
 #include "app/thumbs.hpp"
 #include "core/color_raster.hpp"
 #include "core/strokes.hpp"
+#include "render/colour.hpp"
 #include "render/page.hpp"
 using namespace genko;
 using core::Json;
@@ -198,6 +199,37 @@ private slots:
         QCOMPARE(*gui_test::read_book(path).page(0).layers.back().color_raster,drawn);
         const QString folder=QString::fromUtf8(qgetenv("GENKO_COLOR_SCREENSHOT_DIR"));
         if (!folder.isEmpty()) {QVERIFY(QDir().mkpath(folder));QVERIFY(window.grab().save(folder+"/"+precision+"-eraser-pen.png"));}
+        window.hide();
+    }
+    // 色校正: the canvas shows the page as render/colour::proof makes it print (the plain conversion: no profile
+    // chosen on this computer), and as it is again once switched off.
+    void cmykProofShowsThePageAsItPrints() {
+        (void)gui_test::config_folder();QTemporaryDir tmp;
+        auto doc=core::new_episode("色校正",core::Num(1),1,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        doc.edit_page(0).numero=false;doc.edit_page(0).layers.clear();doc.edit_page(0).frames.clear();
+        doc=core::CommandBus().apply(doc,Json::array({Json{{"op","put_color_raster"},{"page",1},{"width",2},{"height",1},{"precision","u16"},
+            {"pixels",Json::array({0,65535,0,65535,65535,0,40000,65535})}}}),core::Actor("human:tester")).doc;
+        const auto path=gui_test::path_of(tmp.path()+"/book");gui_test::write_book(path,doc);
+        auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
+        app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        const auto shown=[&](bool proof) {
+            QVERIFY(window.canvas()->wait_rendered(10000));
+            const int dpi=window.canvas()->renderer().shown_dpi();QVERIFY(dpi>0);
+            render::RenderOptions options;options.mode="proof";options.skip_unported=true;
+            auto image=render::render_page(session->document().page(0),dpi,options,&session->document()).image;
+            if (proof) image=render::colour::proof(image);
+            const auto bytes=image.convert("RGB").tobytes();
+            QCOMPARE(window.canvas()->renderer().compose(dpi),QImage(reinterpret_cast<const uchar*>(bytes.data()),image.width(),image.height(),
+                image.width()*3,QImage::Format_RGB888).convertToFormat(QImage::Format_RGB32));
+        };
+        shown(false);
+        window.action("act_cmyk_proof")->trigger();
+        QVERIFY(window.canvas()->renderer().cmyk_proof());
+        shown(true);
+        const QString folder=QString::fromUtf8(qgetenv("GENKO_COLOR_SCREENSHOT_DIR"));
+        if (!folder.isEmpty()) {QVERIFY(QDir().mkpath(folder));QVERIFY(window.grab().save(folder+"/cmyk-proof.png"));}
+        window.action("act_cmyk_proof")->trigger();
+        shown(false);
         window.hide();
     }
     void precisionPenConversionKeepsDiskUndo_data() {precisionPaintConversionKeepsSource_data();}

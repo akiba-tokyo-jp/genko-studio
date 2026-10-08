@@ -107,6 +107,9 @@ genko_test(test_contract_raster_cli SOURCES contract/test_contract_raster_cli.cp
 # core/filters, the correction layers' adjustments for the ops and the renderer, against Python's filters.apply_filter.
 genko_test(test_contract_filters SOURCES contract/test_contract_filters.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 600)
+# render/colour (CMYK, ICC, the screen proof) against Python's genko/colour.py.
+genko_test(test_contract_colour SOURCES contract/test_contract_colour.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 600)
 # The two together: a book made by the ops (C++ and Python), drawn by `genko render` and `python -m genko render`.
 genko_test(test_contract_drawn_by_ops SOURCES contract/test_contract_drawn_by_ops.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)

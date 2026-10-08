@@ -88,6 +88,7 @@ const std::vector<Expected>& expected() {
         {"act_prev", "◀ 前のページ", k({QKeySequence(Std::MoveToPreviousPage), s("Ctrl+Left")}), "", false, "表示"},
         {"act_next", "次のページ ▶", k({QKeySequence(Std::MoveToNextPage), s("Ctrl+Right")}), "", false, "表示"},
         {"act_guides", "仕上がり線・基本枠を表示", k({s("Ctrl+;")}), "断ち切り（裁ち落とし）・仕上がり線・基本枠", true, "表示"},
+        {"act_cmyk_proof", "CMYK で見る（色校正）", {}, "印刷したときの色の見当（CMYK の範囲に収めた色）で表示します。プロファイルは書き出しで選んだもの", true, "表示"},
         {"act_select", "選択", k({s("V")}), "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", true, "ツール"},
         {"act_pen", "ペン", k({s("B")}), "レイヤー パネルで選んだレイヤーに描きます", true, "ツール"},
         {"act_eraser", "消しゴム", k({s("E")}), "ペンの線は触れた所で切れます", true, "ツール"},
@@ -224,7 +225,7 @@ private slots:
     }
 
     void cleanupTestCase() {
-        // every one of the 52 was triggered by a test below
+        // every one of the 53 was triggered by a test below
         QStringList missing;
         for (const Expected& e : expected()) {
             if (fired().count(QString::fromLatin1(e.attribute)) == 0) missing << QString::fromLatin1(e.attribute);
@@ -235,10 +236,10 @@ private slots:
     void theMenusHoldPythonsCommands() {
         Studio studio;
         MainWindow* w = studio.window.get();
-        QCOMPARE(expected().size(), std::size_t{52});
-        // Preserve all 52 Python actions; exposure, nombre and the six layer operations (merge, flatten, convert) have
+        QCOMPARE(expected().size(), std::size_t{53});
+        // Preserve all 53 Python actions; exposure, nombre and the six layer operations (merge, flatten, convert) have
         // their own GUI E2E tests (test_gui_materials, test_gui_color).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{60});
+        QCOMPARE(w->actions_by_name().size(), std::size_t{61});
         QVERIFY(w->action("act_exposure"));
         QVERIFY(w->action("act_nombre"));
         for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten",
@@ -406,6 +407,10 @@ private slots:
         QVERIFY(!c->show_guides);
         studio.trigger("act_guides");
         QVERIFY(c->show_guides);
+        studio.trigger("act_cmyk_proof");  // (its pictures: test_gui_color cmykProofShowsThePageAsItPrints)
+        QVERIFY(c->renderer().cmyk_proof());
+        studio.trigger("act_cmyk_proof");
+        QVERIFY(!c->renderer().cmyk_proof());
         QCOMPARE(w->page_index(), 0);
         studio.trigger("act_next");
         QCOMPARE(w->page_index(), 1);

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <filesystem>
+#include <optional>
+
 #include <QImage>
 #include <QObject>
 #include <QRect>
@@ -50,6 +53,10 @@ public:
     void clear();
     // proof (the page as it prints, the name lines in blue) | name
     void set_mode(const std::string& mode);
+    // 色校正: the page as it will print in CMYK (render/colour::proof through the profile, or the plain conversion
+    // without one), or as it is (nothing).
+    void set_cmyk_proof(std::optional<std::optional<std::filesystem::path>> proof);
+    bool cmyk_proof() const { return proof_.has_value(); }
 
     // What the view needs: the resolution of the whole page (base) and the one wanted (finer when zoomed in), and
     // the part of the page in sight (mm).
@@ -117,6 +124,7 @@ private:
     std::shared_ptr<const core::Page> page_ptr_;
     std::uint64_t generation_ = 0;
     std::string mode_ = "proof";
+    std::optional<std::optional<std::filesystem::path>> proof_;  // set_cmyk_proof
     std::map<int, Level> levels_;
     int base_dpi_ = 0;
     int wanted_dpi_ = 0;

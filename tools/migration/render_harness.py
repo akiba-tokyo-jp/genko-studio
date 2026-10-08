@@ -14,6 +14,9 @@ Commands:
                                 without pressure at 72, 150 and 600 dpi: the coverage and its origin
   adjust-cases OUT              filters.apply_filter for correction-layer settings (good, bad and odd ones): the
                                 tables Image.point gets, or the exception
+  colour-cases OUT ICC           colour.to_cmyk / from_cmyk / proof / ink_coverage on a fixed picture, with and without
+                                the CMYK profile ICC (each rendering intent), and the profile checks: their bytes or
+                                the exception
   make-books OUT --seed N --count K
                                 K random books for drawing (layers, brushes, rasters, patches, masks, blend modes,
                                 fills and gradients, corrections, panels): OUT/book-NN.genko
@@ -1256,6 +1259,49 @@ def unit_tables(outdir: str) -> None:
     (root / "render_unit_tables.json").write_text(json.dumps(tables, ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
 
 
+def colour_cases(out: str, icc: str) -> None:
+    """colour.py on a fixed RGBA picture (every grey, saturated and dark colours, half-clear pixels): each result's
+    mode and bytes (base64), or the exception; the sRGB profile's bytes (its creation time left out)."""
+    from PIL import Image
+
+    from genko import colour
+
+    w, h = 64, 40
+    picture = Image.new("RGBA", (w, h))
+    picture.putdata([((x * 4) % 256, (y * 6 + x) % 256, (x * y) % 256, 255 if y < 30 else 100 + x) for y in range(h) for x in range(w)])
+
+    def shot(make):
+        try:
+            image = make()
+            return {"mode": image.mode, "size": list(image.size), "bytes": base64.b64encode(image.tobytes()).decode("ascii")}
+        except Exception as exc:  # (the reference's own exception: its type and message)
+            return {"error": [type(exc).__name__, str(exc)]}
+
+    cases = {"picture": base64.b64encode(picture.tobytes()).decode("ascii"), "size": [w, h]}
+    cases["to_cmyk"] = shot(lambda: colour.to_cmyk(picture))
+    cases["to_cmyk_200"] = shot(lambda: colour.to_cmyk(picture, ink_limit=200))
+    cases["from_cmyk"] = shot(lambda: colour.from_cmyk(colour.to_cmyk(picture)))
+    cases["proof"] = shot(lambda: colour.proof(picture))
+    cases["ink"] = colour.ink_coverage(colour.to_cmyk(picture))
+    for intent in colour.INTENTS:
+        cases["to_cmyk_icc_" + intent] = shot(lambda: colour.to_cmyk(picture, icc, intent=intent))
+        cases["from_cmyk_icc_" + intent] = shot(lambda: colour.from_cmyk(colour.to_cmyk(picture, icc), icc, intent=intent))
+    cases["proof_icc"] = shot(lambda: colour.proof(picture, icc))
+    cases["ink_icc"] = colour.ink_coverage(colour.to_cmyk(picture, icc))
+    cases["is_cmyk"] = colour.is_cmyk_profile(icc)
+    cases["name"] = colour.profile_name(icc)
+    srgb = bytearray(colour.srgb_icc())
+    srgb[24:36] = bytes(12)  # (the date and time it was made)
+    cases["srgb_icc"] = base64.b64encode(bytes(srgb)).decode("ascii")
+    srgb_file = Path(out).with_suffix(".srgb.icc")
+    srgb_file.write_bytes(colour.srgb_icc())
+    cases["srgb_is_cmyk"] = colour.is_cmyk_profile(srgb_file)
+    cases["to_cmyk_srgb_profile"] = shot(lambda: colour.to_cmyk(picture, srgb_file))
+    cases["to_cmyk_bad_intent"] = shot(lambda: colour.to_cmyk(picture, icc, intent="vivid"))
+    cases["missing_profile"] = shot(lambda: colour.to_cmyk(picture, Path(out).with_suffix(".none.icc")))
+    Path(out).write_text(json.dumps(cases) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1270,6 +1316,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed", type=int, default=1)
     p = sub.add_parser("adjust-cases")
     p.add_argument("out")
+    p = sub.add_parser("colour-cases")
+    p.add_argument("out")
+    p.add_argument("icc")
     p = sub.add_parser("make-books")
     p.add_argument("out")
     p.add_argument("--seed", type=int, default=1)
@@ -1286,6 +1335,8 @@ def main(argv: list[str] | None = None) -> int:
         brush_cases(args.outdir, args.seed)
     elif args.cmd == "adjust-cases":
         adjust_cases(args.out)
+    elif args.cmd == "colour-cases":
+        colour_cases(args.out, args.icc)
     elif args.cmd == "make-books":
         make_books(args.out, args.seed, args.count)
     elif args.cmd == "render":

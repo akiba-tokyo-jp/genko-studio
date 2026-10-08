@@ -151,6 +151,15 @@ void MainWindow::build_actions() {
         c->show_guides = guides->isChecked();
         c->update();
     });
+    QAction* proof = make("act_cmyk_proof", QStringLiteral("CMYK で見る（色校正）"), [] {}, {},
+                          QStringLiteral("印刷したときの色の見当（CMYK の範囲に収めた色）で表示します。プロファイルは書き出しで選んだもの"), true);
+    connect(proof, &QAction::triggered, this, [c](bool on) {
+        std::optional<std::filesystem::path> icc;  // (the CMYK profile chosen last for export, kept on this computer)
+        const QString chosen = settings()->value(QStringLiteral("color/icc")).toString();
+        if (!chosen.isEmpty() && QFileInfo(chosen).isFile()) icc = core::path_from_utf8(chosen.toStdString());
+        c->renderer().set_cmyk_proof(on ? std::optional<std::optional<std::filesystem::path>>(icc) : std::nullopt);
+        c->update();
+    });
     // the tools (one at a time: tool_actions)
     make("act_select", QStringLiteral("選択"), [this] { choose_tool(QStringLiteral("select")); }, keys({QKeySequence(QStringLiteral("V"))}),
          QStringLiteral("コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす"), true);
@@ -300,6 +309,7 @@ void MainWindow::build_menus() {
     for (const char* name : {"act_overview", "act_prev", "act_next"}) view->addAction(action(name));
     view->addSeparator();
     view->addAction(action("act_guides"));
+    view->addAction(action("act_cmyk_proof"));
     QMenu* tools = bar->addMenu(QStringLiteral("ツール"));
     for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_frame"}) tools->addAction(action(name));
     tools->addSeparator();

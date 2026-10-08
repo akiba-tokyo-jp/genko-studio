@@ -25,6 +25,12 @@
 
 フォントは配布物に入れるが、PSD 等の出力ファイルへ埋め込まない（PSD-01）。
 
+## 試験データ（配布物に入れない）
+
+| 名前 | 出典 | ライセンス | 置き場所 |
+|---|---|---|---|
+| PhotoCraft Coated CMYK（合成 ICC プロファイル、sha256 f7ba9320…a54cc） | PhotoCraft v0.2.0 `crates/cms/profiles/photocraft-coated-cmyk.icc`（pin ad86321） | CC0-1.0 | `native/tests/data/colour/`（CMYK 変換・色校正の契約試験） |
+
 ## 使わないもの
 
 - Qt の GPL 専用モジュール（Qt HTTP Server、Qt Charts の GPL 版など）。HTTP API は Qt Network の `QTcpServer` 上に自前で実装する。
