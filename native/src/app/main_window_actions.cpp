@@ -155,11 +155,16 @@ void MainWindow::build_actions() {
     });
     QAction* proof = make("act_cmyk_proof", QStringLiteral("CMYK で見る（色校正）"), [] {}, {},
                           QStringLiteral("印刷したときの色の見当（CMYK の範囲に収めた色）で表示します。プロファイルは書き出しで選んだもの"), true);
-    connect(proof, &QAction::triggered, this, [c](bool on) {
-        std::optional<std::filesystem::path> icc;  // (the CMYK profile chosen last for export, kept on this computer)
+    // (the CMYK profile chosen last for export, kept on this computer, while its file is there)
+    const auto profile = [] {
+        std::optional<std::filesystem::path> icc;
         const QString chosen = settings()->value(QStringLiteral("color/icc")).toString();
         if (!chosen.isEmpty() && QFileInfo(chosen).isFile()) icc = core::path_from_utf8(chosen.toStdString());
-        c->renderer().set_cmyk_proof(on ? std::optional<std::optional<std::filesystem::path>>(icc) : std::nullopt);
+        return icc;
+    };
+    c->renderer().set_proof_profile(profile);
+    connect(proof, &QAction::triggered, this, [c, profile](bool on) {
+        c->renderer().set_cmyk_proof(on ? std::optional<std::optional<std::filesystem::path>>(profile()) : std::nullopt);
         c->update();
     });
     // the tools (one at a time: tool_actions)

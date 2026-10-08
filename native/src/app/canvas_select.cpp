@@ -112,6 +112,7 @@ void PageCanvas::finish_warp() {
     if (!warp_) return;
     const Warp warp = *warp_;
     warp_.reset();
+    sel_drag_.reset();  // (a point still held goes with it)
     Json points = Json::array();
     for (const QPointF& p : warp.points) points.push_back(Json::array({r3(p.x()), r3(p.y())}));
     Json out{{warp.kind.toStdString(), points}};
@@ -122,6 +123,7 @@ void PageCanvas::finish_warp() {
 
 void PageCanvas::cancel_warp() {
     warp_.reset();
+    sel_drag_.reset();
     update();
 }
 
@@ -274,6 +276,10 @@ bool PageCanvas::marquee_press(const QPointF& pos, const QPointF& mm, Qt::Keyboa
 
 bool PageCanvas::marquee_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed) {
     if (sel_drag_ && sel_drag_->kind == QLatin1String("warp")) {
+        if (!warp_ || static_cast<std::size_t>(sel_drag_->index) >= warp_->points.size()) {
+            sel_drag_.reset();
+            return true;
+        }
         warp_->points[static_cast<std::size_t>(sel_drag_->index)] = QPointF(r3(mm.x()), r3(mm.y()));
         update();
         return true;

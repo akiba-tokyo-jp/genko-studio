@@ -325,7 +325,7 @@ void MainWindow::set_target_layer(const std::string& layer_id) {
     target_layer_id_ = layer_id;
     pen_changed();
     if (const core::Layer* layer = target_layer()) flash(QStringLiteral("描く先: %1").arg(wording::layer_label(*layer)), 2500);
-    if (layer_panel_ != nullptr) layer_panel_->refresh();
+    if (layer_panel_ != nullptr) layer_panel_->show_target();  // (not built again: a Ctrl / Shift+click keeps the others)
 }
 
 std::optional<core::Json> MainWindow::selection_area() const {

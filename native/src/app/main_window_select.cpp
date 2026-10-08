@@ -270,9 +270,11 @@ void MainWindow::change_selection(const Json& change) {
 
 void MainWindow::change_selection_by(const char* key, int sign) {
     if (!need_area()) return;
+    const Asked asked = asking();
     const QString title = QString::fromLatin1(key) == QLatin1String("grow_mm") ? (sign > 0 ? QStringLiteral("広げる") : QStringLiteral("狭める"))
                                                                                  : QStringLiteral("ぼかす");
-    if (const auto amount = ask::get_double(this, QStringLiteral("選択範囲"), title + QStringLiteral("幅（mm）"), 1.0, 0.1, 50.0, 1))
+    if (const auto amount = ask::get_double(this, QStringLiteral("選択範囲"), title + QStringLiteral("幅（mm）"), 1.0, 0.1, 50.0, 1);
+        amount && still(asked))
         change_selection(Json{{key, sign * *amount}});
 }
 
@@ -304,8 +306,9 @@ bool MainWindow::keep_selection(std::optional<QString> name) {
     const core::Page* page = current_page();
     if (!area || page == nullptr) return false;
     if (!name) {
+        const Asked asked = asking();
         name = ask::get_text(this, QStringLiteral("選択範囲をストック"), QStringLiteral("名前（例: 空、髪、背景）"));
-        if (!name || name->trimmed().isEmpty()) return false;
+        if (!name || name->trimmed().isEmpty() || !still(asked)) return false;
     }
     return apply_ops(Json::array({Json{{"op", "store_area"}, {"page", page->index.json()}, {"name", name->trimmed().toStdString()}, {"area", *area}}}));
 }
@@ -414,7 +417,8 @@ void MainWindow::start_mesh_grid() {
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     form->addRow(buttons);
-    if (ask::exec(&dialog) != QDialog::Accepted) return;
+    const Asked asked = asking();
+    if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return;
     settings()->setValue(QStringLiteral("warp/mesh"), across->value());
     start_warp(QStringLiteral("mesh"), across->value(), down->value());
 }
@@ -459,7 +463,8 @@ void MainWindow::transform_numbers() {
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     form->addRow(buttons);
-    if (ask::exec(&dialog) != QDialog::Accepted) return;
+    const Asked asked = asking();
+    if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return;
     const auto m = transform_matrix(canvas_->selection_pivot(), boxes["dx"]->value(), boxes["dy"]->value(), boxes["sx"]->value() / 100,
                                     boxes["sy"]->value() / 100, boxes["angle"]->value());
     const std::array<double, 6> identity{1, 0, 0, 1, 0, 0};
@@ -547,7 +552,9 @@ void MainWindow::line_width() {
     const auto area = need_area();
     const core::Layer* layer = area ? paint_layer() : nullptr;
     if (!area || layer == nullptr) return;
-    if (const auto value = ask::get_double(this, QStringLiteral("線の太さ"), QStringLiteral("選んだ範囲の線の太さ（mm）"), pen_.width_mm, 0.05, 50, 2))
+    const Asked asked = asking();
+    if (const auto value = ask::get_double(this, QStringLiteral("線の太さ"), QStringLiteral("選んだ範囲の線の太さ（mm）"), pen_.width_mm, 0.05, 50, 2);
+        value && still(asked))
         apply_ops(Json::array({Json{{"op", "set_stroke_width"}, {"page", current_page()->index.json()}, {"layer_id", layer->id}, {"area", *area},
                                     {"width_mm", *value}}}));
 }

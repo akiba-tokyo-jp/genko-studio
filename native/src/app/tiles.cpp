@@ -321,6 +321,14 @@ void PageRenderer::want(int base_dpi, int wanted_dpi, const QRectF& visible_mm) 
 
 void PageRenderer::dispatch() {
     if (!shown_page_ || !doc_) return;
+    if (proof_ && proof_profile_) {  // (the profile as it is now: another one, or its file gone, draws everything again)
+        std::optional<std::filesystem::path> now = proof_profile_();
+        if (now != *proof_) {
+            proof_ = std::move(now);
+            ++generation_;
+            for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
+        }
+    }
     const int most = pool_.maxThreadCount();
     // the whole page first (the tiles in sight before the others), then the finer tiles in sight
     std::vector<Level*> order;

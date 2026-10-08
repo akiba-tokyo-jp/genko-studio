@@ -7,6 +7,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
 #include <QListWidget>
@@ -47,6 +48,9 @@ struct Book {
         window = std::make_unique<app::MainWindow>(session);
         window->resize(1200, 800);
         window->show();
+        for (QDockWidget* dock : window->findChildren<QDockWidget*>())  // (the layers' tab in front of the pages')
+            if (dock->objectName() == QStringLiteral("レイヤー")) dock->raise();
+        QCoreApplication::processEvents();
     }
     app::LayerPanel& panel() const { return *window->layer_panel(); }
     const core::Page& page() const { return session->document().page(0); }
@@ -243,9 +247,20 @@ private slots:
         const auto row_of = [&](const std::string& id) {
             return static_cast<int>(std::find(panel.ids().begin(), panel.ids().end(), id) - panel.ids().begin());
         };
+        // a click on a layer's name, as a person does it (Ctrl: one more; Shift: all from the last one)
+        const auto click = [&](const std::string& id, Qt::KeyboardModifiers modifiers) {
+            QListWidget* list = panel.list();
+            QListWidgetItem* item = list->item(row_of(id));
+            list->scrollToItem(item);
+            const QRect r = list->visualItemRect(item);
+            QTest::mouseClick(list->viewport(), Qt::LeftButton, modifiers, QPoint(r.left() + r.width() * 3 / 4, r.center().y()));
+        };
         const auto pick = [&](std::initializer_list<std::string> ids) {
-            panel.list()->clearSelection();
-            for (const auto& id : ids) panel.list()->item(row_of(id))->setSelected(true);
+            bool first = true;
+            for (const auto& id : ids) {
+                click(id, first ? Qt::NoModifier : Qt::ControlModifier);
+                first = false;
+            }
         };
         // one only: a word, nothing done
         pick({ink});
@@ -255,6 +270,15 @@ private slots:
 
         pick({ink, pen});
         QCOMPARE(panel.selected_ids().size(), std::size_t(2));
+        QCOMPARE(book.window->target_layer()->id, pen);  // (the last one clicked is drawn on)
+        // Shift+click: the layers from the one clicked before to this one
+        std::string third;
+        for (const auto& l : book.page().layers) if (l.id != ink && l.id != pen && l.kind != core::LayerKind::Folder) third = l.id;
+        click(third, Qt::NoModifier);
+        click(pen, Qt::ShiftModifier);
+        const int a = row_of(third), b = row_of(pen);
+        QCOMPARE(panel.selected_ids().size(), static_cast<std::size_t>(std::abs(a - b) + 1));
+        pick({ink, pen});
         book.menu_action(panel.many_menu(), QStringLiteral("選んだレイヤーを隠す"))->trigger();
         QVERIFY(!book.layer(ink)->visible && !book.layer(pen)->visible);
         pick({ink, pen});

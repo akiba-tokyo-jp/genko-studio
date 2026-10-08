@@ -399,6 +399,11 @@ private slots:
             } catch (const core::Error& error) {
                 QCOMPARE(QString::fromStdString(error.code()), QString("not_yet_ported"));
             }
+            // a book read without that check (opened to look at): left out of a preview, refused elsewhere — never
+            // drawn as if it were not there
+            QVERIFY_EXCEPTION_THROWN(render::render_page(shapes.page(0), 200, render::proof_options(), &shapes), render::NotYetPorted);
+            const auto preview_shapes = render::render_page(shapes.page(0), 200, preview, &shapes);
+            QCOMPARE(preview_shapes.omitted, std::vector<std::string>{std::string("adjust:") + kind});
             auto hidden = shapes;
             hidden.edit_page(0).layers.back().visible = false;
             core::validate_color_document(hidden);  // (hidden: the page shows nothing of it)
@@ -415,6 +420,26 @@ private slots:
         const Pixel got = after.pixel(4 * 8 + 4);
         QVERIFY2(std::abs(got[0] + 0.5) < 1e-5 && std::abs(got[1] - 0.75) < 1e-5 && std::abs(got[2] - 0.5) < 1e-5,
                  qPrintable(QString("%1 %2 %3").arg(got[0]).arg(got[1]).arg(got[2])));
+    }
+
+    // Line extraction's window is the 8-bit layer's at 200 dpi: on a finer raster it grows with it, and one past the
+    // limit is refused (not cut down to it, which would draw another line).
+    void lineartWindowOnAFineRaster() {
+        auto doc = precise("u16", 300, [](std::uint32_t x, std::uint32_t y) { return Pixel{(x % 7) / 7.0, (y % 5) / 5.0, 0.5, 1}; });  // 300 dpi
+        Json op{{"op", "filter_raster"}, {"page", 1}, {"id", "paint"}, {"kind", "lineart"}, {"radius", 7}};
+        QVERIFY(paint(edit(doc, op)).color_raster);
+        op["radius"] = 69;  // (the 8-bit layer takes it; ×1.5 = 104 here: past 101)
+        try {
+            (void)edit(eight_bit_page(40), op);
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+        try {
+            (void)edit(doc, op);
+            QFAIL("a window past the limit was taken");
+        } catch (const core::Error& error) {
+            QVERIFY2(QString::fromUtf8(error.what()).contains(QStringLiteral("radius is too large for a raster of this resolution (at most 67)")), error.what());
+        }
     }
 
     // A plugin runs in the external runner, not here; precise pen lines are converted to paint first: both refused,

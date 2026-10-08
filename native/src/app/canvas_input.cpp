@@ -405,7 +405,9 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
     QString tool = key == QLatin1String("ctrl") ? QStringLiteral("select") : QString();
     if ((base == QLatin1String("zoom") || base == QLatin1String("marquee")) && key == QLatin1String("alt")) tool.clear();
     if (down) {
-        if (!tool.isEmpty() && !held_tool_ && stroke_.empty() && tool != tool_) {
+        // (not while a line, a selection or its handles are being dragged: the drag ends with the tool it began with)
+        const bool dragging = !stroke_.empty() || !marquee_stroke_.empty() || sel_drag_ || ellipse_drag_;
+        if (!tool.isEmpty() && !held_tool_ && !dragging && tool != tool_) {
             held_tool_ = tool_;
             held_key_ = key;
             tool_ = tool;

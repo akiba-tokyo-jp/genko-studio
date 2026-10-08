@@ -10,12 +10,14 @@
 #include <QPushButton>
 #include <QTimer>
 #include "gui_support.hpp"
+#include "app/config.hpp"
 #include "app/main_window.hpp"
 #include "app/canvas.hpp"
 #include "app/inject.hpp"
 #include "app/tiles.hpp"
 #include "app/thumbs.hpp"
 #include "core/color_raster.hpp"
+#include "core/paths.hpp"
 #include "core/strokes.hpp"
 #include "render/colour.hpp"
 #include "render/page.hpp"
@@ -230,6 +232,26 @@ private slots:
         if (!folder.isEmpty()) {QVERIFY(QDir().mkpath(folder));QVERIFY(window.grab().save(folder+"/cmyk-proof.png"));}
         window.action("act_cmyk_proof")->trigger();
         shown(false);
+        // through the profile chosen for export (at a path of any name); its file gone: the plain conversion again
+        const auto icc=std::filesystem::path(tmp.path().toStdString())/core::path_from_utf8("プロファイル.icc");
+        std::filesystem::copy_file(std::filesystem::path(GENKO_TEST_DATA)/"colour"/"photocraft-coated-cmyk.icc",icc);
+        app::settings()->setValue(QStringLiteral("color/icc"),QString::fromStdString(core::path_to_utf8(icc)));
+        window.action("act_cmyk_proof")->trigger();
+        const auto through=[&](const std::optional<std::filesystem::path>& profile) {
+            QVERIFY(window.canvas()->wait_rendered(10000));
+            const int dpi=window.canvas()->renderer().shown_dpi();QVERIFY(dpi>0);
+            render::RenderOptions options;options.mode="proof";options.skip_unported=true;
+            const auto image=render::colour::proof(render::render_page(session->document().page(0),dpi,options,&session->document()).image,profile);
+            const auto bytes=image.convert("RGB").tobytes();
+            QCOMPARE(window.canvas()->renderer().compose(dpi),QImage(reinterpret_cast<const uchar*>(bytes.data()),image.width(),image.height(),
+                image.width()*3,QImage::Format_RGB888).convertToFormat(QImage::Format_RGB32));
+        };
+        through(icc);
+        std::filesystem::remove(icc);
+        window.canvas()->zoom_by(2.0);  // (tiles drawn again: the profile looked up again)
+        through(std::nullopt);
+        window.action("act_cmyk_proof")->trigger();
+        app::settings()->remove(QStringLiteral("color/icc"));
         window.hide();
     }
     void precisionPenConversionKeepsDiskUndo_data() {precisionPaintConversionKeepsSource_data();}

@@ -86,6 +86,17 @@ public:
     // The tools of the marquee (rect, lasso, wand, ellipse, polyline, colour, selpen, selerase), and the one of a way.
     static bool is_marquee_tool(const QString& tool);
     static QString marquee_tool_of(const QString& way);
+    // What a question or a dialog is about to be asked about (the book in front as it is now, and its page), and
+    // whether it is still so when the answer comes (otherwise a notice, and nothing is done): the book may be read
+    // further or changed from outside while it waits, and the pages and layers asked about are gone then.
+    struct Asked {
+        std::shared_ptr<Session> session;
+        DocPtr snapshot;
+        int page_index = 0;
+    };
+    Asked asking() const { return Asked{session_, session_->snapshot(), page_index_}; }
+    bool still(const Asked& asked) { return modal_target_unchanged(asked.session, asked.snapshot, asked.page_index); }
+    bool modal_target_unchanged(const std::shared_ptr<Session>& origin, const DocPtr& snapshot, int page_index);
     // The page shown as these ops would leave it, without changing the book (フィルターのプレビュー); none: as it is.
     void preview_ops(const std::optional<core::Json>& ops);
     LayerPanel* layer_panel() const { return layer_panel_; }
@@ -142,7 +153,6 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
-    bool modal_target_unchanged(const std::shared_ptr<Session>& origin, const DocPtr& snapshot, int page_index);
     void build_actions();
     void build_menus();
     void build_toolbars();

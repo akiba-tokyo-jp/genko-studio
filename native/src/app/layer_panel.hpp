@@ -37,6 +37,8 @@ public:
     explicit LayerPanel(MainWindow* window);
     // The page's layers again (after a change, another page).
     void refresh();
+    // The layer drawn on chosen in the list (the list as it is: the other layers chosen with it stay chosen).
+    void show_target();
     // The layers chosen in the list (Ctrl / Shift+click), bottom first.
     std::vector<std::string> selected_ids() const;
     // Tests and the window: the list, the filter chooser, the menus.
@@ -115,7 +117,18 @@ private:
     QPushButton* details_toggle_ = nullptr;
     QWidget* details_ = nullptr;
     std::map<std::string, std::vector<std::string>> solo_hidden_;  // page id → the layers hidden by solo (this session)
-    std::map<std::string, QIcon> thumbs_;
+    // page id/layer id → its small picture and what it was made of (the lines' and pixels' own blocks held, so that
+    // one freed cannot come back at the same address and pass for it)
+    struct Thumb {
+        core::StrokeListPtr strokes;
+        core::Bytes raster;
+        core::Bytes color;
+        core::Bytes mask;
+        std::vector<core::Bytes> patches;
+        std::string state;
+        QIcon icon;
+    };
+    std::map<std::string, Thumb> thumbs_;
 };
 
 }  // namespace genko::app

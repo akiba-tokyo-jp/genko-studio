@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 
+#include "core/command_bus.hpp"
 #include "core/color_adjust.hpp"
 #include "core/color_raster.hpp"
 #include "core/error.hpp"
@@ -459,7 +460,11 @@ void lineart(Picture& p, const Json& params_in, double scale) {
     // scaled, the specks' area by the square)
     Json params = params_in;
     if (scale != 1) {
-        params["radius"] = std::min<double>(limits::kRankSize, std::round(number(params_in, "radius", 7) * scale));
+        const double radius = std::round(number(params_in, "radius", 7) * scale);
+        if (radius > static_cast<double>(limits::kRankSize))  // (not cut down to the limit: refused, as a larger one is)
+            throw core::OpError("radius is too large for a raster of this resolution (at most " +
+                                std::to_string(static_cast<int>(std::floor(limits::kRankSize / scale))) + ")");
+        params["radius"] = radius;
         params["min_px"] = std::round(number(params_in, "min_px", 12) * scale * scale);
     }
     std::string bytes(p.size() * 4, '\0');

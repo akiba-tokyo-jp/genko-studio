@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 
 #include <QImage>
@@ -57,6 +58,9 @@ public:
     // without one), or as it is (nothing).
     void set_cmyk_proof(std::optional<std::optional<std::filesystem::path>> proof);
     bool cmyk_proof() const { return proof_.has_value(); }
+    // Where the proof's profile is looked up each time tiles are drawn (Python's icc_setting: the one chosen last for
+    // export, while its file is there; none: the plain conversion): one chosen or taken away meanwhile is followed.
+    void set_proof_profile(std::function<std::optional<std::filesystem::path>()> profile) { proof_profile_ = std::move(profile); }
 
     // What the view needs: the resolution of the whole page (base) and the one wanted (finer when zoomed in), and
     // the part of the page in sight (mm).
@@ -125,6 +129,7 @@ private:
     std::uint64_t generation_ = 0;
     std::string mode_ = "proof";
     std::optional<std::optional<std::filesystem::path>> proof_;  // set_cmyk_proof
+    std::function<std::optional<std::filesystem::path>()> proof_profile_;
     std::map<int, Level> levels_;
     int base_dpi_ = 0;
     int wanted_dpi_ = 0;

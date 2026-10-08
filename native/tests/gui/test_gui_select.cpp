@@ -404,6 +404,50 @@ private slots:
         QVERIFY(!canvas->quick_mask);
     }
 
+    // Keys while a drag goes on: Esc (or Enter refused, on a locked layer) while a free transform's point is held
+    // stops it, and the point let go afterwards is nothing; Ctrl held in the middle of a lasso does not switch the
+    // tool under it.
+    void keysDuringADrag() {
+        Studio studio;
+        auto* canvas = studio.canvas();
+        studio.window->set_target_layer(studio.ink);
+        studio.trigger("act_marquee");
+        inject::mouse_stroke(canvas, {QPointF(5, 5), QPointF(35, 35)});
+        const auto before = studio.line(studio.ink);
+        studio.trigger("act_warp_perspective");
+        inject::mouse(canvas, inject::Phase::Press, QPointF(35, 35));
+        inject::mouse(canvas, inject::Phase::Move, QPointF(38, 38));
+        QTest::keyClick(canvas, Qt::Key_Escape);
+        QVERIFY(!canvas->warping());
+        inject::mouse(canvas, inject::Phase::Move, QPointF(40, 40));
+        inject::mouse(canvas, inject::Phase::Release, QPointF(40, 40));
+        QVERIFY(studio.area());
+        QCOMPARE(studio.line(studio.ink).size(), before.size());
+
+        QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", studio.ink}, {"locked", true}}})));
+        studio.trigger("act_warp_perspective");
+        inject::mouse(canvas, inject::Phase::Press, QPointF(35, 35));
+        inject::mouse(canvas, inject::Phase::Move, QPointF(38, 38));
+        QTest::keyClick(canvas, Qt::Key_Return);
+        QVERIFY(!canvas->warping());
+        inject::mouse(canvas, inject::Phase::Move, QPointF(40, 40));
+        inject::mouse(canvas, inject::Phase::Release, QPointF(40, 40));
+        QCOMPARE(studio.line(studio.ink).size(), before.size());
+
+        studio.trigger("act_deselect");
+        studio.trigger("act_lasso");
+        inject::mouse(canvas, inject::Phase::Press, QPointF(10, 10));
+        inject::mouse(canvas, inject::Phase::Move, QPointF(30, 10));
+        QTest::keyPress(canvas, Qt::Key_Control, Qt::ControlModifier);
+        QCOMPARE(canvas->tool(), QStringLiteral("marquee"));
+        inject::mouse(canvas, inject::Phase::Move, QPointF(30, 30), Qt::ControlModifier);
+        inject::mouse(canvas, inject::Phase::Move, QPointF(10, 30), Qt::ControlModifier);
+        inject::mouse(canvas, inject::Phase::Release, QPointF(10, 30), Qt::ControlModifier);
+        QTest::keyRelease(canvas, Qt::Key_Control, Qt::NoModifier);
+        QCOMPARE(canvas->tool(), QStringLiteral("marquee"));
+        QVERIFY2(std::abs(studio.size() - 400) < 30, qPrintable(QString::number(studio.size())));
+    }
+
     // Alt held with the marquee takes away: it does not switch the tool.
     void altStaysWithTheMarquee() {
         Studio studio;

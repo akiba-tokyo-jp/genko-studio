@@ -58,6 +58,16 @@ const std::vector<std::pair<QString, Json>>& tints() {
     return all;
 }
 
+// What a layer's small picture shows besides its lines and pixels (each kind's settings, its patches' places).
+std::string thumb_state(const core::Layer& layer) {
+    const auto dump = [](const std::optional<Json>& value) { return value ? value->dump() : std::string("-"); };
+    std::string out = std::to_string(static_cast<int>(layer.kind)) + "|" + dump(layer.fill) + "|" + dump(layer.tone) + "|" + dump(layer.screen) +
+                      "|" + dump(layer.effect) + "|" + dump(layer.adjust) + "|" + layer.asset.value_or("") + "|" + layer.material_id.value_or("") +
+                      "|" + (layer.mask && layer.mask->enabled ? "mask" : "") + "|" + std::to_string(layer.opacity);
+    for (const core::Patch& patch : layer.patches) out += "|" + patch.attrs.dump();
+    return out;
+}
+
 QPushButton* button(const QString& text, const QString& tip, const QString& name) {
     auto* b = new QPushButton(text);
     b->setToolTip(tip);
@@ -298,17 +308,37 @@ void LayerPanel::refresh() {
     selected(false);
 }
 
+void LayerPanel::show_target() {
+    const core::Layer* target = window_->target_layer();
+    const auto at = target != nullptr ? std::find(ids_.begin(), ids_.end(), target->id) : ids_.end();
+    if (at == ids_.end()) {  // (a layer the list does not have yet)
+        refresh();
+        return;
+    }
+    const int row = static_cast<int>(at - ids_.begin());
+    if (list_->currentRow() != row) {
+        loading_ = true;
+        list_->setCurrentRow(row);
+        loading_ = false;
+    }
+    selected(false);
+}
+
 QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
     // a small picture of the layer alone (kept until the layer changes); an empty layer or a folder: none
     if (layer.kind == core::LayerKind::Folder) return {};
     const bool drawn = layer.stroke_count() > 0 || !layer.patches.empty() || (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster ||
                        layer.kind == core::LayerKind::Placed || layer.kind == core::LayerKind::Tone || (layer.fill && core::py_truthy(*layer.fill));
     if (!drawn) return {};
-    const std::string key = page.id + "/" + layer.id + "/" + std::to_string(reinterpret_cast<std::uintptr_t>(layer.strokes.get())) + "/" +
-                            std::to_string(reinterpret_cast<std::uintptr_t>(layer.raster_png.get())) + "/" +
-                            std::to_string(reinterpret_cast<std::uintptr_t>(layer.color_raster.get())) + "/" + std::to_string(layer.patches.size()) + "/" +
-                            (layer.fill ? layer.fill->dump() : std::string()) + "/" + (layer.mask && layer.mask->png ? std::to_string(layer.mask->png->size()) : std::string());
-    if (const auto found = thumbs_.find(key); found != thumbs_.end()) return found->second;
+    const std::string key = page.id + "/" + layer.id;
+    Thumb made{layer.strokes, layer.raster_png, layer.color_raster, layer.mask ? layer.mask->png : nullptr, {}, thumb_state(layer), {}};
+    for (const core::Patch& patch : layer.patches) made.patches.push_back(patch.png);
+    if (const auto found = thumbs_.find(key); found != thumbs_.end()) {
+        const Thumb& was = found->second;
+        if (was.strokes == made.strokes && was.raster == made.raster && was.color == made.color && was.mask == made.mask &&
+            was.patches == made.patches && was.state == made.state)
+            return was.icon;
+    }
     QIcon icon;
     try {
         const render::Image image = render::layer_image(page, layer, 10, &window_->book(), true);
@@ -321,7 +351,8 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
         return {};
     }
     if (thumbs_.size() > 400) thumbs_.clear();
-    thumbs_[key] = icon;
+    made.icon = icon;
+    thumbs_[key] = std::move(made);
     return icon;
 }
 
@@ -496,7 +527,9 @@ void LayerPanel::move(int delta) {
 void LayerPanel::remove() {
     const auto [page, layer] = this->layer();
     if (layer == nullptr) return;
+    const auto asked = window_->asking();  // (the page and the layer stay as they are while asked, or nothing is done)
     if (!ask::question(this, QStringLiteral("Genko"), QStringLiteral("レイヤー「%1」を消しますか？\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer)))) return;
+    if (!window_->still(asked)) return;
     window_->apply_ops(Json::array({Json{{"op", "delete_layer"}, {"page", page->index.json()}, {"id", layer->id}}}));
 }
 
@@ -565,7 +598,9 @@ void LayerPanel::set_selected(const Json& fields) {
 void LayerPanel::merge_visible(bool copy) {
     const core::Page* page = window_->current_page();
     if (page == nullptr) return;
+    const auto asked = window_->asking();
     if (!copy && !ask::question(this, QStringLiteral("Genko"), QStringLiteral("見えているレイヤーを 1 枚にまとめます。\n（元に戻す で取り消せます）"))) return;
+    if (!window_->still(asked)) return;
     const std::string id = core::new_id();
     Json op{{"op", "merge_visible"}, {"page", page->index.json()}, {"copy", copy}};
     if (copy) op["id"] = id;
@@ -603,8 +638,9 @@ void LayerPanel::paper() {
     std::vector<int> now{255, 255, 255};
     if (page != nullptr && page->extra.is_object() && page->extra.contains("paper_rgb") && page->extra["paper_rgb"].is_array())
         now = page->extra["paper_rgb"].get<std::vector<int>>();
+    const auto asked = window_->asking();
     const auto colour = ask::colour(this, QColor(now[0], now[1], now[2]), QStringLiteral("用紙の色（全ページ）"));
-    if (!colour) return;
+    if (!colour || !window_->still(asked)) return;
     const Json rgb = Json::array({colour->red(), colour->green(), colour->blue()});
     window_->apply_ops(Json::array({Json{{"op", "set_paper"}, {"rgb", rgb == Json::array({255, 255, 255}) ? Json() : rgb}}}));
 }
@@ -624,15 +660,17 @@ void LayerPanel::add_special(const std::string& kind, const QString& title, cons
 
 void LayerPanel::add_fill() {
     const auto& rgb = window_->pen().rgb;
+    const auto asked = window_->asking();
     const auto colour = ask::colour(this, QColor(static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])), QStringLiteral("ベタ塗りの色"));
-    if (colour) add_special("fill", QStringLiteral("ベタ塗り"), Json{{"rgb", Json::array({colour->red(), colour->green(), colour->blue()})}});
+    if (colour && window_->still(asked)) add_special("fill", QStringLiteral("ベタ塗り"), Json{{"rgb", Json::array({colour->red(), colour->green(), colour->blue()})}});
 }
 
 void LayerPanel::add_gradient() {
     const auto& rgb = window_->pen().rgb;
+    const auto asked = window_->asking();
     const auto spec = gradient_dialog(this, window_->current_page(),
                                       Json{{"rgb_from", Json::array({rgb[0], rgb[1], rgb[2]})}, {"rgb_to", Json::array({255, 255, 255})}, {"opacity_to", 0.0}});
-    if (spec) add_special("gradient", QStringLiteral("グラデーション"), Json{{"gradient", *spec}});
+    if (spec && window_->still(asked)) add_special("gradient", QStringLiteral("グラデーション"), Json{{"gradient", *spec}});
 }
 
 std::optional<Json> LayerPanel::adjust_fields(const std::string& kind, const Json& now) {
@@ -644,8 +682,9 @@ std::optional<Json> LayerPanel::adjust_fields(const std::string& kind, const Jso
 }
 
 void LayerPanel::add_adjust(const std::string& kind) {
+    const auto asked = window_->asking();
     const auto params = adjust_fields(kind);
-    if (!params) return;
+    if (!params || !window_->still(asked)) return;
     QString title = QStringLiteral("色調補正");
     for (const auto& [key, label] : adjustment_kinds()) if (key == kind) title = label;
     Json spec{{"kind", kind}};
@@ -656,6 +695,7 @@ void LayerPanel::add_adjust(const std::string& kind) {
 void LayerPanel::edit_special() {
     const auto [page, layer] = this->layer();
     if (layer == nullptr) return;
+    const auto asked = window_->asking();  // (each dialog's answer applied only to the book it was asked about)
     if (layer->kind == core::LayerKind::Adjust && layer->adjust && layer->adjust->is_object()) {
         const std::string kind = layer->adjust->value("kind", std::string("levels"));
         if (kind == "exposure") {
@@ -663,26 +703,27 @@ void LayerPanel::edit_special() {
             return;
         }
         const auto params = adjust_fields(kind, *layer->adjust);
-        if (!params) return;
+        if (!params || !window_->still(asked)) return;
         Json spec{{"kind", kind}};
         spec.update(*params);
         set("adjust", spec);
     } else if (layer->kind == core::LayerKind::Fill && layer->fill && layer->fill->is_object() && layer->fill->contains("gradient")) {
-        if (const auto spec = gradient_dialog(this, page, (*layer->fill)["gradient"])) set("fill", Json{{"gradient", *spec}});
+        if (const auto spec = gradient_dialog(this, page, (*layer->fill)["gradient"]); spec && window_->still(asked)) set("fill", Json{{"gradient", *spec}});
     } else if (layer->kind == core::LayerKind::Fill && layer->fill && layer->fill->is_object()) {
         const Json rgb = layer->fill->value("rgb", Json::array({255, 255, 255}));
         const auto colour = ask::colour(this, QColor(rgb[0].get<int>(), rgb[1].get<int>(), rgb[2].get<int>()), QStringLiteral("ベタ塗りの色"));
-        if (colour) set("fill", Json{{"rgb", Json::array({colour->red(), colour->green(), colour->blue()})}});
+        if (colour && window_->still(asked)) set("fill", Json{{"rgb", Json::array({colour->red(), colour->green(), colour->blue()})}});
     }
 }
 
 void LayerPanel::border() {
     const auto [page, layer] = this->layer();
     if (layer == nullptr) return;
+    const auto asked = window_->asking();
     const auto width = ask::get_double(this, QStringLiteral("フチ"), QStringLiteral("フチの太さ（mm）"), 0.6, 0.05, 10, 2);
     if (!width) return;
     const auto colour = ask::colour(this, QColor(255, 255, 255), QStringLiteral("フチの色"));
-    if (!colour) return;
+    if (!colour || !window_->still(asked)) return;
     Json effect = layer->effect && layer->effect->is_object() ? *layer->effect : Json::object();
     effect["border"] = Json{{"width_mm", *width}, {"rgb", Json::array({colour->red(), colour->green(), colour->blue()})}};
     set("effect", effect);
@@ -691,8 +732,9 @@ void LayerPanel::border() {
 void LayerPanel::water_edge() {
     const auto [page, layer] = this->layer();
     if (layer == nullptr) return;
+    const auto asked = window_->asking();
     const auto width = ask::get_double(this, QStringLiteral("水彩境界"), QStringLiteral("にじむ幅（mm）"), 0.8, 0.05, 10, 2);
-    if (!width) return;
+    if (!width || !window_->still(asked)) return;
     Json effect = layer->effect && layer->effect->is_object() ? *layer->effect : Json::object();
     effect["water_edge"] = Json{{"width_mm", *width}, {"strength", 0.7}};
     set("effect", effect);
@@ -701,8 +743,9 @@ void LayerPanel::water_edge() {
 void LayerPanel::screen() {
     const auto [page, layer] = this->layer();
     if (layer == nullptr) return;
+    const auto asked = window_->asking();
     const auto spec = screen_dialog(this, layer->screen && layer->screen->is_object() ? *layer->screen : Json::object());
-    if (!spec) return;
+    if (!spec || !window_->still(asked)) return;
     set("screen", *spec);
     window_->flash(QStringLiteral("このレイヤーのグレーは、印刷と書き出しで網点になります（画面はグレーのまま）"), 5000);
 }
@@ -729,9 +772,11 @@ void LayerPanel::apply_filter() {
     const auto area = window_->selection_area();
     const QString extra = layer->stroke_count() > 0 ? QStringLiteral("\nペンの線は画像になり、あとから線として消せなくなります。") : QString();
     const QString where = area ? QStringLiteral("の選択範囲の中") : QStringLiteral("全体");
+    const auto asked = window_->asking();
     if (!ask::question(this, QStringLiteral("Genko"),
                        QStringLiteral("レイヤー「%1」%2に「%3」をかけます。%4\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer), where, label, extra)))
         return;
+    if (!window_->still(asked)) return;
     const std::string layer_id = layer->id;
     const Json index = page->index.json();
     std::optional<Json> params;
@@ -751,7 +796,7 @@ void LayerPanel::apply_filter() {
                                },
                                kind == "levels" || kind == "curve" ? histogram(*page, *layer) : std::nullopt);
     }
-    if (!params) return;
+    if (!params || !window_->still(asked)) return;
     Json op{{"op", "filter_raster"}, {"page", index}, {"id", layer_id}, {"kind", kind}};
     op.update(*params);
     if (area) op["area"] = *area;

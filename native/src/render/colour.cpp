@@ -5,7 +5,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <fstream>
+#include <iterator>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "core/error.hpp"
@@ -38,12 +41,70 @@ struct Transform {
     }
 };
 
-// colour._profile: the file read as an ICC profile (Python: ValueError when it cannot be)
+// colour._profile: the file read as an ICC profile (Python: ValueError when it cannot be). The bytes are read through
+// the path itself (any name, on any system: lcms2's own fopen takes a narrow name) and parsed from memory.
 Profile open_profile(const std::filesystem::path& icc) {
-    const std::string name = core::path_to_utf8(icc);
-    cmsHPROFILE handle = cmsOpenProfileFromFile(name.c_str(), "r");
+    std::string bytes;
+    {
+        std::ifstream file(icc, std::ios::binary);
+        if (file) bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+        if (!file && !file.eof()) bytes.clear();
+    }
+    cmsHPROFILE handle = bytes.empty() ? nullptr : cmsOpenProfileFromMem(bytes.data(), static_cast<cmsUInt32Number>(bytes.size()));
     if (handle == nullptr) throw core::PyValueError("the colour profile cannot be read (cannot open profile file)");
     return Profile(handle);
+}
+
+// ImageCms.buildTransform's failure: PyCMSError("cannot build transform")
+[[noreturn]] void cannot_build() { throw core::PyUncaught("PyCMSError", "cannot build transform"); }
+
+// The transforms of a profile, made once while the file is as it was (a page's tiles each go through them, on the
+// pool's threads: made without lcms2's one-pixel cache, which is not shared safely).
+using TransformPtr = std::shared_ptr<const Transform>;
+struct CacheKey {
+    std::string path;
+    std::uintmax_t size = 0;
+    std::filesystem::file_time_type written;
+    std::uint32_t intent = 0;
+    bool to_cmyk = false;
+    bool operator==(const CacheKey&) const = default;
+};
+
+std::mutex cache_lock;
+std::vector<std::pair<CacheKey, TransformPtr>> cache;
+
+std::optional<CacheKey> key_of(const std::filesystem::path& icc, std::string_view intent, bool to_cmyk) {
+    const auto at = std::find(kIntents.begin(), kIntents.end(), intent);
+    if (at == kIntents.end()) return std::nullopt;
+    std::error_code error;
+    CacheKey key{core::path_to_utf8(icc), std::filesystem::file_size(icc, error), {}, static_cast<std::uint32_t>(at - kIntents.begin()), to_cmyk};
+    if (!error) key.written = std::filesystem::last_write_time(icc, error);
+    if (error) return std::nullopt;
+    return key;
+}
+
+// The transform made before for this file as it is now, or none.
+TransformPtr cached(const std::optional<CacheKey>& key) {
+    if (!key) return nullptr;
+    const std::lock_guard<std::mutex> held(cache_lock);
+    for (const auto& [k, transform] : cache)
+        if (k == *key) return transform;
+    return nullptr;
+}
+
+TransformPtr make_transform(const Profile& file, std::uint32_t intent, bool to_cmyk, const std::optional<CacheKey>& key) {
+    const Profile srgb(cmsCreate_sRGBProfile());
+    TransformPtr transform =
+        to_cmyk ? std::make_shared<const Transform>(cmsCreateTransform(srgb.handle, TYPE_RGBA_8, file.handle, TYPE_CMYK_8, intent,
+                                                                      cmsFLAGS_BLACKPOINTCOMPENSATION | cmsFLAGS_NOCACHE))
+                : std::make_shared<const Transform>(cmsCreateTransform(file.handle, TYPE_CMYK_8, srgb.handle, TYPE_RGBA_8, intent, cmsFLAGS_NOCACHE));
+    if (transform->handle == nullptr) cannot_build();
+    if (key) {
+        const std::lock_guard<std::mutex> held(cache_lock);
+        if (cache.size() >= 8) cache.erase(cache.begin());
+        cache.emplace_back(*key, transform);
+    }
+    return transform;
 }
 
 std::uint32_t intent_of(std::string_view intent) {
@@ -106,13 +167,14 @@ bool is_cmyk_profile(const std::filesystem::path& icc) {
 Image to_cmyk(const Image& image, const std::optional<std::filesystem::path>& icc, int ink_limit, std::string_view intent) {
     const Image rgb = image.convert("RGB");
     if (icc) {
-        if (!is_cmyk_profile(*icc)) throw core::PyValueError("the profile is not a CMYK printing profile");
-        const Profile in(cmsCreate_sRGBProfile());
-        const Profile out = open_profile(*icc);
-        const Transform transform(cmsCreateTransform(in.handle, TYPE_RGBA_8, out.handle, TYPE_CMYK_8, intent_of(intent),
-                                                     cmsFLAGS_BLACKPOINTCOMPENSATION));
-        if (transform.handle == nullptr) throw core::PyValueError("the colour profile cannot be used for CMYK");
-        return apply(rgb, "CMYK", transform.handle);
+        const auto key = key_of(*icc, intent, true);
+        TransformPtr transform = cached(key);
+        if (!transform) {  // (Python's order: the profile's kind, the profile read again, then the intent)
+            if (!is_cmyk_profile(*icc)) throw core::PyValueError("the profile is not a CMYK printing profile");
+            const Profile file = open_profile(*icc);
+            transform = make_transform(file, intent_of(intent), true, key);
+        }
+        return apply(rgb, "CMYK", transform->handle);
     }
     // grey component replacement, in numpy's float32 steps
     const std::string bytes = rgb.tobytes();
@@ -142,11 +204,13 @@ Image to_cmyk(const Image& image, const std::optional<std::filesystem::path>& ic
 
 Image from_cmyk(const Image& image, const std::optional<std::filesystem::path>& icc, std::string_view intent) {
     if (icc) {
-        const Profile in = open_profile(*icc);
-        const Profile out(cmsCreate_sRGBProfile());
-        const Transform transform(cmsCreateTransform(in.handle, TYPE_CMYK_8, out.handle, TYPE_RGBA_8, intent_of(intent), 0));
-        if (transform.handle == nullptr) throw core::PyValueError("the colour profile cannot be used for CMYK");
-        return apply(image.convert("CMYK"), "RGB", transform.handle);
+        const auto key = key_of(*icc, intent, false);
+        TransformPtr transform = cached(key);
+        if (!transform) {
+            const Profile file = open_profile(*icc);  // (its errors before the intent's, as Python reads them)
+            transform = make_transform(file, intent_of(intent), false, key);
+        }
+        return apply(image.convert("CMYK"), "RGB", transform->handle);
     }
     return image.convert("RGB");
 }
