@@ -1329,6 +1329,22 @@ std::vector<double> matrix_of(const Json& op) {
     return out;
 }
 
+// A precise tool's new pixels for the layer (render/color_edit): the picture kept as it was when nothing changed (no
+// new copy, no change to undo); what the raster cannot take (a value, a size) refused as the op's error.
+template <class Tool>
+void precise_edit(Layer& layer, Tool&& tool) {
+    std::string pixels;
+    try {
+        pixels = tool();
+    } catch (const core::PyUncaught&) {
+        throw;
+    } catch (const core::Error& error) {
+        if (error.code() != "value" && error.code() != "format") throw;
+        throw OpError(error.what());  // (Python's ValueError becomes the op's error, as for 8-bit pixels)
+    }
+    if (pixels != *layer.color_raster) layer.color_raster = std::make_shared<const std::string>(std::move(pixels));
+}
+
 void delete_or_transform_area(OpContext& c, bool transform) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -1338,26 +1354,18 @@ void delete_or_transform_area(OpContext& c, bool transform) {
     const Json area = core::op_area(op);
     if (page.layers[ti].color_raster) {  // (the precise pixels themselves: render/color_edit)
         Layer& target = page.layers[ti];
-        std::string pixels;
         if (!transform) {
-            pixels = color_edit::delete_area(page, target, area);
+            precise_edit(target, [&] { return color_edit::delete_area(page, target, area); });
         } else if (core::truthy_at(op, "warp")) {
             const warp::Go go = warp::mapping(selection::area_bbox(area), op["warp"]);
-            pixels = color_edit::warp_area(page, target, area, go, interp(op));
+            const Resample resample = interp(op);
+            precise_edit(target, [&] { return color_edit::warp_area(page, target, area, go, resample); });
         } else {
             const std::vector<double> m = matrix_of(op);
             if (m.size() != 6) throw OpError("matrix is [a, b, c, d, e, f]");
             const Resample resample = interp(op);
-            try {
-                pixels = color_edit::move_area(page, target, area, selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, resample);
-            } catch (const core::PyUncaught&) {
-                throw;
-            } catch (const core::Error& error) {
-                if (error.code() != "value") throw;
-                throw OpError(error.what());
-            }
+            precise_edit(target, [&] { return color_edit::move_area(page, target, area, selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, resample); });
         }
-        target.color_raster = std::make_shared<const std::string>(std::move(pixels));
         return;
     }
     selection::Items items = selection::lift(page.layers[ti], area, page);
@@ -1433,7 +1441,7 @@ void paste(OpContext& c) {
         pasted.panel_clip = false;
         selection::drop(pasted, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
         Layer& target = page.layers[ti];
-        target.color_raster = std::make_shared<const std::string>(color_edit::paste(page, target, pasted, &doc));
+        precise_edit(target, [&] { return color_edit::paste(page, target, pasted, &doc); });
         return;
     }
     selection::drop(page.layers[ti], std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
@@ -1884,8 +1892,9 @@ void erase(OpContext& c) {
     const std::string texture = texture_value != nullptr && core::py_truthy(*texture_value) ? core::py_str(*texture_value) : "";
     Layer& target = page.layers[li];
     if (target.color_raster) {
-        target.color_raster = std::make_shared<const std::string>(color_edit::erase(
-            page, target, points, width, texture == "hard" ? "" : texture, target.id + raster::first_point_repr(points)));
+        precise_edit(target, [&] {
+            return color_edit::erase(page, target, points, width, texture == "hard" ? "" : texture, target.id + raster::first_point_repr(points));
+        });
         return;
     }
     const bool has_raster = target.raster_png && !target.raster_png->empty();

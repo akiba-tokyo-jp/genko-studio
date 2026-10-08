@@ -47,6 +47,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `ruby-layout@1` | M4 | 台詞の `ruby_spans`（書記素範囲 `[start,end)`、読み、書体・倍率・揃え・距離・字間）。TEXT-01 |
 | `paper-texture@1` | M3 | ブラシの紙質（素材参照、濃度、倍率、回転、反転、合成、適用座標、seed）。BRUSH-01 |
 | `psd-text@1` | M4 | PSD の編集可能文字の出力設定（原稿側の保存項目がある場合のみ） |
+| `native.color_raster_v1` / `native.color_raster_tiles_v1` | M3 | 高精度カラー画素とそのタイル保存（下の節） |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -126,7 +127,15 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 
 高精度 `convert_layer(to="pen")` は `preserve_precision: true` を明示する。従来の省略呼出しは、8bitへ精度喪失し得る変換の拒否契約を維持する。GUIの「ペンレイヤーに変換」は必ずtrueで呼び、カラー線機能を宣言して保存する。マスク・効果・スクリーン・色指定・パッチ・既存線・panel_eachが付く高精度元画像は、まだ正確なペン変換ができないため原本とbatch全体を変更せず拒否する。
 
-既存の精密カラーペン層に `convert_layer(to="pen")` を再送した場合、RGB8へ再トレースせず、線と精密色を無変更で保持する。アフィン・遠近・メッシュの線変形は `color_rgb` を保持する。`filter_raster` の高精度線/画像、ならびに高精度画像の消しゴム・選択削除/移動は未対応のため、焼込み/線・画素変更の前に `not_yet_ported` でbatch全体を拒否する。この安全拒否は当該編集機能の完成を意味しない。
+既存の精密カラーペン層に `convert_layer(to="pen")` を再送した場合、RGB8へ再トレースせず、線と精密色を無変更で保持する。アフィン・遠近・メッシュの線変形は `color_rgb` を保持する。
+
+## 高精度カラー画素（native.color_raster_v1、native.color_raster_tiles_v1）
+
+層の `color_raster` は straight sRGB の RGBA16（u16）または RGBA32F（f32、HDR可）で、ページ全面に引き伸ばして表示する。資産は GKCR（`"GKCR"`、版1、標本バイト数2/4、予約0、LE幅・高さ、LE標本）で拡張子 `.colorrgba`。
+
+- 保存は256px角のタイル単位（M3①-1）: `{"tiles": [ref…（行ごと）], "tile": 256, "width", "height", "precision", "space": "srgb", "alpha": "straight"}`。各タイルはそれ自体がGKCR資産で、内容アドレスのため変更のないタイルは共有される。一部を描き替えた保存は触れたタイルだけを増やす（履歴が全面の複製で膨らまない）。`features` に `native.color_raster_tiles_v1` を加える。
+- 旧形式 `{"asset": ref, …}`（全面1資産）も読む。
+- 消しゴム・範囲削除・移動/変形/ワープ・貼り付け、ペン・塗り・グラデーション等の描込み、マスク（表示・結合）は画素の精度のまま行う（`render/color_edit`）。道具の届かない画素はバイト不変。描込みは層に線・塗りを残さず画素へ焼き込む。
 
 `features`へ`native.color_stroke_v1`を登録する。未対応の読み手は従来の未知feature規則により編集・保存を拒否する。既存のRGB8線とモノクロ線の形式は変えない。
 
