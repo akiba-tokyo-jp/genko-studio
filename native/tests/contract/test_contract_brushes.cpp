@@ -122,10 +122,7 @@ private slots:
         QCOMPARE(failures, 0);
     }
 
-    void library_not_yet() {
-        QVERIFY_THROWS_EXCEPTION(genko::core::Error, brushes::library_path());
-        QVERIFY_THROWS_EXCEPTION(genko::core::Error, brushes::save_to_library("x", std::nullopt));
-    }
+    // (the brush library: test_contract_abr)
 };
 
 QTEST_GUILESS_MAIN(TestContractBrushes)

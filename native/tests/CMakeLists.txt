@@ -110,6 +110,9 @@ genko_test(test_contract_filters SOURCES contract/test_contract_filters.cpp DEPS
 # render/colour (CMYK, ICC, the screen proof) against Python's genko/colour.py.
 genko_test(test_contract_colour SOURCES contract/test_contract_colour.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 600)
+# render/abr (Photoshop brush files) and the brush library against Python's genko/abr.py and brushes.py.
+genko_test(test_contract_abr SOURCES contract/test_contract_abr.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 600)
 # The two together: a book made by the ops (C++ and Python), drawn by `genko render` and `python -m genko render`.
 genko_test(test_contract_drawn_by_ops SOURCES contract/test_contract_drawn_by_ops.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)

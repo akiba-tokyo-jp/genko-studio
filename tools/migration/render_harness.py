@@ -17,6 +17,11 @@ Commands:
   colour-cases OUT ICC           colour.to_cmyk / from_cmyk / proof / ink_coverage on a fixed picture, with and without
                                 the CMYK profile ICC (each rendering intent), and the profile checks: their bytes or
                                 the exception
+  abr-cases OUT FILE...           abr.brushes_from for each .abr FILE (prefix: its stem and a space) and
+                                abr.tip_from_picture for each other FILE: the definitions with each tip's pixels, or
+                                the exception
+  brush-library OUT CONFIG      brushes.save_to_library / load_library in the config folder CONFIG (a few brushes
+                                kept, one forgotten): the file's text and what it reads back
   make-books OUT --seed N --count K
                                 K random books for drawing (layers, brushes, rasters, patches, masks, blend modes,
                                 fills and gradients, corrections, panels): OUT/book-NN.genko
@@ -1302,6 +1307,49 @@ def colour_cases(out: str, icc: str) -> None:
     Path(out).write_text(json.dumps(cases) + "\n", encoding="utf-8")
 
 
+def _tip_pixels(tip_png: str) -> dict:
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(base64.b64decode(tip_png)))
+    return {"mode": image.mode, "size": list(image.size), "bytes": base64.b64encode(image.tobytes()).decode("ascii")}
+
+
+def abr_cases(out: str, files: list[str]) -> None:
+    """abr.py on the given files: each brush definition with its tip as pixels (the PNG's bytes are the encoder's)."""
+    from genko import abr
+
+    cases = {}
+    for name in files:
+        path = Path(name)
+        try:
+            if path.suffix.lower() == ".abr":
+                found = []
+                for definition in abr.brushes_from(path.read_bytes(), prefix=f"{path.stem} "):
+                    found.append({**{k: v for k, v in definition.items() if k != "tip_png"}, "tip": _tip_pixels(definition["tip_png"]),
+                                  "tip_kind": definition["tip"]})
+                cases[path.name] = {"brushes": found}
+            else:
+                cases[path.name] = {"tip": _tip_pixels(abr.tip_from_picture(str(path)))}
+        except Exception as exc:  # (the reference's own exception: its type and message)
+            cases[path.name] = {"error": [type(exc).__name__, str(exc)]}
+    Path(out).write_text(json.dumps(cases, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def brush_library(out: str, config: str) -> None:
+    """brushes.save_to_library and load_library in a config folder of the test's own."""
+    import os
+
+    os.environ["GENKO_CONFIG_DIR"] = config
+    from genko import brushes
+
+    brushes.save_to_library("my_a", {"label": "細い線", "base": "gpen", "width_mm": 0.35, "opacity": 0.8, "taper": True})
+    brushes.save_to_library("my_b", {"label": "B", "base": "maru", "width_mm": 1, "rgb": [255, 255, 255], "spacing": 0.25})
+    brushes.save_to_library("my_c", {"label": "\"引用\"\n改行", "base": "gpen", "min_pressure": 1e-05})
+    brushes.save_to_library("my_b", None)
+    text = brushes.library_path().read_text(encoding="utf-8")
+    Path(out).write_text(json.dumps({"text": text, "loaded": brushes.load_library()}, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1319,6 +1367,12 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("colour-cases")
     p.add_argument("out")
     p.add_argument("icc")
+    p = sub.add_parser("abr-cases")
+    p.add_argument("out")
+    p.add_argument("files", nargs="+")
+    p = sub.add_parser("brush-library")
+    p.add_argument("out")
+    p.add_argument("config")
     p = sub.add_parser("make-books")
     p.add_argument("out")
     p.add_argument("--seed", type=int, default=1)
@@ -1337,6 +1391,10 @@ def main(argv: list[str] | None = None) -> int:
         adjust_cases(args.out)
     elif args.cmd == "colour-cases":
         colour_cases(args.out, args.icc)
+    elif args.cmd == "abr-cases":
+        abr_cases(args.out, args.files)
+    elif args.cmd == "brush-library":
+        brush_library(args.out, args.config)
     elif args.cmd == "make-books":
         make_books(args.out, args.seed, args.count)
     elif args.cmd == "render":

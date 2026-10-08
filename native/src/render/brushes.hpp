@@ -36,10 +36,16 @@ void register_brushes(const core::Json& definitions);
 // Forget the registered brushes (a new process starts without them; the tests use this between books).
 void clear_custom();
 
-// The person's own brush library lives in the config folder, which is settled in M6: these throw NotYetPorted.
-std::filesystem::path library_path();
-core::Json load_library();
-void save_to_library(std::string_view key, const std::optional<core::Json>& data);
+// _decode_tip: the ink of an image tip given as base64 PNG (its alpha, or its darkness), or nothing for a picture that
+// cannot be opened.
+std::optional<Image> tip_ink(const std::string& base64_png);
+
+// The person's own brushes (key → settings) in the config folder's brushes.json (Python's library_path,
+// load_library, save_to_library; the folder is the app's: app/config.hpp). A file that cannot be read is an empty
+// library; saving writes json.dumps({"brushes": …}, ensure_ascii=False, indent=1).
+std::filesystem::path library_path(const std::filesystem::path& config_dir);
+core::Json load_library(const std::filesystem::path& config_dir);
+void save_to_library(const std::filesystem::path& config_dir, std::string_view key, const std::optional<core::Json>& data);
 
 // A line's coverage at a resolution, only around the line: an "L" picture and where its corner is on the page.
 struct Coverage {

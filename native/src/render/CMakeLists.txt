@@ -28,6 +28,7 @@ genko_library(genko_render
     vectorize.cpp
     color_edit.cpp
     color_filters.cpp
+    abr.cpp
     colour.cpp
     raster_ops.cpp
     ${GENKO_MATERIAL_RESOURCES}

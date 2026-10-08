@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -394,9 +396,47 @@ void clear_custom() {
     g_custom.clear();
 }
 
-std::filesystem::path library_path() { throw NotYetPorted("brush_library"); }
-core::Json load_library() { throw NotYetPorted("brush_library"); }
-void save_to_library(std::string_view, const std::optional<core::Json>&) { throw NotYetPorted("brush_library"); }
+std::optional<Image> tip_ink(const std::string& base64_png) { return decode_tip(base64_png); }
+
+std::filesystem::path library_path(const std::filesystem::path& config_dir) { return config_dir / "brushes.json"; }
+
+core::Json load_library(const std::filesystem::path& config_dir) {
+    core::Json data;
+    try {
+        std::ifstream file(library_path(config_dir), std::ios::binary);
+        if (!file) return core::Json::object();
+        const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        if (core::utf8_error(text)) return core::Json::object();  // (UnicodeDecodeError is a ValueError)
+        data = core::parse_python_json(text);
+    } catch (const core::Error&) {
+        return core::Json::object();
+    }
+    core::Json out = core::Json::object();
+    if (!data.is_object()) return out;
+    const auto found = data.find("brushes");
+    if (found == data.end() || !core::py_truthy(*found)) return out;
+    if (!found->is_object()) throw core::PyUncaught("AttributeError", "'" + core::py_type_name(*found) + "' object has no attribute 'items'");
+    for (const auto& [key, value] : found->items()) {
+        if (!value.is_object()) throw core::PyValueError("dictionary update sequence element #0 has length 1; 2 is required");
+        out[key] = value;
+    }
+    return out;
+}
+
+void save_to_library(const std::filesystem::path& config_dir, std::string_view key, const std::optional<core::Json>& data) {
+    core::Json brushes = load_library(config_dir);
+    if (data) brushes[std::string(key)] = *data;
+    else brushes.erase(std::string(key));
+    const std::filesystem::path path = library_path(config_dir);
+    std::filesystem::create_directories(path.parent_path());
+    core::DumpOptions options;
+    options.indent = 1;
+    options.item_separator = ",";
+    const std::string text = core::dump(core::Json{{"brushes", brushes}}, options);
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    file.write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (!file) throw core::PyUncaught("OSError", "the brush library cannot be written: " + path.string());
+}
 
 std::optional<Coverage> draw(Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view kind,
                              std::string_view seed, std::span<const double> rotation, double pressure_opacity) {
