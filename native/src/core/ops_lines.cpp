@@ -721,6 +721,12 @@ void replace_text(OpContext& c) {
 
 }  // namespace
 
+std::vector<std::string> line_style_keys() {
+    std::vector<std::string> keys;
+    for (const StyleKey& key : kStyleKeys) keys.emplace_back(key.name);
+    return keys;
+}
+
 void register_line_ops(OpRegistry& registry, PictureCheck check) {
     registry.add("add_line", [check](OpContext& c) { add_line(c, check); });
     registry.add("edit_line", [check](OpContext& c) { edit_line(c, check); });

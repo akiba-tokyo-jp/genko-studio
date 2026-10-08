@@ -3,10 +3,16 @@
 #include <QWidget>
 
 #include <map>
+#include <string>
 #include <variant>
 #include <vector>
 
+#include "core/json.hpp"
+
 class QAction;
+class QCheckBox;
+class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
 class QPushButton;
 class QVBoxLayout;
@@ -24,6 +30,27 @@ QPushButton* menu_button(const QString& label, const std::vector<std::vector<QAc
 // A tool's page: sections (a string starts one) of command rows and switches; nullptr is a gap.
 using PageItem = std::variant<QString, QAction*, QWidget*, std::nullptr_t>;
 QWidget* action_page(const std::vector<PageItem>& items);
+
+// How a new line typed with the text tool starts (Python's TextToolSettings): its balloon, direction, face and size,
+// and whether the balloon is drawn by hand.
+class TextToolSettings : public QWidget {
+    Q_OBJECT
+public:
+    explicit TextToolSettings(QWidget* parent = nullptr);
+    // line_fields(): {balloon, vertical, style: {font?, size_mm?}}
+    struct LineFields {
+        std::string balloon;
+        bool vertical = true;
+        core::Json style = core::Json::object();
+    };
+    LineFields line_fields() const;
+
+    QComboBox* balloon = nullptr;
+    QCheckBox* vertical = nullptr;
+    QCheckBox* draw_balloon = nullptr;
+    QComboBox* font = nullptr;
+    QDoubleSpinBox* size = nullptr;
+};
 
 class ToolSettings : public QWidget {
     Q_OBJECT

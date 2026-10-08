@@ -303,7 +303,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     column->addWidget(failure_bar_);
     column->addWidget(canvas_, 1);
     setCentralWidget(central);
-    ime_ = new ImeEntry(canvas_);  // (the entrance for typed words: the text tool uses it in M4)
+    ime_ = new ImeEntry(canvas_);  // (the entrance for typed words; the text tool types in its InlineEditor, ime.hpp)
     ime_->hide();
 
     status_ = new QLabel;
@@ -462,7 +462,9 @@ void MainWindow::on_book_changed(const BookChange& change) {
         reload_pages();
     } else {
         pages_->fill(session_->snapshot(), page_index_);
+        lines_later_ = change.why == BookChange::Why::Edit;  // (an edit on this page: the lines panel follows a moment later)
         show_page();
+        lines_later_ = false;
     }
     if (doc_ < doc_tabs_->count()) doc_tabs_->setTabText(doc_, documents_[static_cast<std::size_t>(doc_)].title());
     render::brushes::follow_book(b.brush_custom);  // (a define_brush: the person's own brushes and their edits stay)
@@ -498,6 +500,11 @@ void MainWindow::show_page() {
     refresh_status();
     if (navigator_ != nullptr) navigator_->update();
     if (layer_panel_ != nullptr) layer_panel_->refresh();
+    if (lines_later_) {
+        lines_timer_.start();
+    } else {
+        refresh_lines();
+    }
     if (guides_ != nullptr && guides_->isVisible()) guides_->refresh();
     if (materials_ != nullptr && materials_->isVisible()) materials_->refresh();
     if (timeline_ != nullptr) {

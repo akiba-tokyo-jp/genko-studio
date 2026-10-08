@@ -74,6 +74,25 @@ bool same_layer_look(const core::Layer& a, const core::Layer& b) {
            a.screen == b.screen && a.asset == b.asset && a.region.has_value() == b.region.has_value() && a.angle == b.angle;
 }
 
+// The page's lines of dialogue as they are drawn: the same words, places, balloons, tails and styles.
+bool same_line(const core::StoryLine& a, const core::StoryLine& b) {
+    const bool tails = a.tail.has_value() == b.tail.has_value() && (!a.tail || (same_num(a.tail->x, b.tail->x) && same_num(a.tail->y, b.tail->y)));
+    return tails && a.id == b.id && a.text == b.text && a.speaker == b.speaker && a.frame_id == b.frame_id && a.ruby == b.ruby &&
+           same_num(a.x_mm, b.x_mm) && same_num(a.y_mm, b.y_mm) && same_num(a.w_mm, b.w_mm) && same_num(a.h_mm, b.h_mm) &&
+           a.balloon == b.balloon && a.wrap == b.wrap && a.ruby_runs == b.ruby_runs && same_points(a.path, b.path) &&
+           a.emphasis_runs == b.emphasis_runs && a.style_runs == b.style_runs && a.style == b.style && a.tails == b.tails;
+}
+
+bool same_story(const core::Document& a, const core::Document& b, const core::Num& index) {
+    const auto x = a.story_for_page(index);
+    const auto y = b.story_for_page(index);
+    if (x.size() != y.size()) return false;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        if (x[i] != y[i] && !same_line(*x[i], *y[i])) return false;
+    }
+    return true;
+}
+
 // The page drawn faintly over `page` (render_page's onion: in name and proof, the first page of that index), or none.
 const core::Page* onion_page(const core::Document& doc, const core::Page& page, const std::string& mode) {
     if ((mode != "name" && mode != "proof") || !page.onion_from || !page.onion_from->truthy()) return nullptr;
@@ -245,7 +264,8 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
         rough_first_ = true;
         omitted_.clear();
         emit omittedChanged(omitted_);
-    } else if (shown_page_ != &page || doc_->brush_custom != doc->brush_custom || doc_->story.size() != doc->story.size() || !same_onion) {
+    } else if (shown_page_ != &page || doc_->brush_custom != doc->brush_custom || doc_->story.size() != doc->story.size() || !same_onion ||
+               !same_story(*doc_, *doc, page.index)) {
         // the same page, changed: only the tiles its new or removed lines cover are drawn again (anything else
         // changed: all of them)
         const core::Page& old = *shown_page_;
@@ -253,7 +273,8 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
                        old.fills == page.fills && old.extra == page.extra && old.effects == page.effects && old.ruler == page.ruler &&
                        old.rulers == page.rulers && old.prims == page.prims && old.numero == page.numero &&
                        old.onion_from == page.onion_from && same_onion && old.layers.size() == page.layers.size() &&
-                       doc_->brush_custom == doc->brush_custom && doc_->story.size() == doc->story.size());
+                       doc_->brush_custom == doc->brush_custom && doc_->story.size() == doc->story.size() &&
+                       same_story(*doc_, *doc, page.index));  // (a line edited, moved or restyled: the whole page, as Python draws it)
         std::vector<core::StrokePtr> touched;
         if (!whole) {
             for (std::size_t i = 0; i < page.layers.size() && !whole; ++i) {

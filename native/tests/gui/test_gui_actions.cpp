@@ -242,8 +242,10 @@ private slots:
         // (test_gui_select), the 3 of animation and the timelapse and the 2 of the filter plugins (M3) theirs
         // (test_gui_anim), the 13 of the drawing tools and the colour and the 7 of editing lines (M3) theirs
         // (test_gui_paint), the 31 of the rulers and 3D theirs (test_gui_guides), the 23 of effect lines, tones, materials,
-        // the view's extras, the layer commands and the scans theirs (test_gui_effects).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{171});
+        // the view's extras, the layer commands and the scans theirs (test_gui_effects), the 8 of the lines of dialogue
+        // (M4: act_text, act_line_type, act_balloon_pen, act_line_edit, act_line_delete, act_line_wrap, act_story_editor,
+        // act_replace) theirs (test_gui_lines).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{179});
         QVERIFY(w->action("act_exposure"));
         QVERIFY(w->action("act_nombre"));
         for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten",
@@ -275,8 +277,9 @@ private slots:
             }
         }
         // the palette and the command bar (Python's order); with M3's eight ways of the marquee (test_gui_select) and its
-        // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects)
-        QCOMPARE(w->tools_group()->actions().size(), 27);
+        // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
+        // text tool (test_gui_lines)
+        QCOMPARE(w->tools_group()->actions().size(), 28);
     }
 
     void theToolsAreOneGroup() {
@@ -291,7 +294,7 @@ private slots:
                                                   {"gradient", "act_gradient"}, {"shape", "act_shape"}, {"blend", "act_blend"},
                                                   {"liquify", "act_liquify"}, {"reshape", "act_reshape"}, {"vector", "act_vector"},
                                                   {"ruler", "act_ruler"},     {"3d", "act_3d"},         {"effect", "act_effect"},
-                                                  {"stamp", "act_stamp"}};
+                                                  {"stamp", "act_stamp"},     {"text", "act_text"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

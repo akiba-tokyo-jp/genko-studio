@@ -97,6 +97,7 @@ void PageCanvas::paint_page(QPainter& painter) {
     draw_grid(painter);    // (canvas_guides.cpp)
     draw_rulers(painter);
     draw_selection(painter);
+    draw_lines(painter);  // (the balloons' boxes and the chosen one's handles: canvas_lines.cpp)
     if (tool_drag_ && tool_ == QLatin1String("move") && !move_image_.isNull()) {
         // the layer being moved: its picture following the pen
         const QPointF d = tool_drag_->second - tool_drag_->first;
@@ -118,6 +119,7 @@ void PageCanvas::paint_page(QPainter& painter) {
         painter.setPen(QPen(theme::accent(), 1.2, Qt::DashLine));
         painter.drawRect(QRectF(zoom_drag_->first, zoom_drag_->second).normalized());
     }
+    draw_balloon_stroke(painter);  // (the balloon pen's outline)
     if (!stroke_.empty() && tool_ == QLatin1String("pen") && live_) {
         if (live_snapped_) {
             for (const auto& copy : live_copies_) draw_in_page_px(painter, copy->image(), copy->box(), copy->dpi());
@@ -210,6 +212,7 @@ void PageCanvas::draw_plain(QPainter& painter) const {
     painter.setPen(QPen(QColor(QStringLiteral("#111111")), 2));
     painter.setBrush(Qt::NoBrush);
     for (const core::Frame* frame : page()->leaf_frames()) draw_polygon_mm(painter, outline_of(*frame));
+    for (const core::StoryLine* line : lines()) draw_balloon_box(painter, *line, std::nullopt);  // (and the balloons' boxes)
 }
 
 void PageCanvas::draw_selection(QPainter& painter) const {

@@ -2,7 +2,10 @@
 
 #include <QAction>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
@@ -14,6 +17,7 @@
 
 #include <utility>
 
+#include "app/lettering.hpp"
 #include "app/theme.hpp"
 
 namespace genko::app {
@@ -151,6 +155,53 @@ QWidget* action_page(const std::vector<PageItem>& items) {
     }
     layout->addStretch(1);
     return page;
+}
+
+TextToolSettings::TextToolSettings(QWidget* parent) : QWidget(parent) {
+    setObjectName(QStringLiteral("text_settings"));
+    balloon = new QComboBox;
+    balloon->setObjectName(QStringLiteral("text_balloon"));
+    for (const auto& [key, label] : lettering::kinds()) balloon->addItem(label, key);
+    vertical = new QCheckBox(QStringLiteral("縦書き"));
+    vertical->setObjectName(QStringLiteral("text_vertical"));
+    vertical->setChecked(true);
+    draw_balloon = new QCheckBox(QStringLiteral("フキダシを手で描く"));
+    draw_balloon->setObjectName(QStringLiteral("text_draw_balloon"));
+    draw_balloon->setToolTip(QStringLiteral("ドラッグで囲んだ形がフキダシになり、そのあと台詞を打ちます。クリックだけなら、いつもどおり台詞を置きます"));
+    font = new QComboBox;
+    font->setObjectName(QStringLiteral("text_font"));
+    font->addItem(QStringLiteral("いつもの書体（アンチック）"), QString());
+    for (const auto& [key, label] : lettering::bundled_fonts()) {
+        if (key != QLatin1String("antique")) font->addItem(label, key);
+    }
+    size = new QDoubleSpinBox;
+    size->setObjectName(QStringLiteral("text_size"));
+    size->setRange(0, 60);
+    size->setSingleStep(0.5);
+    size->setSuffix(QStringLiteral(" mm"));
+    size->setSpecialValueText(QStringLiteral("自動（フキダシに合わせる）"));
+    auto* form = new QFormLayout(this);
+    form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+    form->setContentsMargins(0, 0, 0, 0);
+    form->addRow(QStringLiteral("フキダシ"), balloon);
+    form->addRow(QString(), vertical);
+    form->addRow(QString(), draw_balloon);
+    form->addRow(QStringLiteral("書体"), font);
+    form->addRow(QStringLiteral("文字の大きさ"), size);
+    auto* note = new QLabel(QStringLiteral("ルビは ｜約束《やくそく》、傍点は 《《強調》》、一部を大きく {大|…}（特大・小・太・赤・青・白も）と打ちます。"
+                                           "入れた後の台詞は、台詞パネルで直せます。"));
+    note->setWordWrap(true);
+    theme::hint(note);
+    form->addRow(note);
+}
+
+TextToolSettings::LineFields TextToolSettings::line_fields() const {
+    LineFields fields;
+    if (!font->currentData().toString().isEmpty()) fields.style["font"] = font->currentData().toString().toStdString();
+    if (size->value() > 0) fields.style["size_mm"] = size->value();
+    fields.balloon = balloon->currentData().toString().toStdString();
+    fields.vertical = vertical->isChecked();
+    return fields;
 }
 
 ToolSettings::ToolSettings(QWidget* parent) : QWidget(parent) {

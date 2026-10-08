@@ -102,6 +102,10 @@ void MainWindow::build_tool_settings() {
         eraser_texture_->addItem(label, key);
     eraser_texture_->setToolTip(QStringLiteral("ペイントのレイヤーの消え方。ペンの線（ベクター）は、どれでもその所で切れる"));
     eraser_form->addRow(QStringLiteral("消しゴムの質"), eraser_texture_);
+    eraser_balloons_ = new QCheckBox(QStringLiteral("フキダシを削る"));
+    eraser_balloons_->setObjectName(QStringLiteral("eraser_balloons"));
+    eraser_balloons_->setToolTip(QStringLiteral("消しゴムでなぞった所の、台詞のフキダシ（中と線）を削ります。絵は消しません"));
+    eraser_form->addRow(eraser_balloons_);
     eraser_form->addRow(note(QStringLiteral("定規への吸着（表示メニュー）がオンなら、消しゴムも定規に沿って消します")));
     eraser_form->addRow(note(QStringLiteral("トーンのレイヤーでは削ります（ぼかすかは素材パネルのトーンの欄で）")));
     ts->add({QStringLiteral("eraser")}, eraser_page);
@@ -167,7 +171,8 @@ void MainWindow::build_tool_settings() {
                                                             {action("act_flip_h"), action("act_flip_v"), action("act_warp_perspective"), action("act_warp_mesh"),
                                                              action("act_warp_apply")},
                                                             {action("act_fill_selection"), action("act_line_width"), action("act_tone_here")}}))}));
-    ts->add({QStringLiteral("select")}, action_page({QStringLiteral("表示"), action("act_fit"), action("act_actual")}));
+    ts->add({QStringLiteral("text")}, text_settings_);  // (the text tool: main_window_lines.cpp)
+    ts->add({QStringLiteral("select")}, line_select_page());  // (the chosen line's lettering, then the view)
     ts->add({QStringLiteral("move")}, action_page({QStringLiteral("レイヤー"), action("act_layer_dup"), action("act_select_all")}));
     build_paint_pages(ts);  // (図形・色混ぜ・ゆがみ・グラデーション: main_window_paint.cpp)
     build_vector_pages(ts);  // (線の編集・線の修正: main_window_vector.cpp)

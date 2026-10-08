@@ -34,6 +34,7 @@ bool PageCanvas::is_stroke_tool(const QString& tool) {
 }
 
 bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers) {
+    if (tool_ == QLatin1String("text")) return text_press(mm);  // (テキスト: canvas_lines.cpp)
     if (tool_ == QLatin1String("vector")) {
         vector_press(mm.x(), mm.y(), modifiers);
         return true;
@@ -91,6 +92,8 @@ bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
 }
 
 bool PageCanvas::tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed) {
+    if (line_move(mm, modifiers)) return true;  // (a balloon or one of its handles dragged: canvas_lines.cpp)
+    if (text_move(mm, pressed)) return true;
     if (effect_move(mm)) return true;
     if ((vector_drag_ || vector_trace_) && vector_move(mm.x(), mm.y())) return true;
     if (reshape_) {
@@ -112,6 +115,8 @@ bool PageCanvas::tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, b
 }
 
 bool PageCanvas::tool_release() {
+    if (text_release()) return true;
+    if (line_release()) return true;
     if (effect_release()) return true;
     if (vector_release()) return true;
     if (reshape_release()) return true;

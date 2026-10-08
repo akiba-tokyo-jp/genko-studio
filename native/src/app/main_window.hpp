@@ -47,6 +47,10 @@ class MaterialPanel;
 class LayerPanel;
 class TimelinePanel;
 class ToolSettings;
+class TextToolSettings;
+class StoryPanel;
+class StoryEditor;
+class ReplaceDialog;
 
 class Navigator;
 class PageList;
@@ -73,6 +77,7 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
     friend class GuidePanel;     // (its edits are the window's: the chosen panel, the layer drawn on)
     friend class MaterialPanel;  // (likewise)
+    friend class StoryPanel;     // (the chosen panel, a line's panel)
 
 public:
     // A window on a book (shared with any other window on it); none: a new untitled book in memory (8 pages, A4).
@@ -148,6 +153,15 @@ public:
     const std::string& effect_kind() const { return effect_kind_; }
     // スキャナーから取り込む: where the scan comes from (tests; none: the scanner, scanner::scan).
     std::function<std::string(int dpi)> scanner_source;
+    // 台詞 (main_window_lines.cpp): the panel, the text tool's settings, the story editor open (none: closed); a line
+    // chosen (the panel shows it; open_panel: its tab comes to the front); a balloon's right-click menu (not shown).
+    StoryPanel* story() const { return story_; }
+    TextToolSettings* text_settings() const { return text_settings_; }
+    StoryEditor* story_editor() const;
+    void on_line_selected(const std::string& line_id, bool open_panel);
+    std::unique_ptr<QMenu> line_menu(const std::string& line_id);
+    // A line of the book by its id (none: not there).
+    const core::StoryLine* line_by_id(const std::string& line_id) const;
 
     PageCanvas* canvas() const { return canvas_; }
     PageList* pages() const { return pages_; }
@@ -328,6 +342,29 @@ private:
     bool effect_shape_stroke(const StrokeInput& stroke, const core::Page& page);
     void onion();
     void import_scan(bool from_scanner);
+    // the lines of dialogue (main_window_lines.cpp)
+    void build_line_actions();
+    void build_line_menus(QMenu* pages);
+    void build_line_dock();
+    QWidget* line_select_page();
+    void panel_for_tool(const QString& tool);
+    void refresh_lines();
+    const core::Frame* frame_by_id(const std::optional<std::string>& frame_id) const;
+    void type_new_line(double x_mm, double y_mm);
+    void balloon_drawn(const core::Json& outline);
+    void edit_line_inline(const std::string& line_id);
+    const core::StoryLine* selected_line_or_say();
+    void edit_selected_line();
+    void delete_selected_line();
+    void toggle_selected_wrap();
+    void set_selected_balloon(const QString& kind);
+    std::optional<QString> panel_reference(const std::string& frame_id) const;
+    void picture_balloon(const std::string& line_id);
+    void draw_text_path(const std::string& line_id);
+    bool text_path_stroke(const StrokeInput& stroke);
+    bool balloon_eraser_stroke(const StrokeInput& stroke, const core::Page& page);
+    void open_story_editor();
+    void replace_dialog();
     // editing lines (main_window_vector.cpp)
     void build_vector_actions();
     void build_vector_pages(ToolSettings* ts);
@@ -390,6 +427,13 @@ private:
     std::optional<core::Json> pending_material_;
     std::string effect_kind_ = "focus";
     std::optional<std::pair<std::string, std::string>> effect_shape_for_;  // (effect id, path | inner_path)
+    StoryPanel* story_ = nullptr;
+    TextToolSettings* text_settings_ = nullptr;
+    QDockWidget* lines_dock_ = nullptr;
+    QPointer<StoryEditor> story_editor_;
+    QTimer lines_timer_;                       // (the lines panel follows an edit a moment later)
+    bool lines_later_ = false;
+    std::optional<std::string> text_path_for_;  // the next pen line becomes this line's path (文字をパスに沿わせる)
     std::vector<QAction*> effect_actions_;  // the effect kinds (Python's effect_actions)
     std::vector<QAction*> ruler_actions_;  // the ruler kinds (Python's ruler_actions)
     std::vector<QAction*> prop_actions_;
@@ -414,6 +458,7 @@ private:
     QDoubleSpinBox* eraser_size_ = nullptr;
     QComboBox* eraser_mode_ = nullptr;
     QComboBox* eraser_texture_ = nullptr;
+    QCheckBox* eraser_balloons_ = nullptr;  // フキダシを削る (the eraser cuts the balloons it goes over)
     QComboBox* frame_mode_ = nullptr;
     QComboBox* marquee_mode_ = nullptr;
     QDoubleSpinBox* selection_pen_ = nullptr;

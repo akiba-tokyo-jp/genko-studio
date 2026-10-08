@@ -123,6 +123,8 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
                tool_ == QLatin1String("reshape") || tool_ == QLatin1String("ruler") || tool_ == QLatin1String("3d") ||
                tool_ == QLatin1String("effect") || tool_ == QLatin1String("stamp")) {
         setCursor(Qt::CrossCursor);
+    } else if (tool_ == QLatin1String("text")) {
+        setCursor(Qt::IBeamCursor);
     } else if (tool_ == QLatin1String("frame") && pos && page() != nullptr) {
         const QPointF mm = mm_of(*pos);
         if (const auto gutter = hit_gutter(mm.x(), mm.y())) {
@@ -130,6 +132,8 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
         } else {
             setCursor(Qt::CrossCursor);
         }
+    } else if (pos && page() != nullptr && tool_ != QLatin1String("marquee") && hit_line(mm_of(*pos).x(), mm_of(*pos).y()) != nullptr) {
+        setCursor(Qt::SizeAllCursor);  // (a balloon: dragged with the select tool)
     } else {
         setCursor(Qt::ArrowCursor);
     }
@@ -195,6 +199,7 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         return;
     }
     if (tool_ == QLatin1String("select")) {
+        if (line_press(pos, mm)) return;  // (a balloon or its handles: canvas_lines.cpp)
         last_pos_ = pos;  // a drag on empty paper moves the view (hand), a click chooses a panel
         return;
     }
@@ -384,6 +389,10 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
         finish_frame_poly();
         return;
     }
+    if (page() != nullptr && event->button() == Qt::LeftButton && tool_ == QLatin1String("select")) {
+        line_double_click(to_mm(event->position()));  // (a balloon: type over it)
+        return;
+    }
     // (otherwise the second press of a double click is swallowed, as in Python: never a second fill, stamp or cut)
 }
 
@@ -395,6 +404,7 @@ void PageCanvas::leaveEvent(QEvent*) {
 void PageCanvas::contextMenuEvent(QContextMenuEvent* event) {
     if (page() == nullptr) return;
     const QPointF mm = to_mm(QPointF(event->pos()));
+    if (line_context_menu(mm, event->globalPos())) return;  // (a balloon's own menu)
     const core::Frame* frame = page()->frame_at(core::Num(mm.x()), core::Num(mm.y()));
     const std::string chosen = page()->selected_frame_id.is_string() ? page()->selected_frame_id.get<std::string>() : std::string();
     if (frame != nullptr && frame->id != chosen) emit frameSelected(QString::fromStdString(frame->id));
@@ -453,7 +463,7 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
         // (not while a line, a selection or its handles are being dragged: the drag ends with the tool it began with)
         const bool dragging = !stroke_.empty() || !marquee_stroke_.empty() || sel_drag_ || ellipse_drag_ || !lasso_fill_.empty() || shape_drag_ ||
                               vector_drag_ || vector_trace_ || reshape_ || tool_drag_ || zoom_drag_ || frame_drag_ || prim_drag_ ||
-                              ruler_drag_ || effect_drag_ || panning_;
+                              ruler_drag_ || effect_drag_ || line_drag_ || handle_drag_ || !balloon_stroke_.empty() || panning_;
         if (!tool.isEmpty() && !held_tool_ && !dragging && tool != tool_) {
             held_tool_ = tool_;
             held_key_ = key;
@@ -505,6 +515,11 @@ void PageCanvas::keyPressEvent(QKeyEvent* event) {
     if (marquee_key(event)) return;
     if (event->key() == Qt::Key_Escape && selection_) {
         set_selection(std::nullopt);
+        return;
+    }
+    if (event->key() == Qt::Key_Escape && line_drag_) {  // (a balloon being dragged stays where it was)
+        line_drag_.reset();
+        update();
         return;
     }
     QWidget::keyPressEvent(event);

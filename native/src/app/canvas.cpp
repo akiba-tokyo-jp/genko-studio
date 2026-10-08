@@ -96,7 +96,10 @@ void PageCanvas::set_page(DocPtr doc, std::size_t index) {
         overlays_.clear();
         frame_drag_.reset();
         frame_poly_.clear();
+        line_drag_.reset();
+        handle_drag_.reset();
     }
+    balloon_stroke_.clear();  // (Python's set_page: _stroke = [])
     if (size_changed || view_.fitted) fit_page();
     renderer_->show(doc_, index_);
     request_tiles();
@@ -145,6 +148,7 @@ void PageCanvas::set_tool(const QString& tool) {
     stroke_.clear();
     marquee_stroke_.clear();
     lasso_fill_.clear();  // (Python's _stroke: the area being drawn round to fill, too)
+    balloon_stroke_.clear();  // (and the balloon pen's outline)
     ruler_draft_.reset();
     live_.reset();
     update_cursor();

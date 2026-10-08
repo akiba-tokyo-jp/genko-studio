@@ -96,6 +96,17 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("style_runs is .*", "文字の一部の書式は、言葉と「大きさ・太字・色」の組で指定します"));
         r.push_back(rule("scale must be between 0.3 and 3", "文字の大きさの倍率は 0.3〜3 の間で決めます"));
         r.push_back(rule(R"(unknown style_runs key (\S+).*)", "文字の一部の書式に知らない項目があります（大きさ・太字・色だけ）"));
+        // the lines of dialogue (core/ops_lines.cpp: the refusals the C++ build words more closely than the families below)
+        r.push_back(rule("text is required", "台詞の文字が要ります（空の台詞は置けません）"));
+        r.push_back(rule(R"(a tail's to must be two numbers \[x, y\])", "しっぽの先は [x, y] の 2 つの数で指定します"));
+        r.push_back(rule(R"((x_mm|y_mm|w_mm|h_mm|path|tail) must be a finite number)", [](const QRegularExpressionMatch& m) {
+            static const QHash<QString, QString> names = {{"x_mm", "台詞の横の位置"}, {"y_mm", "台詞の縦の位置"}, {"w_mm", "フキダシの幅"},
+                                                          {"h_mm", "フキダシの高さ"}, {"path", "フキダシの形"}, {"tail", "しっぽの先"}};
+            return QStringLiteral("%1は、ふつうの数で指定します（無限大や NaN は使えません）").arg(names.value(m.captured(1)));
+        }));
+        r.push_back(rule(R"(points needs \[x_mm, y_mm\])", "点は [x, y]（mm）の 2 つの数で指定します"));
+        r.push_back(rule(R"(replace_text with regex .* is not in the C\+\+ build yet)",
+                         "この版の Genko では、まだ正規表現での置換はできません（「正規表現で探す」を外すと置き換えられます）"));
         r.push_back(rule("gradient_fill needs from and to.*", "グラデーションは、始めと終わりの点で指定します"));
         r.push_back(rule("the gradient needs a longer drag", "もう少し長くドラッグします"));
         r.push_back(rule("the book's pages are still being read: try again in a moment",

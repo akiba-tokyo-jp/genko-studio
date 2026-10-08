@@ -25,11 +25,18 @@
 class QKeyEvent;
 class QVariantAnimation;
 
+namespace genko::app {
+class InlineEditor;
+}
+
 // The page canvas (Python's genko/app/canvas.py PageCanvas): the page as it will print (drawn by the renderer in
 // tiles on worker threads) with light overlays on top — the bleed, trim line and basic frame, the reading order of
 // the panels, the chosen panel, the panel tool's gutters, corners and bows, the line being drawn.
 //
-// Tools: 選択 (click a panel to choose it, drag elsewhere to move the view), レイヤー移動, ペン and 消しゴム
+// Tools: 選択 (click a panel to choose it, drag a balloon to move it — its box's handles resize it, its tail's ● and ◇
+// move the tip and bend it, the ○ above turns it —, double-click a balloon to type over it, drag elsewhere to move the
+// view), テキスト (click to type a line there, Ctrl+Enter keeps it; or draw a balloon's outline by hand: canvas_lines.cpp),
+// レイヤー移動, ペン and 消しゴム
 // (the pen's lines are cut where it passes), コマ割り (drag across a panel to cut it — level and upright cuts snap,
 // Alt for a free angle —, drag a gutter, a chosen panel's corners and the ◇ on its edges; or draw new panels:
 // rect, poly, free), 範囲選択 (canvas_select.cpp: a rectangle, an ellipse, a lasso, a polyline, auto-select, colour,
@@ -174,6 +181,30 @@ public:
     bool vector_delete();
     // The moving layer's picture (QImage and where it sits, mm), given by the window when a layer move starts.
     void set_move_image(const QImage& image, const QRectF& where_mm);
+    // --- the lines (台詞, canvas_lines.cpp) ------------------------------------------------------------------
+    // The line chosen: its box shown, and with the select tool its handles.
+    std::optional<std::string> selected_line_id;
+    // The text tool draws a balloon's outline by hand (フキダシを手で描く) instead of placing a line where clicked.
+    bool balloon_pen = false;
+    // The page's lines (Python's canvas.lines: the book's story for the page shown).
+    std::vector<const core::StoryLine*> lines() const;
+    // Type a line at this point of the page (Python's open_editor): on_done(the words, or nothing) when finished. An
+    // editor still open is finished first (its words kept).
+    InlineEditor* open_editor(double x_mm, double y_mm, const QString& text, std::function<void(std::optional<QString>)> on_done);
+    InlineEditor* editor() const;
+    // A handle of the chosen line (Python's _handles): resize (key nw … w), turn, or a tail's tip (part "to"), its bend
+    // ("via") or one of its corners ("vias", via); where it is (mm).
+    struct LineHandle {
+        QString kind;  // resize | turn | tail
+        QString key;   // the resize handle's corner or side
+        int tail = -1;
+        QString part;  // to | via | vias
+        int via = -1;
+        QPointF at;
+    };
+    std::vector<LineHandle> line_handles() const;
+    // balloons.tails_of(line): its tails with a tip, or its single old tail as one.
+    static core::Json tails_of(const core::StoryLine& line);
 
     // The line with this id is on the page now: it is shown exactly as the page will be until its tiles are drawn.
     void stroke_applied(const std::string& id);
@@ -276,6 +307,16 @@ signals:
     void effectSelected(const QString& effect_id);
     void effectMoved(const QString& effect_id, const QPointF& centre);
     void stampRequested(double x_mm, double y_mm);
+    // the lines: the text tool clicked here (mm); a balloon's outline drawn by hand ([[x, y], …] mm); a line chosen (and
+    // whether its panel opens); a line's box or tails changed ({x_mm, y_mm, w_mm, h_mm} | {tails}: move_line, or {style}:
+    // edit_line); a double click on a balloon (type over it); a right click on one; a balloon dragged to (mm)
+    void textRequested(double x_mm, double y_mm);
+    void balloonDrawn(const genko::core::Json& outline);
+    void lineSelected(const QString& line_id, bool open_panel);
+    void lineGeometry(const QString& line_id, const genko::core::Json& change);
+    void lineEditRequested(const QString& line_id);
+    void lineContextMenu(const QString& line_id, const QPoint& global);
+    void textMoved(const QString& line_id, double x_mm, double y_mm);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -396,6 +437,23 @@ private:
     void effect_press(const QPointF& pos);
     bool effect_move(const QPointF& mm);
     bool effect_release();
+    // the lines (canvas_lines.cpp): true when the press, move or release was theirs
+    const core::StoryLine* selected_line() const;
+    const core::StoryLine* hit_line(double x_mm, double y_mm) const;
+    std::optional<LineHandle> hit_line_handle(const QPointF& pos) const;
+    void draw_balloon_box(QPainter& painter, const core::StoryLine& line, std::optional<QPointF> at, bool strong = false,
+                          bool fill = true) const;
+    void draw_lines(QPainter& painter) const;
+    void draw_line_handles(QPainter& painter) const;
+    void draw_balloon_stroke(QPainter& painter) const;
+    bool line_press(const QPointF& pos, const QPointF& mm);
+    bool line_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool line_release();
+    bool line_double_click(const QPointF& mm);
+    bool line_context_menu(const QPointF& mm, const QPoint& global);
+    bool text_press(const QPointF& mm);
+    bool text_move(const QPointF& mm, bool pressed);
+    bool text_release();
     // 線の編集 and 線の修正 (canvas_vector.cpp)
     std::vector<core::StrokePtr> vector_strokes() const;
     core::StrokePtr vector_hit(double x, double y) const;
@@ -523,6 +581,24 @@ private:
         bool moved = false;
     };
     std::optional<EffectDrag> effect_drag_;
+    struct LineDrag {  // a balloon dragged: where it was grabbed (from its corner) and where it is shown
+        std::string id;
+        QPointF grab;
+        QPointF pos;
+        QPointF orig;
+    };
+    std::optional<LineDrag> line_drag_;
+    struct HandleDrag {  // a handle of the chosen line dragged: the box as it was and is now, the tails, the turn
+        LineHandle handle;
+        std::string line;
+        std::array<core::Num, 4> orig;
+        std::array<core::Num, 4> cur;
+        core::Json tails;
+        std::optional<core::Num> angle;
+    };
+    std::optional<HandleDrag> handle_drag_;
+    std::vector<QPointF> balloon_stroke_;  // the balloon pen's outline (mm)
+    QPointer<InlineEditor> editor_;
     struct Warp {
         QString kind;  // perspective | mesh
         std::array<double, 4> box{};  // x, y, w, h

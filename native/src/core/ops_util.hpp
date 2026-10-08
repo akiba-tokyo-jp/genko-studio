@@ -93,5 +93,7 @@ using PictureCheck = std::function<void(const std::string& bytes)>;
 // set_balloon_path, replace_text: core/ops_lines.cpp). Without `check` a picture in a line's style is refused with
 // not_yet_ported (as an area that needs resolving is): render::ops_registry registers them again with its check.
 void register_line_ops(OpRegistry& registry, PictureCheck check = {});
+// ops.STYLE_KEYS: the keys a line's style takes, in Python's order (the app's 既定の設定に戻す clears them).
+std::vector<std::string> line_style_keys();
 
 }  // namespace genko::core

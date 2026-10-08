@@ -481,6 +481,11 @@ void MainWindow::flip(int sx, int sy) {
 }
 
 void MainWindow::delete_area() {
+    if (!selection_area() && canvas_->tool() == QLatin1String("select") && canvas_->selected_line_id) {
+        apply_ops(Json::array({Json{{"op", "delete_line"}, {"id", *canvas_->selected_line_id}}}));  // Delete on a picked balloon
+        canvas_->selected_line_id.reset();
+        return;
+    }
     const auto area = need_area();
     if (!area) return;
     if (const core::Layer* layer = paint_layer())

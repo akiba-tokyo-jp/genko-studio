@@ -200,6 +200,7 @@ void MainWindow::build_actions() {
     build_vector_actions();     // (線の修正, 線の編集 and its commands: main_window_vector.cpp)
     build_guide_actions();      // (定規, 3D and their commands: main_window_guides.cpp)
     build_material_actions();   // (効果線, 素材を置く, トーン, the view's extras, the layer commands: main_window_materials.cpp)
+    build_line_actions();       // (テキスト, 台詞 and the book's lines, the 台詞 panel: main_window_lines.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -285,6 +286,7 @@ void MainWindow::build_actions() {
                                           {"picker", "act_picker"}, {"fill", "act_fill"}, {"lassofill", "act_lassofill"},
                                           {"gradient", "act_gradient"}, {"shape", "act_shape"}, {"blend", "act_blend"}, {"reshape", "act_reshape"},
                                           {"rect", "act_marquee"}, {"lasso", "act_lasso"}, {"wand", "act_wand"}, {"ruler", "act_ruler"},
+                                          {"text", "act_text"},
                                           {"3d", "act_3d"}, {"effect", "act_effect"}, {"stamp", "act_stamp"},
                                           {"move", "act_move"}, {"undo", "act_undo"}, {"redo", "act_redo"}, {"fit", "act_fit"},
                                           {"zoom_in", "act_zoom_in"}, {"zoom_out", "act_zoom_out"}, {"prev", "act_prev"}, {"next", "act_next"}}) {
@@ -348,7 +350,8 @@ void MainWindow::build_menus() {
     view->addAction(action("act_screen_dots"));
     QMenu* tools = bar->addMenu(QStringLiteral("ツール"));
     // (Python's order; the tools not ported yet join it as they come)
-    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_blend", "act_shape", "act_frame"}) tools->addAction(action(name));
+    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_blend", "act_shape", "act_text", "act_frame"})
+        tools->addAction(action(name));
     tools->addSeparator();
     for (const char* name : {"act_picker", "act_fill", "act_lassofill", "act_fill_gaps", "act_gradient", "act_reshape", "act_vector", "act_liquify"})
         tools->addAction(action(name));
@@ -412,6 +415,7 @@ void MainWindow::build_menus() {
     frames->addAction(action("act_reset_shape"));
     frames->addSeparator();
     frames->addAction(action("act_frame_numbers"));
+    build_line_menus(pages);  // (台詞, ストーリーエディター, 台詞の検索・置換: main_window_lines.cpp)
     pages->addSeparator();
     pages->addAction(action("act_name_ok"));
     view_menu_ = bar->addMenu(QStringLiteral("ウィンドウ"));
@@ -440,6 +444,7 @@ void MainWindow::build_toolbars() {
                              "act_picker"})
         palette_->addAction(action(name));
     palette_->addSeparator();
+    palette_->addAction(action("act_text"));
     palette_->addAction(action("act_frame"));
     palette_->addSeparator();
     for (const char* name : {"act_marquee", "act_lasso", "act_wand", "act_reshape"}) palette_->addAction(action(name));
@@ -512,8 +517,9 @@ void MainWindow::build_docks() {
     layers->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
     addDockWidget(Qt::RightDockWidgetArea, layers);
     tabifyDockWidget(pages_dock_, layers);
-    pages_dock_->raise();
     view_menu_->addAction(layers->toggleViewAction());
+    build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
+    pages_dock_->raise();
     build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)
     build_guide_dock();   // (定規・3D, a tab when it is opened: main_window_guides.cpp)
     build_material_dock();  // (素材, トーン, 効果線: main_window_materials.cpp)
@@ -533,6 +539,7 @@ void MainWindow::choose_tool(const QString& tool) {
     if (const auto it = tool_actions_.find(tool); it != tool_actions_.end()) it->second->setChecked(true);
     if (tool == QLatin1String("effect")) set_effect_pictures(effect_actions_, {"focus", "speed", "uni_flash", "beta_flash"});  // (drawn when first needed)
     if (tool_settings_ != nullptr) tool_settings_->show_tool(canvas_->tool());
+    panel_for_tool(tool);  // (the lines for the text tool, the layers for the drawing tools: main_window_lines.cpp)
     pen_changed();
 }
 
@@ -575,6 +582,8 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
         return;
     }
     if (effect_shape_stroke(stroke, *page)) return;  // (this stroke shapes an effect, not ink: main_window_materials.cpp)
+    if (text_path_stroke(stroke)) return;             // (or is the path a line's words follow: main_window_lines.cpp)
+    if (balloon_eraser_stroke(stroke, *page)) return;  // (or cuts the balloons it went over: フキダシを削る)
     const core::Layer* layer = paint_layer();
     if (layer == nullptr) {
         canvas_->stroke_dropped();

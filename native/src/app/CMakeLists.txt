@@ -44,10 +44,16 @@ genko_library(genko_app
     main_window_vector.cpp
     main_window_guides.cpp
     main_window_materials.cpp
+    main_window_lines.cpp
     canvas_tools.cpp
     canvas_vector.cpp
     canvas_guides.cpp
     canvas_effects.cpp
+    canvas_lines.cpp
+    lettering.cpp
+    text_style.cpp
+    story_panel.cpp
+    story_editor.cpp
     guide_panel.cpp
     material_tabs.cpp
     scanner.cpp
