@@ -39,6 +39,9 @@ genko_library(genko_app
     main_window_actions.cpp
     main_window_select.cpp
     main_window_brushes.cpp
+    main_window_anim.cpp
+    timeline.cpp
+    plugins_dialog.cpp
     brush_panel.cpp
     fields.cpp
     tool_settings.cpp

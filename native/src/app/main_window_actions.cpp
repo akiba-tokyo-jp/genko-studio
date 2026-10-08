@@ -192,6 +192,7 @@ void MainWindow::build_actions() {
     }
     actions_.at("act_select")->setChecked(true);
     build_selection_actions();  // (範囲選択 and the selection's commands: main_window_select.cpp)
+    build_anim_actions();       // (アニメーション, タイムラプス: main_window_anim.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -308,6 +309,9 @@ void MainWindow::build_menus() {
     file->addAction(action("act_save"));
     file->addAction(action("act_save_as"));
     file->addSeparator();
+    file->addAction(action("act_timelapse"));
+    file->addAction(action("act_timelapse_export"));
+    file->addSeparator();
     file->addAction(action("act_close"));
     file->addAction(action("act_quit"));
     QMenu* edit = bar->addMenu(QStringLiteral("編集"));
@@ -336,12 +340,16 @@ void MainWindow::build_menus() {
     QMenu* layers = bar->addMenu(QStringLiteral("レイヤー"));
     for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten", "act_layer_convert_paint", "act_layer_convert_pen"})
         layers->addAction(action(name));
+    layers->addSeparator();
+    layers->addAction(action("act_plugins"));
+    layers->addAction(action("act_plugin_settings"));
     QMenu* pages = bar->addMenu(QStringLiteral("ページ"));
     for (const char* name : {"act_add_page", "act_dup_page", "act_del_page"}) pages->addAction(action(name));
     pages->addSeparator();
     pages->addAction(action("act_page_up"));
     pages->addAction(action("act_page_down"));
     pages->addAction(action("act_nombre"));
+    pages->addAction(action("act_timeline"));
     pages->addSeparator();
     QMenu* frames = pages->addMenu(QStringLiteral("コマ"));
     for (const char* name : {"act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection"}) frames->addAction(action(name));
@@ -414,6 +422,7 @@ void MainWindow::build_docks() {
     addDockWidget(Qt::LeftDockWidgetArea, navigator_dock_);
     splitDockWidget(tool_settings_dock_, navigator_dock_, Qt::Vertical);
     view_menu_->addAction(navigator_dock_->toggleViewAction());
+    build_anim_dock();  // (タイムライン, a tab beside the navigator: main_window_anim.cpp)
     pages_dock_ = new QDockWidget(QStringLiteral("ページ"), this);
     pages_dock_->setObjectName(QStringLiteral("ページ"));
     pages_dock_->setWidget(pages_);

@@ -72,6 +72,18 @@ QString save_path(QWidget* parent, const QString& caption, const QString& sugges
     return QFileDialog::getSaveFileName(parent, caption, suggested, filter);
 }
 
+QString save_path_filtered(QWidget* parent, const QString& caption, const QString& suggested, const QString& filter, QString* chosen) {
+    if (const auto r = current(); r && r->save_path_filtered) {
+        auto [path, which] = r->save_path_filtered(caption, suggested, filter);
+        if (chosen != nullptr) *chosen = which;
+        return path;
+    }
+    QString which;
+    const QString path = QFileDialog::getSaveFileName(parent, caption, suggested, filter, &which);
+    if (chosen != nullptr) *chosen = which;
+    return path;
+}
+
 QString open_path(QWidget* parent, const QString& caption, const QString& filter) {
     if (const auto r = current(); r && r->open_path) return r->open_path(caption, filter);
     return QFileDialog::getOpenFileName(parent, caption, QString(), filter);

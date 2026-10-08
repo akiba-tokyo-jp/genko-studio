@@ -40,6 +40,10 @@ Image open_image(std::string_view bytes, const PngLimits& limits = {});
 // The image as PNG bytes ("1", "L", "LA", "I;16", "RGB", "RGBA" and "P"); compress_level as zlib's (0..9).
 std::string write_png(const Image& image, int compress_level = 6);
 
+// The image as JPEG bytes (an RGB copy of it), as Pillow's save(…, quality=q) with its other defaults writes it: libjpeg's
+// defaults with jpeg_set_quality(q, force_baseline), 4:2:0, no density. core::Error("format") when libjpeg fails.
+std::string write_jpeg(const Image& image, int quality = 85);
+
 // write_png to a file (core::Error("io") when it cannot be written).
 void save_png(const Image& image, const std::filesystem::path& path, int compress_level = 6);
 

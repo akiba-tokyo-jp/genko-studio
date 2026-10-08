@@ -29,6 +29,7 @@
 #include "app/wording.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "render/plugins.hpp"
 #include "render/page.hpp"
 
 namespace genko::app {
@@ -213,7 +214,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     mask_button_->setMenu(mask_menu_);
     filter_ = new QComboBox;
     filter_->setObjectName(QStringLiteral("layer_filter"));
-    for (const auto& [key, label] : filter_kinds()) filter_->addItem(label, QString::fromStdString(key));
+    reload_filters();
     auto* apply = button(QStringLiteral("かける…"), QStringLiteral("選んだフィルターをレイヤーにかけます（選択範囲があればその中だけ）"), QStringLiteral("layer_filter_apply"));
     connect(apply, &QPushButton::clicked, this, [this] { apply_filter(); });
 
@@ -267,6 +268,22 @@ void LayerPanel::show_details(bool on, bool save) {
     details_toggle_->setText((on ? QStringLiteral("▾ ") : QStringLiteral("▸ ")) + QStringLiteral("レイヤーの設定"));
     details_toggle_->setToolTip(QStringLiteral("不透明度・合成・ロック・下描き・マスク・フィルターなど"));
     if (save) settings()->setValue(QStringLiteral("ui/layer_details"), on ? QStringLiteral("true") : QStringLiteral("false"));
+}
+
+void LayerPanel::reload_filters() {
+    const QString was = filter_->currentData().toString();
+    filter_->blockSignals(true);
+    filter_->clear();
+    for (const auto& [key, label] : filter_kinds()) filter_->addItem(label, QString::fromStdString(key));
+    try {
+        for (const auto& plugin : render::plugins::available()) {  // (filters a person installed and chose to run)
+            filter_->addItem(QStringLiteral("%1（プラグイン）").arg(QString::fromStdString(plugin.name)),
+                             QString::fromStdString(std::string(render::plugins::kPrefix) + plugin.key));
+        }
+    } catch (const std::exception&) {
+    }
+    if (const int at = filter_->findData(was); at >= 0) filter_->setCurrentIndex(at);
+    filter_->blockSignals(false);
 }
 
 void LayerPanel::refresh() {

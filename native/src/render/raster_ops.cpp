@@ -1,4 +1,5 @@
 #include "render/raster_ops.hpp"
+#include "render/plugins.hpp"
 
 #include <QCryptographicHash>
 #include <QFile>
@@ -1819,16 +1820,26 @@ std::filesystem::path config_dir() {
     return core::path_from_utf8(base.toStdString()) / "genko";
 }
 
-// plugins.run's checks: a plugin is a file a person installed in <config>/plugins; this build does not run it (the
-// external runner of COMP-04 does)
-[[noreturn]] void plugin_filter(const std::string& kind) {
-    const std::string key = kind.substr(7);
+// A plugin's own refusals (not chosen, no Python or no Pillow for the runner): the op's error.
+template <typename Work>
+auto plugin_work(Work&& work) {
+    try {
+        return work();
+    } catch (const core::Error& error) {
+        if (error.code() == "plugin_not_allowed" || error.code() == "plugin_runner") throw OpError(error.what());
+        throw;
+    }
+}
+
+// A plugin on a layer of precise colours: plugins take 8-bit pictures (plugins.run's checks first).
+[[noreturn]] void plugin_on_precise(const std::string& kind) {
+    const std::string key = kind.substr(plugins::kPrefix.size());
     std::error_code ec;
     if (key.empty() || key.find('/') != std::string::npos || key.find('\\') != std::string::npos ||
-        !std::filesystem::is_regular_file(config_dir() / "plugins" / core::path_from_utf8(key + ".py"), ec)) {
+        !std::filesystem::is_regular_file(plugins::folder() / core::path_from_utf8(key + ".py"), ec)) {
         throw core::PyValueError("no plugin " + key);
     }
-    core::not_yet_ported("a filter plugin (" + key + ") runs in the external plugin runner, not in this build");
+    throw OpError("a filter plugin works on 8-bit paint layers, not on a layer of precise colours");
 }
 
 void filter_raster(OpContext& c) {
@@ -1857,7 +1868,7 @@ void filter_raster(OpContext& c) {
             }
         };
         refused([&] {
-            if (kind.starts_with("plugin:")) plugin_filter(kind);
+            if (kind.starts_with("plugin:")) plugin_on_precise(kind);
             color_filters::check(kind, params);
         });
         // (its area read after the settings, as the 8-bit op reads it)
@@ -1877,8 +1888,8 @@ void filter_raster(OpContext& c) {
     }
     Image filtered;
     try {
-        if (kind.starts_with("plugin:")) plugin_filter(kind);
-        filtered = filters::apply_filter(image, kind, params);
+        filtered = kind.starts_with("plugin:") ? plugin_work([&] { return plugins::run(kind, image, params); })
+                                               : filters::apply_filter(image, kind, params);
     } catch (const core::PyUncaught&) {
         throw;
     } catch (const core::Error& error) {

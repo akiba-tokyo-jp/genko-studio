@@ -239,8 +239,9 @@ private slots:
         QCOMPARE(expected().size(), std::size_t{53});
         // Preserve all 53 Python actions; exposure, nombre and the six layer operations (merge, flatten, convert) have
         // their own GUI E2E tests (test_gui_materials, test_gui_color), the 31 of the selection (M3) theirs
-        // (test_gui_select).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{92});
+        // (test_gui_select), the 3 of animation and the timelapse and the 2 of the filter plugins (M3) theirs
+        // (test_gui_anim).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{97});
         QVERIFY(w->action("act_exposure"));
         QVERIFY(w->action("act_nombre"));
         for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten",

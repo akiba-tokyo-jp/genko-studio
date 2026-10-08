@@ -201,6 +201,11 @@ public:
     void alpha_composite(const Image& im, Point dest = {}, std::optional<Box> source = std::nullopt);
 
     Image convert(std::string_view mode, Dither dither = Dither::FloydSteinberg) const;
+    // quantize(colors): a "P" picture of at most `colors` colours (Pillow's Image.quantize without a palette: median
+    // cut, fast octree for RGBA; its dither is not used there).
+    Image quantize(int colors = 256) const;
+    // A "P" picture's palette: RGB of each entry it has (nothing for other modes).
+    std::vector<std::array<std::uint8_t, 3>> palette() const;
 
     // point(lut[, mode]): lut holds 256 values per band (clipped to 0..255), or 256 when mode is "1" or "L" from "L"
     // or "P".

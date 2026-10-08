@@ -78,6 +78,10 @@ public:
     PageRenderer& renderer() { return *renderer_; }
     const PageRenderer& renderer() const { return *renderer_; }
     void set_render_mode(const std::string& mode);
+    // A picture made elsewhere shown as the page (a frame while an animation plays), until the page changes; a null
+    // image: the page's own tiles again.
+    void show_frame(const QImage& picture);
+    bool showing_frame() const { return !shown_frame_.isNull(); }
 
     // --- tools ----------------------------------------------------------------------------------------------
     const QString& tool() const { return tool_; }
@@ -295,6 +299,7 @@ private:
 
     DocPtr doc_;
     std::size_t index_ = 0;
+    QImage shown_frame_;  // show_frame
     std::unique_ptr<PageRenderer> renderer_;
     ViewState view_;
     QString tool_ = QStringLiteral("select");

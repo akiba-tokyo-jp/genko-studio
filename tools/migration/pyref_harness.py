@@ -2205,6 +2205,84 @@ def unit_tables() -> dict:
     }
 
 
+def movie_info(path: str) -> dict:
+    """A moving picture as Pillow plays it (or a folder of numbered PNGs, or an MP4 as ffprobe counts it): its
+    format, size, frames (each one's RGB pixels as sha256, and how long it shows), loop."""
+    import hashlib
+    import shutil
+    import subprocess
+
+    from PIL import Image, ImageSequence
+
+    target = Path(path)
+    if target.is_dir():
+        files = sorted(target.glob("frame_*.png"))
+        frames = []
+        sizes = []
+        for f in files:
+            with Image.open(f) as im:
+                rgb = im.convert("RGB")
+                frames.append(hashlib.sha256(rgb.tobytes()).hexdigest())
+                sizes.append(list(rgb.size))
+        return {"format": "frames", "names": [f.name for f in files], "sizes": sizes, "frames": frames}
+    if target.suffix.lower() == ".mp4":
+        tool = shutil.which("ffprobe")
+        if tool is None:
+            return {"format": "mp4", "probed": False}
+        done = subprocess.run([tool, "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                               "stream=nb_read_frames,r_frame_rate,width,height,codec_name,pix_fmt", "-of", "json", str(target)],
+                              capture_output=True, text=True)
+        stream = json.loads(done.stdout or "{}").get("streams", [{}])[0]
+        return {"format": "mp4", "probed": True, **stream}
+    with Image.open(target) as im:
+        frames, durations, sizes = [], [], []
+        for frame in ImageSequence.Iterator(im):
+            rgb = frame.convert("RGB")
+            frames.append(hashlib.sha256(rgb.tobytes()).hexdigest())
+            durations.append(frame.info.get("duration"))
+            sizes.append(list(rgb.size))
+        return {"format": im.format, "size": list(im.size), "n_frames": getattr(im, "n_frames", 1), "loop": im.info.get("loop"),
+                "durations": durations, "sizes": sizes, "frames": frames}
+
+
+def movie_infos(out: str, paths: list[str]) -> None:
+    Path(out).write_text(json.dumps({p: movie_info(p) for p in paths}, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def anim_movies(book: str, page: int, folder: str, out: str, formats: list[str], dpi: int) -> None:
+    """anim.export of one page of a book in each format (at this dpi), and each file as Pillow plays it."""
+    from genko import anim
+    from genko.io import load_episode
+
+    fresh_process_state(True)
+    episode = load_episode(Path(book))
+    target = next(p for p in episode.pages if p.index == page)
+    results = {}
+    for fmt in formats:
+        dest = Path(folder) / ("frames" if fmt == "frames" else f"movie.{fmt}")
+        try:
+            written = anim.export(target, dest, episode=episode, dpi=dpi, fmt=fmt)
+        except Exception as exc:  # (the reference's own refusal: its type and message)
+            results[fmt] = {"error": [type(exc).__name__, str(exc)]}
+            continue
+        results[fmt] = movie_info(str(dest if fmt == "frames" else written))
+    Path(out).write_text(json.dumps(results, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def plugin_run(config: str, kind: str, src: str, dest: str, params: str) -> None:
+    """plugins.run (Python's own, in this process) on a picture, with the plugins of a config folder."""
+    import os
+
+    os.environ["GENKO_CONFIG_DIR"] = config
+    from PIL import Image
+
+    from genko import plugins
+
+    with Image.open(src) as im:
+        out = plugins.run(kind, im.convert("RGBA"), json.loads(params))
+    out.save(dest)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -2260,7 +2338,29 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--books", required=True)
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--count", type=int, default=150)
+    p = sub.add_parser("movie-info")
+    p.add_argument("out")
+    p.add_argument("paths", nargs="*")
+    p = sub.add_parser("anim-movies")
+    p.add_argument("book")
+    p.add_argument("page", type=int)
+    p.add_argument("folder")
+    p.add_argument("out")
+    p.add_argument("--formats", default="gif,png,webp,frames,mp4")
+    p.add_argument("--dpi", type=int, default=20)
+    p = sub.add_parser("plugin-run")
+    for name in ("config", "kind", "src", "dest", "params"):
+        p.add_argument(name)
     args = parser.parse_args(argv)
+    if args.cmd == "plugin-run":
+        plugin_run(args.config, args.kind, args.src, args.dest, args.params)
+        return 0
+    if args.cmd == "movie-info":
+        movie_infos(args.out, args.paths)
+        return 0
+    if args.cmd == "anim-movies":
+        anim_movies(args.book, args.page, args.folder, args.out, args.formats.split(","), args.dpi)
+        return 0
     if args.cmd == "show-cases":
         return show_cases(args.cases, args.book, args.only)
     if args.cmd == "filter-edges":

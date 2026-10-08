@@ -79,7 +79,9 @@ void PageCanvas::paint_page(QPainter& painter) {
     }
     draw_shadow(painter, page_rect);
     painter.fillRect(page_rect, Qt::white);
-    if (renderer_->any_shown()) {
+    if (!shown_frame_.isNull()) {
+        painter.drawImage(page_rect, shown_frame_);
+    } else if (renderer_->any_shown()) {
         const QTransform kept = painter.transform();
         painter.setTransform(QTransform(view_.scale, 0, 0, view_.scale, view_.pan.x(), view_.pan.y()) * view_transform());
         renderer_->paint(painter, seen_mm());

@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <memory>
+#include <utility>
 #include <optional>
 
 class QDialog;
@@ -25,6 +26,8 @@ struct Responder {
     std::function<void(const QString& title, const QString& text)> warning;
     std::function<QString(const QString& caption, const QString& start)> existing_dir;
     std::function<QString(const QString& caption, const QString& suggested)> save_path;
+    // a place to save and the filter chosen with it
+    std::function<std::pair<QString, QString>(const QString& caption, const QString& suggested, const QString& filter)> save_path_filtered;
     std::function<QString(const QString& caption, const QString& filter)> open_path;
     std::function<int(QDialog* dialog)> exec;  // QDialog::exec's result for a dialog the app runs
 };
@@ -42,6 +45,8 @@ bool question(QWidget* parent, const QString& title, const QString& text);
 void warning(QWidget* parent, const QString& title, const QString& text);
 QString existing_dir(QWidget* parent, const QString& caption, const QString& start = {});
 QString save_path(QWidget* parent, const QString& caption, const QString& suggested, const QString& filter = {});
+// save_path, and which of the filters ("A (*.a);;B (*.b)") was chosen with it (`chosen`).
+QString save_path_filtered(QWidget* parent, const QString& caption, const QString& suggested, const QString& filter, QString* chosen);
 // A file to read (nothing: none chosen); `filter` as QFileDialog takes it ("画像 (*.png *.jpg)").
 QString open_path(QWidget* parent, const QString& caption, const QString& filter = {});
 int exec(QDialog* dialog);

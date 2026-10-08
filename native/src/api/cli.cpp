@@ -35,6 +35,7 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/timelapse.hpp"
 #include "storage/doctor.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/gc.hpp"
@@ -568,7 +569,10 @@ int apply(const QStringList& args, bool ascii) {
         request.base_revision = loaded.document.revision;
         request.ops = result.journal_ops;
         request.txn = txn;
+        const bool lapse = render::timelapse::is_on(result.doc);  // (タイムラプス: the pages this save changes)
+        const Json before = lapse ? storage::read_disk_state(dir).payload : Json();
         const storage::SaveResult saved = storage::Saver(lock).save(result.doc, request);
+        if (lapse && !saved.already_committed) render::timelapse::after_save(dir, result.doc, before);
         out["revision"] = saved.revision;
         out["txn"] = saved.txn;
         if (saved.repaired) out["repaired"] = true;

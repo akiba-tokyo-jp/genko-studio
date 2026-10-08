@@ -89,6 +89,7 @@ void PageCanvas::set_page(DocPtr doc, std::size_t index) {
     const bool size_changed = before == nullptr || !(before->spec.width_mm == now.spec.width_mm && before->spec.height_mm == now.spec.height_mm);
     doc_ = std::move(doc);
     index_ = index;
+    shown_frame_ = QImage();  // (a frame played: until the page changes)
     if (other_page) {
         stroke_.clear();
         live_.reset();
@@ -113,6 +114,11 @@ void PageCanvas::clear_page() {
 }
 
 void PageCanvas::set_render_mode(const std::string& mode) { renderer_->set_mode(mode); }
+
+void PageCanvas::show_frame(const QImage& picture) {
+    shown_frame_ = picture;
+    update();
+}
 
 void PageCanvas::request_tiles() {
     if (page() == nullptr || width() <= 0 || height() <= 0) return;

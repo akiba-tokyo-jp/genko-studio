@@ -37,6 +37,8 @@ public:
     explicit LayerPanel(MainWindow* window);
     // The page's layers again (after a change, another page).
     void refresh();
+    // The filters again (the plugins chosen to run, after their settings changed).
+    void reload_filters();
     // The layer drawn on chosen in the list (the list as it is: the other layers chosen with it stay chosen).
     void show_target();
     // The layers chosen in the list (Ctrl / Shift+click), bottom first.

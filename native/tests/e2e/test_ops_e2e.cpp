@@ -211,8 +211,8 @@ private slots:
         refused("a locked page", Json::parse(R"([{"op": "set_note", "page": 3, "note": "x"}])"), ai, "apply", "locked by human:作者");
         step("newly ported tone in a batch", Json::parse(R"([{"op": "set_note", "page": 1, "note": "x"}, {"op": "add_tone", "page": 1}])"), person);
         refused("an op this build does not have yet",
-                 Json::parse(R"([{"op": "set_note", "page": 1, "note": "refused prefix"}, {"op": "add_anim_folder", "page": 1}])"),
-                 person, "not_yet_ported", "ops[1] add_anim_folder: add_anim_folder is not in the C++ build yet");
+                 Json::parse(R"([{"op": "set_note", "page": 1, "note": "refused prefix"}, {"op": "set_bible", "bible": {}}])"),
+                 person, "not_yet_ported", "ops[1] set_bible: set_bible is not in the C++ build yet");
         step("for_pages", Json::parse(R"([{"op": "for_pages", "pages": [1, 2, 4], "ops": [{"op": "set_note", "note": "全"}]}])"), ai);
         step("unlock", Json::parse(R"([{"op": "unlock_page", "page": 3}])"), person);
         const std::int64_t last = revision;

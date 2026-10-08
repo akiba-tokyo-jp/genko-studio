@@ -47,6 +47,8 @@ genko_library(genko_core
     ops_strokes.cpp
     ops_layers.cpp
     ops_rulers.cpp
+    anim.cpp
+    ops_anim.cpp
     linalg3.cpp
     mesh3d.cpp
     prim3d.cpp

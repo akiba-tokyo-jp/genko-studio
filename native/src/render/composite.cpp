@@ -17,6 +17,8 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "core/paths.hpp"
+#include "render/plugins.hpp"
 #include "render/filters.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
@@ -359,10 +361,32 @@ Image apply_filter(const Ctx& ctx, const Image& image, const std::string& kind, 
     const Image rgba = image.convert("RGBA");
     const bool known = std::find(core::kAdjustments.begin(), core::kAdjustments.end(), kind) != core::kAdjustments.end();
     if (!known) {
-        // (a person's filter plugin runs in the external runner, not here)
-        if (kind.starts_with("plugin:") && skip_unported(ctx, "adjust:plugin")) {
-            *skipped = true;
-            return rgba;
+        // a person's filter plugin: in its runner, when it is chosen to run (its own errors: the layer does nothing, as
+        // Python's _adjusted catches them); one not chosen is left out on screen and refused for output
+        if (kind.starts_with("plugin:")) {
+            const std::string key = kind.substr(plugins::kPrefix.size());
+            if (!plugins::allowed(key)) {
+                if (ctx.skip_unported) {
+                    skip_unported(ctx, "plugin:" + key);
+                    *skipped = true;
+                    return rgba;
+                }
+                std::error_code ec;
+                if (!std::filesystem::is_regular_file(plugins::folder() / core::path_from_utf8(key + ".py"), ec)) {
+                    throw core::PyValueError("no plugin " + key);  // (not installed: as Python, the layer does nothing)
+                }
+                throw core::Error("plugin_not_allowed",
+                                  "plugin " + key + " is not chosen to run (turn plugins on and choose it in the plugin settings)");
+            }
+            try {
+                return plugins::run(kind, rgba, params);
+            } catch (const core::Error& error) {
+                // (no Python or no Pillow to run it: left out on screen and reported, refused for output)
+                if (error.code() != "plugin_runner" || !ctx.skip_unported) throw;
+                skip_unported(ctx, "plugin:" + key);
+                *skipped = true;
+                return rgba;
+            }
         }
         // the filters that change shapes too (an old book's correction layer may hold one): render/filters.cpp
         if (std::find(std::begin(kOtherFilters), std::end(kOtherFilters), kind) != std::end(kOtherFilters)) {
@@ -549,6 +573,7 @@ bool needs_whole_page(const core::Page& page) {
         const auto it = layer.adjust->find("kind");
         if (it == layer.adjust->end() || !it->is_string()) continue;
         if (std::find(std::begin(kOtherFilters), std::end(kOtherFilters), it->get<std::string>()) != std::end(kOtherFilters)) return true;
+        if (it->get<std::string>().starts_with("plugin:")) return true;  // (a plugin sees the whole page, as in Python)
     }
     return false;
 }

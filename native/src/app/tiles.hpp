@@ -61,6 +61,10 @@ public:
     // Where the proof's profile is looked up each time tiles are drawn (Python's icc_setting: the one chosen last for
     // export, while its file is there; none: the plain conversion): one chosen or taken away meanwhile is followed.
     void set_proof_profile(std::function<std::optional<std::filesystem::path>()> profile) { proof_profile_ = std::move(profile); }
+    // An animation page: the frame shown (its exposed cels only) and whether the frames around it show faint over it
+    // (オニオンスキン, and the light table). A page that is not an animation is drawn as it is.
+    void set_anim(std::int64_t frame, bool onion);
+    std::int64_t anim_frame() const { return frame_; }
 
     // What the view needs: the resolution of the whole page (base) and the one wanted (finer when zoomed in), and
     // the part of the page in sight (mm).
@@ -138,6 +142,10 @@ private:
     bool first_shown_ = false;
     bool rough_first_ = false;
     QStringList omitted_;
+    std::int64_t frame_ = 1;
+    bool onion_ = true;
+    struct OnionStore;
+    std::shared_ptr<OnionStore> onions_;  // (the onion skin of the frame shown, made once for all its tiles)
     QThreadPool pool_;
     std::shared_ptr<PageRenderer*> self_;  // (results find the renderer through this; nulled when it goes)
 };

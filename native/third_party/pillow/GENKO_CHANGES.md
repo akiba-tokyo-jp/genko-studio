@@ -32,7 +32,8 @@ Pillow 12.3.0 の sdist を基準に、`Imaging.h` と `Storage.c` に画像確�
 ## ビルドしないもの
 
 - 画像コーデック: `*Decode.c`・`*Encode.c`。PNG は libpng で読む（`native/src/render/png.cpp`）。
-- `Arrow.c`、`codec_fd.c`、`Dib.c`（Windows の画面表示）、`Quant*.c`（減色）。
+- `Arrow.c`、`codec_fd.c`、`Dib.c`（Windows の画面表示）。
+- 減色（`Quant.c`・`QuantHash.c`・`QuantHeap.c`・`QuantOctree.c`・`QuantPngQuant.c`）はビルドする（アニメーション・タイムラプスの GIF で、Python 版の `Image.quantize(colors=128)` と同じ減色にするため）。libimagequant は使わない（`HAVE_LIBIMAGEQUANT` を定義しない）。
 - `Resample.c`: `compat/resample_region.c` から読む（上記）。
 
 ## ビルドの設定

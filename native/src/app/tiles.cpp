@@ -6,12 +6,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <future>
+#include <mutex>
 #include <unordered_set>
 
+#include "core/anim.hpp"
 #include "core/pyconv.hpp"
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
 #include "render/not_yet_ported.hpp"
+#include "render/anim.hpp"
 #include "render/colour.hpp"
 #include "render/page.hpp"
 
@@ -136,6 +140,54 @@ void PageRenderer::clear() {
 void PageRenderer::set_mode(const std::string& mode) {
     if (mode == mode_) return;
     mode_ = mode;
+    ++generation_;
+    for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
+    dispatch();
+}
+
+// The onion skin of one frame of one page (the page by its identity: a changed page is another), made by the first tile
+// that needs it while the others wait for it.
+struct PageRenderer::OnionStore {
+    using Value = std::shared_ptr<const render::Image>;
+    std::mutex mutex;
+    std::shared_ptr<const core::Page> page;
+    std::int64_t frame = 0;
+    int dpi = 0;
+    std::shared_future<Value> value;
+
+    Value get(const std::shared_ptr<const core::Page>& of, std::int64_t at, int resolution, const DocPtr& doc) {
+        std::promise<Value> made;
+        std::shared_future<Value> wait;
+        bool mine = false;
+        {
+            std::lock_guard lock(mutex);
+            if (page != of || frame != at || dpi != resolution || !value.valid()) {
+                page = of;
+                frame = at;
+                dpi = resolution;
+                value = made.get_future().share();
+                mine = true;
+            }
+            wait = value;
+        }
+        if (mine) {
+            try {
+                auto ghost = render::anim::onion(*of, at, resolution, 1, 1, 0.35, doc.get());
+                made.set_value(ghost ? std::make_shared<const render::Image>(std::move(*ghost)) : nullptr);
+            } catch (...) {
+                made.set_value(nullptr);  // (a faint picture that cannot be made: the frame alone)
+            }
+        }
+        return wait.get();
+    }
+};
+
+void PageRenderer::set_anim(std::int64_t frame, bool onion) {
+    if (frame == frame_ && onion == onion_) return;
+    frame_ = frame;
+    onion_ = onion;
+    const core::Page* p = page();
+    if (p == nullptr || !core::anim::is_animation(*p)) return;  // (nothing on screen changes)
     ++generation_;
     for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
     dispatch();
@@ -356,7 +408,11 @@ void PageRenderer::dispatch() {
             const std::string mode = mode_;
             const auto proof = proof_;
             const std::stop_token stop = tile.stop->get_token();
-            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, stop]() {
+            const std::int64_t frame = frame_;
+            const bool onion = onion_;
+            if (!onions_) onions_ = std::make_shared<OnionStore>();
+            const std::shared_ptr<OnionStore> onions = onions_;
+            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, stop, frame, onion, onions]() {
                 Result result;
                 result.page_id = page_id;
                 result.dpi = dpi;
@@ -371,7 +427,23 @@ void PageRenderer::dispatch() {
                     options.skip_unported = true;  // (a preview on screen: what is not drawn yet is reported)
                     options.region = render::RenderRegion{region.x(), region.y(), region.width(), region.height()};
                     options.stop = stop;
-                    render::RenderResult drawn = render::render_page(doc->page(page_index), dpi, options, doc.get());
+                    const std::shared_ptr<const core::Page> raw = doc->pages[page_index];
+                    render::RenderResult drawn;
+                    if (core::anim::is_animation(*raw)) {  // (the frame shown, with the frames around it faint)
+                        options.at_frame = true;
+                        drawn = render::render_page(core::anim::at_frame(*raw, frame), dpi, options, doc.get());
+                        if (onion) {
+                            if (const auto ghost = onions->get(raw, frame, std::min(dpi, 100), doc)) {
+                                const render::Size full{render::mm_to_px(raw->spec.width_mm.value(), dpi),
+                                                        render::mm_to_px(raw->spec.height_mm.value(), dpi)};
+                                const render::Box box{region.x(), region.y(), region.x() + region.width(), region.y() + region.height()};
+                                const render::Image part = ghost->size() == full ? ghost->crop(box) : ghost->resize_region(full, box);
+                                drawn.image = render::alpha_composite(drawn.image.convert("RGBA"), part).convert("RGB");
+                            }
+                        }
+                    } else {
+                        drawn = render::render_page(*raw, dpi, options, doc.get());
+                    }
                     if (proof) drawn.image = render::colour::proof(drawn.image, *proof);  // (per pixel: a tile as the page)
                     result.image = to_qimage(drawn.image);
                     result.omitted = std::move(drawn.omitted);

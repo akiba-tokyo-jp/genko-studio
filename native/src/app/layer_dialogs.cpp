@@ -25,6 +25,7 @@
 
 #include "app/ask.hpp"
 #include "core/filters.hpp"
+#include "render/plugins.hpp"
 
 namespace genko::app {
 
@@ -398,7 +399,20 @@ std::optional<Json> filter_params(QWidget* parent, const std::string& kind, cons
                                   std::optional<std::vector<int>> histogram) {
     const Json now = now_in.is_object() ? now_in : Json::object();
     const auto found = fields().find(kind);
-    if ((found == fields().end() || found->second.empty()) && kind != "curve") return Json::object();
+    const std::vector<Field>* asked = found != fields().end() ? &found->second : nullptr;
+    std::vector<std::string> plugin_keys;  // (a plugin's own settings: plugins.fields, their names kept while it asks)
+    std::vector<Field> plugin_fields;
+    if (asked == nullptr && kind.starts_with(render::plugins::kPrefix)) {
+        const auto given = render::plugins::fields(kind);
+        plugin_keys.reserve(given.size());
+        for (const auto& [key, label, lo, hi, value] : given) plugin_keys.push_back(key);
+        for (std::size_t i = 0; i < given.size(); ++i) {
+            const auto& [key, label, lo, hi, value] = given[i];
+            plugin_fields.push_back(Field{plugin_keys[i].c_str(), QString::fromStdString(label), Number{lo, hi, value}});
+        }
+        asked = &plugin_fields;
+    }
+    if ((asked == nullptr || asked->empty()) && kind != "curve") return Json::object();
     QString title = QStringLiteral("フィルターの強さ");
     for (const auto& [key, label] : kAdjustments) if (key == kind) title = label;
     for (const auto& [key, label] : kFilters) if (key == kind) title = label;
@@ -417,8 +431,8 @@ std::optional<Json> filter_params(QWidget* parent, const std::string& kind, cons
     timer->setSingleShot(true);
     timer->setInterval(250);
     const auto restart = [timer] { timer->start(); };
-    if (found != fields().end()) {
-        for (const Field& field : found->second) {
+    if (asked != nullptr) {
+        for (const Field& field : *asked) {
             QWidget* box = nullptr;
             if (const auto* choice = std::get_if<Choice>(&field.spec)) {
                 auto* combo = new QComboBox;

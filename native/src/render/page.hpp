@@ -17,7 +17,7 @@
 // panel borders, crop marks, the ruler's points and the onion skin, the same pixels as the Python baseline.
 //
 // Not drawn in this step (render::NotYetPorted names them, unless RenderOptions::skip_unported): lines and balloons
-// ("balloons"), placed pictures ("placed"), nombres ("nombre"), a jacket's folds ("covers"), animation pages ("anim")
+// ("balloons"), placed pictures ("placed"), nombres ("nombre"), a jacket's folds ("covers")
 // and the monochrome finish of a painting app's colour layer ("finish"); correction layers other than the colour
 // adjustments ("adjust:<kind>"). Tone layers, effect lines and a layer's screen (render/tones.hpp, render/effects.hpp)
 // and the 3D guides (render/prims.hpp) are drawn.
@@ -55,6 +55,9 @@ struct RenderOptions {
     bool skip_unported = false;
     // Only this part of the page: the same pixels as drawing the whole page and cutting this part out.
     std::optional<RenderRegion> region;
+    // The page is already one frame of its animation (core::anim::at_frame): drawn as it is. Otherwise an animation
+    // page draws as its first frame.
+    bool at_frame = false;
     // Requested: the render stops soon with Cancelled.
     std::stop_token stop;
 };
@@ -94,6 +97,10 @@ Image render_frame(const core::Page& page, std::string_view frame_id, int dpi, c
 // Two pages side by side as the open book shows them (page index first and second).
 Image render_spread(const core::Document& episode, const core::Num& first, const core::Num& second, int dpi = 150,
                     const RenderOptions& options = {}, bool to_trim = false);
+
+// anim.cel_image: one cel alone on a clear page ("RGBA"): its pixels (resized to the page) and its lines, without the
+// panels, its mask or its opacity (the onion skin and the light table).
+Image cel_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr);
 
 // One layer alone over a transparent page (its pixels, fills and lines, panel clip and mask).
 Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,

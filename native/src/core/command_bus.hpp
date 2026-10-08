@@ -176,7 +176,12 @@ void register_book_ops(OpRegistry& registry);
 // Register the ruler ops of M3 (set_ruler, add_ruler, edit_ruler, delete_ruler, ruler_to_layer).
 void register_ruler_ops(OpRegistry& registry);
 
-// Register every op of core: the book ops, the frame, page, stroke and layer ops, the ruler ops (what builtin() holds).
+// Register the animation ops of M3 (set_animation, add_anim_folder, add_cel, set_exposure, set_exposures,
+// set_camera_key, set_light_table).
+void register_anim_ops(OpRegistry& registry);
+
+// Register every op of core: the book ops, the frame, page, stroke and layer ops, the ruler and animation ops (what
+// builtin() holds).
 void register_core_ops(OpRegistry& registry);
 
 }  // namespace genko::core

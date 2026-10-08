@@ -116,6 +116,12 @@ genko_test(test_contract_abr SOURCES contract/test_contract_abr.cpp DEPS genko_t
 # The two together: a book made by the ops (C++ and Python), drawn by `genko render` and `python -m genko render`.
 genko_test(test_contract_drawn_by_ops SOURCES contract/test_contract_drawn_by_ops.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# Animation (M3③): the ops against Python's apply_ops (anim_cases.json), an animation page drawn as its first frame.
+genko_test(test_contract_anim SOURCES contract/test_contract_anim.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# Filter plugins (M3③, COMP-04): the runner against Python's plugins.run, the choice, the bounds.
+genko_test(test_contract_plugins SOURCES contract/test_contract_plugins.cpp DEPS genko_test_support genko_render_ops
+           LABELS contract TIMEOUT 1800)
 
 # 3D (M3-C): the geometry of figures, guides and models bit for bit against Python, the ops, the drawing.
 genko_test(test_contract_3d_geometry SOURCES contract/test_contract_3d_geometry.cpp DEPS genko_test_support genko_render
@@ -159,6 +165,7 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
   # the brush panel and ツールの設定: brushes kept per kind, one's own made, opened, given and read back (.abr too)
   genko_test(test_gui_brushes SOURCES gui/test_gui_brushes.cpp DEPS genko_app GUI TIMEOUT 600)
+  genko_test(test_gui_anim SOURCES gui/test_gui_anim.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_session SOURCES unit/test_session.cpp DEPS genko_app LABELS unit TIMEOUT 300)
   # the pen: Python's packing of mouse and tablet input, and the live line's pixels against the renderer's per brush
   genko_test(test_gui_pen SOURCES gui/test_gui_pen.cpp DEPS genko_app GUI TIMEOUT 1200)

@@ -40,6 +40,7 @@ namespace genko::app {
 
 class BrushPanel;
 class LayerPanel;
+class TimelinePanel;
 class ToolSettings;
 
 class Navigator;
@@ -113,6 +114,13 @@ public:
     bool export_brush(std::optional<QString> path = std::nullopt);
     PenSettings& pen() { return pen_; }
     void pen_changed();
+    // アニメーション: the timeline panel, the frame shown of each animation page (page id → frame) and of one page
+    // (none: the one in front).
+    TimelinePanel* timeline() const { return timeline_; }
+    std::map<std::string, std::int64_t> anim_frames;
+    std::int64_t current_frame(const core::Page* page = nullptr) const;
+    // A panel by its title brought to the front (タイムライン, 全体図, …).
+    void show_dock(const QString& title);
 
     PageCanvas* canvas() const { return canvas_; }
     PageList* pages() const { return pages_; }
@@ -236,6 +244,11 @@ private:
     void forget_brush();
     void import_brushes_dialog();
     core::Json eraser_fields(const core::Layer& layer) const;
+    // animation and the timelapse (main_window_anim.cpp)
+    void build_anim_actions();
+    void build_anim_dock();
+    void toggle_timelapse(bool on);
+    void export_timelapse();
     // the selection (main_window_select.cpp)
     void build_selection_actions();
     void build_selection_menu(QMenu* menu);
@@ -279,6 +292,8 @@ private:
     BrushPanel* brush_ = nullptr;
     ToolSettings* tool_settings_ = nullptr;
     QDockWidget* tool_settings_dock_ = nullptr;
+    TimelinePanel* timeline_ = nullptr;
+    QDockWidget* timeline_dock_ = nullptr;
     QDoubleSpinBox* eraser_size_ = nullptr;
     QComboBox* eraser_mode_ = nullptr;
     QComboBox* eraser_texture_ = nullptr;

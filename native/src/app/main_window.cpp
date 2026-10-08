@@ -1,7 +1,10 @@
 #include "app/tool_settings.hpp"
 #include "app/main_window.hpp"
+#include "app/timeline.hpp"
 #include "app/layer_panel.hpp"
 
+#include <QCheckBox>
+#include <QSignalBlocker>
 #include <QApplication>
 #include <QPointer>
 #include <QCloseEvent>
@@ -39,6 +42,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/brushes.hpp"
+#include "render/timelapse.hpp"
 #include "render/ops_registry.hpp"
 
 namespace genko::app {
@@ -433,6 +437,8 @@ void MainWindow::show_page() {
     canvas_->binding = book().binding;
     // (a person alone sees the page as it will print, name lines in blue; the name view is for the agent's name stage)
     canvas_->set_render_mode(!page->name_ok && agent_book() ? "name" : "proof");
+    // (an animation page: the frame shown, with the frames around it faint when the timeline asks for it)
+    canvas_->renderer().set_anim(current_frame(page), timeline_ == nullptr || timeline_->onion->isChecked());
     canvas_->set_page(session_->snapshot(), static_cast<std::size_t>(page_index_));
     if (book().is_deferred(static_cast<std::size_t>(page_index_))) {
         flash(QStringLiteral("このページを読み込んでいます。読み込みが終わると表示します。"), 3000);
@@ -441,6 +447,14 @@ void MainWindow::show_page() {
     refresh_status();
     if (navigator_ != nullptr) navigator_->update();
     if (layer_panel_ != nullptr) layer_panel_->refresh();
+    if (timeline_ != nullptr) {
+        timeline_->frame = current_frame(page);
+        if (timeline_->isVisible()) timeline_->refresh();
+    }
+    if (QAction* lapse = action("act_timelapse")) {
+        const QSignalBlocker quiet(lapse);
+        lapse->setChecked(render::timelapse::is_on(book()));
+    }
 }
 
 void MainWindow::select_page(int row) {

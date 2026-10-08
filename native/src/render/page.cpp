@@ -13,6 +13,7 @@
 #include <mutex>
 #include <utility>
 
+#include "core/anim.hpp"
 #include "core/covers.hpp"
 #include "core/error.hpp"
 #include "core/filters.hpp"
@@ -855,6 +856,14 @@ void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, co
 }
 RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, const core::Document* episode,
                     std::vector<std::string>& omitted) {
+    if (!options.at_frame) {  // (an animation page prints as its first frame, not every cel at once)
+        const Json* anim = get(page_in.extra, "anim");
+        if (anim != nullptr && core::py_truthy(*anim)) {
+            RenderOptions framed = options;
+            framed.at_frame = true;
+            return render(core::anim::at_frame(page_in, 1), dpi, framed, episode, omitted);
+        }
+    }
     if (options.region && needs_whole_page(page_in)) {
         const Box box = area_of(options, Size{mm_to_px(page_in.spec.width_mm.value(), dpi), mm_to_px(page_in.spec.height_mm.value(), dpi)});
         RenderOptions whole = options;
@@ -875,8 +884,6 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     ctx.omitted = &omitted;
     ctx.stop = options.stop;
     const Page& page = page_in;
-    const Json* anim = get(page.extra, "anim");
-    if (anim != nullptr && anim->is_object()) skip_unported(ctx, "anim");  // (left out: the page as it is)
     ctx.finish = options.finish.value_or(page.spec.expression != "color");
     const int width = mm_to_px(page.spec.width_mm.value(), dpi);
     const int height = mm_to_px(page.spec.height_mm.value(), dpi);
@@ -1222,6 +1229,28 @@ void blend_color_strokes(ColorCanvas& canvas, const core::Page& page, const core
     const auto panels=clip_mask(page,ctx.size,dpi,area);
     precise_strokes(canvas,ctx,layer,area,panels?&*panels:nullptr);
 }
+Image cel_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode) {
+    std::vector<std::string> omitted;
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = episode;
+    ctx.dpi = dpi;
+    ctx.mode = "proof";
+    ctx.skip_unported = true;  // (a faint picture while drawing: what is not drawn yet is left out)
+    ctx.omitted = &omitted;
+    ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+    const Box area{0, 0, ctx.size.width, ctx.size.height};
+    std::optional<Image> raster;
+    if (layer.color_raster && !is_tone(layer)) {
+        raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), ctx.size, area);
+    } else if (layer.kind != LayerKind::Placed && layer.raster_png && !layer.raster_png->empty()) {
+        raster = raster_part(layer.raster_png, ctx.size, area);
+    }
+    auto lines = layer_strokes(ctx, layer, area, nullptr, raster ? &*raster : nullptr, false, false);
+    if (lines) raster = raster ? alpha_composite(raster->convert("RGBA"), *lines) : std::move(*lines);
+    return raster ? raster->convert("RGBA") : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0});
+}
+
 Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode,
                   bool skip_unported_flag, bool bake_color) {
     std::vector<std::string> omitted;

@@ -17,6 +17,7 @@
 #include "core/ids.hpp"
 #include "core/paths.hpp"
 #include "render/ops_registry.hpp"
+#include "render/timelapse.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/journal.hpp"
@@ -173,7 +174,17 @@ Session::JobResult Session::execute(const Job& job) {
                     request.ops = step.journal_ops;
                     request.action = step.action;
                     request.txn = step.txn;
+                    // (タイムラプス: the book as it was on disk, to know the pages this save changes)
+                    const bool lapse = render::timelapse::is_on(*step.doc);
+                    Json before;
+                    if (lapse) {
+                        try {
+                            before = storage::read_disk_state(job.dir).payload;
+                        } catch (const std::exception&) {
+                        }
+                    }
                     const storage::SaveResult saved = storage::Saver(lock).save(*step.doc, request);
+                    if (lapse && !saved.already_committed) render::timelapse::after_save(job.dir, *step.doc, before);
                     done.revision = saved.revision;
                     done.txn = saved.txn;
                     done.repaired = saved.repaired;
@@ -267,6 +278,7 @@ Session::JobResult Session::execute(const Job& job) {
             request.base_revision = 0;
             request.ops = Json::array();
             const storage::SaveResult saved = storage::Saver(lock).save(*job.doc, request);
+            render::timelapse::after_save(job.dir, *job.doc, Json());  // (a new book: every page, when it is on)
             r.revision = saved.revision;
             r.doc = job.doc;
             r.ok = true;

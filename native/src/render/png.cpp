@@ -482,6 +482,47 @@ Image open_image(std::string_view bytes, const PngLimits& limits) {
     throw core::Error("unidentified_image", "cannot identify image file");
 }
 
+// --- JPEG writing ------------------------------------------------------------------------------------------------
+
+namespace {
+
+struct JpegWriteGuard {
+    jpeg_compress_struct codec{};
+    JpegError error{};
+    unsigned char* buffer = nullptr;
+    unsigned long size = 0;
+    ~JpegWriteGuard() {
+        if (codec.mem != nullptr) jpeg_destroy_compress(&codec);
+        std::free(buffer);
+    }
+};
+
+// (the jump target in a helper without C++ owners, as jpeg_header's)
+bool jpeg_encode(JpegWriteGuard* state, const unsigned char* pixels, int width, int height, int quality) {
+    std::jmp_buf jump;
+    state->error.jump = &jump;
+    state->codec.err = jpeg_std_error(&state->error.base);
+    state->error.base.error_exit = jpeg_error_exit;
+    if (setjmp(jump)) return false;
+    jpeg_create_compress(&state->codec);
+    jpeg_mem_dest(&state->codec, &state->buffer, &state->size);
+    state->codec.image_width = static_cast<JDIMENSION>(width);
+    state->codec.image_height = static_cast<JDIMENSION>(height);
+    state->codec.input_components = 3;
+    state->codec.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&state->codec);
+    jpeg_set_quality(&state->codec, quality, TRUE);
+    jpeg_start_compress(&state->codec, TRUE);
+    while (state->codec.next_scanline < state->codec.image_height) {
+        JSAMPROW row = const_cast<unsigned char*>(pixels + static_cast<std::size_t>(state->codec.next_scanline) * static_cast<std::size_t>(width) * 3);
+        jpeg_write_scanlines(&state->codec, &row, 1);
+    }
+    jpeg_finish_compress(&state->codec);
+    return true;
+}
+
+}  // namespace
+
 std::string write_png(const Image& image, int compress_level) {
     if (image.empty()) throw core::Error("value", "no image");
     const std::string_view mode = image.mode();
@@ -551,6 +592,17 @@ std::string write_png(const Image& image, int compress_level) {
         throw core::Error("io", std::string("cannot write PNG: ") + guard.state.message);
     }
     return std::string(reinterpret_cast<const char*>(guard.state.data), guard.state.size);
+}
+
+std::string write_jpeg(const Image& image, int quality) {
+    if (image.empty()) throw core::Error("value", "no image");
+    const Image rgb = image.mode() == "RGB" ? image : image.convert("RGB");
+    const std::string pixels = rgb.tobytes();
+    JpegWriteGuard state;
+    if (!jpeg_encode(&state, reinterpret_cast<const unsigned char*>(pixels.data()), rgb.width(), rgb.height(), quality)) {
+        throw core::Error("format", std::string("cannot write JPEG: ") + state.error.message);
+    }
+    return std::string(reinterpret_cast<const char*>(state.buffer), state.size);
 }
 
 void save_png(const Image& image, const std::filesystem::path& path, int compress_level) {

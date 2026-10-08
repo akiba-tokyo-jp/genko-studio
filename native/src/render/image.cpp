@@ -561,6 +561,25 @@ void Image::alpha_composite(const Image& im, Point dest, std::optional<Box> sour
 
 // --- Image: modes ---------------------------------------------------------------------------------------------------
 
+Image Image::quantize(int colors) const {
+    require();
+    const std::string_view m = mode();
+    if (m != "L" && m != "P" && m != "RGB" && m != "RGBA") throw core::Error("value", "only RGB or L images can be quantized");
+    if (width() == 0 || height() == 0) return derived(ImagingNewDirty(IMAGING_MODE_P, width(), height()));
+    return derived(ImagingQuantize(im_, colors, m == "RGBA" ? 2 : 0, 0));
+}
+
+std::vector<std::array<std::uint8_t, 3>> Image::palette() const {
+    std::vector<std::array<std::uint8_t, 3>> out;
+    if (im_ == nullptr || im_->palette == nullptr || mode() != "P") return out;
+    const int size = std::clamp(im_->palette->size, 0, 256);
+    for (int i = 0; i < size; ++i) {
+        const UINT8* entry = im_->palette->palette + i * 4;
+        out.push_back({entry[0], entry[1], entry[2]});
+    }
+    return out;
+}
+
 Image Image::convert(std::string_view mode, Dither dither) const {
     require();
     const std::string_view from = this->mode();
