@@ -51,9 +51,9 @@ private:
 
 // The files of one export: each written whole beside its place as it is made (put), all moved into place together
 // (commit), in the order they were put (a later file of the same name in place of an earlier one, as Python's writes
-// leave it). Those not committed are removed. A place a file cannot go to (a folder there) is found before any file
-// is moved; a file that still cannot be moved in puts back the ones moved before it (the files there before are kept
-// aside until all are in).
+// leave it). Those not committed are removed. A place a file cannot go to (a folder there), or whose state cannot be
+// read, is found before any file is moved; a file that still cannot be moved in puts back the ones moved before it (the
+// files there before are kept aside until all are in; one that cannot be put back is said, where it is kept).
 class Output {
 public:
     Output() = default;

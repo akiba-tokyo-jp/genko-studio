@@ -22,12 +22,15 @@
 #include "core/ids.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
+#include "storage/asset_store.hpp"
 #include "storage/fault.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/journal.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
+#include "storage/state.hpp"
 #include "storage/transaction.hpp"
+#include "storage/undo.hpp"
 #include "storage/writer.hpp"
 
 namespace fs = std::filesystem;
@@ -153,6 +156,15 @@ std::string apply_error_code(Session& session, const Json& ops) {
         return error.code();
     }
     return "applied";
+}
+
+// A change saved by `actor` in a session of its own (before the session under test is opened).
+void saved_by(const fs::path& book, Session::Options options, const std::string& actor, const Json& ops) {
+    options.actor = actor;
+    auto other = Session::open(book, options);
+    other->apply(ops);
+    other->save_now();
+    if (!other->wait_saved(10000ms)) throw genko::core::Error("test", "the change was not saved");
 }
 
 // Fault injection for this process while it lives (the build must have it).
@@ -1752,6 +1764,275 @@ private slots:
         QVERIFY(session->can_undo());
         QCOMPARE(session->history().done.size(), std::size_t{2});
         QCOMPARE(session->history().later.size(), std::size_t{0});
+        QCOMPARE(session->status().kind, SaveKind::Saved);
+    }
+
+    // A journal undo the journal refuses because the book is not what its change left (here: a recovery point taken
+    // after it, which the journal does not stack): said once, and the book goes on being saved — not read again and
+    // tried again for ever, every later change waiting behind it.
+    void aJournalUndoOfABookChangedOutsideTheJournalIsSaid() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_book(book);
+        Session::Options options = quick(recovery);
+        options.autosave = false;
+        saved_by(book, options, "human:tester", stroke_op(30, 1));
+        {
+            auto lost = Session::open(book, options);
+            lost->apply(stroke_op(40, 2));
+            lost->write_recovery_copy();
+            QVERIFY(lost->wait_idle(10000ms));
+        }
+        {
+            auto taken = Session::open(book, options);
+            QVERIFY(taken->recovery_offer().has_value());
+            taken->adopt_recovery();
+            QVERIFY(taken->wait_saved(10000ms));
+        }
+        auto session = Session::open(book, options);
+        QSignalSpy notices(session.get(), &Session::notice);
+        QSignalSpy changes(session.get(), &Session::changed);
+        QVERIFY(session->can_undo());
+        session->undo();
+        QVERIFY2(session->wait_idle(5000ms), "the journal undo is tried again and again");
+        QCOMPARE(notices.count(), 1);
+        QVERIFY(notices.front().front().toString().startsWith(QStringLiteral("project.json changed outside the journal")));
+        QCOMPARE(changes.count(), 0);
+        QCOMPARE(session->status().kind, SaveKind::Saved);
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{1});
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+        // and a change after it is saved
+        session->apply(stroke_op(60, 1));
+        session->save_now();
+        QVERIFY(session->wait_saved(5000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{2});
+    }
+
+    // Undo of an adopted recovery point once it is saved: the journal cannot take it back (it is not on its stacks),
+    // so it is refused at once, in the person's words — not tried, ending in a conflict every later save hits.
+    void anAdoptedRecoveryPointIsNotUndone() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_book(book);
+        Session::Options options = quick(recovery);
+        options.autosave = false;
+        {
+            auto lost = Session::open(book, options);
+            lost->apply(stroke_op(40, 2));
+            lost->write_recovery_copy();
+            QVERIFY(lost->wait_idle(10000ms));
+        }
+        auto session = Session::open(book, options);
+        session->adopt_recovery();
+        QVERIFY(session->wait_saved(10000ms));
+        std::string said;
+        try {
+            session->undo();
+        } catch (const genko::core::ApplyError& error) {
+            said = error.code();
+        }
+        QVERIFY(session->wait_idle(5000ms));
+        QVERIFY2(session->status().kind == SaveKind::Saved, qPrintable(session->status().code));
+        QCOMPARE(said, std::string("recover_undo"));
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+        session->apply(stroke_op(60, 1));
+        session->save_now();
+        QVERIFY(session->wait_saved(5000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{1});
+    }
+
+    // A journal redo asked while another writer changed the journal (the agent undid its own change, which is now
+    // on top of the redo stack): not made on the book as it is now — it would redo the agent's change instead of the
+    // person's —, but dropped and said.
+    void aJournalRedoIsNotMadeOnABookChangedMeanwhile() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        saved_by(book, options, "ai:bot", stroke_op(30, 2));         // Z
+        saved_by(book, options, "human:tester", stroke_op(30, 1));   // X
+        auto session = Session::open(book, options);
+        session->undo();  // X, through the journal
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{0});
+        genko::storage::restore(book, "ai:bot", false, false);  // the agent undoes Z: the redo stack is [X, Z]
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{0});
+        QSignalSpy notices(session.get(), &Session::notice);
+        session->redo();  // (before the window's watcher has read the book again)
+        QVERIFY(session->wait_idle(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{0});  // (the agent's change stays undone)
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{0});
+        QCOMPARE(notices.count(), 1);
+        QCOMPARE(session->status().kind, SaveKind::Saved);
+        QCOMPARE(session->history().later.size(), std::size_t{2});
+    }
+
+    // A journal undo given to the disk and failed there (the journal could not be written) may be on the disk all
+    // the same: Redo does not take it back as if it never was, it waits; once the disk takes it, Redo brings it back.
+    void aJournalUndoThatReachedTheDiskIsNotTakenBack() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        saved_by(book, options, "human:tester", stroke_op(30, 1));
+        auto session = Session::open(book, options);
+        const fs::path journal = genko::storage::journal::journal_file(book);
+        fs::permissions(journal, fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read);
+        session->undo();
+        QVERIFY(session->wait_idle(10000ms));
+        fs::permissions(journal, fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read);
+        QVERIFY(session->unsaved());  // (failed: the recovery copy holds the change)
+        std::string said;
+        try {
+            session->redo();
+        } catch (const genko::core::ApplyError& error) {
+            said = error.code();
+        }
+        QCOMPARE(said, std::string("busy"));
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{0});
+        session->redo();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{1});
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{1});
+    }
+
+    // A change made while a journal undo is written ends the journal's redo (as Python's journal, where the change is
+    // written first): read again after the undo, nothing can be redone from the journal.
+    void aChangeMadeWhileTheJournalUndoesEndsItsRedo() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        saved_by(book, options, "human:tester", stroke_op(30, 1));  // X
+        auto session = Session::open(book, options);
+        auto other = std::make_unique<genko::storage::ProjectLock>(book, "ai:other");
+        other->try_acquire();
+        session->undo();  // X, through the journal: held up
+        QVERIFY(session->job_running());
+        session->apply(stroke_op(50, 2));  // E
+        other->release();
+        QVERIFY(wait_for([&] { return !session->job_running() && ink_strokes(session->document(), 0) == 0; }));
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+        QVERIFY(!session->can_redo());
+        QCOMPARE(session->history().later.size(), std::size_t{0});
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        QVERIFY(!session->can_redo());
+    }
+
+    // A change made and undone while a journal undo is written, the undo read back after it: Redo brings back that
+    // change (as Python's journal, where it was written and undone, ending the journal's redo) — not the journal's.
+    void aChangeUndoneWhileTheJournalUndoesIsTheOneRedone() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        saved_by(book, options, "human:tester", stroke_op(30, 1));  // X
+        auto session = Session::open(book, options);
+        auto other = std::make_unique<genko::storage::ProjectLock>(book, "ai:other");
+        other->try_acquire();
+        session->undo();  // X, through the journal: held up
+        session->apply(stroke_op(50, 2));  // E
+        session->undo();  // E
+        other->release();
+        QVERIFY(wait_for([&] { return !session->job_running() && ink_strokes(session->document(), 0) == 0; }));
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{0});
+        QVERIFY(session->can_redo());
+        session->redo();
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{0});
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{1});
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{0});
+        QVERIFY(!session->can_redo());
+        // and undone again: it alone can be redone (X's redo is gone, as in Python)
+        session->undo();
+        QVERIFY(session->wait_saved(10000ms));
+        const Session::History h = session->history();
+        QCOMPARE(h.later.size(), std::size_t{1});
+        QCOMPARE(h.later[0].ops[0].value("page", 0), 2);
+    }
+
+    // Redo, then Undo while that journal redo is written, the redo refused by the journal: the undo meant to take it
+    // back is not made either (it would undo the change below); a redo not given to the disk yet is simply taken back.
+    void anUndoOfARefusedJournalRedoIsNotMade() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        saved_by(book, options, "human:tester", stroke_op(30, 2));  // Y
+        saved_by(book, options, "human:tester", stroke_op(30, 1));  // X
+        auto session = Session::open(book, options);
+        session->undo();  // X
+        QVERIFY(session->wait_saved(10000ms));
+        // (X's state is gone from the book's records: the journal refuses its redo)
+        const auto stacks = genko::storage::journal::stacks(book);
+        QVERIFY(!stacks.redo.empty() && stacks.redo.back().after);
+        QVERIFY(fs::remove(genko::storage::AssetStore(book).path(*stacks.redo.back().after, genko::storage::kStateSuffix)));
+        const std::int64_t revision = disk_revision(book);
+        QSignalSpy notices(session.get(), &Session::notice);
+        auto other = std::make_unique<genko::storage::ProjectLock>(book, "ai:other");
+        other->try_acquire();
+        session->redo();  // given to the disk, held up
+        QVERIFY(session->job_running());
+        session->undo();  // to take it back
+        other->release();
+        QVERIFY(session->wait_idle(10000ms));
+        QCOMPARE(notices.count(), 1);
+        QCOMPARE(disk_revision(book), revision);
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{1});  // (Y not undone)
+        QCOMPARE(session->waiting(), std::size_t{0});
+        QCOMPARE(session->status().kind, SaveKind::Saved);
+    }
+
+    // A journal redo asked while another job runs (not given to the disk yet), then Undo: the redo is taken back,
+    // nothing written for either.
+    void anUndoTakesBackAJournalRedoNotWrittenYet() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        saved_by(book, options, "human:tester", stroke_op(30, 1));
+        {
+            auto first = Session::open(book, options);
+            first->undo();
+            QVERIFY(first->wait_saved(10000ms));
+        }
+        auto session = Session::open(book, options);
+        QVERIFY(session->can_redo());
+        // another writer's note: the session reads the book again, held up by that writer's lock
+        genko::storage::ProjectLock lock(book, "ai:other");
+        lock.try_acquire();
+        {
+            const auto loaded = genko::storage::load_document(book);
+            const genko::core::CommandBus bus;
+            const auto result = bus.apply(loaded.document, Json::array({Json::object({{"op", "set_note"}, {"page", 2}, {"note", "外"}})}),
+                                          genko::core::Actor("ai:other"));
+            genko::storage::SaveRequest request;
+            request.actor = "ai:other";
+            request.base_revision = loaded.document.revision;
+            request.ops = result.journal_ops;
+            genko::storage::Saver(lock).save(result.doc, request);
+        }
+        session->check_outside();
+        QVERIFY(wait_for([&] { return session->status().kind == SaveKind::Saving; }));
+        session->redo();
+        QCOMPARE(session->waiting(), std::size_t{1});
+        session->undo();
+        QCOMPARE(session->waiting(), std::size_t{0});
+        lock.release();
+        QVERIFY(session->wait_idle(10000ms));
         QCOMPARE(session->status().kind, SaveKind::Saved);
     }
 };

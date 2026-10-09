@@ -9,6 +9,7 @@
 
 #include "core/error.hpp"
 #include "core/paths.hpp"
+#include "core/pyconv.hpp"
 #include "storage/fsutil.hpp"
 
 namespace genko::formats::detail {
@@ -94,10 +95,13 @@ void Output::put(PartFile&& file) {
 }
 
 void Output::commit() {
-    // every place first: one a file cannot go to (a folder there) stops the export before any file is moved
+    // every place first: one a file cannot go to (a folder there), or one whose state cannot be read (whether a file
+    // there would be replaced and could be put back), stops the export before any file is moved
     for (const PartFile& file : files_) {
         std::error_code ec;
-        if (fs::is_directory(fs::symlink_status(file.dest(), ec))) io_error(std::error_code(EISDIR, std::generic_category()), file.dest());
+        const fs::file_status status = fs::symlink_status(file.dest(), ec);
+        if (status.type() == fs::file_type::none) io_error(ec, file.dest());
+        if (fs::is_directory(status)) io_error(std::error_code(EISDIR, std::generic_category()), file.dest());
     }
     // the files there before are set aside until every new one is in place, and put back when one cannot be moved in
     struct Moved {
@@ -107,17 +111,25 @@ void Output::commit() {
     };
     std::vector<Moved> moved;
     const auto fail = [&](const std::error_code& ec, const fs::path& path) {
+        std::optional<fs::path> kept;  // (a file there before that could not be put back: where it is now)
         for (auto it = moved.rbegin(); it != moved.rend(); ++it) {
             std::error_code ignored;
             if (it->placed) fs::remove(it->dest, ignored);
-            if (it->aside) fs::rename(*it->aside, it->dest, ignored);
+            if (!it->aside) continue;
+            std::error_code back;
+            fs::rename(*it->aside, it->dest, back);
+            if (back && !kept) kept = *it->aside;
         }
-        io_error(ec, path);
+        std::string message = storage::os_error_text(ec.value() != 0 ? ec.value() : EIO, path);
+        if (kept) message += "; the file that was there is kept as " + core::py_repr_str(text(*kept));
+        throw core::Error("io", message);
     };
     for (PartFile& file : files_) {
         moved.push_back(Moved{file.dest(), std::nullopt, false});
         std::error_code ec;
-        if (fs::exists(fs::symlink_status(file.dest(), ec))) {
+        const fs::file_status status = fs::symlink_status(file.dest(), ec);
+        if (status.type() == fs::file_type::none) fail(ec, file.dest());
+        if (fs::exists(status)) {
             moved.back().aside = beside(file.dest(), ".old");
             fs::rename(file.dest(), *moved.back().aside, ec);
             if (ec) {

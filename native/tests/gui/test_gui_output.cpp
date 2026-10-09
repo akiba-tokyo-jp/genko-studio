@@ -1137,6 +1137,14 @@ private slots:
         QFile::remove(plugins + QStringLiteral("/offplug.py"));
     }
 
+    // An export that could not put back a file it had set aside (the files there before are kept until every new one
+    // is in place) says where that file is now.
+    void anExportSaysWhereAFileItCouldNotPutBackIs() {
+        QCOMPARE(app::wording::error(QStringLiteral("[Errno 13] Permission denied: '/b/x.png'; the file that was there is kept as "
+                                                    "'/b/.genko-0123456789abcdef.old'")),
+                 QStringLiteral("書き出したファイルを置けず、前からあったファイルも元の場所に戻せませんでした。前のファイルは「/b/.genko-0123456789abcdef.old」にあります"));
+    }
+
     // A book without pages: its export dialog opens, with nothing to show.
     void exportDialogOfABookWithoutPages() {
         Studio s;

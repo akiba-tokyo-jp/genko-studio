@@ -497,10 +497,23 @@ void Session::finish_reading(const JobResult& r) {
     const bool changed_meanwhile = !done_.empty() || !undone_.empty();
     DocPtr current = r.doc;
     std::vector<std::shared_ptr<Change>> replayed;
+    std::map<const Change*, std::shared_ptr<Change>> again_of;
     std::deque<Action> keep;
     for (const Action& action : queue_) {
-        if (action.kind != Action::Kind::Edit || !action.change) continue;
+        if (!action.change) continue;
+        if (action.kind != Action::Kind::Edit) {
+            // (a change made and undone meanwhile that is written as such, Change::journal: as it was)
+            const auto found = again_of.find(action.change.get());
+            if (found == again_of.end() || action.kind != Action::Kind::Undo || replayed.empty() || replayed.back() != found->second) continue;
+            replayed.pop_back();
+            current = found->second->before;
+            keep.push_back(Action{Action::Kind::Undo, found->second, core::new_txn_id(), ++next_seq_, false});
+            continue;
+        }
         if (auto again = replay(action.change, current)) {
+            again->undone_seq = action.change->undone_seq;
+            again->journal = action.change->journal;
+            again_of[action.change.get()] = again;
             current = again->after;
             replayed.push_back(again);
             keep.push_back(Action{Action::Kind::Edit, again, core::new_txn_id(), ++next_seq_, false});
@@ -511,8 +524,14 @@ void Session::finish_reading(const JobResult& r) {
     DocPtr tip = current;
     failures = &redo_lost;  // (not in the book: only the chance to redo them is lost)
     for (auto it = undone_.rbegin(); it != undone_.rend(); ++it) {
+        if (const auto found = again_of.find(it->get()); found != again_of.end()) {  // (made again above, and undone)
+            tip = found->second->after;
+            redo_chain.push_back(found->second);
+            continue;
+        }
         auto again = replay(*it, tip);
         if (!again) break;  // (the ones after it were made on top of it)
+        again->undone_seq = (*it)->undone_seq;
         tip = again->after;
         redo_chain.push_back(again);
     }
@@ -638,6 +657,11 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
     change->before = doc_;
     change->after = std::make_shared<const core::Document>(std::move(result.doc));
     change->held = replaced_precise_bytes(*change->before, *change->after);
+    // (the journal holds changes this one ends — to redo, undone by this session, or a journal undo or redo still to be
+    // written: Python's journal ends them as the change is written, so it is written even if undone before it is saved,
+    // and no later read of the journal brings them back)
+    change->journal = disk_redo_ > 0 || disk_step_waits() ||
+                      std::any_of(undone_.begin(), undone_.end(), [](const std::shared_ptr<Change>& c) { return c->on_disk; });
     doc_ = change->after;
     done_.push_back(change);
     undone_.clear();
@@ -670,19 +694,25 @@ void Session::undo() {
     if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
     if (!done_.empty()) {
         const std::shared_ptr<Change> change = done_.back();
+        const auto given = [&](const Action& a) { return a.change == change && (a.in_flight || a.sent); };
+        if (change->recover && (change->on_disk || std::any_of(queue_.begin(), queue_.end(), given))) {
+            // (an adopted recovery point is not on the journal's stacks: once it reached the disk, nothing takes it back)
+            throw core::ApplyError("復旧用コピーの採用は、原稿に保存した後は元に戻せません", "recover_undo");
+        }
         done_.pop_back();
         undone_.push_back(change);
         change->undone_seq = ++next_seq_;
         const auto queued = [&](Action::Kind kind) {
             return std::find_if(queue_.rbegin(), queue_.rend(),
-                                [&](const Action& a) { return a.kind == kind && a.change == change && !a.in_flight; });
+                                [&](const Action& a) { return a.kind == kind && a.change == change && !a.in_flight && !a.sent; });
         };
-        if (auto it = queued(Action::Kind::Edit); it != queue_.rend() && !trimmed_) {
+        if (auto it = queued(Action::Kind::Edit); it != queue_.rend() && !trimmed_ && !change->journal) {
             queue_.erase(std::next(it).base());  // (it never reached the disk: undone in memory only)
         } else if (it != queue_.rend()) {
             // Once changes of this session are undone through the journal (trim_history), an Undo reaching past
             // them reads the book again and its redo comes from the journal: a change undone before it was saved
-            // goes to the journal too (made and undone), so that redo still finds it.
+            // goes to the journal too (made and undone), so that redo still finds it. So does a change that ends what
+            // the journal holds to redo (Change::journal).
             queue_.push_back(Action{Action::Kind::Undo, change, core::new_txn_id(), ++next_seq_, false});
         } else if (auto redo = queued(Action::Kind::Redo); redo != queue_.rend()) {
             queue_.erase(std::next(redo).base());
@@ -696,6 +726,14 @@ void Session::undo() {
         return;
     }
     if (loading_) throw core::ApplyError("原稿の残りのページを読み込み中です。読み込みが終わってから元に戻してください。", "loading");
+    if (!queue_.empty() && queue_.back().kind == Action::Kind::DiskRedo && !queue_.back().in_flight && !queue_.back().sent) {
+        // the journal redo asked last, not given to the disk yet: taken back, nothing written for either
+        queue_.pop_back();
+        --disk_undo_;
+        ++disk_redo_;
+        emit statusChanged();
+        return;
+    }
     if (path_ && disk_undo_ > 0) {
         // a change saved before this session: undone through the journal, and the book read again after it
         queue_.push_back(Action{Action::Kind::DiskUndo, nullptr, core::new_txn_id(), ++next_seq_, false});
@@ -706,6 +744,13 @@ void Session::undo() {
         return;
     }
     throw core::ApplyError("nothing to undo", "nothing_to_undo");
+}
+
+// A journal undo or redo waits (or is being written).
+bool Session::disk_step_waits() const {
+    return std::any_of(queue_.begin(), queue_.end(), [](const Action& a) {
+        return a.kind == Action::Kind::DiskUndo || a.kind == Action::Kind::DiskRedo;
+    });
 }
 
 // The journal's undos not written yet (or being written) that redo() takes before the changes undone in memory: those
@@ -726,10 +771,11 @@ void Session::redo() {
     if (saving_as_) throw core::ApplyError("別名保存中です。完了してからRedoしてください。", "save_as_busy");
     if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
     if (disk_undos_first() > 0) {
-        // a saved change the journal is still to undo comes back first: its undo not begun, it is not made at all;
-        // while it is being written, Redo waits for it (the book read again after it takes the ones undone in memory)
+        // a saved change the journal is still to undo comes back first: its undo not given to the disk yet, it is not
+        // made at all; once given (it may be there, even if that save failed), Redo waits for it (the book read again
+        // after it takes the ones undone in memory)
         const auto last = std::find_if(queue_.rbegin(), queue_.rend(), [](const Action& a) { return a.kind == Action::Kind::DiskUndo; });
-        if (last->in_flight) throw core::ApplyError("取り消しを原稿に書き込み中です。書き終わってからやり直してください。", "busy");
+        if (last->in_flight || last->sent) throw core::ApplyError("取り消しを原稿に書き込み中です。書き終わってからやり直してください。", "busy");
         queue_.erase(std::next(last).base());
         ++disk_undo_;
         --disk_redo_;
@@ -741,13 +787,13 @@ void Session::redo() {
         undone_.pop_back();
         done_.push_back(change);
         const auto queued = std::find_if(queue_.rbegin(), queue_.rend(), [&](const Action& a) {
-            return a.kind == Action::Kind::Undo && a.change == change && !a.in_flight;
+            return a.kind == Action::Kind::Undo && a.change == change && !a.in_flight && !a.sent;
         });
-        const bool undo_in_flight =
-            std::any_of(queue_.begin(), queue_.end(), [&](const Action& a) { return a.change == change && a.in_flight; });
+        const bool undo_given =
+            std::any_of(queue_.begin(), queue_.end(), [&](const Action& a) { return a.change == change && (a.in_flight || a.sent); });
         if (queued != queue_.rend()) {
             queue_.erase(std::next(queued).base());
-        } else if (change->on_disk || undo_in_flight) {
+        } else if (change->on_disk || undo_given) {
             queue_.push_back(Action{Action::Kind::Redo, change, core::new_txn_id(), ++next_seq_, false});
         } else {
             queue_.push_back(Action{Action::Kind::Edit, change, core::new_txn_id(), ++next_seq_, false});
@@ -962,6 +1008,7 @@ void Session::start_job() {
             step.expect_top = action.change->txn;
         }
         action.in_flight = true;
+        action.sent = true;
         job.steps.push_back(std::move(step));
         // (the book is read again after an undo or redo of a change from before this session: what comes after it is
         // applied to that book first)
@@ -1015,7 +1062,16 @@ void Session::job_done(const JobResult& r) {
         }
         std::optional<Action> refused;
         for (Action& action : queue_) {
-            if (action.in_flight && !r.ok && !refused) refused = action;
+            if (action.in_flight && !r.ok) {
+                if (!refused) {
+                    // (the step that failed may have reached the disk — not when the book could not be locked, or its
+                    // revision was found moved, before anything was written)
+                    if (r.code == QLatin1String("locked") || r.code == QLatin1String("revision_conflict")) action.sent = false;
+                    refused = action;
+                } else {
+                    action.sent = false;  // (the steps after it did not run)
+                }
+            }
             action.in_flight = false;
         }
         if (r.ok) {
@@ -1024,9 +1080,12 @@ void Session::job_done(const JobResult& r) {
             failure_code_.clear();
             recovery_failed_ = false;
         } else {
+            // (external_change: the book is not what the change on top of the journal left — a recovery point taken,
+            // a change made outside the journal —, which reading it again does not change)
             static const QStringList kRefusals = {QStringLiteral("other_actor"), QStringLiteral("needs_person"),
                                                   QStringLiteral("nothing_to_undo"), QStringLiteral("nothing_to_redo"),
-                                                  QStringLiteral("no_before"), QStringLiteral("missing_snapshot")};
+                                                  QStringLiteral("no_before"), QStringLiteral("missing_snapshot"),
+                                                  QStringLiteral("external_change")};
             const bool undo_refused = refused && refused->kind != Action::Kind::Edit && kRefusals.contains(r.code);
             if (undo_refused) {
                 // the journal will not take this undo or redo back (another person's change, an approval…): the book stays
@@ -1034,24 +1093,26 @@ void Session::job_done(const JobResult& r) {
                 queue_.erase(std::find_if(queue_.begin(), queue_.end(), [&](const Action& a) { return a.seq == refused->seq; }));
                 emit notice(r.message, true);
                 if (refused->kind == Action::Kind::DiskUndo || refused->kind == Action::Kind::DiskRedo) {
-                    // (it, and the journal's undos or redos asked after it: not tried, as Python's 履歴 stops at the first
-                    // refusal — the journal would refuse them the same)
-                    const int back = refused->kind == Action::Kind::DiskUndo ? 1 : -1;
-                    disk_undo_ += back;
-                    disk_redo_ -= back;
+                    // (it, and the journal's undos and redos asked after it — those meant to take it back too: not tried,
+                    // as Python's 履歴 stops at the first refusal)
+                    const auto back = [this](Action::Kind kind) {
+                        const int by = kind == Action::Kind::DiskUndo ? 1 : -1;
+                        disk_undo_ += by;
+                        disk_redo_ -= by;
+                    };
+                    back(refused->kind);
                     for (auto it = queue_.begin(); it != queue_.end();) {
-                        if (it->kind != refused->kind) {
+                        if (it->kind != Action::Kind::DiskUndo && it->kind != Action::Kind::DiskRedo) {
                             ++it;
                             continue;
                         }
-                        disk_undo_ += back;
-                        disk_redo_ -= back;
+                        back(it->kind);
                         it = queue_.erase(it);
                     }
                 }
                 // (an undo of this session's change that was shown already: the book is read again)
                 if (refused->kind == Action::Kind::Undo || refused->kind == Action::Kind::Redo) start_rebase();
-            } else if (r.code == QLatin1String("revision_conflict") || r.code == QLatin1String("external_change")) {
+            } else if (r.code == QLatin1String("revision_conflict")) {
                 start_rebase();
             } else if (r.code == QLatin1String("locked")) {
                 failed_ = true;
@@ -1063,7 +1124,7 @@ void Session::job_done(const JobResult& r) {
             }
         }
         if (reloaded) {
-            rebase_onto(reloaded, base_revision_, undo_depth, redo_depth);
+            rebase_onto(reloaded, base_revision_, undo_depth, redo_depth, true);
         } else if (r.ok && r.disk_revision >= 0 && r.disk_revision != base_revision_) {
             start_rebase();  // (another writer's change after ours: read the book again, ours kept on top)
         }
@@ -1187,12 +1248,12 @@ void Session::simplify_queue() {
         for (std::size_t i = 0; i + 1 < queue_.size(); ++i) {
             const Action& a = queue_[i];
             const Action& b = queue_[i + 1];
-            if (a.in_flight || b.in_flight || !a.change || a.change != b.change) continue;
+            if (a.in_flight || b.in_flight || a.sent || b.sent || !a.change || a.change != b.change) continue;
             const bool pair = (a.kind == Action::Kind::Edit && b.kind == Action::Kind::Undo) ||
                               (a.kind == Action::Kind::Undo && b.kind == Action::Kind::Redo) ||
                               (a.kind == Action::Kind::Redo && b.kind == Action::Kind::Undo);
             if (!pair) continue;
-            if (a.kind == Action::Kind::Edit && (a.change->on_disk || trimmed_)) continue;  // (trimmed_: see undo())
+            if (a.kind == Action::Kind::Edit && (a.change->on_disk || trimmed_ || a.change->journal)) continue;  // (see undo())
             queue_.erase(queue_.begin() + static_cast<std::ptrdiff_t>(i), queue_.begin() + static_cast<std::ptrdiff_t>(i) + 2);
             again = true;
             break;
@@ -1245,18 +1306,51 @@ void Session::start_rebase() {
     emit statusChanged();
 }
 
-void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo_depth, std::int64_t redo_depth) {
+void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo_depth, std::int64_t redo_depth, bool after_own_step) {
+    // The journal's undos and redos still asked for are made on the book read right after this session's own (under
+    // the same lock: nobody else wrote in between, and the next one checks that nobody did since). On a book another
+    // writer changed they could take back or bring back another change than the one asked: dropped, and said.
+    if (!after_own_step) {
+        bool dropped = false;
+        for (auto it = queue_.begin(); it != queue_.end();) {
+            if (it->kind != Action::Kind::DiskUndo && it->kind != Action::Kind::DiskRedo) {
+                ++it;
+                continue;
+            }
+            const int by = it->kind == Action::Kind::DiskUndo ? 1 : -1;
+            disk_undo_ += by;
+            disk_redo_ -= by;
+            it = queue_.erase(it);
+            dropped = true;
+        }
+        if (dropped) {
+            emit notice(QStringLiteral("原稿がほかで変わったため、まだ原稿に書いていなかった「元に戻す」「やり直す」を取りやめました（履歴で確かめてください）"), true);
+        }
+    }
     const core::CommandBus bus(*registry_);
     QStringList conflicts_found;
     DocPtr current = std::move(fresh);
     std::vector<std::shared_ptr<Change>> replayed;
+    std::vector<std::shared_ptr<Change>> replayed_undone;  // replayed, then undone by an Undo waiting after it
+    std::map<const Change*, std::shared_ptr<Change>> again_of;
     std::deque<Action> keep;
     for (const Action& action : queue_) {
         if (action.kind == Action::Kind::DiskUndo || action.kind == Action::Kind::DiskRedo) {
-            keep.push_back(action);  // (the journal's undos and redos still asked for: made on the book as it is then)
+            keep.push_back(action);
             continue;
         }
         if (action.kind != Action::Kind::Edit) {
+            // an undo or redo of a change made again here (made, then undone, before it was written): as it was
+            const auto found = action.change ? again_of.find(action.change.get()) : again_of.end();
+            auto& from = action.kind == Action::Kind::Undo ? replayed : replayed_undone;
+            auto& to = action.kind == Action::Kind::Undo ? replayed_undone : replayed;
+            if (found != again_of.end() && !from.empty() && from.back() == found->second) {
+                from.pop_back();
+                to.push_back(found->second);
+                current = action.kind == Action::Kind::Undo ? found->second->before : found->second->after;
+                keep.push_back(Action{action.kind, found->second, core::new_txn_id(), ++next_seq_, false});
+                continue;
+            }
             if (action.kind == Action::Kind::Undo || action.kind == Action::Kind::Redo) {
                 conflicts_found << QStringLiteral("%1 could not be applied to the book as it is now")
                                        .arg(action.kind == Action::Kind::Undo ? QStringLiteral("undo") : QStringLiteral("redo"));
@@ -1300,8 +1394,11 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
             again->before = current;
             again->after = std::make_shared<const core::Document>(std::move(result.doc));
             again->held = replaced_precise_bytes(*again->before, *again->after);
+            again->undone_seq = change->undone_seq;
+            again->journal = change->journal;
             current = again->after;
             replayed.push_back(again);
+            again_of[change.get()] = again;
             keep.push_back(Action{Action::Kind::Edit, again, core::new_txn_id(), ++next_seq_, false});
         } catch (const core::Error& error) {
             conflicts_found << QString::fromUtf8(error.what());
@@ -1318,13 +1415,16 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
     const DocPtr before = doc_;
     doc_ = current;
     done_ = std::move(replayed);
-    undone_.clear();
+    undone_ = std::move(replayed_undone);
     queue_ = std::move(keep);
     base_revision_ = revision;
+    // what the journal will hold to undo and redo once what waits is written, in its order: a change ends its redo
     disk_undo_ = undo_depth;
     disk_redo_ = redo_depth;
-    for (const Action& action : queue_) {  // (the journal's undos and redos asked for and not made yet)
-        if (action.kind == Action::Kind::DiskUndo) {
+    for (const Action& action : queue_) {
+        if (action.kind == Action::Kind::Edit) {
+            disk_redo_ = 0;
+        } else if (action.kind == Action::Kind::DiskUndo) {
             --disk_undo_;
             ++disk_redo_;
         } else if (action.kind == Action::Kind::DiskRedo) {
@@ -1332,6 +1432,8 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
             --disk_redo_;
         }
     }
+    disk_undo_ = std::max<std::int64_t>(0, disk_undo_);
+    disk_redo_ = std::max<std::int64_t>(0, disk_redo_);
     read_only_ = doc_->read_only_reason;
     failed_ = false;
     failure_.clear();

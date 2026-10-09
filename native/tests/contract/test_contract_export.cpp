@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include <filesystem>
 #include <functional>
@@ -30,6 +31,7 @@
 #include "formats/checks.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
+#include "formats/output.hpp"
 #include "formats/pillow_save.hpp"
 #include "render/brushes.hpp"
 #include "render/colour.hpp"
@@ -419,6 +421,35 @@ private slots:
         QStringList there{name(0, ".png"), name(1, ".png")};
         there.sort();
         QCOMPARE(QDir(png).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot, QDir::Name), there);
+    }
+
+    // A place whose state cannot be read (its folder cannot be looked into) stops the export before any file is moved
+    // — not even the files elsewhere, set aside and put back.
+    void anUnreadablePlaceStopsBeforeAnyFileMoves() {
+        const QString open = scratch_.path() + "/unreadable/open";
+        const QString shut = scratch_.path() + "/unreadable/shut";
+        QVERIFY(QDir().mkpath(open) && QDir().mkpath(shut));
+        genko::test::write_bytes(open + "/a.png", "an export before");
+        QString said;
+        bool untouched = false;
+        {
+            formats::detail::Output output;
+            output.put(path_of(open + "/a.png"), "new a");
+            output.put(path_of(shut + "/b.png"), "new b");
+            QThread::msleep(30);  // (the folder's time from the files written into it, before the commit)
+            const fs::file_time_type stamp = fs::last_write_time(path_of(open));
+            fs::permissions(path_of(shut), fs::perms::owner_read | fs::perms::owner_write);  // (its names cannot be looked up)
+            try {
+                output.commit();
+            } catch (const genko::core::Error& e) {
+                said = QString::fromStdString(e.code() + ": " + e.what());
+            }
+            untouched = fs::last_write_time(path_of(open)) == stamp;  // (before the files not moved are removed)
+            fs::permissions(path_of(shut), fs::perms::owner_all);
+        }
+        QCOMPARE(said, QStringLiteral("io: [Errno 13] Permission denied: '%1'").arg(shut + "/b.png"));
+        QCOMPARE(QString::fromStdString(genko::test::read_bytes(open + "/a.png")), QStringLiteral("an export before"));
+        QVERIFY2(untouched, "a file was moved there and back");
     }
 
     // The submission pack is one export: its PNGs, which come after its TIFFs, stopped (a folder of a PNG's name) — no

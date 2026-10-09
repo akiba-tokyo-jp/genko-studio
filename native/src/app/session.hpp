@@ -234,6 +234,9 @@ private:
         bool undone_on_disk = false;   // a journal undo of it is committed (and no redo since)
         std::size_t held = 0;          // the precise colour pictures it replaced (kept alive by `before` alone)
         std::uint64_t undone_seq = 0;  // undo(): when it was undone (in the order of the actions' seq)
+        // Written to the journal even when it is undone before it is saved (made, then undone): it ends what the journal
+        // holds to redo, as Python's journal, where every change is written at once (apply()).
+        bool journal = false;
     };
 
     // What the disk still has to get, in order.
@@ -244,6 +247,7 @@ private:
         std::string txn;                 // this action's own transaction id: a retry after a failure is saved once
         std::uint64_t seq = 0;
         bool in_flight = false;          // part of the job running now
+        bool sent = false;               // given to the disk: it may be there even when that job failed
     };
 
     struct Job;
@@ -261,7 +265,8 @@ private:
     void simplify_queue();
     void after_failure(const QString& code, const QString& message);
     void start_rebase();
-    void rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo_depth, std::int64_t redo_depth);
+    void rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo_depth, std::int64_t redo_depth, bool after_own_step = false);
+    bool disk_step_waits() const;
     void finish_reading(const JobResult& result);
     void request_recovery();
     void trim_history();
