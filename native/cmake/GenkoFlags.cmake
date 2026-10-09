@@ -28,8 +28,19 @@ function(genko_target_flags target)
   if(GENKO_SANITIZE AND NOT MSVC)
     target_compile_options(${target} PRIVATE -fsanitize=${GENKO_SANITIZE} -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
     target_link_options(${target} PRIVATE -fsanitize=${GENKO_SANITIZE})
+    if(GENKO_LINKER_PACKS)
+      target_link_options(${target} PRIVATE LINKER:-z,pack-relative-relocs LINKER:--compress-debug-sections=zlib)
+    endif()
   endif()
 endfunction()
+
+# A sanitizer build links every library into each test program (about 0.6 GB each, most of it relocations and debug
+# information): where the linker can, pack the relative relocations and compress the debug sections. The programs
+# and the sanitizers' reports (file and line) are the same.
+if(GENKO_SANITIZE AND NOT MSVC)
+  include(CheckLinkerFlag)
+  check_linker_flag(CXX "LINKER:-z,pack-relative-relocs,--compress-debug-sections=zlib" GENKO_LINKER_PACKS)
+endif()
 
 # A Genko library: static, its include root is native/src, flags as above.
 function(genko_library name)
