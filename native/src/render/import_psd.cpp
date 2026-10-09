@@ -15,6 +15,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #else
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #endif
 
@@ -43,6 +45,12 @@ constexpr int kMaskDpi = 150;                          // ops.MASK_DPI
 constexpr std::int64_t kMaxPagePixels = 12'001LL * 12'001LL;
 // The largest file read (Photoshop's own limit for a PSD; a PSB past it would not fit what one page can hold).
 constexpr std::uint64_t kMaxFileBytes = std::uint64_t{1} << 31;
+// The pixels the op makes for the file's pixel layers in all, each a page layer (drawn, PNG-encoded and kept) and a
+// picture as large as the canvas: 128 pictures of the largest size an op makes. A page of a book at 600 dpi with its
+// bleed is some 37 (A4) to 55 (B4) million pixels a layer, so some 140 (B4) to 210 (A4) such layers are taken; a
+// small file of many one-pixel layers on the largest canvas (32767 of them in 2.4 MB) is not, before any layer is made
+// (Python goes on for hours, holding gigabytes of PNGs, until MemoryError).
+constexpr double kMaxImportPixels = 128.0 * static_cast<double>(limits::kPixels);
 
 // --- the file -----------------------------------------------------------------------------------------------------
 
@@ -137,6 +145,52 @@ std::string read_bytes(const std::string& filename) {
     }
     return out;
 }
+#else
+// (Windows: deferred with the rest of that build; not compiled yet)
+// ntpath.expanduser of a path's first part ("~" or "~user"): USERPROFILE, else HOMEDRIVE and HOMEPATH; another user's
+// home beside the current user's (USERNAME) profile folder; the part unchanged when there is no such home.
+std::wstring expand_home(const std::wstring& first) {
+    std::wstring home;
+    if (const wchar_t* profile = _wgetenv(L"USERPROFILE")) {
+        home = profile;
+    } else if (const wchar_t* path = _wgetenv(L"HOMEPATH")) {
+        const wchar_t* drive = _wgetenv(L"HOMEDRIVE");
+        home = (std::filesystem::path(drive != nullptr ? drive : L"") / path).wstring();
+    } else {
+        return first;
+    }
+    if (first.size() > 1) {  // (~user)
+        const std::wstring user = first.substr(1);
+        const wchar_t* current = _wgetenv(L"USERNAME");
+        if (current == nullptr || user != current) {
+            const std::filesystem::path own(home);
+            if (current == nullptr || own.filename().wstring() != current) return first;
+            home = (own.parent_path() / user).wstring();
+        }
+    }
+    return home;
+}
+
+// Path.read_bytes() with its errors as the POSIX build's (ApplyError "the file cannot be read (…)"). Beyond Python, a
+// file larger than kMaxFileBytes is refused before it is read.
+std::string read_bytes(const std::filesystem::path& source) {
+    std::ifstream in(source, std::ios::binary);
+    if (!in) throw OpError("the file cannot be read (" + core::path_to_utf8(source) + ")");
+    const auto too_large = [] { throw OpError("the file cannot be read (it is larger than 2 GiB)"); };
+    in.seekg(0, std::ios::end);
+    const std::streamoff size = in.tellg();
+    if (size > 0 && static_cast<std::uint64_t>(size) > kMaxFileBytes) too_large();
+    in.clear();
+    in.seekg(0, std::ios::beg);
+    std::string out;
+    char buffer[1 << 16];
+    while (in.read(buffer, sizeof buffer) || in.gcount() > 0) {
+        out.append(buffer, static_cast<std::size_t>(in.gcount()));
+        if (out.size() > kMaxFileBytes) too_large();
+    }
+    if (in.bad()) throw OpError("the file cannot be read (" + core::path_to_utf8(source) + ")");
+    return out;
+}
 #endif
 
 // fileops.import_psd's reading of op["path"]: Path(str(path)).expanduser(), relative to the book's folder when it has
@@ -158,14 +212,21 @@ std::string read_path(const core::Document& doc, const Json& value) {
     }
     return read_bytes(source.text());
 #else
-    // (Windows: deferred with the rest of that build; the file as std::filesystem finds it)
+    // (Windows: deferred with the rest of that build; as the POSIX build, with ntpath's "~" and std::filesystem's
+    // paths)
     std::filesystem::path source = core::path_from_utf8(core::py_str(value));
-    if (source.is_relative() && doc.asset_dir) source = *doc.asset_dir / source;
-    std::ifstream in(source, std::ios::binary);
-    if (!in) throw OpError("the file cannot be read (" + core::path_to_utf8(source) + ")");
-    std::string out((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (out.size() > kMaxFileBytes) throw OpError("the file cannot be read (it is larger than 2 GiB)");
-    return out;
+    if (!source.has_root_name() && !source.has_root_directory() && !source.empty()) {  // (no drive and no root)
+        auto part = source.begin();
+        if (part->wstring().starts_with(L"~")) {
+            const std::wstring home = expand_home(part->wstring());
+            if (home.starts_with(L"~")) throw core::PyUncaught("RuntimeError", "Could not determine home directory.");
+            std::filesystem::path expanded(home);
+            for (++part; part != source.end(); ++part) expanded /= *part;
+            source = std::move(expanded);
+        }
+    }
+    if (source.is_relative() && doc.asset_dir) source = *doc.asset_dir / source;  // (relative to the book's folder)
+    return read_bytes(source);
 #endif
 }
 
@@ -285,6 +346,16 @@ void import_psd(core::OpContext& c) {
     if (where.shown_w * where.shown_h > limits::kPixels) {
         throw OpError("the picture is too large (" + std::to_string(where.shown_w) + "×" + std::to_string(where.shown_h) +
                       " pixels; at most " + std::to_string(limits::kPixels) + ")");
+    }
+    // (the op as a whole, before any layer is made: kMaxImportPixels)
+    const auto pictures = std::count_if(layers.begin(), layers.end(), [](const psd::Layer& l) { return !l.folder; });
+    const double each = static_cast<double>(where.page_w) * static_cast<double>(where.page_h) +
+                        static_cast<double>(file.width()) * static_cast<double>(file.height());
+    if (static_cast<double>(pictures) * each > kMaxImportPixels) {
+        throw OpError("the PSD has too many layers for their size (" + std::to_string(pictures) + " layers, each a page layer of " +
+                      std::to_string(where.page_w) + "×" + std::to_string(where.page_h) + " and a picture of " +
+                      std::to_string(file.width()) + "×" + std::to_string(file.height()) + " pixels; at most " +
+                      std::to_string(static_cast<std::int64_t>(kMaxImportPixels)) + " pixels in all)");
     }
     const std::string prefix = core::truthy_at(op, "id") ? core::py_str(op["id"]) : core::new_id();
     const Json parent = core::truthy_at(op, "parent") ? Json(core::py_str(op["parent"])) : Json(nullptr);

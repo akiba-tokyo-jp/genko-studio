@@ -59,7 +59,15 @@ std::string relayout_raster(const std::string& png, const core::PageSpec& spec, 
 
 std::optional<std::string> relayout_mask(const std::string& png, const core::PageSpec& old_paper, const core::PageSpec& paper,
                                          const core::Rect& old_frame, const core::Rect& new_frame) {
-    const Image mask = selection::open_picture(png).convert("L");
+    // (a mask that is no picture that can be read — not a picture, cut short, too large to open — is left exactly as it
+    // is, as Python leaves every mask: the op goes on)
+    std::optional<Image> opened;
+    try {
+        opened = selection::open_picture(png).convert("L");
+    } catch (const core::Error&) {
+        return std::nullopt;
+    }
+    const Image& mask = *opened;
     // (one value everywhere — a mask showing, or hiding, all of its layer — is the same moved)
     const auto [low, high] = mask.getextrema().front();
     if (low == high) return std::nullopt;

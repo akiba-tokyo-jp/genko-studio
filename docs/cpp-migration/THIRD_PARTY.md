@@ -15,7 +15,7 @@
 | libwebp | 1.3.2 / 1.5.x | BSD-3-Clause | WebP（タイムラプス・アニメーション） | 静的 |
 | Little CMS 2 | 2.14 / 2.16 | MIT | 色変換（CMYK、ICC） | 静的 |
 | Pillow の `libImaging`（C 実装のみ） | 12.3.0（sdist sha256 3b8182a7…7cce） | MIT-CMU（HPND） | 継承描画の画素処理（線・合成・変換・フィルター）。現行版と同じ画素を出すため | 静的。`native/third_party/pillow/`、ライセンス文と変更記録を同梱 |
-| Arm optimized-routines の `math/`（sinf・cosf・powf とその表。glibc 2.39 の sysdeps/ieee754/flt-32 と同じもの） | glibc 2.39 同梱版（2018-2024） | MIT OR Apache-2.0 WITH LLVM-exception（MIT で利用） | numpy の float32 sin・cos・power が参照環境で使う C ライブラリの関数を、どの OS でも同じビットで計算する（`native/src/render/libm_float.cpp` に移植） | 静的（ソースに移植）。`native/third_party/optimized-routines/LICENSE-MIT` |
+| Arm optimized-routines（https://github.com/ARM-software/optimized-routines）の `math/sinf.c`・`cosf.c`・`sincosf.h`・`sincosf_data.c`・`powf.c`・`powf_log2_data.c`・`exp2f_data.c` | v25.01（コミット 3752b981a6f3b89b5468476a87568a29fd9e0822。これらのファイルは v25.07 も同じ）。著作権表示は各ファイルの通り（Copyright (c) 2018-2024, Arm Limited: sinf.c・cosf.c・sincosf.h／2018-2019: sincosf_data.c／2017-2024: powf.c／2017-2019: powf_log2_data.c／2017-2018: exp2f_data.c） | MIT OR Apache-2.0 WITH LLVM-exception（MIT で利用） | numpy の float32 sin・cos・power が参照環境で使う C ライブラリの関数を、どの OS でも同じビットで計算する（`native/src/render/libm_float.cpp` に移植。参照環境の C ライブラリ glibc 2.39 の結果とビット単位で照合する。glibc の同梱版は LGPL のため使わない） | 静的（ソースに移植）。`native/third_party/optimized-routines/LICENSE-MIT`（同リポジトリの `LICENSE` の MIT の部分そのまま） |
 
 ## 同梱フォント・アイコン（現行版から継承）
 

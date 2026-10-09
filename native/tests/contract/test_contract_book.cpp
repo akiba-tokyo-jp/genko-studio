@@ -5,13 +5,15 @@
 // each step's reply, full snapshot, project.json payload and what covers.py makes of the book (pages_in_order,
 // reading_order, file_stem, folds), and the book after the case saved and read back. import_pages also reads the
 // legacy books (data/legacy) and books this test makes that cannot be read (none there, an empty folder, broken JSON, a
-// newer version, JSON that is not a book, a book missing a picture). A case marked "cpp" is one this build refuses on
-// purpose (a paper that is not a finite number, pixels moved onto a basic frame of no finite size or onto a paper too
-// large to hold them, a book it would open read-only, a version only this build reads): C++ must refuse it with that
-// code, its error holding "cpp_says". One marked "cpp": "deviates" is one this build answers otherwise than Python on
-// purpose, the user's decision its "cpp_says" names (opsupport.hpp): D1, set_page_spec moving a cover's pixels on its
-// own paper and a layer's mask with what it masks; D2, import_pages pointing what names a layer at the page's own new
-// layers. It is Python's but at its "cpp_differs", keeps its "cpp_keeps" after the case and saved and read back, and
+// newer version, JSON that is not a book, a book missing a picture), and the other book with areas kept on a page that
+// name its layers (as a book can hold them: store_area keeps an area resolved to a mask, but the page's keys are read
+// and written as they are). A case marked "cpp" is one this build refuses on purpose (a paper that is not a finite
+// number, pixels moved onto a basic frame of no finite size or onto a paper too large to hold them, a book it would
+// open read-only, a version only this build reads): C++ must refuse it with that code, its error holding "cpp_says".
+// One marked "cpp": "deviates" is one this build answers otherwise than Python on purpose, the user's decision its
+// "cpp_says" names (opsupport.hpp): D1, set_page_spec moving a cover's pixels on its own paper and a layer's mask with
+// what it masks; D2, import_pages and duplicate_page pointing what names a layer at the page's own new layers. It is
+// Python's but at its "cpp_differs", keeps its "cpp_keeps" after the case and saved and read back, and
 // Python's book does not. The command line copies none of the other book's assets with import_pages, as
 // Python's does (its app and MCP tools copy them first, merge.copy_assets): checked on both command lines. Skipped
 // without the Python reference.
@@ -124,6 +126,32 @@ class TestContractBook : public QObject {
         }
     }
 
+    // <scratch>/scratch/areas.genko: the other book with areas kept on its page 2 that name the page's layers (its
+    // paint layer o-paint and its ink layer), alone and inside a union, a subtract and an intersect.
+    void write_book_with_kept_areas() {
+        const QString dir = path("scratch") + "/areas.genko";
+        genko::test::copy_tree(other_, dir);
+        Json payload = genko::test::read_json(other_ + "/project.json");
+        Json& page = payload["pages"][1];
+        std::string ink;
+        for (const Json& layer : page["layers"]) {
+            if (layer.value("role", "") == "ink") ink = layer["id"].get<std::string>();
+        }
+        QVERIFY(!ink.empty());
+        const Json box = Json::object({{"rect", Json::array({10, 10, 30, 20})}});
+        const Json corner = Json::object({{"rect", Json::array({0, 0, 40, 40})}});
+        const Json paint = Json::object({{"layer", "o-paint"}});
+        const Json lines = Json::object({{"layer", ink}, {"grow_mm", 1}});
+        const Json inside = Json::object({{"intersect", Json::array({paint, corner})}});
+        page["saved_areas"] = Json::object({{"paint", paint},
+                                            {"lines", Json::object({{"union", Json::array({box, lines})}})},
+                                            {"nested", Json::object({{"subtract", Json::array({Json::object({{"all", true}}), inside})}})}});
+        genko::test::write_bytes(dir + "/project.json", genko::core::dump_python(payload));
+        const auto loaded = genko::storage::load_document(genko::storage::path_from_utf8(dir.toStdString()));
+        QVERIFY2(loaded.report.clean(), genko::core::dump_python(loaded.report.to_json()).c_str());
+        QCOMPARE(loaded.document.page(1).extra["saved_areas"].size(), std::size_t{3});
+    }
+
 private slots:
     void initTestCase() {
         if (genko::test::python_ref().isEmpty()) QSKIP("no reference Python: set GENKO_PYREF or install /opt/pyref/bin/python");
@@ -133,6 +161,7 @@ private slots:
         const auto made = genko::test::harness({"make-pagesbook", pages_, other_}, path("pyenv"), 1200000);
         QVERIFY2(made.finished && made.exit_code == 0, made.err.right(4000).constData());
         write_unreadable_books();
+        write_book_with_kept_areas();
     }
 
     void bookOpsLikePython() {

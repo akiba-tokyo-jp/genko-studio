@@ -103,9 +103,12 @@ std::string compare_deviating_steps(const std::vector<StepOutcome>& outcomes, co
 
 // What a deviating case's "cpp_keeps" asks of the book after it (`after`; `before`: the book before its last step):
 //   "layer_refs": true — every reference to a layer on a page (a layer's parent_id, a ruler's layer_id, the old
-//     single ruler's, an animation track's folder and cels and its light table, a line's style.below_layer) names a
+//     single ruler's, an animation track's folder and cels and its light table, an area kept on the page —
+//     saved_areas: {"layer": id}, also inside a union, intersect or subtract —, a line's style.below_layer) names a
 //     layer of that page
 //     (the user's decision D2: a page copied takes its references along to its own layers);
+//   "kept_area_fills": [[page, name], …] — fill_area with the area kept on the page under that name ({"saved": name})
+//     succeeds on the book (it names the page's own layers: D2);
 //   "moved": [[page, layer id, "paint" | "mask"], …] — the layer's pixels (alpha over 127) or its mask's hidden part
 //     (under 128) have moved with the page's basic frame from `before` to `after`, as everything else on the page:
 //     their middle where the frame takes it (within 0.5 mm) and their area scaled with it (within 5%), the picture as

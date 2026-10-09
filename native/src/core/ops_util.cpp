@@ -298,6 +298,19 @@ void remap_layer_refs(Page& page, const std::vector<StoryLine*>& lines, const Fr
             for (Json& cel : anim["light_table"]) remap(cel);  // (the cels always shown faint)
         }
     }
+    // the areas kept on the page (selops: {"layer": id}, and the areas in a union, intersect or subtract list; a book
+    // can hold them so, though store_area keeps an area resolved)
+    if (page.extra.is_object() && page.extra.contains("saved_areas") && page.extra["saved_areas"].is_object()) {
+        const std::function<void(Json&)> area_refs = [&](Json& area) {
+            if (!area.is_object()) return;
+            remap_key(area, "layer");
+            for (const char* key : {"union", "intersect", "subtract"}) {
+                if (!area.contains(key) || !area[key].is_array()) continue;
+                for (Json& part : area[key]) area_refs(part);
+            }
+        };
+        for (auto& [name, area] : page.extra["saved_areas"].items()) area_refs(area);
+    }
     for (StoryLine* line : lines) remap_key(line->style, "below_layer");
 }
 

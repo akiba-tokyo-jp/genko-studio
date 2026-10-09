@@ -229,7 +229,18 @@ const std::vector<Rule>& rules() {
             return QStringLiteral("PSD を読み込めません（%1）").arg(inner(m.captured(1)));
         }));
         r.push_back(rule("the PSD file is cut short", "PSD のファイルが途中で切れています"));
-        // (this build's own refusals of a PSD too large to read: render/psd.hpp)
+        r.push_back(rule("fit must be paper, bleed or trim", "PSD を合わせる範囲は、用紙・裁ち落とし・仕上がりから選びます"));
+        // (what Python's reader says of a file it cannot read, in the PSD's refusal: numpy's, struct's and zlib's
+        // words; zlib's error itself goes through import_psd as "error: …")
+        r.push_back(rule("not enough image data", "絵のデータが足りません"));
+        r.push_back(rule("buffer size must be a multiple of element size", "絵のデータの長さが合いません"));
+        r.push_back(rule(R"(cannot reshape array of size \d+ into shape \(.*\))", "絵のデータの量が、絵の大きさと合いません"));
+        r.push_back(rule(R"(unpack requires a buffer of \d+ bytes)", "ファイルが途中で切れています"));
+        r.push_back(rule(R"(Error -?\d+ while decompressing data.*)", "圧縮された絵のデータが壊れています"));
+        r.push_back(rule(R"(error: Error -?\d+ while decompressing data.*)", "PSD を読み込めません（圧縮された絵のデータが壊れています）"));
+        // (this build's own refusals of a PSD too large to read: render/psd.hpp, render/import_psd.cpp)
+        r.push_back(rule(R"(the PSD has too many layers for their size \(.*\))",
+                         "PSD のレイヤーが、絵の大きさに対して多すぎて読み込めません（レイヤーを結合するか、解像度を下げて保存し直してください）"));
         r.push_back(rule("a layer is too large to read", "レイヤーが大きすぎて読めません"));
         r.push_back(rule("the layers are too large to read", "レイヤーの絵が多すぎて読めません"));
         r.push_back(rule("the picture is too large to read", "絵が大きすぎて読めません"));
@@ -471,6 +482,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("paper is too large: .*", "用紙が大きすぎて、ページの中身を新しい基本枠へ動かせません"));
         r.push_back(rule(R"(the paint layer on the new paper is too large \(.*\))",
                          "用紙が大きすぎて、ペイントレイヤーの絵を新しい用紙に移せません"));
+        r.push_back(rule(R"(the layer mask on the new paper is too large \(.*\))", "用紙が大きすぎて、レイヤーマスクを新しい用紙に移せません"));
+        // (storage::copy_assets: the other book's pictures copied before its pages are taken in)
+        r.push_back(rule(R"(the asset ['"](.*)['"] is too large to copy \(at most (\d+) bytes\))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("取り込む原稿の素材ファイル（%1）が大きすぎて取り込めません（1 ファイル %2 MiB まで）")
+                .arg(m.captured(1), QString::number(m.captured(2).toULongLong() / (1024 * 1024)));
+        }));
         r.push_back(rule("the basic frame must be a finite size", "基本枠の大きさは、ふつうの数で指定します（無限大や NaN は使えません）"));
         r.push_back(rule("set_page_spec moving high-precision colour pixels is not in the C\\+\\+ build yet",
                          "この版の Genko では、高精度の色のレイヤーがある原稿の用紙を、中身ごと変えることはまだできません（中身を動かさない変更はできます）"));

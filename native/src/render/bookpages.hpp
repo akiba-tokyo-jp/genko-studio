@@ -23,8 +23,9 @@ std::string relayout_raster(const std::string& png, const core::PageSpec& spec, 
 // PNG ("L" over the page's old paper `old_paper`, white shows) made again over the page's new paper `paper` at
 // ops.MASK_DPI, each pixel taking the old mask's value where the content now there came from (the old basic frame onto
 // the new one as pagespec._Map moves a point), bilinear, the old mask's edge carried on past its paper; as PNG.
-// Nothing when moving changes nothing: a mask of one value everywhere, or the same paper and frame. OpError for a
-// basic frame of no finite size and a paper too large to hold the mask.
+// Nothing when moving changes nothing: a mask of one value everywhere, or the same paper and frame; and for a mask that
+// is no picture that can be read (Python never reads it there: it is left as it is). OpError for a basic frame of no
+// finite size and a paper too large to hold the mask.
 std::optional<std::string> relayout_mask(const std::string& png, const core::PageSpec& old_paper, const core::PageSpec& paper,
                                          const core::Rect& old_frame, const core::Rect& new_frame);
 

@@ -95,10 +95,11 @@ void refresh_frame_ids(Frame& frame, FrameIdMap& map);
 // What on a copied page names one of its layers, pointed at the layer's new id (`layers`: old layer id → new, as
 // duplicate_page and import_pages give the copy's layers new ids): each layer's folder (parent_id), a ruler kept to one
 // layer (layer_id, the old single ruler's too), an animation's folders and cels (page.extra["anim"]: its tracks and its
-// light table), and on the copied lines (`lines`) the layer a line is drawn under (style.below_layer). An id the map
-// does not hold (no layer of the page) is left as it is. Python leaves them all naming the old page's layers (ops.py,
-// duplicate_page and import_pages): a deliberate deviation of this build, the user's decision D2 (SPEC §2: a known bug
-// is not reproduced).
+// light table), an area kept on the page that names a layer (page.extra["saved_areas"]: {"layer": id}, also inside a
+// union, intersect or subtract), and on the copied lines (`lines`) the layer a line is drawn under
+// (style.below_layer). An id the map does not hold (no layer of the page) is left as it is. Python leaves them all
+// naming the old page's layers (ops.py, duplicate_page and import_pages): a deliberate deviation of this build, the
+// user's decision D2 (SPEC §2: a known bug is not reproduced).
 void remap_layer_refs(Page& page, const std::vector<StoryLine*>& lines, const FrameIdMap& layers);
 
 // Register the ops of M2-O1 (frames, pages, strokes, layers, brush).
@@ -131,8 +132,9 @@ struct BookPageHooks {
         relayout_raster;
     // A layer mask (its PNG over the page's old paper `old_paper`) moved as its layer's pixels and lines are, from the
     // old basic frame onto the new one, over the page's new paper `paper` at ops.MASK_DPI; nothing when that changes
-    // nothing (a mask of one value everywhere; the same paper and frame). Python leaves a mask as it was, stretched over
-    // the new paper while what it masks moves (the user's decision D1).
+    // nothing (a mask of one value everywhere; the same paper and frame) and for a mask that cannot be read (left as it
+    // is). Python leaves a mask as it was, stretched over the new paper while what it masks moves (the user's decision
+    // D1).
     std::function<std::optional<std::string>(const std::string& png, const PageSpec& old_paper, const PageSpec& paper,
                                              const Rect& old_frame, const Rect& new_frame)>
         relayout_mask;

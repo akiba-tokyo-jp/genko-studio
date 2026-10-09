@@ -1,13 +1,19 @@
-// glibc 2.39's sinf, cosf and powf (sysdeps/ieee754/flt-32), as x86-64 glibc builds them for a CPU with FMA and AVX2
-// (sysdeps/x86_64/fpu/multiarch: s_sinf-fma.c, s_cosf-fma.c, e_powf-fma.c, compiled with -mfma -mavx2, where GCC fuses
-// each a * b + c into one multiply-add). The algorithms and tables are Arm's optimized-routines (math/sinf.c, cosf.c,
-// sincosf.h, sincosf_data.c, powf.c, powf_log2_data.c, exp2f_data.c):
+// sinf, cosf and powf of Arm's optimized-routines (https://github.com/ARM-software/optimized-routines, tag v25.01,
+// commit 3752b981a6f3b89b5468476a87568a29fd9e0822: math/sinf.c, cosf.c, sincosf.h, sincosf_data.c, powf.c,
+// powf_log2_data.c, exp2f_data.c, with math_config.h's helpers), without TOINT_INTRINSICS, as built for a CPU with FMA
+// and AVX2 (-mfma -mavx2, where the compiler fuses each a * b + c into one multiply-add: std::fma here), which is how
+// the reference's C library runs them (glibc 2.39 on x86-64, which this is checked against):
 //
-//   Copyright (c) 2018-2024, Arm Limited.
+//   Copyright (c) 2018-2024, Arm Limited.  (sinf.c, cosf.c, sincosf.h)
+//   Copyright (c) 2018-2019, Arm Limited.  (sincosf_data.c)
+//   Copyright (c) 2017-2024, Arm Limited.  (powf.c)
+//   Copyright (c) 2017-2019, Arm Limited.  (powf_log2_data.c)
+//   Copyright (c) 2017-2018, Arm Limited.  (exp2f_data.c)
 //   SPDX-License-Identifier: MIT OR Apache-2.0 WITH LLVM-exception
 //
-// taken here under its MIT terms (native/third_party has the texts; docs/cpp-migration/THIRD_PARTY.md). What C leaves to
-// the machine is written out: the NaN an invalid operation gives (x86's, as the reference's), the NaN `x + y` passes on.
+// taken here under its MIT terms (native/third_party/optimized-routines/LICENSE-MIT; docs/cpp-migration/
+// THIRD_PARTY.md). What C leaves to the machine is written out: the NaN an invalid operation gives (x86's, as the
+// reference's), the NaN `x + y` passes on.
 
 #include "render/libm_float.hpp"
 
@@ -39,10 +45,10 @@ float nan_sum(float x, float y) {
     return x + y;
 }
 
-// __issignalingf (x86: a quiet NaN has the top bit of its fraction set)
+// issignalingf_inline (math_config.h; x86: a quiet NaN has the top bit of its fraction set)
 bool is_signaling(float x) { return ((asuint(x) ^ 0x00400000U) & 0x7fffffffU) > 0x7fc00000U; }
 
-// --- sinf, cosf (s_sincosf.h, sysdeps/x86/fpu/s_sincosf_data.c) ---------------------------------------------------
+// --- sinf, cosf (math/sinf.c, cosf.c, sincosf.h, sincosf_data.c) --------------------------------------------------
 
 struct SinCos {
     double sign[4];  // the sign of the sine in quadrants 0..3
@@ -114,7 +120,7 @@ double reduce_large(std::uint32_t xi, int& n) {
     return x * kPi63;
 }
 
-// --- powf (e_powf.c, e_powf_log2_data.c, e_exp2f_data.c; POWF_SCALE 1 without TOINT_INTRINSICS) ---------------------
+// --- powf (math/powf.c, powf_log2_data.c, exp2f_data.c; POWF_SCALE 1 without TOINT_INTRINSICS) ----------------------
 
 struct InvcLogc {
     double invc, logc;
@@ -217,7 +223,7 @@ float sinf(float y) {
     int n = 0;
     if (abstop12(y) < abstop12(kPio4)) {
         const double s = x * x;
-        if (abstop12(y) < abstop12(0x1p-12f)) return y;  // (glibc raises the underflow of a tiny y)
+        if (abstop12(y) < abstop12(0x1p-12f)) return y;  // (the source also raises underflow for a tiny y)
         return sinf_poly(x, s, p, 0);
     }
     if (abstop12(y) < abstop12(120.0f)) {

@@ -13,13 +13,17 @@
 //   3. hostileFilesRefused: files Python would take gigabytes for (a layer of 40000 × 20000 PackBits rows of nothing,
 //      a canvas of 100000 × 100000, a zip layer of nothing as wide as a house) refused without that memory, by the
 //      reader and by the op, the book unchanged;
-//   4. budgetsHold: the reader's limits (one channel, one layer, every channel together), shrunk, refuse a small file.
+//   4. budgetsHold: the reader's limits (one channel, one layer, every channel together), shrunk, refuse a small file;
+//   5. aWholeImportIsBounded: a small file of 32767 one-pixel layers on a canvas of 10000 × 12000 (Python makes a page
+//      layer and a canvas-sized picture of each and keeps every PNG: hours, and gigabytes of PNGs) refused by the op
+//      before any layer is made, at once, the book unchanged.
 // Skipped without the Python reference.
 
 #include <QtTest>
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
 
@@ -118,6 +122,51 @@ bool python_safe(const std::string& data) {
         return !error.too_large();
     }
     return true;
+}
+
+// An 8-bit RGB PSD of width × height holding `count` layers of one pixel each (raw red, green and blue samples) and
+// nothing after them (no merged picture: read_psd has none).
+std::string one_pixel_layers(std::uint32_t width, std::uint32_t height, int count) {
+    const auto u16 = [](std::string& out, unsigned v) {
+        out += {static_cast<char>(v >> 8 & 0xFF), static_cast<char>(v & 0xFF)};
+    };
+    const auto u32 = [](std::string& out, std::uint32_t v) {
+        out += {static_cast<char>(v >> 24 & 0xFF), static_cast<char>(v >> 16 & 0xFF), static_cast<char>(v >> 8 & 0xFF),
+                static_cast<char>(v & 0xFF)};
+    };
+    std::string info;  // the layer info: the count, the records, the channels' data
+    u16(info, static_cast<unsigned>(count));
+    for (int n = 0; n < count; ++n) {
+        for (const std::uint32_t edge : {0U, 0U, 1U, 1U}) u32(info, edge);  // top, left, bottom, right
+        u16(info, 3);
+        for (unsigned channel = 0; channel < 3; ++channel) {
+            u16(info, channel);
+            u32(info, 3);  // (its compression, raw, and its one sample)
+        }
+        info += "8BIMnorm";
+        info += {static_cast<char>(255), '\0', '\0', '\0'};  // opacity, clipping, flags, filler
+        u32(info, 12);  // extra data: no mask, no blending ranges, an empty name padded to 4
+        u32(info, 0);
+        u32(info, 0);
+        info.append(4, '\0');
+    }
+    for (int n = 0; n < 3 * count; ++n) info += std::string("\0\0\x80", 3);
+    if (info.size() % 2 != 0) info += '\0';
+    std::string out = "8BPS";
+    u16(out, 1);
+    out.append(6, '\0');
+    u16(out, 3);  // channels
+    u32(out, height);
+    u32(out, width);
+    u16(out, 8);  // bits
+    u16(out, 3);  // RGB
+    u32(out, 0);  // colour mode data
+    u32(out, 0);  // image resources
+    u32(out, static_cast<std::uint32_t>(4 + info.size() + 4));  // the layer and mask section
+    u32(out, static_cast<std::uint32_t>(info.size()));
+    out += info;
+    u32(out, 0);  // global layer mask info
+    return out;
 }
 
 }  // namespace
@@ -391,6 +440,39 @@ private slots:
         }
         limits.max_decoded_bytes = 48 + 100;
         QVERIFY(!psd::File::read(zip, limits).layers().empty());
+    }
+
+    // The op as a whole: each pixel layer is a page layer and a picture as large as the canvas, made, drawn and kept as
+    // a PNG. 32767 layers of one pixel on the largest canvas (2.4 MB of file) would be hours of that and gigabytes of
+    // PNGs: refused before any layer is made (a refusal of this build's; Python fails, later, with MemoryError).
+    void aWholeImportIsBounded() {
+        const genko::core::Document book = load_book();
+        const auto pages = book.pages;
+        const std::size_t layers_before = book.page(5).layers.size();
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        const std::string data = one_pixel_layers(10000, 12000, 32767);
+        QVERIFY(data.size() < 2'500'000);
+        QCOMPARE(psd::File::read(data).layers().size(), std::size_t{32767});  // (the reader takes it: a pixel a layer)
+        const auto import = [&](const std::string& file) {
+            const Json op = Json::object({{"op", "import_psd"}, {"page", 6}, {"psd", genko::core::b64encode(file)}});
+            return Json::array({op});
+        };
+        QElapsedTimer clock;
+        clock.start();
+        try {
+            (void)bus.apply(book, import(data), genko::core::Actor("genko"));
+            QFAIL("imported");
+        } catch (const genko::core::ApplyError& error) {
+            const std::string says =
+                "ops[0] import_psd: the PSD has too many layers for their size (32767 layers, each a page layer of ";
+            QVERIFY2(error.code() == "apply" && std::string(error.what()).starts_with(says), error.what());
+        }
+        QVERIFY2(clock.elapsed() < 20000, std::to_string(clock.elapsed()).c_str());
+        QVERIFY(book.pages == pages);
+        QCOMPARE(book.page(5).layers.size(), layers_before);
+        // many layers on a canvas of a page's size are taken
+        const auto taken = bus.apply(book, import(one_pixel_layers(1000, 1400, 60)), genko::core::Actor("genko"));
+        QCOMPARE(taken.doc.page(5).layers.size(), layers_before + 60);
     }
 };
 

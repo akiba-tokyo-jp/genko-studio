@@ -862,6 +862,19 @@ std::string layer_refs_difference(const core::Document& doc) {
             const Json& light = page->extra["anim"].value("light_table", Json::array());
             for (const Json& cel : light.is_array() ? light : Json::array()) check(cel, "the light table's cel");
         }
+        // the areas kept on the page (selops: {"layer": id}, and the areas in a union, intersect or subtract)
+        const std::function<void(const Json&)> area_refs = [&](const Json& area) {
+            if (!area.is_object()) return;
+            if (area.contains("layer")) check(area["layer"], "a kept area's layer");
+            for (const char* key : {"union", "intersect", "subtract"}) {
+                if (area.contains(key) && area[key].is_array()) {
+                    for (const Json& part : area[key]) area_refs(part);
+                }
+            }
+        };
+        if (page->extra.is_object() && page->extra.contains("saved_areas") && page->extra["saved_areas"].is_object()) {
+            for (const auto& [name, area] : page->extra["saved_areas"].items()) area_refs(area);
+        }
         for (const core::StoryLine* line : doc.story_for_page(page->index)) {
             if (line->style.is_object() && line->style.contains("below_layer")) check(line->style["below_layer"], "line " + line->id + "'s layer");
         }
@@ -1017,6 +1030,20 @@ std::string kept_by_deviation(const Json& keeps, const core::Document& before, c
         for (const Json& item : keeps["moved"]) {
             const std::string d = moved_difference(before, after, item[0].get<std::int64_t>(), item[1].get<std::string>(), item[2].get<std::string>());
             if (!d.empty()) return d;
+        }
+    }
+    if (keeps.contains("kept_area_fills")) {
+        static const core::CommandBus bus(render::ops_registry());
+        for (const Json& item : keeps["kept_area_fills"]) {
+            const Json area = Json::object({{"saved", item[1]}});
+            const Json ops = Json::array(
+                {Json::object({{"op", "fill_area"}, {"page", item[0]}, {"area", area}, {"rgb", Json::array({0, 0, 0})}})});
+            try {
+                (void)bus.apply(after, ops, core::Actor("genko"));
+            } catch (const core::ApplyError& error) {
+                return "fill_area of the area kept as " + core::dump_python(item[1]) + " on page " + core::dump_python(item[0]) +
+                       ": " + error.what();
+            }
         }
     }
     return {};

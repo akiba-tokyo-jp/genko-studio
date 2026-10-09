@@ -879,6 +879,41 @@ private slots:
         QCOMPARE(QString::fromStdString(lines.values[lines.values.size() - 2]["action"].get<std::string>()), QStringLiteral("recover"));
     }
 
+    // A recovery point taken is the book's work again, in the book's folder: its asset_dir (where import_psd reads a
+    // relative path from, as Python's Episode.asset_dir) stays the book's, not the recovery point's folder.
+    void aRecoveryTakenKeepsTheBooksFolder() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_book(book);
+        auto options = quick(recovery);
+        options.autosave = false;
+        {
+            auto original = Session::open(book, options);
+            original->apply(stroke_op(30));
+            original->write_recovery_copy();
+            QVERIFY(original->wait_idle(10000ms));
+        }
+        auto again = Session::open(book, options);
+        QVERIFY(again->recovery_offer().has_value());
+        const fs::path point = again->recovery_offer()->folder;
+        QVERIFY(again->document().asset_dir == book);
+        again->adopt_recovery();
+        QCOMPARE(ink_strokes(again->document()), std::size_t{1});
+        QVERIFY2(again->document().asset_dir == book,
+                 genko::core::path_to_utf8(again->document().asset_dir.value_or(fs::path("(none)"))).c_str());
+        // a relative path is read from the book's folder
+        try {
+            again->apply(Json::array({Json::object({{"op", "import_psd"}, {"page", 1}, {"path", "art/nowhere.psd"}})}));
+            QFAIL("read a file that is not there");
+        } catch (const genko::core::ApplyError& error) {
+            const std::string said = error.what();
+            QVERIFY2(said.find(genko::core::path_to_utf8(book / "art" / "nowhere.psd")) != std::string::npos, said.c_str());
+            QVERIFY2(said.find(genko::core::path_to_utf8(point)) == std::string::npos, said.c_str());
+        }
+        QVERIFY(again->wait_saved(10000ms));
+    }
+
     void recoveryCannotOverwriteUnknownFeatures() {
         QTemporaryDir tmp;
         const fs::path book = path_of(tmp.filePath("book.genko"));

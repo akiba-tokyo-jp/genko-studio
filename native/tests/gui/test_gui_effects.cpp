@@ -717,9 +717,46 @@ private slots:
                  QStringLiteral("取り込む原稿は、この Genko より新しい版で保存されているため取り込めません（Genko を新しくしてください）"));
         QCOMPARE(error(std::string("project.json version 5 is newer than this build supports (4); update Genko")),
                  QStringLiteral("この原稿は、この Genko より新しい版で保存されているため開けません（Genko を新しくしてください）"));
+        // (this build's own: a mask moved onto a paper too large for it, an asset of the other book too large to copy)
+        QCOMPARE(error(std::string("ops[0] set_page_spec: the layer mask on the new paper is too large (100001×4 pixels; at most "
+                                   "120000000)")),
+                 QStringLiteral("用紙が大きすぎて、レイヤーマスクを新しい用紙に移せません"));
+        QCOMPARE(error(std::string("the asset '/books/他.genko/assets/ab/" + std::string(64, 'a') +
+                                   ".png' is too large to copy (at most 268435456 bytes)")),
+                 QStringLiteral("取り込む原稿の素材ファイル（/books/他.genko/assets/ab/%1.png）が大きすぎて取り込めません（1 ファイル 256 MiB まで）")
+                     .arg(QString(64, QLatin1Char('a'))));
         // (the others keep their words)
         QCOMPARE(error(std::string("ops[0] import_pages: the other book cannot be read ([Errno 2] No such file or directory: 'x')")),
                  QStringLiteral("取り込む原稿を開けませんでした（原稿のフォルダーを選んでください）"));
+    }
+
+    void psdRefusalsInThePersonsWords() {
+        // (import_psd's refusals, with the reasons Python's reader gives in English, as the person reads them)
+        using app::wording::error;
+        QCOMPARE(error(std::string("ops[0] import_psd: fit must be paper, bleed or trim")),
+                 QStringLiteral("PSD を合わせる範囲は、用紙・裁ち落とし・仕上がりから選びます"));
+        QCOMPARE(error(std::string("ops[0] import_psd: the PSD cannot be read (not enough image data)")),
+                 QStringLiteral("PSD を読み込めません（絵のデータが足りません）"));
+        QCOMPARE(error(std::string("ops[0] import_psd: the PSD cannot be read (buffer size must be a multiple of element size)")),
+                 QStringLiteral("PSD を読み込めません（絵のデータの長さが合いません）"));
+        QCOMPARE(error(std::string("ops[0] import_psd: the PSD cannot be read (cannot reshape array of size 7 into shape (2,4))")),
+                 QStringLiteral("PSD を読み込めません（絵のデータの量が、絵の大きさと合いません）"));
+        QCOMPARE(error(std::string("ops[0] import_psd: the PSD cannot be read (unpack requires a buffer of 2 bytes)")),
+                 QStringLiteral("PSD を読み込めません（ファイルが途中で切れています）"));
+        QCOMPARE(error(std::string("ops[0] import_psd: the PSD cannot be read (Error -3 while decompressing data: incorrect header check)")),
+                 QStringLiteral("PSD を読み込めません（圧縮された絵のデータが壊れています）"));
+        // (zlib's error, which Python's import_psd lets through)
+        QCOMPARE(error(std::string("ops[0] import_psd: error: Error -3 while decompressing data: invalid stored block lengths")),
+                 QStringLiteral("PSD を読み込めません（圧縮された絵のデータが壊れています）"));
+        QCOMPARE(error(std::string("ops[0] import_psd: error: Error -5 while decompressing data: incomplete or truncated stream")),
+                 QStringLiteral("PSD を読み込めません（圧縮された絵のデータが壊れています）"));
+        // (this build's own: the layers of a small file on a large canvas)
+        QCOMPARE(error(std::string("ops[0] import_psd: the PSD has too many layers for their size (32767 layers, each a page layer "
+                                   "of 8316×11762 and a picture of 10000×12000 pixels; at most 15360000000 pixels in all)")),
+                 QStringLiteral("PSD のレイヤーが、絵の大きさに対して多すぎて読み込めません（レイヤーを結合するか、解像度を下げて保存し直してください）"));
+        // (a reason of its own words keeps them)
+        QCOMPARE(error(std::string("ops[0] import_psd: the PSD cannot be read (the PSD file is cut short)")),
+                 QStringLiteral("PSD を読み込めません（PSD のファイルが途中で切れています）"));
     }
 
     void layerAndViewCommands() {

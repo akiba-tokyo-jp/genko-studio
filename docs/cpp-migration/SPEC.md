@@ -151,7 +151,12 @@ QtはLGPL利用条件を満たす動的リンク構成を基本とする。MIT�
 | ライトテーブル変換で巨大な画像から際限なく線の点を作る | 生成点の合計を既存の `render/limits::kPoints` 上限で生成前に検査し、超過時は一括操作を拒否 | M3 |
 | `set_page_spec` がペイント層の画素を本の用紙の大きさに作り直すため、本より幅の広いカバー・帯の画素（袖など）が切れて消える | 各ページ自身の新しい用紙（カバー・帯は `covers.spec_for`）の大きさで動かす（利用者の決定 D1） | M4 |
 | `set_page_spec` が層マスクを動かさず新しい用紙に引き伸ばすため、基本枠へ動いた中身とマスクがずれる | マスクも中身と同じく旧基本枠から新基本枠へ動かす（全面同じ値のマスクはそのまま。利用者の決定 D1） | M4 |
-| `duplicate_page`・`import_pages` が層に新しい id を付けても、`parent_id`・台詞の `style.below_layer`・定規の `layer_id`・アニメーションのフォルダー／セル／ライトテーブルが元の id を指したまま残る | 写したページの新しい層の id に付け替える（ページに無い id はそのまま。利用者の決定 D2） | M4 |
+| `duplicate_page`・`import_pages` が層に新しい id を付けても、`parent_id`・台詞の `style.below_layer`・定規の `layer_id`・アニメーションのフォルダー／セル／ライトテーブル・ページにストックした選択範囲（`saved_areas`）の `layer`（`union`・`intersect`・`subtract` の中も）が元の id を指したまま残る | 写したページの新しい層の id に付け替える（ページに無い id はそのまま。利用者の決定 D2） | M4 |
+| `import_psd`（`psd.read_psd`）が PSD のチャンネルを上限なく展開して持つ（zip の出力も PackBits の行もすべて。1 チャンネル・1 レイヤーやマスクの絵の大きさも問わない）ため、小さなファイルでも数 GB を確保しようとする | 1 チャンネルの展開が 480 MB（`limits::kPixels` の 4 倍）を、1 レイヤー・1 マスクの絵が 1 億 2000 万画素（`limits::kPixels`）を超えるものは `a layer is too large to read`、全チャンネルの展開の合計が 8 GiB を超えるものは `the layers are too large to read` で、その大きさを確保する前に拒否（`the PSD cannot be read (…)`） | M4 |
+| `import_psd` がファイルを大きさを問わず丸ごと読む（`Path.read_bytes`） | 2 GiB を超えるファイルは読まずに `the file cannot be read (it is larger than 2 GiB)` で拒否 | M4 |
+| `import_psd` がレイヤーごとにページ大の RGBA のレイヤーとキャンバス大の絵を作り、PNG にして持つため、大きなキャンバスに 1 画素のレイヤーを多数並べた小さなファイル（10000 × 12000 に 32767 枚で 2.4 MB）で何時間も処理を続け、PNG を持ち続けて最後は MemoryError で止まる | レイヤーを 1 枚も作る前に、作る画素の合計（絵のあるレイヤーの数 ×（ページのレイヤーの画素数＋キャンバスの画素数））が `limits::kPixels` の 128 倍（153 億 6000 万画素）を超えるものを `the PSD has too many layers for their size (…)` で拒否（裁ち落としを含む A4〜B4 の 600 dpi なら 140〜210 枚程度まで読み込む） | M4 |
+| `import_psd` がページのレイヤー（正の大きさでない用紙では `MAX_SIDE` の 12000 画素の上限が効かない）、高さや幅 0 の PSD を見出しの大きさで表す絵、150 dpi のレイヤーマスクを、大きさを問わず作る | 作る前に、ページのレイヤーが 12001 × 12001 画素を超えるものは `the page layer is too large (…)`、絵が 1 億 2000 万画素を超えるものは `the picture is too large (…)`、マスクが 1 億 2000 万画素か一辺 10 万画素を超えるものは `the layer mask is too large (…)` で拒否 | M4 |
+| 作品の結合（`merge.copy_assets`）が、取り込む原稿の素材ファイルを大きさを問わずコピーする（`shutil.copy2`） | 256 MiB（原稿の素材 1 つの読込上限 `kAssetMaxBytes`）を超えるファイルは `the asset '…' is too large to copy (at most 268435456 bytes)` で止める（名前順でそれより前のファイルはコピー済み） | M4 |
 
 ### COMP-02 継承する制作領域
 

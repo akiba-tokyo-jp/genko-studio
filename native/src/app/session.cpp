@@ -1261,6 +1261,9 @@ void Session::adopt_recovery() {
     core::Document doc = std::move(loaded.document);
     doc.revision = doc_->revision;
     doc.book_id = doc_->book_id;
+    // (the pictures are read from the recovery point; the book's folder stays the book's, where import_psd reads a
+    // relative path from, as Python's Episode keeps its asset_dir)
+    doc.asset_dir = doc_->asset_dir;
     auto change = std::make_shared<Change>();
     change->id = new_change_id();
     change->ops = Json::array({Json::object({{"op", "recover"}})});

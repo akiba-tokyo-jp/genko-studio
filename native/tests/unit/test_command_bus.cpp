@@ -352,6 +352,39 @@ private slots:
         QCOMPARE(repapered.spec.preset.value(), std::string("doujin-b5"));
     }
 
+    // set_page_spec moves a layer's mask with what it masks (the user's decision D1), but a mask whose bytes are no
+    // picture that can be read (not a picture at all, a PNG cut short) is left exactly as it is and the op goes on, as
+    // Python's, which never reads a mask there.
+    void aMaskThatCannotBeReadStaysAsItIs() {
+        namespace render = genko::render;
+        Document doc = book();
+        render::Image corner = render::Image::create("L", {31, 44}, render::Ink(255));  // (hides its top left corner)
+        corner.paste(render::Ink(0), render::Box{0, 0, 10, 10});
+        const std::string png = render::write_png(corner);
+        const std::vector<std::pair<std::string, std::string>> masks{
+            {"junk", "not a picture"}, {"cut", png.substr(0, png.size() - 20)}, {"read", png}};
+        for (const auto& [id, bytes] : masks) {
+            genko::core::Layer layer;
+            layer.id = id;
+            layer.mask.emplace();
+            layer.mask->png = std::make_shared<const std::string>(bytes);
+            doc.edit_page(1).layers.push_back(layer);
+        }
+        const Document moved = bus().apply(doc, ops(R"([{"op": "set_page_spec", "preset": "b5"}])"), Actor("genko")).doc;
+        for (const auto& [id, bytes] : masks) {
+            const genko::core::Layer* found = nullptr;
+            for (const genko::core::Layer& layer : moved.page(1).layers) {
+                if (layer.id == id) found = &layer;
+            }
+            QVERIFY(found != nullptr && found->mask && found->mask->png && found->mask->enabled);
+            if (id == "read") {
+                QVERIFY(*found->mask->png != bytes);  // (moved onto the new paper)
+            } else {
+                QCOMPARE(*found->mask->png, bytes);
+            }
+        }
+    }
+
     // One registry for the whole build (render::ops_registry: core's ops and the ops that draw), each module's ops
     // registered by its own register_*_ops; core::OpRegistry::builtin() has core's alone.
     void registries() {
