@@ -1,6 +1,7 @@
 // `genko render` against `python -m genko render`: the same arguments give the same JSON and a PNG with the same
-// pixels, for pages of random books (tools/migration/render_harness.py make-books) in every mode; a page with
-// something not drawn yet says so ({"code": "not_yet_ported"}) and writes nothing; the usage and save errors match
+// pixels, for pages of random books (tools/migration/render_harness.py make-books) in every mode, a jacket's and a
+// band's folds too (drawn since M4②: nothing in these books is left undrawn now; a page with something not drawn yet
+// would say so, {"code": "not_yet_ported"}, and write nothing); the usage and save errors match
 // (a page that is not there: the same exit code, an error in JSON where Python stops with a traceback). Python's
 // command line runs with Pillow held to its BASIC text layout, as the reference was measured (render_harness.py does
 // the same): a reference Python whose Pillow has raqm would otherwise lay out the letters of the balloons by it.
@@ -11,6 +12,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <set>
 #include <string>
 
 #include "core/json.hpp"
@@ -50,7 +52,13 @@ private slots:
     void pages() {
         int compared = 0;
         int not_yet = 0;
+        int folded = 0;  // (a jacket or a band drawn in name or proof: its folds and their names)
         for (const auto& [book, pages] : manifest_.items()) {
+            std::set<std::string> covers;
+            const Json payload = genko::test::read_json(books_ + QLatin1Char('/') + QString::fromStdString(book) + "/project.json");
+            for (const Json& page : payload["pages"]) {
+                if (page.contains("cover")) covers.insert(genko::core::dump_python(page["index"]));
+            }
             for (const auto& [index, unported] : pages.items()) {
                 for (const char* mode : {"print", "proof", "name"}) {
                     const QString dir = books_ + QLatin1Char('/') + QString::fromStdString(book);
@@ -77,12 +85,14 @@ private slots:
                     QCOMPARE(std::string(image.mode()), std::string("RGB"));
                     QVERIFY2(image.tobytes() == want.tobytes(), (book + " p" + index + " " + mode).c_str());
                     ++compared;
+                    if (std::string(mode) != "print" && covers.contains(index)) ++folded;
                 }
             }
         }
-        qInfo("render: %d pages the same, %d not yet ported", compared, not_yet);
+        qInfo("render: %d pages the same (%d with folds), %d not yet ported", compared, folded, not_yet);
         QVERIFY(compared >= 20);
-        QVERIFY(not_yet >= 1);
+        QCOMPARE(not_yet, 0);
+        QVERIFY(folded >= 4);
     }
 
     void errors() {

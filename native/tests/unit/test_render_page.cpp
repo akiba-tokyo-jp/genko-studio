@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QTemporaryDir>
 #include "render/draw.hpp"
+#include "core/covers.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 
@@ -265,11 +266,9 @@ private slots:
         QTest::addColumn<QString>("what");
         QTest::addColumn<QString>("mode");
         // (tones, effect lines and screens are drawn since M3-B, the 3D guides since M3-C, a page's animation since
-        // M3-③: anim_is_drawn, lines and their balloons since M4: balloons_are_drawn)
-        for (const char* what : {"covers", "placed"}) {
-            const char* mode = std::string(what) == "covers" ? "proof" : "print";
-            QTest::newRow(what) << QString(what) << QString(mode);
-        }
+        // M3-③: anim_is_drawn, lines and their balloons since M4: balloons_are_drawn, a jacket's folds since M4②:
+        // folds_are_drawn)
+        for (const char* what : {"placed"}) QTest::newRow(what) << QString(what) << QString("print");
     }
 
     void not_yet_ported() {
@@ -279,7 +278,6 @@ private slots:
         genko::core::Page& page = doc.edit_page(0);
         const std::string w = what.toStdString();
         if (w == "nombre") page.numero = true;
-        if (w == "covers") page.extra["cover"] = Json::object({{"kind", "jacket"}, {"spine_mm", 5}, {"flap_mm", 10}});
         if (w == "anim") page.extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
         if (w == "placed") {
             Layer placed;
@@ -303,6 +301,42 @@ private slots:
         // the other page has none of it
         options.skip_unported = false;
         QVERIFY(unported_element(*doc.pages[1], doc, options).empty());
+    }
+
+    void folds_are_drawn() {
+        // a jacket's and a band's folds (dashed lines and the parts' names) in name and proof, never in print; nothing
+        // left out; parts of the page drawn alone the same as the whole page cut
+        for (const char* kind : {"jacket", "obi"}) {
+            Document doc = book();
+            Json cover = Json::object({{"kind", kind}, {"spine_mm", 5}, {"flap_mm", 10}});
+            if (std::string(kind) == "obi") cover["height_mm"] = 40;
+            genko::core::Page& page = doc.edit_page(0);
+            page.extra["cover"] = cover;
+            page.spec = genko::core::spec_for(doc.spec, cover);
+            for (const char* mode : {"print", "proof", "name"}) {
+                render::RenderOptions options;
+                options.mode = mode;
+                QVERIFY(unported_element(*doc.pages[0], doc, options).empty());
+                const render::RenderResult r = render::render_page(*doc.pages[0], 72, options, &doc);
+                QVERIFY(r.omitted.empty());
+                // (the folds' blue, (60, 140, 220), only where they are drawn)
+                const std::string bytes = r.image.tobytes();
+                bool blue = false;
+                for (std::size_t at = 0; at + 2 < bytes.size() && !blue; at += 3) {
+                    blue = static_cast<unsigned char>(bytes[at]) == 60 && static_cast<unsigned char>(bytes[at + 1]) == 140 &&
+                           static_cast<unsigned char>(bytes[at + 2]) == 220;
+                }
+                QCOMPARE(blue, std::string(mode) != "print");
+                if (std::string(mode) == "print") continue;
+                for (const render::RenderRegion region : {render::RenderRegion{3, 2, 40, 30}, render::RenderRegion{17, 0, 9, 50}}) {
+                    render::RenderOptions part = options;
+                    part.region = region;
+                    const render::Image got = render::render_page(*doc.pages[0], 72, part, &doc).image;
+                    const render::Image want = r.image.crop(render::Box{region.x, region.y, region.x + region.w, region.y + region.h});
+                    QVERIFY(got.tobytes() == want.tobytes());
+                }
+            }
+        }
     }
 
     void anim_is_drawn() {

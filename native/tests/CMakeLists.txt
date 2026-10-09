@@ -130,6 +130,11 @@ genko_test(test_contract_vector SOURCES contract/test_contract_vector.cpp contra
 # apply_ops (lines_cases.json).
 genko_test(test_contract_lines SOURCES contract/test_contract_lines.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# The book and page ops of M4: set_page_spec, set_spread, add_cover, for_pages, set_assignee and import_pages against
+# Python's apply_ops (book_cases.json), with what covers.py makes of the book; `genko apply` with import_pages copying
+# no asset file, as Python's.
+genko_test(test_contract_book SOURCES contract/test_contract_book.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).

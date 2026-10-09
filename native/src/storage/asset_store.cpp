@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <system_error>
+#include <vector>
 #include <utility>
 
 #include "core/error.hpp"
@@ -94,6 +95,39 @@ std::vector<fs::path> AssetStore::all_files() const {
     if (ec) throw core::Error("io", os_error_text(ec.value(), root()), path_to_utf8(root()));
     std::sort(out.begin(), out.end());
     return out;
+}
+
+std::size_t copy_assets(const fs::path& src, const fs::path& dest) {
+    const fs::path root = src / "assets";
+    std::error_code ec;
+    if (fs::symlink_status(root, ec).type() != fs::file_type::directory) return 0;  // (none, or a link: not followed)
+    std::vector<fs::path> files;
+    for (auto it = fs::recursive_directory_iterator(root, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        std::error_code type_ec;  // (the iterator does not go into a linked folder; a linked file is passed over here)
+        if (it->symlink_status(type_ec).type() == fs::file_type::regular && !type_ec) files.push_back(it->path());
+    }
+    if (ec) throw core::Error("io", os_error_text(ec.value(), root), path_to_utf8(root));
+    std::sort(files.begin(), files.end());
+    AssetStore target(dest);
+    std::size_t copied = 0;
+    for (const fs::path& file : files) {
+        // <ab>/<64 lowercase hex><suffix>, the folder the digest's first two digits
+        const fs::path rel = file.lexically_relative(root);
+        std::vector<std::string> parts;
+        for (const auto& part : rel) parts.push_back(path_to_utf8(part));
+        if (parts.size() != 2) continue;
+        const std::string& name = parts[1];
+        if (name.size() < 64 || (name.size() >= 4 && name.compare(name.size() - 4, 4, ".tmp") == 0)) continue;
+        const std::string ref = "sha256:" + name.substr(0, 64);
+        const std::string suffix = name.substr(64);
+        if (!AssetStore::is_ref(ref) || !AssetStore::is_suffix(suffix) || parts[0] != name.substr(0, 2)) continue;
+        if (target.has(ref, suffix)) continue;
+        const std::string bytes = read_file(file);
+        if (AssetStore::ref(bytes) != ref) continue;  // (it does not hold what its name says)
+        target.put_known(ref, bytes, suffix);
+        ++copied;
+    }
+    return copied;
 }
 
 }  // namespace genko::storage

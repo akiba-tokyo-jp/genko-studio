@@ -1,6 +1,7 @@
 #include "render/ops_registry.hpp"
 
 #include "core/ops_util.hpp"
+#include "render/bookpages.hpp"
 #include "render/color_edit.hpp"
 #include "render/ops_3d.hpp"
 #include "render/raster_ops.hpp"
@@ -15,6 +16,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_paint_ops(registry);
     // the line ops again, now able to look at a picture in a line's style (core's refuse it with not_yet_ported)
     core::register_line_ops(registry, verify_style_picture);
+    // set_page_spec and import_pages again, now able to move a paint layer's pixels and to read the other book
+    render::register_bookpage_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

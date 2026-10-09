@@ -14,9 +14,10 @@ Commands (JSON is UTF-8 without escapes):
                                        "out", "dest"?} (apply_ops on the book read; the reply, or {"ok": false,
                                        "error"}, to out; saved with save_episode into the new folder dest) |
                                        {"op": "steps", "book", "steps": [{"ops", "agent"?, "dry_run"?}], "ids",
-                                       "first_id"?, "store", "out", "digest"?, "reread"?, "dump"?} (batches one after
-                                       another on the book in memory, as a session: see steps_job; "dump", a folder:
-                                       the layers' PNGs after each step written there, see _png_pixels) |
+                                       "first_id"?, "store", "out", "digest"?, "reread"?, "dump"?, "covers"?} (batches
+                                       one after another on the book in memory, as a session: see steps_job;
+                                       "dump", a folder: the layers' PNGs after each step written there, see
+                                       _png_pixels) |
                                        {"op": "add_adjust_layers", "book", "dest", "layers"} (correction layers of
                                        any filter put on pages by hand: add_adjust_layers_job)
   restore BOOK --actor A [--redo] [--force]
@@ -30,6 +31,9 @@ Commands (JSON is UTF-8 without escapes):
   make-random OUT --seed N --count K   K random v3 books made with new_episode and direct field assignment
   make-opsbook DEST                    the v3 book of the op contract tests (native/tests/contract/ops_cases.json
                                        names its ids: they are counted, so it is the same book every time)
+  make-pagesbook DEST OTHER            the v3 books of the book and page op contract tests (native/tests/contract/
+                                       book_cases.json): the op book with what set_page_spec moves besides, and a
+                                       book to take pages from (see make_pagesbook)
   make-drawbook DEST                   the v3 book test_contract_drawn_by_ops draws lines on (nothing the C++ build
                                        does not draw yet; ids counted)
   make-sequences OUT --books DIR --seed N --count K
@@ -240,11 +244,24 @@ def _full_snapshot(episode) -> dict:
     return full
 
 
+def _covers_of(episode) -> dict:
+    """What genko/covers.py makes of the book (the "covers" of a steps record): the pages in order (pages_in_order) and
+    as a reader turns them (reading_order), by number; each page's file stem; each page's folds for either binding."""
+    from genko import covers
+
+    return {"order": [p.index for p in covers.pages_in_order(episode)],
+            "reading": [[p.index, part] for p, part in covers.reading_order(episode)],
+            "stems": [covers.file_stem(p) for p in episode.pages],
+            "folds": {binding: [[list(f) for f in covers.folds(p, binding)] for p in episode.pages]
+                      for binding in ("right", "left")}}
+
+
 def steps_job(job: dict) -> None:
     """Batches applied one after another to one book in memory, as a session does: after each, the reply (or the
     error), the full snapshot (see _full_snapshot) and the project.json payload (Python's v3 writer, without
-    "revision"; its PNGs as the pixels they hold: _png_pixels). With "digest", the snapshot and payload (and the
-    reply's snapshot) are replaced by the sha256 of their json.dumps. With "reread" (a new folder), the book is then
+    "revision"; its PNGs as the pixels they hold: _png_pixels), and with "covers" what covers.py makes of the book
+    (_covers_of). With "digest", the snapshot and payload (and the reply's snapshot) are replaced by the sha256 of their
+    json.dumps. With "reread" (a new folder), the book is then
     saved there with save_episode and read back as a new process would (ids counted from 1 again with "ids"): one
     more record, {"reread": true, "full", "payload"}."""
     import copy
@@ -281,7 +298,10 @@ def steps_job(job: dict) -> None:
             if "snapshot" in reply:
                 reply["snapshot"] = _digest(reply["snapshot"])
             full, payload = _digest(full), _digest(payload)
-        records.append({"reply": reply, "full": full, "payload": payload})
+        record = {"reply": reply, "full": full, "payload": payload}
+        if job.get("covers"):
+            record["covers"] = _covers_of(episode)
+        records.append(record)
     if job.get("reread"):
         save_episode(episode, Path(job["reread"]), actor="genko")
         fresh_process_state(bool(job.get("ids")))
@@ -823,6 +843,84 @@ def make_opsbook(dest: str) -> None:
                        {"id": "t2", "page_index": 5, "page_id": page(5).id, "role": "ink", "status": "open"}]
     episode.nombre = {"start": 1}
     save_episode(episode, root, actor="human:作者")
+
+
+def make_pagesbook(dest: str, other: str) -> None:
+    """The v3 books of the book and page op contract tests (native/tests/contract/book_cases.json):
+    DEST: the op contract book (make-opsbook) with what set_page_spec moves that its ops do not make: briefs with
+    regions (one without a box, one of numbers as text) on page 1, 3D guides (one without pos or size) on page 2, effect
+    lines (a centre and an inner ellipse, empty params, none) and an old tone's region on page 3, a mask on page 4's
+    paint layer, a hand-drawn balloon on page 6.
+    OTHER: a book to take pages from (import_pages): A5, bound on the left, three pages (split panels, lines in panels,
+    placed art of its own, a paint layer with a mask, a spread, an onion skin, an assignee, a page without nombre), a
+    back cover and a jacket at its end, and studio assets. Ids counted (DEST from 1 again for its additions after
+    0x900)."""
+    import base64
+
+    from genko import models
+    from genko.assets import AssetStore
+    from genko.headless import apply_ops
+    from genko.io import load_episode, save_episode
+    from genko.models import Binding, Layer, LayerKind, LayerRole, PageSpec, Rect
+
+    make_opsbook(dest)
+    fresh_process_state(True)
+    episode = load_episode(Path(dest))
+    counting_ids(0x900)
+
+    def page(book, n):
+        return next(p for p in book.pages if p.index == n)
+
+    def run(book, ops, name):
+        reply = apply_ops(book, ops, agent="human:作者")
+        if not reply.get("ok"):
+            raise SystemExit(f"make-pagesbook {name}: {ops}: {reply}")
+
+    leaf = page(episode, 1).leaf_frames()[0]
+    leaf.panel = {**(leaf.panel or {}), "regions": [{"kind": "face", "rect_mm": [130, 30, 20, 25]}, {"kind": "prop"},
+                                                    {"kind": "head", "rect_mm": ["110", 50, 8.5, 9]}]}
+    page(episode, 2).prims = [{"id": "prim-a", "kind": "box", "pos": [50, 60, 5], "size": [20, 10, 30], "rot": [0, 30, 0]},
+                              {"id": "prim-b", "kind": "box"}]
+    page(episode, 3).effects = [{"id": "fx-1", "kind": "focus", "frame_id": None,
+                                 "params": {"center": [100, 120], "inner": [30, 20], "count": 40}},
+                                {"id": "fx-2", "kind": "speed", "frame_id": None, "params": {}},
+                                {"id": "fx-3", "kind": "speed", "frame_id": None}]
+    tone = next(layer for layer in page(episode, 3).layers if layer.id == "tone-1")
+    tone.region = [(30, 40), (90.5, 40), (90, 90)]
+    paint = next(layer for layer in page(episode, 4).layers if layer.id == "paint-1")
+    paint.mask = {"png": _tiny_png((255, 255, 255, 255), (12, 16)), "enabled": True}
+    line6 = next(line for line in episode.story if line.page_index == 6)
+    run(episode, [{"op": "set_balloon_path", "id": line6.id, "path": [[40, 150], [80, 152], [78, 190], [42, 186]]}], "path")
+    save_episode(episode, Path(dest), actor="human:作者")
+
+    # the other book
+    fresh_process_state(True)
+    root = Path(other)
+    root.mkdir(parents=True, exist_ok=True)
+    store = AssetStore(root)
+    book = models.new_episode("取り込む原稿", 2, 3, PageSpec.a5_doujin(), Binding.LEFT)
+    run(book, [{"op": "split_frame", "page": 1, "axis": "vertical", "ratio": 0.5, "gutter_mm": 4}], "other split")
+    leaves = page(book, 1).leaf_frames()
+    run(book, [{"op": "add_line", "page": 1, "text": "向こうの台詞", "frame_id": leaves[0].id, "x_mm": 30, "y_mm": 40,
+                "tails": [{"to": [40, 80], "via": [35, 70]}]},
+               {"op": "add_line", "page": 1, "text": "外", "x_mm": 90, "y_mm": 150},
+               {"op": "add_line", "page": 3, "text": "三頁", "x_mm": 50, "y_mm": 60, "w_mm": 25, "h_mm": 30},
+               {"op": "add_stroke", "page": 2, "layer": "ink", "points": [[20, 30, 0.5], [60, 80, 0.8], [90, 40, 0.4]]},
+               {"op": "add_layer", "page": 2, "kind": "paint", "id": "o-paint"},
+               {"op": "put_raster", "page": 2, "id": "o-paint",
+                "png_base64": base64.b64encode(_tiny_png((10, 120, 200, 180), (7, 5))).decode()},
+               {"op": "set_spread", "page": 2, "with": 3}, {"op": "set_onion", "page": 3, "from": 2},
+               {"op": "set_assignee", "pages": [2], "who": "向こうの人"}, {"op": "set_note", "page": 1, "note": "取り込む"},
+               {"op": "add_cover", "kind": "back"}, {"op": "add_cover", "kind": "jacket", "spine_mm": 12, "flap_mm": 60}],
+        "other")
+    art = store.put_bytes(_tiny_png((40, 200, 90, 255), (5, 4)), ".png")
+    page(book, 1).layers.append(Layer(id=models.new_id(), role=LayerRole.USER, kind=LayerKind.PLACED, title="向こうの絵",
+                                      asset=art, frame_id=leaves[1].id, placement_mm=Rect(80, 40, 30, 20), fit="cover"))
+    o_paint = next(layer for layer in page(book, 2).layers if layer.id == "o-paint")
+    o_paint.mask = {"png": _tiny_png((128, 128, 128, 255), (6, 6)), "enabled": False}
+    page(book, 3).numero = False
+    book.studio = {"assets": {art: {"kind": "art", "candidate": "c9"}, "sha256:" + "ab" * 32: {"kind": "ref"}}}
+    save_episode(book, root, actor="human:作者")
 
 
 def make_drawbook(dest: str) -> None:
@@ -2449,6 +2547,9 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("make-opsbook", "make-drawbook", "make-rasterbook"):
         p = sub.add_parser(name)
         p.add_argument("out")
+    p = sub.add_parser("make-pagesbook")
+    p.add_argument("out")
+    p.add_argument("other")
     p = sub.add_parser("make-sequences")
     p.add_argument("out")
     p.add_argument("--books", required=True)
@@ -2511,6 +2612,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "make-opsbook":
         make_opsbook(args.out)
+        return 0
+    if args.cmd == "make-pagesbook":
+        make_pagesbook(args.out, args.other)
         return 0
     if args.cmd == "make-drawbook":
         make_drawbook(args.out)

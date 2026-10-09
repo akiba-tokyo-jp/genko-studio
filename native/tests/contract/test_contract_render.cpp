@@ -3,13 +3,15 @@
 //    brush and custom brushes, rasters of every PNG mode and size, patches, masks, every blend mode, opacity, clipping,
 //    lock_alpha, fills and gradients, corrections, layer effects, panels cut, slanted, bowed, rounded, bleeding, with
 //    every border style, paper colours, rulers and onion skins, lines of dialogue in balloons of every shape with
-//    tails of every kind (joined, turned, cut, drawn by hand, set under a layer) and lines not placed (labels); in
-//    print, proof and name at 72, 150 and 350 dpi;
+//    tails of every kind (joined, turned, cut, drawn by hand, set under a layer) and lines not placed (labels), jackets
+//    and bands (帯) with their folds; in print, proof and name at 72, 150 and 350 dpi, and the front and back covers cut
+//    out of each jacket and band (covers.front_of);
 //  - the three legacy books (data/legacy);
 //  - a line added to a page drawn before (the remembered layer picture is drawn on, as in Python).
-// Tone layers, effect lines and layer screens (M3-B), the 3D guides (M3-C) and lines with their balloons (M4) are drawn
-// on both sides. Pages with what this step does not draw yet (placed pictures and their finish, cover folds) must say
-// so (NotYetPorted) and are then drawn with skip_unported, against Python with the same things left out.
+// Tone layers, effect lines and layer screens (M3-B), the 3D guides (M3-C), lines with their balloons (M4①) and a
+// jacket's folds (M4②) are drawn on both sides. Pages with what this step does not draw yet (placed pictures and their
+// finish) must say so (NotYetPorted) and are then drawn with skip_unported, against Python with the same things left
+// out.
 // Regions: parts of a page drawn alone are the same as the whole page cut (with and without remembered lines).
 // Skipped without the Python reference.
 
@@ -23,8 +25,10 @@
 #include <string>
 #include <vector>
 
+#include "core/covers.hpp"
 #include "core/error.hpp"
 #include "render/brushes.hpp"
+#include "render/covers.hpp"
 #include "render/page.hpp"
 #include "rendertest.hpp"
 #include "storage/fsutil.hpp"
@@ -85,7 +89,7 @@ class TestContractRender : public QObject {
             add(page.index);
             if (page.onion_from) add(*page.onion_from);
         } else {
-            out = {"nombre", "placed", "covers", "anim", "finish"};  // (lines and balloons are drawn since M4)
+            out = {"placed", "finish"};  // (lines and balloons are drawn since M4①, a jacket's folds since M4②)
         }
         out.erase("onion");
         return out;
@@ -194,6 +198,19 @@ private slots:
                 job["mode"] = "print";
                 add(job);
             }
+            // the front and back covers cut out of a jacket or a band (covers.front_of)
+            for (const auto& page : b.doc.pages) {
+                if (genko::core::folds(*page).empty()) continue;
+                for (const char* which : {"表紙", "裏表紙"}) {
+                    Json job = Json::object({{"book", b.path}, {"page", page->index.json()}, {"kind", "front_of"}, {"which", which}});
+                    job["dpi"] = 100;
+                    job["mode"] = "proof";
+                    add(job);
+                    job["dpi"] = 72;
+                    job["mode"] = "print";
+                    add(job);
+                }
+            }
         }
         // a line added to a page drawn just before: page 1 of a few books, the first strokes layer
         for (int i : {0, 3, 7, 12}) {
@@ -235,6 +252,7 @@ private slots:
         int failures = 0;
         int strict = 0;
         int skipped = 0;
+        int folded = 0;  // (pages with a jacket's or a band's folds, drawn in name or proof)
         for (std::size_t i = 0; i < jobs_.size(); ++i) {
             const Json& job = jobs_[i];
             if (job.contains("then") || job.contains("kind") || job.contains("rough") || job.contains("crop_marks")) continue;
@@ -253,6 +271,7 @@ private slots:
             try {
                 got = render::render_page(*page, dpi, options, &b.doc);
                 ++strict;
+                if (options.mode != "print" && !genko::core::folds(*page).empty()) ++folded;
             } catch (const render::NotYetPorted& e) {
                 const std::set<std::string> ok = allowed(name, b.doc, *page);
                 if (!ok.contains(e.element())) {
@@ -278,8 +297,9 @@ private slots:
                 ++failures;
             }
         }
-        qInfo("pages: %d drawn strictly, %d with skip_unported", strict, skipped);
+        qInfo("pages: %d drawn strictly (%d with a jacket's or a band's folds), %d with skip_unported", strict, folded, skipped);
         QVERIFY(strict > 400);  // (most pages carry nothing this step leaves out)
+        QVERIFY(folded >= 48);
         QCOMPARE(failures, 0);
     }
 
@@ -316,6 +336,9 @@ private slots:
                 got = render::layer_image(*page, *layer, dpi, &b.doc, true);
             } else {
                 got = render::render_page(*page, dpi, options, &b.doc).image;
+                if (kind == "front_of") {
+                    got = render::front_of(*page, got, dpi, genko::core::to_string(b.doc.binding), job["which"].get<std::string>());
+                }
                 if (kind == "bitonal") {
                     const Json* screen = job.contains("screen") ? &job["screen"] : nullptr;
                     got = render::to_bitonal(got, job["threshold"].get<int>(), screen);
@@ -333,7 +356,8 @@ private slots:
             }
         }
         for (const auto& [label, count] : counts) qInfo("%s: %d", label.c_str(), count);
-        QVERIFY(counts.size() >= 7);
+        QVERIFY(counts.size() >= 8);
+        QVERIFY(counts["front_of"] >= 20);
         QCOMPARE(failures, 0);
     }
 

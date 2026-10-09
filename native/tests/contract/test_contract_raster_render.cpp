@@ -1,9 +1,12 @@
 // Pages carrying what the ops of M3-A1 make — pixels put, filtered, filled and erased; patches filled, transformed and
 // pasted; masks set and painted; layers merged and converted; correction layers with each filter of filters.py; paper
-// colours — drawn by render::render_page against Python's genko.render.render_page, every pixel (RGB):
+// colours — and the covers add_cover makes (a jacket, a band, a back cover), the whole book then put on other paper
+// (set_page_spec: the pixels moved onto the new basic frame), drawn by render::render_page against Python's
+// genko.render.render_page, every pixel (RGB):
 //   1. the book `pyref_harness.py make-rasterbook` makes, after the ops below (kDressing) applied by Python's apply_ops
-//      and saved by save_episode: its pages 1 to 4 drawn on both sides in print, proof and name at 72, 150 and 350
-//      dpi (page 3 with a nombre, a tone and a line of dialogue in its balloon);
+//      and saved by save_episode: its pages 1 to 4 and its covers (5 to 7) drawn on both sides in print, proof and name
+//      at 72, 150 and 350 dpi (page 3 with a nombre, a tone and a line of dialogue in its balloon; the jacket and the
+//      band with their folds);
 //   2. the same ops applied by this build (render::ops_registry) to the same book, drawn by this build: the same pixels
 //      as Python's drawing of its own book;
 //   3. five random parts of each page (proof at 150 dpi, print at 350), drawn alone: the same pixels as Python's whole
@@ -35,7 +38,7 @@ namespace {
 
 const std::vector<std::string> kModes{"print", "proof", "name"};
 const std::vector<int> kDpis{72, 150, 350};
-const std::vector<int> kPages{1, 2, 3, 4};
+const std::vector<int> kPages{1, 2, 3, 4, 5, 6, 7};
 
 // A small RGBA picture (Pillow: rectangles and an ellipse on 24 × 18) and a grey one (30 × 20).
 constexpr const char* kPicture =
@@ -88,6 +91,15 @@ Json dressing() {
     add(R"({"op": "delete_area", "page": 4, "layer_id": "multi-4", "area": {"rect": [30, 40, 10, 10]}})");
     ops.push_back(Json::object({{"op", "put_raster"}, {"page", 4}, {"id", "blank-4"}, {"png_base64", kColours}}));
     add(R"({"op": "set_paper", "page": 4, "rgb": [235, 235, 235]})");
+    // covers (pages 5 to 7), then the book on a larger paper: everything moved onto the new basic frame. (76 × 100 mm:
+    // on some sizes, 78 × 104 mm among them, page 2's twirl correction differs from Python's at a pixel or two by 1, a
+    // mismatch that was there before and is tracked separately: render/filters.cpp follows numpy's float32 sin/cos on
+    // its FMA path, while the tests run the reference with NPY_DISABLE_CPU_FEATURES, which takes numpy's path without
+    // FMA. Python's own picture differs between the two settings at the same pixel.)
+    add(R"({"op": "add_cover", "kind": "jacket", "spine_mm": 6, "flap_mm": 15})");
+    add(R"({"op": "add_cover", "kind": "obi", "spine_mm": 6, "flap_mm": 9, "height_mm": 22, "bleed": false})");
+    add(R"({"op": "add_cover", "kind": "back"})");
+    add(R"({"op": "set_page_spec", "paper": [76, 100], "trim": [66, 90], "bleed_mm": 3, "margins": [9, 10, 7, 6]})");
     return ops;
 }
 
@@ -273,7 +285,7 @@ private slots:
             }
         }
         qInfo("%d drawings the same as Python's, every pixel", compared - failures);
-        QCOMPARE(compared, 72);
+        QCOMPARE(compared, 126);
         QCOMPARE(failures, 0);
     }
 
@@ -309,7 +321,7 @@ private slots:
             }
         }
         qInfo("regions: %d the same as Python's pages cut", checked - failures);
-        QCOMPARE(checked, 80);
+        QCOMPARE(checked, 140);
         QCOMPARE(failures, 0);
     }
 

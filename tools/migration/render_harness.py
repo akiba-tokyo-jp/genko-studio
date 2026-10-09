@@ -31,7 +31,8 @@ Commands:
                                 K random books for drawing (layers, brushes, rasters, patches, masks, blend modes,
                                 fills and gradients, corrections, panels): OUT/book-NN.genko
   render JOBS                   render_page for each job of a JSON list: {"book", "page", "dpi", "mode", "out",
-                                "skip_unported": bool} → a PNG of the page
+                                "skip_unported": bool} → a PNG of the page; "kind": "front_of" with "which" (表紙 or
+                                裏表紙): the page drawn, then covers.front_of cuts that cover out of it
   layer-image JOBS              layer_image for each job: {"book", "page", "layer", "dpi", "out"}
   text-cases OUT --seed N --count K
                                 the letters of chosen lines and K random ones (every style key that changes them,
@@ -45,10 +46,10 @@ Commands:
                                 at a few dpi; and the shapes' geometry (_edge_point, _tail_polygon, _polyline_tail,
                                 _uneven, _electric, _outline, _wobbly, _smooth_closed, _turned, _thought_trail): OUT
 
-With skip_unported the elements this C++ step does not draw yet (placed pictures, cover folds, animation) are left
-out the way the C++ RenderOptions::skip_unported leaves them out (tones, effect lines and layer screens are drawn on
-both sides since M3-B, the 3D guides since M3-C, nombres since the M2 material work, lines and their balloons since
-M4).
+With skip_unported the elements this C++ step does not draw yet (placed pictures and their finish) are left out the
+way the C++ RenderOptions::skip_unported leaves them out (tones, effect lines and layer screens are drawn on both sides
+since M3-B, the 3D guides since M3-C, nombres since the M2 material work, an animation page as its first frame since
+M3③, lines and their balloons since M4①, a jacket's and a band's folds since M4②).
 
 The reference lays text out as the measured one did: Pillow without raqm (BASIC layout, FreeType 2.14.3). A Pillow that
 has raqm (and finds fribidi) is held to BASIC here, so the nombres compare with the C++ drawing of them.
@@ -849,8 +850,9 @@ def rand_frames(rng, page, models):
 
 
 def make_render_book(rng, dest: Path, index: int, story: bool = False) -> None:
-    """A random book for drawing. `story`: with lines of dialogue in balloons, and a jacket in every fourth book (whose
-    folds this build does not draw yet), drawn from numbers of their own (the pages are the same either way)."""
+    """A random book for drawing. `story`: with lines of dialogue in balloons, and a jacket in every eighth book from the
+    fourth and a band (帯) in every eighth from the eighth (the last page made one: its paper is the cover's, its folds
+    drawn in name and proof), drawn from numbers of their own (the pages are the same either way)."""
     from genko import brushes, models
     from genko.io import save_episode
     from genko.models import Binding, Layer, LayerKind, LayerRole, PageSpec
@@ -967,9 +969,11 @@ def make_render_book(rng, dest: Path, index: int, story: bool = False) -> None:
         for page in episode.pages:
             if srng.random() < 0.55:
                 rand_story(srng, episode, page)
-        if index % 4 == 3:  # (what is still not drawn: a jacket's folds, in name and proof)
+        if index % 4 == 3:  # (a jacket's or a band's folds, in name and proof)
             jacket = episode.pages[-1]
             jacket.extra["cover"] = {"kind": "jacket", "spine_mm": srng.choice([0, 8, 15]), "flap_mm": srng.choice([0, 20])}
+            if index % 8 == 7:
+                jacket.extra["cover"].update(kind="obi", height_mm=srng.choice([30, 45]))
             for page in episode.pages:  # (a jacket is wider than the pages: no onion skin between them)
                 if page is jacket or page.onion_from == jacket.index:
                     page.onion_from = None
@@ -1006,14 +1010,12 @@ def rand_story(rng, episode, page) -> None:
 
 
 def unported_of(episode) -> dict:
-    """What each page carries that M2-R1 does not draw (page index → names, as render::NotYetPorted names them)."""
-    from genko import covers
-
+    """What each page carries that this build does not draw (page index → names, as render::NotYetPorted names them):
+    nothing of what make_render_book makes since M4② (a jacket's folds were the last), but for an onion skin, whose page
+    is drawn too ("onion")."""
     out = {}
     for page in episode.pages:
         names = set()
-        if covers.folds(page):  # (drawn in name and proof)
-            names.add("covers")
         if page.onion_from:  # (the page underneath is drawn too)
             prev = next((p for p in episode.pages if p.index == page.onion_from), None)
             if prev is not None and prev is not page:
@@ -1040,11 +1042,10 @@ def make_books(out: str, seed: int, count: int) -> None:
 
 def leave_out_unported() -> None:
     """What RenderOptions::skip_unported leaves out, left out here too (each drawing function does nothing)."""
-    from genko import anim, covers, render
+    from genko import anim, render
 
     render._placed_raster = lambda *args, **kwargs: None
     render._finish_placed = lambda fitted, *args, **kwargs: fitted
-    covers.draw_folds = lambda *args, **kwargs: None
     anim.at_frame = lambda page, frame: page
 
 
@@ -1054,10 +1055,10 @@ def _unported_scope(enabled: bool):
     if not enabled:
         yield
         return
-    from genko import anim, balloons, covers, render, tones
+    from genko import anim, balloons, render, tones
     names = [(tones, 'draw_layer'), (tones, 'screened'), (render, '_draw_effects'),
              (render, '_draw_prims'), (render, '_placed_raster'), (render, '_finish_placed'),
-             (covers, 'draw_folds'), (anim, 'at_frame'), (balloons, 'draw_lines')]  # (balloons: drawn, kept as it is)
+             (anim, 'at_frame'), (balloons, 'draw_lines')]  # (balloons: drawn, kept as it is)
     originals = [(module, name, getattr(module, name)) for module, name in names]
     try:
         leave_out_unported()
@@ -1112,6 +1113,11 @@ def _render_jobs(jobs: list) -> None:
             continue
         image = render.render_page(page, job["dpi"], mode=job["mode"], episode=episode,
                                    crop_marks=bool(job.get("crop_marks")), rough=bool(job.get("rough")))
+        if kind == "front_of":
+            from genko import covers
+
+            covers.front_of(page, image, job["dpi"], episode.binding.value, job["which"]).save(job["out"])
+            continue
         if kind == "bitonal":
             render.to_bitonal(image, job["threshold"], job.get("screen")).save(job["out"])
             continue

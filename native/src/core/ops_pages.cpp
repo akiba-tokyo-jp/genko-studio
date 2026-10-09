@@ -14,34 +14,6 @@ namespace genko::core {
 
 namespace {
 
-// A dict of old panel id → new id (a repeated id keeps its first place and its last value).
-using IdMap = std::vector<std::pair<std::string, std::string>>;
-
-void map_set(IdMap& map, const std::string& from, const std::string& to) {
-    for (auto& [k, v] : map) {
-        if (k == from) {
-            v = to;
-            return;
-        }
-    }
-    map.emplace_back(from, to);
-}
-
-const std::string* map_get(const IdMap& map, const std::string& from) {
-    for (const auto& [k, v] : map) {
-        if (k == from) return &v;
-    }
-    return nullptr;
-}
-
-// ops._refresh_frame_ids: new ids for the panel and every panel under it (the panel first).
-void refresh_frame_ids(Frame& frame, IdMap& map) {
-    const std::string old = frame.id;
-    frame.id = new_id();
-    map_set(map, old, frame.id);
-    for (Frame& child : frame.children) refresh_frame_ids(child, map);
-}
-
 // Python's list.insert(i, x)
 void list_insert(std::vector<Num>& list, std::int64_t at, const Num& value) {
     const auto size = static_cast<std::int64_t>(list.size());
@@ -58,18 +30,18 @@ void duplicate_page(OpContext& c) {
     clone.index = Num(static_cast<std::int64_t>(doc.pages.size()) + 1);
     clone.id = "pg_" + new_id();
     clone.spread_with.reset();
-    IdMap frame_map;
+    FrameIdMap frame_map;
     for (Frame& frame : clone.frames) refresh_frame_ids(frame, frame_map);
     if (py_truthy(clone.selected_frame_id)) {
         require_hashable(clone.selected_frame_id);
         const std::string* mapped =
-            clone.selected_frame_id.is_string() ? map_get(frame_map, clone.selected_frame_id.get<std::string>()) : nullptr;
+            clone.selected_frame_id.is_string() ? frame_map.get(clone.selected_frame_id.get<std::string>()) : nullptr;
         clone.selected_frame_id = mapped != nullptr ? Json(*mapped) : Json(nullptr);
     }
     for (Layer& layer : clone.layers) {
         layer.id = new_id();
         if (layer.frame_id && !layer.frame_id->empty()) {
-            if (const std::string* mapped = map_get(frame_map, *layer.frame_id)) layer.frame_id = *mapped;
+            if (const std::string* mapped = frame_map.get(*layer.frame_id)) layer.frame_id = *mapped;
         }
     }
     std::vector<StoryLine> new_lines;
@@ -79,7 +51,7 @@ void duplicate_page(OpContext& c) {
         copied.id = new_id();
         copied.page_index = clone.index;
         if (copied.frame_id && !copied.frame_id->empty()) {
-            if (const std::string* mapped = map_get(frame_map, *copied.frame_id)) copied.frame_id = *mapped;
+            if (const std::string* mapped = frame_map.get(*copied.frame_id)) copied.frame_id = *mapped;
         }
         new_lines.push_back(std::move(copied));
     }

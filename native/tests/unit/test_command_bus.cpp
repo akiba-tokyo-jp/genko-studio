@@ -12,10 +12,13 @@
 #include <set>
 #include <string>
 
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/model.hpp"
+#include "render/image.hpp"
 #include "render/ops_registry.hpp"
+#include "render/png.hpp"
 #include "testsupport.hpp"
 
 using genko::core::ApplyError;
@@ -299,6 +302,54 @@ private slots:
         }
         const auto normal = apply(doc, R"([{"op":"set_lt","page":2,"threshold":"0.25"}])");
         QVERIFY(normal.doc.page(1).lt_threshold->same(Num(0.25)));
+    }
+
+    // The book and page ops of M4 that need more than core: core's own bus refuses a paint layer's pixels moved by
+    // set_page_spec and the other book import_pages reads (not_yet_ported), and does the rest; this build's precise
+    // colour pixels, which Python does not have, are not moved yet (not_yet_ported): the paper alone changes with
+    // move false.
+    void bookPageOpsNeedTheDrawingBuild() {
+        const Json move = ops(R"([{"op": "set_page_spec", "preset": "b5"}])");
+        const Json paper = ops(R"([{"op": "set_page_spec", "preset": "b5", "move": false}])");
+        const auto code_of = [](const CommandBus& on, const Document& doc, const Json& batch) {
+            try {
+                on.apply(doc, batch, Actor("genko"));
+            } catch (const ApplyError& error) {
+                return error.code() + ": " + error.what();
+            }
+            return std::string("(applied)");
+        };
+        Document doc = book();
+        QCOMPARE(code_of(CommandBus(), doc, move), std::string("(applied)"));  // (nothing on the pages that needs drawing)
+        genko::core::Layer paint;
+        paint.id = "paint";
+        paint.kind = genko::core::LayerKind::Raster;
+        paint.raster_png = std::make_shared<const std::string>(
+            genko::render::write_png(genko::render::Image::create("RGBA", {8, 6}, genko::render::Ink{200, 20, 20, 255})));
+        doc.edit_page(1).layers.push_back(paint);
+        const std::string refused = code_of(CommandBus(), doc, move);
+        QVERIFY2(refused.starts_with("not_yet_ported: ops[0] set_page_spec: set_page_spec moving a paint layer's pixels"), refused.c_str());
+        QCOMPARE(code_of(CommandBus(), doc, paper), std::string("(applied)"));
+        const Document moved = bus().apply(doc, move, Actor("genko")).doc;
+        const genko::render::Image picture = genko::render::read_png(*moved.page(1).layers.back().raster_png);
+        QCOMPARE(picture.width(), 1638);  // (the new paper, 208 × 283 mm, at raster.WORKING_DPI)
+        QCOMPARE(picture.height(), 2228);
+        const std::string imported = code_of(CommandBus(), book(), ops(R"([{"op": "import_pages", "from": "nowhere.genko"}])"));
+        QVERIFY2(imported.starts_with("not_yet_ported: ops[0] import_pages: import_pages reads the other book"), imported.c_str());
+        // precise colour pixels
+        Document precise = book();
+        genko::core::Layer colour;
+        colour.id = "precise";
+        colour.kind = genko::core::LayerKind::Raster;
+        colour.panel_clip = false;
+        colour.color_raster = std::make_shared<const std::string>(genko::core::encode_color_raster(
+            Json{{"width", 1}, {"height", 1}, {"precision", "u16"}, {"pixels", Json::array({65535, 0, 0, 65535})}}));
+        precise.edit_page(0).layers.push_back(colour);
+        const std::string kept = code_of(bus(), precise, move);
+        QVERIFY2(kept.starts_with("not_yet_ported: ops[0] set_page_spec: set_page_spec moving high-precision colour pixels"), kept.c_str());
+        const Document repapered = bus().apply(precise, paper, Actor("genko")).doc;
+        QVERIFY(repapered.page(0).layers.back().color_raster == colour.color_raster);
+        QCOMPARE(repapered.spec.preset.value(), std::string("doujin-b5"));
     }
 
     // One registry for the whole build (render::ops_registry: core's ops and the ops that draw), each module's ops

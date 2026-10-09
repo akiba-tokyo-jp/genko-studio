@@ -44,4 +44,13 @@ private:
     std::filesystem::path project_;
 };
 
+// merge.copy_assets(src, dest) (作品の結合: the other book's pictures before its pages are taken in by import_pages): every
+// asset file of the book at `src` copied into the book at `dest`, those it already has left; how many were copied. Only
+// what is laid out as an asset is (assets/<ab>/<64 hex><suffix>, a regular file, not a temporary one) and holds the bytes
+// its name says (Python copies any file there, as it is): a link is not followed (neither to a file nor to a folder, nor
+// assets/ itself), so nothing outside the other book is read, and nothing that would stand in for an asset's bytes
+// comes in. Each is written as AssetStore writes (atomically). Throws core::Error("io") when a file cannot be read or
+// written.
+std::size_t copy_assets(const std::filesystem::path& src, const std::filesystem::path& dest);
+
 }  // namespace genko::storage

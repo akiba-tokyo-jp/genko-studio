@@ -157,6 +157,54 @@ private slots:
         QCOMPARE(store.all_files().size(), std::size_t{2});
     }
 
+    // merge.copy_assets (作品の結合): the other book's assets, those this book has left as they are; only files laid out
+    // as assets whose bytes hash to their names; links neither to files nor to folders followed, assets/ itself a link
+    // not read; temporary files left behind
+    void copyAssetsOfAnotherBook() {
+        QTemporaryDir tmp;
+        const fs::path src = to_path(tmp.path()) / "src.genko";
+        const fs::path dest = to_path(tmp.path()) / "dest.genko";
+        AssetStore from(src);
+        AssetStore to(dest);
+        const std::string a = from.put_bytes("picture a", ".png");
+        const std::string b = from.put_bytes("lines b", ".strokes.json");
+        const std::string kept = from.put_bytes("both have it", ".png");
+        to.put_known(kept, "both have it", ".png");
+        const std::string wrong = AssetStore::ref("what the name says");
+        write_file(from.path(wrong, ".png"), "something else");                       // (does not hold what its name says)
+        write_file(from.root() / "ab" / "leftover.png.123.tmp", "x");                 // (an unfinished write)
+        write_file(from.root() / "notes.txt", "not an asset");                         // (not laid out as one)
+        const std::string misplaced = AssetStore::ref("misplaced");
+        write_file(from.root() / "00" / (misplaced.substr(7) + ".png"), "misplaced");  // (in another asset's folder)
+        const fs::path outside = to_path(tmp.path()) / "outside";
+        write_file(outside / "secret.png", "outside the book");
+        const std::string secret = AssetStore::ref("outside the book");
+        std::error_code ec;
+        fs::create_directories(from.path(secret, ".png").parent_path());
+        fs::create_symlink(outside / "secret.png", from.path(secret, ".png"), ec);
+        const bool links = !ec;  // (a file system without links: the rest still holds)
+        const std::string far = AssetStore::ref("far away");
+        write_file(outside / far.substr(7, 2) / (far.substr(7) + ".png"), "far away");
+        fs::create_symlink(outside / far.substr(7, 2), from.root() / "zz", ec);
+        QCOMPARE(genko::storage::copy_assets(src, dest), std::size_t{2});
+        QCOMPARE(to.get_bytes(a, ".png").value(), std::string("picture a"));
+        QCOMPARE(to.get_bytes(b, ".strokes.json").value(), std::string("lines b"));
+        QCOMPARE(to.get_bytes(kept, ".png").value(), std::string("both have it"));
+        QVERIFY(!to.has(wrong, ".png"));
+        QVERIFY(!to.has(misplaced, ".png"));
+        QVERIFY(!to.has(secret, ".png"));
+        QVERIFY(!to.has(far, ".png"));
+        QVERIFY(!fs::exists(to.root() / "notes.txt"));
+        QCOMPARE(to.all_files().size(), std::size_t{3});
+        QCOMPARE(genko::storage::copy_assets(src, dest), std::size_t{0});  // (all there now)
+        // assets/ a link to another book's assets: not read; no assets/ at all: nothing
+        const fs::path linked = to_path(tmp.path()) / "linked.genko";
+        fs::create_directories(linked);
+        fs::create_directory_symlink(src / "assets", linked / "assets", ec);
+        if (links && !ec) QCOMPARE(genko::storage::copy_assets(linked, to_path(tmp.path()) / "third.genko"), std::size_t{0});
+        QCOMPARE(genko::storage::copy_assets(to_path(tmp.path()) / "none.genko", dest), std::size_t{0});
+    }
+
     void writeAtomic() {
         QTemporaryDir tmp;
         const fs::path target = to_path(tmp.path()) / "a" / "b" / "file.json";

@@ -305,6 +305,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("shape must be linear, radial or ellipse", "グラデーションの形は、直線・円・楕円から選びます"));
         r.push_back(rule(R"(stops are \[\[position.*)", "グラデーションの色は 2〜16 色で、それぞれ位置（0〜100 %）・色・濃さ（0〜100 %）を指定します"));
         r.push_back(rule("repeat is none, repeat or mirror", "繰り返しは、なし・繰り返す・折り返すから選びます"));
+        r.push_back(rule(R"(the other book cannot be read \(this book (?:needs repairs|uses features).*\))",
+                         "取り込む原稿に、見つからない絵や読めないデータがあるため取り込めません（その原稿を開いて確かめてください）"));
         r.push_back(rule("the other book cannot be read.*", "取り込む原稿を開けませんでした（原稿のフォルダーを選んでください）"));
         r.push_back(rule(R"(the other book has no page (\d+))", "取り込む原稿に \\1 ページはありません"));
         r.push_back(rule("the adjustment cannot be used: .*", "その補正の数値は使えません"));
@@ -445,6 +447,17 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the paper must hold the finished size and its bleed", "用紙が、仕上がりと裁ち落としより小さくなっています"));
         r.push_back(rule("the basic frame must fit inside the finished size", "基本枠が仕上がりに収まりません"));
         r.push_back(rule("sizes must be positive", "寸法は 0 より大きくします"));
+        r.push_back(rule("(paper|trim|bleed_mm|margins) must be a finite number", [](const QRegularExpressionMatch& m) {
+            static const QHash<QString, QString> names = {{"paper", "用紙の大きさ"}, {"trim", "仕上がりの大きさ"},
+                                                          {"bleed_mm", "裁ち落とし"}, {"margins", "基本枠の余白"}};
+            return QStringLiteral("%1は、ふつうの数で指定します（無限大や NaN は使えません）").arg(names.value(m.captured(1)));
+        }));
+        r.push_back(rule("paper is too large: .*", "用紙が大きすぎて、ページの中身を新しい基本枠へ動かせません"));
+        r.push_back(rule(R"(the paint layer on the new paper is too large \(.*\))",
+                         "用紙が大きすぎて、ペイントレイヤーの絵を新しい用紙に移せません"));
+        r.push_back(rule("the basic frame must be a finite size", "基本枠の大きさは、ふつうの数で指定します（無限大や NaN は使えません）"));
+        r.push_back(rule("set_page_spec moving high-precision colour pixels is not in the C\\+\\+ build yet",
+                         "この版の Genko では、高精度の色のレイヤーがある原稿の用紙を、中身ごと変えることはまだできません（中身を動かさない変更はできます）"));
         r.push_back(rule(R"(a (\w+) ruler needs (\d+) point\(s\))", "この定規には点が \\2 つ要ります"));
         r.push_back(rule("a perspective ruler has 1 to 3 vanishing points", "パース定規の消失点は 1〜3 つです"));
         r.push_back(rule("ratio must be above 0", "縦横の比は 0 より大きくします"));

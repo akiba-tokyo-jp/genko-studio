@@ -27,6 +27,7 @@
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
 #include "render/color_canvas.hpp"
+#include "render/covers.hpp"
 #include "render/effects.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
@@ -781,23 +782,6 @@ void draw_nombre(Image& image, const Box& area, const Ctx& ctx) {
     }
 }
 
-// covers.folds(page) is not empty
-bool folds_draw(const Page& page) {
-    const Json* cover = core::cover_of(page);
-    if (cover == nullptr) return false;
-    const std::string k = (*cover)["kind"].get<std::string>();
-    if (k != "jacket" && k != "obi") return false;  // (covers.WRAPS)
-    const core::Rect t = page.trim_rect_mm();
-    const auto mm = [&](std::string_view key) {
-        const Json* v = get(*cover, key);
-        return (v != nullptr && core::py_truthy(*v)) ? core::py_float(*v) : 0.0;
-    };
-    const double spine = mm("spine_mm");
-    const double flap = mm("flap_mm");
-    const double face = (t.width.value() - spine - 2 * flap) / 2;
-    return flap > 0 || face > 0 || spine > 0;
-}
-
 // The story lines of this page (Episode.story_for_page; a page alone has none here: C++ keeps lines in the book).
 std::vector<const core::StoryLine*> lines_of(const Page& page, const core::Document* episode) {
     if (episode == nullptr) return {};
@@ -1122,8 +1106,10 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     if (!print && core::py_truthy(page.prims)) draw_prims(image, area, ctx);  // 3D guides, never printed (M3-C)
     if (truthy_json(page.ruler) && name_or_proof) draw_ruler(image, area, ctx);
     draw_frames(image, area, page, ctx.size, dpi);
-    if (name_or_proof && get(page.extra, "cover") != nullptr && core::py_truthy(*get(page.extra, "cover")) && folds_draw(page)) {
-        skip_unported(ctx, "covers");
+    // where a jacket or a band folds, and what each part is (in name and proof; covers.draw_folds)
+    if (name_or_proof && get(page.extra, "cover") != nullptr && core::py_truthy(*get(page.extra, "cover"))) {
+        const std::string binding(episode != nullptr ? core::to_string(episode->binding) : std::string_view("right"));
+        draw_folds(image, area, ctx.size, page, dpi, binding, ctx.stop);
     }
     // lines: placed ones in balloons, the others as labels
     if (!lines.empty()) draw_story(image, area, ctx, lines, drawn_below, panels, font_path, unported);

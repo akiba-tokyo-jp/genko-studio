@@ -112,6 +112,10 @@ private:
 // them).
 std::vector<std::string> validate_document(const Document& doc);
 
+// Python's facing_problem: why two pages cannot form a spread ("pages 3 and 5 are not next to each other", "pages 1 and
+// 2 are two sides of one leaf, not a spread"), nothing when they face each other in the open book.
+std::optional<std::string> facing_problem(const Document& doc, const Page& a, const Page& b);
+
 // The op as the journal keeps it: an inline png_base64 picture replaced by "<N base64 chars>" (Python's _journal_op).
 Json journal_op(const Json& op);
 
@@ -184,7 +188,7 @@ void register_anim_ops(OpRegistry& registry);
 void register_vector_ops(OpRegistry& registry);
 
 // Register every op of core: the book ops, the frame, page, stroke and layer ops, the ruler and animation ops, the line
-// ops (what builtin() holds).
+// ops, the book and page ops of M4 (what builtin() holds).
 void register_core_ops(OpRegistry& registry);
 
 }  // namespace genko::core

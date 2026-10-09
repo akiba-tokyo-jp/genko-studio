@@ -4,6 +4,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/command_bus.hpp"
@@ -74,6 +75,22 @@ Json layer_to_dict(const Layer& layer);
 // The panel ids of a page (pre-order, with duplicates as they are).
 std::vector<std::string> frame_ids(const Page& page);
 
+// A dict of old panel id → new id, as ops._refresh_frame_ids fills it (a repeated id keeps its first place and its
+// last value).
+class FrameIdMap {
+public:
+    void set(const std::string& from, const std::string& to);
+    // The new id (null when the id is not in the map).
+    const std::string* get(const std::string& from) const;
+
+private:
+    std::vector<std::pair<std::string, std::string>> items_;
+};
+
+// ops._refresh_frame_ids: new ids for the panel and every panel under it (the panel first), each recorded in `map`
+// (duplicate_page and import_pages).
+void refresh_frame_ids(Frame& frame, FrameIdMap& map);
+
 // Register the ops of M2-O1 (frames, pages, strokes, layers, brush).
 void register_frame_ops(OpRegistry& registry);
 void register_page_ops(OpRegistry& registry);
@@ -93,6 +110,22 @@ using PictureCheck = std::function<void(const std::string& bytes)>;
 // set_balloon_path, replace_text: core/ops_lines.cpp). Without `check` a picture in a line's style is refused with
 // not_yet_ported (as an area that needs resolving is): render::ops_registry registers them again with its check.
 void register_line_ops(OpRegistry& registry, PictureCheck check = {});
+// What the book and page ops of M4 need beyond core (render::register_bookpage_ops gives both; without them the ops
+// refuse that part with not_yet_ported).
+struct BookPageHooks {
+    // pagespec._raster: a whole-page paint layer's PNG moved and resized from the old basic frame onto the new one, as
+    // big as the book's new paper `spec` at raster.WORKING_DPI. Pillow's errors as Python raises them (PyUncaught).
+    std::function<std::string(const std::string& png, const PageSpec& spec, const Rect& old_frame, const Rect& new_frame)>
+        relayout_raster;
+    // io.load_episode(Path(from)) for import_pages: the other book, read whole. OpError "the other book cannot be read
+    // (<why>)" for one that cannot be read, Python's words where Python has them.
+    std::function<Document(const std::string& from)> load_book;
+};
+
+// Register the book and page ops of M4 (set_page_spec, set_spread, add_cover, set_assignee, import_pages:
+// core/ops_bookpages.cpp; for_pages is the CommandBus's, replace_text a line op, set_nombre an M1 book op).
+void register_bookpage_ops(OpRegistry& registry, BookPageHooks hooks = {});
+
 // ops.STYLE_KEYS: the keys a line's style takes, in Python's order (the app's 既定の設定に戻す clears them).
 std::vector<std::string> line_style_keys();
 

@@ -38,6 +38,8 @@ genko_library(genko_render
     ops_paint.cpp
     zip.cpp
     materials.cpp
+    covers.cpp
+    bookpages.cpp
     text/fonts.cpp
     text/tategaki.cpp
     text/lettering.cpp

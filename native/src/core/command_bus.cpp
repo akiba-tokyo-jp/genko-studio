@@ -107,21 +107,6 @@ const Page* first_page(const Document& doc, const Num& index) {
     return nullptr;
 }
 
-// Python's facing_problem: why two pages cannot form a spread (nothing when they face each other).
-std::optional<std::string> facing_problem(const Document& doc, const Page& a, const Page& b) {
-    if (!(py_abs(a.index - b.index) == Num(1))) {
-        return "pages " + a.index.repr() + " and " + b.index.repr() + " are not next to each other";
-    }
-    const bool b_first = b.index < a.index;  // (sorted by index, a first on a tie)
-    const Page& first = b_first ? b : a;
-    const Page& second = b_first ? a : b;
-    const std::string start = doc.binding == Binding::Right ? "right" : "left";
-    const std::string start_side = doc.start_side.value_or("");
-    if (first.side(start_side) != start || second.side(start_side) == start) {
-        return "pages " + first.index.repr() + " and " + second.index.repr() + " are two sides of one leaf, not a spread";
-    }
-    return std::nullopt;
-}
 
 // Python's _op_page_index: the page an op is about (its "page", or the page of the line a line op names).
 std::optional<Num> op_page_index(const Document& doc, const Json& op) {
@@ -251,6 +236,21 @@ void read_as_touched_pages_does(const Json& ops) {
 
 ApplyError::ApplyError(const std::string& message, std::string code) : Error(std::move(code), message) {}
 
+std::optional<std::string> facing_problem(const Document& doc, const Page& a, const Page& b) {
+    if (!(py_abs(a.index - b.index) == Num(1))) {
+        return "pages " + a.index.repr() + " and " + b.index.repr() + " are not next to each other";
+    }
+    const bool b_first = b.index < a.index;  // (sorted by index, a first on a tie)
+    const Page& first = b_first ? b : a;
+    const Page& second = b_first ? a : b;
+    const std::string start = doc.binding == Binding::Right ? "right" : "left";
+    const std::string start_side = doc.start_side.value_or("");
+    if (first.side(start_side) != start || second.side(start_side) == start) {
+        return "pages " + first.index.repr() + " and " + second.index.repr() + " are two sides of one leaf, not a spread";
+    }
+    return std::nullopt;
+}
+
 // --- OpRegistry --------------------------------------------------------------------------------------------------
 
 void register_core_ops(OpRegistry& registry) {
@@ -265,6 +265,7 @@ void register_core_ops(OpRegistry& registry) {
     register_vector_ops(registry);
     register_arrange_ops(registry);
     register_line_ops(registry);
+    register_bookpage_ops(registry);
 }
 
 const OpRegistry& OpRegistry::builtin() {

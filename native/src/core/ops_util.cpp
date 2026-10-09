@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "core/ids.hpp"
 #include "core/pyconv.hpp"
 
 namespace genko::core {
@@ -243,6 +244,30 @@ std::vector<std::string> frame_ids(const Page& page) {
     std::vector<std::string> out;
     for (const Frame& frame : page.frames) collect_ids(frame, out);
     return out;
+}
+
+void FrameIdMap::set(const std::string& from, const std::string& to) {
+    for (auto& [key, value] : items_) {
+        if (key == from) {  // (a dict: the key keeps its place and takes the new value)
+            value = to;
+            return;
+        }
+    }
+    items_.emplace_back(from, to);
+}
+
+const std::string* FrameIdMap::get(const std::string& from) const {
+    for (const auto& [key, value] : items_) {
+        if (key == from) return &value;
+    }
+    return nullptr;
+}
+
+void refresh_frame_ids(Frame& frame, FrameIdMap& map) {
+    const std::string old = frame.id;
+    frame.id = new_id();
+    map.set(old, frame.id);
+    for (Frame& child : frame.children) refresh_frame_ids(child, map);
 }
 
 }  // namespace genko::core
