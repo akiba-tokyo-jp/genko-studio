@@ -147,7 +147,8 @@ void MainWindow::build_line_dock() {
 
 QWidget* MainWindow::line_select_page() {
     // the select tool's page: the chosen line's lettering and balloon first, then the view and the book's lines
-    QWidget* page = action_page({QStringLiteral("表示"), action("act_fit"), action("act_actual"), QStringLiteral("原稿"), action("act_story_editor")});
+    QWidget* page = action_page({QStringLiteral("表示"), action("act_fit"), action("act_actual"), QStringLiteral("原稿"), action("act_story_editor"),
+                                 action("act_checks")});
     static_cast<QVBoxLayout*>(page->layout())->insertWidget(0, story_->style_box);
     return page;
 }

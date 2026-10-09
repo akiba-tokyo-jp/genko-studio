@@ -41,6 +41,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "formats/export.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/ops_registry.hpp"
@@ -223,22 +224,6 @@ void remember_project(const fs::path& path) {
     } catch (const core::Error&) {
         // (the list of recent books is a convenience: not being able to keep it stops nothing)
     }
-}
-
-QString safe_name(const QString& text, const QString& fallback) {
-    static const QString bad = QStringLiteral("<>:\"/\\|?*");
-    QString out;
-    for (const QChar c : text) out += (bad.contains(c) || c.unicode() < 32) ? QChar('_') : c;
-    out = out.trimmed();
-    while (!out.isEmpty() && (out.endsWith(QLatin1Char('.')) || out.endsWith(QLatin1Char(' ')))) out.chop(1);
-    if (out.isEmpty()) out = fallback;
-    static const QStringList reserved = [] {
-        QStringList names{QStringLiteral("CON"), QStringLiteral("PRN"), QStringLiteral("AUX"), QStringLiteral("NUL")};
-        for (int i = 1; i <= 9; ++i) names << QStringLiteral("COM%1").arg(i) << QStringLiteral("LPT%1").arg(i);
-        return names;
-    }();
-    if (reserved.contains(out.section(QLatin1Char('.'), 0, 0).toUpper())) out = QStringLiteral("_") + out;
-    return out.left(80);
 }
 
 // --- the paper ------------------------------------------------------------------------------------------------------
@@ -477,7 +462,8 @@ NewProjectDialog::NewProjectDialog(QWidget* parent) : QDialog(parent) {
 }
 
 fs::path NewProjectDialog::target() const {
-    QString name = safe_name(title->text().trimmed().isEmpty() ? QStringLiteral("無題") : title->text().trimmed(), QStringLiteral("manga"));
+    const QString typed = title->text().trimmed();
+    QString name = QString::fromStdString(formats::safe_name((typed.isEmpty() ? QStringLiteral("無題") : typed).toStdString(), "manga"));
     if (episode->value() > 1) name += QStringLiteral("_%1").arg(episode->value(), 2, 10, QLatin1Char('0'));
     QString base = folder->text();
     if (base.startsWith(QLatin1Char('~'))) base = QDir::homePath() + base.mid(1);

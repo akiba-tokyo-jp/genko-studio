@@ -823,4 +823,8 @@ Image swatch(const Json& tone, Size size, int dpi, bool print_mode) {
     return alpha_composite(Image::create("RGBA", size, Ink{255, 255, 255, 255}), layer).convert("RGB");
 }
 
+Image mask(const core::Layer& layer, const Page& page) {
+    return tone_mask(layer, page, Box{0, 0, page.size.width, page.size.height});
+}
+
 }  // namespace genko::render::tones

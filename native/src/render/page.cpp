@@ -1522,6 +1522,11 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
     return colored(masked(ctx, layer, layer_effects(layer, std::move(*raster), dpi), area));
 }
 
+Image tone_mask(const core::Page& page, const core::Layer& layer, Size size, int dpi) {
+    const tones::Page p{&page, dpi, size, [dpi](Image& out, const Box& box, const core::Patch& patch) { paint_patch(out, box, patch, dpi, nullptr); }};
+    return tones::mask(layer, p);
+}
+
 std::optional<Image> drawable_layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode,
                   bool skip_unported_flag, bool bake_color) {
     std::vector<std::string> omitted;

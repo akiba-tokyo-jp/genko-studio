@@ -159,6 +159,22 @@ public:
     void redo();
     bool can_undo() const;
     bool can_redo() const;
+    // 履歴 (Python's app/history.timeline): the changes up to now, oldest first, and the ones that can be redone, the
+    // next first — in the order undo() and redo() step through them. The saved changes from before this session come
+    // from the book's journal (its Undo and Redo stacks, the converted old history first: a change that made the book,
+    // with nothing before it, left out); this session's from memory (`saved`: its transaction is committed, `at` its
+    // time).
+    struct HistoryEntry {
+        core::Json ops = core::Json::array();  // the change's ops (as the journal keeps them: a big batch in brief)
+        core::Json actor;                       // who made it (as recorded; null: not recorded)
+        bool saved = false;
+        std::optional<double> at;  // when it was saved (seconds since the epoch)
+    };
+    struct History {
+        std::vector<HistoryEntry> done;
+        std::vector<HistoryEntry> later;
+    };
+    History history() const;
 
     // --- the disk -------------------------------------------------------------------------------------------
     SaveStatus status() const;

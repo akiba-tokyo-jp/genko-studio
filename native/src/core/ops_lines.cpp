@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/balloon_tails.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/ops_util.hpp"
@@ -447,6 +448,8 @@ Json lettering_style(const Json& value, const PictureCheck& check) {
     return out;
 }
 
+}  // namespace
+
 // ops.tail_hidden: whether a tail's tip lies inside its balloon (an ellipse for the round kinds, the box for the others)
 bool tail_hidden(const StoryLine& line, const Json& tip) {
     const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
@@ -460,6 +463,8 @@ bool tail_hidden(const StoryLine& line, const Json& tip) {
     }
     return squared(divided(dx, w / 2)) + squared(divided(dy, h / 2)) < 1.0;
 }
+
+namespace {
 
 // ops._tails_outside: each tail's tip that the balloon now covers moved out past its outline, the same way from its
 // middle (a bigger or moved balloon must not swallow its tail)

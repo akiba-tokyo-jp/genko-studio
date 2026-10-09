@@ -178,6 +178,7 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         return;
     }
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
+    if (guide_press(event->position())) return;  // (a guide line pulled from a scale: canvas_scale.cpp)
     const QPointF mm = mm_of(pos);
     press_pos_ = pos;
     if (tool_ == QLatin1String("move")) {
@@ -225,6 +226,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
         set_rotation(before + turn);
         return;
     }
+    if (guide_move(event->position())) return;
     const QPointF pos = unturned(event->position());
     if (zoom_drag_) {
         zoom_drag_->second = pos;
@@ -298,6 +300,7 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         turning_.reset();
         return;
     }
+    if (guide_release(event->position())) return;
     if (zoom_drag_) {
         const auto [start, end] = *zoom_drag_;
         zoom_drag_.reset();

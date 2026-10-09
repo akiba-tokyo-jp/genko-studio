@@ -40,7 +40,9 @@ class QDockWidget;
 namespace genko::app {
 
 class BrushPanel;
+class CheckPanel;
 class ColourPanel;
+class HistoryPanel;
 class GuidePanel;
 class SubView;
 class MaterialPanel;
@@ -78,6 +80,7 @@ class MainWindow : public QMainWindow {
     friend class GuidePanel;     // (its edits are the window's: the chosen panel, the layer drawn on)
     friend class MaterialPanel;  // (likewise)
     friend class StoryPanel;     // (the chosen panel, a line's panel)
+    friend class HistoryPanel;   // (after its undo and redo: the book watched and shown again)
 
 public:
     // A window on a book (shared with any other window on it); none: a new untitled book in memory (8 pages, A4).
@@ -162,6 +165,11 @@ public:
     std::unique_ptr<QMenu> line_menu(const std::string& line_id);
     // A line of the book by its id (none: not there).
     const core::StoryLine* line_by_id(const std::string& line_id) const;
+    // 履歴 and 点検 (main_window_output.cpp): the panels; a problem the checks found shown on its page (its page in
+    // front, its place marked, its line chosen or its layer drawn on, its words in the status line).
+    HistoryPanel* history() const { return history_; }
+    CheckPanel* checks() const { return checks_; }
+    void show_issue(const core::Json& issue);
 
     PageCanvas* canvas() const { return canvas_; }
     PageList* pages() const { return pages_; }
@@ -375,6 +383,14 @@ private:
     void assignee_dialog();
     void merge_book();
     void import_psd();
+    // 書き出し, 印刷, 履歴, 入稿前の点検, the phone screens and the scales (main_window_output.cpp)
+    void build_output_actions();
+    void build_output_docks();
+    void output_panels_follow();
+    void run_checks();
+    void export_book();
+    void print_book();
+    void toggle_phone();
     // editing lines (main_window_vector.cpp)
     void build_vector_actions();
     void build_vector_pages(ToolSettings* ts);
@@ -438,6 +454,11 @@ private:
     std::string effect_kind_ = "focus";
     std::optional<std::pair<std::string, std::string>> effect_shape_for_;  // (effect id, path | inner_path)
     StoryPanel* story_ = nullptr;
+    HistoryPanel* history_ = nullptr;
+    QDockWidget* history_dock_ = nullptr;
+    QTimer history_timer_;  // (the history follows a change a moment later)
+    CheckPanel* checks_ = nullptr;
+    QDockWidget* checks_dock_ = nullptr;
     TextToolSettings* text_settings_ = nullptr;
     QDockWidget* lines_dock_ = nullptr;
     QPointer<StoryEditor> story_editor_;

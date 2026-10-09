@@ -68,17 +68,6 @@ std::vector<MainWindow*>& open_windows() {
     return list;
 }
 
-QString omitted_words(const QString& element) {
-    static const std::map<QString, QString> words = {
-        {"default_font", "読めないフォントの文字"}, {"large_font", "大きすぎるフォント（32 MB 超）の文字"},
-        {"text_features", "横書きの文字の字形の指定（OpenType 機能）"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
-        {"prims", "3D"}, {"placed", "配置した画像"}, {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"},
-        {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"}};
-    if (const auto it = words.find(element); it != words.end()) return it->second;
-    if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
-    return element;
-}
-
 }  // namespace
 
 // --- documents (several books, one book in several windows) ------------------------------------------------------
@@ -422,6 +411,9 @@ void MainWindow::connect_session() {
     Session* s = session_.get();
     session_links_.push_back(connect(s, &Session::changed, this, &MainWindow::on_book_changed));
     session_links_.push_back(connect(s, &Session::statusChanged, this, &MainWindow::refresh_status));
+    session_links_.push_back(connect(s, &Session::statusChanged, this, [this] {  // (a change saved: its time in 履歴)
+        if (history_dock_ != nullptr && history_dock_->isVisible()) history_timer_.start();
+    }));
     session_links_.push_back(connect(s, &Session::conflicts, this, [this](const QStringList& messages) {
         QStringList lines;
         for (int i = 0; i < messages.size() && i < 8; ++i) lines << QStringLiteral("・%1").arg(wording::error(messages[i]));
@@ -468,6 +460,7 @@ void MainWindow::on_book_changed(const BookChange& change) {
     }
     if (doc_ < doc_tabs_->count()) doc_tabs_->setTabText(doc_, documents_[static_cast<std::size_t>(doc_)].title());
     render::brushes::follow_book(b.brush_custom);  // (a define_brush: the person's own brushes and their edits stay)
+    output_panels_follow();  // (履歴 and 点検: main_window_output.cpp)
 }
 
 void MainWindow::reload_pages() {
@@ -523,6 +516,7 @@ void MainWindow::select_page(int row) {
         perf::event("page_switch", {{"row", row}});
         session_->save_now();  // a page switch writes what was done on the last page (on the worker)
         canvas_->set_selection(std::nullopt);
+        canvas_->highlight_box.reset();  // (a problem shown by the checks stays on its page)
     }
     page_index_ = row;
     show_page();
@@ -641,7 +635,7 @@ void MainWindow::show_omitted(const QStringList& elements) {
         } else if (element.startsWith(QStringLiteral("plugin_failed:"))) {
             failed << element.mid(14);
         } else {
-            words << omitted_words(element);
+            words << wording::unported_element(element);
         }
     }
     QStringList text;
@@ -704,6 +698,7 @@ void MainWindow::show_document(int index) {
     doc_tabs_->setTabText(index, doc.title());
     doc_tabs_->blockSignals(false);
     refresh_status();
+    output_panels_follow();  // (another book: its history; the checks of the last one are out of date)
 }
 
 void MainWindow::switch_document(int index) {

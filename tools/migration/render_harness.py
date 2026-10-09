@@ -52,6 +52,12 @@ Commands:
   export-cases JOBS OUT         Python's exporters (genko.export, profiles, pack, psd, app.exporting.run, parse_pages,
                                 subset, default_dpi) for each job of a JSON list, writing their files where each job says:
                                 OUT (JSON) with what each returned or raised
+  check-cases OUT --seed N --count K
+                                genko.checks.book (入稿前の点検, with the studio preflight it folds in) for chosen books that
+                                reach every check (lines, faces cut by panels, pasted pictures, paint layers, art beyond the
+                                bleed, stale faces, moiré, spreads, unprinted art, empty pages, books made with agents and
+                                their placed pictures) and K random drawing books: OUT/books/*.genko and OUT/checks.json
+                                with each report as json.dumps writes it
   save-cases OUT --seed N --count K
                                 pictures saved by Pillow as the exports save them (PNG, JPEG, TIFF with their options):
                                 the pictures and the bytes
@@ -2408,6 +2414,233 @@ def save_cases(out: str, seed: int, count: int) -> None:
     Path(out).write_text(dumps({"icc": b64(icc), "cases": cases}), encoding="utf-8")
 
 
+def _check_books(root: Path, seed: int, count: int) -> dict:
+    """The books of the checks' test: chosen pages that reach every check of genko/checks.py (and the studio
+    preflight it folds in) and `count` random drawing books (make_render_book with lines and balloons, covers). Each
+    saved as OUT/<name>.genko; {name: whether it is checked with its folder (the preflight)}."""
+    import pyref_harness
+    from genko import models
+    from genko.assets import AssetStore
+    from genko.io import save_episode
+    from genko.models import Layer, LayerKind, LayerRole, PageSpec, Rect
+
+    rng = random.Random(seed)
+    books: dict = {}
+
+    def stroke(points, width=0.8, kind="gpen"):
+        return models.Stroke(id=models.new_id(), points=[tuple(p) for p in points], pressure=[0.6] * len(points), width_mm=width, kind=kind)
+
+    def save(name, episode, project=True, extra_project=None):
+        dest = root / name
+        save_episode(episode, dest, actor="human:作者")
+        books[name] = project
+        if extra_project is not None:
+            books[extra_project] = False
+            import shutil
+
+            shutil.copytree(dest, root / extra_project)
+        return dest
+
+    # 1. the lines: not placed, beyond the trim, beyond the basic frame (and a sound effect there), lettered too small,
+    # tails buried in their balloons, overlapping (and kept apart by a group), words with line breaks
+    pyref_harness.fresh_process_state(True, first=seed)
+    ep = models.new_episode("点検の台詞", 1, 2, PageSpec.a4_mono())
+    page = ep.pages[0]
+    t, inner = page.trim_rect_mm(), page.inner_rect_mm()
+    ep.add_line(1, "置かれていない台詞です", x_mm=0, y_mm=0, balloon="")
+    ep.add_line(1, "仕上がりの外まで出ているとても長い台詞", x_mm=t.x - 3, y_mm=t.y + 20, w_mm=30, h_mm=24)
+    ep.add_line(1, "基本枠の外\nにある台詞です", x_mm=t.x + 2, y_mm=inner.y + 30, w_mm=28, h_mm=22, balloon="box")
+    ep.add_line(1, "ドーン", x_mm=t.x + 2, y_mm=inner.y + 70, w_mm=20, h_mm=20, balloon="sfx")
+    ep.add_line(1, "とても小さなフキダシにたくさんの言葉を詰め込んだので文字が小さくなる" * 2, x_mm=inner.x + 10, y_mm=inner.y + 10, w_mm=12, h_mm=9)
+    hidden = ep.add_line(1, "尾が中にある", x_mm=inner.x + 60, y_mm=inner.y + 10, w_mm=30, h_mm=20, tail=(inner.x + 75, inner.y + 20))
+    boxed = ep.add_line(1, "四角の尾", x_mm=inner.x + 100, y_mm=inner.y + 10, w_mm=30, h_mm=20, balloon="narration")
+    boxed.tails = [{"to": [inner.x + 128, inner.y + 28]}, {"to": [inner.x + 140, inner.y + 60]}, {"kind": "dots"}]
+    a = ep.add_line(1, "重なっているひとつめの台詞", x_mm=inner.x + 20, y_mm=inner.y + 120, w_mm=40, h_mm=30)
+    b = ep.add_line(1, "重なっているふたつめ", x_mm=inner.x + 35, y_mm=inner.y + 130, w_mm=40, h_mm=30, balloon="shout")
+    g1 = ep.add_line(1, "同じ組", x_mm=inner.x + 100, y_mm=inner.y + 120, w_mm=40, h_mm=30)
+    g2 = ep.add_line(1, "同じ組の続き", x_mm=inner.x + 110, y_mm=inner.y + 125, w_mm=40, h_mm=30)
+    g1.style = {"group": True}
+    g2.style = {"group": 1}
+    ep.add_line(1, "", x_mm=inner.x + 10, y_mm=inner.y + 200, w_mm=20, h_mm=10, balloon="none")
+    ep.add_line(2, "二ページ目の台詞", x_mm=inner.x + 10, y_mm=inner.y + 10, w_mm=0, h_mm=0)
+    _ = (hidden, a, b)
+    save("lines.genko", ep)
+
+    # 2. faces and people cut by the panel's edge, pictures pasted at low resolution, paint layers, art beyond the
+    # bleed, faces reported on art since replaced, layers that do not print, an empty page, a spread that does not face
+    pyref_harness.fresh_process_state(True, first=seed + 1)
+    ep = models.new_episode("点検の絵", 1, 5, PageSpec.b5_doujin())
+    page = ep.pages[0]
+    root_id = page.frames[0].id
+    left, right = page.split_frame(root_id, "vertical", 0.5, 3.0)
+    right.bleed = True
+    r = left.rect
+    left.panel = {"slot": "1a", "regions": [
+        {"kind": "face", "char": "hero", "rect_mm": [r.x - 4, r.y + 10, 20, 20]},
+        {"kind": "person", "char": "hero", "rect_mm": [r.x - 30, r.y + 5, 60, 90]},
+        {"kind": "body", "rect_mm": [r.x + r.width - 10, r.y + r.height - 20, 50, 60]},
+        {"kind": "head", "rect_mm": [r.x + 5, r.y + 5, 10, 10]},
+        {"kind": "prop", "rect_mm": [r.x - 50, r.y, 10, 10]},
+        {"kind": "face", "rect_mm": [1, 2, 3]}],
+        "adopted": {"art": "a2"}, "regions_for": "a1"}
+    right.panel = {"regions": [{"kind": "person", "char": "rival", "rect_mm": [right.rect.x + 10, right.rect.y - 40, 30, 60]},
+                               {"kind": "face", "char": "rival", "rect_mm": [right.rect.x + 200, right.rect.y + 20, 15, 15]}],
+                   "adopted": {"art": "same"}, "regions_for": "same"}
+    ink = next(layer for layer in page.layers if layer.role == LayerRole.INK)
+    ink.strokes = [stroke([(10, 10), (40, 40)]), stroke([(-12, 5), (30, 300)])]
+    pasted = Layer(id=models.new_id(), role=LayerRole.USER, kind=LayerKind.STROKES, title="写真")
+    pasted.patches = [{"id": models.new_id(), "box": [20.0, 30.0, 40.0, 30.0], "mode": "image", "png": rand_picture(rng, (120, 90), "RGB"), "opacity": 1.0},
+                      {"id": models.new_id(), "box": [50.0, 80.0, 5.0, 5.0], "mode": "image", "png": rand_picture(rng, (200, 200), "L"), "opacity": 1.0},
+                      {"id": models.new_id(), "box": [60.0, 90.0, 20.0, 20.0], "mode": "mask", "png": rand_picture(rng, (8, 6), "L"), "rgb": [10, 20, 30]}]
+    page.layers.append(pasted)
+    paint = Layer(id=models.new_id(), role=LayerRole.USER, kind=LayerKind.RASTER, title="")
+    paint.raster_png = rand_picture(rng, (40, 50), "RGBA")
+    page.layers.append(paint)
+    unseen = Layer(id=models.new_id(), role=LayerRole.USER, kind=LayerKind.STROKES, visible=False)
+    unseen.strokes = [stroke([(-50, -50), (500, 500)])]
+    page.layers.append(unseen)
+    page.spread_with = 2
+    # page 2: art only on the name and draft layers
+    p2 = ep.pages[1]
+    for layer in p2.layers:
+        if layer.role == LayerRole.NAME:
+            layer.strokes = [stroke([(30, 30), (60, 60)])]
+    draft = Layer(id=models.new_id(), role=LayerRole.DRAFT, kind=LayerKind.STROKES, title="アタリ")
+    draft.strokes = [stroke([(40, 40), (70, 90)])]
+    p2.layers.append(draft)
+    off = Layer(id=models.new_id(), role=LayerRole.USER, kind=LayerKind.RASTER, title="書き出さない", exportable=False)
+    off.raster_png = rand_picture(rng, (30, 30), "L")
+    p2.layers.append(off)
+    # page 3: nothing at all; page 4: only effect lines; page 5: a spread with a page the book does not have
+    ep.pages[3].effects = [{"id": models.new_id(), "kind": "speed", "frame_id": None, "params": {}}]
+    ep.pages[4].spread_with = 9
+    ink5 = next(layer for layer in ep.pages[4].layers if layer.role == LayerRole.INK)
+    ink5.strokes = [stroke([(20, 20), (25, 26)])]
+    save("art.genko", ep)
+
+    # 3. tones that beat into a moiré: two tone layers over the same panels at different line counts, one the same as
+    # the first, one in a corner of its own, a screened layer, a noise tone (never compared), a hidden one
+    pyref_harness.fresh_process_state(True, first=seed + 2)
+    ep = models.new_episode("点検のトーン", 1, 3, PageSpec.a5_doujin())
+    page = ep.pages[0]
+    page.layers.append(Layer(id=models.new_id(), role=LayerRole.TONE, kind=LayerKind.TONE, lpi=60.0, density=0.3, title="影"))
+    page.layers.append(Layer(id=models.new_id(), role=LayerRole.TONE, kind=LayerKind.TONE, lpi=85.0, density=0.2))
+    page.layers.append(Layer(id=models.new_id(), role=LayerRole.TONE, kind=LayerKind.TONE, lpi=60.0, density=0.5, title="同じ網"))
+    corner = Layer(id=models.new_id(), role=LayerRole.USER, kind=LayerKind.TONE, lpi=60.0, density=0.3, angle=30.0, title="隅")
+    corner.region = [(1.0, 1.0), (12.0, 1.0), (12.0, 9.0), (1.0, 9.0)]
+    page.layers.append(corner)
+    noise = Layer(id=models.new_id(), role=LayerRole.TONE, kind=LayerKind.TONE, lpi=60.0, density=0.3, title="砂目")
+    noise.tone = {"pattern": "noise"}
+    page.layers.append(noise)
+    page.layers.append(Layer(id=models.new_id(), role=LayerRole.TONE, kind=LayerKind.TONE, lpi=40.0, density=0.3, visible=False))
+    screened = Layer(id=models.new_id(), role=LayerRole.USER, kind=LayerKind.STROKES, title="トーン化した線")
+    screened.strokes = [stroke([(20, 30), (90, 120)], width=8.0), stroke([(30, 100), (100, 40)], width=6.0)]
+    screened.screen = {"pattern": "line", "lpi": 50.0, "angle": 15.0, "black": 0.1, "white": 0.95}
+    page.layers.append(screened)
+    p2 = ep.pages[1]
+    lined = Layer(id=models.new_id(), role=LayerRole.TONE, kind=LayerKind.TONE, lpi=60.0, density=0.3)
+    lined.tone = {"pattern": "line"}
+    lined.strokes = [stroke([(10, 10), (60, 80)], width=10.0), stroke([(20, 20), (30, 30)], width=4.0, kind="scrape")]
+    p2.layers.append(lined)
+    dots = Layer(id=models.new_id(), role=LayerRole.TONE, kind=LayerKind.TONE, lpi=60.0, density=0.3)
+    dots.patches = [{"id": models.new_id(), "box": [5.0, 5.0, 40.0, 40.0], "mode": "mask", "png": rand_picture(rng, (30, 30), "L")}]
+    p2.layers.append(dots)
+    ep.pages[1].spread_with = 3
+    ep.pages[2].spread_with = 2
+    save("tones.genko", ep)
+
+    # 4. a book made with agents (strict_gates): the preflight folded in with the book's folder, not without it
+    pyref_harness.fresh_process_state(True, first=seed + 3)
+    ep = models.new_episode("点検のスタジオ", 2, 3, PageSpec.a4_mono())
+    ep.strict_gates = True
+    ep.bible.characters = [{"id": "hero", "locked": True}, {"id": "villain"}, {"id": "zed", "locked": False}]
+    p1, p2, p3 = ep.pages
+    p1.name_ok, p1.art_ok, p1.stage = True, False, "finish"
+    p2.stage = "ink"
+    p3.name_ok, p3.art_ok, p3.stage = True, True, "finish"
+    a1, b1 = p1.split_frame(p1.frames[0].id, "horizontal", 0.5, 4.0)
+    a1.panel = {"slot": "1a", "status": "adopted", "characters": [{"id": "villain"}, {"id": "hero"}, "hero", {"id": "nobody"}, {"id": "zed"}],
+                "candidates": [{"id": "c0", "origin": {"kind": "fixture"}},
+                               {"id": "c1", "parent": "c0", "upscaled": {"scale": 2, "method": "lanczos"}, "origin": {"kind": "agent", "model": "m"}},
+                               {"id": "c2", "origin": {"kind": "agent"}},
+                               {"id": "c3", "origin": {"kind": "agent", "tool_id": "t"}}]}
+    b1.panel = {"status": "draft", "slot": ""}
+    p3.frames[0].panel = {"status": "skip"}
+    store = AssetStore(root / "studio.genko")
+    small = store.put_bytes(rand_picture(rng, (300, 200), "RGB"), ".png")
+    big = store.put_bytes(rand_picture(rng, (1700, 1200), "L"), ".png")
+    missing = "sha256:" + "ab" * 32
+    placed = [
+        dict(asset=small, frame_id=a1.id, placement_mm=Rect(a1.rect.x, a1.rect.y, 60.0, 40.0), source={"candidate": "c1"}),
+        dict(asset=big, frame_id=a1.id, placement_mm=Rect(a1.rect.x, a1.rect.y, 100.0, 70.0), source={"candidate": "c2"}),
+        dict(asset=big, frame_id=a1.id, placement_mm=Rect(a1.rect.x, a1.rect.y, 100.0, 70.0), source={"candidate": "c3"}),
+        dict(asset=missing, frame_id=b1.id, placement_mm=Rect(0.0, 0.0, 10.0, 10.0)),
+        dict(asset=big, frame_id="no-such-frame", placement_mm=None, source={"candidate": "c3"}),
+        dict(asset=big, frame_id=None, placement_mm=Rect(0.0, 0.0, 0.0, 10.0)),
+    ]
+    for n, how in enumerate(placed):
+        p1.layers.append(Layer(id=f"placed{n:06d}", role=LayerRole.USER, kind=LayerKind.PLACED, **how))
+    p1.layers.append(Layer(id="placedhidden", role=LayerRole.USER, kind=LayerKind.PLACED, asset=missing, visible=False))
+    ep.add_line(2, "位置の無い台詞はとても長いのでここで切れる", x_mm=0, y_mm=0)
+    ep.add_line(1, "置いた台詞", x_mm=50, y_mm=60, w_mm=30, h_mm=20, frame_id=a1.id)
+    save("studio.genko", ep, extra_project="studio-alone.genko")
+
+    # 5. a book with studio settings but no strict gates; and one whose characters the preflight cannot read (Python
+    # leaves the preflight out then)
+    pyref_harness.fresh_process_state(True, first=seed + 4)
+    ep = models.new_episode("点検の設定", 1, 2, PageSpec.a5_doujin())
+    ep.studio = {"pipeline": "name"}
+    ep.pages[0].stage = "finish"
+    ep.pages[0].frames[0].panel = {"status": "adopted", "characters": [{"id": "a"}]}
+    ep.bible.characters = [{"id": "a"}]
+    save("studio-dict.genko", ep)
+    pyref_harness.fresh_process_state(True, first=seed + 5)
+    ep = models.new_episode("点検の壊れた設定", 1, 1, PageSpec.a5_doujin())
+    ep.strict_gates = True
+    ep.bible.characters = [{"id": ["not", "hashable"]}]
+    save("studio-broken.genko", ep)
+
+    # 6. a reported face whose place is not numbers: Python's checks stop there (ValueError), and so must the C++ build's
+    pyref_harness.fresh_process_state(True, first=seed + 6)
+    ep = models.new_episode("点検の壊れた顔", 1, 1, PageSpec.a5_doujin())
+    ep.pages[0].frames[0].panel = {"regions": [{"kind": "face", "rect_mm": ["a", 1, 2, 3]}]}
+    save("regions-broken.genko", ep)
+
+    # 7. random drawing books: pen and paint layers, patches, masks, tones, balloons of every kind, covers
+    for i in range(count):
+        pyref_harness.fresh_process_state(True, first=seed * 1000 + i)
+        name = f"random-{i:02d}.genko"
+        make_render_book(random.Random(seed * 1000 + i), root / name, i, story=True)
+        books[name] = i % 3 != 0
+    return books
+
+
+def check_cases(out: str, seed: int, count: int) -> None:
+    """genko.checks.book for the books of _check_books (with each book's folder, or without it): OUT/books/<name>.genko
+    and OUT/checks.json {name: {"project": bool, "report": json.dumps(report, ensure_ascii=False)} or {"error": [type,
+    message]}}: the C++ build's report must be the same text, byte for byte."""
+    from genko import brushes, checks, render
+    from genko.io import load_episode
+
+    root = Path(out)
+    (root / "books").mkdir(parents=True, exist_ok=True)
+    books = _check_books(root / "books", seed, count)
+    results = {}
+    for name, project in books.items():
+        path = root / "books" / name
+        render._STROKE_CACHE.clear()
+        render._FRAME_MASKS.clear()
+        brushes.CUSTOM.clear()
+        episode = load_episode(path)
+        brushes.CUSTOM.clear()
+        brushes.register(episode.brush_custom)
+        try:
+            results[name] = {"project": project, "report": dumps(checks.book(episode, path if project else None))}
+        except Exception as e:  # (Python's own error: the C++ build raises it too)
+            results[name] = {"project": project, "error": [type(e).__name__, str(e)]}
+    (root / "checks.json").write_text(dumps(results), encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -2416,6 +2649,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("export-cases")
     p.add_argument("jobs")
     p.add_argument("out")
+    p = sub.add_parser("check-cases")
+    p.add_argument("out")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--count", type=int, default=12)
     p = sub.add_parser("save-cases")
     p.add_argument("out")
     p.add_argument("--seed", type=int, default=1)
@@ -2486,6 +2723,8 @@ def main(argv: list[str] | None = None) -> int:
         make_export_books(args.out)
     elif args.cmd == "export-cases":
         export_cases(args.jobs, args.out)
+    elif args.cmd == "check-cases":
+        check_cases(args.out, args.seed, args.count)
     elif args.cmd == "save-cases":
         save_cases(args.out, args.seed, args.count)
     elif args.cmd == "render":

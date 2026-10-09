@@ -4,6 +4,7 @@
 #include <QRegularExpression>
 
 #include <functional>
+#include <map>
 #include <vector>
 
 namespace genko::app::wording {
@@ -108,6 +109,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(replace_text with regex .* is not in the C\+\+ build yet)",
                          "この版の Genko では、まだ正規表現での置換はできません（「正規表現で探す」を外すと置き換えられます）"));
         r.push_back(rule("gradient_fill needs from and to.*", "グラデーションは、始めと終わりの点で指定します"));
+        // what this build does not do yet (render::NotYetPorted, the studio's official export)
+        r.push_back(rule("not yet ported: (.*)", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("この版の Genko では、まだ扱えないもの（%1）があるため、できませんでした（原稿は変わりません）").arg(unported_element(m.captured(1)));
+        }));
+        r.push_back(rule(R"(official export is not in the C\+\+ build yet)",
+                         "この版の Genko では、まだ正式な書き出し（点検と書き出しの承認の記録）はできません。正式な書き出しを外すと書き出せます"));
         r.push_back(rule("the gradient needs a longer drag", "もう少し長くドラッグします"));
         r.push_back(rule("the book's pages are still being read: try again in a moment",
                          "原稿の残りのページを読み込み中です。読み込みが終わってから、もう一度操作してください"));
@@ -586,6 +593,17 @@ QString layer_label(const core::Layer& layer) {
         QRegularExpression::anchoredPattern(QStringLiteral(R"((art|ink|placed)?\s*[0-9a-f]{8,}|placed (art|bg|draft|name)|layer)")));
     if (!title.isEmpty() && !made.match(title).hasMatch() && title != role) return title;
     return base;
+}
+
+QString unported_element(const QString& element) {
+    static const std::map<QString, QString> words = {
+        {"default_font", "読めないフォントの文字"}, {"large_font", "大きすぎるフォント（32 MB 超）の文字"},
+        {"text_features", "横書きの文字の字形の指定（OpenType 機能）"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
+        {"prims", "3D"}, {"placed", "配置した画像"}, {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"},
+        {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"}};
+    if (const auto it = words.find(element); it != words.end()) return it->second;
+    if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
+    return element;
 }
 
 QString error(const std::string& message) { return error(QString::fromStdString(message)); }

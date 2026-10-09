@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <map>
+#include <set>
 #include <system_error>
 #include <utility>
 
@@ -16,6 +18,7 @@
 #include "core/error.hpp"
 #include "core/ids.hpp"
 #include "core/paths.hpp"
+#include "core/pyconv.hpp"
 #include "render/ops_registry.hpp"
 #include "render/timelapse.hpp"
 #include "storage/asset_store.hpp"
@@ -738,6 +741,75 @@ void Session::redo() {
         return;
     }
     throw core::ApplyError("nothing to redo", "nothing_to_redo");
+}
+
+Session::History Session::history() const {
+    History out;
+    // this session's changes, by the transaction that first saved each (the journal's entry for it)
+    std::set<std::string> mine;
+    for (const auto* list : {&done_, &undone_}) {
+        for (const auto& change : *list) {
+            if (!change->txn.empty()) mine.insert(change->txn);
+        }
+    }
+    std::map<std::string, Json> prepared;  // a committed transaction's prepare line
+    std::vector<HistoryEntry> journal;     // the saved changes before this session, in the order of the timeline
+    if (path_) {
+        try {
+            for (const auto& t : storage::journal::transactions(storage::journal::read_lines(storage::journal::journal_file(*path_)))) {
+                if (t.status == storage::journal::Transaction::Status::committed) prepared[t.txn] = t.prepare;
+            }
+            const storage::journal::Stacks stacks = storage::journal::stacks(*path_);
+            std::vector<Json> legacy;  // the old journal's lines (legacy:<n> is line n)
+            const bool any_legacy = std::any_of(stacks.undo.begin(), stacks.undo.end(), [](const auto& i) { return i.legacy; }) ||
+                                    std::any_of(stacks.redo.begin(), stacks.redo.end(), [](const auto& i) { return i.legacy; });
+            if (any_legacy) legacy = storage::journal::read_lines(*path_ / "legacy" / "journal.jsonl").values;
+            const auto entry_of = [&](const storage::journal::HistoryItem& item) {
+                HistoryEntry entry;
+                entry.actor = item.actor;
+                entry.saved = true;
+                const Json* line = nullptr;
+                if (item.legacy) {
+                    const std::size_t n = static_cast<std::size_t>(std::stoull(item.id.substr(7)));
+                    if (n < legacy.size()) line = &legacy[n];
+                } else if (const auto it = prepared.find(item.id); it != prepared.end()) {
+                    line = &it->second;
+                }
+                if (line != nullptr && line->is_object()) {
+                    if (const auto ops = line->find("ops"); ops != line->end() && core::py_truthy(*ops)) entry.ops = *ops;
+                    if (const auto at = line->find("at"); at != line->end() && at->is_number()) entry.at = at->get<double>();
+                }
+                return entry;
+            };
+            for (const auto& item : stacks.undo) {
+                if (item.before && mine.count(item.id) == 0) journal.push_back(entry_of(item));  // (nothing before it: the book being made)
+            }
+            for (auto it = stacks.redo.rbegin(); it != stacks.redo.rend(); ++it) {
+                if (mine.count(it->id) == 0) journal.push_back(entry_of(*it));
+            }
+        } catch (const std::exception&) {
+            journal.clear();  // (a journal that cannot be read: the changes in memory only)
+        }
+    }
+    const auto of_change = [&](const Change& change) {
+        HistoryEntry entry;
+        entry.ops = change.ops;
+        entry.actor = actor_;
+        entry.saved = change.on_disk;
+        if (change.on_disk) {
+            if (const auto it = prepared.find(change.txn); it != prepared.end()) {
+                if (const auto at = it->second.find("at"); at != it->second.end() && at->is_number()) entry.at = at->get<double>();
+            }
+        }
+        return entry;
+    };
+    const std::size_t before = std::min(journal.size(), static_cast<std::size_t>(std::max<std::int64_t>(0, disk_undo_)));
+    out.done.assign(journal.begin(), journal.begin() + static_cast<std::ptrdiff_t>(before));
+    for (const auto& change : done_) out.done.push_back(of_change(*change));
+    for (auto it = undone_.rbegin(); it != undone_.rend(); ++it) out.later.push_back(of_change(**it));
+    const std::size_t after = std::min(journal.size(), before + static_cast<std::size_t>(std::max<std::int64_t>(0, disk_redo_)));
+    out.later.insert(out.later.end(), journal.begin() + static_cast<std::ptrdiff_t>(before), journal.begin() + static_cast<std::ptrdiff_t>(after));
+    return out;
 }
 
 bool Session::can_undo() const { return !saving_as_ && read_only_.empty() && (!done_.empty() || (path_ && disk_undo_ > 0 && !loading_)); }

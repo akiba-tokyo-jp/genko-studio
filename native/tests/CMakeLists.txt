@@ -167,6 +167,11 @@ set_tests_properties(test_contract_export PROPERTIES ENVIRONMENT "QT_QPA_PLATFOR
 genko_test(test_contract_export_cli SOURCES contract/test_contract_export_cli.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
            LABELS contract TIMEOUT 1800)
 set_tests_properties(test_contract_export_cli PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
+# 入稿前の点検 (M4③b, formats/checks): checks.book (and the studio preflight it folds in) against Python's on chosen
+# books that reach every check and random drawing books (render_harness.py check-cases), each report byte for byte.
+genko_test(test_contract_checks SOURCES contract/test_contract_checks.cpp DEPS genko_test_support genko_formats
+           LABELS contract TIMEOUT 1800)
+set_tests_properties(test_contract_checks PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
 # Filter plugins (M3③, COMP-04): the runner against Python's plugins.run, the choice, the bounds.
 genko_test(test_contract_plugins SOURCES contract/test_contract_plugins.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 1800)
@@ -224,6 +229,12 @@ if(GENKO_BUILD_APP)
   # the book and its pages (M4②c): spreads, the nombre, the paper, covers, who draws a page, another book's pages taken
   # in (its assets copied first), a PSD as layers, the page list's menu; each command's ops against Python's window
   genko_test(test_gui_book SOURCES gui/test_gui_book.cpp DEPS genko_app GUI TIMEOUT 900)
+  # the book going out (M4③b): 書き出し… (the dialog's exports as `genko export` writes them), 印刷… (to a PDF: the
+  # pages as render_page draws them at the printer's resolution), 履歴 (undo and redo by a click), 入稿前の点検 and its
+  # panel (the issues listed, each shown on its page), the phone screens and the scales (a guide pulled out)
+  genko_test(test_gui_output SOURCES gui/test_gui_output.cpp DEPS genko_app genko_test_support ZLIB::ZLIB GUI TIMEOUT 1200)
+  target_compile_definitions(test_gui_output PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")
+  add_dependencies(test_gui_output genko)
   genko_test(test_session SOURCES unit/test_session.cpp DEPS genko_app LABELS unit TIMEOUT 300)
   # the pen: Python's packing of mouse and tablet input, and the live line's pixels against the renderer's per brush
   genko_test(test_gui_pen SOURCES gui/test_gui_pen.cpp DEPS genko_app GUI TIMEOUT 1200)

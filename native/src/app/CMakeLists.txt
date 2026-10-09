@@ -47,6 +47,12 @@ genko_library(genko_app
     main_window_lines.cpp
     main_window_book.cpp
     book_dialogs.cpp
+    main_window_output.cpp
+    export_dialog.cpp
+    print_dialog.cpp
+    history_panel.cpp
+    check_panel.cpp
+    canvas_scale.cpp
     canvas_tools.cpp
     canvas_vector.cpp
     canvas_guides.cpp
@@ -73,4 +79,5 @@ genko_library(genko_app
     app_main.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
-  PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent)
+  PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent
+              Qt6::PrintSupport)

@@ -24,6 +24,9 @@ QString actor(std::string_view name);
 // A layer as people call it: its title when a person gave one, else its role (絵（配置） for placed art).
 QString layer_label(const core::Layer& layer);
 
+// What this build does not draw or do yet (render::NotYetPorted's element: "placed", "adjust:<kind>", …) in words.
+QString unported_element(const QString& element);
+
 // An ApplyError message in plain Japanese (unknown ones are kept, after a short lead).
 QString error(const QString& message);
 QString error(const std::string& message);

@@ -246,8 +246,9 @@ private slots:
         // (M4: act_text, act_line_type, act_balloon_pen, act_line_edit, act_line_delete, act_line_wrap, act_story_editor,
         // act_replace) theirs (test_gui_lines), the 7 of the book and its pages (M4②c: act_spread, act_paper,
         // act_page_nombre, act_add_cover, act_assignee, act_merge_book, act_import_psd; act_nombre, Python's now, was
-        // here before) theirs (test_gui_book).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{186});
+        // here before) theirs (test_gui_book), the 6 of the book going out (M4③b: act_export, act_print, act_history,
+        // act_phone, act_scale, act_checks) theirs (test_gui_output).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{192});
         QVERIFY(w->action("act_exposure"));
         QVERIFY(w->action("act_nombre"));
         for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten",

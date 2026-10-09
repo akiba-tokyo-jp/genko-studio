@@ -1,7 +1,8 @@
 // The screens and the small widgets of SPEC UX-02 / ACCEPTANCE.md AC-UX (M2-G1 試験 4, 5).
 //
 //   4  the start screen, 新しい原稿, 用紙の設定 (for a new book and for the book's own), ノンブルの設定, 表紙・カバーを足す,
-//      the templates, the question before closing, the whole path and the main window, on screens of 1024 × 640,
+//      the templates, the question before closing, the whole path, the main window, 書き出し… and 印刷…, and the main
+//      window with its 点検 and 履歴 panels opened, on screens of 1024 × 640,
 //      1366 × 768 and 1920 × 1080 at 100, 125, 150 and 200 % scaling: each window is inside the screen, and its buttons
 //      (閉じる, 作る, やめる, 決める, キャンセル…) are wholly in sight — the rest of the body scrolls. The size asked for
 //      and the size each window got are both written to the log.
@@ -22,6 +23,8 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QInputMethodEvent>
+#include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QProcess>
@@ -37,13 +40,17 @@
 
 #include "app/book_dialogs.hpp"
 #include "app/canvas.hpp"
+#include "app/check_panel.hpp"
 #include "app/dialogs.hpp"
+#include "app/export_dialog.hpp"
 #include "app/fit_preview.hpp"
+#include "app/history_panel.hpp"
 #include "app/icons.hpp"
 #include "app/ime.hpp"
 #include "app/main_window.hpp"
 #include "app/pages_panel.hpp"
 #include "app/path_label.hpp"
+#include "app/print_dialog.hpp"
 #include "app/save_status.hpp"
 #include "app/theme.hpp"
 #include "app/thumbs.hpp"
@@ -200,6 +207,39 @@ int probe(int argc, char** argv) {
         std::vector<Seen> seen = {{QStringLiteral("canvas"), window.canvas(), false},
                                   {QStringLiteral("status"), window.statusBar(), true}};
         out << look_at(QStringLiteral("main"), &window, QSize(1280, 800), seen).dump() << "\n";
+        // 書き出し… and 印刷… (M4③b): their buttons in sight, their rows reachable
+        app::ExportDialog exporting(&window, window.session().snapshot(), window.session().path(), "human:tester");
+        seen = buttons_of(&exporting, true);
+        for (QWidget* field : std::vector<QWidget*>{exporting.format, exporting.which, exporting.dpi, exporting.area, exporting.color, exporting.folder,
+                                                    exporting.preview})
+            seen.push_back(Seen{field->objectName().isEmpty() ? QStringLiteral("field") : field->objectName(), field, false});
+        out << look_at(QStringLiteral("export"), &exporting, exporting.size(), seen).dump() << "\n";
+        app::PrintDialog printing(&window);
+        seen = buttons_of(&printing, true);
+        for (QWidget* field : std::vector<QWidget*>{printing.pages, printing.area, printing.scale, printing.spreads})
+            seen.push_back(Seen{QStringLiteral("print field"), field, false});
+        out << look_at(QStringLiteral("print"), &printing, printing.sizeHint(), seen).dump() << "\n";
+    }
+    {
+        // the window with 履歴 and 点検 opened (hidden at first, as Python's occasional panels)
+        app::MainWindow window(app::Session::open(book, quick(path_of(dir.filePath("recovery")))));
+        window.show();  // (a panel is brought to the front of its tabs in a window on the screen, as the person opens it)
+        QCoreApplication::processEvents();
+        window.show_dock(QStringLiteral("履歴"));
+        window.show_dock(QStringLiteral("点検"));
+        std::vector<Seen> seen = {{QStringLiteral("canvas"), window.canvas(), false},
+                                  {QStringLiteral("status"), window.statusBar(), true},
+                                  {QStringLiteral("点検する"), window.checks()->run_button, false}};
+        out << look_at(QStringLiteral("main-checks"), &window, QSize(1280, 800), seen).dump() << "\n";
+    }
+    {
+        app::MainWindow window(app::Session::open(book, quick(path_of(dir.filePath("recovery")))));
+        window.show();
+        QCoreApplication::processEvents();
+        window.show_dock(QStringLiteral("点検"));
+        window.show_dock(QStringLiteral("履歴"));
+        std::vector<Seen> seen = {{QStringLiteral("履歴"), window.history()->list(), false}, {QStringLiteral("status"), window.statusBar(), true}};
+        out << look_at(QStringLiteral("main-history"), &window, QSize(1280, 800), seen).dump() << "\n";
     }
     return 0;
 }
@@ -307,7 +347,7 @@ private slots:
                 }
             }
         }
-        QCOMPARE(windows, 10);
+        QCOMPARE(windows, 14);
     }
 
     // 試験 5: a long Japanese path, cut to fit, all of it one click away, copied whole

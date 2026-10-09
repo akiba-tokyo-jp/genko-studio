@@ -200,6 +200,7 @@ void MainWindow::build_actions() {
     build_guide_actions();      // (定規, 3D and their commands: main_window_guides.cpp)
     build_material_actions();   // (効果線, 素材を置く, トーン, the view's extras, the layer commands: main_window_materials.cpp)
     build_line_actions();       // (テキスト, 台詞 and the book's lines, the 台詞 panel: main_window_lines.cpp)
+    build_output_actions();     // (書き出し, 印刷, 履歴, 入稿前の点検, スマホの画面, 目盛り: main_window_output.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -289,7 +290,8 @@ void MainWindow::build_actions() {
                                           {"text", "act_text"},
                                           {"3d", "act_3d"}, {"effect", "act_effect"}, {"stamp", "act_stamp"},
                                           {"move", "act_move"}, {"undo", "act_undo"}, {"redo", "act_redo"}, {"fit", "act_fit"},
-                                          {"zoom_in", "act_zoom_in"}, {"zoom_out", "act_zoom_out"}, {"prev", "act_prev"}, {"next", "act_next"}}) {
+                                          {"zoom_in", "act_zoom_in"}, {"zoom_out", "act_zoom_out"}, {"prev", "act_prev"}, {"next", "act_next"},
+                                          {"export", "act_export"}}) {
         QAction* act = actions_.at(QString::fromLatin1(attribute));
         act->setIcon(icons::icon(name));
         const QString shortcut = act->shortcut().toString();
@@ -326,6 +328,8 @@ void MainWindow::build_menus() {
     file->addAction(action("act_scanner"));
     file->addAction(action("act_merge_book"));
     file->addAction(action("act_import_psd"));
+    file->addAction(action("act_export"));
+    file->addAction(action("act_print"));
     file->addSeparator();
     file->addAction(action("act_timelapse"));
     file->addAction(action("act_timelapse_export"));
@@ -335,6 +339,7 @@ void MainWindow::build_menus() {
     QMenu* edit = bar->addMenu(QStringLiteral("編集"));
     edit->addAction(action("act_undo"));
     edit->addAction(action("act_redo"));
+    edit->addAction(action("act_history"));
     edit->addSeparator();
     for (const char* name : {"act_cut", "act_copy", "act_paste", "act_delete_area"}) edit->addAction(action(name));
     edit->addSeparator();
@@ -347,6 +352,8 @@ void MainWindow::build_menus() {
     for (const char* name : {"act_overview", "act_prev", "act_next"}) view->addAction(action(name));
     view->addSeparator();
     view->addAction(action("act_guides"));
+    view->addAction(action("act_phone"));
+    view->addAction(action("act_scale"));
     view->addAction(action("act_onion"));
     view->addAction(action("act_cmyk_proof"));
     view->addAction(action("act_screen_dots"));
@@ -420,6 +427,7 @@ void MainWindow::build_menus() {
     frames->addSeparator();
     frames->addAction(action("act_frame_numbers"));
     build_line_menus(pages);  // (台詞, ストーリーエディター, 台詞の検索・置換: main_window_lines.cpp)
+    pages->addAction(action("act_checks"));  // (Python's 本の形でプレビュー before it joins as it comes)
     pages->addSeparator();
     pages->addAction(action("act_name_ok"));
     view_menu_ = bar->addMenu(QStringLiteral("ウィンドウ"));
@@ -468,7 +476,7 @@ void MainWindow::build_toolbars() {
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     commands_->addWidget(spacer);
     for (const char* name : std::initializer_list<const char*>{"act_undo", "act_redo", nullptr, "act_fit", "act_zoom_in", "act_zoom_out", nullptr,
-                                                               "act_prev", "act_next"}) {
+                                                               "act_prev", "act_next", nullptr, "act_export"}) {
         if (name == nullptr) {
             commands_->addSeparator();
         } else {
@@ -527,6 +535,7 @@ void MainWindow::build_docks() {
     build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)
     build_guide_dock();   // (定規・3D, a tab when it is opened: main_window_guides.cpp)
     build_material_dock();  // (素材, トーン, 効果線: main_window_materials.cpp)
+    build_output_docks();   // (履歴 and 点検, tabs when they are opened: main_window_output.cpp)
     setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
     setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
 }

@@ -409,15 +409,15 @@ private slots:
                               QStringLiteral("原稿用紙の設定…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
                               QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("アニメーション（タイムライン）"),
                               QStringLiteral("|"), QStringLiteral("コマ")}));
-        // ファイル: after the scans, before the export (書き出し and 印刷, of M5, not yet here)
+        // ファイル: after the scans, before the export (書き出し and 印刷, M4③b: test_gui_output)
         QMenu* file = top_menu(s.window.get(), QStringLiteral("ファイル"));
         QVERIFY(file != nullptr);
         const QStringList in_file = menu_texts(file);
         const int scanner = static_cast<int>(in_file.indexOf(QStringLiteral("スキャナーから取り込む…")));
         QVERIFY(scanner > 0);
-        QCOMPARE(in_file.mid(scanner - 1, 5), QStringList({QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"),
+        QCOMPARE(in_file.mid(scanner - 1, 7), QStringList({QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"),
                                                            QStringLiteral("ほかの原稿のページを取り込む…"), QStringLiteral("PSD をレイヤーのまま読み込む…"),
-                                                           QStringLiteral("|")}));
+                                                           QStringLiteral("書き出し…"), QStringLiteral("印刷…"), QStringLiteral("|")}));
     }
 
     // 次のページと見開きにする／解除: with the next page when they face each other; else, when the page before faces it,

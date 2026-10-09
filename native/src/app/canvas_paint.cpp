@@ -94,6 +94,7 @@ void PageCanvas::paint_page(QPainter& painter) {
     if (committing_) draw_in_page_px(painter, committing_->image(), committing_->box(), committing_->dpi());
     painter.setRenderHint(QPainter::Antialiasing);
     if (show_guides) draw_guides(painter, page_rect);
+    if (phone_view) draw_phone(painter);  // (the phone screens: canvas_scale.cpp)
     draw_grid(painter);    // (canvas_guides.cpp)
     draw_rulers(painter);
     draw_selection(painter);
@@ -114,6 +115,7 @@ void PageCanvas::paint_page(QPainter& painter) {
     draw_tools(painter);    // (the area being filled, the gradient's drag, the figure being drawn: canvas_tools.cpp)
     draw_prims(painter);    // (the 3D tool's handles: canvas_guides.cpp)
     draw_effect_handles(painter);  // (the effect tool's centres: canvas_effects.cpp)
+    draw_highlight(painter);       // (a problem the checks found: canvas_scale.cpp)
     if (zoom_drag_) {  // (the area the magnifier will fill the view with)
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(theme::accent(), 1.2, Qt::DashLine));
@@ -155,6 +157,8 @@ void PageCanvas::paint_page(QPainter& painter) {
         painter.setBrush(Qt::NoBrush);
         painter.drawEllipse(h, radius, radius);  // (the circle and the cross cursor: circle_cross, the default)
     }
+    draw_guide_drag(painter);  // (a guide line pulled from a scale, and the scales: canvas_scale.cpp)
+    draw_scale(painter);
 }
 
 void PageCanvas::draw_shadow(QPainter& painter, const QRectF& page_rect) const {

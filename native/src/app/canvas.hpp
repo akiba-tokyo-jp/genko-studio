@@ -103,6 +103,19 @@ public:
     QString frame_mode = QStringLiteral("cut");  // cut | rect | poly | free
     bool show_guides = true;
     bool show_frame_numbers = false;
+    // スマホの画面の範囲 (canvas_scale.cpp, Python's canvas.phone_view): on a vertical-scroll book, where each phone screen
+    // (the page's width filling a screen held upright, 390 × 844) ends down the page, and the screen under the cursor.
+    bool phone_view = false;
+    static constexpr double kPhoneAspect = 844.0 / 390.0;
+    // Where each phone screen ends down the page (mm from the page's top).
+    std::vector<double> phone_screens() const;
+    // 目盛り (canvas_scale.cpp, Python's canvas_shapes): mm scales along the top and the left following the view, from
+    // which guide lines are pulled out (a drag from the top: across, "h"; from the left: down, "v"; let go on the page:
+    // rulerPlaced {"kind": "guide", "axis", "at"}). A guide placed is not drawn (as Python's), only while it is pulled.
+    bool show_scale = false;
+    static constexpr int kScalePx = 16;
+    // A problem the checks found, marked on the page ([x, y, w, h] mm; Python's highlight_box).
+    std::optional<std::array<double, 4>> highlight_box;
     core::Binding binding = core::Binding::Right;
     // --- the selection (範囲選択: the marquee tool) --------------------------------------------------------------
     // The area chosen (an op's area: {"poly"} or {"mask"}, mm) and its outline on the screen (a mask's box).
@@ -400,6 +413,16 @@ private:
     void draw_polygon_mm(QPainter& painter, const std::vector<QPointF>& points) const;
     void draw_in_page_px(QPainter& painter, const QImage& image, const QRect& box, int dpi) const;
 
+    // the scales, the guide pulled from them, the phone screens and the checks' mark (canvas_scale.cpp)
+    std::optional<QString> scale_hit(const QPointF& widget) const;
+    bool guide_press(const QPointF& widget);
+    bool guide_move(const QPointF& widget);
+    bool guide_release(const QPointF& widget);
+    void draw_guide_drag(QPainter& painter) const;
+    void draw_scale(QPainter& painter) const;
+    void draw_phone(QPainter& painter) const;
+    void draw_highlight(QPainter& painter) const;
+
     // the drawing tools (canvas_tools.cpp): true when the press, move or release was theirs
     bool tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
     bool tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed);
@@ -514,6 +537,11 @@ private:
     std::optional<QPointF> hover_;
     std::optional<std::pair<double, double>> turning_;  // Shift+Space drag: (start angle, rotation then)
     std::optional<std::pair<QPointF, QPointF>> zoom_drag_;
+    struct GuideDrag {  // a guide line pulled from a scale: its axis (h | v) and where it is (mm; none: not yet moved)
+        QString axis;
+        std::optional<double> at;
+    };
+    std::optional<GuideDrag> guide_drag_;
     bool zoom_out_ = false;
     std::optional<std::pair<QPointF, QPointF>> tool_drag_;  // the layer-move tool (mm)
     QImage move_image_;

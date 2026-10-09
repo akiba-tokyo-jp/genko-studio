@@ -69,6 +69,22 @@ struct Page {
     PatchPainter paint_patch;
 };
 
+// tones.mask(layer, page, size, dpi): where the layer has tone over the whole page (L, 255 = tone): its region, its
+// patches and its pen lines (scrape lines take tone away), every panel when it has none of these.
+Image mask(const core::Layer& layer, const Page& page);
+
+}  // namespace genko::render::tones
+
+namespace genko::render {
+
+// tones.mask(layer, page, size, dpi) as Python calls it, with render._paint_patch for the patches (page.cpp): where a
+// tone layer has tone over the whole page at `dpi` (L of `size`, 255 = tone).
+Image tone_mask(const core::Page& page, const core::Layer& layer, Size size, int dpi);
+
+}  // namespace genko::render
+
+namespace genko::render::tones {
+
 // tones.draw_layer(image, layer, page, dpi, print_mode) for the box `box` of the page: `image` (RGBA, the box's
 // size) with the layer's tone over it. `panels` is render._clip_mask over the box (nothing when no panel cuts).
 Image draw_layer(Image image, const core::Layer& layer, const Page& page, const Box& box, const Image* panels,

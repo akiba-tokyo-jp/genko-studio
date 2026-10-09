@@ -37,9 +37,6 @@ class PathLabel;
 std::vector<std::filesystem::path> recent_projects();
 void remember_project(const std::filesystem::path& path);
 
-// A file name that works on Windows, macOS and Linux (Python's export.safe_name; Japanese is kept).
-QString safe_name(const QString& text, const QString& fallback = QStringLiteral("genko"));
-
 // 用紙の設定: a preset, or every number — paper, finished size, bleed and the basic frame's margins.
 class PaperDialog : public QDialog {
     Q_OBJECT
