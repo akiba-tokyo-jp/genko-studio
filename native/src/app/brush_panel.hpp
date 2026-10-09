@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "app/pen.hpp"
+#include "core/brushes.hpp"
 #include "core/json.hpp"
 
 class QCheckBox;
@@ -165,6 +166,9 @@ public:
     QComboBox* paper_seam = nullptr;
     QSpinBox* paper_seed = nullptr;
     std::string paper_asset;
+    // The paper as set (its picture: paper_asset). A number the person did not change keeps the brush's own value
+    // (the boxes hold whole percent and degrees; a brush made through an op may have finer ones).
+    core::Paper paper() const;
     // Take a picture file in as the paper (true when it could be; otherwise why not, in Japanese: paper_error).
     bool take_paper(const QString& path);
     QString paper_error;
@@ -174,6 +178,7 @@ private:
     void pick_paper();
     void show_paper();
     std::string base_;
+    core::Paper started_paper_;  // the base's paper as the dialog opened (paper())
 };
 
 }  // namespace genko::app

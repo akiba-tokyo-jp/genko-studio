@@ -321,7 +321,7 @@ std::vector<std::string> paper_refs(const Json& brush_custom) {
     if (!brush_custom.is_object()) return out;
     for (const auto& [key, brush] : brush_custom.items()) {
         const Json* paper = get(brush, "paper");
-        if (paper == nullptr || paper->is_null()) continue;
+        if (paper == nullptr || !is_paper(*paper)) continue;
         try {
             const std::string ref = paper_from_json(*paper).asset;
             if (std::find(out.begin(), out.end(), ref) == out.end()) out.push_back(ref);
@@ -331,6 +331,8 @@ std::vector<std::string> paper_refs(const Json& brush_custom) {
     }
     return out;
 }
+
+bool is_paper(const Json& value) { return value.is_object() && value.contains("asset"); }
 
 std::span<const Brush> builtin_brushes() {
     static const std::vector<Brush> brushes = make_builtins();
@@ -466,7 +468,7 @@ Brush brush_from_dict(std::string_view key, const Json& data, const std::optiona
     out.stamp_size = to_float(merged["stamp_size"]);
     out.mix = to_float(merged["mix"]);
     out.stretch = to_float(merged["stretch"]);
-    if (!merged["paper"].is_null()) out.paper = paper_from_json(merged["paper"]);
+    if (is_paper(merged["paper"])) out.paper = paper_from_json(merged["paper"]);  // (another writer's "paper": none)
     return out;
 }
 

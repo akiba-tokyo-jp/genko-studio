@@ -43,6 +43,7 @@ void PageCanvas::begin_stroke(const QPointF& mm, double pressure, double rotatio
     live_.reset();
     live_copies_.clear();
     live_snapped_ = false;
+    live_failed_ = false;
     live_sync();
     update();
 }

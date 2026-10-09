@@ -377,7 +377,11 @@ private:
     void coast();
     void stop_coast();
     void live_reset();
+    // The live line drawn for the stroke so far (live_draw); a line that cannot be drawn (a brush's paper picture this
+    // process does not have) is not shown for the rest of the stroke and the window is told (renderFailed), never thrown
+    // out of the event that drew it.
     void live_sync();
+    void live_draw();
     void begin_stroke(const QPointF& mm, double pressure, double rotation, bool tablet);
     void extend_stroke(const QPointF& mm, double pressure, double rotation, bool straight);
     void finish_stroke();
@@ -518,6 +522,7 @@ private:
     std::unique_ptr<LiveInk> live_;
     std::vector<std::unique_ptr<LiveInk>> live_copies_;  // the symmetry copies of a snapped line
     bool live_snapped_ = false;                          // live_ holds the snapped line (drawn whole each time)
+    bool live_failed_ = false;                           // this stroke's live line could not be drawn (live_sync)
     std::unique_ptr<LiveInk> committing_;
     struct Overlay {
         std::unique_ptr<LiveInk> ink;

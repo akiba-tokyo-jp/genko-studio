@@ -15,10 +15,12 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QListWidgetItem>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTabWidget>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 
@@ -31,8 +33,10 @@
 #include "app/wording.hpp"
 #include "core/base64.hpp"
 #include "core/brushes.hpp"
+#include "core/command_bus.hpp"
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
+#include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/paper.hpp"
 #include "render/png.hpp"
@@ -207,6 +211,13 @@ private slots:
             {"paper has an unknown setting: colour", QStringLiteral("紙質に知らない設定があります（colour）")},
             {"paper asset must be an asset ref (sha256:<64 hex>)", QStringLiteral("紙質の画像（asset）は sha256: と 64 桁の 16 進数で指定します")},
             {"paper must be an object or null", QStringLiteral("紙質は設定のまとまり（オブジェクト）か null で指定します")},
+            // (drawing with a paper whose picture is not there: a book's or one's own brush — each has its own way out)
+            {"the paper picture sha256:" + std::string(64, 'c') + " is not known here (its book's brushes are not read)",
+             QStringLiteral("紙質の画像が見つかりません（原稿の素材が欠けているなら、原稿の assets フォルダーに画像を戻すまで、そのブラシでは描けません。"
+                            "自分のブラシなら、ブラシの詳細で紙質の画像を読み込み直せます）")},
+            {"the brush paper library cannot be read, so it is left as it is: /home/me/.config/genko/brush_papers.json",
+             QStringLiteral("自分のブラシの紙質の一覧（brush_papers.json）を読めないため、そのままにしました（紙質のあるブラシは保存できません）: "
+                            "/home/me/.config/genko/brush_papers.json")},
         };
         for (const auto& [english, japanese] : cases) QCOMPARE(app::wording::error(english), japanese);
     }
@@ -328,6 +339,194 @@ private slots:
         QVERIFY(back.paper == made.paper);
         QVERIFY(render::paper::bytes(back.paper->asset) != nullptr);
         QVERIFY(render::brushes::load_own_brushes(app::config_dir())[keys[0]].contains("paper"));
+    }
+
+    // A book whose brush's paper picture is gone opens read-only; drawing with that brush shows why and stops nothing
+    // (the live line is not drawn; no exception leaves the pen's events), and the book is not changed.
+    void missingPictureDoesNotStopTheApp() {
+        QTemporaryDir keep;
+        const fs::path book = gui_test::path_of(keep.path() + "/欠け.genko");
+        core::Document doc = book_doc();
+        doc = core::CommandBus(render::ops_registry())
+                  .apply(doc, Json::array({Json{{"op", "define_brush"}, {"key", "my_gone"}, {"label", "欠けた紙"}, {"base", "fill_pen"},
+                                               {"paper", Json{{"png", core::b64encode(grain_png())}, {"density", 1}}}}}),
+                         core::Actor("human:tester"))
+                  .doc;
+        gui_test::write_book(book, doc);
+        const std::string ref = doc.brush_custom["my_gone"]["paper"]["asset"].get<std::string>();
+        QVERIFY(fs::remove(book / storage::AssetStore::relpath(ref, ".png")));
+        render::brushes::clear_custom();
+        render::paper::clear();
+        Studio studio(book);
+        QVERIFY(!studio.session->read_only_reason().empty());
+        studio.choose("my_gone");
+        QCOMPARE(studio.brush().kind(), std::string("my_gone"));
+        QStringList failed;
+        QObject::connect(studio.window->canvas(), &app::PageCanvas::renderFailed, studio.window.get(), [&](const QString& m) { failed << m; });
+        studio.draw({QPointF(10, 15), QPointF(30, 25), QPointF(50, 15)});
+        QCOMPARE(failed.size(), 1);  // (once for the stroke, not on every move)
+        QVERIFY2(app::wording::error(failed[0]).startsWith(QStringLiteral("紙質の画像が見つかりません")), qPrintable(failed[0]));
+        QCOMPARE(gui_test::ink_strokes(studio.session->document()), std::size_t(0));
+        QVERIFY(studio.window->canvas()->live() == nullptr);
+    }
+
+    // One's own brush whose paper picture is missing (or broken) keeps its paper: it is listed as such and refuses to draw,
+    // with a word, rather than drawing without its paper (and bringing a brush without it into the book). A broken picture
+    // file of the library is written again from the picture the process has.
+    void libraryPictureMissing() {
+        const std::string key = "my_lost";
+        render::brushes::define_brush(key, Json{{"label", "失くした紙"}, {"base", "fill_pen"}, {"width_mm", 4},
+                                               {"paper", render::brushes::with_paper_taken_in(Json{{"paper", Json{{"png", core::b64encode(grain_png())}}}})["paper"]}});
+        const core::Brush made = render::brushes::brush(key);
+        render::brushes::save_to_library(app::config_dir(), key, core::brush_to_dict(made));
+        const fs::path picture = app::config_dir() / "brush_papers" / (made.paper->asset.substr(7) + ".png");
+        const std::string right = genko::test::read_bytes(gui_test::qpath(picture));
+        // broken on disk: written again (the process has the picture)
+        genko::test::write_bytes(gui_test::qpath(picture), "not a picture");
+        render::brushes::save_to_library(app::config_dir(), key, core::brush_to_dict(made));
+        QVERIFY(genko::test::read_bytes(gui_test::qpath(picture)) == right);
+        // gone: the brush keeps its paper, listed as missing its picture, and refuses to draw
+        QVERIFY(fs::remove(picture));
+        render::brushes::clear_custom();
+        render::paper::clear();
+        Studio studio;
+        QVERIFY(render::brushes::brush(key).paper == made.paper);
+        bool listed = false;
+        for (int i = 0; i < studio.brush().kinds->count(); ++i) {
+            const QListWidgetItem* item = studio.brush().kinds->item(i);
+            if (item->data(Qt::UserRole).toString().toStdString() == key) listed = item->toolTip().contains(QStringLiteral("紙質の画像が見つかりません"));
+        }
+        QVERIFY(listed);
+        studio.choose(key);
+        studio.draw({QPointF(10, 15), QPointF(30, 25)});
+        QCOMPARE(gui_test::ink_strokes(studio.session->document()), std::size_t(0));
+        QVERIFY(!studio.session->document().brush_custom.contains(key));
+        QVERIFY2(studio.window->last_error().contains(QStringLiteral("紙質の画像が見つからない")), qPrintable(studio.window->last_error()));
+    }
+
+    // A brush_papers.json that cannot be read: brushes without a paper are still saved and forgotten (the file is left as
+    // it is); a brush with one is refused with the file named.
+    void brokenPaperLibrary() {
+        const fs::path papers = render::brushes::library_papers_path(app::config_dir());
+        fs::create_directories(papers.parent_path());
+        genko::test::write_bytes(gui_test::qpath(papers), "{\"papers\": ");
+        render::brushes::save_to_library(app::config_dir(), "my_plain", Json{{"label", "普通"}, {"texture", "grain"}});
+        QVERIFY(render::brushes::load_library(app::config_dir()).contains("my_plain"));
+        render::brushes::save_to_library(app::config_dir(), "my_plain", std::nullopt);
+        QVERIFY(!render::brushes::load_library(app::config_dir()).contains("my_plain"));
+        QCOMPARE(genko::test::read_bytes(gui_test::qpath(papers)), std::string("{\"papers\": "));
+        const Json with = render::brushes::with_paper_taken_in(Json{{"label", "紙"}, {"paper", Json{{"png", core::b64encode(grain_png())}}}});
+        try {
+            render::brushes::save_to_library(app::config_dir(), "my_with", with);
+            QFAIL("saved over a paper library that cannot be read");
+        } catch (const core::PyUncaught& error) {
+            QVERIFY2(std::string(error.what()).find("brush_papers.json") != std::string::npos, error.what());
+            QVERIFY(app::wording::error(std::string(error.what())).startsWith(QStringLiteral("自分のブラシの紙質の一覧（brush_papers.json）を読めない")));
+        }
+        QCOMPARE(genko::test::read_bytes(gui_test::qpath(papers)), std::string("{\"papers\": "));
+    }
+
+    // The library's papers of brushes that are no longer there (forgotten here, or by Python's app in brushes.json) are
+    // dropped, and their pictures removed once nothing names them (a picture written in the last hour is left, in case
+    // another Genko is saving it); a picture still named stays.
+    void orphans() {
+        const auto picture_of = [](const std::string& png) {
+            auto grey = std::make_shared<const std::string>(render::paper::take_in(png));
+            const std::string ref = storage::AssetStore::ref(*grey);
+            render::paper::keep(ref, grey);
+            return ref;
+        };
+        const std::string a = picture_of(grain_png());
+        const std::string b = picture_of(render::write_png(render::Image::create("L", render::Size{9, 9}, render::Ink(120))));
+        const auto save = [](const std::string& key, const std::string& ref) {
+            render::brushes::save_to_library(app::config_dir(), key, Json{{"label", key}, {"paper", Json{{"asset", ref}}}});
+        };
+        save("my_a", a);
+        save("my_b", b);
+        save("my_b2", b);
+        const auto file = [](const std::string& ref) { return app::config_dir() / "brush_papers" / (ref.substr(7) + ".png"); };
+        const auto age = [&](const std::string& ref) { fs::last_write_time(file(ref), fs::file_time_type::clock::now() - std::chrono::hours(2)); };
+        age(a);
+        age(b);
+        render::brushes::save_to_library(app::config_dir(), "my_a", std::nullopt);  // forgotten here
+        QVERIFY(!fs::exists(file(a)));
+        // my_b forgotten by Python's app (brushes.json only): its paper dropped at the next save; b still named by my_b2
+        Json lib = read_json_file(render::brushes::library_path(app::config_dir()));
+        lib["brushes"].erase("my_b");
+        genko::test::write_bytes(gui_test::qpath(render::brushes::library_path(app::config_dir())), lib.dump(1));
+        render::brushes::save_to_library(app::config_dir(), "my_c", Json{{"label", "c"}});
+        const Json papers = read_json_file(render::brushes::library_papers_path(app::config_dir()));
+        QVERIFY(!papers["papers"].contains("my_b") && !papers["papers"].contains("my_a"));
+        QVERIFY(papers["papers"].contains("my_b2"));
+        QVERIFY(fs::exists(file(b)));
+        // a new picture nothing names yet is left (another Genko may be saving it)
+        const std::string c = picture_of(render::write_png(render::Image::create("L", render::Size{5, 5}, render::Ink(30))));
+        save("my_new", c);
+        lib = read_json_file(render::brushes::library_path(app::config_dir()));
+        lib["brushes"].erase("my_new");
+        genko::test::write_bytes(gui_test::qpath(render::brushes::library_path(app::config_dir())), lib.dump(1));
+        render::brushes::save_to_library(app::config_dir(), "my_c", Json{{"label", "c"}});
+        QVERIFY(fs::exists(file(c)));
+    }
+
+    // The tab's boxes hold whole percent and degrees: a paper set more finely (through an op) keeps its values unless the
+    // person changes that box.
+    void finerValuesKept() {
+        Studio studio;
+        const Json fine = render::brushes::with_paper_taken_in(Json{{"paper", Json{{"png", core::b64encode(grain_png())}, {"density", 0.333},
+                                                                                   {"scale", 1.234}, {"rotation", 12.5}}}})["paper"];
+        render::brushes::define_brush("my_fine", Json{{"label", "細かい"}, {"base", "fill_pen"}, {"paper", fine}});
+        app::BrushDialog d(studio.window.get(), "my_fine", true);
+        Json paper = d.data()["paper"];
+        QCOMPARE(paper["density"], Json(0.333));
+        QCOMPARE(paper["scale"], Json(1.234));
+        QCOMPARE(paper["rotation"], Json(12.5));
+        d.paper_density->setValue(50);
+        paper = d.data()["paper"];
+        QCOMPARE(paper["density"], Json(0.5));
+        QCOMPARE(paper["scale"], Json(1.234));
+        QCOMPARE(paper["rotation"], Json(12.5));
+    }
+
+    // The screen at every zoom: the tiles drawn at the book's own resolution are its full-size output (print), pixel for
+    // pixel; at another zoom the tiles are the page drawn at that resolution (the paper the same size on the paper); back
+    // at the first zoom, the same pixels again.
+    void zoomTiles() {
+        QTemporaryDir keep;
+        const fs::path book = gui_test::path_of(keep.path() + "/拡大.genko");
+        core::Document doc = core::new_episode("拡大", core::Num(1), 1, core::PageSpec::custom(60, 60, 50, 50, 1, 2, 2, 2, 2, 144, "mono"));
+        doc = core::CommandBus(render::ops_registry())
+                  .apply(doc, Json::array({Json{{"op", "define_brush"}, {"key", "my_zoom"}, {"label", "拡大"}, {"base", "fill_pen"}, {"width_mm", 5},
+                                               {"paper", Json{{"png", core::b64encode(grain_png())}, {"density", 1}, {"rotation", 20}}}},
+                                          Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"}, {"kind", "my_zoom"}, {"width_mm", 5},
+                                               {"points", Json::array({Json::array({10, 12, 1}), Json::array({50, 40, 1})})}}}),
+                         core::Actor("human:tester"))
+                  .doc;
+        gui_test::write_book(book, doc);
+        render::brushes::clear_custom();
+        render::paper::clear();
+        Studio studio(book);
+        auto* canvas = studio.window->canvas();
+        canvas->renderer().set_mode("print");
+        const auto output = [&](int dpi) {
+            const core::Document& now = studio.session->document();
+            const render::Image image = render::render_page(now.page(0), dpi, {}, &now).image;
+            const std::string bytes = image.tobytes();
+            return QImage(reinterpret_cast<const uchar*>(bytes.data()), image.width(), image.height(), image.width() * 3, QImage::Format_RGB888)
+                .convertToFormat(QImage::Format_RGB32);
+        };
+        const auto zoom_to = [&](int dpi) {
+            canvas->zoom_by(dpi / 25.4 / canvas->scale());
+            QCOMPARE(canvas->base_dpi(), dpi);
+            QVERIFY(canvas->wait_rendered(30000));
+        };
+        zoom_to(144);
+        const QImage at_book = canvas->renderer().compose(144);
+        QVERIFY(at_book == output(144));
+        zoom_to(72);
+        QVERIFY(canvas->renderer().compose(72) == output(72));
+        zoom_to(144);
+        QVERIFY(canvas->renderer().compose(144) == at_book);
     }
 
     // The book on another computer: closed, the process knowing no brush and no picture, no library; opened again, the

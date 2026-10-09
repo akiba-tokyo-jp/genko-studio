@@ -245,7 +245,7 @@ Image read_jpeg(std::string_view bytes, const PngLimits& limits) {
                      static_cast<unsigned long>(bytes.size()))) jpeg_failed(state, true);
     const std::int64_t pixels = static_cast<std::int64_t>(state.codec.image_width) * state.codec.image_height;
     if (pixels > limits.max_pixels || state.codec.image_width > 0x7fffffffU / 4U ||
-        state.codec.image_height > 0x7fffffffU)
+        state.codec.image_height > 0x7fffffffU || beyond_side(state.codec.image_width, state.codec.image_height, limits))
         throw core::Error("image_too_large", "JPEG image exceeds pixel/dimension limit");
     const char* mode = nullptr;
     const char* rawmode = nullptr;
@@ -368,6 +368,17 @@ Image read_png(std::string_view bytes, const PngLimits& limits) {
     if (bytes.size() < 8 || png_sig_cmp(reinterpret_cast<png_const_bytep>(bytes.data()), 0, 8) != 0) {
         throw core::Error("unidentified_image", "cannot identify image file (not a PNG file)");
     }
+    if (limits.max_side > 0 && bytes.size() >= 24 && bytes.substr(12, 4) == "IHDR") {
+        // (a side beyond max_side is refused from the IHDR chunk itself, before libpng reads any further)
+        const auto be32 = [&](std::size_t at) {
+            std::uint32_t v = 0;
+            for (std::size_t i = 0; i < 4; ++i) v = (v << 8) | static_cast<unsigned char>(bytes[at + i]);
+            return v;
+        };
+        if (beyond_side(be32(16), be32(20), limits)) {
+            throw core::Error("image_too_large", "image is wider or taller than " + std::to_string(limits.max_side) + " pixels");
+        }
+    }
     ReadState state;
     state.data = reinterpret_cast<const unsigned char*>(bytes.data());
     state.size = bytes.size();
@@ -392,6 +403,9 @@ Image read_png(std::string_view bytes, const PngLimits& limits) {
                                                     " for colour type " + std::to_string(h.color_type) + ")");
     }
     const std::int64_t pixels = static_cast<std::int64_t>(h.width) * static_cast<std::int64_t>(h.height);
+    if (beyond_side(h.width, h.height, limits)) {
+        throw core::Error("image_too_large", "image is wider or taller than " + std::to_string(limits.max_side) + " pixels");
+    }
     if (pixels > limits.max_pixels) {
         throw core::Error("image_too_large", "Image size (" + std::to_string(pixels) + " pixels) exceeds limit of " +
                                                  std::to_string(limits.max_pixels) +

@@ -16,6 +16,8 @@
 #include "core/error.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/png.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/reader.hpp"
 
 namespace genko::render::paper {
 
@@ -138,12 +140,30 @@ int sample_at(const Frame& f, std::int64_t px, std::int64_t py, Sample* out) {
     return value;
 }
 
+// A 16-bit grey picture (I;16, little-endian: what the PNG reader gives) by the upper 8 bits of each value, its
+// transparent value (tRNS) kept transparent. (Pillow's convert("L") cuts the values at 255: a scan of paper would be
+// almost white. This build's own choice: Python has no paper.)
+Image upper_bytes(const Image& image) {
+    const std::string raw = image.tobytes();
+    std::string grey(raw.size() / 2, '\0');
+    std::string alpha(grey.size(), '\xff');
+    const Transparency& t = image.transparency();
+    for (std::size_t i = 0; i < grey.size(); ++i) {
+        const int v = static_cast<unsigned char>(raw[2 * i]) | (static_cast<unsigned char>(raw[2 * i + 1]) << 8);
+        grey[i] = static_cast<char>(v >> 8);
+        if (t.kind == Transparency::Kind::Index && v == t.value) alpha[i] = '\0';
+    }
+    return Image::merge("LA", {Image::frombytes("L", image.size(), grey), Image::frombytes("L", image.size(), alpha)});
+}
+
 // The picture laid over white and made grey (Pillow: Image.alpha_composite(white, image.convert("RGBA")).convert("L")).
 Image grey_of(const Image& image) {
     const std::string_view mode = image.mode();
     Image rgba;
-    if (mode == "I;16" || mode == "I;16B" || mode == "I;16L" || mode == "I" || mode == "F") {
-        rgba = image.convert("L").convert("RGBA");  // (deep greys: to 8 bits first)
+    if (mode == "I;16") {
+        rgba = upper_bytes(image).convert("RGBA");
+    } else if (mode == "I;16B" || mode == "I;16L" || mode == "I" || mode == "F") {
+        rgba = image.convert("L").convert("RGBA");  // (not given by the readers paper takes)
     } else {
         rgba = image.convert("RGBA");
     }
@@ -171,7 +191,7 @@ void check_size(const Image& image) {
     if (image.width() > kMaxSide || image.height() > kMaxSide) too_large();
 }
 
-constexpr PngLimits kPaperLimits{static_cast<std::int64_t>(kMaxSide) * kMaxSide};
+constexpr PngLimits kPaperLimits{static_cast<std::int64_t>(kMaxSide) * kMaxSide, kMaxSide};
 
 struct Registry {
     std::shared_mutex mutex;
@@ -184,6 +204,21 @@ Registry& registry() {
     static Registry r;
     return r;
 }
+
+// The reader's check of a book's paper pictures (storage/reader.hpp set_paper_check): decoded as they are drawn, so a
+// book whose picture cannot be drawn opens read-only instead of failing when its lines are drawn. (Set when this file is
+// linked: every program that draws lines draws them through it.)
+const bool kReaderCheck = [] {
+    storage::set_paper_check([](std::string_view png) -> std::optional<std::string> {
+        try {
+            (void)grain_of(png);
+        } catch (const core::Error& error) {
+            return std::string(error.what());
+        }
+        return std::nullopt;
+    });
+    return true;
+}();
 
 }  // namespace
 
@@ -228,11 +263,12 @@ Grain grain_of(std::string_view png) {
     return out;
 }
 
-void keep(const std::string& ref, core::Bytes png) {
-    if (!png) return;
+bool keep(const std::string& ref, core::Bytes png) {
+    if (!png || storage::AssetStore::ref(*png) != ref) return false;  // (never another picture under its name)
     Registry& r = registry();
     std::unique_lock lock(r.mutex);
-    r.pictures.emplace(ref, std::move(png));  // (one ref, one picture: the first kept stays)
+    r.pictures.emplace(ref, std::move(png));
+    return true;
 }
 
 void keep_all(const std::map<std::string, core::Bytes>& papers) {
@@ -243,9 +279,13 @@ void keep_all(const std::map<std::string, core::Bytes>& papers) {
         std::shared_lock lock(r.mutex);
         if (std::all_of(papers.begin(), papers.end(), [&](const auto& p) { return !p.second || r.pictures.contains(p.first); })) return;
     }
-    std::unique_lock lock(r.mutex);
     for (const auto& [ref, png] : papers) {
-        if (png) r.pictures.emplace(ref, png);
+        bool known = false;
+        {
+            std::shared_lock lock(r.mutex);
+            known = r.pictures.contains(ref);
+        }
+        if (!known) keep(ref, png);  // (hashed outside the lock: each new picture once)
     }
 }
 

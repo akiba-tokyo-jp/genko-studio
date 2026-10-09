@@ -51,9 +51,11 @@ struct Grain {
 
 // A picture file (PNG, JPEG, BMP or GIF) taken in as a paper: laid over white (what is transparent is white paper:
 // it takes nothing from the ink), made grey as Pillow's convert("L") makes it (ITU-R 601-2) and written as a grey PNG:
-// the bytes the book keeps. core::Error with these codes (the reason in English):
+// the bytes the book keeps. A 16-bit grey picture is taken by its upper 8 bits first (Pillow's convert("L") cuts its
+// values at 255, which would make a scan of paper almost white; this build's own choice: Python has no paper). core::Error
+// with these codes (the reason in English):
 //   paper_file_too_large  more than kMaxFileBytes
-//   paper_too_large       a side over kMaxSide pixels (refused before its pixels are decoded)
+//   paper_too_large       a side over kMaxSide pixels (refused from its header, before its pixels are decoded)
 //   paper_empty           no pixels
 //   paper_format          a picture this build does not read (TIFF, WebP, PSD)
 //   paper_unreadable      not a picture, or a broken one
@@ -64,8 +66,9 @@ Grain grain_of(std::string_view png);
 
 // The pictures this process knows, by their asset ref: content-addressed, so one ref is always the same picture, of
 // whichever book it came (the books' papers are made known with their brushes: render/brushes.hpp register_book,
-// follow_book; render_page makes its book's known). Thread-safe.
-void keep(const std::string& ref, core::Bytes png);
+// follow_book; render_page makes its book's known). Only bytes that hash to their ref are kept (keep: whether they
+// did): another picture under a ref is never drawn, nor passed on to another book or a brush file. Thread-safe.
+bool keep(const std::string& ref, core::Bytes png);
 void keep_all(const std::map<std::string, core::Bytes>& papers);
 // The PNG of a ref (null when it is not known).
 core::Bytes bytes(const std::string& ref);

@@ -17,7 +17,15 @@ namespace genko::render {
 struct PngLimits {
     // Refused above this many pixels (width × height), before anything is decoded.
     std::int64_t max_pixels = 400'000'000;
+    // Refused above this many pixels on either side, before anything is decoded (0: no such limit). PNG, JPEG, BMP and
+    // GIF (its screen and its first frame) say so; the paper texture's pictures use it (render/paper.hpp).
+    std::int64_t max_side = 0;
 };
+
+// Whether a picture of w × h pixels is beyond limits.max_side (when it has one).
+inline bool beyond_side(std::int64_t w, std::int64_t h, const PngLimits& limits) {
+    return limits.max_side > 0 && (w > limits.max_side || h > limits.max_side);
+}
 
 // What Pillow's Image.open refuses (DecompressionBombError above twice MAX_IMAGE_PIXELS): the drawing opens the
 // pictures of a book with this, as the Python baseline does.

@@ -51,6 +51,11 @@ Paper paper_from_json(const Json& data);
 // are left out (the reader reports them).
 std::vector<std::string> paper_refs(const Json& brush_custom);
 
+// Whether a brush's "paper" value is this build's paper: an object with an "asset". Anything else (null; a key some
+// other writer left there, which Python ignores: a number, a string, an object without "asset") is no paper, and is
+// kept as it is where the brush's settings are kept as they were read.
+bool is_paper(const Json& value);
+
 struct Brush {
     std::string key;
     std::string label;
@@ -105,7 +110,7 @@ Json brush_to_dict(const Brush& b);
 // brushes.from_dict(key, data, base) with `custom` known: a brush from its settings, the missing ones from `base` (or
 // data["base"], or the G pen). Python's errors: PyValueError with its message when a setting is out of range or of
 // the wrong kind, and float()'s and int()'s (PyValueError, PyTypeError, PyUncaught) for values that are not numbers.
-// "paper" (this build): null for none, an object for one (paper_from_json, checked after Python's settings); when
+// "paper" (this build): one when it is_paper (paper_from_json, checked after Python's settings), else none; when
 // data does not say, the base's.
 Brush brush_from_dict(std::string_view key, const Json& data, const std::optional<std::string>& base,
                       std::span<const Brush> custom);

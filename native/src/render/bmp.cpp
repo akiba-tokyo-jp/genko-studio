@@ -106,6 +106,7 @@ Image read_bmp(std::string_view bytes, const PngLimits& limits) {
         height > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) bad_bmp();
     const std::uint64_t pixels = static_cast<std::uint64_t>(width) * height;
     if (static_cast<std::int64_t>(pixels) > limits.max_pixels) throw core::Error("image_too_large", "image has too many pixels");
+    if (beyond_side(width, static_cast<std::int64_t>(height), limits)) throw core::Error("image_too_large", "image is too wide or too tall");
     if (le(bytes, header == 12 ? 22 : 26, 2) != 1) bad_bmp();
     const auto bits = le(bytes, header == 12 ? 24 : 28, 2);
     const auto compression = header == 12 ? 0 : le(bytes, 30);

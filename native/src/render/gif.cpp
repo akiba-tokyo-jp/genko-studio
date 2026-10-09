@@ -33,7 +33,7 @@ Image read_gif(std::string_view bytes, PngLimits limits) {
     if (bytes.size() < 13 || (bytes.substr(0, 6) != "GIF87a" && bytes.substr(0, 6) != "GIF89a")) bad_gif();
     auto width = u16(bytes, 6), height = u16(bytes, 8);
     auto pixels = static_cast<std::uint64_t>(width) * height;
-    if (limits.max_pixels < 0 || pixels > static_cast<std::uint64_t>(limits.max_pixels))
+    if (limits.max_pixels < 0 || pixels > static_cast<std::uint64_t>(limits.max_pixels) || beyond_side(width, height, limits))
         throw core::Error("image_too_large", "image is too large");
     const auto flags = byte_at(bytes, 10);
     std::size_t palette_size = (flags & 0x80U) ? (1U << ((flags & 7U) + 1U)) : 0;
@@ -81,7 +81,7 @@ Image read_gif(std::string_view bytes, PngLimits limits) {
     width = std::max(width, xoff + frame_width);
     height = std::max(height, yoff + frame_height);
     pixels = static_cast<std::uint64_t>(width) * height;
-    if (pixels > static_cast<std::uint64_t>(limits.max_pixels))
+    if (pixels > static_cast<std::uint64_t>(limits.max_pixels) || beyond_side(width, height, limits))
         throw core::Error("image_too_large", "image is too large");
     const auto frame_flags = byte_at(bytes, pos + 9);
     const bool interlace = (frame_flags & 0x40U) != 0;

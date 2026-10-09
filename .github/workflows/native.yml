@@ -98,7 +98,7 @@ jobs:
             libgl-dev libegl-dev libopengl-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1-dev libfreetype-dev \
             libharfbuzz-dev liblcms2-dev libpng-dev libjpeg-turbo8-dev libtiff-dev libwebp-dev zlib1g-dev \
             nlohmann-json3-dev libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
-            libxcb-xinerama0 libxcb-xkb1 libxcb-randr0 libxcb-shape0 xvfb fonts-ipafont-gothic fonts-ipafont-mincho
+            libxcb-xinerama0 libxcb-xkb1 libxcb-randr0 libxcb-shape0 xvfb fonts-ipafont-gothic fonts-ipafont-mincho poppler-utils
       - name: Qt (official binaries, LGPL modules only)
         uses: actions/cache@v4
         id: qt-cache

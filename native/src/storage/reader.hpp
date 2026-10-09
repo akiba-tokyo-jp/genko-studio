@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -100,6 +101,13 @@ int project_version(const core::Json& payload);
 // v4's min_reader, writer, book_id, features). Other keys are kept in Document::extra and Page::extra.
 bool is_known_top_key(std::string_view key);
 bool is_known_page_key(std::string_view key);
+
+// BRUSH-01: how a paper texture's picture (a brush's paper asset, read and hashed) is checked to be drawable: nothing
+// when it is, else why not (in English). The drawing build sets it (render/paper.cpp: the picture decoded as it is
+// drawn); a picture it refuses is reported (broken_asset) and the book opens read-only. Without one (a program without
+// the drawing) the pictures are only hashed.
+using PaperCheck = std::function<std::optional<std::string>(std::string_view png)>;
+void set_paper_check(PaperCheck check);
 
 // The v4 features this build can read and write (schema-v4.md §3: the precise colour ones, native.exposure_v1 and
 // paper-texture@1).

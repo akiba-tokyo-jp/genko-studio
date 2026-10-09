@@ -420,7 +420,12 @@ void BrushPanel::fill_kinds() {
         item->setIcon(QIcon(stroke_preview(brush.key, {text.red(), text.green(), text.blue()}, QSize(72, 20))));
         item->setData(Qt::UserRole, key_of(brush.key));
         if (brush.key.starts_with("my_") && !mine.contains(brush.key)) item->setToolTip(QStringLiteral("この原稿に入っていたブラシ"));
-        if (brush.paper) item->setToolTip(item->toolTip() + (item->toolTip().isEmpty() ? QString() : QStringLiteral("・")) + QStringLiteral("紙質あり"));
+        if (brush.paper) {
+            const QString paper = render::paper::bytes(brush.paper->asset)
+                                      ? QStringLiteral("紙質あり")
+                                      : QStringLiteral("紙質の画像が見つかりません（このブラシでは描けません。ブラシの詳細で読み込み直してください）");
+            item->setToolTip(item->toolTip() + (item->toolTip().isEmpty() ? QString() : QStringLiteral("・")) + paper);
+        }
         kinds->addItem(item);
     }
 }
@@ -727,6 +732,7 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     aa = combo(kAa, b.aa);
     // 紙質: the base's paper to start from (its picture is this process's: the brush was made known with it)
     const core::Paper paper = b.paper.value_or(core::Paper{});
+    started_paper_ = paper;
     paper_asset = b.paper ? b.paper->asset : std::string();
     paper_on = new QCheckBox(QStringLiteral("紙質を使う（線の下に紙の凹凸を敷く）"));
     paper_on->setObjectName(QStringLiteral("paper_on"));
@@ -910,7 +916,7 @@ Json BrushDialog::data() const {
     out["aa"] = aa->currentData().toString().toStdString();
     out["mix"] = mix->value() / 100.0;
     out["stretch"] = stretch->value() / 100.0;
-    out["paper"] = paper_on->isChecked() && !paper_asset.empty() ? core::paper_to_json(paper_of(*this)) : Json(nullptr);
+    out["paper"] = paper_on->isChecked() && !paper_asset.empty() ? core::paper_to_json(paper()) : Json(nullptr);
     return out;
 }
 
@@ -926,6 +932,16 @@ void BrushDialog::pick_tip() {
     tip->setCurrentIndex(tip->findData(QStringLiteral("image")));
     if (spacing->value() == 0) spacing->setValue(25);
     draw_sample();
+}
+
+core::Paper BrushDialog::paper() const {
+    core::Paper p = paper_of(*this);
+    // (a value set finer than the boxes hold stays as it was while its box shows it)
+    const auto percent = [](double v) { return static_cast<int>(core::py_round_whole(v * 100)); };
+    if (paper_density->value() == percent(started_paper_.density)) p.density = started_paper_.density;
+    if (paper_scale->value() == percent(started_paper_.scale)) p.scale = started_paper_.scale;
+    if (paper_rotation->value() == static_cast<int>(core::py_round_whole(started_paper_.rotation))) p.rotation = started_paper_.rotation;
+    return p;
 }
 
 bool BrushDialog::take_paper(const QString& path) {
@@ -976,13 +992,15 @@ void BrushDialog::show_paper() {
     }
     if (!on) {
         paper_preview->setPixmap(QPixmap());
-        paper_preview->setText(paper_asset.empty() ? QStringLiteral("紙質の画像はまだありません") : QStringLiteral("紙質を使いません"));
+        paper_preview->setText(paper_asset.empty() ? QStringLiteral("紙質の画像はまだありません")
+                               : !paper_on->isChecked() ? QStringLiteral("紙質を使いません")
+                                                        : QStringLiteral("紙質の画像が見つかりません。「紙質の画像を読み込む…」で読み込み直してください"));
         paper_about->setText(QStringLiteral("線の下に紙の凹凸を敷くと、紙の暗い所でインクがかすれます。表示を拡大・縮小しても紙目の大きさは変わりません"));
         return;
     }
     // a patch of fully inked paper at 300 dpi (13.5 × 10 mm), as the brush lays its lines on it
     constexpr int w = 160, h = 120, dpi = 300;
-    const core::Paper paper = paper_of(*this);
+    const core::Paper paper = this->paper();
     std::shared_ptr<const render::paper::Grain> grain;
     render::Image cover = render::Image::create("L", render::Size{w, h}, render::Ink(255));
     try {

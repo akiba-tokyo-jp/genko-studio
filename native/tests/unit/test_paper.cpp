@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <QFileInfo>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
@@ -25,6 +26,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -253,6 +255,48 @@ bool as_expected(const render::Image& got, const QString& name) {
     return same(got, render::read_png(genko::test::read_bytes(file)), name);
 }
 
+// zlib's CRC-32 (a PNG chunk's check).
+std::uint32_t crc32(std::string_view bytes) {
+    std::uint32_t c = 0xFFFFFFFFU;
+    for (const char ch : bytes) {
+        c ^= static_cast<unsigned char>(ch);
+        for (int k = 0; k < 8; ++k) c = (c & 1U) != 0 ? 0xEDB88320U ^ (c >> 1) : c >> 1;
+    }
+    return ~c;
+}
+
+std::string be32(std::uint32_t v) {
+    return std::string{static_cast<char>(v >> 24), static_cast<char>((v >> 16) & 0xff), static_cast<char>((v >> 8) & 0xff), static_cast<char>(v & 0xff)};
+}
+
+// A PNG of only its header (8-bit grey, w × h) and its end: no pixels to decode.
+std::string png_header(std::uint32_t w, std::uint32_t h) {
+    const std::string ihdr = "IHDR" + be32(w) + be32(h) + std::string("\x08\x00\x00\x00\x00", 5);
+    return std::string("\x89PNG\r\n\x1a\n", 8) + be32(13) + ihdr + be32(crc32(ihdr)) + be32(0) + "IEND" + be32(crc32("IEND"));
+}
+
+// A GIF and a BMP of only their headers saying w × h.
+std::string gif_header(int w, int h) {
+    std::string out = "GIF89a";
+    out += static_cast<char>(w & 0xff), out += static_cast<char>(w >> 8), out += static_cast<char>(h & 0xff), out += static_cast<char>(h >> 8);
+    return out + std::string("\x00\x00\x00;", 4);
+}
+
+std::string bmp_header(int w, int h) {
+    const auto le = [](std::uint32_t v, int n) {
+        std::string out;
+        for (int i = 0; i < n; ++i) out += static_cast<char>((v >> (8 * i)) & 0xff);
+        return out;
+    };
+    return "BM" + le(54, 4) + le(0, 4) + le(54, 4) + le(40, 4) + le(static_cast<std::uint32_t>(w), 4) + le(static_cast<std::uint32_t>(h), 4) +
+           le(1, 2) + le(8, 2) + le(0, 4) + le(0, 4) + le(0, 4) + le(0, 4) + le(0, 4) + le(0, 4);
+}
+
+// The asset store's file of a ref.
+QString asset_file(const fs::path& book, const std::string& ref) {
+    return QString::fromStdString(core::path_to_utf8(book / storage::AssetStore::relpath(ref, ".png")));
+}
+
 // How a picture and the PDF's page drawn again differ, at the best of the nine shifts of at most one pixel: the shift
 // and the largest difference of a channel over the pixels both have.
 struct Fit {
@@ -394,6 +438,30 @@ private slots:
         QCOMPARE(int(g.values[2]), 0);
     }
 
+    // A 16-bit grey picture (a scan of paper often is one) is taken by its upper 8 bits (Pillow's convert("L") would cut
+    // its values at 255 and make the paper almost white).
+    void sixteenBitGrey() {
+        std::string raw;
+        std::vector<int> want;
+        for (int y = 0; y < 64; ++y) {
+            for (int x = 0; x < 64; ++x) {
+                const int v = (x * 1031 + y * 977) % 65536;
+                raw += static_cast<char>(v & 0xff), raw += static_cast<char>(v >> 8);  // (I;16: little-endian)
+                want.push_back(v >> 8);
+            }
+        }
+        const render::Image deep = render::Image::frombytes("I;16", render::Size{64, 64}, raw);
+        const std::string png = render::write_png(deep);
+        QCOMPARE(std::string(render::read_png(png).mode()), std::string("I;16"));
+        const paper::Grain g = paper::grain_of(paper::take_in(png));
+        int white = 0;
+        for (std::size_t i = 0; i < want.size(); ++i) {
+            QCOMPARE(int(g.values[i]), want[i]);
+            white += g.values[i] == 255;
+        }
+        QVERIFY(white < 64);
+    }
+
     // What is refused, and why (core::Error codes; define_brush words them, the app in Japanese).
     void takeInRefusals() {
         QCOMPARE(take_in_code(""), std::string("paper_unreadable"));
@@ -409,9 +477,17 @@ private slots:
             const std::string wide = render::write_png(render::Image::create("L", size, render::Ink(200)));
             QCOMPARE(take_in_code(wide), std::string("paper_too_large"));
         }
-        std::string huge_header = render::write_png(render::Image::create("L", render::Size{1, 1}, render::Ink(200)));
-        huge_header[16] = 0, huge_header[17] = 1, huge_header[18] = static_cast<char>(0x86), huge_header[19] = static_cast<char>(0xa0);  // (width 100000; its CRC now wrong)
-        QVERIFY(take_in_code(huge_header) == "paper_too_large" || take_in_code(huge_header) == "paper_unreadable");
+        // a side over 4096 from the header alone (no pixels there to decode): PNG, GIF and BMP; a picture of fewer pixels
+        // than 4096 × 4096 in all but one side too long (16000 × 1000)
+        QCOMPARE(take_in_code(png_header(4097, 1)), std::string("paper_too_large"));
+        QCOMPARE(take_in_code(png_header(1, 4097)), std::string("paper_too_large"));
+        QCOMPARE(take_in_code(png_header(16000, 1000)), std::string("paper_too_large"));
+        QCOMPARE(take_in_code(png_header(100000, 100000)), std::string("paper_too_large"));
+        QCOMPARE(take_in_code(png_header(4096, 4)), std::string("paper_unreadable"));  // (its size is taken: its pixels are missing)
+        QCOMPARE(take_in_code(gif_header(5000, 1)), std::string("paper_too_large"));
+        QCOMPARE(take_in_code(bmp_header(5000, 1)), std::string("paper_too_large"));
+        QCOMPARE(take_in_code(render::write_jpeg(render::Image::create("RGB", render::Size{4097, 8}, render::Ink::tuple({9, 9, 9})))),
+                 std::string("paper_too_large"));
         // the largest that is taken: 4096 on a side
         QCOMPARE(take_in_code(render::write_png(render::Image::create("L", render::Size{4096, 2}, render::Ink(9)))), std::string());
         // a file over 64 MiB is not even read as a picture
@@ -678,6 +754,131 @@ private slots:
         QVERIFY2(reported, loaded.report.to_json().dump().c_str());
         // a feature this build knows is not a reason to open read-only
         QVERIFY(storage::is_known_feature(core::kPaperFeature));
+        // and a book with a missing picture is never drawn without it
+        brushes::clear_custom();
+        paper::clear();
+        brushes::register_book(loaded.document);
+        QVERIFY(!loaded.document.papers.contains(ref));
+        QVERIFY_THROWS_EXCEPTION(core::Error, render::render_page(loaded.document.page(0), kDpi, {}, &loaded.document));
+    }
+
+    // A picture whose bytes are not the ones its name says (another picture put in its place), one that hashes right but
+    // cannot be decoded, one too large: each reported, the book read-only, the picture neither kept by the book nor known
+    // to the process (never drawn, never passed on to another book or a brush file); the page is not drawn without it;
+    // `genko render` refuses it too.
+    void brokenPictures() {
+        QTemporaryDir tmp;
+        const fs::path dir = core::path_from_utf8((tmp.path() + QStringLiteral("/p.genko")).toStdString());
+        const core::Document doc = reference_book();
+        write_book(doc, dir);
+        const std::string ref = doc.brush_custom["my_paper_a"]["paper"]["asset"].get<std::string>();
+        const std::string right = *doc.papers.at(ref);
+        // another picture in its place
+        const std::string other = render::write_png(render::Image::create("L", render::Size{8, 8}, render::Ink(0)));
+        genko::test::write_bytes(asset_file(dir, ref), other);
+        brushes::clear_custom();
+        paper::clear();
+        auto loaded = storage::load_document(dir);
+        QVERIFY(!loaded.document.read_only_reason.empty());
+        bool reported = false;
+        for (const auto& issue : loaded.report.issues) reported = reported || (issue.kind == "hash_mismatch" && issue.ref == ref);
+        QVERIFY2(reported, loaded.report.to_json().dump().c_str());
+        QVERIFY(!loaded.document.papers.contains(ref));
+        brushes::register_book(loaded.document);
+        QVERIFY(paper::bytes(ref) == nullptr);
+        QVERIFY_THROWS_EXCEPTION(core::Error, render::render_page(loaded.document.page(0), kDpi, {}, &loaded.document));
+        const auto cli = genko::test::run_genko({"render", QString::fromStdString(core::path_to_utf8(dir)), "--page", "1", "--dpi", "50", "--out",
+                                                 tmp.path() + QStringLiteral("/p.png")});
+        QVERIFY2(cli.exit_code != 0, cli.out.constData());
+        QVERIFY(!QFile::exists(tmp.path() + QStringLiteral("/p.png")));
+        // the process keeps only bytes that hash to their ref
+        QVERIFY(!paper::keep(ref, std::make_shared<const std::string>(other)));
+        QVERIFY(paper::bytes(ref) == nullptr);
+        std::map<std::string, core::Bytes> wrong{{ref, std::make_shared<const std::string>(other)}};
+        paper::keep_all(wrong);
+        QVERIFY(paper::bytes(ref) == nullptr);
+        QVERIFY(paper::keep(ref, std::make_shared<const std::string>(right)));
+        QVERIFY(*paper::bytes(ref) == right);
+        // pictures that hash right but are not drawable: cut short, and wider than 4096
+        const std::string png = render::write_png(render::Image::create("L", render::Size{40, 40}, render::Ink(77)));
+        for (const std::string& bad : {png.substr(0, png.size() - 30), render::write_png(render::Image::create("L", render::Size{5000, 1}, render::Ink(1)))}) {
+            const std::string bad_ref = storage::AssetStore::ref(bad);
+            QDir().mkpath(QFileInfo(asset_file(dir, bad_ref)).path());
+            genko::test::write_bytes(asset_file(dir, bad_ref), bad);
+            Json project = genko::test::read_json(QString::fromStdString(core::path_to_utf8(dir / "project.json")));
+            project["brush"]["custom"]["my_paper_a"]["paper"]["asset"] = bad_ref;
+            genko::test::write_bytes(asset_file(dir, ref), right);
+            genko::test::write_bytes(QString::fromStdString(core::path_to_utf8(dir / "project.json")), project.dump(2));
+            brushes::clear_custom();
+            paper::clear();
+            loaded = storage::load_document(dir);
+            QVERIFY(!loaded.document.read_only_reason.empty());
+            reported = false;
+            for (const auto& issue : loaded.report.issues) {
+                reported = reported || (issue.kind == "broken_asset" && issue.pointer == "/brush/custom/my_paper_a/paper/asset");
+            }
+            QVERIFY2(reported, loaded.report.to_json().dump().c_str());
+            QVERIFY(!loaded.document.papers.contains(bad_ref));
+        }
+    }
+
+    // Another writer's "paper" key that is not this build's paper (Python ignores it): not a reason to refuse the brush or
+    // to open the book read-only; the brush draws as it would without it, and the key is kept as it was read.
+    void strayPaperKeys() {
+        std::vector<core::Brush> known;
+        for (const Json& stray : {Json(3), Json("rough"), Json::array({1, 2}), Json{{"note", "kraft"}}, Json(nullptr)}) {
+            const core::Brush b = core::brush_from_dict("my_stray", Json{{"label", "x"}, {"paper", stray}}, std::nullopt, known);
+            QVERIFY(!b.paper);
+            QVERIFY(!core::is_paper(stray));
+            std::vector<core::Brush> custom;
+            core::register_brushes(Json{{"my_stray", Json{{"label", "x"}, {"texture", "grain"}, {"paper", stray}}}}, custom);
+            QCOMPARE(custom.size(), std::size_t(1));
+        }
+        QVERIFY(core::is_paper(Json{{"asset", "sha256:" + std::string(64, 'a')}}));
+        QVERIFY(core::is_paper(Json{{"asset", 3}}));  // (meant as one: its asset is checked, and refused)
+        QTemporaryDir tmp;
+        const fs::path dir = core::path_from_utf8((tmp.path() + QStringLiteral("/s.genko")).toStdString());
+        core::Document doc = core::new_episode("迷子", core::Num(1), 1, core::PageSpec::custom(40, 40, 30, 30, 1, 2, 2, 2, 2, 150, "mono"));
+        doc.brush_custom = Json{{"my_stray", Json{{"label", "迷子"}, {"texture", "grain"}, {"paper", Json{{"note", "kraft"}}}}}};
+        write_book(doc, dir);
+        const auto loaded = storage::load_document(dir);
+        QVERIFY2(loaded.report.clean(), loaded.report.to_json().dump().c_str());
+        QVERIFY(loaded.document.features.empty());
+        QCOMPARE(loaded.document.brush_custom["my_stray"]["paper"], (Json{{"note", "kraft"}}));
+        brushes::register_book(loaded.document);
+        QVERIFY(brushes::brush("my_stray").key == "my_stray" && !brushes::brush("my_stray").paper);
+    }
+
+    // The inherited brushes' reference page is the Python baseline's own drawing of the same lines (render.layer_image).
+    void inheritedIsPythons() {
+        if (genko::test::python_ref().isEmpty()) QSKIP("no reference Python: set GENKO_PYREF or install /opt/pyref/bin/python");
+        const core::Document doc = reference_book();
+        Json lines = Json::array();
+        for (const core::StrokePtr& s : ink_layer(doc, 1).strokes->items) {
+            Json points = Json::array();
+            for (const core::PointF& p : s->points) points.push_back(Json::array({p.x, p.y}));
+            lines.push_back(Json{{"id", s->id}, {"kind", s->kind}, {"width_mm", s->width_mm}, {"points", points}, {"pressure", s->pressure}});
+        }
+        QTemporaryDir tmp;
+        genko::test::write_bytes(tmp.path() + QStringLiteral("/lines.json"), lines.dump());
+        const QString script = QStringLiteral(
+            "import json, sys\n"
+            "from genko import models, render\n"
+            "lines = json.load(open(sys.argv[1], encoding='utf-8'))\n"
+            "spec = models.PageSpec.custom(100, 80, 90, 70, 2, 4, 4, 4, 4, 300, 'mono')\n"
+            "book = models.new_episode('紙質', 1, 2, spec)\n"
+            "page = book.pages[1]\n"
+            "page.frames = []\n"
+            "ink = next(l for l in page.layers if l.role == models.LayerRole.INK)\n"
+            "ink.strokes = [models.Stroke(id=s['id'], points=[tuple(p) for p in s['points']], pressure=s['pressure'],\n"
+            "                             width_mm=s['width_mm'], kind=s['kind']) for s in lines]\n"
+            "render.layer_image(page, ink, 300, book).save(sys.argv[2])\n");
+        const auto py = genko::test::run(genko::test::python_ref(), {QStringLiteral("-c"), script, tmp.path() + QStringLiteral("/lines.json"),
+                                                                     tmp.path() + QStringLiteral("/python.png")},
+                                         genko::test::python_env(tmp.path()));
+        QVERIFY2(py.finished && py.exit_code == 0, py.err.constData());
+        const render::Image python = render::read_png(genko::test::read_bytes(tmp.path() + QStringLiteral("/python.png")));
+        QVERIFY(same(render::read_png(data_bytes(QStringLiteral("expected/inherited-brushes.png"))), python, QStringLiteral("inherited-python")));
     }
 
     // Undo and Redo of the journal (on disk): the paper's change undone gives back the first pixels; the first use of a
@@ -723,6 +924,14 @@ private slots:
     // PNG export, each channel within 2/255; and the print is the page as render_page draws it.
     void printedPdf() {
         const QString pdftocairo = QStandardPaths::findExecutable(QStringLiteral("pdftocairo"));
+#ifdef Q_OS_LINUX
+        const bool required = true;  // (native.yml installs poppler-utils: on Linux the print is always checked)
+#else
+        const bool required = qEnvironmentVariable("GENKO_REQUIRE_PDFTOCAIRO") == QLatin1String("1");
+#endif
+        if (pdftocairo.isEmpty() && (required || qEnvironmentVariable("GENKO_REQUIRE_PDFTOCAIRO") == QLatin1String("1"))) {
+            QFAIL("no PDF rasterizer (poppler's pdftocairo): the print check of AC-BRUSH needs it (poppler-utils)");
+        }
         if (pdftocairo.isEmpty()) QSKIP("no PDF rasterizer (poppler's pdftocairo) to draw the PDF back");
         QTemporaryDir tmp;
         const core::Document doc = reference_book();

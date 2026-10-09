@@ -175,7 +175,13 @@ void PageCanvas::stroke_applied(const std::string& id) {
             if (stroke->id != id) continue;
             // the committed line (smoothed, tapered, with its id): exactly as its tiles will be, until they are
             auto kept = std::make_unique<LiveInk>(doc_, *p, layer, ink->dpi(), pen_fields_, id);
-            kept->finish(*stroke);
+            try {
+                kept->finish(*stroke);
+            } catch (const std::exception& error) {
+                emit renderFailed(QString::fromUtf8(error.what()));  // (its tiles say so too: nothing shown in their place)
+                update();
+                return;
+            }
             if (!renderer_->current(kept->dpi(), kept->box_mm())) overlays_.push_back(Overlay{std::move(kept), renderer_->generation()});
             update();
             return;
@@ -415,6 +421,22 @@ void PageCanvas::live_reset() {
 }
 
 void PageCanvas::live_sync() {
+    if (live_failed_) return;
+    try {
+        live_draw();
+    } catch (const std::exception& error) {
+        // (a line this build cannot draw now — its brush's paper picture is not here — is not shown for the rest of the
+        // stroke; the window says why, once)
+        live_failed_ = true;
+        live_.reset();
+        live_copies_.clear();
+        live_snapped_ = false;
+        update();
+        emit renderFailed(QString::fromUtf8(error.what()));
+    }
+}
+
+void PageCanvas::live_draw() {
     const core::Page* p = page();
     if (p == nullptr || tool_ != QLatin1String("pen") || !pen_layer_ || stroke_.empty()) return;
     const core::Layer* layer = nullptr;

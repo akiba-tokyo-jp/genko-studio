@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <set>
 #include <span>
 #include <system_error>
 #include <unordered_map>
@@ -79,6 +80,12 @@ const Json* find(const Json& object, std::string_view key) {
 
 std::string at_key(const std::string& at, std::string_view key) { return core::json_pointer_append(at, key); }
 std::string at_index(const std::string& at, std::size_t i) { return core::json_pointer_append(at, i); }
+
+// The drawing build's check of a paper picture (set_paper_check), set once when the program starts.
+PaperCheck& paper_check() {
+    static PaperCheck check;
+    return check;
+}
 
 [[noreturn]] void format_error(const std::string& at, const std::string& message) {
     throw core::Error("format", message + (at.empty() ? std::string() : " (at " + at + ")"), at);
@@ -442,11 +449,13 @@ core::StoryLine Reader::read_line(const Json& data, const std::string& at) {
 }
 
 void Reader::read_papers(core::Document& doc) {
-    // BRUSH-01: the pictures of the brushes' papers (a brush whose paper cannot be read, or whose picture is missing,
-    // makes the book read-only: it is never drawn without its paper, nor written without it)
+    // BRUSH-01: the pictures of the brushes' papers. A brush whose paper cannot be read, or whose picture is missing, is
+    // not the picture its name says or cannot be drawn makes the book read-only: it is never drawn without its paper (nor
+    // with another picture), nor written without it. A "paper" that is not this build's (core::is_paper) is not one.
+    std::set<std::string> checked;
     for (const auto& [name, brush] : doc.brush_custom.items()) {
         const Json* paper = find(brush, "paper");
-        if (paper == nullptr || paper->is_null()) continue;
+        if (paper == nullptr || !core::is_paper(*paper)) continue;
         const std::string at = at_key(at_key(at_key("/brush", "custom"), name), "paper");
         std::string ref;
         try {
@@ -455,8 +464,23 @@ void Reader::read_papers(core::Document& doc) {
             issue("broken_asset", at, {}, std::string("the paper of this brush cannot be read: ") + error.what());
             continue;
         }
-        if (doc.papers.contains(ref)) continue;
-        if (core::Bytes png = read_png(*find(*paper, "asset"), at_key(at, "asset"), nullptr)) doc.papers.emplace(ref, std::move(png));
+        if (doc.papers.contains(ref) || !checked.insert(ref).second) continue;  // (each picture once)
+        const std::string at_asset = at_key(at, "asset");
+        core::Bytes png = read_png(*find(*paper, "asset"), at_asset, nullptr);
+        if (!png) continue;  // (missing: reported)
+        if (AssetStore::ref(*png) != ref) {
+            if (!options_.verify_hashes) {
+                issue("hash_mismatch", at_asset, ref, "the picture " + AssetStore::relpath(ref, ".png") + " does not hold the bytes its name says");
+            }
+            continue;  // (another picture in its place: not this paper)
+        }
+        if (const PaperCheck& check = paper_check()) {
+            if (const auto why = check(*png)) {
+                issue("broken_asset", at_asset, ref, "the paper picture " + AssetStore::relpath(ref, ".png") + " cannot be drawn: " + *why);
+                continue;
+            }
+        }
+        doc.papers.emplace(ref, std::move(png));
     }
 }
 
@@ -1051,6 +1075,8 @@ Json LoadReport::to_json() const {
     out["issues"] = std::move(list);
     return out;
 }
+
+void set_paper_check(PaperCheck check) { paper_check() = std::move(check); }
 
 bool is_known_top_key(std::string_view key) { return in(kTopKeys, key); }
 bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }

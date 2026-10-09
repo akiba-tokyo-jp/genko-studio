@@ -112,7 +112,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(paper has an unknown setting: (.*))", "紙質に知らない設定があります（\\1）"));
         r.push_back(rule(R"(paper asset must be an asset ref.*)", "紙質の画像（asset）は sha256: と 64 桁の 16 進数で指定します"));
         r.push_back(rule("paper must be an object or null", "紙質は設定のまとまり（オブジェクト）か null で指定します"));
-        r.push_back(rule(R"(the paper picture \S+ is not known here.*)", "紙質の画像が見つかりません（ブラシの詳細で紙質の画像を読み込み直してください）"));
+        r.push_back(rule(R"(the paper picture \S+ is not known here.*)",
+                         "紙質の画像が見つかりません（原稿の素材が欠けているなら、原稿の assets フォルダーに画像を戻すまで、そのブラシでは描けません。"
+                         "自分のブラシなら、ブラシの詳細で紙質の画像を読み込み直せます）"));
+        r.push_back(rule(R"(the brush paper library cannot be read, so it is left as it is: (.*))",
+                         "自分のブラシの紙質の一覧（brush_papers.json）を読めないため、そのままにしました（紙質のあるブラシは保存できません）: \\1"));
         r.push_back(rule("a brush of one's own has a key starting with my_", "自作のブラシの名前（key）は my_ で始めます"));
         r.push_back(rule("wobble must be between 0 and 1", "線の揺れは 0〜1 の間で決めます"));
         r.push_back(rule("spikes must be between 6 and 80", "トゲの数は 6〜80 の間で決めます"));
