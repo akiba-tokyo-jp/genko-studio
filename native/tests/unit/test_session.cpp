@@ -2390,6 +2390,76 @@ private slots:
         QCOMPARE(h.done[1].ops[0].value("page", 0), 1);
         QCOMPARE(h.done[2].ops[0].value("op", std::string()), std::string("recover"));
     }
+
+    // A conflict whose read of the book failed for a moment (the book could not be read): the read is tried again soon,
+    // and when what waits can be made on the book then, the conflict ends without another change or save asked.
+    void aConflictsReadThatFailedIsTriedAgain() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        auto session = conflict_after_journal_undo(book, options);
+        QCOMPARE(session->status().code, QStringLiteral("rebase_conflict"));
+        session->undo();  // E (the pair adds nothing: a read of the book ends the conflict)
+        const fs::path project = book / "project.json";
+        fs::permissions(project, fs::perms::none);
+        session->save_now();  // (the book read again: it cannot be)
+        QVERIFY(session->wait_idle(10000ms));
+        fs::permissions(project, fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read);
+        QCOMPARE(session->status().code, QStringLiteral("rebase_conflict"));
+        QVERIFY2(wait_for([&] { return session->status().kind == SaveKind::Saved; }, 8000), qPrintable(session->status().code));
+        QCOMPARE(session->document().pages.size(), std::size_t{2});
+    }
+
+    // Taking a recovery point whose save failed before the book took it, then another writer's change: the recovery is
+    // not made on the book as it is now (a conflict), and — the book read again shows it is not there — Undo takes it
+    // back, so the book is shown as it is and saved again.
+    void aRecoveryNotWrittenBeforeAnotherWritersChangeCanBeUndone() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_book(book);
+        Session::Options options = quick(recovery);
+        options.autosave = false;
+        {
+            auto lost = Session::open(book, options);
+            lost->apply(stroke_op(40, 2));
+            lost->write_recovery_copy();
+            QVERIFY(lost->wait_idle(10000ms));
+        }
+        auto session = Session::open(book, options);
+        QVERIFY(session->recovery_offer().has_value());
+        const fs::path journal = genko::storage::journal::journal_file(book);
+        fs::permissions(journal, fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read);
+        session->adopt_recovery();  // (its save fails: the journal cannot be written)
+        QVERIFY(session->wait_idle(10000ms));
+        fs::permissions(journal, fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read);
+        QVERIFY(session->unsaved());
+        {
+            genko::storage::ProjectLock lock(book, "ai:other");
+            lock.try_acquire();
+            const auto loaded = genko::storage::load_document(book);
+            const genko::core::CommandBus bus;
+            const auto result = bus.apply(loaded.document, Json::array({Json::object({{"op", "set_note"}, {"page", 2}, {"note", "外"}})}),
+                                          genko::core::Actor("ai:other"));
+            genko::storage::SaveRequest request;
+            request.actor = "ai:other";
+            request.base_revision = loaded.document.revision;
+            request.ops = result.journal_ops;
+            genko::storage::Saver(lock).save(result.doc, request);
+            lock.release();
+        }
+        session->check_outside();  // (the window's watcher: the book moved on)
+        QVERIFY(session->wait_idle(10000ms));
+        QCOMPARE(session->status().code, QStringLiteral("rebase_conflict"));
+        QCOMPARE(apply_error_code(*session, Json::array({Json::object({{"op", "undo"}})})), std::string("applied"));
+        session->save_now();
+        QVERIFY(session->wait_idle(10000ms));
+        QVERIFY2(session->status().kind == SaveKind::Saved, qPrintable(session->status().code));
+        QCOMPARE(session->document().page(1).note, std::string("外"));
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{0});
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{0});
+    }
 };
 
 QTEST_GUILESS_MAIN(TestSession)

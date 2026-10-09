@@ -1187,10 +1187,16 @@ void Session::job_done(const JobResult& r) {
     case Job::Kind::Rebase:
         rebasing_ = false;
         if (r.ok) {
+            // (read after the book's repair: a step given to the disk that is not there now was not written — an
+            // adopted recovery point among them can be undone again)
+            for (Action& action : queue_) {
+                if (action.sent && r.written.count(action.txn) == 0) action.sent = false;
+            }
             rebase_onto(r.doc, r.revision, r.undo_depth, r.redo_depth, false, r.written);
         } else if (failure_code_ == QLatin1String("rebase_conflict")) {
-            // (the conflict stands until a read of the book takes what waits: nothing is written over the book meanwhile)
-            if (r.code == QLatin1String("locked")) retry_timer_.start(3000);
+            // (the conflict stands until a read of the book takes what waits — nothing is written over the book
+            // meanwhile —: read again soon)
+            retry_timer_.start(3000);
         } else if (r.code == QLatin1String("locked")) {
             retry_timer_.start(3000);
             failed_ = true;

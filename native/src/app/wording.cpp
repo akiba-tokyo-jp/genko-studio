@@ -486,6 +486,9 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the latest saved change is not the one this session made", "原稿の最後の変更が、この画面でした変更ではないため、元に戻せません"));
         r.push_back(rule("the latest saved change is not the one this session undid",
                          "原稿で最後に取り消された変更が、この画面で取り消した変更ではないため、やり直せません"));
+        // (a book read again while the adopted recovery point waited to be written: app/session.cpp)
+        r.push_back(rule("the recovery point was not taken: the book changed meanwhile",
+                         "その間に原稿が変わったため、復旧用コピーを採用していません（元に戻すか、別名で保存してください）"));
         r.push_back(rule("the project did not exist before this change", "これより前には戻せません"));
         r.push_back(rule("snapshot .* is missing .*", "戻すための記録が見つかりません"));
         r.push_back(rule("revision conflict.*", "原稿がほかで変わっています。開き直してからやり直します"));

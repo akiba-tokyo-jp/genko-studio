@@ -1148,6 +1148,9 @@ private slots:
                                                     "'/c/.genko-fedcba9876543210.old'")),
                  QStringLiteral("書き出したファイルを置けず、前からあったファイルも元の場所に戻せませんでした。前のファイルは"
                                 "「/b/.genko-0123456789abcdef.old」「/c/.genko-fedcba9876543210.old」にあります"));
+        // (the session's conflict for an adopted recovery point not yet written when another writer saved)
+        QCOMPARE(app::wording::error(QStringLiteral("the recovery point was not taken: the book changed meanwhile")),
+                 QStringLiteral("その間に原稿が変わったため、復旧用コピーを採用していません（元に戻すか、別名で保存してください）"));
     }
 
     // A book without pages: its export dialog opens, with nothing to show.
