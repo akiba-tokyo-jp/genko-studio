@@ -209,6 +209,16 @@ double filter_support(Resample r) {
     return 0.0;
 }
 
+// ImagingCopy: Pillow's _copy copies row by row, and an image without columns has null rows — a memcpy from a null row
+// is undefined even for no bytes (UBSan stops there: a PSD's layer of no width). Such an image has nothing to copy: it
+// is made anew in the same mode and size (and palette).
+ImagingMemoryInstance* copy_of(ImagingMemoryInstance* im) {
+    if (im->xsize > 0 && im->ysize > 0) return ImagingCopy(im);
+    ImagingMemoryInstance* out = ImagingNew2Dirty(im->mode, nullptr, im);
+    if (out != nullptr) ImagingCopyPalette(out, im);
+    return out;
+}
+
 }  // namespace
 
 // --- Ink ------------------------------------------------------------------------------------------------------------
@@ -330,7 +340,7 @@ Image::~Image() {
 }
 
 Image::Image(const Image& other) : transparency_(other.transparency_), gif_logical_l_(other.gif_logical_l_) {
-    if (other.im_ != nullptr) im_ = check(ImagingCopy(other.im_));
+    if (other.im_ != nullptr) im_ = check(copy_of(other.im_));
 }
 
 Image& Image::operator=(const Image& other) {
@@ -493,7 +503,7 @@ std::vector<double> Image::getpixel(int x, int y) const {
 
 Image Image::copy() const {
     require();
-    return derived(ImagingCopy(im_));
+    return derived(copy_of(im_));
 }
 
 Image Image::crop(const Box& box) const {

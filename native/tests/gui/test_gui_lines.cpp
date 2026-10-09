@@ -792,7 +792,8 @@ private slots:
         QCOMPARE(s.last()["style"].size(), std::size_t{46});
         QVERIFY(!s.last()["style"].contains("group"));
         QCOMPARE(s.last()["style"].begin().key(), std::string("font"));
-        for (const auto& [key, value] : s.last()["style"].items()) QVERIFY2(value.is_null(), key.c_str());
+        const Json cleared = s.last()["style"];  // (kept: a range-for over a temporary's items() reads freed memory)
+        for (const auto& [key, value] : cleared.items()) QVERIFY2(value.is_null(), key.c_str());
         // a tail's width: the line's style, then its tails (both: the field is one of the style's, as in Python)
         s.window->go_to_page(1);
         const std::string tailed = s.put(Json{{"op", "add_line"}, {"text", "しっぽ"}, {"x_mm", 40.0}, {"y_mm", 50.0}, {"w_mm", 30.0}, {"h_mm", 40.0},

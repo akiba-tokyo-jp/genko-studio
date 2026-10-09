@@ -267,6 +267,21 @@ private slots:
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, l.crop(render::Box{0, 0, 20000, 20000}));
     }
 
+    void imagesWithoutPixelsCopy() {
+        // (as a PSD's layer of no width: Pillow's row copy would read a null row, which the ASan build stops on)
+        for (const render::Size size : {render::Size{0, 5}, render::Size{5, 0}, render::Size{0, 0}}) {
+            for (const char* mode : {"L", "RGB", "RGBA"}) {
+                const Image empty = Image::create(mode, size);
+                const Image copied(empty);  // NOLINT(performance-unnecessary-copy-initialization): the copy is the test
+                QCOMPARE(copied.size().width, size.width);
+                QCOMPARE(copied.size().height, size.height);
+                QCOMPARE(std::string(copied.mode()), std::string(mode));
+                QCOMPARE(empty.copy().size().width, size.width);
+                QCOMPARE(Image::merge("RGB", {empty.convert("L"), empty.convert("L"), empty.convert("L")}).size().height, size.height);
+            }
+        }
+    }
+
     void resize_region() {
         // a part of a resized picture is the same as cutting it from the whole one, for every filter and mode
         unsigned seed = 12345;
