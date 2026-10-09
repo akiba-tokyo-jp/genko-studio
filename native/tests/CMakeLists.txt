@@ -208,6 +208,9 @@ if(GENKO_BUILD_APP)
   # 台詞 (M4①c): the text tool, the balloon pen, a balloon's handles and menu, the 台詞 panel, the story editor and
   # 台詞の検索・置換, each gesture's ops against Python's window, the page drawn after them
   genko_test(test_gui_lines SOURCES gui/test_gui_lines.cpp DEPS genko_app GUI TIMEOUT 900)
+  # the book and its pages (M4②c): spreads, the nombre, the paper, covers, who draws a page, another book's pages taken
+  # in (its assets copied first), a PSD as layers, the page list's menu; each command's ops against Python's window
+  genko_test(test_gui_book SOURCES gui/test_gui_book.cpp DEPS genko_app GUI TIMEOUT 900)
   genko_test(test_session SOURCES unit/test_session.cpp DEPS genko_app LABELS unit TIMEOUT 300)
   # the pen: Python's packing of mouse and tablet input, and the live line's pixels against the renderer's per brush
   genko_test(test_gui_pen SOURCES gui/test_gui_pen.cpp DEPS genko_app GUI TIMEOUT 1200)

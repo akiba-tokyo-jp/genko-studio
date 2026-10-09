@@ -48,6 +48,9 @@ public:
     PaperDialog(QWidget* parent, const core::PageSpec& spec, bool changing = false);
     // The paper chosen (throws core::Error when the numbers do not fit).
     core::PageSpec spec() const;
+    // The set_page_spec op for this choice (Python's PaperDialog.op): the preset by its key, or every number; and
+    // whether what is on the pages moves with the basic frame.
+    core::Json op() const;
     QPushButton* ok_button() const { return ok_; }
     QPushButton* cancel_button() const { return cancel_; }
 

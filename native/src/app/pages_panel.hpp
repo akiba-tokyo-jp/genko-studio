@@ -13,8 +13,8 @@
 #include "core/model.hpp"
 
 // The page list (Python's genko/app/pages_panel.py): a small picture of every page, drag to reorder, and a menu for
-// adding, copying, moving and deleting. The pictures come from the lasting cache and are made only for the rows in
-// sight, one at a time on a worker thread, so the window stays quick however long the book is.
+// adding, copying, moving and deleting, spreads and the page's nombre. The pictures come from the lasting cache and are
+// made only for the rows in sight, one at a time on a worker thread, so the window stays quick however long the book is.
 
 namespace genko::app {
 
@@ -45,6 +45,10 @@ signals:
     void addAfterRequested(int index);
     void duplicateRequested(int index);
     void deleteRequested(int index);
+    // the menu's spreads (MainWindow.set_spread): with the page `other`, or undone; the page's nombre shown or hidden
+    void spreadRequested(int index, int other);
+    void spreadUndone(int index);
+    void numeroRequested(int index, bool numero);
 
 protected:
     void dropEvent(QDropEvent* event) override;

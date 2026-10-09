@@ -271,7 +271,10 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
     const bool same_onion = !same_page || (onion_page(*doc_, *shown_page_, mode_) == onion &&
                                            (onion == nullptr || same_story(*doc_, *doc, onion->index)));
     const bool same_book = !same_page || same_book_look(*doc_, *doc);
-    if (!same_page) {
+    // (the same page on other paper — 原稿用紙の設定, or its undo — is drawn anew at its new size, as another page is)
+    const bool resized = same_page && !(same_num(shown_page_->spec.width_mm, page.spec.width_mm) &&
+                                        same_num(shown_page_->spec.height_mm, page.spec.height_mm));
+    if (!same_page || resized) {
         for (auto& [dpi, level] : levels_) {
             for (Tile& tile : level.tiles) {
                 if (tile.stop) tile.stop->request_stop();

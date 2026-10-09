@@ -1,9 +1,10 @@
 // The screens and the small widgets of SPEC UX-02 / ACCEPTANCE.md AC-UX (M2-G1 試験 4, 5).
 //
-//   4  the start screen, 新しい原稿, 用紙の設定, the templates, the question before closing, the whole path and the main
-//      window, on screens of 1024 × 640, 1366 × 768 and 1920 × 1080 at 100, 125, 150 and 200 % scaling: each window is
-//      inside the screen, and its buttons (閉じる, 作る, やめる, 決める, キャンセル…) are wholly in sight — the rest of the
-//      body scrolls. The size asked for and the size each window got are both written to the log.
+//   4  the start screen, 新しい原稿, 用紙の設定 (for a new book and for the book's own), ノンブルの設定, 表紙・カバーを足す,
+//      the templates, the question before closing, the whole path and the main window, on screens of 1024 × 640,
+//      1366 × 768 and 1920 × 1080 at 100, 125, 150 and 200 % scaling: each window is inside the screen, and its buttons
+//      (閉じる, 作る, やめる, 決める, キャンセル…) are wholly in sight — the rest of the body scrolls. The size asked for
+//      and the size each window got are both written to the log.
 //   5  a path of more than 200 characters (Japanese folder names) is cut in the middle to fit, never only in part: a
 //      click shows all of it, コピー puts all of it on the clipboard.
 //   and the preview that fits a page whatever its shape (I08), the entrance for typed Japanese (input method events:
@@ -15,8 +16,11 @@
 
 #include <QtTest>
 
+#include <QCheckBox>
 #include <QClipboard>
+#include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QInputMethodEvent>
 #include <QListWidget>
 #include <QPlainTextEdit>
@@ -25,11 +29,13 @@
 #include <QScreen>
 #include <QScrollArea>
 #include <QSignalSpy>
+#include <QSpinBox>
 #include <QStatusBar>
 
 #include <fstream>
 #include <memory>
 
+#include "app/book_dialogs.hpp"
 #include "app/canvas.hpp"
 #include "app/dialogs.hpp"
 #include "app/fit_preview.hpp"
@@ -141,6 +147,29 @@ int probe(int argc, char** argv) {
                        {{QStringLiteral("決める"), dialog.ok_button(), true}, {QStringLiteral("やめる"), dialog.cancel_button(), true}})
                    .dump()
             << "\n";
+    }
+    {
+        // 原稿用紙の設定… (the book's paper changed: its question whether what is on the pages moves)
+        app::PaperDialog dialog(nullptr, core::PageSpec::b4_comic(), true);
+        out << look_at(QStringLiteral("paper-change"), &dialog, QSize(760, 520),
+                       {{QStringLiteral("変える"), dialog.ok_button(), true}, {QStringLiteral("やめる"), dialog.cancel_button(), true},
+                        {QStringLiteral("動かす"), dialog.move, false}})
+                   .dump()
+            << "\n";
+    }
+    {
+        // ノンブルの設定… and 表紙・カバーを足す… (M4: Python's forms; their rows scroll, their buttons stay in sight)
+        const core::Document doc = new_doc(2);
+        app::NombreDialog nombre(nullptr, doc);
+        std::vector<Seen> seen = buttons_of(&nombre, true);
+        for (QWidget* field : std::vector<QWidget*>{nombre.shown, nombre.position, nombre.face, nombre.size_mm, nombre.start, nombre.hidden,
+                                                    nombre.hidden_mm})
+            seen.push_back(Seen{field->objectName(), field, false});
+        out << look_at(QStringLiteral("nombre"), &nombre, nombre.size(), seen).dump() << "\n";
+        app::CoverDialog cover(nullptr, doc);
+        seen = buttons_of(&cover, true);
+        for (QWidget* field : std::vector<QWidget*>{cover.kind, cover.spine, cover.flap, cover.band}) seen.push_back(Seen{field->objectName(), field, false});
+        out << look_at(QStringLiteral("cover"), &cover, cover.size(), seen).dump() << "\n";
     }
     {
         auto doc = std::make_shared<const core::Document>(new_doc(2));
@@ -278,7 +307,7 @@ private slots:
                 }
             }
         }
-        QCOMPARE(windows, 7);
+        QCOMPARE(windows, 10);
     }
 
     // 試験 5: a long Japanese path, cut to fit, all of it one click away, copied whole

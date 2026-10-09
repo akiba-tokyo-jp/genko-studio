@@ -358,6 +358,19 @@ core::PageSpec PaperDialog::spec() const {
                                   bottom->value(), inner->value(), outer->value(), dpi->value());
 }
 
+Json PaperDialog::op() const {
+    if (!preset_key_.isEmpty()) {
+        return Json::object({{"op", "set_page_spec"}, {"preset", preset_key_.toStdString()}, {"move", move->isChecked()}});
+    }
+    return Json::object({{"op", "set_page_spec"},
+                         {"paper", Json::array({paper_w->value(), paper_h->value()})},
+                         {"trim", Json::array({trim_w->value(), trim_h->value()})},
+                         {"bleed_mm", bleed->value()},
+                         {"margins", Json::array({top->value(), bottom->value(), inner->value(), outer->value()})},
+                         {"dpi", dpi->value()},
+                         {"move", move->isChecked()}});
+}
+
 void PaperDialog::changed(bool keep_preset) {
     if (!keep_preset && !preset_key_.isEmpty()) {
         preset_key_.clear();

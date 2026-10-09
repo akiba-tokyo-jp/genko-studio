@@ -45,6 +45,8 @@ genko_library(genko_app
     main_window_guides.cpp
     main_window_materials.cpp
     main_window_lines.cpp
+    main_window_book.cpp
+    book_dialogs.cpp
     canvas_tools.cpp
     canvas_vector.cpp
     canvas_guides.cpp

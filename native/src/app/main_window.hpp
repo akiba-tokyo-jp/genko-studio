@@ -365,6 +365,16 @@ private:
     bool balloon_eraser_stroke(const StrokeInput& stroke, const core::Page& page);
     void open_story_editor();
     void replace_dialog();
+    // the book and its pages (main_window_book.cpp)
+    void build_book_actions();
+    void set_spread(const core::Num& index, const std::optional<core::Num>& other);
+    void toggle_spread();
+    void toggle_page_nombre();
+    void paper_settings();
+    void add_cover_dialog();
+    void assignee_dialog();
+    void merge_book();
+    void import_psd();
     // editing lines (main_window_vector.cpp)
     void build_vector_actions();
     void build_vector_pages(ToolSettings* ts);

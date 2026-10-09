@@ -2,6 +2,7 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QDialog>
 #include <QTimer>
 #include <QDockWidget>
@@ -46,12 +47,12 @@ private slots:
         QVERIFY(window.action("act_nombre"));const auto before=session->snapshot();bool seen=false;
         QTimer::singleShot(0,&window,[&]{
             auto* dialog=window.findChild<QDialog*>("nombre_dialog");if(!dialog)return;seen=true;
-            auto* font=dialog->findChild<QComboBox*>("nombre_font");auto* start=dialog->findChild<QLineEdit*>("nombre_start");
-            if(!font||!start){dialog->reject();return;}font->setCurrentIndex(font->findData("hand"));start->setText("12");dialog->findChild<QCheckBox*>("nombre_hidden")->setChecked(true);
+            auto* font=dialog->findChild<QComboBox*>("nombre_font");auto* start=dialog->findChild<QSpinBox*>("nombre_start");
+            if(!font||!start){dialog->reject();return;}font->setCurrentIndex(font->findData("hand"));start->setValue(12);dialog->findChild<QCheckBox*>("nombre_hidden")->setChecked(true);
             const QString screenshots=qEnvironmentVariable("GENKO_GUI_SCREENSHOTS");if(!screenshots.isEmpty()){QVERIFY(QDir().mkpath(screenshots));QVERIFY(dialog->grab().save(screenshots+"/nombre-dialog.png"));}
             dialog->accept();
         });window.action("act_nombre")->trigger();QVERIFY(seen);
-        QCOMPARE(window.book().nombre.at("font"),core::Json("hand"));QCOMPARE(window.book().nombre.at("start"),core::Json("12"));
+        QCOMPARE(window.book().nombre.at("font"),core::Json("hand"));QCOMPARE(window.book().nombre.at("start"),core::Json(12));  // (Python's dialog: its spin box's number)
         const auto pixels=[&](const core::Document& d){render::RenderOptions ro;ro.mode="print";ro.finish=false;return render::render_page(d.page(0),110,ro,&d).image;};
         const auto image=pixels(window.book());QVERIFY(image.tobytes()!=pixels(*before).tobytes());
         QFile cases(QStringLiteral(GENKO_REPO_ROOT)+"/native/tests/fixtures/render/nombre-cases.json");QVERIFY(cases.open(QIODevice::ReadOnly));
@@ -80,11 +81,14 @@ private slots:
         QTimer::singleShot(0,&window,[&]{auto* dialog=window.findChild<QDialog*>("nombre_dialog");if(!dialog)return;seen=true;
             auto* visible=dialog->findChild<QDoubleSpinBox*>("nombre_size");auto* hidden=dialog->findChild<QDoubleSpinBox*>("nombre_hidden_size");
             QCOMPARE(visible->minimum(),1.0);QCOMPARE(visible->maximum(),20.0);QCOMPARE(hidden->minimum(),1.0);QCOMPARE(hidden->maximum(),10.0);
-            dialog->findChild<QCheckBox*>("nombre_numero")->setChecked(false);dialog->findChild<QLineEdit*>("nombre_start")->setText("-1");dialog->accept();
+            // (the first page's number: Python's spin box, 0 to 9999; -1 cannot be given)
+            auto* start=dialog->findChild<QSpinBox*>("nombre_start");QCOMPARE(start->minimum(),0);QCOMPARE(start->maximum(),9999);start->setValue(-1);QCOMPARE(start->value(),0);
+            dialog->reject();
         });window.action("act_nombre")->trigger();QVERIFY(seen);QCOMPARE(session->snapshot(),before);
-        QTimer::singleShot(0,&window,[&]{auto* dialog=window.findChild<QDialog*>("nombre_dialog");if(!dialog)return;
-            dialog->findChild<QCheckBox*>("nombre_numero")->setChecked(false);auto* font=dialog->findChild<QComboBox*>("nombre_font");font->addItem("invalid","not-a-font");font->setCurrentIndex(font->count()-1);dialog->accept();
-        });window.action("act_nombre")->trigger();QCOMPARE(session->snapshot(),before);
+        bool refused=false;
+        QTimer::singleShot(0,&window,[&]{auto* dialog=window.findChild<QDialog*>("nombre_dialog");if(!dialog)return;refused=true;
+            auto* font=dialog->findChild<QComboBox*>("nombre_font");font->addItem("invalid","not-a-font");font->setCurrentIndex(font->count()-1);dialog->accept();
+        });window.action("act_nombre")->trigger();QVERIFY(refused);QCOMPARE(session->snapshot(),before);
     }
     void nombreModalKeepsTarget(){
         QFETCH(QString,change);auto doc=core::new_episode("ノンブル対象",core::Num(1),2,core::PageSpec::custom(70,95,60,85,3,8,8,7,6));
@@ -92,13 +96,15 @@ private slots:
         app::Session::Options options;options.autosave=false;auto session=std::make_shared<app::Session>(doc,std::nullopt,options);app::MainWindow window(session);
         window.go_to_page(10);const auto before=session->snapshot();bool seen=false;
         QTimer::singleShot(0,&window,[&]{auto* dialog=window.findChild<QDialog*>("nombre_dialog");if(!dialog)return;seen=true;
-            dialog->findChild<QCheckBox*>("nombre_numero")->setChecked(false);dialog->findChild<QLineEdit*>("nombre_start")->setText(change=="invalid"?"bad":"12");
+            dialog->findChild<QSpinBox*>("nombre_start")->setValue(12);
+            if(change=="invalid"){auto* font=dialog->findChild<QComboBox*>("nombre_font");font->addItem("invalid","not-a-font");font->setCurrentIndex(font->count()-1);}
             if(change=="page")window.go_to_page(11);
             if(change=="document")window.add_document(std::make_shared<app::Session>(doc,std::nullopt,options));
             if(change=="snapshot")window.apply_ops(core::Json::array({core::Json{{"op","set_note"},{"page",11},{"note","変更"}}}));
             if(change=="cancel")dialog->reject();else dialog->accept();
         });window.action("act_nombre")->trigger();QVERIFY(seen);
-        if(change=="stored-number"){QVERIFY(!session->document().page(0).numero);QVERIFY(session->document().page(1).numero);QCOMPARE(session->document().nombre.at("start"),core::Json("12"));}
+        // (a page's own nombre is このページのノンブルを隠す／出す, not this dialog: test_gui_book)
+        if(change=="stored-number"){QVERIFY(session->document().page(0).numero);QVERIFY(session->document().page(1).numero);QCOMPARE(session->document().nombre.at("start"),core::Json(12));}
         else{QCOMPARE(session->document().nombre,before->nombre);QVERIFY(session->document().page(0).numero);QVERIFY(session->document().page(1).numero);if(change!="snapshot")QCOMPARE(session->snapshot(),before);else QCOMPARE(session->document().page(1).note,std::string("変更"));}
     }
     void kindSearchAliasesMatchLegacy_data() {

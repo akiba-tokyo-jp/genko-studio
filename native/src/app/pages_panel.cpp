@@ -182,6 +182,17 @@ void PageList::show_menu(const QPoint& pos) {
     QListWidgetItem* at = itemAt(pos);
     if (at == nullptr) return;
     const int index = at->data(Qt::UserRole).toInt();
+    // (the page the row stands for: none, no menu)
+    const core::Page* shown = nullptr;
+    if (doc_) {
+        for (const auto& p : doc_->pages) {
+            if (p->index == core::Num(index)) {
+                shown = p.get();
+                break;
+            }
+        }
+    }
+    if (shown == nullptr) return;
     QMenu menu(this);
     menu.addAction(QStringLiteral("この後ろにページを追加"), this, [this, index] { emit addAfterRequested(index); });
     menu.addAction(QStringLiteral("このページを複製"), this, [this, index] { emit duplicateRequested(index); });
@@ -200,6 +211,21 @@ void PageList::show_menu(const QPoint& pos) {
     };
     menu.addAction(QStringLiteral("前へ移す"), this, [move, index] { move(index, -1); });
     menu.addAction(QStringLiteral("後ろへ移す"), this, [move, index] { move(index, 1); });
+    menu.addSeparator();
+    // a spread with the page after or before (Python offers both, whether or not they face each other), or undone
+    if (shown->spread_with && shown->spread_with->truthy()) {
+        menu.addAction(QStringLiteral("見開きを解除"), this, [this, index] { emit spreadUndone(index); });
+    } else {
+        if (index < static_cast<int>(doc_->pages.size())) {
+            menu.addAction(QStringLiteral("%1 ページと見開きにする").arg(index + 1), this, [this, index] { emit spreadRequested(index, index + 1); });
+        }
+        if (index > 1) {
+            menu.addAction(QStringLiteral("%1 ページと見開きにする").arg(index - 1), this, [this, index] { emit spreadRequested(index, index - 1); });
+        }
+    }
+    const bool numero = shown->numero;
+    menu.addAction(numero ? QStringLiteral("このページのノンブルを隠す") : QStringLiteral("このページのノンブルを出す"), this,
+                   [this, index, numero] { emit numeroRequested(index, !numero); });
     menu.addSeparator();
     menu.addAction(QStringLiteral("このページを消す…"), this, [this, index] {
         if (ask::question(this, QStringLiteral("Genko"), QStringLiteral("%1 ページを消しますか？（元に戻す で取り消せます）").arg(index))) {

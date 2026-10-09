@@ -244,15 +244,17 @@ private slots:
         // (test_gui_paint), the 31 of the rulers and 3D theirs (test_gui_guides), the 23 of effect lines, tones, materials,
         // the view's extras, the layer commands and the scans theirs (test_gui_effects), the 8 of the lines of dialogue
         // (M4: act_text, act_line_type, act_balloon_pen, act_line_edit, act_line_delete, act_line_wrap, act_story_editor,
-        // act_replace) theirs (test_gui_lines).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{179});
+        // act_replace) theirs (test_gui_lines), the 7 of the book and its pages (M4②c: act_spread, act_paper,
+        // act_page_nombre, act_add_cover, act_assignee, act_merge_book, act_import_psd; act_nombre, Python's now, was
+        // here before) theirs (test_gui_book).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{186});
         QVERIFY(w->action("act_exposure"));
         QVERIFY(w->action("act_nombre"));
         for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten",
                                  "act_layer_convert_paint", "act_layer_convert_pen"}) {
             QVERIFY2(w->action(name), name);
         }
-        QCOMPARE(w->action("act_nombre")->text(),QStringLiteral("ノンブル（ページ番号）の設定…"));
+        QCOMPARE(w->action("act_nombre")->text(),QStringLiteral("ノンブルの設定…"));  // (Python's words)
         QVERIFY(menus_of(w,w->action("act_nombre")).contains(QStringLiteral("ページ")));
         for (const Expected& e : expected()) {
             const QString name = QString::fromLatin1(e.attribute);
