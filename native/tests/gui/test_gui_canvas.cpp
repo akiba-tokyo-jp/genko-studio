@@ -11,6 +11,8 @@
 
 #include "app/canvas.hpp"
 #include "app/tiles.hpp"
+#include "core/strokes.hpp"
+#include "render/brushes.hpp"
 #include "render/page.hpp"
 #include "app/frame_tools.hpp"
 #include "app/icons.hpp"
@@ -64,6 +66,17 @@ struct Desk {
 
 QPointF centre(const core::Frame& f) { return QPointF(f.rect.x.value() + f.rect.width.value() / 2, f.rect.y.value() + f.rect.height.value() / 2); }
 
+// The page as render_page draws it in proof (what the tiles must compose to).
+QImage drawn(const core::Document& doc, std::size_t index, int dpi) {
+    genko::render::RenderOptions options;
+    options.mode = "proof";
+    options.skip_unported = true;
+    const auto image = genko::render::render_page(doc.page(index), dpi, options, &doc).image;
+    const auto bytes = image.tobytes();
+    return QImage(reinterpret_cast<const uchar*>(bytes.data()), image.width(), image.height(), image.width() * 3, QImage::Format_RGB888)
+        .convertToFormat(QImage::Format_RGB32);
+}
+
 }  // namespace
 
 class TestGuiCanvas : public QObject {
@@ -115,6 +128,85 @@ private slots:
         QCOMPARE(renderer.generation(), print_generation);
         QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
         QCOMPARE(renderer.compose(72), printed);
+    }
+
+    // The nombre (proof) shows the page's number, counted from the first page that is not a cover: a page that comes to
+    // another number — a page before it deleted, a page before it made a cover — is drawn again with its new one,
+    // though nothing of its own changed.
+    void nombreFollowsThePageNumber() {
+        auto doc = std::make_shared<core::Document>(core::new_episode(
+            "ノンブル", Num(1), 6, core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6)));
+        genko::app::PageRenderer renderer;
+        renderer.show(doc, 4);  // (page 5)
+        renderer.want(72, 72, QRectF(0, 0, 70, 95));
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        const QImage five = renderer.compose(72);
+        QCOMPARE(five, drawn(*doc, 4, 72));
+        // page 2 (no lines on it) deleted: the page is page 4 now
+        auto fewer = std::make_shared<core::Document>(*doc);
+        fewer->pages.erase(fewer->pages.begin() + 1);
+        for (std::size_t i = 1; i < fewer->pages.size(); ++i) fewer->edit_page(i).index = Num(static_cast<std::int64_t>(i + 1));
+        QCOMPARE(fewer->page(3).id, doc->page(4).id);
+        renderer.show(fewer, 3);
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        const QImage four = renderer.compose(72);
+        QVERIFY(four != five);
+        QCOMPARE(four, drawn(*fewer, 3, 72));
+        // page 1 made a cover (the page itself the same): one page fewer counted before it
+        auto covered = std::make_shared<core::Document>(*fewer);
+        covered->edit_page(0).extra["cover"] = Json::object({{"kind", "front"}});
+        QCOMPARE(covered->pages[3].get(), fewer->pages[3].get());
+        renderer.show(covered, 3);
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        QVERIFY(renderer.compose(72) != four);
+        QCOMPARE(renderer.compose(72), drawn(*covered, 3, 72));
+    }
+
+    // The nombre takes a white halo where something dark lies under it: a line drawn under part of it — in one tile,
+    // where the nombre spans two — draws all of it again, so both halves have the halo (white on the page's light paper),
+    // as the whole page drawn has.
+    void nombreHaloFollowsWhatIsUnderIt() {
+        // (118.2 mm wide: the nombre's middle, 59.1 mm, is at pixel 512 at 220 dpi, between two columns of tiles)
+        auto doc = std::make_shared<core::Document>(core::new_episode(
+            "ノンブルの白フチ", Num(1), 6, core::PageSpec::custom(118.2, 95, 108.2, 85, 3, 8, 8, 7, 6)));
+        doc->nombre = Json::object({{"start", 1001}});  // ("1005": wide enough to span both)
+        doc->edit_page(4).extra["paper_rgb"] = Json::array({240, 238, 236});  // (light enough for no halo, which shows on it)
+        for (auto& layer : doc->edit_page(4).layers) {
+            if (layer.role == core::LayerRole::Ink) layer.panel_clip = false;  // (its lines run out of the panel, under the nombre)
+        }
+        genko::app::PageRenderer renderer;
+        renderer.show(doc, 4);
+        renderer.want(220, 220, QRectF(0, 0, 118.2, 95));
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        QCOMPARE(renderer.compose(220), drawn(*doc, 4, 220));
+        const auto nombres = genko::render::nombre_areas(doc->page(4), 220, doc.get());
+        QCOMPARE(nombres.size(), std::size_t{1});
+        QVERIFY(nombres[0].x0 < 512 && nombres[0].x1 > 512);  // (it spans two tiles)
+        // a short dark line under its left half, in the left tile alone
+        auto lined = std::make_shared<core::Document>(*doc);
+        auto stroke = std::make_shared<core::Stroke>();
+        stroke->id = "under-nombre";
+        stroke->points = {{56.2, 86.0}, {57.2, 86.1}, {57.9, 86.0}};
+        stroke->pressure = {1.0, 1.0, 1.0};
+        stroke->width_mm = 0.4;
+        for (auto& layer : lined->edit_page(4).layers) {
+            if (layer.role == core::LayerRole::Ink) layer.strokes = core::make_strokes({stroke});
+        }
+        const auto line = genko::render::brushes::extent({1024, 823}, core::stroke_points(*stroke), 220, 0.4, "gpen");
+        QVERIFY(line);
+        const std::string where = "line " + std::to_string(line->x0) + "," + std::to_string(line->y0) + "-" + std::to_string(line->x1) + "," +
+                                  std::to_string(line->y1) + "; nombre " + std::to_string(nombres[0].x0) + "," + std::to_string(nombres[0].y0) +
+                                  "-" + std::to_string(nombres[0].x1) + "," + std::to_string(nombres[0].y1);
+        QVERIFY2(line->x1 + 2 < 512 && line->x1 > nombres[0].x0 && line->y0 < nombres[0].y1 && line->y1 > nombres[0].y0, where.c_str());
+        const auto generation = renderer.generation();
+        renderer.show(lined, 4);
+        QVERIFY(renderer.generation() > generation);
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 10000);
+        const QImage before = drawn(*doc, 4, 220);
+        const QImage after = drawn(*lined, 4, 220);
+        QVERIFY(before.copy(512, nombres[0].y0, nombres[0].x1 - 512, nombres[0].y1 - nombres[0].y0) !=
+                after.copy(512, nombres[0].y0, nombres[0].x1 - 512, nombres[0].y1 - nombres[0].y0));  // (the halo, in the other tile)
+        QCOMPARE(renderer.compose(220), after);
     }
 
     void unrelatedPageChangesKeepCurrentOnionTiles() {

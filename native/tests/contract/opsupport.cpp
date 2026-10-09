@@ -10,8 +10,11 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <optional>
+#include <set>
 #include <vector>
 
 #include "core/actor.hpp"
@@ -19,11 +22,13 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "core/pynum.hpp"
 #include "render/brushes.hpp"
 #include "render/ops_registry.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "core/paths.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "storage/snapshot.hpp"
 #include "storage/transaction.hpp"
@@ -697,7 +702,7 @@ std::string compare_step(const StepOutcome& cpp, const Json& python) {
 }
 
 std::string read_back_difference(const core::Document& doc, const std::filesystem::path& dir, storage::AssetStore& store,
-                                 const Json& reread, ReadBackNotes& notes) {
+                                 const Json& reread, ReadBackNotes& notes, const std::vector<std::string>& deviations) {
     StepOutcome before = state_of(doc, store);
     std::filesystem::create_directories(dir);
     {
@@ -714,11 +719,15 @@ std::string read_back_difference(const core::Document& doc, const std::filesyste
     if (!loaded.report.clean()) return "read back with " + core::dump_python(loaded.report.to_json()).substr(0, 600);
     const StepOutcome after = state_of(loaded.document, store);
 
-    // the same as Python's, saved and read back
+    // the same as Python's, saved and read back (but where the case deviates on purpose)
     std::string where;
     if (!reread.is_object() || !reread.contains("reread")) return "Python did not read it back";
-    if (!strict_equal(after.full, reread["full"], &where)) return "read back, full snapshot (Python's read back): " + where.substr(0, 1200);
-    if (!strict_equal(after.payload, reread["payload"], &where)) return "read back, payload (Python's read back): " + where.substr(0, 1200);
+    {
+        const StepOutcome mine = deviations.empty() ? after : without_deviations(after, deviations);
+        const Json python = deviations.empty() ? reread : without_deviations(reread, deviations);
+        if (!strict_equal(mine.full, python["full"], &where)) return "read back, full snapshot (Python's read back): " + where.substr(0, 1200);
+        if (!strict_equal(mine.payload, python["payload"], &where)) return "read back, payload (Python's read back): " + where.substr(0, 1200);
+    }
     // the same as before the save, but for the selection, the default layers of a page that had none and the margins
     // of a paper preset (ints there; Python's reader makes them floats)
     for (Json* spec : {&before.full["spec"], &before.payload["spec"]}) {
@@ -745,6 +754,271 @@ std::string read_back_difference(const core::Document& doc, const std::filesyste
     }
     if (!strict_equal(after.full, before.full, &where)) return "read back, full snapshot: " + where.substr(0, 1200);
     if (!strict_equal(after.payload, before.payload, &where)) return "read back, payload: " + where.substr(0, 1200);
+    return {};
+}
+
+// --- cases this build answers otherwise than Python on purpose ----------------------------------------------------
+
+namespace {
+
+// "payload/pages/*/layers" → its tokens (RFC 6901: "~1" is "/", "~0" is "~")
+std::vector<std::string> path_tokens(const std::string& path) {
+    std::vector<std::string> out;
+    std::string token;
+    const auto done = [&] {
+        std::string plain;
+        for (std::size_t i = 0; i < token.size(); ++i) {
+            if (token[i] == '~' && i + 1 < token.size()) {
+                plain += token[i + 1] == '1' ? '/' : '~';
+                ++i;
+            } else {
+                plain += token[i];
+            }
+        }
+        out.push_back(plain);
+        token.clear();
+    };
+    for (const char c : path) {
+        if (c == '/') {
+            done();
+        } else {
+            token += c;
+        }
+    }
+    done();
+    return out;
+}
+
+void blank_at(Json& value, const std::vector<std::string>& tokens, std::size_t at, bool wild) {
+    if (at == tokens.size()) {
+        value = "(deviates on purpose)";
+        return;
+    }
+    const std::string& token = tokens[at];
+    if (value.is_object()) {
+        if (wild && token == "*") {
+            for (auto item : value.items()) blank_at(item.value(), tokens, at + 1, wild);
+        } else if (value.contains(token)) {
+            blank_at(value[token], tokens, at + 1, wild);
+        }
+    } else if (value.is_array()) {
+        if (wild && token == "*") {
+            for (Json& item : value) blank_at(item, tokens, at + 1, wild);
+        } else if (!token.empty() && std::all_of(token.begin(), token.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; })) {
+            const std::size_t index = std::stoul(token);
+            if (index < value.size()) blank_at(value[index], tokens, at + 1, wild);
+        }
+    }
+}
+
+Json as_record(const StepOutcome& outcome) {
+    return Json::object({{"reply", outcome.reply}, {"full", outcome.full}, {"payload", outcome.payload}});
+}
+
+const core::Page* page_numbered(const core::Document& doc, std::int64_t index) {
+    for (const auto& page : doc.pages) {
+        if (page->index == core::Num(index)) return page.get();
+    }
+    return nullptr;
+}
+
+const core::Layer* layer_named(const core::Page& page, const std::string& id) {
+    for (const core::Layer& layer : page.layers) {
+        if (layer.id == id) return &layer;
+    }
+    return nullptr;
+}
+
+// D2: every reference to a layer on each page names a layer of that page
+std::string layer_refs_difference(const core::Document& doc) {
+    int checked = 0;
+    for (const auto& page : doc.pages) {
+        std::set<std::string> ids;
+        for (const core::Layer& layer : page->layers) ids.insert(layer.id);
+        std::string wrong;
+        const auto check = [&](const Json& value, const std::string& what) {
+            if (!value.is_string() || value.get_ref<const std::string&>().empty()) return;
+            ++checked;
+            if (!ids.contains(value.get<std::string>()) && wrong.empty()) wrong = what + " " + value.get<std::string>();
+        };
+        for (const core::Layer& layer : page->layers) check(layer.parent_id, "layer " + layer.id + "'s folder");
+        if (page->rulers.is_array()) {
+            for (const Json& ruler : page->rulers) {
+                if (ruler.is_object() && ruler.contains("layer_id")) check(ruler["layer_id"], "a ruler's layer");
+            }
+        }
+        if (page->ruler && page->ruler->is_object() && page->ruler->contains("layer_id")) check((*page->ruler)["layer_id"], "the ruler's layer");
+        if (page->extra.is_object() && page->extra.contains("anim") && page->extra["anim"].is_object()) {
+            const Json& tracks = page->extra["anim"].value("tracks", Json::array());
+            for (const Json& track : tracks.is_array() ? tracks : Json::array()) {
+                if (!track.is_object()) continue;
+                if (track.contains("folder")) check(track["folder"], "an animation's folder");
+                if (track.contains("cels") && track["cels"].is_array()) {
+                    for (const Json& cel : track["cels"]) {
+                        if (cel.is_array() && cel.size() >= 2) check(cel[1], "an animation's cel");
+                    }
+                }
+            }
+            const Json& light = page->extra["anim"].value("light_table", Json::array());
+            for (const Json& cel : light.is_array() ? light : Json::array()) check(cel, "the light table's cel");
+        }
+        for (const core::StoryLine* line : doc.story_for_page(page->index)) {
+            if (line->style.is_object() && line->style.contains("below_layer")) check(line->style["below_layer"], "line " + line->id + "'s layer");
+        }
+        if (!wrong.empty()) return "page " + page->index.repr() + ": " + wrong + " is not a layer of the page";
+    }
+    if (checked == 0) return "no reference to a layer to check";
+    return {};
+}
+
+struct Spread {
+    double area_mm2 = 0;
+    double cx = 0;
+    double cy = 0;
+};
+
+// The part of a picture that `inked` picks: its area and middle in mm (px_per_mm in x and y)
+template <class Inked>
+Spread spread_of(const render::Image& image, double kx, double ky, Inked inked) {
+    const std::string bytes = image.tobytes();
+    const int bands = image.mode() == std::string("L") ? 1 : 4;
+    double n = 0, sx = 0, sy = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const auto* px = reinterpret_cast<const unsigned char*>(bytes.data()) +
+                             (static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width()) + static_cast<std::size_t>(x)) * bands;
+            if (!inked(px)) continue;
+            n += 1;
+            sx += x + 0.5;
+            sy += y + 0.5;
+        }
+    }
+    if (n == 0) return {};
+    return Spread{n / (kx * ky), sx / n / kx, sy / n / ky};
+}
+
+// D1: the layer's pixels or its mask's hidden part moved with the page's basic frame
+std::string moved_difference(const core::Document& before, const core::Document& after, std::int64_t index, const std::string& id,
+                             const std::string& what) {
+    const core::Page* a = page_numbered(before, index);
+    const core::Page* b = page_numbered(after, index);
+    if (a == nullptr || b == nullptr) return "no page " + std::to_string(index);
+    const core::Layer* la = layer_named(*a, id);
+    const core::Layer* lb = layer_named(*b, id);
+    if (la == nullptr || lb == nullptr) return "no layer " + id + " on page " + std::to_string(index);
+    const bool paint = what == "paint";
+    const auto picture = [&](const core::Layer& layer) -> std::optional<render::Image> {
+        const core::Bytes& png = paint ? layer.raster_png : (layer.mask ? layer.mask->png : core::Bytes());
+        if (!png || png->empty()) return std::nullopt;
+        return render::open_image(*png, render::kPillowOpenLimits).convert(paint ? "RGBA" : "L");
+    };
+    const auto old_picture = picture(*la);
+    const auto new_picture = picture(*lb);
+    if (!old_picture || !new_picture) return what + " of layer " + id + " missing";
+    const int dpi = paint ? 200 : 150;  // (raster.WORKING_DPI, ops.MASK_DPI)
+    const int width = paint ? render::mm_to_px(b->spec.width_mm.value(), dpi)
+                            : static_cast<int>(std::max(1.0, core::py_round_whole(b->spec.width_mm.value() / 25.4 * dpi)));
+    const int height = paint ? render::mm_to_px(b->spec.height_mm.value(), dpi)
+                             : static_cast<int>(std::max(1.0, core::py_round_whole(b->spec.height_mm.value() / 25.4 * dpi)));
+    if (new_picture->width() != width || new_picture->height() != height) {
+        return what + " of layer " + id + " is " + std::to_string(new_picture->width()) + "x" + std::to_string(new_picture->height()) +
+               ", not as big as its page's paper (" + std::to_string(width) + "x" + std::to_string(height) + ")";
+    }
+    const auto inked = [paint](const unsigned char* px) { return paint ? px[3] > 127 : px[0] < 128; };
+    const double k = paint ? 200 / 25.4 : 0;
+    const Spread was = spread_of(*old_picture, paint ? k : old_picture->width() / a->spec.width_mm.value(),
+                                 paint ? k : old_picture->height() / a->spec.height_mm.value(), inked);
+    const Spread now = spread_of(*new_picture, paint ? k : new_picture->width() / b->spec.width_mm.value(),
+                                 paint ? k : new_picture->height() / b->spec.height_mm.value(), inked);
+    if (was.area_mm2 <= 0) return what + " of layer " + id + " had nothing to move";
+    const std::string start_side = before.start_side.value_or("");
+    const core::Rect from = a->inner_rect_mm(start_side);
+    const core::Rect to = b->inner_rect_mm(after.start_side.value_or(""));
+    const double sx = to.width.value() / from.width.value();
+    const double sy = to.height.value() / from.height.value();
+    const double want_x = to.x.value() + (was.cx - from.x.value()) * sx;
+    const double want_y = to.y.value() + (was.cy - from.y.value()) * sy;
+    const double want_area = was.area_mm2 * sx * sy;
+    char text[400];
+    std::snprintf(text, sizeof text, "%s of layer %s: %.2f mm2 about (%.2f, %.2f) mm, where %.2f mm2 about (%.2f, %.2f) mm moved with the frame",
+                  what.c_str(), id.c_str(), now.area_mm2, now.cx, now.cy, want_area, want_x, want_y);
+    if (std::fabs(now.area_mm2 - want_area) > 0.05 * want_area || std::hypot(now.cx - want_x, now.cy - want_y) > 0.5) return text;
+    return {};
+}
+
+}  // namespace
+
+bool deviates(const Json& c) { return c.is_object() && c.value("cpp", Json()) == Json("deviates"); }
+
+std::vector<std::string> deviation_paths(const Json& c) {
+    std::vector<std::string> out;
+    if (c.contains("cpp_differs")) {
+        for (const Json& path : c["cpp_differs"]) out.push_back(path.get<std::string>());
+    }
+    return out;
+}
+
+Json without_deviations(Json record, const std::vector<std::string>& paths) {
+    for (const std::string& path : paths) {
+        const std::vector<std::string> tokens = path_tokens(path);
+        if (record.is_object() && record.contains(tokens.front())) blank_at(record[tokens.front()], tokens, 1, true);
+    }
+    return record;
+}
+
+StepOutcome without_deviations(StepOutcome outcome, const std::vector<std::string>& paths) {
+    const Json record = without_deviations(as_record(outcome), paths);
+    outcome.reply = record["reply"];
+    outcome.full = record["full"];
+    outcome.payload = record["payload"];
+    return outcome;
+}
+
+std::vector<std::string> step_differences(const StepOutcome& cpp, const Json& python, std::size_t most) {
+    Json mine = as_record(cpp);
+    Json theirs = Json::object({{"reply", python["reply"]}, {"full", python["full"]}, {"payload", python["payload"]}});
+    std::vector<std::string> out;
+    for (const char* key : {"reply", "full", "payload"}) {
+        while (out.size() < most) {
+            std::string where;
+            if (strict_equal(mine[key], theirs[key], &where)) break;
+            const std::string pointer = where.substr(0, where.find(": "));
+            out.push_back(std::string(key) + (pointer == "/" ? "" : pointer));
+            if (pointer == "/") break;
+            const std::vector<std::string> tokens = path_tokens(std::string(key) + pointer);
+            blank_at(mine[key], tokens, 1, false);
+            blank_at(theirs[key], tokens, 1, false);
+        }
+    }
+    return out;
+}
+
+std::string compare_deviating_steps(const std::vector<StepOutcome>& outcomes, const Json& records, const Json& c) {
+    const std::vector<std::string> paths = deviation_paths(c);
+    bool apart = false;
+    for (std::size_t s = 0; s < outcomes.size(); ++s) {
+        if (!compare_step(outcomes[s], records[s]).empty()) apart = true;
+        const std::string diff = compare_step(without_deviations(outcomes[s], paths), without_deviations(records[s], paths));
+        if (!diff.empty()) {
+            std::string at;
+            for (const std::string& place : step_differences(outcomes[s], records[s], 48)) at += " " + place;
+            return "step " + std::to_string(s) + ": " + diff.substr(0, 600) + " (it differs from Python at:" + at + ")";
+        }
+    }
+    if (!apart) return "marked as deviating on purpose (" + c.value("cpp_says", std::string()) + ") but the same as Python";
+    return {};
+}
+
+std::string kept_by_deviation(const Json& keeps, const core::Document& before, const core::Document& after) {
+    if (keeps.value("layer_refs", false)) {
+        if (std::string d = layer_refs_difference(after); !d.empty()) return d;
+    }
+    if (keeps.contains("moved")) {
+        for (const Json& item : keeps["moved"]) {
+            const std::string d = moved_difference(before, after, item[0].get<std::int64_t>(), item[1].get<std::string>(), item[2].get<std::string>());
+            if (!d.empty()) return d;
+        }
+    }
     return {};
 }
 

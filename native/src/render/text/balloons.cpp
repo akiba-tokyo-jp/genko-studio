@@ -1048,6 +1048,7 @@ void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>&
         return;
     }
     const Box here = page_box(part);
+    const Box page_all{0, 0, part.page.width, part.page.height};
     for (const core::StoryLine* ln : lines) {  // 画像のフキダシ: the picture stretched over the box
         if (ln->balloon != "picture") continue;
         const Json lst = style_of(*ln);
@@ -1070,7 +1071,13 @@ void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>&
             placed = place();
         } catch (const std::exception&) {
         }
-        if (placed && !overlaps(placed->first, here)) continue;
+        if (placed && !overlaps(placed->first, here)) {
+            // (but what the group is decided for the whole page: a picture this build cannot open yet that reaches the
+            // page leaves its group out of every part, whether the part shows the picture or not — as the whole page
+            // drawn leaves it out)
+            if (overlaps(placed->first, page_all) && picture_unported(data)) throw NotYetPorted("image_format");
+            continue;
+        }
         const std::shared_ptr<const std::optional<Image>> picture = remembered_picture(data);
         if (!*picture) continue;
         if (!placed) placed = place();

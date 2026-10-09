@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -203,6 +204,51 @@ private slots:
         fs::create_directory_symlink(src / "assets", linked / "assets", ec);
         if (links && !ec) QCOMPARE(genko::storage::copy_assets(linked, to_path(tmp.path()) / "third.genko"), std::size_t{0});
         QCOMPARE(genko::storage::copy_assets(to_path(tmp.path()) / "none.genko", dest), std::size_t{0});
+    }
+
+    // copy_assets streams each file (hashed on the way into a temporary file, renamed into place when it holds what its
+    // name says), so it never holds one whole: a file past the store's cap for one asset (kAssetMaxBytes) is refused
+    // before any of it is read, leaving nothing behind; one whose bytes are not its name's leaves no temporary file;
+    // one of many pieces arrives as it was.
+    void copyAssetsStreamsWithACap() {
+        QTemporaryDir tmp;
+        const fs::path src = to_path(tmp.path()) / "src.genko";
+        const fs::path dest = to_path(tmp.path()) / "dest.genko";
+        AssetStore from(src);
+        AssetStore to(dest);
+        std::string big;  // (several pieces of the copy)
+        for (std::uint32_t i = 0; i < 300000; ++i) big += static_cast<char>((i * 7919U) % 251U);
+        const std::string ref = from.put_bytes(big, ".png");
+        const std::string wrong = AssetStore::ref("what the name says");
+        write_file(from.path(wrong, ".png"), "something else");
+        // a file past the cap (sparse: nothing written), named as an asset
+        const std::string huge = "sha256:" + std::string(64, '0');
+        fs::create_directories(from.path(huge, ".png").parent_path());
+        write_file(from.path(huge, ".png"), "");
+        fs::resize_file(from.path(huge, ".png"), genko::storage::kAssetMaxBytes + 1);
+        const auto temporaries = [&dest] {
+            int n = 0;
+            std::error_code ec;
+            for (auto it = fs::recursive_directory_iterator(dest, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (it->path().extension() == ".tmp") ++n;
+            }
+            return n;
+        };
+        try {
+            genko::storage::copy_assets(src, dest);
+            QFAIL("a file past the cap was copied");
+        } catch (const genko::core::Error& error) {
+            QCOMPARE(error.code(), std::string("memory"));
+            QVERIFY2(std::string(error.what()).find("too large to copy") != std::string::npos, error.what());
+        }
+        QVERIFY(!to.has(huge, ".png"));
+        QCOMPARE(temporaries(), 0);
+        fs::remove(from.path(huge, ".png"));
+        QCOMPARE(genko::storage::copy_assets(src, dest), std::size_t{1});
+        QCOMPARE(to.get_bytes(ref, ".png").value(), big);
+        QVERIFY(!to.has(wrong, ".png"));
+        QCOMPARE(temporaries(), 0);
+        QCOMPARE(to.all_files().size(), std::size_t{1});
     }
 
     void writeAtomic() {

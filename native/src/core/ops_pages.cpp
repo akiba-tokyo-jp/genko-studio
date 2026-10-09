@@ -38,8 +38,11 @@ void duplicate_page(OpContext& c) {
             clone.selected_frame_id.is_string() ? frame_map.get(clone.selected_frame_id.get<std::string>()) : nullptr;
         clone.selected_frame_id = mapped != nullptr ? Json(*mapped) : Json(nullptr);
     }
+    FrameIdMap layer_map;
     for (Layer& layer : clone.layers) {
+        const std::string old = layer.id;
         layer.id = new_id();
+        layer_map.set(old, layer.id);
         if (layer.frame_id && !layer.frame_id->empty()) {
             if (const std::string* mapped = frame_map.get(*layer.frame_id)) layer.frame_id = *mapped;
         }
@@ -55,6 +58,10 @@ void duplicate_page(OpContext& c) {
         }
         new_lines.push_back(std::move(copied));
     }
+    // (the copy's folders, rulers, cels and lines set under a layer name its own layers: the user's decision D2)
+    std::vector<StoryLine*> copied_lines;
+    for (StoryLine& line : new_lines) copied_lines.push_back(&line);
+    remap_layer_refs(clone, copied_lines, layer_map);
     const Num clone_index = clone.index;
     doc.story.insert(doc.story.end(), new_lines.begin(), new_lines.end());
     doc.pages.push_back(std::make_shared<Page>(std::move(clone)));

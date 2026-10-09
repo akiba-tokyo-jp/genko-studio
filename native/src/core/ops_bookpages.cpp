@@ -265,8 +265,9 @@ void move_frame(Frame& frame, const Map& m) {
     for (Frame& child : frame.children) move_frame(child, m);
 }
 
-// pagespec.relayout's work on one layer: its lines, patches, region, placement and pixels
-void move_layer(Layer& layer, const Map& m, const PageSpec& spec, const BookPageHooks& hooks) {
+// pagespec.relayout's work on one layer: its lines, patches, region, placement and pixels; and its mask (the user's
+// decision D1). `paper` is the page's new paper (a cover's own), `old_paper` the one it had.
+void move_layer(Layer& layer, const Map& m, const PageSpec& paper, const PageSpec& old_paper, const BookPageHooks& hooks) {
     if (layer.stroke_count() > 0) {
         std::vector<StrokePtr> items;
         items.reserve(layer.strokes->items.size());
@@ -291,14 +292,26 @@ void move_layer(Layer& layer, const Map& m, const PageSpec& spec, const BookPage
         if (!hooks.relayout_raster) {
             not_yet_ported("set_page_spec moving a paint layer's pixels: they are moved by the drawing build (render::ops_registry)");
         }
-        layer.raster_png = std::make_shared<const std::string>(hooks.relayout_raster(*layer.raster_png, spec, m.old_frame(), m.new_frame()));
+        layer.raster_png = std::make_shared<const std::string>(hooks.relayout_raster(*layer.raster_png, paper, m.old_frame(), m.new_frame()));
+    }
+    // (Python leaves the mask where it was: here it moves with what it masks)
+    if (layer.mask && layer.mask->png && !layer.mask->png->empty()) {
+        if (!hooks.relayout_mask) {
+            not_yet_ported("set_page_spec moving a layer's mask: it is moved by the drawing build (render::ops_registry)");
+        }
+        if (auto moved = hooks.relayout_mask(*layer.mask->png, old_paper, paper, m.old_frame(), m.new_frame())) {
+            layer.mask->png = std::make_shared<const std::string>(std::move(*moved));
+        }
     }
     // (Python has no precise colour pixels: this build cannot move them onto the new frame yet)
     if (layer.color_raster) not_yet_ported("set_page_spec moving high-precision colour pixels is not in the C++ build yet");
 }
 
 // pagespec.relayout(episode, new_spec, move): the book on new paper; with `move`, everything on each page follows the
-// basic frame. Whether a value moved is not a finite number (left as Python leaves it, for the op to refuse).
+// basic frame. Whether a value moved is not a finite number (left as Python leaves it, for the op to refuse). Two
+// deliberate deviations (the user's decision D1; SPEC §2, a known bug is not reproduced): a paint layer's pixels are
+// as big as the page's own new paper (Python's, the book's, cut off what a jacket or a band has beyond it), and a
+// layer's mask moves with what it masks (Python leaves it stretched over the new paper).
 bool relayout(Document& doc, const PageSpec& spec, bool move, const BookPageHooks& hooks) {
     const std::string start_side = doc.start_side.value_or("");
     // olds = {page.index: page.inner_rect_mm(episode.start_side) for page in episode.pages}
@@ -314,6 +327,8 @@ bool relayout(Document& doc, const PageSpec& spec, bool move, const BookPageHook
         }
         if (!kept) olds.emplace_back(page->index, rect);
     }
+    std::vector<PageSpec> old_papers;  // (each page's own, for its masks)
+    for (const auto& page : doc.pages) old_papers.push_back(page->spec);
     doc.spec = spec;
     for (std::size_t i = 0; i < doc.pages.size(); ++i) {
         Page& page = doc.edit_page(i);
@@ -330,7 +345,7 @@ bool relayout(Document& doc, const PageSpec& spec, bool move, const BookPageHook
         }
         const Map m(*old_frame, page.inner_rect_mm(start_side), overflow);
         for (Frame& frame : page.frames) move_frame(frame, m);
-        for (Layer& layer : page.layers) move_layer(layer, m, spec, hooks);
+        for (Layer& layer : page.layers) move_layer(layer, m, page.spec, old_papers[i], hooks);
         for (StoryLine& line : doc.story) {
             if (!(line.page_index == page.index)) continue;
             if (line.x_mm.truthy() || line.y_mm.truthy()) {
@@ -540,7 +555,8 @@ void set_assignee(OpContext& c) {
 // --- import_pages (作品の結合) -------------------------------------------------------------------------------------
 
 // Pages of another book added after this one's, before its covers at the back (or after the page "after" names), with
-// their lines, their panels, layers and lines under new ids. The pages refer to the other book's asset files (placed
+// their lines, their panels, layers and lines under new ids (and what names their layers following them: the user's
+// decision D2, remap_layer_refs). The pages refer to the other book's asset files (placed
 // pictures) without copying them: the import dialog and the MCP tool copy them first (storage::copy_assets, as
 // Python's app and MCP tools do with merge.copy_assets); `genko apply`, as Python's, copies none.
 void import_pages(OpContext& c, const BookPageHooks& hooks) {
@@ -582,13 +598,17 @@ void import_pages(OpContext& c, const BookPageHooks& hooks) {
                 clone.selected_frame_id.is_string() ? frame_map.get(clone.selected_frame_id.get<std::string>()) : nullptr;
             clone.selected_frame_id = mapped != nullptr ? Json(*mapped) : Json(nullptr);
         }
+        FrameIdMap layer_map;
         for (Layer& layer : clone.layers) {
+            const std::string old = layer.id;
             layer.id = new_id();
+            layer_map.set(old, layer.id);
             if (layer.frame_id && !layer.frame_id->empty()) {
                 if (const std::string* mapped = frame_map.get(*layer.frame_id)) layer.frame_id = *mapped;
             }
         }
         // the lines of other.story_for_page(index), copied under new ids onto the new page
+        std::vector<StoryLine> lines;
         for (const StoryLine& line : other.story) {
             if (!(line.page_index == Num(*wanted[n].value))) continue;
             StoryLine copied = line;
@@ -597,8 +617,13 @@ void import_pages(OpContext& c, const BookPageHooks& hooks) {
             if (copied.frame_id && !copied.frame_id->empty()) {
                 if (const std::string* mapped = frame_map.get(*copied.frame_id)) copied.frame_id = *mapped;
             }
-            doc.story.push_back(std::move(copied));
+            lines.push_back(std::move(copied));
         }
+        // (its folders, rulers, cels and lines set under a layer name its own layers: the user's decision D2)
+        std::vector<StoryLine*> copied_lines;
+        for (StoryLine& line : lines) copied_lines.push_back(&line);
+        remap_layer_refs(clone, copied_lines, layer_map);
+        for (StoryLine& line : lines) doc.story.push_back(std::move(line));
         doc.pages.push_back(std::make_shared<Page>(std::move(clone)));
     }
     // what the pages' pictures are: the other book's studio assets this book does not have

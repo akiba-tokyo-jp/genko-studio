@@ -102,6 +102,10 @@ std::optional<Image> picture_of(const core::Json& data);
 // picture_of(data) remembered by the data's digest (Python's balloons._PICTURES keeps the 64 last by hash(data)), for
 // the threads drawing a page's parts: each picture decoded once. Python's errors as picture_of's (not remembered).
 std::shared_ptr<const std::optional<Image>> remembered_picture(const core::Json& data);
+// Whether picture_of(data) stops with NotYetPorted("image_format") (a picture of a format Pillow opens and this build
+// does not yet), known from the decoded bytes' first ones without opening the picture; remembered by the data's
+// digest. False for data picture_of finds no picture in. (Python's hash(data) first, as picture_of.)
+bool picture_unported(const core::Json& data);
 
 // The letter effects.
 // outlined(text_img, grow, colour): a halo (白フチ) grow px wide.

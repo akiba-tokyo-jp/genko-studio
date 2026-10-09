@@ -308,8 +308,8 @@ Samples depth8(const std::string* raw, std::uint64_t length, std::int64_t width,
         if (length % 4 != 0) value_error("buffer size must be a multiple of element size");  // (np.frombuffer)
         out.length = length / 4;
         if (raw != nullptr) {
-            // (np.clip(f, 0, 1) ** (1 / 2.2) * 255).astype(np.uint8): float32 throughout, the power numpy's (libm's
-            // powf, as the reference runs numpy), NaN cast to 0 as numpy casts it there
+            // (np.clip(f, 0, 1) ** (1 / 2.2) * 255).astype(np.uint8): float32 throughout, the power numpy's (the C
+            // library's powf, as the reference runs numpy: glibc's, np::powf), NaN cast to 0 as numpy casts it there
             const float gamma = static_cast<float>(1 / 2.2);
             out.bytes.resize(static_cast<std::size_t>(out.length));
             for (std::size_t i = 0; i < out.bytes.size(); ++i) {

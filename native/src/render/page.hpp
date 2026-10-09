@@ -118,6 +118,11 @@ Image to_bitonal(const Image& image, int threshold = 180, const core::Json* scre
 // Would drawing this page now mean drawing many lines from scratch (no recent drawing of them at this resolution)?
 bool rough_needed(const core::Page& page, int dpi);
 
+// Where the page's nombres are drawn at `dpi` (print and proof): for each, the box (pixels) of its letters with the
+// margin whose colours decide whether it gets its white halo — what the page has under it changes how it is drawn.
+// Empty when the page shows none.
+std::vector<Box> nombre_areas(const core::Page& page, int dpi, const core::Document* episode = nullptr);
+
 // The remembered layer pictures and masks are forgotten (a new process starts without them).
 void clear_render_caches();
 

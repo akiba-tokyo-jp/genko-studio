@@ -5,8 +5,12 @@
 //      project.json payload are the same as Python's apply_ops gives, ids counted the same on both sides. Every op of
 //      M2-O1 has 10 or more cases that succeed and 5 or more that fail (undo: test_contract_ops_cli). A case marked
 //      "cpp": "not_yet_ported" is a part of an op this build refuses on purpose (the colour mixing under a line): C++
-//      must refuse it with not_yet_ported. (The pixels of a paint layer the erasers reach, and the areas the bus
-//      resolves, come with the ops of M3-A1: render::ops_registry.)
+//      must refuse it with not_yet_ported. One marked "cpp": "deviates" is one this build answers otherwise than Python
+//      on purpose, the user's decision its "cpp_says" names (opsupport.hpp): D2, duplicate_page pointing what names a
+//      layer on the copy (a layer's folder, a line set under a layer, a ruler kept to a layer, an animation's cels) at
+//      the copy's own layers. It is Python's but at its "cpp_differs" and keeps its "cpp_keeps" (and Python's book does
+//      not). (The pixels of a paint layer the erasers reach, and the areas the bus resolves, come with the ops of
+//      M3-A1: render::ops_registry.)
 // The ruler cases remain in test_contract_rulers, including saving and rereading.
 //   2. random op sequences (300, made by `pyref_harness.py make-sequences` with a fixed seed: 1 to 12 ops each, with
 //      for_pages, strict_gates, page locks and other actors) on 20 random books: each step the same as Python's. (The
@@ -15,7 +19,7 @@
 //   4. saved and read back: the book after each successful fixed case, saved by storage::Saver and read again, has
 //      the same full snapshot and payload as before the save (but for what Python does not keep either: the frame
 //      selected, the layers of a page that has none, int margins) and as Python's book saved by save_episode and read
-//      again.
+//      again (a deviating case: but at its places, and what it keeps kept).
 // (3, the command line against `python -m genko apply`, and undo: test_contract_ops_cli.)
 // Skipped when there is no reference Python ($GENKO_PYREF or /opt/pyref/bin/python).
 
@@ -141,6 +145,7 @@ private slots:
         QVERIFY2(loaded.report.clean(), genko::core::dump_python(loaded.report.to_json()).c_str());
         std::map<std::string, std::pair<int, int>> counts;  // op → (successes, failures) matched with Python
         int not_ported = 0;
+        int deviating = 0;
         std::vector<std::string> failures;
         for (std::size_t n = 0; n < cases.size(); ++n) {
             const Json& c = cases[n];
@@ -148,7 +153,11 @@ private slots:
             const std::string op = c["op"].get<std::string>();
             const bool expect_ok = c["ok"].get<bool>();
             genko::storage::AssetStore store(to_path(path(QStringLiteral("fixed/cpp-store-%1").arg(n))));
-            const auto outcomes = genko::test::run_steps(loaded.document, steps_of(c), first_id, store);
+            std::vector<genko::core::Document> books{loaded.document};  // (the book before each step, and after the last)
+            const auto outcomes = genko::test::run_steps(loaded.document, steps_of(c), first_id, store, false, nullptr,
+                                                         [&books](genko::core::Document& doc, std::size_t, const genko::test::StepOutcome&) {
+                                                             books.push_back(doc);
+                                                         });
             const Json& records = python[n];
             if (records.size() != outcomes.size()) {
                 failures.push_back(name + ": Python gave " + std::to_string(records.size()) + " steps");
@@ -168,6 +177,13 @@ private slots:
                     failures.push_back(name + ": fails in another op: " + error.substr(0, 300));
                     continue;
                 }
+            }
+            if (genko::test::deviates(c)) {  // the user's decision: Python's but at its places, keeping what it says
+                std::string wrong = genko::test::compare_deviating_steps(outcomes, records, c);
+                if (wrong.empty()) wrong = genko::test::kept_by_deviation(c["cpp_keeps"], books[books.size() - 2], books.back());
+                if (!wrong.empty()) failures.push_back(name + " (" + c["cpp_says"].get<std::string>() + "): " + wrong.substr(0, 1500));
+                ++deviating;
+                continue;
             }
             if (c.contains("cpp")) {  // a part this build refuses on purpose
                 const auto& final = outcomes.back();
@@ -199,7 +215,9 @@ private slots:
             QVERIFY2(ok >= 10, (std::string(op) + ": " + std::to_string(ok) + " successes match Python (10 needed)").c_str());
             QVERIFY2(failing >= 5, (std::string(op) + ": " + std::to_string(failing) + " failures match Python (5 needed)").c_str());
         }
-        qInfo("matched (ok/failing): %s%d refused as not yet ported", summary.c_str(), not_ported);
+        qInfo("matched (ok/failing): %s%d refused as not yet ported, %d deviating on purpose (the user's decision D2)",
+              summary.c_str(), not_ported, deviating);
+        QVERIFY(deviating >= 3);
     }
 
     void randomSequences() {
@@ -323,7 +341,7 @@ private slots:
         Json jobs = Json::array();
         std::vector<std::size_t> chosen;
         for (std::size_t n = 0; n < cases.size(); ++n) {
-            if (!cases[n]["ok"].get<bool>() || cases[n].contains("cpp")) continue;
+            if (!cases[n]["ok"].get<bool>() || (cases[n].contains("cpp") && !genko::test::deviates(cases[n]))) continue;
             Json job = Json::object();
             job["op"] = "steps";
             job["book"] = opsbook_.toStdString();
@@ -344,6 +362,7 @@ private slots:
             return genko::storage::load_document(to_path(opsbook_));
         }();
         std::map<std::string, int> counts;  // op → cases saved and read back as they were
+        int deviating = 0;
         genko::test::ReadBackNotes notes;
         std::vector<std::string> failures;
         for (std::size_t k = 0; k < chosen.size(); ++k) {
@@ -351,11 +370,28 @@ private slots:
             const std::string name = c["n"].get<std::string>();
             genko::storage::AssetStore store(to_path(path(QStringLiteral("saved/cpp-store-%1").arg(chosen[k]))));
             genko::core::Document doc;
-            genko::test::run_steps(loaded.document, steps_of(c), first_id, store, false, &doc);
-            const std::string difference = genko::test::read_back_difference(
-                doc, to_path(path(QStringLiteral("saved/cpp-%1.genko").arg(chosen[k]))), store, python[k].back(), notes);
+            std::vector<genko::core::Document> books{loaded.document};
+            genko::test::run_steps(loaded.document, steps_of(c), first_id, store, false, &doc,
+                                   [&books](genko::core::Document& d, std::size_t, const genko::test::StepOutcome&) { books.push_back(d); });
+            const bool deviates = genko::test::deviates(c);
+            const fs::path saved = to_path(path(QStringLiteral("saved/cpp-%1.genko").arg(chosen[k])));
+            std::string difference = genko::test::read_back_difference(doc, saved, store, python[k].back(), notes,
+                                                                       genko::test::deviation_paths(c));
+            if (difference.empty() && deviates) {  // (what it keeps, kept when read back; not in Python's book)
+                const genko::core::ScopedIdSource ids(genko::core::counting_ids());
+                difference = genko::test::kept_by_deviation(c["cpp_keeps"], books[books.size() - 2],
+                                                            genko::storage::load_document(saved).document);
+                const auto py = genko::storage::load_document(to_path(path(QStringLiteral("saved/py-%1.genko").arg(chosen[k]))));
+                if (difference.empty() && genko::test::kept_by_deviation(c["cpp_keeps"], books[books.size() - 2], py.document).empty()) {
+                    difference = "Python's book keeps it too: not a deviation";
+                }
+            }
             if (!difference.empty()) {
                 failures.push_back(name + ": " + difference);
+                continue;
+            }
+            if (deviates) {
+                ++deviating;
                 continue;
             }
             counts[c["op"].get<std::string>()] += 1;
@@ -369,8 +405,9 @@ private slots:
             QVERIFY2(counts[op] >= 10, (std::string(op) + ": only " + std::to_string(counts[op]) + " cases saved and read back").c_str());
         }
         qInfo("saved and read back as they were: %s(%d selections not saved, %d pages without layers read back with the "
-              "default ones, %d int margins read back as floats)",
-              summary.c_str(), notes.unselected, notes.refilled, notes.floated);
+              "default ones, %d int margins read back as floats); %d deviating on purpose, kept so when read back",
+              summary.c_str(), notes.unselected, notes.refilled, notes.floated, deviating);
+        QVERIFY(deviating >= 3);
     }
 };
 

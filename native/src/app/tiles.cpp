@@ -12,6 +12,7 @@
 #include <unordered_set>
 
 #include "core/anim.hpp"
+#include "core/covers.hpp"
 #include "core/pyconv.hpp"
 #include "core/strokes.hpp"
 #include "render/brushes.hpp"
@@ -97,6 +98,16 @@ bool same_story(const core::Document& a, const core::Document& b, const core::Nu
 // font_path), the nombre's settings and the side the book starts on (where the nombre goes).
 bool same_book_look(const core::Document& a, const core::Document& b) {
     return a.font_path == b.font_path && a.nombre == b.nombre && a.start_side == b.start_side;
+}
+
+// How many covers come before the page (by number): the nombre counts the pages from the first that is not one
+// (render/page.cpp nombre_text).
+std::size_t covers_before(const core::Document& doc, const core::Page& page) {
+    std::size_t n = 0;
+    for (const auto& p : doc.pages) {
+        if (p->index < page.index && core::is_cover(*p)) ++n;
+    }
+    return n;
 }
 
 // The page drawn faintly over `page` (render_page's onion: in name and proof, the first page of that index), or none.
@@ -274,11 +285,14 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
         omitted_.clear();
         emit omittedChanged(omitted_);
     } else if (shown_page_ != &page || doc_->brush_custom != doc->brush_custom || doc_->story.size() != doc->story.size() || !same_onion ||
-               !same_book || !same_story(*doc_, *doc, page.index)) {
+               !same_book || !same_story(*doc_, *doc, page.index) ||
+               covers_before(*doc_, *shown_page_) != covers_before(*doc, page)) {
         // the same page, changed: only the tiles its new or removed lines cover are drawn again (anything else
-        // changed: all of them)
+        // changed: all of them — its number too, and the covers before it, which the nombre and the binding edge
+        // follow)
         const core::Page& old = *shown_page_;
-        bool whole = !(same_spec(old.spec, page.spec) && same_frames(old.frames, page.frames) && old.binding == page.binding &&
+        bool whole = !(old.index == page.index && covers_before(*doc_, old) == covers_before(*doc, page) &&
+                       same_spec(old.spec, page.spec) && same_frames(old.frames, page.frames) && old.binding == page.binding &&
                        old.fills == page.fills && old.extra == page.extra && old.effects == page.effects && old.ruler == page.ruler &&
                        old.rulers == page.rulers && old.prims == page.prims && old.numero == page.numero &&
                        old.onion_from == page.onion_from && same_onion && same_book && old.layers.size() == page.layers.size() &&
@@ -316,12 +330,26 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
                 mark(level, QRect(QPoint(0, 0), level.size), generation_);
                 continue;
             }
+            // (a nombre takes a white halo by what lies under its letters: a line drawn or taken away under any of it
+            // draws all of it again, in every tile it spans)
+            std::vector<render::Box> nombres;
+            try {
+                if (!touched.empty()) nombres = render::nombre_areas(page, dpi, doc.get());
+            } catch (const std::exception&) {
+                mark(level, QRect(QPoint(0, 0), level.size), generation_);  // (where it lies is not known: all of it)
+                continue;
+            }
             const render::Size size{level.size.width(), level.size.height()};
             for (const core::StrokePtr& stroke : touched) {
                 const auto box = render::brushes::extent(size, core::stroke_points(*stroke), dpi,
                                                          stroke->width_mm != 0.0 ? stroke->width_mm : 0.35, stroke->kind);
                 if (!box) continue;
-                mark(level, QRect(box->x0 - 2, box->y0 - 2, box->width() + 4, box->height() + 4), generation_);
+                const QRect drawn(box->x0 - 2, box->y0 - 2, box->width() + 4, box->height() + 4);
+                mark(level, drawn, generation_);
+                for (const render::Box& nombre : nombres) {
+                    const QRect under(nombre.x0, nombre.y0, nombre.width(), nombre.height());
+                    if (drawn.intersects(under)) mark(level, under, generation_);
+                }
             }
         }
     }

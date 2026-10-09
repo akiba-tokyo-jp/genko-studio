@@ -1157,6 +1157,23 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
 
 }  // namespace
 
+std::vector<Box> nombre_areas(const core::Page& page, int dpi, const core::Document* episode) {
+    const auto items = nombre_items(page, episode);
+    std::vector<Box> out;
+    if (items.empty()) return out;
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = episode;
+    ctx.dpi = dpi;
+    ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+    const auto text = nombre_text(page, episode), font = nombre_font(episode);
+    for (const auto& item : items) {
+        const int size = std::max(6, mm_to_px(item[2], dpi));
+        out.push_back(nombre_geometry(text, font, size, item, ctx).second);
+    }
+    return out;
+}
+
 std::optional<Image> detail::layer_lines(const Ctx& ctx, const core::Layer& layer, const Image* panel_mask, const Image* raster,
                                          bool with_page) {
     return layer_strokes(ctx, layer, Box{0, 0, ctx.size.width, ctx.size.height}, panel_mask, raster, false, with_page);

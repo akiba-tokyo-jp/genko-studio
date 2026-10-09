@@ -14,6 +14,7 @@
 #include "core/pyops.hpp"
 #include "core/pyrandom.hpp"
 #include "render/draw.hpp"
+#include "render/libm_float.hpp"
 #include "render/op_limits.hpp"
 
 namespace genko::render::filters {
@@ -22,22 +23,15 @@ using core::Json;
 
 // --- numpy's float32 sine and cosine -----------------------------------------------------------------------------------
 
-namespace {
-
-// (never folded or vectorised by the compiler: the C library's own functions, each value by itself)
-float (*volatile g_sinf)(float) = [](float x) { return ::sinf(x); };
-float (*volatile g_cosf)(float) = [](float x) { return ::cosf(x); };
-
-}  // namespace
-
 // numpy 2.4's FLOAT_sin and FLOAT_cos (loops_trigonometric.dispatch.cpp) take their vectorised way — Cody–Waite's
 // reduction and Myklebust's polynomials with fused multiply-adds, libm past its range — only where the CPU target has
 // FMA3 (NPY_SIMD_FMA3); elsewhere they call npy_sinf / npy_cosf, the C library's sinf and cosf, for every element. The
 // reference runs with NPY_DISABLE_CPU_FEATURES=X86_V3,X86_V4,AVX512_ICL,AVX512_SPR (.github/workflows/native.yml):
-// numpy's X86_V2 baseline, without FMA3, so the C library's functions are numpy's here. (The two ways part in the last
-// bit for some angles: on some page sizes a twirl's pixel by 1.)
-float numpy_sinf(float x) { return g_sinf(x); }
-float numpy_cosf(float x) { return g_cosf(x); }
+// numpy's X86_V2 baseline, without FMA3, so the C library's functions are numpy's there — glibc 2.39's, computed here
+// by render/libm_float.cpp so that every platform gets their bits (another C library may round some otherwise). (The
+// two ways part in the last bit for some angles: on some page sizes a twirl's pixel by 1.)
+float numpy_sinf(float x) { return libm::sinf(x); }
+float numpy_cosf(float x) { return libm::cosf(x); }
 
 // --- connected parts ------------------------------------------------------------------------------------------------
 

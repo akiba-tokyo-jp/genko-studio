@@ -443,6 +443,117 @@ std::string copy_file_hashed(const fs::path& from, const fs::path& to) {
     return hash.result().toHex().toStdString();
 }
 
+namespace {
+
+[[noreturn]] void too_large_to_copy(const fs::path& from, std::uintmax_t maximum) {
+    throw core::Error("memory", "the asset " + core::py_repr_str(path_to_utf8(from)) + " is too large to copy (at most " +
+                                    std::to_string(maximum) + " bytes)",
+                      path_to_utf8(from));
+}
+
+}  // namespace
+
+bool copy_file_verified(const fs::path& from, const fs::path& to, std::string_view sha256, std::uintmax_t maximum) {
+    fault::before_write(to);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    std::vector<char> buf(kChunk);
+    std::uintmax_t total = 0;
+    const fs::path folder = folder_of(to);
+#ifdef _WIN32
+    Handle source(CreateFileW(from.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (!source.valid()) fail_windows(from);
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!GetFileInformationByHandle(source.h, &info)) fail_windows(from);
+    if (GetFileType(source.h) != FILE_TYPE_DISK ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) != 0) {
+        return false;  // (a link, or not a file)
+    }
+    if (((static_cast<std::uintmax_t>(info.nFileSizeHigh) << 32) | info.nFileSizeLow) > maximum) too_large_to_copy(from, maximum);
+    make_dirs_durable(folder);
+    const fs::path tmp = folder / path_from_utf8(temp_name(to));
+    {
+        Handle target(CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
+        if (!target.valid()) fail_windows(tmp);
+        try {
+            for (;;) {
+                const std::size_t got = read_some(source.h, buf.data(), buf.size(), from);
+                if (got == 0) break;
+                total += got;
+                if (total > maximum) too_large_to_copy(from, maximum);  // (it grew)
+                hash.addData(QByteArrayView(buf.data(), static_cast<qsizetype>(got)));
+                write_all(target.h, buf.data(), got, tmp);
+            }
+            if (!FlushFileBuffers(target.h)) fail_windows(tmp);
+        } catch (...) {
+            CloseHandle(target.h);
+            target.h = INVALID_HANDLE_VALUE;
+            DeleteFileW(tmp.c_str());
+            throw;
+        }
+    }
+    if (hash.result().toHex().toStdString() != sha256) {
+        DeleteFileW(tmp.c_str());
+        return false;  // (it does not hold what its name says)
+    }
+    for (int attempt = 0;; ++attempt) {
+        if (MoveFileExW(tmp.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) break;
+        const DWORD code = GetLastError();
+        const bool busy = code == ERROR_SHARING_VIOLATION || code == ERROR_ACCESS_DENIED || code == ERROR_LOCK_VIOLATION;
+        if (!busy || attempt == 7) {
+            DeleteFileW(tmp.c_str());
+            fail(errno_from_windows(code), to);
+        }
+        Sleep(static_cast<DWORD>(50u << attempt));
+    }
+#else
+    Fd source;
+    source.fd = open_retry(from, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (source.fd < 0) {
+        if (errno == ELOOP) return false;  // (a link)
+        fail(errno, from);
+    }
+    struct stat st {};
+    if (::fstat(source.fd, &st) != 0) fail(errno, from);
+    if (!S_ISREG(st.st_mode)) return false;
+    if (st.st_size < 0 || static_cast<std::uintmax_t>(st.st_size) > maximum) too_large_to_copy(from, maximum);
+    make_dirs_durable(folder);
+    const fs::path tmp = folder / path_from_utf8(temp_name(to));
+    {
+        Fd target;
+        target.fd = open_retry(tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        if (target.fd < 0) fail(errno, tmp);
+        try {
+            for (;;) {
+                const std::size_t got = read_some(source.fd, buf.data(), buf.size(), from);
+                if (got == 0) break;
+                total += got;
+                if (total > maximum) too_large_to_copy(from, maximum);  // (it grew)
+                hash.addData(QByteArrayView(buf.data(), static_cast<qsizetype>(got)));
+                write_all(target.fd, buf.data(), got, tmp);
+            }
+            if (::fsync(target.fd) != 0) fail(errno, tmp);
+            close_checked(target, tmp);
+        } catch (...) {
+            ::unlink(tmp.c_str());
+            throw;
+        }
+    }
+    if (hash.result().toHex().toStdString() != sha256) {
+        ::unlink(tmp.c_str());
+        return false;  // (it does not hold what its name says)
+    }
+    if (::rename(tmp.c_str(), to.c_str()) != 0) {
+        const int error_number = errno;
+        ::unlink(tmp.c_str());
+        fail(error_number, to);
+    }
+    sync_dir(folder);
+#endif
+    fault::after_write(to);
+    return true;
+}
+
 std::string sha256_file(const fs::path& path) {
     QCryptographicHash hash(QCryptographicHash::Sha256);
     std::vector<char> buf(kChunk);

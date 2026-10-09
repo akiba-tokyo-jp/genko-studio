@@ -122,9 +122,9 @@ std::size_t copy_assets(const fs::path& src, const fs::path& dest) {
         const std::string suffix = name.substr(64);
         if (!AssetStore::is_ref(ref) || !AssetStore::is_suffix(suffix) || parts[0] != name.substr(0, 2)) continue;
         if (target.has(ref, suffix)) continue;
-        const std::string bytes = read_file(file);
-        if (AssetStore::ref(bytes) != ref) continue;  // (it does not hold what its name says)
-        target.put_known(ref, bytes, suffix);
+        // (streamed into a temporary file and hashed on the way, then renamed; not when it does not hold what its name
+        // says, or is no longer a regular file)
+        if (!copy_file_verified(file, target.path(ref, suffix), name.substr(0, 64), kAssetMaxBytes)) continue;
         ++copied;
     }
     return copied;

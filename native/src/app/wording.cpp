@@ -315,7 +315,15 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("repeat is none, repeat or mirror", "繰り返しは、なし・繰り返す・折り返すから選びます"));
         r.push_back(rule(R"(the other book cannot be read \(this book (?:needs repairs|uses features).*\))",
                          "取り込む原稿に、見つからない絵や読めないデータがあるため取り込めません（その原稿を開いて確かめてください）"));
+        r.push_back(rule(R"(the other book cannot be read \(project\.json (?:version \S+ is newer than this build supports|needs Genko that reads version \S+).*\))",
+                         "取り込む原稿は、この Genko より新しい版で保存されているため取り込めません（Genko を新しくしてください）"));
         r.push_back(rule("the other book cannot be read.*", "取り込む原稿を開けませんでした（原稿のフォルダーを選んでください）"));
+        r.push_back(rule(R"(project\.json (?:version \S+ is newer than this build supports|needs Genko that reads version \S+).*)",
+                         "この原稿は、この Genko より新しい版で保存されているため開けません（Genko を新しくしてください）"));
+        r.push_back(rule(R"(pages (\S+) and (\S+) are not next to each other)", "\\1 ページと \\2 ページは隣り合っていないので、見開きになりません"));
+        r.push_back(rule(R"(pages (\S+) and (\S+) are two sides of one leaf, not a spread)",
+                         "\\1 ページと \\2 ページは 1 枚の紙の表と裏なので、見開きになりません"));
+        r.push_back(rule("preset must be one of b4, b5, a5, a4, webtoon", "原稿用紙は B4・B5・A5・A4・縦読み（Webtoon）から選びます"));
         r.push_back(rule(R"(the other book has no page (\d+))", "取り込む原稿に \\1 ページはありません"));
         r.push_back(rule("the adjustment cannot be used: .*", "その補正の数値は使えません"));
         r.push_back(rule("the layer has no marks to trace", "このレイヤーには線にできる絵がありません"));

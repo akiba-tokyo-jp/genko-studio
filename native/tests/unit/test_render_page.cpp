@@ -501,9 +501,10 @@ private slots:
     }
 
     void far_picture_balloons_are_not_opened() {
-        // A part of the page that a picture balloon does not reach does not open its picture: one this build cannot read
-        // yet stops the whole page (or is left out of it), while a part away from it is drawn without asking (a tile of
-        // the canvas, a region).
+        // A part of the page that a picture balloon does not reach does not open its picture, but decides as the whole
+        // page does (what the picture is, is known from its first bytes): one this build cannot read yet stops the whole
+        // page and the part away from it alike, or, with skip_unported, is left out of both and said so (a tile of the
+        // canvas, a region: the same pixels as the whole page cut).
         Document doc = book();
         const Document plain = doc;
         const Num index = doc.pages[0]->index;
@@ -515,9 +516,51 @@ private slots:
         const render::Image whole = render::render_page(*plain.pages[0], 150, proof, &plain).image;
         const render::RenderRegion far{whole.width() - 80, whole.height() - 60, 80, 60};
         proof.region = far;
+        QVERIFY_THROWS_EXCEPTION(render::NotYetPorted, render::render_page(*doc.pages[0], 150, proof, &doc));
+        proof.skip_unported = true;
         const render::RenderResult got = render::render_page(*doc.pages[0], 150, proof, &doc);
-        QVERIFY(got.omitted.empty());
+        QCOMPARE(got.omitted, std::vector<std::string>{"image_format"});
         QVERIFY(got.image.tobytes() == whole.crop(render::Box{far.x, far.y, far.x + far.w, far.y + far.h}).tobytes());
+    }
+
+    void unported_picture_leaves_its_group_out_everywhere() {
+        // A joined group (style.group) with a picture balloon this build cannot open yet (TIFF): the whole page drawn with
+        // skip_unported leaves the whole group out and says so; so does every part of the page — one the picture reaches,
+        // and one it does not that the group's other balloon reaches — so each part is the whole page cut.
+        Document doc = book();
+        const Num index = doc.pages[0]->index;
+        {
+            genko::core::StoryLine& picture = doc.add_line(index, "絵", "", std::nullopt, "", Num(2), Num(2), Num(12), Num(8), "picture");
+            picture.style["picture"] = genko::core::b64encode(std::string("II*\0", 4) + std::string(60, '\x01'));
+            picture.style["group"] = "g";
+        }
+        doc.add_line(index, "遠くの台詞", "", std::nullopt, "", Num(40), Num(70), Num(25), Num(18), "speech").style["group"] = "g";
+        Document apart = doc;  // (the same balloon in a group of its own: drawn)
+        apart.story.back().style["group"] = "h";
+        for (const char* mode : {"proof", "print"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            options.skip_unported = true;
+            const render::RenderResult whole = render::render_page(*doc.pages[0], 150, options, &doc);
+            QCOMPARE(whole.omitted, std::vector<std::string>{"image_format"});
+            QVERIFY(whole.image.tobytes() != render::render_page(*apart.pages[0], 150, options, &apart).image.tobytes());
+            const int w = whole.image.width();
+            const int h = whole.image.height();
+            for (const render::RenderRegion part : {render::RenderRegion{220, 400, w - 220, h - 400},  // (the balloon, not the picture)
+                                                    render::RenderRegion{0, 0, 100, 80},              // (the picture)
+                                                    render::RenderRegion{0, 0, w, h / 2}, render::RenderRegion{0, h / 2, w, h - h / 2},
+                                                    render::RenderRegion{300, 450, 1, 1}}) {
+                for (const bool fresh : {true, false}) {
+                    if (fresh) render::clear_render_caches();
+                    render::RenderOptions o = options;
+                    o.region = part;
+                    const render::RenderResult got = render::render_page(*doc.pages[0], 150, o, &doc);
+                    QCOMPARE(got.omitted, std::vector<std::string>{"image_format"});
+                    QVERIFY2(got.image.tobytes() == whole.image.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes(),
+                             (std::string(mode) + " region " + std::to_string(part.x) + "," + std::to_string(part.y)).c_str());
+                }
+            }
+        }
     }
 
     void remembered_keys_count() {

@@ -35,14 +35,16 @@ float pairwise_sum(const float* a, std::size_t n);
 // arr.mean() of a float32 array: float32(double(pairwise sum) / n).
 float mean(const float* a, std::size_t n);
 
-// The float32 ufuncs numpy computes with the platform's libm on this machine (np.sin, np.cos, np.hypot, np.arctan2
-// of float32 arrays: sinf, cosf, hypotf, atan2f), called out of line so the compiler never folds or merges them.
+// The float32 ufuncs numpy computes with the platform's libm where the reference runs (np.sin, np.cos, np.hypot,
+// np.arctan2 of float32 arrays: sinf, cosf, hypotf, atan2f), called out of line so the compiler never folds or merges
+// them. sinf and cosf are glibc 2.39's on every platform (render/libm_float.hpp); hypotf and atan2f this machine's.
 float sinf(float x);
 float cosf(float x);
 float hypotf(float x, float y);
 float atan2f(float y, float x);
 // np.power of a float32 array and a float32 (psd._depth8's gamma): libm's powf, element by element (numpy 2.4 takes
-// its own SIMD way only with AVX512_SKX, which the reference's NPY_DISABLE_CPU_FEATURES leaves out).
+// its own SIMD way only with AVX512_SKX, which the reference's NPY_DISABLE_CPU_FEATURES leaves out): glibc 2.39's on
+// every platform (render/libm_float.hpp).
 float powf(float x, float y);
 // np.hypot of float64 arrays (and of int64 ones, cast to float64): libm's hypot (balloons._fade_mask).
 double hypot(double x, double y);

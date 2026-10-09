@@ -36,6 +36,9 @@ Image read_png(std::string_view bytes, const PngLimits& limits = {});
 // Other formats Pillow opens (TIFF, WebP, PSD) throw NotYetPorted("image_format");
 // anything else core::Error("unidentified_image").
 Image open_image(std::string_view bytes, const PngLimits& limits = {});
+// Whether open_image refuses these bytes as one of those other formats (NotYetPorted("image_format")): known by their
+// first bytes, without reading the rest.
+bool unported_image_format(std::string_view bytes);
 
 // The image as PNG bytes ("1", "L", "LA", "I;16", "RGB", "RGBA" and "P"); compress_level as zlib's (0..9).
 std::string write_png(const Image& image, int compress_level = 6);

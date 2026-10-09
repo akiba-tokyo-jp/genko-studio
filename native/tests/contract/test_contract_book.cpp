@@ -8,7 +8,11 @@
 // newer version, JSON that is not a book, a book missing a picture). A case marked "cpp" is one this build refuses on
 // purpose (a paper that is not a finite number, pixels moved onto a basic frame of no finite size or onto a paper too
 // large to hold them, a book it would open read-only, a version only this build reads): C++ must refuse it with that
-// code, its error holding "cpp_says". The command line copies none of the other book's assets with import_pages, as
+// code, its error holding "cpp_says". One marked "cpp": "deviates" is one this build answers otherwise than Python on
+// purpose, the user's decision its "cpp_says" names (opsupport.hpp): D1, set_page_spec moving a cover's pixels on its
+// own paper and a layer's mask with what it masks; D2, import_pages pointing what names a layer at the page's own new
+// layers. It is Python's but at its "cpp_differs", keeps its "cpp_keeps" after the case and saved and read back, and
+// Python's book does not. The command line copies none of the other book's assets with import_pages, as
 // Python's does (its app and MCP tools copy them first, merge.copy_assets): checked on both command lines. Skipped
 // without the Python reference.
 
@@ -153,7 +157,7 @@ private slots:
             job["steps"] = steps_of(cases[n]);
             job["out"] = (dir + QStringLiteral("/%1.json").arg(n)).toStdString();
             job["covers"] = true;
-            if (cases[n]["ok"].get<bool>() && !cases[n].contains("cpp")) {
+            if (cases[n]["ok"].get<bool>() && (!cases[n].contains("cpp") || genko::test::deviates(cases[n]))) {
                 job["reread"] = (dir + QStringLiteral("/py-%1.genko").arg(n)).toStdString();
             }
             jobs.push_back(std::move(job));
@@ -170,6 +174,7 @@ private slots:
         std::map<std::string, std::pair<int, int>> same;  // op → (successes, refusals) the same as Python's
         int read_back = 0;
         int refused_here = 0;
+        int deviating = 0;
         int covers_compared = 0;
         genko::test::ReadBackNotes notes;
         std::vector<std::string> failures;
@@ -187,9 +192,11 @@ private slots:
             genko::storage::AssetStore store(genko::storage::path_from_utf8((dir + QStringLiteral("/cpp-store-%1").arg(n)).toStdString()));
             genko::core::Document last;
             std::vector<Json> covers;  // what covers.py makes of the book after each step, on this side
+            std::vector<genko::core::Document> books{loaded.document};  // (the book before each step, and after the last)
             const auto outcomes = genko::test::run_steps(loaded.document, steps_of(c), first_id, store, false, &last,
-                                                         [&covers](genko::core::Document& doc, std::size_t, const genko::test::StepOutcome&) {
+                                                         [&covers, &books](genko::core::Document& doc, std::size_t, const genko::test::StepOutcome&) {
                                                              covers.push_back(covers_of(doc));
+                                                             books.push_back(doc);
                                                          });
             if (records.size() != outcomes.size()) {
                 failures.push_back(name + ": Python gave " + std::to_string(records.size()) + " steps");
@@ -209,7 +216,7 @@ private slots:
                     continue;
                 }
             }
-            if (c.contains("cpp")) {  // refused here on purpose
+            if (c.contains("cpp") && !genko::test::deviates(c)) {  // refused here on purpose
                 const auto& final = outcomes.back();
                 const std::string error = final.reply.value("error", std::string());
                 if (final.code != c["cpp"].get<std::string>() || error.find(c["cpp_says"].get<std::string>()) == std::string::npos) {
@@ -221,9 +228,16 @@ private slots:
                 ++refused_here;
                 continue;
             }
+            const bool deviates = genko::test::deviates(c);  // (the user's decision: Python's but at its places)
+            if (deviates) {
+                if (const std::string diff = genko::test::compare_deviating_steps(outcomes, records, c); !diff.empty()) {
+                    failures.push_back(name + ": " + diff.substr(0, 1500));
+                    continue;
+                }
+            }
             bool ok = true;
             for (std::size_t s = 0; s < outcomes.size() && ok; ++s) {
-                const std::string diff = genko::test::compare_step(outcomes[s], records[s]);
+                const std::string diff = deviates ? std::string() : genko::test::compare_step(outcomes[s], records[s]);
                 if (!diff.empty()) {
                     failures.push_back(name + " step " + std::to_string(s) + ": " + diff.substr(0, 1500));
                     ok = false;
@@ -240,6 +254,35 @@ private slots:
                 ++covers_compared;
             }
             if (!ok) continue;
+            if (deviates) {
+                // what this build keeps: after the case, saved and read back; and not in Python's book
+                const Json& keeps = c["cpp_keeps"];
+                const genko::core::Document& before = books[books.size() - 2];
+                const auto saved = genko::storage::path_from_utf8((dir + QStringLiteral("/cpp-%1.genko").arg(n)).toStdString());
+                std::string wrong = genko::test::kept_by_deviation(keeps, before, last);
+                if (wrong.empty()) {
+                    wrong = genko::test::read_back_difference(last, saved, store, reread, notes, genko::test::deviation_paths(c));
+                }
+                if (wrong.empty()) {
+                    const genko::core::ScopedIdSource ids(genko::core::counting_ids());
+                    wrong = genko::test::kept_by_deviation(keeps, before, genko::storage::load_document(saved).document);
+                    if (!wrong.empty()) wrong = "read back: " + wrong;
+                }
+                if (wrong.empty()) {
+                    const genko::core::ScopedIdSource ids(genko::core::counting_ids());
+                    const auto python = genko::storage::load_document(
+                        genko::storage::path_from_utf8((dir + QStringLiteral("/py-%1.genko").arg(n)).toStdString()));
+                    if (genko::test::kept_by_deviation(keeps, before, python.document).empty()) {
+                        wrong = "Python's book keeps it too: not a deviation";
+                    }
+                }
+                if (!wrong.empty()) {
+                    failures.push_back(name + " (" + c["cpp_says"].get<std::string>() + "): " + wrong);
+                    continue;
+                }
+                ++deviating;
+                continue;
+            }
             (expect_ok ? same[op].first : same[op].second) += 1;
             if (!expect_ok) continue;
             const std::string difference = genko::test::read_back_difference(
@@ -252,8 +295,9 @@ private slots:
         }
         for (const auto& f : failures) qWarning("%s", f.c_str());
         for (const auto& [op, n] : same) qInfo("%s: %d successes and %d refusals the same as Python", op.c_str(), n.first, n.second);
-        qInfo("saved and read back as they were: %d; refused here on purpose: %d; covers compared after %d steps", read_back,
-              refused_here, covers_compared);
+        qInfo("saved and read back as they were: %d; refused here on purpose: %d; deviating on purpose (the user's decisions D1, "
+              "D2) and kept so, saved and read back: %d; covers compared after %d steps",
+              read_back, refused_here, deviating, covers_compared);
         QVERIFY2(failures.empty(), (std::to_string(failures.size()) + " of " + std::to_string(cases.size()) +
                                     " cases differ from Python (see the warnings)").c_str());
         const std::map<std::string, std::pair<int, int>> needed{
@@ -266,6 +310,7 @@ private slots:
                       std::to_string(least.first) + "/" + std::to_string(least.second) + " needed").c_str());
         }
         QVERIFY(refused_here >= 8);
+        QVERIFY(deviating >= 5);
     }
 
     // `genko apply` with import_pages copies none of the other book's asset files, as Python's `genko apply` does (its

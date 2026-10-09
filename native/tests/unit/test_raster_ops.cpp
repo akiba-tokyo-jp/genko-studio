@@ -15,7 +15,10 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <functional>
 #include <future>
 #include <memory>
@@ -35,6 +38,7 @@
 #include "core/strokes.hpp"
 #include "render/selection.hpp"
 #include "render/image.hpp"
+#include "render/libm_float.hpp"
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
@@ -46,6 +50,10 @@
 #include "storage/undo.hpp"
 #include "storage/writer.hpp"
 #include "testsupport.hpp"
+
+#if defined(__GLIBC__)
+#include <gnu/libc-version.h>
+#endif
 
 using genko::core::ApplyError;
 using genko::core::ApplyResult;
@@ -1598,6 +1606,87 @@ private slots:
         row("nested", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"union": [{"intersect": [{"all": true}, {"saved": "s", "invert": true}]},
             {"subtract": [{"union": [{"rect": [5, 5, 10, 10]}, {"rect": [12, 12, 10, 10]}]}, {"ellipse": [8, 8, 6, 6]}]}], "grow_mm": -0.5}}])", 1, "2828267568/239");
         row("one part", R"([{"op": "fill_area", "page": 1, "layer_id": "paint-1", "area": {"subtract": [{"rect": [10, 10, 30, 30]}]}}])", 1, "3473190623/242");
+    }
+
+    // numpy's float32 sine, cosine and power (the twirl's, the waves', a PSD's gamma) are the reference's C library's,
+    // glibc 2.39's: computed by render/libm_float.cpp, the same bits on every platform (ARCHITECTURE.md §4). A sample
+    // over every range — tiny, the polynomial alone, the quick reduction (to 120), the slow one (past 120, to the largest
+    // float), infinities and NaNs; powf of the gammas over [0, 1], of negative bases, past the overflow and the
+    // underflow — gives the same checksum everywhere, and where the C library is glibc 2.39 on x86-64 with FMA and AVX2
+    // (where glibc takes its FMA build, as on the reference machines) each value is its own, bit for bit. (Every one of
+    // the 2^32 floats was compared so for sinf and cosf, and 2.4e9 pairs for powf, when the port was made.)
+    void libmFloatIsGlibcs() {
+        namespace libm = genko::render::libm;
+        const auto bits = [](float f) { return std::bit_cast<std::uint32_t>(f); };
+        std::vector<float> xs;
+        for (std::uint64_t i = 0; i < (1ULL << 20); ++i) xs.push_back(std::bit_cast<float>(static_cast<std::uint32_t>(i * 0x9E3779B1ULL)));
+        for (std::uint32_t at = bits(0x1p-30f); at <= bits(120.0f); at += 977) xs.push_back(std::bit_cast<float>(at));  // (to the slow reduction)
+        for (std::uint32_t at = bits(120.0f); at < bits(INFINITY); at += 4099) {  // (the slow reduction, both signs)
+            xs.push_back(std::bit_cast<float>(at));
+            xs.push_back(-std::bit_cast<float>(at));
+        }
+        for (const float x : {0.0f, -0.0f, 1e-45f, 0x1p-12f, 0x1.921FB6p-1f, 120.0f, 0x1.fffffep127f, INFINITY, -INFINITY, NAN,
+                              std::bit_cast<float>(0x7f800001U), std::bit_cast<float>(0xffc12345U)}) {
+            xs.push_back(x);
+        }
+        // (where glibc's FMA build and the same code without fused multiply-adds part: every such float, both signs)
+        for (const std::uint32_t at : {0x418a3adbU, 0x418a3adcU, 0x418a3addU, 0x418a3adeU, 0x41bc76d9U, 0x4202eb4bU, 0x42687a55U,
+                                       0x4280ce28U, 0x42870e40U, 0x42c55faaU, 0x42d8d23eU, 0x4255b0a9U, 0x42a35c07U, 0x42a35d44U,
+                                       0x42a97360U, 0x42cf5854U, 0x42e87a55U}) {
+            xs.push_back(std::bit_cast<float>(at));
+            xs.push_back(-std::bit_cast<float>(at));
+        }
+        std::vector<std::pair<float, float>> pairs;
+        for (const float y : {static_cast<float>(1 / 2.2), 2.2f, 0.5f, 3.0f, -1.5f}) {
+            for (std::uint32_t at = 0; at <= bits(1.0f); at += 4099) pairs.emplace_back(std::bit_cast<float>(at), y);
+        }
+        for (std::uint64_t i = 0; i < (1ULL << 18); ++i) {
+            const std::uint64_t r = i * 0x9E3779B97F4A7C15ULL;
+            pairs.emplace_back(std::bit_cast<float>(static_cast<std::uint32_t>(r)), std::bit_cast<float>(static_cast<std::uint32_t>(r >> 32)));
+        }
+        pairs.emplace_back(std::bit_cast<float>(0x3eb61590U), std::bit_cast<float>(0x40a662c8U));  // (the same for powf)
+        for (int a = -40; a <= 40; ++a) {
+            for (int b = -60; b <= 60; ++b) pairs.emplace_back(a * 0.25f, b * 0.5f);  // (negative bases, odd and even powers)
+        }
+        for (const float x : {0.0f, -0.0f, 1.0f, -1.0f, 2.0f, 1e-45f, 1e38f, INFINITY, -INFINITY, NAN}) {
+            for (const float y : {0.0f, -0.0f, 1.0f, -1.0f, 0.5f, 3.0f, 150.0f, -150.0f, INFINITY, -INFINITY, NAN}) pairs.emplace_back(x, y);
+        }
+        std::uint64_t sum = 1469598103934665603ULL;  // (FNV-1a over the results' bits)
+        const auto mix = [&sum](std::uint32_t v) {
+            for (int k = 0; k < 4; ++k) {
+                sum ^= (v >> (8 * k)) & 0xff;
+                sum *= 1099511628211ULL;
+            }
+        };
+        for (const float x : xs) {
+            mix(bits(libm::sinf(x)));
+            mix(bits(libm::cosf(x)));
+        }
+        for (const auto& [x, y] : pairs) mix(bits(libm::powf(x, y)));
+        qInfo("%zu sines and cosines, %zu powers", xs.size(), pairs.size());
+        QCOMPARE(sum, std::uint64_t{398089069976897963ULL});
+#if defined(__GLIBC__) && (defined(__x86_64__) || defined(__amd64__))
+        const std::string version = gnu_get_libc_version();
+        if (version != "2.39" || !__builtin_cpu_supports("fma") || !__builtin_cpu_supports("avx2")) {
+            qInfo("not compared with this C library (glibc %s, or a CPU without FMA and AVX2)", version.c_str());
+            return;
+        }
+        float (*volatile system_sinf)(float) = ::sinf;
+        float (*volatile system_cosf)(float) = ::cosf;
+        float (*volatile system_powf)(float, float) = ::powf;
+        std::size_t differ = 0;
+        for (const float x : xs) {
+            if (bits(libm::sinf(x)) != bits(system_sinf(x)) || bits(libm::cosf(x)) != bits(system_cosf(x))) {
+                if (++differ < 5) qWarning("sinf/cosf %08x differ from glibc's", bits(x));
+            }
+        }
+        for (const auto& [x, y] : pairs) {
+            if (bits(libm::powf(x, y)) != bits(system_powf(x, y))) {
+                if (++differ < 10) qWarning("powf %08x %08x differs from glibc's", bits(x), bits(y));
+            }
+        }
+        QCOMPARE(differ, std::size_t{0});
+#endif
     }
 
     void ordinaryResultsKept() {

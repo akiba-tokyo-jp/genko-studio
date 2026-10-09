@@ -470,15 +470,28 @@ Image read_png(std::string_view bytes, const PngLimits& limits) {
     return out;
 }
 
-Image open_image(std::string_view bytes, const PngLimits& limits) {
-    if (bytes.size() >= 8 && png_sig_cmp(reinterpret_cast<png_const_bytep>(bytes.data()), 0, 8) == 0) {
-        return read_png(bytes, limits);
+namespace {
+
+bool png_signature(std::string_view bytes) {
+    return bytes.size() >= 8 && png_sig_cmp(reinterpret_cast<png_const_bytep>(bytes.data()), 0, 8) == 0;
+}
+
+}  // namespace
+
+bool unported_image_format(std::string_view bytes) {
+    if (png_signature(bytes) || bytes.substr(0, 3) == "\xff\xd8\xff" || bytes.substr(0, 2) == "BM" ||
+        bytes.substr(0, 6) == "GIF87a" || bytes.substr(0, 6) == "GIF89a") {
+        return false;
     }
+    return other_image_format(bytes);  // (Pillow would open these; the remaining formats are not ported yet)
+}
+
+Image open_image(std::string_view bytes, const PngLimits& limits) {
+    if (png_signature(bytes)) return read_png(bytes, limits);
     if (bytes.substr(0, 3) == "\xff\xd8\xff") return read_jpeg(bytes, limits);
     if (bytes.substr(0, 2) == "BM") return read_bmp(bytes, limits);
     if (bytes.substr(0, 6) == "GIF87a" || bytes.substr(0, 6) == "GIF89a") return read_gif(bytes, limits);
-    // Pillow would open these; the remaining formats are not ported yet.
-    if (other_image_format(bytes)) throw NotYetPorted("image_format");
+    if (unported_image_format(bytes)) throw NotYetPorted("image_format");
     throw core::Error("unidentified_image", "cannot identify image file");
 }
 

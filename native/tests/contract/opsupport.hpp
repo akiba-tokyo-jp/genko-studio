@@ -73,8 +73,46 @@ struct ReadBackNotes {
 // `doc` saved by storage::Saver as a new v4 book in `dir` and read back: "" when it reads back as it was (but for what
 // `notes` counts) and as Python's book saved by save_episode and read back (`reread`: the "reread" record of a harness
 // "steps" job); else what differs. `store` holds the assets the payloads refer to.
+// `deviations` (a deviating case's cpp_differs, below): those places are not compared with Python's book read back; the
+// book read back is still compared whole with the book before the save.
 std::string read_back_difference(const core::Document& doc, const std::filesystem::path& dir, storage::AssetStore& store,
-                                 const core::Json& reread, ReadBackNotes& notes);
+                                 const core::Json& reread, ReadBackNotes& notes, const std::vector<std::string>& deviations = {});
+
+// --- cases this build answers otherwise than Python on purpose ----------------------------------------------------
+//
+// A case marked "cpp": "deviates" (in book_cases.json, ops_cases.json) is one where this build deliberately does not
+// do what Python does: a decision of the user's, named in its "cpp_says" (SPEC §2: a known bug of Python's is not
+// reproduced). Its "cpp_differs" lists the places of a step's record where it may differ from Python's — paths into
+// {"reply", "full", "payload"} ("payload/pages/7/layers/*/parent_id"; "*" any key or index) — and everything else is
+// compared as for any case, and at least one step must differ there (else the mark is stale). Its "cpp_keeps" says
+// what this build keeps that Python does not (kept_by_deviation), checked on the book after the case, the book saved
+// and read back, and — failing — on Python's book.
+
+bool deviates(const core::Json& c);
+// The case's cpp_differs.
+std::vector<std::string> deviation_paths(const core::Json& c);
+// The step's outcome, or Python's record of it, with what is at those places (where there is something) replaced by
+// one mark.
+StepOutcome without_deviations(StepOutcome outcome, const std::vector<std::string>& paths);
+core::Json without_deviations(core::Json record, const std::vector<std::string>& paths);
+// Where a step's outcome differs from Python's record (up to `most` places, as paths of cpp_differs' kind).
+std::vector<std::string> step_differences(const StepOutcome& cpp, const core::Json& python, std::size_t most = 16);
+// "" when the case's steps are Python's but at its places (compare_step) and differ there somewhere; else what is
+// wrong.
+std::string compare_deviating_steps(const std::vector<StepOutcome>& outcomes, const core::Json& records, const core::Json& c);
+
+// What a deviating case's "cpp_keeps" asks of the book after it (`after`; `before`: the book before its last step):
+//   "layer_refs": true — every reference to a layer on a page (a layer's parent_id, a ruler's layer_id, the old
+//     single ruler's, an animation track's folder and cels and its light table, a line's style.below_layer) names a
+//     layer of that page
+//     (the user's decision D2: a page copied takes its references along to its own layers);
+//   "moved": [[page, layer id, "paint" | "mask"], …] — the layer's pixels (alpha over 127) or its mask's hidden part
+//     (under 128) have moved with the page's basic frame from `before` to `after`, as everything else on the page:
+//     their middle where the frame takes it (within 0.5 mm) and their area scaled with it (within 5%), the picture as
+//     big as the page's own paper (raster.WORKING_DPI; a mask ops.MASK_DPI) — none of it cut off (the user's decision
+//     D1).
+// "" when it holds; else where it does not.
+std::string kept_by_deviation(const core::Json& keeps, const core::Document& before, const core::Document& after);
 // Python's words without the addresses of its objects ("<_io.BytesIO object at 0x7f…>" → "<_io.BytesIO object>").
 std::string without_addresses(std::string text);
 

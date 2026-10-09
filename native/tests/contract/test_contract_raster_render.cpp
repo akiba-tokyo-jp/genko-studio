@@ -15,6 +15,10 @@
 //   4. the same book put on another paper (78 × 104 mm, trimmed to 68 × 94), its pages with waves and a twirl (1, 2
 //      and 4) drawn as in 1 and 2: sizes where numpy's float32 sine and cosine and another way of computing them part
 //      (see dressing()).
+// The user's decision D1 (SPEC §2): set_page_spec moves a layer's mask with what it masks, where Python leaves it
+// stretched over the new paper. This build's book differs from Python's there alone — the masks page 1 has before the
+// move, each Python's mask moved from the old basic frame onto the new one (render::relayout_mask) — and is drawn for 2
+// and 4 with those masks as Python keeps them, every other pixel compared.
 // Skipped without the Python reference.
 
 #include <QtTest>
@@ -23,10 +27,12 @@
 #include <QTemporaryDir>
 
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
+#include "render/bookpages.hpp"
 #include "render/brushes.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -184,6 +190,58 @@ class TestContractRasterRender : public QObject {
     genko::core::Document plain_doc_;  // Python's book before the correction layers put on by hand
     genko::core::Document py_other_;   // the book on the other paper, as Python saved it, read by this build
     genko::core::Document cpp_other_;  // … the ops applied by this build
+    // (this build's books with the masks D1 moved put back as Python keeps them, for comparing every other pixel)
+    genko::core::Document cpp_doc_kept_;
+    genko::core::Document cpp_other_kept_;
+
+    // The user's decision D1: `cpp` (this build's book after the ops) differs from `python` (Python's) in the masks the
+    // pages had before set_page_spec (`before`: this build's book just before it) alone, each Python's moved with what it
+    // masks; `cpp` with Python's masks put back in their place. How many there were in `moved`.
+    static genko::core::Document masks_as_python(const genko::core::Document& cpp, const genko::core::Document& python,
+                                                 const genko::core::Document& before, int& moved) {
+        const auto pixels = [](const genko::core::Bytes& png) {
+            const render::Image image = render::read_png(*png, render::kPillowOpenLimits).convert("L");
+            return std::to_string(image.width()) + "x" + std::to_string(image.height()) + ":" + image.tobytes();
+        };
+        genko::core::Document out = cpp;
+        moved = 0;
+        for (std::size_t i = 0; i < cpp.pages.size(); ++i) {
+            const genko::core::Page& page = *cpp.pages[i];
+            const genko::core::Page* theirs = page_of(python, static_cast<int>(page.index.int_value()));
+            const genko::core::Page* was = page_of(before, static_cast<int>(page.index.int_value()));
+            for (std::size_t k = 0; k < page.layers.size(); ++k) {
+                const genko::core::Layer& layer = page.layers[k];
+                if (!layer.mask || !layer.mask->png) continue;
+                const auto find = [&](const genko::core::Page* on) -> const genko::core::Layer* {
+                    for (const auto& l : on->layers) {
+                        if (l.id == layer.id) return &l;
+                    }
+                    return nullptr;
+                };
+                const genko::core::Layer* py_layer = find(theirs);
+                if (py_layer == nullptr || !py_layer->mask || !py_layer->mask->png) {
+                    qWarning("page %d layer %s: a mask Python's book does not have", static_cast<int>(page.index.int_value()), layer.id.c_str());
+                    ++moved;  // (counted, so the count says so)
+                    continue;
+                }
+                if (pixels(layer.mask->png) == pixels(py_layer->mask->png)) continue;
+                const genko::core::Layer* old_layer = find(was);
+                const std::string start_side = cpp.start_side.value_or("");
+                const auto expected = render::relayout_mask(*old_layer->mask->png, was->spec, page.spec, was->inner_rect_mm(start_side),
+                                                            page.inner_rect_mm(start_side));
+                if (!expected || pixels(std::make_shared<const std::string>(*expected)) != pixels(layer.mask->png) ||
+                    pixels(old_layer->mask->png) != pixels(py_layer->mask->png)) {
+                    qWarning("page %d layer %s: the mask is not Python's moved with what it masks", static_cast<int>(page.index.int_value()),
+                             layer.id.c_str());
+                    moved += 100;
+                    continue;
+                }
+                out.edit_page(i).layers[k].mask = py_layer->mask;
+                ++moved;
+            }
+        }
+        return out;
+    }
     std::map<std::string, QString> drawn_;  // "<book>-<page>-<mode>-<dpi>" → Python's drawing
 
     QString path(const QString& relative) const { return scratch_.path() + QLatin1Char('/') + relative; }
@@ -262,6 +320,22 @@ private slots:
             add_adjust_layers(dressed_doc);
             cpp_other_ = bus.apply(dressed_doc, masks(), genko::core::Actor("human:作者"), false).doc;
         }
+        // (D1: this build's books but for the masks set_page_spec moved, which are Python's moved with what they mask)
+        for (const auto& [paper, trim, cpp, python, kept] :
+             {std::tuple<Json, Json, genko::core::Document*, genko::core::Document*, genko::core::Document*>{
+                  Json::array({76, 100}), Json::array({66, 90}), &cpp_doc_, &py_doc_, &cpp_doc_kept_},
+              {kOtherPaper, kOtherTrim, &cpp_other_, &py_other_, &cpp_other_kept_}}) {
+            const genko::core::ScopedIdSource ids(genko::core::counting_ids());
+            const genko::core::Document doc = genko::storage::load_document(genko::storage::path_from_utf8(original.toStdString())).document;
+            Json unmoved = dressing(paper, trim);
+            QCOMPARE(unmoved.back()["op"], Json("set_page_spec"));
+            unmoved.erase(unmoved.size() - 1);
+            const genko::core::Document before =
+                genko::core::CommandBus(render::ops_registry()).apply(doc, unmoved, genko::core::Actor("human:作者"), false).doc;
+            int moved = 0;
+            *kept = masks_as_python(*cpp, *python, before, moved);
+            QCOMPARE(moved, 3);  // (page 1's: in-a, mask-1, adj-levels)
+        }
 
         // Python draws the pages (of the book before the correction layers too, in the modes the regions are cut in)
         Json jobs = Json::array();
@@ -296,7 +370,7 @@ private slots:
                 for (const int dpi : kDpis) {
                     const render::Image want = python_picture("dressed", page, mode, dpi);
                     for (const auto& [side, doc] : {std::pair<const char*, const genko::core::Document*>{"Python's book", &py_doc_},
-                                                   {"this build's book", &cpp_doc_}}) {
+                                                   {"this build's book (D1's masks as Python's)", &cpp_doc_kept_}}) {
                         render::clear_render_caches();
                         const render::Image got = draw(*doc, page, mode, dpi);
                         ++compared;
@@ -362,7 +436,7 @@ private slots:
                 for (const int dpi : kDpis) {
                     const render::Image want = python_picture("other", page, mode, dpi);
                     for (const auto& [side, doc] : {std::pair<const char*, const genko::core::Document*>{"Python's book", &py_other_},
-                                                   {"this build's book", &cpp_other_}}) {
+                                                   {"this build's book (D1's masks as Python's)", &cpp_other_kept_}}) {
                         render::clear_render_caches();
                         const render::Image got = draw(*doc, page, mode, dpi);
                         ++compared;

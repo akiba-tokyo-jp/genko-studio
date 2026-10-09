@@ -41,6 +41,14 @@ void write_new_file(const std::filesystem::path& path, std::string_view bytes);
 // lowercase hex digits) of the bytes copied.
 std::string copy_file_hashed(const std::filesystem::path& from, const std::filesystem::path& to);
 
+// Copy the regular file `from` to `to` as write_atomic writes (a temporary file beside `to`, fsynced, renamed over it,
+// the folder fsynced; missing folders made), read in pieces and hashed on the way, when its bytes hash to `sha256` (64
+// lowercase hex digits). A link is not followed: false for a link or anything but a regular file, and false when the
+// bytes do not hash to `sha256` — nothing left behind either way. core::Error("memory") when it holds more than
+// `maximum` bytes (nothing written), core::Error("io") when it cannot be read or written.
+bool copy_file_verified(const std::filesystem::path& from, const std::filesystem::path& to, std::string_view sha256,
+                        std::uintmax_t maximum);
+
 // The sha256 (64 lowercase hex digits) of a file's bytes, read in pieces; of some bytes.
 std::string sha256_file(const std::filesystem::path& path);
 std::string sha256_hex(std::string_view bytes);

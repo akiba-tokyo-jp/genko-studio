@@ -700,6 +700,28 @@ private slots:
         QCOMPARE(error(std::string("the picture is too large (at most 64 MB): a.png")), QStringLiteral("画像ファイルが大きすぎます（64 MB まで）"));
     }
 
+    void bookRefusalsInThePersonsWords() {
+        // (set_spread's, set_page_spec's and a newer book's refusals, as the person reads them)
+        using app::wording::error;
+        QCOMPARE(error(std::string("ops[0] set_spread: pages 2 and 5 are not next to each other")),
+                 QStringLiteral("2 ページと 5 ページは隣り合っていないので、見開きになりません"));
+        QCOMPARE(error(std::string("ops[0] set_spread: pages 3 and 4 are two sides of one leaf, not a spread")),
+                 QStringLiteral("3 ページと 4 ページは 1 枚の紙の表と裏なので、見開きになりません"));
+        QCOMPARE(error(std::string("ops[0] set_page_spec: preset must be one of b4, b5, a5, a4, webtoon")),
+                 QStringLiteral("原稿用紙は B4・B5・A5・A4・縦読み（Webtoon）から選びます"));
+        QCOMPARE(error(std::string("ops[0] import_pages: the other book cannot be read (project.json version 99 is newer than this "
+                                   "build supports (4); update Genko)")),
+                 QStringLiteral("取り込む原稿は、この Genko より新しい版で保存されているため取り込めません（Genko を新しくしてください）"));
+        QCOMPARE(error(std::string("ops[0] import_pages: the other book cannot be read (project.json needs Genko that reads version 7 "
+                                   "(this build reads up to 4); update Genko)")),
+                 QStringLiteral("取り込む原稿は、この Genko より新しい版で保存されているため取り込めません（Genko を新しくしてください）"));
+        QCOMPARE(error(std::string("project.json version 5 is newer than this build supports (4); update Genko")),
+                 QStringLiteral("この原稿は、この Genko より新しい版で保存されているため開けません（Genko を新しくしてください）"));
+        // (the others keep their words)
+        QCOMPARE(error(std::string("ops[0] import_pages: the other book cannot be read ([Errno 2] No such file or directory: 'x')")),
+                 QStringLiteral("取り込む原稿を開けませんでした（原稿のフォルダーを選んでください）"));
+    }
+
     void layerAndViewCommands() {
         Studio s;
         const std::size_t layers = s.page().layers.size();

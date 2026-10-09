@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -91,6 +92,15 @@ private:
 // (duplicate_page and import_pages).
 void refresh_frame_ids(Frame& frame, FrameIdMap& map);
 
+// What on a copied page names one of its layers, pointed at the layer's new id (`layers`: old layer id → new, as
+// duplicate_page and import_pages give the copy's layers new ids): each layer's folder (parent_id), a ruler kept to one
+// layer (layer_id, the old single ruler's too), an animation's folders and cels (page.extra["anim"]: its tracks and its
+// light table), and on the copied lines (`lines`) the layer a line is drawn under (style.below_layer). An id the map
+// does not hold (no layer of the page) is left as it is. Python leaves them all naming the old page's layers (ops.py,
+// duplicate_page and import_pages): a deliberate deviation of this build, the user's decision D2 (SPEC §2: a known bug
+// is not reproduced).
+void remap_layer_refs(Page& page, const std::vector<StoryLine*>& lines, const FrameIdMap& layers);
+
 // Register the ops of M2-O1 (frames, pages, strokes, layers, brush).
 void register_frame_ops(OpRegistry& registry);
 void register_page_ops(OpRegistry& registry);
@@ -110,13 +120,22 @@ using PictureCheck = std::function<void(const std::string& bytes)>;
 // set_balloon_path, replace_text: core/ops_lines.cpp). Without `check` a picture in a line's style is refused with
 // not_yet_ported (as an area that needs resolving is): render::ops_registry registers them again with its check.
 void register_line_ops(OpRegistry& registry, PictureCheck check = {});
-// What the book and page ops of M4 need beyond core (render::register_bookpage_ops gives both; without them the ops
+// What the book and page ops of M4 need beyond core (render::register_bookpage_ops gives them; without them the ops
 // refuse that part with not_yet_ported).
 struct BookPageHooks {
     // pagespec._raster: a whole-page paint layer's PNG moved and resized from the old basic frame onto the new one, as
-    // big as the book's new paper `spec` at raster.WORKING_DPI. Pillow's errors as Python raises them (PyUncaught).
+    // big as the page's new paper `spec` at raster.WORKING_DPI. Pillow's errors as Python raises them (PyUncaught).
+    // (Python makes every page's pixels as big as the book's paper, which cuts off what a jacket or a band, wider than
+    // the book, has beyond it: here a cover's own paper, covers::spec_for — the user's decision D1.)
     std::function<std::string(const std::string& png, const PageSpec& spec, const Rect& old_frame, const Rect& new_frame)>
         relayout_raster;
+    // A layer mask (its PNG over the page's old paper `old_paper`) moved as its layer's pixels and lines are, from the
+    // old basic frame onto the new one, over the page's new paper `paper` at ops.MASK_DPI; nothing when that changes
+    // nothing (a mask of one value everywhere; the same paper and frame). Python leaves a mask as it was, stretched over
+    // the new paper while what it masks moves (the user's decision D1).
+    std::function<std::optional<std::string>(const std::string& png, const PageSpec& old_paper, const PageSpec& paper,
+                                             const Rect& old_frame, const Rect& new_frame)>
+        relayout_mask;
     // io.load_episode(Path(from)) for import_pages: the other book, read whole. OpError "the other book cannot be read
     // (<why>)" for one that cannot be read, Python's words where Python has them.
     std::function<Document(const std::string& from)> load_book;

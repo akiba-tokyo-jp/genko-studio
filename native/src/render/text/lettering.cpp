@@ -876,6 +876,22 @@ std::shared_ptr<const std::optional<Image>> remembered_picture(const Json& data)
     return made;
 }
 
+bool picture_unported(const Json& data) {
+    core::require_hashable(data);
+    if (!data.is_string()) return false;
+    static detail::Memo<bool> sniffed(256, 1024LL * 1024);
+    const std::string key = detail::digest_of(data.get_ref<const std::string&>());
+    if (auto found = sniffed.get(key)) return *found;
+    bool unported = false;
+    try {
+        unported = unported_image_format(core::a2b_base64(data.get_ref<const std::string&>()));
+    } catch (const core::Error& e) {
+        if (e.code() != "format") throw;  // (not base64: picture_of finds no picture)
+    }
+    sniffed.put(key, std::make_shared<const bool>(unported), 1);
+    return unported;
+}
+
 Image picture_letters(const Image& image, const Json& data) {
     const std::shared_ptr<const std::optional<Image>> remembered = remembered_picture(data);
     const std::optional<Image>& picture = *remembered;

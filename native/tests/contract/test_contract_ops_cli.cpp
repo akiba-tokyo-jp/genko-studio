@@ -11,7 +11,8 @@
 //          test_contract_ops compares them exactly, with ids counted the same on both sides).
 //      Where Python stops with a traceback (an exception apply_ops lets through), C++ prints {"ok": false, "error",
 //      "code": "python_error"} and exits 1 as Python does: the error ends with the traceback's last line.
-//      Left out: the parts this build refuses on purpose ("cpp": "not_yet_ported") and [{"op": "undo"}] (below).
+//      Left out: the parts this build refuses on purpose ("cpp": "not_yet_ported"), the cases it answers otherwise on
+//      purpose ("cpp": "deviates", the user's decisions: test_contract_ops) and [{"op": "undo"}] (below).
 //   2. [{"op": "undo"}]: `genko apply` undoes the latest saved change as `genko undo --as <agent>` does (the same
 //      reply keys kind and rev, the same book after, the same refusals and exit codes) and as Python's `genko undo`
 //      (journal.restore) does on the v3 book. Python's own apply_ops undoes only its session's changes, so its

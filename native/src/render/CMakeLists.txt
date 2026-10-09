@@ -16,6 +16,7 @@ genko_library(genko_render
     composite.cpp
     page.cpp
     npcompat.cpp
+    libm_float.cpp
     tones.cpp
     effects.cpp
     fill_patches.cpp
@@ -50,8 +51,8 @@ genko_library(genko_render
   PUBLIC_DEPS genko_core Qt6::Core
   PRIVATE_DEPS genko_storage pillow_imaging PNG::PNG JPEG::JPEG ZLIB::ZLIB Freetype::Freetype ${GENKO_WEBP} ${GENKO_LCMS2})
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
-# (numpy's float32 sinf, cosf, hypotf, atan2f, powf: called in libm as numpy calls them. MSVC: /fp:precise, with which
-# these have no intrinsic forms)
+# (numpy's float32 hypotf, atan2f: called in libm as numpy calls them; sinf, cosf, powf: glibc's, libm_float.cpp, with
+# std::fma where glibc's FMA build fuses. MSVC: /fp:precise, with which these have no intrinsic forms)
 if(NOT MSVC)
   set_source_files_properties(npcompat.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
 endif()

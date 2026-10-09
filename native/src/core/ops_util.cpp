@@ -270,4 +270,35 @@ void refresh_frame_ids(Frame& frame, FrameIdMap& map) {
     for (Frame& child : frame.children) refresh_frame_ids(child, map);
 }
 
+void remap_layer_refs(Page& page, const std::vector<StoryLine*>& lines, const FrameIdMap& layers) {
+    const auto remap = [&layers](Json& value) {
+        if (!value.is_string()) return;
+        if (const std::string* to = layers.get(value.get_ref<const std::string&>())) value = *to;
+    };
+    const auto remap_key = [&remap](Json& holder, const char* key) {
+        if (holder.is_object() && holder.contains(key)) remap(holder[key]);
+    };
+    for (Layer& layer : page.layers) remap(layer.parent_id);
+    if (page.rulers.is_array()) {
+        for (Json& ruler : page.rulers) remap_key(ruler, "layer_id");
+    }
+    if (page.ruler) remap_key(*page.ruler, "layer_id");
+    if (page.extra.is_object() && page.extra.contains("anim")) {
+        Json& anim = page.extra["anim"];
+        if (anim.is_object() && anim.contains("tracks") && anim["tracks"].is_array()) {
+            for (Json& track : anim["tracks"]) {
+                remap_key(track, "folder");
+                if (!track.is_object() || !track.contains("cels") || !track["cels"].is_array()) continue;
+                for (Json& cel : track["cels"]) {  // [frame, cel layer id | null]
+                    if (cel.is_array() && cel.size() >= 2) remap(cel[1]);
+                }
+            }
+        }
+        if (anim.is_object() && anim.contains("light_table") && anim["light_table"].is_array()) {
+            for (Json& cel : anim["light_table"]) remap(cel);  // (the cels always shown faint)
+        }
+    }
+    for (StoryLine* line : lines) remap_key(line->style, "below_layer");
+}
+
 }  // namespace genko::core
