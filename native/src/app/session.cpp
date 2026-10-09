@@ -687,10 +687,10 @@ void Session::trim_history() {
     while (held > options_.history_bytes && done_.size() > 1 && path_) {
         const std::shared_ptr<Change> oldest = done_.front();
         if (!oldest->on_disk || oldest->undone_on_disk || oldest->recover) break;
-        if (std::any_of(queue_.begin(), queue_.end(), [&](const Action& a) { return a.change == oldest; })) break;
+        if (waits(oldest)) break;
         held -= oldest->held;
         done_.erase(done_.begin());
-        ++journal_undo_;  // (in the journal, under the changes still in memory)
+        forget(*oldest);  // (in the journal, under the changes still in memory)
         trimmed_ = true;
     }
 }
@@ -800,6 +800,18 @@ void Session::mark_written(const Action& action, const std::string& txn) {
         change->on_disk = true;
     }
     change->undone_on_disk = action.kind == Action::Kind::Undo;
+}
+
+// A change of this session that has left memory, nothing of it waiting: where the journal has it is counted with the
+// saved changes before this session (the base of journal_after()).
+void Session::forget(const Change& change) {
+    if (!change.on_disk || change.recover) return;  // (a recovery point is not on the journal's stacks)
+    ++(change.undone_on_disk ? journal_redo_ : journal_undo_);
+}
+
+// Something of this change waits to be written.
+bool Session::waits(const std::shared_ptr<Change>& change) const {
+    return std::any_of(queue_.begin(), queue_.end(), [&](const Action& a) { return a.change == change; });
 }
 
 // The journal's undos not written yet (or being written) that redo() takes before the changes undone in memory: those
@@ -1079,18 +1091,22 @@ void Session::job_done(const JobResult& r) {
         job_running_ = false;
         perf::event("save_end", {{"ok", r.ok}, {"steps", static_cast<std::int64_t>(r.steps.size())}});
         DocPtr reloaded;
-        std::int64_t undo_depth = 0;
-        std::int64_t redo_depth = 0;
+        const auto in_memory = [this](const std::shared_ptr<Change>& change) {
+            return std::find(done_.begin(), done_.end(), change) != done_.end() ||
+                   std::find(undone_.begin(), undone_.end(), change) != undone_.end();
+        };
         for (const JobResult::Step& step : r.steps) {
             if (queue_.empty() || !queue_.front().in_flight) break;
             const Action action = queue_.front();
             queue_.pop_front();
             mark_written(action, step.txn);
             if (action.kind == Action::Kind::Edit && !action.change->recover) journal_redo_ = 0;  // (a change ends its redo)
+            if (action.change && !in_memory(action.change) && !waits(action.change)) forget(*action.change);
             if (step.reloaded) {
+                // (the journal as read just now: the base of what waits, also when that cannot be made on the book read)
                 reloaded = step.reloaded;
-                undo_depth = step.undo_depth;
-                redo_depth = step.redo_depth;
+                journal_undo_ = step.undo_depth;
+                journal_redo_ = step.redo_depth;
             }
             base_revision_ = step.revision;
             last_revision_ = step.revision;
@@ -1146,7 +1162,7 @@ void Session::job_done(const JobResult& r) {
             }
         }
         if (reloaded) {
-            rebase_onto(reloaded, base_revision_, undo_depth, redo_depth, true);
+            rebase_onto(reloaded, base_revision_, journal_undo_, journal_redo_, true);
         } else if (r.ok && r.disk_revision >= 0 && r.disk_revision != base_revision_) {
             start_rebase();  // (another writer's change after ours: read the book again, ours kept on top)
         }
@@ -1172,6 +1188,9 @@ void Session::job_done(const JobResult& r) {
         rebasing_ = false;
         if (r.ok) {
             rebase_onto(r.doc, r.revision, r.undo_depth, r.redo_depth, false, r.written);
+        } else if (failure_code_ == QLatin1String("rebase_conflict")) {
+            // (the conflict stands until a read of the book takes what waits: nothing is written over the book meanwhile)
+            if (r.code == QLatin1String("locked")) retry_timer_.start(3000);
         } else if (r.code == QLatin1String("locked")) {
             retry_timer_.start(3000);
             failed_ = true;
@@ -1347,7 +1366,10 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
     std::vector<std::shared_ptr<Change>> replayed_undone;  // replayed, then undone by an Undo waiting after it
     std::map<const Change*, std::shared_ptr<Change>> again_of;
     std::deque<Action> keep;
-    for (const Action& action : queue_) {
+    std::set<std::uint64_t> adds_nothing;  // the undo of a change made, then undone, that cannot be made on this book
+    for (auto it = queue_.begin(); it != queue_.end(); ++it) {
+        const Action& action = *it;
+        if (adds_nothing.count(action.seq) != 0) continue;
         if (written.count(action.txn) != 0) {
             mark_written(action, action.txn);
             continue;
@@ -1419,6 +1441,15 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
             again_of[change.get()] = again;
             keep.push_back(Action{Action::Kind::Edit, again, core::new_txn_id(), ++next_seq_, false});
         } catch (const core::Error& error) {
+            // A change made, then undone, that waits only to end what the journal held to redo (Change::journal) adds
+            // nothing to the book: when it cannot be made on it, neither is written (the journal as read tells what it
+            // holds now).
+            const auto of_it = [&](const Action& a) { return a.change == change; };
+            const auto next = std::find_if(std::next(it), queue_.end(), of_it);
+            if (next != queue_.end() && next->kind == Action::Kind::Undo && std::none_of(std::next(next), queue_.end(), of_it)) {
+                adds_nothing.insert(next->seq);
+                continue;
+            }
             conflicts_found << QString::fromUtf8(error.what());
         }
     }
@@ -1539,7 +1570,13 @@ void Session::adopt_recovery() {
     change->after = std::make_shared<const core::Document>(std::move(doc));
     recovery_offer_.reset();
     doc_ = change->after;
-    // (a recovery is not an undoable edit in the journal: the history starts again from it)
+    // (a recovery is not an undoable edit in the journal: the history starts again from it — the changes of this session
+    // already in the journal stay there, counted with the saved changes before them now, or once written)
+    for (const auto* list : {&done_, &undone_}) {
+        for (const auto& left : *list) {
+            if (!waits(left)) forget(*left);
+        }
+    }
     done_.clear();
     undone_.clear();
     done_.push_back(change);

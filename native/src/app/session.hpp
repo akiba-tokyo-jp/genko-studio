@@ -280,6 +280,8 @@ private:
     bool disk_step_waits() const;
     JournalAfter journal_after() const;
     static void mark_written(const Action& action, const std::string& txn);
+    void forget(const Change& change);
+    bool waits(const std::shared_ptr<Change>& change) const;
     void finish_reading(const JobResult& result);
     void request_recovery();
     void trim_history();

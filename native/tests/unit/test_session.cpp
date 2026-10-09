@@ -167,6 +167,24 @@ void saved_by(const fs::path& book, Session::Options options, const std::string&
     if (!other->wait_saved(10000ms)) throw genko::core::Error("test", "the change was not saved");
 }
 
+// A book with X (a line on page 1) and P (a third page) saved before the session, and the session's journal undo of P
+// held up by another writer's lock while E is drawn on P's page: E cannot be made on the book read after the undo.
+std::shared_ptr<Session> conflict_after_journal_undo(const fs::path& book, const Session::Options& options) {
+    make_book(book);
+    saved_by(book, options, "human:tester", stroke_op(30, 1));                                   // X
+    saved_by(book, options, "human:tester", Json::array({Json::object({{"op", "add_page"}})}));  // P
+    auto session = Session::open(book, options);
+    {
+        genko::storage::ProjectLock other(book, "ai:other");
+        other.try_acquire();
+        session->undo();                   // P, through the journal: held up
+        session->apply(stroke_op(50, 3));  // E, on P's page
+        other.release();
+    }
+    if (!session->wait_idle(10000ms)) throw genko::core::Error("test", "the journal undo did not end");
+    return session;
+}
+
 // Fault injection for this process while it lives (the build must have it).
 struct Fault {
     explicit Fault(const char* spec) { genko::storage::fault::set_for_testing(spec); }
@@ -2244,6 +2262,133 @@ private slots:
         session->redo();
         QVERIFY(session->wait_saved(10000ms));
         QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{1});
+    }
+
+    // E drawn on P's page while the journal undo of P is written (it ends the journal's redo, so it is kept to be
+    // written even when undone): E cannot be made on the book read after it — a conflict, the window keeping both —,
+    // and once E is undone the made-and-undone pair adds nothing to the book: the next read of it takes what waits.
+    void aChangeOnAPageTheJournalUndoTookAwayCanBeUndoneOutOfTheConflict() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        auto session = conflict_after_journal_undo(book, options);
+        QCOMPARE(session->status().code, QStringLiteral("rebase_conflict"));
+        QCOMPARE(session->document().pages.size(), std::size_t{3});
+        session->undo();  // E
+        session->save_now();
+        QVERIFY(session->wait_idle(10000ms));
+        QVERIFY2(session->status().kind == SaveKind::Saved, qPrintable(session->status().code));
+        QCOMPARE(session->document().pages.size(), std::size_t{2});
+        QCOMPARE(genko::storage::load_document(book).document.pages.size(), std::size_t{2});
+        QVERIFY(session->can_redo());
+        session->redo();  // P
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(genko::storage::load_document(book).document.pages.size(), std::size_t{3});
+        QCOMPARE(ink_strokes_on_disk(book, 2), std::size_t{0});
+    }
+
+    // The same pair on the other way the book is read again (another writer's change, here the page E was drawn on
+    // deleted): no conflict either.
+    void aChangeUndoneOnAPageAnotherWriterDeletedLeavesNoConflict() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        saved_by(book, options, "human:tester", stroke_op(30, 1));  // X
+        auto session = Session::open(book, options);
+        session->undo();  // X, through the journal
+        QVERIFY(session->wait_saved(10000ms));
+        session->apply(stroke_op(50, 2));  // E (it ends X's redo)
+        session->undo();
+        saved_by(book, options, "ai:other", Json::array({Json::object({{"op", "delete_page"}, {"page", 2}})}));
+        QSignalSpy notices(session.get(), &Session::notice);
+        session->save_now();
+        QVERIFY(session->wait_idle(10000ms));
+        QVERIFY2(session->status().kind == SaveKind::Saved, qPrintable(session->status().code));
+        QCOMPARE(notices.count(), 0);
+        QCOMPARE(session->document().pages.size(), std::size_t{1});
+        QCOMPARE(genko::storage::load_document(book).document.pages.size(), std::size_t{1});
+        session->apply(stroke_op(60, 1));
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{1});
+    }
+
+    // A conflict after a journal undo (E kept, which cannot be made on the book read after it) stands while the book
+    // cannot be read again (another writer holds it): nothing is written over the book meanwhile — not E made on the
+    // book before the undo, which would bring P's page back.
+    void aConflictAfterAJournalUndoWritesNothingUntilTheBookIsReadAgain() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        options.lock_wait = 1000ms;
+        auto session = conflict_after_journal_undo(book, options);
+        QCOMPARE(session->status().code, QStringLiteral("rebase_conflict"));
+        const std::int64_t revision = disk_revision(book);
+        {
+            genko::storage::ProjectLock other(book, "ai:other");
+            other.try_acquire();
+            session->save_now();  // (the book read again: held up)
+            QVERIFY(session->wait_idle(10000ms));
+            other.release();
+        }
+        session->save_now();
+        QVERIFY(session->wait_idle(10000ms));
+        QCOMPARE(disk_revision(book), revision);
+        QCOMPARE(genko::storage::load_document(book).document.pages.size(), std::size_t{2});
+        QCOMPARE(session->status().code, QStringLiteral("rebase_conflict"));
+        QCOMPARE(session->document().pages.size(), std::size_t{3});
+    }
+
+    // In that conflict, what can be undone and redone through the journal is counted from the journal as read after
+    // the undo (P undone there), not as if the undo were still to be written.
+    void aConflictAfterAJournalUndoCountsTheJournalAsRead() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        auto session = conflict_after_journal_undo(book, options);
+        QCOMPARE(session->status().code, QStringLiteral("rebase_conflict"));
+        // (X, then E — P is undone in the journal, and E, when it is written, ends its redo)
+        const Session::History h = session->history();
+        QCOMPARE(h.done.size(), std::size_t{2});
+        QCOMPARE(h.later.size(), std::size_t{0});
+        session->undo();  // E
+        QVERIFY(session->can_undo());  // (X, through the journal)
+        QCOMPARE(session->history().done.size(), std::size_t{1});
+    }
+
+    // Changes of this session saved before a recovery point is taken stay in the journal, under it: the history still
+    // has them (the one written with it too).
+    void changesSavedBeforeARecoveryIsTakenStayInTheHistory() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_book(book);
+        Session::Options options = quick(recovery);
+        options.autosave = false;
+        {
+            auto lost = Session::open(book, options);
+            lost->apply(stroke_op(40, 2));
+            lost->write_recovery_copy();
+            QVERIFY(lost->wait_idle(10000ms));
+        }
+        auto session = Session::open(book, options);
+        QVERIFY(session->recovery_offer().has_value());
+        session->apply(stroke_op(30, 1));  // A
+        session->save_now();
+        session->apply(stroke_op(50, 1));  // B, while A is written (the recovery point stays: B is not saved)
+        QVERIFY(session->wait_idle(10000ms));
+        session->adopt_recovery();
+        QVERIFY(session->wait_saved(10000ms));
+        const Session::History h = session->history();
+        QCOMPARE(h.done.size(), std::size_t{3});  // A, B, the recovery
+        QCOMPARE(h.done[0].ops[0].value("page", 0), 1);
+        QCOMPARE(h.done[1].ops[0].value("page", 0), 1);
+        QCOMPARE(h.done[2].ops[0].value("op", std::string()), std::string("recover"));
     }
 };
 
