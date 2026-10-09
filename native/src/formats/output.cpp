@@ -111,17 +111,16 @@ void Output::commit() {
     };
     std::vector<Moved> moved;
     const auto fail = [&](const std::error_code& ec, const fs::path& path) {
-        std::optional<fs::path> kept;  // (a file there before that could not be put back: where it is now)
+        std::string message = storage::os_error_text(ec.value() != 0 ? ec.value() : EIO, path);
         for (auto it = moved.rbegin(); it != moved.rend(); ++it) {
             std::error_code ignored;
             if (it->placed) fs::remove(it->dest, ignored);
             if (!it->aside) continue;
             std::error_code back;
             fs::rename(*it->aside, it->dest, back);
-            if (back && !kept) kept = *it->aside;
+            // (a file there before that could not be put back: where it is now, each one)
+            if (back) message += "; the file that was there is kept as " + core::py_repr_str(text(*it->aside));
         }
-        std::string message = storage::os_error_text(ec.value() != 0 ? ec.value() : EIO, path);
-        if (kept) message += "; the file that was there is kept as " + core::py_repr_str(text(*kept));
         throw core::Error("io", message);
     };
     for (PartFile& file : files_) {

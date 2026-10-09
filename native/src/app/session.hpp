@@ -14,6 +14,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -248,6 +249,15 @@ private:
         std::uint64_t seq = 0;
         bool in_flight = false;          // part of the job running now
         bool sent = false;               // given to the disk: it may be there even when that job failed
+        bool sent_before = false;        // `sent` before the job running now (a try that wrote nothing leaves it so)
+    };
+
+    // What the journal will hold once the queue is written: the saved changes to undo and to redo that are not this
+    // session's in memory, and all it will hold to redo (this session's undone changes too).
+    struct JournalAfter {
+        std::int64_t undo = 0;
+        std::int64_t redo = 0;
+        std::int64_t redo_all = 0;
     };
 
     struct Job;
@@ -265,8 +275,11 @@ private:
     void simplify_queue();
     void after_failure(const QString& code, const QString& message);
     void start_rebase();
-    void rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo_depth, std::int64_t redo_depth, bool after_own_step = false);
+    void rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo_depth, std::int64_t redo_depth, bool after_own_step = false,
+                     const std::set<std::string>& written = {});
     bool disk_step_waits() const;
+    JournalAfter journal_after() const;
+    static void mark_written(const Action& action, const std::string& txn);
     void finish_reading(const JobResult& result);
     void request_recovery();
     void trim_history();
@@ -294,9 +307,11 @@ private:
     std::vector<std::shared_ptr<Change>> done_;    // this session's changes, oldest first
     std::vector<std::shared_ptr<Change>> undone_;  // the ones undone, next to redo last
     std::deque<Action> queue_;                     // what the disk still has to get, in order
-    std::int64_t disk_undo_ = 0;  // saved changes before this session that the journal can undo
+    // The journal's Undo and Redo depths as last read or written, less this session's changes in memory (the saved
+    // changes before them, and the ones undone): with the queue, journal_after() gives what they will be.
+    std::int64_t journal_undo_ = 0;
+    std::int64_t journal_redo_ = 0;
     bool trimmed_ = false;        // trim_history let changes of this session go to the journal
-    std::int64_t disk_redo_ = 0;
     std::uint64_t redo_floor_ = 0;  // apply(): what was undone before it (an action's seq below this) is not redone
     mutable std::shared_ptr<const JournalRead> journal_read_;  // history(): the journal as last read
 

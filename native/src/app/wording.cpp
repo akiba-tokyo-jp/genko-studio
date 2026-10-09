@@ -117,8 +117,12 @@ const std::vector<Rule>& rules() {
                          "この版の Genko では、まだ正式な書き出し（点検と書き出しの承認の記録）はできません。正式な書き出しを外すと書き出せます"));
         // the exports' bounds (formats::check_dpi, render_page's and the strip's size)
         r.push_back(rule("the resolution must be between 1 and 100000 dpi", "解像度は 1〜100000 dpi の間で決めます"));
-        r.push_back(rule(R"(.*; the file that was there is kept as '(.*)')",
-                         "書き出したファイルを置けず、前からあったファイルも元の場所に戻せませんでした。前のファイルは「\\1」にあります"));
+        r.push_back(rule(R"(.*?; the file that was there is kept as '(.*)')", [](const QRegularExpressionMatch& m) {
+            // (one clause for each file that could not be put back)
+            const QStringList kept = m.captured(1).split(QStringLiteral("'; the file that was there is kept as '"));
+            return QStringLiteral("書き出したファイルを置けず、前からあったファイルも元の場所に戻せませんでした。前のファイルは「%1」にあります")
+                .arg(kept.join(QStringLiteral("」「")));
+        }));
         r.push_back(rule("the (?:page|picture|strip) is too large at this resolution", "この解像度では絵が大きすぎて扱えません（解像度を下げてください）"));
         r.push_back(rule("the gradient needs a longer drag", "もう少し長くドラッグします"));
         r.push_back(rule("the book's pages are still being read: try again in a moment",
