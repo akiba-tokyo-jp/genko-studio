@@ -85,7 +85,8 @@ public:
     TrueTypeFonts& operator=(const TrueTypeFonts&) = delete;
 
     // ImageFont.truetype(font, size) for a size of 1 or more. A file FreeType cannot read is where genko.fonts falls
-    // back to Pillow's built-in default font, which this build does not have: NotYetPorted("default_font").
+    // back to Pillow's built-in default font, which this build does not have: NotYetPorted("default_font"). A font file
+    // past 32 MB is not read: NotYetPorted("large_font").
     const TrueTypeFont& truetype(const std::string& font, int size);
     std::stop_token stop() const;
 

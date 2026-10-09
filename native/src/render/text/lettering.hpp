@@ -61,16 +61,36 @@ Layout text_layout(const core::StoryLine& line, int dpi, const std::optional<std
 std::pair<Image, std::int64_t> text_image(const core::StoryLine& line, int dpi,
                                           const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {});
 // text_layout's result remembered for the same line (what it reads of it: its text, kind, wrap, size, style and
-// runs), dpi and font: a page drawn again, or in parts, sets each line once. clear_layout_cache() forgets them.
+// runs, a picture in its style by its digest), dpi and font: a page drawn again, or in parts, sets each line once.
+// clear_layout_cache() forgets them (and the pictures remembered).
 std::shared_ptr<const Layout> remembered_layout(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path,
                                                 std::stop_token stop = {});
 void clear_layout_cache();
 
+class Fonts;
+
+// The speakers' names' font for the lines drawn on one part of a page: opened once for all of them (when a name is
+// drawn there), not once a line.
+class SpeakerFonts {
+public:
+    explicit SpeakerFonts(std::stop_token stop = {});
+    ~SpeakerFonts();
+    SpeakerFonts(const SpeakerFonts&) = delete;
+    SpeakerFonts& operator=(const SpeakerFonts&) = delete;
+    Fonts& fonts();
+
+private:
+    std::stop_token stop_;
+    std::unique_ptr<Fonts> fonts_;
+};
+
 // _paint_text(image, line, dpi, show_speaker, font_path): the line's letters on the page (from its box's middle, or
 // its corner for "none"; along its path when it has one) and the speaker's name above the box. `origin`: where the
-// image's top left lies on the page, when it holds a part of it (the same pixels as the whole page cut there).
+// image's top left lies on the page, when it holds a part of it (the same pixels as the whole page cut there). A part
+// the letters do not reach — known from the line's layout made before — is left without looking for the layout.
 void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_speaker,
-                const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {}, Point origin = {});
+                const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {}, Point origin = {},
+                SpeakerFonts* speakers = nullptr);
 // path_text(image, line, dpi, font_path): 文字をパスに沿わせる — each letter stood on the path, turned with it.
 void path_text(Image& image, const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path = std::nullopt,
                std::stop_token stop = {}, Point origin = {});
@@ -79,6 +99,9 @@ void path_text(Image& image, const core::StoryLine& line, int dpi, const std::op
 // nothing when the data is not a picture (Python's `except Exception`). Unhashable data (a list, a dict) is Python's
 // TypeError; other formats Pillow opens: NotYetPorted("image_format").
 std::optional<Image> picture_of(const core::Json& data);
+// picture_of(data) remembered by the data's digest (Python's balloons._PICTURES keeps the 64 last by hash(data)), for
+// the threads drawing a page's parts: each picture decoded once. Python's errors as picture_of's (not remembered).
+std::shared_ptr<const std::optional<Image>> remembered_picture(const core::Json& data);
 
 // The letter effects.
 // outlined(text_img, grow, colour): a halo (白フチ) grow px wide.

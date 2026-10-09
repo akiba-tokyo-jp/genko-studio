@@ -13,6 +13,7 @@
 #include <QtTest>
 
 #include <QDir>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include <map>
@@ -45,8 +46,8 @@ Json steps_of(const Json& c) {
 }
 
 // The person's material library (<config>/materials) the cases stamp from, read by both sides: pictures (u-pic, and ones
-// that are not there, hold nothing, are a folder, are not a picture, lie outside the library or are named by a whole
-// path), letterings in folders of their own (with a library's odd values: numbers as text, a style as pairs, keys
+// that are not there, hold nothing, are a folder, are not a picture, lie in a folder of the library or outside it, are
+// named by a whole path or are links), letterings in folders of their own (with a library's odd values: numbers as text, a style as pairs, keys
 // and sizes Python refuses), and materials of a kind there is not.
 void write_library(const QString& config) {
     const QString root = config + QStringLiteral("/materials");
@@ -55,9 +56,13 @@ void write_library(const QString& config) {
     picture.paste(genko::render::Ink{250, 40, 10, 128}, genko::render::Box{0, 0, 3, 3});
     genko::render::save_png(picture, genko::storage::path_from_utf8((root + QStringLiteral("/u-pic.png")).toStdString()));
     genko::render::save_png(picture, genko::storage::path_from_utf8((config + QStringLiteral("/outside.png")).toStdString()));
+    genko::render::save_png(picture, genko::storage::path_from_utf8((root + QStringLiteral("/sub/u-pic.png")).toStdString()));
+    QFile::link(config + QStringLiteral("/outside.png"), root + QStringLiteral("/link.png"));
+    QFile::link(config + QStringLiteral("/nowhere.png"), root + QStringLiteral("/dangling.png"));
     genko::test::write_bytes(root + QStringLiteral("/empty.png"), "");
     genko::test::write_bytes(root + QStringLiteral("/notes.png"), "not a picture");
     const std::string outside = (config + QStringLiteral("/outside.png")).toStdString();
+    const std::string nowhere = (config + QStringLiteral("/nowhere.png")).toStdString();
     const Json png = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGM8ISf3n4GBgYGJAQoAHxICB2m00JwAAAAASUVORK5CYII=";
     const Json items = Json::array({
         Json{{"id", "u-pic"}, {"kind", "image"}, {"name", "青い絵"}, {"folder", "画像"}, {"file", "u-pic.png"}, {"width_mm", 30},
@@ -70,6 +75,12 @@ void write_library(const QString& config) {
         Json{{"id", "u-pic-text"}, {"kind", "image"}, {"name", "絵でない"}, {"file", "notes.png"}},
         Json{{"id", "u-pic-outside"}, {"kind", "image"}, {"name", "外の絵"}, {"file", "../outside.png"}},
         Json{{"id", "u-pic-whole-path"}, {"kind", "image"}, {"name", "全体のパスの絵"}, {"file", outside}},
+        Json{{"id", "u-pic-sub"}, {"kind", "image"}, {"name", "フォルダの中の絵"}, {"file", "sub/u-pic.png"}},
+        Json{{"id", "u-pic-sub-missing"}, {"kind", "image"}, {"name", "フォルダの中にない絵"}, {"file", "sub/nothing.png"}},
+        Json{{"id", "u-pic-outside-missing"}, {"kind", "image"}, {"name", "外にない絵"}, {"file", "../nothing.png"}},
+        Json{{"id", "u-pic-whole-path-missing"}, {"kind", "image"}, {"name", "全体のパスにない絵"}, {"file", nowhere}},
+        Json{{"id", "u-pic-link"}, {"kind", "image"}, {"name", "リンクの絵"}, {"file", "link.png"}},
+        Json{{"id", "u-pic-dangling"}, {"kind", "image"}, {"name", "先のないリンクの絵"}, {"file", "dangling.png"}},
         Json{{"id", "u-let-plain"}, {"kind", "lettering"}, {"name", "ただの描き文字"}, {"folder", "自作の描き文字"}},
         Json{{"id", "u-let-vertical"}, {"kind", "lettering"}, {"name", "ズキューン"}, {"folder", "効果音/強い"}, {"text", "ズキューン"},
              {"balloon", "shout"}, {"wrap", "vertical"},

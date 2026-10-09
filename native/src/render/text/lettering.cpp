@@ -675,16 +675,45 @@ detail::Memo<Layout>& layouts() {
     return memo;
 }
 
-}  // namespace
+// 画像のフキダシ's and picture letters' pictures, decoded once (balloons._PICTURES: by the data's hash, the 64 last)
+detail::Memo<std::optional<Image>>& pictures() {
+    static detail::Memo<std::optional<Image>> memo(64, 256LL * 1024 * 1024);
+    return memo;
+}
 
-std::shared_ptr<const Layout> remembered_layout(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path,
-                                                std::stop_token stop) {
-    // (everything text_layout reads of the line, and the font files it opens by name)
+// Where a layout's letters lie (its size, em and corner): kept longer than the layouts' pictures, so a part of the page
+// the letters do not reach is left before the layout is looked for or made again.
+struct LayoutShape {
+    int width = 0;
+    int height = 0;
+    std::int64_t em = 0;
+    double corner_x = 0.0;
+    double corner_y = 0.0;
+};
+
+detail::Memo<LayoutShape>& layout_shapes() {
+    static detail::Memo<LayoutShape> memo(8192, 16LL * 1024 * 1024);
+    return memo;
+}
+
+// The box a speaker's name in the default face at a size covers from where it is drawn (its glyphs' box, a pixel
+// more around): a part of the page it does not reach opens no font.
+detail::Memo<Box>& speaker_boxes() {
+    static detail::Memo<Box> memo(4096, 4LL * 1024 * 1024);
+    return memo;
+}
+
+// Everything text_layout reads of the line, and the font files it opens by name (a picture in its style by its digest).
+std::optional<std::string> layout_key(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path) {
     Json style_runs = Json::array();
     for (const auto& [words, style] : line.style_runs) style_runs.push_back(Json::array({words, style}));
-    const std::optional<std::string> key = detail::memo_key(Json::array(
-        {line.text, line.balloon, line.wrap, line.w_mm.json(), line.h_mm.json(), line.style, Json(line.ruby_runs),
-         Json(line.emphasis_runs), style_runs, dpi, font_path ? Json(*font_path) : Json()}));
+    return detail::memo_key(Json::array({line.text, line.balloon, line.wrap, line.w_mm.json(), line.h_mm.json(),
+                                         detail::keyed_style(line.style), Json(line.ruby_runs), Json(line.emphasis_runs), style_runs,
+                                         dpi, font_path ? Json(*font_path) : Json()}));
+}
+
+std::shared_ptr<const Layout> layout_by_key(const std::optional<std::string>& key, const core::StoryLine& line, int dpi,
+                                            const std::optional<std::string>& font_path, std::stop_token stop) {
     if (key) {
         if (auto found = layouts().get(*key)) return found;
     }
@@ -692,11 +721,34 @@ std::shared_ptr<const Layout> remembered_layout(const core::StoryLine& line, int
     if (key) {
         const std::int64_t bytes = static_cast<std::int64_t>(made->image.width()) * made->image.height() * 4;
         layouts().put(*key, made, bytes);
+        layout_shapes().put(*key, std::make_shared<const LayoutShape>(LayoutShape{made->image.width(), made->image.height(), made->em,
+                                                                                  made->corner_x, made->corner_y}),
+                            static_cast<std::int64_t>(sizeof(LayoutShape)));
     }
     return made;
 }
 
-void clear_layout_cache() { layouts().clear(); }
+}  // namespace
+
+std::shared_ptr<const Layout> remembered_layout(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path,
+                                                std::stop_token stop) {
+    return layout_by_key(layout_key(line, dpi, font_path), line, dpi, font_path, std::move(stop));
+}
+
+void clear_layout_cache() {
+    layouts().clear();
+    layout_shapes().clear();
+    speaker_boxes().clear();
+    pictures().clear();
+}
+
+SpeakerFonts::SpeakerFonts(std::stop_token stop) : stop_(std::move(stop)) {}
+SpeakerFonts::~SpeakerFonts() = default;
+
+Fonts& SpeakerFonts::fonts() {
+    if (!fonts_) fonts_ = std::make_unique<Fonts>(stop_);
+    return *fonts_;
+}
 
 Image outlined(const Image& text, std::int64_t grow, const Rgb& colour) {
     const Image alpha = text.split()[3];
@@ -814,8 +866,19 @@ std::optional<Image> picture_of(const Json& data) {
     return std::nullopt;
 }
 
+std::shared_ptr<const std::optional<Image>> remembered_picture(const Json& data) {
+    core::require_hashable(data);  // (Python's hash(data) first)
+    if (!data.is_string()) return std::make_shared<const std::optional<Image>>();
+    const std::string key = detail::digest_of(data.get_ref<const std::string&>());
+    if (auto found = pictures().get(key)) return found;
+    auto made = std::make_shared<const std::optional<Image>>(picture_of(data));
+    pictures().put(key, made, *made ? static_cast<std::int64_t>((*made)->width()) * (*made)->height() * 4 : 0);
+    return made;
+}
+
 Image picture_letters(const Image& image, const Json& data) {
-    const std::optional<Image> picture = picture_of(data);
+    const std::shared_ptr<const std::optional<Image>> remembered = remembered_picture(data);
+    const std::optional<Image>& picture = *remembered;
     if (!picture) return image;
     const Image alpha = image.getchannel(3);
     const Box box = alpha.getbbox().value_or(Box{0, 0, image.width(), image.height()});
@@ -979,14 +1042,22 @@ void path_text(Image& image, const core::StoryLine& line, int dpi, const std::op
 }
 
 void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_speaker, const std::optional<std::string>& font_path,
-                std::stop_token stop, Point origin) {
-    if (core::py_truthy(at(style_of(line), "text_path"))) {
+                std::stop_token stop, Point origin, SpeakerFonts* speakers) {
+    const Json st = style_of(line);
+    if (core::py_truthy(at(st, "text_path"))) {
         path_text(image, line, dpi, font_path, std::move(stop), origin);
         return;
     }
-    const std::shared_ptr<const Layout> remembered = remembered_layout(line, dpi, font_path, stop);
-    const Layout& layout = *remembered;
-    const Json st = style_of(line);
+    // (where the letters of a layout made before lie is known without it: the layout is looked for, or made, only for a
+    // part of the page they reach)
+    const std::optional<std::string> key = layout_key(line, dpi, font_path);
+    std::shared_ptr<const Layout> layout;
+    std::shared_ptr<const LayoutShape> shape = key ? layout_shapes().get(*key) : nullptr;
+    if (!shape) {
+        layout = layout_by_key(key, line, dpi, font_path, stop);
+        shape = std::make_shared<const LayoutShape>(LayoutShape{layout->image.width(), layout->image.height(), layout->em, layout->corner_x,
+                                                                layout->corner_y});
+    }
     const std::int64_t x = px(line.x_mm.value() + float_or(at(st, "text_dx_mm"), 0), dpi);  // (the words moved inside the balloon)
     const std::int64_t y = px(line.y_mm.value() + float_or(at(st, "text_dy_mm"), 0), dpi);
     const std::int64_t w = px(mm_or(line.w_mm, 40), dpi);
@@ -995,20 +1066,39 @@ void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_sp
     const double cy = static_cast<double>(y) + static_cast<double>(h) / 2;
     const std::string kind = kind_of(line);
     // (a part of the page: every place below is a whole pixel, so moving it by the part's corner is exact)
-    if (kind == "none") {
-        image.paste(layout.image, Point{static_cast<int>(x - origin.x), static_cast<int>(y - origin.y)}, &layout.image);  // text only: from the box's corner
-    } else {
-        image.paste(layout.image,
-                    Point{static_cast<int>(core::py_round_int(cx + layout.corner_x) - origin.x),
-                          static_cast<int>(core::py_round_int(cy + layout.corner_y) - origin.y)},
-                    &layout.image);
+    const Point at_page = kind == "none" ? Point{static_cast<int>(x), static_cast<int>(y)}  // text only: from the box's corner
+                                         : Point{static_cast<int>(core::py_round_int(cx + shape->corner_x)),
+                                                 static_cast<int>(core::py_round_int(cy + shape->corner_y))};
+    const Box here{origin.x, origin.y, origin.x + image.width(), origin.y + image.height()};
+    const auto reaches = [&here](const Box& b) { return b.x0 < here.x1 && here.x0 < b.x1 && b.y0 < here.y1 && here.y0 < b.y1; };
+    if (reaches(Box{at_page.x, at_page.y, at_page.x + shape->width, at_page.y + shape->height})) {
+        if (!layout) layout = layout_by_key(key, line, dpi, font_path, stop);
+        image.paste(layout->image, Point{at_page.x - origin.x, at_page.y - origin.y}, &layout->image);
     }
     if (show_speaker && !line.speaker.empty() && kind != "none") {
-        Fonts fonts(stop);
-        const TrueTypeFont& font = fonts.font(face_of(Json()), std::max<std::int64_t>(8, floordiv(layout.em * 2, 3)));
+        const std::int64_t size = std::max<std::int64_t>(8, floordiv(shape->em * 2, 3));
+        const PointD at_name{static_cast<double>(x), static_cast<double>(std::max<std::int64_t>(0, y - shape->em))};
+        // (a name of one row whose box is known and does not reach this part: no font opened for it)
+        const bool one_row = line.speaker.find('\n') == std::string::npos;
+        const std::optional<std::string> name_key = one_row ? detail::memo_key(Json::array({line.speaker, size})) : std::nullopt;
+        if (name_key) {
+            if (const auto box = speaker_boxes().get(*name_key)) {
+                const Box covered{static_cast<int>(at_name.x) + box->x0, static_cast<int>(at_name.y) + box->y0,
+                                  static_cast<int>(at_name.x) + box->x1, static_cast<int>(at_name.y) + box->y1};
+                if (!reaches(covered)) return;
+            }
+        }
+        std::optional<SpeakerFonts> own;
+        if (speakers == nullptr) speakers = &own.emplace(stop);
+        const TrueTypeFont& font = speakers->fonts().font(face_of(Json()), size);
+        const std::u32string name = u32(line.speaker);
+        if (name_key) {
+            const std::array<int, 4> b = font.getbbox(name);
+            speaker_boxes().put(*name_key, std::make_shared<const Box>(Box{b[0] - 2, b[1] - 2, b[2] + 2, b[3] + 2}),
+                                static_cast<std::int64_t>(sizeof(Box)));
+        }
         Draw draw(image);
-        draw.text(PointD{static_cast<double>(x - origin.x), static_cast<double>(std::max<std::int64_t>(0, y - layout.em) - origin.y)},
-                  u32(line.speaker), font, Ink{90, 90, 90});
+        draw.text(PointD{at_name.x - origin.x, at_name.y - origin.y}, name, font, Ink{90, 90, 90});
     }
 }
 

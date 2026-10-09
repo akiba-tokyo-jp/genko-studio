@@ -170,14 +170,28 @@ private slots:
         QTest::newRow("no line") << QString("u-blue") << QString("nope") << QString("no line nope");
         QTest::newRow("missing") << QString("u-gone") << QString("l1") << QString("the picture file of this material is missing");
         QTest::newRow("missing, no line") << QString("u-gone") << QString("nope") << QString("the picture file of this material is missing");
+        QTest::newRow("missing in a folder") << QString("u-sub-gone") << QString("l1") << QString("the picture file of this material is missing");
+        QTest::newRow("missing in a folder, no line") << QString("u-sub-gone") << QString("nope") << QString("the picture file of this material is missing");
+        // (a name this build does not read — a whole path, a way out of the library, a link — is refused before the file
+        // system is asked anything about it: before Python's own errors, its missing picture and its line)
         QTest::newRow("outside") << QString("u-out") << QString("l1") << QString("unsafe material image source");
-        QTest::newRow("outside, no line") << QString("u-out") << QString("nope") << QString("no line nope");
+        QTest::newRow("outside, no line") << QString("u-out") << QString("nope") << QString("unsafe material image source");
+        QTest::newRow("outside and missing") << QString("u-out-gone") << QString("l1") << QString("unsafe material image source");
+        QTest::newRow("whole path and missing") << QString("u-whole-gone") << QString("l1") << QString("material image must be inside the material library");
+        QTest::newRow("whole path, no line") << QString("u-whole") << QString("nope") << QString("material image must be inside the material library");
+#ifndef Q_OS_WIN
+        QTest::newRow("a link") << QString("u-link") << QString("l1") << QString("unsafe material image source");
+        QTest::newRow("a link to nothing") << QString("u-dangling") << QString("l1") << QString("unsafe material image source");
+        QTest::newRow("through a linked folder") << QString("u-through") << QString("l1") << QString("unsafe material image source");
+        QTest::newRow("missing through a linked folder") << QString("u-through-gone") << QString("l1") << QString("unsafe material image source");
+#endif
         QTest::newRow("not a picture") << QString("u-text") << QString("l1") << QString("not a readable image");
     }
     void pictureBalloonFromTheLibrary() {
         // 画像のフキダシ: an image material with a line_id becomes that line's balloon (its picture, base64, in the line's
-        // style); Python's errors first (the picture missing, then the line), then what this build refuses (a picture
-        // outside the library, one it cannot draw); the library never written
+        // style). A name this build does not read (a whole path, a way out of the library, a link) is refused first,
+        // before the file system is asked anything about it; for the others Python's errors come first (the picture
+        // missing, then the line), then what this build refuses (one it cannot draw); the library never written
         QFETCH(QString, material);
         QFETCH(QString, line);
         QFETCH(QString, refusal);
@@ -200,9 +214,25 @@ private slots:
         QVERIFY(text.open(QIODevice::WriteOnly));
         text.write("not a picture");
         text.close();
+        QVERIFY(QDir().mkpath(root + "/sub"));
+#ifndef Q_OS_WIN
+        QVERIFY(QFile::link(cfg.path() + "/outside.png", root + "/u-link.png"));
+        QVERIFY(QFile::link(cfg.path() + "/nowhere.png", root + "/u-dangling.png"));
+        QVERIFY(QFile::link(cfg.path(), root + "/linked"));
+#endif
+        const std::string whole = (cfg.path() + "/outside.png").toStdString();
+        const std::string whole_gone = (cfg.path() + "/gone.png").toStdString();
         const std::string library = Json::array({Json{{"id", "u-blue"}, {"kind", "image"}, {"name", "青"}, {"file", "u-blue.png"}},
                                                  Json{{"id", "u-gone"}, {"kind", "image"}, {"name", "ない"}, {"file", "gone.png"}},
+                                                 Json{{"id", "u-sub-gone"}, {"kind", "image"}, {"name", "中にない"}, {"file", "sub/gone.png"}},
                                                  Json{{"id", "u-out"}, {"kind", "image"}, {"name", "外"}, {"file", "../outside.png"}},
+                                                 Json{{"id", "u-out-gone"}, {"kind", "image"}, {"name", "外にない"}, {"file", "../gone.png"}},
+                                                 Json{{"id", "u-whole"}, {"kind", "image"}, {"name", "全体"}, {"file", whole}},
+                                                 Json{{"id", "u-whole-gone"}, {"kind", "image"}, {"name", "全体にない"}, {"file", whole_gone}},
+                                                 Json{{"id", "u-link"}, {"kind", "image"}, {"name", "リンク"}, {"file", "u-link.png"}},
+                                                 Json{{"id", "u-dangling"}, {"kind", "image"}, {"name", "先のないリンク"}, {"file", "u-dangling.png"}},
+                                                 Json{{"id", "u-through"}, {"kind", "image"}, {"name", "リンクのフォルダ"}, {"file", "linked/outside.png"}},
+                                                 Json{{"id", "u-through-gone"}, {"kind", "image"}, {"name", "リンクのフォルダにない"}, {"file", "linked/gone.png"}},
                                                  Json{{"id", "u-text"}, {"kind", "image"}, {"name", "文字"}, {"file", "notes.png"}}}).dump();
         QFile manifest(root + "/library.json");
         QVERIFY(manifest.open(QIODevice::WriteOnly));

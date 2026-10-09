@@ -9,6 +9,8 @@
 #include <cmath>
 #include <initializer_list>
 #include <memory>
+#include <optional>
+#include <string_view>
 
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
@@ -513,7 +515,7 @@ std::optional<std::string> masks_key(const std::vector<const core::StoryLine*>& 
             for (const core::Point& p : *ln->path) path.push_back(Json::array({p.x.json(), p.y.json()}));
         }
         items.push_back(Json::array({ln->id, ln->balloon, ln->x_mm.json(), ln->y_mm.json(), ln->w_mm.json(), ln->h_mm.json(), path,
-                                     ln->style}));
+                                     detail::keyed_style(ln->style)}));
     }
     Json tail_items = Json::array();
     for (const auto& [line, tail] : tails) {
@@ -576,7 +578,7 @@ Json line_json(const core::StoryLine& ln) {
     return Json::array({ln.id, ln.text, ln.speaker, ln.frame_id ? Json(*ln.frame_id) : Json(), ln.x_mm.json(), ln.y_mm.json(),
                         ln.w_mm.json(), ln.h_mm.json(), ln.balloon,
                         ln.tail ? Json::array({ln.tail->x.json(), ln.tail->y.json()}) : Json(), ln.wrap, Json(ln.ruby_runs), path,
-                        Json(ln.emphasis_runs), style_runs, ln.style, Json(ln.tails)});
+                        Json(ln.emphasis_runs), style_runs, detail::keyed_style(ln.style), Json(ln.tails)});
 }
 
 struct Sheet {
@@ -588,10 +590,48 @@ detail::Memo<Sheet>& remembered_sheets() {
     return memo;
 }
 
+// 画像のフキダシ's picture stretched over its box (Lanczos), by the picture's digest and the box's size: once for all the
+// parts of a page it reaches
+detail::Memo<Image>& remembered_stretches() {
+    static detail::Memo<Image> memo(64, 128LL * 1024 * 1024);
+    return memo;
+}
+
+std::shared_ptr<const Image> stretched_picture(const std::string& data, const Image& picture, Size stretch) {
+    const std::optional<std::string> key = detail::memo_key(Json::array({detail::digest_of(data), stretch.width, stretch.height}));
+    if (key) {
+        if (auto found = remembered_stretches().get(*key)) return found;
+    }
+    auto made = std::make_shared<const Image>(picture.resize(stretch, Resample::Lanczos));
+    if (key) remembered_stretches().put(*key, made, static_cast<std::int64_t>(stretch.width) * stretch.height * 4);
+    return made;
+}
+
+// Pillow's KeyError for OpenType features without raqm (the BASIC layout the reference is held to)
+bool needs_raqm(const core::PyUncaught& e) {
+    return e.type() == "KeyError" && std::string_view(e.what()).find("without libraqm") != std::string_view::npos;
+}
+
+// A line's letters on the part. What they need that this build cannot draw — NotYetPorted, and features across
+// ("text_features") — is left out and reported when the caller says so: the balloon and the group's other lines are
+// drawn. Without that, it stops the drawing as it is.
+void letters(const PagePart& part, const core::StoryLine& line, int dpi, bool show_speaker, const std::optional<std::string>& font_path,
+             std::stop_token stop, const Unported* unported, SpeakerFonts* speakers) {
+    try {
+        paint_text(*part.image, line, dpi, show_speaker, font_path, std::move(stop), part.origin, speakers);
+    } catch (const NotYetPorted& e) {
+        if (unported == nullptr || !*unported) throw;
+        (*unported)(e);
+    } catch (const core::PyUncaught& e) {
+        if (unported == nullptr || !*unported || !needs_raqm(e)) throw;
+        (*unported)(NotYetPorted("text_features"));
+    }
+}
+
 // _draw_turned(image, lines, dpi, show_speaker, font_path, degrees): drawn upright on its own sheet, turned about its
 // centre and laid on the page; the tails turned back first, so they still point where they were aimed.
 void draw_turned(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi, bool show_speaker,
-                 const std::optional<std::string>& font_path, double degrees, std::stop_token stop) {
+                 const std::optional<std::string>& font_path, double degrees, std::stop_token stop, SpeakerFonts* speakers) {
     double x0 = lines.front()->x_mm.value();
     double y0 = lines.front()->y_mm.value();
     double x1 = x0 + mm_or(lines.front()->w_mm, 40);
@@ -673,10 +713,11 @@ void draw_turned(const PagePart& part, const std::vector<const core::StoryLine*>
                           &sheet->turned);
     }
     if (show_speaker) {
+        std::optional<SpeakerFonts> own;
+        if (speakers == nullptr) speakers = &own.emplace(stop);
         for (const core::StoryLine* ln : lines) {
             if (ln->speaker.empty() || kind_of(*ln) == "none") continue;
-            Fonts fonts(stop);
-            const TrueTypeFont& font = fonts.font(face_of(Json()), std::max<std::int64_t>(8, px(3, dpi)));
+            const TrueTypeFont& font = speakers->fonts().font(face_of(Json()), std::max<std::int64_t>(8, px(3, dpi)));
             Draw draw(*part.image);
             const std::int64_t x = px(ln->x_mm.value(), dpi);
             const std::int64_t y = std::max<std::int64_t>(0, px(ln->y_mm.value() - 4, dpi));
@@ -992,34 +1033,52 @@ Pt thought_trail(const core::StoryLine& line, const Panels* panels) {
 // --- the groups and the page -----------------------------------------------------------------------------------------
 
 void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi, bool show_speaker,
-                const std::optional<std::string>& font_path, const Panels* panels, std::stop_token stop) {
+                const std::optional<std::string>& font_path, const Panels* panels, std::stop_token stop, const Unported* unported,
+                SpeakerFonts* speakers) {
     if (lines.empty()) return;
+    std::optional<SpeakerFonts> own;
+    if (speakers == nullptr) speakers = &own.emplace(stop);
     const core::StoryLine& first = *lines.front();
     const std::string kind = kind_of(first);
     const Json st = style_of(first);
     const Json& rotate = at(st, "rotate_deg");
     if (core::py_truthy(rotate) && std::fabs(core::to_float(rotate)) > 0.01) {
-        draw_turned(part, lines, dpi, show_speaker, font_path, core::to_float(rotate), stop);
+        // (its sheet is remembered as a whole: what it cannot draw leaves the whole group out, in draw_lines)
+        draw_turned(part, lines, dpi, show_speaker, font_path, core::to_float(rotate), stop, speakers);
         return;
     }
     const Box here = page_box(part);
     for (const core::StoryLine* ln : lines) {  // 画像のフキダシ: the picture stretched over the box
         if (ln->balloon != "picture") continue;
         const Json lst = style_of(*ln);
-        if (!core::py_truthy(at(lst, "picture"))) continue;
-        const std::optional<Image> picture = picture_of(at(lst, "picture"));
-        if (!picture) continue;
-        const std::int64_t bx = px(ln->x_mm.value(), dpi);
-        const std::int64_t by = px(ln->y_mm.value(), dpi);
-        const Size stretch{static_cast<int>(std::max<std::int64_t>(1, px(mm_or(ln->w_mm, 40), dpi))),
-                           static_cast<int>(std::max<std::int64_t>(1, px(mm_or(ln->h_mm, 20), dpi)))};
-        const Box placed{static_cast<int>(bx), static_cast<int>(by), static_cast<int>(bx) + stretch.width, static_cast<int>(by) + stretch.height};
-        if (!overlaps(placed, here)) continue;
-        const Image stretched = picture->resize(stretch, Resample::Lanczos);
-        part.image->paste(stretched, Point{placed.x0 - part.origin.x, placed.y0 - part.origin.y}, &stretched);
+        const Json& data = at(lst, "picture");
+        if (!core::py_truthy(data)) continue;
+        core::require_hashable(data);  // (Python's hash(data) first, wherever the balloon lies)
+        const auto place = [&] {
+            const std::int64_t bx = px(ln->x_mm.value(), dpi);
+            const std::int64_t by = px(ln->y_mm.value(), dpi);
+            const Size stretch{static_cast<int>(std::max<std::int64_t>(1, px(mm_or(ln->w_mm, 40), dpi))),
+                               static_cast<int>(std::max<std::int64_t>(1, px(mm_or(ln->h_mm, 20), dpi)))};
+            return std::pair<Box, Size>{Box{static_cast<int>(bx), static_cast<int>(by), static_cast<int>(bx) + stretch.width,
+                                            static_cast<int>(by) + stretch.height},
+                                        stretch};
+        };
+        // (a part of the page the picture does not reach does not open it. Its place is known before the picture —
+        // unless working it out fails, which Python meets only with a picture: then the picture first, as there)
+        std::optional<std::pair<Box, Size>> placed;
+        try {
+            placed = place();
+        } catch (const std::exception&) {
+        }
+        if (placed && !overlaps(placed->first, here)) continue;
+        const std::shared_ptr<const std::optional<Image>> picture = remembered_picture(data);
+        if (!*picture) continue;
+        if (!placed) placed = place();
+        const std::shared_ptr<const Image> stretched = stretched_picture(data.get_ref<const std::string&>(), **picture, placed->second);
+        part.image->paste(*stretched, Point{placed->first.x0 - part.origin.x, placed->first.y0 - part.origin.y}, stretched.get());
     }
     if (kind == "picture") {
-        for (const core::StoryLine* line : lines) paint_text(*part.image, *line, dpi, show_speaker, font_path, stop, part.origin);
+        for (const core::StoryLine* line : lines) letters(part, *line, dpi, show_speaker, font_path, stop, unported, speakers);
         return;
     }
     if (kind != "sfx" && kind != "none") {
@@ -1066,7 +1125,7 @@ void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>&
             paint_shapes(part, lines, boxes, tails, region, dpi, st);
         }
     }
-    for (const core::StoryLine* line : lines) paint_text(*part.image, *line, dpi, show_speaker, font_path, stop, part.origin);
+    for (const core::StoryLine* line : lines) letters(part, *line, dpi, show_speaker, font_path, stop, unported, speakers);
 }
 
 void draw_lines(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi, const std::optional<std::string>& font_path,
@@ -1090,13 +1149,17 @@ void draw_lines(const PagePart& part, const std::vector<const core::StoryLine*>&
         }
         order[found->second].push_back(line);
     }
+    SpeakerFonts speakers(stop);  // (opened once for the names of all the groups, when one is drawn)
     for (const auto& group : order) {
         if (stop.stop_requested()) throw Cancelled();
         try {
-            draw_group(part, group, dpi, show_speaker, font_path, panels, stop);
+            draw_group(part, group, dpi, show_speaker, font_path, panels, stop, unported, &speakers);
         } catch (const NotYetPorted& e) {
             if (unported == nullptr || !*unported) throw;
             (*unported)(e);
+        } catch (const core::PyUncaught& e) {  // (a turned balloon's letters: its sheet drawn whole or not at all)
+            if (unported == nullptr || !*unported || !needs_raqm(e)) throw;
+            (*unported)(NotYetPorted("text_features"));
         }
     }
 }
@@ -1105,6 +1168,7 @@ void clear_balloon_cache() {
     clear_layout_cache();
     remembered_masks().clear();
     remembered_sheets().clear();
+    remembered_stretches().clear();
 }
 
 }  // namespace genko::render::text

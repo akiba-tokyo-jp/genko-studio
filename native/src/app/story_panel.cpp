@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <limits>
 
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
@@ -46,6 +47,39 @@ using core::Json;
 namespace {
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
+
+// A slot's work, as PySide runs a Python slot: an error (a style written by hand, say) is logged and the panel carries
+// on. (An exception must never leave a Qt slot: it would end the program.)
+template <class Work>
+void carry_on(const char* slot, Work&& work) {
+    try {
+        work();
+    } catch (const std::exception& error) {
+        qWarning("StoryPanel.%s: %s", slot, error.what());
+    }
+}
+
+// QColor(*rgb), the colour Python's panel opens its colour dialog with: one number is a QRgb (0xRRGGBB, solid), three or
+// four are red, green, blue (and alpha). What Python cannot make a colour of — two numbers, five, words, a number past
+// a C int (its TypeError or OverflowError, logged by PySide: no dialog) — starts from the default colour here.
+QColor start_colour(const Json& rgb, const QColor& fallback) {
+    if (!core::py_truthy(rgb) || !rgb.is_array() || rgb.size() == 2 || rgb.size() > 4) return fallback;
+    std::vector<std::int64_t> v;
+    for (const Json& x : rgb) {
+        if (x.is_boolean()) {
+            v.push_back(x.get<bool>() ? 1 : 0);
+        } else if (x.is_number_integer() && !(x.is_number_unsigned() && x.get<std::uint64_t>() > 0xFFFFFFFFULL)) {
+            v.push_back(x.get<std::int64_t>());
+        } else {
+            return fallback;
+        }
+    }
+    if (v.size() == 1) return v[0] >= 0 && v[0] <= 0xFFFFFFFFLL ? QColor::fromRgb(static_cast<QRgb>(v[0])) : fallback;
+    for (const std::int64_t c : v) {
+        if (c < std::numeric_limits<int>::min() || c > std::numeric_limits<int>::max()) return fallback;
+    }
+    return QColor(static_cast<int>(v[0]), static_cast<int>(v[1]), static_cast<int>(v[2]), v.size() == 4 ? static_cast<int>(v[3]) : 255);
+}
 
 // theme.empty_note: quiet words in an empty list, saying what will appear there and how (they go with the first row)
 class EmptyNote : public QObject {
@@ -133,7 +167,7 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     setObjectName(QStringLiteral("story_panel"));
     list = new QListWidget;
     list->setObjectName(QStringLiteral("storyList"));
-    connect(list, &QListWidget::currentRowChanged, this, [this](int) { picked(); });
+    connect(list, &QListWidget::currentRowChanged, this, [this](int) { picked(); });  // (picked carries on by itself)
     empty_note = new QLabel(QStringLiteral("このページにはまだ台詞がありません。\nテキストの道具（T）で、置きたい所をクリックします"), list->viewport());
     empty_note->setWordWrap(true);
     empty_note->setAlignment(Qt::AlignCenter);
@@ -142,10 +176,10 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     new EmptyNote(list, empty_note);  // (its place follows the list's size; refresh says whether it shows)
     up_button = iconic(QStringLiteral("↑ 前へ"), "up", QStringLiteral("選んだ台詞を読み順で前へ"));
     up_button->setObjectName(QStringLiteral("story_up"));
-    connect(up_button, &QPushButton::clicked, this, [this] { move(-1); });
+    connect(up_button, &QPushButton::clicked, this, [this] { carry_on("move", [this] { move(-1); }); });
     down_button = iconic(QStringLiteral("↓ 後へ"), "down", QStringLiteral("選んだ台詞を読み順で後ろへ"));
     down_button->setObjectName(QStringLiteral("story_down"));
-    connect(down_button, &QPushButton::clicked, this, [this] { move(1); });
+    connect(down_button, &QPushButton::clicked, this, [this] { carry_on("move", [this] { move(1); }); });
     speaker = new QLineEdit;
     speaker->setObjectName(QStringLiteral("story_speaker"));
     speaker->setPlaceholderText(QStringLiteral("話者（空でもよい）"));
@@ -166,20 +200,20 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     add_button->setObjectName(QStringLiteral("story_add"));
     add_button->setIcon(icons::icon("add"));
     add_button->setToolTip(QStringLiteral("上の欄の台詞を、選んだコマに加えます"));
-    connect(add_button, &QPushButton::clicked, this, [this] { add(); });
+    connect(add_button, &QPushButton::clicked, this, [this] { carry_on("add", [this] { add(); }); });
     apply_button = new QPushButton(QStringLiteral("台詞を直す"));
     apply_button->setObjectName(QStringLiteral("story_apply"));
     apply_button->setToolTip(QStringLiteral("選んだ台詞を、上の欄の言葉・話者・形に直します"));
-    connect(apply_button, &QPushButton::clicked, this, [this] { apply_edit(); });
+    connect(apply_button, &QPushButton::clicked, this, [this] { carry_on("apply_edit", [this] { apply_edit(); }); });
     delete_button = iconic(QStringLiteral("消す"), "delete", QStringLiteral("選んだ台詞を消す"));
     delete_button->setObjectName(QStringLiteral("story_delete"));
-    connect(delete_button, &QPushButton::clicked, this, [this] { remove(); });
+    connect(delete_button, &QPushButton::clicked, this, [this] { carry_on("remove", [this] { remove(); }); });
     // lettering style of the selected line (applied at once)
     font = new QComboBox;
     font->setObjectName(QStringLiteral("story_font"));
     for (const auto& [key, label] : lettering::bundled_fonts()) font->addItem(label, key);
     font->addItem(QStringLiteral("パソコンの書体を選ぶ…"), QStringLiteral("__pick__"));
-    connect(font, &QComboBox::activated, this, [this](int) { font_changed(); });
+    connect(font, &QComboBox::activated, this, [this](int) { carry_on("font_changed", [this] { font_changed(); }); });
     const auto spin = [this](double lo, double hi, double step, const QString& suffix, const QString& special = {}) {
         auto* box = new QDoubleSpinBox;
         box->setRange(lo, hi);
@@ -187,18 +221,18 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
         box->setDecimals(2);
         box->setSuffix(suffix);
         if (!special.isEmpty()) box->setSpecialValueText(special);
-        connect(box, &QDoubleSpinBox::editingFinished, this, [this] { style_changed(); });
+        connect(box, &QDoubleSpinBox::editingFinished, this, [this] { carry_on("style_changed", [this] { style_changed(); }); });
         return box;
     };
     const auto choice = [this](std::initializer_list<std::pair<const char*, const char*>> items) {
         auto* combo = new QComboBox;
         for (const auto& [label, key] : items) combo->addItem(QString::fromUtf8(label), QString::fromLatin1(key));
-        connect(combo, &QComboBox::activated, this, [this](int) { style_changed(); });
+        connect(combo, &QComboBox::activated, this, [this](int) { carry_on("style_changed", [this] { style_changed(); }); });
         return combo;
     };
     const auto check = [this](const QString& label) {
         auto* box = new QCheckBox(label);
-        connect(box, &QCheckBox::clicked, this, [this](bool) { style_changed(); });
+        connect(box, &QCheckBox::clicked, this, [this](bool) { carry_on("style_changed", [this] { style_changed(); }); });
         return box;
     };
     size = spin(0, 40, 0.5, QStringLiteral(" mm"), QStringLiteral("自動"));
@@ -219,7 +253,7 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     scale_x->setToolTip(QStringLiteral("長体・平体: 1 より小さいと細長い字（長体）、大きいと平たい字（平体）"));
     gradient = new QPushButton(QStringLiteral("文字のグラデーション…"));
     gradient->setToolTip(QStringLiteral("文字を上から下へ 2 色で塗り分けます（もう一度押すと外す）"));
-    connect(gradient, &QPushButton::clicked, this, [this] { pick_gradient(); });
+    connect(gradient, &QPushButton::clicked, this, [this] { carry_on("pick_gradient", [this] { pick_gradient(); }); });
     yakumono = check(QStringLiteral("約物を詰める（」「 などを半分に）"));
     arc = spin(-1, 1, 0.1, QString());
     arc->setToolTip(QStringLiteral("文字を弓なりに曲げます（1 で真ん中が大きく持ち上がる。マイナスで逆向き）"));
@@ -232,7 +266,7 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     italic = check(QStringLiteral("斜体"));
     outline_colour = new QPushButton(QStringLiteral("フチの色…"));
     outline_colour->setToolTip(QStringLiteral("白フチの色（黒フチなど）"));
-    connect(outline_colour, &QPushButton::clicked, this, [this] { pick_outline_colour(); });
+    connect(outline_colour, &QPushButton::clicked, this, [this] { carry_on("pick_outline_colour", [this] { pick_outline_colour(); }); });
     wobble = spin(0, 1, 0.1, QString());
     wobble->setToolTip(QStringLiteral("フキダシの線を手描きのように揺らす（0 でまっすぐ）"));
     double_line = check(QStringLiteral("二重線"));
@@ -240,26 +274,30 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     spikes->setRange(0, 80);
     spikes->setSpecialValueText(QStringLiteral("自動"));
     spikes->setToolTip(QStringLiteral("叫びのフキダシのトゲの数"));
-    connect(spikes, &QSpinBox::editingFinished, this, [this] { style_changed(); });
+    connect(spikes, &QSpinBox::editingFinished, this, [this] { carry_on("style_changed", [this] { style_changed(); }); });
     spike_depth = spin(0.05, 0.6, 0.05, QString());
     spike_depth->setToolTip(QStringLiteral("叫びのフキダシのトゲの長さ（大きいほど鋭い）"));
     color = new QPushButton(QStringLiteral("文字の色…"));
-    connect(color, &QPushButton::clicked, this, [this] { pick_color(); });
+    connect(color, &QPushButton::clicked, this, [this] { carry_on("pick_color", [this] { pick_color(); }); });
     line_colour = new QPushButton(QStringLiteral("フキダシの線の色…"));
-    connect(line_colour, &QPushButton::clicked, this, [this] { pick_style_colour("line_rgb", QStringLiteral("フキダシの線の色"), QColor(20, 20, 20)); });
+    connect(line_colour, &QPushButton::clicked, this, [this] {
+        carry_on("pick_style_colour", [this] { pick_style_colour("line_rgb", QStringLiteral("フキダシの線の色"), QColor(20, 20, 20)); });
+    });
     fill_colour = new QPushButton(QStringLiteral("フキダシの中の色…"));
-    connect(fill_colour, &QPushButton::clicked, this, [this] { pick_style_colour("fill_rgb", QStringLiteral("フキダシの中の色"), QColor(255, 255, 255)); });
+    connect(fill_colour, &QPushButton::clicked, this, [this] {
+        carry_on("pick_style_colour", [this] { pick_style_colour("fill_rgb", QStringLiteral("フキダシの中の色"), QColor(255, 255, 255)); });
+    });
     fill_cover = new QSpinBox;
     fill_cover->setRange(0, 100);
     fill_cover->setSuffix(QStringLiteral(" %"));
     fill_cover->setToolTip(QStringLiteral("フキダシの中の塗りの濃さ（下の絵が透ける）"));
-    connect(fill_cover, &QSpinBox::editingFinished, this, [this] { style_changed(); });
+    connect(fill_cover, &QSpinBox::editingFinished, this, [this] { carry_on("style_changed", [this] { style_changed(); }); });
     text_dx = spin(-40, 40, 0.5, QStringLiteral(" mm"));
     text_dy = spin(-40, 40, 0.5, QStringLiteral(" mm"));
     for (QDoubleSpinBox* box : {text_dx, text_dy}) box->setToolTip(QStringLiteral("文字だけをフキダシの中でずらします（フキダシは動かない）"));
     tail_width = spin(0, 30, 0.5, QStringLiteral(" mm"), QStringLiteral("自動"));
     tail_width->setToolTip(QStringLiteral("しっぽの付け根の幅"));
-    connect(tail_width, &QDoubleSpinBox::editingFinished, this, [this] { set_tail_width(); });  // (after its style: as Python's)
+    connect(tail_width, &QDoubleSpinBox::editingFinished, this, [this] { carry_on("set_tail_width", [this] { set_tail_width(); }); });  // (after its style: as Python's)
     path_curve = check(QStringLiteral("手で描いたフキダシを曲線にする"));
     ruby_scale = spin(0.25, 0.8, 0.05, QStringLiteral(" 字"));
     ruby_scale->setToolTip(QStringLiteral("ルビの大きさ（本文の何字ぶんか。既定 0.5）"));
@@ -268,12 +306,14 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     layer_order = new QComboBox;
     layer_order->setToolTip(QStringLiteral("テキストの重ね順: このレイヤーの下に台詞を描きます（上のレイヤーの絵がフキダシに重なる）"));
     connect(layer_order, &QComboBox::activated, this, [this](int) {
-        const QVariant data = layer_order->currentData();
-        style(Json{{"below_layer", data.isValid() && !data.isNull() ? Json(data.toString().toStdString()) : Json()}});
+        carry_on("layer_order", [this] {
+            const QVariant data = layer_order->currentData();
+            style(Json{{"below_layer", data.isValid() && !data.isNull() ? Json(data.toString().toStdString()) : Json()}});
+        });
     });
     reset = new QPushButton(QStringLiteral("既定の設定に戻す"));
     reset->setToolTip(QStringLiteral("この台詞の文字とフキダシの設定を既定に戻します"));
-    connect(reset, &QPushButton::clicked, this, [this] { reset_style(); });
+    connect(reset, &QPushButton::clicked, this, [this] { carry_on("reset_style", [this] { reset_style(); }); });
     // the names the tests and the screen readers use
     for (const auto& [widget, name] : std::initializer_list<std::pair<QWidget*, const char*>>{
              {font, "font"}, {size, "size"}, {tracking, "tracking"}, {leading, "leading"}, {outline, "outline"}, {border, "border"},
@@ -297,7 +337,7 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     auto* row = new QHBoxLayout;
     row->addWidget(kind, 1);
     row->addWidget(vertical);
-    connect(text, &QPlainTextEdit::textChanged, this, [this] { main_button(); });  // (the accent only once there are words to add)
+    connect(text, &QPlainTextEdit::textChanged, this, [this] { carry_on("main_button", [this] { main_button(); }); });  // (the accent only once there are words to add)
     auto* buttons = new QHBoxLayout;
     buttons->addWidget(add_button, 1);
     buttons->addWidget(apply_button, 1);
@@ -433,6 +473,17 @@ void StoryPanel::main_button() {
 }
 
 void StoryPanel::picked() {
+    // (Python's _picked stops at a value it cannot show, its slot's error logged and _loading left on; here every field
+    // that can be shown is, and the panel goes on taking edits)
+    try {
+        show_picked();
+    } catch (const std::exception& error) {
+        loading_ = false;
+        qWarning("StoryPanel.picked: %s", error.what());
+    }
+}
+
+void StoryPanel::show_picked() {
     const core::StoryLine* l = line();
     for (QWidget* widget : {static_cast<QWidget*>(apply_button), static_cast<QWidget*>(delete_button)}) widget->setEnabled(l != nullptr);
     theme::role_prop(apply_button, "primary", l != nullptr);
@@ -456,7 +507,18 @@ void StoryPanel::picked() {
     kind->setCurrentIndex(std::max(0, kind->findData(qs(l->balloon))));
     vertical->setChecked(l->wrap == "vertical");
     const Json st = render::text::style_of(*l);
-    const auto f = [&st](const char* key, double fallback) { return core::py_truthy(st[key]) ? core::to_float(st[key]) : fallback; };
+    // (a value that is not a number — written into the book by hand — or more than its field holds shows as the
+    // field's default, or as much as the field holds)
+    const auto read = [](auto&& value, auto fallback) -> decltype(fallback) {
+        try {
+            return value();
+        } catch (const std::exception&) {
+            return fallback;
+        }
+    };
+    const auto f = [&st, &read](const char* key, double fallback) {
+        return read([&] { return core::py_truthy(st[key]) ? core::to_float(st[key]) : fallback; }, fallback);
+    };
     const QString face = core::py_truthy(st["font"]) ? qs(core::py_str(st["font"])) : (l->balloon == "sfx" ? QStringLiteral("sfx") : QStringLiteral("antique"));
     int index = font->findData(face);
     if (index < 0) {
@@ -468,7 +530,7 @@ void StoryPanel::picked() {
     tracking->setValue(f("tracking", 0));
     leading->setValue(f("leading", 0));
     outline->setValue(f("outline_mm", 0));
-    border->setValue(st["border_mm"].is_null() ? 0.35 : core::to_float(st["border_mm"]));
+    border->setValue(read([&] { return st["border_mm"].is_null() ? 0.35 : core::to_float(st["border_mm"]); }, 0.35));
     align->setCurrentIndex(std::max(0, align->findData(qs(core::py_str(st["align"])))));
     fill->setCurrentIndex(std::max(0, fill->findData(qs(core::py_str(st["fill"])))));
     tcy->setChecked(core::py_truthy(st["tcy"]));
@@ -480,17 +542,22 @@ void StoryPanel::picked() {
     gradient->setText(core::py_truthy(st["gradient"]) ? QStringLiteral("文字のグラデーションを外す") : QStringLiteral("文字のグラデーション…"));
     latin->setCurrentIndex(std::max(0, latin->findData(qs(core::py_str(st["latin"])))));
     mark->setCurrentIndex(std::max(0, mark->findData(qs(core::py_str(st["emphasis_mark"])))));
-    weight->setCurrentIndex(render::text::line_weight(st));
+    weight->setCurrentIndex(read([&] { return render::text::line_weight(st); }, 0));
     italic->setChecked(core::py_truthy(st["italic"]));
     wobble->setValue(f("wobble", 0));
     double_line->setChecked(core::py_truthy(st["double"]));
-    spikes->setValue(core::py_truthy(st["spikes"]) ? static_cast<int>(core::py_int(st["spikes"])) : 0);
+    spikes->setValue(read([&] { return core::py_truthy(st["spikes"]) ? static_cast<int>(std::clamp<std::int64_t>(core::py_int(st["spikes"]), 0, 80)) : 0; }, 0));
     spike_depth->setValue(f("spike_depth", 0.2));
-    fill_cover->setValue(static_cast<int>(core::py_round_int(100 * (st["fill_opacity"].is_null() ? 1.0 : core::to_float(st["fill_opacity"])))));
+    fill_cover->setValue(read(
+        [&] {
+            const double percent = 100 * (st["fill_opacity"].is_null() ? 1.0 : core::to_float(st["fill_opacity"]));
+            return std::isnan(percent) ? 100 : static_cast<int>(core::py_round_int(std::clamp(percent, 0.0, 100.0)));
+        },
+        100));
     text_dx->setValue(f("text_dx_mm", 0));
     text_dy->setValue(f("text_dy_mm", 0));
     const Json first_width = !l->tails.empty() && l->tails.front().is_object() ? core::get_or(l->tails.front(), "width_mm", Json()) : Json();
-    tail_width->setValue(core::py_truthy(first_width) ? core::to_float(first_width) : 0.0);
+    tail_width->setValue(read([&] { return core::py_truthy(first_width) ? core::to_float(first_width) : 0.0; }, 0.0));
     tail_width->setEnabled(!l->tails.empty());
     path_curve->setVisible(l->path.has_value() && !l->path->empty());
     path_curve->setChecked(core::py_truthy(st["path_curve"]));
@@ -552,10 +619,7 @@ void StoryPanel::style_changed() {
 void StoryPanel::pick_style_colour(const char* key, const QString& title, const QColor& fallback) {
     const core::StoryLine* l = line();
     if (l == nullptr) return;
-    const Json rgb = render::text::style_of(*l)[key];
-    const QColor now = core::py_truthy(rgb) ? QColor(static_cast<int>(core::py_int(rgb[0])), static_cast<int>(core::py_int(rgb[1])), static_cast<int>(core::py_int(rgb[2])))
-                                            : fallback;
-    const auto chosen = ask::colour(this, now, title);
+    const auto chosen = ask::colour(this, start_colour(render::text::style_of(*l)[key], fallback), title);
     if (chosen) style(Json{{key, Json::array({chosen->red(), chosen->green(), chosen->blue()})}});
 }
 
@@ -636,11 +700,7 @@ void StoryPanel::pick_color() {
 void StoryPanel::pick_outline_colour() {
     const core::StoryLine* l = line();
     if (l == nullptr) return;
-    const Json st = render::text::style_of(*l);
-    const Json rgb = st["outline_rgb"];
-    const QColor now = core::py_truthy(rgb) ? QColor(static_cast<int>(core::py_int(rgb[0])), static_cast<int>(core::py_int(rgb[1])), static_cast<int>(core::py_int(rgb[2])))
-                                            : QColor(255, 255, 255);
-    const auto chosen = ask::colour(this, now, QStringLiteral("フチの色"));
+    const auto chosen = ask::colour(this, start_colour(render::text::style_of(*l)["outline_rgb"], QColor(255, 255, 255)), QStringLiteral("フチの色"));
     if (!chosen) return;
     // (re-read: the dialog may have let the book change)
     const core::StoryLine* again = line();

@@ -1749,53 +1749,81 @@ Json builtin_material(const std::string& id) {
 // The picture of an image material (materials.image_bytes: library_dir() / item["file"], read when it is there): none
 // when it has no file, the file is not there or holds nothing (the op then says the picture is missing), and Python's
 // own errors (a name that is not a str; a folder or a file that cannot be read, which apply_ops lets through). A
-// picture this build does not read — outside the library or through a link, or past 64 MB — is not read: what refuses
-// it is kept in `refused`, for the op to throw once Python's own errors have had their turn.
+// picture this build does not read is not read. One named by a whole path or outside the library ("..") is refused
+// (OpError) before the file system is asked anything about it, and the library is walked down without following a
+// link (one is refused there, as a file that is not a plain file): no file outside the library is looked at, and these
+// refusals come before Python's own errors (its missing picture, the op's line). One past 64 MB is kept in `refused`,
+// for the op to throw once Python's own errors have had their turn.
 struct MaterialPicture {
     std::string bytes;
     std::string refused;
 };
 
 std::optional<MaterialPicture> material_picture(const Json& material) {
+    namespace fs = std::filesystem;
     const Json file = core::get_or(material, "file", Json());
     if (!core::py_truthy(file)) return std::nullopt;
 #ifdef _WIN32
     constexpr const char* kPathType = "WindowsPath";
+    constexpr std::string_view kSeparators = "/\\";
 #else
     constexpr const char* kPathType = "PosixPath";
+    constexpr std::string_view kSeparators = "/";
 #endif
     if (!file.is_string()) {
         throw core::PyTypeError(std::string("unsupported operand type(s) for /: '") + kPathType + "' and '" + core::py_type_name(file) +
                                 "'");
     }
     const std::string name = file.get<std::string>();
+    // (a name with a NUL in it is no file: Path.exists() says False, Python's missing picture)
+    if (name.find('\0') != std::string::npos) return std::nullopt;
     const std::string root = core::path_to_utf8(config_dir() / "materials");
     const std::string text = pathlib_text(name.front() == '/' ? name : root + "/" + name);  // (pathlib: a whole path replaces)
-    const std::filesystem::path path = core::path_from_utf8(text);
+    MaterialPicture out;
+    const fs::path named = core::path_from_utf8(name);
+    if (QDir::isAbsolutePath(QString::fromStdString(name)) || named.has_root_name() || named.has_root_directory()) {
+        throw OpError("material image must be inside the material library");
+    }
+    std::vector<std::string> parts;
+    for (std::size_t at = 0; at <= name.size();) {
+        const std::size_t next = std::min(name.find_first_of(kSeparators, at), name.size());
+        const std::string part = name.substr(at, next - at);
+        if (part == "..") {
+            throw OpError("unsafe material image source");
+        }
+        if (!part.empty() && part != ".") parts.push_back(part);
+        at = next + 1;
+    }
+    // the library: a folder of its own (not a link, nor under one), as before M4; not there, nothing in it is
     std::error_code ec;
-    if (!std::filesystem::exists(path, ec)) return std::nullopt;
-    if (std::filesystem::is_directory(path, ec)) {
+    fs::path path = core::path_from_utf8(root);
+    const fs::file_status library = fs::symlink_status(path, ec);
+    if (!fs::exists(library) || (!fs::is_directory(library) && !fs::is_symlink(library))) return std::nullopt;
+    const QFileInfo directory(QString::fromStdString(root));
+    if (fs::is_symlink(library) || directory.canonicalFilePath() != directory.absoluteFilePath()) {
+        throw OpError("unsafe material image source");
+    }
+    // down to the file, a link never followed; a part that is not there: Python's missing picture
+    fs::file_status status = library;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        path /= core::path_from_utf8(parts[i]);
+        status = fs::symlink_status(path, ec);
+        if (fs::is_symlink(status)) {
+            throw OpError("unsafe material image source");
+        }
+        if (!fs::exists(status) || (i + 1 < parts.size() && !fs::is_directory(status))) return std::nullopt;
+    }
+    if (fs::is_directory(status)) {
         throw core::PyUncaught("IsADirectoryError", "[Errno 21] Is a directory: " + core::py_repr_str(text));
     }
     constexpr qint64 kMaxSourceBytes = 64ll << 20;  // (the user-preview reader's cap on an original file)
-    const QString library = QString::fromStdString(root);
-    const QFileInfo directory(library);
-    const QString relative = QString::fromStdString(name);
-    const QFileInfo source(QDir(library).filePath(relative));
+    const QFileInfo source(QString::fromStdString(core::path_to_utf8(path)));
     const QString canonical = source.canonicalFilePath();
-    MaterialPicture out;
-    if (QDir::isAbsolutePath(relative)) {
-        out.refused = "material image must be inside the material library";
-    } else if (!directory.isDir() || directory.isSymLink() || directory.canonicalFilePath() != directory.absoluteFilePath() ||
-               !source.isFile() || source.isSymLink() || canonical != source.absoluteFilePath() ||
-               !canonical.startsWith(directory.canonicalFilePath() + "/")) {
-        out.refused = "unsafe material image source";
-    } else if (source.size() > kMaxSourceBytes) {
-        out.refused = "material image exceeds byte budget";
+    if (!fs::is_regular_file(status) || canonical != source.absoluteFilePath() || !canonical.startsWith(directory.canonicalFilePath() + "/")) {
+        throw OpError("unsafe material image source");
     }
-    if (!out.refused.empty()) {  // (not read; one that holds nothing is still Python's missing picture)
-        const auto size = std::filesystem::file_size(path, ec);
-        if (!ec && size == 0) return std::nullopt;
+    if (source.size() > kMaxSourceBytes) {
+        out.refused = "material image exceeds byte budget";
         return out;
     }
     QFile read(canonical);

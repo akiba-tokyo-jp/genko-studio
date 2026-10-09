@@ -70,7 +70,8 @@ std::vector<MainWindow*>& open_windows() {
 
 QString omitted_words(const QString& element) {
     static const std::map<QString, QString> words = {
-        {"default_font", "読めないフォントの文字"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
+        {"default_font", "読めないフォントの文字"}, {"large_font", "大きすぎるフォント（32 MB 超）の文字"},
+        {"text_features", "横書きの文字の字形の指定（OpenType 機能）"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
         {"prims", "3D"}, {"placed", "配置した画像"}, {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"},
         {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"}};
     if (const auto it = words.find(element); it != words.end()) return it->second;

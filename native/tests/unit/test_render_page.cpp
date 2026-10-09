@@ -5,6 +5,7 @@
 #include <QtTest>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QTemporaryDir>
 #include "render/draw.hpp"
 #include "core/covers.hpp"
@@ -19,6 +20,7 @@
 #include <thread>
 #include <vector>
 
+#include "core/base64.hpp"
 #include "core/error.hpp"
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
@@ -27,6 +29,8 @@
 #include "render/color_canvas.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/text/lettering.hpp"
+#include "render/text/memo.hpp"
 
 namespace render = genko::render;
 using genko::core::Document;
@@ -426,6 +430,107 @@ private slots:
             QVERIFY(render::render_page(*precise.pages[0], 150, o, &precise).image.tobytes() ==
                     whole.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes());
         }
+    }
+
+    void lettering_it_cannot_draw_is_left_out() {
+        // What a line's letters need that this build cannot draw stops the page (NotYetPorted, by name) or, with
+        // skip_unported, is left out and reported — that line's letters: the page, the other lines and the balloons are
+        // drawn, and parts of the page are the same as the whole page cut. (1) OpenType features on letters across:
+        // Pillow without raqm (the BASIC layout the reference is held to) raises KeyError, which text_layout keeps; (2)
+        // a font file past the 32 MB this build reads (Python reads any), the book's, for a balloon's letters and for a
+        // line not placed (its label).
+        const Document base = book();
+        const Num index = base.pages[0]->index;
+        Document plain = base;
+        plain.add_line(index, "普通の台詞", "", std::nullopt, "", Num(10), Num(12), Num(30), Num(20), "speech");
+        Document doc = plain;
+        {
+            genko::core::StoryLine& featured = doc.add_line(index, "ABC漢字", "", std::nullopt, "", Num(20), Num(50), Num(40), Num(20), "box");
+            featured.wrap = "horizontal";
+            featured.style["features"] = Json::array({"jp78"});
+            QVERIFY_THROWS_EXCEPTION(genko::core::PyUncaught, render::text::text_layout(featured, 150));
+        }
+        for (const char* mode : {"print", "proof"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            QCOMPARE(unported_element(*doc.pages[0], doc, options), std::string("text_features"));
+            options.skip_unported = true;
+            const render::RenderResult r = render::render_page(*doc.pages[0], 150, options, &doc);
+            QCOMPARE(r.omitted, std::vector<std::string>{"text_features"});
+            // (the box drawn, its letters not; the other line drawn)
+            QVERIFY(r.image.tobytes() != render::render_page(*plain.pages[0], 150, options, &plain).image.tobytes());
+            QVERIFY(r.image.tobytes() != render::render_page(*base.pages[0], 150, options, &base).image.tobytes());
+            for (const render::RenderRegion part : {render::RenderRegion{0, 0, 1, 1}, render::RenderRegion{90, 260, 200, 120},
+                                                    render::RenderRegion{0, 150, r.image.width(), 90}}) {
+                for (const bool fresh : {true, false}) {
+                    if (fresh) render::clear_render_caches();
+                    render::RenderOptions o = options;
+                    o.region = part;
+                    const render::RenderResult got = render::render_page(*doc.pages[0], 150, o, &doc);
+                    QVERIFY(got.image.tobytes() == r.image.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes());
+                }
+            }
+        }
+        // a font file of 33 MB (sparse: nothing written), the book's
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString big = dir.filePath(QStringLiteral("big.ttf"));
+        {
+            QFile file(big);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QVERIFY(file.resize(33LL * 1024 * 1024));
+        }
+        for (const bool placed : {true, false}) {
+            Document fonted = base;
+            fonted.font_path = big.toStdString();
+            if (placed) {
+                fonted.add_line(index, "大きな書体", "", std::nullopt, "", Num(10), Num(12), Num(30), Num(20), "speech");
+            } else {
+                fonted.add_line(index, "置かれない台詞", "C", std::nullopt, "", Num(0), Num(0), Num(40), Num(20), "");  // (a label)
+            }
+            fonted.add_line(index, "自分の書体", "", std::nullopt, "", Num(20), Num(50), Num(30), Num(20), "box").style["font"] = "mincho";
+            render::RenderOptions options;
+            options.mode = "proof";
+            QCOMPARE(unported_element(*fonted.pages[0], fonted, options), std::string("large_font"));
+            options.skip_unported = true;
+            const render::RenderResult r = render::render_page(*fonted.pages[0], 150, options, &fonted);
+            QCOMPARE(r.omitted, std::vector<std::string>{"large_font"});
+            QVERIFY(r.image.tobytes() != render::render_page(*base.pages[0], 150, options, &base).image.tobytes());
+        }
+        QVERIFY(QFile::remove(big));
+    }
+
+    void far_picture_balloons_are_not_opened() {
+        // A part of the page that a picture balloon does not reach does not open its picture: one this build cannot read
+        // yet stops the whole page (or is left out of it), while a part away from it is drawn without asking (a tile of
+        // the canvas, a region).
+        Document doc = book();
+        const Document plain = doc;
+        const Num index = doc.pages[0]->index;
+        doc.add_line(index, "絵", "", std::nullopt, "", Num(2), Num(2), Num(12), Num(8), "picture").style["picture"] =
+            genko::core::b64encode(std::string("II*\0", 4) + std::string(60, '\x01'));
+        render::RenderOptions proof;
+        proof.mode = "proof";
+        QCOMPARE(unported_element(*doc.pages[0], doc, proof), std::string("image_format"));
+        const render::Image whole = render::render_page(*plain.pages[0], 150, proof, &plain).image;
+        const render::RenderRegion far{whole.width() - 80, whole.height() - 60, 80, 60};
+        proof.region = far;
+        const render::RenderResult got = render::render_page(*doc.pages[0], 150, proof, &doc);
+        QVERIFY(got.omitted.empty());
+        QVERIFY(got.image.tobytes() == whole.crop(render::Box{far.x, far.y, far.x + far.w, far.y + far.h}).tobytes());
+    }
+
+    void remembered_keys_count() {
+        // What a remembered picture is kept by counts in the memory the pictures may take: a key of megabytes (a line's
+        // picture written into it) is not kept as if it were free.
+        render::text::detail::Memo<int> memo(16, 4096);
+        memo.put(std::string(2000, 'k'), std::make_shared<const int>(1), 1);
+        QVERIFY(memo.get(std::string(2000, 'k')) == nullptr);  // (more than a quarter of what may be kept, with its key)
+        memo.put("small", std::make_shared<const int>(2), 1);
+        QVERIFY(memo.get("small") != nullptr);
+        for (char c : {'a', 'b', 'c', 'd', 'e'}) memo.put(std::string(1000, c), std::make_shared<const int>(c), 1);
+        QVERIFY(memo.get(std::string(1000, 'a')) == nullptr);  // (the oldest gone: five keys of 1000 bytes are more than 4096)
+        QVERIFY(memo.get(std::string(1000, 'e')) != nullptr);
     }
 
     void precise_page_balloons() {

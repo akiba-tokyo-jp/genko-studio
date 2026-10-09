@@ -569,7 +569,10 @@ struct TrueTypeFonts::State {
             if (font.size() > 4096) throw core::Error("value", "font name exceeded");
             QFile source(QString::fromStdString(font));
             if (!source.open(QIODevice::ReadOnly | QIODevice::Unbuffered)) throw NotYetPorted("default_font");
-            if (source.size() <= 0 || source.size() > cap) throw core::Error("value", "text font exceeds byte limit");
+            // (a font file past the 32 MB this build reads — Python's Pillow reads any — is not drawn with: said by name, so
+            // a page leaves out the letters in it and says so; one with nothing in it is a file FreeType cannot read)
+            if (source.size() > cap) throw NotYetPorted("large_font");
+            if (source.size() <= 0) throw NotYetPorted("default_font");
             auto bytes = std::make_shared<QByteArray>(source.readAll());
             if (bytes->size() != source.size()) throw core::Error("value", "text font changed during read");
             entry->bytes = std::move(bytes);

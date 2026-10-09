@@ -32,6 +32,7 @@
 #include "core/pyops.hpp"
 #include "render/image.hpp"
 #include "render/png.hpp"
+#include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
 
 namespace genko::app {
@@ -271,10 +272,16 @@ void MainWindow::balloon_drawn(const Json& outline) {
 void MainWindow::edit_line_inline(const std::string& line_id) {
     const core::StoryLine* line = line_by_id(line_id);
     if (line == nullptr) return;
-    canvas_->open_editor(line->x_mm.value(), line->y_mm.value(), lettering::with_marks(*line), [this, line_id](std::optional<QString> typed) {
-        if (closed_) return;
+    const auto origin = session_;
+    canvas_->open_editor(line->x_mm.value(), line->y_mm.value(), lettering::with_marks(*line), [this, origin, line_id](std::optional<QString> typed) {
+        if (!typed || typed->isEmpty() || closed_) return;
+        // (another book in the window now — its tab chosen, Ctrl+Tab — may have a line of the same id: not that one)
+        if (session_ != origin) {
+            flash(QStringLiteral("確認中に対象の原稿・ページが変更されたため、操作を中止しました。やり直してください。"), 6000, true);
+            return;
+        }
         const core::StoryLine* current = line_by_id(line_id);  // (the line as it is now)
-        if (!typed || typed->isEmpty() || current == nullptr) return;
+        if (current == nullptr) return;
         const lettering::Marks marks = lettering::parse_marks(*typed);
         if (lettering::same_marks(marks, *current)) return;
         Json ops = Json::array({Json{{"op", "edit_line"},
@@ -464,7 +471,8 @@ std::unique_ptr<QMenu> MainWindow::line_menu(const std::string& line_id) {
     const auto at = std::find_if(lines.begin(), lines.end(), [&](const core::StoryLine* l) { return l->id == line_id; });
     if (at != lines.end() && at + 1 != lines.end()) {
         const std::string next = (*(at + 1))->id;
-        const Json key = core::py_truthy(group) ? group : Json("g_" + line_id.substr(0, 8));
+        // (f"g_{line_id[:8]}": the id's first eight characters, code points as Python's str has them)
+        const Json key = core::py_truthy(group) ? group : Json("g_" + render::text::utf8(render::text::u32(line_id).substr(0, 8)));
         menu->addAction(QStringLiteral("次の台詞のフキダシとつなげる"), this, [this, line_id, next, key] {
             apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", line_id}, {"style", Json{{"group", key}}}},
                                    Json{{"op", "edit_line"}, {"id", next}, {"style", Json{{"group", key}}}}}));

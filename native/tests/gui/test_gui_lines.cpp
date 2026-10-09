@@ -14,6 +14,7 @@
 #include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QInputMethodEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -22,6 +23,7 @@
 #include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QPointer>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QTableWidget>
@@ -41,6 +43,7 @@
 #include "app/story_editor.hpp"
 #include "app/story_panel.hpp"
 #include "app/text_style.hpp"
+#include "app/tiles.hpp"
 #include "app/tool_settings.hpp"
 #include "app/wording.hpp"
 #include "core/base64.hpp"
@@ -65,12 +68,15 @@ struct Studio {
     std::unique_ptr<app::MainWindow> window;
     gui_test::Answers answers;
     std::vector<Json> ops;  // every op applied, in order
-    Studio() {
+    // (edit: the book as it is on disk before it opens, e.g. a style written by hand)
+    explicit Studio(const std::function<void(core::Document&)>& edit = {}) {
         (void)gui_test::config_folder();
         previous_config = qgetenv("GENKO_CONFIG_DIR");
         qputenv("GENKO_CONFIG_DIR", config.path().toUtf8());
         const auto path = gui_test::path_of(tmp.path() + "/book");
-        gui_test::write_book(path, gui_test::new_doc(2));  // (A4, two pages: Python's new_episode("試し", 1, 2, PageSpec.a4_mono()))
+        core::Document doc = gui_test::new_doc(2);  // (A4, two pages: Python's new_episode("試し", 1, 2, PageSpec.a4_mono()))
+        if (edit) edit(doc);
+        gui_test::write_book(path, doc);
         session = app::Session::open(path, gui_test::quick(gui_test::path_of(tmp.path() + "/recovery")));
         window = std::make_unique<app::MainWindow>(session);
         window->resize(1300, 900);
@@ -1090,6 +1096,204 @@ private slots:
         const auto shout = app::lettering::measure({U"あいう", U"えお"}, "shout");
         QCOMPARE(shout.first, 26.43995756636174);
         QCOMPARE(shout.second, 32.50343522601233);
+    }
+
+    void theLinesPanelShowsWhatItCanOfAStyle() {
+        // A style the panel cannot show whole: colours of fewer than three numbers (Python's _merge_style keeps
+        // [int(v) for v in value][:3], so edit_line and add_line take [255]), a cover the field cannot hold (fill_opacity
+        // 1e17, a float the op takes), and values written into the book by hand that are not numbers. Python's
+        // QColor(*rgb) takes one number as a QRgb and fails with two (PySide logs it and carries on); _picked stops at a
+        // field it cannot read. Here every field that can be shown is, the colour dialogs start from the colour Python's
+        // would (else the default colour), and nothing leaves a slot: the lettering is still edited from the panel.
+        Studio s([](core::Document& doc) {
+            core::StoryLine& hand = doc.add_line(core::Num(1), "手書きの設定", "", std::nullopt, "", core::Num(120), core::Num(30), core::Num(30), core::Num(40));
+            hand.id = "HAND";
+            hand.style = Json{{"size_mm", "big"}, {"tracking", 0.3}, {"spikes", "many"}, {"rgb", "red"}, {"outline_mm", Json::array({1})},
+                              {"outline_rgb", Json::array({1})}, {"border_mm", "thin"}, {"fill_opacity", "half"}, {"text_dx_mm", 2.5}};
+        });
+        const std::string few = s.put(Json{{"op", "add_line"}, {"text", "短い色"}, {"x_mm", 40.0}, {"y_mm", 50.0}, {"w_mm", 30.0}, {"h_mm", 40.0},
+                                           {"style", Json{{"line_rgb", Json::array({255})}, {"rgb", Json::array({7})}, {"outline_rgb", Json::array({1, 2})},
+                                                          {"fill_rgb", Json::array({1, 2, 3})}, {"fill_opacity", 1e17}, {"text_dy_mm", 1.5}}}});
+        QVERIFY(!few.empty());
+        QCOMPARE(s.line(few)->style["line_rgb"], Json::array({255}));
+        auto& panel = s.panel();
+        QList<QColor> offered;
+        s.answers.responder->colour = [&offered](const QColor& now, const QString&) {
+            offered << now;
+            return std::optional<QColor>();
+        };
+        s.window->on_line_selected(few, false);
+        QCOMPARE(panel.current_id(), std::optional<std::string>(few));
+        QVERIFY(panel.style_body->isVisibleTo(panel.style_box));
+        QCOMPARE(panel.fill_cover->value(), 100);  // (round(100 * 1e17): more than the field holds)
+        QCOMPARE(panel.text_dy->value(), 1.5);     // (and the fields after it)
+        QCOMPARE(panel.layer_order->count(), static_cast<int>(s.page().layers.size()) + 1);
+        panel.line_colour->click();     // [255]: QColor(255), a QRgb
+        panel.color->click();           // [7]
+        panel.outline_colour->click();  // [1, 2]: no colour of two numbers (Python's TypeError): the default
+        panel.fill_colour->click();
+        QCOMPARE(offered, (QList<QColor>{QColor(0, 0, 255), QColor(0, 0, 7), QColor(255, 255, 255), QColor(1, 2, 3)}));
+        const std::size_t count = s.ops.size();
+        panel.size->setValue(5.0);
+        emit panel.size->editingFinished();
+        QCOMPARE(s.ops.size(), count + 1);
+        QCOMPARE(s.last()["style"]["size_mm"], Json(5.0));
+        // written by hand: what is not a number shows as the field's default, the rest as it is
+        s.window->on_line_selected("HAND", false);
+        QCOMPARE(panel.current_id(), std::optional<std::string>("HAND"));
+        QCOMPARE(panel.size->value(), 0.0);
+        QCOMPARE(panel.tracking->value(), 0.3);
+        QCOMPARE(panel.spikes->value(), 0);
+        QCOMPARE(panel.outline->value(), 0.0);
+        QCOMPARE(panel.border->value(), 0.35);
+        QCOMPARE(panel.fill_cover->value(), 100);
+        QCOMPARE(panel.text_dx->value(), 2.5);
+        offered.clear();
+        panel.color->click();           // "red": Python's QColor(*"red") fails: the default
+        panel.outline_colour->click();  // [1]
+        QCOMPARE(offered, (QList<QColor>{QColor(10, 10, 10), QColor(0, 0, 1)}));
+        const std::size_t edits = s.ops.size();
+        panel.tracking->setValue(0.5);
+        emit panel.tracking->editingFinished();
+        QCOMPARE(s.ops.size(), edits + 1);
+        QCOMPARE(s.last()["id"], Json("HAND"));
+        QCOMPARE(s.last()["style"]["tracking"], Json(0.5));
+    }
+
+    void joinedBalloonsKeepWholeCharactersInTheirGroup() {
+        // 次の台詞のフキダシとつなげる: the group is "g_" and the first eight characters of the line's id (Python's
+        // line_id[:8]: code points), so an id of other letters keeps them whole, and the book is saved with it
+        Studio s;
+        const std::string a = s.put(Json{{"op", "add_line"}, {"id", "L01_こんにちは"}, {"text", "一"}, {"x_mm", 40.0}, {"y_mm", 50.0}, {"w_mm", 30.0}, {"h_mm", 40.0}});
+        const std::string b = s.put(Json{{"op", "add_line"}, {"text", "二"}, {"x_mm", 100.0}, {"y_mm", 50.0}, {"w_mm", 30.0}, {"h_mm", 40.0}});
+        QCOMPARE(a, std::string("L01_こんにちは"));
+        s.ops.clear();
+        auto menu = s.window->line_menu(a);
+        QVERIFY(menu != nullptr);
+        find_action(menu.get(), QStringLiteral("次の台詞のフキダシとつなげる"))->trigger();
+        QCOMPARE(s.ops.size(), std::size_t{2});
+        const std::string group = s.ops[0]["style"]["group"].get<std::string>();
+        QCOMPARE(QString::fromStdString(group), QStringLiteral("g_L01_こんにち"));
+        QCOMPARE(s.ops[1]["style"]["group"], Json(group));
+        QVERIFY(drawn_as_book(s));
+        s.session->save_now();
+        QVERIFY(s.session->wait_saved(std::chrono::milliseconds(20000)));
+        QCOMPARE(s.session->status().kind, app::SaveKind::Saved);
+        const core::Document saved = gui_test::read_book(gui_test::path_of(s.tmp.path() + "/book"));
+        QCOMPARE(saved.story.size(), std::size_t{2});
+        for (const core::StoryLine& line : saved.story) QCOMPARE(line.style["group"], Json(group));
+    }
+
+    void aLineTypedOverStopsWhenTheBookChanges() {
+        // A line typed over in place (F2, a double click) while the person goes to another book (Ctrl+Tab, the tabs):
+        // the words are not put into the other book's line of the same id. As for a line typed new or a balloon drawn:
+        // the work stops, and says so.
+        Studio s;
+        const std::string id = s.put(Json{{"op", "add_line"}, {"id", "SAME"}, {"text", "テスト"}, {"x_mm", 50.0}, {"y_mm", 65.0}, {"w_mm", 40.12}, {"h_mm", 55.46}});
+        QCOMPARE(id, std::string("SAME"));
+        const auto other_path = gui_test::path_of(s.tmp.path() + "/other");
+        gui_test::write_book(other_path, gui_test::new_doc(2, "別の本"));
+        auto other = app::Session::open(other_path, gui_test::quick(gui_test::path_of(s.tmp.path() + "/recovery-other")));
+        other->apply(Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "SAME"}, {"text", "別の台詞"}, {"x_mm", 50.0}, {"y_mm", 65.0},
+                                       {"w_mm", 40.12}, {"h_mm", 55.46}}}));
+        QVERIFY(other->wait_saved(std::chrono::milliseconds(20000)));
+        s.session->save_now();
+        QVERIFY(s.session->wait_saved(std::chrono::milliseconds(20000)));
+        s.trigger("act_select");
+        double_click_mm(s.canvas(), QPointF(60.0, 80.0));
+        QPointer<app::InlineEditor> editor = s.canvas()->editor();
+        QVERIFY(editor != nullptr);
+        QCOMPARE(editor->toPlainText(), QStringLiteral("テスト"));
+        editor->moveCursor(QTextCursor::End);
+        ime_commit(editor, QStringLiteral("です"));
+        s.ops.clear();  // (the double click chose the panel there: select_frame)
+        s.window->add_document(other);
+        QCOMPARE(s.window->book().title, std::string("別の本"));
+        if (s.canvas()->editor() != nullptr) ctrl_enter(s.canvas()->editor());
+        QVERIFY(s.canvas()->editor() == nullptr);
+        QCOMPARE(s.window->line_by_id("SAME")->text, std::string("別の台詞"));
+        QCOMPARE(other->document().story.front().text, std::string("別の台詞"));
+        QCOMPARE(s.session->document().story.front().text, std::string("テスト"));
+        QVERIFY2(s.ops.empty(), s.since(0).dump().c_str());
+        QCOMPARE(s.window->last_error(), QStringLiteral("確認中に対象の原稿・ページが変更されたため、操作を中止しました。やり直してください。"));
+    }
+
+    void theTilesFollowTheBooksFont() {
+        // The canvas's tiles drawn again when the book's font changes (set_meta font_path: every line without a face of
+        // its own is drawn in it, while the page, its lines and the brushes are the same)
+        const auto spec = core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6);
+        auto doc = std::make_shared<core::Document>(core::new_episode("書体", core::Num(1), 2, spec));
+        doc->add_line(core::Num(1), "あいう漢字", "", std::nullopt, "", core::Num(10), core::Num(10), core::Num(40), core::Num(30), "box");
+        app::PageRenderer renderer;
+        renderer.show(doc, 0);
+        renderer.want(72, 72, QRectF(0, 0, 70, 95));
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 20000);
+        const QImage before = renderer.compose(72);
+        QCOMPARE(before, rendered(*doc, 0, 72));
+        // (the book's own font file: a copy of the bundled Mincho, which draws the kanji the antique default takes from
+        // its Gothic)
+        QTemporaryDir fonts;
+        const QString file = fonts.filePath(QStringLiteral("book-font.ttf"));
+        QVERIFY(QFile::copy(QStringLiteral(":/genko/text/mincho"), file));
+        auto restyled = std::make_shared<core::Document>(*doc);
+        restyled->font_path = file.toStdString();
+        QCOMPARE(restyled->pages[0].get(), doc->pages[0].get());
+        const auto generation = renderer.generation();
+        renderer.show(restyled, 0);
+        QVERIFY(renderer.generation() > generation);
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 20000);
+        QCOMPARE(renderer.compose(72), rendered(*restyled, 0, 72));
+        QVERIFY(renderer.compose(72) != before);
+    }
+
+    void theTilesFollowThePageDrawnFaintly() {
+        // The canvas's tiles drawn again when the lines of the page drawn faintly over this one change (its onion skin:
+        // proof and name draw that page with its lines), and when the book's font changes there
+        const auto spec = core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6);
+        auto onion = std::make_shared<core::Document>(core::new_episode("オニオンの台詞", core::Num(1), 3, spec));
+        onion->add_line(core::Num(1), "あいう", "", std::nullopt, "", core::Num(10), core::Num(10), core::Num(40), core::Num(30), "box");
+        onion->edit_page(1).onion_from = core::Num(1);
+        app::PageRenderer faint;
+        faint.show(onion, 1);
+        faint.want(72, 72, QRectF(0, 0, 70, 95));
+        QTRY_VERIFY_WITH_TIMEOUT(faint.settled(), 20000);
+        const QImage was = faint.compose(72);
+        QCOMPARE(was, rendered(*onion, 1, 72));
+        auto reworded = std::make_shared<core::Document>(*onion);
+        reworded->story.front().text = "かきくけこ漢字";
+        reworded->story.front().balloon = "cloud";
+        QCOMPARE(reworded->pages[0].get(), onion->pages[0].get());
+        QCOMPARE(reworded->pages[1].get(), onion->pages[1].get());
+        const auto faint_generation = faint.generation();
+        faint.show(reworded, 1);
+        QVERIFY(faint.generation() > faint_generation);
+        QTRY_VERIFY_WITH_TIMEOUT(faint.settled(), 20000);
+        QCOMPARE(faint.compose(72), rendered(*reworded, 1, 72));
+        QVERIFY(faint.compose(72) != was);
+        // (the book's font, there too: a copy of the bundled Mincho)
+        QTemporaryDir fonts;
+        const QString file = fonts.filePath(QStringLiteral("book-font.ttf"));
+        QVERIFY(QFile::copy(QStringLiteral(":/genko/text/mincho"), file));
+        auto refonted = std::make_shared<core::Document>(*reworded);
+        refonted->font_path = file.toStdString();
+        faint.show(refonted, 1);
+        QTRY_VERIFY_WITH_TIMEOUT(faint.settled(), 20000);
+        QCOMPARE(faint.compose(72), rendered(*refonted, 1, 72));
+    }
+
+    void lettersThisBuildCannotDrawAreLeftOutAndSaid() {
+        // A line whose letters this build cannot draw — OpenType features across (Pillow without raqm, the BASIC layout
+        // the reference is held to, raises KeyError) — does not stop the page on the canvas: its letters are left out,
+        // the band says what in words, and the rest is drawn as render_page draws the book with skip_unported.
+        Studio s;
+        const std::string id = s.put(Json{{"op", "add_line"}, {"text", "ABC漢字"}, {"wrap", "horizontal"}, {"balloon", "box"}, {"x_mm", 40.0},
+                                          {"y_mm", 50.0}, {"w_mm", 40.0}, {"h_mm", 20.0}, {"style", Json{{"features", Json::array({"jp78"})}}}});
+        QVERIFY(!id.empty());
+        QVERIFY(drawn_as_book(s));
+        QTRY_VERIFY(s.window->unported_band()->isVisible());
+        QVERIFY2(s.window->unported_band()->text().contains(QStringLiteral("（横書きの文字の字形の指定（OpenType 機能））")),
+                 qPrintable(s.window->unported_band()->text()));
+        QVERIFY(ink_in(shown(s), QRectF(40.0, 50.0, 40.0, 20.0), s.canvas()->base_dpi()) > 0);  // (the box drawn)
     }
 
     void lineRefusalsInWords() {

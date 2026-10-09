@@ -833,7 +833,14 @@ void draw_story(Image& image, const Box& area, const Ctx& ctx, const std::vector
         if (placed_line(*line) || below(line)) continue;
         check_cancel(ctx);
         if (!fonts) fonts.emplace(ctx.stop);
-        const TrueTypeFont& font = label_font(*fonts, font_path);
+        const TrueTypeFont* found = nullptr;
+        try {
+            found = &label_font(*fonts, font_path);
+        } catch (const NotYetPorted& e) {  // (the book's font past what this build reads: this label left out, said)
+            skip_unported(ctx, e.element());
+            continue;
+        }
+        const TrueTypeFont& font = *found;
         const core::Rect inner = ctx.page->inner_rect_mm();
         const int x = mm_to_px(inner.x.value() + 4, ctx.dpi);
         const int y = mm_to_px(inner.y.value() + 4, ctx.dpi);
@@ -984,8 +991,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     }
     const text::Panels panels = lines.empty() ? text::Panels{} : panels_of(page);
     const std::optional<std::string> font_path = episode != nullptr ? std::optional<std::string>(episode->font_path) : std::nullopt;
-    // (what a balloon cannot draw yet — a font file that does not open, a warp with no map — stops the render, or is
-    // left out and reported with skip_unported)
+    // (what a balloon cannot draw yet — a font file that does not open or is past 32 MB, a warp with no map, OpenType
+    // features across — stops the render, or is left out and reported with skip_unported: that line's letters)
     const text::Unported unported = [&ctx](const NotYetPorted& e) { skip_unported(ctx, e.element()); };
     for (const Layer& layer : page.layers) {
         check_cancel(ctx);

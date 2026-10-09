@@ -1,5 +1,8 @@
 #pragma once
 
+#include <QByteArrayView>
+#include <QCryptographicHash>
+
 #include <cstdint>
 #include <list>
 #include <map>
@@ -27,6 +30,29 @@ inline std::optional<std::string> memo_key(const core::Json& inputs) {
     }
 }
 
+// A text as a key: its SHA-256 and its length (a picture's base64 can be megabytes; its key need not be).
+inline std::string digest_of(const std::string& text) {
+    const QByteArray hash = QCryptographicHash::hash(QByteArrayView(text.data(), static_cast<qsizetype>(text.size())), QCryptographicHash::Sha256);
+    return hash.toHex().toStdString() + ":" + std::to_string(text.size());
+}
+
+// A line's style as a key: [the style without its long texts, [[key, digest_of(text)], …]] — a picture balloon's
+// picture, picture letters' fill — so the key stays small and quick to compare. (Any other style: [style].)
+inline core::Json keyed_style(const core::Json& style) {
+    constexpr std::size_t kLong = 1024;
+    if (!style.is_object()) return core::Json::array({style});
+    core::Json kept = core::Json::object();
+    core::Json long_texts = core::Json::array();
+    for (const auto& [key, value] : style.items()) {
+        if (value.is_string() && value.get_ref<const std::string&>().size() > kLong) {
+            long_texts.push_back(core::Json::array({key, digest_of(value.get_ref<const std::string&>())}));
+        } else {
+            kept[key] = value;
+        }
+    }
+    return core::Json::array({kept, long_texts});
+}
+
 template <class T>
 class Memo {
 public:
@@ -40,7 +66,9 @@ public:
         return it->second->value;
     }
 
+    // (bytes: what the value takes; its key is kept too, and counts)
     void put(const std::string& key, std::shared_ptr<const T> value, std::int64_t bytes) {
+        bytes += static_cast<std::int64_t>(key.size());
         const std::lock_guard lock(mutex_);
         if (bytes > budget_ / 4) return;  // (a very large picture is not kept)
         if (const auto it = index_.find(key); it != index_.end()) {

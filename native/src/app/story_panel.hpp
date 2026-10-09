@@ -100,7 +100,9 @@ public:
 
 private:
     std::vector<const core::StoryLine*> lines() const;
+    // The chosen line's words and lettering shown (never throws: what cannot be shown is logged, the rest is shown).
     void picked();
+    void show_picked();
     void main_button();
     void style(const core::Json& change);
     void style_changed();

@@ -41,8 +41,12 @@ inline PagePart whole_page(Image& image) { return PagePart{&image, Point{0, 0}, 
 using Panels = std::vector<std::pair<std::string, std::array<double, 4>>>;
 
 // Called with what a group could not draw (render::NotYetPorted); rethrows it when what is not ported must stop the
-// drawing. Without one, it is rethrown.
+// drawing. Without one, it is rethrown. Letters this build cannot draw are left out line by line (the balloon and the
+// group's other lines drawn): a font it does not read, and OpenType features across, where Pillow without raqm (the
+// BASIC layout the reference is held to) raises KeyError — "text_features" here.
 using Unported = std::function<void(const NotYetPorted&)>;
+
+class SpeakerFonts;
 
 // draw_lines(image, lines, dpi, font_path, show_speaker, panels): every placed line of a page, joined balloons
 // (style.group) drawn together in the reading order of their first line.
@@ -50,10 +54,10 @@ void draw_lines(const PagePart& part, const std::vector<const core::StoryLine*>&
                 const std::optional<std::string>& font_path = std::nullopt, bool show_speaker = true,
                 const Panels* panels = nullptr, std::stop_token stop = {}, const Unported* unported = nullptr);
 // draw_group(image, lines, dpi, show_speaker, font_path, panels): one balloon (or several joined ones) with their
-// tails and text.
+// tails and text. (speakers: the names' font shared by the groups drawn on the same part)
 void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi, bool show_speaker = true,
                 const std::optional<std::string>& font_path = std::nullopt, const Panels* panels = nullptr,
-                std::stop_token stop = {});
+                std::stop_token stop = {}, const Unported* unported = nullptr, SpeakerFonts* speakers = nullptr);
 
 // The balloons' pictures remembered for drawing a page again in parts (the letters, the shapes' masks, a turned
 // balloon's sheet) are forgotten.
