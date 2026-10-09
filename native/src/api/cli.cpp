@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdio>
 #include <exception>
+#include <initializer_list>
 #include <filesystem>
 #include <limits>
 #include <map>
@@ -31,6 +32,8 @@
 #include "core/ops_schema.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "formats/export.hpp"
+#include "render/anim.hpp"
 #include "render/brushes.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -398,6 +401,148 @@ int render_command(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// `genko export <book> <out> [--format F] [options]` (Python's export command, genko/__main__.py): the book written
+// out in one format; the paths of the files one a line, or with --json {"ok": true, "count", "files"}.
+int export_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--json", false},      {"--dpi", true},       {"--format", true},     {"--width", true},
+                                          {"--max-height", true}, {"--long-edge", true}, {"--jpeg", false},      {"--spreads", false},
+                                          {"--color", true},      {"--icc", true},       {"--screen-lpi", true}, {"--screen-shape", true},
+                                          {"--area", true},       {"--fps", true},       {"--seconds", true},    {"--page", true}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
+    // argparse's choices
+    const auto choice = [&](const char* name, const char* fallback, std::initializer_list<const char*> choices) -> std::optional<std::string> {
+        const std::string value = a.value(name).value_or(QString::fromLatin1(fallback)).toStdString();
+        for (const char* c : choices) {
+            if (value == c) return value;
+        }
+        return std::nullopt;
+    };
+    const auto invalid_choice = [&](const char* name, std::initializer_list<const char*> choices) {
+        std::string listed;
+        for (const char* c : choices) listed += std::string(listed.empty() ? "" : ", ") + "'" + c + "'";
+        return usage("genko export: argument " + std::string(name) + ": invalid choice: " + core::py_repr_str(a.value(name)->toStdString()) +
+                     " (choose from " + listed + ")");
+    };
+    const std::initializer_list<const char*> kFormats{"png", "tiff",   "pdf",    "strip",  "psd",       "epub",     "pack",
+                                                      "webtoon", "sns", "cmyk", "layers", "kindle", "timelapse", "animation"};
+    const std::initializer_list<const char*> kColours{"rgb", "cmyk", "gray"};
+    const std::initializer_list<const char*> kShapes{"round", "square", "diamond", "ellipse"};
+    const std::initializer_list<const char*> kAreas{"paper", "bleed", "trim"};
+    const auto fmt = choice("--format", "png", kFormats);
+    if (!fmt) return invalid_choice("--format", kFormats);
+    const auto color = choice("--color", "rgb", kColours);
+    if (!color) return invalid_choice("--color", kColours);
+    const auto shape = choice("--screen-shape", "round", kShapes);
+    if (!shape) return invalid_choice("--screen-shape", kShapes);
+    const auto area = choice("--area", "paper", kAreas);
+    if (!area) return invalid_choice("--area", kAreas);
+    std::map<std::string, std::optional<std::int64_t>> ints;
+    for (const char* name : {"--dpi", "--width", "--max-height", "--long-edge", "--page"}) {
+        if (const auto value = a.value(name)) {
+            const auto n = int_option(*value);
+            if (!n) return usage("genko export: argument " + std::string(name) + ": invalid int value: " + core::py_repr_str(value->toStdString()));
+            ints[name] = *n;
+        }
+    }
+    std::map<std::string, std::optional<double>> floats;
+    for (const char* name : {"--screen-lpi", "--fps", "--seconds"}) {
+        if (const auto value = a.value(name)) {
+            try {
+                floats[name] = core::py_float(Json(value->toStdString()));
+            } catch (const core::Error&) {
+                return usage("genko export: argument " + std::string(name) + ": invalid float value: " + core::py_repr_str(value->toStdString()));
+            }
+        }
+    }
+    const auto int_or = [&](const char* name, std::int64_t fallback) { return ints[name].value_or(fallback); };
+    const auto narrow = [](std::int64_t v) {  // (pixels or dots past what a picture can hold: refused as drawing refuses them)
+        if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) {
+            throw core::Error("image_too_large", "the picture is too large at this resolution");
+        }
+        return static_cast<int>(v);
+    };
+    const std::optional<std::int64_t> dpi = ints["--dpi"] && *ints["--dpi"] != 0 ? ints["--dpi"] : std::nullopt;  // (args.dpi or …)
+
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const bool file_given = !formats::detail::suffix(out).empty();  // (args.out.suffix)
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    render::brushes::clear_custom();
+    render::brushes::register_book(doc.brush_custom);  // (the book's own brushes, as Python's reader registers them)
+    const std::int64_t spec_dpi = doc.spec.dpi.truthy() ? core::py_int(doc.spec.dpi) : 0;
+    std::vector<fs::path> paths;
+    const std::string& f = *fmt;
+    if (f == "strip") {
+        paths = {formats::export_strip(doc, file_given ? out : formats::detail::join(out, "strip.png"), narrow(dpi.value_or(150)))};
+    } else if (f == "psd") {
+        // a folder gets one layered PSD per page; a .psd path gets the first page
+        if (file_given) {
+            paths = {formats::export_psd(doc, out, dpi.value_or(spec_dpi))};
+        } else {
+            paths = formats::export_psd_pages(doc, out, dpi);
+        }
+    } else if (f == "epub") {
+        paths = {formats::export_epub(doc, file_given ? out : formats::detail::join(out, "out.epub"), narrow(dpi.value_or(150)))};
+    } else if (f == "webtoon") {
+        paths = formats::export_webtoon(doc, out, narrow(int_or("--width", 800)), narrow(int_or("--max-height", 1280)), 0,
+                                        a.flag("--jpeg") ? "jpeg" : "png");
+    } else if (f == "sns") {
+        paths = formats::export_sns(doc, out, narrow(int_or("--long-edge", 2048)), a.flag("--jpeg") ? "jpeg" : "png", 92, a.flag("--spreads"));
+    } else if (f == "pack") {
+        paths = formats::export_pack(doc, out, "shueisha", dpi);
+    } else if (f == "layers") {
+        paths = formats::export_layers(doc, out, narrow(dpi.value_or(spec_dpi)), *area);
+    } else if (f == "kindle") {
+        const std::int64_t given = int_or("--long-edge", 2048);
+        const std::int64_t long_edge = given != 2048 ? given : formats::kKindleLongEdge;
+        paths = {formats::export_kindle(doc, file_given ? out : formats::detail::join(out, "kindle.epub"), narrow(long_edge))};
+    } else if (f == "animation") {
+        const std::int64_t wanted = ints["--page"] && *ints["--page"] != 0 ? *ints["--page"] : 1;  // (args.page or 1)
+        const core::Page* page = nullptr;
+        for (const auto& p : doc.pages) {
+            if (p->index == core::Num(wanted)) {
+                page = p.get();
+                break;
+            }
+        }
+        if (page == nullptr) {  // (Python: SystemExit with these words, exit 1)
+            return usage("no page " + (ints["--page"] ? std::to_string(*ints["--page"]) : std::string("None")), 1);
+        }
+        const fs::path dest = file_given ? out : formats::detail::join(out, "p" + formats::detail::padded(page->index, 3) + ".gif");
+        paths = render::anim::export_animation(*page, dest, &doc, narrow(dpi.value_or(100)));
+    } else if (f == "timelapse") {
+        std::optional<Json> page;
+        if (ints["--page"]) page = Json(*ints["--page"]);
+        paths = {render::timelapse::export_timelapse(src, file_given ? out : formats::detail::join(out, "timelapse.webp"), page,
+                                                     floats["--fps"].value_or(12.0), floats["--seconds"])};
+    } else {
+        std::optional<Json> screen;
+        if (floats["--screen-lpi"] && *floats["--screen-lpi"] != 0.0) {
+            screen = Json::object();
+            (*screen)["lpi"] = *floats["--screen-lpi"];
+            (*screen)["shape"] = *shape;
+        }
+        paths = formats::export_print(doc, out, f, dpi, 180, true, *area, f == "cmyk" ? std::string("cmyk") : *color,
+                                      a.value("--icc").value_or(QString()).toStdString(), screen);
+    }
+    if (a.flag("--json")) {
+        Json files = Json::array();
+        for (const auto& p : paths) files.push_back(core::path_to_utf8(p));
+        Json json = Json::object();
+        json["ok"] = true;
+        json["count"] = static_cast<std::int64_t>(paths.size());
+        json["files"] = files;
+        print_json(json, ascii);
+    } else {
+        std::string lines;
+        for (const auto& p : paths) lines += core::path_to_utf8(p) + "\n";
+        write_text(lines, stdout);
+    }
+    return 0;
+}
+
 int schema(const QStringList& args, bool ascii) {
     if (!args.isEmpty()) return usage("unrecognized arguments: " + args.join(QLatin1Char(' ')).toStdString());
     core::Json out = core::Json::object();
@@ -659,6 +804,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("doctor")) return doctor(args, ascii);
         if (command == QLatin1String("migrate")) return migrate(args, ascii);
         if (command == QLatin1String("render")) return render_command(args, ascii);
+        if (command == QLatin1String("export")) return export_command(args, ascii);
         return usage("unknown command: " + command.toStdString());
     } catch (const storage::UnsupportedProjectVersion& error) {
         return fail(error.what(), error.code(), ascii, 2);

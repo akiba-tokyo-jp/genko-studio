@@ -1,6 +1,6 @@
 genko_library(genko_api
   SOURCES buildinfo.cpp cli.cpp
-  PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops
+  PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats
   PRIVATE_DEPS ZLIB::ZLIB PNG::PNG JPEG::JPEG TIFF::TIFF Freetype::Freetype ${GENKO_HARFBUZZ} ${GENKO_WEBP} ${GENKO_LCMS2})
 
 add_executable(genko main.cpp)

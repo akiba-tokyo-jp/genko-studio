@@ -154,6 +154,19 @@ set_tests_properties(test_contract_balloons PROPERTIES ENVIRONMENT "QT_QPA_PLATF
 # The paint ops of M3④: add_shape, smudge and liquify against Python's apply_ops (paint_cases.json).
 genko_test(test_contract_paint SOURCES contract/test_contract_paint.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# The exports (M4③a, formats/): every format of export.py, profiles.py, pack.py and psd.py's writer, and
+# app/exporting.run, against Python's on the same books (render_harness.py make-export-books, export-cases): what each
+# call returns or raises, and every file it writes, byte for byte (export_files.hpp leaves out only the times Python's
+# files carry: the sRGB profile's date, an EPUB's zip times and dcterms:modified); the encoders alone against Pillow's
+# (save-cases).
+genko_test(test_contract_export SOURCES contract/test_contract_export.cpp DEPS genko_test_support genko_formats ZLIB::ZLIB
+           LABELS contract TIMEOUT 1800)
+set_tests_properties(test_contract_export PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
+# `genko export` against `python -m genko export`: every format and option, the output, the files, the refusals and
+# exit codes, a moving picture (animation, timelapse) as Pillow plays it.
+genko_test(test_contract_export_cli SOURCES contract/test_contract_export_cli.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
+           LABELS contract TIMEOUT 1800)
+set_tests_properties(test_contract_export_cli PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
 # Filter plugins (M3③, COMP-04): the runner against Python's plugins.run, the choice, the bounds.
 genko_test(test_contract_plugins SOURCES contract/test_contract_plugins.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 1800)

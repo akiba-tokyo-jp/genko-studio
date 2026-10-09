@@ -234,26 +234,33 @@ std::map<std::string, std::string> read(const std::filesystem::path& path, const
     return files;
 }
 
-void write(const std::filesystem::path& path, const std::vector<std::pair<std::string, std::string>>& files) {
+std::string archive(const std::vector<Entry>& entries) {
     // (the time the files are written, as ZipFile.writestr stamps them: local time, two-second steps)
     const QDateTime now = QDateTime::currentDateTime();
     const std::uint32_t dos_time = std::uint32_t(now.time().hour()) << 11 | std::uint32_t(now.time().minute()) << 5 | std::uint32_t(now.time().second() / 2);
     const std::uint32_t dos_date = std::uint32_t(std::max(0, now.date().year() - 1980)) << 9 | std::uint32_t(now.date().month()) << 5 | std::uint32_t(now.date().day());
     std::string out, directory;
-    for (const auto& [name, content] : files) {
+    for (const Entry& entry : entries) {
+        const std::string& name = entry.name;
+        const std::string& content = entry.data;
         if (content.size() > 0xfffffffeu || name.size() > 0xffff) throw core::PyValueError("a file is too large for the pack");
         const std::uint32_t crc = crc32(0, reinterpret_cast<const Bytef*>(content.data()), static_cast<uInt>(content.size()));
-        std::string packed(compressBound(static_cast<uLong>(content.size())) + 16, '\0');
-        z_stream z{};
-        if (deflateInit2(&z, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK) throw core::Error("io", "zlib");
-        z.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(content.data()));
-        z.avail_in = static_cast<uInt>(content.size());
-        z.next_out = reinterpret_cast<Bytef*>(packed.data());
-        z.avail_out = static_cast<uInt>(packed.size());
-        const int result = deflate(&z, Z_FINISH);
-        packed.resize(z.total_out);
-        deflateEnd(&z);
-        if (result != Z_STREAM_END) throw core::Error("io", "zlib");
+        std::string packed;
+        if (entry.deflated) {
+            packed.assign(compressBound(static_cast<uLong>(content.size())) + 16, '\0');
+            z_stream z{};
+            if (deflateInit2(&z, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK) throw core::Error("io", "zlib");
+            z.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(content.data()));
+            z.avail_in = static_cast<uInt>(content.size());
+            z.next_out = reinterpret_cast<Bytef*>(packed.data());
+            z.avail_out = static_cast<uInt>(packed.size());
+            const int result = deflate(&z, Z_FINISH);
+            packed.resize(z.total_out);
+            deflateEnd(&z);
+            if (result != Z_STREAM_END) throw core::Error("io", "zlib");
+        } else {
+            packed = content;  // (ZIP_STORED)
+        }
         if (out.size() + packed.size() > 0xfffffffeu) throw core::PyValueError("the pack is too large");
         const auto offset = static_cast<std::uint32_t>(out.size());
         const bool ascii = std::all_of(name.begin(), name.end(), [](char ch) { return static_cast<unsigned char>(ch) < 0x80; });
@@ -262,7 +269,7 @@ void write(const std::filesystem::path& path, const std::vector<std::pair<std::s
             if (central) put16(to, 3 << 8 | 20);  // (made on Unix, zip 2.0)
             put16(to, 20);
             put16(to, ascii ? 0 : 0x800);  // (a name past ASCII is UTF-8, said so as ZipFile says it)
-            put16(to, 8);
+            put16(to, entry.deflated ? 8 : 0);
             put16(to, dos_time);
             put16(to, dos_date);
             put32(to, crc);
@@ -283,18 +290,25 @@ void write(const std::filesystem::path& path, const std::vector<std::pair<std::s
         out += packed;
         header(directory, true);
     }
-    if (files.size() > 0xfffe) throw core::PyValueError("the pack holds too many files");
+    if (entries.size() > 0xfffe) throw core::PyValueError("the pack holds too many files");
     const auto dir_at = static_cast<std::uint32_t>(out.size());
     out += directory;
     put32(out, 0x06054b50);
     put16(out, 0);
     put16(out, 0);
-    put16(out, static_cast<std::uint32_t>(files.size()));
-    put16(out, static_cast<std::uint32_t>(files.size()));
+    put16(out, static_cast<std::uint32_t>(entries.size()));
+    put16(out, static_cast<std::uint32_t>(entries.size()));
     put32(out, static_cast<std::uint32_t>(directory.size()));
     put32(out, dir_at);
     put16(out, 0);
-    storage::write_atomic(path, out);
+    return out;
+}
+
+void write(const std::filesystem::path& path, const std::vector<std::pair<std::string, std::string>>& files) {
+    std::vector<Entry> entries;
+    entries.reserve(files.size());
+    for (const auto& [name, content] : files) entries.push_back(Entry{name, content, true});
+    storage::write_atomic(path, archive(entries));
 }
 
 }  // namespace genko::render::zip

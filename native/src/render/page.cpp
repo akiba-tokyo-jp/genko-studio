@@ -1155,7 +1155,143 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     return RenderResult{std::move(image), {}};
 }
 
+// The first `count` characters of UTF-8 text (Python's text[:count]).
+std::string first_chars(const std::string& text, std::size_t count) {
+    std::size_t at = 0;
+    for (std::size_t n = 0; n < count && at < text.size(); ++n) {
+        const auto lead = static_cast<unsigned char>(text[at]);
+        at += lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+    }
+    return text.substr(0, std::min(at, text.size()));
+}
+
 }  // namespace
+
+void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each) {
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = &episode;
+    ctx.dpi = dpi;
+    ctx.mode = "print";
+    ctx.finish = true;
+    ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+    const Size size = ctx.size;
+    if (static_cast<std::int64_t>(size.width) * size.height > kMaxAreaPixels) {
+        throw core::Error("image_too_large", "the picture is too large at this resolution");
+    }
+    const Box whole{0, 0, size.width, size.height};
+    const auto blank = [&] { return transparent(whole); };
+    const auto give = [&](std::string name, Image image) {
+        PageLayer out;
+        out.name = std::move(name);
+        out.image = std::move(image);
+        each(std::move(out));
+    };
+    give("紙", Image::create("RGBA", size, Ink{255, 255, 255, 255}));
+    for (const LayerRole role : {LayerRole::Bg, LayerRole::Ink, LayerRole::Finish}) {
+        const core::NumList* fill = page.fill_of(role);
+        if (fill == nullptr) continue;
+        std::vector<std::int64_t> rgba;
+        for (const Num& v : *fill) rgba.push_back(core::py_int(v.json()));
+        rgba.push_back(255);
+        give("塗り " + std::string(core::to_string(role)), Image::create("RGBA", size, Ink::tuple(rgba)));
+    }
+    for (const Layer& layer : page.layers) {
+        check_cancel(ctx);
+        if (!layer.visible || !layer.exportable || guide_role(layer.role)) continue;
+        if (layer.kind == LayerKind::Folder) continue;
+        if (layer.kind == LayerKind::Placed) throw NotYetPorted("placed");  // (its art before the monochrome finish)
+        std::optional<Image> raster;
+        if (layer.color_raster) {  // (a layer in precise colour, which Python does not have: its 8-bit picture)
+            raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), size, whole);
+        } else if (layer.raster_png && !layer.raster_png->empty()) {
+            raster = raster_part(layer.raster_png, size, whole);
+        }
+        if (!raster) continue;
+        PageLayer out;
+        out.name = !layer.title.empty() ? layer.title : std::string(core::to_string(layer.role)) + " " + layer.id.substr(0, 6);
+        out.image = std::move(*raster);
+        out.settings = true;
+        out.opacity = layer.opacity;
+        out.blend = layer.blend;
+        out.clip = layer.clip;
+        if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled) {
+            out.mask = decoded(layer.mask->png, "L").resize(size);
+        }
+        each(std::move(out));
+    }
+    // the pen lines of the ink layer (page.ink_strokes: its first), each as render._stroke draws it, 3 px wide
+    const Layer* ink_layer = page.first_layer(LayerRole::Ink);
+    const bool ink_has_raster = std::any_of(page.layers.begin(), page.layers.end(), [](const Layer& l) {
+        return l.role == LayerRole::Ink && ((l.raster_png && !l.raster_png->empty()) || l.color_raster);
+    });
+    if (ink_layer != nullptr && ink_layer->stroke_count() > 0 && !ink_has_raster) {
+        Image ink = blank();
+        {
+            Draw draw(ink);
+            const Ink colour{20, 20, 20};
+            for (const core::StrokePtr& stroke : ink_layer->strokes->items) {
+                check_cancel(ctx);
+                const auto& pts = stroke->points;
+                if (pts.size() < 2) continue;
+                const auto at = [&](std::size_t i) {
+                    return PointD{static_cast<double>(mm_to_px(pts[i].x, dpi)), static_cast<double>(mm_to_px(pts[i].y, dpi))};
+                };
+                if (!stroke->pressure.empty() && stroke->pressure.size() == pts.size()) {
+                    for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
+                        const double pressure = stroke->pressure[i];
+                        const int w = std::max<int>(1, static_cast<int>(core::py_round_int(3 * std::max(0.15, std::min(1.5, pressure)))));
+                        const std::vector<PointD> seg{at(i), at(i + 1)};
+                        draw.line(seg, colour, w, Joint::Curve);
+                    }
+                } else {
+                    std::vector<PointD> all;
+                    all.reserve(pts.size());
+                    for (std::size_t i = 0; i < pts.size(); ++i) all.push_back(at(i));
+                    draw.line(all, colour, 3, Joint::Curve);
+                }
+            }
+        }
+        if (const auto mask = clip_mask(page, size, dpi, whole)) ink.putalpha(chops::multiply(alpha_of(ink), *mask));
+        give("ペン入れ", std::move(ink));
+    }
+    if (std::any_of(page.layers.begin(), page.layers.end(), [](const Layer& l) { return l.role == LayerRole::Tone && l.visible; })) {
+        Image tones_image = blank();
+        const std::optional<Image> panel_mask = clip_mask(page, size, dpi, whole);
+        for (const Layer& layer : page.layers) {
+            if (is_tone(layer) && layer.visible) {
+                tones_image = tones::draw_layer(std::move(tones_image), layer, tone_page(ctx), whole, panel_mask ? &*panel_mask : nullptr, true);
+            }
+        }
+        give("トーン", std::move(tones_image));
+    }
+    if (core::py_truthy(page.effects)) {
+        Image lines = blank();
+        for (const Json& effect : core::iterate(page.effects)) {
+            if (!effects::drawn(effect)) continue;
+            lines = effects::draw(std::move(lines), effect, page, dpi, size, whole);
+        }
+        give("効果", std::move(lines));
+    }
+    Image frames = blank();
+    draw_frames(frames, whole, page, size, dpi);
+    give("コマ枠", std::move(frames));
+    const std::optional<std::string> font_path(episode.font_path);
+    for (const core::StoryLine* line : episode.story_for_page(page.index)) {
+        if (!placed_line(*line)) continue;
+        check_cancel(ctx);
+        Image balloon = blank();
+        text::draw_lines(text::whole_page(balloon), {line}, dpi, font_path, false, nullptr, ctx.stop, nullptr);
+        std::string words = line->text;
+        std::erase(words, '\n');
+        give("台詞 " + first_chars(words, 24), std::move(balloon));
+    }
+    if (!nombre_items(page, &episode).empty()) {
+        Image numero = blank();
+        draw_nombre(numero, whole, ctx);
+        give("ノンブル", std::move(numero));
+    }
+}
 
 std::vector<Box> nombre_areas(const core::Page& page, int dpi, const core::Document* episode) {
     const auto items = nombre_items(page, episode);

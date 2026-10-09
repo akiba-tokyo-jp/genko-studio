@@ -537,6 +537,8 @@ const std::vector<Rule>& rules() {
             return QStringLiteral("%1の指定が要ります").arg(field(name));
         }));
         // (the C++ build's own: what it does not do yet, and saving)
+        r.push_back(rule("official export is not in the C\\+\\+ build yet",
+                         "この版の Genko では、まだ正式な書き出し（確認と承認の記録つき）はできません（ふつうの書き出しはできます）"));
         r.push_back(rule(R"((?:ops\[\d+\] )?(\S+) is not in the C\+\+ build yet.*)", "この版の Genko では、まだその操作（\\1）はできません"));
         r.push_back(rule("this book is open read-only: .*", "この原稿は読み取り専用で開いています（変更できません）"));
         r.push_back(rule("the book was closed", "この原稿は閉じられています"));

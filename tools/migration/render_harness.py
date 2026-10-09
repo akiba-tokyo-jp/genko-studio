@@ -45,6 +45,16 @@ Commands:
                                 outlines, every style key of the balloon) and K random ones, on RGB and RGBA pictures
                                 at a few dpi; and the shapes' geometry (_edge_point, _tail_polygon, _polyline_tail,
                                 _uneven, _electric, _outline, _wobbly, _smooth_closed, _turned, _thought_trail): OUT
+  make-export-books OUT          the books of the export tests (test_contract_export, test_contract_export_cli):
+                                drawing books (make-books) made into books the exports see differently (titles that need
+                                safe_name, covers front and back, a jacket, a band, spreads, colour and monochrome, nombres,
+                                tones, effect lines, pixel layers with masks, an animation page): OUT/<name>.genko
+  export-cases JOBS OUT         Python's exporters (genko.export, profiles, pack, psd, app.exporting.run, parse_pages,
+                                subset, default_dpi) for each job of a JSON list, writing their files where each job says:
+                                OUT (JSON) with what each returned or raised
+  save-cases OUT --seed N --count K
+                                pictures saved by Pillow as the exports save them (PNG, JPEG, TIFF with their options):
+                                the pictures and the bytes
 
 With skip_unported the elements this C++ step does not draw yet (placed pictures and their finish) are left out the
 way the C++ RenderOptions::skip_unported leaves them out (tones, effect lines and layer screens are drawn on both sides
@@ -2179,9 +2189,237 @@ def balloon_cases(out: str, seed: int, count: int) -> None:
     Path(out).write_text(dumps({"units": units, "cases": cases}), encoding="utf-8")
 
 
+# --- exports (M4: genko/export.py, profiles.py, pack.py, psd.py's writer, app/exporting.py) ---------------------------
+
+
+def _layered(episode, rng) -> None:
+    """Pages the layered exports (layers, PSD) see more of: pixel layers with masks (on and off), blend modes,
+    opacities, clipping and names past ASCII; the page's fills; a nombre on every page."""
+    from genko import models
+    from genko.models import Layer, LayerKind, LayerRole
+
+    for n, page in enumerate(episode.pages):
+        page.numero = True
+        size = (max(1, round(float(page.spec.width_mm) / 25.4 * 150)), max(1, round(float(page.spec.height_mm) / 25.4 * 150)))
+        for k, (title, blend, opacity, clip) in enumerate([("写真のレイヤー「空」", "multiply", 0.55, False), ("", "screen", 1.0, True),
+                                                            ("Ink & wash: 墨", "soft_light", 0.3, False)]):
+            layer = Layer(id=models.new_id(), role=LayerRole.USER, kind=LayerKind.RASTER, title=title, blend=blend, opacity=opacity, clip=clip)
+            layer.raster_png = rand_picture(rng, rng.choice([size, (size[0] // 2 + 3, size[1] // 3 + 7)]), rng.choice(["RGBA", "RGB", "LA", "P"]))
+            if k != 1:
+                layer.mask = {"png": rand_picture(rng, rng.choice([size, (40, 30)]), rng.choice(["L", "RGBA"])), "enabled": k == 0 or n % 2 == 0}
+            page.layers.insert(rng.randrange(0, len(page.layers) + 1), layer)
+        if n % 2 == 0:
+            page.fills = {LayerRole.BG: (rng.randrange(200, 256), rng.randrange(200, 256), rng.randrange(200, 256)),
+                          LayerRole.FINISH: (rng.randrange(256), rng.randrange(256), rng.randrange(256))}
+
+
+def _export_book(dest: Path, seed: int, index: int, *, pages: int, title: str, episode_no, expression: str | None,
+                 ops: list, start_side=False, layered: bool = False) -> dict:
+    """make_render_book (drawing of every kind, balloons) with `pages` pages, then made into the book an export test
+    wants: its title and episode number, its colour, and `ops` applied as a person would apply them."""
+    from dataclasses import replace
+
+    import pyref_harness
+    from genko.headless import apply_ops
+    from genko.io import load_episode, save_episode
+
+    import shutil
+
+    for attempt in range(200):  # (the first seed that makes a book of as many pages)
+        shutil.rmtree(dest, ignore_errors=True)
+        pyref_harness.fresh_process_state(True, first=seed * 1000)
+        make_render_book(random.Random(seed * 1000 + attempt), dest, index, story=True)
+        episode = load_episode(dest)
+        if len(episode.pages) == pages:
+            break
+    episode.title = title
+    episode.episode = episode_no
+    if start_side is not False:
+        episode.start_side = start_side
+    if expression is not None:
+        spec = replace(episode.spec, expression=expression)
+        episode.spec = spec
+        for page in episode.pages:
+            page.spec = replace(page.spec, expression=expression)
+    if ops:
+        apply_ops(episode, ops, agent="human:作者")
+    if layered:
+        _layered(episode, random.Random(seed))
+    save_episode(episode, dest, actor="human:作者")
+    return {"pages": [p.index for p in episode.pages], "covers": [(p.extra.get("cover") or {}).get("kind") for p in episode.pages]}
+
+
+def make_export_books(out: str) -> None:
+    """The books of the export tests (test_contract_export, test_contract_export_cli): drawing books (make_render_book:
+    pen and paint layers with masks and blend modes, fills, corrections, panels, balloons) made into books the exports
+    see differently: a title that needs safe_name, both bindings, spreads, colour and monochrome paper, nombres, tones
+    and effect lines, covers (front and back, a jacket, a band), a title with a dot (Path.with_suffix in profiles._save
+    cuts it). OUT/<name>.genko and OUT/MANIFEST.json ({name: its page numbers and covers})."""
+    root = Path(out)
+    root.mkdir(parents=True, exist_ok=True)
+    tone = {"op": "add_tone", "page": 2, "lpi": 40.0, "density": 0.3}
+    effect = {"op": "add_effect", "page": 1, "kind": "speed", "params": {"count": 24}}
+    books = {
+        # monochrome, nombres, a spread (pages 2 and 3), a tone and effect lines; a title with characters Windows refuses
+        "mono.genko": dict(seed=31, index=0, pages=3, title="原稿:テスト/第1話?", episode_no=3, expression="mono",
+                           ops=[{"op": "set_nombre", "show": True, "position": "bottom_outside"}, {"op": "set_spread", "page": 2, "with": 3},
+                                tone, effect], layered=True),
+        # colour, a front cover and a back cover, a spread across the gutter (pages 1 and 2)
+        "colour.genko": dict(seed=32, index=1, pages=2, title="Vol.2 カラー", episode_no=12, expression="color", start_side="left",
+                             ops=[{"op": "add_cover", "kind": "front"}, {"op": "add_cover", "kind": "back"},
+                                  {"op": "set_spread", "page": 1, "with": 2}], layered=True),
+        # a jacket (one wide sheet: the e-books cut its front and back out of it); a reserved name for a title
+        "jacket.genko": dict(seed=33, index=2, pages=2, title="CON", episode_no=1, expression="mono",
+                             ops=[{"op": "add_cover", "kind": "jacket", "spine_mm": 8, "flap_mm": 20}, effect]),
+        # a band (帯) and a monochrome book bound on the left
+        "obi.genko": dict(seed=34, index=5, pages=1, title=" 帯の本 & <B>. ", episode_no=2, expression="mono",
+                          ops=[{"op": "add_cover", "kind": "obi", "spine_mm": 6, "height_mm": 30},
+                               {"op": "set_nombre", "show": True, "hidden": True}]),
+        # an animation on page 2 (two cels, a sheet, a camera move): `genko export --format animation`
+        "anim.genko": dict(seed=35, index=6, pages=2, title="動き", episode_no=1, expression="mono",
+                           ops=[{"op": "set_animation", "page": 2, "frames": 4, "fps": 6},
+                                {"op": "add_anim_folder", "page": 2, "id": "af", "name": "動き"},
+                                {"op": "add_cel", "page": 2, "folder": "af", "id": "c1"},
+                                {"op": "add_stroke", "page": 2, "layer_id": "c1", "points": [[10, 20, 0.4], [40, 50, 0.9], [60, 30, 0.6]],
+                                 "kind": "gpen", "width_mm": 1.5},
+                                {"op": "add_cel", "page": 2, "folder": "af", "id": "c2", "at": 3},
+                                {"op": "add_stroke", "page": 2, "layer_id": "c2", "points": [[15, 70, 0.5], [45, 80, 0.8]], "kind": "maru",
+                                 "width_mm": 2},
+                                {"op": "set_camera_key", "page": 2, "frame": 1, "rect": [5, 5, 50, 70]}]),
+    }
+    manifest = {}
+    for name, how in books.items():
+        manifest[name] = _export_book(root / name, **how)
+    (root / "MANIFEST.json").write_text(dumps(manifest), encoding="utf-8")
+
+
+def _export_call(job: dict):
+    """One exporter called as the job says (paths as given; Path for a function's dest)."""
+    from genko import brushes, export, pack, profiles, psd
+    from genko.app import exporting
+    from genko.io import load_episode
+
+    brushes.CUSTOM.clear()
+    episode = load_episode(Path(job["book"]))
+    brushes.CUSTOM.clear()
+    brushes.register(episode.brush_custom)
+    kwargs = dict(job.get("kwargs") or {})
+    call = job["call"]
+    dest = Path(job["dest"])
+    functions = {"export_png_sequence": export.export_png_sequence, "export_print": export.export_print,
+                 "export_layers": export.export_layers, "export_strip": export.export_strip, "export_epub": export.export_epub,
+                 "export_kindle": export.export_kindle, "export_webtoon": profiles.export_webtoon,
+                 "export_sns": profiles.export_sns, "export_pack": pack.export_pack, "export_psd_pages": psd.export_psd_pages,
+                 "export_psd": psd.export_psd}
+    if call == "run":
+        project = Path(job["book"]) if job.get("project", True) else None
+        return exporting.run(episode, project, kwargs.pop("key"), dest, **kwargs)
+    if call == "parse_pages":
+        return exporting.parse_pages(kwargs["text"], kwargs["count"])
+    if call == "subset":
+        from genko.headless import snapshot
+
+        return snapshot(exporting.subset(episode, kwargs["pages"]), full=True)
+    if call == "default_dpi":
+        return exporting.default_dpi(episode, kwargs["key"])
+    written = functions[call](episode, dest, **kwargs)
+    return [str(p) for p in written] if isinstance(written, list) else str(written)
+
+
+def export_cases(jobs_path: str, out: str) -> None:
+    """Python's exporters for each job of a JSON list ({"id", "book", "call", "dest", "kwargs"}: call is an exporter of
+    genko.export, profiles, pack or psd, called as call(episode, Path(dest), **kwargs); or "run" (app.exporting.run with
+    kwargs["key"] and the book as its project unless "project" is false), "parse_pages", "subset" (the snapshot of the
+    part), "default_dpi"): OUT (JSON) {id: {"result": what it returned (paths as str)} or {"error": [type, message]}}.
+    The files are where each job says; the tests compare them with the C++ build's."""
+    from genko import render
+
+    jobs = json.loads(Path(jobs_path).read_text(encoding="utf-8"))
+    results = {}
+    for job in jobs:
+        render._STROKE_CACHE.clear()
+        render._FRAME_MASKS.clear()
+        try:
+            results[job["id"]] = {"result": _export_call(job)}
+        except Exception as e:  # (Python's own error: the C++ build raises the same)
+            results[job["id"]] = {"error": [type(e).__name__, str(e)]}
+    Path(out).write_text(dumps(results), encoding="utf-8")
+
+
+def save_cases(out: str, seed: int, count: int) -> None:
+    """Pictures saved as the exports save them, by Pillow (PNG with dpi, an ICC profile and optimize; JPEG with quality,
+    optimize and a profile; TIFF compressed with LZW or Group 4, with dpi and a profile): OUT (JSON) {"icc": the
+    profile used (base64), "cases": [{"mode", "size", "pixels" (base64 of tobytes()), "format", "params", "bytes"}]}.
+    Pillow's encoders compress with the zlib, libjpeg-turbo and libtiff of its wheel; the C++ build must write the same
+    bytes."""
+    from PIL import Image, ImageCms, ImageDraw, ImageFilter
+
+    rng = random.Random(seed)
+    icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    cases = []
+
+    def picture(mode: str, size: tuple[int, int], noise: bool):
+        im = Image.new("RGBA", size, (255, 255, 255, rng.choice([0, 255])))
+        draw = ImageDraw.Draw(im)
+        for _ in range(rng.randrange(3, 60)):
+            draw.line([(rng.randrange(size[0]), rng.randrange(size[1])), (rng.randrange(size[0]), rng.randrange(size[1]))],
+                      fill=tuple(rng.randrange(256) for _ in range(4)), width=rng.randrange(1, 12))
+        if noise:  # (incompressible: the data runs over several IDAT chunks)
+            im = Image.frombytes("RGBA", size, bytes(rng.getrandbits(8) for _ in range(size[0] * size[1] * 4)))
+        elif rng.random() < 0.5:
+            im = im.filter(ImageFilter.GaussianBlur(rng.random() * 2))
+        return im.convert(mode)
+
+    plans = [("PNG", m) for m in ("1", "L", "LA", "RGB", "RGBA")] + [("JPEG", m) for m in ("L", "RGB")] + \
+            [("TIFF", m) for m in ("1", "L", "RGB", "CMYK")]
+    for n in range(count):
+        fmt, mode = plans[n % len(plans)]
+        noise = n % 17 == 3 and fmt == "PNG"
+        size = (rng.choice([1, 7, 64, 129, 300]), rng.choice([1, 5, 64, 200])) if not noise else (rng.choice([150, 260]), 200)
+        if n % 11 == 0:
+            size = (rng.choice([16500, 17000]), 3)  # (wider than MAXBLOCK / 4: bigger IDAT chunks)
+        im = picture(mode, size, noise)
+        params: dict = {}
+        if fmt == "PNG":
+            if rng.random() < 0.6:
+                d = rng.choice([72, 150, 350, 600, 1200])
+                params["dpi"] = [d, d]
+            if mode in ("RGB", "RGBA") and rng.random() < 0.5:
+                params["icc_profile"] = True
+            if rng.random() < 0.4:
+                params["optimize"] = True
+        elif fmt == "JPEG":
+            params["quality"] = rng.choice([85, 90, 92])
+            if rng.random() < 0.5:
+                params["optimize"] = True
+            if mode == "RGB" and rng.random() < 0.5:
+                params["icc_profile"] = True
+        else:
+            params["compression"] = "group4" if mode == "1" else "tiff_lzw"
+            d = rng.choice([150, 600])
+            params["dpi"] = [d, d]
+            if mode in ("RGB", "CMYK") and rng.random() < 0.6:
+                params["icc_profile"] = True
+        given = {k: (icc if k == "icc_profile" else tuple(v) if k == "dpi" else v) for k, v in params.items()}
+        buf = io.BytesIO()
+        im.save(buf, format=fmt, **given)
+        cases.append({"mode": mode, "size": list(im.size), "pixels": b64(im.tobytes()), "format": fmt, "params": params,
+                      "bytes": b64(buf.getvalue())})
+    Path(out).write_text(dumps({"icc": b64(icc), "cases": cases}), encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("make-export-books")
+    p.add_argument("out")
+    p = sub.add_parser("export-cases")
+    p.add_argument("jobs")
+    p.add_argument("out")
+    p = sub.add_parser("save-cases")
+    p.add_argument("out")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--count", type=int, default=60)
     p = sub.add_parser("unit-tables")
     p.add_argument("outdir")
     p = sub.add_parser("draw-cases")
@@ -2244,6 +2482,12 @@ def main(argv: list[str] | None = None) -> int:
         balloon_cases(args.out, args.seed, args.count)
     elif args.cmd == "make-books":
         make_books(args.out, args.seed, args.count)
+    elif args.cmd == "make-export-books":
+        make_export_books(args.out)
+    elif args.cmd == "export-cases":
+        export_cases(args.jobs, args.out)
+    elif args.cmd == "save-cases":
+        save_cases(args.out, args.seed, args.count)
     elif args.cmd == "render":
         if args.workers > 1:
             render_jobs_parallel(args.jobs, args.workers)

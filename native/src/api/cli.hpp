@@ -18,6 +18,11 @@ namespace genko::api {
 //                                                one page as PNG; {"ok": true, "path", "mode"}, or
 //                                                {"ok": false, "code": "not_yet_ported", "element", …} for a page with
 //                                                something this build does not draw yet
+//   genko export <dir> <out> [--format png|tiff|pdf|strip|psd|epub|pack|webtoon|sns|cmyk|layers|kindle|timelapse|animation]
+//                [--dpi D] [--color rgb|cmyk|gray] [--icc F] [--area paper|bleed|trim] [--screen-lpi L] [--screen-shape S]
+//                [--width W] [--max-height H] [--long-edge E] [--jpeg] [--spreads] [--fps F] [--seconds S] [--page N] [--json]
+//                                                the book written out (formats/export.hpp); the files' paths one a line,
+//                                                or {"ok": true, "count", "files"} with --json
 //   genko --version                              the versions of Genko and its libraries
 int run_cli(int argc, char** argv);
 

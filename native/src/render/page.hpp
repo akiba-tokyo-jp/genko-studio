@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <stop_token>
@@ -110,6 +111,27 @@ Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, con
                   bool skip_unported = false, bool bake_color = false);
 std::optional<Image> drawable_layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,
                   bool skip_unported = false, bool bake_color = false);
+
+// One layer of a page as the layered exports write it (Python's psd.page_layers): its name, its picture ("RGBA" of the
+// page's size) and, for a pixel layer, its settings (`settings`: opacity, blend, clip, and its mask, "L" of the page's
+// size, white shows).
+struct PageLayer {
+    std::string name;
+    Image image;
+    bool settings = false;
+    double opacity = 1.0;
+    std::string blend = "normal";
+    bool clip = false;
+    std::optional<Image> mask;
+};
+
+// psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer
+// (not the name and draft), the pen lines of the ink layer (3 px, as render._stroke draws them), the tones, the effect
+// lines, the panel borders, one layer for each placed line (its balloon and letters), the nombres. Each is given to
+// `each` as it is made (they are never all held). NotYetPorted("placed") for a placed picture (its art before the
+// monochrome finish is not drawn by this build yet). (A layer in precise colour, which Python does not have: its
+// 8-bit picture.)
+void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each);
 
 // Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
 // noise; 書き出しでのトーン化).

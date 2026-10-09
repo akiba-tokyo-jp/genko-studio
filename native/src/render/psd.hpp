@@ -10,8 +10,8 @@
 #include "render/image.hpp"
 
 // Photoshop files read as layers (Python's genko/psd.py: read_psd and its helpers), for import_psd. (ARCHITECTURE.md §1
-// puts PSD/PSB reading in formats/, which has no library yet: it sits in render next to the ABR reader, as it makes
-// render::Image pictures.) PSD (version 1)
+// puts PSD/PSB reading in formats/; it sits in render next to the ABR reader, as import_psd, an op of render's, reads with
+// it and it makes render::Image pictures. The PSD writer is formats/'s: formats/export.hpp.) PSD (version 1)
 // and PSB (version 2); grey, bitmap, indexed (as grey), duotone, RGB, CMYK and the other modes as psd.py reads them;
 // 1, 8, 16 and 32 bits; channels raw, PackBits, zip and zip with prediction. psd.py has its own reader (psd-tools is
 // only a test dependency of the Python version, and Pillow's PsdImagePlugin, which reads the merged picture alone, is
