@@ -18,6 +18,8 @@ void register_render_ops(core::OpRegistry& registry) {
     core::register_line_ops(registry, verify_style_picture);
     // set_page_spec and import_pages again, now able to move a paint layer's pixels and to read the other book
     render::register_bookpage_ops(registry);
+    // import_psd (fileops: a PSD or PSB read as layers, render/psd)
+    register_file_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

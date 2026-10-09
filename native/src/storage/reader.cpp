@@ -1073,6 +1073,7 @@ LoadResult load_parsed(const Json& payload, const core::ParseRepairs& repairs, c
     Reader reader(dir, options, result.report, repairs);
     result.document = reader.migrate(payload);
     result.document.read_only_reason = read_only_reason(result.report);
+    if (!dir.empty()) result.document.asset_dir = dir;  // (io.load_episode: episode.asset_dir = src)
     return result;
 }
 

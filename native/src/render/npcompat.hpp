@@ -41,6 +41,9 @@ float sinf(float x);
 float cosf(float x);
 float hypotf(float x, float y);
 float atan2f(float y, float x);
+// np.power of a float32 array and a float32 (psd._depth8's gamma): libm's powf, element by element (numpy 2.4 takes
+// its own SIMD way only with AVX512_SKX, which the reference's NPY_DISABLE_CPU_FEATURES leaves out).
+float powf(float x, float y);
 // np.hypot of float64 arrays (and of int64 ones, cast to float64): libm's hypot (balloons._fade_mask).
 double hypot(double x, double y);
 

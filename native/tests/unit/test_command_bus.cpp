@@ -363,7 +363,8 @@ private slots:
             QVERIFY2(all.find(name) != nullptr, name);
         }
         for (const char* name : {"add_tone", "set_tone", "delete_tone", "add_effect", "effect_to_layer", "add_figure",
-                                 "render_prims", "trace_prims", "camera_from_ruler", "set_stroke_width", "reshape_stroke", "lt_convert"}) {
+                                 "render_prims", "trace_prims", "camera_from_ruler", "set_stroke_width", "reshape_stroke", "lt_convert",
+                                 "import_psd"}) {
             QVERIFY2(core_ops.find(name) == nullptr, name);
             QVERIFY2(all.find(name) != nullptr, name);
         }
@@ -382,7 +383,7 @@ private slots:
             "put_raster", "filter_raster", "fill", "fill_area", "fill_enclosed",
             "fill_gaps", "flood_fill", "gradient_fill", "delete_area", "transform_area",
             "paste", "erase", "erase_raster", "set_stroke_width", "reshape_stroke", "lt_convert", "stamp_material",
-            "add_shape", "smudge", "liquify"};
+            "add_shape", "smudge", "liquify", "import_psd"};
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

@@ -997,6 +997,9 @@ void Session::job_done(const JobResult& r) {
             disk_redo_ = 0;
             auto copy = std::make_shared<core::Document>(*r.doc);
             copy->revision = r.revision;
+            // (the book's folder, where import_psd reads a relative path from: save_episode sets episode.asset_dir when
+            // it has none — a new book's first save; a book read has the folder it was read from)
+            if (!copy->asset_dir) copy->asset_dir = target;
             last_saved_ = QDateTime::currentDateTime();
             last_revision_ = r.revision;
             rebase_onto(copy, r.revision, 0, 0);

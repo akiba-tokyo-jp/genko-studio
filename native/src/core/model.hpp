@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <span>
@@ -331,6 +332,9 @@ struct Document {
     // first page is shown while the others are read). Such a book is never written (storage::project_payload_v4
     // refuses it), and an op batch may not reach these pages (CommandBus refuses it with "page_not_loaded").
     std::vector<PagePtr> deferred;
+    // (not saved) The book's folder, as Python's Episode.asset_dir: where the book was read from
+    // (storage::load_document), none for a book not on disk. import_psd reads a relative path from there.
+    std::optional<std::filesystem::path> asset_dir;
 
     const Page& page(std::size_t i) const { return *pages.at(i); }
     // pages[i] is one of `deferred` (its strokes and pictures are not read yet).

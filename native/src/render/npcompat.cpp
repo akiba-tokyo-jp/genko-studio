@@ -1,7 +1,7 @@
 // numpy's PCG64, SeedSequence, pairwise summation and float32 math (numpy 2.x: numpy/random/bit_generator.pyx,
 // numpy/random/src/pcg64, numpy/_core/src/umath/loops_utils.h.src, npy_math_internal.h.src).
 //
-// This file is compiled with -fno-builtin: sinf, cosf, hypotf and atan2f are called in libm as numpy calls them.
+// This file is compiled with -fno-builtin: sinf, cosf, hypotf, atan2f and powf are called in libm as numpy calls them.
 
 #include "render/npcompat.hpp"
 
@@ -176,6 +176,7 @@ float sinf(float x) { return ::sinf(x); }
 float cosf(float x) { return ::cosf(x); }
 float hypotf(float x, float y) { return ::hypotf(x, y); }
 float atan2f(float y, float x) { return ::atan2f(y, x); }
+float powf(float x, float y) { return ::powf(x, y); }
 double hypot(double x, double y) { return ::hypot(x, y); }
 
 float remainder(float a, float b) {

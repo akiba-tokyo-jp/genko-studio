@@ -29,6 +29,7 @@ genko_library(genko_render
     color_edit.cpp
     color_filters.cpp
     abr.cpp
+    psd.cpp
     movie.cpp
     anim.cpp
     timelapse.cpp
@@ -49,8 +50,8 @@ genko_library(genko_render
   PUBLIC_DEPS genko_core Qt6::Core
   PRIVATE_DEPS genko_storage pillow_imaging PNG::PNG JPEG::JPEG ZLIB::ZLIB Freetype::Freetype ${GENKO_WEBP} ${GENKO_LCMS2})
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
-# (numpy's float32 sinf, cosf, hypotf, atan2f: called in libm as numpy calls them. MSVC: /fp:precise, with which these
-# have no intrinsic forms)
+# (numpy's float32 sinf, cosf, hypotf, atan2f, powf: called in libm as numpy calls them. MSVC: /fp:precise, with which
+# these have no intrinsic forms)
 if(NOT MSVC)
   set_source_files_properties(npcompat.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
 endif()
@@ -63,4 +64,5 @@ genko_library(genko_render_ops
     ops_tones.cpp
     ops_effects.cpp
     ops_3d.cpp
+    import_psd.cpp
   PUBLIC_DEPS genko_render genko_core Qt6::Core)

@@ -19,7 +19,9 @@ Commands (JSON is UTF-8 without escapes):
                                        "dump", a folder: the layers' PNGs after each step written there, see
                                        _png_pixels) |
                                        {"op": "add_adjust_layers", "book", "dest", "layers"} (correction layers of
-                                       any filter put on pages by hand: add_adjust_layers_job)
+                                       any filter put on pages by hand: add_adjust_layers_job) |
+                                       {"op": "psd_reads", "reads": [{"file", "cut"?}], "out"} (psd.read_psd of each
+                                       file, or of its first `cut` bytes: psd_reads_job)
   restore BOOK --actor A [--redo] [--force]
                                        journal.restore under ProjectLock, as `genko undo`/`redo` does: the reply (or
                                        {"ok": false, "error"}) on stdout
@@ -34,6 +36,8 @@ Commands (JSON is UTF-8 without escapes):
   make-pagesbook DEST OTHER            the v3 books of the book and page op contract tests (native/tests/contract/
                                        book_cases.json): the op book with what set_page_spec moves besides, and a
                                        book to take pages from (see make_pagesbook)
+  make-psds CASES OUT                  the PSD and PSB files of a case file's "files" (native/tests/contract/
+                                       psd_cases.json) written into OUT as <name>.psd (psd_bytes)
   make-drawbook DEST                   the v3 book test_contract_drawn_by_ops draws lines on (nothing the C++ build
                                        does not draw yet; ids counted)
   make-sequences OUT --books DIR --seed N --count K
@@ -391,6 +395,8 @@ def run_batch(jobs_path: str) -> None:
             apply_job(job)
         elif job["op"] == "steps":
             steps_job(job)
+        elif job["op"] == "psd_reads":
+            psd_reads_job(job)
         else:
             raise SystemExit(f"unknown job {job['op']!r}")
 
@@ -2512,6 +2518,290 @@ def colour_grids(config: str, out: str, rgbs: str) -> None:
     Path(out).write_text(json.dumps(results, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+# --- PSD and PSB files for import_psd (native/tests/contract/psd_cases.json) -----------------------------------------
+
+_PSD_LONG_KEYS = {"LMsk", "Lr16", "Lr32", "Layr", "Mt16", "Mt32", "Mtrn", "Alph", "FMsk", "lnk2", "FEid", "FXid", "PxSD"}
+
+
+def _psd_rowbytes(width: int, depth: int) -> int:
+    return (width * depth + 7) // 8 if depth == 1 else width * max(1, depth // 8)
+
+
+def _psd_samples(seed: int, width: int, height: int, depth: int, fill=None) -> bytes:
+    """One channel's samples (rows of the depth's bytes, big-endian): `fill` everywhere, or a pattern from `seed` with
+    runs (for PackBits' repeats) and noise (for its literals); 32-bit floats reach below 0 and above 1, with NaN and the
+    infinities now and then."""
+    if width <= 0 or height <= 0:
+        return b""
+    rng = random.Random(seed)
+    out = bytearray()
+    if depth == 1:
+        rowbytes = _psd_rowbytes(width, 1)
+        for y in range(height):
+            for x in range(rowbytes):
+                out.append(fill if fill is not None else (0xFF if (x + y + seed) % 5 == 0 else rng.randrange(256) if y % 3 else 0))
+        return bytes(out)
+    bpp = max(1, depth // 8)
+    for y in range(height):
+        for x in range(width):
+            if fill is not None:
+                v = fill
+            elif (y + seed) % 3 == 0:
+                v = (x // 4) * 37 + y * 11 + seed * 5  # (runs of four)
+            else:
+                v = x * 9 + y * 5 + seed * 17 + rng.randrange(16)
+            if depth == 32:
+                if fill is not None:
+                    f = float(fill)
+                else:
+                    r = rng.random()
+                    f = float("nan") if r < 0.02 else float("inf") if r < 0.03 else float("-inf") if r < 0.04 else (v % 61) / 50.0 - 0.1
+                out += struct.pack(">f", f)
+            elif depth == 16:
+                out += struct.pack(">H", fill if fill is not None else (v * 257 + rng.randrange(256)) & 0xFFFF)
+            else:
+                out += (v & 0xFF).to_bytes(1, "big") * bpp
+    return bytes(out)
+
+
+def _packbits(row: bytes) -> bytes:
+    out = bytearray()
+    i, n = 0, len(row)
+    while i < n:
+        run = 1
+        while i + run < n and row[i + run] == row[i] and run < 128:
+            run += 1
+        if run >= 3:
+            out += bytes([257 - run, row[i]])
+            i += run
+            continue
+        start = i
+        while i < n and i - start < 128 and not (i + 2 < n and row[i] == row[i + 1] == row[i + 2]):
+            i += 1
+        out += bytes([i - start - 1]) + row[start:i]
+    return bytes(out)
+
+
+def _psd_compressed(raw: bytes, comp: int, width: int, height: int, depth: int, psb: bool) -> bytes:
+    """A channel's data as the file keeps it: its compression (2 bytes), then raw rows (0), PackBits rows after their
+    byte counts (1), zlib (2), or zlib of each row's differences from the sample before (3, as psd.py undoes them)."""
+    import zlib
+
+    rowbytes = _psd_rowbytes(width, depth)
+    head = struct.pack(">H", comp)
+    if comp == 1:
+        rows = [_packbits(raw[y * rowbytes:(y + 1) * rowbytes]) for y in range(max(0, height))]
+        return head + b"".join(struct.pack(">I" if psb else ">H", len(r)) for r in rows) + b"".join(rows)
+    if comp == 2:
+        return head + zlib.compress(raw)
+    if comp == 3:
+        bpp = max(1, depth // 8)
+        mod = 1 << (8 * bpp)
+        out = bytearray()
+        for y in range(max(0, height)):
+            row = raw[y * rowbytes:(y + 1) * rowbytes]
+            prev = 0
+            for x in range(0, len(row), bpp):
+                v = int.from_bytes(row[x:x + bpp], "big")
+                out += ((v - prev) % mod).to_bytes(bpp, "big")
+                prev = v
+        return head + zlib.compress(bytes(out))
+    return head + raw
+
+
+def _psd_default_ids(mode: int) -> list:
+    return [-1, 0, 1, 2, 3] if mode == 4 else [-1, 0] if mode in (0, 1, 2, 8) else [-1, 0, 1, 2]
+
+
+def _psd_hex(value) -> bytes:
+    return bytes.fromhex(value) if isinstance(value, str) else bytes(value)
+
+
+def psd_bytes(spec: dict) -> bytes:
+    """A PSD (version 1) or PSB (2) file from a spec (psd_cases.json's "files"): the header ("mode", "depth", "size",
+    "channels"), colour mode data, resources (a resolution by default), the layers from the bottom ("layers": each its
+    "box" [left, top, right, bottom], "channels" [{"id", "comp", "seed", "fill", "len", "hex", "hex_repeat"}], "name" (Pascal, Latin-1)
+    or "name_hex", "luni", "blend", "opacity", "clip", "flags", "sig", "mask" {"box", "default", "flags", "len",
+    "size"}, "ranges", "section", "text", "adjust", "blocks" [[sig, tag, hex]], "extra_len", "repeat": the record that many
+    times), the merged picture
+    ("merged": {"comp", "seed", "planes", "hex"} or null for none) and the file's end ("truncate": a length, or
+    [mark, offset] from "records", "channel_data" or "merged"; "patch": [[offset or [mark, offset], hex]]). Lengths can be
+    given wrong ("count", "li_len", "lm_len", "res_len", "colour_len", a channel's "len", a mask's "len", "extra_len").
+    "hex_only": the whole file, byte for byte."""
+    if "hex_only" in spec:  # (a file given byte for byte)
+        return _psd_hex(spec["hex_only"])
+    version = int(spec.get("version", 1))
+    psb = version == 2
+    mode = int(spec.get("mode", 3))
+    depth = int(spec.get("depth", 8))
+    width, height = spec.get("size", [16, 12])
+    colour = 4 if mode == 4 else 3 if mode in (3, 7, 9) else 1
+    merged = spec.get("merged", {})
+    planes = merged.get("planes", colour) if isinstance(merged, dict) else colour
+    nchan = int(spec.get("channels", planes))
+    length = (lambda n: struct.pack(">Q", n)) if psb else (lambda n: struct.pack(">I", n))
+    marks: dict = {}
+    out = bytearray(b"8BPS" + struct.pack(">H", version) + b"\x00" * 6)
+    out += struct.pack(">HIIHH", nchan, height, width, depth, mode)
+    colour_data = _psd_hex(spec.get("colour_data", ""))
+    out += struct.pack(">I", spec.get("colour_len", len(colour_data))) + colour_data
+    if "resources_hex" in spec:
+        resources = _psd_hex(spec["resources_hex"])
+    else:
+        resources = b""
+        for rid, body in spec.get("resources", [[1005, struct.pack(">IHHIHH", 72 << 16, 1, 1, 72 << 16, 1, 1).hex()]]):
+            data = _psd_hex(body)
+            resources += b"8BIM" + struct.pack(">HH", rid, 0) + struct.pack(">I", len(data)) + data + b"\x00" * (len(data) % 2)
+    out += struct.pack(">I", spec.get("res_len", len(resources))) + resources
+    layers = spec.get("layers")
+    if layers is None and "layer_section_hex" not in spec:
+        out += length(spec.get("lm_len", 0))
+    elif "layer_section_hex" in spec:
+        out += _psd_hex(spec["layer_section_hex"])
+    else:
+        records = bytearray()
+        data = bytearray()
+        layers = [layer for layer in layers for _ in range(int(layer.get("repeat", 1)))]
+        for layer in layers:
+            left, top, right, bottom = layer.get("box", [0, 0, width, height])
+            w, h = right - left, bottom - top
+            chans = []
+            for n, ch in enumerate(layer.get("channels") or [{"id": cid} for cid in _psd_default_ids(mode)]):
+                cid = int(ch.get("id", n))
+                cw, chh = w, h
+                if cid == -2 and "mask" in layer:
+                    ml, mt, mr, mb = layer["mask"].get("box", [left, top, right, bottom])
+                    cw, chh = mr - ml, mb - mt
+                if "hex" in ch:
+                    payload = _psd_hex(ch["hex"])
+                elif "hex_repeat" in ch:  # ([head, unit, count]: the head, then the unit `count` times)
+                    head, unit, times = ch["hex_repeat"]
+                    payload = _psd_hex(head) + _psd_hex(unit) * int(times)
+                else:
+                    fill = ch.get("fill")  # (an opaque alpha unless it is given or seeded)
+                    if fill is None and cid == -1 and "seed" not in ch:
+                        fill = {16: 0xFFFF, 32: 1.0}.get(depth, 255)
+                    raw = _psd_samples(int(ch.get("seed", 100 * len(records) + n + 1)), cw, chh, depth, fill)
+                    payload = _psd_compressed(raw, int(ch.get("comp", layer.get("comp", spec.get("comp", 1)))), cw, chh, depth, psb)
+                chans.append((cid, int(ch.get("len", len(payload))), payload))
+            records += struct.pack(">iiii", top, left, bottom, right) + struct.pack(">H", len(chans))
+            for cid, size, _ in chans:
+                records += struct.pack(">h", cid) + length(size)
+            records += layer.get("sig", "8BIM").encode("latin-1") + layer.get("blend", "norm").encode("latin-1")
+            records += bytes([int(layer.get("opacity", 255)), int(layer.get("clip", 0)), int(layer.get("flags", 0)), 0])
+            extra = bytearray()
+            if "mask" in layer:
+                m = layer["mask"]
+                ml, mt, mr, mb = m.get("box", [left, top, right, bottom])
+                body = struct.pack(">iiii", mt, ml, mb, mr) + bytes([int(m.get("default", 0)), int(m.get("flags", 0))])
+                body += b"\x00" * max(0, int(m.get("size", 20)) - len(body))
+                extra += struct.pack(">I", int(m.get("len", len(body)))) + body
+            else:
+                extra += struct.pack(">I", 0)
+            ranges = _psd_hex(layer.get("ranges", ""))
+            extra += struct.pack(">I", len(ranges)) + ranges
+            name = _psd_hex(layer["name_hex"]) if "name_hex" in layer else str(layer.get("name", "")).encode("latin-1")
+            pascal = bytes([len(name)]) + name
+            extra += pascal + b"\x00" * ((4 - len(pascal) % 4) % 4)
+            blocks = [list(b) for b in layer.get("blocks", [])]
+            if "luni" in layer:
+                text = str(layer["luni"]).encode("utf-16-be")
+                blocks.insert(0, ["8BIM", "luni", (struct.pack(">I", len(text) // 2) + text).hex()])
+            if "section" in layer:
+                blocks.append(["8BIM", layer.get("section_key", "lsct"), struct.pack(">I", int(layer["section"])).hex()])
+            if layer.get("text"):
+                blocks.append(["8BIM", "TySh", "0001"])
+            if layer.get("adjust"):
+                blocks.append(["8BIM", layer["adjust"], "00020000"])
+            for sig, tag, body_hex in blocks:
+                body = _psd_hex(body_hex)
+                size = struct.pack(">Q", len(body)) if psb and tag in _PSD_LONG_KEYS else struct.pack(">I", len(body))
+                extra += sig.encode("latin-1") + tag.encode("latin-1") + size + body + b"\x00" * (len(body) % 2 if layer.get("pad", True) else 0)
+            records += struct.pack(">I", int(layer.get("extra_len", len(extra)))) + extra
+            for _, _, payload in chans:
+                data += payload
+        info = struct.pack(">h", int(spec.get("count", len(layers))))
+        marks["records"] = len(out) + (16 if psb else 8) + 2
+        marks["channel_data"] = marks["records"] + len(records)
+        info += records + data
+        if len(info) % 2:
+            info += b"\x00"
+        section = length(int(spec.get("li_len", len(info)))) + info + _psd_hex(spec.get("global_mask", "00000000"))
+        out += length(int(spec.get("lm_len", len(section)))) + section
+    marks["merged"] = len(out)
+    if merged is not None and "hex" in merged:  # (the merged picture's data given byte for byte)
+        out += struct.pack(">H", int(merged.get("comp", 1))) + _psd_hex(merged["hex"])
+    elif merged is not None:
+        comp = int(merged.get("comp", 1))
+        raws = [_psd_samples(int(merged.get("seed", 7000)) + c, width, height, depth) for c in range(planes)]
+        if comp == 1:
+            rowbytes = _psd_rowbytes(width, depth)
+            rows = [_packbits(raw[y * rowbytes:(y + 1) * rowbytes]) for raw in raws for y in range(height)]
+            out += struct.pack(">H", 1) + b"".join(struct.pack(">I" if psb else ">H", len(r)) for r in rows) + b"".join(rows)
+        elif comp == 2:
+            import zlib
+
+            out += struct.pack(">H", 2) + zlib.compress(b"".join(raws))
+        else:
+            out += struct.pack(">H", comp) + b"".join(raws)
+    out += _psd_hex(spec.get("append", ""))
+
+    def at(where) -> int:
+        return where if isinstance(where, int) else marks[where[0]] + int(where[1])
+
+    for where, patch in spec.get("patch", []):
+        start = at(where)
+        out[start:start + len(_psd_hex(patch))] = _psd_hex(patch)
+    if "truncate" in spec:
+        del out[at(spec["truncate"]):]
+    return bytes(out)
+
+
+def make_psds(specs_path: str, out: str) -> None:
+    """Each PSD of a case file's "files" ({name: spec}) written as OUT/<name>.psd (psd_bytes)."""
+    files = json.loads(Path(specs_path).read_text(encoding="utf-8"))["files"]
+    folder = Path(out)
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, spec in files.items():
+        (folder / f"{name}.psd").write_bytes(psd_bytes(spec))
+
+
+def _image_digest(image) -> str | None:
+    """The mode, size and pixels of a PIL image ("<mode>|<w>x<h>|" and its bytes, sha256), or None."""
+    import hashlib
+
+    if image is None:
+        return None
+    h = hashlib.sha256(f"{image.mode}|{image.size[0]}x{image.size[1]}|".encode("utf-8"))
+    h.update(image.tobytes())
+    return h.hexdigest()
+
+
+def psd_reads_job(job: dict) -> None:
+    """psd.read_psd of each of job["reads"] ({"file", "cut"?: the file's first bytes only}): the PSDFile (its layers with
+    their pictures and masks as _image_digest, the merged picture, the size, dpi, mode and skipped layers), or the
+    exception it raised ({"error": its type's name, "message"})."""
+    from genko import psd
+
+    records = []
+    for item in job["reads"]:
+        data = Path(item["file"]).read_bytes()
+        if "cut" in item:
+            data = data[:int(item["cut"])]
+        try:
+            doc = psd.read_psd(data)
+        except Exception as exc:  # (what fileops.import_psd catches, and what it lets through)
+            records.append({"error": type(exc).__name__, "message": str(exc)})
+            continue
+        records.append({"size": list(doc.size), "dpi": doc.dpi, "mode": doc.mode, "skipped": doc.skipped,
+                        "merged": _image_digest(doc.merged),
+                        "layers": [{"name": item.name, "folder": item.folder, "parent": item.parent, "opacity": item.opacity,
+                                    "visible": item.visible, "blend": item.blend, "clip": item.clip, "kind": item.kind,
+                                    "image": _image_digest(item.image), "mask": _image_digest(item.mask)}
+                                   for item in doc.layers]})
+    Path(job["out"]).write_text(dumps(records), encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -2550,6 +2840,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("make-pagesbook")
     p.add_argument("out")
     p.add_argument("other")
+    p = sub.add_parser("make-psds")
+    p.add_argument("specs")
+    p.add_argument("out")
     p = sub.add_parser("make-sequences")
     p.add_argument("out")
     p.add_argument("--books", required=True)
@@ -2615,6 +2908,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "make-pagesbook":
         make_pagesbook(args.out, args.other)
+        return 0
+    if args.cmd == "make-psds":
+        make_psds(args.specs, args.out)
         return 0
     if args.cmd == "make-drawbook":
         make_drawbook(args.out)

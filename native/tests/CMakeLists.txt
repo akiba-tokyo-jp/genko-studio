@@ -135,6 +135,11 @@ genko_test(test_contract_lines SOURCES contract/test_contract_lines.cpp contract
 # no asset file, as Python's.
 genko_test(test_contract_book SOURCES contract/test_contract_book.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# import_psd (M4②b): psd.read_psd and the op against Python's on the PSD and PSB files of psd_cases.json (every file,
+# a few cut after every byte, all of them changed at a few bytes; each step's reply, snapshot and payload, the layers'
+# pixels, the book read back), and hostile files refused without the memory Python would take.
+genko_test(test_contract_psd SOURCES contract/test_contract_psd.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).

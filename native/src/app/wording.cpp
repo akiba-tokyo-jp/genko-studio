@@ -229,8 +229,16 @@ const std::vector<Rule>& rules() {
             return QStringLiteral("PSD を読み込めません（%1）").arg(inner(m.captured(1)));
         }));
         r.push_back(rule("the PSD file is cut short", "PSD のファイルが途中で切れています"));
+        // (this build's own refusals of a PSD too large to read: render/psd.hpp)
+        r.push_back(rule("a layer is too large to read", "レイヤーが大きすぎて読めません"));
+        r.push_back(rule("the layers are too large to read", "レイヤーの絵が多すぎて読めません"));
+        r.push_back(rule("the picture is too large to read", "絵が大きすぎて読めません"));
+        r.push_back(rule(R"(the page layer is too large \(.*\))", "用紙の大きさに対して PSD の絵が大きすぎて、レイヤーにできません"));
+        r.push_back(rule(R"(the picture is too large \(\d+×\d+ pixels.*\))", "PSD の絵が大きすぎて、レイヤーにできません"));
+        r.push_back(rule(R"(the layer mask is too large \(.*\))", "用紙が大きすぎて、PSD のレイヤーマスクを作れません"));
         r.push_back(rule("the PSD has no pictures to read", "PSD に読み込める絵がありません"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
+        r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         r.push_back(rule(R"(the file cannot be read \((.*)\))", "ファイルを読み込めません"));
         r.push_back(rule("the profile is not a CMYK printing profile", "CMYK の印刷用のカラープロファイルではありません"));
         r.push_back(rule("the recorded pictures are missing", "記録した絵が見つかりません"));
