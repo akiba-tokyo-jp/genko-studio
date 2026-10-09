@@ -27,7 +27,7 @@ class QSpinBox;
 // colour; the fill and eraser settings. The settings live in the app's settings and travel with every line as op
 // fields, so a line keeps the look it was drawn with. And the dialog that makes one's own brush from another (or
 // opens one of one's own again): its size and pressure, smoothness, colour and texture, tip and pattern, with a sample
-// line drawn as it changes.
+// line drawn as it changes; and (this build) the paper under its lines (紙質: BRUSH-01).
 
 namespace genko::app {
 
@@ -148,9 +148,31 @@ public:
     QSpinBox* stretch = nullptr;
     QComboBox* aa = nullptr;
     std::string tip_png;
+    // 紙質 (BRUSH-01): the paper under the lines, its picture (taken in: paper_asset, the grey picture's ref) and settings,
+    // and a patch of fully inked paper as the brush lays it (paper_preview)
+    QCheckBox* paper_on = nullptr;
+    QPushButton* paper_picture = nullptr;
+    QLabel* paper_preview = nullptr;
+    QLabel* paper_about = nullptr;
+    QSpinBox* paper_density = nullptr;
+    QSpinBox* paper_scale = nullptr;
+    QSpinBox* paper_rotation = nullptr;
+    QCheckBox* paper_flip_x = nullptr;
+    QCheckBox* paper_flip_y = nullptr;
+    QCheckBox* paper_invert = nullptr;
+    QComboBox* paper_blend = nullptr;
+    QComboBox* paper_coords = nullptr;
+    QComboBox* paper_seam = nullptr;
+    QSpinBox* paper_seed = nullptr;
+    std::string paper_asset;
+    // Take a picture file in as the paper (true when it could be; otherwise why not, in Japanese: paper_error).
+    bool take_paper(const QString& path);
+    QString paper_error;
 
 private:
     void pick_tip();
+    void pick_paper();
+    void show_paper();
     std::string base_;
 };
 

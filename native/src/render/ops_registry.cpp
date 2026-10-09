@@ -4,6 +4,7 @@
 #include "render/bookpages.hpp"
 #include "render/color_edit.hpp"
 #include "render/ops_3d.hpp"
+#include "render/paper.hpp"
 #include "render/raster_ops.hpp"
 
 namespace genko::render {
@@ -20,6 +21,14 @@ void register_render_ops(core::OpRegistry& registry) {
     render::register_bookpage_ops(registry);
     // import_psd (fileops: a PSD or PSB read as layers, render/psd)
     register_file_ops(registry);
+    // define_brush again, able to take a paper's picture in (BRUSH-01, render/paper)
+    core::register_define_brush(registry, [](std::string_view file) {
+        try {
+            return paper::take_in(file);
+        } catch (const core::Error& error) {
+            throw core::OpError(error.what());
+        }
+    });
 }
 
 const core::OpRegistry& ops_registry() {

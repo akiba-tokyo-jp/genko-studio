@@ -30,6 +30,7 @@
 #include "render/covers.hpp"
 #include "render/effects.hpp"
 #include "render/page_internal.hpp"
+#include "render/paper.hpp"
 #include "render/png.hpp"
 #include "render/prims.hpp"
 #include "render/text/balloons.hpp"
@@ -448,6 +449,7 @@ struct StrokeSet {
 std::optional<Image> draw_strokes(const Ctx& ctx, const Layer& layer, const StrokeSet& set, const Box& area,
                                   const Image* panel_mask, const Image* raster, bool rough) {
     const bool guide = guide_role(layer.role);
+    if (ctx.episode != nullptr) paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
     if (ctx.dpi <= kQuickDpi || rough) {
         return clipped(layer, quick_strokes(ctx, set.strokes, set.patches, area, guide), panel_mask, raster);
     }
@@ -881,6 +883,7 @@ void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, co
     if (layer.mask || layer.effect || layer.screen || layer.color || layer.panel_each || !layer.patches.empty() || layer.raster_png)
         throw NotYetPorted("precise stroke layer style");
     ColorCanvas own(transparent(area));
+    if (ctx.episode != nullptr) paper::keep_all(ctx.episode->papers);  // (BRUSH-01: its brushes' papers)
     for (const auto& stroke : layer.strokes->items) {
         check_cancel(ctx);
         const auto brush=brushes::brush(stroke->kind);

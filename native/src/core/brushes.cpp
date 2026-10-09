@@ -1,7 +1,10 @@
 #include "core/brushes.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <tuple>
 #include <utility>
 
@@ -215,6 +218,39 @@ std::vector<std::pair<char32_t, std::size_t>> code_points(const std::string& s) 
     return out;
 }
 
+// BRUSH-01: "sha256:" and 64 lowercase hex digits (storage::AssetStore::is_ref, which core cannot see).
+bool paper_ref(const std::string& ref) {
+    if (ref.size() != 71 || ref.compare(0, 7, "sha256:") != 0) return false;
+    return std::all_of(ref.begin() + 7, ref.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+
+// A paper's number: finite, an int or a float (not a bool), in its range; its default when it is not given.
+double paper_number(const Json& data, const char* name, double fallback, double lo, double hi) {
+    const Json* value = get(data, name);
+    if (value == nullptr) return fallback;
+    const double v = value->is_number() ? value->get<double>() : std::nan("");
+    if (!(std::isfinite(v) && lo <= v && v <= hi)) {
+        throw PyValueError(std::string("paper ") + name + " must be between " + py_format_g(lo) + " and " + py_format_g(hi));
+    }
+    return v;
+}
+
+bool paper_flag(const Json& data, const char* name, bool fallback) {
+    const Json* value = get(data, name);
+    if (value == nullptr) return fallback;
+    if (!value->is_boolean()) throw PyValueError(std::string("paper ") + name + " must be true or false");
+    return value->get<bool>();
+}
+
+std::string paper_choice(const Json& data, const char* name, const std::string& fallback, const char* a, const char* b) {
+    const Json* value = get(data, name);
+    if (value == nullptr) return fallback;
+    if (!(value->is_string() && (*value == a || *value == b))) {
+        throw PyValueError(std::string("paper ") + name + " must be " + a + " or " + b);
+    }
+    return value->get<std::string>();
+}
+
 // str(label).strip()[:40]
 std::string clean_label(const std::string& text) {
     const auto cps = code_points(text);
@@ -230,6 +266,71 @@ std::string clean_label(const std::string& text) {
 }
 
 }  // namespace
+
+Json paper_to_json(const Paper& paper) {
+    Json out = Json::object();
+    out["asset"] = paper.asset;
+    out["density"] = paper.density;
+    out["scale"] = paper.scale;
+    out["rotation"] = paper.rotation;
+    out["flip_x"] = paper.flip_x;
+    out["flip_y"] = paper.flip_y;
+    out["invert"] = paper.invert;
+    out["blend"] = paper.blend;
+    out["coords"] = paper.coords;
+    out["seam"] = paper.seam;
+    out["seed"] = paper.seed;
+    return out;
+}
+
+Paper paper_from_json(const Json& data) {
+    if (!data.is_object()) throw PyValueError("paper must be an object or null");
+    static const char* const kKeys[] = {"asset", "density", "scale", "rotation", "flip_x", "flip_y", "invert", "blend", "coords", "seam", "seed"};
+    for (const auto& [key, value] : data.items()) {
+        if (std::none_of(std::begin(kKeys), std::end(kKeys), [&](const char* k) { return key == k; })) {
+            throw PyValueError("paper has an unknown setting: " + key);
+        }
+    }
+    Paper out;
+    const Json* asset = get(data, "asset");
+    if (asset == nullptr || !asset->is_string() || !paper_ref(asset->get_ref<const std::string&>())) {
+        throw PyValueError("paper asset must be an asset ref (sha256:<64 hex>)");
+    }
+    out.asset = asset->get<std::string>();
+    out.density = paper_number(data, "density", out.density, 0.0, 1.0);
+    out.scale = paper_number(data, "scale", out.scale, 0.1, 10.0);
+    out.rotation = paper_number(data, "rotation", out.rotation, -360.0, 360.0);
+    out.flip_x = paper_flag(data, "flip_x", out.flip_x);
+    out.flip_y = paper_flag(data, "flip_y", out.flip_y);
+    out.invert = paper_flag(data, "invert", out.invert);
+    out.blend = paper_choice(data, "blend", out.blend, "multiply", "subtract");
+    out.coords = paper_choice(data, "coords", out.coords, "paper", "stroke");
+    out.seam = paper_choice(data, "seam", out.seam, "repeat", "mirror");
+    if (const Json* seed = get(data, "seed")) {
+        const bool whole = seed->is_number_integer() &&
+                           (seed->is_number_unsigned() ? seed->get<std::uint64_t>() <= static_cast<std::uint64_t>(kPaperMaxSeed)
+                                                       : seed->get<std::int64_t>() >= 0 && seed->get<std::int64_t>() <= kPaperMaxSeed);
+        if (!whole) throw PyValueError("paper seed must be a whole number between 0 and " + std::to_string(kPaperMaxSeed));
+        out.seed = seed->get<std::int64_t>();
+    }
+    return out;
+}
+
+std::vector<std::string> paper_refs(const Json& brush_custom) {
+    std::vector<std::string> out;
+    if (!brush_custom.is_object()) return out;
+    for (const auto& [key, brush] : brush_custom.items()) {
+        const Json* paper = get(brush, "paper");
+        if (paper == nullptr || paper->is_null()) continue;
+        try {
+            const std::string ref = paper_from_json(*paper).asset;
+            if (std::find(out.begin(), out.end(), ref) == out.end()) out.push_back(ref);
+        } catch (const PyValueError&) {
+            // (the reader reports it)
+        }
+    }
+    return out;
+}
 
 std::span<const Brush> builtin_brushes() {
     static const std::vector<Brush> brushes = make_builtins();
@@ -278,6 +379,7 @@ Json brush_to_dict(const Brush& b) {
         const Json theirs = j3_value(plain, key);
         if (mine != theirs) out[key] = mine;
     }
+    if (b.paper) out["paper"] = paper_to_json(*b.paper);  // (BRUSH-01: only a brush with one)
     return out;
 }
 
@@ -296,6 +398,7 @@ Brush brush_from_dict(std::string_view key, const Json& data, const std::optiona
     for (const char* k : kJ3Keys) merged[k] = j3_value(plain, k);
     const Json start = brush_to_dict(start_brush);
     for (const auto& [k, v] : start.items()) merged[k] = v;
+    if (!merged.contains("paper")) merged["paper"] = nullptr;  // (BRUSH-01: the base's paper, or none)
     if (data.is_object()) {
         for (const auto& [k, v] : data.items()) {
             if (merged.contains(k)) merged[k] = v;
@@ -363,6 +466,7 @@ Brush brush_from_dict(std::string_view key, const Json& data, const std::optiona
     out.stamp_size = to_float(merged["stamp_size"]);
     out.mix = to_float(merged["mix"]);
     out.stretch = to_float(merged["stretch"]);
+    if (!merged["paper"].is_null()) out.paper = paper_from_json(merged["paper"]);
     return out;
 }
 

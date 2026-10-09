@@ -90,6 +90,29 @@ const std::vector<Rule>& rules() {
             return QStringLiteral("ブラシの%1は %2〜%3 の間で決めます").arg(names.value(m.captured(1), m.captured(1)), m.captured(2), m.captured(3));
         }));
         r.push_back(rule("a brush needs a name", "ブラシに名前を付けます"));
+        // 紙質 (BRUSH-01: define_brush's paper, render/paper.hpp)
+        r.push_back(rule(R"(the paper's picture cannot be read.*)", "紙質の画像を読めません（PNG・JPEG・BMP・GIF の画像を選んでください。壊れた画像は読めません）"));
+        r.push_back(rule(R"(this build does not read that kind of picture.*)",
+                         "この版の Genko では読めない形式の画像です（紙質は PNG・JPEG・BMP・GIF で読み込みます）"));
+        r.push_back(rule(R"(the paper's picture is too large \(at most (\d+) pixels a side\))", "紙質の画像が大きすぎます（縦横 \\1 画素まで）"));
+        r.push_back(rule(R"(the paper's picture file is too large.*)", "紙質の画像のファイルが大きすぎます（64 MB まで）"));
+        r.push_back(rule("the paper's picture has no pixels", "紙質の画像に画素がありません"));
+        r.push_back(rule(R"(the book has no paper picture .*)", "この原稿には、その紙質の画像がありません（画像を読み込み直してください）"));
+        r.push_back(rule(R"(a paper needs its picture.*)", "紙質には画像が要ります（png か asset で指定します）"));
+        r.push_back(rule(R"(a paper takes its picture once.*)", "紙質の画像は png か asset のどちらか一つで指定します"));
+        r.push_back(rule(R"(paper (density|scale|rotation) must be between (\S+) and (\S+))", [](const QRegularExpressionMatch& m) {
+            static const QHash<QString, QString> names = {{"density", "濃さ"}, {"scale", "倍率"}, {"rotation", "回転"}};
+            return QStringLiteral("紙質の%1は %2〜%3 の間で決めます").arg(names.value(m.captured(1)), m.captured(2), m.captured(3));
+        }));
+        r.push_back(rule("paper blend must be multiply or subtract", "紙質の合成は乗算（multiply）か減算（subtract）です"));
+        r.push_back(rule("paper coords must be paper or stroke", "紙目の位置は紙面に固定（paper）か線ごと（stroke）です"));
+        r.push_back(rule("paper seam must be repeat or mirror", "紙質の継ぎ目は繰り返し（repeat）か折り返し（mirror）です"));
+        r.push_back(rule("paper (flip_x|flip_y|invert) must be true or false", "紙質の反転・濃淡の反転は true か false で決めます"));
+        r.push_back(rule(R"(paper seed must be a whole number between 0 and (\d+))", "紙質の乱数の種は 0〜\\1 の整数で決めます"));
+        r.push_back(rule(R"(paper has an unknown setting: (.*))", "紙質に知らない設定があります（\\1）"));
+        r.push_back(rule(R"(paper asset must be an asset ref.*)", "紙質の画像（asset）は sha256: と 64 桁の 16 進数で指定します"));
+        r.push_back(rule("paper must be an object or null", "紙質は設定のまとまり（オブジェクト）か null で指定します"));
+        r.push_back(rule(R"(the paper picture \S+ is not known here.*)", "紙質の画像が見つかりません（ブラシの詳細で紙質の画像を読み込み直してください）"));
         r.push_back(rule("a brush of one's own has a key starting with my_", "自作のブラシの名前（key）は my_ で始めます"));
         r.push_back(rule("wobble must be between 0 and 1", "線の揺れは 0〜1 の間で決めます"));
         r.push_back(rule("spikes must be between 6 and 80", "トゲの数は 6〜80 の間で決めます"));

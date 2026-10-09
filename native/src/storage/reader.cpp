@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "core/brushes.hpp"
 #include "core/covers.hpp"
 #include "core/color_raster.hpp"
 #include "core/exposure.hpp"
@@ -328,6 +329,7 @@ private:
     core::StoryLine read_line(const Json& data, const std::string& at);
     core::Layer read_layer(const Json& data, const std::string& at);
     core::Stroke read_stroke(const Json& raw, const std::string& at);
+    void read_papers(core::Document& doc);
     core::StrokeListPtr read_strokes_blob(const Json& ref_value, const std::string& at);
     core::Bytes read_png(const Json& ref_value, const std::string& at, core::BlobMemo* memo);
     core::Bytes read_legacy_raster(const std::string& relpath, const std::string& at);
@@ -437,6 +439,25 @@ core::StoryLine Reader::read_line(const Json& data, const std::string& at) {
     for (const Json& tail : list_or_empty(data, "tails")) line.tails.push_back(core::py_dict(tail));
     check_keys(data, kLineKeys, at, "line");
     return line;
+}
+
+void Reader::read_papers(core::Document& doc) {
+    // BRUSH-01: the pictures of the brushes' papers (a brush whose paper cannot be read, or whose picture is missing,
+    // makes the book read-only: it is never drawn without its paper, nor written without it)
+    for (const auto& [name, brush] : doc.brush_custom.items()) {
+        const Json* paper = find(brush, "paper");
+        if (paper == nullptr || paper->is_null()) continue;
+        const std::string at = at_key(at_key(at_key("/brush", "custom"), name), "paper");
+        std::string ref;
+        try {
+            ref = core::paper_from_json(*paper).asset;
+        } catch (const core::Error& error) {
+            issue("broken_asset", at, {}, std::string("the paper of this brush cannot be read: ") + error.what());
+            continue;
+        }
+        if (doc.papers.contains(ref)) continue;
+        if (core::Bytes png = read_png(*find(*paper, "asset"), at_key(at, "asset"), nullptr)) doc.papers.emplace(ref, std::move(png));
+    }
 }
 
 core::Stroke Reader::read_stroke(const Json& raw, const std::string& at) {
@@ -919,6 +940,7 @@ core::Document Reader::migrate(const Json& payload) {
         const Json custom = dict_or_empty(*brush, "custom");
         for (const auto& [name, value] : custom.items()) doc.brush_custom[name] = core::py_dict(value);
         check_keys(*brush, kBrushKeys, "/brush", "brush");
+        read_papers(doc);
     }
     doc.nombre = dict_or_empty(payload, "nombre");
     if (const Json* bible = find(payload, "bible"); bible && core::py_truthy(*bible)) {
@@ -1034,7 +1056,7 @@ bool is_known_top_key(std::string_view key) { return in(kTopKeys, key); }
 bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }
 bool is_known_feature(std::string_view feature) {
     return feature == core::kColorRasterFeature || feature == core::kColorTilesFeature || feature == core::kExposureFeature ||
-           feature == core::kColorStrokeFeature;
+           feature == core::kColorStrokeFeature || feature == core::kPaperFeature;
 }
 
 int project_version(const Json& payload) {

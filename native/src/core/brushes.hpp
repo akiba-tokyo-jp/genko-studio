@@ -16,6 +16,41 @@
 
 namespace genko::core {
 
+// BRUSH-01 紙質 (this build only; schema-v4.md §3 paper-texture@1): a picture of paper under a brush's line. The picture
+// is an asset of the book (a grey PNG, render/paper.hpp makes it from the file taken in: its brightness is where the
+// paper takes the ink, its darkness where the ink is lost); these are the settings a brush keeps with it.
+struct Paper {
+    std::string asset;               // "sha256:…": assets/<ab>/<64 hex>.png
+    double density = 0.5;            // 0..1: how much of the ink the paper's dark parts take away
+    double scale = 1.0;              // 0.1..10: one pixel of the picture is scale / 300 inch on the page
+    double rotation = 0.0;           // -360..360 degrees, clockwise on the page
+    bool flip_x = false;             // 左右反転
+    bool flip_y = false;             // 上下反転
+    bool invert = false;             // 濃淡の反転
+    std::string blend = "multiply";  // multiply (乗算) | subtract (減算)
+    std::string coords = "paper";    // paper (紙面固定: the page's mm) | stroke (線ごと: from the line's first point)
+    std::string seam = "repeat";     // repeat (繰り返し) | mirror (折り返し)
+    std::int64_t seed = 0;           // 0..2147483647: where the picture starts (render/paper.hpp)
+
+    friend bool operator==(const Paper&, const Paper&) = default;
+};
+
+inline constexpr std::string_view kPaperFeature = "paper-texture@1";
+inline constexpr std::int64_t kPaperMaxSeed = 2147483647;
+
+// The paper as a brush keeps it: every setting, in this order (asset, density, scale, rotation, flip_x, flip_y, invert,
+// blend, coords, seam, seed).
+Json paper_to_json(const Paper& paper);
+
+// The paper from its settings (the missing ones as above). PyValueError "paper …" for anything but an object of these
+// keys with a valid asset ref, finite numbers in range (an int or a float, not a bool), bools and the named choices. A
+// picture given as "png" is not a setting: define_brush takes it in first (render/paper.hpp).
+Paper paper_from_json(const Json& data);
+
+// The refs of the papers a book's brushes (brush.custom) keep, each once, in their order; those that cannot be read
+// are left out (the reader reports them).
+std::vector<std::string> paper_refs(const Json& brush_custom);
+
 struct Brush {
     std::string key;
     std::string label;
@@ -47,6 +82,7 @@ struct Brush {
     double stamp_size = 1.0;
     double mix = 0.0;
     double stretch = 0.0;
+    std::optional<Paper> paper;  // BRUSH-01: none for every brush Python knows
 
     friend bool operator==(const Brush&, const Brush&) = default;
 };
@@ -62,12 +98,15 @@ const Brush* find_builtin(std::string_view key);
 // "unhashable type: 'list'" for a list or a dict.
 Brush find_brush(const Json& key, std::span<const Brush> custom);
 
-// brushes.to_dict: the settings a book keeps (the J3 ones only when they differ from a plain round pen).
+// brushes.to_dict: the settings a book keeps (the J3 ones only when they differ from a plain round pen), and "paper"
+// last for a brush with one (paper_to_json; never for one without: its settings stay as Python writes them).
 Json brush_to_dict(const Brush& b);
 
 // brushes.from_dict(key, data, base) with `custom` known: a brush from its settings, the missing ones from `base` (or
 // data["base"], or the G pen). Python's errors: PyValueError with its message when a setting is out of range or of
 // the wrong kind, and float()'s and int()'s (PyValueError, PyTypeError, PyUncaught) for values that are not numbers.
+// "paper" (this build): null for none, an object for one (paper_from_json, checked after Python's settings); when
+// data does not say, the base's.
 Brush brush_from_dict(std::string_view key, const Json& data, const std::optional<std::string>& base,
                       std::span<const Brush> custom);
 

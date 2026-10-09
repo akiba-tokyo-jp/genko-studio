@@ -633,7 +633,7 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
         render::brushes::Brush own = render::brushes::brush(kind);
         if (own.key != kind) {  // (not known: from the library again, never the G pen's settings under its name)
             try {
-                render::brushes::register_brushes(render::brushes::load_library(config_dir()));
+                render::brushes::register_brushes(render::brushes::load_own_brushes(config_dir()));
             } catch (const std::exception&) {
             }
             own = render::brushes::brush(kind);
@@ -644,7 +644,18 @@ void MainWindow::on_stroke(const StrokeInput& stroke) {
             return;
         }
         Json define{{"op", "define_brush"}, {"key", kind}};
-        const Json settings_of = core::brush_to_dict(own);
+        Json settings_of = core::brush_to_dict(own);
+        if (own.paper && !book().papers.contains(own.paper->asset)) {
+            try {
+                settings_of = render::brushes::with_paper_picture(settings_of);  // (the book keeps its paper's picture)
+            } catch (const std::exception&) {
+                flash(QStringLiteral("このブラシ（%1）の紙質の画像が見つからないため描けませんでした。ブラシの詳細で紙質の画像を読み込み直してください")
+                          .arg(QString::fromStdString(own.label)),
+                      5000, true);
+                canvas_->stroke_dropped();
+                return;
+            }
+        }
         for (const auto& [key, value] : settings_of.items()) define[key] = value;
         ops.insert(ops.begin(), define);
     }

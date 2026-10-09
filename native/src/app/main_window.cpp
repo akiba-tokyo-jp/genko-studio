@@ -130,7 +130,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     documents::add(this);
     pen_ = PenSettings::load();  // (until the brush panel is made: it drives the pen from then on)
     // the book's own brushes are known to the drawing (as Python's reader registers them)
-    render::brushes::register_book(book().brush_custom);
+    render::brushes::register_book(book());  // (and the pictures of their papers)
 
     canvas_ = new PageCanvas;
     if (const QScreen* screen = QGuiApplication::primaryScreen()) {
@@ -481,7 +481,7 @@ void MainWindow::on_book_changed(const BookChange& change) {
         lines_later_ = false;
     }
     if (doc_ < doc_tabs_->count()) doc_tabs_->setTabText(doc_, documents_[static_cast<std::size_t>(doc_)].title());
-    render::brushes::follow_book(b.brush_custom);  // (a define_brush: the person's own brushes and their edits stay)
+    render::brushes::follow_book(b);  // (a define_brush: the person's own brushes and their edits stay)
     output_panels_follow();  // (履歴 and 点検: main_window_output.cpp)
 }
 
@@ -712,7 +712,7 @@ void MainWindow::show_document(int index) {
     connect_session();
     canvas_->set_selection(std::nullopt);
     watch();
-    render::brushes::follow_book(book().brush_custom);
+    render::brushes::follow_book(book());
     reload_pages();
     if (doc.view) canvas_->set_view_state(*doc.view);
     doc_tabs_->blockSignals(true);

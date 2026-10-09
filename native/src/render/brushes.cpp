@@ -20,8 +20,10 @@
 #include "core/pyrandom.hpp"
 #include "render/draw.hpp"
 #include "render/not_yet_ported.hpp"
+#include "render/paper.hpp"
 #include "render/png.hpp"
 #include "render/stroke.hpp"
+#include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
 namespace genko::render::brushes {
@@ -327,9 +329,8 @@ Image shade(const core::PenPoints& points, Size size, Point origin, int dpi, dou
     return out;
 }
 
-std::optional<Coverage> draw_plain(Size size, const core::PenPoints& points, int dpi, double width_mm,
-                                   std::string_view kind, std::string_view seed, std::span<const double> rotation) {
-    const Brush b = brush(kind);
+std::optional<Coverage> draw_plain(const Brush& b, Size size, const core::PenPoints& points, int dpi, double width_mm,
+                                   std::string_view seed, std::span<const double> rotation) {
     const auto e = extent_of(b, size, points, dpi, width_mm);
     if (!e) return std::nullopt;
     const double scale = e->scale;
@@ -413,6 +414,16 @@ void follow_book(const Json& definitions) {
     g_book_seen = now;
 }
 
+void register_book(const core::Document& doc) {
+    paper::keep_all(doc.papers);  // (first: a brush is never known before its paper's picture)
+    register_book(doc.brush_custom);
+}
+
+void follow_book(const core::Document& doc) {
+    paper::keep_all(doc.papers);
+    follow_book(doc.brush_custom);
+}
+
 void clear_custom() {
     std::unique_lock lock(g_custom_mutex);
     g_custom.clear();
@@ -478,31 +489,153 @@ core::Json read_library(const std::filesystem::path& config_dir, bool strict) {
     return out;
 }
 
+// BRUSH-01: brush_papers.json's papers (key → settings): nothing for a file that is not there; one that cannot be read is
+// nothing too, or (`strict`, before it is written over) an error that leaves it as it is.
+core::Json read_library_papers(const std::filesystem::path& config_dir, bool strict) {
+    const std::filesystem::path path = library_papers_path(config_dir);
+    std::error_code missing;
+    if (!std::filesystem::exists(path, missing) && !missing) return core::Json::object();
+    try {
+        const std::string text = storage::read_file_bounded(path, paper::kMaxFileBytes);
+        if (core::utf8_error(text)) throw core::Error("value", "not UTF-8");
+        const core::Json data = core::parse_python_json(text);
+        const auto papers = data.is_object() ? data.find("papers") : data.end();
+        if (papers != data.end() && papers->is_object()) return *papers;
+        throw core::Error("value", "no papers");
+    } catch (const core::Error&) {
+        if (strict) throw core::PyUncaught("OSError", "the brush library cannot be read, so it is left as it is: " + core::path_to_utf8(path));
+        return core::Json::object();
+    }
+}
+
+// Where the library keeps a paper's picture: brush_papers/<64 hex>.png.
+std::filesystem::path picture_path(const std::filesystem::path& config_dir, const std::string& ref) {
+    return config_dir / "brush_papers" / (ref.substr(ref.find(':') + 1) + ".png");
+}
+
 }  // namespace
 
 core::Json load_library(const std::filesystem::path& config_dir) { return read_library(config_dir, false); }
 
 void save_to_library(const std::filesystem::path& config_dir, std::string_view key, const std::optional<core::Json>& data) {
     core::Json brushes = read_library(config_dir, true);
-    if (data) brushes[std::string(key)] = *data;
-    else brushes.erase(std::string(key));
+    // BRUSH-01: the paper beside brushes.json (Python's app reads and writes that file, and would drop it)
+    std::optional<core::Paper> kept;
+    if (data) {
+        core::Json entry = *data;
+        if (const auto given = entry.find("paper"); given != entry.end()) {
+            if (!given->is_null()) kept = core::paper_from_json(*given);
+            entry.erase(given);
+        }
+        brushes[std::string(key)] = entry;
+    } else {
+        brushes.erase(std::string(key));
+    }
+    core::Json papers;
+    std::error_code ec;
+    const bool papers_there = std::filesystem::exists(library_papers_path(config_dir), ec);
+    if (kept || papers_there) papers = read_library_papers(config_dir, true);
+    const auto write = [&](const std::filesystem::path& path, std::string_view bytes) {
+        try {
+            std::filesystem::create_directories(path.parent_path());
+            storage::write_atomic(path, bytes);
+        } catch (const std::exception& error) {
+            throw core::PyUncaught("OSError", "the brush library cannot be written: " + core::path_to_utf8(path) + " (" + error.what() + ")");
+        }
+    };
+    if (kept) {  // (its picture first: brush_papers.json never names a picture that is not there)
+        const core::Bytes png = paper::bytes(kept->asset);
+        if (!png) throw core::Error("missing_asset", "the paper picture " + kept->asset + " is not known here");
+        const std::filesystem::path file = picture_path(config_dir, kept->asset);
+        if (!std::filesystem::is_regular_file(file, ec)) write(file, *png);
+    }
     core::DumpOptions options;
     options.indent = 1;
     options.item_separator = ",";
-    const std::string text = core::dump(core::Json{{"brushes", brushes}}, options);
-    try {
-        storage::write_atomic(library_path(config_dir), text);
-    } catch (const core::Error& error) {
-        throw core::PyUncaught("OSError", "the brush library cannot be written: " + core::path_to_utf8(library_path(config_dir)) + " (" + error.what() + ")");
+    write(library_path(config_dir), core::dump(core::Json{{"brushes", brushes}}, options));
+    if (kept) {
+        papers[std::string(key)] = core::paper_to_json(*kept);
+    } else if (papers.is_object() && papers.contains(std::string(key))) {
+        papers.erase(std::string(key));
+    } else {
+        return;
     }
+    write(library_papers_path(config_dir), core::dump(core::Json{{"genko_brush_papers", 1}, {"papers", papers}}, options));
+}
+
+std::filesystem::path library_papers_path(const std::filesystem::path& config_dir) { return config_dir / "brush_papers.json"; }
+
+core::Json load_own_brushes(const std::filesystem::path& config_dir) {
+    core::Json out = load_library(config_dir);
+    core::Json papers;
+    try {
+        papers = read_library_papers(config_dir, false);
+    } catch (const core::Error&) {
+        return out;
+    }
+    for (auto& [key, settings] : out.items()) {
+        const auto found = papers.find(key);
+        if (found == papers.end()) continue;
+        try {
+            const core::Paper own = core::paper_from_json(*found);
+            const std::filesystem::path file = picture_path(config_dir, own.asset);
+            std::error_code missing;
+            if (!std::filesystem::is_regular_file(file, missing)) continue;
+            auto png = std::make_shared<const std::string>(storage::read_file_bounded(file, paper::kMaxFileBytes));
+            if (storage::AssetStore::ref(*png) != own.asset) continue;  // (not the picture its name says)
+            paper::keep(own.asset, std::move(png));
+            settings["paper"] = core::paper_to_json(own);
+        } catch (const core::Error&) {
+            // (a paper that cannot be read: the brush as brushes.json has it)
+        }
+    }
+    return out;
+}
+
+core::Json with_paper_taken_in(const core::Json& definition) {
+    const auto given = definition.is_object() ? definition.find("paper") : definition.end();
+    if (given == definition.end() || !given->is_object() || !given->contains("png")) return definition;
+    core::Json out = definition;
+    core::Json& settings = out["paper"];
+    const core::Json text = settings["png"];
+    settings.erase("png");
+    std::string file;
+    try {
+        if (!text.is_string()) throw core::Error("value", "png is not text");
+        file = core::a2b_base64(text.get_ref<const std::string&>());
+    } catch (const core::Error&) {
+        throw core::Error("value", "the paper's picture cannot be read (png must be the picture file in base64)");
+    }
+    auto grey = std::make_shared<const std::string>(paper::take_in(file));
+    const std::string ref = storage::AssetStore::ref(*grey);
+    paper::keep(ref, std::move(grey));
+    settings["asset"] = ref;
+    return out;
+}
+
+core::Json with_paper_picture(const core::Json& definition) {
+    const auto given = definition.is_object() ? definition.find("paper") : definition.end();
+    if (given == definition.end() || !given->is_object()) return definition;
+    const auto asset = given->find("asset");
+    if (asset == given->end() || !asset->is_string()) return definition;
+    const core::Bytes png = paper::bytes(asset->get<std::string>());
+    if (!png) throw core::Error("missing_asset", "the paper picture " + asset->get<std::string>() + " is not known here");
+    core::Json out = definition;
+    out["paper"].erase("asset");
+    out["paper"]["png"] = core::b64encode(*png);
+    return out;
 }
 
 std::optional<Coverage> draw(Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view kind,
                              std::string_view seed, std::span<const double> rotation, double pressure_opacity) {
-    auto drawn = draw_plain(size, points, dpi, width_mm, kind, seed, rotation);
-    if (!drawn || pressure_opacity <= 0) return drawn;
-    const Image light = shade(points, drawn->mask.size(), drawn->origin, dpi, width_mm, py_min(1.0, pressure_opacity));
-    drawn->mask = chops::multiply(drawn->mask, light);
+    const Brush b = brush(kind);
+    auto drawn = draw_plain(b, size, points, dpi, width_mm, seed, rotation);
+    if (drawn && pressure_opacity > 0) {
+        const Image light = shade(points, drawn->mask.size(), drawn->origin, dpi, width_mm, py_min(1.0, pressure_opacity));
+        drawn->mask = chops::multiply(drawn->mask, light);
+    }
+    // BRUSH-01: the paper under the line, after its pressure (render/paper.hpp: the order)
+    if (drawn && b.paper) paper::apply(drawn->mask, drawn->origin, dpi, *b.paper, seed, points.front().x, points.front().y);
     return drawn;
 }
 

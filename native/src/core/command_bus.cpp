@@ -46,13 +46,16 @@ std::string join(const std::vector<std::string>& items, std::string_view separat
     return out;
 }
 
+// define_brush's paper (BRUSH-01): this build's own key, never named an unknown key.
+bool paper_key(const Json& op, std::string_view key) { return key == "paper" && is_op(op, "define_brush"); }
+
 // Python's _usage: the keys given that the op does not take, and how the op is written.
 std::string usage(const Json& op) {
     const Json* schema = schema_of(op);
     if (schema == nullptr) return {};
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
-        if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_")) strange.push_back(key);
+        if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key)) strange.push_back(key);
     }
     std::vector<std::string> keys;
     for (const auto& [key, value] : schema->items()) {
@@ -65,9 +68,11 @@ std::string usage(const Json& op) {
 }
 
 // Keys this build's ops take beyond Python's (the precise colour work: merge_visible's flatten, convert_layer's
-// preserve_precision). They are used, so not reported as ignored; the public list (`genko schema`) stays Python's.
+// preserve_precision; BRUSH-01: define_brush's paper). They are used, so not reported as ignored; the public list
+// (`genko schema`) stays Python's.
 bool native_key(std::string_view op, std::string_view key) {
-    return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision");
+    return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
+           (op == "define_brush" && key == "paper");
 }
 
 // Python's _unknown_keys: keys an op was given that it does not take (ignored, so said).
@@ -601,6 +606,14 @@ Json journal_op(const Json& op) {
         const auto it = out.find("png_base64");
         if (it != out.end() && it->is_string()) {
             *it = "<" + std::to_string(code_points(it->get_ref<const std::string&>())) + " base64 chars>";
+        }
+        // (BRUSH-01: define_brush's paper picture, kept by the book as an asset)
+        if (is_op(out, "define_brush")) {
+            if (const auto paper = out.find("paper"); paper != out.end() && paper->is_object()) {
+                if (const auto png = paper->find("png"); png != paper->end() && png->is_string()) {
+                    *png = "<" + std::to_string(code_points(png->get_ref<const std::string&>())) + " base64 chars>";
+                }
+            }
         }
     }
     return out;

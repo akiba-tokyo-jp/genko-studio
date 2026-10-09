@@ -2286,7 +2286,7 @@ void lt_convert(OpContext& c) {
 // Python's reader makes the book's own brushes known to the process (brushes.register, and define_brush adds to
 // them): the lines these ops draw are drawn with them, as the page is. Only what the book has newly or differently is
 // made known (brushes::follow_book): the person's own brushes stay, as in Python's one CUSTOM.
-void use_book_brushes(const Document& doc) { brushes::follow_book(doc.brush_custom); }
+void use_book_brushes(const Document& doc) { brushes::follow_book(doc); }
 
 core::OpFunction drawing(void (*op)(OpContext&)) {
     return [op](OpContext& c) {

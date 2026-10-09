@@ -59,6 +59,10 @@ genko_test(test_ops_3d SOURCES unit/test_ops_3d.cpp DEPS genko_test_support genk
 # The ops of M3-A1 (layers, masks, pixels, fills, areas, paper) without Python.
 genko_test(test_raster_ops SOURCES unit/test_raster_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_core genko_storage genko_render_ops LABELS unit)
+# 紙質 (BRUSH-01, this build only): the arithmetic against the independent reference (data/paper/samples.json), the
+# pictures taken in, define_brush's paper, the full-size reference pages, saved and opened elsewhere, Undo and Redo,
+# the print's PDF drawn back by poppler's pdftocairo, the command line.
+genko_test(test_paper SOURCES unit/test_paper.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
@@ -218,6 +222,9 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_select SOURCES gui/test_gui_select.cpp DEPS genko_app GUI TIMEOUT 600)
   # the brush panel and ツールの設定: brushes kept per kind, one's own made, opened, given and read back (.abr too)
   genko_test(test_gui_brushes SOURCES gui/test_gui_brushes.cpp DEPS genko_app GUI TIMEOUT 600)
+  # 紙質 (BRUSH-01): the dialog's paper, one's own brush with a paper (the library beside Python's file, read by
+  # Python's reader), a book drawn with it saved and opened on another computer, the zoom, Undo, a .genkobrush
+  genko_test(test_gui_paper SOURCES gui/test_gui_paper.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_anim SOURCES gui/test_gui_anim.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_paint SOURCES gui/test_gui_paint.cpp DEPS genko_app GUI TIMEOUT 600)
   genko_test(test_gui_guides SOURCES gui/test_gui_guides.cpp DEPS genko_app GUI TIMEOUT 900)

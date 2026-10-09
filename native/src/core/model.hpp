@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -317,6 +318,9 @@ struct Document {
     bool brush_taper = false;
     std::string brush_curve = "linear";
     Json brush_custom = Json::object();
+    // BRUSH-01 (paper-texture@1): the grey pictures of the papers its brushes keep (brush_custom[key]["paper"]["asset"]),
+    // by their asset ref. Written as assets/<ab>/<64 hex>.png; only those a brush keeps are written and read.
+    std::map<std::string, Bytes> papers;
     Json nombre = Json::object();
     Json extra = Json::object();  // top-level keys this build does not know; written back unchanged
     std::int64_t revision = 0;

@@ -375,7 +375,7 @@ int render_command(const QStringList& args, bool ascii) {
     const auto loaded = storage::load_document(storage::path_from_utf8(pathlib_text(src.toStdString())));
     const core::Document& doc = loaded.document;
     render::brushes::clear_custom();
-    render::brushes::register_book(doc.brush_custom);  // (the book's own brushes, as Python's reader registers them)
+    render::brushes::register_book(doc);  // (the book's own brushes, as Python's reader registers them, and their papers)
     const core::Page* page = nullptr;
     for (const auto& p : doc.pages) {
         if (p->index == core::Num(page_number)) {
@@ -470,7 +470,7 @@ int export_command(const QStringList& args, bool ascii) {
     const auto loaded = storage::load_document(src);
     const core::Document& doc = loaded.document;
     render::brushes::clear_custom();
-    render::brushes::register_book(doc.brush_custom);  // (the book's own brushes, as Python's reader registers them)
+    render::brushes::register_book(doc);  // (the book's own brushes, as Python's reader registers them, and their papers)
     const std::int64_t spec_dpi = doc.spec.dpi.truthy() ? core::py_int(doc.spec.dpi) : 0;
     std::vector<fs::path> paths;
     const std::string& f = *fmt;

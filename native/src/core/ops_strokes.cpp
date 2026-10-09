@@ -7,6 +7,9 @@
 #include <limits>
 #include <utility>
 
+#include <QCryptographicHash>
+
+#include "core/base64.hpp"
 #include "core/brushes.hpp"
 #include "core/frames.hpp"
 #include "core/ids.hpp"
@@ -488,17 +491,75 @@ void erase(OpContext& c) {
     }
 }
 
+// define_brush's "paper" as the brush keeps it: its settings checked (OpError with their words), its picture given as
+// "png" taken in (`picture`: its ref and the grey PNG the book will keep) or given as the "asset" of a paper the book
+// keeps. Without `take_in` a picture is not taken (not_yet_ported).
+Json paper_settings(const Json& given, const Document& doc, const PaperTakeIn& take_in,
+                    std::optional<std::pair<std::string, Bytes>>& picture) {
+    if (!given.is_object()) throw OpError("paper must be an object or null");
+    const bool png = given.contains("png");
+    const bool asset = given.contains("asset");
+    if (png && asset) throw OpError("a paper takes its picture once: png or asset, not both");
+    if (!png && !asset) throw OpError("a paper needs its picture: png (base64) or asset (sha256:…)");
+    Json settings = given;
+    settings.erase("png");
+    if (png) settings["asset"] = "sha256:" + std::string(64, '0');  // (the settings first, then the picture)
+    try {
+        (void)paper_from_json(settings);
+    } catch (const PyValueError& error) {
+        throw OpError(error.what());
+    }
+    if (!png) {
+        const std::string& ref = settings["asset"].get_ref<const std::string&>();
+        if (!doc.papers.contains(ref)) throw OpError("the book has no paper picture " + ref + " (give the picture as png)");
+        return settings;
+    }
+    if (!take_in) not_yet_ported("define_brush's paper picture (png): it is taken in by the drawing build");
+    const Json& text = given["png"];
+    std::string file;
+    try {
+        if (!text.is_string()) throw Error("value", "png is not text");
+        file = a2b_base64(text.get_ref<const std::string&>());
+    } catch (const Error&) {
+        throw OpError("the paper's picture cannot be read (png must be the picture file in base64)");
+    }
+    std::string grey = take_in(file);
+    const QByteArray digest =
+        QCryptographicHash::hash(QByteArrayView(grey.data(), static_cast<qsizetype>(grey.size())), QCryptographicHash::Sha256).toHex();
+    const std::string ref = "sha256:" + digest.toStdString();
+    settings["asset"] = ref;
+    picture = std::make_pair(ref, std::make_shared<const std::string>(std::move(grey)));
+    return settings;
+}
+
 }  // namespace
 
-void register_stroke_ops(OpRegistry& registry) {
-    registry.add("define_brush",[](OpContext& c) {
+void register_define_brush(OpRegistry& registry, PaperTakeIn take_in) {
+    registry.add("define_brush",[take_in](OpContext& c) {
         const std::string key=truthy_at(c.op,"key")?py_str(c.op["key"]):std::string();
         if(!key.starts_with("my_") || key.size()>40)throw OpError("a brush of one's own has a key starting with my_");
         if(truthy_at(c.op,"delete")){c.doc.brush_custom.erase(key);return;}
         Json data=c.op;for(const char* k:{"op","key","delete"})data.erase(k);
+        // BRUSH-01 (this build): the paper's picture taken in and given by its asset, the book keeping it
+        std::optional<std::pair<std::string, Bytes>> picture;
+        if (const auto given = data.find("paper"); given != data.end() && !given->is_null()) {
+            data["paper"] = paper_settings(*given, c.doc, take_in, picture);
+        }
         std::vector<Brush> known;register_brushes(c.doc.brush_custom,known);
-        c.doc.brush_custom[key]=brush_to_dict(brush_from_dict(key,data,std::nullopt,known));
+        const Brush made=brush_from_dict(key,data,std::nullopt,known);
+        if (made.paper && !picture && !c.doc.papers.contains(made.paper->asset)) {
+            throw OpError("the book has no paper picture " + made.paper->asset + " (give the picture as png)");
+        }
+        c.doc.brush_custom[key]=brush_to_dict(made);
+        if (picture) c.doc.papers[picture->first] = std::move(picture->second);
+        if (made.paper && std::find(c.doc.features.begin(), c.doc.features.end(), kPaperFeature) == c.doc.features.end()) {
+            c.doc.features.emplace_back(kPaperFeature);  // (schema-v4 §3: the first use of a paper declares it)
+        }
     });
+}
+
+void register_stroke_ops(OpRegistry& registry) {
+    register_define_brush(registry);
     registry.add("add_stroke", add_stroke);
     registry.add("delete_stroke", delete_stroke);
     registry.add("edit_stroke", edit_stroke);

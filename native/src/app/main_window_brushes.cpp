@@ -275,6 +275,12 @@ bool MainWindow::export_brush(std::optional<QString> path) {
     }
     Json definition = core::brush_to_dict(brush);
     definition["base"] = core::find_builtin(key) != nullptr ? key : std::string(core::kDefaultBrush);
+    try {
+        definition = render::brushes::with_paper_picture(definition);  // (a paper goes with its picture: the file is enough)
+    } catch (const std::exception&) {
+        flash(QStringLiteral("書き出せませんでした: このブラシの紙質の画像が見つかりません"), 5000, true);
+        return false;
+    }
     core::DumpOptions options;
     options.indent = 1;
     options.item_separator = ",";
@@ -310,7 +316,7 @@ std::vector<std::string> MainWindow::import_brushes(const QString& path) {
     for (const Json& definition : definitions) {
         const std::string key = "my_" + core::new_id();
         try {
-            render::brushes::define_brush(key, definition);
+            render::brushes::define_brush(key, render::brushes::with_paper_taken_in(definition));
         } catch (const core::PyUncaught&) {
             throw;
         } catch (const core::Error&) {

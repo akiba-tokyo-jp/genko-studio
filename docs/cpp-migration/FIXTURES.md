@@ -43,3 +43,12 @@ B4・600dpi・8 ページ。各ページ 20 レイヤー:
 ## F5 保存異常（M1）
 
 v1/v2/v3/v4 のコピー、欠けた素材、ハッシュ不一致、未知キー、途中で切れた journal 行、無効なパス、書込み不能のフォルダー、擬似 ENOSPC（故障注入）、別プロセスの排他。実ディスクは満杯にしない。故障注入は `storage` の書込み関数を差し替える試験用の口（`GENKO_FAULT` 環境変数、Release 配布物では無効）で行う。
+
+## 紙質（BRUSH-01、M3）
+
+`native/tests/data/paper/`（`MANIFEST.json` にハッシュ。`test_paper` が照合する）。紙質は C++ 版だけの機能なので、期待値は Python 版の出力ではない。
+
+- `samples.json`: 解析可能な期待値。固定の 5×3 の紙・seed・全設定（濃さ・倍率・回転・反転・濃淡の反転・合成・適用座標・継ぎ目）の 7 件について、画素の mm 位置→画像上の位置（1/256 画素）→4 画素の混ぜ→紙の値→7 段の被覆に残るインク、と被覆画像 1 枚への適用。`tools/migration/paper_reference.py samples` が `render/paper.hpp` の記述から独立に計算する（IEEE double と整数だけ）。
+- `grain.png`（96×96 RGBA、左上が透明へ抜ける）・`grain.jpg`・`grain.gif`・`grain.bmp` と、Pillow 12.3.0 が白に重ねてグレーにした結果 `grain-grey.json`（`paper_reference.py pictures`）。
+- `expected/paper-settings.png`（全設定の紙質ブラシ・交差する線・筆圧・不透明度・紙質なしの同じ線）と `expected/inherited-brushes.png`（紙質なしの継承ブラシ全種）: 100×80 mm・300 dpi のペン入れレイヤーの原寸 8bit RGBA。この版の描画を品質確認して承認した期待画像（`GENKO_PAPER_WRITE_EXPECTED=1` で書き直す）。
+- 印刷の照合（`test_paper` printedPdf）: 原寸 PDF（300 dpi）を poppler 24.02 の `pdftocairo`（cairo 描画。固定 rasterizer）で、ネイティブ出力と同じ画素数（`-scale-to-x/-y`、300 dpi で mm を丸めた大きさ）に戻し、PNG 書き出しと 1 画素以内の位置・各チャンネル 2/255 以内で比べる（実測は差 0）。PDF の用紙は mm のままで画素の端数を持つため、文字どおりの `-r 300` では頁全体が再標本化される（`pdftocairo -r 300` で差 34 の画素が数個、`pdftoppm` は画像を平滑化して差 252）。`pdftocairo` の無い環境では SKIP。

@@ -101,7 +101,8 @@ int project_version(const core::Json& payload);
 bool is_known_top_key(std::string_view key);
 bool is_known_page_key(std::string_view key);
 
-// The v4 features this build can read and write (none yet: schema-v4.md §3 adds them in M3/M4).
+// The v4 features this build can read and write (schema-v4.md §3: the precise colour ones, native.exposure_v1 and
+// paper-texture@1).
 bool is_known_feature(std::string_view feature);
 
 }  // namespace genko::storage

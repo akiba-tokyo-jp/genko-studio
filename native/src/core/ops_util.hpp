@@ -106,6 +106,14 @@ void remap_layer_refs(Page& page, const std::vector<StoryLine*>& lines, const Fr
 void register_frame_ops(OpRegistry& registry);
 void register_page_ops(OpRegistry& registry);
 void register_stroke_ops(OpRegistry& registry);
+
+// BRUSH-01: a paper's picture file (its bytes, decoded from define_brush's paper "png") taken in as the grey PNG the book
+// keeps (render/paper.hpp's take_in). OpError with the reason for a picture that cannot be taken.
+using PaperTakeIn = std::function<std::string(std::string_view file_bytes)>;
+// define_brush again (core/ops_strokes.cpp), its "paper" taking a picture: render::ops_registry registers it with
+// render/paper's. Without `take_in` (core's own registry) a paper given as "png" is refused with not_yet_ported; one
+// given by the "asset" of a paper the book keeps is taken either way.
+void register_define_brush(OpRegistry& registry, PaperTakeIn take_in = {});
 void register_layer_ops(OpRegistry& registry);
 void register_color_ops(OpRegistry& registry);
 // Register the ops of M3-A that draw nothing (move_layers, group_layers, set_paper, set_timelapse, store_area,

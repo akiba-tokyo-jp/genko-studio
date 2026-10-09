@@ -90,7 +90,7 @@ LiveInk::LiveInk(std::shared_ptr<const core::Document> doc_ptr, const core::Page
         pressure_opacity_ = core::py_round(core::py_clamp(core::py_float(fields["pressure_opacity"]), 0.0, 1.0), 3);
     }
     const bool by_speed = truthy(fields, "stabilize_speed") && stabilize_ != 0;
-    piecewise_ = !stamped(b) && b.texture.empty() && b.aa != "strong" && pressure_opacity_ <= 0 && !by_speed;
+    piecewise_ = !stamped(b) && b.texture.empty() && b.aa != "strong" && pressure_opacity_ <= 0 && !by_speed && !b.paper;
     clip_ = layer.panel_clip &&
             render::detail::clip_mask(page, size_, dpi_, render::Box{0, 0, 1, 1}).has_value();  // (a panel cuts the layers)
 }

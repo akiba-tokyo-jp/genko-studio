@@ -21,6 +21,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <initializer_list>
 #include <map>
 #include <set>
 
@@ -28,10 +30,16 @@
 #include "app/config.hpp"
 #include "app/fields.hpp"
 #include "app/theme.hpp"
+#include "app/wording.hpp"
+#include "core/brushes.hpp"
+#include "core/error.hpp"
 #include "core/pynum.hpp"
 #include "core/stroke_geom.hpp"
 #include "render/abr.hpp"
 #include "render/brushes.hpp"
+#include "render/paper.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/fsutil.hpp"
 
 namespace genko::app {
 
@@ -61,8 +69,36 @@ const std::vector<std::pair<QString, QString>> kPatterns{{QStringLiteral("なし
                                                          {QStringLiteral("星"), QStringLiteral("stars")},    {QStringLiteral("葉"), QStringLiteral("leaves")}};
 const std::vector<std::pair<QString, QString>> kAa{{QStringLiteral("なし"), QStringLiteral("none")}, {QStringLiteral("弱"), QStringLiteral("weak")},
                                                    {QStringLiteral("中"), QStringLiteral("normal")}, {QStringLiteral("強"), QStringLiteral("strong")}};
+// 紙質 (BRUSH-01)
+const std::vector<std::pair<QString, QString>> kPaperBlends{{QStringLiteral("乗算（紙の濃さの分だけ薄く）"), QStringLiteral("multiply")},
+                                                            {QStringLiteral("減算（弱い筆圧ほど紙目が出る）"), QStringLiteral("subtract")}};
+const std::vector<std::pair<QString, QString>> kPaperCoords{{QStringLiteral("紙面に固定"), QStringLiteral("paper")},
+                                                            {QStringLiteral("線ごと（線の描き始めから）"), QStringLiteral("stroke")}};
+const std::vector<std::pair<QString, QString>> kPaperSeams{{QStringLiteral("繰り返し"), QStringLiteral("repeat")},
+                                                           {QStringLiteral("折り返し（継ぎ目を鏡に映す）"), QStringLiteral("mirror")}};
 
 QString key_of(const std::string& kind) { return QString::fromStdString(kind); }
+
+}  // namespace
+
+// The dialog's paper as set (its picture: paper_asset).
+core::Paper paper_of(const BrushDialog& d) {
+    core::Paper p;
+    p.asset = d.paper_asset;
+    p.density = d.paper_density->value() / 100.0;
+    p.scale = d.paper_scale->value() / 100.0;
+    p.rotation = static_cast<double>(d.paper_rotation->value());
+    p.flip_x = d.paper_flip_x->isChecked();
+    p.flip_y = d.paper_flip_y->isChecked();
+    p.invert = d.paper_invert->isChecked();
+    p.blend = d.paper_blend->currentData().toString().toStdString();
+    p.coords = d.paper_coords->currentData().toString().toStdString();
+    p.seam = d.paper_seam->currentData().toString().toStdString();
+    p.seed = d.paper_seed->value();
+    return p;
+}
+
+namespace {
 
 QString number_text(double v) {  // (Python's f"{v:g}")
     return QString::number(v, 'g', 6);
@@ -188,7 +224,7 @@ std::vector<double> size_presets() {
 BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("brush_panel"));
     try {
-        render::brushes::register_brushes(render::brushes::load_library(config_dir()));  // the person's own brushes
+        render::brushes::register_brushes(render::brushes::load_own_brushes(config_dir()));  // the person's own brushes (and papers)
     } catch (const std::exception&) {
         // (a library that cannot be read: the built-in brushes)
     }
@@ -384,6 +420,7 @@ void BrushPanel::fill_kinds() {
         item->setIcon(QIcon(stroke_preview(brush.key, {text.red(), text.green(), text.blue()}, QSize(72, 20))));
         item->setData(Qt::UserRole, key_of(brush.key));
         if (brush.key.starts_with("my_") && !mine.contains(brush.key)) item->setToolTip(QStringLiteral("この原稿に入っていたブラシ"));
+        if (brush.paper) item->setToolTip(item->toolTip() + (item->toolTip().isEmpty() ? QString() : QStringLiteral("・")) + QStringLiteral("紙質あり"));
         kinds->addItem(item);
     }
 }
@@ -688,6 +725,45 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     stretch = spin(0, 100, percent(b.stretch), QStringLiteral(" %"));
     stretch->setToolTip(QStringLiteral("色延び: 拾った色を線の先までどれだけ引きずるか（混色が 0 % のときは効きません）"));
     aa = combo(kAa, b.aa);
+    // 紙質: the base's paper to start from (its picture is this process's: the brush was made known with it)
+    const core::Paper paper = b.paper.value_or(core::Paper{});
+    paper_asset = b.paper ? b.paper->asset : std::string();
+    paper_on = new QCheckBox(QStringLiteral("紙質を使う（線の下に紙の凹凸を敷く）"));
+    paper_on->setObjectName(QStringLiteral("paper_on"));
+    paper_on->setChecked(b.paper.has_value());
+    paper_picture = new QPushButton(QStringLiteral("紙質の画像を読み込む…"));
+    paper_picture->setObjectName(QStringLiteral("paper_picture"));
+    paper_picture->setToolTip(QStringLiteral("PNG・JPEG・BMP・GIF（縦横 4096 画素まで）。画像は原稿の中に保存されるので、元のファイルを消したり"
+                                             "別の PC で開いたりしても同じ線になります"));
+    connect(paper_picture, &QPushButton::clicked, this, [this] { pick_paper(); });
+    paper_preview = new QLabel;
+    paper_preview->setObjectName(QStringLiteral("paper_preview"));
+    paper_preview->setMinimumSize(160, 120);
+    paper_preview->setAlignment(Qt::AlignCenter);
+    paper_preview->setStyleSheet(QStringLiteral("background: white; border-radius: 6px"));
+    paper_about = new QLabel;
+    paper_about->setWordWrap(true);
+    theme::role(paper_about, "hint");  // (always shown: the picture's size and how far it repeats)
+    paper_density = spin(0, 100, percent(paper.density), QStringLiteral(" %"));
+    paper_density->setToolTip(QStringLiteral("紙の暗い所が、インクをどれだけ取り去るか（0 % で紙質なしと同じ）"));
+    paper_scale = spin(10, 1000, percent(paper.scale), QStringLiteral(" %"));
+    paper_scale->setToolTip(QStringLiteral("100 % で画像の 1 画素が 1/300 インチ（約 0.085 mm）。表示の拡大・縮小では変わりません"));
+    paper_rotation = spin(-360, 360, static_cast<int>(core::py_round_whole(paper.rotation)), QStringLiteral(" °"));
+    paper_flip_x = new QCheckBox(QStringLiteral("左右に反転"));
+    paper_flip_x->setChecked(paper.flip_x);
+    paper_flip_y = new QCheckBox(QStringLiteral("上下に反転"));
+    paper_flip_y->setChecked(paper.flip_y);
+    paper_invert = new QCheckBox(QStringLiteral("濃淡を反転（明るい所でインクが抜ける）"));
+    paper_invert->setChecked(paper.invert);
+    paper_blend = combo(kPaperBlends, paper.blend);
+    paper_coords = combo(kPaperCoords, paper.coords);
+    paper_coords->setToolTip(QStringLiteral("紙面に固定: 重なった線も同じ紙目になる。線ごと: 線を動かすと紙目もついて動く"));
+    paper_seam = combo(kPaperSeams, paper.seam);
+    paper_seam->setToolTip(QStringLiteral("画像を並べるときのつなぎ方。継ぎ目の目立つ画像は「折り返し」で目立たなくなります"));
+    paper_seed = new QSpinBox;
+    paper_seed->setRange(0, static_cast<int>(core::kPaperMaxSeed));
+    paper_seed->setValue(static_cast<int>(paper.seed));
+    paper_seed->setToolTip(QStringLiteral("紙の画像をどこから敷き始めるか。同じ値なら、どの PC でも同じ紙目になります"));
 
     auto* form = new QFormLayout;
     form->addRow(QStringLiteral("名前"), name);
@@ -724,13 +800,32 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     tips->addRow(QStringLiteral("大きさの乱れ"), jitter);
     tips->addRow(QString(), turn);
     tips->addRow(QStringLiteral("一度に置く数"), count);
+    auto* papers = new QFormLayout;
+    papers->addRow(section(QStringLiteral("紙質"), QStringLiteral("先端の画像とは別に、線の下に敷く紙の画像です")));
+    papers->addRow(QString(), paper_on);
+    papers->addRow(QString(), paper_picture);
+    papers->addRow(paper_preview);
+    papers->addRow(paper_about);
+    papers->addRow(QStringLiteral("濃さ"), paper_density);
+    papers->addRow(QStringLiteral("倍率"), paper_scale);
+    papers->addRow(QStringLiteral("回転"), paper_rotation);
+    papers->addRow(QString(), paper_flip_x);
+    papers->addRow(QString(), paper_flip_y);
+    papers->addRow(QString(), paper_invert);
+    papers->addRow(QStringLiteral("合成"), paper_blend);
+    papers->addRow(QStringLiteral("紙目の位置"), paper_coords);
+    papers->addRow(QStringLiteral("継ぎ目"), paper_seam);
+    papers->addRow(QStringLiteral("乱数の種"), paper_seed);
     auto* tabs = new QTabWidget;
     auto* basic = new QWidget;
     auto* shape = new QWidget;
+    auto* grain = new QWidget;
     basic->setLayout(form);
     shape->setLayout(tips);
+    grain->setLayout(papers);
     tabs->addTab(basic, QStringLiteral("描き味"));
     tabs->addTab(shape, QStringLiteral("先端・模様"));
+    tabs->addTab(grain, QStringLiteral("紙質"));
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(editing ? QStringLiteral("直す") : QStringLiteral("作る"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
@@ -762,6 +857,23 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     for (QDoubleSpinBox* w : {width, curve}) connect(w, &QDoubleSpinBox::valueChanged, this, [this] { draw_sample(); });
     for (QCheckBox* w : {taper, fixed, white, tip_follow, tip_rotation, turn}) connect(w, &QCheckBox::toggled, this, [this] { draw_sample(); });
     for (QComboBox* w : {texture, tip, pattern, aa}) connect(w, &QComboBox::currentIndexChanged, this, [this] { draw_sample(); });
+    // 紙質: each setting shows on the patch of paper and the sample at once
+    const auto paper_changed = [this] {
+        show_paper();
+        draw_sample();
+    };
+    for (QSpinBox* w : {paper_density, paper_scale, paper_rotation, paper_seed}) connect(w, &QSpinBox::valueChanged, this, paper_changed);
+    for (QCheckBox* w : {paper_flip_x, paper_flip_y, paper_invert}) connect(w, &QCheckBox::toggled, this, paper_changed);
+    for (QComboBox* w : {paper_blend, paper_coords, paper_seam}) connect(w, &QComboBox::currentIndexChanged, this, paper_changed);
+    connect(paper_on, &QCheckBox::toggled, this, [this, paper_changed](bool on) {
+        if (on && paper_asset.empty()) {
+            pick_paper();  // (a paper needs its picture first)
+            if (paper_asset.empty()) paper_on->setChecked(false);
+            return;
+        }
+        paper_changed();
+    });
+    show_paper();
     draw_sample();
 }
 
@@ -798,6 +910,7 @@ Json BrushDialog::data() const {
     out["aa"] = aa->currentData().toString().toStdString();
     out["mix"] = mix->value() / 100.0;
     out["stretch"] = stretch->value() / 100.0;
+    out["paper"] = paper_on->isChecked() && !paper_asset.empty() ? core::paper_to_json(paper_of(*this)) : Json(nullptr);
     return out;
 }
 
@@ -813,6 +926,84 @@ void BrushDialog::pick_tip() {
     tip->setCurrentIndex(tip->findData(QStringLiteral("image")));
     if (spacing->value() == 0) spacing->setValue(25);
     draw_sample();
+}
+
+bool BrushDialog::take_paper(const QString& path) {
+    paper_error.clear();
+    std::string bytes;
+    try {
+        const std::filesystem::path file(path.toStdU16String());
+        if (std::filesystem::file_size(file) > render::paper::kMaxFileBytes) {  // (not read whole)
+            paper_error = wording::error(std::string("the paper's picture file is too large (at most 64 MiB)"));
+            return false;
+        }
+        bytes = storage::read_file(file);
+    } catch (const std::exception&) {
+        paper_error = QStringLiteral("紙質の画像のファイルを開けません: %1").arg(path);
+        return false;
+    }
+    try {
+        auto grey = std::make_shared<const std::string>(render::paper::take_in(bytes));
+        paper_asset = storage::AssetStore::ref(*grey);
+        render::paper::keep(paper_asset, std::move(grey));
+    } catch (const core::Error& error) {
+        paper_error = wording::error(QString::fromUtf8(error.what()));
+        return false;
+    } catch (const std::exception&) {
+        paper_error = QStringLiteral("紙質の画像を読み込めませんでした（大きすぎるか、メモリが足りません）");
+        return false;
+    }
+    paper_on->blockSignals(true);
+    paper_on->setChecked(true);
+    paper_on->blockSignals(false);
+    show_paper();
+    draw_sample();
+    return true;
+}
+
+void BrushDialog::pick_paper() {
+    // (the picture is kept in the book and with one's own brushes: the file may go afterwards)
+    const QString path = ask::open_path(this, QStringLiteral("紙質にする画像"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.bmp *.gif)"));
+    if (path.isEmpty()) return;
+    if (!take_paper(path)) ask::warning(this, QStringLiteral("紙質の画像"), paper_error);
+}
+
+void BrushDialog::show_paper() {
+    const bool on = paper_on->isChecked() && !paper_asset.empty() && render::paper::bytes(paper_asset) != nullptr;
+    for (QWidget* w : std::initializer_list<QWidget*>{paper_density, paper_scale, paper_rotation, paper_flip_x, paper_flip_y, paper_invert,
+                                                      paper_blend, paper_coords, paper_seam, paper_seed}) {
+        w->setEnabled(on);
+    }
+    if (!on) {
+        paper_preview->setPixmap(QPixmap());
+        paper_preview->setText(paper_asset.empty() ? QStringLiteral("紙質の画像はまだありません") : QStringLiteral("紙質を使いません"));
+        paper_about->setText(QStringLiteral("線の下に紙の凹凸を敷くと、紙の暗い所でインクがかすれます。表示を拡大・縮小しても紙目の大きさは変わりません"));
+        return;
+    }
+    // a patch of fully inked paper at 300 dpi (13.5 × 10 mm), as the brush lays its lines on it
+    constexpr int w = 160, h = 120, dpi = 300;
+    const core::Paper paper = paper_of(*this);
+    std::shared_ptr<const render::paper::Grain> grain;
+    render::Image cover = render::Image::create("L", render::Size{w, h}, render::Ink(255));
+    try {
+        grain = render::paper::grain(paper.asset);
+        render::paper::apply(cover, render::Point{0, 0}, dpi, paper, "sample", 0, 0);
+    } catch (const std::exception&) {
+        paper_preview->setPixmap(QPixmap());
+        paper_preview->setText(QStringLiteral("紙質の画像を読めません"));
+        return;
+    }
+    QImage patch(w, h, QImage::Format_RGBA8888);
+    patch.fill(Qt::white);
+    render::brushes::Coverage laid{std::move(cover), render::Point{0, 0}};
+    lay(patch, laid, {20, 20, 20}, 1.0, true);
+    paper_preview->setPixmap(QPixmap::fromImage(patch));
+    const double mm = 25.4 / render::paper::kBaseDpi * paper.scale;
+    paper_about->setText(QStringLiteral("%1 × %2 画素の紙（いまの倍率で %3 × %4 mm ごとに並びます）。見本は 13.5 × 10 mm を塗りつぶした所です")
+                             .arg(grain->width)
+                             .arg(grain->height)
+                             .arg(grain->width * mm, 0, 'f', 1)
+                             .arg(grain->height * mm, 0, 'f', 1));
 }
 
 void BrushDialog::draw_sample() {

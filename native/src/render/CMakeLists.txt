@@ -12,6 +12,7 @@ genko_library(genko_render
     gif.cpp
     stroke.cpp
     brushes.cpp
+    paper.cpp
     panels.cpp
     composite.cpp
     page.cpp

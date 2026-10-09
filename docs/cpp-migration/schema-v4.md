@@ -140,3 +140,17 @@ v3 の行（`rev`・`actor`・`at`・`changes`・`via`）をそのまま残し�
 `features`へ`native.color_stroke_v1`を登録する。未対応の読み手は従来の未知feature規則により編集・保存を拒否する。既存のRGB8線とモノクロ線の形式は変えない。
 
 線の辞書形式・packed形式に任意の`color_rgb`を加える。値は`{"precision":"u16"|"f32","values":[r,g,b]}`。RGBはstraight sRGBの正規化値（16bitは整数値/65535、32bitは有限のfloat32範囲、HDRを保持）。値は厳密に3個、未知キー・未知precision・非有限値を拒否する。`opacity`は従来どおり独立の0〜1のalpha。`color_rgb`がある線は`rgb`の8bit previewを色の正本にしない。線の座標・幅・筆圧は既存形式のまま編集可能とする。
+
+## 紙質（paper-texture@1、BRUSH-01）
+
+ブラシの紙質。C++版だけの機能で、Python版の原稿・ブラシの意味は変えない（紙質のないブラシの設定・描画は従来どおり）。
+
+- 原稿のブラシ `brush.custom[<key>]` に任意の `paper` を加える。値は次のキーをこの順で持つオブジェクト。未知キー・範囲外・非有限値・bool の数値は拒否する。
+  `{"asset": "sha256:…", "density": 0..1 (0.5), "scale": 0.1..10 (1), "rotation": -360..360 (0, 度・紙面で時計回り), "flip_x": bool, "flip_y": bool, "invert": bool, "blend": "multiply"|"subtract", "coords": "paper"|"stroke", "seam": "repeat"|"mirror", "seed": 0..2147483647 (0)}`
+- `asset` は紙の画像（グレーの PNG、`assets/<ab>/<64桁>.png`）。取り込んだ PNG・JPEG・BMP・GIF を白の上に重ねて（透明は白い紙＝インクを取らない）Pillow の `convert("L")` と同じ式でグレーにしたもの。縦横 4096 画素まで、元のファイルは 64 MiB まで。元のファイルの場所は記録しない（消しても別 PC でも同じ）。書き手はブラシが参照する紙の画像だけを書き、読み手はハッシュを照合する。欠けた画像・読めない設定は報告して読取専用で開く（紙質なしで描かない）。
+- 倍率 1 で画像の 1 画素が 1/300 インチ。`coords: "paper"` は紙面の mm に固定（表示の拡大・縮小や解像度で紙目の物理サイズは変わらない。重なった線は同じ紙目）、`"stroke"` は線の最初の点から測り、線の id ごとに始まりをずらす。
+- 合成順序（`render/paper.hpp`）: ブラシ自身の被覆（先端・スタンプ・質感・縁）→ 筆圧での薄さ（`pressure_opacity`）→ 紙質 → 線の不透明度（線×ブラシ）→ 同じ色の線をまとめてレイヤーへ。
+- 紙質: 画素 (X, Y) の中心 `x_mm = (X + 0.5) × 25.4 / dpi`（y も）から基準点（paper: 0、stroke: 線の最初の点）を引き、`-rotation` 回して `u = (dx·cos + dy·sin) / (scale × 25.4 / 300)`、`v = (dy·cos − dx·sin) / …`、反転は符号。`U = floor((u − 0.5) × 256) + ou × 256`（V も）。`(ou, ov)` は seed（stroke は線の id の FNV-1a 64 と xor）の SplitMix64 を画像の幅・高さで割った余り。周りの 4 画素を 1/256 の重みで混ぜ（四捨五入）、継ぎ目は繰り返しか折り返し。`invert` で 255 − 値。取るインク `A = ((255 − 値) × floor(density × 255 + 0.5) + 127) / 255`、乗算 `被覆 × (255 − A) / 255`（四捨五入）、減算 `max(0, 被覆 − A)`。sin・cos は 90 度ごとは厳密、残りは固定の多項式（+−×÷ だけ）。どの OS でも同じ画素。
+- 拡張を使う op が初めて適用されたとき（`define_brush` の `paper`）に `features` へ `paper-texture@1` を加える。書き手もブラシが紙質を持てば加える。紙質を使わない原稿は変わらない。
+- op: `define_brush` の `paper` は上の設定に加えて、画像を `"png"`（画像ファイルの base64。`asset` とどちらか一つ）で受ける。履歴の op 記録では `png` を `"<N base64 chars>"` に縮める。`genko schema`（公開スキーマ）は Python のまま。
+- 自分のブラシのライブラリ: Python 版と共有する `brushes.json` には紙質を書かない（Python 版の編集が `paper` を落とすため）。C++ 版は隣の `brush_papers.json`（`{"genko_brush_papers": 1, "papers": {<key>: 紙質}}`）と `brush_papers/<64桁>.png` に置く。`.genkobrush` は紙質の画像を `paper.png`（base64）で含む。

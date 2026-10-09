@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "core/brushes.hpp"
 #include "core/error.hpp"
 #include "core/color_raster.hpp"
 #include "core/exposure.hpp"
@@ -286,6 +287,15 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         if (core::has_color_strokes(layer)) features.emplace_back(core::kColorStrokeFeature);
         if (layer.kind == core::LayerKind::Adjust && layer.adjust && layer.adjust->value("kind", core::Json()) == "exposure")
             features.emplace_back(core::kExposureFeature);
+    }
+    // BRUSH-01: the pictures of the papers the book's brushes keep (only those), and the feature that says so
+    for (const std::string& ref : core::paper_refs(doc.brush_custom)) {
+        const auto picture = doc.papers.find(ref);
+        if (picture == doc.papers.end() || !picture->second) {
+            throw core::Error("value", "the paper picture " + ref + " of the book's brushes is not held: the book is not written");
+        }
+        store.put_known(ref, *picture->second, ".png");
+        features.emplace_back(core::kPaperFeature);
     }
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
