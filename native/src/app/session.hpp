@@ -156,6 +156,8 @@ public:
     // Take back the latest change (in memory when it is not saved yet, else through the journal). Throws
     // core::ApplyError("nothing to undo").
     void undo();
+    // Put back what undo() took, the latest first (a saved change the journal is still to undo before the changes undone
+    // in memory, as Python's journal gives them back: core::ApplyError "busy" while that undo is being written).
     void redo();
     bool can_undo() const;
     bool can_redo() const;
@@ -231,6 +233,7 @@ private:
         bool on_disk = false;          // that transaction is committed: undo and redo now go through the journal
         bool undone_on_disk = false;   // a journal undo of it is committed (and no redo since)
         std::size_t held = 0;          // the precise colour pictures it replaced (kept alive by `before` alone)
+        std::uint64_t undone_seq = 0;  // undo(): when it was undone (in the order of the actions' seq)
     };
 
     // What the disk still has to get, in order.
@@ -245,6 +248,7 @@ private:
 
     struct Job;
     struct JobResult;
+    struct JournalRead;
 
     // A job on the worker thread (static: it sees only what the job carries).
     static JobResult execute(const Job& job);
@@ -261,6 +265,8 @@ private:
     void finish_reading(const JobResult& result);
     void request_recovery();
     void trim_history();
+    std::size_t disk_undos_first() const;
+    std::shared_ptr<const JournalRead> read_journal() const;
     std::uint64_t new_change_id() { return ++next_change_; }
 
     Options options_;
@@ -286,6 +292,8 @@ private:
     std::int64_t disk_undo_ = 0;  // saved changes before this session that the journal can undo
     bool trimmed_ = false;        // trim_history let changes of this session go to the journal
     std::int64_t disk_redo_ = 0;
+    std::uint64_t redo_floor_ = 0;  // apply(): what was undone before it (an action's seq below this) is not redone
+    mutable std::shared_ptr<const JournalRead> journal_read_;  // history(): the journal as last read
 
     bool job_running_ = false;
     bool save_wanted_ = false;

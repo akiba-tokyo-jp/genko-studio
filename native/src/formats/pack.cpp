@@ -9,8 +9,10 @@ namespace genko::formats {
 std::vector<fs::path> export_pack(const core::Document& episode, const fs::path& dest, std::string_view preset, std::optional<std::int64_t> dpi_given) {
     detail::make_dirs(dest);
     const std::int64_t dpi = dpi_given && *dpi_given != 0 ? *dpi_given : episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600;
-    std::vector<fs::path> written = export_print(episode, dest, "tiff", dpi, 180, true);
-    const std::vector<fs::path> pngs = export_print(episode, dest, "png", dpi, 180, true);
+    // (one export: the TIFFs, the PNGs and the two texts moved into place together)
+    detail::Output output;
+    std::vector<fs::path> written = detail::print_into(output, episode, dest, "tiff", dpi, 180, true);
+    const std::vector<fs::path> pngs = detail::print_into(output, episode, dest, "png", dpi, 180, true);
     written.insert(written.end(), pngs.begin(), pngs.end());
     std::string lines = "page,numero,dpi,expression,spread_with,width_mm,height_mm,bleed_mm,preset";
     for (const auto& page : episode.pages) {
@@ -18,7 +20,6 @@ std::vector<fs::path> export_pack(const core::Document& episode, const fs::path&
                  page->spec.expression + "," + (page->spread_with && page->spread_with->truthy() ? page->spread_with->repr() : std::string()) +
                  "," + page->spec.width_mm.repr() + "," + page->spec.height_mm.repr() + "," + page->spec.bleed_mm.repr() + "," + std::string(preset);
     }
-    detail::Output output;
     const fs::path csv = detail::join(dest, "list.csv");
     output.put(csv, detail::native_text(lines + "\n"));
     const fs::path readme = detail::join(dest, "README.txt");

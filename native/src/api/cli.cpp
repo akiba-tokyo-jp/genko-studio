@@ -474,6 +474,11 @@ int export_command(const QStringList& args, bool ascii) {
     const std::int64_t spec_dpi = doc.spec.dpi.truthy() ? core::py_int(doc.spec.dpi) : 0;
     std::vector<fs::path> paths;
     const std::string& f = *fmt;
+    // (the resolution of a format that takes one, 1 to 100000 dpi: refused before anything is drawn or made)
+    if (f != "webtoon" && f != "sns" && f != "kindle" && f != "timelapse") {
+        const std::int64_t fallback = f == "strip" || f == "epub" ? 150 : f == "animation" ? 100 : f == "layers" ? spec_dpi : spec_dpi != 0 ? spec_dpi : 600;
+        formats::check_dpi(dpi.value_or(fallback));
+    }
     if (f == "strip") {
         paths = {formats::export_strip(doc, file_given ? out : formats::detail::join(out, "strip.png"), narrow(dpi.value_or(150)))};
     } else if (f == "psd") {

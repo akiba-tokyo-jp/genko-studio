@@ -51,8 +51,9 @@ std::optional<Json> CheckPanel::run() {
     Json report;
     try {
         report = formats::checks::book(window_->book(), window_->session().path());
-    } catch (const core::Error& error) {
-        // (what this build cannot check yet, or a book's data where Python's check stops too: said, nothing listed)
+    } catch (const std::exception& error) {
+        // (what this build cannot check yet, a book still being read, or a book's data where Python's check stops too:
+        // said, nothing listed)
         report_.reset();
         stale_ = false;
         list->clear();

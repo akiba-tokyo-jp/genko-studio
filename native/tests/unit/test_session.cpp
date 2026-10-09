@@ -1,7 +1,8 @@
 // The app's editing session (app/session.hpp), without a window: the five save states and their changes, edits made
 // while a save runs, the autosave's timing (a pause of 2 s, at most 10 s), undo and redo in memory and through the
-// journal, rebasing on a change made by another writer (and its conflicts), the recovery point when the book cannot be
-// written (and when neither can be), a read-only book, ids chosen before a change is applied, and save-as.
+// journal (in Python's order, also while the journal's undo is written), rebasing on a change made by another writer
+// (and its conflicts), the recovery point when the book cannot be written (and when neither can be), a read-only book,
+// ids chosen before a change is applied, and save-as.
 
 #include <QtTest>
 
@@ -1592,6 +1593,166 @@ private slots:
         QVERIFY(session->wait_saved(10000ms));
         QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{2});
         QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{0});
+    }
+
+    // Redo while the journal is still undoing a change saved before this session (Undo, Undo, Redo in quick
+    // succession): that change is the next to come back (Python's order: the journal's redo stack, the latest undone
+    // first), before the ones undone in memory. While its undo is being written, Redo waits (said, nothing changed);
+    // the session never ends up holding a redo the book read again cannot take (a conflict every later save hits).
+    void aRedoWhileTheJournalUndoesWaitsItsTurn() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        {
+            auto before = Session::open(book, options);
+            before->apply(stroke_op(30, 2));
+            before->save_now();
+            QVERIFY(before->wait_saved(10000ms));
+        }
+        auto session = Session::open(book, options);
+        session->apply(stroke_op(30, 1));
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        auto other = std::make_unique<genko::storage::ProjectLock>(book, "ai:other");
+        other->try_acquire();
+        session->undo();  // this session's line (page 1), in memory
+        session->undo();  // the line saved before (page 2): through the journal, held up by the other writer's lock
+        QVERIFY(session->job_running());
+        // what can be redone, the next first: the line saved before, then this session's
+        const Session::History waiting = session->history();
+        QCOMPARE(waiting.later.size(), std::size_t{2});
+        QCOMPARE(waiting.later[0].ops[0].value("page", 0), 2);
+        QCOMPARE(waiting.later[1].ops[0].value("page", 0), 1);
+        std::string said;
+        try {
+            session->redo();
+        } catch (const genko::core::ApplyError& error) {
+            said = error.code();
+        }
+        other->release();
+        QVERIFY(session->wait_idle(10000ms));
+        session->save_now();
+        QVERIFY(session->wait_idle(10000ms));
+        QVERIFY2(session->status().kind == SaveKind::Saved, qPrintable(session->status().code + QStringLiteral(": ") + session->status().reason));
+        QCOMPARE(said, std::string("busy"));
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{0});
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{0});
+        // then in Python's order: the line saved before, then this session's
+        session->redo();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{0});
+        session->redo();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{1});
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{1});
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{1});
+        QVERIFY(!session->can_redo());
+        QCOMPARE(session->status().kind, SaveKind::Saved);
+    }
+
+    // The journal's undo still waiting (another save runs first): Redo takes it back before it is written — the change
+    // saved before this session comes back first, as Python's journal gives it — and the change undone in memory stays
+    // undone (not redone in its place, leaving the journal to undo the wrong one).
+    void aRedoBeforeTheJournalUndoStartsTakesItBack() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        {
+            auto before = Session::open(book, options);
+            before->apply(stroke_op(30, 2));
+            before->save_now();
+            QVERIFY(before->wait_saved(10000ms));
+        }
+        auto session = Session::open(book, options);
+        session->apply(stroke_op(30, 1));
+        auto other = std::make_unique<genko::storage::ProjectLock>(book, "ai:other");
+        other->try_acquire();
+        session->save_now();
+        QVERIFY(session->job_running());  // (the line's save, held up)
+        session->undo();  // this session's line
+        session->undo();  // the line saved before: its journal undo waits behind the save
+        session->redo();
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{0});
+        other->release();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(session->status().kind, SaveKind::Saved);
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{0});
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{1});
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{0});
+        session->redo();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{1});
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{1});
+        QVERIFY(!session->can_redo());
+    }
+
+    // Two changes saved before this session undone one after the other (a click two rows back in 履歴): both are
+    // undone through the journal, the second after the book was read again after the first; and redone again.
+    void twoJournalUndosInARow() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        for (const int page : {1, 2}) {
+            auto before = Session::open(book, options);
+            before->apply(stroke_op(30, page));
+            before->save_now();
+            QVERIFY(before->wait_saved(10000ms));
+        }
+        auto session = Session::open(book, options);
+        session->undo();
+        session->undo();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{0});
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{0});
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{0});
+        QCOMPARE(session->history().later.size(), std::size_t{2});
+        QVERIFY(!session->can_undo());
+        session->redo();
+        session->redo();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{1});
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{1});
+        QCOMPARE(ink_strokes(session->document(), 1), std::size_t{1});
+    }
+
+    // Undoing back through another person's change: the journal refuses it, said once, and the undos asked after it
+    // are not tried (Python's 履歴 stops at the first refusal); the book and what can be undone stay as they were.
+    void undoingThroughAnotherPersonsChangeStopsAtTheFirstRefusal() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        for (const char* who : {"human:tester", "ai:other"}) {
+            Session::Options as = options;
+            as.actor = who;
+            auto before = Session::open(book, as);
+            before->apply(stroke_op(30, std::string(who) == "ai:other" ? 2 : 1));
+            before->save_now();
+            QVERIFY(before->wait_saved(10000ms));
+        }
+        const std::int64_t revision = disk_revision(book);
+        auto session = Session::open(book, options);
+        QSignalSpy notices(session.get(), &Session::notice);
+        session->undo();
+        session->undo();
+        QVERIFY(session->wait_idle(10000ms));
+        QCOMPARE(notices.count(), 1);
+        QCOMPARE(disk_revision(book), revision);
+        QCOMPARE(session->waiting(), std::size_t{0});
+        QVERIFY(session->can_undo());
+        QCOMPARE(session->history().done.size(), std::size_t{2});
+        QCOMPARE(session->history().later.size(), std::size_t{0});
+        QCOMPARE(session->status().kind, SaveKind::Saved);
     }
 };
 

@@ -56,16 +56,24 @@ int decimal(std::uint32_t cp) {
     return -1;
 }
 
+// A page number as Python's int() reads it: its value, held at the largest (or smallest) an int64 holds when it is
+// beyond them (no book has such a page), and its digits as Python prints the number.
+struct PageNumber {
+    std::int64_t value = 0;
+    std::string text;
+};
+
 // int(text) for a page number: Python's whitespace around, a sign, decimal digits of any script with single "_"
 // between them; nothing when it is not one.
-std::optional<std::int64_t> py_int_text(std::string_view original) {
+std::optional<PageNumber> py_int_text(std::string_view original) {
     const std::string text = core::py_strip(original);
     std::size_t at = 0;
     bool negative = false;
     if (at < text.size() && (text[at] == '+' || text[at] == '-')) negative = text[at++] == '-';
     std::int64_t value = 0;
+    std::string digits;
+    bool beyond = false;
     bool digit_before = false;
-    bool any = false;
     while (at < text.size()) {
         if (text[at] == '_') {
             if (!digit_before) return std::nullopt;
@@ -76,14 +84,25 @@ std::optional<std::int64_t> py_int_text(std::string_view original) {
         std::size_t n = 1;
         const int d = decimal(code_point(text, at, n));
         if (d < 0) return std::nullopt;
-        if (value > (std::numeric_limits<std::int64_t>::max() - d) / 10) throw core::Error("format", "int(" + core::py_repr_str(original) + ") is too large for this build");
-        value = value * 10 + d;
+        beyond = beyond || value > (std::numeric_limits<std::int64_t>::max() - d) / 10;
+        if (!beyond) value = value * 10 + d;
+        if (!digits.empty() || d != 0) digits += static_cast<char>('0' + d);
         digit_before = true;
-        any = true;
         at += n;
     }
-    if (!any || !digit_before) return std::nullopt;
-    return negative ? -value : value;
+    if (!digit_before) return std::nullopt;
+    if (digits.empty()) digits = "0";
+    if (beyond) value = negative ? std::numeric_limits<std::int64_t>::min() : std::numeric_limits<std::int64_t>::max();
+    else if (negative) value = -value;
+    return PageNumber{value, (negative && digits != "0" ? "-" : "") + digits};
+}
+
+// a < b as numbers (two held at the same end: by their digits)
+bool smaller(const PageNumber& a, const PageNumber& b) {
+    if (a.value != b.value) return a.value < b.value;
+    if (a.text == b.text) return false;
+    if (a.text.size() != b.text.size()) return (a.text.size() < b.text.size()) != (a.value < 0);
+    return (a.text < b.text) != (a.value < 0);
 }
 
 }  // namespace
@@ -129,25 +148,27 @@ std::vector<std::int64_t> parse_pages(std::string_view text, std::int64_t count)
         const std::string part = core::py_strip(std::string_view(all).substr(start, comma == std::string::npos ? std::string::npos : comma - start));
         start = comma == std::string::npos ? all.size() + 1 : comma + 1;
         if (!part.empty()) {
-            std::int64_t first = 0, last = 0;
+            PageNumber first, last;
             const std::size_t dash = part.find('-');
             if (dash != std::string::npos) {
                 const auto a = py_int_text(std::string_view(part).substr(0, dash));
                 const auto b = py_int_text(std::string_view(part).substr(dash + 1));
                 if (!a || !b) throw core::PyValueError("ページの指定が読めません: " + part);
-                first = std::min(*a, *b);
-                last = std::max(*a, *b);
+                first = smaller(*b, *a) ? *b : *a;
+                last = smaller(*b, *a) ? *a : *b;
             } else {
                 const auto n = py_int_text(part);
                 if (!n) throw core::PyValueError("ページの指定が読めません: " + part);
                 first = last = *n;
             }
-            for (std::int64_t n = first; n <= last; ++n) {
+            // (a number past 64 bits is past the book: said with its digits, as Python says it)
+            if (!(1 <= first.value && first.value <= count)) throw core::PyValueError(first.text + " ページはありません（1〜" + std::to_string(count) + "）");
+            for (std::int64_t n = first.value; n <= last.value; ++n) {
                 if (!(1 <= n && n <= count)) {
                     throw core::PyValueError(std::to_string(n) + " ページはありません（1〜" + std::to_string(count) + "）");
                 }
                 if (std::find(out.begin(), out.end(), n) == out.end()) out.push_back(n);
-                if (n == last) break;  // (no overflow past the last)
+                if (n == last.value) break;  // (no overflow past the last)
             }
         }
         if (comma == std::string::npos) break;
@@ -181,6 +202,8 @@ std::int64_t default_dpi(const core::Document& episode, std::string_view key) {
 core::Json run(const core::Document& episode_in, const std::optional<std::filesystem::path>& project, std::string_view key,
                const std::filesystem::path& out, const RunOptions& o) {
     using core::Json;
+    // (a book whose pages are still being read: the ones not read yet would come out empty)
+    if (!episode_in.deferred.empty()) throw core::Error("page_not_loaded", "the book's pages are still being read: try again in a moment");
     const auto refuse = [](const std::string& error) { return Json{{"ok", false}, {"error", error}}; };
     const Format* fmt = format(key);
     if (fmt == nullptr) return refuse("知らない形式: " + std::string(key));
@@ -209,6 +232,7 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
     const std::int64_t dpi = o.dpi && *o.dpi != 0 ? *o.dpi : default_dpi(*episode, key);
     std::vector<std::filesystem::path> files;
     try {
+        if (std::find(fmt->options.begin(), fmt->options.end(), "dpi") != fmt->options.end()) check_dpi(dpi);  // (before anything is made)
         if (key == "pdf" || key == "tiff" || key == "png" || key == "cmyk") {
             files = export_print(*episode, out, std::string(key), dpi, 180, true, o.area, key == "cmyk" ? std::string("cmyk") : o.color, o.icc, o.screen);
         } else if (key == "layers") {

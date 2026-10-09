@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #include <jpeglib.h>
@@ -224,6 +225,10 @@ PngWriter::PngWriter(render::Size size, std::string_view mode, const PngSave& pa
     s.mode = std::string(mode);
     s.layout = png_mode(mode);
     if (size.width <= 0 || size.height <= 0) throw core::Error("value", "cannot write an empty image as PNG");
+    // (a row's bytes are counted in an int: a wider picture is refused before anything is made for it)
+    if ((static_cast<std::int64_t>(s.layout.bits) * size.width + 7) / 8 >= std::numeric_limits<int>::max()) {
+        throw core::Error("image_too_large", "image too large to write as PNG");
+    }
     s.out = "\x89PNG\r\n\x1a\n";
     std::string ihdr;
     put32(ihdr, static_cast<std::uint32_t>(size.width));

@@ -126,7 +126,8 @@ void MainWindow::build_tool_settings() {
                          action("act_merge"), action("act_delete_frame"), action("act_frame_selection"), action("act_template"),
                          action("act_save_template"), action("act_gutters"), QStringLiteral("枠線"), action("act_border"), action("act_no_border"),
                          static_cast<QWidget*>(menu_button(QStringLiteral("枠線の種類・色"), {kinds, {action("act_border_colour")}})), action("act_corner"),
-                         QStringLiteral("形"), action("act_bleed"), action("act_frame_numbers"),
+                         QStringLiteral("形"), action("act_bleed"), action("act_reset_shape"), action("act_frame_numbers"),
+                         QStringLiteral("原稿"), action("act_paper"),
                          static_cast<QWidget*>(note(QStringLiteral("コマを選ぶと、辺の中ほどの ◇ をドラッグで辺を曲げられます（外へふくらむ・内へへこむ）。")))}));
     // the selection
     marquee_mode_ = new QComboBox;

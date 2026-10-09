@@ -58,7 +58,9 @@ struct RunOptions {
 };
 
 // exporting.run: {"ok": true, "files": [...]} or {"ok": false, "error": …} (Python's ValueError and OSError become the
-// error; what this build does not do yet, render::NotYetPorted, too, with "code": "not_yet_ported"). `out` is a folder.
+// error; what this build does not do yet, render::NotYetPorted, too, with "code": "not_yet_ported"; a resolution past
+// 1 to 100000 dpi, formats::check_dpi). `out` is a folder. A book whose pages are still being read (Document::deferred:
+// the app's first page first) is not written from: core::Error("page_not_loaded") is thrown.
 core::Json run(const core::Document& episode, const std::optional<std::filesystem::path>& project, std::string_view key,
                const std::filesystem::path& out, const RunOptions& options = {});
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -33,6 +34,11 @@ namespace fs = std::filesystem;
 std::string safe_name(std::string_view text, std::string_view fallback = "genko");
 // export.stem: f"{safe_name(title)}_ep{episode:02d}" (PyValueError for an episode number that is a float).
 std::string stem(const core::Document& episode);
+
+// The resolutions the exports take: 1 to 100000 dpi (Python takes any int, and fails somewhere — or writes pictures of
+// one pixel). check_dpi: core::Error("value") "the resolution must be between 1 and 100000 dpi" past them.
+inline constexpr std::int64_t kMaxDpi = 100000;
+void check_dpi(std::int64_t dpi);
 
 inline constexpr std::array<std::string_view, 3> kAreas{"paper", "bleed", "trim"};
 inline constexpr std::array<std::string_view, 5> kColors{"auto", "rgb", "cmyk", "gray", "bitonal"};
@@ -101,6 +107,13 @@ std::vector<fs::path> export_psd_pages(const core::Document& episode, const fs::
 fs::path export_psd(const core::Document& episode, const fs::path& dest, std::int64_t dpi = 150, std::int64_t page = 1);
 
 namespace detail {
+class Output;
+// export_print with its files put into `output`, moved into place with the others of the export (the pack's); a PDF is
+// one file, moved into place by itself when it is whole.
+std::vector<fs::path> print_into(Output& output, const core::Document& episode, const fs::path& dest, std::string fmt,
+                                 std::optional<std::int64_t> dpi = std::nullopt, int threshold = 180, bool crop_marks = true,
+                                 std::string_view area = "paper", std::string_view color = "auto", const std::string& icc = {},
+                                 const std::optional<core::Json>& screen = std::nullopt);
 // f"{value:0{width}d}": the sign counted in the width (PyValueError for a float, as Python's format).
 std::string padded(const core::Num& value, std::size_t width);
 // Text as Path.write_text writes it ("\n" as "\r\n" on Windows).

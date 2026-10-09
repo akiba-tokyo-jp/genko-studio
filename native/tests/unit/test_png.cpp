@@ -1,6 +1,6 @@
 // render::read_png against Pillow: PNG files of every mode (saved by Pillow; one interlaced) read to the mode,
 // pixels and transparency Pillow reads, and converted to RGBA and L the same; broken files and huge sizes refused;
-// write_png keeps the pixels.
+// write_png keeps the pixels; the exports' row writer (formats::PngWriter) refuses rows wider than an int counts.
 
 #include <QtTest>
 
@@ -15,6 +15,7 @@
 #include "core/base64.hpp"
 #include "core/error.hpp"
 #include "core/command_bus.hpp"
+#include "formats/pillow_save.hpp"
 #include "render/png.hpp"
 #include "testsupport.hpp"
 
@@ -855,6 +856,26 @@ private slots:
             QCOMPARE(std::string(e.what()), std::string("Image size (178957000 pixels) exceeds limit of 178956970 pixels, could be "
                                                          "decompression bomb DOS attack."));
         }
+    }
+
+    // The exports' PNG writer (formats::PngWriter, a strip written row by row): a picture whose rows hold more bytes
+    // than an int counts is refused before anything is made for it (not cut to a smaller count).
+    void theRowWriterRefusesRowsPastAnInt() {
+        for (const auto& [width, mode] : {std::pair{1'000'000'000, "RGBA"}, std::pair{715'827'883, "RGB"}}) {
+            QString said;
+            try {
+                genko::formats::PngWriter writer(render::Size{width, 1}, mode);
+            } catch (const genko::core::Error& error) {
+                said = QString::fromStdString(error.code() + ": " + error.what());
+            } catch (const std::exception& error) {
+                said = QStringLiteral("std::exception: %1").arg(QString::fromUtf8(error.what()));
+            }
+            QCOMPARE(said, QStringLiteral("image_too_large: image too large to write as PNG"));
+        }
+        // (the widest that fits: made, its rows taken)
+        genko::formats::PngWriter fits(render::Size{3, 2}, "RGB");
+        fits.add(render::Image::create("RGB", render::Size{3, 2}, render::Ink{1, 2, 3}));
+        QVERIFY(fits.finish().starts_with("\x89PNG"));
     }
 };
 

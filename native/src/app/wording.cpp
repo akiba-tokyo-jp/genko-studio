@@ -115,6 +115,9 @@ const std::vector<Rule>& rules() {
         }));
         r.push_back(rule(R"(official export is not in the C\+\+ build yet)",
                          "この版の Genko では、まだ正式な書き出し（点検と書き出しの承認の記録）はできません。正式な書き出しを外すと書き出せます"));
+        // the exports' bounds (formats::check_dpi, render_page's and the strip's size)
+        r.push_back(rule("the resolution must be between 1 and 100000 dpi", "解像度は 1〜100000 dpi の間で決めます"));
+        r.push_back(rule("the (?:page|picture|strip) is too large at this resolution", "この解像度では絵が大きすぎて扱えません（解像度を下げてください）"));
         r.push_back(rule("the gradient needs a longer drag", "もう少し長くドラッグします"));
         r.push_back(rule("the book's pages are still being read: try again in a moment",
                          "原稿の残りのページを読み込み中です。読み込みが終わってから、もう一度操作してください"));

@@ -411,9 +411,8 @@ void MainWindow::connect_session() {
     Session* s = session_.get();
     session_links_.push_back(connect(s, &Session::changed, this, &MainWindow::on_book_changed));
     session_links_.push_back(connect(s, &Session::statusChanged, this, &MainWindow::refresh_status));
-    session_links_.push_back(connect(s, &Session::statusChanged, this, [this] {  // (a change saved: its time in 履歴)
-        if (history_dock_ != nullptr && history_dock_->isVisible()) history_timer_.start();
-    }));
+    // (a change saved: its time in 履歴)
+    session_links_.push_back(connect(s, &Session::statusChanged, this, [this] { history_follows(); }));
     session_links_.push_back(connect(s, &Session::conflicts, this, [this](const QStringList& messages) {
         QStringList lines;
         for (int i = 0; i < messages.size() && i < 8; ++i) lines << QStringLiteral("・%1").arg(wording::error(messages[i]));
@@ -430,6 +429,29 @@ void MainWindow::disconnect_session() {
 }
 
 bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids) {
+    // (a change that takes a while says so, with the busy cursor, while it is made: Python's SLOW_OPS)
+    static const std::map<std::string, QString> kSlow = {
+        {"trace_prims", QStringLiteral("3D を線にしています…")},          {"add_cover", QStringLiteral("表紙を作っています…")},
+        {"add_scene", QStringLiteral("3D の背景を置いています…")},        {"add_prim3d", QStringLiteral("3D を置いています…")},
+        {"pose_figure", QStringLiteral("3D のポーズを変えています…")},    {"pose_mannequin", QStringLiteral("3D のポーズを変えています…")},
+        {"import_pages", QStringLiteral("ページを取り込んでいます…")}};
+    struct Busy {
+        bool on = false;
+        ~Busy() {
+            if (on) QGuiApplication::restoreOverrideCursor();
+        }
+    } busy;
+    for (std::size_t i = 0; ops.is_array() && i < ops.size(); ++i) {
+        const Json& op = ops[i];
+        const auto name = op.is_object() ? op.find("op") : op.end();
+        const auto slow = name != op.end() && name->is_string() ? kSlow.find(name->get<std::string>()) : kSlow.end();
+        if (slow == kSlow.end()) continue;
+        status_->setText(QStringLiteral("<b>%1</b>").arg(slow->second));
+        QGuiApplication::setOverrideCursor(Qt::WaitCursor);
+        busy.on = true;
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);  // (shown before the work; no input taken meanwhile)
+        break;
+    }
     QElapsedTimer clock;
     clock.start();
     try {
@@ -698,7 +720,7 @@ void MainWindow::show_document(int index) {
     doc_tabs_->setTabText(index, doc.title());
     doc_tabs_->blockSignals(false);
     refresh_status();
-    output_panels_follow();  // (another book: its history; the checks of the last one are out of date)
+    output_panels_follow(true);  // (another book: its history at once; the checks of the last one are out of date)
 }
 
 void MainWindow::switch_document(int index) {

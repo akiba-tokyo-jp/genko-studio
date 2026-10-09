@@ -7,9 +7,11 @@
 //   - printing to a PDF: the sheets (a spread on one), each page's picture as render_page draws it at the printer's
 //     resolution as Python computes it, fitted or at its real size, centred; the dialog's pages, its words, its preview;
 //   - 履歴: the changes listed with Python's words (history.describe, the saved times), a click undoes or redoes to just
-//     after a change, the changes saved before this session and other people's;
+//     after a change, the changes saved before this session and other people's (in Python's order while the journal
+//     undoes), the list of the book in front;
 //   - 点検: the issues listed as Python lists them (the stopping ones first, by page), each shown on its page (its place
 //     marked, its line chosen, its layer drawn on), out of date after an edit; the select tool's page has the row;
+//   - nothing goes out of a book still being read, nor is it checked;
 //   - the phone screens (where they end down a tall page, kept as chosen), the scales (a guide pulled from each,
 //     add_ruler as Python's window sends it, none when let go on the scale or with the scales off).
 
@@ -50,6 +52,7 @@
 #include "app/print_dialog.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
+#include "app/wording.hpp"
 #include "core/pynum.hpp"
 #include "formats/checks.hpp"
 #include "formats/export.hpp"
@@ -899,6 +902,250 @@ private slots:
         QVERIFY(!c->show_scale);
         pull(QPointF(across.x(), 8), across, across);
         QCOMPARE(s.ops.size(), std::size_t{2});
+    }
+
+    // While the rest of a book is still being read (its first page shown first, SPEC PERF-01), nothing of it goes out
+    // and it is not checked — the pages not read yet would come out blank and be found empty: 書き出し, 印刷 and 入稿前の
+    // 点検 say so (as an op that reaches those pages is refused), and so do the 点検する button, printing and an export
+    // dialog holding such a book.
+    void nothingGoesOutWhileTheBookIsRead() {
+        QTemporaryDir tmp;
+        const fs::path path = gui_test::path_of(tmp.path() + QStringLiteral("/book.genko"));
+        const fs::path recovery = gui_test::path_of(tmp.path() + QStringLiteral("/recovery"));
+        gui_test::write_book(path, gui_test::new_doc(3));
+        {
+            auto drawing = app::Session::open(path, gui_test::quick(recovery));
+            for (int page = 1; page <= 3; ++page) {
+                drawing->apply(Json::array({Json{{"op", "add_stroke"}, {"page", page}, {"layer", "ink"},
+                                                 {"points", Json::array({Json::array({20, 30, 0.5}), Json::array({60, 90, 0.5})})}}}));
+            }
+            QVERIFY(drawing->wait_saved(std::chrono::milliseconds(10000)));
+        }
+        app::Session::Options options = gui_test::quick(recovery);
+        options.defer_pages = true;
+        options.read_rest_now = false;
+        auto session = app::Session::from(app::Session::read(path, options), path, options);
+        QVERIFY(session->loading());
+        Studio s(gui_test::new_doc(1), false);  // (the answers and the config folder; the window used is below)
+        app::MainWindow w(session);
+        w.resize(1280, 860);
+        w.show();
+        const QString wait = QStringLiteral("原稿の残りのページを読み込み中です。読み込みが終わってから、もう一度操作してください");
+        for (const char* name : {"act_export", "act_print", "act_checks"}) {
+            w.flash(QString(), 1, true);
+            w.action(QString::fromLatin1(name))->trigger();
+            QCOMPARE(w.last_error(), wait);
+        }
+        QVERIFY2(s.answers.asked.isEmpty(), qPrintable(s.answers.asked.join(QStringLiteral(" | "))));
+        w.checks()->run_button->click();
+        QCOMPARE(w.checks()->summary->text(), QStringLiteral("点検できませんでした。") + wait);
+        QCOMPARE(w.checks()->list->count(), 0);
+        QPrinter printer(QPrinter::ScreenResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        printer.setOutputFileName(tmp.path() + QStringLiteral("/print.pdf"));
+        QString printed;
+        try {
+            app::printing::print_pages(*session->snapshot(), printer, {1, 2, 3});
+        } catch (const core::Error& e) {
+            printed = QString::fromStdString(e.code());
+        }
+        QCOMPARE(printed, QStringLiteral("page_not_loaded"));
+        app::ExportDialog dialog(&w, session->snapshot(), session->path(), session->actor());
+        dialog.folder->setText(tmp.path() + QStringLiteral("/out"));
+        dialog.run();
+        QCOMPARE(s.answers.asked, QStringList{QStringLiteral("Genko: ") + wait});
+        QVERIFY(!QFileInfo::exists(tmp.path() + QStringLiteral("/out")));
+        // read whole: checked
+        session->read_rest();
+        QVERIFY(gui_test::wait_for([&] { return !session->loading(); }));
+        w.action(QStringLiteral("act_checks"))->trigger();
+        QVERIFY(w.checks()->report().has_value());
+    }
+
+    // 履歴 while the journal undoes a change saved before this session (a click back past this session's changes,
+    // its undo held up by another writer): what can be redone is listed in the order Redo takes it — the journal's
+    // change first, then this session's (as Python's journal gives them back) —, a click forward while that undo is
+    // written waits (said; nothing changed), and the book is saved as before (no change it cannot take held back);
+    // then forward again in that order.
+    void historyWhileTheJournalUndoes() {
+        QTemporaryDir tmp;
+        const fs::path path = gui_test::path_of(tmp.path() + QStringLiteral("/book.genko"));
+        const fs::path recovery = gui_test::path_of(tmp.path() + QStringLiteral("/recovery"));
+        gui_test::write_book(path, gui_test::new_doc(2));
+        {
+            auto options = gui_test::quick(recovery);
+            options.actor = "ai:hermes";
+            auto other = app::Session::open(path, options);
+            other->apply(Json::array({Json{{"op", "add_page"}, {"count", 1}}}));
+            QVERIFY(other->wait_saved(std::chrono::milliseconds(10000)));
+        }
+        {
+            auto mine = app::Session::open(path, gui_test::quick(recovery));
+            mine->apply(Json::array({Json{{"op", "set_nombre"}, {"show", true}}}));
+            QVERIFY(mine->wait_saved(std::chrono::milliseconds(10000)));
+        }
+        Studio s(gui_test::new_doc(1), false);  // (the answers and the config folder; the window used is below)
+        auto session = app::Session::open(path, gui_test::quick(recovery));
+        app::MainWindow w(session);
+        w.resize(1280, 860);
+        w.show();
+        w.action(QStringLiteral("act_history"))->trigger();
+        app::HistoryPanel* panel = w.history();
+        QListWidget* list = panel->list();
+        const auto texts = [&] {
+            QStringList out;
+            for (int i = 0; i < list->count(); ++i) out << list->item(i)->text();
+            return out;
+        };
+        const auto click = [&](int row) {
+            list->scrollToItem(list->item(row));
+            QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, list->visualItemRect(list->item(row)).center());
+        };
+        QVERIFY(w.apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", gui_test::ink_of(w.book().page(0))->id},
+                                              {"points", Json::array({Json::array({10, 10, 0.5}), Json::array({50, 60, 0.5})})}}})));
+        QVERIFY(w.apply_ops(Json::array({Json{{"op", "split_frame"}, {"page", 1}, {"frame_id", w.book().page(0).leaf_frames().front()->id},
+                                              {"axis", "horizontal"}}})));
+        QVERIFY(session->wait_saved(std::chrono::milliseconds(10000)));
+        QVERIFY(gui_test::wait_for([&] { return texts().size() == 5 && texts()[4].startsWith(QStringLiteral("▶ コマを割った　")); }));
+        auto other = std::make_unique<storage::ProjectLock>(path, "ai:other");
+        other->try_acquire();
+        click(1);
+        QCOMPARE(panel->done(), 1);
+        QVERIFY(session->job_running());
+        const QStringList waiting = texts();
+        QVERIFY2(waiting.size() == 5 && waiting[2].startsWith(QStringLiteral("ノンブルを変えた（戻した操作）")) &&
+                     waiting[3].startsWith(QStringLiteral("ペンで描いた（戻した操作）")) && waiting[4].startsWith(QStringLiteral("コマを割った（戻した操作）")),
+                 qPrintable(waiting.join(QStringLiteral(" | "))));
+        click(3);
+        QCOMPARE(panel->done(), 1);
+        QCOMPARE(w.last_error(), QStringLiteral("取り消しを原稿に書き込み中です。書き終わってからやり直してください。"));
+        other->release();
+        QVERIFY(gui_test::wait_for([&] { return session->wait_idle(std::chrono::milliseconds(50)); }));
+        QVERIFY2(session->status().kind == app::SaveKind::Saved, qPrintable(session->status().code));
+        QVERIFY(!w.book().nombre.value("show", false));
+        QCOMPARE(gui_test::ink_strokes(w.book(), 0), std::size_t{0});
+        // forward to just after the line: the nombre, then the line; the split stays undone
+        QVERIFY(gui_test::wait_for([&] { return texts().size() == 5 && texts()[1].startsWith(QStringLiteral("▶ ページを足した")); }));
+        click(3);
+        QVERIFY(gui_test::wait_for([&] { return session->wait_idle(std::chrono::milliseconds(50)) && gui_test::ink_strokes(w.book(), 0) == 1; }));
+        QVERIFY(w.book().nombre.value("show", false));
+        QCOMPARE(w.book().page(0).leaf_frames().size(), std::size_t{1});
+        QCOMPARE(session->status().kind, app::SaveKind::Saved);
+        QVERIFY2(gui_test::wait_for([&] {
+                     return texts().size() == 5 && texts()[3].startsWith(QStringLiteral("▶ ペンで描いた")) &&
+                            texts()[4].startsWith(QStringLiteral("コマを割った（戻した操作）"));
+                 }),
+                 qPrintable(texts().join(QStringLiteral(" | "))));
+    }
+
+    // 履歴 follows the book in front: another book's tab brings its list at once (a click on it is about that book),
+    // and while the panel is behind another tab it is not read again after each change — only when it comes back.
+    void historyFollowsTheBookInFront() {
+        Studio s(gui_test::new_doc(2));
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        QVERIFY(s.saved());
+        s.act("act_history")->trigger();
+        QListWidget* list = s.window->history()->list();
+        QVERIFY(gui_test::wait_for([&] { return list->count() == 2; }));
+        const fs::path second = gui_test::path_of(s.tmp.path() + QStringLiteral("/second.genko"));
+        gui_test::write_book(second, gui_test::new_doc(1));
+        s.window->add_document(app::Session::open(second, gui_test::quick(gui_test::path_of(s.tmp.path() + QStringLiteral("/recovery2")))));
+        QCOMPARE(s.window->current_document(), 1);
+        QCOMPARE(list->count(), 1);  // (its own: nothing done in it yet)
+        s.window->switch_document(0);
+        QCOMPARE(s.window->current_document(), 0);
+        QCOMPARE(list->count(), 2);
+        // behind the page list: left as it is until it is in front again
+        s.dock(QStringLiteral("ページ"))->raise();
+        QVERIFY(gui_test::wait_for([&] { return s.dock(QStringLiteral("履歴"))->geometry().right() < 0; }));
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        QTest::qWait(400);
+        QCOMPARE(list->count(), 2);
+        s.dock(QStringLiteral("履歴"))->raise();
+        QVERIFY(gui_test::wait_for([&] { return list->count() == 3; }));
+    }
+
+    // 印刷のプレビュー of a book with something this build does not draw yet: said before the preview opens (an empty
+    // preview, and its own 印刷 button printing nothing, would say nothing); a sheet that cannot be drawn at the
+    // printer's resolution, said after the preview has tried it.
+    void printPreviewSaysWhatItCannotDraw() {
+        core::Document book = gui_test::new_doc(2);
+        core::Layer placed;
+        placed.id = "placed000001";
+        placed.kind = core::LayerKind::Placed;
+        book.edit_page(1).layers.push_back(placed);
+        Studio s(book);
+        bool seen = false;
+        s.on_print = [&](app::PrintDialog* d) {
+            seen = true;
+            QVERIFY(d->preview() == nullptr);
+            QCOMPARE(s.answers.asked.size(), 2);
+            QVERIFY2(s.answers.asked[1].startsWith(QStringLiteral("印刷: この版の Genko では、まだ扱えないもの（")), qPrintable(s.answers.asked[1]));
+            d->pages->setText(QStringLiteral("1"));  // (the page this build draws: its preview)
+            QPrintPreviewDialog* preview = d->preview();
+            QVERIFY(preview != nullptr);
+            preview->close();
+        };
+        s.act("act_print")->trigger();
+        QVERIFY(seen);
+        // a page too large to draw at the printer's resolution (2 m square): the preview opens, then says why it is empty
+        Studio huge(core::new_episode("大きな紙", core::Num(1), 1, core::PageSpec::custom(2000, 2000, 1990, 1990, 2, 5, 5, 4, 4, 600)));
+        bool opened = false;
+        huge.on_print = [&](app::PrintDialog* d) {
+            QPrintPreviewDialog* preview = d->preview();
+            opened = preview != nullptr;
+            if (!opened) return;
+            QVERIFY2(gui_test::wait_for([&] { return huge.answers.asked.size() >= 2; }), qPrintable(huge.answers.asked.join(QStringLiteral(" | "))));
+            QCOMPARE(huge.answers.asked[1], QStringLiteral("印刷: この解像度では絵が大きすぎて扱えません（解像度を下げてください）"));
+            preview->close();
+        };
+        huge.act("act_print")->trigger();
+        QVERIFY(opened);
+    }
+
+    // A filter plugin's correction layer (plugins off): printing says it as the plugin's refusal (not as something
+    // this build does not draw); one not installed does nothing, as in Python, and the page prints.
+    void printingSaysAPluginsOwnRefusal() {
+        const QString plugins = gui_test::config_folder().path() + QStringLiteral("/plugins");
+        QVERIFY(QDir().mkpath(plugins));
+        {
+            QFile file(plugins + QStringLiteral("/offplug.py"));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("NAME = 'off'\n\ndef run(image, **kw):\n    return image\n");
+        }
+        core::Document book = gui_test::new_doc(2);
+        for (const auto& [page, kind] : {std::pair{0, "plugin:offplug"}, std::pair{1, "plugin:absent"}}) {
+            core::Layer adjust;
+            adjust.id = "adjust00000" + std::to_string(page);
+            adjust.kind = core::LayerKind::Adjust;
+            adjust.adjust = Json{{"kind", kind}};
+            book.edit_page(static_cast<std::size_t>(page)).layers.push_back(adjust);
+        }
+        Studio s(book);
+        const auto print = [&](std::int64_t page) {
+            QPrinter printer(QPrinter::ScreenResolution);
+            printer.setOutputFormat(QPrinter::PdfFormat);
+            printer.setOutputFileName(s.tmp.path() + QStringLiteral("/p%1.pdf").arg(page));
+            try {
+                return QString::number(app::printing::print_pages(s.doc(), printer, {page}));
+            } catch (const core::Error& e) {
+                return app::wording::error(QString::fromUtf8(e.what()));
+            }
+        };
+        QCOMPARE(print(1), QStringLiteral("プラグイン「offplug」は使う設定になっていません（レイヤー → プラグインの設定で選びます）"));
+        QCOMPARE(print(2), QStringLiteral("1"));
+        QFile::remove(plugins + QStringLiteral("/offplug.py"));
+    }
+
+    // A book without pages: its export dialog opens, with nothing to show.
+    void exportDialogOfABookWithoutPages() {
+        Studio s;
+        core::Document empty = gui_test::new_doc(1);
+        empty.pages.clear();
+        app::ExportDialog dialog(s.window.get(), std::make_shared<const core::Document>(empty), std::nullopt, "human:tester");
+        QVERIFY(dialog.preview->pixmap().isNull());
+        dialog.format->setCurrentIndex(dialog.format->findData(QStringLiteral("pdf")));
+        QVERIFY(dialog.preview->pixmap().isNull());
     }
 };
 

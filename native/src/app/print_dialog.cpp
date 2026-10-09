@@ -98,21 +98,36 @@ int print_dpi(const QPrinter& printer) {
     return std::max(150, std::min(kMaxDpi, resolution != 0 ? resolution : 300));
 }
 
-int print_pages(const core::Document& episode, QPrinter& printer, const std::vector<std::int64_t>& pages, const QString& area,
-                const std::function<void(int, int)>& progress, const QString& scale, bool spreads,
-                const std::function<void(const QImage&, const QRectF&)>& sheet) {
-    const int dpi = print_dpi(printer);
-    const auto groups = sheets(episode, pages, spreads);
+void check_pages(const core::Document& episode, const std::vector<std::int64_t>& pages, bool spreads) {
+    // (a book whose pages are still being read: the ones not read yet would print blank)
+    if (!episode.deferred.empty()) throw core::Error("page_not_loaded", "the book's pages are still being read: try again in a moment");
     // (what this build does not draw yet is said before any paper is used: a quick look at each page first)
-    for (const auto& group : groups) {
+    for (const auto& group : sheets(episode, pages, spreads)) {
         for (const core::Page* page : group) {
             render::RenderOptions look;
             look.mode = "print";
             look.skip_unported = true;
             const auto seen = render::render_page(*page, 10, look, &episode);
-            if (!seen.omitted.empty()) throw render::NotYetPorted(seen.omitted.front());
+            for (const std::string& element : seen.omitted) {
+                if (!element.starts_with("plugin_")) throw render::NotYetPorted(element);
+            }
+            if (!seen.omitted.empty()) {
+                // a filter plugin left out on screen (not chosen, or its runner in trouble): drawn as it prints, so its
+                // own refusal is said (one not installed does nothing, as in Python)
+                render::RenderOptions output;
+                output.mode = "print";
+                (void)render::render_page(*page, 10, output, &episode);
+            }
         }
     }
+}
+
+int print_pages(const core::Document& episode, QPrinter& printer, const std::vector<std::int64_t>& pages, const QString& area,
+                const std::function<void(int, int)>& progress, const QString& scale, bool spreads,
+                const std::function<void(const QImage&, const QRectF&)>& sheet) {
+    const int dpi = print_dpi(printer);
+    check_pages(episode, pages, spreads);
+    const auto groups = sheets(episode, pages, spreads);
     QPainter painter;
     if (!painter.begin(&printer)) throw core::Error("value", "プリンターを開けませんでした");
     int done = 0;
@@ -212,7 +227,7 @@ void PrintDialog::print(QPrinter* given) {
     std::vector<std::int64_t> wanted;
     try {
         wanted = chosen();
-    } catch (const core::Error& error) {
+    } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("印刷"), QString::fromUtf8(error.what()).replace(QStringLiteral("書き出す"), QStringLiteral("印刷する")));
         return;
     }
@@ -231,7 +246,7 @@ void PrintDialog::print(QPrinter* given) {
     try {
         printed = printing::print_pages(window_->book(), *printer, wanted, area->currentData().toString(), {}, scale->currentData().toString(),
                                         spreads->isChecked());
-    } catch (const core::Error& error) {
+    } catch (const std::exception& error) {
         unsetCursor();
         ask::warning(this, QStringLiteral("印刷"), wording::error(QString::fromUtf8(error.what())));
         return;
@@ -245,8 +260,18 @@ QPrintPreviewDialog* PrintDialog::preview() {
     std::vector<std::int64_t> wanted;
     try {
         wanted = chosen();
-    } catch (const core::Error& error) {
+    } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("印刷"), QString::fromUtf8(error.what()).replace(QStringLiteral("書き出す"), QStringLiteral("印刷する")));
+        return nullptr;
+    }
+    const QString chosen_area = area->currentData().toString();
+    const QString chosen_scale = scale->currentData().toString();
+    const bool both = spreads->isChecked();
+    const DocPtr book = window_->session().snapshot();
+    try {  // (what stops the print is said before the preview opens: not an empty preview)
+        printing::check_pages(*book, wanted, both);
+    } catch (const std::exception& error) {
+        ask::warning(this, QStringLiteral("印刷"), wording::error(QString::fromUtf8(error.what())));
         return nullptr;
     }
     auto* printer = new QPrinter(QPrinter::HighResolution);
@@ -254,15 +279,13 @@ QPrintPreviewDialog* PrintDialog::preview() {
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     connect(dialog, &QObject::destroyed, this, [printer] { delete printer; });
     dialog->setWindowTitle(QStringLiteral("印刷のプレビュー"));
-    const QString chosen_area = area->currentData().toString();
-    const QString chosen_scale = scale->currentData().toString();
-    const bool both = spreads->isChecked();
-    const DocPtr book = window_->session().snapshot();
-    connect(dialog, &QPrintPreviewDialog::paintRequested, this, [book, wanted, chosen_area, chosen_scale, both](QPrinter* p) {
+    connect(dialog, &QPrintPreviewDialog::paintRequested, this, [this, book, wanted, chosen_area, chosen_scale, both](QPrinter* p) {
         try {
             printing::print_pages(*book, *p, wanted, chosen_area, {}, chosen_scale, both);
-        } catch (const core::Error&) {
-            // (the preview stays empty: printing says why)
+        } catch (const std::exception& error) {
+            // (the sheets could not be drawn — the preview stays empty, its 印刷 prints nothing: said once it has painted)
+            const QString why = wording::error(QString::fromUtf8(error.what()));
+            QMetaObject::invokeMethod(this, [this, why] { ask::warning(this, QStringLiteral("印刷"), why); }, Qt::QueuedConnection);
         }
     });
     dialog->open();

@@ -293,7 +293,7 @@ void ExportDialog::show_preview() {
     std::vector<std::int64_t> chosen;
     try {
         chosen = pages();
-    } catch (const core::Error& error) {
+    } catch (const std::exception& error) {
         preview->clear();
         preview_note->setText(QString::fromUtf8(error.what()));
         return;
@@ -353,7 +353,7 @@ void ExportDialog::pick_icc() {
     bool ok = false;
     try {
         ok = render::colour::is_cmyk_profile(core::path_from_utf8(path.toStdString()));
-    } catch (const core::Error& error) {
+    } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
         return;
     }
@@ -400,11 +400,15 @@ fs::path ExportDialog::out() const {
 }
 
 void ExportDialog::run() {
+    if (!episode_->deferred.empty()) {  // (a book whose pages are still being read: the ones not read yet would come out empty)
+        ask::warning(this, QStringLiteral("Genko"), wording::error(QStringLiteral("the book's pages are still being read: try again in a moment")));
+        return;
+    }
     const fs::path dest = out();
     std::vector<std::int64_t> chosen;
     try {
         chosen = pages();
-    } catch (const core::Error& error) {
+    } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("Genko"), QString::fromUtf8(error.what()));
         return;
     }
@@ -412,7 +416,7 @@ void ExportDialog::run() {
         Json report;
         try {
             report = formats::checks::book(*episode_, project_);
-        } catch (const core::Error& error) {
+        } catch (const std::exception& error) {
             ask::warning(this, QStringLiteral("Genko"), QStringLiteral("書き出す前の点検ができませんでした。\n") + wording::error(QString::fromUtf8(error.what())));
             return;
         }
@@ -440,7 +444,7 @@ void ExportDialog::run() {
     Json reply;
     try {
         reply = formats::run(*episode_, project_, format->currentData().toString().toStdString(), dest, o);
-    } catch (const core::Error& error) {  // (what Python would stop on with a traceback: said, in Japanese)
+    } catch (const std::exception& error) {  // (what Python would stop on with a traceback: said, in Japanese)
         reply = Json{{"ok", false}, {"error", error.what()}};
     }
     unsetCursor();

@@ -149,6 +149,8 @@ private slots:
         QTest::newRow("screen-lpi") << "mono" << "o" << QStringList{"--format", "tiff", "--dpi", "40", "--screen-lpi", "5"};
         QTest::newRow("rgb-profile") << "colour" << "o" << QStringList{"--format", "pdf", "--color", "cmyk", "--icc", scratch_.path() + "/srgb.icc", "--dpi", "40"};
         QTest::newRow("no-book") << "nowhere" << "o" << QStringList{"--dpi", "40"};
+        // (a resolution the format does not take: left alone, as Python leaves it)
+        QTest::newRow("sns-dpi") << "mono" << "o" << QStringList{"--format", "sns", "--long-edge", "120", "--dpi", "-5"};
     }
 
     void formats() {
@@ -172,6 +174,42 @@ private slots:
         }
         same("timelapse-gif", lapse, "t.gif", {"--format", "timelapse", "--fps", "4"});
         same("timelapse-page", lapse, "o", {"--format", "timelapse", "--page", "2", "--seconds", "1"});
+    }
+
+    // A title as long as a file name allows (80 Japanese characters, the names of the files 249 to 254 bytes): the files
+    // written as Python writes them.
+    void aLongTitle() {
+        const QString book = scratch_.path() + "/long.genko";
+        const auto made = python({"new", book, "--title", QString(80, QChar(0x3042)), "--pages", "2", "--paper", "a5"});
+        QVERIFY2(made.finished && made.exit_code == 0, made.err.right(3000).constData());
+        same("long-title-png", book, "o", {"--dpi", "20"});
+        same("long-title-pdf", book, "o", {"--format", "pdf", "--dpi", "20"});
+    }
+
+    // A resolution past what an export takes (1 to 100000 dpi), for every format that takes one: refused before
+    // anything is drawn or written, as a JSON error, exit 1 (Python takes any int: a traceback, or pictures of a pixel).
+    void resolutionsOutOfRange_data() {
+        QTest::addColumn<QString>("book");
+        QTest::addColumn<QStringList>("options");
+        for (const char* format : {"png", "pdf", "tiff", "cmyk", "layers", "psd", "pack", "epub", "strip", "animation"}) {
+            for (const char* dpi : {"-5", "100001"}) {
+                QStringList options{"--format", format, "--dpi", dpi};
+                if (std::string(format) == "animation") options << "--page" << "2";
+                QTest::newRow(qPrintable(QStringLiteral("%1 %2").arg(format, dpi))) << (std::string(format) == "animation" ? "anim" : "mono") << options;
+            }
+        }
+    }
+
+    void resolutionsOutOfRange() {
+        QFETCH(QString, book);
+        QFETCH(QStringList, options);
+        const QString dir = scratch_.path() + "/resolution/" + QString::fromUtf8(QTest::currentDataTag()).replace(' ', '_');
+        const auto got = cpp(QStringList{"export", this->book(book), dir + "/o"} + options);
+        QVERIFY(got.finished);
+        QCOMPARE(got.exit_code, 1);
+        QCOMPARE(genko::core::parse_python_json(got.out.toStdString()),
+                 (Json{{"ok", false}, {"error", "the resolution must be between 1 and 100000 dpi"}, {"code", "value"}}));
+        QVERIFY2(!QFileInfo::exists(dir), qPrintable(dir));
     }
 
     // Usage errors: exit 2 on both, nothing written.

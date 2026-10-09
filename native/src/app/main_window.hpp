@@ -386,7 +386,8 @@ private:
     // 書き出し, 印刷, 履歴, 入稿前の点検, the phone screens and the scales (main_window_output.cpp)
     void build_output_actions();
     void build_output_docks();
-    void output_panels_follow();
+    void output_panels_follow(bool now = false);
+    void history_follows(bool now = false);
     void run_checks();
     void export_book();
     void print_book();

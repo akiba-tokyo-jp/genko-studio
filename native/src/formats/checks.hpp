@@ -32,6 +32,7 @@ core::Json page_issues(const core::Document& episode, const core::Page& page);
 
 // checks.book(episode, project): {"ok", "issues", "errors", "warnings"} — every page's issues, then the studio
 // preflight's errors and warnings when the book is a studio project and `project` (its folder) is given.
+// core::Error("page_not_loaded") for a book whose pages are still being read (Document::deferred).
 core::Json book(const core::Document& episode, const std::optional<std::filesystem::path>& project = std::nullopt);
 
 // genko/studio/preflight.check(episode, project) with its defaults: {"errors": [...], "warnings": [...]}, each

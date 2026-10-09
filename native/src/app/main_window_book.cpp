@@ -8,7 +8,9 @@
 #include <QFileInfo>
 
 #include <filesystem>
+#include <optional>
 #include <system_error>
+#include <vector>
 
 #include "app/ask.hpp"
 #include "app/book_dialogs.hpp"
@@ -22,6 +24,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"
+#include "core/pyops.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/reader.hpp"
 
@@ -50,6 +53,51 @@ bool same_folder(const fs::path& a, const fs::path& b) {
     const fs::path x = fs::weakly_canonical(a, ea);
     const fs::path y = fs::weakly_canonical(b, eb);
     return !ea && !eb && x == y;
+}
+
+// The file named by an asset ref in a book's assets/ (any suffix, as studio_ops._require_asset finds one), or none.
+std::optional<fs::path> asset_file(const fs::path& book, const std::string& ref) {
+    const std::string digest = ref.substr(7);
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(book / "assets" / digest.substr(0, 2), ec)) {
+        std::error_code type_ec;
+        if (core::path_to_utf8(entry.path().filename()).starts_with(digest) && entry.is_regular_file(type_ec)) return entry.path();
+    }
+    return std::nullopt;
+}
+
+// The asset files the pages taken in refer to without holding them that this book still does not have once
+// storage::copy_assets has copied (it leaves out a link and a file that does not hold what its name says): their places
+// in the other book. A placed picture (read from assets/ when the page is drawn) and the other book's studio list of
+// pictures (import_pages adds the entries this book's list lacks); a page's pixels, masks and strokes come with it.
+std::vector<fs::path> not_copied(const core::Document& other, const std::optional<std::vector<std::int64_t>>& pages, const core::Document& here,
+                                 const fs::path& src, const fs::path& dest) {
+    const storage::AssetStore theirs(src);
+    const storage::AssetStore mine(dest);
+    std::vector<fs::path> missing;
+    std::vector<const core::Page*> taken;
+    if (pages) {
+        for (const std::int64_t n : *pages) taken.push_back(numbered(other, Num(n)));
+    } else {
+        for (const auto& page : other.pages) taken.push_back(page.get());
+    }
+    for (const core::Page* page : taken) {
+        if (page == nullptr) continue;  // (import_pages says it has no such page)
+        for (const core::Layer& layer : page->layers) {
+            if (layer.kind == core::LayerKind::Placed && layer.asset && storage::AssetStore::is_ref(*layer.asset) && !mine.has(*layer.asset, ".png")) {
+                missing.push_back(theirs.path(*layer.asset, ".png"));
+            }
+        }
+    }
+    const Json* listed = other.studio.is_object() ? core::get(other.studio, "assets") : nullptr;
+    const Json* ours = here.studio.is_object() ? core::get(here.studio, "assets") : nullptr;
+    if (listed != nullptr && listed->is_object()) {
+        for (const auto& [ref, info] : listed->items()) {
+            if (!storage::AssetStore::is_ref(ref) || (ours != nullptr && ours->is_object() && ours->contains(ref)) || asset_file(dest, ref)) continue;
+            missing.push_back(asset_file(src, ref).value_or(src / "assets" / ref.substr(7, 2) / ref.substr(7)));
+        }
+    }
+    return missing;
 }
 
 // Why the other book's asset files could not be copied, in the person's words: one too large (wording's own words), or
@@ -200,7 +248,8 @@ void MainWindow::assignee_dialog() {
 
 // ほかの原稿のページを取り込む… (_merge_book, 作品の結合): another book's pages (all, or some) after this one's. Its asset
 // files are copied into this book first (merge.copy_assets: storage::copy_assets, which takes only files laid out as
-// assets that hold what their names say, and follows no link), then the pages go in by import_pages.
+// assets that hold what their names say, and follows no link), then the pages go in by import_pages — unless one of
+// them would refer to a picture this book still does not have (Python copies every file as it is): refused, said.
 void MainWindow::merge_book() {
     if (!session_->path()) {
         flash(QStringLiteral("取り込む前に、この原稿を保存します（ファイル → 別の場所に保存）"), 6000);
@@ -208,7 +257,7 @@ void MainWindow::merge_book() {
     }
     const Asked asked = asking();
     const QString folder = ask::existing_dir(this, QStringLiteral("ページを取り込む原稿（.genko のフォルダ）"));
-    if (folder.isEmpty()) return;
+    if (folder.isEmpty() || !still(asked)) return;
     const std::string from = python_path_text(folder);  // (str(Path(folder)))
     const fs::path src = core::path_from_utf8(from);
     std::error_code ec;
@@ -220,12 +269,14 @@ void MainWindow::merge_book() {
         flash(QStringLiteral("同じ原稿は取り込めません（ページの複製を使います）"), 5000);
         return;
     }
-    std::int64_t count = 0;
+    std::optional<core::Document> other;
     try {
-        const storage::LoadResult loaded = storage::load_document(src);
-        // (a book this build can only open read-only cannot be taken in either: import_pages refuses it)
-        if (!loaded.document.read_only_reason.empty()) throw core::Error("read_only", loaded.document.read_only_reason);
-        count = static_cast<std::int64_t>(loaded.document.pages.size());
+        storage::LoadResult loaded = storage::load_document(src);
+        // (a book this build can only open read-only cannot be taken in either: import_pages refuses it, in these words)
+        if (!loaded.document.read_only_reason.empty()) {
+            throw core::Error("read_only", "the other book cannot be read (" + loaded.document.read_only_reason + ")");
+        }
+        other = std::move(loaded.document);
     } catch (const std::exception& error) {
         // (Python says the reader's own words; in the person's words where there are some)
         const QString why = QString::fromUtf8(error.what());
@@ -233,6 +284,7 @@ void MainWindow::merge_book() {
         flash(QStringLiteral("その原稿を読めませんでした:\n%1").arg(said.startsWith(QStringLiteral("この操作はできませんでした")) ? why : said), 6000, true);
         return;
     }
+    const auto count = static_cast<std::int64_t>(other->pages.size());
     const auto text = ask::get_text(this, QStringLiteral("作品の結合"), QStringLiteral("取り込むページ（1〜%1。例: 1-4, 7。空ならすべて）").arg(count));
     if (!text || !still(asked)) return;
     std::optional<std::vector<std::int64_t>> pages;
@@ -252,6 +304,12 @@ void MainWindow::merge_book() {
         storage::copy_assets(src, *session_->path());
     } catch (const core::Error& error) {
         flash(copy_refusal(error), 6000, true);
+        return;
+    }
+    if (const auto missing = not_copied(*other, pages, book(), src, *session_->path()); !missing.empty()) {
+        flash(QStringLiteral("取り込む原稿の素材ファイル（%1）を、この原稿に写せないため取り込めません（リンクや、名前と中身の違うファイルは写しません）")
+                  .arg(QString::fromStdString(core::path_to_utf8(missing.front()))),
+              6000, true);
         return;
     }
     const std::size_t before = book().pages.size();

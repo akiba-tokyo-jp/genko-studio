@@ -20,6 +20,8 @@ namespace genko::formats::detail {
 void make_dirs(const std::filesystem::path& dir);
 
 // A file written in parts: beside `dest`, under a name nothing else uses, until it is moved into place.
+class Output;
+
 class PartFile {
 public:
     explicit PartFile(std::filesystem::path dest);
@@ -38,6 +40,8 @@ public:
     const std::filesystem::path& dest() const { return dest_; }
 
 private:
+    friend class Output;
+
     std::filesystem::path dest_;
     std::filesystem::path part_;
     std::ofstream file_;
@@ -47,7 +51,9 @@ private:
 
 // The files of one export: each written whole beside its place as it is made (put), all moved into place together
 // (commit), in the order they were put (a later file of the same name in place of an earlier one, as Python's writes
-// leave it). Those not committed are removed.
+// leave it). Those not committed are removed. A place a file cannot go to (a folder there) is found before any file
+// is moved; a file that still cannot be moved in puts back the ones moved before it (the files there before are kept
+// aside until all are in).
 class Output {
 public:
     Output() = default;

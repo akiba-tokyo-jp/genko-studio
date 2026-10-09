@@ -72,7 +72,6 @@ constexpr int kQuickDpi = 32;  // at or below this lines are drawn as plain poly
 constexpr std::size_t kRoughFrom = 300;
 constexpr std::size_t kStrokeCacheSize = 12;
 constexpr std::int64_t kStrokeCachePixels = 80'000'000;
-constexpr std::int64_t kMaxAreaPixels = 1'500'000'000;
 
 bool guide_role(LayerRole role) { return role == LayerRole::Name || role == LayerRole::Draft; }
 

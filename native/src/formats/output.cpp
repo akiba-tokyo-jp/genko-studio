@@ -4,6 +4,7 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <optional>
 #include <system_error>
 
 #include "core/error.hpp"
@@ -20,13 +21,15 @@ namespace {
     throw core::Error("io", storage::os_error_text(ec.value() != 0 ? ec.value() : EIO, path));
 }
 
-fs::path part_beside(const fs::path& dest) {
+// A name beside `dest` nothing else uses, of its own length whatever the name of `dest` (one of 255 bytes too has
+// room for its file in the making): .genko-<16 hex><ext>.
+fs::path beside(const fs::path& dest, std::string_view ext) {
     for (;;) {
         char hex[17];
         std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(QRandomGenerator::system()->generate64()));
-        const fs::path part = dest.parent_path() / core::path_from_utf8("." + core::path_to_utf8(dest.filename()) + "." + hex + ".part");
+        const fs::path path = dest.parent_path() / core::path_from_utf8(".genko-" + std::string(hex) + std::string(ext));
         std::error_code ignored;
-        if (!fs::exists(part, ignored)) return part;
+        if (!fs::exists(fs::symlink_status(path, ignored))) return path;
     }
 }
 
@@ -41,7 +44,7 @@ void make_dirs(const fs::path& dir) {
     if (ec && !fs::is_directory(dir)) io_error(ec, dir);
 }
 
-PartFile::PartFile(fs::path dest) : dest_(std::move(dest)), part_(part_beside(dest_)) {
+PartFile::PartFile(fs::path dest) : dest_(std::move(dest)), part_(beside(dest_, ".part")) {
     file_.open(part_, std::ios::binary | std::ios::trunc);
     if (!file_) io_error(std::error_code(errno, std::generic_category()), dest_);
 }
@@ -91,7 +94,46 @@ void Output::put(PartFile&& file) {
 }
 
 void Output::commit() {
-    for (PartFile& file : files_) file.commit();
+    // every place first: one a file cannot go to (a folder there) stops the export before any file is moved
+    for (const PartFile& file : files_) {
+        std::error_code ec;
+        if (fs::is_directory(fs::symlink_status(file.dest(), ec))) io_error(std::error_code(EISDIR, std::generic_category()), file.dest());
+    }
+    // the files there before are set aside until every new one is in place, and put back when one cannot be moved in
+    struct Moved {
+        fs::path dest;
+        std::optional<fs::path> aside;
+        bool placed = false;
+    };
+    std::vector<Moved> moved;
+    const auto fail = [&](const std::error_code& ec, const fs::path& path) {
+        for (auto it = moved.rbegin(); it != moved.rend(); ++it) {
+            std::error_code ignored;
+            if (it->placed) fs::remove(it->dest, ignored);
+            if (it->aside) fs::rename(*it->aside, it->dest, ignored);
+        }
+        io_error(ec, path);
+    };
+    for (PartFile& file : files_) {
+        moved.push_back(Moved{file.dest(), std::nullopt, false});
+        std::error_code ec;
+        if (fs::exists(fs::symlink_status(file.dest(), ec))) {
+            moved.back().aside = beside(file.dest(), ".old");
+            fs::rename(file.dest(), *moved.back().aside, ec);
+            if (ec) {
+                moved.back().aside.reset();
+                fail(ec, file.dest());
+            }
+        }
+        fs::rename(file.part_, file.dest(), ec);
+        if (ec) fail(ec, file.dest());
+        moved.back().placed = true;
+        file.done_ = true;
+    }
+    for (const Moved& m : moved) {
+        std::error_code ignored;
+        if (m.aside) fs::remove(*m.aside, ignored);
+    }
     files_.clear();
 }
 

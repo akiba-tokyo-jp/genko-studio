@@ -643,6 +643,7 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
     undone_.clear();
     disk_redo_ = 0;
     queue_.push_back(Action{Action::Kind::Edit, change, core::new_txn_id(), ++next_seq_, false});
+    redo_floor_ = next_seq_;
     ++generation_;
     touch(BookChange{BookChange::Why::Edit, ops, change->before, change->after});
     schedule_save();
@@ -671,6 +672,7 @@ void Session::undo() {
         const std::shared_ptr<Change> change = done_.back();
         done_.pop_back();
         undone_.push_back(change);
+        change->undone_seq = ++next_seq_;
         const auto queued = [&](Action::Kind kind) {
             return std::find_if(queue_.rbegin(), queue_.rend(),
                                 [&](const Action& a) { return a.kind == kind && a.change == change && !a.in_flight; });
@@ -706,9 +708,34 @@ void Session::undo() {
     throw core::ApplyError("nothing to undo", "nothing_to_undo");
 }
 
+// The journal's undos not written yet (or being written) that redo() takes before the changes undone in memory: those
+// asked after the latest of them was undone and after the last edit, the latest first (Python's order: its journal's redo
+// stack, the latest undone on top).
+std::size_t Session::disk_undos_first() const {
+    const std::uint64_t after = std::max(redo_floor_, undone_.empty() ? std::uint64_t{0} : undone_.back()->undone_seq);
+    std::size_t n = 0;
+    for (auto it = queue_.rbegin(); it != queue_.rend(); ++it) {
+        if (it->kind != Action::Kind::DiskUndo) continue;
+        if (it->seq < after) break;
+        ++n;
+    }
+    return std::min(n, static_cast<std::size_t>(std::max<std::int64_t>(0, disk_redo_)));
+}
+
 void Session::redo() {
     if (saving_as_) throw core::ApplyError("別名保存中です。完了してからRedoしてください。", "save_as_busy");
     if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (disk_undos_first() > 0) {
+        // a saved change the journal is still to undo comes back first: its undo not begun, it is not made at all;
+        // while it is being written, Redo waits for it (the book read again after it takes the ones undone in memory)
+        const auto last = std::find_if(queue_.rbegin(), queue_.rend(), [](const Action& a) { return a.kind == Action::Kind::DiskUndo; });
+        if (last->in_flight) throw core::ApplyError("取り消しを原稿に書き込み中です。書き終わってからやり直してください。", "busy");
+        queue_.erase(std::next(last).base());
+        ++disk_undo_;
+        --disk_redo_;
+        emit statusChanged();
+        return;
+    }
     if (!undone_.empty()) {
         const std::shared_ptr<Change> change = undone_.back();
         undone_.pop_back();
@@ -743,6 +770,64 @@ void Session::redo() {
     throw core::ApplyError("nothing to redo", "nothing_to_redo");
 }
 
+// What history() reads of the book's journal: kept while the journal file is the one it was read from (its place, size
+// and time), so that 履歴 in front reads it again only when it has changed.
+struct Session::JournalRead {
+    fs::path file;
+    std::uintmax_t size = 0;
+    fs::file_time_type time{};
+    std::map<std::string, Json> prepared;  // a committed transaction's prepare line
+    // the saved changes in the order of the timeline: the undo stack (those with a state before them), then the
+    // redo stack, the next to redo first; each by its transaction
+    std::vector<std::pair<std::string, HistoryEntry>> undo;
+    std::vector<std::pair<std::string, HistoryEntry>> redo;
+};
+
+std::shared_ptr<const Session::JournalRead> Session::read_journal() const {
+    const fs::path file = storage::journal::journal_file(*path_);
+    std::error_code ec;
+    const std::uintmax_t size = fs::file_size(file, ec);
+    const fs::file_time_type time = ec ? fs::file_time_type{} : fs::last_write_time(file, ec);
+    if (!ec && journal_read_ && journal_read_->file == file && journal_read_->size == size && journal_read_->time == time) return journal_read_;
+    auto read = std::make_shared<JournalRead>();
+    for (const auto& t : storage::journal::transactions(storage::journal::read_lines(file))) {
+        if (t.status == storage::journal::Transaction::Status::committed) read->prepared[t.txn] = t.prepare;
+    }
+    const storage::journal::Stacks stacks = storage::journal::stacks(*path_);
+    std::vector<Json> legacy;  // the old journal's lines (legacy:<n> is line n)
+    const bool any_legacy = std::any_of(stacks.undo.begin(), stacks.undo.end(), [](const auto& i) { return i.legacy; }) ||
+                            std::any_of(stacks.redo.begin(), stacks.redo.end(), [](const auto& i) { return i.legacy; });
+    if (any_legacy) legacy = storage::journal::read_lines(*path_ / "legacy" / "journal.jsonl").values;
+    const auto entry_of = [&](const storage::journal::HistoryItem& item) {
+        HistoryEntry entry;
+        entry.actor = item.actor;
+        entry.saved = true;
+        const Json* line = nullptr;
+        if (item.legacy) {
+            const std::size_t n = static_cast<std::size_t>(std::stoull(item.id.substr(7)));
+            if (n < legacy.size()) line = &legacy[n];
+        } else if (const auto it = read->prepared.find(item.id); it != read->prepared.end()) {
+            line = &it->second;
+        }
+        if (line != nullptr && line->is_object()) {
+            if (const auto ops = line->find("ops"); ops != line->end() && core::py_truthy(*ops)) entry.ops = *ops;
+            if (const auto at = line->find("at"); at != line->end() && at->is_number()) entry.at = at->get<double>();
+        }
+        return std::pair{item.id, entry};
+    };
+    for (const auto& item : stacks.undo) {
+        if (item.before) read->undo.push_back(entry_of(item));  // (nothing before it: the book being made)
+    }
+    for (auto it = stacks.redo.rbegin(); it != stacks.redo.rend(); ++it) read->redo.push_back(entry_of(*it));
+    if (!ec) {
+        read->file = file;
+        read->size = size;
+        read->time = time;
+        journal_read_ = read;
+    }
+    return read;
+}
+
 Session::History Session::history() const {
     History out;
     // this session's changes, by the transaction that first saved each (the journal's entry for it)
@@ -752,42 +837,18 @@ Session::History Session::history() const {
             if (!change->txn.empty()) mine.insert(change->txn);
         }
     }
-    std::map<std::string, Json> prepared;  // a committed transaction's prepare line
-    std::vector<HistoryEntry> journal;     // the saved changes before this session, in the order of the timeline
+    std::shared_ptr<const JournalRead> read;
+    std::vector<HistoryEntry> journal;  // the saved changes before this session, in the order of the timeline
     if (path_) {
         try {
-            for (const auto& t : storage::journal::transactions(storage::journal::read_lines(storage::journal::journal_file(*path_)))) {
-                if (t.status == storage::journal::Transaction::Status::committed) prepared[t.txn] = t.prepare;
-            }
-            const storage::journal::Stacks stacks = storage::journal::stacks(*path_);
-            std::vector<Json> legacy;  // the old journal's lines (legacy:<n> is line n)
-            const bool any_legacy = std::any_of(stacks.undo.begin(), stacks.undo.end(), [](const auto& i) { return i.legacy; }) ||
-                                    std::any_of(stacks.redo.begin(), stacks.redo.end(), [](const auto& i) { return i.legacy; });
-            if (any_legacy) legacy = storage::journal::read_lines(*path_ / "legacy" / "journal.jsonl").values;
-            const auto entry_of = [&](const storage::journal::HistoryItem& item) {
-                HistoryEntry entry;
-                entry.actor = item.actor;
-                entry.saved = true;
-                const Json* line = nullptr;
-                if (item.legacy) {
-                    const std::size_t n = static_cast<std::size_t>(std::stoull(item.id.substr(7)));
-                    if (n < legacy.size()) line = &legacy[n];
-                } else if (const auto it = prepared.find(item.id); it != prepared.end()) {
-                    line = &it->second;
+            read = read_journal();
+            for (const auto* stack : {&read->undo, &read->redo}) {
+                for (const auto& [id, entry] : *stack) {
+                    if (mine.count(id) == 0) journal.push_back(entry);
                 }
-                if (line != nullptr && line->is_object()) {
-                    if (const auto ops = line->find("ops"); ops != line->end() && core::py_truthy(*ops)) entry.ops = *ops;
-                    if (const auto at = line->find("at"); at != line->end() && at->is_number()) entry.at = at->get<double>();
-                }
-                return entry;
-            };
-            for (const auto& item : stacks.undo) {
-                if (item.before && mine.count(item.id) == 0) journal.push_back(entry_of(item));  // (nothing before it: the book being made)
-            }
-            for (auto it = stacks.redo.rbegin(); it != stacks.redo.rend(); ++it) {
-                if (mine.count(it->id) == 0) journal.push_back(entry_of(*it));
             }
         } catch (const std::exception&) {
+            read.reset();
             journal.clear();  // (a journal that cannot be read: the changes in memory only)
         }
     }
@@ -796,8 +857,8 @@ Session::History Session::history() const {
         entry.ops = change.ops;
         entry.actor = actor_;
         entry.saved = change.on_disk;
-        if (change.on_disk) {
-            if (const auto it = prepared.find(change.txn); it != prepared.end()) {
+        if (change.on_disk && read) {
+            if (const auto it = read->prepared.find(change.txn); it != read->prepared.end()) {
                 if (const auto at = it->second.find("at"); at != it->second.end() && at->is_number()) entry.at = at->get<double>();
             }
         }
@@ -806,9 +867,12 @@ Session::History Session::history() const {
     const std::size_t before = std::min(journal.size(), static_cast<std::size_t>(std::max<std::int64_t>(0, disk_undo_)));
     out.done.assign(journal.begin(), journal.begin() + static_cast<std::ptrdiff_t>(before));
     for (const auto& change : done_) out.done.push_back(of_change(*change));
-    for (auto it = undone_.rbegin(); it != undone_.rend(); ++it) out.later.push_back(of_change(**it));
     const std::size_t after = std::min(journal.size(), before + static_cast<std::size_t>(std::max<std::int64_t>(0, disk_redo_)));
-    out.later.insert(out.later.end(), journal.begin() + static_cast<std::ptrdiff_t>(before), journal.begin() + static_cast<std::ptrdiff_t>(after));
+    // (in the order redo() takes them: the journal's undos asked last, then the changes undone in memory, then the rest)
+    const auto first = static_cast<std::ptrdiff_t>(before + std::min(disk_undos_first(), after - before));
+    out.later.insert(out.later.end(), journal.begin() + static_cast<std::ptrdiff_t>(before), journal.begin() + first);
+    for (auto it = undone_.rbegin(); it != undone_.rend(); ++it) out.later.push_back(of_change(**it));
+    out.later.insert(out.later.end(), journal.begin() + first, journal.begin() + static_cast<std::ptrdiff_t>(after));
     return out;
 }
 
@@ -969,12 +1033,21 @@ void Session::job_done(const JobResult& r) {
                 // as the disk has it
                 queue_.erase(std::find_if(queue_.begin(), queue_.end(), [&](const Action& a) { return a.seq == refused->seq; }));
                 emit notice(r.message, true);
-                if (refused->kind == Action::Kind::DiskUndo) {
-                    ++disk_undo_;
-                    --disk_redo_;
-                } else if (refused->kind == Action::Kind::DiskRedo) {
-                    ++disk_redo_;
-                    --disk_undo_;
+                if (refused->kind == Action::Kind::DiskUndo || refused->kind == Action::Kind::DiskRedo) {
+                    // (it, and the journal's undos or redos asked after it: not tried, as Python's 履歴 stops at the first
+                    // refusal — the journal would refuse them the same)
+                    const int back = refused->kind == Action::Kind::DiskUndo ? 1 : -1;
+                    disk_undo_ += back;
+                    disk_redo_ -= back;
+                    for (auto it = queue_.begin(); it != queue_.end();) {
+                        if (it->kind != refused->kind) {
+                            ++it;
+                            continue;
+                        }
+                        disk_undo_ += back;
+                        disk_redo_ -= back;
+                        it = queue_.erase(it);
+                    }
                 }
                 // (an undo of this session's change that was shown already: the book is read again)
                 if (refused->kind == Action::Kind::Undo || refused->kind == Action::Kind::Redo) start_rebase();
@@ -1179,6 +1252,10 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
     std::vector<std::shared_ptr<Change>> replayed;
     std::deque<Action> keep;
     for (const Action& action : queue_) {
+        if (action.kind == Action::Kind::DiskUndo || action.kind == Action::Kind::DiskRedo) {
+            keep.push_back(action);  // (the journal's undos and redos still asked for: made on the book as it is then)
+            continue;
+        }
         if (action.kind != Action::Kind::Edit) {
             if (action.kind == Action::Kind::Undo || action.kind == Action::Kind::Redo) {
                 conflicts_found << QStringLiteral("%1 could not be applied to the book as it is now")
@@ -1246,6 +1323,15 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
     base_revision_ = revision;
     disk_undo_ = undo_depth;
     disk_redo_ = redo_depth;
+    for (const Action& action : queue_) {  // (the journal's undos and redos asked for and not made yet)
+        if (action.kind == Action::Kind::DiskUndo) {
+            --disk_undo_;
+            ++disk_redo_;
+        } else if (action.kind == Action::Kind::DiskRedo) {
+            ++disk_undo_;
+            --disk_redo_;
+        }
+    }
     read_only_ = doc_->read_only_reason;
     failed_ = false;
     failure_.clear();

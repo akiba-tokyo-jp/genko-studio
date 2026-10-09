@@ -145,6 +145,10 @@ std::string safe_name(std::string_view text, std::string_view fallback) {
 
 std::string stem(const core::Document& episode) { return safe_name(episode.title) + "_ep" + detail::padded(episode.episode, 2); }
 
+void check_dpi(std::int64_t dpi) {
+    if (dpi < 1 || dpi > kMaxDpi) throw core::Error("value", "the resolution must be between 1 and 100000 dpi");
+}
+
 Image crop_to(const Image& image, const core::Page& page, std::string_view area, int dpi) {
     if (area == "paper") return image;
     const core::Rect r = area == "bleed" ? page.bleed_rect_mm() : page.trim_rect_mm();
@@ -174,9 +178,18 @@ std::vector<fs::path> export_png_sequence(const core::Document& episode, const f
     return written;
 }
 
-std::vector<fs::path> export_print(const core::Document& episode, const fs::path& dest, std::string fmt, std::optional<std::int64_t> dpi_given,
+std::vector<fs::path> export_print(const core::Document& episode, const fs::path& dest, std::string fmt, std::optional<std::int64_t> dpi,
                                    int threshold, bool crop_marks, std::string_view area, std::string_view color, const std::string& icc,
-                                   const std::optional<core::Json>& screen_given) {
+                                   const std::optional<core::Json>& screen) {
+    detail::Output output;
+    std::vector<fs::path> written = detail::print_into(output, episode, dest, std::move(fmt), dpi, threshold, crop_marks, area, color, icc, screen);
+    output.commit();
+    return written;
+}
+
+std::vector<fs::path> detail::print_into(detail::Output& output, const core::Document& episode, const fs::path& dest, std::string fmt,
+                                         std::optional<std::int64_t> dpi_given, int threshold, bool crop_marks, std::string_view area,
+                                         std::string_view color, const std::string& icc, const std::optional<core::Json>& screen_given) {
     if (std::find(kAreas.begin(), kAreas.end(), area) == kAreas.end()) throw core::PyValueError("area must be one of paper, bleed, trim");
     if (std::find(kColors.begin(), kColors.end(), color) == kColors.end()) {
         throw core::PyValueError("color must be auto, rgb, cmyk, gray or bitonal");
@@ -187,12 +200,12 @@ std::vector<fs::path> export_print(const core::Document& episode, const fs::path
     if (icc_path && color == "cmyk" && !render::colour::is_cmyk_profile(*icc_path)) {
         throw core::PyValueError("the profile is not a CMYK printing profile");
     }
-    detail::make_dirs(dest);
     // print resolution comes from the page spec (B4 comic: 600)
     const std::int64_t dpi64 = dpi_given && *dpi_given != 0 ? *dpi_given
                                : episode.spec.dpi.truthy()  ? core::py_int(episode.spec.dpi)
                                                             : 600;
-    if (dpi64 < 1 || dpi64 > 100000) throw core::Error("image_too_large", "the page is too large at this resolution");
+    check_dpi(dpi64);
+    detail::make_dirs(dest);
     const int dpi = static_cast<int>(dpi64);
     // (Python checks the screen once every page is drawn: here first, before any is)
     std::optional<core::Json> screen;
@@ -243,7 +256,6 @@ std::vector<fs::path> export_print(const core::Document& episode, const fs::path
         write_pdf(path, pages, [&](std::size_t n) { return coloured(image_of(*episode.pages[n]), hows[n]); });
         return {path};
     }
-    detail::Output output;
     std::vector<fs::path> written;
     for (const auto& page_ptr : episode.pages) {
         const core::Page& page = *page_ptr;
@@ -272,7 +284,6 @@ std::vector<fs::path> export_print(const core::Document& episode, const fs::path
         output.put(path, bytes);
         written.push_back(path);
     }
-    output.commit();
     return written;
 }
 
@@ -312,8 +323,14 @@ fs::path export_strip(const core::Document& episode, const fs::path& dest, int d
     int width = 0;
     std::int64_t height = 0;
     for (const core::Page* page : pages) {
-        width = std::max(width, render::mm_to_px(page->spec.width_mm.value(), dpi));
-        height += render::mm_to_px(page->spec.height_mm.value(), dpi);
+        const int w = render::mm_to_px(page->spec.width_mm.value(), dpi);
+        const int h = render::mm_to_px(page->spec.height_mm.value(), dpi);
+        // (a page render_page would refuse: refused before the strip's rows are made for it)
+        if (w > 0x7fffffff / 4 || h > 0x7fffffff / 4 || static_cast<std::int64_t>(w) * h > render::kMaxAreaPixels) {
+            throw core::Error("image_too_large", "the strip is too large at this resolution");
+        }
+        width = std::max(width, w);
+        height += h;
     }
     if (height > 0x7fffffff / 4) throw core::Error("image_too_large", "the strip is too large at this resolution");
     PngWriter writer(render::Size{width, static_cast<int>(height)}, "RGB");

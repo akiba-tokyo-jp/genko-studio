@@ -699,6 +699,8 @@ Json preflight(const core::Document& episode, const fs::path& project) {
 }
 
 Json book(const core::Document& episode, const std::optional<fs::path>& project) {
+    // (a book whose pages are still being read: the ones not read yet would be found empty, their problems not at all)
+    if (!episode.deferred.empty()) throw core::Error("page_not_loaded", "the book's pages are still being read: try again in a moment");
     Json issues = Json::array();
     for (const auto& page : episode.pages) {
         for (Json& found : page_issues(episode, *page)) issues.push_back(std::move(found));

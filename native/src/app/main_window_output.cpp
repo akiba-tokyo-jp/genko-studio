@@ -20,6 +20,7 @@
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/print_dialog.hpp"
+#include "app/wording.hpp"
 #include "core/pyconv.hpp"
 
 namespace genko::app {
@@ -38,6 +39,19 @@ bool phone_default(const core::Document& book) {
     if (book.pages.empty()) return false;
     const auto [w, h] = book.pages.front()->spec.trim_size();
     return h.value() >= 2.5 * w.value();
+}
+
+// Nothing goes out of a book whose pages are still being read, nor is it checked (the pages not read yet would come
+// out blank and be found empty): said, as an op that reaches them is refused.
+bool read_whole(MainWindow& window) {
+    if (window.book().deferred.empty()) return true;
+    window.flash(wording::error(QStringLiteral("the book's pages are still being read: try again in a moment")), 6000, true);
+    return false;
+}
+
+// The panel is in front (Python's _dock_visible: a panel behind another tab is moved out of the window).
+bool in_front(const QMainWindow& window, const QDockWidget* dock) {
+    return dock != nullptr && dock->isVisible() && (dock->isFloating() || window.rect().intersects(dock->geometry()));
 }
 
 QDockWidget* occasional_dock(QMainWindow* window, const QString& title, QWidget* panel) {
@@ -93,7 +107,7 @@ void MainWindow::build_output_docks() {
     history_timer_.setSingleShot(true);
     history_timer_.setInterval(250);  // (as Python's panels follow a change: a moment later)
     connect(&history_timer_, &QTimer::timeout, this, [this] {
-        if (history_dock_->isVisible()) history_->refresh();
+        if (in_front(*this, history_dock_)) history_->refresh();
     });
     checks_ = new CheckPanel(this);
     checks_dock_ = occasional_dock(this, QStringLiteral("点検"), checks_);
@@ -103,13 +117,26 @@ void MainWindow::build_output_docks() {
     view_menu_->addAction(checks_dock_->toggleViewAction());
 }
 
-// After a change to the book (or its save): the history follows (when it is shown), the checks are out of date.
-void MainWindow::output_panels_follow() {
+// After a change to the book: the checks are out of date, the history follows.
+void MainWindow::output_panels_follow(bool now) {
     if (checks_ != nullptr) checks_->refresh();
-    if (history_dock_ != nullptr && history_dock_->isVisible()) history_timer_.start();
+    history_follows(now);
+}
+
+// 履歴 after a change or a save: read again a moment later when it is in front (behind another tab: when it comes
+// back); `now` (another book in front): at once, so that a click on the list is about that book.
+void MainWindow::history_follows(bool now) {
+    if (history_dock_ == nullptr || !in_front(*this, history_dock_)) return;
+    if (now) {
+        history_timer_.stop();
+        history_->refresh();
+    } else {
+        history_timer_.start();
+    }
 }
 
 void MainWindow::run_checks() {
+    if (!read_whole(*this)) return;
     show_dock(QStringLiteral("点検"));
     const std::optional<Json> report = checks_->run();
     if (!report) {
@@ -155,6 +182,7 @@ void MainWindow::show_issue(const Json& issue) {
 }
 
 void MainWindow::export_book() {
+    if (!read_whole(*this)) return;
     session_->save_now();  // (Python's commit_now: what was done is written first)
     const core::Page* page = current_page();
     ExportDialog dialog(this, session_->snapshot(), session_->path(), session_->actor(), false,
@@ -166,6 +194,7 @@ void MainWindow::export_book() {
 }
 
 void MainWindow::print_book() {
+    if (!read_whole(*this)) return;
     session_->save_now();  // (Python's commit_now)
     PrintDialog dialog(this);
     ask::exec(&dialog);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <stdexcept>
@@ -76,6 +77,9 @@ RenderOptions proof_options();
 
 // The roles exported (render.EXPORT_ROLES).
 std::vector<core::LayerRole> export_plan(const core::Page& page);
+
+// The most pixels render_page draws at once (a page, or the region asked for): past it, core::Error("image_too_large").
+inline constexpr std::int64_t kMaxAreaPixels = 1'500'000'000;
 
 // max(1, round(mm / 25.4 * dpi)).
 int mm_to_px(double mm, int dpi);

@@ -9,13 +9,16 @@
 // PageSpec.describe, covers.spec_for, main._page_list, fileops.import_psd); the page list and the canvas after them; a
 // book that changed while a question was open left alone; the refusals in the person's words.
 
+#include <QAbstractButton>
 #include <QAbstractSpinBox>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCursor>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFormLayout>
+#include <QGuiApplication>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenu>
@@ -36,6 +39,7 @@
 #include "app/main_window.hpp"
 #include "app/pages_panel.hpp"
 #include "app/tiles.hpp"
+#include "app/tool_settings.hpp"
 #include "core/covers.hpp"
 #include "core/geometry.hpp"
 #include "core/ids.hpp"
@@ -1014,6 +1018,159 @@ private slots:
         QVERIFY2(s.window->last_error().startsWith(QStringLiteral("1 ページと 2 ページは 1 枚の紙の表と裏なので、見開きになりません（set_spread の書き方: {")),
                  qPrintable(s.window->last_error()));
         QVERIFY(!s.book().page(1).spread_with);
+    }
+
+    // ほかの原稿のページを取り込む… with a page whose placed picture this build does not copy (its file a link, or not
+    // holding what its name says): refused in the person's words, no page taken in — this book would refer to a picture
+    // it does not have (Python copies such files as they are). Pages that do not use it come in.
+    void takenInPagesNeedTheirPictures() {
+        Studio s(2);
+        const auto book_with = [&](const QString& name, const std::string& first, const std::string& second) {
+            const fs::path dir = gui_test::path_of(s.tmp.path() + QStringLiteral("/") + name);
+            core::Document doc = gui_test::new_doc(2, "ほかの原稿");
+            for (const auto& [page, ref] : {std::pair{0, first}, std::pair{1, second}}) {
+                core::Layer placed;
+                placed.id = "placed-art-" + std::to_string(page);
+                placed.kind = core::LayerKind::Placed;
+                placed.asset = ref;
+                placed.placement_mm = core::Rect{core::Num(10), core::Num(10), core::Num(40), core::Num(40)};
+                doc.edit_page(static_cast<std::size_t>(page)).layers.push_back(placed);
+            }
+            gui_test::write_book(dir, doc);
+            return dir;
+        };
+        const std::string fine = storage::AssetStore::ref(render::write_png(render::Image::frombytes("RGB", {4, 4}, std::string(48, '\x30'))));
+        const std::string wrong = storage::AssetStore::ref("what the name says");
+        const fs::path corrupt = book_with(QStringLiteral("corrupt.genko"), wrong, fine);
+        storage::AssetStore store(corrupt);
+        write_bytes(store.path(wrong, ".png"), "something else");
+        (void)store.put_bytes(render::write_png(render::Image::frombytes("RGB", {4, 4}, std::string(48, '\x30'))), ".png");
+        QString folder = QString::fromStdString(core::path_to_utf8(corrupt));
+        QString pages;
+        s.answers.responder->existing_dir = [&](const QString&, const QString&) { return folder; };
+        s.answers.responder->get_text = [&](const QString&, const QString&, const QString&) { return std::optional<QString>(pages); };
+        const auto before = s.session->snapshot();
+        std::size_t n = s.ops.size();
+        QVERIFY(s.trigger("act_merge_book"));
+        QCOMPARE(s.ops.size(), n);
+        QCOMPARE(s.window->last_error(), QStringLiteral("取り込む原稿の素材ファイル（%1）を、この原稿に写せないため取り込めません（リンクや、名前と中身の違うファイルは写しません）")
+                                             .arg(QString::fromStdString(core::path_to_utf8(store.path(wrong, ".png")))));
+        QCOMPARE(s.session->snapshot(), before);
+        // its page 2 alone: taken in, its picture with it
+        pages = QStringLiteral("2");
+        QVERIFY(s.trigger("act_merge_book"));
+        QCOMPARE(s.book().pages.size(), std::size_t{3});
+        QVERIFY(storage::AssetStore(s.path).has(fine, ".png"));
+        // a picture whose file is a link (to a file outside the book)
+        const std::string linked = storage::AssetStore::ref("not this book's");
+        const fs::path linking = book_with(QStringLiteral("linking.genko"), linked, linked);
+        write_bytes(linking.parent_path() / "outside.png", "not this book's");
+        const fs::path link = storage::AssetStore(linking).path(linked, ".png");
+        fs::create_directories(link.parent_path());
+        std::error_code ec;
+        fs::create_symlink(linking.parent_path() / "outside.png", link, ec);
+        if (ec) return;  // (no links here)
+        folder = QString::fromStdString(core::path_to_utf8(linking));
+        pages.clear();
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_merge_book"));
+        QCOMPARE(s.ops.size(), n);
+        QCOMPARE(s.window->last_error(), QStringLiteral("取り込む原稿の素材ファイル（%1）を、この原稿に写せないため取り込めません（リンクや、名前と中身の違うファイルは写しません）")
+                                             .arg(QString::fromStdString(core::path_to_utf8(link))));
+        QCOMPARE(s.book().pages.size(), std::size_t{3});
+        QVERIFY(!storage::AssetStore(s.path).has(linked, ".png"));
+    }
+
+    // A book this build can open only read-only (a feature it does not know) is not taken in: said in the person's
+    // words, before the pages are asked for.
+    void aBookOpenOnlyToReadIsNotTakenIn() {
+        Studio s(2);
+        const OtherBook other(s.tmp.path() + QStringLiteral("/future.genko"), 2);
+        {
+            QFile file(gui_test::qpath(other.path / "project.json"));
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            Json project = Json::parse(file.readAll().toStdString());
+            file.close();
+            project["features"] = Json::array({"genko.future-feature"});
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            file.write(QByteArray::fromStdString(project.dump(2)));
+        }
+        bool texts = false;
+        s.answers.responder->existing_dir = [&](const QString&, const QString&) { return QString::fromStdString(other.text()); };
+        s.answers.responder->get_text = [&](const QString&, const QString&, const QString&) {
+            texts = true;
+            return std::optional<QString>(QString());
+        };
+        QVERIFY(s.trigger("act_merge_book"));
+        QVERIFY(!texts);
+        QCOMPARE(s.window->last_error(),
+                 QStringLiteral("その原稿を読めませんでした:\n取り込む原稿に、見つからない絵や読めないデータがあるため取り込めません（その原稿を開いて確かめてください）"));
+        QCOMPARE(s.book().pages.size(), std::size_t{2});
+    }
+
+    // Another book brought to the front while the folder is chosen: nothing is done (the question was about the book
+    // in front before), said as for any question whose book changed meanwhile.
+    void aBookChangedWhileTheFolderIsChosen() {
+        Studio s(2);
+        const fs::path second = gui_test::path_of(s.tmp.path() + QStringLiteral("/second.genko"));
+        gui_test::write_book(second, gui_test::new_doc(1));
+        bool texts = false;
+        s.answers.responder->existing_dir = [&](const QString&, const QString&) {
+            s.window->add_document(app::Session::open(second, gui_test::quick(gui_test::path_of(s.tmp.path() + QStringLiteral("/recovery2")))));
+            return QString::fromStdString(core::path_to_utf8(second));  // (the book in front now)
+        };
+        s.answers.responder->get_text = [&](const QString&, const QString&, const QString&) {
+            texts = true;
+            return std::optional<QString>(QString());
+        };
+        QVERIFY(s.trigger("act_merge_book"));
+        QCOMPARE(s.window->current_document(), 1);
+        QVERIFY(!texts);
+        QCOMPARE(s.window->last_error(), QStringLiteral("確認中に対象の原稿・ページが変更されたため、操作を中止しました。やり直してください。"));
+    }
+
+    // The コマ tool's settings: after 形 (断ち切り, 選んだコマの形を元に戻す, コマ番号), 原稿 with 原稿用紙の設定…, as Python's page.
+    void thePanelToolsPageHasThePaper() {
+        Studio s(1);
+        s.window->choose_tool(QStringLiteral("frame"));
+        const QWidget* page = s.window->tool_settings()->current_page();
+        QStringList rows;
+        for (int i = 0; i < page->layout()->count(); ++i) {
+            QWidget* w = page->layout()->itemAt(i)->widget();
+            if (auto* label = qobject_cast<QLabel*>(w)) rows << label->text();
+            if (auto* button = qobject_cast<QAbstractButton*>(w)) rows << button->text();
+        }
+        const auto text = [&](const char* name) { return s.window->action(QString::fromLatin1(name))->iconText(); };
+        QVERIFY2(rows.contains(QStringLiteral("形")), qPrintable(rows.join(QStringLiteral(" | "))));
+        QCOMPARE(rows.mid(rows.indexOf(QStringLiteral("形"))),
+                 (QStringList{QStringLiteral("形"), text("act_bleed"), text("act_reset_shape"), text("act_frame_numbers"), QStringLiteral("原稿"),
+                              text("act_paper"), QStringLiteral("コマを選ぶと、辺の中ほどの ◇ をドラッグで辺を曲げられます（外へふくらむ・内へへこむ）。")}));
+    }
+
+    // A change that takes a while (Python's SLOW_OPS: 表紙・3D・ページの取り込み…) says so in the status line, with the
+    // busy cursor, while it is made; an ordinary one does not.
+    void slowChangesSayTheyAreBusy() {
+        Studio s(2);
+        QString shown;
+        bool busy = false;
+        {
+            QObject guard;  // (the look is taken while the change is made, or not at all)
+            QTimer::singleShot(0, &guard, [&] {
+                shown = s.window->status_label()->text();
+                busy = QGuiApplication::overrideCursor() != nullptr && QGuiApplication::overrideCursor()->shape() == Qt::WaitCursor;
+            });
+            QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_cover"}, {"kind", "front"}}})));
+        }
+        QCOMPARE(shown, QStringLiteral("<b>表紙を作っています…</b>"));
+        QVERIFY(busy);
+        QVERIFY(QGuiApplication::overrideCursor() == nullptr);
+        shown.clear();
+        {
+            QObject guard;
+            QTimer::singleShot(0, &guard, [&] { shown = QStringLiteral("looked"); });
+            QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        }
+        QCOMPARE(shown, QString());
     }
 
     // PSD をレイヤーのまま読み込む…: a PSD chosen (Python's caption and filter), its layers put just above the layer chosen

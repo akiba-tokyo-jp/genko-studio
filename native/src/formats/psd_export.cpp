@@ -239,11 +239,11 @@ std::string resources(std::int64_t dpi) {
     return out + block;
 }
 
-}  // namespace
-
-fs::path export_page_psd(const core::Document& episode, const core::Page& page, const fs::path& dest, std::optional<std::int64_t> dpi_given) {
+// The page's PSD (export_page_psd), put into `output` at `dest`.
+void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest,
+                  std::optional<std::int64_t> dpi_given) {
     const std::int64_t dpi = dpi_given && *dpi_given != 0 ? *dpi_given : episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600;
-    if (dpi < 1 || dpi > 100000) throw core::Error("image_too_large", "the page is too large at this resolution");
+    check_dpi(dpi);
     render::RenderOptions options;
     options.mode = "print";
     const Image merged = render::render_page(page, static_cast<int>(dpi), options, &episode).image;
@@ -268,18 +268,27 @@ fs::path export_page_psd(const core::Document& episode, const core::Page& page, 
     body += counts;
     body += packed;
     if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
-    detail::Output output;
     output.put(dest, body);
+}
+
+}  // namespace
+
+fs::path export_page_psd(const core::Document& episode, const core::Page& page, const fs::path& dest, std::optional<std::int64_t> dpi) {
+    detail::Output output;
+    put_page_psd(output, episode, page, dest, dpi);
     output.commit();
     return dest;
 }
 
 std::vector<fs::path> export_psd_pages(const core::Document& episode, const fs::path& dest, std::optional<std::int64_t> dpi) {
     detail::make_dirs(dest);
+    detail::Output output;  // (one export: every page's PSD moved into place together)
     std::vector<fs::path> written;
     for (const auto& page : episode.pages) {
-        written.push_back(export_page_psd(episode, *page, detail::join(dest, stem(episode) + "_p" + detail::padded(page->index, 3) + ".psd"), dpi));
+        written.push_back(detail::join(dest, stem(episode) + "_p" + detail::padded(page->index, 3) + ".psd"));
+        put_page_psd(output, episode, *page, written.back(), dpi);
     }
+    output.commit();
     return written;
 }
 

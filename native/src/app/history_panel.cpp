@@ -160,7 +160,7 @@ void HistoryPanel::go_to(int target) {
             ++done_;
             ++steps;
         }
-    } catch (const core::Error& error) {
+    } catch (const std::exception& error) {
         window_->flash(wording::error(QString::fromUtf8(error.what())), 5000, true);
     }
     if (steps > 0) {
