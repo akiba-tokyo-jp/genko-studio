@@ -42,8 +42,8 @@ Image remap_area(const Image& rgba, int width, int height, const std::vector<dou
 // (0 for false cells).
 std::vector<std::int64_t> component_sizes(const BoolGrid& grid);
 
-// numpy 2's float32 np.sin / np.cos (its vectorised Cody–Waite reduction and polynomials, with fused multiply-adds;
-// libm's sinf / cosf past their range).
+// numpy 2's float32 np.sin / np.cos as the reference runs it (NPY_DISABLE_CPU_FEATURES: numpy's baseline without FMA3,
+// where each element is the C library's sinf / cosf).
 float numpy_sinf(float x);
 float numpy_cosf(float x);
 

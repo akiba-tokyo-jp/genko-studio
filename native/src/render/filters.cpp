@@ -24,59 +24,20 @@ using core::Json;
 
 namespace {
 
-// (loops_trigonometric: the Cody–Waite constants and Myklebust's polynomials, every multiply-add fused)
-constexpr float kTwoOverPi = 0x1.45f306p-1f;
-constexpr float kPio2High = -0x1.921fb0p+00f;
-constexpr float kPio2Med = -0x1.5110b4p-22f;
-constexpr float kPio2Low = -0x1.846988p-48f;
-constexpr float kRintMagic = 0x1.800000p+23f;
-
-float cosine_poly(float x2) {
-    float r = std::fmaf(0x1.98e616p-16f, x2, -0x1.6c06dcp-10f);
-    r = std::fmaf(r, x2, 0x1.55553cp-05f);
-    r = std::fmaf(r, x2, -0x1.000000p-01f);
-    r = std::fmaf(r, x2, 0x1.000000p+00f);
-    return r;
-}
-
-float sine_poly(float x, float x2) {
-    float r = std::fmaf(0x1.7d3bbcp-19f, x2, -0x1.a06bbap-13f);
-    r = std::fmaf(r, x2, 0x1.11119ap-07f);
-    r = std::fmaf(r, x2, -0x1.555556p-03f);
-    r = std::fmaf(r, x2, 0.0f);
-    r = std::fmaf(r, x, x);
-    return r;
-}
-
-// libm's sinf and cosf, called as numpy calls them past the vectorised range (never folded by the compiler)
+// (never folded or vectorised by the compiler: the C library's own functions, each value by itself)
 float (*volatile g_sinf)(float) = [](float x) { return ::sinf(x); };
 float (*volatile g_cosf)(float) = [](float x) { return ::cosf(x); };
 
-float numpy_trig(float x, bool cosine) {
-    if (std::isnan(x)) return std::numeric_limits<float>::quiet_NaN();
-    const float limit = cosine ? 71476.0625f : 117435.992f;
-    if (!(std::fabs(x) <= limit)) return cosine ? g_cosf(x) : g_sinf(x);
-    volatile float magic = kRintMagic;  // (round to nearest by adding and taking away 1.5 × 2**23)
-    float quadrant = x * kTwoOverPi;
-    quadrant = quadrant + magic;
-    quadrant = quadrant - magic;
-    float reduced = std::fmaf(quadrant, kPio2High, x);
-    reduced = std::fmaf(quadrant, kPio2Med, reduced);
-    reduced = std::fmaf(quadrant, kPio2Low, reduced);
-    const float reduced2 = reduced * reduced;
-    const float c = cosine_poly(reduced2);
-    const float s = sine_poly(reduced, reduced2);
-    auto iquadrant = static_cast<std::int32_t>(std::nearbyint(quadrant));
-    if (cosine) iquadrant += 1;
-    float out = (iquadrant & 1) == 0 ? s : c;
-    if ((iquadrant & 2) == 2) out = 0.0f - out;
-    return out;
-}
-
 }  // namespace
 
-float numpy_sinf(float x) { return numpy_trig(x, false); }
-float numpy_cosf(float x) { return numpy_trig(x, true); }
+// numpy 2.4's FLOAT_sin and FLOAT_cos (loops_trigonometric.dispatch.cpp) take their vectorised way — Cody–Waite's
+// reduction and Myklebust's polynomials with fused multiply-adds, libm past its range — only where the CPU target has
+// FMA3 (NPY_SIMD_FMA3); elsewhere they call npy_sinf / npy_cosf, the C library's sinf and cosf, for every element. The
+// reference runs with NPY_DISABLE_CPU_FEATURES=X86_V3,X86_V4,AVX512_ICL,AVX512_SPR (.github/workflows/native.yml):
+// numpy's X86_V2 baseline, without FMA3, so the C library's functions are numpy's here. (The two ways part in the last
+// bit for some angles: on some page sizes a twirl's pixel by 1.)
+float numpy_sinf(float x) { return g_sinf(x); }
+float numpy_cosf(float x) { return g_cosf(x); }
 
 // --- connected parts ------------------------------------------------------------------------------------------------
 

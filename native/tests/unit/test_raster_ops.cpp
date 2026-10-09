@@ -1578,7 +1578,9 @@ private slots:
         row("set_layer_mask area", R"([{"op": "set_layer_mask", "page": 1, "id": "pen-1", "area": {"rect": [5, 60, 30, 30]}}])", 1, "2173996834/210");
         row("wave", R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "wave", "amplitude": 6, "wavelength": 60}])", 1, "2978599020/157");
         row("wave strings", R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "wave", "amplitude": "-3.5", "wavelength": "7"}])", 1, "2602572867/156");
-        row("twirl", R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "twirl", "angle": 90, "radius": 0.45}])", 1, "1418000732/157");
+        // (the twirl's sines and cosines as the reference's numpy computes them — the C library's sinf and cosf, its baseline
+        // without FMA3 — paint-1 the same pixels as Python's; numpy's vectorised way gave one pixel otherwise, at (398, 439))
+        row("twirl", R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "twirl", "angle": 90, "radius": 0.45}])", 1, "3805548029/157");
         row("twirl strong", R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "twirl", "angle": -720, "radius": 0.8}])", 1, "228589212/157");
         row("wave 1e30", R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "wave", "amplitude": 1e30, "wavelength": 60}])", 1, "3724908635/155");
         row("wave string 1e30", R"([{"op": "filter_raster", "page": 1, "id": "paint-1", "kind": "wave", "amplitude": "1e30", "wavelength": "60"}])", 1, "3724908635/155");

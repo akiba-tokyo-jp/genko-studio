@@ -11,7 +11,10 @@
 //      as Python's drawing of its own book;
 //   3. five random parts of each page (proof at 150 dpi, print at 350), drawn alone: the same pixels as Python's whole
 //      page cut there — of the book before the correction layers put on by hand (each part drawn by itself) and with
-//      them (their filters look beyond each pixel: such a page's part is cut from the whole page drawn).
+//      them (their filters look beyond each pixel: such a page's part is cut from the whole page drawn);
+//   4. the same book put on another paper (78 × 104 mm, trimmed to 68 × 94), its pages with waves and a twirl (1, 2
+//      and 4) drawn as in 1 and 2: sizes where numpy's float32 sine and cosine and another way of computing them part
+//      (see dressing()).
 // Skipped without the Python reference.
 
 #include <QtTest>
@@ -39,6 +42,9 @@ namespace {
 const std::vector<std::string> kModes{"print", "proof", "name"};
 const std::vector<int> kDpis{72, 150, 350};
 const std::vector<int> kPages{1, 2, 3, 4, 5, 6, 7};
+const std::vector<int> kWavedPages{1, 2, 4};  // (a wave filtered into page 1, a twirl correction on 2, a wave on 4)
+const Json kOtherPaper = Json::array({78, 104});
+const Json kOtherTrim = Json::array({68, 94});
 
 // A small RGBA picture (Pillow: rectangles and an ellipse on 24 × 18) and a grey one (30 × 20).
 constexpr const char* kPicture =
@@ -48,8 +54,8 @@ constexpr const char* kGrey =
 constexpr const char* kColours =
     "iVBORw0KGgoAAAANSUhEUgAAABQAAAAQCAYAAAAWGF8bAAAAXklEQVR4nGNgGOyAEZ/kCTm5/9jELR49wqkPqwQug4gxmIlcw3CpZcSmwOfbqkZ0hVu4wuqJcSnchaS4DJ9LMbxMKRj8BmKNFFIB1khBlyDHMAwDSTUUm1qqZ73BDwCofSgUOvhv4gAAAABJRU5ErkJggg==";
 
-// The ops applied to the book before it is drawn (each succeeds in Python).
-Json dressing() {
+// The ops applied to the book before it is drawn (each succeeds in Python), the book then put on this paper and trim.
+Json dressing(const Json& paper = Json::array({76, 100}), const Json& trim = Json::array({66, 90})) {
     Json ops = Json::array();
     const auto add = [&](const char* text) { ops.push_back(Json::parse(text)); };
     // page 1: pixels waved and erased roughly; a fill closing a gap; a radial gradient in a box; masks set and painted;
@@ -91,15 +97,18 @@ Json dressing() {
     add(R"({"op": "delete_area", "page": 4, "layer_id": "multi-4", "area": {"rect": [30, 40, 10, 10]}})");
     ops.push_back(Json::object({{"op", "put_raster"}, {"page", 4}, {"id", "blank-4"}, {"png_base64", kColours}}));
     add(R"({"op": "set_paper", "page": 4, "rgb": [235, 235, 235]})");
-    // covers (pages 5 to 7), then the book on a larger paper: everything moved onto the new basic frame. (76 × 100 mm:
-    // on some sizes, 78 × 104 mm among them, page 2's twirl correction differs from Python's at a pixel or two by 1, a
-    // mismatch that was there before and is tracked separately: render/filters.cpp follows numpy's float32 sin/cos on
-    // its FMA path, while the tests run the reference with NPY_DISABLE_CPU_FEATURES, which takes numpy's path without
-    // FMA. Python's own picture differs between the two settings at the same pixel.)
+    // covers (pages 5 to 7), then the book on a larger paper: everything moved onto the new basic frame. (The waves and
+    // the twirl take numpy's float32 np.sin and np.cos. The reference runs with NPY_DISABLE_CPU_FEATURES, where numpy
+    // has no FMA3 and computes each with the C library's sinf and cosf, as render/filters.cpp does; numpy's vectorised
+    // way, with fused multiply-adds, gives other last bits for some angles. On most papers no pixel shows it; on 78 ×
+    // 104 mm trimmed to 68 × 94 page 2's twirl correction did, at a pixel or two by 1: anotherPaper() draws that too.)
     add(R"({"op": "add_cover", "kind": "jacket", "spine_mm": 6, "flap_mm": 15})");
     add(R"({"op": "add_cover", "kind": "obi", "spine_mm": 6, "flap_mm": 9, "height_mm": 22, "bleed": false})");
     add(R"({"op": "add_cover", "kind": "back"})");
-    add(R"({"op": "set_page_spec", "paper": [76, 100], "trim": [66, 90], "bleed_mm": 3, "margins": [9, 10, 7, 6]})");
+    Json spec = Json::parse(R"({"op": "set_page_spec", "bleed_mm": 3, "margins": [9, 10, 7, 6]})");
+    spec["paper"] = paper;
+    spec["trim"] = trim;
+    ops.push_back(std::move(spec));
     return ops;
 }
 
@@ -173,6 +182,8 @@ class TestContractRasterRender : public QObject {
     genko::core::Document py_doc_;   // … read by this build
     genko::core::Document cpp_doc_;  // the ops applied by this build
     genko::core::Document plain_doc_;  // Python's book before the correction layers put on by hand
+    genko::core::Document py_other_;   // the book on the other paper, as Python saved it, read by this build
+    genko::core::Document cpp_other_;  // … the ops applied by this build
     std::map<std::string, QString> drawn_;  // "<book>-<page>-<mode>-<dpi>" → Python's drawing
 
     QString path(const QString& relative) const { return scratch_.path() + QLatin1Char('/') + relative; }
@@ -215,15 +226,20 @@ private slots:
             {apply_job(original, path("dressed-1.genko"), dressing(), path("dressed-1.json")),
              Json::object({{"op", "add_adjust_layers"}, {"book", path("dressed-1.genko").toStdString()},
                            {"dest", path("dressed-2.genko").toStdString()}, {"layers", adjust_layers()}}),
-             apply_job(path("dressed-2.genko"), py_book_, masks(), path("dressed-3.json"))});
+             apply_job(path("dressed-2.genko"), py_book_, masks(), path("dressed-3.json")),
+             apply_job(original, path("other-1.genko"), dressing(kOtherPaper, kOtherTrim), path("other-1.json")),
+             Json::object({{"op", "add_adjust_layers"}, {"book", path("other-1.genko").toStdString()},
+                           {"dest", path("other-2.genko").toStdString()}, {"layers", adjust_layers()}}),
+             apply_job(path("other-2.genko"), path("other.genko"), masks(), path("other-3.json"))});
         genko::test::write_bytes(path("dress-jobs.json"), genko::core::dump_python(jobs_made));
         const auto dressed = genko::test::harness({"batch", path("dress-jobs.json")}, path("pyenv"));
         QVERIFY2(dressed.finished && dressed.exit_code == 0, dressed.err.right(4000).constData());
-        for (const char* out : {"dressed-1.json", "dressed-3.json"}) {
+        for (const char* out : {"dressed-1.json", "dressed-3.json", "other-1.json", "other-3.json"}) {
             const Json reply = genko::test::read_json(path(out));
             QVERIFY2(reply.value("ok", false), genko::core::dump_python(reply).substr(0, 2000).c_str());
         }
-        for (const auto& [book, doc] : {std::pair<QString, genko::core::Document*>{py_book_, &py_doc_}, {path("dressed-1.genko"), &plain_doc_}}) {
+        for (const auto& [book, doc] : {std::pair<QString, genko::core::Document*>{py_book_, &py_doc_}, {path("dressed-1.genko"), &plain_doc_},
+                                        {path("other.genko"), &py_other_}}) {
             const genko::core::ScopedIdSource ids(genko::core::counting_ids());
             const auto loaded = genko::storage::load_document(genko::storage::path_from_utf8(book.toStdString()));
             QVERIFY2(loaded.report.clean(), genko::core::dump_python(loaded.report.to_json()).c_str());
@@ -237,6 +253,14 @@ private slots:
             genko::core::Document dressed_doc = bus.apply(doc, dressing(), genko::core::Actor("human:作者"), false).doc;
             add_adjust_layers(dressed_doc);
             cpp_doc_ = bus.apply(dressed_doc, masks(), genko::core::Actor("human:作者"), false).doc;
+        }
+        {
+            const genko::core::ScopedIdSource ids(genko::core::counting_ids());
+            const genko::core::Document doc = genko::storage::load_document(genko::storage::path_from_utf8(original.toStdString())).document;
+            const genko::core::CommandBus bus(render::ops_registry());
+            genko::core::Document dressed_doc = bus.apply(doc, dressing(kOtherPaper, kOtherTrim), genko::core::Actor("human:作者"), false).doc;
+            add_adjust_layers(dressed_doc);
+            cpp_other_ = bus.apply(dressed_doc, masks(), genko::core::Actor("human:作者"), false).doc;
         }
 
         // Python draws the pages (of the book before the correction layers too, in the modes the regions are cut in)
@@ -253,6 +277,11 @@ private slots:
             }
             add_job("plain", path("dressed-1.genko"), page, "proof", 150);
             add_job("plain", path("dressed-1.genko"), page, "print", 350);
+        }
+        for (const int page : kWavedPages) {
+            for (const std::string& mode : kModes) {
+                for (const int dpi : kDpis) add_job("other", path("other.genko"), page, mode, dpi);
+            }
         }
         genko::test::write_bytes(path("render-jobs.json"), genko::core::dump_python(jobs));
         const auto drawn = genko::test::render_harness({"render", path("render-jobs.json")}, path("pyenv"));
@@ -322,6 +351,35 @@ private slots:
         }
         qInfo("regions: %d the same as Python's pages cut", checked - failures);
         QCOMPARE(checked, 140);
+        QCOMPARE(failures, 0);
+    }
+
+    // 4: the waved and twirled pages on the other paper
+    void anotherPaper() {
+        int compared = 0, failures = 0;
+        for (const int page : kWavedPages) {
+            for (const std::string& mode : kModes) {
+                for (const int dpi : kDpis) {
+                    const render::Image want = python_picture("other", page, mode, dpi);
+                    for (const auto& [side, doc] : {std::pair<const char*, const genko::core::Document*>{"Python's book", &py_other_},
+                                                   {"this build's book", &cpp_other_}}) {
+                        render::clear_render_caches();
+                        const render::Image got = draw(*doc, page, mode, dpi);
+                        ++compared;
+                        if (got.size() != want.size() || got.tobytes() != want.tobytes()) {
+                            const auto diff = got.size() == want.size() ? genko::test::pixel_diff(got, want) : genko::test::PixelDiff{};
+                            genko::test::keep_pictures(QStringLiteral("raster-other-p%1-%2-%3").arg(page).arg(QString::fromStdString(mode)).arg(dpi),
+                                                       got, want);
+                            qWarning("78 x 104 mm (68 x 94), %s, page %d, %s at %d dpi: %lld pixels differ (by up to %d)", side, page, mode.c_str(), dpi,
+                                     diff.pixels, diff.largest);
+                            ++failures;
+                        }
+                    }
+                }
+            }
+        }
+        qInfo("78 x 104 mm: %d drawings the same as Python's, every pixel", compared - failures);
+        QCOMPARE(compared, 54);
         QCOMPARE(failures, 0);
     }
 
