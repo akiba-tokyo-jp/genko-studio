@@ -22,6 +22,7 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "core/ruby.hpp"
 #include "render/image.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
@@ -418,6 +419,39 @@ std::optional<std::pair<std::int64_t, std::int64_t>> image_size(const storage::A
     return picture_size(bytes);
 }
 
+// TEXT-01 (a line holding its ruby by place; Python's lines are checked as Python checks them): a ruby that needs review
+// is an error (the official export stops on it, as the studio's preflight); what its lettering could not do as asked
+// (render::text::ruby_notes at the check's 150 dpi) a warning.
+void ruby_issues(const core::StoryLine& line, const core::Page& page, const std::string& short_text, const Json& box, Json& out) {
+    const auto ruby_of = [&line](std::size_t i) { return i < line.ruby_spans->size() ? (*line.ruby_spans)[i].ruby : std::string(); };
+    for (const core::RubySpan& span : *line.ruby_spans) {
+        if (span.review.empty()) continue;
+        const std::string why = span.review == "unplaced" ? "親文字が本文に見つからない" : span.review == "ambiguous" ? "どの語に付くか決められない"
+                                                                                                           : "親文字が書き換えられた";
+        out.push_back(issue("error", "ruby_review", page,
+                            "台詞「" + short_text + "」のルビ「" + span.ruby + "」（親文字「" + span.base + "」）が要確認（" + why +
+                                "）。台詞の欄で振り直すか外す",
+                            box, "line", line.id));
+    }
+    for (const render::text::RubyNote& note : render::text::ruby_notes(line, 150)) {
+        const std::string reading = "台詞「" + short_text + "」のルビ「" + ruby_of(note.span) + "」";
+        std::string message;
+        if (note.kind == "overflow") {
+            message = reading + "が本文の端からはみ出すため、内側へずらした（読みを短くするか、揃えを変える）";
+        } else if (note.kind == "overlap") {
+            message = reading + "が隣のルビと重なっている（字間か揃えを変える）";
+        } else if (note.kind == "font_fallback") {
+            message = reading + "の字「" + note.detail + "」がルビの書体に無く、別の書体で描いた";
+        } else if (note.kind == "glyph_missing") {
+            message = reading + "の字「" + note.detail + "」を描ける書体が無い";
+        } else {
+            message = reading + "の親文字が描かれない（句点を省いた所など）";
+        }
+        const std::string code = "ruby_" + note.kind;
+        out.push_back(issue("warning", code.c_str(), page, message, box, "line", line.id));
+    }
+}
+
 }  // namespace
 
 Json page_issues(const core::Document& episode, const core::Page& page) {
@@ -466,6 +500,7 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
                                     box_json(std::vector<double>(box.begin(), box.end())), "line", line->id));
             }
         }
+        if (line->ruby_spans) ruby_issues(*line, page, short_text, box_json(std::vector<double>(box.begin(), box.end())), out);
     }
     cut_faces(page, out);
     for (std::size_t i = 0; i < placed.size(); ++i) {
@@ -633,6 +668,12 @@ Json preflight(const core::Document& episode, const fs::path& project) {
             if (!line->x_mm.truthy() && !line->y_mm.truthy()) {
                 errors.push_back(pf_issue("line_unplaced", "error", where + "/lines/" + line->id,
                                           num(page.index) + " ページの台詞「" + head(line->text, 12) + "」に位置が無い"));
+            }
+            // (TEXT-01: a ruby that needs review stops the official export)
+            if (const std::int64_t n = core::ruby::review_count(*line); n > 0) {
+                errors.push_back(pf_issue("ruby_review", "error", where + "/lines/" + line->id,
+                                          num(page.index) + " ページの台詞「" + head(line->text, 12) + "」に要確認のルビが " + std::to_string(n) + " つある",
+                                          "台詞の欄で振り直すか外す"));
             }
         }
         for (const core::Layer& layer : page.layers) {

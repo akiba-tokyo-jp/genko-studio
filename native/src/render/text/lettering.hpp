@@ -57,6 +57,10 @@ struct Layout {
 };
 Layout text_layout(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path = std::nullopt,
                    std::stop_token stop = {});
+// What setting the line's rubies by place (ruby-layout@1) could not do as asked (render::text::RubyNote: overflow,
+// overlap, font_fallback, glyph_missing, not_drawn), each kind once a ruby, as text_layout sets them; nothing for a
+// line of Python's.
+std::vector<RubyNote> ruby_notes(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path = std::nullopt);
 // text_image(line, dpi, font_path): the lettering and its em.
 std::pair<Image, std::int64_t> text_image(const core::StoryLine& line, int dpi,
                                           const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {});

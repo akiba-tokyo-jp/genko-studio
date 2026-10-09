@@ -1,0 +1,647 @@
+// TEXT-01: a line's ruby held by place — graphemes (Qt's QTextBoundaryFinder), Python's ruby_runs by the explicit rule,
+// the spans an op gives and project.json holds, an edit's rules followed (edit_line's text by the longest common
+// subsequence, replace_text by its matches), the layout keys and the feature.
+
+#include "core/ruby.hpp"
+
+#include <QChar>
+#include <QString>
+#include <QTextBoundaryFinder>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <limits>
+#include <map>
+#include <optional>
+
+#include "core/command_bus.hpp"
+#include "core/error.hpp"
+#include "core/pyconv.hpp"
+#include "core/pyops.hpp"
+
+namespace genko::core::ruby {
+
+namespace {
+
+constexpr std::array<std::string_view, 3> kReasons{"edited", "ambiguous", "unplaced"};
+const std::vector<std::string> kLayoutKeys{"ruby_font", "ruby_align", "ruby_gap_mm", "ruby_tracking"};
+
+bool reason(std::string_view value) { return std::find(kReasons.begin(), kReasons.end(), value) != kReasons.end(); }
+
+// The grapheme a code-point offset begins (exact: -1 when it falls inside one).
+std::int64_t grapheme_at(const std::vector<std::size_t>& b, std::size_t cp) {
+    const auto it = std::lower_bound(b.begin(), b.end(), cp);
+    return it != b.end() && *it == cp ? static_cast<std::int64_t>(it - b.begin()) : -1;
+}
+
+// The grapheme a code-point offset falls in (floor) and the first one wholly after it (ceil).
+std::int64_t grapheme_floor(const std::vector<std::size_t>& b, std::size_t cp) {
+    const auto it = std::upper_bound(b.begin(), b.end(), cp);
+    return std::max<std::int64_t>(0, static_cast<std::int64_t>(it - b.begin()) - 1);
+}
+std::int64_t grapheme_ceil(const std::vector<std::size_t>& b, std::size_t cp) {
+    return static_cast<std::int64_t>(std::lower_bound(b.begin(), b.end(), cp) - b.begin());
+}
+
+std::int64_t graphemes_of(const std::vector<std::size_t>& b) { return static_cast<std::int64_t>(b.size()) - 1; }
+
+// The graphemes of a text as ids (the same cluster, the same id) shared by two texts.
+struct Clusters {
+    std::vector<int> before;
+    std::vector<int> after;
+};
+
+std::vector<std::u32string> clusters(std::u32string_view text) {
+    const std::vector<std::size_t> b = bounds(text);
+    std::vector<std::u32string> out;
+    for (std::size_t i = 0; i + 1 < b.size(); ++i) out.emplace_back(text.substr(b[i], b[i + 1] - b[i]));
+    return out;
+}
+
+Clusters ids_of(std::u32string_view before, std::u32string_view after) {
+    std::map<std::u32string, int> ids;
+    Clusters out;
+    for (std::u32string& c : clusters(before)) out.before.push_back(ids.emplace(std::move(c), static_cast<int>(ids.size())).first->second);
+    for (std::u32string& c : clusters(after)) out.after.push_back(ids.emplace(std::move(c), static_cast<int>(ids.size())).first->second);
+    return out;
+}
+
+// The common start and end of two texts (in graphemes): the end never reaching into the start.
+struct Window {
+    std::int64_t p = 0;
+    std::int64_t q = 0;
+    std::int64_t n = 0;
+    std::int64_t m = 0;
+    // where a place of the text before lies in the text after: before the changed part, after it, or (inside it) at its
+    // start (for a range's start) or its end (for a range's end)
+    std::int64_t start(std::int64_t x) const { return x <= p ? x : x >= n - q ? x + (m - n) : p; }
+    std::int64_t end(std::int64_t x) const { return x <= p ? x : x >= n - q ? x + (m - n) : m - q; }
+};
+
+Window window_of(const std::vector<int>& a, const std::vector<int>& b) {
+    Window w;
+    w.n = static_cast<std::int64_t>(a.size());
+    w.m = static_cast<std::int64_t>(b.size());
+    while (w.p < std::min(w.n, w.m) && a[static_cast<std::size_t>(w.p)] == b[static_cast<std::size_t>(w.p)]) ++w.p;
+    while (w.q < std::min(w.n, w.m) - w.p && a[static_cast<std::size_t>(w.n - 1 - w.q)] == b[static_cast<std::size_t>(w.m - 1 - w.q)]) ++w.q;
+    return w;
+}
+
+RubySpan needing_review(const RubySpan& span, std::int64_t start, std::int64_t end, std::string_view why) {
+    RubySpan out = span;
+    out.start = std::max<std::int64_t>(0, start);
+    out.end = std::max(out.start, end);
+    if (out.review.empty()) out.review = std::string(why);
+    return out;
+}
+
+// Longest-common-subsequence tables of two grapheme lists: F[i][j] of a[:i], b[:j]; B[i][j] of a[i:], b[j:].
+class Lcs {
+public:
+    Lcs(const std::vector<int>& a, const std::vector<int>& b) : a_(a), b_(b), n_(a.size()), m_(b.size()) {
+        f_.assign((n_ + 1) * (m_ + 1), 0);
+        r_.assign((n_ + 1) * (m_ + 1), 0);
+        for (std::size_t i = 1; i <= n_; ++i) {
+            for (std::size_t j = 1; j <= m_; ++j) {
+                f_[at(i, j)] = a_[i - 1] == b_[j - 1] ? f_[at(i - 1, j - 1)] + 1 : std::max(f_[at(i - 1, j)], f_[at(i, j - 1)]);
+            }
+        }
+        for (std::size_t i = n_; i-- > 0;) {
+            for (std::size_t j = m_; j-- > 0;) {
+                r_[at(i, j)] = a_[i] == b_[j] ? r_[at(i + 1, j + 1)] + 1 : std::max(r_[at(i + 1, j)], r_[at(i, j + 1)]);
+            }
+        }
+        length_ = f_[at(n_, m_)];
+    }
+    std::uint32_t front(std::size_t i, std::size_t j) const { return f_[at(i, j)]; }
+    std::uint32_t back(std::size_t i, std::size_t j) const { return r_[at(i, j)]; }
+    std::uint32_t length() const { return length_; }
+
+private:
+    std::size_t at(std::size_t i, std::size_t j) const { return i * (m_ + 1) + j; }
+    const std::vector<int>& a_;
+    const std::vector<int>& b_;
+    std::size_t n_;
+    std::size_t m_;
+    std::vector<std::uint32_t> f_;
+    std::vector<std::uint32_t> r_;
+    std::uint32_t length_ = 0;
+};
+
+[[noreturn]] void bad_spans() { throw OpError("ruby_spans is a list of {start, end, ruby} (the places of the readings: graphemes of the text)"); }
+
+std::int64_t whole(const Json& value) {
+    if (!value.is_number_integer()) return -1;
+    if (value.is_number_unsigned() && value.get<std::uint64_t>() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) return -1;
+    return value.get<std::int64_t>();
+}
+
+}  // namespace
+
+bool unicode_is_fixed() { return QChar::currentUnicodeVersion() == QChar::Unicode_17_0; }
+
+std::u32string code_points(std::string_view utf8) {
+    std::u32string out;
+    out.reserve(utf8.size());
+    std::size_t i = 0;
+    const auto bad = [] { return Error("value", "invalid UTF-8 text"); };
+    while (i < utf8.size()) {
+        const auto c = static_cast<unsigned char>(utf8[i]);
+        std::size_t n = 0;
+        char32_t cp = 0;
+        if (c < 0x80) {
+            n = 1;
+            cp = c;
+        } else if ((c >> 5) == 6) {
+            n = 2;
+            cp = c & 0x1f;
+        } else if ((c >> 4) == 14) {
+            n = 3;
+            cp = c & 0x0f;
+        } else if ((c >> 3) == 30) {
+            n = 4;
+            cp = c & 0x07;
+        } else {
+            throw bad();
+        }
+        if (i + n > utf8.size()) throw bad();
+        for (std::size_t k = 1; k < n; ++k) {
+            const auto d = static_cast<unsigned char>(utf8[i + k]);
+            if ((d >> 6) != 2) throw bad();
+            cp = (cp << 6) | (d & 0x3f);
+        }
+        out.push_back(cp);
+        i += n;
+    }
+    return out;
+}
+
+std::string to_utf8(std::u32string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (const char32_t cp : text) {
+        if (cp < 0x80) {
+            out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+            out.push_back(static_cast<char>(0xc0 | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+        } else if (cp < 0x10000) {
+            out.push_back(static_cast<char>(0xe0 | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+        } else {
+            out.push_back(static_cast<char>(0xf0 | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+        }
+    }
+    return out;
+}
+
+std::vector<std::size_t> bounds(std::u32string_view text) {
+    std::vector<std::size_t> out{0};
+    if (text.empty()) return out;
+    // (QString holds UTF-16: each UTF-16 place's code point)
+    const QString q = QString::fromUcs4(text.data(), static_cast<qsizetype>(text.size()));
+    std::vector<std::size_t> cp_of(static_cast<std::size_t>(q.size()) + 1, 0);
+    std::size_t unit = 0;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        cp_of[unit] = i;
+        unit += text[i] > 0xFFFF ? 2 : 1;
+    }
+    cp_of[unit] = text.size();
+    QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, q);
+    finder.toStart();
+    for (qsizetype at = finder.toNextBoundary(); at != -1; at = finder.toNextBoundary()) {
+        const std::size_t cp = cp_of[static_cast<std::size_t>(std::clamp<qsizetype>(at, 0, q.size()))];
+        if (cp > out.back()) out.push_back(cp);
+    }
+    if (out.back() != text.size()) out.push_back(text.size());
+    return out;
+}
+
+std::int64_t count(std::string_view utf8) { return graphemes_of(bounds(code_points(utf8))); }
+
+std::string slice(std::string_view utf8, std::int64_t start, std::int64_t end) {
+    const std::u32string text = code_points(utf8);
+    const std::vector<std::size_t> b = bounds(text);
+    const std::int64_t n = graphemes_of(b);
+    start = std::clamp<std::int64_t>(start, 0, n);
+    end = std::clamp<std::int64_t>(end, start, n);
+    const std::size_t from = b[static_cast<std::size_t>(start)];
+    return to_utf8(std::u32string_view(text).substr(from, b[static_cast<std::size_t>(end)] - from));
+}
+
+bool is_layout_key(std::string_view key) { return std::find(kLayoutKeys.begin(), kLayoutKeys.end(), key) != kLayoutKeys.end(); }
+
+const std::vector<std::string>& layout_keys() { return kLayoutKeys; }
+
+Json layout_value(std::string_view key, const Json& value) {
+    const auto number = [&](double lo, double hi, const char* bounds_text) {
+        double v = 0.0;
+        try {
+            v = value.is_string() || value.is_number() || value.is_boolean() ? to_float(value) : std::nan("");
+        } catch (const Error&) {
+            v = std::nan("");
+        }
+        if (!(lo <= v && v <= hi)) {
+            throw OpError(std::string(key) + " must be between " + bounds_text);
+        }
+        return Json(v);
+    };
+    if (key == "ruby_font") {
+        if (!value.is_string() || value.get_ref<const std::string&>().empty()) {
+            throw OpError("ruby_font must be a face (gothic, mincho, …) or a font file's path");
+        }
+        return value;
+    }
+    if (key == "ruby_align") {
+        if (!is_one_of(value, {"head", "center", "tail"})) throw OpError("ruby_align must be head, center or tail");
+        return value;
+    }
+    if (key == "ruby_gap_mm") return number(-1.0, 10.0, "-1 and 10");
+    if (key == "ruby_tracking") return number(-0.5, 2.0, "-0.5 and 2");
+    throw OpError("unknown ruby layout key " + std::string(key));
+}
+
+bool uses_layout(const Json& style) {
+    if (!style.is_object()) return false;
+    return std::any_of(kLayoutKeys.begin(), kLayoutKeys.end(), [&](const std::string& key) { return style.contains(key); });
+}
+
+std::vector<RubySpan> from_runs(std::string_view text_utf8, const std::vector<Json>& runs, bool keep_unplaced) {
+    const std::u32string text = code_points(text_utf8);
+    const std::vector<std::size_t> b = bounds(text);
+    std::vector<RubySpan> out;
+    std::size_t pos = 0;
+    for (const Json& run : runs) {
+        if (!py_truthy(run) || !run.is_array() || run.size() < 2 || !py_truthy(run[0]) || !py_truthy(run[1])) continue;
+        const std::string base = py_str(run[0]);
+        const std::string reading = py_str(run[1]);
+        const std::u32string words = code_points(base);
+        const std::size_t at = text.find(words, pos);
+        std::int64_t start = -1;
+        std::int64_t end = -1;
+        if (at != std::u32string::npos) {
+            pos = at + words.size();
+            start = grapheme_at(b, at);
+            end = grapheme_at(b, at + words.size());
+        }
+        if (start >= 0 && end > start) {
+            out.push_back(RubySpan{start, end, reading, base, {}});
+        } else if (keep_unplaced) {
+            out.push_back(RubySpan{0, 0, reading, base, "unplaced"});
+        }
+    }
+    std::stable_sort(out.begin(), out.end(), [](const RubySpan& x, const RubySpan& y) { return x.start < y.start; });
+    return out;
+}
+
+std::vector<Json> runs_of(const std::vector<RubySpan>& spans) {
+    std::vector<Json> out;
+    for (const RubySpan& span : spans) {
+        if (span.review.empty()) out.push_back(Json::array({span.base, span.ruby}));
+    }
+    return out;
+}
+
+std::vector<RubySpan> parse(const Json& raw, std::string_view text) {
+    if (!raw.is_array()) bad_spans();
+    const std::int64_t n = count(text);
+    std::vector<RubySpan> out;
+    for (const Json& item : raw) {
+        if (!item.is_object()) bad_spans();
+        for (const auto& [key, value] : item.items()) {
+            if (key != "start" && key != "end" && key != "ruby" && key != "base" && key != "review") {
+                throw OpError("a ruby span has start, end, ruby, base and review, not " + key);
+            }
+        }
+        RubySpan span;
+        const Json* review = get(item, "review");
+        if (review != nullptr && py_truthy(*review)) {
+            if (!review->is_string() || !reason(review->get_ref<const std::string&>())) {
+                throw OpError("a ruby span's review must be edited, ambiguous or unplaced");
+            }
+            span.review = review->get<std::string>();
+        }
+        span.start = item.contains("start") ? whole(item["start"]) : -1;
+        span.end = item.contains("end") ? whole(item["end"]) : -1;
+        const bool fits = span.review.empty() ? (0 <= span.start && span.start < span.end && span.end <= n)
+                                              : (0 <= span.start && span.start <= span.end && span.end <= n);
+        if (!fits) {
+            throw OpError("a ruby span must be [start, end) of whole numbers with 0 <= start < end <= " + std::to_string(n) +
+                          " (the graphemes of the text): " + item.dump(-1, ' ', false));
+        }
+        const Json* reading = get(item, "ruby");
+        if (reading == nullptr || !reading->is_string() || reading->get_ref<const std::string&>().empty()) {
+            throw OpError("a ruby span needs its reading (ruby: a text)");
+        }
+        span.ruby = reading->get<std::string>();
+        if (span.ruby.find('\n') != std::string::npos) throw OpError("a ruby span's reading must be one line");
+        (void)code_points(span.ruby);
+        const std::string there = slice(text, span.start, span.end);
+        const Json* base = get(item, "base");
+        if (base != nullptr && !base->is_null() && !base->is_string()) throw OpError("a ruby span's base must be a text");
+        if (span.review.empty()) {
+            if (base != nullptr && base->is_string() && base->get<std::string>() != there) {
+                throw OpError("a ruby span's base " + py_repr_str(base->get<std::string>()) + " is not the text at [" +
+                              std::to_string(span.start) + ", " + std::to_string(span.end) + "): " + py_repr_str(there));
+            }
+            span.base = there;
+        } else {
+            span.base = base != nullptr && base->is_string() && !base->get_ref<const std::string&>().empty() ? base->get<std::string>() : there;
+            if (span.base.empty()) throw OpError("a ruby span that needs review keeps its base (a text)");
+        }
+        out.push_back(std::move(span));
+    }
+    std::stable_sort(out.begin(), out.end(), [](const RubySpan& x, const RubySpan& y) { return x.start != y.start ? x.start < y.start : x.end < y.end; });
+    const RubySpan* last = nullptr;
+    for (const RubySpan& span : out) {
+        if (!span.review.empty()) continue;
+        if (last != nullptr && span.start < last->end) {
+            throw OpError("rubies overlap: [" + std::to_string(last->start) + ", " + std::to_string(last->end) + ") and [" +
+                          std::to_string(span.start) + ", " + std::to_string(span.end) + ")");
+        }
+        last = &span;
+    }
+    return out;
+}
+
+Json to_json(const std::vector<RubySpan>& spans) {
+    Json out = Json::array();
+    for (const RubySpan& span : spans) {
+        Json item = Json::object();
+        item["start"] = span.start;
+        item["end"] = span.end;
+        item["base"] = span.base;
+        item["ruby"] = span.ruby;
+        if (!span.review.empty()) item["review"] = span.review;
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
+std::string problem(const std::vector<RubySpan>& spans, std::string_view text) {
+    const std::int64_t n = count(text);
+    const RubySpan* last = nullptr;
+    for (std::size_t i = 0; i < spans.size(); ++i) {
+        const RubySpan& span = spans[i];
+        const std::string at = "span " + std::to_string(i);
+        if (span.ruby.empty()) return at + " has no reading";
+        if (!span.review.empty() && !reason(span.review)) return at + "'s review " + py_repr_str(span.review) + " is not one of edited, ambiguous, unplaced";
+        const bool fits = span.review.empty() ? (0 <= span.start && span.start < span.end && span.end <= n)
+                                              : (0 <= span.start && span.start <= span.end && span.end <= n);
+        if (!fits) return at + " [" + std::to_string(span.start) + ", " + std::to_string(span.end) + ") is outside the text's " + std::to_string(n) + " graphemes";
+        if (i > 0 && (span.start < spans[i - 1].start || (span.start == spans[i - 1].start && span.end < spans[i - 1].end))) {
+            return at + " is out of order";
+        }
+        if (!span.review.empty()) continue;
+        if (span.base != slice(text, span.start, span.end)) return at + "'s base " + py_repr_str(span.base) + " is not the text there";
+        if (last != nullptr && span.start < last->end) return at + " overlaps the one before";
+        last = &span;
+    }
+    return {};
+}
+
+Followed follow_text(std::string_view before_utf8, std::string_view after_utf8, const std::vector<RubySpan>& spans) {
+    Followed out;
+    if (before_utf8 == after_utf8) {
+        out.spans = spans;
+        return out;
+    }
+    const std::u32string before = code_points(before_utf8);
+    const std::u32string after = code_points(after_utf8);
+    const Clusters ids = ids_of(before, after);
+    const Window w = window_of(ids.before, ids.after);
+    const auto n = static_cast<std::size_t>(w.n);
+    const auto m = static_cast<std::size_t>(w.m);
+    const bool small = static_cast<std::int64_t>(n + 1) * static_cast<std::int64_t>(m + 1) <= kLcsCells;
+    std::optional<Lcs> lcs;
+    if (small) lcs.emplace(ids.before, ids.after);
+    for (const RubySpan& span : spans) {
+        const std::int64_t s = std::clamp<std::int64_t>(span.start, 0, w.n);
+        const std::int64_t e = std::clamp<std::int64_t>(span.end, s, w.n);
+        if (!span.review.empty() || e <= s) {
+            out.spans.push_back(needing_review(span, w.start(s), w.end(e), span.review.empty() ? "edited" : span.review));
+            continue;
+        }
+        if (!lcs) {  // (a long text: its common start and end only)
+            if (e <= w.p) {
+                out.spans.push_back(span);
+            } else if (s >= w.n - w.q) {
+                RubySpan moved = span;
+                moved.start = s + (w.m - w.n);
+                moved.end = e + (w.m - w.n);
+                out.spans.push_back(moved);
+            } else if (s >= w.p && e <= w.n - w.q && w.m - w.q == w.p) {
+                ++out.removed;
+            } else {
+                out.spans.push_back(needing_review(span, w.start(s), w.end(e), "edited"));
+            }
+            continue;
+        }
+        const auto us = static_cast<std::size_t>(s);
+        const auto ue = static_cast<std::size_t>(e);
+        const std::size_t k = ue - us;
+        const std::uint32_t total = lcs->length();
+        std::vector<std::size_t> places;  // where every best alignment may keep the base whole
+        for (std::size_t t = 0; t + k <= m; ++t) {
+            if (!std::equal(ids.after.begin() + static_cast<std::ptrdiff_t>(t), ids.after.begin() + static_cast<std::ptrdiff_t>(t + k),
+                            ids.before.begin() + static_cast<std::ptrdiff_t>(us))) {
+                continue;
+            }
+            if (lcs->front(us, t) + k + lcs->back(ue, t + k) == total) places.push_back(t);
+        }
+        bool deletable = false;  // a best alignment keeps none of it
+        for (std::size_t j = 0; j <= m && !deletable; ++j) deletable = lcs->front(us, j) + lcs->back(ue, j) == total;
+        bool kept_any = false;  // a best alignment keeps some of it
+        for (std::size_t i = us; i < ue && !kept_any; ++i) {
+            for (std::size_t j = 0; j < m && !kept_any; ++j) {
+                kept_any = ids.before[i] == ids.after[j] && lcs->front(i, j) + 1 + lcs->back(i + 1, j + 1) == total;
+            }
+        }
+        if (places.size() == 1 && !deletable) {
+            RubySpan moved = span;
+            moved.start = static_cast<std::int64_t>(places.front());
+            moved.end = moved.start + static_cast<std::int64_t>(k);
+            out.spans.push_back(moved);
+        } else if (places.empty() && !kept_any) {
+            ++out.removed;
+        } else {
+            out.spans.push_back(needing_review(span, w.start(s), w.end(e), places.empty() ? "edited" : "ambiguous"));
+        }
+    }
+    std::stable_sort(out.spans.begin(), out.spans.end(), [](const RubySpan& x, const RubySpan& y) { return x.start < y.start; });
+    // (each ruby is placed alone: two that different alignments put over the same letters cannot both be right)
+    RubySpan* last = nullptr;
+    for (RubySpan& span : out.spans) {
+        if (!span.review.empty()) continue;
+        if (last != nullptr && span.start < last->end) {
+            last->review = "ambiguous";
+            span.review = "ambiguous";
+        }
+        last = &span;
+    }
+    return out;
+}
+
+Followed follow_replacements(std::string_view before_utf8, std::string_view after_utf8, const std::vector<Replacement>& replacements,
+                             const std::vector<RubySpan>& spans) {
+    Followed out;
+    const std::u32string before = code_points(before_utf8);
+    const std::u32string after = code_points(after_utf8);
+    const std::vector<std::size_t> b0 = bounds(before);
+    const std::vector<std::size_t> b1 = bounds(after);
+    // each match narrowed to what it changes (its common start and end with the replacement taken off)
+    struct Edit {
+        std::size_t a = 0;
+        std::size_t b = 0;
+        std::int64_t delta = 0;
+        std::size_t added = 0;
+    };
+    std::vector<Edit> edits;
+    for (const Replacement& r : replacements) {
+        const std::u32string_view was = std::u32string_view(before).substr(r.start, r.end - r.start);
+        const std::u32string_view with = r.with;
+        std::size_t p = 0;
+        while (p < was.size() && p < with.size() && was[p] == with[p]) ++p;
+        std::size_t q = 0;
+        while (q < was.size() - p && q < with.size() - p && was[was.size() - 1 - q] == with[with.size() - 1 - q]) ++q;
+        const std::size_t a = r.start + p;
+        const std::size_t b = r.end - q;
+        const std::size_t added = with.size() - p - q;
+        if (a == b && added == 0) continue;
+        edits.push_back(Edit{a, b, static_cast<std::int64_t>(added) - static_cast<std::int64_t>(b - a), added});
+    }
+    // where a place of the text before lies after the edits (a range's start inside an edit: the edit's new start; its
+    // end: the edit's new end; an insertion at a range's start moves it, one at its end does not)
+    const auto start_after = [&](std::size_t x) {
+        std::int64_t shift = 0;
+        for (const Edit& e : edits) {
+            if (e.b <= x) {
+                shift += e.delta;
+            } else if (e.a < x) {
+                return static_cast<std::int64_t>(e.a) + shift;
+            } else {
+                break;
+            }
+        }
+        return static_cast<std::int64_t>(x) + shift;
+    };
+    const auto end_after = [&](std::size_t x) {
+        std::int64_t shift = 0;
+        for (const Edit& e : edits) {
+            if (e.b < x || (e.b == x && e.a < e.b)) {
+                shift += e.delta;
+            } else if (e.a < x) {
+                return static_cast<std::int64_t>(e.a) + shift + static_cast<std::int64_t>(e.added);
+            } else {
+                break;
+            }
+        }
+        return static_cast<std::int64_t>(x) + shift;
+    };
+    const auto hint = [&](const RubySpan& span, std::size_t s, std::size_t e, std::string_view why) {
+        const std::int64_t from = std::clamp<std::int64_t>(start_after(s), 0, static_cast<std::int64_t>(after.size()));
+        const std::int64_t to = std::clamp<std::int64_t>(end_after(e), from, static_cast<std::int64_t>(after.size()));
+        return needing_review(span, grapheme_floor(b1, static_cast<std::size_t>(from)), grapheme_ceil(b1, static_cast<std::size_t>(to)), why);
+    };
+    const std::int64_t n = graphemes_of(b0);
+    for (const RubySpan& span : spans) {
+        const std::size_t s = b0[static_cast<std::size_t>(std::clamp<std::int64_t>(span.start, 0, n))];
+        const std::size_t e = b0[static_cast<std::size_t>(std::clamp<std::int64_t>(span.end, span.start, n))];
+        if (!span.review.empty() || e <= s) {
+            out.spans.push_back(hint(span, s, e, span.review.empty() ? "edited" : span.review));
+            continue;
+        }
+        std::int64_t shift = 0;
+        bool gone = false;
+        bool reached = false;
+        for (const Edit& edit : edits) {
+            if (edit.b <= s) {
+                shift += edit.delta;
+            } else if (edit.a >= e) {
+                break;
+            } else if (edit.a <= s && edit.b >= e) {
+                gone = true;
+            } else {
+                reached = true;
+            }
+        }
+        if (gone) {
+            ++out.removed;
+            continue;
+        }
+        if (!reached) {
+            const auto from = static_cast<std::size_t>(static_cast<std::int64_t>(s) + shift);
+            const auto to = static_cast<std::size_t>(static_cast<std::int64_t>(e) + shift);
+            const std::int64_t g0 = grapheme_at(b1, from);
+            const std::int64_t g1 = grapheme_at(b1, to);
+            // (the base the same letters, still whole graphemes: a combining mark added at its end joins it)
+            if (g0 >= 0 && g1 > g0 && std::u32string_view(after).substr(from, to - from) == std::u32string_view(before).substr(s, e - s)) {
+                RubySpan moved = span;
+                moved.start = g0;
+                moved.end = g1;
+                out.spans.push_back(moved);
+                continue;
+            }
+        }
+        out.spans.push_back(hint(span, s, e, "edited"));
+    }
+    std::stable_sort(out.spans.begin(), out.spans.end(), [](const RubySpan& x, const RubySpan& y) { return x.start < y.start; });
+    return out;
+}
+
+bool same_drawn(const std::vector<RubySpan>& a, const std::vector<RubySpan>& b) {
+    const auto drawn = [](const std::vector<RubySpan>& spans, bool& reviewed) {
+        std::vector<RubySpan> out;
+        for (const RubySpan& span : spans) {
+            if (span.review.empty()) {
+                out.push_back(span);
+            } else if (span.review != "unplaced") {
+                reviewed = true;
+            }
+        }
+        return out;
+    };
+    bool reviewed = false;
+    const std::vector<RubySpan> x = drawn(a, reviewed);
+    const std::vector<RubySpan> y = drawn(b, reviewed);
+    return !reviewed && x == y;
+}
+
+std::int64_t review_count(const StoryLine& line) {
+    if (!line.ruby_spans) return 0;
+    return static_cast<std::int64_t>(std::count_if(line.ruby_spans->begin(), line.ruby_spans->end(), [](const RubySpan& s) { return !s.review.empty(); }));
+}
+
+std::int64_t review_count(const Document& doc) {
+    std::int64_t n = 0;
+    for (const StoryLine& line : doc.story) n += review_count(line);
+    return n;
+}
+
+bool uses_feature(const StoryLine& line) { return line.ruby_spans.has_value() || uses_layout(line.style); }
+
+void add_feature(Document& doc) {
+    const std::string feature(kRubyLayoutFeature);
+    if (std::find(doc.features.begin(), doc.features.end(), feature) == doc.features.end()) {
+        doc.features.push_back(feature);
+        std::sort(doc.features.begin(), doc.features.end());
+    }
+}
+
+void settle(Document& doc, StoryLine& line) {
+    if (!line.ruby_spans && uses_layout(line.style)) line.ruby_spans = from_runs(line.text, line.ruby_runs, true);
+    if (line.ruby_spans) {
+        std::stable_sort(line.ruby_spans->begin(), line.ruby_spans->end(),
+                         [](const RubySpan& x, const RubySpan& y) { return x.start != y.start ? x.start < y.start : x.end < y.end; });
+        line.ruby_runs = runs_of(*line.ruby_spans);
+        if (line.ruby_spans->empty() && !uses_layout(line.style)) line.ruby_spans.reset();
+    }
+    if (uses_feature(line)) add_feature(doc);
+}
+
+}  // namespace genko::core::ruby

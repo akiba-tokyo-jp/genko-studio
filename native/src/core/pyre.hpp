@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // Python's re for what the ops ask of it (bookops.replace_text without "regex"): a pattern that is a text found as it
 // is (re.compile(re.escape(find), flags) for a str), matched with or without re.IGNORECASE as CPython 3.12's _sre
@@ -22,6 +23,13 @@ public:
     // Python cannot read fails whatever the text: re.error (PyUncaught "re.error": "invalid group reference 1 at
     // position 1", "bad escape \q at position 0", …) or IndexError ("unknown group name 'x'").
     std::pair<std::string, std::int64_t> subn(std::string_view repl, std::string_view text) const;
+    // The same, with each match where it was (code points of the text) and what replaced it, in order.
+    struct Match {
+        std::size_t start = 0;
+        std::size_t end = 0;
+        std::u32string with;
+    };
+    std::pair<std::string, std::int64_t> subn(std::string_view repl, std::string_view text, std::vector<Match>* matches) const;
 
 private:
     std::u32string find_;

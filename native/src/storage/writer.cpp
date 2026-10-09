@@ -9,6 +9,7 @@
 #include "core/exposure.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "core/ruby.hpp"
 #include "core/strokes.hpp"
 #include "core/version.hpp"
 #include "storage/fsutil.hpp"
@@ -190,6 +191,7 @@ Json line_json(const core::StoryLine& line) {
     Json runs = Json::array();
     for (const auto& run : line.ruby_runs) runs.push_back(run);
     out["ruby_runs"] = std::move(runs);
+    if (line.ruby_spans) out["ruby_spans"] = core::ruby::to_json(*line.ruby_spans);  // (ruby-layout@1 only)
     out["path"] = line.path ? points_json(*line.path) : Json(nullptr);
     if (!line.emphasis_runs.empty()) {
         Json marks = Json::array();
@@ -296,6 +298,9 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         }
         store.put_known(ref, *picture->second, ".png");
         features.emplace_back(core::kPaperFeature);
+    }
+    for (const auto& line : doc.story) {
+        if (core::ruby::uses_feature(line)) features.emplace_back(core::kRubyLayoutFeature);
     }
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());

@@ -376,6 +376,7 @@ Json StoryEditor::plan() {
                            {"ruby_runs", marks.ruby_runs},
                            {"emphasis_runs", marks.emphasis_runs},
                            {"style_runs", marks.style_runs}});
+        lettering::put_ruby(ops.back(), marks, &line, true);  // (TEXT-01: by place when Python's runs would not say where)
         if (marks.text != line.text || r.balloon != was_balloon) {
             const core::Frame* frame = nullptr;
             for (const auto& page : book.pages) {
@@ -423,7 +424,7 @@ Json StoryEditor::plan() {
             const core::Frame* frame = frames.empty() ? nullptr : frames[i * frames.size() / fresh.size()];
             const lettering::Marks marks = lettering::parse_marks(r.text);
             Json op{{"op", "add_line"}, {"page", page_no}, {"id", *r.id}, {"text", marks.text}, {"speaker", utf8(r.speaker)}, {"balloon", utf8(r.balloon)}};
-            if (!marks.ruby_runs.empty()) op["ruby_runs"] = marks.ruby_runs;
+            lettering::put_ruby(op, marks, nullptr, false);
             if (!marks.emphasis_runs.empty()) op["emphasis_runs"] = marks.emphasis_runs;
             if (!marks.style_runs.empty()) op["style_runs"] = marks.style_runs;
             if (frame != nullptr) {

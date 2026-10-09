@@ -64,6 +64,15 @@ genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_c
 # the print's PDF drawn back by poppler's pdftocairo, the command line (no Python: test_contract_paper has that part).
 genko_test(test_paper SOURCES unit/test_paper.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
+# TEXT-01 (ruby-layout@1): a line's ruby held by place — the table of edits (data/ruby_cases.json), the ops' refusals,
+# the feature, the book read back, the official export stopped while a ruby needs review; and drawn — by place as
+# Python's ruby_runs when nothing new is set, the ruby font / size / alignment / distance / spacing, PNG and PDF, the F4
+# book saved, read back and written out.
+genko_test(test_ruby SOURCES unit/test_ruby.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_ruby_render SOURCES unit/test_ruby_render.cpp DEPS genko_test_support genko_formats genko_render_ops ZLIB::ZLIB
+           LABELS unit TIMEOUT 900)
+set_tests_properties(test_ruby_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
            TIMEOUT 1200)
@@ -237,6 +246,9 @@ if(GENKO_BUILD_APP)
   # 台詞 (M4①c): the text tool, the balloon pen, a balloon's handles and menu, the 台詞 panel, the story editor and
   # 台詞の検索・置換, each gesture's ops against Python's window, the page drawn after them
   genko_test(test_gui_lines SOURCES gui/test_gui_lines.cpp DEPS genko_app GUI TIMEOUT 900)
+  # TEXT-01 in the window: the ruby typed with the input method (the table's "gui" cases), the ruby settings beside the
+  # select tool, 要確認 marked, reassigned and cleared, Undo, 台詞の検索・置換, 縦書き・横書き, saved and read back
+  genko_test(test_gui_ruby SOURCES gui/test_gui_ruby.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # the book and its pages (M4②c): spreads, the nombre, the paper, covers, who draws a page, another book's pages taken
   # in (its assets copied first), a PSD as layers, the page list's menu; each command's ops against Python's window
   genko_test(test_gui_book SOURCES gui/test_gui_book.cpp DEPS genko_app GUI TIMEOUT 900)

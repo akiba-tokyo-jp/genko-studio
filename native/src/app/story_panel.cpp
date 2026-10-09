@@ -38,6 +38,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/ruby.hpp"
 #include "render/text/lettering.hpp"
 
 namespace genko::app {
@@ -303,6 +304,59 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     ruby_scale->setToolTip(QStringLiteral("ルビの大きさ（本文の何字ぶんか。既定 0.5）"));
     mono_ruby = check(QStringLiteral("モノルビ（1 字ずつに振る）"));
     mono_ruby->setToolTip(QStringLiteral("読みが字数で割り切れるとき、1 字ずつの真横に振ります（つかない時はまとめて）"));
+    // TEXT-01: how the rubies are set (each its own key, sent alone: the other settings untouched)
+    ruby_font = new QComboBox;
+    ruby_font->addItem(QStringLiteral("本文と同じ"), QString());
+    for (const auto& [key, label] : lettering::bundled_fonts()) ruby_font->addItem(label, key);
+    ruby_font->setToolTip(QStringLiteral("ルビだけの書体（本文の書体はそのまま）"));
+    connect(ruby_font, &QComboBox::activated, this, [this](int) {
+        carry_on("ruby_style", [this] {
+            const QString key = ruby_font->currentData().toString();
+            ruby_style("ruby_font", key.isEmpty() ? Json() : Json(key.toStdString()));
+        });
+    });
+    ruby_align = new QComboBox;
+    ruby_align->addItem(QStringLiteral("先頭（親文字の頭から）"), QStringLiteral("head"));
+    ruby_align->addItem(QStringLiteral("中央（親文字の真ん中に）"), QStringLiteral("center"));
+    ruby_align->addItem(QStringLiteral("末尾（親文字の終わりまで）"), QStringLiteral("tail"));
+    ruby_align->setCurrentIndex(1);
+    ruby_align->setToolTip(QStringLiteral("ルビを親文字のどこに揃えるか（既定は中央）"));
+    connect(ruby_align, &QComboBox::activated, this, [this](int) {
+        carry_on("ruby_style", [this] {
+            const QString key = ruby_align->currentData().toString();
+            ruby_style("ruby_align", key == QLatin1String("center") ? Json() : Json(key.toStdString()));
+        });
+    });
+    ruby_gap = new QDoubleSpinBox;
+    ruby_gap->setRange(-1, 10);
+    ruby_gap->setSingleStep(0.1);
+    ruby_gap->setDecimals(2);
+    ruby_gap->setSuffix(QStringLiteral(" mm"));
+    ruby_gap->setToolTip(QStringLiteral("ルビと本文の間の距離（mm。既定 0）"));
+    connect(ruby_gap, &QDoubleSpinBox::editingFinished, this, [this] {
+        carry_on("ruby_style", [this] { ruby_style("ruby_gap_mm", ruby_gap->value() != 0.0 ? Json(ruby_gap->value()) : Json()); });
+    });
+    ruby_tracking = new QDoubleSpinBox;
+    ruby_tracking->setRange(-0.5, 2);
+    ruby_tracking->setSingleStep(0.05);
+    ruby_tracking->setDecimals(2);
+    ruby_tracking->setSuffix(QStringLiteral(" 字"));
+    ruby_tracking->setToolTip(QStringLiteral("ルビの字と字の間（ルビ 1 字の何字ぶんか。既定 0）"));
+    connect(ruby_tracking, &QDoubleSpinBox::editingFinished, this, [this] {
+        carry_on("ruby_style", [this] {
+            ruby_style("ruby_tracking", ruby_tracking->value() != 0.0 ? Json(ruby_tracking->value()) : Json());
+        });
+    });
+    // TEXT-01: the chosen line's rubies, those that need review marked, reassigned or cleared
+    rubies = new QListWidget;
+    rubies->setToolTip(QStringLiteral("要確認のルビは、本文の編集が親文字にかかったもの。元の親文字と読みを残してあります"));
+    rubies->setMaximumHeight(72);
+    ruby_reassign = new QPushButton(QStringLiteral("振り直す…"));
+    ruby_reassign->setToolTip(QStringLiteral("選んだルビの親文字と読みを選び直します"));
+    connect(ruby_reassign, &QPushButton::clicked, this, [this] { carry_on("reassign_ruby", [this] { reassign_ruby(); }); });
+    ruby_clear = new QPushButton(QStringLiteral("外す"));
+    ruby_clear->setToolTip(QStringLiteral("選んだルビを外します（元に戻すで戻ります）"));
+    connect(ruby_clear, &QPushButton::clicked, this, [this] { carry_on("clear_ruby", [this] { clear_ruby(); }); });
     layer_order = new QComboBox;
     layer_order->setToolTip(QStringLiteral("テキストの重ね順: このレイヤーの下に台詞を描きます（上のレイヤーの絵がフキダシに重なる）"));
     connect(layer_order, &QComboBox::activated, this, [this](int) {
@@ -323,7 +377,8 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
              {spike_depth, "spike_depth"}, {color, "color"}, {line_colour, "line_colour"}, {fill_colour, "fill_colour"},
              {fill_cover, "fill_cover"}, {text_dx, "text_dx"}, {text_dy, "text_dy"}, {tail_width, "tail_width"},
              {path_curve, "path_curve"}, {ruby_scale, "ruby_scale"}, {mono_ruby, "mono_ruby"}, {layer_order, "layer_order"},
-             {reset, "reset"}})
+             {reset, "reset"}, {ruby_font, "ruby_font"}, {ruby_align, "ruby_align"}, {ruby_gap, "ruby_gap"},
+             {ruby_tracking, "ruby_tracking"}, {rubies, "rubies"}, {ruby_reassign, "ruby_reassign"}, {ruby_clear, "ruby_clear"}})
         widget->setObjectName(QStringLiteral("story_") + QString::fromLatin1(name));
 
     auto* order = new QHBoxLayout;
@@ -380,6 +435,10 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     form->addRow(QString(), path_curve);
     form->addRow(QStringLiteral("ルビの大きさ"), ruby_scale);
     form->addRow(QString(), mono_ruby);
+    form->addRow(QStringLiteral("ルビの書体"), ruby_font);
+    form->addRow(QStringLiteral("ルビの揃え"), ruby_align);
+    form->addRow(QStringLiteral("ルビと本文の距離"), ruby_gap);
+    form->addRow(QStringLiteral("ルビの字間"), ruby_tracking);
     form->addRow(QStringLiteral("重ね順"), layer_order);
     auto* hint = new QLabel(QStringLiteral("フキダシはダブルクリックで打ち直し、四隅で大きさ、●でしっぽの先、◇でしっぽの曲がり、上の○で回転。"
                                            "右クリックで形・しっぽ・結合。"));
@@ -409,6 +468,20 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     layout->addWidget(list, 1);
     layout->addWidget(speaker);
     layout->addWidget(text);
+    ruby_box = new QWidget;
+    auto* rl = new QVBoxLayout(ruby_box);
+    rl->setContentsMargins(0, 0, 0, 0);
+    rl->setSpacing(2);
+    auto* ruby_heading = new QLabel(QStringLiteral("ルビ（要確認は振り直すか外す）"));
+    theme::hint(ruby_heading);
+    rl->addWidget(ruby_heading);
+    rl->addWidget(rubies);
+    auto* ruby_buttons = new QHBoxLayout;
+    ruby_buttons->addWidget(ruby_reassign, 1);
+    ruby_buttons->addWidget(ruby_clear, 1);
+    rl->addLayout(ruby_buttons);
+    ruby_box->setVisible(false);
+    layout->addWidget(ruby_box);
     layout->addLayout(row);
     layout->addLayout(buttons);
     auto* more = new QLabel(QStringLiteral("文字・フキダシの設定は左の「ツールの設定」に出ます"));
@@ -455,7 +528,9 @@ void StoryPanel::refresh() {
             const QString label = lettering::kind_label(l->balloon);
             const QString words = qs(l->text).replace(QLatin1Char('\n'), QLatin1Char(' '));
             // (the kind first: a long line is cut at its end, not its kind)
-            auto* item = new QListWidgetItem(QStringLiteral("%1.〔%2〕%3%4").arg(++n).arg(label.section(QStringLiteral("（"), 0, 0), who, words));
+            // (TEXT-01: a line with a ruby that needs review says so first)
+            const QString review = core::ruby::review_count(*l) > 0 ? QStringLiteral("【ルビ要確認】") : QString();
+            auto* item = new QListWidgetItem(QStringLiteral("%1.%5〔%2〕%3%4").arg(++n).arg(label.section(QStringLiteral("（"), 0, 0), who, words, review));
             item->setToolTip(QStringLiteral("%1%2\n%3").arg(who, words, label));
             list->addItem(item);
             line_ids_.push_back(l->id);
@@ -500,6 +575,7 @@ void StoryPanel::show_picked() {
     }
     window_->canvas()->selected_line_id = l != nullptr ? std::optional<std::string>(l->id) : std::nullopt;
     window_->canvas()->update();
+    show_rubies(l);
     if (l == nullptr) return;
     loading_ = true;
     speaker->setText(qs(l->speaker));
@@ -563,6 +639,23 @@ void StoryPanel::show_picked() {
     path_curve->setChecked(core::py_truthy(st["path_curve"]));
     ruby_scale->setValue(f("ruby_scale", 0.5));
     mono_ruby->setChecked(core::py_truthy(st["mono_ruby"]));
+    {
+        const QString ruby_face = st.contains("ruby_font") && st["ruby_font"].is_string() ? qs(st["ruby_font"].get<std::string>()) : QString();
+        int at = ruby_font->findData(ruby_face);
+        if (at < 0) {
+            ruby_font->addItem(QFileInfo(ruby_face).completeBaseName(), ruby_face);
+            at = ruby_font->findData(ruby_face);
+        }
+        ruby_font->setCurrentIndex(at);
+        const QString align_key = st.contains("ruby_align") && st["ruby_align"].is_string() ? qs(st["ruby_align"].get<std::string>()) : QStringLiteral("center");
+        ruby_align->setCurrentIndex(std::max(0, ruby_align->findData(align_key)));
+        // (keys not among style_of's defaults: looked for, never read as missing)
+        const auto given = [&st, &read](const char* key) {
+            return read([&] { return st.contains(key) && core::py_truthy(st[key]) ? core::to_float(st[key]) : 0.0; }, 0.0);
+        };
+        ruby_gap->setValue(given("ruby_gap_mm"));
+        ruby_tracking->setValue(given("ruby_tracking"));
+    }
     layer_order->clear();
     layer_order->addItem(QStringLiteral("いちばん上（既定）"), QVariant());
     if (const core::Page* page = window_->current_page()) {
@@ -614,6 +707,102 @@ void StoryPanel::style_changed() {
     change["ruby_scale"] = std::abs(ruby_scale->value() - 0.5) > 1e-3 ? Json(ruby_scale->value()) : Json();
     change["mono_ruby"] = on_or_none(mono_ruby->isChecked());
     style(change);
+}
+
+void StoryPanel::ruby_style(const char* key, const Json& value) {
+    const core::StoryLine* l = line();
+    if (l != nullptr && !loading_) window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"style", Json{{key, value}}}}}));
+}
+
+void StoryPanel::show_rubies(const core::StoryLine* l) {
+    const int row = rubies->currentRow();
+    rubies->clear();
+    if (l != nullptr) {
+        for (const core::RubySpan& span : lettering::rubies_of(*l)) {
+            const QString shown = QStringLiteral("%1《%2》").arg(qs(span.base), qs(span.ruby));
+            if (span.review.empty()) {
+                rubies->addItem(shown);
+                continue;
+            }
+            const QString why = span.review == "unplaced"    ? QStringLiteral("親文字が本文に見つかりません")
+                                : span.review == "ambiguous" ? QStringLiteral("どの語に付くか決められません")
+                                                             : QStringLiteral("本文の編集が親文字にかかりました");
+            auto* item = new QListWidgetItem(QStringLiteral("要確認: %1（%2）").arg(shown, why));
+            item->setToolTip(QStringLiteral("元の親文字と読みを残してあります。振り直すか外します（このルビは描かれず、正式な書き出しは止まります）"));
+            rubies->addItem(item);
+        }
+    }
+    if (row >= 0 && row < rubies->count()) rubies->setCurrentRow(row);
+    ruby_box->setVisible(rubies->count() > 0);
+}
+
+void StoryPanel::reassign_ruby() {
+    const core::StoryLine* l = line();
+    if (l == nullptr) return;
+    const std::string id = l->id;
+    const int row = rubies->currentRow();
+    const std::vector<core::RubySpan> before = lettering::rubies_of(*l);
+    if (row < 0 || row >= static_cast<int>(before.size())) {
+        window_->flash(QStringLiteral("先にルビの一覧で振り直すルビを選びます"), 6000);
+        return;
+    }
+    const core::RubySpan old = before[static_cast<std::size_t>(row)];
+    const QPointer<StoryPanel> alive(this);
+    const auto typed = ask::get_text(this, QStringLiteral("ルビを振り直す"), QStringLiteral("親文字（本文の中の語）"), qs(old.base));
+    if (alive.isNull() || !typed || lettering::strip(*typed).isEmpty()) return;
+    const std::string base = lettering::strip(*typed).toStdString();
+    // (the book may have changed while asking: the line as it is now)
+    const core::StoryLine* now = line();
+    if (now == nullptr || now->id != id) return;
+    const std::u32string text = core::ruby::code_points(now->text);
+    const std::u32string words = core::ruby::code_points(base);
+    const std::vector<std::size_t> b = core::ruby::bounds(text);
+    std::vector<std::pair<std::int64_t, std::int64_t>> places;  // where the base is, whole graphemes
+    for (std::size_t at = text.find(words); at != std::u32string::npos && !words.empty(); at = text.find(words, at + 1)) {
+        const auto g0 = std::lower_bound(b.begin(), b.end(), at);
+        const auto g1 = std::lower_bound(b.begin(), b.end(), at + words.size());
+        if (g0 != b.end() && *g0 == at && g1 != b.end() && *g1 == at + words.size()) places.emplace_back(g0 - b.begin(), g1 - b.begin());
+    }
+    if (places.empty()) {
+        window_->flash(QStringLiteral("本文に「%1」が見つかりません（親文字は本文の中の語を書きます）").arg(qs(base)), 6000);
+        return;
+    }
+    std::size_t pick = 0;
+    if (places.size() > 1) {
+        QStringList items;
+        for (std::size_t i = 0; i < places.size(); ++i) {
+            const std::string before_text = core::ruby::slice(now->text, std::max<std::int64_t>(0, places[i].first - 3), places[i].first);
+            const std::string after_text = core::ruby::slice(now->text, places[i].second, places[i].second + 3);
+            items << QStringLiteral("%1 つ目: %2［%3］%4").arg(i + 1).arg(qs(before_text), qs(base), qs(after_text));
+        }
+        const auto chosen = ask::get_item(this, QStringLiteral("ルビを振り直す"), QStringLiteral("どの「%1」に振りますか").arg(qs(base)), items, 0, false);
+        if (alive.isNull() || !chosen || !items.contains(*chosen)) return;
+        pick = static_cast<std::size_t>(items.indexOf(*chosen));
+    }
+    const auto reading = ask::get_text(this, QStringLiteral("ルビを振り直す"), QStringLiteral("「%1」の読み").arg(qs(base)), qs(old.ruby));
+    if (alive.isNull() || !reading || lettering::strip(*reading).isEmpty()) return;
+    const core::StoryLine* again = line();
+    if (again == nullptr || again->id != id || again->text != now->text) return;
+    std::vector<core::RubySpan> spans = lettering::rubies_of(*again);
+    const auto it = std::find(spans.begin(), spans.end(), old);
+    if (it == spans.end()) return;  // (changed meanwhile)
+    spans.erase(it);
+    spans.push_back(core::RubySpan{places[pick].first, places[pick].second, lettering::strip(*reading).toStdString(), base, {}});
+    std::stable_sort(spans.begin(), spans.end(), [](const core::RubySpan& x, const core::RubySpan& y) { return x.start < y.start; });
+    window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", id}, {"ruby_spans", lettering::spans_op(spans)}}}));
+}
+
+void StoryPanel::clear_ruby() {
+    const core::StoryLine* l = line();
+    if (l == nullptr) return;
+    const int row = rubies->currentRow();
+    std::vector<core::RubySpan> spans = lettering::rubies_of(*l);
+    if (row < 0 || row >= static_cast<int>(spans.size())) {
+        window_->flash(QStringLiteral("先にルビの一覧で外すルビを選びます"), 6000);
+        return;
+    }
+    spans.erase(spans.begin() + row);
+    window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"ruby_spans", lettering::spans_op(spans)}}}));
 }
 
 void StoryPanel::pick_style_colour(const char* key, const QString& title, const QColor& fallback) {
@@ -716,6 +905,11 @@ void StoryPanel::reset_style() {
     for (const std::string& key : core::line_style_keys()) {
         if (key != "group") keep[key] = nullptr;
     }
+    // (TEXT-01's keys the line has: back to the default too)
+    const core::StoryLine* l = line();
+    for (const std::string& key : core::ruby::layout_keys()) {
+        if (l != nullptr && l->style.is_object() && l->style.contains(key)) keep[key] = nullptr;
+    }
     style(keep);
     picked();
 }
@@ -757,7 +951,7 @@ void StoryPanel::add() {
     Json op{{"op", "add_line"}, {"page", page->index.json()}, {"text", marks.text}, {"speaker", lettering::strip(speaker->text()).toStdString()},
             {"frame_id", frame->id}, {"balloon", balloon}};
     for (const auto& [key, value] : box.items()) op[key] = value;
-    if (!marks.ruby_runs.empty()) op["ruby_runs"] = marks.ruby_runs;
+    lettering::put_ruby(op, marks, nullptr, false);
     if (!marks.emphasis_runs.empty()) op["emphasis_runs"] = marks.emphasis_runs;
     if (!marks.style_runs.empty()) op["style_runs"] = marks.style_runs;
     if (window_->apply_ops(Json::array({op}))) {
@@ -794,6 +988,7 @@ void StoryPanel::apply_edit() {
                                  {"ruby_runs", marks.ruby_runs},
                                  {"emphasis_runs", marks.emphasis_runs},
                                  {"style_runs", marks.style_runs}}});
+    lettering::put_ruby(ops[0], marks, l, true);  // (TEXT-01: by place when Python's runs would not say where)
     if (marks.text != l->text || balloon != l->balloon || down != (l->wrap == "vertical")) {
         Json op{{"op", "move_line"}, {"id", l->id}};
         const Json size = lettering::refit(*l, window_->frame_by_id(l->frame_id), marks.text, balloon, down);

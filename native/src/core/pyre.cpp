@@ -422,6 +422,10 @@ std::vector<Piece> parse_template(const std::u32string& source) {
 PyLiteralPattern::PyLiteralPattern(std::string_view find, bool ignore_case) : find_(decode(find)), ignore_case_(ignore_case) {}
 
 std::pair<std::string, std::int64_t> PyLiteralPattern::subn(std::string_view repl, std::string_view text) const {
+    return subn(repl, text, nullptr);
+}
+
+std::pair<std::string, std::int64_t> PyLiteralPattern::subn(std::string_view repl, std::string_view text, std::vector<Match>* matches) const {
     // _sre's pattern_subx: a template without a backslash is used as it is; any other is compiled first
     const std::vector<Piece> pieces =
         repl.find('\\') == std::string_view::npos ? std::vector<Piece>{Piece{false, std::string(repl)}} : parse_template(decode(repl));
@@ -454,7 +458,9 @@ std::pair<std::string, std::int64_t> PyLiteralPattern::subn(std::string_view rep
     while (i < chars.size()) {
         if (n > 0 && i + n <= chars.size() && matches_at(i)) {
             const std::string matched = encode(std::u32string_view(chars).substr(i, n));
+            const std::size_t from = out.size();
             for (const Piece& piece : pieces) out += piece.match ? matched : piece.words;
+            if (matches != nullptr) matches->push_back(Match{i, i + n, decode(std::string_view(out).substr(from))});
             ++count;
             i += n;
             continue;

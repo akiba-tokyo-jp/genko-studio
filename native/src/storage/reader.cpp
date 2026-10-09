@@ -16,6 +16,7 @@
 #include "core/exposure.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "core/ruby.hpp"
 #include "core/strokes.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
@@ -50,10 +51,10 @@ constexpr std::array<std::string_view, 4> kRectKeys{"x", "y", "width", "height"}
 constexpr std::array<std::string_view, 14> kFrameKeys{"id", "rect", "split_axis", "clip", "bleed", "border_mm",
                                                       "children", "panel", "poly", "split", "custom", "curves",
                                                       "line", "corner_mm"};
-constexpr std::array<std::string_view, 19> kLineKeys{"id", "page_index", "text", "speaker", "frame_id", "ruby",
+constexpr std::array<std::string_view, 20> kLineKeys{"id", "page_index", "text", "speaker", "frame_id", "ruby",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
-                                                     "ruby_runs", "path", "emphasis_runs", "style_runs", "style",
-                                                     "tails"};
+                                                     "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
+                                                     "style", "tails"};
 constexpr std::array<std::string_view, 42> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
@@ -334,6 +335,7 @@ private:
     core::Rect read_rect(const Json& data, const std::string& at);
     core::Frame read_frame(const Json& data, const std::string& at);
     core::StoryLine read_line(const Json& data, const std::string& at);
+    void read_ruby_spans(core::StoryLine& line, const Json& raw, const std::string& at);
     core::Layer read_layer(const Json& data, const std::string& at);
     core::Stroke read_stroke(const Json& raw, const std::string& at);
     void read_papers(core::Document& doc);
@@ -431,6 +433,7 @@ core::StoryLine Reader::read_line(const Json& data, const std::string& at) {
     for (const Json& item : list_or_empty(data, "ruby_runs")) {
         line.ruby_runs.push_back(iterable(item, at_key(at, "ruby_runs")));
     }
+    if (const Json* spans = find(data, "ruby_spans"); spans != nullptr && !spans->is_null()) read_ruby_spans(line, *spans, at_key(at, "ruby_spans"));
     if (const Json* path = find(data, "path"); path && core::py_truthy(*path)) {
         line.path = points_of(*path, at_key(at, "path"));
     }
@@ -482,6 +485,60 @@ void Reader::read_papers(core::Document& doc) {
         }
         doc.papers.emplace(ref, std::move(png));
     }
+}
+
+// ruby-layout@1: the line's rubies by place ({start, end, base, ruby, review?} each, core/ruby.hpp), ruby_runs their
+// mirror. What does not fit the text is reported (the book opens read-only); accepted, such a ruby is kept as needing
+// review where it was (its range cut to the text), never dropped.
+void Reader::read_ruby_spans(core::StoryLine& line, const Json& raw, const std::string& at) {
+    std::vector<core::RubySpan> spans;
+    bool formed = raw.is_array();
+    for (std::size_t i = 0; formed && i < raw.size(); ++i) {
+        const Json& item = raw[i];
+        const auto text = [&item](const char* key) -> const Json* {
+            const Json* v = item.is_object() ? find(item, key) : nullptr;
+            return v != nullptr && v->is_string() ? v : nullptr;
+        };
+        const Json* start = item.is_object() ? find(item, "start") : nullptr;
+        const Json* end = item.is_object() ? find(item, "end") : nullptr;
+        const Json* reading = text("ruby");
+        const Json* base = text("base");
+        const Json* review = item.is_object() ? find(item, "review") : nullptr;
+        formed = start != nullptr && end != nullptr && start->is_number_integer() && end->is_number_integer() && reading != nullptr &&
+                 base != nullptr && (review == nullptr || review->is_string());
+        if (!formed) break;
+        for (const auto& [key, value] : item.items()) {
+            if (key != "start" && key != "end" && key != "base" && key != "ruby" && key != "review") {
+                issue("unknown_key", at_key(at_index(at, i), key), {},
+                      "the ruby key " + core::py_repr_str(key) + " is not read by this build and would not be written back");
+            }
+        }
+        spans.push_back(core::RubySpan{start->get<std::int64_t>(), end->get<std::int64_t>(), reading->get<std::string>(),
+                                       base->get<std::string>(), review != nullptr ? review->get<std::string>() : std::string()});
+    }
+    if (!formed) {
+        repair(at, "ruby_spans must be a list of {start, end, base, ruby, review?}: read as no ruby by place");
+        return;
+    }
+    std::string why;
+    try {
+        why = core::ruby::problem(spans, line.text);
+    } catch (const core::Error& error) {
+        why = error.what();
+    }
+    if (!why.empty()) {
+        repair(at, "the rubies do not fit the line's text (" + why + "): read as needing review");
+        const std::int64_t n = core::ruby::count(line.text);
+        for (core::RubySpan& span : spans) {
+            span.start = std::clamp<std::int64_t>(span.start, 0, n);
+            span.end = std::clamp<std::int64_t>(span.end, span.start, n);
+            if (span.ruby.empty()) span.ruby = "?";
+            span.review = "edited";
+        }
+        std::stable_sort(spans.begin(), spans.end(), [](const core::RubySpan& x, const core::RubySpan& y) { return x.start < y.start; });
+    }
+    line.ruby_runs = core::ruby::runs_of(spans);
+    line.ruby_spans = std::move(spans);
 }
 
 core::Stroke Reader::read_stroke(const Json& raw, const std::string& at) {
@@ -1082,7 +1139,7 @@ bool is_known_top_key(std::string_view key) { return in(kTopKeys, key); }
 bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }
 bool is_known_feature(std::string_view feature) {
     return feature == core::kColorRasterFeature || feature == core::kColorTilesFeature || feature == core::kExposureFeature ||
-           feature == core::kColorStrokeFeature || feature == core::kPaperFeature;
+           feature == core::kColorStrokeFeature || feature == core::kPaperFeature || feature == core::kRubyLayoutFeature;
 }
 
 int project_version(const Json& payload) {

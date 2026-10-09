@@ -59,6 +59,7 @@ genko_library(genko_core
     areas.cpp
     ops_arrange.cpp
     pyre.cpp
+    ruby.cpp
     ops_lines.cpp
     ops_bookpages.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"

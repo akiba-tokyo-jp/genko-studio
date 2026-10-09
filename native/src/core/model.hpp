@@ -213,6 +213,21 @@ struct Frame {
     double corner_mm = 0.0;                 // 角の丸み
 };
 
+// One ruby of a line held by its place in the text (ruby-layout@1, core/ruby.hpp): the reading over the text's
+// extended grapheme clusters [start, end). `base` is the text of that range when the ruby was set. A ruby that needs
+// review (要確認: an edit reached into its base, or where it went cannot be told) keeps the base and reading it had, its
+// range only where it was last seen; it is not drawn, and `review` says why ("edited", "ambiguous" or "unplaced";
+// empty: drawn).
+struct RubySpan {
+    std::int64_t start = 0;
+    std::int64_t end = 0;
+    std::string ruby;
+    std::string base;
+    std::string review;
+
+    bool operator==(const RubySpan&) const = default;
+};
+
 struct StoryLine {
     std::string id;
     Num page_index;
@@ -228,6 +243,9 @@ struct StoryLine {
     std::optional<Point> tail;
     std::string wrap = "horizontal";
     std::vector<Json> ruby_runs;               // each a list (Python's tuple(item)), e.g. ["東京", "とうきょう"]
+    // ruby-layout@1: the rubies by place, in the order of their starts (none: the line holds its ruby as Python's
+    // ruby_runs, found by its words). With spans, ruby_runs is their mirror: [base, reading] of each drawn one.
+    std::optional<std::vector<RubySpan>> ruby_spans;
     std::optional<std::vector<Point>> path;    // a balloon drawn by hand: its outline
     std::vector<std::string> emphasis_runs;    // 傍点
     std::vector<std::pair<std::string, Json>> style_runs;  // [[words, {scale, bold, rgb}]]

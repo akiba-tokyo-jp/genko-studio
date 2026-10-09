@@ -10,6 +10,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/ruby.hpp"
 #include "formats/export.hpp"
 #include "render/not_yet_ported.hpp"
 
@@ -224,6 +225,13 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
     if (o.official) {
         if (!fmt->official) return refuse(std::string(fmt->label) + " は正式な書き出しに使えない");
         if (!project) return refuse("正式な書き出しの前に、原稿を保存する");
+        // (TEXT-01: a ruby that needs review stops the official export, here before the rest, which is not ported yet)
+        if (const std::int64_t n = core::ruby::review_count(*episode); n > 0) {
+            Json refused = refuse("the official export stops: " + std::to_string(n) + " ruby reading" + (n == 1 ? " needs" : "s need") +
+                                  " review (reassign or clear " + (n == 1 ? "it" : "them") + " first)");
+            refused["code"] = "ruby_review";
+            return refused;
+        }
         // (HumanService.export: preflight and the export approval, the studio's; not in this build yet)
         Json refused = refuse("official export is not in the C++ build yet");
         refused["code"] = "not_yet_ported";

@@ -14,6 +14,7 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "core/ruby.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/tategaki.hpp"
@@ -399,6 +400,36 @@ Json place_at(double x_mm, double y_mm, const std::string& text, const std::stri
                 {"wrap", vertical ? "vertical" : "horizontal"}};
 }
 
+namespace {
+
+// parse_ruby with where each base went in the text it gives (UTF-16 places of the QString).
+std::pair<QString, std::vector<std::pair<qsizetype, qsizetype>>> ruby_places(const QString& text) {
+    QString out;
+    std::vector<std::pair<qsizetype, qsizetype>> places;
+    qsizetype pos = 0;
+    auto it = ruby_pattern().globalMatch(text);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        out += text.mid(pos, m.capturedStart() - pos);
+        const QString base = !m.captured(1).isEmpty() ? m.captured(1) : m.captured(3);
+        places.emplace_back(out.size(), out.size() + base.size());
+        out += base;
+        pos = m.capturedEnd();
+    }
+    out += text.mid(pos);
+    return {out, places};
+}
+
+// A UTF-16 place of a text as the grapheme it begins (`up`: the first grapheme wholly after it, else the one it is in).
+std::int64_t grapheme_of(const QString& text, const std::vector<std::size_t>& bounds, qsizetype place, bool up) {
+    const std::size_t cp = static_cast<std::size_t>(QStringView(text).left(place).toUcs4().size());
+    const auto it = up ? std::lower_bound(bounds.begin(), bounds.end(), cp) : std::upper_bound(bounds.begin(), bounds.end(), cp);
+    const auto at = static_cast<std::int64_t>(it - bounds.begin());
+    return up ? at : std::max<std::int64_t>(0, at - 1);
+}
+
+}  // namespace
+
 std::pair<QString, Json> parse_ruby(const QString& text) {
     Json runs = Json::array();
     const QString out = substitute(ruby_pattern(), text, [&](const QRegularExpressionMatch& m) {
@@ -420,6 +451,17 @@ Marks parse_marks(const QString& typed) {
     auto [text, runs] = parse_ruby(dotted);
     marks.text = utf8(text);
     marks.ruby_runs = std::move(runs);
+    // (TEXT-01: each ruby where it was typed, in graphemes)
+    const auto places = ruby_places(dotted).second;
+    const std::vector<std::size_t> bounds = core::ruby::bounds(text.toStdU32String());
+    for (std::size_t i = 0; i < places.size() && i < marks.ruby_runs.size(); ++i) {
+        core::RubySpan span;
+        span.start = grapheme_of(text, bounds, places[i].first, false);
+        span.end = std::max(span.start + 1, grapheme_of(text, bounds, places[i].second, true));
+        span.ruby = marks.ruby_runs[i][1].get<std::string>();
+        span.base = core::ruby::slice(marks.text, span.start, span.end);
+        marks.ruby_spans.push_back(std::move(span));
+    }
     // (the styled words, found again in the text without its marks)
     for (const auto& [words, style] : styles) {
         const QString plain = substitute(emphasis_pattern(), words, [](const QRegularExpressionMatch& m) { return m.captured(1); });
@@ -445,8 +487,34 @@ QString with_ruby(const QString& text, const std::vector<Json>& runs) {
     return out;
 }
 
+namespace {
+
+// The text with its drawn rubies by place in the notation, each where it is.
+QString with_spans(const core::StoryLine& line) {
+    const std::u32string text = core::ruby::code_points(line.text);
+    const std::vector<std::size_t> b = core::ruby::bounds(text);
+    const auto n = static_cast<std::int64_t>(b.size()) - 1;
+    std::u32string out;
+    std::int64_t at = 0;
+    for (const core::RubySpan& span : *line.ruby_spans) {
+        if (!span.review.empty() || span.start < at || span.end > n || span.end <= span.start) continue;
+        const auto piece = [&](std::int64_t from, std::int64_t to) {
+            return std::u32string_view(text).substr(b[static_cast<std::size_t>(from)], b[static_cast<std::size_t>(to)] - b[static_cast<std::size_t>(from)]);
+        };
+        out += piece(at, span.start);
+        out += U"｜";
+        out += piece(span.start, span.end);
+        out += U"《" + core::ruby::code_points(span.ruby) + U"》";
+        at = span.end;
+    }
+    out += std::u32string_view(text).substr(b[static_cast<std::size_t>(at)]);
+    return QString::fromStdU32String(out);
+}
+
+}  // namespace
+
 QString with_marks(const core::StoryLine& line) {
-    QString text = with_ruby(qs(line.text), line.ruby_runs);
+    QString text = line.ruby_spans ? with_spans(line) : with_ruby(qs(line.text), line.ruby_runs);
     qsizetype pos = 0;
     for (const std::string& b : line.emphasis_runs) {
         const QString base = qs(b);
@@ -499,7 +567,83 @@ bool same_marks(const Marks& marks, const core::StoryLine& line) {
     for (const std::string& words : line.emphasis_runs) dots.push_back(words);
     Json styles = Json::array();
     for (const auto& [words, style] : line.style_runs) styles.push_back(Json::array({words, style}));
-    return core::py_equals(marks.ruby_runs, ruby) && core::py_equals(marks.emphasis_runs, dots) && core::py_equals(marks.style_runs, styles);
+    const bool same_ruby = line.ruby_spans ? ruby_after(marks, &line) == *line.ruby_spans : core::py_equals(marks.ruby_runs, ruby);
+    return same_ruby && core::py_equals(marks.emphasis_runs, dots) && core::py_equals(marks.style_runs, styles);
+}
+
+std::vector<core::RubySpan> rubies_of(const core::StoryLine& line) {
+    return line.ruby_spans ? *line.ruby_spans : core::ruby::from_runs(line.text, line.ruby_runs, false);
+}
+
+std::vector<core::RubySpan> ruby_after(const Marks& marks, const core::StoryLine* line) {
+    std::vector<core::RubySpan> typed = marks.ruby_spans;
+    if (line == nullptr) return typed;
+    std::vector<core::RubySpan> old = core::ruby::follow_text(line->text, marks.text, rubies_of(*line)).spans;
+    std::vector<bool> used(old.size(), false);
+    std::vector<core::RubySpan> out;
+    std::vector<bool> placed(typed.size(), false);
+    // a ruby typed where an old one went: that one, its reading as typed
+    for (std::size_t t = 0; t < typed.size(); ++t) {
+        for (std::size_t o = 0; o < old.size(); ++o) {
+            if (used[o] || !old[o].review.empty() || old[o].start != typed[t].start || old[o].end != typed[t].end) continue;
+            used[o] = true;
+            placed[t] = true;
+            out.push_back(typed[t]);
+            break;
+        }
+    }
+    // one typed with an old one's reading over another place it reaches: that one edited in its base (needs review)
+    for (std::size_t t = 0; t < typed.size(); ++t) {
+        if (placed[t]) continue;
+        for (std::size_t o = 0; o < old.size(); ++o) {
+            const bool reaches = typed[t].start < std::max(old[o].end, old[o].start + 1) && old[o].start < typed[t].end;
+            if (used[o] || old[o].ruby != typed[t].ruby || !reaches) continue;
+            used[o] = true;
+            placed[t] = true;
+            core::RubySpan edited = old[o];
+            edited.start = typed[t].start;
+            edited.end = typed[t].end;
+            if (edited.review.empty()) edited.review = "edited";
+            out.push_back(std::move(edited));
+            break;
+        }
+        if (!placed[t]) out.push_back(typed[t]);  // (new)
+    }
+    // the old ones that need review and were not typed over stay so (the others not typed again are gone)
+    for (std::size_t o = 0; o < old.size(); ++o) {
+        if (!used[o] && !old[o].review.empty()) out.push_back(old[o]);
+    }
+    std::stable_sort(out.begin(), out.end(), [](const core::RubySpan& a, const core::RubySpan& b) {
+        return a.start != b.start ? a.start < b.start : a.end < b.end;
+    });
+    return out;
+}
+
+Json spans_op(const std::vector<core::RubySpan>& spans) {
+    Json out = Json::array();
+    for (const core::RubySpan& span : spans) {
+        Json item{{"start", span.start}, {"end", span.end}, {"ruby", span.ruby}};
+        if (!span.review.empty()) {
+            item["base"] = span.base;
+            item["review"] = span.review;
+        }
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
+void put_ruby(Json& op, const Marks& marks, const core::StoryLine* line, bool always) {
+    const std::vector<core::RubySpan> spans = ruby_after(marks, line);
+    const bool reviewed = std::any_of(spans.begin(), spans.end(), [](const core::RubySpan& s) { return !s.review.empty(); });
+    std::vector<Json> runs;
+    for (const Json& run : marks.ruby_runs) runs.push_back(run);
+    const bool as_python = (line == nullptr || !line->ruby_spans) && !reviewed && core::ruby::from_runs(marks.text, runs, false) == spans;
+    if (as_python) {
+        if (always || !marks.ruby_runs.empty()) op["ruby_runs"] = marks.ruby_runs;
+        return;
+    }
+    op.erase("ruby_runs");
+    op["ruby_spans"] = spans_op(spans);
 }
 
 }  // namespace genko::app::lettering

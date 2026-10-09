@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -53,6 +54,9 @@ std::vector<std::u32string> phrases(std::u32string_view text);
 std::vector<std::u32string> phrase_columns(std::u32string_view text, std::int64_t per,
                                            const std::function<std::int64_t(std::u32string_view)>& size = {});
 std::u32string without_periods(std::u32string_view text);
+// without_periods with, for each character of the result, the place in `text` it came from (a period turned into a
+// line break: the period's).
+std::pair<std::u32string, std::vector<std::size_t>> without_periods_mapped(std::u32string_view text);
 
 // mark_tcy(text, style_runs), mono_runs(ruby_runs), char_styles(text, style_runs, base) (base: a dict or null)
 std::u32string mark_tcy(std::u32string_view text, const StyleRuns& style_runs);
@@ -86,8 +90,45 @@ void draw_mark(Image& image, double cx, double cy, double size, std::string_view
 // Image.alpha_composite(im, dest): im over the image with its corner at dest (anywhere: what falls outside is lost).
 void composite_at(Image& base, const Image& im, std::int64_t x, std::int64_t y);
 
+// What the lettering of a line's ruby held by place (ruby-layout@1) could not do as it was asked — said, never shrunk
+// or cut: "overflow" (a reading longer than all the text it is set beside: the lettering grows to hold it), "overlap"
+// (readings over each other), "font_fallback" (a letter the ruby's face lacks, drawn in another), "glyph_missing" (a
+// letter no face has), "not_drawn" (a ruby whose base the lettering leaves out, e.g. a closing 。). A reading longer
+// than its base only, moved back within the text at the start or end of a column or row, is not one (Python moves
+// its ruby the same way). `span`: the ruby's place in the line's ruby_spans.
+struct RubyNote {
+    std::string kind;
+    std::size_t span = 0;
+    std::string detail;
+
+    bool operator==(const RubyNote&) const = default;
+};
+
+// A ruby by place, as the lettering takes it: the code points [from, to) of the text it was given (`origins` maps the
+// text set back to them), its reading's graphemes, and which of the line's spans it is.
+struct PlacedRuby {
+    std::size_t from = 0;
+    std::size_t to = 0;
+    std::vector<std::u32string> reading;
+    std::size_t span = 0;
+};
+
+// How a line's rubies by place are set (the line's style; the defaults are Python's): their face, size against the
+// text (ruby_scale, 0.25..0.8 of the em), alignment over the base (head | center | tail), distance from the text (px)
+// and the space between their letters (of the ruby's size).
+struct RubySetting {
+    Face face;
+    double scale = 0.5;
+    bool scale_given = false;  // (across, Python's ruby is always half the em: ruby_scale only when the line gives it)
+    std::string align = "center";
+    std::int64_t gap = 0;
+    double tracking = 0.0;
+};
+
 // compose(text, font, em, max_height, fill, ruby_runs, face=…, …): the keyword arguments as balloons._vertical
-// passes them (empty lists for None).
+// passes them (empty lists for None). With `placed` (a line holding its ruby by place) the readings are those, set as
+// `ruby_set` says, instead of ruby_runs; `origins` gives each character of `text` its place in the line's text (npos:
+// none), and what could not be done as asked goes to `notes`.
 struct ComposeArgs {
     std::u32string text;
     std::int64_t em = 0;
@@ -105,7 +146,17 @@ struct ComposeArgs {
     int bold = 0;
     double ruby_scale = 0.5;
     bool mono_ruby = false;
+    std::optional<std::vector<PlacedRuby>> placed;
+    std::vector<std::size_t> origins;
+    RubySetting ruby_set;
+    std::vector<RubyNote>* notes = nullptr;
 };
 Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args);
+
+// Whether two characters are the same once set (cells: !? and full-width digits set as their ASCII ones).
+bool same_set(char32_t given, char32_t set);
+// A letter of a ruby's reading its face lacks: noted (when there are notes) as drawn in another face
+// ("font_fallback") or in none ("glyph_missing").
+void note_font(Fonts& fonts, const Face& face, std::u32string_view letter, std::size_t span, std::vector<RubyNote>* notes);
 
 }  // namespace genko::render::text

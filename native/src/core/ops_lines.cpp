@@ -4,6 +4,12 @@
 // (_parse_tails, and _tails_outside for a balloon moved over its own tail), its ruby, dots (傍点) and styled words; and
 // the line stamp_material makes of a lettering material (the rest of that op is render's). Nothing is drawn.
 //
+// TEXT-01 (core/ruby.hpp): add_line and edit_line also take ruby_spans (the rubies by place), the style the ruby
+// layout keys (ruby_font, ruby_align, ruby_gap_mm, ruby_tracking), and an edit of the text follows the rubies held by
+// place. A line of Python's (ruby_runs only) is changed as Python changes it as long as its runs still say where each
+// ruby is; when they no longer would (Python would draw a reading over another word, or keep one whose base was
+// edited), the line holds its rubies by place from then on (see edited_text and replaced_text).
+//
 // Python also keeps each page's lines in page.texts (the same objects as the story's, read from the story); this build
 // keeps the story alone. Every id page.texts holds is in the story too (add_line and delete_line change both, and the
 // ops that renumber pages keep the ids), so _find_line, which looks in the story first, finds the same line here.
@@ -12,6 +18,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -27,6 +34,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/pyre.hpp"
+#include "core/ruby.hpp"
 
 namespace genko::core {
 
@@ -369,6 +377,14 @@ Json merge_style(const Json& current, const Json& change, const PictureCheck& ch
     if (!change.is_object()) throw OpError("style must be an object");
     Json out = current.is_object() ? current : Json::object();
     for (const auto& [key, value] : change.items()) {
+        if (ruby::is_layout_key(key)) {  // (TEXT-01's keys: not Python's, nor in its list of them)
+            if (value.is_null() || value == Json("")) {
+                out.erase(key);
+            } else {
+                out[key] = ruby::layout_value(key, value);
+            }
+            continue;
+        }
         const auto* spec = std::find_if(std::begin(kStyleKeys), std::end(kStyleKeys), [&](const StyleKey& k) { return k.name == key; });
         if (spec == std::end(kStyleKeys)) unknown_style_key(key);
         if (value.is_null() || value == Json("")) {
@@ -517,6 +533,57 @@ void require_kept(const StoryLine& line, const Json* frame_id = nullptr) {
     require_finite(line.style, "style");
 }
 
+// --- the ruby by place (TEXT-01) -------------------------------------------------------------------------------------
+
+// What an op did to a line's rubies, for its report: how many it made need review and how many it took away.
+struct RubyChange {
+    std::int64_t review = 0;
+    std::int64_t removed = 0;
+};
+
+// The op's report: the ruby keys added when there is something to say (a line of Python's left as Python leaves it
+// says nothing, as Python).
+void report_ruby(OpContext& c, const RubyChange& change) {
+    if (change.review <= 0 && change.removed <= 0) return;
+    Json report = c.report ? *c.report : Json::object();
+    if (change.review > 0) report["ruby_review"] = get_or(report, "ruby_review", Json(0)).get<std::int64_t>() + change.review;
+    if (change.removed > 0) report["ruby_removed"] = get_or(report, "ruby_removed", Json(0)).get<std::int64_t>() + change.removed;
+    c.report = std::move(report);
+}
+
+// The rubies an op gives by place (add_line, edit_line): ruby_spans against the line's text (null: none), never with
+// ruby_runs.
+void given_spans(StoryLine& line, const Json& op) {
+    if (py_truthy(get_or(op, "ruby_runs", Json()))) throw OpError("give the rubies as ruby_spans or as ruby_runs, not both");
+    const Json& raw = op["ruby_spans"];
+    line.ruby_spans = raw.is_null() ? std::vector<RubySpan>{} : ruby::parse(raw, line.text);
+}
+
+// A line's rubies after its text changed from `before`: by place, followed (core/ruby.hpp); of Python's (`runs` were
+// its runs), as Python leaves them (edit_line keeps the runs; replace_text the ones whose base is still in the text,
+// `python`) when the runs still say where each ruby is, else held by place from now on.
+RubyChange followed(StoryLine& line, const std::string& before, const std::vector<Json>& runs, const std::vector<Json>& python,
+                    const std::function<ruby::Followed(const std::vector<RubySpan>&)>& follow) {
+    RubyChange change;
+    const std::int64_t reviewed = ruby::review_count(line);
+    if (line.ruby_spans) {
+        ruby::Followed f = follow(*line.ruby_spans);
+        line.ruby_spans = std::move(f.spans);
+        change.removed = f.removed;
+        change.review = ruby::review_count(line) - reviewed;
+        return change;
+    }
+    line.ruby_runs = python;
+    const std::vector<RubySpan> had = ruby::from_runs(before, runs, true);
+    if (had.empty()) return change;
+    ruby::Followed f = follow(had);
+    if (ruby::same_drawn(f.spans, ruby::from_runs(line.text, python, false))) return change;
+    line.ruby_spans = std::move(f.spans);
+    change.removed = f.removed;
+    change.review = ruby::review_count(line);
+    return change;
+}
+
 // --- the ops -------------------------------------------------------------------------------------------------------------
 
 void add_line(OpContext& c, const PictureCheck& check) {
@@ -561,6 +628,8 @@ void add_line(OpContext& c, const PictureCheck& check) {
         line.tail = tail_point(line.tails.front()["to"]);
     }
     line.balloon = balloon_kind(Json(line.balloon));
+    if (has(op, "ruby_spans")) given_spans(line, op);
+    ruby::settle(doc, line);
     require_kept(line, &frame_id);
 }
 
@@ -593,6 +662,10 @@ void edit_line(OpContext& c, const PictureCheck& check) {
     const Json* line_id = get(op, "id");
     if (line_id == nullptr || !py_truthy(*line_id)) throw OpError("id is required");
     StoryLine& line = find_line(c.doc, py_str(*line_id));
+    const std::string before = line.text;
+    const std::vector<Json> runs = line.ruby_runs;
+    const bool by_place = line.ruby_spans.has_value();
+    const std::int64_t reviewed = ruby::review_count(line);
     if (has(op, "style")) line.style = merge_style(line.style, op["style"], check);
     if (has(op, "tails")) {
         line.tails = parse_tails(op["tails"]);
@@ -612,6 +685,20 @@ void edit_line(OpContext& c, const PictureCheck& check) {
         if (!is_one_of(op["wrap"], {"vertical", "horizontal"})) throw OpError("wrap must be vertical or horizontal");
         line.wrap = py_str(op["wrap"]);
     }
+    // the rubies: given by place; given as Python's runs to a line that holds them by place (the explicit rule, the runs
+    // not found kept as needing review); or followed through the new text
+    RubyChange change;
+    if (has(op, "ruby_spans")) {
+        given_spans(line, op);
+    } else if (has(op, "ruby_runs") && by_place) {
+        line.ruby_spans = ruby::from_runs(line.text, line.ruby_runs, true);
+    } else if (has(op, "text") && line.text != before && !has(op, "ruby_runs")) {
+        change = followed(line, before, runs, line.ruby_runs,
+                          [&](const std::vector<RubySpan>& spans) { return ruby::follow_text(before, line.text, spans); });
+    }
+    ruby::settle(c.doc, line);
+    change.review = std::max<std::int64_t>(0, ruby::review_count(line) - reviewed);
+    if (by_place || line.ruby_spans) report_ruby(c, change);  // (a line of Python's left so: nothing, as Python)
     require_kept(line, get(op, "frame_id"));
 }
 
@@ -688,6 +775,8 @@ void set_balloon_path(OpContext& c) {
     if (has(op, "ruby_runs")) line.ruby_runs = ruby_runs_of(op["ruby_runs"]);
     if (has(op, "emphasis_runs")) line.emphasis_runs = emphasis(op["emphasis_runs"]);
     if (has(op, "style_runs")) line.style_runs = style_runs(op["style_runs"]);
+    if (has(op, "ruby_runs") && line.ruby_spans) line.ruby_spans = ruby::from_runs(line.text, line.ruby_runs, true);  // (TEXT-01)
+    ruby::settle(c.doc, line);
     require_kept(line);
 }
 
@@ -722,23 +811,40 @@ void replace_text(OpContext& c) {
     std::vector<std::int64_t> pages;
     for (const Json& p : iterate(py_or(op_value(op, "pages"), Json::array()))) pages.push_back(to_int_held(p));
     std::int64_t count = 0;
+    std::int64_t ruby_review = 0;
+    std::int64_t ruby_removed = 0;
     Json where = Json::array();
     for (StoryLine& line : c.doc.story) {
         if (!pages.empty() && std::none_of(pages.begin(), pages.end(), [&](std::int64_t p) { return line.page_index == Num(p); })) {
             continue;
         }
-        auto [text, n] = pattern.subn(replace, line.text);
+        std::vector<PyLiteralPattern::Match> matches;
+        auto [text, n] = pattern.subn(replace, line.text, &matches);
         if (n > 0) {
             where.push_back(Json::object({{"line", line.id}, {"page", line.page_index.json()}, {"count", n},
                                           {"text", first_characters(text, 40)}}));
+            const std::string before = line.text;
             line.text = text;
             count += n;
             // (ruby, dots and styled parts keep pointing at words that are still there)
-            std::vector<Json> ruby;
+            std::vector<Json> kept;
             for (const Json& run : line.ruby_runs) {
-                if (py_truthy(run) && found_in(subscript(run, 0), text)) ruby.push_back(run);
+                if (py_truthy(run) && found_in(subscript(run, 0), text)) kept.push_back(run);
             }
-            line.ruby_runs = std::move(ruby);
+            // (TEXT-01: the rubies by place followed through the matches; Python's runs as Python leaves them while
+            // they still say where each ruby is)
+            std::vector<ruby::Replacement> edits;
+            for (const auto& m : matches) edits.push_back(ruby::Replacement{m.start, m.end, m.with});
+            const std::vector<Json> runs = line.ruby_runs;
+            const bool by_place = line.ruby_spans.has_value();
+            const RubyChange change = followed(line, before, runs, kept, [&](const std::vector<RubySpan>& spans) {
+                return ruby::follow_replacements(before, text, edits, spans);
+            });
+            ruby::settle(c.doc, line);
+            if (by_place || line.ruby_spans) {
+                ruby_review += change.review;
+                ruby_removed += change.removed;
+            }
             std::erase_if(line.emphasis_runs, [&](const std::string& words) { return text.find(words) == std::string::npos; });
             std::erase_if(line.style_runs, [&](const auto& run) { return text.find(run.first) == std::string::npos; });
         }
@@ -753,6 +859,7 @@ void replace_text(OpContext& c) {
     }
     if (count == 0 && truthy_at(op, "must_find")) throw OpError("nothing matched");
     c.report = Json::object({{"replaced", count}, {"where", py_slice(where, 0, 200)}});
+    report_ruby(c, RubyChange{ruby_review, ruby_removed});
 }
 
 }  // namespace
@@ -797,6 +904,7 @@ void stamp_lettering(Document& doc, std::size_t at, const Json& op, const Json& 
     line.wrap = py_str(py_or(op_value(material, "wrap"), Json("horizontal")));
     line.style = lettering_style(op_value(material, "style"), check);
     if (truthy_at(op, "id")) line.id = py_str(op["id"]);  // (unchecked: Python keeps a second line with a line's id)
+    ruby::settle(doc, line);
     require_kept(line, &frame_id);
 }
 

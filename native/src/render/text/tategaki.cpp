@@ -140,6 +140,10 @@ Ink opaque(const Rgb& fill) { return Ink::with_alpha(fill, 255); }  // fill + (2
 
 bool is_vs(char32_t c) { return (c >= 0xFE00 && c <= 0xFE0F) || (c >= 0xE0100 && c <= 0xE01EF); }
 
+bool same_set(char32_t given, char32_t set) {
+    return given == set || bang_of(given) == set || (full_digit(given) && U'0' + (given - 0xFF10) == set);
+}
+
 namespace {
 
 // _latin_run(text, i)
@@ -367,17 +371,24 @@ std::vector<std::u32string> phrase_columns(std::u32string_view text, std::int64_
     return cols;
 }
 
-std::u32string without_periods(std::u32string_view text_in) {
+std::u32string without_periods(std::u32string_view text_in) { return without_periods_mapped(text_in).first; }
+
+std::pair<std::u32string, std::vector<std::size_t>> without_periods_mapped(std::u32string_view text_in) {
     const auto period = [](char32_t c) { return c == U'。' || c == U'．'; };              // [。．]
     const auto closer = [](char32_t c) { return in(U"」』）)", c); };              // [」』）)]
+    // (each character's place in the text given, carried along)
+    std::u32string text(text_in);
+    std::vector<std::size_t> from(text.size());
+    for (std::size_t i = 0; i < from.size(); ++i) from[i] = i;
     // re.sub(r"[。．]+(?=[」』）)]*\s*$)", "", text): the run of periods with nothing but closing brackets and
     // whitespace after it (the last one; `$` also before a final "\n", which \s* takes anyway)
-    std::u32string text(text_in);
     {
         std::u32string out;
+        std::vector<std::size_t> out_from;
         std::size_t i = 0;
         while (i < text.size()) {
             if (!period(text[i])) {
+                out_from.push_back(from[i]);
                 out.push_back(text[i++]);
                 continue;
             }
@@ -386,17 +397,23 @@ std::u32string without_periods(std::u32string_view text_in) {
             std::size_t k = j;
             while (k < text.size() && closer(text[k])) ++k;
             while (k < text.size() && py_isspace(text[k])) ++k;
-            if (k != text.size()) out.append(text, i, j - i);
+            if (k != text.size()) {
+                out.append(text, i, j - i);
+                out_from.insert(out_from.end(), from.begin() + static_cast<std::ptrdiff_t>(i), from.begin() + static_cast<std::ptrdiff_t>(j));
+            }
             i = j;
         }
         text = std::move(out);
+        from = std::move(out_from);
     }
     // re.sub(r"[。．]+(?=[」』）)]*$)", "", text, flags=re.M): a run before the closing brackets that end a line
     {
         std::u32string out;
+        std::vector<std::size_t> out_from;
         std::size_t i = 0;
         while (i < text.size()) {
             if (!period(text[i])) {
+                out_from.push_back(from[i]);
                 out.push_back(text[i++]);
                 continue;
             }
@@ -404,10 +421,14 @@ std::u32string without_periods(std::u32string_view text_in) {
             while (j < text.size() && period(text[j])) ++j;
             std::size_t k = j;
             while (k < text.size() && closer(text[k])) ++k;
-            if (!(k == text.size() || text[k] == U'\n')) out.append(text, i, j - i);
+            if (!(k == text.size() || text[k] == U'\n')) {
+                out.append(text, i, j - i);
+                out_from.insert(out_from.end(), from.begin() + static_cast<std::ptrdiff_t>(i), from.begin() + static_cast<std::ptrdiff_t>(j));
+            }
             i = j;
         }
         text = std::move(out);
+        from = std::move(out_from);
     }
     // re.sub(r"[。．](?![」』）)\n])", "\n", text): a period inside a line starts the next column
     std::u32string out;
@@ -418,7 +439,7 @@ std::u32string without_periods(std::u32string_view text_in) {
             out.push_back(text[i]);
         }
     }
-    return out;
+    return {std::move(out), std::move(from)};
 }
 
 std::u32string mark_tcy(std::u32string_view text, const StyleRuns& style_runs) {
@@ -700,6 +721,81 @@ void draw_mark(Image& image, double cx, double cy, double size, std::string_view
     draw.ellipse(BoxF{cx - r, cy - r * 0.9, cx + r, cy + r}, colour);
 }
 
+namespace {
+
+// A ruby by place in the columns: (column, first row, last row) and its share of the reading.
+struct PlacedSpan {
+    std::size_t column = 0;
+    std::size_t first = 0;
+    std::size_t last = 0;
+    std::vector<std::u32string> reading;
+    std::size_t span = 0;
+};
+
+// The columns' cells each of args.placed covers (the characters set traced back to the line's text through
+// args.origins): a base broken over columns gets its reading in proportion, as _ruby_spans shares it.
+std::vector<PlacedSpan> placed_spans(const std::vector<Column>& cols, const ComposeArgs& args) {
+    const auto [flat, where] = flat_cells(cols);
+    std::vector<std::size_t> flat_from(flat.size(), std::u32string::npos);
+    std::size_t j = 0;
+    for (std::size_t k = 0; k < flat.size(); ++k) {
+        // (what is set is the text without its line breaks: only a variation selector with no letter before it is
+        // left out besides)
+        std::size_t at = j;
+        while (at < args.text.size() && (args.text[at] == U'\n' || !same_set(args.text[at], flat[k]))) ++at;
+        if (at == args.text.size()) continue;
+        flat_from[k] = at < args.origins.size() ? args.origins[at] : std::u32string::npos;
+        j = at + 1;
+    }
+    std::vector<PlacedSpan> out;
+    for (const PlacedRuby& ruby : *args.placed) {
+        std::map<std::size_t, std::vector<std::size_t>> by_col;
+        for (std::size_t k = 0; k < flat.size(); ++k) {
+            if (flat_from[k] == std::u32string::npos || flat_from[k] < ruby.from || flat_from[k] >= ruby.to) continue;
+            auto& rows = by_col[where[k].first];
+            if (std::find(rows.begin(), rows.end(), where[k].second) == rows.end()) rows.push_back(where[k].second);
+        }
+        if (by_col.empty()) {
+            if (args.notes != nullptr) args.notes->push_back(RubyNote{"not_drawn", ruby.span, "its base is not set"});
+            continue;
+        }
+        std::int64_t count = 0;
+        for (const auto& [c, rows] : by_col) count += static_cast<std::int64_t>(rows.size());
+        const auto len = static_cast<std::int64_t>(ruby.reading.size());
+        std::int64_t taken = 0;
+        std::size_t n = 0;
+        for (const auto& [c, rows] : by_col) {
+            const std::int64_t share = n == by_col.size() - 1
+                                           ? len - taken
+                                           : core::py_round_int(static_cast<double>(len * static_cast<std::int64_t>(rows.size())) / static_cast<double>(count));
+            const std::int64_t from = std::clamp<std::int64_t>(taken, 0, len);
+            const std::int64_t to = std::clamp<std::int64_t>(taken + share, from, len);
+            out.push_back(PlacedSpan{c, *std::min_element(rows.begin(), rows.end()), *std::max_element(rows.begin(), rows.end()),
+                                     std::vector<std::u32string>(ruby.reading.begin() + from, ruby.reading.begin() + to), ruby.span});
+            taken += share;
+            ++n;
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+void note_font(Fonts& fonts, const Face& face, std::u32string_view letter, std::size_t span, std::vector<RubyNote>* notes) {
+    if (notes == nullptr || letter.empty() || py_isspace(letter)) return;
+    const std::u32string first(1, letter[0]);
+    const std::string& own = is_kana_like(first) ? face.kana : face.other;
+    if (fonts.has_glyph(own, first)) return;
+    const std::string other = own == face.kana ? face.other : face.kana;
+    for (const std::string& path : {other, std::string("gothic"), std::string("sfx")}) {
+        if (fonts.has_glyph(path, first)) {
+            notes->push_back(RubyNote{"font_fallback", span, utf8(first)});
+            return;
+        }
+    }
+    notes->push_back(RubyNote{"glyph_missing", span, utf8(first)});
+}
+
 Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
     // Vertical text, columns right to left. 傍点 sit right of their characters and ruby right of those (ruby moves
     // out when both are there), centred on their base, for every run.
@@ -763,13 +859,17 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
         n += col.size();
         index_of.push_back(std::move(idx));
     }
-    const std::vector<RubySpan> spans = !ruby_runs.empty() ? ruby_spans(cols, ruby_runs) : std::vector<RubySpan>{};
+    // (a line holding its ruby by place: the rubies where they are, set as the line says; else Python's ruby_runs)
+    const bool by_place = args.placed.has_value();
+    const std::vector<RubySpan> spans = !by_place && !ruby_runs.empty() ? ruby_spans(cols, ruby_runs) : std::vector<RubySpan>{};
+    const std::vector<PlacedSpan> placed = by_place ? placed_spans(cols, args) : std::vector<PlacedSpan>{};
     const auto marked = !args.emphasis_runs.empty() ? emphasis_cells(cols, args.emphasis_runs)
                                                     : std::set<std::pair<std::size_t, std::size_t>>{};
-    const double ruby_scale = args.ruby_scale != 0.0 ? args.ruby_scale : 0.5;  // (ruby_scale or 0.5)
-    const std::int64_t ruby_w =
-        !spans.empty() ? std::max<std::int64_t>(4, core::py_round_int(static_cast<double>(em) * core::py_max(0.25, core::py_min(0.8, ruby_scale))))
-                       : 0;
+    const double ruby_scale = by_place ? args.ruby_set.scale : args.ruby_scale != 0.0 ? args.ruby_scale : 0.5;  // (ruby_scale or 0.5)
+    const std::int64_t ruby_size =
+        std::max<std::int64_t>(4, core::py_round_int(static_cast<double>(em) * core::py_max(0.25, core::py_min(0.8, ruby_scale))));
+    const std::int64_t ruby_gap = by_place ? args.ruby_set.gap : 0;
+    const std::int64_t ruby_w = !spans.empty() ? ruby_size : !placed.empty() ? std::max<std::int64_t>(0, ruby_size + ruby_gap) : 0;
     const std::int64_t mark_w = !marked.empty() ? std::max<std::int64_t>(3, core::py_round_int(static_cast<double>(em) * 0.36)) : 0;
     const std::int64_t gap = std::max<std::int64_t>(0, core::py_round_int(static_cast<double>(em) * args.leading));
     std::vector<std::int64_t> widths;
@@ -806,6 +906,16 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
             ys[c] = std::move(spread);
         }
     }
+    // (by place: a reading longer than all the text of its column is not cut — the lettering grows, said)
+    const std::int64_t step = ruby_size + core::py_round_int(static_cast<double>(ruby_size) * args.ruby_set.tracking);
+    for (const PlacedSpan& span : placed) {
+        if (span.reading.empty()) continue;
+        const std::int64_t length = ruby_size + (static_cast<std::int64_t>(span.reading.size()) - 1) * step;
+        if (length > height) {
+            if (args.notes != nullptr) args.notes->push_back(RubyNote{"overflow", span.span, "longer than the text"});
+            height = length;
+        }
+    }
     Image out = blank(width, height);
     std::vector<std::int64_t> lefts;
     std::vector<std::int64_t> tops;
@@ -838,6 +948,48 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
             if (marked.contains({c, row})) {
                 draw_mark(out, static_cast<double>(cx + widths[c]) + static_cast<double>(mark_w) / 2,
                           static_cast<double>(y) + static_cast<double>(size) / 2, static_cast<double>(mark_w), mark_kind, rgb);
+            }
+        }
+    }
+    // the rubies by place: beside the base, from its head, around its middle or to its tail, `gap` from the text, their
+    // letters `tracking` apart; one that would run past the column's text is moved back within it (as Python's)
+    struct Drawn {
+        std::size_t column;
+        std::int64_t top;
+        std::int64_t bottom;
+        std::size_t span;
+    };
+    std::vector<Drawn> drawn;
+    for (const PlacedSpan& span : placed) {
+        if (span.reading.empty()) continue;
+        const std::size_t c = span.column;
+        const std::int64_t rx = lefts[c] + widths[c] + mark_w + ruby_gap;
+        const std::int64_t y0 = tops[c] + ys[c][span.first];
+        const std::int64_t y1 = tops[c] + ys[c][span.last] + heights[index_of[c][span.last]];
+        const auto count = static_cast<std::int64_t>(span.reading.size());
+        const std::int64_t length = ruby_size + (count - 1) * step;
+        std::int64_t want = 0;
+        if (args.ruby_set.align == "head") {
+            want = y0;
+        } else if (args.ruby_set.align == "tail") {
+            want = y1 - length;
+        } else {
+            want = core::py_round_int(static_cast<double>(y0 + y1) / 2 - static_cast<double>(length) / 2);
+        }
+        const std::int64_t top = std::max<std::int64_t>(0, std::min<std::int64_t>(height - length, want));  // (kept within, as Python)
+        for (std::int64_t i = 0; i < count; ++i) {
+            const std::u32string& letter = span.reading[static_cast<std::size_t>(i)];
+            note_font(fonts, args.ruby_set.face, letter, span.span, args.notes);
+            composite_at(out, glyph(letter, fonts.font(args.ruby_set.face, std::max<std::int64_t>(8, ruby_size), letter), ruby_size, args.fill), rx,
+                         top + i * step);
+        }
+        drawn.push_back(Drawn{c, top, top + length, span.span});
+    }
+    for (std::size_t a = 0; a < drawn.size() && args.notes != nullptr; ++a) {
+        for (std::size_t b = a + 1; b < drawn.size(); ++b) {
+            if (drawn[a].column == drawn[b].column && drawn[a].span != drawn[b].span && drawn[a].top < drawn[b].bottom &&
+                drawn[b].top < drawn[a].bottom) {
+                args.notes->push_back(RubyNote{"overlap", drawn[a].span, "with ruby " + std::to_string(drawn[b].span)});
             }
         }
     }

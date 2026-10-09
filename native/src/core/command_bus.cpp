@@ -68,11 +68,11 @@ std::string usage(const Json& op) {
 }
 
 // Keys this build's ops take beyond Python's (the precise colour work: merge_visible's flatten, convert_layer's
-// preserve_precision; BRUSH-01: define_brush's paper). They are used, so not reported as ignored; the public list
-// (`genko schema`) stays Python's.
+// preserve_precision; BRUSH-01: define_brush's paper; TEXT-01's ruby by place: add_line's and edit_line's ruby_spans).
+// They are used, so not reported as ignored; the public list (`genko schema`) stays Python's.
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
-           (op == "define_brush" && key == "paper");
+           (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans");
 }
 
 // Python's _unknown_keys: keys an op was given that it does not take (ignored, so said).

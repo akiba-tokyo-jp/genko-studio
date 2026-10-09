@@ -95,6 +95,16 @@ public:
     QCheckBox* path_curve = nullptr;
     QDoubleSpinBox* ruby_scale = nullptr;
     QCheckBox* mono_ruby = nullptr;
+    // TEXT-01: how the line's rubies are set (each its own style key: ruby_font, ruby_align, ruby_gap_mm, ruby_tracking)
+    QComboBox* ruby_font = nullptr;
+    QComboBox* ruby_align = nullptr;
+    QDoubleSpinBox* ruby_gap = nullptr;
+    QDoubleSpinBox* ruby_tracking = nullptr;
+    // TEXT-01: the chosen line's rubies (those that need review marked 要確認), reassigned or cleared
+    QWidget* ruby_box = nullptr;
+    QListWidget* rubies = nullptr;
+    QPushButton* ruby_reassign = nullptr;
+    QPushButton* ruby_clear = nullptr;
     QComboBox* layer_order = nullptr;
     QPushButton* reset = nullptr;
 
@@ -114,6 +124,12 @@ private:
     void pick_color();
     void pick_outline_colour();
     void reset_style();
+    void ruby_style(const char* key, const core::Json& value);
+    void show_rubies(const core::StoryLine* l);
+    // 振り直す…: the chosen ruby's base asked (found in the text; the place chosen when it is there more than once) and
+    // its reading (the old ones offered). 外す: the chosen ruby taken off (Undo puts it back).
+    void reassign_ruby();
+    void clear_ruby();
 
     MainWindow* window_ = nullptr;
     std::vector<std::string> line_ids_;

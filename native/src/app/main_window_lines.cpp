@@ -213,7 +213,7 @@ void MainWindow::type_new_line(double x_mm, double y_mm) {
         for (const auto& [key, value] : box.items()) op[key] = value;
         if (!fields.style.empty()) op["style"] = fields.style;
         if (frame != nullptr) op["frame_id"] = frame->id;
-        if (!marks.ruby_runs.empty()) op["ruby_runs"] = marks.ruby_runs;
+        lettering::put_ruby(op, marks, nullptr, false);
         if (!marks.emphasis_runs.empty()) op["emphasis_runs"] = marks.emphasis_runs;
         if (!marks.style_runs.empty()) op["style_runs"] = marks.style_runs;
         const auto before = story_ids(book());
@@ -258,7 +258,7 @@ void MainWindow::balloon_drawn(const Json& outline) {
                 {"wrap", fields.vertical ? "vertical" : "horizontal"}};
         if (const core::Frame* frame = target->frame_at(Num(cx), Num(cy))) op["frame_id"] = frame->id;
         if (!fields.style.empty()) op["style"] = fields.style;
-        if (!marks.ruby_runs.empty()) op["ruby_runs"] = marks.ruby_runs;
+        lettering::put_ruby(op, marks, nullptr, false);
         if (!marks.emphasis_runs.empty()) op["emphasis_runs"] = marks.emphasis_runs;
         if (!marks.style_runs.empty()) op["style_runs"] = marks.style_runs;
         const auto before = story_ids(book());
@@ -291,6 +291,7 @@ void MainWindow::edit_line_inline(const std::string& line_id) {
                                      {"ruby_runs", marks.ruby_runs},
                                      {"emphasis_runs", marks.emphasis_runs},
                                      {"style_runs", marks.style_runs}}});
+        lettering::put_ruby(ops[0], marks, current, true);  // (TEXT-01: by place when Python's runs would not say where)
         const Json size = lettering::refit(*current, frame_by_id(current->frame_id), marks.text, current->balloon, current->wrap == "vertical");
         // keep the balloon's centre where it was
         const double cx = (current->x_mm + current->w_mm / Num(2)).value();

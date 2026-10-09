@@ -40,6 +40,9 @@ B4・600dpi・8 ページ。各ページ 20 レイヤー:
 
 縦横書き、同じ語の繰返し（「東京と東京」）、禁則、縦中横（「AI」「12」）、部分書式、異体字セレクタ、複数ルビ、各種フキダシ、効果文字、ノンブル、CMYK、下描き・非出力層を持つ 4 ページ。ルビの編集追従の期待結果表（ACCEPTANCE.md AC-TEXT の例）を `native/tests/data/ruby_cases.json` に置く。
 
+- 4 ページの本は試験の中で op から作る（`native/tests/unit/test_ruby_render.cpp` の `f4Book`: 作って保存し、読み直して同じ台詞・ルビであることを確かめ、PNG・PDF・CMYK に書き出す）。生成物の固定ファイルは置かない（op と書体が決まれば同じ本になる）。
+- `ruby_cases.json` は `tools/migration/make_ruby_cases.py` で書き、その sha256 を `native/tests/data/MANIFEST.json` に置く（試験が照合する）。各ケースは本文・最初のルビ（`ruby_spans` か Python の `ruby_runs`）・編集（`edit_line` か `replace_text`）と、期待する本文・`ruby_spans`・`ruby_runs`・点検のルビの警告・op の報告。範囲は Unicode 17.0（Qt 6.11.2）の書記素。同じ語の繰返し、結合文字、絵文字の並び（ZWJ・国旗）、異体字セレクタ（IVS・SVS）、全文置換、Python の `ruby_runs` の変換、はみ出し・重なり・代わりの書体、IME の確定（`"gui"`、`test_gui_ruby` が入力メソッドのイベントで打つ）を含む。
+
 ## F5 保存異常（M1）
 
 v1/v2/v3/v4 のコピー、欠けた素材、ハッシュ不一致、未知キー、途中で切れた journal 行、無効なパス、書込み不能のフォルダー、擬似 ENOSPC（故障注入）、別プロセスの排他。実ディスクは満杯にしない。故障注入は `storage` の書込み関数を差し替える試験用の口（`GENKO_FAULT` 環境変数、Release 配布物では無効）で行う。

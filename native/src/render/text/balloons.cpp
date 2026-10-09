@@ -17,6 +17,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/pyrandom.hpp"
+#include "core/ruby.hpp"
 #include "render/draw.hpp"
 #include "render/npcompat.hpp"
 #include "render/page.hpp"
@@ -575,10 +576,12 @@ Json line_json(const core::StoryLine& ln) {
     }
     Json style_runs = Json::array();
     for (const auto& [words, style] : ln.style_runs) style_runs.push_back(Json::array({words, style}));
-    return Json::array({ln.id, ln.text, ln.speaker, ln.frame_id ? Json(*ln.frame_id) : Json(), ln.x_mm.json(), ln.y_mm.json(),
-                        ln.w_mm.json(), ln.h_mm.json(), ln.balloon,
-                        ln.tail ? Json::array({ln.tail->x.json(), ln.tail->y.json()}) : Json(), ln.wrap, Json(ln.ruby_runs), path,
-                        Json(ln.emphasis_runs), style_runs, detail::keyed_style(ln.style), Json(ln.tails)});
+    Json out = Json::array({ln.id, ln.text, ln.speaker, ln.frame_id ? Json(*ln.frame_id) : Json(), ln.x_mm.json(), ln.y_mm.json(),
+                            ln.w_mm.json(), ln.h_mm.json(), ln.balloon,
+                            ln.tail ? Json::array({ln.tail->x.json(), ln.tail->y.json()}) : Json(), ln.wrap, Json(ln.ruby_runs), path,
+                            Json(ln.emphasis_runs), style_runs, detail::keyed_style(ln.style), Json(ln.tails)});
+    if (ln.ruby_spans) out.push_back(core::ruby::to_json(*ln.ruby_spans));  // (ruby-layout@1: the rubies by place)
+    return out;
 }
 
 struct Sheet {

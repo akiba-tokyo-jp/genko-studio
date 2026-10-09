@@ -80,7 +80,7 @@ bool same_line(const core::StoryLine& a, const core::StoryLine& b) {
     const bool tails = a.tail.has_value() == b.tail.has_value() && (!a.tail || (same_num(a.tail->x, b.tail->x) && same_num(a.tail->y, b.tail->y)));
     return tails && a.id == b.id && a.text == b.text && a.speaker == b.speaker && a.frame_id == b.frame_id && a.ruby == b.ruby &&
            same_num(a.x_mm, b.x_mm) && same_num(a.y_mm, b.y_mm) && same_num(a.w_mm, b.w_mm) && same_num(a.h_mm, b.h_mm) &&
-           a.balloon == b.balloon && a.wrap == b.wrap && a.ruby_runs == b.ruby_runs && same_points(a.path, b.path) &&
+           a.balloon == b.balloon && a.wrap == b.wrap && a.ruby_runs == b.ruby_runs && a.ruby_spans == b.ruby_spans && same_points(a.path, b.path) &&
            a.emphasis_runs == b.emphasis_runs && a.style_runs == b.style_runs && a.style == b.style && a.tails == b.tails;
 }
 

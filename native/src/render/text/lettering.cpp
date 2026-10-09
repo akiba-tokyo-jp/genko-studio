@@ -16,6 +16,7 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "core/ruby.hpp"
 #include "render/draw.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/png.hpp"
@@ -113,6 +114,71 @@ std::u32string set_text(Fonts& fonts, const core::StoryLine& line, const Json& s
     return text;
 }
 
+// _set_text with, for each character set, its place in the line's text (code points; npos: none). Only a line holding its
+// ruby by place needs it (ruby-layout@1): its readings are set beside the characters that came from their bases.
+struct SetText {
+    std::u32string text;
+    std::vector<std::size_t> from;
+};
+
+SetText set_text_mapped(Fonts& fonts, const core::StoryLine& line, const Json& st, const Face& face) {
+    SetText out;
+    out.text = fonts.normalize(face, u32(line.text));  // (one character for one)
+    out.from.resize(out.text.size());
+    for (std::size_t i = 0; i < out.from.size(); ++i) out.from[i] = i;
+    if (one_of(kind_of(line), kSpoken) && !core::py_truthy(at(st, "periods"))) {
+        auto [text, from] = without_periods_mapped(out.text);
+        out.text = std::move(text);
+        out.from = std::move(from);
+    }
+    return out;
+}
+
+// How the line's rubies by place are set: its style's ruby_font, ruby_scale, ruby_align, ruby_gap_mm and ruby_tracking,
+// Python's look where a key is not given (the line's face, half the em, centred, beside the text, letter to letter).
+RubySetting ruby_setting(const Json& st, const Face& face, int dpi) {
+    RubySetting set;
+    set.face = core::py_truthy(at(st, "ruby_font")) ? face_of(at(st, "ruby_font")) : face;
+    set.scale_given = core::py_truthy(at(st, "ruby_scale"));
+    set.scale = set.scale_given ? core::to_float(at(st, "ruby_scale")) : 0.5;
+    set.align = at(st, "ruby_align").is_string() ? at(st, "ruby_align").get<std::string>() : std::string("center");
+    const double gap_mm = core::py_truthy(at(st, "ruby_gap_mm")) ? core::to_float(at(st, "ruby_gap_mm")) : 0.0;
+    set.gap = core::py_round_int(gap_mm / 25.4 * static_cast<double>(dpi));
+    set.tracking = core::py_truthy(at(st, "ruby_tracking")) ? core::to_float(at(st, "ruby_tracking")) : 0.0;
+    return set;
+}
+
+// The line's drawn rubies by place as the lettering takes them (code points of the line's text, the reading's
+// graphemes); モノルビ: a reading whose graphemes share evenly over its base's becomes one per grapheme of the base.
+std::vector<PlacedRuby> placed_of(const core::StoryLine& line, bool mono) {
+    std::vector<PlacedRuby> out;
+    const std::u32string text = u32(line.text);
+    const std::vector<std::size_t> b = core::ruby::bounds(text);
+    const auto n = static_cast<std::int64_t>(b.size()) - 1;
+    for (std::size_t i = 0; i < line.ruby_spans->size(); ++i) {
+        const core::RubySpan& span = (*line.ruby_spans)[i];
+        if (!span.review.empty() || span.start < 0 || span.end > n || span.end <= span.start) continue;
+        const std::u32string reading = u32(span.ruby);
+        const std::vector<std::size_t> rb = core::ruby::bounds(reading);
+        std::vector<std::u32string> letters;
+        for (std::size_t k = 0; k + 1 < rb.size(); ++k) letters.push_back(reading.substr(rb[k], rb[k + 1] - rb[k]));
+        const auto base = static_cast<std::size_t>(span.end - span.start);
+        if (mono && base > 1 && letters.size() % base == 0) {
+            const std::size_t each = letters.size() / base;
+            for (std::size_t g = 0; g < base; ++g) {
+                const auto at_g = static_cast<std::size_t>(span.start) + g;
+                out.push_back(PlacedRuby{b[at_g], b[at_g + 1],
+                                         std::vector<std::u32string>(letters.begin() + static_cast<std::ptrdiff_t>(g * each),
+                                                                     letters.begin() + static_cast<std::ptrdiff_t>((g + 1) * each)),
+                                         i});
+            }
+        } else {
+            out.push_back(PlacedRuby{b[static_cast<std::size_t>(span.start)], b[static_cast<std::size_t>(span.end)], std::move(letters), i});
+        }
+    }
+    return out;
+}
+
 // the default text colour, or style.rgb
 Rgb fill_of(const Json& st) { return core::py_truthy(at(st, "rgb")) ? rgb_tuple(at(st, "rgb")) : kText; }
 
@@ -120,8 +186,11 @@ std::size_t cell_count(std::u32string_view text, bool tcy, bool latin) { return 
 
 // _vertical(line, st, face, em, inner_h, fill)
 Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, const Face& face, std::int64_t em, double inner_h,
-                    const Rgb& fill) {
-    std::u32string text = set_text(fonts, line, st, face);
+                    const Rgb& fill, int dpi, std::vector<RubyNote>* notes) {
+    const bool by_place = line.ruby_spans.has_value();
+    SetText set = by_place ? set_text_mapped(fonts, line, st, face) : SetText{set_text(fonts, line, st, face), {}};
+    std::u32string text = std::move(set.text);
+    std::vector<std::size_t> from = std::move(set.from);
     const double tracking = float_or(at(st, "tracking"), 0);
     const double leading = float_or(at(st, "leading"), 0);
     const bool latin = at(st, "latin") != Json("upright");
@@ -138,11 +207,24 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
             const auto cols = phrase_columns(text, fit, [&](std::u32string_view part) {
                 return static_cast<std::int64_t>(cell_count(part, tcy, latin));
             });
+            // (the columns are the text without its whitespace at either end, in order: where each character came from
+            // follows it, a line break put between them comes from nowhere)
+            std::size_t lead = 0;
+            while (lead < text.size() && py_isspace(text[lead])) ++lead;
+            std::vector<std::size_t> joined_from;
+            std::size_t next = lead;
             for (std::size_t i = 0; i < cols.size(); ++i) {
-                if (i > 0) joined.push_back(U'\n');
+                if (i > 0) {
+                    joined.push_back(U'\n');
+                    joined_from.push_back(std::u32string::npos);
+                }
                 joined += cols[i];
+                for (std::size_t k = 0; k < cols[i].size(); ++k, ++next) {
+                    joined_from.push_back(by_place && next < from.size() && text[next] == cols[i][k] ? from[next] : std::u32string::npos);
+                }
             }
             text = std::move(joined);
+            from = std::move(joined_from);
         }
     }
     (void)fonts.font(face, em);  // (compose's `font`, face.font(em): not drawn with when there is a face)
@@ -163,6 +245,12 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
     args.bold = line_weight(st);
     args.ruby_scale = float_or(at(st, "ruby_scale"), 0.5);
     args.mono_ruby = core::py_truthy(at(st, "mono_ruby"));
+    if (by_place) {
+        args.placed = placed_of(line, args.mono_ruby);
+        args.origins = std::move(from);
+        args.ruby_set = ruby_setting(st, face, dpi);
+        args.notes = notes;
+    }
     return compose(fonts, face, args);
 }
 
@@ -171,8 +259,10 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
 // ruby above them); part of a line can be larger, smaller, bolder or in another colour (style_runs), which makes its
 // row taller.
 Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st, const Face& face, std::int64_t em,
-                      double inner_w, const Rgb& fill) {
-    const std::u32string text = set_text(fonts, line, st, face);
+                      double inner_w, const Rgb& fill, int dpi, std::vector<RubyNote>* notes) {
+    const bool by_place = line.ruby_spans.has_value();
+    const SetText set = by_place ? set_text_mapped(fonts, line, st, face) : SetText{set_text(fonts, line, st, face), {}};
+    const std::u32string& text = set.text;
     const double tracking = float_or(at(st, "tracking"), 0);
     std::u32string flat;
     for (const char32_t c : text) {
@@ -198,10 +288,32 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         std::size_t first;
         std::size_t last;
         std::u32string ruby;
+        std::vector<std::u32string> letters;  // (by place: the reading's graphemes, and which of the line's spans)
+        std::size_t span = 0;
     };
     std::vector<RubyAt> ruby_at;
+    const RubySetting setting = by_place ? ruby_setting(st, face, dpi) : RubySetting{};
+    if (by_place) {  // (the characters that came from each ruby's base)
+        for (const PlacedRuby& placed : placed_of(line, core::py_truthy(at(st, "mono_ruby")))) {
+            std::size_t first = std::u32string::npos;
+            std::size_t last = 0;
+            for (std::size_t i = 0; i < text.size(); ++i) {
+                if (text[i] == U'\n' || set.from[i] < placed.from || set.from[i] >= placed.to) continue;
+                first = std::min(first, i);
+                last = i + 1;
+            }
+            if (first == std::u32string::npos) {
+                if (notes != nullptr) notes->push_back(RubyNote{"not_drawn", placed.span, "its base is not set"});
+                continue;
+            }
+            std::u32string reading;
+            for (const auto& letter : placed.reading) reading += letter;
+            ruby_at.push_back({first, last, reading, placed.reading, placed.span});
+        }
+    }
     pos = 0;
     for (const Json& run : line.ruby_runs) {
+        if (by_place) break;
         if (!core::py_truthy(run) || core::length(run) < 2) continue;
         const Json base_value = core::subscript(run, 0);
         const Json ruby_value = core::subscript(run, 1);
@@ -209,12 +321,18 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         const std::u32string base = fonts.normalize(face, u32(core::py_str(base_value)));
         const std::size_t found = text.find(base, pos);
         if (found != std::u32string::npos) {
-            ruby_at.push_back({found, found + base.size(), u32(core::py_str(ruby_value))});
+            ruby_at.push_back({found, found + base.size(), u32(core::py_str(ruby_value)), {}, 0});
             pos = found + base.size();
         }
     }
     const std::int64_t mark_h = !marked.empty() ? core::py_round_int(static_cast<double>(em) * 0.36) : 0;
-    const std::int64_t ruby_h = !ruby_at.empty() ? std::max<std::int64_t>(6, floordiv(em, 2)) : 0;
+    // (by place, ruby_scale sizes it across too when the line gives it; a line of Python's always half the em)
+    const std::int64_t ruby_h =
+        ruby_at.empty() ? 0
+        : by_place && setting.scale_given
+            ? std::max<std::int64_t>(4, core::py_round_int(static_cast<double>(em) * core::py_max(0.25, core::py_min(0.8, setting.scale))))
+            : std::max<std::int64_t>(6, floordiv(em, 2));
+    const std::int64_t ruby_gap = by_place && !ruby_at.empty() ? setting.gap : 0;
     const auto size_of = [&](std::size_t i) -> std::int64_t {
         const Json& style = styles[i];
         const Json* scale = style.is_object() && style.contains("scale") ? &style["scale"] : nullptr;
@@ -273,7 +391,7 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         if (last) break;
         start = end + 1;
     }
-    const std::int64_t above = mark_h + ruby_h;
+    const std::int64_t above = std::max<std::int64_t>(0, mark_h + ruby_h + ruby_gap);
     const double leading = float_or(at(st, "leading"), 0);
     const auto tallest_of = [&](const std::vector<std::size_t>& row) {
         std::int64_t tallest = 0;
@@ -290,7 +408,7 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
     }
     double widest = widths.front();
     for (const double w : widths) widest = core::py_max(widest, w);
-    const auto out_w = std::max<std::int64_t>(1, static_cast<std::int64_t>(core::py_ceil(widest)));
+    auto out_w = std::max<std::int64_t>(1, static_cast<std::int64_t>(core::py_ceil(widest)));
     std::int64_t total = 0;
     for (const std::int64_t h : heights) total += h;
     Image out = blank(out_w, std::max<std::int64_t>(1, total));
@@ -337,7 +455,7 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
             const double w = advance(i) - static_cast<double>(em) * tracking;
             if (marked.contains(i)) {
                 draw_mark(out, x + w / 2,
-                          static_cast<double>(top + ruby_h) + static_cast<double>(mark_h) / 2 +
+                          static_cast<double>(top + ruby_h + ruby_gap) + static_cast<double>(mark_h) / 2 +
                               static_cast<double>(std::max<std::int64_t>(1, floordiv(em, 16))),
                           static_cast<double>(mark_h), mark_kind, rgb, false);
             }
@@ -346,6 +464,21 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         }
         top += heights[r];
     }
+    struct Drawn {
+        std::int64_t row;
+        double left;
+        double right;
+        std::size_t span;
+    };
+    std::vector<Drawn> drawn;
+    struct Part {  // (by place: a ruby's letters over one row, and its base's left and right there)
+        std::int64_t row = 0;
+        std::vector<std::u32string> letters;
+        double x0 = 0.0;
+        double x1 = 0.0;
+        std::size_t span = 0;
+    };
+    std::vector<Part> parts;
     for (const RubyAt& run : ruby_at) {
         // a word split over rows gets its ruby split in proportion
         std::map<std::int64_t, std::vector<std::size_t>> groups;
@@ -355,7 +488,7 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         std::int64_t count = 0;
         for (const auto& [row_top, chars] : groups) count += static_cast<std::int64_t>(chars.size());
         if (count == 0) count = 1;
-        const auto len = static_cast<std::int64_t>(run.ruby.size());
+        const auto len = static_cast<std::int64_t>(by_place ? run.letters.size() : run.ruby.size());
         std::int64_t taken = 0;
         std::size_t n = 0;
         for (const auto& [row_top, chars] : groups) {
@@ -368,6 +501,16 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
             const std::int64_t to = std::clamp<std::int64_t>(taken + share, 0, len);
             taken += share;
             if (to <= from) continue;
+            if (by_place) {
+                Part piece;
+                piece.row = row_top;
+                piece.letters.assign(run.letters.begin() + from, run.letters.begin() + to);
+                piece.x0 = std::get<0>(xs.at(chars.front()));
+                piece.x1 = std::get<1>(xs.at(chars.back()));
+                piece.span = run.span;
+                parts.push_back(std::move(piece));
+                continue;
+            }
             const std::u32string part = run.ruby.substr(static_cast<std::size_t>(from), static_cast<std::size_t>(to - from));
             const TrueTypeFont& font = fonts.font(face, ruby_h, part.substr(0, 1));
             const double span = font.getlength(part);
@@ -376,6 +519,70 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
             draw.text(PointD{core::py_max(0.0, core::py_min(static_cast<double>(out_w) - span, centre - span / 2)),
                              static_cast<double>(row_top)},
                       part, font, Ink::with_alpha(fill, 255));
+        }
+    }
+    // by place: from the base's head, around its middle or to its tail, the letters `tracking` apart, kept within the
+    // lettering (as Python keeps its ruby); a reading wider than all the text is not cut: the lettering widens (said)
+    const double track = static_cast<double>(core::py_round_int(static_cast<double>(ruby_h) * setting.tracking));
+    const auto width_of = [&](const Part& piece, std::vector<double>* advances) {
+        if (track == 0.0) {
+            std::u32string part;
+            for (const auto& letter : piece.letters) part += letter;
+            return fonts.font(setting.face, ruby_h, part.substr(0, 1)).getlength(part);
+        }
+        std::vector<double> each;
+        for (const auto& letter : piece.letters) each.push_back(fonts.font(setting.face, ruby_h, letter).getlength(letter));
+        const double span = core::py_float_sum(each) + track * static_cast<double>(piece.letters.size() - 1);
+        if (advances != nullptr) *advances = std::move(each);
+        return span;
+    };
+    double widest_ruby = 0.0;
+    for (const Part& piece : parts) widest_ruby = core::py_max(widest_ruby, width_of(piece, nullptr));
+    const std::int64_t text_w = out_w;
+    double shift = 0.0;
+    if (widest_ruby > static_cast<double>(out_w)) {
+        const auto wide = static_cast<std::int64_t>(core::py_ceil(widest_ruby));
+        const std::int64_t dx = floordiv(wide - out_w, 2);
+        Image wider = blank(wide, out.height());
+        wider.paste(out, Point{static_cast<int>(dx), 0}, &out);
+        out = std::move(wider);
+        out_w = wide;
+        shift = static_cast<double>(dx);
+    }
+    for (const Part& piece : parts) {
+        std::vector<double> advances;
+        const double span = width_of(piece, &advances);
+        if (span > static_cast<double>(text_w) && notes != nullptr) {
+            notes->push_back(RubyNote{"overflow", piece.span, "wider than the text"});
+        }
+        const double x0 = piece.x0 + shift;
+        const double x1 = piece.x1 + shift;
+        const double want = setting.align == "head" ? x0 : setting.align == "tail" ? x1 - span : (x0 + x1) / 2 - span / 2;
+        const double x = core::py_max(0.0, core::py_min(static_cast<double>(out_w) - span, want));
+        Draw draw(out);
+        if (track != 0.0) {
+            double at_x = x;
+            for (std::size_t i = 0; i < piece.letters.size(); ++i) {
+                note_font(fonts, setting.face, piece.letters[i], piece.span, notes);
+                draw.text(PointD{at_x, static_cast<double>(piece.row)}, piece.letters[i], fonts.font(setting.face, ruby_h, piece.letters[i]),
+                          Ink::with_alpha(fill, 255));
+                at_x += advances[i] + track;
+            }
+        } else {
+            std::u32string part;
+            for (const auto& letter : piece.letters) {
+                note_font(fonts, setting.face, letter, piece.span, notes);
+                part += letter;
+            }
+            draw.text(PointD{x, static_cast<double>(piece.row)}, part, fonts.font(setting.face, ruby_h, part.substr(0, 1)), Ink::with_alpha(fill, 255));
+        }
+        drawn.push_back(Drawn{piece.row, x, x + span, piece.span});
+    }
+    for (std::size_t a = 0; a < drawn.size() && notes != nullptr; ++a) {
+        for (std::size_t b = a + 1; b < drawn.size(); ++b) {
+            if (drawn[a].row == drawn[b].row && drawn[a].span != drawn[b].span && drawn[a].left < drawn[b].right && drawn[b].left < drawn[a].right) {
+                notes->push_back(RubyNote{"overlap", drawn[a].span, "with ruby " + std::to_string(drawn[b].span)});
+            }
         }
     }
     return out;
@@ -553,7 +760,33 @@ Fit fit_in(const std::vector<std::array<double, 2>>& points, double a, double b,
     return {best_worst, best_off[0], best_off[1]};
 }
 
+namespace {
+
+Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path, std::stop_token stop,
+                 std::vector<RubyNote>* notes);
+
+}  // namespace
+
 Layout text_layout(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path, std::stop_token stop) {
+    return layout_of(line, dpi, font_path, std::move(stop), nullptr);
+}
+
+std::vector<RubyNote> ruby_notes(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path) {
+    std::vector<RubyNote> notes;
+    if (!line.ruby_spans) return notes;
+    (void)layout_of(line, dpi, font_path, {}, &notes);
+    std::vector<RubyNote> once;
+    for (const RubyNote& note : notes) {
+        const bool seen = std::any_of(once.begin(), once.end(), [&](const RubyNote& n) { return n.kind == note.kind && n.span == note.span; });
+        if (!seen) once.push_back(note);
+    }
+    return once;
+}
+
+namespace {
+
+Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path, std::stop_token stop,
+                 std::vector<RubyNote>* notes) {
     // The lettering, its em, and where its top left sits from the box's middle (px). In an ellipse the letters are
     // fitted to the outline by their own shape, and sit where they fit best.
     const Json st = style_of(line);
@@ -608,7 +841,9 @@ Layout text_layout(const core::StoryLine& line, int dpi, const std::optional<std
     const double scale_x = core::py_max(0.3, core::py_min(3.0, float_or(at(st, "scale_x"), 1.0)));
     Image image;
     for (int attempt = 0; attempt < 12; ++attempt) {
-        image = vertical ? vertical_text(fonts, line, st, face, em, inner_h, fill) : horizontal_text(fonts, line, st, face, em, inner_w, fill);
+        if (notes != nullptr) notes->clear();  // (what the lettering kept says)
+        image = vertical ? vertical_text(fonts, line, st, face, em, inner_h, fill, dpi, notes)
+                         : horizontal_text(fonts, line, st, face, em, inner_w, fill, dpi, notes);
         if (std::fabs(scale_x - 1) > 1e-3) {  // 長体 (< 1) or 平体 (> 1): the letters narrower or wider than tall
             image = image.resize({static_cast<int>(std::max<std::int64_t>(1, core::py_round_int(image.width() * scale_x))), image.height()},
                                  Resample::Lanczos);
@@ -662,6 +897,8 @@ Layout text_layout(const core::StoryLine& line, int dpi, const std::optional<std
     return out;
 }
 
+}  // namespace
+
 std::pair<Image, std::int64_t> text_image(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path,
                                           std::stop_token stop) {
     Layout layout = text_layout(line, dpi, font_path, std::move(stop));
@@ -707,9 +944,10 @@ detail::Memo<Box>& speaker_boxes() {
 std::optional<std::string> layout_key(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path) {
     Json style_runs = Json::array();
     for (const auto& [words, style] : line.style_runs) style_runs.push_back(Json::array({words, style}));
-    return detail::memo_key(Json::array({line.text, line.balloon, line.wrap, line.w_mm.json(), line.h_mm.json(),
-                                         detail::keyed_style(line.style), Json(line.ruby_runs), Json(line.emphasis_runs), style_runs,
-                                         dpi, font_path ? Json(*font_path) : Json()}));
+    Json key = Json::array({line.text, line.balloon, line.wrap, line.w_mm.json(), line.h_mm.json(), detail::keyed_style(line.style),
+                            Json(line.ruby_runs), Json(line.emphasis_runs), style_runs, dpi, font_path ? Json(*font_path) : Json()});
+    if (line.ruby_spans) key.push_back(core::ruby::to_json(*line.ruby_spans));  // (ruby-layout@1: the rubies by place)
+    return detail::memo_key(key);
 }
 
 std::shared_ptr<const Layout> layout_by_key(const std::optional<std::string>& key, const core::StoryLine& line, int dpi,
