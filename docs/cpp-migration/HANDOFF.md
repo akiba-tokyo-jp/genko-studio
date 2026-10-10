@@ -7,6 +7,16 @@
 - **M4 の残り**: TEXT-01（ルビの詳細組版と書記素範囲の追従、`ruby-layout@1`、改善 I04、AC-TEXT）、PSD-01（PSD の編集可能な文字、`psd-text@1`、改善 I05、AC-PSD の構造検査と Krita 読込）。M4 出口（AC-TEXT・AC-PSD・AC-EXPORT）はこれらの後。
 - 2026-10-09 に一度始めた M4 出口の V3（凍結 2461338）は、M4 が未完成と分かったので ASan の途中で止めた。結果は使わない。
 
+### M3 の残り BRUSH-01 紙質のブラシ（paper-texture@1、改善 I06）（aeaf239…7857af9）— 統合済み
+- 凍結 7857af9。計画 `validation_policy.py --base 145530d --head 7857af9 --phase integration`（tier full、Linux 各95試験）。
+  - linux-asan: 95/95 合格・CLI23 合格・サニタイザ指摘なし（10/10 00:29–03:21 UTC）。
+  - linux-release: 95/95 合格・CLI23 合格（09:28–10:50 UTC）。1回目は作業プロセスの再起動で 59/95 の途中で止まり（interrupted として残す）、同じ計画で Release だけ回し直した。
+- 内容: 本のブラシに任意の paper（素材 sha256 の灰色 PNG、濃度・倍率〔1 画素 = 1/300 インチ〕・回転・左右/上下反転・濃淡反転・乗算/減算・紙に固定/線の始点から・繰り返し/鏡映・seed）。合成順は被覆→筆圧→紙質→不透明度。整数の双一次補間と四則だけの sin/cos で OS に依らない。define_brush の paper、初めて使った時に features へ paper-texture@1。紙質の画像が無い・描けない・ハッシュ違いの本は読み取り専用。自分のブラシの紙質は brushes.json（Python と共有）を変えず brush_papers.json・brush_papers/。画面はブラシの「紙質」タブ。
+- 利用者の決定（10/09）: 期待画像 native/tests/data/paper/expected/paper-settings.png・inherited-brushes.png を承認。保存先は別ファイル。公開契約の追加（define_brush の paper、brush.custom[*].paper と paper-texture@1、.genkobrush の paper.png）とこの細部（灰色だけ、1辺 4096 px・64 MiB、乗算・減算、反転、倍率の基準）を確定。
+- レビュー1回（P1×1: 紙質の画像の欠けた本で描くと Qt の処理から例外で落ちる、P2×4: ハッシュ違いの画像の登録、印刷の試験の skip、16 ビットの灰色、ライブラリの紙質の消失）と修正の再確認（P3 のうち利用者のファイルを消しうる2件と Windows の skip を直した）。
+- 印刷の検査は poppler の pdftocairo で PDF を同じ画素数に戻して差 0。Linux では pdftocairo が無ければ失敗（native.yml の apt に poppler-utils を足した。CI は有効にしていない）。Windows の受入にも poppler が要る。
+- push 済み（145530d..7857af9）。M3 の出口（紙質を別PCへ持ち出して再現できる）は M4 出口の V3 で合わせて受け入れる。
+
 ### 進め方
 - M3 と同じく群ごとに「実装（対象試験）→レビュー1回→凍結→V2（Linux Release＋ASan、validation_run.py）→native/integrationへ統合」。V3 は M4 出口だけ。開発は worktree の m4-dev。
 - 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.1GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18 / cgroup v1。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。V2 は ASan と Release を順に（各構成内 ctest 1並列）。Windows は開発中 deferred（配布前の Windows 実機受入は必須のまま）。
