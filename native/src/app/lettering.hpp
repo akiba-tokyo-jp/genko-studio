@@ -62,7 +62,8 @@ Marks parse_marks(const QString& typed);
 
 // The rubies a line holds once typed marks are applied (TEXT-01, core/ruby.hpp): the notation typed is what the line's
 // rubies are. For a new line, the rubies typed. For an edit of `line`: a ruby typed with one's reading over the same
-// base is that one (its own settings kept), drawn, whatever the edit rules made of it (one needing review included);
+// base is that one (its own settings kept), drawn, whatever the edit rules made of it (one needing review included) —
+// the one the edit rules surely put there, else those of the same words in the order they appear;
 // one typed where a drawn one went with another reading is that one; one typed with a drawn one's reading over a place
 // that is not where that one went but reaches it (typed into its base, its base cut or moved by hand) is that one
 // edited in its base: it needs review, its base, reading and settings kept; a ruby typed anywhere else is new (no

@@ -690,14 +690,14 @@ void edit_line(OpContext& c, const PictureCheck& check) {
             now = std::move(f.spans);
             change.removed = f.removed;
         }
-        line.ruby_spans = ruby::from_runs_keeping(line.text, line.ruby_runs, now);
+        line.ruby_spans = ruby::from_runs_keeping(line.text, line.ruby_runs, now, runs);  // (runs: the line's before the op)
     } else if (has(op, "text") && line.text != before && !has(op, "ruby_runs")) {
         change = followed(line, before, runs, line.ruby_runs,
                           [&](const std::vector<RubySpan>& spans) { return ruby::follow_text(before, line.text, spans); });
     }
     ruby::settle(c.doc, line);
     change.review = std::max<std::int64_t>(0, ruby::review_count(line) - reviewed);
-    if (by_place || line.ruby_spans) report_ruby(c, change);  // (a line of Python's left so: nothing, as Python)
+    report_ruby(c, change);  // (a line of Python's left as Python leaves it: nothing, as Python)
     require_kept(line, get(op, "frame_id"));
 }
 
@@ -774,7 +774,9 @@ void set_balloon_path(OpContext& c) {
     if (has(op, "ruby_runs")) line.ruby_runs = ruby_runs_of(op["ruby_runs"]);
     if (has(op, "emphasis_runs")) line.emphasis_runs = emphasis(op["emphasis_runs"]);
     if (has(op, "style_runs")) line.style_runs = style_runs(op["style_runs"]);
-    if (has(op, "ruby_runs") && line.ruby_spans) line.ruby_spans = ruby::from_runs_keeping(line.text, line.ruby_runs, *line.ruby_spans);  // (TEXT-01)
+    if (has(op, "ruby_runs") && line.ruby_spans) {  // (TEXT-01)
+        line.ruby_spans = ruby::from_runs_keeping(line.text, line.ruby_runs, *line.ruby_spans, ruby::runs_of(*line.ruby_spans));
+    }
     ruby::settle(c.doc, line);
     require_kept(line);
 }
@@ -835,15 +837,14 @@ void replace_text(OpContext& c) {
             std::vector<ruby::Replacement> edits;
             for (const auto& m : matches) edits.push_back(ruby::Replacement{m.start, m.end, m.with});
             const std::vector<Json> runs = line.ruby_runs;
-            const bool by_place = line.ruby_spans.has_value();
             const RubyChange change = followed(line, before, runs, kept, [&](const std::vector<RubySpan>& spans) {
                 return ruby::follow_replacements(before, text, edits, spans);
             });
             ruby::settle(c.doc, line);
-            if (by_place || line.ruby_spans) {
-                ruby_review += change.review;
-                ruby_removed += change.removed;
-            }
+            // (a line of Python's left as Python leaves it says nothing, as Python; one whose ruby this build takes away
+            // where Python would not — its base's word gone, the same word left elsewhere — says so)
+            ruby_review += change.review;
+            ruby_removed += change.removed;
             std::erase_if(line.emphasis_runs, [&](const std::string& words) { return text.find(words) == std::string::npos; });
             std::erase_if(line.style_runs, [&](const auto& run) { return text.find(run.first) == std::string::npos; });
         }

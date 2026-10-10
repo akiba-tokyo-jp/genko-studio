@@ -30,12 +30,16 @@
 //    than one place, keep in one and delete in another, or keep in part in one, needs review ("ambiguous"); one every
 //    alignment deletes is taken away; any other needs review ("edited"). Texts past kLcsCells are compared by their
 //    common start and end, both ways round (the longest common start first, then the longest common end first): a
-//    ruby the two place differently (a word there more than once around the edit) needs review ("ambiguous");
+//    ruby the two place differently (a word there more than once around the edit), or one they keep whose base's
+//    letters are also in what changed (either text, either way round: an edit at each end around a repeated word),
+//    needs review ("ambiguous");
 //  - replace_text knows where each match was: those are its edits. A ruby whose whole base the matches that reach it
-//    cover (one match of all of it, or several together) is taken away, as Python takes its run away, whatever the
-//    replacement has in common with it (東京 → 東西); a match is first compared with its replacement only to tell
-//    letters added beside the base (京 → 京都 adds 都 after the 京; 東京へ → 東京まで changes only the へ) from an
-//    edit of it.
+//    cover (one match of all of it, or several together) goes to the base inside the replacement when one match's
+//    replacement holds it once (東京 → 「東京」, the rest letters added around it, where Python's run finds it too),
+//    needs review ("ambiguous") when it holds it more than once, and is taken away otherwise, as Python takes its run
+//    away, whatever the replacement has in common with it (東京 → 東西); a match is first compared with its
+//    replacement only to tell letters added beside the base (京 → 京都 adds 都 after the 京; 東京へ → 東京まで changes
+//    only the へ) from an edit of it.
 // A ruby that needs review keeps a range only as where it was last seen (where the edit's place maps it). A ruby's own
 // settings go with it: moved, needing review, taken away and given back (Undo) with it.
 //
@@ -91,11 +95,13 @@ void take_settings(RubySpan& to, const RubySpan& from);
 // renderer finds it), and becomes the graphemes it covers when both its ends fall between graphemes. A run not found
 // is not drawn (as Python); with `keep_unplaced` it is kept as needing review ("unplaced", at [0, 0)).
 std::vector<RubySpan> from_runs(std::string_view text, const std::vector<Json>& runs, bool keep_unplaced);
-// Python's runs given to a line held by place, whose rubies are now `had` (followed through the op's text): the runs
-// those rubies mirror (runs_of: a Python client sending the line's own runs back) leave them as they are; other runs
-// become rubies by the explicit rule (from_runs, keeping the runs not found), each taking the settings of the one of
-// `had` with its base and reading (in order), else of the one at its place over the same base.
-std::vector<RubySpan> from_runs_keeping(std::string_view text, const std::vector<Json>& runs, const std::vector<RubySpan>& had);
+// Python's runs given to a line held by place, whose rubies are now `had` (followed through the op's text): the line's
+// own runs as they were before the op (`mirror`: a Python client sending them back) leave `had` as it is, those the
+// edit made need review included; other runs become rubies by the explicit rule (from_runs, keeping the runs not
+// found), each taking the settings of the one of `had` with its base and reading (in order), else of the one at its
+// place over the same base.
+std::vector<RubySpan> from_runs_keeping(std::string_view text, const std::vector<Json>& runs, const std::vector<RubySpan>& had,
+                                        const std::vector<Json>& mirror);
 // The spans as Python's ruby_runs: [base, reading] of each drawn span, in order.
 std::vector<Json> runs_of(const std::vector<RubySpan>& spans);
 

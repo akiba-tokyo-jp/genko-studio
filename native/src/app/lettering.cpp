@@ -598,19 +598,19 @@ std::vector<core::RubySpan> ruby_after(const Marks& marks, const core::StoryLine
         core::ruby::take_settings(kept, had[o]);
         out.push_back(std::move(kept));
     };
-    // a ruby typed with one's reading over its base (the same words): that one, whatever the edit made of it — the
-    // one the edit took there first, then the others in order
+    // a ruby typed with one's reading over its base (the same words): that one, whatever the edit made of it — the one
+    // the edit surely took there (drawn there after it), then the others in the order they appear (a place the edit
+    // could not tell is no guide: the same words keep their settings in order)
+    const auto same = [&](std::size_t t, std::size_t o) { return !used[o] && had[o].ruby == typed[t].ruby && had[o].base == typed[t].base; };
     for (std::size_t t = 0; t < typed.size(); ++t) {
-        std::optional<std::size_t> pick;
-        for (std::size_t o = 0; o < had.size(); ++o) {
-            if (used[o] || had[o].ruby != typed[t].ruby || had[o].base != typed[t].base) continue;
-            if (now[o] && now[o]->start == typed[t].start && now[o]->end == typed[t].end) {
-                pick = o;
-                break;
-            }
-            if (!pick) pick = o;
+        for (std::size_t o = 0; o < had.size() && !placed[t]; ++o) {
+            if (same(t, o) && now[o] && now[o]->review.empty() && now[o]->start == typed[t].start && now[o]->end == typed[t].end) adopt(t, o);
         }
-        if (pick) adopt(t, *pick);
+    }
+    for (std::size_t t = 0; t < typed.size(); ++t) {
+        for (std::size_t o = 0; o < had.size() && !placed[t]; ++o) {
+            if (same(t, o)) adopt(t, o);
+        }
     }
     // a ruby typed where a drawn one went (its reading changed in the notation): that one
     for (std::size_t t = 0; t < typed.size(); ++t) {

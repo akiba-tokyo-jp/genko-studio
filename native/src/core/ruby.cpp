@@ -370,9 +370,9 @@ std::vector<RubySpan> from_runs(std::string_view text_utf8, const std::vector<Js
     return out;
 }
 
-std::vector<RubySpan> from_runs_keeping(std::string_view text, const std::vector<Json>& runs, const std::vector<RubySpan>& had) {
+std::vector<RubySpan> from_runs_keeping(std::string_view text, const std::vector<Json>& runs, const std::vector<RubySpan>& had,
+                                        const std::vector<Json>& mirror) {
     // (the line's own runs sent back: its rubies as they are)
-    const std::vector<Json> mirror = runs_of(had);
     bool same = mirror.size() == runs.size();
     for (std::size_t i = 0; same && i < runs.size(); ++i) same = py_equals(mirror[i], runs[i]);
     if (same) return had;
@@ -517,6 +517,20 @@ Followed follow_text(std::string_view before_utf8, std::string_view after_utf8, 
         return !base.empty() && std::u32string_view(after).substr(at, base.size()) == base && at + base.size() < after.size() &&
                grapheme_at(b1, at + base.size()) < 0;
     };
+    // the base's letters also in what either window says changed, in either text: the common start and end alone cannot
+    // tell which of those the ruby was on (one edit or several around a word there more than once)
+    const auto in_changed = [&](std::int64_t s, std::int64_t e) {
+        const auto has = [&](const std::vector<int>& text, std::int64_t from, std::int64_t to) {
+            if (to - from < e - s) return false;
+            const auto lo = text.begin() + from;
+            const auto hi = text.begin() + to;
+            return std::search(lo, hi, ids.before.begin() + s, ids.before.begin() + e) != hi;
+        };
+        for (const Window* x : {&w, &w2}) {
+            if (has(ids.before, x->p, x->n - x->q) || has(ids.after, x->p, x->m - x->q)) return true;
+        }
+        return false;
+    };
     const auto keep = [&](const RubySpan& span, std::size_t i) {
         out.spans.push_back(span);
         out.origin.push_back(i);
@@ -532,7 +546,7 @@ Followed follow_text(std::string_view before_utf8, std::string_view after_utf8, 
         if (!lcs) {  // (a long text)
             const Fate one = fate_in(w, s, e);
             const Fate two = fate_in(w2, s, e);
-            if (!(one == two)) {
+            if (!(one == two) || (one.kind == Fate::Kind::kept && in_changed(s, e))) {
                 keep(needing_review(span, w.start(s), w.end(e), "ambiguous"), i);
             } else if (one.kind == Fate::Kind::kept) {
                 RubySpan moved = span;
@@ -618,6 +632,7 @@ Followed follow_replacements(std::string_view before_utf8, std::string_view afte
         std::size_t added = 0;
         std::size_t from = 0;
         std::size_t to = 0;
+        std::u32string_view with;
     };
     std::vector<Edit> edits;
     for (const Replacement& r : replacements) {
@@ -631,7 +646,7 @@ Followed follow_replacements(std::string_view before_utf8, std::string_view afte
         const std::size_t b = r.end - q;
         const std::size_t added = with.size() - p - q;
         if (a == b && added == 0) continue;
-        edits.push_back(Edit{a, b, static_cast<std::int64_t>(added) - static_cast<std::int64_t>(b - a), added, r.start, r.end});
+        edits.push_back(Edit{a, b, static_cast<std::int64_t>(added) - static_cast<std::int64_t>(b - a), added, r.start, r.end, r.with});
     }
     // where a place of the text before lies after the edits (a range's start inside an edit: the edit's new start; its
     // end: the edit's new end; an insertion at a range's start moves it, one at its end does not)
@@ -678,23 +693,50 @@ Followed follow_replacements(std::string_view before_utf8, std::string_view afte
             continue;
         }
         std::int64_t shift = 0;
-        std::vector<std::pair<std::size_t, std::size_t>> reaching;  // the matches whose edit reaches the base
+        std::vector<const Edit*> reaching;  // the matches whose edit reaches the base
         for (const Edit& edit : edits) {
             if (edit.b <= s) {
                 shift += edit.delta;
             } else if (edit.a >= e) {
                 break;
             } else {
-                reaching.emplace_back(edit.from, edit.to);
+                reaching.push_back(&edit);
             }
         }
-        // the whole base taken away by the matches that reach it (they are in order and never overlap)
+        // the whole base covered by the matches that reach it (they are in order and never overlap): one match whose
+        // replacement holds the base once puts it there (the rest of the replacement letters added around it, as
+        // Python's run finds it there), twice or more cannot tell where (ambiguous); else it is taken away
         std::size_t covered = s;
-        for (const auto& [from, to] : reaching) {
-            if (from <= covered) covered = std::max(covered, to);
+        for (const Edit* edit : reaching) {
+            if (edit->from <= covered) covered = std::max(covered, edit->to);
         }
         if (!reaching.empty() && covered >= e) {
-            ++out.removed;
+            const Edit* whole = reaching.size() == 1 ? reaching.front() : nullptr;
+            const std::u32string_view base = std::u32string_view(before).substr(s, e - s);
+            std::vector<std::size_t> found;
+            for (std::size_t at = whole != nullptr ? whole->with.find(base) : std::u32string_view::npos; at != std::u32string_view::npos;
+                 at = whole->with.find(base, at + 1)) {
+                found.push_back(at);
+            }
+            if (found.empty()) {
+                ++out.removed;
+                continue;
+            }
+            if (found.size() == 1) {
+                const auto from = static_cast<std::size_t>(static_cast<std::int64_t>(whole->from) + shift) + found.front();
+                const std::int64_t h0 = grapheme_at(b1, from);
+                const std::int64_t h1 = grapheme_at(b1, from + base.size());
+                if (h0 >= 0 && h1 > h0) {
+                    RubySpan moved = span;
+                    moved.start = h0;
+                    moved.end = h1;
+                    out.spans.push_back(moved);
+                    out.origin.push_back(i);
+                    continue;
+                }
+            }
+            out.spans.push_back(hint(span, s, e, found.size() == 1 ? "edited" : "ambiguous"));
+            out.origin.push_back(i);
             continue;
         }
         if (reaching.empty()) {

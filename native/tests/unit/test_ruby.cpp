@@ -383,6 +383,28 @@ private slots:
                             edit("へ" + kana), tmp_, &report);
         QVERIFY(spans.is_null());
         QCOMPARE(report, Json({{"ruby_removed", 1}}));
+        // two edits, one at each end, around a word there twice: neither reading drawn on a word it may not be on
+        const auto none_drawn = [](const Json& got) {
+            if (!got.is_array()) return false;
+            for (const Json& span : got) {
+                if (!span.contains("review")) return false;
+            }
+            return true;
+        };
+        spans = spans_after(Json{{"text", "東京と東京" + kana + "X"}, {"ruby_spans", two}}, edit("東京" + kana + "Y"), tmp_);
+        QVERIFY2(none_drawn(spans), shown(spans).c_str());
+        QCOMPARE(spans[0]["review"], Json("ambiguous"));
+        std::string changed = kana;
+        changed.replace(changed.size() - 3, 3, "ん");  // (its last letter changed)
+        spans = spans_after(Json{{"text", "東京と東京" + kana}, {"ruby_spans", two}}, edit("東京" + changed), tmp_);
+        QVERIFY2(none_drawn(spans), shown(spans).c_str());
+        const Json mirror = Json::parse(R"([{"start": 2501, "end": 2503, "ruby": "まえ"}, {"start": 2504, "end": 2506, "ruby": "うしろ"}])");
+        spans = spans_after(Json{{"text", "X" + kana + "東京と東京"}, {"ruby_spans", mirror}}, edit("Y" + kana + "東京"), tmp_);
+        QVERIFY2(none_drawn(spans), shown(spans).c_str());
+        // (a word not in what changed: kept)
+        spans = spans_after(Json{{"text", "東京へ" + kana}, {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "まえ"}])")}},
+                            edit("東京へ" + kana + "Y"), tmp_);
+        QCOMPARE(shown(spans), shown(Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "まえ"}])")));
         // (and the one-grapheme base given a combining mark: edited, not removed)
         spans = spans_after(Json{{"text", "海へ" + kana}, {"ruby_spans", Json::parse(R"([{"start": 0, "end": 1, "ruby": "うみ"}])")}},
                             edit("海\u0301へ" + kana), tmp_);
