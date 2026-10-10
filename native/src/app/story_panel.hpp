@@ -95,16 +95,19 @@ public:
     QCheckBox* path_curve = nullptr;
     QDoubleSpinBox* ruby_scale = nullptr;
     QCheckBox* mono_ruby = nullptr;
-    // TEXT-01: how the line's rubies are set (each its own style key: ruby_font, ruby_align, ruby_gap_mm, ruby_tracking)
-    QComboBox* ruby_font = nullptr;
-    QComboBox* ruby_align = nullptr;
-    QDoubleSpinBox* ruby_gap = nullptr;
-    QDoubleSpinBox* ruby_tracking = nullptr;
-    // TEXT-01: the chosen line's rubies (those that need review marked 要確認), reassigned or cleared
+    // TEXT-01: the chosen line's rubies (those that need review marked 要確認), reassigned or cleared, and under them the
+    // chosen ruby's own settings (ruby_settings: its face, size against the text, alignment, distance from the text and
+    // letter spacing; each change an edit_line of the line's ruby_spans)
     QWidget* ruby_box = nullptr;
     QListWidget* rubies = nullptr;
     QPushButton* ruby_reassign = nullptr;
     QPushButton* ruby_clear = nullptr;
+    QWidget* ruby_settings = nullptr;
+    QComboBox* ruby_font = nullptr;
+    QDoubleSpinBox* ruby_ratio = nullptr;
+    QComboBox* ruby_align = nullptr;
+    QDoubleSpinBox* ruby_gap = nullptr;
+    QDoubleSpinBox* ruby_tracking = nullptr;
     QComboBox* layer_order = nullptr;
     QPushButton* reset = nullptr;
 
@@ -124,8 +127,11 @@ private:
     void pick_color();
     void pick_outline_colour();
     void reset_style();
-    void ruby_style(const char* key, const core::Json& value);
     void show_rubies(const core::StoryLine* l);
+    // The chosen ruby's settings shown (none chosen: nothing to set); one of them changed (`key` a ruby setting of
+    // core/ruby.hpp, null: the line's look).
+    void show_ruby_settings();
+    void set_ruby(const char* key, const core::Json& value);
     // 振り直す…: the chosen ruby's base asked (found in the text; the place chosen when it is there more than once) and
     // its reading (the old ones offered). 外す: the chosen ruby taken off (Undo puts it back).
     void reassign_ruby();

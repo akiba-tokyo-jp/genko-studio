@@ -61,6 +61,34 @@ Layout text_layout(const core::StoryLine& line, int dpi, const std::optional<std
 // overlap, font_fallback, glyph_missing, not_drawn), each kind once a ruby, as text_layout sets them; nothing for a
 // line of Python's.
 std::vector<RubyNote> ruby_notes(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path = std::nullopt);
+// PSD-01 (internal, not an op): where each drawn ruby lies on the page and where its base does, so the PSD writer can
+// give each reading a text layer of its own. A place for each ruby drawn (one needing review is not), in the order the
+// lettering sets them; a base broken over columns (rows) gives a place for each part. `span`: which of the line's
+// ruby_spans (a line of Python's: of its runs as core::ruby::from_runs finds them); `reading`: the letters drawn there;
+// `ruby`: the box they are set in (down: their em squares; across: their advances by the font's ascent and descent
+// from where they are drawn); `base`: the box its base's characters are set in there (down: their cells in the column;
+// across, the same as the reading's); `letters`: where each letter is set (down: its em square's top left; across: the
+// point the font draws it from, the ascender's left); `size`: the letters' size (px); `face`: their face. Page pixels
+// at `dpi`, as paint_text puts the lettering. `exact`: false when the letters are not where the boxes say — an effect
+// after they were set (scale_x: the boxes follow it, the letters drawn narrower or wider than `size`; arc, skew_deg or
+// italic, warp: the boxes are where they were set), a line turned by rotate_deg (its group drawn turned: the boxes
+// unturned), a line of Python's that the explicit rule finds otherwise than its lettering does. A line on a path
+// (text_path) draws no ruby: no places.
+struct RubyPlace {
+    std::size_t span = 0;
+    std::string reading;
+    Box ruby;
+    Box base;
+    std::vector<PointD> letters;
+    std::int64_t size = 0;
+    Face face;
+    bool vertical = true;
+};
+struct RubyPlaces {
+    std::vector<RubyPlace> places;
+    bool exact = true;
+};
+RubyPlaces ruby_places(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path = std::nullopt);
 // text_image(line, dpi, font_path): the lettering and its em.
 std::pair<Image, std::int64_t> text_image(const core::StoryLine& line, int dpi,
                                           const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {});

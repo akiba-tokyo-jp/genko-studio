@@ -304,15 +304,38 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     ruby_scale->setToolTip(QStringLiteral("ルビの大きさ（本文の何字ぶんか。既定 0.5）"));
     mono_ruby = check(QStringLiteral("モノルビ（1 字ずつに振る）"));
     mono_ruby->setToolTip(QStringLiteral("読みが字数で割り切れるとき、1 字ずつの真横に振ります（つかない時はまとめて）"));
-    // TEXT-01: how the rubies are set (each its own key, sent alone: the other settings untouched)
+    // TEXT-01: the chosen line's rubies, those that need review marked, reassigned or cleared; the chosen ruby's own
+    // settings (each change an edit_line of the line's ruby_spans: that ruby's entry carries it, the others untouched)
+    rubies = new QListWidget;
+    rubies->setToolTip(QStringLiteral("要確認のルビは、本文の編集が親文字にかかったもの。元の親文字と読みを残してあります"));
+    rubies->setMaximumHeight(72);
+    connect(rubies, &QListWidget::currentRowChanged, this, [this](int) { carry_on("show_ruby_settings", [this] { show_ruby_settings(); }); });
+    ruby_reassign = new QPushButton(QStringLiteral("振り直す…"));
+    ruby_reassign->setToolTip(QStringLiteral("選んだルビの親文字と読みを選び直します（組み方はそのまま）"));
+    connect(ruby_reassign, &QPushButton::clicked, this, [this] { carry_on("reassign_ruby", [this] { reassign_ruby(); }); });
+    ruby_clear = new QPushButton(QStringLiteral("外す"));
+    ruby_clear->setToolTip(QStringLiteral("選んだルビを外します（元に戻すで戻ります）"));
+    connect(ruby_clear, &QPushButton::clicked, this, [this] { carry_on("clear_ruby", [this] { clear_ruby(); }); });
     ruby_font = new QComboBox;
     ruby_font->addItem(QStringLiteral("本文と同じ"), QString());
     for (const auto& [key, label] : lettering::bundled_fonts()) ruby_font->addItem(label, key);
-    ruby_font->setToolTip(QStringLiteral("ルビだけの書体（本文の書体はそのまま）"));
+    ruby_font->setToolTip(QStringLiteral("このルビだけの書体（本文の書体はそのまま）"));
     connect(ruby_font, &QComboBox::activated, this, [this](int) {
-        carry_on("ruby_style", [this] {
+        carry_on("set_ruby", [this] {
             const QString key = ruby_font->currentData().toString();
-            ruby_style("ruby_font", key.isEmpty() ? Json() : Json(key.toStdString()));
+            set_ruby("font", key.isEmpty() ? Json() : Json(key.toStdString()));
+        });
+    });
+    ruby_ratio = new QDoubleSpinBox;
+    ruby_ratio->setRange(0.2, 0.8);  // (0.2, below the least a ruby takes: none of its own, the line's)
+    ruby_ratio->setSingleStep(0.05);
+    ruby_ratio->setDecimals(2);
+    ruby_ratio->setSuffix(QStringLiteral(" 字"));
+    ruby_ratio->setSpecialValueText(QStringLiteral("行の設定"));
+    ruby_ratio->setToolTip(QStringLiteral("このルビの大きさ（本文の何字ぶんか、0.25〜0.8。「行の設定」: 縦書きは行のルビの大きさ、横書きは半分）"));
+    connect(ruby_ratio, &QDoubleSpinBox::editingFinished, this, [this] {
+        carry_on("set_ruby", [this] {
+            set_ruby("scale", ruby_ratio->value() > ruby_ratio->minimum() + 1e-9 ? Json(ruby_ratio->value()) : Json());
         });
     });
     ruby_align = new QComboBox;
@@ -320,11 +343,11 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     ruby_align->addItem(QStringLiteral("中央（親文字の真ん中に）"), QStringLiteral("center"));
     ruby_align->addItem(QStringLiteral("末尾（親文字の終わりまで）"), QStringLiteral("tail"));
     ruby_align->setCurrentIndex(1);
-    ruby_align->setToolTip(QStringLiteral("ルビを親文字のどこに揃えるか（既定は中央）"));
+    ruby_align->setToolTip(QStringLiteral("このルビを親文字のどこに揃えるか（既定は中央）"));
     connect(ruby_align, &QComboBox::activated, this, [this](int) {
-        carry_on("ruby_style", [this] {
+        carry_on("set_ruby", [this] {
             const QString key = ruby_align->currentData().toString();
-            ruby_style("ruby_align", key == QLatin1String("center") ? Json() : Json(key.toStdString()));
+            set_ruby("align", key == QLatin1String("center") ? Json() : Json(key.toStdString()));
         });
     });
     ruby_gap = new QDoubleSpinBox;
@@ -332,31 +355,19 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     ruby_gap->setSingleStep(0.1);
     ruby_gap->setDecimals(2);
     ruby_gap->setSuffix(QStringLiteral(" mm"));
-    ruby_gap->setToolTip(QStringLiteral("ルビと本文の間の距離（mm。既定 0）"));
+    ruby_gap->setToolTip(QStringLiteral("このルビと本文の間の距離（mm。既定 0）"));
     connect(ruby_gap, &QDoubleSpinBox::editingFinished, this, [this] {
-        carry_on("ruby_style", [this] { ruby_style("ruby_gap_mm", ruby_gap->value() != 0.0 ? Json(ruby_gap->value()) : Json()); });
+        carry_on("set_ruby", [this] { set_ruby("gap_mm", ruby_gap->value() != 0.0 ? Json(ruby_gap->value()) : Json()); });
     });
     ruby_tracking = new QDoubleSpinBox;
     ruby_tracking->setRange(-0.5, 2);
     ruby_tracking->setSingleStep(0.05);
     ruby_tracking->setDecimals(2);
     ruby_tracking->setSuffix(QStringLiteral(" 字"));
-    ruby_tracking->setToolTip(QStringLiteral("ルビの字と字の間（ルビ 1 字の何字ぶんか。既定 0）"));
+    ruby_tracking->setToolTip(QStringLiteral("このルビの字と字の間（ルビ 1 字の何字ぶんか。既定 0）"));
     connect(ruby_tracking, &QDoubleSpinBox::editingFinished, this, [this] {
-        carry_on("ruby_style", [this] {
-            ruby_style("ruby_tracking", ruby_tracking->value() != 0.0 ? Json(ruby_tracking->value()) : Json());
-        });
+        carry_on("set_ruby", [this] { set_ruby("tracking", ruby_tracking->value() != 0.0 ? Json(ruby_tracking->value()) : Json()); });
     });
-    // TEXT-01: the chosen line's rubies, those that need review marked, reassigned or cleared
-    rubies = new QListWidget;
-    rubies->setToolTip(QStringLiteral("要確認のルビは、本文の編集が親文字にかかったもの。元の親文字と読みを残してあります"));
-    rubies->setMaximumHeight(72);
-    ruby_reassign = new QPushButton(QStringLiteral("振り直す…"));
-    ruby_reassign->setToolTip(QStringLiteral("選んだルビの親文字と読みを選び直します"));
-    connect(ruby_reassign, &QPushButton::clicked, this, [this] { carry_on("reassign_ruby", [this] { reassign_ruby(); }); });
-    ruby_clear = new QPushButton(QStringLiteral("外す"));
-    ruby_clear->setToolTip(QStringLiteral("選んだルビを外します（元に戻すで戻ります）"));
-    connect(ruby_clear, &QPushButton::clicked, this, [this] { carry_on("clear_ruby", [this] { clear_ruby(); }); });
     layer_order = new QComboBox;
     layer_order->setToolTip(QStringLiteral("テキストの重ね順: このレイヤーの下に台詞を描きます（上のレイヤーの絵がフキダシに重なる）"));
     connect(layer_order, &QComboBox::activated, this, [this](int) {
@@ -377,7 +388,7 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
              {spike_depth, "spike_depth"}, {color, "color"}, {line_colour, "line_colour"}, {fill_colour, "fill_colour"},
              {fill_cover, "fill_cover"}, {text_dx, "text_dx"}, {text_dy, "text_dy"}, {tail_width, "tail_width"},
              {path_curve, "path_curve"}, {ruby_scale, "ruby_scale"}, {mono_ruby, "mono_ruby"}, {layer_order, "layer_order"},
-             {reset, "reset"}, {ruby_font, "ruby_font"}, {ruby_align, "ruby_align"}, {ruby_gap, "ruby_gap"},
+             {reset, "reset"}, {ruby_font, "ruby_font"}, {ruby_ratio, "ruby_ratio"}, {ruby_align, "ruby_align"}, {ruby_gap, "ruby_gap"},
              {ruby_tracking, "ruby_tracking"}, {rubies, "rubies"}, {ruby_reassign, "ruby_reassign"}, {ruby_clear, "ruby_clear"}})
         widget->setObjectName(QStringLiteral("story_") + QString::fromLatin1(name));
 
@@ -435,10 +446,6 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     form->addRow(QString(), path_curve);
     form->addRow(QStringLiteral("ルビの大きさ"), ruby_scale);
     form->addRow(QString(), mono_ruby);
-    form->addRow(QStringLiteral("ルビの書体"), ruby_font);
-    form->addRow(QStringLiteral("ルビの揃え"), ruby_align);
-    form->addRow(QStringLiteral("ルビと本文の距離"), ruby_gap);
-    form->addRow(QStringLiteral("ルビの字間"), ruby_tracking);
     form->addRow(QStringLiteral("重ね順"), layer_order);
     auto* hint = new QLabel(QStringLiteral("フキダシはダブルクリックで打ち直し、四隅で大きさ、●でしっぽの先、◇でしっぽの曲がり、上の○で回転。"
                                            "右クリックで形・しっぽ・結合。"));
@@ -472,7 +479,7 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     auto* rl = new QVBoxLayout(ruby_box);
     rl->setContentsMargins(0, 0, 0, 0);
     rl->setSpacing(2);
-    auto* ruby_heading = new QLabel(QStringLiteral("ルビ（要確認は振り直すか外す）"));
+    auto* ruby_heading = new QLabel(QStringLiteral("ルビ（選ぶと下で組み方を変えられます。要確認は振り直すか外す）"));
     theme::hint(ruby_heading);
     rl->addWidget(ruby_heading);
     rl->addWidget(rubies);
@@ -480,6 +487,17 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     ruby_buttons->addWidget(ruby_reassign, 1);
     ruby_buttons->addWidget(ruby_clear, 1);
     rl->addLayout(ruby_buttons);
+    ruby_settings = new QWidget;  // (the chosen ruby's own: none chosen, nothing to set)
+    auto* rf = new QFormLayout(ruby_settings);
+    rf->setContentsMargins(0, 0, 0, 0);
+    rf->setSpacing(2);
+    rf->addRow(QStringLiteral("書体"), ruby_font);
+    rf->addRow(QStringLiteral("大きさ"), ruby_ratio);
+    rf->addRow(QStringLiteral("揃え"), ruby_align);
+    rf->addRow(QStringLiteral("本文との距離"), ruby_gap);
+    rf->addRow(QStringLiteral("字間"), ruby_tracking);
+    ruby_settings->setEnabled(false);
+    rl->addWidget(ruby_settings);
     ruby_box->setVisible(false);
     layout->addWidget(ruby_box);
     layout->addLayout(row);
@@ -639,23 +657,6 @@ void StoryPanel::show_picked() {
     path_curve->setChecked(core::py_truthy(st["path_curve"]));
     ruby_scale->setValue(f("ruby_scale", 0.5));
     mono_ruby->setChecked(core::py_truthy(st["mono_ruby"]));
-    {
-        const QString ruby_face = st.contains("ruby_font") && st["ruby_font"].is_string() ? qs(st["ruby_font"].get<std::string>()) : QString();
-        int at = ruby_font->findData(ruby_face);
-        if (at < 0) {
-            ruby_font->addItem(QFileInfo(ruby_face).completeBaseName(), ruby_face);
-            at = ruby_font->findData(ruby_face);
-        }
-        ruby_font->setCurrentIndex(at);
-        const QString align_key = st.contains("ruby_align") && st["ruby_align"].is_string() ? qs(st["ruby_align"].get<std::string>()) : QStringLiteral("center");
-        ruby_align->setCurrentIndex(std::max(0, ruby_align->findData(align_key)));
-        // (keys not among style_of's defaults: looked for, never read as missing)
-        const auto given = [&st, &read](const char* key) {
-            return read([&] { return st.contains(key) && core::py_truthy(st[key]) ? core::to_float(st[key]) : 0.0; }, 0.0);
-        };
-        ruby_gap->setValue(given("ruby_gap_mm"));
-        ruby_tracking->setValue(given("ruby_tracking"));
-    }
     layer_order->clear();
     layer_order->addItem(QStringLiteral("いちばん上（既定）"), QVariant());
     if (const core::Page* page = window_->current_page()) {
@@ -709,9 +710,41 @@ void StoryPanel::style_changed() {
     style(change);
 }
 
-void StoryPanel::ruby_style(const char* key, const Json& value) {
+void StoryPanel::show_ruby_settings() {
     const core::StoryLine* l = line();
-    if (l != nullptr && !loading_) window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"style", Json{{key, value}}}}}));
+    const std::vector<core::RubySpan> spans = l != nullptr ? lettering::rubies_of(*l) : std::vector<core::RubySpan>{};
+    const int row = rubies->currentRow();
+    const bool chosen = row >= 0 && row < static_cast<int>(spans.size());
+    ruby_settings->setEnabled(chosen);
+    const core::RubySpan none;
+    const core::RubySpan& span = chosen ? spans[static_cast<std::size_t>(row)] : none;
+    const QString face = span.font ? qs(*span.font) : QString();
+    int at = ruby_font->findData(face);
+    if (at < 0) {  // (a font file: shown by its name)
+        ruby_font->addItem(QFileInfo(face).completeBaseName(), face);
+        at = ruby_font->findData(face);
+    }
+    ruby_font->setCurrentIndex(at);
+    ruby_ratio->setValue(span.scale.value_or(ruby_ratio->minimum()));
+    ruby_align->setCurrentIndex(std::max(0, ruby_align->findData(qs(span.align.value_or("center")))));
+    ruby_gap->setValue(span.gap_mm.value_or(0.0));
+    ruby_tracking->setValue(span.tracking.value_or(0.0));
+}
+
+void StoryPanel::set_ruby(const char* key, const Json& value) {
+    const core::StoryLine* l = line();
+    if (l == nullptr || loading_) return;
+    std::vector<core::RubySpan> spans = lettering::rubies_of(*l);
+    const int row = rubies->currentRow();
+    if (row < 0 || row >= static_cast<int>(spans.size())) {
+        window_->flash(QStringLiteral("先にルビの一覧で組み方を変えるルビを選びます"), 6000);
+        return;
+    }
+    core::RubySpan& span = spans[static_cast<std::size_t>(row)];
+    const core::RubySpan was = span;
+    (void)core::ruby::set_setting(span, key, value);
+    if (span == was) return;  // (nothing changed: no edit)
+    window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"ruby_spans", lettering::spans_op(spans)}}}));
 }
 
 void StoryPanel::show_rubies(const core::StoryLine* l) {
@@ -734,6 +767,7 @@ void StoryPanel::show_rubies(const core::StoryLine* l) {
     }
     if (row >= 0 && row < rubies->count()) rubies->setCurrentRow(row);
     ruby_box->setVisible(rubies->count() > 0);
+    show_ruby_settings();
 }
 
 void StoryPanel::reassign_ruby() {
@@ -787,7 +821,13 @@ void StoryPanel::reassign_ruby() {
     const auto it = std::find(spans.begin(), spans.end(), old);
     if (it == spans.end()) return;  // (changed meanwhile)
     spans.erase(it);
-    spans.push_back(core::RubySpan{places[pick].first, places[pick].second, lettering::strip(*reading).toStdString(), base, {}});
+    core::RubySpan fresh;  // (the ruby's own settings kept)
+    fresh.start = places[pick].first;
+    fresh.end = places[pick].second;
+    fresh.ruby = lettering::strip(*reading).toStdString();
+    fresh.base = base;
+    core::ruby::take_settings(fresh, old);
+    spans.push_back(std::move(fresh));
     std::stable_sort(spans.begin(), spans.end(), [](const core::RubySpan& x, const core::RubySpan& y) { return x.start < y.start; });
     window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", id}, {"ruby_spans", lettering::spans_op(spans)}}}));
 }
@@ -904,11 +944,6 @@ void StoryPanel::reset_style() {
     Json keep = Json::object();
     for (const std::string& key : core::line_style_keys()) {
         if (key != "group") keep[key] = nullptr;
-    }
-    // (TEXT-01's keys the line has: back to the default too)
-    const core::StoryLine* l = line();
-    for (const std::string& key : core::ruby::layout_keys()) {
-        if (l != nullptr && l->style.is_object() && l->style.contains(key)) keep[key] = nullptr;
     }
     style(keep);
     picked();

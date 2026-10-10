@@ -865,11 +865,28 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
     const std::vector<PlacedSpan> placed = by_place ? placed_spans(cols, args) : std::vector<PlacedSpan>{};
     const auto marked = !args.emphasis_runs.empty() ? emphasis_cells(cols, args.emphasis_runs)
                                                     : std::set<std::pair<std::size_t, std::size_t>>{};
-    const double ruby_scale = by_place ? args.ruby_set.scale : args.ruby_scale != 0.0 ? args.ruby_scale : 0.5;  // (ruby_scale or 0.5)
-    const std::int64_t ruby_size =
-        std::max<std::int64_t>(4, core::py_round_int(static_cast<double>(em) * core::py_max(0.25, core::py_min(0.8, ruby_scale))));
-    const std::int64_t ruby_gap = by_place ? args.ruby_set.gap : 0;
-    const std::int64_t ruby_w = !spans.empty() ? ruby_size : !placed.empty() ? std::max<std::int64_t>(0, ruby_size + ruby_gap) : 0;
+    const double ruby_scale = args.ruby_scale != 0.0 ? args.ruby_scale : 0.5;  // (ruby_scale or 0.5)
+    const auto size_at = [em](double scale) {
+        return std::max<std::int64_t>(4, core::py_round_int(static_cast<double>(em) * core::py_max(0.25, core::py_min(0.8, scale))));
+    };
+    const std::int64_t ruby_size = size_at(ruby_scale);
+    // (by place: each ruby its own face, size, distance from the text and spacing — the line's where it gives none —
+    // and the lane beside the columns as wide as the widest of them needs)
+    const RubySetting plain_set{face, std::nullopt, "center", 0, 0.0};
+    const auto set_of = [&](std::size_t span) -> const RubySetting& {
+        return span < args.ruby_sets.size() ? args.ruby_sets[span] : plain_set;
+    };
+    const auto own_size = [&](std::size_t span) { return set_of(span).scale ? size_at(*set_of(span).scale) : ruby_size; };
+    const auto own_step = [&](std::size_t span) {
+        const std::int64_t size = own_size(span);
+        return size + core::py_round_int(static_cast<double>(size) * set_of(span).tracking);
+    };
+    std::optional<std::int64_t> lane;
+    for (const PlacedSpan& span : placed) {
+        const std::int64_t need = own_size(span.span) + set_of(span.span).gap;
+        lane = lane ? std::max(*lane, need) : need;
+    }
+    const std::int64_t ruby_w = !spans.empty() ? ruby_size : lane ? std::max<std::int64_t>(0, *lane) : 0;
     const std::int64_t mark_w = !marked.empty() ? std::max<std::int64_t>(3, core::py_round_int(static_cast<double>(em) * 0.36)) : 0;
     const std::int64_t gap = std::max<std::int64_t>(0, core::py_round_int(static_cast<double>(em) * args.leading));
     std::vector<std::int64_t> widths;
@@ -907,10 +924,9 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
         }
     }
     // (by place: a reading longer than all the text of its column is not cut — the lettering grows, said)
-    const std::int64_t step = ruby_size + core::py_round_int(static_cast<double>(ruby_size) * args.ruby_set.tracking);
     for (const PlacedSpan& span : placed) {
         if (span.reading.empty()) continue;
-        const std::int64_t length = ruby_size + (static_cast<std::int64_t>(span.reading.size()) - 1) * step;
+        const std::int64_t length = own_size(span.span) + (static_cast<std::int64_t>(span.reading.size()) - 1) * own_step(span.span);
         if (length > height) {
             if (args.notes != nullptr) args.notes->push_back(RubyNote{"overflow", span.span, "longer than the text"});
             height = length;
@@ -962,28 +978,42 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
     std::vector<Drawn> drawn;
     for (const PlacedSpan& span : placed) {
         if (span.reading.empty()) continue;
+        const RubySetting& set = set_of(span.span);
+        const std::int64_t size = own_size(span.span);
+        const std::int64_t step = own_step(span.span);
         const std::size_t c = span.column;
-        const std::int64_t rx = lefts[c] + widths[c] + mark_w + ruby_gap;
+        const std::int64_t rx = lefts[c] + widths[c] + mark_w + set.gap;
         const std::int64_t y0 = tops[c] + ys[c][span.first];
         const std::int64_t y1 = tops[c] + ys[c][span.last] + heights[index_of[c][span.last]];
         const auto count = static_cast<std::int64_t>(span.reading.size());
-        const std::int64_t length = ruby_size + (count - 1) * step;
+        const std::int64_t length = size + (count - 1) * step;
         std::int64_t want = 0;
-        if (args.ruby_set.align == "head") {
+        if (set.align == "head") {
             want = y0;
-        } else if (args.ruby_set.align == "tail") {
+        } else if (set.align == "tail") {
             want = y1 - length;
         } else {
             want = core::py_round_int(static_cast<double>(y0 + y1) / 2 - static_cast<double>(length) / 2);
         }
         const std::int64_t top = std::max<std::int64_t>(0, std::min<std::int64_t>(height - length, want));  // (kept within, as Python)
+        RubyDrawn where;
         for (std::int64_t i = 0; i < count; ++i) {
             const std::u32string& letter = span.reading[static_cast<std::size_t>(i)];
-            note_font(fonts, args.ruby_set.face, letter, span.span, args.notes);
-            composite_at(out, glyph(letter, fonts.font(args.ruby_set.face, std::max<std::int64_t>(8, ruby_size), letter), ruby_size, args.fill), rx,
-                         top + i * step);
+            note_font(fonts, set.face, letter, span.span, args.notes);
+            composite_at(out, glyph(letter, fonts.font(set.face, std::max<std::int64_t>(8, size), letter), size, args.fill), rx, top + i * step);
+            where.reading += letter;
+            where.letters.push_back(PointD{static_cast<double>(rx), static_cast<double>(top + i * step)});
         }
         drawn.push_back(Drawn{c, top, top + length, span.span});
+        if (args.drawn != nullptr) {
+            where.span = span.span;
+            where.ruby = BoxF{static_cast<double>(rx), static_cast<double>(top), static_cast<double>(rx + size), static_cast<double>(top + length)};
+            where.base = BoxF{static_cast<double>(lefts[c]), static_cast<double>(y0), static_cast<double>(lefts[c] + widths[c]), static_cast<double>(y1)};
+            where.size = size;
+            where.face = set.face;
+            where.vertical = true;
+            args.drawn->push_back(std::move(where));
+        }
     }
     for (std::size_t a = 0; a < drawn.size() && args.notes != nullptr; ++a) {
         for (std::size_t b = a + 1; b < drawn.size(); ++b) {

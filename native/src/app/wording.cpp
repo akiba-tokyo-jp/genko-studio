@@ -135,7 +135,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(points needs \[x_mm, y_mm\])", "点は [x, y]（mm）の 2 つの数で指定します"));
         // TEXT-01 (core/ruby.cpp): the rubies by place and their settings, refused in the C++ build only (SPEC COMP-01a)
         r.push_back(rule(R"(ruby_spans is a list of \{start, end, ruby\}.*)", "ルビは {start, end, ruby}（本文の書記素の位置と読み）の並びで指定します"));
-        r.push_back(rule("a ruby span has start, end, ruby, base and review, not .*", "ルビに知らない項目があります（start・end・ruby・base・review だけ）"));
+        r.push_back(rule("a ruby span has start, end, ruby, base, review, font, scale, align, gap_mm and tracking, not .*",
+                         "ルビに知らない項目があります（start・end・ruby・base・review と、組み方の font・scale・align・gap_mm・tracking だけ）"));
         r.push_back(rule("a ruby span's review must be edited, ambiguous or unplaced", "ルビの要確認の理由は edited・ambiguous・unplaced のどれかです"));
         r.push_back(rule(R"(a ruby span must be \[start, end\) of whole numbers.*)",
                          "ルビの位置が本文の外にあるか、整数ではありません（start は end より前、end は本文の字数まで）"));
@@ -146,10 +147,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("a ruby span that needs review keeps its base.*", "要確認のルビには、元の親文字が要ります"));
         r.push_back(rule("rubies overlap: .*", "ルビの親文字が重なっています（ひとつの字に振れるルビはひとつです）"));
         r.push_back(rule("give the rubies as ruby_spans or as ruby_runs, not both", "ルビは ruby_spans か ruby_runs のどちらかで指定します"));
-        r.push_back(rule("ruby_font must be .*", "ルビの書体は、書体の名前（gothic・mincho など）か書体のファイルで指定します"));
-        r.push_back(rule("ruby_align must be head, center or tail", "ルビの揃えは、先頭・中央・末尾から選びます"));
-        r.push_back(rule("ruby_gap_mm must be between -1 and 10", "ルビと本文の距離は -1〜10 mm の間で決めます"));
-        r.push_back(rule("ruby_tracking must be between -0.5 and 2", "ルビの字間は -0.5〜2 字の間で決めます"));
+        r.push_back(rule("a ruby's font must be .*", "ルビの書体は、書体の名前（gothic・mincho など）か書体のファイルで指定します"));
+        r.push_back(rule("a ruby's scale must be between 0.25 and 0.8", "ルビの大きさは、本文の 0.25〜0.8 字の間の数で決めます"));
+        r.push_back(rule("a ruby's align must be head, center or tail", "ルビの揃えは、先頭（head）・中央（center）・末尾（tail）から選びます"));
+        r.push_back(rule("a ruby's gap_mm must be between -1 and 10", "ルビと本文の距離は -1〜10 mm の間の数で決めます"));
+        r.push_back(rule("a ruby's tracking must be between -0.5 and 2", "ルビの字間は -0.5〜2 字の間の数で決めます"));
         r.push_back(rule(R"(the official export stops: (\d+) ruby readings? needs? review.*)",
                          "要確認のルビが \\1 つあるため、正式な書き出しはできません。台詞の欄で振り直すか外してください"));
         r.push_back(rule(R"(replace_text with regex .* is not in the C\+\+ build yet)",

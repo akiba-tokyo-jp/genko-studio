@@ -32,7 +32,8 @@
 //    end only.)
 //  - replace_text knows where each match was: those are its edits, each match and its replacement compared first (so
 //    京 → 京都 adds 都 after the 京).
-// A ruby that needs review keeps a range only as where it was last seen (where the edit's place maps it).
+// A ruby that needs review keeps a range only as where it was last seen (where the edit's place maps it). A ruby's own
+// settings go with it: moved, needing review, taken away and given back (Undo) with it.
 //
 // Python's ruby_runs ([[base, reading], …], found by their words when drawn) become spans by the explicit rule
 // from_runs. A line of Python's keeps them as they are while what an edit does to them is what Python does
@@ -63,15 +64,22 @@ std::int64_t count(std::string_view utf8);
 // The graphemes [start, end) of a text (UTF-8 in and out; the range clamped to the text).
 std::string slice(std::string_view utf8, std::int64_t start, std::int64_t end);
 
-// The keys this feature adds to a line's style (C++ only; not Python's STYLE_KEYS): ruby_font (a face, as style.font),
-// ruby_align (head | center | tail; default center), ruby_gap_mm (the distance from the text, -1..10 mm; default 0),
-// ruby_tracking (between the ruby's letters, -0.5..2 of the ruby's size; default 0). The ruby's size against the text
-// is Python's ruby_scale (0.25..0.8 of the text, unitless).
-bool is_layout_key(std::string_view key);
-const std::vector<std::string>& layout_keys();
-// The value a layout key keeps (OpError "<key> must be …" otherwise).
-Json layout_value(std::string_view key, const Json& value);
-bool uses_layout(const Json& style);
+// Each ruby's own settings (C++ only, ruby-layout@1), held in its ruby_spans entry (RubySpan). A setting not given (or
+// given as null) is the line's look, Python's:
+//   font      a face: a bundled key (gothic, mincho, maru, …) or a font file's path — default: the line's face;
+//   scale     the ruby's size against the text, 0.25..0.8 (unitless) — default: down, the line's style.ruby_scale
+//             (Python's, 0.5 when it has none); across, half the em (Python's ruby across never reads ruby_scale);
+//   align     head | center | tail over its base — default center;
+//   gap_mm    the distance from the text, -1..10 mm — default 0;
+//   tracking  the space between its letters, -0.5..2 of the ruby's size — default 0.
+// The line's style has no ruby keys of its own but Python's ruby_scale and mono_ruby.
+// Sets `key` of the span from `value` (null: none). OpError "a ruby's <key> must be …" for a value out of its bounds,
+// never clamped; a key that is not a setting is not one (false).
+bool set_setting(RubySpan& span, std::string_view key, const Json& value);
+// The settings given, as ruby_spans holds them ({font?, scale?, align?, gap_mm?, tracking?}).
+Json settings_json(const RubySpan& span);
+// The settings of `from` given to `to` (its place, base, reading and review its own).
+void take_settings(RubySpan& to, const RubySpan& from);
 
 // The explicit rule for Python's ruby_runs: in order, a run that is a list whose first two items are truthy (Python's
 // `run and run[0] and run[1]`) has str(run[0]) for its base and str(run[1]) for its reading; the base is looked for,
@@ -79,14 +87,18 @@ bool uses_layout(const Json& style);
 // renderer finds it), and becomes the graphemes it covers when both its ends fall between graphemes. A run not found
 // is not drawn (as Python); with `keep_unplaced` it is kept as needing review ("unplaced", at [0, 0)).
 std::vector<RubySpan> from_runs(std::string_view text, const std::vector<Json>& runs, bool keep_unplaced);
+// Python's runs given to a line held by place (from_runs, keeping the runs not found): a ruby that lands where one of
+// `had` was, over the same base, keeps that one's settings (one not found: one of `had` with its base and reading).
+std::vector<RubySpan> from_runs_keeping(std::string_view text, const std::vector<Json>& runs, const std::vector<RubySpan>& had);
 // The spans as Python's ruby_runs: [base, reading] of each drawn span, in order.
 std::vector<Json> runs_of(const std::vector<RubySpan>& spans);
 
-// Spans given to an op ([{start, end, ruby, base?, review?}, …]) against the text: a drawn span's base is the text there
-// (a base given must be it); a span needing review keeps the base given (default: the text there) and may lie
-// anywhere in the text. Sorted by place. OpError for anything else.
+// Spans given to an op ([{start, end, ruby, base?, review?, font?, scale?, align?, gap_mm?, tracking?}, …]) against the
+// text: a drawn span's base is the text there (a base given must be it); a span needing review keeps the base given
+// (default: the text there) and may lie anywhere in the text; each its own settings. Sorted by place. OpError for
+// anything else.
 std::vector<RubySpan> parse(const Json& raw, std::string_view text);
-// As project.json holds them: [{start, end, base, ruby, review?}, …].
+// As project.json holds them: [{start, end, base, ruby, font?, scale?, align?, gap_mm?, tracking?, review?}, …].
 Json to_json(const std::vector<RubySpan>& spans);
 // What is wrong with spans read for a text (empty: nothing): ranges outside it or overlapping drawn ones, a drawn
 // span whose base is not the text there, a review that is not one of the reasons, a span without its reading.
@@ -109,18 +121,17 @@ struct Replacement {
 Followed follow_replacements(std::string_view before, std::string_view after, const std::vector<Replacement>& edits,
                              const std::vector<RubySpan>& spans);
 
-// The drawn spans of two lists are the same rubies (place, base, reading) and neither has one needing review but for
-// "unplaced" ones.
+// The drawn spans of two lists are the same rubies (place, base, reading, settings) and neither has one needing review
+// but for "unplaced" ones.
 bool same_drawn(const std::vector<RubySpan>& a, const std::vector<RubySpan>& b);
 
 std::int64_t review_count(const StoryLine& line);
 std::int64_t review_count(const Document& doc);
-// The line uses the feature: it holds spans or a layout key.
+// The line uses the feature: it holds its ruby by place.
 bool uses_feature(const StoryLine& line);
 
-// After an op changed a line: the spans in order and ruby_runs their mirror; a line of Python's given a layout key
-// holds its ruby by place (from_runs, keeping the runs not found); a line with neither spans nor a layout key back in
-// Python's form; the book's features given ruby-layout@1 when the line uses it.
+// After an op changed a line: the spans in order and ruby_runs their mirror; a line left with no span back in Python's
+// form; the book's features given ruby-layout@1 when the line uses it.
 void settle(Document& doc, StoryLine& line);
 void add_feature(Document& doc);
 

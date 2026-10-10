@@ -1,13 +1,15 @@
 // TEXT-01 in the window (AC-TEXT, label gui): a line's ruby typed with the input method in the canvas's editor (the
-// table's cases with "gui": the words being converted never change the book; the settled words follow the edit rules),
-// the ruby settings beside the select tool (書体・大きさ・揃え・本文との距離・字間: each an edit_line of its own key),
-// rubies that need review (要確認) marked in the 台詞 list and listed with the line, reassigned or cleared there, Undo
+// table's cases with "gui": the words being converted never change the book; the settled words follow the edit rules,
+// each ruby keeping its own settings), each ruby's own settings under the line's ruby list (書体・大きさ・揃え・本文との
+// 距離・字間: an edit_line of the line's ruby_spans), rubies that need review (要確認) marked in the 台詞 list and listed
+// with the line, reassigned (keeping the ruby's settings) or cleared there, Undo
 // giving back the text, range and reading, 台詞の検索・置換 following the same rules, 縦書き・横書き kept, and the book
 // saved and read back with its ruby.
 
 #include <QtTest>
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QInputMethodEvent>
@@ -163,45 +165,102 @@ private slots:
         QVERIFY(ran >= 5);
     }
 
-    // The settings beside the select tool: each its own key in one edit_line (the panel's other settings untouched).
+    // The chosen ruby's own settings under the line's ruby list: each change an edit_line of the line's ruby_spans, that
+    // ruby's entry carrying it (the other rubies and the line's style untouched; back to the default: the key goes). The
+    // select tool's style page keeps Python's ruby_scale and mono_ruby only. 振り直す… keeps the ruby's settings.
     void rubySettings() {
         Studio s;
-        QVERIFY(s.put(Json{{"op", "add_line"}, {"id", "L1"}, {"text", "東京へ"}, {"x_mm", 40}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 50},
-                           {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "とうきょう"}])")}}));
+        QVERIFY(s.put(Json{{"op", "add_line"}, {"id", "L1"}, {"text", "東京と大阪"}, {"x_mm", 40}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 50},
+                           {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "とうきょう"}, {"start": 3, "end": 5, "ruby": "おおさか"}])")}}));
         s.window->on_line_selected("L1", false);
+        app::StoryPanel& panel = s.panel();
+        auto* rubies = s.find<QListWidget>("story_rubies");
         auto* font = s.find<QComboBox>("story_ruby_font");
+        auto* ratio = s.find<QDoubleSpinBox>("story_ruby_ratio");
         auto* align = s.find<QComboBox>("story_ruby_align");
         auto* gap = s.find<QDoubleSpinBox>("story_ruby_gap");
         auto* tracking = s.find<QDoubleSpinBox>("story_ruby_tracking");
-        QVERIFY(font && align && gap && tracking);
+        auto* reassign = s.find<QPushButton>("story_ruby_reassign");
+        QVERIFY(rubies && font && ratio && align && gap && tracking && reassign);
+        // with the ruby list, not on the style page
+        for (QWidget* w : std::vector<QWidget*>{font, ratio, align, gap, tracking}) {
+            QVERIFY2(panel.ruby_box->isAncestorOf(w), qPrintable(w->objectName()));
+            QVERIFY2(!panel.style_box->isAncestorOf(w), qPrintable(w->objectName()));
+        }
+        QVERIFY(panel.style_box->isAncestorOf(panel.ruby_scale) && panel.style_box->isAncestorOf(panel.mono_ruby));
+        // no ruby chosen: nothing to set
+        rubies->setCurrentRow(-1);
+        QTRY_VERIFY(!font->isEnabled() && !ratio->isEnabled() && !align->isEnabled() && !gap->isEnabled() && !tracking->isEnabled());
+        rubies->setCurrentRow(1);
+        QTRY_VERIFY(font->isEnabled() && ratio->isEnabled() && align->isEnabled() && gap->isEnabled() && tracking->isEnabled());
+        // nothing set: the line's look (the ratio the line's)
         QCOMPARE(font->currentText(), QStringLiteral("本文と同じ"));
+        QCOMPARE(ratio->value(), ratio->minimum());
+        QVERIFY2(ratio->text().contains(QStringLiteral("行の設定")), qPrintable(ratio->text()));
         QCOMPARE(align->currentData().toString(), QStringLiteral("center"));
+        QCOMPARE(gap->value(), 0.0);
         QCOMPARE(gap->suffix(), QStringLiteral(" mm"));
+        QCOMPARE(tracking->value(), 0.0);
+        const auto op = [](const char* id, const char* spans) {
+            return Json{{"op", "edit_line"}, {"id", id}, {"ruby_spans", Json::parse(spans)}}.dump();
+        };
         font->setCurrentIndex(font->findData(QStringLiteral("gothic")));
         emit font->activated(font->currentIndex());
-        QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "L1"}, {"style", Json{{"ruby_font", "gothic"}}}}).dump());
+        QCOMPARE(s.last().dump(), op("L1", R"([{"start": 0, "end": 2, "ruby": "とうきょう"}, {"start": 3, "end": 5, "ruby": "おおさか", "font": "gothic"}])"));
+        ratio->setValue(0.6);
+        emit ratio->editingFinished();
+        QCOMPARE(s.last().dump(), op("L1", R"([{"start": 0, "end": 2, "ruby": "とうきょう"},
+            {"start": 3, "end": 5, "ruby": "おおさか", "font": "gothic", "scale": 0.6}])"));
         align->setCurrentIndex(align->findData(QStringLiteral("head")));
         emit align->activated(align->currentIndex());
-        QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "L1"}, {"style", Json{{"ruby_align", "head"}}}}).dump());
         gap->setValue(1.5);
         emit gap->editingFinished();
-        QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "L1"}, {"style", Json{{"ruby_gap_mm", 1.5}}}}).dump());
         tracking->setValue(0.25);
         emit tracking->editingFinished();
-        QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "L1"}, {"style", Json{{"ruby_tracking", 0.25}}}}).dump());
+        QCOMPARE(s.last().dump(), op("L1", R"([{"start": 0, "end": 2, "ruby": "とうきょう"},
+            {"start": 3, "end": 5, "ruby": "おおさか", "font": "gothic", "scale": 0.6, "align": "head", "gap_mm": 1.5, "tracking": 0.25}])"));
+        QCOMPARE(spans_of(s.line("L1")).dump(), Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "とうきょう"},
+            {"start": 3, "end": 5, "base": "大阪", "ruby": "おおさか", "font": "gothic", "scale": 0.6, "align": "head", "gap_mm": 1.5,
+             "tracking": 0.25}])").dump());
         const Json style = s.line("L1")["style"];
-        QCOMPARE(style["ruby_font"], Json("gothic"));
-        QCOMPARE(style["ruby_align"], Json("head"));
-        QCOMPARE(style["ruby_gap_mm"], Json(1.5));
-        QCOMPARE(style["ruby_tracking"], Json(0.25));
-        // back to the defaults: the keys go
+        for (const char* key : {"ruby_font", "ruby_align", "ruby_gap_mm", "ruby_tracking", "ruby_scale"}) QVERIFY2(!style.contains(key), key);
+        // back to the default: the key goes
         align->setCurrentIndex(align->findData(QStringLiteral("center")));
         emit align->activated(align->currentIndex());
-        QCOMPARE(s.last()["style"], Json({{"ruby_align", nullptr}}));
-        // the panel shows the line's settings again
-        s.window->on_line_selected("L1", false);
+        ratio->setValue(ratio->minimum());
+        emit ratio->editingFinished();
+        QCOMPARE(s.last().dump(), op("L1", R"([{"start": 0, "end": 2, "ruby": "とうきょう"},
+            {"start": 3, "end": 5, "ruby": "おおさか", "font": "gothic", "gap_mm": 1.5, "tracking": 0.25}])"));
+        // each ruby shows its own
+        rubies->setCurrentRow(0);
+        QTRY_COMPARE(font->currentData().toString(), QString());
+        QCOMPARE(gap->value(), 0.0);
+        rubies->setCurrentRow(1);
         QTRY_COMPARE(font->currentData().toString(), QStringLiteral("gothic"));
         QCOMPARE(gap->value(), 1.5);
+        QCOMPARE(tracking->value(), 0.25);
+        // the line chosen again: the same ruby's
+        s.window->on_line_selected("L1", false);
+        QTRY_COMPARE(font->currentData().toString(), QStringLiteral("gothic"));
+        // 振り直す…: the reading changed, the ruby's settings kept
+        rubies->setCurrentRow(1);
+        s.answers.responder->get_text = [](const QString&, const QString& label, const QString& text) {
+            return std::optional<QString>(label.contains(QStringLiteral("親文字")) ? text : QStringLiteral("おおざか"));
+        };
+        reassign->click();
+        QCOMPARE(spans_of(s.line("L1")).dump(), Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "とうきょう"},
+            {"start": 3, "end": 5, "base": "大阪", "ruby": "おおざか", "font": "gothic", "gap_mm": 1.5, "tracking": 0.25}])").dump());
+        // a line of Python's (ruby_runs): its ruby given a setting goes by place
+        QVERIFY(s.put(Json{{"op", "add_line"}, {"id", "L2"}, {"text", "東京へ"}, {"x_mm", 100}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 50},
+                           {"ruby_runs", Json::parse(R"([["東京", "とうきょう"]])")}}));
+        s.window->on_line_selected("L2", false);
+        QTRY_COMPARE(rubies->count(), 1);
+        rubies->setCurrentRow(0);
+        QTRY_VERIFY(tracking->isEnabled());
+        tracking->setValue(0.5);
+        emit tracking->editingFinished();
+        QCOMPARE(s.last().dump(), op("L2", R"([{"start": 0, "end": 2, "ruby": "とうきょう", "tracking": 0.5}])"));
+        QCOMPARE(spans_of(s.line("L2")).dump(), Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "とうきょう", "tracking": 0.5}])").dump());
     }
 
     // 要確認: marked in the list, listed with the line, reassigned (the base chosen, its reading given) or cleared.
@@ -268,11 +327,11 @@ private slots:
         QCOMPARE(spans_of(s.line("L2")).dump(), Json::parse(R"([{"start": 3, "end": 5, "base": "東京", "ruby": "とうきょう"}])").dump());
     }
 
-    // Undo after the whole base was deleted: the text, the range and the reading come back.
+    // Undo after the whole base was deleted: the text, the range, the reading and the ruby's settings come back.
     void undoGivesTheRubyBack() {
         Studio s;
         QVERIFY(s.put(Json{{"op", "add_line"}, {"id", "L1"}, {"text", "東京へ"}, {"x_mm", 40}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 50},
-                           {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "とうきょう"}])")}}));
+                           {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "とうきょう", "align": "tail", "gap_mm": 0.5}])")}}));
         const Json before = s.line("L1");
         QVERIFY(s.window->apply_ops(Json::parse(R"([{"op": "edit_line", "id": "L1", "text": "へ"}])")));
         QVERIFY(spans_of(s.line("L1")).is_null());

@@ -134,18 +134,20 @@ SetText set_text_mapped(Fonts& fonts, const core::StoryLine& line, const Json& s
     return out;
 }
 
-// How the line's rubies by place are set: its style's ruby_font, ruby_scale, ruby_align, ruby_gap_mm and ruby_tracking,
-// Python's look where a key is not given (the line's face, half the em, centred, beside the text, letter to letter).
-RubySetting ruby_setting(const Json& st, const Face& face, int dpi) {
-    RubySetting set;
-    set.face = core::py_truthy(at(st, "ruby_font")) ? face_of(at(st, "ruby_font")) : face;
-    set.scale_given = core::py_truthy(at(st, "ruby_scale"));
-    set.scale = set.scale_given ? core::to_float(at(st, "ruby_scale")) : 0.5;
-    set.align = at(st, "ruby_align").is_string() ? at(st, "ruby_align").get<std::string>() : std::string("center");
-    const double gap_mm = core::py_truthy(at(st, "ruby_gap_mm")) ? core::to_float(at(st, "ruby_gap_mm")) : 0.0;
-    set.gap = core::py_round_int(gap_mm / 25.4 * static_cast<double>(dpi));
-    set.tracking = core::py_truthy(at(st, "ruby_tracking")) ? core::to_float(at(st, "ruby_tracking")) : 0.0;
-    return set;
+// Each of the line's rubies by place as it is set (by its place in the line's spans): its own settings (core/ruby.hpp),
+// the line's look where it gives none (the line's face, its size the line's, centred, beside the text, letter to letter).
+std::vector<RubySetting> ruby_settings(const core::StoryLine& line, const Face& face, int dpi) {
+    std::vector<RubySetting> out;
+    for (const core::RubySpan& span : *line.ruby_spans) {
+        RubySetting set;
+        set.face = span.font ? face_of(Json(*span.font)) : face;
+        set.scale = span.scale;
+        set.align = span.align.value_or("center");
+        set.gap = core::py_round_int(span.gap_mm.value_or(0.0) / 25.4 * static_cast<double>(dpi));
+        set.tracking = span.tracking.value_or(0.0);
+        out.push_back(std::move(set));
+    }
+    return out;
 }
 
 // The line's drawn rubies by place as the lettering takes them (code points of the line's text, the reading's
@@ -186,7 +188,7 @@ std::size_t cell_count(std::u32string_view text, bool tcy, bool latin) { return 
 
 // _vertical(line, st, face, em, inner_h, fill)
 Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, const Face& face, std::int64_t em, double inner_h,
-                    const Rgb& fill, int dpi, std::vector<RubyNote>* notes) {
+                    const Rgb& fill, int dpi, std::vector<RubyNote>* notes, std::vector<RubyDrawn>* drawn) {
     const bool by_place = line.ruby_spans.has_value();
     SetText set = by_place ? set_text_mapped(fonts, line, st, face) : SetText{set_text(fonts, line, st, face), {}};
     std::u32string text = std::move(set.text);
@@ -248,8 +250,9 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
     if (by_place) {
         args.placed = placed_of(line, args.mono_ruby);
         args.origins = std::move(from);
-        args.ruby_set = ruby_setting(st, face, dpi);
+        args.ruby_sets = ruby_settings(line, face, dpi);
         args.notes = notes;
+        args.drawn = drawn;
     }
     return compose(fonts, face, args);
 }
@@ -259,7 +262,7 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
 // ruby above them); part of a line can be larger, smaller, bolder or in another colour (style_runs), which makes its
 // row taller.
 Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st, const Face& face, std::int64_t em,
-                      double inner_w, const Rgb& fill, int dpi, std::vector<RubyNote>* notes) {
+                      double inner_w, const Rgb& fill, int dpi, std::vector<RubyNote>* notes, std::vector<RubyDrawn>* drawn_at) {
     const bool by_place = line.ruby_spans.has_value();
     const SetText set = by_place ? set_text_mapped(fonts, line, st, face) : SetText{set_text(fonts, line, st, face), {}};
     const std::u32string& text = set.text;
@@ -292,7 +295,7 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         std::size_t span = 0;
     };
     std::vector<RubyAt> ruby_at;
-    const RubySetting setting = by_place ? ruby_setting(st, face, dpi) : RubySetting{};
+    const std::vector<RubySetting> sets = by_place ? ruby_settings(line, face, dpi) : std::vector<RubySetting>{};
     if (by_place) {  // (the characters that came from each ruby's base)
         for (const PlacedRuby& placed : placed_of(line, core::py_truthy(at(st, "mono_ruby")))) {
             std::size_t first = std::u32string::npos;
@@ -326,13 +329,20 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         }
     }
     const std::int64_t mark_h = !marked.empty() ? core::py_round_int(static_cast<double>(em) * 0.36) : 0;
-    // (by place, ruby_scale sizes it across too when the line gives it; a line of Python's always half the em)
-    const std::int64_t ruby_h =
-        ruby_at.empty() ? 0
-        : by_place && setting.scale_given
-            ? std::max<std::int64_t>(4, core::py_round_int(static_cast<double>(em) * core::py_max(0.25, core::py_min(0.8, setting.scale))))
-            : std::max<std::int64_t>(6, floordiv(em, 2));
-    const std::int64_t ruby_gap = by_place && !ruby_at.empty() ? setting.gap : 0;
+    // Python's ruby across is half the em (it never reads ruby_scale); by place each ruby its own size (its scale),
+    // distance from the text and face, the lane above the rows as tall as the tallest of them needs
+    const std::int64_t ruby_h = std::max<std::int64_t>(6, floordiv(em, 2));
+    const RubySetting plain_set{face, std::nullopt, "center", 0, 0.0};
+    const auto set_of = [&](std::size_t span) -> const RubySetting& { return span < sets.size() ? sets[span] : plain_set; };
+    const auto own_h = [&](std::size_t span) {
+        const std::optional<double>& scale = set_of(span).scale;
+        return scale ? std::max<std::int64_t>(4, core::py_round_int(static_cast<double>(em) * core::py_max(0.25, core::py_min(0.8, *scale)))) : ruby_h;
+    };
+    std::int64_t lane = 0;
+    for (std::size_t r = 0; r < ruby_at.size(); ++r) {
+        const std::int64_t need = by_place ? own_h(ruby_at[r].span) + set_of(ruby_at[r].span).gap : ruby_h;
+        lane = r == 0 ? need : std::max(lane, need);
+    }
     const auto size_of = [&](std::size_t i) -> std::int64_t {
         const Json& style = styles[i];
         const Json* scale = style.is_object() && style.contains("scale") ? &style["scale"] : nullptr;
@@ -391,7 +401,7 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         if (last) break;
         start = end + 1;
     }
-    const std::int64_t above = std::max<std::int64_t>(0, mark_h + ruby_h + ruby_gap);
+    const std::int64_t above = std::max<std::int64_t>(0, mark_h + lane);
     const double leading = float_or(at(st, "leading"), 0);
     const auto tallest_of = [&](const std::vector<std::size_t>& row) {
         std::int64_t tallest = 0;
@@ -417,6 +427,7 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
     const bool justify = align_value == Json("justify");  // 均等揃え: each row (but the last) spread over the whole width
     const std::string mark_kind = core::py_str(core::py_or(at(st, "emphasis_mark"), Json("sesame")));
     std::map<std::size_t, std::tuple<double, double, std::int64_t>> xs;  // place in text → (left, right, row top)
+    std::map<std::size_t, BoxF> set_in;  // (asked where the rubies were set: place in text → the box its letter was set in)
     std::int64_t top = 0;
     for (std::size_t r = 0; r < rows.size(); ++r) {
         const auto& row = rows[r];
@@ -453,9 +464,14 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
                           ink, {}, thick, thick != 0 ? std::optional<Ink>(ink) : std::nullopt);
             }
             const double w = advance(i) - static_cast<double>(em) * tracking;
+            if (drawn_at != nullptr) {  // (its advance, the font's ascent and descent from where it is drawn; a bold one's stroke)
+                const auto [ascent, descent] = fonts.font(face, size, std::u32string(1, text[i])).getmetrics();
+                const double y = base_y + static_cast<double>(tallest - size);
+                set_in[i] = BoxF{x - thick, y - thick, x + w + thick, y + ascent + descent + thick};
+            }
             if (marked.contains(i)) {
                 draw_mark(out, x + w / 2,
-                          static_cast<double>(top + ruby_h + ruby_gap) + static_cast<double>(mark_h) / 2 +
+                          static_cast<double>(top + lane) + static_cast<double>(mark_h) / 2 +
                               static_cast<double>(std::max<std::int64_t>(1, floordiv(em, 16))),
                           static_cast<double>(mark_h), mark_kind, rgb, false);
             }
@@ -471,12 +487,13 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         std::size_t span;
     };
     std::vector<Drawn> drawn;
-    struct Part {  // (by place: a ruby's letters over one row, and its base's left and right there)
+    struct Part {  // (by place: a ruby's letters over one row, and its base's characters, left and right there)
         std::int64_t row = 0;
         std::vector<std::u32string> letters;
         double x0 = 0.0;
         double x1 = 0.0;
         std::size_t span = 0;
+        std::vector<std::size_t> chars;
     };
     std::vector<Part> parts;
     for (const RubyAt& run : ruby_at) {
@@ -508,6 +525,7 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
                 piece.x0 = std::get<0>(xs.at(chars.front()));
                 piece.x1 = std::get<1>(xs.at(chars.back()));
                 piece.span = run.span;
+                piece.chars = chars;
                 parts.push_back(std::move(piece));
                 continue;
             }
@@ -521,17 +539,23 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
                       part, font, Ink::with_alpha(fill, 255));
         }
     }
-    // by place: from the base's head, around its middle or to its tail, the letters `tracking` apart, kept within the
-    // lettering (as Python keeps its ruby); a reading wider than all the text is not cut: the lettering widens (said)
-    const double track = static_cast<double>(core::py_round_int(static_cast<double>(ruby_h) * setting.tracking));
+    // by place, each ruby as its own settings say: from the base's head, around its middle or to its tail, its letters
+    // `tracking` apart in its face and size, `gap` above the text (its foot on the lane's), kept within the lettering
+    // (as Python keeps its ruby); a reading wider than all the text is not cut: the lettering widens (said)
+    const auto track_of = [&](const Part& piece) {
+        return static_cast<double>(core::py_round_int(static_cast<double>(own_h(piece.span)) * set_of(piece.span).tracking));
+    };
     const auto width_of = [&](const Part& piece, std::vector<double>* advances) {
+        const Face& own = set_of(piece.span).face;
+        const std::int64_t size = own_h(piece.span);
+        const double track = track_of(piece);
         if (track == 0.0) {
             std::u32string part;
             for (const auto& letter : piece.letters) part += letter;
-            return fonts.font(setting.face, ruby_h, part.substr(0, 1)).getlength(part);
+            return fonts.font(own, size, part.substr(0, 1)).getlength(part);
         }
         std::vector<double> each;
-        for (const auto& letter : piece.letters) each.push_back(fonts.font(setting.face, ruby_h, letter).getlength(letter));
+        for (const auto& letter : piece.letters) each.push_back(fonts.font(own, size, letter).getlength(letter));
         const double span = core::py_float_sum(each) + track * static_cast<double>(piece.letters.size() - 1);
         if (advances != nullptr) *advances = std::move(each);
         return span;
@@ -550,6 +574,9 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         shift = static_cast<double>(dx);
     }
     for (const Part& piece : parts) {
+        const RubySetting& own = set_of(piece.span);
+        const std::int64_t size = own_h(piece.span);
+        const double track = track_of(piece);
         std::vector<double> advances;
         const double span = width_of(piece, &advances);
         if (span > static_cast<double>(text_w) && notes != nullptr) {
@@ -557,26 +584,55 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         }
         const double x0 = piece.x0 + shift;
         const double x1 = piece.x1 + shift;
-        const double want = setting.align == "head" ? x0 : setting.align == "tail" ? x1 - span : (x0 + x1) / 2 - span / 2;
+        const double want = own.align == "head" ? x0 : own.align == "tail" ? x1 - span : (x0 + x1) / 2 - span / 2;
         const double x = core::py_max(0.0, core::py_min(static_cast<double>(out_w) - span, want));
+        const auto y = static_cast<double>(piece.row + lane - own.gap - size);
+        RubyDrawn where;
         Draw draw(out);
         if (track != 0.0) {
             double at_x = x;
             for (std::size_t i = 0; i < piece.letters.size(); ++i) {
-                note_font(fonts, setting.face, piece.letters[i], piece.span, notes);
-                draw.text(PointD{at_x, static_cast<double>(piece.row)}, piece.letters[i], fonts.font(setting.face, ruby_h, piece.letters[i]),
-                          Ink::with_alpha(fill, 255));
+                note_font(fonts, own.face, piece.letters[i], piece.span, notes);
+                draw.text(PointD{at_x, y}, piece.letters[i], fonts.font(own.face, size, piece.letters[i]), Ink::with_alpha(fill, 255));
+                where.letters.push_back(PointD{at_x, y});
                 at_x += advances[i] + track;
             }
         } else {
             std::u32string part;
             for (const auto& letter : piece.letters) {
-                note_font(fonts, setting.face, letter, piece.span, notes);
+                note_font(fonts, own.face, letter, piece.span, notes);
                 part += letter;
             }
-            draw.text(PointD{x, static_cast<double>(piece.row)}, part, fonts.font(setting.face, ruby_h, part.substr(0, 1)), Ink::with_alpha(fill, 255));
+            const TrueTypeFont& font = fonts.font(own.face, size, part.substr(0, 1));
+            draw.text(PointD{x, y}, part, font, Ink::with_alpha(fill, 255));
+            if (drawn_at != nullptr) {  // (each letter where the line of them puts it)
+                std::u32string before;
+                for (const auto& letter : piece.letters) {
+                    where.letters.push_back(PointD{x + font.getlength(before), y});
+                    before += letter;
+                }
+            }
         }
         drawn.push_back(Drawn{piece.row, x, x + span, piece.span});
+        if (drawn_at != nullptr) {  // (the box its letters are set in: their advances, the font's ascent and descent)
+            const auto [ascent, descent] = fonts.font(own.face, size, piece.letters.front().substr(0, 1)).getmetrics();
+            where.span = piece.span;
+            for (const auto& letter : piece.letters) where.reading += letter;
+            where.ruby = BoxF{x, y, x + span, y + ascent + descent};
+            bool first = true;
+            for (const std::size_t i : piece.chars) {
+                const auto it = set_in.find(i);
+                if (it == set_in.end()) continue;
+                const BoxF b{it->second.x0 + shift, it->second.y0, it->second.x1 + shift, it->second.y1};
+                where.base = first ? b : BoxF{std::min(where.base.x0, b.x0), std::min(where.base.y0, b.y0), std::max(where.base.x1, b.x1),
+                                              std::max(where.base.y1, b.y1)};
+                first = false;
+            }
+            where.size = size;
+            where.face = own.face;
+            where.vertical = false;
+            drawn_at->push_back(std::move(where));
+        }
     }
     for (std::size_t a = 0; a < drawn.size() && notes != nullptr; ++a) {
         for (std::size_t b = a + 1; b < drawn.size(); ++b) {
@@ -762,8 +818,15 @@ Fit fit_in(const std::vector<std::array<double, 2>>& points, double a, double b,
 
 namespace {
 
+// (asked where the rubies by place were set: those places through the letter effects; `exact` false when an effect
+// moved the letters some other way than the boxes follow)
+struct SetRubies {
+    std::vector<RubyDrawn> drawn;
+    bool exact = true;
+};
+
 Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path, std::stop_token stop,
-                 std::vector<RubyNote>* notes);
+                 std::vector<RubyNote>* notes, SetRubies* rubies = nullptr);
 
 }  // namespace
 
@@ -783,10 +846,52 @@ std::vector<RubyNote> ruby_notes(const core::StoryLine& line, int dpi, const std
     return once;
 }
 
+RubyPlaces ruby_places(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path) {
+    RubyPlaces out;
+    const Json st = style_of(line);
+    if (core::py_truthy(at(st, "text_path"))) return out;  // (letters on a path carry no ruby, as Python's)
+    core::StoryLine twin = line;  // (a line of Python's: its runs where the explicit rule finds them)
+    if (!line.ruby_spans) {
+        twin.ruby_spans = core::ruby::from_runs(line.text, line.ruby_runs, false);
+        if (twin.ruby_spans->empty()) return out;
+    }
+    SetRubies set;
+    const Layout layout = layout_of(twin, dpi, font_path, {}, nullptr, &set);
+    out.exact = set.exact;
+    if (!line.ruby_spans) out.exact = out.exact && layout.image.tobytes() == text_layout(line, dpi, font_path).image.tobytes();
+    const Json& rotate = at(st, "rotate_deg");
+    if (core::py_truthy(rotate) && std::fabs(core::to_float(rotate)) > 0.01) out.exact = false;  // (its group drawn turned)
+    // where the lettering's top left lies on the page (as paint_text puts it)
+    const std::int64_t x = px(line.x_mm.value() + float_or(at(st, "text_dx_mm"), 0), dpi);
+    const std::int64_t y = px(line.y_mm.value() + float_or(at(st, "text_dy_mm"), 0), dpi);
+    const double cx = static_cast<double>(x) + static_cast<double>(px(mm_or(line.w_mm, 40), dpi)) / 2;
+    const double cy = static_cast<double>(y) + static_cast<double>(px(mm_or(line.h_mm, 20), dpi)) / 2;
+    const bool corner = kind_of(line) == "none";
+    const auto left = static_cast<double>(corner ? x : core::py_round_int(cx + layout.corner_x));
+    const auto top = static_cast<double>(corner ? y : core::py_round_int(cy + layout.corner_y));
+    const auto on_page = [&](const BoxF& b) {
+        return Box{static_cast<int>(std::floor(b.x0 + left)), static_cast<int>(std::floor(b.y0 + top)), static_cast<int>(std::ceil(b.x1 + left)),
+                   static_cast<int>(std::ceil(b.y1 + top))};
+    };
+    for (const RubyDrawn& where : set.drawn) {
+        RubyPlace place;
+        place.span = where.span;
+        place.reading = utf8(where.reading);
+        place.ruby = on_page(where.ruby);
+        place.base = on_page(where.base);
+        for (const PointD& p : where.letters) place.letters.push_back(PointD{p.x + left, p.y + top});
+        place.size = where.size;
+        place.face = where.face;
+        place.vertical = where.vertical;
+        out.places.push_back(std::move(place));
+    }
+    return out;
+}
+
 namespace {
 
 Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path, std::stop_token stop,
-                 std::vector<RubyNote>* notes) {
+                 std::vector<RubyNote>* notes, SetRubies* rubies) {
     // The lettering, its em, and where its top left sits from the box's middle (px). In an ellipse the letters are
     // fitted to the outline by their own shape, and sit where they fit best.
     const Json st = style_of(line);
@@ -842,11 +947,21 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     Image image;
     for (int attempt = 0; attempt < 12; ++attempt) {
         if (notes != nullptr) notes->clear();  // (what the lettering kept says)
-        image = vertical ? vertical_text(fonts, line, st, face, em, inner_h, fill, dpi, notes)
-                         : horizontal_text(fonts, line, st, face, em, inner_w, fill, dpi, notes);
+        if (rubies != nullptr) rubies->drawn.clear();
+        std::vector<RubyDrawn>* drawn = rubies != nullptr ? &rubies->drawn : nullptr;
+        image = vertical ? vertical_text(fonts, line, st, face, em, inner_h, fill, dpi, notes, drawn)
+                         : horizontal_text(fonts, line, st, face, em, inner_w, fill, dpi, notes, drawn);
         if (std::fabs(scale_x - 1) > 1e-3) {  // 長体 (< 1) or 平体 (> 1): the letters narrower or wider than tall
+            const int set_w = image.width();
             image = image.resize({static_cast<int>(std::max<std::int64_t>(1, core::py_round_int(image.width() * scale_x))), image.height()},
                                  Resample::Lanczos);
+            if (rubies != nullptr) {  // (the boxes narrowed or widened with them)
+                const double f = static_cast<double>(image.width()) / static_cast<double>(std::max(1, set_w));
+                for (RubyDrawn& where : rubies->drawn) {
+                    for (BoxF* b : {&where.ruby, &where.base}) *b = BoxF{b->x0 * f, b->y0, b->x1 * f, b->y1};
+                    for (PointD& p : where.letters) p.x *= f;
+                }
+            }
         }
         bool fits = false;
         if (hug) {
@@ -866,12 +981,24 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     const Json& outline = at(st, "outline_mm");
     std::int64_t grow = core::py_truthy(outline) ? px(core::to_float(outline), dpi) : (kind == "sfx" ? std::max<std::int64_t>(2, floordiv(em, 8)) : 0);
     if (kind == "tone_box" && !core::py_truthy(outline)) grow = std::max<std::int64_t>(2, floordiv(em, 7));  // (a white edge over the tone)
-    if (grow != 0) image = outlined(image, grow, core::py_truthy(at(st, "outline_rgb")) ? rgb_tuple(at(st, "outline_rgb")) : Rgb{255, 255, 255});
+    if (grow != 0) {
+        image = outlined(image, grow, core::py_truthy(at(st, "outline_rgb")) ? rgb_tuple(at(st, "outline_rgb")) : Rgb{255, 255, 255});
+        if (rubies != nullptr) {  // (the letters moved in by the halo's room: grow + 1 each side)
+            const auto pad = static_cast<double>(grow + 1);
+            for (RubyDrawn& where : rubies->drawn) {
+                for (BoxF* b : {&where.ruby, &where.base}) *b = BoxF{b->x0 + pad, b->y0 + pad, b->x1 + pad, b->y1 + pad};
+                for (PointD& p : where.letters) p = PointD{p.x + pad, p.y + pad};
+            }
+        }
+    }
     if (core::py_truthy(at(st, "arc"))) image = arched(image, core::to_float(at(st, "arc")), vertical);
     double skew = float_or(at(st, "skew_deg"), 0);
     if (skew == 0.0) skew = core::py_truthy(at(st, "italic")) ? 12.0 : 0.0;  // (italic: a light lean)
     if (skew != 0.0) image = skewed(image, skew, vertical);
     if (core::py_truthy(at(st, "warp"))) image = warped_letters(image, at(st, "warp"));
+    if (rubies != nullptr && (std::fabs(scale_x - 1) > 1e-3 || core::py_truthy(at(st, "arc")) || skew != 0.0 || core::py_truthy(at(st, "warp")))) {
+        rubies->exact = false;  // (bent, leant, pulled or drawn narrower or wider: the boxes are where the letters were set)
+    }
     Layout out;
     out.corner_x = -static_cast<double>(image.width()) / 2;
     out.corner_y = -static_cast<double>(image.height()) / 2;

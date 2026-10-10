@@ -62,16 +62,18 @@ Marks parse_marks(const QString& typed);
 
 // The rubies a line holds once typed marks are applied (TEXT-01, core/ruby.hpp): for a new line, the rubies typed. For
 // an edit of `line`, its rubies are first followed through the change of its text by the edit rules; then a ruby typed
-// where one of them went is that one (its reading as typed); a ruby typed with one's reading over a place that is not
-// where that one went (typed into its base, its base cut or moved by hand) is that one edited in its base: it needs
-// review, its base and reading kept; one that needs review and was not typed over stays so; a ruby typed anywhere else
-// is new, and one not typed again is gone (its marks were taken away).
+// where one of them went is that one (its reading as typed, its own settings kept); a ruby typed with one's reading
+// over a place that is not where that one went (typed into its base, its base cut or moved by hand) is that one edited
+// in its base: it needs review, its base, reading and settings kept; one that needs review and was not typed over
+// stays so; a ruby typed anywhere else is new (no settings of its own), and one not typed again is gone (its marks were
+// taken away).
 std::vector<core::RubySpan> ruby_after(const Marks& marks, const core::StoryLine* line);
 // The rubies of an add_line or edit_line op made from typed marks: Python's ruby_runs as Python's window sends them
 // (always: even when empty, as edit_line) when they put every ruby where it was typed and the line holds nothing by
 // place; else ruby_spans (ruby_runs taken out).
 void put_ruby(core::Json& op, const Marks& marks, const core::StoryLine* line, bool always);
-// The rubies by place as an op gives them: {start, end, ruby}, and base and review for one that needs review.
+// The rubies by place as an op gives them: {start, end, ruby}, the settings each has (font, scale, align, gap_mm,
+// tracking), and base and review for one that needs review.
 core::Json spans_op(const std::vector<core::RubySpan>& spans);
 // A line's rubies as listed (by place; for a line of Python's, its runs where the explicit rule finds them).
 std::vector<core::RubySpan> rubies_of(const core::StoryLine& line);

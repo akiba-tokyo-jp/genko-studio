@@ -12,13 +12,20 @@ THUMB = "\U0001F44D\U0001F3FD"
 JP = "\U0001F1EF\U0001F1F5"
 IVS = "\U000E0100"
 
-def span(start, end, ruby, base=None, review=None):
+def span(start, end, ruby, base=None, review=None, **settings):
+    """A ruby: [start, end) graphemes, its reading; base and review as the book keeps them; its own settings
+    (font, scale, align, gap_mm, tracking)."""
     out = {"start": start, "end": end, "ruby": ruby}
     if base is not None:
         out["base"] = base
     if review:
         out["review"] = review
+    out.update(settings)
     return out
+
+# a ruby's own settings, carried with it through every edit
+SET = {"font": "gothic", "scale": 0.6, "align": "head", "gap_mm": 1.0, "tracking": 0.2}
+SET2 = {"font": "mincho", "align": "tail", "gap_mm": 0.5}
 
 def edit(text):
     return {"op": "edit_line", "text": text}
@@ -99,12 +106,15 @@ cases = [
     {"n": "全文置換: 親文字の一部の置換は要確認", "text": T, "spans": [span(0, 2, R)], "edit": replace("京", "都"),
      "want": want("東都へ", [span(0, 2, R, "東京", "edited")], [], ["ruby_review"])},
     # Python's ruby_runs (the explicit rule)
-    {"n": "ruby_runs の変換: ルビの組み方を設定すると明示ルール（前から順に、前のルビの後ろで最初に見つかる所）で範囲にする",
-     "text": "東京と東京", "runs": [["東京", R]], "edit": {"op": "edit_line", "style": {"ruby_align": "head"}},
+    {"n": "ruby_runs の変換: 位置で持つ台詞に ruby_runs を渡すと明示ルール（前から順に、前のルビの後ろで最初に見つかる所）で範囲にする",
+     "text": "東京と東京", "spans": [span(3, 5, "x")], "edit": {"op": "edit_line", "ruby_runs": [["東京", R]]},
      "want": want("東京と東京", [span(0, 2, R, "東京")], [["東京", R]])},
-    {"n": "ruby_runs の変換: 本文に見つからない親文字は消さずに要確認", "text": T, "runs": [["大阪", "おおさか"]],
-     "edit": {"op": "edit_line", "style": {"ruby_gap_mm": 1}},
-     "want": want(T, [span(0, 0, "おおさか", "大阪", "unplaced")], [], ["ruby_review"])},
+    {"n": "ruby_runs の変換: 前と同じ所に来たルビは、そこにあったルビの組み方を保つ", "text": "東京と東京",
+     "spans": [span(3, 5, "x", **SET)], "edit": {"op": "edit_line", "ruby_runs": [["東京", R], ["東京", "きょう"]]},
+     "want": want("東京と東京", [span(0, 2, R, "東京"), span(3, 5, "きょう", "東京", **SET)], [["東京", R], ["東京", "きょう"]])},
+    {"n": "ruby_runs の変換: 見つからなかった親文字は、後で本文に現れても読みを推測せず要確認で残す", "text": T,
+     "runs": [["大阪", "おおさか"], ["東京", R]], "edit": edit("東京へ大阪"),
+     "want": want("東京へ大阪", [span(0, 0, "おおさか", "大阪", "unplaced"), span(0, 2, R, "東京")], [["東京", R]], ["ruby_review"])},
     {"n": "ruby_runs のまま: 対応の変わらない編集は Python と同じに保存する", "text": T, "runs": [["東京", R]], "edit": edit("新東京へ"),
      "want": want("新東京へ", None, [["東京", R]])},
     {"n": "ruby_runs のまま: Python なら別の語へ移る編集は位置で持って要確認にする", "text": "東京と東京", "runs": [["東京", R]],
@@ -120,15 +130,30 @@ cases = [
                   ["ruby_overflow", "ruby_overlap"])},
     {"n": "親文字より長い読みが行頭で内側へ寄るのは警告しない", "text": "東京へ", "box": [20, 20, 60, 60], "spans": [span(0, 2, R)],
      "edit": None, "want": want("東京へ", [span(0, 2, R, "東京")], [["東京", R]])},
-    {"n": "ルビの書体にない字は代わりの書体で描き、警告する", "text": "井戸", "box": [20, 20, 60, 60], "style": {"ruby_font": "sfx"},
-     "spans": [span(0, 1, "ゐ")], "edit": None,
-     "want": want("井戸", [span(0, 1, "ゐ", "井")], [["井", "ゐ"]], ["ruby_font_fallback"])},
+    {"n": "ルビの書体にない字は代わりの書体で描き、警告する", "text": "井戸", "box": [20, 20, 60, 60],
+     "spans": [span(0, 1, "ゐ", font="sfx")], "edit": None,
+     "want": want("井戸", [span(0, 1, "ゐ", "井", font="sfx")], [["井", "ゐ"]], ["ruby_font_fallback"])},
+    # each ruby's own settings go with it wherever the edit takes it (moved, needing review, taken away and back)
+    {"n": "ルビの組み方は読みと一緒に動く", "text": T, "spans": [span(0, 2, R, **SET)], "edit": edit("新東京へ"),
+     "want": want("新東京へ", [span(1, 3, R, "東京", **SET)], [["東京", R]])},
+    {"n": "要確認になったルビも組み方を残す", "text": T, "spans": [span(0, 2, R, **SET)], "edit": edit("東新京へ"),
+     "want": want("東新京へ", [span(0, 3, R, "東京", "edited", **SET)], [], ["ruby_review"])},
+    {"n": "同じ語の繰り返し: それぞれのルビが自分の組み方を保つ", "text": "東京と東京",
+     "spans": [span(0, 2, "とう", **SET), span(3, 5, "きょう", **SET2)], "edit": edit("大東京と東京"),
+     "want": want("大東京と東京", [span(1, 3, "とう", "東京", **SET), span(4, 6, "きょう", "東京", **SET2)], [["東京", "とう"], ["東京", "きょう"]])},
+    {"n": "全文置換でも組み方は読みと一緒に動く（前の語が消えても後ろの語の組み方のまま）", "text": "東京と東京",
+     "spans": [span(0, 2, "とう", **SET), span(3, 5, "きょう", **SET2)], "edit": replace("東京と", ""),
+     "want": want("東京", [span(0, 2, "きょう", "東京", **SET2)], [["東京", "きょう"]], [], {"ruby_removed": 1})},
+
     {"n": "どの書体にもない字は警告する", "text": "井戸", "box": [20, 20, 60, 60], "spans": [span(0, 1, "ㇰ")], "edit": None,
      "want": want("井戸", [span(0, 1, "ㇰ", "井")], [["井", "ㇰ"]], ["ruby_glyph_missing"])},
     # typed with the input method (the canvas's editor): the words being converted never change the book
     {"n": "IME: 先頭で変換して「新」と確定", "text": T, "spans": [span(0, 2, R)], "gui": True,
      "ime": {"shown": "｜東京《とうきょう》へ", "steps": [{"cursor": 0, "preedit": "しん", "commit": "新"}]},
      "want": want("新東京へ", [span(1, 3, R, "東京")], [["東京", R]])},
+    {"n": "IME: 組み方のあるルビの前で確定しても組み方を保つ", "text": T, "spans": [span(0, 2, R, **SET)], "gui": True,
+     "ime": {"shown": "｜東京《とうきょう》へ", "steps": [{"cursor": 0, "preedit": "しん", "commit": "新"}]},
+     "want": want("新東京へ", [span(1, 3, R, "東京", **SET)], [["東京", R]])},
     {"n": "IME: ルビの後ろで変換して「駅」と確定", "text": T, "spans": [span(0, 2, R)], "gui": True,
      "ime": {"shown": "｜東京《とうきょう》へ", "steps": [{"cursor": 10, "preedit": "えき", "commit": "駅"}]},
      "want": want("東京駅へ", [span(0, 2, R, "東京")], [["東京", R]])},
@@ -150,7 +175,8 @@ doc = {
              "text, its saved ruby_spans (null: none, the line keeps Python's ruby_runs), its ruby_runs, the ruby_* codes of "
              "入稿前の点検 for the line (checks.page_issues, in order) and the ruby_* keys of the op's report (ruby_review: the "
              "rubies it made need review, ruby_removed: the ones whose whole base it took away; for the cases typed in the "
-             "editor, not checked). Ranges are "
+             "editor, not checked). A ruby's own settings (font, scale, align, gap_mm, tracking) go with it through every "
+             "edit. Ranges are "
              "[start, end) in extended grapheme clusters of the text (Unicode below, Qt's QTextBoundaryFinder). A case "
              "with \"gui\" is typed in the canvas's editor with the input method (test_gui_ruby); \"undo\": Undo gives the "
              "line back as it was. Written by tools/migration/make_ruby_cases.py; its sha256 is in "

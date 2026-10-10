@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "core/brushes.hpp"
+#include "core/command_bus.hpp"
 #include "core/covers.hpp"
 #include "core/color_raster.hpp"
 #include "core/exposure.hpp"
@@ -487,9 +488,10 @@ void Reader::read_papers(core::Document& doc) {
     }
 }
 
-// ruby-layout@1: the line's rubies by place ({start, end, base, ruby, review?} each, core/ruby.hpp), ruby_runs their
-// mirror. What does not fit the text is reported (the book opens read-only); accepted, such a ruby is kept as needing
-// review where it was (its range cut to the text), never dropped.
+// ruby-layout@1: the line's rubies by place ({start, end, base, ruby, font?, scale?, align?, gap_mm?, tracking?,
+// review?} each, core/ruby.hpp), ruby_runs their mirror. What does not fit the text is reported (the book opens
+// read-only); accepted, such a ruby is kept as needing review where it was (its range cut to the text), never dropped.
+// A ruby's setting out of its bounds is reported the same way; accepted, that setting is not set (the line's look).
 void Reader::read_ruby_spans(core::StoryLine& line, const Json& raw, const std::string& at) {
     std::vector<core::RubySpan> spans;
     bool formed = raw.is_array();
@@ -507,17 +509,31 @@ void Reader::read_ruby_spans(core::StoryLine& line, const Json& raw, const std::
         formed = start != nullptr && end != nullptr && start->is_number_integer() && end->is_number_integer() && reading != nullptr &&
                  base != nullptr && (review == nullptr || review->is_string());
         if (!formed) break;
+        core::RubySpan span;
+        span.start = start->get<std::int64_t>();
+        span.end = end->get<std::int64_t>();
+        span.ruby = reading->get<std::string>();
+        span.base = base->get<std::string>();
+        span.review = review != nullptr ? review->get<std::string>() : std::string();
         for (const auto& [key, value] : item.items()) {
-            if (key != "start" && key != "end" && key != "base" && key != "ruby" && key != "review") {
+            if (key == "start" || key == "end" || key == "base" || key == "ruby" || key == "review") continue;
+            // (each ruby's own settings: one out of its bounds is the line's look again, reported)
+            bool setting = false;
+            try {
+                setting = core::ruby::set_setting(span, key, value);
+            } catch (const core::OpError& error) {
+                setting = true;
+                repair(at_key(at_index(at, i), key), std::string(error.what()) + ": read as not set (the line's look)");
+            }
+            if (!setting) {
                 issue("unknown_key", at_key(at_index(at, i), key), {},
                       "the ruby key " + core::py_repr_str(key) + " is not read by this build and would not be written back");
             }
         }
-        spans.push_back(core::RubySpan{start->get<std::int64_t>(), end->get<std::int64_t>(), reading->get<std::string>(),
-                                       base->get<std::string>(), review != nullptr ? review->get<std::string>() : std::string()});
+        spans.push_back(std::move(span));
     }
     if (!formed) {
-        repair(at, "ruby_spans must be a list of {start, end, base, ruby, review?}: read as no ruby by place");
+        repair(at, "ruby_spans must be a list of {start, end, base, ruby, review?, settings?}: read as no ruby by place");
         return;
     }
     std::string why;

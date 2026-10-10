@@ -113,22 +113,39 @@ struct PlacedRuby {
     std::size_t span = 0;
 };
 
-// How a line's rubies by place are set (the line's style; the defaults are Python's): their face, size against the
-// text (ruby_scale, 0.25..0.8 of the em), alignment over the base (head | center | tail), distance from the text (px)
-// and the space between their letters (of the ruby's size).
+// How one ruby by place is set: its own settings (core/ruby.hpp), the line's look for those it does not give — its
+// face, its size against the text (none: the line's, which down is Python's ruby_scale and across half the em), where
+// it sits over its base (head | center | tail), its distance from the text (px) and the space between its letters (of
+// its size).
 struct RubySetting {
     Face face;
-    double scale = 0.5;
-    bool scale_given = false;  // (across, Python's ruby is always half the em: ruby_scale only when the line gives it)
+    std::optional<double> scale;
     std::string align = "center";
     std::int64_t gap = 0;
     double tracking = 0.0;
 };
 
+// Where the lettering set a ruby by place, in its own pixels before the letter effects (render::text::ruby_places puts
+// it on the page for PSD-01): which of the line's spans, the letters set there (a base broken over columns or rows
+// gives one for each part), the box of those letters (down: their em squares; across: their ink as the font draws it),
+// the box of the base's characters there (down: their cells; across: their ink), each letter's place (down: its em
+// square's top left; across: the point the font draws it from, the ascender's left), the letters' size and face.
+struct RubyDrawn {
+    std::size_t span = 0;
+    std::u32string reading;
+    BoxF ruby;
+    BoxF base;
+    std::vector<PointD> letters;
+    std::int64_t size = 0;
+    Face face;
+    bool vertical = true;
+};
+
 // compose(text, font, em, max_height, fill, ruby_runs, face=…, …): the keyword arguments as balloons._vertical
-// passes them (empty lists for None). With `placed` (a line holding its ruby by place) the readings are those, set as
-// `ruby_set` says, instead of ruby_runs; `origins` gives each character of `text` its place in the line's text (npos:
-// none), and what could not be done as asked goes to `notes`.
+// passes them (empty lists for None). With `placed` (a line holding its ruby by place) the readings are those, each set
+// as its `ruby_sets` entry (by its place in the line's spans) says, instead of ruby_runs; `origins` gives each character
+// of `text` its place in the line's text (npos: none), what could not be done as asked goes to `notes` and where each
+// was set to `drawn`.
 struct ComposeArgs {
     std::u32string text;
     std::int64_t em = 0;
@@ -148,8 +165,9 @@ struct ComposeArgs {
     bool mono_ruby = false;
     std::optional<std::vector<PlacedRuby>> placed;
     std::vector<std::size_t> origins;
-    RubySetting ruby_set;
+    std::vector<RubySetting> ruby_sets;
     std::vector<RubyNote>* notes = nullptr;
+    std::vector<RubyDrawn>* drawn = nullptr;
 };
 Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args);
 

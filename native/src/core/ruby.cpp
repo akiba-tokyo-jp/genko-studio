@@ -1,6 +1,6 @@
 // TEXT-01: a line's ruby held by place — graphemes (Qt's QTextBoundaryFinder), Python's ruby_runs by the explicit rule,
 // the spans an op gives and project.json holds, an edit's rules followed (edit_line's text by the longest common
-// subsequence, replace_text by its matches), the layout keys and the feature.
+// subsequence, replace_text by its matches), each ruby's own settings and the feature.
 
 #include "core/ruby.hpp"
 
@@ -25,7 +25,6 @@ namespace genko::core::ruby {
 namespace {
 
 constexpr std::array<std::string_view, 3> kReasons{"edited", "ambiguous", "unplaced"};
-const std::vector<std::string> kLayoutKeys{"ruby_font", "ruby_align", "ruby_gap_mm", "ruby_tracking"};
 
 bool reason(std::string_view value) { return std::find(kReasons.begin(), kReasons.end(), value) != kReasons.end(); }
 
@@ -234,41 +233,61 @@ std::string slice(std::string_view utf8, std::int64_t start, std::int64_t end) {
     return to_utf8(std::u32string_view(text).substr(from, b[static_cast<std::size_t>(end)] - from));
 }
 
-bool is_layout_key(std::string_view key) { return std::find(kLayoutKeys.begin(), kLayoutKeys.end(), key) != kLayoutKeys.end(); }
-
-const std::vector<std::string>& layout_keys() { return kLayoutKeys; }
-
-Json layout_value(std::string_view key, const Json& value) {
-    const auto number = [&](double lo, double hi, const char* bounds_text) {
-        double v = 0.0;
-        try {
-            v = value.is_string() || value.is_number() || value.is_boolean() ? to_float(value) : std::nan("");
-        } catch (const Error&) {
-            v = std::nan("");
+bool set_setting(RubySpan& span, std::string_view key, const Json& value) {
+    const auto number = [&](std::optional<double>& into, double lo, double hi, const char* bounds_text) {
+        if (value.is_null()) {
+            into.reset();
+            return;
         }
-        if (!(lo <= v && v <= hi)) {
-            throw OpError(std::string(key) + " must be between " + bounds_text);
-        }
-        return Json(v);
+        // (a number: not a text or true / false, never clamped)
+        const double v = value.is_number() ? value.get<double>() : std::nan("");
+        if (!(lo <= v && v <= hi)) throw OpError("a ruby's " + std::string(key) + " must be between " + bounds_text);
+        into = v;
     };
-    if (key == "ruby_font") {
-        if (!value.is_string() || value.get_ref<const std::string&>().empty()) {
-            throw OpError("ruby_font must be a face (gothic, mincho, …) or a font file's path");
+    if (key == "font") {
+        if (value.is_null()) {
+            span.font.reset();
+        } else if (!value.is_string() || value.get_ref<const std::string&>().empty()) {
+            throw OpError("a ruby's font must be a face (gothic, mincho, …) or a font file's path");
+        } else {
+            span.font = value.get<std::string>();
         }
-        return value;
+    } else if (key == "scale") {
+        number(span.scale, 0.25, 0.8, "0.25 and 0.8");
+    } else if (key == "align") {
+        if (value.is_null()) {
+            span.align.reset();
+        } else if (!is_one_of(value, {"head", "center", "tail"})) {
+            throw OpError("a ruby's align must be head, center or tail");
+        } else {
+            span.align = value.get<std::string>();
+        }
+    } else if (key == "gap_mm") {
+        number(span.gap_mm, -1.0, 10.0, "-1 and 10");
+    } else if (key == "tracking") {
+        number(span.tracking, -0.5, 2.0, "-0.5 and 2");
+    } else {
+        return false;
     }
-    if (key == "ruby_align") {
-        if (!is_one_of(value, {"head", "center", "tail"})) throw OpError("ruby_align must be head, center or tail");
-        return value;
-    }
-    if (key == "ruby_gap_mm") return number(-1.0, 10.0, "-1 and 10");
-    if (key == "ruby_tracking") return number(-0.5, 2.0, "-0.5 and 2");
-    throw OpError("unknown ruby layout key " + std::string(key));
+    return true;
 }
 
-bool uses_layout(const Json& style) {
-    if (!style.is_object()) return false;
-    return std::any_of(kLayoutKeys.begin(), kLayoutKeys.end(), [&](const std::string& key) { return style.contains(key); });
+Json settings_json(const RubySpan& span) {
+    Json out = Json::object();
+    if (span.font) out["font"] = *span.font;
+    if (span.scale) out["scale"] = *span.scale;
+    if (span.align) out["align"] = *span.align;
+    if (span.gap_mm) out["gap_mm"] = *span.gap_mm;
+    if (span.tracking) out["tracking"] = *span.tracking;
+    return out;
+}
+
+void take_settings(RubySpan& to, const RubySpan& from) {
+    to.font = from.font;
+    to.scale = from.scale;
+    to.align = from.align;
+    to.gap_mm = from.gap_mm;
+    to.tracking = from.tracking;
 }
 
 std::vector<RubySpan> from_runs(std::string_view text_utf8, const std::vector<Json>& runs, bool keep_unplaced) {
@@ -290,12 +309,38 @@ std::vector<RubySpan> from_runs(std::string_view text_utf8, const std::vector<Js
             end = grapheme_at(b, at + words.size());
         }
         if (start >= 0 && end > start) {
-            out.push_back(RubySpan{start, end, reading, base, {}});
+            RubySpan span;
+            span.start = start;
+            span.end = end;
+            span.ruby = reading;
+            span.base = base;
+            out.push_back(std::move(span));
         } else if (keep_unplaced) {
-            out.push_back(RubySpan{0, 0, reading, base, "unplaced"});
+            RubySpan span;
+            span.ruby = reading;
+            span.base = base;
+            span.review = "unplaced";
+            out.push_back(std::move(span));
         }
     }
     std::stable_sort(out.begin(), out.end(), [](const RubySpan& x, const RubySpan& y) { return x.start < y.start; });
+    return out;
+}
+
+std::vector<RubySpan> from_runs_keeping(std::string_view text, const std::vector<Json>& runs, const std::vector<RubySpan>& had) {
+    std::vector<RubySpan> out = from_runs(text, runs, true);
+    std::vector<bool> used(had.size(), false);
+    for (RubySpan& span : out) {
+        for (std::size_t i = 0; i < had.size(); ++i) {
+            const RubySpan& old = had[i];
+            const bool same = span.review.empty() ? old.start == span.start && old.end == span.end && old.base == span.base
+                                                  : old.base == span.base && old.ruby == span.ruby;
+            if (used[i] || !same) continue;
+            used[i] = true;
+            take_settings(span, old);
+            break;
+        }
+    }
     return out;
 }
 
@@ -313,12 +358,13 @@ std::vector<RubySpan> parse(const Json& raw, std::string_view text) {
     std::vector<RubySpan> out;
     for (const Json& item : raw) {
         if (!item.is_object()) bad_spans();
+        RubySpan span;
         for (const auto& [key, value] : item.items()) {
-            if (key != "start" && key != "end" && key != "ruby" && key != "base" && key != "review") {
-                throw OpError("a ruby span has start, end, ruby, base and review, not " + key);
+            if (key == "start" || key == "end" || key == "ruby" || key == "base" || key == "review") continue;
+            if (!set_setting(span, key, value)) {
+                throw OpError("a ruby span has start, end, ruby, base, review, font, scale, align, gap_mm and tracking, not " + key);
             }
         }
-        RubySpan span;
         const Json* review = get(item, "review");
         if (review != nullptr && py_truthy(*review)) {
             if (!review->is_string() || !reason(review->get_ref<const std::string&>())) {
@@ -377,6 +423,8 @@ Json to_json(const std::vector<RubySpan>& spans) {
         item["end"] = span.end;
         item["base"] = span.base;
         item["ruby"] = span.ruby;
+        const Json settings = settings_json(span);  // (named: the loop reads into it)
+        for (const auto& [key, value] : settings.items()) item[key] = value;
         if (!span.review.empty()) item["review"] = span.review;
         out.push_back(std::move(item));
     }
@@ -623,7 +671,7 @@ std::int64_t review_count(const Document& doc) {
     return n;
 }
 
-bool uses_feature(const StoryLine& line) { return line.ruby_spans.has_value() || uses_layout(line.style); }
+bool uses_feature(const StoryLine& line) { return line.ruby_spans.has_value(); }
 
 void add_feature(Document& doc) {
     const std::string feature(kRubyLayoutFeature);
@@ -634,12 +682,11 @@ void add_feature(Document& doc) {
 }
 
 void settle(Document& doc, StoryLine& line) {
-    if (!line.ruby_spans && uses_layout(line.style)) line.ruby_spans = from_runs(line.text, line.ruby_runs, true);
     if (line.ruby_spans) {
         std::stable_sort(line.ruby_spans->begin(), line.ruby_spans->end(),
                          [](const RubySpan& x, const RubySpan& y) { return x.start != y.start ? x.start < y.start : x.end < y.end; });
         line.ruby_runs = runs_of(*line.ruby_spans);
-        if (line.ruby_spans->empty() && !uses_layout(line.style)) line.ruby_spans.reset();
+        if (line.ruby_spans->empty()) line.ruby_spans.reset();
     }
     if (uses_feature(line)) add_feature(doc);
 }

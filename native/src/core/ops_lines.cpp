@@ -4,9 +4,9 @@
 // (_parse_tails, and _tails_outside for a balloon moved over its own tail), its ruby, dots (傍点) and styled words; and
 // the line stamp_material makes of a lettering material (the rest of that op is render's). Nothing is drawn.
 //
-// TEXT-01 (core/ruby.hpp): add_line and edit_line also take ruby_spans (the rubies by place), the style the ruby
-// layout keys (ruby_font, ruby_align, ruby_gap_mm, ruby_tracking), and an edit of the text follows the rubies held by
-// place. A line of Python's (ruby_runs only) is changed as Python changes it as long as its runs still say where each
+// TEXT-01 (core/ruby.hpp): add_line and edit_line also take ruby_spans (the rubies by place, each with its own
+// settings: font, scale, align, gap_mm, tracking), and an edit of the text follows the rubies held by place (their
+// settings with them). A line of Python's (ruby_runs only) is changed as Python changes it as long as its runs still say where each
 // ruby is; when they no longer would (Python would draw a reading over another word, or keep one whose base was
 // edited), the line holds its rubies by place from then on (see edited_text and replaced_text).
 //
@@ -377,14 +377,6 @@ Json merge_style(const Json& current, const Json& change, const PictureCheck& ch
     if (!change.is_object()) throw OpError("style must be an object");
     Json out = current.is_object() ? current : Json::object();
     for (const auto& [key, value] : change.items()) {
-        if (ruby::is_layout_key(key)) {  // (TEXT-01's keys: not Python's, nor in its list of them)
-            if (value.is_null() || value == Json("")) {
-                out.erase(key);
-            } else {
-                out[key] = ruby::layout_value(key, value);
-            }
-            continue;
-        }
         const auto* spec = std::find_if(std::begin(kStyleKeys), std::end(kStyleKeys), [&](const StyleKey& k) { return k.name == key; });
         if (spec == std::end(kStyleKeys)) unknown_style_key(key);
         if (value.is_null() || value == Json("")) {
@@ -691,7 +683,7 @@ void edit_line(OpContext& c, const PictureCheck& check) {
     if (has(op, "ruby_spans")) {
         given_spans(line, op);
     } else if (has(op, "ruby_runs") && by_place) {
-        line.ruby_spans = ruby::from_runs(line.text, line.ruby_runs, true);
+        line.ruby_spans = ruby::from_runs_keeping(line.text, line.ruby_runs, *line.ruby_spans);
     } else if (has(op, "text") && line.text != before && !has(op, "ruby_runs")) {
         change = followed(line, before, runs, line.ruby_runs,
                           [&](const std::vector<RubySpan>& spans) { return ruby::follow_text(before, line.text, spans); });
@@ -775,7 +767,7 @@ void set_balloon_path(OpContext& c) {
     if (has(op, "ruby_runs")) line.ruby_runs = ruby_runs_of(op["ruby_runs"]);
     if (has(op, "emphasis_runs")) line.emphasis_runs = emphasis(op["emphasis_runs"]);
     if (has(op, "style_runs")) line.style_runs = style_runs(op["style_runs"]);
-    if (has(op, "ruby_runs") && line.ruby_spans) line.ruby_spans = ruby::from_runs(line.text, line.ruby_runs, true);  // (TEXT-01)
+    if (has(op, "ruby_runs") && line.ruby_spans) line.ruby_spans = ruby::from_runs_keeping(line.text, line.ruby_runs, *line.ruby_spans);  // (TEXT-01)
     ruby::settle(c.doc, line);
     require_kept(line);
 }

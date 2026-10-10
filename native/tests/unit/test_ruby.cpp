@@ -217,14 +217,28 @@ private slots:
             "ruby_runs": [["東", "x"]]}])")), "not both"));
         QVERIFY(has(refusal(doc, Json::parse(R"([{"op": "add_line", "page": 1, "text": "東京", "ruby_spans": [{"start": 0, "end": 3, "ruby": "x"}]}])")),
                     "ruby span"));
+        // each ruby's own settings, and their bounds (never clamped: refused)
+        const auto setting = [&](const char* key, const Json& value) {
+            Json one{{"start", 0}, {"end", 2}, {"ruby", "とうきょう"}};
+            one[key] = value;
+            return spans(Json::array({one}));
+        };
+        QVERIFY2(has(setting("align", "left"), "a ruby's align must be head, center or tail"), setting("align", "left").c_str());
+        QVERIFY(has(setting("gap_mm", 11), "a ruby's gap_mm must be between -1 and 10"));
+        QVERIFY(has(setting("gap_mm", "1"), "a ruby's gap_mm must be between -1 and 10"));
+        QVERIFY(has(setting("tracking", -0.6), "a ruby's tracking must be between -0.5 and 2"));
+        QVERIFY(has(setting("scale", 0.9), "a ruby's scale must be between 0.25 and 0.8"));
+        QVERIFY(has(setting("scale", true), "a ruby's scale must be between 0.25 and 0.8"));
+        QVERIFY(has(setting("font", 3), "a ruby's font"));
+        QVERIFY(has(setting("font", ""), "a ruby's font"));
+        QVERIFY(has(setting("colour", 1), "a ruby span has start, end, ruby, base, review"));
+        // (the line's style has no ruby keys of its own but Python's ruby_scale: they are refused with Python's words)
         const auto style = [&](const Json& value) {
             return refusal(doc, Json::array({Json{{"op", "edit_line"}, {"id", "L1"}, {"style", value}}}));
         };
-        QVERIFY(has(style(Json{{"ruby_align", "left"}}), "ruby_align must be head, center or tail"));
-        QVERIFY(has(style(Json{{"ruby_gap_mm", 11}}), "ruby_gap_mm must be between -1 and 10"));
-        QVERIFY(has(style(Json{{"ruby_gap_mm", "nan"}}), "ruby_gap_mm"));
-        QVERIFY(has(style(Json{{"ruby_tracking", -0.6}}), "ruby_tracking must be between -0.5 and 2"));
-        QVERIFY(has(style(Json{{"ruby_font", 3}}), "ruby_font"));
+        for (const char* key : {"ruby_font", "ruby_align", "ruby_gap_mm", "ruby_tracking"}) {
+            QVERIFY2(has(style(Json{{key, "head"}}), (std::string("unknown style key ") + key + " (one of font, size_mm,").c_str()), key);
+        }
         // (a key that is not one is refused with Python's own words: its list is Python's)
         QVERIFY(has(style(Json{{"colour", 1}}), "unknown style key colour (one of font, size_mm,"));
         // the review state is the book's to set: a reading given back as needing review keeps its base
@@ -237,23 +251,23 @@ private slots:
             "review": "maybe"}]}])")), "review"));
     }
 
-    // The layout keys: set, read back, cleared with null; the feature only while the book uses it.
-    void layoutKeysAndTheFeature() {
-        Document doc = run_ops(blank_book(), Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "L1"}, {"text", "東京へ"}}})).doc;
+    // Each ruby's own settings: given in ruby_spans (null: none), read back as given, each ruby its own; nothing set
+    // is the line's (Python's) look; the feature only while the book uses it.
+    void perRubySettingsAndTheFeature() {
+        Document doc = run_ops(blank_book(), Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "L1"}, {"text", "東京と東京"}}})).doc;
         QCOMPARE(payload_of(doc, tmp_)["features"], Json::array());
-        doc = run_ops(doc, Json::parse(R"([{"op": "edit_line", "id": "L1", "style": {"ruby_font": "mincho", "ruby_align": "tail",
-            "ruby_gap_mm": 0.5, "ruby_tracking": 0.1, "ruby_scale": 0.6}, "ruby_spans": [{"start": 0, "end": 2, "ruby": "とうきょう"}]}])")).doc;
+        doc = run_ops(doc, Json::parse(R"([{"op": "edit_line", "id": "L1", "style": {"ruby_scale": 0.6}, "ruby_spans": [
+            {"start": 0, "end": 2, "ruby": "とうきょう", "font": "mincho", "scale": 0.4, "align": "tail", "gap_mm": 0.5, "tracking": 0.1},
+            {"start": 3, "end": 5, "ruby": "とうけい", "align": "head", "font": null, "scale": null}]}])")).doc;
         Json payload = payload_of(doc, tmp_);
         QCOMPARE(payload["features"], Json::array({"ruby-layout@1"}));
-        const Json& style = line_of(payload, "L1")["style"];
-        QCOMPARE(style["ruby_font"], Json("mincho"));
-        QCOMPARE(style["ruby_align"], Json("tail"));
-        QCOMPARE(style["ruby_gap_mm"], Json(0.5));
-        QCOMPARE(style["ruby_tracking"], Json(0.1));
+        QCOMPARE(shown(line_of(payload, "L1")["ruby_spans"]), shown(Json::parse(R"([
+            {"start": 0, "end": 2, "base": "東京", "ruby": "とうきょう", "font": "mincho", "scale": 0.4, "align": "tail", "gap_mm": 0.5, "tracking": 0.1},
+            {"start": 3, "end": 5, "base": "東京", "ruby": "とうけい", "align": "head"}])")));
+        QCOMPARE(line_of(payload, "L1")["style"]["ruby_scale"], Json(0.6));  // (Python's, the line's: the rubies without their own)
         QCOMPARE(doc.features, std::vector<std::string>({"ruby-layout@1"}));
-        // nothing of the feature left on the line: the line is Python's again (the book keeps the feature it declared)
-        doc = run_ops(doc, Json::parse(R"([{"op": "edit_line", "id": "L1", "ruby_spans": null, "style": {"ruby_font": null,
-            "ruby_align": null, "ruby_gap_mm": null, "ruby_tracking": null}}])")).doc;
+        // nothing by place left on the line: the line is Python's again (the book keeps the feature it declared)
+        doc = run_ops(doc, Json::parse(R"([{"op": "edit_line", "id": "L1", "ruby_spans": null}])")).doc;
         payload = payload_of(doc, tmp_);
         QVERIFY(!line_of(payload, "L1").contains("ruby_spans"));
         QCOMPARE(line_of(payload, "L1")["ruby_runs"], Json::array());
@@ -309,8 +323,8 @@ private slots:
     // text is reported and opens read-only (nothing is guessed or dropped).
     void savedAndReadBack() {
         Document doc = run_ops(blank_book(), Json::parse(R"([{"op": "add_line", "page": 1, "id": "L1", "text": "東京と東京",
-            "ruby_spans": [{"start": 3, "end": 5, "ruby": "とうきょう"}, {"start": 0, "end": 2, "ruby": "とうけい", "base": "東京",
-            "review": "ambiguous"}], "style": {"ruby_align": "head"}}])")).doc;
+            "ruby_spans": [{"start": 3, "end": 5, "ruby": "とうきょう", "align": "head", "gap_mm": 2}, {"start": 0, "end": 2, "ruby": "とうけい",
+            "base": "東京", "review": "ambiguous", "font": "maru"}]}])")).doc;
         const auto dir = genko::storage::path_from_utf8(tmp_.path().toStdString() + "/book.genko");
         {
             genko::storage::ProjectLock lock(dir, "genko");
@@ -326,8 +340,8 @@ private slots:
         const Json payload = payload_of(loaded.document, tmp_);
         QCOMPARE(payload["features"], Json::array({"ruby-layout@1"}));
         QCOMPARE(shown(line_of(payload, "L1")["ruby_spans"]),
-                 shown(Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "とうけい", "review": "ambiguous"},
-                                       {"start": 3, "end": 5, "base": "東京", "ruby": "とうきょう"}])")));
+                 shown(Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "とうけい", "font": "maru", "review": "ambiguous"},
+                                       {"start": 3, "end": 5, "base": "東京", "ruby": "とうきょう", "align": "head", "gap_mm": 2.0}])")));
         QCOMPARE(line_of(payload, "L1")["ruby_runs"], Json::parse(R"([["東京", "とうきょう"]])"));
         // spans that do not fit the text (written by hand): reported, read-only
         Json raw = genko::test::read_json(QString::fromStdString(dir.string() + "/project.json"));
@@ -336,6 +350,17 @@ private slots:
         const auto broken = genko::storage::load_document(dir);
         QVERIFY(!broken.report.clean());
         QVERIFY(!broken.document.read_only_reason.empty());
+        // a ruby's setting out of its bounds (written by hand): reported, read-only; accepted, the setting goes back to the
+        // default and the ruby stays where it is
+        raw["story"][0]["ruby_spans"][1]["end"] = 5;
+        raw["story"][0]["ruby_spans"][1]["gap_mm"] = 99;
+        genko::test::write_bytes(QString::fromStdString(dir.string() + "/project.json"), genko::core::dump_python(raw));
+        const auto far = genko::storage::load_document(dir);
+        QVERIFY(!far.report.clean());
+        QVERIFY(!far.document.read_only_reason.empty());
+        const Json kept = line_of(payload_of(far.document, tmp_), "L1")["ruby_spans"];
+        QCOMPARE(shown(kept), shown(Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "とうけい", "font": "maru", "review": "ambiguous"},
+                                                   {"start": 3, "end": 5, "base": "東京", "ruby": "とうきょう", "align": "head"}])")));
     }
 };
 

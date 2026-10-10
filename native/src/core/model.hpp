@@ -217,13 +217,20 @@ struct Frame {
 // extended grapheme clusters [start, end). `base` is the text of that range when the ruby was set. A ruby that needs
 // review (要確認: an edit reached into its base, or where it went cannot be told) keeps the base and reading it had, its
 // range only where it was last seen; it is not drawn, and `review` says why ("edited", "ambiguous" or "unplaced";
-// empty: drawn).
+// empty: drawn). Each ruby has its own settings (none given: the line's look, Python's; core/ruby.hpp has their bounds):
+// its face, its size against the text (scale), where it sits over its base (align), its distance from the text
+// (gap_mm) and the space between its letters (tracking). An edit carries them with the ruby.
 struct RubySpan {
     std::int64_t start = 0;
     std::int64_t end = 0;
     std::string ruby;
     std::string base;
     std::string review;
+    std::optional<std::string> font;   // a bundled face's key (gothic, mincho, …) or a font file's path
+    std::optional<double> scale;       // 0.25..0.8 of the text's size
+    std::optional<std::string> align;  // head | center | tail
+    std::optional<double> gap_mm;      // -1..10 mm
+    std::optional<double> tracking;    // -0.5..2 of the ruby's size
 
     bool operator==(const RubySpan&) const = default;
 };

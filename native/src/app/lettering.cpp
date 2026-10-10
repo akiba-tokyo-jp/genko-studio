@@ -582,13 +582,15 @@ std::vector<core::RubySpan> ruby_after(const Marks& marks, const core::StoryLine
     std::vector<bool> used(old.size(), false);
     std::vector<core::RubySpan> out;
     std::vector<bool> placed(typed.size(), false);
-    // a ruby typed where an old one went: that one, its reading as typed
+    // a ruby typed where an old one went: that one (its own settings kept), its reading as typed
     for (std::size_t t = 0; t < typed.size(); ++t) {
         for (std::size_t o = 0; o < old.size(); ++o) {
             if (used[o] || !old[o].review.empty() || old[o].start != typed[t].start || old[o].end != typed[t].end) continue;
             used[o] = true;
             placed[t] = true;
-            out.push_back(typed[t]);
+            core::RubySpan kept = typed[t];
+            core::ruby::take_settings(kept, old[o]);
+            out.push_back(std::move(kept));
             break;
         }
     }
@@ -623,6 +625,8 @@ Json spans_op(const std::vector<core::RubySpan>& spans) {
     Json out = Json::array();
     for (const core::RubySpan& span : spans) {
         Json item{{"start", span.start}, {"end", span.end}, {"ruby", span.ruby}};
+        const Json settings = core::ruby::settings_json(span);  // (its own settings; named: the loop reads into it)
+        for (const auto& [key, value] : settings.items()) item[key] = value;
         if (!span.review.empty()) {
             item["base"] = span.base;
             item["review"] = span.review;
