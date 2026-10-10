@@ -18,7 +18,9 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <string>
@@ -100,15 +102,17 @@ Read read_psd(const std::string& path) {
     return r;
 }
 
-// The box of a picture's ink (alpha > 40) inside `b`: how many pixels.
+// A picture's ink (its last band, the alpha, > 40) inside the box x0, y0, x1, y1: how many pixels. (The band read once,
+// as bytes, of only that box.)
 int ink_in(const Image& image, int x0, int y0, int x1, int y1) {
-    int n = 0;
-    for (int y = std::max(0, y0); y < std::min(image.height(), y1); ++y) {
-        for (int x = std::max(0, x0); x < std::min(image.width(), x1); ++x) {
-            if (image.getpixel(x, y).back() > 40) ++n;
-        }
-    }
-    return n;
+    x0 = std::max(0, x0);
+    y0 = std::max(0, y0);
+    x1 = std::min(image.width(), x1);
+    y1 = std::min(image.height(), y1);
+    if (x0 >= x1 || y0 >= y1) return 0;
+    const bool whole = x0 == 0 && y0 == 0 && x1 == image.width() && y1 == image.height();
+    const std::string alpha = (whole ? image : image.crop(genko::render::Box{x0, y0, x1, y1})).getchannel(image.bands() - 1).tobytes();
+    return static_cast<int>(std::count_if(alpha.begin(), alpha.end(), [](char v) { return static_cast<unsigned char>(v) > 40; }));
 }
 int ink_in(const Image& image, const genko::render::Box& b) { return ink_in(image, b.x0, b.y0, b.x1, b.y1); }
 
@@ -153,6 +157,27 @@ std::string fonts_of(const psd::TextLayer& text) {
     return out;
 }
 
+// A layer's text, read back (there must be one).
+psd::TextLayer text_of(const Read& r, const std::string& name) {
+    const psd::Layer* layer = r.named(name);
+    if (layer == nullptr) qFatal("no layer %s", name.c_str());
+    const auto text = r.file.text(*layer);
+    if (!text) qFatal("no text in %s", name.c_str());
+    return *text;
+}
+
+// A line's em and its rubies' places at the book's resolution, as the lettering sets them.
+std::int64_t em_of(const Document& doc, const std::string& id) { return genko::render::text::remembered_layout(line_of(doc, id), kDpi, std::nullopt)->em; }
+genko::render::text::RubyPlaces places_of(const Document& doc, const std::string& id) { return genko::render::text::ruby_places(line_of(doc, id), kDpi); }
+
+// Where two pictures' bytes (4 a pixel, `width` pixels a row) first differ, as "x,y".
+std::string first_difference(const std::string& a, const std::string& b, int width) {
+    std::size_t at = 0;
+    while (at < a.size() && at < b.size() && a[at] == b[at]) ++at;
+    const std::size_t pixel = at / 4, w = static_cast<std::size_t>(width);
+    return std::to_string(pixel % w) + "," + std::to_string(pixel / w);
+}
+
 // The image-way PSD of each page of the PSD book at 150 dpi (imageWayIsAsBefore).
 const QString kImageWay[4] = {QStringLiteral("1b6d11a43f8606e655dfa18495011edda404e609290241b9f7fa1e91914aa7bd"),
                               QStringLiteral("1f1457dfff7b5c7782f9d8532a37d242d9385a714dd26f97dd0199dd1cc99ca4"),
@@ -172,6 +197,150 @@ class TestPsdText : public QObject {
     QTemporaryDir tmp_;
 
     std::string path(const std::string& rel) const { return tmp_.path().toStdString() + "/" + rel; }
+
+    // The PSD book, its pages written once each way at kDpi — the image way, and the editable way with its report —
+    // and each file read back once: the checks of the book (one test function a page or an aspect) look at the same
+    // files, the first to ask writing them.
+    std::optional<Document> book_;
+    std::optional<std::vector<std::filesystem::path>> image_way_, editable_;
+    genko::formats::PsdTextReport report_;
+    std::map<std::string, Read> read_;
+    QString cli_book_;
+
+    const Document& book() {
+        if (!book_) book_ = psd_book();
+        return *book_;
+    }
+    const std::vector<std::filesystem::path>& image_way() {
+        if (!image_way_) image_way_ = genko::formats::export_psd_pages(book(), genko::core::path_from_utf8(path("image")), kDpi);
+        return *image_way_;
+    }
+    const std::vector<std::filesystem::path>& editable() {
+        if (!editable_) {
+            editable_ = genko::formats::export_psd_pages(book(), genko::core::path_from_utf8(path("editable")), kDpi,
+                                                         genko::formats::PsdText{true, false}, &report_);
+        }
+        return *editable_;
+    }
+    const Read& read_once(const std::filesystem::path& file) {
+        auto it = read_.find(file.string());
+        if (it == read_.end()) it = read_.emplace(file.string(), read_psd(file.string())).first;
+        return it->second;
+    }
+    const Read& image_page(std::size_t i) { return read_once(image_way().at(i)); }
+    const Read& editable_page(std::size_t i) { return read_once(editable().at(i)); }
+
+    // The PSD book made with the command line (`genko new`, `genko apply`) once; empty when that failed (the test
+    // asking has failed then).
+    QString cli_book() {
+        if (cli_book_.isEmpty()) make_cli_book();
+        return cli_book_;
+    }
+    void make_cli_book() {
+        const QString book = tmp_.path() + "/cli.genko";
+        auto ran = genko::test::run_genko({"new", book, "--pages", "4", "--title", "PSD文字", "--plain"});
+        QCOMPARE(ran.exit_code, 0);
+        ran = genko::test::run_genko({"apply", book, genko::test::test_data("psd_text_book.json")});
+        QVERIFY2(ran.exit_code == 0, ran.out.constData());
+        cli_book_ = book;
+    }
+
+    // The command line's PSD of the book the image way (in `dir`): Python's, the four pages imageWayIsAsBefore holds.
+    void image_way_written(const QString& dir) {
+        const auto written = genko::test::tree_hashes(dir);
+        QCOMPARE(written.size(), std::size_t{4});
+        std::size_t page = 0;
+        for (const auto& [name, sha] : written) {
+            QCOMPARE(name, "PSD文字_ep01_p00" + std::to_string(page + 1) + ".psd");
+            QCOMPARE(QString::fromStdString(sha), kImageWay[page++]);
+        }
+    }
+
+    // (layersMakeTheLine) A turned line's layers — its balloon's (`balloon`) and its letters' (`letters`) — against its
+    // image-way layer (`line`), by the rules given there. Pixel by pixel only where a letter layer reaches and three
+    // pixels round that (the 7×7 squares of the pixels there); outside it, where only the balloon can be, the bytes at
+    // once.
+    void turned_line_made(const std::string& name, const Image& line, const Image& balloon, const std::vector<Image>& letters) {
+        const int w = line.width(), h = line.height();
+        std::optional<genko::render::Box> reached;
+        for (const Image& l : letters) {
+            const auto b = l.getchannel("A").getbbox();
+            if (!b) continue;
+            reached = reached ? genko::render::Box{std::min(reached->x0, b->x0), std::min(reached->y0, b->y0), std::max(reached->x1, b->x1),
+                                                   std::max(reached->y1, b->y1)}
+                              : *b;
+        }
+        QVERIFY2(reached.has_value(), name.c_str());
+        const genko::render::Box region{std::max(0, reached->x0 - 3), std::max(0, reached->y0 - 3), std::min(w, reached->x1 + 3),
+                                        std::min(h, reached->y1 + 3)};
+        // outside: no letter layer within 3 pixels, so the balloon layer's pixels exactly
+        Image want_outside = line.copy(), base_outside = balloon.copy();
+        want_outside.paste(genko::render::Ink{0, 0, 0, 0}, region);
+        base_outside.paste(genko::render::Ink{0, 0, 0, 0}, region);
+        const std::string a = want_outside.tobytes(), b = base_outside.tobytes();
+        if (a != b) QFAIL(("not the balloon: " + name + " at " + first_difference(a, b, w)).c_str());
+        // inside, pixel by pixel (x, y in the region)
+        const int rw = region.x1 - region.x0, rh = region.y1 - region.y0;
+        const std::string want = line.crop(region).tobytes();
+        const std::string base = balloon.crop(region).tobytes();
+        std::vector<std::string> marks;
+        for (const Image& l : letters) marks.push_back(l.crop(region).tobytes());
+        const auto at = [&](int x, int y) { return static_cast<std::size_t>(y) * static_cast<std::size_t>(rw) + static_cast<std::size_t>(x); };
+        const auto where = [&](int x, int y) { return name + " at " + std::to_string(region.x0 + x) + "," + std::to_string(region.y0 + y); };
+        // per pixel: whether a letter layer reaches it, the one that covers it opaquely (alone), whether the image way
+        // differs there from the balloon layer
+        std::vector<unsigned char> reach(static_cast<std::size_t>(rw) * static_cast<std::size_t>(rh), 0), changed(reach.size(), 0);
+        std::vector<int> opaque(reach.size(), -1);
+        for (std::size_t p = 0; p < reach.size(); ++p) {
+            int count = 0, full = -1;
+            for (std::size_t m = 0; m < marks.size(); ++m) {
+                const auto alpha = static_cast<unsigned char>(marks[m][p * 4 + 3]);
+                if (alpha == 0) continue;
+                ++count;
+                if (alpha == 255) full = static_cast<int>(m);
+            }
+            reach[p] = count > 0 ? 1 : 0;
+            if (count == 1) opaque[p] = full;
+            changed[p] = want.compare(p * 4, 4, base, p * 4, 4) != 0 ? 1 : 0;
+        }
+        const auto near = [&](const std::vector<unsigned char>& mask, int x, int y) {  // (in the 7×7 square about it)
+            for (int yy = std::max(0, y - 3); yy <= std::min(rh - 1, y + 3); ++yy) {
+                for (int xx = std::max(0, x - 3); xx <= std::min(rw - 1, x + 3); ++xx) {
+                    if (mask[at(xx, yy)] != 0) return true;
+                }
+            }
+            return false;
+        };
+        const auto distance = [](const std::string& u, const std::string& v, std::size_t p) {
+            int d = 0;
+            for (std::size_t c = 0; c < 4; ++c) d += std::abs(int(static_cast<unsigned char>(u[p * 4 + c])) - int(static_cast<unsigned char>(v[p * 4 + c])));
+            return d;
+        };
+        // the line's inked pixels, and those inside the region not compared exactly
+        const std::string alpha = line.getchannel("A").tobytes();
+        const auto inked = static_cast<std::int64_t>(std::count_if(alpha.begin(), alpha.end(), [](char v) { return v != 0; }));
+        std::int64_t left = 0, interior = 0;
+        for (int y = 0; y < rh; ++y) {
+            for (int x = 0; x < rw; ++x) {
+                const std::size_t p = at(x, y);
+                if (!near(reach, x, y)) {  // the balloon, exactly (letters there would be ones the letter layers lack)
+                    if (changed[p] != 0) QFAIL(("not the balloon: " + where(x, y)).c_str());
+                } else if (want[p * 4 + 3] != 0) {
+                    ++left;
+                }
+                if (reach[p] != 0 && !near(changed, x, y)) QFAIL(("letters the image way does not have: " + where(x, y)).c_str());
+                if (opaque[p] >= 0) {  // the letters, not the balloon
+                    const std::string& mark = marks[static_cast<std::size_t>(opaque[p])];
+                    if (distance(want, mark, p) >= distance(want, base, p)) QFAIL(("not the letters: " + where(x, y)).c_str());
+                    ++interior;
+                }
+            }
+        }
+        // most of the line is compared exactly; the letters' own pixels are compared
+        const std::int64_t exactly = inked - left;
+        QVERIFY2(exactly * 4 > inked * 3, qPrintable(QString::number(exactly) + " of " + QString::number(inked)));
+        QVERIFY2(interior > 100, qPrintable(QString::number(interior)));
+    }
 
 private slots:
     void initTestCase() { QVERIFY(tmp_.isValid()); }
@@ -241,8 +410,7 @@ private slots:
     // holds to Python's, and the same as Python's own for the book without what only this build has —
     // test_contract_psd_text's imageWayIsPythons), with no text layer and no group.
     void imageWayIsAsBefore() {
-        const Document doc = psd_book();
-        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("image")), kDpi);
+        const auto& files = image_way();
         QCOMPARE(files.size(), std::size_t{4});
         for (std::size_t i = 0; i < files.size(); ++i) {
             const std::string bytes = genko::test::read_bytes(QString::fromStdString(files[i].string()));
@@ -250,7 +418,7 @@ private slots:
             QVERIFY2(sha == kImageWay[i], qPrintable(QString::number(i + 1) + ": " + sha));
             QVERIFY(bytes.find("TySh") == std::string::npos);
             QVERIFY(bytes.find("lsct") == std::string::npos);
-            const Read r = read_psd(files[i].string());
+            const Read& r = image_page(i);
             for (const auto& layer : r.layers) QVERIFY(!r.file.text(layer).has_value());
         }
     }
@@ -265,154 +433,91 @@ private slots:
     // (most of the line); every pixel where the image way is not the balloon has a letter layer's pixel in its 7×7
     // square, and every letter layer's pixel such a pixel in its own; and a pixel one letter layer covers opaquely is,
     // in the image way, nearer that layer's pixel than the balloon's.)
+    void layersMakeTheLine_data() {
+        QTest::addColumn<int>("page");
+        QTest::addColumn<int>("lines");
+        QTest::addColumn<int>("turned");
+        QTest::newRow("page 1") << 0 << 5 << 0;
+        QTest::newRow("page 2") << 1 << 4 << 0;
+        QTest::newRow("page 3") << 2 << 3 << 1;  // (its two lines with an outline left out; 回る台詞 turned)
+        QTest::newRow("page 4") << 3 << 5 << 0;
+    }
     void layersMakeTheLine() {
-        const Document doc = psd_book();
-        const auto editable = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("composite")), kDpi,
-                                                               genko::formats::PsdText{true, false});
-        const auto images = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("composite-images")), kDpi);
-        int groups = 0, exact = 0, turned = 0, interior = 0;
-        for (std::size_t page = 0; page < editable.size(); ++page) {
-            const Read e = read_psd(editable[page].string());
-            const Read im = read_psd(images[page].string());
-            for (const auto& group : e.layers) {
-                if (!group.folder) continue;
-                bool halo = false;
-                const psd::Layer* balloon = nullptr;
-                std::vector<Image> letters;
-                std::string id;
-                for (const psd::Layer* layer : e.in(group.name)) {
-                    if (e.file.stroke(*layer)) halo = true;
-                    if (layer->name == "フキダシ") {
-                        balloon = layer;
-                        continue;
-                    }
-                    letters.push_back(e.file.image(*layer));
-                    if (layer->name.rfind("本文 #", 0) == 0) id = layer->name.substr(std::string("本文 #").size());
-                }
-                if (halo) continue;
-                const psd::Layer* whole = im.named(group.name);
-                QVERIFY2(whole != nullptr, group.name.c_str());
-                const Image line = im.file.image(*whole);
-                ++groups;
-                const genko::core::Json& rotate = line_of(doc, id).style.is_object() && line_of(doc, id).style.contains("rotate_deg")
-                                                      ? line_of(doc, id).style["rotate_deg"]
-                                                      : genko::core::Json(0);
-                if (rotate == genko::core::Json(0)) {
-                    Image rebuilt = balloon != nullptr ? e.file.image(*balloon) : Image::create("RGBA", line.size(), genko::render::Ink{0, 0, 0, 0});
-                    for (const Image& l : letters) rebuilt.paste(l, genko::render::Point{0, 0}, &l);
-                    const std::string a = rebuilt.tobytes();
-                    const std::string b = line.tobytes();
-                    if (a != b) {
-                        std::size_t at = 0;
-                        while (a[at] == b[at]) ++at;
-                        QFAIL((group.name + " differs at " + std::to_string(at / 4 % static_cast<std::size_t>(line.width())) + "," +
-                               std::to_string(at / 4 / static_cast<std::size_t>(line.width())))
-                                  .c_str());
-                    }
-                    ++exact;
+        QFETCH(int, page);
+        QFETCH(int, lines);
+        QFETCH(int, turned);
+        const Document& doc = book();
+        const Read& e = editable_page(static_cast<std::size_t>(page));
+        const Read& im = image_page(static_cast<std::size_t>(page));
+        int groups = 0, exact = 0, rotated = 0;
+        for (const auto& group : e.layers) {
+            if (!group.folder) continue;
+            bool halo = false;
+            const psd::Layer* balloon = nullptr;
+            std::vector<Image> letters;
+            std::string id;
+            for (const psd::Layer* layer : e.in(group.name)) {
+                if (e.file.stroke(*layer)) halo = true;
+                if (layer->name == "フキダシ") {
+                    balloon = layer;
                     continue;
                 }
-                ++turned;
-                const std::string want = line.tobytes();
-                const std::string base = balloon != nullptr ? e.file.image(*balloon).tobytes() : std::string(want.size(), '\0');
-                const int w = line.width(), h = line.height();
-                const auto at = [&](int x, int y) { return static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x); };
-                std::vector<std::string> marks;
-                for (const Image& l : letters) marks.push_back(l.tobytes());
-                // per pixel: whether a letter layer reaches it, the one that covers it opaquely (alone), whether the image
-                // way differs there from the balloon layer
-                std::vector<unsigned char> reach(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0), changed(reach.size(), 0);
-                std::vector<int> opaque(reach.size(), -1);
-                for (std::size_t p = 0; p < reach.size(); ++p) {
-                    int count = 0, full = -1;
-                    for (std::size_t m = 0; m < marks.size(); ++m) {
-                        const auto alpha = static_cast<unsigned char>(marks[m][p * 4 + 3]);
-                        if (alpha == 0) continue;
-                        ++count;
-                        if (alpha == 255) full = static_cast<int>(m);
-                    }
-                    reach[p] = count > 0 ? 1 : 0;
-                    if (count == 1) opaque[p] = full;
-                    changed[p] = want.compare(p * 4, 4, base, p * 4, 4) != 0 ? 1 : 0;
-                }
-                const auto near = [&](const std::vector<unsigned char>& mask, int x, int y) {  // (in the 7×7 square about it)
-                    for (int yy = std::max(0, y - 3); yy <= std::min(h - 1, y + 3); ++yy) {
-                        for (int xx = std::max(0, x - 3); xx <= std::min(w - 1, x + 3); ++xx) {
-                            if (mask[at(xx, yy)] != 0) return true;
-                        }
-                    }
-                    return false;
-                };
-                const auto distance = [](const std::string& a, const std::string& b, std::size_t p) {
-                    int d = 0;
-                    for (std::size_t c = 0; c < 4; ++c) d += std::abs(int(static_cast<unsigned char>(a[p * 4 + c])) - int(static_cast<unsigned char>(b[p * 4 + c])));
-                    return d;
-                };
-                std::int64_t inked = 0, exactly = 0;
-                for (int y = 0; y < h; ++y) {
-                    for (int x = 0; x < w; ++x) {
-                        const std::size_t p = at(x, y);
-                        const std::string where = group.name + " at " + std::to_string(x) + "," + std::to_string(y);
-                        if (want[p * 4 + 3] != 0) ++inked;
-                        if (!near(reach, x, y)) {  // the balloon, exactly (letters there would be ones the letter layers lack)
-                            if (changed[p] != 0) QFAIL(("not the balloon: " + where).c_str());
-                            if (want[p * 4 + 3] != 0) ++exactly;
-                        }
-                        if (reach[p] != 0 && !near(changed, x, y)) QFAIL(("letters the image way does not have: " + where).c_str());
-                        if (opaque[p] >= 0) {  // the letters, not the balloon
-                            const std::string& mark = marks[static_cast<std::size_t>(opaque[p])];
-                            if (distance(want, mark, p) >= distance(want, base, p)) QFAIL(("not the letters: " + where).c_str());
-                            ++interior;
-                        }
-                    }
-                }
-                // most of the line is compared exactly
-                QVERIFY2(exactly * 4 > inked * 3, qPrintable(QString::number(exactly) + " of " + QString::number(inked)));
+                letters.push_back(e.file.image(*layer));
+                if (layer->name.rfind("本文 #", 0) == 0) id = layer->name.substr(std::string("本文 #").size());
             }
+            if (halo) continue;
+            const psd::Layer* whole = im.named(group.name);
+            QVERIFY2(whole != nullptr, group.name.c_str());
+            const Image line = im.file.image(*whole);
+            ++groups;
+            const genko::core::Json& rotate = line_of(doc, id).style.is_object() && line_of(doc, id).style.contains("rotate_deg")
+                                                  ? line_of(doc, id).style["rotate_deg"]
+                                                  : genko::core::Json(0);
+            const Image under = balloon != nullptr ? e.file.image(*balloon) : Image::create("RGBA", line.size(), genko::render::Ink{0, 0, 0, 0});
+            if (rotate == genko::core::Json(0)) {
+                Image rebuilt = under;
+                for (const Image& l : letters) rebuilt.paste(l, genko::render::Point{0, 0}, &l);
+                const std::string a = rebuilt.tobytes();
+                const std::string b = line.tobytes();
+                if (a != b) QFAIL((group.name + " differs at " + first_difference(a, b, line.width())).c_str());
+                ++exact;
+                continue;
+            }
+            ++rotated;
+            turned_line_made(group.name, line, under, letters);
+            if (QTest::currentTestFailed()) return;
         }
-        QCOMPARE(groups, 17);  // (every line but the two with an outline)
-        QCOMPARE(turned, 1);
-        QCOMPARE(exact, 16);
-        QVERIFY(interior > 100);
+        QCOMPARE(groups, lines);  // (every line but those with an outline: 17 in the book)
+        QCOMPARE(rotated, turned);
+        QCOMPARE(exact, lines - turned);
     }
 
-    // The book written editable and read back with this build's reader.
+    // The book written editable and read back with this build's reader: what the export says it wrote, the merged
+    // picture (the page as drawn, the same as the image way's), the resolution, no font in the file.
     void editableBook() {
-        const Document doc = psd_book();
-        genko::formats::PsdTextReport report;
-        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("editable")), kDpi,
-                                                            genko::formats::PsdText{true, false}, &report);
+        const auto& files = editable();
         QCOMPARE(files.size(), std::size_t{4});
-        QVERIFY(report.rasterized.empty());
-        QCOMPARE(report.text_layers, std::int64_t{19});
-        QCOMPARE(report.ruby_layers, std::int64_t{13});
+        QVERIFY(report_.rasterized.empty());
+        QCOMPARE(report_.text_layers, std::int64_t{19});
+        QCOMPARE(report_.ruby_layers, std::int64_t{13});
         for (const char* font : {kGothic, kMincho, kMaru, kSfx}) {
-            QVERIFY2(std::find(report.fonts.begin(), report.fonts.end(), font) != report.fonts.end(), font);
+            QVERIFY2(std::find(report_.fonts.begin(), report_.fonts.end(), font) != report_.fonts.end(), font);
         }
-        const auto image_way = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("as-images")), kDpi);
-        std::vector<Read> pages;
         for (std::size_t i = 0; i < files.size(); ++i) {
-            pages.push_back(read_psd(files[i].string()));
-            // the merged picture is the page as drawn, the same as the image way's
-            const Read pictures = read_psd(image_way[i].string());
-            QVERIFY(pages.back().file.merged()->tobytes() == pictures.file.merged()->tobytes());
-            QCOMPARE(pages.back().file.dpi(), double{kDpi});
-            // no font file in the PSD
+            const Read& page = editable_page(i);
+            QVERIFY(page.file.merged()->tobytes() == image_page(i).file.merged()->tobytes());
+            QCOMPARE(page.file.dpi(), double{kDpi});
             const std::string bytes = genko::test::read_bytes(QString::fromStdString(files[i].string()));
             QVERIFY(bytes.find("glyf") == std::string::npos && bytes.find("OTTO") == std::string::npos);
         }
-        const auto text_of = [&](const Read& r, const std::string& name) -> psd::TextLayer {
-            const psd::Layer* layer = r.named(name);
-            if (layer == nullptr) qFatal("no layer %s", name.c_str());
-            const auto text = r.file.text(*layer);
-            if (!text) qFatal("no text in %s", name.c_str());
-            return *text;
-        };
-        const auto em_of = [&](const std::string& id) { return genko::render::text::text_layout(line_of(doc, id), kDpi).em; };
-        const auto places = [&](const std::string& id) { return genko::render::text::ruby_places(line_of(doc, id), kDpi); };
+    }
 
-        // page 1, down: 「東京と東京」, a reading beside each 東京, in the line's group with its balloon
-        const Read& p1 = pages[0];
+    // The editable book's page 1, down: 「東京と東京」 and a reading beside each 東京, a shout, 縦中横, styled parts, a line
+    // of Python's.
+    void editableDown() {
+        const Document& doc = book();
+        // 「東京と東京」, a reading beside each 東京, in the line's group with its balloon
+        const Read& p1 = editable_page(0);
         const psd::Layer* body = p1.named("本文 #p1a");
         QVERIFY(body != nullptr);
         QCOMPARE(body->kind, std::string("text"));
@@ -429,7 +534,7 @@ private slots:
         // the face アンチック: kana in the Mincho, kanji in the Gothic, each run named by its PostScript name
         QCOMPARE(fonts_of(t), std::string(kGothic) + "," + kMincho + "," + kGothic);
         QCOMPARE(t.runs[0].length + t.runs[1].length + t.runs[2].length, std::size_t{6});
-        const std::int64_t em = em_of("p1a");
+        const std::int64_t em = em_of(doc, "p1a");
         for (const auto& run : t.runs) {
             QCOMPARE(run.style.size, double(em));
             QVERIFY(!run.style.faux_bold && !run.style.faux_italic);
@@ -440,7 +545,7 @@ private slots:
         QCOMPARE(t.paragraphs.size(), std::size_t{1});
         QCOMPARE(t.paragraphs[0].justification, 0);
         // the text's anchor: its column's middle line, at the top of its first cell (the first reading's base there)
-        const auto p1a = places("p1a");
+        const auto p1a = places_of(doc, "p1a");
         QVERIFY(p1a.exact);
         QCOMPARE(p1a.places.size(), std::size_t{2});
         QVERIFY2(near(t.transform[4], (p1a.places[0].base.x0 + p1a.places[0].base.x1) / 2.0, 1.0), std::to_string(t.transform[4]).c_str());
@@ -480,7 +585,7 @@ private slots:
         QCOMPARE(t.style_at(5)->baseline_direction, 1);
         // the styled parts: 「大きな」 larger, 「声」 bold and red; two readings
         t = text_of(p1, "本文 #p1d");
-        const std::int64_t em_d = em_of("p1d");
+        const std::int64_t em_d = em_of(doc, "p1d");
         QCOMPARE(t.style_at(0)->size, double(std::llround(em_d * 1.4)));
         QCOMPARE(t.style_at(2)->size, double(std::llround(em_d * 1.4)));
         QCOMPARE(t.style_at(3)->size, double(em_d));
@@ -492,18 +597,23 @@ private slots:
         QVERIFY(text_of(p1, "ルビ「やくそく」 #p1d-r1").text == u"やくそく");
         // a line of Python's (ruby_runs): its reading a layer too; the spacing and the columns' distance
         t = text_of(p1, "本文 #p1e");
-        const std::int64_t em_e = em_of("p1e");
+        const std::int64_t em_e = em_of(doc, "p1e");
         QVERIFY(near(t.runs.front().style.tracking, std::llround(em_e * 0.1) * 1000.0 / double(em_e), 1e-9));
         QVERIFY(text_of(p1, "ルビ「かんじ」 #p1e-r0").vertical);
-        // page 2, across: variation selectors kept, a reading in the Mincho from the head, one to the tail
-        const Read& p2 = pages[1];
-        t = text_of(p2, "本文 #p2a");
+    }
+
+    // The editable book's page 2, across: variation selectors kept, a reading in the Mincho from the head, one to the
+    // tail; rows to the right, leant and spaced; bold and coloured parts; to the left in its group with its balloon.
+    void editableAcross() {
+        const Document& doc = book();
+        const Read& p2 = editable_page(1);
+        psd::TextLayer t = text_of(p2, "本文 #p2a");
         QVERIFY(!t.vertical);
         QVERIFY(t.text == u16("葛\xf3\xa0\x84\x80飾区と辻\xef\xb8\x80堂へ"));
         psd::TextLayer ruby = text_of(p2, "ルビ「かつしかく」 #p2a-r0");
         QVERIFY(!ruby.vertical);
         QCOMPARE(fonts_of(ruby), std::string(kMincho));
-        const auto p2a = places("p2a");
+        const auto p2a = places_of(doc, "p2a");
         QVERIFY(near(ruby.transform[4], p2a.places[0].letters[0].x, 1.0));
         QVERIFY(ruby.transform[5] > p2a.places[0].ruby.y0 && ruby.transform[5] < p2a.places[0].ruby.y1);  // (its baseline)
         QVERIFY(text_of(p2, "ルビ「つじどう」 #p2a-r1").text == u"つじどう");
@@ -512,7 +622,7 @@ private slots:
         QVERIFY(t.text == u"横書きの台詞\r右に揃えて");
         QCOMPARE(t.paragraphs.size(), std::size_t{2});
         QCOMPARE(t.paragraphs[0].justification, 1);
-        const std::int64_t em_b = em_of("p2b");
+        const std::int64_t em_b = em_of(doc, "p2b");
         for (const auto& run : t.runs) {
             QVERIFY(run.style.faux_italic);
             QVERIFY(near(run.style.tracking, 100.0, 1e-9));
@@ -522,15 +632,19 @@ private slots:
         t = text_of(p2, "本文 #p2c");
         QVERIFY(t.style_at(0)->faux_bold);
         QVERIFY((t.style_at(0)->fill == std::array<int, 3>{30, 90, 200}));
-        QCOMPARE(t.style_at(3)->size, double(std::llround(em_of("p2c") * 1.3)));
+        QCOMPARE(t.style_at(3)->size, double(std::llround(em_of(doc, "p2c") * 1.3)));
         t = text_of(p2, "本文 #p2d");
         QCOMPARE(t.paragraphs[0].justification, 0);
         QVERIFY(t.text == u"左に揃える行\rふたつめ");
         QCOMPARE(p2.folder_of(*p2.named("本文 #p2d")), std::string("台詞 左に揃える行ふたつめ"));
         QVERIFY(p2.named("フキダシ") != nullptr);
-        // page 3: effect letters (fill and a single-colour outline as the layer's stroke), turned, narrowed, leant
-        const Read& p3 = pages[2];
-        t = text_of(p3, "本文 #p3a");
+    }
+
+    // The editable book's page 3: effect letters (fill and a single-colour outline as the layer's stroke), turned,
+    // narrowed, leant; nothing of the draft or the layer that is not written.
+    void editableEffects() {
+        const Read& p3 = editable_page(2);
+        psd::TextLayer t = text_of(p3, "本文 #p3a");
         QCOMPARE(fonts_of(t), std::string(kSfx));
         QVERIFY((t.runs.front().style.fill == std::array<int, 3>{200, 30, 30}));
         QCOMPARE(p3.file.stroke(*p3.named("本文 #p3a")).value(), (psd::Stroke{6, {255, 255, 255}, "outside", 100, true}));
@@ -553,15 +667,18 @@ private slots:
         QVERIFY(!t.runs.front().style.faux_italic);
         // nothing of the draft or the layer that is not written
         for (const auto& layer : p3.layers) QVERIFY(layer.name.find("hidden") == std::string::npos);
-        // page 4: a reading broken over two columns (a layer for each part), each ruby its own font and spacing, the
-        // columns justified (area text), across justified, down to the foot
-        const Read& p4 = pages[3];
+    }
+
+    // The editable book's page 4: a reading broken over two columns (a layer for each part), each ruby its own font and
+    // spacing, the columns justified (area text), across justified, down to the foot.
+    void editableJustified() {
+        const Read& p4 = editable_page(3);
         QVERIFY(text_of(p4, "ルビ「えき」 #p4a-r0.1").text == u"えき");
         QVERIFY(text_of(p4, "ルビ「まえ」 #p4a-r0.2").text == u"まえ");
-        ruby = text_of(p4, "ルビ「たてがき」 #p4b-r0");
+        const psd::TextLayer ruby = text_of(p4, "ルビ「たてがき」 #p4b-r0");
         QVERIFY(near(ruby.runs.front().style.tracking, 300.0, 1000.0 / ruby.runs.front().style.size));
         QCOMPARE(fonts_of(text_of(p4, "ルビ「よこがき」 #p4b-r1")), std::string(kMaru));
-        t = text_of(p4, "本文 #p4c");
+        psd::TextLayer t = text_of(p4, "本文 #p4c");
         QVERIFY(t.box.has_value());
         QCOMPARE(t.paragraphs[0].justification, 6);
         t = text_of(p4, "本文 #p4d");
@@ -571,8 +688,13 @@ private slots:
         QVERIFY(!t.box.has_value());
         QCOMPARE(t.paragraphs[0].justification, 1);
         QVERIFY(t.text == u"下に\r揃える行");
-        // the nombre on every page, outside the lines' groups
-        for (const Read& r : pages) {
+    }
+
+    // On every page of the editable book: the nombre, outside the lines' groups; every text layer in a line's group,
+    // with its letters' pixels.
+    void editableLayersInGroups() {
+        for (std::size_t page = 0; page < 4; ++page) {
+            const Read& r = editable_page(page);
             const psd::Layer* nombre = r.named("ノンブル");
             QVERIFY(nombre != nullptr);
             QVERIFY(!nombre->parent.has_value());
@@ -676,15 +798,11 @@ private slots:
         QCOMPARE(report.to_json()["warnings"][0]["kind"], Json("font_missing"));
     }
 
-    // `genko export --format psd --psd-text editable [--rasterize-unsupported]`: the same files as the export; the
-    // default the image way; what it refuses.
-    void commandLine() {
-        const QString book = tmp_.path() + "/cli.genko";
-        auto ran = genko::test::run_genko({"new", book, "--pages", "4", "--title", "PSD文字", "--plain"});
-        QCOMPARE(ran.exit_code, 0);
-        ran = genko::test::run_genko({"apply", book, genko::test::test_data("psd_text_book.json")});
-        QVERIFY2(ran.exit_code == 0, ran.out.constData());
-        ran = genko::test::run_genko({"export", book, tmp_.path() + "/cli-editable", "--format", "psd", "--dpi", "150", "--psd-text", "editable", "--json"});
+    // `genko export --format psd --psd-text editable`: the files the export writes, counted as it counts them.
+    void commandLineEditable() {
+        const QString book = cli_book();
+        QVERIFY(!book.isEmpty());
+        const auto ran = genko::test::run_genko({"export", book, tmp_.path() + "/cli-editable", "--format", "psd", "--dpi", "150", "--psd-text", "editable", "--json"});
         QVERIFY2(ran.exit_code == 0, ran.out.constData());
         Json out = printed(ran.out);
         QCOMPARE(out["count"], Json(4));
@@ -692,19 +810,31 @@ private slots:
         QCOMPARE(out["psd_text"]["ruby_layers"], Json(13));
         const Read r = read_psd(out["files"][0].get<std::string>());
         QVERIFY(r.file.text(*r.named("本文 #p1a")).has_value());
-        // the default: the image way, the same bytes as --psd-text image
-        ran = genko::test::run_genko({"export", book, tmp_.path() + "/cli-default", "--format", "psd", "--dpi", "150"});
+    }
+
+    // The command line's default is the image way: Python's PSD (the bytes imageWayIsAsBefore holds) …
+    void commandLineDefault() {
+        const QString book = cli_book();
+        QVERIFY(!book.isEmpty());
+        const auto ran = genko::test::run_genko({"export", book, tmp_.path() + "/cli-default", "--format", "psd", "--dpi", "150"});
         QCOMPARE(ran.exit_code, 0);
-        ran = genko::test::run_genko({"export", book, tmp_.path() + "/cli-image", "--format", "psd", "--dpi", "150", "--psd-text", "image"});
+        image_way_written(tmp_.path() + "/cli-default");
+    }
+
+    // … the same files as `--psd-text image`.
+    void commandLineImageWay() {
+        const QString book = cli_book();
+        QVERIFY(!book.isEmpty());
+        const auto ran = genko::test::run_genko({"export", book, tmp_.path() + "/cli-image", "--format", "psd", "--dpi", "150", "--psd-text", "image"});
         QCOMPARE(ran.exit_code, 0);
-        const auto written = genko::test::tree_hashes(tmp_.path() + "/cli-default");
-        QVERIFY(written == genko::test::tree_hashes(tmp_.path() + "/cli-image"));
-        QCOMPARE(written.size(), std::size_t{4});
-        std::size_t page = 0;
-        for (const auto& [name, sha] : written) QCOMPARE(QString::fromStdString(sha), kImageWay[page++]);  // (Python's PSD)
-        // what it refuses
+        image_way_written(tmp_.path() + "/cli-image");
+    }
+
+    // What the command line refuses: a line PSD text cannot keep stops the strict export (nothing written) and is
+    // drawn as a picture with --rasterize-unsupported …
+    void commandLineRefuses() {
         const QString unsupported = tmp_.path() + "/cli-unsupported.genko";
-        ran = genko::test::run_genko({"new", unsupported, "--pages", "1", "--plain"});
+        auto ran = genko::test::run_genko({"new", unsupported, "--pages", "1", "--plain"});
         QCOMPARE(ran.exit_code, 0);
         const QString ops = tmp_.path() + "/ops.json";
         genko::test::write_bytes(ops, R"([{"op": "add_line", "page": 1, "id": "g", "text": "グラデ", "x_mm": 100, "y_mm": 20, "w_mm": 30,
@@ -713,7 +843,7 @@ private slots:
         QCOMPARE(ran.exit_code, 0);
         ran = genko::test::run_genko({"export", unsupported, tmp_.path() + "/cli-strict", "--format", "psd", "--psd-text", "editable"});
         QCOMPARE(ran.exit_code, 1);
-        out = printed(ran.out);
+        Json out = printed(ran.out);
         QCOMPARE(out["code"], Json("psd_text_unsupported"));
         QCOMPARE(out["report"], Json::parse(R"([{"page": 1, "line": "g", "text": "グラデ", "features": ["gradient"]}])"));
         QVERIFY(!QDir(tmp_.path() + "/cli-strict").exists() || QDir(tmp_.path() + "/cli-strict").isEmpty());
@@ -721,48 +851,75 @@ private slots:
                                       "--rasterize-unsupported", "--json"});
         QVERIFY2(ran.exit_code == 0, ran.out.constData());
         QCOMPARE(printed(ran.out)["psd_text"]["rasterized"][0]["line"], Json("g"));
+    }
+
+    // … and what it does not take: another --psd-text, --rasterize-unsupported without editable, editable for another
+    // format (usage, exit 2).
+    void commandLineUsage() {
+        const QString book = cli_book();
+        QVERIFY(!book.isEmpty());
         for (const QStringList& wrong : {QStringList{"--psd-text", "pictures"}, QStringList{"--rasterize-unsupported"},
                                          QStringList{"--psd-text", "editable", "--format", "png"}}) {
             QStringList args{"export", book, tmp_.path() + "/cli-wrong"};
             if (!wrong.contains("--format")) args << "--format" << "psd";
-            ran = genko::test::run_genko(args + wrong);
+            const auto ran = genko::test::run_genko(args + wrong);
             QVERIFY2(ran.exit_code == 2, qPrintable(wrong.join(' ')));
             QCOMPARE(printed(ran.err)["code"], Json("usage"));
         }
     }
 
     // An outline is the layer's stroke as wide as the halo the lettering draws: the halo's filter stops at 61 px (30 px
-    // round the letters), so a wider outline — effect letters' own at 600 dpi (em / 8 = 35 px), outline_mm 3 (71 px), a
-    // 網かけの箱's (em / 7) — is 30 px in the PSD too.
+    // round the letters), so a wider outline — effect letters' own at 600 dpi (em / 8 = 32 px), outline_mm 3 (71 px), a
+    // 網かけの箱's (em / 7) — is 30 px in the PSD too. (A line a row, each on a page of its own.)
+    void strokeIsTheHaloDrawn_data() {
+        QTest::addColumn<QString>("id");
+        QTest::addColumn<QString>("op");
+        QTest::addColumn<double>("width");
+        QTest::newRow("effect letters") << "sfx"
+                                        << R"({"op": "add_line", "page": 1, "id": "sfx", "text": "ド", "x_mm": 5, "y_mm": 5, "w_mm": 11, "h_mm": 30,
+                                              "wrap": "horizontal", "balloon": "sfx"})"
+                                        << 30.0;
+        QTest::newRow("outline 3 mm") << "wide"
+                                      << R"({"op": "add_line", "page": 1, "id": "wide", "text": "縁", "x_mm": 30, "y_mm": 45, "w_mm": 20, "h_mm": 20,
+                                            "wrap": "vertical", "balloon": "none", "style": {"size_mm": 5, "outline_mm": 3}})"
+                                      << 30.0;
+        QTest::newRow("outline 0.5 mm") << "thin"
+                                        << R"({"op": "add_line", "page": 1, "id": "thin", "text": "細", "x_mm": 30, "y_mm": 75, "w_mm": 20, "h_mm": 20,
+                                              "wrap": "vertical", "balloon": "none", "style": {"size_mm": 5, "outline_mm": 0.5}})"
+                                        << 12.0;
+    }
     void strokeIsTheHaloDrawn() {
+        QFETCH(QString, id);
+        QFETCH(QString, op);
+        QFETCH(double, width);
         genko::core::PageSpec spec = genko::core::PageSpec::a4_mono();
         spec.width_mm = genko::core::Num(90);
         spec.height_mm = genko::core::Num(110);
         spec.preset.reset();
         Document doc = genko::core::new_episode("縁", genko::core::Num(1), 1, spec);
-        doc = run_ops(doc, Json::parse(R"([
-            {"op": "add_line", "page": 1, "id": "sfx", "text": "ドン", "x_mm": 5, "y_mm": 5, "w_mm": 80, "h_mm": 30, "wrap": "horizontal",
-             "balloon": "sfx"},
-            {"op": "add_line", "page": 1, "id": "wide", "text": "縁", "x_mm": 30, "y_mm": 45, "w_mm": 20, "h_mm": 20, "wrap": "vertical",
-             "balloon": "none", "style": {"size_mm": 5, "outline_mm": 3}},
-            {"op": "add_line", "page": 1, "id": "thin", "text": "細", "x_mm": 30, "y_mm": 75, "w_mm": 20, "h_mm": 20, "wrap": "vertical",
-             "balloon": "none", "style": {"size_mm": 5, "outline_mm": 0.5}}])"));
+        doc = run_ops(doc, Json::array({Json::parse(op.toStdString())}));
         constexpr int kFine = 600;
-        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("halo")), kFine, genko::formats::PsdText{true, false});
+        const std::string name = id.toStdString();
+        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("halo-" + name)), kFine,
+                                                            genko::formats::PsdText{true, false});
         const Read r = read_psd(files.front().string());
-        for (const auto& [id, width] : std::vector<std::pair<std::string, double>>{{"sfx", 30}, {"wide", 30}, {"thin", 12}}) {
-            const auto stroke = r.file.stroke(*r.named("本文 #" + id));
-            QVERIFY2(stroke.has_value(), id.c_str());
-            QVERIFY2(stroke->size == width, (id + ": " + std::to_string(stroke->size)).c_str());
-            // the halo the lettering draws reaches that far round the letters, every side
-            const auto& line = line_of(doc, id);
-            const Image whole = genko::render::text::text_layout(line, kFine).image;
-            const Image letters = genko::render::text::set_layout(line, kFine, std::nullopt, genko::render::text::LetterParts{false, true, true, false}).layout.image;
-            QCOMPARE(whole.size(), letters.size());
-            const auto a = whole.getbbox().value();
-            const auto b = letters.getbbox().value();
-            QVERIFY2(b.x0 - a.x0 == width && b.y0 - a.y0 == width && a.x1 - b.x1 == width && a.y1 - b.y1 == width, id.c_str());
-        }
+        const psd::Layer* text = r.named("本文 #" + name);
+        QVERIFY(text != nullptr);
+        const auto stroke = r.file.stroke(*text);
+        QVERIFY2(stroke.has_value(), name.c_str());
+        QVERIFY2(stroke->size == width, (name + ": " + std::to_string(stroke->size)).c_str());
+        // the halo the lettering draws reaches that far round the letters, every side: the line as the page was drawn
+        // with it (the layout the export made, remembered), placed as the page places it, against the letters' layer
+        const auto& line = line_of(doc, name);
+        const auto whole = genko::render::text::remembered_layout(line, kFine, std::nullopt);
+        const genko::render::Point at = genko::render::text::lettering_at(line, kFine, whole->corner_x, whole->corner_y);
+        const auto drawn = whole->image.getbbox().value();
+        const genko::render::Box a{drawn.x0 + at.x, drawn.y0 + at.y, drawn.x1 + at.x, drawn.y1 + at.y};
+        const auto b = r.file.image(*text).getbbox().value();
+        QVERIFY2(b.x0 - a.x0 == width && b.y0 - a.y0 == width && a.x1 - b.x1 == width && a.y1 - b.y1 == width,
+                 (name + ": " + std::to_string(b.x0 - a.x0) + " " + std::to_string(b.y0 - a.y0) + " " + std::to_string(a.x1 - b.x1) + " " +
+                  std::to_string(a.y1 - b.y1))
+                     .c_str());
     }
 
     // Down, a cell of half-width letters the lettering keeps upright (a lone letter or digit, a lone !) is upright in the

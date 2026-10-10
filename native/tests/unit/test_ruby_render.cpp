@@ -82,11 +82,19 @@ Image lettering(const Json& fields) {
 }
 
 // The box of the ink (alpha > 40) inside `area` of an RGBA picture: x0, y0, x1, y1 (in the picture), or none.
+// (The area's alpha read once, as bytes.)
 std::optional<std::array<int, 4>> ink_box(const Image& image, int x0, int y0, int x1, int y1) {
     std::optional<std::array<int, 4>> box;
-    for (int y = std::max(0, y0); y < std::min(image.height(), y1); ++y) {
-        for (int x = std::max(0, x0); x < std::min(image.width(), x1); ++x) {
-            if (image.getpixel(x, y).back() <= 40) continue;
+    x0 = std::max(0, x0);
+    y0 = std::max(0, y0);
+    x1 = std::min(image.width(), x1);
+    y1 = std::min(image.height(), y1);
+    if (x0 >= x1 || y0 >= y1) return box;
+    const std::string alpha = image.crop(genko::render::Box{x0, y0, x1, y1}).getchannel(image.bands() - 1).tobytes();
+    const auto w = static_cast<std::size_t>(x1 - x0);
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            if (static_cast<unsigned char>(alpha[static_cast<std::size_t>(y - y0) * w + static_cast<std::size_t>(x - x0)]) <= 40) continue;
             if (!box) {
                 box = std::array<int, 4>{x, y, x + 1, y + 1};
             } else {
@@ -100,16 +108,19 @@ std::optional<std::array<int, 4>> ink_box(const Image& image, int x0, int y0, in
     return box;
 }
 
-// The dark pixels (< 128) of a page picture (RGB or L) inside a box.
+// The dark pixels (< 128, the first band) of a page picture (RGB or L) inside a box. (The box's band read once, as bytes.)
 int dark_in(const Image& page, int x0, int y0, int x1, int y1) {
-    int n = 0;
-    for (int y = std::max(0, y0); y < std::min(page.height(), y1); ++y) {
-        for (int x = std::max(0, x0); x < std::min(page.width(), x1); ++x) {
-            if (page.getpixel(x, y).front() < 128) ++n;
-        }
-    }
-    return n;
+    x0 = std::max(0, x0);
+    y0 = std::max(0, y0);
+    x1 = std::min(page.width(), x1);
+    y1 = std::min(page.height(), y1);
+    if (x0 >= x1 || y0 >= y1) return 0;
+    const std::string grey = page.crop(genko::render::Box{x0, y0, x1, y1}).getchannel(0).tobytes();
+    return static_cast<int>(std::count_if(grey.begin(), grey.end(), [](char v) { return static_cast<unsigned char>(v) < 128; }));
 }
+
+// A picture's first band (its grey, or its red) as bytes, a pixel's at y · width + x.
+std::string first_band(const Image& image) { return image.getchannel(0).tobytes(); }
 
 std::string read_file(const QString& path) {
     QFile f(path);
@@ -446,9 +457,11 @@ private slots:
         QCOMPARE(without.size(), png.size());
         int top = png.height(), bottom = 0;
         int changed = 0;
+        const std::string with_bytes = first_band(png), without_bytes = first_band(without);
         for (int y = 0; y < png.height(); ++y) {
             for (int x = 0; x < png.width(); ++x) {
-                if (png.getpixel(x, y).front() == without.getpixel(x, y).front()) continue;
+                const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(png.width()) + static_cast<std::size_t>(x);
+                if (with_bytes[at] == without_bytes[at]) continue;
                 ++changed;
                 if (x > png.width() / 2) {  // (line A: the right half of the page)
                     top = std::min(top, y);
@@ -500,9 +513,11 @@ private slots:
         // every pixel that differs between two pages lies in the boxes, and each box has some
         const auto changed_within = [&](const Image& a, const Image& b, const std::vector<Box>& boxes) {
             std::vector<int> hits(boxes.size(), 0);
+            const std::string a_bytes = first_band(a), b_bytes = first_band(b);
             for (int y = 0; y < a.height(); ++y) {
                 for (int x = 0; x < a.width(); ++x) {
-                    if (a.getpixel(x, y).front() == b.getpixel(x, y).front()) continue;
+                    const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(a.width()) + static_cast<std::size_t>(x);
+                    if (a_bytes[at] == b_bytes[at]) continue;
                     if (!inside(boxes, x, y)) return "a change at " + std::to_string(x) + "," + std::to_string(y) + " outside";
                     for (std::size_t i = 0; i < boxes.size(); ++i) {
                         if (inside({boxes[i]}, x, y)) ++hits[i];
@@ -666,9 +681,11 @@ private slots:
         const Image bare = genko::render::render_page(no_ruby.page(0), kDpi, {}, &no_ruby).image.convert("L");
         const Image with = genko::render::render_page(loaded.document.page(0), kDpi, {}, &loaded.document).image.convert("L");
         int top = with.height(), bottom = 0;
+        const std::string with_bytes = first_band(with), bare_bytes = first_band(bare);
         for (int y = px(20); y < px(90); ++y) {
             for (int x = px(140); x < px(170); ++x) {
-                if (with.getpixel(x, y).front() != bare.getpixel(x, y).front()) {
+                const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(with.width()) + static_cast<std::size_t>(x);
+                if (with_bytes[at] != bare_bytes[at]) {
                     top = std::min(top, y);
                     bottom = std::max(bottom, y);
                 }
