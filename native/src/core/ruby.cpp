@@ -692,6 +692,25 @@ Followed follow_replacements(std::string_view before_utf8, std::string_view afte
             out.origin.push_back(i);
             continue;
         }
+        // a match over the whole base whose replacement holds it twice or more: only the base's first place in it (where
+        // Python's run is found) is sure — the ruby kept anywhere else (the match narrowed to letters added before it, say)
+        // cannot tell which it was on
+        std::optional<std::size_t> only_at;
+        {
+            const std::u32string_view base = std::u32string_view(before).substr(s, e - s);
+            std::int64_t ahead = 0;
+            for (const Edit& edit : edits) {
+                if (edit.from <= s && edit.to >= e) {
+                    const std::size_t first = edit.with.find(base);
+                    if (first != std::u32string_view::npos && edit.with.find(base, first + 1) != std::u32string_view::npos) {
+                        only_at = static_cast<std::size_t>(static_cast<std::int64_t>(edit.from) + ahead) + first;
+                    }
+                    break;
+                }
+                if (edit.to > s) break;
+                ahead += edit.delta;
+            }
+        }
         std::int64_t shift = 0;
         std::vector<const Edit*> reaching;  // the matches whose edit reaches the base
         for (const Edit& edit : edits) {
@@ -742,6 +761,11 @@ Followed follow_replacements(std::string_view before_utf8, std::string_view afte
         if (reaching.empty()) {
             const auto from = static_cast<std::size_t>(static_cast<std::int64_t>(s) + shift);
             const auto to = static_cast<std::size_t>(static_cast<std::int64_t>(e) + shift);
+            if (only_at && *only_at != from) {
+                out.spans.push_back(hint(span, s, e, "ambiguous"));
+                out.origin.push_back(i);
+                continue;
+            }
             const std::int64_t h0 = grapheme_at(b1, from);
             const std::int64_t h1 = grapheme_at(b1, to);
             // (the base the same letters, still whole graphemes: a combining mark added at its end joins it)

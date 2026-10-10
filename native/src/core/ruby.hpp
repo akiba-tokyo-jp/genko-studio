@@ -36,7 +36,9 @@
 //  - replace_text knows where each match was: those are its edits. A ruby whose whole base the matches that reach it
 //    cover (one match of all of it, or several together) goes to the base inside the replacement when one match's
 //    replacement holds it once (東京 → 「東京」, the rest letters added around it, where Python's run finds it too),
-//    needs review ("ambiguous") when it holds it more than once, and is taken away otherwise, as Python takes its run
+//    needs review ("ambiguous") when it holds it more than once — unless it stays on the first of them, where Python's
+//    run is found (東京 → 東京と東京), even when the match narrows to letters added beside it (東京 → 大東京と東京:
+//    ambiguous) — and is taken away otherwise, as Python takes its run
 //    away, whatever the replacement has in common with it (東京 → 東西); a match is first compared with its
 //    replacement only to tell letters added beside the base (京 → 京都 adds 都 after the 京; 東京へ → 東京まで changes
 //    only the へ) from an edit of it.
