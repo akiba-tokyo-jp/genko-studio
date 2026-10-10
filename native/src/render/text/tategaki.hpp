@@ -141,7 +141,14 @@ struct RubyDrawn {
     std::int64_t size = 0;
     Face face;
     bool vertical = true;
+    // (PSD-01) the space added between its letters (px: down, beyond each em square; across, beyond each advance), the
+    // font file each letter is drawn in (Fonts::path_for) and their colour
+    double spacing = 0.0;
+    std::vector<std::string> fonts;
+    Rgb fill;
 };
+
+struct SetRow;  // (lettering.hpp)
 
 // compose(text, font, em, max_height, fill, ruby_runs, face=…, …): the keyword arguments as balloons._vertical
 // passes them (empty lists for None). With `placed` (a line holding its ruby by place) the readings are those, each set
@@ -170,6 +177,11 @@ struct ComposeArgs {
     std::vector<RubySetting> ruby_sets;
     std::vector<RubyNote>* notes = nullptr;
     std::vector<RubyDrawn>* drawn = nullptr;
+    // PSD-01: draw the text (and its 傍点) and/or the rubies (the same layout either way), and where each cell was set
+    // (render::text::SetRow, lettering.hpp: a column each)
+    bool draw_text = true;
+    bool draw_ruby = true;
+    std::vector<SetRow>* cells = nullptr;
 };
 Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args);
 

@@ -55,12 +55,18 @@ struct RunOptions {
     std::string icc;
     bool dots = false;
     std::optional<core::Json> screen;
+    // (psd, PSD-01) the lines' text kept editable — "image" (as pictures: Python's PSD) or "editable" — and, editable,
+    // a line using what PSD text cannot keep drawn as a picture (見た目優先) instead of stopping the export (厳密)
+    std::string psd_text = "image";
+    bool psd_rasterize = false;
 };
 
 // exporting.run: {"ok": true, "files": [...]} or {"ok": false, "error": …} (Python's ValueError and OSError become the
 // error; what this build does not do yet, render::NotYetPorted, too, with "code": "not_yet_ported"; a resolution past
-// 1 to 100000 dpi, formats::check_dpi). `out` is a folder. A book whose pages are still being read (Document::deferred:
-// the app's first page first) is not written from: core::Error("page_not_loaded") is thrown.
+// 1 to 100000 dpi, formats::check_dpi). `out` is a folder. The editable PSD (options.psd_text "editable") adds
+// "psd_text" (PsdTextReport) to its reply, or stops with "code": "psd_text_unsupported" and the lines ("items"). A
+// book whose pages are still being read (Document::deferred: the app's first page first) is not written from:
+// core::Error("page_not_loaded") is thrown.
 core::Json run(const core::Document& episode, const std::optional<std::filesystem::path>& project, std::string_view key,
                const std::filesystem::path& out, const RunOptions& options = {});
 

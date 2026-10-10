@@ -89,6 +89,76 @@ struct RubyPlaces {
     bool exact = true;
 };
 RubyPlaces ruby_places(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path = std::nullopt);
+
+// PSD-01 (internal, not an op): which parts of a placed line are drawn — the editable PSD puts its balloon, its text
+// and its rubies on layers of their own. `halo`: the letters' outline (白フチ; the PSD gives it as the text layer's
+// stroke instead). Whatever is drawn is laid out as when everything is: a part drawn alone is where it is then.
+struct LetterParts {
+    bool balloon = true;
+    bool text = true;
+    bool ruby = true;
+    bool halo = true;
+    bool all() const { return balloon && text && ruby && halo; }
+};
+
+// PSD-01 (internal): one character of a line's text as the lettering set it, before its letter effects: what it is (a
+// cell: a character with its variation selector; down, also the letters of a 縦中横 cell or of half-width letters laid
+// on their side), its size (px), weight (0 normal, 1 bold, 2 heavy) and colour, the font file it is drawn in (a
+// bundled font's name or a file's path, as Fonts::path_for gives it), and where: down, its cell; across, its advance
+// by the font's ascent and descent from where it is drawn.
+struct SetChar {
+    std::u32string text;
+    std::int64_t size = 0;
+    int weight = 0;
+    Rgb rgb;
+    std::string font;
+    bool tcy = false;       // (down) letters set across in one cell (縦中横)
+    bool sideways = false;  // (down) half-width letters laid on their side
+    BoxF box;
+};
+// A column (down, right to left) or a row (across, top to bottom) of the text, and its line: down, the column's
+// middle (`axis`, x) and the top of its first cell (`start`); across, its baseline (the tallest letter's, y) and its
+// left. `end`: down, the foot of its last cell; across, its right.
+struct SetRow {
+    std::vector<SetChar> chars;
+    double axis = 0.0;
+    double start = 0.0;
+    double end = 0.0;
+};
+// A line's lettering as set (its own pixels, before the letter effects): the text, its em, face and alignment (down:
+// top | center | bottom | justify; across: left | center | right | justify), the box the text is set in (`area`),
+// its rubies (each part as render::text::RubyDrawn has it), and what the lettering does to that picture afterwards:
+// `to_image` maps a set pixel to the lettering's picture (x' = a·x + c·y + e, y' = b·x + d·y + f: 長体・平体 scale_x,
+// the halo's room, the lean of skew_deg or italic). `italic`: the lean is style.italic's (a slanted face), not
+// skew_deg's. `halo`: the outline's width (px) and colour. `effects`: what has no such map — "gradient",
+// "picture_fill", "arc", "warp", "text_path" (letters on a path: nothing else is set) — and "emphasis" (傍点).
+struct SetLetters {
+    bool vertical = true;
+    std::int64_t em = 0;
+    Face face;
+    std::string align;
+    std::vector<SetRow> rows;
+    std::vector<RubyDrawn> rubies;
+    BoxF area;
+    Size size;
+    std::array<double, 6> to_image{1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+    bool italic = false;
+    std::optional<std::pair<std::int64_t, Rgb>> halo;
+    std::vector<std::string> effects;
+};
+// The lettering of a line as set, and its picture drawn with only `parts` (the letters where they are when everything
+// is drawn), its em and corner as text_layout's. A line on a path: only its `effects`.
+struct SetLayout {
+    SetLetters set;
+    Layout layout;
+};
+SetLayout set_layout(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path, const LetterParts& parts);
+// The face a line's letters are set in (its style's font; the effects face for "sfx"; else the book's font or the
+// default) and whether a font its style names was not found (and the default used instead).
+std::pair<Face, bool> line_face(const core::StoryLine& line, const std::optional<std::string>& font_path = std::nullopt);
+// Where paint_text puts the top left of a line's lettering on the page (px), for a lettering with this corner.
+Point lettering_at(const core::StoryLine& line, int dpi, double corner_x, double corner_y);
+
 // text_image(line, dpi, font_path): the lettering and its em.
 std::pair<Image, std::int64_t> text_image(const core::StoryLine& line, int dpi,
                                           const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {});
@@ -122,7 +192,7 @@ private:
 // the letters do not reach — known from the line's layout made before — is left without looking for the layout.
 void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_speaker,
                 const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {}, Point origin = {},
-                SpeakerFonts* speakers = nullptr);
+                SpeakerFonts* speakers = nullptr, const LetterParts* parts = nullptr);
 // path_text(image, line, dpi, font_path): 文字をパスに沿わせる — each letter stood on the path, turned with it.
 void path_text(Image& image, const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path = std::nullopt,
                std::stop_token stop = {}, Point origin = {});

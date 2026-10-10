@@ -584,6 +584,11 @@ File File::read(std::string data, const Limits& limits) {
                         rec.section = be32(body);
                     } else if (tag == "TySh") {
                         rec.kind = "text";
+                        rec.tysh_at = static_cast<std::uint64_t>(body.data() - d.data());  // (PSD-01: read when asked)
+                        rec.tysh_size = body.size();
+                    } else if (tag == "lfx2") {
+                        rec.lfx2_at = static_cast<std::uint64_t>(body.data() - d.data());
+                        rec.lfx2_size = body.size();
                     } else if (adjust_tag(tag)) {
                         rec.kind = "adjust";
                     }
@@ -708,6 +713,20 @@ File File::read(std::string data, const Limits& limits) {
         if (!pending.empty()) pending.back().push_back(f.layers_.size() - 1);
     }
     return f;
+}
+
+std::optional<TextLayer> File::text(const Layer& layer) const {
+    if (layer.folder || layer.record >= records_.size()) return std::nullopt;
+    const Record& rec = records_[layer.record];
+    if (rec.tysh_size == 0) return std::nullopt;
+    return read_tysh(std::string_view(data_).substr(static_cast<std::size_t>(rec.tysh_at), static_cast<std::size_t>(rec.tysh_size)));
+}
+
+std::optional<Stroke> File::stroke(const Layer& layer) const {
+    if (layer.folder || layer.record >= records_.size()) return std::nullopt;
+    const Record& rec = records_[layer.record];
+    if (rec.lfx2_size == 0) return std::nullopt;
+    return read_lfx2(std::string_view(data_).substr(static_cast<std::size_t>(rec.lfx2_at), static_cast<std::size_t>(rec.lfx2_size)));
 }
 
 std::string File::samples(const ChannelRef& channel) const {

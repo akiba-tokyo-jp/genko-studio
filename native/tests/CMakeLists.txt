@@ -72,6 +72,13 @@ genko_test(test_ruby SOURCES unit/test_ruby.cpp DEPS genko_test_support genko_fo
 genko_test(test_ruby_render SOURCES unit/test_ruby_render.cpp DEPS genko_test_support genko_formats genko_render_ops ZLIB::ZLIB
            LABELS unit TIMEOUT 900)
 set_tests_properties(test_ruby_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+# PSD-01 (AC-PSD's structure checks with this build's reader, ACCEPTANCE.md §6): the editable PSD — the text structures
+# written and read back, the PSD book (data/psd_text_book.json) as groups of balloon, text and ruby layers with their
+# text, runs, fonts, sizes, colours, spacing, alignment, transforms and strokes, the strict refusal and the lines drawn
+# as pictures when asked, the image way unchanged, `genko export --psd-text`, the support table in the docs.
+genko_test(test_psd_text SOURCES unit/test_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS unit TIMEOUT 900)
+set_tests_properties(test_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
@@ -157,6 +164,11 @@ genko_test(test_contract_book SOURCES contract/test_contract_book.cpp contract/o
 # pixels, the book read back), and hostile files refused without the memory Python would take.
 genko_test(test_contract_psd SOURCES contract/test_contract_psd.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# PSD-01 against psd-tools (ACCEPTANCE.md §6): the editable PSD book read by psd-tools (tools/migration/psd_text_check.py)
+# and by render::psd::File, the same layers, groups, texts, runs, fonts, transforms and strokes.
+genko_test(test_contract_psd_text SOURCES contract/test_contract_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 1800)
+set_tests_properties(test_contract_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).

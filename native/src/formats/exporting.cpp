@@ -12,6 +12,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "formats/export.hpp"
+#include "formats/psd_text.hpp"
 #include "render/not_yet_ported.hpp"
 
 namespace genko::formats {
@@ -119,7 +120,7 @@ const std::vector<Format>& formats() {
          "選ばなければ、黒い線は K 版だけ・総インキ量は 320% 以内にして変換する。",
          {"dpi", "area", "icc"}, false},
         {"layers", "レイヤーごとの PNG", "ページごとのフォルダーに、レイヤーを 1 枚ずつ透明な PNG で（下のレイヤーから番号順）。", {"dpi", "area"}, false},
-        {"psd", "PSD（レイヤー付き）", "ページごとの PSD。CLIP STUDIO PAINT・Photoshop で仕上げを続けるとき。", {"dpi"}, false},
+        {"psd", "PSD（レイヤー付き）", "ページごとの PSD。CLIP STUDIO PAINT・Photoshop で仕上げを続けるとき。", {"dpi", "psd_text"}, false},
         {"pack", "入稿セット", "TIFF・PNG・ページ一覧（CSV）・説明書きをまとめたフォルダ。", {"dpi"}, false},
         {"webtoon", "縦読み（Webtoon）", "全ページを縦につなげ、決まった高さで切った画像。網点にしない。", {"width", "max_height", "jpeg"}, true},
         {"sns", "SNS 用画像", "1 ページ 1 枚の JPEG。見開きも 1 枚にできる。網点にしない。", {"long_edge", "jpeg", "spreads"}, true},
@@ -238,7 +239,9 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
         return refused;
     }
     const std::int64_t dpi = o.dpi && *o.dpi != 0 ? *o.dpi : default_dpi(*episode, key);
+    if (key == "psd" && o.psd_text != "image" && o.psd_text != "editable") return refuse("PSD の文字の扱いが分かりません: " + o.psd_text);
     std::vector<std::filesystem::path> files;
+    std::optional<Json> psd_report;  // (PSD-01: what the editable PSD did)
     try {
         if (std::find(fmt->options.begin(), fmt->options.end(), "dpi") != fmt->options.end()) check_dpi(dpi);  // (before anything is made)
         if (key == "pdf" || key == "tiff" || key == "png" || key == "cmyk") {
@@ -247,6 +250,10 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
             files = export_layers(*episode, out, static_cast<int>(dpi), o.area);
         } else if (key == "kindle") {
             files = {export_kindle(*episode, detail::join(out, stem(*episode) + "_kindle.epub"), o.long_edge, std::nullopt, o.dots)};
+        } else if (key == "psd" && o.psd_text == "editable") {
+            PsdTextReport report;
+            files = export_psd_pages(*episode, out, dpi, PsdText{true, o.psd_rasterize}, &report);
+            psd_report = report.to_json();
         } else if (key == "psd") {
             files = export_psd_pages(*episode, out, dpi);
         } else if (key == "pack") {
@@ -260,6 +267,11 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
         } else {
             files = export_sns(*episode, out, o.long_edge, o.jpeg ? "jpeg" : "png", 92, o.spreads);
         }
+    } catch (const PsdTextRefused& e) {  // (PSD-01, strict: nothing written; the lines and what they use)
+        Json error = refuse(e.what());
+        error["code"] = e.code();
+        error["items"] = issues_json(e.issues());
+        return error;
     } catch (const render::NotYetPorted& e) {  // (what this build does not draw yet: nothing written)
         Json error = refuse(e.what());
         error["code"] = e.code();
@@ -274,7 +286,9 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
     }
     Json written = Json::array();
     for (const auto& f : files) written.push_back(core::path_to_utf8(f));
-    return Json{{"ok", true}, {"files", written}};
+    Json reply{{"ok", true}, {"files", written}};
+    if (psd_report) reply["psd_text"] = *psd_report;
+    return reply;
 }
 
 }  // namespace genko::formats

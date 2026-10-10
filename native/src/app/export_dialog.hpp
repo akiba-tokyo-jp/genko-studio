@@ -28,7 +28,10 @@ class QSpinBox;
 // the first page to be written shown small, cut as it will be. 書き出す runs 入稿前の点検 first (formats/checks: what
 // stops a print is asked about — write anyway, fix it, or stop), then formats::run, then says how many files it wrote
 // (with a button that opens the folder) or why it could not, in Japanese. "正式な書き出し" (official: the studio's
-// checked export) is refused by this build (formats::run says so).
+// checked export) is refused by this build (formats::run says so). A PSD's 文字 (PSD-01, C++ only): as pictures
+// (見た目優先で画像化, the default: Python's PSD) or kept as text layers (文字を編集可能なレイヤーとして保持), with what
+// the editable PSD cannot keep listed before anything is written — strict stops, the appearance way asks and draws
+// those lines as pictures — the fonts it names (never put in the file) and that a ruby does not follow its text.
 
 namespace genko::app {
 
@@ -80,6 +83,9 @@ public:
     QCheckBox* jpeg = nullptr;
     QCheckBox* spreads = nullptr;
     QCheckBox* official = nullptr;
+    QComboBox* psd_text = nullptr;         // (PSD-01) image | editable
+    QComboBox* psd_unsupported = nullptr;  // (editable) stop | rasterize
+    QLabel* psd_notes = nullptr;           // (editable) what it cannot keep, the fonts, the ruby
     QLineEdit* folder = nullptr;
     QDialogButtonBox* buttons = nullptr;
     std::map<std::string, QWidget*> rows;  // option key → its field (shown only for the formats that take it)
@@ -87,6 +93,11 @@ public:
 private:
     void format_changed();
     void show_preview();
+    // (PSD-01) the editable PSD's choices shown or hidden, and what it cannot keep on the pages chosen
+    void psd_changed();
+    // (PSD-01) before an editable PSD is written: strict stops on what it cannot keep (said), the appearance way asks
+    // first; false when nothing is to be written
+    bool psd_text_go(const std::vector<std::int64_t>& chosen);
     bool bitonal() const;
     // ask_preflight: "go" (write anyway), "fix" or "stop".
     QString ask_preflight(const std::vector<core::Json>& errors);

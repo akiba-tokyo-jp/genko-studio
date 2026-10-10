@@ -453,6 +453,91 @@ private slots:
         QCOMPARE(s.boxes.back(), QStringLiteral("2 個のファイルを書き出しました。\n%1").arg(part));
     }
 
+    // PSD-01 in 書き出し…: a PSD's 文字 — as pictures (the default, Python's PSD) or kept as text layers — what the
+    // editable PSD cannot keep listed before anything is written with what becomes of it, the fonts it names and that
+    // they are not put in the file, the ruby that does not follow its text in other apps; the strict way stops (said,
+    // nothing written), the appearance way asks first and draws those lines as pictures: the files `genko export
+    // --psd-text editable --rasterize-unsupported` writes.
+    void exportDialogPsdText() {
+        Studio s(gui_test::new_doc(2, "PSDの文字"));
+        QVERIFY(s.window->apply_ops(Json::parse(R"([
+            {"op": "add_line", "page": 1, "id": "ok", "text": "東京と東京", "x_mm": 140, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "ruby_spans": [{"start": 3, "end": 5, "ruby": "とうきょう"}]},
+            {"op": "add_line", "page": 2, "id": "grad", "text": "グラデ", "x_mm": 100, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "style": {"gradient": {"rgb_from": [0, 0, 0], "rgb_to": [200, 0, 0]}}}])")));
+        QVERIFY(s.saved());
+        const QString strict = s.tmp.path() + QStringLiteral("/psd-strict");
+        const QString app_out = s.tmp.path() + QStringLiteral("/psd-app");
+        bool seen = false;
+        s.on_export = [&](app::ExportDialog* d) {
+            seen = true;
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("pdf")));
+            QVERIFY(d->rows.at("psd_text")->isHidden());
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("psd")));
+            QVERIFY(!d->rows.at("psd_text")->isHidden());
+            QCOMPARE(d->psd_text->currentData().toString(), QStringLiteral("image"));
+            QCOMPARE(d->psd_text->itemText(0), QStringLiteral("見た目優先で画像化（従来どおり）"));
+            QCOMPARE(d->psd_text->itemText(1), QStringLiteral("文字を編集可能なレイヤーとして保持"));
+            QVERIFY(d->psd_unsupported->isHidden());
+            QVERIFY(d->psd_notes->isHidden());
+            QCOMPARE(d->options().psd_text, std::string("image"));
+            d->psd_text->setCurrentIndex(d->psd_text->findData(QStringLiteral("editable")));
+            QVERIFY(!d->psd_unsupported->isHidden());
+            QCOMPARE(d->psd_unsupported->currentData().toString(), QStringLiteral("stop"));
+            QVERIFY(!d->psd_notes->isHidden());
+            const QString notes = d->psd_notes->text();
+            QVERIFY2(notes.contains(QStringLiteral("2 ページ「グラデ」: グラデーションの文字塗り")), qPrintable(notes));
+            QVERIFY2(notes.contains(QStringLiteral("書き出しを止めます")), qPrintable(notes));
+            QVERIFY2(notes.contains(QStringLiteral("ZenKakuGothicNew-Bold")), qPrintable(notes));
+            QVERIFY2(notes.contains(QStringLiteral("埋め込みません")), qPrintable(notes));
+            QVERIFY2(notes.contains(QStringLiteral("ルビは自動では追従しません")), qPrintable(notes));
+            QCOMPARE(d->options().psd_text, std::string("editable"));
+            QVERIFY(!d->options().psd_rasterize);
+            // only the pages written: page 1 alone has nothing PSD text cannot keep
+            d->which->setCurrentIndex(3);
+            d->range->setText(QStringLiteral("1"));
+            emit d->range->editingFinished();
+            QVERIFY2(d->psd_notes->text().contains(QStringLiteral("表せない装飾のある台詞はありません")), qPrintable(d->psd_notes->text()));
+            d->which->setCurrentIndex(0);
+            QVERIFY(d->psd_notes->text().contains(QStringLiteral("グラデ")));
+            // strict: said before anything is written, nothing written
+            d->dpi->setValue(72);
+            d->folder->setText(strict);
+            d->run();
+            QVERIFY(d->result() != QDialog::Accepted);
+            QVERIFY(!QDir(strict).exists());
+            QVERIFY2(s.answers.asked.last().startsWith(QStringLiteral("Genko: PSD の文字に表せない装飾のある台詞が 1 つあるため")),
+                     qPrintable(s.answers.asked.last()));
+            QVERIFY(s.answers.asked.last().contains(QStringLiteral("2 ページ「グラデ」: グラデーションの文字塗り")));
+            // the appearance way: asked first (stopping writes nothing), then those lines drawn as pictures
+            d->psd_unsupported->setCurrentIndex(d->psd_unsupported->findData(QStringLiteral("rasterize")));
+            QVERIFY(d->options().psd_rasterize);
+            d->folder->setText(app_out);
+            s.clicks << QStringLiteral("やめる");
+            d->run();
+            QVERIFY2(s.boxes.last().contains(QStringLiteral("2 ページ「グラデ」")), qPrintable(s.boxes.last()));
+            QVERIFY(!QDir(app_out).exists());
+            s.clicks << QStringLiteral("画像にして書き出す") << QStringLiteral("閉じる");
+            d->run();
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+            QCOMPARE((*d->reply)["psd_text"]["rasterized"][0]["line"], Json("grad"));
+            QVERIFY2(s.boxes.last().contains(QStringLiteral("画像にした台詞: 1")), qPrintable(s.boxes.last()));
+            QVERIFY(s.boxes.last().contains(QStringLiteral("ルビは自動では追従しません")));
+        };
+        s.act("act_export")->trigger();
+        QVERIFY(seen);
+        QProcess cli;
+        const QString cli_out = s.tmp.path() + QStringLiteral("/psd-cli");
+        cli.start(QStringLiteral(GENKO_CLI), {QStringLiteral("export"), gui_test::qpath(s.path), cli_out, QStringLiteral("--format"), QStringLiteral("psd"),
+                                             QStringLiteral("--dpi"), QStringLiteral("72"), QStringLiteral("--psd-text"), QStringLiteral("editable"),
+                                             QStringLiteral("--rasterize-unsupported")});
+        QVERIFY(cli.waitForFinished(300000));
+        QVERIFY2(cli.exitCode() == 0, cli.readAllStandardError().constData());
+        QVERIFY(!test::exports::tree(app_out).empty());
+        const QString difference = test::exports::tree_difference(app_out, cli_out);
+        QVERIFY2(difference.isEmpty(), qPrintable(difference));
+    }
+
     // The check before writing (書き出す runs 入稿前の点検 first): what stops a print, on the pages written, asked about —
     // stop (nothing written), fix it (the dialog closes, 点検 opens with the problem), or write anyway; the official
     // export refused in Japanese.

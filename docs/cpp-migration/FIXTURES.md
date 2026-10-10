@@ -43,6 +43,24 @@ B4・600dpi・8 ページ。各ページ 20 レイヤー:
 - 4 ページの本は試験の中で op から作る（`native/tests/unit/test_ruby_render.cpp` の `f4Book`: 作って保存し、読み直して同じ台詞・ルビ（ルビごとの組み方を含む。1 行に組み方の違うルビを並べる台詞がある）であることを確かめ、PNG・PDF・CMYK に書き出す）。生成物の固定ファイルは置かない（op と書体が決まれば同じ本になる）。
 - `ruby_cases.json` は `tools/migration/make_ruby_cases.py` で書き、その sha256 を `native/tests/data/MANIFEST.json` に置く（試験が照合する）。各ケースは本文・最初のルビ（`ruby_spans` か Python の `ruby_runs`）・編集（`edit_line` か `replace_text`）と、期待する本文・`ruby_spans`・`ruby_runs`・点検のルビの警告・op の報告。範囲は Unicode 17.0（Qt 6.11.2）の書記素。同じ語の繰返し、結合文字、絵文字の並び（ZWJ・国旗）、異体字セレクタ（IVS・SVS）、全文置換、Python の `ruby_runs` の変換、はみ出し・重なり・代わりの書体、ルビごとの組み方（`font`・`scale`・`align`・`gap_mm`・`tracking`）が移動・要確認・全文置換・`ruby_runs` の受け取り・IME の確定でルビと一緒に動くこと、親文字全体の全文置換（置換文字列と共通の字がある、複数の一致で覆う、親文字を 1 度・2 度含む語への置換。Python 版の台詞は参照の Python の `replace_text` と同じ結果）、1 字の親文字に付く結合文字・IVS・ZWJ、最適な対応の一部が親文字を崩す編集、写しの `ruby_runs` の送り返し、IME の確定と記法の編集（`"gui"`、`test_gui_ruby` が入力メソッドのイベントと Delete キーで打つ。記法ごとルビを消す、Python 版の台詞で読みを同じ語の 2 つ目へ付け替える）を含む。`"undo": true` のケースは、本を保存し、編集を次の版として保存して `genko undo` と同じ取り消し（`storage::restore`）をし、台詞が元どおり（組み方も）か確かめる。長い本文（共通の先頭・末尾での判断。両端に 1 つずつの編集、同じ語の繰り返し）と、壊れた `ruby_spans` の読み方は `test_ruby` の中で作る。
 
+- PSD-01（編集可能な PSD）の本は `native/tests/data/psd_text_book.json`（`genko new --pages 4` の A4 の本に当てる op の並び。sha256 は `MANIFEST.json`）。F4 の種類の台詞を 4 ページに置く: 縦書き・横書き、「東京と東京」の両方の語にルビ、文節の改行・禁則、縦中横（「AI」「12」）、部分書式（大きさ・太字・色）、Python 版の `ruby_runs` の台詞、異体字セレクタ、ルビの書体・先頭/末尾・距離・字間・大きさ、列をまたぐルビ、効果文字（単色の塗りと縁取り）、回転・長体・傾け・斜体、右・左・中央・上・下・均等揃え、各種フキダシ、ノンブル、下描き・非出力層。`test_psd_text`（自前の読込）と `test_contract_psd_text`（psd-tools、`tools/migration/psd_text_check.py`）がこれを編集可能な PSD に書いて構造を検査する。
+- **Krita での読込（ACCEPTANCE.md §6 の代替検査。M4 出口で 1 回、開発機には Krita を入れない）**: 同じ本を CLI で作って書き出し、Krita のコマンドで開いて PNG にする。
+
+  ```bash
+  G=build/linux-release/src/api/genko            # 試す genko（配布物ならその genko）
+  OUT=$(mktemp -d)
+  $G new "$OUT/psd-text.genko" --title PSD文字 --pages 4 --plain
+  $G apply "$OUT/psd-text.genko" native/tests/data/psd_text_book.json
+  $G export "$OUT/psd-text.genko" "$OUT/psd" --format psd --dpi 150 --psd-text editable --json   # 4 ファイル、text_layers 19・ruby_layers 13
+  $G export "$OUT/psd-text.genko" "$OUT/png" --format png --dpi 150 --area paper --color rgb        # 見比べる絵
+  for f in "$OUT"/psd/*.psd; do
+    QT_QPA_PLATFORM=offscreen krita --export --export-filename "${f%.psd}.krita.png" "$f" || echo "NG: $f"
+  done
+  ls -l "$OUT"/psd/*.krita.png
+  ```
+
+  合格: 4 つの `.krita.png` ができ（Krita が読めない PSD では書き出しが失敗する）、どれも 1240 × 1754 px で、`$OUT/png` の同じページと見た目が同じ（文字・ルビ・フキダシ・ノンブルがそろい、効果文字の縁取りがある）。続けて 1 ページを Krita の画面で開き、レイヤーに「台詞 …」のグループと、その中の「フキダシ」「本文 #<台詞の ID>」「ルビ「…」 #<台詞の ID>-r<番号>」があること、効果文字（3 ページの「ドーン」「ゴゴゴ」）にレイヤースタイルの境界線があることを確かめる。リリース版の Krita（5.2 系）は PSD の文字レイヤーを画素のレイヤーとして読む（Krita の PSD 文字の読込は未統合の MR !1954）ので、Krita で文字として直せることは求めない。結果（Krita の版、日付、気づいたこと）は検証記録に残す。
+
 ## F5 保存異常（M1）
 
 v1/v2/v3/v4 のコピー、欠けた素材、ハッシュ不一致、未知キー、途中で切れた journal 行、無効なパス、書込み不能のフォルダー、擬似 ENOSPC（故障注入）、別プロセスの排他。実ディスクは満杯にしない。故障注入は `storage` の書込み関数を差し替える試験用の口（`GENKO_FAULT` 環境変数、Release 配布物では無効）で行う。

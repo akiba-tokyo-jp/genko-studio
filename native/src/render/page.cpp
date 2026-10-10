@@ -1169,7 +1169,8 @@ std::string first_chars(const std::string& text, std::size_t count) {
 
 }  // namespace
 
-void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each) {
+void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
+                 const std::function<void(const core::StoryLine&)>* line_layers) {
     Ctx ctx;
     ctx.page = &page;
     ctx.episode = &episode;
@@ -1282,6 +1283,10 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
     for (const core::StoryLine* line : episode.story_for_page(page.index)) {
         if (!placed_line(*line)) continue;
         check_cancel(ctx);
+        if (line_layers != nullptr && *line_layers) {  // (PSD-01: the editable PSD makes the line's layers)
+            (*line_layers)(*line);
+            continue;
+        }
         Image balloon = blank();
         text::draw_lines(text::whole_page(balloon), {line}, dpi, font_path, false, nullptr, ctx.stop, nullptr);
         std::string words = line->text;

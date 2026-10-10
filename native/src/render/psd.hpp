@@ -8,6 +8,7 @@
 
 #include "core/error.hpp"
 #include "render/image.hpp"
+#include "render/psd_text.hpp"
 
 // Photoshop files read as layers (Python's genko/psd.py: read_psd and its helpers), for import_psd. (ARCHITECTURE.md §1
 // puts PSD/PSB reading in formats/; it sits in render next to the ABR reader, as import_psd, an op of render's, reads with
@@ -91,6 +92,11 @@ public:
     std::optional<Image> mask(const Layer& layer) const;
     // The merged picture (PSDFile.merged: RGBA), nothing where read_psd has none.
     std::optional<Image> merged() const;
+    // PSD-01 (not psd.py's: the structure checks of the editable PSD): a layer's text, read from its TySh block
+    // (render/psd_text.hpp), and the stroke of its layer effects (its lfx2 block); nothing for a layer without one.
+    // core::Error("format") for a block that cannot be read.
+    std::optional<TextLayer> text(const Layer& layer) const;
+    std::optional<Stroke> stroke(const Layer& layer) const;
 
     struct ChannelRef {
         int id = 0;
@@ -114,6 +120,9 @@ public:
         std::int64_t mask_left = 0, mask_top = 0, mask_right = 0, mask_bottom = 0;
         int mask_default = 0;
         bool mask_disabled = false;
+        // (PSD-01) where its TySh and lfx2 blocks' payloads are in the file (size 0: none)
+        std::uint64_t tysh_at = 0, tysh_size = 0;
+        std::uint64_t lfx2_at = 0, lfx2_size = 0;
         const ChannelRef* channel(int id) const;
     };
 

@@ -1,6 +1,7 @@
 // PSD export (Python's genko/psd.py, its writer): one file a page with real layers (render::page_layers), each stored
 // cut to what it holds and PackBits-compressed, the printed page as the merged picture. Layer names in Unicode (the
-// luni block) with an ASCII one beside it.
+// luni block) with an ASCII one beside it. The editable PSD (PSD-01, not Python's; formats/psd_text.hpp) writes each
+// placed line as a group of its balloon, its text and its rubies, the text as Photoshop text layers.
 
 #include <algorithm>
 #include <map>
@@ -8,9 +9,16 @@
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
+#include "core/pyops.hpp"
+#include "core/ruby.hpp"
 #include "formats/export.hpp"
 #include "formats/output.hpp"
+#include "formats/psd_text_detail.hpp"
 #include "render/page.hpp"
+#include "render/psd_text.hpp"
+#include "render/text/balloons.hpp"
+#include "render/text/fonts.hpp"
+#include "render/text/lettering.hpp"
 
 namespace genko::formats {
 
@@ -158,45 +166,23 @@ public:
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
         const std::optional<render::Box> found = rgba.getbbox();
         const render::Box box = found ? *found : render::Box{0, 0, 1, 1};  // (an empty layer kept as 1 pixel)
-        const Image crop = rgba.crop(box);
-        const std::vector<Image> bands = crop.split();
-        put_i32(records_, box.y0);
-        put_i32(records_, box.x0);
-        put_i32(records_, box.y1);
-        put_i32(records_, box.x1);
-        std::vector<std::pair<int, std::string>> channels{{-1, rle(bands[3])}, {0, rle(bands[0])}, {1, rle(bands[1])}, {2, rle(bands[2])}};
-        std::string mask_data;
-        if (layer.mask) {  // (an L picture over the whole canvas: white shows)
-            channels.emplace_back(-2, rle(layer.mask->convert("L").resize(size_)));
-            put_u32(mask_data, 20);
-            put_i32(mask_data, 0);
-            put_i32(mask_data, 0);
-            put_i32(mask_data, size_.height);
-            put_i32(mask_data, size_.width);
-            mask_data += std::string("\xff\x00\x00\x00", 4);
-        } else {
-            put_u32(mask_data, 0);
-        }
-        put_u16(records_, static_cast<std::uint32_t>(channels.size()));
-        for (const auto& [id, packed] : channels) {
-            put_u16(records_, static_cast<std::uint32_t>(static_cast<std::int16_t>(id)) & 0xffff);
-            put_u32(records_, u32_of(packed.size()));
-        }
         const double opacity_given = layer.settings ? layer.opacity : 1.0;
-        const auto opacity = static_cast<unsigned>(std::clamp<std::int64_t>(core::py_round_int(255 * opacity_given), 0, 255));
-        records_ += "8BIM" + blend_key(layer.settings ? layer.blend : std::string("normal"));
-        put_u8(records_, opacity);
-        put_u8(records_, layer.settings && layer.clip ? 1 : 0);
-        put_u8(records_, 0);  // (flags: visible)
-        put_u8(records_, 0);
-        std::string extra = mask_data;
-        put_u32(extra, 0);
-        extra += pascal(layer.name) + unicode_name(layer.name);
-        put_u32(records_, u32_of(extra.size()));
-        records_ += extra;
-        for (const auto& [id, packed] : channels) data_ += packed;
-        ++count_;
+        write(layer.name, rgba.crop(box), box, opacity_given, blend_key(layer.settings ? layer.blend : std::string("normal")),
+              layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr, {});
     }
+
+    // (PSD-01) a layer of a picture that is a part of the page (its top left at `origin`), cut to what it holds, with
+    // more tagged blocks after its name (a text layer's TySh, its effects' lfx2)
+    void add_part(const std::string& name, const Image& part, render::Point origin, const std::string& blocks) {
+        const Image rgba = part.mode() == "RGBA" ? part : part.convert("RGBA");
+        const std::optional<render::Box> found = rgba.getbbox();
+        const render::Box local = found ? *found : render::Box{0, 0, 1, 1};
+        const render::Box box{local.x0 + origin.x, local.y0 + origin.y, local.x1 + origin.x, local.y1 + origin.y};
+        write(name, rgba.crop(local), box, 1.0, "norm", false, nullptr, blocks);
+    }
+    // (PSD-01) a group: its end (below its layers) and the group itself (above them), as Photoshop writes them
+    void group_end() { section("</Layer group>", 3, "norm"); }
+    void group(const std::string& name) { section(name, 1, "pass"); }
 
     std::string finish() {
         std::string info;
@@ -214,10 +200,391 @@ public:
     }
 
 private:
+    void write(const std::string& name, const Image& crop, const render::Box& box, double opacity_given, const std::string& blend, bool clip,
+               const Image* mask, const std::string& blocks) {
+        const std::vector<Image> bands = crop.split();
+        put_i32(records_, box.y0);
+        put_i32(records_, box.x0);
+        put_i32(records_, box.y1);
+        put_i32(records_, box.x1);
+        std::vector<std::pair<int, std::string>> channels{{-1, rle(bands[3])}, {0, rle(bands[0])}, {1, rle(bands[1])}, {2, rle(bands[2])}};
+        std::string mask_data;
+        if (mask != nullptr) {  // (an L picture over the whole canvas: white shows)
+            channels.emplace_back(-2, rle(mask->convert("L").resize(size_)));
+            put_u32(mask_data, 20);
+            put_i32(mask_data, 0);
+            put_i32(mask_data, 0);
+            put_i32(mask_data, size_.height);
+            put_i32(mask_data, size_.width);
+            mask_data += std::string("\xff\x00\x00\x00", 4);
+        } else {
+            put_u32(mask_data, 0);
+        }
+        put_u16(records_, static_cast<std::uint32_t>(channels.size()));
+        for (const auto& [id, packed] : channels) {
+            put_u16(records_, static_cast<std::uint32_t>(static_cast<std::int16_t>(id)) & 0xffff);
+            put_u32(records_, u32_of(packed.size()));
+        }
+        const auto opacity = static_cast<unsigned>(std::clamp<std::int64_t>(core::py_round_int(255 * opacity_given), 0, 255));
+        records_ += "8BIM" + blend;
+        put_u8(records_, opacity);
+        put_u8(records_, clip ? 1 : 0);
+        put_u8(records_, 0);  // (flags: visible)
+        put_u8(records_, 0);
+        std::string extra = mask_data;
+        put_u32(extra, 0);
+        extra += pascal(name) + unicode_name(name) + blocks;
+        put_u32(records_, u32_of(extra.size()));
+        records_ += extra;
+        for (const auto& [id, packed] : channels) data_ += packed;
+        ++count_;
+    }
+
+    // A group's record: no pixels (four channels of nothing), its section divider (lsct): 1 an open group (with its
+    // blend, pass through), 3 the end of one.
+    void section(const std::string& name, std::uint32_t type, std::string_view blend) {
+        for (int i = 0; i < 4; ++i) put_i32(records_, 0);
+        put_u16(records_, 4);
+        for (const int id : {-1, 0, 1, 2}) {
+            put_u16(records_, static_cast<std::uint32_t>(static_cast<std::int16_t>(id)) & 0xffff);
+            put_u32(records_, 2);
+        }
+        records_ += "8BIM";
+        records_ += blend;
+        put_u8(records_, 255);
+        put_u8(records_, 0);
+        put_u8(records_, 0x18);  // (flags: visible; Photoshop's bits 3 and 4 — its pixels do not show)
+        put_u8(records_, 0);
+        std::string extra;
+        put_u32(extra, 0);
+        put_u32(extra, 0);
+        extra += pascal(name) + unicode_name(name);
+        std::string divider;
+        put_u32(divider, type);
+        if (type != 3) {
+            divider += "8BIM";
+            divider += blend;
+        }
+        extra += "8BIMlsct";
+        put_u32(extra, static_cast<std::uint32_t>(divider.size()));
+        extra += divider;
+        put_u32(records_, u32_of(extra.size()));
+        records_ += extra;
+        for (int i = 0; i < 4; ++i) put_u16(data_, 0);  // (each channel raw, with nothing)
+        ++count_;
+    }
+
     render::Size size_;
     std::string records_;
     std::string data_;
     int count_ = 0;
+};
+
+// A tagged block of a layer record: its key, its length and its payload, padded to 4 bytes.
+std::string tagged(std::string_view key, std::string payload) {
+    payload.append((4 - payload.size() % 4) % 4, '\0');
+    std::string out = "8BIM";
+    out += key;
+    put_u32(out, u32_of(payload.size()));
+    return out + payload;
+}
+
+// PSD-01: each placed line of a page as layers of its own (formats/psd_text.hpp): a group with its balloon, its text as
+// a text layer and each ruby as one — or, a line using what PSD text cannot keep (the export goes on only when asked to
+// draw those as pictures), the layer the image way gives it.
+class EditableLines {
+public:
+    EditableLines(Records& records, const core::Document& episode, int dpi, render::Size size, std::int64_t page, PsdTextReport& report)
+        : records_(records), dpi_(dpi), size_(size), page_(page), report_(report), font_path_(episode.font_path) {}
+
+    void add(const core::StoryLine& line) {
+        const std::string words = detail::words_of(line.text, 24);
+        std::vector<std::string> features = detail::line_features(line);
+        if (!features.empty()) {  // (asked to: as the image way draws it)
+            Image whole = blank();
+            render::text::draw_lines(render::text::whole_page(whole), {&line}, dpi_, font_path_, false, nullptr, {}, nullptr);
+            render::PageLayer layer;
+            layer.name = "台詞 " + words;
+            layer.image = std::move(whole);
+            records_.add(std::move(layer));
+            report_.rasterized.push_back(PsdTextIssue{page_, line.id, words, std::move(features)});
+            return;
+        }
+        detail::font_warnings(line, page_, font_path_, fonts_, nullptr, report_.warnings);
+        // (a line of Python's holds its rubies by place where the explicit rule finds them, as ruby_places tells them
+        // apart: its text and pixels drawn so)
+        core::StoryLine twin = line;
+        if (!twin.ruby_spans) {
+            std::vector<core::RubySpan> spans = core::ruby::from_runs(line.text, line.ruby_runs, false);
+            if (!spans.empty()) twin.ruby_spans = std::move(spans);
+        }
+        struct Made {
+            std::string name;
+            Image picture;
+            render::Point origin;
+            std::string blocks;
+        };
+        std::vector<Made> made;
+        Image balloon = drawn(twin, render::text::LetterParts{true, false, false, true});
+        if (const auto box = balloon.getbbox()) made.push_back(Made{"フキダシ", balloon.crop(*box), {box->x0, box->y0}, {}});
+        balloon = Image();
+        const render::text::EditableLine editable = render::text::editable_line(twin, dpi_, font_path_);
+        const render::text::SetLetters& set = editable.lettering->set;
+        const std::array<double, 6> m = editable.to_page;
+        std::string effects;
+        if (set.halo) {
+            const render::text::Rgb& rgb = set.halo->second;
+            effects = tagged("lfx2", render::psd::lfx2(render::psd::Stroke{static_cast<double>(set.halo->first),
+                                                                            {colour(rgb, 0), colour(rgb, 1), colour(rgb, 2)}, "outside", 100.0, true}));
+        }
+        const render::psd::TextLayer body = body_text(line, set, m);
+        if (!body.text.empty()) {
+            Image letters = drawn(twin, render::text::LetterParts{false, true, false, false});
+            const auto box = letters.getbbox();
+            made.push_back(Made{"本文 #" + line.id, box ? letters.crop(*box) : letters.crop(render::Box{0, 0, 1, 1}),
+                                box ? render::Point{box->x0, box->y0} : render::Point{0, 0}, tagged("TySh", render::psd::tysh(body)) + effects});
+            ++report_.text_layers;
+        }
+        if (!set.rubies.empty()) {
+            Image rubies = drawn(twin, render::text::LetterParts{false, false, true, false});
+            for (std::size_t k = 0; k < set.rubies.size(); ++k) {
+                const render::text::RubyDrawn& place = set.rubies[k];
+                std::size_t parts = 0, nth = 0;
+                for (std::size_t j = 0; j < set.rubies.size(); ++j) {
+                    if (set.rubies[j].span != place.span) continue;
+                    ++parts;
+                    if (j <= k) nth = parts;
+                }
+                const std::string name = "ルビ「" + render::text::utf8(place.reading) + "」 #" + line.id + "-r" + std::to_string(place.span) +
+                                         (parts > 1 ? "." + std::to_string(nth) : std::string());
+                // its pixels: the reading's box on the page (and a little round it), taken from the rubies' picture
+                const render::Box box = on_page(m, place.ruby, 3);
+                Image piece = rubies.crop(box);
+                rubies.paste(Image::create("RGBA", piece.size(), render::Ink{0, 0, 0, 0}), render::Point{box.x0, box.y0});
+                made.push_back(Made{name, std::move(piece), {box.x0, box.y0}, tagged("TySh", render::psd::tysh(ruby_text(set, place, m))) + effects});
+                ++report_.ruby_layers;
+            }
+        }
+        if (made.empty()) return;
+        records_.group_end();
+        for (const Made& layer : made) records_.add_part(layer.name, layer.picture, layer.origin, layer.blocks);
+        records_.group("台詞 " + words);
+    }
+
+private:
+    Image blank() const { return Image::create("RGBA", size_, render::Ink{0, 0, 0, 0}); }
+
+    Image drawn(const core::StoryLine& line, const render::text::LetterParts& parts) const {
+        Image out = blank();
+        render::text::draw_lines(render::text::whole_page(out), {&line}, dpi_, font_path_, false, nullptr, {}, nullptr, &parts);
+        return out;
+    }
+
+    static int colour(const render::text::Rgb& rgb, std::size_t i) {
+        return i < rgb.size() ? static_cast<int>(std::clamp<std::int64_t>(rgb[i], 0, 255)) : 0;
+    }
+
+    // The box a set box (the lettering's own pixels) covers on the page through `m`, `margin` pixels round it, within
+    // the page.
+    render::Box on_page(const std::array<double, 6>& m, const render::BoxF& b, int margin) const {
+        double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        bool first = true;
+        for (const auto& [x, y] : {std::pair{b.x0, b.y0}, std::pair{b.x1, b.y0}, std::pair{b.x0, b.y1}, std::pair{b.x1, b.y1}}) {
+            const double px = m[0] * x + m[2] * y + m[4];
+            const double py = m[1] * x + m[3] * y + m[5];
+            x0 = first ? px : std::min(x0, px);
+            y0 = first ? py : std::min(y0, py);
+            x1 = first ? px : std::max(x1, px);
+            y1 = first ? py : std::max(y1, py);
+            first = false;
+        }
+        const auto clampx = [&](double v) { return static_cast<int>(std::clamp<double>(v, 0, size_.width)); };
+        const auto clampy = [&](double v) { return static_cast<int>(std::clamp<double>(v, 0, size_.height)); };
+        return render::Box{clampx(std::floor(x0) - margin), clampy(std::floor(y0) - margin), clampx(std::ceil(x1) + margin),
+                           clampy(std::ceil(y1) + margin)};
+    }
+
+    // The layer's transform: the set letters' map to the page from the text's anchor (a set point) — without the lean
+    // of style.italic, which the runs carry as a slanted face (FauxItalic) instead.
+    static std::array<double, 6> transform(const render::text::SetLetters& set, const std::array<double, 6>& m, double ax, double ay) {
+        std::array<double, 6> t{m[0], m[1], m[2], m[3], m[0] * ax + m[2] * ay + m[4], m[1] * ax + m[3] * ay + m[5]};
+        if (set.italic) {
+            const double k = core::py_tan(12.0 * (core::kPi / 180.0));
+            const double f = set.to_image[0] != 0.0 ? set.to_image[0] : 1.0;
+            if (set.vertical) {
+                t[0] = m[0] + m[2] * k * f;
+                t[1] = m[1] + m[3] * k * f;
+            } else {
+                t[2] = m[2] + m[0] * k / f;
+                t[3] = m[3] + m[1] * k / f;
+            }
+        }
+        return t;
+    }
+
+    std::string font_name(const std::string& path) {
+        std::string name = detail::font_name(fonts_, path);
+        if (std::find(report_.fonts.begin(), report_.fonts.end(), name) == report_.fonts.end()) report_.fonts.push_back(name);
+        return name;
+    }
+
+    // The runs of characters in one style, from each character's.
+    static void runs_of(const std::vector<render::psd::TextStyle>& styles, render::psd::TextLayer& layer) {
+        for (const render::psd::TextStyle& style : styles) {
+            if (!layer.runs.empty() && layer.runs.back().style == style) {
+                ++layer.runs.back().length;
+            } else {
+                layer.runs.push_back(render::psd::StyleRun{1, style});
+            }
+        }
+    }
+
+    render::psd::TextLayer body_text(const core::StoryLine& line, const render::text::SetLetters& set, const std::array<double, 6>& m) {
+        render::psd::TextLayer out;
+        out.vertical = set.vertical;
+        const core::Json st = render::text::style_of(line);
+        const auto number = [&](const char* key, double fallback) {
+            const auto it = st.find(key);
+            return it != st.end() && core::py_truthy(*it) ? core::to_float(*it) : fallback;
+        };
+        const auto em = static_cast<double>(set.em);
+        // the space after each character (px): down, Python's whole pixels and never less than nothing
+        const double tracking = number("tracking", 0.0);
+        const double gap = set.vertical ? static_cast<double>(std::max<std::int64_t>(0, core::py_round_int(em * tracking))) : em * tracking;
+        const bool upright_latin = set.vertical && st.contains("latin") && st["latin"] == core::Json("upright");
+        const auto& rows = set.rows;
+        // the distance of each row (column) from the one before: baselines down the page, columns' middles to the left
+        const auto pitch = [&](std::size_t r) {
+            if (rows.size() < 2) {
+                return set.vertical ? em * (1.0 + number("leading", 0.4)) : em * (1.15 + number("leading", 0.4));
+            }
+            const std::size_t a = r == 0 ? 0 : r - 1;
+            const std::size_t b = r == 0 ? 1 : r;
+            return set.vertical ? rows[a].axis - rows[b].axis : rows[b].axis - rows[a].axis;
+        };
+        std::vector<render::psd::TextStyle> styles;
+        render::psd::TextStyle last;
+        bool have_last = false;
+        for (std::size_t r = 0; r < rows.size(); ++r) {
+            const double leading = pitch(r);
+            std::size_t start = out.text.size();
+            for (const render::text::SetChar& ch : rows[r].chars) {
+                render::psd::TextStyle style;
+                style.font = font_name(ch.font);
+                style.size = static_cast<double>(ch.size);
+                style.faux_bold = ch.weight > 0;
+                style.faux_italic = set.italic;
+                style.fill = {colour(ch.rgb, 0), colour(ch.rgb, 1), colour(ch.rgb, 2)};
+                style.tracking = ch.size > 0 ? gap / static_cast<double>(ch.size) * 1000.0 : 0.0;
+                style.leading = leading;
+                style.baseline_direction = !set.vertical ? 2 : ch.tcy ? 3 : upright_latin && !ch.sideways && ch.text.size() == 1 && ch.text[0] < 0x2e80 ? 1 : 2;
+                style.run_alignment = 2;
+                const std::u16string text = render::psd::utf16(render::text::utf8(ch.text));
+                out.text += text;
+                styles.insert(styles.end(), text.size(), style);
+                last = style;
+                have_last = true;
+            }
+            if (!have_last) {  // (an empty first row: the line's own size and face)
+                last.font = font_name(set.face.other);
+                last.size = em;
+                last.faux_italic = set.italic;
+            }
+            last.leading = leading;
+            // its paragraph: its characters and the line break after (the text engine's own at the end)
+            out.paragraphs.push_back(render::psd::ParagraphRun{out.text.size() - start + 1, 0});
+            if (r + 1 < rows.size()) out.text.push_back(u'\r');
+            styles.push_back(last);
+        }
+        if (out.text.empty()) return out;
+        runs_of(styles, out);
+        // the anchor, where the text is set from (point text), or the box it fills (justified: area text)
+        const std::string& align = set.align;
+        int justification = 0;
+        double ax = 0.0, ay = 0.0;
+        const render::BoxF& area = set.area;
+        if (align == "justify") {
+            justification = set.vertical ? 6 : 3;
+            ax = area.x0;
+            ay = area.y0;
+            out.box = std::array<double, 4>{0.0, 0.0, area.x1 - area.x0, area.y1 - area.y0};
+        } else if (set.vertical) {
+            justification = align == "center" ? 2 : align == "bottom" ? 1 : 0;
+            ax = rows.front().axis;
+            ay = justification == 2 ? (area.y0 + area.y1) / 2 : justification == 1 ? area.y1 : area.y0;
+        } else {
+            justification = align == "center" ? 2 : align == "right" ? 1 : 0;
+            ay = rows.front().axis;
+            const render::text::SetRow* first = &rows.front();
+            for (const auto& row : rows) {
+                if (!row.chars.empty()) {
+                    first = &row;
+                    break;
+                }
+            }
+            if (justification == 0) {
+                ax = first->start;
+                for (const auto& row : rows) {
+                    if (!row.chars.empty()) ax = std::min(ax, row.start);
+                }
+            } else if (justification == 1) {
+                ax = first->end;
+                for (const auto& row : rows) {
+                    if (!row.chars.empty()) ax = std::max(ax, row.end);
+                }
+            } else {
+                ax = (first->start + first->end) / 2;
+            }
+        }
+        for (render::psd::ParagraphRun& p : out.paragraphs) p.justification = justification;
+        out.bounds = {area.x0 - ax, area.y0 - ay, area.x1 - ax, area.y1 - ay};
+        out.transform = transform(set, m, ax, ay);
+        return out;
+    }
+
+    render::psd::TextLayer ruby_text(const render::text::SetLetters& set, const render::text::RubyDrawn& place, const std::array<double, 6>& m) {
+        render::psd::TextLayer out;
+        out.vertical = place.vertical;
+        std::vector<render::psd::TextStyle> styles;
+        const std::vector<std::size_t> letters = core::ruby::bounds(place.reading);  // (its graphemes, as the letters set)
+        for (std::size_t i = 0; i + 1 < letters.size(); ++i) {
+            render::psd::TextStyle style;
+            style.font = font_name(i < place.fonts.size() ? place.fonts[i] : place.face.other);
+            style.size = static_cast<double>(place.size);
+            style.faux_italic = set.italic;
+            style.fill = {colour(place.fill, 0), colour(place.fill, 1), colour(place.fill, 2)};
+            style.tracking = place.size > 0 ? place.spacing / static_cast<double>(place.size) * 1000.0 : 0.0;
+            style.leading = static_cast<double>(place.size);
+            const std::u16string text = render::psd::utf16(render::text::utf8(place.reading.substr(letters[i], letters[i + 1] - letters[i])));
+            out.text += text;
+            styles.insert(styles.end(), text.size(), style);
+        }
+        if (styles.empty()) return out;
+        styles.push_back(styles.back());
+        runs_of(styles, out);
+        out.paragraphs.push_back(render::psd::ParagraphRun{out.text.size() + 1, 0});
+        // set from its first letter: down, the middle of its em square's top; across, where the font draws it from (its
+        // baseline)
+        const render::PointD first = place.letters.empty() ? render::PointD{place.ruby.x0, place.ruby.y0} : place.letters.front();
+        double ax = first.x, ay = first.y;
+        if (place.vertical) {
+            ax += static_cast<double>(place.size) / 2;
+        } else {
+            const std::u32string one = place.reading.substr(0, letters.size() > 1 ? letters[1] : place.reading.size());
+            ay += fonts_.font(place.face, place.size, one).getmetrics().first;
+        }
+        out.bounds = {place.ruby.x0 - ax, place.ruby.y0 - ay, place.ruby.x1 - ax, place.ruby.y1 - ay};
+        out.transform = transform(set, m, ax, ay);
+        return out;
+    }
+
+    Records& records_;
+    int dpi_;
+    render::Size size_;
+    std::int64_t page_;
+    PsdTextReport& report_;
+    std::optional<std::string> font_path_;
+    render::text::Fonts fonts_;
 };
 
 // psd._resources: ResolutionInfo (1005), the resolution in pixels per inch as 16.16 fixed point.
@@ -241,7 +608,7 @@ std::string resources(std::int64_t dpi) {
 
 // The page's PSD (export_page_psd), put into `output` at `dest`.
 void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest,
-                  std::optional<std::int64_t> dpi_given) {
+                  std::optional<std::int64_t> dpi_given, const PsdText& text = {}, PsdTextReport* report = nullptr) {
     const std::int64_t dpi = dpi_given && *dpi_given != 0 ? *dpi_given : episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600;
     check_dpi(dpi);
     render::RenderOptions options;
@@ -249,7 +616,15 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
     const Image merged = render::render_page(page, static_cast<int>(dpi), options, &episode).image;
     const Image rgb = merged.mode() == "RGB" ? merged : merged.convert("RGB");
     Records records(rgb.size());
-    render::page_layers(page, episode, static_cast<int>(dpi), [&](render::PageLayer&& layer) { records.add(std::move(layer)); });
+    const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
+    if (text.editable) {  // (PSD-01: each placed line's layers made here)
+        PsdTextReport own;
+        EditableLines lines(records, episode, static_cast<int>(dpi), rgb.size(), core::py_int(page.index.json()), report != nullptr ? *report : own);
+        const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers);
+    } else {
+        render::page_layers(page, episode, static_cast<int>(dpi), each);
+    }
     std::string body = "8BPS";
     put_u16(body, 1);
     body.append(6, '\0');
@@ -273,28 +648,42 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
 
 }  // namespace
 
-fs::path export_page_psd(const core::Document& episode, const core::Page& page, const fs::path& dest, std::optional<std::int64_t> dpi) {
+// (PSD-01) The strict editable export stops before anything is drawn when a line on the pages written uses what PSD
+// text cannot keep.
+void check_psd_text(const core::Document& episode, const PsdText& text, const core::Page* only) {
+    if (!text.editable || text.rasterize) return;
+    std::vector<PsdTextIssue> issues = psd_text_issues(episode);
+    if (only != nullptr) std::erase_if(issues, [&](const PsdTextIssue& issue) { return core::Num(issue.page) != only->index; });
+    if (!issues.empty()) throw PsdTextRefused(std::move(issues));
+}
+
+fs::path export_page_psd(const core::Document& episode, const core::Page& page, const fs::path& dest, std::optional<std::int64_t> dpi,
+                         const PsdText& text, PsdTextReport* report) {
+    check_psd_text(episode, text, &page);
     detail::Output output;
-    put_page_psd(output, episode, page, dest, dpi);
+    put_page_psd(output, episode, page, dest, dpi, text, report);
     output.commit();
     return dest;
 }
 
-std::vector<fs::path> export_psd_pages(const core::Document& episode, const fs::path& dest, std::optional<std::int64_t> dpi) {
+std::vector<fs::path> export_psd_pages(const core::Document& episode, const fs::path& dest, std::optional<std::int64_t> dpi,
+                                       const PsdText& text, PsdTextReport* report) {
+    check_psd_text(episode, text, nullptr);
     detail::make_dirs(dest);
     detail::Output output;  // (one export: every page's PSD moved into place together)
     std::vector<fs::path> written;
     for (const auto& page : episode.pages) {
         written.push_back(detail::join(dest, stem(episode) + "_p" + detail::padded(page->index, 3) + ".psd"));
-        put_page_psd(output, episode, *page, written.back(), dpi);
+        put_page_psd(output, episode, *page, written.back(), dpi, text, report);
     }
     output.commit();
     return written;
 }
 
-fs::path export_psd(const core::Document& episode, const fs::path& dest, std::int64_t dpi, std::int64_t page) {
+fs::path export_psd(const core::Document& episode, const fs::path& dest, std::int64_t dpi, std::int64_t page, const PsdText& text,
+                    PsdTextReport* report) {
     for (const auto& p : episode.pages) {
-        if (p->index == core::Num(page)) return export_page_psd(episode, *p, dest, dpi);
+        if (p->index == core::Num(page)) return export_page_psd(episode, *p, dest, dpi, text, report);
     }
     throw core::Error("key", "no page " + std::to_string(page));  // (Python: StopIteration)
 }

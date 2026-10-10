@@ -134,8 +134,10 @@ struct PageLayer {
 // lines, the panel borders, one layer for each placed line (its balloon and letters), the nombres. Each is given to
 // `each` as it is made (they are never all held). NotYetPorted("placed") for a placed picture (its art before the
 // monochrome finish is not drawn by this build yet). (A layer in precise colour, which Python does not have: its
-// 8-bit picture.)
-void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each);
+// 8-bit picture.) `line_layers` (PSD-01, the editable PSD): each placed line is handed to it, in its place among the
+// layers, instead of being given as a layer of its own.
+void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
+                 const std::function<void(const core::StoryLine&)>* line_layers = nullptr);
 
 // Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
 // noise; 書き出しでのトーン化).

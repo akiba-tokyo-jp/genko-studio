@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -47,17 +48,32 @@ using Panels = std::vector<std::pair<std::string, std::array<double, 4>>>;
 using Unported = std::function<void(const NotYetPorted&)>;
 
 class SpeakerFonts;
+struct LetterParts;
+struct SetLayout;
 
 // draw_lines(image, lines, dpi, font_path, show_speaker, panels): every placed line of a page, joined balloons
-// (style.group) drawn together in the reading order of their first line.
+// (style.group) drawn together in the reading order of their first line. `parts` (PSD-01, the editable PSD): only
+// these of each line (render::text::LetterParts; none: all of it).
 void draw_lines(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi,
                 const std::optional<std::string>& font_path = std::nullopt, bool show_speaker = true,
-                const Panels* panels = nullptr, std::stop_token stop = {}, const Unported* unported = nullptr);
+                const Panels* panels = nullptr, std::stop_token stop = {}, const Unported* unported = nullptr,
+                const LetterParts* parts = nullptr);
 // draw_group(image, lines, dpi, show_speaker, font_path, panels): one balloon (or several joined ones) with their
 // tails and text. (speakers: the names' font shared by the groups drawn on the same part)
 void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi, bool show_speaker = true,
                 const std::optional<std::string>& font_path = std::nullopt, const Panels* panels = nullptr,
-                std::stop_token stop = {}, const Unported* unported = nullptr, SpeakerFonts* speakers = nullptr);
+                std::stop_token stop = {}, const Unported* unported = nullptr, SpeakerFonts* speakers = nullptr,
+                const LetterParts* parts = nullptr);
+
+// PSD-01 (internal, not an op): a placed line drawn alone (as render::page_layers draws each) as the editable PSD lays
+// it: its lettering as set (render::text::set_layout, its picture with nothing drawn) and the map from the set
+// letters' pixels to the page's — where paint_text puts the lettering and, for a line turned by rotate_deg, how its
+// sheet is turned and laid (x' = a·x + c·y + e, y' = b·x + d·y + f).
+struct EditableLine {
+    std::shared_ptr<const SetLayout> lettering;
+    std::array<double, 6> to_page{1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+};
+EditableLine editable_line(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path = std::nullopt);
 
 // The balloons' pictures remembered for drawing a page again in parts (the letters, the shapes' masks, a turned
 // balloon's sheet) are forgotten.

@@ -10,6 +10,7 @@
 
 #include "core/json.hpp"
 #include "core/model.hpp"
+#include "formats/psd_text.hpp"
 #include "render/image.hpp"
 
 // The exports (Python's genko/export.py, profiles.py, pack.py and psd.py's writer), writing the same files: the same
@@ -97,14 +98,19 @@ std::vector<fs::path> export_pack(const core::Document& episode, const fs::path&
                                   std::optional<std::int64_t> dpi = std::nullopt);
 
 // psd.export_page_psd: the page as a layered PSD (the printed page as its merged picture, render::page_layers as its
-// layers, each cut to what it holds, PackBits); dpi nothing or 0: the book's, else 600.
+// layers, each cut to what it holds, PackBits); dpi nothing or 0: the book's, else 600. `text` (PSD-01,
+// formats/psd_text.hpp): the lines kept as text layers (editable) — the editable way checks every page written before
+// it draws any (PsdTextRefused, strict) and says what it did in `report`; by default the lines are pictures, Python's
+// file byte for byte.
 fs::path export_page_psd(const core::Document& episode, const core::Page& page, const fs::path& dest,
-                         std::optional<std::int64_t> dpi = std::nullopt);
+                         std::optional<std::int64_t> dpi = std::nullopt, const PsdText& text = {}, PsdTextReport* report = nullptr);
 // psd.export_psd_pages: one PSD a page in the folder `dest` (<stem>_p001.psd, …).
-std::vector<fs::path> export_psd_pages(const core::Document& episode, const fs::path& dest, std::optional<std::int64_t> dpi = std::nullopt);
+std::vector<fs::path> export_psd_pages(const core::Document& episode, const fs::path& dest, std::optional<std::int64_t> dpi = std::nullopt,
+                                       const PsdText& text = {}, PsdTextReport* report = nullptr);
 // psd.export_psd: one page (page number `page`) as a PSD at `dest` (core::Error("key") when there is no such page:
 // Python's StopIteration).
-fs::path export_psd(const core::Document& episode, const fs::path& dest, std::int64_t dpi = 150, std::int64_t page = 1);
+fs::path export_psd(const core::Document& episode, const fs::path& dest, std::int64_t dpi = 150, std::int64_t page = 1,
+                    const PsdText& text = {}, PsdTextReport* report = nullptr);
 
 namespace detail {
 class Output;

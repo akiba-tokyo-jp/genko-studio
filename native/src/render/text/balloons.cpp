@@ -619,9 +619,10 @@ bool needs_raqm(const core::PyUncaught& e) {
 // ("text_features") — is left out and reported when the caller says so: the balloon and the group's other lines are
 // drawn. Without that, it stops the drawing as it is.
 void letters(const PagePart& part, const core::StoryLine& line, int dpi, bool show_speaker, const std::optional<std::string>& font_path,
-             std::stop_token stop, const Unported* unported, SpeakerFonts* speakers) {
+             std::stop_token stop, const Unported* unported, SpeakerFonts* speakers, const LetterParts* parts = nullptr) {
+    if (parts != nullptr && !parts->text && !parts->ruby) return;  // (PSD-01: the balloon alone)
     try {
-        paint_text(*part.image, line, dpi, show_speaker, font_path, std::move(stop), part.origin, speakers);
+        paint_text(*part.image, line, dpi, show_speaker, font_path, std::move(stop), part.origin, speakers, parts);
     } catch (const NotYetPorted& e) {
         if (unported == nullptr || !*unported) throw;
         (*unported)(e);
@@ -631,10 +632,18 @@ void letters(const PagePart& part, const core::StoryLine& line, int dpi, bool sh
     }
 }
 
-// _draw_turned(image, lines, dpi, show_speaker, font_path, degrees): drawn upright on its own sheet, turned about its
-// centre and laid on the page; the tails turned back first, so they still point where they were aimed.
-void draw_turned(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi, bool show_speaker,
-                 const std::optional<std::string>& font_path, double degrees, std::stop_token stop, SpeakerFonts* speakers) {
+// Where a turned group's sheet lies: the middle of the group's boxes (mm), the sheet's top left (mm), its size and where
+// it is laid on the page (px).
+struct TurnedSheet {
+    Pt centre;
+    double left = 0.0;
+    double top = 0.0;
+    std::int64_t size = 0;
+    std::int64_t at_x = 0;
+    std::int64_t at_y = 0;
+};
+
+TurnedSheet turned_sheet(const std::vector<const core::StoryLine*>& lines, int dpi) {
     double x0 = lines.front()->x_mm.value();
     double y0 = lines.front()->y_mm.value();
     double x1 = x0 + mm_or(lines.front()->w_mm, 40);
@@ -653,59 +662,77 @@ void draw_turned(const PagePart& part, const std::vector<const core::StoryLine*>
     reach += 6;  // room for outlines, halos and the tail's bubbles
     const double left = centre[0] - reach;
     const double top = centre[1] - reach;
-    const std::int64_t size = px(2 * reach, dpi);
-    const std::int64_t at_x = core::py_round_int(left / 25.4 * dpi);
-    const std::int64_t at_y = core::py_round_int(top / 25.4 * dpi);
+    return TurnedSheet{centre, left, top, px(2 * reach, dpi), core::py_round_int(left / 25.4 * dpi), core::py_round_int(top / 25.4 * dpi)};
+}
+
+// A line of a turned group as it is drawn upright on its sheet: moved by the sheet's corner, without its turn, its
+// tails turned back about the group's middle.
+core::StoryLine upright_twin(const core::StoryLine& ln, const TurnedSheet& sheet, double degrees) {
+    const double left = sheet.left;
+    const double top = sheet.top;
+    const Pt& centre = sheet.centre;
+    core::StoryLine twin = ln;
+    twin.style = Json::object();
+    if (ln.style.is_object()) {
+        for (const auto& [k, v] : ln.style.items()) {
+            if (k != "rotate_deg") twin.style[k] = v;
+        }
+    }
+    twin.x_mm = core::Num(ln.x_mm.value() - left);
+    twin.y_mm = core::Num(ln.y_mm.value() - top);
+    if (ln.path && !ln.path->empty()) {
+        std::vector<core::Point> moved;
+        for (const core::Point& p : *ln.path) moved.push_back(core::Point{core::Num(p.x.value() - left), core::Num(p.y.value() - top)});
+        twin.path = std::move(moved);
+    } else {
+        twin.path.reset();
+    }
+    std::vector<Json> tails;
+    for (const Json& tail : balloon::tails_of(ln)) {
+        Json moved = tail;
+        const Json to = core::subscript(tail, "to");
+        const Pt t = balloon::turned(Pt{number(core::subscript(to, 0)), number(core::subscript(to, 1))}, centre, -degrees);
+        moved["to"] = Json::array({t[0] - left, t[1] - top});
+        const Json* via = core::dict_get(tail, "via");
+        if (via != nullptr && core::py_truthy(*via)) {
+            const Pt v = balloon::turned(Pt{number(core::subscript(*via, 0)), number(core::subscript(*via, 1))}, centre, -degrees);
+            moved["via"] = Json::array({v[0] - left, v[1] - top});
+        }
+        tails.push_back(std::move(moved));
+    }
+    twin.tail = tails.empty() ? std::nullopt
+                              : std::optional<core::Point>(core::Point{core::Num(tails.front()["to"][0].get<double>()),
+                                                                       core::Num(tails.front()["to"][1].get<double>())});
+    twin.tails = std::move(tails);
+    return twin;
+}
+
+// _draw_turned(image, lines, dpi, show_speaker, font_path, degrees): drawn upright on its own sheet, turned about its
+// centre and laid on the page; the tails turned back first, so they still point where they were aimed. (`parts`,
+// PSD-01: only those drawn, on a sheet of their own.)
+void draw_turned(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi, bool show_speaker,
+                 const std::optional<std::string>& font_path, double degrees, std::stop_token stop, SpeakerFonts* speakers,
+                 const LetterParts* parts = nullptr) {
+    const TurnedSheet place = turned_sheet(lines, dpi);
+    const std::int64_t size = place.size;
+    const std::int64_t at_x = place.at_x;
+    const std::int64_t at_y = place.at_y;
     if (overlaps(Box{static_cast<int>(at_x), static_cast<int>(at_y), static_cast<int>(at_x + size), static_cast<int>(at_y + size)},
                  page_box(part))) {
+        const bool partial = parts != nullptr && !parts->all();
         Json group = Json::array();
         for (const core::StoryLine* ln : lines) group.push_back(line_json(*ln));
         const std::optional<std::string> key =
-            detail::memo_key(Json::array({"turned", dpi, font_path ? Json(*font_path) : Json(), group}));
+            partial ? std::nullopt : detail::memo_key(Json::array({"turned", dpi, font_path ? Json(*font_path) : Json(), group}));
         std::shared_ptr<const Sheet> sheet = key ? remembered_sheets().get(*key) : nullptr;
         if (!sheet) {
             Image upright_sheet = Image::create("RGBA", Size{static_cast<int>(size), static_cast<int>(size)}, Ink{0, 0, 0, 0});
             std::vector<core::StoryLine> twins;
             twins.reserve(lines.size());
-            for (const core::StoryLine* ln : lines) {
-                core::StoryLine twin = *ln;
-                twin.style = Json::object();
-                if (ln->style.is_object()) {
-                    for (const auto& [k, v] : ln->style.items()) {
-                        if (k != "rotate_deg") twin.style[k] = v;
-                    }
-                }
-                twin.x_mm = core::Num(ln->x_mm.value() - left);
-                twin.y_mm = core::Num(ln->y_mm.value() - top);
-                if (ln->path && !ln->path->empty()) {
-                    std::vector<core::Point> moved;
-                    for (const core::Point& p : *ln->path) moved.push_back(core::Point{core::Num(p.x.value() - left), core::Num(p.y.value() - top)});
-                    twin.path = std::move(moved);
-                } else {
-                    twin.path.reset();
-                }
-                std::vector<Json> tails;
-                for (const Json& tail : balloon::tails_of(*ln)) {
-                    Json moved = tail;
-                    const Json to = core::subscript(tail, "to");
-                    const Pt t = balloon::turned(Pt{number(core::subscript(to, 0)), number(core::subscript(to, 1))}, centre, -degrees);
-                    moved["to"] = Json::array({t[0] - left, t[1] - top});
-                    const Json* via = core::dict_get(tail, "via");
-                    if (via != nullptr && core::py_truthy(*via)) {
-                        const Pt v = balloon::turned(Pt{number(core::subscript(*via, 0)), number(core::subscript(*via, 1))}, centre, -degrees);
-                        moved["via"] = Json::array({v[0] - left, v[1] - top});
-                    }
-                    tails.push_back(std::move(moved));
-                }
-                twin.tail = tails.empty() ? std::nullopt
-                                          : std::optional<core::Point>(core::Point{core::Num(tails.front()["to"][0].get<double>()),
-                                                                                   core::Num(tails.front()["to"][1].get<double>())});
-                twin.tails = std::move(tails);
-                twins.push_back(std::move(twin));
-            }
+            for (const core::StoryLine* ln : lines) twins.push_back(upright_twin(*ln, place, degrees));
             std::vector<const core::StoryLine*> upright;
             for (const core::StoryLine& twin : twins) upright.push_back(&twin);
-            draw_group(whole_page(upright_sheet), upright, dpi, false, font_path, nullptr, stop);
+            draw_group(whole_page(upright_sheet), upright, dpi, false, font_path, nullptr, stop, nullptr, nullptr, parts);
             const double middle = static_cast<double>(size) / 2;
             auto made = std::make_shared<Sheet>();
             made->turned = upright_sheet.rotate(-degrees, Resample::Bicubic, false, std::pair<double, double>{middle, middle});
@@ -1037,7 +1064,7 @@ Pt thought_trail(const core::StoryLine& line, const Panels* panels) {
 
 void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi, bool show_speaker,
                 const std::optional<std::string>& font_path, const Panels* panels, std::stop_token stop, const Unported* unported,
-                SpeakerFonts* speakers) {
+                SpeakerFonts* speakers, const LetterParts* parts) {
     if (lines.empty()) return;
     std::optional<SpeakerFonts> own;
     if (speakers == nullptr) speakers = &own.emplace(stop);
@@ -1047,13 +1074,14 @@ void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>&
     const Json& rotate = at(st, "rotate_deg");
     if (core::py_truthy(rotate) && std::fabs(core::to_float(rotate)) > 0.01) {
         // (its sheet is remembered as a whole: what it cannot draw leaves the whole group out, in draw_lines)
-        draw_turned(part, lines, dpi, show_speaker, font_path, core::to_float(rotate), stop, speakers);
+        draw_turned(part, lines, dpi, show_speaker, font_path, core::to_float(rotate), stop, speakers, parts);
         return;
     }
+    const bool balloons = parts == nullptr || parts->balloon;  // (PSD-01: the balloon, or only the letters)
     const Box here = page_box(part);
     const Box page_all{0, 0, part.page.width, part.page.height};
     for (const core::StoryLine* ln : lines) {  // 画像のフキダシ: the picture stretched over the box
-        if (ln->balloon != "picture") continue;
+        if (ln->balloon != "picture" || !balloons) continue;
         const Json lst = style_of(*ln);
         const Json& data = at(lst, "picture");
         if (!core::py_truthy(data)) continue;
@@ -1088,10 +1116,10 @@ void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>&
         part.image->paste(*stretched, Point{placed->first.x0 - part.origin.x, placed->first.y0 - part.origin.y}, stretched.get());
     }
     if (kind == "picture") {
-        for (const core::StoryLine* line : lines) letters(part, *line, dpi, show_speaker, font_path, stop, unported, speakers);
+        for (const core::StoryLine* line : lines) letters(part, *line, dpi, show_speaker, font_path, stop, unported, speakers, parts);
         return;
     }
-    if (kind != "sfx" && kind != "none") {
+    if (kind != "sfx" && kind != "none" && balloons) {
         std::vector<std::array<std::int64_t, 4>> boxes;
         for (const core::StoryLine* ln : lines) boxes.push_back(box_px(*ln, dpi));
         Tails tails;
@@ -1135,11 +1163,11 @@ void draw_group(const PagePart& part, const std::vector<const core::StoryLine*>&
             paint_shapes(part, lines, boxes, tails, region, dpi, st);
         }
     }
-    for (const core::StoryLine* line : lines) letters(part, *line, dpi, show_speaker, font_path, stop, unported, speakers);
+    for (const core::StoryLine* line : lines) letters(part, *line, dpi, show_speaker, font_path, stop, unported, speakers, parts);
 }
 
 void draw_lines(const PagePart& part, const std::vector<const core::StoryLine*>& lines, int dpi, const std::optional<std::string>& font_path,
-                bool show_speaker, const Panels* panels, std::stop_token stop, const Unported* unported) {
+                bool show_speaker, const Panels* panels, std::stop_token stop, const Unported* unported, const LetterParts* parts) {
     // joined balloons together, in the reading order of their first line (style.group, a dict's key)
     std::vector<std::vector<const core::StoryLine*>> order;
     std::vector<std::pair<Json, std::size_t>> keyed;
@@ -1163,7 +1191,7 @@ void draw_lines(const PagePart& part, const std::vector<const core::StoryLine*>&
     for (const auto& group : order) {
         if (stop.stop_requested()) throw Cancelled();
         try {
-            draw_group(part, group, dpi, show_speaker, font_path, panels, stop, unported, &speakers);
+            draw_group(part, group, dpi, show_speaker, font_path, panels, stop, unported, &speakers, parts);
         } catch (const NotYetPorted& e) {
             if (unported == nullptr || !*unported) throw;
             (*unported)(e);
@@ -1172,6 +1200,37 @@ void draw_lines(const PagePart& part, const std::vector<const core::StoryLine*>&
             (*unported)(NotYetPorted("text_features"));
         }
     }
+}
+
+EditableLine editable_line(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path) {
+    EditableLine out;
+    auto lettering = std::make_shared<SetLayout>(set_layout(line, dpi, font_path, LetterParts{false, false, false, false}));
+    std::array<double, 6> m = lettering->set.to_image;
+    const auto then = [&m](const std::array<double, 6>& q) {
+        m = {q[0] * m[0] + q[2] * m[1], q[1] * m[0] + q[3] * m[1], q[0] * m[2] + q[2] * m[3], q[1] * m[2] + q[3] * m[3],
+             q[0] * m[4] + q[2] * m[5] + q[4], q[1] * m[4] + q[3] * m[5] + q[5]};
+    };
+    const Json st = style_of(line);
+    const Json& rotate = at(st, "rotate_deg");
+    if (core::py_truthy(rotate) && std::fabs(core::to_float(rotate)) > 0.01) {
+        // (as draw_turned lays the line alone: set on its upright sheet, the sheet turned about its middle by
+        // Image.rotate(-degrees) — clockwise on the page — and laid at its place)
+        const double degrees = core::to_float(rotate);
+        const TurnedSheet sheet = turned_sheet({&line}, dpi);
+        const Point at_sheet = lettering_at(upright_twin(line, sheet, degrees), dpi, lettering->layout.corner_x, lettering->layout.corner_y);
+        then({1.0, 0.0, 0.0, 1.0, static_cast<double>(at_sheet.x), static_cast<double>(at_sheet.y)});
+        const double middle = static_cast<double>(sheet.size) / 2;
+        const double c = std::cos(degrees * core::kPi / 180.0);
+        const double s = std::sin(degrees * core::kPi / 180.0);
+        then({c, s, -s, c, middle - c * middle + s * middle, middle - s * middle - c * middle});
+        then({1.0, 0.0, 0.0, 1.0, static_cast<double>(sheet.at_x), static_cast<double>(sheet.at_y)});
+    } else {
+        const Point at_page = lettering_at(line, dpi, lettering->layout.corner_x, lettering->layout.corner_y);
+        then({1.0, 0.0, 0.0, 1.0, static_cast<double>(at_page.x), static_cast<double>(at_page.y)});
+    }
+    out.lettering = std::move(lettering);
+    out.to_page = m;
+    return out;
 }
 
 void clear_balloon_cache() {

@@ -40,6 +40,7 @@
 #include "core/pyops.hpp"
 #include "formats/checks.hpp"
 #include "formats/export.hpp"
+#include "formats/psd_text.hpp"
 #include "render/colour.hpp"
 #include "render/page.hpp"
 
@@ -64,6 +65,31 @@ QString area_label(std::string_view key) {
     if (key == "bleed") return QStringLiteral("裁ち落としまで（入稿の標準）");
     return QStringLiteral("仕上がりまで");
 }
+
+// (PSD-01) A feature the editable PSD cannot keep in words (formats::psd_text_unsupported).
+QString feature_words(const std::vector<std::string>& keys) {
+    QStringList words;
+    for (const std::string& key : keys) {
+        QString word = qs(key);
+        for (const formats::PsdTextFeature& f : formats::psd_text_unsupported()) {
+            if (f.key == key) word = qs(f.label);
+        }
+        words << word;
+    }
+    return words.join(QStringLiteral("、"));
+}
+
+// (PSD-01) The lines the editable PSD cannot keep as text, one a line (the first ten).
+QString issue_lines(const std::vector<formats::PsdTextIssue>& issues) {
+    QStringList lines;
+    for (std::size_t i = 0; i < issues.size() && i < 10; ++i) {
+        lines << QStringLiteral("・%1 ページ「%2」: %3").arg(issues[i].page).arg(qs(issues[i].text), feature_words(issues[i].features));
+    }
+    if (issues.size() > 10) lines << QStringLiteral("…ほか %1 件").arg(issues.size() - 10);
+    return lines.join(QLatin1Char('\n'));
+}
+
+constexpr const char* kRubyNote = "ルビは本文とは別の文字レイヤーです。受取アプリで本文を直しても、ルビは自動では追従しません。";
 
 QImage to_qimage(const render::Image& image) {
     const render::Image rgb = image.convert("RGB");
@@ -183,6 +209,31 @@ ExportDialog::ExportDialog(QWidget* parent, DocPtr episode, std::optional<fs::pa
     connect(color, &QComboBox::currentIndexChanged, this, [this] { screen_row->setEnabled(bitonal()); });
     jpeg = new QCheckBox(QStringLiteral("JPEG にする（PNG より軽い）"));
     spreads = new QCheckBox(QStringLiteral("見開きも 1 枚ずつ出す"));
+    psd_text = new QComboBox;
+    psd_text->setObjectName(QStringLiteral("psd_text"));
+    psd_text->addItem(QStringLiteral("見た目優先で画像化（従来どおり）"), QStringLiteral("image"));
+    psd_text->addItem(QStringLiteral("文字を編集可能なレイヤーとして保持"), QStringLiteral("editable"));
+    psd_text->setToolTip(QStringLiteral("見た目優先: 台詞ごとに、フキダシと文字を 1 枚の画像レイヤーにします（これまでの PSD）。\n"
+                                        "編集可能: 台詞ごとのグループに、本文とルビを文字レイヤー、フキダシを画像レイヤーにして入れます"));
+    psd_unsupported = new QComboBox;
+    psd_unsupported->setObjectName(QStringLiteral("psd_unsupported"));
+    psd_unsupported->addItem(QStringLiteral("表せない装飾があれば書き出さない（厳密）"), QStringLiteral("stop"));
+    psd_unsupported->addItem(QStringLiteral("表せない装飾のある台詞だけ画像にする（見た目優先）"), QStringLiteral("rasterize"));
+    psd_unsupported->setToolTip(QStringLiteral("グラデーションや画像の文字塗り・パスに沿った文字・弓なりの曲げ・四隅のゆがみ・傍点は、"
+                                               "PSD の文字レイヤーにできません（対応表: docs/PSD_TEXT_SUPPORT.md）"));
+    psd_notes = new QLabel;
+    psd_notes->setObjectName(QStringLiteral("psd_notes"));
+    psd_notes->setWordWrap(true);
+    psd_notes->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    theme::role(psd_notes, "hint");
+    auto* psd_box = new QWidget;
+    auto* psd_lines = new QVBoxLayout(psd_box);
+    psd_lines->setContentsMargins(0, 0, 0, 0);
+    psd_lines->addWidget(psd_text);
+    psd_lines->addWidget(psd_unsupported);
+    psd_lines->addWidget(psd_notes);
+    connect(psd_text, &QComboBox::currentIndexChanged, this, [this] { psd_changed(); });
+    connect(psd_unsupported, &QComboBox::currentIndexChanged, this, [this] { psd_changed(); });
     official = new QCheckBox(QStringLiteral("正式な書き出し（点検して、書き出しの承認として記録する）"));
     official->setChecked(official_only);
     official->setEnabled(!official_only);
@@ -207,7 +258,7 @@ ExportDialog::ExportDialog(QWidget* parent, DocPtr episode, std::optional<fs::pa
     for (const auto& [key, label, widget] : std::vector<std::tuple<std::string, QString, QWidget*>>{
              {"dpi", QStringLiteral("解像度"), dpi}, {"area", QStringLiteral("書き出す範囲"), area}, {"width", QStringLiteral("幅"), width},
              {"max_height", QStringLiteral("1 枚の高さの上限"), max_height}, {"long_edge", QStringLiteral("長辺"), long_edge},
-             {"jpeg", QString(), jpeg}, {"spreads", QString(), spreads}}) {
+             {"jpeg", QString(), jpeg}, {"spreads", QString(), spreads}, {"psd_text", QStringLiteral("文字"), psd_box}}) {
         form_->addRow(label, widget);
         rows[key] = widget;
     }
@@ -289,7 +340,90 @@ std::vector<std::int64_t> ExportDialog::pages() const {
     return all;
 }
 
+void ExportDialog::psd_changed() {
+    const bool editable = psd_text->currentData().toString() == QLatin1String("editable");
+    psd_unsupported->setVisible(editable);
+    psd_notes->setVisible(editable);
+    if (!editable) return;
+    std::vector<std::int64_t> chosen;
+    try {
+        chosen = pages();
+    } catch (const std::exception&) {  // (the preview says why)
+        psd_notes->clear();
+        return;
+    }
+    QStringList notes;
+    try {
+        const core::Document part = formats::subset(*episode_, chosen);
+        const std::vector<formats::PsdTextIssue> issues = formats::psd_text_issues(part);
+        if (issues.empty()) {
+            notes << QStringLiteral("PSD の文字に表せない装飾のある台詞はありません。");
+        } else {
+            const bool rasterize = psd_unsupported->currentData().toString() == QLatin1String("rasterize");
+            notes << QStringLiteral("PSD の文字に表せない装飾のある台詞: %1 件（%2）")
+                         .arg(issues.size())
+                         .arg(rasterize ? QStringLiteral("見た目優先: その台詞だけ画像にして書き出します。その台詞の文字は受取アプリで直せません")
+                                        : QStringLiteral("厳密: このままでは書き出しを止めます"));
+            notes << issue_lines(issues);
+        }
+        const formats::PsdTextFonts fonts = formats::psd_text_fonts(part);
+        if (!fonts.fonts.empty()) {
+            QStringList names;
+            for (const std::string& name : fonts.fonts) names << qs(name);
+            notes << QStringLiteral("使う書体（PSD に埋め込みません。受取側に同じ書体が要ります）: %1").arg(names.join(QStringLiteral("、")));
+        }
+        for (const Json& warning : fonts.warnings) {
+            const QString page = QString::fromStdString(core::py_str(warning.value("page", Json())));
+            const std::string id = warning.value("line", std::string());
+            QString words;
+            for (const auto& p : part.pages) {
+                for (const core::StoryLine* line : part.story_for_page(p->index)) {
+                    if (line->id == id) words = qs(line->text).remove(QLatin1Char('\n')).left(24);
+                }
+            }
+            const QString detail = qs(warning.value("detail", std::string()));
+            notes << (warning.value("kind", std::string()) == "font_missing"
+                          ? QStringLiteral("・%1 ページ「%2」: 書体「%3」が見つからないため、既定の書体で描きます").arg(page, words, detail)
+                          : QStringLiteral("・%1 ページ「%2」: 「%3」は台詞の書体にないため、別の書体で描きます").arg(page, words, detail));
+        }
+    } catch (const std::exception& error) {
+        notes << wording::error(QString::fromUtf8(error.what()));
+    }
+    notes << QString::fromUtf8(kRubyNote) + QStringLiteral("（対応表: docs/PSD_TEXT_SUPPORT.md）");
+    psd_notes->setText(notes.join(QLatin1Char('\n')));
+}
+
+bool ExportDialog::psd_text_go(const std::vector<std::int64_t>& chosen) {
+    if (format->currentData().toString() != QLatin1String("psd") || psd_text->currentData().toString() != QLatin1String("editable")) return true;
+    std::vector<formats::PsdTextIssue> issues;
+    try {
+        issues = formats::psd_text_issues(formats::subset(*episode_, chosen));
+    } catch (const std::exception& error) {
+        ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
+        return false;
+    }
+    if (issues.empty()) return true;
+    if (psd_unsupported->currentData().toString() != QLatin1String("rasterize")) {
+        ask::warning(this, QStringLiteral("Genko"),
+                     QStringLiteral("PSD の文字に表せない装飾のある台詞が %1 つあるため、編集可能な PSD は書き出しません（厳密）。\n%2\n"
+                                    "「表せない装飾のある台詞だけ画像にする（見た目優先）」を選ぶと、その台詞を画像にして書き出せます。")
+                         .arg(issues.size())
+                         .arg(issue_lines(issues)));
+        return false;
+    }
+    QMessageBox box(this);
+    box.setWindowTitle(QStringLiteral("PSD の文字"));
+    box.setIcon(QMessageBox::Warning);
+    box.setText(QStringLiteral("次の %1 つの台詞は、PSD の文字に表せない装飾があるため、画像にして書き出します（その台詞の文字は受取アプリで直せません）。\n%2")
+                    .arg(issues.size())
+                    .arg(issue_lines(issues)));
+    QPushButton* go = box.addButton(QStringLiteral("画像にして書き出す"), QMessageBox::AcceptRole);
+    box.addButton(QStringLiteral("やめる"), QMessageBox::RejectRole);
+    return exec_box(box) == go;
+}
+
 void ExportDialog::show_preview() {
+    if (psd_text != nullptr) psd_changed();  // (PSD-01: what the pages chosen have)
     std::vector<std::int64_t> chosen;
     try {
         chosen = pages();
@@ -383,6 +517,8 @@ formats::RunOptions ExportDialog::options() const {
     o.area = area->currentData().toString().toStdString();
     o.color = color->currentData().toString().toStdString();
     o.icc = icc->text().trimmed().toStdString();
+    o.psd_text = psd_text->currentData().toString().toStdString();
+    o.psd_rasterize = psd_unsupported->currentData().toString() == QLatin1String("rasterize");
     if (screen_on->isChecked() && bitonal()) {
         o.screen = Json{{"lpi", screen_lpi->value()}, {"shape", screen_shape->currentData().toString().toStdString()}};
     }
@@ -438,6 +574,7 @@ void ExportDialog::run() {
             if (answer != QLatin1String("go")) return;
         }
     }
+    if (!psd_text_go(chosen)) return;  // (PSD-01: said or asked before anything is written)
     setCursor(Qt::WaitCursor);
     formats::RunOptions o = options();
     o.pages = chosen;
@@ -460,9 +597,17 @@ void ExportDialog::run() {
         ask::warning(this, QStringLiteral("Genko"), QStringLiteral("書き出せませんでした。\n") + why);
         return;
     }
+    QString said = QStringLiteral("%1 個のファイルを書き出しました。\n%2").arg(reply["files"].size()).arg(QString::fromStdString(core::path_to_utf8(dest)));
+    if (const auto psd = reply.find("psd_text"); psd != reply.end()) {  // (PSD-01: what the editable PSD did)
+        said += QStringLiteral("\n文字レイヤー: %1・ルビ: %2・画像にした台詞: %3\n")
+                    .arg(QString::fromStdString(core::py_str(psd->value("text_layers", Json(0)))),
+                         QString::fromStdString(core::py_str(psd->value("ruby_layers", Json(0)))))
+                    .arg(psd->value("rasterized", Json::array()).size()) +
+                QString::fromUtf8(kRubyNote);
+    }
     QMessageBox box(this);
     box.setWindowTitle(QStringLiteral("Genko"));
-    box.setText(QStringLiteral("%1 個のファイルを書き出しました。\n%2").arg(reply["files"].size()).arg(QString::fromStdString(core::path_to_utf8(dest))));
+    box.setText(said);
     QPushButton* open_button = box.addButton(QStringLiteral("フォルダを開く"), QMessageBox::ActionRole);
     box.addButton(QStringLiteral("閉じる"), QMessageBox::AcceptRole);
     if (exec_box(box) == open_button) QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdString(core::path_to_utf8(dest))));

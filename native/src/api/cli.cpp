@@ -407,7 +407,8 @@ int export_command(const QStringList& args, bool ascii) {
     static constexpr Option kOptions[] = {{"--json", false},      {"--dpi", true},       {"--format", true},     {"--width", true},
                                           {"--max-height", true}, {"--long-edge", true}, {"--jpeg", false},      {"--spreads", false},
                                           {"--color", true},      {"--icc", true},       {"--screen-lpi", true}, {"--screen-shape", true},
-                                          {"--area", true},       {"--fps", true},       {"--seconds", true},    {"--page", true}};
+                                          {"--area", true},       {"--fps", true},       {"--seconds", true},    {"--page", true},
+                                          {"--psd-text", true},   {"--rasterize-unsupported", false}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
     // argparse's choices
@@ -437,6 +438,16 @@ int export_command(const QStringList& args, bool ascii) {
     if (!shape) return invalid_choice("--screen-shape", kShapes);
     const auto area = choice("--area", "paper", kAreas);
     if (!area) return invalid_choice("--area", kAreas);
+    // PSD-01 (C++ only): the lines' text kept as text layers in a PSD (default: as pictures, Python's PSD)
+    const std::initializer_list<const char*> kPsdTexts{"image", "editable"};
+    const auto psd_text = choice("--psd-text", "image", kPsdTexts);
+    if (!psd_text) return invalid_choice("--psd-text", kPsdTexts);
+    if (*psd_text == "editable" && *fmt != "psd") return usage("genko export: argument --psd-text: editable is for --format psd");
+    if (a.flag("--rasterize-unsupported") && *psd_text != "editable") {
+        return usage("genko export: argument --rasterize-unsupported: only with --psd-text editable");
+    }
+    const formats::PsdText psd_choice{*psd_text == "editable", a.flag("--rasterize-unsupported")};
+    formats::PsdTextReport psd_report;
     std::map<std::string, std::optional<std::int64_t>> ints;
     for (const char* name : {"--dpi", "--width", "--max-height", "--long-edge", "--page"}) {
         if (const auto value = a.value(name)) {
@@ -483,10 +494,15 @@ int export_command(const QStringList& args, bool ascii) {
         paths = {formats::export_strip(doc, file_given ? out : formats::detail::join(out, "strip.png"), narrow(dpi.value_or(150)))};
     } else if (f == "psd") {
         // a folder gets one layered PSD per page; a .psd path gets the first page
-        if (file_given) {
-            paths = {formats::export_psd(doc, out, dpi.value_or(spec_dpi))};
-        } else {
-            paths = formats::export_psd_pages(doc, out, dpi);
+        try {
+            if (file_given) {
+                paths = {formats::export_psd(doc, out, dpi.value_or(spec_dpi), 1, psd_choice, &psd_report)};
+            } else {
+                paths = formats::export_psd_pages(doc, out, dpi, psd_choice, &psd_report);
+            }
+        } catch (const formats::PsdTextRefused& refused) {  // (strict: nothing written; the lines and what they use)
+            const Json items = formats::issues_json(refused.issues());
+            return fail(refused.what(), refused.code(), ascii, 1, &items);
         }
     } else if (f == "epub") {
         paths = {formats::export_epub(doc, file_given ? out : formats::detail::join(out, "out.epub"), narrow(dpi.value_or(150)))};
@@ -539,11 +555,16 @@ int export_command(const QStringList& args, bool ascii) {
         json["ok"] = true;
         json["count"] = static_cast<std::int64_t>(paths.size());
         json["files"] = files;
+        if (psd_choice.editable) json["psd_text"] = psd_report.to_json();  // (what the editable PSD did)
         print_json(json, ascii);
     } else {
         std::string lines;
         for (const auto& p : paths) lines += core::path_to_utf8(p) + "\n";
         write_text(lines, stdout);
+        // (the editable PSD's lines drawn as pictures and its font warnings, said on stderr)
+        if (psd_choice.editable && (!psd_report.rasterized.empty() || !psd_report.warnings.empty())) {
+            write_text(core::dump_python(Json{{"psd_text", psd_report.to_json()}}, ascii) + "\n", stderr);
+        }
     }
     return 0;
 }

@@ -14,6 +14,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "render/draw.hpp"
+#include "render/text/lettering.hpp"
 
 namespace genko::render::text {
 
@@ -940,6 +941,12 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
         const std::int64_t top =
             (args.align == "top" || args.align == "justify") ? 0 : floordiv(height - col_h, args.align == "center" ? 2 : 1);
         tops.push_back(top);
+        SetRow* set_row = nullptr;  // (PSD-01: where each cell of the column is set)
+        if (args.cells != nullptr) {
+            args.cells->push_back(SetRow{{}, static_cast<double>(cx) + static_cast<double>(widths[c]) / 2, static_cast<double>(top),
+                                         static_cast<double>(top + col_h)});
+            set_row = &args.cells->back();
+        }
         for (std::size_t row = 0; row < cols[c].size(); ++row) {
             const Cell& cell = cols[c][row];
             const std::size_t i = index_of[c][row];
@@ -948,13 +955,32 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
             const Rgb rgb = style_rgb(style, args.fill);
             const int thick = bold_px(size, style_get(style, "bold"));
             const std::int64_t y = top + ys[c][row];
-            if (cell[0] == kRot) {
+            const bool sideways = cell[0] == kRot;
+            const bool across = !sideways && cell.size() > 1 && !has_vs(cell);
+            if (set_row != nullptr) {
+                SetChar set;
+                for (const char32_t ch : cell_text(cell)) {
+                    if (ch != kTcyOpen && ch != kTcyClose) set.text.push_back(ch);
+                }
+                set.size = size;
+                set.weight = weight_level(style_get(style, "bold"));
+                set.rgb = rgb;
+                set.font = fonts.path_for(face, sideways ? std::u32string_view(U"A") : across ? std::u32string_view(U"0") : std::u32string_view(cell));
+                set.tcy = across;
+                set.sideways = sideways;
+                const double w = sideways ? turned.at(i).width() : static_cast<double>(size);
+                const double h = sideways ? turned.at(i).height() : static_cast<double>(size);
+                const double x = static_cast<double>(cx + floordiv(widths[c] - static_cast<std::int64_t>(w), 2));
+                set.box = BoxF{x, static_cast<double>(y), x + w, static_cast<double>(y) + h};
+                set_row->chars.push_back(std::move(set));
+            }
+            if (!args.draw_text) continue;
+            if (sideways) {
                 const Image& image = turned.at(i);
                 composite_at(out, image, cx + floordiv(widths[c] - image.width(), 2), y);
                 continue;
             }
-            const Image image = cell.size() > 1 && !has_vs(cell) ? tcy_glyph(cell, font_for(U"0", size), size, rgb, thick)
-                                                                  : glyph(cell, font_for(cell, size), size, rgb, thick);
+            const Image image = across ? tcy_glyph(cell, font_for(U"0", size), size, rgb, thick) : glyph(cell, font_for(cell, size), size, rgb, thick);
             composite_at(out, image, cx + floordiv(widths[c] - size, 2), y);
             if (marked.contains({c, row})) {
                 draw_mark(out, static_cast<double>(cx + widths[c]) + static_cast<double>(mark_w) / 2,
@@ -994,11 +1020,17 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
         RubyDrawn where;
         for (std::int64_t i = 0; i < count; ++i) {
             const std::u32string& letter = span.reading[static_cast<std::size_t>(i)];
-            note_font(fonts, set.face, letter, fonts.path_for(set.face, letter), span.span, args.notes);
-            composite_at(out, glyph(letter, fonts.font(set.face, std::max<std::int64_t>(8, size), letter), size, args.fill), rx, top + i * step);
+            const std::string used = fonts.path_for(set.face, letter);
+            note_font(fonts, set.face, letter, used, span.span, args.notes);
+            if (args.draw_ruby) {
+                composite_at(out, glyph(letter, fonts.font(set.face, std::max<std::int64_t>(8, size), letter), size, args.fill), rx, top + i * step);
+            }
             where.reading += letter;
             where.letters.push_back(PointD{static_cast<double>(rx), static_cast<double>(top + i * step)});
+            where.fonts.push_back(used);
         }
+        where.spacing = static_cast<double>(step - size);
+        where.fill = args.fill;
         drawn.push_back(Drawn{c, top, top + length, span.span});
         if (args.drawn != nullptr) {
             where.span = span.span;
@@ -1027,7 +1059,7 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
         const std::int64_t top = std::max<std::int64_t>(
             0, std::min<std::int64_t>(height - ruby_w * count,
                                       core::py_round_int(centre - static_cast<double>(ruby_w * count) / 2)));
-        for (std::int64_t i = 0; i < count; ++i) {
+        for (std::int64_t i = 0; i < count && args.draw_ruby; ++i) {
             const std::u32string ch(1, span.ruby[static_cast<std::size_t>(i)]);
             composite_at(out, glyph(ch, font_for(ch, std::max<std::int64_t>(8, ruby_w)), ruby_w, args.fill), rx, top + i * ruby_w);
         }

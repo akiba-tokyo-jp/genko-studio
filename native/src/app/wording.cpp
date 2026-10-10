@@ -161,6 +161,9 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("not yet ported: (.*)", [](const QRegularExpressionMatch& m) {
             return QStringLiteral("この版の Genko では、まだ扱えないもの（%1）があるため、できませんでした（原稿は変わりません）").arg(unported_element(m.captured(1)));
         }));
+        // PSD-01 (formats/psd_text.hpp): the strict editable PSD refused (C++ only, SPEC COMP-01a)
+        r.push_back(rule(R"(the editable PSD stops: (\d+) lines? uses? what PSD text cannot keep.*)",
+                         "PSD の文字に表せない装飾のある台詞が \\1 つあるため、編集可能な PSD は書き出しませんでした（その台詞だけ画像にする「見た目優先」を選ぶと書き出せます）"));
         r.push_back(rule(R"(official export is not in the C\+\+ build yet)",
                          "この版の Genko では、まだ正式な書き出し（点検と書き出しの承認の記録）はできません。正式な書き出しを外すと書き出せます"));
         // the exports' bounds (formats::check_dpi, render_page's and the strip's size)

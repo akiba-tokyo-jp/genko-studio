@@ -12,6 +12,7 @@ genko_library(genko_formats
     profiles.cpp
     pack.cpp
     psd_export.cpp
+    psd_text.cpp
     exporting.cpp
     checks.cpp
   PUBLIC_DEPS genko_render genko_core Qt6::Core
