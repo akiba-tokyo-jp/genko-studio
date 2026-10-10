@@ -14,6 +14,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/ruby.hpp"
 #include "formats/psd_text_detail.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
@@ -100,7 +101,24 @@ std::string words_of(const std::string& text, std::size_t count) {
     return words.substr(0, std::min(end, words.size()));
 }
 
-std::vector<std::string> line_features(const core::StoryLine& line) {
+core::StoryLine by_place(const core::StoryLine& line) {
+    core::StoryLine twin = line;
+    if (!twin.ruby_spans) {
+        std::vector<core::RubySpan> spans = core::ruby::from_runs(line.text, line.ruby_runs, false);
+        if (!spans.empty()) twin.ruby_spans = std::move(spans);
+    }
+    return twin;
+}
+
+std::string font_token(std::string_view name) {
+    std::string out;
+    for (const char c : name) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '+' || c == '-') out += c;
+    }
+    return out;
+}
+
+std::vector<std::string> line_features(const core::StoryLine& line, std::optional<std::int64_t> dpi, const std::optional<std::string>& font_path) {
     const Json st = render::text::style_of(line);
     std::vector<std::string> out;
     if (core::py_truthy(at(st, "gradient"))) out.emplace_back("gradient");
@@ -112,6 +130,18 @@ std::vector<std::string> line_features(const core::StoryLine& line) {
         if (!run.empty() && line.text.find(run) != std::string::npos) {
             out.emplace_back("emphasis");
             break;
+        }
+    }
+    if (dpi && !line.ruby_spans && !line.ruby_runs.empty() && !core::py_truthy(at(st, "text_path"))) {
+        const core::StoryLine twin = by_place(line);
+        if (twin.ruby_spans) {  // (set by place as the editable PSD sets it, against the line's own lettering)
+            const int at_dpi = static_cast<int>(*dpi);
+            const std::shared_ptr<const render::text::Layout> own = render::text::remembered_layout(line, at_dpi, font_path);
+            const render::text::Layout placed = render::text::text_layout(twin, at_dpi, font_path);
+            if (own->image.size() != placed.image.size() || own->corner_x != placed.corner_x || own->corner_y != placed.corner_y ||
+                own->image.tobytes() != placed.image.tobytes()) {
+                out.emplace_back("ruby_runs");
+            }
         }
     }
     return out;
@@ -133,7 +163,8 @@ std::string font_name(render::text::Fonts& fonts, const std::string& path) {
         // (a font that is not read: named by its file)
     }
     const std::optional<std::string> found = postscript_name(bytes);
-    const std::string name = found ? *found : core::path_to_utf8(core::path_from_utf8(path).stem());
+    std::string name = font_token(found ? *found : core::path_to_utf8(core::path_from_utf8(path).stem()));
+    if (name.empty()) name = "Font";  // (a name of none of those characters)
     const std::lock_guard<std::mutex> lock(mutex);
     known.emplace(path, name);
     return name;
@@ -179,16 +210,19 @@ const std::vector<PsdTextFeature>& psd_text_unsupported() {
         {"arc", "弓なりの曲げ", "非線形の変形は文字レイヤーの行列に表せない"},
         {"warp", "四隅を引くゆがみ", "非線形の変形は文字レイヤーの行列に表せない"},
         {"emphasis", "傍点", "PSD の文字に傍点がないため、文字にできない"},
+        {"ruby_runs", "組み方の変わる旧形式のルビ",
+         "旧形式のルビ（ruby_runs）は位置で持つルビにして書くが、読みが本文より長いときなど画面と違う組み方になるため、文字にできない（ルビを振り直すと文字にできる）"},
     };
     return table;
 }
 
-std::vector<PsdTextIssue> psd_text_issues(const core::Document& episode) {
+std::vector<PsdTextIssue> psd_text_issues(const core::Document& episode, std::int64_t dpi) {
     std::vector<PsdTextIssue> out;
+    const std::optional<std::string> font_path(episode.font_path);
     for (const auto& page : episode.pages) {
         for (const core::StoryLine* line : episode.story_for_page(page->index)) {
             if (!detail::placed_line(*line)) continue;
-            std::vector<std::string> features = detail::line_features(*line);
+            std::vector<std::string> features = detail::line_features(*line, dpi, font_path);
             if (features.empty()) continue;
             out.push_back(PsdTextIssue{core::py_int(page->index.json()), line->id, detail::words_of(line->text, 24), std::move(features)});
         }

@@ -98,6 +98,10 @@ Image blank(std::int64_t w, std::int64_t h) {
     return Image::create("RGBA", {static_cast<int>(w), static_cast<int>(h)}, Ink{0, 0, 0, 0});
 }
 
+// The size of the max filter outlined() grows a halo with: grow · 2 + 1, at most 61 (Python's _outlined), so the halo
+// reaches halo_filter(grow) / 2 px round the letters — never more than 30 (PSD-01's stroke is as wide).
+std::int64_t halo_filter(std::int64_t grow) { return std::min<std::int64_t>(grow * 2 + 1, 61) | 1; }
+
 // _emphasis(line, face)
 std::vector<std::u32string> emphasis_of(Fonts& fonts, const core::StoryLine& line, const Face& face) {
     std::vector<std::u32string> out;
@@ -1082,7 +1086,7 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
                 picture = std::move(padded);
             }
             to_image = then(to_image, {1.0, 0.0, 0.0, 1.0, static_cast<double>(grow + 1), static_cast<double>(grow + 1)});
-            if (set_out != nullptr) set_out->halo = std::pair<std::int64_t, Rgb>{grow, halo};
+            if (set_out != nullptr) set_out->halo = std::pair<std::int64_t, Rgb>{halo_filter(grow) / 2, halo};  // (as wide as drawn)
         }
         if (core::py_truthy(at(st, "arc"))) picture = arched(picture, core::to_float(at(st, "arc")), vertical);
         if (skew != 0.0) {
@@ -1273,7 +1277,7 @@ Image outlined(const Image& text, std::int64_t grow, const Rgb& colour) {
     const std::int64_t pad = grow + 1;
     Image padded = Image::create("L", {static_cast<int>(alpha.width() + 2 * pad), static_cast<int>(alpha.height() + 2 * pad)}, 0);
     padded.paste(alpha, Point{static_cast<int>(pad), static_cast<int>(pad)});
-    const Image halo = padded.filter(Filter::max_filter(static_cast<int>(std::min<std::int64_t>(grow * 2 + 1, 61) | 1)));
+    const Image halo = padded.filter(Filter::max_filter(static_cast<int>(halo_filter(grow))));
     Image out = Image::create("RGBA", padded.size(), Ink::with_alpha(colour, 0));
     out.putalpha(halo);
     Image body = Image::create("RGBA", padded.size(), Ink{0, 0, 0, 0});
@@ -1584,7 +1588,9 @@ void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_sp
         }
         const SetLayout set = set_layout(line, dpi, font_path, *parts);
         const Point at_page = lettering_at(line, dpi, set.layout.corner_x, set.layout.corner_y);
-        image.paste(set.layout.image, Point{at_page.x - origin.x, at_page.y - origin.y}, &set.layout.image);
+        // (laid over what is there, so on the blank layer they are the letters' own pixels — pasting them with their
+        // alpha as the mask, as the whole page is drawn, would square it: a·a, the faintest edge pixels lost)
+        composite_at(image, set.layout.image, at_page.x - origin.x, at_page.y - origin.y);
         return;
     }
     const Json st = style_of(line);

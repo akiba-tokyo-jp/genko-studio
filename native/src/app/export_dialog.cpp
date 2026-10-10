@@ -234,6 +234,7 @@ ExportDialog::ExportDialog(QWidget* parent, DocPtr episode, std::optional<fs::pa
     psd_lines->addWidget(psd_notes);
     connect(psd_text, &QComboBox::currentIndexChanged, this, [this] { psd_changed(); });
     connect(psd_unsupported, &QComboBox::currentIndexChanged, this, [this] { psd_changed(); });
+    connect(dpi, &QSpinBox::editingFinished, this, [this] { psd_changed(); });  // (a line of Python's is set at it)
     official = new QCheckBox(QStringLiteral("正式な書き出し（点検して、書き出しの承認として記録する）"));
     official->setChecked(official_only);
     official->setEnabled(!official_only);
@@ -355,7 +356,7 @@ void ExportDialog::psd_changed() {
     QStringList notes;
     try {
         const core::Document part = formats::subset(*episode_, chosen);
-        const std::vector<formats::PsdTextIssue> issues = formats::psd_text_issues(part);
+        const std::vector<formats::PsdTextIssue> issues = formats::psd_text_issues(part, dpi->value());
         if (issues.empty()) {
             notes << QStringLiteral("PSD の文字に表せない装飾のある台詞はありません。");
         } else {
@@ -397,7 +398,7 @@ bool ExportDialog::psd_text_go(const std::vector<std::int64_t>& chosen) {
     if (format->currentData().toString() != QLatin1String("psd") || psd_text->currentData().toString() != QLatin1String("editable")) return true;
     std::vector<formats::PsdTextIssue> issues;
     try {
-        issues = formats::psd_text_issues(formats::subset(*episode_, chosen));
+        issues = formats::psd_text_issues(formats::subset(*episode_, chosen), dpi->value());
     } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
         return false;

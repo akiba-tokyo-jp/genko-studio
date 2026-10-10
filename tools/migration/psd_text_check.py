@@ -1,6 +1,8 @@
 """Read PSD files with psd-tools and print what their layers are (PSD-01's structure check, ACCEPTANCE.md §6).
 
     python psd_text_check.py out.json a.psd [b.psd …]
+    python psd_text_check.py python-book OPS BOOK      (the PSD book made by Python's genko)
+    python psd_text_check.py python-psd BOOK OUT DPI   (Python's PSD of it: the image way)
 
 For each file, {"width", "height", "layers": {"<folder>/<name>": {...}}, "order": {"<folder>": [names bottom to top]}}:
 each layer's kind (pixel, type, group) and, for a type layer, its text as psd-tools reads it (the descriptor's "Txt "
@@ -136,7 +138,60 @@ def view(path: str) -> dict:
     return {"width": psd.width, "height": psd.height, "layers": layers, "order": order}
 
 
+def _graphemes(text: str) -> list[str]:
+    # (a letter with its variation selectors, as the book's ruby ranges count them)
+    out: list[str] = []
+    for ch in text:
+        if out and (0xFE00 <= ord(ch) <= 0xFE0F or 0xE0100 <= ord(ch) <= 0xE01EF):
+            out[-1] += ch
+        else:
+            out.append(ch)
+    return out
+
+
+def python_book(ops_path: str, dest: str) -> None:
+    """The PSD book as Python's genko makes it (four A4 pages, the ops applied; a ruby by place given as its ruby_runs:
+    Python's book has no rubies by place), saved."""
+    from pathlib import Path
+
+    from genko.headless import apply_ops
+    from genko.io import save_episode
+    from genko.models import PageSpec, new_episode
+
+    with open(ops_path, encoding="utf-8") as f:
+        ops = json.load(f)
+    for op in ops:
+        spans = op.pop("ruby_spans", None)
+        if spans:
+            letters = _graphemes(op["text"])
+            op["ruby_runs"] = [["".join(letters[s["start"]:s["end"]]), s["ruby"]] for s in spans]
+    episode = new_episode("PSD文字", 1, 4, PageSpec.a4_mono())
+    apply_ops(episode, ops, agent="human:作者")
+    save_episode(episode, Path(dest))
+
+
+def python_psd(book: str, out: str, dpi: int) -> None:
+    """Python's PSD of every page of a book (psd.export_psd_pages), its text laid out as the measured reference's:
+    Pillow's BASIC layout, without raqm, as render_harness and pyref_harness hold it (the C++ drawing is BASIC's)."""
+    from pathlib import Path
+
+    from PIL import ImageFont
+
+    ImageFont.core.HAVE_RAQM = False
+
+    from genko import psd
+    from genko.io import load_episode
+
+    psd.export_psd_pages(load_episode(Path(book)), Path(out), dpi)
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) > 1 and argv[1] == "python-book":
+        python_book(argv[2], argv[3])
+        return 0
+    if len(argv) > 1 and argv[1] == "python-psd":
+        python_psd(argv[2], argv[3], int(argv[4]))
+        return 0
     out, paths = argv[1], argv[2:]
     with open(out, "w", encoding="utf-8") as f:
         json.dump({path: view(path) for path in paths}, f, ensure_ascii=False, indent=1)

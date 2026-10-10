@@ -299,7 +299,7 @@ public:
 
     void add(const core::StoryLine& line) {
         const std::string words = detail::words_of(line.text, 24);
-        std::vector<std::string> features = detail::line_features(line);
+        std::vector<std::string> features = detail::line_features(line, dpi_, font_path_);
         if (!features.empty()) {  // (asked to: as the image way draws it)
             Image whole = blank();
             render::text::draw_lines(render::text::whole_page(whole), {&line}, dpi_, font_path_, false, nullptr, {}, nullptr);
@@ -312,12 +312,8 @@ public:
         }
         detail::font_warnings(line, page_, font_path_, fonts_, nullptr, report_.warnings);
         // (a line of Python's holds its rubies by place where the explicit rule finds them, as ruby_places tells them
-        // apart: its text and pixels drawn so)
-        core::StoryLine twin = line;
-        if (!twin.ruby_spans) {
-            std::vector<core::RubySpan> spans = core::ruby::from_runs(line.text, line.ruby_runs, false);
-            if (!spans.empty()) twin.ruby_spans = std::move(spans);
-        }
+        // apart: its text and pixels drawn so — line_features has made sure that sets it as its own lettering does)
+        const core::StoryLine twin = detail::by_place(line);
         struct Made {
             std::string name;
             Image picture;
@@ -428,6 +424,16 @@ private:
         return name;
     }
 
+    // Characters as the PSD's text holds them: a control character (U+0000–U+001F, U+007F; the lettering sets one as a
+    // character of its row) is a space — U+000D would be a paragraph break and U+0003 a forced line break there.
+    static std::u16string engine_text(std::u32string_view text) {
+        std::u32string kept(text);
+        for (char32_t& c : kept) {
+            if (c < 0x20 || c == 0x7f) c = U' ';
+        }
+        return render::psd::utf16(render::text::utf8(kept));
+    }
+
     // The runs of characters in one style, from each character's.
     static void runs_of(const std::vector<render::psd::TextStyle>& styles, render::psd::TextLayer& layer) {
         for (const render::psd::TextStyle& style : styles) {
@@ -451,7 +457,6 @@ private:
         // the space after each character (px): down, Python's whole pixels and never less than nothing
         const double tracking = number("tracking", 0.0);
         const double gap = set.vertical ? static_cast<double>(std::max<std::int64_t>(0, core::py_round_int(em * tracking))) : em * tracking;
-        const bool upright_latin = set.vertical && st.contains("latin") && st["latin"] == core::Json("upright");
         const auto& rows = set.rows;
         // the distance of each row (column) from the one before: baselines down the page, columns' middles to the left
         const auto pitch = [&](std::size_t r) {
@@ -477,9 +482,11 @@ private:
                 style.fill = {colour(ch.rgb, 0), colour(ch.rgb, 1), colour(ch.rgb, 2)};
                 style.tracking = ch.size > 0 ? gap / static_cast<double>(ch.size) * 1000.0 : 0.0;
                 style.leading = leading;
-                style.baseline_direction = !set.vertical ? 2 : ch.tcy ? 3 : upright_latin && !ch.sideways && ch.text.size() == 1 && ch.text[0] < 0x2e80 ? 1 : 2;
+                // (down: half-width letters laid on their side 2, across in their cell 3, every other cell upright 1 —
+                // a lone letter, digit or ! is upright, as the lettering keeps it; across: the text engine's default)
+                style.baseline_direction = !set.vertical ? 2 : ch.sideways ? 2 : ch.tcy ? 3 : 1;
                 style.run_alignment = 2;
-                const std::u16string text = render::psd::utf16(render::text::utf8(ch.text));
+                const std::u16string text = engine_text(ch.text);
                 out.text += text;
                 styles.insert(styles.end(), text.size(), style);
                 last = style;
@@ -555,7 +562,7 @@ private:
             style.fill = {colour(place.fill, 0), colour(place.fill, 1), colour(place.fill, 2)};
             style.tracking = place.size > 0 ? place.spacing / static_cast<double>(place.size) * 1000.0 : 0.0;
             style.leading = static_cast<double>(place.size);
-            const std::u16string text = render::psd::utf16(render::text::utf8(place.reading.substr(letters[i], letters[i + 1] - letters[i])));
+            const std::u16string text = engine_text(place.reading.substr(letters[i], letters[i + 1] - letters[i]));
             out.text += text;
             styles.insert(styles.end(), text.size(), style);
         }
@@ -606,10 +613,15 @@ std::string resources(std::int64_t dpi) {
     return out + block;
 }
 
+// The resolution a PSD is written at: the one asked for (nothing or 0: the book's, else 600).
+std::int64_t psd_dpi(const core::Document& episode, std::optional<std::int64_t> dpi_given) {
+    return dpi_given && *dpi_given != 0 ? *dpi_given : episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600;
+}
+
 // The page's PSD (export_page_psd), put into `output` at `dest`.
 void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest,
                   std::optional<std::int64_t> dpi_given, const PsdText& text = {}, PsdTextReport* report = nullptr) {
-    const std::int64_t dpi = dpi_given && *dpi_given != 0 ? *dpi_given : episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600;
+    const std::int64_t dpi = psd_dpi(episode, dpi_given);
     check_dpi(dpi);
     render::RenderOptions options;
     options.mode = "print";
@@ -650,16 +662,17 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
 
 // (PSD-01) The strict editable export stops before anything is drawn when a line on the pages written uses what PSD
 // text cannot keep.
-void check_psd_text(const core::Document& episode, const PsdText& text, const core::Page* only) {
+void check_psd_text(const core::Document& episode, const PsdText& text, const core::Page* only, std::int64_t dpi) {
     if (!text.editable || text.rasterize) return;
-    std::vector<PsdTextIssue> issues = psd_text_issues(episode);
+    check_dpi(dpi);  // (before any line is set at it)
+    std::vector<PsdTextIssue> issues = psd_text_issues(episode, dpi);
     if (only != nullptr) std::erase_if(issues, [&](const PsdTextIssue& issue) { return core::Num(issue.page) != only->index; });
     if (!issues.empty()) throw PsdTextRefused(std::move(issues));
 }
 
 fs::path export_page_psd(const core::Document& episode, const core::Page& page, const fs::path& dest, std::optional<std::int64_t> dpi,
                          const PsdText& text, PsdTextReport* report) {
-    check_psd_text(episode, text, &page);
+    check_psd_text(episode, text, &page, psd_dpi(episode, dpi));
     detail::Output output;
     put_page_psd(output, episode, page, dest, dpi, text, report);
     output.commit();
@@ -668,7 +681,7 @@ fs::path export_page_psd(const core::Document& episode, const core::Page& page, 
 
 std::vector<fs::path> export_psd_pages(const core::Document& episode, const fs::path& dest, std::optional<std::int64_t> dpi,
                                        const PsdText& text, PsdTextReport* report) {
-    check_psd_text(episode, text, nullptr);
+    check_psd_text(episode, text, nullptr, psd_dpi(episode, dpi));
     detail::make_dirs(dest);
     detail::Output output;  // (one export: every page's PSD moved into place together)
     std::vector<fs::path> written;

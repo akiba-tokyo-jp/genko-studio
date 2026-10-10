@@ -22,6 +22,7 @@
 #include "render/ops_registry.hpp"
 #include "render/psd.hpp"
 #include "render/psd_text.hpp"
+#include "storage/reader.hpp"
 #include "testsupport.hpp"
 
 using genko::core::Json;
@@ -161,6 +162,64 @@ private slots:
         QCOMPARE(p4["layers"]["台詞 均等に割り付けた縦の行/本文 #p4c"]["text"]["shape"], Json("box"));
         QVERIFY(p4["layers"].contains("/ノンブル"));
         QCOMPARE(p4["layers"]["/ノンブル"]["kind"], Json("pixel"));
+    }
+
+    // The image way (the default PSD) is Python's: the PSD book as Python makes it (its rubies as ruby_runs — Python's
+    // book has none by place) written by Python's psd.export_psd_pages — its text laid out by Pillow's BASIC layout, without
+    // raqm, as render_harness holds the reference — and by this build, byte for byte. (The unit test holds the PSD book's
+    // own image-way bytes to those of the build before PSD-01.)
+    void imageWayIsPythons() {
+        const QString script = genko::test::repo_root() + QStringLiteral("/tools/migration/psd_text_check.py");
+        const QString book = path(QStringLiteral("python.genko"));
+        auto ran = genko::test::run(genko::test::python_ref(), {script, QStringLiteral("python-book"), genko::test::test_data(QStringLiteral("psd_text_book.json")), book},
+                                    genko::test::python_env(path(QStringLiteral("pyenv"))));
+        QVERIFY2(ran.exit_code == 0, ran.err.constData());
+        ran = genko::test::run(genko::test::python_ref(), {script, QStringLiteral("python-psd"), book, path(QStringLiteral("python-psd")), QStringLiteral("150")},
+                               genko::test::python_env(path(QStringLiteral("pyenv"))));
+        QVERIFY2(ran.exit_code == 0, ran.err.constData());
+        const auto loaded = genko::storage::load_document(genko::core::path_from_utf8(book.toStdString()));
+        const auto files = genko::formats::export_psd_pages(loaded.document, genko::core::path_from_utf8(path("cpp-psd").toStdString()), kDpi);
+        QCOMPARE(files.size(), std::size_t{4});
+        const auto theirs = genko::test::tree_hashes(path(QStringLiteral("python-psd")));
+        const auto mine = genko::test::tree_hashes(path(QStringLiteral("cpp-psd")));
+        QCOMPARE(mine.size(), std::size_t{4});
+        QVERIFY(mine == theirs);
+    }
+
+    // A font whose PostScript name ends in a backslash: written without it, and psd-tools reads the text.
+    void fontNameAsPsdToolsReadsIt() {
+        std::string font = genko::test::read_bytes(genko::test::repo_root() + QStringLiteral("/src/genko/fonts/Yomogi-Regular.ttf"));
+        const auto be16 = [&](std::size_t at) { return (static_cast<unsigned char>(font[at]) << 8) | static_cast<unsigned char>(font[at + 1]); };
+        const auto be32 = [&](std::size_t at) { return (static_cast<std::size_t>(be16(at)) << 16) | static_cast<std::size_t>(be16(at + 2)); };
+        for (std::size_t i = 0; i < static_cast<std::size_t>(be16(4)); ++i) {  // (each PostScript name record's last character a backslash)
+            const std::size_t rec = 12 + i * 16;
+            if (font.compare(rec, 4, "name") != 0) continue;
+            const std::size_t name = be32(rec + 8);
+            const std::size_t strings = name + static_cast<std::size_t>(be16(name + 4));
+            for (std::size_t k = 0; k < static_cast<std::size_t>(be16(name + 2)); ++k) {
+                const std::size_t r = name + 6 + k * 12;
+                if (be16(r + 6) != 6) continue;
+                const std::size_t end = strings + static_cast<std::size_t>(be16(r + 10)) + static_cast<std::size_t>(be16(r + 8));
+                if (be16(r) != 1) font[end - 2] = '\0';
+                font[end - 1] = '\\';
+            }
+        }
+        genko::test::write_bytes(path(QStringLiteral("spoilt.ttf")), font);
+        genko::core::Document doc = genko::core::new_episode("書体名", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        doc = run_ops(doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "f"}, {"text", "ふでの字"}, {"x_mm", 140}, {"y_mm", 20},
+                                             {"w_mm", 30}, {"h_mm", 60}, {"wrap", "vertical"}, {"balloon", "none"},
+                                             {"style", Json{{"size_mm", 5}, {"font", path(QStringLiteral("spoilt.ttf")).toStdString()}}}}}));
+        const std::string file = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("font-name").toStdString()), kDpi,
+                                                                  genko::formats::PsdText{true, false})
+                                     .front()
+                                     .string();
+        Json theirs = psd_tools({file});  // (not const: a key it lacks reads as null)
+        QVERIFY(theirs.is_object() && theirs.contains(file));
+        Json& text = theirs[file]["layers"]["台詞 ふでの字/本文 #f"]["text"];
+        QCOMPARE(text["text"], Json("ふでの字"));
+        QCOMPARE(text["runs"][0]["style"]["font"], Json("Yomogi-Regula"));
+        std::string where;
+        QVERIFY2(genko::test::same_content(theirs[file], own_view(file), &where), where.c_str());
     }
 
     // A line using what PSD text cannot keep, drawn as a picture when asked: psd-tools reads it as a picture layer

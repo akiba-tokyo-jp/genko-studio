@@ -114,6 +114,32 @@ int ink_in(const Image& image, const genko::render::Box& b) { return ink_in(imag
 
 bool near(double a, double b, double within) { return std::fabs(a - b) <= within; }
 
+// A font's PostScript name (name ID 6, each record) given a backslash for its last character, in place.
+bool spoil_postscript_name(std::string& font) {
+    const auto be16 = [&](std::size_t at) { return (static_cast<unsigned char>(font[at]) << 8) | static_cast<unsigned char>(font[at + 1]); };
+    const auto be32 = [&](std::size_t at) { return (static_cast<std::size_t>(be16(at)) << 16) | static_cast<std::size_t>(be16(at + 2)); };
+    bool spoilt = false;
+    for (std::size_t i = 0; i < static_cast<std::size_t>(be16(4)); ++i) {
+        const std::size_t rec = 12 + i * 16;
+        if (font.compare(rec, 4, "name") != 0) continue;
+        const std::size_t name = be32(rec + 8);
+        const std::size_t strings = name + static_cast<std::size_t>(be16(name + 4));
+        for (std::size_t k = 0; k < static_cast<std::size_t>(be16(name + 2)); ++k) {
+            const std::size_t r = name + 6 + k * 12;
+            if (be16(r + 6) != 6) continue;
+            const std::size_t end = strings + static_cast<std::size_t>(be16(r + 10)) + static_cast<std::size_t>(be16(r + 8));
+            if (be16(r) == 1) {
+                font[end - 1] = '\\';
+            } else {
+                font[end - 2] = '\0';
+                font[end - 1] = '\\';
+            }
+            spoilt = true;
+        }
+    }
+    return spoilt;
+}
+
 // The JSON a command printed last on a stream (stderr may hold Qt's words about the locale before it), as an object.
 Json printed(const QByteArray& stream) {
     QList<QByteArray> lines = stream.trimmed().split('\n');
@@ -126,6 +152,12 @@ std::string fonts_of(const psd::TextLayer& text) {
     for (const auto& run : text.runs) out += (out.empty() ? "" : ",") + run.style.font;
     return out;
 }
+
+// The image-way PSD of each page of the PSD book at 150 dpi (imageWayIsAsBefore).
+const QString kImageWay[4] = {QStringLiteral("1b6d11a43f8606e655dfa18495011edda404e609290241b9f7fa1e91914aa7bd"),
+                              QStringLiteral("1f1457dfff7b5c7782f9d8532a37d242d9385a714dd26f97dd0199dd1cc99ca4"),
+                              QStringLiteral("f7d33547e0049c31cfd8ec16e5128a01dbca3a7aeecbb42155dfced6fcda7af7"),
+                              QStringLiteral("5a8b99f44a399f5542db7ced98d789069da421975dcb7f81097110d5bb3fe665")};
 
 constexpr const char* kGothic = "ZenKakuGothicNew-Bold";
 constexpr const char* kMincho = "ZenOldMincho-SemiBold";
@@ -204,20 +236,144 @@ private slots:
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, psd::read_tysh("not a type layer"));
     }
 
-    // The image way (the default) is Python's PSD: no text layers, nothing in a group.
+    // The image way (the default) is Python's PSD, unchanged by PSD-01: the fixture book's pages are the bytes the build
+    // before the editable PSD wrote (their sha256, below: written by e146b96's genko, whose image way test_contract_export
+    // holds to Python's, and the same as Python's own for the book without what only this build has —
+    // test_contract_psd_text's imageWayIsPythons), with no text layer and no group.
     void imageWayIsAsBefore() {
         const Document doc = psd_book();
         const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("image")), kDpi);
         QCOMPARE(files.size(), std::size_t{4});
-        const auto again = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("image-again")), kDpi, genko::formats::PsdText{});
         for (std::size_t i = 0; i < files.size(); ++i) {
             const std::string bytes = genko::test::read_bytes(QString::fromStdString(files[i].string()));
-            QVERIFY(bytes == genko::test::read_bytes(QString::fromStdString(again[i].string())));
+            const QString sha = QString::fromLatin1(QCryptographicHash::hash(QByteArray::fromStdString(bytes), QCryptographicHash::Sha256).toHex());
+            QVERIFY2(sha == kImageWay[i], qPrintable(QString::number(i + 1) + ": " + sha));
             QVERIFY(bytes.find("TySh") == std::string::npos);
             QVERIFY(bytes.find("lsct") == std::string::npos);
             const Read r = read_psd(files[i].string());
             for (const auto& layer : r.layers) QVERIFY(!r.file.text(layer).has_value());
         }
+    }
+
+    // Each line's layers put together with the renderer's own operation — its balloon layer, then each letter layer
+    // pasted on with its alpha as the mask, as render::page_layers draws a line for the image way — are exactly that
+    // line's image-way layer, every pixel. (A line with an outline is left out: the PSD draws it as the layer's stroke.
+    // A turned line's sheet is resampled whole in the image way — bicubic, each pixel from the 4×4 sheet pixels about
+    // its place, which turned lie within 2√2 < 3 pixels of it, clipped to 0..255, after the letters were pasted on the
+    // balloon with their alpha as the mask — and its balloon and letters apart here, so the two can be the same only
+    // away from the letters. There: a pixel whose 7×7 square no letter layer reaches is exactly the balloon layer's
+    // (most of the line); every pixel where the image way is not the balloon has a letter layer's pixel in its 7×7
+    // square, and every letter layer's pixel such a pixel in its own; and a pixel one letter layer covers opaquely is,
+    // in the image way, nearer that layer's pixel than the balloon's.)
+    void layersMakeTheLine() {
+        const Document doc = psd_book();
+        const auto editable = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("composite")), kDpi,
+                                                               genko::formats::PsdText{true, false});
+        const auto images = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("composite-images")), kDpi);
+        int groups = 0, exact = 0, turned = 0, interior = 0;
+        for (std::size_t page = 0; page < editable.size(); ++page) {
+            const Read e = read_psd(editable[page].string());
+            const Read im = read_psd(images[page].string());
+            for (const auto& group : e.layers) {
+                if (!group.folder) continue;
+                bool halo = false;
+                const psd::Layer* balloon = nullptr;
+                std::vector<Image> letters;
+                std::string id;
+                for (const psd::Layer* layer : e.in(group.name)) {
+                    if (e.file.stroke(*layer)) halo = true;
+                    if (layer->name == "フキダシ") {
+                        balloon = layer;
+                        continue;
+                    }
+                    letters.push_back(e.file.image(*layer));
+                    if (layer->name.rfind("本文 #", 0) == 0) id = layer->name.substr(std::string("本文 #").size());
+                }
+                if (halo) continue;
+                const psd::Layer* whole = im.named(group.name);
+                QVERIFY2(whole != nullptr, group.name.c_str());
+                const Image line = im.file.image(*whole);
+                ++groups;
+                const genko::core::Json& rotate = line_of(doc, id).style.is_object() && line_of(doc, id).style.contains("rotate_deg")
+                                                      ? line_of(doc, id).style["rotate_deg"]
+                                                      : genko::core::Json(0);
+                if (rotate == genko::core::Json(0)) {
+                    Image rebuilt = balloon != nullptr ? e.file.image(*balloon) : Image::create("RGBA", line.size(), genko::render::Ink{0, 0, 0, 0});
+                    for (const Image& l : letters) rebuilt.paste(l, genko::render::Point{0, 0}, &l);
+                    const std::string a = rebuilt.tobytes();
+                    const std::string b = line.tobytes();
+                    if (a != b) {
+                        std::size_t at = 0;
+                        while (a[at] == b[at]) ++at;
+                        QFAIL((group.name + " differs at " + std::to_string(at / 4 % static_cast<std::size_t>(line.width())) + "," +
+                               std::to_string(at / 4 / static_cast<std::size_t>(line.width())))
+                                  .c_str());
+                    }
+                    ++exact;
+                    continue;
+                }
+                ++turned;
+                const std::string want = line.tobytes();
+                const std::string base = balloon != nullptr ? e.file.image(*balloon).tobytes() : std::string(want.size(), '\0');
+                const int w = line.width(), h = line.height();
+                const auto at = [&](int x, int y) { return static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x); };
+                std::vector<std::string> marks;
+                for (const Image& l : letters) marks.push_back(l.tobytes());
+                // per pixel: whether a letter layer reaches it, the one that covers it opaquely (alone), whether the image
+                // way differs there from the balloon layer
+                std::vector<unsigned char> reach(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0), changed(reach.size(), 0);
+                std::vector<int> opaque(reach.size(), -1);
+                for (std::size_t p = 0; p < reach.size(); ++p) {
+                    int count = 0, full = -1;
+                    for (std::size_t m = 0; m < marks.size(); ++m) {
+                        const auto alpha = static_cast<unsigned char>(marks[m][p * 4 + 3]);
+                        if (alpha == 0) continue;
+                        ++count;
+                        if (alpha == 255) full = static_cast<int>(m);
+                    }
+                    reach[p] = count > 0 ? 1 : 0;
+                    if (count == 1) opaque[p] = full;
+                    changed[p] = want.compare(p * 4, 4, base, p * 4, 4) != 0 ? 1 : 0;
+                }
+                const auto near = [&](const std::vector<unsigned char>& mask, int x, int y) {  // (in the 7×7 square about it)
+                    for (int yy = std::max(0, y - 3); yy <= std::min(h - 1, y + 3); ++yy) {
+                        for (int xx = std::max(0, x - 3); xx <= std::min(w - 1, x + 3); ++xx) {
+                            if (mask[at(xx, yy)] != 0) return true;
+                        }
+                    }
+                    return false;
+                };
+                const auto distance = [](const std::string& a, const std::string& b, std::size_t p) {
+                    int d = 0;
+                    for (std::size_t c = 0; c < 4; ++c) d += std::abs(int(static_cast<unsigned char>(a[p * 4 + c])) - int(static_cast<unsigned char>(b[p * 4 + c])));
+                    return d;
+                };
+                std::int64_t inked = 0, exactly = 0;
+                for (int y = 0; y < h; ++y) {
+                    for (int x = 0; x < w; ++x) {
+                        const std::size_t p = at(x, y);
+                        const std::string where = group.name + " at " + std::to_string(x) + "," + std::to_string(y);
+                        if (want[p * 4 + 3] != 0) ++inked;
+                        if (!near(reach, x, y)) {  // the balloon, exactly (letters there would be ones the letter layers lack)
+                            if (changed[p] != 0) QFAIL(("not the balloon: " + where).c_str());
+                            if (want[p * 4 + 3] != 0) ++exactly;
+                        }
+                        if (reach[p] != 0 && !near(changed, x, y)) QFAIL(("letters the image way does not have: " + where).c_str());
+                        if (opaque[p] >= 0) {  // the letters, not the balloon
+                            const std::string& mark = marks[static_cast<std::size_t>(opaque[p])];
+                            if (distance(want, mark, p) >= distance(want, base, p)) QFAIL(("not the letters: " + where).c_str());
+                            ++interior;
+                        }
+                    }
+                }
+                // most of the line is compared exactly
+                QVERIFY2(exactly * 4 > inked * 3, qPrintable(QString::number(exactly) + " of " + QString::number(inked)));
+            }
+        }
+        QCOMPARE(groups, 17);  // (every line but the two with an outline)
+        QCOMPARE(turned, 1);
+        QCOMPARE(exact, 16);
+        QVERIFY(interior > 100);
     }
 
     // The book written editable and read back with this build's reader.
@@ -279,7 +435,7 @@ private slots:
             QVERIFY(!run.style.faux_bold && !run.style.faux_italic);
             QVERIFY((run.style.fill == std::array<int, 3>{10, 10, 10}));
             QCOMPARE(run.style.tracking, 0.0);
-            QCOMPARE(run.style.baseline_direction, 2);
+            QCOMPARE(run.style.baseline_direction, 1);  // (upright in its column, as drawn)
         }
         QCOMPARE(t.paragraphs.size(), std::size_t{1});
         QCOMPARE(t.paragraphs[0].justification, 0);
@@ -320,8 +476,8 @@ private slots:
         t = text_of(p1, "本文 #p1c");
         QVERIFY(t.text == u"AIと12時");
         for (const std::size_t at : {std::size_t{0}, std::size_t{1}, std::size_t{3}, std::size_t{4}}) QCOMPARE(t.style_at(at)->baseline_direction, 3);
-        QCOMPARE(t.style_at(2)->baseline_direction, 2);
-        QCOMPARE(t.style_at(5)->baseline_direction, 2);
+        QCOMPARE(t.style_at(2)->baseline_direction, 1);
+        QCOMPARE(t.style_at(5)->baseline_direction, 1);
         // the styled parts: 「大きな」 larger, 「声」 bold and red; two readings
         t = text_of(p1, "本文 #p1d");
         const std::int64_t em_d = em_of("p1d");
@@ -451,7 +607,7 @@ private slots:
                            {"h_mm", 20}, {"wrap", "horizontal"}, {"balloon", "none"},
                            {"style", Json{{"fill_png", genko::core::b64encode(png)}}}});
         doc = run_ops(doc, ops);
-        const auto issues = genko::formats::psd_text_issues(doc);
+        const auto issues = genko::formats::psd_text_issues(doc, kDpi);
         Json listed = genko::formats::issues_json(issues);
         QCOMPARE(listed, Json::parse(R"([
             {"page": 1, "line": "grad", "text": "グラデ", "features": ["gradient"]},
@@ -541,7 +697,11 @@ private slots:
         QCOMPARE(ran.exit_code, 0);
         ran = genko::test::run_genko({"export", book, tmp_.path() + "/cli-image", "--format", "psd", "--dpi", "150", "--psd-text", "image"});
         QCOMPARE(ran.exit_code, 0);
-        QVERIFY(genko::test::tree_hashes(tmp_.path() + "/cli-default") == genko::test::tree_hashes(tmp_.path() + "/cli-image"));
+        const auto written = genko::test::tree_hashes(tmp_.path() + "/cli-default");
+        QVERIFY(written == genko::test::tree_hashes(tmp_.path() + "/cli-image"));
+        QCOMPARE(written.size(), std::size_t{4});
+        std::size_t page = 0;
+        for (const auto& [name, sha] : written) QCOMPARE(QString::fromStdString(sha), kImageWay[page++]);  // (Python's PSD)
         // what it refuses
         const QString unsupported = tmp_.path() + "/cli-unsupported.genko";
         ran = genko::test::run_genko({"new", unsupported, "--pages", "1", "--plain"});
@@ -569,6 +729,154 @@ private slots:
             QVERIFY2(ran.exit_code == 2, qPrintable(wrong.join(' ')));
             QCOMPARE(printed(ran.err)["code"], Json("usage"));
         }
+    }
+
+    // An outline is the layer's stroke as wide as the halo the lettering draws: the halo's filter stops at 61 px (30 px
+    // round the letters), so a wider outline — effect letters' own at 600 dpi (em / 8 = 35 px), outline_mm 3 (71 px), a
+    // 網かけの箱's (em / 7) — is 30 px in the PSD too.
+    void strokeIsTheHaloDrawn() {
+        genko::core::PageSpec spec = genko::core::PageSpec::a4_mono();
+        spec.width_mm = genko::core::Num(90);
+        spec.height_mm = genko::core::Num(110);
+        spec.preset.reset();
+        Document doc = genko::core::new_episode("縁", genko::core::Num(1), 1, spec);
+        doc = run_ops(doc, Json::parse(R"([
+            {"op": "add_line", "page": 1, "id": "sfx", "text": "ドン", "x_mm": 5, "y_mm": 5, "w_mm": 80, "h_mm": 30, "wrap": "horizontal",
+             "balloon": "sfx"},
+            {"op": "add_line", "page": 1, "id": "wide", "text": "縁", "x_mm": 30, "y_mm": 45, "w_mm": 20, "h_mm": 20, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5, "outline_mm": 3}},
+            {"op": "add_line", "page": 1, "id": "thin", "text": "細", "x_mm": 30, "y_mm": 75, "w_mm": 20, "h_mm": 20, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5, "outline_mm": 0.5}}])"));
+        constexpr int kFine = 600;
+        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("halo")), kFine, genko::formats::PsdText{true, false});
+        const Read r = read_psd(files.front().string());
+        for (const auto& [id, width] : std::vector<std::pair<std::string, double>>{{"sfx", 30}, {"wide", 30}, {"thin", 12}}) {
+            const auto stroke = r.file.stroke(*r.named("本文 #" + id));
+            QVERIFY2(stroke.has_value(), id.c_str());
+            QVERIFY2(stroke->size == width, (id + ": " + std::to_string(stroke->size)).c_str());
+            // the halo the lettering draws reaches that far round the letters, every side
+            const auto& line = line_of(doc, id);
+            const Image whole = genko::render::text::text_layout(line, kFine).image;
+            const Image letters = genko::render::text::set_layout(line, kFine, std::nullopt, genko::render::text::LetterParts{false, true, true, false}).layout.image;
+            QCOMPARE(whole.size(), letters.size());
+            const auto a = whole.getbbox().value();
+            const auto b = letters.getbbox().value();
+            QVERIFY2(b.x0 - a.x0 == width && b.y0 - a.y0 == width && a.x1 - b.x1 == width && a.y1 - b.y1 == width, id.c_str());
+        }
+    }
+
+    // Down, a cell of half-width letters the lettering keeps upright (a lone letter or digit, a lone !) is upright in the
+    // PSD too (BaselineDirection 1), 縦中横 across in its cell (3), a Latin word of four letters or more laid on its side (2).
+    void halfWidthUprightDown() {
+        Document doc = genko::core::new_episode("向き", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        doc = run_ops(doc, Json::parse(R"([
+            {"op": "add_line", "page": 1, "id": "a", "text": "え!?3日後だ!", "x_mm": 150, "y_mm": 20, "w_mm": 30, "h_mm": 90, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5}},
+            {"op": "add_line", "page": 1, "id": "b", "text": "第5話", "x_mm": 110, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5, "tcy": true}},
+            {"op": "add_line", "page": 1, "id": "c", "text": "Genkoで描く", "x_mm": 70, "y_mm": 20, "w_mm": 30, "h_mm": 90, "wrap": "vertical",
+             "balloon": "none", "style": {"size_mm": 5}}])"));
+        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("upright")), kDpi, genko::formats::PsdText{true, false});
+        const Read r = read_psd(files.front().string());
+        const psd::TextLayer a = r.file.text(*r.named("本文 #a")).value();
+        QVERIFY(a.text == u"え!?3日後だ!");
+        const std::vector<int> want_a{1, 3, 3, 1, 1, 1, 1, 1};
+        for (std::size_t i = 0; i < want_a.size(); ++i) QVERIFY2(a.style_at(i)->baseline_direction == want_a[i], std::to_string(i).c_str());
+        const psd::TextLayer b = r.file.text(*r.named("本文 #b")).value();
+        QVERIFY(b.text == u"第5話");
+        QCOMPARE(b.style_at(1)->baseline_direction, 1);
+        const psd::TextLayer c = r.file.text(*r.named("本文 #c")).value();
+        QVERIFY(c.text == u"Genkoで描く");
+        for (std::size_t i = 0; i < 5; ++i) QCOMPARE(c.style_at(i)->baseline_direction, 2);
+        QCOMPARE(c.style_at(5)->baseline_direction, 1);
+    }
+
+    // A line of Python's (ruby_runs) that the rubies by place set otherwise than its own lettering — a reading wider than
+    // its text: Python's way cuts it, by place the lettering widens — is not kept as text (its layers would not be the
+    // line drawn): listed (strict stops), drawn as a picture when asked; one set alike stays text.
+    void pythonRubySetOtherwise() {
+        Document doc = genko::core::new_episode("旧ルビ", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        doc = run_ops(doc, Json::parse(R"([
+            {"op": "add_line", "page": 1, "id": "long", "text": "字だ", "x_mm": 20, "y_mm": 100, "w_mm": 40, "h_mm": 20, "wrap": "horizontal",
+             "ruby_runs": [["字", "ながいながいよみがなです"]]},
+            {"op": "add_line", "page": 1, "id": "fine", "text": "漢字の読み", "x_mm": 60, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "ruby_runs": [["漢字", "かんじ"]]}])"));
+        QVERIFY(!genko::render::text::ruby_places(line_of(doc, "long"), kDpi).exact);
+        QCOMPARE(genko::formats::issues_json(genko::formats::psd_text_issues(doc, kDpi)),
+                 Json::parse(R"([{"page": 1, "line": "long", "text": "字だ", "features": ["ruby_runs"]}])"));
+        QVERIFY_THROWS_EXCEPTION(genko::formats::PsdTextRefused, genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("old-strict")), kDpi,
+                                                                                                genko::formats::PsdText{true, false}));
+        genko::formats::PsdTextReport report;
+        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("old-raster")), kDpi,
+                                                            genko::formats::PsdText{true, true}, &report);
+        QCOMPARE(report.rasterized.size(), std::size_t{1});
+        const Read r = read_psd(files.front().string());
+        const Read images = read_psd(genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("old-images")), kDpi)[0].string());
+        QVERIFY(r.file.image(*r.named("台詞 字だ")).tobytes() == images.file.image(*images.named("台詞 字だ")).tobytes());
+        QVERIFY(r.file.text(*r.named("ルビ「かんじ」 #fine-r0")).has_value());
+        const auto& table = genko::formats::psd_text_unsupported();
+        QVERIFY(std::any_of(table.begin(), table.end(), [](const auto& f) { return f.key == "ruby_runs"; }));
+    }
+
+    // Control characters the lettering draws in a row (a carriage return, a tab, U+0003 — Photoshop's paragraph and
+    // forced line breaks) are spaces in the PSD's text: one paragraph a row, the runs as long as the text.
+    void controlCharactersAreSpaces() {
+        Document doc = genko::core::new_episode("制御", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        Json op{{"op", "add_line"}, {"page", 1}, {"id", "c"}, {"text", "横の\r改行\tタブ\x03終わり"}, {"x_mm", 20}, {"y_mm", 20}, {"w_mm", 150},
+                {"h_mm", 20}, {"wrap", "horizontal"}, {"balloon", "none"}, {"style", Json{{"size_mm", 5}}}};
+        doc = run_ops(doc, Json::array({op}));
+        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("controls")), kDpi, genko::formats::PsdText{true, false});
+        const Read r = read_psd(files.front().string());
+        const psd::TextLayer t = r.file.text(*r.named("本文 #c")).value();
+        QVERIFY(t.text == u"横の 改行 タブ 終わり");
+        QVERIFY(t.engine_text == t.text + u"\r");
+        QCOMPARE(t.paragraphs.size(), std::size_t{1});
+        std::size_t length = 0;
+        for (const auto& run : t.runs) length += run.length;
+        QCOMPARE(length, t.text.size() + 1);
+    }
+
+    // A font's PostScript name is written with only A–Z, a–z, 0–9 and . _ + - (a backslash at its end would end the
+    // text engine's text for psd-tools).
+    void fontNamesAreTokens() {
+        std::string font = genko::test::read_bytes(genko::test::repo_root() + "/src/genko/fonts/Yomogi-Regular.ttf");
+        QVERIFY(!font.empty());
+        QVERIFY(spoil_postscript_name(font));
+        const QString file = tmp_.path() + "/spoilt-name.ttf";
+        genko::test::write_bytes(file, font);
+        Document doc = genko::core::new_episode("書体名", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        doc = run_ops(doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "f"}, {"text", "ふでの字"}, {"x_mm", 140}, {"y_mm", 20},
+                                             {"w_mm", 30}, {"h_mm", 60}, {"wrap", "vertical"}, {"balloon", "none"},
+                                             {"style", Json{{"size_mm", 5}, {"font", file.toStdString()}}}}}));
+        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("font-name")), kDpi, genko::formats::PsdText{true, false});
+        const Read r = read_psd(files.front().string());
+        const psd::TextLayer t = r.file.text(*r.named("本文 #f")).value();
+        QCOMPARE(t.runs.front().style.font, std::string("Yomogi-Regula"));
+    }
+
+    // A descriptor nested without end (lists in lists) is refused, not followed until the stack runs out.
+    void deepDescriptorsAreRefused() {
+        std::string payload;
+        const auto u16 = [&](unsigned v) { payload += static_cast<char>(v >> 8); payload += static_cast<char>(v & 0xff); };
+        const auto u32 = [&](std::uint32_t v) { u16(v >> 16); u16(v & 0xffff); };
+        u16(1);
+        payload.append(48, '\0');  // (the transform)
+        u16(50);
+        u32(16);
+        u32(1);
+        u16(0);  // (the descriptor's name: "")
+        u32(0);
+        payload += "TxLr";
+        u32(1);
+        u32(0);
+        payload += "Txt ";
+        for (int i = 0; i < 300000; ++i) {
+            payload += "VlLs";
+            u32(1);
+        }
+        payload += "long";
+        u32(0);
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, psd::read_tysh(payload));
     }
 
     // The support table goes out with the docs (docs/PSD_TEXT_SUPPORT.md): every feature this build cannot keep as text,

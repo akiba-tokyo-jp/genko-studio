@@ -193,6 +193,7 @@ std::u16string read_unicode(Bytes& b) {
 DObject read_structure(Bytes& b, int depth);
 
 DValue read_value(Bytes& b, const std::string& type, int depth) {
+    if (depth > 32) broken("descriptors nested too deep");  // (lists in lists as well as objects)
     DValue v;
     v.type = type;
     if (type == "TEXT") {

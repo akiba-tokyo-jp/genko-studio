@@ -739,8 +739,12 @@ void draw_turned(const PagePart& part, const std::vector<const core::StoryLine*>
             sheet = made;
             if (key) remembered_sheets().put(*key, sheet, size * size * 4);
         }
-        part.image->paste(sheet->turned, Point{static_cast<int>(at_x - part.origin.x), static_cast<int>(at_y - part.origin.y)},
-                          &sheet->turned);
+        if (partial && (parts->text || parts->ruby)) {  // (PSD-01: the letters' own pixels, as paint_text lays a part)
+            composite_at(*part.image, sheet->turned, at_x - part.origin.x, at_y - part.origin.y);
+        } else {
+            part.image->paste(sheet->turned, Point{static_cast<int>(at_x - part.origin.x), static_cast<int>(at_y - part.origin.y)},
+                              &sheet->turned);
+        }
     }
     if (show_speaker) {
         std::optional<SpeakerFonts> own;

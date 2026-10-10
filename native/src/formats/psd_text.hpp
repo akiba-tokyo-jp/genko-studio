@@ -46,8 +46,8 @@ struct PsdTextIssue {
     std::string text;
     std::vector<std::string> features;
 };
-// Every placed line of the book's pages that the editable PSD cannot keep as text, page by page.
-std::vector<PsdTextIssue> psd_text_issues(const core::Document& episode);
+// Every placed line of the book's pages that the editable PSD cannot keep as text, page by page, at `dpi`.
+std::vector<PsdTextIssue> psd_text_issues(const core::Document& episode, std::int64_t dpi);
 core::Json issues_json(const std::vector<PsdTextIssue>& issues);
 
 // The fonts the book's placed lines are set in (their PostScript names, as the PSD names them) and what about them is
