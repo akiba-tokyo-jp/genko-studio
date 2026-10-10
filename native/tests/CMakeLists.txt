@@ -61,7 +61,7 @@ genko_test(test_raster_ops SOURCES unit/test_raster_ops.cpp DEPS genko_test_supp
 genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_core genko_storage genko_render_ops LABELS unit)
 # 紙質 (BRUSH-01, this build only): the arithmetic against the independent reference (data/paper/samples.json), the
 # pictures taken in, define_brush's paper, the full-size reference pages, saved and opened elsewhere, Undo and Redo,
-# the print's PDF drawn back by poppler's pdftocairo, the command line.
+# the print's PDF drawn back by poppler's pdftocairo, the command line (no Python: test_contract_paper has that part).
 genko_test(test_paper SOURCES unit/test_paper.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
@@ -113,6 +113,10 @@ genko_test(test_contract_filters SOURCES contract/test_contract_filters.cpp DEPS
            LABELS contract TIMEOUT 600)
 # render/colour (CMYK, ICC, the screen proof) against Python's genko/colour.py.
 genko_test(test_contract_colour SOURCES contract/test_contract_colour.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 600)
+# 紙質 (BRUSH-01): the inherited brushes' reference page (data/paper/expected/inherited-brushes.png) is Python's own
+# drawing of the same lines, and this build's.
+genko_test(test_contract_paper SOURCES contract/test_contract_paper.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 600)
 # render/abr (Photoshop brush files) and the brush library against Python's genko/abr.py and brushes.py.
 genko_test(test_contract_abr SOURCES contract/test_contract_abr.cpp DEPS genko_test_support genko_render

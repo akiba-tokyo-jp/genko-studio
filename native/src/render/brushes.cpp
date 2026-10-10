@@ -492,7 +492,8 @@ core::Json read_library(const std::filesystem::path& config_dir, bool strict) {
 }
 
 // BRUSH-01: brush_papers.json's papers (key → settings): none for a file that is not there; nothing (std::nullopt) for
-// one that is there but cannot be read (it is left as it is).
+// one that is there but cannot be read, or is not of this layout ("genko_brush_papers": 1; a later Genko's may name its
+// pictures otherwise): it is left as it is, and so are its pictures.
 std::optional<core::Json> read_library_papers(const std::filesystem::path& config_dir) {
     const std::filesystem::path path = library_papers_path(config_dir);
     std::error_code missing;
@@ -501,7 +502,10 @@ std::optional<core::Json> read_library_papers(const std::filesystem::path& confi
         const std::string text = storage::read_file_bounded(path, paper::kMaxFileBytes);
         if (core::utf8_error(text)) return std::nullopt;
         const core::Json data = core::parse_python_json(text);
-        const auto papers = data.is_object() ? data.find("papers") : data.end();
+        if (!data.is_object()) return std::nullopt;
+        const auto version = data.find("genko_brush_papers");
+        if (version == data.end() || !version->is_number_integer() || *version != 1) return std::nullopt;
+        const auto papers = data.find("papers");
         if (papers != data.end() && papers->is_object()) return *papers;
     } catch (const core::Error&) {
     }
@@ -586,13 +590,22 @@ void save_to_library(const std::filesystem::path& config_dir, std::string_view k
     if (kept) {  // (its picture first: brush_papers.json never names a picture that is not there, or a broken one)
         const core::Bytes png = paper::bytes(kept->asset);
         if (!png) throw core::Error("missing_asset", "the paper picture " + kept->asset + " is not known here");
-        if (!library_picture(config_dir, kept->asset)) write(picture_path(config_dir, kept->asset), *png);
+        const std::filesystem::path file = picture_path(config_dir, kept->asset);
+        std::error_code touched;
+        if (library_picture(config_dir, kept->asset)) {
+            // (there already: made new, so another Genko that read brush_papers.json before this names it does not take
+            // it for one nothing has named for an hour; written again when its time cannot be set)
+            std::filesystem::last_write_time(file, std::filesystem::file_time_type::clock::now(), touched);
+            if (touched) write(file, *png);
+        } else {
+            write(file, *png);
+        }
     }
     core::DumpOptions options;
     options.indent = 1;
     options.item_separator = ",";
     write(library_path(config_dir), core::dump(core::Json{{"brushes", brushes}}, options));
-    if (!papers) return;
+    if (!papers) return;  // (one that cannot be read, or of another layout: nothing in it dropped, none of its pictures)
     // the key's paper set or taken away, and the papers of brushes brushes.json no longer has (forgotten here or by
     // Python's app) dropped
     bool changed = false;

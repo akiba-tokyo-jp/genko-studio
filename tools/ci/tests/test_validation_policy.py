@@ -1,6 +1,7 @@
 """検証頻度・選択・安全側への拡大を確認する回帰試験。"""
 import importlib.util
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -103,6 +104,24 @@ class PolicyTests(unittest.TestCase):
         p = self.plan(['native/src/render/raster_ops.cpp', 'native/src/app/canvas.cpp'])
         for r in p['matrix']['include']:
             self.assertEqual(r['tests'], sorted(set(r['tests'])))
+
+    def test_tests_run_on_windows_never_skip_for_the_python_oracle(self):
+        # Windows runs every test but the contract ones, without a reference Python, and validation_run.py fails a SKIP
+        # it does not expect: a comparison with Python belongs in a contract test.
+        text = (ROOT / 'native/tests/CMakeLists.txt').read_text(encoding='utf-8')
+        normal = policy.inventory(ROOT)['normal']
+        offenders = []
+        for name, body in re.findall(r'genko_test\((test_\w+)\s+(.*?)\)', text, re.S):
+            if name not in normal:
+                continue
+            sources = re.search(r'SOURCES\s+(.*?)(?:\s(?:DEPS|LABELS|TIMEOUT|GUI)\b|$)', body, re.S)
+            for source in sources.group(1).split() if sources else []:
+                code = (ROOT / 'native/tests' / source).read_text(encoding='utf-8')
+                for statement in re.findall(r'[^;{}]*QSKIP\([^;]*;', code):
+                    if re.search(r'python_ref|reference Python|GENKO_PYREF', statement):
+                        offenders.append(name + ': ' + ' '.join(statement.split())[:160])
+        self.assertTrue(normal)
+        self.assertEqual(offenders, [])
 
 
 if __name__ == '__main__':

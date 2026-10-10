@@ -9,6 +9,8 @@
 //
 // The expected pictures (data/paper/expected/) are this build's own (BRUSH-01 is new: no Python output to match),
 // approved after a look. GENKO_PAPER_WRITE_EXPECTED=1 writes them again from this build (then MANIFEST.json's hashes).
+// The inherited brushes' page is also Python's own drawing: test_contract_paper (no reference Python needed here, so
+// that this test runs as it is on Windows).
 
 #include <QtTest>
 
@@ -40,6 +42,7 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/paper.hpp"
+#include "paperlines.hpp"
 #include "render/png.hpp"
 #include "rendertest.hpp"
 #include "storage/asset_store.hpp"
@@ -102,27 +105,8 @@ core::Paper fixture_paper(const Json& j) {
     return p;
 }
 
-core::Stroke line(std::string id, std::string kind, double width, std::vector<std::array<double, 3>> points) {
-    core::Stroke s;
-    s.id = std::move(id);
-    s.kind = std::move(kind);
-    s.width_mm = width;
-    for (const auto& [x, y, p] : points) {
-        s.points.push_back(core::PointF{x, y});
-        s.pressure.push_back(p);
-    }
-    return s;
-}
-
-// A wave of n points from (x0, y) to (x1, y), pressed from `p0` to `p1`.
-std::vector<std::array<double, 3>> wave(double x0, double x1, double y, double amplitude, double p0, double p1, int n = 24) {
-    std::vector<std::array<double, 3>> out;
-    for (int i = 0; i < n; ++i) {
-        const double t = static_cast<double>(i) / (n - 1);
-        out.push_back({x0 + (x1 - x0) * t, y + amplitude * std::sin(t * 6.283185307179586), p0 + (p1 - p0) * t});
-    }
-    return out;
-}
+using genko::test::paper_lines::line;
+using genko::test::paper_lines::wave;
 
 core::Layer& ink_layer(core::Document& doc, std::size_t page) {
     for (core::Layer& layer : doc.edit_page(page).layers) {
@@ -189,18 +173,8 @@ core::Document reference_book() {
     f1.rgb = std::vector<std::int64_t>{170, 40, 40};
     add(f1);
     ink_layer(doc, 0).strokes = core::make_strokes(std::move(items));
-    // page 2: every inherited brush, none with a paper
-    std::vector<core::StrokePtr> inherited;
-    int n = 0;
-    for (const core::Brush& b : core::builtin_brushes()) {
-        const double x = 6 + (n % 3) * 30.0;
-        const double y = 7 + (n / 3) * 10.0;
-        const double width = std::min(b.width_mm, 3.0);
-        inherited.push_back(std::make_shared<const core::Stroke>(
-            line("inherited-" + b.key, b.key, width, wave(x, x + 24, y, 2, 0.2, 1.0, 16))));
-        ++n;
-    }
-    ink_layer(doc, 1).strokes = core::make_strokes(std::move(inherited));
+    // page 2: every inherited brush, none with a paper (the lines test_contract_paper has Python draw)
+    ink_layer(doc, 1).strokes = core::make_strokes(genko::test::paper_lines::inherited());
     return doc;
 }
 
@@ -847,38 +821,6 @@ private slots:
         QCOMPARE(loaded.document.brush_custom["my_stray"]["paper"], (Json{{"note", "kraft"}}));
         brushes::register_book(loaded.document);
         QVERIFY(brushes::brush("my_stray").key == "my_stray" && !brushes::brush("my_stray").paper);
-    }
-
-    // The inherited brushes' reference page is the Python baseline's own drawing of the same lines (render.layer_image).
-    void inheritedIsPythons() {
-        if (genko::test::python_ref().isEmpty()) QSKIP("no reference Python: set GENKO_PYREF or install /opt/pyref/bin/python");
-        const core::Document doc = reference_book();
-        Json lines = Json::array();
-        for (const core::StrokePtr& s : ink_layer(doc, 1).strokes->items) {
-            Json points = Json::array();
-            for (const core::PointF& p : s->points) points.push_back(Json::array({p.x, p.y}));
-            lines.push_back(Json{{"id", s->id}, {"kind", s->kind}, {"width_mm", s->width_mm}, {"points", points}, {"pressure", s->pressure}});
-        }
-        QTemporaryDir tmp;
-        genko::test::write_bytes(tmp.path() + QStringLiteral("/lines.json"), lines.dump());
-        const QString script = QStringLiteral(
-            "import json, sys\n"
-            "from genko import models, render\n"
-            "lines = json.load(open(sys.argv[1], encoding='utf-8'))\n"
-            "spec = models.PageSpec.custom(100, 80, 90, 70, 2, 4, 4, 4, 4, 300, 'mono')\n"
-            "book = models.new_episode('紙質', 1, 2, spec)\n"
-            "page = book.pages[1]\n"
-            "page.frames = []\n"
-            "ink = next(l for l in page.layers if l.role == models.LayerRole.INK)\n"
-            "ink.strokes = [models.Stroke(id=s['id'], points=[tuple(p) for p in s['points']], pressure=s['pressure'],\n"
-            "                             width_mm=s['width_mm'], kind=s['kind']) for s in lines]\n"
-            "render.layer_image(page, ink, 300, book).save(sys.argv[2])\n");
-        const auto py = genko::test::run(genko::test::python_ref(), {QStringLiteral("-c"), script, tmp.path() + QStringLiteral("/lines.json"),
-                                                                     tmp.path() + QStringLiteral("/python.png")},
-                                         genko::test::python_env(tmp.path()));
-        QVERIFY2(py.finished && py.exit_code == 0, py.err.constData());
-        const render::Image python = render::read_png(genko::test::read_bytes(tmp.path() + QStringLiteral("/python.png")));
-        QVERIFY(same(render::read_png(data_bytes(QStringLiteral("expected/inherited-brushes.png"))), python, QStringLiteral("inherited-python")));
     }
 
     // Undo and Redo of the journal (on disk): the paper's change undone gives back the first pixels; the first use of a

@@ -469,6 +469,66 @@ private slots:
         QVERIFY(fs::exists(file(c)));
     }
 
+    // Two Genkos saving at once: a save that names a picture already there (and right) makes it new again, so another
+    // Genko that read brush_papers.json just before (and so does not see it named) leaves it as one written in the last
+    // hour.
+    void namedPictureIsNew() {
+        auto grey = std::make_shared<const std::string>(render::paper::take_in(grain_png()));
+        const std::string ref = storage::AssetStore::ref(*grey);
+        render::paper::keep(ref, grey);
+        const fs::path picture = app::config_dir() / "brush_papers" / (ref.substr(7) + ".png");
+        const Json data{{"label", "古い紙"}, {"paper", Json{{"asset", ref}}}};
+        render::brushes::save_to_library(app::config_dir(), "my_old", data);
+        const std::string before = genko::test::read_bytes(gui_test::qpath(picture));
+        // the picture left from long ago; the other Genko's view: brush_papers.json read before this save named it
+        fs::last_write_time(picture, fs::file_time_type::clock::now() - std::chrono::hours(2));
+        const std::string unseen = genko::test::read_bytes(gui_test::qpath(render::brushes::library_papers_path(app::config_dir())));
+        render::brushes::save_to_library(app::config_dir(), "my_old", data);  // names it again
+        const auto named = fs::last_write_time(picture);
+        QVERIFY(genko::test::read_bytes(gui_test::qpath(picture)) == before);
+        // the other Genko writes what it read (without my_old's paper) and cleans up
+        Json stale = Json::parse(unseen);
+        stale["papers"].erase("my_old");
+        genko::test::write_bytes(gui_test::qpath(render::brushes::library_papers_path(app::config_dir())), stale.dump(1));
+        render::brushes::save_to_library(app::config_dir(), "my_other", Json{{"label", "別"}});
+        QVERIFY(fs::exists(picture));
+        QVERIFY(named > fs::file_time_type::clock::now() - std::chrono::minutes(10));
+    }
+
+    // brush_papers.json of another version (a later Genko's) is not read: none of its papers is taken, nothing in it is
+    // written over or dropped, and none of its pictures is removed; a brush with a paper is not saved over it.
+    void otherLibraryVersion() {
+        auto grey = std::make_shared<const std::string>(render::paper::take_in(grain_png()));
+        const std::string ref = storage::AssetStore::ref(*grey);
+        render::paper::keep(ref, grey);
+        render::brushes::save_to_library(app::config_dir(), "my_later", Json{{"label", "後の版"}});  // (in brushes.json)
+        const fs::path picture = app::config_dir() / "brush_papers" / (ref.substr(7) + ".png");
+        fs::create_directories(picture.parent_path());
+        genko::test::write_bytes(gui_test::qpath(picture), *grey);
+        fs::last_write_time(picture, fs::file_time_type::clock::now() - std::chrono::hours(2));
+        const fs::path papers = render::brushes::library_papers_path(app::config_dir());
+        for (const Json& later : {Json{{"genko_brush_papers", 2}, {"papers", Json{{"my_later", Json{{"pictures", Json::array({ref})}}}}}},
+                                  Json{{"genko_brush_papers", 2}, {"papers", Json{{"my_later", Json{{"asset", ref}, {"density", 0.5}}}}}},
+                                  Json{{"papers", Json{{"my_later", Json{{"asset", ref}}}}}},
+                                  Json{{"genko_brush_papers", "1"}, {"papers", Json{{"my_later", Json{{"asset", ref}}}}}}}) {
+            const std::string text = later.dump(1);
+            genko::test::write_bytes(gui_test::qpath(papers), text);
+            QVERIFY2(!render::brushes::load_own_brushes(app::config_dir())["my_later"].contains("paper"), text.c_str());
+            render::brushes::save_to_library(app::config_dir(), "my_plain", Json{{"label", "普通"}});
+            render::brushes::save_to_library(app::config_dir(), "my_plain", std::nullopt);
+            QVERIFY2(genko::test::read_bytes(gui_test::qpath(papers)) == text, text.c_str());
+            QVERIFY2(fs::exists(picture), text.c_str());
+            try {
+                render::brushes::save_to_library(app::config_dir(), "my_with", Json{{"label", "紙"}, {"paper", Json{{"asset", ref}}}});
+                QFAIL(qPrintable(QStringLiteral("saved over a paper library of another version: ") + QString::fromStdString(text)));
+            } catch (const core::PyUncaught& error) {
+                QVERIFY(app::wording::error(std::string(error.what())).startsWith(QStringLiteral("自分のブラシの紙質の一覧（brush_papers.json）を読めない")));
+            }
+            QVERIFY2(genko::test::read_bytes(gui_test::qpath(papers)) == text, text.c_str());
+            QVERIFY2(fs::exists(picture), text.c_str());
+        }
+    }
+
     // The tab's boxes hold whole percent and degrees: a paper set more finely (through an op) keeps its values unless the
     // person changes that box.
     void finerValuesKept() {
