@@ -489,32 +489,67 @@ void Reader::read_papers(core::Document& doc) {
 }
 
 // ruby-layout@1: the line's rubies by place ({start, end, base, ruby, font?, scale?, align?, gap_mm?, tracking?,
-// review?} each, core/ruby.hpp), ruby_runs their mirror. What does not fit the text is reported (the book opens
-// read-only); accepted, such a ruby is kept as needing review where it was (its range cut to the text), never dropped.
-// A ruby's setting out of its bounds is reported the same way; accepted, that setting is not set (the line's look).
+// review?} each, core/ruby.hpp), ruby_runs their mirror. What is not as the writer writes it is reported (the book
+// opens read-only); accepted, it is what is read here: a ruby read as far as it can be (a place of numbers that are not
+// whole, no base: the text there, a review that is not a reason) or not fitting the text (outside it, its base not the
+// text there, over a drawn one) is kept as needing review where it was, its range cut to the text — that ruby only,
+// never dropped, never drawn by its run's first-occurrence rule. A list that is not one keeps the runs it mirrored as
+// needing review (where each goes cannot be told). An item with no reading holds no ruby: left out (said). A ruby's
+// setting out of its bounds is the line's look (said).
 void Reader::read_ruby_spans(core::StoryLine& line, const Json& raw, const std::string& at) {
     std::vector<core::RubySpan> spans;
-    bool formed = raw.is_array();
-    for (std::size_t i = 0; formed && i < raw.size(); ++i) {
+    if (!raw.is_array()) {
+        repair(at, "ruby_spans must be a list of {start, end, base, ruby, review?, settings?}: the rubies its runs mirrored read as "
+                   "needing review (ambiguous), none drawn");
+        for (const Json& run : line.ruby_runs) {
+            if (!run.is_array() || run.size() < 2 || !core::py_truthy(run[0]) || !core::py_truthy(run[1])) continue;
+            core::RubySpan span;
+            span.base = core::py_str(run[0]);
+            span.ruby = core::py_str(run[1]);
+            span.review = "ambiguous";
+            spans.push_back(std::move(span));
+        }
+        line.ruby_runs = core::ruby::runs_of(spans);
+        line.ruby_spans = std::move(spans);
+        return;
+    }
+    std::vector<bool> loose;  // (read only as far as it could be)
+    for (std::size_t i = 0; i < raw.size(); ++i) {
         const Json& item = raw[i];
-        const auto text = [&item](const char* key) -> const Json* {
-            const Json* v = item.is_object() ? find(item, key) : nullptr;
-            return v != nullptr && v->is_string() ? v : nullptr;
-        };
-        const Json* start = item.is_object() ? find(item, "start") : nullptr;
-        const Json* end = item.is_object() ? find(item, "end") : nullptr;
-        const Json* reading = text("ruby");
-        const Json* base = text("base");
-        const Json* review = item.is_object() ? find(item, "review") : nullptr;
-        formed = start != nullptr && end != nullptr && start->is_number_integer() && end->is_number_integer() && reading != nullptr &&
-                 base != nullptr && (review == nullptr || review->is_string());
-        if (!formed) break;
+        const std::string here = at_index(at, i);
+        const Json* reading = item.is_object() ? find(item, "ruby") : nullptr;
+        if (reading == nullptr || !reading->is_string() || reading->get_ref<const std::string&>().empty()) {
+            repair(here, "a ruby without its reading (ruby: a text) holds no ruby: left out");
+            continue;
+        }
         core::RubySpan span;
-        span.start = start->get<std::int64_t>();
-        span.end = end->get<std::int64_t>();
         span.ruby = reading->get<std::string>();
-        span.base = base->get<std::string>();
-        span.review = review != nullptr ? review->get<std::string>() : std::string();
+        bool whole = true;
+        const auto place = [&](const char* key) -> std::int64_t {
+            const Json* v = find(item, key);
+            if (v != nullptr && v->is_number_integer() && !(v->is_number_unsigned() && v->get<std::uint64_t>() > (1ULL << 62))) {
+                return v->get<std::int64_t>();
+            }
+            whole = false;
+            if (v != nullptr && v->is_number_float() && std::isfinite(v->get<double>())) {
+                return static_cast<std::int64_t>(std::floor(std::clamp(v->get<double>(), -1e15, 1e15)));
+            }
+            return 0;
+        };
+        span.start = place("start");
+        span.end = place("end");
+        if (const Json* base = find(item, "base"); base != nullptr && base->is_string()) {
+            span.base = base->get<std::string>();
+        } else {
+            whole = false;
+        }
+        if (const Json* review = find(item, "review"); review != nullptr && !review->is_null()) {
+            if (review->is_string()) {
+                span.review = review->get<std::string>();
+            } else {
+                whole = false;
+            }
+        }
         for (const auto& [key, value] : item.items()) {
             if (key == "start" || key == "end" || key == "base" || key == "ruby" || key == "review") continue;
             // (each ruby's own settings: one out of its bounds is the line's look again, reported)
@@ -523,38 +558,54 @@ void Reader::read_ruby_spans(core::StoryLine& line, const Json& raw, const std::
                 setting = core::ruby::set_setting(span, key, value);
             } catch (const core::OpError& error) {
                 setting = true;
-                repair(at_key(at_index(at, i), key), std::string(error.what()) + ": read as not set (the line's look)");
+                repair(at_key(here, key), std::string(error.what()) + ": read as not set (the line's look)");
             }
             if (!setting) {
-                issue("unknown_key", at_key(at_index(at, i), key), {},
+                issue("unknown_key", at_key(here, key), {},
                       "the ruby key " + core::py_repr_str(key) + " is not read by this build and would not be written back");
             }
         }
+        if (!whole) repair(here, "a ruby must have whole-number start and end and a base and reading text: read as needing review");
         spans.push_back(std::move(span));
+        loose.push_back(!whole);
     }
-    if (!formed) {
-        repair(at, "ruby_spans must be a list of {start, end, base, ruby, review?, settings?}: read as no ruby by place");
-        return;
-    }
-    std::string why;
+    // each against the text: one that does not fit it needs review (cut to the text), the others are as they were
+    std::int64_t n = 0;
+    bool counted = true;
     try {
-        why = core::ruby::problem(spans, line.text);
-    } catch (const core::Error& error) {
-        why = error.what();
+        n = core::ruby::count(line.text);
+    } catch (const core::Error&) {
+        counted = false;
     }
-    if (!why.empty()) {
-        repair(at, "the rubies do not fit the line's text (" + why + "): read as needing review");
-        const std::int64_t n = core::ruby::count(line.text);
-        for (core::RubySpan& span : spans) {
-            span.start = std::clamp<std::int64_t>(span.start, 0, n);
-            span.end = std::clamp<std::int64_t>(span.end, span.start, n);
-            if (span.ruby.empty()) span.ruby = "?";
-            span.review = "edited";
+    const auto reason = [](const std::string& review) { return review == "edited" || review == "ambiguous" || review == "unplaced"; };
+    std::vector<std::size_t> order(spans.size());
+    for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&spans](std::size_t x, std::size_t y) {
+        return spans[x].start != spans[y].start ? spans[x].start < spans[y].start : spans[x].end < spans[y].end;
+    });
+    std::vector<core::RubySpan> sorted;
+    std::int64_t drawn_end = 0;
+    for (const std::size_t i : order) {
+        core::RubySpan span = spans[i];
+        bool fits = counted && !loose[i] && (span.review.empty() || reason(span.review));
+        const std::int64_t s = std::clamp<std::int64_t>(span.start, 0, n);
+        const std::int64_t e = std::clamp<std::int64_t>(span.end, s, n);
+        fits = fits && s == span.start && e == span.end && (span.review.empty() ? s < e : true);
+        span.start = s;
+        span.end = e;
+        if (fits && span.review.empty()) fits = span.base == core::ruby::slice(line.text, s, e) && s >= drawn_end;
+        if (span.base.empty() && counted) span.base = core::ruby::slice(line.text, s, e);  // (no base given: the text there)
+        if (!fits) {
+            if (!loose[i]) repair(at_index(at, i), "this ruby does not fit the line's text (outside it, its base not the text there, or over "
+                                                   "another): read as needing review");
+            if (span.review.empty() || !reason(span.review)) span.review = "edited";
+        } else if (span.review.empty()) {
+            drawn_end = e;
         }
-        std::stable_sort(spans.begin(), spans.end(), [](const core::RubySpan& x, const core::RubySpan& y) { return x.start < y.start; });
+        sorted.push_back(std::move(span));
     }
-    line.ruby_runs = core::ruby::runs_of(spans);
-    line.ruby_spans = std::move(spans);
+    line.ruby_runs = core::ruby::runs_of(sorted);
+    line.ruby_spans = std::move(sorted);
 }
 
 core::Stroke Reader::read_stroke(const Json& raw, const std::string& at) {

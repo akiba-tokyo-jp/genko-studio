@@ -567,7 +567,12 @@ bool same_marks(const Marks& marks, const core::StoryLine& line) {
     for (const std::string& words : line.emphasis_runs) dots.push_back(words);
     Json styles = Json::array();
     for (const auto& [words, style] : line.style_runs) styles.push_back(Json::array({words, style}));
-    const bool same_ruby = line.ruby_spans ? ruby_after(marks, &line) == *line.ruby_spans : core::py_equals(marks.ruby_runs, ruby);
+    // (a line of Python's: its runs the same, and each typed where they put it — a reading moved to the same word's
+    // other place changes the line)
+    std::vector<Json> runs;
+    for (const Json& run : marks.ruby_runs) runs.push_back(run);
+    const bool same_ruby = line.ruby_spans ? ruby_after(marks, &line) == *line.ruby_spans
+                                           : core::py_equals(marks.ruby_runs, ruby) && core::ruby::from_runs(marks.text, runs, false) == marks.ruby_spans;
     return same_ruby && core::py_equals(marks.emphasis_runs, dots) && core::py_equals(marks.style_runs, styles);
 }
 
@@ -576,33 +581,58 @@ std::vector<core::RubySpan> rubies_of(const core::StoryLine& line) {
 }
 
 std::vector<core::RubySpan> ruby_after(const Marks& marks, const core::StoryLine* line) {
-    std::vector<core::RubySpan> typed = marks.ruby_spans;
+    const std::vector<core::RubySpan>& typed = marks.ruby_spans;
     if (line == nullptr) return typed;
-    std::vector<core::RubySpan> old = core::ruby::follow_text(line->text, marks.text, rubies_of(*line)).spans;
-    std::vector<bool> used(old.size(), false);
-    std::vector<core::RubySpan> out;
+    // the line's rubies before the edit, and where the edit rules take each (none: taken away)
+    const std::vector<core::RubySpan> had = rubies_of(*line);
+    const core::ruby::Followed f = core::ruby::follow_text(line->text, marks.text, had);
+    std::vector<std::optional<core::RubySpan>> now(had.size());
+    for (std::size_t k = 0; k < f.spans.size(); ++k) now[f.origin[k]] = f.spans[k];
+    std::vector<bool> used(had.size(), false);
     std::vector<bool> placed(typed.size(), false);
-    // a ruby typed where an old one went: that one (its own settings kept), its reading as typed
+    std::vector<core::RubySpan> out;
+    const auto adopt = [&](std::size_t t, std::size_t o) {  // (that one, as typed: its own settings kept, drawn)
+        used[o] = true;
+        placed[t] = true;
+        core::RubySpan kept = typed[t];
+        core::ruby::take_settings(kept, had[o]);
+        out.push_back(std::move(kept));
+    };
+    // a ruby typed with one's reading over its base (the same words): that one, whatever the edit made of it — the
+    // one the edit took there first, then the others in order
     for (std::size_t t = 0; t < typed.size(); ++t) {
-        for (std::size_t o = 0; o < old.size(); ++o) {
-            if (used[o] || !old[o].review.empty() || old[o].start != typed[t].start || old[o].end != typed[t].end) continue;
-            used[o] = true;
-            placed[t] = true;
-            core::RubySpan kept = typed[t];
-            core::ruby::take_settings(kept, old[o]);
-            out.push_back(std::move(kept));
-            break;
+        std::optional<std::size_t> pick;
+        for (std::size_t o = 0; o < had.size(); ++o) {
+            if (used[o] || had[o].ruby != typed[t].ruby || had[o].base != typed[t].base) continue;
+            if (now[o] && now[o]->start == typed[t].start && now[o]->end == typed[t].end) {
+                pick = o;
+                break;
+            }
+            if (!pick) pick = o;
+        }
+        if (pick) adopt(t, *pick);
+    }
+    // a ruby typed where a drawn one went (its reading changed in the notation): that one
+    for (std::size_t t = 0; t < typed.size(); ++t) {
+        for (std::size_t o = 0; o < had.size() && !placed[t]; ++o) {
+            if (used[o] || !had[o].review.empty() || !now[o] || !now[o]->review.empty() || now[o]->start != typed[t].start ||
+                now[o]->end != typed[t].end) {
+                continue;
+            }
+            adopt(t, o);
         }
     }
-    // one typed with an old one's reading over another place it reaches: that one edited in its base (needs review)
+    // one typed with a drawn one's reading over another place it reaches (typed into its base, its base cut or moved by
+    // hand): that one edited in its base (needs review)
     for (std::size_t t = 0; t < typed.size(); ++t) {
         if (placed[t]) continue;
-        for (std::size_t o = 0; o < old.size(); ++o) {
-            const bool reaches = typed[t].start < std::max(old[o].end, old[o].start + 1) && old[o].start < typed[t].end;
-            if (used[o] || old[o].ruby != typed[t].ruby || !reaches) continue;
+        for (std::size_t o = 0; o < had.size(); ++o) {
+            if (used[o] || !had[o].review.empty() || !now[o] || had[o].ruby != typed[t].ruby) continue;
+            const bool reaches = typed[t].start < std::max(now[o]->end, now[o]->start + 1) && now[o]->start < typed[t].end;
+            if (!reaches) continue;
             used[o] = true;
             placed[t] = true;
-            core::RubySpan edited = old[o];
+            core::RubySpan edited = *now[o];
             edited.start = typed[t].start;
             edited.end = typed[t].end;
             if (edited.review.empty()) edited.review = "edited";
@@ -611,9 +641,10 @@ std::vector<core::RubySpan> ruby_after(const Marks& marks, const core::StoryLine
         }
         if (!placed[t]) out.push_back(typed[t]);  // (new)
     }
-    // the old ones that need review and were not typed over stay so (the others not typed again are gone)
-    for (std::size_t o = 0; o < old.size(); ++o) {
-        if (!used[o] && !old[o].review.empty()) out.push_back(old[o]);
+    // the ones that needed review before (not in the notation) and were not typed over stay so; the drawn ones not typed
+    // again are gone (their notation was taken away)
+    for (std::size_t o = 0; o < had.size(); ++o) {
+        if (!used[o] && !had[o].review.empty() && now[o]) out.push_back(*now[o]);
     }
     std::stable_sort(out.begin(), out.end(), [](const core::RubySpan& a, const core::RubySpan& b) {
         return a.start != b.start ? a.start < b.start : a.end < b.end;
@@ -634,6 +665,17 @@ Json spans_op(const std::vector<core::RubySpan>& spans) {
         out.push_back(std::move(item));
     }
     return out;
+}
+
+Json rubies_op(const core::StoryLine& line, const std::vector<core::RubySpan>& spans) {
+    Json op{{"op", "edit_line"}, {"id", line.id}};
+    const std::vector<Json> runs = core::ruby::runs_of(spans);
+    if (!line.ruby_spans && core::ruby::from_runs(line.text, runs, false) == spans) {
+        op["ruby_runs"] = Json(runs);
+    } else {
+        op["ruby_spans"] = spans_op(spans);
+    }
+    return op;
 }
 
 void put_ruby(Json& op, const Marks& marks, const core::StoryLine* line, bool always) {

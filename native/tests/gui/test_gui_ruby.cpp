@@ -117,15 +117,30 @@ class TestGuiRuby : public QObject {
 
 private slots:
     // The table's cases typed in the canvas's editor with the input method.
-    void typedWithTheInputMethod() {
+    // (one row a case: each reported on its own)
+    void typedWithTheInputMethod_data() {
+        QTest::addColumn<int>("index");
         const Json table = genko::test::read_json(genko::test::test_data("ruby_cases.json"));
-        int ran = 0;
-        for (const Json& c : table["cases"]) {
+        int rows = 0;
+        for (std::size_t i = 0; i < table["cases"].size(); ++i) {
+            const Json& c = table["cases"][i];
             if (!c.value("gui", false)) continue;
+            QTest::newRow(c["n"].get<std::string>().c_str()) << static_cast<int>(i);
+            ++rows;
+        }
+        QVERIFY(rows >= 9);
+    }
+
+    void typedWithTheInputMethod() {
+        QFETCH(int, index);
+        const Json table = genko::test::read_json(genko::test::test_data("ruby_cases.json"));
+        {
+            const Json& c = table["cases"][static_cast<std::size_t>(index)];
             const QString name = QString::fromStdString(c["n"].get<std::string>());
             Studio s;
             Json add{{"op", "add_line"}, {"id", "L1"}, {"text", c["text"]}, {"x_mm", 40}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 50}};
             if (c.contains("spans")) add["ruby_spans"] = c["spans"];
+            if (c.contains("runs")) add["ruby_runs"] = c["runs"];
             QVERIFY2(s.put(add), qPrintable(name));
             const Json before = s.line("L1");
             s.window->on_line_selected("L1", false);
@@ -136,6 +151,14 @@ private slots:
             const std::size_t count = s.ops.size();
             for (const Json& step : c["ime"]["steps"]) {
                 QTextCursor cursor = editor->textCursor();
+                if (step.contains("delete")) {  // (the editor's characters [from, to) selected and deleted)
+                    cursor.setPosition(step["delete"][0].get<int>());
+                    cursor.setPosition(step["delete"][1].get<int>(), QTextCursor::KeepAnchor);
+                    editor->setTextCursor(cursor);
+                    QTest::keyClick(editor, Qt::Key_Delete);
+                    QCOMPARE(s.ops.size(), count);
+                    continue;
+                }
                 cursor.setPosition(step["cursor"].get<int>());
                 editor->setTextCursor(cursor);
                 if (step.contains("preedit")) {
@@ -160,9 +183,7 @@ private slots:
             QVERIFY2(genko::test::same_content(spans_of(got), want["spans"], &where),
                      qPrintable(name + QStringLiteral(": ") + QString::fromStdString(spans_of(got).dump() + " " + where)));
             QVERIFY2(genko::test::strict_equal(got["ruby_runs"], want["runs"], &where), qPrintable(name));
-            ++ran;
         }
-        QVERIFY(ran >= 5);
     }
 
     // The chosen ruby's own settings under the line's ruby list: each change an edit_line of the line's ruby_spans, that
@@ -224,6 +245,13 @@ private slots:
              "tracking": 0.25}])").dump());
         const Json style = s.line("L1")["style"];
         for (const char* key : {"ruby_font", "ruby_align", "ruby_gap_mm", "ruby_tracking", "ruby_scale"}) QVERIFY2(!style.contains(key), key);
+        // a size under the least a ruby takes (0.25) but above 「行の設定」: the least
+        ratio->setValue(0.22);
+        emit ratio->editingFinished();
+        QCOMPARE(s.last()["ruby_spans"][1]["scale"], Json(0.25));
+        QCOMPARE(ratio->value(), 0.25);
+        ratio->setValue(0.6);
+        emit ratio->editingFinished();
         // back to the default: the key goes
         align->setCurrentIndex(align->findData(QStringLiteral("center")));
         emit align->activated(align->currentIndex());
@@ -325,6 +353,44 @@ private slots:
         reassign->click();
         QCOMPARE(choices.size(), 2);
         QCOMPARE(spans_of(s.line("L2")).dump(), Json::parse(R"([{"start": 3, "end": 5, "base": "東京", "ruby": "とうきょう"}])").dump());
+    }
+
+    // 振り直す… and 外す on a line of Python's (ruby_runs): Python's op when its runs say the change (the line stays
+    // Python's), the rubies by place when they cannot (the same word twice, the second chosen).
+    void pythonLineReassignAndClear() {
+        Studio s;
+        QVERIFY(s.put(Json{{"op", "add_line"}, {"id", "L1"}, {"text", "東京と大阪"}, {"x_mm", 40}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 50},
+                           {"ruby_runs", Json::parse(R"([["東京", "A"], ["大阪", "B"]])")}}));
+        s.window->on_line_selected("L1", false);
+        auto* rubies = s.find<QListWidget>("story_rubies");
+        auto* reassign = s.find<QPushButton>("story_ruby_reassign");
+        auto* clear = s.find<QPushButton>("story_ruby_clear");
+        QVERIFY(rubies && reassign && clear);
+        QTRY_COMPARE(rubies->count(), 2);
+        rubies->setCurrentRow(1);
+        s.answers.responder->get_text = [](const QString&, const QString& label, const QString& text) {
+            return std::optional<QString>(label.contains(QStringLiteral("親文字")) ? text : QStringLiteral("C"));
+        };
+        reassign->click();
+        QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "L1"}, {"ruby_runs", Json::parse(R"([["東京", "A"], ["大阪", "C"]])")}}).dump());
+        QVERIFY(!s.line("L1").contains("ruby_spans"));
+        rubies->setCurrentRow(0);
+        clear->click();
+        QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "L1"}, {"ruby_runs", Json::parse(R"([["大阪", "C"]])")}}).dump());
+        QVERIFY(!s.line("L1").contains("ruby_spans"));
+        QCOMPARE(s.line("L1")["ruby_runs"], Json::parse(R"([["大阪", "C"]])"));
+        // the same word twice, the second chosen: Python's runs would put it on the first
+        QVERIFY(s.put(Json{{"op", "add_line"}, {"id", "L2"}, {"text", "東京と東京"}, {"x_mm", 100}, {"y_mm", 40}, {"w_mm", 40}, {"h_mm", 50},
+                           {"ruby_runs", Json::parse(R"([["東京", "A"]])")}}));
+        s.window->on_line_selected("L2", false);
+        QTRY_COMPARE(rubies->count(), 1);
+        rubies->setCurrentRow(0);
+        s.answers.responder->get_text = [](const QString&, const QString&, const QString& text) { return std::optional<QString>(text); };
+        s.answers.responder->get_item = [](const QString&, const QString&, const QStringList& items, int, bool) {
+            return items.size() == 2 ? std::optional<QString>(items[1]) : std::optional<QString>();
+        };
+        reassign->click();
+        QCOMPARE(spans_of(s.line("L2")).dump(), Json::parse(R"([{"start": 3, "end": 5, "base": "東京", "ruby": "A"}])").dump());
     }
 
     // Undo after the whole base was deleted: the text, the range, the reading and the ruby's settings come back.

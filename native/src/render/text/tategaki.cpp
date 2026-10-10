@@ -781,19 +781,14 @@ std::vector<PlacedSpan> placed_spans(const std::vector<Column>& cols, const Comp
 
 }  // namespace
 
-void note_font(Fonts& fonts, const Face& face, std::u32string_view letter, std::size_t span, std::vector<RubyNote>* notes) {
+void note_font(Fonts& fonts, const Face& face, std::u32string_view letter, const std::string& used, std::size_t span,
+               std::vector<RubyNote>* notes) {
     if (notes == nullptr || letter.empty() || py_isspace(letter)) return;
-    const std::u32string first(1, letter[0]);
-    const std::string& own = is_kana_like(first) ? face.kana : face.other;
-    if (fonts.has_glyph(own, first)) return;
-    const std::string other = own == face.kana ? face.other : face.kana;
-    for (const std::string& path : {other, std::string("gothic"), std::string("sfx")}) {
-        if (fonts.has_glyph(path, first)) {
-            notes->push_back(RubyNote{"font_fallback", span, utf8(first)});
-            return;
-        }
+    if (!fonts.has_glyph(used, letter)) {
+        notes->push_back(RubyNote{"glyph_missing", span, utf8(letter)});
+    } else if (used != face.kana && used != face.other) {
+        notes->push_back(RubyNote{"font_fallback", span, utf8(letter)});
     }
-    notes->push_back(RubyNote{"glyph_missing", span, utf8(first)});
 }
 
 Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
@@ -999,7 +994,7 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
         RubyDrawn where;
         for (std::int64_t i = 0; i < count; ++i) {
             const std::u32string& letter = span.reading[static_cast<std::size_t>(i)];
-            note_font(fonts, set.face, letter, span.span, args.notes);
+            note_font(fonts, set.face, letter, fonts.path_for(set.face, letter), span.span, args.notes);
             composite_at(out, glyph(letter, fonts.font(set.face, std::max<std::int64_t>(8, size), letter), size, args.fill), rx, top + i * step);
             where.reading += letter;
             where.letters.push_back(PointD{static_cast<double>(rx), static_cast<double>(top + i * step)});
@@ -1017,8 +1012,7 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
     }
     for (std::size_t a = 0; a < drawn.size() && args.notes != nullptr; ++a) {
         for (std::size_t b = a + 1; b < drawn.size(); ++b) {
-            if (drawn[a].column == drawn[b].column && drawn[a].span != drawn[b].span && drawn[a].top < drawn[b].bottom &&
-                drawn[b].top < drawn[a].bottom) {
+            if (drawn[a].column == drawn[b].column && drawn[a].top < drawn[b].bottom && drawn[b].top < drawn[a].bottom) {
                 args.notes->push_back(RubyNote{"overlap", drawn[a].span, "with ruby " + std::to_string(drawn[b].span)});
             }
         }

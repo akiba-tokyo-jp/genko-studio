@@ -92,8 +92,10 @@ void composite_at(Image& base, const Image& im, std::int64_t x, std::int64_t y);
 
 // What the lettering of a line's ruby held by place (ruby-layout@1) could not do as it was asked — said, never shrunk
 // or cut: "overflow" (a reading longer than all the text it is set beside: the lettering grows to hold it), "overlap"
-// (readings over each other), "font_fallback" (a letter the ruby's face lacks, drawn in another), "glyph_missing" (a
-// letter no face has), "not_drawn" (a ruby whose base the lettering leaves out, e.g. a closing 。). A reading longer
+// (readings over each other, the parts of one モノルビ reading included), "font_fallback" (a letter the ruby's face
+// lacks, drawn in another; or the ruby's font not found — detail "font:<its name>" — and the line's face used),
+// "glyph_missing" (a letter the font it is drawn in lacks), "not_drawn" (a ruby whose base the lettering leaves out,
+// e.g. a closing 。). A reading longer
 // than its base only, moved back within the text at the start or end of a column or row, is not one (Python moves
 // its ruby the same way). `span`: the ruby's place in the line's ruby_spans.
 struct RubyNote {
@@ -173,8 +175,10 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args);
 
 // Whether two characters are the same once set (cells: !? and full-width digits set as their ASCII ones).
 bool same_set(char32_t given, char32_t set);
-// A letter of a ruby's reading its face lacks: noted (when there are notes) as drawn in another face
-// ("font_fallback") or in none ("glyph_missing").
-void note_font(Fonts& fonts, const Face& face, std::u32string_view letter, std::size_t span, std::vector<RubyNote>* notes);
+// A letter of a ruby's reading as it is drawn, in the font file `used` (Fonts::path_for of the letter, or across of the
+// part it is drawn in): noted (when there are notes) when that font lacks it ("glyph_missing": no face drew it) or is
+// not the ruby's face ("font_fallback").
+void note_font(Fonts& fonts, const Face& face, std::u32string_view letter, const std::string& used, std::size_t span,
+               std::vector<RubyNote>* notes);
 
 }  // namespace genko::render::text

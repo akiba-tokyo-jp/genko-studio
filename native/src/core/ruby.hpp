@@ -22,16 +22,20 @@
 //  - an edit that takes the whole base away (a deletion of it, or a replacement of all of it) takes the ruby away: it
 //    is not drawn, and the history (Undo) gives it back with the text;
 //  - any other edit that reaches the base (an insertion inside it, a part of it deleted or replaced, a line break
-//    inside it, a replacement across its edge, a combining mark joined to its last letter) makes it need review
-//    ("edited"): its base and reading are kept and it is not drawn until a person reassigns or clears it; nothing is
-//    guessed;
+//    inside it, a replacement across its edge, a combining mark, variation selector or joiner joined to its last
+//    letter — a base of one letter included) makes it need review ("edited"): its base and reading are kept and it is
+//    not drawn until a person reassigns or clears it; nothing is guessed;
 //  - edit_line's whole new text is compared with the old one by the longest common subsequence of their graphemes: a
 //    ruby whose base every such alignment keeps whole in one same place goes there; one the alignments put in more
-//    than one place, or keep in one and delete in another, needs review ("ambiguous"); one every alignment deletes
-//    is taken away; any other needs review ("edited"). (Texts past kLcsCells are compared by their common start and
-//    end only.)
-//  - replace_text knows where each match was: those are its edits, each match and its replacement compared first (so
-//    京 → 京都 adds 都 after the 京).
+//    than one place, keep in one and delete in another, or keep in part in one, needs review ("ambiguous"); one every
+//    alignment deletes is taken away; any other needs review ("edited"). Texts past kLcsCells are compared by their
+//    common start and end, both ways round (the longest common start first, then the longest common end first): a
+//    ruby the two place differently (a word there more than once around the edit) needs review ("ambiguous");
+//  - replace_text knows where each match was: those are its edits. A ruby whose whole base the matches that reach it
+//    cover (one match of all of it, or several together) is taken away, as Python takes its run away, whatever the
+//    replacement has in common with it (東京 → 東西); a match is first compared with its replacement only to tell
+//    letters added beside the base (京 → 京都 adds 都 after the 京; 東京へ → 東京まで changes only the へ) from an
+//    edit of it.
 // A ruby that needs review keeps a range only as where it was last seen (where the edit's place maps it). A ruby's own
 // settings go with it: moved, needing review, taken away and given back (Undo) with it.
 //
@@ -87,8 +91,10 @@ void take_settings(RubySpan& to, const RubySpan& from);
 // renderer finds it), and becomes the graphemes it covers when both its ends fall between graphemes. A run not found
 // is not drawn (as Python); with `keep_unplaced` it is kept as needing review ("unplaced", at [0, 0)).
 std::vector<RubySpan> from_runs(std::string_view text, const std::vector<Json>& runs, bool keep_unplaced);
-// Python's runs given to a line held by place (from_runs, keeping the runs not found): a ruby that lands where one of
-// `had` was, over the same base, keeps that one's settings (one not found: one of `had` with its base and reading).
+// Python's runs given to a line held by place, whose rubies are now `had` (followed through the op's text): the runs
+// those rubies mirror (runs_of: a Python client sending the line's own runs back) leave them as they are; other runs
+// become rubies by the explicit rule (from_runs, keeping the runs not found), each taking the settings of the one of
+// `had` with its base and reading (in order), else of the one at its place over the same base.
 std::vector<RubySpan> from_runs_keeping(std::string_view text, const std::vector<Json>& runs, const std::vector<RubySpan>& had);
 // The spans as Python's ruby_runs: [base, reading] of each drawn span, in order.
 std::vector<Json> runs_of(const std::vector<RubySpan>& spans);
@@ -100,13 +106,11 @@ std::vector<Json> runs_of(const std::vector<RubySpan>& spans);
 std::vector<RubySpan> parse(const Json& raw, std::string_view text);
 // As project.json holds them: [{start, end, base, ruby, font?, scale?, align?, gap_mm?, tracking?, review?}, …].
 Json to_json(const std::vector<RubySpan>& spans);
-// What is wrong with spans read for a text (empty: nothing): ranges outside it or overlapping drawn ones, a drawn
-// span whose base is not the text there, a review that is not one of the reasons, a span without its reading.
-std::string problem(const std::vector<RubySpan>& spans, std::string_view text);
 
 // What an edit did to a line's spans. `removed`: rubies whose whole base went (not drawn; Undo has them).
 struct Followed {
     std::vector<RubySpan> spans;
+    std::vector<std::size_t> origin;  // for each of `spans`, its place in the spans followed
     std::int64_t removed = 0;
 };
 // edit_line's text: `before` became `after` (the rules above).

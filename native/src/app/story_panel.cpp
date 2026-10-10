@@ -34,6 +34,7 @@
 #include "app/text_style.hpp"
 #include "app/theme.hpp"
 #include "app/wording.hpp"
+#include "core/command_bus.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
@@ -335,6 +336,8 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     ruby_ratio->setToolTip(QStringLiteral("このルビの大きさ（本文の何字ぶんか、0.25〜0.8。「行の設定」: 縦書きは行のルビの大きさ、横書きは半分）"));
     connect(ruby_ratio, &QDoubleSpinBox::editingFinished, this, [this] {
         carry_on("set_ruby", [this] {
+            // (above 「行の設定」 but under the least a ruby takes: the least)
+            if (ruby_ratio->value() > ruby_ratio->minimum() + 1e-9 && ruby_ratio->value() < 0.25) ruby_ratio->setValue(0.25);
             set_ruby("scale", ruby_ratio->value() > ruby_ratio->minimum() + 1e-9 ? Json(ruby_ratio->value()) : Json());
         });
     });
@@ -742,9 +745,15 @@ void StoryPanel::set_ruby(const char* key, const Json& value) {
     }
     core::RubySpan& span = spans[static_cast<std::size_t>(row)];
     const core::RubySpan was = span;
-    (void)core::ruby::set_setting(span, key, value);
+    try {
+        (void)core::ruby::set_setting(span, key, value);
+    } catch (const core::OpError& error) {  // (said, as an op's refusal is; the ruby's settings shown again)
+        window_->flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
+        show_ruby_settings();
+        return;
+    }
     if (span == was) return;  // (nothing changed: no edit)
-    window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"ruby_spans", lettering::spans_op(spans)}}}));
+    window_->apply_ops(Json::array({lettering::rubies_op(*l, spans)}));
 }
 
 void StoryPanel::show_rubies(const core::StoryLine* l) {
@@ -829,7 +838,7 @@ void StoryPanel::reassign_ruby() {
     core::ruby::take_settings(fresh, old);
     spans.push_back(std::move(fresh));
     std::stable_sort(spans.begin(), spans.end(), [](const core::RubySpan& x, const core::RubySpan& y) { return x.start < y.start; });
-    window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", id}, {"ruby_spans", lettering::spans_op(spans)}}}));
+    window_->apply_ops(Json::array({lettering::rubies_op(*again, spans)}));
 }
 
 void StoryPanel::clear_ruby() {
@@ -842,7 +851,7 @@ void StoryPanel::clear_ruby() {
         return;
     }
     spans.erase(spans.begin() + row);
-    window_->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", l->id}, {"ruby_spans", lettering::spans_op(spans)}}}));
+    window_->apply_ops(Json::array({lettering::rubies_op(*l, spans)}));
 }
 
 void StoryPanel::pick_style_colour(const char* key, const QString& title, const QColor& fallback) {

@@ -41,6 +41,8 @@ inline constexpr std::string_view kDefaultSfx = "sfx";
 // fonts.face(spec, default): a bundled key, a font file's path (a file that exists), or null (the default). A spec
 // that is neither gives the default face. Python's TypeError for a spec that is not a str.
 Face face_of(const core::Json& spec, std::string_view default_key = kDefaultDialogue);
+// Whether face_of finds `name` (a bundled key, or a font file that exists) rather than giving the default.
+bool face_exists(std::string_view name);
 
 // fonts.is_kana_like(char): the first character is kana, the long vowel mark or Japanese punctuation.
 bool is_kana_like(std::u32string_view ch);
@@ -57,6 +59,8 @@ public:
     bool has_glyph(const std::string& path, std::u32string_view ch);
     // Face.font(size, char)
     const TrueTypeFont& font(const Face& face, std::int64_t size, std::u32string_view ch = U"漢");
+    // The font file Face.font takes for the character (the face's half for it, or the first that has it).
+    std::string path_for(const Face& face, std::u32string_view ch);
     // Face.normalize(text): characters the face lacks swapped for look-alikes it has (― → —, ～ → 〜 …).
     std::u32string normalize(const Face& face, std::u32string_view text);
 

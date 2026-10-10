@@ -136,6 +136,11 @@ Face face_of(const core::Json& spec_in, std::string_view default_key) {
     return Face{std::string(default_key), std::string(fallback->kana), std::string(fallback->other)};
 }
 
+bool face_exists(std::string_view name) {
+    return bundled(name) != nullptr ||
+           (name.find('\0') == std::string_view::npos && QFileInfo(QString::fromUtf8(name.data(), static_cast<qsizetype>(name.size()))).isFile());
+}
+
 bool is_kana_like(std::u32string_view ch) {
     const char32_t code = ch.empty() ? U' ' : ch[0];
     // (`char in "ー〜～…‥"` is a substring test: a whole text of these, or no text at all, counts too)
@@ -169,15 +174,17 @@ bool Fonts::has_glyph(const std::string& path, std::u32string_view ch) {
     return has;
 }
 
-const TrueTypeFont& Fonts::font(const Face& face, std::int64_t size, std::u32string_view ch) {
+const TrueTypeFont& Fonts::font(const Face& face, std::int64_t size, std::u32string_view ch) { return truetype(path_for(face, ch), size); }
+
+std::string Fonts::path_for(const Face& face, std::u32string_view ch) {
     const std::string& first = is_kana_like(ch) ? face.kana : face.other;
-    if (ch.size() != 1 || has_glyph(first, ch)) return truetype(first, size);
+    if (ch.size() != 1 || has_glyph(first, ch)) return first;
     // a character the face lacks (e.g. ― in some Minchos): the other half, then the bundled Gothic
     const std::string other = first == face.kana ? face.other : face.kana;
     for (const std::string& path : {other, std::string(kGothic), std::string(kSfx)}) {
-        if (has_glyph(path, ch)) return truetype(path, size);
+        if (has_glyph(path, ch)) return path;
     }
-    return truetype(first, size);
+    return first;
 }
 
 std::u32string Fonts::normalize(const Face& face, std::u32string_view text) {

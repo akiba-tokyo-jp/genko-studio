@@ -87,12 +87,55 @@ Window window_of(const std::vector<int>& a, const std::vector<int>& b) {
     return w;
 }
 
+// The same, the common end taken first (then the common start, never reaching into it): with the window above, the two
+// ends of the places a single edit may have been (a word there more than once around it).
+Window window_from_end(const std::vector<int>& a, const std::vector<int>& b) {
+    Window w;
+    w.n = static_cast<std::int64_t>(a.size());
+    w.m = static_cast<std::int64_t>(b.size());
+    while (w.q < std::min(w.n, w.m) && a[static_cast<std::size_t>(w.n - 1 - w.q)] == b[static_cast<std::size_t>(w.m - 1 - w.q)]) ++w.q;
+    while (w.p < std::min(w.n, w.m) - w.q && a[static_cast<std::size_t>(w.p)] == b[static_cast<std::size_t>(w.p)]) ++w.p;
+    return w;
+}
+
+// What the single edit of a window does to a range of the text before: keeps it (where it lies after), takes it away,
+// or reaches into it.
+struct Fate {
+    enum class Kind { kept, removed, edited };
+    Kind kind = Kind::kept;
+    std::int64_t start = 0;
+    std::int64_t end = 0;
+    bool operator==(const Fate&) const = default;
+};
+
+Fate fate_in(const Window& w, std::int64_t s, std::int64_t e) {
+    if (e <= w.p) return Fate{Fate::Kind::kept, s, e};
+    if (s >= w.n - w.q) return Fate{Fate::Kind::kept, s + (w.m - w.n), e + (w.m - w.n)};
+    if (s >= w.p && e <= w.n - w.q && w.m - w.q == w.p) return Fate{Fate::Kind::removed, 0, 0};
+    return Fate{Fate::Kind::edited, 0, 0};
+}
+
 RubySpan needing_review(const RubySpan& span, std::int64_t start, std::int64_t end, std::string_view why) {
     RubySpan out = span;
     out.start = std::max<std::int64_t>(0, start);
     out.end = std::max(out.start, end);
     if (out.review.empty()) out.review = std::string(why);
     return out;
+}
+
+// A follow's spans in the order of their starts, each keeping its origin.
+void sort_followed(Followed& f) {
+    std::vector<std::size_t> order(f.spans.size());
+    for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&f](std::size_t x, std::size_t y) { return f.spans[x].start < f.spans[y].start; });
+    std::vector<RubySpan> spans;
+    std::vector<std::size_t> origin;
+    for (const std::size_t i : order) {
+        spans.push_back(std::move(f.spans[i]));
+        origin.push_back(f.origin[i]);
+    }
+    f.spans = std::move(spans);
+    f.origin = std::move(origin);
 }
 
 // Longest-common-subsequence tables of two grapheme lists: F[i][j] of a[:i], b[:j]; B[i][j] of a[i:], b[j:].
@@ -328,16 +371,30 @@ std::vector<RubySpan> from_runs(std::string_view text_utf8, const std::vector<Js
 }
 
 std::vector<RubySpan> from_runs_keeping(std::string_view text, const std::vector<Json>& runs, const std::vector<RubySpan>& had) {
+    // (the line's own runs sent back: its rubies as they are)
+    const std::vector<Json> mirror = runs_of(had);
+    bool same = mirror.size() == runs.size();
+    for (std::size_t i = 0; same && i < runs.size(); ++i) same = py_equals(mirror[i], runs[i]);
+    if (same) return had;
     std::vector<RubySpan> out = from_runs(text, runs, true);
     std::vector<bool> used(had.size(), false);
-    for (RubySpan& span : out) {
+    std::vector<bool> given(out.size(), false);
+    // the settings of the ruby with the same base and reading (in order), else of the one at the same place
+    for (std::size_t k = 0; k < out.size(); ++k) {
         for (std::size_t i = 0; i < had.size(); ++i) {
-            const RubySpan& old = had[i];
-            const bool same = span.review.empty() ? old.start == span.start && old.end == span.end && old.base == span.base
-                                                  : old.base == span.base && old.ruby == span.ruby;
-            if (used[i] || !same) continue;
+            if (used[i] || had[i].base != out[k].base || had[i].ruby != out[k].ruby) continue;
             used[i] = true;
-            take_settings(span, old);
+            given[k] = true;
+            take_settings(out[k], had[i]);
+            break;
+        }
+    }
+    for (std::size_t k = 0; k < out.size(); ++k) {
+        if (given[k] || !out[k].review.empty()) continue;
+        for (std::size_t i = 0; i < had.size(); ++i) {
+            if (used[i] || had[i].start != out[k].start || had[i].end != out[k].end || had[i].base != out[k].base) continue;
+            used[i] = true;
+            take_settings(out[k], had[i]);
             break;
         }
     }
@@ -431,36 +488,16 @@ Json to_json(const std::vector<RubySpan>& spans) {
     return out;
 }
 
-std::string problem(const std::vector<RubySpan>& spans, std::string_view text) {
-    const std::int64_t n = count(text);
-    const RubySpan* last = nullptr;
-    for (std::size_t i = 0; i < spans.size(); ++i) {
-        const RubySpan& span = spans[i];
-        const std::string at = "span " + std::to_string(i);
-        if (span.ruby.empty()) return at + " has no reading";
-        if (!span.review.empty() && !reason(span.review)) return at + "'s review " + py_repr_str(span.review) + " is not one of edited, ambiguous, unplaced";
-        const bool fits = span.review.empty() ? (0 <= span.start && span.start < span.end && span.end <= n)
-                                              : (0 <= span.start && span.start <= span.end && span.end <= n);
-        if (!fits) return at + " [" + std::to_string(span.start) + ", " + std::to_string(span.end) + ") is outside the text's " + std::to_string(n) + " graphemes";
-        if (i > 0 && (span.start < spans[i - 1].start || (span.start == spans[i - 1].start && span.end < spans[i - 1].end))) {
-            return at + " is out of order";
-        }
-        if (!span.review.empty()) continue;
-        if (span.base != slice(text, span.start, span.end)) return at + "'s base " + py_repr_str(span.base) + " is not the text there";
-        if (last != nullptr && span.start < last->end) return at + " overlaps the one before";
-        last = &span;
-    }
-    return {};
-}
-
 Followed follow_text(std::string_view before_utf8, std::string_view after_utf8, const std::vector<RubySpan>& spans) {
     Followed out;
     if (before_utf8 == after_utf8) {
         out.spans = spans;
+        for (std::size_t i = 0; i < spans.size(); ++i) out.origin.push_back(i);
         return out;
     }
     const std::u32string before = code_points(before_utf8);
     const std::u32string after = code_points(after_utf8);
+    const std::vector<std::size_t> b1 = bounds(after);
     const Clusters ids = ids_of(before, after);
     const Window w = window_of(ids.before, ids.after);
     const auto n = static_cast<std::size_t>(w.n);
@@ -468,25 +505,44 @@ Followed follow_text(std::string_view before_utf8, std::string_view after_utf8, 
     const bool small = static_cast<std::int64_t>(n + 1) * static_cast<std::int64_t>(m + 1) <= kLcsCells;
     std::optional<Lcs> lcs;
     if (small) lcs.emplace(ids.before, ids.after);
-    for (const RubySpan& span : spans) {
+    // (a long text: its common start and end, taken both ways round — where the two disagree, the edit could have been
+    // anywhere between them)
+    const Window w2 = small ? w : window_from_end(ids.before, ids.after);
+    // a one-letter-or-more base whose letters are still there, a mark, selector or joiner now joined to its last one: an
+    // edit in it, not its removal
+    const auto joined = [&](const RubySpan& span, std::int64_t g) {
+        if (g < 0 || g >= w.m) return false;
+        const std::u32string base = code_points(span.base);
+        const std::size_t at = b1[static_cast<std::size_t>(g)];
+        return !base.empty() && std::u32string_view(after).substr(at, base.size()) == base && at + base.size() < after.size() &&
+               grapheme_at(b1, at + base.size()) < 0;
+    };
+    const auto keep = [&](const RubySpan& span, std::size_t i) {
+        out.spans.push_back(span);
+        out.origin.push_back(i);
+    };
+    for (std::size_t i = 0; i < spans.size(); ++i) {
+        const RubySpan& span = spans[i];
         const std::int64_t s = std::clamp<std::int64_t>(span.start, 0, w.n);
         const std::int64_t e = std::clamp<std::int64_t>(span.end, s, w.n);
         if (!span.review.empty() || e <= s) {
-            out.spans.push_back(needing_review(span, w.start(s), w.end(e), span.review.empty() ? "edited" : span.review));
+            keep(needing_review(span, w.start(s), w.end(e), span.review.empty() ? "edited" : span.review), i);
             continue;
         }
-        if (!lcs) {  // (a long text: its common start and end only)
-            if (e <= w.p) {
-                out.spans.push_back(span);
-            } else if (s >= w.n - w.q) {
+        if (!lcs) {  // (a long text)
+            const Fate one = fate_in(w, s, e);
+            const Fate two = fate_in(w2, s, e);
+            if (!(one == two)) {
+                keep(needing_review(span, w.start(s), w.end(e), "ambiguous"), i);
+            } else if (one.kind == Fate::Kind::kept) {
                 RubySpan moved = span;
-                moved.start = s + (w.m - w.n);
-                moved.end = e + (w.m - w.n);
-                out.spans.push_back(moved);
-            } else if (s >= w.p && e <= w.n - w.q && w.m - w.q == w.p) {
+                moved.start = one.start;
+                moved.end = one.end;
+                keep(moved, i);
+            } else if (one.kind == Fate::Kind::removed && !joined(span, w.start(s))) {
                 ++out.removed;
             } else {
-                out.spans.push_back(needing_review(span, w.start(s), w.end(e), "edited"));
+                keep(needing_review(span, w.start(s), w.end(e), "edited"), i);
             }
             continue;
         }
@@ -494,7 +550,7 @@ Followed follow_text(std::string_view before_utf8, std::string_view after_utf8, 
         const auto ue = static_cast<std::size_t>(e);
         const std::size_t k = ue - us;
         const std::uint32_t total = lcs->length();
-        std::vector<std::size_t> places;  // where every best alignment may keep the base whole
+        std::vector<std::size_t> places;  // where a best alignment may keep the base whole
         for (std::size_t t = 0; t + k <= m; ++t) {
             if (!std::equal(ids.after.begin() + static_cast<std::ptrdiff_t>(t), ids.after.begin() + static_cast<std::ptrdiff_t>(t + k),
                             ids.before.begin() + static_cast<std::ptrdiff_t>(us))) {
@@ -505,23 +561,34 @@ Followed follow_text(std::string_view before_utf8, std::string_view after_utf8, 
         bool deletable = false;  // a best alignment keeps none of it
         for (std::size_t j = 0; j <= m && !deletable; ++j) deletable = lcs->front(us, j) + lcs->back(ue, j) == total;
         bool kept_any = false;  // a best alignment keeps some of it
-        for (std::size_t i = us; i < ue && !kept_any; ++i) {
+        for (std::size_t x = us; x < ue && !kept_any; ++x) {
             for (std::size_t j = 0; j < m && !kept_any; ++j) {
-                kept_any = ids.before[i] == ids.after[j] && lcs->front(i, j) + 1 + lcs->back(i + 1, j + 1) == total;
+                kept_any = ids.before[x] == ids.after[j] && lcs->front(x, j) + 1 + lcs->back(x + 1, j + 1) == total;
             }
         }
-        if (places.size() == 1 && !deletable) {
+        // every best alignment keeps each of its letters there: none leaves one out, none puts one elsewhere
+        const auto firm = [&](std::size_t t) {
+            for (std::size_t x = us; x < ue; ++x) {
+                const std::size_t there = t + (x - us);
+                for (std::size_t j = 0; j <= m; ++j) {
+                    if (lcs->front(x, j) + lcs->back(x + 1, j) == total) return false;
+                    if (j < m && j != there && ids.before[x] == ids.after[j] && lcs->front(x, j) + 1 + lcs->back(x + 1, j + 1) == total) return false;
+                }
+            }
+            return true;
+        };
+        if (places.size() == 1 && !deletable && firm(places.front())) {
             RubySpan moved = span;
             moved.start = static_cast<std::int64_t>(places.front());
             moved.end = moved.start + static_cast<std::int64_t>(k);
-            out.spans.push_back(moved);
-        } else if (places.empty() && !kept_any) {
+            keep(moved, i);
+        } else if (places.empty() && !kept_any && !joined(span, w.start(s))) {
             ++out.removed;
         } else {
-            out.spans.push_back(needing_review(span, w.start(s), w.end(e), places.empty() ? "edited" : "ambiguous"));
+            keep(needing_review(span, w.start(s), w.end(e), places.empty() ? "edited" : "ambiguous"), i);
         }
     }
-    std::stable_sort(out.spans.begin(), out.spans.end(), [](const RubySpan& x, const RubySpan& y) { return x.start < y.start; });
+    sort_followed(out);
     // (each ruby is placed alone: two that different alignments put over the same letters cannot both be right)
     RubySpan* last = nullptr;
     for (RubySpan& span : out.spans) {
@@ -542,12 +609,15 @@ Followed follow_replacements(std::string_view before_utf8, std::string_view afte
     const std::u32string after = code_points(after_utf8);
     const std::vector<std::size_t> b0 = bounds(before);
     const std::vector<std::size_t> b1 = bounds(after);
-    // each match narrowed to what it changes (its common start and end with the replacement taken off)
+    // each match narrowed to what it changes (its common start and end with the replacement taken off): what tells
+    // letters added beside a base from an edit of it; the match itself [from, to) is what it took away
     struct Edit {
         std::size_t a = 0;
         std::size_t b = 0;
         std::int64_t delta = 0;
         std::size_t added = 0;
+        std::size_t from = 0;
+        std::size_t to = 0;
     };
     std::vector<Edit> edits;
     for (const Replacement& r : replacements) {
@@ -561,7 +631,7 @@ Followed follow_replacements(std::string_view before_utf8, std::string_view afte
         const std::size_t b = r.end - q;
         const std::size_t added = with.size() - p - q;
         if (a == b && added == 0) continue;
-        edits.push_back(Edit{a, b, static_cast<std::int64_t>(added) - static_cast<std::int64_t>(b - a), added});
+        edits.push_back(Edit{a, b, static_cast<std::int64_t>(added) - static_cast<std::int64_t>(b - a), added, r.start, r.end});
     }
     // where a place of the text before lies after the edits (a range's start inside an edit: the edit's new start; its
     // end: the edit's new end; an insertion at a range's start moves it, one at its end does not)
@@ -597,48 +667,55 @@ Followed follow_replacements(std::string_view before_utf8, std::string_view afte
         return needing_review(span, grapheme_floor(b1, static_cast<std::size_t>(from)), grapheme_ceil(b1, static_cast<std::size_t>(to)), why);
     };
     const std::int64_t n = graphemes_of(b0);
-    for (const RubySpan& span : spans) {
-        const std::size_t s = b0[static_cast<std::size_t>(std::clamp<std::int64_t>(span.start, 0, n))];
-        const std::size_t e = b0[static_cast<std::size_t>(std::clamp<std::int64_t>(span.end, span.start, n))];
+    for (std::size_t i = 0; i < spans.size(); ++i) {
+        const RubySpan& span = spans[i];
+        const std::int64_t g0 = std::clamp<std::int64_t>(span.start, 0, n);
+        const std::size_t s = b0[static_cast<std::size_t>(g0)];
+        const std::size_t e = b0[static_cast<std::size_t>(std::clamp<std::int64_t>(span.end, g0, n))];
         if (!span.review.empty() || e <= s) {
             out.spans.push_back(hint(span, s, e, span.review.empty() ? "edited" : span.review));
+            out.origin.push_back(i);
             continue;
         }
         std::int64_t shift = 0;
-        bool gone = false;
-        bool reached = false;
+        std::vector<std::pair<std::size_t, std::size_t>> reaching;  // the matches whose edit reaches the base
         for (const Edit& edit : edits) {
             if (edit.b <= s) {
                 shift += edit.delta;
             } else if (edit.a >= e) {
                 break;
-            } else if (edit.a <= s && edit.b >= e) {
-                gone = true;
             } else {
-                reached = true;
+                reaching.emplace_back(edit.from, edit.to);
             }
         }
-        if (gone) {
+        // the whole base taken away by the matches that reach it (they are in order and never overlap)
+        std::size_t covered = s;
+        for (const auto& [from, to] : reaching) {
+            if (from <= covered) covered = std::max(covered, to);
+        }
+        if (!reaching.empty() && covered >= e) {
             ++out.removed;
             continue;
         }
-        if (!reached) {
+        if (reaching.empty()) {
             const auto from = static_cast<std::size_t>(static_cast<std::int64_t>(s) + shift);
             const auto to = static_cast<std::size_t>(static_cast<std::int64_t>(e) + shift);
-            const std::int64_t g0 = grapheme_at(b1, from);
-            const std::int64_t g1 = grapheme_at(b1, to);
+            const std::int64_t h0 = grapheme_at(b1, from);
+            const std::int64_t h1 = grapheme_at(b1, to);
             // (the base the same letters, still whole graphemes: a combining mark added at its end joins it)
-            if (g0 >= 0 && g1 > g0 && std::u32string_view(after).substr(from, to - from) == std::u32string_view(before).substr(s, e - s)) {
+            if (h0 >= 0 && h1 > h0 && std::u32string_view(after).substr(from, to - from) == std::u32string_view(before).substr(s, e - s)) {
                 RubySpan moved = span;
-                moved.start = g0;
-                moved.end = g1;
+                moved.start = h0;
+                moved.end = h1;
                 out.spans.push_back(moved);
+                out.origin.push_back(i);
                 continue;
             }
         }
         out.spans.push_back(hint(span, s, e, "edited"));
+        out.origin.push_back(i);
     }
-    std::stable_sort(out.spans.begin(), out.spans.end(), [](const RubySpan& x, const RubySpan& y) { return x.start < y.start; });
+    sort_followed(out);
     return out;
 }
 

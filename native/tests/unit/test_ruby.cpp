@@ -20,6 +20,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/model.hpp"
+#include "core/ruby.hpp"
 #include "formats/checks.hpp"
 #include "formats/exporting.hpp"
 #include "render/ops_registry.hpp"
@@ -28,6 +29,7 @@
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "storage/transaction.hpp"
+#include "storage/undo.hpp"
 #include "storage/writer.hpp"
 #include "testsupport.hpp"
 
@@ -112,6 +114,30 @@ Json ruby_report(const ApplyResult& result) {
 
 std::string shown(const Json& value) { return value.dump(-1, ' ', false); }
 
+constexpr const char* kActor = "human:作者";
+
+// The book saved in `dir` by the actor: the first revision, or the next one with the ops' journal record.
+void save_as(const Document& doc, const std::filesystem::path& dir, const Json& journal_ops, std::int64_t base) {
+    genko::storage::ProjectLock lock(dir, kActor);
+    lock.try_acquire();
+    genko::storage::SaveRequest request;
+    request.actor = kActor;
+    request.base_revision = base;
+    request.ops = journal_ops;
+    genko::storage::Saver(lock).save(doc, request);
+}
+
+// A line put by add_line (`fields` over its text) and the line as the book writes it after `ops`.
+Json spans_after(const Json& add, const Json& ops, const QTemporaryDir& dir, Json* report = nullptr) {
+    Json op{{"op", "add_line"}, {"page", 1}, {"id", "L1"}, {"x_mm", 20}, {"y_mm", 20}};
+    for (const auto& [key, value] : add.items()) op[key] = value;
+    const Document doc = run_ops(blank_book(), Json::array({op})).doc;
+    const ApplyResult result = run_ops(doc, ops);
+    if (report != nullptr) *report = ruby_report(result);
+    const Json line = line_of(payload_of(result.doc, dir), "L1");
+    return line.contains("ruby_spans") ? line["ruby_spans"] : Json();
+}
+
 }  // namespace
 
 class TestRuby : public QObject {
@@ -152,8 +178,8 @@ private slots:
                 const Json put = line_of(payload_of(before, tmp_), "L1");
                 Document after = before;
                 Json report = Json::object();
-                if (!c["edit"].is_null()) {
-                    Json edit = c["edit"];
+                Json edit = c["edit"];
+                if (!edit.is_null()) {
                     if (edit["op"] == "edit_line") edit["id"] = "L1";
                     const ApplyResult result = run_ops(before, Json::array({edit}));
                     after = result.doc;
@@ -180,11 +206,21 @@ private slots:
                 }
                 const Json want_report = want.contains("report") ? want["report"] : Json::object();
                 if (!genko::test::same_content(report, want_report, &where)) failures.push_back(name + ": report " + shown(report));
-                // the line before the edit is whole in the book before it (Undo gives it back: text, range and reading)
+                // Undo through the journal (genko undo): the book saved, the edit saved as its next revision and undone —
+                // the line comes back whole (text, range, reading and the ruby's own settings)
                 if (c.value("undo", false)) {
-                    const Json again = line_of(payload_of(before, tmp_), "L1");
-                    if (!genko::test::strict_equal(again, put, &where)) failures.push_back(name + ": the line before the edit changed");
-                    if (!again.contains("ruby_spans") || again["ruby_spans"].empty()) failures.push_back(name + ": no ruby before the edit");
+                    const auto dir = genko::storage::path_from_utf8(tmp_.path().toStdString() + "/undo-" + std::to_string(ran) + ".genko");
+                    save_as(before, dir, Json::array(), 0);
+                    const Document read = genko::storage::load_document(dir).document;
+                    const ApplyResult saved = bus().apply(read, Json::array({edit}), Actor(kActor));
+                    save_as(saved.doc, dir, saved.journal_ops, read.revision);
+                    if (line_of(payload_of(genko::storage::load_document(dir).document, tmp_), "L1") == put) {
+                        failures.push_back(name + ": the edit saved changed nothing");
+                    }
+                    (void)genko::storage::restore(dir, kActor, false, false);
+                    const Json again = line_of(payload_of(genko::storage::load_document(dir).document, tmp_), "L1");
+                    if (!genko::test::strict_equal(again, put, &where)) failures.push_back(name + ": Undo did not give the line back (" + where + ")");
+                    if (!again.contains("ruby_spans") || again["ruby_spans"].empty()) failures.push_back(name + ": no ruby after Undo");
                 }
             } catch (const std::exception& error) {
                 failures.push_back(name + ": " + error.what());
@@ -317,6 +353,152 @@ private slots:
         bool stops = false;
         for (const Json& issue : pre["errors"]) stops = stops || issue["code"] == "ruby_review";
         QVERIFY(stops);
+    }
+
+    // A long text (graphemes before × after past kLcsCells) is compared by its common start and end, both ways round:
+    // where the two disagree on where the edit was (a word there more than once), the rubies they place differently need
+    // review (ambiguous), as the short text's comparison says; an edit with nothing repeated around it follows the rules.
+    void longTextFallback() {
+        std::string kana;
+        for (int i = 0; i < 250; ++i) kana += "あいうえおかきくけこ";
+        QVERIFY(static_cast<std::int64_t>(2506) * 2503 > genko::core::ruby::kLcsCells);
+        const Json two = Json::parse(R"([{"start": 0, "end": 2, "ruby": "まえ"}, {"start": 3, "end": 5, "ruby": "うしろ"}])");
+        const auto edit = [](const std::string& text) { return Json::array({Json{{"op", "edit_line"}, {"id", "L1"}, {"text", text}}}); };
+        Json report;
+        // 「と東京」 taken from the middle: which 東京 went cannot be told
+        Json spans = spans_after(Json{{"text", "東京と東京" + kana}, {"ruby_spans", two}}, edit("東京" + kana), tmp_, &report);
+        QCOMPARE(shown(spans), shown(Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "まえ", "review": "ambiguous"},
+            {"start": 2, "end": 2, "base": "東京", "ruby": "うしろ", "review": "ambiguous"}])")));
+        QCOMPARE(report, Json({{"ruby_review", 2}}));
+        // 「東京と」 put before (or after the first): the same text — neither reading can be placed
+        spans = spans_after(Json{{"text", "東京と東京" + kana}, {"ruby_spans", two}}, edit("東京と東京と東京" + kana), tmp_);
+        QCOMPARE(shown(spans), shown(Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "まえ", "review": "ambiguous"},
+            {"start": 3, "end": 5, "base": "東京", "ruby": "うしろ", "review": "ambiguous"}])")));
+        // nothing repeated around the edit: moved, kept, removed as the rules say
+        spans = spans_after(Json{{"text", "東京へ" + kana}, {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "まえ"}])")}},
+                            edit("新東京へ" + kana), tmp_, &report);
+        QCOMPARE(shown(spans), shown(Json::parse(R"([{"start": 1, "end": 3, "base": "東京", "ruby": "まえ"}])")));
+        QCOMPARE(report, Json::object());
+        spans = spans_after(Json{{"text", "東京へ" + kana}, {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "まえ"}])")}},
+                            edit("へ" + kana), tmp_, &report);
+        QVERIFY(spans.is_null());
+        QCOMPARE(report, Json({{"ruby_removed", 1}}));
+        // (and the one-grapheme base given a combining mark: edited, not removed)
+        spans = spans_after(Json{{"text", "海へ" + kana}, {"ruby_spans", Json::parse(R"([{"start": 0, "end": 1, "ruby": "うみ"}])")}},
+                            edit("海\u0301へ" + kana), tmp_);
+        QCOMPARE(shown(spans), shown(Json::parse(R"([{"start": 0, "end": 1, "base": "海", "ruby": "うみ", "review": "edited"}])")));
+    }
+
+    // replace_text taking a whole base away from a line of Python's leaves it Python's (no ruby_spans, no feature): its
+    // runs as Python leaves them. set_balloon_path given the line's own runs back keeps its rubies where they are.
+    void pythonLinesAndRunsGivenBack() {
+        Document doc = run_ops(blank_book(), Json::parse(R"([{"op": "add_line", "page": 1, "id": "L1", "text": "東京へ",
+            "ruby_runs": [["東京", "とうきょう"]]}])")).doc;
+        const ApplyResult replaced = run_ops(doc, Json::parse(R"([{"op": "replace_text", "find": "東京", "replace": "東西"}])"));
+        const Json payload = payload_of(replaced.doc, tmp_);
+        QCOMPARE(payload["features"], Json::array());
+        QVERIFY(!line_of(payload, "L1").contains("ruby_spans"));
+        QCOMPARE(ruby_report(replaced), Json::object());
+        Json report;
+        const Json kept = spans_after(Json{{"text", "東京と東京"}, {"ruby_spans", Json::parse(R"([{"start": 3, "end": 5, "ruby": "うしろ", "gap_mm": 1}])")}},
+                                      Json::parse(R"([{"op": "set_balloon_path", "id": "L1", "ruby_runs": [["東京", "うしろ"]],
+                                          "path": [[0, 0], [30, 0], [30, 20], [0, 20]]}])"), tmp_, &report);
+        QCOMPARE(shown(kept), shown(Json::parse(R"([{"start": 3, "end": 5, "base": "東京", "ruby": "うしろ", "gap_mm": 1.0}])")));
+    }
+
+    // 入稿前の点検 carries on: a line that is nowhere still has its rubies needing review said; a line whose lettering
+    // cannot be set (OpenType features across, Pillow's KeyError) does not stop the page's other checks; the words for
+    // a reading longer than all the text say what the lettering did (widened, not cut or moved in).
+    void checksCarryOn() {
+        Document doc = run_ops(blank_book(), Json::parse(R"([{"op": "add_line", "page": 1, "id": "L1", "text": "東新京へ",
+            "ruby_spans": [{"start": 0, "end": 3, "ruby": "とうきょう", "base": "東京", "review": "edited"}]},
+            {"op": "add_line", "page": 1, "id": "L2", "text": "東京と大阪", "x_mm": 60, "y_mm": 60, "wrap": "horizontal",
+             "style": {"features": ["jp78"]}, "ruby_spans": [{"start": 0, "end": 2, "ruby": "とうきょう"},
+             {"start": 3, "end": 5, "ruby": "おおさか", "base": "大坂", "review": "edited"}]},
+            {"op": "add_line", "page": 1, "id": "L3", "text": "海と空", "x_mm": 120, "y_mm": 20, "w_mm": 60, "h_mm": 60, "wrap": "vertical",
+             "ruby_spans": [{"start": 0, "end": 1, "ruby": "わたつみのかみさま"}]}])")).doc;
+        for (genko::core::StoryLine& line : doc.story) {
+            if (line.id != "L1") continue;
+            line.x_mm = genko::core::Num(0);
+            line.y_mm = genko::core::Num(0);
+            line.balloon.clear();
+        }
+        Json issues;
+        try {
+            issues = genko::formats::checks::page_issues(doc, doc.page(0));
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+        std::set<std::string> got;
+        std::string overflow;
+        for (const Json& issue : issues) {
+            if (!issue["target"].is_object()) continue;
+            got.insert(issue["target"]["id"].get<std::string>() + ":" + issue["code"].get<std::string>());
+            if (issue["code"] == "ruby_overflow") overflow = issue["message"].get<std::string>();
+        }
+        QVERIFY(got.contains("L1:line_unplaced"));
+        QVERIFY(got.contains("L1:ruby_review"));
+        QVERIFY(got.contains("L2:ruby_review"));
+        QVERIFY(got.contains("L3:ruby_overflow"));
+        QVERIFY2(overflow.find("文字組を広げて") != std::string::npos && overflow.find("内側へずらした") == std::string::npos, overflow.c_str());
+    }
+
+    // replace_text's following of a ruby whose range lies past the text (a state no op makes): kept in the text, never
+    // read outside it.
+    void replacementsStayInTheText() {
+        genko::core::RubySpan far;
+        far.start = 5;
+        far.end = 6;
+        far.ruby = "x";
+        far.base = "x";
+        far.review = "edited";
+        const auto followed = genko::core::ruby::follow_replacements("東京", "東都", {genko::core::ruby::Replacement{1, 2, U"都"}}, {far});
+        QCOMPARE(followed.spans.size(), std::size_t{1});
+        QVERIFY(followed.spans[0].start <= followed.spans[0].end && followed.spans[0].end <= 2);
+    }
+
+    // Spans not as the writer writes them (by hand): each read as far as it can be — a range of numbers that are not
+    // whole, no base (the text there) — and kept needing review (edited), never dropped and never drawn by the runs'
+    // first-occurrence rule; the others as they were. A list that is not one: its runs kept needing review, none drawn.
+    // Reported, the book read-only; the document read is what accepting the repairs writes.
+    void malformedSpansKeptAsReview() {
+        const Document doc = run_ops(blank_book(), Json::parse(R"([{"op": "add_line", "page": 1, "id": "L1", "text": "東京と東京と大阪",
+            "ruby_spans": [{"start": 0, "end": 2, "ruby": "まえ"}, {"start": 3, "end": 5, "ruby": "うしろ", "gap_mm": 1},
+            {"start": 6, "end": 8, "ruby": "おおさか"}]}])")).doc;
+        const auto dir = genko::storage::path_from_utf8(tmp_.path().toStdString() + "/malformed.genko");
+        save_as(doc, dir, Json::array(), 0);
+        Json raw = genko::test::read_json(QString::fromStdString(dir.string() + "/project.json"));
+        raw["story"][0]["ruby_spans"][0].erase("base");
+        raw["story"][0]["ruby_spans"][1]["start"] = 3.0;
+        genko::test::write_bytes(QString::fromStdString(dir.string() + "/project.json"), genko::core::dump_python(raw));
+        const auto loaded = genko::storage::load_document(dir);
+        QVERIFY(!loaded.report.clean());
+        QVERIFY(!loaded.document.read_only_reason.empty());
+        Json line = line_of(payload_of(loaded.document, tmp_), "L1");
+        QCOMPARE(shown(line["ruby_spans"]), shown(Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "まえ", "review": "edited"},
+            {"start": 3, "end": 5, "base": "東京", "ruby": "うしろ", "gap_mm": 1.0, "review": "edited"},
+            {"start": 6, "end": 8, "base": "大阪", "ruby": "おおさか"}])")));
+        QCOMPARE(line["ruby_runs"], Json::parse(R"([["大阪", "おおさか"]])"));
+        // a span that does not fit: that one needs review, not the others
+        raw = genko::test::read_json(QString::fromStdString(dir.string() + "/project.json"));
+        raw["story"][0]["ruby_spans"][0]["base"] = "東京";
+        raw["story"][0]["ruby_spans"][1]["start"] = 3;
+        raw["story"][0]["ruby_spans"][1]["end"] = 99;
+        genko::test::write_bytes(QString::fromStdString(dir.string() + "/project.json"), genko::core::dump_python(raw));
+        line = line_of(payload_of(genko::storage::load_document(dir).document, tmp_), "L1");
+        QCOMPARE(shown(line["ruby_spans"]), shown(Json::parse(R"([{"start": 0, "end": 2, "base": "東京", "ruby": "まえ"},
+            {"start": 3, "end": 8, "base": "東京", "ruby": "うしろ", "gap_mm": 1.0, "review": "edited"},
+            {"start": 6, "end": 8, "base": "大阪", "ruby": "おおさか"}])")));
+        // not a list: the runs it mirrored kept needing review (where they go cannot be told), none drawn
+        raw["story"][0]["ruby_spans"] = "x";
+        genko::test::write_bytes(QString::fromStdString(dir.string() + "/project.json"), genko::core::dump_python(raw));
+        const auto lost = genko::storage::load_document(dir);
+        QVERIFY(!lost.report.clean());
+        line = line_of(payload_of(lost.document, tmp_), "L1");
+        QCOMPARE(line["ruby_runs"], Json::array());
+        QCOMPARE(shown(line["ruby_spans"]), shown(Json::parse(R"([{"start": 0, "end": 0, "base": "東京", "ruby": "まえ", "review": "ambiguous"},
+            {"start": 0, "end": 0, "base": "東京", "ruby": "うしろ", "review": "ambiguous"},
+            {"start": 0, "end": 0, "base": "大阪", "ruby": "おおさか", "review": "ambiguous"}])")));
     }
 
     // Saved and read back: the spans where they were (review and all), the feature; a book whose spans do not fit its

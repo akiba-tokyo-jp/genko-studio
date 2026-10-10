@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -194,6 +195,14 @@ private slots:
         const Image placed = lettering(Json{{"text", "東京"}, {"style", Json{{"mono_ruby", true}}},
                                             {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "とうきょ"}])")}});
         QVERIFY(placed.tobytes() == python.tobytes());
+        // (across, Python's lettering has no モノルビ: one reading over the whole base — 「さか」 centred over 山川, not さ
+        // over 山 and か over 川 — by place too)
+        const Image python_across = lettering(Json{{"text", "山川へ"}, {"wrap", "horizontal"}, {"style", Json{{"mono_ruby", true}}},
+                                                   {"ruby_runs", Json::parse(R"([["山川", "さか"]])")}});
+        const Image placed_across = lettering(Json{{"text", "山川へ"}, {"wrap", "horizontal"}, {"style", Json{{"mono_ruby", true}}},
+                                                   {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "さか"}])")}});
+        QCOMPARE(placed_across.size(), python_across.size());
+        QVERIFY(placed_across.tobytes() == python_across.tobytes());
         // (but a reading longer than all the text: Python's is cut at the lettering's end; by place it grows to hold it)
         const Image cut = lettering(Json{{"text", "東京"}, {"ruby_runs", Json::parse(R"([["東京", "とうきょうと"]])")}});
         const Image whole = lettering(Json{{"text", "東京"}, {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "とうきょうと"}])")}});
@@ -321,6 +330,55 @@ private slots:
         QVERIFY(first && second);
         QVERIFY2((*first)[1] >= 30 && (*first)[1] < 38 && (*first)[3] <= 62, "the first from the head of its word");
         QVERIFY2((*second)[1] >= 148 && (*second)[3] > 170, "the second to the tail of its word");
+    }
+
+    // What the lettering says of rubies it could not set as asked: モノルビ's parts of one reading that meet each other
+    // (down: 「やまやま」 beside 山 and 「かわかわ」 beside 川, each longer than its letter) overlap; a ruby's font that
+    // is not there is the line's face (said: font_fallback), never another default; a horizontal part drawn in the font
+    // of its first letter says a letter that font lacks as missing, not as drawn in another face.
+    void notesAsDrawn() {
+        const auto notes = [](const Json& fields) {
+            const Document doc = with_line(fields);
+            std::set<std::string> out;
+            for (const auto& note : genko::render::text::ruby_notes(line_of(doc), kDpi)) out.insert(note.kind + ":" + note.detail);
+            return out;
+        };
+        const auto mono = notes(Json{{"text", "山川へ"}, {"style", Json{{"mono_ruby", true}}},
+                                     {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "やまやまかわかわ"}])")}});
+        QVERIFY(std::any_of(mono.begin(), mono.end(), [](const std::string& n) { return n.rfind("overlap:", 0) == 0; }));
+        // the ruby's font not found: the line's face (Mincho here), as if none were given
+        const Json lost = Json::parse(R"([{"start": 0, "end": 2, "ruby": "とうきょう", "font": "nosuchface"}])");
+        const Json none = Json::parse(R"([{"start": 0, "end": 2, "ruby": "とうきょう"}])");
+        for (const char* wrap : {"vertical", "horizontal"}) {
+            const Json style{{"size_mm", 5}, {"font", "mincho"}};
+            const Image missing = lettering(Json{{"text", "東京へ"}, {"wrap", wrap}, {"style", style}, {"ruby_spans", lost}});
+            const Image plain = lettering(Json{{"text", "東京へ"}, {"wrap", wrap}, {"style", style}, {"ruby_spans", none}});
+            QVERIFY2(missing.tobytes() == plain.tobytes(), wrap);
+            QVERIFY2(notes(Json{{"text", "東京へ"}, {"wrap", wrap}, {"style", style}, {"ruby_spans", lost}}).contains("font_fallback:font:nosuchface"), wrap);
+        }
+        // across, 「かゐ」 in the SFX face is drawn in the face of か: ゐ, which it lacks, is missing (no other face drew it)
+        const auto across = notes(Json{{"text", "井戸"}, {"wrap", "horizontal"},
+                                       {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "かゐ", "font": "sfx"}])")}});
+        QVERIFY2(across.contains("glyph_missing:ゐ") && !across.contains("font_fallback:ゐ"), (*across.begin()).c_str());
+    }
+
+    // A distance from the text below the ruby's own size (every ruby of the row): the lane above the row is never
+    // less than nothing — the 傍点 and the letters where a line without the ruby has them, the reading into the text.
+    void negativeDistanceAcross() {
+        const auto at600 = [](const Json& spans) {
+            Json op{{"op", "add_line"}, {"page", 1}, {"id", "L1"}, {"x_mm", 20}, {"y_mm", 20}, {"w_mm", 60}, {"h_mm", 20},
+                    {"wrap", "horizontal"}, {"balloon", "none"}, {"style", Json{{"size_mm", 2}}}, {"text", "東京へ"},
+                    {"emphasis_runs", Json::array({"東京"})}};
+            if (!spans.is_null()) op["ruby_spans"] = spans;
+            const Document doc = run_ops(blank_book(), Json::array({op}));
+            return genko::render::text::text_image(line_of(doc), 600).first;
+        };
+        const Image under = at600(Json::parse(R"([{"start": 0, "end": 2, "ruby": "あ", "scale": 0.25, "gap_mm": -1}])"));
+        const Image bare = at600(Json());
+        QCOMPARE(under.size(), bare.size());
+        // (the reading 12 px wide over the middle of 東京: x 41..53; left of it the same pixels)
+        QVERIFY(under.crop(genko::render::Box{0, 0, 35, under.height()}).tobytes() == bare.crop(genko::render::Box{0, 0, 35, bare.height()}).tobytes());
+        QVERIFY(ink_box(under, 38, 0, 56, under.height()));
     }
 
     // 禁則 and the box break the columns: never the ranges. A base broken over two columns gets its reading in both.

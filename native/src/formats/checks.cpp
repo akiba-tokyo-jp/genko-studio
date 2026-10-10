@@ -420,10 +420,8 @@ std::optional<std::pair<std::int64_t, std::int64_t>> image_size(const storage::A
 }
 
 // TEXT-01 (a line holding its ruby by place; Python's lines are checked as Python checks them): a ruby that needs review
-// is an error (the official export stops on it, as the studio's preflight); what its lettering could not do as asked
-// (render::text::ruby_notes at the check's 150 dpi) a warning.
-void ruby_issues(const core::StoryLine& line, const core::Page& page, const std::string& short_text, const Json& box, Json& out) {
-    const auto ruby_of = [&line](std::size_t i) { return i < line.ruby_spans->size() ? (*line.ruby_spans)[i].ruby : std::string(); };
+// is an error (the official export stops on it, as the studio's preflight) — said for a line placed nowhere too.
+void ruby_review_issues(const core::StoryLine& line, const core::Page& page, const std::string& short_text, const Json& box, Json& out) {
     for (const core::RubySpan& span : *line.ruby_spans) {
         if (span.review.empty()) continue;
         const std::string why = span.review == "unplaced" ? "親文字が本文に見つからない" : span.review == "ambiguous" ? "どの語に付くか決められない"
@@ -433,17 +431,34 @@ void ruby_issues(const core::StoryLine& line, const core::Page& page, const std:
                                 "）。台詞の欄で振り直すか外す",
                             box, "line", line.id));
     }
-    for (const render::text::RubyNote& note : render::text::ruby_notes(line, 150)) {
+}
+
+// What its lettering could not do as asked (render::text::ruby_notes at the check's 150 dpi): a warning. A lettering
+// that cannot be set (what _text_size_mm passes over) says nothing here and stops nothing; what this build does not
+// letter yet is said, as text_size_mm says it.
+void ruby_note_issues(const core::StoryLine& line, const core::Page& page, const std::string& short_text, const Json& box, Json& out) {
+    std::vector<render::text::RubyNote> notes;
+    try {
+        notes = render::text::ruby_notes(line, 150);
+    } catch (const render::NotYetPorted&) {
+        throw;
+    } catch (const std::exception&) {
+        return;
+    }
+    const auto ruby_of = [&line](std::size_t i) { return i < line.ruby_spans->size() ? (*line.ruby_spans)[i].ruby : std::string(); };
+    for (const render::text::RubyNote& note : notes) {
         const std::string reading = "台詞「" + short_text + "」のルビ「" + ruby_of(note.span) + "」";
         std::string message;
         if (note.kind == "overflow") {
-            message = reading + "が本文の端からはみ出すため、内側へずらした（読みを短くするか、揃えを変える）";
+            message = reading + "が本文全体より長いため、文字組を広げて描いた（読みを短くするか、ルビの大きさ・字間を変える）";
         } else if (note.kind == "overlap") {
             message = reading + "が隣のルビと重なっている（字間か揃えを変える）";
+        } else if (note.kind == "font_fallback" && note.detail.rfind("font:", 0) == 0) {
+            message = reading + "の書体「" + note.detail.substr(5) + "」が見つからないため、台詞の書体で描いた";
         } else if (note.kind == "font_fallback") {
             message = reading + "の字「" + note.detail + "」がルビの書体に無く、別の書体で描いた";
         } else if (note.kind == "glyph_missing") {
-            message = reading + "の字「" + note.detail + "」を描ける書体が無い";
+            message = reading + "の字「" + note.detail + "」を描いた書体に、その字が無い";
         } else {
             message = reading + "の親文字が描かれない（句点を省いた所など）";
         }
@@ -468,6 +483,7 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
         const std::string short_text = head(text, 14) + (chars(text).size() > 14 ? "…" : "");
         if (!line->x_mm.truthy() && !line->y_mm.truthy() && line->balloon.empty()) {
             out.push_back(issue("error", "line_unplaced", page, "台詞「" + short_text + "」がどこにも置かれていない", nullptr, "line", line->id));
+            if (line->ruby_spans) ruby_review_issues(*line, page, short_text, nullptr, out);  // (TEXT-01: said wherever the line is)
             continue;
         }
         const std::array<double, 4> box{line->x_mm.value(), line->y_mm.value(), line->w_mm.truthy() ? line->w_mm.value() : 0.0,
@@ -500,7 +516,10 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
                                     box_json(std::vector<double>(box.begin(), box.end())), "line", line->id));
             }
         }
-        if (line->ruby_spans) ruby_issues(*line, page, short_text, box_json(std::vector<double>(box.begin(), box.end())), out);
+        if (line->ruby_spans) {
+            ruby_review_issues(*line, page, short_text, box_json(std::vector<double>(box.begin(), box.end())), out);
+            ruby_note_issues(*line, page, short_text, box_json(std::vector<double>(box.begin(), box.end())), out);
+        }
     }
     cut_faces(page, out);
     for (std::size_t i = 0; i < placed.size(); ++i) {

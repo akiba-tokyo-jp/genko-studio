@@ -677,13 +677,20 @@ void edit_line(OpContext& c, const PictureCheck& check) {
         if (!is_one_of(op["wrap"], {"vertical", "horizontal"})) throw OpError("wrap must be vertical or horizontal");
         line.wrap = py_str(op["wrap"]);
     }
-    // the rubies: given by place; given as Python's runs to a line that holds them by place (the explicit rule, the runs
-    // not found kept as needing review); or followed through the new text
+    // the rubies: given by place; given as Python's runs to a line that holds them by place (its own runs sent back:
+    // its rubies, followed through the new text, as they are; others by the explicit rule, the runs not found kept as
+    // needing review); or followed through the new text
     RubyChange change;
     if (has(op, "ruby_spans")) {
         given_spans(line, op);
     } else if (has(op, "ruby_runs") && by_place) {
-        line.ruby_spans = ruby::from_runs_keeping(line.text, line.ruby_runs, *line.ruby_spans);
+        std::vector<RubySpan> now = *line.ruby_spans;
+        if (line.text != before) {
+            ruby::Followed f = ruby::follow_text(before, line.text, now);
+            now = std::move(f.spans);
+            change.removed = f.removed;
+        }
+        line.ruby_spans = ruby::from_runs_keeping(line.text, line.ruby_runs, now);
     } else if (has(op, "text") && line.text != before && !has(op, "ruby_runs")) {
         change = followed(line, before, runs, line.ruby_runs,
                           [&](const std::vector<RubySpan>& spans) { return ruby::follow_text(before, line.text, spans); });

@@ -60,13 +60,14 @@ struct Marks {
 };
 Marks parse_marks(const QString& typed);
 
-// The rubies a line holds once typed marks are applied (TEXT-01, core/ruby.hpp): for a new line, the rubies typed. For
-// an edit of `line`, its rubies are first followed through the change of its text by the edit rules; then a ruby typed
-// where one of them went is that one (its reading as typed, its own settings kept); a ruby typed with one's reading
-// over a place that is not where that one went (typed into its base, its base cut or moved by hand) is that one edited
-// in its base: it needs review, its base, reading and settings kept; one that needs review and was not typed over
-// stays so; a ruby typed anywhere else is new (no settings of its own), and one not typed again is gone (its marks were
-// taken away).
+// The rubies a line holds once typed marks are applied (TEXT-01, core/ruby.hpp): the notation typed is what the line's
+// rubies are. For a new line, the rubies typed. For an edit of `line`: a ruby typed with one's reading over the same
+// base is that one (its own settings kept), drawn, whatever the edit rules made of it (one needing review included);
+// one typed where a drawn one went with another reading is that one; one typed with a drawn one's reading over a place
+// that is not where that one went but reaches it (typed into its base, its base cut or moved by hand) is that one
+// edited in its base: it needs review, its base, reading and settings kept; a ruby typed anywhere else is new (no
+// settings of its own). A drawn one not typed again is gone (its notation was taken away); one that needed review
+// before (not in the notation) and was not typed over stays so, where the edit rules take it.
 std::vector<core::RubySpan> ruby_after(const Marks& marks, const core::StoryLine* line);
 // The rubies of an add_line or edit_line op made from typed marks: Python's ruby_runs as Python's window sends them
 // (always: even when empty, as edit_line) when they put every ruby where it was typed and the line holds nothing by
@@ -75,6 +76,10 @@ void put_ruby(core::Json& op, const Marks& marks, const core::StoryLine* line, b
 // The rubies by place as an op gives them: {start, end, ruby}, the settings each has (font, scale, align, gap_mm,
 // tracking), and base and review for one that needs review.
 core::Json spans_op(const std::vector<core::RubySpan>& spans);
+// The edit_line that gives `line` these rubies (振り直す…, 外す, a ruby's settings): for a line of Python's, Python's
+// ruby_runs when they say them (each drawn where its run is found, none needing review, no settings), the line staying
+// Python's; else ruby_spans.
+core::Json rubies_op(const core::StoryLine& line, const std::vector<core::RubySpan>& spans);
 // A line's rubies as listed (by place; for a line of Python's, its runs where the explicit rule finds them).
 std::vector<core::RubySpan> rubies_of(const core::StoryLine& line);
 // parse_ruby(text): ('約束の日', [['約束', 'やくそく']]) from '｜約束《やくそく》の日'.
