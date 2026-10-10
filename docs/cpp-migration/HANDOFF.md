@@ -17,6 +17,18 @@
 - 印刷の検査は poppler の pdftocairo で PDF を同じ画素数に戻して差 0。Linux では pdftocairo が無ければ失敗（native.yml の apt に poppler-utils を足した。CI は有効にしていない）。Windows の受入にも poppler が要る。
 - push 済み（145530d..7857af9）。M3 の出口（紙質を別PCへ持ち出して再現できる）は M4 出口の V3 で合わせて受け入れる。
 
+### 群C ルビの詳細組版と範囲追従（TEXT-01、ruby-layout@1、改善 I04）・編集可能な文字の PSD（PSD-01、改善 I05）（…c91288a）— 統合済み
+- PSD-01 は TEXT-01 のルビの位置（render::text::ruby_places）に依るので1群にした。凍結 c91288a。計画 `validation_policy.py --base 2b5fe41 --head c91288a --phase integration`（tier full、Linux 各100試験）。
+  - linux-asan: 100/100 合格・CLI23 合格・サニタイザ指摘なし（10/10 16:52–21:11 UTC）。
+  - linux-release: 100/100 合格・CLI23 合格（21:34–22:53 UTC）。
+  - 前の凍結 8629b46 は ASan で test_psd_text が QtTest の1関数 300 秒を超えて止められた（試験の画素の読み方が遅い。製品の不具合ではない）。時間の上限は変えず、試験を速くして関数を分けた（c91288a、ASan で test_psd_text 134 秒）。ほかの 99 試験は合格していた。
+- TEXT-01: 台詞の ruby_spans（拡張書記素クラスタの [start,end)、Qt 6.11.2 の Unicode 17.0）にルビごとの書体・大きさ・揃え・本文との距離・字間。追従の規則（前は動かす、後ろ・末尾は変えない、親文字にかかる編集は要確認、全削除・全置換は外して Undo で戻る、長い台詞は前後両方から比べ、別の語に載せない）。要確認がある間は正式な書き出しを止め、点検に ruby_review。Python の台詞は Python と同じ結果の間は Python の形のまま。画面は記法を正とし、ルビの一覧で振り直す・外す・ルビごとの設定。
+- PSD-01: genko export --format psd --psd-text editable で台詞ごとのグループ（フキダシ・本文・ルビごとの文字レイヤー、TySh/TxLr/EngineData、縦横・run・字間・揃え・変形・縁取り）。既定（image）は Python とバイトまで同じ。未対応（グラデーション・画像の塗り・パスの文字・円弧・ワープ・傍点・組み方の変わる旧形式のルビ）は厳密で断り、--rasterize-unsupported の時だけその台詞を画像に。書体は PostScript 名だけで埋め込まない。対応表 docs/PSD_TEXT_SUPPORT.md。受取アプリでの再編集は §6 で waived（psd-tools と自前の読み手で構造を照合。Krita での読込は M4 出口で行う）。
+- 利用者の決定（10/09–10）: ルビの設定はルビごと、親文字の全置換は外す（Python と同じ）、ルビの公開契約の追加を確定。PSD の CLI、未対応に円弧と傍点、層の名前と対応 ID を確定。
+- レビュー: TEXT-01 は群レビュー（P1×3・P2×7）と修正の再確認3回（別の語に載る・黙って外れる不具合が無くなるまで）。PSD-01 は群レビュー（P2×4: 縁の太さ、縦書きの立てた半角、旧形式のルビ、試験の弱さ）。
+- 既知の制限: 編集可能の PSD は縁取りのある台詞の文字組を部分ごとに数回計算し直し、効果文字の多い頁は画像の書き出しより数倍遅い。
+- push 済み（2b5fe41..c91288a）。
+
 ### 進め方
 - M3 と同じく群ごとに「実装（対象試験）→レビュー1回→凍結→V2（Linux Release＋ASan、validation_run.py）→native/integrationへ統合」。V3 は M4 出口だけ。開発は worktree の m4-dev。
 - 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.1GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18 / cgroup v1。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。V2 は ASan と Release を順に（各構成内 ctest 1並列）。Windows は開発中 deferred（配布前の Windows 実機受入は必須のまま）。
