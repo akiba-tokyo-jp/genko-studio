@@ -4,7 +4,7 @@
 // the ruby issues of 入稿前の点検 and what the op reports; the line before the edit is kept whole (Undo). Then what the
 // ops refuse (spans outside the text, overlapping, both forms at once, the layout keys' bounds), the Unicode version
 // the ranges are counted in, the feature written only when the book uses it (a book of Python's saved as before), and
-// a book read back with its ruby where it was.
+// a book read back with its ruby where it was. replace_text with a pattern ("regex") follows the ruby by the same rules.
 
 #include <QtTest>
 
@@ -230,6 +230,58 @@ private slots:
         for (const auto& f : failures) qWarning("%s", f.c_str());
         QVERIFY2(failures.empty(), (std::to_string(failures.size()) + " of " + std::to_string(ran) + " cases differ").c_str());
         QVERIFY(ran >= 30);
+    }
+
+    // replace_text with "regex" (core/pyre, Python's re): each match follows the ruby by the same rules as the words
+    // found as they are — every replace_text case of the table again, its words as a pattern (re.escape), the same line
+    // and report; and what only a pattern makes: an empty match before a base moves it, one at its end leaves it, one
+    // inside it needs review, a match of the whole base made from its groups takes the ruby away.
+    void regexReplacementFollowsAsWordsDo() {
+        const auto escaped = [](const std::string& words) {  // (re.escape)
+            std::string out;
+            for (const char c : words) {
+                if (std::string_view("()[]{}?*+-|^$\\.&~# \t\n\r\v\f").find(c) != std::string_view::npos) out += '\\';
+                out += c;
+            }
+            return out;
+        };
+        const Json table = genko::test::read_json(genko::test::test_data("ruby_cases.json"));
+        std::vector<std::string> failures;
+        int compared = 0;
+        for (const Json& c : table["cases"]) {
+            if (c.value("gui", false) || !c["edit"].is_object() || c["edit"]["op"] != "replace_text") continue;
+            const std::string name = c["n"].get<std::string>();
+            const Document before = run_ops(blank_book(), Json::array({add_op(c)})).doc;
+            Json pattern = c["edit"];
+            pattern["find"] = escaped(c["edit"]["find"].get<std::string>());
+            pattern["regex"] = true;
+            const ApplyResult words = run_ops(before, Json::array({c["edit"]}));
+            const ApplyResult regex = run_ops(before, Json::array({pattern}));
+            std::string where;
+            if (!genko::test::strict_equal(line_of(payload_of(regex.doc, tmp_), "L1"), line_of(payload_of(words.doc, tmp_), "L1"), &where)) {
+                failures.push_back(name + ": the line (" + where + ")");
+            }
+            if (!genko::test::strict_equal(Json(regex.results), Json(words.results), &where)) failures.push_back(name + ": the report (" + where + ")");
+            ++compared;
+        }
+        for (const auto& f : failures) qWarning("%s", f.c_str());
+        QVERIFY2(failures.empty(), (std::to_string(failures.size()) + " of " + std::to_string(compared) + " cases differ").c_str());
+        QVERIFY(compared >= 15);
+        // what only a pattern makes
+        const Json add{{"text", "東京へ"}, {"ruby_spans", Json::parse(R"([{"start": 0, "end": 2, "ruby": "とうきょう"}])")}};
+        const auto after = [&](const char* find, const char* replace, Json* report = nullptr) {
+            return spans_after(add, Json::array({Json{{"op", "replace_text"}, {"find", find}, {"replace", replace}, {"regex", true}}}), tmp_,
+                               report);
+        };
+        QCOMPARE(after("^", "新")[0]["start"], Json(1));  // (an empty match before the base: it moves)
+        QCOMPARE(after("^", "新")[0]["end"], Json(3));
+        QCOMPARE(after("(?<=京)", "の")[0]["end"], Json(2));  // (one at its end: as it was)
+        QCOMPARE(after("(?<=京)", "の")[0].value("review", std::string()), std::string());
+        QCOMPARE(after("(?=京)", "・")[0]["review"], Json("edited"));  // (one inside it)
+        Json report;
+        const Json gone = after("(東)(京)", "\\2\\1", &report);  // (the whole base made anew: taken away, said)
+        QVERIFY2(gone.is_null() || gone.empty(), shown(gone).c_str());
+        QCOMPARE(report["ruby_removed"], Json(1));
     }
 
     // What the ops refuse: a range outside the text or not of whole numbers, rubies over the same characters, no

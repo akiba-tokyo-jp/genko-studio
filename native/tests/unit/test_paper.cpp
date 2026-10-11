@@ -446,6 +446,11 @@ private slots:
         QCOMPARE(take_in_code(jpg.substr(0, jpg.size() / 2)), std::string("paper_unreadable"));
         QCOMPARE(take_in_code(std::string("II*\0", 4) + std::string(64, '\0')), std::string("paper_format"));     // TIFF
         QCOMPARE(take_in_code(std::string("RIFF\x10\0\0\0WEBPVP8 ", 16) + std::string(32, '\0')), std::string("paper_format"));  // WebP
+        // a PSD, though open_image opens it as one picture (grey, 2 × 2, raw): not one of the paper's four formats
+        const std::string psd = std::string("8BPS\0\x01", 6) + std::string(6, '\0') + std::string("\0\x01\0\0\0\x02\0\0\0\x02\0\x08\0\x01", 14) +
+                                std::string(12, '\0') + std::string("\0\0\x10\x80\xc0\xff", 6);
+        QCOMPARE(render::open_image(psd).size(), (render::Size{2, 2}));
+        QCOMPARE(take_in_code(psd), std::string("paper_format"));
         // a side over 4096 pixels: refused from the header, nothing decoded (4097 × 1, and 1 × 100000)
         for (const auto& size : {render::Size{4097, 1}, render::Size{1, 4097}}) {
             const std::string wide = render::write_png(render::Image::create("L", size, render::Ink(200)));

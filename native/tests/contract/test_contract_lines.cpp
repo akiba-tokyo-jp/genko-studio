@@ -7,8 +7,10 @@
 // library's own, with what a library can hold that Python refuses), with a material library both sides read
 // (write_library): each step's reply, full snapshot and project.json payload, and the book after the case saved and read
 // back. A case marked "cpp" is one this build refuses on purpose (what Python keeps that this build's book cannot hold,
-// a picture it does not read or cannot draw, or a regex): C++ must refuse it with that code, its error holding
-// "cpp_says". Skipped without the Python reference.
+// a picture it does not read or cannot draw): C++ must refuse it with that code, its error holding "cpp_says". Find and
+// replace with patterns of re's own syntax ("regex": true, core/pyre) as Python's re does it: groups, names,
+// backreferences, look-arounds, flags, Unicode classes, empty matches, speakers, pages, ruby, and Python's errors
+// (re.error as "the pattern cannot be read", and what re lets through). Skipped without the Python reference.
 
 #include <QtTest>
 
@@ -240,7 +242,7 @@ private slots:
                                     " cases differ from Python (see the warnings)").c_str());
         const std::map<std::string, std::pair<int, int>> needed{
             {"add_line", {28, 104}},    {"edit_line", {15, 14}},  {"move_line", {17, 8}},         {"delete_line", {5, 6}},
-            {"reorder_lines", {9, 10}}, {"cut_balloon", {6, 10}}, {"set_balloon_path", {6, 8}}, {"replace_text", {19, 25}},
+            {"reorder_lines", {9, 10}}, {"cut_balloon", {6, 10}}, {"set_balloon_path", {6, 8}}, {"replace_text", {41, 38}},
             {"stamp_material", {28, 38}}};
         for (const auto& [op, least] : needed) {
             const auto got = same[op];

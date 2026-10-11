@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -18,6 +19,12 @@
 // their links are not followed.
 
 namespace genko::render::materials {
+
+// The person's library.json and folders.json, at most this large (beyond Python, which reads any size): read up to it
+// (the materials panel lists what it can read; one larger is not read), and a change that would make it larger is
+// refused before anything is written ("the material library would be too large for the materials panel (at most 16 MB)").
+// 1 MB until 2026-10-11 (the person's decision: 16 MB).
+inline constexpr std::int64_t kMaxLibraryBytes = 16ll << 20;
 
 // KINDS, in Python's order.
 const std::vector<std::string>& kinds();

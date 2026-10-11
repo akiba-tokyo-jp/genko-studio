@@ -44,9 +44,11 @@ namespace {
 QJsonArray user_entries(const QString& root) {
     const QFileInfo directory(root), file(root + "/library.json");
     if (!directory.isDir() || directory.isSymLink() || directory.canonicalFilePath()!=directory.absoluteFilePath() ||
-        file.isSymLink() || !file.isFile() || file.size()> (1<<20)) return {};
+        file.isSymLink() || !file.isFile() || file.size()>render::materials::kMaxLibraryBytes) return {};
     QFile input(file.absoluteFilePath());if(!input.open(QIODevice::ReadOnly))return {};
-    const auto document=QJsonDocument::fromJson(input.read((1<<20)+1));
+    const QByteArray bytes=input.read(render::materials::kMaxLibraryBytes+1);
+    if(bytes.size()>render::materials::kMaxLibraryBytes)return {};
+    const auto document=QJsonDocument::fromJson(bytes);
     if(!document.isArray())return {};
     QJsonArray result;QSet<QString> ids;
     const QSet<QString> kinds={"tone","effect","image","lines","lettering","brush","prim"};

@@ -21,7 +21,9 @@ Commands (JSON is UTF-8 without escapes):
                                        {"op": "add_adjust_layers", "book", "dest", "layers"} (correction layers of
                                        any filter put on pages by hand: add_adjust_layers_job) |
                                        {"op": "psd_reads", "reads": [{"file", "cut"?}], "out"} (psd.read_psd of each
-                                       file, or of its first `cut` bytes: psd_reads_job)
+                                       file, or of its first `cut` bytes: psd_reads_job) |
+                                       {"op": "psd_images", "reads", "out"} (Pillow's Image.open and load() of each:
+                                       a PSD as one picture, psd_images_job)
   restore BOOK --actor A [--redo] [--force]
                                        journal.restore under ProjectLock, as `genko undo`/`redo` does: the reply (or
                                        {"ok": false, "error"}) on stdout
@@ -397,6 +399,8 @@ def run_batch(jobs_path: str) -> None:
             steps_job(job)
         elif job["op"] == "psd_reads":
             psd_reads_job(job)
+        elif job["op"] == "psd_images":
+            psd_images_job(job)
         else:
             raise SystemExit(f"unknown job {job['op']!r}")
 
@@ -2799,6 +2803,40 @@ def psd_reads_job(job: dict) -> None:
                                     "visible": item.visible, "blend": item.blend, "clip": item.clip, "kind": item.kind,
                                     "image": _image_digest(item.image), "mask": _image_digest(item.mask)}
                                    for item in doc.layers]})
+    Path(job["out"]).write_text(dumps(records), encoding="utf-8")
+
+
+def psd_images_job(job: dict) -> None:
+    """Pillow's Image.open and load() of each of job["reads"] ({"file", "cut"?}): a PSD as one picture (PsdImagePlugin's
+    merged picture): {"format", "mode", "size", "image": _image_digest, "rgba": the digest of convert("RGBA") or
+    [type, message]}, or {"error": the exception's type, "message" (a BytesIO's address taken out), "stage": "open" |
+    "load"}."""
+    import io
+    import re as regex
+    import warnings
+
+    from PIL import Image
+
+    records = []
+    for item in job["reads"]:
+        data = Path(item["file"]).read_bytes()
+        if "cut" in item:
+            data = data[:int(item["cut"])]
+        stage = "open"
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")  # (DecompressionBombWarning: only a warning)
+                with Image.open(io.BytesIO(data)) as image:
+                    stage = "load"
+                    image.load()
+                    record = {"format": image.format, "mode": image.mode, "size": list(image.size), "image": _image_digest(image)}
+                    try:
+                        record["rgba"] = _image_digest(image.convert("RGBA"))
+                    except Exception as exc:
+                        record["rgba"] = [type(exc).__name__, str(exc)]
+        except Exception as exc:
+            record = {"error": type(exc).__name__, "message": regex.sub(r" at 0x[0-9a-f]+>", ">", str(exc)), "stage": stage}
+        records.append(record)
     Path(job["out"]).write_text(dumps(records), encoding="utf-8")
 
 

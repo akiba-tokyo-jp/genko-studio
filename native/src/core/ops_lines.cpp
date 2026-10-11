@@ -799,16 +799,43 @@ bool found_in(const Json& words, const std::string& text) {
     return text.find(words.get_ref<const std::string&>()) != std::string::npos;
 }
 
-// bookops.replace_text (一括置換): every line's words (and speakers, if asked) with `find` swapped for `replace`; `pages`
-// limits it; how many and where go back in the op's report. A pattern of re's own syntax ("regex") is not here yet.
+// bookops.replace_text (一括置換): every line's words (and speakers, if asked) with `find` swapped for `replace` — the
+// words as they are, or a pattern of re's own syntax ("regex", core/pyre: Python 3.12's re); `pages` limits it; how many
+// and where go back in the op's report. Beyond Python (SPEC COMP-01a): a pattern whose search takes more than
+// kRegexSteps steps over the book, or whose groups nest more than 200 deep, is refused (Python searches on for hours,
+// or stops with RecursionError).
 void replace_text(OpContext& c) {
     const Json& op = c.op;
     const std::string find = py_str(py_or(op_value(op, "find"), Json("")));
     if (find.empty()) throw OpError("find is the words to look for");
     const std::string replace = py_str(py_or(op_value(op, "replace"), Json("")));
     const bool ignore_case = !py_truthy(get_or(op, "case", Json(true)));
-    if (truthy_at(op, "regex")) not_yet_ported("replace_text with regex (a pattern in Python's re syntax) is not in the C++ build yet");
-    const PyLiteralPattern pattern(find, ignore_case);  // (re.compile(re.escape(find), flags))
+    // re.compile(find if op.get("regex") else re.escape(find), flags): re.error is the op's error, the others go through
+    std::optional<PyPattern> regex;
+    std::optional<PyLiteralPattern> literal;
+    if (truthy_at(op, "regex")) {
+        try {
+            regex.emplace(find, ignore_case ? PyPattern::kIgnoreCase : 0);
+        } catch (const PyUncaught& error) {
+            if (error.type() == "re.error") throw OpError(std::string("the pattern cannot be read: ") + error.what());
+            throw;
+        } catch (const Error& error) {
+            if (error.code() == "regex_nested") throw OpError(error.what());
+            throw;
+        }
+    } else {
+        literal.emplace(find, ignore_case);
+    }
+    PyReBudget budget;  // (one for the whole book)
+    const auto subn = [&](const std::string& text, std::vector<PyReMatch>* matches) {
+        if (!regex) return literal->subn(replace, text, matches);
+        try {
+            return regex->subn(replace, text, matches, budget);
+        } catch (const Error& error) {
+            if (error.code() == "regex_too_slow") throw OpError(error.what());
+            throw;
+        }
+    };
     std::vector<std::int64_t> pages;
     for (const Json& p : iterate(py_or(op_value(op, "pages"), Json::array()))) pages.push_back(to_int_held(p));
     std::int64_t count = 0;
@@ -819,8 +846,8 @@ void replace_text(OpContext& c) {
         if (!pages.empty() && std::none_of(pages.begin(), pages.end(), [&](std::int64_t p) { return line.page_index == Num(p); })) {
             continue;
         }
-        std::vector<PyLiteralPattern::Match> matches;
-        auto [text, n] = pattern.subn(replace, line.text, &matches);
+        std::vector<PyReMatch> matches;
+        auto [text, n] = subn(line.text, &matches);
         if (n > 0) {
             where.push_back(Json::object({{"line", line.id}, {"page", line.page_index.json()}, {"count", n},
                                           {"text", first_characters(text, 40)}}));
@@ -849,7 +876,7 @@ void replace_text(OpContext& c) {
             std::erase_if(line.style_runs, [&](const auto& run) { return text.find(run.first) == std::string::npos; });
         }
         if (truthy_at(op, "speakers")) {
-            auto [speaker, m] = pattern.subn(replace, line.speaker);
+            auto [speaker, m] = subn(line.speaker, nullptr);
             if (m > 0) {
                 where.push_back(Json::object({{"line", line.id}, {"page", line.page_index.json()}, {"count", m}, {"speaker", speaker}}));
                 line.speaker = speaker;

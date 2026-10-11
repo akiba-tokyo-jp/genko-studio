@@ -22,6 +22,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <tuple>
 
@@ -33,6 +34,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "core/pyre.hpp"
 #include "render/ops_registry.hpp"
 #include "render/text/fonts.hpp"
 
@@ -519,23 +521,36 @@ int ReplaceDialog::search() {
     results->clear();
     const QString text = find->text();
     if (text.isEmpty()) return 0;
-    const QRegularExpression re(regex->isChecked() ? text : QRegularExpression::escape(text), QRegularExpression::UseUnicodePropertiesOption);
-    if (!re.isValid()) {
+    // re.compile(text if regex else re.escape(text)), and len(pattern.findall(…)) of each line (core/pyre: Python's re);
+    // the search bounded as replace_text's is (a pattern that would take too long is said, never left running)
+    std::optional<core::PyPattern> compiled;
+    std::optional<core::PyLiteralPattern> literal;
+    try {
+        if (regex->isChecked()) compiled.emplace(utf8(text), 0);
+        else literal.emplace(utf8(text), false);
+    } catch (const std::exception&) {  // (re.error; and what Python's dialog would not catch either)
         count->setText(QStringLiteral("正規表現が読めません"));
         return 0;
     }
-    const auto hits_in = [&re](const std::string& words) {
-        int n = 0;
-        auto it = re.globalMatch(qs(words));
-        while (it.hasNext()) {
-            it.next();
-            ++n;
-        }
-        return n;
+    core::PyReBudget budget;
+    const auto hits_in = [&](const std::string& words) -> int {
+        if (literal) return static_cast<int>(literal->subn("", words).second);
+        return static_cast<int>(compiled->count(words, budget));
     };
     int found = 0;
     for (const core::StoryLine& line : window_->book().story) {
-        const int hits = hits_in(line.text) + (speakers->isChecked() ? hits_in(line.speaker) : 0);
+        int hits = 0;
+        try {
+            hits = hits_in(line.text) + (speakers->isChecked() ? hits_in(line.speaker) : 0);
+        } catch (const std::exception& error) {
+            // (core::Error "regex_too_slow"; or what Python's findall raises, as its SystemError for a group's span)
+            const auto* own = dynamic_cast<const core::Error*>(&error);
+            results->clear();
+            count->setText(own != nullptr && own->code() == "regex_too_slow"
+                               ? QStringLiteral("この正規表現は探すのに時間がかかりすぎるため、探すのをやめました（書き方を見直してください）")
+                               : QStringLiteral("この正規表現では探せませんでした（%1）").arg(QString::fromUtf8(error.what())));
+            return 0;
+        }
         if (hits == 0) continue;
         found += hits;
         const QString who = line.speaker.empty() ? QString() : qs(line.speaker) + QStringLiteral("：");

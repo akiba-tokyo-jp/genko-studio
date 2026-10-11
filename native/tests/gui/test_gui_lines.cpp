@@ -31,6 +31,8 @@
 #include <QToolBar>
 #include <QtTest>
 
+#include <QElapsedTimer>
+
 #include <cmath>
 #include <fstream>
 #include <functional>
@@ -931,20 +933,61 @@ private slots:
         QCOMPARE(s.window->last_notice(), QStringLiteral("3 か所を置き換えました（元に戻すは 1 回）"));
         QCOMPARE(s.window->book().story.front().text, std::string("セリフのセリフ"));
         QVERIFY(drawn_as_book(s));
-        // a pattern of re's own: the op this build does not have yet, said in words
+        // a pattern of re's own (Python's re, core/pyre): found as Python's findall finds it, replaced with its groups
         s.answers.responder->exec = [&](QDialog* dialog) {
             auto* d = qobject_cast<app::ReplaceDialog*>(dialog);
             if (d == nullptr) return 0;
-            d->find->setText(QStringLiteral("セ.フ"));
+            d->find->setText(QStringLiteral("セ(.)フ"));
+            d->replace->setText(QStringLiteral("台\\1詞"));
             d->regex->setChecked(true);
+            searched = d->search();
+            counted = d->count->text();
             d->replace_all();
             return 0;
         };
-        const std::size_t count = s.ops.size();
         s.trigger("act_replace");
+        QCOMPARE(searched, 2);
+        QCOMPARE(counted, QStringLiteral("2 か所（1 行）"));
+        QCOMPARE(s.last().dump(), (Json{{"op", "replace_text"}, {"find", "セ(.)フ"}, {"replace", "台\\1詞"}, {"regex", true}, {"speakers", false}}).dump());
+        QCOMPARE(s.window->last_notice(), QStringLiteral("2 か所を置き換えました（元に戻すは 1 回）"));
+        QCOMPARE(s.window->book().story.front().text, std::string("台リ詞の台リ詞"));
+        // a pattern Python cannot read: said, nothing sent
+        const std::size_t count = s.ops.size();
+        s.answers.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::ReplaceDialog*>(dialog);
+            if (d == nullptr) return 0;
+            d->find->setText(QStringLiteral("台(詞"));
+            d->regex->setChecked(true);
+            searched = d->search();
+            counted = d->count->text();
+            d->replace_all();
+            return 0;
+        };
+        s.trigger("act_replace");
+        QCOMPARE(searched, 0);
+        QCOMPARE(counted, QStringLiteral("正規表現が読めません"));
         QCOMPARE(s.ops.size(), count);
-        QCOMPARE(s.window->last_error(),
-                 QStringLiteral("この版の Genko では、まだ正規表現での置換はできません（「正規表現で探す」を外すと置き換えられます）"));
+        // a pattern that would search for hours (Python's would): stopped and said, in about a second at most, the window
+        // not held; nothing sent
+        s.put(Json{{"op", "add_line"}, {"text", std::string(40, 'a') + "!"}, {"x_mm", 10.0}, {"y_mm", 10.0}, {"w_mm", 20.0}, {"h_mm", 30.0}});
+        const std::size_t before_slow = s.ops.size();
+        QElapsedTimer slow;
+        s.answers.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::ReplaceDialog*>(dialog);
+            if (d == nullptr) return 0;
+            d->find->setText(QStringLiteral("(a|aa)+$"));
+            d->regex->setChecked(true);
+            slow.start();
+            searched = d->search();
+            counted = d->count->text();
+            d->replace_all();
+            return 0;
+        };
+        s.trigger("act_replace");
+        QCOMPARE(searched, 0);
+        QCOMPARE(counted, QStringLiteral("この正規表現は探すのに時間がかかりすぎるため、探すのをやめました（書き方を見直してください）"));
+        QCOMPARE(s.ops.size(), before_slow);
+        QVERIFY2(slow.elapsed() < 60000, qPrintable(QString::number(slow.elapsed())));
         // nothing there
         s.answers.responder->exec = [&](QDialog* dialog) {
             auto* d = qobject_cast<app::ReplaceDialog*>(dialog);
@@ -1306,8 +1349,14 @@ private slots:
         QCOMPARE(w::error(QStringLiteral("ops[0] add_line: path must be a finite number")),
                  QStringLiteral("フキダシの形は、ふつうの数で指定します（無限大や NaN は使えません）"));
         QCOMPARE(w::error(QStringLiteral("ops[0] cut_balloon: points needs [x_mm, y_mm]")), QStringLiteral("点は [x, y]（mm）の 2 つの数で指定します"));
-        QCOMPARE(w::error(QStringLiteral("ops[0] replace_text: replace_text with regex (a pattern in Python's re syntax) is not in the C++ build yet")),
-                 QStringLiteral("この版の Genko では、まだ正規表現での置換はできません（「正規表現で探す」を外すと置き換えられます）"));
+        QCOMPARE(w::error(QStringLiteral("ops[0] replace_text: the pattern cannot be read: missing ), unterminated subpattern at position 0")),
+                 QStringLiteral("正規表現が読めません"));
+        QCOMPARE(w::error(QStringLiteral("ops[0] replace_text: the pattern takes too long to search (more than 100000000 steps, or a million "
+                                         "places to go back to): this build stops it rather than hold the window")),
+                 QStringLiteral("この正規表現は探すのに時間がかかりすぎるため、置き換えませんでした（原稿は変わりません）。書き方を見直してください"));
+        QCOMPARE(w::error(QStringLiteral("ops[0] replace_text: the pattern nests too deeply (groups and look-arounds at most 200 levels inside "
+                                         "one another)")),
+                 QStringLiteral("正規表現のかっこの入れ子が深すぎます（200 段まで）"));
         // (the families keep the others: no line, ids, kinds, order)
         QCOMPARE(w::error(QStringLiteral("ops[0] edit_line: no line abc")), QStringLiteral("台詞が見つかりません（消されたか、別のページのものです）"));
         QCOMPARE(w::error(QStringLiteral("ops[0] add_line: line abc already exists")), QStringLiteral("同じ ID がすでにあります"));

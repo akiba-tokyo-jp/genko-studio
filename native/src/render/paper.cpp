@@ -226,11 +226,16 @@ std::string take_in(std::string_view file_bytes) {
     if (file_bytes.size() > kMaxFileBytes) {
         throw core::Error("paper_file_too_large", "the paper's picture file is too large (at most 64 MiB)");
     }
+    const auto other_format = [] {
+        throw core::Error("paper_format", "this build does not read that kind of picture (TIFF, WebP, PSD): give the paper as PNG, JPEG, BMP or GIF");
+    };
+    // (a PSD, which open_image opens as one picture, is not a paper's picture either: BRUSH-01 takes those four)
+    if (file_bytes.substr(0, 4) == "8BPS") other_format();
     Image image;
     try {
         image = open_image(file_bytes, kPaperLimits);
     } catch (const NotYetPorted&) {
-        throw core::Error("paper_format", "this build does not read that kind of picture (TIFF, WebP, PSD): give the paper as PNG, JPEG, BMP or GIF");
+        other_format();
     } catch (const core::Error& error) {
         if (error.code() == "image_too_large") too_large();
         unreadable();

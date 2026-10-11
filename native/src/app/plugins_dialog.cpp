@@ -53,17 +53,26 @@ PluginsDialog::PluginsDialog(QWidget* parent) : QDialog(parent) {
         "プラグインは、Genko の外の別のプロセスとして、このコンピューターの Python で動きます。落ちても原稿は壊れませんが、"
         "安全な隔離（サンドボックス）ではありません。プラグインはそのコードにできることを何でもできるので、信頼できるものだけを選んでください。"
         "渡すのは、フィルターをかける絵（そのレイヤーの絵。補正レイヤーでは、その下に描かれたページの絵）と設定だけです"
-        "（原稿のファイルやパスワードは渡しません）。"));
+        "（原稿のファイルやパスワードは渡しません）。"
+        "プラグインのフォルダーの中のフォルダーに plugin.json とプログラムを置いたもの（ネイティブのプラグイン）は、Python なしで動きます。"));
     note->setWordWrap(true);
     theme::role(note, "hint");
     list = new QListWidget;
     list->setObjectName(QStringLiteral("plugins_list"));
     for (const render::plugins::Listed& item : render::plugins::listed()) {
-        QString text = QString::fromStdString(item.key) + QStringLiteral(".py");
+        // (a native plugin: its folder and plugin.json's name, read without running anything)
+        QString text = QString::fromStdString(item.key) + (item.native ? QStringLiteral("（プログラム）") : QStringLiteral(".py"));
         if (item.manifest && item.manifest->contains("name")) text += QStringLiteral(" — ") + QString::fromStdString(core::py_str((*item.manifest)["name"]));
         auto* row = new QListWidgetItem(text, list);
         row->setData(Qt::UserRole, QString::fromStdString(item.key));
         row->setData(Qt::UserRole + 1, QString::fromStdString(item.sha256));  // (the file as shown: only that is chosen)
+        row->setData(Qt::UserRole + 2, item.native);
+        if (item.problem) {  // (cannot be chosen: said why)
+            row->setText(text + QStringLiteral("（使えません）"));
+            row->setFlags(row->flags() & ~(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled));
+            row->setToolTip(wording::error(QString::fromStdString(*item.problem)));
+            continue;
+        }
         row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
         row->setCheckState(item.chosen ? Qt::Checked : Qt::Unchecked);
         row->setToolTip(QStringLiteral("sha256 %1（ファイルが変わったら選び直します）").arg(QString::fromStdString(item.sha256.substr(0, 16))));
@@ -112,7 +121,7 @@ void PluginsDialog::show_found() {
         where = render::plugins::python();
     }
     found->setText(where ? QStringLiteral("使う Python: %1").arg(qpath(*where))
-                         : QStringLiteral("Python が見つかりません（プラグインを使うには Python と Pillow が要ります）"));
+                         : QStringLiteral("Python が見つかりません（Python のプラグインには Python と Pillow が要ります。ネイティブのプラグインには要りません）"));
 }
 
 bool PluginsDialog::keep() {
@@ -125,16 +134,19 @@ bool PluginsDialog::keep() {
         for (int i = 0; i < list->count(); ++i) {
             QListWidgetItem* row = list->item(i);
             const QString key = row->data(Qt::UserRole).toString();
-            if (key.isEmpty()) continue;
+            if (key.isEmpty() || !(row->flags() & Qt::ItemIsUserCheckable)) continue;
             const bool on = row->checkState() == Qt::Checked;
             bool was = false;
             for (const auto& item : now) {
                 if (item.key == key.toStdString()) was = item.chosen;
             }
             if (on == was) continue;
+            const bool native = row->data(Qt::UserRole + 2).toBool();
             if (on && !ask::question(this, QStringLiteral("プラグインを動かす"),
-                                     QStringLiteral("「%1.py」を動かしてよいですか。\n\nプラグインは別のプロセスで動きますが、安全な隔離ではありません。"
-                                                    "そのコードはこのコンピューターでできることを何でもできます。信頼できるものだけを選んでください。")
+                                     (native ? QStringLiteral("「%1」（プログラム）を動かしてよいですか。\n\nプラグインは別のプロセスで動きますが、安全な隔離ではありません。"
+                                                              "そのプログラムはこのコンピューターでできることを何でもできます。信頼できるものだけを選んでください。")
+                                             : QStringLiteral("「%1.py」を動かしてよいですか。\n\nプラグインは別のプロセスで動きますが、安全な隔離ではありません。"
+                                                              "そのコードはこのコンピューターでできることを何でもできます。信頼できるものだけを選んでください。"))
                                          .arg(key))) {
                 row->setCheckState(Qt::Unchecked);
                 continue;

@@ -8,6 +8,16 @@ string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${
 configure_file(ops_schema_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp" @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_OPS_SCHEMA_FILE}")
 
+# The Unicode names of Python's unicodedata.lookup (core/pyre's \N{…}), embedded from data/unicode_names.bin
+# (tools/migration/pyre_tables.py writes it); a change to the file re-runs CMake.
+set(GENKO_PYRE_NAMES_FILE "${CMAKE_CURRENT_SOURCE_DIR}/data/unicode_names.bin")
+file(READ "${GENKO_PYRE_NAMES_FILE}" _genko_names_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," GENKO_PYRE_NAMES_BYTES "${_genko_names_hex}")
+string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b})" "\\1\n"
+       GENKO_PYRE_NAMES_BYTES "${GENKO_PYRE_NAMES_BYTES}")
+configure_file(pyre_names_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp" @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_PYRE_NAMES_FILE}")
+
 genko_library(genko_core
   SOURCES
     version.cpp
@@ -59,10 +69,15 @@ genko_library(genko_core
     areas.cpp
     ops_arrange.cpp
     pyre.cpp
+    pyre_parse.cpp
+    pyre_compile.cpp
+    pyre_match.cpp
+    pyre_unicode.cpp
     ruby.cpp
     ops_lines.cpp
     ops_bookpages.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
 
 # CPython calls libm directly: so must we (no pow(x, 2.0) → x*x, no sin+cos → sincos), for the same last bits. Every

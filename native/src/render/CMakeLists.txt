@@ -10,6 +10,7 @@ genko_library(genko_render
     png.cpp
     bmp.cpp
     gif.cpp
+    psd_image.cpp
     stroke.cpp
     brushes.cpp
     paper.cpp

@@ -16,7 +16,14 @@
 //   4. budgetsHold: the reader's limits (one channel, one layer, every channel together), shrunk, refuse a small file;
 //   5. aWholeImportIsBounded: a small file of 32767 one-pixel layers on a canvas of 10000 × 12000 (Python makes a page
 //      layer and a canvas-sized picture of each and keeps every PNG: hours, and gigabytes of PNGs) refused by the op
-//      before any layer is made, at once, the book unchanged.
+//      before any layer is made, at once, the book unchanged;
+//   6. pictureLikePillow: a PSD opened as one picture (render::open_image, render/psd_image.hpp) as Pillow 12.3's
+//      Image.open and load() open it, on every file (the "pil" ones are made for this: each mode, raw and PackBits,
+//      odd sizes, palettes, too few channels, a bomb, PackBits and raw data cut short or running over, sections that
+//      say more than the file has) and on a few files cut after every byte: the same mode, size and pixels, and the
+//      same pixels made RGBA, or the same error at the same stage (open or load); a Lab file decoded the same, though
+//      open_image refuses it as not yet ported (Pillow turns Lab into RGB through Little CMS); pictureMutationsLikePillow:
+//      the same for the files changed at a few bytes each (seeded).
 // Skipped without the Python reference.
 
 #include <QtTest>
@@ -28,6 +35,7 @@
 #include <QTemporaryDir>
 
 #include <map>
+#include <optional>
 #include <random>
 #include <string>
 
@@ -36,8 +44,11 @@
 #include "core/error.hpp"
 #include "core/ids.hpp"
 #include "opsupport.hpp"
+#include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
+#include "render/png.hpp"
 #include "render/psd.hpp"
+#include "render/psd_image.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
@@ -102,6 +113,64 @@ Json read_record(const std::string& data) {
     } catch (const std::exception& error) {  // (none: shown as a difference)
         return Json::object({{"error", "C++"}, {"message", error.what()}});
     }
+}
+
+// The harness's psd_images record of `data` (Pillow's Image.open, then load()): what render::psd_image_size refuses
+// is Image.open's error, what render::open_image refuses then is load()'s. A Lab file's picture is read by
+// render::read_psd_image, open_image refusing it as not yet ported; its RGBA (Little CMS's) is not compared: "rgba" is
+// "(Lab)" here.
+Json image_record(const std::string& data) {
+    const auto refused = [](const genko::core::Error& error, const char* stage) {
+        static const std::map<std::string, std::string> types{
+            {"unidentified_image", "UnidentifiedImageError"}, {"format", "OSError"}, {"image_too_large", "DecompressionBombError"}};
+        const auto type = types.find(error.code());
+        Json out = Json::object();
+        out["error"] = type == types.end() ? "C++ " + error.code() : type->second;
+        out["message"] = error.code() == "unidentified_image" ? std::string("cannot identify image file <_io.BytesIO object>") : std::string(error.what());
+        out["stage"] = stage;
+        return out;
+    };
+    try {
+        (void)genko::render::psd_image_size(data, genko::render::kPillowOpenLimits);
+    } catch (const genko::render::NotYetPorted& error) {
+        return Json::object({{"error", "C++"}, {"message", error.what()}});
+    } catch (const genko::core::Error& error) {
+        return refused(error, "open");
+    }
+    const bool lab = genko::render::psd_lab(data);
+    std::optional<genko::render::Image> image;
+    try {
+        if (lab) {
+            try {
+                (void)genko::render::open_image(data, genko::render::kPillowOpenLimits);
+                return Json::object({{"error", "C++"}, {"message", "open_image took a Lab file"}});
+            } catch (const genko::render::NotYetPorted& error) {
+                if (error.element() != "image_format") return Json::object({{"error", "C++"}, {"message", error.what()}});
+            }
+            image = genko::render::read_psd_image(data, genko::render::kPillowOpenLimits);
+        } else {
+            image = genko::render::open_image(data, genko::render::kPillowOpenLimits);
+        }
+    } catch (const genko::render::NotYetPorted& error) {
+        return Json::object({{"error", "C++"}, {"message", error.what()}});
+    } catch (const genko::core::Error& error) {
+        return refused(error, "load");
+    }
+    Json out = Json::object();
+    out["format"] = "PSD";
+    out["mode"] = std::string(image->mode());
+    out["size"] = Json::array({image->width(), image->height()});
+    out["image"] = digest(image);
+    if (lab) {
+        out["rgba"] = "(Lab)";
+    } else {
+        try {
+            out["rgba"] = digest(image->convert("RGBA"));
+        } catch (const genko::core::Error& error) {
+            out["rgba"] = Json::array({"C++ " + error.code(), std::string(error.what())});
+        }
+    }
+    return out;
 }
 
 // Whether Python can read `data` without taking gigabytes (it holds every channel decoded, pads PackBits rows to the
@@ -245,6 +314,52 @@ class TestContractPsd : public QObject {
         QVERIFY(outcomes["read"] >= least_read);
     }
 
+    // Each of `reads` ({"file", "cut"?}) opened as one picture by Pillow and here: a failure (QVERIFY) when a record
+    // differs.
+    void compare_pictures(const Json& reads, const QString& name, int least_read) {
+        const QString dir = path(name);
+        QDir().mkpath(dir);
+        const Json jobs = Json::array({Json::object({{"op", "psd_images"}, {"reads", reads}, {"out", (dir + "/py.json").toStdString()}})});
+        genko::test::write_bytes(dir + "/jobs.json", genko::core::dump_python(jobs));
+        const auto ran = genko::test::harness({"batch", dir + "/jobs.json"}, path("pyenv"), 1800000);
+        QVERIFY2(ran.finished && ran.exit_code == 0, ran.err.right(4000).constData());
+        const Json records = genko::test::read_json(dir + "/py.json");
+        QCOMPARE(records.size(), reads.size());
+        std::vector<std::string> failures;
+        std::map<std::string, int> outcomes;  // what Pillow made of them (each kind of error, or each mode read)
+        int lab = 0;
+        for (std::size_t n = 0; n < reads.size(); ++n) {
+            std::string data = genko::test::read_bytes(QString::fromStdString(reads[n]["file"].get<std::string>()));
+            if (reads[n].contains("cut")) data.resize(reads[n]["cut"].get<std::size_t>());
+            Json got = image_record(data);
+            if (got.contains("rgba") && got["rgba"] == Json("(Lab)") && records[n].contains("rgba")) {
+                got["rgba"] = records[n]["rgba"];
+                ++lab;
+            }
+            const std::string want_text = genko::core::dump_python(records[n]);
+            const std::string got_text = genko::core::dump_python(got);
+            if (got_text != want_text) {
+                failures.push_back(genko::core::dump_python(reads[n]) + ": " + got_text.substr(0, 700) + " != " + want_text.substr(0, 700));
+                continue;
+            }
+            if (records[n].contains("error")) {
+                outcomes[records[n]["stage"].get<std::string>() + " " + records[n]["error"].get<std::string>() + ": " +
+                         records[n]["message"].get<std::string>().substr(0, 50)] += 1;
+            } else {
+                outcomes["read " + records[n]["mode"].get<std::string>()] += 1;
+            }
+        }
+        for (std::size_t i = 0; i < failures.size() && i < 60; ++i) qWarning("%s", failures[i].c_str());
+        int read = 0;
+        for (const auto& [what, count] : outcomes) {
+            qInfo("%5d  %s", count, what.c_str());
+            if (what.starts_with("read ")) read += count;
+        }
+        qInfo("%zu pictures the same as Pillow's (%d of Lab, their RGBA not compared)", reads.size() - failures.size(), lab);
+        QVERIFY2(failures.empty(), (std::to_string(failures.size()) + " of " + std::to_string(reads.size()) + " pictures differ").c_str());
+        QVERIFY(read >= least_read);
+    }
+
 private slots:
     void initTestCase() {
         if (genko::test::python_ref().isEmpty()) QSKIP("no reference Python: set GENKO_PYREF or install /opt/pyref/bin/python");
@@ -300,6 +415,55 @@ private slots:
         }
         qInfo("%zu files changed at a few bytes (%d more not given to Python: they would take it gigabytes)", reads.size(), unsafe);
         compare_reads(reads, QStringLiteral("mutated"), 500);
+    }
+
+    void pictureLikePillow() {
+        Json reads = Json::array();
+        for (const char* list : {"pil", "reads"}) {
+            for (const Json& name : cases_[list]) reads.push_back(Json::object({{"file", file(name.get<std::string>()).toStdString()}}));
+        }
+        for (const char* list : {"pil_cuts", "cuts"}) {
+            for (const Json& name : cases_[list]) {
+                const std::string whole = genko::test::read_bytes(file(name.get<std::string>()));
+                for (std::size_t cut = 0; cut < whole.size(); ++cut) {
+                    reads.push_back(Json::object({{"file", file(name.get<std::string>()).toStdString()}, {"cut", static_cast<std::int64_t>(cut)}}));
+                }
+            }
+        }
+        compare_pictures(reads, QStringLiteral("pictures"), 40);
+    }
+
+    void pictureMutationsLikePillow() {
+        const QString dir = path("picture-mutations");
+        QDir().mkpath(dir);
+        std::mt19937 rng(20261011);
+        Json reads = Json::array();
+        int unsafe = 0;
+        for (const char* list : {"pil", "reads"}) {
+            for (const Json& name : cases_[list]) {
+                const std::string whole = genko::test::read_bytes(file(name.get<std::string>()));
+                if (whole.empty() || whole.size() > 100000) continue;
+                for (int k = 0; k < 25; ++k) {
+                    std::string changed = whole;
+                    const int changes = 1 + static_cast<int>(rng() % 4);
+                    for (int c = 0; c < changes; ++c) {
+                        const std::size_t at = rng() % changed.size();
+                        const unsigned how = rng() % 4;
+                        const auto value = static_cast<unsigned char>(changed[at]);
+                        changed[at] = static_cast<char>(how == 0 ? rng() & 0xFF : how == 1 ? value ^ (1u << (rng() % 8)) : how == 2 ? 0xFF : 0);
+                    }
+                    if (!python_safe(changed)) {
+                        ++unsafe;
+                        continue;
+                    }
+                    const QString changed_file = dir + QStringLiteral("/%1.psd").arg(reads.size());
+                    genko::test::write_bytes(changed_file, changed);
+                    reads.push_back(Json::object({{"file", changed_file.toStdString()}}));
+                }
+            }
+        }
+        qInfo("%zu files changed at a few bytes (%d more not given to Python: they would take it gigabytes)", reads.size(), unsafe);
+        compare_pictures(reads, QStringLiteral("picture-mutated"), 300);
     }
 
     void importLikePython() {

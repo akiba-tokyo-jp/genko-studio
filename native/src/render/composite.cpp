@@ -371,8 +371,7 @@ Image apply_filter(const Ctx& ctx, const Image& image, const std::string& kind, 
                     *skipped = true;
                     return rgba;
                 }
-                std::error_code ec;
-                if (!std::filesystem::is_regular_file(plugins::folder() / core::path_from_utf8(key + ".py"), ec)) {
+                if (!plugins::installed(key)) {
                     throw core::PyValueError("no plugin " + key);  // (not installed: as Python, the layer does nothing)
                 }
                 throw core::Error("plugin_not_allowed",

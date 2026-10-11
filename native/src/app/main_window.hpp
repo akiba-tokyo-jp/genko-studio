@@ -140,15 +140,16 @@ public:
     // 定規・3D: the panel; the page's 3D traced as pencil lines on the layer drawn on (only the chosen one).
     GuidePanel* guides() const { return guides_; }
     void trace_prims(bool selected_only = false);
-    // 素材: the panel; a material put as Python's use_material puts it (a brush chosen, a tone on the selection or the
-    // chosen panel, an effect in the chosen panel, else the material tool waiting for a click); a double click in the
-    // list (at once, in the middle of the page); the selection's lines and fills as a part ({strokes, patches}); the
-    // next pen line as an effect's path or clear middle (key: path | inner_path).
+    // 素材: the panel; a material put as Python's use_material puts it — 貼る, or a double click in the list, as in
+    // Python (a brush chosen, a tone on the selection or the chosen panel, an effect in the chosen panel, else the
+    // material tool waiting for a click on the page); the wait given up (Esc, a C++ addition: the tool chosen before
+    // comes back); the selection's lines and fills as a part ({strokes, patches}); the next pen line as an effect's
+    // path or clear middle (key: path | inner_path).
     MaterialPanel* materials() const { return materials_; }
     // サブビュー: the reference pictures beside the page.
     SubView* subview() const { return subview_; }
     void use_material(const core::Json& item);
-    void material_activated(const QString& material_id, const QString& kind);
+    bool cancel_stamp();
     std::optional<core::Json> copy_selection_items();
     void draw_effect_shape(const std::string& effect_id, const std::string& key);
     // The material the material tool puts (none: the one chosen in the panel); the effect kind the effect tool puts.
@@ -219,6 +220,7 @@ public:
 protected:
     void closeEvent(QCloseEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
 private:
     void build_actions();
@@ -452,6 +454,8 @@ private:
     SubView* subview_ = nullptr;
     QDockWidget* materials_dock_ = nullptr;
     std::optional<core::Json> pending_material_;
+    QString stamp_return_tool_;  // (the tool chosen before a material waited for its click: Esc gives it back)
+    void wait_for_stamp(const core::Json& item);
     std::string effect_kind_ = "focus";
     std::optional<std::pair<std::string, std::string>> effect_shape_for_;  // (effect id, path | inner_path)
     StoryPanel* story_ = nullptr;

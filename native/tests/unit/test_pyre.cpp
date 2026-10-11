@@ -1,0 +1,127 @@
+// core/pyre's own bounds (SPEC COMP-01a), without Python: Python 3.12's re searches on for hours (or until its memory
+// runs out) where a pattern backtracks without end, and stops with RecursionError at about 490 groups inside one
+// another; this build refuses such a search when it has spent kRegexSteps steps or holds a million places to go back
+// to — for the whole book in replace_text, which leaves the book as it was and says so — and refuses groups more than
+// 200 deep. And a few of Python's results (test_contract_pyre has them all, against Python).
+
+#include <QtTest>
+
+#include <QElapsedTimer>
+
+#include <string>
+
+#include "core/actor.hpp"
+#include "core/command_bus.hpp"
+#include "core/error.hpp"
+#include "core/model.hpp"
+#include "core/pyre.hpp"
+#include "render/ops_registry.hpp"
+
+using genko::core::Json;
+using genko::core::PyPattern;
+using genko::core::PyReBudget;
+
+namespace {
+
+std::string code_of(const std::function<void()>& work) {
+    try {
+        work();
+    } catch (const genko::core::Error& error) {
+        return error.code() + ": " + error.what();
+    }
+    return "(done)";
+}
+
+}  // namespace
+
+class TestPyre : public QObject {
+    Q_OBJECT
+
+private slots:
+    // A few of Python's own answers (re.subn in Python 3.12), as a first check.
+    void likePython() {
+        PyReBudget budget;
+        QCOMPARE(PyPattern("(\\w)(\\w)", 0).subn("\\2\\1", "abcd", nullptr, budget), (std::pair<std::string, std::int64_t>{"badc", 2}));
+        QCOMPARE(PyPattern("x*", 0).subn("-", "abxd", nullptr, budget), (std::pair<std::string, std::int64_t>{"-a-b--d-", 5}));
+        QCOMPARE(PyPattern("(?i)σ", 0).subn("s", "Σσς", nullptr, budget), (std::pair<std::string, std::int64_t>{"sss", 3}));
+        QCOMPARE(PyPattern("[𐐀a]", PyPattern::kIgnoreCase).subn("x", "𐐀𐐨", nullptr, budget), (std::pair<std::string, std::int64_t>{"𐐀𐐨", 0}));
+        QCOMPARE(PyPattern("(?:(a)|b)*", 0).spans("ab", budget).front(), (std::vector<std::pair<std::int64_t, std::int64_t>>{{0, 2}, {0, 1}}));
+        QCOMPARE(PyPattern("\\N{HIRAGANA LETTER A}+", 0).subn("ア", "あああい", nullptr, budget), (std::pair<std::string, std::int64_t>{"アい", 1}));
+        QCOMPARE(code_of([] { PyPattern("(?<=a+)b", 0); }), std::string("python_error: look-behind requires fixed-width pattern"));
+        QCOMPARE(code_of([] { PyPattern("a\n(", 0); }), std::string("python_error: missing ), unterminated subpattern at position 2 (line 2, column 1)"));
+    }
+
+    // A pattern that backtracks without end (Python's runs for hours) stops when its steps are spent, in about a second.
+    void searchesAreBounded() {
+        const std::string text = std::string(60, 'a') + "!";
+        QElapsedTimer clock;
+        clock.start();
+        PyReBudget budget;
+        QCOMPARE(code_of([&] { PyPattern("(a|aa)+$", 0).subn("x", text, nullptr, budget); }).substr(0, 54),
+                 std::string("regex_too_slow: the pattern takes too long to search ("));
+        QCOMPARE(budget.steps, std::uint64_t{0});
+        qInfo("stopped after %lld ms", static_cast<long long>(clock.elapsed()));
+        QVERIFY2(clock.elapsed() < 60000, qPrintable(QString::number(clock.elapsed())));
+        // the budget is the whole search's: what one line spent the next has no more
+        PyReBudget shared{1000};
+        const PyPattern any(".*a", 0);
+        QCOMPARE(code_of([&] {
+                     for (int i = 0; i < 1000; ++i) any.subn("x", std::string(40, 'b'), nullptr, shared);
+                 }).substr(0, 14),
+                 std::string("regex_too_slow"));
+        // a group repeated without end at least, whose every time Python would hold: stopped long before the memory goes
+        clock.restart();
+        PyReBudget deep;
+        QCOMPARE(code_of([&] { PyPattern("(?:a|){4294967294}", 0).subn("x", "aaa", nullptr, deep); }).substr(0, 14), std::string("regex_too_slow"));
+        QVERIFY2(clock.elapsed() < 60000, qPrintable(QString::number(clock.elapsed())));
+        // the find dialog's count is bounded the same way
+        PyReBudget counted;
+        QCOMPARE(code_of([&] { PyPattern("(a+)+b", 0).count(text, counted); }).substr(0, 14), std::string("regex_too_slow"));
+    }
+
+    // Groups inside one another: 200 deep are read, 201 refused (Python reads about 490, then RecursionError).
+    void nestingIsBounded() {
+        PyReBudget budget;
+        const std::string deep = std::string(200, '(') + "a" + std::string(200, ')');
+        QCOMPARE(PyPattern(deep, 0).subn("x", "a", nullptr, budget), (std::pair<std::string, std::int64_t>{"x", 1}));
+        QCOMPARE(PyPattern(deep, 0).groups(), std::int64_t{200});
+        const std::string deeper = std::string(201, '(') + "a" + std::string(201, ')');
+        QCOMPARE(code_of([&] { PyPattern(deeper, 0); }),
+                 std::string("regex_nested: the pattern nests too deeply (groups and look-arounds at most 200 levels inside one another)"));
+        const std::string looks = "(?=" + std::string(250, '(') + "a" + std::string(250, ')') + ")";
+        QCOMPARE(code_of([&] { PyPattern(looks, 0); }).substr(0, 12), std::string("regex_nested"));
+    }
+
+    // replace_text: the refusal is the op's, the book as it was (Python's would hold the window for hours).
+    void replaceTextRefusesWithoutChanges() {
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        const genko::core::Actor person("human:作者");
+        genko::core::Document doc = genko::core::new_episode("p", genko::core::Num(1), 2, genko::core::PageSpec::a4_mono());
+        doc = bus.apply(doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", std::string(54, 'a') + "!"}},
+                                          Json{{"op", "add_line"}, {"page", 2}, {"text", "台詞"}}}),
+                        person)
+                  .doc;
+        const auto refused = [&](const Json& op) {
+            try {
+                (void)bus.apply(doc, Json::array({op}), person);
+            } catch (const genko::core::ApplyError& error) {
+                return std::string(error.what());
+            }
+            return std::string("(applied)");
+        };
+        QElapsedTimer clock;
+        clock.start();
+        const std::string slow = refused(Json{{"op", "replace_text"}, {"find", "(a|aa)+$"}, {"replace", "x"}, {"regex", true}});
+        QVERIFY2(slow.starts_with("ops[0] replace_text: the pattern takes too long to search (more than 100000000 steps"), slow.c_str());
+        QVERIFY2(clock.elapsed() < 60000, qPrintable(QString::number(clock.elapsed())));
+        const std::string nested = refused(Json{{"op", "replace_text"}, {"find", std::string(201, '(') + std::string(201, ')')}, {"regex", true}});
+        QVERIFY2(nested.starts_with("ops[0] replace_text: the pattern nests too deeply"), nested.c_str());
+        // a pattern that reads well replaces on every page, as Python's
+        const auto done = bus.apply(doc, Json::parse(R"J([{"op": "replace_text", "find": "(a+)!|台(詞)", "replace": "<\\1\\2>", "regex": true}])J"), person);
+        QCOMPARE(done.doc.story[0].text, "<" + std::string(54, 'a') + ">");
+        QCOMPARE(done.doc.story[1].text, std::string("<詞>"));
+    }
+};
+
+QTEST_GUILESS_MAIN(TestPyre)
+#include "test_pyre.moc"

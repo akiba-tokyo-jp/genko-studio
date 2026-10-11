@@ -36,7 +36,7 @@ namespace {
 
 constexpr std::int64_t kMaxPictureBytes = 64ll << 20;  // (one picture read into the library or out of it)
 // (library.json, folders.json: as large as the materials panel reads them, so what the panel cannot show is never changed)
-constexpr std::int64_t kMaxListBytes = 1ll << 20;
+constexpr std::int64_t kMaxListBytes = kMaxLibraryBytes;
 constexpr std::int64_t kMaxPackListBytes = 16ll << 20;  // (a pack's pack.json)
 
 fs::path library_file(const fs::path& config_dir) { return library_dir(config_dir) / "library.json"; }
@@ -117,7 +117,8 @@ std::string library_text(const Json& items) {
 void save_text(const fs::path& config_dir, const std::string& text) {
     need_safe_folder(config_dir);
     if (static_cast<std::int64_t>(text.size()) > kMaxListBytes) {
-        throw core::PyValueError("the material library would be too large for the materials panel (at most 1 MB)");
+        throw core::PyValueError("the material library would be too large for the materials panel (at most " +
+                                 std::to_string(kMaxListBytes >> 20) + " MB)");
     }
     try {
         storage::write_atomic(library_file(config_dir), text);
@@ -221,7 +222,8 @@ Json import_picture(const fs::path& config_dir, const std::string& bytes, const 
     const std::string text = library_text(items);
     need_safe_folder(config_dir);
     if (static_cast<std::int64_t>(text.size()) > kMaxListBytes) {
-        throw core::PyValueError("the material library would be too large for the materials panel (at most 1 MB)");
+        throw core::PyValueError("the material library would be too large for the materials panel (at most " +
+                                 std::to_string(kMaxListBytes >> 20) + " MB)");
     }
     try {
         storage::write_atomic(library_dir(config_dir) / file, write_png(rgba));

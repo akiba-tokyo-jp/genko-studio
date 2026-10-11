@@ -1,6 +1,7 @@
 // 素材・トーン・効果線, the view's extras and the layer commands (M3④-5, Python's main.py): the materials panel and its
 // dock; 効果線 (a tool: a click in a panel puts the chosen kind, its centre drags) and its kinds, drawn only inside a
-// selection or kept clear of it; 素材を置く (a tool: a click puts the material chosen); トーン — on the selection or the
+// selection or kept clear of it; 素材を置く (a tool: a click puts the material chosen; Esc gives up a material waiting
+// for its click); トーン — on the selection or the
 // chosen panel, or where a click finds lines around it —; 上下反転, オニオンスキン, 網点を画面で; コマの形を元に戻す; and
 // the layer commands of the レイヤー menu (Python's act_layer_*), which are the layer panel's buttons.
 
@@ -12,6 +13,7 @@
 #include <QDockWidget>
 #include <QFile>
 #include <QFileInfo>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QScrollArea>
 
@@ -150,21 +152,38 @@ void MainWindow::build_material_pages(ToolSettings* ts) {
     ts->add({QStringLiteral("stamp")}, action_page({action("act_materials")}));
 }
 
-void MainWindow::material_activated(const QString& material_id, const QString& kind) {
-    // (a double click puts it at once, in the middle of the page: as the M2 browser did)
-    const core::Page* page = current_page();
-    if (page == nullptr) return;
-    Json op{{"op", "stamp_material"}, {"page", page->index.json()}, {"material_id", material_id.toStdString()},
-            {"x_mm", page->spec.width_mm.value() / 2}, {"y_mm", page->spec.height_mm.value() / 2}};
-    if (const core::Layer* layer = target_layer()) op["after"] = layer->id;
-    if (!apply_ops(Json::array({std::move(op)}))) return;
-    if (kind == QLatin1String("brush")) {
-        const auto key = "my_" + QCryptographicHash::hash(material_id.toUtf8(), QCryptographicHash::Sha1).toHex().left(10).toStdString();
-        if (!book().brush_custom.contains(key)) return;
-        brush_->reload_kinds(key);  // (the brush panel chooses it: the pen follows)
-        choose_tool(QStringLiteral("pen"));  // Updates the live pen after the successful registration.
-        flash(QStringLiteral("選んだブラシで描けます"), 3500);
+// A material waiting for its click on the page (the material tool); the tool chosen before it remembered for Esc.
+void MainWindow::wait_for_stamp(const Json& item) {
+    if (canvas_->tool() != QLatin1String("stamp")) stamp_return_tool_ = canvas_->tool();
+    pending_material_ = item;
+    choose_tool(QStringLiteral("stamp"));
+}
+
+// Esc (a C++ addition, the person's decision of 2026-10-11): a material waiting for its click is given up and the tool
+// chosen before comes back. Python's material tool keeps waiting until another tool is chosen.
+bool MainWindow::cancel_stamp() {
+    if (!pending_material_ || canvas_->tool() != QLatin1String("stamp")) return false;
+    pending_material_.reset();
+    choose_tool(stamp_return_tool_.isEmpty() || stamp_return_tool_ == QLatin1String("stamp") ? QStringLiteral("pen") : stamp_return_tool_);
+    flash(QStringLiteral("素材を置くのをやめました"), 2500);
+    return true;
+}
+
+void MainWindow::keyPressEvent(QKeyEvent* event) {
+    // (an Esc the canvas, the material list or another part of the window did not use)
+    if (event->key() == Qt::Key_Escape) {
+        try {
+            if (cancel_stamp()) {
+                event->accept();
+                return;
+            }
+        } catch (const std::exception& error) {
+            flash(wording::error(QString::fromUtf8(error.what())), 4000, true);
+            event->accept();
+            return;
+        }
     }
+    QMainWindow::keyPressEvent(event);
 }
 
 // --- tones -----------------------------------------------------------------------------------------------------------
@@ -184,8 +203,7 @@ void MainWindow::after_tone(const std::string& layer_id) {
 void MainWindow::tone_here() { put_tone(default_tone(), true); }
 
 void MainWindow::tone_click() {
-    pending_material_ = default_tone();
-    choose_tool(QStringLiteral("stamp"));
+    wait_for_stamp(default_tone());
     flash(QStringLiteral("「%1」: 線で囲まれた所をクリックすると、そこにトーンが入ります").arg(QString::fromStdString(core::py_str(core::py_get(*pending_material_, "name", "")))),
           4000);
 }
@@ -199,8 +217,7 @@ void MainWindow::put_tone(const Json& item, bool ask_click) {
     } else if (const core::Frame* frame = selected_frame()) {
         op["frame_id"] = frame->id;
     } else if (ask_click) {
-        pending_material_ = item;
-        choose_tool(QStringLiteral("stamp"));
+        wait_for_stamp(item);
         flash(QStringLiteral("選択範囲もコマも選ばれていません。トーンを貼る所をクリックします"), 4000);
         return;
     }
@@ -235,8 +252,7 @@ void MainWindow::use_material(const Json& item) {
             return;
         }
     }
-    pending_material_ = item;
-    choose_tool(QStringLiteral("stamp"));
+    wait_for_stamp(item);
     const QString where = kind == "effect" ? QStringLiteral("コマの中") : QStringLiteral("置きたい所");
     flash(QStringLiteral("「%1」: %2をクリックします").arg(QString::fromStdString(core::py_str(core::py_get(item, "name", ""))), where), 3500);
 }

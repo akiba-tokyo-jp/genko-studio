@@ -64,6 +64,9 @@ genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_c
 # the print's PDF drawn back by poppler's pdftocairo, the command line (no Python: test_contract_paper has that part).
 genko_test(test_paper SOURCES unit/test_paper.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
+# core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
+# steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
+genko_test(test_pyre SOURCES unit/test_pyre.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # TEXT-01 (ruby-layout@1): a line's ruby held by place — the table of edits (data/ruby_cases.json), the ops' refusals,
 # the feature, the book read back, the official export stopped while a ruby needs review; and drawn — by place as
 # Python's ruby_runs when nothing new is set, the ruby font / size / alignment / distance / spacing, PNG and PDF, the F4
@@ -149,9 +152,13 @@ genko_test(test_contract_anim SOURCES contract/test_contract_anim.cpp contract/o
 # The vector line edits (M3④): vector_edit and trace_edit against Python's apply_ops (vector_cases.json).
 genko_test(test_contract_vector SOURCES contract/test_contract_vector.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# core/pyre against Python 3.12's re (tools/migration/pyre_harness.py): every code point's properties and every name
+# re reads, the curated cases of contract/pyre_cases.json and 30000 random ones: compile errors, groups, spans, subn,
+# findall.
+genko_test(test_contract_pyre SOURCES contract/test_contract_pyre.cpp DEPS genko_test_support LABELS contract TIMEOUT 1800)
 # The line ops of M4: add_line, edit_line, move_line, delete_line, reorder_lines, cut_balloon, set_balloon_path,
-# replace_text and stamp_material's lines (lettering materials, a picture material made a balloon) against Python's
-# apply_ops (lines_cases.json).
+# replace_text (with re's patterns too) and stamp_material's lines (lettering materials, a picture material made a
+# balloon) against Python's apply_ops (lines_cases.json).
 genko_test(test_contract_lines SOURCES contract/test_contract_lines.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
 # The book and page ops of M4: set_page_spec, set_spread, add_cover, for_pages, set_assignee and import_pages against
@@ -204,6 +211,14 @@ set_tests_properties(test_contract_checks PROPERTIES ENVIRONMENT "QT_QPA_PLATFOR
 # Filter plugins (M3③, COMP-04): the runner against Python's plugins.run, the choice, the bounds.
 genko_test(test_contract_plugins SOURCES contract/test_contract_plugins.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 1800)
+# Native filter plugins (COMP-04's native extension, this build only: docs/PLUGIN_NATIVE.md) with a small program of the
+# test tree as the plugin: listed without running, chosen with consent, a picture filtered, and the refusals (plugin.json
+# that cannot be used, a missing program, a crash, too much written back, too slow); without Python.
+add_executable(genko_test_native_plugin support/native_test_plugin.cpp)
+genko_target_flags(genko_test_native_plugin)
+genko_test(test_native_plugins SOURCES unit/test_native_plugins.cpp DEPS genko_render_ops LABELS unit TIMEOUT 900)
+target_compile_definitions(test_native_plugins PRIVATE GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
+add_dependencies(test_native_plugins genko_test_native_plugin)
 
 # 3D (M3-C): the geometry of figures, guides and models bit for bit against Python, the ops, the drawing.
 genko_test(test_contract_3d_geometry SOURCES contract/test_contract_3d_geometry.cpp DEPS genko_test_support genko_render

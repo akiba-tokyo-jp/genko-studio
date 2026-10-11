@@ -53,6 +53,7 @@
 #include "render/color_canvas.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
+#include "render/psd_image.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
 #include "render/stroke.hpp"
@@ -1626,6 +1627,29 @@ void verify_image(const std::string& blob) {
         return;
     }
     const std::string unknown = "cannot identify image file <_io.BytesIO object>";
+    if (b.substr(0, 4) == "8BPS") {
+        // a PSD as one picture (Pillow's PsdImagePlugin, render/psd_image.hpp): what Image.open says of it, the size
+        // Python refuses; then, beyond Python (as for JPEG, BMP and GIF: its verify() reads no pixel), every pixel of its
+        // merged picture decoded, so a picture the pages can never draw is not kept
+        Size size;
+        try {
+            size = psd_image_size(b, kPillowOpenLimits);
+        } catch (const core::Error& error) {
+            if (error.code() == "unidentified_image") unreadable(unknown);
+            unreadable(error.what());
+        }
+        if (static_cast<std::int64_t>(size.width) * size.height > kOpsMaxImagePixels) {
+            throw OpError("image too large: " + std::to_string(size.width) + "x" + std::to_string(size.height));
+        }
+        try {
+            (void)open_image(blob, kPillowOpenLimits);
+        } catch (const NotYetPorted&) {
+            throw;
+        } catch (const core::Error& error) {
+            unreadable(error.what());
+        }
+        return;
+    }
     if (b.substr(0, 8) != kPngSignature) {
         try {
             (void)open_image(blob);
@@ -1996,11 +2020,7 @@ auto plugin_work(Work&& work) {
 // A plugin on a layer of precise colours: plugins take 8-bit pictures (plugins.run's checks first).
 [[noreturn]] void plugin_on_precise(const std::string& kind) {
     const std::string key = kind.substr(plugins::kPrefix.size());
-    std::error_code ec;
-    if (key.empty() || key.find('/') != std::string::npos || key.find('\\') != std::string::npos ||
-        !std::filesystem::is_regular_file(plugins::folder() / core::path_from_utf8(key + ".py"), ec)) {
-        throw core::PyValueError("no plugin " + key);
-    }
+    if (!plugins::installed(key)) throw core::PyValueError("no plugin " + key);
     throw OpError("a filter plugin works on 8-bit paint layers, not on a layer of precise colours");
 }
 

@@ -484,19 +484,36 @@ private slots:
         materials::add_material(dir, "x", "lines", "マイ素材");
         QVERIFY_THROWS_EXCEPTION(core::Error, materials::import_image(dir, dir / "a.png", Json(), Json("画像"), Json("wide")));
         QCOMPARE(pictures(), std::size_t(0));
-        // a library that would pass 1 MB
-        const std::string big(1048576 - 200, 'x');
+        // a library past the old 1 MB (as the materials panel read it before 2026-10-11) is read and changed: 16 MB now
+        const std::string past_old(2 * 1048576, 'x');
+        spit(materials::library_dir(dir) / "library.json", "[{\"id\": \"u-big\", \"name\": \"" + past_old + "\", \"kind\": \"lines\", \"folder\": \"f\"}]");
+        QCOMPARE(materials::user_materials(dir).size(), std::size_t(1));
+        const Json grown = materials::import_image(dir, dir / "a.png");
+        QCOMPARE(pictures(), std::size_t(1));
+        QCOMPARE(materials::user_materials(dir).size(), std::size_t(2));
+        materials::delete_material(dir, grown["id"].get<std::string>());
+        QCOMPARE(pictures(), std::size_t(0));
+        // a library that would pass 16 MB
+        const std::string big(16 * 1048576 - 200, 'x');
         spit(materials::library_dir(dir) / "library.json", "[{\"id\": \"u-big\", \"name\": \"" + big + "\", \"kind\": \"lines\", \"folder\": \"f\"}]");
-        QVERIFY(slurp(materials::library_dir(dir) / "library.json").size() <= 1048576);
+        QVERIFY(slurp(materials::library_dir(dir) / "library.json").size() <= 16 * 1048576);
+        QCOMPARE(materials::user_materials(dir).size(), std::size_t(1));  // (read: it is within 16 MB)
         const std::string kept = slurp(materials::library_dir(dir) / "library.json");
         try {
             materials::import_image(dir, dir / "a.png");
-            QFAIL("a library past 1 MB was written");
+            QFAIL("a library past 16 MB was written");
         } catch (const core::PyValueError& e) {
-            QCOMPARE(std::string(e.what()), std::string("the material library would be too large for the materials panel (at most 1 MB)"));
+            QCOMPARE(std::string(e.what()), std::string("the material library would be too large for the materials panel (at most 16 MB)"));
         }
         QCOMPARE(pictures(), std::size_t(0));
         QCOMPARE(slurp(materials::library_dir(dir) / "library.json"), kept);
+        // one past 16 MB is not read (for the list) and is not changed
+        spit(materials::library_dir(dir) / "library.json", "[{\"id\": \"u-big\", \"name\": \"" + big + std::string(300, 'y') +
+                                                               "\", \"kind\": \"lines\", \"folder\": \"f\"}]");
+        QVERIFY(slurp(materials::library_dir(dir) / "library.json").size() > 16 * 1048576);
+        QCOMPARE(materials::user_materials(dir).size(), std::size_t(0));
+        QVERIFY_THROWS_EXCEPTION(core::Error, materials::import_image(dir, dir / "a.png"));
+        QCOMPARE(pictures(), std::size_t(0));
     }
 
     // zip files that are broken, encrypted, zip64 or too large are refused before anything is added.

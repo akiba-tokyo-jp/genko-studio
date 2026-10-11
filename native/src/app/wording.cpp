@@ -154,8 +154,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("a ruby's tracking must be between -0.5 and 2", "ルビの字間は -0.5〜2 字の間の数で決めます"));
         r.push_back(rule(R"(the official export stops: (\d+) ruby readings? needs? review.*)",
                          "要確認のルビが \\1 つあるため、正式な書き出しはできません。台詞の欄で振り直すか外してください"));
-        r.push_back(rule(R"(replace_text with regex .* is not in the C\+\+ build yet)",
-                         "この版の Genko では、まだ正規表現での置換はできません（「正規表現で探す」を外すと置き換えられます）"));
+        // core/pyre's own bounds (SPEC COMP-01a: Python searches on, or stops with RecursionError)
+        r.push_back(rule("the pattern takes too long to search.*",
+                         "この正規表現は探すのに時間がかかりすぎるため、置き換えませんでした（原稿は変わりません）。書き方を見直してください"));
+        r.push_back(rule(R"(the pattern nests too deeply \(groups and look-arounds at most (\d+) levels.*)",
+                         "正規表現のかっこの入れ子が深すぎます（\\1 段まで）"));
         r.push_back(rule("gradient_fill needs from and to.*", "グラデーションは、始めと終わりの点で指定します"));
         // what this build does not do yet (render::NotYetPorted, the studio's official export)
         r.push_back(rule("not yet ported: (.*)", [](const QRegularExpressionMatch& m) {
@@ -277,6 +280,39 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(plugin (.*?) did not finish in (\d+) seconds)", "プラグイン「\\1」が \\2 秒で終わらなかったため止めました"));
         r.push_back(rule("plugin (.*?) wrote back more than a picture", "プラグイン「\\1」が絵より多くのデータを返したため止めました"));
         r.push_back(rule("plugin (.*?) changed since the list was shown.*", "プラグイン「\\1」は一覧を出した後に変わっています。確かめてから選び直してください"));
+        // native plugins (render/plugins.hpp, docs/PLUGIN_NATIVE.md): their plugin.json, their program
+        r.push_back(rule(R"(the plugin\.json of plugin (.*?) cannot be used \((.*)\))", [](const QRegularExpressionMatch& m) {
+            static const std::vector<std::pair<QRegularExpression, QString>> reasons = [] {
+                std::vector<std::pair<QRegularExpression, QString>> out;
+                const auto add = [&out](const char* pattern, const char* words) {
+                    out.emplace_back(QRegularExpression(QRegularExpression::anchoredPattern(QString::fromUtf8(pattern))), QString::fromUtf8(words));
+                };
+                add(R"(a Python plugin (.*) has the same name)", "同じ名前の Python のプラグイン（\\1）があります");
+                add("it is not a file in the plugin's folder", "plugin.json がプラグインのフォルダーの中のファイルではありません");
+                add("it cannot be read", "plugin.json を読めません");
+                add("it is larger than 64 KB", "plugin.json が 64 KB を超えています");
+                add("it is not JSON", "plugin.json が JSON ではありません");
+                add("it is not a JSON object", "plugin.json が JSON のオブジェクトではありません");
+                add("its protocol must be 1", "protocol は 1 にします");
+                add("its name must be a text", "name（名前）を文字で書きます");
+                add("its args must be a list of texts", "args は文字のリストにします");
+                add("its params must be an object", "params はオブジェクトにします");
+                add("its executable must be a path inside the plugin's folder", "executable はプラグインのフォルダーの中のファイルにします");
+                add(R"(its program (.*) is not in its folder)", "プログラム「\\1」がプラグインのフォルダーにありません");
+                add("its program is larger than 256 MB", "プログラムが 256 MB を超えています");
+                return out;
+            }();
+            QString why = m.captured(2);
+            for (const auto& [pattern, words] : reasons) {
+                if (const auto found = pattern.match(why); found.hasMatch()) {
+                    why = words.contains(QLatin1Char('\\')) ? expand(words, found) : words;
+                    break;
+                }
+            }
+            return QStringLiteral("プラグイン「%1」の plugin.json が使えません（%2）").arg(m.captured(1), why);
+        }));
+        r.push_back(rule("the program of plugin (.*?) could not be started.*",
+                         "プラグイン「\\1」のプログラムを起動できませんでした（このコンピューターで動くプログラムか確かめてください）"));
         r.push_back(rule("CMYK is written as TIFF or PDF", "CMYK は TIFF か PDF で書き出します"));
         r.push_back(rule("Lab PSD files are not supported: save it as RGB or CMYK", "Lab カラーの PSD は読めません。RGB か CMYK で保存し直してください"));
         r.push_back(rule("MP4 needs ffmpeg on this computer; WebP, GIF and PNG need nothing",
@@ -367,8 +403,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the picture is a link or not a file.*", "画像がリンクかファイルではないので読みません"));
         r.push_back(rule("the pack\\.json is too large \\(at most 16 MB\\).*", "素材パックの pack.json が大きすぎます（16 MB まで）"));
         r.push_back(rule("the pack\\.json is a link or not a file.*", "素材パックの pack.json がリンクかファイルではないので読みません"));
-        r.push_back(rule(R"(the material library would be too large for the materials panel \(at most 1 MB\))",
-                         "素材ライブラリの一覧が大きくなりすぎるので、書き換えませんでした（1 MB まで）"));
+        r.push_back(rule(R"(the material library would be too large for the materials panel \(at most (\d+) MB\))",
+                         "素材ライブラリの一覧が大きくなりすぎるので、書き換えませんでした（\\1 MB まで）"));
         r.push_back(rule("kind must be one of tone, effect, image, lines, lettering, brush, prim", "素材の種類が違います"));
         r.push_back(rule("adjust is set on a correction layer", "補正の設定は、色調補正のレイヤーにだけできます"));
         r.push_back(rule("adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"));
@@ -667,7 +703,8 @@ QString unported_element(const QString& element) {
         {"default_font", "読めないフォントの文字"}, {"large_font", "大きすぎるフォント（32 MB 超）の文字"},
         {"text_features", "横書きの文字の字形の指定（OpenType 機能）"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
         {"prims", "3D"}, {"placed", "配置した画像"}, {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"},
-        {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"}};
+        {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"},
+        {"image_format", "まだ読めない形式の画像（TIFF、WebP、Lab カラーの PSD）"}};
     if (const auto it = words.find(element); it != words.end()) return it->second;
     if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
     return element;

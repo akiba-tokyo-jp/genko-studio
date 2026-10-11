@@ -27,6 +27,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/psd_image.hpp"
 #include "render/selection.hpp"
 #include "render/text/lettering.hpp"
 #include "render/tones.hpp"
@@ -121,6 +122,10 @@ std::pair<std::int64_t, std::int64_t> picture_size(std::string_view bytes) {
             return v;
         };
         return {be32(16), be32(20)};
+    }
+    if (bytes.substr(0, 4) == "8BPS") {  // (a PSD's size from its header, as Image.open reads it: no pixel decoded)
+        const render::Size size = render::psd_image_size(bytes, render::kPillowOpenLimits);
+        return {size.width, size.height};
     }
     const render::Image image = render::open_image(bytes, render::kPillowOpenLimits);
     return {image.width(), image.height()};

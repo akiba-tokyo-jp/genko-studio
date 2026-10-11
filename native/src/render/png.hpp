@@ -41,7 +41,9 @@ Image read_png(std::string_view bytes, const PngLimits& limits = {});
 // Decoders reject incomplete pixel output; BMP retains complete short RLE packets and optional row padding.
 // GIF87a/89a first-frame P/L pixels: global/local palette, transparency, frame extents and interlace.
 // Other GIF metadata extensions are skipped as Pillow does; the first frame is decoded completely.
-// Other formats Pillow opens (TIFF, WebP, PSD) throw NotYetPorted("image_format");
+// PSD as one picture (its merged picture, as Pillow's PsdImagePlugin: render/psd_image.hpp), but for one of Lab
+// colours (Pillow turns those into RGB through Little CMS, not ported yet).
+// That and other formats Pillow opens (TIFF, WebP) throw NotYetPorted("image_format");
 // anything else core::Error("unidentified_image").
 Image open_image(std::string_view bytes, const PngLimits& limits = {});
 // Whether open_image refuses these bytes as one of those other formats (NotYetPorted("image_format")): known by their

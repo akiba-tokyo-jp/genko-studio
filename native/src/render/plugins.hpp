@@ -28,6 +28,16 @@
 //     folder of its own, with a copy of the plugin's code as it was chosen (a file changed since is refused). Asking a
 //     plugin is bounded in time and in how much it may write back.
 // Python is needed only for this: Genko and its own filters never need it.
+//
+// Native plugins (this build only, COMP-04's native extension, docs/PLUGIN_NATIVE.md): a folder <config>/plugins/<key>/
+// holding a plugin.json (protocol 1: {"protocol": 1, "name", "executable", "args"?, "params"?}) and the program it
+// names, inside that folder. The program is started directly (no shell), with plugin.json's args, in a folder of its
+// own, the same short list of variables and GENKO_PLUGIN_PROTOCOL=1 and GENKO_PLUGIN_HOME (its folder); it reads the
+// request (one JSON line {"protocol": 1, "width", "height", "params"}, then the RGBA pixels) and writes the reply (one
+// JSON line {"ok": true, "width", "height"}, then the RGBA pixels; or {"ok": false, "error"}), as the runner does. It
+// is chosen as plugin.json and the program were then (either changed: chosen again), and checked again just before it
+// starts; its name and settings are plugin.json's, so nothing runs to list or describe it. The same limits in time and
+// in what it may write back.
 
 namespace genko::render::plugins {
 
@@ -39,14 +49,19 @@ inline constexpr std::size_t kRunPixels = 8'000'000;  // (kRunTime for each this
 // <config>/plugins
 std::filesystem::path folder();
 
-// The plugin files there (*.py, not starting with "_", sorted), as the list shows them before anything runs.
+// The plugins there (Python files *.py and native plugins' folders, not starting with "_" or ".", sorted by key), as the
+// list shows them before anything runs.
 struct Listed {
-    std::string key;                   // the file name without .py
-    std::optional<core::Json> manifest;  // <key>.json beside it when it is a JSON object
-    std::string sha256;                // of the file now
+    std::string key;                   // the file name without .py, or the native plugin's folder name
+    std::optional<core::Json> manifest;  // <key>.json beside a Python file when it is a JSON object; a native plugin's plugin.json
+    std::string sha256;                // of the file now (a native plugin: of its plugin.json and its program)
     bool chosen = false;               // chosen to run, as it is now
+    bool native = false;               // a native plugin (a program), not a Python file
+    std::optional<std::string> problem;  // why a native plugin cannot be chosen (its plugin.json or its program)
 };
 std::vector<Listed> listed();
+// A plugin of this key is installed: <key>.py or <key>/plugin.json in the folder (nothing read or run).
+bool installed(const std::string& key);
 
 // The person's settings (<config>/plugin_settings.json): plugins on at all (off at first), the Python that runs them
 // (empty: python3 or python on PATH), the plugins chosen (key → the file's sha256 when chosen).
@@ -58,7 +73,8 @@ struct Settings {
 Settings settings();
 void save_settings(const Settings& settings);
 // Choose a plugin to run (as its file is now), or take the choice back. `listed_sha256`: the file as the person was shown
-// it; core::Error("plugin_changed") when it has changed since (nothing is chosen then).
+// it; core::Error("plugin_changed") when it has changed since (nothing is chosen then); core::Error("plugin_manifest")
+// for a native plugin whose plugin.json or program cannot be used ("the plugin.json of plugin x cannot be used (…)").
 void choose(const std::string& key, bool on, const std::optional<std::string>& listed_sha256 = std::nullopt);
 // Plugins are on and this one is chosen, as its file is now.
 bool allowed(const std::string& key);
@@ -67,7 +83,7 @@ bool allowed(const std::string& key);
 std::optional<std::filesystem::path> python();
 
 // A chosen plugin's own name and settings (NAME, PARAMS), read through the runner (once for each file as chosen and each
-// Python; its failures too, until the settings are saved again). Throws PyValueError with Python's words ("no plugin
+// Python; its failures too, until the settings are saved again); a native plugin's from its plugin.json. Throws PyValueError with Python's words ("no plugin
 // x", "plugin x cannot be loaded (…)", "plugin x has no run(image)"); core::Error("plugin_not_allowed") when it is not
 // chosen (or its file changed since); core::Error("plugin_runner") for the runner's own trouble: no Python, no Pillow in
 // it, not started, stopped before it answered, too slow, too much written back.
@@ -83,7 +99,9 @@ std::vector<Described> available();
 std::vector<std::tuple<std::string, std::string, double, double, double>> fields(std::string_view kind);
 
 // plugins.run: the picture (RGBA, the same size back; its transparency kept when the plugin returns RGB) through the
-// plugin. Its errors as describe's, and "plugin x failed (…)" / "plugin x did not return a picture". The same request
+// plugin. Its errors as describe's, and "plugin x failed (…)" / "plugin x did not return a picture" (a native plugin's
+// refusal, or a picture of another size); a native plugin's program that cannot be started: core::Error("plugin_runner",
+// "the program of plugin x could not be started (…)"). The same request
 // asked again while it runs waits for that run; the last few pictures are kept (at most 256 MB). `stop`: no longer
 // wanted — the runner is stopped and render::Cancelled thrown.
 Image run(std::string_view kind, const Image& image, const core::Json& params = core::Json::object(), const std::stop_token& stop = {});

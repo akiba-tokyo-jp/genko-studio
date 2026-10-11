@@ -181,7 +181,8 @@ QWidget* effect_tiles(const std::vector<QAction*>& actions) {
 
 MaterialPanel::MaterialPanel(MainWindow* window) : window_(window) {
     // --- materials
-    browser = new MaterialBrowser(nullptr, [window](const QString& id, const QString& kind) { window->material_activated(id, kind); });
+    // (a double click in the list is 貼る, as Python's itemDoubleClicked → use(): the item clicked is the one chosen)
+    browser = new MaterialBrowser(nullptr, [this](const QString&, const QString&) { use(); });
     auto* use_button = new QPushButton(QStringLiteral("貼る"));
     use_button->setToolTip(QStringLiteral("トーン: 選択範囲か選んだコマに（なければクリックした所に）。効果線: 選んだコマに。画像・パーツ: クリックした所に"));
     connect(use_button, &QPushButton::clicked, this, [this] { use(); });

@@ -24,6 +24,7 @@
 #include "app/plugins_dialog.hpp"
 #include "app/tiles.hpp"
 #include "app/timeline.hpp"
+#include "app/wording.hpp"
 #include "core/anim.hpp"
 #include "render/plugins.hpp"
 #include "render/timelapse.hpp"
@@ -250,6 +251,74 @@ private slots:
         off.enabled = false;
         render::plugins::save_settings(off);
         std::filesystem::remove(folder / "sepia.py");
+    }
+
+    void nativePluginsListedAndChosen() {
+        // (a native plugin, docs/PLUGIN_NATIVE.md: listed by its plugin.json's name, one whose plugin.json cannot be used
+        // shown as such and not offered, the consent asked for a program; nothing runs — the program here is not one)
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        const std::filesystem::path folder = render::plugins::folder();
+        std::filesystem::create_directories(folder / "tint");
+        std::filesystem::create_directories(folder / "broken");
+        std::ofstream(folder / "tint" / "plugin.json")
+            << R"({"protocol": 1, "name": "色づけ", "executable": "tint", "params": {"amount": {"label": "強さ", "min": 0, "max": 1, "default": 0.5}}})";
+        std::ofstream(folder / "tint" / "tint") << "not a program: never started here";
+        std::ofstream(folder / "broken" / "plugin.json") << R"({"protocol": 2, "name": "x", "executable": "x"})";
+        QString question;
+        s.answers.responder->question = [&](const QString& title, const QString& text) {
+            question = text;
+            return title == QStringLiteral("プラグインを動かす");
+        };
+        QString tint_row, broken_row, broken_tip;
+        bool broken_checkable = true;
+        s.answers.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::PluginsDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            d->enabled->setChecked(true);
+            for (int i = 0; i < d->list->count(); ++i) {
+                QListWidgetItem* row = d->list->item(i);
+                const QString key = row->data(Qt::UserRole).toString();
+                if (key == QStringLiteral("tint")) {
+                    tint_row = row->text();
+                    row->setCheckState(Qt::Checked);
+                }
+                if (key == QStringLiteral("broken")) {
+                    broken_row = row->text();
+                    broken_tip = row->toolTip();
+                    broken_checkable = (row->flags() & Qt::ItemIsUserCheckable) != 0;
+                }
+            }
+            return d->keep() ? int(QDialog::Accepted) : int(QDialog::Rejected);
+        };
+        w->action("act_plugin_settings")->trigger();
+        QCOMPARE(tint_row, QStringLiteral("tint（プログラム） — 色づけ"));
+        QCOMPARE(broken_row, QStringLiteral("broken（プログラム）（使えません）"));
+        QCOMPARE(broken_tip, QStringLiteral("プラグイン「broken」の plugin.json が使えません（protocol は 1 にします）"));
+        QVERIFY(!broken_checkable);
+        QVERIFY(question.startsWith(QStringLiteral("「tint」（プログラム）を動かしてよいですか。")));
+        QVERIFY(render::plugins::allowed("tint"));
+        QVERIFY(!render::plugins::allowed("broken"));
+        // offered among the filters by plugin.json's name (its settings too), nothing started to know them
+        auto* filters = w->layer_panel()->findChild<QComboBox*>(QStringLiteral("layer_filter"));
+        QVERIFY(filters != nullptr);
+        QVERIFY(filters->findData(QStringLiteral("plugin:tint")) >= 0);
+        QCOMPARE(filters->itemText(filters->findData(QStringLiteral("plugin:tint"))), QStringLiteral("色づけ（プラグイン）"));
+        QCOMPARE(filters->findData(QStringLiteral("plugin:broken")), -1);
+        // the native plugins' words
+        QCOMPARE(app::wording::error(QStringLiteral("ops[0] filter_raster: the program of plugin tint could not be started (execve: Permission denied)")),
+                 QStringLiteral("プラグイン「tint」のプログラムを起動できませんでした（このコンピューターで動くプログラムか確かめてください）"));
+        QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its program tint.exe is not in its folder)")),
+                 QStringLiteral("プラグイン「x」の plugin.json が使えません（プログラム「tint.exe」がプラグインのフォルダーにありません）"));
+        QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin twin cannot be used (a Python plugin twin.py has the same name)")),
+                 QStringLiteral("プラグイン「twin」の plugin.json が使えません（同じ名前の Python のプラグイン（twin.py）があります）"));
+        QCOMPARE(app::wording::error(QStringLiteral("plugin fails failed (no paper today)")), QStringLiteral("プラグイン「fails」の処理が失敗しました"));
+        render::plugins::Settings off = render::plugins::settings();
+        off.enabled = false;
+        off.chosen = Json::object();
+        render::plugins::save_settings(off);
+        std::filesystem::remove_all(folder / "tint");
+        std::filesystem::remove_all(folder / "broken");
     }
 
     void timelapseNeedsASavedBook() {

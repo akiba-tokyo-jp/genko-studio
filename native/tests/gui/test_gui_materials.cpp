@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QDockWidget>
 #include <QFile>
+#include <QFileInfo>
 #include <QDockWidget>
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -25,6 +26,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <algorithm>
+#include <cmath>
 #include <set>
 
 #include "gui_support.hpp"
@@ -190,6 +193,28 @@ private slots:
         // Browsing and searching are previews only; no document mutation or Undo entry.
         QCOMPARE(session->snapshot(), before);
     }
+    void userLibraryUpToSixteenMegabytesIsListed() {
+        // (2026-10-11: the person's library.json is listed up to 16 MB, no longer 1 MB; past that it is not read)
+        QTemporaryDir config;QVERIFY(config.isValid());const QByteArray previous=qgetenv("GENKO_CONFIG_DIR");
+        struct Restore { QByteArray value;~Restore(){if(value.isNull())qunsetenv("GENKO_CONFIG_DIR");else qputenv("GENKO_CONFIG_DIR",value);} } restore{previous};
+        qputenv("GENKO_CONFIG_DIR",config.path().toUtf8());
+        const QString root=config.path()+"/materials";QVERIFY(QDir().mkpath(root));
+        const auto library=[&](qsizetype padding){
+            QJsonArray items{QJsonObject{{"id","u-large"},{"name",QStringLiteral("大きな一覧の素材")},{"folder",QStringLiteral("私の素材")},{"kind","lines"},
+                                         {"note",QString(padding,QLatin1Char('x'))}}};
+            const QByteArray bytes=QJsonDocument(items).toJson(QJsonDocument::Compact);QFile file(root+"/library.json");
+            QVERIFY(file.open(QIODevice::WriteOnly|QIODevice::Truncate));QCOMPARE(file.write(bytes),qint64(bytes.size()));file.close();
+        };
+        const auto listed=[&]{
+            auto panel=std::unique_ptr<QWidget>(app::make_builtin_material_panel());
+            auto* list=panel->findChild<QListWidget*>("materialList");auto* search=panel->findChild<QLineEdit*>("materialSearch");
+            if(!list||!search)return -1;
+            search->setText(QStringLiteral("大きな一覧の素材"));return list->count();
+        };
+        library(2*1024*1024);QVERIFY(QFileInfo(root+"/library.json").size()>(1<<20));QCOMPARE(listed(),1);
+        library(16*1024*1024-200);QVERIFY(QFileInfo(root+"/library.json").size()<=(16<<20));QCOMPARE(listed(),1);
+        library(16*1024*1024+10);QVERIFY(QFileInfo(root+"/library.json").size()>(16<<20));QCOMPARE(listed(),0);
+    }
     void userLibraryImagesUseLazyPersistentCache() {
         QTemporaryDir config;QVERIFY(config.isValid());const QByteArray previous=qgetenv("GENKO_CONFIG_DIR");
         struct Restore { QByteArray value;~Restore(){if(value.isNull())qunsetenv("GENKO_CONFIG_DIR");else qputenv("GENKO_CONFIG_DIR",value);} } restore{previous};
@@ -251,6 +276,7 @@ private slots:
         const std::string key="my_"+QCryptographicHash::hash(QStringLiteral("brush-雨ブラシ").toUtf8(),QCryptographicHash::Sha1).toHex().left(10).toStdString();
         QVERIFY(window.book().brush_custom.contains(key));
         QVERIFY2(window.pen().kind==key,"double-clicked brush must become the active pen before drawing");
+        QCOMPARE(window.last_notice(),QStringLiteral("ブラシ「雨ブラシ」で描けます"));  // (Python's use_material: a double click is 貼る)
         QCOMPARE(window.pen().width_mm,3.0);QCOMPARE(window.canvas()->tool(),QString("pen"));QCOMPARE(window.canvas()->live_pen().at("kind"),core::Json(key));
         app::inject::mouse_stroke(window.canvas(),{QPointF(6,8),QPointF(8,9),QPointF(10,10),QPointF(12,11)});
         const auto* ink=gui_test::ink_of(window.book().page(0));QVERIFY(ink);QCOMPARE(ink->stroke_count(),std::size_t(1));QCOMPARE(ink->strokes->items[0]->kind,key);QCOMPARE(ink->strokes->items[0]->width_mm,3.0);
@@ -272,15 +298,32 @@ private slots:
         const auto book=gui_test::path_of(bookRoot.path()+"/画像.genko");gui_test::write_book(book,doc);app::Session::Options options;options.autosave=false;auto session=app::Session::open(book,options);app::MainWindow window(session);
         auto* dock=window.findChild<QDockWidget*>(QStringLiteral("素材"));QVERIFY(dock);window.resize(1200,800);window.show();dock->show();QVERIFY(QTest::qWaitForWindowExposed(&window));
         auto* search=dock->findChild<QLineEdit*>("materialSearch");auto* list=dock->findChild<QListWidget*>("materialList");QVERIFY(search&&list);search->setText(QStringLiteral("配置用の青"));QCOMPARE(list->count(),1);QCOMPARE(list->item(0)->data(Qt::UserRole).toString(),QString("u-gui-blue"));
-        list->setCurrentRow(0);list->scrollToItem(list->item(0));QCoreApplication::processEvents();const QPoint point=list->visualItemRect(list->item(0)).center();QTest::mouseClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,point);QTest::mouseDClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,point);
+        list->setCurrentRow(0);list->scrollToItem(list->item(0));QCoreApplication::processEvents();const QPoint point=list->visualItemRect(list->item(0)).center();
+        // (Python: a double click is 貼る — the material tool waits for a click on the page, and nothing is put yet)
+        window.choose_tool("eraser");const auto untouched=session->snapshot();
+        const auto double_click=[&]{QTest::mouseClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,point);QTest::mouseDClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,point);};
+        double_click();
+        QCOMPARE(window.canvas()->tool(),QString("stamp"));QVERIFY(window.pending_material());QCOMPARE(window.last_notice(),QStringLiteral("「配置用の青」: 置きたい所をクリックします"));
+        QCOMPARE(session->snapshot(),untouched);
+        // Esc (the list has the keyboard) gives it up: the tool chosen before comes back, the book as it was
+        QTest::keyClick(list,Qt::Key_Escape);
+        QVERIFY(!window.pending_material());QCOMPARE(window.canvas()->tool(),QString("eraser"));QCOMPARE(window.last_notice(),QStringLiteral("素材を置くのをやめました"));
+        QCOMPARE(session->snapshot(),untouched);
+        // again, and a click on the page puts it there (its middle where clicked: Python's stamp_material)
+        double_click();QCOMPARE(window.canvas()->tool(),QString("stamp"));
+        app::inject::click_mm(window.canvas(),QPointF(7.5,12.25));
         const auto* ink=gui_test::ink_of(window.book().page(0));QVERIFY(ink);QCOMPARE(ink->patches.size(),std::size_t(1));QCOMPARE(*ink->patches[0].png,png.toStdString());
+        QCOMPARE(ink->patches[0].attrs.at("box"),core::Json::array({1.5,9.25,12.0,6.0}));
+        QCOMPARE(window.canvas()->tool(),QString("stamp"));QVERIFY(window.pending_material());  // (each click puts another, as in Python)
         const auto proof=render::render_page(window.book().page(0),72,render::proof_options()).image;QCOMPARE(proof.getpixel(proof.width()/2,proof.height()/2),(std::vector<double>{12,123,234}));QVERIFY(proof.tobytes()!=render::render_page(doc.page(0),72,render::proof_options()).image.tobytes());
         session->save_now();QVERIFY(session->wait_saved(std::chrono::seconds(10)));const auto revision=gui_test::disk_revision(book);
         window.action("act_undo")->trigger();QVERIFY(session->wait_saved(std::chrono::seconds(10)));QVERIFY(gui_test::disk_revision(book)>revision);QCOMPARE(gui_test::ink_of(window.book().page(0))->patches.size(),std::size_t(0));QCOMPARE(render::render_page(window.book().page(0),72,render::proof_options()).image.tobytes(),render::render_page(doc.page(0),72,render::proof_options()).image.tobytes());
         const auto undoRevision=gui_test::disk_revision(book);window.action("act_redo")->trigger();QVERIFY(session->wait_saved(std::chrono::seconds(10)));QVERIFY(gui_test::disk_revision(book)>undoRevision);
         const auto reopened=app::Session::open(book,options);const auto* restored=gui_test::ink_of(reopened->document().page(0));QVERIFY(restored);QCOMPARE(restored->patches.size(),std::size_t(1));QCOMPARE(*restored->patches[0].png,png.toStdString());const auto output=render::render_page(reopened->document().page(0),72,render::proof_options()).image;QCOMPARE(output.tobytes(),proof.tobytes());
         const auto file=gui_test::path_of(bookRoot.path()+"/画像.png");render::save_png(output,file);QFile exported(gui_test::qpath(file));QVERIFY(exported.open(QIODevice::ReadOnly));const auto exportedBytes=exported.readAll();QCOMPARE(render::read_png(std::string_view(exportedBytes.constData(),static_cast<std::size_t>(exportedBytes.size()))).tobytes(),proof.tobytes());
-        window.canvas()->fit_page();QVERIFY(window.canvas()->wait_rendered(10000));const auto screen=window.canvas()->grab().toImage();const auto center=window.canvas()->to_widget(QPointF(10,10));const auto ratio=screen.devicePixelRatio();QCOMPARE(screen.pixelColor(qRound(center.x()*ratio),qRound(center.y()*ratio)),QColor(12,123,234));
+        window.canvas()->fit_page();QVERIFY(window.canvas()->wait_rendered(10000));const auto screen=window.canvas()->grab().toImage();const auto ratio=screen.devicePixelRatio();
+        const auto shown=[&](QPointF mm){const auto at=window.canvas()->to_widget(mm);return screen.pixelColor(qRound(at.x()*ratio),qRound(at.y()*ratio));};
+        QCOMPARE(shown(QPointF(10,10)),QColor(12,123,234));QVERIFY(shown(QPointF(15,5))!=QColor(12,123,234));  // (its box: 1.5–13.5 × 9.25–15.25 mm)
         const QString screenshots=qEnvironmentVariable("GENKO_GUI_SCREENSHOTS");if(!screenshots.isEmpty()){QVERIFY(QDir().mkpath(screenshots));QVERIFY(window.grab().save(screenshots+"/material-user-image.png"));}
         QVERIFY(manifest.open(QIODevice::ReadOnly));QCOMPARE(manifest.readAll(),QByteArray::fromStdString(library));QVERIFY(source.open(QIODevice::ReadOnly));QCOMPARE(source.readAll(),png);
     }
@@ -290,8 +333,23 @@ private slots:
         auto* dock=window.findChild<QDockWidget*>(QStringLiteral("素材"));QVERIFY(dock);window.resize(1200,800);window.show();dock->show();QVERIFY(QTest::qWaitForWindowExposed(&window));
         auto* search=dock->findChild<QLineEdit*>("materialSearch");auto* list=dock->findChild<QListWidget*>("materialList");QVERIFY(search&&list);search->setText(QStringLiteral("汗"));QListWidgetItem* selected=nullptr;
         for(int n=0;n<list->count();++n){if(list->item(n)->data(Qt::UserRole).toString()=="mark-汗")selected=list->item(n);}QVERIFY(selected);list->setCurrentItem(selected);QCoreApplication::processEvents();
-        const auto pos=list->visualItemRect(selected).center();QTest::mouseClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,pos);QTest::mouseDClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,pos);
+        const auto pos=list->visualItemRect(selected).center();
+        const auto double_click=[&]{QTest::mouseClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,pos);QTest::mouseDClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,pos);};
+        const QString toolBefore=window.canvas()->tool();
+        double_click();
+        QCOMPARE(window.canvas()->tool(),QString("stamp"));QCOMPARE(window.last_notice(),QStringLiteral("「汗」: 置きたい所をクリックします"));QCOMPARE(session->snapshot(),before);
+        // Esc on the page gives it up (the page has the keyboard)
+        QTest::keyClick(window.canvas(),Qt::Key_Escape);
+        QVERIFY(!window.pending_material());QCOMPARE(window.canvas()->tool(),toolBefore);QCOMPARE(window.last_notice(),QStringLiteral("素材を置くのをやめました"));QCOMPARE(session->snapshot(),before);
+        // a second Esc has nothing to give up
+        QTest::keyClick(window.canvas(),Qt::Key_Escape);QCOMPARE(window.canvas()->tool(),toolBefore);
+        double_click();app::inject::click_mm(window.canvas(),QPointF(6,13));
         const auto* ink=gui_test::ink_of(window.book().page(0));QVERIFY(ink);QCOMPARE(ink->stroke_count(),std::size_t(2));
+        {   // (the part's lines centred where clicked: Python's stamp_material moves their box's middle there)
+            double x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+            for(const auto& stroke:ink->strokes->items)for(const auto& p:stroke->points){x0=std::min(x0,p.x);x1=std::max(x1,p.x);y0=std::min(y0,p.y);y1=std::max(y1,p.y);}
+            QVERIFY2(std::abs((x0+x1)/2-6)<0.6&&std::abs((y0+y1)/2-13)<0.6,qPrintable(QString("%1,%2 %3,%4").arg(x0).arg(y0).arg(x1).arg(y1)));
+        }
         const auto output=render::render_page(window.book().page(0),72,render::proof_options());QVERIFY(output.image.tobytes()!=render::render_page(doc.page(0),72,render::proof_options()).image.tobytes());
         window.action("act_undo")->trigger();QCOMPARE(session->snapshot(),before);window.action("act_redo")->trigger();QCOMPARE(gui_test::ink_of(window.book().page(0))->stroke_count(),std::size_t(2));
         const auto folder=gui_test::path_of(temp.path()+"/線画.genko");session->save_as(folder);QVERIFY(session->wait_saved(std::chrono::seconds(10)));const auto reopened=app::Session::open(folder,options);QCOMPARE(gui_test::ink_of(reopened->document().page(0))->stroke_count(),std::size_t(2));
@@ -311,7 +369,15 @@ private slots:
         search->setText(QStringLiteral("網点 60 線 30%"));QCOMPARE(list->count(),1);
         list->setCurrentRow(0);list->scrollToItem(list->item(0));QCoreApplication::processEvents();
         const QPoint point=list->visualItemRect(list->item(0)).center();
-        QTest::mouseClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,point);QTest::mouseDClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,point);
+        const auto double_click=[&]{QTest::mouseClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,point);QTest::mouseDClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,point);};
+        // (Python's _put_tone: neither a selection nor a chosen panel, so the material tool waits for a click)
+        const auto untouched=session->snapshot();const QString toolBefore=window.canvas()->tool();
+        double_click();
+        QCOMPARE(window.canvas()->tool(),QString("stamp"));QCOMPARE(window.last_notice(),QStringLiteral("選択範囲もコマも選ばれていません。トーンを貼る所をクリックします"));
+        QCOMPARE(session->snapshot(),untouched);
+        QTest::keyClick(list,Qt::Key_Escape);
+        QVERIFY(!window.pending_material());QCOMPARE(window.canvas()->tool(),toolBefore);QCOMPARE(window.last_notice(),QStringLiteral("素材を置くのをやめました"));QCOMPARE(session->snapshot(),untouched);
+        double_click();app::inject::click_mm(window.canvas(),QPointF(10,10));
         QTRY_VERIFY_WITH_TIMEOUT(window.book().page(0).layers.size()==doc.page(0).layers.size()+1,3000);
         const auto found=std::find_if(window.book().page(0).layers.begin(),window.book().page(0).layers.end(),[](const core::Layer& l){return l.kind==core::LayerKind::Tone;});
         QVERIFY(found!=window.book().page(0).layers.end());const std::string toneId=found->id;const auto& tone=*found;QCOMPARE(tone.material_id.value_or(""),std::string("dot-60-30"));QCOMPARE(tone.density.value(),0.3);
