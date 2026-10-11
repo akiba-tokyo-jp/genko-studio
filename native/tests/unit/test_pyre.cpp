@@ -3,7 +3,9 @@
 // another; this build refuses such a search when it has spent kRegexSteps steps (sre's steps and the work between
 // them) or holds a million places to go back to or 4 million entries of data kept to go back — for the whole book in
 // replace_text, which leaves the book as it was and says so — and refuses groups more than 200 deep. And a few of
-// Python's results (test_contract_pyre has them all, against Python).
+// Python's results (test_contract_pyre has them all, against Python). How long a refusal may take is measured against
+// this build here (regex_timing.hpp: the steps given at the rate measured, times 3), so a sanitizer build at -O0 is
+// held to the same proportion as a release one; an optimized build is also held to 10 s.
 
 #include <QtTest>
 
@@ -17,6 +19,7 @@
 #include "core/error.hpp"
 #include "core/model.hpp"
 #include "core/pyre.hpp"
+#include "regex_timing.hpp"
 #include "render/ops_registry.hpp"
 
 using genko::core::Json;
@@ -53,9 +56,13 @@ private slots:
         QCOMPARE(code_of([] { PyPattern("a\n(", 0); }), std::string("python_error: missing ), unterminated subpattern at position 2 (line 2, column 1)"));
     }
 
-    // A pattern that backtracks without end (Python's runs for hours) stops when its steps are spent, in under a second in
-    // a release build (each bound here 10 s: room for a sanitizer build on a busy machine).
+    // A pattern that backtracks without end (Python's runs for hours) stops when its steps are spent: in proportion to
+    // them (regex_timing.hpp), and in an optimized build within 10 s (0.7 s in a release build).
     void searchesAreBounded() {
+        const std::int64_t calibration = genko::test::regex_step_cost();
+        const std::int64_t bound = genko::test::regex_steps_bound_ms(calibration, genko::core::kRegexSteps);
+        qInfo("%llu steps measured in %lld us: %lld ms for a refusal at most", static_cast<unsigned long long>(genko::test::kCalibrationSteps),
+              static_cast<long long>(calibration / 1000), static_cast<long long>(bound));
         const std::string text = std::string(60, 'a') + "!";
         QElapsedTimer clock;
         clock.start();
@@ -64,7 +71,8 @@ private slots:
                  std::string("regex_too_slow: the pattern takes too long to search ("));
         QCOMPARE(budget.steps, std::uint64_t{0});
         qInfo("stopped after %lld ms", static_cast<long long>(clock.elapsed()));
-        QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
+        QVERIFY2(clock.elapsed() < bound, qPrintable(QString::number(clock.elapsed())));
+        if constexpr (genko::test::kOptimizedBuild) QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
         // the budget is the whole search's: what one line spent the next has no more
         PyReBudget shared{1000};
         const PyPattern any(".*a", 0);
@@ -77,7 +85,8 @@ private slots:
         PyReBudget deep;
         QCOMPARE(code_of([&] { PyPattern("(?:a|){4294967294}", 0).subn("x", "aaa", nullptr, deep); }).substr(0, 14), std::string("regex_too_slow"));
         qInfo("a group repeated without end: stopped after %lld ms", static_cast<long long>(clock.elapsed()));
-        QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
+        QVERIFY2(clock.elapsed() < bound, qPrintable(QString::number(clock.elapsed())));
+        if constexpr (genko::test::kOptimizedBuild) QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
         // the find dialog's count is bounded the same way
         PyReBudget counted;
         QCOMPARE(code_of([&] { PyPattern("(a+)+b", 0).count(text, counted); }).substr(0, 14), std::string("regex_too_slow"));
@@ -87,8 +96,14 @@ private slots:
     // (a pattern of many groups copies them all), the marks set to nothing below a new one, each choice of a branch
     // looked at, each item of a set looked through. So a pattern of 1000 or 3000 groups, of a set of 5000 characters
     // outside the BMP (no bitmap: a list) or of 5000 choices, backtracking without end, stops when its steps are spent,
-    // as quickly as one without them (counted as sre's steps alone: 25 s, 100 s, and minutes).
+    // within the time its budget is worth at the rate measured for steps without such work (regex_timing.hpp; counted as
+    // sre's steps alone a release build took 25 s, 100 s and minutes, past that bound's 2 s), and in an optimized build
+    // within 10 s (under half a second).
     void costlyStepsAreCounted() {
+        const std::int64_t calibration = genko::test::regex_step_cost();
+        const std::int64_t bound = genko::test::regex_steps_bound_ms(calibration, genko::core::kRegexSteps);
+        qInfo("%llu steps measured in %lld us: %lld ms for a refusal at most", static_cast<unsigned long long>(genko::test::kCalibrationSteps),
+              static_cast<long long>(calibration / 1000), static_cast<long long>(bound));
         const std::string text = std::string(60, 'a');
         std::string groups1000;
         for (int i = 0; i < 1000; ++i) groups1000 += "()";
@@ -117,8 +132,9 @@ private slots:
             PyReBudget budget;
             QCOMPARE(code_of([&] { PyPattern(pattern, 0).subn("x", text, nullptr, budget); }).substr(0, 14), std::string("regex_too_slow"));
             qInfo("%s: stopped after %lld ms", what, static_cast<long long>(clock.elapsed()));
-            // (under half a second in a release build; 10 s leaves room for a sanitizer build on a busy machine)
-            if (clock.elapsed() >= 10000) slow += std::string(what) + ": " + std::to_string(clock.elapsed()) + " ms; ";
+            if (clock.elapsed() >= bound || (genko::test::kOptimizedBuild && clock.elapsed() >= 10000)) {
+                slow += std::string(what) + ": " + std::to_string(clock.elapsed()) + " ms; ";
+            }
         }
         QVERIFY2(slow.empty(), slow.c_str());
         // and they find what Python finds where they are quick
@@ -143,6 +159,7 @@ private slots:
 
     // replace_text: the refusal is the op's, the book as it was (Python's would hold the window for hours).
     void replaceTextRefusesWithoutChanges() {
+        const std::int64_t bound = genko::test::regex_steps_bound_ms(genko::test::regex_step_cost(), genko::core::kRegexSteps);
         const genko::core::CommandBus bus(genko::render::ops_registry());
         const genko::core::Actor person("human:作者");
         genko::core::Document doc = genko::core::new_episode("p", genko::core::Num(1), 2, genko::core::PageSpec::a4_mono());
@@ -162,8 +179,9 @@ private slots:
         clock.start();
         const std::string slow = refused(Json{{"op", "replace_text"}, {"find", "(a|aa)+$"}, {"replace", "x"}, {"regex", true}});
         QVERIFY2(slow.starts_with("ops[0] replace_text: the pattern takes too long to search (more than 100000000 steps"), slow.c_str());
-        qInfo("replace_text: refused after %lld ms", static_cast<long long>(clock.elapsed()));
-        QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
+        qInfo("replace_text: refused after %lld ms (%lld ms at most)", static_cast<long long>(clock.elapsed()), static_cast<long long>(bound));
+        QVERIFY2(clock.elapsed() < bound, qPrintable(QString::number(clock.elapsed())));
+        if constexpr (genko::test::kOptimizedBuild) QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
         const std::string nested = refused(Json{{"op", "replace_text"}, {"find", std::string(201, '(') + std::string(201, ')')}, {"regex", true}});
         QVERIFY2(nested.starts_with("ops[0] replace_text: the pattern nests too deeply"), nested.c_str());
         // refused at a later line after an earlier one was replaced, in a batch after another op: nothing of it is kept

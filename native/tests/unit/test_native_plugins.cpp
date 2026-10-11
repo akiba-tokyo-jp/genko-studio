@@ -370,6 +370,10 @@ private slots:
         }
         later.join();
         QVERIFY(cancelled);
+        // (what is measured is that the run is stopped when it is no longer wanted, not waited for to its end: 1 s until
+        // the stop, then a pass of the runner's 50 ms loop, the kill and the copy's folder removed — no work in
+        // proportion to the build's speed: a sanitizer build at -O0 is as quick here, the plugin its 56 KB of pixels and
+        // a program of a few MB copied; the plugin sleeps 1000 s, so 10 s tells a stop from a wait in any build)
         QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
 #ifndef _WIN32
         // what it started was stopped with it (its process group): nothing writes after it
@@ -379,6 +383,7 @@ private slots:
         clock.restart();
         QCOMPARE(refusal([] { plugins::run("plugin:sleepy", picture()); }),
                  QStringLiteral("plugin_runner: plugin sleepy did not finish in %1 seconds").arg(plugins::kRunTime.count()));
+        // (the whole of kRunTime waited, then stopped: 20 s past it for the copy, the start and the kill in any build)
         QVERIFY(clock.elapsed() >= plugins::kRunTime.count() * 1000 - 1000);
         QVERIFY2(clock.elapsed() < plugins::kRunTime.count() * 1000 + 20000, qPrintable(QString::number(clock.elapsed())));
         // (stopped there as when no longer wanted, its process group with it: checked above, where what it started has

@@ -51,6 +51,7 @@
 #include "core/base64.hpp"
 #include "core/pynum.hpp"
 #include "gui_support.hpp"
+#include "../support/regex_timing.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
 
@@ -967,8 +968,10 @@ private slots:
         QCOMPARE(searched, 0);
         QCOMPARE(counted, QStringLiteral("正規表現が読めません"));
         QCOMPARE(s.ops.size(), count);
-        // a pattern that would search for hours (Python's would): stopped and said, the window not held (the search and
-        // 置換 each stop in under a second in a release build; 15 s for both leaves room for a sanitizer build); nothing sent
+        // a pattern that would search for hours (Python's would): stopped and said, the window not held — the search and 置換
+        // each stop when their steps are spent, so both within the time 2 × kRegexSteps steps take at the rate measured
+        // here (regex_timing.hpp), and in an optimized build within 15 s (under 2 s); nothing sent
+        const std::int64_t slow_bound = genko::test::regex_steps_bound_ms(genko::test::regex_step_cost(), 2 * genko::core::kRegexSteps);
         s.put(Json{{"op", "add_line"}, {"text", std::string(40, 'a') + "!"}, {"x_mm", 10.0}, {"y_mm", 10.0}, {"w_mm", 20.0}, {"h_mm", 30.0}});
         const std::size_t before_slow = s.ops.size();
         QElapsedTimer slow;
@@ -987,7 +990,8 @@ private slots:
         QCOMPARE(searched, 0);
         QCOMPARE(counted, QStringLiteral("この正規表現は探すのに時間がかかりすぎるため、探すのをやめました（書き方を見直してください）"));
         QCOMPARE(s.ops.size(), before_slow);
-        QVERIFY2(slow.elapsed() < 15000, qPrintable(QString::number(slow.elapsed())));
+        QVERIFY2(slow.elapsed() < slow_bound, qPrintable(QString::number(slow.elapsed()) + QStringLiteral(" ms, at most ") + QString::number(slow_bound)));
+        if constexpr (genko::test::kOptimizedBuild) QVERIFY2(slow.elapsed() < 15000, qPrintable(QString::number(slow.elapsed())));
         // nothing there
         s.answers.responder->exec = [&](QDialog* dialog) {
             auto* d = qobject_cast<app::ReplaceDialog*>(dialog);
