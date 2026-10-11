@@ -1,6 +1,22 @@
 # Genko C++ 引継ぎ（2026-10-08）
 
-## M4 — 2026-10-09 記録（この節が最新）
+## M4出口受入（Linux）— 2026-10-11 記録（この節が最新）
+
+- **凍結SHA**: `65f833353c548bc5f28c9e0f4c775c96f5fa4635`（native/integration。M4 の群A・群B・群C と M3 の残り BRUSH-01 を統合した後の記録の版）。計画は `validation_policy.py --base 9b344f5 --head 65f8333 --phase milestone`（基点は M3 出口の凍結。tier full、Linux 各100試験）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz。M3 出口とは別の機種）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44 / cgroup v1。Qt 6.11.2、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。ASan（各構成内 ctest 1並列）→ ASan のビルドを消して Release と Debug を同時に。
+- **結果**（validation_run.py の result.json）:
+  - linux-asan: 100/100 合格、サニタイザ指摘なし、CLI23 合格（10/10 22:54–10/11 02:55 UTC）
+  - linux-release: 100/100 合格、CLI23 合格（03:17–04:30）
+  - linux-debug: 100/100 合格、CLI23 合格（03:17–04:50）
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1件のみ＝Windows 2構成が開発中 deferred。Linux 3構成どうしの照合は指摘なし。**Windowsを含む --pair 合格ではない。**
+- **実xcb（Xvfb 1920×1080）GUI・E2E**（凍結SHAのビルド）: Release で gui_actions 14・gui_anim 6・gui_book 29・gui_brushes 8・gui_canvas 78・gui_color 60・gui_colours 4・gui_effects 14・gui_guides 7・gui_layers 12・gui_layout 32・gui_lines 20・gui_materials 35・gui_output 20・gui_paint 11・gui_paper 14・gui_pen 51・gui_ruby 18・gui_select 13、Debug で gui_save 36・app_e2e 8（開く→描く→Undo→保存→終了→別プロセスで再開）、全合格・FAIL 0。Release の gui_save は故障注入が Debug だけのため SKIP 1（合格に数えない。Debug で 36 合格）。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。試験は表示のみで合否判定なし。測定機は基準クラスではない）: 開いて最初の頁 548 ms、全頁 795 ms／入力→ライブ線 p95 1.56・p99 4.38 ms（n=43780）／線確定→表示 p95 18.3 ms／Undo→表示 p95 30.5 ms／頁切替 最初 p95 23.7・精細 p95 93.8 ms（n=4）／自動保存 p95 2.43 s／保存中のタイマーの遅れ p99 9.40 ms・イベントループの停止 p99 46.1 ms（最大 46 ms）。F1頁 350dpi 全描画 1114 ms・1線追加 598 ms・512px部分 45 ms。空いた状態での再計測もほぼ同じ（入力→ライブ線 p95 1.50 ms、停止 p99 52.8 ms、タイマーの遅れ p99 9.71 ms）。M3 出口（別の機種）と比べ、入力→ライブ線は約3倍・タイマーの遅れは約2倍、停止の最大は 309→46 ms。どれも合格値（PERF-B 33/50 ms、PERF-E 50 ms）より小さいが、基準機での測定は M7。
+- **AC-PSD（§6 の代替検査）**: 編集可能な PSD（`native/tests/data/psd_text_book.json`、150 dpi、文字レイヤー19・ルビのレイヤー13、画像にした台詞 0、書体の注意 0）を Krita 5.2.2（Ubuntu の 1:5.2.2+dfsg-2build8、Xvfb）で開いて PNG に書き出せた（4頁とも 1240×1754 px、Genko の PNG との差は 0.01〜0.08% の画素で見た目は同じ、効果文字の縁取りあり）。Krita の .kra に書き出した層の構造でも「台詞 …」のグループの中に「フキダシ」「本文 #<id>」「ルビ「…」 #<id>-r<n>」、効果文字の本文にレイヤースタイルがある。Krita 5.2 は文字レイヤーを画素の層として読む（文字として直せることは求めない）。Photoshop・CLIP STUDIO PAINT での再編集は waived（未確認として既知制限に書く）。構造は test_psd_text（自前の読み手）と test_contract_psd_text（psd-tools）で検査。
+- **AC-TEXT の目視**: 同じ本の PNG（150 dpi）と PDF（pdftocairo で 150 dpi に戻した頁）を拡大して見た。文字・句読点・ルビの欠けはない（縦書き・横書き、縦中横の AI・12、禁則、異体字セレクタの 葛󠄀・辻︀、ルビの書体・揃え・距離・字間・大きさ、二列にまたがるルビ、回転・斜体・効果文字）。書体は ZenKakuGothicNew-Bold・ZenOldMincho-SemiBold・DelaGothicOne-Regular・ZenMaruGothic-Bold。**試験データの誤り（残課題）**: psd_text_book.json と test_ruby_render の F4 の本の「大きな声で約束する」の ruby_spans が [4,5)「こえ」・[6,8)「やくそく」で、書記素で数えると「で」「束す」に付く（意図は「声」[3,4)・「約束」[5,7)）。描画はデータの通りで製品の誤りではない。M5 の最初の群で直す。IME の Windows での確認は deferred。
+- **M3 の出口**: 下の M3 出口受入（2026-10-09）で欠けていた BRUSH-01（紙質を別PCへ持ち出して再現できる）は、この凍結で合わせて受け入れた（test_paper・test_gui_paper・test_contract_paper が3構成とも合格、GUI は gui_paper 14）。**M3・M4 とも Linux の出口受入は合格**（Windows は deferred）。
+- **残課題・利用者判断**: Windows 実機受入（配布前に必須）、上の試験データの誤り、編集可能の PSD の書き出しが縁取りのある台詞で遅い（部分ごとに文字組を計算し直す）、replace_text の正規表現（not_yet_ported、利用者判断）、COMP-04 のネイティブ拡張の登録形式（公開契約の追加、利用者確認待ち）、CMYK/Lab の扱い、素材ライブラリ一覧の 1 MB 上限、素材一覧のダブルクリック、PSD を画像として開く（Pillow の平坦化、NotYetPorted）。置いた絵（place_asset）と正式な書き出しは M5。
+
+## M4 — 2026-10-09 記録
 
 ### M3・M4 の残り（2026-10-09 訂正）
 - **M3 出口の記録の訂正**: 下の「M3出口受入（Linux）」は BRUSH-01（紙質の画像を使うブラシ。改善 I06、AC-BRUSH の紙質、schema-v4 の `paper-texture@1`、PLAN の M3 出口「紙質を別PCへ持ち出して再現できる」）が未実装のまま記録した。その節の試験結果は正しいが、**M3 は完了していない**。BRUSH-01 を実装し、M4 出口の V3 で合わせて受け入れる。
