@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -42,5 +43,15 @@ bool in_poly(std::span<const PointF> points, double x, double y);
 // The box a placed picture is clipped to: the page ("none" or no panel), the panel's box ("frame") or the panel's
 // box run out to the bleed on its outer sides ("bleed").
 Rect clip_box(const Page& page, const Frame* frame, std::string_view clip_to);
+
+// placement.default_target: the box a picture over a panel is fitted to (clip_box), widened by pad_mm on every side
+// (floats, as Python's arithmetic with pad_mm makes them).
+Rect default_target(const Page& page, const Frame& frame, std::string_view clip_to, double pad_mm = 0.0);
+
+// placement.fit_rect: the page box (mm) the whole picture (image_w × image_h pixels) takes so that it covers `target`
+// ("cover", and any other word), fits inside it ("contain") or fills it ("stretch"; also a picture of no size), scaled
+// by `scale` about the target's middle and moved by the offset; each value rounded to 3 places (floats).
+Rect fit_rect(const Rect& target, std::int64_t image_w, std::int64_t image_h, std::string_view fit, double offset_x,
+              double offset_y, double scale);
 
 }  // namespace genko::core

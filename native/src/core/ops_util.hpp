@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -75,6 +76,13 @@ Json layer_to_dict(const Layer& layer);
 
 // The panel ids of a page (pre-order, with duplicates as they are).
 std::vector<std::string> frame_ids(const Page& page);
+
+// ops._placed_on: the placed layers of these panels (their positions in page.layers).
+std::vector<std::size_t> placed_on(const Page& page, const std::set<std::string>& frame_ids);
+
+// ops._orphan_art: placed art whose panel went away (the layers at `art` on the page) kept in studio.orphans
+// ({"kind": "layers", "page_id", "reason", "rev", "layers"}: asset refs stay alive for gc) and taken off the page.
+void orphan_art(Document& doc, Page& page, const std::vector<std::size_t>& art, const std::string& reason);
 
 // A dict of old panel id → new id, as ops._refresh_frame_ids fills it (a repeated id keeps its first place and its
 // last value).

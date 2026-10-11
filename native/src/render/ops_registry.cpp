@@ -1,10 +1,12 @@
 #include "render/ops_registry.hpp"
 
 #include "core/ops_util.hpp"
+#include "core/studio.hpp"
 #include "render/bookpages.hpp"
 #include "render/color_edit.hpp"
 #include "render/ops_3d.hpp"
 #include "render/paper.hpp"
+#include "render/placed.hpp"
 #include "render/raster_ops.hpp"
 
 namespace genko::render {
@@ -21,6 +23,8 @@ void register_render_ops(core::OpRegistry& registry) {
     render::register_bookpage_ops(registry);
     // import_psd (fileops: a PSD or PSB read as layers, render/psd)
     register_file_ops(registry);
+    // the studio ops again, place_asset and set_placement able to read an asset's picture size (render/placed)
+    core::register_studio_ops(registry, core::StudioHooks{asset_picture_size});
     // define_brush again, able to take a paper's picture in (BRUSH-01, render/paper)
     core::register_define_brush(registry, [](std::string_view file) {
         try {

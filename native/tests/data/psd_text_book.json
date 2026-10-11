@@ -7,7 +7,7 @@
    "style": {"tcy": true}, "style_runs": [["AI", {"tcy": true}]]},
   {"op": "add_line", "page": 1, "id": "p1d", "text": "大きな声で約束する", "x_mm": 20, "y_mm": 20, "w_mm": 35, "h_mm": 70, "wrap": "vertical",
    "style_runs": [["大きな", {"scale": 1.4}], ["声", {"bold": true, "rgb": [200, 30, 30]}]],
-   "ruby_spans": [{"start": 4, "end": 5, "ruby": "こえ"}, {"start": 6, "end": 8, "ruby": "やくそく"}]},
+   "ruby_spans": [{"start": 3, "end": 4, "ruby": "こえ"}, {"start": 5, "end": 7, "ruby": "やくそく"}]},
   {"op": "add_line", "page": 1, "id": "p1e", "text": "漢字の読み", "x_mm": 60, "y_mm": 100, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
    "balloon": "box", "style": {"tracking": 0.1, "leading": 0.6}, "ruby_runs": [["漢字", "かんじ"]]},
   {"op": "add_line", "page": 2, "id": "p2a", "text": "葛󠄀飾区と辻︀堂へ", "x_mm": 30, "y_mm": 30, "w_mm": 90, "h_mm": 25,

@@ -1,0 +1,7576 @@
+{
+ "note": "Cases for test_contract_studio (studioOpsLikePython): the studio ops of M5 (Python's genko/studio/studio_ops.py, which ops.apply_ops dispatches its STUDIO_OPS to) and set_bible, add_ticket and set_ticket (ops._apply_one) on the book `studio_harness.py make-studiobook` makes: the op contract book (pyref_harness.py make-opsbook: page 5 held by ai:other, a front cover as page 7) with a studio — characters (c-ken's sheet approved and locked), locations, a prop, a script, a page plan, briefs (page 1: a pinned shot and a prompt override on 000000000028, a person's fix on 000000000029, regions, a reference, three candidates and the art adopted on 000000000026), requests, sheet candidates from two agents and a person, tickets of every kind, two proposals, the style fixed from page 6 — and its pictures ($A1 … $G1 PNGs, $J1 a JPEG, $CUT a PNG cut short after its header, $BAD bytes that are no picture, $CRC a PNG whose header's checksum is wrong, $BOMB a header too large to open; refs from the book's assets.json). Each case: its steps ({ops, agent?, dry_run?}; or one step of ops, agent, dry), whether its last step succeeds in Python, with time.strftime fixed (allow_chat_approval). A case marked \"cpp\" is one this build refuses on purpose (a number Python makes from text, 'inf' or 'nan', that it would keep): C++ must refuse it with that code, its error holding \"cpp_says\".",
+ "first_id": 2816,
+ "clock": "2026-10-11T12:34:56",
+ "cases": [
+  {
+   "n": "set_studio bible_doc by an agent",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "bible_doc": {
+      "title": "新しい題"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_studio style merged",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "style": {
+      "notes": [
+       "新しい"
+      ],
+      "extra": 1
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_studio style replaced by a text",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "style": "plain"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_studio policy by an agent",
+   "op": "set_studio",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_studio",
+     "policy": {
+      "auto_adopt": true
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_studio policy null by an agent",
+   "op": "set_studio",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_studio",
+     "policy": null,
+     "premise": "x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_studio policy merged by a person",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "policy": {
+      "max_images": 4
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_studio policy replaced by a list",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "policy": [
+      1,
+      2
+     ]
+    }
+   ],
+   "agent": "genko"
+  },
+  {
+   "n": "set_studio premise null",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "premise": null
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_studio nothing",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_studio unknown keys",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "title": "x",
+     "premise": "p"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_studio on a style that is not an object",
+   "op": "set_studio",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_studio",
+       "style": "plain"
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "set_studio",
+       "style": {
+        "notes": []
+       }
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "set_style_catalog by an agent while the style is fixed",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "gag-yuru",
+      "title": "ゆるい落書き風",
+      "path": [
+       "ギャグ漫画",
+       "シュール"
+      ],
+      "prompt": {
+       "ja": "ゆるい線",
+       "en": "loose lines",
+       "tags": "a,b"
+      },
+      "avoid": [
+       "写実"
+      ],
+      "sample": "$A1",
+      "version": 3,
+      "updated_at": "2026-09-01",
+      "extra_key": "dropped"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_style_catalog by a person: the fixed style goes stale",
+   "op": "set_style_catalog",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "gag-yuru",
+      "title": "ゆるい落書き風",
+      "path": [
+       "ギャグ漫画",
+       "シュール"
+      ],
+      "prompt": {
+       "ja": "ゆるい線",
+       "en": "loose lines",
+       "tags": "a,b"
+      },
+      "avoid": [
+       "写実"
+      ],
+      "sample": "$A1",
+      "version": 3,
+      "updated_at": "2026-09-01",
+      "extra_key": "dropped"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog null by a person",
+   "op": "set_style_catalog",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": null
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog bad id",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "Bad_ID",
+      "title": "ゆるい落書き風",
+      "path": [
+       "ギャグ漫画",
+       "シュール"
+      ],
+      "prompt": {
+       "ja": "ゆるい線",
+       "en": "loose lines",
+       "tags": "a,b"
+      },
+      "avoid": [
+       "写実"
+      ],
+      "sample": "$A1",
+      "version": 3,
+      "updated_at": "2026-09-01",
+      "extra_key": "dropped"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog id with spaces",
+   "op": "set_style_catalog",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "  gag-yuru  ",
+      "title": "ゆるい落書き風",
+      "path": [
+       "ギャグ漫画",
+       "シュール"
+      ],
+      "prompt": {
+       "ja": "ゆるい線",
+       "en": "loose lines",
+       "tags": "a,b"
+      },
+      "avoid": [
+       "写実"
+      ],
+      "sample": "$A1",
+      "version": 3,
+      "updated_at": "2026-09-01",
+      "extra_key": "dropped"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog id a number",
+   "op": "set_style_catalog",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": 5,
+      "title": "ゆるい落書き風",
+      "path": [
+       "ギャグ漫画",
+       "シュール"
+      ],
+      "prompt": {
+       "ja": "ゆるい線",
+       "en": "loose lines",
+       "tags": "a,b"
+      },
+      "avoid": [
+       "写実"
+      ],
+      "sample": null,
+      "version": 3,
+      "updated_at": "2026-09-01",
+      "extra_key": "dropped"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog id starting with -",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "-x",
+      "title": "ゆるい落書き風",
+      "path": [
+       "ギャグ漫画",
+       "シュール"
+      ],
+      "prompt": {
+       "ja": "ゆるい線",
+       "en": "loose lines",
+       "tags": "a,b"
+      },
+      "avoid": [
+       "写実"
+      ],
+      "sample": "$A1",
+      "version": 3,
+      "updated_at": "2026-09-01",
+      "extra_key": "dropped"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog id too long",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "title": "ゆるい落書き風",
+      "path": [
+       "ギャグ漫画",
+       "シュール"
+      ],
+      "prompt": {
+       "ja": "ゆるい線",
+       "en": "loose lines",
+       "tags": "a,b"
+      },
+      "avoid": [
+       "写実"
+      ],
+      "sample": "$A1",
+      "version": 3,
+      "updated_at": "2026-09-01",
+      "extra_key": "dropped"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog id of 121",
+   "op": "set_style_catalog",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "title": "ゆるい落書き風",
+      "path": [
+       "ギャグ漫画",
+       "シュール"
+      ],
+      "prompt": {
+       "ja": "ゆるい線",
+       "en": "loose lines",
+       "tags": "a,b"
+      },
+      "avoid": [
+       "写実"
+      ],
+      "sample": "$A1",
+      "version": 3,
+      "updated_at": "2026-09-01",
+      "extra_key": "dropped"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog no prompt",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "x"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog blank prompt",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "x",
+      "prompt": {
+       "ja": "  "
+      }
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog prompt not an object",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "x",
+      "prompt": "words"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog sample not an asset",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "gag-yuru",
+      "title": "ゆるい落書き風",
+      "path": [
+       "ギャグ漫画",
+       "シュール"
+      ],
+      "prompt": {
+       "ja": "ゆるい線",
+       "en": "loose lines",
+       "tags": "a,b"
+      },
+      "avoid": [
+       "写実"
+      ],
+      "sample": "pic.png",
+      "version": 3,
+      "updated_at": "2026-09-01",
+      "extra_key": "dropped"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog sample missing",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": {
+      "id": "gag-yuru",
+      "title": "ゆるい落書き風",
+      "path": [
+       "ギャグ漫画",
+       "シュール"
+      ],
+      "prompt": {
+       "ja": "ゆるい線",
+       "en": "loose lines",
+       "tags": "a,b"
+      },
+      "avoid": [
+       "写実"
+      ],
+      "sample": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "version": 3,
+      "updated_at": "2026-09-01",
+      "extra_key": "dropped"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog not an object",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": "gag-yuru"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog a list",
+   "op": "set_style_catalog",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_style_catalog",
+     "catalog": [
+      {
+       "id": "gag-yuru",
+       "title": "ゆるい落書き風",
+       "path": [
+        "ギャグ漫画",
+        "シュール"
+       ],
+       "prompt": {
+        "ja": "ゆるい線",
+        "en": "loose lines",
+        "tags": "a,b"
+       },
+       "avoid": [
+        "写実"
+       ],
+       "sample": "$A1",
+       "version": 3,
+       "updated_at": "2026-09-01",
+       "extra_key": "dropped"
+      }
+     ]
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_style_catalog by an agent after the style is opened",
+   "op": "set_style_catalog",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "revoke",
+       "gate": "art",
+       "page": 6,
+       "reason": "やり直し"
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "set_style_catalog",
+       "catalog": {
+        "id": "gag-yuru",
+        "title": "ゆるい落書き風",
+        "path": [
+         "ギャグ漫画",
+         "シュール"
+        ],
+        "prompt": {
+         "ja": "ゆるい線",
+         "en": "loose lines",
+         "tags": "a,b"
+        },
+        "avoid": [
+         "写実"
+        ],
+        "sample": "$A1",
+        "version": 3,
+        "updated_at": "2026-09-01",
+        "extra_key": "dropped"
+       }
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "set_style_catalog",
+       "catalog": {
+        "id": "gag-yuru",
+        "title": "同じ id",
+        "path": [
+         "ギャグ漫画",
+         "シュール"
+        ],
+        "prompt": {
+         "ja": "ゆるい線",
+         "en": "loose lines",
+         "tags": "a,b"
+        },
+        "avoid": [
+         "写実"
+        ],
+        "sample": "$A1",
+        "version": 3,
+        "updated_at": "2026-09-01",
+        "extra_key": "dropped"
+       }
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "set_style_catalog the same catalog again",
+   "op": "set_style_catalog",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_style_catalog",
+       "catalog": {
+        "id": "gag-yuru",
+        "title": "ゆるい落書き風",
+        "path": [
+         "ギャグ漫画",
+         "シュール"
+        ],
+        "prompt": {
+         "ja": "ゆるい線",
+         "en": "loose lines",
+         "tags": "a,b"
+        },
+        "avoid": [
+         "写実"
+        ],
+        "sample": "$A1",
+        "version": 3,
+        "updated_at": "2026-09-01",
+        "extra_key": "dropped"
+       }
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "set_style_catalog",
+       "catalog": {
+        "id": "gag-yuru",
+        "title": "ゆるい落書き風",
+        "path": [
+         "ギャグ漫画",
+         "シュール"
+        ],
+        "prompt": {
+         "ja": "ゆるい線",
+         "en": "loose lines",
+         "tags": "a,b"
+        },
+        "avoid": [
+         "写実"
+        ],
+        "sample": "$A1",
+        "version": 3,
+        "updated_at": "2026-09-01",
+        "extra_key": "dropped"
+       }
+      }
+     ],
+     "agent": "human:作者"
+    }
+   ]
+  },
+  {
+   "n": "upsert_character new",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-new",
+      "name": "新"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_character replaces",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-yuki",
+      "name": "雪"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_character locked by an agent",
+   "op": "upsert_character",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-ken",
+      "name": "x"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_character locked unlock by an agent",
+   "op": "upsert_character",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-ken"
+     },
+     "unlock": true
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_character locked by a person without unlock",
+   "op": "upsert_character",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-ken"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "upsert_character unlocked by a person",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-ken",
+      "name": "健"
+     },
+     "unlock": true
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "upsert_character kept locked by a person",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-ken",
+      "locked": true
+     },
+     "unlock": 1
+    }
+   ],
+   "agent": "genko"
+  },
+  {
+   "n": "upsert_character without id",
+   "op": "upsert_character",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "name": "x"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_character null",
+   "op": "upsert_character",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": null
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_character empty list",
+   "op": "upsert_character",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": []
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_character a list",
+   "op": "upsert_character",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": [
+      [
+       "id",
+       "x"
+      ]
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_character number id",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": 7
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_character unused",
+   "op": "delete_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_character",
+     "id": "c-mio"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_character used in a panel",
+   "op": "delete_character",
+   "ok": false,
+   "ops": [
+    {
+     "op": "delete_character",
+     "id": "c-yuki"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_character used, force",
+   "op": "delete_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_character",
+     "id": "c-yuki",
+     "force": true
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_character unknown",
+   "op": "delete_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_character",
+     "id": "nobody"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_character no id",
+   "op": "delete_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_character"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_character used by a locked character",
+   "op": "delete_character",
+   "ok": false,
+   "ops": [
+    {
+     "op": "delete_character",
+     "id": "c-ken"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_location new",
+   "op": "upsert_location",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_location",
+     "location": {
+      "id": "loc-park",
+      "name": "公園"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_location replaces",
+   "op": "upsert_location",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_location",
+     "location": {
+      "id": "loc-roof"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_location no id",
+   "op": "upsert_location",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_location",
+     "location": {
+      "name": "x"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_location a text",
+   "op": "upsert_location",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_location",
+     "location": "loc-x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_location none",
+   "op": "upsert_location",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_location"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_location",
+   "op": "delete_location",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_location",
+     "id": "loc-room"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_location unknown",
+   "op": "delete_location",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_location",
+     "id": "x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_location named with a locked page",
+   "op": "delete_location",
+   "ok": false,
+   "ops": [
+    {
+     "op": "delete_location",
+     "id": "loc-room",
+     "page": 5
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_prop named with a locked page",
+   "op": "delete_prop",
+   "ok": false,
+   "ops": [
+    {
+     "op": "delete_prop",
+     "id": "prop-bag",
+     "page": 5
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_script named with a locked page",
+   "op": "set_script",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_script",
+     "script": {},
+     "page": 5
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_prop new",
+   "op": "upsert_prop",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_prop",
+     "prop": {
+      "id": "prop-pen",
+      "name": "ペン"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_prop replaces",
+   "op": "upsert_prop",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_prop",
+     "prop": {
+      "id": "prop-bag",
+      "name": "かばん"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_prop no id",
+   "op": "upsert_prop",
+   "ok": false,
+   "ops": [
+    {
+     "op": "upsert_prop",
+     "prop": {
+      "id": ""
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_prop",
+   "op": "delete_prop",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_prop",
+     "id": "prop-bag"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_prop on a fresh studio key",
+   "op": "delete_prop",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "delete_prop",
+       "id": "prop-bag"
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "delete_prop",
+       "id": "prop-bag"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "delete_location number id",
+   "op": "delete_location",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_location",
+     "id": 5
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_script",
+   "op": "set_script",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_script",
+     "script": {
+      "scenes": []
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_script a list",
+   "op": "set_script",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_script",
+     "script": []
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_script missing",
+   "op": "set_script",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_script"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan keeps the reviews",
+   "op": "set_page_plan",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": 2,
+     "plan": {
+      "input_hash": "h2",
+      "rev": 3
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan new",
+   "op": "set_page_plan",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": 3,
+     "plan": {
+      "name": {
+       "page": 3
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan null",
+   "op": "set_page_plan",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": 4,
+     "plan": null
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan a list",
+   "op": "set_page_plan",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": 2,
+     "plan": [
+      1
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan by page_id",
+   "op": "set_page_plan",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page_id": "pg_00000000000d",
+     "plan": {
+      "a": 1
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan unknown page_id",
+   "op": "set_page_plan",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page_id": "pg_x",
+     "plan": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan page_id a number",
+   "op": "set_page_plan",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page_id": 3,
+     "plan": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan no page",
+   "op": "set_page_plan",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "plan": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan page text",
+   "op": "set_page_plan",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": "3",
+     "plan": {
+      "b": 2
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan page float",
+   "op": "set_page_plan",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": 3.9,
+     "plan": {
+      "b": 2
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan page word",
+   "op": "set_page_plan",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": "three",
+     "plan": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan page 99",
+   "op": "set_page_plan",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": 99,
+     "plan": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan page past 64 bits",
+   "op": "set_page_plan",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": 1180591620717411303424,
+     "plan": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan page locked",
+   "op": "set_page_plan",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": 5,
+     "plan": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_page_plan page locked by its owner",
+   "op": "set_page_plan",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_page_plan",
+     "page": 5,
+     "plan": {
+      "x": 1
+     }
+    }
+   ],
+   "agent": "ai:other"
+  },
+  {
+   "n": "set_panel pinned field by an agent",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000028",
+     "set": {
+      "shot": "CU"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel field by an agent",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000028",
+     "set": {
+      "action": "走る",
+      "emotion": "焦り"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel pinned field by a person",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000028",
+     "set": {
+      "shot": "CU"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_panel prompt override by an agent",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": {
+      "gen": {
+       "size_override": [
+        1024,
+        1024
+       ]
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel prompt override by a person",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": {
+      "gen": {
+       "size_override": [
+        1024,
+        1024
+       ]
+      }
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_panel gen without override",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": {
+      "gen": {
+       "prompt_override": null,
+       "seed": 3
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel status bad",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": {
+      "status": "done"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel status skip by an agent",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": {
+      "status": "skip"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel status skip by a person",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": {
+      "status": "skip"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_panel candidates",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": {
+      "candidates": []
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_panel adopted",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": {
+      "adopted": {}
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_panel unset pinned by an agent",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000028",
+     "unset": [
+      "shot"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel unset by an agent",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000028",
+     "unset": [
+      "action",
+      "nothing"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel unset pinned by a person",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000028",
+     "unset": [
+      "shot",
+      "gen"
+     ]
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_panel unset a text",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000028",
+     "unset": "action"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel pin by an agent",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "pin": [
+      "time",
+      "angle"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel unpin by an agent",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000028",
+     "unpin": [
+      "shot"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel unpin by a person",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000028",
+     "unpin": [
+      "shot",
+      "zz"
+     ]
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_panel pin a list",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "pin": [
+      [
+       "x"
+      ]
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel pin a number",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 4,
+     "frame_id": "000000000018",
+     "pin": [
+      5,
+      2.5,
+      true
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel pin words",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 4,
+     "frame_id": "000000000018",
+     "pin": [
+      "b",
+      "a",
+      "ゆ",
+      "B",
+      "a"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel new panel briefed",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 4,
+     "frame_id": "000000000018",
+     "set": {
+      "shot": "ELS"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel new panel stays empty",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 4,
+     "frame_id": "000000000018",
+     "set": {
+      "angle": "high"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel characters with a tag",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 4,
+     "frame_id": "000000000018",
+     "set": {
+      "characters": [
+       {
+        "id": "c-yuki",
+        "tag": "名札"
+       },
+       "c-ken"
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel no frame",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "set": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel unknown frame",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "nope",
+     "set": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel frame a number",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": 28,
+     "set": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel not a leaf",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000025",
+     "set": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel root not a leaf",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000006",
+     "set": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel set a list",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": [
+      [
+       "shot",
+       "CU"
+      ]
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel set null",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": null
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel locked page",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 5,
+     "frame_id": "00000000001e",
+     "set": {
+      "shot": "CU"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel locked page by its owner",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 5,
+     "frame_id": "00000000001e",
+     "set": {
+      "shot": "CU"
+     }
+    }
+   ],
+   "agent": "ai:other"
+  },
+  {
+   "n": "set_panel regions by a person count in the brief",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 4,
+     "frame_id": "000000000018",
+     "set": {
+      "regions": [
+       {
+        "id": "r1",
+        "kind": "face",
+        "source": "user"
+       },
+       {
+        "id": "r2",
+        "source": "agent"
+       }
+      ]
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_panel drawn panel",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 2,
+     "frame_id": "drawn-b",
+     "set": {
+      "shot": "FS"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel for_pages",
+   "op": "set_panel",
+   "ok": false,
+   "ops": [
+    {
+     "op": "for_pages",
+     "pages": [
+      1,
+      4
+     ],
+     "ops": [
+      {
+       "op": "set_panel",
+       "frame_id": "000000000018",
+       "set": {
+        "shot": "CU"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel dry run",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "set": {
+      "shot": "CU"
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "dry": true
+  },
+  {
+   "n": "record_review panel",
+   "op": "record_review",
+   "ok": true,
+   "ops": [
+    {
+     "op": "record_review",
+     "page": 1,
+     "frame_id": "000000000026",
+     "kind": "art",
+     "score": 0.9,
+     "notes": "OK",
+     "input_hash": "h"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "record_review page",
+   "op": "record_review",
+   "ok": true,
+   "ops": [
+    {
+     "op": "record_review",
+     "page": 2,
+     "kind": "regions",
+     "notes": null
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "record_review page without a plan",
+   "op": "record_review",
+   "ok": true,
+   "ops": [
+    {
+     "op": "record_review",
+     "page": 4,
+     "score": 3
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "record_review unknown frame",
+   "op": "record_review",
+   "ok": false,
+   "ops": [
+    {
+     "op": "record_review",
+     "page": 1,
+     "frame_id": "x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "record_review kind a number",
+   "op": "record_review",
+   "ok": true,
+   "ops": [
+    {
+     "op": "record_review",
+     "page": 3,
+     "kind": 5
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "record_review on a plan with reviews not an object",
+   "op": "record_review",
+   "ok": false,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_page_plan",
+       "page": 3,
+       "plan": {
+        "reviews": [
+         1
+        ]
+       }
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "record_review",
+       "page": 3
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "approve by an agent",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "bible"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "approve by a conversation of an agent",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "bible"
+    }
+   ],
+   "agent": "ai:hermes/9204"
+  },
+  {
+   "n": "approve bad gate",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "cover"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve no gate",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve name page 2",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "name",
+     "page": 2
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve name pages 2 and 3",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "name",
+     "page": 2
+    },
+    {
+     "op": "approve",
+     "gate": "name",
+     "page": 3
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve name without page",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "name"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve name on a locked page",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "name",
+     "page": 5
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve name by the legacy caller",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "name",
+     "page": 4
+    }
+   ],
+   "agent": "genko"
+  },
+  {
+   "n": "approve name by human",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "name",
+     "page": 4
+    }
+   ],
+   "agent": "human"
+  },
+  {
+   "n": "approve art without the name",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "art",
+     "page": 2
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve art with panels not adopted",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "art",
+     "page": 1
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve art page 4",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "name",
+     "page": 4
+    },
+    {
+     "op": "approve",
+     "gate": "art",
+     "page": 4
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve art page 6 again fixes the style anew",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "art",
+     "page": 6
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve art after the style went stale",
+   "op": "approve",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_style_catalog",
+       "catalog": {
+        "id": "gag-yuru",
+        "title": "ゆるい落書き風",
+        "path": [
+         "ギャグ漫画",
+         "シュール"
+        ],
+        "prompt": {
+         "ja": "ゆるい線",
+         "en": "loose lines",
+         "tags": "a,b"
+        },
+        "avoid": [
+         "写実"
+        ],
+        "sample": "$A1",
+        "version": 3,
+        "updated_at": "2026-09-01",
+        "extra_key": "dropped"
+       }
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "approve",
+       "gate": "name",
+       "page": 4
+      },
+      {
+       "op": "approve",
+       "gate": "art",
+       "page": 4
+      }
+     ],
+     "agent": "human:作者"
+    }
+   ]
+  },
+  {
+   "n": "approve art with adopted art: the style's tool and reference",
+   "op": "approve",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_panel",
+       "page": 1,
+       "frame_id": "000000000029",
+       "set": {
+        "status": "skip"
+       }
+      },
+      {
+       "op": "set_panel",
+       "page": 1,
+       "frame_id": "000000000028",
+       "set": {
+        "status": "skip"
+       }
+      },
+      {
+       "op": "resolve_ticket",
+       "id": "000000000a10",
+       "note": "直した"
+      },
+      {
+       "op": "revoke",
+       "gate": "art",
+       "page": 6
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "approve",
+       "gate": "art",
+       "page": 1
+      }
+     ],
+     "agent": "human:作者"
+    }
+   ]
+  },
+  {
+   "n": "approve art with a derived picture adopted",
+   "op": "approve",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_panel",
+       "page": 1,
+       "frame_id": "000000000029",
+       "set": {
+        "status": "skip"
+       }
+      },
+      {
+       "op": "set_panel",
+       "page": 1,
+       "frame_id": "000000000028",
+       "set": {
+        "status": "skip"
+       }
+      },
+      {
+       "op": "revoke",
+       "gate": "art",
+       "page": 6
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_a3"
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "approve",
+       "gate": "art",
+       "page": 1
+      }
+     ],
+     "agent": "human:作者"
+    }
+   ]
+  },
+  {
+   "n": "approve sheet",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "sheet",
+     "character_id": "c-yuki",
+     "candidate_id": "cd_y1"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve sheet with a face",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "sheet",
+     "character_id": "c-yuki",
+     "candidate_id": "cd_y2",
+     "face_asset": "$F1"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve sheet again replaces the sheet",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "sheet",
+     "character_id": "c-ken",
+     "candidate_id": "cd_k2"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve sheet unknown character",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "sheet",
+     "character_id": "c-x",
+     "candidate_id": "cd_y1"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve sheet unknown candidate",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "sheet",
+     "character_id": "c-yuki",
+     "candidate_id": "cd_k1"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve sheet no candidates",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "sheet",
+     "character_id": "c-mio"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve export",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "export"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve via a chat",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "export",
+     "via": "ai:hermesxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "message": "はいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはいはい"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve via a chat without words",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "script",
+     "via": 5
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "approve dry run",
+   "op": "approve",
+   "ok": true,
+   "ops": [
+    {
+     "op": "approve",
+     "gate": "name",
+     "page": 2
+    }
+   ],
+   "agent": "human:作者",
+   "dry": true
+  },
+  {
+   "n": "approve not per page",
+   "op": "approve",
+   "ok": false,
+   "ops": [
+    {
+     "op": "for_pages",
+     "pages": "all",
+     "ops": [
+      {
+       "op": "approve",
+       "gate": "name"
+      }
+     ]
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "allow_chat_approval by an agent",
+   "op": "allow_chat_approval",
+   "ok": false,
+   "ops": [
+    {
+     "op": "allow_chat_approval",
+     "on": false
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "allow_chat_approval off",
+   "op": "allow_chat_approval",
+   "ok": true,
+   "ops": [
+    {
+     "op": "allow_chat_approval",
+     "on": false
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "allow_chat_approval on by a word",
+   "op": "allow_chat_approval",
+   "ok": true,
+   "ops": [
+    {
+     "op": "allow_chat_approval",
+     "on": "yes"
+    }
+   ],
+   "agent": "genko"
+  },
+  {
+   "n": "allow_chat_approval without on",
+   "op": "allow_chat_approval",
+   "ok": true,
+   "ops": [
+    {
+     "op": "allow_chat_approval"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "revoke by an agent",
+   "op": "revoke",
+   "ok": false,
+   "ops": [
+    {
+     "op": "revoke",
+     "gate": "name",
+     "page": 1
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "revoke name",
+   "op": "revoke",
+   "ok": true,
+   "ops": [
+    {
+     "op": "revoke",
+     "gate": "name",
+     "page": 1,
+     "reason": "直す"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "revoke art of the pilot page",
+   "op": "revoke",
+   "ok": true,
+   "ops": [
+    {
+     "op": "revoke",
+     "gate": "art",
+     "page": 6,
+     "page_id": "pg_00000000001f"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "revoke art of another page",
+   "op": "revoke",
+   "ok": true,
+   "ops": [
+    {
+     "op": "revoke",
+     "gate": "art",
+     "page": 1
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "revoke name by page_id",
+   "op": "revoke",
+   "ok": true,
+   "ops": [
+    {
+     "op": "revoke",
+     "gate": "name",
+     "page_id": "pg_00000000001f"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "revoke sheet",
+   "op": "revoke",
+   "ok": true,
+   "ops": [
+    {
+     "op": "revoke",
+     "gate": "sheet",
+     "character_id": "c-ken"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "revoke sheet unknown",
+   "op": "revoke",
+   "ok": false,
+   "ops": [
+    {
+     "op": "revoke",
+     "gate": "sheet",
+     "character_id": "c-x"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "revoke export",
+   "op": "revoke",
+   "ok": false,
+   "ops": [
+    {
+     "op": "revoke",
+     "gate": "export"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "revoke no gate",
+   "op": "revoke",
+   "ok": false,
+   "ops": [
+    {
+     "op": "revoke"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "revoke name no page",
+   "op": "revoke",
+   "ok": false,
+   "ops": [
+    {
+     "op": "revoke",
+     "gate": "name"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "request_approval",
+   "op": "request_approval",
+   "ok": true,
+   "ops": [
+    {
+     "op": "request_approval",
+     "gate": "name",
+     "pages": [
+      4,
+      2,
+      4
+     ],
+     "note": "見て"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "request_approval bad gate",
+   "op": "request_approval",
+   "ok": false,
+   "ops": [
+    {
+     "op": "request_approval",
+     "gate": "page"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "request_approval unknown page",
+   "op": "request_approval",
+   "ok": false,
+   "ops": [
+    {
+     "op": "request_approval",
+     "gate": "name",
+     "pages": [
+      2,
+      99
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "request_approval pages as text",
+   "op": "request_approval",
+   "ok": true,
+   "ops": [
+    {
+     "op": "request_approval",
+     "gate": "art",
+     "pages": "21"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "request_approval page a word",
+   "op": "request_approval",
+   "ok": false,
+   "ops": [
+    {
+     "op": "request_approval",
+     "gate": "art",
+     "pages": [
+      "x"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "request_approval page past 64 bits",
+   "op": "request_approval",
+   "ok": false,
+   "ops": [
+    {
+     "op": "request_approval",
+     "gate": "art",
+     "pages": [
+      99,
+      1180591620717411303424
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "request_approval sheet",
+   "op": "request_approval",
+   "ok": true,
+   "ops": [
+    {
+     "op": "request_approval",
+     "gate": "sheet",
+     "character_id": "c-mio",
+     "pages": null
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "request_approval pages a number",
+   "op": "request_approval",
+   "ok": false,
+   "ops": [
+    {
+     "op": "request_approval",
+     "gate": "art",
+     "pages": 3
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "request_fix by an agent",
+   "op": "request_fix",
+   "ok": true,
+   "ops": [
+    {
+     "op": "request_fix",
+     "page": 1,
+     "frame_id": "000000000028",
+     "instruction": " 手を直す ",
+     "candidate_id": "c"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "request_fix by a person, no panel",
+   "op": "request_fix",
+   "ok": true,
+   "ops": [
+    {
+     "op": "request_fix",
+     "page": 4,
+     "instruction": "背景"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "request_fix empty",
+   "op": "request_fix",
+   "ok": false,
+   "ops": [
+    {
+     "op": "request_fix",
+     "page": 4,
+     "instruction": "  "
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "request_fix unknown frame",
+   "op": "request_fix",
+   "ok": false,
+   "ops": [
+    {
+     "op": "request_fix",
+     "page": 4,
+     "frame_id": "x",
+     "instruction": "a"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "request_fix on a skipped panel",
+   "op": "request_fix",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_panel",
+       "page": 4,
+       "frame_id": "000000000018",
+       "set": {
+        "status": "skip"
+       }
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "request_fix",
+       "page": 4,
+       "frame_id": "000000000018",
+       "instruction": "直す"
+      }
+     ],
+     "agent": "human:作者"
+    }
+   ]
+  },
+  {
+   "n": "request_fix instruction a number",
+   "op": "request_fix",
+   "ok": true,
+   "ops": [
+    {
+     "op": "request_fix",
+     "page": 4,
+     "instruction": 12
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "ask_human",
+   "op": "ask_human",
+   "ok": true,
+   "ops": [
+    {
+     "op": "ask_human",
+     "text": "質問"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "ask_human with a panel",
+   "op": "ask_human",
+   "ok": true,
+   "ops": [
+    {
+     "op": "ask_human",
+     "text": "質問",
+     "page": 6,
+     "frame_id": "000000000045",
+     "item": "art"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "ask_human empty",
+   "op": "ask_human",
+   "ok": false,
+   "ops": [
+    {
+     "op": "ask_human",
+     "text": ""
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "ask_human page 0",
+   "op": "ask_human",
+   "ok": false,
+   "ops": [
+    {
+     "op": "ask_human",
+     "text": "q",
+     "page": 0
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "ask_human by page_id",
+   "op": "ask_human",
+   "ok": true,
+   "ops": [
+    {
+     "op": "ask_human",
+     "text": "q",
+     "page_id": "pg_000000000013"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "ask_human unknown frame",
+   "op": "ask_human",
+   "ok": false,
+   "ops": [
+    {
+     "op": "ask_human",
+     "text": "q",
+     "page": 1,
+     "frame_id": "x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "ask_human frame without page",
+   "op": "ask_human",
+   "ok": true,
+   "ops": [
+    {
+     "op": "ask_human",
+     "text": "q",
+     "frame_id": "x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "resolve_ticket by an agent",
+   "op": "resolve_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "resolve_ticket",
+     "id": "000000000a10",
+     "note": "夕焼けにした"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "resolve_ticket by an agent without a note",
+   "op": "resolve_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "resolve_ticket",
+     "id": "000000000a10"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "resolve_ticket a person's question by an agent",
+   "op": "resolve_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "resolve_ticket",
+     "id": "000000000a0e",
+     "note": "n"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "resolve_ticket a gate by an agent",
+   "op": "resolve_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "resolve_ticket",
+     "id": "000000000a0c",
+     "note": "n"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "resolve_ticket a gate by a person",
+   "op": "resolve_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "resolve_ticket",
+     "id": "000000000a0c"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "resolve_ticket a fix for a person",
+   "op": "resolve_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "resolve_ticket",
+     "id": "000000000a0b",
+     "note": "見ました"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "resolve_ticket done",
+   "op": "resolve_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "resolve_ticket",
+     "id": "000000000a11",
+     "note": "n"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "resolve_ticket unknown",
+   "op": "resolve_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "resolve_ticket",
+     "id": "t9"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "resolve_ticket an old ticket",
+   "op": "resolve_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "resolve_ticket",
+     "id": "t1"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "resolve_ticket while another fix is open",
+   "op": "resolve_ticket",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "request_fix",
+       "page": 1,
+       "frame_id": "000000000026",
+       "instruction": "もう一つ"
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "resolve_ticket",
+       "id": "000000000a10",
+       "note": "一つ目"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "reopen_ticket by an agent",
+   "op": "reopen_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "reopen_ticket",
+     "id": "000000000a11"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "reopen_ticket",
+   "op": "reopen_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "reopen_ticket",
+     "id": "000000000a11",
+     "note": " まだ "
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "reopen_ticket a fix on a panel",
+   "op": "reopen_ticket",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "resolve_ticket",
+       "id": "000000000a10",
+       "note": "直した"
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "reopen_ticket",
+       "id": "000000000a10",
+       "note": "まだ"
+      }
+     ],
+     "agent": "human:作者"
+    }
+   ]
+  },
+  {
+   "n": "reopen_ticket on a skipped panel",
+   "op": "reopen_ticket",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_panel",
+       "page": 1,
+       "frame_id": "000000000026",
+       "set": {
+        "status": "skip"
+       }
+      },
+      {
+       "op": "reopen_ticket",
+       "id": "000000000a10"
+      }
+     ],
+     "agent": "human:作者"
+    }
+   ]
+  },
+  {
+   "n": "reopen_ticket unknown",
+   "op": "reopen_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "reopen_ticket",
+     "id": "x"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "add_ticket",
+   "op": "add_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_ticket",
+     "page": 2,
+     "frame_id": "drawn-a",
+     "role": "ink",
+     "assignee": "アシ",
+     "rate": "1000"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_ticket with id",
+   "op": "add_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_ticket",
+     "page": 3,
+     "id": "t-new"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_ticket no page",
+   "op": "add_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_ticket"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_ticket unknown page",
+   "op": "add_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_ticket",
+     "page": 9
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_ticket",
+   "op": "set_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_ticket",
+     "id": "t1",
+     "status": "done",
+     "assignee": "誰か",
+     "rate": 500
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_ticket studio ticket",
+   "op": "set_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_ticket",
+     "id": "000000000a0e",
+     "status": "closed"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_ticket unknown",
+   "op": "set_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_ticket",
+     "id": "t9",
+     "status": "done"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_ticket no id",
+   "op": "set_ticket",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_ticket"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_region by an agent",
+   "op": "add_region",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "region": {
+      "kind": "prop",
+      "rect_mm": [
+       1,
+       2,
+       3,
+       4
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_region by a person",
+   "op": "add_region",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "region": {
+      "kind": "face",
+      "id": "rg_new",
+      "source": "agent"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "add_region twice without id",
+   "op": "add_region",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_region",
+     "page": 4,
+     "frame_id": "000000000018",
+     "region": {
+      "kind": "a"
+     }
+    },
+    {
+     "op": "add_region",
+     "page": 4,
+     "frame_id": "000000000018",
+     "region": {
+      "kind": "b"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_region existing id",
+   "op": "add_region",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "region": {
+      "kind": "face",
+      "id": "rg_face"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_region no kind",
+   "op": "add_region",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "region": {
+      "id": "r"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_region pairs",
+   "op": "add_region",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_region",
+     "page": 4,
+     "frame_id": "000000000018",
+     "region": [
+      [
+       "kind",
+       "face"
+      ],
+      [
+       "id",
+       "rp"
+      ]
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_region a text",
+   "op": "add_region",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_region",
+     "page": 4,
+     "frame_id": "000000000018",
+     "region": "face"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_region a number",
+   "op": "add_region",
+   "ok": false,
+   "ops": [
+    {
+     "op": "add_region",
+     "page": 4,
+     "frame_id": "000000000018",
+     "region": 5
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "add_region new panel",
+   "op": "add_region",
+   "ok": true,
+   "ops": [
+    {
+     "op": "add_region",
+     "page": 6,
+     "frame_id": "000000000044",
+     "region": {
+      "kind": "face"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "edit_region a person's by an agent",
+   "op": "edit_region",
+   "ok": false,
+   "ops": [
+    {
+     "op": "edit_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "id": "rg_face",
+     "set": {
+      "rect_mm": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "edit_region by an agent",
+   "op": "edit_region",
+   "ok": true,
+   "ops": [
+    {
+     "op": "edit_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "id": "rg_body",
+     "set": {
+      "rect_mm": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "id": "x",
+      "source": "user"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "edit_region a person's by a person",
+   "op": "edit_region",
+   "ok": true,
+   "ops": [
+    {
+     "op": "edit_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "id": "rg_face",
+     "set": {
+      "char": "c-ken"
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "edit_region unknown",
+   "op": "edit_region",
+   "ok": false,
+   "ops": [
+    {
+     "op": "edit_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "id": "rg_x",
+     "set": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "edit_region set a list",
+   "op": "edit_region",
+   "ok": false,
+   "ops": [
+    {
+     "op": "edit_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "id": "rg_body",
+     "set": [
+      1
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_region by an agent",
+   "op": "delete_region",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "id": "rg_body"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_region a person's by an agent",
+   "op": "delete_region",
+   "ok": false,
+   "ops": [
+    {
+     "op": "delete_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "id": "rg_face"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_region a person's by a person",
+   "op": "delete_region",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_region",
+     "page": 1,
+     "frame_id": "000000000026",
+     "id": "rg_face"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "delete_region no panel regions",
+   "op": "delete_region",
+   "ok": false,
+   "ops": [
+    {
+     "op": "delete_region",
+     "page": 4,
+     "frame_id": "000000000018",
+     "id": "x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "replace_regions agent",
+   "op": "replace_regions",
+   "ok": true,
+   "ops": [
+    {
+     "op": "replace_regions",
+     "page": 1,
+     "frame_id": "000000000026",
+     "source": "agent",
+     "regions": [
+      {
+       "kind": "face",
+       "id": "rg_a"
+      },
+      {
+       "kind": "person"
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "replace_regions detected",
+   "op": "replace_regions",
+   "ok": true,
+   "ops": [
+    {
+     "op": "replace_regions",
+     "page": 1,
+     "frame_id": "000000000026",
+     "source": "detected",
+     "regions": []
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "replace_regions default source",
+   "op": "replace_regions",
+   "ok": true,
+   "ops": [
+    {
+     "op": "replace_regions",
+     "page": 1,
+     "frame_id": "000000000026"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "replace_regions user",
+   "op": "replace_regions",
+   "ok": false,
+   "ops": [
+    {
+     "op": "replace_regions",
+     "page": 1,
+     "frame_id": "000000000026",
+     "source": "user",
+     "regions": []
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "replace_regions a region not an object",
+   "op": "replace_regions",
+   "ok": false,
+   "ops": [
+    {
+     "op": "replace_regions",
+     "page": 1,
+     "frame_id": "000000000026",
+     "regions": [
+      5
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "bind_ref",
+   "op": "bind_ref",
+   "ok": true,
+   "ops": [
+    {
+     "op": "bind_ref",
+     "page": 1,
+     "frame_id": "000000000026",
+     "ref": {
+      "source": "$A2",
+      "role": "pose"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "bind_ref replaces",
+   "op": "bind_ref",
+   "ok": true,
+   "ops": [
+    {
+     "op": "bind_ref",
+     "page": 1,
+     "frame_id": "000000000026",
+     "ref": {
+      "id": "rf_roof",
+      "source": "$L1",
+      "role": "location",
+      "order": 5
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "bind_ref no role",
+   "op": "bind_ref",
+   "ok": false,
+   "ops": [
+    {
+     "op": "bind_ref",
+     "page": 1,
+     "frame_id": "000000000026",
+     "ref": {
+      "source": "x"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "bind_ref new panel",
+   "op": "bind_ref",
+   "ok": true,
+   "ops": [
+    {
+     "op": "bind_ref",
+     "page": 4,
+     "frame_id": "000000000018",
+     "ref": {
+      "source": "x",
+      "role": "y",
+      "id": "rf_1"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "unbind_ref",
+   "op": "unbind_ref",
+   "ok": true,
+   "ops": [
+    {
+     "op": "unbind_ref",
+     "page": 1,
+     "frame_id": "000000000026",
+     "id": "rf_roof"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "unbind_ref unknown",
+   "op": "unbind_ref",
+   "ok": true,
+   "ops": [
+    {
+     "op": "unbind_ref",
+     "page": 1,
+     "frame_id": "000000000026",
+     "id": "x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "unbind_ref no frame",
+   "op": "unbind_ref",
+   "ok": false,
+   "ops": [
+    {
+     "op": "unbind_ref",
+     "page": 1,
+     "id": "rf_roof"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets",
+   "op": "register_assets",
+   "ok": true,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "$A2": {
+       "kind": "art"
+      },
+      "$A1": {
+       "note": "n"
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets meta null",
+   "op": "register_assets",
+   "ok": true,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "$A3": null
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets unknown asset",
+   "op": "register_assets",
+   "ok": false,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "sha256:0000000000000000000000000000000000000000000000000000000000000000": {}
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets not an asset",
+   "op": "register_assets",
+   "ok": false,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "pic.png": {}
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets meta a list",
+   "op": "register_assets",
+   "ok": false,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "$A2": [
+       1
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets a list",
+   "op": "register_assets",
+   "ok": false,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": [
+      "$A2"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets a prefix of a digest",
+   "op": "register_assets",
+   "ok": true,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "sha256:22": {
+       "kind": "x"
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets the empty digest",
+   "op": "register_assets",
+   "ok": true,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "sha256:": {
+       "kind": "x"
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets a digest that leaves assets/",
+   "op": "register_assets",
+   "ok": false,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "sha256:../project.json": {}
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets the folder of assets/",
+   "op": "register_assets",
+   "ok": false,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "sha256:.": {}
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets an absolute digest",
+   "op": "register_assets",
+   "ok": false,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "sha256:/etc": {}
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "register_assets a digest of other letters",
+   "op": "register_assets",
+   "ok": false,
+   "ops": [
+    {
+     "op": "register_assets",
+     "assets": {
+      "sha256:写真": {}
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference to a character",
+   "op": "attach_reference",
+   "ok": true,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": {
+      "character_id": "c-yuki"
+     },
+     "asset": "$S2",
+     "kind": "sheet"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference sheet of a locked character by an agent",
+   "op": "attach_reference",
+   "ok": false,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": {
+      "character_id": "c-ken"
+     },
+     "asset": "$S2",
+     "kind": "face"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference sheet of a locked character by a person",
+   "op": "attach_reference",
+   "ok": true,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": {
+      "character_id": "c-ken"
+     },
+     "asset": "$S2",
+     "kind": "face"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "attach_reference reference to a locked character",
+   "op": "attach_reference",
+   "ok": true,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": {
+      "character_id": "c-ken"
+     },
+     "asset": "$S2"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference to a location",
+   "op": "attach_reference",
+   "ok": true,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": {
+      "location_id": "loc-room"
+     },
+     "asset": "$L1",
+     "kind": "location"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference to a prop",
+   "op": "attach_reference",
+   "ok": true,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": {
+      "prop_id": "prop-bag"
+     },
+     "asset": "$A1"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference unknown prop",
+   "op": "attach_reference",
+   "ok": false,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": {
+      "prop_id": "p-x"
+     },
+     "asset": "$A1"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference no target",
+   "op": "attach_reference",
+   "ok": false,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "asset": "$A1"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference no asset",
+   "op": "attach_reference",
+   "ok": false,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": {
+      "prop_id": "prop-bag"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference unknown asset",
+   "op": "attach_reference",
+   "ok": false,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": {
+      "prop_id": "prop-bag"
+     },
+     "asset": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference target a list",
+   "op": "attach_reference",
+   "ok": false,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": [
+      "c-yuki"
+     ],
+     "asset": "$A1"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "attach_reference unknown character",
+   "op": "attach_reference",
+   "ok": false,
+   "ops": [
+    {
+     "op": "attach_reference",
+     "target": {
+      "character_id": "c-x"
+     },
+     "asset": "$A1"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "open_request new",
+   "op": "open_request",
+   "ok": true,
+   "ops": [
+    {
+     "op": "open_request",
+     "request": {
+      "id": "rq_new",
+      "purpose": "art",
+      "mode": "new",
+      "target": {
+       "page": 4,
+       "frame_id": "000000000018"
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "open_request again",
+   "op": "open_request",
+   "ok": true,
+   "ops": [
+    {
+     "op": "open_request",
+     "request": {
+      "id": "rq_open",
+      "purpose": "art"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "open_request an edit again",
+   "op": "open_request",
+   "ok": true,
+   "ops": [
+    {
+     "op": "open_request",
+     "request": {
+      "id": "rq_edit"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "open_request twice in a batch",
+   "op": "open_request",
+   "ok": true,
+   "ops": [
+    {
+     "op": "open_request",
+     "request": {
+      "id": "rq_x",
+      "target": {
+       "page": 1,
+       "frame_id": "000000000028"
+      },
+      "mode": "inpaint"
+     }
+    },
+    {
+     "op": "open_request",
+     "request": {
+      "id": "rq_x",
+      "target": {
+       "page": 1,
+       "frame_id": "000000000028"
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "open_request no id",
+   "op": "open_request",
+   "ok": false,
+   "ops": [
+    {
+     "op": "open_request",
+     "request": {
+      "purpose": "art"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "open_request no target panel",
+   "op": "open_request",
+   "ok": true,
+   "ops": [
+    {
+     "op": "open_request",
+     "request": {
+      "id": "rq_sheet",
+      "target": {
+       "character_id": "c-yuki"
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "open_request unknown page",
+   "op": "open_request",
+   "ok": false,
+   "ops": [
+    {
+     "op": "open_request",
+     "request": {
+      "id": "rq_y",
+      "target": {
+       "page": 99,
+       "frame_id": "x"
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "open_request target by page_id",
+   "op": "open_request",
+   "ok": true,
+   "ops": [
+    {
+     "op": "open_request",
+     "request": {
+      "id": "rq_z",
+      "target": {
+       "page_id": "pg_00000000001f",
+       "frame_id": "000000000046"
+      }
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "open_request pairs",
+   "op": "open_request",
+   "ok": true,
+   "ops": [
+    {
+     "op": "open_request",
+     "request": [
+      [
+       "id",
+       "rq_p"
+      ]
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "close_request",
+   "op": "close_request",
+   "ok": true,
+   "ops": [
+    {
+     "op": "close_request",
+     "id": "rq_open",
+     "reason": "superseded"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "close_request default reason",
+   "op": "close_request",
+   "ok": true,
+   "ops": [
+    {
+     "op": "close_request",
+     "id": "rq_edit"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "close_request unknown",
+   "op": "close_request",
+   "ok": false,
+   "ops": [
+    {
+     "op": "close_request",
+     "id": "rq_x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates for a request",
+   "op": "import_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "request_id": "rq_open",
+     "candidates": [
+      {
+       "asset": "$A2",
+       "px": [
+        30,
+        40
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates the same picture",
+   "op": "import_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidates": [
+      {
+       "asset": "$A1",
+       "px": [
+        40,
+        30
+       ],
+       "origin": {
+        "kind": "self"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates with metrics, face and mapping",
+   "op": "import_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 6,
+     "frame_id": "000000000045",
+     "candidates": [
+      {
+       "id": "cd_m",
+       "asset": "$A3",
+       "px": [
+        "64",
+        48.9
+       ],
+       "origin": {
+        "kind": "fixture"
+       },
+       "metrics": {
+        "a": 1
+       },
+       "face_box01": [
+        "0.1",
+        0.2,
+        0.3,
+        0.4
+       ],
+       "mapping": {
+        "pad_mm": 2
+       },
+       "upscaled": {
+        "from": "x"
+       },
+       "mode": "edit",
+       "parent": "cd_a1"
+      },
+      {
+       "asset": "$G1",
+       "px": [
+        36,
+        36
+       ],
+       "origin": {
+        "kind": "genko"
+       },
+       "mapping": "no"
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates two of one picture at once",
+   "op": "import_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 6,
+     "frame_id": "000000000045",
+     "candidates": [
+      {
+       "id": "c1",
+       "asset": "$A3",
+       "px": [
+        64,
+        48
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      },
+      {
+       "id": "c2",
+       "asset": "$A3",
+       "px": [
+        64,
+        48
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates for a character",
+   "op": "import_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "character_id": "c-yuki",
+     "candidates": [
+      {
+       "id": "cd_y4",
+       "asset": "$F1",
+       "px": [
+        8,
+        8
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      },
+      {
+       "asset": "$S2",
+       "px": [
+        22,
+        30
+       ],
+       "origin": {
+        "kind": "agent"
+       },
+       "face_box01": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates for a location",
+   "op": "import_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "location_id": "loc-room",
+     "candidates": [
+      {
+       "asset": "$L1",
+       "px": [
+        48,
+        32
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates a withdrawn picture again",
+   "op": "import_candidates",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "withdraw_candidates",
+       "character_id": "c-yuki",
+       "candidate_ids": [
+        "cd_y1"
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "character_id": "c-yuki",
+       "candidates": [
+        {
+         "asset": "$S2",
+         "px": [
+          22,
+          30
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "import_candidates answers a sent-back sheet",
+   "op": "import_candidates",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "reject_sheet",
+       "character_id": "c-yuki",
+       "candidate_ids": [
+        "cd_y1"
+       ],
+       "note": "目を大きく"
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "character_id": "c-yuki",
+       "candidates": [
+        {
+         "asset": "$A3",
+         "px": [
+          64,
+          48
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "import_candidates empty",
+   "op": "import_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidates": []
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates bad origin",
+   "op": "import_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidates": [
+      {
+       "asset": "$A1",
+       "px": [
+        1,
+        1
+       ],
+       "origin": {
+        "kind": "robot"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates no origin",
+   "op": "import_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidates": [
+      {
+       "asset": "$A1",
+       "px": [
+        1,
+        1
+       ]
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates bad px",
+   "op": "import_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidates": [
+      {
+       "asset": "$A1",
+       "px": [
+        0,
+        5
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates px a word",
+   "op": "import_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidates": [
+      {
+       "asset": "$A1",
+       "px": [
+        5,
+        "x"
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates px three",
+   "op": "import_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidates": [
+      {
+       "asset": "$A1",
+       "px": [
+        5,
+        5,
+        5
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates no asset",
+   "op": "import_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidates": [
+      {
+       "px": [
+        5,
+        5
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates unknown request",
+   "op": "import_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "request_id": "rq_none",
+     "candidates": [
+      {}
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates unknown panel goes to the orphans",
+   "op": "import_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "gone",
+     "candidates": [
+      {
+       "asset": "$A1",
+       "px": [
+        40,
+        30
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates on a node goes to the orphans",
+   "op": "import_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "000000000025",
+     "candidates": [
+      {
+       "asset": "$A1",
+       "px": [
+        40,
+        30
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates unknown page",
+   "op": "import_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 9,
+     "frame_id": "x",
+     "candidates": [
+      {
+       "asset": "$A1",
+       "px": [
+        40,
+        30
+       ],
+       "origin": {
+        "kind": "agent"
+       }
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates candidate not an object",
+   "op": "import_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidates": [
+      "x"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "import_candidates face not finite",
+   "op": "import_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "import_candidates",
+     "page": 6,
+     "frame_id": "000000000045",
+     "candidates": [
+      {
+       "asset": "$A3",
+       "px": [
+        64,
+        48
+       ],
+       "origin": {
+        "kind": "agent"
+       },
+       "face_box01": [
+        "inf",
+        0,
+        1,
+        1
+       ]
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "face_box01 must be a finite number"
+  },
+  {
+   "n": "review_candidates",
+   "op": "review_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "review_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "reviews": [
+      {
+       "candidate_id": "cd_a2",
+       "score": 0.5,
+       "fix": "空",
+       "checks": {
+        "hands": false
+       }
+      },
+      {
+       "candidate_id": "cd_a3",
+       "note": "小さい",
+       "checks": "no"
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "review_candidates unknown",
+   "op": "review_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "review_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "reviews": [
+      {
+       "candidate_id": "x"
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "review_candidates none",
+   "op": "review_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "review_candidates",
+     "page": 1,
+     "frame_id": "000000000026"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "review_candidates a panel without candidates",
+   "op": "review_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "review_candidates",
+     "page": 4,
+     "frame_id": "000000000018",
+     "reviews": [
+      {
+       "candidate_id": "x"
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "review_candidates an object",
+   "op": "review_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "review_candidates",
+     "page": 1,
+     "frame_id": "000000000026",
+     "reviews": {
+      "candidate_id": "cd_a2"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_candidate",
+   "op": "set_candidate",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "status": "shortlisted"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_candidate bad status",
+   "op": "set_candidate",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "status": "best"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_candidate unknown",
+   "op": "set_candidate",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "x",
+     "status": "rejected"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "withdraw_candidates own",
+   "op": "withdraw_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "character_id": "c-yuki",
+     "candidate_ids": [
+      "cd_y1"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "withdraw_candidates another agent's",
+   "op": "withdraw_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "character_id": "c-yuki",
+     "candidate_ids": [
+      "cd_y2"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "withdraw_candidates a person's",
+   "op": "withdraw_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "character_id": "c-yuki",
+     "candidate_ids": [
+      "cd_y3"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "withdraw_candidates by a person",
+   "op": "withdraw_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "character_id": "c-yuki",
+     "candidate_ids": [
+      "cd_y2",
+      "cd_y3"
+     ]
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "withdraw_candidates the approved sheet",
+   "op": "withdraw_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "character_id": "c-ken",
+     "candidate_ids": [
+      "cd_k1"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "withdraw_candidates the approved sheet by a person",
+   "op": "withdraw_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "character_id": "c-ken",
+     "candidate_ids": [
+      "cd_k1"
+     ]
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "withdraw_candidates unknown",
+   "op": "withdraw_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "character_id": "c-yuki",
+     "candidate_ids": [
+      "cd_x"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "withdraw_candidates none",
+   "op": "withdraw_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "character_id": "c-yuki"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "withdraw_candidates no owner",
+   "op": "withdraw_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "candidate_ids": [
+      "cd_y1"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "withdraw_candidates a character without candidates",
+   "op": "withdraw_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "character_id": "c-mio",
+     "candidate_ids": [
+      "x"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "withdraw_candidates location",
+   "op": "withdraw_candidates",
+   "ok": true,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "location_id": "loc-roof",
+     "candidate_ids": [
+      "cd_l1"
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "withdraw_candidates by another conversation",
+   "op": "withdraw_candidates",
+   "ok": false,
+   "ops": [
+    {
+     "op": "withdraw_candidates",
+     "character_id": "c-yuki",
+     "candidate_ids": [
+      "cd_y1"
+     ]
+    }
+   ],
+   "agent": "ai:hermes/9204"
+  },
+  {
+   "n": "reject_sheet by an agent",
+   "op": "reject_sheet",
+   "ok": false,
+   "ops": [
+    {
+     "op": "reject_sheet",
+     "character_id": "c-yuki"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "reject_sheet all",
+   "op": "reject_sheet",
+   "ok": true,
+   "ops": [
+    {
+     "op": "reject_sheet",
+     "character_id": "c-yuki"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "reject_sheet some with a note",
+   "op": "reject_sheet",
+   "ok": true,
+   "ops": [
+    {
+     "op": "reject_sheet",
+     "character_id": "c-yuki",
+     "candidate_ids": [
+      "cd_y2"
+     ],
+     "note": "  髪を短く "
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "reject_sheet unknown character",
+   "op": "reject_sheet",
+   "ok": true,
+   "ops": [
+    {
+     "op": "reject_sheet",
+     "character_id": "c-x",
+     "note": "x"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "reject_sheet after the sheet was approved",
+   "op": "reject_sheet",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "approve",
+       "gate": "sheet",
+       "character_id": "c-yuki",
+       "candidate_id": "cd_y1"
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "reject_sheet",
+       "character_id": "c-yuki",
+       "candidate_ids": [
+        "cd_y1"
+       ]
+      }
+     ],
+     "agent": "human:作者"
+    }
+   ]
+  },
+  {
+   "n": "adopt_candidate another",
+   "op": "adopt_candidate",
+   "ok": true,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate fit and offset",
+   "op": "adopt_candidate",
+   "ok": true,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "fit": "contain",
+     "offset_mm": [
+      1,
+      2.5
+     ],
+     "scale": "0.5",
+     "clip_to": "bleed"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate stretch",
+   "op": "adopt_candidate",
+   "ok": true,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a3",
+     "fit": "stretch",
+     "offset_mm": [
+      1.5,
+      -2
+     ],
+     "scale": 2
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate unknown fit",
+   "op": "adopt_candidate",
+   "ok": true,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "fit": "zoom",
+     "clip_to": "none",
+     "offset_mm": [
+      0,
+      0,
+      9
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate to bg",
+   "op": "adopt_candidate",
+   "ok": true,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "to": "bg"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate to ink",
+   "op": "adopt_candidate",
+   "ok": true,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a3",
+     "to": "ink"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate to draft before the name",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 3,
+       "frame_id": "000000000033",
+       "candidates": [
+        {
+         "id": "cd_p3",
+         "asset": "$A3",
+         "px": [
+          64,
+          48
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 3,
+       "frame_id": "000000000033",
+       "candidate_id": "cd_p3",
+       "to": "draft"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "adopt_candidate art before the name",
+   "op": "adopt_candidate",
+   "ok": false,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 3,
+     "frame_id": "000000000033",
+     "candidate_id": "x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate bad to",
+   "op": "adopt_candidate",
+   "ok": false,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "to": "fg"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate unknown",
+   "op": "adopt_candidate",
+   "ok": false,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "x"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate offset a word",
+   "op": "adopt_candidate",
+   "ok": false,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "offset_mm": [
+      "a",
+      1
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate offset one number",
+   "op": "adopt_candidate",
+   "ok": false,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "offset_mm": [
+      1
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate offset a number",
+   "op": "adopt_candidate",
+   "ok": false,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "offset_mm": 1
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate scale a word",
+   "op": "adopt_candidate",
+   "ok": false,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "scale": "big"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "adopt_candidate scale not finite",
+   "op": "adopt_candidate",
+   "ok": true,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a2",
+     "scale": "inf"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "placement_mm.x must be a finite number"
+  },
+  {
+   "n": "adopt_candidate by an agent on approved art",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 6,
+       "frame_id": "000000000044",
+       "candidates": [
+        {
+         "id": "cd_p6",
+         "asset": "$A1",
+         "px": [
+          40,
+          30
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 6,
+       "frame_id": "000000000044",
+       "candidate_id": "cd_p6"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "adopt_candidate other art takes a finished page back to ink",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "advance",
+       "page": 1,
+       "to": "finish"
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_a2"
+      }
+     ],
+     "agent": "human:作者"
+    }
+   ]
+  },
+  {
+   "n": "adopt_candidate the same again",
+   "op": "adopt_candidate",
+   "ok": true,
+   "ops": [
+    {
+     "op": "adopt_candidate",
+     "page": 1,
+     "frame_id": "000000000026",
+     "candidate_id": "cd_a1"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "adopt_candidate on a slanted panel",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "approve",
+       "gate": "name",
+       "page": 3
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 3,
+       "frame_id": "000000000034",
+       "candidates": [
+        {
+         "id": "cd_s",
+         "asset": "$A2",
+         "px": [
+          30,
+          40
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 3,
+       "frame_id": "000000000034",
+       "candidate_id": "cd_s",
+       "clip_to": "bleed"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "unadopt back to the one before",
+   "op": "unadopt",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_a2"
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "unadopt",
+       "page": 1,
+       "frame_id": "000000000026"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "unadopt the only one",
+   "op": "unadopt",
+   "ok": true,
+   "ops": [
+    {
+     "op": "unadopt",
+     "page": 1,
+     "frame_id": "000000000026"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "unadopt nothing",
+   "op": "unadopt",
+   "ok": false,
+   "ops": [
+    {
+     "op": "unadopt",
+     "page": 1,
+     "frame_id": "000000000026",
+     "to": "bg"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "unadopt the old placed art",
+   "op": "unadopt",
+   "ok": true,
+   "ops": [
+    {
+     "op": "unadopt",
+     "page": 1,
+     "frame_id": "000000000028"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "unadopt history with a missing candidate",
+   "op": "unadopt",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_a2"
+      },
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_a1"
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "unadopt",
+       "page": 1,
+       "frame_id": "000000000026"
+      },
+      {
+       "op": "unadopt",
+       "page": 1,
+       "frame_id": "000000000026"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "set_placement contain",
+   "op": "set_placement",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_placement",
+     "page": 1,
+     "frame_id": "000000000026",
+     "fit": "contain"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_placement offset and scale",
+   "op": "set_placement",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_placement",
+     "page": 1,
+     "frame_id": "000000000026",
+     "offset_mm": [
+      3,
+      -4
+     ],
+     "scale": 1.25
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_placement clip bleed",
+   "op": "set_placement",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_placement",
+     "page": 1,
+     "frame_id": "000000000026",
+     "clip_to": "bleed"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_placement nothing adopted",
+   "op": "set_placement",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_placement",
+     "page": 1,
+     "frame_id": "000000000026",
+     "to": "bg"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_placement of a picture with no candidate",
+   "op": "set_placement",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_placement",
+     "page": 1,
+     "frame_id": "000000000028",
+     "fit": "stretch"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_placement of a picture with no candidate, scaled",
+   "op": "set_placement",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_placement",
+     "page": 1,
+     "frame_id": "000000000028",
+     "scale": 0.5,
+     "offset_mm": [
+      2,
+      2
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_placement a region not a box",
+   "op": "set_placement",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "add_region",
+       "page": 1,
+       "frame_id": "000000000026",
+       "region": {
+        "kind": "x",
+        "id": "rg_odd",
+        "rect_mm": [
+         1,
+         2,
+         3
+        ]
+       }
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "set_placement",
+       "page": 1,
+       "frame_id": "000000000026",
+       "scale": 0.5
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "set_placement region box of words",
+   "op": "set_placement",
+   "ok": false,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "add_region",
+       "page": 1,
+       "frame_id": "000000000026",
+       "region": {
+        "kind": "x",
+        "id": "rg_odd",
+        "rect_mm": [
+         1,
+         2,
+         3,
+         "x"
+        ]
+       }
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "set_placement",
+       "page": 1,
+       "frame_id": "000000000026",
+       "scale": 0.5
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "set_placement scale not finite",
+   "op": "set_placement",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_placement",
+     "page": 1,
+     "frame_id": "000000000026",
+     "scale": "nan"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "placement_mm.x must be a finite number"
+  },
+  {
+   "n": "place_asset on a page",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$A1"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset in a panel",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 1,
+     "asset": "$A2",
+     "frame_id": "000000000028",
+     "fit": "contain",
+     "title": "絵"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset at a place",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$A3",
+     "placement_mm": [
+      10,
+      "20",
+      30.5,
+      40
+     ],
+     "to": "name"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset at a place clipped",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 1,
+     "asset": "$A3",
+     "placement_mm": [
+      10,
+      20,
+      30,
+      40
+     ],
+     "frame_id": "000000000028",
+     "clip_to": "frame"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset bg",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 1,
+     "asset": "$A1",
+     "to": "bg",
+     "clip_to": "bleed",
+     "frame_id": "000000000026"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset draft",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 2,
+     "asset": "$G1",
+     "to": "draft"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset bad to",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$A1",
+     "to": "ink"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset a path",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "/tmp/a.png"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset none",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset unknown",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset a prefix of a digest",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "sha256:22"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset a JPEG",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$J1"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset a PNG cut short",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$CUT"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset not a picture",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$BAD"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset a broken header",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$CRC"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset a decompression bomb",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$BOMB"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset box of three",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$A1",
+     "placement_mm": [
+      1,
+      2,
+      3
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset box not finite",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$A1",
+     "placement_mm": [
+      1,
+      2,
+      "inf",
+      4
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "placement_mm.width must be a finite number"
+  },
+  {
+   "n": "place_asset not a leaf",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 1,
+     "asset": "$A1",
+     "frame_id": "000000000025"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset strict before the name",
+   "op": "place_asset",
+   "ok": false,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_meta",
+       "strict_gates": true
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "place_asset",
+       "page": 2,
+       "asset": "$A1"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "place_asset strict draft before the name",
+   "op": "place_asset",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_meta",
+       "strict_gates": true
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "place_asset",
+       "page": 2,
+       "asset": "$A1",
+       "to": "draft"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "place_asset on the cover's bleed panel",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 7,
+     "asset": "$A2",
+     "frame_id": "00000000004e",
+     "clip_to": "bleed"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset on a locked page",
+   "op": "place_asset",
+   "ok": false,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 5,
+     "asset": "$A1"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_finish",
+   "op": "set_finish",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_finish",
+     "page": 1,
+     "frame_id": "000000000026",
+     "finish": {
+      "black": 30,
+      "screen": "fm"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_finish null",
+   "op": "set_finish",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_finish",
+     "page": 1,
+     "frame_id": "000000000026"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_finish no layer",
+   "op": "set_finish",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_finish",
+     "page": 1,
+     "frame_id": "000000000028",
+     "finish": {
+      "black": 1
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_finish unknown frame",
+   "op": "set_finish",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_finish",
+     "page": 1,
+     "frame_id": "x",
+     "finish": {}
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_layout on a blank page",
+   "op": "set_layout",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 4,
+     "tree": {
+      "rect_mm": [
+       20,
+       25,
+       160,
+       230
+      ],
+      "axis": "horizontal",
+      "children": [
+       {
+        "rect_mm": [
+         20,
+         25,
+         160,
+         100
+        ],
+        "bleed": true,
+        "border_mm": 1.2,
+        "corner_mm": 2
+       },
+       {
+        "rect_mm": [
+         "20",
+         130,
+         160,
+         125.555
+        ],
+        "axis": "vertical",
+        "split": {
+         "a": 0.5
+        },
+        "children": [
+         {
+          "rect_mm": [
+           20,
+           130,
+           80,
+           125
+          ],
+          "poly": [
+           [
+            20,
+            130
+           ],
+           [
+            "100",
+            130
+           ],
+           [
+            100,
+            255
+           ]
+          ],
+          "custom": 1,
+          "clip": 0
+         },
+         {
+          "rect_mm": [
+           102,
+           130,
+           78,
+           125
+          ],
+          "curves": [
+           1,
+           "2",
+           0,
+           0
+          ],
+          "line": {
+           "kind": "double"
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_layout over panels without force",
+   "op": "set_layout",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 1,
+     "tree": {
+      "rect_mm": [
+       20,
+       25,
+       160,
+       230
+      ],
+      "axis": "horizontal",
+      "children": [
+       {
+        "rect_mm": [
+         20,
+         25,
+         160,
+         100
+        ],
+        "bleed": true,
+        "border_mm": 1.2,
+        "corner_mm": 2
+       },
+       {
+        "rect_mm": [
+         "20",
+         130,
+         160,
+         125.555
+        ],
+        "axis": "vertical",
+        "split": {
+         "a": 0.5
+        },
+        "children": [
+         {
+          "rect_mm": [
+           20,
+           130,
+           80,
+           125
+          ],
+          "poly": [
+           [
+            20,
+            130
+           ],
+           [
+            "100",
+            130
+           ],
+           [
+            100,
+            255
+           ]
+          ],
+          "custom": 1,
+          "clip": 0
+         },
+         {
+          "rect_mm": [
+           102,
+           130,
+           78,
+           125
+          ],
+          "curves": [
+           1,
+           "2",
+           0,
+           0
+          ],
+          "line": {
+           "kind": "double"
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_layout over panels with force",
+   "op": "set_layout",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 1,
+     "tree": {
+      "rect_mm": [
+       20,
+       25,
+       160,
+       230
+      ],
+      "axis": "horizontal",
+      "children": [
+       {
+        "rect_mm": [
+         20,
+         25,
+         160,
+         100
+        ],
+        "bleed": true,
+        "border_mm": 1.2,
+        "corner_mm": 2
+       },
+       {
+        "rect_mm": [
+         "20",
+         130,
+         160,
+         125.555
+        ],
+        "axis": "vertical",
+        "split": {
+         "a": 0.5
+        },
+        "children": [
+         {
+          "rect_mm": [
+           20,
+           130,
+           80,
+           125
+          ],
+          "poly": [
+           [
+            20,
+            130
+           ],
+           [
+            "100",
+            130
+           ],
+           [
+            100,
+            255
+           ]
+          ],
+          "custom": 1,
+          "clip": 0
+         },
+         {
+          "rect_mm": [
+           102,
+           130,
+           78,
+           125
+          ],
+          "curves": [
+           1,
+           "2",
+           0,
+           0
+          ],
+          "line": {
+           "kind": "double"
+          }
+         }
+        ]
+       }
+      ]
+     },
+     "force": true
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_layout no rect",
+   "op": "set_layout",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 4,
+     "tree": {
+      "children": []
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_layout no tree",
+   "op": "set_layout",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 4
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_layout children without axis",
+   "op": "set_layout",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 4,
+     "tree": {
+      "rect_mm": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "children": [
+       {
+        "rect_mm": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_layout free without children",
+   "op": "set_layout",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 4,
+     "tree": {
+      "rect_mm": [
+       0,
+       0,
+       100,
+       100
+      ],
+      "axis": "free"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_layout a child without rect",
+   "op": "set_layout",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 4,
+     "tree": {
+      "rect_mm": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "axis": "free",
+      "children": [
+       {}
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_layout rect of three",
+   "op": "set_layout",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 4,
+     "tree": {
+      "rect_mm": [
+       0,
+       0,
+       1
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_layout rect not finite",
+   "op": "set_layout",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_layout",
+     "page": 4,
+     "tree": {
+      "rect_mm": [
+       0,
+       0,
+       "inf",
+       1
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "rect_mm.width must be a finite number"
+  },
+  {
+   "n": "set_layout strict on an approved name by an agent",
+   "op": "set_layout",
+   "ok": false,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_meta",
+       "strict_gates": true
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "set_layout",
+       "page": 6,
+       "tree": {
+        "rect_mm": [
+         20,
+         25,
+         160,
+         230
+        ],
+        "axis": "horizontal",
+        "children": [
+         {
+          "rect_mm": [
+           20,
+           25,
+           160,
+           100
+          ],
+          "bleed": true,
+          "border_mm": 1.2,
+          "corner_mm": 2
+         },
+         {
+          "rect_mm": [
+           "20",
+           130,
+           160,
+           125.555
+          ],
+          "axis": "vertical",
+          "split": {
+           "a": 0.5
+          },
+          "children": [
+           {
+            "rect_mm": [
+             20,
+             130,
+             80,
+             125
+            ],
+            "poly": [
+             [
+              20,
+              130
+             ],
+             [
+              "100",
+              130
+             ],
+             [
+              100,
+              255
+             ]
+            ],
+            "custom": 1,
+            "clip": 0
+           },
+           {
+            "rect_mm": [
+             102,
+             130,
+             78,
+             125
+            ],
+            "curves": [
+             1,
+             "2",
+             0,
+             0
+            ],
+            "line": {
+             "kind": "double"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "force": true
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "set_layout strict by a person",
+   "op": "set_layout",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_meta",
+       "strict_gates": true
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "set_layout",
+       "page": 6,
+       "tree": {
+        "rect_mm": [
+         20,
+         25,
+         160,
+         230
+        ],
+        "axis": "horizontal",
+        "children": [
+         {
+          "rect_mm": [
+           20,
+           25,
+           160,
+           100
+          ],
+          "bleed": true,
+          "border_mm": 1.2,
+          "corner_mm": 2
+         },
+         {
+          "rect_mm": [
+           "20",
+           130,
+           160,
+           125.555
+          ],
+          "axis": "vertical",
+          "split": {
+           "a": 0.5
+          },
+          "children": [
+           {
+            "rect_mm": [
+             20,
+             130,
+             80,
+             125
+            ],
+            "poly": [
+             [
+              20,
+              130
+             ],
+             [
+              "100",
+              130
+             ],
+             [
+              100,
+              255
+             ]
+            ],
+            "custom": 1,
+            "clip": 0
+           },
+           {
+            "rect_mm": [
+             102,
+             130,
+             78,
+             125
+            ],
+            "curves": [
+             1,
+             "2",
+             0,
+             0
+            ],
+            "line": {
+             "kind": "double"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       "force": true
+      }
+     ],
+     "agent": "human:作者"
+    }
+   ]
+  },
+  {
+   "n": "propose layout replaces an open one",
+   "op": "propose",
+   "ok": true,
+   "ops": [
+    {
+     "op": "propose",
+     "proposal": {
+      "kind": "layout",
+      "page": 2,
+      "tree": {}
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "propose the same again",
+   "op": "propose",
+   "ok": true,
+   "ops": [
+    {
+     "op": "propose",
+     "proposal": {
+      "id": "pr_layout",
+      "kind": "layout",
+      "page": 2
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "propose bad kind",
+   "op": "propose",
+   "ok": false,
+   "ops": [
+    {
+     "op": "propose",
+     "proposal": {
+      "kind": "art",
+      "page": 2
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "propose no page",
+   "op": "propose",
+   "ok": false,
+   "ops": [
+    {
+     "op": "propose",
+     "proposal": {
+      "kind": "lines"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "propose by page_id",
+   "op": "propose",
+   "ok": true,
+   "ops": [
+    {
+     "op": "propose",
+     "proposal": {
+      "id": "pr_x",
+      "kind": "lines",
+      "page_id": "pg_000000000013"
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "propose again after a rejection",
+   "op": "propose",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "resolve_proposal",
+       "id": "pr_layout",
+       "status": "rejected",
+       "note": "違う"
+      }
+     ],
+     "agent": "human:作者"
+    },
+    {
+     "ops": [
+      {
+       "op": "propose",
+       "proposal": {
+        "id": "pr_layout",
+        "kind": "layout",
+        "page": 2
+       }
+      }
+     ],
+     "agent": "ai:other"
+    }
+   ]
+  },
+  {
+   "n": "resolve_proposal by an agent",
+   "op": "resolve_proposal",
+   "ok": false,
+   "ops": [
+    {
+     "op": "resolve_proposal",
+     "id": "pr_layout",
+     "status": "accepted"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "resolve_proposal accepted",
+   "op": "resolve_proposal",
+   "ok": true,
+   "ops": [
+    {
+     "op": "resolve_proposal",
+     "id": "pr_lines",
+     "status": "accepted"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "resolve_proposal bad status",
+   "op": "resolve_proposal",
+   "ok": false,
+   "ops": [
+    {
+     "op": "resolve_proposal",
+     "id": "pr_lines",
+     "status": "maybe"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "resolve_proposal unknown",
+   "op": "resolve_proposal",
+   "ok": false,
+   "ops": [
+    {
+     "op": "resolve_proposal",
+     "id": "pr_x",
+     "status": "accepted"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_bible plot",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "plot": 12
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_bible characters",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-a"
+      },
+      {
+       "name": "b"
+      }
+     ],
+     "constraints": [
+      "x",
+      1,
+      null
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_bible characters with a text",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-a"
+      },
+      "b"
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "each of the bible's characters must be an object, not 'b'"
+  },
+  {
+   "n": "set_bible characters a dict",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": {
+      "c-a": {}
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "each of the bible's characters must be an object, not 'c-a'"
+  },
+  {
+   "n": "set_bible characters as pairs",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      [
+       [
+        "id",
+        "c-a"
+       ]
+      ]
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "each of the bible's characters must be an object, not [['id', 'c-a']]"
+  },
+  {
+   "n": "set_bible characters null",
+   "op": "set_bible",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": null
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_bible constraints a text",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "constraints": "ab"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_bible then a character op",
+   "op": "set_bible",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      "c-a"
+     ]
+    },
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-b"
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "ops[0] set_bible: each of the bible's characters must be an object, not 'c-a'"
+  },
+  {
+   "n": "set_bible on a locked page's book",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "plot": "p",
+     "page": 5
+    }
+   ],
+   "agent": "ai:hermes"
+  }
+ ]
+}

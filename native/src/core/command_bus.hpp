@@ -188,7 +188,7 @@ void register_anim_ops(OpRegistry& registry);
 void register_vector_ops(OpRegistry& registry);
 
 // Register every op of core: the book ops, the frame, page, stroke and layer ops, the ruler and animation ops, the line
-// ops, the book and page ops of M4 (what builtin() holds).
+// ops, the book and page ops of M4, the studio ops of M5 (core/studio.hpp; what builtin() holds).
 void register_core_ops(OpRegistry& registry);
 
 }  // namespace genko::core

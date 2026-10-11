@@ -45,6 +45,8 @@ genko_library(genko_render
     materials.cpp
     covers.cpp
     bookpages.cpp
+    placed.cpp
+    screentone.cpp
     text/fonts.cpp
     text/tategaki.cpp
     text/lettering.cpp

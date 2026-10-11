@@ -31,6 +31,7 @@
 #include "render/png.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/memo.hpp"
+#include "storage/asset_store.hpp"
 
 namespace render = genko::render;
 using genko::core::Document;
@@ -271,8 +272,8 @@ private slots:
         QTest::addColumn<QString>("mode");
         // (tones, effect lines and screens are drawn since M3-B, the 3D guides since M3-C, a page's animation since
         // M3-③: anim_is_drawn, lines and their balloons since M4: balloons_are_drawn, a jacket's folds since M4②:
-        // folds_are_drawn)
-        for (const char* what : {"placed"}) QTest::newRow(what) << QString(what) << QString("print");
+        // folds_are_drawn, placed pictures since M5①: placed_is_drawn; a placed WebP is not opened yet)
+        for (const char* what : {"image_format"}) QTest::newRow(what) << QString(what) << QString("print");
     }
 
     void not_yet_ported() {
@@ -283,10 +284,16 @@ private slots:
         const std::string w = what.toStdString();
         if (w == "nombre") page.numero = true;
         if (w == "anim") page.extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
-        if (w == "placed") {
+        QTemporaryDir assets;
+        if (w == "image_format") {  // (a placed picture whose asset is a WebP, 2×2, as Pillow writes one)
+            QVERIFY(assets.isValid());
+            doc.asset_dir = std::filesystem::path(assets.path().toStdString());
             Layer placed;
             placed.id = genko::core::new_id();
             placed.kind = LayerKind::Placed;
+            placed.asset = genko::storage::AssetStore(*doc.asset_dir)
+                               .put_bytes(genko::core::a2b_base64("UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA="), ".png");
+            placed.placement_mm = genko::core::Rect{Num(5), Num(5), Num(30), Num(30)};
             page.layers.push_back(placed);
         }
         render::RenderOptions options;

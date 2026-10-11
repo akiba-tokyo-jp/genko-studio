@@ -53,12 +53,14 @@
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "app/wording.hpp"
+#include "core/base64.hpp"
 #include "core/pynum.hpp"
 #include "formats/checks.hpp"
 #include "formats/export.hpp"
 #include "gui_support.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "storage/asset_store.hpp"
 
 using namespace genko;
 using core::Json;
@@ -1154,12 +1156,18 @@ private slots:
     // preview, and its own 印刷 button printing nothing, would say nothing); a sheet that cannot be drawn at the
     // printer's resolution, said after the preview has tried it.
     void printPreviewSaysWhatItCannotDraw() {
+        // (a picture placed on page 2 whose asset is a WebP, 2×2 as Pillow writes one: Python draws it, this build does
+        // not open a WebP yet. Placed pictures themselves are drawn since M5①.)
+        const std::string webp = genko::core::a2b_base64("UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA=");
         core::Document book = gui_test::new_doc(2);
         core::Layer placed;
         placed.id = "placed000001";
         placed.kind = core::LayerKind::Placed;
+        placed.asset = genko::storage::AssetStore::ref(webp);
+        placed.placement_mm = core::Rect{core::Num(10), core::Num(10), core::Num(40), core::Num(40)};
         book.edit_page(1).layers.push_back(placed);
         Studio s(book);
+        (void)genko::storage::AssetStore(s.path).put_bytes(webp, ".png");
         bool seen = false;
         s.on_print = [&](app::PrintDialog* d) {
             seen = true;

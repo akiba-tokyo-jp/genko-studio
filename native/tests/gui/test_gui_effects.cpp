@@ -702,6 +702,24 @@ private slots:
         QCOMPARE(error(std::string("the picture is too large (at most 64 MB): a.png")), QStringLiteral("画像ファイルが大きすぎます（64 MB まで）"));
     }
 
+    void studioRefusalsInThePersonsWords() {
+        // (M5: the studio's refusals in the C++ build only, SPEC COMP-01a, as the person reads them)
+        using app::wording::error;
+        QCOMPARE(error(std::string("ops[0] place_asset: placement_mm.x must be a finite number")),
+                 QStringLiteral("画像の置き場所は、ふつうの数で指定します（無限大や NaN は使えません）"));
+        QCOMPARE(error(std::string("ops[0] import_candidates: face_box01 must be a finite number")),
+                 QStringLiteral("顔の位置は、ふつうの数で指定します（無限大や NaN は使えません）"));
+        QCOMPARE(error(std::string("ops[0] set_layout: rect_mm.width must be a finite number")),
+                 QStringLiteral("コマや領域の位置と大きさは、ふつうの数で指定します（無限大や NaN は使えません）"));
+        QCOMPARE(error(std::string("ops[0] set_bible: each of the bible's characters must be an object, not 'c-a'")),
+                 QStringLiteral("設定資料の登場人物は、一人ずつ項目のまとまり（オブジェクト）で書きます"));
+        QCOMPARE(error(std::string("ops[0] place_asset: the asset's picture cannot be read (the file is too large)")),
+                 QStringLiteral("素材の画像を読み込めません（壊れているか、読めない形式の画像です）"));
+        QCOMPARE(error(std::string("the finish's line_threshold is not a number")),
+                 QStringLiteral("仕上げの線とみなす濃さは数で指定します（この絵は描けません）"));
+        QCOMPARE(app::wording::unported_element(QStringLiteral("image_format")), QStringLiteral("まだ読めない形式の画像（TIFF、WebP、Lab カラーの PSD）"));
+    }
+
     void bookRefusalsInThePersonsWords() {
         // (set_spread's, set_page_spec's and a newer book's refusals, as the person reads them)
         using app::wording::error;

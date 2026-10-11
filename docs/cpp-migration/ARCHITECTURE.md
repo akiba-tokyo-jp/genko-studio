@@ -68,6 +68,7 @@ tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開
 - op は名前で登録する（`OpRegistry`）。各 op は引数検証・権限判定・ページロック・`strict_gates`・承認ゲートを Python と同じ順で行う。人間専用の op を AI に開かない（`can_approve`：`human:` 接頭辞、または旧来の無名呼出し `genko`）。
 - `dry_run` は検証と結果の予測だけで保存しない。`for_pages` の展開、`area` の解決は Python と同じ規則。
 - op の一覧（引数の説明文を含む）は `docs/ops.schema.json` と `genko schema` の出力を一致させる。
+- スタジオの op（M5：`set_studio`・`approve`・`adopt_candidate`・`place_asset` など 46 種）は、ほかの op と同じく core の op として `core/ops_studio.cpp` に登録する（Python の `apply_ops` が `studio_ops` へ渡すのと同じ位置で、同じ検査順）。素材の画像の大きさだけは画素の読込が要るので、`render::ops_registry()` が `core::StudioHooks`（`render::asset_picture_size`）を差し込んで登録し直す（core だけのバスは `not_yet_ported`）。`studio/`（`genko_studio`）は op 以外のスタジオの部品：同席（`studio/presence.json`）・道具の記録（`studio/logs/tools.jsonl`）・作業の確保（`studio/claims/`）・依頼フォルダー（`studio/requests/`）・画像生成の道具の一覧（設定フォルダーの `tools.json`）・入力スキーマと jsonschema_lite・原稿から読む state。配置画像の描画（`_placed_raster`・`_finish_placed`）は `render/placed.cpp` と `render/screentone.cpp`。
 
 ## 6. 保存（v4）と履歴
 

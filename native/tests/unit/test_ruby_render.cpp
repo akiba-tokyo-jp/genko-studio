@@ -617,7 +617,7 @@ private slots:
              "style": {"tcy": true}, "style_runs": [["AI", {"tcy": true}]]},
             {"op": "add_line", "page": 1, "id": "p1d", "text": "大きな声で約束する", "x_mm": 20, "y_mm": 20, "w_mm": 35, "h_mm": 70, "wrap": "vertical",
              "style_runs": [["大きな", {"scale": 1.4}], ["声", {"bold": true, "rgb": [200, 30, 30]}]], "emphasis_runs": ["約束"],
-             "ruby_spans": [{"start": 4, "end": 5, "ruby": "こえ"}, {"start": 6, "end": 8, "ruby": "やくそく"}]},
+             "ruby_spans": [{"start": 3, "end": 4, "ruby": "こえ"}, {"start": 5, "end": 7, "ruby": "やくそく"}]},
             {"op": "add_line", "page": 2, "id": "p2a", "text": "葛\udb40\udd00飾区と辻\ufe00堂へ", "x_mm": 30, "y_mm": 30, "w_mm": 90, "h_mm": 25, "wrap": "horizontal",
              "balloon": "box", "ruby_spans": [{"start": 0, "end": 3, "ruby": "かつしかく", "font": "mincho", "align": "head", "gap_mm": 0.5},
              {"start": 4, "end": 6, "ruby": "つじどう", "align": "tail"}]},
@@ -649,6 +649,8 @@ private slots:
         const Json story = story_of(loaded.document, tmp_);
         QCOMPARE(story[0]["text"].get<std::string>(), std::string("東京と東京"));
         QCOMPARE(story[0]["ruby_spans"][0]["start"], Json(3));
+        QCOMPARE(story[3]["ruby_spans"][0]["base"], Json("声"));  // (each reading over its own word)
+        QCOMPARE(story[3]["ruby_spans"][1]["base"], Json("約束"));
         QCOMPARE(story[4]["ruby_spans"][0]["base"], Json("葛\xf3\xa0\x84\x80飾区"));
         QCOMPARE(story[4]["ruby_spans"][1]["base"], Json("辻\xef\xb8\x80堂"));
         const auto out = genko::storage::path_from_utf8(tmp_.path().toStdString() + "/f4-out");

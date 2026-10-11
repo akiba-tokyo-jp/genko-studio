@@ -179,7 +179,7 @@ std::string first_difference(const std::string& a, const std::string& b, int wid
 }
 
 // The image-way PSD of each page of the PSD book at 150 dpi (imageWayIsAsBefore).
-const QString kImageWay[4] = {QStringLiteral("1b6d11a43f8606e655dfa18495011edda404e609290241b9f7fa1e91914aa7bd"),
+const QString kImageWay[4] = {QStringLiteral("3bb689e02a4ee5833f89b3eefc0c4894adf821bdc7ff004313438efca8f3c2ba"),
                               QStringLiteral("1f1457dfff7b5c7782f9d8532a37d242d9385a714dd26f97dd0199dd1cc99ca4"),
                               QStringLiteral("f7d33547e0049c31cfd8ec16e5128a01dbca3a7aeecbb42155dfced6fcda7af7"),
                               QStringLiteral("5a8b99f44a399f5542db7ced98d789069da421975dcb7f81097110d5bb3fe665")};
@@ -408,7 +408,8 @@ private slots:
     // The image way (the default) is Python's PSD, unchanged by PSD-01: the fixture book's pages are the bytes the build
     // before the editable PSD wrote (their sha256, below: written by e146b96's genko, whose image way test_contract_export
     // holds to Python's, and the same as Python's own for the book without what only this build has —
-    // test_contract_psd_text's imageWayIsPythons), with no text layer and no group.
+    // test_contract_psd_text's imageWayIsPythons; page 1's since M5①, where the book's「大きな声で約束する」has its rubies
+    // on「声」and「約束」, this build's, the same as Python's there), with no text layer and no group.
     void imageWayIsAsBefore() {
         const auto& files = image_way();
         QCOMPARE(files.size(), std::size_t{4});
@@ -595,6 +596,17 @@ private slots:
         QVERIFY((t.style_at(4)->fill == std::array<int, 3>{10, 10, 10}));
         QVERIFY(text_of(p1, "ルビ「こえ」 #p1d-r0").text == u"こえ");
         QVERIFY(text_of(p1, "ルビ「やくそく」 #p1d-r1").text == u"やくそく");
+        // each reading over its own word: こえ over 「声」, やくそく over 「約束」 (graphemes [3, 4) and [5, 7))
+        const auto& spans_d = line_of(doc, "p1d").ruby_spans;
+        QVERIFY(spans_d.has_value() && spans_d->size() == 2);
+        QCOMPARE((*spans_d)[0].base, std::string("声"));
+        QCOMPARE((*spans_d)[1].base, std::string("約束"));
+        const auto p1d = places_of(doc, "p1d");
+        QCOMPARE(p1d.places.size(), std::size_t{2});
+        const Image body_d = p1.file.image(*p1.named("本文 #p1d"));
+        QVERIFY(ink_in(body_d, p1d.places[0].base) > 20);
+        QVERIFY(ink_in(body_d, p1d.places[1].base) > 20);
+        QVERIFY(p1d.places[1].base.y0 > p1d.places[0].base.y1);  // (「約束」 below 「声」 in the column)
         // a line of Python's (ruby_runs): its reading a layer too; the spacing and the columns' distance
         t = text_of(p1, "本文 #p1e");
         const std::int64_t em_e = em_of(doc, "p1e");

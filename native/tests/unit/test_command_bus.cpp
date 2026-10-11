@@ -563,8 +563,14 @@ private slots:
             QCOMPARE(error.code() + ": " + error.what(),
                      std::string("not_yet_ported: ops[0] fill: fill is not in the C++ build yet"));
         }
+        // the studio's ops are core's since M5① (Python's words; a person's approval refused for an agent)
         QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1}, {"op": "approve", "page": 1}])")),
-                 std::string("not_yet_ported: ops[1] approve: approve is not in the C++ build yet"));
+                 std::string("apply: ops[1] approve: gate must be one of ('bible', 'script', 'sheet', 'name', 'art', 'export') ‖ approve "
+                             "takes {gate: bible|script|sheet|name|art|export, page: int?, character_id: str?, candidate_id: str?, "
+                             "face_asset: str?}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1}, {"op": "approve", "gate": "name", "page": 1}])"), "ai:hermes"),
+                 std::string("apply: ops[1] approve: approve needs a person (actor ai:hermes cannot approve) ‖ approve takes {gate: "
+                             "bible|script|sheet|name|art|export, page: int?, character_id: str?, candidate_id: str?, face_asset: str?}"));
         QCOMPARE(error_of(doc, ops(R"([{"op": "for_pages", "pages": "all", "ops": []}])")),
                  std::string("apply: ops[0] for_pages: ops is the list of ops to run on each page"));
         // undo is an op only on its own (Python's _apply_one does not know it)

@@ -88,9 +88,8 @@ class TestContractRender : public QObject {
             };
             add(page.index);
             if (page.onion_from) add(*page.onion_from);
-        } else {
-            out = {"placed", "finish"};  // (lines and balloons are drawn since M4①, a jacket's folds since M4②)
-        }
+        }  // (else nothing: lines and balloons are drawn since M4①, a jacket's folds since M4②, placed pictures and their
+           // finish since M5①)
         out.erase("onion");
         return out;
     }

@@ -502,6 +502,39 @@ bool unported_image_format(std::string_view bytes) {
     return other_image_format(bytes);  // (Pillow would open these; the remaining formats are not ported yet)
 }
 
+Size picture_size(std::string_view bytes) {
+    if (!png_signature(bytes)) return open_image(bytes, kPillowOpenLimits).size();
+    ReadState state;
+    state.data = reinterpret_cast<const unsigned char*>(bytes.data());
+    state.size = bytes.size();
+    ReadGuard guard;
+    guard.png = png_create_read_struct(PNG_LIBPNG_VER_STRING, &state, on_error, on_warning);
+    if (guard.png == nullptr) throw core::Error("memory", "cannot read PNG");
+    guard.info = png_create_info_struct(guard.png);
+    if (guard.info == nullptr) throw core::Error("memory", "cannot read PNG");
+    png_set_read_fn(guard.png, &state, on_read);
+    png_set_user_limits(guard.png, 0x7fffffffU, 0x7fffffffU);
+    png_set_benign_errors(guard.png, 1);
+#ifdef PNG_SKIP_sRGB_CHECK_PROFILE
+    png_set_option(guard.png, PNG_SKIP_sRGB_CHECK_PROFILE, PNG_OPTION_ON);
+#endif
+    Header h;
+    if (!read_header(guard.png, guard.info, &h)) unidentified(state);
+    const char* mode = nullptr;
+    const char* rawmode = nullptr;
+    if (!mode_of(h.bit_depth, h.color_type, &mode, &rawmode)) {
+        throw core::Error("unidentified_image", "cannot identify image file (PNG bit depth " + std::to_string(h.bit_depth) +
+                                                    " for colour type " + std::to_string(h.color_type) + ")");
+    }
+    const std::int64_t pixels = static_cast<std::int64_t>(h.width) * static_cast<std::int64_t>(h.height);
+    if (pixels > kPillowOpenLimits.max_pixels) {
+        throw core::Error("image_too_large", "Image size (" + std::to_string(pixels) + " pixels) exceeds limit of " +
+                                                 std::to_string(kPillowOpenLimits.max_pixels) +
+                                                 " pixels, could be decompression bomb DOS attack.");
+    }
+    return Size{static_cast<int>(h.width), static_cast<int>(h.height)};
+}
+
 Image open_image(std::string_view bytes, const PngLimits& limits) {
     if (png_signature(bytes)) return read_png(bytes, limits);
     if (bytes.substr(0, 3) == "\xff\xd8\xff") return read_jpeg(bytes, limits);

@@ -1,6 +1,7 @@
 #include "core/placement.hpp"
 
 #include <cmath>
+#include <tuple>
 #include <utility>
 
 #include "core/frames.hpp"
@@ -118,6 +119,31 @@ Rect clip_box(const Page& page, const Frame* frame, std::string_view clip_to) {
     const Num x1 = edges.right ? bleed.x + bleed.width : r.x + r.width;
     const Num y1 = edges.bottom ? bleed.y + bleed.height : r.y + r.height;
     return Rect{x0, y0, x1 - x0, y1 - y0};
+}
+
+Rect default_target(const Page& page, const Frame& frame, std::string_view clip_to, double pad_mm) {
+    const Rect box = clip_box(page, &frame, clip_to);
+    return Rect{Num(box.x.value() - pad_mm), Num(box.y.value() - pad_mm), Num(box.width.value() + 2 * pad_mm),
+                Num(box.height.value() + 2 * pad_mm)};
+}
+
+Rect fit_rect(const Rect& target, std::int64_t image_w, std::int64_t image_h, std::string_view fit, double offset_x,
+              double offset_y, double scale) {
+    // (w, h as Python holds them: the target's own number, or a float)
+    Num w = target.width;
+    Num h = target.height;
+    if (!(fit == "stretch" || image_w <= 0 || image_h <= 0)) {
+        const double ratio = static_cast<double>(image_w) / static_cast<double>(image_h);
+        const std::pair<Num, Num> by_width{target.width, Num(target.width.value() / ratio)};
+        const std::pair<Num, Num> by_height{Num(target.height.value() * ratio), target.height};
+        const bool width_first = fit == "contain" ? by_width.second <= target.height : by_width.second >= target.height;
+        std::tie(w, h) = width_first ? by_width : by_height;
+    }
+    const double ws = w.value() * scale;
+    const double hs = h.value() * scale;
+    const double x = target.x.value() + (target.width.value() - ws) / 2 + offset_x;
+    const double y = target.y.value() + (target.height.value() - hs) / 2 + offset_y;
+    return Rect{Num(py_round(x, 3)), Num(py_round(y, 3)), Num(py_round(ws, 3)), Num(py_round(hs, 3))};
 }
 
 }  // namespace genko::core

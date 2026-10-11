@@ -76,6 +76,9 @@ genko_library(genko_core
     ruby.cpp
     ops_lines.cpp
     ops_bookpages.cpp
+    clock.cpp
+    stylecat.cpp
+    ops_studio.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
   PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)

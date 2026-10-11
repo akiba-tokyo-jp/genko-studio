@@ -14,6 +14,7 @@
 #include "core/color_raster.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/studio.hpp"
 
 namespace genko::core {
 
@@ -271,6 +272,7 @@ void register_core_ops(OpRegistry& registry) {
     register_arrange_ops(registry);
     register_line_ops(registry);
     register_bookpage_ops(registry);
+    register_studio_ops(registry);
 }
 
 const OpRegistry& OpRegistry::builtin() {

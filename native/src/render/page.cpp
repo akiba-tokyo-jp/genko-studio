@@ -31,6 +31,7 @@
 #include "render/effects.hpp"
 #include "render/page_internal.hpp"
 #include "render/paper.hpp"
+#include "render/placed.hpp"
 #include "render/png.hpp"
 #include "render/prims.hpp"
 #include "render/text/balloons.hpp"
@@ -634,7 +635,11 @@ Image draw_effects(const Ctx& ctx, const Image& image, const Box& area) {
 std::optional<Image> layer_pixels(const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel_mask, bool rough) {
     std::optional<Image> raster;
     if (layer.kind == LayerKind::Placed) {
-        skip_unported(ctx, "placed");  // (left out: as if it had no picture)
+        try {
+            raster = placed_raster(layer, *ctx.page, ctx.episode, ctx.size, ctx.dpi, ctx.mode, ctx.finish, ctx.dots, area);
+        } catch (const NotYetPorted& e) {  // (a picture this build cannot open yet: left out as if it had none, and said)
+            skip_unported(ctx, e.element());
+        }
     } else if (layer.color_raster) {
         if (is_tone(layer)) throw NotYetPorted("high_precision_tone");
         raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), ctx.size, area);
@@ -1087,17 +1092,18 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         const Json* source_kind = layer.source ? get(*layer.source, "kind") : nullptr;
         if (ctx.finish && (print || mode == "proof") && source_kind != nullptr && *source_kind == "psd" &&
             !truthy_json(layer.screen)) {
-            // (a picture from a painting app on a monochrome page is finished like placed art)
-            const bool whole = area == Box{0, 0, ctx.size.width, ctx.size.height};
-            const bool colour = whole ? has_colour(*raster)
-                                      : [&] {
-                                            const Box all{0, 0, ctx.size.width, ctx.size.height};
-                                            const auto full_mask = clip_mask(page, ctx.size, dpi, all);
-                                            const auto full = layer_with_effects(ctx, layer, all, full_mask ? &*full_mask : nullptr,
-                                                                                 ctx.rough);
-                                            return full && has_colour(*full);
-                                        }();
-            if (colour) skip_unported(ctx, "finish");
+            // (a picture from a painting app on a monochrome page is finished like placed art: grey and tones. The
+            // finish looks at each pixel's neighbourhood and lays its dots from the page's corner: the whole picture.)
+            const Box all{0, 0, ctx.size.width, ctx.size.height};
+            if (area == all) {
+                if (has_colour(*raster)) raster = finish_placed(*raster, layer, page, episode, dpi, mode, ctx.dots, Point{0, 0});
+            } else {
+                const auto full_mask = clip_mask(page, ctx.size, dpi, all);
+                const auto full = layer_with_effects(ctx, layer, all, full_mask ? &*full_mask : nullptr, ctx.rough);
+                if (full && has_colour(*full)) {
+                    raster = finish_placed(*full, layer, page, episode, dpi, mode, ctx.dots, Point{0, 0}).crop(area);
+                }
+            }
         }
         if (truthy_json(layer.screen) && ((print && ctx.dots) || screen_dots(ctx))) {
             raster = screened_layer(ctx, layer, *raster, area, panel);  // トーン化: its greys as dots in print
@@ -1203,7 +1209,21 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         check_cancel(ctx);
         if (!layer.visible || !layer.exportable || guide_role(layer.role)) continue;
         if (layer.kind == LayerKind::Folder) continue;
-        if (layer.kind == LayerKind::Placed) throw NotYetPorted("placed");  // (its art before the monochrome finish)
+        if (layer.kind == LayerKind::Placed) {  // its art before the monochrome finish (mode "name")
+            auto art = placed_raster(layer, page, &episode, size, dpi, "name", true, ctx.dots, whole);
+            if (art) {
+                const Json to = core::py_get(layer.source ? core::py_or(*layer.source, Json::object()) : Json::object(), "to",
+                                             Json("art"));
+                core::require_hashable(to);  // ({…}.get(to, to))
+                std::string label = core::py_str(to);
+                if (to == Json("art")) label = "絵";
+                else if (to == Json("bg")) label = "背景";
+                else if (to == Json("ink")) label = "線画";
+                else if (to == Json("draft")) label = "下描き";
+                give(core::py_strip(label + " " + (!layer.title.empty() ? layer.title : layer.id)), std::move(*art));
+            }
+            continue;
+        }
         std::optional<Image> raster;
         if (layer.color_raster) {  // (a layer in precise colour, which Python does not have: its 8-bit picture)
             raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), size, whole);
@@ -1646,6 +1666,7 @@ bool rough_needed(const core::Page& page, int dpi) {
 
 void clear_render_caches() {
     text::clear_balloon_cache();
+    clear_placed_caches();
     {
         std::lock_guard lock(g_cache_mutex);
         g_stroke_cache.clear();

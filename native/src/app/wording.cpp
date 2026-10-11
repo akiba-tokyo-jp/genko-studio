@@ -133,6 +133,26 @@ const std::vector<Rule>& rules() {
             return QStringLiteral("%1は、ふつうの数で指定します（無限大や NaN は使えません）").arg(names.value(m.captured(1)));
         }));
         r.push_back(rule(R"(points needs \[x_mm, y_mm\])", "点は [x, y]（mm）の 2 つの数で指定します"));
+        // M5 (core/ops_studio.cpp, render/placed.cpp, render/screentone.cpp): the studio's refusals in the C++ build only
+        // (SPEC COMP-01a)
+        r.push_back(rule(R"((placement_mm|face_box01|pad_mm|rect_mm|poly|border_mm|curves|corner_mm)(?:\.\w+)? must be a finite number)",
+                         [](const QRegularExpressionMatch& m) {
+                             static const QHash<QString, QString> names = {
+                                 {"placement_mm", "画像の置き場所"}, {"face_box01", "顔の位置"}, {"pad_mm", "画像の余白"},
+                                 {"rect_mm", "コマや領域の位置と大きさ"}, {"poly", "コマの角の位置"}, {"border_mm", "枠線の太さ"},
+                                 {"curves", "コマの辺のふくらみ"}, {"corner_mm", "コマの角の丸み"}};
+                             return QStringLiteral("%1は、ふつうの数で指定します（無限大や NaN は使えません）").arg(names.value(m.captured(1)));
+                         }));
+        r.push_back(rule(R"(each of the bible's characters must be an object, not .*)",
+                         "設定資料の登場人物は、一人ずつ項目のまとまり（オブジェクト）で書きます"));
+        r.push_back(rule(R"(the asset's picture cannot be read \((.*)\))", "素材の画像を読み込めません（壊れているか、読めない形式の画像です）"));
+        r.push_back(rule(R"(the finish's (\w+) is not a number)", [](const QRegularExpressionMatch& m) {
+            static const QHash<QString, QString> names = {
+                {"black", "ベタにする濃さ"}, {"white", "紙の白にする明るさ"}, {"line_threshold", "線とみなす濃さ"},
+                {"line_contrast", "線とみなす周りとの差"}, {"lpi", "網点の線数"}, {"angle", "網点の角度"},
+                {"face_light", "顔を明るくする度合い"}, {"smooth", "絵のざらつきのならし"}};
+            return QStringLiteral("仕上げの%1は数で指定します（この絵は描けません）").arg(names.value(m.captured(1), m.captured(1)));
+        }));
         // TEXT-01 (core/ruby.cpp): the rubies by place and their settings, refused in the C++ build only (SPEC COMP-01a)
         r.push_back(rule(R"(ruby_spans is a list of \{start, end, ruby\}.*)", "ルビは {start, end, ruby}（本文の書記素の位置と読み）の並びで指定します"));
         r.push_back(rule("a ruby span has start, end, ruby, base, review, font, scale, align, gap_mm and tracking, not .*",

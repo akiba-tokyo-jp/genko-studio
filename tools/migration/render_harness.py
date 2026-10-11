@@ -62,10 +62,11 @@ Commands:
                                 pictures saved by Pillow as the exports save them (PNG, JPEG, TIFF with their options):
                                 the pictures and the bytes
 
-With skip_unported the elements this C++ step does not draw yet (placed pictures and their finish) are left out the
-way the C++ RenderOptions::skip_unported leaves them out (tones, effect lines and layer screens are drawn on both sides
-since M3-B, the 3D guides since M3-C, nombres since the M2 material work, an animation page as its first frame since
-M3③, lines and their balloons since M4①, a jacket's and a band's folds since M4②).
+With skip_unported the elements this C++ step does not draw yet are left out the way the C++
+RenderOptions::skip_unported leaves them out: an animation page is drawn as it is (tones, effect lines and layer screens
+are drawn on both sides since M3-B, the 3D guides since M3-C, nombres since the M2 material work, an animation page as
+its first frame since M3③, lines and their balloons since M4①, a jacket's and a band's folds since M4②, placed pictures
+and their finish since M5①).
 
 The reference lays text out as the measured one did: Pillow without raqm (BASIC layout, FreeType 2.14.3). A Pillow that
 has raqm (and finds fribidi) is held to BASIC here, so the nombres compare with the C++ drawing of them.
@@ -1058,10 +1059,8 @@ def make_books(out: str, seed: int, count: int) -> None:
 
 def leave_out_unported() -> None:
     """What RenderOptions::skip_unported leaves out, left out here too (each drawing function does nothing)."""
-    from genko import anim, render
+    from genko import anim
 
-    render._placed_raster = lambda *args, **kwargs: None
-    render._finish_placed = lambda fitted, *args, **kwargs: fitted
     anim.at_frame = lambda page, frame: page
 
 
@@ -1073,8 +1072,7 @@ def _unported_scope(enabled: bool):
         return
     from genko import anim, balloons, render, tones
     names = [(tones, 'draw_layer'), (tones, 'screened'), (render, '_draw_effects'),
-             (render, '_draw_prims'), (render, '_placed_raster'), (render, '_finish_placed'),
-             (anim, 'at_frame'), (balloons, 'draw_lines')]  # (balloons: drawn, kept as it is)
+             (render, '_draw_prims'), (anim, 'at_frame'), (balloons, 'draw_lines')]  # (balloons: drawn, kept as it is)
     originals = [(module, name, getattr(module, name)) for module, name in names]
     try:
         leave_out_unported()

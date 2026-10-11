@@ -53,16 +53,6 @@ Frame& find_or_key_error(Page& page, const std::string& frame_id) {
     return *frame;
 }
 
-// ops._placed_on: the placed layers of these panels (their positions in page.layers).
-std::vector<std::size_t> placed_on(const Page& page, const std::set<std::string>& frame_ids) {
-    std::vector<std::size_t> out;
-    for (std::size_t i = 0; i < page.layers.size(); ++i) {
-        const Layer& layer = page.layers[i];
-        if (layer.kind == LayerKind::Placed && layer.frame_id && frame_ids.contains(*layer.frame_id)) out.push_back(i);
-    }
-    return out;
-}
-
 // episode.studio.setdefault("orphans", []).append(record)
 void add_orphan(Document& doc, Json record) {
     if (!doc.studio.is_object()) doc.studio = Json::object();
@@ -72,6 +62,18 @@ void add_orphan(Document& doc, Json record) {
         throw PyUncaught("AttributeError", "'" + py_type_name(orphans) + "' object has no attribute 'append'");
     }
     orphans.push_back(std::move(record));
+}
+
+}  // namespace
+
+// ops._placed_on: the placed layers of these panels (their positions in page.layers).
+std::vector<std::size_t> placed_on(const Page& page, const std::set<std::string>& frame_ids) {
+    std::vector<std::size_t> out;
+    for (std::size_t i = 0; i < page.layers.size(); ++i) {
+        const Layer& layer = page.layers[i];
+        if (layer.kind == LayerKind::Placed && layer.frame_id && frame_ids.contains(*layer.frame_id)) out.push_back(i);
+    }
+    return out;
 }
 
 // ops._orphan_art: placed art whose panel went away is kept in studio.orphans (asset refs stay alive for gc) and
@@ -93,6 +95,9 @@ void orphan_art(Document& doc, Page& page, const std::vector<std::size_t>& art, 
     }
     page.layers = std::move(kept);
 }
+
+namespace {
+
 
 Json panels_record(const Page& page, const std::string& frame_id, Json panels, std::int64_t revision) {
     Json record = Json::object();

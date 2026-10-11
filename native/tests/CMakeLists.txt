@@ -49,7 +49,7 @@ genko_test(test_color_raster_edit SOURCES unit/test_color_raster_edit.cpp DEPS g
 genko_test(test_precision_merge_controls SOURCES unit/test_precision_merge_controls.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit TIMEOUT 1200)
 genko_test(test_precision_flatten SOURCES unit/test_precision_flatten.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit)
 genko_test(test_precision_merge_safety SOURCES unit/test_precision_merge_safety.cpp DEPS genko_core genko_storage genko_render genko_render_ops LABELS unit)
-genko_test(test_render_page SOURCES unit/test_render_page.cpp DEPS genko_render LABELS unit)
+genko_test(test_render_page SOURCES unit/test_render_page.cpp DEPS genko_render genko_storage LABELS unit)
 target_compile_definitions(test_render_page PRIVATE GENKO_SOURCE_DIR="${GENKO_SOURCE_ROOT}")
 # Tones, effect lines and rulers (M3-B).
 genko_test(test_rulers SOURCES unit/test_rulers.cpp DEPS genko_test_support genko_render_ops LABELS unit)
@@ -166,6 +166,12 @@ genko_test(test_contract_lines SOURCES contract/test_contract_lines.cpp contract
 # no asset file, as Python's.
 genko_test(test_contract_book SOURCES contract/test_contract_book.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+# The studio ops of M5 (studio_ops.py: the bible, briefs, regions, requests, candidates, adoption, placement, approvals,
+# tickets, proposals; set_bible, add_ticket, set_ticket) against Python's apply_ops (studio_cases.json on
+# studio_harness.py's studio book), and the same saved batch by batch with Undo and Redo by actor, the approval audit
+# compared with Python's.
+genko_test(test_contract_studio SOURCES contract/test_contract_studio.cpp contract/opsupport.cpp
+           DEPS genko_test_support genko_render_ops genko_studio genko_formats LABELS contract TIMEOUT 2400)
 # import_psd (M4②b): psd.read_psd and the op against Python's on the PSD and PSB files of psd_cases.json (every file,
 # a few cut after every byte, all of them changed at a few bytes; each step's reply, snapshot and payload, the layers'
 # pixels, the book read back), and hostile files refused without the memory Python would take.

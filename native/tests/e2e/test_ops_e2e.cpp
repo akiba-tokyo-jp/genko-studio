@@ -1,8 +1,8 @@
 // The ops of M2-O1 end to end through the command line, each step its own process. A book made by `genko new` gets
 // every op through `genko apply`, batch by batch (by a person and by an AI; for_pages too); after each batch
-// `genko inspect` shows the book the reply showed. Batches that may not be applied (an AI approving, a page locked by
-// a person, an op this build does not have yet, a stale --expect-revision, a dry run) leave the book's files as they
-// were. Then `genko undo` takes the
+// `genko inspect` shows the book the reply showed (a studio op, set_bible, too). Batches that may not be applied (an AI
+// approving, a page locked by a person, what this build does not do yet — replace_text with a regex —, a stale
+// --expect-revision, a dry run) leave the book's files as they were. Then `genko undo` takes the
 // batches back one by one (the book each time as it was before that batch), `genko redo` puts them back, and
 // [{"op": "undo"}] given to `genko apply` undoes as `genko undo` does, once for a --txn given twice.
 
@@ -210,9 +210,15 @@ private slots:
         step("lock", Json::parse(R"([{"op": "lock_page", "page": 3, "agent": "human:作者"}])"), person);
         refused("a locked page", Json::parse(R"([{"op": "set_note", "page": 3, "note": "x"}])"), ai, "apply", "locked by human:作者");
         step("newly ported tone in a batch", Json::parse(R"([{"op": "set_note", "page": 1, "note": "x"}, {"op": "add_tone", "page": 1}])"), person);
-        refused("an op this build does not have yet",
-                 Json::parse(R"([{"op": "set_note", "page": 1, "note": "refused prefix"}, {"op": "set_bible", "bible": {}}])"),
-                 person, "not_yet_ported", "ops[1] set_bible: set_bible is not in the C++ build yet");
+        // (set_bible, this test's op not in this build until M5①, is a studio op now: applied, and taken back by Undo)
+        step("the bible", Json::parse(R"([{"op": "set_note", "page": 1, "note": "設定"}, {"op": "set_bible", "plot": "屋上で鞄を拾う",
+                                           "characters": [{"id": "c-yuki", "name": "ユキ"}], "constraints": ["8ページ"]}])"),
+             person);
+        refused("what this build does not do yet",
+                 Json::parse(R"([{"op": "set_note", "page": 1, "note": "refused prefix"},
+                                 {"op": "replace_text", "find": "a", "replace": "b", "regex": true}])"),
+                 person, "not_yet_ported",
+                 "ops[1] replace_text: replace_text with regex (a pattern in Python's re syntax) is not in the C++ build yet");
         step("for_pages", Json::parse(R"([{"op": "for_pages", "pages": [1, 2, 4], "ops": [{"op": "set_note", "note": "全"}]}])"), ai);
         step("unlock", Json::parse(R"([{"op": "unlock_page", "page": 3}])"), person);
         const std::int64_t last = revision;
@@ -225,6 +231,7 @@ private slots:
                                "delete_layer", "duplicate_layer", "set_layer", "set_layers", "reorder_layers", "set_brush"}) {
             QVERIFY2(std::find(ops_seen.begin(), ops_seen.end(), op) != ops_seen.end(), op);
         }
+        QVERIFY(std::find(ops_seen.begin(), ops_seen.end(), "set_bible") != ops_seen.end());  // (and a studio op, M5①)
 
         // a dry run and a stale --expect-revision write nothing
         const auto before_dry = files();
