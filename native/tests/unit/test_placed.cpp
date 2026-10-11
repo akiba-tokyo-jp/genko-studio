@@ -1,7 +1,8 @@
 // Placed pictures (M5) where this build goes past Python or must not stop on what it is given: the size of an asset's
-// picture read from its header only, as Image.open reads it (a PNG, JPEG, BMP or GIF whose pixels are cut short has a
+// picture read from its header only, as Image.open reads it (a PNG, JPEG, BMP, GIF or PSD whose pixels are cut short has a
 // size; decoding it fails, as Python's load() does); such a picture not placed — by place_asset, adopt_candidate or
-// set_placement — the whole picture decoded first (C++ only: Python places it and the drawing fails), the batch refused;
+// set_placement — the whole picture decoded first (C++ only: Python places it and the drawing fails), the batch refused
+// (a Photoshop file too, opened as one picture; one of Lab colours, not opened yet, placed and said not drawn);
 // one that came in without being placed here (a book written elsewhere) stopping the drawing and the export with an
 // error that says so, nothing written; an asset file past what the store reads refused (C++ only); a digest naming
 // another place no asset (C++ only); a WebP not opened yet (not_yet_ported); a finish whose screen is too coarse for the
@@ -63,6 +64,22 @@ const Sample kSamples[] = {
      "iVBORw0KGgoAAAANSUhEUgAAAAkAAAAGCAIAAACepSOSAAAAMklEQVR4nGNkYGCQw4FYGDQYGBgEsSK4nBImQpYzRkUdaHIuDAwuDAxpEAamXCgMdQAAPsEJHEGEH+8AAAAASUVORK5CYII=",
      "iVBORw0KGgoAAAANSUhEUgAAAAkAAAAGCAIAAACepSOSAAAAMklEQVR4nGNkYGCQw4FYGDQYGBgEsSK4nBImQpYz"},
 };
+
+// Photoshop files of 9×6 with no layers and their merged picture (studio_harness.py's _psd): RGB, the same cut short in
+// its merged picture (Image.open reads its size, load() fails), and one of Lab colours (Pillow opens it; this build does
+// not turn Lab into RGB yet).
+const char* const kPsdRgb =
+    "OEJQUwABAAAAAAAAAAMAAAAGAAAACQAIAAMAAAAAAAAAHDhCSU0D7QAAAAAAEABIAAAAAQABAEgAAAABAAEAAAAAAAEACgAKAAYACgAKAAYACgAGAAoACgAG"
+    "AAoABgAKAAoABgAKAAoIX1lpeHSEkp2gCFttb3WHiJOfq/2m/csA8AhrbHKGh5qiqqcIc3WEgZCWoLKy/cf97AARCGl4fYSMmKKhr/2g/cUA6gh3dIiVl6Gj"
+    "rb0IfXyGkZihr7bD/cH95gALCIaSkpiiqLe5yP2a/b8A5AiEi42TorKwu8cIgZGcmay1ssXF/bv94AAFCJOSp7CywL7Szgial6usvsHQ2eI=";
+const char* const kPsdCut =
+    "OEJQUwABAAAAAAAAAAMAAAAGAAAACQAIAAMAAAAAAAAAHDhCSU0D7QAAAAAAEABIAAAAAQABAEgAAAABAAEAAAAAAAEACgAKAAYACgAKAAYACgAGAAoACgAG"
+    "AAoABgAKAAoABgAKAAoIX1lpeHSEkp2gCFttb3WHiJOfq/2m/csA8AhrbHKGh5qiqqcIc3WEgZCWoLKy/cf97AARCGl4fYSMmKKhr/2g/cUA6gh3dIiVl6Gj"
+    "rb0IfXyGkZihr7bD/cH95gALCIaSkpiiqLe5yP2a/b8A5AiEi42TorKwu8cIgZGcmay1ssXF/bv94AAFCJOSp7CywL4=";
+const char* const kPsdLab =
+    "OEJQUwABAAAAAAAAAAMAAAAGAAAACQAIAAkAAAAAAAAAHDhCSU0D7QAAAAAAEABIAAAAAQABAEgAAAABAAEAAAAAAAEACgAGAAoACgAGAAoABgAKAAoABgAK"
+    "AAoACgAKAAYACgAKAAYIBQgXIiooOjlK/c398gAXCAsbHSI1OzpGWwgLIScuNUJAU1n97v0TADgIIhwmMjtGUlhc/cf97AARCBAnIy43RUpXWggeKigzR1Ba"
+    "Vl/96P0NADIIHzc6OkdbXmRvCCQ1NkROW1pteQglMTY/SlNSYmkIIjI8Q0pUWGJr/eL9BwAsCDE8TE5RY2RwfQgxSEpPWWxyc4P9A/0oAE0=";
 
 // A WebP, 2×2, as Pillow writes one (this build does not open a WebP yet).
 const char* const kWebp = "UklGRh4AAABXRUJQVlA4TBEAAAAvAUAAAAdQhSJXof+BiOh/AAA=";
@@ -142,6 +159,16 @@ private slots:
             QCOMPARE(render::picture_size(cut), (render::Size{9, 6}));  // (as Image.open: the header is whole)
             QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::open_image(cut, render::kPillowOpenLimits));  // (as load())
         }
+        // a Photoshop file's from its header and sections, as Image.open reads it: one cut short in its merged picture,
+        // and one of Lab colours, have a size too
+        const std::string psd = genko::core::a2b_base64(kPsdRgb);
+        const std::string psd_cut = genko::core::a2b_base64(kPsdCut);
+        const std::string psd_lab = genko::core::a2b_base64(kPsdLab);
+        QCOMPARE(render::picture_size(psd), render::open_image(psd, render::kPillowOpenLimits).size());
+        QCOMPARE(render::picture_size(psd_cut), (render::Size{9, 6}));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::open_image(psd_cut, render::kPillowOpenLimits));
+        QCOMPARE(render::picture_size(psd_lab), (render::Size{9, 6}));
+        QVERIFY_THROWS_EXCEPTION(render::NotYetPorted, render::open_image(psd_lab, render::kPillowOpenLimits));
         // (no header to read: Python's errors, as before)
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::picture_size(std::string("\xff\xd8\xff\xe0", 4)));
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::picture_size(std::string("BM", 2)));
@@ -198,6 +225,28 @@ private slots:
         QVERIFY2(said.starts_with("apply: ops[1] adopt_candidate: the asset's picture cannot be read ("), said.c_str());
         const std::string webp = put(tmp.path(), genko::core::a2b_base64(kWebp));
         QCOMPARE(QString::fromStdString(refused(doc, adopting(webp))), QStringLiteral("(applied)"));
+        // (a Photoshop file opened as one picture: placed, or refused when its merged picture is cut short; one of Lab
+        // colours placed, its size from its header — the drawing says it is not drawn yet)
+        const std::string psd = put(tmp.path(), genko::core::a2b_base64(kPsdRgb));
+        const std::string psd_cut = put(tmp.path(), genko::core::a2b_base64(kPsdCut));
+        const std::string psd_lab = put(tmp.path(), genko::core::a2b_base64(kPsdLab));
+        const auto placing = [&leaf](const std::string& ref) {
+            return Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", ref}, {"frame_id", leaf}})});
+        };
+        QCOMPARE(QString::fromStdString(refused(doc, placing(psd))), QStringLiteral("(applied)"));
+        QCOMPARE(QString::fromStdString(refused(doc, adopting(psd))), QStringLiteral("(applied)"));
+        QVERIFY(refused(doc, placing(psd_cut)).starts_with("apply: ops[0] place_asset: the asset's picture cannot be read ("));
+        QVERIFY(refused(doc, adopting(psd_cut)).starts_with("apply: ops[1] adopt_candidate: the asset's picture cannot be read ("));
+        const auto lab = bus().apply(doc, placing(psd_lab), Actor("human:作者"));
+        QCOMPARE(QString::fromStdString(refused(doc, adopting(psd_lab))), QStringLiteral("(applied)"));
+        QString element;
+        try {
+            render::clear_render_caches();
+            (void)render::render_page(lab.doc.page(0), 60, render::RenderOptions{}, &lab.doc);
+        } catch (const render::NotYetPorted& e) {
+            element = QString::fromStdString(e.element());
+        }
+        QCOMPARE(element, QStringLiteral("image_format"));
         const std::string gone = put(tmp.path(), genko::core::a2b_base64(kSamples[0].cut));
         const auto imported = bus().apply(doc, Json::array({adopting(gone)[0]}), Actor("human:作者"));  // (import_candidates looks for it)
         QVERIFY(fs::remove(genko::storage::AssetStore(*doc.asset_dir).path(gone, ".png")));

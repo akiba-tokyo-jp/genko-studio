@@ -129,16 +129,25 @@ _CUT_PICTURES = {
 }
 
 
+def _psd(mode: int = 3, size=(30, 20), seed: int = 5150, cut: int = 0) -> bytes:
+    """A Photoshop file with no layers and its merged picture (PackBits; mode 3 RGB, 9 Lab), as Pillow opens it as one
+    picture (pyref_harness.psd_bytes); `cut`: that many bytes taken off its end (its size still in the header)."""
+    data = base.psd_bytes({"mode": mode, "size": list(size), "merged": {"comp": 1, "seed": seed}})
+    return data[:len(data) - cut] if cut else data
+
+
 def _odd_assets() -> dict[str, bytes]:
     """Files under assets/ as .png that are not plain PNGs: a JPEG (Pillow opens it by its bytes), bytes that are no
     picture, a PNG cut short after its header (Pillow reads its size; its pixels are not there), a PNG whose header's
-    checksum is wrong (Pillow cannot identify it), a header too large to open (a decompression bomb), and a JPEG, a BMP
-    and a GIF cut short in their pixels (JX, BX, GX: Pillow reads their size)."""
+    checksum is wrong (Pillow cannot identify it), a header too large to open (a decompression bomb), a JPEG, a BMP
+    and a GIF cut short in their pixels (JX, BX, GX: Pillow reads their size), and Photoshop files opened as one picture
+    (PSD an RGB one, PSDLAB one of Lab colours, PSDX an RGB one cut short in its merged picture)."""
     good = _png((16, 12), (60, 160, 60, 255))
     crc = bytearray(good)
     crc[29] ^= 0xFF  # (IHDR's CRC: after the 8-byte signature, 4 length, 4 type, 13 data)
     return {"J1": _jpeg(), "BAD": b"this is not a picture", "CUT": good[:60], "CRC": bytes(crc),
-            "BOMB": _bomb_png(20000, 20000), **{name: base64.b64decode(text) for name, text in _CUT_PICTURES.items()}}
+            "BOMB": _bomb_png(20000, 20000), **{name: base64.b64decode(text) for name, text in _CUT_PICTURES.items()},
+            "PSD": _psd(), "PSDLAB": _psd(mode=9, seed=5160), "PSDX": _psd(seed=5170, cut=40)}
 
 
 def make_studiobook(dest: str) -> dict:
@@ -253,7 +262,8 @@ def make_studiobook(dest: str) -> dict:
 def _placed_pictures() -> dict[str, bytes]:
     """The pictures of the placed pictures book: art with greys, lines, a face, dark clothes, a clear corner and a
     half-clear band (RGBA); fine grain (L); a palette picture with a clear index; grey with alpha (LA); 16-bit grey; a
-    colourful picture (RGB) and its JPEG; black line art on white."""
+    colourful picture (RGB) and its JPEG; black line art on white; a Photoshop file (RGB, its merged picture) and one of
+    Lab colours (P_PSDLAB: this build does not open those yet)."""
     import random
 
     from PIL import Image, ImageDraw
@@ -302,7 +312,7 @@ def _placed_pictures() -> dict[str, bytes]:
     di.rectangle((60, 40, 120, 80), fill=(150, 150, 150))
     return {"P_ART": save(art), "P_GRAIN": save(grain), "P_PAL": save(pal, transparency=0), "P_LA": save(la),
             "P_16": save(deep), "P_COL": save(colour), "P_JPG": save(colour.resize((120, 90)), "JPEG", quality=88),
-            "P_INK": save(ink)}
+            "P_INK": save(ink), "P_PSD": _psd(size=(96, 64), seed=5180), "P_PSDLAB": _psd(mode=9, size=(40, 30), seed=5190)}
 
 
 def make_placedbook(dest: str) -> dict:
@@ -336,6 +346,7 @@ def make_placedbook(dest: str) -> dict:
         run([dict({"op": "place_asset", "page": page}, **how)])
 
     run([{"op": "register_assets", "assets": {refs[n]: {"kind": "art"} for n in _placed_pictures()}}])
+    # (P_PSDLAB is not placed here: this build does not draw it yet — test_contract_studio places it itself)
     # page 1: a rounded panel (the old placed art), a bowed one with art fitted inside, a person and a head in the
     # rounded one (c-ken's clothes print white), the adopted art's own finish (face light) and the style's
     run([{"op": "set_frame", "page": 1, "frame_id": "000000000028", "corner_mm": 4.0},
@@ -357,11 +368,13 @@ def make_placedbook(dest: str) -> dict:
     run([{"op": "set_frame", "page": 3, "frame_id": "000000000033", "bleed": True}])
     place(3, asset=refs["P_COL"], frame_id="000000000033", clip_to="bleed", fit="cover")
     place(3, asset=refs["P_INK"], frame_id="000000000034", clip_to="frame")
-    # page 4: a JPEG on the page, 16-bit grey stretched over the panel, a draft and a name picture
+    # page 4: a JPEG on the page, 16-bit grey stretched over the panel, a draft and a name picture, a Photoshop file
     place(4, asset=refs["P_JPG"], placement_mm=[20, 20, 60, 45], clip_to="none")
     place(4, asset=refs["P_16"], frame_id="000000000018", fit="stretch")
     place(4, asset=refs["P_ART"], frame_id="000000000018", to="draft", placement_mm=[100, 150, 50, 40])
     place(4, asset=refs["P_ART"], frame_id="000000000018", to="name", placement_mm=[30, 200, 50, 40])
+    # a Photoshop file's merged picture (Pillow opens it as one RGB picture) on the page past its panel
+    place(4, asset=refs["P_PSD"], placement_mm=[110, 30, 80, 55], clip_to="none")
 
     by_index = {p.index: p for p in episode.pages}
     p3, p4, p5, p6, p7 = by_index[3], by_index[4], by_index[5], by_index[6], by_index[7]

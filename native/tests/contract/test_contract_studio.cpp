@@ -21,8 +21,9 @@
 // folders: each call's result or error, and the files after it.
 //
 // placedPicturesLikePython: placed pictures drawn (render._placed_raster, _finish_placed; psd's placed layers) on the book
-// `studio_harness.py make-placedbook` makes (placements and reported faces far past the page among them), page by page,
-// layer by layer and in the exports, pixel for pixel and file for file.
+// `studio_harness.py make-placedbook` makes (placements and reported faces far past the page among them, a Photoshop
+// file's merged picture), page by page, layer by layer and in the exports, pixel for pixel and file for file; a
+// Photoshop file of Lab colours placed and not drawn yet (not_yet_ported).
 //
 // peopleOnlyThroughTheCommandLine (C++ only): what only a person holds refused to an agent through `genko apply`, and
 // an approved character's deletion recorded in the audit as an approval gone.
@@ -51,6 +52,7 @@
 #include "opsupport.hpp"
 #include "render/brushes.hpp"
 #include "render/not_yet_ported.hpp"
+#include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "rendertest.hpp"
@@ -917,6 +919,7 @@ private slots:
         const QString book = dir + "/book.genko";
         const auto made = studio_harness({"make-placedbook", book}, path("pyenv"), 1200000);
         QVERIFY2(made.finished && made.exit_code == 0, made.err.right(4000).constData());
+        const Json pictures = genko::test::read_json(book + "/assets.json");
         QVERIFY(QFile::remove(book + "/assets.json"));
         genko::render::clear_render_caches();
         const auto loaded = genko::storage::load_document(genko::storage::path_from_utf8(book.toStdString()));
@@ -1081,6 +1084,49 @@ private slots:
                 said = QString::fromStdString(e.code() + ": " + e.what());
             }
             QCOMPARE(said, QStringLiteral("value: the finish's line_threshold is not a number"));
+        }
+        // a Photoshop file of Lab colours (Python turns them into RGB through Little CMS, which this build does not do
+        // yet): placed — its size read from its header, as Python reads it — and then neither drawn nor exported, said
+        // so (not_yet_ported "image_format"), nothing written
+        {
+            const genko::core::CommandBus bus(genko::render::ops_registry());
+            const auto placed_lab = bus.apply(doc,
+                                              Json::array({Json{{"op", "place_asset"}, {"page", 4}, {"asset", pictures["P_PSDLAB"]},
+                                                                {"placement_mm", Json::array({20, 150, 40, 30})}, {"clip_to", "none"}}}),
+                                              genko::core::Actor("human:作者"));
+            QCOMPARE(placed_lab.applied.size(), std::size_t{1});
+            const genko::core::Document& lab = placed_lab.doc;
+            const genko::core::Page* page4 = nullptr;
+            for (const auto& p : lab.pages) {
+                if (p->index == genko::core::Num(4)) page4 = p.get();
+            }
+            QVERIFY(page4 != nullptr);
+            const auto placed_layer = std::find_if(page4->layers.begin(), page4->layers.end(), [&](const auto& l) {
+                return l.asset && Json(*l.asset) == pictures["P_PSDLAB"];
+            });
+            QVERIFY(placed_layer != page4->layers.end());
+            QCOMPARE(placed_layer->placement_mm->width.value(), 40.0);  // (placement_mm given: its own box)
+            for (const char* mode : {"print", "proof"}) {
+                genko::render::clear_render_caches();
+                genko::render::RenderOptions options;
+                options.mode = mode;
+                QString element;
+                try {
+                    (void)genko::render::render_page(*page4, 60, options, &lab);
+                } catch (const genko::render::NotYetPorted& e) {
+                    element = QString::fromStdString(e.element());
+                }
+                QCOMPARE(element, QStringLiteral("image_format"));
+            }
+            const std::filesystem::path dest = genko::core::path_from_utf8((dir + "/lab").toStdString());
+            QString element;
+            try {
+                (void)genko::formats::export_print(lab, dest, "png", 40, 180, true, "paper", "auto");
+            } catch (const genko::render::NotYetPorted& e) {
+                element = QString::fromStdString(e.element());
+            }
+            QCOMPARE(element, QStringLiteral("image_format"));
+            QVERIFY(!std::filesystem::exists(dest) || std::filesystem::is_empty(dest));
         }
 
         QVERIFY(pages >= 42 && layers >= 20 && tiles >= 42 && exported_files >= 30);

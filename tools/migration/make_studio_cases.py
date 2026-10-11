@@ -510,12 +510,19 @@ case("unadopt history with a missing candidate", "unadopt", True,
                   {"op": "adopt_candidate", "page": 1, "frame_id": L1C, "candidate_id": "cd_a1"}], AI),
             step([{"op": "unadopt", "page": 1, "frame_id": L1C}, {"op": "unadopt", "page": 1, "frame_id": L1C}], AI)])
 for name, what in (("JX", "a JPEG cut short"), ("BX", "a BMP cut short"), ("GX", "a GIF cut short"), ("CUT", "a PNG cut short"),
-                   ("BAD", "no picture"), ("CRC", "a PNG with a broken header"), ("BOMB", "a decompression bomb")):
+                   ("BAD", "no picture"), ("CRC", "a PNG with a broken header"), ("BOMB", "a decompression bomb"),
+                   ("PSDX", "a PSD cut short")):
     case(f"adopt_candidate {what}", "adopt_candidate", True,
          steps=[step([{"op": "import_candidates", "page": 1, "frame_id": L1C,
                        "candidates": [{"id": "cd_x", "asset": "$" + name, "px": [9, 6], "origin": {"kind": "agent"}}]}], AI),
                 step([{"op": "adopt_candidate", "page": 1, "frame_id": L1C, "candidate_id": "cd_x"}], AI)],
          cpp="apply", cpp_says=CANNOT_READ)
+# (a Photoshop file, opened as one picture; one of Lab colours, which this build does not open yet, adopted unread)
+for name, what in (("PSD", "a PSD"), ("PSDLAB", "a PSD of Lab colours")):
+    case(f"adopt_candidate {what}", "adopt_candidate", True,
+         steps=[step([{"op": "import_candidates", "page": 1, "frame_id": L1C,
+                       "candidates": [{"id": "cd_x", "asset": "$" + name, "px": [30, 20], "origin": {"kind": "agent"}}]}], AI),
+                step([{"op": "adopt_candidate", "page": 1, "frame_id": L1C, "candidate_id": "cd_x"}], AI)])
 case("set_placement contain", "set_placement", True, [{"op": "set_placement", "page": 1, "frame_id": L1C, "fit": "contain"}], AI)
 case("set_placement offset and scale", "set_placement", True, [{"op": "set_placement", "page": 1, "frame_id": L1C, "offset_mm": [3, -4], "scale": 1.25}], AI)
 case("set_placement clip bleed", "set_placement", True, [{"op": "set_placement", "page": 1, "frame_id": L1C, "clip_to": "bleed"}], AI)
@@ -549,6 +556,12 @@ case("place_asset a PNG cut short", "place_asset", True, [{"op": "place_asset", 
 for name, what in (("JX", "JPEG"), ("BX", "BMP"), ("GX", "GIF")):
     case(f"place_asset a {what} cut short", "place_asset", True, [{"op": "place_asset", "page": 4, "asset": "$" + name, "frame_id": P4}], AI,
          cpp="apply", cpp_says=CANNOT_READ)
+# (a Photoshop file's size read from its header, as Image.open reads it — one of Lab colours too —; one cut short in its
+# merged picture refused here)
+case("place_asset a PSD", "place_asset", True, [{"op": "place_asset", "page": 4, "asset": "$PSD", "frame_id": P4, "fit": "contain"}], AI)
+case("place_asset a PSD of Lab colours", "place_asset", True, [{"op": "place_asset", "page": 4, "asset": "$PSDLAB"}], AI)
+case("place_asset a PSD cut short", "place_asset", True, [{"op": "place_asset", "page": 4, "asset": "$PSDX"}], AI,
+     cpp="apply", cpp_says=CANNOT_READ)
 case("place_asset not a picture", "place_asset", False, [{"op": "place_asset", "page": 4, "asset": "$BAD"}], AI)
 case("place_asset a broken header", "place_asset", False, [{"op": "place_asset", "page": 4, "asset": "$CRC"}], AI)
 case("place_asset a decompression bomb", "place_asset", False, [{"op": "place_asset", "page": 4, "asset": "$BOMB"}], AI)
@@ -713,8 +726,8 @@ json.dump({"note": (
     "regions, a reference, three candidates and the art adopted on 000000000026), requests, sheet candidates from two agents "
     "and a person, tickets of every kind, two proposals, the style fixed from page 6 — and its pictures ($A1 … $G1 PNGs, $J1 a "
     "JPEG, $CUT a PNG cut short after its header, $BAD bytes that are no picture, $CRC a PNG whose header's checksum is wrong, "
-    "$BOMB a header too large to open, $JX $BX $GX a JPEG, a BMP and a GIF cut short in their pixels; refs from the book's "
-    "assets.json). Each case: its steps ({ops, agent?, dry_run?}; or one "
+    "$BOMB a header too large to open, $JX $BX $GX a JPEG, a BMP and a GIF cut short in their pixels, $PSD $PSDLAB $PSDX "
+    "Photoshop files (RGB, Lab, RGB cut short in its merged picture); refs from the book's assets.json). Each case: its steps ({ops, agent?, dry_run?}; or one "
     "step of ops, agent, dry), whether its last step succeeds in Python, with time.strftime fixed (allow_chat_approval). A "
     "case marked \"cpp\" is one this build refuses on purpose (a number Python makes from text, 'inf' or 'nan', that it would "
     "keep; what only a person holds, changed by an agent; a picture placed whose pixels cannot be decoded): C++ must refuse it "

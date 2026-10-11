@@ -1,5 +1,5 @@
 {
- "note": "Cases for test_contract_studio (studioOpsLikePython): the studio ops of M5 (Python's genko/studio/studio_ops.py, which ops.apply_ops dispatches its STUDIO_OPS to) and set_bible, add_ticket and set_ticket (ops._apply_one) on the book `studio_harness.py make-studiobook` makes: the op contract book (pyref_harness.py make-opsbook: page 5 held by ai:other, a front cover as page 7) with a studio — characters (c-ken's sheet approved and locked), locations, a prop, a script, a page plan, briefs (page 1: a pinned shot and a prompt override on 000000000028, a person's fix on 000000000029, regions, a reference, three candidates and the art adopted on 000000000026), requests, sheet candidates from two agents and a person, tickets of every kind, two proposals, the style fixed from page 6 — and its pictures ($A1 … $G1 PNGs, $J1 a JPEG, $CUT a PNG cut short after its header, $BAD bytes that are no picture, $CRC a PNG whose header's checksum is wrong, $BOMB a header too large to open, $JX $BX $GX a JPEG, a BMP and a GIF cut short in their pixels; refs from the book's assets.json). Each case: its steps ({ops, agent?, dry_run?}; or one step of ops, agent, dry), whether its last step succeeds in Python, with time.strftime fixed (allow_chat_approval). A case marked \"cpp\" is one this build refuses on purpose (a number Python makes from text, 'inf' or 'nan', that it would keep; what only a person holds, changed by an agent; a picture placed whose pixels cannot be decoded): C++ must refuse it with that code, its error holding \"cpp_says\".",
+ "note": "Cases for test_contract_studio (studioOpsLikePython): the studio ops of M5 (Python's genko/studio/studio_ops.py, which ops.apply_ops dispatches its STUDIO_OPS to) and set_bible, add_ticket and set_ticket (ops._apply_one) on the book `studio_harness.py make-studiobook` makes: the op contract book (pyref_harness.py make-opsbook: page 5 held by ai:other, a front cover as page 7) with a studio — characters (c-ken's sheet approved and locked), locations, a prop, a script, a page plan, briefs (page 1: a pinned shot and a prompt override on 000000000028, a person's fix on 000000000029, regions, a reference, three candidates and the art adopted on 000000000026), requests, sheet candidates from two agents and a person, tickets of every kind, two proposals, the style fixed from page 6 — and its pictures ($A1 … $G1 PNGs, $J1 a JPEG, $CUT a PNG cut short after its header, $BAD bytes that are no picture, $CRC a PNG whose header's checksum is wrong, $BOMB a header too large to open, $JX $BX $GX a JPEG, a BMP and a GIF cut short in their pixels, $PSD $PSDLAB $PSDX Photoshop files (RGB, Lab, RGB cut short in its merged picture); refs from the book's assets.json). Each case: its steps ({ops, agent?, dry_run?}; or one step of ops, agent, dry), whether its last step succeeds in Python, with time.strftime fixed (allow_chat_approval). A case marked \"cpp\" is one this build refuses on purpose (a number Python makes from text, 'inf' or 'nan', that it would keep; what only a person holds, changed by an agent; a picture placed whose pixels cannot be decoded): C++ must refuse it with that code, its error holding \"cpp_says\".",
  "first_id": 2816,
  "clock": "2026-10-11T12:34:56",
  "cases": [
@@ -6353,6 +6353,131 @@
    "cpp_says": "the asset's picture cannot be read ("
   },
   {
+   "n": "adopt_candidate a PSD cut short",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$PSDX",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a PSD",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$PSD",
+         "px": [
+          30,
+          20
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
+   "n": "adopt_candidate a PSD of Lab colours",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$PSDLAB",
+         "px": [
+          30,
+          20
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ]
+  },
+  {
    "n": "set_placement contain",
    "op": "set_placement",
    "ok": true,
@@ -6770,6 +6895,49 @@
      "page": 4,
      "asset": "$GX",
      "frame_id": "000000000018"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "place_asset a PSD",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$PSD",
+     "frame_id": "000000000018",
+     "fit": "contain"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset a PSD of Lab colours",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$PSDLAB"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "place_asset a PSD cut short",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$PSDX"
     }
    ],
    "agent": "ai:hermes",

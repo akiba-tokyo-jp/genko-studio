@@ -19,7 +19,7 @@ namespace genko::render {
 // studio_ops._asset_size's picture: Image.open(assets/<ab>/<sha256>.png of the book `book`).size, read from its header
 // as Image.open reads it (render::picture_size: the pixels not decoded), nothing when there is no such file (or `ref` is
 // no asset ref). Python's errors as it raises them: core::PyUncaught UnidentifiedImageError ("cannot identify image
-// file <_io.BytesIO object>") and DecompressionBombError; NotYetPorted("image_format") for TIFF, WebP and PSD. A file
+// file <_io.BytesIO object>") and DecompressionBombError; NotYetPorted("image_format") for TIFF and WebP. A file
 // larger than storage::kAssetMaxBytes is refused with core::OpError "the asset's picture cannot be read (…)" (C++ only).
 std::optional<std::pair<std::int64_t, std::int64_t>> asset_picture_size(const std::filesystem::path& book, const std::string& ref);
 
@@ -27,8 +27,8 @@ std::optional<std::pair<std::int64_t, std::int64_t>> asset_picture_size(const st
 // COMP-01a): the whole picture decoded as placed_raster decodes it, core::OpError "the asset's picture cannot be read
 // (…)" when it cannot be — its pixels cut short or broken, no picture at all, a decompression bomb, a file larger than
 // storage::kAssetMaxBytes — where Python places it and the drawing fails. Nothing to say when there is no such file (or
-// `ref` is no asset ref: nothing is drawn), nor of a picture this build does not open yet (TIFF, WebP, PSD: the drawing
-// says not_yet_ported).
+// `ref` is no asset ref: nothing is drawn), nor of a picture this build does not open yet (TIFF, WebP, a PSD of Lab
+// colours: the drawing says not_yet_ported).
 void check_asset_picture(const std::filesystem::path& book, const std::string& ref);
 
 // render._placed_raster(layer, page, episode, size, dpi, mode, finish) over the box `area` of the page (an "RGBA"

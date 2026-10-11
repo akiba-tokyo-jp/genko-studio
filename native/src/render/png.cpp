@@ -523,6 +523,7 @@ Size picture_size(std::string_view bytes) {
         if (bytes.substr(0, 3) == "\xff\xd8\xff") return jpeg_size(bytes, kPillowOpenLimits);
         if (bytes.substr(0, 2) == "BM") return bmp_size(bytes, kPillowOpenLimits);
         if (bytes.substr(0, 6) == "GIF87a" || bytes.substr(0, 6) == "GIF89a") return gif_size(bytes, kPillowOpenLimits);
+        if (bytes.substr(0, 4) == "8BPS") return psd_image_size(bytes, kPillowOpenLimits);  // (a Lab one's too)
         return open_image(bytes, kPillowOpenLimits).size();  // (NotYetPorted, or not a picture)
     }
     ReadState state;
