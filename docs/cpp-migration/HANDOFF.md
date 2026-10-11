@@ -1,6 +1,45 @@
 # Genko C++ 引継ぎ（2026-10-08）
 
-## M4出口受入（Linux）— 2026-10-11 記録（この節が最新）
+## M5 と M3・M4 の残り群E — 2026-10-11 記録（この節が最新）
+
+### 進め方
+- 群ごとに「実装（対象試験）→レビュー1回→凍結→V2（Linux ASan＋Release、validation_run.py）→native/integration へ統合」。群E（M3・M4 の残り、worktree `m4-rest`）と M5①（worktree `m5-dev`）は並行して作り、それぞれ独立レビュー1回の指摘を直した後、M5① を群E の上へ載せ直して、2群をまとめて1つの候補に凍結し V2 を1回行った。
+- 群E だけで先に回した V2（凍結 6a8d1b0）は、ASan で test_pyre が落ちた（正規表現の探す手間の上限の試験が Release の実測で決めた 10 秒で、-O0＋ASan では 62 秒かかる）。試験を「同じプロセスで測った単価×予算×3」（最適化した構成では 10 秒・15 秒も残す）に直し（5a5f650）、ASan の段の途中で止めた。結果は使わない。直した版で群E に関わる 15 本を ASan で先に確かめた（15/15 合格）。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU / RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44。Qt 6.11.2、参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9。
+
+### V2（群E＋M5①）— 統合済み
+- 凍結 `13a425d25fbece4e173191ae7229d4b23c9a3b06`。計画 `validation_policy.py --base b95eaf9 --head 13a425d --phase integration`（tier full）。
+  - linux-asan: 107/107 合格・CLI23 合格・サニタイザ指摘なし（10/11 15:57–20:48 UTC）。result.json の failures は空。
+  - linux-release: 107/107 合格・CLI23 合格（10/11 21:20–22:40 UTC）。result.json の failures は空。
+- Windows は開発中 deferred（計画の windows-debug/release は実行しない。配布前の Windows 実機受入は必須）。
+
+### 群E（M3・M4 の残り。a6342f2・6a8d1b0・5a5f650）
+- replace_text の `regex: true` と台詞の検索・置換の窓を、CPython 3.12.3 の `re`（sre）の移植で行う（`native/src/core/pyre*`、Unicode の表と名前は生成。CPython・Secret Labs AB・Unicode License v3 の許諾文を `native/third_party/cpython/` に同梱）。参照 Python と照合（手書き約 770 件・乱択 3 万件の型、置換テンプレート、エラー文と位置）。
+- COMP-04 のネイティブ拡張: `<設定>/plugins/<名前>/plugin.json`（`docs/PLUGIN_NATIVE.md`）。既定で無効、同意は plugin.json と本体の sha256 に結び付け、同意したバイトを設定フォルダーの非公開の写しへ書き出して動かす（差し替えたものは動かない）。シェルなし、環境変数は許可リスト、時間・出力の上限、POSIX ではプロセスグループごと止める（Windows は子の子を止められない＝限界として記載）。
+- PSD を Pillow 12.3 と同じに一枚の絵として開く（`render/psd_image`）。Lab の PSD は Little CMS を通すため未移植として断る。
+- 素材ライブラリの一覧（library.json・folders.json）の上限 16 MB。素材一覧のダブルクリックは Python と同じく「貼る」（置く所をクリックで選ぶ）。
+- レビュー（P1×1・P2×4・P3）で直した所: 正規表現の手数の数え漏れ（印の写し・選択肢・文字集合）、数字のあふれ（Python と同じ OverflowError・invalid group reference に。正規表現でない置換テンプレートの退行も）、同じ名前の .py と plugin.json の同意を取り消せない、確かめてから動かすまでの差し替え、ライセンス表示、読めない本体・リンク・リンクのフォルダー、標準エラーの末尾、同意の問いに本体と引数、folders.json の上限。
+
+### M5①（Studio の状態と制作の操作。1a3f544・d6d4039・13a425d）
+- 制作の操作 46 種（`core/ops_studio.cpp`。絵の大きさが要るものは render から差し込む）、`native/src/studio/`（presence・toollog・claims・依頼のフォルダー・道具の登録・入力の型・本から読む状態）、配置画像と白黒の仕上げの描画（`render/placed`・`render/screentone`）。頁・レイヤー・PSD・書き出しの NotYetPorted（placed・finish）を外した。群E の上へ載せ直して、PSD の配置画像も Python と同じ画素で描く。
+- 試験データの誤り（M4 出口の残課題）を直した: 「大きな声で約束する」のルビを「声」[3,4)・「約束」[5,7) に（psd_text_book.json・F4）。PSD の 1 頁目の hash が Python の PSD と同じことを照合で確かめる。
+- test_contract_studio（457 件の操作、保存・Undo/Redo と監査、studio のファイル、配置画像 48 頁・83 ファイル・48 タイル）を参照 Python と照合。
+- レビュー（P1×1・P2×4・P3）で直した所: 巨大な有限値の配置で頁全体が描けなくなる、SPEC の書き方が実装より強い、C++ だけの拒否の試験、claim の一時ファイル名、O(n²)、picture_size はヘッダーだけ、`:` を含む参照、数のあふれ、変えない操作で頁を複製しない、網が粗すぎるときの拒否を SPEC に、配置画像のキャッシュの解放。
+
+### 利用者の決定（2026-10-11）
+- 群E: Esc で素材の配置待ちを取りやめる（C++ の追加。SPEC に記載）を残す。plugin.json の形式を確定。Lab の PSD は CMYK/Lab 編集の工程（M5 の後、M6 の前）で扱う。正規表現の C++ だけの上限（1 億ステップ／戻る場所 100 万・データ 400 万／入れ子 200 段）を確定。
+- M5①: 操作は core に置き、絵の大きさは render から差し込む配置で ARCHITECTURE.md を直す。C++ だけの拒否（Inf/NaN、set_bible の characters、assets/ の外の参照、読めない絵・256 MiB 超、数でない仕上げ、presence/claims の壊れた項目）を確定。tools.jsonl は Python と同じ（整数の ms は整数、Windows は CRLF）。
+- M5①: AI（human: でない actor）は、人が描いた範囲（set_panel の regions）、人物の承認（locked の付け外し・承認済みの人物の設定画と顔。set_bible・upsert_character）、承認済みの人物の削除、承認依頼のチケット、絵柄の固定を変えられない（Python は通す。ACCEPTANCE AC-API・SPEC の「固定欄・承認を維持」に合わせた C++ だけの拒否）。承認済みの人物が消えたことを audit.jsonl に残す（Python は残さない）。
+- M5①: 読めない絵（形式を問わず）は配置のとき（place_asset・adopt_candidate・候補のない set_placement）に全部展開して確かめて断る。大きさだけのときはヘッダーだけ読む。
+
+### 残課題
+- Windows 実機受入（配布前に必須）。Windows でのプラグインの子の子の停止（Job Object）。
+- Lab の PSD（CMYK/Lab 編集の工程で）。
+- 配置画像の仕上げが 4000 万画素を超えるとタイルごとに作り直す、白黒の頁の色のレイヤーの仕上げをタイルごとに頁全体で作り直す（性能。正しさは同じ）。
+- 編集可能の PSD の書き出しが縁取りのある台詞で遅い（M4 から）。
+- M5②〜④（StudioService・CLI、MCP・HTTP、画面）と M5 出口。M5② は m5-2 で作業中。
+
+## M4出口受入（Linux）— 2026-10-11 記録
 
 - **凍結SHA**: `65f833353c548bc5f28c9e0f4c775c96f5fa4635`（native/integration。M4 の群A・群B・群C と M3 の残り BRUSH-01 を統合した後の記録の版）。計画は `validation_policy.py --base 9b344f5 --head 65f8333 --phase milestone`（基点は M3 出口の凍結。tier full、Linux 各100試験）。
 - **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz。M3 出口とは別の機種）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44 / cgroup v1。Qt 6.11.2、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。ASan（各構成内 ctest 1並列）→ ASan のビルドを消して Release と Debug を同時に。
