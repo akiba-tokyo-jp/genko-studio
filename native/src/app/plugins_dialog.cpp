@@ -20,6 +20,7 @@
 #include "app/wording.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "core/pyops.hpp"
 #include "render/plugins.hpp"
 
 namespace genko::app {
@@ -27,6 +28,25 @@ namespace genko::app {
 namespace {
 
 QString qpath(const std::filesystem::path& path) { return QString::fromStdString(core::path_to_utf8(path)); }
+
+// What a native plugin runs, as its plugin.json says: the program and its arguments (an argument with a space, a quote
+// or nothing in it quoted)
+QString what_runs(const core::Json& manifest) {
+    QString out = QStringLiteral("動かすプログラム: %1").arg(QString::fromStdString(core::py_str(core::py_get(manifest, "executable", ""))));
+    const core::Json args = core::py_get(manifest, "args", core::Json::array());
+    if (args.is_array() && !args.empty()) {
+        QStringList words;
+        for (const core::Json& arg : args) {
+            QString word = QString::fromStdString(arg.is_string() ? arg.get<std::string>() : core::py_str(arg));
+            if (word.isEmpty() || word.contains(QLatin1Char(' ')) || word.contains(QLatin1Char('"'))) {
+                word = QLatin1Char('"') + word.replace(QLatin1Char('"'), QStringLiteral("\\\"")) + QLatin1Char('"');
+            }
+            words << word;
+        }
+        out += QStringLiteral("\n引数: ") + words.join(QLatin1Char(' '));
+    }
+    return out;
+}
 
 }  // namespace
 
@@ -67,6 +87,7 @@ PluginsDialog::PluginsDialog(QWidget* parent) : QDialog(parent) {
         row->setData(Qt::UserRole, QString::fromStdString(item.key));
         row->setData(Qt::UserRole + 1, QString::fromStdString(item.sha256));  // (the file as shown: only that is chosen)
         row->setData(Qt::UserRole + 2, item.native);
+        if (item.native && item.manifest) row->setData(Qt::UserRole + 3, what_runs(*item.manifest));
         if (item.problem) {  // (cannot be chosen: said why)
             row->setText(text + QStringLiteral("（使えません）"));
             row->setFlags(row->flags() & ~(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled));
@@ -136,18 +157,19 @@ bool PluginsDialog::keep() {
             const QString key = row->data(Qt::UserRole).toString();
             if (key.isEmpty() || !(row->flags() & Qt::ItemIsUserCheckable)) continue;
             const bool on = row->checkState() == Qt::Checked;
+            const bool native = row->data(Qt::UserRole + 2).toBool();
             bool was = false;
-            for (const auto& item : now) {
-                if (item.key == key.toStdString()) was = item.chosen;
+            for (const auto& item : now) {  // (a Python file and a folder may share a key: the row's own kind)
+                if (item.key == key.toStdString() && item.native == native) was = item.chosen;
             }
             if (on == was) continue;
-            const bool native = row->data(Qt::UserRole + 2).toBool();
             if (on && !ask::question(this, QStringLiteral("プラグインを動かす"),
-                                     (native ? QStringLiteral("「%1」（プログラム）を動かしてよいですか。\n\nプラグインは別のプロセスで動きますが、安全な隔離ではありません。"
-                                                              "そのプログラムはこのコンピューターでできることを何でもできます。信頼できるものだけを選んでください。")
-                                             : QStringLiteral("「%1.py」を動かしてよいですか。\n\nプラグインは別のプロセスで動きますが、安全な隔離ではありません。"
-                                                              "そのコードはこのコンピューターでできることを何でもできます。信頼できるものだけを選んでください。"))
-                                         .arg(key))) {
+                                     native ? QStringLiteral("「%1」（プログラム）を動かしてよいですか。\n\n%2\n\nプラグインは別のプロセスで動きますが、安全な隔離ではありません。"
+                                                             "そのプログラムはこのコンピューターでできることを何でもできます。信頼できるものだけを選んでください。")
+                                                  .arg(key, row->data(Qt::UserRole + 3).toString())
+                                            : QStringLiteral("「%1.py」を動かしてよいですか。\n\nプラグインは別のプロセスで動きますが、安全な隔離ではありません。"
+                                                             "そのコードはこのコンピューターでできることを何でもできます。信頼できるものだけを選んでください。")
+                                                  .arg(key))) {
                 row->setCheckState(Qt::Unchecked);
                 continue;
             }

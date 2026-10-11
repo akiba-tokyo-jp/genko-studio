@@ -3,6 +3,8 @@
 // sets' bitmaps and the case-insensitive codes decide which characters match, quirks and all). Not made: the INFO block
 // before the code, which only lets the search skip ahead (pyre_match.cpp searches every position instead, with the same
 // result).
+// Secret Labs' Regular Expression Engine: Copyright (c) 1997-2001 by Secret Labs AB. All rights reserved. This version
+// of the SRE library can be redistributed under CNRI's Python 1.6 license (native/third_party/cpython/LICENSE-SRE).
 
 #include <algorithm>
 #include <cstring>

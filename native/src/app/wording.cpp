@@ -299,6 +299,9 @@ const std::vector<Rule>& rules() {
                 add("its params must be an object", "params はオブジェクトにします");
                 add("its executable must be a path inside the plugin's folder", "executable はプラグインのフォルダーの中のファイルにします");
                 add(R"(its program (.*) is not in its folder)", "プログラム「\\1」がプラグインのフォルダーにありません");
+                add(R"(its program (.*) is a link)", "プログラム「\\1」がリンクです（プラグインのフォルダーの中のファイルにします）");
+                add(R"(its program (.*) cannot be read)", "プログラム「\\1」を読めません（読める権限が要ります）");
+                add("its folder is a link", "プラグインのフォルダーがリンクです（設定のフォルダーの plugins の中に置きます）");
                 add("its program is larger than 256 MB", "プログラムが 256 MB を超えています");
                 return out;
             }();
@@ -313,6 +316,10 @@ const std::vector<Rule>& rules() {
         }));
         r.push_back(rule("the program of plugin (.*?) could not be started.*",
                          "プラグイン「\\1」のプログラムを起動できませんでした（このコンピューターで動くプログラムか確かめてください）"));
+        r.push_back(rule("the program of plugin (.*?) could not be copied to run it.*",
+                         "プラグイン「\\1」のプログラムを、動かすために設定のフォルダーへ写せませんでした（空きや権限を確かめてください）"));
+        r.push_back(rule(R"(programs cannot run from Genko's settings folder on this computer \((.*?): .*\), so plugin (.*) cannot run)",
+                         "このコンピューターでは Genko の設定のフォルダー（\\1）の中でプログラムを動かせないため、プラグイン「\\2」を動かせませんでした"));
         r.push_back(rule("CMYK is written as TIFF or PDF", "CMYK は TIFF か PDF で書き出します"));
         r.push_back(rule("Lab PSD files are not supported: save it as RGB or CMYK", "Lab カラーの PSD は読めません。RGB か CMYK で保存し直してください"));
         r.push_back(rule("MP4 needs ffmpeg on this computer; WebP, GIF and PNG need nothing",
@@ -405,6 +412,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the pack\\.json is a link or not a file.*", "素材パックの pack.json がリンクかファイルではないので読みません"));
         r.push_back(rule(R"(the material library would be too large for the materials panel \(at most (\d+) MB\))",
                          "素材ライブラリの一覧が大きくなりすぎるので、書き換えませんでした（\\1 MB まで）"));
+        r.push_back(rule(R"(the material folders would be too large for the materials panel \(at most (\d+) MB\))",
+                         "素材のフォルダーの一覧が大きくなりすぎるので、フォルダーを足しませんでした（\\1 MB まで）"));
         r.push_back(rule("kind must be one of tone, effect, image, lines, lettering, brush, prim", "素材の種類が違います"));
         r.push_back(rule("adjust is set on a correction layer", "補正の設定は、色調補正のレイヤーにだけできます"));
         r.push_back(rule("adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"));

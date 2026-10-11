@@ -8,6 +8,14 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#ifdef Q_OS_UNIX
+#include <signal.h>
+#include <unistd.h>
+#endif
+#ifdef __linux__
+#include <sys/statvfs.h>
+#endif
+
 #include <algorithm>
 #include <deque>
 #include <fstream>
@@ -163,12 +171,26 @@ QProcessEnvironment plugin_environment() {
     return env;
 }
 
+// A plugin's process starts a process group of its own (POSIX), so that stopping it stops what it started too.
+// (Windows: only the process itself is stopped — what it started itself runs on; that would need a Job Object.)
+void own_process_group(QProcess& process) {
+#ifdef Q_OS_UNIX
+    process.setChildProcessModifier([] { (void)::setpgid(0, 0); });
+#else
+    (void)process;
+#endif
+}
+
 // One request to a started plugin process (the runner, or a native plugin's program), bounded in time and in what it
 // may write back; `input` streamed to it in pieces after `header`. Its reply: one JSON object on a line, then the
-// picture's bytes.
+// picture's bytes. What it writes to stderr: the last 64 KB kept (their end said when it stops before answering).
 Reply exchange(QProcess& process, const std::string& key, const std::string& header, const std::string& input, std::chrono::seconds limit,
                std::size_t most, const std::stop_token& stop) {
     const auto stop_now = [&process] {
+#ifdef Q_OS_UNIX
+        const qint64 pid = process.processId();
+        if (pid > 0) (void)::kill(-static_cast<pid_t>(pid), SIGKILL);  // (its group: what it started too)
+#endif
         process.kill();
         process.waitForFinished(5000);
     };
@@ -180,7 +202,8 @@ Reply exchange(QProcess& process, const std::string& key, const std::string& hea
         const QByteArray o = process.readAllStandardOutput();
         out.append(o.constData(), static_cast<std::size_t>(o.size()));
         const QByteArray e = process.readAllStandardError();
-        if (err.size() < 65536) err.append(e.constData(), static_cast<std::size_t>(std::min<qsizetype>(e.size(), 65536)));
+        err.append(e.constData(), static_cast<std::size_t>(e.size()));
+        if (err.size() > 65536) err.erase(0, err.size() - 65536);
     };
     const auto check = [&] {
         if (stop.stop_requested()) {
@@ -264,6 +287,7 @@ Reply ask_runner(const std::string& key, const Code& code, const char* what, con
     env.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
     env.insert(QStringLiteral("PYTHONDONTWRITEBYTECODE"), QStringLiteral("1"));
     process.setProcessEnvironment(env);
+    own_process_group(process);
     process.start();
     if (!process.waitForStarted(10000)) {
         runner_trouble("plugin " + key + " could not be started (" + process.errorString().toStdString() + ")");
@@ -301,8 +325,9 @@ bool is_native(const std::string& key) {
 }
 
 struct Native {
-    std::filesystem::path home;
-    std::filesystem::path program;
+    std::filesystem::path home;     // its folder (as found in the plugins' folder)
+    std::filesystem::path program;  // the program, the real path inside home
+    std::string given;              // plugin.json's executable
     std::vector<std::string> args;
     std::string name;
     Json params = Json::object();
@@ -310,33 +335,34 @@ struct Native {
     std::string sha256;  // of plugin.json's bytes and the program's
 };
 
-// sha256 of plugin.json's bytes, a line break and the program's bytes (read in pieces: nothing run)
-std::string native_digest(const std::string& manifest_bytes, const std::filesystem::path& program) {
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    hash.addData(QByteArray::fromRawData(manifest_bytes.data(), static_cast<qsizetype>(manifest_bytes.size())));
-    hash.addData(QByteArrayView("\n", 1));
-    QFile file(QString::fromStdString(core::path_to_utf8(program)));
-    if (file.open(QIODevice::ReadOnly)) hash.addData(&file);
-    return hash.result().toHex().toStdString();
-}
-
-// A native plugin's plugin.json read (it is never run) and its program found inside its folder; the plugin.json's
-// problems as core::Error("plugin_manifest").
-Native read_native(const std::string& key) {
+// plugin.json's bytes, from a file (not a link) of the plugin's own folder (not a link either), at most 64 KB
+std::string manifest_text(const std::string& key) {
     std::error_code ec;
     if (!usable_key(key)) throw core::PyValueError("no plugin " + key);
     if (std::filesystem::is_regular_file(folder() / core::path_from_utf8(key + ".py"), ec)) {
         manifest_problem(key, "a Python plugin " + key + ".py has the same name");
     }
-    Native out;
-    out.home = native_home(key);
-    const std::filesystem::path manifest = out.home / "plugin.json";
+    const std::filesystem::path home = native_home(key);
+    if (std::filesystem::symlink_status(home, ec).type() != std::filesystem::file_type::directory) manifest_problem(key, "its folder is a link");
+    const std::filesystem::path manifest = home / "plugin.json";
     const auto status = std::filesystem::symlink_status(manifest, ec);
     if (ec || status.type() != std::filesystem::file_type::regular) manifest_problem(key, "it is not a file in the plugin's folder");
     const std::uintmax_t bytes = std::filesystem::file_size(manifest, ec);
     if (ec) manifest_problem(key, "it cannot be read");
     if (bytes > kMostManifestBytes) manifest_problem(key, "it is larger than 64 KB");
-    const std::string text = read_file(manifest);
+    QFile file(QString::fromStdString(core::path_to_utf8(manifest)));
+    if (!file.open(QIODevice::ReadOnly)) manifest_problem(key, "it cannot be read");
+    const QByteArray text = file.read(static_cast<qint64>(kMostManifestBytes) + 1);
+    if (static_cast<std::uintmax_t>(text.size()) > kMostManifestBytes) manifest_problem(key, "it is larger than 64 KB");
+    return text.toStdString();
+}
+
+// plugin.json (these bytes) read — it is never run — and its program found inside the plugin's folder (not a link, no
+// part of its path leading out of the folder, at most 256 MB); the problems as core::Error("plugin_manifest")
+Native parse_native(const std::string& key, const std::string& text) {
+    std::error_code ec;
+    Native out;
+    out.home = native_home(key);
     try {
         out.manifest = core::parse_python_json(text);
     } catch (const core::Error&) {
@@ -365,24 +391,40 @@ Native read_native(const std::string& key) {
     // the program: a relative path that stays inside the folder (no "..", no drive or root, no link out of it)
     const Json executable = field("executable");
     if (!executable.is_string() || executable.get<std::string>().empty()) manifest_problem(key, "its executable must be a path inside the plugin's folder");
-    const std::string given = executable.get<std::string>();
-    const std::filesystem::path relative = core::path_from_utf8(given);
-    bool inside = relative.is_relative() && !relative.has_root_name() && !relative.has_root_directory() && given.find(':') == std::string::npos;
+    out.given = executable.get<std::string>();
+    const std::filesystem::path relative = core::path_from_utf8(out.given);
+    bool inside = relative.is_relative() && !relative.has_root_name() && !relative.has_root_directory() && out.given.find(':') == std::string::npos;
     for (const auto& part : relative) inside = inside && part != "..";
     if (!inside) manifest_problem(key, "its executable must be a path inside the plugin's folder");
-    out.program = out.home / relative;
-    const auto program_status = std::filesystem::symlink_status(out.program, ec);
-    if (ec || program_status.type() != std::filesystem::file_type::regular) manifest_problem(key, "its program " + given + " is not in its folder");
+    const std::filesystem::path program = out.home / relative;
+    const auto program_status = std::filesystem::symlink_status(program, ec);
+    if (ec || program_status.type() == std::filesystem::file_type::not_found) manifest_problem(key, "its program " + out.given + " is not in its folder");
+    if (program_status.type() == std::filesystem::file_type::symlink) manifest_problem(key, "its program " + out.given + " is a link");
+    if (program_status.type() != std::filesystem::file_type::regular) manifest_problem(key, "its program " + out.given + " is not in its folder");
     const std::filesystem::path home_real = std::filesystem::canonical(out.home, ec);
-    const std::filesystem::path program_real = ec ? std::filesystem::path() : std::filesystem::canonical(out.program, ec);
-    if (ec) manifest_problem(key, "its program " + given + " is not in its folder");
+    const std::filesystem::path program_real = ec ? std::filesystem::path() : std::filesystem::canonical(program, ec);
+    if (ec) manifest_problem(key, "its program " + out.given + " is not in its folder");
     const auto mismatch = std::mismatch(home_real.begin(), home_real.end(), program_real.begin(), program_real.end());
     if (mismatch.first != home_real.end()) manifest_problem(key, "its executable must be a path inside the plugin's folder");
-    const std::uintmax_t program_bytes = std::filesystem::file_size(out.program, ec);
-    if (ec) manifest_problem(key, "its program " + given + " is not in its folder");
+    const std::uintmax_t program_bytes = std::filesystem::file_size(program_real, ec);
+    if (ec) manifest_problem(key, "its program " + out.given + " is not in its folder");
     if (program_bytes > kMostProgramBytes) manifest_problem(key, "its program is larger than 256 MB");
     out.program = program_real;
-    out.sha256 = native_digest(text, out.program);
+    return out;
+}
+
+// A native plugin's plugin.json read and its program found and read through for its digest (nothing run): sha256 of
+// plugin.json's bytes, a line break and the program's bytes. A program that cannot be read is refused (a program the
+// person may only run cannot be checked or copied).
+Native read_native(const std::string& key) {
+    const std::string text = manifest_text(key);
+    Native out = parse_native(key, text);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(QByteArrayView(text.data(), static_cast<qsizetype>(text.size())));
+    hash.addData(QByteArrayView("\n", 1));
+    QFile file(QString::fromStdString(core::path_to_utf8(out.program)));
+    if (!file.open(QIODevice::ReadOnly) || !hash.addData(&file)) manifest_problem(key, "its program " + out.given + " cannot be read");
+    out.sha256 = hash.result().toHex().toStdString();
     return out;
 }
 
@@ -407,36 +449,112 @@ NativeNow native_now(const std::string& key) {
 
 NativeNow native_now_remembered(const std::string& key);
 
-// A chosen native plugin as it is now: plugins on, chosen, and plugin.json and the program the bytes chosen (`fresh`:
-// read again, as before it is started — a file changed since is refused; otherwise as last read, when neither file's
-// size or time has changed since)
-Native chosen_native(const std::string& key, bool fresh) {
-    const NativeNow now = fresh ? native_now(key) : native_now_remembered(key);
+[[noreturn]] void not_chosen(const std::string& key) {
+    throw core::Error("plugin_not_allowed", "plugin " + key + " is not chosen to run (turn plugins on and choose it in the plugin settings)");
+}
+
+// A chosen native plugin as last read (when neither file's size or time has changed since): plugins on, chosen as its
+// plugin.json and program are. What runs is checked again from the bytes copied (prepare_native).
+Native chosen_native(const std::string& key) {
+    const NativeNow now = native_now_remembered(key);
     const Settings s = settings();
     const auto chosen = s.chosen.find(key);
-    if (!now.plugin || !s.enabled || chosen == s.chosen.end() || !chosen->is_string() || chosen->get<std::string>() != now.sha256) {
-        throw core::Error("plugin_not_allowed",
-                          "plugin " + key + " is not chosen to run (turn plugins on and choose it in the plugin settings)");
-    }
+    if (!now.plugin || !s.enabled || chosen == s.chosen.end() || !chosen->is_string() || chosen->get<std::string>() != now.sha256) not_chosen(key);
     return *now.plugin;
 }
 
-// One request to a native plugin's program: started directly with plugin.json's args (no shell), in a folder of its
-// own, with the short list of variables, the protocol and its folder.
-Reply ask_native(const std::string& key, const Native& plugin, const std::string& header, const std::string& input, std::chrono::seconds limit,
+// The folder the programs are copied to before they run: inside Genko's settings folder (the system's temporary folder
+// may forbid programs), each run in a folder of its own that only this user may enter, removed afterwards (what a crash
+// left behind, a day old, is removed at the next run).
+std::filesystem::path runs_folder() { return core::poses::config_dir() / "plugin-runs"; }
+
+void remove_old_runs(const std::filesystem::path& runs) {
+    std::error_code ec;
+    const auto now = std::filesystem::file_time_type::clock::now();
+    for (const auto& entry : std::filesystem::directory_iterator(runs, ec)) {
+        if (!core::path_to_utf8(entry.path().filename()).starts_with("run-")) continue;
+        std::error_code e;
+        const auto time = entry.last_write_time(e);
+        if (!e && now - time > std::chrono::hours(24)) std::filesystem::remove_all(entry.path(), e);
+    }
+}
+
+// The program about to run: plugin.json and the program read once more and checked against the choice, and the very
+// bytes checked written to a private folder and made executable there; that copy is what runs (a file changed after
+// the check never runs). GENKO_PLUGIN_HOME stays the plugin's own folder.
+struct Launch {
+    std::unique_ptr<QTemporaryDir> dir;
+    std::filesystem::path program;
+    Native plugin;
+};
+Launch prepare_native(const std::string& key, const std::string& chosen_sha256) {
+    Launch out;
+    std::string text;
+    try {
+        text = manifest_text(key);
+        out.plugin = parse_native(key, text);
+    } catch (const core::Error&) {
+        not_chosen(key);  // (it was usable when chosen: it has changed since)
+    }
+    const std::filesystem::path runs = runs_folder();
+    std::error_code ec;
+    std::filesystem::create_directories(runs, ec);
+    remove_old_runs(runs);
+    const auto copy_trouble = [&](const std::string& why) {
+        runner_trouble("the program of plugin " + key + " could not be copied to run it (" + why + ")");
+    };
+    out.dir = std::make_unique<QTemporaryDir>(QString::fromStdString(core::path_to_utf8(runs / "run-XXXXXX")));
+    if (!out.dir->isValid()) copy_trouble("no folder could be made in " + core::path_to_utf8(runs));
+    out.program = core::path_from_utf8(out.dir->path().toStdString()) / out.plugin.program.filename();
+    QFile source(QString::fromStdString(core::path_to_utf8(out.plugin.program)));
+    if (!source.open(QIODevice::ReadOnly)) not_chosen(key);
+    QFile copy(QString::fromStdString(core::path_to_utf8(out.program)));
+    if (!copy.open(QIODevice::WriteOnly | QIODevice::Truncate)) copy_trouble(copy.errorString().toStdString());
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(QByteArrayView(text.data(), static_cast<qsizetype>(text.size())));
+    hash.addData(QByteArrayView("\n", 1));
+    std::uintmax_t copied = 0;
+    for (;;) {
+        const QByteArray piece = source.read(qint64{1} << 20);
+        if (piece.isEmpty()) break;
+        copied += static_cast<std::uintmax_t>(piece.size());
+        if (copied > kMostProgramBytes) not_chosen(key);
+        hash.addData(piece);
+        if (copy.write(piece) != piece.size()) copy_trouble(copy.errorString().toStdString());
+    }
+    if (source.error() != QFileDevice::NoError) not_chosen(key);
+    copy.close();
+    if (copy.error() != QFileDevice::NoError) copy_trouble(copy.errorString().toStdString());
+    if (hash.result().toHex().toStdString() != chosen_sha256) not_chosen(key);
+    if (!copy.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner)) {
+        copy_trouble("it could not be made executable");
+    }
+#ifdef __linux__
+    // (a settings folder on a file system mounted noexec: said as such)
+    struct statvfs fs {};
+    if (::statvfs(out.dir->path().toLocal8Bit().constData(), &fs) == 0 && (fs.f_flag & ST_NOEXEC) != 0) {
+        runner_trouble("programs cannot run from Genko's settings folder on this computer (" + core::path_to_utf8(runs) +
+                       ": its file system is mounted noexec), so plugin " + key + " cannot run");
+    }
+#endif
+    return out;
+}
+
+// One request to a native plugin's program: its checked copy started directly with plugin.json's args (no shell), in
+// the copy's own folder, with the short list of variables, the protocol and the plugin's folder.
+Reply ask_native(const std::string& key, const Launch& launch, const std::string& header, const std::string& input, std::chrono::seconds limit,
                  std::size_t most, const std::stop_token& stop) {
-    QTemporaryDir dir;
-    if (!dir.isValid()) throw core::Error("io", "cannot make a folder for the plugin");
     QProcess process;
-    process.setProgram(QString::fromStdString(core::path_to_utf8(plugin.program)));
+    process.setProgram(QString::fromStdString(core::path_to_utf8(launch.program)));
     QStringList args;
-    for (const std::string& arg : plugin.args) args.push_back(QString::fromStdString(arg));
+    for (const std::string& arg : launch.plugin.args) args.push_back(QString::fromStdString(arg));
     process.setArguments(args);
-    process.setWorkingDirectory(dir.path());
+    process.setWorkingDirectory(launch.dir->path());
     QProcessEnvironment env = plugin_environment();
     env.insert(QStringLiteral("GENKO_PLUGIN_PROTOCOL"), QString::number(kProtocol));
-    env.insert(QStringLiteral("GENKO_PLUGIN_HOME"), QString::fromStdString(core::path_to_utf8(plugin.home)));
+    env.insert(QStringLiteral("GENKO_PLUGIN_HOME"), QString::fromStdString(core::path_to_utf8(launch.plugin.home)));
     process.setProcessEnvironment(env);
+    own_process_group(process);
     process.start();
     if (!process.waitForStarted(10000)) {
         runner_trouble("the program of plugin " + key + " could not be started (" + process.errorString().toStdString() + ")");
@@ -646,7 +764,7 @@ std::optional<std::filesystem::path> python() {
 
 Described describe(const std::string& key) {
     if (is_native(key)) {  // (plugin.json says it: nothing runs)
-        const Native plugin = chosen_native(key, false);
+        const Native plugin = chosen_native(key);
         return Described{key, plugin.name, plugin.params};
     }
     const Code code = chosen_code(key);
@@ -717,8 +835,8 @@ std::vector<std::tuple<std::string, std::string, double, double, double>> fields
 Image run(std::string_view kind, const Image& image, const Json& params, const std::stop_token& stop) {
     const std::string key(kind.starts_with(kPrefix) ? kind.substr(kPrefix.size()) : kind);
     const bool native = is_native(key);
-    const std::optional<Native> program = native ? std::optional<Native>(chosen_native(key, true)) : std::nullopt;
-    const Code code = native ? Code{{}, program->sha256} : chosen_code(key);
+    // (a native plugin: as last read here — its program read again only when no picture kept answers, as it is copied)
+    const Code code = native ? Code{{}, chosen_native(key).sha256} : chosen_code(key);
     const Image rgba = image.mode() == "RGBA" ? image : image.convert("RGBA");
     Json header = Json::object();
     if (native) header["protocol"] = kProtocol;
@@ -760,7 +878,7 @@ Image run(std::string_view kind, const Image& image, const Json& params, const s
             // (a large picture is given longer: the time limit is for a page-sized one at screen resolution)
             const std::size_t count = static_cast<std::size_t>(rgba.width()) * static_cast<std::size_t>(rgba.height());
             const auto limit = kRunTime * static_cast<std::int64_t>(std::max<std::size_t>(1, (count + kRunPixels - 1) / kRunPixels));
-            Reply reply = native ? ask_native(key, *program, head, pixels, limit, count * 4 + 65536, stop)
+            Reply reply = native ? ask_native(key, prepare_native(key, code.sha256), head, pixels, limit, count * 4 + 65536, stop)
                                  : ask_runner(key, code, "run", head, pixels, limit, count * 4 + 65536, stop);
             if (core::py_get(reply.header, "width") != Json(rgba.width()) || core::py_get(reply.header, "height") != Json(rgba.height()) ||
                 reply.data.size() != count * 4) {

@@ -2,6 +2,8 @@
 // The character properties Python's re reads (Modules/_sre: sre_lower_unicode, sre_upper_unicode, SRE_UNI_IS_*),
 // _sre.unicode_iscased, str.isidentifier for group names, str.isalpha for the inline flags' errors and
 // str.isprintable for repr() in the errors; test_contract_pyre checks every code point against Python.
+// From the Unicode Character Database 15.0.0: Copyright (c) 1991-2026 Unicode, Inc., under the Unicode License v3
+// (native/third_party/cpython/LICENSE-Unicode).
 
 #include "core/pyre_internal.hpp"
 

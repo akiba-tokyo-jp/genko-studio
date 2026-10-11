@@ -1,5 +1,8 @@
 #pragma once
 
+// Secret Labs' Regular Expression Engine: Copyright (c) 1997-2001 by Secret Labs AB. All rights reserved. This version
+// of the SRE library can be redistributed under CNRI's Python 1.6 license (native/third_party/cpython/LICENSE-SRE).
+
 #include <cstdint>
 #include <memory>
 #include <string>

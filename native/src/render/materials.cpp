@@ -403,8 +403,13 @@ void add_folder(const fs::path& config_dir, const std::string& name) {
     Json list = Json::array();
     for (const std::string& n : names) list.push_back(n);
     list.push_back(clean);
+    const std::string text = core::dump_python(list);
+    if (static_cast<std::int64_t>(text.size()) > kMaxListBytes) {  // (written, it could never be read again: as library.json)
+        throw core::PyValueError("the material folders would be too large for the materials panel (at most " +
+                                 std::to_string(kMaxListBytes >> 20) + " MB)");
+    }
     try {
-        storage::write_atomic(folders_file(config_dir), core::dump_python(list));
+        storage::write_atomic(folders_file(config_dir), text);
     } catch (const core::Error& error) {
         throw core::PyUncaught("OSError", "the material folders cannot be written: " + core::path_to_utf8(folders_file(config_dir)) + " (" +
                                               error.what() + ")");

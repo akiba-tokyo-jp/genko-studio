@@ -516,6 +516,30 @@ private slots:
         QCOMPARE(pictures(), std::size_t(0));
     }
 
+    // The empty folders' list (folders.json) is read up to 16 MB, as the library: a folder added that would make it larger
+    // is refused before it is written (written, it could never be read again), the list as it was.
+    void foldersListBounded() {
+        QTemporaryDir config;
+        const fs::path dir = core::path_from_utf8(config.path().toStdString());
+        materials::add_folder(dir, "最初");
+        const std::string big(16 * 1048576 - 200, 'x');
+        spit(materials::library_dir(dir) / "folders.json", "[\"" + big + "\"]");
+        QCOMPARE(materials::empty_folders(dir).size(), std::size_t(1));  // (read: within 16 MB)
+        const std::string kept = slurp(materials::library_dir(dir) / "folders.json");
+        try {
+            materials::add_folder(dir, std::string(300, 'y'));
+            QFAIL("a folders list past 16 MB was written");
+        } catch (const core::PyValueError& e) {
+            QCOMPARE(std::string(e.what()), std::string("the material folders would be too large for the materials panel (at most 16 MB)"));
+        }
+        QCOMPARE(slurp(materials::library_dir(dir) / "folders.json"), kept);
+        QCOMPARE(materials::empty_folders(dir).size(), std::size_t(1));
+        // one that fits is added, and read
+        materials::add_folder(dir, "短い");
+        QVERIFY(slurp(materials::library_dir(dir) / "folders.json").size() <= 16 * 1048576);
+        QCOMPARE(materials::empty_folders(dir), (std::vector<std::string>{big, "短い"}));
+    }
+
     // zip files that are broken, encrypted, zip64 or too large are refused before anything is added.
     void badZipsAreRefused() {
         QTemporaryDir config;

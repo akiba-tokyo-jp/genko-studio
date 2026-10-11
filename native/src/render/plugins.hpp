@@ -30,14 +30,17 @@
 // Python is needed only for this: Genko and its own filters never need it.
 //
 // Native plugins (this build only, COMP-04's native extension, docs/PLUGIN_NATIVE.md): a folder <config>/plugins/<key>/
-// holding a plugin.json (protocol 1: {"protocol": 1, "name", "executable", "args"?, "params"?}) and the program it
-// names, inside that folder. The program is started directly (no shell), with plugin.json's args, in a folder of its
-// own, the same short list of variables and GENKO_PLUGIN_PROTOCOL=1 and GENKO_PLUGIN_HOME (its folder); it reads the
-// request (one JSON line {"protocol": 1, "width", "height", "params"}, then the RGBA pixels) and writes the reply (one
-// JSON line {"ok": true, "width", "height"}, then the RGBA pixels; or {"ok": false, "error"}), as the runner does. It
-// is chosen as plugin.json and the program were then (either changed: chosen again), and checked again just before it
-// starts; its name and settings are plugin.json's, so nothing runs to list or describe it. The same limits in time and
-// in what it may write back.
+// (not a link) holding a plugin.json (protocol 1: {"protocol": 1, "name", "executable", "args"?, "params"?}) and the
+// program it names, inside that folder (not a link, readable). It is chosen as plugin.json and the program are then
+// (either changed: chosen again); its name and settings are plugin.json's, so nothing runs to list or describe it.
+// To run, plugin.json and the program are read once more, checked against the choice, and the very bytes checked are
+// copied to a private folder under the settings folder (<config>/plugin-runs/run-…, removed afterwards; not the
+// system's temporary folder, which may forbid programs): that copy is started directly (no shell), with plugin.json's
+// args, in that folder, with the same short list of variables and GENKO_PLUGIN_PROTOCOL=1 and GENKO_PLUGIN_HOME (the
+// plugin's own folder). It reads the request (one JSON line {"protocol": 1, "width", "height", "params"}, then the
+// RGBA pixels) and writes the reply (one JSON line {"ok": true, "width", "height"}, then the RGBA pixels; or {"ok":
+// false, "error"}), as the runner does. The same limits in time and in what it may write back. A plugin's process (the
+// runner's too) starts a process group of its own on POSIX, stopped whole when it is stopped (Windows: the process).
 
 namespace genko::render::plugins {
 

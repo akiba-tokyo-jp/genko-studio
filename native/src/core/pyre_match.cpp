@@ -4,7 +4,12 @@
 // stacks, never on the C++ stack), so a pattern matches the same spans with the same groups as in Python. Text
 // positions stand for sre's pointers (-1 for NULL). The search tries every position (sre's INFO prefix and charset
 // skipping only make it faster). Beyond sre: every step is counted against a Budget (sre's signal check is where the
-// count is made).
+// count is made), and so is the work sre does between two steps, in proportion to it: the marks saved and given back at
+// a place to go back to (as many as the highest mark set), the marks set to nothing below a new one, each choice of a
+// branch looked at, each item of a set looked through, each character a repeat walks over, the marks of a match found.
+// One Matcher (sre's state) serves the searches of one call over a text: its marks are made once, as sre's are.
+// Secret Labs' Regular Expression Engine: Copyright (c) 1997-2001 by Secret Labs AB. All rights reserved. This version
+// of the SRE library can be redistributed under CNRI's Python 1.6 license (native/third_party/cpython/LICENSE-SRE).
 
 #include <cstring>
 
@@ -75,6 +80,8 @@ bool category(Code code, char32_t ch) {
     }
 }
 
+}  // namespace
+
 class Matcher {
 public:
     Matcher(const std::vector<Code>& code, std::int64_t groups, std::u32string_view text, Budget& budget)
@@ -94,6 +101,7 @@ public:
         // general case
         start_ = ptr_ = ptr;
         std::int64_t status = match(0, true);
+        if (budget_.spent) return kStepsSpent;  // (spent between two steps: never a match found past the budget)
         must_advance_ = false;
         if (status == 0 && code_[0] == AT && (code_[1] == AT_BEGINNING || code_[1] == AT_BEGINNING_STRING)) {
             start_ = ptr_ = end;
@@ -105,7 +113,9 @@ public:
             start_ = ptr_ = ptr;
             if (!spend(1)) return kStepsSpent;
             status = match(0, false);
+            if (budget_.spent) return kStepsSpent;
         }
+        if (status > 0 && !spend(static_cast<std::uint64_t>(lastmark_ + 1))) return kStepsSpent;  // (the marks taken)
         return status;
     }
 
@@ -127,7 +137,7 @@ private:
     }
 
     bool spend(std::uint64_t steps) {
-        if (budget_.left < steps) {
+        if (budget_.spent || budget_.left < steps) {
             budget_.left = 0;
             budget_.spent = true;
             return false;
@@ -135,6 +145,8 @@ private:
         budget_.left -= steps;
         return true;
     }
+    // Work counted where its op goes on: once spent, the next step (or the search) stops.
+    void charge(std::uint64_t steps) { (void)spend(steps); }
 
     char32_t ch(std::int64_t at) const { return text_[static_cast<std::size_t>(at)]; }
 
@@ -176,10 +188,17 @@ private:
         }
     }
 
-    // SRE(charset): whether ch is in the set at code_[set]
-    bool charset(std::size_t set, Code chr) const {
+    // SRE(charset): whether ch is in the set at code_[set] (each item looked through counted)
+    bool charset(std::size_t set, Code chr) {
+        std::uint64_t looked = 0;
+        const bool in = charset_scan(set, chr, looked);
+        charge(looked);
+        return in;
+    }
+    bool charset_scan(std::size_t set, Code chr, std::uint64_t& looked) const {
         bool ok = true;
         for (;;) {
+            ++looked;
             switch (code_[set++]) {
                 case FAILURE: return !ok;
                 case LITERAL:
@@ -237,7 +256,7 @@ private:
         if (maxcount < end - ptr && maxcount != kMaxRepeat) end = ptr + maxcount;
         const auto walk = [&](auto&& keep) -> std::int64_t {
             const std::int64_t from = ptr;
-            while (ptr < end && keep(ch(ptr))) ++ptr;
+            while (ptr < end && !budget_.spent && keep(ch(ptr))) ++ptr;
             if (!spend(static_cast<std::uint64_t>(ptr - from) + 1)) return kStepsSpent;
             return ptr - ptr_;
         };
@@ -266,12 +285,16 @@ private:
         }
     }
 
+    // (the marks copied counted: a pattern of many groups copies them all at every place to go back to)
     void mark_push(std::int64_t lastmark) {
-        if (lastmark >= 0) data_.insert(data_.end(), mark_.begin(), mark_.begin() + static_cast<std::ptrdiff_t>(lastmark + 1));
+        if (lastmark < 0) return;
+        charge(static_cast<std::uint64_t>(lastmark + 1));
+        data_.insert(data_.end(), mark_.begin(), mark_.begin() + static_cast<std::ptrdiff_t>(lastmark + 1));
     }
     void mark_pop(std::int64_t lastmark, bool discard) {
         if (lastmark < 0) return;
         const auto n = static_cast<std::size_t>(lastmark + 1);
+        charge(n);
         std::copy(data_.end() - static_cast<std::ptrdiff_t>(n), data_.end(), mark_.begin());
         if (discard) data_.resize(data_.size() - n);
     }
@@ -395,7 +418,8 @@ dispatch:
             const auto i = static_cast<std::int64_t>(code_[pattern]);
             if ((i & 1) != 0) lastindex_ = i / 2 + 1;
             if (i > lastmark_) {
-                // lastmark is the highest valid index in the mark array: the marks it skips are NULL
+                // lastmark is the highest valid index in the mark array: the marks it skips are NULL (counted)
+                if (i > lastmark_ + 1) charge(static_cast<std::uint64_t>(i - lastmark_ - 1));
                 for (std::int64_t j = lastmark_ + 1; j < i; ++j) mark_[static_cast<std::size_t>(j)] = -1;
                 lastmark_ = i;
             }
@@ -483,6 +507,7 @@ dispatch:
             lastmark_save();
             if (repeat_ >= 0) mark_push(ctx().lastmark);
             for (; code_[pattern] != 0; pattern += code_[pattern]) {
+                if (!spend(1)) PYRE_RETURN_ERROR(kStepsSpent);  // (each choice looked at)
                 if (code_[pattern + 1] == LITERAL && (ptr >= end || static_cast<Code>(ch(ptr)) != code_[pattern + 2])) continue;
                 if (code_[pattern + 1] == IN && (ptr >= end || !charset(pattern + 3, ch(ptr)))) continue;
                 ptr_ = ptr;
@@ -903,21 +928,22 @@ exit:
 #undef PYRE_RETURN_ON_ERROR
 }
 
-}  // namespace
+Searcher::Searcher(const std::vector<Code>& code, std::int64_t groups, std::u32string_view text, Budget& budget)
+    : matcher_(std::make_unique<Matcher>(code, groups, text, budget)), budget_(budget) {}
 
-Searched search(const std::vector<Code>& code, std::int64_t groups, std::u32string_view text, std::int64_t start, bool must_advance,
-                Budget& budget) {
-    Matcher matcher(code, groups, text, budget);
-    const std::int64_t status = matcher.search(start, must_advance);
+Searcher::~Searcher() = default;
+
+Searched Searcher::search(std::int64_t start, bool must_advance) {
+    const std::int64_t status = matcher_->search(start, must_advance);
     Searched out;
     if (status <= 0) {
-        if (status < 0 && !budget.spent) budget.spent = true;  // (an internal error: refused as too much, never a match)
+        if (status < 0 && !budget_.spent) budget_.spent = true;  // (an internal error: refused as too much, never a match)
         return out;
     }
     out.found = true;
-    out.start = matcher.start();
-    out.end = matcher.ptr();
-    out.marks = matcher.marks();
+    out.start = matcher_->start();
+    out.end = matcher_->ptr();
+    out.marks = matcher_->marks();
     return out;
 }
 

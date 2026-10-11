@@ -262,7 +262,7 @@ private slots:
         std::filesystem::create_directories(folder / "tint");
         std::filesystem::create_directories(folder / "broken");
         std::ofstream(folder / "tint" / "plugin.json")
-            << R"({"protocol": 1, "name": "色づけ", "executable": "tint", "params": {"amount": {"label": "強さ", "min": 0, "max": 1, "default": 0.5}}})";
+            << R"({"protocol": 1, "name": "色づけ", "executable": "tint", "args": ["--soft", "a b"], "params": {"amount": {"label": "強さ", "min": 0, "max": 1, "default": 0.5}}})";
         std::ofstream(folder / "tint" / "tint") << "not a program: never started here";
         std::ofstream(folder / "broken" / "plugin.json") << R"({"protocol": 2, "name": "x", "executable": "x"})";
         QString question;
@@ -297,6 +297,7 @@ private slots:
         QCOMPARE(broken_tip, QStringLiteral("プラグイン「broken」の plugin.json が使えません（protocol は 1 にします）"));
         QVERIFY(!broken_checkable);
         QVERIFY(question.startsWith(QStringLiteral("「tint」（プログラム）を動かしてよいですか。")));
+        QVERIFY2(question.contains(QStringLiteral("動かすプログラム: tint\n引数: --soft \"a b\"")), qPrintable(question));  // (what will run, as plugin.json says)
         QVERIFY(render::plugins::allowed("tint"));
         QVERIFY(!render::plugins::allowed("broken"));
         // offered among the filters by plugin.json's name (its settings too), nothing started to know them
@@ -313,12 +314,61 @@ private slots:
         QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin twin cannot be used (a Python plugin twin.py has the same name)")),
                  QStringLiteral("プラグイン「twin」の plugin.json が使えません（同じ名前の Python のプラグイン（twin.py）があります）"));
         QCOMPARE(app::wording::error(QStringLiteral("plugin fails failed (no paper today)")), QStringLiteral("プラグイン「fails」の処理が失敗しました"));
+        QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its folder is a link)")),
+                 QStringLiteral("プラグイン「x」の plugin.json が使えません（プラグインのフォルダーがリンクです（設定のフォルダーの plugins の中に置きます））"));
+        QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its program run is a link)")),
+                 QStringLiteral("プラグイン「x」の plugin.json が使えません（プログラム「run」がリンクです（プラグインのフォルダーの中のファイルにします））"));
+        QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its program tint cannot be read)")),
+                 QStringLiteral("プラグイン「x」の plugin.json が使えません（プログラム「tint」を読めません（読める権限が要ります））"));
+        QCOMPARE(app::wording::error(QStringLiteral("the program of plugin tint could not be copied to run it (No space left on device)")),
+                 QStringLiteral("プラグイン「tint」のプログラムを、動かすために設定のフォルダーへ写せませんでした（空きや権限を確かめてください）"));
+        QCOMPARE(app::wording::error(QStringLiteral("programs cannot run from Genko's settings folder on this computer (/home/a/.config/genko/plugin-runs: "
+                                                    "its file system is mounted noexec), so plugin tint cannot run")),
+                 QStringLiteral("このコンピューターでは Genko の設定のフォルダー（/home/a/.config/genko/plugin-runs）の中でプログラムを動かせないため、プラグイン「tint」を動かせませんでした"));
         render::plugins::Settings off = render::plugins::settings();
         off.enabled = false;
         off.chosen = Json::object();
         render::plugins::save_settings(off);
         std::filesystem::remove_all(folder / "tint");
         std::filesystem::remove_all(folder / "broken");
+    }
+
+    void pluginOfTwoKindsTakenBack() {
+        // (twin.py and twin/plugin.json: the Python file is the plugin, the folder's row is shown unusable beside it;
+        // the Python one, chosen, is taken back by unchecking its own row)
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        const std::filesystem::path folder = render::plugins::folder();
+        std::filesystem::create_directories(folder / "twin");
+        std::ofstream(folder / "twin.py") << "def run(image):\n    return image\n";
+        std::ofstream(folder / "twin" / "plugin.json") << R"({"protocol": 1, "name": "双子", "executable": "twin"})";
+        std::ofstream(folder / "twin" / "twin") << "not a program: never started here";
+        render::plugins::Settings on = render::plugins::settings();
+        on.enabled = true;
+        render::plugins::save_settings(on);
+        render::plugins::choose("twin", true);
+        QVERIFY(render::plugins::allowed("twin"));
+        int rows = 0;
+        s.answers.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::PluginsDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            for (int i = 0; i < d->list->count(); ++i) {
+                QListWidgetItem* row = d->list->item(i);
+                if (row->data(Qt::UserRole).toString() != QStringLiteral("twin")) continue;
+                ++rows;
+                if (!row->data(Qt::UserRole + 2).toBool()) row->setCheckState(Qt::Unchecked);
+            }
+            return d->keep() ? int(QDialog::Accepted) : int(QDialog::Rejected);
+        };
+        w->action("act_plugin_settings")->trigger();
+        QCOMPARE(rows, 2);
+        QVERIFY(!render::plugins::allowed("twin"));
+        render::plugins::Settings off = render::plugins::settings();
+        off.enabled = false;
+        off.chosen = Json::object();
+        render::plugins::save_settings(off);
+        std::filesystem::remove(folder / "twin.py");
+        std::filesystem::remove_all(folder / "twin");
     }
 
     void timelapseNeedsASavedBook() {

@@ -5,8 +5,11 @@
 // again); a picture filtered through it, directly and by filter_raster, with its settings, its environment (no secrets,
 // the protocol, its folder); and what is refused: plugin.json that cannot be used (not JSON, another protocol, no name,
 // a program missing, outside its folder or given as an absolute path, args that are not texts, a Python plugin of the
-// same name), a program that cannot be started, that crashes, refuses, answers with another size, writes back too much
-// or takes too long (stopped at kRunTime; and at once when no longer wanted). No Python.
+// same name; links: the program, a folder on its way out of the plugin's folder, the plugin's folder itself; a program
+// that cannot be read), a program that cannot be started, that crashes, refuses, answers with another size, writes back
+// too much or takes too long (stopped at kRunTime; and at once when no longer wanted). What runs is a copy of the bytes
+// checked against the choice, in a private folder under the settings folder, removed afterwards; a program changed
+// after the choice never runs. No Python.
 
 #include <QtTest>
 
@@ -69,6 +72,7 @@ class TestNativePlugins : public QObject {
     QString config_;
     QString folder_;
     QString program_name_;  // (the program's file name in a plugin's folder: with .exe on Windows)
+    bool unreadable_ = false;  // (the unreadable plugin's program cannot be read by this process)
 
     QString mark() const { return scratch_.path() + "/ran.txt"; }
 
@@ -126,6 +130,7 @@ private slots:
         install("sleepy", manifest("遅い", "sleep"));
         install("flood", manifest("あふれる", "flood"));
         install("noexec", manifest("動かない", "invert"));
+        write(folder_ + "/noexec/" + program_name_, "not a program this computer runs\n");  // (no format any system starts)
         // plugin.json that cannot be used
         install("badjson", "{not json");
         install("listjson", "[1, 2]");
@@ -138,6 +143,24 @@ private slots:
         install("badargs", R"({"protocol": 1, "name": "x", "executable": "filter", "args": "invert"})");
         install("twin", manifest("双子", "invert"));
         write(folder_ + "/twin.py", "def run(image):\n    return image\n");
+        install("where", manifest("どこ", "where"));
+        // links: the program itself; a folder on the program's path leading out of the plugin's folder; the plugin's
+        // folder itself (all made by the test: the program is a copy of the test program)
+        install("linked", R"({"protocol": 1, "name": "x", "executable": "run"})");
+        QVERIFY(QFile::link(folder_ + "/linked/" + program_name_, folder_ + "/linked/run"));
+        const QString elsewhere = scratch_.path() + "/elsewhere";
+        QVERIFY(QDir().mkpath(elsewhere + "/home"));
+        QVERIFY(QFile::copy(QStringLiteral(GENKO_TEST_NATIVE_PLUGIN), elsewhere + "/" + program_name_));
+        install("outlink", R"({"protocol": 1, "name": "x", "executable": "bin/)" + program_name_.toStdString() + R"("})", false);
+        QVERIFY(QFile::link(elsewhere, folder_ + "/outlink/bin"));
+        write(elsewhere + "/home/plugin.json", manifest("x", "invert"));
+        QVERIFY(QFile::copy(QStringLiteral(GENKO_TEST_NATIVE_PLUGIN), elsewhere + "/home/" + program_name_));
+        QVERIFY(QFile::link(elsewhere + "/home", folder_ + "/folderlink"));
+        // a program that may be run but not read (no right to read it, as a person's other files may be)
+        install("unreadable", manifest("読めない", "invert"));
+        QVERIFY(QFile::setPermissions(folder_ + "/unreadable/" + program_name_, QFile::ExeOwner));
+        QFile probe(folder_ + "/unreadable/" + program_name_);
+        unreadable_ = !probe.open(QIODevice::ReadOnly);  // (a process that may read anything reads it all the same)
         // not plugins: a folder without plugin.json, folders starting with "_" or "."
         QVERIFY(QDir().mkpath(folder_ + "/empty"));
         install("_private", manifest("x", "invert"));
@@ -152,9 +175,9 @@ private slots:
             keys.push_back(item.key + (item.native ? "/" : ".py"));
             by_key[item.key + (item.native ? "/" : ".py")] = item;
         }
-        QCOMPARE(keys, (std::vector<std::string>{"absolute/", "badargs/", "badjson/", "crasher/", "environment/", "fails/", "flood/", "listjson/",
-                                                 "negative/", "noexec/", "noname/", "noprogram/", "outside/", "protocol2/", "sleepy/", "small/",
-                                                 "twin.py", "twin/"}));
+        QCOMPARE(keys, (std::vector<std::string>{"absolute/", "badargs/", "badjson/", "crasher/", "environment/", "fails/", "flood/", "folderlink/",
+                                                 "linked/", "listjson/", "negative/", "noexec/", "noname/", "noprogram/", "outlink/", "outside/",
+                                                 "protocol2/", "sleepy/", "small/", "twin.py", "twin/", "unreadable/", "where/"}));
         const auto& negative = by_key["negative/"];
         QVERIFY(negative.native && !negative.chosen && !negative.problem && negative.sha256.size() == 64);
         QCOMPARE((*negative.manifest)["name"], Json("反転（ネイティブ）"));
@@ -169,6 +192,14 @@ private slots:
         QCOMPARE(problem("absolute/"), cannot.arg("absolute", "its executable must be a path inside the plugin's folder"));
         QCOMPARE(problem("badargs/"), cannot.arg("badargs", "its args must be a list of texts"));
         QCOMPARE(problem("twin/"), cannot.arg("twin", "a Python plugin twin.py has the same name"));
+        QCOMPARE(problem("linked/"), cannot.arg("linked", "its program run is a link"));
+        QCOMPARE(problem("outlink/"), cannot.arg("outlink", "its executable must be a path inside the plugin's folder"));
+        QCOMPARE(problem("folderlink/"), cannot.arg("folderlink", "its folder is a link"));
+        if (unreadable_) {
+            QCOMPARE(problem("unreadable/"), cannot.arg("unreadable", "its program " + program_name_ + " cannot be read"));
+        } else {
+            qInfo("this process may read any file: the program without the right to read it is read all the same");
+        }
         QVERIFY(!by_key["twin.py"].native && !by_key["twin.py"].problem);
         QVERIFY(!QFile::exists(mark()));  // (no program was started)
         // off at first: nothing runs, nothing is offered
@@ -236,7 +267,16 @@ private slots:
             file.write("changed", 7);
         }
         QVERIFY(!plugins::allowed("negative"));
+        const QByteArray ran_before = [&] {
+            QFile f(mark());
+            return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+        }();
+        plugins::forget_made();
         QVERIFY(refusal([] { plugins::run("plugin:negative", picture()); }).startsWith("plugin_not_allowed: plugin negative is not chosen to run"));
+        {  // (the program changed after the choice never ran)
+            QFile f(mark());
+            QCOMPARE(f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(), ran_before);
+        }
         QVERIFY(refusal([&] { plugins::choose("negative", true, shown); }).startsWith("plugin_changed: plugin negative changed since the list was shown"));
         QVERIFY(!plugins::allowed("negative"));
         plugins::choose("negative", true, listed_sha("negative"));
@@ -256,6 +296,27 @@ private slots:
         enable(false);
     }
 
+    // What runs is a copy of the bytes checked: in a private folder under the settings folder (not the plugin's folder,
+    // not the system's temporary one), its working folder too, removed when it has answered; GENKO_PLUGIN_HOME is the
+    // plugin's own folder.
+    void runsACopy() {
+        enable(true);
+        plugins::choose("where", true);
+        QFile::remove(folder_ + "/where/where.txt");
+        QCOMPARE(plugins::run("plugin:where", picture()).getpixel(30, 30), (std::vector<double>{225, 135, 35, 255}));
+        QFile where(folder_ + "/where/where.txt");
+        QVERIFY(where.open(QIODevice::ReadOnly));
+        const QStringList lines = QString::fromUtf8(where.readAll()).split(QLatin1Char('\n'));
+        QVERIFY(lines.size() >= 2);
+        const QString runs = QDir::cleanPath(config_ + "/plugin-runs");
+        QVERIFY2(QDir::cleanPath(QFileInfo(lines[0]).absolutePath()).startsWith(runs + "/run-"), qPrintable(lines[0]));
+        QCOMPARE(QFileInfo(lines[0]).fileName(), program_name_);
+        QCOMPARE(QDir::cleanPath(lines[1]), QDir::cleanPath(QFileInfo(lines[0]).absolutePath()));  // (its working folder: the copy's)
+        QVERIFY2(!QFileInfo::exists(QFileInfo(lines[0]).absolutePath()), "the copy's folder is removed");
+        QVERIFY(QDir(config_ + "/plugin-runs").entryList(QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
+        enable(false);
+    }
+
     // What cannot be chosen, and a program's trouble.
     void refusals() {
         enable(true);
@@ -264,6 +325,12 @@ private slots:
         QCOMPARE(refusal([] { plugins::choose("noprogram", true); }), cannot.arg("noprogram", "its program missing is not in its folder"));
         QCOMPARE(refusal([] { plugins::choose("outside", true); }), cannot.arg("outside", "its executable must be a path inside the plugin's folder"));
         QCOMPARE(refusal([] { plugins::choose("absolute", true); }), cannot.arg("absolute", "its executable must be a path inside the plugin's folder"));
+        QCOMPARE(refusal([] { plugins::choose("linked", true); }), cannot.arg("linked", "its program run is a link"));
+        QCOMPARE(refusal([] { plugins::choose("outlink", true); }), cannot.arg("outlink", "its executable must be a path inside the plugin's folder"));
+        QCOMPARE(refusal([] { plugins::choose("folderlink", true); }), cannot.arg("folderlink", "its folder is a link"));
+        if (unreadable_) {
+            QCOMPARE(refusal([] { plugins::choose("unreadable", true); }), cannot.arg("unreadable", "its program " + program_name_ + " cannot be read"));
+        }
         QCOMPARE(refusal([] { plugins::choose("twin", false); }), QString());  // (taking a choice back needs nothing)
         QVERIFY(refusal([] { plugins::choose("none", true); }).endsWith("no plugin none"));
         QVERIFY(!plugins::allowed("badjson") && !plugins::allowed("outside"));
@@ -274,11 +341,8 @@ private slots:
         QVERIFY(refusal([] { plugins::run("plugin:flood", picture()); }).startsWith("plugin_runner: plugin flood wrote back more than a picture"));
         // the environment: no secrets, the protocol, its own folder
         QCOMPARE(plugins::run("plugin:environment", picture()).getpixel(3, 3), (std::vector<double>{0, 255, 77, 255}));
-#ifndef _WIN32
-        // a program that cannot be started (not executable: chosen as it is, its permission taken away after)
-        QVERIFY(QFile::setPermissions(folder_ + "/noexec/" + program_name_, QFile::ReadOwner | QFile::WriteOwner));
+        // a program that cannot be started (bytes no system runs: its copy is made and refused at the start)
         QVERIFY(refusal([] { plugins::run("plugin:noexec", picture()); }).startsWith("plugin_runner: the program of plugin noexec could not be started ("));
-#endif
         // the ones that can be described are offered, the others not
         std::vector<std::string> offered;
         for (const auto& d : plugins::available()) offered.push_back(d.key);
@@ -307,11 +371,18 @@ private slots:
         later.join();
         QVERIFY(cancelled);
         QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
+#ifndef _WIN32
+        // what it started was stopped with it (its process group): nothing writes after it
+        std::this_thread::sleep_for(std::chrono::milliseconds(4000));
+        QVERIFY(!QFile::exists(folder_ + "/sleepy/grandchild.txt"));
+#endif
         clock.restart();
         QCOMPARE(refusal([] { plugins::run("plugin:sleepy", picture()); }),
                  QStringLiteral("plugin_runner: plugin sleepy did not finish in %1 seconds").arg(plugins::kRunTime.count()));
         QVERIFY(clock.elapsed() >= plugins::kRunTime.count() * 1000 - 1000);
         QVERIFY2(clock.elapsed() < plugins::kRunTime.count() * 1000 + 20000, qPrintable(QString::number(clock.elapsed())));
+        // (stopped there as when no longer wanted, its process group with it: checked above, where what it started has
+        // not yet written)
         enable(false);
     }
 };

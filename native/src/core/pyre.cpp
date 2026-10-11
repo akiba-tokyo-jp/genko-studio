@@ -1,3 +1,6 @@
+// Secret Labs' Regular Expression Engine: Copyright (c) 1997-2001 by Secret Labs AB. All rights reserved. This version
+// of the SRE library can be redistributed under CNRI's Python 1.6 license (native/third_party/cpython/LICENSE-SRE).
+
 #include "core/pyre.hpp"
 
 #include <QByteArray>
@@ -362,16 +365,21 @@ std::uint32_t octal(std::u32string_view digits) {
     return value;
 }
 
-// int(digits) of ASCII digits: ValueError past Python's 4300 digits; held up to 2^62 (past every group number)
+// int(digits) of ASCII digits: ValueError past Python's 4300 digits; held at 2^62 past that (past every group number:
+// never multiplied past it)
 std::int64_t int_of(std::u32string_view digits) {
     if (digits.size() > 4300) {
         throw PyValueError("Exceeds the limit (4300 digits) for integer string conversion: value has " + std::to_string(digits.size()) +
                            " digits; use sys.set_int_max_str_digits() to increase the limit");
     }
+    constexpr std::int64_t kHeld = std::int64_t{1} << 62;
     std::int64_t value = 0;
     for (const char32_t c : digits) {
-        value = value * 10 + static_cast<std::int64_t>(c - U'0');
-        if (value > (std::int64_t{1} << 62)) value = std::int64_t{1} << 62;
+        if (value >= kHeld / 10) {
+            value = kHeld;
+            continue;
+        }
+        value = std::min(value * 10 + static_cast<std::int64_t>(c - U'0'), kHeld);
     }
     return value;
 }
@@ -480,7 +488,8 @@ Template template_of(std::string_view repl, std::int64_t groups, const std::vect
 
 [[noreturn]] void too_slow() {
     throw Error("regex_too_slow", "the pattern takes too long to search (more than " + std::to_string(kRegexSteps) +
-                                      " steps, or a million places to go back to): this build stops it rather than hold the window");
+                                      " steps, a million places to go back to or 4 million entries of data kept to go back): this build stops it rather "
+                                      "than hold the window");
 }
 
 }  // namespace
@@ -585,11 +594,12 @@ std::vector<std::pair<std::int64_t, std::int64_t>> match_spans(const pyre::Searc
 template <class Found>
 void each_match(const std::vector<pyre::Code>& code, std::int64_t groups, const std::u32string& chars, PyReBudget& budget, Found&& found) {
     pyre::Budget left{budget.steps, false};
+    pyre::Searcher searcher(code, groups, chars, left);
     std::int64_t start = 0;
     bool must_advance = false;
     const auto end = static_cast<std::int64_t>(chars.size());
     while (start <= end) {
-        const pyre::Searched s = pyre::search(code, groups, chars, start, must_advance, left);
+        const pyre::Searched s = searcher.search(start, must_advance);
         budget.steps = left.left;
         if (left.spent) too_slow();
         if (!s.found) break;

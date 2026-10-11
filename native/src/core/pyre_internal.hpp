@@ -4,6 +4,8 @@
 // _compiler.py, _casefix.py, _constants.py and Modules/_sre/sre_lib.h, sre.c; PSF License, native/third_party/cpython).
 // Each part is the Python (or C) it is named after, decision for decision: the same pattern compiles to the same code,
 // the same code matches the same spans with the same groups, and a pattern Python cannot read fails with Python's words.
+// Secret Labs' Regular Expression Engine: Copyright (c) 1997-2001 by Secret Labs AB. All rights reserved. This version
+// of the SRE library can be redistributed under CNRI's Python 1.6 license (native/third_party/cpython/LICENSE-SRE).
 
 #include <array>
 #include <cstdint>
@@ -160,8 +162,8 @@ std::vector<Code> compile(const Parsed& parsed, int flags);
 
 // --- sre_lib.h / sre.c --------------------------------------------------------------------------------------------
 
-// What a search may spend (this build's bound: Python has none): each opcode dispatched and each character a
-// repeat or a backreference walks over is a step.
+// What a search may spend (this build's bound: Python has none): each opcode dispatched, each character a repeat or
+// a backreference walks over, and the work between two of sre's steps in proportion to it (pyre_match.cpp) are steps.
 struct Budget {
     std::uint64_t left = 0;
     bool spent = false;
@@ -174,8 +176,22 @@ struct Searched {
     std::vector<std::int64_t> marks;  // state.mark (-1: NULL), lastmark + 1 of them
 };
 
-// SRE(search) from `start` over text[0, end) (state.must_advance as asked): Budget::spent when the steps ran out.
-Searched search(const std::vector<Code>& code, std::int64_t groups, std::u32string_view text, std::int64_t start, bool must_advance,
-                Budget& budget);
+class Matcher;
+
+// sre's state for the searches of one call over one text (pattern_subx's, findall's): its marks made once, as sre
+// makes them once for the state; each search resets the rest (state_reset).
+class Searcher {
+public:
+    Searcher(const std::vector<Code>& code, std::int64_t groups, std::u32string_view text, Budget& budget);
+    ~Searcher();
+    Searcher(const Searcher&) = delete;
+    Searcher& operator=(const Searcher&) = delete;
+    // SRE(search) from `start` over text[0, end) (state.must_advance as asked): Budget::spent when the steps ran out.
+    Searched search(std::int64_t start, bool must_advance);
+
+private:
+    std::unique_ptr<Matcher> matcher_;
+    Budget& budget_;
+};
 
 }  // namespace genko::core::pyre

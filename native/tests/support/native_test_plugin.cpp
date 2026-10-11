@@ -3,10 +3,13 @@
 //   invert        the colours turned over, the alpha kept; the setting "red" (0..255) put in the red of every pixel
 //   environment   green when GENKO_TEST_SECRET was not passed on and GENKO_PLUGIN_PROTOCOL is 1, red otherwise; the
 //                 blue the number in home.txt of GENKO_PLUGIN_HOME (its own folder)
+//   where         as invert, and where it runs written to where.txt in GENKO_PLUGIN_HOME: the program's path (argv[0])
+//                 on the first line, the working folder on the second
 //   fail          {"ok": false, "error": "no paper today"}
 //   small         a picture of 1 × 1
 //   crash         stops (abort) after reading the request
-//   sleep         sleeps for 1000 seconds
+//   sleep         sleeps for 1000 seconds (POSIX: having started a process of its own that writes grandchild.txt in
+//                 GENKO_PLUGIN_HOME after 3 seconds, unless it is stopped with it)
 //   flood         writes 64 MB back
 // "--mark PATH" (anywhere after the first argument): a line written to PATH first, so a test sees that it ran.
 // No Qt, no Genko library: a plugin is any program that speaks the protocol.
@@ -15,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -24,6 +28,8 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace {
@@ -67,7 +73,13 @@ int main(int argc, char** argv) {
     std::string pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4, '\0');
     std::cin.read(pixels.data(), static_cast<std::streamsize>(pixels.size()));
     const std::string size = R"("width": )" + std::to_string(width) + R"(, "height": )" + std::to_string(height);
-    if (what == "invert") {
+    if (what == "where") {
+        const char* home = std::getenv("GENKO_PLUGIN_HOME");
+        if (home != nullptr) {
+            std::ofstream(std::string(home) + "/where.txt") << argv[0] << "\n" << std::filesystem::current_path().string() << "\n";
+        }
+    }
+    if (what == "invert" || what == "where") {
         const long red = number_of(line, "red", -1);
         for (std::size_t i = 0; i < pixels.size(); i += 4) {
             for (std::size_t c = 0; c < 3; ++c) pixels[i + c] = static_cast<char>(255 - static_cast<unsigned char>(pixels[i + c]));
@@ -98,6 +110,13 @@ int main(int argc, char** argv) {
     } else if (what == "crash") {
         std::abort();
     } else if (what == "sleep") {
+#ifndef _WIN32
+        if (::fork() == 0) {  // (the process it starts: stopped with it, or it writes grandchild.txt)
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            if (const char* home = std::getenv("GENKO_PLUGIN_HOME")) std::ofstream(std::string(home) + "/grandchild.txt") << "ran on\n";
+            std::_Exit(0);
+        }
+#endif
         std::this_thread::sleep_for(std::chrono::seconds(1000));
     } else if (what == "flood") {
         const std::string block(1 << 20, 'x');

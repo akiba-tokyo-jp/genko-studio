@@ -967,8 +967,8 @@ private slots:
         QCOMPARE(searched, 0);
         QCOMPARE(counted, QStringLiteral("正規表現が読めません"));
         QCOMPARE(s.ops.size(), count);
-        // a pattern that would search for hours (Python's would): stopped and said, in about a second at most, the window
-        // not held; nothing sent
+        // a pattern that would search for hours (Python's would): stopped and said, the window not held (the search and
+        // 置換 each stop in under a second in a release build; 15 s for both leaves room for a sanitizer build); nothing sent
         s.put(Json{{"op", "add_line"}, {"text", std::string(40, 'a') + "!"}, {"x_mm", 10.0}, {"y_mm", 10.0}, {"w_mm", 20.0}, {"h_mm", 30.0}});
         const std::size_t before_slow = s.ops.size();
         QElapsedTimer slow;
@@ -987,7 +987,7 @@ private slots:
         QCOMPARE(searched, 0);
         QCOMPARE(counted, QStringLiteral("この正規表現は探すのに時間がかかりすぎるため、探すのをやめました（書き方を見直してください）"));
         QCOMPARE(s.ops.size(), before_slow);
-        QVERIFY2(slow.elapsed() < 60000, qPrintable(QString::number(slow.elapsed())));
+        QVERIFY2(slow.elapsed() < 15000, qPrintable(QString::number(slow.elapsed())));
         // nothing there
         s.answers.responder->exec = [&](QDialog* dialog) {
             auto* d = qobject_cast<app::ReplaceDialog*>(dialog);
@@ -1351,8 +1351,9 @@ private slots:
         QCOMPARE(w::error(QStringLiteral("ops[0] cut_balloon: points needs [x_mm, y_mm]")), QStringLiteral("点は [x, y]（mm）の 2 つの数で指定します"));
         QCOMPARE(w::error(QStringLiteral("ops[0] replace_text: the pattern cannot be read: missing ), unterminated subpattern at position 0")),
                  QStringLiteral("正規表現が読めません"));
-        QCOMPARE(w::error(QStringLiteral("ops[0] replace_text: the pattern takes too long to search (more than 100000000 steps, or a million "
-                                         "places to go back to): this build stops it rather than hold the window")),
+        QCOMPARE(w::error(QStringLiteral("ops[0] replace_text: the pattern takes too long to search (more than 100000000 steps, a million "
+                                         "places to go back to or 4 million entries of data kept to go back): this build stops it rather "
+                                         "than hold the window")),
                  QStringLiteral("この正規表現は探すのに時間がかかりすぎるため、置き換えませんでした（原稿は変わりません）。書き方を見直してください"));
         QCOMPARE(w::error(QStringLiteral("ops[0] replace_text: the pattern nests too deeply (groups and look-arounds at most 200 levels inside "
                                          "one another)")),

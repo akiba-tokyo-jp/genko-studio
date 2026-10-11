@@ -691,6 +691,8 @@ private slots:
         using app::wording::error;
         QCOMPARE(error(std::string("the material library would be too large for the materials panel (at most 16 MB)")),
                  QStringLiteral("素材ライブラリの一覧が大きくなりすぎるので、書き換えませんでした（16 MB まで）"));
+        QCOMPARE(error(std::string("the material folders would be too large for the materials panel (at most 16 MB)")),
+                 QStringLiteral("素材のフォルダーの一覧が大きくなりすぎるので、フォルダーを足しませんでした（16 MB まで）"));
         QCOMPARE(error(std::string("the pack.json is too large (at most 16 MB): pack.json")), QStringLiteral("素材パックの pack.json が大きすぎます（16 MB まで）"));
         QCOMPARE(error(std::string("the pack.json is a link or not a file: /x/pack.json")),
                  QStringLiteral("素材パックの pack.json がリンクかファイルではないので読みません"));

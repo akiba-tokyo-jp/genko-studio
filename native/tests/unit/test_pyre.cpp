@@ -1,14 +1,16 @@
 // core/pyre's own bounds (SPEC COMP-01a), without Python: Python 3.12's re searches on for hours (or until its memory
 // runs out) where a pattern backtracks without end, and stops with RecursionError at about 490 groups inside one
-// another; this build refuses such a search when it has spent kRegexSteps steps or holds a million places to go back
-// to — for the whole book in replace_text, which leaves the book as it was and says so — and refuses groups more than
-// 200 deep. And a few of Python's results (test_contract_pyre has them all, against Python).
+// another; this build refuses such a search when it has spent kRegexSteps steps (sre's steps and the work between
+// them) or holds a million places to go back to or 4 million entries of data kept to go back — for the whole book in
+// replace_text, which leaves the book as it was and says so — and refuses groups more than 200 deep. And a few of
+// Python's results (test_contract_pyre has them all, against Python).
 
 #include <QtTest>
 
 #include <QElapsedTimer>
 
 #include <string>
+#include <vector>
 
 #include "core/actor.hpp"
 #include "core/command_bus.hpp"
@@ -51,7 +53,8 @@ private slots:
         QCOMPARE(code_of([] { PyPattern("a\n(", 0); }), std::string("python_error: missing ), unterminated subpattern at position 2 (line 2, column 1)"));
     }
 
-    // A pattern that backtracks without end (Python's runs for hours) stops when its steps are spent, in about a second.
+    // A pattern that backtracks without end (Python's runs for hours) stops when its steps are spent, in under a second in
+    // a release build (each bound here 10 s: room for a sanitizer build on a busy machine).
     void searchesAreBounded() {
         const std::string text = std::string(60, 'a') + "!";
         QElapsedTimer clock;
@@ -61,7 +64,7 @@ private slots:
                  std::string("regex_too_slow: the pattern takes too long to search ("));
         QCOMPARE(budget.steps, std::uint64_t{0});
         qInfo("stopped after %lld ms", static_cast<long long>(clock.elapsed()));
-        QVERIFY2(clock.elapsed() < 60000, qPrintable(QString::number(clock.elapsed())));
+        QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
         // the budget is the whole search's: what one line spent the next has no more
         PyReBudget shared{1000};
         const PyPattern any(".*a", 0);
@@ -73,10 +76,56 @@ private slots:
         clock.restart();
         PyReBudget deep;
         QCOMPARE(code_of([&] { PyPattern("(?:a|){4294967294}", 0).subn("x", "aaa", nullptr, deep); }).substr(0, 14), std::string("regex_too_slow"));
-        QVERIFY2(clock.elapsed() < 60000, qPrintable(QString::number(clock.elapsed())));
+        qInfo("a group repeated without end: stopped after %lld ms", static_cast<long long>(clock.elapsed()));
+        QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
         // the find dialog's count is bounded the same way
         PyReBudget counted;
         QCOMPARE(code_of([&] { PyPattern("(a+)+b", 0).count(text, counted); }).substr(0, 14), std::string("regex_too_slow"));
+    }
+
+    // Work sre does between two of its steps is counted too: the marks saved and given back at each place to go back to
+    // (a pattern of many groups copies them all), the marks set to nothing below a new one, each choice of a branch
+    // looked at, each item of a set looked through. So a pattern of 1000 or 3000 groups, of a set of 5000 characters
+    // outside the BMP (no bitmap: a list) or of 5000 choices, backtracking without end, stops when its steps are spent,
+    // as quickly as one without them (counted as sre's steps alone: 25 s, 100 s, and minutes).
+    void costlyStepsAreCounted() {
+        const std::string text = std::string(60, 'a');
+        std::string groups1000;
+        for (int i = 0; i < 1000; ++i) groups1000 += "()";
+        std::string groups3000;
+        for (int i = 0; i < 3000; ++i) groups3000 += "()";
+        std::string wide;  // (U+10000 and on, each written as itself)
+        for (char32_t c = 0x10000; c < 0x10000 + 5000; ++c) {
+            wide += static_cast<char>(0xF0 | (c >> 18));
+            wide += static_cast<char>(0x80 | ((c >> 12) & 0x3F));
+            wide += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
+            wide += static_cast<char>(0x80 | (c & 0x3F));
+        }
+        std::string choices;
+        for (int i = 0; i < 5000; ++i) choices += "b" + std::to_string(i) + "|";
+        const std::vector<std::pair<const char*, std::string>> patterns{
+            {"1000 groups", groups1000 + "(?:aa|a)*c"},
+            {"3000 groups", groups3000 + "(?:aa|a)*c"},
+            {"a set of 5000", "(?:[" + wide + "a]|aa)*c"},
+            {"5000 choices", "(?:" + choices + "aa|a)*c"},
+            {"a mark far up", "(?:x" + groups1000 + "|(a)|aa)*c"},  // (the 1000 groups' marks set to nothing each time)
+        };
+        std::string slow;
+        for (const auto& [what, pattern] : patterns) {
+            QElapsedTimer clock;
+            clock.start();
+            PyReBudget budget;
+            QCOMPARE(code_of([&] { PyPattern(pattern, 0).subn("x", text, nullptr, budget); }).substr(0, 14), std::string("regex_too_slow"));
+            qInfo("%s: stopped after %lld ms", what, static_cast<long long>(clock.elapsed()));
+            // (under half a second in a release build; 10 s leaves room for a sanitizer build on a busy machine)
+            if (clock.elapsed() >= 10000) slow += std::string(what) + ": " + std::to_string(clock.elapsed()) + " ms; ";
+        }
+        QVERIFY2(slow.empty(), slow.c_str());
+        // and they find what Python finds where they are quick
+        PyReBudget budget;
+        QCOMPARE(PyPattern(groups1000 + "(?:aa|a)*c", 0).subn("x", "aaac", nullptr, budget), (std::pair<std::string, std::int64_t>{"x", 1}));
+        QCOMPARE(PyPattern("(?:[" + wide + "a]|aa)*c", 0).subn("x", "aaac", nullptr, budget), (std::pair<std::string, std::int64_t>{"x", 1}));
+        QCOMPARE(PyPattern("(?:" + choices + "aa|a)*c", 0).subn("x", "b4999aac", nullptr, budget), (std::pair<std::string, std::int64_t>{"x", 1}));
     }
 
     // Groups inside one another: 200 deep are read, 201 refused (Python reads about 490, then RecursionError).
@@ -113,9 +162,32 @@ private slots:
         clock.start();
         const std::string slow = refused(Json{{"op", "replace_text"}, {"find", "(a|aa)+$"}, {"replace", "x"}, {"regex", true}});
         QVERIFY2(slow.starts_with("ops[0] replace_text: the pattern takes too long to search (more than 100000000 steps"), slow.c_str());
-        QVERIFY2(clock.elapsed() < 60000, qPrintable(QString::number(clock.elapsed())));
+        qInfo("replace_text: refused after %lld ms", static_cast<long long>(clock.elapsed()));
+        QVERIFY2(clock.elapsed() < 10000, qPrintable(QString::number(clock.elapsed())));
         const std::string nested = refused(Json{{"op", "replace_text"}, {"find", std::string(201, '(') + std::string(201, ')')}, {"regex", true}});
         QVERIFY2(nested.starts_with("ops[0] replace_text: the pattern nests too deeply"), nested.c_str());
+        // refused at a later line after an earlier one was replaced, in a batch after another op: nothing of it is kept
+        {
+            genko::core::Document book = genko::core::new_episode("q", genko::core::Num(1), 2, genko::core::PageSpec::a4_mono());
+            book = bus.apply(book, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "台詞"}},
+                                                Json{{"op", "add_line"}, {"page", 2}, {"text", std::string(54, 'a') + "!"}}}),
+                             person)
+                       .doc;
+            const auto story = book.story;
+            const auto pages = book.pages;
+            try {
+                (void)bus.apply(book, Json::array({Json{{"op", "edit_line"}, {"id", story[0].id}, {"text", "台詞です"}},
+                                                   Json{{"op", "replace_text"}, {"find", "台|(a|aa)+$"}, {"replace", "x"}, {"regex", true}}}),
+                                person);
+                QFAIL("applied");
+            } catch (const genko::core::ApplyError& error) {
+                QVERIFY2(std::string(error.what()).starts_with("ops[1] replace_text: the pattern takes too long to search"), error.what());
+            }
+            QCOMPARE(book.story.size(), story.size());
+            QCOMPARE(book.story[0].text, std::string("台詞"));
+            QCOMPARE(book.story[1].text, std::string(54, 'a') + "!");
+            QVERIFY(book.pages == pages);
+        }
         // a pattern that reads well replaces on every page, as Python's
         const auto done = bus.apply(doc, Json::parse(R"J([{"op": "replace_text", "find": "(a+)!|台(詞)", "replace": "<\\1\\2>", "regex": true}])J"), person);
         QCOMPARE(done.doc.story[0].text, "<" + std::string(54, 'a') + ">");

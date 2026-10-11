@@ -2,6 +2,8 @@
 // native/third_party/cpython): the pattern read into subpatterns, with Python's errors at Python's positions. Python's
 // warnings (FutureWarning for a possible nested set, DeprecationWarning for an odd group name) change nothing and are
 // not given.
+// Secret Labs' Regular Expression Engine: Copyright (c) 1997-2001 by Secret Labs AB. All rights reserved. This version
+// of the SRE library can be redistributed under CNRI's Python 1.6 license (native/third_party/cpython/LICENSE-SRE).
 
 #include <algorithm>
 #include <limits>
@@ -22,16 +24,21 @@ bool is_whitespace(char32_t c) { return c == U' ' || c == U'\t' || c == U'\n' ||
 std::string text_of(std::u32string_view s) { return encode(s); }
 
 // int(digits) for ASCII digits, as Python makes it: ValueError past 4300 digits (sys.int_info's limit), else the value
-// held as far as it matters (anything past 2^62 is past every bound it is compared with)
+// held as far as it matters (anything past 2^62 is past every bound it is compared with: held at 2^62, never
+// multiplied past it)
 std::uint64_t int_of(std::u32string_view digits) {
     if (digits.size() > 4300) {
         throw PyValueError("Exceeds the limit (4300 digits) for integer string conversion: value has " + std::to_string(digits.size()) +
                            " digits; use sys.set_int_max_str_digits() to increase the limit");
     }
+    constexpr std::uint64_t kHeld = std::uint64_t{1} << 62;
     std::uint64_t value = 0;
     for (const char32_t c : digits) {
-        value = value * 10 + static_cast<std::uint64_t>(c - U'0');
-        if (value > (std::uint64_t{1} << 62)) value = std::uint64_t{1} << 62;
+        if (value >= kHeld / 10) {
+            value = kHeld;
+            continue;
+        }
+        value = std::min(value * 10 + static_cast<std::uint64_t>(c - U'0'), kHeld);
     }
     return value;
 }
