@@ -16,6 +16,16 @@
 - **M3 の出口**: 下の M3 出口受入（2026-10-09）で欠けていた BRUSH-01（紙質を別PCへ持ち出して再現できる）は、この凍結で合わせて受け入れた（test_paper・test_gui_paper・test_contract_paper が3構成とも合格、GUI は gui_paper 14）。**M3・M4 とも Linux の出口受入は合格**（Windows は deferred）。
 - **残課題・利用者判断**: Windows 実機受入（配布前に必須）、上の試験データの誤り、編集可能の PSD の書き出しが縁取りのある台詞で遅い（部分ごとに文字組を計算し直す）、replace_text の正規表現（not_yet_ported、利用者判断）、COMP-04 のネイティブ拡張の登録形式（公開契約の追加、利用者確認待ち）、CMYK/Lab の扱い、素材ライブラリ一覧の 1 MB 上限、素材一覧のダブルクリック、PSD を画像として開く（Pillow の平坦化、NotYetPorted）。置いた絵（place_asset）と正式な書き出しは M5。
 
+## 利用者の判断（2026-10-11）
+
+保留していた判断項目への回答。M3・M4 の残りの群として M5 と並行して実装する（CMYK/Lab は別工程）。
+- replace_text の正規表現（regex: true）: Python の re を全部移す（Python と同じ結果。通常の置換は既に Python と同じ）。
+- COMP-04 のネイティブ拡張: plugins フォルダーの plugin.json（名前・実行ファイル・引数・設定項目）で登録する形を設計して入れる。既定は無効、選んだものだけ同意の上で実行。
+- PSD を 1 枚の画像として開く・読み込む: Python と同じ（Pillow の PsdImagePlugin の平坦化）に入れる。
+- 素材ライブラリの一覧（library.json）の上限: 1 MB → 16 MB。
+- 素材一覧のダブルクリック: Python と同じ（ページでクリックした所に置く）。
+- CMYK・Lab での編集: 足す。M5 の後、M6 の前の独立した工程（設計・実装・検証）。
+
 ## M4 — 2026-10-09 記録
 
 ### M3・M4 の残り（2026-10-09 訂正）
