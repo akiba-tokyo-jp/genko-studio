@@ -33,7 +33,7 @@
 #include "app/config.hpp"
 #include "app/look.hpp"
 #include "app/theme.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"

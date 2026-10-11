@@ -30,7 +30,7 @@
 #include "app/material_tabs.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/brushes.hpp"
 #include "core/ids.hpp"
 #include "core/paths.hpp"

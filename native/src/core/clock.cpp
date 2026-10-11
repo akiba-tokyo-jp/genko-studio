@@ -16,7 +16,9 @@ std::optional<std::string>& fixed_text() {
 
 }  // namespace
 
-std::string local_time_text() {
+std::string local_time_text() { return local_time_text("%Y-%m-%dT%H:%M:%S"); }
+
+std::string local_time_text(const char* format) {
     if (const auto& fixed = fixed_text()) return *fixed;
     const std::time_t now = std::time(nullptr);
     std::tm local{};
@@ -25,8 +27,22 @@ std::string local_time_text() {
 #else
     localtime_r(&now, &local);
 #endif
-    std::array<char, 32> out{};
-    const std::size_t n = std::strftime(out.data(), out.size(), "%Y-%m-%dT%H:%M:%S", &local);
+    std::array<char, 128> out{};
+    const std::size_t n = std::strftime(out.data(), out.size(), format, &local);
+    return std::string(out.data(), n);
+}
+
+std::string utc_time_text(const char* format) {
+    if (const auto& fixed = fixed_text()) return *fixed;
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+#if defined(_WIN32)
+    gmtime_s(&utc, &now);
+#else
+    gmtime_r(&now, &utc);
+#endif
+    std::array<char, 128> out{};
+    const std::size_t n = std::strftime(out.data(), out.size(), format, &utc);
     return std::string(out.data(), n);
 }
 

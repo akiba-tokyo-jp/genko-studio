@@ -198,6 +198,14 @@ QtはLGPL利用条件を満たす動的リンク構成を基本とする。MIT�
 | 承認済み（`locked`）の人物を人が消したとき、`gate_changes` が新しい状態の鍵しか見ないため、`studio/audit.jsonl` に何も残さない | 「消えた承認」`{"what": "character:<id>:locked", "from": true, "to": null}` を記録する（その Undo は Python と同じく `from: null, to: true`）。そのため、承認済みの人物を消す・戻す Undo・Redo は承認の変更として人だけが行える（エージェントは `needs_person`） | M5 |
 | 網点のしきい値のタイルが大きすぎる粗い網（線数が解像度に比べて小さい。トーン・レイヤーのトーン化・配置画像の仕上げの `lpi`）を、Python は 1 画素ずつ作り、何分・何 GB もかかる | タイルが 4096 px 四方を超える網は `the screen is too coarse for this resolution (… px a side)` で拒否（印刷・書き出し・ドットの見え方。網を作らない見え方は描く。wording.cpp で日本語） | M3・M5 |
 | スタジオの op が数える回数（`attempts` の `requests`・`fix_rounds`・`images`）が Python の int で限りなく増える | 64 ビットを超えるまでは Python と同じ（2**63 以上は符号なしの整数で書く）。2**64 - 1 を超える数は `a count past 2**64 - 1 is too large for this build` で拒否（wording.cpp で日本語） | M5 |
+| スタジオの道具（`genko studio`・MCP・HTTP が呼ぶ StudioService・HumanService）が、書き込みの途中で失敗すると前の段まで保存したままになる: `request_approval` の `character_ids`（1 人ずつ保存し、途中の人物で止まる）、`adopt-drafts`（保存の後で `studio/drafts` を `drafts.adopted` に移せず、次にまた取り込む）、`create_project`（ロックなしで作る） | 書き込む前に全部を確かめてから 1 回で保存する（`character_ids` の全員、`drafts.adopted` に移せるか）。`create_project` は本のロックの下で作る。断るときの誤り・言葉は Python と同じ | M5 |
+| `create_project` の `title` に文字列でない値（数など）を渡すと、そのまま本の題に入る | `str(title)` の文字として入れる（本の題は文字） | M5 |
+| HumanService.export（正式な書き出し）の `screen`（網点）が、形式が画面向けかどうかの真偽値で上書きされ、印刷の書き出し（pdf・tiff・png）に網点が付かない | 渡された `screen` を印刷の書き出しに使う（画面向けの webtoon・sns は Python と同じく使わない）。アプリの正式な書き出し（`formats::run` の `official`）は `service::run_export` を通して同じ HumanService.export を呼ぶ | M5 |
+| バックグラウンドの仕事（`export`・`export_proof`・`upscale` の `background: true`）を、呼んですぐ終わるプロセス（`genko studio call`）で始めると、プロセスと一緒に仕事が消え、記録が running のまま残る（後で lost） | プロセスは仕事が終わるまで待ってから終わる（記録は done・failed）。MCP・HTTP のように続くプロセスでは Python と同じ（約 40 秒待ち、終わらなければ job を返し `export_status` で問い合わせる）。仕事の id の乱数は本の id の数え方に含めない | M5 |
+| `import_image`（PNG 以外の画像）と `take_panel_art` の `crop01` が、パレットの絵（GIF などのモード P・PA）を Pillow のパレット PNG として保存する | この版はまだパレット PNG を書かない: `not yet ported: palette_png`（code `not_yet_ported`）で何も書かない（wording.cpp で日本語）。`import_images`・`import_name` は Python と同じく RGB にしてから保存する | M5 |
+| 絵として読めないバイトの誤りの言葉（`import_images`・`import_name` の「画像として読めない: …」、`import_image` の `not a readable image: …`）に Pillow の内部の言葉（オブジェクトのアドレス `<_io.BytesIO object at 0x…>` など）が入る | 同じ前置きで、この版の読み取りの言葉（`cannot identify image file <_io.BytesIO object>` など。アドレスは入れない） | M5 |
+| 絵柄カタログの見本の絵がこの版でまだ開けない形式（WebP・TIFF など）のとき、Pillow で PNG に変えて素材にする | カタログの誤り（見本を読めない）として扱い、絵柄は選べない（何も書かない） | M5 |
+| Python 版で書いた本（v1〜v3）にスタジオの道具で書き込むと v3 のまま上書きする | 読むだけの道具は Python と同じ。書き込む道具は `needs_migration` で断り（`genko migrate` で v4 にしてから）、本を変えない | M5 |
 
 ### COMP-02 継承する制作領域
 

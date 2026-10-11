@@ -22,7 +22,7 @@
 #include "app/brush_panel.hpp"
 #include "app/config.hpp"
 #include "app/theme.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/error.hpp"
 #include "core/json.hpp"
 #include "core/poses.hpp"

@@ -22,7 +22,7 @@
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/anim.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"

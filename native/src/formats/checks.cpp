@@ -648,10 +648,11 @@ Json page_issues(const core::Document& episode, const core::Page& page) {
     return out;
 }
 
-Json preflight(const core::Document& episode, const fs::path& project) {
+Json studio_check(const core::Document& episode, const fs::path& project, const StudioCheck& options) {
     const storage::AssetStore store(project);
     Json errors = Json::array();
     Json warnings = Json::array();
+    Json dpi_table = Json::array();
     const bool studio_project = episode.strict_gates || core::py_truthy(episode.studio);
     PyDict characters;
     for (const Json& c : core::iterate(episode.bible.characters)) {
@@ -721,11 +722,15 @@ Json preflight(const core::Document& episode, const fs::path& project) {
                     dpi = core::py_round(effective, 1);
                 }
             }
-            if (dpi && *dpi < kMinDpi) {
-                errors.push_back(pf_issue("low_dpi", "error", lwhere,
-                                          num(page.index) + " ページのコマ " + frame_id + " の実効解像度が " + fixed(*dpi, 0) + " dpi（" +
-                                              std::to_string(kMinDpi) + " 未満）",
-                                          "高解像度化した候補を取り込むか、--force で通す"));
+            if (dpi) {
+                dpi_table.push_back(Json{{"page", page.index.json()}, {"frame_id", layer.frame_id ? Json(*layer.frame_id) : Json(nullptr)}, {"dpi", *dpi}});
+                if (*dpi < options.min_dpi) {
+                    (options.force ? warnings : errors)
+                        .push_back(pf_issue("low_dpi", options.force ? "warning" : "error", lwhere,
+                                            num(page.index) + " ページのコマ " + frame_id + " の実効解像度が " + fixed(*dpi, 0) + " dpi（" +
+                                                std::to_string(options.min_dpi) + " 未満）",
+                                            "高解像度化した候補を取り込むか、--force で通す"));
+                }
             }
             const std::optional<Json> cand = candidate_for(page, layer);
             const Json origin = core::py_or(cand_get(cand, "origin"), Json::object());
@@ -733,6 +738,12 @@ Json preflight(const core::Document& episode, const fs::path& project) {
                 const Json up = core::subscript(*cand, "upscaled");
                 const Json* scale = core::dict_get(up, "scale");
                 const Json* method = core::dict_get(up, "method");
+                if (!dpi_table.empty()) {
+                    Json& last = dpi_table.back();
+                    if (core::py_equals(last["frame_id"], layer.frame_id ? Json(*layer.frame_id) : Json(nullptr))) {
+                        last["upscaled"] = scale != nullptr ? *scale : Json(nullptr);
+                    }
+                }
                 warnings.push_back(pf_issue("upscaled", "warning", lwhere,
                                             num(page.index) + " ページのコマ " + frame_id + " の絵は " + core::py_str(scale != nullptr ? *scale : Json(nullptr)) +
                                                 " 倍に拡大したもの（" + core::py_str(method != nullptr ? *method : Json(nullptr)) + "。描き込みは元の大きさのまま）"));
@@ -741,14 +752,22 @@ Json preflight(const core::Document& episode, const fs::path& project) {
             const Json* drawn_kind = core::dict_get(drawn, "kind");
             const Json* kind = core::dict_get(origin, "kind");
             if (drawn_kind != nullptr && drawn_kind->is_string() && drawn_kind->get_ref<const std::string&>() == "fixture") {
-                errors.push_back(pf_issue("fixture_image", "error", lwhere, num(page.index) + " ページに試験用の画像（fixture）がある",
-                                          "本番では使えない。--allow-fixture で通す"));
+                (options.allow_fixture ? warnings : errors)
+                    .push_back(pf_issue("fixture_image", options.allow_fixture ? "warning" : "error", lwhere,
+                                        num(page.index) + " ページに試験用の画像（fixture）がある", "本番では使えない。--allow-fixture で通す"));
             } else if (!cand || (kind != nullptr && kind->is_string() && kind->get_ref<const std::string&>() == "agent" &&
                                  !core::py_truthy(core::py_or(core::py_get(origin, "tool_id"), core::py_get(origin, "model"))))) {
                 warnings.push_back(pf_issue("provenance_missing", "warning", lwhere,
                                             num(page.index) + " ページのコマ " + frame_id + " の画像の来歴（ツール・モデル）が記録されていない"));
             }
         }
+    }
+    // (a monochrome book written in colour: the printer sees grey fringes on every dot)
+    const bool mono = std::any_of(episode.pages.begin(), episode.pages.end(), [](const auto& p) { return p->spec.expression != "color"; });
+    if (options.color && *options.color == "rgb" && mono) {
+        (options.force ? warnings : errors)
+            .push_back(pf_issue("mono_as_colour", options.force ? "warning" : "error", "/color", "モノクロの原稿を RGB で書き出そうとしている",
+                                "color を auto（グレー）か bitonal（2 階調）にする"));
     }
     if (studio_project) {
         std::sort(needed_sheets.begin(), needed_sheets.end(), py_sort_less);
@@ -760,7 +779,13 @@ Json preflight(const core::Document& episode, const fs::path& project) {
             }
         }
     }
-    return Json{{"errors", errors}, {"warnings", warnings}};
+    const bool ok = errors.empty();
+    return Json{{"ok", ok}, {"errors", errors}, {"warnings", warnings}, {"dpi", dpi_table}, {"min_dpi", options.min_dpi}};
+}
+
+Json preflight(const core::Document& episode, const fs::path& project) {
+    Json report = studio_check(episode, project, StudioCheck{});
+    return Json{{"errors", std::move(report["errors"])}, {"warnings", std::move(report["warnings"])}};
 }
 
 Json book(const core::Document& episode, const std::optional<fs::path>& project) {

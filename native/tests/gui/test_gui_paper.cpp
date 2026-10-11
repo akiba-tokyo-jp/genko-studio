@@ -30,7 +30,7 @@
 #include "app/config.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/brushes.hpp"
 #include "core/command_bus.hpp"
@@ -219,7 +219,7 @@ private slots:
              QStringLiteral("自分のブラシの紙質の一覧（brush_papers.json）を読めないため、そのままにしました（紙質のあるブラシは保存できません）: "
                             "/home/me/.config/genko/brush_papers.json")},
         };
-        for (const auto& [english, japanese] : cases) QCOMPARE(app::wording::error(english), japanese);
+        for (const auto& [english, japanese] : cases) QCOMPARE(genko::wording::error(english), japanese);
     }
 
     // One's own brush with a paper: the library keeps it beside Python's file (which Python's reader reads as before and
@@ -365,7 +365,7 @@ private slots:
         QObject::connect(studio.window->canvas(), &app::PageCanvas::renderFailed, studio.window.get(), [&](const QString& m) { failed << m; });
         studio.draw({QPointF(10, 15), QPointF(30, 25), QPointF(50, 15)});
         QCOMPARE(failed.size(), 1);  // (once for the stroke, not on every move)
-        QVERIFY2(app::wording::error(failed[0]).startsWith(QStringLiteral("紙質の画像が見つかりません")), qPrintable(failed[0]));
+        QVERIFY2(genko::wording::error(failed[0]).startsWith(QStringLiteral("紙質の画像が見つかりません")), qPrintable(failed[0]));
         QCOMPARE(gui_test::ink_strokes(studio.session->document()), std::size_t(0));
         QVERIFY(studio.window->canvas()->live() == nullptr);
     }
@@ -421,7 +421,7 @@ private slots:
             QFAIL("saved over a paper library that cannot be read");
         } catch (const core::PyUncaught& error) {
             QVERIFY2(std::string(error.what()).find("brush_papers.json") != std::string::npos, error.what());
-            QVERIFY(app::wording::error(std::string(error.what())).startsWith(QStringLiteral("自分のブラシの紙質の一覧（brush_papers.json）を読めない")));
+            QVERIFY(genko::wording::error(std::string(error.what())).startsWith(QStringLiteral("自分のブラシの紙質の一覧（brush_papers.json）を読めない")));
         }
         QCOMPARE(genko::test::read_bytes(gui_test::qpath(papers)), std::string("{\"papers\": "));
     }
@@ -522,7 +522,7 @@ private slots:
                 render::brushes::save_to_library(app::config_dir(), "my_with", Json{{"label", "紙"}, {"paper", Json{{"asset", ref}}}});
                 QFAIL(qPrintable(QStringLiteral("saved over a paper library of another version: ") + QString::fromStdString(text)));
             } catch (const core::PyUncaught& error) {
-                QVERIFY(app::wording::error(std::string(error.what())).startsWith(QStringLiteral("自分のブラシの紙質の一覧（brush_papers.json）を読めない")));
+                QVERIFY(genko::wording::error(std::string(error.what())).startsWith(QStringLiteral("自分のブラシの紙質の一覧（brush_papers.json）を読めない")));
             }
             QVERIFY2(genko::test::read_bytes(gui_test::qpath(papers)) == text, text.c_str());
             QVERIFY2(fs::exists(picture), text.c_str());

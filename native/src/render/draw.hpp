@@ -53,6 +53,8 @@ public:
     int size() const { return size_; }
     // getmetrics(): (ascent, descent), the descent positive below the baseline.
     std::pair<int, int> getmetrics() const;
+    // getname(): (family, style) as the font names them (nothing for a name it does not have).
+    std::pair<std::optional<std::string>, std::optional<std::string>> getname() const;
     // getlength(text): the advance in pixels (a whole number under BASIC).
     double getlength(std::u32string_view text) const;
     // getbbox(text, stroke_width=..., anchor=...): (left, top, right, bottom) from the anchor point. anchor "" is "la".
@@ -88,6 +90,9 @@ public:
     // back to Pillow's built-in default font, which this build does not have: NotYetPorted("default_font"). A font file
     // past 32 MB is not read: NotYetPorted("large_font").
     const TrueTypeFont& truetype(const std::string& font, int size);
+    // ImageFont.load_default(size) under FreeType: Pillow 12.3.0's own Aileron Regular (the subset its ImageFont.py
+    // carries, native/third_party/pillow/fonts/load_default.ttf) at `size` (Pillow's default: 10).
+    const TrueTypeFont& load_default(int size = 10);
     std::stop_token stop() const;
 
 private:

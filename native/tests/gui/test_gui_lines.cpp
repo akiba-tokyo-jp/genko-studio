@@ -47,7 +47,7 @@
 #include "app/text_style.hpp"
 #include "app/tiles.hpp"
 #include "app/tool_settings.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/pynum.hpp"
 #include "gui_support.hpp"
@@ -1345,7 +1345,7 @@ private slots:
     }
 
     void lineRefusalsInWords() {
-        namespace w = app::wording;
+        namespace w = genko::wording;
         QCOMPARE(w::error(QStringLiteral("ops[0] add_line: text is required")), QStringLiteral("台詞の文字が要ります（空の台詞は置けません）"));
         QCOMPARE(w::error(QStringLiteral("ops[0] move_line: a tail's to must be two numbers [x, y]")), QStringLiteral("しっぽの先は [x, y] の 2 つの数で指定します"));
         QCOMPARE(w::error(QStringLiteral("ops[0] move_line: x_mm must be a finite number")),

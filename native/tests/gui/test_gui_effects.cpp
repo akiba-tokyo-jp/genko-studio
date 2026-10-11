@@ -43,7 +43,7 @@
 #include "app/subview.hpp"
 #include "app/tiles.hpp"
 #include "app/tool_settings.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/pynum.hpp"
 #include "gui_support.hpp"
 #include "render/materials.hpp"
@@ -688,7 +688,7 @@ private slots:
 
     void libraryRefusalsInThePersonsWords() {
         // (the library's and the packs' refusals beyond Python, as the person reads them)
-        using app::wording::error;
+        using genko::wording::error;
         QCOMPARE(error(std::string("the material library would be too large for the materials panel (at most 16 MB)")),
                  QStringLiteral("素材ライブラリの一覧が大きくなりすぎるので、書き換えませんでした（16 MB まで）"));
         QCOMPARE(error(std::string("the material folders would be too large for the materials panel (at most 16 MB)")),
@@ -704,7 +704,7 @@ private slots:
 
     void studioRefusalsInThePersonsWords() {
         // (M5: the studio's refusals in the C++ build only, SPEC COMP-01a, as the person reads them)
-        using app::wording::error;
+        using genko::wording::error;
         QCOMPARE(error(std::string("ops[0] place_asset: placement_mm.x must be a finite number")),
                  QStringLiteral("画像の置き場所は、ふつうの数で指定します（無限大や NaN は使えません）"));
         QCOMPARE(error(std::string("ops[0] import_candidates: face_box01 must be a finite number")),
@@ -719,7 +719,7 @@ private slots:
                  QStringLiteral("素材の画像を読み込めません（壊れているか、読めない形式の画像です）"));
         QCOMPARE(error(std::string("the finish's line_threshold is not a number")),
                  QStringLiteral("仕上げの線とみなす濃さは数で指定します（この絵は描けません）"));
-        QCOMPARE(app::wording::unported_element(QStringLiteral("image_format")), QStringLiteral("まだ読めない形式の画像（TIFF、WebP、Lab カラーの PSD）"));
+        QCOMPARE(genko::wording::unported_element(QStringLiteral("image_format")), QStringLiteral("まだ読めない形式の画像（TIFF、WebP、Lab カラーの PSD）"));
         QCOMPARE(error(std::string("the screen is too coarse for this resolution (22472 px a side)")),
                  QStringLiteral("網点が粗すぎて、この解像度では作れません（線数を上げるか、解像度を下げてください）"));
         QCOMPARE(error(std::string("ops[0] open_request: a count past 2**64 - 1 is too large for this build (Python's int has no bound)")),
@@ -744,7 +744,7 @@ private slots:
 
     void bookRefusalsInThePersonsWords() {
         // (set_spread's, set_page_spec's and a newer book's refusals, as the person reads them)
-        using app::wording::error;
+        using genko::wording::error;
         QCOMPARE(error(std::string("ops[0] set_spread: pages 2 and 5 are not next to each other")),
                  QStringLiteral("2 ページと 5 ページは隣り合っていないので、見開きになりません"));
         QCOMPARE(error(std::string("ops[0] set_spread: pages 3 and 4 are two sides of one leaf, not a spread")),
@@ -774,7 +774,7 @@ private slots:
 
     void psdRefusalsInThePersonsWords() {
         // (import_psd's refusals, with the reasons Python's reader gives in English, as the person reads them)
-        using app::wording::error;
+        using genko::wording::error;
         QCOMPARE(error(std::string("ops[0] import_psd: fit must be paper, bleed or trim")),
                  QStringLiteral("PSD を合わせる範囲は、用紙・裁ち落とし・仕上がりから選びます"));
         QCOMPARE(error(std::string("ops[0] import_psd: the PSD cannot be read (not enough image data)")),

@@ -14,6 +14,7 @@
 #include <tiffio.h>
 
 #include "core/error.hpp"
+#include "core/pynum.hpp"
 #include "render/colour.hpp"
 
 namespace genko::formats {
@@ -511,6 +512,145 @@ std::string tiff_bytes(const render::Image& image, const TiffSave& params) {
 const std::string& srgb_icc_once() {
     static const std::string profile = render::colour::srgb_icc();
     return profile;
+}
+
+namespace {
+
+// PdfParser's writer, as PdfImagePlugin._save drives it: objects written one after another, the offset of each kept
+// for the cross-reference table.
+class PdfWriter {
+public:
+    std::string out;
+
+    // next_object_id(offset): the next object's number, its offset recorded (0 until it is written).
+    int next_object_id(std::size_t offset) {
+        offsets_.push_back(offset);
+        return static_cast<int>(offsets_.size());
+    }
+    // write_obj(ref, …): "<n> 0 obj", the dictionary (when it has entries), the stream; "endobj".
+    void write_obj(int ref, const std::string& dict, const std::string* stream = nullptr) {
+        offsets_[static_cast<std::size_t>(ref - 1)] = out.size();
+        out += std::to_string(ref) + " 0 obj";
+        out += dict;
+        if (stream != nullptr) {
+            out += "stream\n";
+            out += *stream;
+            out += "\nendstream\n";
+        }
+        out += "endobj\n";
+    }
+    // write_xref_and_trailer(): the free entry 0, every object in order, the trailer.
+    void write_xref_and_trailer(int root, int info) {
+        const std::size_t start = out.size();
+        const std::size_t count = offsets_.size() + 1;
+        out += "xref\n0 " + std::to_string(count) + "\n";
+        out += "0000000000 65536 f \n";
+        char line[32];
+        for (const std::size_t offset : offsets_) {
+            std::snprintf(line, sizeof line, "%010zu %05d n \n", offset, 0);
+            out += line;
+        }
+        out += "trailer\n<<\n/Root " + std::to_string(root) + " 0 R\n/Size " + std::to_string(count) + "\n/Info " + std::to_string(info) +
+               " 0 R\n>>\nstartxref\n" + std::to_string(start) + "\n%%EOF";
+    }
+
+private:
+    std::vector<std::size_t> offsets_;
+};
+
+std::string ref_text(int ref) { return std::to_string(ref) + " 0 R"; }
+
+// pdf_repr(str): encode_text (UTF-16BE with its BOM) in parentheses, \ ( ) escaped.
+std::string pdf_text(std::string_view utf8) {
+    std::string bytes = "\xfe\xff";
+    std::size_t i = 0;
+    while (i < utf8.size()) {
+        const unsigned char c = static_cast<unsigned char>(utf8[i]);
+        std::uint32_t cp = c;
+        int extra = 0;
+        if (c >= 0xf0) {
+            cp = c & 0x07;
+            extra = 3;
+        } else if (c >= 0xe0) {
+            cp = c & 0x0f;
+            extra = 2;
+        } else if (c >= 0xc0) {
+            cp = c & 0x1f;
+            extra = 1;
+        }
+        for (int k = 1; k <= extra && i + static_cast<std::size_t>(k) < utf8.size(); ++k) cp = (cp << 6) | (static_cast<unsigned char>(utf8[i + k]) & 0x3f);
+        i += static_cast<std::size_t>(extra) + 1;
+        const auto unit = [&bytes](std::uint32_t u) {
+            bytes += static_cast<char>((u >> 8) & 0xff);
+            bytes += static_cast<char>(u & 0xff);
+        };
+        if (cp >= 0x10000) {
+            cp -= 0x10000;
+            unit(0xd800 + (cp >> 10));
+            unit(0xdc00 + (cp & 0x3ff));
+        } else {
+            unit(cp);
+        }
+    }
+    std::string escaped = "(";
+    for (const char ch : bytes) {
+        if (ch == '\\' || ch == '(' || ch == ')') escaped += '\\';
+        escaped += ch;
+    }
+    return escaped + ")";
+}
+
+}  // namespace
+
+std::string pdf_bytes(const std::vector<Image>& images, double resolution, std::string_view title, std::string_view date) {
+    if (images.empty()) throw core::Error("value", "no pictures to save");
+    for (const Image& im : images) {
+        if (im.mode() != "RGB" && im.mode() != "L") throw core::Error("value", "cannot save mode " + std::string(im.mode()));
+    }
+    PdfWriter pdf;
+    pdf.out = "%PDF-1.4\n% created by Pillow PDF driver\n";
+    std::vector<int> image_refs;
+    std::vector<int> page_refs;
+    std::vector<int> contents_refs;
+    for (std::size_t i = 0; i < images.size(); ++i) {
+        image_refs.push_back(pdf.next_object_id(0));
+        page_refs.push_back(pdf.next_object_id(0));
+        contents_refs.push_back(pdf.next_object_id(0));
+    }
+    // write_catalog
+    const int root = pdf.next_object_id(pdf.out.size());
+    const int pages = pdf.next_object_id(0);
+    pdf.write_obj(root, "<<\n/Type /Catalog\n/Pages " + ref_text(pages) + "\n>>");
+    std::string kids = "[";
+    for (const int ref : page_refs) kids += " " + ref_text(ref);
+    pdf.write_obj(pages, "<<\n/Type /Pages\n/Count " + std::to_string(images.size()) + "\n/Kids " + kids + " ]\n>>");
+    for (std::size_t i = 0; i < images.size(); ++i) {
+        const Image& im = images[i];
+        const bool rgb = im.mode() == "RGB";
+        const std::string stream = jpeg_bytes(im);
+        pdf.write_obj(image_refs[i],
+                      "<<\n/Type /XObject\n/Subtype /Image\n/Width " + std::to_string(im.width()) + "\n/Height " + std::to_string(im.height()) +
+                          "\n/Filter /DCTDecode\n/BitsPerComponent 8\n/ColorSpace " + (rgb ? "/DeviceRGB" : "/DeviceGray") + "\n/Length " +
+                          std::to_string(stream.size()) + "\n>>",
+                      &stream);
+        const double w = im.width() * 72.0 / resolution;
+        const double h = im.height() * 72.0 / resolution;
+        pdf.write_obj(page_refs[i], "<<\n/Resources <<\n/ProcSet [ /PDF " + std::string(rgb ? "/ImageC" : "/ImageB") + " ]\n/XObject <<\n/image " +
+                                        ref_text(image_refs[i]) + "\n>>\n>>\n/MediaBox [ 0 0 " + core::py_float_repr(w) + " " +
+                                        core::py_float_repr(h) + " ]\n/Contents " + ref_text(contents_refs[i]) + "\n/Type /Page\n/Parent " +
+                                        ref_text(pages) + "\n>>");
+        char line[128];
+        std::snprintf(line, sizeof line, "q %f 0 0 %f 0 0 cm /image Do Q\n", w, h);
+        const std::string contents = line;
+        pdf.write_obj(contents_refs[i], "<<\n/Length " + std::to_string(contents.size()) + "\n>>", &contents);
+    }
+    const int info = pdf.next_object_id(pdf.out.size());
+    std::string dict = "<<";
+    if (!title.empty()) dict += "\n/Title " + pdf_text(title);
+    dict += "\n/CreationDate (D:" + std::string(date) + ")\n/ModDate (D:" + std::string(date) + ")\n>>";
+    pdf.write_obj(info, dict);
+    pdf.write_xref_and_trailer(root, info);
+    return pdf.out;
 }
 
 }  // namespace genko::formats

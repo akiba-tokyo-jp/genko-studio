@@ -10,7 +10,7 @@
 // The words people see (Python's genko/app/wording.py): stages, layers, actors, the save states and error messages.
 // Internal ids and op names stay in the data; the screens show these instead.
 
-namespace genko::app::wording {
+namespace genko::wording {
 
 // STAGE: name → ネーム, ink → 作画, finish → 仕上げ (the key itself when unknown).
 QString stage(std::string_view key);
@@ -31,4 +31,7 @@ QString unported_element(const QString& element);
 QString error(const QString& message);
 QString error(const std::string& message);
 
-}  // namespace genko::app::wording
+// wording._inner: a reason inside another message, in Japanese when it is known, else as it is (no lead).
+QString reason(const QString& text);
+
+}  // namespace genko::wording

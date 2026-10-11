@@ -233,7 +233,8 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
             refused["code"] = "ruby_review";
             return refused;
         }
-        // (HumanService.export: preflight and the export approval, the studio's; not in this build yet)
+        // (HumanService.export: preflight and the export approval, the studio's)
+        if (o.official_export) return o.official_export(*project);
         Json refused = refuse("official export is not in the C++ build yet");
         refused["code"] = "not_yet_ported";
         return refused;

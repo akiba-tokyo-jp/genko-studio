@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "render/image.hpp"
 
@@ -66,6 +67,13 @@ struct TiffSave {
 };
 
 std::string tiff_bytes(const render::Image& image, const TiffSave& params);
+
+// images[0].save(path, format="PDF", save_all=True, append_images=images[1:], resolution=…) (PdfImagePlugin with
+// PdfParser's writer): each picture a page of its size at `resolution` dpi, stored as a JPEG (DCTDecode, as
+// jpeg_bytes makes it), the document's Title `title` (the file's stem) and its CreationDate and ModDate "(D:<date>)",
+// `date` being time.strftime("%Y%m%d%H%M%SZ", time.gmtime()) (core::utc_time_text). Modes L and RGB (others
+// core::Error("value") "cannot save mode …"); no pictures core::Error("value").
+std::string pdf_bytes(const std::vector<render::Image>& images, double resolution, std::string_view title, std::string_view date);
 
 // colour.srgb_icc(): the sRGB profile, made once (Python's lru_cache: every file of a process carries the same bytes,
 // the time they were made in them).

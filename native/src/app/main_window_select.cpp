@@ -18,7 +18,7 @@
 #include "app/canvas.hpp"
 #include "app/config.hpp"
 #include "app/main_window.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"

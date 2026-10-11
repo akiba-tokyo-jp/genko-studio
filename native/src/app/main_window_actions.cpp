@@ -48,7 +48,7 @@
 #include "app/templates.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/brushes.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"

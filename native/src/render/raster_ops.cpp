@@ -2389,4 +2389,6 @@ void register_raster_ops(core::OpRegistry& registry) {
     registry.set_area_resolver(resolve_area);
 }
 
+void verify_picture(const std::string& blob) { verify_image(blob); }
+
 }  // namespace genko::render

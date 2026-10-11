@@ -34,7 +34,7 @@
 #include "app/config.hpp"
 #include "app/main_window.hpp"
 #include "app/material_panel.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"

@@ -37,7 +37,7 @@
 #include "app/look.hpp"
 #include "app/path_label.hpp"
 #include "app/theme.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"

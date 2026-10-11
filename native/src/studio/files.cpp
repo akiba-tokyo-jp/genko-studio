@@ -38,22 +38,6 @@ std::size_t code_points(const std::string& text) {
     return static_cast<std::size_t>(std::count_if(text.begin(), text.end(), [](char c) { return (static_cast<unsigned char>(c) & 0xC0) != 0x80; }));
 }
 
-// What Python writes for `text` through a file opened in text mode (Path.write_text, open(…, "a")): each "\n" as
-// os.linesep — "\r\n" on Windows —, so the two versions write the same bytes there too. (Both read either: Python's
-// universal newlines, this build's JSON reading that takes "\r" for white space.)
-std::string text_mode(std::string text) {
-#ifdef _WIN32
-    std::string out;
-    out.reserve(text.size() + text.size() / 16);
-    for (const char c : text) {
-        if (c == '\n') out += '\r';
-        out += c;
-    }
-    return out;
-#else
-    return text;
-#endif
-}
 
 // A file's text as Path.read_text gives it (nothing when it cannot be read).
 std::optional<std::string> read_text(const fs::path& path) {
@@ -104,6 +88,23 @@ bool safe_name(const std::string& name) {
 }
 
 }  // namespace
+
+// What Python writes for `text` through a file opened in text mode (Path.write_text, open(…, "a")): each "\n" as
+// os.linesep — "\r\n" on Windows —, so the two versions write the same bytes there too. (Both read either: Python's
+// universal newlines, this build's JSON reading that takes "\r" for white space.)
+std::string text_mode(std::string text) {
+#ifdef _WIN32
+    std::string out;
+    out.reserve(text.size() + text.size() / 16);
+    for (const char c : text) {
+        if (c == '\n') out += '\r';
+        out += c;
+    }
+    return out;
+#else
+    return text;
+#endif
+}
 
 // --- jsonutil --------------------------------------------------------------------------------------------------------------
 

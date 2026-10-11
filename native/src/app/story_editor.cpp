@@ -29,7 +29,7 @@
 #include "app/ask.hpp"
 #include "app/lettering.hpp"
 #include "app/main_window.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/actor.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"

@@ -10,7 +10,6 @@ genko_library(genko_app
   SOURCES
     config.cpp
     session.cpp
-    wording.cpp
     theme.cpp
     icons.cpp
     ask.cpp
@@ -79,5 +78,5 @@ genko_library(genko_app
     app_main.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
-  PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent
+  PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent
               Qt6::PrintSupport)

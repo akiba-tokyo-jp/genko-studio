@@ -10,6 +10,11 @@ namespace genko::core {
 
 // time.strftime("%Y-%m-%dT%H:%M:%S"): the local time now, to the second ("2026-10-11T09:30:00").
 std::string local_time_text();
+// time.strftime(format): the local time now in that format (std::strftime's directives). While a ScopedClock lives, its
+// text whatever the format (as the reference harness fixes time.strftime).
+std::string local_time_text(const char* format);
+// time.strftime(format, time.gmtime()): the time now in UTC in that format; the ScopedClock's text while one lives.
+std::string utc_time_text(const char* format);
 
 // Tests only: while it lives, local_time_text() returns `text` (one at a time; not for threads).
 class ScopedClock {

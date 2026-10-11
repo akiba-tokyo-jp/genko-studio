@@ -334,6 +334,24 @@ Image lineart(const Image& image, const LineParams& params) {
     return out;
 }
 
+}  // namespace
+
+core::Json line_settings(const core::Json& data) {
+    const LineParams p = line_params(data);
+    core::Json rgb = core::Json::array();
+    for (std::int64_t v : p.rgb) rgb.push_back(v);
+    return core::Json::object({{"radius", p.radius},
+                               {"threshold", p.threshold},
+                               {"min_px", static_cast<std::int64_t>(p.min_px)},
+                               {"drop_blue", p.drop_blue},
+                               {"keep_solid", p.keep_solid},
+                               {"rgb", std::move(rgb)}});
+}
+
+Image extract_lines(const Image& image, const core::Json& data) { return lineart(image, line_params(data)); }
+
+namespace {
+
 // motion, radial and zoom blur
 Image motion_blur(const Image& rgba, const Json& params) {
     const double distance = core::py_max(1.0, iparam(params, "distance", 12));

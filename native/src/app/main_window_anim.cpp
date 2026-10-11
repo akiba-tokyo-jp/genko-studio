@@ -23,7 +23,7 @@
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
 #include "app/timeline.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/movie.hpp"

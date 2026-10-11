@@ -13,6 +13,8 @@ Pillow 12.3.0 の sdist を基準に、`Imaging.h` と `Storage.c` に画像確�
 
 ## 足したファイル
 
+- `fonts/load_default.ttf`: Pillow 12.3.0 の `PIL/ImageFont.py` の `load_default()` が base64 で持つフォント（Aileron Regular の部分集合）を、デコードしたバイトのまま置いたもの（中身は変えていない）。`resources/genko_text.qrc` の `pillow_default` として組み込み、`render::TrueTypeFonts::load_default(size)` が FreeType で開く。
+
 - `CMakeLists.txt`: 静的ライブラリ `pillow_imaging`。画素処理のファイルだけをビルドする（「ビルドしないもの」を参照）。
 - `compat/Python.h`: libImaging が `ImPlatform.h` から読む `Python.h` の代わり（include パスで先に見つかる）。宣言に要る型（`Py_ssize_t`、中身のない `PyObject`）、ビルドするファイルが呼ぶ Python の関数、`PyMutex` だけを持つ。
   - `Py_GIL_DISABLED` を定義する（Pillow の free-threaded ビルドと同じ）。これで Imaging.h・Storage.c の `MUTEX_LOCK` が働き、共有のメモリアリーナ（`ImagingDefaultArena`）と画像の参照数がロックで守られる。Genko は複数のスレッドで描くため。画素の計算は変わらない。

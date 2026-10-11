@@ -17,7 +17,7 @@
 
 #include "app/ask.hpp"
 #include "app/theme.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"

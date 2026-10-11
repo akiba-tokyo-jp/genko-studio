@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -12,7 +13,8 @@
 // The exports people start from the app, without Qt (Python's genko/app/exporting.py): the formats and their options,
 // the pages to write, and run(), which writes one format into a folder and says what it wrote. Every format can be
 // written freely; the checked "正式な書き出し" (official: preflight, the export approval recorded) goes through the
-// studio, which this build does not have yet: run() refuses it (after Python's own refusals) instead of writing.
+// studio, a layer above this one: run() hands it to RunOptions::official_export after Python's own refusals
+// (service::run_export sets it), and refuses it without one instead of writing.
 
 namespace genko::formats {
 
@@ -59,6 +61,10 @@ struct RunOptions {
     // a line using what PSD text cannot keep drawn as a picture (見た目優先) instead of stopping the export (厳密)
     std::string psd_text = "image";
     bool psd_rasterize = false;
+    // The official export itself (HumanService.export, which the studio layer above this one has: service::run_export
+    // sets it), called after Python's own refusals with the book's folder; without it the official export is refused
+    // (code "not_yet_ported").
+    std::function<core::Json(const std::filesystem::path& project)> official_export;
 };
 
 // exporting.run: {"ok": true, "files": [...]} or {"ok": false, "error": …} (Python's ValueError and OSError become the

@@ -494,6 +494,12 @@ std::pair<int, int> TrueTypeFont::getmetrics() const {
     return {static_cast<int>(ft_pixel(m.ascender)), static_cast<int>(-ft_pixel(m.descender))};
 }
 
+std::pair<std::optional<std::string>, std::optional<std::string>> TrueTypeFont::getname() const {
+    // font_getattr family / style: the face's names (None when FreeType has none)
+    const auto name = [](const char* text) { return text == nullptr ? std::optional<std::string>() : std::optional<std::string>(text); };
+    return {name(face_->family_name), name(face_->style_name)};
+}
+
 double TrueTypeFont::getlength(std::u32string_view text) const {
     // font_getlength: the advances summed in 26.6 (a C int), then FreeTypeFont.getlength's / 64
     int length = 0;
@@ -517,6 +523,9 @@ std::pair<Image, Point> TrueTypeFont::getmask2(std::u32string_view text, int str
 }
 
 namespace {
+
+// The name TrueTypeFonts keeps Pillow's own default font under (not a file anyone names: load_default()).
+constexpr std::string_view kPillowDefaultKey = ":/genko/text/pillow_default";
 
 // A bundled font's bytes, read from the resources once per process and then shared (they never change).
 std::shared_ptr<const QByteArray> bundled_bytes(const std::string& name) {
@@ -564,6 +573,8 @@ struct TrueTypeFonts::State {
         constexpr qint64 cap = 32 * 1024 * 1024;
         if (bundled_text_font(font)) {
             entry->bytes = bundled_bytes(font);
+        } else if (font == kPillowDefaultKey) {
+            entry->bytes = bundled_bytes("pillow_default");
         } else {
             // a font file: Python's truetype() falls back to Pillow's own default font when the file cannot be read
             if (font.size() > 4096) throw core::Error("value", "font name exceeded");
@@ -605,6 +616,8 @@ TrueTypeFonts::~TrueTypeFonts() = default;
 
 std::stop_token TrueTypeFonts::stop() const { return state_->stop; }
 
+const TrueTypeFont& TrueTypeFonts::load_default(int size) { return truetype(std::string(kPillowDefaultKey), size); }
+
 const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size) {
     State& s = *state_;
     if (s.stop.stop_requested()) throw Cancelled();
@@ -618,7 +631,7 @@ const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size) {
                                               static_cast<FT_Long>(file.bytes->size()), 0, &face);
     if (error) {
         if (genko_imaging_error_kind() != 0 || s.memory.second) detail::throw_imaging_error();
-        if (bundled_text_font(font)) check_text(error);
+        if (bundled_text_font(font) || font == kPillowDefaultKey) check_text(error);
         throw NotYetPorted("default_font");  // (genko.fonts.truetype: Pillow's load_default())
     }
     auto opened = std::unique_ptr<TrueTypeFont>(new TrueTypeFont(face, s.library, size, s.stop));
@@ -631,7 +644,7 @@ const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size) {
     request.vertResolution = 0;
     if (const FT_Error sized = FT_Request_Size(face, &request); sized) {
         if (genko_imaging_error_kind() != 0 || s.memory.second) detail::throw_imaging_error();
-        if (bundled_text_font(font)) check_text(sized);
+        if (bundled_text_font(font) || font == kPillowDefaultKey) check_text(sized);
         throw NotYetPorted("default_font");
     }
     if (s.memory.second) detail::throw_imaging_error();

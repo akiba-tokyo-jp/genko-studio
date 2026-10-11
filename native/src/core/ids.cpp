@@ -28,19 +28,28 @@ std::string hex_bits(std::uint64_t bits, int digits) {
 
 // The innermost ScopedIdScript of this thread (none: new_id() as it always was).
 thread_local ScopedIdScript* g_script = nullptr;
+// How many ScopedIdsApart live on this thread.
+thread_local int g_apart = 0;
+
+// The first 48 bits of a version 4 UUID are all random (its version digit comes after them).
+std::string random_id() { return hex_bits(QRandomGenerator::system()->generate64() >> 16, 12); }
 
 std::string unscripted_id() {
     if (const auto& source = test_source()) return source();
-    // The first 48 bits of a version 4 UUID are all random (its version digit comes after them).
-    return hex_bits(QRandomGenerator::system()->generate64() >> 16, 12);
+    return random_id();
 }
 
 }  // namespace
 
 std::string new_id() {
+    if (g_apart > 0) return random_id();
     if (g_script != nullptr) return g_script->next();
     return unscripted_id();
 }
+
+ScopedIdsApart::ScopedIdsApart() { ++g_apart; }
+
+ScopedIdsApart::~ScopedIdsApart() { --g_apart; }
 
 ScopedIdScript::ScopedIdScript(std::vector<std::string> given) : given_(std::move(given)), outer_(g_script) {
     g_script = this;

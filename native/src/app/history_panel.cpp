@@ -16,7 +16,7 @@
 
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
 

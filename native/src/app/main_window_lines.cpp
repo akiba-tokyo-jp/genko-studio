@@ -24,7 +24,7 @@
 #include "app/story_editor.hpp"
 #include "app/story_panel.hpp"
 #include "app/tool_settings.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/error.hpp"
 #include "core/pyconv.hpp"

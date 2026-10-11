@@ -24,7 +24,7 @@
 #include "app/plugins_dialog.hpp"
 #include "app/tiles.hpp"
 #include "app/timeline.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/anim.hpp"
 #include "render/plugins.hpp"
 #include "render/timelapse.hpp"
@@ -307,22 +307,22 @@ private slots:
         QCOMPARE(filters->itemText(filters->findData(QStringLiteral("plugin:tint"))), QStringLiteral("色づけ（プラグイン）"));
         QCOMPARE(filters->findData(QStringLiteral("plugin:broken")), -1);
         // the native plugins' words
-        QCOMPARE(app::wording::error(QStringLiteral("ops[0] filter_raster: the program of plugin tint could not be started (execve: Permission denied)")),
+        QCOMPARE(genko::wording::error(QStringLiteral("ops[0] filter_raster: the program of plugin tint could not be started (execve: Permission denied)")),
                  QStringLiteral("プラグイン「tint」のプログラムを起動できませんでした（このコンピューターで動くプログラムか確かめてください）"));
-        QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its program tint.exe is not in its folder)")),
+        QCOMPARE(genko::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its program tint.exe is not in its folder)")),
                  QStringLiteral("プラグイン「x」の plugin.json が使えません（プログラム「tint.exe」がプラグインのフォルダーにありません）"));
-        QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin twin cannot be used (a Python plugin twin.py has the same name)")),
+        QCOMPARE(genko::wording::error(QStringLiteral("the plugin.json of plugin twin cannot be used (a Python plugin twin.py has the same name)")),
                  QStringLiteral("プラグイン「twin」の plugin.json が使えません（同じ名前の Python のプラグイン（twin.py）があります）"));
-        QCOMPARE(app::wording::error(QStringLiteral("plugin fails failed (no paper today)")), QStringLiteral("プラグイン「fails」の処理が失敗しました"));
-        QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its folder is a link)")),
+        QCOMPARE(genko::wording::error(QStringLiteral("plugin fails failed (no paper today)")), QStringLiteral("プラグイン「fails」の処理が失敗しました"));
+        QCOMPARE(genko::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its folder is a link)")),
                  QStringLiteral("プラグイン「x」の plugin.json が使えません（プラグインのフォルダーがリンクです（設定のフォルダーの plugins の中に置きます））"));
-        QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its program run is a link)")),
+        QCOMPARE(genko::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its program run is a link)")),
                  QStringLiteral("プラグイン「x」の plugin.json が使えません（プログラム「run」がリンクです（プラグインのフォルダーの中のファイルにします））"));
-        QCOMPARE(app::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its program tint cannot be read)")),
+        QCOMPARE(genko::wording::error(QStringLiteral("the plugin.json of plugin x cannot be used (its program tint cannot be read)")),
                  QStringLiteral("プラグイン「x」の plugin.json が使えません（プログラム「tint」を読めません（読める権限が要ります））"));
-        QCOMPARE(app::wording::error(QStringLiteral("the program of plugin tint could not be copied to run it (No space left on device)")),
+        QCOMPARE(genko::wording::error(QStringLiteral("the program of plugin tint could not be copied to run it (No space left on device)")),
                  QStringLiteral("プラグイン「tint」のプログラムを、動かすために設定のフォルダーへ写せませんでした（空きや権限を確かめてください）"));
-        QCOMPARE(app::wording::error(QStringLiteral("programs cannot run from Genko's settings folder on this computer (/home/a/.config/genko/plugin-runs: "
+        QCOMPARE(genko::wording::error(QStringLiteral("programs cannot run from Genko's settings folder on this computer (/home/a/.config/genko/plugin-runs: "
                                                     "its file system is mounted noexec), so plugin tint cannot run")),
                  QStringLiteral("このコンピューターでは Genko の設定のフォルダー（/home/a/.config/genko/plugin-runs）の中でプログラムを動かせないため、プラグイン「tint」を動かせませんでした"));
         render::plugins::Settings off = render::plugins::settings();

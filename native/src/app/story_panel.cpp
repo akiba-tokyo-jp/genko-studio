@@ -33,7 +33,7 @@
 #include "app/main_window.hpp"
 #include "app/text_style.hpp"
 #include "app/theme.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/command_bus.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"

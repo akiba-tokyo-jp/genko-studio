@@ -25,7 +25,7 @@
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/tool_settings.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/frames.hpp"
 #include "core/ids.hpp"

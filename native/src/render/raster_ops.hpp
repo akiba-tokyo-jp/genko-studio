@@ -32,6 +32,10 @@ void use_brushes_of(const core::Document& doc);
 // never be drawn; other formats as open_image reads them (core::PictureCheck).
 void verify_style_picture(const std::string& bytes);
 
+// ops._verify_image(blob): bytes Pillow cannot open, and absurd sizes, refused before they reach a layer (OpError "not a
+// readable image: …" / "image too large: WxH"; a picture whose pixels cannot be decoded refused too, beyond Python).
+void verify_picture(const std::string& blob);
+
 // Adds these ops (erase and erase_raster take over core's, which stop at a paint layer's pixels) and the area
 // resolver to `registry`.
 void register_raster_ops(core::OpRegistry& registry);

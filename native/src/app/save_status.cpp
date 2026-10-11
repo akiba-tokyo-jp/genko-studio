@@ -10,7 +10,7 @@
 #include "app/look.hpp"
 #include "app/path_label.hpp"
 #include "app/theme.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/paths.hpp"
 
 namespace genko::app {

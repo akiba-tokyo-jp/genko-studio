@@ -38,7 +38,7 @@
 #include "app/perf.hpp"
 #include "app/save_status.hpp"
 #include "app/theme.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/actor.hpp"
 #include "core/command_bus.hpp"
 #include "core/paths.hpp"

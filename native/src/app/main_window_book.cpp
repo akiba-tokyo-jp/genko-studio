@@ -20,7 +20,7 @@
 #include "app/main_window.hpp"
 #include "app/pages_panel.hpp"
 #include "app/save_status.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"

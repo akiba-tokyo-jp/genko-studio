@@ -52,7 +52,7 @@
 #include "app/print_dialog.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/pynum.hpp"
 #include "formats/checks.hpp"
@@ -1222,7 +1222,7 @@ private slots:
             try {
                 return QString::number(app::printing::print_pages(s.doc(), printer, {page}));
             } catch (const core::Error& e) {
-                return app::wording::error(QString::fromUtf8(e.what()));
+                return genko::wording::error(QString::fromUtf8(e.what()));
             }
         };
         QCOMPARE(print(1), QStringLiteral("プラグイン「offplug」は使う設定になっていません（レイヤー → プラグインの設定で選びます）"));
@@ -1233,16 +1233,16 @@ private slots:
     // An export that could not put back a file it had set aside (the files there before are kept until every new one
     // is in place) says where that file is now — each of them, when it could not put back several.
     void anExportSaysWhereAFileItCouldNotPutBackIs() {
-        QCOMPARE(app::wording::error(QStringLiteral("[Errno 13] Permission denied: '/b/x.png'; the file that was there is kept as "
+        QCOMPARE(genko::wording::error(QStringLiteral("[Errno 13] Permission denied: '/b/x.png'; the file that was there is kept as "
                                                     "'/b/.genko-0123456789abcdef.old'")),
                  QStringLiteral("書き出したファイルを置けず、前からあったファイルも元の場所に戻せませんでした。前のファイルは「/b/.genko-0123456789abcdef.old」にあります"));
-        QCOMPARE(app::wording::error(QStringLiteral("[Errno 13] Permission denied: '/b/z.png'; the file that was there is kept as "
+        QCOMPARE(genko::wording::error(QStringLiteral("[Errno 13] Permission denied: '/b/z.png'; the file that was there is kept as "
                                                     "'/b/.genko-0123456789abcdef.old'; the file that was there is kept as "
                                                     "'/c/.genko-fedcba9876543210.old'")),
                  QStringLiteral("書き出したファイルを置けず、前からあったファイルも元の場所に戻せませんでした。前のファイルは"
                                 "「/b/.genko-0123456789abcdef.old」「/c/.genko-fedcba9876543210.old」にあります"));
         // (the session's conflict for an adopted recovery point not yet written when another writer saved)
-        QCOMPARE(app::wording::error(QStringLiteral("the recovery point was not taken: the book changed meanwhile")),
+        QCOMPARE(genko::wording::error(QStringLiteral("the recovery point was not taken: the book changed meanwhile")),
                  QStringLiteral("その間に原稿が変わったため、復旧用コピーを採用していません（元に戻すか、別名で保存してください）"));
     }
 

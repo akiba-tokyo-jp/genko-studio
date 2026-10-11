@@ -11,7 +11,7 @@
 #include <algorithm>
 
 #include "app/main_window.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
 #include "formats/checks.hpp"

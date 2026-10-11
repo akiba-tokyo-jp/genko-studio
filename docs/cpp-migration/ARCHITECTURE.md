@@ -15,13 +15,16 @@ native/
     formats/  PNG/TIFF/PDF/PSD/EPUB/Kindle/strip/webtoon/SNS/pack/layers/timelapse/animation、PSD/PSB/ABR 読込
     studio/   スタジオの op 以外の部品：同席・道具の記録・作業の確保・依頼フォルダー・画像生成の道具の一覧・入力スキーマ・
               原稿から読む state（スタジオの op ＝企画・脚本・ネーム・依頼・候補・採用・領域・仕上げ・承認・相談は core の op）
+    service/  スタジオの道具（StudioService・HumanService：エージェントと人が呼ぶ 41 の道具と人だけの承認・正式な書き出し）と
+              その部品（依頼と下絵の案内・取り込み・アタリ・点検・確認ページ・バックグラウンドの仕事・高解像度化・評価）、
+              利用者向けの言葉（wording）。`genko studio`・MCP・HTTP・アプリが同じものを呼ぶ
     api/      CLI（genko）、HTTP、MCP、設定変換、エラー整形
     app/      Qt Widgets 画面、ペン、IME、案内（GUI だけが Qt Widgets に依存）
   tests/      unit/  contract/  e2e/  perf/  data/（固定の小さな試験資産）
 tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開発用。製品に入れない）
 ```
 
-依存は `core ← storage ← render ← text ← formats ← api ← app` と `core ← storage ← studio ← api` の一方向。スタジオの op は、ほかの op と同じく core に置き（`core/ops_studio.cpp`）、絵の画素を読む部分（素材の画像の大きさと、配置の前に絵全体を読めるかの確かめ）だけを render が `core::StudioHooks` で差し込む（`render::ops_registry()`。core は render に依存しない）。`studio`（`genko_studio`）は core と storage だけに依存し、render・formats には依存しない。`core`・`storage` は **QtCore だけ**に依存してよい（QCryptographicHash・QRandomGenerator・QStringConverter 等。QtGui/Widgets は不可）。`render` 以降は QtGui の QImage/QPainter を使ってよいが、ディスプレイ接続を要求しない（headless で動く）。GUI 部品は `app` だけ。
+依存は `core ← storage ← render ← text ← formats ← service ← api ← app` と `core ← storage ← studio ← service` の一方向。スタジオの op は、ほかの op と同じく core に置き（`core/ops_studio.cpp`）、絵の画素を読む部分（素材の画像の大きさと、配置の前に絵全体を読めるかの確かめ）だけを render が `core::StudioHooks` で差し込む（`render::ops_registry()`。core は render に依存しない）。`studio`（`genko_studio`）は core と storage だけに依存し、render・formats には依存しない。`service`（`genko_service`）は formats・render・studio・storage・core の上にあり、道具を Python のメソッドと同じ引数で受け（`StudioService::call`：位置引数とキーワード引数の JSON。束ねられないものは Python の TypeError）、`ToolResult::to_dict()` の JSON で答える（MCP・HTTP・`genko studio` はこれを送るだけ）。formats は service を知らないので、アプリの正式な書き出しは `formats::RunOptions::official_export` に service が HumanService.export を差し込む（`service::run_export`）。`core`・`storage` は **QtCore だけ**に依存してよい（QCryptographicHash・QRandomGenerator・QStringConverter 等。QtGui/Widgets は不可）。`render` 以降は QtGui の QImage/QPainter を使ってよいが、ディスプレイ接続を要求しない（headless で動く）。GUI 部品は `app` だけ。
 
 変更は必ず `CommandBus` を通す。app・api が原稿 JSON やファイルを直接書き換える経路を作らない。
 
@@ -84,10 +87,12 @@ tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開
 
 - GUI（QWidget・QPixmap）はメインスレッドだけ。描画・保存・出力・フィルターはワーカーで、不変の `Document` と独立した画像バッファを扱い、結果は世代 ID 付きでキュー経由で返す。古い世代の結果は捨てる。
 - 原稿の変更は 1 本の実行列で順序付ける。ワーカーから生ポインタでモデルを書き換えない。
+- スタジオのバックグラウンドの仕事（`service/jobs`：`export`・`export_proof`・`upscale` の `background`）は、仕事ごとのスレッドで、同じ root と actor の StudioService を新しく作って動かす（呼んだ側の StudioService を共有しない）。本への書き込みは本のロックで順序付く。スレッドはすべて登録して join し、デタッチしない。前面（`genko studio`、MCP・HTTP のサーバ）は終わる前に `jobs::wait_all()` を呼び、仕事が終わるまで待つ（Python はプロセスと一緒に仕事が消える。SPEC COMP-01a）。試験用の id の数え方（`ScopedIdSource`）と時刻（`ScopedClock`）は、待っている間に仕事のスレッドから読まれてよいが、仕事の途中で変えない。
 
 ## 8. エラー
 
-- `core::Error`（`code` 文字列と英語の `message`、必要なら JSON ポインター `path`）を例外として投げる。CLI/HTTP/MCP は `{"ok": false, "error": …, "code": …}` に整形する。日本語の利用者向け文言は `app`・`api` の文言表（Python の `app/wording.py` 相当）で付ける。
+- `core::Error`（`code` 文字列と英語の `message`、必要なら JSON ポインター `path`）を例外として投げる。CLI/HTTP/MCP は `{"ok": false, "error": …, "code": …}` に整形する。日本語の利用者向け文言は `service/wording.cpp` の文言表（Python の `app/wording.py` 相当。スタジオの道具の `fail()` とアプリが同じ表を使う）で付ける。
+- スタジオの道具が Python で投げるもの（ApplyError・ValueError・TypeError・FileNotFoundError・JSONDecodeError と、Python がつかまえずトレースバックになるもの）は、同じ型の C++ の例外（`core::ApplyError`・`core::PyValueError`・`core::PyTypeError`・`core::Error("not_found"/"json")`・`core::PyUncaught(型名)`）として投げる。`genko studio` は Python と同じく `{"ok": false, "error": str(exc)}` を出し、`code` を足す。Python ではトレースバックで止まるものは `{"ok": false, "error": "<型>: <言葉>", "code": "python_error"}`。
 - 保存・入出力の失敗は握りつぶさない。失敗を成功扱いで返さない。
 
 ## 9. 試験の約束

@@ -20,7 +20,7 @@
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/print_dialog.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/pyconv.hpp"
 
 namespace genko::app {

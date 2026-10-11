@@ -42,6 +42,12 @@ Image remap_area(const Image& rgba, int width, int height, const std::vector<dou
 // (0 for false cells).
 std::vector<std::int64_t> component_sizes(const BoolGrid& grid);
 
+// lineart.LineParams.from_dict(data).__dict__: the settings line extraction uses, as Python keeps them ({radius,
+// threshold, min_px, drop_blue, keep_solid, rgb}: the studio's derive records them).
+core::Json line_settings(const core::Json& data);
+// lineart.extract(image, LineParams.from_dict(data)): the lines of a picture as ink on a transparent "RGBA" layer.
+Image extract_lines(const Image& image, const core::Json& data);
+
 // numpy 2's float32 np.sin / np.cos as the reference runs it (NPY_DISABLE_CPU_FEATURES: numpy's baseline without FMA3,
 // where each element is the C library's sinf / cosf).
 float numpy_sinf(float x);

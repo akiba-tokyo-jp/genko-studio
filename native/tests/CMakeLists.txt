@@ -176,6 +176,14 @@ genko_test(test_contract_book SOURCES contract/test_contract_book.cpp contract/o
 # compared with Python's.
 genko_test(test_contract_studio SOURCES contract/test_contract_studio.cpp contract/opsupport.cpp
            DEPS genko_test_support genko_render_ops genko_studio genko_formats LABELS contract TIMEOUT 2400)
+# The studio service (M5②: service.py's StudioService and HumanService, adopt-drafts, stats, the audit and `genko studio`)
+# against Python's: service_cases.json (make_service_cases.py) run here and by service_harness.py, step by step: each reply,
+# the books and the other files after it.
+genko_test(test_contract_service SOURCES contract/test_contract_service.cpp
+           DEPS genko_test_support genko_service LABELS contract TIMEOUT 2400)
+# The studio service where this build goes past Python (SPEC COMP-01a): background jobs, a palette picture refused,
+# the official export handed to the studio.
+genko_test(test_service SOURCES unit/test_service.cpp DEPS genko_test_support genko_service LABELS unit)
 # import_psd (M4②b): psd.read_psd and the op against Python's on the PSD and PSB files of psd_cases.json (every file,
 # a few cut after every byte, all of them changed at a few bytes; each step's reply, snapshot and payload, the layers'
 # pixels, the book read back), and hostile files refused without the memory Python would take.

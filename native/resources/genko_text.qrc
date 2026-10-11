@@ -6,5 +6,6 @@
     <file alias="hand">../../src/genko/fonts/Yomogi-Regular.ttf</file>
     <file alias="sfx">../../src/genko/fonts/DelaGothicOne-Regular.ttf</file>
     <file alias="sfx_pop">../../src/genko/fonts/ReggaeOne-Regular.ttf</file>
+    <file alias="pillow_default">../third_party/pillow/fonts/load_default.ttf</file>
   </qresource>
 </RCC>

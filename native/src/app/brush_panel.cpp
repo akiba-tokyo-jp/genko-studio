@@ -30,7 +30,7 @@
 #include "app/config.hpp"
 #include "app/fields.hpp"
 #include "app/theme.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/brushes.hpp"
 #include "core/error.hpp"
 #include "core/pynum.hpp"

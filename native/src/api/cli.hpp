@@ -23,6 +23,7 @@ namespace genko::api {
 //                [--width W] [--max-height H] [--long-edge E] [--jpeg] [--spreads] [--fps F] [--seconds S] [--page N] [--json]
 //                                                the book written out (formats/export.hpp); the files' paths one a line,
 //                                                or {"ok": true, "count", "files"} with --json
+//   genko studio <command> …                     the studio's agent tools and human approvals (api/studio_cli.hpp)
 //   genko --version                              the versions of Genko and its libraries
 int run_cli(int argc, char** argv);
 

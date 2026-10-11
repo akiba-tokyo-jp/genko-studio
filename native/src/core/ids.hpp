@@ -43,6 +43,17 @@ private:
     Source previous_;
 };
 
+// While it lives, new_id() on this thread gives random ids, apart from any ScopedIdSource and ScopedIdScript: for work
+// whose ids are thrown away (a trial run before the real one), so that the ids the real work takes do not depend on it.
+// Nests; other threads are not affected.
+class ScopedIdsApart {
+public:
+    ScopedIdsApart();
+    ~ScopedIdsApart();
+    ScopedIdsApart(const ScopedIdsApart&) = delete;
+    ScopedIdsApart& operator=(const ScopedIdsApart&) = delete;
+};
+
 // "000000000001", "000000000002", … (tools/migration/pyref_harness.py --ids makes the same).
 ScopedIdSource::Source counting_ids(std::uint64_t first = 1);
 

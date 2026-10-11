@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <string>
 
 #include "core/json.hpp"
 #include "core/model.hpp"
@@ -34,6 +35,18 @@ core::Json page_issues(const core::Document& episode, const core::Page& page);
 // preflight's errors and warnings when the book is a studio project and `project` (its folder) is given.
 // core::Error("page_not_loaded") for a book whose pages are still being read (Document::deferred).
 core::Json book(const core::Document& episode, const std::optional<std::filesystem::path>& project = std::nullopt);
+
+// genko/studio/preflight.check(episode, project, allow_fixture=…, force=…, min_dpi=…, color=…): what stops the final
+// export. Low resolution (and a monochrome book written in RGB) is an error unless forced, a test image unless allowed:
+// then they are warnings. {"ok", "errors", "warnings", "dpi": [{page, frame_id, dpi, upscaled?}], "min_dpi"}; the issues
+// as preflight() gives them. (TEXT-01: a ruby that needs review is an error too, beyond Python.)
+struct StudioCheck {
+    bool allow_fixture = false;
+    bool force = false;
+    int min_dpi = kMinDpi;
+    std::optional<std::string> color;
+};
+core::Json studio_check(const core::Document& episode, const std::filesystem::path& project, const StudioCheck& options);
 
 // genko/studio/preflight.check(episode, project) with its defaults: {"errors": [...], "warnings": [...]}, each
 // {"code", "severity", "path", "message", "hint"} (Issue.to_dict). Python's exceptions as core::Error (book() takes

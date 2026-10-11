@@ -29,7 +29,7 @@
 #include "app/scanner.hpp"
 #include "app/tiles.hpp"
 #include "app/tool_settings.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"

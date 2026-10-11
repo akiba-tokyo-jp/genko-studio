@@ -26,7 +26,7 @@
 #include "app/config.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
-#include "app/wording.hpp"
+#include "service/wording.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "render/plugins.hpp"

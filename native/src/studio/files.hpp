@@ -26,6 +26,10 @@ namespace genko::studio {
 
 // --- jsonutil ------------------------------------------------------------------------------------------------------------
 
+// What Python writes for `text` through a file opened in text mode (Path.write_text, open(…, "w"/"a")): each "\n" as
+// os.linesep, "\r\n" on Windows (elsewhere the text as it is).
+std::string text_mode(std::string text);
+
 // jsonutil.canonical_json: keys sorted, "," and ":" without spaces, UTF-8.
 std::string canonical_json(const core::Json& value);
 // jsonutil.content_hash: "sha256:" and the sha256 of canonical_json.
