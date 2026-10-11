@@ -68,7 +68,7 @@ Json gates_of(const Json* payload) {
 Json gate_changes(const Json* before, const Json& after) {
     const Json old_gates = gates_of(before);
     const Json new_gates = gates_of(&after);
-    Json out = Json::array();
+    std::map<std::string, Json> changes;  // (by key: Python's sorted order)
     for (const auto& [key, value] : new_gates.items()) {
         const auto old = old_gates.find(key);
         const std::int64_t was = old == old_gates.end() ? 0 : as_int(*old);  // (a missing key is False, or 0)
@@ -77,8 +77,16 @@ Json gate_changes(const Json* before, const Json& after) {
         change["what"] = key;
         change["from"] = old == old_gates.end() ? Json(nullptr) : *old;
         change["to"] = value;
-        out.push_back(std::move(change));
+        changes[key] = std::move(change);
     }
+    // (C++ only: an approved character that is no longer there — deleted by a person — is an approval gone, "to" null.
+    // Python looks at the keys of the new state only and records nothing: SPEC COMP-01a.)
+    for (const auto& [key, value] : old_gates.items()) {
+        if (!key.starts_with("character:") || new_gates.contains(key) || as_int(value) == 0) continue;
+        changes[key] = Json::object({{"what", key}, {"from", value}, {"to", nullptr}});
+    }
+    Json out = Json::array();
+    for (auto& [key, change] : changes) out.push_back(std::move(change));
     return out;
 }
 

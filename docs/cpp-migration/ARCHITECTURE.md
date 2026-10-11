@@ -13,14 +13,15 @@ native/
     render/   描線・ブラシ・タイル・レイヤー合成・トーン・効果線・3D・色管理（画面と出力で共通）
     text/     縦書き・横書き、禁則、ルビ、傍点、字体処理（FreeType+HarfBuzz）、フキダシ
     formats/  PNG/TIFF/PDF/PSD/EPUB/Kindle/strip/webtoon/SNS/pack/layers/timelapse/animation、PSD/PSB/ABR 読込
-    studio/   企画・脚本・ネーム・依頼・候補・採用・領域・仕上げ・承認・相談・作業一覧
+    studio/   スタジオの op 以外の部品：同席・道具の記録・作業の確保・依頼フォルダー・画像生成の道具の一覧・入力スキーマ・
+              原稿から読む state（スタジオの op ＝企画・脚本・ネーム・依頼・候補・採用・領域・仕上げ・承認・相談は core の op）
     api/      CLI（genko）、HTTP、MCP、設定変換、エラー整形
     app/      Qt Widgets 画面、ペン、IME、案内（GUI だけが Qt Widgets に依存）
   tests/      unit/  contract/  e2e/  perf/  data/（固定の小さな試験資産）
 tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開発用。製品に入れない）
 ```
 
-依存は `core ← storage ← render ← text ← formats ← studio ← api ← app` の一方向。`core`・`storage` は **QtCore だけ**に依存してよい（QCryptographicHash・QRandomGenerator・QStringConverter 等。QtGui/Widgets は不可）。`render` 以降は QtGui の QImage/QPainter を使ってよいが、ディスプレイ接続を要求しない（headless で動く）。GUI 部品は `app` だけ。
+依存は `core ← storage ← render ← text ← formats ← api ← app` と `core ← storage ← studio ← api` の一方向。スタジオの op は、ほかの op と同じく core に置き（`core/ops_studio.cpp`）、絵の画素を読む部分（素材の画像の大きさと、配置の前に絵全体を読めるかの確かめ）だけを render が `core::StudioHooks` で差し込む（`render::ops_registry()`。core は render に依存しない）。`studio`（`genko_studio`）は core と storage だけに依存し、render・formats には依存しない。`core`・`storage` は **QtCore だけ**に依存してよい（QCryptographicHash・QRandomGenerator・QStringConverter 等。QtGui/Widgets は不可）。`render` 以降は QtGui の QImage/QPainter を使ってよいが、ディスプレイ接続を要求しない（headless で動く）。GUI 部品は `app` だけ。
 
 変更は必ず `CommandBus` を通す。app・api が原稿 JSON やファイルを直接書き換える経路を作らない。
 
@@ -68,7 +69,7 @@ tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開
 - op は名前で登録する（`OpRegistry`）。各 op は引数検証・権限判定・ページロック・`strict_gates`・承認ゲートを Python と同じ順で行う。人間専用の op を AI に開かない（`can_approve`：`human:` 接頭辞、または旧来の無名呼出し `genko`）。
 - `dry_run` は検証と結果の予測だけで保存しない。`for_pages` の展開、`area` の解決は Python と同じ規則。
 - op の一覧（引数の説明文を含む）は `docs/ops.schema.json` と `genko schema` の出力を一致させる。
-- スタジオの op（M5：`set_studio`・`approve`・`adopt_candidate`・`place_asset` など 46 種）は、ほかの op と同じく core の op として `core/ops_studio.cpp` に登録する（Python の `apply_ops` が `studio_ops` へ渡すのと同じ位置で、同じ検査順）。素材の画像の大きさだけは画素の読込が要るので、`render::ops_registry()` が `core::StudioHooks`（`render::asset_picture_size`）を差し込んで登録し直す（core だけのバスは `not_yet_ported`）。`studio/`（`genko_studio`）は op 以外のスタジオの部品：同席（`studio/presence.json`）・道具の記録（`studio/logs/tools.jsonl`）・作業の確保（`studio/claims/`）・依頼フォルダー（`studio/requests/`）・画像生成の道具の一覧（設定フォルダーの `tools.json`）・入力スキーマと jsonschema_lite・原稿から読む state。配置画像の描画（`_placed_raster`・`_finish_placed`）は `render/placed.cpp` と `render/screentone.cpp`。
+- スタジオの op（M5：`set_studio`・`approve`・`adopt_candidate`・`place_asset` など 46 種）は、ほかの op と同じく core の op として `core/ops_studio.cpp` に登録する（Python の `apply_ops` が `studio_ops` へ渡すのと同じ位置で、同じ検査順）。素材の画像の大きさと、配置の前の絵の確かめ（絵全体を展開する。C++ だけ）は画素の読込が要るので、`render::ops_registry()` が `core::StudioHooks`（`render::asset_picture_size`・`render::check_asset_picture`）を差し込んで登録し直す（core だけのバスは大きさが要る所で `not_yet_ported`、絵は確かめない）。`studio/`（`genko_studio`）は op 以外のスタジオの部品：同席（`studio/presence.json`）・道具の記録（`studio/logs/tools.jsonl`）・作業の確保（`studio/claims/`）・依頼フォルダー（`studio/requests/`）・画像生成の道具の一覧（設定フォルダーの `tools.json`）・入力スキーマと jsonschema_lite・原稿から読む state。配置画像の描画（`_placed_raster`・`_finish_placed`）は `render/placed.cpp` と `render/screentone.cpp`。
 
 ## 6. 保存（v4）と履歴
 

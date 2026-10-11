@@ -23,8 +23,9 @@ void register_render_ops(core::OpRegistry& registry) {
     render::register_bookpage_ops(registry);
     // import_psd (fileops: a PSD or PSB read as layers, render/psd)
     register_file_ops(registry);
-    // the studio ops again, place_asset and set_placement able to read an asset's picture size (render/placed)
-    core::register_studio_ops(registry, core::StudioHooks{asset_picture_size});
+    // the studio ops again, place_asset and set_placement able to read an asset's picture size, and those placing a
+    // picture able to see it can be drawn (render/placed)
+    core::register_studio_ops(registry, core::StudioHooks{asset_picture_size, check_asset_picture});
     // define_brush again, able to take a paper's picture in (BRUSH-01, render/paper)
     core::register_define_brush(registry, [](std::string_view file) {
         try {

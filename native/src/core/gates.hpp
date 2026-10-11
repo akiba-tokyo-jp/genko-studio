@@ -13,7 +13,8 @@ Json gates_of(const Json* payload);
 
 // What changed between two payloads, as Python lists it: [{"what": key, "from": old value or null, "to": new
 // value}, …] in key order, for the keys of `after` whose value differs from `before` (a missing key counts as false,
-// or 0 for export_approvals). `before` may be null (a new book).
+// or 0 for export_approvals); and, which Python leaves out, each approved character of `before` that `after` does not
+// have ({"what": "character:<id>:locked", "from": true, "to": null}). `before` may be null (a new book).
 Json gate_changes(const Json* before, const Json& after);
 
 }  // namespace genko::core

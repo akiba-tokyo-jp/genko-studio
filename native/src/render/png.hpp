@@ -46,10 +46,10 @@ Image read_png(std::string_view bytes, const PngLimits& limits = {});
 // That and other formats Pillow opens (TIFF, WebP) throw NotYetPorted("image_format");
 // anything else core::Error("unidentified_image").
 Image open_image(std::string_view bytes, const PngLimits& limits = {});
-// Image.open(bytes).size: a PNG's from its chunks before the image data, read as Pillow reads them when it opens a file
-// (its pixels are not decoded); the other pictures open_image reads, decoded. core::Error as read_png and open_image throw
-// them: "unidentified_image", "image_too_large" (above kPillowOpenLimits: Pillow's DecompressionBombError), "format"; and
-// NotYetPorted("image_format").
+// Image.open(bytes).size: a PNG's from its chunks before the image data, a JPEG's, BMP's or GIF's from its header, read
+// as Pillow reads them when it opens a file (the pixels are not decoded: a picture whose pixels are cut short or broken
+// has a size, and open_image refuses it). core::Error as read_png and open_image throw them: "unidentified_image",
+// "image_too_large" (above kPillowOpenLimits: Pillow's DecompressionBombError), "format"; and NotYetPorted("image_format").
 Size picture_size(std::string_view bytes);
 // Whether open_image refuses these bytes as one of those other formats (NotYetPorted("image_format")): known by their
 // first bytes, without reading the rest.

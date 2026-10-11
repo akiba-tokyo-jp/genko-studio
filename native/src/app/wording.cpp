@@ -146,6 +146,9 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(each of the bible's characters must be an object, not .*)",
                          "設定資料の登場人物は、一人ずつ項目のまとまり（オブジェクト）で書きます"));
         r.push_back(rule(R"(the asset's picture cannot be read \((.*)\))", "素材の画像を読み込めません（壊れているか、読めない形式の画像です）"));
+        r.push_back(rule(R"(the screen is too coarse for this resolution.*)",
+                         "網点が粗すぎて、この解像度では作れません（線数を上げるか、解像度を下げてください）"));
+        r.push_back(rule(R"(a count past .* is too large for this build.*)", "数が大きすぎて、この版の Genko では数えられません"));
         r.push_back(rule(R"(the finish's (\w+) is not a number)", [](const QRegularExpressionMatch& m) {
             static const QHash<QString, QString> names = {
                 {"black", "ベタにする濃さ"}, {"white", "紙の白にする明るさ"}, {"line_threshold", "線とみなす濃さ"},
@@ -581,6 +584,15 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("only a person can set prompt/size overrides", "プロンプトや寸法の上書きは人だけが指定できます"));
         r.push_back(rule("only a person can mark a panel skip", "コマを「絵なし」にできるのは人だけです"));
         r.push_back(rule("only a person can unpin", "固定を外せるのは人だけです"));
+        // (M5: what only a person holds, refused to an agent in the C++ build only: SPEC COMP-01a)
+        r.push_back(rule(R"(only a person can set a panel's regions with set_panel.*)",
+                         "コマの範囲（regions）をまとめて書き換えられるのは人だけです（AI は範囲の追加・編集・差し替えの操作を使います）"));
+        r.push_back(rule(R"(only a person can change a character's approval.*)",
+                         "人物の承認（固定と、承認済みの人物の設定画・顔）を変えられるのは人だけです"));
+        r.push_back(rule(R"(only a person can delete an approved character \((.*)\))", "承認済みの人物 \\1 を消せるのは人だけです"));
+        r.push_back(rule(R"(only a person can change a request for approval.*)", "承認の依頼を変えられるのは人だけです"));
+        r.push_back(rule(R"(only a person can change the style fixed by the pilot page.*)",
+                         "試し描きのページで決めた絵柄（style.locked）を変えられるのは人だけです"));
         r.push_back(rule(R"((\w+) is pinned by a person)", "\\1 は人が固定しています"));
         r.push_back(rule("a person drew this region; only a person can change it", "人が描いた範囲なので、変えられるのは人だけです"));
         r.push_back(rule("the character sheet is approved; only a person can change it", "設定画は承認済みなので、変えられるのは人だけです"));

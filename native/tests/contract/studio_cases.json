@@ -1,5 +1,5 @@
 {
- "note": "Cases for test_contract_studio (studioOpsLikePython): the studio ops of M5 (Python's genko/studio/studio_ops.py, which ops.apply_ops dispatches its STUDIO_OPS to) and set_bible, add_ticket and set_ticket (ops._apply_one) on the book `studio_harness.py make-studiobook` makes: the op contract book (pyref_harness.py make-opsbook: page 5 held by ai:other, a front cover as page 7) with a studio — characters (c-ken's sheet approved and locked), locations, a prop, a script, a page plan, briefs (page 1: a pinned shot and a prompt override on 000000000028, a person's fix on 000000000029, regions, a reference, three candidates and the art adopted on 000000000026), requests, sheet candidates from two agents and a person, tickets of every kind, two proposals, the style fixed from page 6 — and its pictures ($A1 … $G1 PNGs, $J1 a JPEG, $CUT a PNG cut short after its header, $BAD bytes that are no picture, $CRC a PNG whose header's checksum is wrong, $BOMB a header too large to open; refs from the book's assets.json). Each case: its steps ({ops, agent?, dry_run?}; or one step of ops, agent, dry), whether its last step succeeds in Python, with time.strftime fixed (allow_chat_approval). A case marked \"cpp\" is one this build refuses on purpose (a number Python makes from text, 'inf' or 'nan', that it would keep): C++ must refuse it with that code, its error holding \"cpp_says\".",
+ "note": "Cases for test_contract_studio (studioOpsLikePython): the studio ops of M5 (Python's genko/studio/studio_ops.py, which ops.apply_ops dispatches its STUDIO_OPS to) and set_bible, add_ticket and set_ticket (ops._apply_one) on the book `studio_harness.py make-studiobook` makes: the op contract book (pyref_harness.py make-opsbook: page 5 held by ai:other, a front cover as page 7) with a studio — characters (c-ken's sheet approved and locked), locations, a prop, a script, a page plan, briefs (page 1: a pinned shot and a prompt override on 000000000028, a person's fix on 000000000029, regions, a reference, three candidates and the art adopted on 000000000026), requests, sheet candidates from two agents and a person, tickets of every kind, two proposals, the style fixed from page 6 — and its pictures ($A1 … $G1 PNGs, $J1 a JPEG, $CUT a PNG cut short after its header, $BAD bytes that are no picture, $CRC a PNG whose header's checksum is wrong, $BOMB a header too large to open, $JX $BX $GX a JPEG, a BMP and a GIF cut short in their pixels; refs from the book's assets.json). Each case: its steps ({ops, agent?, dry_run?}; or one step of ops, agent, dry), whether its last step succeeds in Python, with time.strftime fixed (allow_chat_approval). A case marked \"cpp\" is one this build refuses on purpose (a number Python makes from text, 'inf' or 'nan', that it would keep; what only a person holds, changed by an agent; a picture placed whose pixels cannot be decoded): C++ must refuse it with that code, its error holding \"cpp_says\".",
  "first_id": 2816,
  "clock": "2026-10-11T12:34:56",
  "cases": [
@@ -44,7 +44,21 @@
      "style": "plain"
     }
    ],
-   "agent": "ai:hermes"
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change the style fixed by the pilot page"
+  },
+  {
+   "n": "set_studio style replaced by a text by a person",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "style": "plain"
+    }
+   ],
+   "agent": "human:作者"
   },
   {
    "n": "set_studio policy by an agent",
@@ -150,7 +164,7 @@
        "style": "plain"
       }
      ],
-     "agent": "ai:hermes"
+     "agent": "human:作者"
     },
     {
      "ops": [
@@ -6038,6 +6052,307 @@
    ]
   },
   {
+   "n": "adopt_candidate a JPEG cut short",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$JX",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a BMP cut short",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$BX",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a GIF cut short",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$GX",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a PNG cut short",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$CUT",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate no picture",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$BAD",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a PNG with a broken header",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$CRC",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "adopt_candidate a decompression bomb",
+   "op": "adopt_candidate",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "import_candidates",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidates": [
+        {
+         "id": "cd_x",
+         "asset": "$BOMB",
+         "px": [
+          9,
+          6
+         ],
+         "origin": {
+          "kind": "agent"
+         }
+        }
+       ]
+      }
+     ],
+     "agent": "ai:hermes"
+    },
+    {
+     "ops": [
+      {
+       "op": "adopt_candidate",
+       "page": 1,
+       "frame_id": "000000000026",
+       "candidate_id": "cd_x"
+      }
+     ],
+     "agent": "ai:hermes"
+    }
+   ],
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
    "n": "set_placement contain",
    "op": "set_placement",
    "ok": true,
@@ -6409,7 +6724,57 @@
      "asset": "$CUT"
     }
    ],
-   "agent": "ai:hermes"
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "place_asset a JPEG cut short",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$JX",
+     "frame_id": "000000000018"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "place_asset a BMP cut short",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$BX",
+     "frame_id": "000000000018"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
+  },
+  {
+   "n": "place_asset a GIF cut short",
+   "op": "place_asset",
+   "ok": true,
+   "ops": [
+    {
+     "op": "place_asset",
+     "page": 4,
+     "asset": "$GX",
+     "frame_id": "000000000018"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "the asset's picture cannot be read ("
   },
   {
    "n": "place_asset not a picture",
@@ -7455,7 +7820,33 @@
      ]
     }
    ],
-   "agent": "ai:hermes"
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "set_bible characters by a person",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-a"
+      },
+      {
+       "name": "b"
+      }
+     ],
+     "constraints": [
+      "x",
+      1,
+      null
+     ]
+    }
+   ],
+   "agent": "human:作者"
   },
   {
    "n": "set_bible characters with a text",
@@ -7571,6 +7962,546 @@
     }
    ],
    "agent": "ai:hermes"
+  },
+  {
+   "n": "set_panel regions by an agent",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 4,
+     "frame_id": "000000000018",
+     "set": {
+      "regions": [
+       {
+        "id": "rg_x",
+        "kind": "face",
+        "rect_mm": [
+         1,
+         2,
+         3,
+         4
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can set a panel's regions with set_panel"
+  },
+  {
+   "n": "set_panel unset regions by an agent",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "unset": [
+      "regions"
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can set a panel's regions with set_panel"
+  },
+  {
+   "n": "set_panel regions by a person",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 4,
+     "frame_id": "000000000018",
+     "set": {
+      "regions": [
+       {
+        "id": "rg_x",
+        "kind": "face",
+        "rect_mm": [
+         1,
+         2,
+         3,
+         4
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_panel unset regions by a person",
+   "op": "set_panel",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_panel",
+     "page": 1,
+     "frame_id": "000000000026",
+     "unset": [
+      "regions"
+     ]
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_bible dropping an approved character by an agent",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-yuki",
+       "name": "ユキ"
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "set_bible locking a character by an agent",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-new",
+       "name": "新",
+       "locked": true
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "set_bible another sheet for an approved character by an agent",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-yuki",
+       "name": "ユキ"
+      },
+      {
+       "id": "c-ken",
+       "name": "健",
+       "locked": true,
+       "refs": [
+        {
+         "asset": "$S2",
+         "kind": "sheet",
+         "approved_by": "human:作者"
+        },
+        {
+         "asset": "$F1",
+         "kind": "face",
+         "approved_by": "human:作者"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "set_bible a sheet ref of a character not locked by an agent",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-new",
+       "name": "新",
+       "refs": [
+        {
+         "asset": "$S2",
+         "kind": "sheet"
+        }
+       ]
+      },
+      {
+       "id": "c-ken",
+       "name": "健",
+       "locked": true,
+       "refs": [
+        {
+         "asset": "$S1",
+         "kind": "sheet",
+         "approved_by": "human:作者"
+        },
+        {
+         "asset": "$F1",
+         "kind": "face",
+         "approved_by": "human:作者"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_bible dropping an approved character by a person",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-yuki",
+       "name": "ユキ"
+      }
+     ]
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_bible keeping the approvals by an agent",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "plot": "新しい筋",
+     "constraints": [],
+     "characters": [
+      {
+       "id": "c-yuki",
+       "name": "ユキ",
+       "refs": [
+        {
+         "asset": "$S2",
+         "kind": "pose"
+        }
+       ]
+      },
+      {
+       "id": "c-ken",
+       "name": "健",
+       "locked": true,
+       "refs": [
+        {
+         "asset": "$S1",
+         "kind": "sheet",
+         "approved_by": "human:作者"
+        },
+        {
+         "asset": "$F1",
+         "kind": "face",
+         "approved_by": "human:作者"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_bible unlocking by an agent",
+   "op": "set_bible",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_bible",
+     "characters": [
+      {
+       "id": "c-ken",
+       "name": "健",
+       "locked": false,
+       "refs": [
+        {
+         "asset": "$S1",
+         "kind": "sheet",
+         "approved_by": "human:作者"
+        },
+        {
+         "asset": "$F1",
+         "kind": "face",
+         "approved_by": "human:作者"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "upsert_character locking a character by an agent",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-yuki",
+      "name": "ユキ",
+      "locked": true
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "upsert_character a new one locked by an agent",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-new",
+      "name": "新",
+      "locked": true
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a character's approval"
+  },
+  {
+   "n": "upsert_character locking a character by a person",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-yuki",
+      "name": "ユキ",
+      "locked": true
+     }
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "upsert_character a sheet ref by an agent",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-mio",
+      "name": "ミオ",
+      "refs": [
+       {
+        "asset": "$S2",
+        "kind": "sheet"
+       }
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_character a face ref by an agent",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-yuki",
+      "refs": [
+       {
+        "asset": "$F1",
+        "kind": "face"
+       }
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "upsert_character not locked by an agent",
+   "op": "upsert_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "upsert_character",
+     "character": {
+      "id": "c-mio",
+      "name": "ミオ",
+      "locked": false,
+      "refs": [
+       {
+        "asset": "$S2",
+        "kind": "pose"
+       }
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "delete_character approved by an agent",
+   "op": "delete_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_character",
+     "id": "c-ken",
+     "force": true
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can delete an approved character (c-ken)"
+  },
+  {
+   "n": "delete_character approved by a person",
+   "op": "delete_character",
+   "ok": true,
+   "ops": [
+    {
+     "op": "delete_character",
+     "id": "c-ken",
+     "force": true
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_ticket on a request for approval by an agent",
+   "op": "set_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_ticket",
+     "id": "000000000a0c",
+     "status": "done"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change a request for approval (ticket 000000000a0c)"
+  },
+  {
+   "n": "set_ticket on a request for approval by a person",
+   "op": "set_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_ticket",
+     "id": "000000000a0c",
+     "status": "done"
+    }
+   ],
+   "agent": "human:作者"
+  },
+  {
+   "n": "set_ticket on a fix by an agent",
+   "op": "set_ticket",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_ticket",
+     "id": "000000000a10",
+     "assignee": "human"
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_studio unfixing the style by an agent",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "style": {
+      "locked": null
+     }
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change the style fixed by the pilot page"
+  },
+  {
+   "n": "set_studio replacing the style by an agent",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "style": "plain"
+    }
+   ],
+   "agent": "ai:hermes",
+   "cpp": "apply",
+   "cpp_says": "only a person can change the style fixed by the pilot page"
+  },
+  {
+   "n": "set_studio style notes by an agent",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "style": {
+      "notes": [
+       "線は太め"
+      ]
+     }
+    }
+   ],
+   "agent": "ai:hermes"
+  },
+  {
+   "n": "set_studio unfixing the style by a person",
+   "op": "set_studio",
+   "ok": true,
+   "ops": [
+    {
+     "op": "set_studio",
+     "style": {
+      "locked": null
+     }
+    }
+   ],
+   "agent": "human:作者"
   }
  ]
 }

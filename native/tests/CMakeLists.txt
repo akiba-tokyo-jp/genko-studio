@@ -24,6 +24,10 @@ genko_test(test_storage SOURCES unit/test_storage.cpp DEPS genko_test_support LA
 genko_test(test_lock SOURCES unit/test_lock.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_journal SOURCES unit/test_journal.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_command_bus SOURCES unit/test_command_bus.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# The studio (M5): its files where this build goes past Python, and its ops' refusals and changes this build alone makes.
+genko_test(test_studio_files SOURCES unit/test_studio_files.cpp DEPS genko_test_support genko_studio LABELS unit)
+genko_test(test_studio_ops SOURCES unit/test_studio_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_placed SOURCES unit/test_placed.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit)
 genko_test(test_ops SOURCES unit/test_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_transaction SOURCES unit/test_transaction.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 

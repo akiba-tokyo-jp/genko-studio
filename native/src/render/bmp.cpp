@@ -90,7 +90,11 @@ constexpr std::array<MaskMode, 8> k32{{
 }};
 }  // namespace
 
-Image read_bmp(std::string_view bytes, const PngLimits& limits) {
+namespace {
+
+// read_bmp up to what Pillow's BmpImageFile._open reads (the headers, the bitfields and the palette); `size_only`: the
+// size then, without the pixels (the image is returned empty).
+Image bmp_read(std::string_view bytes, const PngLimits& limits, Size* size_only) {
     if (bytes.substr(0, 2) != "BM" || bytes.size() < 18) bad_bmp();
     const auto header = le(bytes, 14);
     if (header != 12 && header != 40 && header != 52 && header != 56 && header != 64 && header != 108 && header != 124)
@@ -161,6 +165,10 @@ Image read_bmp(std::string_view bytes, const PngLimits& limits) {
         }
         if (gray) { mode = colors == 2 ? "1" : "L"; raw = mode; }
     }
+    if (size_only != nullptr) {
+        *size_only = Size{static_cast<int>(width), static_cast<int>(height)};
+        return Image();
+    }
     std::size_t offset = le(bytes, 10);
     if (offset == 0) offset = metadata_end;  // Pillow: offset or the post-header/palette cursor.
     // Pillow accepts an offset pointing to the start of the palette by advancing past it.
@@ -210,5 +218,15 @@ Image read_bmp(std::string_view bytes, const PngLimits& limits) {
     }
     if (!genko_imaging_budget_transfer(&rows.reservation, image.raw())) detail::throw_imaging_error();
     return image;
+}
+
+}  // namespace
+
+Image read_bmp(std::string_view bytes, const PngLimits& limits) { return bmp_read(bytes, limits, nullptr); }
+
+Size bmp_size(std::string_view bytes, const PngLimits& limits) {
+    Size size;
+    (void)bmp_read(bytes, limits, &size);
+    return size;
 }
 }  // namespace genko::render

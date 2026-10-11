@@ -233,11 +233,10 @@ bool jpeg_rows(JpegGuard* state, ImagingMemoryInstance* image, ImagingShuffler u
     throw core::Error(code, std::string("cannot read JPEG: ") + state.error.message);
 }
 
-Image read_jpeg(std::string_view bytes, const PngLimits& limits) {
+// The JPEG's markers up to its first scan (what Pillow's JpegImageFile._open reads), with the checks made there.
+void jpeg_open(JpegGuard& state, std::jmp_buf& jump, std::string_view bytes, const PngLimits& limits) {
     if (bytes.size() > std::numeric_limits<unsigned long>::max())
         throw core::Error("image_too_large", "JPEG input too large");
-    std::jmp_buf jump{};
-    JpegGuard state;
     state.error.jump = &jump;
     state.codec.err = jpeg_std_error(&state.error.base);
     state.error.base.error_exit = jpeg_error_exit;
@@ -248,9 +247,26 @@ Image read_jpeg(std::string_view bytes, const PngLimits& limits) {
     if (pixels > limits.max_pixels || state.codec.image_width > 0x7fffffffU / 4U ||
         state.codec.image_height > 0x7fffffffU || beyond_side(state.codec.image_width, state.codec.image_height, limits))
         throw core::Error("image_too_large", "JPEG image exceeds pixel/dimension limit");
+    if (state.codec.data_precision != 8) throw core::Error("unidentified_image", "unsupported JPEG precision");
+    if (state.codec.num_components != 1 && state.codec.num_components != 3 && state.codec.num_components != 4) {
+        throw core::Error("unidentified_image", "unsupported JPEG component count");
+    }
+}
+
+Size jpeg_size(std::string_view bytes, const PngLimits& limits) {
+    std::jmp_buf jump{};
+    JpegGuard state;
+    jpeg_open(state, jump, bytes, limits);
+    return Size{static_cast<int>(state.codec.image_width), static_cast<int>(state.codec.image_height)};
+}
+
+Image read_jpeg(std::string_view bytes, const PngLimits& limits) {
+    std::jmp_buf jump{};
+    JpegGuard state;
+    jpeg_open(state, jump, bytes, limits);
+    const std::int64_t pixels = static_cast<std::int64_t>(state.codec.image_width) * state.codec.image_height;
     const char* mode = nullptr;
     const char* rawmode = nullptr;
-    if (state.codec.data_precision != 8) throw core::Error("unidentified_image", "unsupported JPEG precision");
     if (state.codec.num_components == 1) {
         mode = rawmode = "L";
         state.codec.out_color_space = JCS_GRAYSCALE;
@@ -503,7 +519,12 @@ bool unported_image_format(std::string_view bytes) {
 }
 
 Size picture_size(std::string_view bytes) {
-    if (!png_signature(bytes)) return open_image(bytes, kPillowOpenLimits).size();
+    if (!png_signature(bytes)) {  // (as Image.open: the header only, the pixels not decoded)
+        if (bytes.substr(0, 3) == "\xff\xd8\xff") return jpeg_size(bytes, kPillowOpenLimits);
+        if (bytes.substr(0, 2) == "BM") return bmp_size(bytes, kPillowOpenLimits);
+        if (bytes.substr(0, 6) == "GIF87a" || bytes.substr(0, 6) == "GIF89a") return gif_size(bytes, kPillowOpenLimits);
+        return open_image(bytes, kPillowOpenLimits).size();  // (NotYetPorted, or not a picture)
+    }
     ReadState state;
     state.data = reinterpret_cast<const unsigned char*>(bytes.data());
     state.size = bytes.size();

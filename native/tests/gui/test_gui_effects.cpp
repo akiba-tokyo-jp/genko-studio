@@ -715,9 +715,31 @@ private slots:
                  QStringLiteral("設定資料の登場人物は、一人ずつ項目のまとまり（オブジェクト）で書きます"));
         QCOMPARE(error(std::string("ops[0] place_asset: the asset's picture cannot be read (the file is too large)")),
                  QStringLiteral("素材の画像を読み込めません（壊れているか、読めない形式の画像です）"));
+        QCOMPARE(error(std::string("ops[1] adopt_candidate: the asset's picture cannot be read (broken PNG file: image file is truncated)")),
+                 QStringLiteral("素材の画像を読み込めません（壊れているか、読めない形式の画像です）"));
         QCOMPARE(error(std::string("the finish's line_threshold is not a number")),
                  QStringLiteral("仕上げの線とみなす濃さは数で指定します（この絵は描けません）"));
         QCOMPARE(app::wording::unported_element(QStringLiteral("image_format")), QStringLiteral("まだ読めない形式の画像（TIFF、WebP、Lab カラーの PSD）"));
+        QCOMPARE(error(std::string("the screen is too coarse for this resolution (22472 px a side)")),
+                 QStringLiteral("網点が粗すぎて、この解像度では作れません（線数を上げるか、解像度を下げてください）"));
+        QCOMPARE(error(std::string("ops[0] open_request: a count past 2**64 - 1 is too large for this build (Python's int has no bound)")),
+                 QStringLiteral("数が大きすぎて、この版の Genko では数えられません"));
+        // (what only a person holds, refused to an agent)
+        QCOMPARE(error(std::string("ops[0] set_panel: only a person can set a panel's regions with set_panel (an agent uses add_region, "
+                                   "edit_region or replace_regions)")),
+                 QStringLiteral("コマの範囲（regions）をまとめて書き換えられるのは人だけです（AI は範囲の追加・編集・差し替えの操作を使います）"));
+        QCOMPARE(error(std::string("ops[0] set_bible: only a person can change a character's approval (locked, and an approved "
+                                   "character's sheet and face)")),
+                 QStringLiteral("人物の承認（固定と、承認済みの人物の設定画・顔）を変えられるのは人だけです"));
+        QCOMPARE(error(std::string("ops[0] upsert_character: only a person can change a character's approval (locked, and an approved "
+                                   "character's sheet and face)")),
+                 QStringLiteral("人物の承認（固定と、承認済みの人物の設定画・顔）を変えられるのは人だけです"));
+        QCOMPARE(error(std::string("ops[0] delete_character: only a person can delete an approved character (c-ken)")),
+                 QStringLiteral("承認済みの人物 c-ken を消せるのは人だけです"));
+        QCOMPARE(error(std::string("ops[0] set_ticket: only a person can change a request for approval (ticket t1)")),
+                 QStringLiteral("承認の依頼を変えられるのは人だけです"));
+        QCOMPARE(error(std::string("ops[0] set_studio: only a person can change the style fixed by the pilot page (style.locked)")),
+                 QStringLiteral("試し描きのページで決めた絵柄（style.locked）を変えられるのは人だけです"));
     }
 
     void bookRefusalsInThePersonsWords() {

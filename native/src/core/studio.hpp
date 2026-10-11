@@ -19,9 +19,9 @@
 // with Python's arguments, checks in Python's order, results and messages; the human-only rules (approve, revoke,
 // reopen_ticket, reject_sheet, resolve_proposal, allow_chat_approval, a policy, an unlock, a pinned field, a person's
 // region, a skip, a prompt override) as Python's (core::can_approve: "human:<name>", "human" or the unnamed "genko").
-// The ops change only the book in memory (a batch is all or nothing); the only file they read is an asset's picture
-// header, for place_asset and set_placement (StudioHooks). The book and page ops of the same family that Python keeps in
-// ops._apply_one (set_bible, add_ticket, set_ticket) are here too.
+// The ops change only the book in memory (a batch is all or nothing); the only file they read is an asset's picture,
+// for place_asset, adopt_candidate and set_placement (StudioHooks). The book and page ops of the same family that Python
+// keeps in ops._apply_one (set_bible, add_ticket, set_ticket) are here too.
 
 namespace genko::core {
 
@@ -44,13 +44,18 @@ std::string content_hash(const Json& value);
 // (or a region) that is not an object (PyUncaught).
 std::string brief_hash(const Json& panel);
 
-// What the studio ops need beyond core: the size of an asset's picture (Image.open(...).size of
-// assets/<ab>/<sha256>.png in the book's folder `book`), nothing when there is no such file. render::ops_registry gives
-// it (render::picture_size); without it place_asset, and set_placement of a placed picture that is no candidate, refuse
-// that part with not_yet_ported.
+// What the studio ops need beyond core, from render::ops_registry (render/placed.hpp):
+// - picture_size: the size of an asset's picture (Image.open(...).size of assets/<ab>/<sha256>.png in the book's folder
+//   `book`, read from its header), nothing when there is no such file. Without it place_asset, and set_placement of a
+//   placed picture that is no candidate, refuse that part with not_yet_ported.
+// - picture_check (C++ only, SPEC COMP-01a): the whole picture decoded, as the drawing decodes it, before it is placed
+//   (place_asset, adopt_candidate, set_placement of a placed picture that is no candidate), core::OpError when it cannot
+//   be (Python places it and the drawing fails); nothing to say when there is no such file. Without it (core's own
+//   registry, which draws nothing) the picture is not looked at.
 struct StudioHooks {
     std::function<std::optional<std::pair<std::int64_t, std::int64_t>>(const std::filesystem::path& book, const std::string& ref)>
         picture_size;
+    std::function<void(const std::filesystem::path& book, const std::string& ref)> picture_check;
 };
 
 // Register the studio ops (studio_ops.STUDIO_OPS) and set_bible, add_ticket and set_ticket.

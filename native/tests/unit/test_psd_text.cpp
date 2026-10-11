@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "psd_book_hashes.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/model.hpp"
@@ -178,11 +179,8 @@ std::string first_difference(const std::string& a, const std::string& b, int wid
     return std::to_string(pixel % w) + "," + std::to_string(pixel / w);
 }
 
-// The image-way PSD of each page of the PSD book at 150 dpi (imageWayIsAsBefore).
-const QString kImageWay[4] = {QStringLiteral("3bb689e02a4ee5833f89b3eefc0c4894adf821bdc7ff004313438efca8f3c2ba"),
-                              QStringLiteral("1f1457dfff7b5c7782f9d8532a37d242d9385a714dd26f97dd0199dd1cc99ca4"),
-                              QStringLiteral("f7d33547e0049c31cfd8ec16e5128a01dbca3a7aeecbb42155dfced6fcda7af7"),
-                              QStringLiteral("5a8b99f44a399f5542db7ced98d789069da421975dcb7f81097110d5bb3fe665")};
+// The image-way PSD of each page of the PSD book at 150 dpi (imageWayIsAsBefore): psd_book_hashes.hpp.
+QString image_way_sha(std::size_t page) { return QString::fromLatin1(genko::test::kPsdBookImageWay[page]); }
 
 constexpr const char* kGothic = "ZenKakuGothicNew-Bold";
 constexpr const char* kMincho = "ZenOldMincho-SemiBold";
@@ -252,7 +250,7 @@ class TestPsdText : public QObject {
         std::size_t page = 0;
         for (const auto& [name, sha] : written) {
             QCOMPARE(name, "PSD文字_ep01_p00" + std::to_string(page + 1) + ".psd");
-            QCOMPARE(QString::fromStdString(sha), kImageWay[page++]);
+            QCOMPARE(QString::fromStdString(sha), image_way_sha(page++));
         }
     }
 
@@ -409,14 +407,15 @@ private slots:
     // before the editable PSD wrote (their sha256, below: written by e146b96's genko, whose image way test_contract_export
     // holds to Python's, and the same as Python's own for the book without what only this build has —
     // test_contract_psd_text's imageWayIsPythons; page 1's since M5①, where the book's「大きな声で約束する」has its rubies
-    // on「声」and「約束」, this build's, the same as Python's there), with no text layer and no group.
+    // on「声」and「約束」, the same as Python's there, which imageWayIsPythons holds too: psd_book_hashes.hpp), with no
+    // text layer and no group.
     void imageWayIsAsBefore() {
         const auto& files = image_way();
         QCOMPARE(files.size(), std::size_t{4});
         for (std::size_t i = 0; i < files.size(); ++i) {
             const std::string bytes = genko::test::read_bytes(QString::fromStdString(files[i].string()));
             const QString sha = QString::fromLatin1(QCryptographicHash::hash(QByteArray::fromStdString(bytes), QCryptographicHash::Sha256).toHex());
-            QVERIFY2(sha == kImageWay[i], qPrintable(QString::number(i + 1) + ": " + sha));
+            QVERIFY2(sha == image_way_sha(i), qPrintable(QString::number(i + 1) + ": " + sha));
             QVERIFY(bytes.find("TySh") == std::string::npos);
             QVERIFY(bytes.find("lsct") == std::string::npos);
             const Read& r = image_page(i);

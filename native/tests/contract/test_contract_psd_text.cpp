@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "psd_book_hashes.hpp"
 #include "core/command_bus.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
@@ -184,6 +185,10 @@ private slots:
         const auto mine = genko::test::tree_hashes(path(QStringLiteral("cpp-psd")));
         QCOMPARE(mine.size(), std::size_t{4});
         QVERIFY(mine == theirs);
+        // page 1 of Python's PSD is the page 1 the unit test holds this build's book to (psd_book_hashes.hpp: since M5① the
+        // book's rubies on 「声」 and 「約束」, a page Python's book and this build's lay out alike)
+        QCOMPARE(QString::fromStdString(theirs.begin()->first), QStringLiteral("PSD文字_ep01_p001.psd"));
+        QCOMPARE(QString::fromStdString(theirs.begin()->second), QString::fromLatin1(genko::test::kPsdBookImageWay[0]));
     }
 
     // A font whose PostScript name ends in a backslash: written without it, and psd-tools reads the text.

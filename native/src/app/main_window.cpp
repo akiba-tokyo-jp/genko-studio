@@ -44,6 +44,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/brushes.hpp"
+#include "render/placed.hpp"
 #include "render/timelapse.hpp"
 #include "render/ops_registry.hpp"
 
@@ -330,6 +331,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
 MainWindow::~MainWindow() {
     disconnect_session();
     documents::remove(this);
+    render::clear_placed_caches();  // (a window closed: its books' placed pictures are let go)
 }
 
 void MainWindow::showEvent(QShowEvent* event) {
@@ -712,6 +714,9 @@ void MainWindow::show_document(int index) {
     connect_session();
     canvas_->set_selection(std::nullopt);
     watch();
+    // (another book in front: the placed pictures remembered for the one before — decoded and finished, up to
+    // hundreds of MB at a high zoom — are let go; the book in front decodes its own again as its tiles ask)
+    render::clear_placed_caches();
     render::brushes::follow_book(book());
     reload_pages();
     if (doc.view) canvas_->set_view_state(*doc.view);

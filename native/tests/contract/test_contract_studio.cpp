@@ -7,7 +7,8 @@
 // book after the case saved and read back; the human-only rules (approve, revoke, reopen, reject, resolve a proposal,
 // allow chat approvals, a policy, an unlock, a pinned field, a person's region, skip, a prompt override) refused for an
 // agent as Python refuses them. A case marked "cpp" is one this build refuses on purpose (a number Python makes from
-// text, "inf" or "nan", that it would keep): C++ must refuse it with that code, its error holding "cpp_says".
+// text, "inf" or "nan", that it would keep; what only a person holds, changed by an agent): C++ must refuse it with that
+// code, its error holding "cpp_says". The cases are made by tools/migration/make_studio_cases.py.
 //
 // savedChangesLikePython: the same ops saved one batch at a time as `genko apply --agent` saves them, and Undo / Redo by
 // actor as `genko undo` / `genko redo` do them — this build's command line on the book converted to v4, Python's on the v3
@@ -20,8 +21,14 @@
 // folders: each call's result or error, and the files after it.
 //
 // placedPicturesLikePython: placed pictures drawn (render._placed_raster, _finish_placed; psd's placed layers) on the book
-// `studio_harness.py make-placedbook` makes, page by page, layer by layer and in the exports, pixel for pixel and file
-// for file. Skipped without the Python reference.
+// `studio_harness.py make-placedbook` makes (placements and reported faces far past the page among them), page by page,
+// layer by layer and in the exports, pixel for pixel and file for file.
+//
+// peopleOnlyThroughTheCommandLine (C++ only): what only a person holds refused to an agent through `genko apply`, and
+// an approved character's deletion recorded in the audit as an approval gone.
+//
+// brokenPicturesAreNotPlaced (C++ only): a picture whose pixels cannot be decoded not placed through `genko apply`, and
+// one a book written by Python placed neither drawn nor exported. Skipped without the Python reference.
 
 #include <QtTest>
 
@@ -174,7 +181,7 @@ Json studio_call(const Json& call, const QString& project, const QString& config
     } else if (fn == "toollog.record") {
         const std::optional<Json> given = args.contains("result") && !args["result"].is_null() ? std::optional<Json>(args["result"]) : std::nullopt;
         st::record_tool(dir, text("actor"), text("tool"), args.value("kwargs", Json::object()), given, optional_text("error"),
-                        args.value("ms", 0.0), args["at"].get<double>());
+                        genko::core::Num::from_json(args.value("ms", Json(0.0))).value(), args["at"].get<double>());
     } else if (fn == "toollog.read") {
         result = Json::array();
         for (Json& line : st::read_tools(dir)) result.push_back(std::move(line));
@@ -537,6 +544,150 @@ private slots:
         QVERIFY2(problems.empty(), problems.c_str());
         qInfo("saved: %d, undone or redone: %d, refused: %d, audit lines: %d — each as Python's", saved, restored, refused, audited);
         QVERIFY(saved >= 8 && restored >= 5 && refused >= 6 && audited >= 8);
+    }
+
+    // C++ only (SPEC COMP-01a): what only a person holds, through the command line on the studio book converted to v4
+    // (`genko apply --agent`): an agent's batch refused with nothing written (the book's files and studio/audit.jsonl as
+    // they were), a person's done; an approved character a person deletes recorded in studio/audit.jsonl as an approval
+    // gone (Python records nothing), its Undo refused to an agent (it brings an approval back) and done by a person.
+    void peopleOnlyThroughTheCommandLine() {
+        const QString dir = path("people");
+        QDir().mkpath(dir);
+        const QString v4 = dir + "/book.genko";
+        const auto migrated = genko::test::run_genko({"migrate", book_, v4});
+        QVERIFY2(migrated.finished && migrated.exit_code == 0, (migrated.out + migrated.err).constData());
+        const auto audit = [&v4] {
+            std::vector<Json> out;
+            QFile file(v4 + "/studio/audit.jsonl");
+            if (!file.open(QIODevice::ReadOnly)) return out;
+            for (const QByteArray& line : file.readAll().split('\n')) {
+                if (!line.trimmed().isEmpty()) out.push_back(genko::core::parse_python_json(line.toStdString()));
+            }
+            return out;
+        };
+        int n = 0;
+        const auto apply = [&](const Json& ops, const char* agent) {
+            const QString file = dir + QStringLiteral("/ops-%1.json").arg(n++);
+            genko::test::write_bytes(file, genko::core::dump_python(ops));
+            return genko::test::run_genko({"apply", v4, file, "--agent", agent});
+        };
+        const Json tries = Json::parse(R"([
+            [{"op": "set_panel", "page": 1, "frame_id": "000000000026", "set": {"regions": []}}],
+            [{"op": "set_panel", "page": 1, "frame_id": "000000000026", "unset": ["regions"]}],
+            [{"op": "set_bible", "characters": [{"id": "c-yuki", "name": "ユキ"}]}],
+            [{"op": "delete_character", "id": "c-ken", "force": true}],
+            [{"op": "set_ticket", "id": "000000000a0c", "status": "done"}],
+            [{"op": "set_studio", "style": {"locked": null}}],
+            [{"op": "upsert_character", "character": {"id": "c-yuki", "name": "ユキ", "locked": true}}],
+            [{"op": "upsert_character", "character": {"id": "c-new", "name": "新", "locked": true}}]
+        ])");
+        for (const Json& ops : tries) {
+            const auto before = genko::test::tree_hashes(v4, false);
+            const auto run = apply(ops, "ai:hermes");
+            const Json reply = genko::test::one_line(run.out);
+            const std::string what = genko::core::dump_python(ops) + ": " + run.out.toStdString();
+            QVERIFY2(run.exit_code == 1 && reply.value("code", std::string()) == "apply", what.c_str());
+            QVERIFY2(reply["error"].get<std::string>().find("only a person can") != std::string::npos, what.c_str());
+            QVERIFY2(genko::test::tree_hashes(v4, false) == before, what.c_str());  // (nothing written, the audit as it was)
+        }
+        // a person deletes c-ken, whose sheet a person approved: the approval gone is in the audit
+        const std::size_t lines = audit().size();
+        const auto deleted = apply(tries[3], "human:作者");
+        QVERIFY2(deleted.exit_code == 0, deleted.out.constData());
+        auto after = audit();
+        QCOMPARE(after.size(), lines + 1);
+        QCOMPARE(after.back()["actor"], Json("human:作者"));
+        QCOMPARE(after.back()["changes"], Json::parse(R"([{"what": "character:c-ken:locked", "from": true, "to": null}])"));
+        // its Undo brings the approval back: not an agent's to do; a person's, recorded so
+        const auto before_undo = genko::test::tree_hashes(v4, false);
+        const auto by_agent = genko::test::run_genko({"undo", v4, "--as", "ai:hermes", "--force"});  // (--force: past "another's change")
+        QVERIFY2(by_agent.exit_code != 0 && genko::test::one_line(by_agent.out).value("code", std::string()) == "needs_person",
+                 by_agent.out.constData());
+        QVERIFY(genko::test::tree_hashes(v4, false) == before_undo);
+        const auto by_person = genko::test::run_genko({"undo", v4, "--as", "human:作者"});
+        QVERIFY2(by_person.exit_code == 0, by_person.out.constData());
+        after = audit();
+        QCOMPARE(after.back()["changes"], Json::parse(R"([{"what": "character:c-ken:locked", "from": null, "to": true}])"));
+        // and the rest a person does
+        for (const std::size_t k : {0, 1, 2, 4, 5, 6, 7}) {
+            const auto run = apply(tries[k], "human:作者");
+            QVERIFY2(run.exit_code == 0, (genko::core::dump_python(tries[k]) + ": " + run.out.toStdString()).c_str());
+        }
+        const std::string problems = genko::test::book_problems(v4);
+        QVERIFY2(problems.empty(), problems.c_str());
+    }
+
+    // C++ only (SPEC COMP-01a): a picture whose pixels cannot be decoded, through the command line on the studio book
+    // converted to v4 — a JPEG, a BMP and a GIF cut short in their pixels ($JX, $BX, $GX: their size in the header) —:
+    // not placed by place_asset, nor adopted from a candidate, nor fitted again by set_placement where a book written by
+    // Python placed it (Python places it; its batch saved as Python's `genko apply` saves it), each batch refused, an
+    // agent's and a person's, with nothing written (the book's files and studio/audit.jsonl as they were); and the page
+    // Python placed them on, which nothing placed here, neither drawn (`genko render`) nor exported (`genko export`): the
+    // error says so, and nothing is written.
+    void brokenPicturesAreNotPlaced() {
+        const QString dir = path("broken");
+        QDir().mkpath(dir);
+        // Python places the three on page 1's second panel (nothing adopted there): as art, background and draft
+        Json job = Json::object();
+        job["op"] = "saved";
+        job["book"] = book_.toStdString();
+        job["dest"] = (dir + "/py.genko").toStdString();
+        job["steps"] = placed(Json::parse(R"([{"agent": "ai:hermes", "ops": [
+            {"op": "place_asset", "page": 1, "asset": "$JX", "frame_id": "000000000029", "to": "art"},
+            {"op": "place_asset", "page": 1, "asset": "$BX", "frame_id": "000000000029", "to": "bg"},
+            {"op": "place_asset", "page": 1, "asset": "$GX", "frame_id": "000000000029", "to": "draft"}]}])"),
+                              refs_);
+        job["out"] = (dir + "/py.json").toStdString();
+        genko::test::write_bytes(dir + "/jobs.json", genko::core::dump_python(Json::array({job})));
+        const auto ran = studio_harness({"batch", dir + "/jobs.json"}, path("pyenv"), 1800000);
+        QVERIFY2(ran.finished && ran.exit_code == 0, ran.err.right(4000).constData());
+        const Json records = genko::test::read_json(dir + "/py.json");
+        QVERIFY2(records[0]["reply"].value("ok", false), genko::core::dump_python(records).c_str());
+        const QString v4 = dir + "/book.genko";
+        const auto migrated = genko::test::run_genko({"migrate", dir + "/py.genko", v4});
+        QVERIFY2(migrated.finished && migrated.exit_code == 0, (migrated.out + migrated.err).constData());
+        int n = 0;
+        const auto refused = [&](const Json& ops, const char* agent) {
+            const QString file = dir + QStringLiteral("/ops-%1.json").arg(n++);
+            genko::test::write_bytes(file, genko::core::dump_python(ops));
+            const auto before = genko::test::tree_hashes(v4, false);
+            const auto run = genko::test::run_genko({"apply", v4, file, "--agent", agent});
+            const Json reply = genko::test::one_line(run.out);
+            const std::string what = std::string(agent) + " " + genko::core::dump_python(ops) + ": " + run.out.toStdString();
+            QVERIFY2(run.exit_code == 1 && reply.value("code", std::string()) == "apply", what.c_str());
+            QVERIFY2(reply["error"].get<std::string>().find("the asset's picture cannot be read (") != std::string::npos, what.c_str());
+            QVERIFY2(genko::test::tree_hashes(v4, false) == before, what.c_str());  // (nothing written, the audit as it was)
+        };
+        for (const char* name : {"JX", "BX", "GX"}) {
+            const std::string ref = refs_.at(name);
+            const Json place = Json::array({Json::object({{"op", "place_asset"}, {"page", 4}, {"asset", ref}})});
+            const Json adopt = Json::array({Json::object({{"op", "import_candidates"}, {"page", 1}, {"frame_id", "000000000026"},
+                                                          {"candidates", Json::array({Json::object({{"id", "cd_x"}, {"asset", ref},
+                                                                                                    {"px", Json::array({9, 6})},
+                                                                                                    {"origin", Json::object({{"kind", "agent"}})}})})}}),
+                                            Json::object({{"op", "adopt_candidate"}, {"page", 1}, {"frame_id", "000000000026"}, {"candidate_id", "cd_x"}})});
+            for (const char* agent : {"ai:hermes", "human:作者"}) {
+                refused(place, agent);
+                refused(adopt, agent);
+            }
+        }
+        for (const char* to : {"art", "bg", "draft"}) {
+            const Json fit = Json::array({Json::object({{"op", "set_placement"}, {"page", 1}, {"frame_id", "000000000029"}, {"to", to}, {"scale", 0.5}})});
+            refused(fit, "ai:hermes");
+            refused(fit, "human:作者");
+        }
+        // the page Python placed them on: neither drawn nor exported, nothing written
+        const QString png = dir + "/page1.png";
+        const auto drawn = genko::test::run_genko({"render", v4, "--page", "1", "--dpi", "40", "--out", png});
+        const Json drawn_reply = genko::test::one_line(drawn.out);
+        QVERIFY2(drawn.exit_code != 0 && drawn_reply.value("code", std::string()) == "format", (drawn.out + drawn.err).constData());
+        QVERIFY(!QFileInfo::exists(png));
+        const QString out = dir + "/exported";
+        const auto exported = genko::test::run_genko({"export", v4, out, "--format", "png", "--dpi", "40"});
+        const Json exported_reply = genko::test::one_line(exported.out);
+        QVERIFY2(exported.exit_code != 0 && !exported_reply.value("ok", true) && exported_reply.value("code", std::string()) == "format",
+                 (exported.out + exported.err).constData());
+        QVERIFY2(!QFileInfo::exists(out) || QDir(out).isEmpty(), out.toUtf8().constData());
     }
 
     // The studio's own files and checks (studio/presence.json, studio/logs/tools.jsonl, studio/claims/, studio/requests/,

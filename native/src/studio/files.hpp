@@ -9,9 +9,11 @@
 #include <vector>
 
 #include "core/json.hpp"
+#include "core/pynum.hpp"
 
 // The studio's own files in a book's folder and in the person's config folder, written and read as Python's genko.studio
-// writes and reads them (the same bytes, so the two versions can share a book):
+// writes and reads them (the same bytes, so the two versions can share a book; what Python writes in text mode with
+// its line ends: "\r\n" on Windows):
 //   studio/presence.json       who is writing the book from an agent (presence.py)
 //   studio/logs/tools.jsonl     one line per agent tool call (toollog.py; tools.1.jsonl past 20 MiB)
 //   studio/claims/<item>.json   short leases on work items (claims.py)
@@ -60,10 +62,11 @@ void touch(const std::filesystem::path& project, const std::string& actor, doubl
 inline constexpr std::uintmax_t kToolLogBytes = 20ULL * 1024 * 1024;
 
 // toollog.record: one line for an agent tool call made at `at` (epoch seconds): its tool, its arguments summarised
-// (numbers, bools and texts of at most 64 characters only), how long it took, whether it worked and its error codes or
-// error. A log that cannot be written is left (logging never breaks a tool).
+// (numbers, bools and texts of at most 64 characters only), how long it took (`ms`, round(ms, 1): an int stays an int,
+// a float a float, as Python writes them), whether it worked and its error codes or error. A log that cannot be written
+// is left (logging never breaks a tool).
 void record_tool(const std::filesystem::path& project, const std::string& actor, const std::string& tool, const core::Json& kwargs,
-                 const std::optional<core::Json>& result, const std::optional<std::string>& error, double ms, double at);
+                 const std::optional<core::Json>& result, const std::optional<std::string>& error, const core::Num& ms, double at);
 // toollog.read: the lines of tools.1.jsonl then tools.jsonl (lines that are not JSON left out).
 std::vector<core::Json> read_tools(const std::filesystem::path& project);
 

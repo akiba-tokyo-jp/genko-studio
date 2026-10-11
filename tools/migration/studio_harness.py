@@ -29,6 +29,7 @@ Commands (JSON is UTF-8 without escapes):
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import copy
 import io
@@ -110,15 +111,34 @@ def _jpeg() -> bytes:
     return buf.getvalue()
 
 
+# 9×6 pictures as Pillow writes them, cut short in their pixels (native/tests/unit/test_placed.cpp's): Image.open reads
+# their size from the header, load() fails ("image file is truncated").
+_CUT_PICTURES = {
+    "JX": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4z"
+          "NDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAGAAkDASIAAhEB"
+          "AxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS"
+          "0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKz"
+          "tLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgEC"
+          "BAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpj"
+          "ZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6"
+          "/9oADAMBAAIRAxEAPwDz+w==",
+    "BX": "Qk3eAAAAAAAAADYAAAAoAAAACQAAAAYAAAABABgAAAAAAKgAAADEDgAAxA4AAAAAAAAAAAAAHh7IHh7IHh7IHh7IHh7IHh7I/wAA/wAA/wAAAB4e"
+          "yB4eyB4eyB4eyB4eyP8AAP8AAP8AAB4eyAAeHsgeHsgeHsj/AAD/AAD/AAD/AAAeHsgeHsgAHh7IHh7I/wAA/wAA/wAAHh7IHh7IHh7IHh7IAP8AAP8A"
+          "AP8AAP8AAB4eyB4=",
+    "GX": "R0lGODdhCQAGAIIAAMwAAMwzAMwAM8wzMwAA/wAAAAAAAAAAACwAAAAACQAGAAAIIgAHEAgggKBBAggJDCC4cACAhAULMkyoEA==",
+}
+
+
 def _odd_assets() -> dict[str, bytes]:
     """Files under assets/ as .png that are not plain PNGs: a JPEG (Pillow opens it by its bytes), bytes that are no
     picture, a PNG cut short after its header (Pillow reads its size; its pixels are not there), a PNG whose header's
-    checksum is wrong (Pillow cannot identify it) and a header too large to open (a decompression bomb)."""
+    checksum is wrong (Pillow cannot identify it), a header too large to open (a decompression bomb), and a JPEG, a BMP
+    and a GIF cut short in their pixels (JX, BX, GX: Pillow reads their size)."""
     good = _png((16, 12), (60, 160, 60, 255))
     crc = bytearray(good)
     crc[29] ^= 0xFF  # (IHDR's CRC: after the 8-byte signature, 4 length, 4 type, 13 data)
     return {"J1": _jpeg(), "BAD": b"this is not a picture", "CUT": good[:60], "CRC": bytes(crc),
-            "BOMB": _bomb_png(20000, 20000)}
+            "BOMB": _bomb_png(20000, 20000), **{name: base64.b64decode(text) for name, text in _CUT_PICTURES.items()}}
 
 
 def make_studiobook(dest: str) -> dict:
@@ -383,6 +403,36 @@ def make_placedbook(dest: str) -> dict:
                            frame_id="00000000004e", placement_mm=Rect(20, 20, 100, 100), visible=False))
     p7.layers.append(Layer(id="placed7missi", role=LayerRole.USER, kind=LayerKind.PLACED, asset="sha256:" + "ab" * 32,
                            frame_id="00000000004e", placement_mm=Rect(20, 20, 100, 100)))
+    # a page of placements far off the page (any finite size: nothing drawn, as Python draws nothing) and huge ones over
+    # it, made by the ops: art moved and scaled by set_placement, pictures placed past the paper and around it, faces and
+    # people reported far away (both corners past what a C int holds at every resolution the tests draw, 40 dpi and up:
+    # Pillow's (int) cast makes them INT_MIN; not an ellipse hundreds of millions of pixels wide, nor one with a corner
+    # inside that range and one past it, which Pillow takes minutes to draw)
+    run([{"op": "add_page", "count": 1}])
+    known = {p.id for p in by_index.values()}
+    huge = next(p for p in episode.pages if p.id not in known)  # (the new page, before the cover)
+    run([{"op": "split_frame", "page": huge.index, "frame_id": huge.leaf_frames()[0].id, "axis": "horizontal", "ratio": 0.5,
+          "gutter_mm": 4}])
+    huge = next(p for p in episode.pages if p.id == huge.id)  # (apply_ops works on a copy of the page)
+    left, right = [f.id for f in huge.leaf_frames()][:2]
+    run([{"op": "import_candidates", "page": huge.index, "frame_id": left,
+          "candidates": [{"id": "cd_h1", "asset": refs["P_ART"], "px": [240, 180], "origin": {"kind": "agent"}}]},
+         {"op": "import_candidates", "page": huge.index, "frame_id": right,
+          "candidates": [{"id": "cd_h2", "asset": refs["P_COL"], "px": [200, 150], "origin": {"kind": "agent"}}]}],
+        agent="ai:hermes")
+    run([{"op": "approve", "gate": "name", "page": huge.index},
+         {"op": "adopt_candidate", "page": huge.index, "frame_id": left, "candidate_id": "cd_h1"},
+         {"op": "adopt_candidate", "page": huge.index, "frame_id": right, "candidate_id": "cd_h2"}])
+    run([{"op": "set_placement", "page": huge.index, "frame_id": left, "offset_mm": [1e7, 0]},
+         {"op": "set_placement", "page": huge.index, "frame_id": right, "scale": 1e6}])
+    place(huge.index, asset=refs["P_GRAIN"], placement_mm=[1e8, 0, 10, 10], clip_to="none")
+    place(huge.index, asset=refs["P_LA"], frame_id=right, placement_mm=[-1e9, -1e9, 2e9, 2e9])
+    run([{"op": "add_region", "page": huge.index, "frame_id": right,
+          "region": {"id": "rg_far", "kind": "face", "rect_mm": [1e10, 0, 1e10, 10]}},
+         {"op": "add_region", "page": huge.index, "frame_id": right,
+          "region": {"id": "rg_farbody", "kind": "person", "rect_mm": [1e10, 0, 1e10, 10], "char": "c-yuki"}},
+         {"op": "add_region", "page": huge.index, "frame_id": right,
+          "region": {"id": "rg_farhead", "kind": "head", "rect_mm": [4e8, 0, 10, 10]}}])
     save_episode(episode, Path(dest), actor="human:作者")
     (Path(dest) / "assets.json").write_text(dumps(refs), encoding="utf-8")
     return refs

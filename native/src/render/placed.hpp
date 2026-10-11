@@ -16,13 +16,20 @@
 
 namespace genko::render {
 
-// studio_ops._asset_size's picture: Image.open(assets/<ab>/<sha256>.png of the book `book`).size, nothing when there is
-// no such file (or `ref` is no asset ref). Python's errors as it raises them: core::PyUncaught UnidentifiedImageError
-// ("cannot identify image file <_io.BytesIO object>") and DecompressionBombError; NotYetPorted("image_format") for TIFF,
-// WebP and PSD. A JPEG, BMP or GIF whose pixels cannot be decoded, or a file larger than storage::kAssetMaxBytes, is
-// refused with core::OpError "the asset's picture cannot be read (…)" (C++ only: Python reads its size from the header
-// and the page cannot be drawn later).
+// studio_ops._asset_size's picture: Image.open(assets/<ab>/<sha256>.png of the book `book`).size, read from its header
+// as Image.open reads it (render::picture_size: the pixels not decoded), nothing when there is no such file (or `ref` is
+// no asset ref). Python's errors as it raises them: core::PyUncaught UnidentifiedImageError ("cannot identify image
+// file <_io.BytesIO object>") and DecompressionBombError; NotYetPorted("image_format") for TIFF, WebP and PSD. A file
+// larger than storage::kAssetMaxBytes is refused with core::OpError "the asset's picture cannot be read (…)" (C++ only).
 std::optional<std::pair<std::int64_t, std::int64_t>> asset_picture_size(const std::filesystem::path& book, const std::string& ref);
+
+// Whether the asset's picture can be drawn, before it is placed (core::StudioHooks::picture_check, C++ only: SPEC
+// COMP-01a): the whole picture decoded as placed_raster decodes it, core::OpError "the asset's picture cannot be read
+// (…)" when it cannot be — its pixels cut short or broken, no picture at all, a decompression bomb, a file larger than
+// storage::kAssetMaxBytes — where Python places it and the drawing fails. Nothing to say when there is no such file (or
+// `ref` is no asset ref: nothing is drawn), nor of a picture this build does not open yet (TIFF, WebP, PSD: the drawing
+// says not_yet_ported).
+void check_asset_picture(const std::filesystem::path& book, const std::string& ref);
 
 // render._placed_raster(layer, page, episode, size, dpi, mode, finish) over the box `area` of the page (an "RGBA"
 // picture of the area): the asset's picture resampled (LANCZOS) into its placement, only the part inside its clip box
@@ -35,8 +42,10 @@ std::optional<std::pair<std::int64_t, std::int64_t>> asset_picture_size(const st
 std::optional<Image> placed_raster(const core::Layer& layer, const core::Page& page, const core::Document* episode, Size size,
                                    int dpi, std::string_view mode, bool finish, bool dots, const Box& area);
 
-// The pictures placed_raster remembers between tiles (decoded assets, finished art), forgotten (clear_render_caches).
+// The pictures placed_raster remembers between tiles (decoded assets, finished art), forgotten (clear_render_caches; the
+// window when another book comes in front or the window closes), and how many pixels they hold.
 void clear_placed_caches();
+std::int64_t placed_cache_pixels();
 
 // render._finish_placed(fitted, layer, page, episode, dpi, mode, origin): a placed (or painted) picture on a monochrome
 // page in print or proof: extracted line art (source.to "ink") as pure black lines, other art grey with the finish of

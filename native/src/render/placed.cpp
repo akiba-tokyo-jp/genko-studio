@@ -48,6 +48,18 @@ std::optional<std::pair<std::int64_t, std::int64_t>> asset_picture_size(const st
     }
 }
 
+void check_asset_picture(const std::filesystem::path& book, const std::string& ref) {
+    if (!storage::AssetStore::is_ref(ref)) return;
+    try {
+        const auto bytes = storage::AssetStore(book).get_bytes(ref, ".png", storage::kAssetMaxBytes);
+        if (bytes) (void)open_image(*bytes, kPillowOpenLimits);
+    } catch (const NotYetPorted&) {
+        return;  // (not opened by this build yet: the drawing says so)
+    } catch (const core::Error& error) {
+        throw core::OpError(std::string("the asset's picture cannot be read (") + error.what() + ")");
+    }
+}
+
 namespace {
 
 // A few pictures remembered by a key (a page is drawn in tiles, each asking for the same picture): the decoded assets
@@ -76,6 +88,13 @@ public:
     void clear() {
         std::lock_guard lock(mutex_);
         items_.clear();
+    }
+
+    std::int64_t pixels() {
+        std::lock_guard lock(mutex_);
+        std::int64_t out = 0;
+        for (const auto& [key, image] : items_) out += static_cast<std::int64_t>(image->width()) * image->height();
+        return out;
     }
 
 private:
@@ -143,9 +162,9 @@ bool kind_in(const Json& region, std::initializer_list<const char*> kinds) {
     return std::any_of(kinds.begin(), kinds.end(), [&kind](const char* k) { return core::py_equals(kind, Json(k)); });
 }
 
-BoxF box_of(int x0, int y0, int x1, int y1) {
-    return BoxF{static_cast<double>(x0), static_cast<double>(y0), static_cast<double>(x1), static_cast<double>(y1)};
-}
+// render.mm_to_px as Python's int: max(1, round(mm / 25.4 * dpi)), unbounded (a whole float; round()'s OverflowError
+// for an infinity). A mask's corners are drawn from these as Pillow takes Python's ints (its own (int) cast of each).
+double px_whole(double mm, int dpi) { return core::py_max(1.0, core::py_round_whole(mm / 25.4 * dpi)); }
 
 // render._face_mask: white ellipses, softened at the edge, where the panel's reported faces are (in the art's pixels).
 std::optional<Image> face_mask(const core::Layer& layer, const core::Page& page, Size size, int dpi, Point origin) {
@@ -160,11 +179,9 @@ std::optional<Image> face_mask(const core::Layer& layer, const core::Page& page,
     {
         Draw draw(mask);
         for (const Json& rect : faces) {
-            const int x0 = mm_to_px(divided(rect[0]), dpi) - origin.x;
-            const int y0 = mm_to_px(divided(rect[1]), dpi) - origin.y;
-            const int x1 = x0 + mm_to_px(divided(rect[2]), dpi);
-            const int y1 = y0 + mm_to_px(divided(rect[3]), dpi);
-            draw.ellipse(box_of(x0, y0, x1, y1), Ink(255));
+            const double x0 = px_whole(divided(rect[0]), dpi) - origin.x;
+            const double y0 = px_whole(divided(rect[1]), dpi) - origin.y;
+            draw.ellipse(BoxF{x0, y0, x0 + px_whole(divided(rect[2]), dpi), y0 + px_whole(divided(rect[3]), dpi)}, Ink(255));
         }
     }
     return mask.filter(Filter::gaussian_blur(core::py_max(1.0, dpi / 100.0)));
@@ -211,22 +228,18 @@ std::pair<std::optional<Image>, std::optional<Image>> clothes_masks(const core::
         {
             Draw draw(mask);
             for (const Json& rect : bodies) {
-                const int x0 = mm_to_px(divided(rect[0]), dpi) - origin.x;
-                const int y0 = mm_to_px(divided(rect[1]), dpi) - origin.y;
-                const int x1 = x0 + mm_to_px(divided(rect[2]), dpi);
-                const int y1 = y0 + mm_to_px(divided(rect[3]), dpi);
-                draw.rectangle(box_of(x0, y0, x1, y1), Ink(255));
+                const double x0 = px_whole(divided(rect[0]), dpi) - origin.x;
+                const double y0 = px_whole(divided(rect[1]), dpi) - origin.y;
+                draw.rectangle(BoxF{x0, y0, x0 + px_whole(divided(rect[2]), dpi), y0 + px_whole(divided(rect[3]), dpi)}, Ink(255));
             }
             for (const Json& r : regions) {  // (never the faces, nor the hair above them)
                 if (!kind_in(r, {"face", "head"})) continue;
                 const Json& rect = r["rect_mm"];
                 const double left = minus(rect[0], times(rect[2], 0.15));
-                const int x0 = mm_to_px(left, dpi) - origin.x;
+                const double x0 = px_whole(left, dpi) - origin.x;
                 const double top = minus(rect[1], times(rect[3], 0.3));
-                const int y0 = mm_to_px(top, dpi) - origin.y;
-                const int x1 = x0 + mm_to_px(times(rect[2], 1.3), dpi);
-                const int y1 = y0 + mm_to_px(times(rect[3], 1.45), dpi);
-                draw.ellipse(box_of(x0, y0, x1, y1), Ink(0));
+                const double y0 = px_whole(top, dpi) - origin.y;
+                draw.ellipse(BoxF{x0, y0, x0 + px_whole(times(rect[2], 1.3), dpi), y0 + px_whole(times(rect[3], 1.45), dpi)}, Ink(0));
             }
         }
         Image soft = mask.filter(Filter::gaussian_blur(core::py_max(1.0, dpi / 150.0)));
@@ -264,6 +277,8 @@ void clear_placed_caches() {
     sources().clear();
     finished().clear();
 }
+
+std::int64_t placed_cache_pixels() { return sources().pixels() + finished().pixels(); }
 
 Image finish_placed(const Image& fitted, const core::Layer& layer, const core::Page& page, const core::Document* episode, int dpi,
                     std::string_view mode, bool dots, Point origin) {
@@ -308,18 +323,22 @@ std::optional<Image> placed_raster(const core::Layer& layer, const core::Page& p
     const storage::AssetStore store(*episode->asset_dir);
     if (!store.has(ref, ".png")) return std::nullopt;
     const core::Rect& r = *layer.placement_mm;  // may start left of / above the paper, so no clamping here
-    const std::int64_t x0 = core::py_round_int(r.x.value() / 25.4 * dpi);
-    const std::int64_t y0 = core::py_round_int(r.y.value() / 25.4 * dpi);
-    const std::int64_t x1 = core::py_round_int((r.x + r.width).value() / 25.4 * dpi);
-    const std::int64_t y1 = core::py_round_int((r.y + r.height).value() / 25.4 * dpi);
+    // (Python's ints, unbounded, held as whole floats: a placement far off the page — any finite size — is nothing
+    // drawn, as in Python; round()'s OverflowError only for an infinity, as Python's)
+    const double x0 = core::py_round_whole(r.x.value() / 25.4 * dpi);
+    const double y0 = core::py_round_whole(r.y.value() / 25.4 * dpi);
+    const double x1 = core::py_round_whole((r.x + r.width).value() / 25.4 * dpi);
+    const double y1 = core::py_round_whole((r.y + r.height).value() / 25.4 * dpi);
     if (x1 <= x0 || y1 <= y0) return std::nullopt;
     const core::Frame* frame = layer.frame_id && !layer.frame_id->empty() ? page.find_frame(*layer.frame_id) : nullptr;
     const Box clip = rect_px(core::clip_box(page, frame, layer.clip_to), dpi);
-    // only the visible part is resampled, straight from the source pixels
-    const Box visible{static_cast<int>(std::max<std::int64_t>({x0, clip.x0, 0})), static_cast<int>(std::max<std::int64_t>({y0, clip.y0, 0})),
-                      static_cast<int>(std::min<std::int64_t>({x1, clip.x1, size.width})),
-                      static_cast<int>(std::min<std::int64_t>({y1, clip.y1, size.height}))};
-    if (empty_box(visible)) return std::nullopt;
+    // only the visible part is resampled, straight from the source pixels (its corners on the page, so ints)
+    const double vx0 = std::max({x0, static_cast<double>(clip.x0), 0.0});
+    const double vy0 = std::max({y0, static_cast<double>(clip.y0), 0.0});
+    const double vx1 = std::min({x1, static_cast<double>(clip.x1), static_cast<double>(size.width)});
+    const double vy1 = std::min({y1, static_cast<double>(clip.y1), static_cast<double>(size.height)});
+    if (vx1 <= vx0 || vy1 <= vy0) return std::nullopt;
+    const Box visible{static_cast<int>(vx0), static_cast<int>(vy0), static_cast<int>(vx1), static_cast<int>(vy1)};
 
     const std::string source_key = core::path_to_utf8(*episode->asset_dir) + "\n" + ref;
     std::shared_ptr<const Image> source = sources().get(source_key);
@@ -329,10 +348,11 @@ std::optional<Image> placed_raster(const core::Layer& layer, const core::Page& p
         source = std::make_shared<const Image>(open_image(*bytes, kPillowOpenLimits).convert("RGBA"));
         sources().put(source_key, source);
     }
-    const double sx = static_cast<double>(source->width()) / static_cast<double>(x1 - x0);
-    const double sy = static_cast<double>(source->height()) / static_cast<double>(y1 - y0);
-    const BoxF box{static_cast<double>(visible.x0 - x0) * sx, static_cast<double>(visible.y0 - y0) * sy,
-                   static_cast<double>(visible.x1 - x0) * sx, static_cast<double>(visible.y1 - y0) * sy};
+    // (Python's int differences, exact, as floats: the same while they are below 2**53 pixels; past that, a difference
+    // is rounded before the division here, where Python divides the exact ints)
+    const double sx = static_cast<double>(source->width()) / (x1 - x0);
+    const double sy = static_cast<double>(source->height()) / (y1 - y0);
+    const BoxF box{(vx0 - x0) * sx, (vy0 - y0) * sy, (vx1 - x0) * sx, (vy1 - y0) * sy};
     const Size fitted_size{visible.width(), visible.height()};
 
     Image out = Image::create("RGBA", Size{area.width(), area.height()}, Ink{0, 0, 0, 0});

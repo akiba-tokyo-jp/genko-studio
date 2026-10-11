@@ -5,6 +5,7 @@
 #include <QRegularExpression>
 
 #include <algorithm>
+#include <atomic>
 #include <system_error>
 
 #include "core/error.hpp"
@@ -35,6 +36,23 @@ std::string first_code_points(const std::string& text, std::size_t n) {
 
 std::size_t code_points(const std::string& text) {
     return static_cast<std::size_t>(std::count_if(text.begin(), text.end(), [](char c) { return (static_cast<unsigned char>(c) & 0xC0) != 0x80; }));
+}
+
+// What Python writes for `text` through a file opened in text mode (Path.write_text, open(…, "a")): each "\n" as
+// os.linesep — "\r\n" on Windows —, so the two versions write the same bytes there too. (Both read either: Python's
+// universal newlines, this build's JSON reading that takes "\r" for white space.)
+std::string text_mode(std::string text) {
+#ifdef _WIN32
+    std::string out;
+    out.reserve(text.size() + text.size() / 16);
+    for (const char c : text) {
+        if (c == '\n') out += '\r';
+        out += c;
+    }
+    return out;
+#else
+    return text;
+#endif
 }
 
 // A file's text as Path.read_text gives it (nothing when it cannot be read).
@@ -99,7 +117,7 @@ void write_json(const fs::path& path, const Json& value) {
     options.item_separator = ",";
     options.key_separator = ": ";
     options.sort_keys = true;
-    storage::write_atomic(path, core::dump(value, options) + "\n");
+    storage::write_atomic(path, text_mode(core::dump(value, options) + "\n"));
 }
 
 Json read_json(const fs::path& path, const Json& fallback) {
@@ -123,7 +141,7 @@ Json read_presence(const fs::path& project) {
 }
 
 void write_presence(const fs::path& project, const Json& data) {
-    storage::write_atomic(presence_file(project), core::dump_python(data));
+    storage::write_atomic(presence_file(project), text_mode(core::dump_python(data)));
 }
 
 }  // namespace
@@ -202,7 +220,7 @@ void touch(const fs::path& project, const std::string& actor, double now) {
 // --- toollog ---------------------------------------------------------------------------------------------------------------
 
 void record_tool(const fs::path& project, const std::string& actor, const std::string& tool, const Json& kwargs,
-                 const std::optional<Json>& result, const std::optional<std::string>& error, double ms, double at) {
+                 const std::optional<Json>& result, const std::optional<std::string>& error, const core::Num& ms, double at) {
     const fs::path path = project / "studio" / "logs" / "tools.jsonl";
     try {
         std::error_code status;
@@ -222,7 +240,7 @@ void record_tool(const fs::path& project, const std::string& actor, const std::s
         entry["actor"] = actor;
         entry["tool"] = tool;
         entry["args"] = std::move(args);
-        entry["ms"] = core::py_round(ms, 1);
+        entry["ms"] = core::py_round(ms, 1).json();  // (an int stays an int, as Python's round(ms, 1))
         const bool given = result && core::py_truthy(*result) && result->is_object();
         if (error) {
             entry["ok"] = false;
@@ -246,7 +264,7 @@ void record_tool(const fs::path& project, const std::string& actor, const std::s
                 entry["error"] = first_code_points(core::py_str((*result)["error"]), 300);
             }
         }
-        storage::append_durable(path, core::dump_python(entry) + "\n");
+        storage::append_durable(path, text_mode(core::dump_python(entry) + "\n"));
     } catch (const std::exception&) {
         // logging never breaks a tool
     }
@@ -321,10 +339,12 @@ bool claim(const fs::path& project, const std::string& item_id, const std::strin
     const auto current = holder(project, item_id, now);
     if (current && *current != actor) return false;
     if (current == actor || fs::exists(path, error)) {
-        // renew our own claim, or replace an expired one: write a fresh file, then check we won
-        std::string who = actor;
-        std::replace(who.begin(), who.end(), ':', '_');
-        const fs::path tmp = folder / core::path_from_utf8(item_id + "." + std::to_string(QCoreApplication::applicationPid()) + "." + who + ".tmp");
+        // renew our own claim, or replace an expired one: write a fresh file, then check we won (the temporary file is
+        // named by the process and a count, not by the actor as Python names it: an actor's name holding "/", "\" or
+        // ".." would put it outside the folder)
+        static std::atomic<std::uint64_t> made{0};
+        const fs::path tmp = folder / core::path_from_utf8(item_id + "." + std::to_string(QCoreApplication::applicationPid()) + "." +
+                                                           std::to_string(++made) + ".tmp");
         storage::write_atomic(tmp, body);
         if (!current) {
             fs::remove(path, error);
@@ -382,7 +402,7 @@ fs::path write_request(const fs::path& project, const Json& request, const std::
         }
         storage::write_atomic(path, data);
     }
-    storage::write_atomic(folder / "request.json", core::dump_python_indent2(request) + "\n");
+    storage::write_atomic(folder / "request.json", text_mode(core::dump_python_indent2(request) + "\n"));
     storage::make_dirs_durable(project / "studio" / "inbox" / core::path_from_utf8(id->get<std::string>()));
     return folder;
 }
@@ -396,7 +416,7 @@ Json generic_sizes() { return Json::array({Json::array({1024, 1024}), Json::arra
 Json generic_supports() { return Json::object({{"references", true}, {"edit", true}, {"mask", true}, {"seed", false}}); }
 
 void write_tools(const fs::path& config, const Json& data) {
-    storage::write_atomic(config / "tools.json", core::dump_python_indent2(data) + "\n");
+    storage::write_atomic(config / "tools.json", text_mode(core::dump_python_indent2(data) + "\n"));
 }
 
 }  // namespace

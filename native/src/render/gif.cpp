@@ -27,7 +27,12 @@ struct Reservation {
 };
 }  // namespace
 
-Image read_gif(std::string_view bytes, PngLimits limits) {
+namespace {
+
+// read_gif up to what Pillow's GifImageFile._open reads (the screen, the blocks before the first frame, its descriptor,
+// palette and code size); `size_only`: the size then, without the pixels (the image is returned empty). `logical_l`:
+// whether the picture is an "L" one shown with the global palette (Image::gif_logical_l_, which read_gif sets).
+Image gif_read(std::string_view bytes, PngLimits limits, Size* size_only, bool* logical_l) {
     constexpr std::uint64_t kBudget = 1ull << 30;
     if (bytes.size() > kBudget) throw core::Error("image_too_large", "image is too large");
     if (bytes.size() < 13 || (bytes.substr(0, 6) != "GIF87a" && bytes.substr(0, 6) != "GIF89a")) bad_gif();
@@ -104,6 +109,10 @@ Image read_gif(std::string_view bytes, PngLimits limits) {
     const bool logical_l_with_palette = (frame_flags & 0x80U) != 0 && identity && !global_identity;
     const auto display_palette = logical_l_with_palette ? global_palette : palette;
     const auto bits = byte_at(bytes, pos++);
+    if (size_only != nullptr) {
+        *size_only = Size{static_cast<int>(width), static_cast<int>(height)};
+        return Image();
+    }
     if (bits > 12) throw core::Error("format", "codec configuration error when reading image file");
     const std::uint64_t rows_size = static_cast<std::uint64_t>(height) * sizeof(void*);
     const std::uint64_t work_size = bytes.size() + sizeof(GIFDECODERSTATE) + sizeof(ImagingCodecStateInstance);
@@ -128,7 +137,7 @@ Image read_gif(std::string_view bytes, PngLimits limits) {
         image.raw()->palette->size = display_palette_size;
         unpack(image.raw()->palette->palette, reinterpret_cast<const UINT8*>(display_palette.data()), display_palette_size);
     }
-    image.gif_logical_l_ = logical_l_with_palette;
+    if (logical_l != nullptr) *logical_l = logical_l_with_palette;  // (read_gif's: Image keeps it)
     GIFDECODERSTATE context{};
     context.bits = static_cast<int>(bits);
     context.interlace = interlace ? 1 : 0;
@@ -159,5 +168,20 @@ Image read_gif(std::string_view bytes, PngLimits limits) {
     }
     if (!genko_imaging_budget_transfer(&rows.owner, image.raw())) detail::throw_imaging_error();
     return image;
+}
+
+}  // namespace
+
+Image read_gif(std::string_view bytes, PngLimits limits) {
+    bool logical_l = false;
+    Image image = gif_read(bytes, limits, nullptr, &logical_l);
+    image.gif_logical_l_ = logical_l;
+    return image;
+}
+
+Size gif_size(std::string_view bytes, PngLimits limits) {
+    Size size;
+    (void)gif_read(bytes, limits, &size, nullptr);
+    return size;
 }
 }  // namespace genko::render
