@@ -17,7 +17,7 @@ set(_pillow_sources
   Reduce Storage UnpackYCC Unpack UnsharpMask GifDecode Quant QuantHash QuantHeap QuantOctree QuantPngQuant)
 list(TRANSFORM _pillow_sources PREPEND "${_pillow_dir}/")
 list(TRANSFORM _pillow_sources APPEND ".c")
-list(APPEND _pillow_sources compat/resample_region.c)
+list(APPEND _pillow_sources compat/resample_region.c compat/row_bands.c)
 
 # Imaging.h as C++ reads it (ImagingCxx.h, made here): C++ does not allow `typedef struct ImagingMemoryArena {…}
 # *ImagingMemoryArena;` (a struct and a typedef of one name), so the struct's tag is renamed; and Mode.h, which

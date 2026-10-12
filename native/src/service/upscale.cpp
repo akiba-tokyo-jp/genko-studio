@@ -118,22 +118,23 @@ bool unregister(const std::string& name) {
     return true;
 }
 
-render::Image builtin(const render::Image& image, double scale) {
+render::Image builtin(const render::Image& image, double scale, int threads) {
     const std::string_view m = image.mode();
     const std::string mode = (m == "RGBA" || m == "LA" || m == "P") ? "RGBA" : (m == "L" || m == "1") ? "L" : "RGB";
     const render::Image source = image.convert(mode);
     const render::Size size{std::max(1, static_cast<int>(core::py_round_int(source.width() * scale))),
                             std::max(1, static_cast<int>(core::py_round_int(source.height() * scale)))};
-    render::Image big = source.resize(size, render::Resample::Lanczos);
+    // (in bands of rows on several threads: the same pixels as resize and filter, render/image.hpp)
+    render::Image big = source.resize_in_bands(size, render::Resample::Lanczos, std::nullopt, threads);
     if (scale > 1.05) {
         const render::Filter sharpen = render::Filter::unsharp_mask(core::py_max(1.0, scale * 0.7), 90, 2);
         if (mode == "RGBA") {
-            const render::Image rgb = big.convert("RGB").filter(sharpen);
+            const render::Image rgb = big.convert("RGB").filter_in_bands(sharpen, threads);
             const render::Image alpha = big.getchannel("A");
             big = rgb.convert("RGBA");
             big.putalpha(alpha);
         } else {
-            big = big.filter(sharpen);
+            big = big.filter_in_bands(sharpen, threads);
         }
     }
     return big;

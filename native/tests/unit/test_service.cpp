@@ -33,14 +33,17 @@
 #include "core/model.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "core/pynum.hpp"
 #include "formats/exporting.hpp"
 #include "formats/pillow_save.hpp"
 #include "render/image.hpp"
+#include "render/placed.hpp"
 #include "service/book.hpp"
 #include "service/evaluate.hpp"
 #include "service/human_service.hpp"
 #include "service/jobs.hpp"
 #include "service/studio_service.hpp"
+#include "service/upscale.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
@@ -308,6 +311,76 @@ private slots:
         QCOMPARE(static_cast<int>((*stored)[25]), 3);  // (colour type 3: a palette)
         QCOMPARE(static_cast<int>((*stored)[24]), 1);  // (two colours: one bit a pixel)
         QCOMPARE(stored->substr(37, 4), std::string("PLTE"));
+    }
+
+    // adopt: the panel's picture from the agent is decoded whole before it is placed (as any picture from elsewhere);
+    // Genko's enlargement of it, written just now in this process from the pixels it made, is not decoded again when it
+    // is adopted (render::vouch_for_picture: its file holds those very bytes).
+    void upscaledArtIsNotDecodedAgain() {
+        const fs::path root = folder(QStringLiteral("vouched"));
+        genko::service::StudioService agent(root, "ai:test");
+        QVERIFY(agent.call("create_project", Json::array({"v.genko", "v", 1}), Json::object()).ok);
+        const fs::path book = root / "v.genko";
+        const Json approved = genko::service::HumanService(book, "human:leaf").approve_name(Json::array({1}));
+        QVERIFY2(approved.value("ok", false), approved.dump().c_str());
+        const std::string leaf = genko::storage::load_document(book).document.page(0).leaf_frames().at(0)->id;
+        const std::string art = genko::storage::AssetStore(book).put_bytes(grey_png(400, 300, 120), ".png");
+        const Json imported = Json::array({Json{{"op", "import_candidates"}, {"page", 1}, {"frame_id", leaf},
+                                                {"candidates", Json::array({Json{{"id", "cd_1"}, {"asset", art}, {"px", {400, 300}},
+                                                                                 {"origin", Json{{"kind", "agent"}}}}})}}});
+        QVERIFY(agent.call("apply_ops", Json::array({"v.genko", imported}), Json{{"commit", true}}).ok);
+        const auto before = genko::render::picture_checks();
+        const genko::service::ToolResult adopted =
+            agent.call("adopt", Json::array({"v.genko", "cd_1"}), Json{{"page", 1}, {"frame_id", leaf}, {"preview", false}});
+        QVERIFY2(adopted.ok, adopted.to_dict().dump().c_str());
+        QCOMPARE(adopted.data["upscaled"], Json(true));
+        const auto after = genko::render::picture_checks();
+        QCOMPARE(after.decoded - before.decoded, std::uint64_t{1});  // (the agent's picture)
+        QCOMPARE(after.vouched - before.vouched, std::uint64_t{1});  // (Genko's enlargement of it)
+    }
+
+    // Genko's own enlargement (upscale.builtin), worked out in bands of rows: the same pixels and PNG bytes as one band
+    // (the resize and the unsharp mask as before: render::Image::resize and filter), whatever the number of bands, for
+    // each mode it takes.
+    void enlargementIsTheSameInAnyNumberOfBands() {
+        const genko::render::BandCounts start = genko::render::band_counts();
+        genko::render::Image base = genko::render::Image::create("RGB", genko::render::Size{173, 129}, genko::render::Ink{230, 230, 230});
+        for (int y = 0; y < 129; y += 7) base.paste(genko::render::Ink{40 + y, 200 - y, (y * 13) % 255}, genko::render::Box{(y * 5) % 150, y, 173, y + 3});
+        for (const char* mode : {"RGB", "L", "RGBA", "LA", "1"}) {
+            genko::render::Image source = base.convert(mode);
+            for (const double scale : {1.0, 1.04, 2.5, 3.7}) {
+                const genko::render::Image one = genko::service::upscale::builtin(source, scale, 1);
+                // (one band: what the code did before it worked in bands)
+                const std::string mode_used = (std::string(mode) == "RGBA" || std::string(mode) == "LA" || std::string(mode) == "P") ? "RGBA"
+                                              : (std::string(mode) == "L" || std::string(mode) == "1")                          ? "L"
+                                                                                                                                 : "RGB";
+                const genko::render::Image plain = source.convert(mode_used);
+                const genko::render::Size size{std::max(1, static_cast<int>(genko::core::py_round_int(plain.width() * scale))),
+                                               std::max(1, static_cast<int>(genko::core::py_round_int(plain.height() * scale)))};
+                genko::render::Image before = plain.resize(size, genko::render::Resample::Lanczos);
+                if (scale > 1.05) {
+                    const genko::render::Filter sharpen = genko::render::Filter::unsharp_mask(std::max(1.0, scale * 0.7), 90, 2);
+                    if (mode_used == "RGBA") {
+                        const genko::render::Image rgb = before.convert("RGB").filter(sharpen);
+                        const genko::render::Image alpha = before.getchannel("A");
+                        before = rgb.convert("RGBA");
+                        before.putalpha(alpha);
+                    } else {
+                        before = before.filter(sharpen);
+                    }
+                }
+                QVERIFY2(one.tobytes() == before.tobytes(), (std::string(mode) + " ×" + std::to_string(scale)).c_str());
+                for (const int threads : {2, 3, 4, 7, 16}) {
+                    const genko::render::Image banded = genko::service::upscale::builtin(source, scale, threads);
+                    const std::string what = std::string(mode) + " ×" + std::to_string(scale) + " in " + std::to_string(threads) + " bands";
+                    QVERIFY2(banded.mode() == one.mode() && banded.size() == one.size() && banded.tobytes() == one.tobytes(), what.c_str());
+                    QVERIFY2(genko::formats::png_bytes(banded) == genko::formats::png_bytes(one), what.c_str());
+                }
+            }
+        }
+        const genko::render::BandCounts end = genko::render::band_counts();
+        QCOMPARE(end.failed - start.failed, std::uint64_t{0});
+        QVERIFY(end.banded - start.banded > 50);
     }
 
     // formats::run's official export, handed to the studio by service::run_export after Python's own refusals: the

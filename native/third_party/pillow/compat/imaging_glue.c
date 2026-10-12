@@ -106,6 +106,8 @@ uint64_t genko_imaging_budget_live(void) {
     }
     return value;
 }
+int genko_imaging_budget_active(void) { return active_budget != NULL; }
+
 uint64_t genko_imaging_budget_peak(void) {
     uint64_t value = 0;
     if (active_budget) {

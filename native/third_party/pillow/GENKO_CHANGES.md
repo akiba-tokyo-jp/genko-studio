@@ -26,6 +26,13 @@ Pillow 12.3.0 の sdist を基準に、`Imaging.h` と `Storage.c` に画像確�
 - `compat/resample_region.c`・`compat/resample_region.h`: `genko_ImagingResampleRegion`。拡大縮小した画像の一部（出力の列 [x0, x1)・行 [y0, y1)）だけを計算する。`RenderRegion` で描画範囲だけを描くため（docs/cpp-migration/ARCHITECTURE.md §4a）。
   - `Resample.c` を未改変のまま `#include` し、その static 関数（係数の計算、水平・垂直の各パス）をそのまま使う。各画素は、`ImagingResample` が全体を計算するときと同じ係数・順序・丸めで出る。単体試験（`test_image`）と契約試験（`test_contract_render` の regions）で、全体を描いて切り出したものと全画素が一致することを確かめている。
   - このため `Resample.c` は単独ではビルドしない（同じ関数が二度定義されないように）。
+- `compat/row_bands.c`・`compat/row_bands.h`: `render::Image::resize_in_bands`・`filter_in_bands`（Genko の拡大 `upscale` の Lanczos とアンシャープマスク）が、行の帯ごとに複数のスレッドで同時に計算するための部品。どの行も、全体を一度に計算するときと同じコードで出るので、帯の数によらず全画素が同じ（`test_image` の bandsMakeTheSamePixels、`test_service` の enlargementIsTheSameInAnyNumberOfBands、`test_contract_service` の Python との照合）。
+  - `genko_imaging_view`・`genko_imaging_view_free`: 画像の一部（列 [x0, x1)・行 [y0, y1)）を、画素を写さずに、行の表だけを持つ別の画像として見せる。libImaging の行ごとの関数（`ImagingHorizontalBoxBlur`、`ImagingTranspose`）を帯ごとに呼ぶため。パレットのある画像には作らない。
+  - `ImagingHorizontalBoxBlur` の宣言: `BoxBlur.c` で `static` なしに定義されているが `Imaging.h` に宣言がない関数を、そのまま呼ぶための宣言。
+  - `genko_gaussian_blur_radius`: `BoxBlur.c` の static 関数 `_gaussian_blur_radius` の本文をそのまま写したもの（同じビルドの設定で同じ値）。
+  - `genko_unsharp_rows`: `UnsharpMask.c` の `ImagingUnsharpMask` のぼかしの後の行の処理（と `clip8`）を、行 [y0, y1) だけについてそのまま写したもの。
+  - 帯の分け方・順番・スレッドは C++ 側（`native/src/render/image.cpp`）。横の各パスは帯ごとに、縦のパスは転置の帯ごとに行い、パスの間はすべての帯が終わるのを待つ（縦のパスが他の帯の書いた行を読むのは、それが全部書き終わってから）。各帯が書くのは自分の行だけ。
+- `compat/imaging_glue.c` の `genko_imaging_budget_active`: このスレッドが画像確保の予算（`genko_imaging_budget_begin`）の中にいるか。予算の中では、ほかのスレッドで確保した画素が予算に数えられないので、帯ごとの並列をせず元の関数を呼ぶ。
 - ビルド時に作る `ImagingCxx.h`（ビルドディレクトリの `third_party/pillow/cxx/`）: C++ から読むための Imaging.h。CMake が構成時に、Imaging.h から文字列の置換で作る。
   - C++ では `typedef struct ImagingMemoryArena {…} *ImagingMemoryArena;`（同じ名前の struct と typedef）が書けない。そこで struct のタグ名を `ImagingMemoryArenaInstance` に替える（`extern struct ImagingMemoryArena ImagingDefaultArena;` も合わせる）。
   - Imaging.h の `extern "C"` の外で読まれる `Mode.h` を `extern "C"` で囲む。

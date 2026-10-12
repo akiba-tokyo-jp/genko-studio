@@ -141,6 +141,22 @@ struct Filter {
     static Filter smooth_more();
 };
 
+// How many threads Image::resize_in_bands, resize_region_in_bands and filter_in_bands use by default: the processors
+// there are, 1 to 8.
+int band_threads();
+// How many times they worked in bands, and how many times a band failed and the work was done again by resize(),
+// resize_region() or filter() (for tests: a failure there is a fault of the bands, not of the picture).
+struct BandCounts {
+    std::uint64_t banded = 0;
+    std::uint64_t failed = 0;
+};
+BandCounts band_counts();
+// side() on a thread of its own while main() runs on this one, both over before this returns (an exception of either
+// thrown here, main()'s first); one after the other — side() first — when a thread cannot be started, or when this
+// thread is inside an ImageAllocationBudget (the other thread's pictures would not be counted in it). The two must not
+// write what the other reads or writes: what each makes is then what it makes alone.
+void side_by_side(const std::function<void()>& side, const std::function<void()>& main);
+
 // A picture: mode (Pillow's: "1", "L", "LA", "La", "P", "PA", "I", "I;16", "F", "RGB", "RGBA", "RGBa", "RGBX",
 // "HSV", "CMYK", "YCbCr"), size and pixels. A value: copying copies the pixels, moving is cheap. An Image made with
 // the default constructor holds nothing (empty()).
@@ -250,6 +266,20 @@ public:
     void thumbnail(Size size, Resample resample = Resample::Bicubic, std::optional<double> reducing_gap = 2.0);
 
     Image filter(const Filter& filter) const;
+
+    // resize(size, resample, box), resize_region(size, region, resample, box) and filter(filter) worked out in bands of
+    // rows on several threads at once (`threads` at most; 0: band_threads()), with the same pixels: each row by the
+    // same libImaging code (genko_ImagingResampleRegion; the box blur's row passes and transposes, and the unsharp
+    // mask's rows), each pass over before the next begins (a vertical pass reads rows of other bands only once they are
+    // all written). What they do not split — resize: a size that is the picture's own (the whole box), mode 1 or P,
+    // NEAREST, a box the picture cannot give (refused there), one that is a plain crop, a picture over 100 times
+    // taller than wide; filter: other than GaussianBlur, BoxBlur and UnsharpMask, a mode the blur does not take, no
+    // radius —, a picture too small for two bands, and a call inside an ImageAllocationBudget (other threads' pictures
+    // are not counted in it) are resize(), resize_region() and filter() themselves.
+    Image resize_in_bands(Size size, Resample resample, std::optional<BoxF> box = std::nullopt, int threads = 0) const;
+    Image resize_region_in_bands(Size size, const Box& region, Resample resample, std::optional<BoxF> box = std::nullopt,
+                                 int threads = 0) const;
+    Image filter_in_bands(const Filter& filter, int threads = 0) const;
 
     // getbbox(alpha_only=True): the box of the non-zero pixels (of the alpha band only, when there is one).
     std::optional<Box> getbbox(bool alpha_only = true) const;

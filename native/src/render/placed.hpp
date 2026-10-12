@@ -31,6 +31,20 @@ std::optional<std::pair<std::int64_t, std::int64_t>> asset_picture_size(const st
 // colours: the drawing says not_yet_ported).
 void check_asset_picture(const std::filesystem::path& book, const std::string& ref);
 
+// A picture this process has just written into the book `book` from the pixels `pixels` it holds (Genko's own
+// enlargement: service's upscale; the asset `ref` is the PNG of those pixels): its ref remembered (the latest 64), so
+// that check_asset_picture does not decode it again — only while the file under that ref holds those very bytes (their
+// sha256 is the ref); anything else is decoded as any picture from elsewhere. C++ only (SPEC COMP-01a). The pixels
+// also go into the placed pictures' cache, as the drawing would decode them from that file (a ref is its bytes' hash);
+// in "RGBA", as it keeps them, they are kept without a copy.
+void vouch_for_picture(const std::filesystem::path& book, const std::string& ref, Image pixels);
+// How many pictures check_asset_picture has decoded, and how many it let through as vouched for (for tests).
+struct PictureChecks {
+    std::uint64_t decoded = 0;
+    std::uint64_t vouched = 0;
+};
+PictureChecks picture_checks();
+
 // render._placed_raster(layer, page, episode, size, dpi, mode, finish) over the box `area` of the page (an "RGBA"
 // picture of the area): the asset's picture resampled (LANCZOS) into its placement, only the part inside its clip box
 // (clip_box: the panel, the panel run out to the bleed, or the page) and the page, cut to the panel's shape (a slanted,

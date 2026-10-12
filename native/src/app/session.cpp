@@ -155,6 +155,35 @@ std::size_t replaced_precise_bytes(const core::Document& before, const core::Doc
     return bytes;
 }
 
+// A change that only chooses a panel (select_frame): the choice is not saved in the book (schema-v4: not in
+// project.json), so it is not a change to the book's content.
+bool only_chooses(const Json& ops) {
+    if (!ops.is_array() || ops.empty()) return false;
+    return std::all_of(ops.begin(), ops.end(), [](const Json& op) { return op.is_object() && op.value("op", Json()) == Json("select_frame"); });
+}
+
+// The choice made on `before`, again on `base`: each op's page found by its id (another writer may have moved the
+// pages since), at the number it has now. None when a page or its panel is not in `base` any more (nothing to choose).
+std::optional<Json> choice_on(const Json& ops, const core::Document& before, const core::Document& base) {
+    Json again = Json::array();
+    for (const Json& op : ops) {
+        const auto named = op.find("page");
+        if (named == op.end()) return std::nullopt;
+        const auto then = std::find_if(before.pages.begin(), before.pages.end(), [&](const core::PagePtr& page) { return page->index.json() == *named; });
+        if (then == before.pages.end()) return std::nullopt;
+        const auto now = std::find_if(base.pages.begin(), base.pages.end(), [&](const core::PagePtr& page) { return page->id == (*then)->id; });
+        if (now == base.pages.end()) return std::nullopt;
+        const auto frame_id = op.find("frame_id");
+        if (frame_id == op.end() || !frame_id->is_string() || (*now)->find_frame(frame_id->get_ref<const std::string&>()) == nullptr) {
+            return std::nullopt;
+        }
+        Json moved = op;
+        moved["page"] = (*now)->index.json();
+        again.push_back(std::move(moved));
+    }
+    return again;
+}
+
 }  // namespace
 
 // --- the worker's side -------------------------------------------------------------------------------------------
@@ -474,31 +503,41 @@ void Session::finish_reading(const JobResult& r) {
             again->after = change->after;
             return again;
         }
+        // (a choice of a panel follows its page, or goes with it: SPEC COMP-01a — not a conflict)
+        std::optional<Json> moved;
+        if (only_chooses(change->ops)) {
+            moved = choice_on(change->ops, *change->before, *base);
+            if (!moved) return nullptr;
+            again->ops = *moved;
+        }
         try {
-            // (the pages its ops name by number — while pages are read, only ops on a read page carry one)
-            for (const Json& op : change->ops) {
-                const auto named = op.is_object() ? op.find("page") : op.end();
-                if (!op.is_object() || named == op.end()) continue;
-                const auto page_named = [&](const DocPtr& doc) -> const core::Page* {
-                    for (const auto& page : doc->pages) {
-                        if (page->index.json() == *named) return page.get();
+            // (the pages its ops name by number — while pages are read, only ops on a read page carry one; a choice was
+            // found by its page's id above)
+            if (!moved) {
+                for (const Json& op : change->ops) {
+                    const auto named = op.is_object() ? op.find("page") : op.end();
+                    if (!op.is_object() || named == op.end()) continue;
+                    const auto page_named = [&](const DocPtr& doc) -> const core::Page* {
+                        for (const auto& page : doc->pages) {
+                            if (page->index.json() == *named) return page.get();
+                        }
+                        return nullptr;
+                    };
+                    const core::Page* then = page_named(change->before);
+                    const core::Page* now = page_named(base);
+                    if ((then == nullptr) != (now == nullptr) || (then != nullptr && then->id != now->id)) {
+                        throw core::ApplyError("ページの番号とIDの対応が変わったため、読み込み中の変更を適用しませんでした。", "rebase_conflict");
                     }
-                    return nullptr;
-                };
-                const core::Page* then = page_named(change->before);
-                const core::Page* now = page_named(base);
-                if ((then == nullptr) != (now == nullptr) || (then != nullptr && then->id != now->id)) {
-                    throw core::ApplyError("ページの番号とIDの対応が変わったため、読み込み中の変更を適用しませんでした。", "rebase_conflict");
                 }
             }
             core::ScopedIdScript script(change->ids);
-            core::ApplyResult result = bus.apply(*base, change->ops, core::Actor(actor_));
+            core::ApplyResult result = bus.apply(*base, again->ops, core::Actor(actor_));
             again->journal_ops = result.journal_ops;
             again->ids = script.taken();
             again->after = std::make_shared<const core::Document>(std::move(result.doc));
             return again;
         } catch (const core::Error& error) {
-            *failures << QString::fromUtf8(error.what());
+            if (!moved) *failures << QString::fromUtf8(error.what());  // (a choice that cannot be made: let go)
             return nullptr;
         }
     };
@@ -538,6 +577,7 @@ void Session::finish_reading(const JobResult& r) {
             continue;
         }
         auto again = replay(*it, tip);
+        if (!again && only_chooses((*it)->ops)) continue;  // (a choice gone with its panel: the book is the same without it)
         if (!again) break;  // (the ones after it were made on top of it)
         again->undone_seq = (*it)->undone_seq;
         tip = again->after;
@@ -1373,9 +1413,11 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
     std::map<const Change*, std::shared_ptr<Change>> again_of;
     std::deque<Action> keep;
     std::set<std::uint64_t> adds_nothing;  // the undo of a change made, then undone, that cannot be made on this book
+    std::set<const Change*> choices_gone;  // a choice of a panel that is not in the book any more
     for (auto it = queue_.begin(); it != queue_.end(); ++it) {
         const Action& action = *it;
         if (adds_nothing.count(action.seq) != 0) continue;
+        if (action.change && choices_gone.count(action.change.get()) != 0) continue;  // (its undo or redo: nothing to do)
         if (written.count(action.txn) != 0) {
             mark_written(action, action.txn);
             continue;
@@ -1409,32 +1451,45 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
             conflicts_found << QStringLiteral("the recovery point was not taken: the book changed meanwhile");
             continue;
         }
-        try {
-            // Page numbers are positional, not identity. Never replay against a
-            // number that another writer has assigned to a different page.
-            // Refuse changed placement instead of guessing the author's intent;
-            // the conflict path below retains the complete local snapshot/history.
-            const bool creates_page = std::any_of(change->ops.begin(), change->ops.end(), [](const Json& op) {
-                const auto name = op.value("op", std::string());
-                return name == "add_page" || name == "duplicate_page";
-            });
-            if (creates_page && change->ops.size() > 1 && current->pages.size() != change->before->pages.size()) {
-                // A later op can reference a page created inside this same batch.
-                // Its number did not exist in before and cannot be checked below.
-                throw core::ApplyError("ページ構成が変わったため、一括操作の対象を変更せず保持しました。", "rebase_conflict");
+        // A choice of a panel (select_frame) is not in the book: it follows its page by id to the number the page has
+        // now, and goes when its page or panel did (SPEC COMP-01a). It never holds the saves up as a conflict; the
+        // changes to the book's content keep the rule below.
+        std::optional<Json> moved;
+        if (only_chooses(change->ops)) {
+            moved = choice_on(change->ops, *change->before, *current);
+            if (!moved) {
+                choices_gone.insert(change.get());
+                continue;
             }
-            for (const auto& original : change->before->pages) {
-                const auto at_number = std::find_if(current->pages.begin(), current->pages.end(),
-                    [&](const core::PagePtr& page) { return page->index == original->index; });
-                if (at_number != current->pages.end() && (*at_number)->id != original->id) {
-                    throw core::ApplyError("ページの番号とIDの対応が変わったため、未保存の操作を保持しました。", "rebase_conflict");
+        }
+        try {
+            if (!moved) {
+                // Page numbers are positional, not identity. Never replay against a
+                // number that another writer has assigned to a different page.
+                // Refuse changed placement instead of guessing the author's intent;
+                // the conflict path below retains the complete local snapshot/history.
+                const bool creates_page = std::any_of(change->ops.begin(), change->ops.end(), [](const Json& op) {
+                    const auto name = op.value("op", std::string());
+                    return name == "add_page" || name == "duplicate_page";
+                });
+                if (creates_page && change->ops.size() > 1 && current->pages.size() != change->before->pages.size()) {
+                    // A later op can reference a page created inside this same batch.
+                    // Its number did not exist in before and cannot be checked below.
+                    throw core::ApplyError("ページ構成が変わったため、一括操作の対象を変更せず保持しました。", "rebase_conflict");
+                }
+                for (const auto& original : change->before->pages) {
+                    const auto at_number = std::find_if(current->pages.begin(), current->pages.end(),
+                        [&](const core::PagePtr& page) { return page->index == original->index; });
+                    if (at_number != current->pages.end() && (*at_number)->id != original->id) {
+                        throw core::ApplyError("ページの番号とIDの対応が変わったため、未保存の操作を保持しました。", "rebase_conflict");
+                    }
                 }
             }
             core::ScopedIdScript script(change->ids);
-            core::ApplyResult result = bus.apply(*current, change->ops, core::Actor(actor_));
+            core::ApplyResult result = bus.apply(*current, moved ? *moved : change->ops, core::Actor(actor_));
             auto again = std::make_shared<Change>();
             again->id = new_change_id();
-            again->ops = change->ops;
+            again->ops = moved ? *moved : change->ops;
             again->journal_ops = result.journal_ops;
             again->ids = script.taken();
             again->before = current;
@@ -1447,6 +1502,10 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
             again_of[change.get()] = again;
             keep.push_back(Action{Action::Kind::Edit, again, core::new_txn_id(), ++next_seq_, false});
         } catch (const core::Error& error) {
+            if (moved) {  // (a choice that cannot be made: let go, as one whose panel is gone)
+                choices_gone.insert(change.get());
+                continue;
+            }
             // A change made, then undone, that waits only to end what the journal held to redo (Change::journal) adds
             // nothing to the book: when it cannot be made on it, neither is written (the journal as read tells what it
             // holds now).

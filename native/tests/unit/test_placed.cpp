@@ -253,6 +253,67 @@ private slots:
         QCOMPARE(QString::fromStdString(refused(imported.doc, Json::array({adopting(gone)[1]}))), QStringLiteral("(applied)"));
     }
 
+    // A picture this process wrote just now from pixels it holds (render::vouch_for_picture: Genko's own enlargement) is
+    // placed without being decoded again — only while its file holds those very bytes: put other bytes under its name
+    // and it is decoded, and refused, as any picture from elsewhere. Pictures from elsewhere are decoded whole, as before.
+    void aPictureThisProcessWroteIsNotDecodedAgain() {
+        QTemporaryDir tmp;
+        const Document doc = book_in(tmp.path());
+        const std::string leaf = doc.page(0).frames[0].id;
+        const auto adopting = [&leaf](const std::string& ref) {
+            return Json::array({Json::object({{"op", "import_candidates"}, {"page", 1}, {"frame_id", leaf},
+                                              {"candidates", Json::array({Json::object({{"id", "cd_1"}, {"asset", ref}, {"px", Json::array({9, 6})},
+                                                                                        {"origin", Json::object({{"kind", "agent"}})}})})}}),
+                                Json::object({{"op", "adopt_candidate"}, {"page", 1}, {"frame_id", leaf}, {"candidate_id", "cd_1"}})});
+        };
+        const auto placing = [&leaf](const std::string& ref) {
+            return Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", ref}, {"frame_id", leaf}})});
+        };
+        // from elsewhere: decoded each time it is placed
+        const std::string elsewhere = put(tmp.path(), genko::core::a2b_base64(kSamples[3].whole));
+        auto before = render::picture_checks();
+        QCOMPARE(QString::fromStdString(refused(doc, adopting(elsewhere))), QStringLiteral("(applied)"));
+        QCOMPARE(QString::fromStdString(refused(doc, placing(elsewhere))), QStringLiteral("(applied)"));
+        auto after = render::picture_checks();
+        QCOMPARE(after.decoded - before.decoded, std::uint64_t{2});
+        QCOMPARE(after.vouched - before.vouched, std::uint64_t{0});
+        // written here: not decoded again
+        const std::string written_bytes = genko::core::a2b_base64(kSamples[0].whole);
+        const std::string written = put(tmp.path(), written_bytes);
+        render::vouch_for_picture(*doc.asset_dir, written, render::open_image(written_bytes));
+        before = render::picture_checks();
+        QCOMPARE(QString::fromStdString(refused(doc, adopting(written))), QStringLiteral("(applied)"));
+        QCOMPARE(QString::fromStdString(refused(doc, placing(written))), QStringLiteral("(applied)"));
+        after = render::picture_checks();
+        QCOMPARE(after.decoded - before.decoded, std::uint64_t{0});
+        QCOMPARE(after.vouched - before.vouched, std::uint64_t{2});
+        // the pixels it remembers for the drawing are the ones the drawing decodes from the file
+        {
+            const auto placed = bus().apply(doc, placing(written), Actor("human:作者"));
+            render::RenderOptions options;
+            options.mode = "print";
+            render::clear_render_caches();
+            render::vouch_for_picture(*doc.asset_dir, written, render::open_image(written_bytes));
+            const std::string seeded = render::render_page(placed.doc.page(0), 60, options, &placed.doc).image.tobytes();
+            render::clear_render_caches();
+            const std::string decoded = render::render_page(placed.doc.page(0), 60, options, &placed.doc).image.tobytes();
+            QVERIFY(seeded == decoded);
+        }
+        // other bytes under its name (the pixels cut short): decoded, and refused as from elsewhere
+        const fs::path file = genko::storage::AssetStore(*doc.asset_dir).path(written, ".png");
+        fs::permissions(file, fs::perms::owner_read | fs::perms::owner_write);
+        genko::test::write_bytes(QString::fromStdString(genko::core::path_to_utf8(file)), genko::core::a2b_base64(kSamples[0].cut));
+        before = render::picture_checks();
+        const std::string said = refused(doc, adopting(written));
+        QVERIFY2(said.starts_with("apply: ops[1] adopt_candidate: the asset's picture cannot be read ("), said.c_str());
+        after = render::picture_checks();
+        QCOMPARE(after.decoded - before.decoded, std::uint64_t{1});
+        QCOMPARE(after.vouched - before.vouched, std::uint64_t{0});
+        // and a cut picture from elsewhere is refused as before
+        const std::string cut = put(tmp.path(), genko::core::a2b_base64(kSamples[1].cut));
+        QVERIFY(refused(doc, placing(cut)).starts_with("apply: ops[0] place_asset: the asset's picture cannot be read ("));
+    }
+
     void aBrokenPictureFromElsewhereStopsItsDrawingAndExport() {
         // (a book written elsewhere — by Python, which places such a picture —: nothing placed it here)
         for (const Sample& s : kSamples) {

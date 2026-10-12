@@ -4,10 +4,17 @@
 #include "render/image.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <limits>
+#include <functional>
 #include <memory>
+#include <system_error>
+#include <thread>
+#include <utility>
+#include <vector>
 
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
@@ -1227,6 +1234,249 @@ Image Image::filter(const Filter& f) const {
     std::vector<Image> ims;
     for (int c = 0; c < im_->bands; ++c) ims.push_back(one(getchannel(c)));
     return merge(mode(), ims);
+}
+
+// --- in bands of rows ------------------------------------------------------------------------------------------------
+
+int band_threads() {
+    const unsigned n = std::thread::hardware_concurrency();
+    return static_cast<int>(std::clamp(n == 0 ? 1U : n, 1U, 8U));
+}
+
+namespace {
+
+std::atomic<std::uint64_t> g_banded{0};
+std::atomic<std::uint64_t> g_band_failures{0};
+
+constexpr int kBandRows = 32;  // (the fewest rows a band is given: fewer are not worth a thread)
+
+// The bands [first, last) of `rows` rows: `threads` of them at most, each of kBandRows rows at least (one at least).
+std::vector<std::pair<int, int>> bands_of(int rows, int threads) {
+    const int n = std::max(1, std::min(threads, rows / kBandRows));
+    std::vector<std::pair<int, int>> out;
+    for (int i = 0; i < n; ++i) {
+        out.emplace_back(static_cast<int>(static_cast<std::int64_t>(rows) * i / n), static_cast<int>(static_cast<std::int64_t>(rows) * (i + 1) / n));
+    }
+    return out;
+}
+
+// work(band, first, last) for each band, the first on this thread and the others on threads of their own, all waited
+// for; true when every band's work went well (false too when a thread cannot be started). The bands write rows of
+// their own; what they read is not written while they run.
+bool each_band(const std::vector<std::pair<int, int>>& bands, const std::function<bool(std::size_t, int, int)>& work) {
+    std::vector<char> ok(bands.size(), 0);
+    std::vector<std::thread> threads;
+    threads.reserve(bands.size());
+    bool started = true;
+    for (std::size_t i = 1; i < bands.size() && started; ++i) {
+        try {
+            threads.emplace_back([&ok, &work, &bands, i] { ok[i] = work(i, bands[i].first, bands[i].second) ? 1 : 0; });
+        } catch (const std::system_error&) {
+            started = false;
+        }
+    }
+    if (started && !bands.empty()) ok[0] = work(0, bands[0].first, bands[0].second) ? 1 : 0;
+    for (std::thread& t : threads) t.join();
+    genko_imaging_clear_error();  // (a band that failed left its error on its own thread; the caller does the work again)
+    return started && std::all_of(ok.begin(), ok.end(), [](char v) { return v != 0; });
+}
+
+// A view of part of an image (row_bands.h), freed when it goes.
+struct RowView {
+    Imaging im;
+    RowView(Imaging base, int x0, int y0, int x1, int y1) : im(genko_imaging_view(base, x0, y0, x1, y1)) {}
+    ~RowView() { genko_imaging_view_free(im); }
+    RowView(const RowView&) = delete;
+    RowView& operator=(const RowView&) = delete;
+};
+
+// ImagingBoxBlur(out, in, xradius, yradius, passes) in bands (its checks made by the caller): the horizontal passes
+// band by band, then the transpose of each band of columns with its vertical passes, then the transpose back.
+bool box_blur_in_bands(Imaging out, Imaging in, float xradius, float yradius, int passes, int threads) {
+    const int w = in->xsize;
+    const int h = in->ysize;
+    if (xradius != 0) {
+        const bool ok = each_band(bands_of(h, threads), [&](std::size_t, int y0, int y1) {
+            RowView from(in, 0, y0, w, y1);
+            RowView to(out, 0, y0, w, y1);
+            if (from.im == nullptr || to.im == nullptr || ImagingHorizontalBoxBlur(to.im, from.im, xradius) == nullptr) return false;
+            for (int i = 1; i < passes; ++i) {
+                if (ImagingHorizontalBoxBlur(to.im, to.im, xradius) == nullptr) return false;
+            }
+            return true;
+        });
+        if (!ok) return false;
+    }
+    if (yradius != 0) {
+        Imaging turned = ImagingNewDirty(in->mode, h, w);
+        if (turned == nullptr) {
+            genko_imaging_clear_error();
+            return false;
+        }
+        Imaging source = xradius == 0 ? in : out;
+        bool ok = each_band(bands_of(w, threads), [&](std::size_t, int a, int b) {
+            RowView rows(turned, 0, a, h, b);
+            RowView columns(source, a, 0, b, h);
+            if (rows.im == nullptr || columns.im == nullptr || ImagingTranspose(rows.im, columns.im) == nullptr) return false;
+            for (int i = 0; i < passes; ++i) {
+                if (ImagingHorizontalBoxBlur(rows.im, rows.im, yradius) == nullptr) return false;
+            }
+            return true;
+        });
+        if (ok) {
+            ok = each_band(bands_of(h, threads), [&](std::size_t, int c, int d) {
+                RowView rows(out, 0, c, w, d);
+                RowView columns(turned, c, 0, d, w);
+                return rows.im != nullptr && columns.im != nullptr && ImagingTranspose(rows.im, columns.im) != nullptr;
+            });
+        }
+        ImagingDelete(turned);
+        if (!ok) return false;
+    }
+    return xradius != 0 || yradius != 0;  // (no radius: filter() copies)
+}
+
+}  // namespace
+
+BandCounts band_counts() { return BandCounts{g_banded.load(), g_band_failures.load()}; }
+
+void side_by_side(const std::function<void()>& side, const std::function<void()>& main) {
+    if (genko_imaging_budget_active() != 0) {
+        side();
+        main();
+        return;
+    }
+    std::exception_ptr side_failed;
+    std::thread other;
+    try {
+        other = std::thread([&side, &side_failed] {
+            try {
+                side();
+            } catch (...) {
+                side_failed = std::current_exception();
+            }
+        });
+    } catch (const std::system_error&) {
+        side();
+        main();
+        return;
+    }
+    std::exception_ptr main_failed;
+    try {
+        main();
+    } catch (...) {
+        main_failed = std::current_exception();
+    }
+    other.join();
+    if (main_failed) std::rethrow_exception(main_failed);
+    if (side_failed) std::rethrow_exception(side_failed);
+}
+
+Image Image::resize_in_bands(Size size, Resample resample, std::optional<BoxF> box, int threads) const {
+    return resize_region_in_bands(size, Box{0, 0, size.width, size.height}, resample, box, threads);
+}
+
+Image Image::resize_region_in_bands(Size size, const Box& region, Resample resample, std::optional<BoxF> box_in, int threads) const {
+    require();
+    if (threads <= 0) threads = band_threads();
+    const bool whole = region == Box{0, 0, size.width, size.height};
+    const auto alone = [&] { return whole ? resize(size, resample, box_in) : resize_region(size, region, resample, box_in); };
+    // (what resize and resize_region do otherwise than by ImagingResample — or refuse —, done by them)
+    if (size.width < 1 || size.height < 1 || region.x0 < 0 || region.y0 < 0 || region.x1 > size.width || region.y1 > size.height ||
+        region.x1 <= region.x0 || region.y1 <= region.y0) {
+        return alone();
+    }
+    const BoxF box = box_in.value_or(BoxF{0, 0, static_cast<double>(width()), static_cast<double>(height())});
+    const bool full_box = box.x0 == 0 && box.y0 == 0 && box.x1 == width() && box.y1 == height();
+    const std::string_view m = mode();
+    if ((this->size() == size && full_box) || m == "1" || m == "P" || resample == Resample::Nearest ||
+        (height() > width() * 100 && size.height < height())) {
+        return alone();
+    }
+    // (_imaging.c _resize: the box in single precision, its checks, and a box that is a plain crop)
+    const float fbox[4] = {static_cast<float>(box.x0), static_cast<float>(box.y0), static_cast<float>(box.x1), static_cast<float>(box.y1)};
+    if (fbox[0] < 0 || fbox[1] < 0 || fbox[2] > static_cast<float>(width()) || fbox[3] > static_cast<float>(height()) || fbox[2] - fbox[0] < 0 ||
+        fbox[3] - fbox[1] < 0) {
+        return alone();
+    }
+    if (fbox[0] - static_cast<float>(static_cast<int>(fbox[0])) == 0 && fbox[2] - fbox[0] == static_cast<float>(size.width) &&
+        fbox[1] - static_cast<float>(static_cast<int>(fbox[1])) == 0 && fbox[3] - fbox[1] == static_cast<float>(size.height)) {
+        return alone();
+    }
+    const auto bands = bands_of(region.height(), threads);
+    if (bands.size() < 2 || genko_imaging_budget_active() != 0) return alone();
+    if (m == "LA" || m == "RGBA") {  // (as resize and resize_region: premultiplied)
+        return convert(m == "LA" ? "La" : "RGBa").resize_region_in_bands(size, region, resample, box, threads).convert(m);
+    }
+    std::vector<Imaging> parts(bands.size(), nullptr);
+    const bool ok = each_band(bands, [&](std::size_t i, int a, int b) {
+        float own[4] = {fbox[0], fbox[1], fbox[2], fbox[3]};
+        parts[i] = genko_ImagingResampleRegion(im_, size.width, size.height, filter_id(resample), own, region.x0, region.y0 + a, region.x1,
+                                               region.y0 + b);
+        return parts[i] != nullptr;
+    });
+    Imaging out = ok ? ImagingNewDirty(im_->mode, region.width(), region.height()) : nullptr;
+    if (out != nullptr) {
+        for (std::size_t i = 0; i < bands.size(); ++i) {
+            for (int y = bands[i].first; y < bands[i].second; ++y) {
+                std::memcpy(out->image[y], parts[i]->image[y - bands[i].first], static_cast<std::size_t>(out->linesize));
+            }
+        }
+    }
+    for (Imaging part : parts) {
+        if (part != nullptr) ImagingDelete(part);
+    }
+    if (out == nullptr) {
+        ++g_band_failures;
+        genko_imaging_clear_error();
+        return alone();  // (what went wrong is said there, or it goes well there)
+    }
+    ++g_banded;
+    return derived(out);
+}
+
+Image Image::filter_in_bands(const Filter& f, int threads) const {
+    require();
+    if (threads <= 0) threads = band_threads();
+    const bool blur = f.kind == Filter::Kind::GaussianBlur || f.kind == Filter::Kind::BoxBlur || f.kind == Filter::Kind::UnsharpMask;
+    const Imaging in = im_;
+    const ModeID m = in->mode;
+    // (ImagingBoxBlur's checks: the modes and type it takes, a radius not below zero)
+    const bool takes = m == IMAGING_MODE_RGB || m == IMAGING_MODE_RGBA || m == IMAGING_MODE_RGBa || m == IMAGING_MODE_RGBX ||
+                       m == IMAGING_MODE_CMYK || m == IMAGING_MODE_L || m == IMAGING_MODE_LA || m == IMAGING_MODE_La;
+    const bool unsharp = f.kind == Filter::Kind::UnsharpMask;
+    const bool radius = unsharp ? f.radius_x > 0 : (f.radius_x > 0 || f.radius_y > 0) && f.radius_x >= 0 && f.radius_y >= 0;
+    if (!blur || !takes || in->type != IMAGING_TYPE_UINT8 || !radius || in->xsize < kBandRows * 2 || in->ysize < kBandRows * 2 || threads < 2 ||
+        genko_imaging_budget_active() != 0) {
+        return filter(f);
+    }
+    float xradius = 0;
+    float yradius = 0;
+    int passes = 3;
+    if (f.kind == Filter::Kind::BoxBlur) {
+        xradius = static_cast<float>(f.radius_x);
+        yradius = static_cast<float>(f.radius_y);
+        passes = 1;
+    } else {  // (ImagingGaussianBlur; ImagingUnsharpMask blurs with ImagingGaussianBlur(radius, radius, 3))
+        xradius = genko_gaussian_blur_radius(static_cast<float>(f.radius_x), 3);
+        yradius = genko_gaussian_blur_radius(static_cast<float>(unsharp ? f.radius_x : f.radius_y), 3);
+    }
+    Imaging made = ImagingNewDirty(m, in->xsize, in->ysize);
+    if (made == nullptr) {
+        ++g_band_failures;
+        genko_imaging_clear_error();
+        return filter(f);
+    }
+    Image out = derived(made);
+    bool ok = box_blur_in_bands(out.im_, in, xradius, yradius, passes, threads);
+    if (ok && unsharp) {
+        ok = each_band(bands_of(in->ysize, threads), [&](std::size_t, int y0, int y1) {
+            genko_unsharp_rows(out.im_, in, f.percent, f.threshold, y0, y1);
+            return true;
+        });
+    }
+    ++(ok ? g_banded : g_band_failures);
+    return ok ? out : filter(f);
 }
 
 std::optional<Box> Image::getbbox(bool alpha_only) const {

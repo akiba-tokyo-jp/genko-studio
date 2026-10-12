@@ -1,8 +1,9 @@
 // The app's editing session (app/session.hpp), without a window: the five save states and their changes, edits made
 // while a save runs, the autosave's timing (a pause of 2 s, at most 10 s), undo and redo in memory and through the
 // journal (in Python's order, also while the journal's undo is written), rebasing on a change made by another writer
-// (and its conflicts), the recovery point when the book cannot be written (and when neither can be), a read-only book,
-// ids chosen before a change is applied, and save-as.
+// (and its conflicts; a chosen panel, which is not in the book, following its page instead), the recovery point when
+// the book cannot be written (and when neither can be), a read-only book, ids chosen before a change is applied, and
+// save-as.
 
 #include <QtTest>
 
@@ -16,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "app/session.hpp"
 #include "core/command_bus.hpp"
@@ -184,6 +186,39 @@ std::shared_ptr<Session> conflict_after_journal_undo(const fs::path& book, const
     }
     if (!session->wait_idle(10000ms)) throw genko::core::Error("test", "the journal undo did not end");
     return session;
+}
+
+// Another writer's change saved meanwhile (an agent's apply_ops, committed): under the book's lock, on the book as it is
+// on disk.
+void saved_meanwhile(const fs::path& book, const Json& ops, const std::string& actor = "ai:other") {
+    genko::storage::ProjectLock lock(book, actor);
+    lock.try_acquire();
+    const auto loaded = genko::storage::load_document(book);
+    const auto result = genko::core::CommandBus().apply(loaded.document, ops, genko::core::Actor(actor));
+    genko::storage::SaveRequest request;
+    request.actor = actor;
+    request.base_revision = loaded.document.revision;
+    request.ops = result.journal_ops;
+    genko::storage::Saver(lock).save(result.doc, request);
+}
+
+std::vector<std::string> page_ids(const genko::core::Document& doc) {
+    std::vector<std::string> ids;
+    for (const auto& page : doc.pages) ids.push_back(page->id);
+    return ids;
+}
+
+// The pages a panel is chosen on (select_frame's choice: not saved in the book), by page id.
+std::map<std::string, Json> chosen(const genko::core::Document& doc) {
+    std::map<std::string, Json> out;
+    for (const auto& page : doc.pages) {
+        if (!page->selected_frame_id.is_null()) out[page->id] = page->selected_frame_id;
+    }
+    return out;
+}
+
+Json choose(int page, const std::string& frame_id) {
+    return Json::array({Json::object({{"op", "select_frame"}, {"page", page}, {"frame_id", frame_id}})});
 }
 
 // Fault injection for this process while it lives (the build must have it).
@@ -2510,6 +2545,141 @@ private slots:
         QCOMPARE(session->document().page(1).note, std::string("外"));
         QCOMPARE(ink_strokes(session->document(), 1), std::size_t{0});
         QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{0});
+    }
+
+    // A panel chosen in the window (select_frame: a change of its own, the choice not saved in the book) and, before
+    // it is saved, an agent reorders the pages: the choice follows its page (by id, to the page's new number) and is
+    // saved on the agent's book, without a conflict holding up the saves (Python's session put the choice on the page
+    // that took the number, a page without that panel). The agent's order stands; a line drawn after on the chosen
+    // page's new number saves as any change.
+    void aChosenPanelFollowsItsPageThroughAnotherWritersReorder() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book, 3);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        auto session = Session::open(book, options);
+        const std::vector<std::string> ids = page_ids(session->document());
+        const std::string frame = session->document().page(0).leaf_frames().at(0)->id;
+        session->apply(choose(1, frame));
+        saved_meanwhile(book, Json::array({Json::object({{"op", "reorder"}, {"order", Json::array({2, 1, 3})}})}));
+        const auto revision = disk_revision(book);
+        QSignalSpy conflicts(session.get(), &Session::conflicts);
+        session->save_now();
+        QVERIFY2(session->wait_saved(10000ms), qPrintable(session->status().code + QStringLiteral(": ") + session->status().reason));
+        QCOMPARE(conflicts.count(), 0);
+        const std::vector<std::string> agents = {ids[1], ids[0], ids[2]};
+        QVERIFY(page_ids(genko::storage::load_document(book).document) == agents);
+        QVERIFY(page_ids(session->document()) == agents);
+        QCOMPARE(disk_revision(book), revision + 1);  // (the choice saved, as Python saves it: a change of its own)
+        const std::map<std::string, Json> want = {{ids[0], Json(frame)}};
+        QVERIFY(chosen(session->document()) == want);  // (on its page, now page 2)
+        session->apply(stroke_op(30, 2));
+        session->save_now();
+        QVERIFY(session->wait_saved(10000ms));
+        QCOMPARE(conflicts.count(), 0);
+        QCOMPARE(ink_strokes_on_disk(book, 1), std::size_t{1});
+        QCOMPARE(genko::storage::load_document(book).document.page(1).id, ids[0]);
+    }
+
+    // The chosen panel, or its page, gone in the agent's change: the choice goes too (nothing to choose), quietly; the
+    // book is the agent's and nothing waits. With a line drawn after the choice on a page the agent left in place, the
+    // line is saved.
+    void aChosenPanelGoneMeanwhileIsLetGo_data() {
+        QTest::addColumn<QString>("gone");
+        QTest::newRow("its page deleted") << QStringLiteral("page");
+        QTest::newRow("its panel deleted") << QStringLiteral("panel");
+    }
+    void aChosenPanelGoneMeanwhileIsLetGo() {
+        QFETCH(QString, gone);
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_book(book, 3);
+        Session::Options options = quick(recovery);
+        options.autosave = false;
+        // (page 3 in two panels)
+        saved_by(book, options, "human:tester", Json::array({Json::object({{"op", "split_frame"}, {"page", 3}, {"axis", "horizontal"}})}));
+        auto session = Session::open(book, options);
+        const std::string frame = session->document().page(2).leaf_frames().at(0)->id;
+        session->apply(choose(3, frame));
+        session->apply(stroke_op(30, 1));
+        saved_meanwhile(book, gone == QStringLiteral("page") ? Json::array({Json::object({{"op", "delete_page"}, {"page", 3}})})
+                                                             : Json::array({Json::object({{"op", "delete_frame"}, {"page", 3}, {"frame_id", frame}})}));
+        QSignalSpy conflicts(session.get(), &Session::conflicts);
+        session->save_now();
+        QVERIFY2(session->wait_saved(10000ms), qPrintable(session->status().code + QStringLiteral(": ") + session->status().reason));
+        QCOMPARE(conflicts.count(), 0);
+        QVERIFY(chosen(session->document()).empty());
+        QCOMPARE(session->waiting(), std::size_t{0});
+        const auto disk = genko::storage::load_document(book).document;
+        QCOMPARE(disk.pages.size(), std::size_t(gone == QStringLiteral("page") ? 2 : 3));
+        if (gone == QStringLiteral("panel")) QVERIFY(disk.page(2).find_frame(frame) == nullptr);
+        QCOMPARE(ink_strokes(disk, 0), std::size_t{1});
+    }
+
+    // Only the choice follows its page: a line drawn after it on the page the agent moved is a change to the book, and
+    // it is not put on the page that took its number nor moved by the session — it waits as a conflict (nothing
+    // written) until the person takes it back; then the choice is saved on its page.
+    void aLineOnAPageMovedMeanwhileStillWaitsAsAConflict() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        make_book(book, 3);
+        Session::Options options = quick(path_of(tmp.filePath("recovery")));
+        options.autosave = false;
+        auto session = Session::open(book, options);
+        const std::vector<std::string> ids = page_ids(session->document());
+        const std::string frame = session->document().page(0).leaf_frames().at(0)->id;
+        session->apply(choose(1, frame));
+        session->apply(stroke_op(30, 1));
+        const auto unsaved = session->snapshot();
+        saved_meanwhile(book, Json::array({Json::object({{"op", "reorder"}, {"order", Json::array({2, 1, 3})}})}));
+        const std::string project = genko::storage::read_file(book / "project.json");
+        QSignalSpy conflicts(session.get(), &Session::conflicts);
+        session->save_now();
+        QVERIFY(wait_for([&] { return conflicts.count() == 1; }));
+        QVERIFY(session->wait_idle(10000ms));
+        QCOMPARE(session->status().code, QStringLiteral("rebase_conflict"));
+        QCOMPARE(session->snapshot().get(), unsaved.get());
+        QCOMPARE(genko::storage::read_file(book / "project.json"), project);
+        session->undo();  // (the line)
+        session->save_now();
+        QVERIFY2(session->wait_saved(10000ms), qPrintable(session->status().code + QStringLiteral(": ") + session->status().reason));
+        const std::map<std::string, Json> want = {{ids[0], Json(frame)}};
+        QVERIFY(chosen(session->document()) == want);
+        const auto disk = genko::storage::load_document(book).document;
+        QVERIFY((page_ids(disk) == std::vector<std::string>{ids[1], ids[0], ids[2]}));
+        for (std::size_t page = 0; page < 3; ++page) QCOMPARE(ink_strokes(disk, page), std::size_t{0});
+    }
+
+    // While the rest of the book is read (its first page shown first), a panel chosen on the page shown and the pages
+    // swapped meanwhile by another writer: the choice follows its page as above, without a conflict.
+    void aChoiceWhileTheRestIsReadFollowsItsPage() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_drawn_book(book, recovery, 2, 1);
+        const Session::Options options = first_page_first(recovery);
+        auto session = Session::from(Session::read(book, options), book, options);
+        const std::string first_id = session->document().page(0).id;
+        const std::string frame = session->document().page(0).leaf_frames().at(0)->id;
+        session->apply(choose(1, frame));
+        {
+            Session::Options other = quick(path_of(tmp.filePath("recovery-other")));
+            other.actor = "agent:other";
+            auto writer = Session::open(book, other);
+            writer->apply(Json::array({Json::object({{"op", "reorder"}, {"order", Json::array({2, 1})}})}));
+            QVERIFY(writer->wait_saved(10000ms));
+        }
+        QSignalSpy conflicts(session.get(), &Session::conflicts);
+        session->read_rest();
+        QVERIFY(wait_for([&] { return !session->loading(); }));
+        QVERIFY2(session->wait_saved(10000ms), qPrintable(session->status().code + QStringLiteral(": ") + session->status().reason));
+        QCOMPARE(conflicts.count(), 0);
+        QCOMPARE(session->document().page(1).id, first_id);
+        const std::map<std::string, Json> want = {{first_id, Json(frame)}};
+        QVERIFY(chosen(session->document()) == want);
+        QCOMPARE(genko::storage::load_document(book).document.page(1).id, first_id);
     }
 };
 

@@ -32,8 +32,9 @@ Json register_program(const std::string& name, const Json& command, const std::v
 // upscale.unregister(name): whether it was there.
 bool unregister(const std::string& name);
 
-// upscale.builtin(image, scale): Lanczos enlargement, then an unsharp mask sized to the enlargement.
-render::Image builtin(const render::Image& image, double scale);
+// upscale.builtin(image, scale): Lanczos enlargement, then an unsharp mask sized to the enlargement. Worked out in bands
+// of rows on `threads` threads at most (0: render::band_threads()), with the same pixels whatever their number.
+render::Image builtin(const render::Image& image, double scale, int threads = 0);
 // upscale.external(name, image, scale): the person's upscaler run on the picture (its output resized to exactly `scale`).
 // core::PyValueError with Python's words when it is not registered, cannot be started, fails or makes no picture.
 render::Image external(const std::string& name, const render::Image& image, double scale);

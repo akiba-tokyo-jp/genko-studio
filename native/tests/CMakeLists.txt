@@ -190,6 +190,14 @@ genko_test(test_contract_service SOURCES contract/test_contract_service.cpp
 # `genko mcp` (stdio, Streamable HTTP) and `genko serve` against Python's, through the MCP SDK's own client and raw
 # JSON-RPC / HTTP (tools/migration/mcp_harness.py on contract/mcp_cases.json; skipped without $GENKO_MCP_PYTHON).
 genko_test(test_contract_mcp SOURCES contract/test_contract_mcp.cpp DEPS genko_test_support genko_render LABELS contract TIMEOUT 3600)
+# F3 (ACCEPTANCE.md §2, M5's exit): tests/test_m4_pipeline.py's 8-page offline making on this build — Python's FakeAgent
+# through the MCP SDK's client on `genko mcp`, the person's `genko studio` — against the same run on Python's
+# (tools/migration/pipeline_harness.py): every call and reply, the pictures, the book, its audit and approvals; what was
+# written out (drawn from random ids: against Python's drawing of this build's book). Skipped without $GENKO_MCP_PYTHON,
+# as test_contract_mcp.
+genko_test(test_contract_pipeline SOURCES contract/test_contract_pipeline.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
+           LABELS contract TIMEOUT 7200)
+set_tests_properties(test_contract_pipeline PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=7100000")
 # The studio service where this build goes past Python (SPEC COMP-01a): background jobs (and a thread that cannot
 # start), a palette picture kept, the official export handed to the studio (holding the book, taking back its files,
 # printing the dots asked for), for_pages and put_raster's reads, preview names, pages gone meanwhile, v1–v3 books
@@ -364,6 +372,11 @@ else()
   target_compile_definitions(test_cli_e2e PRIVATE GENKO_WITH_APP=0)
 endif()
 
+# PERF-F (ACCEPTANCE.md §4), shown and judged against its pass values (not run by the usual CI: ctest -L perf; run it in
+# Release): F3's making on `genko mcp` and `genko studio` (every call), 100 calls of each kind, the 8-page proof 10 times
+# (tools/migration/pipeline_harness.py).
+genko_test(test_perf_pipeline SOURCES perf/test_perf_pipeline.cpp DEPS genko_test_support LABELS perf TIMEOUT 3600)
+set_tests_properties(test_perf_pipeline PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
 # Timings, shown and not judged (not run by the usual CI: ctest -L perf).
 genko_test(test_perf_render SOURCES perf/test_perf_render.cpp DEPS genko_render LABELS perf TIMEOUT 1800)
 set_tests_properties(test_perf_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")

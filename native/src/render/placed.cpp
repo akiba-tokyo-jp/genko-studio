@@ -1,9 +1,11 @@
 #include "render/placed.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <list>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include "core/command_bus.hpp"
@@ -48,11 +50,50 @@ std::optional<std::pair<std::int64_t, std::int64_t>> asset_picture_size(const st
     }
 }
 
+namespace {
+
+std::mutex g_vouched_mutex;
+std::list<std::string> g_vouched;  // (the latest first)
+constexpr std::size_t kVouched = 64;
+std::atomic<std::uint64_t> g_decoded{0};
+std::atomic<std::uint64_t> g_let_through{0};
+
+bool vouched(const std::string& ref) {
+    std::lock_guard lock(g_vouched_mutex);
+    return std::find(g_vouched.begin(), g_vouched.end(), ref) != g_vouched.end();
+}
+
+}  // namespace
+
+// (defined below, with the caches)
+void remember_source(const std::filesystem::path& book, const std::string& ref, Image pixels);
+
+void vouch_for_picture(const std::filesystem::path& book, const std::string& ref, Image pixels) {
+    if (!storage::AssetStore::is_ref(ref)) return;
+    {
+        std::lock_guard lock(g_vouched_mutex);
+        g_vouched.remove(ref);
+        g_vouched.push_front(ref);
+        while (g_vouched.size() > kVouched) g_vouched.pop_back();
+    }
+    remember_source(book, ref, std::move(pixels));
+}
+
+PictureChecks picture_checks() { return PictureChecks{g_decoded.load(), g_let_through.load()}; }
+
 void check_asset_picture(const std::filesystem::path& book, const std::string& ref) {
     if (!storage::AssetStore::is_ref(ref)) return;
     try {
         const auto bytes = storage::AssetStore(book).get_bytes(ref, ".png", storage::kAssetMaxBytes);
-        if (bytes) (void)open_image(*bytes, kPillowOpenLimits);
+        if (!bytes) return;
+        // (written just now by this process from pixels it held — vouch_for_picture —, and the file holds those very
+        // bytes: nothing to find by decoding it)
+        if (vouched(ref) && storage::AssetStore::ref(*bytes) == ref) {
+            ++g_let_through;
+            return;
+        }
+        ++g_decoded;
+        (void)open_image(*bytes, kPillowOpenLimits);
     } catch (const NotYetPorted&) {
         return;  // (not opened by this build yet: the drawing says so)
     } catch (const core::Error& error) {
@@ -273,6 +314,13 @@ void spread_into(Json& out, const Json& value) {
 
 }  // namespace
 
+// The picture placed_raster would decode from the asset `ref` of the book `book` (open_image of its bytes, RGBA): these
+// pixels, when they are the ones its bytes were made from.
+void remember_source(const std::filesystem::path& book, const std::string& ref, Image pixels) {
+    if (pixels.mode() != "RGBA") pixels = pixels.convert("RGBA");
+    sources().put(core::path_to_utf8(book) + "\n" + ref, std::make_shared<const Image>(std::move(pixels)));
+}
+
 void clear_placed_caches() {
     sources().clear();
     finished().clear();
@@ -370,13 +418,13 @@ std::optional<Image> placed_raster(const core::Layer& layer, const core::Page& p
             const std::string key = source_key + "\n" + core::dump_python(bits);
             std::shared_ptr<const Image> art = finished().get(key);
             if (art == nullptr) {
-                const Image fitted = source->resize(fitted_size, Resample::Lanczos, box);
+                const Image fitted = source->resize_in_bands(fitted_size, Resample::Lanczos, box);  // (in bands: the same pixels)
                 art = std::make_shared<const Image>(finish_placed(fitted, layer, page, episode, dpi, mode, dots, Point{visible.x0, visible.y0}));
                 if (static_cast<std::int64_t>(fitted_size.width) * fitted_size.height <= kKeptFinishPixels) finished().put(key, art);
             }
             piece = art->crop(in_fitted);
         } else {
-            piece = source->resize_region(fitted_size, in_fitted, Resample::Lanczos, box);
+            piece = source->resize_region_in_bands(fitted_size, in_fitted, Resample::Lanczos, box);  // (in bands: the same pixels)
         }
         out.paste(piece, Point{part.x0 - area.x0, part.y0 - area.y0});
     }

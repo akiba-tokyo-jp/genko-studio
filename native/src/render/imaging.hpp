@@ -9,6 +9,7 @@
 #include "ImagingCxx.h"  // libImaging/Imaging.h as C++ reads it (made by native/third_party/pillow/CMakeLists.txt)
 #include "imaging_glue.h"
 #include "resample_region.h"
+#include "row_bands.h"
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif

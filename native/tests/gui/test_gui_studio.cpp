@@ -8,7 +8,8 @@
 //
 // C++ (SPEC UX-02, improvement I13): the words for the AI in several lines (Enter a new line, the input method's words,
 // Ctrl+Enter sends), asked about once more before they go, kept as a draft for each request across another request,
-// the book changing under it and another tab, until sent; a draft not dropped without asking.
+// the book changing under it and another tab, until sent; a draft not dropped without asking. A panel chosen in the
+// window while an agent reorders the pages: no conflict holds up the window's saves (SPEC COMP-01a).
 
 #include <QtTest>
 
@@ -167,8 +168,9 @@ struct Desk {
     QStringList warnings;
     std::function<int(QDialog*)> on_dialog;
 
-    Desk(const fs::path& book, const fs::path& recovery) {
-        session = app::Session::open(book, gui_test::quick(recovery));
+    Desk(const fs::path& book, const fs::path& recovery) : Desk(book, gui_test::quick(recovery)) {}
+    Desk(const fs::path& book, const app::Session::Options& options) {
+        session = app::Session::open(book, options);
         window = std::make_unique<app::MainWindow>(session);
         window->resize(1366, 900);
         window->show();
@@ -778,6 +780,69 @@ private slots:
                  qPrintable(desk.window->last_error()));
         QCOMPARE(static_cast<int>(gui_test::read_book(book.path).tickets.size()), fixes);
         QCOMPARE(app::Drafts::instance().get(app::draft_book_key(*desk.window), QStringLiteral("panel:") + qs(book.leaves[0])), QStringLiteral("右を向く"));
+    }
+
+    // The window and an agent on the same book (M5's exit; F3: the book handled safely from the window and the MCP
+    // tools at once): a panel chosen in the window — a change of its own, the choice not saved in the book — and, before
+    // it is saved, the agent reorders the pages (its apply_ops, committed). The window reads the book again: no
+    // conflict holds up its saves, the agent's order stands, the choice stays on its panel's page (now page 2); the
+    // person's instruction for the panel and the agent's next change go on as usual.
+    void choiceWhileTheAgentReorders() {
+        StudioBook book(false);
+        app::Session::Options options = gui_test::quick(book.root / "recovery");
+        options.idle = std::chrono::hours(1);  // (the autosave waits longer than the test: the choice waits when the agent writes)
+        options.longest = std::chrono::hours(1);
+        Desk desk(book.path, options);
+        QSignalSpy conflicts(desk.session.get(), &app::Session::conflicts);
+        QDockWidget* dock = desk.dock(QStringLiteral("コマの詳細"));
+        dock->raise();
+        QVERIFY(gui_test::wait_for([&] { return dock->isVisible(); }, 60000));
+        app::PanelView* view = desk.window->panel_view();
+        const std::vector<std::string> ids = [&] {
+            std::vector<std::string> out;
+            for (const auto& page : desk.window->book().pages) out.push_back(page->id);
+            return out;
+        }();
+        emit desk.window->canvas()->frameSelected(qs(book.leaves[0]));
+        QVERIFY(gui_test::wait_for([&] { return view->candidates->count() == 2; }, 60000));
+        QCOMPARE(desk.session->waiting(), std::size_t{1});  // (the choice, not saved yet)
+        const auto reordered = book.ai(Json::array({Json{{"op", "reorder"}, {"order", {2, 1, 3}}}}));
+        QVERIFY2(reordered.ok, reordered.to_dict().dump().c_str());
+        const auto revision = desk.window->book().revision;
+        desk.session->check_outside();  // (the window's file watcher)
+        QVERIFY(gui_test::wait_for([&] { return desk.window->book().revision != revision || desk.session->status().kind == app::SaveKind::Failed; }, 60000));
+        desk.session->save_now();
+        QVERIFY2(desk.saved(), qPrintable(app::failure_reason(desk.session->status()) + QStringLiteral(" / ") + desk.window->last_error()));
+        QCOMPARE(conflicts.count(), 0);
+        {
+            const core::Document saved = gui_test::read_book(book.path);
+            QCOMPARE(saved.page(0).id, ids[1]);
+            QCOMPARE(saved.page(1).id, ids[0]);
+            QCOMPARE(desk.window->book().page(1).selected_frame_id, Json(book.leaves[0]));
+            QVERIFY(desk.window->book().page(0).selected_frame_id.is_null());
+        }
+        // the person goes on: the panel shown where it is now, an instruction for it
+        desk.window->select_page(1);
+        emit desk.window->canvas()->frameSelected(qs(book.leaves[0]));
+        QVERIFY(gui_test::wait_for([&] { return view->frame_id == book.leaves[0] && view->candidates->count() == 2; }, 60000));
+        desk.yes = {true};
+        type_in(view->instruction, QStringLiteral("左を向く"));
+        view->send_button->click();
+        QVERIFY2(desk.saved(), qPrintable(app::failure_reason(desk.session->status()) + QStringLiteral(" / ") + desk.window->last_error()));
+        {
+            const core::Document saved = gui_test::read_book(book.path);
+            const core::Frame* frame = saved.page(1).find_frame(book.leaves[0]);
+            QVERIFY(frame != nullptr && frame->panel && frame->panel->is_object());
+            const Json instruction = frame->panel->value("instruction", Json::object());
+            QCOMPARE(instruction.is_object() ? instruction.value("text", Json()) : Json(), Json("左を向く"));
+        }
+        // and so does the agent
+        const auto noted = book.ai(Json::array({Json{{"op", "set_note"}, {"page", 2}, {"note", "AI のメモ"}}}));
+        QVERIFY2(noted.ok, noted.to_dict().dump().c_str());
+        desk.session->check_outside();
+        QVERIFY(gui_test::wait_for([&] { return desk.window->book().page(1).note == "AI のメモ"; }, 60000));
+        QVERIFY(desk.saved());
+        QCOMPARE(conflicts.count(), 0);
     }
 
     // The approval box asked about one request while it comes to choose another, or the request is closed elsewhere: the

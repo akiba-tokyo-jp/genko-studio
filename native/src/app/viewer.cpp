@@ -86,8 +86,10 @@ ViewerDialog::ViewerDialog(QWidget* parent, const QString& title, const std::vec
     view_ = new ImageView;
     auto* caption = new QLabel(note);
     caption->setWordWrap(true);
-    auto* prev_button = new QPushButton(QStringLiteral("← 前のページ"));
-    auto* next_button = new QPushButton(QStringLiteral("次のページ →"));
+    // (the page buttons and label are the dialog's own from the start: without pages they are hidden and in no layout,
+    // and a widget without a parent would outlive the dialog)
+    auto* prev_button = new QPushButton(QStringLiteral("← 前のページ"), this);
+    auto* next_button = new QPushButton(QStringLiteral("次のページ →"), this);
     connect(prev_button, &QPushButton::clicked, this, [this] { step(-1); });
     connect(next_button, &QPushButton::clicked, this, [this] { step(1); });
     auto* fit = new QPushButton(QStringLiteral("全体（0）"));
@@ -96,7 +98,7 @@ ViewerDialog::ViewerDialog(QWidget* parent, const QString& title, const std::vec
     connect(actual, &QPushButton::clicked, view_, &ImageView::actual);
     auto* close = new QPushButton(QStringLiteral("閉じる"));
     connect(close, &QPushButton::clicked, this, &QDialog::accept);
-    page_label_ = new QLabel;
+    page_label_ = new QLabel(this);
     auto* bar = new QHBoxLayout;
     if (!pages_.empty() && load_page_) {
         bar->addWidget(prev_button);
@@ -105,6 +107,7 @@ ViewerDialog::ViewerDialog(QWidget* parent, const QString& title, const std::vec
     } else {
         prev_button->hide();
         next_button->hide();
+        page_label_->hide();
     }
     bar->addStretch(1);
     bar->addWidget(fit);

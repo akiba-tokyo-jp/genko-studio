@@ -26,6 +26,8 @@ int genko_imaging_budget_begin(uint64_t limit);
 void genko_imaging_budget_end(void);
 uint64_t genko_imaging_budget_live(void);
 uint64_t genko_imaging_budget_peak(void);
+/* Whether this thread is inside a budget (work handed to other threads would not be counted in it). */
+int genko_imaging_budget_active(void);
 struct ImagingMemoryInstance;
 int genko_imaging_budget_reserve(struct ImagingMemoryInstance *im, uint64_t bytes);
 void genko_imaging_budget_release(struct ImagingMemoryInstance *im);

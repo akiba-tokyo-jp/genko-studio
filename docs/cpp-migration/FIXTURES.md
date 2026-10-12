@@ -36,6 +36,11 @@ B4・600dpi・8 ページ。各ページ 20 レイヤー:
 
 既存 `tests/test_m4_pipeline.py` の 8 ページオフライン工程。企画・脚本・ネーム・固定の合成候補画像・採用・仕上げ・出力。外部 AI の生成時間・画質は測らない。
 
+- 原稿は固定ファイルを置かず、`tools/migration/pipeline_harness.py` が工程そのもので作る: Python の FakeAgent（`tests/agents/`。物語は `tests/fixtures/studio/demo4`、絵は `tests/agents/images.py` の合成画像）が公式 MCP SDK のクライアント（`mcp.Client`、stdio）で `genko mcp --agent ai:test` に繋ぎ、人役（test_m4_pipeline.py の ScriptedHuman）が依頼に `genko studio approve`・`export` のプロセスで答える。外部 AI・課金・ネットワークは使わない。
+- `test_contract_pipeline`（contract）: この版の `genko mcp`・`genko studio` と、Python 版のサーバー・CLI で同じ工程を流し、mcp_harness.py と同じ伏せ方（パス・id は出会った順・時刻・job の id。id から作る wi_・rq_・cd_・rg_ も出会った順）で、全呼び出しの返事と最後の `genko studio audit`・`stats`（道具の記録の時間を除く）、本の最終状態（Python の v3 の形。承認を含む）と承認監査を照合する。並びが乱数の id で決まる一覧（candidates の同じ順位の行、その順に送る review、監査の 1 件の中の変更）は id に依らない順に並べてから比べる。返事の絵は ARCHITECTURE.md §9 の許容差。candidates の一覧画像は、各候補の見出しの行（上 16 px）を除く（見出しは候補の id で、両方の側で乱数のため）。バックグラウンドの仕事（MCP の export_proof はいつも仕事にし、40 秒で終わらなければ job を返す）は、速さに依らず仕事の記録が終わるのを待ってから export_status を 1 回呼び、道具の返事は時間内に終わったときの形で記録する（ASan・-O0 の遅い版でも呼び出しと道具の記録が変わらないように。そのため test_m4_pipeline.py の流れより export_status が 1 回多い。両方の側で同じ）。
+- 描画が乱数の id で決まる所（フキダシの輪郭の揺れは台詞の id、効果線は効果の id を種にする）は、Python 同士でも実行ごとに違う（Python を 2 回流しても TIFF の画素が違う）。そのため、書き出した PDF・TIFF 8 枚・校正 PDF は、この版の最後の本を Python の v3 の形に書いて Python に書き出させ（`pipeline_harness.py redraw`）、バイトで照合する（除くのは export_files.hpp が除く時刻と、校正 PDF の作成時刻だけ）。finish_page の返事の絵も同じ本の Python の描画と照合する（仕上げで足す効果線は、プレビューのためだけに作る id で描かれ、保存のときに別の id で作り直されるので、その効果線のコマだけ除く。仕上げた頁そのものは書き出しで照合）。test_m4_pipeline.py の確かめ（全ページ承認・仕上げ、人物の承認、試験画像の正式書き出しの拒否、良い候補だけの採用、承認は人だけ、など）も両方で行う。時間は見ない（ASan・-O0 でも成り立つ）。`GENKO_MCP_PYTHON` が無ければ test_contract_mcp と同じく SKIP。
+- `test_perf_pipeline`（perf、Release）: PERF-F。同じ工程のこの版の全呼び出しの時間、情報取得・編集の確定・候補の採用・ページの仕上げを各 100 回、8 ページの校正出力を新しい出力先（`studio/proofs/r<版>`）へ 10 回。
+
 ## F4 組版と納品（M4）
 
 縦横書き、同じ語の繰返し（「東京と東京」）、禁則、縦中横（「AI」「12」）、部分書式、異体字セレクタ、複数ルビ、各種フキダシ、効果文字、ノンブル、CMYK、下描き・非出力層を持つ 4 ページ。ルビの編集追従の期待結果表（ACCEPTANCE.md AC-TEXT の例）を `native/tests/data/ruby_cases.json` に置く。

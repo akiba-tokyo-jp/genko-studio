@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <limits>
 #include <cmath>
+#include <exception>
 
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
@@ -17,6 +18,7 @@
 #include "render/draw.hpp"
 #include "render/filters.hpp"
 #include "render/page.hpp"
+#include "render/placed.hpp"
 #include "render/png.hpp"
 #include "render/raster_ops.hpp"
 #include "render/text/fonts.hpp"
@@ -974,7 +976,35 @@ ToolResult StudioService::upscale(const Json& a) {
     } catch (const core::PyValueError& exc) {
         return fail(exc.what(), "upscale_failed", "/method");
     }
-    const std::string ref = store.put_bytes(formats::png_bytes(big), ".png");
+    // (the PNG on this thread; meanwhile, on another, the picture as the drawing keeps it and the one shown: neither
+    // reads what the other makes, so each is what it would be alone — render::side_by_side)
+    std::string bytes;
+    render::Image kept;
+    std::string shown;
+    std::exception_ptr shown_failed;
+    render::side_by_side(
+        [&big, &kept, &shown, &shown_failed] {
+            try {
+                if (big.mode() != "RGBA") kept = big.convert("RGBA");
+            } catch (...) {
+                kept = render::Image();  // (not kept: the drawing decodes the file, as any picture)
+            }
+            try {
+                render::Image small = big.convert("RGB");
+                small.thumbnail(render::Size{512, 512});
+                shown = png(small);
+            } catch (...) {
+                shown_failed = std::current_exception();  // (thrown where Python makes it: after the candidate is in)
+            }
+        },
+        [&big, &bytes] { bytes = formats::png_bytes(big); });
+    const std::string ref = store.put_bytes(bytes, ".png");
+    // (written here from the pixels just made: placing it need not decode it again)
+    if (big.mode() == "RGBA") {
+        render::vouch_for_picture(path, ref, big);
+    } else if (!kept.empty()) {
+        render::vouch_for_picture(path, ref, std::move(kept));
+    }
     const std::string cand_id = "cd_" + studio::content_hash(Json::object({{"upscale", method}, {"from", source["asset"]}, {"scale", scale}})).substr(7, 10);
     const Json marker = Json::object({{"from", source_id}, {"from_px", Json::array({image.width(), image.height()})}, {"scale", factor}, {"method", method}});
     Json item = Json::object({{"id", cand_id}, {"asset", ref}, {"px", Json::array({big.width(), big.height()})}, {"mode", "upscale"}, {"parent", source_id},
@@ -989,13 +1019,12 @@ ToolResult StudioService::upscale(const Json& a) {
         if (!result.ok) return result;
     }
     const Json after = now && *now != 0.0 ? Json(core::py_round(*now * factor, 1)) : Json();
-    render::Image shown = big.convert("RGB");
-    shown.thumbnail(render::Size{512, 512});
+    if (shown_failed) std::rethrow_exception(shown_failed);
     return ToolResult(true, Json::object({{"candidate", cand_id}, {"candidate_id", cand_id}, {"parent", source_id}, {"px", Json::array({big.width(), big.height()})},
                                           {"scale", factor}, {"method", method}, {"dpi_before", now ? Json(*now) : Json()}, {"dpi_after", after},
                                           {"adopt", Json::object({{"candidate_id", cand_id}, {"page", a["page"]}, {"frame_id", a["frame_id"]}})},
                                           {"note", "拡大しただけで描き込みは増えない。作画の承認の後に採用すると、承認は取り直しになる"}}),
-                      {}, {png(shown)});
+                      {}, {shown});
 }
 
 ToolResult StudioService::import_image(const Json& a) {
