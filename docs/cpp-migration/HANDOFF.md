@@ -1,6 +1,38 @@
 # Genko C++ 引継ぎ（2026-10-08）
 
-## M5 と M3・M4 の残り群E — 2026-10-11 記録（この節が最新）
+## M5②（Studio のサービスと genko studio）・M5③（MCP と HTTP）— 2026-10-12 記録（この節が最新）
+
+### V2 — 統合済み
+- 凍結 `17a22bf7ebb6660db7838b72a677d2c7d3727b75`。計画 `validation_policy.py --base 3192b93 --head 17a22bf --phase integration`（tier full、Linux 各 112 試験）。
+  - linux-asan: 112/112 合格・CLI23 合格・サニタイザ指摘なし（10/12 11:24–16:47 UTC）。result.json の failures は空。
+  - linux-release: 112/112 合格・CLI23 合格（10/12 17:25–18:55 UTC）。result.json の failures は空。
+- 1 回目（凍結 ef14b1d）は ASan で test_contract_mcp の jobs（client_stdio）が落ちた。取り消した export_status がサーバーで最大 3 秒動き続け、SDK の stdio クライアントは会話の終わりの 2 秒後にサーバーを止めるので、その呼び出しが道具の記録に残るかが速さで変わっていた。照合を緩めず、取り消しの後は記録に書かれるまで待つ形に直し（17a22bf）、ASan から V2 をやり直した。
+- その前の試み（凍結 6b0d6b7）は、ASan のビルドが 23 GB（874 段の 861 段目）に達して空きが尽きかけたので止めた（結果は使わない）。サニタイザーのビルドに限り Genko のライブラリと同梱の Pillow を共有ライブラリにした（ef14b1d。全体で約 4 GB。genko_render_ops は共有のときだけ genko_render に入れる。zlib を直接使う 2 試験の DEPS を書いた）。デバッグ情報も行の表だけ（-g1、6b0d6b7）。Release・Debug・Windows は静的のまま。
+- 参照の MCP の Python は GENKO_MCP_PYTHON（tools/migration/mcp_reference_requirements.txt、mcp 2.2.0）。無いと test_contract_mcp は SKIP になり、validation_run の監査が不合格にする。
+- Windows は開発中 deferred（配布前の Windows 実機受入は必須）。
+
+### M5②（1998525・6e5a24b）
+- native/src/service/: StudioService と HumanService の全メソッド（エージェントの道具 39 と projects・create_project・upscalers を Python と同じ引数・ToolResult で `StudioService::call` から呼ぶ）、絵の道具、ネームの取り込みと解析、点検・書き出し・仕事（jobs）・正式な書き出し。api/studio_cli.cpp に `genko studio` の全命令。
+- test_contract_service（参照 Python と flow・style・drafts・art・ship・atari・cli・palette を照合。cli は同じプロセスで本・監査・ファイルまで厳密に、別のプロセスでも stdout と終了コードを照合）と test_service。
+- レビュー（P1×2・P2×12）で直した所: for_pages の内側の op にもエージェントの op 一覧と path の閉じ込め（Python にもある穴。AC-API の root 外パス）、プレビューのファイル名の id を安全に、消えたページを参照しない、v1〜v3 の本は副作用の前に needs_migration（genko studio は終了コード 3）、request_approval の人物を 1 回で保存、チャット承認をロックの中で確かめ直す、正式な書き出しは承認の保存までロックを持つ、アプリの正式な書き出しを service::run_export に、画素を展開する前にヘッダーで 64 MP、PDF の数をロケールに依らず、confine を call のキーワードから外す、パレットの絵（モード P）を Pillow と同じバイトで書く、ほか。
+- 一度だけの失敗（cli の手順 42、stdout が空で exit 1）は 3300 回で再現せず、原因は不明。リトライは入れず、試験の Run が crashed・stderr などを出すようにした。
+
+### M5③（f65dd12・4d930f9）
+- api/mcp_*: Python と同じ道具 41 と 4 リソース、JSON-RPC（初期化・道具・リソース・取り消し・ジョブ）、stdio と Streamable HTTP（`genko mcp --transport streamable-http --host --port`。既定は stdio。名前と既定値は公式 SDK）。api/headless_server・http_server・tokens: `genko serve`（server.py の HTTP API）、`genko token`。
+- test_contract_mcp（公式 mcp.Client の stdio・HTTP と生の JSON-RPC・HTTP API を C++ と Python のサーバーで照合）、test_mcp_api_e2e（エージェントが人だけの操作を通れない、人の道具が無い、外部コマンドの引数、HTTP の検査）、test_http_server。
+- レビュー（P1×1・P2×3・P3×13）で直した所: /v1/apply の import_pages の from を root の中に（Python にもある穴）、ヘッダーの段階で Host→Origin→Content-Type→token を確かめて断る要求の本文は読まない、許可した Origin への断りにも ACAO・Vary、token は SHA-256 を全件と同じ手間で比べる、chunked を厳しく、tokens.json は要求ごとに読み直す、スレッド 64・1 アドレス 32 接続・ヘッダー 10 秒の上限、ほか。
+
+### 利用者の決定（2026-10-12）
+- 正式な書き出しの screen は指定どおり使う（Python は真偽値で上書きして使わない）。CLI の裏の仕事は終わるまで待ってから終える。C++ だけの扱い（承認依頼の人物・下書きの採用は全部確かめてから 1 回で保存、作品はロックの下で作る、v3 の本への書き込みは needs_migration、CLI の失敗 JSON に code）を確定。
+- `genko studio` の --agent（human:x などで人として振る舞える）は Python と同じにする（制限しない。既知の制限）。
+- `genko mcp --transport streamable-http --host --port` の形を確定（MCP の HTTP は SDK と同じく認証なし）。
+- 書体のパス（style.font・set_nombre.font）は、システムの書体を指す正当な使い方があるので root に閉じない（あるかどうかだけが分かる。既知の制限）。
+
+### 残課題
+- M5④（画面）と M5 出口の準備（F3・PERF-F）は m5-4・m5-exit で作業中。M5 出口の V3 はその後。
+- Windows 実機受入（配布前に必須）。
+
+## M5 と M3・M4 の残り群E — 2026-10-11 記録
 
 ### 進め方
 - 群ごとに「実装（対象試験）→レビュー1回→凍結→V2（Linux ASan＋Release、validation_run.py）→native/integration へ統合」。群E（M3・M4 の残り、worktree `m4-rest`）と M5①（worktree `m5-dev`）は並行して作り、それぞれ独立レビュー1回の指摘を直した後、M5① を群E の上へ載せ直して、2群をまとめて1つの候補に凍結し V2 を1回行った。
