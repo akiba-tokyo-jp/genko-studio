@@ -35,9 +35,12 @@ function(genko_target_flags target)
 endfunction()
 
 # A sanitizer build links every library into each test program (about 0.6 GB each, most of it relocations and debug
-# information): where the linker can, pack the relative relocations and compress the debug sections. The programs
-# and the sanitizers' reports (file and line) are the same.
+# information): where the linker can, pack the relative relocations and compress the debug sections, and keep only the
+# line tables of the debug information (-g1, for the third-party code too). The programs and the sanitizers' reports
+# (function, file and line) are the same.
 if(GENKO_SANITIZE AND NOT MSVC)
+  set(CMAKE_C_FLAGS_DEBUG "-g1")
+  set(CMAKE_CXX_FLAGS_DEBUG "-g1")
   include(CheckLinkerFlag)
   check_linker_flag(CXX "LINKER:-z,pack-relative-relocs,--compress-debug-sections=zlib" GENKO_LINKER_PACKS)
 endif()
