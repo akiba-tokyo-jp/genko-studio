@@ -1,0 +1,6016 @@
+[
+ {
+  "name": "stdio_legacy",
+  "steps": [
+   {
+    "stdio": {
+     "lines": [
+      {
+       "jsonrpc": "2.0",
+       "id": 0,
+       "method": "tools/list"
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": "p",
+       "method": "ping"
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "1999-01-01",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "harness",
+         "version": "1"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "method": "notifications/initialized"
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 2,
+       "method": "tools/list",
+       "params": {
+        "cursor": "x"
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 3,
+       "method": "resources/read",
+       "params": {
+        "uri": "genko://guide/skill"
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 4,
+       "method": "prompts/get",
+       "params": {
+        "name": "nope"
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 5,
+       "method": "tools/call",
+       "params": {
+        "name": 5
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 6,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "arguments": [
+         1
+        ]
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 7,
+       "method": "resources/read",
+       "params": {}
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 8,
+       "method": "server/discover",
+       "params": {}
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 9,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": "x",
+        "clientInfo": {
+         "name": "harness",
+         "version": "1"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 10,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "_meta": {
+         "progressToken": "t1"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 11,
+       "method": "resources/subscribe",
+       "params": {
+        "uri": "x"
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 12,
+       "method": "logging/setLevel",
+       "params": {
+        "level": "info"
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 13,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 14,
+       "method": "ping",
+       "params": {
+        "_meta": "x"
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 15,
+       "method": "tools/call",
+       "params": {
+        "name": "status",
+        "arguments": {}
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 16,
+       "method": "tools/call",
+       "params": {
+        "name": "render",
+        "arguments": {
+         "project": "x",
+         "page": "abc",
+         "max_px": 3.5,
+         "frame_id": 7,
+         "session": "a/b"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 17,
+       "method": "tools/call",
+       "params": {
+        "name": "render",
+        "arguments": {
+         "project": "x",
+         "page": "3",
+         "session": "bad session"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 18,
+       "method": "tools/call",
+       "params": {
+        "name": "check",
+        "arguments": {
+         "project": "x",
+         "pages": "[1,\"2\",true, 3.0]"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 19,
+       "method": "tools/call",
+       "params": {
+        "name": "next",
+        "arguments": {
+         "project": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "limit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "claim": "maybe"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 20,
+       "method": "tools/call",
+       "params": {
+        "name": "create_project",
+        "arguments": {
+         "name": "book.genko",
+         "title": "題",
+         "pages": 2,
+         "spec_preset": "doujin-a5"
+        }
+       }
+      },
+      {
+       "await": [
+        20
+       ]
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 21,
+       "method": "tools/call",
+       "params": {
+        "name": "status",
+        "arguments": {
+         "project": "book.genko"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 22,
+       "method": "tools/call",
+       "params": {
+        "name": "nosuch",
+        "arguments": {}
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 23,
+       "method": "resources/list"
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 24,
+       "method": "resources/read",
+       "params": {
+        "uri": "genko://ops"
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 25,
+       "method": "resources/read",
+       "params": {
+        "uri": "genko://nope"
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 26,
+       "method": "resources/templates/list"
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 27,
+       "method": "prompts/list"
+      },
+      {
+       "raw": "{not json\n"
+      },
+      {
+       "raw": "\n"
+      },
+      {
+       "raw": "[1, 2]\n"
+      },
+      {
+       "raw": "{\"jsonrpc\": \"2.0\", \"id\": 28, \"method\": \"tools/call\", \"params\": {\"name\": \"status\", \"arguments\": {\"project\": \"ÿþ\"}}}\r"
+      },
+      {
+       "raw": "{\"jsonrpc\": \"1.0\", \"id\": 29, \"method\": \"ping\"}\n"
+      },
+      {
+       "raw": "{\"jsonrpc\": \"2.0\", \"id\": 30.0, \"method\": \"ping\"}\n"
+      },
+      {
+       "raw": "{\"jsonrpc\": \"2.0\", \"id\": true, \"method\": \"ping\"}\n"
+      },
+      {
+       "raw": "{\"jsonrpc\": \"2.0\", \"id\": 31, \"method\": \"ping\", \"params\": [1]}\n"
+      },
+      {
+       "raw": "{\"jsonrpc\": \"2.0\", \"id\": 32, \"result\": {}}\n"
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 33,
+       "method": "foo/bar"
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 34,
+       "method": "tools/call",
+       "params": {
+        "name": "inspect",
+        "arguments": {
+         "project": "book.genko",
+         "target": "page",
+         "page": 1
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 35,
+       "method": "tools/call",
+       "params": {
+        "name": "next",
+        "arguments": {
+         "project": "book.genko",
+         "limit": true,
+         "claim": 1
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 36,
+       "method": "tools/call",
+       "params": {
+        "name": "export_status",
+        "arguments": {
+         "project": "book.genko",
+         "job": "job_none",
+         "wait_s": "0"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 37,
+       "method": "tools/call",
+       "params": {
+        "name": "adopt",
+        "arguments": {
+         "project": "book.genko",
+         "candidate_id": "c",
+         "offset_mm": [
+          1,
+          "2",
+          "x"
+         ],
+         "scale": "2"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 38,
+       "method": "tools/call",
+       "params": {
+        "name": "adopt",
+        "arguments": {
+         "project": "book.genko",
+         "candidate_id": "c",
+         "offset_mm": "[1.5, \"2\"]",
+         "upscale": "no"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 39,
+       "method": "tools/call",
+       "params": {
+        "name": "next",
+        "arguments": {
+         "project": "book.genko",
+         "limit": "12_3"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 40,
+       "method": "tools/call",
+       "params": {
+        "name": "check",
+        "arguments": {
+         "project": "book.genko",
+         "pages": "null"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 41,
+       "method": "tools/call",
+       "params": {
+        "name": "use_style",
+        "arguments": {
+         "project": "book.genko"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 42,
+       "method": "tools/call",
+       "params": {
+        "name": "apply_ops",
+        "arguments": {
+         "project": "book.genko",
+         "ops": [
+          {
+           "op": "approve",
+           "gate": "name",
+           "page": 1
+          }
+         ],
+         "commit": true
+        }
+       }
+      }
+     ],
+     "wait": [
+      0,
+      "p",
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      28
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "stdio_modern",
+  "steps": [
+   {
+    "stdio": {
+     "lines": [
+      {
+       "jsonrpc": "2.0",
+       "method": "notifications/initialized"
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "server/discover",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 2,
+       "method": "tools/list",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 3,
+       "method": "resources/list",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 4,
+       "method": "resources/read",
+       "params": {
+        "uri": "genko://guide/manga-rules",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 5,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "arguments": {},
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 6,
+       "method": "ping",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 7,
+       "method": "tools/list"
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 8,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "harness",
+         "version": "1"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 9,
+       "method": "resources/read",
+       "params": {
+        "uri": "genko://nope",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 10,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2099-01-01",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 11,
+       "method": "resources/templates/list",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 12,
+       "method": "prompts/list",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 13,
+       "method": "prompts/get",
+       "params": {
+        "name": "x",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 14,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 15,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": 5,
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 16,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": 5,
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 17,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": 5
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 18,
+       "method": "logging/setLevel",
+       "params": {
+        "level": "info",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 19,
+       "method": "foo/bar",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 20,
+       "method": "tools/call",
+       "params": {
+        "name": "status",
+        "arguments": {
+         "project": "x"
+        },
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 21,
+       "method": "tools/call",
+       "params": {
+        "name": 5,
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 22,
+       "method": "tools/list",
+       "params": {
+        "cursor": 5,
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 23,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         },
+         "progressToken": 1.5
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 24,
+       "method": "tools/call",
+       "params": {
+        "name": "create_project",
+        "arguments": {
+         "name": "book.genko",
+         "title": "t",
+         "pages": 1,
+         "spec_preset": "doujin-a5"
+        },
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      },
+      {
+       "await": [
+        24
+       ]
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 25,
+       "method": "tools/call",
+       "params": {
+        "name": "render",
+        "arguments": {
+         "project": "book.genko",
+         "page": 1,
+         "max_px": 120
+        },
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      }
+     ],
+     "wait": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "stdio_cancel",
+  "steps": [
+   {
+    "write": "book.genko/.keep",
+    "text": ""
+   },
+   {
+    "stdio": {
+     "lines": [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "harness",
+         "version": "1"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 2,
+       "method": "tools/call",
+       "params": {
+        "name": "create_project",
+        "arguments": {
+         "name": "book.genko",
+         "title": "t",
+         "pages": 1,
+         "spec_preset": "doujin-a5"
+        }
+       }
+      }
+     ],
+     "wait": [
+      2
+     ]
+    }
+   },
+   {
+    "job_record": "book.genko",
+    "id": "job_slow",
+    "status": "running"
+   },
+   {
+    "stdio": {
+     "lines": [
+      {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "harness",
+         "version": "1"
+        }
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "method": "notifications/initialized"
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 2,
+       "method": "tools/call",
+       "params": {
+        "name": "export_status",
+        "arguments": {
+         "project": "book.genko",
+         "job": "job_slow",
+         "wait_s": 3
+        }
+       }
+      },
+      {
+       "sleep": 0.5
+      },
+      {
+       "jsonrpc": "2.0",
+       "method": "notifications/cancelled",
+       "params": {
+        "requestId": 2,
+        "reason": "user"
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 3,
+       "method": "ping"
+      },
+      {
+       "jsonrpc": "2.0",
+       "method": "notifications/cancelled",
+       "params": {
+        "requestId": 99
+       }
+      },
+      {
+       "jsonrpc": "2.0",
+       "id": 4,
+       "method": "tools/call",
+       "params": {
+        "name": "export_status",
+        "arguments": {
+         "project": "book.genko",
+         "job": "job_slow",
+         "wait_s": 1.5
+        }
+       }
+      }
+     ],
+     "wait": [
+      3
+     ],
+     "silent": [
+      2,
+      4
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "http_raw",
+  "steps": [
+   {
+    "http": [
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 1,
+       "method": "initialize",
+       "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+         "name": "harness",
+         "version": "1"
+        }
+       }
+      },
+      "session": "keep"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "method": "notifications/initialized"
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 2,
+       "method": "tools/list"
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 3,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "arguments": {}
+       }
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 4,
+       "method": "tools/call",
+       "params": {
+        "name": "status",
+        "arguments": {
+         "project": "x"
+        }
+       }
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 5,
+       "method": "ping"
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "Mcp-Session-Id": "nope"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 6,
+       "method": "ping"
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 7,
+       "method": "ping"
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "text/plain",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 8,
+       "method": "ping"
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "Host": "evil.example:80"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 9,
+       "method": "ping"
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "Origin": "http://evil.example"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 10,
+       "method": "ping"
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "Origin": "http://localhost:3000"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 11,
+       "method": "ping"
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "declare": 5242880,
+      "session": "use"
+     },
+     {
+      "method": "PUT",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 12,
+       "method": "ping"
+      },
+      "session": "use"
+     },
+     {
+      "method": "GET",
+      "headers": {
+       "Accept": "text/event-stream"
+      },
+      "session": "use",
+      "stream": "head",
+      "hold": true
+     },
+     {
+      "method": "GET",
+      "headers": {
+       "Accept": "text/event-stream"
+      },
+      "session": "use"
+     },
+     {
+      "method": "GET",
+      "headers": {
+       "Accept": "application/json"
+      },
+      "session": "use",
+      "release": true
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 13,
+       "method": "resources/read",
+       "params": {
+        "uri": "genko://nope"
+       }
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "path": "/other",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 14,
+       "method": "ping"
+      },
+      "session": "use"
+     },
+     {
+      "method": "DELETE",
+      "headers": {},
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 15,
+       "method": "ping"
+      },
+      "session": "use"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28",
+       "Mcp-Method": "server/discover"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 20,
+       "method": "server/discover",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28",
+       "Mcp-Method": "tools/call",
+       "Mcp-Name": "projects"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 21,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "arguments": {},
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 22,
+       "method": "tools/list",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28",
+       "Mcp-Method": "foo/bar"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 23,
+       "method": "foo/bar",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28",
+       "Mcp-Method": "tools/call",
+       "Mcp-Name": "other"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 24,
+       "method": "tools/call",
+       "params": {
+        "name": "projects",
+        "arguments": {},
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28",
+       "Mcp-Method": "notifications/initialized"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "method": "notifications/initialized"
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28",
+       "Mcp-Method": "tools/list"
+      },
+      "raw": "{not json"
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28",
+       "Mcp-Method": "tools/list"
+      },
+      "body": [
+       {
+        "jsonrpc": "2.0",
+        "id": 25,
+        "method": "tools/list",
+        "params": {
+         "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {},
+          "io.modelcontextprotocol/clientInfo": {
+           "name": "harness",
+           "version": "1"
+          }
+         }
+        }
+       }
+      ]
+     },
+     {
+      "method": "GET",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28"
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json",
+       "MCP-Protocol-Version": "2026-07-28"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 26,
+       "method": "tools/list",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28",
+       "Mcp-Method": "resources/read",
+       "Mcp-Name": "genko://nope"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 27,
+       "method": "resources/read",
+       "params": {
+        "uri": "genko://nope",
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2099-01-01",
+       "Mcp-Method": "tools/list"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 28,
+       "method": "tools/list",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2099-01-01",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      }
+     },
+     {
+      "method": "POST",
+      "headers": {
+       "Content-Type": "application/json",
+       "Accept": "application/json, text/event-stream",
+       "MCP-Protocol-Version": "2026-07-28",
+       "Mcp-Method": "ping"
+      },
+      "body": {
+       "jsonrpc": "2.0",
+       "id": 29,
+       "method": "ping",
+       "params": {
+        "_meta": {
+         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+         "io.modelcontextprotocol/clientCapabilities": {},
+         "io.modelcontextprotocol/clientInfo": {
+          "name": "harness",
+          "version": "1"
+         }
+        }
+       }
+      }
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "api",
+  "allow_origins": [
+   "http://ok.example"
+  ],
+  "steps": [
+   {
+    "write": "../secret/secret.png",
+    "base64": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAAHElEQVR4nGM8oaHBQA3ARBVTRg0aNWjUoBFsEABJywE4xZmKkAAAAABJRU5ErkJggg=="
+   },
+   {
+    "symlink": "link_out",
+    "to": "../secret"
+   },
+   {
+    "write": "api.genko/studio/requests/rq_t/request.json",
+    "text": "{}"
+   },
+   {
+    "write": "api.genko/studio/requests/rq_t/guide.png",
+    "base64": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAAHElEQVR4nGM8oaHBQA3ARBVTRg0aNWjUoBFsEABJywE4xZmKkAAAAABJRU5ErkJggg=="
+   },
+   {
+    "write": "api.genko/studio/private.txt",
+    "text": "not a request's"
+   },
+   {
+    "symlink": "api.genko/studio/requests/rq_t/out.png",
+    "to": "../../../../../secret/secret.png"
+   },
+   {
+    "api": [
+     {
+      "method": "GET",
+      "path": "/health",
+      "token": null
+     },
+     {
+      "method": "GET",
+      "path": "/schema",
+      "token": null
+     },
+     {
+      "method": "GET",
+      "path": "/schema",
+      "token": "nope"
+     },
+     {
+      "method": "GET",
+      "path": "/schema",
+      "headers": {
+       "Authorization": "bearer tok-ai"
+      },
+      "token": null
+     },
+     {
+      "method": "GET",
+      "path": "/openapi.json"
+     },
+     {
+      "method": "GET",
+      "path": "/health",
+      "token": null,
+      "headers": {
+       "Host": "evil.example"
+      }
+     },
+     {
+      "method": "GET",
+      "path": "/health",
+      "token": null,
+      "headers": {
+       "Host": null
+      }
+     },
+     {
+      "method": "GET",
+      "path": "/health",
+      "token": null,
+      "headers": {
+       "Origin": "http://evil.example"
+      }
+     },
+     {
+      "method": "GET",
+      "path": "/health",
+      "token": null,
+      "headers": {
+       "Origin": "http://ok.example"
+      }
+     },
+     {
+      "method": "OPTIONS",
+      "path": "/v1/new",
+      "token": null,
+      "headers": {
+       "Origin": "http://ok.example"
+      }
+     },
+     {
+      "method": "OPTIONS",
+      "path": "/v1/new",
+      "token": null,
+      "headers": {
+       "Origin": "http://evil.example"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "json": {
+       "dest": "api.genko",
+       "title": "API",
+       "pages": 2
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "json": {
+       "dest": "../escape.genko"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "json": {
+       "dest": "/etc/escape.genko"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "json": {
+       "dest": "a%2F..%2F..%2Fescape.genko"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "json": {
+       "title": "no dest"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "json": {
+       "dest": "n.genko",
+       "pages": "x"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "text": "{not json",
+      "headers": {
+       "Content-Type": "application/json"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "text": "[1]",
+      "headers": {
+       "Content-Type": "application/json"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "json": {
+       "dest": "x.genko"
+      },
+      "headers": {
+       "Content-Type": "text/plain"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/new",
+      "declare": 67108865,
+      "headers": {
+       "Content-Type": "application/json"
+      }
+     },
+     {
+      "method": "GET",
+      "path": "/v1/inspect?path=api.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/inspect?path=api.genko&full=1"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/inspect?path=nope.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/inspect?path=..%2F"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/inspect"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/inspect?path=link_out"
+     },
+     {
+      "method": "POST",
+      "path": "/v1/assets?path=link_out",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAAHElEQVR4nGM8oaHBQA3ARBVTRg0aNWjUoBFsEABJywE4xZmKkAAAAABJRU5ErkJggg==",
+      "headers": {
+       "Content-Type": "image/png"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/export",
+      "json": {
+       "path": "api.genko",
+       "out": "link_out/x"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "add_line",
+         "page": 1,
+         "text": "こんにちは",
+         "x_mm": 30,
+         "y_mm": 40
+        }
+       ]
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "set_note",
+         "page": 1,
+         "text": "x"
+        }
+       ],
+       "dry_run": true
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "set_note",
+         "page": 1,
+         "text": "x"
+        }
+       ],
+       "expect_revision": 99
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "name_ok",
+         "page": 1
+        }
+       ]
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "allow_chat_approval",
+         "on": false
+        }
+       ]
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "lock_page",
+         "page": 2
+        }
+       ]
+      },
+      "token": "tok-human"
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "set_note",
+         "page": 2,
+         "text": "ai"
+        }
+       ]
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "unlock_page",
+         "page": 2
+        }
+       ]
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "undo"
+        }
+       ]
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "put_raster",
+         "page": 1,
+         "path": "/etc/passwd"
+        }
+       ]
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "set_meta",
+         "font_path": "../x.ttf"
+        }
+       ]
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": [
+        {
+         "op": "put_raster",
+         "page": 1,
+         "path": "link_out/secret.png"
+        }
+       ]
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": "abc"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko",
+       "ops": 5
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/apply",
+      "json": {
+       "path": "api.genko"
+      }
+     },
+     {
+      "method": "GET",
+      "path": "/v1/pages/1.png?path=api.genko&dpi=40"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/pages/1.png?path=api.genko&dpi=4000"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/pages/9.png?path=api.genko&dpi=40"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/pages/x.png?path=api.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/spreads/1-2.png?path=api.genko&dpi=36"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/spreads/1.png?path=api.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/pages/1/frames/nope.png?path=api.genko&dpi=40"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/pages/7/frames/nope.png?path=api.genko&dpi=40"
+     },
+     {
+      "method": "POST",
+      "path": "/v1/export",
+      "json": {
+       "path": "api.genko",
+       "out": "out1",
+       "format": "png",
+       "dpi": 40
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/export",
+      "json": {
+       "path": "api.genko",
+       "out": "out2",
+       "format": "gif"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/export",
+      "json": {
+       "path": "api.genko",
+       "out": "../out3"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/assets?path=api.genko",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAAHElEQVR4nGM8oaHBQA3ARBVTRg0aNWjUoBFsEABJywE4xZmKkAAAAABJRU5ErkJggg==",
+      "headers": {
+       "Content-Type": "image/png"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/assets?path=api.genko",
+      "text": "PK\u0003\u0004 not an image",
+      "headers": {
+       "Content-Type": "image/png"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/assets?path=api.genko",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAAHElEQVR4nGM8oaHBQA3ARBVTRg0aNWjUoBFsEABJywE4xZmKkAAAAABJRU5ErkJggg==",
+      "headers": {
+       "Content-Type": "application/json"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/assets?path=nope.genko",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAAHElEQVR4nGM8oaHBQA3ARBVTRg0aNWjUoBFsEABJywE4xZmKkAAAAABJRU5ErkJggg==",
+      "headers": {
+       "Content-Type": "image/png"
+      }
+     },
+     {
+      "method": "POST",
+      "path": "/v1/assets?path=..%2Fx",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAAHElEQVR4nGM8oaHBQA3ARBVTRg0aNWjUoBFsEABJywE4xZmKkAAAAABJRU5ErkJggg==",
+      "headers": {
+       "Content-Type": "image/png"
+      }
+     },
+     {
+      "method": "GET",
+      "path": "/v1/requests/rq_x/files/a.png?path=api.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/requests/rq_t/files/guide.png?path=api.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/requests/rq_t/files/..%2F..%2Fprivate.txt?path=api.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/requests/rq_t/files/../../private.txt?path=api.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/requests/rq_t/files/%2E%2E/request.json?path=api.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/requests/rq_t/files/out.png?path=api.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/requests/..%2Frq_t/files/guide.png?path=api.genko"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/requests/rq_t/files/guide.png?path=link_out"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/jobs/nope"
+     },
+     {
+      "method": "GET",
+      "path": "/v1/nope"
+     },
+     {
+      "method": "DELETE",
+      "path": "/v1/new"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "client_stdio_auto",
+  "steps": [
+   {
+    "client": {
+     "transport": "stdio",
+     "mode": "auto",
+     "ops": [
+      {
+       "op": "info"
+      },
+      {
+       "op": "list_tools"
+      },
+      {
+       "op": "list_resources"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://ops"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/skill"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/drawing"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/manga-rules"
+      },
+      {
+       "op": "ping"
+      },
+      {
+       "op": "call",
+       "name": "projects"
+      },
+      {
+       "op": "call",
+       "name": "create_project",
+       "args": {
+        "name": "book.genko",
+        "title": "試験",
+        "pages": 2,
+        "spec_preset": "doujin-a5"
+       }
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "set_bible",
+       "args": {
+        "project": "book.genko",
+        "bible": {
+         "title": "夏の午後の約束",
+         "logline": "5年前の約束を果たすため、幼馴染が夏の屋上に来る。",
+         "plot": "転校していったソラと、屋上で会う約束をしていたひな。5年後の同じ日、ひなは半信半疑で屋上に上がる。",
+         "themes": [
+          "約束",
+          "再会"
+         ],
+         "characters": [
+          {
+           "id": "hina",
+           "name": "日向ひな",
+           "role": "heroine",
+           "age": 16,
+           "look": {
+            "hair": "肩までのストレート、横に流した前髪",
+            "hair_value": "beta",
+            "eyes": "大きく、やや垂れ目",
+            "build": "細身",
+            "height_cm": 156,
+            "outfits": [
+             {
+              "id": "default",
+              "desc": "半袖のセーラー服"
+             }
+            ],
+            "marks": [
+             "左側に星形の髪留め"
+            ],
+            "silhouette": "髪留め + 前髪"
+           },
+           "speech": {
+            "first_person": "わたし",
+            "tone": "丁寧語まじり"
+           },
+           "tokens_en": "a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip"
+          },
+          {
+           "id": "sora",
+           "name": "天野ソラ",
+           "role": "hero",
+           "age": 16,
+           "look": {
+            "hair": "短い癖毛",
+            "hair_value": "white",
+            "eyes": "切れ長",
+            "build": "やや長身",
+            "height_cm": 172,
+            "outfits": [
+             {
+              "id": "default",
+              "desc": "学ランの前を開けている"
+             }
+            ],
+            "marks": [],
+            "silhouette": "癖毛 + 開いた学ラン"
+           },
+           "speech": {
+            "first_person": "俺",
+            "tone": "ぶっきらぼう"
+           },
+           "tokens_en": null
+          }
+         ],
+         "locations": [
+          {
+           "id": "loc_rooftop",
+           "name": "校舎の屋上",
+           "desc": "フェンスと給水塔のある屋上",
+           "times": [
+            "sunset"
+           ]
+          }
+         ],
+         "style": {
+          "notes": [
+           "背景は描き込みすぎない"
+          ]
+         },
+         "constraints": [
+          "台詞・効果音を画像に描かない"
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "set_script",
+       "args": {
+        "project": "book.genko",
+        "script": {
+         "scenes": [
+          {
+           "id": "sc_01",
+           "summary": "ひなが屋上に上がる",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "beats": [
+            {
+             "id": "b01",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "夕方の屋上。ひなが扉を開ける",
+             "emotion": "緊張",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b02",
+             "kind": "narration",
+             "speaker_id": null,
+             "text": "5年前の今日、ここで約束した",
+             "emotion": "郷愁",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b03",
+             "kind": "monologue",
+             "speaker_id": "hina",
+             "text": "…来るわけないよね",
+             "emotion": "諦め",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b04",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "誰もいない屋上。フェンスの向こうに夕日",
+             "emotion": "寂しさ",
+             "page": 2,
+             "reveal": false
+            },
+            {
+             "id": "b05",
+             "kind": "dialogue",
+             "speaker_id": "sora",
+             "text": "遅いぞ",
+             "emotion": "照れ",
+             "page": 2,
+             "reveal": true
+            },
+            {
+             "id": "b06",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "給水塔の上にソラが座っている",
+             "emotion": "驚き",
+             "page": 2,
+             "reveal": false
+            }
+           ]
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 1,
+         "turn_role": "normal",
+         "template": null,
+         "tiers": [
+          {
+           "h": 0.35,
+           "cols": [
+            {
+             "slot": "p1",
+             "w": 1.0,
+             "rows": null
+            }
+           ]
+          },
+          {
+           "h": 0.65,
+           "cols": [
+            {
+             "slot": "p2",
+             "w": 0.55,
+             "rows": null
+            },
+            {
+             "slot": "p3",
+             "w": 0.45,
+             "rows": null
+            }
+           ]
+          }
+         ],
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "LS",
+           "angle": "high",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "扉を開ける",
+             "expression": "緊張",
+             "facing": "left",
+             "pos": "right",
+             "scale": 0.4
+            }
+           ],
+           "action": "屋上の扉を開ける",
+           "emotion": "緊張",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b01",
+            "b02"
+           ],
+           "lines": [
+            {
+             "beat_id": "b02",
+             "balloon": "narration",
+             "breaks": [
+              "5年前の今日",
+              "ここで約束した"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p2",
+           "shot": "MS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "立ち止まる",
+             "expression": "不安",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.8
+            }
+           ],
+           "action": "屋上を見回す",
+           "emotion": "不安",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [],
+           "lines": []
+          },
+          {
+           "slot": "p3",
+           "shot": "CU",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "うつむく",
+             "expression": "諦め",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.9
+            }
+           ],
+           "action": "うつむく",
+           "emotion": "諦め",
+           "fx": [],
+           "emphasis": 0.5,
+           "cross": false,
+           "beat_ids": [
+            "b03"
+           ],
+           "lines": [
+            {
+             "beat_id": "b03",
+             "balloon": "thought",
+             "breaks": [
+              "…来るわけ",
+              "ないよね"
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 1,
+         "turn_role": "normal",
+         "template": null,
+         "tiers": [
+          {
+           "h": 0.35,
+           "cols": [
+            {
+             "slot": "p1",
+             "w": 1.0,
+             "rows": null
+            }
+           ]
+          },
+          {
+           "h": 0.65,
+           "cols": [
+            {
+             "slot": "p2",
+             "w": 0.55,
+             "rows": null
+            },
+            {
+             "slot": "p3",
+             "w": 0.45,
+             "rows": null
+            }
+           ]
+          }
+         ],
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "LS",
+           "angle": "high",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "扉を開ける",
+             "expression": "緊張",
+             "facing": "left",
+             "pos": "right",
+             "scale": 0.4
+            }
+           ],
+           "action": "屋上の扉を開ける",
+           "emotion": "緊張",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b01",
+            "b02"
+           ],
+           "lines": [
+            {
+             "beat_id": "b02",
+             "balloon": "narration",
+             "breaks": [
+              "5年前の今日",
+              "ここで約束した"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p2",
+           "shot": "MS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "立ち止まる",
+             "expression": "不安",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.8
+            }
+           ],
+           "action": "屋上を見回す",
+           "emotion": "不安",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [],
+           "lines": []
+          },
+          {
+           "slot": "p3",
+           "shot": "CU",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "うつむく",
+             "expression": "諦め",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.9
+            }
+           ],
+           "action": "うつむく",
+           "emotion": "諦め",
+           "fx": [],
+           "emphasis": 0.5,
+           "cross": false,
+           "beat_ids": [
+            "b03"
+           ],
+           "lines": [
+            {
+             "beat_id": "b03",
+             "balloon": "thought",
+             "breaks": [
+              "…来るわけ",
+              "ないよね"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 2,
+         "turn_role": "reveal",
+         "template": "climax_wide",
+         "tiers": null,
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "ELS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [],
+           "action": "誰もいない屋上とフェンスの向こうの夕日",
+           "emotion": "寂しさ",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b04"
+           ],
+           "lines": []
+          },
+          {
+           "slot": "p2",
+           "shot": "INSERT",
+           "angle": "low",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [],
+           "action": "給水塔の上から声が降ってくる",
+           "emotion": "驚き",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [
+            "b05"
+           ],
+           "lines": [
+            {
+             "beat_id": "b05",
+             "balloon": "speech",
+             "breaks": [
+              "遅いぞ"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p3",
+           "shot": "FS",
+           "angle": "low",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "sora",
+             "pose": "給水塔の上に座る",
+             "expression": "照れ笑い",
+             "facing": "left",
+             "pos": "right_third",
+             "scale": 0.6
+            },
+            {
+             "id": "hina",
+             "pose": "見上げる",
+             "expression": "驚き",
+             "facing": "right",
+             "pos": "left",
+             "scale": 0.5
+            }
+           ],
+           "action": "給水塔の上にソラが座っている",
+           "emotion": "驚き",
+           "fx": [
+            "focus"
+           ],
+           "emphasis": 0.9,
+           "cross": false,
+           "beat_ids": [
+            "b06"
+           ],
+           "lines": []
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "next",
+       "args": {
+        "project": "book.genko",
+        "limit": 2
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": 1,
+        "max_px": 300
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": 2,
+        "mode": "print",
+        "max_px": 200
+       }
+      },
+      {
+       "op": "call",
+       "name": "inspect",
+       "args": {
+        "project": "book.genko",
+        "target": "snapshot",
+        "page": 1
+       }
+      },
+      {
+       "op": "call",
+       "name": "check",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "preflight",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "tickets",
+       "args": {
+        "project": "book.genko",
+        "status": "all"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "cli": [
+     "studio",
+     "chat-approval",
+     "$root/book.genko",
+     "off",
+     "--as",
+     "human:owner"
+    ]
+   },
+   {
+    "client": {
+     "transport": "stdio",
+     "mode": "auto",
+     "ops": [
+      {
+       "op": "info"
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "approve",
+          "gate": "name",
+          "page": 1
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "lock_page",
+          "page": 1
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "allow_chat_approval",
+          "on": true
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "record_chat_approval",
+       "args": {
+        "project": "book.genko",
+        "gate": "name",
+        "message": "OK",
+        "pages": [
+         1
+        ],
+        "person": "owner"
+       }
+      },
+      {
+       "op": "call",
+       "name": "request_approval",
+       "args": {
+        "project": "book.genko",
+        "pages": [
+         1,
+         2
+        ],
+        "gate": "name",
+        "note": "見てください"
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_note",
+          "page": 1,
+          "note": "s1 のメモ"
+         }
+        ],
+        "commit": true,
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_note",
+          "page": 1,
+          "note": "s1 のメモ"
+         }
+        ],
+        "commit": true,
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "nope.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": "abc"
+       }
+      },
+      {
+       "op": "call",
+       "name": "nosuch"
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "book.genko",
+        "session": "a b"
+       }
+      },
+      {
+       "op": "call",
+       "name": "export",
+       "args": {
+        "project": "book.genko",
+        "format": "png",
+        "pages": [
+         1
+        ],
+        "dpi": 72
+       }
+      }
+     ]
+    }
+   },
+   {
+    "job_record": "book.genko",
+    "id": "job_slow",
+    "status": "running"
+   },
+   {
+    "job_record": "book.genko",
+    "id": "job_done",
+    "status": "done",
+    "result": {
+     "ok": true,
+     "files": [
+      "a.png"
+     ],
+     "issues": []
+    }
+   },
+   {
+    "client": {
+     "transport": "stdio",
+     "mode": "auto",
+     "ops": [
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_done",
+        "wait_s": 0
+       }
+      },
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_slow",
+        "wait_s": 0
+       }
+      },
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_none"
+       }
+      },
+      {
+       "op": "cancel",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_slow",
+        "wait_s": 3
+       },
+       "after": 0.5
+      },
+      {
+       "op": "call",
+       "name": "projects"
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s2"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s2"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "cli": [
+     "studio",
+     "comment",
+     "$root/book.genko",
+     "セリフを短く",
+     "--page",
+     "1",
+     "--as",
+     "human:owner"
+    ]
+   },
+   {
+    "client": {
+     "transport": "stdio",
+     "mode": "auto",
+     "ops": [
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "tickets",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "files": "book.genko"
+   }
+  ]
+ },
+ {
+  "name": "client_stdio_legacy",
+  "steps": [
+   {
+    "client": {
+     "transport": "stdio",
+     "mode": "legacy",
+     "ops": [
+      {
+       "op": "info"
+      },
+      {
+       "op": "list_tools"
+      },
+      {
+       "op": "list_resources"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://ops"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/skill"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/drawing"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/manga-rules"
+      },
+      {
+       "op": "ping"
+      },
+      {
+       "op": "call",
+       "name": "projects"
+      },
+      {
+       "op": "call",
+       "name": "create_project",
+       "args": {
+        "name": "book.genko",
+        "title": "試験",
+        "pages": 2,
+        "spec_preset": "doujin-a5"
+       }
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "set_bible",
+       "args": {
+        "project": "book.genko",
+        "bible": {
+         "title": "夏の午後の約束",
+         "logline": "5年前の約束を果たすため、幼馴染が夏の屋上に来る。",
+         "plot": "転校していったソラと、屋上で会う約束をしていたひな。5年後の同じ日、ひなは半信半疑で屋上に上がる。",
+         "themes": [
+          "約束",
+          "再会"
+         ],
+         "characters": [
+          {
+           "id": "hina",
+           "name": "日向ひな",
+           "role": "heroine",
+           "age": 16,
+           "look": {
+            "hair": "肩までのストレート、横に流した前髪",
+            "hair_value": "beta",
+            "eyes": "大きく、やや垂れ目",
+            "build": "細身",
+            "height_cm": 156,
+            "outfits": [
+             {
+              "id": "default",
+              "desc": "半袖のセーラー服"
+             }
+            ],
+            "marks": [
+             "左側に星形の髪留め"
+            ],
+            "silhouette": "髪留め + 前髪"
+           },
+           "speech": {
+            "first_person": "わたし",
+            "tone": "丁寧語まじり"
+           },
+           "tokens_en": "a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip"
+          },
+          {
+           "id": "sora",
+           "name": "天野ソラ",
+           "role": "hero",
+           "age": 16,
+           "look": {
+            "hair": "短い癖毛",
+            "hair_value": "white",
+            "eyes": "切れ長",
+            "build": "やや長身",
+            "height_cm": 172,
+            "outfits": [
+             {
+              "id": "default",
+              "desc": "学ランの前を開けている"
+             }
+            ],
+            "marks": [],
+            "silhouette": "癖毛 + 開いた学ラン"
+           },
+           "speech": {
+            "first_person": "俺",
+            "tone": "ぶっきらぼう"
+           },
+           "tokens_en": null
+          }
+         ],
+         "locations": [
+          {
+           "id": "loc_rooftop",
+           "name": "校舎の屋上",
+           "desc": "フェンスと給水塔のある屋上",
+           "times": [
+            "sunset"
+           ]
+          }
+         ],
+         "style": {
+          "notes": [
+           "背景は描き込みすぎない"
+          ]
+         },
+         "constraints": [
+          "台詞・効果音を画像に描かない"
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "set_script",
+       "args": {
+        "project": "book.genko",
+        "script": {
+         "scenes": [
+          {
+           "id": "sc_01",
+           "summary": "ひなが屋上に上がる",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "beats": [
+            {
+             "id": "b01",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "夕方の屋上。ひなが扉を開ける",
+             "emotion": "緊張",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b02",
+             "kind": "narration",
+             "speaker_id": null,
+             "text": "5年前の今日、ここで約束した",
+             "emotion": "郷愁",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b03",
+             "kind": "monologue",
+             "speaker_id": "hina",
+             "text": "…来るわけないよね",
+             "emotion": "諦め",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b04",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "誰もいない屋上。フェンスの向こうに夕日",
+             "emotion": "寂しさ",
+             "page": 2,
+             "reveal": false
+            },
+            {
+             "id": "b05",
+             "kind": "dialogue",
+             "speaker_id": "sora",
+             "text": "遅いぞ",
+             "emotion": "照れ",
+             "page": 2,
+             "reveal": true
+            },
+            {
+             "id": "b06",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "給水塔の上にソラが座っている",
+             "emotion": "驚き",
+             "page": 2,
+             "reveal": false
+            }
+           ]
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 1,
+         "turn_role": "normal",
+         "template": null,
+         "tiers": [
+          {
+           "h": 0.35,
+           "cols": [
+            {
+             "slot": "p1",
+             "w": 1.0,
+             "rows": null
+            }
+           ]
+          },
+          {
+           "h": 0.65,
+           "cols": [
+            {
+             "slot": "p2",
+             "w": 0.55,
+             "rows": null
+            },
+            {
+             "slot": "p3",
+             "w": 0.45,
+             "rows": null
+            }
+           ]
+          }
+         ],
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "LS",
+           "angle": "high",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "扉を開ける",
+             "expression": "緊張",
+             "facing": "left",
+             "pos": "right",
+             "scale": 0.4
+            }
+           ],
+           "action": "屋上の扉を開ける",
+           "emotion": "緊張",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b01",
+            "b02"
+           ],
+           "lines": [
+            {
+             "beat_id": "b02",
+             "balloon": "narration",
+             "breaks": [
+              "5年前の今日",
+              "ここで約束した"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p2",
+           "shot": "MS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "立ち止まる",
+             "expression": "不安",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.8
+            }
+           ],
+           "action": "屋上を見回す",
+           "emotion": "不安",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [],
+           "lines": []
+          },
+          {
+           "slot": "p3",
+           "shot": "CU",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "うつむく",
+             "expression": "諦め",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.9
+            }
+           ],
+           "action": "うつむく",
+           "emotion": "諦め",
+           "fx": [],
+           "emphasis": 0.5,
+           "cross": false,
+           "beat_ids": [
+            "b03"
+           ],
+           "lines": [
+            {
+             "beat_id": "b03",
+             "balloon": "thought",
+             "breaks": [
+              "…来るわけ",
+              "ないよね"
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 1,
+         "turn_role": "normal",
+         "template": null,
+         "tiers": [
+          {
+           "h": 0.35,
+           "cols": [
+            {
+             "slot": "p1",
+             "w": 1.0,
+             "rows": null
+            }
+           ]
+          },
+          {
+           "h": 0.65,
+           "cols": [
+            {
+             "slot": "p2",
+             "w": 0.55,
+             "rows": null
+            },
+            {
+             "slot": "p3",
+             "w": 0.45,
+             "rows": null
+            }
+           ]
+          }
+         ],
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "LS",
+           "angle": "high",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "扉を開ける",
+             "expression": "緊張",
+             "facing": "left",
+             "pos": "right",
+             "scale": 0.4
+            }
+           ],
+           "action": "屋上の扉を開ける",
+           "emotion": "緊張",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b01",
+            "b02"
+           ],
+           "lines": [
+            {
+             "beat_id": "b02",
+             "balloon": "narration",
+             "breaks": [
+              "5年前の今日",
+              "ここで約束した"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p2",
+           "shot": "MS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "立ち止まる",
+             "expression": "不安",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.8
+            }
+           ],
+           "action": "屋上を見回す",
+           "emotion": "不安",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [],
+           "lines": []
+          },
+          {
+           "slot": "p3",
+           "shot": "CU",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "うつむく",
+             "expression": "諦め",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.9
+            }
+           ],
+           "action": "うつむく",
+           "emotion": "諦め",
+           "fx": [],
+           "emphasis": 0.5,
+           "cross": false,
+           "beat_ids": [
+            "b03"
+           ],
+           "lines": [
+            {
+             "beat_id": "b03",
+             "balloon": "thought",
+             "breaks": [
+              "…来るわけ",
+              "ないよね"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 2,
+         "turn_role": "reveal",
+         "template": "climax_wide",
+         "tiers": null,
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "ELS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [],
+           "action": "誰もいない屋上とフェンスの向こうの夕日",
+           "emotion": "寂しさ",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b04"
+           ],
+           "lines": []
+          },
+          {
+           "slot": "p2",
+           "shot": "INSERT",
+           "angle": "low",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [],
+           "action": "給水塔の上から声が降ってくる",
+           "emotion": "驚き",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [
+            "b05"
+           ],
+           "lines": [
+            {
+             "beat_id": "b05",
+             "balloon": "speech",
+             "breaks": [
+              "遅いぞ"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p3",
+           "shot": "FS",
+           "angle": "low",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "sora",
+             "pose": "給水塔の上に座る",
+             "expression": "照れ笑い",
+             "facing": "left",
+             "pos": "right_third",
+             "scale": 0.6
+            },
+            {
+             "id": "hina",
+             "pose": "見上げる",
+             "expression": "驚き",
+             "facing": "right",
+             "pos": "left",
+             "scale": 0.5
+            }
+           ],
+           "action": "給水塔の上にソラが座っている",
+           "emotion": "驚き",
+           "fx": [
+            "focus"
+           ],
+           "emphasis": 0.9,
+           "cross": false,
+           "beat_ids": [
+            "b06"
+           ],
+           "lines": []
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "next",
+       "args": {
+        "project": "book.genko",
+        "limit": 2
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": 1,
+        "max_px": 300
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": 2,
+        "mode": "print",
+        "max_px": 200
+       }
+      },
+      {
+       "op": "call",
+       "name": "inspect",
+       "args": {
+        "project": "book.genko",
+        "target": "snapshot",
+        "page": 1
+       }
+      },
+      {
+       "op": "call",
+       "name": "check",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "preflight",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "tickets",
+       "args": {
+        "project": "book.genko",
+        "status": "all"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "cli": [
+     "studio",
+     "chat-approval",
+     "$root/book.genko",
+     "off",
+     "--as",
+     "human:owner"
+    ]
+   },
+   {
+    "client": {
+     "transport": "stdio",
+     "mode": "legacy",
+     "ops": [
+      {
+       "op": "info"
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "approve",
+          "gate": "name",
+          "page": 1
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "lock_page",
+          "page": 1
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "allow_chat_approval",
+          "on": true
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "record_chat_approval",
+       "args": {
+        "project": "book.genko",
+        "gate": "name",
+        "message": "OK",
+        "pages": [
+         1
+        ],
+        "person": "owner"
+       }
+      },
+      {
+       "op": "call",
+       "name": "request_approval",
+       "args": {
+        "project": "book.genko",
+        "pages": [
+         1,
+         2
+        ],
+        "gate": "name",
+        "note": "見てください"
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_note",
+          "page": 1,
+          "note": "s1 のメモ"
+         }
+        ],
+        "commit": true,
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_note",
+          "page": 1,
+          "note": "s1 のメモ"
+         }
+        ],
+        "commit": true,
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "nope.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": "abc"
+       }
+      },
+      {
+       "op": "call",
+       "name": "nosuch"
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "book.genko",
+        "session": "a b"
+       }
+      },
+      {
+       "op": "call",
+       "name": "export",
+       "args": {
+        "project": "book.genko",
+        "format": "png",
+        "pages": [
+         1
+        ],
+        "dpi": 72
+       }
+      }
+     ]
+    }
+   },
+   {
+    "job_record": "book.genko",
+    "id": "job_slow",
+    "status": "running"
+   },
+   {
+    "job_record": "book.genko",
+    "id": "job_done",
+    "status": "done",
+    "result": {
+     "ok": true,
+     "files": [
+      "a.png"
+     ],
+     "issues": []
+    }
+   },
+   {
+    "client": {
+     "transport": "stdio",
+     "mode": "legacy",
+     "ops": [
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_done",
+        "wait_s": 0
+       }
+      },
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_slow",
+        "wait_s": 0
+       }
+      },
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_none"
+       }
+      },
+      {
+       "op": "cancel",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_slow",
+        "wait_s": 3
+       },
+       "after": 0.5
+      },
+      {
+       "op": "call",
+       "name": "projects"
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s2"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s2"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "cli": [
+     "studio",
+     "comment",
+     "$root/book.genko",
+     "セリフを短く",
+     "--page",
+     "1",
+     "--as",
+     "human:owner"
+    ]
+   },
+   {
+    "client": {
+     "transport": "stdio",
+     "mode": "legacy",
+     "ops": [
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "tickets",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "files": "book.genko"
+   }
+  ]
+ },
+ {
+  "name": "client_http_auto",
+  "steps": [
+   {
+    "client": {
+     "transport": "http",
+     "mode": "auto",
+     "ops": [
+      {
+       "op": "info"
+      },
+      {
+       "op": "list_tools"
+      },
+      {
+       "op": "list_resources"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://ops"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/skill"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/drawing"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/manga-rules"
+      },
+      {
+       "op": "ping"
+      },
+      {
+       "op": "call",
+       "name": "projects"
+      },
+      {
+       "op": "call",
+       "name": "create_project",
+       "args": {
+        "name": "book.genko",
+        "title": "試験",
+        "pages": 2,
+        "spec_preset": "doujin-a5"
+       }
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "set_bible",
+       "args": {
+        "project": "book.genko",
+        "bible": {
+         "title": "夏の午後の約束",
+         "logline": "5年前の約束を果たすため、幼馴染が夏の屋上に来る。",
+         "plot": "転校していったソラと、屋上で会う約束をしていたひな。5年後の同じ日、ひなは半信半疑で屋上に上がる。",
+         "themes": [
+          "約束",
+          "再会"
+         ],
+         "characters": [
+          {
+           "id": "hina",
+           "name": "日向ひな",
+           "role": "heroine",
+           "age": 16,
+           "look": {
+            "hair": "肩までのストレート、横に流した前髪",
+            "hair_value": "beta",
+            "eyes": "大きく、やや垂れ目",
+            "build": "細身",
+            "height_cm": 156,
+            "outfits": [
+             {
+              "id": "default",
+              "desc": "半袖のセーラー服"
+             }
+            ],
+            "marks": [
+             "左側に星形の髪留め"
+            ],
+            "silhouette": "髪留め + 前髪"
+           },
+           "speech": {
+            "first_person": "わたし",
+            "tone": "丁寧語まじり"
+           },
+           "tokens_en": "a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip"
+          },
+          {
+           "id": "sora",
+           "name": "天野ソラ",
+           "role": "hero",
+           "age": 16,
+           "look": {
+            "hair": "短い癖毛",
+            "hair_value": "white",
+            "eyes": "切れ長",
+            "build": "やや長身",
+            "height_cm": 172,
+            "outfits": [
+             {
+              "id": "default",
+              "desc": "学ランの前を開けている"
+             }
+            ],
+            "marks": [],
+            "silhouette": "癖毛 + 開いた学ラン"
+           },
+           "speech": {
+            "first_person": "俺",
+            "tone": "ぶっきらぼう"
+           },
+           "tokens_en": null
+          }
+         ],
+         "locations": [
+          {
+           "id": "loc_rooftop",
+           "name": "校舎の屋上",
+           "desc": "フェンスと給水塔のある屋上",
+           "times": [
+            "sunset"
+           ]
+          }
+         ],
+         "style": {
+          "notes": [
+           "背景は描き込みすぎない"
+          ]
+         },
+         "constraints": [
+          "台詞・効果音を画像に描かない"
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "set_script",
+       "args": {
+        "project": "book.genko",
+        "script": {
+         "scenes": [
+          {
+           "id": "sc_01",
+           "summary": "ひなが屋上に上がる",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "beats": [
+            {
+             "id": "b01",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "夕方の屋上。ひなが扉を開ける",
+             "emotion": "緊張",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b02",
+             "kind": "narration",
+             "speaker_id": null,
+             "text": "5年前の今日、ここで約束した",
+             "emotion": "郷愁",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b03",
+             "kind": "monologue",
+             "speaker_id": "hina",
+             "text": "…来るわけないよね",
+             "emotion": "諦め",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b04",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "誰もいない屋上。フェンスの向こうに夕日",
+             "emotion": "寂しさ",
+             "page": 2,
+             "reveal": false
+            },
+            {
+             "id": "b05",
+             "kind": "dialogue",
+             "speaker_id": "sora",
+             "text": "遅いぞ",
+             "emotion": "照れ",
+             "page": 2,
+             "reveal": true
+            },
+            {
+             "id": "b06",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "給水塔の上にソラが座っている",
+             "emotion": "驚き",
+             "page": 2,
+             "reveal": false
+            }
+           ]
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 1,
+         "turn_role": "normal",
+         "template": null,
+         "tiers": [
+          {
+           "h": 0.35,
+           "cols": [
+            {
+             "slot": "p1",
+             "w": 1.0,
+             "rows": null
+            }
+           ]
+          },
+          {
+           "h": 0.65,
+           "cols": [
+            {
+             "slot": "p2",
+             "w": 0.55,
+             "rows": null
+            },
+            {
+             "slot": "p3",
+             "w": 0.45,
+             "rows": null
+            }
+           ]
+          }
+         ],
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "LS",
+           "angle": "high",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "扉を開ける",
+             "expression": "緊張",
+             "facing": "left",
+             "pos": "right",
+             "scale": 0.4
+            }
+           ],
+           "action": "屋上の扉を開ける",
+           "emotion": "緊張",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b01",
+            "b02"
+           ],
+           "lines": [
+            {
+             "beat_id": "b02",
+             "balloon": "narration",
+             "breaks": [
+              "5年前の今日",
+              "ここで約束した"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p2",
+           "shot": "MS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "立ち止まる",
+             "expression": "不安",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.8
+            }
+           ],
+           "action": "屋上を見回す",
+           "emotion": "不安",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [],
+           "lines": []
+          },
+          {
+           "slot": "p3",
+           "shot": "CU",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "うつむく",
+             "expression": "諦め",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.9
+            }
+           ],
+           "action": "うつむく",
+           "emotion": "諦め",
+           "fx": [],
+           "emphasis": 0.5,
+           "cross": false,
+           "beat_ids": [
+            "b03"
+           ],
+           "lines": [
+            {
+             "beat_id": "b03",
+             "balloon": "thought",
+             "breaks": [
+              "…来るわけ",
+              "ないよね"
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 1,
+         "turn_role": "normal",
+         "template": null,
+         "tiers": [
+          {
+           "h": 0.35,
+           "cols": [
+            {
+             "slot": "p1",
+             "w": 1.0,
+             "rows": null
+            }
+           ]
+          },
+          {
+           "h": 0.65,
+           "cols": [
+            {
+             "slot": "p2",
+             "w": 0.55,
+             "rows": null
+            },
+            {
+             "slot": "p3",
+             "w": 0.45,
+             "rows": null
+            }
+           ]
+          }
+         ],
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "LS",
+           "angle": "high",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "扉を開ける",
+             "expression": "緊張",
+             "facing": "left",
+             "pos": "right",
+             "scale": 0.4
+            }
+           ],
+           "action": "屋上の扉を開ける",
+           "emotion": "緊張",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b01",
+            "b02"
+           ],
+           "lines": [
+            {
+             "beat_id": "b02",
+             "balloon": "narration",
+             "breaks": [
+              "5年前の今日",
+              "ここで約束した"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p2",
+           "shot": "MS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "立ち止まる",
+             "expression": "不安",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.8
+            }
+           ],
+           "action": "屋上を見回す",
+           "emotion": "不安",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [],
+           "lines": []
+          },
+          {
+           "slot": "p3",
+           "shot": "CU",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "うつむく",
+             "expression": "諦め",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.9
+            }
+           ],
+           "action": "うつむく",
+           "emotion": "諦め",
+           "fx": [],
+           "emphasis": 0.5,
+           "cross": false,
+           "beat_ids": [
+            "b03"
+           ],
+           "lines": [
+            {
+             "beat_id": "b03",
+             "balloon": "thought",
+             "breaks": [
+              "…来るわけ",
+              "ないよね"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 2,
+         "turn_role": "reveal",
+         "template": "climax_wide",
+         "tiers": null,
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "ELS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [],
+           "action": "誰もいない屋上とフェンスの向こうの夕日",
+           "emotion": "寂しさ",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b04"
+           ],
+           "lines": []
+          },
+          {
+           "slot": "p2",
+           "shot": "INSERT",
+           "angle": "low",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [],
+           "action": "給水塔の上から声が降ってくる",
+           "emotion": "驚き",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [
+            "b05"
+           ],
+           "lines": [
+            {
+             "beat_id": "b05",
+             "balloon": "speech",
+             "breaks": [
+              "遅いぞ"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p3",
+           "shot": "FS",
+           "angle": "low",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "sora",
+             "pose": "給水塔の上に座る",
+             "expression": "照れ笑い",
+             "facing": "left",
+             "pos": "right_third",
+             "scale": 0.6
+            },
+            {
+             "id": "hina",
+             "pose": "見上げる",
+             "expression": "驚き",
+             "facing": "right",
+             "pos": "left",
+             "scale": 0.5
+            }
+           ],
+           "action": "給水塔の上にソラが座っている",
+           "emotion": "驚き",
+           "fx": [
+            "focus"
+           ],
+           "emphasis": 0.9,
+           "cross": false,
+           "beat_ids": [
+            "b06"
+           ],
+           "lines": []
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "next",
+       "args": {
+        "project": "book.genko",
+        "limit": 2
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": 1,
+        "max_px": 300
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": 2,
+        "mode": "print",
+        "max_px": 200
+       }
+      },
+      {
+       "op": "call",
+       "name": "inspect",
+       "args": {
+        "project": "book.genko",
+        "target": "snapshot",
+        "page": 1
+       }
+      },
+      {
+       "op": "call",
+       "name": "check",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "preflight",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "tickets",
+       "args": {
+        "project": "book.genko",
+        "status": "all"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "cli": [
+     "studio",
+     "chat-approval",
+     "$root/book.genko",
+     "off",
+     "--as",
+     "human:owner"
+    ]
+   },
+   {
+    "client": {
+     "transport": "http",
+     "mode": "auto",
+     "ops": [
+      {
+       "op": "info"
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "approve",
+          "gate": "name",
+          "page": 1
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "lock_page",
+          "page": 1
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "allow_chat_approval",
+          "on": true
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "record_chat_approval",
+       "args": {
+        "project": "book.genko",
+        "gate": "name",
+        "message": "OK",
+        "pages": [
+         1
+        ],
+        "person": "owner"
+       }
+      },
+      {
+       "op": "call",
+       "name": "request_approval",
+       "args": {
+        "project": "book.genko",
+        "pages": [
+         1,
+         2
+        ],
+        "gate": "name",
+        "note": "見てください"
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_note",
+          "page": 1,
+          "note": "s1 のメモ"
+         }
+        ],
+        "commit": true,
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_note",
+          "page": 1,
+          "note": "s1 のメモ"
+         }
+        ],
+        "commit": true,
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "nope.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": "abc"
+       }
+      },
+      {
+       "op": "call",
+       "name": "nosuch"
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "book.genko",
+        "session": "a b"
+       }
+      },
+      {
+       "op": "call",
+       "name": "export",
+       "args": {
+        "project": "book.genko",
+        "format": "png",
+        "pages": [
+         1
+        ],
+        "dpi": 72
+       }
+      }
+     ]
+    }
+   },
+   {
+    "job_record": "book.genko",
+    "id": "job_slow",
+    "status": "running"
+   },
+   {
+    "job_record": "book.genko",
+    "id": "job_done",
+    "status": "done",
+    "result": {
+     "ok": true,
+     "files": [
+      "a.png"
+     ],
+     "issues": []
+    }
+   },
+   {
+    "client": {
+     "transport": "http",
+     "mode": "auto",
+     "ops": [
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_done",
+        "wait_s": 0
+       }
+      },
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_slow",
+        "wait_s": 0
+       }
+      },
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_none"
+       }
+      },
+      {
+       "op": "cancel",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_slow",
+        "wait_s": 3
+       },
+       "after": 0.5
+      },
+      {
+       "op": "call",
+       "name": "projects"
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s2"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s2"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "cli": [
+     "studio",
+     "comment",
+     "$root/book.genko",
+     "セリフを短く",
+     "--page",
+     "1",
+     "--as",
+     "human:owner"
+    ]
+   },
+   {
+    "client": {
+     "transport": "http",
+     "mode": "auto",
+     "ops": [
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "tickets",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "files": "book.genko"
+   }
+  ]
+ },
+ {
+  "name": "client_http_legacy",
+  "steps": [
+   {
+    "client": {
+     "transport": "http",
+     "mode": "legacy",
+     "ops": [
+      {
+       "op": "info"
+      },
+      {
+       "op": "list_tools"
+      },
+      {
+       "op": "list_resources"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://ops"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/skill"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/drawing"
+      },
+      {
+       "op": "read_resource",
+       "uri": "genko://guide/manga-rules"
+      },
+      {
+       "op": "ping"
+      },
+      {
+       "op": "call",
+       "name": "projects"
+      },
+      {
+       "op": "call",
+       "name": "create_project",
+       "args": {
+        "name": "book.genko",
+        "title": "試験",
+        "pages": 2,
+        "spec_preset": "doujin-a5"
+       }
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "set_bible",
+       "args": {
+        "project": "book.genko",
+        "bible": {
+         "title": "夏の午後の約束",
+         "logline": "5年前の約束を果たすため、幼馴染が夏の屋上に来る。",
+         "plot": "転校していったソラと、屋上で会う約束をしていたひな。5年後の同じ日、ひなは半信半疑で屋上に上がる。",
+         "themes": [
+          "約束",
+          "再会"
+         ],
+         "characters": [
+          {
+           "id": "hina",
+           "name": "日向ひな",
+           "role": "heroine",
+           "age": 16,
+           "look": {
+            "hair": "肩までのストレート、横に流した前髪",
+            "hair_value": "beta",
+            "eyes": "大きく、やや垂れ目",
+            "build": "細身",
+            "height_cm": 156,
+            "outfits": [
+             {
+              "id": "default",
+              "desc": "半袖のセーラー服"
+             }
+            ],
+            "marks": [
+             "左側に星形の髪留め"
+            ],
+            "silhouette": "髪留め + 前髪"
+           },
+           "speech": {
+            "first_person": "わたし",
+            "tone": "丁寧語まじり"
+           },
+           "tokens_en": "a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip"
+          },
+          {
+           "id": "sora",
+           "name": "天野ソラ",
+           "role": "hero",
+           "age": 16,
+           "look": {
+            "hair": "短い癖毛",
+            "hair_value": "white",
+            "eyes": "切れ長",
+            "build": "やや長身",
+            "height_cm": 172,
+            "outfits": [
+             {
+              "id": "default",
+              "desc": "学ランの前を開けている"
+             }
+            ],
+            "marks": [],
+            "silhouette": "癖毛 + 開いた学ラン"
+           },
+           "speech": {
+            "first_person": "俺",
+            "tone": "ぶっきらぼう"
+           },
+           "tokens_en": null
+          }
+         ],
+         "locations": [
+          {
+           "id": "loc_rooftop",
+           "name": "校舎の屋上",
+           "desc": "フェンスと給水塔のある屋上",
+           "times": [
+            "sunset"
+           ]
+          }
+         ],
+         "style": {
+          "notes": [
+           "背景は描き込みすぎない"
+          ]
+         },
+         "constraints": [
+          "台詞・効果音を画像に描かない"
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "set_script",
+       "args": {
+        "project": "book.genko",
+        "script": {
+         "scenes": [
+          {
+           "id": "sc_01",
+           "summary": "ひなが屋上に上がる",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "beats": [
+            {
+             "id": "b01",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "夕方の屋上。ひなが扉を開ける",
+             "emotion": "緊張",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b02",
+             "kind": "narration",
+             "speaker_id": null,
+             "text": "5年前の今日、ここで約束した",
+             "emotion": "郷愁",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b03",
+             "kind": "monologue",
+             "speaker_id": "hina",
+             "text": "…来るわけないよね",
+             "emotion": "諦め",
+             "page": 1,
+             "reveal": false
+            },
+            {
+             "id": "b04",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "誰もいない屋上。フェンスの向こうに夕日",
+             "emotion": "寂しさ",
+             "page": 2,
+             "reveal": false
+            },
+            {
+             "id": "b05",
+             "kind": "dialogue",
+             "speaker_id": "sora",
+             "text": "遅いぞ",
+             "emotion": "照れ",
+             "page": 2,
+             "reveal": true
+            },
+            {
+             "id": "b06",
+             "kind": "action",
+             "speaker_id": null,
+             "text": "給水塔の上にソラが座っている",
+             "emotion": "驚き",
+             "page": 2,
+             "reveal": false
+            }
+           ]
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 1,
+         "turn_role": "normal",
+         "template": null,
+         "tiers": [
+          {
+           "h": 0.35,
+           "cols": [
+            {
+             "slot": "p1",
+             "w": 1.0,
+             "rows": null
+            }
+           ]
+          },
+          {
+           "h": 0.65,
+           "cols": [
+            {
+             "slot": "p2",
+             "w": 0.55,
+             "rows": null
+            },
+            {
+             "slot": "p3",
+             "w": 0.45,
+             "rows": null
+            }
+           ]
+          }
+         ],
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "LS",
+           "angle": "high",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "扉を開ける",
+             "expression": "緊張",
+             "facing": "left",
+             "pos": "right",
+             "scale": 0.4
+            }
+           ],
+           "action": "屋上の扉を開ける",
+           "emotion": "緊張",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b01",
+            "b02"
+           ],
+           "lines": [
+            {
+             "beat_id": "b02",
+             "balloon": "narration",
+             "breaks": [
+              "5年前の今日",
+              "ここで約束した"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p2",
+           "shot": "MS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "立ち止まる",
+             "expression": "不安",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.8
+            }
+           ],
+           "action": "屋上を見回す",
+           "emotion": "不安",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [],
+           "lines": []
+          },
+          {
+           "slot": "p3",
+           "shot": "CU",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "うつむく",
+             "expression": "諦め",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.9
+            }
+           ],
+           "action": "うつむく",
+           "emotion": "諦め",
+           "fx": [],
+           "emphasis": 0.5,
+           "cross": false,
+           "beat_ids": [
+            "b03"
+           ],
+           "lines": [
+            {
+             "beat_id": "b03",
+             "balloon": "thought",
+             "breaks": [
+              "…来るわけ",
+              "ないよね"
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 1,
+         "turn_role": "normal",
+         "template": null,
+         "tiers": [
+          {
+           "h": 0.35,
+           "cols": [
+            {
+             "slot": "p1",
+             "w": 1.0,
+             "rows": null
+            }
+           ]
+          },
+          {
+           "h": 0.65,
+           "cols": [
+            {
+             "slot": "p2",
+             "w": 0.55,
+             "rows": null
+            },
+            {
+             "slot": "p3",
+             "w": 0.45,
+             "rows": null
+            }
+           ]
+          }
+         ],
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "LS",
+           "angle": "high",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "扉を開ける",
+             "expression": "緊張",
+             "facing": "left",
+             "pos": "right",
+             "scale": 0.4
+            }
+           ],
+           "action": "屋上の扉を開ける",
+           "emotion": "緊張",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b01",
+            "b02"
+           ],
+           "lines": [
+            {
+             "beat_id": "b02",
+             "balloon": "narration",
+             "breaks": [
+              "5年前の今日",
+              "ここで約束した"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p2",
+           "shot": "MS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "立ち止まる",
+             "expression": "不安",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.8
+            }
+           ],
+           "action": "屋上を見回す",
+           "emotion": "不安",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [],
+           "lines": []
+          },
+          {
+           "slot": "p3",
+           "shot": "CU",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "hina",
+             "pose": "うつむく",
+             "expression": "諦め",
+             "facing": "left",
+             "pos": "center",
+             "scale": 0.9
+            }
+           ],
+           "action": "うつむく",
+           "emotion": "諦め",
+           "fx": [],
+           "emphasis": 0.5,
+           "cross": false,
+           "beat_ids": [
+            "b03"
+           ],
+           "lines": [
+            {
+             "beat_id": "b03",
+             "balloon": "thought",
+             "breaks": [
+              "…来るわけ",
+              "ないよね"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "submit_name",
+       "args": {
+        "project": "book.genko",
+        "plan": {
+         "page": 2,
+         "turn_role": "reveal",
+         "template": "climax_wide",
+         "tiers": null,
+         "panels": [
+          {
+           "slot": "p1",
+           "shot": "ELS",
+           "angle": "eye",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [],
+           "action": "誰もいない屋上とフェンスの向こうの夕日",
+           "emotion": "寂しさ",
+           "fx": [],
+           "emphasis": 0.3,
+           "cross": false,
+           "beat_ids": [
+            "b04"
+           ],
+           "lines": []
+          },
+          {
+           "slot": "p2",
+           "shot": "INSERT",
+           "angle": "low",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [],
+           "action": "給水塔の上から声が降ってくる",
+           "emotion": "驚き",
+           "fx": [],
+           "emphasis": 0.4,
+           "cross": false,
+           "beat_ids": [
+            "b05"
+           ],
+           "lines": [
+            {
+             "beat_id": "b05",
+             "balloon": "speech",
+             "breaks": [
+              "遅いぞ"
+             ]
+            }
+           ]
+          },
+          {
+           "slot": "p3",
+           "shot": "FS",
+           "angle": "low",
+           "location_id": "loc_rooftop",
+           "time": "sunset",
+           "characters": [
+            {
+             "id": "sora",
+             "pose": "給水塔の上に座る",
+             "expression": "照れ笑い",
+             "facing": "left",
+             "pos": "right_third",
+             "scale": 0.6
+            },
+            {
+             "id": "hina",
+             "pose": "見上げる",
+             "expression": "驚き",
+             "facing": "right",
+             "pos": "left",
+             "scale": 0.5
+            }
+           ],
+           "action": "給水塔の上にソラが座っている",
+           "emotion": "驚き",
+           "fx": [
+            "focus"
+           ],
+           "emphasis": 0.9,
+           "cross": false,
+           "beat_ids": [
+            "b06"
+           ],
+           "lines": []
+          }
+         ]
+        },
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "next",
+       "args": {
+        "project": "book.genko",
+        "limit": 2
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": 1,
+        "max_px": 300
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": 2,
+        "mode": "print",
+        "max_px": 200
+       }
+      },
+      {
+       "op": "call",
+       "name": "inspect",
+       "args": {
+        "project": "book.genko",
+        "target": "snapshot",
+        "page": 1
+       }
+      },
+      {
+       "op": "call",
+       "name": "check",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "preflight",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "tickets",
+       "args": {
+        "project": "book.genko",
+        "status": "all"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "cli": [
+     "studio",
+     "chat-approval",
+     "$root/book.genko",
+     "off",
+     "--as",
+     "human:owner"
+    ]
+   },
+   {
+    "client": {
+     "transport": "http",
+     "mode": "legacy",
+     "ops": [
+      {
+       "op": "info"
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "approve",
+          "gate": "name",
+          "page": 1
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "lock_page",
+          "page": 1
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "allow_chat_approval",
+          "on": true
+         }
+        ],
+        "commit": true
+       }
+      },
+      {
+       "op": "call",
+       "name": "record_chat_approval",
+       "args": {
+        "project": "book.genko",
+        "gate": "name",
+        "message": "OK",
+        "pages": [
+         1
+        ],
+        "person": "owner"
+       }
+      },
+      {
+       "op": "call",
+       "name": "request_approval",
+       "args": {
+        "project": "book.genko",
+        "pages": [
+         1,
+         2
+        ],
+        "gate": "name",
+        "note": "見てください"
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_note",
+          "page": 1,
+          "note": "s1 のメモ"
+         }
+        ],
+        "commit": true,
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_note",
+          "page": 1,
+          "note": "s1 のメモ"
+         }
+        ],
+        "commit": true,
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "nope.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "render",
+       "args": {
+        "project": "book.genko",
+        "page": "abc"
+       }
+      },
+      {
+       "op": "call",
+       "name": "nosuch"
+      },
+      {
+       "op": "call",
+       "name": "status",
+       "args": {
+        "project": "book.genko",
+        "session": "a b"
+       }
+      },
+      {
+       "op": "call",
+       "name": "export",
+       "args": {
+        "project": "book.genko",
+        "format": "png",
+        "pages": [
+         1
+        ],
+        "dpi": 72
+       }
+      }
+     ]
+    }
+   },
+   {
+    "job_record": "book.genko",
+    "id": "job_slow",
+    "status": "running"
+   },
+   {
+    "job_record": "book.genko",
+    "id": "job_done",
+    "status": "done",
+    "result": {
+     "ok": true,
+     "files": [
+      "a.png"
+     ],
+     "issues": []
+    }
+   },
+   {
+    "client": {
+     "transport": "http",
+     "mode": "legacy",
+     "ops": [
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_done",
+        "wait_s": 0
+       }
+      },
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_slow",
+        "wait_s": 0
+       }
+      },
+      {
+       "op": "call",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_none"
+       }
+      },
+      {
+       "op": "cancel",
+       "name": "export_status",
+       "args": {
+        "project": "book.genko",
+        "job": "job_slow",
+        "wait_s": 3
+       },
+       "after": 0.5
+      },
+      {
+       "op": "call",
+       "name": "projects"
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s2"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s2"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko",
+        "session": "s1"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "cli": [
+     "studio",
+     "comment",
+     "$root/book.genko",
+     "セリフを短く",
+     "--page",
+     "1",
+     "--as",
+     "human:owner"
+    ]
+   },
+   {
+    "client": {
+     "transport": "http",
+     "mode": "legacy",
+     "ops": [
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "tickets",
+       "args": {
+        "project": "book.genko"
+       }
+      },
+      {
+       "op": "call",
+       "name": "undo",
+       "args": {
+        "project": "book.genko"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "files": "book.genko"
+   }
+  ]
+ }
+]

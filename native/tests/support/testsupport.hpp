@@ -39,6 +39,8 @@ QString test_data(const QString& relative = {});
 QString genko_cli();
 // The genko_lock_helper executable of this build (holds a book's project lock in another process).
 QString lock_helper();
+// The genko_argv_helper executable of this build (a stand-in for a person's upscaler: writes the arguments it got).
+QString argv_helper();
 
 // Whether this build injects faults (GENKO_FAULT, GENKO_TEST_MIGRATE_HOOK): Debug and ASan builds.
 bool fault_injection();
@@ -53,6 +55,10 @@ std::string lock_file_text(const QString& book);
 
 // The Python reference: $GENKO_PYREF, else /opt/pyref/bin/python; empty when neither exists.
 QString python_ref();
+// A Python with the `mcp` extra of pyproject.toml (the MCP SDK and its dependencies as uv.lock pins them, Pillow and
+// numpy): $GENKO_MCP_PYTHON, else /opt/pyref-mcp/bin/python; empty when neither exists. The MCP and HTTP contract tests
+// run the SDK's own client and Python's servers with it.
+QString mcp_python();
 
 struct Run {
     bool started = false;

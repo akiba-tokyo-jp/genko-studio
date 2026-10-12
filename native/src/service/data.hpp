@@ -15,5 +15,7 @@ const core::Json& vocab();
 // guide/manga_rules.md and guide/drawing.md, as text.
 const std::string& rules();
 const std::string& drawing();
+// guide/SKILL.md, as text (the MCP resource genko://guide/skill).
+const std::string& skill();
 
 }  // namespace genko::service::data

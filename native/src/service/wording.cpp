@@ -149,6 +149,9 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the screen is too coarse for this resolution.*)",
                          "網点が粗すぎて、この解像度では作れません（線数を上げるか、解像度を下げてください）"));
         r.push_back(rule(R"(a count past .* is too large for this build.*)", "数が大きすぎて、この版の Genko では数えられません"));
+        // M5③ (api/mcp_tools.cpp): an MCP tool's arguments with a number the C++ build cannot carry (SPEC COMP-01a)
+        r.push_back(rule(R"(the arguments hold a number this build does not take \(NaN, Infinity or an integer past 64 bits\) at (.*))",
+                         "引数に、この版の Genko では扱えない数（NaN・Infinity・64 ビットを超える整数）があります（\\1。原稿は変わりません）"));
         r.push_back(rule(R"(the finish's (\w+) is not a number)", [](const QRegularExpressionMatch& m) {
             static const QHash<QString, QString> names = {
                 {"black", "ベタにする濃さ"}, {"white", "紙の白にする明るさ"}, {"line_threshold", "線とみなす濃さ"},

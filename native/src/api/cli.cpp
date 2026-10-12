@@ -24,6 +24,7 @@
 #endif
 
 #include "api/buildinfo.hpp"
+#include "api/server_cli.hpp"
 #include "api/studio_cli.hpp"
 #include "core/actor.hpp"
 #include "core/command_bus.hpp"
@@ -833,6 +834,9 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("render")) return render_command(args, ascii);
         if (command == QLatin1String("export")) return export_command(args, ascii);
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
+        if (command == QLatin1String("mcp")) return mcp_command(args);
+        if (command == QLatin1String("serve")) return serve_command(args);
+        if (command == QLatin1String("token")) return token_command(args, ascii);
         return usage("unknown command: " + command.toStdString());
     } catch (const storage::UnsupportedProjectVersion& error) {
         return fail(error.what(), error.code(), ascii, 2);

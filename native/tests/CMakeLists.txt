@@ -2,6 +2,9 @@
 add_executable(genko_lock_helper support/lock_helper.cpp)
 target_link_libraries(genko_lock_helper PRIVATE genko_storage Qt6::Core)
 genko_target_flags(genko_lock_helper)
+# A stand-in for a person's upscaler program: writes the arguments it got (test_mcp_api_e2e).
+add_executable(genko_argv_helper support/argv_helper.cpp)
+genko_target_flags(genko_argv_helper)
 
 # Shared test helpers (strict JSON comparison, the Python reference, running the CLI).
 add_library(genko_test_support STATIC support/testsupport.cpp)
@@ -11,9 +14,10 @@ target_compile_definitions(genko_test_support PRIVATE
   GENKO_REPO_ROOT="${GENKO_REPO_ROOT}"
   GENKO_TEST_DATA="${GENKO_SOURCE_ROOT}/tests/data"
   GENKO_CLI="$<TARGET_FILE:genko>"
-  GENKO_LOCK_HELPER="$<TARGET_FILE:genko_lock_helper>")
+  GENKO_LOCK_HELPER="$<TARGET_FILE:genko_lock_helper>"
+  GENKO_ARGV_HELPER="$<TARGET_FILE:genko_argv_helper>")
 genko_target_flags(genko_test_support)
-add_dependencies(genko_test_support genko genko_lock_helper)
+add_dependencies(genko_test_support genko genko_lock_helper genko_argv_helper)
 
 genko_test(test_buildinfo SOURCES unit/test_buildinfo.cpp DEPS genko_api LABELS unit)
 genko_test(test_json SOURCES unit/test_json.cpp DEPS genko_test_support LABELS unit)
@@ -181,6 +185,9 @@ genko_test(test_contract_studio SOURCES contract/test_contract_studio.cpp contra
 # the books and the other files after it.
 genko_test(test_contract_service SOURCES contract/test_contract_service.cpp
            DEPS genko_test_support genko_service genko_api LABELS contract TIMEOUT 2400)
+# `genko mcp` (stdio, Streamable HTTP) and `genko serve` against Python's, through the MCP SDK's own client and raw
+# JSON-RPC / HTTP (tools/migration/mcp_harness.py on contract/mcp_cases.json; skipped without $GENKO_MCP_PYTHON).
+genko_test(test_contract_mcp SOURCES contract/test_contract_mcp.cpp DEPS genko_test_support genko_render LABELS contract TIMEOUT 3600)
 # The studio service where this build goes past Python (SPEC COMP-01a): background jobs (and a thread that cannot
 # start), a palette picture kept, the official export handed to the studio (holding the book, taking back its files,
 # printing the dots asked for), for_pages and put_raster's reads, preview names, pages gone meanwhile, v1–v3 books
@@ -269,6 +276,8 @@ genko_test(test_cli_e2e SOURCES e2e/test_cli_e2e.cpp DEPS genko_test_support LAB
 genko_test(test_save_e2e SOURCES e2e/test_save_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
 genko_test(test_migrate_e2e SOURCES e2e/test_migrate_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
 genko_test(test_ops_e2e SOURCES e2e/test_ops_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
+# `genko mcp` and `genko serve` where an agent must not get through and where this build draws its own lines (M5③).
+genko_test(test_mcp_api_e2e SOURCES e2e/test_mcp_api_e2e.cpp DEPS genko_test_support genko_render Qt6::Network LABELS e2e TIMEOUT 1800)
 
 # The desktop app (M2-G1): the editing session alone, then the windows on the offscreen platform (label gui).
 if(GENKO_BUILD_APP)

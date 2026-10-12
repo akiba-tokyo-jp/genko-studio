@@ -24,6 +24,10 @@ namespace genko::api {
 //                                                the book written out (formats/export.hpp); the files' paths one a line,
 //                                                or {"ok": true, "count", "files"} with --json
 //   genko studio <command> …                     the studio's agent tools and human approvals (api/studio_cli.hpp)
+//   genko mcp --root R [--agent ai:<name>] [--transport stdio|streamable-http] [--host H] [--port P]
+//   genko serve --root R [--host H] [--port P] [--allow-origin O]… [--allow-host H]…
+//   genko token add --actor A | list | revoke --id P
+//                                                the MCP server, the HTTP API and its tokens (api/server_cli.hpp)
 //   genko --version                              the versions of Genko and its libraries
 int run_cli(int argc, char** argv);
 

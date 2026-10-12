@@ -24,4 +24,9 @@ extern const unsigned char kDrawingMd[] = {
 };
 extern const std::size_t kDrawingMdSize = sizeof(kDrawingMd);
 
+extern const unsigned char kSkillMd[] = {
+@GENKO_STUDIO_SKILL_BYTES@
+};
+extern const std::size_t kSkillMdSize = sizeof(kSkillMd);
+
 }  // namespace genko::service::detail

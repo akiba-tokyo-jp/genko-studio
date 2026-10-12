@@ -123,6 +123,7 @@ QString test_data(const QString& relative) {
 QString genko_cli() { return QString::fromUtf8(GENKO_CLI); }
 
 QString lock_helper() { return QString::fromUtf8(GENKO_LOCK_HELPER); }
+QString argv_helper() { return QString::fromUtf8(GENKO_ARGV_HELPER); }
 
 bool fault_injection() { return GENKO_FAULT_INJECTION != 0; }
 
@@ -156,6 +157,13 @@ QString python_ref() {
     const QString configured = qEnvironmentVariable("GENKO_PYREF");
     if (!configured.isEmpty()) return QFileInfo(configured).isExecutable() ? configured : QString();
     const QString fallback = QStringLiteral("/opt/pyref/bin/python");
+    return QFileInfo(fallback).isExecutable() ? fallback : QString();
+}
+
+QString mcp_python() {
+    const QString configured = qEnvironmentVariable("GENKO_MCP_PYTHON");
+    if (!configured.isEmpty()) return QFileInfo(configured).isExecutable() ? configured : QString();
+    const QString fallback = QStringLiteral("/opt/pyref-mcp/bin/python");
     return QFileInfo(fallback).isExecutable() ? fallback : QString();
 }
 

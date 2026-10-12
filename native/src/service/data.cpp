@@ -14,6 +14,8 @@ extern const unsigned char kRulesMd[];
 extern const std::size_t kRulesMdSize;
 extern const unsigned char kDrawingMd[];
 extern const std::size_t kDrawingMdSize;
+extern const unsigned char kSkillMd[];
+extern const std::size_t kSkillMdSize;
 }  // namespace genko::service::detail
 
 namespace genko::service::data {
@@ -41,6 +43,11 @@ const std::string& rules() {
 
 const std::string& drawing() {
     static const std::string kept(text(detail::kDrawingMd, detail::kDrawingMdSize));
+    return kept;
+}
+
+const std::string& skill() {
+    static const std::string kept(text(detail::kSkillMd, detail::kSkillMdSize));
     return kept;
 }
 
