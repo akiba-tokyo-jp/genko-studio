@@ -3237,7 +3237,8 @@
         "job": "job_slow",
         "wait_s": 3
        },
-       "after": 0.5
+       "after": 0.5,
+       "await_log": true
       },
       {
        "op": "call",
@@ -4199,7 +4200,8 @@
         "job": "job_slow",
         "wait_s": 3
        },
-       "after": 0.5
+       "after": 0.5,
+       "await_log": true
       },
       {
        "op": "call",
@@ -5161,7 +5163,8 @@
         "job": "job_slow",
         "wait_s": 3
        },
-       "after": 0.5
+       "after": 0.5,
+       "await_log": true
       },
       {
        "op": "call",
@@ -6123,7 +6126,8 @@
         "job": "job_slow",
         "wait_s": 3
        },
-       "after": 0.5
+       "after": 0.5,
+       "await_log": true
       },
       {
        "op": "call",

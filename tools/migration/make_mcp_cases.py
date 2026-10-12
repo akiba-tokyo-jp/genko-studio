@@ -199,7 +199,7 @@ def client_ops_second() -> list:
         {"op": "call", "name": "render", "args": {"project": BOOK, "page": "abc"}},
         {"op": "call", "name": "nosuch"},
         {"op": "call", "name": "status", "args": {"project": BOOK, "session": "a b"}},
-        # jobs: a background export and its record
+        # jobs: a background export and its record (asked after once, whether it ended within the tool's 40 s or not)
         {"op": "call", "name": "export", "args": {"project": BOOK, "format": "png", "pages": [1], "dpi": 72}, "settle": True},
     ]
 
@@ -213,7 +213,7 @@ def client_ops_jobs() -> list:
         {"op": "call", "name": "export_status", "args": {"project": BOOK, "job": "job_slow", "wait_s": 0}},
         {"op": "call", "name": "export_status", "args": {"project": BOOK, "job": "job_none"}},
         # cancelled: a call given up after a moment (the server answers what follows)
-        {"op": "cancel", "name": "export_status", "args": {"project": BOOK, "job": "job_slow", "wait_s": 3}, "after": 0.5},
+        {"op": "cancel", "name": "export_status", "args": {"project": BOOK, "job": "job_slow", "wait_s": 3}, "after": 0.5, "await_log": True},
         {"op": "call", "name": "projects"},
         # Undo last (the replies after one that goes through are compared with their keys sorted: mcp_harness.Normal)
         *[{"op": "call", "name": "undo", "args": {"project": BOOK, "session": "s2"}} for _ in range(2)],

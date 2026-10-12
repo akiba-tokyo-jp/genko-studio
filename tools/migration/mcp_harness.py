@@ -31,8 +31,10 @@ JOB: {"server": {"kind": "cpp", "genko": EXE} | {"kind": "py", "python": EXE, "r
                                                       redirect's Location) and the JSON or SSE body
   {"client": {"transport": "stdio" | "http", "mode": "auto" | "legacy", "ops": [...]}}
                                                       the MCP SDK's own Client (mcp.Client): ops info, list_tools,
-                                                      list_resources, read_resource, call (with "settle": a job it
-                                                      returns asked after until it is done), cancel, ping
+                                                      list_resources, read_resource, call (with "settle": the job
+                                                      it names asked after once, by export_status), cancel (with
+                                                      "await_log": until the server has logged the cancelled call),
+                                                      ping
   {"api": [REQUEST, ...]}                             `genko serve` (tokens.json in the config folder: tok-ai is
                                                       ai:bot, tok-human human:owner): each
                                                       {"method", "path", "headers"?, "token"?, "json"? | "base64"? |
@@ -431,19 +433,25 @@ async def _client_ops(job: dict, step: dict, norm: Normal) -> list:
                         out.append({"ping": True})
                     elif kind == "call":
                         result = await client.call_tool(op["name"], op.get("args") or {})
+                        asked = None
                         if op.get("settle"):
-                            result = await _settled(client, op, result)
-                        record = {"call": op["name"], **_content(norm, result)}
-                        if norm.restored:
-                            record = {"keys_sorted": True, **_sorted_keys(record)}
-                        out.append(record)
-                        text = record["content"][0].get("text") if record["content"] else None
+                            result, asked = await _settled(client, op, result)
+                        for name, answer in ((op["name"], result), ("export_status", asked)):
+                            if answer is None:
+                                continue
+                            record = {"call": name, **_content(norm, answer)}
+                            if norm.restored:
+                                record = {"keys_sorted": True, **_sorted_keys(record)}
+                            out.append(record)
+                        text = out[-1]["content"][0].get("text") if out[-1]["content"] else None
                         if op["name"] == "undo" and isinstance(text, dict) and text.get("json", {}).get("ok") is True:
                             norm.restored = True
                     elif kind == "cancel":
                         # a slow call given up after a moment: the client sends notifications/cancelled; the server
                         # never answers it and goes on serving
                         done = {}
+                        book = Path(job["root"]) / str((op.get("args") or {}).get("project", ""))
+                        before = _logged(book, op) if op.get("await_log") else 0
 
                         async def slow():
                             done["result"] = await client.call_tool(op["name"], op.get("args") or {})
@@ -451,9 +459,18 @@ async def _client_ops(job: dict, step: dict, norm: Normal) -> list:
                         started = time.monotonic()
                         with anyio.move_on_after(float(op.get("after", 1.0))) as scope:
                             await slow()
-                        await client.send_ping()
+                        await client.list_tools()  # (served on: a request both eras serve — 2026's has no ping)
                         out.append({"cancel": op["name"], "cancelled": scope.cancelled_caught and "result" not in done,
                                     "served_after": time.monotonic() - started < float(op.get("after", 1.0)) + 30})
+                        if op.get("await_log"):
+                            # (the call goes on to its end on the server, which logs it there: what comes next waits
+                            # for that, so where its entry falls in the log, and whether the conversation ended
+                            # before it did, does not depend on how fast the build is)
+                            deadline = time.monotonic() + 600
+                            while _logged(book, op) <= before:
+                                if time.monotonic() > deadline:
+                                    raise RuntimeError(f"the cancelled {op['name']} was never logged")
+                                await anyio.sleep(0.1)
                     else:
                         raise ValueError(f"unknown op {kind}")
                 except MCPError as exc:
@@ -465,30 +482,50 @@ async def _client_ops(job: dict, step: dict, norm: Normal) -> list:
 
 
 async def _settled(client, op: dict, result):
-    """A tool that works in the background answers within 40 s, or returns a job to ask after: its final reply either way
-    (export_status until the job is done, the job's result put in the reply's place), so the record does not depend on
-    how fast the build is."""
+    """A tool that works in the background (export) answers within its 40 s, or returns a job to ask after. Either way
+    its job is asked after once, by export_status with the longest wait it takes (60 s), so both sides make the same
+    calls (and log them) however fast the build is: the tool's reply in the form it has when the job ended in time (when
+    it came back running, the job's result put in its place), and export_status's reply. A job that did not end within
+    those 100 s stops the run."""
+    from types import SimpleNamespace
+
     try:
         reply = json.loads(result.content[0].text)
     except (AttributeError, IndexError, ValueError):
-        return result
-    if not (isinstance(reply, dict) and reply.get("ok") and reply.get("job") and reply.get("status") == "running"):
-        return result
+        return result, None
+    if not (isinstance(reply, dict) and reply.get("ok") and reply.get("job")):
+        return result, None
     project = (op.get("args") or {}).get("project")
-    for _ in range(600):
-        status = await client.call_tool("export_status", {"project": project, "job": reply["job"], "wait_s": 30})
-        state = json.loads(status.content[0].text)
-        if state.get("status") != "running":
-            from types import SimpleNamespace
+    status = await client.call_tool("export_status", {"project": project, "job": reply["job"], "wait_s": 60})
+    state = json.loads(status.content[0].text)
+    if state.get("status") == "running":
+        raise RuntimeError(f"job {reply['job']} did not end within the tool's 40 s and export_status's 60 s")
+    if reply.get("status") == "running":
+        # (StudioService._job of jobs.start's {**reply, "job": id}, its issues left out)
+        done = {**(state.get("result") or {}), "job": reply["job"]}
+        data = {k: v for k, v in done.items() if k not in ("ok", "issues", "files")}
+        final = {"ok": bool(done.get("ok")), **data, "issues": [], "files": list(done.get("files") or []) if done.get("ok") else []}
+        result = SimpleNamespace(content=[SimpleNamespace(type="text", text=json.dumps(final, ensure_ascii=False))], is_error=False)
+    return result, status
 
-            # (the reply as the tool gives it when the job ends within its 40 s: StudioService._job of jobs.start's
-            # {**reply, "job": id}, its issues left out)
-            done = {**(state.get("result") or {}), "job": reply["job"]}
-            data = {k: v for k, v in done.items() if k not in ("ok", "issues", "files")}
-            final = {"ok": bool(done.get("ok")), **data, "issues": [], "files": list(done.get("files") or []) if done.get("ok") else []}
-            text = SimpleNamespace(type="text", text=json.dumps(final, ensure_ascii=False))
-            return SimpleNamespace(content=[text], is_error=False)
-    raise RuntimeError(f"job {reply['job']} did not end")
+
+def _tool_log(book: Path) -> list[dict]:
+    """The tool log the MCP layer keeps in a book (studio/logs/tools.1.jsonl, then tools.jsonl)."""
+    log = []
+    for name in ("tools.1.jsonl", "tools.jsonl"):
+        path = book / "studio" / "logs" / name
+        if path.is_file():
+            for line in path.read_text(encoding="utf-8").split("\n"):
+                if line.strip():
+                    log.append(json.loads(line))
+    return log
+
+
+def _logged(book: Path, op: dict) -> int:
+    """How many entries of the tool log are calls of op's tool with op's arguments (as the log keeps them)."""
+    args = {k: v for k, v in (op.get("args") or {}).items() if k != "project"}
+    return sum(1 for entry in _tool_log(book)
+               if entry.get("tool") == op["name"] and all((entry.get("args") or {}).get(k) == v for k, v in args.items()))
 
 
 def _client(job: dict, step: dict, norm: Normal) -> dict:
@@ -682,14 +719,7 @@ def _run_job(job: dict, out_path: str) -> None:
         elif "files" in step:
             # what the MCP layer itself keeps in a book: the tool log (tool, ok, codes, args' keys) and the presence
             book = root / step["files"]
-            log = []
-            for name in ("tools.1.jsonl", "tools.jsonl"):
-                path = book / "studio" / "logs" / name
-                if path.is_file():
-                    for line in path.read_text(encoding="utf-8").split("\n"):
-                        if line.strip():
-                            entry = json.loads(line)
-                            log.append({k: entry.get(k) for k in ("actor", "tool", "args", "ok", "codes", "error") if k in entry})
+            log = [{k: entry.get(k) for k in ("actor", "tool", "args", "ok", "codes", "error") if k in entry} for entry in _tool_log(book)]
             presence = book / "studio" / "presence.json"
             actors = sorted(json.loads(presence.read_text(encoding="utf-8")).get("actors", {})) if presence.is_file() else []
             records.append({"files": norm.value({"log": log, "presence": actors})})
