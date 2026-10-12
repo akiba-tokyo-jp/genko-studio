@@ -461,7 +461,9 @@ Json analyze(const fs::path& project, const core::Document& doc, const core::Pag
                                 {"tree", found.tree},
                                 {"tiers", found.tiers}});
     const std::string stem = asset.substr(7, 12) + "_" + studio::content_hash(settings.fields).substr(7, 6);
-    const fs::path folder = project / "studio" / "analysis" / core::path_from_utf8(page.id);
+    // (C++: the page's id with its "/" and "\\" written "_", and the folder kept in the book — SPEC COMP-01a)
+    const fs::path folder = project / "studio" / "analysis" / core::path_from_utf8(util::name_part(page.id));
+    if (!util::inside(project, folder)) throw core::Error("path_outside_root", "書き出し先が原稿の外になる: " + util::path_text(folder));
     fs::create_directories(folder);
     storage::write_atomic(folder / core::path_from_utf8(stem + ".json"), studio::text_mode(core::dump_python_indent2(record) + "\n"));
     const render::Image overlay = overlay_image(doc, page, 72, Json::object({{"kind", "layout"}, {"panels", found.leaves_mm}}));

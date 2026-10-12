@@ -33,6 +33,7 @@
 #include "app/config.hpp"
 #include "app/look.hpp"
 #include "app/theme.hpp"
+#include "service/human_service.hpp"
 #include "service/wording.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"
@@ -581,7 +582,9 @@ void ExportDialog::run() {
     o.pages = chosen;
     Json reply;
     try {
-        reply = formats::run(*episode_, project_, format->currentData().toString().toStdString(), dest, o);
+        // (the official export through the studio, as `genko studio export`: HumanService.export's preflight, pages and
+        // approval; every other format as formats::run writes it)
+        reply = service::run_export(*episode_, project_, format->currentData().toString().toStdString(), dest, o);
     } catch (const std::exception& error) {  // (what Python would stop on with a traceback: said, in Japanese)
         reply = Json{{"ok", false}, {"error", error.what()}};
     }

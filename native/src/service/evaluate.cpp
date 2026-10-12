@@ -213,6 +213,7 @@ struct Drafts {
 }  // namespace
 
 Json adopt_drafts(const fs::path& project) {
+    refuse_old_book(project);  // (C++: it writes the book, which this build writes only as v4)
     const Drafts drafts{project / "studio" / "drafts"};
     std::error_code ec;
     if (!fs::is_directory(drafts.root, ec)) {

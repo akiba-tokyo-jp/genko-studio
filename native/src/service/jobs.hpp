@@ -14,8 +14,10 @@
 // The work runs in this process on a thread of its own. While it runs, `beat` is written every kBeatS seconds; a
 // "running" job whose beat is older than kStaleS died with its process and is reported "lost".
 //
-// C++: a process does not end while a job still runs. The front ends call wait_all() before they return (Python's
-// daemon threads die with the process and the job is reported lost; here the job finishes and is recorded).
+// C++: a process does not end while a job still runs. The front ends call wait_all() before they return, and the
+// QCoreApplication's end waits for them too, before anything static is destroyed (Python's daemon threads die with the
+// process and the job is reported lost; here the job finishes and is recorded). A thread that cannot start makes the
+// job's record "failed" and the tool's RuntimeError "can't start new thread" (Python leaves it "running", later lost).
 
 namespace genko::service::jobs {
 
@@ -42,5 +44,15 @@ void wait_all();
 // f"{type(exc).__name__}: {exc}" of what a tool threw, as Python names it (ApplyError, ValueError, TypeError,
 // FileNotFoundError, JSONDecodeError, a PyUncaught's own type; anything else "RuntimeError").
 std::string exception_text(const std::exception_ptr& caught);
+
+// Tests only: while it lives, the `nth` thread (1: the next one) the jobs would start next cannot be started (as when
+// the system has no threads left: std::system_error). One at a time; not for threads.
+class ScopedThreadFailure {
+public:
+    explicit ScopedThreadFailure(int nth);
+    ~ScopedThreadFailure();
+    ScopedThreadFailure(const ScopedThreadFailure&) = delete;
+    ScopedThreadFailure& operator=(const ScopedThreadFailure&) = delete;
+};
 
 }  // namespace genko::service::jobs

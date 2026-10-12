@@ -20,11 +20,20 @@
 
 namespace genko::formats {
 
-// Image.save(…, format="PNG", dpi=…, icc_profile=…, optimize=…): modes 1, L, LA, RGB, RGBA.
+// Image.save(…, format="PNG", dpi=…, icc_profile=…, optimize=…): modes 1, L, LA, RGB, RGBA and P (a palette: 1, 2, 4
+// or 8 bits a pixel by its length, a PLTE chunk; 8 bits unfiltered); the transparency the picture carries (its
+// info["transparency"]) as a tRNS chunk for P, 1, L and RGB, or an RGBA palette's alpha.
 struct PngSave {
     std::optional<std::array<double, 2>> dpi;  // a pHYs chunk: int(dpi / 0.0254 + 0.5) pixels a metre
     std::string icc;                           // an iCCP chunk (zlib.compress of it), when not empty
     bool optimize = false;                     // zlib level 9 and the average filter too (ZipEncode.c)
+};
+
+// What png_bytes takes from the picture itself: a P picture's bits a pixel and its PLTE chunk, the tRNS chunk's data.
+struct PngPicture {
+    int palette_bits = 8;
+    std::string plte;
+    std::optional<std::string> trns;
 };
 
 std::string png_bytes(const render::Image& image, const PngSave& params = {});
@@ -33,7 +42,7 @@ std::string png_bytes(const render::Image& image, const PngSave& params = {});
 // add() a band of rows at a time (each of the size's width and the mode given), finish() when every row is in.
 class PngWriter {
 public:
-    PngWriter(render::Size size, std::string_view mode, const PngSave& params = {});
+    PngWriter(render::Size size, std::string_view mode, const PngSave& params = {}, const PngPicture& picture = {});
     ~PngWriter();
     PngWriter(const PngWriter&) = delete;
     PngWriter& operator=(const PngWriter&) = delete;

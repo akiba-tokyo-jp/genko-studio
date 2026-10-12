@@ -5,6 +5,7 @@
 #include "core/mesh3d.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -1090,9 +1091,10 @@ std::shared_ptr<const std::vector<Line2>> prim_lines(const Json& prim, const Jso
         raise_attribute_error(prim, "items");
     }
     Json key_value = Json::object({{"camera", camera != nullptr ? *camera : Json()}, {"prim", own}});
-    char dpi_text[32];
-    std::snprintf(dpi_text, sizeof dpi_text, "%a", dpi);
-    const std::string key = dump_canonical(key_value) + "@" + dpi_text;
+    // (the resolution's exact bits as text: std::to_chars, which no locale changes — snprintf's %a takes its decimal point)
+    char dpi_text[64];
+    const auto written = std::to_chars(dpi_text, dpi_text + sizeof dpi_text, dpi, std::chars_format::hex);
+    const std::string key = dump_canonical(key_value) + "@" + std::string(dpi_text, written.ptr);
     LinesCache& cache = lines_cache();
     {
         std::lock_guard lock(cache.mutex);

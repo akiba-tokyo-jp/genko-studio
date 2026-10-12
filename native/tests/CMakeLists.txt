@@ -180,9 +180,12 @@ genko_test(test_contract_studio SOURCES contract/test_contract_studio.cpp contra
 # against Python's: service_cases.json (make_service_cases.py) run here and by service_harness.py, step by step: each reply,
 # the books and the other files after it.
 genko_test(test_contract_service SOURCES contract/test_contract_service.cpp
-           DEPS genko_test_support genko_service LABELS contract TIMEOUT 2400)
-# The studio service where this build goes past Python (SPEC COMP-01a): background jobs, a palette picture refused,
-# the official export handed to the studio.
+           DEPS genko_test_support genko_service genko_api LABELS contract TIMEOUT 2400)
+# The studio service where this build goes past Python (SPEC COMP-01a): background jobs (and a thread that cannot
+# start), a palette picture kept, the official export handed to the studio (holding the book, taking back its files,
+# printing the dots asked for), for_pages and put_raster's reads, preview names, pages gone meanwhile, v1–v3 books
+# refused (and `genko studio`'s exit 3), one save for several sheets, chat approvals checked under the lock, another
+# process's lock, confine kept from callers, the command line's own refusals, PDF numbers whatever the locale.
 genko_test(test_service SOURCES unit/test_service.cpp DEPS genko_test_support genko_service LABELS unit)
 # import_psd (M4②b): psd.read_psd and the op against Python's on the PSD and PSB files of psd_cases.json (every file,
 # a few cut after every byte, all of them changed at a few bytes; each step's reply, snapshot and payload, the layers'

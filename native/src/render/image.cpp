@@ -590,6 +590,40 @@ std::vector<std::array<std::uint8_t, 3>> Image::palette() const {
     return out;
 }
 
+std::string_view Image::palette_mode() const {
+    if (im_ == nullptr || im_->palette == nullptr) return {};
+    return im_->palette->mode == IMAGING_MODE_RGBA ? std::string_view("RGBA") : std::string_view("RGB");
+}
+
+std::vector<std::uint8_t> Image::palette_alpha() const {
+    std::vector<std::uint8_t> out;
+    if (im_ == nullptr || im_->palette == nullptr) return out;
+    const int size = std::clamp(im_->palette->size, 0, 256);
+    for (int i = 0; i < size; ++i) out.push_back(im_->palette->palette[i * 4 + 3]);
+    return out;
+}
+
+void Image::putpalette(std::string_view rawmode, std::string_view data) {
+    require();
+    const std::string_view m = mode();
+    if (m != "L" && m != "LA" && m != "P" && m != "PA") throw core::Error("value", "illegal image mode");
+    const std::size_t bands = rawmode == "RGBA" ? 4 : rawmode == "RGB" ? 3 : 0;
+    if (bands == 0) throw core::Error("value", "unrecognized raw mode");
+    const std::size_t entries = data.size() / bands;
+    if (entries > 256) throw core::Error("value", "invalid palette size");
+    ImagingPalette palette = ImagingPaletteNew(bands == 4 ? IMAGING_MODE_RGBA : IMAGING_MODE_RGB);
+    if (palette == nullptr) detail::throw_imaging_error("out of memory");
+    palette->size = static_cast<int>(entries);
+    for (std::size_t i = 0; i < entries; ++i) {
+        for (std::size_t b = 0; b < 3; ++b) palette->palette[i * 4 + b] = static_cast<UINT8>(data[i * bands + b]);
+        palette->palette[i * 4 + 3] = bands == 4 ? static_cast<UINT8>(data[i * bands + 3]) : 255;
+    }
+    ImagingPaletteDelete(im_->palette);
+    im_->palette = palette;
+    im_->mode = m.size() == 2 ? IMAGING_MODE_PA : IMAGING_MODE_P;
+    gif_logical_l_ = false;
+}
+
 Image Image::convert(std::string_view mode, Dither dither) const {
     require();
     const std::string_view from = this->mode();

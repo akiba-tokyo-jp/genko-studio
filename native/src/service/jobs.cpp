@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -49,12 +50,18 @@ struct Shared {
     std::optional<Json> reply;
 };
 
-// The threads this process started (joined by wait_all, or when the process ends).
+// ScopedThreadFailure: the launches left before the one that fails (0: none fails).
+std::atomic<int> failing_launch{0};
+
+// The threads this process started (joined by wait_all; when the QCoreApplication ends, before anything static is
+// destroyed; or, without one, when the process ends).
 class Threads {
 public:
     ~Threads() { join_all(); }
 
-    void add(std::thread thread, std::shared_ptr<std::atomic<bool>> done) {
+    // A thread that runs `body` and sets its flag when it ends, kept to be joined. std::system_error when it cannot
+    // start (nothing started then); once it runs, keeping it cannot fail (the room is made first).
+    void launch(std::function<void()> body) {
         std::lock_guard<std::mutex> guard(lock_);
         // (threads that finished are joined as new ones come, so a long-running server does not keep them)
         for (auto it = running_.begin(); it != running_.end();) {
@@ -65,7 +72,21 @@ public:
                 ++it;
             }
         }
-        running_.emplace_back(std::move(thread), std::move(done));
+        running_.reserve(running_.size() + 1);
+        auto done = std::make_shared<std::atomic<bool>>(false);
+        if (failing_launch.load() > 0 && failing_launch.fetch_sub(1) == 1) {
+            throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again), "cannot start a thread");
+        }
+        std::thread thread([body = std::move(body), done]() mutable {
+            try {
+                body();
+            } catch (...) {  // (each body says what broke itself; nothing may leave a thread)
+            }
+            body = nullptr;
+            done->store(true);
+        });
+        running_.emplace_back(std::move(thread), std::move(done));  // (no throw: the room is there)
+        wait_with_the_application();
     }
 
     void join_all() {
@@ -84,9 +105,19 @@ public:
     }
 
 private:
+    // The jobs end before the QCoreApplication does (its post routines run first in its destructor), so a front end
+    // that forgets wait_all() does not leave them running while the process's statics are destroyed.
+    void wait_with_the_application() {
+        const QCoreApplication* app = QCoreApplication::instance();
+        if (app == nullptr || app == registered_for_) return;
+        registered_for_ = app;
+        qAddPostRoutine(&wait_all);
+    }
+
     std::mutex lock_;
     // (each flag is set by its thread as its last step: join then waits only for the thread's return)
     std::vector<std::pair<std::thread, std::shared_ptr<std::atomic<bool>>>> running_;
+    const QCoreApplication* registered_for_ = nullptr;
 };
 
 Threads& threads() {
@@ -94,19 +125,7 @@ Threads& threads() {
     return all;
 }
 
-// A thread that sets its flag when it ends.
-void launch(std::function<void()> body) {
-    auto done = std::make_shared<std::atomic<bool>>(false);
-    std::thread thread([body = std::move(body), done]() mutable {
-        try {
-            body();
-        } catch (...) {  // (each body says what broke itself; nothing may leave a thread)
-        }
-        body = nullptr;
-        done->store(true);
-    });
-    threads().add(std::move(thread), std::move(done));
-}
+void launch(std::function<void()> body) { threads().launch(std::move(body)); }
 
 Json with(const Json& record, std::initializer_list<std::pair<const char*, Json>> changes) {
     Json out = record;
@@ -155,36 +174,65 @@ Json start(const fs::path& project, const std::string& kind, std::function<Json(
                                       {"beat", started}, {"pid", static_cast<std::int64_t>(QCoreApplication::applicationPid())}});
     write_record(project, record);
     auto shared = std::make_shared<Shared>();
-
-    launch([project, record, shared] {  // (says the work is still alive, until it ends)
-        std::unique_lock<std::mutex> guard(shared->lock);
-        while (!shared->changed.wait_for(guard, std::chrono::duration<double>(kBeatS), [&shared] { return shared->ended; })) {
-            try {
-                write_record(project, with(record, {{"beat", now()}}));
-            } catch (const std::exception&) {  // (OSError: the next beat tries again)
-            }
+    // A thread that cannot start (Python's RuntimeError "can't start new thread", which its jobs.start lets through,
+    // leaving the record "running" until it is lost): the beat already started is ended, the record says failed.
+    const auto cannot_start = [&project, &record, &shared] {
+        {
+            std::lock_guard<std::mutex> guard(shared->lock);
+            shared->ended = true;
+            shared->changed.notify_all();
         }
-    });
-    launch([project, record, shared, work = std::move(work)] {
-        Json reply;
-        std::string status;
-        try {
-            reply = work();
-            status = core::py_truthy(core::py_get(reply, "ok", Json(true))) ? "done" : "failed";
-        } catch (...) {  // (whatever broke, the job says so instead of staying "running")
-            reply = Json::object({{"ok", false}, {"error", exception_text(std::current_exception())}});
-            status = "failed";
-        }
-        std::lock_guard<std::mutex> guard(shared->lock);
-        shared->reply = reply;
-        shared->ended = true;
-        shared->changed.notify_all();
+        const std::string error = "RuntimeError: can't start new thread";
         try {
             const double finished = now();
-            write_record(project, with(record, {{"status", status}, {"beat", finished}, {"finished", finished}, {"result", reply}}));
-        } catch (const std::exception&) {  // (the reply is given all the same; the record says running until it is lost)
+            write_record(project, with(record, {{"status", "failed"}, {"beat", finished}, {"finished", finished},
+                                                {"result", Json::object({{"ok", false}, {"error", error}})}}));
+        } catch (const std::exception&) {  // (the record stays running and is reported lost later)
         }
-    });
+        throw core::PyUncaught("RuntimeError", "can't start new thread");
+    };
+
+    try {
+        launch([project, record, shared] {  // (says the work is still alive, until it ends)
+            std::unique_lock<std::mutex> guard(shared->lock);
+            while (!shared->changed.wait_for(guard, std::chrono::duration<double>(kBeatS), [&shared] { return shared->ended; })) {
+                try {
+                    write_record(project, with(record, {{"beat", now()}}));
+                } catch (const std::exception&) {  // (OSError: the next beat tries again)
+                }
+            }
+        });
+    } catch (const std::system_error&) {
+        cannot_start();
+    } catch (const std::bad_alloc&) {
+        cannot_start();
+    }
+    try {
+        launch([project, record, shared, work = std::move(work)] {
+            Json reply;
+            std::string status;
+            try {
+                reply = work();
+                status = core::py_truthy(core::py_get(reply, "ok", Json(true))) ? "done" : "failed";
+            } catch (...) {  // (whatever broke, the job says so instead of staying "running")
+                reply = Json::object({{"ok", false}, {"error", exception_text(std::current_exception())}});
+                status = "failed";
+            }
+            std::lock_guard<std::mutex> guard(shared->lock);
+            shared->reply = reply;
+            shared->ended = true;
+            shared->changed.notify_all();
+            try {
+                const double finished = now();
+                write_record(project, with(record, {{"status", status}, {"beat", finished}, {"finished", finished}, {"result", reply}}));
+            } catch (const std::exception&) {  // (the reply is given all the same; the record says running until it is lost)
+            }
+        });
+    } catch (const std::system_error&) {
+        cannot_start();
+    } catch (const std::bad_alloc&) {
+        cannot_start();
+    }
 
     std::unique_lock<std::mutex> guard(shared->lock);
     shared->changed.wait_for(guard, std::chrono::duration<double>(std::max(0.0, wait)), [&shared] { return shared->reply.has_value(); });
@@ -245,5 +293,9 @@ Json status(const fs::path& project, const Json& job_id) {
 }
 
 void wait_all() { threads().join_all(); }
+
+ScopedThreadFailure::ScopedThreadFailure(int nth) { failing_launch.store(std::max(0, nth)); }
+
+ScopedThreadFailure::~ScopedThreadFailure() { failing_launch.store(0); }
 
 }  // namespace genko::service::jobs

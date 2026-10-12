@@ -56,12 +56,17 @@ def dumps(value) -> str:
 
 @contextlib.contextmanager
 def fixed_clock(text: str | None):
-    """time.strftime gives `text` meanwhile (the C++ tests fix core::local_time_text the same way)."""
+    """time.strftime gives the time `text` says ("%Y-%m-%dT%H:%M:%S") in the format asked, whatever time it is given
+    (a text that is no such time: the text itself), meanwhile (the C++ tests fix core::local_time_text the same way)."""
     if text is None:
         yield
         return
     original = time.strftime
-    time.strftime = lambda fmt, *rest: text  # noqa: E731
+    try:
+        fixed = time.strptime(text, "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        fixed = None
+    time.strftime = (lambda fmt, *rest: text) if fixed is None else (lambda fmt, *rest: original(fmt, fixed))  # noqa: E731
     try:
         yield
     finally:

@@ -160,9 +160,10 @@ QString python_ref() {
 }
 
 Run run(const QString& program, const QStringList& args, const QProcessEnvironment& env, int timeout_ms,
-        const QByteArray& input) {
+        const QByteArray& input, const QString& working_dir) {
     QProcess process;
     process.setProcessEnvironment(env);
+    if (!working_dir.isEmpty()) process.setWorkingDirectory(working_dir);
     process.start(program, args);
     Run result;
     result.started = process.waitForStarted(60000);
@@ -174,10 +175,19 @@ Run run(const QString& program, const QStringList& args, const QProcessEnvironme
         process.kill();
         process.waitForFinished(5000);
     }
+    result.crashed = process.exitStatus() != QProcess::NormalExit;
     result.exit_code = process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1;
     result.out = process.readAllStandardOutput();
     result.err = process.readAllStandardError();
     return result;
+}
+
+QString Run::described() const {
+    return QStringLiteral("started %1, finished %2, crashed %3, exit %4; stdout [%5]; stderr [%6]")
+        .arg(started ? QStringLiteral("yes") : QStringLiteral("no"), finished ? QStringLiteral("yes") : QStringLiteral("no"),
+             crashed ? QStringLiteral("yes") : QStringLiteral("no"))
+        .arg(exit_code)
+        .arg(QString::fromUtf8(out.left(2000)), QString::fromUtf8(err.right(2000)));
 }
 
 QProcessEnvironment python_env(const QString& scratch) {
@@ -201,12 +211,12 @@ Run harness(const QStringList& args, const QString& scratch, int timeout_ms) {
     return run(python_ref(), full, python_env(scratch), timeout_ms);
 }
 
-Run run_genko(const QStringList& args, const QProcessEnvironment& env, const QByteArray& input) {
+Run run_genko(const QStringList& args, const QProcessEnvironment& env, const QByteArray& input, const QString& working_dir) {
     QProcessEnvironment full = QProcessEnvironment::systemEnvironment();
     full.remove(QStringLiteral("GENKO_FAULT"));
     full.remove(QStringLiteral("GENKO_TEST_MIGRATE_HOOK"));
     for (const QString& key : env.keys()) full.insert(key, env.value(key));
-    return run(genko_cli(), args, full, 300000, input);
+    return run(genko_cli(), args, full, 300000, input, working_dir);
 }
 
 QProcessEnvironment fault_env(const QString& fault) {

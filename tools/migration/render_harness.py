@@ -2409,6 +2409,42 @@ def save_cases(out: str, seed: int, count: int) -> None:
         im.save(buf, format=fmt, **given)
         cases.append({"mode": mode, "size": list(im.size), "pixels": b64(im.tobytes()), "format": fmt, "params": params,
                       "bytes": b64(buf.getvalue())})
+    # palette pictures (mode P, a random generator of their own: the cases above stay as they were): 1, 2, 4 or 8 bits a
+    # pixel by the palette's length, the PLTE chunk, the transparency an image carries (an entry, or alpha per entry:
+    # tRNS), an RGBA palette's alpha, indexes past the palette; and greys and RGB pictures with a transparent colour
+    rng = random.Random(seed * 7919 + 1)
+    for n in range(40):
+        colours = rng.choice([1, 2, 3, 4, 5, 9, 16, 17, 100, 255, 256])
+        size = (rng.choice([1, 3, 7, 8, 9, 15, 33, 64, 129]), rng.choice([1, 2, 5, 31]))
+        top = 256 if n % 5 == 4 else colours
+        im = Image.frombytes("P", size, bytes(rng.randrange(top) for _ in range(size[0] * size[1])))
+        palette_mode = "RGBA" if n % 7 == 3 else "RGB"
+        palette = bytes(rng.getrandbits(8) for _ in range(colours * len(palette_mode)))
+        im.putpalette(palette, palette_mode)
+        case = {"mode": "P", "size": list(im.size), "pixels": b64(im.tobytes()), "palette": b64(palette), "palette_mode": palette_mode}
+        if n % 3 == 1:
+            im.info["transparency"] = case["transparency"] = rng.randrange(-2, colours + 3)
+        elif n % 3 == 2:
+            alpha = bytes(rng.getrandbits(8) for _ in range(rng.randrange(0, colours + 5)))
+            im.info["transparency"] = alpha
+            case["transparency_bytes"] = b64(alpha)
+        params = {}
+        if rng.random() < 0.4:
+            params["dpi"] = [150, 150]
+        if rng.random() < 0.3:
+            params["optimize"] = True
+        buf = io.BytesIO()
+        im.save(buf, format="PNG", **{k: (tuple(v) if k == "dpi" else v) for k, v in params.items()})
+        cases.append({**case, "format": "PNG", "params": params, "bytes": b64(buf.getvalue())})
+    for n, mode in enumerate(["1", "L", "RGB"] * 3):
+        size = (rng.choice([5, 16, 40]), rng.choice([3, 9]))
+        im = picture(mode, size, False)
+        trns = rng.randrange(0, 2) if mode == "1" else rng.randrange(-5, 300) if mode == "L" else tuple(rng.randrange(0, 256) for _ in range(3))
+        im.info["transparency"] = trns
+        buf = io.BytesIO()
+        im.save(buf, format="PNG")
+        cases.append({"mode": mode, "size": list(im.size), "pixels": b64(im.tobytes()), "format": "PNG", "params": {},
+                      "transparency": list(trns) if isinstance(trns, tuple) else trns, "bytes": b64(buf.getvalue())})
     Path(out).write_text(dumps({"icc": b64(icc), "cases": cases}), encoding="utf-8")
 
 

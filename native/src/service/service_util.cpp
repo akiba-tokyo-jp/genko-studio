@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <iterator>
 #include <system_error>
 #include <vector>
 
@@ -52,6 +53,31 @@ std::string zero3(const Json& n) {
 }
 
 std::string path_text(const std::filesystem::path& path) { return core::path_to_utf8(path); }
+
+std::string name_part(std::string_view id) {
+    std::string out(id);
+    for (char& c : out) {
+        if (c == '/' || c == '\\' || c == '\0') c = '_';
+    }
+    return out;
+}
+
+bool inside(const std::filesystem::path& folder, const std::filesystem::path& path) {
+    std::error_code ec;
+    std::filesystem::path base = std::filesystem::weakly_canonical(folder, ec);
+    if (ec) base = folder.lexically_normal();
+    std::filesystem::path where = std::filesystem::weakly_canonical(path, ec);
+    if (ec) where = path.lexically_normal();
+    auto w = where.begin();
+    for (auto b = base.begin(); b != base.end(); ++b, ++w) {
+        if (b->empty() && std::next(b) == base.end()) break;  // (a folder given with a trailing "/")
+        if (w == where.end() || *w != *b) return false;
+    }
+    for (; w != where.end(); ++w) {
+        if (!w->empty()) return true;
+    }
+    return false;
+}
 
 void write_file(const std::filesystem::path& path, std::string_view bytes) {
     std::filesystem::create_directories(path.parent_path());

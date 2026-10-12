@@ -1,6 +1,7 @@
 #include "service/genreq.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 
 #include "core/frames.hpp"
@@ -598,11 +599,12 @@ std::optional<std::string> reference_sheet(const std::map<std::string, std::stri
     }
     if (picked.size() < 2) return std::nullopt;
     const auto wh = core::int_tuple(size_px);
-    int width = static_cast<int>(wh.at(0));
-    int height = static_cast<int>(wh.at(1));
-    const double scale = 1024.0 / std::max(width, height);
-    width = std::max(256, static_cast<int>(core::py_round_int(width * scale)));
-    height = std::max(256, static_cast<int>(core::py_round_int(height * scale)));
+    // (the tool's size as Python's ints, in doubles: a size past an int's range keeps its shape, not its low bits)
+    const double asked_w = static_cast<double>(wh.at(0));
+    const double asked_h = static_cast<double>(wh.at(1));
+    const double scale = 1024.0 / std::max(asked_w, asked_h);
+    const int width = std::max(256, static_cast<int>(core::py_round_int(asked_w * scale)));
+    const int height = std::max(256, static_cast<int>(core::py_round_int(asked_h * scale)));
     render::Image sheet = render::Image::create("RGB", render::Size{width, height}, render::Ink{255, 255, 255});
     const int gap = std::max(8, width / 64);
     const bool wide = width >= height;
@@ -873,6 +875,12 @@ Pack build(const core::Document& doc, const fs::path& project, Options o) {
             }
             const Json px = core::py_or(py_get(cand, "px"), box_size["suggested_px"]);
             const auto wh = core::int_tuple(px);
+            // (C++: a size an int cannot hold is refused — Python makes the mask until its memory runs out; not cut to its
+            // low bits)
+            constexpr std::int64_t kIntMax = std::numeric_limits<int>::max();
+            if (wh.at(0) > kIntMax || wh.at(1) > kIntMax || wh.at(0) < -kIntMax || wh.at(1) < -kIntMax) {
+                throw RequestError("候補の大きさ（px）が大きすぎて、描き直す領域のマスクを作れない", "/candidate_id");
+            }
             const Json pad = py_get(util::or_dict(py_get(cand, "mapping")), "pad_mm", Json(kPadMm));
             const guide::GenBox mask_box = guide::GenBox::for_frame(*frame, core::to_float(pad), {static_cast<int>(wh.at(0)), static_cast<int>(wh.at(1))});
             files["mask.png"] = guide::to_png(guide::mask(mask_box, rects));

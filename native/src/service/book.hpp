@@ -45,11 +45,16 @@ struct Work {
 // The page whose index == `index` (Python's `next((p for p in episode.pages if p.index == index), None)`).
 std::optional<std::size_t> page_at(const core::Document& doc, const Json& index);
 
+// C++: storage::NeedsMigration for a book of v1–v3, which this build does not write (`genko migrate` makes a v4 copy);
+// nothing for a v4 book or a folder without one (a project.json that cannot be read is left to the reading).
+void refuse_old_book(const std::filesystem::path& dir);
+
 // with ProjectLock(path, agent=…): episode = load_episode(path) … save_episode(episode, path, actor=…)
 class Session {
 public:
-    // Takes the lock (core::ApplyError "project locked: …", code "locked", when someone holds it: Python's ProjectLock
-    // raises ApplyError), settles the journal at its last consistent point and reads the book.
+    // Refuses a book of v1–v3 (refuse_old_book) before anything, takes the lock (core::ApplyError "project locked: …",
+    // code "locked", when someone holds it: Python's ProjectLock raises ApplyError), settles the journal at its last
+    // consistent point and reads the book.
     Session(const std::filesystem::path& dir, const std::string& agent);
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;

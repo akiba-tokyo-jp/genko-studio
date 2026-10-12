@@ -31,6 +31,7 @@ Json sorted_list(const Json& pages) {
 
 HumanService::HumanService(fs::path project, std::string actor) : path_(std::move(project)), actor_(std::move(actor)) {
     if (actor_.rfind("human:", 0) != 0) throw core::ApplyError("承認できるのは human:<名前> だけ");
+    refuse_old_book(path_);  // (C++: everything a person does here writes the book; this build writes only v4)
 }
 
 core::Document HumanService::apply(const Json& ops) {
@@ -158,10 +159,15 @@ Json HumanService::accept_proposal(const Json& proposal_id, bool force) {
 }
 
 Json HumanService::export_book(const std::string& fmt, const fs::path& out, const OfficialExport& o) {
-    const core::Document episode = load_episode(path_);
     if (fmt != "pdf" && fmt != "tiff" && fmt != "png" && fmt != "webtoon" && fmt != "sns") {
+        (void)load_episode(path_);  // (Python reads the book first: the ids that read takes)
         return Json::object({{"ok", false}, {"error", "format は pdf / tiff / png / webtoon / sns"}});
     }
+    // (C++: the book held from its read to its approval, so the approval is of the pages written — Python reads the
+    // book, writes the pages, then takes the lock and reads it again to record the approval, approving whatever another
+    // writer changed in between unseen: SPEC COMP-01a)
+    Session session(path_, actor_);
+    const core::Document& episode = session.doc();
     const bool screen = fmt == "webtoon" || fmt == "sns";
     // (screen outputs are sized in pixels, so print resolution does not apply to them)
     formats::checks::StudioCheck check;
@@ -174,6 +180,8 @@ Json HumanService::export_book(const std::string& fmt, const fs::path& out, cons
         for (const auto& [key, value] : report.items()) refused[key] = value;
         return refused;
     }
+    std::error_code ec;
+    const bool had_folder = fs::exists(out, ec);
     std::vector<fs::path> written;
     if (fmt == "webtoon") {
         written = formats::export_webtoon(episode, out, o.width_px, o.max_height, 0, o.jpeg.value_or(false) ? "jpeg" : "png");
@@ -183,7 +191,19 @@ Json HumanService::export_book(const std::string& fmt, const fs::path& out, cons
         const std::int64_t dpi = py_truthy(o.dpi) ? core::to_int(o.dpi) : (episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600);
         written = formats::export_print(episode, out, fmt, dpi, 180, true, o.area, o.color, o.icc, o.screen);
     }
-    apply(Json::array({Json::object({{"op", "approve"}, {"gate", "export"}})}));
+    try {
+        // (Python reads the book again under the lock here: the same read, for the ids it takes; under this lock the book
+        // is the one written, unless a writer that does not wait for the lock changed it — then it is not approved)
+        const core::Document again = load_episode(path_);
+        if (again.revision != episode.revision) throw storage::RevisionConflict(episode.revision, again.revision);
+        session.apply(Json::array({Json::object({{"op", "approve"}, {"gate", "export"}})}), actor_);
+        session.save(actor_);
+    } catch (...) {
+        // (the approval not recorded: the pages written are taken back, so no export stands without its approval)
+        for (const fs::path& file : written) fs::remove(file, ec);
+        if (!had_folder) fs::remove(out, ec);  // (only when it is empty)
+        throw;
+    }
     Json files = Json::array();
     for (const fs::path& f : written) files.push_back(util::path_text(f));
     return Json::object({{"ok", true}, {"files", std::move(files)}, {"warnings", report["warnings"]}, {"dpi", report["dpi"]}});

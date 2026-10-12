@@ -590,7 +590,9 @@ Json StudioService::page_brief(const core::Document& doc, const Json& page) cons
         return text::head(out, 400);
     };
     const auto draft = util::name_of(doc, page);
-    const core::Page& target = doc.page(*page_at(doc, page));
+    const auto at = page_at(doc, page);
+    if (!at) throw core::PyUncaught("StopIteration", "");  // (next(p for p in episode.pages if p.index == page))
+    const core::Page& target = doc.page(*at);
     Json panels = Json::array();
     for (const core::Frame* f : target.leaf_frames()) {
         const Json panel = f->panel && py_truthy(*f->panel) ? *f->panel : Json::object();

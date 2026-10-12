@@ -24,7 +24,7 @@ native/
 tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開発用。製品に入れない）
 ```
 
-依存は `core ← storage ← render ← text ← formats ← service ← api ← app` と `core ← storage ← studio ← service` の一方向。スタジオの op は、ほかの op と同じく core に置き（`core/ops_studio.cpp`）、絵の画素を読む部分（素材の画像の大きさと、配置の前に絵全体を読めるかの確かめ）だけを render が `core::StudioHooks` で差し込む（`render::ops_registry()`。core は render に依存しない）。`studio`（`genko_studio`）は core と storage だけに依存し、render・formats には依存しない。`service`（`genko_service`）は formats・render・studio・storage・core の上にあり、道具を Python のメソッドと同じ引数で受け（`StudioService::call`：位置引数とキーワード引数の JSON。束ねられないものは Python の TypeError）、`ToolResult::to_dict()` の JSON で答える（MCP・HTTP・`genko studio` はこれを送るだけ）。formats は service を知らないので、アプリの正式な書き出しは `formats::RunOptions::official_export` に service が HumanService.export を差し込む（`service::run_export`）。`core`・`storage` は **QtCore だけ**に依存してよい（QCryptographicHash・QRandomGenerator・QStringConverter 等。QtGui/Widgets は不可）。`render` 以降は QtGui の QImage/QPainter を使ってよいが、ディスプレイ接続を要求しない（headless で動く）。GUI 部品は `app` だけ。
+依存は `core ← storage ← render ← text ← formats ← service ← api ← app` と `core ← storage ← studio ← service` の一方向。スタジオの op は、ほかの op と同じく core に置き（`core/ops_studio.cpp`）、絵の画素を読む部分（素材の画像の大きさと、配置の前に絵全体を読めるかの確かめ）だけを render が `core::StudioHooks` で差し込む（`render::ops_registry()`。core は render に依存しない）。`studio`（`genko_studio`）は core と storage だけに依存し、render・formats には依存しない。`service`（`genko_service`）は formats・render・studio・storage・core の上にあり、道具を Python のメソッドと同じ引数で受け（`StudioService::call`：位置引数とキーワード引数の JSON。束ねられないものは Python の TypeError）、`ToolResult::to_dict()` の JSON で答える（MCP・HTTP・`genko studio` はこれを送るだけ）。Python のキーワード専用の `confine=`（`import_image`・`import_name` が --root の外を読むか）は `call` の引数ではなく `StudioService::set_confine` で、コマンドラインだけが使う（MCP・HTTP からは渡せない）。v1〜v3 の本には、書き込む道具を始める前に（`Session`・HumanService・adopt-drafts も）`needs_migration` で断る。formats は service を知らないので、アプリの正式な書き出しは `formats::RunOptions::official_export` に service が HumanService.export を差し込む（`service::run_export`）。`core`・`storage` は **QtCore だけ**に依存してよい（QCryptographicHash・QRandomGenerator・QStringConverter 等。QtGui/Widgets は不可）。`render` 以降は QtGui の QImage/QPainter を使ってよいが、ディスプレイ接続を要求しない（headless で動く）。GUI 部品は `app` だけ。
 
 変更は必ず `CommandBus` を通す。app・api が原稿 JSON やファイルを直接書き換える経路を作らない。
 
@@ -87,7 +87,7 @@ tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開
 
 - GUI（QWidget・QPixmap）はメインスレッドだけ。描画・保存・出力・フィルターはワーカーで、不変の `Document` と独立した画像バッファを扱い、結果は世代 ID 付きでキュー経由で返す。古い世代の結果は捨てる。
 - 原稿の変更は 1 本の実行列で順序付ける。ワーカーから生ポインタでモデルを書き換えない。
-- スタジオのバックグラウンドの仕事（`service/jobs`：`export`・`export_proof`・`upscale` の `background`）は、仕事ごとのスレッドで、同じ root と actor の StudioService を新しく作って動かす（呼んだ側の StudioService を共有しない）。本への書き込みは本のロックで順序付く。スレッドはすべて登録して join し、デタッチしない。前面（`genko studio`、MCP・HTTP のサーバ）は終わる前に `jobs::wait_all()` を呼び、仕事が終わるまで待つ（Python はプロセスと一緒に仕事が消える。SPEC COMP-01a）。試験用の id の数え方（`ScopedIdSource`）と時刻（`ScopedClock`）は、待っている間に仕事のスレッドから読まれてよいが、仕事の途中で変えない。
+- スタジオのバックグラウンドの仕事（`service/jobs`：`export`・`export_proof`・`upscale` の `background`）は、仕事ごとのスレッドで、同じ root と actor の StudioService を新しく作って動かす（呼んだ側の StudioService を共有しない）。本への書き込みは本のロックで順序付く。スレッドはすべて登録して join し、デタッチしない（登録の場所はスレッドを作る前に取るので、作った後で登録に失敗しない）。前面（`genko studio`、MCP・HTTP のサーバ）は終わる前に `jobs::wait_all()` を呼び、仕事が終わるまで待つ（Python はプロセスと一緒に仕事が消える。SPEC COMP-01a）。呼び忘れても、QCoreApplication の終わり（`qAddPostRoutine`。静的な物を壊す前）に待つ。スレッドを始められない仕事は、始めた鼓動を止めて記録を failed にし、Python の RuntimeError を投げる。試験用の id の数え方（`ScopedIdSource`）と時刻（`ScopedClock`）は、待っている間に仕事のスレッドから読まれてよいが、仕事の途中で変えない。
 
 ## 8. エラー
 

@@ -58,19 +58,23 @@ struct Run {
     bool started = false;
     bool finished = false;
     int exit_code = -1;
+    bool crashed = false;  // (QProcess::CrashExit: exit_code is -1 then)
     QByteArray out;
     QByteArray err;
+
+    // How it went, for a test's failure message: started, finished, crashed, the exit code, stdout and stderr.
+    QString described() const;
 };
 
 Run run(const QString& program, const QStringList& args, const QProcessEnvironment& env, int timeout_ms = 600000,
-        const QByteArray& input = {});
+        const QByteArray& input = {}, const QString& working_dir = {});
 // The environment for the Python reference: PYTHONPATH=<repo>/src, no .pyc files, config and caches in `scratch`.
 QProcessEnvironment python_env(const QString& scratch);
 // tools/migration/pyref_harness.py <args> run by the Python reference.
 Run harness(const QStringList& args, const QString& scratch, int timeout_ms = 600000);
 
 // The genko command line of this build (GENKO_FAULT and GENKO_TEST_MIGRATE_HOOK from `env` only).
-Run run_genko(const QStringList& args, const QProcessEnvironment& env = {}, const QByteArray& input = {});
+Run run_genko(const QStringList& args, const QProcessEnvironment& env = {}, const QByteArray& input = {}, const QString& working_dir = {});
 // The environment for genko with GENKO_FAULT set to `fault` (empty: without it).
 QProcessEnvironment fault_env(const QString& fault);
 // The one JSON line a command printed (a string "not one line: …" when it printed something else).

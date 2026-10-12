@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/error.hpp"
+#include "service/book.hpp"
 #include "service/studio_service.hpp"
 
 namespace genko::service {
@@ -16,11 +17,25 @@ struct Tool {
     std::string_view name;
     std::vector<Param> params;
     Method method = nullptr;
+    bool writes = false;  // (it changes the book, its assets, requests or previews: a book of v1–v3 is refused first)
 };
+
+// The tools that write the book or what is kept beside it for the book (its assets, requests, inbox, previews of a
+// change), even when they only try a change (commit false): C++ refuses a book of v1–v3 before they start (this build
+// writes only v4: `genko migrate` makes a v4 copy). The others read (render's and review_page's pictures, the exports,
+// a work item's lease are not the book), as Python's.
+bool writing_tool(std::string_view name) {
+    for (const char* w : {"use_style", "set_bible", "set_script", "submit_name", "apply_ops", "record_review", "record_chat_approval",
+                          "request_approval", "resolve_ticket", "request_fix", "ask_human", "undo", "generation_request", "import_images",
+                          "review_candidates", "adopt", "take_panel_art", "report_regions", "finish_page", "derive", "upscale", "import_name",
+                          "analyze_name", "propose_lines", "import_image"}) {
+        if (name == w) return true;
+    }
+    return false;
+}
 
 Param required(const char* name) { return Param{name, std::nullopt, false}; }
 Param optional(const char* name, Json fallback) { return Param{name, std::move(fallback), false}; }
-Param keyword(const char* name, Json fallback) { return Param{name, std::move(fallback), true}; }
 
 const std::vector<Tool>& tools() {
     static const std::vector<Tool> table = [] {
@@ -87,12 +102,13 @@ const std::vector<Tool>& tools() {
                      &StudioService::upscale});
         t.push_back({"upscalers", {}, &StudioService::upscalers});
         t.push_back({"import_name",
-                     {required("project"), required("files"), optional("start_page", 1), optional("align", "auto"), keyword("confine", true)},
+                     {required("project"), required("files"), optional("start_page", 1), optional("align", "auto")},
                      &StudioService::import_name});
         t.push_back({"analyze_name", {required("project"), required("page"), optional("params", none)}, &StudioService::analyze_name});
         t.push_back({"propose_lines", {required("project"), required("page"), required("lines")}, &StudioService::propose_lines});
         t.push_back({"review_page", {required("project")}, &StudioService::review_page});
-        t.push_back({"import_image", {required("project"), optional("path", none), optional("png_base64", none), keyword("confine", true)},
+        // (Python's keyword-only confine= is not an argument here: set_confine — MCP and HTTP cannot pass it)
+        t.push_back({"import_image", {required("project"), optional("path", none), optional("png_base64", none)},
                      &StudioService::import_image});
         t.push_back({"set_bible", {required("project"), required("bible"), optional("commit", false)}, &StudioService::set_bible});
         t.push_back({"set_script", {required("project"), required("script"), optional("commit", false)}, &StudioService::set_script});
@@ -120,6 +136,7 @@ const std::vector<Tool>& tools() {
                      &StudioService::ask_human});
         t.push_back({"proposals", {required("project"), optional("status", "open")}, &StudioService::proposals});
         t.push_back({"undo", {required("project")}, &StudioService::undo});
+        for (Tool& tool : t) tool.writes = writing_tool(tool.name);
         return t;
     }();
     return table;
@@ -136,6 +153,8 @@ const Tool* find(std::string_view name) {
 
 bool StudioService::has_tool(std::string_view name) { return find(name) != nullptr; }
 
+void StudioService::refuse_old_project(const Json& project) const { refuse_old_book(project_path(project)); }
+
 std::span<const Param> StudioService::parameters(std::string_view name) {
     const Tool* tool = find(name);
     if (tool == nullptr) return {};
@@ -149,6 +168,7 @@ ToolResult StudioService::call(std::string_view name, const Json& positional, co
         throw core::PyUncaught("AttributeError", "'StudioService' object has no attribute '" + std::string(name) + "'");
     }
     const Json bound = bind_arguments("StudioService." + std::string(name), tool->params, positional, kwargs);
+    if (tool->writes) refuse_old_project(bound["project"]);
     return (this->*(tool->method))(bound);
 }
 

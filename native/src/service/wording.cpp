@@ -383,6 +383,13 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the PSD has no pictures to read", "PSD に読み込める絵がありません"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
+        // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)
+        r.push_back(rule(R"(the file cannot be read \(it is not a regular file\))", "ふつうのファイルではないので読み込めません（デバイスやパイプは読みません）"));
+        // (a book of v1–v3, which this build does not write: storage::NeedsMigration)
+        r.push_back(rule(R"(this book is in the version (\d+) format, which this build does not write; .*)", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("この原稿は古い形式（版 %1）なので、書き込めません。genko migrate で新しいフォルダーに v4 として写してから使ってください（元の原稿はそのまま残ります）")
+                .arg(m.captured(1));
+        }));
         r.push_back(rule(R"(the file cannot be read \((.*)\))", "ファイルを読み込めません"));
         r.push_back(rule("the profile is not a CMYK printing profile", "CMYK の印刷用のカラープロファイルではありません"));
         r.push_back(rule("the recorded pictures are missing", "記録した絵が見つかりません"));
@@ -745,8 +752,7 @@ QString unported_element(const QString& element) {
         {"text_features", "横書きの文字の字形の指定（OpenType 機能）"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
         {"prims", "3D"}, {"placed", "配置した画像"}, {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"},
         {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"},
-        {"image_format", "まだ読めない形式の画像（TIFF、WebP、Lab カラーの PSD）"},
-        {"palette_png", "パレットの絵（GIF など）を PNG で保存すること"}};
+        {"image_format", "まだ読めない形式の画像（TIFF、WebP、Lab カラーの PSD）"}};
     if (const auto it = words.find(element); it != words.end()) return it->second;
     if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
     return element;

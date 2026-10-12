@@ -4,6 +4,8 @@
 //   - the export dialog's fields as Python lays them out for each format, the pages it writes, its preview, and every
 //     format it writes through formats::run: the same files as `genko export` writes for the same choices; the check
 //     before writing (write anyway, fix it — the 点検 panel opens —, or stop), the refusals and the result in Japanese;
+//     the official export through the studio (service::run_export → HumanService.export): its preflight's refusal, or
+//     the pages written and the export approval recorded in the book;
 //   - printing to a PDF: the sheets (a spread on one), each page's picture as render_page draws it at the printer's
 //     resolution as Python computes it, fitted or at its real size, centred; the dialog's pages, its words, its preview;
 //   - 履歴: the changes listed with Python's words (history.describe, the saved times), a click undoes or redoes to just
@@ -61,6 +63,7 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
+#include "storage/reader.hpp"
 
 using namespace genko;
 using core::Json;
@@ -542,7 +545,7 @@ private slots:
 
     // The check before writing (書き出す runs 入稿前の点検 first): what stops a print, on the pages written, asked about —
     // stop (nothing written), fix it (the dialog closes, 点検 opens with the problem), or write anyway; the official
-    // export refused in Japanese.
+    // export stopped by the studio's preflight, in Japanese.
     void exportAsksAboutWhatStopsAPrint() {
         core::Document book = gui_test::new_doc(3);
         book.add_line(core::Num(2), "はみ出した台詞", "", std::nullopt, "", core::Num(-3.0), core::Num(40.0), core::Num(30.0), core::Num(20.0));
@@ -591,7 +594,8 @@ private slots:
         };
         s.act("act_export")->trigger();
         QCOMPARE(QDir(out).entryList(QDir::Files).size(), 3);
-        // the official export: refused by this build (formats::run), in Japanese
+        // the official export: the studio's (HumanService.export), stopped by its preflight (the pages are not finished),
+        // in Japanese, nothing written
         s.on_export = [&](app::ExportDialog* d) {
             d->format->setCurrentIndex(d->format->findData(QStringLiteral("pdf")));
             d->official->setChecked(true);
@@ -600,9 +604,39 @@ private slots:
         };
         s.answers.asked.clear();
         s.act("act_export")->trigger();
-        QVERIFY(s.answers.asked.contains(QStringLiteral("Genko: 書き出せませんでした。\nこの版の Genko では、まだ正式な書き出し（点検と書き出しの承認の記録）はできません。"
-                                                        "正式な書き出しを外すと書き出せます")));
+        QVERIFY2(s.answers.asked.contains(QStringLiteral("Genko: 書き出せませんでした。\n1 ページが仕上げ（finish）に進んでいない\n"
+                                                         "2 ページが仕上げ（finish）に進んでいない\n3 ページが仕上げ（finish）に進んでいない")),
+                 qPrintable(s.answers.asked.join(QStringLiteral(" | "))));
         QVERIFY(!QFileInfo::exists(s.tmp.path() + QStringLiteral("/official")));
+    }
+
+    // The official export from the app goes through the studio (service::run_export → HumanService.export, as `genko
+    // studio export` does): a finished book's pages written and the export approval recorded in the book, by the app's
+    // person, at the revision written.
+    void officialExportFromTheApp() {
+        core::Document book = gui_test::new_doc(2);
+        for (std::size_t i = 0; i < book.pages.size(); ++i) book.edit_page(i).stage = "finish";
+        Studio s(book);
+        const std::int64_t revision = storage::load_document(s.path).document.revision;
+        const QString out = s.tmp.path() + QStringLiteral("/official");
+        s.on_export = [&](app::ExportDialog* d) {
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("png")));
+            d->official->setChecked(true);
+            d->dpi->setValue(72);
+            d->folder->setText(out);
+            s.clicks << QStringLiteral("閉じる");
+            d->run();
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+        };
+        s.act("act_export")->trigger();
+        QCOMPARE(QDir(out).entryList(QDir::Files).size(), 2);
+        QCOMPARE(s.boxes.back(), QStringLiteral("2 個のファイルを書き出しました。\n%1").arg(out));
+        const core::Document saved = storage::load_document(s.path).document;
+        const Json& approvals = saved.studio.at("approvals");
+        QCOMPARE(approvals.back()["gate"], Json("export"));
+        QCOMPARE(approvals.back()["rev"], Json(revision));
+        QVERIFY(approvals.back()["by"].get<std::string>().starts_with("human:"));
+        QCOMPARE(saved.revision, revision + 1);
     }
 
     // 印刷: the pages to a PDF printer — each sheet's picture is render_page's at the printer's resolution (Python's

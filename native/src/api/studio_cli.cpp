@@ -314,11 +314,19 @@ int print_reply(const Json& payload, bool ascii) {
     return payload.is_object() && payload.contains("ok") && core::py_truthy(payload["ok"]) ? 0 : 1;
 }
 
-Json failed(const std::string& message) { return Json::object({{"ok", false}, {"error", message}}); }
+// Python's {"ok": False, "error": message}, with the code every failure of this build carries (ARCHITECTURE.md §8).
+Json failed(const std::string& message, const std::string& code) { return Json::object({{"ok", false}, {"error", message}, {"code", code}}); }
 
-// _pages("1,3-5"): the pages (int()'s ValueError for a part that is not a number).
+// The most pages a --pages list names (C++: Python makes the list whatever its length, until its memory runs out).
+constexpr std::uint64_t kMaxListedPages = 100000;
+
+// _pages("1,3-5"): the pages (int()'s ValueError for a part that is not a number). C++: a list of more than
+// kMaxListedPages pages is refused (core::Error "pages_too_many"), a range up to 2**63 - 1 counted without overflow.
 Json pages_of(const std::string& text) {
     Json out = Json::array();
+    const auto too_many = [&text] {
+        throw core::Error("pages_too_many", "--pages のページが多すぎる（" + std::to_string(kMaxListedPages) + " ページまで）: " + text);
+    };
     std::size_t start = 0;
     for (;;) {
         const std::size_t comma = text.find(',', start);
@@ -326,8 +334,16 @@ Json pages_of(const std::string& text) {
         if (const std::size_t dash = part.find('-'); dash != std::string::npos) {
             const std::int64_t a = core::to_int(Json(part.substr(0, dash)));
             const std::int64_t b = core::to_int(Json(part.substr(dash + 1)));
-            for (std::int64_t p = a; p < b + 1; ++p) out.push_back(p);
+            if (a <= b) {  // (range(a, b + 1))
+                const std::uint64_t span = static_cast<std::uint64_t>(b) - static_cast<std::uint64_t>(a);
+                if (span >= kMaxListedPages || out.size() + span + 1 > kMaxListedPages) too_many();
+                for (std::int64_t p = a;; ++p) {
+                    out.push_back(p);
+                    if (p == b) break;
+                }
+            }
         } else if (!core::py_strip(part).empty()) {
+            if (out.size() + 1 > kMaxListedPages) too_many();
             out.push_back(core::to_int(Json(part)));
         }
         if (comma == std::string::npos) break;
@@ -376,7 +392,7 @@ int tools_command(const Json& ns, bool ascii) {
         return print_reply(Json::object({{"ok", true}, {"path", core::path_to_utf8(config / "tools.json")}, {"tools", studio::load_tools(config)}}), ascii);
     }
     if (action == "example") return print_reply(Json::object({{"ok", true}, {"example", example_tools()}}), ascii);
-    if (!core::py_truthy(ns["tool_id"])) return print_reply(failed("tool_id が要る"), ascii);
+    if (!core::py_truthy(ns["tool_id"])) return print_reply(failed("tool_id が要る", "missing_argument"), ascii);
     const std::string id = ns["tool_id"].get<std::string>();
     if (action == "remove") return print_reply(Json::object({{"ok", studio::remove_tool(config, id)}}), ascii);
     Json spec;
@@ -394,10 +410,10 @@ int upscaler_command(const Json& ns, bool ascii) {
     if (action == "list") {
         return print_reply(Json::object({{"ok", true}, {"upscalers", service::upscale::available()}, {"registered", service::upscale::registered()}}), ascii);
     }
-    if (!core::py_truthy(ns["name"])) return print_reply(failed("名前が要る"), ascii);
+    if (!core::py_truthy(ns["name"])) return print_reply(failed("名前が要る", "missing_argument"), ascii);
     const std::string name = ns["name"].get<std::string>();
     if (action == "remove") return print_reply(Json::object({{"ok", service::upscale::unregister(name)}}), ascii);
-    if (!core::py_truthy(ns["command_line"])) return print_reply(failed("--command が要る"), ascii);
+    if (!core::py_truthy(ns["command_line"])) return print_reply(failed("--command が要る", "missing_argument"), ascii);
     Json spec;
     try {
         std::vector<double> scales;
@@ -412,7 +428,7 @@ int upscaler_command(const Json& ns, bool ascii) {
         }
         spec = service::upscale::register_program(name, ns["command_line"], scales, ns["label"].get<std::string>());
     } catch (const core::PyValueError& exc) {
-        return print_reply(failed(exc.what()), ascii);
+        return print_reply(failed(exc.what(), exc.code()), ascii);
     }
     return print_reply(Json::object({{"ok", true}, {"name", name}, {"upscaler", spec}}), ascii);
 }
@@ -450,7 +466,7 @@ int run(const std::string& cmd, const Json& ns, bool ascii) {
     if (cmd == "approve") {
         HumanService human(path, actor_or_default(ns));
         if (ns["gate"] == "sheet") {
-            if (!(core::py_truthy(ns["character"]) && core::py_truthy(ns["candidate"]))) return print_reply(failed("sheet には --character と --candidate が要る"), ascii);
+            if (!(core::py_truthy(ns["character"]) && core::py_truthy(ns["candidate"]))) return print_reply(failed("sheet には --character と --candidate が要る", "missing_argument"), ascii);
             Json face;
             if (core::py_truthy(ns["face"])) {
                 face = Json::array();
@@ -466,7 +482,7 @@ int run(const std::string& cmd, const Json& ns, bool ascii) {
             return print_reply(human.approve_sheet(ns["character"], ns["candidate"], face), ascii);
         }
         const Json pages = pages_of(ns["pages"].get<std::string>());
-        if (pages.empty()) return print_reply(failed("--pages が要る"), ascii);
+        if (pages.empty()) return print_reply(failed("--pages が要る", "missing_argument"), ascii);
         return print_reply(ns["gate"] == "name" ? human.approve_name(pages) : human.approve_art(pages), ascii);
     }
     if (cmd == "chat-approval") return print_reply(HumanService(path, actor_or_default(ns)).chat_approval(ns["state"] == "on"), ascii);
@@ -488,13 +504,12 @@ int run(const std::string& cmd, const Json& ns, bool ascii) {
     }
     if (cmd == "import-name") {
         StudioService importer(path.parent_path(), actor_or_default(ns));
+        importer.set_confine(false);  // (Python's confine=False)
         Json files = Json::array();
         for (const Json& f : ns["files"]) files.push_back(core::path_to_utf8(resolved(f.get<std::string>())));
-        return print_reply(importer
-                               .call("import_name", Json::array({core::path_to_utf8(path.filename()), files, ns["start_page"], ns["align"]}),
-                                     Json::object({{"confine", false}}))
-                               .to_dict(),
-                           ascii);
+        return print_reply(
+            importer.call("import_name", Json::array({core::path_to_utf8(path.filename()), files, ns["start_page"], ns["align"]}), Json::object()).to_dict(),
+            ascii);
     }
     if (cmd == "export") {
         service::OfficialExport options;
@@ -522,7 +537,7 @@ int run(const std::string& cmd, const Json& ns, bool ascii) {
         const Json session = ns.contains("session") ? ns["session"] : Json();
         actor = studio::actor_for(agent.get<std::string>(), session.is_string() ? std::optional<std::string>(session.get<std::string>()) : std::nullopt);
     } catch (const core::Error& exc) {
-        return print_reply(failed(exc.what()), ascii);
+        return print_reply(failed(exc.what(), exc.code()), ascii);
     }
     StudioService service(path.parent_path(), actor);
     const Json name = core::path_to_utf8(path.filename());
@@ -543,17 +558,23 @@ int run(const std::string& cmd, const Json& ns, bool ascii) {
         if (core::py_truthy(ns["params"])) params = core::parse_python_json(ns["params"].get<std::string>());
         result = call("analyze_name", Json::object({{"project", name}, {"page", ns["page"]}, {"params", params}}));
     } else if (cmd == "import-image") {
-        result = call("import_image", Json::object({{"project", name}, {"path", core::path_to_utf8(resolved(ns["image"].get<std::string>()))}, {"confine", false}}));
+        service.set_confine(false);  // (Python's confine=False)
+        result = call("import_image", Json::object({{"project", name}, {"path", core::path_to_utf8(resolved(ns["image"].get<std::string>()))}}));
     } else if (cmd == "call") {
         const std::string tool = ns["tool"].get<std::string>();
         if (!service::agent_tool(tool)) {
             std::string names;
             for (const std::string& t : service::agent_tools_sorted()) names += (names.empty() ? "" : ", ") + t;
-            return print_reply(failed("道具 " + tool + " はない（" + names + "）"), ascii);
+            return print_reply(failed("道具 " + tool + " はない（" + names + "）", "unknown_tool"), ascii);
         }
         Json kwargs = core::py_truthy(ns["args"]) ? load(ns["args"].get<std::string>()) : Json::object();
-        if (!kwargs.is_object()) return print_reply(failed("引数は JSON オブジェクト"), ascii);
-        if (tool == "import_image" && !kwargs.contains("confine")) kwargs["confine"] = false;
+        if (!kwargs.is_object()) return print_reply(failed("引数は JSON オブジェクト", "bad_arguments"), ascii);
+        // (Python: kwargs.setdefault("confine", False) for import_image; the keyword-only confine= of import_image and
+        // import_name is this build's set_confine, not an argument — another tool given it refuses it as Python's does)
+        if (tool == "import_image" || tool == "import_name") {
+            service.set_confine(kwargs.contains("confine") ? core::py_truthy(kwargs["confine"]) : tool == "import_name");
+            kwargs.erase("confine");
+        }
         result = service.call(tool, Json::array({name}), kwargs);
     } else if (cmd == "proposals") {
         result = call("proposals", Json::object({{"project", name}, {"status", core::py_truthy(ns["all"]) ? "all" : "open"}}));
@@ -611,9 +632,12 @@ int studio_command(const QStringList& args, bool ascii) {
     const auto caught = [ascii](const std::string& message, const std::string& code) {
         return print_reply(Json::object({{"ok", false}, {"error", message}, {"code", code}}), ascii);
     };
-    // (a job a tool started in the background ends before the command does: C++ does not leave it to die)
+    // (a job a tool started in the background ends before the command does: C++ does not leave it to die; what the
+    // command printed is out first, so the reply is not held back while the job runs)
     struct WaitForJobs {
         ~WaitForJobs() {
+            std::fflush(stdout);
+            std::fflush(stderr);
             try {
                 service::jobs::wait_all();
             } catch (...) {
@@ -631,7 +655,9 @@ int studio_command(const QStringList& args, bool ascii) {
         return caught(message, "python_error");
     } catch (const core::Error& exc) {
         // ApplyError, ValueError, TypeError, FileNotFoundError and JSONDecodeError: str(exc), as Python's main prints it
-        return caught(exc.what(), exc.code());
+        const int code = caught(exc.what(), exc.code());
+        // (C++: a book of v1–v3, which this build does not write — exit 3, as every genko command's; Python writes v3)
+        return exc.code() == "needs_migration" ? 3 : code;
     } catch (const std::exception& exc) {
         return caught(exc.what(), "internal");
     }

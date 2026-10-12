@@ -31,8 +31,9 @@ export wrote only listed, "<exported>": the test compares those at the end of th
 project.json snapshots, which are this build's v4 files there). The root's path is written <root> everywhere, the
 config folder's <config>; "taken_at" (the UTC time a style was taken) is <taken_at>, an audit entry's time "at" <at>;
 a background job's id is <job>
-and its time "seconds" <seconds> (studio/jobs/ itself, which holds times and the process id, is not compared); and
-the address of a Python object in a message (" at 0x…>") is left out.
+and its time "seconds" <seconds> (studio/jobs/ itself, which holds times and the process id, is not compared); a work
+item's lease (studio/claims/<item>.json) is compared with its "expires" written <expires>; and the address of a Python
+object in a message (" at 0x…>") is left out.
 """
 from __future__ import annotations
 
@@ -113,6 +114,12 @@ def _resolved(value, root: Path):
     return value.replace("$root", str(root))
 
 
+def _claim_file(rel: str) -> bool:
+    """A work item's lease (claims.py): studio/claims/<item>.json."""
+    parts = rel.split("/")
+    return len(parts) >= 3 and parts[-3:-1] == ["studio", "claims"] and parts[-1].endswith(".json")
+
+
 def _files(folder: Path, prefix: str, root: str, config: str) -> dict:
     """Each file's sha256, the root's and the config folder's paths in it written <root> and <config> first (a file
     that names them is the same on both sides)."""
@@ -128,7 +135,10 @@ def _files(folder: Path, prefix: str, root: str, config: str) -> dict:
         if prefix == "" and _exported(rel):
             out[rel] = "<exported>"
             continue
-        data = path.read_bytes().replace(root.encode("utf-8"), b"<root>")
+        data = path.read_bytes()
+        if _claim_file(rel):  # (a lease: its time, the time it was taken plus the lease, written <expires>)
+            data = re.sub(rb'"expires": -?[0-9][0-9.eE+-]*', b'"expires": "<expires>"', data)
+        data = data.replace(root.encode("utf-8"), b"<root>")
         if config:
             data = data.replace(config.encode("utf-8"), b"<config>")
         out[prefix + rel] = _sha(data)

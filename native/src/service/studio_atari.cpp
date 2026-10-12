@@ -81,7 +81,7 @@ ToolResult StudioService::import_name(const Json& a) {
         const Json& name = files[i];
         const std::string where = "/files/" + std::to_string(i);
         const auto [source, under] = resolve_under(root_, name);
-        if (py_truthy(a["confine"]) && !under) return fail("--root の外: " + name.get<std::string>(), "outside_root", where);
+        if (confine_ && !under) return fail("--root の外: " + name.get<std::string>(), "outside_root", where);
         std::error_code ec;
         if (!fs::is_regular_file(source, ec)) return fail("ファイルがない: " + name.get<std::string>(), "no_file", where);
         std::string blob;
@@ -121,7 +121,9 @@ ToolResult StudioService::import_name(const Json& a) {
         session.apply(batch, actor_);
         for (const Json& item : imported) {
             const core::Document& doc = session.doc();
-            const core::Page& page = doc.page(*page_at(doc, item["page"]));
+            const auto found = page_at(doc, item["page"]);  // (made just above, in this session)
+            if (!found) return fail(py_str(item["page"]) + " ページはない", "no_page", "/start_page");
+            const core::Page& page = doc.page(*found);
             const Json proposal = atari::analyze(path, doc, page);
             session.apply(Json::array({Json::object({{"op", "propose"}, {"proposal", proposal}})}), actor_);
             proposals.push_back(Json::object({{"page", item["page"]}, {"proposal", proposal["id"]},
@@ -155,7 +157,9 @@ ToolResult StudioService::analyze_name(const Json& a) {
     // default layers, taking ids, so both are read)
     const core::Document after = load_episode(path);
     const core::Document again = load_episode(path);
-    const std::string bytes = png(atari::overlay_image(after, again.page(*page_at(again, page)), 72));
+    const auto found = page_at(again, page);  // (gone since the proposal was saved: Python's StopIteration)
+    if (!found) return fail(py_str(page) + " ページはない", "no_page", "/page");
+    const std::string bytes = png(atari::overlay_image(after, again.page(*found), 72));
     return ToolResult(true, Json::object({{"proposal", proposal["id"]}, {"panels", proposal["panels"]}, {"tiers", proposal["tiers"]},
                                           {"confidence", proposal["confidence"]}, {"analysis", proposal["analysis"]}}),
                       {}, {bytes});
@@ -185,7 +189,9 @@ ToolResult StudioService::propose_lines(const Json& a) {
     ToolResult result = ops(a["project"], Json::array({Json::object({{"op", "propose"}, {"proposal", proposal}})}));
     if (!result.ok) return result;
     const core::Document after = load_episode(path);
-    const std::string bytes = png(atari::overlay_image(after, after.page(*page_at(after, page)), 72));
+    const auto found = page_at(after, page);  // (gone since the proposal was saved: Python's StopIteration)
+    if (!found) return fail(py_str(page) + " ページはない", "no_page", "/page");
+    const std::string bytes = png(atari::overlay_image(after, after.page(*found), 72));
     return ToolResult(true, Json::object({{"proposal", id}, {"lines", static_cast<std::int64_t>(checked.size())}}), {}, {bytes});
 }
 

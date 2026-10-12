@@ -4,6 +4,7 @@
 // proofs, and long work as background jobs.
 
 #include <algorithm>
+#include <limits>
 #include <chrono>
 #include <thread>
 
@@ -31,6 +32,18 @@ using core::py_str;
 using core::py_truthy;
 
 namespace {
+
+// A size in pixels or dots an exporter takes as an int (width, max_height, long_edge, an animation's dpi): nothing for
+// one an int cannot hold (C++: Python passes it on and makes a picture until its memory runs out; it is refused here,
+// not cut to its low bits).
+std::optional<int> int_size(std::int64_t value) {
+    if (value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()) return std::nullopt;
+    return static_cast<int>(value);
+}
+
+ToolResult too_large(const char* name, const Json& value) {
+    return fail(std::string(name) + " が大きすぎる: " + core::py_str(value), "bad_size", std::string("/") + name);
+}
 
 // _for_agents(found): pre-press findings as an agent needs them (the same kind on many pages said once, with where;
 // what only a person decides said so, not as a switch the agent does not have).
@@ -189,9 +202,14 @@ ToolResult StudioService::export_now(const Json& a) {
                              core::path_from_utf8("p" + util::zero3(page.index.json()) + "." + movie);
         std::vector<fs::path> written;
         try {
-            const int dpi = py_truthy(a["dpi"]) ? static_cast<int>(core::to_int(a["dpi"])) : 100;
-            const std::optional<int> width = core::py_equals(a["width"], Json(800)) ? std::nullopt : std::optional<int>(static_cast<int>(core::to_int(a["width"])));
-            written = render::anim::export_animation(page, out, &episode, dpi, movie, true, "trim", width);
+            const std::optional<int> dpi = py_truthy(a["dpi"]) ? int_size(core::to_int(a["dpi"])) : std::optional<int>(100);
+            if (!dpi) return too_large("dpi", a["dpi"]);
+            std::optional<int> width;
+            if (!core::py_equals(a["width"], Json(800))) {
+                width = int_size(core::to_int(a["width"]));
+                if (!width) return too_large("width", a["width"]);
+            }
+            written = render::anim::export_animation(page, out, &episode, *dpi, movie, true, "trim", width);
         } catch (const core::PyValueError& exc) {
             return fail(exc.what(), "export_failed", "/");
         }
@@ -221,9 +239,15 @@ ToolResult StudioService::export_now(const Json& a) {
     formats::RunOptions options;
     options.actor = actor_;
     if (py_truthy(a["dpi"])) options.dpi = core::to_int(a["dpi"]);
-    options.width = static_cast<int>(core::to_int(a["width"]));
-    options.max_height = static_cast<int>(core::to_int(a["max_height"]));
-    options.long_edge = static_cast<int>(long_edge_px);
+    const std::optional<int> width = int_size(core::to_int(a["width"]));
+    if (!width) return too_large("width", a["width"]);
+    const std::optional<int> max_height = int_size(core::to_int(a["max_height"]));
+    if (!max_height) return too_large("max_height", a["max_height"]);
+    const std::optional<int> edge = int_size(long_edge_px);
+    if (!edge) return too_large("long_edge", long_edge);
+    options.width = *width;
+    options.max_height = *max_height;
+    options.long_edge = *edge;
     options.jpeg = py_truthy(a["jpeg"]);
     options.spreads = py_truthy(a["spreads"]);
     options.area = py_str(a["area"]);

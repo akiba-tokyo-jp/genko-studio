@@ -3,6 +3,8 @@
 #include <zlib.h>
 
 #include <algorithm>
+#include <charconv>
+#include <system_error>
 #include <csetjmp>
 #include <cstdio>
 #include <cstdlib>
@@ -59,7 +61,8 @@ struct PngMode {
     int bits;
 };
 
-PngMode png_mode(std::string_view mode) {
+PngMode png_mode(std::string_view mode, int palette_bits = 8) {
+    if (mode == "P") return {palette_bits, 3, palette_bits};  // ("P;1", "P;2", "P;4" or "P": the palette's length)
     if (mode == "1") return {1, 0, 1};
     if (mode == "L") return {8, 0, 8};
     if (mode == "LA") return {8, 4, 16};
@@ -86,6 +89,9 @@ struct PngWriter::Impl {
     std::string buf;          // one encode(bufsize) call's output
     int y = 0;
     std::vector<unsigned char> buffer, previous, prior, up, average, paeth;
+    bool palette = false;                // mode "P" (a PLTE chunk; rows of fewer bits packed)
+    bool unfiltered = false;             // raw mode "P" (8 bits): ZIP_PNG_PALETTE, no filter and the default strategy
+    std::vector<unsigned char> packed;   // a "P" row packed to the bits a pixel takes (Pack.c's pack1, packP2, packP4)
 
     ~Impl() {
         if (z_open) deflateEnd(&z);
@@ -107,9 +113,11 @@ struct PngWriter::Impl {
         if (result < 0 && result != Z_BUF_ERROR) throw core::Error("io", "encoder error " + std::to_string(result) + " when writing image file");
     }
 
-    // The filter ZipEncode.c chooses for this row (the least total distance from zero), as the bytes deflated.
+    // The filter ZipEncode.c chooses for this row (the least total distance from zero), as the bytes deflated; the rows
+    // of the raw mode "P" unfiltered (encode.c "disable filtering": "P;1", "P;2" and "P;4" are filtered as any).
     const unsigned char* filtered() {
         const unsigned char* output = buffer.data();
+        if (unfiltered) return output;
         int sum = 0;
         for (int i = 1; i <= bytes; ++i) {
             const unsigned char v = buffer[i];
@@ -220,11 +228,13 @@ struct PngWriter::Impl {
     }
 };
 
-PngWriter::PngWriter(render::Size size, std::string_view mode, const PngSave& params) : impl_(std::make_unique<Impl>()) {
+PngWriter::PngWriter(render::Size size, std::string_view mode, const PngSave& params, const PngPicture& picture) : impl_(std::make_unique<Impl>()) {
     Impl& s = *impl_;
     s.size = size;
     s.mode = std::string(mode);
-    s.layout = png_mode(mode);
+    s.palette = mode == "P";
+    s.layout = png_mode(mode, picture.palette_bits);
+    s.unfiltered = s.palette && s.layout.bits == 8;
     if (size.width <= 0 || size.height <= 0) throw core::Error("value", "cannot write an empty image as PNG");
     // (a row's bytes are counted in an int: a wider picture is refused before anything is made for it)
     if ((static_cast<std::int64_t>(s.layout.bits) * size.width + 7) / 8 >= std::numeric_limits<int>::max()) {
@@ -239,6 +249,8 @@ PngWriter::PngWriter(render::Size size, std::string_view mode, const PngSave& pa
     ihdr.append(3, '\0');
     chunk(s.out, "IHDR", ihdr);
     if (!params.icc.empty()) chunk(s.out, "iCCP", std::string("ICC Profile", 11) + std::string(2, '\0') + zlib_compress(params.icc));
+    if (s.palette) chunk(s.out, "PLTE", picture.plte);
+    if (picture.trns) chunk(s.out, "tRNS", *picture.trns);
     if (params.dpi) {
         std::string phys;
         put32(phys, static_cast<std::uint32_t>(static_cast<std::int64_t>((*params.dpi)[0] / 0.0254 + 0.5)));
@@ -260,8 +272,10 @@ PngWriter::PngWriter(render::Size size, std::string_view mode, const PngSave& pa
     s.paeth.assign(n, 4);
     s.buffer[0] = 0;
     s.previous[0] = 0;
-    // optimize: Z_BEST_COMPRESSION; the strategy Z_FILTERED (the data are filtered); window 15, memory level 9
-    if (deflateInit2(&s.z, params.optimize ? Z_BEST_COMPRESSION : Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15, 9, Z_FILTERED) != Z_OK) {
+    // optimize: Z_BEST_COMPRESSION; the strategy Z_FILTERED (the data are filtered) or, unfiltered, the default one;
+    // window 15, memory level 9
+    if (deflateInit2(&s.z, params.optimize ? Z_BEST_COMPRESSION : Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15, 9,
+                     s.unfiltered ? Z_DEFAULT_STRATEGY : Z_FILTERED) != Z_OK) {
         throw core::Error("io", "encoder error when writing image file");
     }
     s.z_open = true;
@@ -279,8 +293,26 @@ void PngWriter::add(const render::Image& rows) {
         const int bottom = std::min(rows.height(), top + band);
         const Image part = top == 0 && bottom == rows.height() ? rows : rows.crop(render::Box{0, top, rows.width(), bottom});
         const std::string raw = part.tobytes();
+        const auto* data = reinterpret_cast<const unsigned char*>(raw.data());
+        const std::size_t width = static_cast<std::size_t>(s.size.width);
         for (int r = 0; r < bottom - top; ++r) {
-            s.row(reinterpret_cast<const unsigned char*>(raw.data()) + static_cast<std::size_t>(r) * static_cast<std::size_t>(s.bytes));
+            if (s.palette && s.layout.bits < 8) {  // (a byte a pixel packed to 1, 2 or 4 bits, the first pixel highest)
+                const unsigned char* in = data + static_cast<std::size_t>(r) * width;
+                s.packed.assign(static_cast<std::size_t>(s.bytes), 0);
+                const int bits = s.layout.bits;
+                const int per = 8 / bits;
+                for (std::size_t x = 0; x < width; ++x) {
+                    // pack1: a set bit for any index but 0; packP2 and packP4: the index's low bits (the first's
+                    // high ones fall off the byte)
+                    const unsigned value = bits == 1 ? (in[x] != 0 ? 1U : 0U) : static_cast<unsigned>(in[x]);
+                    const int shift = 8 - bits * (static_cast<int>(x % static_cast<std::size_t>(per)) + 1);
+                    const unsigned kept = (x % static_cast<std::size_t>(per)) == 0 ? value : (value & ((1U << bits) - 1));
+                    s.packed[x / static_cast<std::size_t>(per)] = static_cast<unsigned char>(s.packed[x / static_cast<std::size_t>(per)] | ((kept << shift) & 0xFF));
+                }
+                s.row(s.packed.data());
+                continue;
+            }
+            s.row(data + static_cast<std::size_t>(r) * static_cast<std::size_t>(s.bytes));
         }
     }
 }
@@ -295,7 +327,46 @@ std::string PngWriter::finish() {
 
 std::string png_bytes(const render::Image& image, const PngSave& params) {
     if (image.empty()) throw core::Error("value", "no image");
-    PngWriter writer(image.size(), image.mode(), params);
+    PngPicture with;
+    const std::string_view mode = image.mode();
+    const render::Transparency& transparency = image.transparency();
+    const auto o16 = [](int v) {
+        std::string out;
+        out += static_cast<char>((v >> 8) & 0xff);
+        out += static_cast<char>(v & 0xff);
+        return out;
+    };
+    if (mode == "P") {
+        // (the palette's length sets the bits a pixel takes; PLTE holds that many entries, zeros past the palette)
+        const std::vector<std::array<std::uint8_t, 3>> entries = image.palette();
+        const int colours = std::max(std::min(static_cast<int>(entries.size()), 256), 1);
+        with.palette_bits = colours <= 2 ? 1 : colours <= 4 ? 2 : colours <= 16 ? 4 : 8;
+        with.plte.clear();
+        for (int i = 0; i < colours; ++i) {
+            for (int b = 0; b < 3; ++b) with.plte += static_cast<char>(i < static_cast<int>(entries.size()) ? entries[static_cast<std::size_t>(i)][static_cast<std::size_t>(b)] : 0);
+        }
+        // tRNS: the transparency the picture carries (an entry: opaque before it; or alpha per entry), else an RGBA
+        // palette's alpha; as many bytes as entries at most
+        if (transparency.kind == render::Transparency::Kind::Index) {
+            const int at = std::clamp(transparency.value, 0, 255);
+            with.trns = (std::string(static_cast<std::size_t>(at), '\xff') + '\0').substr(0, static_cast<std::size_t>(colours));
+        } else if (transparency.kind == render::Transparency::Kind::Bytes) {
+            with.trns = transparency.bytes.substr(0, static_cast<std::size_t>(colours));
+        } else if (transparency.kind == render::Transparency::Kind::Rgb) {
+            throw core::PyValueError("transparency for P must be an integer or bytes");
+        } else if (image.palette_mode() == "RGBA") {
+            const std::vector<std::uint8_t> alpha = image.palette_alpha();
+            with.trns = std::string(alpha.begin(), alpha.begin() + std::min<std::ptrdiff_t>(static_cast<std::ptrdiff_t>(alpha.size()), colours));
+        }
+    } else if (transparency.present() && (mode == "1" || mode == "L")) {
+        if (transparency.kind != render::Transparency::Kind::Index) throw core::PyValueError("transparency for " + std::string(mode) + " must be an integer");
+        with.trns = o16(std::clamp(transparency.value, 0, 65535));
+    } else if (transparency.present() && mode == "RGB") {
+        if (transparency.kind != render::Transparency::Kind::Rgb) throw core::PyValueError("transparency for RGB must be list or tuple");
+        with.trns = o16(transparency.rgb[0]) + o16(transparency.rgb[1]) + o16(transparency.rgb[2]);
+    }
+    // (an RGBA or LA picture's transparency is left out, as Python leaves a stale one in its info)
+    PngWriter writer(image.size(), mode, params, with);
     writer.add(image);
     return writer.finish();
 }
@@ -560,6 +631,14 @@ private:
 
 std::string ref_text(int ref) { return std::to_string(ref) + " 0 R"; }
 
+// "%f" % value: six decimals, C's decimal point whatever the locale (std::to_chars: printf's digits in the C locale).
+std::string fixed6(double value) {
+    char text[512];
+    const auto [end, error] = std::to_chars(text, text + sizeof text, value, std::chars_format::fixed, 6);
+    if (error != std::errc()) throw core::Error("value", "a number too long to write");
+    return std::string(text, end);
+}
+
 // pdf_repr(str): encode_text (UTF-16BE with its BOM) in parentheses, \ ( ) escaped.
 std::string pdf_text(std::string_view utf8) {
     std::string bytes = "\xfe\xff";
@@ -639,9 +718,9 @@ std::string pdf_bytes(const std::vector<Image>& images, double resolution, std::
                                         ref_text(image_refs[i]) + "\n>>\n>>\n/MediaBox [ 0 0 " + core::py_float_repr(w) + " " +
                                         core::py_float_repr(h) + " ]\n/Contents " + ref_text(contents_refs[i]) + "\n/Type /Page\n/Parent " +
                                         ref_text(pages) + "\n>>");
-        char line[128];
-        std::snprintf(line, sizeof line, "q %f 0 0 %f 0 0 cm /image Do Q\n", w, h);
-        const std::string contents = line;
+        // (Python's b"q %f 0 0 %f 0 0 cm /image Do Q\n" % (w, h): C's numbers whatever the locale — snprintf's %f would
+        // take the process's decimal point, a comma in a German one)
+        const std::string contents = "q " + fixed6(w) + " 0 0 " + fixed6(h) + " 0 0 cm /image Do Q\n";
         pdf.write_obj(contents_refs[i], "<<\n/Length " + std::to_string(contents.size()) + "\n>>", &contents);
     }
     const int info = pdf.next_object_id(pdf.out.size());

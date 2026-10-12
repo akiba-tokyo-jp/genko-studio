@@ -5,8 +5,8 @@
 // Undo, character sheets, stats and the audit; the style catalog read from a folder; M0's drafts adopted; art requests,
 // previews, imports, candidates, adoption with Genko's and a person's enlargers, regions, the finishing pass, lines
 // drawn from a picture, the checks, exports into the book, proofs, background jobs, review.html and the blind character
-// test; a one-page book taken to a person's final export; hand-drawn names analysed and accepted; and the command line
-// itself), each step run here and by tools/migration/service_harness.py, each side on its own root and config folder,
+// test; a one-page book taken to a person's final export; hand-drawn names analysed and accepted; the command line
+// itself; palette pictures written as Pillow writes them), each step run here and by tools/migration/service_harness.py, each side on its own root and config folder,
 // ids counted from 1 and the clock fixed on both. Each step's record must be the same: the reply (or the exception
 // raised: its type and words), the previews' bytes (sha256), every book under the root after it (project.json as
 // Python's v3 writer writes it, without its revision; the approval audit's {rev, actor, changes, via}) and every other
@@ -15,12 +15,23 @@
 // at the end of the job as export_files.hpp compares them, without the times their sRGB profiles carry). A background job's id and its
 // time are written <job> and <seconds>, an audit entry's time <at>, and a Python object's address in a message is left
 // out; a book an Undo restored is compared with its keys in any order and without the revisions it records
-// (schema-v4.md: state assets are canonical JSON, and the revision counts on through an Undo).
-// The command line's steps compare its stdout and exit code (the ids it makes are random there: written <id>, a
-// proposal's pr_<id>); Python's tracebacks are this build's {"ok": false, "error": "<Type>: …", "code":
-// "python_error"}, and this build's failures carry "code" (ARCHITECTURE.md §8).
+// (schema-v4.md: state assets are canonical JSON, and the revision counts on through an Undo), and a book whose several
+// character sheets were asked for in one save (SPEC COMP-01a: Python saves each) without the revisions it records.
+// The command line's steps run `genko studio …` in this process as the harness runs Python's (genko::api::studio_command
+// in the root, the step's stdin given, its stdout read; the ids it makes counted as every other step's) and compare its
+// stdout and exit code, then the books and files as every step does; the same job is run once more with each step a
+// process of its own (this build's executable), its stdout and exit code compared with its random ids written <id>,
+// and every step's ending checked (no crash; exit 0, 1 or 3, or 2 where Python's argparse says 2); Python's tracebacks are this build's {"ok": false,
+// "error": "<Type>: …", "code": "python_error"}, and this build's failures carry "code" (ARCHITECTURE.md §8). A work
+// item's lease (studio/claims/<item>.json) is compared with its "expires" written <expires>; this build's is checked to
+// be the time it was made plus the lease. No file or folder this build makes under the root has a ":" in its name (the
+// fixed clock is a time, formatted as each name asks: Windows takes no ":" in a name). confine=False, which only
+// Python's command line passes (keyword-only), is this build's StudioService::set_confine.
 
 #include <QtTest>
+
+#include <cstdio>
+#include <iostream>
 
 #include <QDir>
 #include <QDirIterator>
@@ -28,11 +39,21 @@
 #include <QRegularExpression>
 #include <QTemporaryDir>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <set>
 #include <string>
 
+#include "api/studio_cli.hpp"
 #include "core/base64.hpp"
 #include "core/clock.hpp"
 #include "core/command_bus.hpp"
@@ -188,6 +209,46 @@ bool exported(const std::string& rel) {
     return folders.find("/exports/") != std::string::npos;
 }
 
+// A work item's lease (claims.py): studio/claims/<item>.json.
+bool claim_file(const std::string& rel) {
+    const std::size_t at = rel.rfind("studio/claims/");
+    return at != std::string::npos && (at == 0 || rel[at - 1] == '/') && rel.ends_with(".json") &&
+           rel.find('/', at + 14) == std::string::npos;
+}
+
+// A lease with its time ("expires": the time it was taken plus the lease) written <expires>, as the harness writes it.
+std::string without_expiry(std::string data) {
+    static const QRegularExpression expires(QStringLiteral(R"("expires": -?[0-9][0-9.eE+-]*)"));
+    return QString::fromStdString(data).replace(expires, QStringLiteral("\"expires\": \"<expires>\"")).toStdString();
+}
+
+double now_seconds() { return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+
+// The leases this build took or renewed between `started` and `ended` hold the item for claims.LEASE_SECONDS (600) from
+// then: "" or what is wrong.
+std::string leases_problem(const fs::path& root, double started, double ended) {
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string rel = text_of(it->path().lexically_relative(root));
+        if (!it->is_regular_file() || !claim_file(rel)) continue;
+        const Json lease = genko::core::parse_python_json(genko::storage::read_file(it->path()));
+        const double expires = lease.at("expires").get<double>();
+        if (expires >= started + 600 && expires > ended + 600 + 0.001) return rel + ": expires " + std::to_string(expires) + ", after the lease";
+    }
+    return {};
+}
+
+// The names under the root with a ":" (none may have one: Windows takes none).
+std::string colon_names(const fs::path& root) {
+    std::string found;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string name = text_of(it->path().filename());
+        if (name.find(':') != std::string::npos) found += text_of(it->path().lexically_relative(root)) + "\n";
+    }
+    return found;
+}
+
 // Each file's sha256, the root's and the config folder's paths in it written <root> and <config> first.
 Json files_of(const QString& folder, const std::string& prefix, const std::string& root, const std::string& config) {
     Json out = Json::object();
@@ -214,6 +275,7 @@ Json files_of(const QString& folder, const std::string& prefix, const std::strin
             continue;
         }
         std::string data = genko::test::read_bytes(folder + "/" + QString::fromStdString(rel));
+        if (claim_file(rel)) data = without_expiry(std::move(data));
         data = replace_all(std::move(data), root, "<root>");
         if (!config.empty()) data = replace_all(std::move(data), config, "<config>");
         out[prefix + rel] = sha256(data);
@@ -282,12 +344,14 @@ Json sorted_keys(const Json& value) {
     return value;
 }
 
-// The JSON with the revisions it records ("rev", "revision", "undone_revision": numbers) written <rev>.
+// The JSON with the revisions it records ("rev", "revision", "undone_revision", "at_rev", "changed_rev",
+// "resolved_rev": numbers) written <rev>.
 Json without_revisions(const Json& value) {
     if (value.is_object()) {
         Json out = Json::object();
         for (const auto& [key, item] : value.items()) {
-            const bool revision = key == "rev" || key == "revision" || key == "undone_revision";
+            const bool revision = key == "rev" || key == "revision" || key == "undone_revision" || key == "at_rev" || key == "changed_rev" ||
+                                  key == "resolved_rev";
             out[key] = revision && item.is_number() ? Json("<rev>") : without_revisions(item);
         }
         return out;
@@ -396,6 +460,85 @@ Json human_call(genko::service::HumanService& human, const std::string& name, co
     throw std::runtime_error("no such person's call " + name);
 }
 
+// A standard stream (0, 1 or 2) read from or written to a file while it lives.
+class Redirected {
+public:
+    Redirected(int fd, const QString& file, bool output) : fd_(fd) {
+        std::fflush(stdout);
+        std::fflush(stderr);
+        const QByteArray name = QFile::encodeName(file);
+#ifdef _WIN32
+        const int opened = output ? ::_open(name.constData(), _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, 0600)
+                                  : ::_open(name.constData(), _O_RDONLY | _O_BINARY);
+        saved_ = ::_dup(fd);
+        ::_dup2(opened, fd);
+        ::_close(opened);
+#else
+        const int opened = output ? ::open(name.constData(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600) : ::open(name.constData(), O_RDONLY | O_CLOEXEC);
+        saved_ = ::dup(fd);
+        ::dup2(opened, fd);
+        ::close(opened);
+#endif
+        settle();
+    }
+    ~Redirected() {
+        std::fflush(stdout);
+        std::fflush(stderr);
+#ifdef _WIN32
+        ::_dup2(saved_, fd_);
+        ::_close(saved_);
+#else
+        ::dup2(saved_, fd_);
+        ::close(saved_);
+#endif
+        settle();
+    }
+    Redirected(const Redirected&) = delete;
+    Redirected& operator=(const Redirected&) = delete;
+
+private:
+    static void settle() {  // (what stdin said before is forgotten: an end of file, a read ahead)
+        std::clearerr(stdin);
+        std::cin.clear();
+    }
+
+    int fd_;
+    int saved_ = -1;
+};
+
+// `genko studio <args>` as service_harness.py runs genko.studio.cli.main(args): in this process (its ids counted with
+// every other step's), in the root (or its "cwd" under it), with the step's stdin; what it printed on stdout (JSON, or
+// nothing) and its exit code.
+Json cli_step(const Json& step, const fs::path& root) {
+    QStringList args;
+    bool ascii = false;
+    for (const Json& a : step["cli"]) {
+        const QString arg = QString::fromStdString(a.get<std::string>());
+        if (arg == QLatin1String("--ascii")) {  // (genko's own flag, taken before the command: api/cli.cpp)
+            ascii = true;
+            continue;
+        }
+        args << arg;
+    }
+    QTemporaryDir io;
+    const QString in = io.filePath(QStringLiteral("stdin")), out = io.filePath(QStringLiteral("stdout")), err = io.filePath(QStringLiteral("stderr"));
+    genko::test::write_bytes(in, step.value("stdin", std::string()));
+    const QString was = QDir::currentPath();
+    QDir::setCurrent(QString::fromStdString(text_of(root / genko::storage::path_from_utf8(step.value("cwd", std::string())))));
+    int code = 0;
+    {
+        const Redirected input(0, in, false);
+        const Redirected output(1, out, true);
+        const Redirected errors(2, err, true);
+        code = genko::api::studio_command(args, ascii);
+    }
+    QDir::setCurrent(was);
+    const std::string text = genko::test::read_bytes(out);
+    Json parsed;
+    if (!QString::fromStdString(text).trimmed().isEmpty()) parsed = genko::core::parse_python_json(text);
+    return Json::object({{"out", parsed}, {"code", code}});
+}
+
 // One step as service_harness.py's _step makes it, with this build.
 Json cpp_step(const Json& raw, const fs::path& root, const QProcessEnvironment& env) {
     Json step;
@@ -417,8 +560,12 @@ Json cpp_step(const Json& raw, const fs::path& root, const QProcessEnvironment& 
     if (step.contains("tool")) {
         try {
             genko::service::StudioService service(root, step.value("actor", std::string("ai:agent")));
-            const genko::service::ToolResult result =
-                service.call(step["tool"].get<std::string>(), step.value("args", Json::array()), step.value("kwargs", Json::object()));
+            Json kwargs = step.value("kwargs", Json::object());
+            if (kwargs.contains("confine")) {  // (Python's keyword-only confine=, which only its command line passes)
+                service.set_confine(genko::core::py_truthy(kwargs["confine"]));
+                kwargs.erase("confine");
+            }
+            const genko::service::ToolResult result = service.call(step["tool"].get<std::string>(), step.value("args", Json::array()), kwargs);
             Json images = Json::array();
             for (const std::string& png : result.images) images.push_back(sha256(png));
             return Json::object({{"reply", result.to_dict()}, {"images", std::move(images)}});
@@ -456,28 +603,41 @@ Json cpp_step(const Json& raw, const fs::path& root, const QProcessEnvironment& 
             return raised(error);
         }
     }
-    QStringList args;
-    for (const Json& a : step["cli"]) args << QString::fromStdString(a.get<std::string>());
-    args.prepend(QStringLiteral("studio"));
-    const auto ran = genko::test::run_genko(args, env, QByteArray::fromStdString(step.value("stdin", std::string())));
-    const std::string out = ran.out.toStdString();
-    Json parsed;
-    if (!out.empty()) parsed = genko::core::parse_python_json(out);
-    return Json::object({{"out", parsed}, {"code", ran.exit_code}});
+    (void)env;
+    return cli_step(step, root);
 }
 
-// The command line's record as compared: the ids it made written <id>; Python's traceback as this build reports it.
+// The command line's record as compared: Python's traceback as this build reports it.
 Json cli_record(Json record) {
     if (record.contains("traceback")) {
         record["out"] = Json::object({{"ok", false}, {"error", record["traceback"]}, {"code", "python_error"}});
         record.erase("traceback");
     }
-    std::string text = genko::core::dump_python(record);
+    return record;
+}
+
+// A record of a process of its own, whose ids are random: each id it made written <id>, a proposal's (a hash of its
+// page's id) pr_<id>.
+Json without_ids(const Json& record) {
     static const QRegularExpression ids(QStringLiteral("(?<![0-9a-f])[0-9a-f]{12}(?![0-9a-f])"));
-    // (a proposal's id is a hash of its page's id: random there too)
     static const QRegularExpression proposals(QStringLiteral("pr_[0-9a-f]{10}(?![0-9a-f])"));
-    text = QString::fromStdString(text).replace(ids, QStringLiteral("<id>")).replace(proposals, QStringLiteral("pr_<id>")).toStdString();
-    return genko::core::parse_python_json(text);
+    const QString text = QString::fromStdString(genko::core::dump_python(record));
+    return genko::core::parse_python_json(QString(text).replace(ids, QStringLiteral("<id>")).replace(proposals, QStringLiteral("pr_<id>")).toStdString());
+}
+
+// Python's records of a job (service_harness.py run), made in `folder`.
+Json python_records(const Json& job, const QString& folder, const QString& scratch) {
+    const QString root = folder + "/" + QString::fromStdString(job["name"].get<std::string>());
+    Json env = job["env"];
+    env["GENKO_CONFIG_DIR"] = (root + "-config").toStdString();
+    const QString out = root + ".json";
+    QDir().mkpath(folder);
+    const Json jobs = Json::array({Json::object({{"root", root.toStdString()}, {"env", env}, {"clock", job["clock"]}, {"steps", job["steps"]},
+                                                  {"out", out.toStdString()}})});
+    genko::test::write_bytes(root + "-jobs.json", genko::core::dump_python(jobs));
+    const auto ran = service_harness({"run", root + "-jobs.json"}, scratch);
+    if (!ran.finished || ran.exit_code != 0) throw std::runtime_error("the harness failed: " + ran.err.right(4000).toStdString());
+    return genko::test::read_json(out);
 }
 
 }  // namespace
@@ -508,7 +668,6 @@ private slots:
         const Json cases = genko::test::read_json(genko::test::repo_root() + "/native/tests/contract/service_cases.json");
         const Json& c = cases["jobs"][static_cast<std::size_t>(job)];
         const QString name = QString::fromStdString(c["name"].get<std::string>());
-        const bool cli = c.value("cli", false);
 
         // Python's records
         const QString py_root = path("py/" + name);
@@ -538,6 +697,12 @@ private slots:
             qputenv(k.constData(), QByteArray::fromStdString(value));
             process_env.insert(QString::fromStdString(key), QString::fromStdString(value));
         };
+        const auto restore_env = [&saved] {
+            for (const auto& [key, value] : saved) {
+                if (value) qputenv(key.constData(), *value); else qunsetenv(key.constData());
+            }
+            saved.clear();
+        };
         set_env("GENKO_CONFIG_DIR", cpp_config.toStdString());
         for (const auto& [key, value] : c["env"].items()) set_env(key, replace_all(value.get<std::string>(), "$root", text_of(cpp_root)));
         const genko::core::ScopedIdSource ids(genko::core::counting_ids());
@@ -548,32 +713,43 @@ private slots:
         // keys in sorted order, and the revision counts on where Python's goes back — schema-v4.md — so from then on
         // those books are compared with their keys in any order and the revisions they and their replies record unread)
         std::set<std::string> restored;
+        std::set<std::string> renumbered;
         for (std::size_t n = 0; n < c["steps"].size(); ++n) {
             const Json& step = c["steps"][n];
+            const double started = now_seconds();
             Json mine = cpp_step(step, cpp_root, process_env);
+            const double ended = now_seconds();
+            if (const std::string lease = leases_problem(cpp_root, started, ended); !lease.empty()) {
+                restore_env();
+                QFAIL(("step " + std::to_string(n) + ": " + lease).c_str());
+            }
             Json theirs = python[n];
-            if (cli) {
-                if (!step.contains("cli")) continue;
-                mine = cli_record(normal(mine, text_of(cpp_root), cpp_config.toStdString()));
-                Json kept = Json::object({{"out", theirs["out"]}, {"code", theirs["code"]}});
-                if (theirs.contains("traceback")) kept["traceback"] = theirs["traceback"];
-                theirs = cli_record(std::move(kept));
+            mine["books"] = books_of(cpp_root, store);
+            mine["files"] = files_of(cpp_root_text, "", text_of(cpp_root), cpp_config.toStdString());
+            // (held: items() of a temporary would dangle)
+            const Json config_files = files_of(cpp_config, "<config>/", text_of(cpp_root), cpp_config.toStdString());
+            for (const auto& [key, value] : config_files.items()) mine["files"][key] = value;
+            mine = normal(mine, text_of(cpp_root), cpp_config.toStdString());
+            if (theirs.contains("unresolved")) theirs["unresolved"] = true;
+            if (step.contains("cli")) {
+                mine = cli_record(std::move(mine));
+                theirs = cli_record(std::move(theirs));
                 // (this build's failures carry their code too: ARCHITECTURE.md §8)
                 if (mine["out"].is_object() && theirs["out"].is_object() && mine["out"].contains("code") && !theirs["out"].contains("code") &&
                     mine["out"].value("ok", true) == false) {
                     mine["out"].erase("code");
                 }
-            } else {
-                mine["books"] = books_of(cpp_root, store);
-                mine["files"] = files_of(cpp_root_text, "", text_of(cpp_root), cpp_config.toStdString());
-                // (held: items() of a temporary would dangle)
-                const Json config_files = files_of(cpp_config, "<config>/", text_of(cpp_root), cpp_config.toStdString());
-                for (const auto& [key, value] : config_files.items()) mine["files"][key] = value;
-                mine = normal(mine, text_of(cpp_root), cpp_config.toStdString());
-                if (theirs.contains("unresolved")) theirs["unresolved"] = true;
             }
-            if (!cli && step.contains("tool") && step["tool"] == "undo" && mine.contains("reply") && mine["reply"].value("ok", false)) {
+            if (step.contains("tool") && step["tool"] == "undo" && mine.contains("reply") && mine["reply"].value("ok", false)) {
                 restored.insert(step["args"].at(0).get<std::string>());
+            }
+            // (request_approval for several character sheets: one save here where Python saves each in turn — SPEC
+            // COMP-01a —, so from then on the book's revision is behind Python's by the requests after the first: what it
+            // records of its revision is compared without it, the rest as before)
+            const Json kwargs = step.value("kwargs", Json::object());
+            if (step.contains("tool") && step["tool"] == "request_approval" && kwargs.contains("character_ids") && kwargs["character_ids"].is_array() &&
+                kwargs["character_ids"].size() > 1 && mine.contains("reply") && mine["reply"].value("ok", false)) {
+                renumbered.insert(step["args"].at(0).get<std::string>());
             }
             for (const std::string& book : restored) {
                 for (Json* side : {&mine, &theirs}) {
@@ -581,6 +757,17 @@ private slots:
                         (*side)["books"][book]["project"] = without_revisions(sorted_keys((*side)["books"][book]["project"]));
                     }
                     const bool on_book = step.contains("args") && !step["args"].empty() && step["args"][0] == book;
+                    if (on_book && side->contains("reply")) (*side)["reply"] = without_revisions((*side)["reply"]);
+                }
+            }
+            for (const std::string& book : renumbered) {
+                for (Json* side : {&mine, &theirs}) {
+                    if (side->contains("books") && (*side)["books"].contains(book)) {
+                        (*side)["books"][book]["project"] = without_revisions((*side)["books"][book]["project"]);
+                        (*side)["books"][book]["audit"] = without_revisions((*side)["books"][book]["audit"]);
+                    }
+                    const bool on_book = (step.contains("args") && !step["args"].empty() && step["args"][0] == book) ||
+                                         (step.contains("project") && step["project"] == book);
                     if (on_book && side->contains("reply")) (*side)["reply"] = without_revisions((*side)["reply"]);
                 }
             }
@@ -599,16 +786,12 @@ private slots:
                 const std::string message = "step " + std::to_string(n) + " " + genko::core::dump_python(step).substr(0, 600) + "\n  at " + where +
                                             "\n  C++:    " + genko::core::dump_python(mine).substr(0, 3000) +
                                             "\n  Python: " + genko::core::dump_python(theirs).substr(0, 3000);
-                for (const auto& [key, value] : saved) {
-                    if (value) qputenv(key.constData(), *value); else qunsetenv(key.constData());
-                }
+                restore_env();
                 QFAIL(message.c_str());
             }
             ++compared;
         }
-        for (const auto& [key, value] : saved) {
-            if (value) qputenv(key.constData(), *value); else qunsetenv(key.constData());
-        }
+        restore_env();
         // what the exports wrote: the same bytes but the times Python's files carry (both roots list the same files)
         int exported_files = 0;
         QDirIterator files(py_root, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
@@ -623,8 +806,91 @@ private slots:
                      qPrintable(rel + ": " + genko::test::exports::tree_difference(QFileInfo(mine_file).path(), QFileInfo(file).path())));
             ++exported_files;
         }
+        const std::string colons = colon_names(cpp_root);
+        QVERIFY2(colons.empty(), ("names with a colon:\n" + colons).c_str());
         qInfo("%s: %d steps the same as Python's, %d exported files", qPrintable(name), compared, exported_files);
         QVERIFY(compared >= 15);
+    }
+
+    // The command line's job again, each `genko studio …` a process of its own (this build's executable, as people run
+    // it, in the root, the step's stdin given): its stdout (JSON) and exit code against Python's, the ids it makes
+    // written <id> (random in a process of its own; the books are compared by serviceLikePython's run in this
+    // process). Every step's process started, ended in its time without crashing, and exits 0, 1 or 3 — 2 only where
+    // Python's argparse refuses the arguments too. What a step's process did is said in full when it differs (no step
+    // is run again).
+    void commandLineAsProcesses() {
+        const Json cases = genko::test::read_json(genko::test::repo_root() + "/native/tests/contract/service_cases.json");
+        Json job;
+        for (const Json& c : cases["jobs"]) {
+            if (c.value("cli", false)) job = c;
+        }
+        QVERIFY(job.is_object());
+        Json python;
+        try {
+            python = python_records(job, path("py-processes"), path("pyenv"));
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+        QCOMPARE(python.size(), job["steps"].size());
+        const QString root_text = path("processes/cli");
+        const QString config = path("processes/cli-config");
+        QDir().mkpath(root_text);
+        const fs::path root = genko::storage::path_from_utf8(root_text.toStdString());
+        QProcessEnvironment env;
+        env.insert(QStringLiteral("GENKO_CONFIG_DIR"), config);
+        for (const auto& [key, value] : job["env"].items()) {
+            env.insert(QString::fromStdString(key), QString::fromStdString(replace_all(value.get<std::string>(), "$root", text_of(root))));
+        }
+        int compared = 0;
+        int usage = 0;
+        for (std::size_t n = 0; n < job["steps"].size(); ++n) {
+            const Json& raw = job["steps"][n];
+            if (!raw.contains("cli")) {
+                (void)cpp_step(raw, root, env);  // (the files the steps read)
+                continue;
+            }
+            const Json step = resolved(raw, root);
+            QStringList args{QStringLiteral("studio")};
+            for (const Json& a : step["cli"]) args << QString::fromStdString(a.get<std::string>());
+            const QString cwd = QString::fromStdString(text_of(root / genko::storage::path_from_utf8(step.value("cwd", std::string()))));
+            const genko::test::Run ran = genko::test::run_genko(args, env, QByteArray::fromStdString(step.value("stdin", std::string())), cwd);
+            const std::string what = "step " + std::to_string(n) + " " + genko::core::dump_python(raw).substr(0, 300) + "\n  the process: " +
+                                     ran.described().toStdString();
+            const Json& theirs_raw = python[n];
+            // how it ended
+            const int expected = theirs_raw.value("code", -1);
+            const bool ended_well = ran.started && ran.finished && !ran.crashed &&
+                                    (ran.exit_code == 0 || ran.exit_code == 1 || ran.exit_code == 3 || (ran.exit_code == 2 && expected == 2));
+            QVERIFY2(ended_well, what.c_str());
+            usage += ran.exit_code == 2 ? 1 : 0;
+            // what it printed: one JSON object, or nothing
+            Json out;
+            const QByteArray printed = ran.out.trimmed();
+            if (!printed.isEmpty()) {
+                try {
+                    out = genko::core::parse_python_json(ran.out.toStdString());
+                } catch (const std::exception& error) {
+                    QFAIL((what + "\n  stdout is not JSON: " + error.what()).c_str());
+                }
+            }
+            Json mine = without_ids(cli_record(normal(Json::object({{"out", out}, {"code", ran.exit_code}}), text_of(root), config.toStdString())));
+            Json kept = Json::object({{"out", theirs_raw["out"]}, {"code", theirs_raw["code"]}});
+            if (theirs_raw.contains("traceback")) kept["traceback"] = theirs_raw["traceback"];
+            Json theirs = without_ids(cli_record(std::move(kept)));
+            // (this build's failures carry their code too: ARCHITECTURE.md §8)
+            if (mine["out"].is_object() && theirs["out"].is_object() && mine["out"].contains("code") && !theirs["out"].contains("code") &&
+                mine["out"].value("ok", true) == false) {
+                mine["out"].erase("code");
+            }
+            std::string where;
+            QVERIFY2(genko::test::strict_equal(mine, theirs, &where),
+                     (what + "\n  at " + where + "\n  C++:    " + genko::core::dump_python(mine).substr(0, 3000) +
+                      "\n  Python: " + genko::core::dump_python(theirs).substr(0, 3000))
+                         .c_str());
+            ++compared;
+        }
+        qInfo("cli as processes: %d steps the same as Python's (%d of them usage errors, exit 2 as Python's)", compared, usage);
+        QVERIFY(compared >= 90);
     }
 };
 

@@ -331,6 +331,92 @@ def ship_job() -> dict:
     return {"name": "ship", "clock": "2026-10-01T09:00:00", "env": {"GENKO_USER": "leaf"}, "steps": steps}
 
 
+def palette_picture(size, colours, fmt="GIF", transparency=None, grey=False) -> bytes:
+    """A palette picture (mode P) of `colours` entries, each of them used: what Pillow saves as a palette PNG of 1, 2, 4
+    or 8 bits a pixel (a GIF's palette is a power of two long)."""
+    from PIL import Image, ImageDraw
+
+    image = Image.new("P", size, 0)
+    palette = []
+    for i in range(colours):
+        palette += [i * 255 // max(1, colours - 1)] * 3 if grey else [(i * 37 + 11) % 256, (i * 91 + 7) % 256, (i * 53 + 29) % 256]
+    image.putpalette(palette)
+    draw = ImageDraw.Draw(image)
+    for k in range(colours):
+        draw.line((k % size[0], 0, size[0] - 1 - k % size[0], size[1] - 1), fill=k, width=1 + k % 3)
+        draw.point((k % size[0], (k * 7) % size[1]), fill=k)
+    buf = io.BytesIO()
+    image.save(buf, format=fmt, **({} if transparency is None else {"transparency": transparency}))
+    return buf.getvalue()
+
+
+def huge_header_png(width: int, height: int) -> bytes:
+    """A PNG whose header says width × height (greys, 8 bits) with a few bytes of pixels: Pillow's verify() reads its
+    chunks (all whole), not its pixels, so the import then refuses its size."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(b"\0" * 64)) + chunk(b"IEND", b""))
+
+
+def palette_job() -> dict:
+    """Palette pictures (mode P) as Pillow writes them as PNG — 1, 2, 4 and 8 bits a pixel, with and without the
+    transparent entry: a GIF brought in with import_image (kept as a palette, by path or base64), a palette PNG and a
+    GIF cut to a panel by take_panel_art's crop01 (the cut saved in the inbox, then imported as it is), GIFs made RGB by
+    import_images (the transparent colour kept), an adopted palette picture given to a person's enlarger (the file the
+    program reads); and a PNG whose header asks for more pixels than an import takes."""
+    bible, script = fixture("bible.json"), fixture("script.json")
+    for scene in script["scenes"]:
+        scene["beats"] = [b for b in scene["beats"] if b.get("page", 1) <= 1]
+    plan = fixture("p001.json")
+    origin = {"kind": "agent", "tool_id": "local:sd", "model": "m1"}
+    gifs = [palette_picture((13, 7), 2, transparency=1), palette_picture((9, 6), 4), palette_picture((11, 5), 3, transparency=0),
+            palette_picture((15, 9), 16, transparency=5), palette_picture((17, 8), 12), palette_picture((21, 10), 200),
+            palette_picture((19, 7), 256, transparency=255), palette_picture((10, 6), 6, grey=True)]
+    p_png = palette_picture((40, 30), 3, fmt="PNG")
+    p_png_alpha = palette_picture((33, 27), 9, fmt="PNG", transparency=2)
+    cut_gif = palette_picture((48, 36), 16, transparency=3)
+    f0 = f"$frame:{BOOK}:1:0"
+    req = f"$request:{BOOK}:0"
+    steps = [
+        tool("create_project", BOOK, "palette", 1, spec_preset="doujin-a5"),
+        tool("set_bible", BOOK, bible, commit=True),
+        tool("set_script", BOOK, script, commit=True),
+        tool("submit_name", BOOK, plan, commit=True, max_px=120),
+        human("approve_name", [1]),
+        *[tool("import_image", BOOK, png_base64=b64(g)) for g in gifs],
+        write("pics/p.gif", gifs[3]),
+        tool("import_image", BOOK, path="pics/p.gif"),
+        tool("import_image", BOOK, png_base64=b64(p_png)),
+        asset(p_png), asset(p_png_alpha), asset(cut_gif),
+        tool("generation_request", BOOK, page=1, frame_id=f0),
+        tool("import_images", BOOK, req, [{"asset": "sha256:" + "0" * 64, "origin": origin}]),
+        write(f"{BOOK}/studio/inbox/huge.png", huge_header_png(10000, 10000)),
+        tool("import_images", BOOK, req, [{"file": "studio/inbox/huge.png", "origin": origin}]),
+        tool("import_images", BOOK, req, [{"file": "studio/inbox/huge.png", "origin": origin}, {"asset": ref(p_png), "origin": origin}]),
+        tool("take_panel_art", BOOK, req, {"asset": ref(p_png), "origin": origin}, crop01=[0.1, 0.1, 0.7, 0.8], upscale=False),
+        tool("take_panel_art", BOOK, req, {"asset": ref(cut_gif), "origin": origin}, crop01=[0, 0.25, 0.55, 0.5], upscale=False),
+        tool("take_panel_art", BOOK, req, {"asset": ref(p_png_alpha), "origin": origin}, crop01=[0.2, 0.2, 0.6, 0.6], upscale=False),
+        asset(gifs[3]), asset(gifs[2]),
+        # (import_images makes RGB of a palette picture that is not a PNG: the transparent entry's colour kept as the
+        # RGB picture's transparent colour, a tRNS chunk)
+        tool("import_images", BOOK, req, [{"asset": ref(gifs[3]), "origin": origin}, {"asset": ref(gifs[2]), "origin": origin}], preview=False),
+        tool("candidates", BOOK, page=1, frame_id=f0),
+        tool("render", BOOK, 1, kind="compare", frame_id=f0, max_px=120),
+        {"cli": ["upscaler", "add", "copy", "--command", "cp {in} {out}", "--scales", "2"]},
+        tool("upscale", BOOK, 1, f0, scale=2, method="copy"),
+        tool("upscale", BOOK, 1, f0, candidate_id=f"$panelcand:{BOOK}:1:0:0", scale=2, method="copy"),
+        tool("upscale", BOOK, 1, f0, candidate_id=f"$panelcand:{BOOK}:1:0:1", scale=2),
+        tool("derive", BOOK, 1, f0, candidate_id=f"$panelcand:{BOOK}:1:0:1"),
+        tool("render", BOOK, 1, mode="print", max_px=120),
+    ]
+    return {"name": "palette", "clock": "2026-10-01T09:00:00", "env": {"GENKO_USER": "leaf"}, "steps": steps}
+
+
 def atari_job() -> dict:
     """Hand-drawn names (M5②b): scans placed on the draft layer and analysed into layout proposals, analysed again with
     other settings, lines read from the handwriting proposed, a person accepting them, the overlay; D8's evaluation."""
@@ -465,6 +551,12 @@ def flow_job() -> dict:
         human("approve_name", [3, 1, 2, 4]),
         tool("status", BOOK),
         tool("next", BOOK, limit=50),
+        # (work items leased: studio/claims/<item>.json, whose "expires" is the time then plus the lease; another agent
+        # sees them taken, the holder renews them)
+        tool("next", BOOK, limit=50, claim=True),
+        tool("next", BOOK, limit=50, actor="ai:other"),
+        tool("next", BOOK, limit=1, claim=True, actor="ai:other"),
+        tool("next", BOOK, limit=50, claim=True),
         tool("tickets", BOOK, status="all"),
         tool("apply_ops", BOOK, "x"),
         tool("apply_ops", BOOK, [{"op": "approve", "gate": "name", "page": 1}]),
@@ -747,7 +839,7 @@ def cli_job() -> dict:
 
 
 def main() -> int:
-    jobs = [flow_job(), style_job(), drafts_job(), art_job(), ship_job(), atari_job(), cli_job()]
+    jobs = [flow_job(), style_job(), drafts_job(), art_job(), ship_job(), atari_job(), cli_job(), palette_job()]
     OUT.write_text(json.dumps({"jobs": jobs}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(f"{OUT}: {sum(len(j['steps']) for j in jobs)} steps in {len(jobs)} jobs")
     return 0

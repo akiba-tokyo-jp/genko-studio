@@ -206,6 +206,13 @@ public:
     Image quantize(int colors = 256) const;
     // A "P" picture's palette: RGB of each entry it has (nothing for other modes).
     std::vector<std::array<std::uint8_t, 3>> palette() const;
+    // Its palette's mode ("RGB" or "RGBA": im.im.getpalettemode()), "" without one; the alpha of each entry it has
+    // (im.im.getpalette("RGBA", "A")).
+    std::string_view palette_mode() const;
+    std::vector<std::uint8_t> palette_alpha() const;
+    // putpalette(data, rawmode): `data` the entries' bytes in `rawmode` ("RGB" or "RGBA"), at most 256 of them; an
+    // "L" or "LA" picture becomes "P" or "PA" (core::Error("value") for other modes).
+    void putpalette(std::string_view rawmode, std::string_view data);
 
     // point(lut[, mode]): lut holds 256 values per band (clipped to 0..255), or 256 when mode is "1" or "L" from "L"
     // or "P".

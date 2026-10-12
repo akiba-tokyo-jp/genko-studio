@@ -3,6 +3,7 @@
 // Genko's own image steps.
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 
 #include "core/base64.hpp"
@@ -15,7 +16,6 @@
 #include "formats/pillow_save.hpp"
 #include "render/draw.hpp"
 #include "render/filters.hpp"
-#include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/raster_ops.hpp"
@@ -119,7 +119,10 @@ std::pair<std::string, std::string> render_kind(const core::Document& doc, const
     } else {
         throw core::ApplyError("kind は compare / guide:composition / guide:pose / guide:keepout");
     }
-    const int edge = static_cast<int>(core::to_int(max_px));
+    // (thumbnail only shrinks: an edge past an int's range is the int's end — the same picture, not a size cut to its
+    // low bits)
+    const std::int64_t asked = core::to_int(max_px);
+    const int edge = static_cast<int>(std::clamp<std::int64_t>(asked, std::numeric_limits<int>::min(), std::numeric_limits<int>::max()));
     image.thumbnail(render::Size{edge, edge});
     return {png(image), label};
 }
@@ -222,11 +225,15 @@ std::optional<std::string> b64decode_validate(std::string_view text) {
     return core::a2b_base64(text);
 }
 
-// _png(image) of a picture an agent brought in: a palette picture (a GIF, mode P) is stored by Pillow as a palette PNG,
-// which this build does not write yet (render::NotYetPorted "palette_png": nothing is written).
+// _png(image) of a picture an agent brought in: a palette picture (a GIF, mode P) stored as Pillow stores it, a palette
+// PNG; a mode Pillow does not write as PNG (PA) is Python's OSError.
 std::string picture_png(const render::Image& image) {
-    if (image.mode() == "P" || image.mode() == "PA") throw render::NotYetPorted("palette_png");
-    return png(image);
+    try {
+        return png(image);
+    } catch (const core::Error& error) {
+        if (error.code() == "io") throw core::PyUncaught("OSError", error.what());
+        throw;
+    }
 }
 
 // Path(text).stem
@@ -267,7 +274,10 @@ ToolResult StudioService::render(const Json& a) {
         render::Image paper = render::Image::create("RGBA", alone.size(), render::Ink{255, 255, 255, 255});
         paper.alpha_composite(alone);
         const std::string bytes = png(paper.convert("RGB"));
-        const fs::path out = path / "studio" / "reviews" / core::path_from_utf8("p" + util::zero3(page) + "_layer_" + py_str(a["layer_id"]) + ".png");
+        // (C++: the id's "/" and "\\" written "_", and the file kept in the book — SPEC COMP-01a)
+        const fs::path out =
+            path / "studio" / "reviews" / core::path_from_utf8("p" + util::zero3(page) + "_layer_" + util::name_part(py_str(a["layer_id"])) + ".png");
+        if (!util::inside(root_, out)) return fail("書き出し先が --root の外になる: " + util::path_text(out), "path_outside_root", "/layer_id");
         util::write_file(out, bytes);
         const std::string title = layer->title.empty() ? std::string(core::to_string(layer->role)) : layer->title;
         return ToolResult(true, Json::object({{"page", page}, {"layer_id", a["layer_id"]}, {"title", title}}), {}, {bytes}, {util::path_text(out)});
@@ -289,7 +299,10 @@ ToolResult StudioService::render(const Json& a) {
         label = py_truthy(frame_id) ? mode.get<std::string>() + "_" + py_str(frame_id) : mode.get<std::string>();
     }
     std::replace(label.begin(), label.end(), ':', '-');
-    const fs::path out = path / "studio" / "reviews" / core::path_from_utf8("p" + util::zero3(page) + "_" + label + ".png");
+    // (C++: the ids in the label — the candidate's, the frame's — with their "/" and "\\" written "_", and the file kept
+    // in the book: Python writes wherever a "../" in an id leads — SPEC COMP-01a)
+    const fs::path out = path / "studio" / "reviews" / core::path_from_utf8("p" + util::zero3(page) + "_" + util::name_part(label) + ".png");
+    if (!util::inside(root_, out)) return fail("書き出し先が --root の外になる: " + util::path_text(out), "path_outside_root", "/");
     util::write_file(out, bytes);
     return ToolResult(true, Json::object({{"page", page}, {"mode", mode}, {"kind", kind}, {"frame_id", frame_id}}), {}, {bytes}, {util::path_text(out)});
 }
@@ -607,7 +620,10 @@ ToolResult StudioService::adopt(const Json& a) {
     const bool upscale_on = py_truthy(a["upscale"]);
     if (core::py_equals(to, Json("art"))) {  // (the resolution is told whether it is enlarged or not)
         const core::Document doc = load_episode(path);
-        const core::Page& pg = doc.page(*page_at(doc, page));
+        // (the page another writer took away since the candidate was adopted: Python's next() stops with StopIteration)
+        const auto found = page_at(doc, page);
+        if (!found) return fail(py_str(page) + " ページはない", "no_page", "/page");
+        const core::Page& pg = doc.page(*found);
         const core::Layer* layer = nullptr;
         for (const core::Layer* la : preflight::art_layers(pg)) {
             const Json source = la->source && py_truthy(*la->source) ? *la->source : Json::object();
@@ -794,7 +810,9 @@ ToolResult StudioService::report_regions(const Json& a) {
                                                                      {"source", "agent"}, {"regions", converted}})}));
     if (result.ok) {
         const core::Document after = load_episode(path);
-        const auto [plan_ops, notes] = finish::plan(after, after.page(*page_at(after, a["page"])));
+        const auto found = page_at(after, a["page"]);  // (gone since the regions were saved: Python's StopIteration)
+        if (!found) return fail(py_str(a["page"]) + " ページはない", "no_page", "/page");
+        const auto [plan_ops, notes] = finish::plan(after, after.page(*found));
         (void)plan_ops;
         Json preview_notes = Json::array();
         for (const Json& n : notes) {
@@ -822,7 +840,9 @@ ToolResult StudioService::finish_page(const Json& a) {
     Json data = Json::object({{"committed", false}, {"page", a["page"]}, {"changes", notes}, {"ops", static_cast<std::int64_t>(plan_ops.size())}});
     if (py_truthy(a["commit"])) {
         Session session(path, actor_);
-        const auto again = finish::plan(session.doc(), session.doc().page(*page_at(session.doc(), a["page"])));
+        const auto found = page_at(session.doc(), a["page"]);  // (gone since it was read: Python's StopIteration)
+        if (!found) return fail(py_str(a["page"]) + " ページはない", "no_page", "/page");
+        const auto again = finish::plan(session.doc(), session.doc().page(*found));
         session.apply(again.first, actor_);
         session.save(actor_);
         data["committed"] = true;
@@ -988,7 +1008,7 @@ ToolResult StudioService::import_image(const Json& a) {
         std::error_code ec;
         fs::path resolved = fs::weakly_canonical(source, ec);
         if (ec) resolved = source.lexically_normal();
-        if (py_truthy(a["confine"])) {
+        if (confine_) {
             bool under = false;
             auto p = resolved.begin();
             auto r = root_.begin();

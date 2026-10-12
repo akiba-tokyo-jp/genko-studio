@@ -2325,6 +2325,47 @@
      }
     },
     {
+     "tool": "next",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "limit": 50,
+      "claim": true
+     }
+    },
+    {
+     "tool": "next",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "limit": 50
+     },
+     "actor": "ai:other"
+    },
+    {
+     "tool": "next",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "limit": 1,
+      "claim": true
+     },
+     "actor": "ai:other"
+    },
+    {
+     "tool": "next",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "limit": 50,
+      "claim": true
+     }
+    },
+    {
      "tool": "tickets",
      "args": [
       "demo.genko"
@@ -7436,6 +7477,698 @@
     }
    ],
    "cli": true
+  },
+  {
+   "name": "palette",
+   "clock": "2026-10-01T09:00:00",
+   "env": {
+    "GENKO_USER": "leaf"
+   },
+   "steps": [
+    {
+     "tool": "create_project",
+     "args": [
+      "demo.genko",
+      "palette",
+      1
+     ],
+     "kwargs": {
+      "spec_preset": "doujin-a5"
+     }
+    },
+    {
+     "tool": "set_bible",
+     "args": [
+      "demo.genko",
+      {
+       "title": "夏の午後の約束",
+       "logline": "5年前の約束を果たすため、幼馴染が夏の屋上に来る。",
+       "plot": "転校していったソラと、屋上で会う約束をしていたひな。5年後の同じ日、ひなは半信半疑で屋上に上がる。",
+       "themes": [
+        "約束",
+        "再会"
+       ],
+       "characters": [
+        {
+         "id": "hina",
+         "name": "日向ひな",
+         "role": "heroine",
+         "age": 16,
+         "look": {
+          "hair": "肩までのストレート、横に流した前髪",
+          "hair_value": "beta",
+          "eyes": "大きく、やや垂れ目",
+          "build": "細身",
+          "height_cm": 156,
+          "outfits": [
+           {
+            "id": "default",
+            "desc": "半袖のセーラー服"
+           }
+          ],
+          "marks": [
+           "左側に星形の髪留め"
+          ],
+          "silhouette": "髪留め + 前髪"
+         },
+         "speech": {
+          "first_person": "わたし",
+          "tone": "丁寧語まじり"
+         },
+         "tokens_en": "a slim 16-year-old girl with shoulder-length straight black hair and a star-shaped hair clip"
+        },
+        {
+         "id": "sora",
+         "name": "天野ソラ",
+         "role": "hero",
+         "age": 16,
+         "look": {
+          "hair": "短い癖毛",
+          "hair_value": "white",
+          "eyes": "切れ長",
+          "build": "やや長身",
+          "height_cm": 172,
+          "outfits": [
+           {
+            "id": "default",
+            "desc": "学ランの前を開けている"
+           }
+          ],
+          "marks": [],
+          "silhouette": "癖毛 + 開いた学ラン"
+         },
+         "speech": {
+          "first_person": "俺",
+          "tone": "ぶっきらぼう"
+         },
+         "tokens_en": null
+        }
+       ],
+       "locations": [
+        {
+         "id": "loc_rooftop",
+         "name": "校舎の屋上",
+         "desc": "フェンスと給水塔のある屋上",
+         "times": [
+          "sunset"
+         ]
+        }
+       ],
+       "style": {
+        "notes": [
+         "背景は描き込みすぎない"
+        ]
+       },
+       "constraints": [
+        "台詞・効果音を画像に描かない"
+       ]
+      }
+     ],
+     "kwargs": {
+      "commit": true
+     }
+    },
+    {
+     "tool": "set_script",
+     "args": [
+      "demo.genko",
+      {
+       "scenes": [
+        {
+         "id": "sc_01",
+         "summary": "ひなが屋上に上がる",
+         "location_id": "loc_rooftop",
+         "time": "sunset",
+         "beats": [
+          {
+           "id": "b01",
+           "kind": "action",
+           "speaker_id": null,
+           "text": "夕方の屋上。ひなが扉を開ける",
+           "emotion": "緊張",
+           "page": 1,
+           "reveal": false
+          },
+          {
+           "id": "b02",
+           "kind": "narration",
+           "speaker_id": null,
+           "text": "5年前の今日、ここで約束した",
+           "emotion": "郷愁",
+           "page": 1,
+           "reveal": false
+          },
+          {
+           "id": "b03",
+           "kind": "monologue",
+           "speaker_id": "hina",
+           "text": "…来るわけないよね",
+           "emotion": "諦め",
+           "page": 1,
+           "reveal": false
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "kwargs": {
+      "commit": true
+     }
+    },
+    {
+     "tool": "submit_name",
+     "args": [
+      "demo.genko",
+      {
+       "page": 1,
+       "turn_role": "normal",
+       "template": null,
+       "tiers": [
+        {
+         "h": 0.35,
+         "cols": [
+          {
+           "slot": "p1",
+           "w": 1.0,
+           "rows": null
+          }
+         ]
+        },
+        {
+         "h": 0.65,
+         "cols": [
+          {
+           "slot": "p2",
+           "w": 0.55,
+           "rows": null
+          },
+          {
+           "slot": "p3",
+           "w": 0.45,
+           "rows": null
+          }
+         ]
+        }
+       ],
+       "panels": [
+        {
+         "slot": "p1",
+         "shot": "LS",
+         "angle": "high",
+         "location_id": "loc_rooftop",
+         "time": "sunset",
+         "characters": [
+          {
+           "id": "hina",
+           "pose": "扉を開ける",
+           "expression": "緊張",
+           "facing": "left",
+           "pos": "right",
+           "scale": 0.4
+          }
+         ],
+         "action": "屋上の扉を開ける",
+         "emotion": "緊張",
+         "fx": [],
+         "emphasis": 0.3,
+         "cross": false,
+         "beat_ids": [
+          "b01",
+          "b02"
+         ],
+         "lines": [
+          {
+           "beat_id": "b02",
+           "balloon": "narration",
+           "breaks": [
+            "5年前の今日",
+            "ここで約束した"
+           ]
+          }
+         ]
+        },
+        {
+         "slot": "p2",
+         "shot": "MS",
+         "angle": "eye",
+         "location_id": "loc_rooftop",
+         "time": "sunset",
+         "characters": [
+          {
+           "id": "hina",
+           "pose": "立ち止まる",
+           "expression": "不安",
+           "facing": "left",
+           "pos": "center",
+           "scale": 0.8
+          }
+         ],
+         "action": "屋上を見回す",
+         "emotion": "不安",
+         "fx": [],
+         "emphasis": 0.4,
+         "cross": false,
+         "beat_ids": [],
+         "lines": []
+        },
+        {
+         "slot": "p3",
+         "shot": "CU",
+         "angle": "eye",
+         "location_id": "loc_rooftop",
+         "time": "sunset",
+         "characters": [
+          {
+           "id": "hina",
+           "pose": "うつむく",
+           "expression": "諦め",
+           "facing": "left",
+           "pos": "center",
+           "scale": 0.9
+          }
+         ],
+         "action": "うつむく",
+         "emotion": "諦め",
+         "fx": [],
+         "emphasis": 0.5,
+         "cross": false,
+         "beat_ids": [
+          "b03"
+         ],
+         "lines": [
+          {
+           "beat_id": "b03",
+           "balloon": "thought",
+           "breaks": [
+            "…来るわけ",
+            "ないよね"
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "kwargs": {
+      "commit": true,
+      "max_px": 120
+     }
+    },
+    {
+     "human": "approve_name",
+     "project": "demo.genko",
+     "actor": "human:leaf",
+     "args": [
+      [
+       1
+      ]
+     ],
+     "kwargs": {}
+    },
+    {
+     "tool": "import_image",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "png_base64": "R0lGODlhDQAHAIEAAAsHHTBiUgAAAAAAACH5BAEAAAEALAAAAAANAAcAAAgfAAEECACgoMGDAgcSRIhQIcOGDh8aVLhQYsKKEikGBAA7"
+     }
+    },
+    {
+     "tool": "import_image",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "png_base64": "R0lGODdhCQAGAIEAAAsHHTBiUlW9h3oYvCwAAAAACQAGAAAIIAABABAwQIDAgwIIJjwoMGFBhgIHFDTI0OHCigUDBAgIADs="
+     }
+    },
+    {
+     "tool": "import_image",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "png_base64": "R0lGODlhCwAFAIEAAAsHHTBiUlW9hwAAACH5BAEAAAAALAAAAAALAAUAAAgeAAEEEEAQgMGDAAgqFIBQYMKFDQ0uLCjxoMIAAAICADs="
+     }
+    },
+    {
+     "tool": "import_image",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "png_base64": "R0lGODlhDwAJAIMAAAsHHTBiUlW9h3oYvJ9z8cTOJukpWw6EkDPfxX2VL6LwZMdLmeymzhEBAzZcOAAAACH5BAEAAAUALAAAAAAPAAkAAAhYAB0AEDCgQAEDCBAoWNigIQAHDgQQOKhQAYOGDgdCNMgQI4CPHwcIgIixAYAFIFM2dJAx5UAAJSEKUABSYMmFBwrI/HhzIYKcCUbabLhQQcKcBQgICOAgIAA7"
+     }
+    },
+    {
+     "tool": "import_image",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "png_base64": "R0lGODdhEQAIAIMAAAsHHTBiUlW9h3oYvJ9z8cTOJukpWw6EkDPfxVg6+n2VL6LwZAAAAAAAAAAAAAAAACwAAAAAEQAIAAAITAABBBAwQEABAwgQLFgIoKFDARALSFS4kKHDhwYNVLR48aHEjR07EgCwsQDEkAAGkCy54ORFASsrIlAgESJMgQ5lJjhQgAABAQEABAQAOw=="
+     }
+    },
+    {
+     "tool": "import_image",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "png_base64": "R0lGODdhFQAKAIYAAAsHHTBiUlW9h8TOJjZcOKVt18rIDBR+djnZq6jqShp4XImJ+67kMPiamh31z4wGbm2lH5IAVNy2vgER8yZsKHAiklHBQ8DS4uUtF1Q+tnmZ66TuBslJOxP/pTha2l21D6dreczGrq1lX/cbyRx2/kHRM4uHnbDi0h/zcZGBgwCSIiXtV2+jwZT+9gMPlXWdp+SuRgkJe1O/5XgaGucrueqoLFm5y8jKahKA1DfbCVw2PoGRc6bsqMtH3fCiEhX9RzpYfF+zsYQO5qlpG87EUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwAAAAAFQAKAAAIpQB17ODRg8cPIEKEDCFCxIaNGxBx5JhIYaDBHz8SLmwYcaLHEh80DMQYRCHDGx49xlihY0aLEyF2YEzIMGWOCAwMAHCAQEAPGi5QzGT4I4eNFylEcMAwwUOGCg8SDACSIyPRHwoIALgBQwUJGSxMgLC5UQhGCxAWFACQ40AAHjYhMhQSBCOPDRckNLD5A6LDuWbt8hjRwSNEv0JqAK7rwwePHToCAgA7"
+     }
+    },
+    {
+     "tool": "import_image",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "png_base64": "R0lGODlhEwAHAIQAAAsHHUBSYtq4HJb8mAUNN0/DoXQe1pl5C77UQOMvdQiKqi3l31JAFHebSZz2fsFRs+as6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACH5BAEAABAALAAAAAATAAcAAAhZABEkULCAQQMHDyA8GECgoYGHBw4ITMCg4oOEDwgUgBjRgAAAIAVaxBjxgEeQKFMyuKjwAYOUMAUYKInRJYMEAVDKLPmwYc2KN3F27NlwAEYHDhgsUJAAQUAAOw=="
+     }
+    },
+    {
+     "tool": "import_image",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "png_base64": "R0lGODdhCgAGAIIAAAAAADMzM2ZmZpmZmczMzP///wAAAAAAACwAAAAACgAGAAAIIgABABAwoIBBgQIFKDRYAGFCAQwdCmRIQIBEigodYgwQICAAOw=="
+     }
+    },
+    {
+     "write": "pics/p.gif",
+     "base64": "R0lGODlhDwAJAIMAAAsHHTBiUlW9h3oYvJ9z8cTOJukpWw6EkDPfxX2VL6LwZMdLmeymzhEBAzZcOAAAACH5BAEAAAUALAAAAAAPAAkAAAhYAB0AEDCgQAEDCBAoWNigIQAHDgQQOKhQAYOGDgdCNMgQI4CPHwcIgIixAYAFIFM2dJAx5UAAJSEKUABSYMmFBwrI/HhzIYKcCUbabLhQQcKcBQgICOAgIAA7"
+    },
+    {
+     "tool": "import_image",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "path": "pics/p.gif"
+     }
+    },
+    {
+     "tool": "import_image",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "png_base64": "iVBORw0KGgoAAAANSUhEUgAAACgAAAAeAgMAAAAjs7ROAAAACVBMVEULBx0wYlJVvYfDtk2OAAAAdElEQVR4nGWPsQ3DMBADL6wEVRnBdab0KC41kZFSUwTfREhh8Q0hqg4HQuRTd+bTtiX2mhhkgtdhSy+JIeNzcNzh5gBvJY7/7wTMQgEuLJlQwCwUQGg3DnI0tdleky5cCpstXYmfdZKv6YWHD2un7VpoS3x/xiAgm4jlpsEAAAAASUVORK5CYII="
+     }
+    },
+    {
+     "asset": "demo.genko",
+     "base64": "iVBORw0KGgoAAAANSUhEUgAAACgAAAAeAgMAAAAjs7ROAAAACVBMVEULBx0wYlJVvYfDtk2OAAAAdElEQVR4nGWPsQ3DMBADL6wEVRnBdab0KC41kZFSUwTfREhh8Q0hqg4HQuRTd+bTtiX2mhhkgtdhSy+JIeNzcNzh5gBvJY7/7wTMQgEuLJlQwCwUQGg3DnI0tdleky5cCpstXYmfdZKv6YWHD2un7VpoS3x/xiAgm4jlpsEAAAAASUVORK5CYII="
+    },
+    {
+     "asset": "demo.genko",
+     "base64": "iVBORw0KGgoAAAANSUhEUgAAACEAAAAbBAMAAAAAK/uXAAAAG1BMVEULBx0wYlJVvYd6GLyfc/HEzibpKVsOhJAz38VgP91bAAAAA3RSTlP//wDXyg1BAAAArElEQVR4nGWPwQ3CMBAEJ2tF8KQEizQQQQOUQAmU4lJogFKQ0kCk1ACfoCg2j5DYJ+452tnVVTS6NGNgOym1b8pTpJvZl4RhxmaIdB1lDwxQaoI4G08VDEZToo59qQkm4tNsAfSFtpD4l+GRi35kYtOEByBQ57+4ASPumq27KdBaGDh7S8CdLBnBHW0m0LYeEC5rToCY2a0a+MX6ZE1mC+TwJRmpaGUzyb/S4QsOIS16UujGTwAAAABJRU5ErkJggg=="
+    },
+    {
+     "asset": "demo.genko",
+     "base64": "R0lGODlhMAAkAIMAAAsHHTBiUlW9h3oYvJ9z8cTOJukpWw6EkDPfxVg6+n2VL6LwZMdLmeymzhEBAzZcOCH5BAEAAAMALAAAAAAwACQAQAj/AAEAEDBAQAEDBRAkQLCAgQMHDwRKnEixosWLFg0mZLjgYUSMIEOKnCiAIUQHI1OqtHhywQIEBQQIWEkT5MkGLl/CLBBT5kWZPDfm9FizKEUGAg1yPGl0JAKVLRHMbEqgqcCbLhHs9IlRpsaNHB1CtKrSAFCwLomSpQl06di1JFMaTPsAJVyjHesuuGs0aky+Eu3arItTK8+pgAc7wKkzKNeUCvoSzql1Z8+pXoNWztmAaWKSZ4W67Fz3c8XQL0d7BhzgtEatQ0ubzsgTdl7Bsym2pYs78YGfCW/nBllS+HCQt/cOb4AxKuKiAyQvXvD3eEWsMJ9bF1jXQdaeTRPULeyedet27g/Lb9U+uztjw4fZp/w40r16x48nFrhrX4ECBAccUAABBAgQQAABAQA7"
+    },
+    {
+     "tool": "generation_request",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "page": 1,
+      "frame_id": "$frame:demo.genko:1:0"
+     }
+    },
+    {
+     "tool": "import_images",
+     "args": [
+      "demo.genko",
+      "$request:demo.genko:0",
+      [
+       {
+        "asset": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "origin": {
+         "kind": "agent",
+         "tool_id": "local:sd",
+         "model": "m1"
+        }
+       }
+      ]
+     ],
+     "kwargs": {}
+    },
+    {
+     "write": "demo.genko/studio/inbox/huge.png",
+     "base64": "iVBORw0KGgoAAAANSUhEUgAAJxAAACcQCAAAAACfJT37AAAADElEQVR4nGNgoAwAAABAAAG3NHzvAAAAAElFTkSuQmCC"
+    },
+    {
+     "tool": "import_images",
+     "args": [
+      "demo.genko",
+      "$request:demo.genko:0",
+      [
+       {
+        "file": "studio/inbox/huge.png",
+        "origin": {
+         "kind": "agent",
+         "tool_id": "local:sd",
+         "model": "m1"
+        }
+       }
+      ]
+     ],
+     "kwargs": {}
+    },
+    {
+     "tool": "import_images",
+     "args": [
+      "demo.genko",
+      "$request:demo.genko:0",
+      [
+       {
+        "file": "studio/inbox/huge.png",
+        "origin": {
+         "kind": "agent",
+         "tool_id": "local:sd",
+         "model": "m1"
+        }
+       },
+       {
+        "asset": "sha256:50dc2ca077b6d14251d4339ab477462f07bf86766dcd3db75016c5e3c30776a5",
+        "origin": {
+         "kind": "agent",
+         "tool_id": "local:sd",
+         "model": "m1"
+        }
+       }
+      ]
+     ],
+     "kwargs": {}
+    },
+    {
+     "tool": "take_panel_art",
+     "args": [
+      "demo.genko",
+      "$request:demo.genko:0",
+      {
+       "asset": "sha256:50dc2ca077b6d14251d4339ab477462f07bf86766dcd3db75016c5e3c30776a5",
+       "origin": {
+        "kind": "agent",
+        "tool_id": "local:sd",
+        "model": "m1"
+       }
+      }
+     ],
+     "kwargs": {
+      "crop01": [
+       0.1,
+       0.1,
+       0.7,
+       0.8
+      ],
+      "upscale": false
+     }
+    },
+    {
+     "tool": "take_panel_art",
+     "args": [
+      "demo.genko",
+      "$request:demo.genko:0",
+      {
+       "asset": "sha256:173c2459b2c2414dda3a7043da2cd7236ad6de09cecdc739ce81421571eed837",
+       "origin": {
+        "kind": "agent",
+        "tool_id": "local:sd",
+        "model": "m1"
+       }
+      }
+     ],
+     "kwargs": {
+      "crop01": [
+       0,
+       0.25,
+       0.55,
+       0.5
+      ],
+      "upscale": false
+     }
+    },
+    {
+     "tool": "take_panel_art",
+     "args": [
+      "demo.genko",
+      "$request:demo.genko:0",
+      {
+       "asset": "sha256:bd39b0d355b4fbd8a171131cf17d4d0d6f91821173a8628ab597e7c8abb1c537",
+       "origin": {
+        "kind": "agent",
+        "tool_id": "local:sd",
+        "model": "m1"
+       }
+      }
+     ],
+     "kwargs": {
+      "crop01": [
+       0.2,
+       0.2,
+       0.6,
+       0.6
+      ],
+      "upscale": false
+     }
+    },
+    {
+     "asset": "demo.genko",
+     "base64": "R0lGODlhDwAJAIMAAAsHHTBiUlW9h3oYvJ9z8cTOJukpWw6EkDPfxX2VL6LwZMdLmeymzhEBAzZcOAAAACH5BAEAAAUALAAAAAAPAAkAAAhYAB0AEDCgQAEDCBAoWNigIQAHDgQQOKhQAYOGDgdCNMgQI4CPHwcIgIixAYAFIFM2dJAx5UAAJSEKUABSYMmFBwrI/HhzIYKcCUbabLhQQcKcBQgICOAgIAA7"
+    },
+    {
+     "asset": "demo.genko",
+     "base64": "R0lGODlhCwAFAIEAAAsHHTBiUlW9hwAAACH5BAEAAAAALAAAAAALAAUAAAgeAAEEEEAQgMGDAAgqFIBQYMKFDQ0uLCjxoMIAAAICADs="
+    },
+    {
+     "tool": "import_images",
+     "args": [
+      "demo.genko",
+      "$request:demo.genko:0",
+      [
+       {
+        "asset": "sha256:8cd094f47435096719d306df9bb748992ffbd142cca35763168eec4c1faf23c1",
+        "origin": {
+         "kind": "agent",
+         "tool_id": "local:sd",
+         "model": "m1"
+        }
+       },
+       {
+        "asset": "sha256:742cf4ef5a3ad01c376058697668a6e665d23b07501c446355ad28552574f61e",
+        "origin": {
+         "kind": "agent",
+         "tool_id": "local:sd",
+         "model": "m1"
+        }
+       }
+      ]
+     ],
+     "kwargs": {
+      "preview": false
+     }
+    },
+    {
+     "tool": "candidates",
+     "args": [
+      "demo.genko"
+     ],
+     "kwargs": {
+      "page": 1,
+      "frame_id": "$frame:demo.genko:1:0"
+     }
+    },
+    {
+     "tool": "render",
+     "args": [
+      "demo.genko",
+      1
+     ],
+     "kwargs": {
+      "kind": "compare",
+      "frame_id": "$frame:demo.genko:1:0",
+      "max_px": 120
+     }
+    },
+    {
+     "cli": [
+      "upscaler",
+      "add",
+      "copy",
+      "--command",
+      "cp {in} {out}",
+      "--scales",
+      "2"
+     ]
+    },
+    {
+     "tool": "upscale",
+     "args": [
+      "demo.genko",
+      1,
+      "$frame:demo.genko:1:0"
+     ],
+     "kwargs": {
+      "scale": 2,
+      "method": "copy"
+     }
+    },
+    {
+     "tool": "upscale",
+     "args": [
+      "demo.genko",
+      1,
+      "$frame:demo.genko:1:0"
+     ],
+     "kwargs": {
+      "candidate_id": "$panelcand:demo.genko:1:0:0",
+      "scale": 2,
+      "method": "copy"
+     }
+    },
+    {
+     "tool": "upscale",
+     "args": [
+      "demo.genko",
+      1,
+      "$frame:demo.genko:1:0"
+     ],
+     "kwargs": {
+      "candidate_id": "$panelcand:demo.genko:1:0:1",
+      "scale": 2
+     }
+    },
+    {
+     "tool": "derive",
+     "args": [
+      "demo.genko",
+      1,
+      "$frame:demo.genko:1:0"
+     ],
+     "kwargs": {
+      "candidate_id": "$panelcand:demo.genko:1:0:1"
+     }
+    },
+    {
+     "tool": "render",
+     "args": [
+      "demo.genko",
+      1
+     ],
+     "kwargs": {
+      "mode": "print",
+      "max_px": 120
+     }
+    }
+   ]
   }
  ]
 }

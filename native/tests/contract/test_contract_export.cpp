@@ -303,7 +303,9 @@ private slots:
     }
 
     // The encoders alone: pictures Pillow saved as the exports save them (PNG with dpi, a profile, optimize; JPEG at a
-    // quality, optimized, with a profile; TIFF in LZW and Group 4 with dpi and a profile), the same bytes.
+    // quality, optimized, with a profile; TIFF in LZW and Group 4 with dpi and a profile), the same bytes; palette
+    // pictures (P: 1, 2, 4 or 8 bits a pixel, PLTE, the transparency they carry or their palette's alpha as tRNS) and
+    // greys and RGB pictures with a transparent colour, as Pillow writes them as PNG.
     void encoders() {
         const QString file = scratch_.path() + "/save.json";
         const auto py = genko::test::render_harness({"save-cases", file, "--seed", "5", "--count", "70"}, scratch_.path());
@@ -312,9 +314,22 @@ private slots:
         const std::string icc = genko::core::a2b_base64(cases["icc"].get<std::string>());
         int compared = 0;
         for (const Json& c : cases["cases"]) {
-            const genko::render::Image image = genko::render::Image::frombytes(
+            genko::render::Image image = genko::render::Image::frombytes(
                 c["mode"].get<std::string>(), genko::render::Size{c["size"][0].get<int>(), c["size"][1].get<int>()},
                 genko::core::a2b_base64(c["pixels"].get<std::string>()));
+            if (c.contains("palette")) image.putpalette(c["palette_mode"].get<std::string>(), genko::core::a2b_base64(c["palette"].get<std::string>()));
+            genko::render::Transparency trns;
+            if (c.contains("transparency") && c["transparency"].is_array()) {
+                trns.kind = genko::render::Transparency::Kind::Rgb;
+                for (int k = 0; k < 3; ++k) trns.rgb[static_cast<std::size_t>(k)] = c["transparency"][static_cast<std::size_t>(k)].get<int>();
+            } else if (c.contains("transparency")) {
+                trns.kind = genko::render::Transparency::Kind::Index;
+                trns.value = c["transparency"].get<int>();
+            } else if (c.contains("transparency_bytes")) {
+                trns.kind = genko::render::Transparency::Kind::Bytes;
+                trns.bytes = genko::core::a2b_base64(c["transparency_bytes"].get<std::string>());
+            }
+            image.set_transparency(trns);
             const Json& p = c["params"];
             const std::string fmt = c["format"].get<std::string>();
             std::string got;
@@ -338,13 +353,15 @@ private slots:
                 got = formats::tiff_bytes(image, s);
             }
             const std::string want = genko::core::a2b_base64(c["bytes"].get<std::string>());
-            QVERIFY2(got == want, qPrintable(QStringLiteral("%1 %2 %3x%4 %5: %6 bytes, Pillow's %7")
+            std::size_t first = 0;  // (where they part)
+            while (first < got.size() && first < want.size() && got[first] == want[first]) ++first;
+            QVERIFY2(got == want, qPrintable(QStringLiteral("%1 %2 %3x%4 %5: %6 bytes, Pillow's %7, the same up to byte %8 (case %9)")
                                                  .arg(QString::fromStdString(fmt), QString::fromStdString(c["mode"].get<std::string>()))
                                                  .arg(image.width()).arg(image.height())
-                                                 .arg(QString::fromStdString(p.dump())).arg(got.size()).arg(want.size())));
+                                                 .arg(QString::fromStdString(p.dump())).arg(got.size()).arg(want.size()).arg(first).arg(compared)));
             ++compared;
         }
-        QCOMPARE(compared, 70);
+        QCOMPARE(compared, 70 + 40 + 9);  // (the exports' pictures, the palettes, the transparent colours)
     }
 
     // What this build does not draw yet stops an export: a placed picture on the last page of a book whose asset is a

@@ -28,6 +28,8 @@
 
 namespace genko::service {
 
+class Session;
+
 namespace fs = std::filesystem;
 
 // Ops an agent may send through apply_ops (Python's AGENT_OPS): gates, locks, meta (font paths), rasters from local
@@ -48,6 +50,11 @@ public:
 
     const fs::path& root() const { return root_; }
     const std::string& actor() const { return actor_; }
+    // C++: Python's keyword-only confine= of import_image and import_name (whether a path must be under --root), which
+    // only its command line passes (False). Not an argument of call(): MCP and HTTP cannot pass it; the command line
+    // sets it on its service. True unless set.
+    void set_confine(bool confine) { confine_ = confine; }
+    bool confine() const { return confine_; }
 
     // The tool `name` with Python's call: method(*positional, **kwargs). PyTypeError for arguments that do not bind
     // (and for a tool this build does not have: AttributeError in Python, PyUncaught("AttributeError")).
@@ -116,6 +123,8 @@ public:
     Json page_brief(const core::Document& doc, const Json& page) const;
 
 private:
+    // C++: storage::NeedsMigration for a book of v1–v3 (this build writes only v4), before a tool that writes starts.
+    void refuse_old_project(const Json& project) const;
     // The tool `name` called as another tool calls it (keyword arguments, the others their defaults).
     ToolResult invoke(std::string_view name, const Json& kwargs) { return call(name, Json::array(), kwargs); }
     // _export(…): the book written into <project>/exports/<time>_<format>/ (export without background).
@@ -132,9 +141,15 @@ private:
     // request_approval for one character (or pages).
     ToolResult request_one_approval(const Json& project, const Json& gate, const Json& pages, const Json& note,
                                     const Json& character_id);
+    // The request_approval op applied in the session as this agent; the ticket it made (StopIteration without one).
+    Json apply_approval_request(Session& session, const Json& gate, const Json& pages, const Json& note, const Json& character_id) const;
+    // request_approval's reply for one request (how to approve it; a sheet's faces and written look) from the book saved.
+    ToolResult approval_reply(const fs::path& path, const core::Document& doc, const Json& gate, const Json& pages, const Json& character_id,
+                              const Json& ticket) const;
 
     fs::path root_;
     std::string actor_;
+    bool confine_ = true;
 };
 
 // _waiting(items): what the work waits on, by gate.

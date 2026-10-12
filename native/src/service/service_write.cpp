@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <functional>
+#include <optional>
 
 #if !defined(_WIN32)
 #include <pwd.h>
@@ -258,7 +260,9 @@ ToolResult StudioService::submit_name(const Json& a) {
             ops.push_back(Json::object({{"op", "set_panel"}, {"page", page_index}, {"frame_id", *frame}, {"set", std::move(set)}}));
         }
         const core::Document& now = session.doc();
-        const core::Page& target = now.page(*page_at(now, page_index));
+        const auto found = page_at(now, page_index);  // (compile_name found it in this session)
+        if (!found) return fail(py_str(page_index) + " ページはない", "no_page", "/page");
+        const core::Page& target = now.page(*found);
         const Json stored = target.plan && py_truthy(*target.plan) ? *target.plan : Json::object();
         const std::int64_t submits = core::to_int(py_get(stored, "submits", Json(0))) + 1;
         Json slot_to_frame = Json::object();
@@ -285,7 +289,8 @@ ToolResult StudioService::submit_name(const Json& a) {
         }
         session.save(actor_);
         data["committed"] = true;
-        data["gutters"] = briefs::gutter_brief(session.doc().page(*page_at(session.doc(), page_index)));
+        const auto saved_at = page_at(session.doc(), page_index);
+        if (saved_at) data["gutters"] = briefs::gutter_brief(session.doc().page(*saved_at));
     }
     return ToolResult(true, std::move(data), issues, {png}, {util::path_text(out)});
 }
@@ -301,19 +306,60 @@ ToolResult StudioService::apply_ops(const Json& a) {
             return fail("op " + py_str(name) + " はこの道具では使えない", "op_not_allowed", "/ops/" + std::to_string(i) + "/op");
         }
     }
+    // (C++: the ops for_pages repeats page by page are an agent's ops as well, checked as those given — Python looks only
+    // at the top, so any op, put_raster reading any file among them, went through inside for_pages: SPEC COMP-01a)
+    std::function<std::optional<ToolResult>(const Json&, const std::string&)> repeated_allowed;
+    repeated_allowed = [&repeated_allowed](const Json& list, const std::string& at) -> std::optional<ToolResult> {
+        for (std::size_t j = 0; j < list.size(); ++j) {
+            const Json& op = list[j];
+            const Json name = op.is_object() ? py_get(op, "op") : Json();
+            if (!name.is_string()) continue;  // (for_pages refuses what is not an op, apply_ops an op it does not know)
+            const std::string where = at + "/" + std::to_string(j);
+            if (!agent_op(name.get<std::string>())) return fail("op " + py_str(name) + " はこの道具では使えない", "op_not_allowed", where + "/op");
+            if (name == Json("for_pages") && op.contains("ops") && op["ops"].is_array()) {
+                if (auto refused = repeated_allowed(op["ops"], where + "/ops")) return refused;
+            }
+        }
+        return std::nullopt;
+    };
+    for (std::size_t i = 0; i < given.size(); ++i) {
+        const Json& op = given[i];
+        if (core::py_equals(py_get(op, "op"), Json("for_pages")) && op.contains("ops") && op["ops"].is_array()) {
+            if (auto refused = repeated_allowed(op["ops"], "/ops/" + std::to_string(i) + "/ops")) return std::move(*refused);
+        }
+    }
     Json ops = given;  // (each op copied: [dict(op) for op in ops])
     const bool commit = py_truthy(a["commit"]);
+    // import_psd's path, read like the other tools' (in the book or under --root): made absolute, or refused
+    const auto confined_psd = [this, &path](Json& op, const std::string& where) -> std::optional<ToolResult> {
+        if (!core::py_equals(py_get(op, "op"), Json("import_psd")) || !core::truthy_at(op, "path")) return std::nullopt;
+        const fs::path raw = expanduser(py_str(op["path"]));
+        const fs::path target = resolved(raw.is_absolute() ? raw : path / raw);
+        if (!strictly_under(target, root_)) {
+            return fail("path は原稿のフォルダからの相対パスか、--root の中のパス: " + py_str(op["path"]), "path_outside_root", where + "/path");
+        }
+        op["path"] = util::path_text(target);
+        return std::nullopt;
+    };
+    // (C++: and the ones for_pages repeats)
+    std::function<std::optional<ToolResult>(Json&, const std::string&)> repeated_confined;
+    repeated_confined = [&repeated_confined, &confined_psd](Json& list, const std::string& at) -> std::optional<ToolResult> {
+        for (std::size_t j = 0; j < list.size(); ++j) {
+            Json& op = list[j];
+            if (!op.is_object()) continue;
+            const std::string where = at + "/" + std::to_string(j);
+            if (auto refused = confined_psd(op, where)) return refused;
+            if (core::py_equals(py_get(op, "op"), Json("for_pages")) && op.contains("ops") && op["ops"].is_array()) {
+                if (auto refused = repeated_confined(op["ops"], where + "/ops")) return refused;
+            }
+        }
+        return std::nullopt;
+    };
     for (std::size_t i = 0; i < ops.size(); ++i) {
         Json& op = ops[i];
-        if (core::py_equals(py_get(op, "op"), Json("import_psd")) && core::truthy_at(op, "path")) {
-            // (read like the other tools: in the book or under --root)
-            const fs::path raw = expanduser(py_str(op["path"]));
-            const fs::path target = resolved(raw.is_absolute() ? raw : path / raw);
-            if (!strictly_under(target, root_)) {
-                return fail("path は原稿のフォルダからの相対パスか、--root の中のパス: " + py_str(op["path"]), "path_outside_root",
-                            "/ops/" + std::to_string(i) + "/path");
-            }
-            op["path"] = util::path_text(target);
+        if (auto refused = confined_psd(op, "/ops/" + std::to_string(i))) return std::move(*refused);
+        if (core::py_equals(py_get(op, "op"), Json("for_pages")) && op.is_object() && op.contains("ops") && op["ops"].is_array()) {
+            if (auto refused = repeated_confined(op["ops"], "/ops/" + std::to_string(i) + "/ops")) return std::move(*refused);
         }
         if (core::py_equals(py_get(op, "op"), Json("import_pages"))) {  // (作品の結合: another book under --root; its asset files come along)
             const Json from = py_get(op, "from");
@@ -420,6 +466,11 @@ ToolResult StudioService::record_chat_approval(const Json& a) {
     }
     try {
         Session session(path, person);
+        // (C++: looked at again under the lock — a person may have stopped chat approvals since: Python looks once,
+        // before it takes the lock, and records the approval all the same)
+        if (!chat_approval_open(session.doc())) {
+            return fail("この原稿は、人がチャットでの承認を止めている。承認は人が Genko の承認箱で行う", "chat_approval_off", "/project");
+        }
         session.apply(ops, person);
         session.save(person);
     } catch (const core::ApplyError& exc) {
@@ -455,36 +506,51 @@ ToolResult StudioService::request_approval(const Json& a) {
     const Json& gate = a["gate"];
     const Json& character_ids = a["character_ids"];
     if (core::py_equals(gate, Json("sheet")) && py_truthy(character_ids)) {
-        // (C++: every request checked before any is saved — Python saves the ones before a refused one — then each saved
-        // as its own revision, as Python's)
+        // (C++: every request made in one save, after all of them are checked — Python saves each in turn and keeps the
+        // ones before a request it refuses: SPEC COMP-01a. The ids each takes are Python's: see below)
         const std::vector<Json> ids = unique_keys(character_ids);
-        {
-            const core::ScopedIdsApart apart;  // (the trial's ids are thrown away: the saved requests take Python's)
-            const fs::path path = project_path(project);
-            Work trial{load_episode(path), Json::array()};
-            for (const Json& cid : ids) {
-                if (!py_truthy(cid)) return fail("sheet の承認依頼には character_id が要る", "character_required", "/character_id");
-                trial.apply(Json::array({Json::object({{"op", "request_approval"}, {"gate", gate}, {"pages", a["pages"]}, {"note", a["note"]},
-                                                       {"character_id", cid}})}),
-                            actor_);
-            }
-        }
-        std::vector<ToolResult> done;
+        const fs::path path = project_path(project);
         for (const Json& cid : ids) {
-            done.push_back(request_one_approval(project, gate, a["pages"], a["note"], cid));
-            if (!done.back().ok) return done.back();
+            if (!py_truthy(cid)) return fail("sheet の承認依頼には character_id が要る", "character_required", "/character_id");
+        }
+        std::vector<Json> tickets;
+        core::Document doc;
+        {
+            Session session(path, actor_);
+            for (std::size_t i = 0; i < ids.size(); ++i) {
+                // (Python reads the book again for each character, taking ids for its pages' default layers: the same
+                // read here, under the same lock, so the ids the requests take after it are Python's)
+                if (i > 0) (void)load_episode(path);
+                tickets.push_back(apply_approval_request(session, gate, a["pages"], a["note"], ids[i]));
+            }
+            session.save(actor_);
+            doc = session.doc();
         }
         Json requests = Json::array();
         std::vector<std::string> images;
         for (std::size_t i = 0; i < ids.size(); ++i) {
+            const ToolResult done = approval_reply(path, doc, gate, a["pages"], ids[i], tickets[i]);
             Json entry = Json::object({{"character_id", ids[i]}});
-            for (const auto& [key, value] : done[i].data.items()) entry[key] = value;
+            for (const auto& [key, value] : done.data.items()) entry[key] = value;
             requests.push_back(std::move(entry));
-            images.insert(images.end(), done[i].images.begin(), done[i].images.end());
+            images.insert(images.end(), done.images.begin(), done.images.end());
         }
         return ToolResult(true, Json::object({{"requests", std::move(requests)}}), {}, std::move(images));
     }
     return request_one_approval(project, gate, a["pages"], a["note"], a["character_id"]);
+}
+
+Json StudioService::apply_approval_request(Session& session, const Json& gate, const Json& pages, const Json& note, const Json& character_id) const {
+    std::vector<Json> before;
+    for (const Json& t : core::iterate(session.doc().tickets)) before.push_back(util::item(t, "id"));
+    session.apply(Json::array({Json::object({{"op", "request_approval"}, {"gate", gate}, {"pages", pages}, {"note", note},
+                                             {"character_id", character_id}})}),
+                  actor_);
+    for (const Json& t : core::iterate(session.doc().tickets)) {
+        const Json id = util::item(t, "id");
+        if (std::none_of(before.begin(), before.end(), [&id](const Json& b) { return core::py_equals(b, id); })) return t;
+    }
+    throw core::PyUncaught("StopIteration", "");
 }
 
 ToolResult StudioService::request_one_approval(const Json& project, const Json& gate, const Json& pages, const Json& note,
@@ -499,22 +565,16 @@ ToolResult StudioService::request_one_approval(const Json& project, const Json& 
     core::Document doc;
     {
         Session session(path, actor_);
-        std::vector<Json> before;
-        for (const Json& t : core::iterate(session.doc().tickets)) before.push_back(util::item(t, "id"));
-        session.apply(Json::array({Json::object({{"op", "request_approval"}, {"gate", gate}, {"pages", pages}, {"note", note},
-                                                 {"character_id", character_id}})}),
-                      actor_);
-        for (const Json& t : core::iterate(session.doc().tickets)) {
-            const Json id = util::item(t, "id");
-            if (std::none_of(before.begin(), before.end(), [&id](const Json& b) { return core::py_equals(b, id); })) {
-                ticket = t;
-                break;
-            }
-        }
-        if (ticket.is_null()) throw core::PyUncaught("StopIteration", "");
+        ticket = apply_approval_request(session, gate, pages, note, character_id);
         session.save(actor_);
         doc = session.doc();
     }
+    return approval_reply(path, doc, gate, pages, character_id, ticket);
+}
+
+ToolResult StudioService::approval_reply(const fs::path& path, const core::Document& doc, const Json& gate, const Json& pages,
+                                         const Json& character_id, const Json& ticket) const {
+    const bool sheet = core::py_equals(gate, Json("sheet"));
     std::string pages_arg;
     for (const Json& p : util::sorted_unique(pages)) pages_arg += (pages_arg.empty() ? "" : ",") + py_str(p);
     std::string written;

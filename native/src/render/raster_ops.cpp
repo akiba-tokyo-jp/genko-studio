@@ -28,6 +28,12 @@
 #include <utility>
 #include <vector>
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 #include "core/areas.hpp"
 #include "core/base64.hpp"
 #include "core/filters.hpp"
@@ -1697,22 +1703,68 @@ std::string pathlib_text(const std::string& text) {
     return out.empty() ? "." : out;
 }
 
-// Path(str(value)).read_bytes(), with Python's exceptions (which apply_ops lets through)
+// The most put_raster reads from a file (as import_psd: render/import_psd.cpp).
+constexpr std::uint64_t kMaxReadBytes = std::uint64_t{1} << 31;
+
+[[noreturn]] void not_a_file() { throw OpError("the file cannot be read (it is not a regular file)"); }
+[[noreturn]] void too_large_file() { throw OpError("the file cannot be read (it is larger than 2 GiB)"); }
+
+// Path(str(value)).read_bytes(), with Python's exceptions (which apply_ops lets through). Beyond Python: only a regular
+// file is read (not a device or a pipe, whose reading may never end: Python reads /dev/zero until memory runs out), and
+// none past kMaxReadBytes — refused before it is read.
 std::string read_path(const Json& value) {
     const std::string text = pathlib_text(core::py_str(value));
+    if (text.find('\0') != std::string::npos) throw core::PyValueError("embedded null byte");
     const std::filesystem::path path = core::path_from_utf8(text);
     std::error_code ec;
     if (std::filesystem::is_directory(path, ec)) {
         throw core::PyUncaught("IsADirectoryError", "[Errno 21] Is a directory: " + core::py_repr_str(text));
     }
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
+    const auto cannot_open = [&] {
         if (!std::filesystem::exists(path, ec)) {
             throw core::PyUncaught("FileNotFoundError", "[Errno 2] No such file or directory: " + core::py_repr_str(text));
         }
         throw core::PyUncaught("PermissionError", "[Errno 13] Permission denied: " + core::py_repr_str(text));
+    };
+    std::string bytes;
+#ifndef _WIN32
+    // (opened without waiting for a pipe's writer, then looked at: what was opened is what is read)
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0) cannot_open();
+    struct Closer {
+        int fd;
+        ~Closer() { ::close(fd); }
+    } closer{fd};
+    struct stat info {};
+    if (::fstat(fd, &info) != 0) cannot_open();
+    if (S_ISDIR(info.st_mode)) throw core::PyUncaught("IsADirectoryError", "[Errno 21] Is a directory: " + core::py_repr_str(text));
+    if (!S_ISREG(info.st_mode)) not_a_file();
+    if (static_cast<std::uint64_t>(info.st_size) > kMaxReadBytes) too_large_file();
+    char buffer[1 << 16];
+    for (;;) {
+        const ssize_t n = ::read(fd, buffer, sizeof buffer);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            const int error = errno;
+            throw core::PyUncaught("OSError", "[Errno " + std::to_string(error) + "] " + std::strerror(error) + ": " + core::py_repr_str(text));
+        }
+        if (n == 0) break;
+        bytes.append(buffer, static_cast<std::size_t>(n));
+        if (bytes.size() > kMaxReadBytes) too_large_file();  // (a file that grew meanwhile)
     }
-    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+#else
+    if (!std::filesystem::exists(path, ec)) cannot_open();
+    if (!std::filesystem::is_regular_file(path, ec)) not_a_file();
+    std::ifstream in(path, std::ios::binary);
+    if (!in) cannot_open();
+    const std::uintmax_t size = std::filesystem::file_size(path, ec);
+    if (!ec && size > kMaxReadBytes) too_large_file();
+    char buffer[1 << 16];
+    while (in.read(buffer, sizeof buffer) || in.gcount() > 0) {
+        bytes.append(buffer, static_cast<std::size_t>(in.gcount()));
+        if (bytes.size() > kMaxReadBytes) too_large_file();
+    }
+#endif
     return bytes;
 }
 

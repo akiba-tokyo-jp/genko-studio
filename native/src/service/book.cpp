@@ -64,7 +64,18 @@ std::optional<std::size_t> page_at(const core::Document& doc, const Json& index)
     return std::nullopt;
 }
 
+void refuse_old_book(const std::filesystem::path& dir) {
+    storage::DiskState disk;
+    try {
+        disk = storage::read_disk_state(dir);
+    } catch (const std::exception&) {  // (a project.json that cannot be read: the reading says so, as Python's)
+        return;
+    }
+    if (disk.exists && disk.version < 4) throw storage::NeedsMigration(dir, disk.version);
+}
+
 Session::Session(const std::filesystem::path& dir, const std::string& agent) : dir_(dir), lock_(dir, agent) {
+    refuse_old_book(dir_);  // (before the lock file is made and the journal settled: nothing written)
     try {
         lock_.try_acquire();
     } catch (const storage::LockedError& locked) {  // (Python's ProjectLock raises ApplyError)

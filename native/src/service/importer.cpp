@@ -130,19 +130,28 @@ std::string read_source(const fs::path& project, const Json& item, std::size_t i
 std::tuple<std::string, std::pair<int, int>, render::Image> normalize(const std::string& blob, std::size_t index) {
     if (blob.size() > kMaxBytes) throw ImportError("画像が大きすぎる（30 MB まで）", at(index));
     render::Size size;
+    // (bytes that are no picture: Pillow's words, its BytesIO's address left out — SPEC COMP-01a)
+    const auto unreadable = [index](const std::exception& exc) -> ImportError {
+        const auto* error = dynamic_cast<const core::Error*>(&exc);
+        const std::string why = error != nullptr && error->code() == "unidentified_image" ? std::string("cannot identify image file <_io.BytesIO object>")
+                                                                                         : std::string(exc.what());
+        return ImportError("画像として読めない: " + why, at(index));
+    };
     try {
         size = render::picture_size(blob);
         if (render::unported_image_format(blob)) throw core::Error("format", "cannot identify image file");
-        (void)render::open_image(blob, render::kPillowOpenLimits);  // (Image.verify(): the picture holds what it says)
-    } catch (const core::Error& exc) {
-        // (bytes that are no picture: Pillow's words, its BytesIO's address left out — SPEC COMP-01a)
-        const std::string why = exc.code() == "unidentified_image" ? std::string("cannot identify image file <_io.BytesIO object>") : exc.what();
-        throw ImportError("画像として読めない: " + why, at(index));
     } catch (const std::exception& exc) {
-        throw ImportError(std::string("画像として読めない: ") + exc.what(), at(index));
+        throw unreadable(exc);
     }
+    // (the size its header says, before its pixels are read: Python's verify() does not read them either, and a
+    // picture past the limit is refused without the memory its pixels would take)
     if (static_cast<std::int64_t>(size.width) * size.height > kMaxPixels) {
         throw ImportError("画素数が多すぎる: " + std::to_string(size.width) + "x" + std::to_string(size.height) + "（64 MP まで）", at(index));
+    }
+    try {
+        (void)render::open_image(blob, render::kPillowOpenLimits);  // (Image.verify(): the picture holds what it says)
+    } catch (const std::exception& exc) {
+        throw unreadable(exc);
     }
     render::Image image = open_picture(blob);
     std::string out = blob;
