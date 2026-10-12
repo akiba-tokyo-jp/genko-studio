@@ -31,6 +31,7 @@
 #include <cmath>
 #include <system_error>
 
+#include "app/ai_dialog.hpp"
 #include "app/ask.hpp"
 #include "app/config.hpp"
 #include "app/icons.hpp"
@@ -607,8 +608,8 @@ StartDialog::StartDialog(QWidget* parent) : QDialog(parent) {
         if (!path.isEmpty()) pick(fpath(path));
     });
     connect(ai_card, &QPushButton::clicked, this, [this] {
-        // (the AI connection's screens come with M5: said, not hidden)
-        ask::warning(this, QStringLiteral("AI と作る"), QStringLiteral("この版の Genko では、AI とつなぐ画面はまだ使えません（次の段階で入ります）。"));
+        AiDialog dialog(this);
+        ask::exec(&dialog);
     });
     auto* cards = new QHBoxLayout;
     cards->setSpacing(16);

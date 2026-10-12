@@ -334,6 +334,24 @@ if(GENKO_BUILD_APP)
   # processes (AC-SAVE 1, 8); `genko` alone
   genko_test(test_app_e2e SOURCES e2e/test_app_e2e.cpp DEPS genko_test_support LABELS e2e GUI TIMEOUT 1200)
   target_compile_definitions(test_app_e2e PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")
+  # Studio and AI connection in the window (M5④). A stand-in for `genko mcp` the tests start as a client's settings
+  # start Genko's server (tools/call runs this build's StudioService): never a network, never the person's settings.
+  add_executable(genko_fake_mcp support/fake_mcp.cpp)
+  target_link_libraries(genko_fake_mcp PRIVATE genko_service genko_studio Qt6::Core)
+  genko_target_flags(genko_fake_mcp)
+  # the approval box (each kind of request, answered as the person), the process bar, the panel view, the library, the
+  # viewer, チャットでの承認, requests arriving; replies in several lines, asked before they go, kept as drafts (I13);
+  # genko:// links (a later start hands its link over, a style from a catalog folder, `genko register-links`)
+  genko_test(test_gui_studio SOURCES gui/test_gui_studio.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  add_dependencies(test_gui_studio genko)
+  # AI と作る (AI-01, I07): the dialog as Python's, the connection's six states, the clients' settings written after the
+  # change is seen and confirmed (copied first, put back), the test connection (nothing called, the book unchanged),
+  # the book and conversation, and the first setup run through to the AI reading the person's decisions back
+  genko_test(test_gui_ai SOURCES gui/test_gui_ai.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  target_compile_definitions(test_gui_ai PRIVATE GENKO_FAKE_MCP="$<TARGET_FILE:genko_fake_mcp>")
+  add_dependencies(test_gui_ai genko_fake_mcp genko)
+  # the approval box's model and the AI dialog's Qt-free part against Python's (review_model.py, ai_link.py, links.py)
+  genko_test(test_contract_studio_gui SOURCES contract/test_contract_studio_gui.cpp DEPS genko_app genko_test_support LABELS contract TIMEOUT 1800)
 endif()
 
 # `genko` alone starts the desktop app when it is built (test_app_e2e); without it, it is a usage error

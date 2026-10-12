@@ -42,6 +42,7 @@
 #include "app/material_tabs.hpp"
 #include "app/subview.hpp"
 #include "app/main_window.hpp"
+#include "app/studio_widgets.hpp"
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
 #include "app/perf.hpp"
@@ -201,6 +202,7 @@ void MainWindow::build_actions() {
     build_material_actions();   // (効果線, 素材を置く, トーン, the view's extras, the layer commands: main_window_materials.cpp)
     build_line_actions();       // (テキスト, 台詞 and the book's lines, the 台詞 panel: main_window_lines.cpp)
     build_output_actions();     // (書き出し, 印刷, 履歴, 入稿前の点検, スマホの画面, 目盛り: main_window_output.cpp)
+    build_studio_actions();     // (チャットでの承認: main_window_studio.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("線の編集で選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("ペンの色…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -409,8 +411,10 @@ void MainWindow::build_menus() {
     pages->addAction(action("act_page_down"));
     pages->addAction(action("act_spread"));
     pages->addSeparator();
-    // (Python's order; 絵柄を選ぶ and チャットでの承認, of M5, join it as they come)
-    for (const char* name : {"act_paper", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline"}) pages->addAction(action(name));
+    // (Python's order; 絵柄を選ぶ, of M5, joins it as it comes)
+    for (const char* name : {"act_paper", "act_chat_approval", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline"}) {
+        pages->addAction(action(name));
+    }
     pages->addSeparator();
     QMenu* frames = pages->addMenu(QStringLiteral("コマ"));
     for (const char* name : {"act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection"}) frames->addAction(action(name));
@@ -515,6 +519,7 @@ void MainWindow::build_docks() {
     pages_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     addDockWidget(Qt::RightDockWidgetArea, pages_dock_);
     view_menu_->addAction(pages_dock_->toggleViewAction());
+    build_studio_docks();  // (承認箱 over the tabs; コマの詳細 and 資料 among them: main_window_studio.cpp)
     layer_panel_ = new LayerPanel(this);
     auto* layers = new QDockWidget(QStringLiteral("レイヤー"), this);
     layers->setObjectName(QStringLiteral("レイヤー"));
@@ -533,9 +538,15 @@ void MainWindow::build_docks() {
     build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
     pages_dock_->raise();
     build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)
+    tabifyDockWidget(pages_dock_, panel_dock_);  // (コマの詳細 after カラー, as Python's row)
+    view_menu_->addAction(panel_dock_->toggleViewAction());
     build_guide_dock();   // (定規・3D, a tab when it is opened: main_window_guides.cpp)
     build_material_dock();  // (素材, トーン, 効果線: main_window_materials.cpp)
     build_output_docks();   // (履歴 and 点検, tabs when they are opened: main_window_output.cpp)
+    tabifyDockWidget(pages_dock_, library_dock_);  // (資料 last)
+    view_menu_->addAction(library_dock_->toggleViewAction());
+    library_dock_->hide();
+    agent_view(agent_book());
     setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
     setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
 }
@@ -672,9 +683,11 @@ void MainWindow::on_frame_selected(const QString& frame_id) {
     const core::Page* page = current_page();
     if (page == nullptr) return;
     // (choosing goes through an op like every other change: no direct edits of the model)
+    if (panel_view_ != nullptr) panel_view_->frame_id = frame_id.toStdString();
     if (!(page->selected_frame_id.is_string() && page->selected_frame_id.get<std::string>() == frame_id.toStdString())) {
         apply_ops(Json::array({Json::object({{"op", "select_frame"}, {"page", page->index.json()}, {"frame_id", frame_id.toStdString()}})}));
     }
+    if (panel_view_ != nullptr && agent_mode_.value_or(false)) panel_view_->refresh();  // (a deliberate click: the panel shown at once)
 }
 
 void MainWindow::context_menu(const QString& frame_id, const QPoint& global) {

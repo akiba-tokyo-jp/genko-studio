@@ -12,9 +12,11 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
+#include "app/ai_dialog.hpp"
 #include "app/canvas.hpp"
 #include "app/pen.hpp"
 #include "app/session.hpp"
@@ -28,6 +30,7 @@ class QTabBar;
 class QToolBar;
 class QMenu;
 class QDockWidget;
+class QPushButton;
 
 // The main window (Python's genko/app/main.py MainWindow): the page in the middle, the tools on the left, the
 // commands and the open books' tabs above, the navigator and the page list beside it, and in the status bar the page,
@@ -53,6 +56,10 @@ class TextToolSettings;
 class StoryPanel;
 class StoryEditor;
 class ReplaceDialog;
+class ApprovalBox;
+class PanelView;
+class Library;
+class ProcessBar;
 
 class Navigator;
 class PageList;
@@ -172,6 +179,36 @@ public:
     CheckPanel* checks() const { return checks_; }
     void show_issue(const core::Json& issue);
 
+    // The studio (main_window_studio.cpp, Python's studio_widgets and ai_link in main.py): the approval box over the
+    // panels while something waits for the person, the panel view and the library as tabs (books made with agents
+    // only), the process bar and the AI button in the status bar; AI と作る, チャットでの承認, genko:// links.
+    ApprovalBox* approvals() const { return approvals_; }
+    PanelView* panel_view() const { return panel_view_; }
+    Library* library() const { return library_; }
+    ProcessBar* process_bar() const { return process_; }
+    QPushButton* ai_button() const { return ai_button_; }
+    QDockWidget* box_dock() const { return box_dock_; }
+    // The book and conversation this window asks its AI to work in (AI と作る's choice, kept while the window is open).
+    AiTarget& ai_target() { return ai_target_; }
+    // The approval box as tall as its request needs (a preview gets room; only words and buttons otherwise).
+    void fit_box();
+    void open_ai_dialog();
+    // The status line's AI button: who worked on the book lately (● while an AI works; C++: 失敗 when its last call
+    // failed).
+    void refresh_ai();
+    // チャットでの承認…: whether the AI records the approvals the person sends it in a chat (this book only).
+    void chat_approval();
+    // A genko:// link from a web page (the style catalog's 「この絵柄を使う」); when_ready: after the book being read is
+    // shown (a link that started Genko with a book).
+    void open_link(const QString& link);
+    void open_link_when_ready(const QString& link);
+    // Keep a branch of the style catalog as this book's style (asked first when `ask`, or when the style is fixed or the
+    // name is used elsewhere). False: not changed.
+    bool use_style(const std::string& style_id, bool ask = true);
+    // New requests from the AI since `before` (their ids): a quiet note, the taskbar's mark, and (unless turned off in
+    // ui/raise_requests) the approval box in front with the newest chosen.
+    void notice_requests(const std::set<std::string>& before);
+
     PageCanvas* canvas() const { return canvas_; }
     PageList* pages() const { return pages_; }
     Navigator* navigator() const { return navigator_; }
@@ -197,6 +234,9 @@ public:
     // --- doing things ------------------------------------------------------------------------------------------
     // Apply in memory as the person, show it at once (saved after a pause). A refusal shows in the status line.
     bool apply_ops(const core::Json& ops, const std::vector<std::string>& ids = {});
+    // For approvals (Python's apply_and_commit): applied as the person and written at once, so the agent sees the
+    // decision immediately.
+    bool apply_and_commit(const core::Json& ops);
     void go_to_page(int index);
     void select_page(int row);
     void choose_tool(const QString& tool);
@@ -402,6 +442,15 @@ private:
     void vector_simplify();
     void vector_selected(const std::string& what);
     void reshaped(const QString& stroke_id, const core::Json& points);
+    // the studio (main_window_studio.cpp)
+    void build_studio_actions();
+    void build_studio_bar();
+    void build_studio_docks();
+    void studio_follow(bool now);
+    void refresh_studio_docks();
+    void agent_view(bool on);
+    void sync_box();
+    std::set<std::string> request_ids() const;
     // animation and the timelapse (main_window_anim.cpp)
     void build_anim_actions();
     void build_anim_dock();
@@ -505,6 +554,23 @@ private:
     std::optional<core::Json> clipboard_area_;
     std::vector<QPointF> clipboard_outline_;
     bool closed_ = false;
+    ApprovalBox* approvals_ = nullptr;
+    PanelView* panel_view_ = nullptr;
+    Library* library_ = nullptr;
+    ProcessBar* process_ = nullptr;
+    QPushButton* ai_button_ = nullptr;
+    QDockWidget* box_dock_ = nullptr;
+    QDockWidget* panel_dock_ = nullptr;
+    QDockWidget* library_dock_ = nullptr;
+    std::vector<QDockWidget*> agent_docks_;
+    std::optional<bool> agent_mode_;
+    std::optional<bool> box_waiting_;
+    std::set<QDockWidget*> stale_docks_;
+    std::set<std::string> known_requests_;
+    QStringList pending_links_;  // (links that came while the book was being read: taken when it is shown)
+    AiTarget ai_target_;
+    QTimer ai_timer_;      // (the minutes since the AI last wrote)
+    QTimer studio_timer_;  // (the studio's panels follow an edit a moment later)
     PenSettings pen_;
     double eraser_mm_ = 2.0;
 

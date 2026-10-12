@@ -60,6 +60,10 @@ std::vector<Other> others(const std::filesystem::path& project, const std::strin
 std::vector<Other> check(const std::filesystem::path& project, const std::string& actor, double now);
 // presence.touch: after a write, this actor is using the book (actors older than a day are dropped).
 void touch(const std::filesystem::path& project, const std::string& actor, double now);
+// presence._read(project)["actors"]: each actor and when it last wrote, in the file's order (the app's AI dialog and
+// status line, Python's ai_link.recent_ai). An entry that is not an object or whose time is not a number is left out
+// (C++: Python's float() stops the dialog there); one without a time wrote at 0.
+std::vector<std::pair<std::string, double>> presence_actors(const std::filesystem::path& project);
 
 // --- toollog (studio/logs/tools.jsonl) ------------------------------------------------------------------------------
 

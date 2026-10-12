@@ -2,7 +2,8 @@
 //
 //   4  the start screen, 新しい原稿, 用紙の設定 (for a new book and for the book's own), ノンブルの設定, 表紙・カバーを足す,
 //      the templates, the question before closing, the whole path, the main window, 書き出し… and 印刷…, and the main
-//      window with its 点検 and 履歴 panels opened, on screens of 1024 × 640,
+//      window with its 点検 and 履歴 panels opened, AI と作る and the change to an AI client's settings, a book made
+//      with agents with a request in its approval box (M5④), on screens of 1024 × 640,
 //      1366 × 768 and 1920 × 1080 at 100, 125, 150 and 200 % scaling: each window is inside the screen, and its buttons
 //      (閉じる, 作る, やめる, 決める, キャンセル…) are wholly in sight — the rest of the body scrolls. The size asked for
 //      and the size each window got are both written to the log.
@@ -38,8 +39,12 @@
 #include <fstream>
 #include <memory>
 
+#include "app/ai_dialog.hpp"
 #include "app/book_dialogs.hpp"
 #include "app/canvas.hpp"
+#include "app/client_config.hpp"
+#include "app/reply_box.hpp"
+#include "app/studio_widgets.hpp"
 #include "app/check_panel.hpp"
 #include "app/dialogs.hpp"
 #include "app/export_dialog.hpp"
@@ -56,6 +61,7 @@
 #include "app/thumbs.hpp"
 #include "core/strokes.hpp"
 #include "gui_support.hpp"
+#include "service/studio_service.hpp"
 #include "storage/reader.hpp"
 
 using namespace gui_test;
@@ -241,6 +247,37 @@ int probe(int argc, char** argv) {
         std::vector<Seen> seen = {{QStringLiteral("履歴"), window.history()->list(), false}, {QStringLiteral("status"), window.statusBar(), true}};
         out << look_at(QStringLiteral("main-history"), &window, QSize(1280, 800), seen).dump() << "\n";
     }
+    {
+        // M5④: AI と作る (its settings, the change to a client's settings before it is written) and a book made with
+        // agents with a request in its approval box: the buttons to answer it reachable, the AI button in the status bar
+        const fs::path root = path_of(dir.filePath("studio"));
+        genko::service::StudioService agent(root, "ai:hermes");
+        agent.call("create_project", Json::array({"agent.genko", "AI の原稿", 2}), Json::object());
+        agent.call("request_approval", Json::array(), Json{{"project", "agent.genko"}, {"gate", "name"}, {"pages", Json::array({1, 2})}, {"note", "見てください"}});
+        app::AiDialog ai(nullptr, root / "agent.genko");
+        std::vector<Seen> seen = buttons_of(&ai, true);
+        for (QWidget* field : std::vector<QWidget*>{ai.client, ai.root, ai.copy, ai.write_button, ai.test_button, ai.book_pick, ai.session_pick, ai.ask,
+                                                    ai.ask_copy, ai.state_word})
+            seen.push_back(Seen{field->objectName().isEmpty() ? QStringLiteral("ai field") : field->objectName(), field, false});
+        out << look_at(QStringLiteral("ai"), &ai, QSize(900, 600), seen).dump() << "\n";
+        const auto proposal = app::client_config::propose(QStringLiteral("hermes"), path_of(dir.filePath("home/.hermes/config.yaml")),
+                                                          {long_path(dir.path()), QStringLiteral("mcp"), QStringLiteral("--root"), long_path(dir.path())});
+        app::ConfigChangeDialog change(nullptr, proposal);
+        out << look_at(QStringLiteral("ai-config"), &change, change.size(),
+                       {{QStringLiteral("書き込む"), change.write_button, true}, {QStringLiteral("取りやめ"), change.cancel_button, true}})
+                   .dump()
+            << "\n";
+        app::MainWindow window(app::Session::open(root / "agent.genko", quick(path_of(dir.filePath("recovery")))));
+        window.show();
+        QCoreApplication::processEvents();
+        seen = {{QStringLiteral("canvas"), window.canvas(), false},
+                {QStringLiteral("status"), window.statusBar(), true},
+                {QStringLiteral("AI と作る"), window.ai_button(), false},
+                {QStringLiteral("承認"), window.approvals()->approve_button, false},
+                {QStringLiteral("差し戻す"), window.approvals()->back_button, false},
+                {QStringLiteral("理由"), window.approvals()->reason, false}};
+        out << look_at(QStringLiteral("main-studio"), &window, QSize(1280, 800), seen).dump() << "\n";
+    }
     return 0;
 }
 
@@ -299,6 +336,9 @@ private slots:
         env.insert(QStringLiteral("GENKO_LAYOUT_PROBE"), QStringLiteral("1"));
         env.insert(QStringLiteral("GENKO_LAYOUT_OUT"), report);
         env.insert(QStringLiteral("GENKO_CONFIG_DIR"), dir.filePath("config"));
+        // (AI と作る reads the AI clients' settings: those of a home of the test's own)
+        env.insert(QStringLiteral("HOME"), dir.filePath("home"));
+        env.insert(QStringLiteral("XDG_CONFIG_HOME"), dir.filePath("home/.config"));
         child.setProcessEnvironment(env);
         child.setWorkingDirectory(dir.path());
         child.start(QCoreApplication::applicationFilePath(), {});
@@ -347,7 +387,7 @@ private slots:
                 }
             }
         }
-        QCOMPARE(windows, 14);
+        QCOMPARE(windows, 17);
     }
 
     // 試験 5: a long Japanese path, cut to fit, all of it one click away, copied whole

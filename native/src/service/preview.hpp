@@ -1,6 +1,8 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
+#include <utility>
 
 #include "core/json.hpp"
 #include "core/model.hpp"
@@ -25,5 +27,11 @@ render::Image annotate(const render::Image& image, const core::Page& page, int d
 // "<page> ページはない" / "<page> ページにコマ <id> はない（このページのコマ: …）".
 std::string preview(const core::Document& doc, const Json& page_index, const std::string& mode, const Json& max_px,
                     const Json& plan, const Json& frame_id = Json());
+
+// _render_kind(episode, project, page_index, frame_id, kind, candidate_id, max_px): a panel's comparison with a
+// candidate (kind "compare") or one of its guides ("guide:composition" / "guide:pose" / "guide:keepout") as PNG, and
+// its label (studio_art.cpp; the app's panel view shows the comparison too).
+std::pair<std::string, std::string> render_kind(const core::Document& doc, const std::filesystem::path& project, const Json& page_index,
+                                                const Json& frame_id, const Json& kind, const Json& candidate_id, const Json& max_px);
 
 }  // namespace genko::service

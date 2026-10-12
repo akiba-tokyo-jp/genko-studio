@@ -19,7 +19,9 @@ native/
               その部品（依頼と下絵の案内・取り込み・アタリ・点検・確認ページ・バックグラウンドの仕事・高解像度化・評価）、
               利用者向けの言葉（wording）。`genko studio`・MCP・HTTP・アプリが同じものを呼ぶ
     api/      CLI（genko）、HTTP、MCP、設定変換、エラー整形
-    app/      Qt Widgets 画面、ペン、IME、案内（GUI だけが Qt Widgets に依存）
+    app/      Qt Widgets 画面、ペン、IME、案内（GUI だけが Qt Widgets に依存）。スタジオの画面（承認箱・工程・コマの詳細・資料・
+              AI と作る・genko:// のリンク）も。承認箱の中身（review_model）と AI と作る の Qt を使わない部分（ai_link・
+              client_config）は画面から分けて Python と照合する
   tests/      unit/  contract/  e2e/  perf/  data/（固定の小さな試験資産）
 tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開発用。製品に入れない）
 ```
@@ -87,6 +89,7 @@ tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開
 
 - GUI（QWidget・QPixmap）はメインスレッドだけ。描画・保存・出力・フィルターはワーカーで、不変の `Document` と独立した画像バッファを扱い、結果は世代 ID 付きでキュー経由で返す。古い世代の結果は捨てる。
 - 原稿の変更は 1 本の実行列で順序付ける。ワーカーから生ポインタでモデルを書き換えない。
+- AI と作る の「テスト接続」は Genko の MCP サーバーを QProcess で起動し、メインスレッドのイベントで読み書きする（GUI を止めない。時間切れでサーバーを止める）。画面の人の操作（承認・差し戻し・返事・採用）は、ウィンドウのセッション（`human:<名前>`）で op として行い、承認はすぐ保存する（Python の apply_and_commit）。正式な書き出しは `service::run_export`（HumanService.export）。
 - スタジオのバックグラウンドの仕事（`service/jobs`：`export`・`export_proof`・`upscale` の `background`）は、仕事ごとのスレッドで、同じ root と actor の StudioService を新しく作って動かす（呼んだ側の StudioService を共有しない）。本への書き込みは本のロックで順序付く。スレッドはすべて登録して join し、デタッチしない（登録の場所はスレッドを作る前に取るので、作った後で登録に失敗しない）。前面（`genko studio`、MCP・HTTP のサーバ）は終わる前に `jobs::wait_all()` を呼び、仕事が終わるまで待つ（Python はプロセスと一緒に仕事が消える。SPEC COMP-01a）。呼び忘れても、QCoreApplication の終わり（`qAddPostRoutine`。静的な物を壊す前）に待つ。スレッドを始められない仕事は、始めた鼓動を止めて記録を failed にし、Python の RuntimeError を投げる。試験用の id の数え方（`ScopedIdSource`）と時刻（`ScopedClock`）は、待っている間に仕事のスレッドから読まれてよいが、仕事の途中で変えない。
 
 ## 8. エラー

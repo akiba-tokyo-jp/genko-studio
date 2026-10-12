@@ -218,6 +218,17 @@ void touch(const fs::path& project, const std::string& actor, double now) {
     write_presence(project, data);
 }
 
+std::vector<std::pair<std::string, double>> presence_actors(const fs::path& project) {
+    const Json data = read_presence(project);
+    std::vector<std::pair<std::string, double>> out;
+    const Json* actors = core::get(data, "actors");
+    if (actors == nullptr || !actors->is_object()) return out;
+    for (const auto& [name, item] : actors->items()) {
+        if (const auto at = float_at(item, "at")) out.emplace_back(name, *at);
+    }
+    return out;
+}
+
 // --- toollog ---------------------------------------------------------------------------------------------------------------
 
 void record_tool(const fs::path& project, const std::string& actor, const std::string& tool, const Json& kwargs,

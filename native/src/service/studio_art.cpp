@@ -77,6 +77,8 @@ const core::Frame& frame_or_apply_error(const core::Page& page, const Json& page
     }
 }
 
+}  // namespace
+
 // _render_kind(episode, project, page_index, frame_id, kind, candidate_id, max_px): the PNG and its label.
 std::pair<std::string, std::string> render_kind(const core::Document& doc, const fs::path& project, const Json& page_index, const Json& frame_id,
                                                 const Json& kind, const Json& candidate_id, const Json& max_px) {
@@ -126,6 +128,8 @@ std::pair<std::string, std::string> render_kind(const core::Document& doc, const
     image.thumbnail(render::Size{edge, edge});
     return {png(image), label};
 }
+
+namespace {
 
 // _guide_sheet(pack): the request's guides side by side, long side 512 px.
 std::optional<std::string> guide_sheet(const genreq::Pack& pack) {

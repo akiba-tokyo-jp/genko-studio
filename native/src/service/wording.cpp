@@ -1,5 +1,7 @@
 #include "service/wording.hpp"
 
+#include "core/pyconv.hpp"
+
 #include <QHash>
 #include <QRegularExpression>
 
@@ -672,6 +674,9 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(ops must be a JSON array|ops\[\d+\] must be an object)", "操作の指定が正しくありません"));
         r.push_back(rule("order must .*", "並び順の指定が正しくありません"));
         r.push_back(rule(R"(no page (\d+))", "\\1 ページはありません"));
+        // the approval box (app/review_model.cpp: C++ only, where Python's box stops with a KeyError or StopIteration)
+        r.push_back(rule("the proposal is gone", "この提案はもうありません（ほかで片付けられました）"));
+        r.push_back(rule("the proposal's page is gone", "この提案のページはもうありません"));
         r.push_back(rule("a tail needs to: .*", "しっぽの先の位置を指定します"));
         r.push_back(rule(R"(gradient \S+ is a density from 0 to 1)", "グラデーションの濃さは 0〜100% です"));
         r.push_back(rule("ops file must be a JSON array", "操作のファイルの中身が正しくありません"));
@@ -735,6 +740,40 @@ QString actor(std::string_view name) {
     if (n.startsWith(QStringLiteral("ai:"))) return QStringLiteral("AI（%1）").arg(n.mid(3));
     if (n.startsWith(QStringLiteral("human:"))) return n.mid(6);
     return n.isEmpty() ? QStringLiteral("不明") : n;
+}
+
+QString panel_status(const core::Json& status) {
+    static const QHash<QString, QString> table = {{"empty", "未着手"},      {"briefed", "指示あり"}, {"requested", "依頼済み"}, {"candidates", "候補あり"},
+                                                  {"adopted", "採用済み"},  {"fix_requested", "直し待ち"}, {"skip", "絵なし"}};
+    if (status.is_null()) return QStringLiteral("未着手");
+    if (status.is_string()) {
+        const QString k = QString::fromStdString(status.get<std::string>());
+        return table.value(k, k);
+    }
+    return QString::fromStdString(core::py_str(status));
+}
+
+QString gate(std::string_view key) {
+    static const QHash<QString, QString> table = {{"name", "ネーム"}, {"art", "作画"}, {"sheet", "設定画"}, {"export", "書き出し"}};
+    const QString k = qs(key);
+    return table.value(k, k);
+}
+
+const std::vector<std::pair<QString, QString>>& regions() {
+    static const std::vector<std::pair<QString, QString>> list = {
+        {QStringLiteral("face"), QStringLiteral("顔")}, {QStringLiteral("person"), QStringLiteral("人物")}, {QStringLiteral("keep"), QStringLiteral("空けておく")}};
+    return list;
+}
+
+QString region_label(const core::Json& kind) {
+    if (kind.is_string()) {
+        const QString k = QString::fromStdString(kind.get<std::string>());
+        for (const auto& [key, label] : regions()) {
+            if (key == k) return label;
+        }
+        return k;
+    }
+    return QString::fromStdString(core::py_str(kind));
 }
 
 QString layer_label(const core::Layer& layer) {

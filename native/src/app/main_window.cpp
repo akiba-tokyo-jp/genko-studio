@@ -37,6 +37,7 @@
 #include "app/pages_panel.hpp"
 #include "app/perf.hpp"
 #include "app/save_status.hpp"
+#include "app/studio_widgets.hpp"
 #include "app/theme.hpp"
 #include "service/wording.hpp"
 #include "core/actor.hpp"
@@ -301,6 +302,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     statusBar()->addWidget(status_, 1);
     save_label_ = new SaveStatusLabel;
     statusBar()->addPermanentWidget(save_label_);
+    build_studio_bar();  // (AI と作る and the process bar, before the zoom: main_window_studio.cpp)
     zoom_label_ = new QLabel;
     statusBar()->addPermanentWidget(zoom_label_);
     zoom_box_ = new QSpinBox;  // (表示倍率の直接入力)
@@ -324,6 +326,9 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     watch();
     reload_pages();
     pages_->setCurrentRow(0);
+    known_requests_ = request_ids();
+    studio_follow(true);
+    refresh_ai();
     theme::name_buttons(this);
     perf::watch_loop(this);
 }
@@ -485,6 +490,14 @@ void MainWindow::on_book_changed(const BookChange& change) {
     if (doc_ < doc_tabs_->count()) doc_tabs_->setTabText(doc_, documents_[static_cast<std::size_t>(doc_)].title());
     render::brushes::follow_book(b);  // (a define_brush: the person's own brushes and their edits stay)
     output_panels_follow();  // (履歴 and 点検: main_window_output.cpp)
+    // (the studio: someone else's changes may bring requests for the person — a note, and the box in front)
+    const bool outside = change.why == BookChange::Why::Rebase || change.why == BookChange::Why::Reload;
+    const std::set<std::string> before = known_requests_;
+    studio_follow(change.why != BookChange::Why::Edit);
+    if (outside) {
+        notice_requests(before);
+        refresh_ai();
+    }
 }
 
 void MainWindow::reload_pages() {
@@ -541,9 +554,11 @@ void MainWindow::select_page(int row) {
         session_->save_now();  // a page switch writes what was done on the last page (on the worker)
         canvas_->set_selection(std::nullopt);
         canvas_->highlight_box.reset();  // (a problem shown by the checks stays on its page)
+        if (panel_view_ != nullptr) panel_view_->frame_id.reset();
     }
     page_index_ = row;
     show_page();
+    studio_follow(true);
 }
 
 void MainWindow::go_to_page(int index) {
@@ -692,6 +707,7 @@ void MainWindow::watch() {
 void MainWindow::on_disk_change() {
     watch();  // (project.json is replaced atomically, so the watch has to be set again)
     session_->check_outside();
+    refresh_ai();
 }
 
 // --- several books -----------------------------------------------------------------------------------------------
@@ -712,6 +728,7 @@ void MainWindow::show_document(int index) {
     page_index_ = doc.page_index;
     target_layer_id_ = doc.target_layer;
     connect_session();
+    if (panel_view_ != nullptr) panel_view_->frame_id.reset();
     canvas_->set_selection(std::nullopt);
     watch();
     // (another book in front: the placed pictures remembered for the one before — decoded and finished, up to
@@ -726,6 +743,13 @@ void MainWindow::show_document(int index) {
     doc_tabs_->blockSignals(false);
     refresh_status();
     output_panels_follow(true);  // (another book: its history at once; the checks of the last one are out of date)
+    known_requests_ = request_ids();  // (another book's requests are not new ones)
+    studio_follow(true);
+    refresh_ai();
+    if (session_->path() && !pending_links_.isEmpty()) {  // (links that came while it was being read)
+        const QStringList links = std::exchange(pending_links_, {});
+        for (const QString& link : links) QTimer::singleShot(0, this, [this, link] { open_link(link); });
+    }
 }
 
 void MainWindow::switch_document(int index) {
