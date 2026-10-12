@@ -56,8 +56,8 @@ std::string lock_file_text(const QString& book);
 // The Python reference: $GENKO_PYREF, else /opt/pyref/bin/python; empty when neither exists.
 QString python_ref();
 // A Python with the `mcp` extra of pyproject.toml (the MCP SDK and its dependencies as uv.lock pins them, Pillow and
-// numpy): $GENKO_MCP_PYTHON, else /opt/pyref-mcp/bin/python; empty when neither exists. The MCP and HTTP contract tests
-// run the SDK's own client and Python's servers with it.
+// numpy: tools/migration/mcp_reference_requirements.txt): $GENKO_MCP_PYTHON, else /opt/pyref-mcp/bin/python; empty when
+// neither exists. The MCP and HTTP contract tests run the SDK's own client and Python's servers with it.
 QString mcp_python();
 
 struct Run {

@@ -119,13 +119,29 @@ public:
     ~Transport() { retire_all(); }
 
     void bound(std::uint16_t port) {
+        port_ = port;
         // (a host that is not a loopback name: only that host and port, where the SDK checks nothing)
         if (!loopback(options_.host)) hosts_.push_back(options_.host + ":" + std::to_string(port));
     }
 
     void handle(const http::Request& request, http::Responder& r) {
-        const std::string route = request.target.substr(0, request.target.find('?'));
+        const std::size_t question = request.target.find('?');
+        const std::string route = http::percent_decode(request.target.substr(0, question));  // (scope["path"]: decoded)
         if (route != options_.path) {
+            // Starlette's redirect_slashes: the path without its trailing slashes (or with one) that names the endpoint
+            // is where a 307 sends the client, built from its Host header, the query kept (before any other check)
+            std::string other = route;
+            if (!other.empty() && other.back() == '/') {
+                while (!other.empty() && other.back() == '/') other.pop_back();
+            } else {
+                other += '/';
+            }
+            if (route != "/" && other == options_.path) {
+                const std::string authority = request.header("host").value_or(options_.host + ":" + std::to_string(port_));
+                const std::string query = question == std::string::npos ? std::string() : request.target.substr(question);
+                r.send(307, {{"location", "http://" + authority + options_.path + (query.size() > 1 ? query : std::string())}}, "");
+                return;
+            }
             r.send(404, {{"content-type", "text/plain; charset=utf-8"}}, "Not Found");
             return;
         }
@@ -507,8 +523,16 @@ private:
         };
         auto slot = std::make_shared<Slot>();
         const std::vector<std::string> odd = decoded->odd_numbers;
-        start_work([this, slot, id, method, params, odd] {
+        // (a thread for it once one of the kRequestThreads is free; a client that left before then is not served:
+        // its work never starts. Work that started runs to its end — a write is never cut in the middle — and its
+        // answer is dropped when the client left.)
+        std::shared_ptr<RequestPermit> permit;
+        while (!(permit = RequestPermit::within(kTick))) {
+            if (r.gone(0) || http::stop_flag().load()) return;
+        }
+        start_work([this, slot, id, method, params, odd, permit]() mutable {
             Json reply = method == "subscriptions/listen" ? Json() : serve_one(engine_, id, method, params, odd);
+            permit.reset();
             if (method == "subscriptions/listen") return;  // (a listen stream never ends from this side)
             std::lock_guard<std::mutex> lock(slot->mutex);
             slot->reply = std::move(reply);
@@ -593,7 +617,11 @@ private:
             if (found == sessions_.end() || found->second != session) return;
             sessions_.erase(found);
         }
-        start_work([session] { session->connection->close(); });
+        if (!session->connection->busy()) {
+            session->connection->close();  // (nothing of it runs: closed here, no thread for it)
+            return;
+        }
+        start_work([session] { session->connection->close(); });  // (at most as many as the requests running)
     }
 
     void retire_all() {
@@ -618,6 +646,7 @@ private:
 
     Engine engine_;
     HttpOptions options_;
+    std::uint16_t port_ = 0;
     std::vector<std::string> hosts_;
     std::vector<std::string> origins_;
     std::mutex mutex_;
@@ -634,6 +663,7 @@ int serve_streamable_http(const std::filesystem::path& root, const std::string& 
     http::Limits limits;
     limits.max_body = kMaxBody;
     limits.chunked_bodies = true;
+    limits.bad_request = "Invalid HTTP request received.";  // (uvicorn's words for a request h11 cannot read)
     limits.too_large = [](http::Responder& r) { r.send(413, {}, "Request body too large"); };
     http::Server server([&transport](const http::Request& request, http::Responder& r) { transport.handle(request, r); }, limits);
     if (const auto error = server.listen(options.host, options.port)) {

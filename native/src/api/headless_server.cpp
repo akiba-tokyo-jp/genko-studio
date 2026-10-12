@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cstdio>
 #include <deque>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <regex>
 #include <system_error>
 
 #include "api/tokens.hpp"
@@ -153,8 +155,10 @@ fs::path confine(const fs::path& root, const Json& raw) {
     return full;
 }
 
-// _confine_ops: the local files an op reads (put_raster's and import_psd's path, set_meta's font_path) inside --root,
-// in the ops for_pages repeats too (Python looks only at the top level).
+// _confine_ops: the local files an op reads inside --root, in the ops for_pages repeats too (Python looks only at the
+// top level). put_raster's and import_psd's path and a font_path are read as their text whatever they are (str(x), as
+// Python's confine reads them); another op's path that is not a text is no file (add_line's points) and is left alone.
+// import_pages' book (from) must be a book inside --root: its project.json there (Python reads any book).
 Json confine_ops(const fs::path& root, const Json& ops) {
     Json out = Json::array();
     for (const Json& item : ops) {
@@ -163,10 +167,22 @@ Json confine_ops(const fs::path& root, const Json& ops) {
             continue;
         }
         Json op = item;
-        for (const char* key : {"path", "font_path"}) {
-            if (op.contains(key) && op[key].is_string() && !op[key].get_ref<const std::string&>().empty()) {
-                op[key] = core::path_to_utf8(confine(root, op[key]));
+        const Json name = op.contains("op") ? op["op"] : Json();
+        const bool reads_path = name == Json("put_raster") || name == Json("import_psd");
+        if (op.contains("path") && core::py_truthy(op["path"]) && (reads_path || op["path"].is_string())) {
+            op["path"] = core::path_to_utf8(confine(root, Json(core::py_str(op["path"]))));
+        }
+        if (op.contains("font_path") && core::py_truthy(op["font_path"])) {
+            op["font_path"] = core::path_to_utf8(confine(root, Json(core::py_str(op["font_path"]))));
+        }
+        if (name == Json("import_pages") && op.contains("from") && core::py_truthy(op["from"])) {
+            const std::string text = core::py_str(op["from"]);
+            const fs::path book = confine(root, Json(text));
+            std::error_code ec;
+            if (!fs::is_regular_file(book / "project.json", ec)) {
+                throw core::ApplyError("import_pages: from must be a book inside --root (a folder with its project.json): " + text);
             }
+            op["from"] = core::path_to_utf8(book);
         }
         if (op.contains("ops") && op["ops"].is_array()) op["ops"] = confine_ops(root, op["ops"]);
         out.push_back(std::move(op));
@@ -174,15 +190,58 @@ Json confine_ops(const fs::path& root, const Json& ops) {
     return out;
 }
 
-// _dpi: int(value) in 36–1200.
+// The JSON pointers of the integers past the signed 64 bits in `value` (2^63 to 2^64 - 1: the ones the parser keeps).
+void big_integers(const Json& value, const std::string& at, std::vector<std::string>& out) {
+    if (value.is_number_unsigned() && value.get<std::uint64_t>() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+        out.push_back(at);
+    } else if (value.is_array()) {
+        for (std::size_t i = 0; i < value.size(); ++i) big_integers(value[i], at + "/" + std::to_string(i), out);
+    } else if (value.is_object()) {
+        for (const auto& [key, item] : value.items()) big_integers(item, at + "/" + core::json_pointer_token(key), out);
+    }
+}
+
+// _dpi: int(value) in 36–1200 (an integer past 64 bits is past 1200 too).
 int dpi_of(const Json& value) {
+    if (core::py_big_int_text(value)) throw core::PyValueError("dpi must be 36-1200");
     const std::int64_t dpi = core::py_int(value);
     if (dpi < 36 || dpi > 1200) throw core::PyValueError("dpi must be 36-1200");
     return static_cast<int>(dpi);
 }
 
-// int(text) for a number in the route ("invalid literal for int() with base 10: …").
-core::Num route_int(const std::string& text) { return core::Num(core::py_int(Json(text))); }
+// int(text) for a page's number in the route ("invalid literal for int() with base 10: …"); one past 64 bits names no
+// page (Python's int takes it and finds none): nothing.
+std::optional<core::Num> route_int(const std::string& text) {
+    if (core::py_big_int_text(Json(text))) return std::nullopt;
+    return core::Num(core::py_int(Json(text)));
+}
+
+// int(data.get(key, fallback)) for a number in the body; an integer past 64 bits (a number or a text) is refused as
+// the body's other odd numbers are.
+std::int64_t body_int(const Json& data, const char* key, const Json& fallback) {
+    const Json value = data.contains(key) ? data[key] : fallback;
+    if (core::py_big_int_text(value)) {
+        throw core::ApplyError("the body must not hold NaN, Infinity or an integer past 64 bits (at /" + core::json_pointer_token(key) + ")");
+    }
+    return core::py_int(value);
+}
+
+// html.escape(text, quote=False)
+std::string html_escape(std::string_view text) {
+    std::string out;
+    for (const char c : text) {
+        if (c == '&') {
+            out += "&amp;";
+        } else if (c == '<') {
+            out += "&lt;";
+        } else if (c == '>') {
+            out += "&gt;";
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
 
 bool is_png(std::string_view bytes) { return bytes.size() >= 4 && bytes.substr(0, 4) == "\x89PNG"; }
 
@@ -217,37 +276,61 @@ std::deque<std::string> g_job_order;
 
 struct TokenCache {
     std::mutex mutex;
-    std::optional<fs::file_time_type> stamp;
-    bool exists = false;
-    std::map<std::string, std::string> tokens;
+    std::optional<std::string> bytes;                         // tokens.json as last read (nothing: no file)
+    std::vector<std::pair<std::string, std::string>> tokens;  // (the token's SHA-256, hex; its actor)
 };
 TokenCache g_tokens;
 
-// The actor of a token (tokens.json read again when it changed).
+// Whether two texts of the same length are the same, looking at every byte whatever they hold.
+bool same_bytes(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    unsigned char differ = 0;
+    for (std::size_t i = 0; i < a.size(); ++i) differ |= static_cast<unsigned char>(a[i] ^ b[i]);
+    return differ == 0;
+}
+
+// The actor of a token. tokens.json is read on each request and parsed again whenever its bytes changed (its time and
+// size may stay the same); the token sent is compared by its SHA-256 with every token's, all of them, so the time an
+// answer takes says nothing about how much of a token was right.
 std::optional<std::string> actor_of(const std::string& token) {
     std::lock_guard<std::mutex> lock(g_tokens.mutex);
-    std::error_code ec;
-    const fs::path file = tokens::file();
-    const bool exists = fs::is_regular_file(file, ec);
-    const auto stamp = exists ? std::optional<fs::file_time_type>(fs::last_write_time(file, ec)) : std::nullopt;
-    if (exists != g_tokens.exists || stamp != g_tokens.stamp) {
+    std::optional<std::string> bytes;
+    try {
+        std::error_code ec;
+        if (fs::is_regular_file(tokens::file(), ec)) bytes = storage::read_file(tokens::file());
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "genko serve: tokens.json cannot be read (%s): no token is taken\n", error.what());
+        bytes = std::string();
+    }
+    if (bytes != g_tokens.bytes) {
+        g_tokens.tokens.clear();
         try {
-            g_tokens.tokens = tokens::load();
+            if (bytes) {
+                for (const auto& [known, actor] : tokens::parse(*bytes)) g_tokens.tokens.emplace_back(storage::sha256_hex(known), actor);
+            }
         } catch (const std::exception& error) {
             std::fprintf(stderr, "genko serve: tokens.json cannot be read (%s): no token is taken\n", error.what());
             g_tokens.tokens.clear();
         }
-        g_tokens.exists = exists;
-        g_tokens.stamp = stamp;
+        g_tokens.bytes = std::move(bytes);
     }
-    const auto found = g_tokens.tokens.find(token);
-    if (found == g_tokens.tokens.end()) return std::nullopt;
-    return found->second;
+    const std::string digest = storage::sha256_hex(token);
+    std::optional<std::string> found;
+    for (const auto& [known, actor] : g_tokens.tokens) {
+        if (same_bytes(known, digest)) found = actor;  // (no early return: every token is looked at)
+    }
+    return found;
 }
 
 }  // namespace
 
-Api::Api(Options options) : options_(std::move(options)) { options_.root = resolved(fs::absolute(options_.root)); }
+Api::Api(Options options) : options_(std::move(options)) {
+    try {
+        options_.root = resolved(fs::absolute(options_.root));
+    } catch (const Forbidden&) {
+        throw core::Error("value", "--root " + core::path_to_utf8(options_.root) + " cannot be resolved (a link to itself, or a folder that cannot be read)");
+    }
+}
 
 void Api::bound(std::uint16_t port) { port_ = port; }
 
@@ -293,35 +376,22 @@ Reply request_file(const fs::path& root, const std::map<std::string, std::string
     const fs::path folder = resolved(project / "studio" / "requests" / core::path_from_utf8(request_id));
     const fs::path target = resolved(folder / core::path_from_utf8(http::percent_decode(name)));
     std::error_code ec;
-    if (target == folder || !inside(folder, target) || !fs::is_regular_file(target, ec)) return failure("unknown file", 404);
+    // (the request's folder itself inside --root: a link out of studio/requests/ serves nothing)
+    if (!inside(root, folder) || target == folder || !inside(folder, target) || !fs::is_regular_file(target, ec)) return failure("unknown file", 404);
     return Reply{200, storage::read_file(target), {}};
 }
 
 }  // namespace
 
-Reply Api::serve(const http::Request& request) {
-    const auto [path, query_text] = split_target(request.target);
-    const std::string route = route_of(path);
-    const std::string& body = request.body;
-    const auto origin = request.header("origin");
-    const auto allowed_origin = [this](const std::string& o) {
-        return std::find(options_.allow_origins.begin(), options_.allow_origins.end(), o) != options_.allow_origins.end();
-    };
-    if (request.method == "OPTIONS") {
-        if (!origin || origin->empty() || !allowed_origin(*origin)) return failure("origin not allowed", 403);
-        return Reply{204,
-                     "",
-                     {{"Access-Control-Allow-Origin", *origin},
-                      {"Access-Control-Allow-Methods", "GET, POST, OPTIONS"},
-                      {"Access-Control-Allow-Headers", "Content-Type, Authorization"},
-                      {"Vary", "Origin"}}};
-    }
-    if (request.method != "GET" && request.method != "POST") {
-        return Reply{501, "", {}};  // (the handler's 501 page)
-    }
-    // _guard: Host (DNS rebinding), Origin, the body's Content-Type, then the token
+bool Api::allowed_origin(const std::string& origin) const {
+    return std::find(options_.allow_origins.begin(), options_.allow_origins.end(), origin) != options_.allow_origins.end();
+}
+
+// _guard: Host (DNS rebinding), Origin, the body's Content-Type, then the token — a refusal, or the actor.
+std::optional<Reply> Api::guard(const http::Request& head, bool has_body, std::string& actor) const {
+    const std::string route = route_of(split_target(head.target).first);
     {
-        std::string host = request.header("host").value_or("");
+        std::string host = head.header("host").value_or("");
         std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         bool host_ok = false;
         std::vector<std::string> names = {"127.0.0.1", "localhost", "[::1]"};
@@ -335,9 +405,10 @@ Reply Api::serve(const http::Request& request) {
         }
         if (!host_ok) return failure("unexpected Host header", 421);
     }
+    const auto origin = head.header("origin");
     if (origin && !origin->empty() && !allowed_origin(*origin)) return failure("origin not allowed", 403);
-    if (!body.empty()) {
-        std::string type = request.header("content-type").value_or("");
+    if (has_body) {
+        std::string type = head.header("content-type").value_or("");
         type = type.substr(0, type.find(';'));
         const std::size_t a = type.find_first_not_of(" \t");
         const std::size_t b = type.find_last_not_of(" \t");
@@ -351,9 +422,9 @@ Reply Api::serve(const http::Request& request) {
             return failure("Content-Type must be application/json", 415);
         }
     }
-    std::string actor = "anonymous";
+    actor = "anonymous";
     if (route != "/health") {
-        const std::string auth = request.header("authorization").value_or("");
+        const std::string auth = head.header("authorization").value_or("");
         std::string token;
         if (auth.size() >= 7) {
             std::string scheme = auth.substr(0, 7);
@@ -369,18 +440,68 @@ Reply Api::serve(const http::Request& request) {
         if (!known || known->empty()) return failure("Authorization: Bearer <token> is required", 401);
         actor = *known;
     }
+    return std::nullopt;
+}
 
-    Reply reply;
+bool Api::admit(http::Request& head, http::Responder& r) {
+    if (head.method != "GET" && head.method != "POST") return true;  // (OPTIONS answers by itself; others get the 501 page)
+    // (do_GET reads no body; do_POST reads Content-Length's bytes, and http.server knows no chunks)
+    const auto length = head.header("content-length");
+    const bool has_body = head.method == "POST" && length && length->find_first_not_of('0') != std::string::npos;
+    std::string actor;
+    if (const auto refused = guard(head, has_body, actor)) {
+        answer(r, *refused);
+        return false;
+    }
+    head.principal = actor;
+    return true;
+}
+
+void Api::decorate(const http::Request& head, int status, http::Headers& headers) const {
+    (void)status;
+    if (head.method != "GET" && head.method != "POST" && head.method != "OPTIONS") return;  // (http.server's own pages)
+    const auto origin = head.header("origin");
+    if (!origin || origin->empty() || !allowed_origin(*origin)) return;
+    for (const auto& [name, value] : headers) {
+        (void)value;
+        if (name == "Access-Control-Allow-Origin") return;
+    }
+    headers.emplace_back("Access-Control-Allow-Origin", *origin);
+    headers.emplace_back("Vary", "Origin");
+}
+
+void Api::answer(http::Responder& r, const Reply& reply) {
+    http::Headers headers;
+    if (reply.status != 204) headers.emplace_back("Content-Type", is_png(reply.body) ? "image/png" : "application/json; charset=utf-8");
+    for (const auto& h : reply.headers) headers.push_back(h);
+    r.send(reply.status, headers, reply.body);
+}
+
+Reply Api::serve(const http::Request& request) {
+    const auto [path, query_text] = split_target(request.target);
+    const std::string route = route_of(path);
+    const auto origin = request.header("origin");
+    if (request.method == "OPTIONS") {
+        if (!origin || origin->empty() || !allowed_origin(*origin)) return failure("origin not allowed", 403);
+        return Reply{204,
+                     "",
+                     {{"Access-Control-Allow-Origin", *origin},
+                      {"Access-Control-Allow-Methods", "GET, POST, OPTIONS"},
+                      {"Access-Control-Allow-Headers", "Content-Type, Authorization"},
+                      {"Vary", "Origin"}}};
+    }
+    if (request.method != "GET" && request.method != "POST") {
+        return Reply{501, "", {}};  // (the handler's 501 page)
+    }
+    std::string actor = request.principal;
+    if (actor.empty()) {  // (not admitted from its head: the guard now, the body read)
+        if (const auto refused = guard(request, request.method == "POST" && !request.body.empty(), actor)) return *refused;
+    }
     try {
-        reply = route_request(request.method, route, parse_query(query_text), body, actor);
+        return route_request(request.method, route, parse_query(query_text), request.body, actor);
     } catch (const Forbidden& forbidden) {
-        reply = failure(forbidden.message, 403);
+        return failure(forbidden.message, 403);
     }
-    if (origin && !origin->empty() && allowed_origin(*origin)) {
-        reply.headers.emplace_back("Access-Control-Allow-Origin", *origin);
-        reply.headers.emplace_back("Vary", "Origin");
-    }
-    return reply;
 }
 
 Reply Api::route_request(const std::string& method, const std::string& route, const std::map<std::string, std::string>& query,
@@ -400,6 +521,7 @@ Reply Api::route_request(const std::string& method, const std::string& route, co
             if (!data.is_object()) return failure("body must be a JSON object", 400);
             odd = repairs.nonfinite;
             odd.insert(odd.end(), repairs.inexact.begin(), repairs.inexact.end());
+            big_integers(data, "", odd);  // (2^63 to 2^64 - 1, which the parser keeps)
         }
         return routes(method, route, query, data, odd, actor);
     } catch (const Forbidden& forbidden) {
@@ -410,6 +532,19 @@ Reply Api::route_request(const std::string& method, const std::string& route, co
         // (what this build does not do yet: said, never done halfway)
         return json_reply(Json::object({{"ok", false}, {"error", error.what()}, {"code", error.code()}, {"element", error.element()}}), 501);
     } catch (const core::ApplyError& error) {
+        // An exception an op raised that Python's apply_ops lets through (this build's CommandBus writes it as
+        // "ops[i] <op>: <Type>: <words>"): handle_request's own statuses for it, its words without the op's name.
+        static const std::regex kRaised(R"(^ops\[\d+\] [A-Za-z0-9_]+: ([A-Za-z]+Error|StopIteration)(?:: ([\s\S]*))?$)");
+        std::smatch raised;
+        const std::string message = error.what();
+        if (error.code() == "python_error" && std::regex_match(message, raised, kRaised)) {
+            const std::string type = raised[1].str();
+            const std::string words = raised[2].matched ? raised[2].str() : std::string();
+            if (type == "FileNotFoundError") return failure("not found: " + words, 404);
+            if (type == "KeyError" || type == "TypeError" || type == "ValueError" || type == "StopIteration") return failure(words, 400);
+            // (Python would end the connection with a traceback: this build says what failed)
+            return json_reply(Json::object({{"ok", false}, {"error", type + ": " + words}, {"code", "python_error"}}), 500);
+        }
         std::string lower = error.what();
         std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         return failure(error.what(), lower.find("locked") != std::string::npos ? 409 : 400);
@@ -460,9 +595,10 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
         const std::size_t frames = route.find("/frames/");
         const std::string head = route.substr(0, frames);
         std::string frame_id = route.substr(frames + 8);
-        const core::Num index = route_int(head.substr(head.rfind('/') + 1));
-        const core::Page* page = page_at(doc, index);
-        if (page == nullptr) return failure("no page " + index.repr(), 404);
+        const std::string number = head.substr(head.rfind('/') + 1);
+        const auto index = route_int(number);
+        const core::Page* page = index ? page_at(doc, *index) : nullptr;
+        if (page == nullptr) return failure("no page " + (index ? index->repr() : number), 404);
         frame_id = frame_id.substr(0, frame_id.size() - 4);
         render::RenderOptions options = render::proof_options();
         options.mode = q("mode", "proof");
@@ -471,15 +607,15 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
             return png_reply(render::render_frame(*page, frame_id, dpi, options, &doc));
         } catch (const core::Error& error) {
             if (error.code() != "key") throw;
-            return failure("no frame " + frame_id + " on page " + index.repr(), 404);
+            return failure("no frame " + frame_id + " on page " + index->repr(), 404);
         }
     }
     if (method == "GET" && route.rfind("/v1/pages/", 0) == 0 && route.ends_with(".png")) {
         const core::Document doc = load(confine(root, Json(q("path", ""))));
         std::string last = route.substr(route.rfind('/') + 1);
         last = last.substr(0, last.size() - 4);
-        const core::Num index = route_int(last);
-        const core::Page* page = page_at(doc, index);
+        const auto index = route_int(last);
+        const core::Page* page = index ? page_at(doc, *index) : nullptr;
         if (page == nullptr) return failure("", 400);  // (StopIteration: no words)
         render::RenderOptions options;
         options.mode = q("mode", "print");
@@ -501,12 +637,13 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
             throw core::PyValueError(parts.size() < 2 ? "not enough values to unpack (expected 2, got " + std::to_string(parts.size()) + ")"
                                                       : "too many values to unpack (expected 2)");
         }
-        const core::Num left = route_int(parts[0]);
-        const core::Num right = route_int(parts[1]);
+        const auto left = route_int(parts[0]);
+        const auto right = route_int(parts[1]);
         const int dpi = dpi_of(Json(q("dpi", "150")));
         render::RenderOptions options;
         options.mode = q("mode", "print");
-        return png_reply(render::render_spread(doc, left, right, dpi, options));
+        // (a page's number past 64 bits names none: as a number no page has)
+        return png_reply(render::render_spread(doc, left.value_or(core::Num(0)), right.value_or(core::Num(0)), dpi, options));
     }
     if (method == "POST" && route == "/v1/new") {
         refuse_odd("the body");
@@ -514,8 +651,8 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
         const fs::path dest = confine(root, data["dest"]);
         const core::PageSpec spec = core::py_truthy(core::get_or(data, "webtoon", Json())) ? core::PageSpec::webtoon() : core::PageSpec::a4_mono();
         const std::string title = core::py_str(data.contains("title") ? data["title"] : Json("無題"));
-        const std::int64_t episode = core::py_int(data.contains("episode") ? data["episode"] : Json(1));
-        const std::int64_t pages = core::py_int(data.contains("pages") ? data["pages"] : Json(8));
+        const std::int64_t episode = body_int(data, "episode", Json(1));
+        const std::int64_t pages = body_int(data, "pages", Json(8));
         std::error_code ec;
         const auto exists = [&] { return fs::exists(dest / "project.json", ec); };
         if (exists()) {
@@ -549,9 +686,12 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
             }
         }
         ops = confine_ops(root, ops);
-        bool odd_ops = false;
-        for (const std::string& where : odd_numbers) odd_ops = odd_ops || where.rfind("/ops", 0) == 0;
-        if (odd_ops) throw core::ApplyError("ops must not hold NaN or Infinity (at " + odd_numbers.front().substr(4) + ")");
+        for (const std::string& where : odd_numbers) {  // (the M1 words for NaN and Infinity in ops; integers past 64 bits)
+            if (where.rfind("/ops/", 0) != 0) continue;
+            const Json found = data.value(Json::json_pointer(where), Json());
+            throw core::ApplyError(found.is_number() ? "ops must not hold an integer past 64 bits (at " + where.substr(4) + ")"
+                                                     : "ops must not hold NaN or Infinity (at " + where.substr(4) + ")");
+        }
         refuse_odd("the body");
         const bool dry_run = core::py_truthy(core::get_or(data, "dry_run", Json()));
         refuse_legacy(project);  // (a v1–v3 book is not written: genko migrate first; not_found when it is not a book)
@@ -561,7 +701,7 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
         const storage::LoadResult loaded = storage::load_document(project);
         if (loaded.report.source_version < 4) throw storage::NeedsMigration(project, loaded.report.source_version);
         const Json expected = core::get_or(data, "expect_revision", Json());
-        if (!expected.is_null() && loaded.document.revision != core::py_int(expected)) {
+        if (!expected.is_null() && loaded.document.revision != body_int(data, "expect_revision", Json())) {
             return failure("revision conflict: expected " + core::py_str(expected) + ", found " + std::to_string(loaded.document.revision), 409);
         }
         const core::CommandBus bus(render::ops_registry());
@@ -633,26 +773,24 @@ int serve(const Options& options) {
     limits.too_large = [](http::Responder& r) {
         r.send(413, {{"Content-Type", "application/json; charset=utf-8"}}, core::dump_python(Json::object({{"ok", false}, {"error", "body too large"}})));
     };
+    // the guard from the head, before the body is read; CORS on every answer to an allowed Origin (_send)
+    limits.admit = [&api](http::Request& head, http::Responder& r) { return api.admit(head, r); };
+    limits.decorate = [&api](const http::Request& head, int status, http::Headers& headers) { api.decorate(head, status, headers); };
     http::Server server(
         [&api](const http::Request& request, http::Responder& r) {
             if (request.method != "GET" && request.method != "POST" && request.method != "OPTIONS") {
-                // (http.server's own page for a method its handler has no do_<METHOD> for)
+                // (http.server's own page for a method its handler has no do_<METHOD> for: send_error(501, "Unsupported
+                // method (%r)"), the message HTML-escaped)
                 const std::string page = "<!DOCTYPE HTML>\n<html lang=\"en\">\n    <head>\n        <meta charset=\"utf-8\">\n"
                                          "        <title>Error response</title>\n    </head>\n    <body>\n        <h1>Error response</h1>\n"
-                                         "        <p>Error code: 501</p>\n        <p>Message: Unsupported method ('" +
-                                         request.method +
-                                         "').</p>\n        <p>Error code explanation: 501 - Server does not support this operation.</p>\n"
+                                         "        <p>Error code: 501</p>\n        <p>Message: " +
+                                         html_escape("Unsupported method (" + core::py_repr_str(request.method) + ")") +
+                                         ".</p>\n        <p>Error code explanation: 501 - Server does not support this operation.</p>\n"
                                          "    </body>\n</html>\n";
                 r.send(501, {{"Content-Type", "text/html;charset=utf-8"}}, page);
                 return;
             }
-            const Reply reply = api.serve(request);
-            std::vector<std::pair<std::string, std::string>> headers;
-            if (reply.status != 204) {
-                headers.emplace_back("Content-Type", is_png(reply.body) ? "image/png" : "application/json; charset=utf-8");
-            }
-            for (const auto& h : reply.headers) headers.push_back(h);
-            r.send(reply.status, headers, reply.body);
+            Api::answer(r, api.serve(request));
         },
         limits);
     if (const auto error = server.listen(options.host, options.port)) {

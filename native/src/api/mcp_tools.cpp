@@ -456,12 +456,19 @@ constexpr double kTwo63 = 9223372036854775808.0;
 
 bool in_i64(double value) { return value >= -kTwo63 && value < kTwo63; }
 
+// An integer the JSON holds from 2^63 to 2^64 - 1 (the parser keeps those as unsigned): past this build's 64 bits as
+// any integer past them is, whatever the parameter.
+bool past_i64(const Json& value) {
+    return value.is_number_unsigned() && value.get<std::uint64_t>() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+}
+
 // The value for an int parameter, or the problem.
 std::optional<Problem> as_int(const Json& value, Json& out) {
     if (value.is_boolean()) {
         out = value.get<bool>() ? 1 : 0;
         return std::nullopt;
     }
+    if (past_i64(value)) return Problem{{}, "too_big", {}, value};
     if (value.is_number_integer()) {
         out = value;
         return std::nullopt;
@@ -495,11 +502,14 @@ std::optional<Problem> as_float(const Json& value, Json& out) {
         out = value.get<bool>() ? 1.0 : 0.0;
         return std::nullopt;
     }
+    if (past_i64(value)) return Problem{{}, "too_big", {}, value};  // (an integer past 64 bits: refused as a number or a text)
     if (value.is_number()) {
         out = value.get<double>();
         return std::nullopt;
     }
     if (value.is_string()) {
+        std::int64_t whole = 0;
+        if (str_to_int(value.get_ref<const std::string&>(), whole) == Parsed::TooBig) return Problem{{}, "too_big", {}, value};
         double parsed = 0;
         if (str_to_float(value.get_ref<const std::string&>(), parsed)) {
             out = parsed;
@@ -650,6 +660,8 @@ Json pre_parse(const ToolParam& param, const Json& value, std::optional<std::str
     }
     if (!repairs.nonfinite.empty() || !repairs.inexact.empty()) {
         unsupported = "/" + std::string(param.name) + (!repairs.nonfinite.empty() ? repairs.nonfinite.front() : repairs.inexact.front());
+    } else if (const auto big = unsupported_number(parsed)) {  // (2^63 to 2^64 - 1 in the text)
+        unsupported = "/" + std::string(param.name) + *big;
     }
     return parsed;
 }
@@ -714,6 +726,7 @@ Checked check_arguments(const ToolSpec& tool, const Json& arguments) {
 
 std::optional<std::string> unsupported_number(const Json& value) {
     if (value.is_number_float() && !std::isfinite(value.get<double>())) return std::string();
+    if (past_i64(value)) return std::string();
     if (value.is_array()) {
         for (std::size_t i = 0; i < value.size(); ++i) {
             if (auto inner = unsupported_number(value[i])) return "/" + std::to_string(i) + *inner;

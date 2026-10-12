@@ -11,10 +11,17 @@
 #include <csignal>
 #include <cstdio>
 #include <deque>
+#include <map>
 #include <mutex>
 
 #ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #endif
 
 namespace genko::api::http {
@@ -159,6 +166,12 @@ class SocketResponder : public Responder {
 public:
     explicit SocketResponder(QTcpSocket& socket) : socket_(socket) {}
 
+    // The request whose head was read, and what every response to it gets added (Limits::decorate).
+    void answering(const Request* head, const std::function<void(const Request&, int, Headers&)>* decorate) {
+        head_ = head;
+        decorate_ = decorate;
+    }
+
     void send(int status, const std::vector<std::pair<std::string, std::string>>& headers, std::string_view body) override {
         if (started_) return;
         std::vector<std::pair<std::string, std::string>> all = headers;
@@ -167,9 +180,11 @@ public:
         write(body);
     }
 
-    bool start(int status, const std::vector<std::pair<std::string, std::string>>& headers) override {
+    bool start(int status, const std::vector<std::pair<std::string, std::string>>& given) override {
         if (started_) return false;
         started_ = true;
+        Headers headers = given;
+        if (head_ != nullptr && decorate_ != nullptr && *decorate_) (*decorate_)(*head_, status, headers);
         std::string head = "HTTP/1.1 " + std::to_string(status) + " " + std::string(reason_phrase(status)) + "\r\n";
         bool has_connection = false;
         for (const auto& [name, value] : headers) {
@@ -223,63 +238,131 @@ private:
     QTcpSocket& socket_;
     bool started_ = false;
     bool broken_ = false;
+    const Request* head_ = nullptr;
+    const std::function<void(const Request&, int, Headers&)>* decorate_ = nullptr;
 };
 
 void plain(Responder& r, int status, std::string_view text) {
     r.send(status, {{"Content-Type", "text/plain; charset=utf-8"}}, text);
 }
 
+// The end of a connection: what was written is sent, the server's side is shut, and what the client still sends is
+// read and dropped for up to `linger_ms` (until it closes its side): a client that is still sending a body the server
+// refused gets the answer rather than a reset.
+void finish(QTcpSocket& socket, int linger_ms) {
+    if (socket.state() != QAbstractSocket::ConnectedState) return;
+    socket.flush();
+    while (socket.bytesToWrite() > 0) {
+        if (!socket.waitForBytesWritten(5000)) break;
+    }
+    const qintptr native = socket.socketDescriptor();
+#ifdef _WIN32
+    if (native != -1) ::shutdown(static_cast<SOCKET>(native), SD_SEND);
+#else
+    if (native != -1) ::shutdown(static_cast<int>(native), SHUT_WR);
+#endif
+    const auto deadline = Clock::now() + std::chrono::milliseconds(linger_ms);
+    while (socket.state() == QAbstractSocket::ConnectedState) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
+        if (left <= 0) break;
+        if (socket.waitForReadyRead(static_cast<int>(std::min<long long>(left, 200)))) {
+            socket.readAll();
+        } else if (socket.state() != QAbstractSocket::ConnectedState || socket.error() == QAbstractSocket::RemoteHostClosedError) {
+            break;
+        }
+    }
+    socket.abort();
+}
+
+std::string lower(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text;
+}
+
+std::string trimmed(const std::string& text) {
+    const std::size_t a = text.find_first_not_of(" \t");
+    if (a == std::string::npos) return {};
+    const std::size_t b = text.find_last_not_of(" \t");
+    return text.substr(a, b - a + 1);
+}
+
+// A chunk's size line ("1a" or "1a;ext"): at most 16 hex digits (no sign, no space), nothing for anything else.
+std::optional<std::uint64_t> chunk_size(std::string_view line) {
+    const std::size_t semicolon = line.find(';');
+    const std::string_view digits = line.substr(0, semicolon);
+    if (digits.empty() || digits.size() > 16) return std::nullopt;
+    std::uint64_t size = 0;
+    for (const char c : digits) {
+        int v = -1;
+        if (c >= '0' && c <= '9') v = c - '0';
+        if (c >= 'a' && c <= 'f') v = c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') v = c - 'A' + 10;
+        if (v < 0) return std::nullopt;
+        size = (size << 4) | static_cast<std::uint64_t>(v);  // (16 digits at most: no overflow)
+    }
+    if (semicolon != std::string_view::npos) {  // (an extension: any text without CR or LF, as h11 takes it)
+        for (const char c : line.substr(semicolon)) {
+            if (c == '\r' || c == '\n' || c == '\0') return std::nullopt;
+        }
+    }
+    return size;
+}
+
 // One request read off the socket and answered.
-void serve_connection(qintptr descriptor, const Handler& handler, const Limits& limits) {
+void serve_connection(qintptr descriptor, const Handler& handler, const Limits& limits, const std::atomic<bool>& stop) {
     QTcpSocket socket;
     if (!socket.setSocketDescriptor(descriptor)) return;
     SocketResponder responder(socket);
-    const auto deadline = Clock::now() + std::chrono::milliseconds(limits.request_timeout_ms);
+    const auto opened = Clock::now();
+    const auto request_deadline = opened + std::chrono::milliseconds(limits.request_timeout_ms);
+    const auto head_deadline = std::min(request_deadline, opened + std::chrono::milliseconds(limits.header_timeout_ms));
     std::string buffer;
-    // (bytes from the client: false at the end of the connection or a timeout)
-    const auto more = [&]() {
-        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
-        if (left <= 0) return false;
-        if (socket.bytesAvailable() == 0 && !socket.waitForReadyRead(static_cast<int>(std::min<long long>(left, limits.idle_timeout_ms)))) return false;
+    // (bytes from the client: false at the end of the connection, a timeout, or the server stopping)
+    const auto more = [&](Clock::time_point deadline) {
+        auto idle = Clock::now() + std::chrono::milliseconds(limits.idle_timeout_ms);
+        while (socket.bytesAvailable() == 0) {
+            if (stop.load()) return false;
+            const auto now = Clock::now();
+            const auto until = std::min(deadline, idle);
+            if (now >= until) return false;
+            const auto slice = std::chrono::duration_cast<std::chrono::milliseconds>(until - now).count();
+            if (!socket.waitForReadyRead(static_cast<int>(std::min<long long>(slice, 200))) &&
+                socket.state() != QAbstractSocket::ConnectedState) {
+                return false;
+            }
+        }
         const QByteArray got = socket.readAll();
         buffer.append(got.constData(), static_cast<std::size_t>(got.size()));
         return true;
     };
+    const auto refuse = [&](int status, std::string_view text) {
+        plain(responder, status, text);
+        finish(socket, limits.linger_ms);
+    };
     std::size_t head_end = std::string::npos;
     while ((head_end = buffer.find("\r\n\r\n")) == std::string::npos) {
-        if (buffer.size() > limits.max_header_bytes) {
-            plain(responder, 431, "Request Header Fields Too Large");
-            return;
-        }
-        if (!more()) {
-            if (!buffer.empty() && socket.state() == QAbstractSocket::ConnectedState) plain(responder, 408, "Request Timeout");
+        if (buffer.size() > limits.max_header_bytes) return refuse(431, "Request Header Fields Too Large");
+        if (!more(head_deadline)) {
+            if (!buffer.empty() && socket.state() == QAbstractSocket::ConnectedState && !stop.load()) return refuse(408, "Request Timeout");
+            socket.abort();
             return;
         }
     }
-    if (head_end > limits.max_header_bytes) {
-        plain(responder, 431, "Request Header Fields Too Large");
-        return;
-    }
+    if (head_end > limits.max_header_bytes) return refuse(431, "Request Header Fields Too Large");
     Request request;
     request.peer = socket.peerAddress().toString().toStdString();
     const std::string head = buffer.substr(0, head_end);
-    std::string rest = buffer.substr(head_end + 4);
+    buffer.erase(0, head_end + 4);  // (what came after the head: the body's start)
     std::size_t line_end = head.find("\r\n");
     const std::string line = head.substr(0, line_end);
     {
         const std::size_t a = line.find(' ');
         const std::size_t b = a == std::string::npos ? std::string::npos : line.find(' ', a + 1);
-        if (a == std::string::npos || b == std::string::npos || line.find(' ', b + 1) != std::string::npos) {
-            plain(responder, 400, "Bad request syntax");
-            return;
-        }
+        if (a == std::string::npos || b == std::string::npos || line.find(' ', b + 1) != std::string::npos) return refuse(400, limits.bad_request);
         request.method = line.substr(0, a);
         request.target = line.substr(a + 1, b - a - 1);
         request.version = line.substr(b + 1);
-        if (request.version.rfind("HTTP/1.", 0) != 0 || request.target.empty()) {
-            plain(responder, 400, "Bad request syntax");
-            return;
-        }
+        if (request.version.rfind("HTTP/1.", 0) != 0 || request.target.empty()) return refuse(400, limits.bad_request);
     }
     while (line_end != std::string::npos) {
         const std::size_t start = line_end + 2;
@@ -287,91 +370,126 @@ void serve_connection(qintptr descriptor, const Handler& handler, const Limits& 
         const std::string field = head.substr(start, line_end == std::string::npos ? std::string::npos : line_end - start);
         if (field.empty()) continue;
         const std::size_t colon = field.find(':');
-        if (colon == std::string::npos || colon == 0 || field[0] == ' ' || field[0] == '\t') {
-            plain(responder, 400, "Bad request syntax");
-            return;
-        }
-        std::string name = field.substr(0, colon);
-        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        std::string value = field.substr(colon + 1);
-        const std::size_t first = value.find_first_not_of(" \t");
-        const std::size_t last = value.find_last_not_of(" \t");
-        value = first == std::string::npos ? std::string() : value.substr(first, last - first + 1);
-        request.headers.emplace_back(std::move(name), std::move(value));
-        if (request.headers.size() > limits.max_headers) {
-            plain(responder, 431, "Too many headers");
-            return;
-        }
+        if (colon == std::string::npos || colon == 0 || field[0] == ' ' || field[0] == '\t') return refuse(400, limits.bad_request);
+        request.headers.emplace_back(lower(field.substr(0, colon)), trimmed(field.substr(colon + 1)));
+        if (request.headers.size() > limits.max_headers) return refuse(431, "Too many headers");
     }
-    // the body
+    responder.answering(&request, &limits.decorate);
+    // the body's framing
     std::optional<std::size_t> length;
+    std::vector<std::string> encodings;
     for (const auto& [name, value] : request.headers) {
+        if (name == "transfer-encoding") encodings.push_back(lower(value));
         if (name != "content-length") continue;
-        if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos || value.size() > 18) {
-            plain(responder, 400, "Bad Content-Length");
-            return;
-        }
+        if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos || value.size() > 18) return refuse(400, limits.bad_request);
         const std::size_t n = std::stoull(value);
-        if (length && *length != n) {
-            plain(responder, 400, "Bad Content-Length");
-            return;
-        }
+        if (length && *length != n) return refuse(400, limits.bad_request);
         length = n;
     }
-    const auto encoding = request.header("transfer-encoding");
-    const bool chunked = encoding && !length && limits.chunked_bodies;
+    bool chunked = false;
+    if (limits.chunked_bodies && !encodings.empty()) {
+        // (Transfer-Encoding "chunked" once, and never beside a Content-Length: a body read one way only)
+        if (encodings.size() != 1 || encodings.front() != "chunked" || length) return refuse(400, limits.bad_request);
+        chunked = true;
+    }
+    const auto too_large = [&] {
+        if (limits.too_large) {
+            limits.too_large(responder);
+        } else {
+            plain(responder, 413, "Request body too large");
+        }
+        finish(socket, limits.linger_ms);
+    };
+    if (length && *length > limits.max_body) return too_large();
+    if (limits.admit && !limits.admit(request, responder)) {
+        if (!responder.started()) plain(responder, 500, "Internal Server Error");
+        return finish(socket, limits.linger_ms);
+    }
     if (length) {
-        if (*length > limits.max_body) {
-            if (limits.too_large) {
-                limits.too_large(responder);
-            } else {
-                plain(responder, 413, "Request body too large");
-            }
-            return;
-        }
-        buffer = std::move(rest);
         while (buffer.size() < *length) {
-            if (!more()) return;
+            if (!more(request_deadline)) {
+                socket.abort();
+                return;
+            }
         }
-        request.body = buffer.substr(0, *length);
+        buffer.resize(*length);
+        request.body = std::move(buffer);
+        buffer.clear();
     } else if (chunked) {
-        buffer = std::move(rest);
         std::size_t at = 0;
-        for (;;) {
+        const auto next_line = [&](std::string& out) {  // (a CRLF-ended line, at most a header's size)
             std::size_t eol;
             while ((eol = buffer.find("\r\n", at)) == std::string::npos) {
-                if (buffer.size() - at > 64 || !more()) return;
+                if (buffer.size() - at > limits.max_header_bytes || !more(request_deadline)) return false;
             }
-            const std::string size_text = buffer.substr(at, eol - at).substr(0, buffer.substr(at, eol - at).find(';'));
-            std::size_t size = 0;
-            try {
-                size = std::stoull(size_text, nullptr, 16);
-            } catch (const std::exception&) {
-                plain(responder, 400, "Bad chunk");
-                return;
-            }
+            out = buffer.substr(at, eol - at);
             at = eol + 2;
-            if (size == 0) break;
-            if (request.body.size() + size > limits.max_body) {
-                if (limits.too_large) {
-                    limits.too_large(responder);
-                } else {
-                    plain(responder, 413, "Request body too large");
-                }
+            return true;
+        };
+        for (;;) {
+            std::string size_line;
+            if (!next_line(size_line)) {
+                if (socket.state() == QAbstractSocket::ConnectedState && !stop.load()) return refuse(400, limits.bad_request);
+                socket.abort();
                 return;
             }
-            while (buffer.size() < at + size + 2) {
-                if (!more()) return;
+            const auto size = chunk_size(size_line);
+            if (!size) return refuse(400, limits.bad_request);
+            if (*size == 0) break;
+            if (*size > limits.max_body - request.body.size()) return too_large();
+            const std::size_t n = static_cast<std::size_t>(*size);
+            while (buffer.size() - at < n + 2) {
+                if (!more(request_deadline)) {
+                    socket.abort();
+                    return;
+                }
             }
-            request.body.append(buffer, at, size);
-            at += size + 2;
+            if (buffer.compare(at + n, 2, "\r\n") != 0) return refuse(400, limits.bad_request);  // (the data's CRLF)
+            request.body.append(buffer, at, n);
+            at += n + 2;
+            if (at > 1024 * 1024) {  // (what was read is dropped as it goes)
+                buffer.erase(0, at);
+                at = 0;
+            }
+        }
+        // the trailer: header lines up to an empty one
+        std::size_t trailer = 0;
+        for (;;) {
+            std::string field;
+            if (!next_line(field)) return refuse(400, limits.bad_request);
+            if (field.empty()) break;
+            trailer += field.size() + 2;
+            if (trailer > limits.max_header_bytes || field.find(':') == std::string::npos) return refuse(400, limits.bad_request);
         }
     }
-    handler(request, responder);
+    try {
+        handler(request, responder);
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "genko: a request failed: %s\n", error.what());
+    } catch (...) {
+        std::fprintf(stderr, "genko: a request failed\n");
+    }
     if (!responder.started()) plain(responder, 500, "Internal Server Error");
-    socket.flush();
-    socket.disconnectFromHost();
-    if (socket.state() != QAbstractSocket::UnconnectedState) socket.waitForDisconnected(1000);
+    finish(socket, limits.linger_ms);
+}
+
+// The address of the client of a connection not yet wrapped in a socket ("" when it cannot be told).
+std::string peer_of(qintptr descriptor) {
+    sockaddr_storage address{};
+#ifdef _WIN32
+    int size = sizeof address;
+    if (::getpeername(static_cast<SOCKET>(descriptor), reinterpret_cast<sockaddr*>(&address), &size) != 0) return {};
+#else
+    socklen_t size = sizeof address;
+    if (::getpeername(static_cast<int>(descriptor), reinterpret_cast<sockaddr*>(&address), &size) != 0) return {};
+#endif
+    char text[INET6_ADDRSTRLEN] = {};
+    if (address.ss_family == AF_INET) {
+        ::inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(&address)->sin_addr, text, sizeof text);
+    } else if (address.ss_family == AF_INET6) {
+        ::inet_ntop(AF_INET6, &reinterpret_cast<sockaddr_in6*>(&address)->sin6_addr, text, sizeof text);
+    }
+    return text;
 }
 
 }  // namespace
@@ -386,6 +504,7 @@ struct Server::Impl : public QTcpServer {
     struct Worker {
         std::unique_ptr<QThread> thread;
         std::shared_ptr<std::atomic<bool>> done;
+        std::string peer;
     };
     std::vector<Worker> workers;
 
@@ -430,29 +549,33 @@ void Server::run(const std::atomic<bool>& stop) {
             const qintptr descriptor = impl_->pending.front();
             impl_->pending.pop_front();
             impl_->reap(false);
-            if (static_cast<int>(impl_->workers.size()) >= impl_->limits.max_connections) {
-                // (as many connections as this server serves at once: this one is told to come back)
+            const std::string peer = peer_of(descriptor);
+            const auto from_peer = std::count_if(impl_->workers.begin(), impl_->workers.end(), [&peer](const Impl::Worker& w) { return w.peer == peer; });
+            if (static_cast<int>(impl_->workers.size()) >= impl_->limits.max_connections || from_peer >= impl_->limits.max_connections_per_peer) {
+                // (as many connections as this server serves at once, or from that address: this one is told to come
+                // back, and what it already sent is read for a moment so that the answer is not lost to a reset)
                 QTcpSocket busy;
                 if (busy.setSocketDescriptor(descriptor)) {
                     SocketResponder r(busy);
                     plain(r, 503, "Service Unavailable");
-                    busy.disconnectFromHost();
+                    finish(busy, std::min(impl_->limits.linger_ms, 100));
                 }
                 continue;
             }
             auto done = std::make_shared<std::atomic<bool>>(false);
             const Handler* handler = &impl_->handler;
             const Limits* limits = &impl_->limits;
-            std::unique_ptr<QThread> thread(QThread::create([descriptor, handler, limits, done] {
+            const std::atomic<bool>* stopping = &stop;
+            std::unique_ptr<QThread> thread(QThread::create([descriptor, handler, limits, stopping, done] {
                 try {
-                    serve_connection(descriptor, *handler, *limits);
+                    serve_connection(descriptor, *handler, *limits, *stopping);
                 } catch (const std::exception& error) {
-                    std::fprintf(stderr, "genko: a request failed: %s\n", error.what());
+                    std::fprintf(stderr, "genko: a connection failed: %s\n", error.what());
                 }
                 done->store(true);
             }));
             thread->start();
-            impl_->workers.push_back(Impl::Worker{std::move(thread), done});
+            impl_->workers.push_back(Impl::Worker{std::move(thread), done, peer});
         }
     }
     impl_->close();

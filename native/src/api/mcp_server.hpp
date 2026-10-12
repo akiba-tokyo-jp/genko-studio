@@ -95,6 +95,24 @@ Json serve_one(const Engine& engine, const Json& id, const std::string& method, 
 // The HTTP status the 2026 era's Streamable HTTP answers an error code with (ERROR_CODE_HTTP_STATUS; 200 for others).
 int http_status_for(int code);
 
+// A thread a request runs on. The process runs at most kRequestThreads of them at once (stdio, the HTTP sessions and the
+// 2026 era's POSTs together); one more waits for one to end, so a client sending requests faster than they end, or
+// leaving them behind, cannot make the server start threads without end.
+constexpr int kRequestThreads = 64;
+class RequestPermit {
+public:
+    RequestPermit();  // (waits for one)
+    ~RequestPermit();
+    RequestPermit(const RequestPermit&) = delete;
+    RequestPermit& operator=(const RequestPermit&) = delete;
+    // One within `wait_ms`, or nothing.
+    static std::shared_ptr<RequestPermit> within(int wait_ms);
+
+private:
+    struct Taken {};
+    explicit RequestPermit(Taken) {}
+};
+
 // One duplex connection (stdio; a Streamable HTTP session of the handshake era): what the client sends goes in through
 // receive() on the reader's thread, what the server answers goes out through `send` (from any thread, one at a time).
 // The era is fixed by the client's first request (stdio: dual; an HTTP session: the handshake era only).
@@ -121,6 +139,8 @@ public:
     void close();
     // Whether the connection has been initialized (the handshake era).
     bool initialized() const;
+    // Whether requests of it are running or waiting for a thread.
+    bool busy() const;
 
 private:
     struct InFlight {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <iterator>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <set>
@@ -438,6 +439,35 @@ Json serve_one(const Engine& engine, const Json& id, const std::string& method, 
     }
 }
 
+// --- the threads requests run on --------------------------------------------------------------------------------------
+
+namespace {
+
+std::mutex g_request_mutex;
+std::condition_variable g_request_changed;
+int g_requests = 0;
+
+}  // namespace
+
+RequestPermit::RequestPermit() {
+    std::unique_lock<std::mutex> lock(g_request_mutex);
+    g_request_changed.wait(lock, [] { return g_requests < kRequestThreads; });
+    ++g_requests;
+}
+
+RequestPermit::~RequestPermit() {
+    std::lock_guard<std::mutex> lock(g_request_mutex);
+    --g_requests;
+    g_request_changed.notify_one();
+}
+
+std::shared_ptr<RequestPermit> RequestPermit::within(int wait_ms) {
+    std::unique_lock<std::mutex> lock(g_request_mutex);
+    if (!g_request_changed.wait_for(lock, std::chrono::milliseconds(wait_ms), [] { return g_requests < kRequestThreads; })) return nullptr;
+    ++g_requests;
+    return std::shared_ptr<RequestPermit>(new RequestPermit(Taken{}));
+}
+
 int http_status_for(int code) {
     switch (code) {
         case -32700:
@@ -463,6 +493,11 @@ Connection::~Connection() { close(); }
 bool Connection::initialized() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return initialize_accepted_;
+}
+
+bool Connection::busy() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return running_ > 0;
 }
 
 void Connection::receive(Inbound message) {
@@ -533,23 +568,34 @@ void Connection::dispatch_request(Inbound message, const std::string& era) {
         auto keep = std::partition(workers_.begin(), workers_.end(), [](const Worker& w) { return !w.done->load(); });
         std::move(keep, workers_.end(), std::back_inserter(ended));
         workers_.erase(keep, workers_.end());
-        ++running_;
-        auto done = std::make_shared<std::atomic<bool>>(false);
-        workers_.push_back(Worker{std::thread([this, id = std::move(id), method, params = std::move(params), odd = std::move(message.odd_numbers), flight,
-                                               era, done]() mutable {
-                                      run_request(std::move(id), std::move(method), std::move(params), std::move(odd), flight, std::move(era));
-                                      std::lock_guard<std::mutex> finished(mutex_);
-                                      --running_;
-                                      done->store(true);
-                                      idle_.notify_all();
-                                  }),
-                                  done});
+        ++running_;  // (counted while it waits for a thread too: close() waits for it)
     }
     for (Worker& w : ended) w.thread.join();
+    auto permit = std::make_shared<RequestPermit>();  // (waits while kRequestThreads requests run)
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    workers_.push_back(Worker{std::thread([this, id = std::move(id), method, params = std::move(params), odd = std::move(message.odd_numbers), flight,
+                                           era, done, permit]() mutable {
+                                  run_request(std::move(id), std::move(method), std::move(params), std::move(odd), flight, std::move(era));
+                                  permit.reset();
+                                  std::lock_guard<std::mutex> finished(mutex_);
+                                  --running_;
+                                  done->store(true);
+                                  idle_.notify_all();
+                              }),
+                              done});
 }
 
 void Connection::run_request(Json id, std::string method, Json params, std::vector<std::string> odd, std::shared_ptr<InFlight> flight,
                              std::string era) {
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (flight->cancelled) {  // (cancelled while it waited for a thread: never started)
+            lock.unlock();
+            finish(flight, Json());
+            return;
+        }
+    }
     Json reply;
     try {
         if (era == "modern") {

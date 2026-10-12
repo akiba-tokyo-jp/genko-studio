@@ -8,13 +8,20 @@
 // person's approvals, an agent's token cannot approve or unlock, tokens.json is read again when it changes (a revoked
 // token stops at once), /v1/new never writes over a book, the files ops read stay in the root inside for_pages too,
 // NaN and deep JSON are refused, pictures that are not pictures or too big are refused, oversized and malformed
-// requests (Content-Length, headers) are refused before anything is read, at most 64 connections at once; the MCP HTTP
-// endpoint's Host, Origin, size and body checks.
+// requests (Content-Length, headers) are refused before anything is read, the guard answers from the head before any
+// body is read, import_pages reads books inside the root only, integers past the signed 64 bits are refused as numbers
+// and as text, a request's folder must be inside the root, a --root that cannot be resolved ends the command; the
+// server: at most 32 connections from one address and 64 in all, early refusals read whole by a client still
+// sending, a slow head cut off after 10 s, a stop that does not wait for requests still arriving, request threads
+// bounded (stdio and the 2026 era's HTTP); the MCP HTTP endpoint's Host, Origin, size and body checks and its strict
+// chunked bodies.
 
 #include <QtTest>
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QHostAddress>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QTcpSocket>
@@ -146,6 +153,7 @@ public:
         return lines_;
     }
     QByteArray err() { return process_.readAllStandardError(); }
+    qint64 pid() const { return process_.processId(); }
 
 private:
     QProcess process_;
@@ -168,8 +176,9 @@ struct Response {
 };
 
 // One raw HTTP/1.1 request (the server closes the connection after its answer).
-Response http(std::uint16_t port, const std::string& raw, int timeout_ms = 300000) {
+Response http(std::uint16_t port, const std::string& raw, int timeout_ms = 300000, const QString& source = {}) {
     QTcpSocket socket;
+    if (!source.isEmpty()) socket.bind(QHostAddress(source), 0);
     socket.connectToHost(QStringLiteral("127.0.0.1"), port);
     Response out;
     if (!socket.waitForConnected(30000)) return out;
@@ -242,12 +251,72 @@ public:
         process_.waitForFinished(120000);
         return process_.exitCode();
     }
+    qint64 pid() const { return process_.processId(); }
     std::uint16_t port = 0;
 
 private:
     QProcess process_;
     QByteArray err_;
 };
+
+// The threads a process runs now (Linux: /proc; 0 elsewhere).
+int threads_of(qint64 pid) {
+    QFile status(QStringLiteral("/proc/%1/status").arg(pid));
+    if (!status.open(QIODevice::ReadOnly)) return 0;
+    for (const QByteArray& line : status.readAll().split('\n')) {
+        if (line.startsWith("Threads:")) return line.mid(8).trimmed().toInt();
+    }
+    return 0;
+}
+
+// A connection from `source` (a loopback address of this machine) that has sent `raw` and stays open.
+std::unique_ptr<QTcpSocket> held_from(const QString& source, std::uint16_t port, const std::string& raw) {
+    auto socket = std::make_unique<QTcpSocket>();
+    socket->bind(QHostAddress(source), 0);
+    socket->connectToHost(QStringLiteral("127.0.0.1"), port);
+    if (!socket->waitForConnected(30000)) return nullptr;
+    socket->write(raw.data(), static_cast<qint64>(raw.size()));
+    socket->waitForBytesWritten(30000);
+    return socket;
+}
+
+// Everything a server answers to `head` followed by `extra` bytes the client keeps sending (in pieces, without
+// reading in between), read once the client has sent them all or the server stopped taking them.
+std::string answer_while_sending(std::uint16_t port, const std::string& head, std::size_t extra, int timeout_ms = 60000) {
+    QTcpSocket socket;
+    socket.connectToHost(QStringLiteral("127.0.0.1"), port);
+    if (!socket.waitForConnected(30000)) return {};
+    socket.write(head.data(), static_cast<qint64>(head.size()));
+    socket.waitForBytesWritten(30000);
+    const std::string piece(64 * 1024, 'x');
+    for (std::size_t sent = 0; sent < extra && socket.state() == QAbstractSocket::ConnectedState; sent += piece.size()) {
+        if (socket.write(piece.data(), static_cast<qint64>(piece.size())) < 0) break;
+        if (!socket.waitForBytesWritten(5000)) break;
+    }
+    std::string data;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (socket.waitForReadyRead(500)) {
+            data += socket.readAll().toStdString();
+        } else if (socket.state() != QAbstractSocket::ConnectedState) {
+            data += socket.readAll().toStdString();
+            break;
+        }
+    }
+    return data;
+}
+
+// A 2026-era request over HTTP (its envelope, its routing headers).
+std::string modern_post(std::uint16_t port, int id, const std::string& tool, const Json& arguments) {
+    const Json meta = Json::object({{"io.modelcontextprotocol/protocolVersion", "2026-07-28"},
+                                    {"io.modelcontextprotocol/clientCapabilities", Json::object()},
+                                    {"io.modelcontextprotocol/clientInfo", Json::object({{"name", "t"}, {"version", "1"}})}});
+    const std::string body = genko::core::dump_python(Json::object(
+        {{"jsonrpc", "2.0"}, {"id", id}, {"method", "tools/call"}, {"params", Json::object({{"name", tool}, {"arguments", arguments}, {"_meta", meta}})}}));
+    return "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) +
+           "\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nMCP-Protocol-Version: 2026-07-28\r\n"
+           "Mcp-Method: tools/call\r\nMcp-Name: " + tool + "\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+}
 
 std::string png_bytes(int w, int h) { return genko::render::write_png(genko::render::Image::create("RGB", genko::render::Size{w, h})); }
 
@@ -293,6 +362,14 @@ std::string tree_diff(const std::map<std::string, std::string>& a, const std::ma
 void write_file(const QString& path, const std::string& bytes) {
     QDir().mkpath(QFileInfo(path).path());
     genko::test::write_bytes(path, bytes);
+}
+
+// A job record that says the job is running, its heartbeat in the future (it never looks lost during a test).
+void running_job(const QString& book, const std::string& id) {
+    const double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch()) / 1000.0;
+    write_file(book + "/studio/jobs/" + QString::fromStdString(id) + ".json",
+               genko::core::dump_python(Json::object({{"id", id}, {"kind", "export"}, {"actor", "ai:test"}, {"status", "running"},
+                                                      {"started", now}, {"beat", now + 3600}, {"pid", 1}})));
 }
 
 const char* const kTools[] = {"projects", "create_project", "status", "next", "inspect", "render", "import_image", "generation_request",
@@ -645,7 +722,6 @@ private slots:
         QCOMPARE(http(port, "BROKEN\r\n\r\n").status, 400);
         // tokens.json is read again when it changes: a revoked token stops at once, a new one works at once
         QCOMPARE(http(port, request_text("GET", "/schema", port, "tok-ai")).status, 200);
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
         write_file(dir + "/config/tokens.json", R"({"tok-new": {"actor": "ai:bot"}, "tok-human": {"actor": "human:owner"}})");
         QCOMPARE(http(port, request_text("GET", "/schema", port, "tok-ai")).status, 401);
         QCOMPARE(http(port, request_text("GET", "/schema", port, "tok-new")).status, 200);
@@ -704,39 +780,389 @@ private slots:
         QCOMPARE(server.stop(), 0);
     }
 
-    // At most 64 connections at once: the next one is answered 503 and closed; once they end, requests are served again.
+    // At most 32 connections at once from one address and 64 in all: the next one is answered 503 (what it sends is
+    // read before the connection closes, so the answer is not lost to a reset); once they end, requests are served again.
     void connectionsAtOnce() {
         const QString dir = fresh("connections");
         write_file(dir + "/config/tokens.json", R"({"tok-ai": {"actor": "ai:bot"}})");
         Server server({"serve", "--root", dir + "/root", "--port", "0"}, dir + "/config");
         QVERIFY(server.port != 0);
         const std::uint16_t port = server.port;
+        // (each has sent its head and a byte of the body it said it would send, and waits)
+        const std::string pending = "POST /v1/new HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) +
+                                    "\r\nAuthorization: Bearer tok-ai\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{";
+        const std::string health = request_text("GET", "/health", port, "");
+        const auto status_from = [&](const QString& source, int wanted) {
+            Response r;
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(2);
+            while (r.status != wanted && std::chrono::steady_clock::now() < deadline) {
+                r = http(port, health, 60000, source);
+                if (r.status != wanted) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            return r.status;
+        };
         std::vector<std::unique_ptr<QTcpSocket>> held;
-        for (int i = 0; i < 64; ++i) {  // (each sends half a request and waits)
-            auto socket = std::make_unique<QTcpSocket>();
-            socket->connectToHost(QStringLiteral("127.0.0.1"), port);
-            QVERIFY(socket->waitForConnected(30000));
-            socket->write("GET /health HTTP/1.1\r\n");
-            QVERIFY(socket->waitForBytesWritten(30000));
-            held.push_back(std::move(socket));
+        for (int i = 0; i < 32; ++i) {
+            held.push_back(held_from(QStringLiteral("127.0.0.1"), port, pending));
+            QVERIFY(held.back() != nullptr);
         }
-        // (the server counts a connection once its thread runs: the 65th is refused once all 64 are counted)
-        Response refused;
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(2);
-        while (refused.status != 503 && std::chrono::steady_clock::now() < deadline) {
-            refused = http(port, request_text("GET", "/health", port, ""));
-            if (refused.status != 503) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        QCOMPARE(status_from(QStringLiteral("127.0.0.1"), 503), 503);
+        // the refusal is read whole even while the client goes on sending
+        const std::string busy = answer_while_sending(port, "POST /v1/new HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) +
+                                                                "\r\nContent-Type: application/json\r\nContent-Length: 8388608\r\n\r\n",
+                                                      8 * 1024 * 1024);
+        QVERIFY2(busy.starts_with("HTTP/1.1 503 ") && busy.ends_with("Service Unavailable"), busy.substr(0, 200).c_str());
+        QCOMPARE(http(port, health, 60000, QStringLiteral("127.0.0.2")).status, 200);  // (another address)
+        for (int i = 0; i < 32; ++i) {
+            held.push_back(held_from(QStringLiteral("127.0.0.2"), port, pending));
+            QVERIFY(held.back() != nullptr);
         }
-        QCOMPARE(refused.status, 503);
+        QCOMPARE(status_from(QStringLiteral("127.0.0.3"), 503), 503);  // (64 in all)
         for (auto& socket : held) socket->abort();
         held.clear();
-        Response served;
-        const auto again = std::chrono::steady_clock::now() + std::chrono::minutes(2);
-        while (served.status != 200 && std::chrono::steady_clock::now() < again) {
-            served = http(port, request_text("GET", "/health", port, ""));
-            if (served.status != 200) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        QCOMPARE(status_from(QStringLiteral("127.0.0.1"), 200), 200);
+        QCOMPARE(server.stop(), 0);
+    }
+
+    // Requests refused early (a body past 64 MiB said, headers past 64 KiB) are answered and the answer is read whole
+    // while the client goes on sending (the server stops writing, then reads what still comes before it closes).
+    void earlyRefusalsAreRead() {
+        const QString dir = fresh("early");
+        write_file(dir + "/config/tokens.json", R"({"tok-ai": {"actor": "ai:bot"}})");
+        Server server({"serve", "--root", dir + "/root", "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        const std::string big = answer_while_sending(port, "POST /v1/new HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) +
+                                                               "\r\nAuthorization: Bearer tok-ai\r\nContent-Type: application/json\r\nContent-Length: 67108865\r\n\r\n",
+                                                     8 * 1024 * 1024);
+        QVERIFY2(big.starts_with("HTTP/1.1 413 ") && big.ends_with(R"({"ok": false, "error": "body too large"})"), big.substr(0, 300).c_str());
+        const std::string headers = answer_while_sending(port, "GET /health HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) + "\r\nX-Big: ",
+                                                         8 * 1024 * 1024);
+        QVERIFY2(headers.starts_with("HTTP/1.1 431 "), headers.substr(0, 300).c_str());
+        QCOMPARE(server.stop(), 0);
+    }
+
+    // A client that sends its head slowly is cut off once the time for a head (10 s) has passed, whatever it still
+    // sends; a server told to stop does not wait for requests still arriving.
+    void slowClients() {
+        const QString dir = fresh("slow");
+        write_file(dir + "/config/tokens.json", R"({"tok-ai": {"actor": "ai:bot"}})");
+        Server server({"serve", "--root", dir + "/root", "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        QTcpSocket socket;
+        socket.connectToHost(QStringLiteral("127.0.0.1"), port);
+        QVERIFY(socket.waitForConnected(30000));
+        socket.write("GET /health HTTP/1.1\r\n");
+        const auto started = std::chrono::steady_clock::now();
+        bool closed = false;
+        while (std::chrono::steady_clock::now() - started < std::chrono::seconds(40)) {
+            socket.write("X-Slow: a\r\n");
+            socket.waitForBytesWritten(1000);
+            if (socket.waitForReadyRead(500)) socket.readAll();
+            if (socket.state() != QAbstractSocket::ConnectedState) {
+                closed = true;
+                break;
+            }
         }
-        QCOMPARE(served.status, 200);
+        const auto took = std::chrono::steady_clock::now() - started;
+        QVERIFY2(closed && took < std::chrono::seconds(25), std::to_string(std::chrono::duration_cast<std::chrono::seconds>(took).count()).c_str());
+        // a request half sent when the server is told to stop: it stops at once
+        auto pending = held_from(QStringLiteral("127.0.0.1"), port, "GET /health HTTP/1.1\r\n");
+        QVERIFY(pending != nullptr);
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        const auto stopping = std::chrono::steady_clock::now();
+        QCOMPARE(server.stop(), 0);
+        QVERIFY(std::chrono::steady_clock::now() - stopping < std::chrono::seconds(10));
+    }
+
+    // `genko serve`'s guard reads the head only: a request it refuses (Host, Origin, Content-Type, token, in Python's
+    // order) is answered before its body is read; an allowed Origin gets its CORS headers on those answers too.
+    void apiGuardBeforeTheBody() {
+        const QString dir = fresh("guard");
+        write_file(dir + "/config/tokens.json", R"({"tok-ai": {"actor": "ai:bot"}})");
+        Server server({"serve", "--root", dir + "/root", "--port", "0", "--allow-origin", "http://ok.example"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        const std::string host = "127.0.0.1:" + std::to_string(port);
+        // (each says a body of 60 MiB follows, and sends none of it)
+        const auto head = [](const std::string& host_header, const std::string& extra) {
+            return "POST /v1/new HTTP/1.1\r\nHost: " + host_header + "\r\n" + extra + "Content-Length: 62914560\r\n\r\n";
+        };
+        const auto started = std::chrono::steady_clock::now();
+        QCOMPARE(http(port, head("evil.example", "Content-Type: application/json\r\nAuthorization: Bearer tok-ai\r\n"), 20000).status, 421);
+        QCOMPARE(http(port, head(host, "Origin: http://evil.example\r\nContent-Type: application/json\r\nAuthorization: Bearer tok-ai\r\n"), 20000).status, 403);
+        Response type = http(port, head(host, "Origin: http://ok.example\r\nContent-Type: text/plain\r\nAuthorization: Bearer tok-ai\r\n"), 20000);
+        QCOMPARE(type.status, 415);
+        QCOMPARE(type.headers["access-control-allow-origin"], std::string("http://ok.example"));
+        Response token = http(port, head(host, "Origin: http://ok.example\r\nContent-Type: application/json\r\nAuthorization: Bearer nope\r\n"), 20000);
+        QCOMPARE(token.status, 401);
+        QCOMPARE(token.headers["access-control-allow-origin"], std::string("http://ok.example"));
+        QCOMPARE(token.headers["vary"], std::string("Origin"));
+        QVERIFY(std::chrono::steady_clock::now() - started < std::chrono::seconds(20));  // (the server waits 30 s for a body)
+        // with a token the body is waited for: nothing is answered before it comes
+        auto waiting = held_from(QStringLiteral("127.0.0.1"), port, head(host, "Content-Type: application/json\r\nAuthorization: Bearer tok-ai\r\n"));
+        QVERIFY(waiting != nullptr);
+        QVERIFY(!waiting->waitForReadyRead(2000));
+        waiting->abort();
+        QCOMPARE(server.stop(), 0);
+    }
+
+    // import_pages reads another book: through /v1/apply it must be a book inside --root (its project.json there), in
+    // for_pages too; a link out of the root and a folder that is not a book are refused, and the book stays as it was.
+    void importPagesStayInTheRoot() {
+        const QString dir = fresh("import");
+        const QString root = dir + "/root";
+        write_file(dir + "/config/tokens.json", R"({"tok-ai": {"actor": "ai:bot"}})");
+        QCOMPARE(genko::test::run_genko({"new", dir + "/outside.genko", "--pages", "1"}).exit_code, 0);
+        QCOMPARE(genko::test::run_genko({"new", root + "/other.genko", "--pages", "1"}).exit_code, 0);
+        QVERIFY(QDir().mkpath(root + "/notabook.genko/studio"));
+        QVERIFY(QFile::link(dir + "/outside.genko", root + "/link.genko"));
+        Server server({"serve", "--root", root, "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        const auto post = [port](const std::string& path, const Json& body) {
+            return http(port, request_text("POST", path, port, "tok-ai", genko::core::dump_python(body)));
+        };
+        QCOMPARE(post("/v1/new", Json::object({{"dest", "b.genko"}, {"pages", 1}})).status, 200);
+        const auto before = tree(root + "/b.genko");
+        const auto import = [](const std::string& from) { return Json::object({{"op", "import_pages"}, {"from", from}}); };
+        const std::string outside = (dir + "/outside.genko").toStdString();
+        const std::vector<std::pair<Json, int>> refused = {
+            {Json::array({import(outside)}), 403},
+            {Json::array({import("../outside.genko")}), 403},
+            {Json::array({import("link.genko")}), 403},
+            {Json::array({import("notabook.genko")}), 400},
+            {Json::array({import("nothing.genko")}), 400},
+            {Json::array({Json::object({{"op", "for_pages"}, {"pages", "all"}, {"ops", Json::array({import(outside)})}})}), 403},
+        };
+        for (const auto& [ops, status] : refused) {
+            const Response r = post("/v1/apply", Json::object({{"path", "b.genko"}, {"ops", ops}}));
+            QVERIFY2(r.status == status, (genko::core::dump_python(ops) + " → " + r.body).c_str());
+        }
+        QVERIFY(tree(root + "/b.genko") == before);
+        // a book inside the root, named from the root as every path of a request is
+        const Response taken = post("/v1/apply", Json::object({{"path", "b.genko"}, {"ops", Json::array({import("other.genko")})}}));
+        QVERIFY2(taken.status == 200, taken.body.c_str());
+        QCOMPARE(taken.json()["snapshot"]["pages"].size(), std::size_t(2));
+        QCOMPARE(server.stop(), 0);
+    }
+
+    // Integers past the signed 64 bits (2^63 and up, below -2^63), as JSON numbers or as text, are refused alike:
+    // in an MCP tool's arguments (an int or a float parameter, inside the ops) and in the HTTP API's body.
+    void integersPast63Bits() {
+        const QString dir = fresh("past63");
+        {
+            Mcp mcp(dir + "/root", dir + "/config");
+            mcp.initialize();
+            QVERIFY(!make_book(mcp, "b.genko").empty());
+            const auto before = book_tree(dir + "/root/b.genko");
+            int id = 700;
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {R"("render", "arguments": {"project": "b.genko", "page": 9223372036854775808})", "/page"},
+                {R"("render", "arguments": {"project": "b.genko", "page": "9223372036854775808"})", "/page"},
+                {R"("render", "arguments": {"project": "b.genko", "page": 18446744073709551615})", "/page"},
+                {R"("render", "arguments": {"project": "b.genko", "page": "-9223372036854775809"})", "/page"},
+                {R"("adopt", "arguments": {"project": "b.genko", "candidate_id": "c", "scale": 9223372036854775808})", "/scale"},
+                {R"("adopt", "arguments": {"project": "b.genko", "candidate_id": "c", "scale": "9223372036854775808"})", "/scale"},
+                {R"("check", "arguments": {"project": "b.genko", "pages": [1, 9223372036854775808]})", "/pages/1"},
+                {R"("apply_ops", "arguments": {"project": "b.genko", "ops": [{"op": "set_note", "page": 9223372036854775808, "note": "x"}], "commit": true})",
+                 "/ops/0/page"},
+                {"\"apply_ops\", \"arguments\": " +
+                     genko::core::dump_python(Json::object({{"project", "b.genko"},
+                                                            {"ops", "[{\"op\": \"set_note\", \"page\": 9223372036854775808, \"note\": \"x\"}]"},
+                                                            {"commit", true}})),
+                 "/ops/0/page"},  // (the ops as a text, read as JSON)
+            };
+            for (const auto& [call, where] : cases) {
+                ++id;
+                mcp.send_raw(R"({"jsonrpc": "2.0", "id": )" + std::to_string(id) + R"(, "method": "tools/call", "params": {"name": )" + call + "}}");
+                Json text = Mcp::text(mcp.answer(id, 120000));
+                QVERIFY2(text.is_object() && text["code"] == Json("unsupported_number") && str(text["detail"]).ends_with(" at " + where),
+                         (call + " → " + genko::core::dump_python(text)).c_str());
+            }
+            // 2^63 - 1 is a number this build carries: the tool answers as it would for any page
+            mcp.send_raw(R"({"jsonrpc": "2.0", "id": 799, "method": "tools/call", "params": {"name": "render", "arguments": {"project": "b.genko", "page": 9223372036854775807}}})");
+            Json last = Mcp::text(mcp.answer(799, 120000));
+            QVERIFY2(last.is_object() && last["code"] != Json("unsupported_number"), genko::core::dump_python(last).c_str());
+            mcp.lines();
+            QVERIFY(book_tree(dir + "/root/b.genko") == before);
+        }
+        write_file(dir + "/config/tokens.json", R"({"tok-ai": {"actor": "ai:bot"}})");
+        Server server({"serve", "--root", dir + "/root", "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        const auto post = [port](const std::string& path, const std::string& body) { return http(port, request_text("POST", path, port, "tok-ai", body)); };
+        for (const char* body : {R"({"dest": "n.genko", "pages": 9223372036854775808})", R"({"dest": "n.genko", "pages": "9223372036854775808"})",
+                                 R"({"dest": "n.genko", "episode": -9223372036854775809})"}) {
+            const Response r = post("/v1/new", body);
+            QCOMPARE(r.status, 400);
+            QVERIFY2(str(r.json()["error"]).starts_with("the body must not hold NaN, Infinity or an integer past 64 bits (at /"), r.body.c_str());
+        }
+        QVERIFY(!QFile::exists(dir + "/root/n.genko/project.json"));
+        const Response ops = post("/v1/apply", R"({"path": "b.genko", "ops": [{"op": "set_note", "page": 9223372036854775808, "note": "x"}]})");
+        QCOMPARE(ops.status, 400);
+        QVERIFY2(str(ops.json()["error"]).starts_with("ops must not hold an integer past 64 bits (at /0/page)"), ops.body.c_str());
+        const Response revision = post("/v1/apply", R"({"path": "b.genko", "ops": [], "expect_revision": "9223372036854775808"})");
+        QCOMPARE(revision.status, 400);
+        QCOMPARE(server.stop(), 0);
+    }
+
+    // tokens.json is read again whenever its bytes change, even when its size and its time stay the same.
+    void tokensReadAgain() {
+        const QString dir = fresh("reread");
+        const QString file = dir + "/config/tokens.json";
+        write_file(file, R"({"tok-aaa": {"actor": "ai:bot"}})");
+        // (its time in whole seconds, so that the same time can be set again exactly)
+        const QDateTime stamp = QDateTime::fromSecsSinceEpoch(QDateTime::currentSecsSinceEpoch() - 60);
+        {
+            QFile f(file);
+            QVERIFY(f.open(QIODevice::ReadWrite));
+            QVERIFY(f.setFileTime(stamp, QFileDevice::FileModificationTime));
+        }
+        Server server({"serve", "--root", dir + "/root", "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        QCOMPARE(http(port, request_text("GET", "/schema", port, "tok-aaa")).status, 200);
+        {
+            QFile f(file);
+            QVERIFY(f.open(QIODevice::ReadWrite));  // (in place: the same file, the same size)
+            f.write(R"({"tok-bbb": {"actor": "ai:bot"}})");
+            f.flush();
+            QVERIFY(f.setFileTime(stamp, QFileDevice::FileModificationTime));
+        }
+        QCOMPARE(QFileInfo(file).lastModified(), stamp);
+        QCOMPARE(http(port, request_text("GET", "/schema", port, "tok-aaa")).status, 401);
+        QCOMPARE(http(port, request_text("GET", "/schema", port, "tok-bbb")).status, 200);
+        // a token is compared whole: a part of one, or one with more after it, is not it
+        QCOMPARE(http(port, request_text("GET", "/schema", port, "tok-bb")).status, 401);
+        QCOMPARE(http(port, request_text("GET", "/schema", port, "tok-bbbb")).status, 401);
+        QCOMPARE(server.stop(), 0);
+    }
+
+    // A request's files: its folder too must be inside --root (a link from studio/requests/ out of it serves nothing).
+    void requestFolderInTheRoot() {
+        const QString dir = fresh("requests");
+        write_file(dir + "/config/tokens.json", R"({"tok-ai": {"actor": "ai:bot"}})");
+        write_file(dir + "/elsewhere/request.json", "{}");
+        write_file(dir + "/elsewhere/secret.png", png_bytes(4, 4));
+        Server server({"serve", "--root", dir + "/root", "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        QCOMPARE(http(port, request_text("POST", "/v1/new", port, "tok-ai", R"({"dest": "b.genko", "pages": 1})")).status, 200);
+        QVERIFY(QDir().mkpath(dir + "/root/b.genko/studio/requests"));
+        QVERIFY(QFile::link(dir + "/elsewhere", dir + "/root/b.genko/studio/requests/rq_x"));
+        const Response r = http(port, request_text("GET", "/v1/requests/rq_x/files/secret.png?path=b.genko", port, "tok-ai"));
+        QCOMPARE(r.status, 404);
+        QVERIFY(r.body.find("\x89PNG") == std::string::npos);
+        QCOMPARE(server.stop(), 0);
+    }
+
+    // A --root that cannot be resolved (a link to itself): `genko serve` says so and ends with 1.
+    void rootThatCannotBeResolved() {
+        const QString dir = fresh("loop");
+        QVERIFY(QFile::link(dir + "/loop", dir + "/loop"));
+        QProcessEnvironment env;
+        env.insert(QStringLiteral("GENKO_CONFIG_DIR"), dir + "/config");
+        const genko::test::Run run = genko::test::run_genko({"serve", "--root", dir + "/loop", "--port", "0"}, env);
+        QCOMPARE(run.exit_code, 1);
+        Json said = genko::test::one_line(run.out);
+        QVERIFY2(said.is_object() && said["ok"] == Json(false) && str(said["error"]).find("--root") != std::string::npos, run.out.constData());
+    }
+
+    // Requests run on a bounded number of threads: 300 slow calls at once over stdio, and 300 slow 2026-era calls over
+    // HTTP whose clients go away at once, keep the server's threads bounded; all the stdio calls are answered.
+    void threadsAreBounded() {
+#ifndef Q_OS_LINUX
+        QSKIP("counts threads through /proc");
+#endif
+        const QString dir = fresh("threads");
+        {
+            Mcp setup(dir + "/root", dir + "/config");
+            setup.initialize();
+            QVERIFY(!make_book(setup, "b.genko").empty());
+        }
+        running_job(dir + "/root/b.genko", "job_slow");
+        {
+            Mcp mcp(dir + "/root", dir + "/config");
+            mcp.initialize();
+            for (int i = 0; i < 300; ++i) {
+                mcp.send(Json::object({{"jsonrpc", "2.0"}, {"id", 1000 + i}, {"method", "tools/call"},
+                                       {"params", Json::object({{"name", "export_status"},
+                                                                {"arguments", Json::object({{"project", "b.genko"}, {"job", "job_slow"}, {"wait_s", 2}})}})}}));
+            }
+            int most = 0;
+            for (int i = 0; i < 300; ++i) {
+                most = std::max(most, threads_of(mcp.pid()));
+                QVERIFY2(!mcp.answer(1000 + i).is_null(), std::to_string(i).c_str());
+            }
+            qInfo("stdio: at most %d threads", most);
+            QVERIFY2(most <= 96, std::to_string(most).c_str());
+        }
+        Server server({"mcp", "--root", dir + "/root", "--agent", "ai:test", "--transport", "streamable-http", "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        int most = 0;
+        for (int i = 0; i < 300; ++i) {
+            QTcpSocket socket;
+            socket.connectToHost(QStringLiteral("127.0.0.1"), server.port);
+            QVERIFY(socket.waitForConnected(30000));
+            const std::string raw = modern_post(server.port, 2000 + i, "export_status", Json::object({{"project", "b.genko"}, {"job", "job_slow"}, {"wait_s", 3}}));
+            socket.write(raw.data(), static_cast<qint64>(raw.size()));
+            socket.waitForBytesWritten(30000);
+            socket.abort();  // (gone at once)
+            most = std::max(most, threads_of(server.pid()));
+        }
+        qInfo("2026-era HTTP: at most %d threads", most);
+        QVERIFY2(most <= 160, std::to_string(most).c_str());
+        // (served again once the connections of the clients that left have ended)
+        Response ping;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(2);
+        while (ping.status != 200 && std::chrono::steady_clock::now() < deadline) {
+            ping = http(server.port, modern_post(server.port, 3000, "projects", Json::object()), 120000);
+            if (ping.status != 200) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        QCOMPARE(ping.status, 200);
+        QCOMPARE(server.stop(), 0);
+    }
+
+    // Chunked bodies on the MCP endpoint, read as uvicorn reads them but stricter: Transfer-Encoding "chunked" alone
+    // (not with a Content-Length), sizes of at most 16 hex digits, each chunk's data followed by CRLF; otherwise 400
+    // "Invalid HTTP request received."; a size past the 4 MiB the endpoint takes, 413.
+    void chunkedBodiesAreStrict() {
+        const QString dir = fresh("chunked");
+        Server server({"mcp", "--root", dir + "/root", "--agent", "ai:test", "--transport", "streamable-http", "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        const std::string init = R"({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}})";
+        const auto head = [port](const std::string& te) {
+            return "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) +
+                   "\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\n" + te + "\r\n";
+        };
+        const auto hex = [](std::size_t n) {
+            char buf[32];
+            std::snprintf(buf, sizeof buf, "%zx", n);
+            return std::string(buf);
+        };
+        const std::string whole = hex(init.size()) + "\r\n" + init + "\r\n0\r\n\r\n";
+        const Response good = http(port, head("Transfer-Encoding: chunked\r\n") + hex(10) + ";ext=1\r\n" + init.substr(0, 10) + "\r\n" + hex(init.size() - 10) + "\r\n" +
+                                             init.substr(10) + "\r\n0\r\nX-Trailer: a\r\n\r\n");
+        QCOMPARE(good.status, 200);
+        const std::vector<std::string> bad = {
+            head("Transfer-Encoding: gzip\r\n") + whole,
+            head("Transfer-Encoding: chunked, gzip\r\n") + whole,
+            head("Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n") + whole,
+            head("Transfer-Encoding: chunked\r\nContent-Length: " + std::to_string(whole.size()) + "\r\n") + whole,
+            head("Transfer-Encoding: chunked\r\n") + "zz\r\n" + init + "\r\n0\r\n\r\n",
+            head("Transfer-Encoding: chunked\r\n") + "0000000000000000" + hex(init.size()) + "\r\n" + init + "\r\n0\r\n\r\n",
+            head("Transfer-Encoding: chunked\r\n") + " " + hex(init.size()) + "\r\n" + init + "\r\n0\r\n\r\n",
+            head("Transfer-Encoding: chunked\r\n") + hex(init.size()) + "\r\n" + init + "XX0\r\n\r\n",
+        };
+        for (const std::string& raw : bad) {
+            const Response r = http(port, raw, 60000);
+            QVERIFY2(r.status == 400 && r.body == "Invalid HTTP request received.", (raw.substr(raw.find("\r\n\r\n") - 60, 120) + " → " + std::to_string(r.status) + " " + r.body).c_str());
+        }
+        const Response huge = http(port, head("Transfer-Encoding: chunked\r\n") + "ffffffffffffffff\r\nabc", 60000);
+        QCOMPARE(huge.status, 413);
         QCOMPARE(server.stop(), 0);
     }
 };

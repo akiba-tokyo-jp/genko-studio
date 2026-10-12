@@ -78,6 +78,8 @@ GitHub Actionsはリポジトリ側で無効とし、検証のために再有効
 python3 tools/ci/validation_policy.py --base <基点SHA> --phase development --output build/validation-plan.json
 ```
 
+Python参照の契約試験は、参照Pythonを環境変数で渡して実行する: `GENKO_PYREF`（Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9）と、MCP・HTTPの契約（`test_contract_mcp`）用の `GENKO_MCP_PYTHON`（`tools/migration/mcp_reference_requirements.txt` のvenv。作り方はARCHITECTURE.md §9）。未設定だと契約試験はSKIPになり、auditが不合格にする。
+
 対応するCMake presetをconfigureし、JSONにある構成だけ実行する:
 
 ```sh

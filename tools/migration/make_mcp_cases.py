@@ -200,7 +200,7 @@ def client_ops_second() -> list:
         {"op": "call", "name": "nosuch"},
         {"op": "call", "name": "status", "args": {"project": BOOK, "session": "a b"}},
         # jobs: a background export and its record
-        {"op": "call", "name": "export", "args": {"project": BOOK, "format": "png", "pages": [1], "dpi": 72}},
+        {"op": "call", "name": "export", "args": {"project": BOOK, "format": "png", "pages": [1], "dpi": 72}, "settle": True},
     ]
 
 
@@ -244,8 +244,9 @@ def client_job(transport: str, mode: str) -> dict:
 
 def http_raw() -> dict:
     """Streamable HTTP as the SDK serves it: the handshake era's sessions (POST answered on SSE, 202, GET stream,
-    DELETE), its refusals (Accept, Content-Type, session, Host, Origin, size, method), and the 2026 era's single POSTs
-    (JSON answers with the error's HTTP status, the routing headers, notifications)."""
+    DELETE), its refusals (Accept, Content-Type, session, Host, Origin, size, method), the 2026 era's single POSTs
+    (JSON answers with the error's HTTP status, the routing headers, notifications), the path's trailing slash
+    (redirected) and a chunked body."""
     j = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     modern = {**j, "MCP-Protocol-Version": V}
     return {"name": "http_raw", "steps": [{"http": [
@@ -288,6 +289,14 @@ def http_raw() -> dict:
         {"method": "POST", "headers": {**j, "MCP-Protocol-Version": "2099-01-01", "Mcp-Method": "tools/list"},
          "body": req(28, "tools/list", {"_meta": {**META, "io.modelcontextprotocol/protocolVersion": "2099-01-01"}})},
         {"method": "POST", "headers": {**modern, "Mcp-Method": "ping"}, "body": req(29, "ping", {"_meta": META})},
+        # the path with a slash after it: Starlette's redirect (before the Host is looked at), the query kept
+        {"method": "POST", "path": "/mcp/", "headers": j, "body": req(30, "ping")},
+        {"method": "GET", "path": "/mcp/?x=1", "headers": j},
+        {"method": "DELETE", "path": "/mcp//"},
+        {"method": "POST", "path": "/mcp/", "headers": {**j, "Host": "evil.example"}, "body": req(31, "ping")},
+        {"method": "POST", "path": "/other/", "headers": j, "body": req(32, "ping")},
+        # a chunked body (in two chunks, an extension and a trailer)
+        {"method": "POST", "headers": j, "body": req(33, "initialize", INIT), "chunked": True},
     ]}]}
 
 
@@ -314,6 +323,17 @@ def api_job() -> dict:
             {"method": "GET", "path": "/health", "token": None, "headers": {"Host": None}},
             {"method": "GET", "path": "/health", "token": None, "headers": {"Origin": "http://evil.example"}},
             {"method": "GET", "path": "/health", "token": None, "headers": {"Origin": "http://ok.example"}},
+            # refusals of the guard to an allowed Origin carry its CORS headers too (the body is not read for them)
+            {"method": "POST", "path": "/v1/new", "json": {"dest": "x.genko"}, "headers": {"Origin": "http://ok.example", "Host": "evil.example"}},
+            {"method": "POST", "path": "/v1/new", "json": {"dest": "x.genko"}, "headers": {"Origin": "http://ok.example", "Content-Type": "text/plain"}},
+            {"method": "POST", "path": "/v1/new", "json": {"dest": "x.genko"}, "token": None, "headers": {"Origin": "http://ok.example"}},
+            {"method": "POST", "path": "/v1/new", "token": "nope", "headers": {"Origin": "http://ok.example", "Content-Type": "application/json"},
+             "declare": 64 * 1024 * 1024 + 1},
+            # a chunked body: http.server reads none (no Content-Length)
+            {"method": "POST", "path": "/v1/new", "json": {"dest": "x.genko"}, "chunked": True},
+            # methods the server has no handler for: http.server's page, the method's repr escaped
+            {"method": "Q<b>&x", "path": "/health", "token": None},
+            {"method": "Q'x", "path": "/health", "token": None},
             {"method": "OPTIONS", "path": "/v1/new", "token": None, "headers": {"Origin": "http://ok.example"}},
             {"method": "OPTIONS", "path": "/v1/new", "token": None, "headers": {"Origin": "http://evil.example"}},
             {"method": "POST", "path": "/v1/new", "json": {"dest": "api.genko", "title": "API", "pages": 2}},
@@ -349,6 +369,14 @@ def api_job() -> dict:
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "put_raster", "page": 1, "path": "/etc/passwd"}]}},
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "set_meta", "font_path": "../x.ttf"}]}},
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "put_raster", "page": 1, "path": "link_out/secret.png"}]}},
+            # paths given as numbers or lists to the ops that read a file: read as their text, inside the root
+            {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "put_raster", "page": 1, "path": 5}]}},
+            {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "put_raster", "page": 1, "path": ["x"]}]}},
+            {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "set_meta", "font_path": 7}]}},
+            # another book's pages, from inside the root
+            {"method": "POST", "path": "/v1/new", "json": {"dest": "other.genko", "title": "他", "pages": 1}},
+            {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": [{"op": "import_pages", "from": "$root/other.genko"}],
+                                                             "dry_run": True}},
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": "abc"}},
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko", "ops": 5}},
             {"method": "POST", "path": "/v1/apply", "json": {"path": "api.genko"}},

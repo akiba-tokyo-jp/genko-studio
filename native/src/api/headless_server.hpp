@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,12 +41,23 @@ struct Reply {
 
 class Api {
 public:
-    // The tokens are read from tokens.json (again whenever the file changes: a revoked token stops working at once).
+    // The tokens are read from tokens.json (again whenever its bytes change: a revoked token stops working at once).
+    // core::Error("value") when --root cannot be resolved.
     explicit Api(Options options);
     void bound(std::uint16_t port);
+    // The guard from a request's head (Host, Origin, Content-Type, token), before its body is read: false when it
+    // answered the refusal; the token's actor goes into the request's principal.
+    bool admit(http::Request& head, http::Responder& r);
+    // The CORS headers every answer to an allowed Origin gets (Python's _send).
+    void decorate(const http::Request& head, int status, http::Headers& headers) const;
+    // A request whose head was admitted (the guard is run here for one that was not).
     Reply serve(const http::Request& request);
+    // A reply sent: its Content-Type (JSON or PNG), its headers.
+    static void answer(http::Responder& r, const Reply& reply);
 
 private:
+    bool allowed_origin(const std::string& origin) const;
+    std::optional<Reply> guard(const http::Request& head, bool has_body, std::string& actor) const;
     // handle_request after the guard: the route's reply, Python's exceptions turned into its statuses.
     Reply route_request(const std::string& method, const std::string& route, const std::map<std::string, std::string>& query,
                         const std::string& body, const std::string& actor);

@@ -99,6 +99,7 @@ tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開
 
 - 試験は CTest に登録する（`genko_test()`）。ラベル: `unit`（速い単体）、`contract`（Python 版の挙動・形式との照合）、`e2e`（CLI/GUI/API の通し）、`perf`（性能。通常の CI では実行しない）、`gui`（offscreen の画面試験）。
 - Python 参照: 開発用コンテナの `/opt/pyref/bin/python` と、リポジトリの `src/genko`（`PYTHONPATH=/src/src`）で現行版の挙動・出力を作り、C++ 版と照合してよい。製品・配布物は Python を必要としない。
+- MCP・HTTP の契約試験（`test_contract_mcp`）の Python 参照は別の venv: 環境変数 `GENKO_MCP_PYTHON`（未設定なら `/opt/pyref-mcp/bin/python`）。中身は `tools/migration/mcp_reference_requirements.txt`（`uv.lock` の `mcp` extra と、参照と同じ Pillow 12.3.0・numpy 2.4.6）で、`python3.12 -m venv /opt/pyref-mcp && /opt/pyref-mcp/bin/pip install -r tools/migration/mcp_reference_requirements.txt` で作る。ほかの契約試験の参照 Python と同じく、どちらも無いと QSKIP になり、検証（`validation_run.py`）はその SKIP を予期しない SKIP として不合格にする。だから検証の環境では `GENKO_PYREF` と並べて必ず用意する。
 - 描画の照合は、同じ DPI の Python 参照画像に対し、全画素の平均絶対差 ≤ 2/255 かつ 99% 以上の画素の差 ≤ 32/255 を基本とする。超える場合は理由（Pillow とのアンチエイリアス差など）を試験に書き、差分画像を残し、台帳の備考に記録する。機能の欠落を許容差で隠さない。
 - 原稿の固定試験資産は `FIXTURES.md` に従って生成し、ハッシュを固定する。本番原稿（`/home/hermes/manga` 等）を使わない。
 

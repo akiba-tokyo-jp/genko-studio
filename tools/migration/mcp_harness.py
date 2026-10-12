@@ -15,7 +15,8 @@ pyref_harness hold it the same way; the C++ drawing is BASIC's).
 JOB: {"server": {"kind": "cpp", "genko": EXE} | {"kind": "py", "python": EXE, "repo": REPO}, "root", "config",
 "agent", "steps"}. The steps, in order:
   {"write": REL, "text" | "base64" | "json"}          a file put under the root
-  {"job_record": BOOK, "id", "status", "result"?}     studio/jobs/<id>.json of the book (started and beat now)
+  {"job_record": BOOK, "id", "status", "result"?}     studio/jobs/<id>.json of the book (started and beat now; a
+                                                      running one's beat renewed every 5 s until the job's end)
   {"stdio": {"lines": [...], "gap"?, "wait"?, "silent"?}}
                                                       one `genko mcp` over stdio fed these lines (a JSON value is
                                                       sent as one line, {"raw": text} as it is, {"sleep": s} waits,
@@ -24,17 +25,19 @@ JOB: {"server": {"kind": "cpp", "genko": EXE} | {"kind": "py", "python": EXE, "r
                                                       message it wrote until it ended is kept (by id), with the ids
                                                       of "silent" it never answered
   {"http": [REQUEST, ...]}                            the raw Streamable HTTP of one `genko mcp --transport
-                                                      streamable-http`: each {"method", "headers"?, "body"?, "raw"?,
-                                                      "session"?: "keep" | "use" | "none", "stream"?: "head"};
-                                                      status, the headers that matter and the JSON or SSE body
+                                                      streamable-http`: each {"method", "path"?, "headers"?, "body"?,
+                                                      "raw"?, "chunked"?, "session"?: "keep" | "use" | "none",
+                                                      "stream"?: "head"}; status, the headers that matter (a
+                                                      redirect's Location) and the JSON or SSE body
   {"client": {"transport": "stdio" | "http", "mode": "auto" | "legacy", "ops": [...]}}
                                                       the MCP SDK's own Client (mcp.Client): ops info, list_tools,
-                                                      list_resources, read_resource, call, cancel, ping
+                                                      list_resources, read_resource, call (with "settle": a job it
+                                                      returns asked after until it is done), cancel, ping
   {"api": [REQUEST, ...]}                             `genko serve` (tokens.json in the config folder: tok-ai is
                                                       ai:bot, tok-human human:owner): each
                                                       {"method", "path", "headers"?, "token"?, "json"? | "base64"? |
-                                                      "text"?}: status, content type, CORS headers and the JSON body
-                                                      (a PNG as its pixels)
+                                                      "text"?, "chunked"?, "declare"?}: status, content type, CORS
+                                                      headers and the JSON body (a PNG as its pixels)
 Each record is normalised: the root's and the config folder's paths <root> and <config>, ids (12 hex digits) <id1>,
 <id2>, … in the order met, a session's id <session>, a job's id <job>, its "seconds" <seconds>, a time stamp <time>,
 how long ago another conversation wrote (<minutes_ago>, in the words too), pictures (PNG) as their mode and size, and the file (OUT.images/NNN.png, in the order met) the test compares the
@@ -83,9 +86,10 @@ class Normal:
         self.config = config
         self.ids: dict[str, str] = {}
         # Once an Undo went through, the book holds what the C++ build restored from a state asset, which is canonical
-        # JSON (its objects' keys sorted: schema-v4.md), where Python puts back the keys in the order they had; the
-        # replies after it are compared with their objects' keys sorted on both sides (as test_contract_service
-        # compares a book an Undo restored).
+        # JSON (its objects' keys sorted: schema-v4.md), where Python puts back the keys in the order they had, and its
+        # revision counts on where Python's goes back; the replies after it are compared with their objects' keys
+        # sorted and without the revisions, on both sides (as test_contract_service compares a book an Undo restored).
+        # Before it, revisions are compared as they are.
         self.restored = False
 
     def text(self, value: str) -> str:
@@ -103,15 +107,17 @@ class Normal:
         value = re.sub(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", "<time>", value)
         value = re.sub(r"\d{8}-\d{6}", "<time>", value)
         value = re.sub(r"（\d+(?:\.\d+)? 分前）", "（<minutes_ago> 分前）", value)  # (book_in_use: how long ago the others wrote)
-        # (a folder named after the book's revision: the C++ build's revision counts on through an Undo, schema-v4)
-        value = re.sub(r"/proofs/r\d+/", "/proofs/r<revision>/", value)
+        if self.restored:  # (a folder named after the book's revision, which counts on through an Undo in v4)
+            value = re.sub(r"/proofs/r\d+/", "/proofs/r<revision>/", value)
         return value
 
     def value(self, value):
         if isinstance(value, dict):
             out = {}
             for k, v in value.items():
-                if k in ("seconds", "minutes_ago", "ms", "started", "beat", "finished", "at", "expires", "revision", "at_rev") and isinstance(v, (int, float)):
+                timing = k in ("seconds", "minutes_ago", "ms", "started", "beat", "finished", "at", "expires")
+                # (the revision only once an Undo went through: the C++ build's counts on through it, schema-v4.md)
+                if (timing or (self.restored and k in ("revision", "at_rev"))) and isinstance(v, (int, float)):
                     out[self.text(k)] = f"<{k}>"
                 else:
                     out[self.text(k)] = self.value(v)
@@ -275,6 +281,17 @@ def _sse_events(text: str) -> list:
     return events
 
 
+def _chunked(body: bytes) -> bytes:
+    """The body in two chunks (the first with an extension) and a trailer, as Transfer-Encoding: chunked sends it."""
+    half = max(1, len(body) // 2)
+    pieces = [body[:half], body[half:]]
+    out = b""
+    for n, piece in enumerate(pieces):
+        if piece:
+            out += f"{len(piece):x}".encode() + (b";part=1" if n == 0 else b"") + b"\r\n" + piece + b"\r\n"
+    return out + b"0\r\nX-Trailer: done\r\n\r\n"
+
+
 def _http(job: dict, step: list, norm: Normal) -> dict:
     server = Running(_mcp_command(job, "http"), _env(job))
     port = server.port
@@ -299,16 +316,21 @@ def _http(job: dict, step: list, norm: Normal) -> dict:
                 conn.putheader(k, v)
             if "declare" in req:  # (a size said, nothing sent: the server answers before it reads)
                 conn.putheader("Content-Length", str(int(req["declare"])))
+            elif body is not None and req.get("chunked"):
+                conn.putheader("Transfer-Encoding", "chunked")
             elif body is not None:
                 conn.putheader("Content-Length", str(len(body)))
             conn.endheaders()
             if body is not None:
-                conn.send(body)
+                conn.send(_chunked(body) if req.get("chunked") else body)
             resp = conn.getresponse()
+            location = resp.getheader("location")
             record = {"status": resp.status,
                       "type": (resp.getheader("content-type") or "").split(";")[0].strip(),
                       "session": "<session>" if resp.getheader("mcp-session-id") else None,
                       "allow": resp.getheader("allow")}
+            if location is not None:
+                record["location"] = location.replace(str(port), "$port")
             if req.get("session") == "keep" and resp.getheader("mcp-session-id"):
                 session = resp.getheader("mcp-session-id")
             if req.get("stream") == "head":
@@ -409,6 +431,8 @@ async def _client_ops(job: dict, step: dict, norm: Normal) -> list:
                         out.append({"ping": True})
                     elif kind == "call":
                         result = await client.call_tool(op["name"], op.get("args") or {})
+                        if op.get("settle"):
+                            result = await _settled(client, op, result)
                         record = {"call": op["name"], **_content(norm, result)}
                         if norm.restored:
                             record = {"keys_sorted": True, **_sorted_keys(record)}
@@ -438,6 +462,33 @@ async def _client_ops(job: dict, step: dict, norm: Normal) -> list:
         if server is not None:
             server.stop()
     return out
+
+
+async def _settled(client, op: dict, result):
+    """A tool that works in the background answers within 40 s, or returns a job to ask after: its final reply either way
+    (export_status until the job is done, the job's result put in the reply's place), so the record does not depend on
+    how fast the build is."""
+    try:
+        reply = json.loads(result.content[0].text)
+    except (AttributeError, IndexError, ValueError):
+        return result
+    if not (isinstance(reply, dict) and reply.get("ok") and reply.get("job") and reply.get("status") == "running"):
+        return result
+    project = (op.get("args") or {}).get("project")
+    for _ in range(600):
+        status = await client.call_tool("export_status", {"project": project, "job": reply["job"], "wait_s": 30})
+        state = json.loads(status.content[0].text)
+        if state.get("status") != "running":
+            from types import SimpleNamespace
+
+            # (the reply as the tool gives it when the job ends within its 40 s: StudioService._job of jobs.start's
+            # {**reply, "job": id}, its issues left out)
+            done = {**(state.get("result") or {}), "job": reply["job"]}
+            data = {k: v for k, v in done.items() if k not in ("ok", "issues", "files")}
+            final = {"ok": bool(done.get("ok")), **data, "issues": [], "files": list(done.get("files") or []) if done.get("ok") else []}
+            text = SimpleNamespace(type="text", text=json.dumps(final, ensure_ascii=False))
+            return SimpleNamespace(content=[text], is_error=False)
+    raise RuntimeError(f"job {reply['job']} did not end")
 
 
 def _client(job: dict, step: dict, norm: Normal) -> dict:
@@ -492,11 +543,13 @@ def _api(job: dict, step: list, norm: Normal) -> dict:
                 conn.putheader(k, v)
             if "declare" in req:  # (a size said, nothing sent: the server answers before it reads)
                 conn.putheader("Content-Length", str(int(req["declare"])))
+            elif req.get("chunked"):  # (http.server knows no chunks: no Content-Length, no body)
+                conn.putheader("Transfer-Encoding", "chunked")
             elif body or req["method"] == "POST":
                 conn.putheader("Content-Length", str(len(body)))
             conn.endheaders()
             if body:
-                conn.send(body)
+                conn.send(_chunked(body) if req.get("chunked") else body)
             try:
                 resp = conn.getresponse()
             except (ConnectionError, http.client.HTTPException) as exc:
@@ -523,7 +576,54 @@ def _api(job: dict, step: list, norm: Normal) -> dict:
 # --- the job ---------------------------------------------------------------------------------------------------------------
 
 
+def _write_record(path: Path, record: dict) -> None:
+    temp = path.with_name(path.name + ".tmp")
+    temp.write_text(json.dumps(record), encoding="utf-8")
+    os.replace(temp, path)  # (whole: a server reading it never sees half a record)
+
+
+class Heartbeat:
+    """The "beat" of the job records a step wrote as running, renewed every few seconds for as long as the job runs, as
+    the process that runs a job renews it: a record never looks lost (90 s without a beat) however slow the build under
+    test is."""
+
+    def __init__(self) -> None:
+        self.records: list[tuple[Path, dict]] = []
+        self.lock = threading.Lock()
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def add(self, path: Path, record: dict) -> None:
+        with self.lock:
+            self.records.append((path, record))
+
+    def _run(self) -> None:
+        while not self.stopped.wait(5):
+            with self.lock:
+                for path, record in self.records:
+                    if path.is_file():
+                        record["beat"] = time.time()
+                        _write_record(path, record)
+
+    def stop(self) -> None:
+        self.stopped.set()
+        self.thread.join()
+
+
+HEARTBEAT: Heartbeat
+
+
 def run_job(job: dict, out_path: str) -> None:
+    global HEARTBEAT
+    HEARTBEAT = Heartbeat()
+    try:
+        _run_job(job, out_path)
+    finally:
+        HEARTBEAT.stop()
+
+
+def _run_job(job: dict, out_path: str) -> None:
     root = Path(job["root"])
     root.mkdir(parents=True, exist_ok=True)
     Path(job["config"]).mkdir(parents=True, exist_ok=True)
@@ -566,7 +666,10 @@ def run_job(job: dict, out_path: str) -> None:
                       "pid": os.getpid()}
             if "result" in step:
                 record.update(finished=now, result=step["result"])
-            (folder / f"{step['id']}.json").write_text(json.dumps(record), encoding="utf-8")
+            target = folder / f"{step['id']}.json"
+            _write_record(target, record)
+            if step["status"] == "running":
+                HEARTBEAT.add(target, record)
             records.append({"job_record": step["id"]})
         elif "stdio" in step:
             records.append(_stdio(job, step["stdio"], norm))

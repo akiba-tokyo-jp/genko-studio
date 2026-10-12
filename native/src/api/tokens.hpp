@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <string_view>
 
 #include "core/json.hpp"
 
@@ -15,6 +16,8 @@ std::filesystem::path file();
 // tokens.load: {token: actor} (empty without a file). core::Error("json") for a file that is not JSON (Python's words),
 // core::Error("format") for an entry without an actor (Python stops with KeyError there).
 std::map<std::string, std::string> load();
+// The same for the bytes of a tokens.json (empty bytes: no tokens).
+std::map<std::string, std::string> parse(std::string_view bytes);
 // tokens.add: a new token (32 random bytes, URL-safe base64) for the actor. core::PyValueError("actor must be
 // human:<name> or ai:<name>") for any other actor.
 std::string add(const std::string& actor);

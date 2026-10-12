@@ -71,7 +71,15 @@ void save(const Json& data) {
 fs::path file() { return core::poses::config_dir() / "tokens.json"; }
 
 std::map<std::string, std::string> load() {
-    const Json data = read_all();
+    std::error_code ec;
+    if (!fs::is_regular_file(file(), ec)) return {};
+    return parse(storage::read_file(file()));
+}
+
+std::map<std::string, std::string> parse(std::string_view bytes) {
+    core::ParseOptions options;
+    options.universal_newlines = true;  // (Path.read_text)
+    const Json data = core::parse_python_json(bytes, nullptr, options);
     std::map<std::string, std::string> out;
     if (!data.is_object()) throw core::Error("format", "tokens.json is not a JSON object");
     for (const auto& [token, info] : data.items()) {
