@@ -45,10 +45,19 @@ if(GENKO_SANITIZE AND NOT MSVC)
   check_linker_flag(CXX "LINKER:-z,pack-relative-relocs,--compress-debug-sections=zlib" GENKO_LINKER_PACKS)
 endif()
 
-# A Genko library: static, its include root is native/src, flags as above.
+# Genko's libraries (and the vendored Pillow) are static, except in a sanitizer build, where they are shared: there each
+# test program would otherwise carry every library again, instrumented (about 0.4 GB each), and the build of all the
+# tests no longer fits the machines the suites run on. What is tested is the same code; only how it is linked differs.
+if(GENKO_SANITIZE AND NOT MSVC)
+  set(GENKO_LIBRARY_KIND SHARED)
+else()
+  set(GENKO_LIBRARY_KIND STATIC)
+endif()
+
+# A Genko library: static (shared in a sanitizer build, above), its include root is native/src, flags as above.
 function(genko_library name)
   cmake_parse_arguments(GL "" "" "SOURCES;PUBLIC_DEPS;PRIVATE_DEPS" ${ARGN})
-  add_library(${name} STATIC ${GL_SOURCES})
+  add_library(${name} ${GENKO_LIBRARY_KIND} ${GL_SOURCES})
   target_include_directories(${name} PUBLIC "${GENKO_SOURCE_ROOT}/src")
   target_link_libraries(${name} PUBLIC ${GL_PUBLIC_DEPS} PRIVATE ${GL_PRIVATE_DEPS})
   genko_target_flags(${name})

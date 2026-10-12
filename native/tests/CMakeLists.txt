@@ -181,12 +181,12 @@ genko_test(test_contract_book SOURCES contract/test_contract_book.cpp contract/o
 # studio_harness.py's studio book), and the same saved batch by batch with Undo and Redo by actor, the approval audit
 # compared with Python's.
 genko_test(test_contract_studio SOURCES contract/test_contract_studio.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops genko_studio genko_formats LABELS contract TIMEOUT 2400)
+           DEPS genko_test_support genko_render_ops genko_studio genko_formats ZLIB::ZLIB LABELS contract TIMEOUT 2400)
 # The studio service (M5②: service.py's StudioService and HumanService, adopt-drafts, stats, the audit and `genko studio`)
 # against Python's: service_cases.json (make_service_cases.py) run here and by service_harness.py, step by step: each reply,
 # the books and the other files after it.
 genko_test(test_contract_service SOURCES contract/test_contract_service.cpp
-           DEPS genko_test_support genko_service genko_api LABELS contract TIMEOUT 2400)
+           DEPS genko_test_support genko_service genko_api ZLIB::ZLIB LABELS contract TIMEOUT 2400)
 # `genko mcp` (stdio, Streamable HTTP) and `genko serve` against Python's, through the MCP SDK's own client and raw
 # JSON-RPC / HTTP (tools/migration/mcp_harness.py on contract/mcp_cases.json; skipped without $GENKO_MCP_PYTHON).
 genko_test(test_contract_mcp SOURCES contract/test_contract_mcp.cpp DEPS genko_test_support genko_render LABELS contract TIMEOUT 3600)

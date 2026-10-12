@@ -41,7 +41,8 @@ file(WRITE "${_cxx_dir}/ImagingCxx.h.new"
 configure_file("${_cxx_dir}/ImagingCxx.h.new" "${_cxx_dir}/ImagingCxx.h" COPYONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_pillow_dir}/Imaging.h")
 
-add_library(pillow_imaging STATIC ${_pillow_sources} compat/imaging_glue.c)
+# (static, or shared in a sanitizer build as Genko's libraries are: cmake/GenkoFlags.cmake)
+add_library(pillow_imaging ${GENKO_LIBRARY_KIND} ${_pillow_sources} compat/imaging_glue.c)
 # SYSTEM: Imaging.h is C and is not written for Genko's warning flags.
 target_include_directories(pillow_imaging SYSTEM PUBLIC
   "${_cxx_dir}"
