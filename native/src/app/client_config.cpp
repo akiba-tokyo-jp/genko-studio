@@ -8,6 +8,7 @@
 #include <QSaveFile>
 
 #include <algorithm>
+#include <set>
 
 #include "core/error.hpp"
 #include "core/json.hpp"
@@ -65,17 +66,98 @@ fs::path backup_path(const fs::path& file) {
     return fpath(candidate);
 }
 
+// What undo() keeps of a file it replaces: named apart from the copies apply() makes (backups() lists only those), so
+// another undo never puts back what was undone.
+fs::path aside_path(const fs::path& file) {
+    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    const QString base = qpath(file) + QStringLiteral(".genko-before-undo-") + stamp;
+    QString candidate = base;
+    for (int n = 2; QFileInfo::exists(candidate); ++n) candidate = QStringLiteral("%1-%2").arg(base).arg(n);
+    return fpath(candidate);
+}
+
+const QByteArray kUtf8Bom("\xEF\xBB\xBF");
+
+// Why bytes are not UTF-8 text Genko can change (a UTF-16 or UTF-32 file says so by its BOM); empty when they are.
+QString not_utf8(const QByteArray& bytes) {
+    if (bytes.startsWith(QByteArray("\xFF\xFE", 2)) || bytes.startsWith(QByteArray("\xFE\xFF", 2)) ||
+        bytes.startsWith(QByteArray("\x00\x00\xFE\xFF", 4))) {  // (UTF-16 LE/BE, UTF-32 LE — FF FE 00 00 — and BE)
+        return QStringLiteral("設定ファイルが UTF-8 ではありません（先頭の BOM から、UTF-16 か UTF-32 で書かれています）。Genko からは書き換えません");
+    }
+    const QByteArray text = bytes.startsWith(kUtf8Bom) ? bytes.mid(3) : bytes;
+    if (QString::fromUtf8(text).toUtf8() != text) return QStringLiteral("設定ファイルが UTF-8 ではありません。Genko からは書き換えません");
+    return {};
+}
+
+// The first key that an object of the JSON text has twice (its JSON pointer), if any.
+struct DuplicateKeys : nlohmann::json_sax<Json> {
+    std::vector<std::set<std::string>> seen;
+    std::vector<std::string> where;
+    std::optional<std::string> found;
+    bool null() override { return true; }
+    bool boolean(bool) override { return true; }
+    bool number_integer(number_integer_t) override { return true; }
+    bool number_unsigned(number_unsigned_t) override { return true; }
+    bool number_float(number_float_t, const string_t&) override { return true; }
+    bool string(string_t&) override { return true; }
+    bool binary(binary_t&) override { return true; }
+    bool start_object(std::size_t) override {
+        seen.emplace_back();
+        return true;
+    }
+    bool key(string_t& name) override {
+        if (!seen.back().insert(name).second && !found) found = name;
+        return !found;
+    }
+    bool end_object() override {
+        seen.pop_back();
+        return true;
+    }
+    bool start_array(std::size_t) override { return true; }
+    bool end_array() override { return true; }
+    bool parse_error(std::size_t, const std::string&, const nlohmann::detail::exception&) override { return false; }
+};
+
+std::optional<std::string> duplicate_key(const QByteArray& text) {
+    DuplicateKeys sax;
+    const std::string body = text.startsWith(kUtf8Bom) ? text.mid(3).toStdString() : text.toStdString();
+    (void)Json::sax_parse(body, &sax, nlohmann::detail::input_format_t::json, false);
+    return sax.found;
+}
+
 // --- claude_desktop_config.json ---------------------------------------------------------------------------------------
 
 void propose_json(Proposal& out, const QStringList& server) {
     Json root = Json::object();
+    const bool bom = out.before.startsWith(kUtf8Bom);
     if (out.exists && !out.before.trimmed().isEmpty()) {
+        if (const QString why = not_utf8(out.before); !why.isEmpty()) {
+            out.refusal = why;
+            return;
+        }
+        core::ParseRepairs repairs;
         try {
             core::ParseOptions options;
-            options.bytes = true;
-            root = core::parse_python_json(out.before.toStdString(), nullptr, options);
+            options.bytes = true;  // (a UTF-8 BOM at the start is read past, and written back)
+            root = core::parse_python_json(out.before.toStdString(), &repairs, options);
         } catch (const core::Error& error) {
             out.refusal = QStringLiteral("設定ファイルを JSON として読めません（%1）。Genko からは書き換えません").arg(QString::fromUtf8(error.what()));
+            return;
+        }
+        // (values that would not be written back as they are: Genko never changes such a file)
+        if (!repairs.nonfinite.empty()) {
+            out.refusal = QStringLiteral("設定ファイルに、NaN・Infinity や 1e400 のような、ふつうの数で表せない数があります（%1）。Genko からは書き換えません")
+                              .arg(QString::fromStdString(repairs.nonfinite.front()));
+            return;
+        }
+        if (!repairs.inexact.empty()) {
+            out.refusal = QStringLiteral("設定ファイルに、64 ビットに収まらない大きな整数があります（%1）。Genko からは書き換えません")
+                              .arg(QString::fromStdString(repairs.inexact.front()));
+            return;
+        }
+        if (const auto twice = duplicate_key(out.before)) {
+            out.refusal = QStringLiteral("設定ファイルの同じオブジェクトに、同じ鍵（%1）が二つあります。Genko からは書き換えません")
+                              .arg(QString::fromStdString(*twice));
             return;
         }
         if (!root.is_object()) {
@@ -123,7 +205,8 @@ void propose_json(Proposal& out, const QStringList& server) {
     if (!settings.isEmpty()) out.kept << QStringLiteral("ほかの設定: %1").arg(settings.join(QStringLiteral(", ")));
     servers["genko"] = entry;
     root["mcpServers"] = servers;
-    out.after = QByteArray::fromStdString(core::dump_python_indent2(root) + "\n");
+    if (bom) out.kept << QStringLiteral("先頭の BOM（UTF-8 の印）");
+    out.after = (bom ? kUtf8Bom : QByteArray()) + QByteArray::fromStdString(core::dump_python_indent2(root) + "\n");
 }
 
 // --- ~/.hermes/config.yaml (only the block style Genko's own text uses) ---------------------------------------------------
@@ -152,6 +235,15 @@ std::optional<std::pair<QString, QString>> key_line(const Line& line, int indent
     return std::pair{key, match.captured(2)};
 }
 
+// Why a key cannot be read as a plain key Genko may write next to: an explicit key ("? …"), a flow collection, an
+// anchor, an alias, a tag, a block scalar, a directive, a merge key ("<<"). Empty when it can.
+QString odd_key(const QString& key) {
+    static const QString kOdd = QStringLiteral("?{[&*!|>%@`");
+    if (key == QLatin1String("<<")) return QStringLiteral("<< で別の鍵を取り込んでいる");
+    if (!key.isEmpty() && kOdd.contains(key.front())) return QStringLiteral("「%1」で始まる鍵や値（YAML の別の書き方）").arg(key.front());
+    return {};
+}
+
 // The rest of a key line holds nothing but perhaps a comment: a block follows.
 bool opens_block(const QString& rest) {
     const QString t = rest.trimmed();
@@ -162,17 +254,22 @@ void propose_yaml(Proposal& out, const QStringList& server) {
     const QString command = dumped(server.value(0).toStdString());
     const QString args = dumped(strings_json(server.mid(1)));
     out.entry_after = shown_entry(command, args);
-    const QString text = QString::fromUtf8(out.before);
-    if (out.exists && text.toUtf8() != out.before) {
-        out.refusal = QStringLiteral("設定ファイルが UTF-8 ではありません。Genko からは書き換えません");
-        return;
+    if (out.exists) {
+        if (const QString why = not_utf8(out.before); !why.isEmpty()) {
+            out.refusal = why;
+            return;
+        }
     }
+    const bool bom = out.before.startsWith(kUtf8Bom);  // (read past, and written back)
+    const QString text = QString::fromUtf8(bom ? out.before.mid(3) : out.before);
+    if (bom) out.kept << QStringLiteral("先頭の BOM（UTF-8 の印）");
+    const QByteArray lead = bom ? kUtf8Bom : QByteArray();
     const bool crlf = text.contains(QStringLiteral("\r\n"));
     const QString eol = crlf ? QStringLiteral("\r\n") : QStringLiteral("\n");
     // Python's text (ai_link.snippet), for a file that has no mcp_servers yet
     const QString fresh = QStringLiteral("mcp_servers:\n  genko:\n    command: %1\n    args: %2\n    timeout: 60\n").arg(command, args);
     if (!out.exists || text.trimmed().isEmpty()) {
-        out.after = QString(fresh).replace(QStringLiteral("\n"), eol).toUtf8();
+        out.after = lead + QString(fresh).replace(QStringLiteral("\n"), eol).toUtf8();
         return;
     }
     QStringList raw = text.split(QLatin1Char('\n'));
@@ -186,25 +283,37 @@ void propose_yaml(Proposal& out, const QStringList& server) {
     const auto refuse = [&](const QString& why) {
         out.refusal = QStringLiteral("設定ファイルの形（%1）は Genko からは安全に書き換えられません。下の文を手で貼ってください").arg(why);
     };
-    for (const Line& line : lines) {
+    // (one "---" before everything else starts the one document: kept, and read past)
+    std::optional<std::size_t> start;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (lines[i].neutral()) continue;
+        if (lines[i].text == QLatin1String("---") || lines[i].text.startsWith(QLatin1String("--- #"))) start = i;
+        break;
+    }
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const Line& line = lines[i];
         int n = 0;
         while (n < line.text.size() && (line.text[n] == QLatin1Char(' ') || line.text[n] == QLatin1Char('\t'))) ++n;
         if (line.text.left(n).contains(QLatin1Char('\t'))) return refuse(QStringLiteral("タブの字下げ"));
         const QString t = line.text.trimmed();
+        if (start && i == *start) continue;
         if (line.indent() == 0 && (t == QLatin1String("---") || t.startsWith(QLatin1String("--- ")) || t == QLatin1String("..."))) {
-            return refuse(QStringLiteral("複数の文書"));
+            return refuse(QStringLiteral("複数の文書・文書の区切り"));
         }
     }
-    // the top-level keys
+    const QString start_text = start ? lines[*start].text : QString();
+    if (start) lines[*start].text = QStringLiteral("# ---");  // (read as a comment below; written back as it was)
+    // the top-level keys: every line at the left edge is a plain "key: …" (a flow document, an explicit "? key", an
+    // anchor, an alias, a tag, a block scalar or a directive there is not read: nothing is written then)
     std::optional<std::size_t> at;
     QStringList settings;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         if (lines[i].neutral() || lines[i].indent() != 0) continue;
+        if (lines[i].text.startsWith(QLatin1Char('-'))) return refuse(QStringLiteral("一番上がリスト"));
+        if (const QString why = odd_key(lines[i].text); !why.isEmpty()) return refuse(why);
         const auto key = key_line(lines[i], 0);
-        if (!key) {
-            if (lines[i].text.startsWith(QLatin1Char('-'))) return refuse(QStringLiteral("一番上がリスト"));
-            continue;  // (a continuation of a value: not a key)
-        }
+        if (!key) return refuse(QStringLiteral("一番上に、鍵として読めない行がある: %1").arg(lines[i].text.left(40)));
+        if (const QString why = odd_key(key->first); !why.isEmpty()) return refuse(why);
         if (key->first == QLatin1String("mcp_servers")) {
             if (at) return refuse(QStringLiteral("mcp_servers が二つ"));
             at = i;
@@ -216,9 +325,10 @@ void propose_yaml(Proposal& out, const QStringList& server) {
     std::vector<QString> result;
     for (const Line& line : lines) result.push_back(line.text);
     if (!at) {  // no mcp_servers: Python's text after the rest
+        if (start) result[*start] = start_text;
         QString joined;
         for (const QString& row : result) joined += row + eol;
-        out.after = (joined + QString(fresh).replace(QStringLiteral("\n"), eol)).toUtf8();
+        out.after = lead + (joined + QString(fresh).replace(QStringLiteral("\n"), eol)).toUtf8();
         return;
     }
     const std::size_t i = *at;
@@ -244,6 +354,7 @@ void propose_yaml(Proposal& out, const QStringList& server) {
         if (lines[k].neutral() || lines[k].indent() != c) continue;
         const auto key = key_line(lines[k], c);
         if (!key) return refuse(QStringLiteral("mcp_servers の中がリスト"));
+        if (const QString why = odd_key(key->first); !why.isEmpty()) return refuse(why);
         if (key->first == QLatin1String("genko")) {
             if (genko) return refuse(QStringLiteral("genko が二つ"));
             if (!opens_block(key->second)) return refuse(QStringLiteral("genko が一行で書かれている"));
@@ -284,9 +395,21 @@ void propose_yaml(Proposal& out, const QStringList& server) {
             if (lines[k].neutral() || lines[k].indent() != key_indent) continue;
             const auto key = key_line(lines[k], key_indent);
             if (!key) return refuse(QStringLiteral("genko の中がリスト"));
+            if (const QString why = odd_key(key->first); !why.isEmpty()) return refuse(why);
             if (!parts.empty()) parts.back().to = k;
             parts.push_back(Part{key->first, k, m, key->second.trimmed()});
         }
+        // (a part's lines end with its last line of content: the comments and blank lines after it stay where they are)
+        const auto content_end = [&](const Part& part) {
+            std::size_t end = part.from + 1;
+            for (std::size_t k = part.from + 1; k < part.to; ++k) {
+                if (!lines[k].neutral()) end = k + 1;
+            }
+            return end;
+        };
+        const auto tail = [&](const Part& part, std::vector<QString>& into) {
+            for (std::size_t k = content_end(part); k < part.to; ++k) into.push_back(lines[k].text);
+        };
         std::vector<QString> block;
         // (lines of genko's block before its first key: comments, kept)
         for (std::size_t k = k0 + 1; k < (parts.empty() ? m : parts.front().from); ++k) block.push_back(lines[k].text);
@@ -295,13 +418,14 @@ void propose_yaml(Proposal& out, const QStringList& server) {
         QStringList others;
         for (const Part& part : parts) {
             if (part.key == QLatin1String("command")) {
-                has_command = true;
                 old_command = part.rest;
-                block.push_back(pad_k + QStringLiteral("command: ") + command);
+                if (!has_command) block.push_back(pad_k + QStringLiteral("command: ") + command);  // (not when args came first)
+                has_command = true;
                 if (!has_args && std::none_of(parts.begin(), parts.end(), [](const Part& p) { return p.key == QLatin1String("args"); })) {
                     block.push_back(pad_k + QStringLiteral("args: ") + args);
                     has_args = true;
                 }
+                tail(part, block);
                 continue;
             }
             if (part.key == QLatin1String("args")) {
@@ -312,6 +436,7 @@ void propose_yaml(Proposal& out, const QStringList& server) {
                 has_args = true;
                 old_args = part.rest;
                 block.push_back(pad_k + QStringLiteral("args: ") + args);
+                tail(part, block);
                 continue;
             }
             if (part.key == QLatin1String("timeout")) has_timeout = true;
@@ -319,16 +444,22 @@ void propose_yaml(Proposal& out, const QStringList& server) {
             for (std::size_t k = part.from; k < part.to; ++k) block.push_back(lines[k].text);
         }
         if (!has_command) block.insert(block.begin(), {pad_k + QStringLiteral("command: ") + command, pad_k + QStringLiteral("args: ") + args});
-        if (!has_timeout) block.push_back(pad_k + QStringLiteral("timeout: 60"));
+        if (!has_timeout) {
+            // (after the last line of content: the comments and blank lines that end the block stay at its end)
+            std::size_t at_end = block.size();
+            while (at_end > 0 && Line{block[at_end - 1]}.neutral()) --at_end;
+            block.insert(block.begin() + static_cast<std::ptrdiff_t>(at_end), pad_k + QStringLiteral("timeout: 60"));
+        }
         if (!others.isEmpty()) out.kept.prepend(QStringLiteral("genko のほかの項目: %1").arg(others.join(QStringLiteral(", "))));
         out.entry_before = shown_entry(old_command, old_args);
         out.same = old_command == command && old_args == args && has_timeout;
         result.erase(result.begin() + static_cast<std::ptrdiff_t>(k0 + 1), result.begin() + static_cast<std::ptrdiff_t>(m));
         result.insert(result.begin() + static_cast<std::ptrdiff_t>(k0 + 1), block.begin(), block.end());
     }
+    if (start) result[*start] = start_text;
     QString joined;
     for (const QString& row : result) joined += row + eol;  // (the file ends with a line end after this)
-    out.after = joined.toUtf8();
+    out.after = lead + joined.toUtf8();
 }
 
 bool write_bytes(const fs::path& file, const QByteArray& bytes, QString* why) {
@@ -343,10 +474,23 @@ bool write_bytes(const fs::path& file, const QByteArray& bytes, QString* why) {
 
 }  // namespace
 
+std::optional<fs::path> msix_claude_file(const QString& local_appdata) {
+    if (local_appdata.isEmpty()) return std::nullopt;
+    const QDir packages(local_appdata + QStringLiteral("/Packages"));
+    for (const QString& name : packages.entryList({QStringLiteral("Claude_*")}, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+        const QString claude = packages.filePath(name) + QStringLiteral("/LocalCache/Roaming/Claude");
+        if (QFileInfo(claude).isDir()) return fpath(claude) / "claude_desktop_config.json";
+    }
+    return std::nullopt;
+}
+
 std::optional<fs::path> default_file(const QString& client) {
     const fs::path home = fpath(QDir::homePath());
     if (client == QLatin1String("claude-desktop")) {
 #if defined(_WIN32)
+        // (the Microsoft Store / MSIX install keeps its settings in its package's own folder: looked at first; SPEC
+        // AI-01, to be seen on a real Windows in M6)
+        if (const auto msix = msix_claude_file(env("LOCALAPPDATA"))) return msix;
         const QString appdata = env("APPDATA");
         return (appdata.isEmpty() ? home / "AppData" / "Roaming" : fpath(appdata)) / "Claude" / "claude_desktop_config.json";
 #elif defined(__APPLE__)
@@ -429,7 +573,7 @@ fs::path undo(const Applied& applied) {
     fs::path aside;
     const auto now = read_all(applied.file);
     if (now && *now != applied.written) {  // (changed since: kept aside before it is replaced)
-        aside = backup_path(applied.file);
+        aside = aside_path(applied.file);
         if (!QFile::copy(qpath(applied.file), qpath(aside))) {
             throw core::Error("io", "今の設定ファイルを残せなかったので、元に戻しませんでした");
         }

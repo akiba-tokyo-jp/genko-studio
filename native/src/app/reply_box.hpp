@@ -5,6 +5,8 @@
 #include <QPlainTextEdit>
 #include <QString>
 #include <QStringList>
+#include <QMutex>
+#include <QThreadPool>
 #include <QTimer>
 
 #include <cstddef>
@@ -14,6 +16,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "storage/reply_drafts.hpp"
 
@@ -71,6 +74,7 @@ std::string encode(const QString& item, const QString& text, const QDateTime& at
 struct Read {
     std::map<QString, QString> drafts;  // item → words
     QStringList discarded;              // a line for each broken file thrown away: "<file>（<why>）"
+    QStringList foreign;                // drafts of a format this build does not know (another Genko's): left as they are
     int left = 0;                       // files past kMaxFiles, not read
 };
 // The drafts of a book. A broken file (not a regular file, larger than kMaxFile, not UTF-8 JSON, another format, words
@@ -102,7 +106,8 @@ public:
     void forget(const QString& book, const QString& item);
     // How many requests of a book have words not sent yet.
     int count(const QString& book);
-    // Write every draft waiting to be written, now.
+    // Write every draft waiting to be written, now, and wait until the files are written (a window closed, the app
+    // quitting, tests). The pause after typing only starts the writes.
     void flush();
     // Whether a book's drafts are written in its folder (place()).
     bool kept_on_disk(const QString& book);
@@ -124,14 +129,22 @@ private:
     };
     const Place* place_of(const QString& book) const;
     const Place* load(const QString& book);
+    void start_writes();
     void write(const Key& key);
     void remove_file(const Key& key);
+    // A file written (bytes) or removed (none) on the files' worker, in order; what went wrong comes back as a problem().
+    void queue(const QString& book, const std::filesystem::path& folder, const std::filesystem::path& file, std::optional<std::string> bytes);
+    static QString file_job(const std::filesystem::path& folder, const std::filesystem::path& file, const std::optional<std::string>& bytes);
+    void report();
 
     std::map<QString, Place> places_;
     std::map<Key, QString> drafts_;
     std::set<Key> dirty_;
     std::set<Key> too_long_;
     QTimer timer_;
+    QThreadPool files_;
+    QMutex said_lock_;
+    std::vector<std::pair<QString, QString>> said_;  // (book, what went wrong), from the worker
 };
 
 }  // namespace genko::app

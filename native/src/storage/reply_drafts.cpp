@@ -5,6 +5,7 @@
 
 #include "core/error.hpp"
 #include "core/json.hpp"
+#include "core/pyconv.hpp"
 #include "core/paths.hpp"
 #include "storage/fsutil.hpp"
 
@@ -26,9 +27,10 @@ bool open_status(const Json& item) {
     return status != nullptr && *status == Json("open");
 }
 
+// The id as the app keys its drafts: str() of it (a number too; None when there is none), as review_model does.
 bool same_id(const Json& item, std::string_view id) {
     const Json* value = get(item, "id");
-    return value != nullptr && value->is_string() && value->get_ref<const std::string&>() == id;
+    return core::py_str(value != nullptr ? *value : Json()) == id;
 }
 
 bool has_frame(const Json& frames, std::string_view id) {
@@ -99,6 +101,23 @@ bool waiting(const Json& payload, std::string_view item) {
         }
     }
     return false;
+}
+
+bool is_leftover_name(std::string_view name) {
+    return name.size() > 64 + 6 && is_draft_name(name.substr(0, 64 + 5)) && name.substr(64 + 5, 1) == "." && name.ends_with(".tmp");
+}
+
+std::vector<fs::path> leftovers(const fs::path& book) {
+    std::vector<fs::path> out;
+    const fs::path dir = folder(book);
+    std::error_code ec;
+    if (!fs::is_directory(fs::symlink_status(dir, ec))) return out;
+    for (auto it = fs::directory_iterator(dir, ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
+        std::error_code type;
+        if (is_leftover_name(core::path_to_utf8(it->path().filename())) && fs::is_regular_file(it->symlink_status(type))) out.push_back(it->path());
+    }
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 std::vector<fs::path> stale(const fs::path& book, const Json& payload) {

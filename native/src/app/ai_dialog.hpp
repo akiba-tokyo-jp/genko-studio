@@ -107,6 +107,8 @@ private:
     void fill_sessions();
     void target_changed();
     void probe_done(const ai_link::Probe& result);
+    // The newest copy of the settings file is not what the file holds now (an undo would change something).
+    bool newest_backup_differs(const std::filesystem::path& file) const;
     std::optional<ai_link::Probe> probe_now() const;
 
     std::optional<std::filesystem::path> book_;

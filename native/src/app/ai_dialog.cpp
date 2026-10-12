@@ -3,6 +3,7 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QDateTime>
+#include <QFile>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
@@ -380,7 +381,7 @@ void AiDialog::fill() {
         config_state->setText(!there ? QStringLiteral("設定ファイルはまだありません。「設定ファイルに書き込む…」で作るか、上の文を手で貼ります。")
                               : has  ? QStringLiteral("設定ファイルに Genko の設定があります。")
                                      : QStringLiteral("設定ファイルに Genko の設定はまだありません。"));
-        undo_button->setEnabled(last_applied(*file).has_value() || !client_config::backups(*file).empty());
+        undo_button->setEnabled(last_applied(*file).has_value() || newest_backup_differs(*file));
     } else {
         config_state->setText(copied_ ? QStringLiteral("設定をコピーしました（この AI の設定は Genko からは確かめられません）。")
                                       : QStringLiteral("この AI の設定は、上の文をコピーして使います（Genko からは書き換えません）。"));
@@ -539,7 +540,7 @@ void AiDialog::undo_config() {
         if (!ask::question(this, QStringLiteral("元に戻す"), question)) return;
     } else {
         const auto copies = client_config::backups(*file);
-        if (copies.empty()) return;
+        if (copies.empty() || !newest_backup_differs(*file)) return;  // (put back already: a second press does nothing)
         applied.client = client_key();
         applied.file = *file;
         applied.backup = copies.front();
@@ -561,7 +562,29 @@ void AiDialog::undo_config() {
     fill();
 }
 
+bool AiDialog::newest_backup_differs(const std::filesystem::path& file) const {
+    const auto copies = client_config::backups(file);
+    if (copies.empty()) return false;
+    QFile now(qpath(file));
+    QFile copy(qpath(copies.front()));
+    if (!copy.open(QIODevice::ReadOnly)) return true;
+    if (!now.open(QIODevice::ReadOnly)) return true;  // (no file now: the copy can be put back)
+    return now.readAll() != copy.readAll();
+}
+
 void AiDialog::test_connection() {
+    // (the folder the server is given must be there: the test starts nothing, and makes no folder, when it is not)
+    const QString folder = root_typed();
+    if (!QFileInfo(folder).isDir()) {
+        ai_link::Probe probe;
+        probe.ok = false;
+        probe.at = QDateTime::currentDateTime();
+        probe.words = QStringLiteral("原稿のフォルダー（%1）がありません。フォルダーを確かめてから、もう一度テスト接続します（何も起動していません）").arg(folder);
+        probe.command = ai_link::snippet(client_key(), folder).server;
+        ai_link::set_last_probe(probe);
+        probe_done(probe);
+        return;
+    }
     test_button->setEnabled(false);
     test_button->setText(QStringLiteral("確かめています…"));
     probe_->start(ai_link::snippet(client_key(), root_typed()).server, probe_timeout_ms);

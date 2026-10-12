@@ -27,6 +27,10 @@ namespace fs = std::filesystem;
 // ~/Library/Application Support/Claude (macOS), $XDG_CONFIG_HOME/Claude or ~/.config/Claude (elsewhere); Hermes Agent's
 // ~/.hermes/config.yaml. None for a client whose settings are not a file Genko writes.
 std::optional<fs::path> default_file(const QString& client);
+// Claude Desktop installed from the Microsoft Store (MSIX) keeps its file under
+// <LOCALAPPDATA>\Packages\Claude_*\LocalCache\Roaming\Claude: that file when such a folder is there (looked at
+// before %APPDATA% on Windows; any system for the tests).
+std::optional<fs::path> msix_claude_file(const QString& local_appdata);
 
 struct Proposal {
     QString client;
@@ -56,7 +60,8 @@ Applied apply(const Proposal& proposal);
 // The file still holds what apply() wrote.
 bool untouched(const Applied& applied);
 // The file put back as it was before apply() (removed, when apply() made it). When it changed since, its present
-// bytes are copied aside first (returned; empty when not needed). core::Error("io") when it cannot.
+// bytes are copied aside first (<file>.genko-before-undo-<time>, never one of backups(): returned; empty when not
+// needed). core::Error("io") when it cannot.
 fs::path undo(const Applied& applied);
 // The copies made of a file, newest first.
 std::vector<fs::path> backups(const fs::path& file);

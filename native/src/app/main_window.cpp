@@ -713,6 +713,12 @@ void MainWindow::watch() {
     }
 }
 
+QString MainWindow::links_kept() const {
+    // (links that came while a book was being read are kept for the next book opened, and said)
+    if (pending_links_.isEmpty()) return {};
+    return QStringLiteral("\n\n届いていたリンク（%1）は、次に原稿を開いたときに使います。").arg(pending_links_.join(QStringLiteral("、")));
+}
+
 void MainWindow::on_disk_change() {
     watch();  // (project.json is replaced atomically, so the watch has to be set again)
     session_->check_outside();
@@ -825,7 +831,7 @@ void MainWindow::open_project(const fs::path& path) {
         watcher->deleteLater();
         flash_timer_.stop();
         if (!read.first) {
-            ask::warning(this, QStringLiteral("Genko"), QStringLiteral("原稿を開けませんでした:\n%1").arg(wording::error(read.second)));
+            ask::warning(this, QStringLiteral("Genko"), QStringLiteral("原稿を開けませんでした:\n%1").arg(wording::error(read.second)) + links_kept());
             refresh_status();
             return;
         }
@@ -850,7 +856,7 @@ void MainWindow::open_project(const fs::path& path) {
             add_document(std::move(opened));
         } catch (const std::exception& error) {
             ask::warning(this, QStringLiteral("Genko"),
-                         QStringLiteral("原稿・復旧用コピーを開けませんでした:\n%1").arg(wording::error(QString::fromUtf8(error.what()))));
+                         QStringLiteral("原稿・復旧用コピーを開けませんでした:\n%1").arg(wording::error(QString::fromUtf8(error.what()))) + links_kept());
             refresh_status();
         }
     });

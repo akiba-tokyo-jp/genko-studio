@@ -1853,7 +1853,7 @@ private slots:
         const QString said = notices.front().front().toString();
         QVERIFY2(said.startsWith(QStringLiteral("cannot undo past this change: its history state ")), qPrintable(said));
         QCOMPARE(genko::wording::error(said),
-                 QStringLiteral("これより前に戻すための記録（履歴の状態）が原稿から消えているため、ここより前には戻せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません"));
+                 QStringLiteral("これより前に戻すための記録（履歴の状態）が原稿から消えているため、ここより前には戻せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません（書いたのは、要るときの履歴の記録の修復だけです）"));
         QVERIFY(notices.front().at(1).toBool());
         QCOMPARE(changes.count(), 0);
         QCOMPARE(session->status().kind, SaveKind::Saved);

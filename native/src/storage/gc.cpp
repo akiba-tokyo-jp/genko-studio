@@ -206,9 +206,17 @@ Json gc(const fs::path& dir, bool dry_run, const std::string& agent, bool legacy
             if (ec) throw core::Error("io", os_error_text(ec.value(), file), path_to_utf8(file));
         }
     }
-    // the app's reply drafts of requests closed or gone (studio/reply_drafts/: schema-v4 「返事の下書き」)
+    // the app's reply drafts of requests closed or gone, and the temporary files of writes that stopped half way
+    // (studio/reply_drafts/: schema-v4 「返事の下書き」) — each after the same 24 hours: a draft is written a moment
+    // after the typing stops, maybe for a panel the book does not hold yet
     if (disk.exists) {
-        for (const fs::path& file : reply_drafts::stale(dir, disk.payload)) {
+        std::vector<fs::path> drafts = reply_drafts::stale(dir, disk.payload);
+        const std::vector<fs::path> temps = reply_drafts::leftovers(dir);
+        drafts.insert(drafts.end(), temps.begin(), temps.end());
+        for (const fs::path& file : drafts) {
+            std::error_code age;
+            const auto written = fs::last_write_time(file, age);
+            if (age || now - written < young) continue;
             removed.push_back(path_to_utf8(file.lexically_relative(dir)));
             if (dry_run) continue;
             std::error_code gone;

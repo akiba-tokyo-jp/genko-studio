@@ -32,12 +32,17 @@ std::string file_name(std::string_view item);
 // JSON of this format with an item and a text (at most kMaxText bytes), named after its item. Nothing otherwise.
 std::optional<std::string> item_of(const std::filesystem::path& file);
 
-// Whether an item still waits in the book (`payload`: its project.json): an open ticket or an open proposal of that id,
-// or "panel:<id>" of a frame the book has.
+// Whether an item still waits in the book (`payload`: its project.json): an open ticket or an open proposal of that id
+// (str() of the id, as the app keys it), or "panel:<id>" of a frame the book has.
 bool waiting(const core::Json& payload, std::string_view item);
 
 // The draft files of a book whose item no longer waits (closed or gone), by name. Files that are not whole drafts are
 // left (the app throws them away when it reads them, and says so).
 std::vector<std::filesystem::path> stale(const std::filesystem::path& book, const core::Json& payload);
+
+// A write's temporary file left beside a draft (storage::write_atomic: "<draft's name>.<pid>.<hex>.tmp").
+bool is_leftover_name(std::string_view name);
+// Those of a book, by name (regular files only).
+std::vector<std::filesystem::path> leftovers(const std::filesystem::path& book);
 
 }  // namespace genko::storage::reply_drafts

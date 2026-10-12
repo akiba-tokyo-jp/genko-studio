@@ -8,6 +8,7 @@
 
 #include <array>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -34,6 +35,7 @@ class QTextEdit;
 namespace genko::app {
 
 class MainWindow;
+class Session;
 class ReplyEdit;
 
 // A picture from the book's assets (asset_image): none without a book on disk, a ref or a picture there.
@@ -135,6 +137,11 @@ private:
     QImage page_image(const review_model::InboxItem& item, const core::Page& page, int dpi) const;
     void show_preview();
     void run_export();
+    // After a question: the request answered, if the same book is in front, the box still has it chosen and the book
+    // still has it waiting (as it is now); otherwise said, and nothing is sent.
+    std::optional<review_model::InboxItem> still_waiting(const std::shared_ptr<Session>& asked, const std::string& ticket);
+    // The draft of the request answered goes (the box's own, or the one kept for it).
+    void forget_draft(const QString& book, const std::string& ticket);
 
     MainWindow* window_;
     std::vector<review_model::InboxItem> items_;

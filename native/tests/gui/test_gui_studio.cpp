@@ -41,6 +41,7 @@
 #include "app/main_window.hpp"
 #include "app/reply_box.hpp"
 #include "app/review_model.hpp"
+#include "app/save_status.hpp"
 #include "app/studio_widgets.hpp"
 #include "app/style_picker.hpp"
 #include "app/viewer.hpp"
@@ -215,6 +216,35 @@ struct Desk {
 QString current_title(const Desk& desk) {
     const auto item = desk.box()->current();
     return item ? QString::fromStdString(item->title()) : QString();
+}
+
+bool review_model_has(const Desk& desk, const std::string& ticket) {
+    for (const auto& item : app::review_model::inbox(desk.window->book())) {
+        if (item.ticket_id == ticket) return true;
+    }
+    return false;
+}
+
+// A style catalog of the test's own (file://) with ギャグ漫画 › ゆるい落書き風 (gag-doodle, version 3), set for the
+// window while it lives.
+struct StyleCatalog {
+    QTemporaryDir site;
+    StyleCatalog() {
+        const QString catalog = site.path() + QStringLiteral("/catalog");
+        QDir().mkpath(catalog + QStringLiteral("/v1/styles"));
+        genko::test::write_bytes(catalog + QStringLiteral("/v1/tree"),
+                                 R"({"nodes": [{"id": "gag", "parent": null, "level": 1, "title": "ギャグ漫画"}, {"id": "gag-doodle", "parent": "gag", "level": 2, "title": "ゆるい落書き風"}]})");
+        genko::test::write_bytes(catalog + QStringLiteral("/v1/styles/gag-doodle"),
+                                 R"({"id": "gag-doodle", "title": "ゆるい落書き風", "level": 2, "expression": "mono", "path": [{"id": "gag", "title": "ギャグ漫画"}],)"
+                                 R"( "prompt": {"ja": "震える細い線", "en": "shaky lines"}, "avoid": [], "samples": [], "version": 3})");
+        qputenv("GENKO_STYLE_CATALOG", (QStringLiteral("file://") + catalog).toUtf8());
+    }
+    ~StyleCatalog() { qunsetenv("GENKO_STYLE_CATALOG"); }
+};
+
+bool has_catalog_style(const fs::path& book) {
+    const Json& studio = gui_test::read_book(book).studio;
+    return studio.is_object() && studio.contains("style") && studio["style"].is_object() && studio["style"].contains("catalog");
 }
 
 const Json* ticket_with(const core::Document& doc, const std::string& kind, const std::function<bool(const Json&)>& also = {}) {
@@ -550,20 +580,30 @@ private slots:
         const fs::path copy = book.root / "copy.genko";
         genko::test::copy_tree(QString::fromStdString(core::path_to_utf8(book.path)), QString::fromStdString(core::path_to_utf8(copy)));
         const fs::path drafts = copy / "studio" / "reply_drafts";
-        const std::vector<fs::path> broken{draft_file(copy, "not json"), draft_file(copy, "big"), draft_file(copy, "t-other"),
-                                           draft_file(copy, "t-a"), draft_file(copy, "t-long"), draft_file(copy, "t-list")};
+        const std::vector<fs::path> broken{draft_file(copy, "not json"), draft_file(copy, "big"), draft_file(copy, "t-a"),
+                                           draft_file(copy, "t-long"), draft_file(copy, "t-list"), draft_file(copy, "t-format")};
         put_file(broken[0], "{\"format\": \"genko-reply-draft@1\", \"item\": ");
         put_file(broken[1], draft_json("big", std::string(300 * 1024, 'a')));
-        put_file(broken[2], draft_json("t-other", "x", "genko-reply-draft@9"));
-        put_file(broken[3], draft_json("t-b", "x"));
-        put_file(broken[4], draft_json("t-long", std::string(65 * 1024, 'a')));
-        put_file(broken[5], "[\"t-list\"]\n");
+        put_file(broken[2], draft_json("t-b", "x"));
+        put_file(broken[3], draft_json("t-long", std::string(65 * 1024, 'a')));
+        put_file(broken[4], "[\"t-list\"]\n");
+        put_file(broken[5], draft_json("t-format", "x", "someone-else@1"));
+        // (a newer Genko's drafts: neither read nor thrown away)
+        const fs::path newer = draft_file(copy, "t-other");
+        put_file(newer, draft_json("t-other", "x", "genko-reply-draft@9"));
         put_file(drafts / "notes.txt", "keep");
         const fs::path temporary = drafts / (draft_file(copy, "t-x").filename().string() + ".123.abc.tmp");
         put_file(temporary, "half");
+        QStringList notices;  // (what the drafts said, from before the window is made)
+        const QMetaObject::Connection listening =
+            QObject::connect(&app::Drafts::instance(), &app::Drafts::problem, [&notices](const QString&, const QString& message) { notices << message; });
+        struct Unlisten {
+            QMetaObject::Connection link;
+            ~Unlisten() { QObject::disconnect(link); }
+        } unlisten{listening};
         Desk again(copy, book.root / "recovery");
         QVERIFY(again.choose(QStringLiteral("ネームの承認: 1, 2 ページ")));  // (the book's drafts read when first wanted)
-        const QString notice = again.window->last_error();
+        const QString notice = notices.value(0);
         QVERIFY2(notice.startsWith(QStringLiteral("返事の下書きのファイルが壊れていたため、読まずに捨てました: ")), qPrintable(notice));
         for (const fs::path& gone : broken) {
             QVERIFY2(!fs::exists(gone), gone.filename().string().c_str());
@@ -575,6 +615,10 @@ private slots:
         QVERIFY(notice.contains(QStringLiteral("UTF-8 の JSON として読めません")));
         QVERIFY(fs::exists(drafts / "notes.txt"));
         QVERIFY(fs::exists(temporary));
+        QVERIFY(fs::exists(newer));
+        QVERIFY2(notices.join(QLatin1Char('\n')).contains(QStringLiteral("この版の Genko が知らない形式の返事の下書きがあります。読まずに、そのまま残しました: ") +
+                                                          QString::fromStdString(newer.filename().string())),
+                 qPrintable(notices.join(QLatin1Char('\n'))));
         QCOMPARE(again.box()->reason->toPlainText(), words);
         QVERIFY(again.choose(QStringLiteral("相談（1 ページ）")));
         QCOMPARE(again.box()->reason->toPlainText(), QStringLiteral("紺で"));
@@ -582,6 +626,7 @@ private slots:
         again.yes = {true};
         again.box()->back_button->click();
         QVERIFY(again.saved());
+        app::Drafts::instance().flush();  // (the files are written and removed on a worker of their own)
         QVERIFY(!fs::exists(draft_file(copy, question_ticket)));
         // emptied: the file goes
         QVERIFY(again.choose(QStringLiteral("ネームの承認: 1, 2 ページ")));
@@ -655,8 +700,170 @@ private slots:
         drafts.flush();
         QVERIFY(fs::exists(draft_file(book.path, "t-1")));
         drafts.forget(locked, QStringLiteral("t-1"));
+        drafts.flush();
         QVERIFY(!fs::exists(draft_file(book.path, "t-1")));
         drafts.forget(old_key, QStringLiteral("t-1"));
+        // studio/reply_drafts a link out of the book: nothing written through it, nothing removed there, and said
+        StudioBook linked(false);
+        QTemporaryDir elsewhere;
+        fs::create_directories(linked.path / "studio");
+        fs::create_directory_symlink(gui_test::path_of(elsewhere.path()), linked.path / "studio" / "reply_drafts");
+        put_file(gui_test::path_of(elsewhere.path()) / draft_file(linked.path, "t-9").filename(), draft_json("t-9", "外のもの"));
+        const QString linked_key = QString::fromStdString(core::path_to_utf8(linked.path));
+        QSignalSpy said(&drafts, &app::Drafts::problem);
+        drafts.place(linked_key, linked.path, true);
+        QVERIFY(drafts.kept_on_disk(linked_key));
+        QVERIFY(drafts.get(linked_key, QStringLiteral("t-9")).isEmpty());  // (not read through the link)
+        drafts.set(linked_key, QStringLiteral("t-1"), QStringLiteral("言葉"));
+        drafts.forget(linked_key, QStringLiteral("t-9"));
+        drafts.flush();
+        QCOMPARE(QDir(elsewhere.path()).entryList(QDir::Files).size(), 1);  // (only what was there)
+        QVERIFY(said.count() >= 1);
+        QVERIFY(said.at(0).at(1).toString().startsWith(QStringLiteral("返事の下書きの置き場所（studio/reply_drafts）が、原稿の中のフォルダーではありません")));
+        drafts.forget(linked_key, QStringLiteral("t-1"));
+        drafts.flush();
+    }
+
+    // An instruction asked about while another writer changes the book (the window reads it again during the question):
+    // the panel is found by its page's id and its own id after the answer — the pages moved, it goes to the panel where it
+    // is now; its page gone, nothing is sent and the words stay.
+    void instructionWhileTheBookChanges() {
+        StudioBook book(false);
+        Desk desk(book.path, book.root / "recovery");
+        QDockWidget* dock = desk.dock(QStringLiteral("コマの詳細"));
+        dock->raise();
+        QVERIFY(gui_test::wait_for([&] { return dock->isVisible(); }, 60000));
+        app::PanelView* view = desk.window->panel_view();
+        emit desk.window->canvas()->frameSelected(qs(book.leaves[0]));
+        QVERIFY(gui_test::wait_for([&] { return view->candidates->count() == 2; }, 60000));
+        QVERIFY(desk.saved());  // (the choice of the panel is a change of its own: saved before the book changes outside)
+        const std::string page_id = gui_test::read_book(book.path).page(0).id;
+        // (the question: before it is answered, the book changes outside and the window reads it again)
+        const auto changed_meanwhile = [&](const Json& ops) {
+            desk.answers.responder->question = [&, ops](const QString& title, const QString& text) {
+                desk.questions << title + QStringLiteral(": ") + text;
+                const auto changed = book.ai(ops, "human:outsider");
+                if (!changed.ok) qFatal("the outside change was refused: %s", changed.to_dict().dump().c_str());
+                desk.session->check_outside();
+                const auto before = desk.window->book().revision;
+                if (!gui_test::wait_for([&] { return desk.window->book().revision != before; }, 60000)) qFatal("not read again");
+                return true;
+            };
+        };
+        changed_meanwhile(Json::array({Json{{"op", "reorder"}, {"order", {2, 1, 3}}}}));
+        type_in(view->instruction, QStringLiteral("左を向く"));
+        view->send_button->click();
+        QVERIFY2(desk.saved(), qPrintable(app::failure_reason(desk.session->status()) + QStringLiteral(" / ") + desk.window->last_error()));
+        {
+            const core::Document saved = gui_test::read_book(book.path);
+            QCOMPARE(saved.page(1).id, page_id);  // (the panel's page is the second now)
+            const core::Frame* frame = saved.page(1).find_frame(book.leaves[0]);
+            QVERIFY(frame != nullptr && frame->panel && frame->panel->is_object());
+            const Json instruction = frame->panel->value("instruction", Json::object());
+            QCOMPARE(instruction.is_object() ? instruction.value("text", Json()) : Json(), Json("左を向く"));
+            QVERIFY(ticket_with(saved, "fix", [&](const Json& t) { return t.value("frame_id", Json()) == Json(book.leaves[0]); }) != nullptr);
+        }
+        QVERIFY(gui_test::wait_for([&] { return view->instruction->toPlainText().isEmpty(); }, 60000));
+        // its page gone while asked: nothing sent, the words kept
+        desk.window->select_page(1);  // (the panel shown again where it is now)
+        emit desk.window->canvas()->frameSelected(qs(book.leaves[0]));
+        QVERIFY(gui_test::wait_for([&] { return view->frame_id == book.leaves[0] && view->candidates->count() == 2; }, 60000));
+        QVERIFY(desk.saved());
+        const int fixes = static_cast<int>(gui_test::read_book(book.path).tickets.size());
+        changed_meanwhile(Json::array({Json{{"op", "delete_page"}, {"page", 2}}}));
+        type_in(view->instruction, QStringLiteral("右を向く"));
+        view->send_button->click();
+        QVERIFY(desk.saved());
+        QVERIFY2(desk.window->last_error().startsWith(QStringLiteral("確認の間に原稿が変わり、そのコマが見つからなくなったため、指示を送っていません")),
+                 qPrintable(desk.window->last_error()));
+        QCOMPARE(static_cast<int>(gui_test::read_book(book.path).tickets.size()), fixes);
+        QCOMPARE(app::Drafts::instance().get(app::draft_book_key(*desk.window), QStringLiteral("panel:") + qs(book.leaves[0])), QStringLiteral("右を向く"));
+    }
+
+    // The approval box asked about one request while it comes to choose another, or the request is closed elsewhere: the
+    // answer is not sent to the other request nor to the closed one; the words stay with the request they were written
+    // for.
+    void answerWhileTheBoxChanges() {
+        StudioBook book;
+        Desk desk(book.path, book.root / "recovery");
+        const QString words = QStringLiteral("直してください");
+        QVERIFY(desk.choose(QStringLiteral("相談（1 ページ）")));
+        const std::string help_ticket = desk.box()->current()->ticket_id;
+        type_in(desk.box()->reason, QStringLiteral("紺で"));  // (the question's own reply, not sent)
+        QVERIFY(desk.choose(QStringLiteral("ネームの承認: 1, 2 ページ")));
+        const std::string name_ticket = desk.box()->current()->ticket_id;
+        type_in(desk.box()->reason, words);
+        // (while 差し戻す is asked, the box comes to choose the question)
+        desk.answers.responder->question = [&](const QString& title, const QString& text) {
+            desk.questions << title + QStringLiteral(": ") + text;
+            desk.choose(QStringLiteral("相談（1 ページ）"));
+            return true;
+        };
+        desk.box()->back_button->click();
+        QVERIFY(desk.saved());
+        QVERIFY2(desk.window->last_error().startsWith(QStringLiteral("確認の間に、承認箱の依頼か原稿が変わったため、送っていません")), qPrintable(desk.window->last_error()));
+        {
+            const core::Document saved = gui_test::read_book(book.path);
+            QCOMPARE(ticket_with(saved, "gate", [](const Json& t) { return t.value("gate", Json()) == Json("name"); })->value("status", Json()), Json("open"));
+            QVERIFY(ticket_with(saved, "fix", [&](const Json& t) { return t.value("text", Json()) == Json(words.toStdString()); }) == nullptr);
+            QCOMPARE(ticket_with(saved, "help")->value("status", Json()), Json("open"));
+        }
+        const QString key = desk.box()->book_key();
+        QCOMPARE(app::Drafts::instance().get(key, qs(name_ticket)), words);
+        QCOMPARE(app::Drafts::instance().get(key, qs(help_ticket)), QStringLiteral("紺で"));  // (the other request's words: not taken)
+        QCOMPARE(desk.box()->reason->toPlainText(), QStringLiteral("紺で"));
+        // a question closed elsewhere while 返事なしで閉じる is asked: nothing applied to it, the reply kept
+        QVERIFY(desk.choose(QStringLiteral("相談（1 ページ）")));
+        desk.answers.responder->question = [&](const QString& title, const QString& text) {
+            desk.questions << title + QStringLiteral(": ") + text;
+            const Json closed = service::HumanService(book.path, "human:outsider").close_ticket(Json(help_ticket));
+            if (!closed.value("ok", false)) qFatal("not closed: %s", closed.dump().c_str());
+            desk.session->check_outside();
+            if (!gui_test::wait_for([&] { return !review_model_has(desk, help_ticket); }, 60000)) qFatal("not read again");
+            return true;
+        };
+        const int revision_before = static_cast<int>(gui_test::read_book(book.path).revision);
+        desk.box()->approve_button->click();
+        QVERIFY(desk.saved());
+        QVERIFY2(desk.window->last_error().startsWith(QStringLiteral("確認の間に、承認箱の依頼か原稿が変わったため、送っていません")), qPrintable(desk.window->last_error()));
+        QCOMPARE(static_cast<int>(gui_test::read_book(book.path).revision), revision_before + 1);  // (the outside change only)
+        QCOMPARE(app::Drafts::instance().get(key, qs(help_ticket)), QStringLiteral("紺で"));
+    }
+
+    // The official export waits for the book to be saved: a save that fails (the book cannot be written) stops it before
+    // the export dialog, and says so.
+    void exportWaitsForTheSave() {
+        StudioBook book;
+        Desk desk(book.path, book.root / "recovery");
+        int dialogs = 0;
+        desk.on_dialog = [&](QDialog*) {
+            ++dialogs;
+            return int(QDialog::Rejected);
+        };
+        const auto& items = desk.box()->items();
+        int row = -1;
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            if (items[i].gate_text() == "export") row = static_cast<int>(i);
+        }
+        QVERIFY(row >= 0);
+        desk.box()->list->setCurrentRow(row);
+        // (the book cannot be written: a folder where its journal was, so every save stops before it writes)
+        const fs::path journal = book.path / "studio" / "journal.jsonl";
+        const fs::path kept = book.path / "studio" / "journal.kept";
+        fs::rename(journal, kept);
+        fs::create_directory(journal);
+        struct Restore {
+            fs::path journal, kept;
+            ~Restore() {
+                std::error_code ec;
+                fs::remove(journal, ec);
+                fs::rename(kept, journal, ec);
+            }
+        } restore{journal, kept};
+        desk.session->apply(Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "書き出す前"}}}));
+        desk.box()->approve();
+        QCOMPARE(dialogs, 0);
+        QVERIFY2(desk.window->last_error().startsWith(QStringLiteral("原稿を保存できていないため、正式な書き出しをしていません")), qPrintable(desk.window->last_error()));
     }
 
     // 返事なしで閉じる with a reply written and not sent: asked first; the draft goes only when it is closed.
@@ -870,6 +1077,20 @@ private slots:
         desk.window->action(QStringLiteral("act_chat_approval"))->trigger();
         QVERIFY(desk.questions.last().contains(QStringLiteral("この原稿では、チャットでの承認を止めています。")));
         QVERIFY(service::chat_approval_open(desk.window->book()));
+        QVERIFY(desk.saved());  // (written before the book changes outside)
+        // switched elsewhere while asked (another window of the person's): read again after the answer, nothing changed
+        desk.answers.responder->question = [&](const QString& title, const QString& text) {
+            desk.questions << title + QStringLiteral(": ") + text;
+            service::HumanService(book.path, "human:tester").chat_approval(Json(false));
+            desk.session->check_outside();
+            if (!gui_test::wait_for([&] { return !service::chat_approval_open(desk.window->book()); }, 60000)) qFatal("not read again");
+            return true;
+        };
+        desk.window->action(QStringLiteral("act_chat_approval"))->trigger();
+        QVERIFY2(desk.window->last_error().startsWith(QStringLiteral("確認の間に原稿か、チャットでの承認の設定が変わったため、何も変えていません")),
+                 qPrintable(desk.window->last_error()));
+        QVERIFY(desk.saved());
+        QVERIFY(!service::chat_approval_open(gui_test::read_book(book.path)));
     }
 
     // The AI's requests arriving while the person works: a note, the box in front with the newest chosen.
@@ -1060,6 +1281,13 @@ private slots:
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert(QStringLiteral("GENKO_CONFIG_DIR"), config.path());
         env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+        // (a home of the test's own: the later start reads and writes nothing of the person's)
+        for (const char* name : {"HOME", "USERPROFILE"}) env.insert(QString::fromLatin1(name), config.path() + QStringLiteral("/home"));
+        env.insert(QStringLiteral("XDG_CONFIG_HOME"), config.path() + QStringLiteral("/home/.config"));
+        env.insert(QStringLiteral("XDG_DATA_HOME"), config.path() + QStringLiteral("/home/.local/share"));
+        env.insert(QStringLiteral("XDG_CACHE_HOME"), config.path() + QStringLiteral("/home/.cache"));
+        env.insert(QStringLiteral("APPDATA"), config.path() + QStringLiteral("/home/AppData/Roaming"));
+        env.insert(QStringLiteral("LOCALAPPDATA"), config.path() + QStringLiteral("/home/AppData/Local"));
         QProcess later;
         later.setProcessEnvironment(env);
         later.start(genko::test::genko_cli(), {QStringLiteral("app"), QStringLiteral("genko://use-style?id=gag-doodle")});
@@ -1072,22 +1300,75 @@ private slots:
         desk.window->open_link(QStringLiteral("genko://other"));
         QCOMPARE(desk.window->last_error(), QStringLiteral("Genko の知らないリンクです: genko://other"));
         // the style: asked, then kept in the book with its words
-        QTemporaryDir site;
-        const QString catalog = site.path() + QStringLiteral("/catalog");
-        QDir().mkpath(catalog + QStringLiteral("/v1/styles"));
-        genko::test::write_bytes(catalog + QStringLiteral("/v1/tree"),
-                                 R"({"nodes": [{"id": "gag", "parent": null, "level": 1, "title": "ギャグ漫画"}, {"id": "gag-doodle", "parent": "gag", "level": 2, "title": "ゆるい落書き風"}]})");
-        genko::test::write_bytes(catalog + QStringLiteral("/v1/styles/gag-doodle"),
-                                 R"({"id": "gag-doodle", "title": "ゆるい落書き風", "level": 2, "expression": "mono", "path": [{"id": "gag", "title": "ギャグ漫画"}],)"
-                                 R"( "prompt": {"ja": "震える細い線", "en": "shaky lines"}, "avoid": [], "samples": [], "version": 3})");
-        qputenv("GENKO_STYLE_CATALOG", (QStringLiteral("file://") + catalog).toUtf8());
-        desk.yes = {true};
-        desk.window->open_link(received.at(0).at(0).toString());
-        qunsetenv("GENKO_STYLE_CATALOG");
+        {
+            const StyleCatalog catalog;
+            desk.yes = {true};
+            desk.window->open_link(received.at(0).at(0).toString());
+        }
         QCOMPARE(desk.questions.size(), 1);
         QCOMPARE(desk.questions.value(0), QStringLiteral("絵柄を選ぶ: 「スタジオ」の絵柄を「ギャグ漫画 › ゆるい落書き風」にしますか？"));
         QCOMPARE(desk.window->book().studio["style"]["catalog"]["id"], Json("gag-doodle"));
         QVERIFY(desk.window->last_notice().startsWith(QStringLiteral("絵柄を「ギャグ漫画 › ゆるい落書き風」にしました（版 3）")));
+    }
+
+    // The style asked about for the book in front while another book comes forward (a book opened meanwhile): after the
+    // answer nothing is changed — neither in the book asked about nor in the one in front now.
+    void styleWhileAnotherBookComesForward() {
+        StudioBook book(false);
+        StudioBook other(false);
+        Desk desk(book.path, book.root / "recovery");
+        const StyleCatalog catalog;
+        desk.answers.responder->question = [&](const QString& title, const QString& text) {
+            desk.questions << title + QStringLiteral(": ") + text;
+            desk.window->add_document(app::Session::open(other.path, gui_test::quick(other.root / "recovery")));
+            return true;
+        };
+        desk.window->open_link(QStringLiteral("genko://use-style?id=gag-doodle"));
+        QCOMPARE(desk.questions.size(), 1);
+        QVERIFY(desk.window->asking().session != desk.session);  // (the other book in front now)
+        QCOMPARE(desk.window->last_error(), QStringLiteral("確認の間に前に出ている原稿が替わったため、絵柄を変えていません。"));
+        QVERIFY(desk.saved());
+        QVERIFY(desk.window->asking().session->wait_saved(std::chrono::seconds(30)));
+        QVERIFY(!has_catalog_style(book.path));
+        QVERIFY(!has_catalog_style(other.path));
+    }
+
+    // A link that comes while no book on disk is in front waits for one. When the book asked for cannot be opened, the
+    // link is kept, and said so; the book opened next takes it.
+    void linksKeptWhenTheBookCannotBeOpened() {
+        StudioBook book(false);
+        QTemporaryDir tmp;
+        gui_test::Answers answers;  // (before the window: the window's questions are answered here to its end)
+        QStringList warnings;
+        QStringList questions;
+        answers.responder->warning = [&](const QString&, const QString& text) { warnings << text; };
+        answers.responder->question = [&](const QString& title, const QString& text) {
+            questions << title + QStringLiteral(": ") + text;
+            return false;
+        };
+        app::Session::Options options;
+        options.actor = "human:tester";
+        options.autosave = false;
+        options.recovery_root = gui_test::path_of(tmp.path() + QStringLiteral("/recovery"));
+        app::MainWindow window(std::make_shared<app::Session>(gui_test::new_doc(1), std::nullopt, options));
+        window.show();
+        window.open_link_when_ready(QStringLiteral("genko://use-style?id=gag-doodle"));
+        QVERIFY(questions.isEmpty());  // (waits for a book)
+        const fs::path broken = gui_test::path_of(tmp.path() + QStringLiteral("/broken.genko"));
+        fs::create_directories(broken);
+        genko::test::write_bytes(gui_test::qpath(broken / "project.json"), "{");
+        window.open_project(broken);
+        QVERIFY(gui_test::wait_for([&] { return !warnings.isEmpty(); }, 60000));
+        QVERIFY2(warnings.at(0).startsWith(QStringLiteral("原稿を開けませんでした")), qPrintable(warnings.at(0)));
+        QVERIFY2(warnings.at(0).endsWith(QStringLiteral("届いていたリンク（genko://use-style?id=gag-doodle）は、次に原稿を開いたときに使います。")),
+                 qPrintable(warnings.at(0)));
+        QVERIFY(questions.isEmpty());
+        // the next book opened takes it: the style is asked about for that book
+        const StyleCatalog catalog;
+        window.open_project(book.path);
+        QVERIFY(gui_test::wait_for([&] { return !questions.isEmpty(); }, 60000));
+        QCOMPARE(questions.at(0), QStringLiteral("絵柄を選ぶ: 「スタジオ」の絵柄を「ギャグ漫画 › ゆるい落書き風」にしますか？"));
+        QVERIFY(!has_catalog_style(book.path));  // (answered no)
     }
 
     // `genko register-links` in a home of its own: the desktop entry, then xdg-mime's default (a stand-in), or why not.

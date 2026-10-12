@@ -35,6 +35,8 @@
 
 namespace genko::app {
 
+namespace fs = std::filesystem;
+
 using core::Json;
 
 namespace {
@@ -258,7 +260,13 @@ void MainWindow::chat_approval() {
                                              "あなたが送った言葉が残ります）。\n\nこの原稿では止めますか？ 止めると、承認は承認箱でだけ行えます。")
                             : QStringLiteral("この原稿では、チャットでの承認を止めています。\n\nTelegram などのチャットで AI に「承認します」と返したとき、"
                                              "AI があなたの名前で記録できるように戻しますか？ 正式な書き出しはこれまでどおり Genko で行います。");
+    const Asked asked = asking();
     if (!ask::question(this, QStringLiteral("チャットでの承認"), text)) return;
+    // (read again after the question: the book in front, and the switch, may have changed meanwhile)
+    if (asking().session != asked.session || service::chat_approval_open(book()) != on) {
+        flash(QStringLiteral("確認の間に原稿か、チャットでの承認の設定が変わったため、何も変えていません。もう一度確かめてください。"), 8000, true);
+        return;
+    }
     apply_ops(Json::array({Json{{"op", "allow_chat_approval"}, {"on", !on}}}));
     flash(on ? QStringLiteral("この原稿ではチャットでの承認を止めました") : QStringLiteral("チャットでの承認を AI が記録できるようにしました"), 4000);
 }
@@ -272,31 +280,30 @@ void MainWindow::notice_requests(const std::set<std::string>& before) {
     const QString title = QString::fromStdString(fresh.back().title());
     const std::string newest = fresh.back().ticket_id;
     const QString more = fresh.size() > 1 ? QStringLiteral(" ほか %1 件").arg(fresh.size() - 1) : QString();
-    const std::shared_ptr<int> tries = std::make_shared<int>(0);
-    const std::shared_ptr<std::function<void()>> show = std::make_shared<std::function<void()>>();
-    *show = [this, title, newest, more, tries, show] {
-        // nothing moves under a pen that is still down: it waits for the pen to lift
-        if (QApplication::mouseButtons() != Qt::NoButton && *tries < 40) {
-            ++*tries;
-            QTimer::singleShot(250, this, *show);
-            return;
-        }
-        toast(this, QStringLiteral("承認の依頼が届きました: %1%2").arg(title, more), 6000);
-        QApplication::alert(this);
-        if (!raise_requests()) return;
-        show_dock(QStringLiteral("承認箱"));
-        if (!box_dock_->isFloating() && box_dock_->height() < 360) {  // (room enough to see the request)
-            resizeDocks({box_dock_, pages_dock_}, {static_cast<int>(height() * 0.62), 80}, Qt::Vertical);
-        }
-        approvals_->refresh();
-        // (C++, I13: a reply being written stays in front — the newest is chosen only when nothing is being written)
-        if (!approvals_->reason->toPlainText().trimmed().isEmpty()) return;
-        const auto& items = approvals_->items();
-        for (std::size_t i = 0; i < items.size(); ++i) {
-            if (items[i].ticket_id == newest) approvals_->list->setCurrentRow(static_cast<int>(i));
-        }
-    };
-    (*show)();
+    show_requests(title, newest, more, 0);
+}
+
+void MainWindow::show_requests(const QString& title, const std::string& newest, const QString& more, int tries) {
+    // nothing moves under a pen that is still down: it waits for the pen to lift (each try a new timer: nothing keeps
+    // itself alive)
+    if (QApplication::mouseButtons() != Qt::NoButton && tries < 40) {
+        QTimer::singleShot(250, this, [this, title, newest, more, tries] { show_requests(title, newest, more, tries + 1); });
+        return;
+    }
+    toast(this, QStringLiteral("承認の依頼が届きました: %1%2").arg(title, more), 6000);
+    QApplication::alert(this);
+    if (!raise_requests()) return;
+    show_dock(QStringLiteral("承認箱"));
+    if (!box_dock_->isFloating() && box_dock_->height() < 360) {  // (room enough to see the request)
+        resizeDocks({box_dock_, pages_dock_}, {static_cast<int>(height() * 0.62), 80}, Qt::Vertical);
+    }
+    approvals_->refresh();
+    // (C++, I13: a reply being written stays in front — the newest is chosen only when nothing is being written)
+    if (!approvals_->reason->toPlainText().trimmed().isEmpty()) return;
+    const auto& items = approvals_->items();
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (items[i].ticket_id == newest) approvals_->list->setCurrentRow(static_cast<int>(i));
+    }
 }
 
 void MainWindow::open_link(const QString& link) {
@@ -341,7 +348,8 @@ void MainWindow::pick_style() {
 
 bool MainWindow::use_style(const std::string& style_id, bool asked) {
     namespace stylecat = service::stylecat;
-    const auto& path = session_->path();
+    const Asked target = asking();  // (the book asked about: it must still be the one in front after the question)
+    const std::optional<fs::path> path = session_->path();
     if (!path) {
         flash(QStringLiteral("絵柄を選ぶ前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
         return false;
@@ -396,6 +404,10 @@ bool MainWindow::use_style(const std::string& style_id, bool asked) {
         const QString title = book().title.empty() ? QStringLiteral("無題") : QString::fromStdString(book().title);
         if (!ask::question(this, QStringLiteral("絵柄を選ぶ"), QStringLiteral("「%1」の絵柄を「%2」にしますか？%3").arg(title, where, warn))) {
             style_declined_ = true;
+            return false;
+        }
+        if (asking().session != target.session) {
+            flash(QStringLiteral("確認の間に前に出ている原稿が替わったため、絵柄を変えていません。"), 8000, true);
             return false;
         }
     }

@@ -127,6 +127,15 @@ private slots:
         for (const char* kind : {"gate:name", "gate:art", "gate:sheet", "gate:export", "help:", "proposal:layout", "proposal:lines"}) {
             QVERIFY2(kinds.count(kind) == 1, kind);
         }
+        // (ユキ's sheets drawn before the style changed: numbered as in the old style, after the one drawn since)
+        bool both = false;
+        for (const Json& w : want["inbox"]) {
+            const Json& sheets = w["sheets"];
+            if (sheets.size() < 2) continue;
+            const auto old = [](const Json& sheet) { return sheet[0].get<std::string>().find("（前の絵柄）") != std::string::npos; };
+            if (!old(sheets.front()) && old(sheets.back())) both = true;
+        }
+        QVERIFY2(both, "no sheets of the new style before those of the old one");
     }
 
     void aiLinkLikePython() {

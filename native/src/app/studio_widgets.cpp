@@ -20,6 +20,7 @@
 #include "app/icons.hpp"
 #include "app/main_window.hpp"
 #include "app/reply_box.hpp"
+#include "app/save_status.hpp"
 #include "app/theme.hpp"
 #include "app/viewer.hpp"
 #include "core/error.hpp"
@@ -577,6 +578,12 @@ void ApprovalBox::approve() {
         run_export();
         return;
     }
+    // (what is answered, taken before a question: the box may choose another request, or the book change, meanwhile)
+    const MainWindow::Asked asked = window_->asking();
+    const QString book = book_key();
+    const std::string ticket = item->ticket_id;
+    Json choice;
+    if (QListWidgetItem* entry = choices->currentItem(); entry != nullptr) choice = entry->data(Qt::UserRole).toString().toStdString();
     if (item->kind == "help" && !reason->toPlainText().trimmed().isEmpty()) {
         // (I13: words typed and not sent are not dropped without asking)
         if (!ask::question(this, QStringLiteral("返事なしで閉じる"),
@@ -584,11 +591,11 @@ void ApprovalBox::approve() {
             return;
         }
     }
-    Json choice;
-    if (QListWidgetItem* entry = choices->currentItem(); entry != nullptr) choice = entry->data(Qt::UserRole).toString().toStdString();
+    const auto still = still_waiting(asked.session, ticket);
+    if (!still) return;
     Json ops;
     try {
-        ops = review_model::approve_ops(window_->book(), *item, window_->session().path(), choice);
+        ops = review_model::approve_ops(window_->book(), *still, window_->session().path(), choice);
     } catch (const core::PyValueError& error) {
         ask::warning(this, QStringLiteral("Genko"), QString::fromUtf8(error.what()));
         return;
@@ -597,7 +604,7 @@ void ApprovalBox::approve() {
         return;
     }
     if (window_->apply_and_commit(ops)) {
-        if (item->kind == "help") reason->sent();
+        if (still->kind == "help") forget_draft(book, ticket);
         emit changed();
     }
 }
@@ -605,10 +612,12 @@ void ApprovalBox::approve() {
 void ApprovalBox::send_back() {
     const auto item = current();
     if (!item) return;
+    const MainWindow::Asked asked = window_->asking();
+    const QString book = book_key();
+    const std::string ticket = item->ticket_id;
     const QString text = reason->toPlainText();
-    Json ops;
     try {
-        ops = review_model::send_back_ops(window_->book(), *item, text.toStdString());
+        (void)review_model::send_back_ops(window_->book(), *item, text.toStdString());  // (refused at once, before asking)
     } catch (const core::PyValueError& error) {
         ask::warning(this, QStringLiteral("Genko"), QString::fromUtf8(error.what()));
         reason->setFocus();
@@ -618,20 +627,59 @@ void ApprovalBox::send_back() {
         return;
     }
     if (!confirm_send(this, back_button->text(), item->by.empty() ? QString() : wording::actor(item->by), text)) return;  // (the draft stays)
+    // (the ops of the book as it is now, for the request that was answered — if it is still the one chosen and waiting)
+    const auto still = still_waiting(asked.session, ticket);
+    if (!still) return;
+    Json ops;
+    try {
+        ops = review_model::send_back_ops(window_->book(), *still, text.toStdString());
+    } catch (const std::exception& error) {
+        window_->flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
+        return;
+    }
     if (window_->apply_and_commit(ops)) {
-        reason->sent();
+        forget_draft(book, ticket);
         emit changed();
     }
 }
 
+std::optional<review_model::InboxItem> ApprovalBox::still_waiting(const std::shared_ptr<Session>& asked, const std::string& ticket) {
+    const auto chosen = current();
+    std::optional<review_model::InboxItem> found;
+    if (window_->asking().session == asked && chosen && chosen->ticket_id == ticket) {
+        for (auto& waiting : review_model::inbox(window_->book())) {
+            if (waiting.ticket_id == ticket) found = std::move(waiting);
+        }
+    }
+    if (!found) {
+        window_->flash(QStringLiteral("確認の間に、承認箱の依頼か原稿が変わったため、送っていません（書いた言葉は残っています）。依頼を選び直して、もう一度行ってください。"),
+                       8000, true);
+    }
+    return found;
+}
+
+void ApprovalBox::forget_draft(const QString& book, const std::string& ticket) {
+    const QString item = qs(ticket);
+    if (reason->book() == book && reason->item() == item) {
+        reason->sent();
+    } else {
+        Drafts::instance().forget(book, item);
+    }
+}
+
 void ApprovalBox::run_export() {
-    Session& session = window_->session();
-    session.save_now();  // (Python's commit_now: what was done is written before the export reads the book)
-    session.wait_saved(std::chrono::seconds(30));
+    const std::shared_ptr<Session> session = window_->asking().session;
+    session->save_now();  // (Python's commit_now: what was done is written before the export reads the book)
+    // (SPEC: the official export reads the book as it is saved — not while a save failed or is still going)
+    if (!session->wait_saved(std::chrono::seconds(30)) || session->unsaved()) {
+        window_->flash(QStringLiteral("原稿を保存できていないため、正式な書き出しをしていません: %1").arg(failure_reason(session->status())), 8000, true);
+        return;
+    }
     const core::Page* page = window_->current_page();
-    ExportDialog dialog(this, session.snapshot(), session.path(), session.actor(), true, page != nullptr ? core::py_int(page->index) : 1);
+    const std::int64_t index = page != nullptr ? core::py_int(page->index) : 1;
+    ExportDialog dialog(this, session->snapshot(), session->path(), session->actor(), true, index);
     ask::exec(&dialog);
-    session.check_outside();  // (Python's session.reload(): the approval the export recorded)
+    session->check_outside();  // (Python's session.reload(): the approval the export recorded)
     emit changed();
 }
 
@@ -1011,19 +1059,40 @@ void PanelView::adopt() {
 }
 
 void PanelView::send_instruction() {
-    const core::Page* page = window_->current_page();
+    const core::Page* shown = window_->current_page();
     const QString text = QString::fromStdString(core::py_strip(instruction->toPlainText().toStdString()));
-    if (page == nullptr || !frame_id || text.isEmpty()) return;
+    if (shown == nullptr || !frame_id || text.isEmpty()) return;
+    // (taken by value before the question: while it is asked the book may be read again — an AI's change — and the
+    // page and the panel it held are gone then)
+    const MainWindow::Asked asked = window_->asking();
+    const std::string page_id = shown->id;
+    const std::string panel = *frame_id;
+    const QString book = draft_book_key(*window_);
+    const QString item = QStringLiteral("panel:") + qs(panel);
     if (!confirm_send(this, QStringLiteral("指示を送る"), QString(), text)) return;  // (I13: asked before it goes; the draft stays)
+    const core::Page* page = nullptr;
+    if (window_->asking().session == asked.session) {
+        for (const auto& candidate : window_->book().pages) {
+            if (candidate->id == page_id && candidate->find_frame(panel) != nullptr) page = candidate.get();
+        }
+    }
+    if (page == nullptr) {
+        window_->flash(QStringLiteral("確認の間に原稿が変わり、そのコマが見つからなくなったため、指示を送っていません（書いた言葉は残っています）。"), 8000, true);
+        return;
+    }
     const std::string words = text.toStdString();
     const Json ops = Json::array({Json{{"op", "set_panel"},
                                        {"page", page->index.json()},
-                                       {"frame_id", *frame_id},
+                                       {"frame_id", panel},
                                        {"set", Json{{"instruction", Json{{"text", words}, {"by", window_->session().actor()}}}}},
                                        {"pin", Json::array({"instruction"})}},
-                                  Json{{"op", "request_fix"}, {"page", page->index.json()}, {"frame_id", *frame_id}, {"instruction", words}, {"scope", "frame"}}});
+                                  Json{{"op", "request_fix"}, {"page", page->index.json()}, {"frame_id", panel}, {"instruction", words}, {"scope", "frame"}}});
     if (window_->apply_ops(ops)) {
-        instruction->sent();
+        if (instruction->book() == book && instruction->item() == item) {
+            instruction->sent();
+        } else {
+            Drafts::instance().forget(book, item);
+        }
         emit changed();
     }
 }

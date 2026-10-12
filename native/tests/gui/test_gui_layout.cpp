@@ -356,9 +356,13 @@ private slots:
         env.insert(QStringLiteral("GENKO_LAYOUT_PROBE"), QStringLiteral("1"));
         env.insert(QStringLiteral("GENKO_LAYOUT_OUT"), report);
         env.insert(QStringLiteral("GENKO_CONFIG_DIR"), dir.filePath("config"));
-        // (AI と作る reads the AI clients' settings: those of a home of the test's own)
+        // (AI と作る reads the AI clients' settings: those of a home of the test's own — on Windows too, where they are
+        // under %APPDATA% and %LOCALAPPDATA%)
         env.insert(QStringLiteral("HOME"), dir.filePath("home"));
+        env.insert(QStringLiteral("USERPROFILE"), dir.filePath("home"));
         env.insert(QStringLiteral("XDG_CONFIG_HOME"), dir.filePath("home/.config"));
+        env.insert(QStringLiteral("APPDATA"), dir.filePath("home/AppData/Roaming"));
+        env.insert(QStringLiteral("LOCALAPPDATA"), dir.filePath("home/AppData/Local"));
         child.setProcessEnvironment(env);
         child.setWorkingDirectory(dir.path());
         child.start(QCoreApplication::applicationFilePath(), {});

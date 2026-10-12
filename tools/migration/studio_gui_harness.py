@@ -2,8 +2,8 @@
 """The Python reference for the app's studio contract test (native/tests/contract/test_contract_studio_gui.cpp): what the
 approval box, the process bar and the AI dialog compute without Qt — genko/app/review_model.py (inbox, progress, the
 ops of 承認 and 差し戻し), the sheet candidates as the approval box numbers them (studio_widgets.ApprovalBox.
-_numbered_sheets) and the Qt-free functions of genko/app/ai_link.py and links.py. Development only; nothing here goes
-into the product.
+_numbered_sheets itself, PySide6 stood in for) and the Qt-free functions of genko/app/ai_link.py and links.py.
+Development only; nothing here goes into the product.
 
     PYTHONPATH=src python3 tools/migration/studio_gui_harness.py review BOOK OUT
     PYTHONPATH=src python3 tools/migration/studio_gui_harness.py ai CASES OUT
@@ -85,17 +85,15 @@ def _raised(exc: BaseException) -> dict:
 
 
 def numbered_sheets(episode, item) -> list:
-    """studio_widgets.ApprovalBox._numbered_sheets (the window's episode is the book)."""
-    changed = int((episode.studio.get("style") or {}).get("changed_rev") or 0)
-    every = (episode.studio.get("character_candidates") or {}).get(item.character_id, [])
-    out = []
-    for n, cand in enumerate(every, 1):
-        if cand.get("status") in ("rejected", "withdrawn"):
-            continue
-        old = changed and int(cand.get("rev") or 0) < changed
-        out.append((f"候補 {n}" + ("（前の絵柄）" if old else ""), cand))
-    fresh = [pair for pair in reversed(out) if "前の絵柄" not in pair[0]]
-    return fresh + [pair for pair in reversed(out) if "前の絵柄" in pair[0]]
+    """studio_widgets.ApprovalBox._numbered_sheets itself (Qt stood in for), on a stand-in of the box whose window holds
+    the book."""
+    from types import SimpleNamespace
+
+    _stub_qt()
+    from genko.app.studio_widgets import ApprovalBox
+
+    box = SimpleNamespace(window=SimpleNamespace(session=SimpleNamespace(episode=episode)))
+    return ApprovalBox._numbered_sheets(box, item)
 
 
 def review(book: str, out: str) -> None:
@@ -107,6 +105,23 @@ def review(book: str, out: str) -> None:
     base.fresh_process_state(True)
     base.counting_ids(0xE00)
     path = Path(book)
+    episode = load_episode(path)
+    # the style changed after ユキ's sheets were drawn, then one more drawn: the box numbers the earlier ones as in the
+    # old style (「（前の絵柄）」), after the new one
+    style = {"id": "gag-yuru", "title": "ゆるい落書き風", "path": ["ギャグ漫画"], "prompt": {"ja": "ゆるい線", "en": "loose lines"},
+             "avoid": [], "version": 3}
+    reply = apply_ops(episode, [{"op": "set_style_catalog", "catalog": style}], agent="human:作者")
+    if not reply.get("ok"):
+        raise SystemExit(f"review: {reply}")
+    save_episode(episode, path, actor="human:作者")
+    episode = load_episode(path)
+    drawn = episode.studio["character_candidates"]["c-ken"][0]  # (a picture ユキ has no sheet of yet)
+    reply = apply_ops(episode, [{"op": "import_candidates", "character_id": "c-yuki",
+                                 "candidates": [{"id": "cd_y4", "asset": drawn["asset"], "px": drawn["px"], "origin": {"kind": "agent"}}]}],
+                      agent="ai:hermes")
+    if not reply.get("ok"):
+        raise SystemExit(f"review: {reply}")
+    save_episode(episode, path, actor="ai:hermes")
     episode = load_episode(path)
     extra = [{"op": "request_approval", "gate": "art", "pages": [1], "note": "絵を見てください"},
              {"op": "request_approval", "gate": "export", "pages": [], "note": ""},

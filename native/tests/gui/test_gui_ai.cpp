@@ -206,6 +206,7 @@ private slots:
         qputenv("XDG_CONFIG_HOME", (home_.path() + QStringLiteral("/.config")).toUtf8());
         qputenv("XDG_DATA_HOME", (home_.path() + QStringLiteral("/.local/share")).toUtf8());
         qputenv("APPDATA", (home_.path() + QStringLiteral("/AppData/Roaming")).toUtf8());
+        qputenv("LOCALAPPDATA", (home_.path() + QStringLiteral("/AppData/Local")).toUtf8());
         log_ = home_.path() + QStringLiteral("/fake-mcp.log");
         qputenv("GENKO_FAKE_MCP_LOG", log_.toUtf8());
         app::ai_link::set_command_for_tests(QStringList{fake_mcp(), QStringLiteral("--mode"), QStringLiteral("ok")});
@@ -442,9 +443,22 @@ private slots:
         });
         QVERIFY(desk.questions.value(0).contains(QStringLiteral("書き込んだ後に変わっています")));
         QCOMPARE(genko::test::read_bytes(file), original);
+        // (the file as it was before the undo is kept apart from Genko's copies: no later undo puts it back)
         const auto copies = app::client_config::backups(config);
-        QCOMPARE(copies.size(), std::size_t(2));
-        QCOMPARE(genko::test::read_bytes(gui_test::qpath(copies.front())), later);
+        QCOMPARE(copies.size(), std::size_t(1));
+        const QStringList asides = QDir(gui_test::qpath(config.parent_path())).entryList({config.filename().string().c_str() + QStringLiteral(".genko-before-undo-*")});
+        QCOMPARE(asides.size(), 1);
+        QCOMPARE(genko::test::read_bytes(gui_test::qpath(config.parent_path()) + QLatin1Char('/') + asides.front()), later);
+        // pressed again: nothing to put back (the file is the copy's): no question, nothing changed
+        desk.questions.clear();
+        desk.yes = {true};
+        desk.with_dialog([&](app::AiDialog* d) {
+            QVERIFY(!d->undo_button->isEnabled());
+            d->undo_config();
+        });
+        QVERIFY(desk.questions.isEmpty());
+        QCOMPARE(genko::test::read_bytes(file), original);
+        QCOMPARE(QDir(gui_test::qpath(config.parent_path())).entryList({config.filename().string().c_str() + QStringLiteral(".genko-before-undo-*")}).size(), 1);
         // a file that is not JSON: refused, untouched
         genko::test::write_bytes(file, "{ not json");
         desk.warnings.clear();
@@ -456,6 +470,86 @@ private slots:
         QVERIFY(desk.warnings.value(0).contains(QStringLiteral("JSON として読めません")));
         QCOMPARE(genko::test::read_bytes(file), std::string("{ not json"));
         QDir(gui_test::qpath(config.parent_path())).removeRecursively();
+    }
+
+    // Claude Desktop's file Genko does not change (nothing is written): numbers JSON cannot carry back as they are (NaN,
+    // 1e400, an integer beyond 64 bits), a key twice in one object, a file that is not UTF-8.
+    void claudeDesktopFileRefused_data() {
+        QTest::addColumn<QByteArray>("before");
+        QTest::addColumn<QString>("refusal");
+        QTest::newRow("NaN") << QByteArray(R"({"a": NaN, "mcpServers": {}})") << QStringLiteral("ふつうの数で表せない数があります（/a）");
+        QTest::newRow("1e400") << QByteArray(R"({"mcpServers": {"x": {"timeout": 1e400}}})") << QStringLiteral("ふつうの数で表せない数があります（/mcpServers/x/timeout）");
+        QTest::newRow("beyond 64 bits") << QByteArray(R"({"id": 123456789012345678901234567890})") << QStringLiteral("64 ビットに収まらない大きな整数があります（/id）");
+        QTest::newRow("a key twice") << QByteArray(R"({"mcpServers": {}, "mcpServers": {"x": {"command": "y"}}})") << QStringLiteral("同じ鍵（mcpServers）が二つ");
+        QTest::newRow("a key twice inside") << QByteArray(R"({"mcpServers": {"genko": {"command": "a", "command": "b"}}})") << QStringLiteral("同じ鍵（command）が二つ");
+        QTest::newRow("utf-16") << QByteArray("\xFF\xFE{\x00}\x00", 6) << QStringLiteral("UTF-16 か UTF-32");
+        QTest::newRow("utf-32 be") << QByteArray("\x00\x00\xFE\xFF\x00\x00\x00{\x00\x00\x00}", 12) << QStringLiteral("UTF-16 か UTF-32");
+        QTest::newRow("not utf-8") << QByteArray("{\"a\": \"\xFF\"}") << QStringLiteral("UTF-8 ではありません");
+    }
+    void claudeDesktopFileRefused() {
+        QFETCH(QByteArray, before);
+        QFETCH(QString, refusal);
+        QTemporaryDir tmp;
+        const fs::path file = gui_test::path_of(tmp.path() + QStringLiteral("/claude_desktop_config.json"));
+        genko::test::write_bytes(gui_test::qpath(file), before.toStdString());
+        const auto proposal = app::client_config::propose(QStringLiteral("claude-desktop"), file, {QStringLiteral("/g"), QStringLiteral("mcp")});
+        QVERIFY2(proposal.refusal.contains(refusal), qPrintable(proposal.refusal));
+        QVERIFY_THROWS_EXCEPTION(core::Error, app::client_config::apply(proposal));
+        QCOMPARE(QByteArray::fromStdString(genko::test::read_bytes(gui_test::qpath(file))), before);
+    }
+
+    // A UTF-8 BOM at the start of Claude Desktop's file is read past and written back (and said to be kept).
+    void claudeDesktopFileWithBom() {
+        QTemporaryDir tmp;
+        const fs::path file = gui_test::path_of(tmp.path() + QStringLiteral("/claude_desktop_config.json"));
+        genko::test::write_bytes(gui_test::qpath(file), "\xEF\xBB\xBF{\"theme\": \"dark\"}\n");
+        const auto proposal = app::client_config::propose(QStringLiteral("claude-desktop"), file, {QStringLiteral("/g"), QStringLiteral("mcp")});
+        QVERIFY2(proposal.refusal.isEmpty(), qPrintable(proposal.refusal));
+        QVERIFY(proposal.kept.join(QLatin1Char('\n')).contains(QStringLiteral("BOM")));
+        app::client_config::apply(proposal);
+        const std::string written = genko::test::read_bytes(gui_test::qpath(file));
+        QVERIFY(written.starts_with("\xEF\xBB\xBF{"));
+        const Json read = core::parse_python_json(written.substr(3));
+        QCOMPARE(read["theme"], Json("dark"));
+        QCOMPARE(read["mcpServers"]["genko"]["command"], Json("/g"));
+        QVERIFY(app::client_config::propose(QStringLiteral("claude-desktop"), file, {QStringLiteral("/g"), QStringLiteral("mcp")}).same);
+    }
+
+    // Claude Desktop from the Microsoft Store (MSIX) keeps its file in its package's folder: that folder is found under
+    // %LOCALAPPDATA%\Packages\Claude_* (looked at first on Windows; to be seen on a real Windows in M6).
+    void msixSettingsFolder() {
+        QTemporaryDir local;
+        QVERIFY(!app::client_config::msix_claude_file(local.path()));
+        QVERIFY(!app::client_config::msix_claude_file(QString()));
+        QDir().mkpath(local.path() + QStringLiteral("/Packages/Other_1/LocalCache/Roaming/Claude"));
+        QDir().mkpath(local.path() + QStringLiteral("/Packages/Claude_pzs8sxrjxfjjc/LocalCache"));
+        QVERIFY(!app::client_config::msix_claude_file(local.path()));  // (the package without its Claude folder yet)
+        QDir().mkpath(local.path() + QStringLiteral("/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude"));
+        const auto found = app::client_config::msix_claude_file(local.path());
+        QVERIFY(found);
+        QCOMPARE(gui_test::qpath(*found), local.path() + QStringLiteral("/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude_desktop_config.json"));
+    }
+
+    // The test connection with a folder that is not there: nothing started, no folder made, the reason said.
+    void testConnectionWithoutTheFolder() {
+        QTemporaryDir tmp;
+        const fs::path root = gui_test::path_of(tmp.path());
+        const fs::path book = agent_book(root, "nofolder.genko");
+        Desk desk(book, root / "recovery");
+        QFile::remove(log_);
+        const QString missing = tmp.path() + QStringLiteral("/no/such/folder");
+        desk.with_dialog([&](app::AiDialog* d) {
+            d->root->setText(missing);
+            d->test_connection();
+            QVERIFY(d->test_button->isEnabled());
+            QVERIFY(d->probe()->sent().isEmpty());
+            QVERIFY(d->probe()->findChildren<QProcess*>().isEmpty());
+            QCOMPARE(d->state_word->text(), QStringLiteral("失敗"));
+            QVERIFY2(d->state_rows->text().contains(QStringLiteral("がありません")), qPrintable(d->state_rows->text()));
+        });
+        QVERIFY(!QFileInfo::exists(missing));
+        QVERIFY(!QFileInfo::exists(tmp.path() + QStringLiteral("/no")));
+        QVERIFY(methods().isEmpty());
     }
 
     // Hermes Agent's YAML: Python's text for a new file; the rest of a file kept, Genko's entry replaced or added; a file of
@@ -484,7 +578,30 @@ private slots:
                                        << QString();
         QTest::newRow("inline map") << QStringLiteral("mcp_servers: {a: {command: x}}\n") << QString() << QStringLiteral("一行で書かれている");
         QTest::newRow("tabs") << QStringLiteral("mcp_servers:\n\tgenko:\n") << QString() << QStringLiteral("タブの字下げ");
-        QTest::newRow("documents") << QStringLiteral("---\nmodel: x\n") << QString() << QStringLiteral("複数の文書");
+        QTest::newRow("document start") << QStringLiteral("---\nmodel: x\n") << QStringLiteral("---\nmodel: x\n") + fresh << QString();
+        QTest::newRow("document start, servers") << QStringLiteral("# head\n--- # one\nmcp_servers:\n  a:\n    command: y\n")
+                                                 << QStringLiteral("# head\n--- # one\nmcp_servers:\n  a:\n    command: y\n  genko:\n    command: #C\n"
+                                                                   "    args: #A\n    timeout: 60\n")
+                                                 << QString();
+        QTest::newRow("documents") << QStringLiteral("---\nmodel: x\n---\nmodel: y\n") << QString() << QStringLiteral("複数の文書");
+        QTest::newRow("document end") << QStringLiteral("model: x\n...\n") << QString() << QStringLiteral("複数の文書");
+        QTest::newRow("flow document") << QStringLiteral("{\"model\": \"x\", \"mcp_servers\": {}}\n") << QString() << QStringLiteral("「{」で始まる");
+        QTest::newRow("flow list") << QStringLiteral("[a, b]\n") << QString() << QStringLiteral("「[」で始まる");
+        QTest::newRow("explicit key") << QStringLiteral("? mcp_servers\n: {other: {command: y}}\n") << QString() << QStringLiteral("「?」で始まる");
+        QTest::newRow("anchor") << QStringLiteral("&base model: x\n") << QString() << QStringLiteral("「&」で始まる");
+        QTest::newRow("merge") << QStringLiteral("base: {command: y}\nmcp_servers:\n  <<: {a: 1}\n") << QString() << QStringLiteral("<< で別の鍵を取り込んでいる");
+        QTest::newRow("tag in genko") << QStringLiteral("mcp_servers:\n  genko:\n    !x command: y\n") << QString() << QStringLiteral("「!」で始まる");
+        QTest::newRow("block scalar at the edge") << QStringLiteral("model: x\n|\n  text\n") << QString() << QStringLiteral("「|」で始まる");
+        QTest::newRow("a line that is not a key") << QStringLiteral("model: x\nplain words\n") << QString() << QStringLiteral("鍵として読めない行");
+        QTest::newRow("comments kept") << QStringLiteral("mcp_servers:\n  genko:\n    command: /old\n    # the arguments\n    args: [\"x\"]\n    # keep me\n\n"
+                                                         "  other:\n    command: y\n# the end\n")
+                                       << QStringLiteral("mcp_servers:\n  genko:\n    command: #C\n    # the arguments\n    args: #A\n    timeout: 60\n    # keep me\n\n"
+                                                         "  other:\n    command: y\n# the end\n")
+                                       << QString();
+        QTest::newRow("comments after the last key") << QStringLiteral("mcp_servers:\n  genko:\n    args: [\"x\"]\n    command: /old\n    timeout: 9\n\n# after\nmodel: m\n")
+                                                     << QStringLiteral("mcp_servers:\n  genko:\n    command: #C\n    args: #A\n    timeout: 9\n\n# after\nmodel: m\n")
+                                                     << QString();
+        QTest::newRow("utf-8 bom") << QStringLiteral("\uFEFFmodel: x\n") << QStringLiteral("\uFEFFmodel: x\n") + fresh << QString();
         QTest::newRow("genko inline") << QStringLiteral("mcp_servers:\n  genko: {command: x}\n") << QString() << QStringLiteral("genko が一行で書かれている");
         QTest::newRow("two") << QStringLiteral("mcp_servers:\n  a: 1\nmcp_servers:\n  b: 2\n") << QString() << QStringLiteral("mcp_servers が二つ");
     }
@@ -501,16 +618,17 @@ private slots:
         if (!refusal.isEmpty()) {
             QVERIFY2(proposal.refusal.contains(refusal), qPrintable(proposal.refusal));
             QVERIFY_THROWS_EXCEPTION(core::Error, app::client_config::apply(proposal));
-            QCOMPARE(QString::fromStdString(genko::test::read_bytes(gui_test::qpath(file))), before);
+            QCOMPARE(QByteArray::fromStdString(genko::test::read_bytes(gui_test::qpath(file))), before.toUtf8());
             return;
         }
         QVERIFY2(proposal.refusal.isEmpty(), qPrintable(proposal.refusal));
         const QString expected = QString(after)
                                      .replace(QStringLiteral("#C"), QStringLiteral("\"/作業/genko\""))
                                      .replace(QStringLiteral("#A"), QStringLiteral("[\"mcp\", \"--root\", \"/r s\", \"--agent\", \"ai:hermes\"]"));
-        QCOMPARE(QString::fromUtf8(proposal.after), expected);
+        // (compared as bytes: QString::fromUtf8 reads past a BOM)
+        QCOMPARE(proposal.after, expected.toUtf8());
         const auto applied = app::client_config::apply(proposal);
-        QCOMPARE(QString::fromStdString(genko::test::read_bytes(gui_test::qpath(file))), expected);
+        QCOMPARE(QByteArray::fromStdString(genko::test::read_bytes(gui_test::qpath(file))), expected.toUtf8());
         QCOMPARE(applied.backup.empty(), before.isNull());
         QVERIFY(app::client_config::configured(QStringLiteral("hermes"), file));
         // written again: the same, nothing to do
@@ -519,7 +637,7 @@ private slots:
         if (before.isNull()) {
             QVERIFY(!QFile::exists(gui_test::qpath(file)));
         } else {
-            QCOMPARE(QString::fromStdString(genko::test::read_bytes(gui_test::qpath(file))), before);
+            QCOMPARE(QByteArray::fromStdString(genko::test::read_bytes(gui_test::qpath(file))), before.toUtf8());
         }
     }
 

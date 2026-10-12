@@ -211,6 +211,8 @@ public:
     // New requests from the AI since `before` (their ids): a quiet note, the taskbar's mark, and (unless turned off in
     // ui/raise_requests) the approval box in front with the newest chosen.
     void notice_requests(const std::set<std::string>& before);
+    // The note of new requests and the box in front (waiting while the pen is down: at most 40 tries 250 ms apart).
+    void show_requests(const QString& title, const std::string& newest, const QString& more, int tries);
 
     PageCanvas* canvas() const { return canvas_; }
     PageList* pages() const { return pages_; }
@@ -571,6 +573,8 @@ private:
     std::set<QDockWidget*> stale_docks_;
     std::set<std::string> known_requests_;
     QStringList pending_links_;  // (links that came while the book was being read: taken when it is shown)
+    // What a failed read says of pending_links_ (kept, not thrown away): "" when there are none.
+    QString links_kept() const;
     bool style_declined_ = false;  // (use_style: the person said no to its question)
     // (the reply drafts' key of the book last shown and its session: a new key for the same session is the book saved in
     // another place, and its drafts are carried there — on_book_changed)

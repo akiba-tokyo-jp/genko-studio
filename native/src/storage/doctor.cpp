@@ -157,32 +157,39 @@ Json doctor(const fs::path& dir) {
     std::set<std::string> missing_states;
     std::set<std::string> lacking_assets;
     std::set<std::string> unreadable_states;
+    std::set<std::string> unrestorable_states;
     std::string first_lacking;
+    std::string first_unrestorable;
     std::map<std::string, bool> usable;
+    // (the same judgement as storage::restore: a state is restorable only when it reads back whole)
     const auto restorable = [&](const std::string& ref) {
         if (const auto known = usable.find(ref); known != usable.end()) return known->second;
         bool ok = false;
-        const auto data = store.get_bytes(ref, kStateSuffix);
-        if (!data) {
-            missing_states.insert(ref);
-        } else {
-            try {
+        try {
+            const auto data = store.get_bytes(ref, kStateSuffix);
+            if (!data) {
+                missing_states.insert(ref);
+            } else {
                 const Json state = core::parse_python_json(*data);
                 if (AssetStore::ref(*data) != ref || !state.is_object()) {
                     unreadable_states.insert(ref);
                 } else {
                     LoadOptions options;
                     options.cache = history_cache;  // (the states share most of their assets: each is read once)
-                    if (const auto gone = missing_asset(load_document_payload(state, project, options).report)) {
+                    const LoadResult back = load_document_payload(state, project, options);
+                    if (const auto gone = missing_asset(back.report)) {
                         lacking_assets.insert(ref);
                         if (first_lacking.empty()) first_lacking = *gone;
+                    } else if (!back.report.clean()) {
+                        unrestorable_states.insert(ref);
+                        if (first_unrestorable.empty()) first_unrestorable = back.document.read_only_reason;
                     } else {
                         ok = true;
                     }
                 }
-            } catch (const core::Error&) {
-                unreadable_states.insert(ref);
             }
+        } catch (const core::Error&) {
+            unreadable_states.insert(ref);  // (a state that cannot be read: not there as it should be)
         }
         usable[ref] = ok;
         return ok;
@@ -203,7 +210,12 @@ Json doctor(const fs::path& dir) {
                            first_lacking + "; an older Genko's genko gc removes them)");
     }
     if (!unreadable_states.empty()) {
-        problems.push_back(std::to_string(unreadable_states.size()) + " state(s) of the Undo/Redo history do not hold the state their name says");
+        problems.push_back(std::to_string(unreadable_states.size()) +
+                           " state(s) of the Undo/Redo history cannot be read or do not hold the state their name says");
+    }
+    if (!unrestorable_states.empty()) {
+        problems.push_back(std::to_string(unrestorable_states.size()) + " state(s) of the Undo/Redo history cannot be restored by this build (" +
+                           first_unrestorable + ")");
     }
     // how far Undo goes now: the newest change whose state before it is there but cannot be restored stops it
     for (std::size_t k = stacks.undo.size(); k-- > 0;) {

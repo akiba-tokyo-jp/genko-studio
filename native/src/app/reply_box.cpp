@@ -1,6 +1,8 @@
 #include "app/reply_box.hpp"
 
 #include <QCoreApplication>
+#include <QMetaObject>
+#include <QMutexLocker>
 #include <QKeyEvent>
 #include <QTextBlock>
 #include <QTextLayout>
@@ -76,7 +78,10 @@ namespace reply_drafts {
 
 namespace {
 
-// Why a draft file cannot be read (empty: it can), and its item and words.
+// A draft of a format this build does not know ("genko-reply-draft@2", …): left as it is, neither read nor removed.
+const QString kForeign = QStringLiteral("\x01foreign");
+
+// Why a draft file cannot be read (empty: it can; kForeign: another format of drafts), and its item and words.
 QString check(const fs::path& path, QString& item, QString& text) {
     std::error_code ec;
     const fs::file_status status = fs::symlink_status(path, ec);
@@ -95,6 +100,10 @@ QString check(const fs::path& path, QString& item, QString& text) {
         data = core::parse_python_json(bytes);
     } catch (const core::Error&) {
         return QStringLiteral("UTF-8 の JSON として読めません");
+    }
+    if (data.is_object() && data.value("format", Json()).is_string() && data["format"] != Json(kFormat) &&
+        data["format"].get_ref<const std::string&>().starts_with("genko-reply-draft@")) {
+        return kForeign;  // (a newer Genko's: kept for it)
     }
     if (!data.is_object() || data.value("format", Json()) != Json(kFormat) || !data.contains("item") || !data["item"].is_string() ||
         !data.contains("text") || !data["text"].is_string() || (data.contains("at") && !data["at"].is_string())) {
@@ -150,6 +159,10 @@ Read read(const fs::path& book) {
             out.drafts[item] = text;
             continue;
         }
+        if (why == kForeign) {
+            out.foreign << QString::fromStdString(name);
+            continue;
+        }
         std::error_code gone;
         fs::remove(path, gone);
         out.discarded << QStringLiteral("%1（%2%3）").arg(QString::fromStdString(name), why,
@@ -168,8 +181,11 @@ Drafts& Drafts::instance() {
 Drafts::Drafts() {
     timer_.setSingleShot(true);
     timer_.setInterval(500);
-    connect(&timer_, &QTimer::timeout, this, &Drafts::flush);
+    connect(&timer_, &QTimer::timeout, this, &Drafts::start_writes);
     if (QCoreApplication* app = QCoreApplication::instance()) connect(app, &QCoreApplication::aboutToQuit, this, &Drafts::flush);
+    // (the files are written on a worker of their own, one at a time and in order: an fsync while the book itself is
+    // being saved takes 100 ms and more, which the window must not wait for)
+    files_.setMaxThreadCount(1);
 }
 
 const Drafts::Place* Drafts::place_of(const QString& book) const {
@@ -218,6 +234,10 @@ const Drafts::Place* Drafts::load(const QString& book) {
     if (!found.discarded.isEmpty()) {
         emit problem(book, QStringLiteral("返事の下書きのファイルが壊れていたため、読まずに捨てました: %1")
                                .arg(found.discarded.join(QStringLiteral("、"))));
+    }
+    if (!found.foreign.isEmpty()) {
+        emit problem(book, QStringLiteral("この版の Genko が知らない形式の返事の下書きがあります。読まずに、そのまま残しました: %1")
+                               .arg(found.foreign.join(QStringLiteral("、"))));
     }
     return place_of(book);
 }
@@ -273,17 +293,21 @@ int Drafts::count(const QString& book) {
     return n;
 }
 
-void Drafts::flush() {
+void Drafts::start_writes() {
     timer_.stop();
     const std::set<Key> waiting = std::exchange(dirty_, {});
     for (const Key& key : waiting) write(key);
 }
 
+void Drafts::flush() {
+    start_writes();
+    files_.waitForDone(30000);
+    report();
+}
+
 void Drafts::write(const Key& key) {
     const Place* place = place_of(key.first);
     if (place == nullptr || !place->keep) return;
-    std::error_code ec;
-    if (!fs::is_regular_file(place->folder / "project.json", ec)) return;  // (the book is gone: its folder is not made again)
     const auto it = drafts_.find(key);
     if (it == drafts_.end() || it->second.trimmed().isEmpty()) {
         too_long_.erase(key);
@@ -299,23 +323,59 @@ void Drafts::write(const Key& key) {
         return;
     }
     too_long_.erase(key);
-    try {
-        storage::write_atomic(reply_drafts::file(place->folder, key.second),
-                              reply_drafts::encode(key.second, it->second, QDateTime::currentDateTime()));
-    } catch (const core::Error& error) {
-        emit problem(key.first, QStringLiteral("返事の下書きを原稿に書けませんでした: %1").arg(wording::error(std::string(error.what()))));
-    }
+    queue(key.first, place->folder, reply_drafts::file(place->folder, key.second),
+          reply_drafts::encode(key.second, it->second, QDateTime::currentDateTime()));
 }
 
 void Drafts::remove_file(const Key& key) {
     const Place* place = place_of(key.first);
     if (place == nullptr || !place->keep) return;
+    queue(key.first, place->folder, reply_drafts::file(place->folder, key.second), std::nullopt);
+}
+
+void Drafts::queue(const QString& book, const fs::path& folder, const fs::path& file, std::optional<std::string> bytes) {
+    files_.start([this, book, folder, file, bytes = std::move(bytes)] {
+        const QString said = file_job(folder, file, bytes);
+        if (said.isEmpty()) return;
+        {
+            const QMutexLocker locked(&said_lock_);
+            said_.emplace_back(book, said);
+        }
+        QMetaObject::invokeMethod(this, &Drafts::report, Qt::QueuedConnection);
+    });
+}
+
+QString Drafts::file_job(const fs::path& folder, const fs::path& file, const std::optional<std::string>& bytes) {
     std::error_code ec;
-    const fs::path path = reply_drafts::file(place->folder, key.second);
-    if (!fs::remove(path, ec) && ec && ec != std::errc::no_such_file_or_directory) {
-        emit problem(key.first, QStringLiteral("返事の下書きのファイルを消せませんでした: %1（%2）")
-                                    .arg(QString::fromStdString(core::path_to_utf8(path)), QString::fromStdString(ec.message())));
+    // (studio/reply_drafts must be the book's own folder: a link, or a file, there is neither written through nor
+    // emptied)
+    const fs::file_status place = fs::symlink_status(file.parent_path(), ec);
+    if (fs::exists(place) && !fs::is_directory(place)) {
+        return QStringLiteral("返事の下書きの置き場所（studio/reply_drafts）が、原稿の中のフォルダーではありません（リンクなど）。下書きを書き込みも消しもしません");
     }
+    if (!bytes) {
+        if (!fs::remove(file, ec) && ec && ec != std::errc::no_such_file_or_directory) {
+            return QStringLiteral("返事の下書きのファイルを消せませんでした: %1（%2）")
+                .arg(QString::fromStdString(core::path_to_utf8(file)), QString::fromStdString(ec.message()));
+        }
+        return {};
+    }
+    if (!fs::is_regular_file(folder / "project.json", ec)) return {};  // (the book is gone: its folder is not made again)
+    try {
+        storage::write_atomic(file, *bytes);
+    } catch (const core::Error& error) {
+        return QStringLiteral("返事の下書きを原稿に書けませんでした: %1").arg(wording::error(std::string(error.what())));
+    }
+    return {};
+}
+
+void Drafts::report() {
+    std::vector<std::pair<QString, QString>> said;
+    {
+        const QMutexLocker locked(&said_lock_);
+        said.swap(said_);
+    }
+    for (const auto& [book, message] : said) emit problem(book, message);
 }
 
 }  // namespace genko::app

@@ -65,13 +65,14 @@ RestoreResult restore(const ProjectLock& lock, const std::string& actor, bool re
         throw core::Error("no_before", "the project did not exist before this change");
     }
     // (a state of the history, or an asset it needs, may be gone — an older Genko's `genko gc` keeps only what a v3
-    // book's journal names —: refused before anything is written, the book and its journal as they were)
+    // book's journal names —: refused before the book is written; the journal's own repair above, which every write
+    // makes first, is all that may have been written)
     const std::string cannot = redo ? "cannot redo this change" : "cannot undo past this change";
     AssetStore store(dir);
     const auto data = store.get_bytes(*wanted, kStateSuffix);
     if (!data) {
         throw core::Error("history_missing", cannot + ": its history state " + *wanted +
-                                                 " is missing from assets/ (an older Genko's genko gc removes such states); nothing was changed");
+                                                 " is missing from assets/ (an older Genko's genko gc removes such states); nothing but the journal's own repair was written");
     }
     Json state;
     try {
@@ -96,7 +97,7 @@ RestoreResult restore(const ProjectLock& lock, const std::string& actor, bool re
     if (!loaded.report.clean()) {
         if (const auto gone = missing_asset(loaded.report)) {
             throw core::Error("history_missing", cannot + ": its history state " + *wanted + " needs assets that are missing (" + *gone +
-                                                     "; an older Genko's genko gc removes such assets); nothing was changed");
+                                                     "; an older Genko's genko gc removes such assets); nothing but the journal's own repair was written");
         }
         throw core::Error("missing_snapshot", "snapshot " + *wanted + " cannot be restored: " + loaded.document.read_only_reason);
     }

@@ -635,13 +635,13 @@ const std::vector<Rule>& rules() {
         // `genko gc` removes them: schema-v4 §8)
         r.push_back(rule(R"(cannot (undo past|redo) this change: its history state \S+ is missing from assets/.*)", [](const QRegularExpressionMatch& m) {
             return m.captured(1) == QLatin1String("redo")
-                       ? QStringLiteral("この変更をやり直すための記録（履歴の状態）が原稿から消えているため、やり直せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません")
-                       : QStringLiteral("これより前に戻すための記録（履歴の状態）が原稿から消えているため、ここより前には戻せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません");
+                       ? QStringLiteral("この変更をやり直すための記録（履歴の状態）が原稿から消えているため、やり直せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません（書いたのは、要るときの履歴の記録の修復だけです）")
+                       : QStringLiteral("これより前に戻すための記録（履歴の状態）が原稿から消えているため、ここより前には戻せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません（書いたのは、要るときの履歴の記録の修復だけです）");
         }));
         r.push_back(rule(R"(cannot (undo past|redo) this change: its history state \S+ needs assets that are missing.*)", [](const QRegularExpressionMatch& m) {
             return m.captured(1) == QLatin1String("redo")
-                       ? QStringLiteral("この変更をやり直すのに要る絵や線の素材が原稿から消えているため、やり直せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません")
-                       : QStringLiteral("これより前に戻すのに要る絵や線の素材が原稿から消えているため、ここより前には戻せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません");
+                       ? QStringLiteral("この変更をやり直すのに要る絵や線の素材が原稿から消えているため、やり直せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません（書いたのは、要るときの履歴の記録の修復だけです）")
+                       : QStringLiteral("これより前に戻すのに要る絵や線の素材が原稿から消えているため、ここより前には戻せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません（書いたのは、要るときの履歴の記録の修復だけです）");
         }));
         r.push_back(rule("snapshot .* does not hold the state its name says", "戻すための記録が壊れているため、戻せません。原稿は変えていません"));
         r.push_back(rule("snapshot .* cannot be restored: .*", "戻すための記録を、この版の Genko では戻せません。原稿は変えていません"));
