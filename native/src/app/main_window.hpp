@@ -205,6 +205,9 @@ public:
     // Keep a branch of the style catalog as this book's style (asked first when `ask`, or when the style is fixed or the
     // name is used elsewhere). False: not changed.
     bool use_style(const std::string& style_id, bool ask = true);
+    // 絵柄を選ぶ…: the style picker (StylePicker) until a style is taken, Genko's own words asked for, or it is closed (a
+    // "no" to use_style's question goes back to the picker).
+    void pick_style();
     // New requests from the AI since `before` (their ids): a quiet note, the taskbar's mark, and (unless turned off in
     // ui/raise_requests) the approval box in front with the newest chosen.
     void notice_requests(const std::set<std::string>& before);
@@ -568,6 +571,11 @@ private:
     std::set<QDockWidget*> stale_docks_;
     std::set<std::string> known_requests_;
     QStringList pending_links_;  // (links that came while the book was being read: taken when it is shown)
+    bool style_declined_ = false;  // (use_style: the person said no to its question)
+    // (the reply drafts' key of the book last shown and its session: a new key for the same session is the book saved in
+    // another place, and its drafts are carried there — on_book_changed)
+    std::weak_ptr<Session> drafts_session_;
+    QString drafts_key_;
     AiTarget ai_target_;
     QTimer ai_timer_;      // (the minutes since the AI last wrote)
     QTimer studio_timer_;  // (the studio's panels follow an edit a moment later)

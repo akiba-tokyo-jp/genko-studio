@@ -687,7 +687,7 @@ ToolResult StudioService::undo(const Json& a) {
     } catch (const core::Error& exc) {
         // (journal.restore's refusals are Python's ApplyError: nothing to undo, another's change, an approval, …)
         static const char* const kRefusals[] = {"nothing_to_undo", "nothing_to_redo", "external_change", "other_actor",
-                                                "needs_person",    "no_before",       "missing_snapshot"};
+                                                "needs_person",    "no_before",       "missing_snapshot", "history_missing"};
         if (std::find(std::begin(kRefusals), std::end(kRefusals), exc.code()) == std::end(kRefusals)) throw;
         return fail(exc.what(), "undo_refused", "/");
     }

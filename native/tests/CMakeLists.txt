@@ -329,7 +329,7 @@ if(GENKO_BUILD_APP)
   target_compile_definitions(test_gui_save PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")
   add_dependencies(test_gui_save genko)
   # the windows on 1024×640 … 1920×1080 at 100–200 %, the long path, the preview, typed Japanese, the picture cache
-  genko_test(test_gui_layout SOURCES gui/test_gui_layout.cpp DEPS genko_app GUI TIMEOUT 1200)
+  genko_test(test_gui_layout SOURCES gui/test_gui_layout.cpp DEPS genko_app genko_test_support GUI TIMEOUT 1200)
   # `genko app` in processes of its own: draw, undo, save, quit, open again; the autosave and the recovery copy across
   # processes (AC-SAVE 1, 8); `genko` alone
   genko_test(test_app_e2e SOURCES e2e/test_app_e2e.cpp DEPS genko_test_support LABELS e2e GUI TIMEOUT 1200)
@@ -340,17 +340,20 @@ if(GENKO_BUILD_APP)
   target_link_libraries(genko_fake_mcp PRIVATE genko_service genko_studio Qt6::Core)
   genko_target_flags(genko_fake_mcp)
   # the approval box (each kind of request, answered as the person), the process bar, the panel view, the library, the
-  # viewer, チャットでの承認, requests arriving; replies in several lines, asked before they go, kept as drafts (I13);
-  # genko:// links (a later start hands its link over, a style from a catalog folder, `genko register-links`)
+  # viewer, チャットでの承認, requests arriving; replies in several lines, asked before they go, kept as drafts (I13) — in
+  # the book's studio/reply_drafts/ (v4 only); 絵柄を選ぶ (a catalog folder); genko:// links (a later start hands its
+  # link over, a style from a catalog folder, `genko register-links`)
   genko_test(test_gui_studio SOURCES gui/test_gui_studio.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   add_dependencies(test_gui_studio genko)
   # AI と作る (AI-01, I07): the dialog as Python's, the connection's six states, the clients' settings written after the
   # change is seen and confirmed (copied first, put back), the test connection (nothing called, the book unchanged),
-  # the book and conversation, and the first setup run through to the AI reading the person's decisions back
+  # the book and conversation, and the first setup run through to the AI reading the person's decisions back (with the
+  # stand-in server, and with this build's `genko mcp`)
   genko_test(test_gui_ai SOURCES gui/test_gui_ai.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   target_compile_definitions(test_gui_ai PRIVATE GENKO_FAKE_MCP="$<TARGET_FILE:genko_fake_mcp>")
   add_dependencies(test_gui_ai genko_fake_mcp genko)
-  # the approval box's model and the AI dialog's Qt-free part against Python's (review_model.py, ai_link.py, links.py)
+  # the approval box's model and the AI dialog's Qt-free part against Python's (review_model.py, ai_link.py, links.py);
+  # what `genko mcp` keeps in a book read by Python's readers; the reply drafts left alone by the Python version
   genko_test(test_contract_studio_gui SOURCES contract/test_contract_studio_gui.cpp DEPS genko_app genko_test_support LABELS contract TIMEOUT 1800)
 endif()
 

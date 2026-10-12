@@ -84,12 +84,6 @@ QString how(const QString& kind) {
     return it == table.end() ? QString() : it->second;
 }
 
-// The draft's key of a book: its folder, or (not saved yet) its id.
-QString book_key_of(const MainWindow& window) {
-    if (const auto& path = window.session().path()) return qpath(*path);
-    return QStringLiteral("book:") + qs(window.book().book_id);
-}
-
 const core::Page* page_by_index(const core::Document& doc, std::int64_t index) {
     for (const auto& page : doc.pages) {
         if (page->index == core::Num(index)) return page.get();
@@ -112,6 +106,13 @@ bool confirm_send(QWidget* parent, const QString& title, const QString& to, cons
 }
 
 }  // namespace
+
+QString draft_book_key(const MainWindow& window) {
+    const Session& session = window.session();
+    const QString key = session.path() ? qpath(*session.path()) : QStringLiteral("book:") + qs(window.book().book_id);
+    Drafts::instance().place(key, session.path(), session.read_only_reason().empty());
+    return key;
+}
 
 std::optional<QImage> asset_image(const std::optional<fs::path>& project, const std::string& ref) {
     if (!project || ref.empty()) return std::nullopt;
@@ -350,7 +351,7 @@ ApprovalBox::ApprovalBox(MainWindow* window) : window_(window) {
     theme::primary(approve_button);
 }
 
-QString ApprovalBox::book_key() const { return book_key_of(*window_); }
+QString ApprovalBox::book_key() const { return draft_book_key(*window_); }
 
 void ApprovalBox::refresh() {
     const auto previous = current();
@@ -774,7 +775,7 @@ void PanelView::refresh() {
     const core::Frame* f = frame();
     candidates->clear();
     regions->clear();
-    instruction->bind(book_key_of(*window_), f != nullptr ? QStringLiteral("panel:") + qs(f->id) : QString());
+    instruction->bind(draft_book_key(*window_), f != nullptr ? QStringLiteral("panel:") + qs(f->id) : QString());
     if (f == nullptr) {
         info->setText(QStringLiteral("編集画面でコマをクリックすると、そのコマの絵と候補がここに出ます。"));
         image->clear();

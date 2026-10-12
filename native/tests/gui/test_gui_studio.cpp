@@ -18,9 +18,11 @@
 #include <QGraphicsScene>
 #include <QGraphicsSimpleTextItem>
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QDockWidget>
 #include <QInputMethodEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
@@ -40,14 +42,17 @@
 #include "app/reply_box.hpp"
 #include "app/review_model.hpp"
 #include "app/studio_widgets.hpp"
+#include "app/style_picker.hpp"
 #include "app/viewer.hpp"
 #include "core/json.hpp"
 #include "core/paths.hpp"
+#include "core/pyconv.hpp"
 #include "gui_support.hpp"
 #include "render/image.hpp"
 #include "render/png.hpp"
 #include "service/human_service.hpp"
 #include "service/studio_service.hpp"
+#include "service/stylecat.hpp"
 #include "storage/asset_store.hpp"
 #include "testsupport.hpp"
 
@@ -219,6 +224,90 @@ const Json* ticket_with(const core::Document& doc, const std::string& kind, cons
     return nullptr;
 }
 
+// A reply draft's file in a book: studio/reply_drafts/<sha256 of the request's key>.json (schema-v4 §1).
+fs::path draft_file(const fs::path& book, const std::string& item) {
+    const QByteArray hash = QCryptographicHash::hash(QByteArray::fromStdString(item), QCryptographicHash::Sha256).toHex();
+    return book / "studio" / "reply_drafts" / (hash.toStdString() + ".json");
+}
+
+std::string file_bytes(const fs::path& path) {
+    QFile file(QString::fromStdString(core::path_to_utf8(path)));
+    if (!file.open(QIODevice::ReadOnly)) return std::string("(none)");
+    return file.readAll().toStdString();
+}
+
+void put_file(const fs::path& path, const std::string& bytes) {
+    fs::create_directories(path.parent_path());
+    QFile file(QString::fromStdString(core::path_to_utf8(path)));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) qFatal("put_file");
+    file.write(bytes.data(), static_cast<qint64>(bytes.size()));
+}
+
+std::string draft_json(const std::string& item, const std::string& text, const std::string& format = "genko-reply-draft@1") {
+    return core::dump_python(Json{{"format", format}, {"item", item}, {"text", text}, {"at", "2026-10-01T09:00:00"}}) + "\n";
+}
+
+// A style catalog in a folder (GENKO_STYLE_CATALOG=file://…, as Python's tests fake stylecat._get): 少年漫画 › バトル ›
+// 低頭身のデフォルメ, and ギャグ漫画 with a style of the same name under it; thumbnails and samples are PNGs there.
+struct Catalog {
+    QTemporaryDir site;
+    QString root;
+    QByteArray before;
+
+    static Json branch(const QString& root, const std::string& id, const std::string& title, int level, const Json& path, const Json& children) {
+        Json full = path;
+        full.push_back(Json{{"id", id}, {"title", title}});
+        return Json{{"id", id}, {"title", title}, {"summary", title + "の絵柄。"}, {"level", level}, {"expression", "mono"}, {"path", full},
+                    {"prompt", Json{{"ja", "モノクロの日本のマンガのコマ。灰色はすべて網点で表す。"}, {"en", "Black-and-white manga panel."}}},
+                    {"avoid", Json::array({"文字", "フキダシ"})},
+                    {"samples", Json::array({Json{{"subject", "upper_body"}, {"url", (QStringLiteral("file://") + root + QStringLiteral("/files/")).toStdString() + id + ".png"}}})},
+                    {"reference", 0}, {"version", 3}, {"updated_at", "2026-09-27T11:18:12Z"}, {"children", children}};
+    }
+
+    Catalog() {
+        root = site.path() + QStringLiteral("/catalog");
+        QDir().mkpath(root + QStringLiteral("/v1/styles"));
+        QDir().mkpath(root + QStringLiteral("/files"));
+        QDir().mkpath(root + QStringLiteral("/t"));
+        const std::string thumb = (QStringLiteral("file://") + root).toStdString() + "/t/shonen.png";
+        const Json tree = Json{{"version", 1}, {"nodes", Json::array({
+            Json{{"id", "shonen"}, {"parent", nullptr}, {"level", 1}, {"title", "少年漫画"}, {"summary", "熱い"}, {"thumbnail_url", thumb}},
+            Json{{"id", "shonen-battle"}, {"parent", "shonen"}, {"level", 2}, {"title", "バトル"}, {"summary", "戦い"}, {"thumbnail_url", nullptr}},
+            Json{{"id", "shonen-battle-chibi"}, {"parent", "shonen-battle"}, {"level", 3}, {"title", "低頭身のデフォルメ"}, {"summary", "2〜3頭身"}},
+            Json{{"id", "gag"}, {"parent", nullptr}, {"level", 1}, {"title", "ギャグ漫画"}, {"summary", "笑い"}},
+            Json{{"id", "gag-chibi"}, {"parent", "gag"}, {"level", 2}, {"title", "低頭身のデフォルメ"}, {"summary", "ちび"}}})}};
+        genko::test::write_bytes(root + QStringLiteral("/v1/tree"), tree.dump());
+        const Json shonen = Json::array({Json{{"id", "shonen"}, {"title", "少年漫画"}}});
+        const Json battle = Json::array({Json{{"id", "shonen"}, {"title", "少年漫画"}}, Json{{"id", "shonen-battle"}, {"title", "バトル"}}});
+        const Json gag = Json::array({Json{{"id", "gag"}, {"title", "ギャグ漫画"}}});
+        const std::vector<Json> styles{
+            branch(root, "shonen", "少年漫画", 1, Json::array(), Json::array({Json{{"id", "shonen-battle"}, {"title", "バトル"}}})),
+            branch(root, "shonen-battle", "バトル", 2, shonen, Json::array({Json{{"id", "shonen-battle-chibi"}, {"title", "低頭身のデフォルメ"}}})),
+            branch(root, "shonen-battle-chibi", "低頭身のデフォルメ", 3, battle, Json::array()),
+            branch(root, "gag", "ギャグ漫画", 1, Json::array(), Json::array({Json{{"id", "gag-chibi"}, {"title", "低頭身のデフォルメ"}}})),
+            branch(root, "gag-chibi", "低頭身のデフォルメ", 2, gag, Json::array())};
+        for (const Json& style : styles) {
+            const QString id = QString::fromStdString(style["id"].get<std::string>());
+            genko::test::write_bytes(root + QStringLiteral("/v1/styles/") + id, style.dump());
+            genko::test::write_bytes(root + QStringLiteral("/files/") + id + QStringLiteral(".png"), grey_png(30, 40, 128));
+        }
+        genko::test::write_bytes(root + QStringLiteral("/t/shonen.png"), grey_png(18, 24, 90));
+        before = qgetenv("GENKO_STYLE_CATALOG");
+        qputenv("GENKO_STYLE_CATALOG", (QStringLiteral("file://") + root).toUtf8());
+    }
+    ~Catalog() {
+        if (before.isEmpty()) {
+            qunsetenv("GENKO_STYLE_CATALOG");
+        } else {
+            qputenv("GENKO_STYLE_CATALOG", before);
+        }
+    }
+};
+
+bool read_through(const app::StylePicker& picker) {
+    return gui_test::wait_for([&] { return picker.reading() == 0; }, 60000);
+}
+
 }  // namespace
 
 class TestGuiStudio : public QObject {
@@ -254,7 +343,8 @@ private slots:
         }
         const auto paper = pages.indexOf(QStringLiteral("原稿用紙の設定…"));
         QVERIFY(paper >= 0);
-        QCOMPARE(pages.value(paper + 1), QStringLiteral("チャットでの承認…"));
+        QCOMPARE(pages.value(paper + 1), QStringLiteral("絵柄を選ぶ…"));
+        QCOMPARE(pages.value(paper + 2), QStringLiteral("チャットでの承認…"));
         // an agent starts working on it: the studio comes, and its request is shown
         service::StudioService ai(gui_test::path_of(tmp.path()), "ai:hermes");
         QVERIFY(ai.call("apply_ops", Json::array({"plain.genko", Json::array({Json{{"op", "set_studio"}, {"premise", "屋上の話"}}})}), Json{{"commit", true}}).ok);
@@ -413,6 +503,160 @@ private slots:
         QCOMPARE(fixes, 2);
         QVERIFY(reason->toPlainText().isEmpty() || current_title(desk) != QStringLiteral("ネームの承認: 1, 2 ページ"));
         QCOMPARE(app::Drafts::instance().count(desk.box()->book_key()), 1);  // (the reply to the question is still kept)
+    }
+
+    // The words not sent are kept in the book (studio/reply_drafts/, one file for each request): written a moment after
+    // the typing stops and when the window closes, read again by another run (the words in memory first), broken files
+    // thrown away with a notice, removed when sent or emptied, not kept when too long; never in the book's history.
+    void draftsKeptInBook() {
+        StudioBook book;
+        const QString words = QStringLiteral("一行目\n二行目");
+        std::string name_ticket;
+        std::string question_ticket;
+        {
+            Desk desk(book.path, book.root / "recovery");
+            QVERIFY(desk.choose(QStringLiteral("ネームの承認: 1, 2 ページ")));
+            name_ticket = desk.box()->current()->ticket_id;
+            const std::string journal = file_bytes(book.path / "studio" / "journal.jsonl");
+            const std::string project = file_bytes(book.path / "project.json");
+            const bool could_undo = desk.session->can_undo();
+            QVERIFY(app::Drafts::instance().kept_on_disk(desk.box()->book_key()));
+            type_in(desk.box()->reason, QStringLiteral("一行目"));
+            QTest::keyClick(desk.box()->reason, Qt::Key_Return);
+            type_in(desk.box()->reason, QStringLiteral("二行目"));
+            const fs::path file = draft_file(book.path, name_ticket);
+            QVERIFY(gui_test::wait_for([&] { return fs::exists(file); }, 30000));
+            const Json kept = genko::test::read_json(QString::fromStdString(core::path_to_utf8(file)));
+            QCOMPARE(kept.size(), std::size_t(4));
+            QCOMPARE(kept.value("format", Json()), Json("genko-reply-draft@1"));
+            QCOMPARE(kept.value("item", Json()), Json(name_ticket));
+            QCOMPARE(kept.value("text", Json()), Json(words.toStdString()));
+            QVERIFY(QDateTime::fromString(QString::fromStdString(kept.value("at", Json("")).get<std::string>()), Qt::ISODate).isValid());
+            // not a change of the book: no journal line, no Undo, nothing to save
+            QCOMPARE(file_bytes(book.path / "studio" / "journal.jsonl"), journal);
+            QCOMPARE(file_bytes(book.path / "project.json"), project);
+            QCOMPARE(desk.session->can_undo(), could_undo);
+            QVERIFY(!desk.session->unsaved());
+            // another request's words, and the window closed at once: written as it closes
+            QVERIFY(desk.choose(QStringLiteral("相談（1 ページ）")));
+            question_ticket = desk.box()->current()->ticket_id;
+            type_in(desk.box()->reason, QStringLiteral("紺で"));
+            desk.window->close();
+            QVERIFY(fs::exists(draft_file(book.path, question_ticket)));
+            QCOMPARE(genko::test::read_json(QString::fromStdString(core::path_to_utf8(draft_file(book.path, question_ticket)))).value("text", Json()),
+                     Json("紺で"));
+        }
+        // another run of the app (a copy of the book: nothing of it in memory), with broken files beside the drafts
+        const fs::path copy = book.root / "copy.genko";
+        genko::test::copy_tree(QString::fromStdString(core::path_to_utf8(book.path)), QString::fromStdString(core::path_to_utf8(copy)));
+        const fs::path drafts = copy / "studio" / "reply_drafts";
+        const std::vector<fs::path> broken{draft_file(copy, "not json"), draft_file(copy, "big"), draft_file(copy, "t-other"),
+                                           draft_file(copy, "t-a"), draft_file(copy, "t-long"), draft_file(copy, "t-list")};
+        put_file(broken[0], "{\"format\": \"genko-reply-draft@1\", \"item\": ");
+        put_file(broken[1], draft_json("big", std::string(300 * 1024, 'a')));
+        put_file(broken[2], draft_json("t-other", "x", "genko-reply-draft@9"));
+        put_file(broken[3], draft_json("t-b", "x"));
+        put_file(broken[4], draft_json("t-long", std::string(65 * 1024, 'a')));
+        put_file(broken[5], "[\"t-list\"]\n");
+        put_file(drafts / "notes.txt", "keep");
+        const fs::path temporary = drafts / (draft_file(copy, "t-x").filename().string() + ".123.abc.tmp");
+        put_file(temporary, "half");
+        Desk again(copy, book.root / "recovery");
+        QVERIFY(again.choose(QStringLiteral("ネームの承認: 1, 2 ページ")));  // (the book's drafts read when first wanted)
+        const QString notice = again.window->last_error();
+        QVERIFY2(notice.startsWith(QStringLiteral("返事の下書きのファイルが壊れていたため、読まずに捨てました: ")), qPrintable(notice));
+        for (const fs::path& gone : broken) {
+            QVERIFY2(!fs::exists(gone), gone.filename().string().c_str());
+            QVERIFY(notice.contains(QString::fromStdString(gone.filename().string())));
+        }
+        QVERIFY(notice.contains(QStringLiteral("大きすぎます（256 KiB まで）")));
+        QVERIFY(notice.contains(QStringLiteral("言葉が長すぎます（64 KiB まで）")));
+        QVERIFY(notice.contains(QStringLiteral("ファイルの名前が中身の依頼と合いません")));
+        QVERIFY(notice.contains(QStringLiteral("UTF-8 の JSON として読めません")));
+        QVERIFY(fs::exists(drafts / "notes.txt"));
+        QVERIFY(fs::exists(temporary));
+        QCOMPARE(again.box()->reason->toPlainText(), words);
+        QVERIFY(again.choose(QStringLiteral("相談（1 ページ）")));
+        QCOMPARE(again.box()->reason->toPlainText(), QStringLiteral("紺で"));
+        // sent: its file goes with it
+        again.yes = {true};
+        again.box()->back_button->click();
+        QVERIFY(again.saved());
+        QVERIFY(!fs::exists(draft_file(copy, question_ticket)));
+        // emptied: the file goes
+        QVERIFY(again.choose(QStringLiteral("ネームの承認: 1, 2 ページ")));
+        QCOMPARE(again.box()->reason->toPlainText(), words);
+        again.box()->reason->selectAll();
+        QTest::keyClick(again.box()->reason, Qt::Key_Delete);
+        QVERIFY(gui_test::wait_for([&] { return !fs::exists(draft_file(copy, name_ticket)); }, 30000));
+        // too long to keep (64 KiB of UTF-8): no file (not an older, shorter one either), and the person is told once
+        type_in(again.box()->reason, QStringLiteral("短い"));
+        app::Drafts::instance().flush();
+        QVERIFY(fs::exists(draft_file(copy, name_ticket)));
+        again.box()->reason->setPlainText(QString(22 * 1024, QChar(0x3042)));  // (3 bytes each: 66 KiB)
+        app::Drafts::instance().flush();
+        QVERIFY(!fs::exists(draft_file(copy, name_ticket)));
+        QVERIFY2(again.window->last_error().startsWith(QStringLiteral("返事の下書きが長すぎるため（64 KiB まで）、原稿には残しません")),
+                 qPrintable(again.window->last_error()));
+        QCOMPARE(again.box()->reason->toPlainText().size(), 22 * 1024);  // (the words stay in the box)
+        again.box()->reason->setPlainText(QString(21 * 1024, QChar(0x3042)));
+        app::Drafts::instance().flush();
+        QVERIFY(fs::exists(draft_file(copy, name_ticket)));
+    }
+
+    // Save As: the words not sent go on in the new book (its folder keeps them); the old book keeps its own.
+    void draftsGoOnAfterSaveAs() {
+        StudioBook book;
+        Desk desk(book.path, book.root / "recovery");
+        QVERIFY(desk.choose(QStringLiteral("ネームの承認: 1, 2 ページ")));
+        const std::string ticket = desk.box()->current()->ticket_id;
+        type_in(desk.box()->reason, QStringLiteral("続き"));
+        app::Drafts::instance().flush();
+        QVERIFY(fs::exists(draft_file(book.path, ticket)));
+        const fs::path target = book.root / "saved.genko";
+        desk.answers.responder->save_path = [&](const QString&, const QString&) { return QString::fromStdString(core::path_to_utf8(target)); };
+        desk.window->action(QStringLiteral("act_save_as"))->trigger();  // (別の場所に保存…: it waits for the copy)
+        QVERIFY(desk.session->path() && *desk.session->path() == target);
+        app::Drafts::instance().flush();
+        QVERIFY(fs::exists(draft_file(target, ticket)));
+        QCOMPARE(genko::test::read_json(QString::fromStdString(core::path_to_utf8(draft_file(target, ticket)))).value("text", Json()), Json("続き"));
+        QVERIFY(gui_test::wait_for([&] { return desk.box()->reason->toPlainText() == QStringLiteral("続き") &&
+                                                desk.box()->book_key() == QString::fromStdString(core::path_to_utf8(target)); }, 30000));
+        QVERIFY(fs::exists(draft_file(book.path, ticket)));
+    }
+
+    // Only a v4 book that can be changed keeps drafts in its folder: a v1–v3 book (M5②'s needs_migration), a book
+    // opened read-only and a book not saved yet keep them in memory, and nothing is written in their folders.
+    void draftsOnlyInV4Books() {
+        QTemporaryDir tmp;
+        const fs::path v3 = gui_test::path_of(tmp.path()) / "v3.genko";
+        genko::test::copy_tree(genko::test::repo_root() + QStringLiteral("/native/tests/data/legacy/book-v3.genko"),
+                               QString::fromStdString(core::path_to_utf8(v3)));
+        auto& drafts = app::Drafts::instance();
+        const QString old_key = QString::fromStdString(core::path_to_utf8(v3));
+        drafts.place(old_key, v3, true);
+        QVERIFY(!drafts.kept_on_disk(old_key));
+        drafts.set(old_key, QStringLiteral("t-1"), QStringLiteral("言葉"));
+        drafts.flush();
+        QCOMPARE(drafts.get(old_key, QStringLiteral("t-1")), QStringLiteral("言葉"));
+        QVERIFY(!fs::exists(v3 / "studio" / "reply_drafts"));
+        StudioBook book(false);
+        const QString locked = QString::fromStdString(core::path_to_utf8(book.path));
+        drafts.place(locked, book.path, false);
+        QVERIFY(!drafts.kept_on_disk(locked));
+        drafts.set(locked, QStringLiteral("t-1"), QStringLiteral("言葉"));
+        drafts.flush();
+        QVERIFY(!fs::exists(book.path / "studio" / "reply_drafts"));
+        drafts.place(QStringLiteral("book:new"), std::nullopt, true);
+        QVERIFY(!drafts.kept_on_disk(QStringLiteral("book:new")));
+        // (the same folder can be changed now: its drafts are written)
+        drafts.place(locked, book.path, true);
+        QVERIFY(drafts.kept_on_disk(locked));
+        drafts.flush();
+        QVERIFY(fs::exists(draft_file(book.path, "t-1")));
+        drafts.forget(locked, QStringLiteral("t-1"));
+        QVERIFY(!fs::exists(draft_file(book.path, "t-1")));
+        drafts.forget(old_key, QStringLiteral("t-1"));
     }
 
     // 返事なしで閉じる with a reply written and not sent: asked first; the draft goes only when it is closed.
@@ -645,6 +889,154 @@ private slots:
         // another tab and back: the requests already there are not new
         delete note;
         QVERIFY(gui_test::wait_for([&] { return desk.window->canvas()->findChild<QLabel*>(QStringLiteral("toast")) == nullptr; }, 60000));
+    }
+
+    // 絵柄を選ぶ (Python's StylePicker) on a catalog in a folder: the genres with their thumbnails, a branch's card (its
+    // sample, its words when asked, the site's page — asked of the browser, never opened by the test), down and up the
+    // levels, the search, a pasted genko:// link, a black-and-white style marked on a colour book, the book's style
+    // opened where it is, and a catalog that cannot be read.
+    void stylePicker() {
+        Catalog catalog;
+        gui_test::Answers answers;
+        {
+            app::StylePicker picker(nullptr);
+            QVERIFY(read_through(picker));
+            QCOMPARE(picker.where->text(), QStringLiteral("絵柄カタログ — 1段目（ジャンル）"));
+            QCOMPARE(picker.list->count(), 2);
+            QCOMPARE(picker.list->item(0)->text(), QStringLiteral("少年漫画\n熱い（下に 1 種）"));
+            QCOMPARE(picker.list->item(1)->text(), QStringLiteral("ギャグ漫画\n笑い（下に 1 種）"));
+            QVERIFY(!picker.list->item(0)->icon().isNull());
+            QVERIFY(picker.list->item(1)->icon().isNull());
+            QVERIFY(!picker.up->isEnabled());
+            QVERIFY(!picker.ok->isEnabled());
+            QVERIFY(picker.plain->isHidden());
+            picker.list->setCurrentRow(0);
+            QVERIFY(picker.ok->isEnabled());
+            QVERIFY(read_through(picker));
+            QCOMPARE(picker.title->text(), QStringLiteral("少年漫画"));
+            QCOMPARE(picker.summary->text(), QStringLiteral("熱い"));
+            QCOMPARE(picker.fit->text(), QStringLiteral("白黒・版 3"));
+            QCOMPARE(picker.words->text(), QStringLiteral("モノクロの日本のマンガのコマ。灰色はすべて網点で表す。"));
+            QVERIFY(!picker.picture->pixmap().isNull());
+            QVERIFY(picker.words_area->isHidden());
+            picker.show_words->click();
+            QVERIFY(!picker.words_area->isHidden());
+            picker.site->click();
+            QCOMPARE(answers.asked.value(0), QStringLiteral("open_url: ") + QString::fromStdString(service::stylecat::page_url("shonen")));
+            // down (Enter, as a double click), down again: the third level
+            QTest::keyClick(picker.list, Qt::Key_Return);
+            QVERIFY(picker.here() == std::optional<std::string>("shonen"));
+            QCOMPARE(picker.where->text(), QStringLiteral("絵柄カタログ › 少年漫画 — 2段目"));
+            QVERIFY(picker.up->isEnabled());
+            picker.go_down("shonen-battle");
+            QCOMPARE(picker.list->item(0)->data(Qt::UserRole).toString(), QStringLiteral("shonen-battle-chibi"));
+            QVERIFY(picker.where->text().endsWith(QStringLiteral("3段目（仕上げの絵柄）")));
+            picker.go_down("shonen-battle-chibi");  // (nothing under it: stays)
+            QVERIFY(picker.here() == std::optional<std::string>("shonen-battle"));
+            // up twice: the genres, with the one come from chosen
+            picker.up->click();
+            QVERIFY(picker.chosen_id() == std::optional<std::string>("shonen-battle"));
+            picker.up->click();
+            QVERIFY(picker.here() == std::optional<std::string>());
+            QVERIFY(picker.chosen_id() == std::optional<std::string>("shonen"));
+            // the search: only the rows with every word
+            picker.find->setText(QStringLiteral("少年　熱い"));
+            QVERIFY(!picker.list->item(0)->isHidden());
+            QVERIFY(picker.list->item(1)->isHidden());
+            picker.find->setText(QStringLiteral("ない言葉"));
+            QVERIFY(picker.list->item(0)->isHidden());
+            picker.find->clear();
+            QVERIFY(!picker.list->item(1)->isHidden());
+            // a link pasted: that style, in its level
+            picker.find->setText(QStringLiteral("genko://use-style?id=shonen-battle-chibi"));
+            QVERIFY(picker.find->text().isEmpty());
+            QVERIFY(picker.here() == std::optional<std::string>("shonen-battle"));
+            QVERIFY(picker.chosen_id() == std::optional<std::string>("shonen-battle-chibi"));
+            picker.ok->click();
+            QCOMPARE(picker.result(), int(QDialog::Accepted));
+            QVERIFY(picker.chosen == std::optional<std::string>("shonen-battle-chibi"));
+            QVERIFY(!picker.back_to_genko);
+        }
+        {
+            // a colour book: a black-and-white style is marked
+            app::StylePicker picker(nullptr, Json(), "color");
+            QVERIFY(read_through(picker));
+            picker.list->setCurrentRow(1);
+            QVERIFY(read_through(picker));
+            QCOMPARE(picker.fit->text(), QStringLiteral("白黒・版 3　この原稿はカラーなので、絵の依頼には使われません"));
+            QVERIFY(!picker.show_words->isChecked());
+        }
+        {
+            // the book's style: opened where it is, Genko's own words offered
+            const Json kept = service::stylecat::saved(service::stylecat::style(Json("shonen-battle-chibi")), std::nullopt);
+            app::StylePicker picker(nullptr, kept);
+            QVERIFY(read_through(picker));
+            QVERIFY(picker.here() == std::optional<std::string>("shonen-battle"));
+            QVERIFY(picker.chosen_id() == std::optional<std::string>("shonen-battle-chibi"));
+            QVERIFY(!picker.plain->isHidden());
+            picker.plain->click();
+            QCOMPARE(picker.result(), int(QDialog::Accepted));
+            QVERIFY(picker.back_to_genko);
+        }
+        {
+            // a catalog that is not there: said where the levels are, nothing listed
+            qputenv("GENKO_STYLE_CATALOG", (QStringLiteral("file://") + catalog.site.path() + QStringLiteral("/nowhere")).toUtf8());
+            app::StylePicker picker(nullptr);
+            QVERIFY(read_through(picker));
+            QCOMPARE(picker.list->count(), 0);
+            QVERIFY(!picker.where->text().isEmpty());
+            QVERIFY(picker.where->text() != QStringLiteral("絵柄カタログを読んでいます…"));
+            qputenv("GENKO_STYLE_CATALOG", (QStringLiteral("file://") + catalog.root).toUtf8());
+        }
+        QCOMPARE(answers.asked.size(), 1);  // (one page asked of the browser; nothing else)
+    }
+
+    // 絵柄を選ぶ… in the window (Python's _pick_style): a style whose name is used elsewhere is asked about — a "no" goes
+    // back to the picker —, the next one is taken into the book (its words and sample kept); again, Genko's own words.
+    void pickStyle() {
+        Catalog catalog;
+        StudioBook book(false);
+        Desk desk(book.path, book.root / "recovery");
+        int shown = 0;
+        QList<bool> plain_offered;  // (Genko の言葉に戻す: only for a book with a style)
+        desk.on_dialog = [&](QDialog* dialog) -> int {
+            auto* picker = qobject_cast<app::StylePicker*>(dialog);
+            if (picker == nullptr || !read_through(*picker)) return QDialog::Rejected;
+            ++shown;
+            if (shown == 1) {
+                picker->find->setText(QStringLiteral("genko://use-style?id=shonen-battle-chibi"));
+                picker->ok->click();
+            } else if (shown == 2) {
+                plain_offered << !picker->plain->isHidden();
+                picker->list->setCurrentRow(1);  // (ギャグ漫画: a genre may be chosen)
+                picker->ok->click();
+            } else {
+                plain_offered << !picker->plain->isHidden();
+                picker->plain->click();
+            }
+            return picker->result();
+        };
+        desk.yes = {false};
+        desk.window->action(QStringLiteral("act_style"))->trigger();
+        QCOMPARE(shown, 2);
+        QCOMPARE(desk.questions.size(), 1);
+        QVERIFY(desk.questions.value(0).startsWith(QStringLiteral("絵柄を選ぶ: 「スタジオ」の絵柄を「少年漫画 › バトル › 低頭身のデフォルメ」にしますか？")));
+        QVERIFY(desk.questions.value(0).contains(QStringLiteral("同じ名前の絵柄がほかの分類にもあります: ギャグ漫画 › 低頭身のデフォルメ")));
+        const Json kept = desk.window->book().studio["style"]["catalog"];
+        QCOMPARE(kept["id"], Json("gag"));
+        QVERIFY(storage::AssetStore(book.path).has(kept["sample"].get<std::string>(), ".png"));
+        QVERIFY(desk.window->last_notice().startsWith(QStringLiteral("絵柄を「ギャグ漫画」にしました（版 3）")));
+        QVERIFY(desk.saved());
+        QCOMPARE(gui_test::read_book(book.path).studio["style"]["catalog"]["id"], Json("gag"));
+        // again: Genko's own words
+        desk.window->action(QStringLiteral("act_style"))->trigger();
+        QCOMPARE(shown, 3);
+        QCOMPARE(plain_offered, QList<bool>({false, true}));
+        QCOMPARE(desk.window->last_notice(), QStringLiteral("絵柄を Genko の言葉に戻しました"));
+        QVERIFY(desk.saved());
+        const Json style = gui_test::read_book(book.path).studio.value("style", Json::object());
+        QVERIFY(!style.is_object() || !core::py_truthy(style.value("catalog", Json())));
+        QCOMPARE(desk.questions.size(), 1);
     }
 
     // genko:// links: one handed over by a later start of this build's genko; one the window does not know; a style from

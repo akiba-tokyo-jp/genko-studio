@@ -39,8 +39,11 @@
 
 #include "core/base64.hpp"
 #include "core/json.hpp"
+#include "core/paths.hpp"
 #include "render/image.hpp"
 #include "render/png.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/journal.hpp"
 #include "testsupport.hpp"
 
 using genko::core::Json;
@@ -506,6 +509,36 @@ private slots:
         const auto after = book_tree(book);
         QVERIFY2(after == before, tree_diff(before, after).c_str());
         QVERIFY(genko::test::read_bytes(book + "/studio/logs/tools.jsonl").size() > logged);
+    }
+
+    // An agent's Undo past a state an older Genko's `genko gc` removed (schema-v4 §8): refused in Japanese (undo_refused,
+    // history_missing's words), nothing of the book written.
+    void undoPastAGoneState() {
+        const QString dir = fresh("history-gone");
+        const QString book = dir + "/root/b.genko";
+        {
+            Mcp mcp(dir + "/root", dir + "/config");
+            mcp.initialize();
+            QVERIFY(!make_book(mcp, "b.genko", 1).empty());
+            const Json changed = Mcp::text(mcp.call("apply_ops", Json::object({{"project", "b.genko"},
+                                                                               {"ops", Json::array({Json::object({{"op", "set_note"}, {"page", 1}, {"note", "x"}})})},
+                                                                               {"commit", true}})));
+            QCOMPARE(changed["ok"], Json(true));
+        }
+        const auto dir_path = genko::core::path_from_utf8(book.toStdString());
+        const std::string gone = *genko::storage::journal::stacks(dir_path).undo.back().before;
+        QVERIFY(QFile::remove(QString::fromStdString(genko::core::path_to_utf8(genko::storage::AssetStore(dir_path).path(gone, ".state.json")))));
+        const auto before = book_tree(book);
+        Mcp mcp(dir + "/root", dir + "/config");
+        mcp.initialize();
+        const Json reply = Mcp::text(mcp.call("undo", Json::object({{"project", "b.genko"}})));
+        QCOMPARE(reply["ok"], Json(false));
+        const std::string all = genko::core::dump_python(reply);
+        QVERIFY2(all.find("undo_refused") != std::string::npos, all.c_str());
+        QVERIFY2(all.find("これより前に戻すための記録（履歴の状態）が原稿から消えているため、ここより前には戻せません") != std::string::npos, all.c_str());
+        mcp.lines();
+        const auto after = book_tree(book);
+        QVERIFY2(after == before, tree_diff(before, after).c_str());
     }
 
     // Numbers this build cannot carry (NaN, infinities, integers past 64 bits; in the JSON or as text) are refused,

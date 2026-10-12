@@ -79,6 +79,7 @@ genko_library(genko_app
     client_config.cpp
     mcp_probe.cpp
     reply_box.cpp
+    style_picker.cpp
     viewer.cpp
     studio_widgets.cpp
     ai_dialog.cpp

@@ -8,6 +8,7 @@
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/journal.hpp"
+#include "storage/reply_drafts.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "storage/state.hpp"
@@ -203,6 +204,16 @@ Json gc(const fs::path& dir, bool dry_run, const std::string& agent, bool legacy
         if (!dry_run) {
             fs::remove(file, ec);
             if (ec) throw core::Error("io", os_error_text(ec.value(), file), path_to_utf8(file));
+        }
+    }
+    // the app's reply drafts of requests closed or gone (studio/reply_drafts/: schema-v4 「返事の下書き」)
+    if (disk.exists) {
+        for (const fs::path& file : reply_drafts::stale(dir, disk.payload)) {
+            removed.push_back(path_to_utf8(file.lexically_relative(dir)));
+            if (dry_run) continue;
+            std::error_code gone;
+            fs::remove(file, gone);
+            if (gone) throw core::Error("io", os_error_text(gone.value(), file), path_to_utf8(file));
         }
     }
     bool legacy_removed = false;

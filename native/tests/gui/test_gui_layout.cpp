@@ -45,6 +45,7 @@
 #include "app/client_config.hpp"
 #include "app/reply_box.hpp"
 #include "app/studio_widgets.hpp"
+#include "app/style_picker.hpp"
 #include "app/check_panel.hpp"
 #include "app/dialogs.hpp"
 #include "app/export_dialog.hpp"
@@ -61,6 +62,7 @@
 #include "app/thumbs.hpp"
 #include "core/strokes.hpp"
 #include "gui_support.hpp"
+#include "testsupport.hpp"
 #include "service/studio_service.hpp"
 #include "storage/reader.hpp"
 
@@ -278,6 +280,24 @@ int probe(int argc, char** argv) {
                 {QStringLiteral("理由"), window.approvals()->reason, false}};
         out << look_at(QStringLiteral("main-studio"), &window, QSize(1280, 800), seen).dump() << "\n";
     }
+    {
+        // M5④: 絵柄を選ぶ, on a catalog of the test's (a folder: nothing is read from the network)
+        const QString catalog = dir.filePath("catalog");
+        QDir().mkpath(catalog + QStringLiteral("/v1/styles"));
+        genko::test::write_bytes(catalog + QStringLiteral("/v1/tree"),
+                                 R"({"nodes": [{"id": "gag", "parent": null, "level": 1, "title": "ギャグ漫画", "summary": "笑い"}, )"
+                                 R"({"id": "gag-doodle", "parent": "gag", "level": 2, "title": "ゆるい落書き風", "summary": "震える線"}]})");
+        qputenv("GENKO_STYLE_CATALOG", (QStringLiteral("file://") + catalog).toUtf8());
+        app::StylePicker picker(nullptr, Json{{"id", "gag-doodle"}, {"title", "ゆるい落書き風"}, {"path", {"ギャグ漫画", "ゆるい落書き風"}}, {"version", 1}});
+        QElapsedTimer clock;
+        clock.start();
+        while (picker.reading() > 0 && clock.elapsed() < 60000) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        std::vector<Seen> seen = buttons_of(&picker, true);
+        for (QWidget* field : std::vector<QWidget*>{picker.find, picker.list, picker.up, picker.show_words, picker.site})
+            seen.push_back(Seen{QStringLiteral("style field"), field, false});
+        out << look_at(QStringLiteral("style"), &picker, QSize(820, 600), seen).dump() << "\n";
+        qunsetenv("GENKO_STYLE_CATALOG");
+    }
     return 0;
 }
 
@@ -387,7 +407,7 @@ private slots:
                 }
             }
         }
-        QCOMPARE(windows, 17);
+        QCOMPARE(windows, 18);
     }
 
     // 試験 5: a long Japanese path, cut to fit, all of it one click away, copied whole

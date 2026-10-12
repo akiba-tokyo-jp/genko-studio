@@ -1,10 +1,12 @@
 #include "app/ask.hpp"
 
 #include <QColorDialog>
+#include <QDesktopServices>
 #include <QDialog>
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QUrl>
 
 namespace genko::app::ask {
 
@@ -100,6 +102,11 @@ QString open_path(QWidget* parent, const QString& caption, const QString& filter
 int exec(QDialog* dialog) {
     if (const auto r = current(); r && r->exec) return r->exec(dialog);
     return dialog->exec();
+}
+
+bool open_url(const QUrl& url) {
+    if (const auto r = current(); r && r->open_url) return r->open_url(url);
+    return QDesktopServices::openUrl(url);
 }
 
 }  // namespace genko::app::ask

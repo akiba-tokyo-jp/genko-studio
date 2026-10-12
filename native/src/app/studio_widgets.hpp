@@ -43,6 +43,10 @@ QImage thumbnail(const QImage& image, QSize box);
 // The shot and angle in words, then the action and the emotion (_brief_words).
 QStringList brief_words(const core::Json& panel);
 
+// The key of the window's book for the reply drafts (Drafts): its folder, or (not saved yet) "book:<id>". The book's
+// drafts are placed first (Drafts::place): kept in its folder when it can be changed and is a v4 book.
+QString draft_book_key(const MainWindow& window);
+
 // A short note at the bottom of the window's page that goes away by itself (a click closes it: comfort.toast).
 QLabel* toast(MainWindow* window, const QString& text, int ms = 5000);
 

@@ -7,15 +7,22 @@ into the product.
 
     PYTHONPATH=src python3 tools/migration/studio_gui_harness.py review BOOK OUT
     PYTHONPATH=src python3 tools/migration/studio_gui_harness.py ai CASES OUT
+    PYTHONPATH=src python3 tools/migration/studio_gui_harness.py drafts CASES OUT
 
 review: BOOK is the studio book (studio_harness.py make-studiobook) — first given the requests it lacks, as the agent
 (ai:hermes) asks for them (an art approval of page 1, an export approval, a question about the whole book, a sheet of a
 character the book does not have; saved as v3) —, then for each request in the box: its fields and title, the
 numbered sheet candidates, the ops of 承認 (a sheet with the first candidate the box lists; once more without any) and
 of 差し戻し with "", "  " and a reason in two lines. "progress" is the process bar's counts.
+drafts: CASES is a JSON list of {"book", "work"}: what the Python version does with a book that has the app's reply
+drafts (studio/reply_drafts/, C++ only): read it (load_episode), the CLI's inspect, apply (a note on page 1, saved: a v2
+book is migrated to v3), a save (save_episode), render, export, undo, redo, gc, doctor, `genko studio audit` and `review`,
+then a backup (backup.make into WORK). Each step's exit code (or what it raised) and the files of the backup; the C++
+test compares the draft files' bytes before and after.
 ai: CASES is a JSON list of {"fn", ...}: snippet (client, root, base: the command that starts Genko), first_request
 (book or null), ai_name (actor), ago (minutes), recent_ai / status_words (book, now), root_text (typed: str(Path(typed
-.strip() or "."))), is_link (text), link_name (user: getpass.getuser()). Each answer, or {"raised", "message"}.
+.strip() or "."))), is_link (text), link_name (user: getpass.getuser()), toollog (book: toollog.read), others (book, actor,
+now: presence.others). Each answer, or {"raised", "message"}.
 """
 from __future__ import annotations
 
@@ -173,6 +180,14 @@ def ai(cases_file: str, out: str) -> None:
                     results.append(ai_link.recent_ai(book) if fn == "recent_ai" else list(ai_link.status_words(book)))
                 finally:
                     time.time = real
+            elif fn == "toollog":
+                from genko.studio import toollog
+
+                results.append(toollog.read(Path(case["book"])))
+            elif fn == "others":
+                from genko.studio import presence
+
+                results.append(presence.others(Path(case["book"]), case["actor"], case["now"]))
             elif fn == "root_text":
                 results.append(str(Path(case["typed"].strip() or ".")))
             elif fn == "is_link":
@@ -192,6 +207,59 @@ def ai(cases_file: str, out: str) -> None:
     Path(out).write_text(_dump(results), encoding="utf-8")
 
 
+def drafts(cases_file: str, out: str) -> None:
+    import os
+    import subprocess
+    import zipfile
+
+    from genko import backup
+    from genko.io import load_episode, save_episode
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(ROOT / "src"), env.get("PYTHONPATH", "")]))
+
+    def cli(*argv: str) -> dict:
+        ran = subprocess.run([sys.executable, "-m", "genko", *argv], env=env, capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=600)
+        return {"exit": ran.returncode, "out": (ran.stdout or "")[-400:], "err": (ran.stderr or "")[-400:]}
+
+    results = []
+    for case in json.loads(Path(cases_file).read_text(encoding="utf-8")):
+        book, work = Path(case["book"]), Path(case["work"])
+        work.mkdir(parents=True, exist_ok=True)
+        ops = work / "ops.json"
+        ops.write_text(json.dumps([{"op": "set_note", "page": 1, "note": "メモ"}]), encoding="utf-8")
+        steps = {}
+        try:
+            load_episode(book)
+            steps["load"] = {"exit": 0}
+        except Exception as exc:  # noqa: BLE001 (compared)
+            steps["load"] = _raised(exc)
+        steps["inspect"] = cli("inspect", str(book))
+        steps["apply"] = cli("apply", str(book), str(ops), "--agent", "human:tester")
+        try:
+            save_episode(load_episode(book), book, actor="human:tester")
+            steps["save"] = {"exit": 0}
+        except Exception as exc:  # noqa: BLE001
+            steps["save"] = _raised(exc)
+        steps["render"] = cli("render", str(book), "--page", "1", "--out", str(work / "p1.png"), "--dpi", "50")
+        steps["export"] = cli("export", str(book), str(work / "export"), "--dpi", "50")
+        steps["undo"] = cli("undo", str(book), "--as", "human:tester")
+        steps["redo"] = cli("redo", str(book), "--as", "human:tester")
+        steps["gc"] = cli("gc", str(book))
+        steps["doctor"] = cli("doctor", str(book))
+        steps["studio_audit"] = cli("studio", "audit", str(book))
+        steps["studio_review"] = cli("studio", "review", str(book), "--out", str(work / "review.html"))
+        try:
+            made = backup.make(book, work / "backups")
+            with zipfile.ZipFile(made) as archive:
+                steps["backup"] = {"exit": 0, "names": sorted(archive.namelist())}
+        except Exception as exc:  # noqa: BLE001
+            steps["backup"] = _raised(exc)
+        results.append(steps)
+    Path(out).write_text(_dump(results), encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -201,9 +269,14 @@ def main() -> None:
     p = sub.add_parser("ai")
     p.add_argument("cases")
     p.add_argument("out")
+    p = sub.add_parser("drafts")
+    p.add_argument("cases")
+    p.add_argument("out")
     args = parser.parse_args()
     if args.cmd == "review":
         review(args.book, args.out)
+    elif args.cmd == "drafts":
+        drafts(args.cases, args.out)
     else:
         ai(args.cases, args.out)
 

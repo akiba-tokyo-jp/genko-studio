@@ -11,6 +11,7 @@
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QUrl>
 
 #include <chrono>
 #include <filesystem>
@@ -135,6 +136,11 @@ struct Answers {
         responder->exec = [self](QDialog* dialog) {
             self->asked << QString::fromLatin1(dialog->metaObject()->className());
             return 0;
+        };
+        // (a test never opens the browser: the page asked for is noted)
+        responder->open_url = [self](const QUrl& url) {
+            self->asked << QStringLiteral("open_url: ") + url.toString();
+            return true;
         };
         genko::app::ask::set_responder(responder);
     }

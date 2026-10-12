@@ -36,6 +36,7 @@
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
 #include "app/perf.hpp"
+#include "app/reply_box.hpp"
 #include "app/save_status.hpp"
 #include "app/studio_widgets.hpp"
 #include "app/theme.hpp"
@@ -416,6 +417,8 @@ void MainWindow::pen_changed() {
 void MainWindow::connect_session() {
     disconnect_session();
     Session* s = session_.get();
+    drafts_session_ = session_;  // (the key its reply drafts are kept under now: on_book_changed follows a new one)
+    drafts_key_ = draft_book_key(*this);
     session_links_.push_back(connect(s, &Session::changed, this, &MainWindow::on_book_changed));
     session_links_.push_back(connect(s, &Session::statusChanged, this, &MainWindow::refresh_status));
     // (a change saved: its time in 履歴)
@@ -493,6 +496,12 @@ void MainWindow::on_book_changed(const BookChange& change) {
     // (the studio: someone else's changes may bring requests for the person — a note, and the box in front)
     const bool outside = change.why == BookChange::Why::Rebase || change.why == BookChange::Why::Reload;
     const std::set<std::string> before = known_requests_;
+    // (the book saved in another place — Save As, a new book's first save —: its reply drafts go on there, before the
+    // boxes show the book under its new key)
+    const QString drafts_key = draft_book_key(*this);
+    if (drafts_session_.lock() == session_ && !drafts_key_.isEmpty() && drafts_key_ != drafts_key) Drafts::instance().carry(drafts_key_, drafts_key);
+    drafts_session_ = session_;
+    drafts_key_ = drafts_key;
     studio_follow(change.why != BookChange::Why::Edit);
     if (outside) {
         notice_requests(before);
@@ -968,6 +977,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         }
     }
     for (const auto& chosen : discards) chosen->discard();
+    Drafts::instance().flush();  // (the reply drafts not written yet go into their books now)
     closed_ = true;
     documents::remove(this);
     disconnect_session();

@@ -1136,7 +1136,7 @@ void Session::job_done(const JobResult& r) {
             static const QStringList kRefusals = {QStringLiteral("other_actor"), QStringLiteral("needs_person"),
                                                   QStringLiteral("nothing_to_undo"), QStringLiteral("nothing_to_redo"),
                                                   QStringLiteral("no_before"), QStringLiteral("missing_snapshot"),
-                                                  QStringLiteral("external_change")};
+                                                  QStringLiteral("history_missing"), QStringLiteral("external_change")};
             const bool undo_refused = refused && refused->kind != Action::Kind::Edit && kRefusals.contains(r.code);
             if (undo_refused) {
                 // the journal will not take this undo or redo back (another person's change, an approval…): the book stays

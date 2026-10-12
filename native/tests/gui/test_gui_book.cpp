@@ -404,13 +404,13 @@ private slots:
             QVERIFY2(a->isEnabled(), e.attribute);  // (Python's are always on: what cannot be done is said when chosen)
             QCOMPARE(menus_of(s.window.get(), a), QStringList{QString::fromUtf8(e.menu)});
         }
-        // ページ: Python's order (チャットでの承認 of M5④ in its place; 絵柄を選ぶ, of M5, not yet here)
+        // ページ: Python's order (絵柄を選ぶ and チャットでの承認 of M5④ in their places)
         QMenu* pages = top_menu(s.window.get(), QStringLiteral("ページ"));
         QVERIFY(pages != nullptr);
-        QCOMPARE(menu_texts(pages).mid(0, 17),
+        QCOMPARE(menu_texts(pages).mid(0, 18),
                  QStringList({QStringLiteral("ページを追加（この後ろに）"), QStringLiteral("このページを複製"), QStringLiteral("このページを消す…"), QStringLiteral("|"),
                               QStringLiteral("このページを前へ"), QStringLiteral("このページを後ろへ"), QStringLiteral("次のページと見開きにする／解除"), QStringLiteral("|"),
-                              QStringLiteral("原稿用紙の設定…"), QStringLiteral("チャットでの承認…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
+                              QStringLiteral("原稿用紙の設定…"), QStringLiteral("絵柄を選ぶ…"), QStringLiteral("チャットでの承認…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
                               QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("アニメーション（タイムライン）"),
                               QStringLiteral("|"), QStringLiteral("コマ")}));
         // ファイル: after the scans, before the export (書き出し and 印刷, M4③b: test_gui_output)

@@ -411,8 +411,8 @@ void MainWindow::build_menus() {
     pages->addAction(action("act_page_down"));
     pages->addAction(action("act_spread"));
     pages->addSeparator();
-    // (Python's order; 絵柄を選ぶ, of M5, joins it as it comes)
-    for (const char* name : {"act_paper", "act_chat_approval", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline"}) {
+    // (Python's order)
+    for (const char* name : {"act_paper", "act_style", "act_chat_approval", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline"}) {
         pages->addAction(action(name));
     }
     pages->addSeparator();

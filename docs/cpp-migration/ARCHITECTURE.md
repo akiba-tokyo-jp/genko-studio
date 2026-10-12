@@ -20,8 +20,9 @@ native/
               利用者向けの言葉（wording）。`genko studio`・MCP・HTTP・アプリが同じものを呼ぶ
     api/      CLI（genko）、HTTP、MCP、設定変換、エラー整形
     app/      Qt Widgets 画面、ペン、IME、案内（GUI だけが Qt Widgets に依存）。スタジオの画面（承認箱・工程・コマの詳細・資料・
-              AI と作る・genko:// のリンク）も。承認箱の中身（review_model）と AI と作る の Qt を使わない部分（ai_link・
-              client_config）は画面から分けて Python と照合する
+              AI と作る・絵柄を選ぶ・genko:// のリンク）も。承認箱の中身（review_model）と AI と作る の Qt を使わない部分（ai_link・
+              client_config）は画面から分けて Python と照合する。AI への返事の下書き（reply_box）は v4 の原稿の
+              studio/reply_drafts/ に置く（原稿の変更・履歴ではない。schema-v4「返事の下書き」）
   tests/      unit/  contract/  e2e/  perf/  data/（固定の小さな試験資産）
 tools/migration/   台帳生成・固定原稿生成・Python 参照比較（開発用。製品に入れない）
 ```

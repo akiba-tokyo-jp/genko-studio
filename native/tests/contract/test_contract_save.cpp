@@ -19,6 +19,7 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <set>
 #include <string>
@@ -545,6 +546,63 @@ private slots:
         const auto again = genko::test::run_genko({"new", path("new-cpp-0.genko")});
         QCOMPARE(again.exit_code, 1);
         QCOMPARE(genko::test::one_line(again.out)["code"], Json("exists"));
+    }
+
+    // The reference Python's `genko gc` run on v4 books (a person with the older Genko: schema-v4 §8). It keeps what a v3
+    // journal names, so it removes, once they are a day old, the assets only an older v4 state names (here the strokes
+    // of the first line) and the converted history (legacy/: its states and old snapshots). This build then opens each
+    // book whole, refuses the Undo past what is gone (history_missing, nothing written), saves and undoes the changes
+    // made since, runs its own gc, and doctor says what is gone and how far Undo goes.
+    void olderGcOnV4Books() {
+        const QString native = path("older-gc-native.genko");
+        QCOMPARE(genko::test::run_genko({"new", native, "--pages", "2"}).exit_code, 0);
+        for (const char* ops : {R"([{"op": "add_stroke", "page": 1, "layer": "ink", "points": [[20, 20], [60, 60]]}])",
+                                R"([{"op": "add_stroke", "page": 1, "layer": "ink", "points": [[30, 20], [70, 60]]}])",
+                                R"([{"op": "set_note", "page": 1, "note": "メモ"}])"}) {
+            genko::test::write_bytes(path("older-gc-ops.json"), ops);
+            const auto done = genko::test::run_genko({"apply", native, path("older-gc-ops.json"), "--agent", "human:作者"});
+            QVERIFY2(done.exit_code == 0, done.out.constData());
+        }
+        QCOMPARE(genko::test::run_genko({"undo", native, "--as", "human:作者"}).exit_code, 0);  // (a Redo waits)
+        const QString migrated = path("older-gc-migrated.genko");
+        QCOMPARE(genko::test::run_genko({"migrate", genko::test::test_data("legacy/book-v3.genko"), migrated}).exit_code, 0);
+        for (const QString& book : {native, migrated}) {
+            // a day and more since the assets were written; then the older Genko's gc
+            for (const auto& entry : fs::recursive_directory_iterator(to_path(book + "/assets"))) {
+                if (entry.is_regular_file()) fs::last_write_time(entry.path(), fs::file_time_type::clock::now() - std::chrono::hours(48));
+            }
+            const auto gc = py_cli({"gc", book});
+            QVERIFY2(gc.finished && gc.exit_code == 0, (gc.out + gc.err).constData());
+            const Json removed = genko::test::one_line(gc.out)["removed"];
+            QVERIFY2(!removed.empty(), gc.out.constData());
+            // opened whole
+            const auto inspect = genko::test::run_genko({"inspect", book});
+            QVERIFY2(inspect.exit_code == 0, inspect.out.constData());
+            QCOMPARE(genko::test::book_problems(book), std::string());
+            // the Undo past what is gone: refused, nothing written
+            const auto before = genko::test::tree_hashes(book, false);
+            const auto undo = genko::test::run_genko({"undo", book, "--as", "human:作者", "--force"});
+            QCOMPARE(undo.exit_code, 1);
+            const Json refused = genko::test::one_line(undo.out);
+            QCOMPARE(refused["code"], Json("history_missing"));
+            QVERIFY2(refused["error"].get<std::string>().starts_with("cannot undo past this change: its history state "), undo.out.constData());
+            QVERIFY(genko::test::tree_hashes(book, false) == before);
+            // doctor: what is gone, and how far Undo goes
+            const Json report = genko::test::one_line(genko::test::run_genko({"doctor", book}).out);
+            QCOMPARE(report["ok"], Json(false));
+            const std::string problems = report["problems"].dump();
+            QVERIFY2(problems.find(book == native ? "need assets that are missing (the strokes assets/" : "are missing from assets/") != std::string::npos,
+                     problems.c_str());
+            QVERIFY2(problems.find("Undo goes back 0 of the ") != std::string::npos, problems.c_str());
+            // a change saved and undone; the Undo after it stops where it did
+            genko::test::write_bytes(path("older-gc-ops.json"), R"([{"op": "set_note", "page": 2, "note": "後で"}])");
+            QCOMPARE(genko::test::run_genko({"apply", book, path("older-gc-ops.json"), "--agent", "human:作者"}).exit_code, 0);
+            QCOMPARE(genko::test::run_genko({"undo", book, "--as", "human:作者"}).exit_code, 0);
+            QCOMPARE(genko::test::one_line(genko::test::run_genko({"undo", book, "--as", "human:作者", "--force"}).out)["code"], Json("history_missing"));
+            // this build's gc, and the book is still whole
+            QCOMPARE(genko::test::run_genko({"gc", book}).exit_code, 0);
+            QCOMPARE(genko::test::book_problems(book), std::string());
+        }
     }
 
     void oldWriterWhileConverting() {

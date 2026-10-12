@@ -27,6 +27,13 @@ Json RestoreResult::to_json() const {
     return out;
 }
 
+std::optional<std::string> missing_asset(const LoadReport& report) {
+    for (const auto& issue : report.issues) {
+        if (issue.kind == "missing_asset") return issue.message;
+    }
+    return std::nullopt;
+}
+
 RestoreResult restore(const ProjectLock& lock, const std::string& actor, bool redo, bool force, const std::string& txn) {
     const fs::path dir = lock.project();
     const std::string kind = redo ? "redo" : "undo";
@@ -57,10 +64,21 @@ RestoreResult restore(const ProjectLock& lock, const std::string& actor, bool re
         }
         throw core::Error("no_before", "the project did not exist before this change");
     }
+    // (a state of the history, or an asset it needs, may be gone — an older Genko's `genko gc` keeps only what a v3
+    // book's journal names —: refused before anything is written, the book and its journal as they were)
+    const std::string cannot = redo ? "cannot redo this change" : "cannot undo past this change";
     AssetStore store(dir);
     const auto data = store.get_bytes(*wanted, kStateSuffix);
-    if (!data) throw core::Error("missing_snapshot", "snapshot " + *wanted + " is missing from assets/");
-    const Json state = core::parse_python_json(*data);
+    if (!data) {
+        throw core::Error("history_missing", cannot + ": its history state " + *wanted +
+                                                 " is missing from assets/ (an older Genko's genko gc removes such states); nothing was changed");
+    }
+    Json state;
+    try {
+        state = core::parse_python_json(*data);
+    } catch (const core::Error&) {
+        state = Json();
+    }
     if (AssetStore::ref(*data) != *wanted || !state.is_object()) {
         throw core::Error("missing_snapshot", "snapshot " + *wanted + " does not hold the state its name says");
     }
@@ -76,6 +94,10 @@ RestoreResult restore(const ProjectLock& lock, const std::string& actor, bool re
     // The state goes back as it was saved; the book read from it gives project.json's key order.
     const LoadResult loaded = load_document_payload(state, dir);
     if (!loaded.report.clean()) {
+        if (const auto gone = missing_asset(loaded.report)) {
+            throw core::Error("history_missing", cannot + ": its history state " + *wanted + " needs assets that are missing (" + *gone +
+                                                     "; an older Genko's genko gc removes such assets); nothing was changed");
+        }
         throw core::Error("missing_snapshot", "snapshot " + *wanted + " cannot be restored: " + loaded.document.read_only_reason);
     }
     const Json payload = ordered_like(state, project_payload_v4(loaded.document, store));

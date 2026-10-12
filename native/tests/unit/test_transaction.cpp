@@ -8,8 +8,11 @@
 
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <set>
+#include <tuple>
 #include <string>
 
 #include "core/command_bus.hpp"
@@ -24,6 +27,7 @@
 #include "storage/journal.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
+#include "storage/reply_drafts.hpp"
 #include "storage/state.hpp"
 #include "storage/transaction.hpp"
 #include "storage/undo.hpp"
@@ -466,6 +470,144 @@ private slots:
             if (item.before) QVERIFY(store.has(*item.before, ".state.json"));
             if (item.after) QVERIFY(store.has(*item.after, ".state.json"));
         }
+    }
+
+    // A state of the history gone from assets/ (an older Genko's `genko gc` keeps only what a v3 journal names:
+    // schema-v4 §8): the Undo past it, and the Redo of a change whose state is gone, are refused with history_missing
+    // before anything is written; doctor says which states and how far Undo goes; saving, gc and the journal's repair go
+    // on as before.
+    void historyStateGone() {
+        const fs::path dir = make_book(book_path());
+        for (int i = 0; i < 3; ++i) edit(dir, (R"([{"op": "set_note", "page": 1, "note": "n)" + std::to_string(i) + R"("}])").c_str());
+        genko::storage::AssetStore store(dir);
+        const std::string gone = *journal::stacks(dir).undo.back().before;  // (the state the last change was made on)
+        QVERIFY(fs::remove(store.path(gone, ".state.json")));
+        const std::string project = genko::storage::read_file(dir / "project.json");
+        const std::string lines = genko::storage::read_file(journal::journal_file(dir));
+        const auto refused = [&](bool redo) -> std::pair<std::string, std::string> {
+            try {
+                genko::storage::restore(dir, "genko", redo, false);
+            } catch (const genko::core::Error& error) {
+                return {error.code(), error.what()};
+            }
+            return {"done", ""};
+        };
+        auto [code, message] = refused(false);
+        QCOMPARE(code, std::string("history_missing"));
+        QCOMPARE(message, "cannot undo past this change: its history state " + gone +
+                              " is missing from assets/ (an older Genko's genko gc removes such states); nothing was changed");
+        QCOMPARE(genko::storage::read_file(dir / "project.json"), project);
+        QCOMPARE(genko::storage::read_file(journal::journal_file(dir)), lines);
+        Json report = genko::storage::doctor(dir);
+        QCOMPARE(report["ok"], Json(false));
+        QCOMPARE(report["problems"], Json::array({"1 state(s) of the Undo/Redo history are missing from assets/ (an older Genko's genko gc removes them)",
+                                                  "Undo goes back 0 of the 4 change(s) in the history: the state before the change of revision 4 cannot be restored"}));
+        // a change is saved, and undone (its state before it is the book's); the Undo after it stops at the same place
+        edit(dir, R"([{"op": "set_note", "page": 1, "note": "n3"}])");
+        genko::storage::restore(dir, "genko", false, false);
+        QCOMPARE(read(dir).page(0).note, std::string("n2"));
+        QCOMPARE(refused(false).first, std::string("history_missing"));
+        // the Redo of a change whose state is gone
+        const std::string redone = *journal::stacks(dir).redo.back().after;
+        QVERIFY(fs::remove(store.path(redone, ".state.json")));
+        std::tie(code, message) = refused(true);
+        QCOMPARE(code, std::string("history_missing"));
+        QVERIFY2(message.starts_with("cannot redo this change: its history state " + redone + " is missing from assets/"), message.c_str());
+        QCOMPARE(read(dir).page(0).note, std::string("n2"));
+        // gc and a repair of an unfinished transaction go on; the book is whole
+        Json prepare = journal::read_lines(journal::journal_file(dir)).values[0];
+        prepare["txn"] = std::string(32, 'd');
+        prepare["rev"] = 99;
+        prepare["after"] = gone;
+        journal::append(journal::journal_file(dir), prepare);
+        QCOMPARE(genko::storage::gc(dir, false)["ok"], Json(true));
+        QCOMPARE(genko::storage::journal::plan_repair(dir).aborted.size(), std::size_t{0});  // (gc repaired it first)
+        QVERIFY(genko::storage::load_document(dir).report.clean());
+        // (the journal is whole but for the two states taken away: the changes that made them)
+        const QStringList said = QString::fromStdString(genko::test::book_problems(to_qstring(dir))).split(QStringLiteral("; "));
+        QCOMPARE(said.size(), 2);
+        for (const QString& problem : said) QVERIFY2(problem.startsWith(QStringLiteral("the state of ")) && problem.endsWith(QStringLiteral(" is missing")), qPrintable(problem));
+        report = genko::storage::doctor(dir);
+        QVERIFY2(report["problems"].dump().find("2 state(s) of the Undo/Redo history are missing from assets/") != std::string::npos,
+                 report.dump().c_str());
+    }
+
+    // An asset only an older state names, gone (an older Genko's gc reads the states of a v3 journal, not a v4 book's):
+    // the Undo to that state is refused with history_missing, nothing written; doctor names the asset.
+    void historyAssetGone() {
+        const fs::path dir = make_book(book_path());
+        genko::storage::AssetStore store(dir);
+        const auto blobs = [&] {
+            std::set<std::string> out;
+            for (const fs::path& file : store.all_files()) {
+                const std::string name = genko::storage::path_to_utf8(file.filename());
+                if (name.ends_with(".strokes.json")) out.insert(name);
+            }
+            return out;
+        };
+        edit(dir, R"([{"op": "add_stroke", "page": 1, "layer": "ink", "points": [[20, 20], [60, 60]]}])");
+        const std::set<std::string> first = blobs();
+        QCOMPARE(first.size(), std::size_t{1});
+        edit(dir, R"([{"op": "add_stroke", "page": 1, "layer": "ink", "points": [[30, 20], [70, 60]]}])");
+        QCOMPARE(blobs().size(), std::size_t{2});
+        const std::string blob = *first.begin();
+        QVERIFY(fs::remove(store.root() / blob.substr(0, 2) / blob));
+        const std::string project = genko::storage::read_file(dir / "project.json");
+        const std::string lines = genko::storage::read_file(journal::journal_file(dir));
+        try {
+            genko::storage::restore(dir, "genko", false, false);
+            QFAIL("the Undo went through");
+        } catch (const genko::core::Error& error) {
+            QCOMPARE(error.code(), std::string("history_missing"));
+            const std::string message = error.what();
+            QVERIFY2(message.starts_with("cannot undo past this change: its history state ") &&
+                         message.find(" needs assets that are missing (the strokes assets/" + blob.substr(0, 2) + "/" + blob + " are missing; ") != std::string::npos,
+                     message.c_str());
+        }
+        QCOMPARE(genko::storage::read_file(dir / "project.json"), project);
+        QCOMPARE(genko::storage::read_file(journal::journal_file(dir)), lines);
+        const Json report = genko::storage::doctor(dir);
+        QCOMPARE(report["problems"], Json::array({"1 state(s) of the Undo/Redo history need assets that are missing (the strokes assets/" + blob.substr(0, 2) +
+                                                      "/" + blob + " are missing; an older Genko's genko gc removes them)",
+                                                  "Undo goes back 0 of the 3 change(s) in the history: the state before the change of revision 3 cannot be restored"}));
+        QCOMPARE(genko::test::book_problems(to_qstring(dir)), std::string());
+    }
+
+    // The app's reply drafts (studio/reply_drafts/, schema-v4 「返事の下書き」): gc removes those whose request is
+    // closed or gone and those of a panel the book no longer has; an open request's, a panel's that is there, a file
+    // that is not a whole draft and other files stay. A dry run lists them and removes nothing.
+    void gcRemovesTheDraftsOfClosedRequests() {
+        namespace drafts = genko::storage::reply_drafts;
+        const fs::path dir = make_book(book_path());
+        edit(dir, R"([{"op": "add_ticket", "page": 1, "id": "t-open"}, {"op": "add_ticket", "page": 1, "id": "t-done"},
+                      {"op": "set_ticket", "id": "t-done", "status": "done"}])");
+        const std::string frame = read(dir).page(0).leaf_frames().at(0)->id;
+        const auto put = [&](const std::string& item) {
+            const fs::path file = drafts::folder(dir) / drafts::file_name(item);
+            genko::storage::write_atomic(file, genko::core::dump_python(Json{{"format", drafts::kFormat}, {"item", item}, {"text", "書きかけ"},
+                                                                             {"at", "2026-10-01T09:00:00"}}) + "\n");
+            return file;
+        };
+        const fs::path open = put("t-open");
+        const fs::path panel = put("panel:" + frame);
+        std::vector<fs::path> stale{put("t-done"), put("t-gone"), put("panel:gone")};
+        const fs::path broken = drafts::folder(dir) / drafts::file_name("t-broken");
+        genko::storage::write_atomic(broken, "{\"format\": ");
+        genko::storage::write_atomic(drafts::folder(dir) / "notes.txt", "x");
+        std::sort(stale.begin(), stale.end());
+        Json listed = Json::array();
+        for (const fs::path& file : stale) listed.push_back(genko::storage::path_to_utf8(file.lexically_relative(dir)));
+        QCOMPARE(genko::storage::gc(dir, true)["removed"], listed);
+        for (const fs::path& file : stale) QVERIFY(fs::exists(file));
+        QCOMPARE(genko::storage::gc(dir, false)["removed"], listed);
+        for (const fs::path& file : stale) QVERIFY(!fs::exists(file));
+        for (const fs::path& file : {open, panel, broken, drafts::folder(dir) / "notes.txt"}) QVERIFY(fs::exists(file));
+        // what waits: an open ticket or proposal, a frame anywhere in a page's frames
+        const Json payload = genko::core::parse_python_json(R"({"tickets": [{"id": "t", "status": "open"}, {"id": "u", "status": "done"}],
+            "studio": {"proposals": {"p1": {"id": "p1", "status": "open"}, "p2": {"id": "p2", "status": "accepted"}}},
+            "pages": [{"frames": [{"id": "f0", "children": [{"id": "f1", "children": []}]}]}]})");
+        for (const char* item : {"t", "p1", "panel:f0", "panel:f1"}) QVERIFY2(drafts::waiting(payload, item), item);
+        for (const char* item : {"u", "p2", "panel:f2", "f1", ""}) QVERIFY2(!drafts::waiting(payload, item), item);
     }
 
     void doctorTellsWhatIsWrong() {

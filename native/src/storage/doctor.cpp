@@ -12,6 +12,7 @@
 #include "storage/reader.hpp"
 #include "storage/state.hpp"
 #include "storage/transaction.hpp"
+#include "storage/undo.hpp"
 
 namespace genko::storage {
 
@@ -103,7 +104,10 @@ Json doctor(const fs::path& dir) {
     }
 
     // what the reader reports (features this build does not know, values it had to change, …)
-    const LoadResult loaded = load_document(project);
+    const auto history_cache = std::make_shared<LoadCache>();  // (shared with the history's states below)
+    LoadOptions current;
+    current.cache = history_cache;
+    const LoadResult loaded = load_document(project, current);
     Json issues = Json::array();
     for (const auto& issue : loaded.report.issues) {
         issues.push_back(issue.to_json());
@@ -148,16 +152,68 @@ Json doctor(const fs::path& dir) {
     }
     const journal::Stacks stacks = journal::stacks(project);
     for (const auto& problem : stacks.problems) problems.push_back("history: " + problem);
-    std::size_t missing_states = 0;
+    // the states Undo and Redo restore: there, readable, and with the assets they need (an older Genko's genko gc
+    // removes the states and the assets only they name: schema-v4 §8); reported, nothing changed
+    std::set<std::string> missing_states;
+    std::set<std::string> lacking_assets;
+    std::set<std::string> unreadable_states;
+    std::string first_lacking;
+    std::map<std::string, bool> usable;
+    const auto restorable = [&](const std::string& ref) {
+        if (const auto known = usable.find(ref); known != usable.end()) return known->second;
+        bool ok = false;
+        const auto data = store.get_bytes(ref, kStateSuffix);
+        if (!data) {
+            missing_states.insert(ref);
+        } else {
+            try {
+                const Json state = core::parse_python_json(*data);
+                if (AssetStore::ref(*data) != ref || !state.is_object()) {
+                    unreadable_states.insert(ref);
+                } else {
+                    LoadOptions options;
+                    options.cache = history_cache;  // (the states share most of their assets: each is read once)
+                    if (const auto gone = missing_asset(load_document_payload(state, project, options).report)) {
+                        lacking_assets.insert(ref);
+                        if (first_lacking.empty()) first_lacking = *gone;
+                    } else {
+                        ok = true;
+                    }
+                }
+            } catch (const core::Error&) {
+                unreadable_states.insert(ref);
+            }
+        }
+        usable[ref] = ok;
+        return ok;
+    };
     for (const auto* stack : {&stacks.undo, &stacks.redo}) {
         for (const auto& item : *stack) {
             for (const auto* ref : {&item.before, &item.after}) {
-                if (*ref && !store.has(**ref, kStateSuffix)) ++missing_states;
+                if (*ref) restorable(**ref);
             }
         }
     }
-    if (missing_states > 0) {
-        problems.push_back(std::to_string(missing_states) + " state(s) of the Undo/Redo history are missing from assets/");
+    if (!missing_states.empty()) {
+        problems.push_back(std::to_string(missing_states.size()) +
+                           " state(s) of the Undo/Redo history are missing from assets/ (an older Genko's genko gc removes them)");
+    }
+    if (!lacking_assets.empty()) {
+        problems.push_back(std::to_string(lacking_assets.size()) + " state(s) of the Undo/Redo history need assets that are missing (" +
+                           first_lacking + "; an older Genko's genko gc removes them)");
+    }
+    if (!unreadable_states.empty()) {
+        problems.push_back(std::to_string(unreadable_states.size()) + " state(s) of the Undo/Redo history do not hold the state their name says");
+    }
+    // how far Undo goes now: the newest change whose state before it is there but cannot be restored stops it
+    for (std::size_t k = stacks.undo.size(); k-- > 0;) {
+        const auto& item = stacks.undo[k];
+        if (!item.before) break;  // (the book's beginning, or an old snapshot the conversion could not take: said then)
+        if (usable[*item.before]) continue;
+        problems.push_back("Undo goes back " + std::to_string(stacks.undo.size() - 1 - k) + " of the " + std::to_string(stacks.undo.size()) +
+                           " change(s) in the history: the state before the change of revision " + core::py_str(item.rev) +
+                           " cannot be restored");
+        break;
     }
 
     // the audit

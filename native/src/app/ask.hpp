@@ -10,6 +10,7 @@
 #include <optional>
 
 class QDialog;
+class QUrl;
 class QWidget;
 
 // The small questions the app asks (a number, a colour, yes or no, a folder, a place to save) and the dialogs it runs,
@@ -34,6 +35,7 @@ struct Responder {
     std::function<std::pair<QString, QString>(const QString& caption, const QString& suggested, const QString& filter)> save_path_filtered;
     std::function<QString(const QString& caption, const QString& filter)> open_path;
     std::function<int(QDialog* dialog)> exec;  // QDialog::exec's result for a dialog the app runs
+    std::function<bool(const QUrl& url)> open_url;  // a web page shown in the browser (true: it opened)
 };
 
 // The responder for tests (null: the real dialogs).
@@ -57,5 +59,7 @@ QString save_path_filtered(QWidget* parent, const QString& caption, const QStrin
 // A file to read (nothing: none chosen); `filter` as QFileDialog takes it ("画像 (*.png *.jpg)").
 QString open_path(QWidget* parent, const QString& caption, const QString& filter = {});
 int exec(QDialog* dialog);
+// A web page in the person's browser (QDesktopServices::openUrl); true when it opened.
+bool open_url(const QUrl& url);
 
 }  // namespace genko::app::ask

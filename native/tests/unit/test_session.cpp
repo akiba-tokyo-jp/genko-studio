@@ -22,6 +22,7 @@
 #include "core/ids.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
+#include "service/wording.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fault.hpp"
 #include "storage/fsutil.hpp"
@@ -1824,6 +1825,56 @@ private slots:
         session->apply(stroke_op(60, 1));
         session->save_now();
         QVERIFY(session->wait_saved(5000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{2});
+    }
+
+    // A journal Undo past a state an older Genko's `genko gc` removed (schema-v4 §8): refused in the person's words
+    // (history_missing), nothing changed on disk or in the window's book, and the next change is saved as before.
+    void aJournalUndoPastAGoneStateIsRefused() {
+        QTemporaryDir tmp;
+        const fs::path book = path_of(tmp.filePath("book.genko"));
+        const fs::path recovery = path_of(tmp.filePath("recovery"));
+        make_book(book);
+        Session::Options options = quick(recovery);
+        options.autosave = false;
+        saved_by(book, options, "human:tester", stroke_op(30, 1));
+        saved_by(book, options, "human:tester", stroke_op(40, 1));
+        const std::string gone = *genko::storage::journal::stacks(book).undo.back().before;
+        QVERIFY(fs::remove(genko::storage::AssetStore(book).path(gone, ".state.json")));
+        const std::string project = genko::storage::read_file(book / "project.json");
+        const std::string lines = genko::storage::read_file(genko::storage::journal::journal_file(book));
+        auto session = Session::open(book, options);
+        QSignalSpy notices(session.get(), &Session::notice);
+        QSignalSpy changes(session.get(), &Session::changed);
+        QVERIFY(session->can_undo());
+        session->undo();
+        QVERIFY2(session->wait_idle(5000ms), "the journal undo is tried again and again");
+        QCOMPARE(notices.count(), 1);
+        const QString said = notices.front().front().toString();
+        QVERIFY2(said.startsWith(QStringLiteral("cannot undo past this change: its history state ")), qPrintable(said));
+        QCOMPARE(genko::wording::error(said),
+                 QStringLiteral("これより前に戻すための記録（履歴の状態）が原稿から消えているため、ここより前には戻せません。古い版の Genko の genko gc で消えることがあります。原稿は変えていません"));
+        QVERIFY(notices.front().at(1).toBool());
+        QCOMPARE(changes.count(), 0);
+        QCOMPARE(session->status().kind, SaveKind::Saved);
+        QCOMPARE(ink_strokes(session->document(), 0), std::size_t{2});
+        QCOMPARE(genko::storage::read_file(book / "project.json"), project);
+        QCOMPARE(genko::storage::read_file(genko::storage::journal::journal_file(book)), lines);
+        // and a change after it is saved, and undone (in memory and again through the journal once reopened)
+        session->apply(stroke_op(60, 1));
+        session->save_now();
+        QVERIFY(session->wait_saved(5000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{3});
+        session.reset();
+        auto again = Session::open(book, options);
+        QSignalSpy refused(again.get(), &Session::notice);
+        again->undo();
+        QVERIFY(again->wait_idle(5000ms));
+        QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{2});
+        again->undo();
+        QVERIFY(again->wait_idle(5000ms));
+        QCOMPARE(refused.count(), 1);
+        QVERIFY(refused.front().front().toString().startsWith(QStringLiteral("cannot undo past this change")));
         QCOMPARE(ink_strokes_on_disk(book, 0), std::size_t{2});
     }
 

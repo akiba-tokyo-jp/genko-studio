@@ -12,6 +12,7 @@ genko_library(genko_storage
     transaction.cpp
     undo.cpp
     gc.cpp
+    reply_drafts.cpp
     doctor.cpp
     migrate.cpp
   PUBLIC_DEPS genko_core Qt6::Core)

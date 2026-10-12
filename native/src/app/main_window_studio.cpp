@@ -22,7 +22,9 @@
 #include "app/reply_box.hpp"
 #include "app/review_model.hpp"
 #include "app/studio_widgets.hpp"
+#include "app/style_picker.hpp"
 #include "app/theme.hpp"
+#include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "service/briefs.hpp"
@@ -67,6 +69,8 @@ bool raise_requests() {
 }  // namespace
 
 void MainWindow::build_studio_actions() {
+    make("act_style", QStringLiteral("絵柄を選ぶ…"), [this] { pick_style(); }, {},
+         QStringLiteral("マンガの絵柄カタログから、この原稿の絵柄を選びます（絵の依頼文と見本の参照画像になります）"));
     make("act_chat_approval", QStringLiteral("チャットでの承認…"), [this] { chat_approval(); }, {},
          QStringLiteral("Telegram などで AI に「承認します」と返すと、AI があなたの名前で承認を記録します（既定）。この原稿だけ止めることもできます"));
 }
@@ -83,6 +87,17 @@ void MainWindow::build_studio_bar() {
     ai_timer_.start();
     process_ = new ProcessBar;
     connect(process_, &ProcessBar::openBox, this, [this] { show_dock(QStringLiteral("承認箱")); });
+    // (a reply draft of a book here that was broken, too long to keep or could not be written)
+    connect(&Drafts::instance(), &Drafts::problem, this, [this](const QString& book, const QString& message) {
+        if (closed_) return;
+        const auto key_of = [](const Session& session) {
+            return session.path() ? QString::fromStdString(core::path_to_utf8(*session.path()))
+                                  : QStringLiteral("book:") + QString::fromStdString(session.document().book_id);
+        };
+        bool mine = session_ && key_of(*session_) == book;
+        for (const Document& doc : documents_) mine = mine || (doc.session && key_of(*doc.session) == book);
+        if (mine) flash(message, 8000, true);
+    });
     statusBar()->addPermanentWidget(process_);
     studio_timer_.setSingleShot(true);
     studio_timer_.setInterval(250);  // (Python's _dock_timer: the side panels a little after an edit)
@@ -308,6 +323,22 @@ void MainWindow::open_link_when_ready(const QString& link) {
     }
 }
 
+void MainWindow::pick_style() {
+    for (;;) {  // (a "no" to the question goes back to the picker, not out of it)
+        StylePicker dialog(this, service::briefs::catalog(book()), book().spec.expression);
+        if (ask::exec(&dialog) != QDialog::Accepted) return;
+        if (dialog.back_to_genko) {
+            if (apply_ops(Json::array({Json{{"op", "set_style_catalog"}, {"catalog", nullptr}}}))) {
+                flash(QStringLiteral("絵柄を Genko の言葉に戻しました"), 4000);
+            }
+            return;
+        }
+        if (!dialog.chosen) return;
+        style_declined_ = false;
+        if (use_style(*dialog.chosen, false) || !style_declined_) return;
+    }
+}
+
 bool MainWindow::use_style(const std::string& style_id, bool asked) {
     namespace stylecat = service::stylecat;
     const auto& path = session_->path();
@@ -363,7 +394,10 @@ bool MainWindow::use_style(const std::string& style_id, bool asked) {
     }
     if (ask_now || core::py_truthy(locked) || !warn.isEmpty()) {
         const QString title = book().title.empty() ? QStringLiteral("無題") : QString::fromStdString(book().title);
-        if (!ask::question(this, QStringLiteral("絵柄を選ぶ"), QStringLiteral("「%1」の絵柄を「%2」にしますか？%3").arg(title, where, warn))) return false;
+        if (!ask::question(this, QStringLiteral("絵柄を選ぶ"), QStringLiteral("「%1」の絵柄を「%2」にしますか？%3").arg(title, where, warn))) {
+            style_declined_ = true;
+            return false;
+        }
     }
     Json kept;
     QGuiApplication::setOverrideCursor(Qt::WaitCursor);

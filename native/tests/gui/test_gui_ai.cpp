@@ -16,7 +16,9 @@
 //   - the first setup run through: empty settings → the dialog → the change seen and confirmed → the file written → the
 //     client started again (the stand-in, as the file says) → book and conversation chosen → the AI's requests in two
 //     books from two conversations → each waiting in its own book's box (none in the other) → the person's approval and
-//     a reply in two lines → the AI reads them back, after the connection is closed and made again.
+//     a reply in two lines → the AI reads them back, after the connection is closed and made again; and the same run with
+//     this build's `genko mcp` (M5③) as the server, which keeps its tool log and presence in each book as Python's
+//     server does.
 
 #include <QtTest>
 
@@ -35,6 +37,7 @@
 #include <QPushButton>
 #include <QSignalSpy>
 
+#include <cmath>
 #include <deque>
 
 #include "app/ai_dialog.hpp"
@@ -616,8 +619,17 @@ private slots:
         });
     }
 
-    // The first setup run through (ACCEPTANCE AC-API, the GUI's part with a stand-in client; §6).
-    void firstSetupToResult() {
+    // The first setup run through (ACCEPTANCE AC-API, the GUI's part with a stand-in client; §6), with the stand-in server.
+    void firstSetupToResult() { first_setup_to_result(false); }
+
+    // The same with this build's own `genko mcp` as the server the client starts (M5③): the settings written, the test
+    // connection, the requests, the approval and the reply, read back by the AI — and what the server keeps in the books
+    // (studio/logs/tools.jsonl, studio/presence.json) written as Python's genko/mcp/server.py writes them.
+    void firstSetupWithGenkoMcp() { first_setup_to_result(true); }
+
+private:
+    void first_setup_to_result(bool genko_mcp) {
+        if (genko_mcp) app::ai_link::set_command_for_tests(QStringList{genko::test::genko_cli()});
         QTemporaryDir tmp;
         const fs::path root = gui_test::path_of(tmp.path());
         const fs::path a = agent_book(root, "A.genko");
@@ -652,8 +664,11 @@ private slots:
         QCOMPARE(command, app::ai_link::snippet(QStringLiteral("claude-desktop"), app::ai_link::root_text(gui_test::qpath(root))).server);
         QVERIFY(desk.session->wait_saved(std::chrono::seconds(30)));
         Client ai;
+        if (genko_mcp) QCOMPARE(command.value(0), genko::test::genko_cli());
         QVERIFY(ai.start(command));
-        QVERIFY(ai.request("initialize", Json{{"protocolVersion", "2025-06-18"}, {"capabilities", Json::object()}}).contains("result"));
+        const Json hello = ai.request("initialize", initialize_params());
+        QVERIFY2(hello.contains("result"), hello.dump().c_str());
+        QCOMPARE(hello["result"].value("protocolVersion", Json()), Json("2025-06-18"));
         // 5. the first requests: two in A from conversation 9204, one in B from another conversation
         Json reply = ai.call("request_approval", Json{{"project", "A.genko"}, {"gate", "name"}, {"pages", Json::array({1})}, {"note", "1 ページのネームを見てください"},
                                                       {"session", "9204"}});
@@ -709,7 +724,7 @@ private slots:
         ai.close();
         Client again;
         QVERIFY(again.start(command));
-        QVERIFY(again.request("initialize", Json{{"protocolVersion", "2025-06-18"}, {"capabilities", Json::object()}}).contains("result"));
+        QVERIFY(again.request("initialize", initialize_params()).contains("result"));
         const Json tickets = again.call("tickets", Json{{"project", "A.genko"}, {"status", "all"}, {"session", "9204"}});
         QVERIFY2(tickets.value("ok", false), tickets.dump().c_str());
         bool fix = false, approved = false, answered = false;
@@ -734,7 +749,77 @@ private slots:
             QCOMPARE(d->chosen_session(), QStringLiteral("9204"));
             QVERIFY(d->state_rows->text().contains(QStringLiteral("<b>確認待ち</b>: なし")));
         });
+        if (genko_mcp) {
+            // the tool log: a line for each call on the book, as toollog.record writes it (json.dumps of {at, actor,
+            // tool, args, ms, ok}: the time rounded to the millisecond, the call's length to a tenth of one, the
+            // arguments summed up — numbers and short strings)
+            const QList<Json> logged_a = log_lines(a);
+            QStringList tools_a;
+            for (const Json& entry : logged_a) tools_a << QString::fromStdString(entry["tool"].get<std::string>());
+            QCOMPARE(tools_a, (QStringList{QStringLiteral("request_approval"), QStringLiteral("ask_human"), QStringLiteral("tickets")}));
+            QCOMPARE(logged_a.value(1)["args"], (Json{{"project", "A.genko"}, {"text", "鞄の色は紺でいいですか"}, {"page", 1}}));
+            QCOMPARE(logged_a.value(0)["args"], (Json{{"project", "A.genko"}, {"gate", "name"}, {"note", "1 ページのネームを見てください"}}));
+            const QList<Json> logged_b = log_lines(b);
+            QCOMPARE(logged_b.size(), 1);
+            QCOMPARE(logged_b.value(0)["actor"], Json("ai:claude-desktop/7777"));
+            // presence: each conversation that wrote the book, at the time of its last write (presence.touch)
+            QCOMPARE(presence_of(a), QStringList{QStringLiteral("ai:claude-desktop/9204")});
+            QCOMPARE(presence_of(b), QStringList{QStringLiteral("ai:claude-desktop/7777")});
+        }
         QDir(gui_test::qpath(config.parent_path())).removeRecursively();
+    }
+
+    // initialize as a client sends it: the version of the protocol, its capabilities and its name (the server checks all).
+    static Json initialize_params() {
+        return Json{{"protocolVersion", "2025-06-18"}, {"capabilities", Json::object()}, {"clientInfo", Json{{"name", "test-client"}, {"version", "1.0"}}}};
+    }
+
+    // The lines of a book's tool log, each checked to be written as Python's json.dumps(entry, ensure_ascii=False) of
+    // toollog.record's entry.
+    static QList<Json> log_lines(const fs::path& book) {
+        QList<Json> out;
+        const std::string bytes = genko::test::read_bytes(gui_test::qpath(book / "studio" / "logs" / "tools.jsonl"));
+        const QStringList lines = QString::fromStdString(bytes).split(QLatin1Char('\n'));
+        [&] { QCOMPARE(lines.last(), QString()); }();  // (each line ends with "\n")
+        const double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch()) / 1000.0;
+        for (const QString& line : lines.mid(0, lines.size() - 1)) {
+            const Json entry = core::parse_python_json(line.toStdString());
+            [&] {
+                QCOMPARE(QString::fromStdString(core::dump_python(entry)), line);
+                QStringList keys;
+                for (const auto& [key, value] : entry.items()) keys << QString::fromStdString(key);
+                QCOMPARE(keys.mid(0, 6), (QStringList{QStringLiteral("at"), QStringLiteral("actor"), QStringLiteral("tool"), QStringLiteral("args"),
+                                                      QStringLiteral("ms"), QStringLiteral("ok")}));
+                for (const QString& key : keys.mid(6)) QVERIFY2(key == QStringLiteral("codes") || key == QStringLiteral("error"), qPrintable(line));
+                QVERIFY2(entry["at"].is_number_float() && std::abs(entry["at"].get<double>() - now) < 600, qPrintable(line));
+                QCOMPARE(entry["at"].get<double>(), std::round(entry["at"].get<double>() * 1000) / 1000);
+                QVERIFY2(entry["ms"].is_number_float() && entry["ms"].get<double>() >= 0, qPrintable(line));
+                QCOMPARE(entry["ms"].get<double>(), std::round(entry["ms"].get<double>() * 10) / 10);
+                QCOMPARE(entry["ok"], Json(true));
+                QVERIFY(entry["args"].is_object());
+            }();
+            out << entry;
+        }
+        return out;
+    }
+
+    // The conversations in a book's presence.json, checked to be written as Python's presence._write writes it
+    // (json.dumps, {"actors": {name: {"at": the time}}, …}).
+    static QStringList presence_of(const fs::path& book) {
+        const std::string bytes = genko::test::read_bytes(gui_test::qpath(book / "studio" / "presence.json"));
+        const Json data = core::parse_python_json(bytes);
+        QStringList out;
+        [&] {
+            QCOMPARE(QString::fromStdString(core::dump_python(data)), QString::fromStdString(bytes));
+            QVERIFY(data.contains("actors"));
+            const double now = static_cast<double>(QDateTime::currentMSecsSinceEpoch()) / 1000.0;
+            for (const auto& [name, item] : data["actors"].items()) {
+                QCOMPARE(item.size(), std::size_t(1));
+                QVERIFY2(item["at"].is_number_float() && std::abs(item["at"].get<double>() - now) < 600, bytes.c_str());
+                out << QString::fromStdString(name);
+            }
+        }();
+        return out;
     }
 };
 
