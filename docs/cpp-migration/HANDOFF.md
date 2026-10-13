@@ -1,6 +1,57 @@
 # Genko C++ 引継ぎ（2026-10-08）
 
-## M5②（Studio のサービスと genko studio）・M5③（MCP と HTTP）— 2026-10-12 記録（この節が最新）
+## M5出口受入（Linux）— 2026-10-13 記録（この節が最新）
+
+- **凍結SHA**: `9f97117d478f1877c304a8e9e93a3f28ac57fd68`（native/integration。M5②③ の上に M5④ a8e6e67・0c4aae4・3567cd1、出口の準備 ad0f49e、出口のレビュー 9f97117）。計画は `validation_policy.py --base 65f8333 --head 9f97117 --phase milestone`（基点は M4 出口の凍結。tier full、Linux 各116試験、性能は別に必須）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44。Qt 6.11.2、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、MCP の参照 Python は GENKO_MCP_PYTHON（mcp 2.2.0）、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。ASan（各構成内 ctest 1並列）→ ASan のビルドを消して Release と Debug を同時に。
+- **結果**（validation_run.py の result.json。failures は空、除いた契約なし）:
+  - linux-asan: 116/116 合格、サニタイザ指摘なし、CLI23 合格（10/13 00:54–06:15 UTC）
+  - linux-release: 116/116 合格、CLI23 合格（07:13–08:49）。故障注入が Debug・ASan だけのための SKIP（test_transaction 10・test_save_e2e 16・test_session 3・test_contract_save 1・test_migrate_e2e 1・test_gui_save 1・test_app_e2e 1。M4 出口と同じ組）は合格に数えない。Debug・ASan では SKIP 0。
+  - linux-debug: 116/116 合格、CLI23 合格（07:13–09:18）
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1件のみ＝Windows 2構成が開発中 deferred。Linux 3構成どうしの照合は指摘なし。**Windowsを含む --pair 合格ではない。**
+- **M5 の出口（PLAN.md）の証拠**（3構成とも合格。件数は QtTest の Totals）:
+  - 公式 MCP SDK のクライアント（stdio・HTTP）、CLI、HTTP から同じ原稿へ安全に操作: test_contract_mcp 11（公式 `mcp.Client` の stdio・Streamable HTTP と生の JSON-RPC・HTTP API を C++ と Python のサーバーで照合。初期化・道具一覧・4リソース・成功・失敗・取消・画像・ジョブ）、test_mcp_api_e2e 22（承認・ページロック・チャット承認の切替・人が固定した欄・人の変更の Undo をエージェントが MCP・HTTP で通れない、41 の道具に人の道具が無い、HTTP の token・Host・Origin・root 外のパス・悪い絵・巨大な要求・chunked・接続の上限、外部コマンドの引数）、test_contract_service 11・test_service 32・test_contract_cli 9・test_cli_e2e 10・test_http_server 6。
+  - GUI 案内から初回クライアント設定・再接続・原稿と会話の選択・依頼・承認・結果反映: test_gui_ai 62（firstSetupToResult は代わりのサーバー、firstSetupWithGenkoMcp はこの版の `genko mcp`。変更案→バックアップ→確認→テスト接続（initialize と tools/list だけ）→原稿と会話→クライアントの再起動→二つの原稿 A・B へ別の会話から依頼→A の承認箱で確認待ち→承認と2行の返事→切断・再接続の後に AI へ結果、B は変わらない。tools.jsonl・presence は Python と同じ）、test_gui_studio 29、test_contract_studio_gui 7（参照 Python と照合）。利用者のクライアントでの初回導入は実施不要（ACCEPTANCE §6。waived、合格に数えない）。
+  - 合成画像によるオフライン 8 ページ工程: test_contract_pipeline 3（eightPagesLikePython。FakeAgent を公式 MCP SDK で `genko mcp` に、人役は `genko studio`。Python と全呼び出しの返事・絵・最後の本・監査・承認を照合し、書き出し（PDF・TIFF 8枚・校正 PDF）は最後の本を Python が書き出したものとバイトで照合。ASan・Debug でも合格）。
+  - 速度（PERF-F）: 下の計測。権限・保存は上の試験と test_save_e2e・test_session（Debug・ASan で故障注入まで）。
+- **PERF-F**（Release、test_perf_pipeline、F3 の工程。合否判定あり。測定機は基準クラスではない）: F3 の工程 80.1 秒・88 作業（人の PDF と TIFF 8 枚）。全呼び出し n=314 p95 1030 ms・p99 1825 ms（除外なし。MCP の道具 306 件 p95 996 ms、人の `genko studio` 8 件 p95 7.76 s、書き出し 4 件 最大 9.60 s を含む）／情報取得 n=100 p95 845 ms／編集の確定 p95 150 ms／候補の採用 p95 1751 ms／ページの仕上げ p95 989 ms（合格値は各 p95 2 秒。間の人の承認 p95 164 ms）／8 ページの校正出力 10 回（新しい出力先 studio/proofs/r<版>）: 呼び出しから PDF の完成まで 8.25〜9.88 s（各 30 秒以内。仕事の記録は呼び出しから開始まで最大 13.9 ms、開始から終了まで最大 9.87 s。MCP の export_proof は最大 40 秒仕事を待つので、返事は仕事の終わりと同じ時刻）。**全項目合格**（Totals 3 passed・0 skipped、ctest exit 0。10/13 09:36–09:44 UTC、load 1.3〜1.6）。
+- **V3 の手順の誤り（私の誤り、製品の失敗ではない）**: V3 のスクリプトが test_perf_pipeline を ctest を通さずに実行したため、CMake に登録した `QTEST_FUNCTION_TIMEOUT=3500000`（と TIMEOUT 3600）が渡らず、QtTest の既定 300 秒で productionApi が打ち切られた（exit 134、計測の途中）。打ち切りで親を失った harness と `genko mcp` が残ったので止めた。同じ凍結のビルドで `ctest -R '^test_perf_pipeline$'` からやり直した（上の値）。
+- **実xcb（Xvfb 1920×1080）GUI・E2E**（凍結SHAのビルド）: Release で gui_actions 14・gui_ai 62・gui_anim 8・gui_book 30・gui_brushes 8・gui_canvas 78・gui_color 60・gui_colours 4・gui_effects 15・gui_guides 7・gui_layers 12・gui_layout 32・gui_lines 20・gui_materials 36・gui_output 21・gui_paint 11・gui_paper 14・gui_pen 51・gui_ruby 18・gui_select 13・gui_studio 29、Debug で gui_save 36・app_e2e 8、全合格・FAIL 0。Release の gui_save は故障注入が Debug だけのため SKIP 1（合格に数えない。Debug で 36 合格）。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。表示のみで合否判定なし）: 開いて最初の頁 641 ms、全頁 757 ms／入力→ライブ線 p95 1.23・p99 5.88 ms（n=43780）／線確定→表示 p95 20.5 ms／Undo→表示 p95 33.0 ms／頁切替 最初 p95 28.8・精細 p95 105 ms（n=4）／自動保存 p95 2.41 s／保存中のタイマーの遅れ p99 11.5 ms・イベントループの停止 p99 44.6 ms（最大 49.6 ms、250 ms 超 0）。F1頁 350dpi 全描画 1227 ms・1線追加 583 ms・512px部分 37 ms。M4 出口とほぼ同じ。基準機での測定は M7。
+- **M5 の出口は Linux で合格**（Windows は開発中 deferred。配布前の Windows 実機受入は必須）。
+
+### M5④（a8e6e67・0c4aae4・3567cd1）
+- app/review_model・ai_link・client_config・mcp_probe・reply_box・viewer・studio_widgets・ai_dialog・links・main_window_studio・style_picker: Python の画面（承認箱、工程、コマの詳細、資料、AI と作る、絵柄を選ぶ、genko:// のリンク）。
+- I07: 接続の状態（未設定・設定済み・未接続・接続済み・処理中・人の確認待ち・失敗）と事実（設定・テスト接続・依頼先・最後の呼び出しと誤り・作業・確認待ち）。テスト接続は initialize と tools/list だけ（生成・課金・原稿の変更をしない）。I13: 複数行の返事（Ctrl+Enter で送る、IME の変換中は送らない）、送る前の確認、下書き（原稿の studio/reply_drafts/、genko-reply-draft@1）。
+- クライアントの設定（Claude Desktop の JSON・Hermes Agent の YAML）は変更案・写し・確認・取りやめ・元に戻す。旧版の `genko gc` が v4 の古い履歴を消しても壊れない（Undo/Redo は history_missing で断り、doctor が報告）。
+- レビュー（P1・P2）で直した所: 確認窓の間に原稿・ページ・コマ・依頼・下書きが変わったら送らない（キーを値で取り、答えの後に確かめる）、Hermes の YAML の書けない形は書かずに理由を出す・コメントと空行と BOM を残す、正式な書き出しは保存が終わってから、doctor の判断を Undo と同じに、下書きのリンクのフォルダー・知らない版・gc、shared_ptr の循環、試験の子プロセスに一時の HOME・APPDATA。
+
+### M5 出口の準備と出口のレビュー（ad0f49e・9f97117）
+- test_contract_pipeline（F3、上）と test_perf_pipeline（PERF-F）。FIXTURES.md F3 に書いた。
+- 1 回目の PERF-F の計測（V2 と同時、load 2〜3）で候補の採用の p95 が 3.07 秒で 2 秒を超えた。合格値は緩めず、Pillow の拡大・アンシャープマスク・ぼかし・配置画像の縮小を行の帯ごとに並列にし（出力のバイトは同じ）、Genko がこのプロセスで今書いた絵（sha256 一致）だけは採用時の全展開の確かめを省く（外から来た絵は今までどおり。SPEC に記載）。
+- GUI の選択（select_frame）は、AI がページを並べ替えても ID で付け直す（消えたら外す）。中身を変える変更は競合として未保存で残す（既知の制限、SPEC）。
+- ASan の test_gui_studio の LeakSanitizer（ViewerDialog のページ送りの部品）を直した。
+- 出口のレビューで直した所: ページ一覧・コマ・台詞の右クリックのメニューはページの id で答えの後の番号を探して当てる、ファイル → 書き出し の正式な書き出しは保存を待つ、Hermes の YAML で genko の値にアンカー・別名・タグがあれば書かない、帯の並列のスレッドはプロセス全体で CPU 数 − 1 本まで（作れなければ呼んだ側で、失敗は逐次でやり直す）、描画の覚えに入れるのは sha256 が合うときと adopt のときだけ。
+
+### 利用者の決定（2026-10-12、M5④）
+- 返事の下書きは原稿に残す（studio/reply_drafts/<sha256>.json、Undo・journal の対象外、v1〜v3 には書かない）。
+- クライアント設定のバックアップは設定ファイルの隣（<名前>.genko-backup-<日時>）。
+- 旧版（Python 版）の `genko gc` が v4 の原稿の古い履歴を消す件は、C++ を強くして記録（既知の制限）。
+
+### 既知の制限（M5 出口の時点）
+- `genko studio` の --agent で人として振る舞える（Python と同じ。利用者決定）。書体のパスは root に閉じない（利用者決定）。
+- 画面の中身を変える変更は、保存待ちの間に AI がページの番号と ID の対応を変えると ID で付け直さず、競合として未保存で残す（SPEC）。
+- C++ 版の原稿（v4）に旧版の `genko gc`・`genko undo` を使わない（SPEC・schema-v4 §8）。
+- 下書きの排他はない（二つのアプリで同じ依頼に書くと後勝ち）。
+- Windows: プラグインの子の子の停止（Job Object）、MSIX 版の Claude の設定の場所、コンソールの窓は M6 の実機で確かめる。
+- cli の手順 42 の一度だけの失敗（M5②）は原因不明のまま（以後再現なし）。
+
+### 残課題・次
+- CMYK/Lab 編集の工程（M5 の後、M6 の前の独立工程。Lab の PSD を含む）。
+- M6 は Windows 実機の実行場所が要るため、着手前に止めて利用者に確認する。
+- Windows 実機受入（配布前に必須）。
+
+## M5②（Studio のサービスと genko studio）・M5③（MCP と HTTP）— 2026-10-12 記録
 
 ### V2 — 統合済み
 - 凍結 `17a22bf7ebb6660db7838b72a677d2c7d3727b75`。計画 `validation_policy.py --base 3192b93 --head 17a22bf --phase integration`（tier full、Linux 各 112 試験）。
@@ -29,7 +80,7 @@
 - 書体のパス（style.font・set_nombre.font）は、システムの書体を指す正当な使い方があるので root に閉じない（あるかどうかだけが分かる。既知の制限）。
 
 ### 残課題
-- M5④（画面）と M5 出口の準備（F3・PERF-F）は m5-4・m5-exit で作業中。M5 出口の V3 はその後。
+- M5④（画面）と M5 出口の準備（F3・PERF-F）は上の M5 出口の節で統合済み。
 - Windows 実機受入（配布前に必須）。
 
 ## M5 と M3・M4 の残り群E — 2026-10-11 記録
@@ -249,7 +300,7 @@
 - COMP-04 のネイティブ拡張（Python 以外の別プロセス画像フィルター）: 実行ファイル型プラグインの登録形式は公開契約の追加になるため利用者確認待ち。
 - CMYK/Lab の扱い（既出の判断項目）。
 
-## M2出口受入（Linux）— 2026-10-08 記録（この節が最新。下の旧節の「マージ後未実施」はこの節で置き換わる）
+## M2出口受入（Linux）— 2026-10-08 記録（下の旧節の「マージ後未実施」はこの節で置き換わる）
 
 - **凍結SHA**: `61e2e2c99857c26c634960f090403e53d339a0c4`（native/integration）。計画は `validation_policy.py --base 5e07b91 --phase milestone`（tier full、Linux各64試験、Windows各41試験＋契約23除外）。
 - **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.8GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18 / cgroup v1。Qt 6.11.2（aqtinstall 3.3.0）、GCC 13.3。参照 Python 3.12.3＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、`OPENBLAS_CORETYPE=Haswell`・`NPY_DISABLE_CPU_FEATURES` は native.yml と同じ。root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行（書込不能の試験を成立させるため）。3構成を同時実行、各構成内は ctest 1並列。
