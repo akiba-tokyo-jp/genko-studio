@@ -2,6 +2,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -28,6 +29,7 @@
 #include "core/poses.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
+#include "render/ink.hpp"
 #include "storage/fsutil.hpp"
 
 namespace genko::app {
@@ -484,6 +486,28 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
     hex->setAccessibleName(QStringLiteral("色（#RRGGBB）"));
     connect(hex, &QLineEdit::editingFinished, this, [this] { from_hex(); });
     numbers->addWidget(hex);
+    // インキ (color-mode@1): the colour's inks on a CMYK or Lab page, chosen as values too; 色域外
+    ink_box = new QWidget;
+    auto* inks = new QHBoxLayout(ink_box);
+    inks->setContentsMargins(0, 0, 0, 0);
+    inks->setSpacing(2);
+    for (std::size_t i = 0; i < ink_spins.size(); ++i) {
+        auto* spin = new QDoubleSpinBox;
+        spin->setDecimals(1);
+        spin->setMaximumWidth(58);
+        spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+        spin->setKeyboardTracking(false);
+        connect(spin, &QDoubleSpinBox::editingFinished, this, [this] { from_inks(); });
+        ink_labels[i] = new QLabel;
+        inks->addWidget(ink_labels[i]);
+        inks->addWidget(spin);
+        ink_spins[i] = spin;
+    }
+    gamut = new QLabel(QStringLiteral("⚠ 色域外"));
+    gamut->setToolTip(QStringLiteral("この色はページのプロファイルでそのまま刷れません（刷ると近い色になります）"));
+    inks->addWidget(gamut);
+    inks->addStretch(1);
+    ink_box->hide();
     // sets, history, between, near
     tabs = new QTabWidget;
     set_choice = new QComboBox;
@@ -529,6 +553,7 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
     layout->addLayout(top);
     layout->addLayout(picker);
     layout->addLayout(numbers);
+    layout->addWidget(ink_box);
     layout->addWidget(pick_source);
     layout->addWidget(tabs, 1);
     sets_ = colours::load_sets(core::poses::config_dir());
@@ -564,7 +589,61 @@ void ColourPanel::show_colour(const Rgb& rgb) {
                      .arg(rgb[2], 2, 16, QLatin1Char('0'))
                      .toUpper());
     fill_near(rgb);
+    show_inks(rgb);
     loading_ = false;
+}
+
+void ColourPanel::set_page_color(const std::optional<core::PageColor>& color) {
+    if (color == page_color_ && (!color || !page_color_ || color->icc == page_color_->icc)) return;
+    page_color_ = color;
+    ink_box->setVisible(page_color_.has_value());
+    if (!page_color_) return;
+    const bool cmyk = page_color_->space == core::InkSpace::Cmyk;
+    const char* names[] = {"C", "M", "Y", "K"};
+    const char* lab[] = {"L", "a", "b", ""};
+    for (std::size_t i = 0; i < ink_spins.size(); ++i) {
+        const bool used = cmyk || i < 3;
+        ink_labels[i]->setText(QString::fromLatin1(cmyk ? names[i] : lab[i]));
+        ink_labels[i]->setVisible(used);
+        ink_spins[i]->setVisible(used);
+        ink_spins[i]->setRange(cmyk || i == 0 ? 0.0 : -128.0, cmyk || i == 0 ? 100.0 : 127.0);
+        ink_spins[i]->setSuffix(cmyk ? QStringLiteral("%") : QString());
+        ink_spins[i]->setAccessibleName(cmyk ? QStringLiteral("%1 版（%）").arg(QString::fromLatin1(names[i])) : QString::fromLatin1(lab[i]));
+    }
+    const bool was = loading_;
+    loading_ = true;
+    show_inks(brush_->rgb());
+    loading_ = was;
+}
+
+void ColourPanel::show_inks(const Rgb& rgb) {
+    if (!page_color_) return;
+    try {
+        const std::vector<double> ink = render::ink::ink_of(*page_color_, rgb);
+        const bool cmyk = page_color_->space == core::InkSpace::Cmyk;
+        for (std::size_t i = 0; i < ink.size() && i < ink_spins.size(); ++i) {
+            const QSignalBlocker quiet(ink_spins[i]);
+            ink_spins[i]->setValue(cmyk ? ink[i] * 100.0 : ink[i]);
+        }
+        // (the table's colours and the greys print as their own inks: never out)
+        const bool own = core::ink_for(*page_color_, rgb) != nullptr || (rgb[0] == rgb[1] && rgb[1] == rgb[2]);
+        gamut->setVisible(!own && render::ink::gamut_distance(*page_color_, rgb) > 3.0);
+    } catch (const std::exception&) {  // (a profile not read: nothing shown)
+        gamut->setVisible(false);
+    }
+}
+
+void ColourPanel::from_inks() {
+    if (loading_ || !page_color_) return;
+    const bool cmyk = page_color_->space == core::InkSpace::Cmyk;
+    std::vector<double> ink;
+    for (std::size_t i = 0; i < (cmyk ? 4u : 3u); ++i) ink.push_back(cmyk ? ink_spins[i]->value() / 100.0 : ink_spins[i]->value());
+    try {
+        if (render::ink::same_inks(*page_color_, render::ink::ink_of(*page_color_, brush_->rgb()), ink)) return;  // (as it is)
+    } catch (const std::exception&) {
+        return;
+    }
+    emit inks_chosen(ink);
 }
 
 void ColourPanel::from_square() {

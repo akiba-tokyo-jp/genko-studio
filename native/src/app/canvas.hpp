@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -150,6 +151,9 @@ public:
     int shape_sides = 5;
     // 色混ぜ and ゆがみ: the brush's size (mm).
     double blend_mm = 6.0;
+    // スポイト: where it picked last (mm) and whether from the drawing layer (color-mode@1: the window reads the inks
+    // there on a CMYK or Lab page).
+    std::optional<std::pair<QPointF, bool>> last_pick;
     // スポイト: the colour as seen ("view") or the drawing layer's own ("layer": asked of layer_colour_at).
     QString pick_source = QStringLiteral("view");
     std::function<std::optional<std::array<int, 3>>(double x_mm, double y_mm)> layer_colour_at;

@@ -10,8 +10,12 @@
 #include <utility>
 #include <vector>
 
+#include "core/ink.hpp"
+
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
+class QLabel;
 class QGridLayout;
 class QLineEdit;
 class QSpinBox;
@@ -125,6 +129,9 @@ public:
     void new_set(const std::optional<QString>& name = std::nullopt);
     // The current colour as a corner of 中間色 (0 左上, 1 右上, 2 左下, 3 右下).
     void set_corner(int i);
+    // color-mode@1: the page's colour mode (none: an RGB page). On a CMYK or Lab page the colour's inks are shown and can
+    // be chosen (インキ), and an RGB colour the page cannot print as it is gets a mark (色域外).
+    void set_page_color(const std::optional<core::PageColor>& color);
 
     const std::vector<Rgb>& history() const { return history_; }
     const std::array<Rgb, 4>& corners() const { return corners_; }
@@ -146,16 +153,24 @@ public:
     QWidget* between_page = nullptr;
     QWidget* near_page = nullptr;
     QComboBox* pick_source = nullptr;
+    QWidget* ink_box = nullptr;                    // (shown on a CMYK or Lab page)
+    std::array<QDoubleSpinBox*, 4> ink_spins{};    // C M Y K in %, or L a b
+    std::array<QLabel*, 4> ink_labels{};
+    QLabel* gamut = nullptr;
 
 signals:
     // スポイト: where the picker takes its colour ("view" | "layer").
     void pick_source_chosen(const QString& source);
+    // インキ: these inks chosen for the pen (CMYK 0..1, or L a b); the window gives them an RGB colour (set_inks).
+    void inks_chosen(const std::vector<double>& ink);
 
 private:
     void from_square();
     void from_hue(double h);
     void from_numbers();
     void from_hex();
+    void show_inks(const Rgb& rgb);
+    void from_inks();
     void fill_sets();
     void fill_set();
     void fill_history();
@@ -165,6 +180,7 @@ private:
     bool keep_set(const std::string& name);
 
     BrushPanel* brush_ = nullptr;
+    std::optional<core::PageColor> page_color_;
     bool loading_ = false;
     Rgb sub_rgb_{255, 255, 255};
     std::vector<Rgb> history_;

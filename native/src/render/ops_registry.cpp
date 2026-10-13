@@ -2,11 +2,13 @@
 
 #include <algorithm>
 
+#include "core/command_bus.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyops.hpp"
 #include "core/studio.hpp"
 #include "render/bookpages.hpp"
 #include "render/color_edit.hpp"
+#include "render/ink_edit.hpp"
 #include "render/ops_3d.hpp"
 #include "render/paper.hpp"
 #include "render/placed.hpp"
@@ -16,29 +18,31 @@ namespace genko::render {
 
 namespace {
 
-// color-mode@1: the ops that work a paint layer's pixels and do not yet know the inks of a CMYK or Lab page (later
-// steps of the colour modes, SPEC.md COLOR-02): refused there, never done in RGB or left undone without a word.
-void refuse_on_ink_pages(const core::OpContext& c, const std::string& name) {
-    static const std::vector<std::string_view> kPending{
-        "transform_area", "delete_area", "paste", "erase_raster", "erase", "filter_raster", "smudge", "liquify",
-        "merge_down", "merge_layers", "merge_visible", "convert_layer", "flood_fill", "gradient_fill", "add_shape",
-        "fill_gaps", "stamp_material", "lt_convert", "put_color_raster", "render_prims",
-        "trace_prims", "ruler_to_layer"};
-    if (std::find(kPending.begin(), kPending.end(), name) == kPending.end()) return;
+// The CMYK and Lab pages an op may work on: the page it names (as it finds it: 1, 1.0 and true alike), or every one
+// when it names none (a page it cannot find: none — the op itself says why).
+std::vector<std::size_t> ink_pages_of(const core::OpContext& c) {
+    std::vector<std::size_t> out;
     const core::Json* page = core::get(c.op, "page");
-    if (page == nullptr || page->is_null()) {  // (no page named: refused while the book has an ink page)
-        for (const auto& each : c.doc.pages) {
-            if (each->color) core::not_yet_ported(name + " on a CMYK or Lab page is not in this build yet");
+    if (page == nullptr || page->is_null()) {
+        for (std::size_t i = 0; i < c.doc.pages.size(); ++i) {
+            if (!c.doc.is_deferred(i) && c.doc.page(i).color) out.push_back(i);
         }
-        return;
+        return out;
     }
-    std::size_t at = 0;
     try {
-        at = core::require_page(c.doc, c.op);  // (the page the op works on, as it finds it: 1, 1.0 and true alike)
+        const std::size_t at = core::require_page(c.doc, c.op);
+        if (c.doc.page(at).color) out.push_back(at);
     } catch (const std::exception&) {
-        return;  // (the op itself says why)
     }
-    if (c.doc.pages[at]->color) core::not_yet_ported(name + " on a CMYK or Lab page is not in this build yet");
+    return out;
+}
+
+// color-mode@1: the pixel ops that do not yet know the inks of a CMYK or Lab page (a later step of the colour modes,
+// SPEC.md COLOR-02: the filters): refused there, never done in RGB or left undone without a word.
+void refuse_on_ink_pages(const core::OpContext& c, const std::string& name) {
+    static const std::vector<std::string_view> kPending{"filter_raster"};
+    if (std::find(kPending.begin(), kPending.end(), name) == kPending.end()) return;
+    if (!ink_pages_of(c).empty()) core::not_yet_ported(name + " on a CMYK or Lab page is not in this build yet");
 }
 
 }  // namespace
@@ -79,6 +83,17 @@ const core::OpRegistry& ops_registry() {
         for (const std::string& name : r.names()) {
             const core::OpFunction op = *r.find(name);
             r.add(name, [op, name](core::OpContext& c) {
+                // (color-mode@1: a pixel op on a CMYK or Lab page works the pictures its ink layers show, then puts
+                // what it left back into inks, render/ink_edit)
+                if (ink_edit::lends(name)) {
+                    if (const std::vector<std::size_t> pages = ink_pages_of(c); !pages.empty()) {
+                        const ink_edit::Lending lending(c.doc, pages);
+                        op(c);
+                        lending.take_back(c.doc);
+                        color_edit::bake_marks(c.doc);
+                        return;
+                    }
+                }
                 refuse_on_ink_pages(c, name);
                 op(c);
                 color_edit::bake_marks(c.doc);

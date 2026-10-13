@@ -40,6 +40,7 @@
 #include "app/save_status.hpp"
 #include "app/studio_widgets.hpp"
 #include "app/theme.hpp"
+#include "app/colours.hpp"
 #include "service/wording.hpp"
 #include "core/actor.hpp"
 #include "core/command_bus.hpp"
@@ -626,6 +627,7 @@ void MainWindow::refresh_status() {
     } else {
         read_only_->hide();
     }
+    if (colours_ != nullptr) colours_->set_page_color(current_page() != nullptr ? current_page()->color : std::nullopt);  // (color-mode@1)
     if (flash_timer_.isActive()) return;  // (a notice is showing: it goes back to the page's status after its time)
     const QString saved = state_words(status);
     const core::Page* page = current_page();

@@ -68,6 +68,16 @@ std::string picture_icc(std::string_view bytes);
 // else RGB (its alpha kept).
 core::InkPixels picture_inks(std::string_view bytes, const core::PageColor& color);
 
+// Are two inks the same at the page's depth (as stored)?
+bool same_inks(const core::PageColor& color, const std::vector<double>& a, const std::vector<double>& b);
+// An RGB colour to give these inks on the page (its table then holds the pair, set_inks): the one the screen shows them
+// as, moved by a step or a few when that one is a colour the rules keep (Genko's blacks, white) or one the table holds
+// for other inks. core::Error("value") when none near is free.
+std::array<int, 3> rgb_for_inks(const core::PageColor& color, const std::vector<double>& ink);
+// How far (CIE ΔE 1976) an sRGB colour moves through a CMYK page's profile and back: past about 3, out of what the
+// page prints (色域外). A Lab page holds every colour: 0.
+double gamut_distance(const core::PageColor& color, const std::array<int, 3>& rgb);
+
 // One sample of an ink as a stored value (0..max) and back.
 std::uint16_t encode_sample(core::InkSpace space, unsigned channel, double value, int depth);
 double decode_sample(core::InkSpace space, unsigned channel, std::uint16_t sample, int depth);

@@ -34,6 +34,7 @@
 #include <functional>
 
 #include "app/canvas.hpp"
+#include "app/colours.hpp"
 #include "app/dialogs.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
@@ -883,6 +884,48 @@ private slots:
         QVERIFY(s.trigger("act_color_mode"));
         QCOMPARE(depth_before, 16);
         QCOMPARE(depth_after, 8);
+    }
+
+    // color-mode@1, step two: on a CMYK page the colour panel shows the pen colour's inks and marks a colour the page
+    // cannot print as it is (色域外); inks chosen there, or picked with the eyedropper, become the pen's colour — in the
+    // page's table when its rules would print other inks for it (set_inks).
+    void inksInTheColourPanel() {
+        Studio s;
+        const std::string icc = genko::test::read_bytes(genko::test::test_data(QStringLiteral("colour/photocraft-coated-cmyk.icc")));
+        s.on_page(1);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"icc", core::b64encode(icc)}},
+                                                 Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"},
+                                                      {"points", Json::array({Json::array({10, 40}), Json::array({50, 40})})}, {"width_mm", 3}}})));
+        app::ColourPanel* panel = s.window->colours();
+        QVERIFY(panel != nullptr);
+        QTRY_VERIFY(panel->ink_box->isVisibleTo(panel));
+        panel->choose({0, 255, 0});
+        QVERIFY(panel->gamut->isVisibleTo(panel));  // (a pure green: out)
+        panel->choose({20, 20, 20});                 // (Genko's black: K 100% alone, never out)
+        QVERIFY(!panel->gamut->isVisibleTo(panel));
+        QCOMPARE(panel->ink_spins[0]->value(), 0.0);
+        QCOMPARE(panel->ink_spins[3]->value(), 100.0);
+        // inks chosen in the panel
+        std::size_t n = s.ops.size();
+        const std::array<double, 4> chosen{10, 90, 80, 0};
+        for (std::size_t i = 0; i < 4; ++i) panel->ink_spins[i]->setValue(chosen[i]);
+        emit panel->ink_spins[3]->editingFinished();
+        QCOMPARE(s.ops.size(), n + 1);
+        QCOMPARE(QString::fromStdString(s.ops.back()["op"].get<std::string>()), QStringLiteral("set_inks"));
+        const auto& table = s.book().page(0).color->inks;
+        QCOMPARE(table.size(), std::size_t{1});
+        QVERIFY(panel->rgb() == table[0].rgb);
+        for (std::size_t i = 0; i < 4; ++i) QVERIFY(std::abs(table[0].ink[i] - chosen[i] / 100.0) < 1e-6);
+        // the eyedropper on the line: K 100% alone, given a colour of its own
+        n = s.ops.size();
+        s.window->canvas()->last_pick = std::make_pair(QPointF(30, 40), false);
+        emit s.window->canvas()->colourPicked({35, 31, 32});
+        QCOMPARE(s.ops.size(), n + 1);
+        const auto& now = s.book().page(0).color->inks;
+        QCOMPARE(now.size(), std::size_t{2});
+        QVERIFY(panel->rgb() == now[1].rgb);
+        QVERIFY2(now[1].ink == (std::vector<double>{0, 0, 0, 1}), core::to_json(*s.book().page(0).color).dump().c_str());
+        QVERIFY(s.window->last_notice().contains(QStringLiteral("K 100.0%")));
     }
 
     void coversAreAdded() {

@@ -41,6 +41,7 @@ genko_library(genko_render
     colour.cpp
     ink.cpp
     ink_canvas.cpp
+    ink_edit.cpp
     ops_ink.cpp
     raster_ops.cpp
     ops_paint.cpp

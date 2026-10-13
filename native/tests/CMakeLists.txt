@@ -77,6 +77,9 @@ genko_test(test_paper SOURCES unit/test_paper.cpp DEPS genko_test_support genko_
 # color-mode@1 (SPEC.md COLOR-02): CMYK and Lab pages without Python — GKIR, the colour mode, the ink rules, the ink
 # canvas's blends, a page drawn in parts, set_color_mode and back, set_inks, the book on disk, Undo, the refusals.
 genko_test(test_ink SOURCES unit/test_ink.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# color-mode@1, step two: the pixel ops of CMYK and Lab pages through their pictures, the eyedropper's inks, a colour
+# for chosen inks and the gamut mark.
+genko_test(test_ink_edit SOURCES unit/test_ink_edit.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
 # steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.

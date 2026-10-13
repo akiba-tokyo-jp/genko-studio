@@ -386,8 +386,8 @@ private slots:
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"icc", core::b64encode("nope")}}})).empty());
         // an op that does not know inks yet: not_yet_ported, nothing done
         const core::Document cmyk = run_ops(doc, Json::array({to_cmyk_op()})).doc;
-        const std::string erased = refusal(cmyk, Json::array({Json{{"op", "erase_raster"}, {"page", 1}, {"layer", "ink"}, {"width_mm", 1}, {"points", Json::array({Json::array({1, 1}), Json::array({5, 5})})}}}));
-        QVERIFY2(erased.rfind("not_yet_ported", 0) == 0, erased.c_str());
+        const std::string filtered = refusal(cmyk, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"layer", "ink"}, {"kind", "mosaic"}, {"block", 4}}}));
+        QVERIFY2(filtered.rfind("not_yet_ported", 0) == 0, filtered.c_str());
         // set_inks on an RGB page
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_inks"}, {"page", 1}, {"inks", Json::array()}}})).empty());
     }
@@ -427,7 +427,7 @@ private slots:
         QVERIFY(formats::ink_note(doc.page(0)));
         // not ported yet on an ink page: page 1, 1.0 or true alike
         for (const Json& page : {Json(1), Json(1.0), Json(true)}) {
-            const std::string refused = refusal(doc, Json::array({Json{{"op", "delete_area"}, {"page", page}, {"x_mm", 0}, {"y_mm", 0}, {"w_mm", 20}, {"h_mm", 20}}}));
+            const std::string refused = refusal(doc, Json::array({Json{{"op", "filter_raster"}, {"page", page}, {"layer", "ink"}, {"kind", "mosaic"}, {"block", 4}}}));
             QVERIFY2(refused.rfind("not_yet_ported", 0) == 0, refused.c_str());
         }
         // LAB to a mode other than RGB, RGBA and RGBX: Pillow's words

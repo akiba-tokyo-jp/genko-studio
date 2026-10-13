@@ -24,6 +24,9 @@
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "core/pynum.hpp"
+#include "service/wording.hpp"
+#include "render/ink.hpp"
+#include "render/ink_edit.hpp"
 #include "render/page.hpp"
 #include "render/selection.hpp"
 
@@ -176,6 +179,7 @@ void MainWindow::build_colour_dock() {
         if (QAction* act = action("act_transparent"); act->isChecked() != on) act->setChecked(on);
     });
     connect(colours_, &ColourPanel::pick_source_chosen, this, [this](const QString& source) { canvas_->pick_source = source; });
+    connect(colours_, &ColourPanel::inks_chosen, this, [this](const std::vector<double>& ink) { choose_inks(ink); });
     auto* dock = new QDockWidget(QStringLiteral("カラー"), this);
     dock->setObjectName(QStringLiteral("カラー"));
     auto* scroll = new QScrollArea;  // (a tall panel scrolls on a small screen instead of making the window taller)
@@ -218,8 +222,60 @@ std::optional<std::array<int, 3>> MainWindow::layer_colour_at(double x_mm, doubl
 }
 
 void MainWindow::colour_picked(const std::array<int, 3>& rgb) {
+    // color-mode@1: on a CMYK or Lab page the eyedropper takes the inks there; when the page's rules would put other
+    // inks on the colour it saw, the colour goes into the page's table with them (set_inks)
+    const core::Page* page = current_page();
+    if (page != nullptr && page->color && canvas_->last_pick) {
+        const auto [mm, from_layer] = *canvas_->last_pick;
+        try {
+            std::optional<std::vector<double>> ink;
+            if (from_layer) {
+                if (const core::Layer* layer = target_layer()) ink = render::ink_edit::layer_inks_at(*page, *layer, mm.x(), mm.y());
+            } else {
+                ink = render::ink_edit::inks_at(*page, &book(), mm.x(), mm.y());
+            }
+            if (ink) {
+                choose_inks(*ink);
+                return;
+            }
+        } catch (const std::exception& error) {
+            flash(wording::error(QString::fromUtf8(error.what())), 4000, true);
+            return;
+        }
+    }
     brush_->set_colour(rgb);
     flash(QStringLiteral("色を拾いました (%1, %2, %3)").arg(rgb[0]).arg(rgb[1]).arg(rgb[2]), 2000);
+}
+
+void MainWindow::choose_inks(const std::vector<double>& ink) {
+    const core::Page* page = current_page();
+    if (page == nullptr || !page->color) return;
+    const core::PageColor& color = *page->color;
+    std::array<int, 3> rgb{};
+    try {
+        rgb = render::ink::rgb_for_inks(color, ink);
+    } catch (const std::exception& error) {
+        flash(wording::error(QString::fromUtf8(error.what())), 4000, true);
+        return;
+    }
+    if (!render::ink::same_inks(color, render::ink::ink_of(color, rgb), ink)) {
+        Json values = Json::array();
+        for (const double v : ink) values.push_back(core::py_round(v, color.space == core::InkSpace::Cmyk ? 5 : 3));
+        if (!apply_ops(Json::array({Json{{"op", "set_inks"}, {"page", page->index.json()},
+                                         {"inks", Json::array({Json::array({Json::array({rgb[0], rgb[1], rgb[2]}), values})})}}}))) {
+            return;
+        }
+    }
+    brush_->set_colour(rgb);
+    QStringList said;
+    const bool cmyk = color.space == core::InkSpace::Cmyk;
+    const char* names[] = {"C", "M", "Y", "K"};
+    const char* lab[] = {"L", "a", "b"};
+    for (std::size_t i = 0; i < ink.size(); ++i) {
+        said << (cmyk ? QStringLiteral("%1 %2%").arg(QString::fromLatin1(names[i])).arg(ink[i] * 100.0, 0, 'f', 1)
+                      : QStringLiteral("%1 %2").arg(QString::fromLatin1(lab[i])).arg(ink[i], 0, 'f', 1));
+    }
+    flash(QStringLiteral("色を拾いました（%1）").arg(said.join(QStringLiteral(" "))), 2000);
 }
 
 void MainWindow::fill_at(double x_mm, double y_mm) {

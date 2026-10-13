@@ -560,4 +560,52 @@ double decode_sample(InkSpace space, unsigned channel, std::uint16_t sample, int
     return depth == 16 ? sample / 257.0 - 128.0 : sample - 128.0;
 }
 
+bool same_inks(const PageColor& color, const std::vector<double>& a, const std::vector<double>& b) {
+    const unsigned ch = core::colour_channels(color.space);
+    if (a.size() < ch || b.size() < ch) return false;
+    for (unsigned c = 0; c < ch; ++c) {
+        if (encode_sample(color.space, c, a[c], color.depth) != encode_sample(color.space, c, b[c], color.depth)) return false;
+    }
+    return true;
+}
+
+std::array<int, 3> rgb_for_inks(const PageColor& color, const std::vector<double>& ink) {
+    const std::array<double, 3> shown = srgb_of(color, ink);
+    std::array<int, 3> rgb{};
+    for (unsigned c = 0; c < 3; ++c) rgb[c] = static_cast<int>(std::lround(std::clamp(shown[c], 0.0, 1.0) * 255.0));
+    // (a colour free for these inks: not one the rules keep — Genko's blacks, white — nor one the table holds for others)
+    const auto free_for = [&](const std::array<int, 3>& c) {
+        if (c[0] == c[1] && c[1] == c[2] && (c[0] == 0 || c[0] == 10 || c[0] == 15 || c[0] == 20 || c[0] == 255)) return false;
+        const core::InkEntry* held = core::ink_for(color, c);
+        return held == nullptr || same_inks(color, held->ink, ink);
+    };
+    if (free_for(rgb)) return rgb;
+    for (int step = 1; step <= 8; ++step) {
+        for (const int sign : {1, -1}) {
+            for (int channel = 2; channel >= 0; --channel) {
+                std::array<int, 3> moved = rgb;
+                moved[channel] += sign * step;
+                if (moved[channel] < 0 || moved[channel] > 255) continue;
+                if (free_for(moved)) return moved;
+            }
+        }
+    }
+    throw core::Error("value", "no RGB colour near these inks is free in the page's table");
+}
+
+double gamut_distance(const PageColor& color, const std::array<int, 3>& rgb) {
+    if (color.space != InkSpace::Cmyk) return 0.0;  // (Lab holds every sRGB colour)
+    const std::array<double, 3> srgb{rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0};
+    const std::array<double, 3> back = srgb_of(color, ink_of_srgb(color, srgb));
+    const Transform lab = cached("srgb>lab:dbl", [] {
+        const ProfileHandle srgb_profile(cmsCreate_sRGBProfile());
+        const ProfileHandle lab_profile(cmsCreateLab4Profile(nullptr));
+        return cmsCreateTransform(srgb_profile.handle, TYPE_RGB_DBL, lab_profile.handle, TYPE_Lab_DBL, INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOCACHE);
+    });
+    double in[6] = {srgb[0], srgb[1], srgb[2], back[0], back[1], back[2]};
+    cmsCIELab out[2];
+    cmsDoTransform(lab->handle, in, out, 2);
+    return cmsDeltaE(&out[0], &out[1]);
+}
+
 }  // namespace genko::render::ink

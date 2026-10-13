@@ -305,7 +305,8 @@ void move_layer(Layer& layer, const Map& m, const PageSpec& paper, const PageSpe
     }
     // (Python has no precise colour pixels: this build cannot move them onto the new frame yet)
     if (layer.color_raster) not_yet_ported("set_page_spec moving high-precision colour pixels is not in the C++ build yet");
-    // (color-mode@1: a CMYK or Lab page's pixels are not moved onto the new frame yet)
+    // (color-mode@1: the drawing build lends set_page_spec the pictures of a CMYK or Lab page's layers, render/ink_edit;
+    // their inks alone are not moved here)
     if (layer.ink_raster) not_yet_ported("set_page_spec moving the pixels of a CMYK or Lab page is not in this build yet");
 }
 

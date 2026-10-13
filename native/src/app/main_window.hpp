@@ -347,6 +347,9 @@ private:
     core::Json paint_fields() const;
     std::optional<std::array<int, 3>> layer_colour_at(double x_mm, double y_mm) const;
     void colour_picked(const std::array<int, 3>& rgb);
+    // color-mode@1: these inks for the pen on the CMYK or Lab page in front (an RGB colour for them, in the page's table
+    // when its rules would put other inks on it: set_inks).
+    void choose_inks(const std::vector<double>& ink);
     void fill_at(double x_mm, double y_mm);
     void lasso_filled(const QVector<QPointF>& points);
     void shape_drawn(const core::Json& shape);

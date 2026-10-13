@@ -190,6 +190,7 @@ void PageCanvas::pick_colour(const QPointF& pos) {
     const core::Page* p = page();
     if (p == nullptr) return;
     const QPointF mm = mm_of(pos);
+    last_pick = std::make_pair(mm, pick_source == QLatin1String("layer"));
     if (pick_source == QLatin1String("layer") && layer_colour_at) {
         if (const auto rgb = layer_colour_at(mm.x(), mm.y())) emit colourPicked(*rgb);
         return;
