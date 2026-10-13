@@ -416,7 +416,8 @@ private slots:
             "put_raster", "filter_raster", "fill", "fill_area", "fill_enclosed",
             "fill_gaps", "flood_fill", "gradient_fill", "delete_area", "transform_area",
             "paste", "erase", "erase_raster", "set_stroke_width", "reshape_stroke", "lt_convert", "stamp_material",
-            "add_shape", "smudge", "liquify", "import_psd"};
+            "add_shape", "smudge", "liquify", "import_psd",
+            "set_color_mode", "set_inks"};  // (color-mode@1: the C++ build's own, SPEC.md COLOR-02)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

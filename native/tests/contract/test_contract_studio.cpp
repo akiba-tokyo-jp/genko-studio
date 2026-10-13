@@ -23,7 +23,7 @@
 // placedPicturesLikePython: placed pictures drawn (render._placed_raster, _finish_placed; psd's placed layers) on the book
 // `studio_harness.py make-placedbook` makes (placements and reported faces far past the page among them, a Photoshop
 // file's merged picture), page by page, layer by layer and in the exports, pixel for pixel and file for file; a
-// Photoshop file of Lab colours placed and not drawn yet (not_yet_ported).
+// Photoshop file of Lab colours placed and drawn as Python draws it (transparent: Pillow's LAB to RGBA).
 //
 // peopleOnlyThroughTheCommandLine (C++ only): what only a person holds refused to an agent through `genko apply`, and
 // an approved character's deletion recorded in the audit as an approval gone.
@@ -1085,9 +1085,9 @@ private slots:
             }
             QCOMPARE(said, QStringLiteral("value: the finish's line_threshold is not a number"));
         }
-        // a Photoshop file of Lab colours (Python turns them into RGB through Little CMS, which this build does not do
-        // yet): placed — its size read from its header, as Python reads it — and then neither drawn nor exported, said
-        // so (not_yet_ported "image_format"), nothing written
+        // a Photoshop file of Lab colours: placed — its size read from its header, as Python reads it — and drawn as
+        // Python draws it (Pillow's "LAB" picture to RGBA through Little CMS, its fourth byte — 0 in a PSD — the alpha:
+        // nothing shows), so the page and its export are the same as without it
         {
             const genko::core::CommandBus bus(genko::render::ops_registry());
             const auto placed_lab = bus.apply(doc,
@@ -1096,11 +1096,15 @@ private slots:
                                               genko::core::Actor("human:作者"));
             QCOMPARE(placed_lab.applied.size(), std::size_t{1});
             const genko::core::Document& lab = placed_lab.doc;
-            const genko::core::Page* page4 = nullptr;
-            for (const auto& p : lab.pages) {
-                if (p->index == genko::core::Num(4)) page4 = p.get();
-            }
-            QVERIFY(page4 != nullptr);
+            const auto page_four = [](const genko::core::Document& from) -> const genko::core::Page* {
+                for (const auto& p : from.pages) {
+                    if (p->index == genko::core::Num(4)) return p.get();
+                }
+                return nullptr;
+            };
+            const genko::core::Page* page4 = page_four(lab);
+            const genko::core::Page* before = page_four(doc);
+            QVERIFY(page4 != nullptr && before != nullptr);
             const auto placed_layer = std::find_if(page4->layers.begin(), page4->layers.end(), [&](const auto& l) {
                 return l.asset && Json(*l.asset) == pictures["P_PSDLAB"];
             });
@@ -1110,23 +1114,11 @@ private slots:
                 genko::render::clear_render_caches();
                 genko::render::RenderOptions options;
                 options.mode = mode;
-                QString element;
-                try {
-                    (void)genko::render::render_page(*page4, 60, options, &lab);
-                } catch (const genko::render::NotYetPorted& e) {
-                    element = QString::fromStdString(e.element());
-                }
-                QCOMPARE(element, QStringLiteral("image_format"));
+                const std::string shown = genko::render::render_page(*page4, 60, options, &lab).image.tobytes();
+                QVERIFY2(shown == genko::render::render_page(*before, 60, options, &doc).image.tobytes(), mode);
             }
             const std::filesystem::path dest = genko::core::path_from_utf8((dir + "/lab").toStdString());
-            QString element;
-            try {
-                (void)genko::formats::export_print(lab, dest, "png", 40, 180, true, "paper", "auto");
-            } catch (const genko::render::NotYetPorted& e) {
-                element = QString::fromStdString(e.element());
-            }
-            QCOMPARE(element, QStringLiteral("image_format"));
-            QVERIFY(!std::filesystem::exists(dest) || std::filesystem::is_empty(dest));
+            QVERIFY(!genko::formats::export_print(lab, dest, "png", 40, 180, true, "paper", "auto").empty());
         }
 
         QVERIFY(pages >= 42 && layers >= 20 && tiles >= 42 && exported_files >= 30);

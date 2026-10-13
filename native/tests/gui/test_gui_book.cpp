@@ -413,12 +413,12 @@ private slots:
         // ページ: Python's order (絵柄を選ぶ and チャットでの承認 of M5④ in their places)
         QMenu* pages = top_menu(s.window.get(), QStringLiteral("ページ"));
         QVERIFY(pages != nullptr);
-        // (ページの色モード…: CMYK/Lab, after the paper)
+        // (ページの色モード…: CMYK/Lab, the C++ build's own, after Python's)
         QCOMPARE(menu_texts(pages).mid(0, 19),
                  QStringList({QStringLiteral("ページを追加（この後ろに）"), QStringLiteral("このページを複製"), QStringLiteral("このページを消す…"), QStringLiteral("|"),
                               QStringLiteral("このページを前へ"), QStringLiteral("このページを後ろへ"), QStringLiteral("次のページと見開きにする／解除"), QStringLiteral("|"),
-                              QStringLiteral("原稿用紙の設定…"), QStringLiteral("ページの色モード…"), QStringLiteral("絵柄を選ぶ…"), QStringLiteral("チャットでの承認…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
-                              QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("アニメーション（タイムライン）"),
+                              QStringLiteral("原稿用紙の設定…"), QStringLiteral("絵柄を選ぶ…"), QStringLiteral("チャットでの承認…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
+                              QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("アニメーション（タイムライン）"), QStringLiteral("ページの色モード…"),
                               QStringLiteral("|"), QStringLiteral("コマ")}));
         // ファイル: after the scans, before the export (書き出し and 印刷, M4③b: test_gui_output)
         QMenu* file = top_menu(s.window.get(), QStringLiteral("ファイル"));

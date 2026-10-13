@@ -169,7 +169,7 @@ private slots:
         QCOMPARE(render::picture_size(psd_cut), (render::Size{9, 6}));
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::open_image(psd_cut, render::kPillowOpenLimits));
         QCOMPARE(render::picture_size(psd_lab), (render::Size{9, 6}));
-        QVERIFY_THROWS_EXCEPTION(render::NotYetPorted, render::open_image(psd_lab, render::kPillowOpenLimits));
+        QCOMPARE(std::string(render::open_image(psd_lab, render::kPillowOpenLimits).mode()), std::string("LAB"));  // (as Pillow's)
         // (no header to read: Python's errors, as before)
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::picture_size(std::string("\xff\xd8\xff\xe0", 4)));
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::picture_size(std::string("BM", 2)));
@@ -240,14 +240,10 @@ private slots:
         QVERIFY(refused(doc, adopting(psd_cut)).starts_with("apply: ops[1] adopt_candidate: the asset's picture cannot be read ("));
         const auto lab = bus().apply(doc, placing(psd_lab), Actor("human:作者"));
         QCOMPARE(QString::fromStdString(refused(doc, adopting(psd_lab))), QStringLiteral("(applied)"));
-        QString element;
-        try {
-            render::clear_render_caches();
-            (void)render::render_page(lab.doc.page(0), 60, render::RenderOptions{}, &lab.doc);
-        } catch (const render::NotYetPorted& e) {
-            element = QString::fromStdString(e.element());
-        }
-        QCOMPARE(element, QStringLiteral("image_format"));
+        // (drawn as Python draws it: Pillow's LAB picture to RGBA keeps the PSD's fourth byte, 0, as its alpha — nothing shows)
+        render::clear_render_caches();
+        QCOMPARE(render::render_page(lab.doc.page(0), 60, render::RenderOptions{}, &lab.doc).image.tobytes(),
+                 render::render_page(doc.page(0), 60, render::RenderOptions{}, &doc).image.tobytes());
         const std::string gone = put(tmp.path(), genko::core::a2b_base64(kSamples[0].cut));
         const auto imported = bus().apply(doc, Json::array({adopting(gone)[0]}), Actor("human:作者"));  // (import_candidates looks for it)
         QVERIFY(fs::remove(genko::storage::AssetStore(*doc.asset_dir).path(gone, ".png")));

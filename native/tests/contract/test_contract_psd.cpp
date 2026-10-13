@@ -116,9 +116,9 @@ Json read_record(const std::string& data) {
 }
 
 // The harness's psd_images record of `data` (Pillow's Image.open, then load()): what render::psd_image_size refuses
-// is Image.open's error, what render::open_image refuses then is load()'s. A Lab file's picture is read by
-// render::read_psd_image, open_image refusing it as not yet ported; its RGBA (Little CMS's) is not compared: "rgba" is
-// "(Lab)" here.
+// is Image.open's error, what render::open_image refuses then is load()'s. A Lab file opens as Pillow's "LAB" picture
+// (color-mode@1, SPEC.md COLOR-02); its RGBA (Little CMS's, another version on each side: within one, as
+// test_contract_ink compares it) is not compared here: "rgba" is "(Lab)".
 Json image_record(const std::string& data) {
     const auto refused = [](const genko::core::Error& error, const char* stage) {
         static const std::map<std::string, std::string> types{
@@ -140,17 +140,7 @@ Json image_record(const std::string& data) {
     const bool lab = genko::render::psd_lab(data);
     std::optional<genko::render::Image> image;
     try {
-        if (lab) {
-            try {
-                (void)genko::render::open_image(data, genko::render::kPillowOpenLimits);
-                return Json::object({{"error", "C++"}, {"message", "open_image took a Lab file"}});
-            } catch (const genko::render::NotYetPorted& error) {
-                if (error.element() != "image_format") return Json::object({{"error", "C++"}, {"message", error.what()}});
-            }
-            image = genko::render::read_psd_image(data, genko::render::kPillowOpenLimits);
-        } else {
-            image = genko::render::open_image(data, genko::render::kPillowOpenLimits);
-        }
+        image = genko::render::open_image(data, genko::render::kPillowOpenLimits);
     } catch (const genko::render::NotYetPorted& error) {
         return Json::object({{"error", "C++"}, {"message", error.what()}});
     } catch (const genko::core::Error& error) {

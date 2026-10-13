@@ -411,8 +411,9 @@ void MainWindow::build_menus() {
     pages->addAction(action("act_page_down"));
     pages->addAction(action("act_spread"));
     pages->addSeparator();
-    // (Python's order)
-    for (const char* name : {"act_paper", "act_color_mode", "act_style", "act_chat_approval", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline"}) {
+    // (Python's order; then the C++ build's own: the page's colour mode, color-mode@1)
+    for (const char* name : {"act_paper", "act_style", "act_chat_approval", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline",
+                             "act_color_mode"}) {
         pages->addAction(action(name));
     }
     pages->addSeparator();
