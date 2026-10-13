@@ -514,7 +514,7 @@ bool unported_image_format(std::string_view bytes) {
         bytes.substr(0, 6) == "GIF87a" || bytes.substr(0, 6) == "GIF89a") {
         return false;
     }
-    if (bytes.substr(0, 4) == "8BPS") return psd_lab(bytes);  // (a PSD of Lab colours: not turned into RGB yet)
+    if (bytes.substr(0, 4) == "8BPS") return false;  // (a PSD of Lab colours too: as Pillow, through Little CMS)
     return other_image_format(bytes);  // (Pillow would open these; the remaining formats are not ported yet)
 }
 
@@ -562,10 +562,7 @@ Image open_image(std::string_view bytes, const PngLimits& limits) {
     if (bytes.substr(0, 3) == "\xff\xd8\xff") return read_jpeg(bytes, limits);
     if (bytes.substr(0, 2) == "BM") return read_bmp(bytes, limits);
     if (bytes.substr(0, 6) == "GIF87a" || bytes.substr(0, 6) == "GIF89a") return read_gif(bytes, limits);
-    if (bytes.substr(0, 4) == "8BPS") {
-        if (psd_lab(bytes)) throw NotYetPorted("image_format");  // (Pillow turns its Lab colours into RGB through Little CMS)
-        return read_psd_image(bytes, limits);
-    }
+    if (bytes.substr(0, 4) == "8BPS") return read_psd_image(bytes, limits);  // (Lab: a "LAB" picture, as Pillow's)
     if (unported_image_format(bytes)) throw NotYetPorted("image_format");
     throw core::Error("unidentified_image", "cannot identify image file");
 }

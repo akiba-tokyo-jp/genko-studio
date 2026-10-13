@@ -14,6 +14,8 @@
 #include "formats/export.hpp"
 #include "formats/output.hpp"
 #include "formats/psd_text_detail.hpp"
+#include "render/ink_canvas.hpp"
+#include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
 #include "render/psd_text.hpp"
 #include "render/text/balloons.hpp"
@@ -203,14 +205,78 @@ private:
     void write(const std::string& name, const Image& crop, const render::Box& box, double opacity_given, const std::string& blend, bool clip,
                const Image* mask, const std::string& blocks) {
         const std::vector<Image> bands = crop.split();
+        std::vector<std::pair<int, std::string>> channels{{-1, rle(bands[3])}, {0, rle(bands[0])}, {1, rle(bands[1])}, {2, rle(bands[2])}};
+        record(name, std::move(channels), box, opacity_given, blend, clip, mask ? std::optional<std::string>(rle(mask->convert("L").resize(size_))) : std::nullopt,
+               blocks);
+    }
+
+public:
+    // color-mode@1: a layer of a CMYK or Lab page's PSD from its inks over the page (values: per pixel the colour
+    // channels then the alpha), cut to what it holds: CMYK stored inverted (0 is full ink), Lab as its bytes; 8 bits
+    // RLE, 16 bits raw.
+    void add_inks(const std::string& name, const std::vector<double>& values, core::InkSpace space, int depth, double opacity,
+                  const std::string& blend, bool clip, const Image* mask) {
+        const unsigned n = core::colour_channels(space), all = n + 1;
+        render::Box box{size_.width, size_.height, 0, 0};
+        for (int y = 0; y < size_.height; ++y) {
+            for (int x = 0; x < size_.width; ++x) {
+                if (values[(std::size_t(y) * size_.width + x) * all + n] <= 0) continue;
+                box.x0 = std::min(box.x0, x);
+                box.y0 = std::min(box.y0, y);
+                box.x1 = std::max(box.x1, x + 1);
+                box.y1 = std::max(box.y1, y + 1);
+            }
+        }
+        if (box.x1 <= box.x0) box = render::Box{0, 0, 1, 1};
+        const double most = depth == 16 ? 65535.0 : 255.0;
+        const auto plane = [&](unsigned channel) {
+            std::string bytes;
+            for (int y = box.y0; y < box.y1; ++y) {
+                for (int x = box.x0; x < box.x1; ++x) {
+                    double v = values[(std::size_t(y) * size_.width + x) * all + channel];
+                    if (channel < n && space == core::InkSpace::Cmyk) v = 1.0 - v;
+                    const auto sample = static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0, 1.0) * most));
+                    if (depth == 16) put_u16(bytes, sample);
+                    else put_u8(bytes, sample);
+                }
+            }
+            return bytes;
+        };
+        std::vector<std::pair<int, std::string>> channels;
+        channels.emplace_back(-1, packed_plane(plane(n), box.width(), box.height(), depth));
+        for (unsigned c = 0; c < n; ++c) channels.emplace_back(static_cast<int>(c), packed_plane(plane(c), box.width(), box.height(), depth));
+        std::optional<std::string> mask_plane;
+        if (mask != nullptr) {
+            const std::string grey = mask->convert("L").resize(size_).tobytes();
+            std::string bytes;
+            for (const char g : grey) {
+                const unsigned v = static_cast<unsigned char>(g);
+                if (depth == 16) put_u16(bytes, v * 257);
+                else put_u8(bytes, v);
+            }
+            mask_plane = packed_plane(bytes, size_.width, size_.height, depth);
+        }
+        record(name, std::move(channels), box, opacity, blend_key(blend), clip, std::move(mask_plane), {});
+    }
+
+    // A plane of samples (rows of `width`, big-endian at 16 bits) as a layer channel's data: 8 bits RLE, 16 raw.
+    static std::string packed_plane(const std::string& bytes, int width, int height, int depth) {
+        if (depth == 8) return rle(Image::frombytes("L", render::Size{width, height}, bytes));
+        std::string out;
+        put_u16(out, 0);
+        return out + bytes;
+    }
+
+private:
+    void record(const std::string& name, std::vector<std::pair<int, std::string>> channels, const render::Box& box, double opacity_given,
+                const std::string& blend, bool clip, std::optional<std::string> mask_plane, const std::string& blocks) {
         put_i32(records_, box.y0);
         put_i32(records_, box.x0);
         put_i32(records_, box.y1);
         put_i32(records_, box.x1);
-        std::vector<std::pair<int, std::string>> channels{{-1, rle(bands[3])}, {0, rle(bands[0])}, {1, rle(bands[1])}, {2, rle(bands[2])}};
         std::string mask_data;
-        if (mask != nullptr) {  // (an L picture over the whole canvas: white shows)
-            channels.emplace_back(-2, rle(mask->convert("L").resize(size_)));
+        if (mask_plane) {  // (an L picture over the whole canvas: white shows)
+            channels.emplace_back(-2, std::move(*mask_plane));
             put_u32(mask_data, 20);
             put_i32(mask_data, 0);
             put_i32(mask_data, 0);
@@ -618,11 +684,88 @@ std::int64_t psd_dpi(const core::Document& episode, std::optional<std::int64_t> 
     return dpi_given && *dpi_given != 0 ? *dpi_given : episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600;
 }
 
+// color-mode@1: the ICC profile as image resource 1039 (after the resolution), the resources' length again.
+std::string resources_with_icc(std::int64_t dpi, std::string_view icc) {
+    std::string out = resources(dpi);
+    if (icc.empty()) return out;
+    std::string block = out.substr(4);
+    block += "8BIM";
+    put_u16(block, 1039);
+    block += std::string(2, '\0');
+    put_u32(block, u32_of(icc.size()));
+    block += icc;
+    if (icc.size() % 2) block += '\0';
+    std::string sized;
+    put_u32(sized, u32_of(block.size()));
+    return sized + block;
+}
+
+// color-mode@1 (SPEC.md COLOR-02): a CMYK or Lab page's PSD in its own colour mode (4 or 9) and depth, every layer and
+// the merged picture as its inks (a paint layer's own; the others' colours by the page's rules), a CMYK page's profile
+// embedded. The editable text of PSD-01 is not written for such a page yet.
+void put_page_psd_inks(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest, std::int64_t dpi,
+                       const PsdText& text) {
+    if (text.editable) throw render::NotYetPorted("psd_text_ink");  // (the editable text of a CMYK or Lab page: a later step)
+    const core::PageColor& color = *page.color;
+    render::RenderOptions options;
+    options.mode = "print";
+    options.inks = true;
+    const render::RenderResult made = render::render_page(page, static_cast<int>(dpi), options, &episode);
+    const core::InkPixels& merged = *made.inks;
+    const render::Size size{static_cast<int>(merged.width), static_cast<int>(merged.height)};
+    Records records(size);
+    render::page_layers(page, episode, static_cast<int>(dpi), [&](render::PageLayer&& layer) {
+        const std::vector<double> values = layer.inks ? *layer.inks : render::ink_picture(layer.image, color).values;
+        records.add_inks(layer.name, values, color.space, color.depth, layer.settings ? layer.opacity : 1.0,
+                         layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr);
+    });
+    const unsigned n = core::colour_channels(color.space);
+    std::string body = "8BPS";
+    put_u16(body, 1);
+    body.append(6, '\0');
+    put_u16(body, n);
+    put_u32(body, merged.height);
+    put_u32(body, merged.width);
+    put_u16(body, static_cast<std::uint32_t>(color.depth));
+    put_u16(body, color.space == core::InkSpace::Cmyk ? 4 : 9);
+    put_u32(body, 0);  // (no colour mode data)
+    body += resources_with_icc(dpi, color.space == core::InkSpace::Cmyk && color.icc ? std::string_view(*color.icc) : std::string_view());
+    body += records.finish();
+    // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 raw
+    const unsigned all = merged.channels();
+    const auto plane = [&](unsigned c) {
+        std::string bytes;
+        for (std::size_t i = 0; i < merged.pixel_count(); ++i) {
+            std::uint32_t v = merged.samples[i * all + c];
+            if (color.space == core::InkSpace::Cmyk) v = merged.max() - v;
+            if (color.depth == 16) put_u16(bytes, v);
+            else put_u8(bytes, v);
+        }
+        return bytes;
+    };
+    if (color.depth == 8) {
+        std::string counts, packed;
+        for (unsigned c = 0; c < n; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed);
+        put_u16(body, 1);
+        body += counts;
+        body += packed;
+    } else {
+        put_u16(body, 0);
+        for (unsigned c = 0; c < n; ++c) body += plane(c);
+    }
+    if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
+    output.put(dest, body);
+}
+
 // The page's PSD (export_page_psd), put into `output` at `dest`.
 void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest,
                   std::optional<std::int64_t> dpi_given, const PsdText& text = {}, PsdTextReport* report = nullptr) {
     const std::int64_t dpi = psd_dpi(episode, dpi_given);
     check_dpi(dpi);
+    if (page.color) {
+        put_page_psd_inks(output, episode, page, dest, dpi, text);
+        return;
+    }
     render::RenderOptions options;
     options.mode = "print";
     const Image merged = render::render_page(page, static_cast<int>(dpi), options, &episode).image;

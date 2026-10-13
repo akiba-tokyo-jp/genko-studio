@@ -1,12 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "core/error.hpp"
+#include "core/ink.hpp"
 #include "render/image.hpp"
 #include "render/psd_text.hpp"
 
@@ -73,8 +75,9 @@ struct Layer {
 
 class File {
 public:
-    // psd.read_psd(data): ReadError with read_psd's errors.
-    static File read(std::string data, const Limits& limits = default_limits());
+    // psd.read_psd(data): ReadError with read_psd's errors. `lab`: a Lab file is read too (color-mode@1: into a CMYK or
+    // Lab page; read_psd refuses one).
+    static File read(std::string data, const Limits& limits = default_limits(), bool lab = false);
 
     // (width, height) of the canvas, as the header has them (32 bits each).
     std::int64_t width() const { return width_; }
@@ -92,6 +95,12 @@ public:
     std::optional<Image> mask(const Layer& layer) const;
     // The merged picture (PSDFile.merged: RGBA), nothing where read_psd has none.
     std::optional<Image> merged() const;
+    // color-mode@1: a pixel layer's picture over the whole canvas, and the merged picture, as a CMYK or Lab page's inks
+    // (CMYK from the file's own profile or the page's, Lab from Lab, the rest from RGB; 8-bit samples as read).
+    core::InkPixels image_inks(const Layer& layer, const core::PageColor& color) const;
+    std::optional<core::InkPixels> merged_inks(const core::PageColor& color) const;
+    // The ICC profile the file carries (image resource 1039), or "".
+    const std::string& icc() const { return icc_; }
     // PSD-01 (not psd.py's: the structure checks of the editable PSD): a layer's text, read from its TySh block
     // (render/psd_text.hpp), and the stroke of its layer effects (its lfx2 block); nothing for a layer without one.
     // core::Error("format") for a block that cannot be read.
@@ -136,6 +145,7 @@ private:
     int mode_ = 0;
     double dpi_ = 72.0;
     std::string mode_name_;
+    std::string icc_;
     std::uint64_t merged_at_ = 0;
     Limits limits_{};
     std::vector<Record> records_;
@@ -154,6 +164,8 @@ private:
     MergedPlan plan_merged() const;
     std::string samples(const ChannelRef& channel) const;
     Image part(const Record& record) const;
+    std::map<int, std::string> part_channels(const Record& record) const;
+    std::optional<std::map<int, std::string>> merged_channels() const;
 };
 
 // psd.BLEND_KEYS: the blend mode of a layer record's key ("normal" for one not there).

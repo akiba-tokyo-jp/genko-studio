@@ -1,5 +1,8 @@
 #include "render/psd.hpp"
 
+#include "render/ink.hpp"
+#include "render/ink_canvas.hpp"
+
 #include <zlib.h>
 
 #include <algorithm>
@@ -431,7 +434,7 @@ Samples read_channel(Reader& r, std::int64_t width, std::int64_t height, int dep
     return depth8(keep ? &raw : nullptr, length, width, height, depth);
 }
 
-int colour_bands(int mode) { return mode == 4 ? 4 : mode == 3 ? 3 : 1; }
+int colour_bands(int mode) { return mode == 4 ? 4 : mode == 3 || mode == 9 ? 3 : 1; }
 
 // The bands psd._to_rgba reads for a mode: CMYK's four, a grey band, or red, green and blue.
 std::vector<int> bands_of(int mode) {
@@ -463,6 +466,25 @@ Image to_rgba(int mode, const std::map<int, std::string>& channels, Size size) {
     return rgba;
 }
 
+// color-mode@1: the bands as a CMYK or Lab page's inks (CMYK through the file's profile, or the page's; Lab from its
+// L, a+128, b+128 bytes; the others through RGB as psd._to_rgba makes them).
+core::InkPixels to_inks(int mode, const std::map<int, std::string>& channels, Size size, const core::PageColor& color,
+                        const std::string& icc) {
+    const auto band = [&](int id, int fallback) {
+        const auto found = channels.find(id);
+        if (found != channels.end() && !found->second.empty()) return Image::frombytes("L", size, found->second);
+        return Image::create("L", size, Ink(fallback));
+    };
+    const Image alpha = band(-1, 255);
+    if (mode == 4) {
+        std::vector<Image> plates;
+        for (int i = 0; i < 4; ++i) plates.push_back(ops::invert(band(i, 255)));
+        return ink::from_cmyk_image(Image::merge("CMYK", plates), &alpha, icc, color);
+    }
+    if (mode == 9) return ink::from_lab_image(Image::merge("LAB", {band(0, 255), band(1, 128), band(2, 128)}), &alpha, color);
+    return ink::from_rgb(to_rgba(mode, channels, size), color);
+}
+
 int as_int(std::int64_t v) { return static_cast<int>(v); }
 
 // Image.new and Image.frombytes of (width, height), as Pillow refuses them before a pixel is made (neither read_psd nor
@@ -480,7 +502,7 @@ std::string blend_of(std::string_view key) {
     return found == blend_keys().end() ? std::string("normal") : found->second;
 }
 
-File File::read(std::string data, const Limits& limits) {
+File File::read(std::string data, const Limits& limits, bool lab) {
     File f;
     f.data_ = std::move(data);
     f.limits_ = limits;
@@ -497,7 +519,7 @@ File File::read(std::string data, const Limits& limits) {
     f.width_ = r.u32();
     f.depth_ = static_cast<int>(r.u16());
     f.mode_ = static_cast<int>(r.u16());
-    if (f.mode_ == 9) psd_error("Lab PSD files are not supported: save it as RGB or CMYK");
+    if (f.mode_ == 9 && !lab) psd_error("Lab PSD files are not supported: save it as RGB or CMYK");
     r.take(r.u32());  // colour mode data
     std::uint64_t res_end = r.u32();
     res_end += r.pos;
@@ -512,6 +534,7 @@ File File::read(std::string data, const Limits& limits) {
             const std::uint32_t fixed = be32(block);
             f.dpi_ = fixed == 0 ? 72.0 : fixed / 65536.0;
         }
+        if (rid == 1039) f.icc_ = std::string(block.substr(0, size));  // (color-mode@1: the file's ICC profile)
     }
     r.pos = res_end;
     static const std::map<int, std::string> kModeNames{{0, "bitmap"}, {1, "gray"},         {2, "indexed"}, {3, "rgb"},
@@ -736,14 +759,18 @@ std::string File::samples(const ChannelRef& channel) const {
     return read_channel(r, channel.width, channel.height, depth_, channel.end, true, budget, limits_).bytes;
 }
 
-Image File::part(const Record& record) const {
+std::map<int, std::string> File::part_channels(const Record& record) const {
     std::map<int, std::string> channels;
     std::vector<int> used = bands_of(mode_);
     used.push_back(-1);
     for (const int id : used) {
         if (const ChannelRef* c = record.channel(id)) channels[id] = samples(*c);
     }
-    return to_rgba(mode_, channels, Size{as_int(record.right - record.left), as_int(record.bottom - record.top)});
+    return channels;
+}
+
+Image File::part(const Record& record) const {
+    return to_rgba(mode_, part_channels(record), Size{as_int(record.right - record.left), as_int(record.bottom - record.top)});
 }
 
 namespace {
@@ -762,6 +789,18 @@ Image File::image(const Layer& layer) const {
     const Record& record = records_.at(layer.record);
     Image canvas = Image::create("RGBA", Size{as_int(width_), as_int(height_)}, Ink{0, 0, 0, 0});
     canvas.paste(part(record), Point{as_int(record.left), as_int(record.top)});
+    return canvas;
+}
+
+core::InkPixels File::image_inks(const Layer& layer, const core::PageColor& color) const {
+    canvas_fits(width_, height_);
+    const Record& record = records_.at(layer.record);
+    const Size size{as_int(record.right - record.left), as_int(record.bottom - record.top)};
+    core::InkPixels canvas = core::blank_ink_pixels(color.space, color.depth, static_cast<std::uint32_t>(std::max<std::int64_t>(1, width_)),
+                                                    static_cast<std::uint32_t>(std::max<std::int64_t>(1, height_)));
+    if (size.width > 0 && size.height > 0) {
+        paste_inks(canvas, to_inks(mode_, part_channels(record), size, color, icc_), Point{as_int(record.left), as_int(record.top)});
+    }
     return canvas;
 }
 
@@ -827,7 +866,7 @@ File::MergedPlan File::plan_merged() const {
     return plan;
 }
 
-std::optional<Image> File::merged() const {
+std::optional<std::map<int, std::string>> File::merged_channels() const {
     const MergedPlan plan = plan_merged();
     if (!plan.exists) return std::nullopt;
     canvas_fits(width_, height_);
@@ -857,7 +896,19 @@ std::optional<Image> File::merged() const {
     if (static_cast<std::uint64_t>(nchan_) > static_cast<std::uint64_t>(colour) && records_.empty()) {
         channels[-1] = plane_samples(static_cast<std::size_t>(colour));  // (a flat file's transparency)
     }
-    return to_rgba(mode_, channels, Size{as_int(width_), as_int(height_)});
+    return channels;
+}
+
+std::optional<Image> File::merged() const {
+    const auto channels = merged_channels();
+    if (!channels) return std::nullopt;
+    return to_rgba(mode_, *channels, Size{as_int(width_), as_int(height_)});
+}
+
+std::optional<core::InkPixels> File::merged_inks(const core::PageColor& color) const {
+    const auto channels = merged_channels();
+    if (!channels) return std::nullopt;
+    return to_inks(mode_, *channels, Size{as_int(width_), as_int(height_)}, color, icc_);
 }
 
 }  // namespace genko::render::psd

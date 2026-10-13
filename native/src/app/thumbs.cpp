@@ -64,6 +64,7 @@ QString qpath(const fs::path& path) { return QString::fromStdString(core::path_t
 std::string page_fingerprint(const core::Document& doc, const core::Page& page) {
     Hasher h;
     h.add(storage::spec_to_json(page.spec));
+    if (page.color) h.add(core::to_json(*page.color));  // (color-mode@1)
     h.add(core::to_string(page.binding));
     for (const core::Frame& frame : page.frames) h.add(frame_tree(frame));
     for (const auto& [role, rgb] : page.fills) {
@@ -116,6 +117,10 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
         if (layer.color_raster) {
             h.add(std::string_view("native-color-raster/1"));
             h.add_bytes(layer.color_raster, nullptr);
+        }
+        if (layer.ink_raster) {  // (color-mode@1)
+            h.add(std::string_view("ink-raster/1"));
+            h.add_bytes(layer.ink_raster, &layer.ink_memo);
         }
         if (layer.mask) {
             h.add(Json(layer.mask->enabled));

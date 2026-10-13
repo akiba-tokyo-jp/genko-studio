@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <stop_token>
@@ -125,6 +126,10 @@ std::optional<Image> drawable_layer_image(const core::Page& page, const core::La
 struct PageLayer {
     std::string name;
     Image image;
+    // color-mode@1: on a CMYK or Lab page, a paint layer's own inks over the page (ink_canvas.hpp's InkPicture values:
+    // per pixel the colour channels then the alpha); `image` is then how the screen shows them. Other layers: none (their
+    // colours are the page's by the rules).
+    std::shared_ptr<const std::vector<double>> inks;
     bool settings = false;
     double opacity = 1.0;
     std::string blend = "normal";

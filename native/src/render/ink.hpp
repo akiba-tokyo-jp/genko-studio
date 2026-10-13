@@ -60,6 +60,12 @@ core::InkPixels from_cmyk_image(const Image& cmyk, const Image* alpha, std::stri
 core::InkPixels from_lab_image(const Image& lab, const Image* alpha, const core::PageColor& color);
 Image lab_to_rgb_as_pillow(const Image& lab);
 
+// The ICC profile a picture's file carries (a JPEG's APP2 ICC_PROFILE chunks, a PSD's image resource 1039), or "".
+std::string picture_icc(std::string_view bytes);
+// A picture's file (any this build opens) as the page's ink pixels: CMYK from its own profile (or the page's), Lab,
+// else RGB (its alpha kept).
+core::InkPixels picture_inks(std::string_view bytes, const core::PageColor& color);
+
 // One sample of an ink as a stored value (0..max) and back.
 std::uint16_t encode_sample(core::InkSpace space, unsigned channel, double value, int depth);
 double decode_sample(core::InkSpace space, unsigned channel, std::uint16_t sample, int depth);

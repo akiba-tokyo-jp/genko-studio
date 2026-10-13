@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QDialog>
+
+#include <map>
 #include <QString>
 
 #include <cstdint>
@@ -67,6 +69,34 @@ public:
 
 private:
     void enable();
+};
+
+// ページの色モード… (color-mode@1, SPEC.md COLOR-02): the page in front, or every page and the pages to come, in RGB, CMYK
+// or Lab, 8 or 16 bits; a CMYK one with the book's profile or one chosen (.icc), its intent and its greys. op() is the
+// set_color_mode to send (its ICC in base64 when chosen here).
+class ColorModeDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    ColorModeDialog(QWidget* parent, const core::Document& book, const core::Page* page);
+    core::Json op() const;
+    // Why the choice cannot be sent (a CMYK mode without a profile), or "" when it can.
+    QString problem() const;
+
+    QComboBox* scope = nullptr;
+    QComboBox* mode = nullptr;
+    QComboBox* depth = nullptr;
+    QComboBox* profile = nullptr;
+    QPushButton* pick = nullptr;
+    QComboBox* intent = nullptr;
+    QComboBox* gray = nullptr;
+    QDialogButtonBox* buttons = nullptr;
+
+private:
+    void enable();
+    void choose_file();
+    const core::Page* page_ = nullptr;
+    std::map<std::string, std::string> chosen_;  // (ICC files chosen here: their ref → their bytes)
 };
 
 // main._page_list(text, count): "1-4, 7" → [1, 2, 3, 4, 7] (、 a comma, 〜 and ～ a dash; a range either way round;

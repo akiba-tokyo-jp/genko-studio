@@ -248,8 +248,8 @@ private slots:
         // act_page_nombre, act_add_cover, act_assignee, act_merge_book, act_import_psd; act_nombre, Python's now, was
         // here before) theirs (test_gui_book), the 6 of the book going out (M4③b: act_export, act_print, act_history,
         // act_phone, act_scale, act_checks) theirs (test_gui_output), the 2 of the studio (M5④: act_chat_approval,
-        // act_style) theirs (test_gui_studio).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{194});
+        // act_style) theirs (test_gui_studio), the colour mode of pages (CMYK/Lab: act_color_mode) its own (test_gui_book).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{195});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

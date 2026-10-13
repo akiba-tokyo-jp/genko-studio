@@ -1339,13 +1339,19 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
             continue;
         }
         std::optional<Image> raster;
+        std::shared_ptr<const std::vector<double>> own_inks;
         if (layer.color_raster) {  // (a layer in precise colour, which Python does not have: its 8-bit picture)
             raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), size, whole);
         } else if (layer.raster_png && !layer.raster_png->empty()) {
             raster = raster_part(layer.raster_png, size, whole);
+        } else if (layer.ink_raster && page.color) {  // (color-mode@1: its inks, and how they are shown)
+            InkPicture picture = sample_ink_raster(*decoded_ink(layer.ink_raster), size, whole);
+            raster = ink_picture_rgba(picture, *page.color);
+            own_inks = std::make_shared<const std::vector<double>>(std::move(picture.values));
         }
         if (!raster) continue;
         PageLayer out;
+        out.inks = std::move(own_inks);
         out.name = !layer.title.empty() ? layer.title : std::string(core::to_string(layer.role)) + " " + layer.id.substr(0, 6);
         out.image = std::move(*raster);
         out.settings = true;
@@ -1360,7 +1366,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
     // the pen lines of the ink layer (page.ink_strokes: its first), each as render._stroke draws it, 3 px wide
     const Layer* ink_layer = page.first_layer(LayerRole::Ink);
     const bool ink_has_raster = std::any_of(page.layers.begin(), page.layers.end(), [](const Layer& l) {
-        return l.role == LayerRole::Ink && ((l.raster_png && !l.raster_png->empty()) || l.color_raster);
+        return l.role == LayerRole::Ink && ((l.raster_png && !l.raster_png->empty()) || l.color_raster || l.ink_raster);
     });
     if (ink_layer != nullptr && ink_layer->stroke_count() > 0 && !ink_has_raster) {
         Image ink = blank();

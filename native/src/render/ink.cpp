@@ -11,6 +11,7 @@
 
 #include "core/error.hpp"
 #include "render/imaging.hpp"
+#include "render/png.hpp"
 #include "storage/reader.hpp"
 
 namespace genko::render::ink {
@@ -493,6 +494,58 @@ Image lab_to_rgb_as_pillow(const Image& lab) {
         }
     }
     return out;
+}
+
+std::string picture_icc(std::string_view b) {
+    const auto u8 = [&](std::size_t at) { return static_cast<unsigned>(static_cast<unsigned char>(b[at])); };
+    const auto be16 = [&](std::size_t at) { return (u8(at) << 8) | u8(at + 1); };
+    const auto be32 = [&](std::size_t at) { return (std::uint32_t(be16(at)) << 16) | be16(at + 2); };
+    if (b.size() > 4 && u8(0) == 0xff && u8(1) == 0xd8) {  // JPEG: the APP2 ICC_PROFILE chunks in their order
+        std::vector<std::pair<unsigned, std::string>> chunks;
+        std::size_t at = 2;
+        while (at + 4 <= b.size() && u8(at) == 0xff) {
+            const unsigned marker = u8(at + 1);
+            if (marker == 0xda || marker == 0xd9) break;
+            const std::size_t length = be16(at + 2);
+            if (length < 2 || at + 2 + length > b.size()) break;
+            if (marker == 0xe2 && length >= 16 && b.substr(at + 4, 12) == std::string_view("ICC_PROFILE\0", 12)) {
+                chunks.emplace_back(u8(at + 16), std::string(b.substr(at + 18, length - 16)));
+            }
+            at += 2 + length;
+        }
+        std::sort(chunks.begin(), chunks.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
+        std::string out;
+        for (const auto& [n, data] : chunks) out += data;
+        return out;
+    }
+    if (b.size() > 30 && b.substr(0, 4) == "8BPS") {  // PSD: the image resources after the colour mode data
+        std::size_t at = 26;
+        const std::size_t colour_data = be32(at);
+        at += 4 + colour_data;
+        if (at + 4 > b.size()) return {};
+        const std::size_t resources = be32(at);
+        at += 4;
+        const std::size_t end = std::min(b.size(), at + resources);
+        while (at + 12 <= end && b.substr(at, 4) == "8BIM") {
+            const unsigned id = be16(at + 4);
+            std::size_t name = u8(at + 6) + 1;
+            if (name % 2) ++name;
+            const std::size_t size_at = at + 6 + name;
+            if (size_at + 4 > end) break;
+            const std::size_t size = be32(size_at);
+            if (size_at + 4 + size > end) break;
+            if (id == 1039) return std::string(b.substr(size_at + 4, size));
+            at = size_at + 4 + size + (size % 2);
+        }
+    }
+    return {};
+}
+
+InkPixels picture_inks(std::string_view bytes, const PageColor& color) {
+    const Image picture = open_image(bytes, kPillowOpenLimits);
+    if (picture.mode() == "CMYK") return from_cmyk_image(picture, nullptr, picture_icc(bytes), color);
+    if (picture.mode() == "LAB") return from_lab_image(picture, nullptr, color);
+    return from_rgb(picture.convert("RGBA"), color);
 }
 
 std::uint16_t encode_sample(InkSpace space, unsigned channel, double value, int depth) {

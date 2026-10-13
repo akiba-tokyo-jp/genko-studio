@@ -2,6 +2,7 @@
 // PIL/ImageFilter.py) and the argument handling of its binding (_imaging.c), over libImaging.
 
 #include "render/image.hpp"
+#include "render/ink.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -638,7 +639,16 @@ Image Image::convert(std::string_view mode, Dither dither) const {
     const bool has_transparency = transparency_.present();
     if (mode.empty() || mode == from) return copy();
     if (from == "RGBA" && (mode == "P" || mode == "PA")) throw core::Error("value", "conversion to P is not ported");
-    if (mode == "LAB" || from == "LAB") throw core::Error("value", "conversion to or from LAB is not ported");
+    if (from == "LAB") {
+        // (Pillow's Image.convert: LAB to RGB, RGBA or RGBX through ImageCms — Little CMS's Lab profile to sRGB,
+        // perceptual; the alpha opaque — and no other)
+        if (mode == "RGB" || mode == "RGBA" || mode == "RGBX") {
+            const Image rgb = ink::lab_to_rgb_as_pillow(*this);
+            return mode == "RGB" ? rgb : rgb.convert(mode);
+        }
+        throw core::Error("value", "conversion from LAB to " + std::string(mode) + " not supported");
+    }
+    if (mode == "LAB") throw core::Error("value", "conversion to LAB is not ported");
     if (mode == "P" || mode == "PA") throw core::Error("value", "conversion to P is not ported");
 
     bool delete_trns = false;

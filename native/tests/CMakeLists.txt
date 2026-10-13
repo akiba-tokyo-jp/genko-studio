@@ -215,6 +215,11 @@ genko_test(test_contract_psd SOURCES contract/test_contract_psd.cpp contract/ops
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
 # PSD-01 against psd-tools (ACCEPTANCE.md §6): the editable PSD book read by psd-tools (tools/migration/psd_text_check.py)
 # and by render::psd::File, the same layers, groups, texts, runs, fonts, transforms and strokes.
+# color-mode@1 (SPEC.md COLOR-02) against the reference Python (tools/migration/ink_check.py): the conversions as Pillow's
+# ImageCms makes them, the files of CMYK and Lab pages as Pillow, psd-tools and pdfimages read them, a Lab PSD.
+genko_test(test_contract_ink SOURCES contract/test_contract_ink.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
+
 genko_test(test_contract_psd_text SOURCES contract/test_contract_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 1800)
 set_tests_properties(test_contract_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

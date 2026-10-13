@@ -118,6 +118,8 @@ void MainWindow::build_book_actions() {
     make("act_nombre", QStringLiteral("ノンブルの設定…"), [this] { nombre_dialog(); }, {}, QStringLiteral("位置・書体・大きさ・始まりの番号・隠しノンブル"));
     make("act_paper", QStringLiteral("原稿用紙の設定…"), [this] { paper_settings(); }, {},
          QStringLiteral("用紙・仕上がり・裁ち落とし・基本枠。変えるとコマや台詞も新しい枠に合わせて動きます"));
+    make("act_color_mode", QStringLiteral("ページの色モード…"), [this] { color_mode_dialog(); }, {},
+         QStringLiteral("RGB・CMYK・Lab と精度（8/16 bit）。CMYK は印刷所のプロファイルを原稿に埋め込みます"));
     make("act_page_nombre", QStringLiteral("このページのノンブルを隠す／出す"), [this] { toggle_page_nombre(); });
     make("act_add_cover", QStringLiteral("表紙・カバーを足す…"), [this] { add_cover_dialog(); }, {}, QStringLiteral("表紙・裏表紙、または背と袖のあるカバー 1 枚"));
     make("act_assignee", QStringLiteral("このページの担当…"), [this] { assignee_dialog(); }, {},
@@ -212,6 +214,16 @@ void MainWindow::paper_settings() {
     reload_pages();
     canvas_->fit_page();
     flash(QStringLiteral("原稿用紙を変えました: %1").arg(QString::fromStdString(book().spec.describe())), 5000);
+}
+
+// ページの色モード… (color-mode@1): the page in front, or every page, converted (set_color_mode, undone as any op).
+void MainWindow::color_mode_dialog() {
+    const Asked asked = asking();
+    ColorModeDialog dialog(this, *asked.snapshot, current_page());
+    if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return;
+    if (!apply_ops(Json::array({dialog.op()}))) return;
+    reload_pages();
+    flash(QStringLiteral("色モードを変えました"), 4000);
 }
 
 // 表紙・カバーを足す… (_add_cover_dialog): the cover at the end of the book, in front.

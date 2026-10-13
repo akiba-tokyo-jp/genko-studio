@@ -77,9 +77,12 @@ Image ink_picture_rgba(const InkPicture& picture, const core::PageColor& color);
 // The picture of an ink raster's alpha alone ("RGBA", black): what a locked layer's lines are kept inside.
 Image ink_alpha_rgba(const InkPicture& picture);
 
-// A part of ink pixels, and ink pixels laid into others at a corner (the same space and depth).
+// A part of ink pixels, and ink pixels laid into others at a corner (the same space and depth; what falls outside is
+// left out), replacing what was there.
 core::InkPixels crop_inks(const core::InkPixels& pixels, Box box);
 void paste_inks(core::InkPixels& into, const core::InkPixels& part, Point at);
+// Ink pixels at another size, as Pillow resizes (premultiplied by their alpha): Bicubic or Lanczos.
+core::InkPixels resize_inks(const core::InkPixels& pixels, Size size, Resample resample);
 
 // A canvas value of one channel from the stored ink (CMYK 0..1 as is; Lab L/100, (a+128)/255, (b+128)/255) and back.
 double to_canvas(core::InkSpace space, unsigned channel, double ink);

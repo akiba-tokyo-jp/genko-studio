@@ -5,7 +5,10 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QHBoxLayout>
 #include <QFormLayout>
+#include <QFile>
+#include <QLabel>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -16,11 +19,15 @@
 #include <climits>
 #include <set>
 
+#include "app/ask.hpp"
 #include "app/lettering.hpp"
 #include "app/look.hpp"
+#include "core/base64.hpp"
 #include "core/covers.hpp"
+#include "core/ink.hpp"
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
+#include "render/ink.hpp"
 
 namespace genko::app {
 
@@ -235,6 +242,138 @@ CoverDialog::CoverDialog(QWidget* parent, const core::Document& book) : QDialog(
 }
 
 bool CoverDialog::all_there() const { return kind->count() == 0; }
+
+ColorModeDialog::ColorModeDialog(QWidget* parent, const core::Document& book, const core::Page* page) : QDialog(parent), page_(page) {
+    setObjectName(QStringLiteral("color_mode_dialog"));
+    setWindowTitle(QStringLiteral("ページの色モード"));
+    scope = new QComboBox;
+    scope->setObjectName(QStringLiteral("color_mode_scope"));
+    if (page != nullptr) scope->addItem(QStringLiteral("このページ（%1 ページ）").arg(QString::fromStdString(page->index.repr())), QStringLiteral("page"));
+    scope->addItem(QStringLiteral("すべてのページと、これから足すページ"), QStringLiteral("all"));
+    mode = new QComboBox;
+    mode->setObjectName(QStringLiteral("color_mode_mode"));
+    mode->addItem(QStringLiteral("RGB"), QStringLiteral("rgb"));
+    mode->addItem(QStringLiteral("CMYK（印刷のインキ）"), QStringLiteral("cmyk"));
+    mode->addItem(QStringLiteral("Lab"), QStringLiteral("lab"));
+    depth = new QComboBox;
+    depth->setObjectName(QStringLiteral("color_mode_depth"));
+    depth->addItem(QStringLiteral("8 bit"), 8);
+    depth->addItem(QStringLiteral("16 bit"), 16);
+    profile = new QComboBox;
+    profile->setObjectName(QStringLiteral("color_mode_profile"));
+    // (the profiles the book has: its pages' and its own)
+    std::map<std::string, std::string> held;
+    const auto keep = [&](const std::optional<core::PageColor>& color) {
+        if (color && color->space == core::InkSpace::Cmyk && color->icc) held.emplace(color->profile, *color->icc);
+    };
+    keep(book.color);
+    for (const auto& p : book.pages) keep(p->color);
+    for (const auto& [ref, bytes] : held) {
+        const std::string name = render::ink::profile_description(bytes);
+        profile->addItem(QString::fromStdString(name.empty() ? ref.substr(7, 12) : name), QString::fromStdString(ref));
+    }
+    pick = new QPushButton(QStringLiteral("ファイルを選ぶ…"));
+    pick->setObjectName(QStringLiteral("color_mode_pick"));
+    connect(pick, &QPushButton::clicked, this, [this] { choose_file(); });
+    auto* profile_row = new QWidget;
+    auto* profile_line = new QHBoxLayout(profile_row);
+    profile_line->setContentsMargins(0, 0, 0, 0);
+    profile_line->addWidget(profile, 1);
+    profile_line->addWidget(pick);
+    intent = new QComboBox;
+    intent->setObjectName(QStringLiteral("color_mode_intent"));
+    intent->addItem(QStringLiteral("相対的な色域を維持"), QStringLiteral("relative"));
+    intent->addItem(QStringLiteral("知覚的"), QStringLiteral("perceptual"));
+    intent->addItem(QStringLiteral("彩度"), QStringLiteral("saturation"));
+    intent->addItem(QStringLiteral("絶対的な色域を維持"), QStringLiteral("absolute"));
+    gray = new QComboBox;
+    gray->setObjectName(QStringLiteral("color_mode_gray"));
+    gray->addItem(QStringLiteral("プロファイルで変換"), QStringLiteral("profile"));
+    gray->addItem(QStringLiteral("K 版だけ（線画向け）"), QStringLiteral("k"));
+    gray->setToolTip(QStringLiteral("画素レイヤーのちょうど灰色（R=G=B）の画素を、K 版だけのインキにします"));
+    // what is there now: the page's mode (or the book's)
+    const std::optional<core::PageColor>& now = page != nullptr ? page->color : book.color;
+    if (now) {
+        mode->setCurrentIndex(now->space == core::InkSpace::Cmyk ? 1 : 2);
+        depth->setCurrentIndex(now->depth == 16 ? 1 : 0);
+        if (const int at = profile->findData(QString::fromStdString(now->profile)); at >= 0) profile->setCurrentIndex(at);
+        if (const int at = intent->findData(QString::fromStdString(now->intent)); at >= 0) intent->setCurrentIndex(at);
+    }
+    auto* note = new QLabel(QStringLiteral("画素レイヤーを新しい色に変換します（取り消せます）。線・台詞・塗りの色は RGB のまま持ち、"
+                                           "ページの色に当てて描きます（墨は K 100%）。CMYK のプロファイルは原稿に埋め込みます。"));
+    note->setWordWrap(true);
+    auto* form = new QFormLayout;
+    form->addRow(QStringLiteral("対象"), scope);
+    form->addRow(QStringLiteral("色モード"), mode);
+    form->addRow(QStringLiteral("精度"), depth);
+    form->addRow(QStringLiteral("CMYK のプロファイル"), profile_row);
+    form->addRow(QStringLiteral("変換の意図"), intent);
+    form->addRow(QStringLiteral("灰色の画素"), gray);
+    form->addRow(note);
+    connect(mode, &QComboBox::currentIndexChanged, this, [this] { enable(); });
+    connect(profile, &QComboBox::currentIndexChanged, this, [this] { enable(); });
+    buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    enable();
+    lay_out(this, form, buttons);
+}
+
+void ColorModeDialog::enable() {
+    const QString chosen = mode->currentData().toString();
+    const bool cmyk = chosen == QLatin1String("cmyk");
+    profile->setEnabled(cmyk);
+    pick->setEnabled(cmyk);
+    intent->setEnabled(chosen != QLatin1String("rgb"));
+    gray->setEnabled(cmyk);
+    buttons->button(QDialogButtonBox::Ok)->setEnabled(problem().isEmpty());
+}
+
+void ColorModeDialog::choose_file() {
+    const QString path = ask::open_path(this, QStringLiteral("CMYK のカラープロファイル"), QStringLiteral("カラープロファイル (*.icc *.icm)"));
+    if (path.isEmpty()) return;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || file.size() > static_cast<qint64>(core::kProfileMaxBytes)) {
+        ask::warning(this, QStringLiteral("Genko"), QStringLiteral("プロファイルを読めません（16 MB まで）"));
+        return;
+    }
+    const QByteArray bytes = file.readAll();
+    const std::string icc(bytes.constData(), static_cast<std::size_t>(bytes.size()));
+    if (const auto why = render::ink::profile_problem(icc)) {
+        ask::warning(this, QStringLiteral("Genko"), QStringLiteral("このプロファイルは CMYK のページに使えません: %1").arg(QString::fromStdString(*why)));
+        return;
+    }
+    const std::string ref = core::bytes_ref(icc);
+    chosen_[ref] = icc;
+    const std::string name = render::ink::profile_description(icc);
+    int at = profile->findData(QString::fromStdString(ref));
+    if (at < 0) {
+        profile->addItem(QString::fromStdString(name.empty() ? ref.substr(7, 12) : name), QString::fromStdString(ref));
+        at = profile->count() - 1;
+    }
+    profile->setCurrentIndex(at);
+}
+
+QString ColorModeDialog::problem() const {
+    if (mode->currentData().toString() == QLatin1String("cmyk") && profile->currentIndex() < 0) {
+        return QStringLiteral("CMYK にするには、印刷所が指定する CMYK のプロファイル（.icc）を選びます");
+    }
+    return {};
+}
+
+core::Json ColorModeDialog::op() const {
+    Json op = Json::object({{"op", "set_color_mode"}, {"mode", mode->currentData().toString().toStdString()}, {"depth", depth->currentData().toInt()}});
+    if (scope->currentData().toString() == QLatin1String("page") && page_ != nullptr) op["page"] = page_->index.json();
+    const QString chosen = mode->currentData().toString();
+    if (chosen != QLatin1String("rgb")) op["intent"] = intent->currentData().toString().toStdString();
+    if (chosen == QLatin1String("cmyk")) {
+        const std::string ref = profile->currentData().toString().toStdString();
+        if (const auto it = chosen_.find(ref); it != chosen_.end()) op["icc"] = core::b64encode(it->second);
+        else op["profile"] = ref;
+        op["gray"] = gray->currentData().toString().toStdString();
+    }
+    return op;
+}
 
 void CoverDialog::enable() {
     const QString chosen = kind->currentData().toString();

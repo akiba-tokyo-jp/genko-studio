@@ -28,6 +28,7 @@
 #include "render/fill.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_registry.hpp"
+#include "render/ink_canvas.hpp"
 #include "render/psd.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
@@ -312,9 +313,11 @@ void import_psd(core::OpContext& c) {
     }
     const std::string fit = core::truthy_at(op, "fit") ? core::py_str(op["fit"]) : std::string("bleed");
     if (fit != "paper" && fit != "bleed" && fit != "trim") throw OpError("fit must be paper, bleed or trim");
+    // (color-mode@1: onto a CMYK or Lab page the layers are the page's inks, and a Lab file is read too)
+    const std::optional<core::PageColor> mode = doc.page(index).color;
     std::optional<psd::File> read;
     try {
-        read = psd::File::read(std::move(data));
+        read = psd::File::read(std::move(data), psd::default_limits(), mode.has_value());
     } catch (const psd::ReadError& error) {
         // (fileops catches PSDError, struct.error, ValueError and IndexError; a KeyError and a zlib.error go through)
         if (error.caught()) throw OpError(std::string("the PSD cannot be read (") + error.what() + ")");
@@ -328,9 +331,15 @@ void import_psd(core::OpContext& c) {
     // the file's layers, or (none with a picture) its merged picture as one
     std::vector<psd::Layer> layers = file.layers();
     std::optional<Image> merged;
+    std::optional<core::InkPixels> merged_inks;
     if (std::all_of(layers.begin(), layers.end(), [](const psd::Layer& l) { return l.folder; })) {
-        merged = file.merged();
-        if (!merged) throw OpError("the PSD has no pictures to read");
+        if (mode) {
+            merged_inks = file.merged_inks(*mode);
+            if (!merged_inks) throw OpError("the PSD has no pictures to read");
+        } else {
+            merged = file.merged();
+            if (!merged) throw OpError("the PSD has no pictures to read");
+        }
         psd::Layer only;
         only.name = core::truthy_at(op, "name") ? core::py_str(op["name"]) : std::string("PSD");
         layers = {only};
@@ -382,16 +391,25 @@ void import_psd(core::OpContext& c) {
         if (item.folder) {
             layer.kind = core::LayerKind::Folder;
         } else {
-            // (onto a clear layer: the pixels as they are)
-            Image canvas = Image::create("RGBA", page_px, Ink{0, 0, 0, 0});
-            const Image picture = merged ? *merged : file.image(item);
-            canvas.paste(same_size ? picture : picture.resize(shown, Resample::Lanczos), paste_corner(where));
             layer.kind = core::LayerKind::Raster;
             // (a painting app's picture: on a monochrome page it prints in grey and tones)
             layer.source = Json::object({{"kind", "psd"}});
-            layer.raster_png = fills::png_bytes(canvas);
-            layer.raster_relpath = raster::page_folder(page) + "/user-" + layer.id + ".png";
-            if (!merged) {
+            if (mode) {  // (color-mode@1: onto a clear layer of the page's inks)
+                core::InkPixels picture = merged_inks ? *merged_inks : file.image_inks(item, *mode);
+                if (!same_size) picture = resize_inks(picture, shown, Resample::Lanczos);
+                core::InkPixels canvas = core::blank_ink_pixels(mode->space, mode->depth, static_cast<std::uint32_t>(page_px.width),
+                                                                static_cast<std::uint32_t>(page_px.height));
+                paste_inks(canvas, picture, paste_corner(where));
+                layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(canvas));
+            } else {
+                // (onto a clear layer: the pixels as they are)
+                Image canvas = Image::create("RGBA", page_px, Ink{0, 0, 0, 0});
+                const Image picture = merged ? *merged : file.image(item);
+                canvas.paste(same_size ? picture : picture.resize(shown, Resample::Lanczos), paste_corner(where));
+                layer.raster_png = fills::png_bytes(canvas);
+                layer.raster_relpath = raster::page_folder(page) + "/user-" + layer.id + ".png";
+            }
+            if (!merged && !merged_inks) {
                 if (const std::optional<Image> mask = file.mask(item)) {
                     limits::check_picture(mask_w, mask_h, "the layer mask");
                     const Size mask_size{static_cast<int>(mask_w), static_cast<int>(mask_h)};

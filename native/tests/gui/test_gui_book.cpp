@@ -40,7 +40,9 @@
 #include "app/pages_panel.hpp"
 #include "app/tiles.hpp"
 #include "app/tool_settings.hpp"
+#include "core/base64.hpp"
 #include "core/covers.hpp"
+#include "core/ink.hpp"
 #include "core/geometry.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
@@ -410,10 +412,11 @@ private slots:
         // ページ: Python's order (絵柄を選ぶ and チャットでの承認 of M5④ in their places)
         QMenu* pages = top_menu(s.window.get(), QStringLiteral("ページ"));
         QVERIFY(pages != nullptr);
-        QCOMPARE(menu_texts(pages).mid(0, 18),
+        // (ページの色モード…: CMYK/Lab, after the paper)
+        QCOMPARE(menu_texts(pages).mid(0, 19),
                  QStringList({QStringLiteral("ページを追加（この後ろに）"), QStringLiteral("このページを複製"), QStringLiteral("このページを消す…"), QStringLiteral("|"),
                               QStringLiteral("このページを前へ"), QStringLiteral("このページを後ろへ"), QStringLiteral("次のページと見開きにする／解除"), QStringLiteral("|"),
-                              QStringLiteral("原稿用紙の設定…"), QStringLiteral("絵柄を選ぶ…"), QStringLiteral("チャットでの承認…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
+                              QStringLiteral("原稿用紙の設定…"), QStringLiteral("ページの色モード…"), QStringLiteral("絵柄を選ぶ…"), QStringLiteral("チャットでの承認…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
                               QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("アニメーション（タイムライン）"),
                               QStringLiteral("|"), QStringLiteral("コマ")}));
         // ファイル: after the scans, before the export (書き出し and 印刷, M4③b: test_gui_output)
@@ -797,6 +800,75 @@ private slots:
 
     // 表紙・カバーを足す…: the kinds the book has not got yet; the spine and flaps for a jacket or a band, the band's
     // height for a band (the others off); the cover at the end, shown; when all four are there, said.
+    // ページの色モード… (color-mode@1): the page in front or every page, its mode, depth, profile (chosen as a file: sent
+    // as its bytes; the book's: by its ref), intent and greys; sent as set_color_mode, shown on the page and the status.
+    void colourModeOfPages() {
+        Studio s;
+        const std::string icc = genko::test::read_bytes(genko::test::test_data(QStringLiteral("colour/photocraft-coated-cmyk.icc")));
+        const QString icc_file = s.tmp.path() + QStringLiteral("/printer.icc");
+        genko::test::write_bytes(icc_file, icc);
+        s.answers.responder->open_path = [&](const QString&, const QString&) { return icc_file; };
+        QStringList seen;
+        std::function<void(QDialog*)> answer;
+        int result = QDialog::Accepted;
+        s.answers.responder->exec = [&](QDialog* d) {
+            seen.clear();
+            for (const char* name : {"color_mode_scope", "color_mode_mode", "color_mode_depth", "color_mode_profile", "color_mode_intent", "color_mode_gray"}) {
+                auto* box = d->findChild<QComboBox*>(QString::fromLatin1(name));
+                seen << (box != nullptr ? label_of(box) + QStringLiteral(": ") + described(box) : QString::fromLatin1(name) + QStringLiteral(" missing"));
+            }
+            if (answer) answer(d);
+            return result;
+        };
+        s.on_page(2);
+        // やめる: nothing
+        result = QDialog::Rejected;
+        std::size_t n = s.ops.size();
+        QVERIFY(s.trigger("act_color_mode"));
+        QCOMPARE(seen.at(0), QStringLiteral("対象: このページ（2 ページ）=page|すべてのページと、これから足すページ=all @page"));
+        QCOMPARE(seen.at(1), QStringLiteral("色モード: RGB=rgb|CMYK（印刷のインキ）=cmyk|Lab=lab @rgb"));
+        QCOMPARE(s.ops.size(), n);
+        // CMYK for this page, the profile chosen as a file: OK only once there is one
+        result = QDialog::Accepted;
+        answer = [](QDialog* d) {
+            auto* mode = d->findChild<QComboBox*>(QStringLiteral("color_mode_mode"));
+            mode->setCurrentIndex(mode->findData(QStringLiteral("cmyk")));
+            auto* ok = d->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
+            QVERIFY(!ok->isEnabled());
+            d->findChild<QPushButton*>(QStringLiteral("color_mode_pick"))->click();
+            QVERIFY(ok->isEnabled());
+            auto* gray = d->findChild<QComboBox*>(QStringLiteral("color_mode_gray"));
+            gray->setCurrentIndex(gray->findData(QStringLiteral("k")));
+        };
+        QVERIFY(s.trigger("act_color_mode"));
+        const Json sent = Json::parse(s.since(n));
+        QCOMPARE(sent.size(), std::size_t{1});
+        QCOMPARE(QString::fromStdString(sent[0]["op"].get<std::string>()), QStringLiteral("set_color_mode"));
+        QCOMPARE(sent[0]["page"].get<int>(), 2);
+        QCOMPARE(QString::fromStdString(sent[0]["mode"].get<std::string>()), QStringLiteral("cmyk"));
+        QCOMPARE(QString::fromStdString(sent[0]["gray"].get<std::string>()), QStringLiteral("k"));
+        QCOMPARE(core::a2b_base64(sent[0]["icc"].get<std::string>()), icc);
+        QVERIFY(s.book().page(1).color && s.book().page(1).color->space == core::InkSpace::Cmyk);
+        QVERIFY(!s.book().page(0).color);
+        QVERIFY2(s.window->status_label()->text().contains(QStringLiteral("CMYK 8 bit")), qPrintable(s.window->status_label()->text()));
+        // every page, Lab 16 bits: the book's profile is not needed
+        answer = [](QDialog* d) {
+            auto* scope = d->findChild<QComboBox*>(QStringLiteral("color_mode_scope"));
+            scope->setCurrentIndex(scope->findData(QStringLiteral("all")));
+            auto* mode = d->findChild<QComboBox*>(QStringLiteral("color_mode_mode"));
+            mode->setCurrentIndex(mode->findData(QStringLiteral("lab")));
+            auto* depth = d->findChild<QComboBox*>(QStringLiteral("color_mode_depth"));
+            depth->setCurrentIndex(depth->findData(16));
+        };
+        n = s.ops.size();
+        QVERIFY(s.trigger("act_color_mode"));
+        QCOMPARE(seen.at(1), QStringLiteral("色モード: RGB=rgb|CMYK（印刷のインキ）=cmyk|Lab=lab @cmyk"));  // (the page's mode now)
+        QCOMPARE(s.since(n), std::string(R"([{"op": "set_color_mode", "mode": "lab", "depth": 16, "intent": "relative"}])"));
+        for (const auto& page : s.book().pages) QVERIFY(page->color && page->color->space == core::InkSpace::Lab && page->color->depth == 16);
+        QVERIFY(s.book().color);
+        QVERIFY(drawn_as_book(s));
+    }
+
     void coversAreAdded() {
         Studio s;
         QStringList seen;

@@ -642,6 +642,10 @@ void MainWindow::refresh_status() {
         }
     }
     const auto frames = page->leaf_frames().size();
+    if (page->color) {  // (color-mode@1: the page's mode beside its panels)
+        selected += QStringLiteral(" ・ %1 %2 bit").arg(page->color->space == core::InkSpace::Cmyk ? QStringLiteral("CMYK") : QStringLiteral("Lab"))
+                        .arg(page->color->depth);
+    }
     if (agent_book()) {
         status_->setText(QStringLiteral("%1 ページ（%2） ・ コマ %3%4 ・ %5")
                              .arg(QString::fromStdString(page->index.repr()), wording::stage(page->stage))

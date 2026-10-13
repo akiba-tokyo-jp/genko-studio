@@ -426,6 +426,7 @@ private:
     void toggle_spread();
     void toggle_page_nombre();
     void paper_settings();
+    void color_mode_dialog();
     void add_cover_dialog();
     void assignee_dialog();
     void merge_book();

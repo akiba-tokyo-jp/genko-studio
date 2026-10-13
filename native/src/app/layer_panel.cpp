@@ -345,14 +345,15 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
     // a small picture of the layer alone (kept until the layer changes); an empty layer or a folder: none
     if (layer.kind == core::LayerKind::Folder) return {};
     const bool drawn = layer.stroke_count() > 0 || !layer.patches.empty() || (layer.raster_png && !layer.raster_png->empty()) || layer.color_raster ||
+                       layer.ink_raster ||
                        layer.kind == core::LayerKind::Placed || layer.kind == core::LayerKind::Tone || (layer.fill && core::py_truthy(*layer.fill));
     if (!drawn) return {};
     const std::string key = page.id + "/" + layer.id;
-    Thumb made{layer.strokes, layer.raster_png, layer.color_raster, layer.mask ? layer.mask->png : nullptr, {}, thumb_state(layer), {}};
+    Thumb made{layer.strokes, layer.raster_png, layer.color_raster, layer.ink_raster, layer.mask ? layer.mask->png : nullptr, {}, thumb_state(layer), {}};
     for (const core::Patch& patch : layer.patches) made.patches.push_back(patch.png);
     if (const auto found = thumbs_.find(key); found != thumbs_.end()) {
         const Thumb& was = found->second;
-        if (was.strokes == made.strokes && was.raster == made.raster && was.color == made.color && was.mask == made.mask &&
+        if (was.strokes == made.strokes && was.raster == made.raster && was.color == made.color && was.ink == made.ink && was.mask == made.mask &&
             was.patches == made.patches && was.state == made.state)
             return was.icon;
     }

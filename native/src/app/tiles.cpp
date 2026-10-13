@@ -69,7 +69,7 @@ bool same_layer_look(const core::Layer& a, const core::Layer& b) {
     }
     const bool masks = a.mask.has_value() == b.mask.has_value() && (!a.mask || (a.mask->png == b.mask->png && a.mask->enabled == b.mask->enabled));
     return masks && a.id == b.id && a.role == b.role && a.kind == b.kind && a.visible == b.visible && a.exportable == b.exportable &&
-           a.raster_png == b.raster_png && a.color_raster == b.color_raster && a.fill_rgb == b.fill_rgb && a.opacity == b.opacity && a.blend == b.blend && a.clip == b.clip &&
+           a.raster_png == b.raster_png && a.color_raster == b.color_raster && a.ink_raster == b.ink_raster && a.fill_rgb == b.fill_rgb && a.opacity == b.opacity && a.blend == b.blend && a.clip == b.clip &&
            a.lock_alpha == b.lock_alpha && a.panel_clip == b.panel_clip && a.panel_each == b.panel_each && a.tone == b.tone &&
            a.color == b.color && a.fill == b.fill && a.adjust == b.adjust && a.effect == b.effect && a.color_prints == b.color_prints &&
            a.screen == b.screen && a.asset == b.asset && a.region.has_value() == b.region.has_value() && a.angle == b.angle;
@@ -296,6 +296,7 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
         const core::Page& old = *shown_page_;
         bool whole = !(old.index == page.index && covers_before(*doc_, old) == covers_before(*doc, page) &&
                        same_spec(old.spec, page.spec) && same_frames(old.frames, page.frames) && old.binding == page.binding &&
+                       old.color == page.color &&  // (color-mode@1: another mode, profile or table of inks: all of it)
                        old.fills == page.fills && old.extra == page.extra && old.effects == page.effects && old.ruler == page.ruler &&
                        old.rulers == page.rulers && old.prims == page.prims && old.numero == page.numero &&
                        old.onion_from == page.onion_from && same_onion && same_book && old.layers.size() == page.layers.size() &&
@@ -528,7 +529,9 @@ void PageRenderer::dispatch() {
                     } else {
                         drawn = render::render_page(*raw, dpi, options, doc.get());
                     }
-                    if (proof) drawn.image = render::colour::proof(drawn.image, *proof);  // (per pixel: a tile as the page)
+                    // (per pixel: a tile as the page. A CMYK page shows its inks already: no proof over them)
+                    const bool cmyk_page = raw->color && raw->color->space == core::InkSpace::Cmyk;
+                    if (proof && !cmyk_page) drawn.image = render::colour::proof(drawn.image, *proof);
                     result.image = to_qimage(drawn.image);
                     result.omitted = std::move(drawn.omitted);
                 } catch (const render::Cancelled&) {

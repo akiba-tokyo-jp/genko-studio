@@ -125,6 +125,7 @@ private:
         core::StrokeListPtr strokes;
         core::Bytes raster;
         core::Bytes color;
+        core::Bytes ink;
         core::Bytes mask;
         std::vector<core::Bytes> patches;
         std::string state;

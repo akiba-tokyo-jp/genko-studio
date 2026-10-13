@@ -22,7 +22,7 @@ void refuse_on_ink_pages(const core::OpContext& c, const std::string& name) {
     static const std::vector<std::string_view> kPending{
         "transform_area", "delete_area", "paste", "erase_raster", "erase", "filter_raster", "smudge", "liquify",
         "merge_down", "merge_layers", "merge_visible", "convert_layer", "flood_fill", "gradient_fill", "add_shape",
-        "fill_gaps", "stamp_material", "lt_convert", "put_raster", "import_psd", "put_color_raster", "render_prims",
+        "fill_gaps", "stamp_material", "lt_convert", "put_color_raster", "render_prims",
         "trace_prims", "ruler_to_layer"};
     if (std::find(kPending.begin(), kPending.end(), name) == kPending.end()) return;
     const core::Json* page = core::get(c.op, "page");

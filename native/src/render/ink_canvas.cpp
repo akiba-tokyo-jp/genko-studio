@@ -91,17 +91,25 @@ double bicubic(double x) {
     return 0.0;
 }
 
+// Pillow's lanczos (support 3): a sinc windowed by a sinc.
+double sinc(double x) {
+    if (x == 0.0) return 1.0;
+    x = x * 3.14159265358979323846;
+    return std::sin(x) / x;
+}
+double lanczos(double x) { return -3.0 <= x && x < 3.0 ? sinc(x) * sinc(x / 3) : 0.0; }
+
 struct Coeffs {
     std::vector<int> start, count;
     std::vector<double> weights;
     int ksize = 0;
 };
 
-Coeffs coeffs(int in, int out, int first, int last) {
+Coeffs coeffs(int in, int out, int first, int last, bool use_lanczos = false) {
     Coeffs k;
     const double scale = static_cast<double>(in) / out;
     const double filterscale = std::max(scale, 1.0);
-    const double support = 2.0 * filterscale;
+    const double support = (use_lanczos ? 3.0 : 2.0) * filterscale;
     k.ksize = static_cast<int>(std::ceil(support)) * 2 + 1;
     const int n = last - first;
     k.start.resize(n);
@@ -119,7 +127,7 @@ Coeffs coeffs(int in, int out, int first, int last) {
         double ww = 0.0;
         double* w = k.weights.data() + static_cast<std::size_t>(i) * k.ksize;
         for (int x = 0; x < xmax; ++x) {
-            w[x] = bicubic((x + xmin - center + 0.5) * ss);
+            w[x] = use_lanczos ? lanczos((x + xmin - center + 0.5) * ss) : bicubic((x + xmin - center + 0.5) * ss);
             ww += w[x];
         }
         for (int x = 0; x < xmax; ++x) {
@@ -163,6 +171,9 @@ std::array<unsigned char, 3> snapped(const core::PageColor& color, const float* 
 }
 
 }  // namespace
+
+// (sample_ink_raster with Pillow's Lanczos or Bicubic)
+InkPicture sample_with(const core::InkPixels& raster, Size full, Box area, bool use_lanczos);
 
 double to_canvas(InkSpace space, unsigned channel, double ink) {
     if (space == InkSpace::Cmyk || channel >= 3) return ink;
@@ -452,10 +463,32 @@ core::InkPixels crop_inks(const core::InkPixels& pixels, Box box) {
 
 void paste_inks(core::InkPixels& into, const core::InkPixels& part, Point at) {
     const unsigned all = into.channels();
-    for (std::uint32_t y = 0; y < part.height; ++y) {
-        const std::uint16_t* src = part.samples.data() + std::size_t(y) * part.width * all;
-        std::copy_n(src, std::size_t(part.width) * all, into.samples.data() + (std::size_t(at.y + y) * into.width + at.x) * all);
+    const int x0 = std::max(0, at.x), y0 = std::max(0, at.y);
+    const int x1 = std::min<int>(static_cast<int>(into.width), at.x + static_cast<int>(part.width));
+    const int y1 = std::min<int>(static_cast<int>(into.height), at.y + static_cast<int>(part.height));
+    if (x1 <= x0 || y1 <= y0) return;
+    for (int y = y0; y < y1; ++y) {
+        const std::uint16_t* src = part.samples.data() + (std::size_t(y - at.y) * part.width + (x0 - at.x)) * all;
+        std::copy_n(src, std::size_t(x1 - x0) * all, into.samples.data() + (std::size_t(y) * into.width + x0) * all);
     }
+}
+
+core::InkPixels resize_inks(const core::InkPixels& pixels, Size size, Resample resample) {
+    if (static_cast<int>(pixels.width) == size.width && static_cast<int>(pixels.height) == size.height) return pixels;
+    const bool lanczos = resample == Resample::Lanczos;
+    const InkPicture picture = sample_with(pixels, size, Box{0, 0, size.width, size.height}, lanczos);
+    core::InkPixels out;
+    out.space = pixels.space;
+    out.depth = pixels.depth;
+    out.width = static_cast<std::uint32_t>(size.width);
+    out.height = static_cast<std::uint32_t>(size.height);
+    const unsigned all = pixels.channels();
+    const double most = pixels.max();
+    out.samples.resize(out.pixel_count() * all);
+    for (std::size_t i = 0; i < out.samples.size(); ++i) {
+        out.samples[i] = static_cast<std::uint16_t>(std::lround(std::clamp(picture.values[i], 0.0, 1.0) * most));
+    }
+    return out;
 }
 
 std::shared_ptr<const core::InkPixels> decoded_ink(const core::Bytes& bytes) {
@@ -478,7 +511,9 @@ std::shared_ptr<const core::InkPixels> decoded_ink(const core::Bytes& bytes) {
     return pixels;
 }
 
-InkPicture sample_ink_raster(const core::InkPixels& raster, Size full, Box area) {
+InkPicture sample_ink_raster(const core::InkPixels& raster, Size full, Box area) { return sample_with(raster, full, area, false); }
+
+InkPicture sample_with(const core::InkPixels& raster, Size full, Box area, bool use_lanczos) {
     InkPicture out;
     out.size = Size{area.width(), area.height()};
     out.channels = core::colour_channels(raster.space);
@@ -497,8 +532,8 @@ InkPicture sample_ink_raster(const core::InkPixels& raster, Size full, Box area)
         return out;
     }
     // premultiplied, horizontally into the rows the vertical pass needs, then vertically (Pillow's two passes)
-    const Coeffs ky = coeffs(rh, full.height, area.y0, area.y1);
-    const Coeffs kx = coeffs(rw, full.width, area.x0, area.x1);
+    const Coeffs ky = coeffs(rh, full.height, area.y0, area.y1, use_lanczos);
+    const Coeffs kx = coeffs(rw, full.width, area.x0, area.x1, use_lanczos);
     int row0 = rh, row1 = 0;
     for (std::size_t i = 0; i < ky.start.size(); ++i) {
         row0 = std::min(row0, ky.start[i]);

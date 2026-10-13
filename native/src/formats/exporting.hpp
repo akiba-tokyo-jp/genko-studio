@@ -45,7 +45,7 @@ std::int64_t default_dpi(const core::Document& episode, std::string_view key);
 // color-mode@1 (SPEC.md COLOR-02): the words saying how many CMYK and Lab pages the format (a key of formats() or the
 // command line's: pdf, tiff, cmyk, png, …) writes from the colours on screen rather than as their inks with this
 // colour (auto, rgb, cmyk, gray, bitonal), or none. PDF and TIFF keep a page's inks with "auto" (a CMYK page's with
-// "cmyk" too). run() puts them in its reply's "notes"; never converted without a word.
+// "cmyk" too), PSD always. run() puts them in its reply's "notes"; never converted without a word.
 std::optional<std::string> ink_note(const core::Document& episode, std::string_view key, std::string_view color);
 
 struct RunOptions {

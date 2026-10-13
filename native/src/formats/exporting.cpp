@@ -205,8 +205,8 @@ std::optional<std::string> ink_note(const core::Document& episode, std::string_v
     std::int64_t converted = 0;
     for (const auto& page : episode.pages) {
         if (!page->color) continue;
-        const bool inks = (key == "pdf" || key == "tiff" || key == "cmyk") &&
-                          (color == "auto" || (color == "cmyk" && page->color->space == core::InkSpace::Cmyk));
+        const bool inks = key == "psd" || ((key == "pdf" || key == "tiff" || key == "cmyk") &&
+                                           (color == "auto" || (color == "cmyk" && page->color->space == core::InkSpace::Cmyk)));
         if (!inks) ++converted;
     }
     if (converted == 0) return std::nullopt;

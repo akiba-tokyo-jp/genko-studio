@@ -1,4 +1,6 @@
 #include "render/raster_ops.hpp"
+
+#include "render/ink.hpp"
 #include "render/plugins.hpp"
 
 #include <QCryptographicHash>
@@ -1793,6 +1795,16 @@ void put_raster(OpContext& c) {
     Layer& layer = page.layers[li];
     if (layer.locked) throw OpError("the layer is locked");  // (Python replaces its pixels)
     layer.kind = LayerKind::Raster;
+    if (page.color) {  // (color-mode@1: a CMYK or Lab page's paint layer holds the picture as the page's inks)
+        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(ink::picture_inks(blob, *page.color)));
+        layer.ink_memo = {};
+        layer.raster_png = nullptr;
+        layer.raster_memo = {};
+        layer.color_raster = nullptr;
+        layer.raster_relpath.reset();
+        if (layer.role == LayerRole::Name || layer.role == LayerRole::Draft) layer.exportable = false;
+        return;
+    }
     layer.raster_png = std::make_shared<const std::string>(std::move(blob));
     const std::string name = layer.role == LayerRole::User ? "user-" + layer.id : std::string(core::to_string(layer.role));
     layer.raster_relpath = raster::page_folder(page) + "/" + name + ".png";
