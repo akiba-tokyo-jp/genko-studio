@@ -56,13 +56,13 @@ constexpr std::array<std::string_view, 20> kLineKeys{"id", "page_index", "text",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
                                                      "style", "tails"};
-constexpr std::array<std::string_view, 42> kLayerKeys{
+constexpr std::array<std::string_view, 43> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
     "color_prints", "screen", "source", "strokes_blob", "stroke_count",
     // placed layers only
-    "frame_id", "placement_mm", "fit", "clip_to", "finish", "color_raster"};
+    "frame_id", "placement_mm", "fit", "clip_to", "finish", "color_raster", "ink_raster"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 2> kMaskKeys{"enabled", "asset"};
 constexpr std::array<std::string_view, 10> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb"};
@@ -82,6 +82,12 @@ const Json* find(const Json& object, std::string_view key) {
 
 std::string at_key(const std::string& at, std::string_view key) { return core::json_pointer_append(at, key); }
 std::string at_index(const std::string& at, std::size_t i) { return core::json_pointer_append(at, i); }
+
+// The drawing build's check of an ICC profile (set_profile_check), set once when the program starts.
+ProfileCheck& profile_check() {
+    static ProfileCheck check;
+    return check;
+}
 
 // The drawing build's check of a paper picture (set_paper_check), set once when the program starts.
 PaperCheck& paper_check() {
@@ -120,6 +126,8 @@ private:
     std::unordered_map<std::string, core::StrokeListPtr> blobs_;  // strokes read in this load (Python's blobcache)
     // Scope is one book load; immutable bytes are owned by the resulting layers.
     std::unordered_map<std::string, core::Bytes> color_blobs_;
+    // color-mode@1: the ICC profiles read (by ref; null when one could not be read)
+    std::unordered_map<std::string, core::Bytes> profiles_;
 
     void issue(std::string kind, std::string pointer, std::string ref, std::string message) {
         report_.issues.push_back(LoadIssue{std::move(kind), std::move(pointer), std::move(ref), std::move(message)});
@@ -342,7 +350,11 @@ private:
     void read_papers(core::Document& doc);
     core::StrokeListPtr read_strokes_blob(const Json& ref_value, const std::string& at);
     core::Bytes read_png(const Json& ref_value, const std::string& at, core::BlobMemo* memo);
+    core::Bytes read_blob(const Json& ref_value, const std::string& at, core::BlobMemo* memo, std::string_view suffix,
+                          std::string_view noun);
     core::Bytes read_legacy_raster(const std::string& relpath, const std::string& at);
+    std::optional<core::PageColor> read_color(Json& extra, const std::string& at);
+    void check_ink_rasters(core::Page& page, const std::string& at);
 };
 
 core::PageSpec Reader::read_spec(const Json& raw) {
@@ -620,6 +632,11 @@ core::Stroke Reader::read_stroke(const Json& raw, const std::string& at) {
 }
 
 core::Bytes Reader::read_png(const Json& ref_value, const std::string& at, core::BlobMemo* memo) {
+    return read_blob(ref_value, at, memo, ".png", "picture");
+}
+
+core::Bytes Reader::read_blob(const Json& ref_value, const std::string& at, core::BlobMemo* memo, std::string_view suffix,
+                              std::string_view noun) {
     if (skip_assets_) return nullptr;
     if (!ref_value.is_string() || !AssetStore::is_ref(ref_value.get_ref<const std::string&>())) {
         issue("broken_ref", at, core::py_str(ref_value), "not an asset ref: " + core::py_repr(ref_value));
@@ -632,9 +649,9 @@ core::Bytes Reader::read_png(const Json& ref_value, const std::string& at, core:
             return it->second;
         }
     }
-    auto bytes = store_.get_bytes(ref, ".png");
+    auto bytes = store_.get_bytes(ref, suffix);
     if (!bytes) {
-        issue("missing_asset", at, ref, "the picture " + AssetStore::relpath(ref, ".png") + " is missing");
+        issue("missing_asset", at, ref, "the " + std::string(noun) + " " + AssetStore::relpath(ref, suffix) + " is missing");
         return nullptr;
     }
     auto shared = std::make_shared<const std::string>(std::move(*bytes));
@@ -642,7 +659,7 @@ core::Bytes Reader::read_png(const Json& ref_value, const std::string& at, core:
         std::string actual = AssetStore::ref(*shared);
         if (actual != ref) {
             issue("hash_mismatch", at, ref,
-                  "the picture " + AssetStore::relpath(ref, ".png") + " does not hold the bytes its name says (" +
+                  "the " + std::string(noun) + " " + AssetStore::relpath(ref, suffix) + " does not hold the bytes its name says (" +
                       actual + ")");
         } else if (options_.cache) {
             options_.cache->pictures.emplace(ref, shared);
@@ -650,6 +667,72 @@ core::Bytes Reader::read_png(const Json& ref_value, const std::string& at, core:
         if (memo != nullptr) memo->remember(shared, std::move(actual));
     }
     return shared;
+}
+
+// color-mode@1: the colour mode kept under "color" (taken out of the keys written back as they were read), its ICC
+// profile read and checked. What cannot be read is reported (the book opens read-only) and is not taken as a mode:
+// the page is never drawn in another space or with another profile, nor written without its mode.
+std::optional<core::PageColor> Reader::read_color(Json& extra, const std::string& at) {
+    const auto it = extra.find("color");
+    if (it == extra.end()) return std::nullopt;
+    const Json raw = *it;
+    extra.erase(it);
+    if (raw.is_null()) return std::nullopt;
+    const std::string here = at_key(at, "color");
+    core::PageColor color;
+    try {
+        color = core::page_color_from_json(raw);
+    } catch (const core::Error& error) {
+        issue("broken_value", here, {}, error.what());
+        extra["color"] = raw;  // (written back as it was: the book is read-only)
+        return std::nullopt;
+    }
+    if (color.space != core::InkSpace::Cmyk) return color;
+    const std::string& ref = color.profile;
+    if (const auto known = profiles_.find(ref); known != profiles_.end()) {
+        color.icc = known->second;
+        return color;
+    }
+    const std::string at_profile = at_key(here, "profile");
+    core::Bytes icc;
+    // (read for a page whose pictures are not read yet too: it is small, and the page is drawn with it when it is read)
+    auto bytes = store_.get_bytes(ref, core::kProfileSuffix, core::kProfileMaxBytes + 1);
+    if (!bytes) {
+        issue("missing_asset", at_profile, ref, "the ICC profile " + AssetStore::relpath(ref, core::kProfileSuffix) + " is missing");
+    } else if (bytes->size() > core::kProfileMaxBytes) {
+        issue("broken_asset", at_profile, ref, "the ICC profile " + AssetStore::relpath(ref, core::kProfileSuffix) + " is larger than 16 MiB");
+    } else if (AssetStore::ref(*bytes) != ref) {
+        issue("hash_mismatch", at_profile, ref, "the ICC profile " + AssetStore::relpath(ref, core::kProfileSuffix) + " does not hold the bytes its name says");
+    } else if (const auto why = profile_check() ? profile_check()(*bytes) : std::nullopt) {
+        issue("broken_asset", at_profile, ref, "the ICC profile " + AssetStore::relpath(ref, core::kProfileSuffix) + " cannot be used: " + *why);
+    } else {
+        icc = std::make_shared<const std::string>(std::move(*bytes));
+    }
+    profiles_[ref] = icc;
+    color.icc = icc;
+    return color;
+}
+
+// color-mode@1: each paint layer's ink pixels are in its page's space and depth (their header read); none on an RGB
+// page; a layer holds one kind of pixels.
+void Reader::check_ink_rasters(core::Page& page, const std::string& at) {
+    for (std::size_t i = 0; i < page.layers.size(); ++i) {
+        core::Layer& layer = page.layers[i];
+        if (!layer.ink_raster) continue;
+        const std::string here = at_key(at_index(at_key(at, "layers"), i), "ink_raster");
+        try {
+            const core::InkRasterHeader header = core::ink_raster_header(*layer.ink_raster);
+            if (!page.color) throw core::Error("value", "an RGB page holds no ink pixels");
+            if (header.space != page.color->space || header.depth != page.color->depth) {
+                throw core::Error("value", "the pixels are not in the page's colour mode");
+            }
+            if ((layer.raster_png && !layer.raster_png->empty()) || layer.color_raster) {
+                throw core::Error("value", "a layer holds one kind of pixels at most");
+            }
+        } catch (const core::Error& error) {
+            issue("broken_asset", here, {}, error.what());
+        }
+    }
 }
 
 core::Bytes Reader::read_legacy_raster(const std::string& relpath, const std::string& at) {
@@ -920,6 +1003,9 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     if (!from_asset && !layer.raster_png && layer.raster_relpath) {
         layer.raster_png = read_legacy_raster(*layer.raster_relpath, at_key(at, "raster_relpath"));
     }
+    if (const Json* ink = find(data, "ink_raster"); ink && !ink->is_null()) {  // color-mode@1 (checked with its page)
+        layer.ink_raster = read_blob(*ink, at_key(at, "ink_raster"), &layer.ink_memo, core::kInkRasterSuffix, "ink raster");
+    }
     if (const Json* patches = find(data, "patches"); patches && core::py_truthy(*patches)) {
         const std::string here = at_key(at, "patches");
         const Json items = iterable(*patches, here);
@@ -1057,6 +1143,8 @@ core::Document Reader::migrate(const Json& payload) {
         if (const Json* cover = find(page.extra, "cover"); cover && cover->is_object()) {
             page.spec = core::spec_for(spec, *cover);
         }
+        page.color = read_color(page.extra, at);
+        check_ink_rasters(page, at);
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
@@ -1101,6 +1189,7 @@ core::Document Reader::migrate(const Json& payload) {
     for (const auto& [key, value] : payload.items()) {
         if (!in(kTopKeys, key)) doc.extra[key] = value;
     }
+    doc.color = read_color(doc.extra, "");
     doc.revision = truthy_at(payload, "revision") ? core::py_int(*find(payload, "revision")) : 0;
     doc.start_side = asis_opt_str(payload, "start_side", "");
     doc.strict_gates = to_bool(payload, "strict_gates", false);
@@ -1201,12 +1290,14 @@ Json LoadReport::to_json() const {
 }
 
 void set_paper_check(PaperCheck check) { paper_check() = std::move(check); }
+void set_profile_check(ProfileCheck check) { profile_check() = std::move(check); }
 
 bool is_known_top_key(std::string_view key) { return in(kTopKeys, key); }
 bool is_known_page_key(std::string_view key) { return in(kPageKeys, key); }
 bool is_known_feature(std::string_view feature) {
     return feature == core::kColorRasterFeature || feature == core::kColorTilesFeature || feature == core::kExposureFeature ||
-           feature == core::kColorStrokeFeature || feature == core::kPaperFeature || feature == core::kRubyLayoutFeature;
+           feature == core::kColorStrokeFeature || feature == core::kPaperFeature || feature == core::kRubyLayoutFeature ||
+           feature == core::kColorModeFeature;
 }
 
 int project_version(const Json& payload) {

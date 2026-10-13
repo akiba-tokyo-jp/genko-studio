@@ -1,0 +1,67 @@
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "core/ink.hpp"
+#include "render/image.hpp"
+
+// The colour work of CMYK and Lab pages (color-mode@1, SPEC.md COLOR-02) through Little CMS: RGB colours into a page's
+// inks (its table of inks, Genko's blacks and white, greys on K alone, the rest through its profile), inks out to sRGB
+// for the screen, and whole rasters from one space into another (a page's conversion).
+//
+// Values: CMYK inks 0..1 (no ink .. 100%), Lab L 0..100 and a, b -128..127 (D50), sRGB 0..1 (encoded). Transforms are
+// made once for a profile, an intent and a direction, without Little CMS's one-pixel cache (they run on the drawing
+// pool's threads).
+
+namespace genko::render::ink {
+
+// Can these bytes be a CMYK page's profile? Nothing when they can, else why not (in English).
+std::optional<std::string> profile_problem(std::string_view icc);
+// The profile's description, or "".
+std::string profile_description(std::string_view icc);
+
+// The ink of an RGB colour on the page (schema-v4.md「色モード」: the table, Genko's blacks and white, other greys,
+// then the profile).
+std::vector<double> ink_of(const core::PageColor& color, const std::array<int, 3>& rgb);
+// The ink of a precise sRGB colour (0..1 each; HDR values are clamped) through the profile.
+std::vector<double> ink_of_srgb(const core::PageColor& color, const std::array<double, 3>& srgb);
+
+// Many 8-bit RGB colours (rgb: 3 bytes each) as inks (out: channels values each), by the same rules; `alpha` (one byte
+// each, or null) skips the transparent ones (their ink is left as it is in `out`).
+void inks_of(const core::PageColor& color, const unsigned char* rgb, const unsigned char* alpha, double* out, std::size_t count);
+
+// Inks (channels values each) as sRGB for the screen (3 floats each, 0..1): relative colorimetric, black point
+// compensation.
+void to_srgb(const core::PageColor& color, const double* inks, float* srgb, std::size_t count);
+std::array<double, 3> srgb_of(const core::PageColor& color, const std::vector<double>& ink);
+
+// The raster's pixels ("RGBA" or "RGB"; 8-bit) as ink pixels of the page's mode (its depth), through the profile and
+// intent; `gray_on_k`: pixels exactly grey (r = g = b) on K alone (CMYK).
+core::InkPixels from_rgb(const Image& image, const core::PageColor& color, bool gray_on_k = false);
+// Precise sRGB pixels (straight RGBA, 0..1, rows from the top; HDR clamped) as ink pixels of the page's mode.
+core::InkPixels from_srgb(const std::vector<float>& rgba, std::uint32_t width, std::uint32_t height, const core::PageColor& color,
+                          bool gray_on_k = false);
+// Ink pixels as sRGB: "RGBA" 8-bit, or (`precise`) straight RGBA floats 0..1.
+Image to_rgba8(const core::InkPixels& pixels, const core::PageColor& color);
+std::vector<float> to_srgb_floats(const core::InkPixels& pixels, const core::PageColor& color);
+// Ink pixels of one mode as another's: CMYK → CMYK (another profile: black preserved), CMYK ↔ Lab, and the depth.
+core::InkPixels convert(const core::InkPixels& pixels, const core::PageColor& from, const core::PageColor& to);
+
+// The CMYK pixels of a CMYK JPEG or PSD (Pillow's "CMYK" image: 0 is no ink) as the page's inks: through the
+// picture's own profile into the page's (black preserved), or taken as the page's when it has none.
+core::InkPixels from_cmyk_image(const Image& cmyk, const Image* alpha, std::string_view picture_icc, const core::PageColor& color);
+// Lab pixels (Pillow's "LAB" image: L, a+128, b+128 bytes) as the page's inks, or as sRGB "RGB" as Pillow converts them
+// (ImageCms: Little CMS's Lab profile to sRGB, perceptual).
+core::InkPixels from_lab_image(const Image& lab, const Image* alpha, const core::PageColor& color);
+Image lab_to_rgb_as_pillow(const Image& lab);
+
+// One sample of an ink as a stored value (0..max) and back.
+std::uint16_t encode_sample(core::InkSpace space, unsigned channel, double value, int depth);
+double decode_sample(core::InkSpace space, unsigned channel, std::uint16_t sample, int depth);
+
+}  // namespace genko::render::ink

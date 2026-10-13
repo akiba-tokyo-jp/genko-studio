@@ -35,6 +35,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "formats/export.hpp"
+#include "formats/exporting.hpp"
 #include "render/anim.hpp"
 #include "render/brushes.hpp"
 #include "render/ops_registry.hpp"
@@ -550,6 +551,8 @@ int export_command(const QStringList& args, bool ascii) {
         paths = formats::export_print(doc, out, f, dpi, 180, true, *area, f == "cmyk" ? std::string("cmyk") : *color,
                                       a.value("--icc").value_or(QString()).toStdString(), screen);
     }
+    const std::optional<std::string> note =
+        formats::ink_note(doc, f, f == "cmyk" ? std::string("cmyk") : *color);
     if (a.flag("--json")) {
         Json files = Json::array();
         for (const auto& p : paths) files.push_back(core::path_to_utf8(p));
@@ -558,11 +561,13 @@ int export_command(const QStringList& args, bool ascii) {
         json["count"] = static_cast<std::int64_t>(paths.size());
         json["files"] = files;
         if (psd_choice.editable) json["psd_text"] = psd_report.to_json();  // (what the editable PSD did)
+        if (note) json["notes"] = Json::array({*note});  // (color-mode@1: pages written from the colours on screen)
         print_json(json, ascii);
     } else {
         std::string lines;
         for (const auto& p : paths) lines += core::path_to_utf8(p) + "\n";
         write_text(lines, stdout);
+        if (note) write_text(*note + "\n", stderr);
         // (the editable PSD's lines drawn as pictures and its font warnings, said on stderr)
         if (psd_choice.editable && (!psd_report.rasterized.empty() || !psd_report.warnings.empty())) {
             write_text(core::dump_python(Json{{"psd_text", psd_report.to_json()}}, ascii) + "\n", stderr);

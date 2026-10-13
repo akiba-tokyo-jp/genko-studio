@@ -39,6 +39,9 @@ genko_library(genko_render
     timelapse.cpp
     plugins.cpp
     colour.cpp
+    ink.cpp
+    ink_canvas.cpp
+    ops_ink.cpp
     raster_ops.cpp
     ops_paint.cpp
     zip.cpp

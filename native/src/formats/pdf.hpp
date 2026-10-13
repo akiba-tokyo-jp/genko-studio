@@ -37,7 +37,10 @@ struct PdfPage {
     PdfBoxes boxes;
 };
 
+// color-mode@1: a page of mode "INK" is a CMYK or Lab page's inks, made by `inks(n)` (8 or 16 bits): CMYK with its
+// profile (ICCBased, N 4) or DeviceCMYK, Lab as /Lab (D50, a and b -128..127).
 std::filesystem::path write_pdf(const std::filesystem::path& path, const std::vector<PdfPage>& pages,
-                                const std::function<render::Image(std::size_t)>& picture);
+                                const std::function<render::Image(std::size_t)>& picture,
+                                const std::function<core::InkPixels(std::size_t)>& inks = {});
 
 }  // namespace genko::formats

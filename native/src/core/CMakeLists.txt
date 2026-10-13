@@ -32,6 +32,7 @@ genko_library(genko_core
     geometry.cpp
     model.cpp
     color_raster.cpp
+    ink.cpp
     exposure.cpp
     ops_color.cpp
     frames.cpp
@@ -81,7 +82,8 @@ genko_library(genko_core
     ops_studio.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
-  PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json)
+  PUBLIC_DEPS Qt6::Core nlohmann_json::nlohmann_json
+  PRIVATE_DEPS ZLIB::ZLIB)
 
 # CPython calls libm directly: so must we (no pow(x, 2.0) → x*x, no sin+cos → sincos), for the same last bits. Every
 # call of libm for Python's math module is in pymath.cpp; linalg3.cpp calls libm's hypot as numpy does. (MSVC: the

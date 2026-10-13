@@ -201,6 +201,18 @@ std::int64_t default_dpi(const core::Document& episode, std::string_view key) {
     return episode.spec.dpi.truthy() ? core::py_int(episode.spec.dpi) : 600;
 }
 
+std::optional<std::string> ink_note(const core::Document& episode, std::string_view key, std::string_view color) {
+    std::int64_t converted = 0;
+    for (const auto& page : episode.pages) {
+        if (!page->color) continue;
+        const bool inks = (key == "pdf" || key == "tiff" || key == "cmyk") &&
+                          (color == "auto" || (color == "cmyk" && page->color->space == core::InkSpace::Cmyk));
+        if (!inks) ++converted;
+    }
+    if (converted == 0) return std::nullopt;
+    return "CMYK・Lab のページ " + std::to_string(converted) + " ページは、この形式・色ではインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
+}
+
 core::Json run(const core::Document& episode_in, const std::optional<std::filesystem::path>& project, std::string_view key,
                const std::filesystem::path& out, const RunOptions& o) {
     using core::Json;
@@ -289,6 +301,7 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
     for (const auto& f : files) written.push_back(core::path_to_utf8(f));
     Json reply{{"ok", true}, {"files", written}};
     if (psd_report) reply["psd_text"] = *psd_report;
+    if (const auto note = ink_note(*episode, key, key == "cmyk" ? std::string("cmyk") : o.color)) reply["notes"] = Json::array({*note});
     return reply;
 }
 

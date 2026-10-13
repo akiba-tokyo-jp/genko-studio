@@ -99,7 +99,8 @@ PdfBoxes pdf_boxes(const core::Page& page, std::string_view area) {
 }
 
 std::filesystem::path write_pdf(const std::filesystem::path& path, const std::vector<PdfPage>& pages,
-                                const std::function<render::Image(std::size_t)>& picture) {
+                                const std::function<render::Image(std::size_t)>& picture,
+                                const std::function<core::InkPixels(std::size_t)>& inks) {
     // The object numbers first (catalog 1, pages 2, then for each page its profile when new, image, content and page),
     // so the catalog and the page tree are written before the pictures are made.
     struct Numbers {
@@ -115,10 +116,10 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
     std::string kids;
     for (std::size_t n = 0; n < pages.size(); ++n) {
         const PdfPage& page = pages[n];
-        if (page.mode != "1" && page.mode != "L" && page.mode != "RGB" && page.mode != "CMYK") {
+        if (page.mode != "1" && page.mode != "L" && page.mode != "RGB" && page.mode != "CMYK" && !(page.mode == "INK" && inks)) {
             throw core::Error("key", "'" + page.mode + "'");
         }
-        if (!page.profile.empty() && (page.mode == "RGB" || page.mode == "CMYK")) {
+        if (!page.profile.empty() && (page.mode == "RGB" || page.mode == "CMYK" || page.mode == "INK")) {
             const auto found = profile_ids.find(page.profile);
             if (found == profile_ids.end()) {
                 profile_ids[page.profile] = ++count;
@@ -145,6 +146,48 @@ std::filesystem::path write_pdf(const std::filesystem::path& path, const std::ve
     object("<< /Type /Pages /Kids [" + kids + "] /Count " + std::to_string(pages.size()) + " >>");
     for (std::size_t n = 0; n < pages.size(); ++n) {
         const PdfPage& page = pages[n];
+        if (page.mode == "INK") {  // (color-mode@1: the page's inks as they are)
+            const core::InkPixels px = inks(n);
+            const bool cmyk = px.space == core::InkSpace::Cmyk;
+            std::string space = cmyk ? "/DeviceCMYK" : "[/Lab << /WhitePoint [0.9642 1 0.8249] /Range [-128 127 -128 127] >>]";
+            if (cmyk && numbers[n].profile != 0) {
+                if (numbers[n].new_profile) {
+                    Deflater deflater;
+                    deflater.add(page.profile, true);
+                    object(stream("/N 4 /Filter /FlateDecode", deflater.take()));
+                }
+                space = "[/ICCBased " + std::to_string(numbers[n].profile) + " 0 R]";
+            }
+            const unsigned colours = core::colour_channels(px.space), all = px.channels();
+            Deflater deflater;
+            std::string row;
+            for (std::uint32_t y = 0; y < px.height; ++y) {
+                row.clear();
+                const std::uint16_t* src = px.samples.data() + std::size_t(y) * px.width * all;
+                for (std::uint32_t x = 0; x < px.width; ++x) {
+                    for (unsigned c = 0; c < colours; ++c) {
+                        const std::uint16_t v = src[x * all + c];
+                        if (px.depth == 16) row.push_back(static_cast<char>(v >> 8));
+                        row.push_back(static_cast<char>(v & 255));
+                    }
+                }
+                deflater.add(row, y + 1 == px.height);
+            }
+            object(stream("/Type /XObject /Subtype /Image /Width " + std::to_string(px.width) + " /Height " + std::to_string(px.height) +
+                              " /ColorSpace " + space + " /BitsPerComponent " + std::to_string(px.depth) + " /Filter /FlateDecode",
+                          deflater.take()));
+            const auto& media = page.boxes.media;
+            object(stream("", "q " + f3(media[2] - media[0]) + " 0 0 " + f3(media[3] - media[1]) + " 0 0 cm /Im0 Do Q"));
+            std::string boxes;
+            for (const auto& [key, value] : {std::pair{"MediaBox", &page.boxes.media}, std::pair{"BleedBox", &page.boxes.bleed},
+                                             std::pair{"TrimBox", &page.boxes.trim}}) {
+                boxes += (boxes.empty() ? "/" : " /") + std::string(key) + " [" + f3((*value)[0]) + " " + f3((*value)[1]) + " " + f3((*value)[2]) +
+                         " " + f3((*value)[3]) + "]";
+            }
+            object("<< /Type /Page /Parent 2 0 R " + boxes + " /Resources << /XObject << /Im0 " + std::to_string(numbers[n].image) +
+                   " 0 R >> >> /Contents " + std::to_string(numbers[n].content) + " 0 R >>");
+            continue;
+        }
         const render::Image made = picture(n);
         if (made.mode() != page.mode) throw core::Error("value", "the picture is not in the page's colour");
         std::string space;

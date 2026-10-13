@@ -333,7 +333,7 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
         throw OpError(name + " needs a person (actor " + actor.name() + " cannot approve)");
     }
     if (named && (name == "undo" || name == "set_meta" || name == "set_bible" || name == "set_autosave")) return;
-    if (named && name == "set_paper" && paper_on_every_page(op)) {
+    if (named && (name == "set_paper" || name == "set_color_mode" || name == "set_inks") && paper_on_every_page(op)) {
         // (every page it changes is asked, as an op on each one is: Python asks none of them)
         for (const auto& each : doc.pages) check_held(doc, *each, each->index, actor);
         return;
@@ -846,6 +846,12 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                 OpContext context{work, *current, actor};
                 (*function)(context);
                 validate_color_document(work);
+                try {
+                    validate_ink_document(work);  // (color-mode@1: what an op leaves on a CMYK or Lab page)
+                } catch (const Error& error) {
+                    if (error.code() == "not_yet_ported") throw;
+                    throw OpError(error.what());
+                }
                 report = std::move(context.report);
             }
         } catch (const ApplyError&) {

@@ -151,6 +151,7 @@ void add_page(OpContext& c) {
     for (std::int64_t n = 0; n < count; ++n) {
         const auto index = static_cast<std::int64_t>(doc.pages.size()) + 1;
         Page page = make_page(Num(index), doc.spec, doc.binding);
+        page.color = doc.color;  // (color-mode@1: the book's mode for the pages it makes)
         Frame root;
         root.id = new_id();
         root.rect = page.inner_rect_mm();

@@ -12,5 +12,7 @@ void register_tone_ops(core::OpRegistry& registry);
 void register_effect_ops(core::OpRegistry& registry);
 // import_psd (render/import_psd.cpp)
 void register_file_ops(core::OpRegistry& registry);
+// set_color_mode and set_inks (color-mode@1, render/ops_ink.cpp)
+void register_ink_ops(core::OpRegistry& registry);
 
 }  // namespace genko::render

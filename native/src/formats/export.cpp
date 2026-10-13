@@ -20,6 +20,7 @@
 #include "formats/pillow_save.hpp"
 #include "render/colour.hpp"
 #include "render/covers.hpp"
+#include "render/ink_canvas.hpp"
 #include "render/page.hpp"
 #include "render/tones.hpp"
 #include "render/zip.hpp"
@@ -159,7 +160,27 @@ Image crop_to(const Image& image, const core::Page& page, std::string_view area,
 
 std::string page_color(const core::Page& page, std::string_view color) {
     if (color != "auto") return std::string(color);
-    return page.spec.expression == "color" || core::is_cover(page) ? "rgb" : "gray";
+    // (a CMYK or Lab page is a colour page)
+    return page.color || page.spec.expression == "color" || core::is_cover(page) ? "rgb" : "gray";
+}
+
+// color-mode@1: a CMYK or Lab page written as its inks (PDF and TIFF): its colour "auto", or "cmyk" for a CMYK page.
+bool as_inks(const core::Page& page, std::string_view fmt, std::string_view color) {
+    if (!page.color || (fmt != "pdf" && fmt != "tiff" && fmt != "cmyk")) return false;
+    return color == "auto" || (color == "cmyk" && page.color->space == core::InkSpace::Cmyk);
+}
+
+core::InkPixels inks_crop_to(const core::InkPixels& inks, const core::Page& page, std::string_view area, int dpi) {
+    if (area == "paper") return inks;
+    const core::Rect r = area == "bleed" ? page.bleed_rect_mm() : page.trim_rect_mm();
+    const int x0 = render::mm_to_px(r.x.value(), dpi);
+    const int y0 = render::mm_to_px(r.y.value(), dpi);
+    render::Box box{x0, y0, x0 + render::mm_to_px(r.width.value(), dpi), y0 + render::mm_to_px(r.height.value(), dpi)};
+    box.x0 = std::clamp(box.x0, 0, static_cast<int>(inks.width));
+    box.x1 = std::clamp(box.x1, box.x0, static_cast<int>(inks.width));
+    box.y0 = std::clamp(box.y0, 0, static_cast<int>(inks.height));
+    box.y1 = std::clamp(box.y1, box.y0, static_cast<int>(inks.height));
+    return render::crop_inks(inks, box);
 }
 
 std::vector<fs::path> export_png_sequence(const core::Document& episode, const fs::path& dest, int working_dpi, std::string_view mode) {
@@ -227,6 +248,16 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
     render::RenderOptions options = print_options();
     options.crop_marks = crop_marks && area == "paper";
     const auto image_of = [&](const core::Page& page) { return crop_to(render::render_page(page, dpi, options, &episode).image, page, area, dpi); };
+    const auto inks_of = [&](const core::Page& page) {
+        render::RenderOptions with_inks = options;
+        with_inks.inks = true;
+        render::RenderResult made = render::render_page(page, dpi, with_inks, &episode);
+        if (!made.inks) throw core::Error("value", "the page's inks were not drawn");
+        return inks_crop_to(*made.inks, page, area, dpi);
+    };
+    const auto page_profile = [](const core::Page& page) -> std::string_view {
+        return page.color && page.color->space == core::InkSpace::Cmyk && page.color->icc ? std::string_view(*page.color->icc) : std::string_view();
+    };
     const auto coloured = [&](const Image& image, const std::string& how) {
         if (how == "cmyk") return render::colour::to_cmyk(image, icc_path);
         if (how == "bitonal") return render::to_bitonal(image, threshold, screen_ptr);
@@ -248,17 +279,29 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
         std::vector<PdfPage> pages;
         std::vector<std::string> hows;
         for (const auto& page : episode.pages) {
+            if (as_inks(*page, fmt, color)) {  // (color-mode@1: its inks as they are, with its own profile)
+                hows.push_back("ink");
+                pages.push_back(PdfPage{"INK", page_profile(*page), pdf_boxes(*page, area)});
+                continue;
+            }
             const std::string how = page_color(*page, color);
             hows.push_back(how);
             const std::string mode = how == "cmyk" ? "CMYK" : how == "bitonal" ? "1" : how == "gray" ? "L" : "RGB";
             pages.push_back(PdfPage{mode, profile_for(how), pdf_boxes(*page, area)});
         }
-        write_pdf(path, pages, [&](std::size_t n) { return coloured(image_of(*episode.pages[n]), hows[n]); });
+        write_pdf(path, pages, [&](std::size_t n) { return coloured(image_of(*episode.pages[n]), hows[n]); },
+                  [&](std::size_t n) { return inks_of(*episode.pages[n]); });
         return {path};
     }
     std::vector<fs::path> written;
     for (const auto& page_ptr : episode.pages) {
         const core::Page& page = *page_ptr;
+        if (as_inks(page, fmt, color)) {  // (color-mode@1: a TIFF of its inks, with its own profile)
+            const fs::path path = detail::join(dest, stem(episode) + "_" + core::file_stem(page) + ".tiff");
+            output.put(path, ink_tiff_bytes(inks_of(page), TiffSave{"tiff_lzw", dpi_pair(dpi), std::string(page_profile(page))}));
+            written.push_back(path);
+            continue;
+        }
         const Image image = image_of(page);
         const std::string name = stem(episode) + "_" + core::file_stem(page);
         const std::string how = page_color(page, color);

@@ -29,6 +29,8 @@
 #include "render/color_canvas.hpp"
 #include "render/covers.hpp"
 #include "render/effects.hpp"
+#include "render/ink.hpp"
+#include "render/ink_canvas.hpp"
 #include "render/page_internal.hpp"
 #include "render/paper.hpp"
 #include "render/placed.hpp"
@@ -645,6 +647,8 @@ std::optional<Image> layer_pixels(const Ctx& ctx, const Layer& layer, const Box&
         raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), ctx.size, area);
     } else if (layer.raster_png && !layer.raster_png->empty()) {
         raster = raster_part(layer.raster_png, ctx.size, area);
+    } else if (layer.ink_raster && ctx.page->color) {  // (color-mode@1: its inks as the screen shows them)
+        raster = ink_picture_rgba(sample_ink_raster(*decoded_ink(layer.ink_raster), ctx.size, area), *ctx.page->color);
     }
     auto lines = layer_strokes(ctx, layer, area, panel_mask, raster ? &*raster : nullptr, rough, true);
     if (lines) raster = raster ? alpha_composite(*raster, *lines) : std::move(*lines);  // (raster is RGBA)
@@ -764,7 +768,9 @@ Box nombre_required_area(const Box& area, const Ctx& ctx) {
     return out;
 }
 
-void draw_nombre(Image& image, const Box& area, const Ctx& ctx) {
+// (`under`: the picture whose colours decide the halo, when it is not `image` itself: a CMYK or Lab page draws its
+// letters on black and on white, and decides by the page as shown)
+void draw_nombre(Image& image, const Box& area, const Ctx& ctx, const Image* under = nullptr) {
     const auto items = nombre_items(*ctx.page, ctx.episode);
     if (items.empty()) return;
     const auto text = nombre_text(*ctx.page, ctx.episode), font = nombre_font(ctx.episode);
@@ -773,7 +779,7 @@ void draw_nombre(Image& image, const Box& area, const Ctx& ctx) {
         const int size = std::max(6, mm_to_px(item[2], ctx.dpi));
         const auto [origin, sample] = nombre_geometry(text, font, size, item, ctx);
         if (!intersects(sample, area)) continue;
-        const Image background = image.crop(shifted(sample, -area.x0, -area.y0)).convert("L");
+        const Image background = (under != nullptr ? *under : image).crop(shifted(sample, -area.x0, -area.y0)).convert("L");
         const bool busy = background.width() > 0 && background.height() > 0 && background.getextrema().front().first < 235;
         // Pillow ImageDraw keeps the fractional part separately, not as a subpixel FT transform.
         const PointD fraction{origin.x - std::floor(origin.x), origin.y - std::floor(origin.y)};
@@ -912,6 +918,64 @@ void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, co
     }
     target.blend(own,layer.opacity,layer.clip,layer.blend);
 }
+// color-mode@1: one layer of a CMYK or Lab page into the page's canvas (SPEC.md COLOR-02). Its own inks (an ink raster,
+// resampled as a paint layer is) are composited as they are; everything drawn in 8 bits (lines, fills, placed
+// pictures, a raster in RGB) as the page's inks of its colours; tones as drawn over the page.
+void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
+    const bool print = ctx.mode == "print";
+    if (is_tone(layer)) {  // (tones sit in the layer order as drawn over the page; a layer above clips to nothing)
+        const bool dots = (print && ctx.finish && ctx.dots) || screen_dots(ctx);
+        canvas.draw_8bit([&](Image& picture) {
+            picture = tones::draw_layer(picture.convert("RGBA"), layer, tone_page(ctx), area, panel, dots).convert("RGB");
+        });
+        canvas.forget_clip();
+        return;
+    }
+    if (!canvas.supports_blend(layer.blend)) {
+        skip_unported(ctx, "ink_blend:" + layer.blend);
+        return;
+    }
+    if (layer.kind == LayerKind::Adjust) {  // (corrections on inks: a later step of the colour modes)
+        skip_unported(ctx, "ink_adjust");
+        return;
+    }
+    if (layer.ink_raster) {
+        const bool tinted_here = layer.color && !layer.color->empty() && (!print || layer.color_prints);
+        if (truthy_json(layer.effect) || truthy_json(layer.screen) || tinted_here) {
+            skip_unported(ctx, "ink_layer_style");
+            return;
+        }
+        InkPicture picture = sample_ink_raster(*decoded_ink(layer.ink_raster), ctx.size, area);
+        if (layer.stroke_count() > 0 || !layer.patches.empty()) {
+            const Image kept = ink_alpha_rgba(picture);  // (透明保護: lines inside its pixels)
+            if (auto lines = layer_strokes(ctx, layer, area, panel, &kept, ctx.rough, true)) {
+                ink_over(picture, ink_picture(*lines, *ctx.page->color));
+            }
+        }
+        std::optional<Image> shown;
+        if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled) {
+            shown = decoded(layer.mask->png, "L").resize_region(ctx.size, area, Resample::Bilinear);
+        }
+        canvas.blend(picture, layer.opacity, layer.clip, layer.blend, shown ? &*shown : nullptr);
+        return;
+    }
+    if (layer.kind == LayerKind::Fill && truthy_json(layer.fill)) {
+        Image raster = fill_layer_image(layer, ctx.size, ctx.dpi, false, area);
+        if (panel != nullptr && layer.panel_clip) raster.putalpha(chops::multiply(alpha_of(raster), *panel));
+        raster = masked(ctx, layer, std::move(raster), area);
+        canvas.blend_rgba(raster, layer.opacity, layer.clip, layer.blend);
+        return;
+    }
+    std::optional<Image> raster = layer_with_effects(ctx, layer, area, panel, ctx.rough);
+    if (!raster) return;
+    if (truthy_json(layer.screen) && ((print && ctx.dots) || screen_dots(ctx))) {
+        raster = screened_layer(ctx, layer, *raster, area, panel);  // トーン化: its greys as dots in print (K)
+    }
+    Image picture = masked(ctx, layer, std::move(*raster), area);
+    if (layer.color && !layer.color->empty() && (!print || layer.color_prints)) picture = tinted(picture, *layer.color);
+    canvas.blend_rgba(picture.mode() == "RGBA" ? picture : picture.convert("RGBA"), layer.opacity, layer.clip, layer.blend);
+}
+
 RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, const core::Document* episode,
                     std::vector<std::string>& omitted) {
     if (!options.at_frame) {  // (an animation page prints as its first frame, not every cel at once)
@@ -928,6 +992,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         whole.region.reset();
         RenderResult out = render(page_in, dpi, whole, episode, omitted);
         out.image = out.image.crop(box);
+        if (out.inks) out.inks = crop_inks(*out.inks, box);
         return out;
     }
     Ctx ctx;
@@ -942,7 +1007,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     ctx.omitted = &omitted;
     ctx.stop = options.stop;
     const Page& page = page_in;
-    ctx.finish = options.finish.value_or(page.spec.expression != "color");
+    // (a CMYK or Lab page is a colour page: never the monochrome finish)
+    ctx.finish = page.color ? false : options.finish.value_or(page.spec.expression != "color");
     const int width = mm_to_px(page.spec.width_mm.value(), dpi);
     const int height = mm_to_px(page.spec.height_mm.value(), dpi);
     if (width > 0x7fffffff / 4 || height > 0x7fffffff / 4) throw core::Error("image_too_large", "the page is too large at this resolution");
@@ -957,6 +1023,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             widened.region = RenderRegion{expanded.x0, expanded.y0, expanded.width(), expanded.height()};
             RenderResult out = render(page_in, dpi, widened, episode, omitted);
             out.image = out.image.crop(shifted(area, -expanded.x0, -expanded.y0));
+            if (out.inks) out.inks = crop_inks(*out.inks, shifted(area, -expanded.x0, -expanded.y0));
             return out;
         }
     }
@@ -1001,6 +1068,78 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     // (what a balloon cannot draw yet — a font file that does not open or is past 32 MB, a warp with no map, OpenType
     // features across — stops the render, or is left out and reported with skip_unported: that line's letters)
     const text::Unported unported = [&ctx](const NotYetPorted& e) { skip_unported(ctx, e.element()); };
+    // the previous page faint over this one (name and proof)
+    const auto onion = [&](Image& image) {
+        if (!(options.onion && episode != nullptr && name_or_proof && page.onion_from && page.onion_from->truthy())) return;
+        const Page* prev = nullptr;
+        for (const auto& p : episode->pages) {
+            if (p->index == *page.onion_from) {
+                prev = p.get();
+                break;
+            }
+        }
+        if (prev == nullptr) return;
+        RenderOptions ghost_options;
+        ghost_options.mode = "print";
+        ghost_options.onion = false;
+        ghost_options.dots = options.dots;
+        ghost_options.screen_dots = options.screen_dots;
+        ghost_options.skip_unported = options.skip_unported;
+        ghost_options.region = options.region;
+        ghost_options.stop = options.stop;
+        const Size ghost_size{mm_to_px(prev->spec.width_mm.value(), dpi), mm_to_px(prev->spec.height_mm.value(), dpi)};
+        if (ghost_size != ctx.size) throw core::Error("value", "images do not match");
+        const Image ghost = render(*prev, dpi, ghost_options, episode, omitted).image.convert("RGBA");
+        const std::vector<Image> c = ghost.split();
+        const auto dim = [](int p) { return static_cast<int>(core::py_trunc_int(p * 0.4)); };  // int(p * 0.4)
+        const Image tint = Image::merge("RGBA", {c[0].point(dim), c[1].point(dim), c[2], c[3].point([](int) { return 70; })});
+        image = alpha_composite(image.convert("RGBA"), tint).convert("RGB");
+    };
+    if (page.color) {  // color-mode@1: a CMYK or Lab page, composited in its inks (SPEC.md COLOR-02)
+        InkCanvas canvas(*page.color, rgba);
+        for (const Layer& layer : page.layers) {
+            check_cancel(ctx);
+            if (const auto under = std::find_if(below.begin(), below.end(), [&](const auto& b) { return b.first == layer.id; });
+                under != below.end()) {
+                canvas.draw_8bit([&](Image& picture) {
+                    text::draw_lines(text::PagePart{&picture, Point{area.x0, area.y0}, ctx.size}, under->second, dpi, font_path, !print,
+                                     &panels, ctx.stop, &unported);
+                });
+            }
+            if (layer.kind == LayerKind::Folder) continue;
+            if (!layer.visible) continue;
+            if (print && !layer.exportable) continue;
+            if (guide_role(layer.role) && print) continue;
+            ink_layer(canvas, ctx, layer, area, panel);
+        }
+        if (core::py_truthy(page.effects)) canvas.draw_8bit([&](Image& picture) { picture = draw_effects(ctx, picture, area); });
+        canvas.draw_8bit([&](Image& picture) { draw_frames(picture, area, page, ctx.size, dpi); });
+        if (!lines.empty()) {
+            canvas.draw_8bit([&](Image& picture) { draw_story(picture, area, ctx, lines, drawn_below, panels, font_path, unported); });
+        }
+        if (print || mode == "proof") {
+            const Image shown = canvas.display();
+            canvas.draw_8bit([&](Image& picture) { draw_nombre(picture, area, ctx, &shown); });
+        }
+        if (options.crop_marks && print) {
+            canvas.draw_8bit([&](Image& picture) {
+                PageCanvas marks(picture, area, ctx.size);
+                draw_crop_marks(marks.draw(), page, dpi);
+                marks.commit();
+            });
+        }
+        RenderResult out{canvas.display(), {}, std::nullopt};
+        if (options.inks) out.inks = canvas.ink_pixels(page.color->depth);
+        // (what is never printed, over the page as shown)
+        if (!print && core::py_truthy(page.prims)) draw_prims(out.image, area, ctx);
+        if (truthy_json(page.ruler) && name_or_proof) draw_ruler(out.image, area, ctx);
+        if (name_or_proof && get(page.extra, "cover") != nullptr && core::py_truthy(*get(page.extra, "cover"))) {
+            const std::string binding(episode != nullptr ? core::to_string(episode->binding) : std::string_view("right"));
+            draw_folds(out.image, area, ctx.size, page, dpi, binding, ctx.stop);
+        }
+        onion(out.image);
+        return out;
+    }
     for (const Layer& layer : page.layers) {
         check_cancel(ctx);
         if (const auto under = std::find_if(below.begin(), below.end(), [&](const auto& b) { return b.first == layer.id; });
@@ -1134,33 +1273,8 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         draw_crop_marks(canvas.draw(), page, dpi);
         canvas.commit();
     }
-    if (options.onion && episode != nullptr && name_or_proof && page.onion_from && page.onion_from->truthy()) {
-        const Page* prev = nullptr;
-        for (const auto& p : episode->pages) {
-            if (p->index == *page.onion_from) {
-                prev = p.get();
-                break;
-            }
-        }
-        if (prev != nullptr) {
-            RenderOptions ghost_options;
-            ghost_options.mode = "print";
-            ghost_options.onion = false;
-            ghost_options.dots = options.dots;
-            ghost_options.screen_dots = options.screen_dots;
-            ghost_options.skip_unported = options.skip_unported;
-            ghost_options.region = options.region;
-            ghost_options.stop = options.stop;
-            const Size ghost_size{mm_to_px(prev->spec.width_mm.value(), dpi), mm_to_px(prev->spec.height_mm.value(), dpi)};
-            if (ghost_size != ctx.size) throw core::Error("value", "images do not match");
-            const Image ghost = render(*prev, dpi, ghost_options, episode, omitted).image.convert("RGBA");
-            const std::vector<Image> c = ghost.split();
-            const auto dim = [](int p) { return static_cast<int>(core::py_trunc_int(p * 0.4)); };  // int(p * 0.4)
-            const Image tint = Image::merge("RGBA", {c[0].point(dim), c[1].point(dim), c[2], c[3].point([](int) { return 70; })});
-            image = alpha_composite(image.convert("RGBA"), tint).convert("RGB");
-        }
-    }
-    return RenderResult{std::move(image), {}};
+    onion(image);
+    return RenderResult{std::move(image), {}, std::nullopt};
 }
 
 // The first `count` characters of UTF-8 text (Python's text[:count]).
@@ -1372,6 +1486,7 @@ Box rect_px(const core::Rect& rect, int dpi) {
 }
 
 bool uses_color_precision(const core::Page& page, bool print) {
+    if (page.color) return false;  // (a CMYK or Lab page has its own canvas)
     return std::any_of(page.layers.begin(), page.layers.end(), [print](const Layer& l) {
         return (l.color_raster || core::has_color_strokes(l)) && l.kind != LayerKind::Folder && l.visible &&
                (!print || (l.exportable && !guide_role(l.role)));
@@ -1401,7 +1516,8 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
     std::vector<std::string> omitted;
     // Keep every layer in high precision within a region; quantize only the final output pixels.
     // Reuse the established global-coordinate region renderer, not an RGBA8 layer intermediate.
-    if(uses_color_precision(page,options.mode=="print") && !needs_whole_page(page)){
+    // (a CMYK or Lab page too: its canvas holds floats)
+    if((uses_color_precision(page,options.mode=="print") || page.color) && !needs_whole_page(page)){
         const Size size{mm_to_px(page.spec.width_mm.value(),dpi),mm_to_px(page.spec.height_mm.value(),dpi)};
         if(size.width>0x7fffffff/4 || size.height>0x7fffffff/4)throw core::Error("image_too_large","the page is too large at this resolution");
         const Box area=area_of(options,size);
@@ -1409,7 +1525,12 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
         if(pixels>kMaxAreaPixels)throw core::Error("image_too_large","the picture is too large at this resolution");
         if(pixels>1024LL*1024){
             if(options.stop.stop_requested())throw Cancelled();
-            RenderResult out{Image::create_blank("RGB",size_of(area)),{}};
+            RenderResult out{Image::create_blank("RGB",size_of(area)),{},std::nullopt};
+            if(options.inks && page.color){
+                out.inks=core::InkPixels{page.color->space,page.color->depth,static_cast<std::uint32_t>(area.width()),
+                                         static_cast<std::uint32_t>(area.height()),{}};
+                out.inks->samples.assign(out.inks->pixel_count()*out.inks->channels(),0);
+            }
             constexpr int tile=512;
             for(int y=area.y0;y<area.y1;y+=tile){
                 for(int x=area.x0;x<area.x1;x+=tile){
@@ -1417,6 +1538,7 @@ RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& o
                     RenderOptions part=options;part.region=RenderRegion{x,y,std::min(tile,area.x1-x),std::min(tile,area.y1-y)};
                     const auto piece=render(page,dpi,part,episode,omitted);
                     out.image.paste(piece.image,Point{x-area.x0,y-area.y0});
+                    if(out.inks && piece.inks)paste_inks(*out.inks,*piece.inks,Point{x-area.x0,y-area.y0});
                 }
             }
             out.omitted=std::move(omitted);return out;

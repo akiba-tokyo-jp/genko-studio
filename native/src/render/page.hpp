@@ -65,11 +65,14 @@ struct RenderOptions {
     bool at_frame = false;
     // Requested: the render stops soon with Cancelled.
     std::stop_token stop;
+    // color-mode@1: a CMYK or Lab page's inks too (RenderResult::inks, at the page's depth). Other pages have none.
+    bool inks = false;
 };
 
 struct RenderResult {
-    Image image;                       // "RGB", the page or the region's size
+    Image image;                       // "RGB", the page or the region's size (a CMYK or Lab page: as the screen shows it)
     std::vector<std::string> omitted;  // with skip_unported: what was left out (each once, in the order met)
+    std::optional<core::InkPixels> inks;  // with RenderOptions::inks on a CMYK or Lab page: its inks (opaque)
 };
 
 // RenderOptions with mode "proof" (render_frame's default).

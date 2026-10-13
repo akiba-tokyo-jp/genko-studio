@@ -48,12 +48,27 @@ Json ints_json(const std::vector<std::int64_t>& values) {
 bool truthy(const std::optional<Json>& value) { return value && core::py_truthy(*value); }
 
 // The asset ref of picture bytes, stored in `store` (put_bytes; the remembered ref when the bytes are unchanged).
-std::string put_png(AssetStore& store, const core::Bytes& png, const core::BlobMemo& memo) {
-    if (const std::string* ref = memo.ref_for(png)) {
-        store.put_known(*ref, *png, ".png");
+std::string put_blob(AssetStore& store, const core::Bytes& bytes, const core::BlobMemo& memo, std::string_view suffix) {
+    if (const std::string* ref = memo.ref_for(bytes)) {
+        store.put_known(*ref, *bytes, suffix);
         return *ref;
     }
-    return store.put_bytes(*png, ".png");
+    return store.put_bytes(*bytes, suffix);
+}
+
+std::string put_png(AssetStore& store, const core::Bytes& png, const core::BlobMemo& memo) { return put_blob(store, png, memo, ".png"); }
+
+// color-mode@1: a CMYK mode's profile written as its asset (the bytes held, or the asset already in the book).
+void put_profile(AssetStore& store, const core::PageColor& color) {
+    if (color.space != core::InkSpace::Cmyk) return;
+    if (color.icc) {
+        if (core::bytes_ref(*color.icc) != color.profile) {
+            throw core::Error("value", "the ICC profile held is not " + color.profile + ": the book is not written");
+        }
+        store.put_known(color.profile, *color.icc, core::kProfileSuffix);
+    } else if (!store.has(color.profile, core::kProfileSuffix)) {
+        throw core::Error("value", "the ICC profile " + color.profile + " is not held: the book is not written");
+    }
 }
 
 // io._frame_to_dict
@@ -158,6 +173,7 @@ Json layer_json(const core::Layer& layer, AssetStore& store) {
     if (layer.raster_png && !layer.raster_png->empty()) {
         out["asset"] = put_png(store, layer.raster_png, layer.raster_memo);
     }
+    if (layer.ink_raster) out["ink_raster"] = put_blob(store, layer.ink_raster, layer.ink_memo, core::kInkRasterSuffix);
     if (layer.stroke_count() > 0) {
         const core::StrokeList& list = *layer.strokes;
         std::string ref;
@@ -238,6 +254,10 @@ Json page_json(const core::Page& page, AssetStore& store) {
     Json fills = Json::object();
     for (const auto& [role, rgb] : page.fills) fills[std::string(core::to_string(role))] = nums_json(rgb);
     out["fills"] = std::move(fills);
+    if (page.color) {
+        put_profile(store, *page.color);
+        out["color"] = core::to_json(*page.color);
+    }
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
     }
@@ -302,6 +322,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     for (const auto& line : doc.story) {
         if (core::ruby::uses_feature(line)) features.emplace_back(core::kRubyLayoutFeature);
     }
+    core::validate_ink_document(doc);
+    bool modes = doc.color.has_value();
+    for (const auto& page : doc.pages) modes = modes || page->color.has_value();
+    if (modes) features.emplace_back(core::kColorModeFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
@@ -330,6 +354,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     if (core::py_truthy(doc.brush_custom)) brush["custom"] = doc.brush_custom;
     out["brush"] = std::move(brush);
     out["spec"] = spec_to_json(doc.spec);
+    if (doc.color) {
+        put_profile(store, *doc.color);
+        out["color"] = core::to_json(*doc.color);
+    }
     Json bible = Json::object();
     bible["plot"] = doc.bible.plot;
     bible["characters"] = doc.bible.characters;

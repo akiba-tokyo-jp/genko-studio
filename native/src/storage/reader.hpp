@@ -109,6 +109,12 @@ bool is_known_page_key(std::string_view key);
 using PaperCheck = std::function<std::optional<std::string>(std::string_view png)>;
 void set_paper_check(PaperCheck check);
 
+// color-mode@1: how a CMYK page's ICC profile (read and hashed) is checked to be usable: nothing when it is, else why
+// not (in English). The drawing build sets it (render/ink.cpp: opened by Little CMS, a CMYK profile); a profile it
+// refuses is reported (broken_asset) and the book opens read-only.
+using ProfileCheck = std::function<std::optional<std::string>(std::string_view icc)>;
+void set_profile_check(ProfileCheck check);
+
 // The v4 features this build can read and write (schema-v4.md §3: the precise colour ones, native.exposure_v1 and
 // paper-texture@1).
 bool is_known_feature(std::string_view feature);

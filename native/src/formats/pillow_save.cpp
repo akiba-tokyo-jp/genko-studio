@@ -580,6 +580,66 @@ std::string tiff_bytes(const render::Image& image, const TiffSave& params) {
     return std::move(memory.data);
 }
 
+std::string ink_tiff_bytes(const core::InkPixels& pixels, const TiffSave& params) {
+    const bool cmyk = pixels.space == core::InkSpace::Cmyk;
+    const int samples = cmyk ? 4 : 3;
+    const int bits = pixels.depth;
+    const std::int64_t w = pixels.width;
+    const std::int64_t h = pixels.height;
+    const std::int64_t stride = samples * w * (bits / 8);
+    std::int64_t rows_per_strip = stride == 0 ? 1 : std::min<std::int64_t>(65536 / stride, h);
+    if (rows_per_strip == 0) rows_per_strip = 1;
+    TiffMemory memory;
+    TIFF* tif = TIFFClientOpen("memory", "w", &memory, tiff_read, tiff_write, tiff_seek, tiff_close, tiff_size, tiff_map, tiff_unmap);
+    if (tif == nullptr) throw core::Error("io", "encoder error -9 when writing image file");
+    struct Closer {
+        TIFF* t;
+        ~Closer() { TIFFClose(t); }
+    } closer{tif};
+    bool ok = TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, static_cast<std::uint32_t>(w)) == 1;
+    ok = ok && TIFFSetField(tif, TIFFTAG_IMAGELENGTH, static_cast<std::uint32_t>(h)) == 1;
+    ok = ok && TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, bits) == 1;
+    ok = ok && TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_LZW) == 1;
+    ok = ok && TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, cmyk ? PHOTOMETRIC_SEPARATED : PHOTOMETRIC_CIELAB) == 1;
+    ok = ok && TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, samples) == 1;
+    ok = ok && TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, static_cast<std::uint32_t>(rows_per_strip)) == 1;
+    if (params.dpi) {
+        ok = ok && TIFFSetField(tif, TIFFTAG_XRESOLUTION, (*params.dpi)[0]) == 1;
+        ok = ok && TIFFSetField(tif, TIFFTAG_YRESOLUTION, (*params.dpi)[1]) == 1;
+    }
+    ok = ok && TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG) == 1;
+    if (params.dpi) ok = ok && TIFFSetField(tif, TIFFTAG_RESOLUTIONUNIT, RESUNIT_INCH) == 1;
+    if (cmyk) ok = ok && TIFFSetField(tif, TIFFTAG_INKSET, INKSET_CMYK) == 1;
+    if (cmyk && !params.icc.empty()) {
+        ok = ok && TIFFSetField(tif, TIFFTAG_ICCPROFILE, static_cast<std::uint32_t>(params.icc.size()), params.icc.data()) == 1;
+    }
+    if (!ok) throw core::Error("io", "encoder error -9 when writing image file");
+    const unsigned all = pixels.channels();
+    std::vector<unsigned char> row8(static_cast<std::size_t>(stride));
+    std::vector<std::uint16_t> row16(static_cast<std::size_t>(w * samples));
+    for (std::uint32_t y = 0; y < pixels.height; ++y) {
+        const std::uint16_t* src = pixels.samples.data() + std::size_t(y) * pixels.width * all;
+        for (std::uint32_t x = 0; x < pixels.width; ++x) {
+            for (int c = 0; c < samples; ++c) {
+                const std::uint16_t v = src[x * all + c];
+                const std::size_t at = std::size_t(x) * samples + c;
+                if (bits == 8) {
+                    row8[at] = static_cast<unsigned char>(cmyk || c == 0 ? v : static_cast<unsigned char>(static_cast<std::int8_t>(int(v) - 128)));
+                } else if (cmyk || c == 0) {
+                    row16[at] = v;
+                } else {  // (CIELab 16 bits: a and b signed, ×256)
+                    const long signed_ab = std::lround((v / 257.0 - 128.0) * 256.0);
+                    row16[at] = static_cast<std::uint16_t>(static_cast<std::int16_t>(std::clamp(signed_ab, -32768L, 32767L)));
+                }
+            }
+        }
+        void* line = bits == 8 ? static_cast<void*>(row8.data()) : static_cast<void*>(row16.data());
+        if (TIFFWriteScanline(tif, line, y, 0) == -1) throw core::Error("io", "encoder error -2 when writing image file");
+    }
+    if (!TIFFFlush(tif)) throw core::Error("io", "encoder error -9 when writing image file");
+    return std::move(memory.data);
+}
+
 const std::string& srgb_icc_once() {
     static const std::string profile = render::colour::srgb_icc();
     return profile;

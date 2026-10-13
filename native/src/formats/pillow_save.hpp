@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/ink.hpp"
 #include "render/image.hpp"
 
 // Pictures written as Pillow 12.3.0's Image.save writes them for the exports (PngImagePlugin, JpegImagePlugin and
@@ -76,6 +77,10 @@ struct TiffSave {
 };
 
 std::string tiff_bytes(const render::Image& image, const TiffSave& params);
+
+// color-mode@1: a CMYK or Lab page's inks as a TIFF (LZW, 8 or 16 bits, no alpha: the page is opaque): CMYK separated
+// (InkSet CMYK) with the page's profile (params.icc), Lab as CIELab (L unsigned, a and b signed; 16 bits: a·256).
+std::string ink_tiff_bytes(const core::InkPixels& pixels, const TiffSave& params);
 
 // images[0].save(path, format="PDF", save_all=True, append_images=images[1:], resolution=…) (PdfImagePlugin with
 // PdfParser's writer): each picture a page of its size at `resolution` dpi, stored as a JPEG (DCTDecode, as

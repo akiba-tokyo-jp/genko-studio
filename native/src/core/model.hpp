@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "core/geometry.hpp"
+#include "core/ink.hpp"
 #include "core/json.hpp"
 #include "core/pynum.hpp"
 
@@ -190,6 +191,10 @@ struct Layer {
     std::optional<Json> adjust;
     std::optional<Json> effect;
     Bytes color_raster;  // immutable native RGBA16/32 asset; never an 8-bit preview
+    // color-mode@1: the pixels of a paint layer on a CMYK or Lab page (GKIR, core/ink.hpp), in the page's space and
+    // depth, stretched over the page as raster_png is. A layer has at most one of raster_png, color_raster, ink_raster.
+    Bytes ink_raster;
+    BlobMemo ink_memo;
     bool color_prints = false;
     std::optional<Json> screen;
 
@@ -289,6 +294,8 @@ struct Page {
     std::string id;
     bool art_ok = false;
     std::optional<Json> plan;
+    // color-mode@1: the page's colour mode (none: an RGB page, as Python's).
+    std::optional<PageColor> color;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;
@@ -355,6 +362,8 @@ struct Document {
     // v4 (docs/cpp-migration/schema-v4.md §2)
     std::string book_id;
     std::vector<std::string> features;
+    // color-mode@1: the colour mode of the pages it makes (none: RGB).
+    std::optional<PageColor> color;
     // Why this book must not be saved (unknown features, missing assets, repairs); empty when it may be.
     std::string read_only_reason;
     // (not saved) The pages whose strokes and pictures are not read yet (storage::LoadOptions::assets_of_page: the
