@@ -235,6 +235,8 @@ Image fill_reference(const Document& doc, const Page& page, std::size_t target, 
     for (const Layer* layer : looked) {
         if (layer->raster_png && !layer->raster_png->empty()) {
             base = alpha_composite(base, selection::open_picture(*layer->raster_png).convert("RGBA").resize(size));
+        } else if (layer->ink_raster && page.color) {  // (color-mode@1: its inks as the screen shows them)
+            base = alpha_composite(base, ink::to_rgba8(core::decode_ink_raster(*layer->ink_raster), *page.color).resize(size));
         }
         if (const auto lines = detail::layer_lines(ctx, *layer, nullptr, nullptr, false)) base = alpha_composite(base, *lines);
     }

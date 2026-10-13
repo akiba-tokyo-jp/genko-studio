@@ -19,6 +19,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "render/fill_patches.hpp"
+#include "render/ink.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/page_internal.hpp"
@@ -176,6 +177,8 @@ Image fill_reference(const core::Document& doc, const core::Page& page, const co
     for (const core::Layer* layer : looked) {
         if (layer->raster_png && !layer->raster_png->empty()) {
             base = alpha_composite(base, open_image(*layer->raster_png, kPillowOpenLimits).convert("RGBA").resize(size));
+        } else if (layer->ink_raster && page.color) {  // (color-mode@1: its inks as the screen shows them)
+            base = alpha_composite(base, ink::to_rgba8(core::decode_ink_raster(*layer->ink_raster), *page.color).resize(size));
         }
         // render._layer_strokes(layer, size, dpi, None, None): the layer's fills and lines alone, no panel cut — as
         // layer_image draws a plain pen layer on a page without panels

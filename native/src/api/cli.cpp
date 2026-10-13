@@ -487,6 +487,7 @@ int export_command(const QStringList& args, bool ascii) {
     render::brushes::register_book(doc);  // (the book's own brushes, as Python's reader registers them, and their papers)
     const std::int64_t spec_dpi = doc.spec.dpi.truthy() ? core::py_int(doc.spec.dpi) : 0;
     std::vector<fs::path> paths;
+    const core::Page* animated = nullptr;  // (an animation: its page)
     const std::string& f = *fmt;
     // (the resolution of a format that takes one, 1 to 100000 dpi: refused before anything is drawn or made)
     if (f != "webtoon" && f != "sns" && f != "kindle" && f != "timelapse") {
@@ -536,6 +537,7 @@ int export_command(const QStringList& args, bool ascii) {
         }
         const fs::path dest = file_given ? out : formats::detail::join(out, "p" + formats::detail::padded(page->index, 3) + ".gif");
         paths = render::anim::export_animation(*page, dest, &doc, narrow(dpi.value_or(100)));
+        animated = page;
     } else if (f == "timelapse") {
         std::optional<Json> page;
         if (ints["--page"]) page = Json(*ints["--page"]);
@@ -551,8 +553,10 @@ int export_command(const QStringList& args, bool ascii) {
         paths = formats::export_print(doc, out, f, dpi, 180, true, *area, f == "cmyk" ? std::string("cmyk") : *color,
                                       a.value("--icc").value_or(QString()).toStdString(), screen);
     }
-    const std::optional<std::string> note =
-        formats::ink_note(doc, f, f == "cmyk" ? std::string("cmyk") : *color);
+    // (color-mode@1: an animation says its page's; a time-lapse is the history's pictures)
+    const std::optional<std::string> note = animated != nullptr ? formats::ink_note(*animated)
+                                            : f == "timelapse"  ? std::nullopt
+                                                                : formats::ink_note(doc, f, f == "cmyk" ? std::string("cmyk") : *color);
     if (a.flag("--json")) {
         Json files = Json::array();
         for (const auto& p : paths) files.push_back(core::path_to_utf8(p));

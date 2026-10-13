@@ -621,6 +621,9 @@ void ExportDialog::run() {
                     .arg(psd->value("rasterized", Json::array()).size()) +
                 QString::fromUtf8(kRubyNote);
     }
+    if (const auto notes = reply.find("notes"); notes != reply.end() && notes->is_array()) {  // (color-mode@1: never without a word)
+        for (const Json& note : *notes) said += QStringLiteral("\n") + QString::fromStdString(core::py_str(note));
+    }
     QMessageBox box(this);
     box.setWindowTitle(QStringLiteral("Genko"));
     box.setText(said);

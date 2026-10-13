@@ -47,6 +47,8 @@ std::int64_t default_dpi(const core::Document& episode, std::string_view key);
 // colour (auto, rgb, cmyk, gray, bitonal), or none. PDF and TIFF keep a page's inks with "auto" (a CMYK page's with
 // "cmyk" too), PSD always. run() puts them in its reply's "notes"; never converted without a word.
 std::optional<std::string> ink_note(const core::Document& episode, std::string_view key, std::string_view color);
+// The same for an animation of one page (a movie holds RGB only): a CMYK or Lab page's, or none.
+std::optional<std::string> ink_note(const core::Page& page);
 
 struct RunOptions {
     bool official = false;

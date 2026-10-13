@@ -214,9 +214,9 @@ ToolResult StudioService::export_now(const Json& a) {
             return fail(exc.what(), "export_failed", "/");
         }
         const std::vector<std::string> files = texts(written);
-        return ToolResult(true, Json::object({{"folder", util::path_text(out.parent_path())}, {"files", json_list(files)},
-                                              {"frames", core::anim::frames_of(page)}}),
-                          {}, {}, files);
+        Json reply = Json::object({{"folder", util::path_text(out.parent_path())}, {"files", json_list(files)}, {"frames", core::anim::frames_of(page)}});
+        if (const auto note = formats::ink_note(page)) reply["notes"] = Json::array({*note});  // (color-mode@1)
+        return ToolResult(true, std::move(reply), {}, {}, files);
     }
     core::require_hashable(format);
     if (!format.is_string() || formats::format(format.get<std::string>()) == nullptr) {
@@ -263,7 +263,9 @@ ToolResult StudioService::export_now(const Json& a) {
     }
     std::vector<std::string> files;
     for (const Json& f : result["files"]) files.push_back(py_str(f));
-    return ToolResult(true, Json::object({{"folder", util::path_text(out)}, {"files", result["files"]}}), {}, {}, std::move(files));
+    Json reply = Json::object({{"folder", util::path_text(out)}, {"files", result["files"]}});
+    if (result.contains("notes")) reply["notes"] = result["notes"];  // (color-mode@1: CMYK・Lab pages converted to sRGB, said)
+    return ToolResult(true, std::move(reply), {}, {}, std::move(files));
 }
 
 ToolResult StudioService::export_status(const Json& a) {

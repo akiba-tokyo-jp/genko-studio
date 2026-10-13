@@ -20,6 +20,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "formats/export.hpp"
+#include "formats/exporting.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -756,7 +757,9 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
         const std::vector<fs::path> files = formats::export_print(doc, out, fmt, dpi);
         Json listed = Json::array();
         for (const fs::path& f : files) listed.push_back(core::path_to_utf8(f));
-        return json_reply(Json::object({{"ok", true}, {"count", files.size()}, {"files", listed}}));
+        Json reply = Json::object({{"ok", true}, {"count", files.size()}, {"files", listed}});
+        if (const auto note = formats::ink_note(doc, fmt, "auto")) reply["notes"] = Json::array({*note});  // (color-mode@1)
+        return json_reply(reply);
     }
     return failure("no route " + method + " " + route, 404);
 }

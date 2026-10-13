@@ -641,9 +641,9 @@ Image Image::convert(std::string_view mode, Dither dither) const {
     if (from == "RGBA" && (mode == "P" || mode == "PA")) throw core::Error("value", "conversion to P is not ported");
     if (from == "LAB") {
         // (Pillow's Image.convert: LAB to RGB, RGBA or RGBX through ImageCms — Little CMS's Lab profile to sRGB,
-        // perceptual, the LAB image's fourth byte kept — and no other)
+        // perceptual, the LAB image's fourth byte kept —; any other mode fails on its way through LAB's base mode, RGB)
         if (mode == "RGB" || mode == "RGBA" || mode == "RGBX") return ink::lab_to_rgb_as_pillow(*this, mode);
-        throw core::Error("value", "conversion from LAB to " + std::string(mode) + " not supported");
+        throw core::Error("value", "conversion from LAB to RGB not supported");
     }
     if (mode == "LAB") throw core::Error("value", "conversion to LAB is not ported");
     if (mode == "P" || mode == "PA") throw core::Error("value", "conversion to P is not ported");

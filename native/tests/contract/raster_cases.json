@@ -11280,8 +11280,7 @@
           "page": 4,
           "png_base64": "OEJQUwABAAAAAAAAAAMAAAAFAAAABwAIAAkAAAAAAAAAAAAAAAAAAAAePFp4lrQHJUNhf527DixKaIakwhUzUW+Nq8kcOlh2lLLQAAsWISw3QigzPklUX2pQW2ZxfIeSeIOOmaSvuqCrtsHM1+IJDA8SFRgbOz5BREdKTW1wc3Z5fH+foqWoq66x0dTX2t3g4w=="
         }
-      ],
-      "cpp": "not_yet_ported"
+      ]
     },
     {
       "n": "gif error empty-extension-sequence",

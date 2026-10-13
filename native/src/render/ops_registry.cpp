@@ -26,13 +26,19 @@ void refuse_on_ink_pages(const core::OpContext& c, const std::string& name) {
         "trace_prims", "ruler_to_layer"};
     if (std::find(kPending.begin(), kPending.end(), name) == kPending.end()) return;
     const core::Json* page = core::get(c.op, "page");
-    for (const auto& each : c.doc.pages) {
-        if (!each->color) continue;
-        const bool named = page != nullptr && !page->is_null() && page->is_number_integer() && each->index == core::Num(page->get<std::int64_t>());
-        if (named || page == nullptr || page->is_null()) {
-            core::not_yet_ported(name + " on a CMYK or Lab page is not in this build yet");
+    if (page == nullptr || page->is_null()) {  // (no page named: refused while the book has an ink page)
+        for (const auto& each : c.doc.pages) {
+            if (each->color) core::not_yet_ported(name + " on a CMYK or Lab page is not in this build yet");
         }
+        return;
     }
+    std::size_t at = 0;
+    try {
+        at = core::require_page(c.doc, c.op);  // (the page the op works on, as it finds it: 1, 1.0 and true alike)
+    } catch (const std::exception&) {
+        return;  // (the op itself says why)
+    }
+    if (c.doc.pages[at]->color) core::not_yet_ported(name + " on a CMYK or Lab page is not in this build yet");
 }
 
 }  // namespace

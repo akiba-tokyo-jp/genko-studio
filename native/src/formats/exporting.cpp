@@ -210,7 +210,15 @@ std::optional<std::string> ink_note(const core::Document& episode, std::string_v
         if (!inks) ++converted;
     }
     if (converted == 0) return std::nullopt;
+    if (key == "pack") {  // (its TIFFs keep the inks — auto —, its PNGs cannot)
+        return "CMYK・Lab のページ " + std::to_string(converted) + " ページの PNG は、画面の色（sRGB）から変換して書き出しました（TIFF はインキの値のまま）";
+    }
     return "CMYK・Lab のページ " + std::to_string(converted) + " ページは、この形式・色ではインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
+}
+
+std::optional<std::string> ink_note(const core::Page& page) {
+    if (!page.color) return std::nullopt;
+    return "CMYK・Lab のページは、動画にはインキの値のまま書けないため、画面の色（sRGB）から変換して書き出しました";
 }
 
 core::Json run(const core::Document& episode_in, const std::optional<std::filesystem::path>& project, std::string_view key,
@@ -246,7 +254,11 @@ core::Json run(const core::Document& episode_in, const std::optional<std::filesy
             return refused;
         }
         // (HumanService.export: preflight and the export approval, the studio's)
-        if (o.official_export) return o.official_export(*project);
+        if (o.official_export) {
+            Json reply = o.official_export(*project);
+            if (const auto note = ink_note(*episode, key, o.color); note && reply.value("ok", false)) reply["notes"] = Json::array({*note});
+            return reply;
+        }
         Json refused = refuse("official export is not in the C++ build yet");
         refused["code"] = "not_yet_ported";
         return refused;

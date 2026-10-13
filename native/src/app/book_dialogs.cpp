@@ -310,7 +310,12 @@ ColorModeDialog::ColorModeDialog(QWidget* parent, const core::Document& book, co
     form->addRow(QStringLiteral("変換の意図"), intent);
     form->addRow(QStringLiteral("灰色の画素"), gray);
     form->addRow(note);
-    connect(mode, &QComboBox::currentIndexChanged, this, [this] { enable(); });
+    connect(mode, &QComboBox::currentIndexChanged, this, [this] {
+        // (back to RGB: 8 bit — the paint layers as PNG —, unless 16 is chosen again: precise pixels, kept only by layers
+        // that do not clip to their panels)
+        if (mode->currentData().toString() == QLatin1String("rgb")) depth->setCurrentIndex(0);
+        enable();
+    });
     connect(profile, &QComboBox::currentIndexChanged, this, [this] { enable(); });
     buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);

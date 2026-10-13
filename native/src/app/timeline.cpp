@@ -30,6 +30,7 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "formats/exporting.hpp"
 #include "render/anim.hpp"
 #include "render/page.hpp"
 
@@ -453,7 +454,9 @@ void TimelinePanel::export_animation() {
         return;
     }
     QApplication::restoreOverrideCursor();
-    window_->flash(QStringLiteral("アニメーションを書き出しました: %1").arg(target), 5000);
+    QString said = QStringLiteral("アニメーションを書き出しました: %1").arg(target);
+    if (const auto note = formats::ink_note(*p)) said += QStringLiteral("（") + QString::fromStdString(*note) + QStringLiteral("）");  // (color-mode@1)
+    window_->flash(said, 5000);
 }
 
 }  // namespace genko::app

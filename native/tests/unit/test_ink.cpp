@@ -21,6 +21,7 @@
 #include "core/error.hpp"
 #include "core/ink.hpp"
 #include "core/paths.hpp"
+#include "formats/exporting.hpp"
 #include "render/colour.hpp"
 #include "render/image.hpp"
 #include "render/ink.hpp"
@@ -389,6 +390,88 @@ private slots:
         QVERIFY2(erased.rfind("not_yet_ported", 0) == 0, erased.c_str());
         // set_inks on an RGB page
         QVERIFY(!refusal(doc, Json::array({Json{{"op", "set_inks"}, {"page", 1}, {"inks", Json::array()}}})).empty());
+    }
+
+    // What the group's review found: a fill stops at an ink layer's lines (its reference), an export written from the
+    // screen's colours says so, an op not ported yet is refused whatever the page number's type, a LAB picture fails to
+    // other modes as Pillow, an ink page with a correction layer is drawn in tiles (the layer left out), and a book no
+    // op could leave opens read-only with its reason.
+    void reviewFixes() {
+        core::Document doc = run_ops(small_book(), Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}, {"title", "線"}},
+                                                                to_cmyk_op()})).doc;
+        render::Image ring = render::Image::create("RGBA", render::Size{60, 80}, render::Ink{0, 0, 0, 0});
+        for (const render::Box& side : {render::Box{15, 15, 45, 17}, render::Box{15, 43, 45, 45}, render::Box{15, 15, 17, 45}, render::Box{43, 15, 45, 45}}) {
+            ring.paste(render::Ink{0, 0, 0, 255}, side);
+        }
+        doc = run_ops(doc, Json::array({Json{{"op", "put_raster"}, {"page", 1}, {"id", "pic"}, {"png_base64", core::b64encode(render::write_png(ring))}},
+                                        Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"reference", true}}}))
+                  .doc;
+        QVERIFY(doc.page(0).layers.back().ink_raster);
+        const core::Document filled =
+            run_ops(doc, Json::array({Json{{"op", "fill"}, {"page", 1}, {"x_mm", 30}, {"y_mm", 30}, {"reference", "reference"}, {"rgb", Json::array({0, 0, 0})}}})).doc;
+        const int dpi = 150;
+        const core::InkPixels inks = page_inks(filled, 0, dpi);
+        const auto px = [&](double x_mm, double y_mm) { return at(inks, render::mm_to_px(x_mm, dpi), render::mm_to_px(y_mm, dpi)); };
+        QCOMPARE(px(30, 30)[3], std::uint16_t(255));  // (inside the ring: filled, K 100)
+        QCOMPARE(px(30, 60)[3], std::uint16_t(0));    // (outside it: the paper)
+        // an export from the screen's colours says so; the pack's TIFFs keep the inks
+        QTemporaryDir tmp;
+        const fs::path out = core::path_from_utf8(tmp.path().toStdString());
+        formats::RunOptions options;
+        options.dpi = 50;
+        const Json png = formats::run(doc, std::nullopt, "png", out / "png", options);
+        QVERIFY2(png.value("ok", false) && png.contains("notes"), png.dump().c_str());
+        const Json tiff = formats::run(doc, std::nullopt, "tiff", out / "tiff", options);
+        QVERIFY2(tiff.value("ok", false) && !tiff.contains("notes"), tiff.dump().c_str());
+        QVERIFY(formats::ink_note(doc, "pack", "auto")->find("TIFF") != std::string::npos);
+        QVERIFY(formats::ink_note(doc.page(0)));
+        // not ported yet on an ink page: page 1, 1.0 or true alike
+        for (const Json& page : {Json(1), Json(1.0), Json(true)}) {
+            const std::string refused = refusal(doc, Json::array({Json{{"op", "delete_area"}, {"page", page}, {"x_mm", 0}, {"y_mm", 0}, {"w_mm", 20}, {"h_mm", 20}}}));
+            QVERIFY2(refused.rfind("not_yet_ported", 0) == 0, refused.c_str());
+        }
+        // LAB to a mode other than RGB, RGBA and RGBX: Pillow's words
+        const render::Image lab = render::Image::frombytes("LAB", render::Size{1, 1}, std::string("\x80\x00\x00", 3));
+        for (const char* mode : {"L", "CMYK", "LA", "RGBa"}) {
+            try {
+                (void)lab.convert(mode);
+                QFAIL("converted");
+            } catch (const core::Error& error) {
+                QCOMPARE(QString::fromUtf8(error.what()), QStringLiteral("conversion from LAB to RGB not supported"));
+            }
+        }
+        // a blur correction layer on an ink page: left out (said), the page drawn as its tiles, the same as whole
+        core::Document blurred = doc;
+        {
+            core::Layer blur;
+            blur.id = "blur";
+            blur.kind = core::LayerKind::Adjust;
+            blur.adjust = Json{{"kind", "blur"}, {"radius", 2}};
+            blurred.edit_page(0).layers.push_back(std::move(blur));
+        }
+        render::RenderOptions o;
+        o.skip_unported = true;  // (the screen; an export refuses it: not_yet_ported)
+        o.region = render::RenderRegion{10, 20, 120, 90};
+        const render::RenderResult part = render::render_page(blurred.page(0), dpi, o, &blurred);
+        QVERIFY(std::find(part.omitted.begin(), part.omitted.end(), "ink_adjust") != part.omitted.end());
+        o.region.reset();
+        const render::Image whole = render::render_page(blurred.page(0), dpi, o, &blurred).image;
+        QCOMPARE(part.image.tobytes(), whole.crop(render::Box{10, 20, 130, 110}).tobytes());
+        const Json refused = formats::run(blurred, std::nullopt, "tiff", out / "blurred", options);
+        QVERIFY2(!refused.value("ok", true) && refused.value("code", std::string()) == "not_yet_ported", refused.dump().c_str());
+        // a Lab page with a blend it cannot composite, written by hand: read-only, with its reason
+        const fs::path dir = out / "book.genko";
+        const core::Document lab_book = run_ops(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"mode", "lab"}}})).doc;
+        write_book(lab_book, dir);
+        {
+            Json payload = Json::parse(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(dir / "project.json"))));
+            payload["pages"][0]["layers"][1]["blend"] = "difference";
+            QFile file(QString::fromStdString(core::path_to_utf8(dir / "project.json")));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(QByteArray::fromStdString(payload.dump()));
+        }
+        const auto opened = storage::load_document(dir);
+        QVERIFY2(opened.document.read_only_reason.find("Lab") != std::string::npos, opened.document.read_only_reason.c_str());
     }
 
     // The book on disk: the mode, the profile (one asset), the ink pixels, the feature; read back the same; what makes it

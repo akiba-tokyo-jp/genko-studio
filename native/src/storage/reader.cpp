@@ -15,6 +15,7 @@
 #include "core/covers.hpp"
 #include "core/color_raster.hpp"
 #include "core/exposure.hpp"
+#include "core/ink.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
@@ -1237,6 +1238,10 @@ core::Document Reader::migrate(const Json& payload) {
     }
     try { core::validate_color_document(doc); }
     catch (const core::Error& error) { issue("broken_asset", "/pages", {}, error.what()); }
+    // (color-mode@1: what no op may leave on a CMYK or Lab page — an RGB picture, a blend Lab does not composite —
+    // opens read-only with its reason, rather than every op and the save failing on it)
+    try { core::validate_ink_document(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
 }
 

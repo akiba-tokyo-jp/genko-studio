@@ -870,6 +870,19 @@ private slots:
         for (const auto& page : s.book().pages) QVERIFY(page->color && page->color->space == core::InkSpace::Lab && page->color->depth == 16);
         QVERIFY(s.book().color);
         QVERIFY(drawn_as_book(s));
+        // back to RGB: 8 bit (the paint layers as PNG) unless 16 is chosen again
+        int depth_before = 0, depth_after = 0;
+        answer = [&](QDialog* d) {
+            auto* mode = d->findChild<QComboBox*>(QStringLiteral("color_mode_mode"));
+            auto* depth = d->findChild<QComboBox*>(QStringLiteral("color_mode_depth"));
+            depth_before = depth->currentData().toInt();
+            mode->setCurrentIndex(mode->findData(QStringLiteral("rgb")));
+            depth_after = depth->currentData().toInt();
+        };
+        result = QDialog::Rejected;
+        QVERIFY(s.trigger("act_color_mode"));
+        QCOMPARE(depth_before, 16);
+        QCOMPARE(depth_after, 8);
     }
 
     void coversAreAdded() {
