@@ -706,6 +706,10 @@ void MainWindow::context_menu(const QString& frame_id, const QPoint& global) {
                 if (leaves[i]->id == frame_id.toStdString()) order = static_cast<int>(i) + 1;
             }
             const core::Frame* frame = page->find_frame(frame_id.toStdString());
+            if (frame == nullptr) {  // (the book read again while the menu was open: the panel is no longer on the page in front)
+                flash(QStringLiteral("確認中に対象の原稿・ページが変更されたため、操作を中止しました。やり直してください。"), 6000, true);
+                return;
+            }
             QString slot;
             if (frame != nullptr && frame->panel && frame->panel->is_object() && frame->panel->contains("slot")) slot = QString::fromStdString(core::py_str((*frame->panel)["slot"]));
             const QString index = QString::fromStdString(page->index.repr());

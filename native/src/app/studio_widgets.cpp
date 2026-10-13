@@ -1,5 +1,6 @@
 #include "app/studio_widgets.hpp"
 
+#include <QScopeGuard>
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QListWidget>
@@ -668,15 +669,21 @@ void ApprovalBox::forget_draft(const QString& book, const std::string& ticket) {
 }
 
 void ApprovalBox::run_export() {
-    const std::shared_ptr<Session> session = window_->asking().session;
+    // (the wait for the save below lets events through: pressed again meanwhile, it is not a second export)
+    if (exporting_) return;
+    exporting_ = true;
+    const auto done = qScopeGuard([this] { exporting_ = false; });
+    const MainWindow::Asked asked = window_->asking();
+    const std::shared_ptr<Session> session = asked.session;
+    // (the page in front as it was pressed, by value: what the window shows may change while the save is waited for)
+    const core::Page* page = window_->current_page();
+    const std::int64_t index = page != nullptr ? core::py_int(page->index) : 1;
     session->save_now();  // (Python's commit_now: what was done is written before the export reads the book)
     // (SPEC: the official export reads the book as it is saved — not while a save failed or is still going)
     if (!session->wait_saved(std::chrono::seconds(30)) || session->unsaved()) {
         window_->flash(QStringLiteral("原稿を保存できていないため、正式な書き出しをしていません: %1").arg(failure_reason(session->status())), 8000, true);
         return;
     }
-    const core::Page* page = window_->current_page();
-    const std::int64_t index = page != nullptr ? core::py_int(page->index) : 1;
     ExportDialog dialog(this, session->snapshot(), session->path(), session->actor(), true, index);
     ask::exec(&dialog);
     session->check_outside();  // (Python's session.reload(): the approval the export recorded)

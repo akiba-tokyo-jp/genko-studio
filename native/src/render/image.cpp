@@ -11,6 +11,7 @@
 #include <limits>
 #include <functional>
 #include <memory>
+#include <new>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -1260,25 +1261,86 @@ std::vector<std::pair<int, int>> bands_of(int rows, int threads) {
     return out;
 }
 
-// work(band, first, last) for each band, the first on this thread and the others on threads of their own, all waited
-// for; true when every band's work went well (false too when a thread cannot be started). The bands write rows of
-// their own; what they read is not written while they run.
-bool each_band(const std::vector<std::pair<int, int>>& bands, const std::function<bool(std::size_t, int, int)>& work) {
-    std::vector<char> ok(bands.size(), 0);
-    std::vector<std::thread> threads;
-    threads.reserve(bands.size());
-    bool started = true;
-    for (std::size_t i = 1; i < bands.size() && started; ++i) {
-        try {
-            threads.emplace_back([&ok, &work, &bands, i] { ok[i] = work(i, bands[i].first, bands[i].second) ? 1 : 0; });
-        } catch (const std::system_error&) {
-            started = false;
+// The band threads running now, all callers together (the tiles of a page are drawn on several threads at once, each
+// of which may work in bands): at most band_threads() − 1 of them, each caller working too.
+std::atomic<int> g_extra_threads{0};
+// ScopedBandFaults: the thread to start, and the band of work to do, that fail (counting down; 0: none).
+std::atomic<int> g_failing_thread{0};
+std::atomic<bool> g_failing_thread_memory{false};
+std::atomic<int> g_failing_band{0};
+std::atomic<int> g_most_threads{0};
+
+// Whether the fault counted down by `left` is due now.
+bool fault_now(std::atomic<int>& left) {
+    int n = left.load();
+    while (n > 0) {
+        if (left.compare_exchange_weak(n, n - 1)) return n == 1;
+    }
+    return false;
+}
+
+// Up to `wanted` band threads from what all callers together may have running: how many it may start.
+int take_threads(int wanted) {
+    const int cap = band_threads() - 1;
+    int now = g_extra_threads.load();
+    for (;;) {
+        const int granted = std::max(0, std::min(wanted, cap - now));
+        if (granted == 0) return 0;
+        if (g_extra_threads.compare_exchange_weak(now, now + granted)) {
+            int most = g_most_threads.load();
+            while (most < now + granted && !g_most_threads.compare_exchange_weak(most, now + granted)) {
+            }
+            return granted;
         }
     }
-    if (started && !bands.empty()) ok[0] = work(0, bands[0].first, bands[0].second) ? 1 : 0;
+}
+
+void give_threads(int n) {
+    if (n > 0) g_extra_threads.fetch_sub(n);
+}
+
+// A thread started for bands (std::system_error when ScopedBandFaults says it cannot be).
+std::thread band_thread(std::function<void()> body) {
+    if (fault_now(g_failing_thread)) {
+        if (g_failing_thread_memory.load()) throw std::bad_alloc();
+        throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again), "cannot start a thread");
+    }
+    return std::thread(std::move(body));
+}
+
+// work(band, first, last) for each band, by this thread and up to `workers` − 1 threads of its own (as many as all
+// callers together may have: take_threads), each taking the next band not taken until none is left; all waited for.
+// True when every band's work went well — a band that fails or throws (its memory not had) is false, and the caller does
+// the whole again in one piece —; a thread that cannot be started leaves its bands to the others, this one at least.
+// The bands write rows of their own; what they read is not written while they run.
+bool each_band(const std::vector<std::pair<int, int>>& bands, const std::function<bool(std::size_t, int, int)>& work, int workers) {
+    std::vector<char> ok(bands.size(), 0);
+    std::atomic<std::size_t> next{0};
+    const auto run = [&]() noexcept {
+        for (std::size_t i = next.fetch_add(1); i < bands.size(); i = next.fetch_add(1)) {
+            try {
+                if (fault_now(g_failing_band)) throw std::bad_alloc();
+                ok[i] = work(i, bands[i].first, bands[i].second) ? 1 : 0;
+            } catch (...) {
+                ok[i] = 0;
+            }
+        }
+    };
+    const int wanted = std::min(workers, static_cast<int>(bands.size())) - 1;
+    const int granted = wanted > 0 ? take_threads(wanted) : 0;
+    std::vector<std::thread> threads;
+    int started = 0;
+    try {
+        threads.reserve(static_cast<std::size_t>(granted));  // (then a thread started is always kept: no throw after it)
+        for (; started < granted; ++started) threads.push_back(band_thread(run));
+    } catch (...) {  // (no thread, or no memory for one: the bands go to the threads there are)
+    }
+    give_threads(granted - started);
+    run();
     for (std::thread& t : threads) t.join();
+    give_threads(started);
     genko_imaging_clear_error();  // (a band that failed left its error on its own thread; the caller does the work again)
-    return started && std::all_of(ok.begin(), ok.end(), [](char v) { return v != 0; });
+    return std::all_of(ok.begin(), ok.end(), [](char v) { return v != 0; });
 }
 
 // A view of part of an image (row_bands.h), freed when it goes.
@@ -1304,7 +1366,7 @@ bool box_blur_in_bands(Imaging out, Imaging in, float xradius, float yradius, in
                 if (ImagingHorizontalBoxBlur(to.im, to.im, xradius) == nullptr) return false;
             }
             return true;
-        });
+        }, threads);
         if (!ok) return false;
     }
     if (yradius != 0) {
@@ -1322,13 +1384,13 @@ bool box_blur_in_bands(Imaging out, Imaging in, float xradius, float yradius, in
                 if (ImagingHorizontalBoxBlur(rows.im, rows.im, yradius) == nullptr) return false;
             }
             return true;
-        });
+        }, threads);
         if (ok) {
             ok = each_band(bands_of(h, threads), [&](std::size_t, int c, int d) {
                 RowView rows(out, 0, c, w, d);
                 RowView columns(turned, c, 0, d, w);
                 return rows.im != nullptr && columns.im != nullptr && ImagingTranspose(rows.im, columns.im) != nullptr;
-            });
+            }, threads);
         }
         ImagingDelete(turned);
         if (!ok) return false;
@@ -1338,27 +1400,43 @@ bool box_blur_in_bands(Imaging out, Imaging in, float xradius, float yradius, in
 
 }  // namespace
 
-BandCounts band_counts() { return BandCounts{g_banded.load(), g_band_failures.load()}; }
+BandCounts band_counts() { return BandCounts{g_banded.load(), g_band_failures.load(), g_most_threads.load()}; }
 
 void side_by_side(const std::function<void()>& side, const std::function<void()>& main) {
-    if (genko_imaging_budget_active() != 0) {
-        side();
-        main();
+    // (one after the other: both done, the exceptions as below)
+    const auto in_turn = [&side, &main] {
+        std::exception_ptr side_failed;
+        std::exception_ptr main_failed;
+        try {
+            side();
+        } catch (...) {
+            side_failed = std::current_exception();
+        }
+        try {
+            main();
+        } catch (...) {
+            main_failed = std::current_exception();
+        }
+        if (main_failed) std::rethrow_exception(main_failed);
+        if (side_failed) std::rethrow_exception(side_failed);
+    };
+    if (genko_imaging_budget_active() != 0 || take_threads(1) == 0) {
+        in_turn();
         return;
     }
     std::exception_ptr side_failed;
     std::thread other;
     try {
-        other = std::thread([&side, &side_failed] {
+        other = band_thread([&side, &side_failed] {
             try {
                 side();
             } catch (...) {
                 side_failed = std::current_exception();
             }
         });
-    } catch (const std::system_error&) {
-        side();
-        main();
+    } catch (...) {  // (no thread, or no memory for one)
+        give_threads(1);
+        in_turn();
         return;
     }
     std::exception_ptr main_failed;
@@ -1368,8 +1446,21 @@ void side_by_side(const std::function<void()>& side, const std::function<void()>
         main_failed = std::current_exception();
     }
     other.join();
+    give_threads(1);
     if (main_failed) std::rethrow_exception(main_failed);
     if (side_failed) std::rethrow_exception(side_failed);
+}
+
+ScopedBandFaults::ScopedBandFaults(int thread, int band, bool thread_memory) {
+    g_failing_thread_memory.store(thread_memory);
+    g_failing_thread.store(thread);
+    g_failing_band.store(band);
+}
+
+ScopedBandFaults::~ScopedBandFaults() {
+    g_failing_thread.store(0);
+    g_failing_band.store(0);
+    g_failing_thread_memory.store(false);
 }
 
 Image Image::resize_in_bands(Size size, Resample resample, std::optional<BoxF> box, int threads) const {
@@ -1408,31 +1499,26 @@ Image Image::resize_region_in_bands(Size size, const Box& region, Resample resam
     if (m == "LA" || m == "RGBA") {  // (as resize and resize_region: premultiplied)
         return convert(m == "LA" ? "La" : "RGBa").resize_region_in_bands(size, region, resample, box, threads).convert(m);
     }
-    std::vector<Imaging> parts(bands.size(), nullptr);
-    const bool ok = each_band(bands, [&](std::size_t i, int a, int b) {
-        float own[4] = {fbox[0], fbox[1], fbox[2], fbox[3]};
-        parts[i] = genko_ImagingResampleRegion(im_, size.width, size.height, filter_id(resample), own, region.x0, region.y0 + a, region.x1,
-                                               region.y0 + b);
-        return parts[i] != nullptr;
-    });
-    Imaging out = ok ? ImagingNewDirty(im_->mode, region.width(), region.height()) : nullptr;
-    if (out != nullptr) {
-        for (std::size_t i = 0; i < bands.size(); ++i) {
-            for (int y = bands[i].first; y < bands[i].second; ++y) {
-                std::memcpy(out->image[y], parts[i]->image[y - bands[i].first], static_cast<std::size_t>(out->linesize));
-            }
-        }
-    }
-    for (Imaging part : parts) {
-        if (part != nullptr) ImagingDelete(part);
-    }
-    if (out == nullptr) {
+    // (each band writes its rows of the region straight into the picture made for it)
+    Imaging made = ImagingNewDirty(im_->mode, region.width(), region.height());
+    if (made == nullptr) {
         ++g_band_failures;
         genko_imaging_clear_error();
         return alone();  // (what went wrong is said there, or it goes well there)
     }
+    Image out = derived(made);
+    const bool ok = each_band(bands, [&](std::size_t, int a, int b) {
+        RowView rows(out.im_, 0, a, region.width(), b);
+        float own[4] = {fbox[0], fbox[1], fbox[2], fbox[3]};
+        return rows.im != nullptr && genko_ImagingResampleRegionInto(rows.im, im_, size.width, size.height, filter_id(resample), own, region.x0,
+                                                                     region.y0 + a, region.x1, region.y0 + b) != nullptr;
+    }, threads);
+    if (!ok) {
+        ++g_band_failures;
+        return alone();
+    }
     ++g_banded;
-    return derived(out);
+    return out;
 }
 
 Image Image::filter_in_bands(const Filter& f, int threads) const {
@@ -1473,7 +1559,7 @@ Image Image::filter_in_bands(const Filter& f, int threads) const {
         ok = each_band(bands_of(in->ysize, threads), [&](std::size_t, int y0, int y1) {
             genko_unsharp_rows(out.im_, in, f.percent, f.threshold, y0, y1);
             return true;
-        });
+        }, threads);
     }
     ++(ok ? g_banded : g_band_failures);
     return ok ? out : filter(f);

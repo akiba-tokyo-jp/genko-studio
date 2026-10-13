@@ -16,6 +16,7 @@
 #include <QApplication>
 #include <QKeyEvent>
 #include <QBuffer>
+#include <QCheckBox>
 #include <QGraphicsScene>
 #include <QGraphicsSimpleTextItem>
 #include <QComboBox>
@@ -38,6 +39,7 @@
 
 #include "app/canvas.hpp"
 #include "app/config.hpp"
+#include "app/export_dialog.hpp"
 #include "app/links.hpp"
 #include "app/main_window.hpp"
 #include "app/reply_box.hpp"
@@ -929,6 +931,85 @@ private slots:
         desk.box()->approve();
         QCOMPARE(dialogs, 0);
         QVERIFY2(desk.window->last_error().startsWith(QStringLiteral("原稿を保存できていないため、正式な書き出しをしていません")), qPrintable(desk.window->last_error()));
+    }
+
+    // ファイル → 書き出し… with 正式な書き出し checked waits for the book to be saved, as 承認箱's export does: a save
+    // that fails (the book cannot be written) stops it before anything is written, and says so; asked again while it
+    // waits (書き出す pressed again), it is not a second export. Not official: as before, without waiting.
+    void exportDialogWaitsForTheSave() {
+        StudioBook book;
+        Desk desk(book.path, book.root / "recovery");
+        QVERIFY(desk.saved());
+        const fs::path out = book.root / "exported";
+        int waited = 0;
+        bool replied = false;
+        bool official = true;
+        desk.on_dialog = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::ExportDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            d->official->setChecked(official);
+            d->folder->setText(QString::fromStdString(core::path_to_utf8(out)));
+            const std::function<QString()> wait = d->unsaved_reason;
+            if (wait) {
+                d->unsaved_reason = [&waited, wait, d] {
+                    if (++waited < 3) d->run();  // (書き出す pressed again while the save is waited for)
+                    return wait();
+                };
+            }
+            d->run();
+            replied = d->reply.has_value();
+            return int(QDialog::Rejected);
+        };
+        // (the book cannot be written: a folder where its journal was, so every save stops before it writes)
+        const fs::path journal = book.path / "studio" / "journal.jsonl";
+        const fs::path kept = book.path / "studio" / "journal.kept";
+        fs::rename(journal, kept);
+        fs::create_directory(journal);
+        struct Restore {
+            fs::path journal, kept;
+            ~Restore() {
+                std::error_code ec;
+                fs::remove(journal, ec);
+                fs::rename(kept, journal, ec);
+            }
+        } restore{journal, kept};
+        desk.session->apply(Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "書き出す前"}}}));
+        QVERIFY(desk.window->action(QStringLiteral("act_export"))->isEnabled());
+        desk.window->action(QStringLiteral("act_export"))->trigger();
+        QCOMPARE(waited, 1);
+        QVERIFY(!replied);
+        QVERIFY2(desk.warnings.size() == 1 && desk.warnings.front().startsWith(QStringLiteral("Genko: 原稿を保存できていないため、正式な書き出しをしていません")),
+                 qPrintable(desk.warnings.join(QStringLiteral(" | "))));
+        QVERIFY(!fs::exists(out));
+        // not official: no waiting for the save (what is in front is written, as before)
+        official = false;
+        waited = 0;
+        desk.warnings.clear();
+        desk.window->action(QStringLiteral("act_export"))->trigger();
+        QCOMPARE(waited, 0);
+        for (const QString& said : desk.warnings) QVERIFY2(!said.contains(QStringLiteral("原稿を保存できていないため")), qPrintable(said));
+    }
+
+    // 承認箱's export pressed again while it waits for the save or its dialog is open: one export, one dialog.
+    void approvalExportIsNotEnteredTwice() {
+        StudioBook book;
+        Desk desk(book.path, book.root / "recovery");
+        int dialogs = 0;
+        desk.on_dialog = [&](QDialog* dialog) {
+            if (qobject_cast<app::ExportDialog*>(dialog) == nullptr) return int(QDialog::Rejected);
+            ++dialogs;
+            if (dialogs < 3) desk.box()->approve();  // (pressed again)
+            return int(QDialog::Rejected);
+        };
+        const auto& items = desk.box()->items();
+        int row = -1;
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            if (items[i].gate_text() == "export") row = static_cast<int>(i);
+        }
+        QVERIFY(row >= 0);
+        desk.box()->list->setCurrentRow(row);
+        desk.box()->approve();
+        QCOMPARE(dialogs, 1);
     }
 
     // 返事なしで閉じる with a reply written and not sent: asked first; the draft goes only when it is closed.

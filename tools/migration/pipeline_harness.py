@@ -252,12 +252,15 @@ async def _perf(job: dict, agent, recorder: Recorder, person: Person, client) ->
         assert approved["ok"]
         out["approve_ms"].append(person.calls[-1]["ms"])
         out["finish"].append(await timed("finish", "finish_page", page=page, commit=True))
-    # the 8-page proof, M times, each into a folder of its own (the revision moved on by a note)
+    # the 8-page proof, M times, each into a folder of its own (the revision moved on by a note). MCP's export_proof is
+    # always a job, and the tool waits up to 40 s for it before it answers (with the job's result, or "running"): the
+    # time to the reply holds that wait. The job's own record (studio/jobs/<id>.json) says when it started and ended.
     for i in range(proofs):
         await agent.tool("apply_ops", ops=[{"op": "set_note", "page": 1, "note": f"校正 {i}"}], commit=True)
         revision = person.book()["revision"]
+        called = time.time()
         started = time.perf_counter()
-        result = await client.call_tool("export_proof", {"project": PROJECT, "format": "pdf", "background": True})
+        result = await client.call_tool("export_proof", {"project": PROJECT, "format": "pdf"})
         accepted_ms = (time.perf_counter() - started) * 1000.0
         reply = json.loads(result.content[0].text)
         if not reply.get("ok"):
@@ -269,10 +272,20 @@ async def _perf(job: dict, agent, recorder: Recorder, person: Person, client) ->
                     reply = {**(status.get("result") or {}), "job": reply["job"], "status": status.get("status")}
                     break
         done_ms = (time.perf_counter() - started) * 1000.0
+        record = {}
+        if reply.get("job"):
+            record_file = Path(job["root"]) / PROJECT / "studio" / "jobs" / f"{reply['job']}.json"
+            if record_file.is_file():
+                record = json.loads(record_file.read_text(encoding="utf-8"))
+        job_started, job_finished = record.get("started"), record.get("finished")
         files = [Path(f) for f in reply.get("files") or []]
         pdf = files[0].read_bytes() if files and files[0].is_file() else b""
         folder = Path(job["root"]) / PROJECT / "studio" / "proofs" / f"r{revision:04d}"
         out["proofs"].append({"accepted_ms": accepted_ms, "done_ms": done_ms, "job": reply.get("job"), "ok": bool(reply.get("ok")),
+                              # (the job's record: from the call to its start, and from its start to its end)
+                              "job_start_ms": (job_started - called) * 1000.0 if isinstance(job_started, (int, float)) else None,
+                              "job_ms": (job_finished - job_started) * 1000.0 if isinstance(job_started, (int, float)) and
+                              isinstance(job_finished, (int, float)) else None,
                               "file": str(files[0]) if files else None, "new_folder": bool(files) and files[0].parent == folder,
                               "pdf": pdf[:5] == b"%PDF-", "pages": len(re.findall(rb"/Type\s*/Page(?![A-Za-z])", pdf))})
     return out
@@ -310,7 +323,27 @@ async def _scenario(job: dict, calls: list) -> dict:
     return out
 
 
+def _time_limit(job: dict) -> None:
+    """job["time_limit_s"], when there is one: at it, where every thread is gets printed, and a second later the run stops
+    with a TimeoutError (what was asked last and OUT.partial.json then, as for any failure), before the test that
+    started this gives up on it and kills it without a word."""
+    limit = job.get("time_limit_s")
+    if not limit:
+        return
+    import faulthandler
+    import signal
+
+    faulthandler.dump_traceback_later(float(limit), exit=False)
+    if hasattr(signal, "SIGALRM"):
+        def stop(signum, frame):
+            raise TimeoutError(f"the time limit of {limit} s was reached")
+
+        signal.signal(signal.SIGALRM, stop)
+        signal.alarm(int(limit) + 1)
+
+
 def run_job(job: dict, out_path: str) -> None:
+    _time_limit(job)
     root = Path(job["root"])
     root.mkdir(parents=True, exist_ok=True)
     Path(job["config"]).mkdir(parents=True, exist_ok=True)
@@ -356,14 +389,17 @@ class Normal(mh.Normal):
 
     DERIVED = re.compile(r"(?<![0-9A-Za-z])([a-z]{2})_([0-9a-f]{6,11})(?![0-9a-f])")
 
-    def __init__(self, root: str, config: str, out: str) -> None:
+    def __init__(self, root: str, config: str, out: str, kept: frozenset[str] = frozenset()) -> None:
         super().__init__(root, config)
         self.out = out
         self.derived: dict[str, str] = {}
+        self.kept = kept  # (ids made from no random id: compared as they are — _content_ids)
 
     def text(self, value: str) -> str:
         def one(m: re.Match) -> str:
             key = m.group(0)
+            if key in self.kept:
+                return key
             if key not in self.derived:
                 self.derived[key] = f"<{m.group(1)}{len(self.derived) + 1}>"
             return self.derived[key]
@@ -413,10 +449,48 @@ def _in_order(side: dict) -> None:
                 entry["changes"].sort(key=key)
 
 
+def _content_ids(book: dict) -> frozenset[str]:
+    """The candidates' ids made from no random id: Genko's enlargement's and a derived picture's ("cd_" and 10 digits of
+    content_hash of the source's asset — its bytes' hash — and the settings: StudioService.upscale, .derive). Each is
+    made again here from what the book says of it, and must be that (else the run fails): these are then compared as
+    they are, not written <cdN> as the ids drawn from random ones (a request's cd_ from its rq_, which is from the
+    panel's id)."""
+    sys.path.insert(0, str(REPO / "src"))
+    from genko.studio.jsonutil import content_hash
+
+    out = set()
+    for page in book.get("pages", []):
+        todo = list(page.get("frames", []))
+        while todo:
+            frame = todo.pop(0)
+            todo[:0] = frame.get("children") or []
+            candidates = (frame.get("panel") or {}).get("candidates") or []
+            by_id = {c.get("id"): c for c in candidates}
+            for c in candidates:
+                origin = c.get("origin") or {}
+                tool = str(origin.get("tool_id") or "")
+                parent = by_id.get(c.get("parent"))
+                if origin.get("kind") != "genko" or parent is None:
+                    continue
+                if c.get("mode") == "upscale" and tool.startswith("genko:upscale:"):
+                    marker = c.get("upscaled") or {}
+                    scale = marker.get("scale")
+                    scales = [scale] + ([int(scale)] if isinstance(scale, float) and scale.is_integer() else [])
+                    made = {"cd_" + content_hash({"upscale": marker.get("method"), "from": parent.get("asset"), "scale": x})[7:17] for x in scales}
+                elif c.get("mode") == "derive" and tool.startswith("genko:"):
+                    made = {"cd_" + content_hash({"derive": tool[len("genko:"):], "from": parent.get("asset"), "params": origin.get("params")})[7:17]}
+                else:
+                    continue
+                if c.get("id") not in made:
+                    raise RuntimeError(f"candidate {c.get('id')} is not made from its source and settings as StudioService makes it: {sorted(made)}")
+                out.add(c["id"])
+    return frozenset(out)
+
+
 def normal(in_path: str, out_path: str) -> None:
     side = json.loads(Path(in_path).read_text(encoding="utf-8"))
     _in_order(side)
-    norm = Normal(side["root"], side["config"], side["out"])
+    norm = Normal(side["root"], side["config"], side["out"], _content_ids(side["book"]))
     calls = []
     for call in side["calls"]:
         call = {k: v for k, v in call.items() if k != "ms"}
@@ -444,6 +518,7 @@ def redraw(job: dict) -> None:
     (preview-pNNN.png: render, mode proof, 1024 px), the proof as export_proof made it at job["proof_revision"]
     (proof.pdf) and the person's official exports (pdf/, tiff/: `genko studio export … --dpi 72 --allow-fixture
     --force --as human:test`). Text laid out with Pillow's BASIC layout, as the measured reference."""
+    _time_limit(job)
     import contextlib
     import io
     import os

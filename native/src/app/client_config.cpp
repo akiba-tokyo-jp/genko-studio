@@ -244,6 +244,38 @@ QString odd_key(const QString& key) {
     return {};
 }
 
+// Whether YAML text has one of `marks` (& an anchor, * an alias, ! a tag) where a node starts: at the start, or after a
+// space, "[", "{" or ","; quoted text is read past, and a comment ends it. (Text in a plain scalar after a space is
+// taken for one too: nothing is written then rather than something that might be wrong.)
+bool has_node_mark(const QString& text, const QString& marks) {
+    QChar quote;
+    for (qsizetype i = 0; i < text.size(); ++i) {
+        const QChar ch = text[i];
+        if (!quote.isNull()) {
+            if (quote == QLatin1Char('"') && ch == QLatin1Char('\\')) {
+                ++i;
+            } else if (ch == quote) {
+                if (quote == QLatin1Char('\'') && i + 1 < text.size() && text[i + 1] == QLatin1Char('\'')) {
+                    ++i;  // ('' inside '…')
+                } else {
+                    quote = QChar();
+                }
+            }
+            continue;
+        }
+        const bool starts = i == 0 || text[i - 1].isSpace() || text[i - 1] == QLatin1Char('[') || text[i - 1] == QLatin1Char('{') ||
+                            text[i - 1] == QLatin1Char(',');
+        if (!starts) continue;
+        if (ch == QLatin1Char('#')) return false;
+        if (ch == QLatin1Char('"') || ch == QLatin1Char('\'')) {
+            quote = ch;
+        } else if (marks.contains(ch)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // The rest of a key line holds nothing but perhaps a comment: a block follows.
 bool opens_block(const QString& rest) {
     const QString t = rest.trimmed();
@@ -357,6 +389,7 @@ void propose_yaml(Proposal& out, const QStringList& server) {
         if (const QString why = odd_key(key->first); !why.isEmpty()) return refuse(why);
         if (key->first == QLatin1String("genko")) {
             if (genko) return refuse(QStringLiteral("genko が二つ"));
+            if (has_node_mark(key->second, QStringLiteral("&*!"))) return refuse(QStringLiteral("genko にアンカー・別名・タグ（& * !）が付いている"));
             if (!opens_block(key->second)) return refuse(QStringLiteral("genko が一行で書かれている"));
             genko = k;
         } else {
@@ -407,6 +440,22 @@ void propose_yaml(Proposal& out, const QStringList& server) {
             }
             return end;
         };
+        // (command's and args' values are written over: an anchor, an alias or a tag on them — on the key's line or the
+        // lines of its value — is not)
+        for (const Part& part : parts) {
+            if (part.key != QLatin1String("command") && part.key != QLatin1String("args")) continue;
+            bool marked = has_node_mark(part.rest, QStringLiteral("&*!"));
+            for (std::size_t k = part.from + 1; k < content_end(part) && !marked; ++k) {
+                marked = !lines[k].neutral() && has_node_mark(lines[k].text, QStringLiteral("&*!"));
+            }
+            if (marked) return refuse(QStringLiteral("genko の %1 の値にアンカー・別名・タグ（& * !）が付いている").arg(part.key));
+        }
+        // (an anchor anywhere in genko's block: what Genko writes there could cut it off from what refers to it)
+        for (std::size_t k = k0 + 1; k < m; ++k) {
+            if (!lines[k].neutral() && has_node_mark(lines[k].text, QStringLiteral("&"))) {
+                return refuse(QStringLiteral("genko の中にアンカー（&）がある"));
+            }
+        }
         const auto tail = [&](const Part& part, std::vector<QString>& into) {
             for (std::size_t k = content_end(part); k < part.to; ++k) into.push_back(lines[k].text);
         };

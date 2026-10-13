@@ -57,6 +57,7 @@ std::list<std::string> g_vouched;  // (the latest first)
 constexpr std::size_t kVouched = 64;
 std::atomic<std::uint64_t> g_decoded{0};
 std::atomic<std::uint64_t> g_let_through{0};
+std::atomic<std::uint64_t> g_drawn_decoded{0};
 
 bool vouched(const std::string& ref) {
     std::lock_guard lock(g_vouched_mutex);
@@ -65,21 +66,16 @@ bool vouched(const std::string& ref) {
 
 }  // namespace
 
-// (defined below, with the caches)
-void remember_source(const std::filesystem::path& book, const std::string& ref, Image pixels);
-
-void vouch_for_picture(const std::filesystem::path& book, const std::string& ref, Image pixels) {
+void vouch_for_picture(const std::filesystem::path& book, const std::string& ref) {
+    (void)book;  // (the ref alone: the check reads the file's bytes and their hash wherever it is)
     if (!storage::AssetStore::is_ref(ref)) return;
-    {
-        std::lock_guard lock(g_vouched_mutex);
-        g_vouched.remove(ref);
-        g_vouched.push_front(ref);
-        while (g_vouched.size() > kVouched) g_vouched.pop_back();
-    }
-    remember_source(book, ref, std::move(pixels));
+    std::lock_guard lock(g_vouched_mutex);
+    g_vouched.remove(ref);
+    g_vouched.push_front(ref);
+    while (g_vouched.size() > kVouched) g_vouched.pop_back();
 }
 
-PictureChecks picture_checks() { return PictureChecks{g_decoded.load(), g_let_through.load()}; }
+PictureChecks picture_checks() { return PictureChecks{g_decoded.load(), g_let_through.load(), g_drawn_decoded.load()}; }
 
 void check_asset_picture(const std::filesystem::path& book, const std::string& ref) {
     if (!storage::AssetStore::is_ref(ref)) return;
@@ -120,10 +116,17 @@ public:
         return nullptr;
     }
 
+    // (a key there already: its picture replaced, not kept twice)
     void put(const std::string& key, std::shared_ptr<const Image> image) {
         std::lock_guard lock(mutex_);
+        items_.remove_if([&key](const auto& item) { return item.first == key; });
         items_.emplace_front(key, std::move(image));
         while (items_.size() > capacity_) items_.pop_back();
+    }
+
+    std::size_t size() {
+        std::lock_guard lock(mutex_);
+        return items_.size();
     }
 
     void clear() {
@@ -314,10 +317,23 @@ void spread_into(Json& out, const Json& value) {
 
 }  // namespace
 
-// The picture placed_raster would decode from the asset `ref` of the book `book` (open_image of its bytes, RGBA): these
-// pixels, when they are the ones its bytes were made from.
-void remember_source(const std::filesystem::path& book, const std::string& ref, Image pixels) {
-    if (pixels.mode() != "RGBA") pixels = pixels.convert("RGBA");
+void keep_placed_picture(const std::filesystem::path& book, const std::string& ref, Image pixels) {
+    if (!storage::AssetStore::is_ref(ref) || pixels.empty()) return;
+    // (the file under the ref holds the bytes it is named after: the PNG of these pixels, as this process wrote it —
+    // AssetStore::put_bytes leaves a file that is there already as it is)
+    try {
+        const auto bytes = storage::AssetStore(book).get_bytes(ref, ".png", storage::kAssetMaxBytes);
+        if (!bytes || storage::AssetStore::ref(*bytes) != ref) return;
+    } catch (const std::exception&) {
+        return;
+    }
+    // (what placed_raster makes of the file: open_image(…).convert("RGBA"). A PNG of RGBA pixels has no tRNS; one of
+    // other pixels has the transparency they carry, and convert gives the same from either)
+    if (pixels.mode() == "RGBA") {
+        pixels.set_transparency(Transparency{});
+    } else {
+        pixels = pixels.convert("RGBA");
+    }
     sources().put(core::path_to_utf8(book) + "\n" + ref, std::make_shared<const Image>(std::move(pixels)));
 }
 
@@ -393,6 +409,7 @@ std::optional<Image> placed_raster(const core::Layer& layer, const core::Page& p
     if (source == nullptr) {
         const auto bytes = store.get_bytes(ref, ".png", storage::kAssetMaxBytes);
         if (!bytes) return std::nullopt;
+        ++g_drawn_decoded;
         source = std::make_shared<const Image>(open_image(*bytes, kPillowOpenLimits).convert("RGBA"));
         sources().put(source_key, source);
     }

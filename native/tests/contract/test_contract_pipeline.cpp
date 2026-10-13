@@ -6,7 +6,9 @@
 // Python's server and command line. No AI, no charges, no network: only the synthetic pictures.
 //
 // Compared, once normalised as mcp_harness.py normalises (paths, ids and the studio's ids made from them in the order
-// met, times, a job's id; the lists ordered by random ids put in an order of their own): every call in order — each
+// met, times, a job's id; the lists ordered by random ids put in an order of their own — but the ids made from no
+// random id, Genko's enlargement's and a derived picture's cd_ (a content_hash of the source's asset and the settings),
+// checked to be made so and compared as they are): every call in order — each
 // tool's reply and pictures (by their pixels, within ARCHITECTURE.md §9's drawing tolerance), each command and its
 // reply and exit code —; `genko studio audit` and `genko studio stats` at the end (the tool log's times left out); the
 // book at the end (project.json as Python's v3 writer writes it, its revision too, with its approvals) and its approval
@@ -218,6 +220,17 @@ std::string pipeline_problem(const Json& book, const Json& run, const QString& r
 
 }  // namespace
 
+// The time the test has (CMakeLists: ctest's TIMEOUT 7200 s, QTEST_FUNCTION_TIMEOUT 7100 s), shared out so that each step
+// stops by itself, saying where it was, before the one above it would kill it without a word: each run of the making
+// has 2300 s (the harness stops itself there with what was asked last — run.json.partial.json — and where each thread
+// was; its process is given 120 s more), each normalising 300 s, Python's drawing 1100 s (+ 120 s): 2 × 2420 + 2 × 300
+// + 1220 = 6660 s, the rest for the comparisons. (The whole test took about 1000 s under ASan on the development
+// machine, 300 s in Release.)
+constexpr int kRunLimitS = 2300;
+constexpr int kNormalS = 300;
+constexpr int kRedrawLimitS = 1100;
+constexpr int kGraceS = 120;
+
 class ContractPipeline : public QObject {
     Q_OBJECT
 
@@ -252,6 +265,7 @@ private slots:
             job["out"] = (dir + "/out").toStdString();
             job["agent"] = "ai:test";
             job["pages"] = 8;
+            job["time_limit_s"] = kRunLimitS;
             genko::test::write_bytes(dir + "/job.json", genko::core::dump_python(job));
             QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
             env.remove(QStringLiteral("PYTHONPATH"));
@@ -260,7 +274,7 @@ private slots:
             const genko::test::Run run = genko::test::run(
                 genko::test::mcp_python(),
                 {genko::test::repo_root() + "/tools/migration/pipeline_harness.py", QStringLiteral("run"), dir + "/job.json", dir + "/run.json"}, env,
-                6600000);
+                (kRunLimitS + kGraceS) * 1000);
             QVERIFY2(run.finished && run.exit_code == 0,
                      (QString(side == 0 ? "this build: " : "Python: ") + QString::fromUtf8(run.err.right(6000))).toUtf8());
             // (the server's standard error comes through the harness's: a sanitizer's report there fails the run)
@@ -310,7 +324,7 @@ private slots:
             const genko::test::Run normal = genko::test::run(
                 genko::test::mcp_python(),
                 {genko::test::repo_root() + "/tools/migration/pipeline_harness.py", QStringLiteral("normal"), dir + "/whole.json", dir + "/normal.json"}, env,
-                600000);
+                kNormalS * 1000);
             QVERIFY2(normal.finished && normal.exit_code == 0, normal.err.right(4000).constData());
             sides[side] = genko::test::read_json(dir + "/normal.json");
         }
@@ -411,6 +425,7 @@ private slots:
                                         {"config", (redraw + "/config").toStdString()},
                                         {"out", (redraw + "/out").toStdString()},
                                         {"pages", 8},
+                                        {"time_limit_s", kRedrawLimitS},
                                         {"proof_revision", proof_folder.mid(1).toInt()}});
         genko::test::write_bytes(redraw + "/job.json", genko::core::dump_python(redraw_job));
         {
@@ -420,7 +435,7 @@ private slots:
             env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
             const genko::test::Run run = genko::test::run(
                 genko::test::mcp_python(), {genko::test::repo_root() + "/tools/migration/pipeline_harness.py", QStringLiteral("redraw"), redraw + "/job.json"},
-                env, 3600000);
+                env, (kRedrawLimitS + kGraceS) * 1000);
             QVERIFY2(run.finished && run.exit_code == 0, run.err.right(6000).constData());
         }
         // (finish_page's preview draws the effect lines it adds with ids made for the preview alone — the change is made

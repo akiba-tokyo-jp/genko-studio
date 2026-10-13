@@ -3,6 +3,7 @@
 
 #include <QtTest>
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <string>
@@ -450,7 +451,7 @@ private slots:
         const Image src = noisy("RGB", 300, 200);
         render::side_by_side([&] { side_on = std::this_thread::get_id(); a = src.convert("L"); },
                              [&] { b = src.resize({150, 100}, render::Resample::Lanczos); });
-        QVERIFY(side_on != here);
+        if (render::band_threads() > 1) QVERIFY(side_on != here);  // (one processor: no thread besides)
         QVERIFY(a.tobytes() == src.convert("L").tobytes());
         QVERIFY(b.tobytes() == src.resize({150, 100}, render::Resample::Lanczos).tobytes());
         const auto thrown = [](const std::function<void()>& side, const std::function<void()>& main) -> std::string {
@@ -475,6 +476,101 @@ private slots:
             QVERIFY(side_on == here);
             QCOMPARE(order, (std::vector<std::string>{"side", "main"}));
         }
+        // its thread cannot be started (no thread left; no memory for it): both done here, one after the other, the
+        // exceptions as before
+        for (const bool memory : {false, true}) {
+            const render::ScopedBandFaults faults(1, 0, memory);
+            std::vector<std::string> order;
+            a = Image();
+            render::side_by_side([&] { side_on = std::this_thread::get_id(); order.push_back("side"); a = src.convert("L"); },
+                                 [&] { order.push_back("main"); });
+            QVERIFY(side_on == here);
+            QCOMPARE(order, (std::vector<std::string>{"side", "main"}));
+            QVERIFY(a.tobytes() == src.convert("L").tobytes());
+        }
+        {
+            const render::ScopedBandFaults faults(1, 0);
+            other_done = false;
+            QCOMPARE(thrown([] { throw genko::core::Error("value", "side"); }, [&] { other_done = true; }), std::string("side"));
+            QVERIFY(other_done);
+        }
+    }
+
+    // A thread for bands that cannot be started: its bands are done by the threads there are (the calling one at least),
+    // the same pixels; a band whose work fails (its memory not had): the whole is done again in one piece, the same
+    // pixels, and that is counted as a failure of the bands — for each banded call, at any band.
+    void bandsWithoutTheirThreadsOrTheirMemory() {
+        const Image src = noisy("RGB", 300, 260);
+        const render::BoxF box{2.5, 1.5, 290.0, 250.25};
+        const render::Box region{10, 40, 600, 470};
+        const std::string resized = src.resize({613, 481}, render::Resample::Lanczos).tobytes();
+        const std::string part = src.resize_region({613, 481}, region, render::Resample::Lanczos, box).tobytes();
+        const render::Filter sharpen = render::Filter::unsharp_mask(2.59, 90, 2);
+        const std::string sharpened = src.filter(sharpen).tobytes();
+        const auto all_three = [&] {
+            QVERIFY(src.resize_in_bands({613, 481}, render::Resample::Lanczos, std::nullopt, 4).tobytes() == resized);
+            QVERIFY(src.resize_region_in_bands({613, 481}, region, render::Resample::Lanczos, box, 4).tobytes() == part);
+            QVERIFY(src.filter_in_bands(sharpen, 4).tobytes() == sharpened);
+        };
+        for (const bool memory : {false, true}) {  // (no thread left; no memory for the thread)
+            for (const int nth : {1, 2, 3}) {
+                const render::BandCounts start = render::band_counts();
+                {
+                    const render::ScopedBandFaults faults(nth, 0, memory);
+                    all_three();
+                }
+                const render::BandCounts end = render::band_counts();
+                QCOMPARE(end.failed - start.failed, std::uint64_t{0});
+                QCOMPARE(end.banded - start.banded, std::uint64_t{3});
+            }
+        }
+        for (const int nth : {1, 2, 4}) {
+            for (int call = 0; call < 3; ++call) {
+                const render::BandCounts start = render::band_counts();
+                {
+                    const render::ScopedBandFaults faults(0, nth);
+                    if (call == 0) QVERIFY(src.resize_in_bands({613, 481}, render::Resample::Lanczos, std::nullopt, 4).tobytes() == resized);
+                    if (call == 1) QVERIFY(src.resize_region_in_bands({613, 481}, region, render::Resample::Lanczos, box, 4).tobytes() == part);
+                    if (call == 2) QVERIFY(src.filter_in_bands(sharpen, 4).tobytes() == sharpened);
+                }
+                const render::BandCounts end = render::band_counts();
+                QCOMPARE(end.failed - start.failed, std::uint64_t{1});
+                QCOMPARE(end.banded - start.banded, std::uint64_t{0});
+            }
+        }
+        // (no fault left behind: banded again)
+        const render::BandCounts start = render::band_counts();
+        all_three();
+        QCOMPARE(render::band_counts().banded - start.banded, std::uint64_t{3});
+    }
+
+    // Many callers in bands at once (the tiles of a page are drawn on several threads, each of which may work in bands):
+    // the band threads besides the callers stay within band_threads() − 1 all together, and each caller's pixels are
+    // its own, the same as alone.
+    void bandThreadsAreSharedByAllCallers() {
+        const Image src = noisy("RGBA", 400, 300);
+        const render::BoxF box{3.25, 2.5, 397.0, 296.75};
+        const std::string alone = src.resize({173, 129}, render::Resample::Lanczos, box).tobytes();
+        const std::string sharp = src.convert("RGB").filter(render::Filter::unsharp_mask(3, 90, 2)).tobytes();
+        const render::BandCounts start = render::band_counts();
+        std::vector<std::thread> callers;
+        std::atomic<int> wrong{0};
+        for (int c = 0; c < 6; ++c) {
+            callers.emplace_back([&] {
+                for (int round = 0; round < 5; ++round) {
+                    if (src.resize_in_bands({173, 129}, render::Resample::Lanczos, box, 8).tobytes() != alone) ++wrong;
+                    if (src.convert("RGB").filter_in_bands(render::Filter::unsharp_mask(3, 90, 2), 8).tobytes() != sharp) ++wrong;
+                }
+            });
+        }
+        for (std::thread& t : callers) t.join();
+        QCOMPARE(wrong.load(), 0);
+        const render::BandCounts counts = render::band_counts();
+        QVERIFY2(counts.most_threads <= render::band_threads() - 1,
+                 qPrintable(QStringLiteral("%1 band threads at once, %2 allowed").arg(counts.most_threads).arg(render::band_threads() - 1)));
+        if (render::band_threads() > 1) QVERIFY(counts.most_threads >= 1);
+        QCOMPARE(counts.failed - start.failed, std::uint64_t{0});
+        QCOMPARE(counts.banded - start.banded, std::uint64_t{60});
     }
 
     void value_semantics() {

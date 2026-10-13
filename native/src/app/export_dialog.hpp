@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -58,6 +59,9 @@ public:
 
     // The person chose to fix what the check found first (the window opens 点検 then).
     bool fix_requested = false;
+    // Asked before an official export (the window: its book saved first, as 承認箱's export waits for it): empty when the
+    // book is saved; else what to say, and nothing is written.
+    std::function<QString()> unsaved_reason;
     // What formats::run returned (none: not run).
     std::optional<core::Json> reply;
 
@@ -91,6 +95,7 @@ public:
     std::map<std::string, QWidget*> rows;  // option key → its field (shown only for the formats that take it)
 
 private:
+    bool running_ = false;  // (run() under way — it may wait for the save: a second click is not a second export)
     void format_changed();
     void show_preview();
     // (PSD-01) the editable PSD's choices shown or hidden, and what it cannot keep on the pages chosen

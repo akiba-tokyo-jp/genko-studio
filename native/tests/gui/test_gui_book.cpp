@@ -43,6 +43,7 @@
 #include "core/covers.hpp"
 #include "core/geometry.hpp"
 #include "core/ids.hpp"
+#include "core/pyconv.hpp"
 #include "gui_support.hpp"
 #include "render/image.hpp"
 #include "render/page.hpp"
@@ -154,10 +155,11 @@ QStringList menus_of(app::MainWindow* window, QAction* wanted) {
 }
 
 // The page list's right-click menu on this row: its items ("|" a separator), and the one named `pick` chosen.
-QStringList page_menu(Studio& s, int row, const QString& pick = {}) {
+// (meanwhile: done while the menu is open, before the choice is made)
+QStringList page_menu(Studio& s, int row, const QString& pick = {}, const std::function<void()>& meanwhile = {}) {
     QStringList texts;
     app::PageList* list = s.window->pages();
-    QTimer::singleShot(0, list, [&texts, pick] {
+    QTimer::singleShot(0, list, [&texts, pick, meanwhile] {
         auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
         if (menu == nullptr) return;
         texts = menu_texts(menu);
@@ -165,6 +167,7 @@ QStringList page_menu(Studio& s, int row, const QString& pick = {}) {
         for (QAction* a : menu->actions()) {
             if (!pick.isEmpty() && a->text() == pick) chosen = a;
         }
+        if (meanwhile) meanwhile();
         menu->close();
         if (chosen != nullptr) chosen->trigger();
     });
@@ -507,6 +510,101 @@ private slots:
         page_menu(s, 3, QStringLiteral("このページのノンブルを出す"));
         QCOMPARE(s.since(n), std::string(R"([{"op": "set_nombre", "page": 4, "numero": true}])"));
         QVERIFY(!s.row_text(3).contains(QStringLiteral("ノンブルなし")));
+    }
+
+    // The page list's menu while the book changes (another writer reorders or deletes pages while the menu or its
+    // question is open; another book comes to the front): each choice goes to the page it was opened on, found by its
+    // id, at its number then; the page gone, the pages of a spread no longer side by side, or another book in front:
+    // nothing is done, and that is said.
+    void pageListMenuFollowsItsPageWhileTheBookChanges() {
+        Studio s(5);
+        const auto ids = [&s] {
+            std::vector<std::string> out;
+            for (const auto& p : s.book().pages) out.push_back(p->id);
+            return out;
+        };
+        const auto number_of = [&s](const std::string& id) {
+            for (const auto& p : s.book().pages) {
+                if (p->id == id) return static_cast<int>(core::py_int(p->index.json()));
+            }
+            return 0;
+        };
+        const QString changed = QStringLiteral("確認中に対象の原稿・ページが変更されたため、操作を中止しました。やり直してください。");
+        const auto reorder = [&s](const std::vector<int>& order) {
+            if (!s.window->apply_ops(Json::array({Json{{"op", "reorder"}, {"order", order}}}))) qFatal("the pages were not reordered meanwhile");
+        };
+        // このページを消す…: the pages reordered while asked — the page asked about is deleted, now page 1
+        const std::string second = ids()[1];
+        s.answers.responder->question = [&](const QString&, const QString&) {
+            reorder({2, 1, 3, 4, 5});
+            return true;
+        };
+        std::size_t n = s.ops.size();
+        page_menu(s, 1, QStringLiteral("このページを消す…"));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "reorder", "order": [2, 1, 3, 4, 5]}, {"op": "delete_page", "page": 1}])"));
+        QCOMPARE(number_of(second), 0);
+        QCOMPARE(s.book().pages.size(), std::size_t{4});
+        // …and the page deleted while asked: nothing more
+        s.window->flash(QStringLiteral("(before)"), 1, true);
+        s.answers.responder->question = [&](const QString&, const QString&) {
+            if (!s.window->apply_ops(Json::array({Json{{"op", "delete_page"}, {"page", 2}}}))) qFatal("the page was not deleted meanwhile");
+            return true;
+        };
+        n = s.ops.size();
+        page_menu(s, 1, QStringLiteral("このページを消す…"));
+        QCOMPARE(s.since(n), std::string(R"([{"op": "delete_page", "page": 2}])"));
+        QCOMPARE(s.window->last_error(), changed);
+        QCOMPARE(s.book().pages.size(), std::size_t{3});
+        s.answers.responder->question = [](const QString&, const QString&) { return true; };
+        // the choices without a question: the pages reordered while the menu is open
+        const std::string first = ids()[0];
+        n = s.ops.size();
+        page_menu(s, 0, QStringLiteral("このページを複製"), [&] { reorder({2, 1, 3}); });
+        QCOMPARE(s.since(n), std::string(R"([{"op": "reorder", "order": [2, 1, 3]}, {"op": "duplicate_page", "page": 2, "next_to": true}])"));
+        QCOMPARE(number_of(first), 2);
+        QCOMPARE(s.book().pages.size(), std::size_t{4});
+        n = s.ops.size();
+        page_menu(s, 1, QStringLiteral("後ろへ移す"), [&] { reorder({1, 3, 2, 4}); });  // (the page that was second is third now)
+        QCOMPARE(s.since(n), std::string(R"([{"op": "reorder", "order": [1, 3, 2, 4]}, {"op": "reorder", "order": [1, 2, 4, 3]}])"));
+        QCOMPARE(number_of(first), 4);
+        n = s.ops.size();
+        const std::string third = ids()[2];
+        page_menu(s, 2, QStringLiteral("このページのノンブルを隠す"), [&] { reorder({3, 1, 2, 4}); });
+        QCOMPARE(s.since(n), std::string(R"([{"op": "reorder", "order": [3, 1, 2, 4]}, {"op": "set_nombre", "page": 1, "numero": false}])"));
+        QVERIFY(!s.book().page(0).numero);
+        QCOMPARE(s.book().page(0).id, third);
+        n = s.ops.size();
+        page_menu(s, 3, QStringLiteral("この後ろにページを追加"), [&] { reorder({4, 1, 2, 3}); });
+        QCOMPARE(s.since(n), std::string(R"([{"op": "reorder", "order": [4, 1, 2, 3]}, {"op": "add_page", "count": 1, "after": 1}])"));
+        // a spread with the page after: both moved, still side by side — made; no longer side by side — said, nothing made
+        n = s.ops.size();
+        page_menu(s, 1, QStringLiteral("3 ページと見開きにする"), [&] { reorder({1, 4, 2, 3, 5}); });
+        QCOMPARE(s.since(n), std::string(R"([{"op": "reorder", "order": [1, 4, 2, 3, 5]}, {"op": "set_spread", "page": 3, "with": 4}, )"
+                                         R"({"op": "set_spread", "page": 4, "with": 3}])"));
+        n = s.ops.size();
+        page_menu(s, 3, QStringLiteral("見開きを解除"), [&] { reorder({4, 3, 1, 2, 5}); });
+        QCOMPARE(s.since(n), std::string(R"([{"op": "reorder", "order": [4, 3, 1, 2, 5]}, {"op": "set_spread", "page": 1, "with": null}, )"
+                                         R"({"op": "set_spread", "page": 2, "with": null}])"));
+        n = s.ops.size();
+        s.window->flash(QStringLiteral("(before)"), 1, true);
+        page_menu(s, 0, QStringLiteral("2 ページと見開きにする"), [&] { reorder({1, 3, 2, 4, 5}); });
+        QCOMPARE(s.since(n), std::string(R"([{"op": "reorder", "order": [1, 3, 2, 4, 5]}])"));
+        QCOMPARE(s.window->last_error(), changed);
+        // another book in front while asked: nothing done in either book
+        const OtherBook other(s.tmp.path() + QStringLiteral("/other.genko"), 2);
+        const std::size_t pages = s.book().pages.size();
+        s.answers.responder->question = [&](const QString&, const QString&) {
+            s.window->add_document(app::Session::open(other.path, gui_test::quick(gui_test::path_of(s.tmp.path() + QStringLiteral("/recovery2")))));
+            return true;
+        };
+        s.window->flash(QStringLiteral("(before)"), 1, true);
+        n = s.ops.size();
+        page_menu(s, 0, QStringLiteral("このページを消す…"));
+        QCOMPARE(s.window->current_document(), 1);
+        QCOMPARE(s.window->book().pages.size(), std::size_t{2});
+        QCOMPARE(s.ops.size(), n);
+        QCOMPARE(s.session->document().pages.size(), pages);
+        QCOMPARE(s.window->last_error(), changed);
     }
 
     // このページのノンブルを隠す／出す: the page in front's nombre, and the page drawn without it.

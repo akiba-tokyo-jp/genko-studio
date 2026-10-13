@@ -645,8 +645,18 @@ ToolResult StudioService::adopt(const Json& a) {
         has_wanted = true;
         dpi = Json::object({{"dpi_before", now}, {"dpi_wanted", wanted}});
         if (upscale_on && py_truthy(now) && now.get<double>() < wanted * 0.95) {
+            // (the enlargement is placed next: upscale keeps its pixels for the drawing)
+            struct Adopting {
+                bool& flag;
+                explicit Adopting(bool& f) : flag(f) { flag = true; }
+                ~Adopting() { flag = false; }
+                Adopting(const Adopting&) = delete;
+                Adopting& operator=(const Adopting&) = delete;
+            };
+            std::optional<Adopting> adopting(std::in_place, adopting_);
             const ToolResult bigger = invoke("upscale", Json::object({{"project", a["project"]}, {"page", page}, {"frame_id", frame_id},
                                                                        {"candidate_id", candidate_id}, {"scale", Json()}, {"method", a["method"]}}));
+            adopting.reset();
             if (!bigger.ok) return stop("upscale", bigger);
             steps.push_back(Json::object({{"step", "upscale"}, {"ok", true}, {"candidate_id", bigger.data["candidate_id"]}, {"scale", py_get(bigger.data, "scale")}}));
             Json again_op = op;
@@ -976,18 +986,22 @@ ToolResult StudioService::upscale(const Json& a) {
     } catch (const core::PyValueError& exc) {
         return fail(exc.what(), "upscale_failed", "/method");
     }
-    // (the PNG on this thread; meanwhile, on another, the picture as the drawing keeps it and the one shown: neither
-    // reads what the other makes, so each is what it would be alone — render::side_by_side)
+    // (the PNG on this thread; meanwhile, on another, the one shown and — when adopt places it next — the picture as the
+    // drawing keeps it: neither reads what the other makes, so each is what it would be alone — render::side_by_side)
+    const render::Size big_size = big.size();
+    const bool keep = adopting_ && big.mode() != "RGBA";
     std::string bytes;
     render::Image kept;
     std::string shown;
     std::exception_ptr shown_failed;
     render::side_by_side(
-        [&big, &kept, &shown, &shown_failed] {
-            try {
-                if (big.mode() != "RGBA") kept = big.convert("RGBA");
-            } catch (...) {
-                kept = render::Image();  // (not kept: the drawing decodes the file, as any picture)
+        [&big, &kept, &shown, &shown_failed, keep] {
+            if (keep) {
+                try {
+                    kept = big.convert("RGBA");
+                } catch (...) {
+                    kept = render::Image();  // (not kept: the drawing decodes the file, as any picture)
+                }
             }
             try {
                 render::Image small = big.convert("RGB");
@@ -999,15 +1013,15 @@ ToolResult StudioService::upscale(const Json& a) {
         },
         [&big, &bytes] { bytes = formats::png_bytes(big); });
     const std::string ref = store.put_bytes(bytes, ".png");
-    // (written here from the pixels just made: placing it need not decode it again)
-    if (big.mode() == "RGBA") {
-        render::vouch_for_picture(path, ref, big);
-    } else if (!kept.empty()) {
-        render::vouch_for_picture(path, ref, std::move(kept));
-    }
+    bytes = std::string();
+    // (written here from the pixels just made: placing it need not decode it again, nor the drawing)
+    render::vouch_for_picture(path, ref);
+    if (adopting_) render::keep_placed_picture(path, ref, big.mode() == "RGBA" ? std::move(big) : std::move(kept));
+    big = render::Image();
+    kept = render::Image();
     const std::string cand_id = "cd_" + studio::content_hash(Json::object({{"upscale", method}, {"from", source["asset"]}, {"scale", scale}})).substr(7, 10);
     const Json marker = Json::object({{"from", source_id}, {"from_px", Json::array({image.width(), image.height()})}, {"scale", factor}, {"method", method}});
-    Json item = Json::object({{"id", cand_id}, {"asset", ref}, {"px", Json::array({big.width(), big.height()})}, {"mode", "upscale"}, {"parent", source_id},
+    Json item = Json::object({{"id", cand_id}, {"asset", ref}, {"px", Json::array({big_size.width, big_size.height})}, {"mode", "upscale"}, {"parent", source_id},
                               {"upscaled", marker}});
     if (core::truthy_at(source, "mapping")) item["mapping"] = source["mapping"];
     item["origin"] = Json::object({{"kind", "genko"}, {"tool_id", "genko:upscale:" + py_str(method)}, {"params", Json::object({{"scale", factor}})}});
@@ -1020,7 +1034,7 @@ ToolResult StudioService::upscale(const Json& a) {
     }
     const Json after = now && *now != 0.0 ? Json(core::py_round(*now * factor, 1)) : Json();
     if (shown_failed) std::rethrow_exception(shown_failed);
-    return ToolResult(true, Json::object({{"candidate", cand_id}, {"candidate_id", cand_id}, {"parent", source_id}, {"px", Json::array({big.width(), big.height()})},
+    return ToolResult(true, Json::object({{"candidate", cand_id}, {"candidate_id", cand_id}, {"parent", source_id}, {"px", Json::array({big_size.width, big_size.height})},
                                           {"scale", factor}, {"method", method}, {"dpi_before", now ? Json(*now) : Json()}, {"dpi_after", after},
                                           {"adopt", Json::object({{"candidate_id", cand_id}, {"page", a["page"]}, {"frame_id", a["frame_id"]}})},
                                           {"note", "拡大しただけで描き込みは増えない。作画の承認の後に採用すると、承認は取り直しになる"}}),

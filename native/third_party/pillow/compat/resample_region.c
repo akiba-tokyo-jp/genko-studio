@@ -24,9 +24,11 @@ column_view(Imaging im, int x0, int width) {
     return view;
 }
 
-Imaging
-genko_ImagingResampleRegion(
-    Imaging imIn, int xsize, int ysize, int filter, float box[4], int x0, int y0, int x1, int y1
+/* The region's pixels: into `into` when it is given (an image of the region's size and imIn's mode, perhaps a view of
+   rows of a larger one), else into a new image. */
+static Imaging
+resample_region(
+    Imaging into, Imaging imIn, int xsize, int ysize, int filter, float box[4], int x0, int y0, int x1, int y1
 ) {
     struct filter *filterp;
     ResampleFunction ResampleHorizontal;
@@ -42,6 +44,9 @@ genko_ImagingResampleRegion(
 
     if (x0 < 0 || y0 < 0 || x1 > xsize || y1 > ysize || x1 <= x0 || y1 <= y0) {
         return (Imaging)ImagingError_ValueError("bad region");
+    }
+    if (into && (into->mode != imIn->mode || into->xsize != x1 - x0 || into->ysize != y1 - y0)) {
+        return (Imaging)ImagingError_ValueError("the image to write into is not the region's");
     }
 
     /* as ImagingResample */
@@ -97,7 +102,13 @@ genko_ImagingResampleRegion(
     need_horizontal = xsize != imIn->xsize || box[0] || box[2] != xsize;
     need_vertical = ysize != imIn->ysize || box[1] || box[3] != ysize;
     if (!need_horizontal && !need_vertical) {
-        return ImagingCrop(imIn, x0, y0, x1, y1);
+        if (!into) {
+            return ImagingCrop(imIn, x0, y0, x1, y1);
+        }
+        for (i = y0; i < y1; i++) {
+            memcpy(into->image[i - y0], imIn->image[i] + (size_t)x0 * (size_t)imIn->pixelsize, (size_t)into->linesize);
+        }
+        return into;
     }
 
     ksize_vert = precompute_coeffs(imIn->ysize, box[1], box[3], ysize, filterp, &bounds_vert, &kk_vert);
@@ -124,7 +135,7 @@ genko_ImagingResampleRegion(
                 ResampleHorizontal(
                     imTemp, imIn, first, ksize_horiz, bounds_horiz + x0 * 2, kk_horiz + (size_t)x0 * ksize_horiz
                 );
-                imOut = ImagingNewDirty(imIn->mode, x1 - x0, y1 - y0);
+                imOut = into ? into : ImagingNewDirty(imIn->mode, x1 - x0, y1 - y0);
                 if (imOut) {
                     ResampleVertical(
                         imOut, imTemp, 0, ksize_vert, bounds_vert + y0 * 2, kk_vert + (size_t)y0 * ksize_vert
@@ -134,7 +145,7 @@ genko_ImagingResampleRegion(
             }
         } else {
             /* (the rows stay as they are: the horizontal pass on the region's own rows) */
-            imOut = ImagingNewDirty(imIn->mode, x1 - x0, y1 - y0);
+            imOut = into ? into : ImagingNewDirty(imIn->mode, x1 - x0, y1 - y0);
             if (imOut) {
                 ResampleHorizontal(
                     imOut, imIn, y0, ksize_horiz, bounds_horiz + x0 * 2, kk_horiz + (size_t)x0 * ksize_horiz
@@ -147,7 +158,7 @@ genko_ImagingResampleRegion(
         /* vertical only: the source columns are the region's columns */
         view = column_view(imIn, x0, x1 - x0);
         if (view) {
-            imOut = ImagingNewDirty(imIn->mode, x1 - x0, y1 - y0);
+            imOut = into ? into : ImagingNewDirty(imIn->mode, x1 - x0, y1 - y0);
             if (imOut) {
                 ResampleVertical(imOut, view, 0, ksize_vert, bounds_vert + y0 * 2, kk_vert + (size_t)y0 * ksize_vert);
             }
@@ -157,4 +168,21 @@ genko_ImagingResampleRegion(
     free(bounds_vert);
     free(kk_vert);
     return imOut;
+}
+
+Imaging
+genko_ImagingResampleRegion(
+    Imaging imIn, int xsize, int ysize, int filter, float box[4], int x0, int y0, int x1, int y1
+) {
+    return resample_region(NULL, imIn, xsize, ysize, filter, box, x0, y0, x1, y1);
+}
+
+Imaging
+genko_ImagingResampleRegionInto(
+    Imaging into, Imaging imIn, int xsize, int ysize, int filter, float box[4], int x0, int y0, int x1, int y1
+) {
+    if (!into) {
+        return (Imaging)ImagingError_ValueError("no image to write into");
+    }
+    return resample_region(into, imIn, xsize, ysize, filter, box, x0, y0, x1, y1);
 }

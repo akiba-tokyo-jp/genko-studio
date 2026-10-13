@@ -116,6 +116,8 @@ private slots:
         job["agent"] = "ai:test";
         job["pages"] = 8;
         job["perf"] = Json::object({{"each", 100}, {"proofs", 10}});
+        // (the harness stops itself before its process is given up on, saying where it was: ctest gives the test 3600 s)
+        job["time_limit_s"] = 3150;
         genko::test::write_bytes(dir + "/job.json", genko::core::dump_python(job));
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.remove(QStringLiteral("PYTHONPATH"));
@@ -123,7 +125,7 @@ private slots:
         env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
         const genko::test::Run run = genko::test::run(
             genko::test::mcp_python(), {genko::test::repo_root() + "/tools/migration/pipeline_harness.py", QStringLiteral("run"), dir + "/job.json", dir + "/run.json"},
-            env, 3300000);
+            env, (3150 + 120) * 1000);
         QVERIFY2(run.finished && run.exit_code == 0, run.err.right(6000).constData());
         const Json out = genko::test::read_json(dir + "/run.json");
 
@@ -163,19 +165,28 @@ private slots:
         for (const Json& ms : perf["approve_ms"]) approvals.add(ms.get<double>());
         qInfo("%s", qPrintable(approvals.line("  (between them: the person's approval of the art, genko studio approve)")));
 
-        // the 8-page proof, 10 times
+        // the 8-page proof, 10 times. MCP's export_proof is always a job, and the tool waits up to 40 s for it before it
+        // answers: the reply holds that wait (it comes with the PDF when the job ends within it). The job's own record
+        // says when it started (after the call) and how long it ran.
         Stats accepted;
         Stats done;
+        Stats job_start;
+        Stats job_run;
         int proof = 0;
         for (const Json& p : perf["proofs"]) {
             ++proof;
             accepted.add(p["accepted_ms"].get<double>());
             done.add(p["done_ms"].get<double>());
-            qInfo("proof %d: taken %.1f ms, its PDF whole %.1f ms (%s)", proof, p["accepted_ms"].get<double>(), p["done_ms"].get<double>(),
-                  p["file"].is_string() ? p["file"].get<std::string>().c_str() : "no file");
+            if (p.value("job_start_ms", Json()).is_number()) job_start.add(p["job_start_ms"].get<double>());
+            if (p.value("job_ms", Json()).is_number()) job_run.add(p["job_ms"].get<double>());
+            qInfo("proof %d: replied %.1f ms, its PDF whole %.1f ms; the job started %.1f ms after the call and ran %.1f ms (%s)", proof,
+                  p["accepted_ms"].get<double>(), p["done_ms"].get<double>(), p.value("job_start_ms", Json(-1.0)).get<double>(),
+                  p.value("job_ms", Json(-1.0)).get<double>(), p["file"].is_string() ? p["file"].get<std::string>().c_str() : "no file");
         }
-        qInfo("%s", qPrintable(accepted.line("PERF-F 8-page proof: the job taken (the reply)")));
+        qInfo("%s", qPrintable(accepted.line("PERF-F 8-page proof: the reply (the tool waits up to 40 s for the job: within it, the reply is the job's end)")));
         qInfo("%s", qPrintable(done.line("PERF-F 8-page proof: from the call to its PDF whole")));
+        qInfo("%s", qPrintable(job_start.line("  the job's record: from the call to the job's start")));
+        qInfo("%s", qPrintable(job_run.line("  the job's record: from its start to its end")));
 
         // the pass values (ACCEPTANCE.md §4 PERF-F): every one judged, all that fail said together
         QStringList failed;
@@ -186,6 +197,7 @@ private slots:
             if (!(kinds[k].pct(0.95) <= 2000.0)) failed << kinds[k].line(words[k]) + QStringLiteral(": p95 over 2 s");
         }
         if (perf["proofs"].size() != 10) failed << QStringLiteral("not 10 proofs");
+        if (job_run.v.size() != perf["proofs"].size()) failed << QStringLiteral("a proof's job record without its start and end");
         std::vector<std::string> files;
         proof = 0;
         for (const Json& p : perf["proofs"]) {

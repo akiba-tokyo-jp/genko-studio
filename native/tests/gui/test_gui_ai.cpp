@@ -604,6 +604,29 @@ private slots:
         QTest::newRow("utf-8 bom") << QStringLiteral("\uFEFFmodel: x\n") << QStringLiteral("\uFEFFmodel: x\n") + fresh << QString();
         QTest::newRow("genko inline") << QStringLiteral("mcp_servers:\n  genko: {command: x}\n") << QString() << QStringLiteral("genko が一行で書かれている");
         QTest::newRow("two") << QStringLiteral("mcp_servers:\n  a: 1\nmcp_servers:\n  b: 2\n") << QString() << QStringLiteral("mcp_servers が二つ");
+        // (an anchor, an alias or a tag on what Genko writes over, or an anchor anywhere in genko's block: what refers to
+        // it would be cut off, or its meaning change — not written)
+        QTest::newRow("anchor on command") << QStringLiteral("mcp_servers:\n  genko:\n    command: &cmd /old\n    args: [\"x\"]\nother: *cmd\n") << QString()
+                                           << QStringLiteral("genko の command の値にアンカー・別名・タグ");
+        QTest::newRow("alias on args") << QStringLiteral("base: &a [\"x\"]\nmcp_servers:\n  genko:\n    command: /old\n    args: *a\n") << QString()
+                                       << QStringLiteral("genko の args の値にアンカー・別名・タグ");
+        QTest::newRow("tag on command") << QStringLiteral("mcp_servers:\n  genko:\n    command: !!str /old\n") << QString()
+                                        << QStringLiteral("genko の command の値にアンカー・別名・タグ");
+        QTest::newRow("alias in the args' list") << QStringLiteral("mcp_servers:\n  genko:\n    command: /old\n    args:\n      - mcp\n      - *root\n") << QString()
+                                                 << QStringLiteral("genko の args の値にアンカー・別名・タグ");
+        QTest::newRow("anchor in env") << QStringLiteral("mcp_servers:\n  genko:\n    command: /old\n    env: &e\n      T: x\n  other:\n    env: *e\n") << QString()
+                                       << QStringLiteral("genko の中にアンカー（&）がある");
+        QTest::newRow("anchor deep in env") << QStringLiteral("mcp_servers:\n  genko:\n    env:\n      T: [a, &t b]\n") << QString()
+                                            << QStringLiteral("genko の中にアンカー（&）がある");
+        QTest::newRow("anchor on genko") << QStringLiteral("mcp_servers:\n  genko: &g\n    command: /old\n") << QString()
+                                         << QStringLiteral("genko にアンカー・別名・タグ");
+        QTest::newRow("alias for genko") << QStringLiteral("mcp_servers:\n  genko: *g\n") << QString() << QStringLiteral("genko にアンカー・別名・タグ");
+        // (& in quotes, inside a word, or in a comment: no anchor — written)
+        QTest::newRow("ampersands that are not anchors")
+            << QStringLiteral("mcp_servers:\n  genko:\n    command: /old # &not\n    env:\n      Q: \"a &b\"\n      S: 'it''s &c'\n      U: http://x?a=1&b=2\n")
+            << QStringLiteral("mcp_servers:\n  genko:\n    command: #C\n    args: #A\n    env:\n      Q: \"a &b\"\n      S: 'it''s &c'\n      U: http://x?a=1&b=2\n"
+                              "    timeout: 60\n")
+            << QString();
     }
     void hermesSettings() {
         QFETCH(QString, before);

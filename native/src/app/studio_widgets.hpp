@@ -145,6 +145,7 @@ private:
 
     MainWindow* window_;
     std::vector<review_model::InboxItem> items_;
+    bool exporting_ = false;  // (run_export under way: it waits for the save, letting events through)
 };
 
 // --- panel view ------------------------------------------------------------------------------------------------------

@@ -150,6 +150,7 @@ private:
     fs::path root_;
     std::string actor_;
     bool confine_ = true;
+    bool adopting_ = false;  // (upscale called by adopt, which places the enlargement next: its pixels kept for the drawing)
 };
 
 // _waiting(items): what the work waits on, by gate.

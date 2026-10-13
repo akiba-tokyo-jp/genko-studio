@@ -156,6 +156,15 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     connect(pages_, &PageList::deleteRequested, this, [this](int index) {
         apply_ops(Json::array({Json::object({{"op", "delete_page"}, {"page", index}})}));
     });
+    // (the menu's choices wait for the menu and its question: they go to the page by its id in the book in front then,
+    // when it is still the one the menu was opened on — main_window_actions' del_page asks the same of its question)
+    pages_->set_book_check([this] {
+        const Asked asked = asking();
+        return std::function<DocPtr()>([this, asked]() -> DocPtr { return session_ == asked.session ? session_->snapshot() : DocPtr(); });
+    });
+    connect(pages_, &PageList::targetLost, this, [this] {
+        flash(QStringLiteral("確認中に対象の原稿・ページが変更されたため、操作を中止しました。やり直してください。"), 6000, true);
+    });
 
     connect(canvas_, &PageCanvas::changed, this, [this] { refresh_status(); });
     connect(canvas_, &PageCanvas::zoomChanged, this, [this](double) { refresh_zoom(); });

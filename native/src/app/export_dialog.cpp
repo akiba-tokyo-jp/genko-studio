@@ -16,6 +16,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QScopeGuard>
 #include <QPixmap>
 #include <QPushButton>
 #include <QScreen>
@@ -538,6 +539,9 @@ fs::path ExportDialog::out() const {
 }
 
 void ExportDialog::run() {
+    if (running_) return;
+    running_ = true;
+    const auto done = qScopeGuard([this] { running_ = false; });
     if (!episode_->deferred.empty()) {  // (a book whose pages are still being read: the ones not read yet would come out empty)
         ask::warning(this, QStringLiteral("Genko"), wording::error(QStringLiteral("the book's pages are still being read: try again in a moment")));
         return;
@@ -577,6 +581,14 @@ void ExportDialog::run() {
         }
     }
     if (!psd_text_go(chosen)) return;  // (PSD-01: said or asked before anything is written)
+    // (SPEC: the official export reads the book as it is saved — not while a save failed or is still going)
+    if (official->isChecked() && unsaved_reason) {
+        const QString why = unsaved_reason();
+        if (!why.isEmpty()) {
+            ask::warning(this, QStringLiteral("Genko"), why);
+            return;
+        }
+    }
     setCursor(Qt::WaitCursor);
     formats::RunOptions o = options();
     o.pages = chosen;

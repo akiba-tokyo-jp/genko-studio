@@ -25,6 +25,7 @@
 #include "core/model.hpp"
 #include "core/paths.hpp"
 #include "formats/exporting.hpp"
+#include "formats/pillow_save.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -280,29 +281,40 @@ private slots:
         // written here: not decoded again
         const std::string written_bytes = genko::core::a2b_base64(kSamples[0].whole);
         const std::string written = put(tmp.path(), written_bytes);
-        render::vouch_for_picture(*doc.asset_dir, written, render::open_image(written_bytes));
+        render::vouch_for_picture(*doc.asset_dir, written);
         before = render::picture_checks();
         QCOMPARE(QString::fromStdString(refused(doc, adopting(written))), QStringLiteral("(applied)"));
         QCOMPARE(QString::fromStdString(refused(doc, placing(written))), QStringLiteral("(applied)"));
         after = render::picture_checks();
         QCOMPARE(after.decoded - before.decoded, std::uint64_t{0});
         QCOMPARE(after.vouched - before.vouched, std::uint64_t{2});
-        // the pixels it remembers for the drawing are the ones the drawing decodes from the file
+        // the pixels kept for the drawing (keep_placed_picture) are the ones the drawing decodes from the file — drawn
+        // from them, the file not decoded; kept again under the same name, the cache holds them once
         {
             const auto placed = bus().apply(doc, placing(written), Actor("human:作者"));
             render::RenderOptions options;
             options.mode = "print";
             render::clear_render_caches();
-            render::vouch_for_picture(*doc.asset_dir, written, render::open_image(written_bytes));
+            const render::Image pixels = render::open_image(written_bytes);
+            render::keep_placed_picture(*doc.asset_dir, written, pixels);
+            render::keep_placed_picture(*doc.asset_dir, written, pixels);
+            QCOMPARE(render::placed_cache_pixels(), static_cast<std::int64_t>(pixels.width()) * pixels.height());
+            before = render::picture_checks();
             const std::string seeded = render::render_page(placed.doc.page(0), 60, options, &placed.doc).image.tobytes();
+            QCOMPARE(render::picture_checks().drawn_decoded - before.drawn_decoded, std::uint64_t{0});
             render::clear_render_caches();
             const std::string decoded = render::render_page(placed.doc.page(0), 60, options, &placed.doc).image.tobytes();
+            QCOMPARE(render::picture_checks().drawn_decoded - before.drawn_decoded, std::uint64_t{1});
             QVERIFY(seeded == decoded);
         }
-        // other bytes under its name (the pixels cut short): decoded, and refused as from elsewhere
+        // other bytes under its name (the pixels cut short): not kept for the drawing — the file is what is drawn (and
+        // fails) —, decoded by the check, and refused as from elsewhere
         const fs::path file = genko::storage::AssetStore(*doc.asset_dir).path(written, ".png");
         fs::permissions(file, fs::perms::owner_read | fs::perms::owner_write);
         genko::test::write_bytes(QString::fromStdString(genko::core::path_to_utf8(file)), genko::core::a2b_base64(kSamples[0].cut));
+        render::clear_render_caches();
+        render::keep_placed_picture(*doc.asset_dir, written, render::open_image(written_bytes));
+        QCOMPARE(render::placed_cache_pixels(), std::int64_t{0});
         before = render::picture_checks();
         const std::string said = refused(doc, adopting(written));
         QVERIFY2(said.starts_with("apply: ops[1] adopt_candidate: the asset's picture cannot be read ("), said.c_str());
@@ -312,6 +324,54 @@ private slots:
         // and a cut picture from elsewhere is refused as before
         const std::string cut = put(tmp.path(), genko::core::a2b_base64(kSamples[1].cut));
         QVERIFY(refused(doc, placing(cut)).starts_with("apply: ops[0] place_asset: the asset's picture cannot be read ("));
+    }
+
+    // Pixels with a transparency (an RGB or L picture whose PNG has a tRNS chunk, as Genko's enlargement of such a
+    // picture is) kept for the drawing: the same picture as the drawing decodes from the file — the transparent colour
+    // see-through in both —, in print and in proof.
+    void keptPicturesWithATransparencyAreTheDecodedOnes() {
+        for (const char* mode : {"RGB", "L"}) {
+            QTemporaryDir tmp;
+            const Document doc = book_in(tmp.path());
+            const std::string leaf = doc.page(0).frames[0].id;
+            render::Image picture = render::Image::create(mode, render::Size{40, 30}, std::string(mode) == "RGB" ? render::Ink{200, 120, 40} : render::Ink(180));
+            picture.paste(std::string(mode) == "RGB" ? render::Ink{10, 20, 30} : render::Ink(25), render::Box{5, 5, 30, 20});
+            render::Transparency see_through;
+            if (std::string(mode) == "RGB") {
+                see_through.kind = render::Transparency::Kind::Rgb;
+                see_through.rgb = {10, 20, 30};
+            } else {
+                see_through.kind = render::Transparency::Kind::Index;
+                see_through.value = 25;
+            }
+            picture.set_transparency(see_through);
+            const std::string bytes = genko::formats::png_bytes(picture);
+            QVERIFY(bytes.find("tRNS") != std::string::npos);
+            const std::string ref = put(tmp.path(), bytes);
+            const auto placed = bus().apply(doc, Json::array({Json::object({{"op", "place_asset"}, {"page", 1}, {"asset", ref}, {"frame_id", leaf}})}),
+                                            Actor("human:作者"));
+            for (const char* drawing : {"print", "proof"}) {
+                render::RenderOptions options;
+                options.mode = drawing;
+                render::clear_render_caches();
+                render::keep_placed_picture(*doc.asset_dir, ref, picture);
+                const auto before = render::picture_checks();
+                const std::string kept = render::render_page(placed.doc.page(0), 60, options, &placed.doc).image.tobytes();
+                QCOMPARE(render::picture_checks().drawn_decoded - before.drawn_decoded, std::uint64_t{0});
+                render::clear_render_caches();
+                const std::string decoded = render::render_page(placed.doc.page(0), 60, options, &placed.doc).image.tobytes();
+                QCOMPARE(render::picture_checks().drawn_decoded - before.drawn_decoded, std::uint64_t{1});
+                QVERIFY2(kept == decoded, (std::string(mode) + " in " + drawing).c_str());
+                // (and the see-through colour is see-through: without the transparency the page is drawn otherwise)
+                render::Image opaque = picture;
+                opaque.set_transparency(render::Transparency{});
+                render::clear_render_caches();
+                render::keep_placed_picture(*doc.asset_dir, ref, opaque);  // (wrong on purpose: shows the test sees it)
+                const std::string wrong = render::render_page(placed.doc.page(0), 60, options, &placed.doc).image.tobytes();
+                QVERIFY2(wrong != decoded, (std::string(mode) + " in " + drawing).c_str());
+            }
+            render::clear_render_caches();
+        }
     }
 
     void aBrokenPictureFromElsewhereStopsItsDrawingAndExport() {

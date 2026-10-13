@@ -4,9 +4,11 @@
 #include <QListWidget>
 #include <QString>
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "app/thumbs.hpp"
@@ -39,6 +41,9 @@ public:
     ThumbMaker& maker() { return *maker_; }
     // The pages whose pictures are shown (a picture each), and whether a row has its picture.
     bool has_picture(int row) const;
+    // Made as the menu opens: what gives, when one of its choices is made, the book in front — when it is still the
+    // book the menu was opened on (MainWindow: the same session), else none. Without it: the list's own book.
+    void set_book_check(std::function<std::function<DocPtr()>()> make) { book_check_ = std::move(make); }
 
 signals:
     void reorderRequested(const std::vector<int>& order, int moving);
@@ -49,6 +54,9 @@ signals:
     void spreadRequested(int index, int other);
     void spreadUndone(int index);
     void numeroRequested(int index, bool numero);
+    // A choice of the menu not made: the book in front is another, or the page it was about is gone (or the pages of a
+    // spread are no longer side by side), since the menu was opened.
+    void targetLost();
 
 protected:
     void dropEvent(QDropEvent* event) override;
@@ -60,6 +68,7 @@ private:
     QIcon blank() const;
 
     DocPtr doc_;
+    std::function<std::function<DocPtr()>()> book_check_;
     std::unique_ptr<ThumbMaker> maker_;
     std::map<std::string, std::pair<const core::Page*, QIcon>> pictures_;  // page id → (the page it shows, picture)
     std::map<std::string, const core::Page*> asked_;  // requested and not back yet

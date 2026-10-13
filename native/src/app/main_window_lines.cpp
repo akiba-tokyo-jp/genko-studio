@@ -481,10 +481,12 @@ std::unique_ptr<QMenu> MainWindow::line_menu(const std::string& line_id) {
         });
     }
     if (core::py_truthy(group)) {
-        const Num page_index = line->page_index;
-        menu->addAction(QStringLiteral("つなげたフキダシを離す"), this, [this, page_index, group] {
+        menu->addAction(QStringLiteral("つなげたフキダシを離す"), this, [this, line_id, group] {
+            // (the line's page when chosen: the pages may have moved while the menu was open)
+            const core::StoryLine* chosen = line_by_id(line_id);
+            if (chosen == nullptr) return;
             Json ops = Json::array();
-            for (const core::StoryLine* l : book().story_for_page(page_index)) {
+            for (const core::StoryLine* l : book().story_for_page(chosen->page_index)) {
                 if (core::py_equals(render::text::style_of(*l)["group"], group)) ops.push_back(Json{{"op", "edit_line"}, {"id", l->id}, {"style", Json{{"group", nullptr}}}});
             }
             apply_ops(ops);

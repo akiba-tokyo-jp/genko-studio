@@ -37,6 +37,7 @@
 #include "formats/exporting.hpp"
 #include "formats/pillow_save.hpp"
 #include "render/image.hpp"
+#include "render/page.hpp"
 #include "render/placed.hpp"
 #include "service/book.hpp"
 #include "service/evaluate.hpp"
@@ -337,6 +338,89 @@ private slots:
         const auto after = genko::render::picture_checks();
         QCOMPARE(after.decoded - before.decoded, std::uint64_t{1});  // (the agent's picture)
         QCOMPARE(after.vouched - before.vouched, std::uint64_t{1});  // (Genko's enlargement of it)
+        // upscale called by itself (nothing placed next): its pixels are not kept for the drawing
+        genko::render::clear_render_caches();
+        const genko::service::ToolResult enlarged =
+            agent.call("upscale", Json::array({"v.genko"}), Json{{"page", 1}, {"frame_id", leaf}, {"candidate_id", "cd_1"}, {"scale", 2}});
+        QVERIFY2(enlarged.ok, enlarged.to_dict().dump().c_str());
+        QCOMPARE(genko::render::placed_cache_pixels(), std::int64_t{0});
+    }
+
+    // Genko's enlargement adopted (with its preview): its pixels kept for the drawing are the ones the drawing decodes
+    // from its file — the preview and the panel drawn from them without decoding it, the same as drawn from the file —,
+    // for a picture with a transparent colour (the tRNS of an RGB or L PNG, carried by the enlargement) too (the proof
+    // drawing of such pixels: test_placed keptPicturesWithATransparencyAreTheDecodedOnes).
+    void keptEnlargementIsTheDecodedOne_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::addColumn<bool>("see_through");
+        QTest::newRow("RGB") << QStringLiteral("RGB") << false;
+        QTest::newRow("RGB with tRNS") << QStringLiteral("RGB") << true;
+        QTest::newRow("L with tRNS") << QStringLiteral("L") << true;
+        QTest::newRow("RGBA") << QStringLiteral("RGBA") << false;
+    }
+    void keptEnlargementIsTheDecodedOne() {
+        QFETCH(QString, mode);
+        QFETCH(bool, see_through);
+        const std::string m = mode.toStdString();
+        const fs::path root = folder(QStringLiteral("kept-") + QString::fromLatin1(QTest::currentDataTag()).replace(QLatin1Char(' '), QLatin1Char('-')));
+        genko::service::StudioService agent(root, "ai:test");
+        QVERIFY(agent.call("create_project", Json::array({"k.genko", "k", 1}), Json::object()).ok);
+        const fs::path book = root / "k.genko";
+        const Json approved = genko::service::HumanService(book, "human:leaf").approve_name(Json::array({1}));
+        QVERIFY2(approved.value("ok", false), approved.dump().c_str());
+        const std::string leaf = genko::storage::load_document(book).document.page(0).leaf_frames().at(0)->id;
+        genko::render::Image picture = genko::render::Image::create("RGB", genko::render::Size{400, 300}, genko::render::Ink{200, 160, 120});
+        picture.paste(genko::render::Ink{10, 20, 30}, genko::render::Box{60, 50, 300, 220});
+        picture.paste(genko::render::Ink{90, 90, 90}, genko::render::Box{120, 100, 200, 150});
+        picture = picture.convert(m);
+        if (see_through) {
+            genko::render::Transparency t;
+            if (m == "RGB") {
+                t.kind = genko::render::Transparency::Kind::Rgb;
+                t.rgb = {10, 20, 30};
+            } else {
+                t.kind = genko::render::Transparency::Kind::Index;
+                t.value = static_cast<int>(picture.getpixel(70, 60).at(0));
+            }
+            picture.set_transparency(t);
+        }
+        const std::string bytes = genko::formats::png_bytes(picture);
+        QCOMPARE(bytes.find("tRNS") != std::string::npos, see_through);
+        const std::string art = genko::storage::AssetStore(book).put_bytes(bytes, ".png");
+        const Json imported = Json::array({Json{{"op", "import_candidates"}, {"page", 1}, {"frame_id", leaf},
+                                                {"candidates", Json::array({Json{{"id", "cd_1"}, {"asset", art}, {"px", {400, 300}},
+                                                                                 {"origin", Json{{"kind", "agent"}}}}})}}});
+        QVERIFY(agent.call("apply_ops", Json::array({"k.genko", imported}), Json{{"commit", true}}).ok);
+        genko::render::clear_render_caches();
+        const genko::service::ToolResult adopted = agent.call("adopt", Json::array({"k.genko", "cd_1"}), Json{{"page", 1}, {"frame_id", leaf}});
+        QVERIFY2(adopted.ok, adopted.to_dict().dump().c_str());
+        QCOMPARE(adopted.data["upscaled"], Json(true));
+        QCOMPARE(adopted.images.size(), std::size_t{1});
+        // (the enlargement's file carries the transparency the picture had)
+        const genko::core::Document adopted_book = genko::storage::load_document(book).document;
+        const genko::core::Frame* frame = adopted_book.page(0).find_frame(leaf);
+        QVERIFY(frame != nullptr && frame->panel && frame->panel->is_object());
+        std::string enlarged_asset;
+        for (const Json& c : frame->panel->value("candidates", Json::array())) {
+            if (c.value("id", Json()) == adopted.data["adopted"]) enlarged_asset = c.value("asset", std::string());
+        }
+        QVERIFY2(!enlarged_asset.empty(), frame->panel->dump().c_str());
+        const auto enlarged = genko::storage::AssetStore(book).get_bytes(enlarged_asset, ".png");
+        QVERIFY(enlarged);
+        QCOMPARE(enlarged->find("tRNS") != std::string::npos, see_through);
+        // the panel drawn as the adopt's preview draws it: from the pixels kept, the enlargement not decoded; the same
+        // as drawn from its file (the caches emptied)
+        const Json args = Json{{"page", 1}, {"mode", "print"}, {"max_px", 512}, {"frame_id", leaf}};
+        const auto before = genko::render::picture_checks();
+        const genko::service::ToolResult kept = agent.call("render", Json::array({"k.genko"}), args);
+        QVERIFY2(kept.ok, kept.to_dict().dump().c_str());
+        QCOMPARE(genko::render::picture_checks().drawn_decoded - before.drawn_decoded, std::uint64_t{0});
+        genko::render::clear_render_caches();
+        const genko::service::ToolResult decoded = agent.call("render", Json::array({"k.genko"}), args);
+        QVERIFY(decoded.ok);
+        QCOMPARE(genko::render::picture_checks().drawn_decoded - before.drawn_decoded, std::uint64_t{1});
+        QVERIFY(kept.images == decoded.images);
+        QVERIFY(adopted.images == decoded.images);
     }
 
     // Genko's own enlargement (upscale.builtin), worked out in bands of rows: the same pixels and PNG bytes as one band

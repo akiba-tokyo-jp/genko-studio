@@ -11,6 +11,7 @@
 #include <QSignalBlocker>
 
 #include <algorithm>
+#include <chrono>
 
 #include "app/ask.hpp"
 #include "app/check_panel.hpp"
@@ -20,6 +21,7 @@
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/print_dialog.hpp"
+#include "app/save_status.hpp"
 #include "service/wording.hpp"
 #include "core/pyconv.hpp"
 
@@ -187,6 +189,13 @@ void MainWindow::export_book() {
     const core::Page* page = current_page();
     ExportDialog dialog(this, session_->snapshot(), session_->path(), session_->actor(), false,
                         page != nullptr ? core::py_int(page->index) : 1);
+    // (an official export chosen in it: the book saved first, as 承認箱's export — SPEC: the official export reads the
+    // book as it is saved, not while a save failed or is still going)
+    dialog.unsaved_reason = [session = session_] {
+        session->save_now();
+        if (session->wait_saved(std::chrono::seconds(30)) && !session->unsaved()) return QString();
+        return QStringLiteral("原稿を保存できていないため、正式な書き出しをしていません: %1").arg(failure_reason(session->status()));
+    };
     ask::exec(&dialog);
     if (dialog.fix_requested) run_checks();
     session_->check_outside();  // (an official export may have recorded an approval: Python's sync)

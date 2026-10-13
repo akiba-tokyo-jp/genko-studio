@@ -9,6 +9,8 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <optional>
+#include <utility>
 
 #include "app/ask.hpp"
 #include "core/covers.hpp"
@@ -193,13 +195,35 @@ void PageList::show_menu(const QPoint& pos) {
         }
     }
     if (shown == nullptr) return;
+    // A choice is made after the menu's own wait (and a question's), while the book may be read again or another book
+    // come to the front: the page is found then by its id, and the choice goes to its number then. The book in front
+    // another, or the page gone (or the pages a spread is made of no longer side by side), nothing is done and that is
+    // said (targetLost).
+    const std::function<DocPtr()> book_now = book_check_ ? book_check_() : std::function<DocPtr()>([this] { return doc_; });
+    const auto page_now = [this, book_now](const std::string& id) -> std::optional<std::pair<int, DocPtr>> {
+        if (const DocPtr doc = book_now()) {
+            for (const auto& p : doc->pages) {
+                if (p->id == id) return std::make_pair(static_cast<int>(core::py_int(p->index.json())), doc);
+            }
+        }
+        emit targetLost();
+        return std::nullopt;
+    };
+    const std::string id = shown->id;
     QMenu menu(this);
-    menu.addAction(QStringLiteral("この後ろにページを追加"), this, [this, index] { emit addAfterRequested(index); });
-    menu.addAction(QStringLiteral("このページを複製"), this, [this, index] { emit duplicateRequested(index); });
+    menu.addAction(QStringLiteral("この後ろにページを追加"), this, [this, page_now, id] {
+        if (const auto now = page_now(id)) emit addAfterRequested(now->first);
+    });
+    menu.addAction(QStringLiteral("このページを複製"), this, [this, page_now, id] {
+        if (const auto now = page_now(id)) emit duplicateRequested(now->first);
+    });
     menu.addSeparator();
-    const auto move = [this](int page, int delta) {
+    const auto move = [this, page_now, id](int delta) {
+        const auto now = page_now(id);
+        if (!now) return;
+        const int page = now->first;
         std::vector<int> order;
-        for (const auto& p : doc_->pages) order.push_back(static_cast<int>(core::py_int(p->index.json())));
+        for (const auto& p : now->second->pages) order.push_back(static_cast<int>(core::py_int(p->index.json())));
         const auto it = std::find(order.begin(), order.end(), page);
         if (it == order.end()) return;
         const int i = static_cast<int>(it - order.begin());
@@ -209,27 +233,54 @@ void PageList::show_menu(const QPoint& pos) {
         order.insert(order.begin() + j, page);
         emit reorderRequested(order, page);
     };
-    menu.addAction(QStringLiteral("前へ移す"), this, [move, index] { move(index, -1); });
-    menu.addAction(QStringLiteral("後ろへ移す"), this, [move, index] { move(index, 1); });
+    menu.addAction(QStringLiteral("前へ移す"), this, [move] { move(-1); });
+    menu.addAction(QStringLiteral("後ろへ移す"), this, [move] { move(1); });
     menu.addSeparator();
     // a spread with the page after or before (Python offers both, whether or not they face each other), or undone
     if (shown->spread_with && shown->spread_with->truthy()) {
-        menu.addAction(QStringLiteral("見開きを解除"), this, [this, index] { emit spreadUndone(index); });
+        menu.addAction(QStringLiteral("見開きを解除"), this, [this, page_now, id] {
+            if (const auto now = page_now(id)) emit spreadUndone(now->first);
+        });
     } else {
+        // (the other page by its id too, and still the one after or before when chosen; a number with no page then:
+        // the number, as before)
+        const auto spread = [this, page_now, id](const std::string& other_id, int side) {
+            const auto now = page_now(id);
+            if (!now) return;
+            if (other_id.empty()) {
+                emit spreadRequested(now->first, now->first + side);
+                return;
+            }
+            const auto other = page_now(other_id);
+            if (!other) return;
+            if (other->first != now->first + side) {
+                emit targetLost();
+                return;
+            }
+            emit spreadRequested(now->first, other->first);
+        };
+        const auto id_of = [this](int n) -> std::string {
+            for (const auto& p : doc_->pages) {
+                if (p->index == core::Num(n)) return p->id;
+            }
+            return {};
+        };
         if (index < static_cast<int>(doc_->pages.size())) {
-            menu.addAction(QStringLiteral("%1 ページと見開きにする").arg(index + 1), this, [this, index] { emit spreadRequested(index, index + 1); });
+            menu.addAction(QStringLiteral("%1 ページと見開きにする").arg(index + 1), this, [spread, other = id_of(index + 1)] { spread(other, 1); });
         }
         if (index > 1) {
-            menu.addAction(QStringLiteral("%1 ページと見開きにする").arg(index - 1), this, [this, index] { emit spreadRequested(index, index - 1); });
+            menu.addAction(QStringLiteral("%1 ページと見開きにする").arg(index - 1), this, [spread, other = id_of(index - 1)] { spread(other, -1); });
         }
     }
     const bool numero = shown->numero;
     menu.addAction(numero ? QStringLiteral("このページのノンブルを隠す") : QStringLiteral("このページのノンブルを出す"), this,
-                   [this, index, numero] { emit numeroRequested(index, !numero); });
+                   [this, page_now, id, numero] {
+                       if (const auto now = page_now(id)) emit numeroRequested(now->first, !numero);
+                   });
     menu.addSeparator();
-    menu.addAction(QStringLiteral("このページを消す…"), this, [this, index] {
+    menu.addAction(QStringLiteral("このページを消す…"), this, [this, page_now, id, index] {
         if (ask::question(this, QStringLiteral("Genko"), QStringLiteral("%1 ページを消しますか？（元に戻す で取り消せます）").arg(index))) {
-            emit deleteRequested(index);
+            if (const auto now = page_now(id)) emit deleteRequested(now->first);
         }
     });
     menu.exec(mapToGlobal(pos));
