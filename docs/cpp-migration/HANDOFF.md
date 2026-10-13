@@ -1,6 +1,49 @@
 # Genko C++ 引継ぎ（2026-10-08）
 
-## M5出口受入（Linux）— 2026-10-13 記録（この節が最新）
+## CMYK・Lab の編集（color-mode@1、COLOR-02）— 2026-10-13 記録（この節が最新。M5 の後、M6 の前の独立した工程）
+
+### 進め方
+- 群ごとに「実装（対象試験）→レビュー1回→凍結→V2（Release＋ASan）→統合」。工程の出口だけ V3。群A（CL-A: 色モードの土台）→群B（描画道具・色パネル・スポイト）→群C（補正・フィルター）→群D（文字・トーン・効果・編集可能な文字の PSD・レイヤースタイル）→出口 V3。
+- M6（Windows 実機）は着手前に止めて利用者に確かめる。
+
+### 利用者の決定（2026-10-13）
+- 色モードはページごと（RGB・CMYK・Lab。新しいページは本の既定 `color`）。
+- この工程で CMYK・Lab のページで全部を使えるようにする（群に分けて順に統合）。
+- ICC は原稿に埋め込む（`.icc` の素材、16 MiB まで。CMYK にするとき選ぶ）。
+- 精度は 8bit と 16bit（32bit は RGB だけ）。
+
+### V2（群A）— 統合済み
+- **凍結SHA**: `276a799173f346e615a6fefd20a5a9b443e62ff2`（native/integration へ早送り。9318f03 の上に 2fe5986・db695a8・ec075d5・e801ece・276a799）。計画は `validation_policy.py --base 9318f03 --head 276a799 --phase integration`（tier full、各 118 試験、性能は別・必須でない）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU / RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44、Qt 6.11.2、参照 Python 3.12＋Pillow 12.3.0（lcms 2.19。C++ 側は lcms 2.14）。root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。ASan（ctest 1並列）→ Release。ASan の間、別の作業ツリー（群B）のビルドを最低優先度（nice 19）で並べた。
+- **結果**（validation_run.py の result.json。failures は空、除いた契約なし）:
+  - linux-asan: 118/118 合格、サニタイザ指摘なし、CLI23 合格（10/13 15:03–20:41 UTC）
+  - linux-release: 118/118 合格、CLI23 合格（10/13 21:08–22:38 UTC）。故障注入が Debug・ASan だけのための SKIP（test_transaction 10・test_save_e2e 16・test_session 3・test_contract_save 1・test_migrate_e2e 1・test_gui_save 1・test_app_e2e 1。これまでと同じ組）は合格に数えない。ASan では SKIP 0。
+- 統合の前に Release の全体（性能を除く）を 1 回流して 5 件の古い期待（Lab の PSD を断る前提、op の一覧、メニューの並び）を見つけ、直してから凍結した（その記録は残さない。上の V2 が証跡）。
+
+### 群A（CL-A。2fe5986・db695a8・ec075d5・e801ece・276a799）
+- 形式: schema-v4.md「色モード（color-mode@1）」。ページと本の `color`、レイヤーの `ink_raster`（.gkir）、機能 `color-mode@1`。読み込みは ICC・GKIR を確かめ、合わない原稿は断る（RGB のページの絵はインキのページで not_yet_ported）。
+- 合成と表示: render/ink_canvas（インキの値で合成。CMYK は版を反転して、Lab は 8 種の合成だけ）、8bit で描く要素（文字・コマ枠・トーン・効果・ノンブル）は黒と白に描いて取り出す（不透明な画素は完全一致だけを表・墨・白に寄せる）。表示は sRGB（相対・BPC）。
+- 操作: `set_color_mode`（RGB に戻すとき depth 8 は PNG、16 は精密 u16）、`set_inks`。まだの画素の操作はインキのページで not_yet_ported（群B・C で順に）。
+- 書き出し: PDF・TIFF はインキのまま（auto、CMYK のページの cmyk）、PSD はいつもインキのまま（モード 4・9、ICC は資源 1039）。RGB だけの形式は `notes`（CLI の JSON にも）。
+- 取り込み: put_raster・import_psd（CMYK は絵の ICC からページの ICC へ黒を保って、Lab はそのまま）。Lab の PSD は Pillow の "LAB" として開く（RGB への変換は Pillow と同じ Lab V2・4 バイト目をそのまま）。RGB のページへの import_psd は Python と同じく断る。
+- 画面: 「ページの色モード…」、ステータスの「CMYK 8 bit」、タイル・サムネイル・レイヤーの小絵の再描画。
+- 試験: test_ink 12、test_contract_ink 5（Pillow の ImageCms・psd-tools・poppler と照合。Little CMS の版が違うので ±1。Pillow は 16bit の PSD を開けないので psd-tools で、16bit の CMYK の TIFF は上位バイトで読む）、test_gui_book colourModeOfPages、raster_cases の「put_raster PSD lab」は Python と照合（C++ の断りの印を外した）。Lab の PSD が開くことに合わせて test_contract_psd（Pillow の "LAB" の画素とバイトで照合。RGBA は lcms の版の差で照合しない）・test_placed・test_contract_studio（配置した Lab の PSD は Pillow と同じく透明で、ページと書き出しは置く前と同じ）・test_command_bus（op の一覧に set_color_mode・set_inks）を直した。色モードのメニューは Python の項目の後ろ（Python の並びを崩さない）。
+- レビュー（1回。P1 なし、P2×2・P3×7）で直した所: 塗り・トーンの参照（参照レイヤー・このレイヤーだけ）にインキの層の線を入れる（P2）、sRGB にして書いた書き出しは CLI だけでなく書き出しの窓・MCP の export（`notes`）・HTTP の /v1/export・正式な書き出し・動画の書き出しでも知らせる（P2。入稿セットは「PNG だけ変換、TIFF はインキのまま」）、まだの op のページを ops と同じ探し方で照合（1.0・true でもすり抜けない）、読み込みで validate_ink_document（Lab で使えない描画モードなど、どの op も作らない原稿は読み取り専用と理由）、インキのページは補正レイヤーで全頁描画にしない（画面は省いて記録、書き出しは not_yet_ported）、RGB に戻す窓は 8 bit を既定に、LAB からほかの形式への変換の文言を Pillow と同じ `conversion from LAB to RGB not supported` に。
+- 私の判断: 高精度の線の色（`color_rgb`）は RGB のページの精度で、インキのページでは線の `rgb`（8 bit）を規則に当てる（schema-v4 を直した。インキの精度は色の表とプロファイル）。インキのページのトーンは RGB のカラーのページと同じく網点にしない濃さ（SPEC を直した）。
+
+### 既知の制限（群A の時点）
+- まだの画素の操作（消しゴム・範囲・貼り付け・色混ぜ・ゆがみ・塗り・結合・変換・3D・定規・判型の変更・フィルター）は CMYK・Lab のページで not_yet_ported（群B・C）。
+- 二色の境の画素はプロファイルで写す（表の色にはしない）。
+- スポイトは表示の RGB を拾う（群B）。描いている途中の線の表示は RGB。
+- インキのページの編集可能な文字の PSD は not_yet_ported（群D）。
+- CLI の `--color` に auto が無いので Lab のページは CLI では RGB と notes（CMYK は `--color cmyk` でインキのまま）。
+- 16bit の PSD の取り込みは 8bit で読む。
+
+### 残課題・次
+- 群B（画素の操作・スポイト・色の窓）は作業ツリー cl-b で実装中（未統合）。続いて群C（フィルター・補正）、群D（文字・トーン・効果・編集可能な文字の PSD・レイヤースタイル）、工程の出口 V3。
+- Windows は開発中 deferred（配布前の実機受入は必須）。M6 は着手前に止めて利用者に確かめる。
+
+## M5出口受入（Linux）— 2026-10-13 記録
 
 - **凍結SHA**: `9f97117d478f1877c304a8e9e93a3f28ac57fd68`（native/integration。M5②③ の上に M5④ a8e6e67・0c4aae4・3567cd1、出口の準備 ad0f49e、出口のレビュー 9f97117）。計画は `validation_policy.py --base 65f8333 --head 9f97117 --phase milestone`（基点は M4 出口の凍結。tier full、Linux 各116試験、性能は別に必須）。
 - **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44。Qt 6.11.2、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、MCP の参照 Python は GENKO_MCP_PYTHON（mcp 2.2.0）、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。ASan（各構成内 ctest 1並列）→ ASan のビルドを消して Release と Debug を同時に。
