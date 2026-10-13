@@ -327,7 +327,7 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_ruby SOURCES gui/test_gui_ruby.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # the book and its pages (M4②c): spreads, the nombre, the paper, covers, who draws a page, another book's pages taken
   # in (its assets copied first), a PSD as layers, the page list's menu; each command's ops against Python's window
-  genko_test(test_gui_book SOURCES gui/test_gui_book.cpp DEPS genko_app GUI TIMEOUT 900)
+  genko_test(test_gui_book SOURCES gui/test_gui_book.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # the book going out (M4③b): 書き出し… (the dialog's exports as `genko export` writes them), 印刷… (to a PDF: the
   # pages as render_page draws them at the printer's resolution), 履歴 (undo and redo by a click), 入稿前の点検 and its
   # panel (the issues listed, each shown on its page), the phone screens and the scales (a guide pulled out)

@@ -161,8 +161,7 @@ void MainWindow::build_actions() {
         c->update();
     });
     QAction* proof = make("act_cmyk_proof", QStringLiteral("CMYK で見る（色校正）"), [] {}, {},
-                          QStringLiteral("印刷したときの色の見当（CMYK の範囲に収めた色）で表示します。プロファイルは書き出しで選んだもの"
-                                         "（CMYK のページは、もともとそのページのインキで表示しています）"), true);
+                          QStringLiteral("印刷したときの色の見当（CMYK の範囲に収めた色）で表示します。プロファイルは書き出しで選んだもの"), true);
     // (the CMYK profile chosen last for export, kept on this computer, while its file is there)
     const auto profile = [] {
         std::optional<std::filesystem::path> icc;

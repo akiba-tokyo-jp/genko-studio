@@ -156,14 +156,24 @@ private slots:
         }
         QVERIFY2(worst <= 1, qPrintable(QStringLiteral("CMYK → sRGB differs by %1").arg(worst)));
         std::string lab_bytes;
-        for (const Json& v : lab) lab_bytes += std::string{char(v[0].get<int>()), char(v[1].get<int>()), char(v[2].get<int>())};
+        // (Pillow's "LAB" raw mode: a and b signed — the bytes XOR 128 — as putdata's values are not)
+        for (const Json& v : lab) lab_bytes += std::string{char(v[0].get<int>()), char(v[1].get<int>() ^ 128), char(v[2].get<int>() ^ 128)};
         const render::Image lab_image = render::Image::frombytes("LAB", render::Size{static_cast<int>(lab.size()), 1}, lab_bytes);
         const std::string lab_rgb = lab_image.convert("RGB").tobytes();
         worst = 0;
+        QString where;
         for (std::size_t i = 0; i < lab.size(); ++i) {
-            for (unsigned c = 0; c < 3; ++c) worst = std::max(worst, std::abs(int(static_cast<unsigned char>(lab_rgb[i * 3 + c])) - pillow["lab_rgb"][i][c].get<int>()));
+            for (unsigned c = 0; c < 3; ++c) {
+                const int d = std::abs(int(static_cast<unsigned char>(lab_rgb[i * 3 + c])) - pillow["lab_rgb"][i][c].get<int>());
+                if (d > worst) {
+                    worst = d;
+                    where = QString::fromStdString(lab[i].dump() + " Pillow " + pillow["lab_rgb"][i].dump() + " ours ") +
+                            QString::number(static_cast<unsigned char>(lab_rgb[i * 3])) + QStringLiteral(",") + QString::number(static_cast<unsigned char>(lab_rgb[i * 3 + 1])) +
+                            QStringLiteral(",") + QString::number(static_cast<unsigned char>(lab_rgb[i * 3 + 2]));
+                }
+            }
         }
-        QVERIFY2(worst <= 1, qPrintable(QStringLiteral("LAB → RGB differs by %1").arg(worst)));
+        QVERIFY2(worst <= 1, qPrintable(QStringLiteral("LAB → RGB differs by %1 (%2)").arg(worst).arg(where)));
     }
 
     // A CMYK page's TIFF, PSD and PDF keep its inks (8 and 16 bits) with its profile; a Lab page's are Lab.
@@ -186,14 +196,25 @@ private slots:
             QCOMPARE(t["tiff"]["bits"][0].get<int>(), depth);
             QCOMPARE(t["tiff"]["inkset"].get<int>(), 1);
             QVERIFY2(near(t["pixels"][0], {0, 0, 0, 255}, 0), t["pixels"][0].dump().c_str());   // (the black line: K alone)
-            QVERIFY2(near(t["pixels"][1], {26, 230, 204, 0}, 0), t["pixels"][1].dump().c_str());  // (the table's ink)
+            // (the table's ink, 0.1, 0.9, 0.8, 0: Pillow reads a 16-bit CMYK TIFF's high bytes — 6554 is 25)
+            const std::vector<int> red = depth == 8 ? std::vector<int>{26, 230, 204, 0} : std::vector<int>{6554 >> 8, 58982 >> 8, 52428 >> 8, 0};
+            QVERIFY2(near(t["pixels"][1], red, 0), t["pixels"][1].dump().c_str());
             QVERIFY2(near(t["pixels"][2], {0, 0, 0, 0}, 0), t["pixels"][2].dump().c_str());       // (the paper: no ink)
             const Json& p = answer["read"][psd];
             QCOMPARE(p["psd"]["mode"].get<int>(), 4);
             QCOMPARE(p["psd"]["depth"].get<int>(), depth);
-            QCOMPARE(p["icc"].get<std::size_t>(), icc_bytes().size());
+            QCOMPARE(p["psd"]["icc"].get<std::size_t>(), icc_bytes().size());
             QVERIFY(p["psd"]["layers"].dump().find("絵") != std::string::npos);
-            QVERIFY2(near(p["pixels"][0], {0, 0, 0, 255}, 0), p["pixels"][0].dump().c_str());
+            // (psd-tools: the stored values, the inks inverted — the black line K alone, the table's ink)
+            const int most = depth == 16 ? 65535 : 255;
+            QVERIFY2(near(p["psd"]["values"][0], {most, most, most, 0}, 0), p["psd"]["values"][0].dump().c_str());
+            const std::vector<int> table = depth == 16 ? std::vector<int>{6554, 58982, 52428, 0} : std::vector<int>{26, 230, 204, 0};
+            QVERIFY2(near(p["psd"]["values"][1], {most - table[0], most - table[1], most - table[2], most - table[3]}, 0),
+                     p["psd"]["values"][1].dump().c_str());
+            if (depth == 8) {
+                QCOMPARE(p["icc"].get<std::size_t>(), icc_bytes().size());
+                QVERIFY2(near(p["pixels"][0], {0, 0, 0, 255}, 0), p["pixels"][0].dump().c_str());  // (Pillow: the inks)
+            }
             // the picture in the file is the paint layer's own inks
             const auto layer_inks = core::decode_ink_raster(*doc.page(0).layers.back().ink_raster);
             const auto at = [&](int x, int y) { return layer_inks.samples.data() + (std::size_t(y) * layer_inks.width + x) * 5; };

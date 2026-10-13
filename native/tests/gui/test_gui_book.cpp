@@ -51,6 +51,7 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
+#include "testsupport.hpp"
 
 using namespace genko;
 using core::Json;
@@ -850,7 +851,9 @@ private slots:
         QCOMPARE(core::a2b_base64(sent[0]["icc"].get<std::string>()), icc);
         QVERIFY(s.book().page(1).color && s.book().page(1).color->space == core::InkSpace::Cmyk);
         QVERIFY(!s.book().page(0).color);
-        QVERIFY2(s.window->status_label()->text().contains(QStringLiteral("CMYK 8 bit")), qPrintable(s.window->status_label()->text()));
+        QCOMPARE(s.window->last_notice(), QStringLiteral("色モードを変えました"));
+        s.window->flash(QString(), 1);  // (the notice's time over: the page's status, with its mode)
+        QTRY_VERIFY2(s.window->status_label()->text().contains(QStringLiteral("CMYK 8 bit")), qPrintable(s.window->status_label()->text()));
         // every page, Lab 16 bits: the book's profile is not needed
         answer = [](QDialog* d) {
             auto* scope = d->findChild<QComboBox*>(QStringLiteral("color_mode_scope"));

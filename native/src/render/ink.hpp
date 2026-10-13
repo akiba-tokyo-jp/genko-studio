@@ -55,10 +55,12 @@ core::InkPixels convert(const core::InkPixels& pixels, const core::PageColor& fr
 // The CMYK pixels of a CMYK JPEG or PSD (Pillow's "CMYK" image: 0 is no ink) as the page's inks: through the
 // picture's own profile into the page's (black preserved), or taken as the page's when it has none.
 core::InkPixels from_cmyk_image(const Image& cmyk, const Image* alpha, std::string_view picture_icc, const core::PageColor& color);
-// Lab pixels (Pillow's "LAB" image: L, a+128, b+128 bytes) as the page's inks, or as sRGB "RGB" as Pillow converts them
-// (ImageCms: Little CMS's Lab profile to sRGB, perceptual).
+// Lab pixels (Pillow's "LAB" image: L, a+128, b+128 bytes) as the page's inks.
 core::InkPixels from_lab_image(const Image& lab, const Image* alpha, const core::PageColor& color);
-Image lab_to_rgb_as_pillow(const Image& lab);
+// A "LAB" image as Pillow's Image.convert makes it "RGB", "RGBA" or "RGBX": ImageCms from Little CMS's Lab profile to
+// sRGB, perceptual, into a new image, and the LAB image's fourth byte copied as it is (pyCMScopyAux) — its alpha:
+// 255 for a LAB image made from colours or bytes, 0 for one merged from bands (a PSD's).
+Image lab_to_rgb_as_pillow(const Image& lab, std::string_view mode);
 
 // The ICC profile a picture's file carries (a JPEG's APP2 ICC_PROFILE chunks, a PSD's image resource 1039), or "".
 std::string picture_icc(std::string_view bytes);

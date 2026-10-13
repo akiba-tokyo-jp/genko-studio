@@ -8,7 +8,8 @@ The request: {"convert": {"icc": path, "rgb": [[r, g, b], …], "cmyk": [[c, m, 
 colours through Pillow (sRGB → CMYK and CMYK → sRGB with the profile, relative colorimetric with black point
 compensation; Pillow's own LAB → RGB) — and/or {"read": {"files": [path, …], "points": [[x, y], …]}} — each file as
 Pillow opens it (mode, size, its ICC profile's length, the pixels at the points, as RGBA too where Pillow converts it),
-a PSD's colour mode, depth and layers by psd-tools, a TIFF's tags.
+a PSD's colour mode, depth, layers, profile length and stored values at the points (0..2^depth-1; a CMYK PSD stores
+its inks inverted) by psd-tools — Pillow opens 8-bit PSDs only —, a TIFF's tags.
 """
 
 import json
@@ -87,10 +88,15 @@ def read(req):
             info["pillow_error"] = f"{type(error).__name__}: {error}"
         if path.endswith(".psd"):
             from psd_tools import PSDImage
+            from psd_tools.constants import Resource
 
             psd = PSDImage.open(path)
+            most = (1 << psd.depth) - 1
+            merged = psd.numpy()
             info["psd"] = {"mode": int(psd.color_mode), "depth": psd.depth, "channels": psd.channels,
-                           "layers": [layer.name for layer in psd]}
+                           "layers": [layer.name for layer in psd],
+                           "icc": len(psd.image_resources.get_data(Resource.ICC_PROFILE) or b""),
+                           "values": [[round(float(v) * most) for v in merged[y, x]] for x, y in req.get("points", [])]}
         if path.endswith(".tiff") or path.endswith(".tif"):
             info["tiff"] = tiff_tags(path)
         out[path] = info

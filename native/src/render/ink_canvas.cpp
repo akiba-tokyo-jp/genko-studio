@@ -153,7 +153,9 @@ constexpr std::size_t kInkBytes = 768ULL * 1024 * 1024;
 // knows exactly (its table, Genko's blacks, white) when it lies within the rounding of the two pictures; else its
 // nearest 8-bit colour.
 std::array<unsigned char, 3> snapped(const core::PageColor& color, const float* c, double alpha) {
-    const double tolerance = 1.0 / std::max(alpha, 1e-6) + 0.5;
+    // (an opaque pixel is taken back exactly: only its own colour; a partly covered one within the rounding of the two
+    // pictures, about 1/alpha)
+    const double tolerance = alpha >= 1.0 - 1e-9 ? 0.0 : 1.0 / std::max(alpha, 1e-6);
     const auto near = [&](int r, int g, int b) {
         return std::abs(c[0] - r) <= tolerance && std::abs(c[1] - g) <= tolerance && std::abs(c[2] - b) <= tolerance;
     };

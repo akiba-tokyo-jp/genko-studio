@@ -472,26 +472,22 @@ InkPixels from_lab_image(const Image& lab, const Image* alpha, const PageColor& 
     return convert(source, lab_mode, color);
 }
 
-Image lab_to_rgb_as_pillow(const Image& lab) {
+Image lab_to_rgb_as_pillow(const Image& lab, std::string_view mode) {
+    // (Pillow's _imagingcms: a "LAB" image is Lab V2 with one extra byte, "RGB", "RGBA" and "RGBX" are TYPE_RGBA_8)
     static const Transform transform = [] {
         const ProfileHandle srgb(cmsCreate_sRGBProfile());
         const ProfileHandle lab_profile(cmsCreateLab2Profile(nullptr));
-        cmsHTRANSFORM handle = cmsCreateTransform(lab_profile.handle, TYPE_Lab_8, srgb.handle, TYPE_RGB_8, INTENT_PERCEPTUAL, cmsFLAGS_NOCACHE);
+        const cmsUInt32Number lab_v2 = COLORSPACE_SH(PT_LabV2) | CHANNELS_SH(3) | BYTES_SH(1) | EXTRA_SH(1);
+        cmsHTRANSFORM handle = cmsCreateTransform(lab_profile.handle, lab_v2, srgb.handle, TYPE_RGBA_8, INTENT_PERCEPTUAL, cmsFLAGS_NOCACHE);
         if (handle == nullptr) throw core::Error("value", "the Lab to sRGB transform cannot be made");
         return std::make_shared<const TransformHandle>(handle);
     }();
-    Image out = Image::create("RGB", lab.size(), Ink{0, 0, 0});
-    std::vector<unsigned char> in(static_cast<std::size_t>(lab.width()) * 3), rgb(static_cast<std::size_t>(lab.width()) * 3);
+    Image out = Image::create_blank(mode, lab.size());
     for (int y = 0; y < lab.height(); ++y) {
         const auto* row = reinterpret_cast<const unsigned char*>(lab.raw()->image[y]);
-        for (int x = 0; x < lab.width(); ++x) {
-            for (unsigned c = 0; c < 3; ++c) in[x * 3 + c] = row[x * 4 + c];
-        }
-        cmsDoTransform(transform->handle, in.data(), rgb.data(), static_cast<cmsUInt32Number>(lab.width()));
         auto* dst = reinterpret_cast<unsigned char*>(out.raw()->image[y]);
-        for (int x = 0; x < lab.width(); ++x) {
-            for (unsigned c = 0; c < 3; ++c) dst[x * 4 + c] = rgb[x * 3 + c];
-        }
+        cmsDoTransform(transform->handle, row, dst, static_cast<cmsUInt32Number>(lab.width()));
+        for (int x = 0; x < lab.width(); ++x) dst[x * 4 + 3] = row[x * 4 + 3];  // (pyCMScopyAux: the extra byte as it is)
     }
     return out;
 }
