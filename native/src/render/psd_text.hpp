@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <optional>
+#include <utility>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,6 +31,9 @@ struct TextStyle {
     double vertical_scale = 1.0;     // VerticalScale
     int baseline_direction = 2;      // BaselineDirection: 1 upright, 2 mixed (Latin laid on its side down), 3 縦中横
     int run_alignment = 2;           // StyleRunAlignment: 0 em box bottom (left), 2 em box centre, 3 roman baseline
+    // (color-mode@1) FillColor as a CMYK document's inks (Type 2: C, M, Y, K 0..1), when it is one; fill then the RGB
+    // they stand for (K alone: its grey)
+    std::optional<std::array<double, 4>> fill_cmyk;
 
     bool operator==(const TextStyle&) const = default;
 };
@@ -80,11 +84,19 @@ TextLayer read_tysh(std::string_view payload);
 // A single-colour stroke around a layer's pixels (the layer effect 「境界線」, FrFX): `size` pixels outside (or inside,
 // centre) the letters, in `rgb`, at `opacity` per cent.
 struct Stroke {
+    Stroke() = default;
+    Stroke(double size_, std::array<int, 3> rgb_, std::string position_ = "outside", double opacity_ = 100.0, bool enabled_ = true)
+        : size(size_), rgb(rgb_), position(std::move(position_)), opacity(opacity_), enabled(enabled_) {}
+
     double size = 0.0;
     std::array<int, 3> rgb{255, 255, 255};
     std::string position = "outside";  // outside | inside | center
     double opacity = 100.0;
     bool enabled = true;
+    // (color-mode@1) the colour as a CMYK document's (Clr  CMYC: C, M, Y, K %) or a Lab one's (LbCl: L, a, b), when it
+    // is one's (rgb then what a CMYK colour stands for; a Lab one's left as it is)
+    std::optional<std::array<double, 4>> cmyk;
+    std::optional<std::array<double, 3>> lab;
 
     bool operator==(const Stroke&) const = default;
 };

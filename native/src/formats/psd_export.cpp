@@ -14,6 +14,7 @@
 #include "formats/export.hpp"
 #include "formats/output.hpp"
 #include "formats/psd_text_detail.hpp"
+#include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
@@ -162,10 +163,16 @@ std::string blend_key(const std::string& blend) {
 // psd._layer_records, one layer at a time: its record and its channels' data.
 class Records {
 public:
-    explicit Records(render::Size size) : size_(size) {}
+    // (`ink`: a CMYK or Lab page's PSD — its layers in the page's inks)
+    explicit Records(render::Size size, std::optional<core::PageColor> ink = std::nullopt) : size_(size), ink_(std::move(ink)) {}
 
     void add(render::PageLayer&& layer) {
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
+        if (ink_) {  // (its colours by the page's rules)
+            add_inks(layer.name, render::ink_picture(rgba, *ink_).values, ink_->space, ink_->depth, layer.settings ? layer.opacity : 1.0,
+                     layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr);
+            return;
+        }
         const std::optional<render::Box> found = rgba.getbbox();
         const render::Box box = found ? *found : render::Box{0, 0, 1, 1};  // (an empty layer kept as 1 pixel)
         const double opacity_given = layer.settings ? layer.opacity : 1.0;
@@ -180,6 +187,12 @@ public:
         const std::optional<render::Box> found = rgba.getbbox();
         const render::Box local = found ? *found : render::Box{0, 0, 1, 1};
         const render::Box box{local.x0 + origin.x, local.y0 + origin.y, local.x1 + origin.x, local.y1 + origin.y};
+        if (ink_) {  // (its colours by the page's rules)
+            const Image crop = rgba.crop(local);
+            write_inks(name, render::ink_picture(crop, *ink_).values, crop.size(), render::Point{box.x0, box.y0}, ink_->space, ink_->depth, 1.0,
+                       "normal", false, nullptr, blocks);
+            return;
+        }
         write(name, rgba.crop(local), box, 1.0, "norm", false, nullptr, blocks);
     }
     // (PSD-01) a group: its end (below its layers) and the group itself (above them), as Photoshop writes them
@@ -216,11 +229,19 @@ public:
     // RLE, 16 bits raw.
     void add_inks(const std::string& name, const std::vector<double>& values, core::InkSpace space, int depth, double opacity,
                   const std::string& blend, bool clip, const Image* mask) {
+        write_inks(name, values, size_, render::Point{0, 0}, space, depth, opacity, blend, clip, mask, {});
+    }
+
+private:
+    // A picture of inks (`values` over `picture`, its top left at `at` on the page) as a layer, cut to what it holds,
+    // with more tagged blocks after its name.
+    void write_inks(const std::string& name, const std::vector<double>& values, render::Size picture, render::Point at, core::InkSpace space,
+                    int depth, double opacity, const std::string& blend, bool clip, const Image* mask, const std::string& blocks) {
         const unsigned n = core::colour_channels(space), all = n + 1;
-        render::Box box{size_.width, size_.height, 0, 0};
-        for (int y = 0; y < size_.height; ++y) {
-            for (int x = 0; x < size_.width; ++x) {
-                if (values[(std::size_t(y) * size_.width + x) * all + n] <= 0) continue;
+        render::Box box{picture.width, picture.height, 0, 0};  // (in the picture)
+        for (int y = 0; y < picture.height; ++y) {
+            for (int x = 0; x < picture.width; ++x) {
+                if (values[(std::size_t(y) * picture.width + x) * all + n] <= 0) continue;
                 box.x0 = std::min(box.x0, x);
                 box.y0 = std::min(box.y0, y);
                 box.x1 = std::max(box.x1, x + 1);
@@ -233,7 +254,7 @@ public:
             std::string bytes;
             for (int y = box.y0; y < box.y1; ++y) {
                 for (int x = box.x0; x < box.x1; ++x) {
-                    double v = values[(std::size_t(y) * size_.width + x) * all + channel];
+                    double v = values[(std::size_t(y) * picture.width + x) * all + channel];
                     if (channel < n && space == core::InkSpace::Cmyk) v = 1.0 - v;
                     const auto sample = static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0, 1.0) * most));
                     if (depth == 16) put_u16(bytes, sample);
@@ -256,9 +277,11 @@ public:
             }
             mask_plane = packed_plane(bytes, size_.width, size_.height, depth);
         }
-        record(name, std::move(channels), box, opacity, blend_key(blend), clip, std::move(mask_plane), {});
+        record(name, std::move(channels), render::Box{box.x0 + at.x, box.y0 + at.y, box.x1 + at.x, box.y1 + at.y}, opacity, blend_key(blend), clip,
+               std::move(mask_plane), blocks);
     }
 
+public:
     // A plane of samples (rows of `width`, big-endian at 16 bits) as a layer channel's data: 8 bits RLE, 16 raw.
     static std::string packed_plane(const std::string& bytes, int width, int height, int depth) {
         if (depth == 8) return rle(Image::frombytes("L", render::Size{width, height}, bytes));
@@ -310,8 +333,9 @@ private:
     // blend, pass through), 3 the end of one.
     void section(const std::string& name, std::uint32_t type, std::string_view blend) {
         for (int i = 0; i < 4; ++i) put_i32(records_, 0);
-        put_u16(records_, 4);
-        for (const int id : {-1, 0, 1, 2}) {
+        const int colours = ink_ ? static_cast<int>(core::colour_channels(ink_->space)) : 3;  // (the document's channels)
+        put_u16(records_, static_cast<std::uint32_t>(colours + 1));
+        for (int id = -1; id < colours; ++id) {
             put_u16(records_, static_cast<std::uint32_t>(static_cast<std::int16_t>(id)) & 0xffff);
             put_u32(records_, 2);
         }
@@ -336,11 +360,12 @@ private:
         extra += divider;
         put_u32(records_, u32_of(extra.size()));
         records_ += extra;
-        for (int i = 0; i < 4; ++i) put_u16(data_, 0);  // (each channel raw, with nothing)
+        for (int i = 0; i <= colours; ++i) put_u16(data_, 0);  // (each channel raw, with nothing)
         ++count_;
     }
 
     render::Size size_;
+    std::optional<core::PageColor> ink_;
     std::string records_;
     std::string data_;
     int count_ = 0;
@@ -360,8 +385,9 @@ std::string tagged(std::string_view key, std::string payload) {
 // draw those as pictures), the layer the image way gives it.
 class EditableLines {
 public:
-    EditableLines(Records& records, const core::Document& episode, int dpi, render::Size size, std::int64_t page, PsdTextReport& report)
-        : records_(records), dpi_(dpi), size_(size), page_(page), report_(report), font_path_(episode.font_path) {}
+    EditableLines(Records& records, const core::Document& episode, int dpi, render::Size size, std::int64_t page, PsdTextReport& report,
+                  const core::PageColor* ink = nullptr)
+        : records_(records), dpi_(dpi), size_(size), page_(page), report_(report), font_path_(episode.font_path), ink_(ink) {}
 
     void add(const core::StoryLine& line) {
         const std::string words = detail::words_of(line.text, 24);
@@ -396,10 +422,17 @@ public:
         std::string effects;
         if (set.halo) {
             const render::text::Rgb& rgb = set.halo->second;
-            effects = tagged("lfx2", render::psd::lfx2(render::psd::Stroke{static_cast<double>(set.halo->first),
-                                                                            {colour(rgb, 0), colour(rgb, 1), colour(rgb, 2)}, "outside", 100.0, true}));
+            render::psd::Stroke halo;
+            halo.size = static_cast<double>(set.halo->first);
+            halo.rgb = {colour(rgb, 0), colour(rgb, 1), colour(rgb, 2)};
+            if (ink_ != nullptr) {  // (color-mode@1: its colour in the document's mode, by the page's rules)
+                const std::vector<double> ink = render::ink::ink_of(*ink_, halo.rgb);
+                if (ink_->space == core::InkSpace::Cmyk) halo.cmyk = std::array<double, 4>{ink[0], ink[1], ink[2], ink[3]};
+                else halo.lab = std::array<double, 3>{ink[0], ink[1], ink[2]};
+            }
+            effects = tagged("lfx2", render::psd::lfx2(halo));
         }
-        const render::psd::TextLayer body = body_text(line, set, m);
+        const render::psd::TextLayer body = in_inks(body_text(line, set, m));
         if (!body.text.empty()) {
             Image letters = drawn(twin, render::text::LetterParts{false, true, false, false});
             const auto box = letters.getbbox();
@@ -423,7 +456,7 @@ public:
                 const render::Box box = on_page(m, place.ruby, 3);
                 Image piece = rubies.crop(box);
                 rubies.paste(Image::create("RGBA", piece.size(), render::Ink{0, 0, 0, 0}), render::Point{box.x0, box.y0});
-                made.push_back(Made{name, std::move(piece), {box.x0, box.y0}, tagged("TySh", render::psd::tysh(ruby_text(set, place, m))) + effects});
+                made.push_back(Made{name, std::move(piece), {box.x0, box.y0}, tagged("TySh", render::psd::tysh(in_inks(ruby_text(set, place, m)))) + effects});
                 ++report_.ruby_layers;
             }
         }
@@ -435,6 +468,17 @@ public:
 
 private:
     Image blank() const { return Image::create("RGBA", size_, render::Ink{0, 0, 0, 0}); }
+
+    // (color-mode@1) a text's colours as a CMYK document's inks by the page's rules (FillColor Type 2); a Lab document's
+    // stay RGB, the colour the text engine takes and the page's rules stand for.
+    render::psd::TextLayer in_inks(render::psd::TextLayer text) const {
+        if (ink_ == nullptr || ink_->space != core::InkSpace::Cmyk) return text;
+        for (render::psd::StyleRun& run : text.runs) {
+            const std::vector<double> ink = render::ink::ink_of(*ink_, run.style.fill);
+            run.style.fill_cmyk = std::array<double, 4>{ink[0], ink[1], ink[2], ink[3]};
+        }
+        return text;
+    }
 
     Image drawn(const core::StoryLine& line, const render::text::LetterParts& parts) const {
         Image out = blank();
@@ -657,6 +701,7 @@ private:
     std::int64_t page_;
     PsdTextReport& report_;
     std::optional<std::string> font_path_;
+    const core::PageColor* ink_;  // (a CMYK or Lab page's: its colours)
     render::text::Fonts fonts_;
 };
 
@@ -702,10 +747,9 @@ std::string resources_with_icc(std::int64_t dpi, std::string_view icc) {
 
 // color-mode@1 (SPEC.md COLOR-02): a CMYK or Lab page's PSD in its own colour mode (4 or 9) and depth, every layer and
 // the merged picture as its inks (a paint layer's own; the others' colours by the page's rules), a CMYK page's profile
-// embedded. The editable text of PSD-01 is not written for such a page yet.
+// embedded. The editable text of PSD-01 too: its layers' pixels in inks, a CMYK page's text colours as inks.
 void put_page_psd_inks(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest, std::int64_t dpi,
-                       const PsdText& text) {
-    if (text.editable) throw render::NotYetPorted("psd_text_ink");  // (the editable text of a CMYK or Lab page: a later step)
+                       const PsdText& text, PsdTextReport* report) {
     const core::PageColor& color = *page.color;
     render::RenderOptions options;
     options.mode = "print";
@@ -713,12 +757,20 @@ void put_page_psd_inks(detail::Output& output, const core::Document& episode, co
     const render::RenderResult made = render::render_page(page, static_cast<int>(dpi), options, &episode);
     const core::InkPixels& merged = *made.inks;
     const render::Size size{static_cast<int>(merged.width), static_cast<int>(merged.height)};
-    Records records(size);
-    render::page_layers(page, episode, static_cast<int>(dpi), [&](render::PageLayer&& layer) {
+    Records records(size, color);
+    const auto each = [&](render::PageLayer&& layer) {
         const std::vector<double> values = layer.inks ? *layer.inks : render::ink_picture(layer.image, color).values;
         records.add_inks(layer.name, values, color.space, color.depth, layer.settings ? layer.opacity : 1.0,
                          layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr);
-    });
+    };
+    if (text.editable) {  // (PSD-01: each placed line's layers made here)
+        PsdTextReport own;
+        EditableLines lines(records, episode, static_cast<int>(dpi), size, core::py_int(page.index.json()), report != nullptr ? *report : own, &color);
+        const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers);
+    } else {
+        render::page_layers(page, episode, static_cast<int>(dpi), each);
+    }
     const unsigned n = core::colour_channels(color.space);
     std::string body = "8BPS";
     put_u16(body, 1);
@@ -763,7 +815,7 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
     const std::int64_t dpi = psd_dpi(episode, dpi_given);
     check_dpi(dpi);
     if (page.color) {
-        put_page_psd_inks(output, episode, page, dest, dpi, text);
+        put_page_psd_inks(output, episode, page, dest, dpi, text, report);
         return;
     }
     render::RenderOptions options;

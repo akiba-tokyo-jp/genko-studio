@@ -71,6 +71,28 @@ def tiff_tags(path):
             "compression": tags.get(259, [None])[0], "inkset": tags.get(332, [None])[0], "icc": tags.get(34675, 0)}
 
 
+def texts(psd):
+    """The text layers of a PSD as psd-tools reads them: each one's name, its first run's FillColor (Type, Values) and
+    its stroke effect's colour (the descriptor's class and values)."""
+    out = []
+    for layer in psd.descendants():
+        if layer.kind != "type":
+            continue
+        entry = {"name": layer.name}
+        try:
+            fill = layer.engine_dict["StyleRun"]["RunArray"][0]["StyleSheet"]["StyleSheetData"]["FillColor"]
+            entry["fill"] = {"type": int(fill["Type"]), "values": [float(v) for v in fill["Values"]]}
+        except (KeyError, IndexError, TypeError) as error:
+            entry["fill_error"] = f"{type(error).__name__}: {error}"
+        for effect in layer.effects:
+            colour = effect.value.get(b"Clr ") if hasattr(effect, "value") else None
+            if colour is not None:
+                entry["stroke"] = {"class": colour.classID.decode("latin-1"),
+                                   "values": {key.decode("latin-1"): float(v) for key, v in colour.items()}}
+        out.append(entry)
+    return out
+
+
 def read(req):
     out = {}
     for path in req["files"]:
@@ -96,7 +118,8 @@ def read(req):
             info["psd"] = {"mode": int(psd.color_mode), "depth": psd.depth, "channels": psd.channels,
                            "layers": [layer.name for layer in psd],
                            "icc": len(psd.image_resources.get_data(Resource.ICC_PROFILE) or b""),
-                           "values": [[round(float(v) * most) for v in merged[y, x]] for x, y in req.get("points", [])]}
+                           "values": [[round(float(v) * most) for v in merged[y, x]] for x, y in req.get("points", [])],
+                           "text": texts(psd)}
         if path.endswith(".tiff") or path.endswith(".tif"):
             info["tiff"] = tiff_tags(path)
         out[path] = info

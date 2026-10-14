@@ -35,6 +35,7 @@
 #include "formats/exporting.hpp"
 #include "formats/psd_text.hpp"
 #include "render/image.hpp"
+#include "render/ink.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -510,6 +511,42 @@ private slots:
             const std::string bytes = genko::test::read_bytes(QString::fromStdString(files[i].string()));
             QVERIFY(bytes.find("glyf") == std::string::npos && bytes.find("OTTO") == std::string::npos);
         }
+    }
+
+    // color-mode@1 (群D): the editable PSD of a CMYK page (mode 4) and a Lab one (mode 9) — text layers as on an RGB
+    // page, their pixels in inks; a CMYK page's text colours and outlines as its inks (FillColor Type 2, CMYC: Genko's
+    // black K 100% alone, white no ink), a Lab page's outline in Lab (LbCl), its text colours RGB.
+    void editableOnInkPages() {
+        const std::string icc = genko::test::read_bytes(genko::test::test_data(QStringLiteral("colour/photocraft-coated-cmyk.icc")));
+        const Document doc = run_ops(book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 3}, {"mode", "cmyk"}, {"icc", genko::core::b64encode(icc)}},
+                                                          Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "lab"}}}));
+        genko::formats::PsdTextReport report;
+        const auto files = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("ink")), kDpi, genko::formats::PsdText{true, false}, &report);
+        QVERIFY(report.rasterized.empty());
+        QCOMPARE(report.text_layers, std::int64_t{19});
+        const auto read_ink = [](const std::filesystem::path& file) {
+            Read r{psd::File::read(genko::test::read_bytes(QString::fromStdString(file.string())), psd::default_limits(), true), {}};
+            r.layers = r.file.layers();
+            return r;
+        };
+        const Read p3 = read_ink(files.at(2));
+        QCOMPARE(p3.file.mode_name(), std::string("cmyk"));
+        const genko::core::PageColor& cmyk = *doc.page(2).color;
+        const psd::TextStyle& red = text_of(p3, "本文 #p3a").runs.front().style;
+        QVERIFY(red.fill_cmyk.has_value());
+        const std::vector<double> want = genko::render::ink::ink_of(cmyk, {200, 30, 30});
+        for (std::size_t i = 0; i < 4; ++i) QVERIFY(near((*red.fill_cmyk)[i], want[i], 1e-5));
+        const psd::Stroke black = p3.file.stroke(*p3.named("本文 #p3e")).value();
+        QVERIFY(black.cmyk && (*black.cmyk == std::array<double, 4>{0, 0, 0, 1}));
+        QVERIFY((black.rgb == std::array<int, 3>{0, 0, 0}));
+        const psd::Stroke white = p3.file.stroke(*p3.named("本文 #p3a")).value();
+        QVERIFY(white.cmyk && (*white.cmyk == std::array<double, 4>{0, 0, 0, 0}));
+        QVERIFY(p3.named("フキダシ") != nullptr || !p3.in("台詞 ドーン").empty());
+        const Read p1 = read_ink(files.at(0));
+        QCOMPARE(p1.file.mode_name(), std::string("lab"));
+        const psd::TextStyle& down = text_of(p1, "本文 #p1a").runs.front().style;
+        QVERIFY(!down.fill_cmyk.has_value());
+        QVERIFY(p1.named("ルビ「とうきょう」 #p1a-r0") != nullptr);
     }
 
     // The editable book's page 1, down: 「東京と東京」 and a reading beside each 東京, a shout, 縦中横, styled parts, a line

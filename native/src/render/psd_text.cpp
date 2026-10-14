@@ -554,6 +554,23 @@ Engine colour(const std::array<int, 3>& rgb) {
                       {"Values", Engine::fs({1.0, rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0})}});
 }
 
+// (color-mode@1) a CMYK document's colour: Type 2, alpha then C, M, Y, K (0..1)
+Engine colour_cmyk(const std::array<double, 4>& cmyk) {
+    return Engine::d({{"Type", Engine::i(2)}, {"Values", Engine::fs({1.0, cmyk[0], cmyk[1], cmyk[2], cmyk[3]})}});
+}
+
+// The RGB a CMYK colour stands for, without a profile: K alone its grey (the page's rules backwards), else each ink
+// taking its share of the light.
+std::array<int, 3> rgb_of_cmyk(const std::array<double, 4>& c) {
+    if (c[0] == 0 && c[1] == 0 && c[2] == 0) {
+        const int v = static_cast<int>(std::lround(std::clamp(1.0 - c[3], 0.0, 1.0) * 255.0));
+        return {v, v, v};
+    }
+    std::array<int, 3> out{};
+    for (std::size_t i = 0; i < 3; ++i) out[i] = static_cast<int>(std::lround(std::clamp((1.0 - c[i]) * (1.0 - c[3]), 0.0, 1.0) * 255.0));
+    return out;
+}
+
 Engine paragraph_properties(int justification) {
     return Engine::d({{"Justification", Engine::i(justification)},
                       {"FirstLineIndent", Engine::f(0.0)},
@@ -602,8 +619,8 @@ Engine style_sheet(const TextStyle& s, std::int64_t font) {
                       {"StyleRunAlignment", Engine::i(s.run_alignment)},
                       {"Language", Engine::i(0)},
                       {"NoBreak", Engine::b(false)},
-                      {"FillColor", colour(s.fill)},
-                      {"StrokeColor", colour({0, 0, 0})},
+                      {"FillColor", s.fill_cmyk ? colour_cmyk(*s.fill_cmyk) : colour(s.fill)},
+                      {"StrokeColor", s.fill_cmyk ? colour_cmyk({0.0, 0.0, 0.0, 1.0}) : colour({0, 0, 0})},
                       {"FillFlag", Engine::b(true)},
                       {"StrokeFlag", Engine::b(false)},
                       {"FillFirst", Engine::b(true)},
@@ -750,7 +767,12 @@ TextStyle style_from(const Engine& data, const std::vector<std::string>& fonts) 
     s.faux_bold = bool_or(data.get("FauxBold"), false);
     s.faux_italic = bool_or(data.get("FauxItalic"), false);
     if (const Engine* values = path(data, {"FillColor", "Values"}); values != nullptr && values->kind == Engine::Kind::list && values->list.size() >= 4) {
-        for (std::size_t i = 0; i < 3; ++i) s.fill[i] = static_cast<int>(std::lround(values->list[i + 1].number * 255.0));
+        if (number_or(path(data, {"FillColor", "Type"}), 1) == 2 && values->list.size() >= 5) {  // (a CMYK document's)
+            s.fill_cmyk = std::array<double, 4>{values->list[1].number, values->list[2].number, values->list[3].number, values->list[4].number};
+            s.fill = rgb_of_cmyk(*s.fill_cmyk);
+        } else {
+            for (std::size_t i = 0; i < 3; ++i) s.fill[i] = static_cast<int>(std::lround(values->list[i + 1].number * 255.0));
+        }
     }
     s.tracking = number_or(data.get("Tracking"), 0.0);
     s.leading = number_or(data.get("Leading"), 0.0);
@@ -921,10 +943,24 @@ TextLayer read_tysh(std::string_view payload) {
 }
 
 std::string lfx2(const Stroke& stroke) {
-    Descriptor rgb;
-    rgb.number("Rd  ", stroke.rgb[0]);
-    rgb.number("Grn ", stroke.rgb[1]);
-    rgb.number("Bl  ", stroke.rgb[2]);
+    Descriptor rgb;  // (its colour in the document's mode: RGBC, CMYC in %, LbCl)
+    std::string_view colour_class = "RGBC";
+    if (stroke.cmyk) {
+        rgb.number("Cyn ", (*stroke.cmyk)[0] * 100.0);
+        rgb.number("Mgnt", (*stroke.cmyk)[1] * 100.0);
+        rgb.number("Ylw ", (*stroke.cmyk)[2] * 100.0);
+        rgb.number("Blck", (*stroke.cmyk)[3] * 100.0);
+        colour_class = "CMYC";
+    } else if (stroke.lab) {
+        rgb.number("Lmnc", (*stroke.lab)[0]);
+        rgb.number("A   ", (*stroke.lab)[1]);
+        rgb.number("B   ", (*stroke.lab)[2]);
+        colour_class = "LbCl";
+    } else {
+        rgb.number("Rd  ", stroke.rgb[0]);
+        rgb.number("Grn ", stroke.rgb[1]);
+        rgb.number("Bl  ", stroke.rgb[2]);
+    }
     Descriptor frame;
     frame.boolean("enab", stroke.enabled);
     frame.boolean("present", true);
@@ -934,7 +970,7 @@ std::string lfx2(const Stroke& stroke) {
     frame.enumerated("Md  ", "BlnM", "Nrml");
     frame.unit("Opct", "#Prc", stroke.opacity);
     frame.unit("Sz  ", "#Pxl", stroke.size);
-    frame.object("Clr ", rgb, "RGBC");
+    frame.object("Clr ", rgb, colour_class);
     frame.boolean("overprint", false);
     Descriptor effects;
     effects.unit("Scl ", "#Prc", 100.0);
@@ -965,9 +1001,18 @@ std::optional<Stroke> read_lfx2(std::string_view payload) {
     if (const DValue* v = f.get("Opct")) out.opacity = v->number;
     if (const DValue* v = f.get("Styl")) out.position = v->enum_value == "InsF" ? "inside" : v->enum_value == "CtrF" ? "center" : "outside";
     if (const DValue* c = f.get("Clr "); c != nullptr && c->object) {
-        const char* const keys[3] = {"Rd  ", "Grn ", "Bl  "};
-        for (std::size_t i = 0; i < 3; ++i) {
-            if (const DValue* v = c->object->get(keys[i])) out.rgb[i] = static_cast<int>(std::lround(v->number));
+        const DObject& colour = *c->object;
+        const auto number_at = [&](const char* key) { const DValue* v = colour.get(key); return v != nullptr ? v->number : 0.0; };
+        if (colour.class_id == "CMYC") {
+            out.cmyk = std::array<double, 4>{number_at("Cyn ") / 100.0, number_at("Mgnt") / 100.0, number_at("Ylw ") / 100.0, number_at("Blck") / 100.0};
+            out.rgb = rgb_of_cmyk(*out.cmyk);
+        } else if (colour.class_id == "LbCl") {
+            out.lab = std::array<double, 3>{number_at("Lmnc"), number_at("A   "), number_at("B   ")};
+        } else {
+            const char* const keys[3] = {"Rd  ", "Grn ", "Bl  "};
+            for (std::size_t i = 0; i < 3; ++i) {
+                if (const DValue* v = colour.get(keys[i])) out.rgb[i] = static_cast<int>(std::lround(v->number));
+            }
         }
     }
     return out;

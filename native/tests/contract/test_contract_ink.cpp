@@ -21,6 +21,7 @@
 #include "core/ink.hpp"
 #include "core/paths.hpp"
 #include "formats/export.hpp"
+#include "formats/psd_text.hpp"
 #include "render/image.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
@@ -174,6 +175,44 @@ private slots:
             }
         }
         QVERIFY2(worst <= 1, qPrintable(QStringLiteral("LAB → RGB differs by %1 (%2)").arg(worst).arg(where)));
+    }
+
+    // (群D) The editable PSD of a CMYK and a Lab page as psd-tools reads it: its text layer (in its group, whose records
+    // carry the page's channels), a CMYK page's text in Genko's black FillColor Type 2 on K alone and its white outline
+    // CMYC with no ink; a Lab page's text RGB, its outline LbCl (L 100).
+    void editableTextKeepsTheInks() {
+        const fs::path out = core::path_from_utf8(path(QStringLiteral("editable")).toStdString());
+        for (const std::string mode : {"cmyk", "lab"}) {
+            const Json to = mode == "cmyk" ? Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"icc", core::b64encode(icc_bytes())}}
+                                           : Json{{"op", "set_color_mode"}, {"mode", "lab"}};
+            const core::Document doc =
+                run_ops(small_book(), Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "t1"}, {"text", "ドン"}, {"x_mm", 5}, {"y_mm", 5},
+                                                        {"w_mm", 50}, {"h_mm", 20}, {"wrap", "horizontal"}, {"balloon", "sfx"},
+                                                        {"style", Json{{"outline_mm", 1}, {"rgb", Json::array({20, 20, 20})}, {"outline_rgb", Json::array({255, 255, 255})}}}},
+                                                   to}))
+                    .doc;
+            formats::PsdTextReport report;
+            const auto psds = formats::export_psd_pages(doc, out / mode, 100, formats::PsdText{true, false}, &report);
+            const std::string psd = core::path_to_utf8(psds.at(0));
+            const Json answer = check(Json{{"read", Json{{"files", Json::array({psd})}, {"points", Json::array()}}}});
+            const Json& texts = answer["read"][psd]["psd"]["text"];
+            const Json* body = nullptr;
+            for (const Json& t : texts) {
+                if (t["name"] == "本文 #t1") body = &t;
+            }
+            QVERIFY2(body != nullptr, texts.dump().c_str());
+            QCOMPARE((*body)["fill"]["type"].get<int>(), mode == "cmyk" ? 2 : 1);
+            const std::vector<double> fill = (*body)["fill"]["values"].get<std::vector<double>>();
+            if (mode == "cmyk") {
+                QVERIFY2((fill == std::vector<double>{1, 0, 0, 0, 1}), body->dump().c_str());
+                QCOMPARE((*body)["stroke"]["class"].get<std::string>(), std::string("CMYC"));
+                for (const char* key : {"Cyn ", "Mgnt", "Ylw ", "Blck"}) QCOMPARE((*body)["stroke"]["values"][key].get<double>(), 0.0);
+            } else {
+                QVERIFY2(fill.size() == 4 && std::abs(fill[1] - 20 / 255.0) < 1e-6, body->dump().c_str());
+                QCOMPARE((*body)["stroke"]["class"].get<std::string>(), std::string("LbCl"));
+                QVERIFY(std::abs((*body)["stroke"]["values"]["Lmnc"].get<double>() - 100.0) < 1e-6);
+            }
+        }
     }
 
     // A CMYK page's TIFF, PSD and PDF keep its inks (8 and 16 bits) with its profile; a Lab page's are Lab.
