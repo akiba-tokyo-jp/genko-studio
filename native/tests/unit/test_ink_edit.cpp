@@ -358,7 +358,8 @@ private slots:
             run_ops(doc, Json::array({Json{{"op", "paste"}, {"page", 1}, {"layer_id", "pic"}, {"items", items}}})).doc;
         all_in_inks(pasted);
         QVERIFY(layer_of(pasted, "pic").patches.empty());
-        const std::uint16_t* p = at(pixels_of(pasted, "pic"), px(40), px(55));
+        const core::InkPixels laid = pixels_of(pasted, "pic");
+        const std::uint16_t* p = at(laid, px(40), px(55));
         QVERIFY2(p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 65535 && p[4] == 65535, "Genko's black: K alone");
         for (unsigned c = 0; c < 5; ++c) QCOMPARE(at(pixels_of(pasted, "pic"), px(45), px(20))[c], at(pixels_of(doc, "pic"), px(45), px(20))[c]);
         QCOMPARE(at(pixels_of(pasted, "pic"), px(55), px(75))[4], std::uint16_t(0));  // (the rest of the layer as it was)
