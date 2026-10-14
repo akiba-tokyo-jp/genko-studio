@@ -25,6 +25,7 @@
 #include "core/pynum.hpp"
 #include "render/fill_patches.hpp"
 #include "render/raster_ops.hpp"
+#include "render/ink_edit.hpp"
 #include "render/selection.hpp"
 
 namespace genko::app {
@@ -501,7 +502,12 @@ bool MainWindow::copy() {
     try {
         render::use_brushes_of(book());
         core::Layer copy = *layer;  // (lifted from a copy: the layer itself keeps everything)
-        const auto lifted = render::selection::lift(copy, *area, *page);
+        auto lifted = render::selection::lift(copy, *area, *page);
+        if (page->color && layer->ink_raster) {  // (color-mode@1: its inks there, as a piece that keeps them)
+            if (const auto piece = render::ink_edit::lift_piece(*page, *layer, *area)) {
+                lifted.patches.push_back(render::ink_edit::piece_patch(*piece, *page->color));
+            }
+        }
         if (lifted.strokes.empty() && lifted.patches.empty()) {
             flash(QStringLiteral("選んだ範囲に、このレイヤーの絵がありません"), 3000);
             return false;
@@ -530,7 +536,12 @@ void MainWindow::paste() {
         return;
     }
     const std::string id = core::new_id();
-    Json add{{"op", "add_layer"}, {"page", page->index.json()}, {"name", "貼り付け"}, {"kind", "pen"}, {"id", id}};
+    // (color-mode@1: pieces of inks go into a paint layer, which keeps them as they were)
+    bool inks = false;
+    if (page->color && clipboard_->contains("patches") && (*clipboard_)["patches"].is_array()) {
+        for (const Json& patch : (*clipboard_)["patches"]) inks = inks || (patch.is_object() && patch.contains("gkir"));
+    }
+    Json add{{"op", "add_layer"}, {"page", page->index.json()}, {"name", "貼り付け"}, {"kind", inks ? "paint" : "pen"}, {"id", id}};
     if (layer != nullptr) add["after"] = layer->id;
     const Json ops = Json::array({add, Json{{"op", "paste"}, {"page", page->index.json()}, {"layer_id", id}, {"items", *clipboard_}}});
     if (apply_ops(ops)) {

@@ -1,6 +1,7 @@
 #include "render/raster_ops.hpp"
 
 #include "render/ink.hpp"
+#include "render/ink_edit.hpp"
 #include "render/plugins.hpp"
 
 #include <QCryptographicHash>
@@ -1382,6 +1383,24 @@ void precise_edit(Layer& layer, Tool&& tool) {
     if (pixels != *layer.color_raster) layer.color_raster = std::make_shared<const std::string>(std::move(pixels));
 }
 
+// color-mode@1: an ink tool's new pixels for the layer (render/ink_edit), as precise_edit's.
+template <class Tool>
+void ink_pixels_edit(Layer& layer, Tool&& tool) {
+    std::string pixels;
+    try {
+        pixels = tool();
+    } catch (const core::PyUncaught&) {
+        throw;
+    } catch (const core::Error& error) {
+        if (error.code() != "value" && error.code() != "format") throw;
+        throw OpError(error.what());
+    }
+    if (!layer.ink_raster || pixels != *layer.ink_raster) {
+        layer.ink_raster = std::make_shared<const std::string>(std::move(pixels));
+        layer.ink_memo = {};
+    }
+}
+
 void delete_or_transform_area(OpContext& c, bool transform) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -1404,6 +1423,23 @@ void delete_or_transform_area(OpContext& c, bool transform) {
             precise_edit(target, [&] { return color_edit::move_area(page, target, area, selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, resample); });
         }
         return;
+    }
+    // (color-mode@1: a CMYK or Lab page's ink pixels are taken, moved or cleared as inks, render/ink_edit; its lines and
+    // fills as on any layer, below)
+    if (page.color && page.layers[ti].ink_raster) {
+        Layer& target = page.layers[ti];
+        if (!transform) {
+            ink_pixels_edit(target, [&] { return ink_edit::delete_area(page, target, area); });
+        } else if (core::truthy_at(op, "warp")) {
+            const warp::Go go = warp::mapping(selection::area_bbox(area), op["warp"]);
+            const Resample resample = interp(op);
+            ink_pixels_edit(target, [&] { return ink_edit::warp_area(page, target, area, go, resample); });
+        } else {
+            const std::vector<double> m = matrix_of(op);
+            if (m.size() != 6) throw OpError("matrix is [a, b, c, d, e, f]");
+            const Resample resample = interp(op);
+            ink_pixels_edit(target, [&] { return ink_edit::move_area(page, target, area, selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, resample); });
+        }
     }
     selection::Items items = selection::lift(page.layers[ti], area, page);
     if (!transform) return;
@@ -1481,7 +1517,32 @@ void paste(OpContext& c) {
         precise_edit(target, [&] { return color_edit::paste(page, target, pasted, &doc); });
         return;
     }
-    selection::drop(page.layers[ti], std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
+    // color-mode@1: pieces of inks copied from a CMYK or Lab page ("gkir", ink_edit::piece_patch) laid into a paint
+    // layer's inks on a page of the same mode, when the paste moves and scales without turning; anywhere else their
+    // picture, the key dropped (never saved)
+    std::vector<core::Patch> pictures;
+    const bool upright = m[1] == 0 && m[2] == 0 && m[0] > 0 && m[3] > 0;
+    Layer& target = page.layers[ti];
+    for (core::Patch& patch : items.patches) {
+        if (!patch.attrs.is_object() || !patch.attrs.contains("gkir")) {
+            pictures.push_back(std::move(patch));
+            continue;
+        }
+        std::optional<core::InkPixels> inks;
+        if (page.color && target.kind == LayerKind::Raster && upright) inks = ink_edit::patch_inks(patch, *page.color);
+        if (inks) {
+            const Json box = core::subscript(patch.attrs, "box");
+            const double x = core::to_float(box[0]), y = core::to_float(box[1]), w = core::to_float(box[2]), h = core::to_float(box[3]);
+            const std::array<double, 4> placed{m[0] * x + m[4], m[3] * y + m[5], m[0] * w, m[3] * h};
+            ink_pixels_edit(target, [&] { return ink_edit::lay_piece(page, target, *inks, placed); });
+            continue;
+        }
+        patch.attrs.erase("gkir");
+        pictures.push_back(std::move(patch));
+    }
+    items.patches = std::move(pictures);
+    if (items.strokes.empty() && items.patches.empty()) return;
+    selection::drop(target, std::move(items), selection::Matrix{m[0], m[1], m[2], m[3], m[4], m[5]}, true);
 }
 
 // --- pixels in --------------------------------------------------------------------------------------------------------
@@ -2157,13 +2218,29 @@ void filter_raster(OpContext& c) {
 
 // --- the eraser on a paint layer ----------------------------------------------------------------------------------------
 
+// The paint layer erase works on (layer_id, else the "layer" role, default "ink"), as it finds it.
+std::size_t erase_target(Page& page, const Json& op) {
+    if (core::truthy_at(op, "layer_id")) return core::layer_by_id(page, core::py_str(op["layer_id"]));
+    const Json* layer = core::get(op, "layer");
+    return core::layer_for_role(page, core::role_from(Json(layer != nullptr && core::py_truthy(*layer) ? core::py_str(*layer) : "ink")));
+}
+
+// Does erase still have inks to erase after core's (a CMYK or Lab page's paint layer holding them)?
+bool erases_inks(Document& doc, const Json& op) {
+    const std::size_t at = core::require_page(doc, op);
+    if (!doc.page(at).color) return false;
+    Page& page = doc.edit_page(at);
+    return page.layers[erase_target(page, op)].ink_raster != nullptr;
+}
+
 void erase(OpContext& c) {
     // The pen lines are core's erase (cut where the eraser went, up to their crossings, or whole; a tone scraped): it
     // does them and then stops at a paint layer's pixels with not_yet_ported. Those are erased here, after it.
+    // (color-mode@1: a paint layer's inks it does not see — they are no PNG — and are erased here too, render/ink_edit)
     static const core::OpFunction* const lines = core::OpRegistry::builtin().find("erase");
     try {
         (*lines)(c);
-        return;
+        if (!erases_inks(c.doc, c.op)) return;
     } catch (const core::Error& error) {
         const std::string_view why = error.what();
         if (error.code() != "not_yet_ported" ||
@@ -2174,13 +2251,7 @@ void erase(OpContext& c) {
     const Json& op = c.op;
     const std::size_t at = core::require_page(doc, op);
     Page& page = doc.edit_page(at);
-    std::size_t li = 0;
-    if (core::truthy_at(op, "layer_id")) {
-        li = core::layer_by_id(page, core::py_str(op["layer_id"]));
-    } else {
-        const Json* layer = core::get(op, "layer");
-        li = core::layer_for_role(page, core::role_from(Json(layer != nullptr && core::py_truthy(*layer) ? core::py_str(*layer) : "ink")));
-    }
+    const std::size_t li = erase_target(page, op);
     const Json* raw = core::get(op, "points");
     core::PenPoints points = core::parse_points(raw != nullptr && core::py_truthy(*raw) ? *raw : Json::array());
     const Json* width_value = core::get(op, "width_mm");
@@ -2202,6 +2273,12 @@ void erase(OpContext& c) {
     if (target.color_raster) {
         precise_edit(target, [&] {
             return color_edit::erase(page, target, points, width, texture == "hard" ? "" : texture, target.id + raster::first_point_repr(points));
+        });
+        return;
+    }
+    if (page.color && target.ink_raster) {  // (color-mode@1: the inks themselves, render/ink_edit)
+        ink_pixels_edit(target, [&] {
+            return ink_edit::erase(page, target, points, width, texture == "hard" ? "" : texture, target.id + raster::first_point_repr(points));
         });
         return;
     }

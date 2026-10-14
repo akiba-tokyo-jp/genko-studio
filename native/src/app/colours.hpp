@@ -181,6 +181,7 @@ private:
 
     BrushPanel* brush_ = nullptr;
     std::optional<core::PageColor> page_color_;
+    bool inks_edited_ = false;  // (an ink value changed by the user since it was shown)
     bool loading_ = false;
     Rgb sub_rgb_{255, 255, 255};
     std::vector<Rgb> history_;

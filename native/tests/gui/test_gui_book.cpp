@@ -916,16 +916,18 @@ private slots:
         QCOMPARE(table.size(), std::size_t{1});
         QVERIFY(panel->rgb() == table[0].rgb);
         for (std::size_t i = 0; i < 4; ++i) QVERIFY(std::abs(table[0].ink[i] - chosen[i] / 100.0) < 1e-6);
-        // the eyedropper on the line: K 100% alone, given a colour of its own
+        // the eyedropper on the line: K 100% alone — Genko's black, which every page prints so: no entry
         n = s.ops.size();
         s.window->canvas()->last_pick = std::make_pair(QPointF(30, 40), false);
         emit s.window->canvas()->colourPicked({35, 31, 32});
-        QCOMPARE(s.ops.size(), n + 1);
-        const auto& now = s.book().page(0).color->inks;
-        QCOMPARE(now.size(), std::size_t{2});
-        QVERIFY(panel->rgb() == now[1].rgb);
-        QVERIFY2(now[1].ink == (std::vector<double>{0, 0, 0, 1}), core::to_json(*s.book().page(0).color).dump().c_str());
+        QCOMPARE(s.ops.size(), n);
+        QVERIFY((panel->rgb() == std::array<int, 3>{20, 20, 20}));
+        QCOMPARE(s.book().page(0).color->inks.size(), std::size_t{1});
         QVERIFY(s.window->last_notice().contains(QStringLiteral("K 100.0%")));
+        // a box left without a change changes nothing
+        n = s.ops.size();
+        emit panel->ink_spins[0]->editingFinished();
+        QCOMPARE(s.ops.size(), n);
     }
 
     void coversAreAdded() {

@@ -53,7 +53,7 @@ public:
     // The page as the screen shows it ("RGB", sRGB).
     Image display() const;
     // The page's inks at a depth (opaque: alpha full).
-    core::InkPixels ink_pixels(int depth) const;
+    core::InkPixels ink_pixels(int depth, bool alpha = false) const;  // (alpha: as composited; else opaque)
 
 private:
     struct Impl;

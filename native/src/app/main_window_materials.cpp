@@ -39,6 +39,7 @@
 #include "render/materials.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/ink_edit.hpp"
 #include "render/selection.hpp"
 
 namespace genko::app {
@@ -301,6 +302,13 @@ std::optional<Json> MainWindow::copy_selection_items() {
     try {
         core::Layer copy = *layer;
         items = render::selection::lift(copy, *area, *page);
+        if (page->color && layer->ink_raster) {  // (color-mode@1: its inks there as the picture they show — a material's)
+            if (const auto piece = render::ink_edit::lift_piece(*page, *layer, *area)) {
+                core::Patch patch = render::ink_edit::piece_patch(*piece, *page->color);
+                patch.attrs.erase("gkir");
+                items.patches.push_back(std::move(patch));
+            }
+        }
     } catch (const std::exception& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 4000, true);
         return std::nullopt;

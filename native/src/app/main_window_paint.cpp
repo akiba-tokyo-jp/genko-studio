@@ -179,7 +179,7 @@ void MainWindow::build_colour_dock() {
         if (QAction* act = action("act_transparent"); act->isChecked() != on) act->setChecked(on);
     });
     connect(colours_, &ColourPanel::pick_source_chosen, this, [this](const QString& source) { canvas_->pick_source = source; });
-    connect(colours_, &ColourPanel::inks_chosen, this, [this](const std::vector<double>& ink) { choose_inks(ink); });
+    connect(colours_, &ColourPanel::inks_chosen, this, [this](const std::vector<double>& ink) { choose_inks(ink, false); });
     auto* dock = new QDockWidget(QStringLiteral("カラー"), this);
     dock->setObjectName(QStringLiteral("カラー"));
     auto* scroll = new QScrollArea;  // (a tall panel scrolls on a small screen instead of making the window taller)
@@ -235,7 +235,7 @@ void MainWindow::colour_picked(const std::array<int, 3>& rgb) {
                 ink = render::ink_edit::inks_at(*page, &book(), mm.x(), mm.y());
             }
             if (ink) {
-                choose_inks(*ink);
+                choose_inks(*ink, true);
                 return;
             }
         } catch (const std::exception& error) {
@@ -247,7 +247,7 @@ void MainWindow::colour_picked(const std::array<int, 3>& rgb) {
     flash(QStringLiteral("色を拾いました (%1, %2, %3)").arg(rgb[0]).arg(rgb[1]).arg(rgb[2]), 2000);
 }
 
-void MainWindow::choose_inks(const std::vector<double>& ink) {
+void MainWindow::choose_inks(const std::vector<double>& ink, bool picked) {
     const core::Page* page = current_page();
     if (page == nullptr || !page->color) return;
     const core::PageColor& color = *page->color;
@@ -259,10 +259,18 @@ void MainWindow::choose_inks(const std::vector<double>& ink) {
         return;
     }
     if (!render::ink::same_inks(color, render::ink::ink_of(color, rgb), ink)) {
+        // (the pair in the table of every page of this mode and profile, so the colour prints so on each of them)
         Json values = Json::array();
         for (const double v : ink) values.push_back(core::py_round(v, color.space == core::InkSpace::Cmyk ? 5 : 3));
-        if (!apply_ops(Json::array({Json{{"op", "set_inks"}, {"page", page->index.json()},
-                                         {"inks", Json::array({Json::array({Json::array({rgb[0], rgb[1], rgb[2]}), values})})}}}))) {
+        const Json pair = Json::array({Json::array({Json::array({rgb[0], rgb[1], rgb[2]}), values})});
+        Json ops = Json::array();
+        for (const auto& other : book().pages) {
+            if (other->color && other->color->space == color.space && other->color->profile == color.profile) {
+                ops.push_back(Json{{"op", "set_inks"}, {"page", other->index.json()}, {"inks", pair}});
+            }
+        }
+        if (!apply_ops(ops)) {  // (a book or page that cannot be changed: the colour still, its inks by the rules)
+            brush_->set_colour(rgb);
             return;
         }
     }
@@ -275,7 +283,7 @@ void MainWindow::choose_inks(const std::vector<double>& ink) {
         said << (cmyk ? QStringLiteral("%1 %2%").arg(QString::fromLatin1(names[i])).arg(ink[i] * 100.0, 0, 'f', 1)
                       : QStringLiteral("%1 %2").arg(QString::fromLatin1(lab[i])).arg(ink[i], 0, 'f', 1));
     }
-    flash(QStringLiteral("色を拾いました（%1）").arg(said.join(QStringLiteral(" "))), 2000);
+    flash((picked ? QStringLiteral("色を拾いました（%1）") : QStringLiteral("色を選びました（%1）")).arg(said.join(QStringLiteral(" "))), 2000);
 }
 
 void MainWindow::fill_at(double x_mm, double y_mm) {

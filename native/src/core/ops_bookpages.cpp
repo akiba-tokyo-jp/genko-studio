@@ -305,9 +305,12 @@ void move_layer(Layer& layer, const Map& m, const PageSpec& paper, const PageSpe
     }
     // (Python has no precise colour pixels: this build cannot move them onto the new frame yet)
     if (layer.color_raster) not_yet_ported("set_page_spec moving high-precision colour pixels is not in the C++ build yet");
-    // (color-mode@1: the drawing build lends set_page_spec the pictures of a CMYK or Lab page's layers, render/ink_edit;
-    // their inks alone are not moved here)
-    if (layer.ink_raster) not_yet_ported("set_page_spec moving the pixels of a CMYK or Lab page is not in this build yet");
+    // (color-mode@1: a CMYK or Lab page's inks moved by the drawing build, render/ink_edit)
+    if (layer.ink_raster) {
+        if (!hooks.relayout_inks) not_yet_ported("set_page_spec moving the pixels of a CMYK or Lab page: they are moved by the drawing build");
+        layer.ink_raster = std::make_shared<const std::string>(hooks.relayout_inks(*layer.ink_raster, paper, m.old_frame(), m.new_frame()));
+        layer.ink_memo = {};
+    }
 }
 
 // pagespec.relayout(episode, new_spec, move): the book on new paper; with `move`, everything on each page follows the

@@ -497,6 +497,8 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
         spin->setMaximumWidth(58);
         spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
         spin->setKeyboardTracking(false);
+        // (only a value the user changed: focus leaving a box changes nothing)
+        connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) { inks_edited_ = true; });
         connect(spin, &QDoubleSpinBox::editingFinished, this, [this] { from_inks(); });
         ink_labels[i] = new QLabel;
         inks->addWidget(ink_labels[i]);
@@ -634,7 +636,8 @@ void ColourPanel::show_inks(const Rgb& rgb) {
 }
 
 void ColourPanel::from_inks() {
-    if (loading_ || !page_color_) return;
+    if (loading_ || !page_color_ || !inks_edited_) return;
+    inks_edited_ = false;
     const bool cmyk = page_color_->space == core::InkSpace::Cmyk;
     std::vector<double> ink;
     for (std::size_t i = 0; i < (cmyk ? 4u : 3u); ++i) ink.push_back(cmyk ? ink_spins[i]->value() / 100.0 : ink_spins[i]->value());

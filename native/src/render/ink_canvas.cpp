@@ -352,7 +352,7 @@ Image InkCanvas::display() const {
     return out;
 }
 
-core::InkPixels InkCanvas::ink_pixels(int depth) const {
+core::InkPixels InkCanvas::ink_pixels(int depth, bool alpha) const {
     core::InkPixels out;
     out.space = impl_->color.space;
     out.depth = depth;
@@ -365,7 +365,8 @@ core::InkPixels InkCanvas::ink_pixels(int depth) const {
         for (unsigned c = 0; c < n; ++c) {
             out.samples[i * (n + 1) + c] = static_cast<std::uint16_t>(std::lround(std::clamp(impl_->px[i * impl_->stride + c], 0.0, 1.0) * most));
         }
-        out.samples[i * (n + 1) + n] = static_cast<std::uint16_t>(most);
+        out.samples[i * (n + 1) + n] =
+            alpha ? static_cast<std::uint16_t>(std::lround(std::clamp(impl_->px[i * impl_->stride + n], 0.0, 1.0) * most)) : static_cast<std::uint16_t>(most);
     }
     return out;
 }

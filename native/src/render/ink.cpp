@@ -570,6 +570,16 @@ bool same_inks(const PageColor& color, const std::vector<double>& a, const std::
 }
 
 std::array<int, 3> rgb_for_inks(const PageColor& color, const std::vector<double>& ink) {
+    // (a grey the rules give these inks — Genko's black for K 100% alone, white for no ink —: that grey, which every
+    // page prints so; Genko's default black first)
+    for (const int v : {20, 255, 0, 10, 15}) {
+        if (same_inks(color, ink_of(color, {v, v, v}), ink)) return {v, v, v};
+    }
+    if (color.space == InkSpace::Cmyk && ink.size() == 4 && ink[0] == 0 && ink[1] == 0 && ink[2] == 0) {
+        for (int v = 1; v < 255; ++v) {  // (K alone: the grey whose rules give it)
+            if (same_inks(color, ink_of(color, {v, v, v}), ink)) return {v, v, v};
+        }
+    }
     const std::array<double, 3> shown = srgb_of(color, ink);
     std::array<int, 3> rgb{};
     for (unsigned c = 0; c < 3; ++c) rgb[c] = static_cast<int>(std::lround(std::clamp(shown[c], 0.0, 1.0) * 255.0));

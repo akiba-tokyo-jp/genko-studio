@@ -154,6 +154,8 @@ struct BookPageHooks {
     std::function<std::optional<std::string>(const std::string& png, const PageSpec& old_paper, const PageSpec& paper,
                                              const Rect& old_frame, const Rect& new_frame)>
         relayout_mask;
+    // color-mode@1: a paint layer's inks (GKIR) on a CMYK or Lab page moved as relayout_raster moves a PNG.
+    std::function<std::string(const std::string& gkir, const PageSpec& spec, const Rect& old_frame, const Rect& new_frame)> relayout_inks;
     // io.load_episode(Path(from)) for import_pages: the other book, read whole. OpError "the other book cannot be read
     // (<why>)" for one that cannot be read, Python's words where Python has them.
     std::function<Document(const std::string& from)> load_book;

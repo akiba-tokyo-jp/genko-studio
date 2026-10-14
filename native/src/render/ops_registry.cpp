@@ -79,24 +79,30 @@ const core::OpRegistry& ops_registry() {
         core::OpRegistry r;
         core::register_core_ops(r);
         register_render_ops(r);
-        // a precise paint layer takes what an op drew on it into its pixels (render/color_edit)
+        // a precise paint layer takes what an op drew on it into its pixels (render/color_edit), a paint layer of a CMYK
+        // or Lab page into its inks (render/ink_edit)
         for (const std::string& name : r.names()) {
             const core::OpFunction op = *r.find(name);
             r.add(name, [op, name](core::OpContext& c) {
-                // (color-mode@1: a pixel op on a CMYK or Lab page works the pictures its ink layers show, then puts
-                // what it left back into inks, render/ink_edit)
+                // (color-mode@1: an op that draws new colours on a CMYK or Lab page works the pictures the ink layers
+                // it works on show, then puts what it left back into inks, render/ink_edit; the ops that only take,
+                // move or clear pixels work the inks themselves, render/raster_ops)
                 if (ink_edit::lends(name)) {
                     if (const std::vector<std::size_t> pages = ink_pages_of(c); !pages.empty()) {
-                        const ink_edit::Lending lending(c.doc, pages);
+                        std::vector<ink_edit::Lending> lent;
+                        lent.reserve(pages.size());
+                        for (const std::size_t at : pages) lent.emplace_back(c.doc, at, name, c.op);
                         op(c);
-                        lending.take_back(c.doc);
+                        for (const ink_edit::Lending& each : lent) each.take_back(c.doc);
                         color_edit::bake_marks(c.doc);
+                        ink_edit::bake_marks(c.doc);
                         return;
                     }
                 }
                 refuse_on_ink_pages(c, name);
                 op(c);
                 color_edit::bake_marks(c.doc);
+                ink_edit::bake_marks(c.doc);
             });
         }
         return r;

@@ -99,6 +99,12 @@ void blend_color_strokes(ColorCanvas& canvas, const core::Page& page, const core
 // Same paper/legacy-page-fill background used by regular drawing and destructive flatten.
 Image page_background(const core::Page& page, Size size, bool name_or_proof);
 
+// color-mode@1: layers of a CMYK or Lab page (as given, in order) composited as the page composites them (proof), onto
+// nothing or (paper) its paper, over the whole page at dpi: their inks with alpha, at the page's depth. What merging
+// them makes on such a page (render/ink_edit).
+core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<core::Layer>& layers, int dpi, const core::Document* episode,
+                                     bool paper = false);
+
 RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options = {},
                          const core::Document* episode = nullptr);
 

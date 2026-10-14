@@ -15,6 +15,7 @@
 #include "render/png.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
+#include "render/ink_edit.hpp"
 #include "storage/reader.hpp"
 
 namespace genko::render {
@@ -153,6 +154,7 @@ void register_bookpage_ops(core::OpRegistry& registry) {
     core::BookPageHooks hooks;
     hooks.relayout_raster = relayout_raster;
     hooks.relayout_mask = relayout_mask;
+    hooks.relayout_inks = ink_edit::relayout_inks;
     hooks.load_book = load_other_book;
     core::register_bookpage_ops(registry, std::move(hooks));
 }

@@ -1,8 +1,9 @@
 // color-mode@1, the second step (SPEC.md COLOR-02): the pixel ops of paint layers on CMYK and Lab pages
-// (render/ink_edit). What an op does not change keeps its inks exactly (16 bits as they were), what it moves keeps
-// them, a line merged into the pixels takes the page's rules (Genko's black: K alone), every op of the step leaves the
-// page in inks; the filters still wait (not_yet_ported); the eyedropper's inks at a point; a colour for chosen inks
-// (Genko's blacks and white, and a colour the table holds for other inks, passed over); the gamut mark.
+// (render/ink_edit). What an op does not change keeps its inks exactly (16 bits as they were); what it moves, copies or
+// lays on new paper keeps them (a rich black whose screen colour is a Genko black among them); a line merged into the
+// pixels takes the page's rules (Genko's black: K alone) while what was there keeps its inks; every op of the step
+// leaves the page in inks; the filters still wait (not_yet_ported); the eyedropper's inks at a point; a colour for
+// chosen inks (a grey the rules give them, else one not the rules' nor the table's for other inks); the gamut mark.
 
 #include <QtTest>
 
@@ -13,13 +14,16 @@
 #include <vector>
 
 #include "core/base64.hpp"
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ink.hpp"
+#include "render/image.hpp"
 #include "render/ink.hpp"
 #include "render/ink_edit.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
+#include "render/png.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -56,6 +60,8 @@ const std::uint16_t* at(const core::InkPixels& p, std::uint32_t x, std::uint32_t
 // The two colours of the picture (CMYK, 16 bits): S at the top right, T at the bottom left.
 constexpr std::array<std::uint16_t, 4> kS{13107, 45875, 6554, 3277};
 constexpr std::array<std::uint16_t, 4> kT{52428, 3277, 32768, 0};
+// A rich black (C60 M40 Y40 K100) whose colour on screen is (0, 0, 0): a Genko black's.
+constexpr std::array<std::uint16_t, 4> kRich{39321, 26214, 26214, 65535};
 
 // A raster pixel of a point (mm): paint layers are kept at the working 200 dpi.
 std::uint32_t px(double mm) { return static_cast<std::uint32_t>(mm * 200 / 25.4); }
@@ -220,6 +226,7 @@ private slots:
         QTest::newRow("set_page_spec") << R"([{"op": "set_page_spec", "preset": "b5"}])";
         QTest::newRow("erase") << R"([{"op": "erase", "page": 1, "layer_id": "pic", "points": [[40, 50], [50, 60]], "texture": "rough"}])";
         QTest::newRow("paste") << R"([{"op": "paste", "page": 1, "layer_id": "pic", "items": {"strokes": [{"points": [[12, 12], [30, 12]]}]}}])";
+        QTest::newRow("stamp_material") << R"([{"op": "stamp_material", "page": 1, "material_id": "speed-h"}])";
         QTest::newRow("ruler_to_layer") << R"([{"op": "add_ruler", "page": 1, "kind": "line", "points": [[5, 10], [55, 70]], "id": "r1"},
             {"op": "ruler_to_layer", "page": 1, "id": "r1", "width_mm": 0.3, "rgb": [200, 10, 10]}])";
         QTest::newRow("render_prims") << R"([{"op": "add_prim3d", "page": 1, "id": "box", "kind": "box", "pos": [30, 40, 0], "size": [20, 15, 18], "rot": [0.3, 0.6, 0]},
@@ -235,6 +242,138 @@ private slots:
             QFAIL(error.what());
         }
         all_in_inks(after);
+    }
+
+    // A rich black (its screen colour a Genko black's) moved, merged under a line and copied: its inks as they were.
+    void richBlackKeepsItsInks() {
+        core::Document doc = ink_book();
+        for (auto& layer : doc.edit_page(0).layers) {
+            if (layer.id != "pic") continue;
+            core::InkPixels p = core::decode_ink_raster(*layer.ink_raster);
+            for (std::uint32_t y = 0; y < px(40); ++y)
+                for (std::uint32_t x = px(30); x < p.width; ++x) std::copy(kRich.begin(), kRich.end(), p.samples.begin() + std::ptrdiff_t((std::size_t(y) * p.width + x) * 5));
+            layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+        }
+        const std::array<int, 3> shown = render::ink::srgb_of(*doc.page(0).color, {0.6, 0.4, 0.4, 1.0}) == std::array<double, 3>{0, 0, 0}
+                                             ? std::array<int, 3>{0, 0, 0} : std::array<int, 3>{-1, -1, -1};
+        QVERIFY2(shown[0] == 0, "the test profile shows this rich black as (0, 0, 0)");
+        // moved
+        const core::Document moved =
+            run_ops(doc, Json::array({Json{{"op", "transform_area"}, {"page", 1}, {"layer_id", "pic"}, {"area", Json{{"rect", Json::array({32, 2, 26, 30})}}},
+                                           {"matrix", Json::array({1, 0, 0, 1, -30, 45})}}}))
+                .doc;
+        const core::InkPixels got = pixels_of(moved, "pic");
+        for (std::uint32_t y = px(47) + 3; y < px(77) - 3; ++y)
+            for (std::uint32_t x = px(2) + 3; x < px(28) - 3; ++x)
+                for (unsigned c = 0; c < 4; ++c) QCOMPARE(at(got, x, y)[c], kRich[c]);
+        // merged under a line in Genko's black: the line K alone, the rest as it was
+        core::Document lined = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen-x"}, {"after", "pic"}},
+                                                         Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen-x"},
+                                                              {"points", Json::array({Json::array({35, 20}), Json::array({55, 20})})}, {"width_mm", 2}},
+                                                         Json{{"op", "merge_down"}, {"page", 1}, {"id", "pen-x"}}}))
+                                   .doc;
+        const core::InkPixels merged = pixels_of(lined, "pic");
+        for (unsigned c = 0; c < 4; ++c) QCOMPARE(at(merged, px(45), px(35))[c], kRich[c]);
+        const std::uint16_t* line = at(merged, px(45), px(20));
+        QVERIFY(line[0] == 0 && line[1] == 0 && line[2] == 0 && line[3] == 65535);
+        // copied (the GUI's lift) and pasted into a paint layer: its inks as they were
+        const auto piece = render::ink_edit::lift_piece(doc.page(0), layer_of(doc, "pic"),
+                                                           Json{{"poly", Json::array({Json::array({35, 5}), Json::array({45, 5}), Json::array({45, 15}), Json::array({35, 15})})}});
+        QVERIFY(piece);
+        const core::Patch patch = render::ink_edit::piece_patch(*piece, *doc.page(0).color);
+        Json items = Json{{"strokes", Json::array()}, {"patches", Json::array()}};
+        Json one = patch.attrs;
+        one["png"] = core::b64encode(*patch.png);
+        items["patches"].push_back(one);
+        const core::Document pasted =
+            run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pasted"}},
+                                      Json{{"op", "paste"}, {"page", 1}, {"layer_id", "pasted"}, {"items", items}, {"matrix", Json::array({1, 0, 0, 1, -30, 50})}}}))
+                .doc;
+        all_in_inks(pasted);
+        QVERIFY(layer_of(pasted, "pasted").patches.empty());
+        const core::InkPixels laid = pixels_of(pasted, "pasted");
+        for (unsigned c = 0; c < 4; ++c) QCOMPARE(at(laid, px(10), px(60))[c], kRich[c]);
+        // pasted onto an RGB page: its picture, the key dropped
+        core::Document rgb = core::new_episode("rgb", core::Num(1), 1, doc.page(0).spec, core::Binding::Right);
+        rgb = run_ops(rgb, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "p"}},
+                                        Json{{"op", "paste"}, {"page", 1}, {"layer_id", "p"}, {"items", items}}}))
+                  .doc;
+        QCOMPARE(layer_of(rgb, "p").patches.size(), std::size_t{1});
+        QVERIFY(!layer_of(rgb, "p").patches[0].attrs.contains("gkir"));
+    }
+
+    // New paper (set_page_spec): the inks moved onto it, a colour all over the same inks.
+    void newPaperKeepsTheInks() {
+        const core::Document doc = ink_book();
+        const core::Document after = run_ops(doc, Json::array({Json{{"op", "set_page_spec"}, {"preset", "b5"}}})).doc;
+        all_in_inks(after);
+        const core::InkPixels got = pixels_of(after, "pic");
+        QVERIFY(got.width != pixels_of(doc, "pic").width);
+        int s_seen = 0;
+        for (std::uint32_t y = 0; y < got.height; ++y)
+            for (std::uint32_t x = 0; x < got.width; ++x) {
+                const std::uint16_t* p = at(got, x, y);
+                if (p[4] == 65535 && p[0] == kS[0] && p[1] == kS[1] && p[2] == kS[2] && p[3] == kS[3]) ++s_seen;
+            }
+        QVERIFY(s_seen > 1000);
+    }
+
+    // A picture pasted onto a paint layer (no inks of its own: an RGB picture) is drawn into its inks there and then —
+    // Genko's black K alone —, and the eraser takes it like the rest.
+    void picturesBecomeInks() {
+        const core::Document doc = ink_book();
+        const render::Image black = render::Image::create("RGBA", render::Size{40, 40}, render::Ink{20, 20, 20, 255});
+        Json items = Json{{"strokes", Json::array()},
+                          {"patches", Json::array({Json{{"mode", "image"}, {"opacity", 1.0}, {"box", Json::array({35, 50, 10, 10})},
+                                                        {"png", core::b64encode(render::write_png(black))}}})}};
+        const core::Document pasted =
+            run_ops(doc, Json::array({Json{{"op", "paste"}, {"page", 1}, {"layer_id", "pic"}, {"items", items}}})).doc;
+        all_in_inks(pasted);
+        QVERIFY(layer_of(pasted, "pic").patches.empty());
+        const std::uint16_t* p = at(pixels_of(pasted, "pic"), px(40), px(55));
+        QVERIFY2(p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 65535 && p[4] == 65535, "Genko's black: K alone");
+        const core::Document erased = run_ops(pasted, Json::array({Json{{"op", "erase_raster"}, {"page", 1}, {"layer_id", "pic"},
+                                                                       {"points", Json::array({Json::array({33, 55}), Json::array({47, 55})})},
+                                                                       {"width_mm", 4}}}))
+                                          .doc;
+        QCOMPARE(at(pixels_of(erased, "pic"), px(40), px(55))[4], std::uint16_t{0});
+    }
+
+    // flood_fill fills the layer of its role whatever layer_id says: that layer is the one lent, and what the fill did
+    // not reach keeps its inks.
+    void floodFillLendsTheLayerItFills() {
+        const int w = render::mm_to_px(60, 72), h = render::mm_to_px(80, 72);
+        render::Image picture = render::Image::create("RGB", render::Size{w, h}, render::Ink{255, 255, 255});
+        picture.paste(render::Ink{0, 0, 0}, render::Box{0, 0, w, h / 2});
+        const auto draft_inks = [](const core::Document& doc) {
+            for (const auto& layer : doc.page(0).layers) {
+                if (layer.role == core::LayerRole::Draft && layer.ink_raster) return core::decode_ink_raster(*layer.ink_raster);
+            }
+            throw core::Error("value", "no draft inks");
+        };
+        const core::Document placed = run_ops(ink_book(), Json::array({Json{{"op", "put_raster"}, {"page", 1}, {"layer", "draft"},
+                                                                            {"png_base64", core::b64encode(render::write_png(picture))}}}))
+                                          .doc;
+        const core::Document doc = run_ops(placed, Json::array({Json{{"op", "flood_fill"}, {"page", 1}, {"layer", "draft"}, {"layer_id", "pic"},
+                                                                     {"x_mm", 30}, {"y_mm", 70}, {"rgb", Json::array({255, 0, 0})}}}))
+                                       .doc;
+        all_in_inks(doc);
+        const core::InkPixels before = draft_inks(placed), got = draft_inks(doc);
+        QCOMPARE(got.width, before.width);
+        for (unsigned c = 0; c < 5; ++c) QCOMPARE(at(got, 10, 10)[c], at(before, 10, 10)[c]);  // (the black the fill did not reach)
+        const std::uint16_t* filled = at(got, got.width / 2, got.height * 7 / 8);
+        const std::uint16_t* white = at(before, got.width / 2, got.height * 7 / 8);
+        QVERIFY2(filled[1] > white[1] + 20000, "the fill: red through the profile");
+    }
+
+    // put_color_raster on an ink page: the precise pixels become inks, and the book does not keep their feature.
+    void preciseRgbBecomesInks() {
+        const core::Document doc = ink_book();
+        const core::Document after = run_ops(doc, Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 1}, {"height", 1}, {"precision", "u16"},
+                                                                   {"pixels", Json::array({1000, 30000, 60000, 65535})}}}))
+                                        .doc;
+        all_in_inks(after);
+        QVERIFY(std::find(after.features.begin(), after.features.end(), core::kColorRasterFeature) == after.features.end());
     }
 
     // The filters wait for their own step: not_yet_ported, nothing done.
@@ -259,12 +398,15 @@ private slots:
         // a colour for inks: the one shown, not Genko's black nor one the table holds for other inks
         const core::PageColor& color = *page.color;
         const std::vector<double> k100{0, 0, 0, 1};
-        const std::array<int, 3> black = render::ink::rgb_for_inks(color, k100);
-        QVERIFY(!(black[0] == black[1] && black[1] == black[2] && (black[0] == 0 || black[0] == 10 || black[0] == 15 || black[0] == 20)));
+        QVERIFY((render::ink::rgb_for_inks(color, k100) == std::array<int, 3>{20, 20, 20}));       // (Genko's black)
+        QVERIFY((render::ink::rgb_for_inks(color, {0, 0, 0, 0}) == std::array<int, 3>{255, 255, 255}));  // (no ink: white)
+        const std::vector<double> red{0.1, 0.9, 0.8, 0};
+        const std::array<int, 3> shown = render::ink::rgb_for_inks(color, red);
+        QVERIFY(!(shown[0] == shown[1] && shown[1] == shown[2]));
         core::PageColor held = color;
-        held.inks.push_back(core::InkEntry{black, {0.5, 0, 0, 0}});
-        const std::array<int, 3> moved = render::ink::rgb_for_inks(held, k100);
-        QVERIFY(moved != black);
+        held.inks.push_back(core::InkEntry{shown, {0.5, 0, 0, 0}});
+        const std::array<int, 3> moved = render::ink::rgb_for_inks(held, red);
+        QVERIFY(moved != shown);
         QVERIFY(render::ink::same_inks(color, k100, k100));
         QVERIFY(!render::ink::same_inks(color, k100, {0, 0, 0, 0.99}));
         // 色域外: a pure sRGB green is out of the CMYK profile, a muted brown is in it; a Lab page holds every colour

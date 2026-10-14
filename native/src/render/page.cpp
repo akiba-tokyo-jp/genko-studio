@@ -31,6 +31,7 @@
 #include "render/effects.hpp"
 #include "render/ink.hpp"
 #include "render/ink_canvas.hpp"
+#include "render/op_limits.hpp"
 #include "render/page_internal.hpp"
 #include "render/paper.hpp"
 #include "render/placed.hpp"
@@ -1516,6 +1517,29 @@ Image page_background(const core::Page& page, Size size, bool name_or_proof) {
         rgba.paste(Ink::with_alpha(rgb, 255), Box{0, 0, size.width, size.height});
     }
     return rgba;
+}
+
+core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<core::Layer>& layers, int dpi, const core::Document* episode,
+                                     bool paper) {
+    if (!page.color) throw core::Error("value", "an RGB page holds no inks");
+    std::vector<std::string> omitted;
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = episode;
+    ctx.dpi = dpi;
+    ctx.mode = "proof";  // (as layer_image draws what the 8-bit merges composite)
+    ctx.omitted = &omitted;
+    ctx.finish = false;
+    ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+    limits::check_picture(ctx.size.width, ctx.size.height, "the page");
+    const Box area{0, 0, ctx.size.width, ctx.size.height};
+    InkCanvas canvas(*page.color, paper ? page_background(page, ctx.size, false) : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}));
+    const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
+    for (const Layer& layer : layers) {
+        if (layer.kind == LayerKind::Folder) continue;
+        ink_layer(canvas, ctx, layer, area, panel_mask ? &*panel_mask : nullptr);
+    }
+    return canvas.ink_pixels(page.color->depth, true);
 }
 
 RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
