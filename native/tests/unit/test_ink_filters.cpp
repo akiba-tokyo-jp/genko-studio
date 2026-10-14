@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -317,6 +318,42 @@ private slots:
                   .doc;
         QCOMPARE(layer_of(doc, "empty").kind, core::LayerKind::Raster);
         QVERIFY(layer_of(doc, "empty").ink_raster);
+    }
+
+    // The styles of an ink paint layer (群D): a border of Genko's black outside it on K alone, a water edge darkening its
+    // rim towards K (its inside as it was), shown in a colour on screen the colour's inks (printed: its own) — nothing
+    // left out.
+    void inkLayerStyles() {
+        const core::Document doc = filter_book();
+        const int dpi = 200;
+        render::RenderOptions o;
+        o.inks = true;
+        const auto styled = [&](const std::function<void(core::Layer&)>& set) {
+            core::Document d = doc;
+            for (auto& layer : d.edit_page(0).layers) {
+                if (layer.id == "pic") set(layer);
+            }
+            render::RenderResult made = render::render_page(d.page(0), dpi, o, &d);
+            if (!made.omitted.empty()) QTest::qFail(qPrintable(QString::fromStdString(made.omitted.front())), __FILE__, __LINE__);
+            return std::move(*made.inks);
+        };
+        const auto page_at = [&](const core::InkPixels& p, double x_mm, double y_mm) {
+            return at(p, static_cast<std::uint32_t>(render::mm_to_px(x_mm, dpi)), static_cast<std::uint32_t>(render::mm_to_px(y_mm, dpi)));
+        };
+        const core::InkPixels border = styled([](core::Layer& l) { l.effect = Json{{"border", Json{{"width_mm", 1}, {"rgb", Json::array({20, 20, 20})}}}}; });
+        const std::uint16_t* out = page_at(border, 30.4, 60);
+        QVERIFY2(out[0] == 0 && out[1] == 0 && out[2] == 0 && out[3] == 65535, "the border: K 100% alone");
+        const core::InkPixels water = styled([](core::Layer& l) { l.effect = Json{{"water_edge", Json{{"width_mm", 1}, {"strength", 1}}}}; });
+        const std::uint16_t* rim = page_at(water, 29.8, 60);
+        QVERIFY2(rim[0] == 0 && rim[1] == 0 && rim[2] == 0 && rim[3] > 33000, "the rim: darker, on K alone");
+        QVERIFY(std::abs(int(page_at(water, 15, 60)[3]) - 32768) <= 1);
+        const core::InkPixels printed = styled([](core::Layer& l) { l.color = std::vector<std::int64_t>{128, 128, 128}; });
+        QCOMPARE(page_at(printed, 0.5, 10)[3], std::uint16_t(65535));  // (printed: its own inks — the colour is the screen's)
+        o.mode = "proof";
+        const core::InkPixels shown = styled([](core::Layer& l) { l.color = std::vector<std::int64_t>{128, 128, 128}; });
+        const std::uint16_t* tinted = page_at(shown, 0.5, 10);
+        QVERIFY2(tinted[0] == 0 && tinted[1] == 0 && tinted[2] == 0 && std::abs(int(tinted[3]) - int(std::lround((1 - 128 / 255.0) * 65535))) <= 1,
+                 "shown in grey 128: K alone");
     }
 
     // Precise lines (color_rgb) on a pen layer of an ink page are drawn by the rules (their 8-bit colour): filtered or

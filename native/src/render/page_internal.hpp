@@ -18,7 +18,12 @@
 #include "render/image.hpp"
 #include "render/page.hpp"
 
+namespace genko::render {
+struct InkPicture;  // (render/ink_canvas)
+}  // namespace genko::render
+
 namespace genko::render::detail {
+
 
 // A point on the page in mm, as a float.
 using PointMM = core::PointF;
@@ -87,6 +92,10 @@ Image fill_layer_image(const core::Layer& layer, Size size, int dpi, bool mono, 
 Image layer_effects(const core::Layer& layer, Image raster, int dpi);
 // How far layer_effects reaches (px): a picture computed this much larger gives exact pixels inside.
 int effect_margin(const core::Layer& layer, int dpi);
+// layer_effects on the picture of an ink paint layer (color-mode@1, its whole picture: the caller gives it a margin):
+// the water edge darkens its rim towards Genko's black, the border lays the inks of its colour (the page's rules) under
+// it — their shapes from its alpha as the 8-bit picture holds it.
+void ink_layer_effects(const core::Layer& layer, InkPicture& picture, int dpi, const core::PageColor& color);
 // render._adjusted over `area`: a correction layer at work on what is under it.
 Image adjusted(const Ctx& ctx, Image rgba, const core::Layer& layer, const Image* clip, const Box& area);
 // Whether the page has a correction layer whose filter looks beyond each pixel or at where it is on the page (blur,

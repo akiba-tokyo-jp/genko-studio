@@ -922,6 +922,33 @@ void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, co
 // color-mode@1: one layer of a CMYK or Lab page into the page's canvas (SPEC.md COLOR-02). Its own inks (an ink raster,
 // resampled as a paint layer is) are composited as they are; everything drawn in 8 bits (lines, fills, placed
 // pictures, a raster in RGB) as the page's inks of its colours; tones as drawn over the page.
+// A part of an ink picture (`box` inside it).
+InkPicture crop_picture(const InkPicture& p, const Box& box) {
+    const unsigned all = p.channels + 1;
+    InkPicture out{Size{box.width(), box.height()}, p.channels, std::vector<double>(std::size_t(box.width()) * box.height() * all, 0.0)};
+    for (int y = 0; y < box.height(); ++y) {
+        const double* from = p.values.data() + (std::size_t(box.y0 + y) * p.size.width + box.x0) * all;
+        std::copy_n(from, std::size_t(box.width()) * all, out.values.data() + std::size_t(y) * box.width() * all);
+    }
+    return out;
+}
+
+// An ink picture as the 8-bit RGBA of the colours its inks mean (render/ink meaning_of: a line on K alone grey).
+Image meant_rgba(const InkPicture& p, const core::PageColor& color) {
+    const unsigned n = p.channels, all = n + 1;
+    const std::size_t count = static_cast<std::size_t>(p.size.width) * p.size.height;
+    std::vector<double> inks(count * n), rgb(count * 3);
+    for (std::size_t i = 0; i < count; ++i)
+        for (unsigned c = 0; c < n; ++c) inks[i * n + c] = from_canvas(color.space, c, p.values[i * all + c]);
+    ink::meaning_of(color, inks.data(), rgb.data(), count);
+    std::string bytes(count * 4, '\0');
+    for (std::size_t i = 0; i < count; ++i) {
+        for (unsigned c = 0; c < 3; ++c) bytes[i * 4 + c] = static_cast<char>(std::lround(std::clamp(rgb[i * 3 + c], 0.0, 1.0) * 255.0));
+        bytes[i * 4 + 3] = static_cast<char>(std::lround(std::clamp(p.values[i * all + n], 0.0, 1.0) * 255.0));
+    }
+    return Image::frombytes("RGBA", p.size, bytes);
+}
+
 void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
     const bool print = ctx.mode == "print";
     if (is_tone(layer)) {  // (tones sit in the layer order as drawn over the page; a layer above clips to nothing)
@@ -973,17 +1000,42 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
         return;
     }
     if (layer.ink_raster) {
-        const bool tinted_here = layer.color && !layer.color->empty() && (!print || layer.color_prints);
-        if (truthy_json(layer.effect) || truthy_json(layer.screen) || tinted_here) {
-            skip_unported(ctx, "ink_layer_style");
-            return;
-        }
-        InkPicture picture = sample_ink_raster(*decoded_ink(layer.ink_raster), ctx.size, area);
+        const core::PageColor& color = *ctx.page->color;
+        // its picture (its pixels, its lines over them), as layer_with_effects takes an 8-bit one: wider by what its
+        // effects reach, then cut to the area
+        const int margin = effect_margin(layer, ctx.dpi);
+        const Box wide = margin == 0 ? area : intersection(Box{area.x0 - margin, area.y0 - margin, area.x1 + margin, area.y1 + margin},
+                                                           Box{0, 0, ctx.size.width, ctx.size.height});
+        std::optional<Image> wide_mask;
+        if (margin != 0 && panel != nullptr) wide_mask = clip_mask(*ctx.page, ctx.size, ctx.dpi, wide);
+        InkPicture picture = sample_ink_raster(*decoded_ink(layer.ink_raster), ctx.size, wide);
         if (layer.stroke_count() > 0 || !layer.patches.empty()) {
             const Image kept = ink_alpha_rgba(picture);  // (透明保護: lines inside its pixels)
-            if (auto lines = layer_strokes(ctx, layer, area, panel, &kept, ctx.rough, true)) {
-                ink_over(picture, ink_picture(*lines, *ctx.page->color));
+            if (auto lines = layer_strokes(ctx, layer, wide, margin == 0 ? panel : (wide_mask ? &*wide_mask : nullptr), &kept, ctx.rough, true)) {
+                ink_over(picture, ink_picture(*lines, color));
             }
+        }
+        ink_layer_effects(layer, picture, ctx.dpi, color);
+        if (margin != 0) picture = crop_picture(picture, shifted(area, -wide.x0, -wide.y0));
+        const bool tinted_here = layer.color && !layer.color->empty() && (!print || layer.color_prints);
+        if (truthy_json(layer.screen) && ((print && ctx.dots) || screen_dots(ctx))) {
+            // トーン化: the greys its inks mean as dots, in 8 bits as on any page (K by the rules)
+            Image raster = screened_layer(ctx, layer, meant_rgba(picture, color), area, panel);
+            Image dots = masked(ctx, layer, std::move(raster), area);
+            if (tinted_here) dots = tinted(dots, *layer.color);
+            canvas.blend_rgba(dots.mode() == "RGBA" ? dots : dots.convert("RGBA"), layer.opacity, layer.clip, layer.blend);
+            return;
+        }
+        if (tinted_here) {  // (shown in its colour: the colour's inks by the rules, its alpha kept)
+            const std::vector<std::int64_t> rgb = *layer.color;
+            const unsigned char c[3] = {static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 0 ? rgb[0] : 0, 0, 255)),
+                                        static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 1 ? rgb[1] : 0, 0, 255)),
+                                        static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 2 ? rgb[2] : 0, 0, 255))};
+            std::array<double, 4> ink{};
+            ink::inks_of(color, c, nullptr, ink.data(), 1);
+            const unsigned n = picture.channels;
+            for (std::size_t i = 0; i < picture.values.size() / (n + 1); ++i)
+                for (unsigned k = 0; k < n; ++k) picture.values[i * (n + 1) + k] = to_canvas(color.space, k, ink[k]);
         }
         std::optional<Image> shown;
         if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled) {

@@ -20,6 +20,8 @@
 #include "core/paths.hpp"
 #include "render/plugins.hpp"
 #include "render/filters.hpp"
+#include "render/ink.hpp"
+#include "render/ink_canvas.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
 
@@ -566,6 +568,63 @@ Image layer_effects(const core::Layer& layer, Image raster, int dpi) {
         out = std::move(border);
     }
     return out;
+}
+
+void ink_layer_effects(const core::Layer& layer, InkPicture& picture, int dpi, const core::PageColor& color) {
+    if (!layer.effect || !core::py_truthy(*layer.effect)) return;
+    const Json& effect = *layer.effect;
+    const unsigned n = picture.channels, all = n + 1;
+    const std::size_t count = static_cast<std::size_t>(picture.size.width) * picture.size.height;
+    std::string bytes(count, '\0');  // (the alpha as the 8-bit picture holds it)
+    for (std::size_t i = 0; i < count; ++i) bytes[i] = static_cast<char>(std::lround(std::clamp(picture.values[i * all + n], 0.0, 1.0) * 255.0));
+    const Image alpha = Image::frombytes("L", picture.size, bytes);
+    const auto canvas_inks = [&](const std::vector<std::int64_t>& rgb) {  // (a colour's inks by the page's rules, as canvas values)
+        const unsigned char c[3] = {static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 0 ? rgb[0] : 0, 0, 255)),
+                                    static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 1 ? rgb[1] : 0, 0, 255)),
+                                    static_cast<unsigned char>(std::clamp<std::int64_t>(rgb.size() > 2 ? rgb[2] : 0, 0, 255))};
+        std::array<double, 4> ink{};
+        ink::inks_of(color, c, nullptr, ink.data(), 1);
+        for (unsigned k = 0; k < n; ++k) ink[k] = to_canvas(color.space, k, ink[k]);
+        return ink;
+    };
+    const Json* water = get(effect, "water_edge");
+    if (water != nullptr && core::py_truthy(*water)) {
+        if (!water->is_object()) throw core::Error("value", "'" + core::py_type_name(*water) + "' object has no attribute 'get'");
+        const int width = std::max(1, py_round_i(number(*water, "width_mm", 0.6) / 25.4 * dpi));
+        const double strength = py_max(0.0, py_min(1.0, number(*water, "strength", 0.6)));
+        const Image inner = width < 12 ? alpha.filter(Filter::min_filter(width * 2 + 1))
+                                       : alpha.filter(Filter::gaussian_blur(width)).point([](int v) { return v > 245 ? 255 : 0; });
+        const std::string dark = chops::subtract(alpha, inner).point([&](int v) { return py_int_trunc(v * strength * 0.6); }).tobytes();
+        const std::array<double, 4> black = canvas_inks({0, 0, 0});
+        for (std::size_t i = 0; i < count; ++i) {  // (black laid over by the rim's alpha, the picture's alpha kept)
+            const double da = static_cast<unsigned char>(dark[i]) / 255.0;
+            double* v = picture.values.data() + i * all;
+            const double oa = v[n], a = da + oa * (1 - da);
+            if (da == 0 || !(a > 0)) continue;
+            for (unsigned c = 0; c < n; ++c) v[c] = (black[c] * da + v[c] * oa * (1 - da)) / a;
+        }
+    }
+    const Json* border_spec = get(effect, "border");
+    if (border_spec != nullptr && core::py_truthy(*border_spec)) {
+        if (!border_spec->is_object()) {
+            throw core::Error("value", "'" + core::py_type_name(*border_spec) + "' object has no attribute 'get'");
+        }
+        const int width = std::max(1, py_round_i(number(*border_spec, "width_mm", 0.5) / 25.4 * dpi));
+        std::vector<std::int64_t> rgb{255, 255, 255};
+        const Json* own = get(*border_spec, "rgb");
+        if (own != nullptr && core::py_truthy(*own)) rgb = core::int_tuple(*own);
+        if (rgb.size() > 3) rgb.resize(3);
+        const std::string grown = alpha.filter(Filter::gaussian_blur(width / 1.5)).point([](int v) { return v > 12 ? 255 : 0; }).tobytes();
+        const std::array<double, 4> ink = canvas_inks(rgb);
+        InkPicture border{picture.size, n, std::vector<double>(count * all, 0.0)};
+        for (std::size_t i = 0; i < count; ++i) {
+            double* v = border.values.data() + i * all;
+            for (unsigned c = 0; c < n; ++c) v[c] = ink[c];
+            v[n] = static_cast<unsigned char>(grown[i]) / 255.0;
+        }
+        ink_over(border, picture);
+        picture = std::move(border);
+    }
 }
 
 bool needs_whole_page(const core::Page& page) {
