@@ -329,8 +329,8 @@ private:
         ++count_;
     }
 
-    // A group's record: no pixels (four channels of nothing), its section divider (lsct): 1 an open group (with its
-    // blend, pass through), 3 the end of one.
+    // A group's record: no pixels (a channel of nothing for each of the document's and the alpha), its section
+    // divider (lsct): 1 an open group (with its blend, pass through), 3 the end of one.
     void section(const std::string& name, std::uint32_t type, std::string_view blend) {
         for (int i = 0; i < 4; ++i) put_i32(records_, 0);
         const int colours = ink_ ? static_cast<int>(core::colour_channels(ink_->space)) : 3;  // (the document's channels)

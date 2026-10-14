@@ -919,9 +919,6 @@ void precise_strokes(ColorCanvas& target, const Ctx& ctx, const Layer& layer, co
     }
     target.blend(own,layer.opacity,layer.clip,layer.blend);
 }
-// color-mode@1: one layer of a CMYK or Lab page into the page's canvas (SPEC.md COLOR-02). Its own inks (an ink raster,
-// resampled as a paint layer is) are composited as they are; everything drawn in 8 bits (lines, fills, placed
-// pictures, a raster in RGB) as the page's inks of its colours; tones as drawn over the page.
 // A part of an ink picture (`box` inside it).
 InkPicture crop_picture(const InkPicture& p, const Box& box) {
     const unsigned all = p.channels + 1;
@@ -949,6 +946,9 @@ Image meant_rgba(const InkPicture& p, const core::PageColor& color) {
     return Image::frombytes("RGBA", p.size, bytes);
 }
 
+// color-mode@1: one layer of a CMYK or Lab page into the page's canvas (SPEC.md COLOR-02). Its own inks (an ink raster,
+// resampled as a paint layer is) are composited as they are; everything drawn in 8 bits (lines, fills, placed
+// pictures, a raster in RGB) as the page's inks of its colours; tones as drawn over the page.
 void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box& area, const Image* panel) {
     const bool print = ctx.mode == "print";
     if (is_tone(layer)) {  // (tones sit in the layer order as drawn over the page; a layer above clips to nothing)
@@ -1001,26 +1001,42 @@ void ink_layer(InkCanvas& canvas, const Ctx& ctx, const Layer& layer, const Box&
     }
     if (layer.ink_raster) {
         const core::PageColor& color = *ctx.page->color;
-        // its picture (its pixels, its lines over them), as layer_with_effects takes an 8-bit one: wider by what its
-        // effects reach, then cut to the area
-        const int margin = effect_margin(layer, ctx.dpi);
-        const Box wide = margin == 0 ? area : intersection(Box{area.x0 - margin, area.y0 - margin, area.x1 + margin, area.y1 + margin},
-                                                           Box{0, 0, ctx.size.width, ctx.size.height});
-        std::optional<Image> wide_mask;
-        if (margin != 0 && panel != nullptr) wide_mask = clip_mask(*ctx.page, ctx.size, ctx.dpi, wide);
-        InkPicture picture = sample_ink_raster(*decoded_ink(layer.ink_raster), ctx.size, wide);
-        if (layer.stroke_count() > 0 || !layer.patches.empty()) {
-            const Image kept = ink_alpha_rgba(picture);  // (透明保護: lines inside its pixels)
-            if (auto lines = layer_strokes(ctx, layer, wide, margin == 0 ? panel : (wide_mask ? &*wide_mask : nullptr), &kept, ctx.rough, true)) {
-                ink_over(picture, ink_picture(*lines, color));
+        // its picture over a box (its pixels, its lines over them inside the box's panels), as layer_with_effects takes
+        // an 8-bit one: wider by what its effects reach, then cut to the box
+        const auto part = [&](const Box& box, const Image* box_panel) {
+            const int margin = effect_margin(layer, ctx.dpi);
+            const Box wide = margin == 0 ? box : intersection(Box{box.x0 - margin, box.y0 - margin, box.x1 + margin, box.y1 + margin},
+                                                              Box{0, 0, ctx.size.width, ctx.size.height});
+            std::optional<Image> wide_mask;
+            if (margin != 0 && box_panel != nullptr) wide_mask = clip_mask(*ctx.page, ctx.size, ctx.dpi, wide);
+            InkPicture picture = sample_ink_raster(*decoded_ink(layer.ink_raster), ctx.size, wide);
+            if (layer.stroke_count() > 0 || !layer.patches.empty()) {
+                const Image kept = ink_alpha_rgba(picture);  // (透明保護: lines inside its pixels)
+                if (auto lines = layer_strokes(ctx, layer, wide, margin == 0 ? box_panel : (wide_mask ? &*wide_mask : nullptr), &kept, ctx.rough, true)) {
+                    ink_over(picture, ink_picture(*lines, color));
+                }
             }
-        }
-        ink_layer_effects(layer, picture, ctx.dpi, color);
-        if (margin != 0) picture = crop_picture(picture, shifted(area, -wide.x0, -wide.y0));
+            ink_layer_effects(layer, picture, ctx.dpi, color);
+            if (margin != 0) picture = crop_picture(picture, shifted(box, -wide.x0, -wide.y0));
+            return picture;
+        };
+        InkPicture picture = part(area, panel);
         const bool tinted_here = layer.color && !layer.color->empty() && (!print || layer.color_prints);
         if (truthy_json(layer.screen) && ((print && ctx.dots) || screen_dots(ctx))) {
-            // トーン化: the greys its inks mean as dots, in 8 bits as on any page (K by the rules)
-            Image raster = screened_layer(ctx, layer, meant_rgba(picture, color), area, panel);
+            // トーン化: the greys its inks mean as dots, in 8 bits as on any page (K by the rules); a noise screen runs
+            // from the top of the page (screened_layer): the band above the area made the same way
+            const Json& spec = *layer.screen;
+            const Json* pattern = get(spec, "pattern");
+            const Box band{0, 0, ctx.size.width, area.y1};
+            Image raster;
+            if (pattern != nullptr && core::py_truthy(*pattern) && core::py_str(*pattern) == "noise" && area != band) {
+                std::optional<Image> band_mask;
+                if (panel != nullptr) band_mask = clip_mask(*ctx.page, ctx.size, ctx.dpi, band);
+                raster = tones::screened(meant_rgba(part(band, band_mask ? &*band_mask : nullptr), color), spec, ctx.dpi, ctx.size, band)
+                             .crop(area);
+            } else {
+                raster = tones::screened(meant_rgba(picture, color), spec, ctx.dpi, ctx.size, area);
+            }
             Image dots = masked(ctx, layer, std::move(raster), area);
             if (tinted_here) dots = tinted(dots, *layer.color);
             canvas.blend_rgba(dots.mode() == "RGBA" ? dots : dots.convert("RGBA"), layer.opacity, layer.clip, layer.blend);

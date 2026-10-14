@@ -356,6 +356,32 @@ private slots:
                  "shown in grey 128: K alone");
     }
 
+    // An ink paint layer with styles drawn in parts (tiles, an export's pieces) is the same as drawn whole and cut there:
+    // a border reaching across a part's edge, a noise screen running from the top of the page (the greys its inks mean
+    // in both).
+    void stylesInPartsAsWhole() {
+        core::Document doc = filter_book();
+        for (auto& layer : doc.edit_page(0).layers) {
+            if (layer.id != "pic") continue;
+            layer.effect = Json{{"border", Json{{"width_mm", 1}, {"rgb", Json::array({20, 20, 20})}}}};
+            layer.screen = Json{{"pattern", "noise"}, {"density", 0.5}};
+        }
+        const int dpi = 100;
+        render::RenderOptions o;
+        o.inks = true;
+        const core::InkPixels whole = *render::render_page(doc.page(0), dpi, o, &doc).inks;
+        o.region = render::RenderRegion{40, 90, 120, 100};
+        const core::InkPixels part = *render::render_page(doc.page(0), dpi, o, &doc).inks;
+        QCOMPARE(part.width, 120u);
+        for (std::uint32_t y = 0; y < part.height; ++y) {
+            for (std::uint32_t x = 0; x < part.width; ++x) {
+                const std::uint16_t* a = at(part, x, y);
+                const std::uint16_t* b = at(whole, x + 40, y + 90);
+                if (!std::equal(a, a + 5, b)) QFAIL(qPrintable(QStringLiteral("(%1, %2) differs from the whole page's").arg(x).arg(y)));
+            }
+        }
+    }
+
     // Precise lines (color_rgb) on a pen layer of an ink page are drawn by the rules (their 8-bit colour): filtered or
     // merged, a line in Genko's black stays on K alone (never precise RGB pixels through the profile).
     void preciseLinesByTheRules() {

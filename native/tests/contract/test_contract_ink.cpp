@@ -182,9 +182,9 @@ private slots:
     // CMYC with no ink; a Lab page's text RGB, its outline LbCl (L 100).
     void editableTextKeepsTheInks() {
         const fs::path out = core::path_from_utf8(path(QStringLiteral("editable")).toStdString());
-        for (const std::string mode : {"cmyk", "lab"}) {
-            const Json to = mode == "cmyk" ? Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"icc", core::b64encode(icc_bytes())}}
-                                           : Json{{"op", "set_color_mode"}, {"mode", "lab"}};
+        for (const std::string mode : {"cmyk", "cmyk16", "lab"}) {  // (16 bits too: its layers and groups at that depth)
+            const Json to = mode == "lab" ? Json{{"op", "set_color_mode"}, {"mode", "lab"}}
+                                          : Json{{"op", "set_color_mode"}, {"mode", "cmyk"}, {"icc", core::b64encode(icc_bytes())}, {"depth", mode == "cmyk16" ? 16 : 8}};
             const core::Document doc =
                 run_ops(small_book(), Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "t1"}, {"text", "ドン"}, {"x_mm", 5}, {"y_mm", 5},
                                                         {"w_mm", 50}, {"h_mm", 20}, {"wrap", "horizontal"}, {"balloon", "sfx"},
@@ -201,9 +201,10 @@ private slots:
                 if (t["name"] == "本文 #t1") body = &t;
             }
             QVERIFY2(body != nullptr, texts.dump().c_str());
-            QCOMPARE((*body)["fill"]["type"].get<int>(), mode == "cmyk" ? 2 : 1);
+            QCOMPARE((*body)["fill"]["type"].get<int>(), mode == "lab" ? 1 : 2);
             const std::vector<double> fill = (*body)["fill"]["values"].get<std::vector<double>>();
-            if (mode == "cmyk") {
+            if (mode != "lab") {
+                QCOMPARE(answer["read"][psd]["psd"]["depth"].get<int>(), mode == "cmyk16" ? 16 : 8);
                 QVERIFY2((fill == std::vector<double>{1, 0, 0, 0, 1}), body->dump().c_str());
                 QCOMPARE((*body)["stroke"]["class"].get<std::string>(), std::string("CMYC"));
                 for (const char* key : {"Cyn ", "Mgnt", "Ylw ", "Blck"}) QCOMPARE((*body)["stroke"]["values"][key].get<double>(), 0.0);
