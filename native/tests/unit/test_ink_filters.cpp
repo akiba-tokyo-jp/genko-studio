@@ -290,7 +290,8 @@ private slots:
         const core::Layer& pen = layer_of(doc, "pen");
         QVERIFY(pen.ink_raster && !pen.raster_png && pen.stroke_count() == 0);
         QCOMPARE(pen.kind, core::LayerKind::Raster);
-        const std::uint16_t* s = at(pixels_of(doc, "pen"), px(15), px(50));
+        const core::InkPixels inks = pixels_of(doc, "pen");
+        const std::uint16_t* s = at(inks, px(15), px(50));
         QVERIFY(s[0] == 0 && s[1] == 0 && s[2] == 0 && s[3] == 65535 && s[4] == 65535);
     }
 
