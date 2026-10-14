@@ -28,6 +28,8 @@ class InkCanvas {
 public:
     // The page's paper (`paper`: the 8-bit picture of the paper and its fills, opaque, the canvas's size) in inks.
     InkCanvas(const core::PageColor& color, const Image& paper);
+    // A clear canvas (no ink, transparent): layers composited alone, as a merge composites them (render/ink_edit).
+    InkCanvas(const core::PageColor& color, Size size);
     ~InkCanvas();
     InkCanvas(const InkCanvas&) = delete;
     InkCanvas& operator=(const InkCanvas&) = delete;

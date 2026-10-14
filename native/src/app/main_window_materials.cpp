@@ -306,6 +306,7 @@ std::optional<Json> MainWindow::copy_selection_items() {
             if (const auto piece = render::ink_edit::lift_piece(*page, *layer, *area)) {
                 core::Patch patch = render::ink_edit::piece_patch(*piece, *page->color);
                 patch.attrs.erase("gkir");
+                patch.attrs.erase("gkir_profile");
                 items.patches.push_back(std::move(patch));
             }
         }

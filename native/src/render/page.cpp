@@ -1533,7 +1533,7 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
     ctx.size = Size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
     limits::check_picture(ctx.size.width, ctx.size.height, "the page");
     const Box area{0, 0, ctx.size.width, ctx.size.height};
-    InkCanvas canvas(*page.color, paper ? page_background(page, ctx.size, false) : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}));
+    InkCanvas canvas = paper ? InkCanvas(*page.color, page_background(page, ctx.size, false)) : InkCanvas(*page.color, ctx.size);
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     for (const Layer& layer : layers) {
         if (layer.kind == LayerKind::Folder) continue;

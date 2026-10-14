@@ -251,9 +251,17 @@ void MainWindow::choose_inks(const std::vector<double>& ink, bool picked) {
     const core::Page* page = current_page();
     if (page == nullptr || !page->color) return;
     const core::PageColor& color = *page->color;
+    // (the pages of this mode and profile, whose tables take the pair: a colour none of them holds for other inks)
+    std::vector<const core::Page*> alike;
+    core::PageColor tables = color;
+    for (const auto& other : book().pages) {
+        if (!other->color || other->color->space != color.space || other->color->profile != color.profile) continue;
+        alike.push_back(other.get());
+        if (other.get() != page) tables.inks.insert(tables.inks.end(), other->color->inks.begin(), other->color->inks.end());
+    }
     std::array<int, 3> rgb{};
     try {
-        rgb = render::ink::rgb_for_inks(color, ink);
+        rgb = render::ink::rgb_for_inks(tables, ink);
     } catch (const std::exception& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 4000, true);
         return;
@@ -264,11 +272,7 @@ void MainWindow::choose_inks(const std::vector<double>& ink, bool picked) {
         for (const double v : ink) values.push_back(core::py_round(v, color.space == core::InkSpace::Cmyk ? 5 : 3));
         const Json pair = Json::array({Json::array({Json::array({rgb[0], rgb[1], rgb[2]}), values})});
         Json ops = Json::array();
-        for (const auto& other : book().pages) {
-            if (other->color && other->color->space == color.space && other->color->profile == color.profile) {
-                ops.push_back(Json{{"op", "set_inks"}, {"page", other->index.json()}, {"inks", pair}});
-            }
-        }
+        for (const core::Page* other : alike) ops.push_back(Json{{"op", "set_inks"}, {"page", other->index.json()}, {"inks", pair}});
         if (!apply_ops(ops)) {  // (a book or page that cannot be changed: the colour still, its inks by the rules)
             brush_->set_colour(rgb);
             return;

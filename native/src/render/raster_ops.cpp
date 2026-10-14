@@ -1518,13 +1518,14 @@ void paste(OpContext& c) {
         return;
     }
     // color-mode@1: pieces of inks copied from a CMYK or Lab page ("gkir", ink_edit::piece_patch) laid into a paint
-    // layer's inks on a page of the same mode, when the paste moves and scales without turning; anywhere else their
-    // picture, the key dropped (never saved)
+    // layer's inks on a page of the same mode and profile, when the paste moves and scales without turning; anywhere
+    // else their picture, the keys dropped (never saved)
     std::vector<core::Patch> pictures;
     const bool upright = m[1] == 0 && m[2] == 0 && m[0] > 0 && m[3] > 0;
     Layer& target = page.layers[ti];
     for (core::Patch& patch : items.patches) {
         if (!patch.attrs.is_object() || !patch.attrs.contains("gkir")) {
+            if (patch.attrs.is_object()) patch.attrs.erase("gkir_profile");
             pictures.push_back(std::move(patch));
             continue;
         }
@@ -1538,6 +1539,7 @@ void paste(OpContext& c) {
             continue;
         }
         patch.attrs.erase("gkir");
+        patch.attrs.erase("gkir_profile");
         pictures.push_back(std::move(patch));
     }
     items.patches = std::move(pictures);
@@ -2225,12 +2227,16 @@ std::size_t erase_target(Page& page, const Json& op) {
     return core::layer_for_role(page, core::role_from(Json(layer != nullptr && core::py_truthy(*layer) ? core::py_str(*layer) : "ink")));
 }
 
-// Does erase still have inks to erase after core's (a CMYK or Lab page's paint layer holding them)?
+// Does erase still have inks to erase after core's (a CMYK or Lab page's paint layer holding them, cut as the pixels
+// of an RGB paint layer are: not a tone scraped, nor only lines taken whole or to their crossings)?
 bool erases_inks(Document& doc, const Json& op) {
     const std::size_t at = core::require_page(doc, op);
     if (!doc.page(at).color) return false;
+    const Json mode = op.contains("mode") ? op["mode"] : Json(nullptr);
+    if (!(mode.is_null() || mode == Json("") || mode == Json("cut"))) return false;
     Page& page = doc.edit_page(at);
-    return page.layers[erase_target(page, op)].ink_raster != nullptr;
+    const Layer& target = page.layers[erase_target(page, op)];
+    return target.kind != LayerKind::Tone && target.ink_raster != nullptr;
 }
 
 void erase(OpContext& c) {

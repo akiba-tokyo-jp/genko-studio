@@ -364,8 +364,10 @@ InkPixels into_inks(const Image& picture, const PageColor& color, const Lending:
             const std::size_t i = std::size_t(y) * w + x;
             std::uint16_t* dst = out.samples.data() + i * all;
             if (lent != nullptr) {
+                // (its colour as it was, or within 2 a channel of it — the rounding of a mix that barely reached it, or
+                // of straight alpha where only the alpha changed —: its own inks)
                 const unsigned char* was = lent + i * 4;
-                if (was[3] != 0 && was[0] == p[0] && was[1] == p[1] && was[2] == p[2]) {  // (its colour as it was)
+                if (was[3] != 0 && std::abs(was[0] - p[0]) <= 2 && std::abs(was[1] - p[1]) <= 2 && std::abs(was[2] - p[2]) <= 2) {
                     const std::uint16_t* inks = loan->pixels.samples.data() + i * all;
                     std::copy_n(inks, n, dst);
                     dst[n] = was[3] == p[3] ? inks[n] : alpha_sample(p[3], color.depth);
@@ -578,14 +580,18 @@ core::Patch piece_patch(const Piece& piece, const core::PageColor& color) {
     patch.attrs = core::Json{{"mode", "image"},
                              {"opacity", 1.0},
                              {"box", core::Json::array({piece.box_mm[0], piece.box_mm[1], piece.box_mm[2], piece.box_mm[3]})},
-                             {"gkir", core::b64encode(core::encode_ink_raster(piece.pixels))}};
+                             {"gkir", core::b64encode(core::encode_ink_raster(piece.pixels))},
+                             {"gkir_profile", color.profile}};
     patch.png = std::make_shared<const std::string>(write_png(ink::to_rgba8(piece.pixels, color)));
     return patch;
 }
 
 std::optional<core::InkPixels> patch_inks(const core::Patch& patch, const core::PageColor& color) {
     const core::Json* gkir = core::get(patch.attrs, "gkir");
-    if (gkir == nullptr || !gkir->is_string()) return std::nullopt;
+    const core::Json* profile = core::get(patch.attrs, "gkir_profile");
+    if (gkir == nullptr || !gkir->is_string() || profile == nullptr || !profile->is_string() || profile->get<std::string>() != color.profile) {
+        return std::nullopt;  // (inks of another profile: drawn as their picture)
+    }
     try {
         core::InkPixels pixels = core::decode_ink_raster(core::a2b_base64(gkir->get<std::string>()));
         if (pixels.space != color.space || pixels.depth != color.depth || pixels.pixel_count() == 0) return std::nullopt;
@@ -856,6 +862,7 @@ Lending::Lending(core::Document& doc, std::size_t at, std::string_view op, const
         const Image shown = ink::to_rgba8(loan.pixels, color_);
         loan.shown = shown.tobytes();
         loan.lent = std::make_shared<const std::string>(write_png(shown, 1));  // (lent for one op: written fast)
+        loan.patches = layer.patches.size();
         layer.raster_png = loan.lent;
         layer.raster_memo = {};
         layer.raster_relpath.reset();
@@ -903,6 +910,16 @@ void Lending::take_back(core::Document& doc) const {
             } else if (layer.raster_png && !layer.raster_png->empty()) {
                 const auto loan = std::find_if(loans_.begin(), loans_.end(), [&](const Loan& l) { return l.layer == layer.id; });
                 const Loan* lent = loan != loans_.end() ? &*loan : nullptr;
+                if (lent != nullptr && layer.kind == core::LayerKind::Raster && layer.patches.size() > lent->patches) {
+                    // (pictures the op laid on the picture it was lent — smudge's, a shape's —: drawn into that picture,
+                    // as the 8-bit tools draw them when they work its pixels, so what they did not change keeps its inks)
+                    core::Layer drawn = layer;
+                    drawn.strokes = core::empty_strokes();
+                    drawn.patches.assign(layer.patches.begin() + std::ptrdiff_t(lent->patches), layer.patches.end());
+                    raster::bake_vectors(page, drawn);
+                    layer.raster_png = drawn.raster_png;
+                    layer.patches.resize(lent->patches);
+                }
                 if (lent != nullptr && (layer.raster_png == lent->lent || *layer.raster_png == *lent->lent)) {
                     layer.ink_raster = lent->ink_raster;  // (as it was lent: its own bytes)
                 } else {

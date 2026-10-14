@@ -249,6 +249,15 @@ InkCanvas::InkCanvas(const core::PageColor& color, const Image& paper) : impl_(s
     }
 }
 
+InkCanvas::InkCanvas(const core::PageColor& color, Size size) : impl_(std::make_unique<Impl>(color, size)) {
+    if (color.space != InkSpace::Lab) return;  // (CMYK: no ink is 0, the alpha 0)
+    for (std::size_t i = 0; i < impl_->px.size() / impl_->stride; ++i) {
+        double* p = impl_->px.data() + i * impl_->stride;
+        p[0] = to_canvas(InkSpace::Lab, 0, 100.0);  // (Lab: L 100, a and b 0 — the paper's)
+        p[1] = p[2] = to_canvas(InkSpace::Lab, 1, 0.0);
+    }
+}
+
 InkCanvas::~InkCanvas() = default;
 
 const core::PageColor& InkCanvas::color() const { return impl_->color; }

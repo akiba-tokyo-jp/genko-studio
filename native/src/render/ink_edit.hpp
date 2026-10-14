@@ -27,7 +27,8 @@
 // What draws new colours or mixes them (smudge and liquify, the fills, shapes, 3D, rulers, the light table, precise RGB
 // pixels) works the picture the screen shows of the layers it works on: those ink layers lend the op their picture (an
 // RGB paint layer's PNG, 8-bit RGBA, as ink::to_rgba8 shows it); after it, what the op left goes back into inks:
-//   - a pixel whose colour the op did not change keeps its inks, and its alpha when the op did not change that either;
+//   - a pixel whose colour the op did not change (or changed by 2 a channel at most) keeps its inks, and its alpha when
+//     the op did not change that either;
 //   - a colour the page's table holds takes its inks;
 //   - a colour the layers lent showed takes the inks they showed it for (what moved keeps its inks);
 //   - Genko's blacks and white take the rules' inks; a colour the rules show (their black, the greys on K alone —
@@ -67,9 +68,10 @@ struct Piece {
 };
 std::optional<Piece> lift_piece(const core::Page& page, const core::Layer& layer, const core::Json& area);
 // The piece as a picture to copy (selection::Items' patch): its picture as the screen shows it, its box, and its inks
-// ("gkir": its GKIR bytes in base64 — a C++ build's own key, never saved: paste draws them or drops the key).
+// ("gkir": its GKIR bytes in base64, "gkir_profile": the page's profile ref — a C++ build's own keys, never saved:
+// paste draws them or drops the keys).
 core::Patch piece_patch(const Piece& piece, const core::PageColor& color);
-// A patch's own inks, when it carries them for a page of this space and depth (anything else: none).
+// A patch's own inks, when it carries them for a page of this space, depth and profile (anything else: none).
 std::optional<core::InkPixels> patch_inks(const core::Patch& patch, const core::PageColor& color);
 // The piece laid over the layer's inks at the box (mm), resampled to the raster (a whole pixel each when the box spans
 // exactly the piece's pixels). A layer with no inks yet gets a clear raster at the working 200 dpi.
@@ -105,6 +107,7 @@ public:
         core::Bytes lent;        // the PNG it was lent
         core::InkPixels pixels;  // its pixels
         std::string shown;       // the picture lent (RGBA bytes)
+        std::size_t patches = 0;  // the pictures it held on it then
     };
 
 private:

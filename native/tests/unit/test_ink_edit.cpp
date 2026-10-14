@@ -24,6 +24,7 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/raster.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -206,6 +207,32 @@ private slots:
         QCOMPARE(line[2], std::uint16_t(0));
         QCOMPARE(line[3], std::uint16_t(65535));
         for (unsigned c = 0; c < 5; ++c) QCOMPARE(at(got, 10, 10)[c], at(before, 10, 10)[c]);
+        QCOMPARE(at(got, px(45), px(60))[4], std::uint16_t(0));  // (what was clear stays clear)
+    }
+
+    // The merges composite the layers alone: where none of them has anything, the layer they make stays clear (no
+    // paper of no ink over what is under it).
+    void mergesKeepWhatWasClear_data() {
+        QTest::addColumn<QString>("op");
+        QTest::addColumn<QString>("layer");
+        QTest::newRow("merge_down") << R"({"op": "merge_down", "page": 1, "id": "pen-x"})" << "pic";
+        QTest::newRow("merge_layers") << R"({"op": "merge_layers", "page": 1, "ids": ["pic", "pen-x"]})" << "pic";
+        QTest::newRow("merge_visible") << R"({"op": "merge_visible", "page": 1, "id": "vis"})" << "vis";
+        QTest::newRow("convert_layer") << R"({"op": "convert_layer", "page": 1, "id": "pen-x", "to": "paint"})" << "pen-x";
+    }
+    void mergesKeepWhatWasClear() {
+        QFETCH(QString, op);
+        QFETCH(QString, layer);
+        core::Document doc = ink_book();
+        doc = run_ops(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen-x"}, {"after", "pic"}},
+                                        Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen-x"},
+                                             {"points", Json::array({Json::array({5, 50}), Json::array({25, 50})})}, {"width_mm", 3}}}))
+                  .doc;
+        const core::Document after = run_ops(doc, Json::array({Json::parse(op.toStdString())})).doc;
+        all_in_inks(after);
+        const core::InkPixels got = pixels_of(after, layer.toStdString());
+        QCOMPARE(at(got, px(45), px(60))[4], std::uint16_t(0));
+        QCOMPARE(at(got, px(15), px(60))[4], layer == "pen-x" ? std::uint16_t(0) : std::uint16_t(65535));
     }
 
     // Every op of the step on an ink page: done, and the page in inks after it.
@@ -300,6 +327,7 @@ private slots:
                   .doc;
         QCOMPARE(layer_of(rgb, "p").patches.size(), std::size_t{1});
         QVERIFY(!layer_of(rgb, "p").patches[0].attrs.contains("gkir"));
+        QVERIFY(!layer_of(rgb, "p").patches[0].attrs.contains("gkir_profile"));
     }
 
     // New paper (set_page_spec): the inks moved onto it, a colour all over the same inks.
@@ -332,6 +360,8 @@ private slots:
         QVERIFY(layer_of(pasted, "pic").patches.empty());
         const std::uint16_t* p = at(pixels_of(pasted, "pic"), px(40), px(55));
         QVERIFY2(p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 65535 && p[4] == 65535, "Genko's black: K alone");
+        for (unsigned c = 0; c < 5; ++c) QCOMPARE(at(pixels_of(pasted, "pic"), px(45), px(20))[c], at(pixels_of(doc, "pic"), px(45), px(20))[c]);
+        QCOMPARE(at(pixels_of(pasted, "pic"), px(55), px(75))[4], std::uint16_t(0));  // (the rest of the layer as it was)
         const core::Document erased = run_ops(pasted, Json::array({Json{{"op", "erase_raster"}, {"page", 1}, {"layer_id", "pic"},
                                                                        {"points", Json::array({Json::array({33, 55}), Json::array({47, 55})})},
                                                                        {"width_mm", 4}}}))
@@ -364,6 +394,61 @@ private slots:
         const std::uint16_t* filled = at(got, got.width / 2, got.height * 7 / 8);
         const std::uint16_t* white = at(before, got.width / 2, got.height * 7 / 8);
         QVERIFY2(filled[1] > white[1] + 20000, "the fill: red through the profile");
+    }
+
+    // smudge lays what it mixed as a picture of the box it changed: drawn into the picture the layer lent, so what it
+    // did not change there keeps its inks (a rich black whose screen colour is a Genko black's does not become K alone).
+    void smudgeKeepsTheInksItDidNotMix() {
+        core::Document doc = ink_book();
+        for (auto& layer : doc.edit_page(0).layers) {
+            if (layer.id != "pic") continue;
+            core::InkPixels p = core::decode_ink_raster(*layer.ink_raster);
+            for (std::uint32_t y = 0; y < px(40); ++y)
+                for (std::uint32_t x = px(30); x < p.width; ++x) std::copy(kRich.begin(), kRich.end(), p.samples.begin() + std::ptrdiff_t((std::size_t(y) * p.width + x) * 5));
+            layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(p));
+        }
+        const Json smudge = Json{{"op", "smudge"}, {"page", 1}, {"layer_id", "pic"}, {"mode", "blur"},
+                                 {"points", Json::array({Json::array({33, 40}), Json::array({57, 40})})}, {"width_mm", 6}};
+        const core::Document after = run_ops(doc, Json::array({smudge})).doc;
+        all_in_inks(after);
+        // the same smudge on an RGB page holding the picture the layer shows: the pixels it did not change
+        const render::Image shown = render::ink::to_rgba8(pixels_of(doc, "pic"), *doc.page(0).color);
+        core::Document rgb = core::new_episode("rgb", core::Num(1), 1, doc.page(0).spec, core::Binding::Right);
+        rgb = run_ops(rgb, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "pic"}}})).doc;
+        for (auto& layer : rgb.edit_page(0).layers) {
+            if (layer.id != "pic") continue;
+            layer.raster_png = std::make_shared<const std::string>(render::write_png(shown));
+            layer.panel_clip = layer.panel_each = false;
+        }
+        rgb = run_ops(rgb, Json::array({smudge})).doc;
+        const std::string was = shown.tobytes();
+        const std::string now = render::raster::layer_pixels(rgb.page(0), layer_of(rgb, "pic")).convert("RGBA").tobytes();
+        QCOMPARE(now.size(), was.size());
+        const core::InkPixels before = pixels_of(doc, "pic"), got = pixels_of(after, "pic");
+        int unchanged = 0, changed = 0;
+        for (std::size_t i = 0; i < before.pixel_count(); ++i) {
+            if (now.compare(i * 4, 4, was, i * 4, 4) != 0) {
+                ++changed;
+                continue;
+            }
+            ++unchanged;
+            const std::uint16_t* a = before.samples.data() + i * 5;
+            const std::uint16_t* b = got.samples.data() + i * 5;
+            if (!std::equal(a, a + 5, b)) QFAIL(qPrintable(QStringLiteral("pixel %1 (not changed by the smudge) lost its inks").arg(i)));
+        }
+        QVERIFY(changed > 100 && unchanged > 1000);
+    }
+
+    // The eraser taking lines whole or to their crossings takes no pixels (as on an RGB page).
+    void wholeLinesEraserLeavesThePixels() {
+        const core::Document doc = ink_book();
+        for (const char* mode : {"whole", "to_crossing"}) {
+            const core::Document after = run_ops(doc, Json::array({Json{{"op", "erase_raster"}, {"page", 1}, {"layer_id", "pic"}, {"mode", mode},
+                                                                       {"points", Json::array({Json::array({5, 20}), Json::array({55, 20})})},
+                                                                       {"width_mm", 4}}}))
+                                            .doc;
+            QCOMPARE(*layer_of(after, "pic").ink_raster, *layer_of(doc, "pic").ink_raster);
+        }
     }
 
     // put_color_raster on an ink page: the precise pixels become inks, and the book does not keep their feature.

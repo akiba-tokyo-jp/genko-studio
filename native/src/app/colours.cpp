@@ -616,6 +616,7 @@ void ColourPanel::set_page_color(const std::optional<core::PageColor>& color) {
     loading_ = true;
     show_inks(brush_->rgb());
     loading_ = was;
+    inks_edited_ = false;  // (the ranges set above may have moved a value: no edit of the user's)
 }
 
 void ColourPanel::show_inks(const Rgb& rgb) {
@@ -627,6 +628,7 @@ void ColourPanel::show_inks(const Rgb& rgb) {
             const QSignalBlocker quiet(ink_spins[i]);
             ink_spins[i]->setValue(cmyk ? ink[i] * 100.0 : ink[i]);
         }
+        inks_edited_ = false;  // (the values shown are the pen's)
         // (the table's colours and the greys print as their own inks: never out)
         const bool own = core::ink_for(*page_color_, rgb) != nullptr || (rgb[0] == rgb[1] && rgb[1] == rgb[2]);
         gamut->setVisible(!own && render::ink::gamut_distance(*page_color_, rgb) > 3.0);

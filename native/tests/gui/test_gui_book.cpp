@@ -52,6 +52,7 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
+#include "render/ink.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -928,6 +929,24 @@ private slots:
         n = s.ops.size();
         emit panel->ink_spins[0]->editingFinished();
         QCOMPARE(s.ops.size(), n);
+        // another page of the profile: the pair goes into its table too, and a colour its table holds for other inks is
+        // never taken (its pair stays)
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "cmyk"}, {"icc", core::b64encode(icc)}}})));
+        QCOMPARE(s.book().page(1).color->profile, s.book().page(0).color->profile);
+        const std::vector<double> wanted{0.2, 0.7, 0.6, 0.0};
+        const std::array<int, 3> held = render::ink::rgb_for_inks(*s.book().page(0).color, wanted);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "set_inks"}, {"page", 2},
+                                                      {"inks", Json::array({Json::array({Json::array({held[0], held[1], held[2]}), Json::array({1, 0, 0, 0})})})}}})));
+        s.on_page(1);
+        for (std::size_t i = 0; i < 4; ++i) panel->ink_spins[i]->setValue(wanted[i] * 100.0);
+        emit panel->ink_spins[3]->editingFinished();
+        QVERIFY(panel->rgb() != held);
+        const core::InkEntry* kept = core::ink_for(*s.book().page(1).color, held);
+        QVERIFY(kept != nullptr && kept->ink[0] == 1.0);
+        for (std::size_t p = 0; p < 2; ++p) {
+            const core::InkEntry* both = core::ink_for(*s.book().page(p).color, panel->rgb());
+            QVERIFY(both != nullptr && std::abs(both->ink[1] - 0.7) < 1e-6);
+        }
     }
 
     void coversAreAdded() {
